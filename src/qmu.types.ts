@@ -37,4 +37,13 @@ declare global {
     | QemuErrorResponse
     | QemuEventResponse
     | QemuGreetingResponse;
+
+  type QemuKeyValue = {
+    type: "qcode" | "number";
+    data: string | number;
+  };
+
+  type QemuStartResult = {
+    id: string;
+  };
 }
