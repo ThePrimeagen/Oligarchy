@@ -1,14 +1,15 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { copyFile, mkdir, rm } from "node:fs/promises";
+import { copyFile, mkdir, rm, stat } from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve as resolvePath } from "node:path";
 import { JSONStreamParser } from "../qmp/json-stream.ts";
 
 const QEMU_BIN = "qemu-system-x86_64";
 const QEMU_IMG = "qemu-img";
-const DEFAULT_ISO = "omarchy.iso";
+const PROJECT_ROOT = join(import.meta.dirname, "..", "..");
+export const DEFAULT_ISO = join(PROJECT_ROOT, "omarchy.iso");
 const DEFAULT_DISK_SIZE = "40G";
 const DEFAULT_CODE = "/usr/share/edk2/x64/OVMF_CODE.4m.fd";
 const DEFAULT_VARS = "/usr/share/edk2/x64/OVMF_VARS.4m.fd";
@@ -17,15 +18,20 @@ const DEFAULT_SMP = 2;
 const DEFAULT_MACHINE = "q35,accel=kvm";
 const DEFAULT_CPU = "host";
 const HANDSHAKE_MS = 10_000;
+const STDERR_CAP = 8 * 1024;
 
 export type QemuCLIOptions = {
   tmp?: string;
   diskSize?: string;
-  iso?: string;
   code?: string;
   vars?: string;
   memory?: string;
   smp?: number;
+};
+
+export type QemuStartOptions = {
+  disk?: string;
+  iso?: string;
 };
 
 type Pending = {
@@ -39,68 +45,113 @@ export class QemuCLI {
   readonly sockPath: string;
   #dir: string;
   #opts: QemuCLIOptions;
+  #disk: string | undefined;
   #parser = new JSONStreamParser();
   #pending = new Map<number, Pending>();
   #nextId = 0;
   #proc: ChildProcess | undefined;
+  #stderr = "";
   #server: Server | undefined;
   #socket: Socket | undefined;
   #greetingResolve: ((msg: QemuGreetingResponse) => void) | undefined;
   #greetingReject: ((err: Error) => void) | undefined;
-  #greeting: Promise<QemuGreetingResponse>;
   #closed = false;
 
-  static async new(options: QemuCLIOptions = {}): Promise<QemuCLI> {
-    const cli = new QemuCLI(options);
-    await mkdir(cli.#dir, { recursive: true, mode: 0o700 });
-    await createDisk(cli.diskPath, options.diskSize ?? DEFAULT_DISK_SIZE);
-    return cli;
-  }
-
-  private constructor(options: QemuCLIOptions) {
+  constructor(options: QemuCLIOptions = {}) {
     this.#opts = options;
     this.id = randomUUID();
     this.#dir = join(options.tmp ?? tmpdir(), `oligarchy-${this.id}`);
     this.diskPath = join(this.#dir, "disk.qcow2");
     this.sockPath = join(this.#dir, "qmp.sock");
-    this.#greeting = new Promise((resolve, reject) => {
-      this.#greetingResolve = resolve;
-      this.#greetingReject = reject;
-    });
   }
 
-  async start(): Promise<QemuStartResult> {
+  /**
+   * Creates the backing qcow2 at diskPath inside the session dir. An
+   * existing disk is preserved, matching the Go launcher.
+   */
+  async createDisk(): Promise<string> {
+    if (this.#closed) {
+      throw new Error("qemu: closed");
+    }
+    await this.#ensureDir();
+    if (!(await fileExists(this.diskPath))) {
+      await qemuImgCreate(this.diskPath, this.#opts.diskSize ?? DEFAULT_DISK_SIZE);
+    }
+    this.#disk = this.diskPath;
+    return this.diskPath;
+  }
+
+  /**
+   * Listens on the QMP unix socket, launches QEMU against it, waits for
+   * the greeting, and negotiates capabilities. Requires a disk: either
+   * call createDisk() first or pass an existing one via options.disk.
+   * The ISO defaults to omarchy.iso in the project root.
+   */
+  async start(options: QemuStartOptions = {}): Promise<QemuStartResult> {
+    if (this.#closed) {
+      throw new Error("qemu: closed");
+    }
     if (this.#socket !== undefined) {
       throw new Error("qemu: already started");
     }
-    const varsPath = join(this.#dir, "OVMF_VARS.fd");
-    await copyFile(this.#opts.vars ?? DEFAULT_VARS, varsPath);
 
-    const args = qemuArgs({
-      sockPath: this.sockPath,
-      varsPath,
-      diskPath: this.diskPath,
-      iso: this.#opts.iso ?? DEFAULT_ISO,
-      code: this.#opts.code ?? DEFAULT_CODE,
-      memory: this.#opts.memory ?? DEFAULT_MEMORY,
-      smp: this.#opts.smp ?? DEFAULT_SMP,
-    });
+    const disk = options.disk === undefined ? this.#disk : resolvePath(options.disk);
+    if (disk === undefined) {
+      throw new Error("qemu: no disk; call createDisk() or pass options.disk");
+    }
+    await assertFile(disk, "disk");
+    const iso = resolvePath(options.iso ?? DEFAULT_ISO);
+    await assertFile(iso, "iso");
 
-    this.#socket = await this.#listenAndSpawn(args);
-    this.#socket.setEncoding("utf8");
-    this.#socket.on("data", (chunk: string) => {
-      this.#onData(chunk);
-    });
-    this.#socket.on("error", (err) => {
-      this.#failAll(err);
-    });
-    this.#socket.on("close", () => {
-      this.#failAll(new Error("qemu: socket closed"));
-    });
+    try {
+      await this.#ensureDir();
+      const varsPath = join(this.#dir, "OVMF_VARS.fd");
+      await copyFile(this.#opts.vars ?? DEFAULT_VARS, varsPath);
 
-    await this.#waitGreeting();
-    await this.#execute("qmp_capabilities", {});
-    return { id: this.id };
+      const args = qemuArgs({
+        sockPath: this.sockPath,
+        varsPath,
+        diskPath: disk,
+        iso,
+        code: this.#opts.code ?? DEFAULT_CODE,
+        memory: this.#opts.memory ?? DEFAULT_MEMORY,
+        smp: this.#opts.smp ?? DEFAULT_SMP,
+      });
+
+      const greeting = new Promise<QemuGreetingResponse>((resolve, reject) => {
+        this.#greetingResolve = resolve;
+        this.#greetingReject = reject;
+      });
+      // A late rejection (socket close after startup failed) must not
+      // become an unhandled rejection.
+      greeting.catch(() => {});
+
+      this.#socket = await this.#listenAndSpawn(args);
+      this.#socket.setEncoding("utf8");
+      this.#socket.on("data", (chunk: string) => {
+        this.#onData(chunk);
+      });
+      this.#socket.on("error", (err) => {
+        this.#failAll(err);
+      });
+      this.#socket.on("close", () => {
+        this.#failAll(new Error("qemu: socket closed"));
+      });
+
+      await this.#waitGreeting(greeting);
+      await this.#execute("qmp_capabilities", {});
+      return { id: this.id };
+    } catch (err) {
+      // Mirror the Go server: a failed start must not leak the QEMU
+      // process or the listening socket.
+      this.#proc?.kill();
+      this.#proc = undefined;
+      this.#socket?.destroy();
+      this.#socket = undefined;
+      this.#server?.close();
+      this.#server = undefined;
+      throw err;
+    }
   }
 
   async stop(): Promise<void> {
@@ -118,6 +169,10 @@ export class QemuCLI {
 
   async screendump(filename: string, format = "png"): Promise<void> {
     await this.#execute("screendump", { filename, format });
+  }
+
+  #ensureDir(): Promise<string | undefined> {
+    return mkdir(this.#dir, { recursive: true, mode: 0o700 });
   }
 
   #execute(name: string, args: unknown): Promise<unknown> {
@@ -141,6 +196,7 @@ export class QemuCLI {
       if ("QMP" in msg) {
         this.#greetingResolve?.(msg);
         this.#greetingResolve = undefined;
+        this.#greetingReject = undefined;
         continue;
       }
       if ("event" in msg) {
@@ -169,26 +225,41 @@ export class QemuCLI {
       const timer = setTimeout(() => {
         reject(new Error("qemu: accept timeout"));
       }, HANDSHAKE_MS);
-      server.once("error", (err) => {
+      const fail = (err: Error) => {
         clearTimeout(timer);
         reject(err);
-      });
+      };
+      server.once("error", fail);
       server.once("connection", (socket) => {
         clearTimeout(timer);
         resolve(socket);
       });
       server.listen(this.sockPath, () => {
-        try {
-          this.#proc = spawn(QEMU_BIN, args, { stdio: "ignore" });
-        } catch (err) {
-          clearTimeout(timer);
-          reject(err instanceof Error ? err : new Error(String(err)));
-        }
+        const proc = spawn(QEMU_BIN, args, { stdio: ["ignore", "ignore", "pipe"] });
+        this.#proc = proc;
+        proc.stderr?.on("data", (chunk: Buffer) => {
+          if (this.#stderr.length < STDERR_CAP) {
+            this.#stderr += chunk.toString();
+          }
+        });
+        proc.once("error", (err) => {
+          fail(new Error(`qemu: ${err.message}`));
+        });
+        proc.once("exit", (code) => {
+          const detail = this.#stderr.trim();
+          fail(
+            new Error(
+              detail === ""
+                ? `qemu: exited ${code} before QMP connect`
+                : `qemu: exited ${code} before QMP connect: ${detail}`,
+            ),
+          );
+        });
       });
     });
   }
 
-  async #waitGreeting(): Promise<void> {
+  async #waitGreeting(greeting: Promise<QemuGreetingResponse>): Promise<void> {
     let timeout: ReturnType<typeof setTimeout>;
     const expired = new Promise<never>((_, reject) => {
       timeout = setTimeout(() => {
@@ -196,7 +267,7 @@ export class QemuCLI {
       }, HANDSHAKE_MS);
     });
     try {
-      await Promise.race([this.#greeting, expired]);
+      await Promise.race([greeting, expired]);
     } finally {
       clearTimeout(timeout!);
     }
@@ -205,6 +276,7 @@ export class QemuCLI {
   #failAll(err: Error): void {
     this.#greetingReject?.(err);
     this.#greetingReject = undefined;
+    this.#greetingResolve = undefined;
     for (const pending of this.#pending.values()) {
       pending.reject(err);
     }
@@ -212,7 +284,7 @@ export class QemuCLI {
   }
 }
 
-function qemuArgs(opts: {
+export function qemuArgs(opts: {
   sockPath: string;
   varsPath: string;
   diskPath: string;
@@ -221,6 +293,12 @@ function qemuArgs(opts: {
   memory: string;
   smp: number;
 }): string[] {
+  if (opts.sockPath === "") {
+    throw new Error("qemu: qmp socket path is required");
+  }
+  if (opts.varsPath === "") {
+    throw new Error("qemu: firmware vars path is required");
+  }
   return [
     "-machine",
     DEFAULT_MACHINE,
@@ -249,9 +327,28 @@ function qemuArgs(opts: {
   ];
 }
 
-function createDisk(path: string, size: string): Promise<void> {
+async function fileExists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function assertFile(path: string, label: string): Promise<void> {
+  try {
+    await stat(path);
+  } catch {
+    throw new Error(`qemu: ${label} not found: ${path}`);
+  }
+}
+
+function qemuImgCreate(path: string, size: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn(QEMU_IMG, ["create", "-f", "qcow2", path, size]);
+    const child = spawn(QEMU_IMG, ["create", "-f", "qcow2", path, size], {
+      stdio: "ignore",
+    });
     child.once("error", reject);
     child.once("exit", (code) => {
       if (code === 0) {
