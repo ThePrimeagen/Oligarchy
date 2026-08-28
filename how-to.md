@@ -5,6 +5,8 @@
 ```bash
 ./oligarchy-server
 ./oligarchy start
+./oligarchy start omarchy.iso
+./oligarchy start omarchy.iso qemu-img.qcow2
 ```
 
 The client defaults to `127.0.0.1:42069`. Override with `OLIGARCHY_ADDR`.

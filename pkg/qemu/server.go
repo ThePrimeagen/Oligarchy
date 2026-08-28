@@ -1,4 +1,4 @@
-package kemu
+package qemu
 
 import (
 	"encoding/json"
@@ -12,8 +12,8 @@ import (
 	"theprimeagen.com/yourmomma/pkg/qmp"
 )
 
-// KemuServer is a QMP client connected to one QEMU instance.
-type KemuServer struct {
+// QEMUServer is a QMP client connected to one QEMU instance.
+type QEMUServer struct {
 	path     string
 	conn     net.Conn
 	enc      *json.Encoder
@@ -30,14 +30,14 @@ type wireResponse struct {
 	ID     json.RawMessage `json:"id"`
 }
 
-// NewKemuServer dials the QMP unix socket, reads the greeting, and
+// NewQEMUServer dials the QMP unix socket, reads the greeting, and
 // completes capabilities negotiation.
-func NewKemuServer(socketPath string) (*KemuServer, error) {
+func NewQEMUServer(socketPath string) (*QEMUServer, error) {
 	conn, err := net.Dial("unix", socketPath)
 	if err != nil {
-		return nil, fmt.Errorf("kemu: dial %s: %w", socketPath, err)
+		return nil, fmt.Errorf("qemu: dial %s: %w", socketPath, err)
 	}
-	s, err := NewKemuServerFromConn(conn)
+	s, err := NewQEMUServerFromConn(conn)
 	if err != nil {
 		return nil, err
 	}
@@ -45,27 +45,27 @@ func NewKemuServer(socketPath string) (*KemuServer, error) {
 	return s, nil
 }
 
-// NewKemuServerFromConn takes an accepted QMP connection, reads the
+// NewQEMUServerFromConn takes an accepted QMP connection, reads the
 // greeting, and completes capabilities negotiation.
-func NewKemuServerFromConn(conn net.Conn) (*KemuServer, error) {
-	s := &KemuServer{
+func NewQEMUServerFromConn(conn net.Conn) (*QEMUServer, error) {
+	s := &QEMUServer{
 		conn: conn,
 		enc:  json.NewEncoder(conn),
 		dec:  json.NewDecoder(conn),
 	}
 	if err := s.dec.Decode(&s.Greeting); err != nil {
 		conn.Close()
-		return nil, fmt.Errorf("kemu: greeting: %w", err)
+		return nil, fmt.Errorf("qemu: greeting: %w", err)
 	}
 	if _, err := Execute(s, qmp.QmpCapabilities(qmp.QmpCapabilitiesArgs{})); err != nil {
 		conn.Close()
-		return nil, fmt.Errorf("kemu: qmp_capabilities: %w", err)
+		return nil, fmt.Errorf("qemu: qmp_capabilities: %w", err)
 	}
 	return s, nil
 }
 
 // Close closes the QMP connection.
-func (s *KemuServer) Close() error {
+func (s *QEMUServer) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.conn == nil {
@@ -77,15 +77,15 @@ func (s *KemuServer) Close() error {
 }
 
 // Do sends a named QMP command and decodes the success return into result.
-func (s *KemuServer) Do(name string, args any, result any) error {
+func (s *QEMUServer) Do(name string, args any, result any) error {
 	return s.do(name, args, result)
 }
 
-func (s *KemuServer) do(name string, args any, result any) error {
+func (s *QEMUServer) do(name string, args any, result any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.conn == nil {
-		return fmt.Errorf("kemu: closed")
+		return fmt.Errorf("qemu: closed")
 	}
 	s.nextID++
 	id := s.nextID
@@ -97,7 +97,7 @@ func (s *KemuServer) do(name string, args any, result any) error {
 		req["arguments"] = args
 	}
 	if err := s.enc.Encode(req); err != nil {
-		return fmt.Errorf("kemu: send %s: %w", name, err)
+		return fmt.Errorf("qemu: send %s: %w", name, err)
 	}
 	want, err := json.Marshal(id)
 	if err != nil {
@@ -106,7 +106,7 @@ func (s *KemuServer) do(name string, args any, result any) error {
 	for {
 		var msg wireResponse
 		if err := s.dec.Decode(&msg); err != nil {
-			return fmt.Errorf("kemu: recv %s: %w", name, err)
+			return fmt.Errorf("qemu: recv %s: %w", name, err)
 		}
 		if msg.Event != "" {
 			continue
@@ -121,14 +121,14 @@ func (s *KemuServer) do(name string, args any, result any) error {
 			return nil
 		}
 		if err := json.Unmarshal(msg.Return, result); err != nil {
-			return fmt.Errorf("kemu: decode %s: %w", name, err)
+			return fmt.Errorf("qemu: decode %s: %w", name, err)
 		}
 		return nil
 	}
 }
 
 // Execute runs a typed QMP command and returns that command's result type.
-func Execute[A any, R any](s *KemuServer, cmd qmp.Command[A, R]) (R, error) {
+func Execute[A any, R any](s *QEMUServer, cmd qmp.Command[A, R]) (R, error) {
 	var ret R
 	var args any
 	if cmd.HasArgs() {
@@ -139,25 +139,25 @@ func Execute[A any, R any](s *KemuServer, cmd qmp.Command[A, R]) (R, error) {
 }
 
 // ReadImage captures the current guest display as a PNG.
-func (s *KemuServer) ReadImage() ([]byte, error) {
+func (s *QEMUServer) ReadImage() ([]byte, error) {
 	path := filepath.Join(os.TempDir(), fmt.Sprintf("oligarchy-%d-%d.png", os.Getpid(), time.Now().UnixNano()))
 	format := qmp.ImageFormatPng
 	if _, err := Execute(s, qmp.Screendump(qmp.ScreendumpArgs{
 		Filename: path,
 		Format:   &format,
 	})); err != nil {
-		return nil, fmt.Errorf("kemu: screendump: %w", err)
+		return nil, fmt.Errorf("qemu: screendump: %w", err)
 	}
 	defer os.Remove(path)
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("kemu: read screendump: %w", err)
+		return nil, fmt.Errorf("qemu: read screendump: %w", err)
 	}
 	return data, nil
 }
 
 // SendKeys types keys into the guest using the given encoding.
-func (s *KemuServer) SendKeys(keys string, encoding KeyEncoding) error {
+func (s *QEMUServer) SendKeys(keys string, encoding KeyEncoding) error {
 	chords, err := ParseKeys(keys, encoding)
 	if err != nil {
 		return err
@@ -168,7 +168,7 @@ func (s *KemuServer) SendKeys(keys string, encoding KeyEncoding) error {
 			vals[i] = qmp.QCode(code)
 		}
 		if _, err := Execute(s, qmp.SendKey(qmp.SendKeyArgs{Keys: vals})); err != nil {
-			return fmt.Errorf("kemu: send-key: %w", err)
+			return fmt.Errorf("qemu: send-key: %w", err)
 		}
 	}
 	return nil

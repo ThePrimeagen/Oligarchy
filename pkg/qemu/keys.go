@@ -1,4 +1,4 @@
-package kemu
+package qemu
 
 import (
 	"fmt"
@@ -24,7 +24,7 @@ func normalizeEncoding(enc KeyEncoding) (KeyEncoding, error) {
 	case EncodingOligarchy:
 		return EncodingOligarchy, nil
 	default:
-		return "", fmt.Errorf("kemu: unknown key encoding %q", enc)
+		return "", fmt.Errorf("qemu: unknown key encoding %q", enc)
 	}
 }
 
@@ -139,7 +139,7 @@ func ParseKeys(s string, encoding KeyEncoding) ([][]qmp.QKeyCode, error) {
 				}
 			}
 			if end < 0 {
-				return nil, fmt.Errorf("kemu: unterminated key sequence")
+				return nil, fmt.Errorf("qemu: unterminated key sequence")
 			}
 			chord, err := parseAngle(string(runes[i+1 : end]))
 			if err != nil {
@@ -160,7 +160,7 @@ func ParseKeys(s string, encoding KeyEncoding) ([][]qmp.QKeyCode, error) {
 
 func parseAngle(inner string) ([]qmp.QKeyCode, error) {
 	if inner == "" {
-		return nil, fmt.Errorf("kemu: empty key sequence")
+		return nil, fmt.Errorf("qemu: empty key sequence")
 	}
 	parts := strings.Split(inner, "-")
 	var mods []qmp.QKeyCode
@@ -175,7 +175,7 @@ func parseAngle(inner string) ([]qmp.QKeyCode, error) {
 		case "M", "META":
 			mods = append(mods, qmp.QKeyCodeMetaL)
 		default:
-			return nil, fmt.Errorf("kemu: unknown modifier %q", parts[i])
+			return nil, fmt.Errorf("qemu: unknown modifier %q", parts[i])
 		}
 	}
 	key, err := parseKeyName(parts[len(parts)-1])
@@ -200,7 +200,7 @@ func parseKeyName(name string) ([]qmp.QKeyCode, error) {
 	if looksLikeQKeyCode(lower) {
 		return []qmp.QKeyCode{qmp.QKeyCode(lower)}, nil
 	}
-	return nil, fmt.Errorf("kemu: unknown key %q", name)
+	return nil, fmt.Errorf("qemu: unknown key %q", name)
 }
 
 func looksLikeQKeyCode(name string) bool {
@@ -231,5 +231,5 @@ func parseRune(r rune) ([]qmp.QKeyCode, error) {
 	if code, ok := shiftedPunct[r]; ok {
 		return []qmp.QKeyCode{qmp.QKeyCodeShift, code}, nil
 	}
-	return nil, fmt.Errorf("kemu: unsupported character %q", string(r))
+	return nil, fmt.Errorf("qemu: unsupported character %q", string(r))
 }

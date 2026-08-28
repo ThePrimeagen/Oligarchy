@@ -3,3 +3,5 @@
 *.qcow2
 *.png
 /OVMF_VARS.fd
+/oligarchy
+/oligarchy-server

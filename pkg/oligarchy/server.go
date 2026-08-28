@@ -12,19 +12,19 @@ import (
 	"sync"
 	"time"
 
-	"theprimeagen.com/yourmomma/pkg/kemu"
+	"theprimeagen.com/yourmomma/pkg/qemu"
 )
 
 const DefaultAddr = "127.0.0.1:42069"
 
 type session struct {
-	kemu *kemu.KemuServer
+	qemu *qemu.QEMUServer
 	proc Process
 	dir  string
 	ln   net.Listener
 }
 
-// OligarchyServer is the session daemon in front of KemuServer.
+// OligarchyServer is the session daemon in front of QEMUServer.
 type OligarchyServer struct {
 	Addr          string
 	SocketDir     string
@@ -102,7 +102,7 @@ func (s *OligarchyServer) Start(cfg LaunchConfig) (string, error) {
 		cleanup()
 		return "", fmt.Errorf("qmp accept: %w", err)
 	}
-	ks, err := kemu.NewKemuServerFromConn(conn)
+	qs, err := qemu.NewQEMUServerFromConn(conn)
 	if err != nil {
 		_ = proc.Kill()
 		cleanup()
@@ -110,7 +110,7 @@ func (s *OligarchyServer) Start(cfg LaunchConfig) (string, error) {
 	}
 
 	s.mu.Lock()
-	s.sessions[id] = &session{kemu: ks, proc: proc, dir: dir, ln: ln}
+	s.sessions[id] = &session{qemu: qs, proc: proc, dir: dir, ln: ln}
 	s.mu.Unlock()
 	return id, nil
 }
@@ -135,32 +135,32 @@ func newSessionID() (string, error) {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:]), nil
 }
 
-func (s *OligarchyServer) session(id string) (*kemu.KemuServer, error) {
+func (s *OligarchyServer) session(id string) (*qemu.QEMUServer, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sess, ok := s.sessions[id]
 	if !ok {
 		return nil, fmt.Errorf("unknown session %q", id)
 	}
-	return sess.kemu, nil
+	return sess.qemu, nil
 }
 
 // GetImage returns the current desktop image for a session.
 func (s *OligarchyServer) GetImage(id string) ([]byte, error) {
-	ks, err := s.session(id)
+	qs, err := s.session(id)
 	if err != nil {
 		return nil, err
 	}
-	return ks.ReadImage()
+	return qs.ReadImage()
 }
 
 // SendKeys types keys into a session.
 func (s *OligarchyServer) SendKeys(id, keys, encoding string) error {
-	ks, err := s.session(id)
+	qs, err := s.session(id)
 	if err != nil {
 		return err
 	}
-	return ks.SendKeys(keys, kemu.KeyEncoding(encoding))
+	return qs.SendKeys(keys, qemu.KeyEncoding(encoding))
 }
 
 // Handler returns the HTTP control plane.

@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"theprimeagen.com/yourmomma/pkg/kemu"
+	"theprimeagen.com/yourmomma/pkg/qemu"
 	"theprimeagen.com/yourmomma/pkg/oligarchy"
 )
 
@@ -43,7 +43,7 @@ func usage() {
 	fmt.Fprintf(os.Stderr, `oligarchy is the client for oligarchy-server
 
 Usage:
-  oligarchy start [-iso path] [-disk path]
+  oligarchy start [iso] [disk]
   oligarchy get-image <id> [-o file]
   oligarchy send-keys <id> <keys> [encoding]
 
@@ -60,8 +60,8 @@ func addr() string {
 func parseStartArgs(args []string) (oligarchy.LaunchConfig, error) {
 	fs := flag.NewFlagSet("start", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	iso := fs.String("iso", oligarchy.DefaultISO, "guest ISO path")
-	disk := fs.String("disk", "", "qcow2 disk path (created if missing)")
+	iso := fs.String("iso", "", "guest ISO path")
+	disk := fs.String("disk", "", "qcow2 disk path")
 	diskSize := fs.String("disk-size", "", "qcow2 virtual size when creating")
 	vars := fs.String("vars", "", "OVMF_VARS template path")
 	code := fs.String("code", "", "OVMF_CODE firmware path")
@@ -70,17 +70,30 @@ func parseStartArgs(args []string) (oligarchy.LaunchConfig, error) {
 	if err := fs.Parse(args); err != nil {
 		return oligarchy.LaunchConfig{}, err
 	}
-	if fs.NArg() != 0 {
-		return oligarchy.LaunchConfig{}, fmt.Errorf("usage: oligarchy start [-iso path] [-disk path]")
+	isoPath := *iso
+	diskPath := *disk
+	rest := fs.Args()
+	if isoPath == "" && len(rest) > 0 {
+		isoPath = rest[0]
+		rest = rest[1:]
 	}
-	isoPath, err := filepath.Abs(*iso)
+	if diskPath == "" && len(rest) > 0 {
+		diskPath = rest[0]
+		rest = rest[1:]
+	}
+	if len(rest) != 0 {
+		return oligarchy.LaunchConfig{}, fmt.Errorf("usage: oligarchy start [iso] [disk]")
+	}
+	if isoPath == "" {
+		isoPath = oligarchy.DefaultISO
+	}
+	isoPath, err := filepath.Abs(isoPath)
 	if err != nil {
 		return oligarchy.LaunchConfig{}, err
 	}
 	if _, err := os.Stat(isoPath); err != nil {
 		return oligarchy.LaunchConfig{}, fmt.Errorf("iso: %w", err)
 	}
-	diskPath := *disk
 	if diskPath != "" {
 		diskPath, err = filepath.Abs(diskPath)
 		if err != nil {
@@ -157,7 +170,7 @@ func cmdSendKeys(args []string) error {
 	if fs.NArg() < 2 || fs.NArg() > 3 {
 		return fmt.Errorf("usage: oligarchy send-keys <id> <keys> [encoding]")
 	}
-	encoding := string(kemu.EncodingOligarchy)
+	encoding := string(qemu.EncodingOligarchy)
 	if fs.NArg() == 3 {
 		encoding = fs.Arg(2)
 	}

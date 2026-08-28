@@ -14,6 +14,7 @@ const (
 	DefaultQEMUBin  = "qemu-system-x86_64"
 	DefaultQEMUImg  = "qemu-img"
 	DefaultISO      = "omarchy.iso"
+	DefaultDisk     = "qemu-img.qcow2"
 	DefaultDiskSize = "40G"
 	DefaultCodeFD   = "/usr/share/edk2/x64/OVMF_CODE.4m.fd"
 	DefaultVarsFD   = "/usr/share/edk2/x64/OVMF_VARS.4m.fd"
@@ -98,7 +99,7 @@ func qemuArgs(socketPath, varsPath string, cfg LaunchConfig) ([]string, error) {
 		"-smp", strconv.Itoa(cfg.SMP),
 		"-drive", fmt.Sprintf("if=pflash,format=raw,readonly=on,file=%s", cfg.CodeFD),
 		"-drive", fmt.Sprintf("if=pflash,format=raw,file=%s", varsPath),
-		"-display", "none",
+		"-display", "gtk",
 		"-chardev", fmt.Sprintf("socket,id=qmp,path=%s", socketPath),
 		"-mon", "chardev=qmp,mode=control",
 	}
@@ -120,7 +121,7 @@ func (l QEMULauncher) Launch(sessionDir, socketPath string, cfg LaunchConfig) (P
 	cfg.ISO = iso
 
 	if cfg.Disk == "" {
-		cfg.Disk = filepath.Join(sessionDir, "disk.qcow2")
+		cfg.Disk = filepath.Join(sessionDir, DefaultDisk)
 	} else {
 		cfg.Disk, err = filepath.Abs(cfg.Disk)
 		if err != nil {
