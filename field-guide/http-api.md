@@ -1,34 +1,25 @@
 # The HTTP API
 
-The control plane spoken between the CLI and a server. Two servers implement it:
+The control plane spoken between the CLI and the proxy (`src/qemu/proxy.ts`).
 
-- Go: `oligarchy-server` (`cmd/oligarchy-server`, `pkg/oligarchy/server.go`) — the reference.
-- TypeScript: the proxy (`src/qemu/proxy.ts`).
-
-Both default to `127.0.0.1:42069`. Bodies are JSON except the PNG. Errors are `4xx`/`5xx` with `{"error": "<message>"}`.
+The proxy defaults to `127.0.0.1:42069`. Bodies are JSON except the PNG. Errors are `4xx`/`5xx` with `{"error": "<message>"}`.
 
 ## POST /start
 
 Boots a QEMU session. Returns `{"id": "<uuid>"}`.
 
-The Go server accepts the full launch config; every field is optional and zero values get server-side defaults:
+The body is JSON with two keys, both optional (an empty body works too):
 
-| field | meaning | default |
-|---|---|---|
-| `iso` | guest ISO path | `omarchy.iso` |
-| `disk` | qcow2 path, created if missing | `<session dir>/qemu-img.qcow2` |
-| `disk_size` | virtual size when creating the disk | `40G` |
-| `code` / `vars` | OVMF firmware paths | `/usr/share/edk2/x64/OVMF_{CODE,VARS}.4m.fd` |
-| `memory` | guest memory | `4G` |
-| `smp` | vCPU count | `2` |
+- `iso` — guest ISO path. Defaults to the proxy's own default ISO (its argv, or `OLIGARCHY_ISO`).
+- `disk` — qcow2 path, which must already exist. When the key is **absent**, the proxy creates a fresh disk (40G virtual) in the session dir.
 
-The TypeScript proxy reads only `iso` and `disk`, and the disk semantics differ: the proxy creates a disk only when the `disk` key is **absent**, and a given disk must already exist (the Go server creates a given path if missing). Clients that want the server-managed disk must therefore omit the key, not send `""`. The CLI does this; keep it that way.
+Clients that want the server-managed disk must therefore omit the key, not send `""`. The CLI does this; keep it that way.
 
 ## GET /image?id=<id>
 
 Returns the session's current display as `image/png` bytes (QMP `screendump` under the hood).
 
-## GET /stats — proxy only
+## GET /stats
 
 Stats for the machine the proxy runs on, plus how many sessions it is running:
 
@@ -44,12 +35,10 @@ Stats for the machine the proxy runs on, plus how many sessions it is running:
 - `cpu` values are utilization percents over a rolling five-minute window, sampled every five seconds by a timer that lives with the server. Every field is a plain number; before the first sample lands they report 0.
 - `memory` is host totals from the OS: `usedBytes = totalBytes - freeBytes`.
 
-The Go server does not implement this endpoint.
-
 ## POST /send-keys
 
 Body `{"id", "keys", "encoding"}`. The server parses the key string (encoding `oligarchy`, see [how-to.md](how-to.md)) and types it into the guest via QMP `send-key`. Returns `{"ok": "true"}`.
 
-## POST /stop — proxy only
+## POST /stop
 
-Body `{"id"}`; kills the QEMU and removes its session directory. Returns `{"ok": "true"}`. The Go server does not implement this endpoint.
+Body `{"id"}`; kills the QEMU and removes its session directory. Returns `{"ok": "true"}`.
