@@ -1,135 +1,80 @@
+// The oligarchy proxy: a main file, not a library. It boots one QEMU
+// session from CLI/env parameters and serves an HTTP control plane for it.
+//
+//   node --experimental-strip-types src/qemu/proxy.ts <iso>
+//
+// The iso comes from argv or OLIGARCHY_ISO; the listen address from
+// OLIGARCHY_ADDR (default 127.0.0.1:42069).
+//
+//   GET  /image      -> PNG of the current guest display
+//   POST /send-keys  -> {"keys": "Hi<ENTER>", "encoding": "oligarchy"}
+
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFile, rm } from "node:fs/promises";
-import { connect as netConnect, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { JSONStreamParser } from "../qmp/json-stream.ts";
+import { createDisk, createQemu, screendump, sendKey, start, stop } from "./client.ts";
 import { parseKeys } from "./keys.ts";
 
-type Pending = {
-  resolve: (value: unknown) => void;
-  reject: (err: unknown) => void;
-};
+const iso = process.argv[2] ?? process.env.OLIGARCHY_ISO;
+if (iso === undefined) {
+  console.error("usage: proxy <iso>  (or set OLIGARCHY_ISO)");
+  process.exit(1);
+}
+const addr = process.env.OLIGARCHY_ADDR ?? "127.0.0.1:42069";
 
-export type QemuProxy = {
-  readonly greeting: QemuGreetingResponse;
-  readonly pending: Map<number | "greeting", Pending>;
-  nextId: number;
-  socket?: Socket;
-};
+const qemu = createQemu();
+await createDisk(qemu);
+await start(qemu, { iso });
 
-/** Dials a QMP unix socket and completes the QMP handshake. */
-export async function connect(path: string): Promise<QemuProxy> {
-  const socket = await new Promise<Socket>((resolve, reject) => {
-    const sock = netConnect(path);
-    sock.once("connect", () => resolve(sock));
-    sock.once("error", reject);
+const server = createServer((req, res) => {
+  void handle(req, res);
+});
+const [host, port] = addr.split(":");
+server.listen(Number(port), host, () => {
+  console.error(`oligarchy proxy listening on ${addr}, session ${qemu.id}`);
+});
+
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.once(signal, () => {
+    server.close();
+    void stop(qemu).then(() => process.exit(0));
   });
-  return fromSocket(socket);
 }
 
-/**
- * Takes a connected QMP socket, reads the greeting, and completes
- * capabilities negotiation.
- */
-export async function fromSocket(socket: Socket): Promise<QemuProxy> {
-  const pending = new Map<number | "greeting", Pending>();
-  const greeting = new Promise<unknown>((resolve, reject) => {
-    pending.set("greeting", { resolve, reject });
-  });
-
-  const parser = new JSONStreamParser();
-  socket.setEncoding("utf8");
-  socket.on("data", (chunk: string) => {
-    try {
-      parser.push(chunk);
-      for (let msg = parser.pull(); msg !== undefined; msg = parser.pull()) {
-        if ("QMP" in msg) {
-          pending.get("greeting")?.resolve(msg);
-          pending.delete("greeting");
-          continue;
-        }
-        if ("event" in msg) {
-          continue;
-        }
-        const id = msg.id as number;
-        const entry = pending.get(id);
-        if (entry === undefined) {
-          continue;
-        }
-        pending.delete(id);
-        if ("error" in msg) {
-          entry.reject(new Error(`${msg.error.class}: ${msg.error.desc}`));
-        } else {
-          entry.resolve(msg.return);
-        }
+async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  try {
+    if (req.method === "GET" && req.url === "/image") {
+      const path = join(tmpdir(), `oligarchy-${process.pid}-${process.hrtime.bigint()}.png`);
+      try {
+        await screendump(qemu, path);
+        const data = await readFile(path);
+        res.writeHead(200, { "Content-Type": "image/png", "Content-Length": data.length });
+        res.end(data);
+      } finally {
+        await rm(path, { force: true });
       }
-    } catch (err) {
-      failAll(pending, err);
-      socket.destroy();
+      return;
     }
-  });
-  socket.on("error", (err) => failAll(pending, err));
-  socket.on("close", () => failAll(pending, new Error("qemu: socket closed")));
 
-  try {
-    const proxy: QemuProxy = {
-      greeting: (await greeting) as QemuGreetingResponse,
-      pending,
-      nextId: 0,
-      socket,
-    };
-    await execute(proxy, "qmp_capabilities");
-    return proxy;
+    if (req.method === "POST" && req.url === "/send-keys") {
+      let body = "";
+      for await (const chunk of req) {
+        body += chunk;
+      }
+      const { keys = "", encoding } = JSON.parse(body) as { keys?: string; encoding?: string };
+      for (const chord of parseKeys(keys, encoding)) {
+        await sendKey(qemu, chord.map((code): QemuKeyValue => ({ type: "qcode", data: code })));
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: "true" }));
+      return;
+    }
+
+    res.writeHead(404, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "not found" }));
   } catch (err) {
-    socket.destroy();
-    throw err;
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
   }
-}
-
-/** Closes the QMP connection; in-flight commands reject. */
-export function close(proxy: QemuProxy): void {
-  failAll(proxy.pending, new Error("qemu: closed"));
-  proxy.socket?.destroy();
-  proxy.socket = undefined;
-}
-
-/** Sends a named QMP command and returns its result. */
-export async function execute(proxy: QemuProxy, name: string, args?: unknown): Promise<unknown> {
-  const socket = proxy.socket;
-  if (socket === undefined) {
-    throw new Error("qemu: closed");
-  }
-  const id = ++proxy.nextId;
-  return new Promise((resolve, reject) => {
-    proxy.pending.set(id, { resolve, reject });
-    // JSON.stringify drops "arguments" when args is undefined.
-    socket.write(`${JSON.stringify({ execute: name, arguments: args, id })}\n`);
-  });
-}
-
-/** Captures the current guest display as a PNG. */
-export async function readImage(proxy: QemuProxy): Promise<Buffer> {
-  const path = join(tmpdir(), `oligarchy-${process.pid}-${process.hrtime.bigint()}.png`);
-  try {
-    await execute(proxy, "screendump", { filename: path, format: "png" });
-    return await readFile(path);
-  } finally {
-    await rm(path, { force: true });
-  }
-}
-
-/** Types keys into the guest using the given key-string encoding. */
-export async function sendKeys(proxy: QemuProxy, keys: string, encoding?: string): Promise<void> {
-  for (const chord of parseKeys(keys, encoding)) {
-    await execute(proxy, "send-key", {
-      keys: chord.map((code): QemuKeyValue => ({ type: "qcode", data: code })),
-    });
-  }
-}
-
-function failAll(pending: Map<number | "greeting", Pending>, err: unknown): void {
-  for (const entry of pending.values()) {
-    entry.reject(err);
-  }
-  pending.clear();
 }
