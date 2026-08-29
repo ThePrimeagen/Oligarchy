@@ -24,6 +24,8 @@ The Go server accepts the full launch config; every field is optional and zero v
 
 The TypeScript proxy reads only `iso` and `disk`, and the disk semantics differ: the proxy creates a disk only when the `disk` key is **absent**, and a given disk must already exist (the Go server creates a given path if missing). Clients that want the server-managed disk must therefore omit the key, not send `""`. The CLI does this; keep it that way.
 
+The proxy also accepts an http(s) url as `iso` (the Go server does not). A url iso is downloaded into `~/.oligarchy/isos` on first use — verified against the publisher's `<url>.sha256` sidecar when one is published — and served from that cache on every later start. The cache file is the url with `:`, `/`, and every other character a file name cannot hold replaced by `_`. A `manifest.json` beside the isos records when each was cached and last used, so the cache can be pruned by size later.
+
 ## GET /image?id=<id>
 
 Returns the session's current display as `image/png` bytes (QMP `screendump` under the hood).

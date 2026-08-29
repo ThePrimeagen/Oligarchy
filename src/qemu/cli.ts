@@ -70,11 +70,16 @@ async function cmdStart(args: string[]): Promise<void> {
       throw new Error("usage: oligarchy start [--iso <path>] [--disk <path>]");
     }
   }
-  iso = resolve(iso === "" ? DEFAULT_ISO : iso);
-  try {
-    await stat(iso);
-  } catch (err) {
-    throw new Error(`iso: ${errorMessage(err)}`);
+  iso = iso === "" ? DEFAULT_ISO : iso;
+  // An http(s) iso is the server's to download and cache; only a file path
+  // is resolved and checked here.
+  if (!iso.startsWith("http://") && !iso.startsWith("https://")) {
+    iso = resolve(iso);
+    try {
+      await stat(iso);
+    } catch (err) {
+      throw new Error(`iso: ${errorMessage(err)}`);
+    }
   }
   const out = JSON.parse(
     await postJSON("/start", {

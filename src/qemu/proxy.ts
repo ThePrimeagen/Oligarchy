@@ -7,6 +7,8 @@
 // OLIGARCHY_ADDR (default 127.0.0.1:42069).
 //
 //   POST /start      -> {"iso"?, "disk"?}; boots a qemu, returns {"id": uuid}
+//                       an http(s) iso is downloaded into ~/.oligarchy/isos
+//                       once and reused from there on later starts
 //   GET  /image?id=  -> PNG of that session's guest display
 //   GET  /stats      -> qemu count + host memory + cpu percentiles (last 5m)
 //   POST /send-keys  -> {"id", "keys": "Hi<ENTER>", "encoding"?}
@@ -16,6 +18,7 @@ import { createServer, type IncomingMessage } from "node:http";
 import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { createDisk, createQemu, screendump, sendKey, start, stop, type Qemu } from "./client.ts";
+import { getIso } from "./iso.ts";
 import { parseKeys } from "./keys.ts";
 import { collectStats, startCpuSampler } from "./stats.ts";
 
@@ -37,11 +40,12 @@ createServer(async (req, res) => {
     if (req.method === "POST" && url.pathname === "/start") {
       const raw = await body(req);
       const cfg = (raw === "" ? {} : JSON.parse(raw)) as { iso?: string; disk?: string };
+      const iso = await getIso(cfg.iso ?? defaultIso);
       const qemu = createQemu();
       if (cfg.disk === undefined) {
         await createDisk(qemu);
       }
-      await start(qemu, { iso: cfg.iso ?? defaultIso, disk: cfg.disk });
+      await start(qemu, { iso, disk: cfg.disk });
       sessions.set(qemu.id, qemu);
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ id: qemu.id }));

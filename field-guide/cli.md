@@ -15,7 +15,7 @@ The server address comes from `OLIGARCHY_ADDR`, default `127.0.0.1:42069`.
 Boots a QEMU session and prints its session id (a UUID). Every other command takes that id.
 
 - Arguments are strict `--flag value` pairs: `--iso <path>` and `--disk <path>`, either order, both optional. Anything else — positionals, unknown flags, a flag without a value — is a usage error. These are intentionally the only two options: the server accepts more (memory, SMP, firmware paths), the CLI does not expose them.
-- The ISO defaults to `omarchy.iso` in the current directory, mostly a debug convenience. It is resolved to an absolute path and must exist; the CLI fails fast with the real path in the error instead of making the server discover it.
+- The ISO defaults to `omarchy.iso` in the current directory, mostly a debug convenience. A path is resolved to absolute and must exist; the CLI fails fast with the real path in the error instead of making the server discover it. An http(s) url is passed through untouched — downloading and caching it is the server's job (see [http-api.md](http-api.md)).
 - The disk is resolved to an absolute path when given. When not given, the `disk` key is omitted from the JSON entirely, not sent as `""`: the Go server treats a missing or empty disk as "create the default disk", and the Node proxy creates a disk only when the key is absent. `JSON.stringify` dropping `undefined` properties is what makes the omission work.
 - Wire call: `POST /start` with `{"iso": "...", "disk"?: "..."}` → `{"id": "<uuid>"}`.
 
