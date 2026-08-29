@@ -31,10 +31,10 @@ export async function getIso(name: string): Promise<string> {
     } catch {
       throw new Error(`iso: not found: ${path}`);
     }
-    // QEMU's own complaint about a non-file lands in stdio "ignore"; name
-    // the problem here instead.
-    if (!info.isFile()) {
-      throw new Error(`iso: not a file: ${path}`);
+    // The path for "--iso ~/isos" instead of the file inside it: QEMU's own
+    // complaint would land in stdio "ignore", so name the mistake here.
+    if (info.isDirectory()) {
+      throw new Error(`iso: is a directory: ${path}`);
     }
     return path;
   }
@@ -72,11 +72,7 @@ async function downloadCached(url: string, file: string): Promise<string> {
   if (!cached) {
     await download(url, path);
   }
-  const now = new Date().toISOString();
-  await updateManifest(file, (entry) => ({
-    cachedAt: entry?.cachedAt ?? now,
-    lastUsedAt: now,
-  }));
+  await updateManifest(file);
   return path;
 }
 
@@ -138,10 +134,7 @@ async function publishedSha256(url: string): Promise<string | undefined> {
 // an entry. A failed write must not wedge the writes after it.
 let manifestChain: Promise<unknown> = Promise.resolve();
 
-function updateManifest(
-  file: string,
-  update: (entry: ManifestEntry | undefined) => ManifestEntry,
-): Promise<void> {
+function updateManifest(file: string): Promise<void> {
   const step = manifestChain.then(async () => {
     let manifest: Record<string, ManifestEntry> = {};
     try {
@@ -152,7 +145,9 @@ function updateManifest(
         throw err;
       }
     }
-    manifest[file] = update(manifest[file]);
+    // A fresh entry gets both stamps; a cache hit only moves lastUsedAt.
+    const now = new Date().toISOString();
+    manifest[file] = { cachedAt: manifest[file]?.cachedAt ?? now, lastUsedAt: now };
     // Temp-write and rename so a crash cannot leave a truncated manifest.
     const partial = `${MANIFEST_PATH}.partial-${process.pid}`;
     await writeFile(partial, `${JSON.stringify(manifest, null, 2)}\n`);
