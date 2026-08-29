@@ -65,18 +65,13 @@ export class QemuCLI {
     this.sockPath = join(this.#dir, "qmp.sock");
   }
 
-  /**
-   * Creates the backing qcow2 at diskPath inside the session dir. An
-   * existing disk is preserved, matching the Go launcher.
-   */
+  /** Creates the backing qcow2 at diskPath inside the session dir. */
   async createDisk(): Promise<string> {
     if (this.#closed) {
       throw new Error("qemu: closed");
     }
     await mkdir(this.#dir, { recursive: true, mode: 0o700 });
-    if (!(await fileExists(this.diskPath))) {
-      await qemuImgCreate(this.diskPath, this.#opts.diskSize ?? DEFAULT_DISK_SIZE);
-    }
+    await qemuImgCreate(this.diskPath, this.#opts.diskSize ?? DEFAULT_DISK_SIZE);
     this.#disk = this.diskPath;
     return this.diskPath;
   }
@@ -321,15 +316,6 @@ export function qemuArgs(opts: {
     "-drive",
     `file=${opts.diskPath},if=virtio,format=qcow2`,
   ];
-}
-
-async function fileExists(path: string): Promise<boolean> {
-  try {
-    await stat(path);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 async function assertFile(path: string, label: string): Promise<void> {
