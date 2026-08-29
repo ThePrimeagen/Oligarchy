@@ -7,44 +7,27 @@ export type StartOptions = {
   model?: string;
 };
 
-export type PromptOptions = {
-  /** Model id for this prompt. Sticky: later prompts without one keep it. */
-  model?: string;
-  /**
-   * Rejoin this session. When omitted, prompt is one-shot: it starts a
-   * session, prompts it, and stops it afterward.
-   */
-  session?: string;
+export type CursorAgent = {
+  /** The session ID: the SDK's bc-… cloud agent id. */
+  readonly session: string;
 };
 
-/** Starts a new Cursor cloud agent session and returns its session ID. */
-export async function start(options: StartOptions = {}): Promise<string> {
-  const agent = await Agent.create({
+/** Starts a new Cursor cloud agent session. */
+export async function start(options: StartOptions = {}): Promise<CursorAgent> {
+  const handle = await Agent.create({
     model: options.model === undefined ? undefined : { id: options.model },
     cloud: {},
   });
-  const session = agent.agentId;
-  agent.close();
-  return session;
+  const session = handle.agentId;
+  handle.close();
+  return { session };
 }
 
-/** Sends text and resolves with the reply once the run finishes. */
-export async function prompt(text: string, options: PromptOptions = {}): Promise<string> {
-  if (options.session === undefined) {
-    const session = await start({ model: options.model });
-    try {
-      return await prompt(text, { session });
-    } finally {
-      await stop(session);
-    }
-  }
-
-  const agent = await Agent.resume(options.session);
+/** Sends text to the agent's session and resolves with the reply once the run finishes. */
+export async function prompt(agent: CursorAgent, text: string): Promise<string> {
+  const handle = await Agent.resume(agent.session);
   try {
-    const run = await agent.send(
-      text,
-      options.model === undefined ? undefined : { model: { id: options.model } },
-    );
+    const run = await handle.send(text);
     const result = await run.wait();
     if (result.status !== "finished") {
       const detail = result.error === undefined ? "" : `: ${result.error.message}`;
@@ -52,16 +35,26 @@ export async function prompt(text: string, options: PromptOptions = {}): Promise
     }
     return result.result ?? "";
   } finally {
-    agent.close();
+    handle.close();
   }
 }
 
-/** Stops a session: cancels its active run, if any, and archives it. */
-export async function stop(session: string): Promise<void> {
-  const runs = await Agent.listRuns(session, { runtime: "cloud", limit: 1 });
+/** Stops the agent's session: cancels its active run, if any, and archives it. */
+export async function stop(agent: CursorAgent): Promise<void> {
+  const runs = await Agent.listRuns(agent.session, { runtime: "cloud", limit: 1 });
   const run = runs.items.at(0);
   if (run?.status === "running") {
     await run.cancel();
   }
-  await Agent.archive(session);
+  await Agent.archive(agent.session);
+}
+
+/** One-shot: starts a session, prompts it, stops it, and returns the reply. */
+export async function oneShotPrompt(text: string): Promise<string> {
+  const agent = await start();
+  try {
+    return await prompt(agent, text);
+  } finally {
+    await stop(agent);
+  }
 }
