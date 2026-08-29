@@ -8,7 +8,8 @@
 //
 //   POST /start      -> {"iso"?, "disk"?}; boots a qemu, returns {"id": uuid}
 //                       an http(s) iso is downloaded into ~/.oligarchy/isos
-//                       once and reused from there on later starts
+//                       once (a start that finds a running download waits
+//                       for it) and reused from there on later starts
 //   GET  /image?id=  -> PNG of that session's guest display
 //   GET  /stats      -> qemu count + host memory + cpu percentiles (last 5m)
 //   POST /send-keys  -> {"id", "keys": "Hi<ENTER>", "encoding"?}

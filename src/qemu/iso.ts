@@ -3,7 +3,8 @@
 // exist, an http(s) url is downloaded into ~/.oligarchy/isos once and
 // served from the cache ever after. manifest.json sits beside the cached
 // isos and records when each was cached and last used, so the cache can be
-// pruned by size later.
+// pruned by size later — and, while a download runs, carries its claim so
+// other proxies wait for it instead of downloading the same iso twice.
 
 import { createHash } from "node:crypto";
 import { createWriteStream } from "node:fs";
@@ -13,14 +14,23 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import { setTimeout as sleep } from "node:timers/promises";
 
 const ISO_DIR = join(homedir(), ".oligarchy", "isos");
 const MANIFEST_PATH = join(ISO_DIR, "manifest.json");
 
-type ManifestEntry = {
-  cachedAt: string;
-  lastUsedAt: string;
-};
+// A downloader refreshes its claim's heartbeat while bytes flow; waiters
+// recheck on the same ten-second cadence and treat three missed beats as a
+// dead downloader.
+const HEARTBEAT_MS = 10_000;
+const POLL_MS = 10_000;
+const STALE_MS = 3 * HEARTBEAT_MS;
+
+// Per cached file: either a live download claim (heartbeatAt advances while
+// bytes flow) or the cached timestamps pruning will need later.
+type ManifestEntry =
+  | { status: "downloading"; heartbeatAt: string }
+  | { status: "cached"; cachedAt: string; lastUsedAt: string };
 
 export async function getIso(name: string): Promise<string> {
   if (!name.startsWith("http://") && !name.startsWith("https://")) {
@@ -65,18 +75,45 @@ const downloads = new Map<string, Promise<string>>();
 async function downloadCached(url: string, file: string): Promise<string> {
   const path = join(ISO_DIR, file);
   await mkdir(ISO_DIR, { recursive: true });
-  const cached = await stat(path).then(
-    () => true,
-    () => false,
-  );
-  if (!cached) {
-    await download(url, path);
+  let waitLogged = false;
+  for (;;) {
+    const cached = await stat(path).then(
+      () => true,
+      () => false,
+    );
+    if (cached) {
+      await updateManifest(file, "cached");
+      return path;
+    }
+    // Another proxy mid-download shows up as a claim with a live heartbeat:
+    // wait for its rename instead of downloading the same iso twice. A stale
+    // heartbeat is a dead downloader and gets walked over. Two proxies
+    // claiming in the same instant both download — wasteful, still correct,
+    // since each streams its own partial and the rename is atomic.
+    const entry = (await readManifest())[file];
+    if (entry?.status === "downloading" && Date.now() - Date.parse(entry.heartbeatAt) < STALE_MS) {
+      if (!waitLogged) {
+        console.error(`iso: another download of ${url} is running; waiting for it`);
+        waitLogged = true;
+      }
+      await sleep(POLL_MS);
+      continue;
+    }
+    await updateManifest(file, "downloading");
+    try {
+      await download(url, file, path);
+    } catch (err) {
+      // Drop the claim so waiters take over right away; if even this write
+      // fails, they still recover once the heartbeat goes stale.
+      await updateManifest(file, "removed").catch(() => {});
+      throw err;
+    }
+    await updateManifest(file, "cached");
+    return path;
   }
-  await updateManifest(file);
-  return path;
 }
 
-async function download(url: string, path: string): Promise<void> {
+async function download(url: string, file: string, path: string): Promise<void> {
   console.error(`iso: downloading ${url} -> ${path}`);
   const res = await fetch(url);
   if (!res.ok || res.body === null) {
@@ -87,6 +124,7 @@ async function download(url: string, path: string): Promise<void> {
   // two proxies on one machine out of each other's partials.
   const partial = `${path}.partial-${process.pid}`;
   const hash = createHash("sha256");
+  let beatAt = Date.now();
   try {
     await pipeline(
       Readable.fromWeb(res.body),
@@ -95,6 +133,14 @@ async function download(url: string, path: string): Promise<void> {
       async function* (chunks: AsyncIterable<Buffer>) {
         for await (const chunk of chunks) {
           hash.update(chunk);
+          // Keep the claim's heartbeat fresh while bytes flow. A failed
+          // beat only risks a duplicate download elsewhere, never this one.
+          if (Date.now() - beatAt >= HEARTBEAT_MS) {
+            beatAt = Date.now();
+            updateManifest(file, "downloading").catch((err: unknown) => {
+              console.error(`iso: heartbeat failed: ${(err as Error).message}`);
+            });
+          }
           yield chunk;
         }
       },
@@ -129,25 +175,40 @@ async function publishedSha256(url: string): Promise<string | undefined> {
   return /^[0-9a-f]{64}$/.test(token) ? token : undefined;
 }
 
+async function readManifest(): Promise<Record<string, ManifestEntry>> {
+  try {
+    return JSON.parse(await readFile(MANIFEST_PATH, "utf8")) as Record<string, ManifestEntry>;
+  } catch (err) {
+    // No manifest yet — the first cached iso creates it.
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw err;
+    }
+    return {};
+  }
+}
+
 // Every manifest write is a read-modify-write of the whole file; the chain
 // keeps concurrent starts for different isos from interleaving and losing
 // an entry. A failed write must not wedge the writes after it.
 let manifestChain: Promise<unknown> = Promise.resolve();
 
-function updateManifest(file: string): Promise<void> {
+function updateManifest(file: string, state: "cached" | "downloading" | "removed"): Promise<void> {
   const step = manifestChain.then(async () => {
-    let manifest: Record<string, ManifestEntry> = {};
-    try {
-      manifest = JSON.parse(await readFile(MANIFEST_PATH, "utf8")) as Record<string, ManifestEntry>;
-    } catch (err) {
-      // No manifest yet — the first cached iso creates it.
-      if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-        throw err;
-      }
-    }
-    // A fresh entry gets both stamps; a cache hit only moves lastUsedAt.
+    const manifest = await readManifest();
+    const entry = manifest[file];
     const now = new Date().toISOString();
-    manifest[file] = { cachedAt: manifest[file]?.cachedAt ?? now, lastUsedAt: now };
+    if (state === "removed") {
+      delete manifest[file];
+    } else if (state === "downloading") {
+      manifest[file] = { status: "downloading", heartbeatAt: now };
+    } else {
+      // A fresh cache gets both stamps; a hit only moves lastUsedAt.
+      manifest[file] = {
+        status: "cached",
+        cachedAt: entry?.status === "cached" ? entry.cachedAt : now,
+        lastUsedAt: now,
+      };
+    }
     // Temp-write and rename so a crash cannot leave a truncated manifest.
     const partial = `${MANIFEST_PATH}.partial-${process.pid}`;
     await writeFile(partial, `${JSON.stringify(manifest, null, 2)}\n`);
