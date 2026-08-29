@@ -42,4 +42,4 @@ Types a key string into the session.
 
 ## Reading the file
 
-`main` dispatches to one `cmd*` function per command. Each command parses its own arguments inline and throws usage errors, which `main` prints to stderr. Three shared helpers: `postJSON` (POST, status check, body text), `readAPIError` (error body to message), and `errorMessage` (thrown error to printable string, unwrapping `cause`). There is no other machinery — see the [philosophy](philosophy.markdown) for why it should stay that way.
+`main` dispatches to one `cmd*` function per command. Each command parses its own arguments inline and throws usage errors, which `main` prints to stderr. Three shared helpers: `postJSON` (POST, status check, body text), `readAPIError` (error body to message), and `errorMessage` (thrown error to printable string, unwrapping `cause`). There is no other machinery — see the [philosophy](philosophy.md) for why it should stay that way.

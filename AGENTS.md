@@ -1,6 +1,6 @@
 # Agent rules
 
-Check the field guide: [field-guide/index.markdown](field-guide/index.markdown).
+Check the field guide: [field-guide/index.md](field-guide/index.md).
 
 ## Vocabulary
 
