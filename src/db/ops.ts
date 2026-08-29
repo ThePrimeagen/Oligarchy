@@ -5,7 +5,7 @@
 //
 // Write-only on purpose: the proxy records, replay tooling will read.
 
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { actionKind, actions, agentRuns, images, sessions } from "./schema.ts";
 
@@ -40,7 +40,9 @@ export async function sessionRunning(db: Db, id: string): Promise<void> {
  * while its runs stay open.
  */
 export async function endSession(db: Db, id: string, status: "succeeded" | "failed" | "aborted", reason: string | null): Promise<void> {
-  const endedAt = new Date();
+  // now() is transaction-start time in Postgres: the session and its runs
+  // stamp the same instant, from the same clock that wrote started_at.
+  const endedAt = sql`now()`;
   await db.transaction(async (tx) => {
     await tx.update(sessions).set({ status, reason, endedAt }).where(eq(sessions.id, id));
     await tx.update(agentRuns).set({ endedAt }).where(and(eq(agentRuns.sessionId, id), isNull(agentRuns.endedAt)));
@@ -63,27 +65,40 @@ export type Action = {
   kind: ActionKind;
   /** The payload as received; the session id lives in its own column. */
   request: unknown;
-  /** What came back on success — null when the request failed (see error). */
+};
+
+/** What closed the action: the response on success, the error on failure. */
+export type Outcome = {
   response: unknown;
-  /** null when the request succeeded; otherwise the error message returned. */
   error: string | null;
-  durationMs: number;
 };
 
 /**
- * Appends one control-plane request to the replay log; returns the action id.
- * A successful get-image passes its PNG, and the pair lands in one
- * transaction: images are 1:1 with their action, and a torn pair would break
- * that promise.
+ * Opens an action: one replay-log row per control-plane request, inserted
+ * when the request starts. Returns the action's id — the auto-incrementing
+ * number finishAction closes it by.
  */
-export async function recordAction(db: Db, action: Action, image?: Buffer): Promise<number> {
+export async function startAction(db: Db, action: Action): Promise<number> {
+  const [row] = await db.insert(actions).values(action).returning({ id: actions.id });
+  return row.id;
+}
+
+/**
+ * Closes an action with its outcome and stamps finished_at. A successful
+ * get-image passes its PNG, and the update and image insert land in one
+ * transaction: images are 1:1 with their action, and a torn pair would
+ * break that promise.
+ */
+export async function finishAction(db: Db, id: number, outcome: Outcome, image?: Buffer): Promise<void> {
+  // The database clock stamps both ends: finished_at - created_at is real
+  // handling time, not cross-clock arithmetic.
+  const finishedAt = sql`now()`;
   if (image === undefined) {
-    const [row] = await db.insert(actions).values(action).returning({ id: actions.id });
-    return row.id;
+    await db.update(actions).set({ response: outcome.response, error: outcome.error, finishedAt }).where(eq(actions.id, id));
+    return;
   }
-  return db.transaction(async (tx) => {
-    const [row] = await tx.insert(actions).values(action).returning({ id: actions.id });
-    await tx.insert(images).values({ actionId: row.id, data: image });
-    return row.id;
+  await db.transaction(async (tx) => {
+    await tx.update(actions).set({ response: outcome.response, error: outcome.error, finishedAt }).where(eq(actions.id, id));
+    await tx.insert(images).values({ actionId: id, data: image });
   });
 }

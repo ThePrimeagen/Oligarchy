@@ -30,10 +30,11 @@ import { join } from "node:path";
 import {
   connectDatabase,
   endSession,
+  finishAction,
   insertSession,
-  recordAction,
   registerAgent,
   sessionRunning,
+  startAction,
   type ActionKind,
 } from "../db/ops.ts";
 import { createDisk, createQemu, screendump, sendKey, start, stop, type Qemu } from "./client.ts";
@@ -112,8 +113,8 @@ createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/image") {
       const qemu = session(url.searchParams.get("id"));
       const path = join(qemu.dir, `image-${process.hrtime.bigint()}.png`);
-      // Not recorded through recorded(): the success row must carry the PNG.
-      const startedAt = Date.now();
+      // Not through recorded(): the finish must carry the PNG.
+      const actionId = await startAction(db, { sessionId: qemu.id, agentId: agent, kind: "get-image", request: {} });
       let data: Buffer;
       try {
         try {
@@ -123,23 +124,11 @@ createServer(async (req, res) => {
           await rm(path, { force: true });
         }
       } catch (err) {
-        await recordAction(db, {
-          sessionId: qemu.id,
-          agentId: agent,
-          kind: "get-image",
-          request: {},
-          response: null,
-          error: errorMessage(err),
-          durationMs: Date.now() - startedAt,
-        }).catch(logDbError);
+        await finishAction(db, actionId, { response: null, error: errorMessage(err) }).catch(logDbError);
         throw err;
       }
       // The PNG is the response; it lives in images, 1:1 with this action.
-      await recordAction(
-        db,
-        { sessionId: qemu.id, agentId: agent, kind: "get-image", request: {}, response: {}, error: null, durationMs: Date.now() - startedAt },
-        data,
-      );
+      await finishAction(db, actionId, { response: {}, error: null }, data);
       res.writeHead(200, { "Content-Type": "image/png", "Content-Length": data.length });
       res.end(data);
       return;
@@ -242,11 +231,12 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 }
 
 /**
- * Times work and records it as one action row: the work's return value is
- * the action's response on success; a failure records the error message and
- * a null response. Recording a success is part of the operation and may
- * fail it; recording a failure must not replace the real error, so that
- * write only logs.
+ * Brackets work between startAction and finishAction: the row exists from
+ * the moment the request starts (an unfinished row is a request whose
+ * completion never made it to the database), and the work's return value
+ * is the response that closes it. Opening the action and closing it on
+ * success are part of the operation and may fail it; closing it on failure
+ * must not replace the real error, so that write only logs.
  */
 async function recorded(
   sessionId: string,
@@ -255,23 +245,15 @@ async function recorded(
   request: unknown,
   work: () => Promise<unknown>,
 ): Promise<void> {
-  const startedAt = Date.now();
+  const actionId = await startAction(db, { sessionId, agentId, kind, request });
   let response: unknown;
   try {
     response = await work();
   } catch (err) {
-    await recordAction(db, {
-      sessionId,
-      agentId,
-      kind,
-      request,
-      response: null,
-      error: errorMessage(err),
-      durationMs: Date.now() - startedAt,
-    }).catch(logDbError);
+    await finishAction(db, actionId, { response: null, error: errorMessage(err) }).catch(logDbError);
     throw err;
   }
-  await recordAction(db, { sessionId, agentId, kind, request, response, error: null, durationMs: Date.now() - startedAt });
+  await finishAction(db, actionId, { response, error: null });
 }
 
 function logDbError(err: unknown): void {

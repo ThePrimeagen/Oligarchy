@@ -17,12 +17,13 @@ Recording a success is part of the operation: if the row cannot be written, the 
 | `sessionRunning` | `db, id` | status → `running` once the QEMU is up after a download |
 | `endSession` | `db, id, status, reason` | verdict (`succeeded`/`failed`/`aborted`), reason, `ended_at` — and closes the session's open agent runs, in one transaction |
 | `registerAgent` | `db, agentId, sessionId` | the agent_runs row tying a cloud agent to the session it drives; a second registration is a database error by design |
-| `recordAction` | `db, {sessionId, agentId, kind, request, response, error, durationMs}, image?` | one replay-log row per control-plane request; returns the action id. A successful get-image passes its PNG and the pair lands in one transaction — images are 1:1 with their action |
+| `startAction` | `db, {sessionId, agentId, kind, request}` | opens the action row the moment the request starts; returns its auto-incrementing id |
+| `finishAction` | `db, id, {response, error}, image?` | closes it: the response or the error, plus `finished_at`. A successful get-image passes its PNG and the update + image insert land in one transaction — images are 1:1 with their action |
 
 ## When rows are written
 
 - **`/start`** inserts the session row first — so the download phase and every failure land on a real row — and registers the agent from the `x-oligarchy-agent` header when one is sent. A url iso starts as `downloading` and flips to `running` once QEMU is up. A failed start is torn down, marked `failed` with the error as the reason, and still gets its action row.
-- **Every action records both sides**: the request payload as received, and the response that came back — the QMP greeting for `/start` (which QEMU answered, straight from the machine that booted), `{}` where the operation has nothing to say. A failed request records a null response and the error message instead. The server-side handling time rides along as `duration_ms`.
+- **Every action is opened, then closed**: the row is inserted with the request payload the moment work starts, and closed with what came back — the QMP greeting for `/start` (which QEMU answered, straight from the machine that booted), `{}` where the operation has nothing to say — or with the error message when it failed. `finished_at` stamps the close; handling time is `finished_at - created_at` (both from the database clock); a row that never finished is a request whose completion was never persisted — the proxy died running it, or the closing write failed and was logged.
 - **`/send-keys`**, **`/image`**, **`/stop`**, **`/finish`** each append one action row. `/image` also stores the PNG — the image is that action's real response, 1:1 in `images`. `/stats` is host telemetry, not a session action, and is not recorded.
 - **`/stop`** ends the session as `aborted` (an end without a verdict); **`/finish`** ends it as `succeeded` or `failed` with the caller's reason. Both stamp `ended_at` on the session and its agent runs.
 - **Shutdown** (SIGINT/SIGTERM) stops every live session and ends it as `aborted` with reason `proxy shutdown`, so a restart never leaves rows claiming to run.

@@ -6,7 +6,7 @@
 //
 // Replaying a session is: actions WHERE session_id ORDER BY created_at, id.
 
-import { bigint, customType, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { bigint, customType, index, jsonb, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
 // drizzle-orm has no built-in bytea column type for postgres.
 const bytea = customType<{ data: Buffer }>({ dataType: () => "bytea" });
@@ -61,13 +61,16 @@ export const actions = pgTable(
     request: jsonb("request").notNull(),
     // What came back on success: the QMP greeting for start, {} where the
     // operation has nothing to say (the get-image PNG lives in images).
-    // Null when the request failed; error carries the message.
     response: jsonb("response"),
-    // Null means the request succeeded; otherwise the error message returned.
+    // The error message returned, when the action failed.
     error: text("error"),
+    // The row is inserted when the request starts and closed when it ends:
+    // a finished action has finished_at plus exactly one of response or
+    // error; a row with neither is a request whose completion never made it
+    // to the database — the proxy died running it, or the close failed.
+    // Handling time is finished_at - created_at.
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    // Server-side handling time of the request.
-    durationMs: integer("duration_ms").notNull(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
   },
   (table) => [index("actions_session_id_idx").on(table.sessionId)],
 );
