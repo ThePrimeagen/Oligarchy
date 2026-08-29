@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { copyFile, mkdir, rm, stat } from "node:fs/promises";
-import { createServer, type Server, type Socket } from "node:net";
+import { createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { JSONStreamParser } from "../qmp/json-stream.ts";
@@ -46,7 +46,6 @@ export type Qemu = {
   readonly pending: Map<number | "greeting", Pending>;
   nextId: number;
   proc?: ChildProcess;
-  server?: Server;
   socket?: Socket;
 };
 
@@ -118,10 +117,11 @@ export async function start(
     timer = setTimeout(() => reject(new Error("qemu: handshake timeout")), HANDSHAKE_MS);
   });
 
+  // QEMU connects to us: listen on the session socket, then spawn. The
+  // listener accepts the one QMP connection and is closed in the finally.
+  const server = createServer();
   try {
     const connection = new Promise<Socket>((resolve, reject) => {
-      const server = createServer();
-      qemu.server = server;
       server.once("error", reject);
       server.once("connection", resolve);
       server.listen(qemu.sockPath, () => {
@@ -180,6 +180,7 @@ export async function start(
     teardown(qemu, err);
     throw err;
   } finally {
+    server.close();
     clearTimeout(timer);
   }
 }
@@ -257,8 +258,6 @@ function teardown(qemu: Qemu, err: unknown): void {
   failAll(qemu, err);
   qemu.socket?.destroy();
   qemu.socket = undefined;
-  qemu.server?.close();
-  qemu.server = undefined;
   qemu.proc?.kill();
   qemu.proc = undefined;
 }
