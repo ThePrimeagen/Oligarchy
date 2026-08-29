@@ -5,6 +5,7 @@ Check the field guide: [field-guide/index.md](field-guide/index.md).
 ## Vocabulary
 
 - When the user says "Kemu" (a speech-to-text rendering), they always mean QEMU. Read any such spelling as QEMU.
+- When the user asks for a "DTS" (a `.d.ts`), they are asking for the module's exported interface: every type and function the module creates and exports, written as bare declarations, so the program can be understood from that surface alone. Never include imports in a DTS — not for any reason. A type that comes from a dependency stays opaque, with a comment naming what it is underneath.
 
 ## TypeScript
 

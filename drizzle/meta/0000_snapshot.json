@@ -1,5 +1,5 @@
 {
-  "id": "993740ce-178a-45d3-af50-22d7919125a9",
+  "id": "fc55b77e-4315-4672-b63d-19f1677f7cf8",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -37,22 +37,22 @@
           "primaryKey": false,
           "notNull": false
         },
-        "kind": {
-          "name": "kind",
-          "type": "action_kind",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
         "request": {
           "name": "request",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true
         },
-        "error": {
-          "name": "error",
-          "type": "text",
+        "state": {
+          "name": "state",
+          "type": "action_state",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "response": {
+          "name": "response",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -63,11 +63,11 @@
           "notNull": true,
           "default": "now()"
         },
-        "duration_ms": {
-          "name": "duration_ms",
-          "type": "integer",
+        "finished_at": {
+          "name": "finished_at",
+          "type": "timestamp with time zone",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         }
       },
       "indexes": {
@@ -282,21 +282,19 @@
     }
   },
   "enums": {
-    "public.action_kind": {
-      "name": "action_kind",
+    "public.action_state": {
+      "name": "action_state",
       "schema": "public",
       "values": [
-        "start",
-        "send-keys",
-        "get-image",
-        "stop",
-        "finish"
+        "completed",
+        "failed"
       ]
     },
     "public.session_status": {
       "name": "session_status",
       "schema": "public",
       "values": [
+        "downloading",
         "running",
         "succeeded",
         "failed",

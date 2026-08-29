@@ -1,12 +1,12 @@
 // Drizzle schema for the control-plane database (PlanetScale Postgres).
 //
 // Four tables: sessions (one row per QEMU boot), agent_runs (which cloud
-// agents drove it), actions (every control-plane request, in order), and
-// images (the PNG each get-image returned).
+// agents drove it), actions (every QMP exchange, in order), and images
+// (the PNG each get-image returned).
 //
 // Replaying a session is: actions WHERE session_id ORDER BY created_at, id.
 
-import { bigint, customType, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { bigint, customType, index, jsonb, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
 // drizzle-orm has no built-in bytea column type for postgres.
 const bytea = customType<{ data: Buffer }>({ dataType: () => "bytea" });
@@ -14,7 +14,9 @@ const bytea = customType<{ data: Buffer }>({ dataType: () => "bytea" });
 // downloading = the ISO is being fetched from the internet; the session
 // exists but QEMU has not booted yet.
 export const sessionStatus = pgEnum("session_status", ["downloading", "running", "succeeded", "failed", "aborted"]);
-export const actionKind = pgEnum("action_kind", ["start", "send-keys", "get-image", "stop", "finish"]);
+// The only two states an exchange can finish in. An action that is still
+// running has no state yet (null, alongside a null finished_at).
+export const actionState = pgEnum("action_state", ["completed", "failed"]);
 
 export const sessions = pgTable("sessions", {
   // The uuid minted by the server at /start — not a database default.
@@ -55,15 +57,22 @@ export const actions = pgTable(
       .references(() => sessions.id),
     // Null when the request was not attributed to an agent (manual use).
     agentId: text("agent_id").references(() => agentRuns.agentId),
-    kind: actionKind("kind").notNull(),
-    // The payload as received: {keys, encoding} for send-keys, {iso, disk}
-    // for start, {status, reason} for finish, {} otherwise.
+    // The exact JSON sent to QEMU over QMP (a QemuCommand); its execute
+    // field names the command.
     request: jsonb("request").notNull(),
-    // Null means the request succeeded; otherwise the error message returned.
-    error: text("error"),
+    // How the exchange ended. completed: response is QEMU's exact reply
+    // (the greeting for qmp_capabilities at boot, the {return} reply
+    // otherwise; a get-image's PNG lives in images). failed: response is
+    // QEMU's {error} reply, or this server's error message when the failure
+    // never reached QEMU (a timeout, a dead socket).
+    state: actionState("state"),
+    response: jsonb("response"),
+    // The row is inserted when the command goes out and closed when the
+    // exchange ends; state, response, and finished_at land together. A row
+    // where they are null is an exchange whose completion was never
+    // persisted. Handling time is finished_at - created_at.
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    // Server-side handling time of the request.
-    durationMs: integer("duration_ms").notNull(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
   },
   (table) => [index("actions_session_id_idx").on(table.sessionId)],
 );
