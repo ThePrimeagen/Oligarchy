@@ -17,8 +17,7 @@ Recording a success is part of the operation: if the row cannot be written, the 
 | `sessionRunning` | `db, id` | status → `running` once the QEMU is up after a download |
 | `endSession` | `db, id, status, reason` | verdict (`succeeded`/`failed`/`aborted`), reason, `ended_at` — and closes the session's open agent runs, in one transaction |
 | `registerAgent` | `db, agentId, sessionId` | the agent_runs row tying a cloud agent to the session it drives; a second registration is a database error by design |
-| `recordAction` | `db, {sessionId, agentId, kind, request, error, durationMs}` | one replay-log row per control-plane request; returns the action id |
-| `recordImage` | `db, actionId, data` | the PNG a get-image returned, 1:1 with its action row |
+| `recordAction` | `db, {sessionId, agentId, kind, request, error, durationMs}, image?` | one replay-log row per control-plane request; returns the action id. A successful get-image passes its PNG and the pair lands in one transaction — images are 1:1 with their action |
 
 ## When rows are written
 

@@ -68,13 +68,20 @@ export type Action = {
   durationMs: number;
 };
 
-/** Appends one control-plane request to the replay log; returns the action id. */
-export async function recordAction(db: Db, action: Action): Promise<number> {
-  const [row] = await db.insert(actions).values(action).returning({ id: actions.id });
-  return row.id;
-}
-
-/** Stores the PNG a get-image returned, 1:1 with its action row. */
-export async function recordImage(db: Db, actionId: number, data: Buffer): Promise<void> {
-  await db.insert(images).values({ actionId, data });
+/**
+ * Appends one control-plane request to the replay log; returns the action id.
+ * A successful get-image passes its PNG, and the pair lands in one
+ * transaction: images are 1:1 with their action, and a torn pair would break
+ * that promise.
+ */
+export async function recordAction(db: Db, action: Action, image?: Buffer): Promise<number> {
+  if (image === undefined) {
+    const [row] = await db.insert(actions).values(action).returning({ id: actions.id });
+    return row.id;
+  }
+  return db.transaction(async (tx) => {
+    const [row] = await tx.insert(actions).values(action).returning({ id: actions.id });
+    await tx.insert(images).values({ actionId: row.id, data: image });
+    return row.id;
+  });
 }

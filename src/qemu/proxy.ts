@@ -32,7 +32,6 @@ import {
   endSession,
   insertSession,
   recordAction,
-  recordImage,
   registerAgent,
   sessionRunning,
   type ActionKind,
@@ -95,8 +94,9 @@ createServer(async (req, res) => {
       } catch (err) {
         // A start that got as far as booting is torn down again: a session
         // whose id the client never learned must not stay running. The boot
-        // error is the one worth seeing, so the cleanup failure is swallowed.
-        await stop(qemu).catch(() => {});
+        // error is the one worth seeing, so the cleanup failure is only
+        // logged — a leftover session dir is worth a line on stderr.
+        await stop(qemu).catch((e: unknown) => console.error(`start: cleanup failed: ${errorMessage(e)}`));
         await endSession(db, qemu.id, "failed", errorMessage(err)).catch(logDbError);
         throw err;
       }
@@ -109,7 +109,7 @@ createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/image") {
       const qemu = session(url.searchParams.get("id"));
       const path = join(qemu.dir, `image-${process.hrtime.bigint()}.png`);
-      // Not recorded through recorded(): the image row needs the action id.
+      // Not recorded through recorded(): the success row must carry the PNG.
       const startedAt = Date.now();
       let data: Buffer;
       try {
@@ -130,15 +130,11 @@ createServer(async (req, res) => {
         }).catch(logDbError);
         throw err;
       }
-      const actionId = await recordAction(db, {
-        sessionId: qemu.id,
-        agentId: agent,
-        kind: "get-image",
-        request: {},
-        error: null,
-        durationMs: Date.now() - startedAt,
-      });
-      await recordImage(db, actionId, data);
+      await recordAction(
+        db,
+        { sessionId: qemu.id, agentId: agent, kind: "get-image", request: {}, error: null, durationMs: Date.now() - startedAt },
+        data,
+      );
       res.writeHead(200, { "Content-Type": "image/png", "Content-Length": data.length });
       res.end(data);
       return;
@@ -156,9 +152,14 @@ createServer(async (req, res) => {
       const qemu = session(id);
       await recorded(qemu.id, agent, "stop", {}, async () => {
         sessions.delete(qemu.id);
-        await stop(qemu);
-        // A stop is an end without a verdict.
-        await endSession(db, qemu.id, "aborted", null);
+        // stop() kills the qemu before the fallible dir removal, so the row
+        // must not stay "running" when only the removal failed: the
+        // endSession runs either way. A stop is an end without a verdict.
+        try {
+          await stop(qemu);
+        } finally {
+          await endSession(db, qemu.id, "aborted", null);
+        }
       });
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: "true" }));
@@ -171,14 +172,19 @@ createServer(async (req, res) => {
         status?: string;
         reason?: string;
       };
-      if (status !== "succeeded" && status !== "failed") {
-        throw new Error(`finish: status must be "succeeded" or "failed", got "${status}"`);
-      }
       const qemu = session(id);
       await recorded(qemu.id, agent, "finish", { status, reason }, async () => {
+        // Validated inside recorded(): a finish for a known session belongs
+        // in its replay log even when the verdict was garbage.
+        if (status !== "succeeded" && status !== "failed") {
+          throw new Error(`finish: status must be "succeeded" or "failed", got "${status}"`);
+        }
         sessions.delete(qemu.id);
-        await stop(qemu);
-        await endSession(db, qemu.id, status, reason ?? null);
+        try {
+          await stop(qemu);
+        } finally {
+          await endSession(db, qemu.id, status, reason ?? null);
+        }
       });
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: "true" }));
@@ -214,16 +220,14 @@ createServer(async (req, res) => {
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
-    // Every session gets its own attempt: one failure must not keep the
-    // others from being stopped and recorded, and the exit is unconditional.
+    // Every session gets both attempts: the qemu dies with the process
+    // either way, so a failed stop must not keep its row "running", and one
+    // session's failure must not keep the others from being recorded. The
+    // exit is unconditional.
     void Promise.all(
       [...sessions.values()].map(async (qemu) => {
-        try {
-          await stop(qemu);
-          await endSession(db, qemu.id, "aborted", "proxy shutdown");
-        } catch (err) {
-          console.error(`shutdown: ${errorMessage(err)}`);
-        }
+        await stop(qemu).catch((err: unknown) => console.error(`shutdown: ${errorMessage(err)}`));
+        await endSession(db, qemu.id, "aborted", "proxy shutdown").catch(logDbError);
       }),
     ).then(() => process.exit(0));
   });
