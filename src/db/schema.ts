@@ -9,11 +9,7 @@
 import { bigint, customType, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
 // drizzle-orm has no built-in bytea column type for postgres.
-const bytea = customType<{ data: Buffer }>({
-  dataType() {
-    return "bytea";
-  },
-});
+const bytea = customType<{ data: Buffer }>({ dataType: () => "bytea" });
 
 export const sessionStatus = pgEnum("session_status", ["running", "succeeded", "failed", "aborted"]);
 export const actionKind = pgEnum("action_kind", ["start", "send-keys", "get-image", "stop", "finish"]);

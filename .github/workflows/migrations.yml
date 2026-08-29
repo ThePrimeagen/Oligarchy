@@ -15,7 +15,7 @@ jobs:
       # changed. The journal is the one file the generator itself appends to.
       - name: fail if an existing migration file was edited, deleted, or renamed
         run: |
-          violations=$(git diff --name-status --diff-filter=MDR \
+          violations=$(git diff --name-status --diff-filter=MDRT \
             "origin/${{ github.base_ref }}...HEAD" \
             -- 'drizzle/' ':(exclude)drizzle/meta/_journal.json')
           if [ -n "$violations" ]; then
