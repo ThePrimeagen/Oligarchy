@@ -77,14 +77,6 @@ async function downloadCached(url: string, file: string): Promise<string> {
   await mkdir(ISO_DIR, { recursive: true });
   let waitLogged = false;
   for (;;) {
-    const cached = await stat(path).then(
-      () => true,
-      () => false,
-    );
-    if (cached) {
-      await updateManifest(file, "cached");
-      return path;
-    }
     // Another proxy mid-download shows up as a claim with a live heartbeat:
     // wait for its rename instead of downloading the same iso twice. A stale
     // heartbeat is a dead downloader and gets walked over. Two proxies
@@ -98,6 +90,16 @@ async function downloadCached(url: string, file: string): Promise<string> {
       }
       await sleep(POLL_MS);
       continue;
+    }
+    // The claim is checked before the file so a download that finishes
+    // between the two reads is still seen here and not downloaded again.
+    const cached = await stat(path).then(
+      () => true,
+      () => false,
+    );
+    if (cached) {
+      await updateManifest(file, "cached");
+      return path;
     }
     await updateManifest(file, "downloading");
     try {
