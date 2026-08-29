@@ -4,7 +4,7 @@
 //
 // A timer started with the server samples the busy share of cpu time every
 // tick into a rolling window; /stats reports the window's mean and
-// p10/p25/p75/p90 percentiles. The cpu fields are null until the first tick.
+// p10/p25/p75/p90 percentiles. The cpu fields are 0 until the first tick.
 
 import os from "node:os";
 
@@ -32,11 +32,11 @@ export type Stats = {
   };
   cpu: {
     cores: number;
-    mean: number | null;
-    p10: number | null;
-    p25: number | null;
-    p75: number | null;
-    p90: number | null;
+    mean: number;
+    p10: number;
+    p25: number;
+    p75: number;
+    p90: number;
   };
 };
 
@@ -106,9 +106,9 @@ function cpuTimes(): CpuTimes {
   return { cores: cpus.length, idleMs, totalMs };
 }
 
-function mean(samples: number[]): number | null {
+function mean(samples: number[]): number {
   if (samples.length === 0) {
-    return null;
+    return 0;
   }
   let sum = 0;
   for (const sample of samples) {
@@ -117,9 +117,9 @@ function mean(samples: number[]): number | null {
   return round1(sum / samples.length);
 }
 
-function percentile(sorted: number[], p: number): number | null {
+function percentile(sorted: number[], p: number): number {
   if (sorted.length === 0) {
-    return null;
+    return 0;
   }
   const index = (p / 100) * (sorted.length - 1);
   const lower = Math.floor(index);
