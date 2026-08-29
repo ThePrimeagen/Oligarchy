@@ -166,7 +166,7 @@ export async function screendump(qemu: Qemu, filename: string, format = "png"): 
   await execute(qemu, "screendump", { filename, format });
 }
 
-export function qemuArgs(opts: {
+function qemuArgs(opts: {
   sockPath: string;
   varsPath: string;
   diskPath: string;
