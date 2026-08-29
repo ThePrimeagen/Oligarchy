@@ -10,7 +10,7 @@ Optimize for the person reading the file top to bottom. A function should be ins
 
 ## Support only what is used
 
-Expose the smallest surface that does the job, even when the layer below supports more. The server's `/start` accepts memory, SMP, disk size, and firmware paths; the CLI takes only `--iso` and `--disk`, because those are the only two anyone needs — and the ISO mostly for debugging. Fewer options is a feature. Do not add a flag because the field exists.
+Expose the smallest surface that does the job, even when the layer below supports more. The qemu client (`src/qemu/client.ts`) supports memory, SMP, disk size, and firmware paths; the proxy's `/start` and the CLI expose only `iso` and `disk`, because those are the only two anyone needs — and the ISO mostly for debugging. Fewer options is a feature. Do not add a flag because the field exists.
 
 The same rule applies to output. When asked for a number, return the number — not everything the system could tell you. `/stats` answers "how many qemus, how much memory, what is the cpu doing" and nothing else; its first draft inventoried the distro, probed for KVM, parsed `/proc/meminfo`, and scanned the process table, and every one of those was deleted.
 
@@ -64,7 +64,7 @@ Simplicity is not deleting necessary behavior. Things that stay, and why:
 
 ## Porting: the reference implementation is the spec
 
-When a component mirrors another (the TypeScript CLI fills the Go client's role), the reference's observable behavior beats general convention: the CLI exits 1 on per-command usage errors because the Go client does, even though exit 2 is the more common convention. The user-facing interface may deliberately diverge — the Go client takes positionals, this CLI takes `--iso`/`--disk` — but wire behavior must match the servers exactly.
+When a component mirrors another, the reference's observable behavior beats general convention. The CLI was ported from a since-deleted Go client, and it exits 1 on per-command usage errors because that client did — even though exit 2 is the more common convention. The user-facing interface may deliberately diverge — the Go client took positionals, this CLI takes `--iso`/`--disk` — but wire behavior must match the server exactly.
 
 ## Tests
 
