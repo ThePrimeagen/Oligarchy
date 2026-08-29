@@ -8,7 +8,7 @@
 //
 //   POST /start      -> {"iso"?, "disk"?}; boots a qemu, returns {"id": uuid}
 //   GET  /image?id=  -> PNG of that session's guest display
-//   GET  /stats      -> host memory/cpu + running proxy and qemu counts
+//   GET  /stats      -> qemu count + host memory + cpu percentiles (last 5m)
 //   POST /send-keys  -> {"id", "keys": "Hi<ENTER>", "encoding"?}
 //   POST /stop       -> {"id"}; kills the qemu and removes its session dir
 
@@ -17,7 +17,7 @@ import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { createDisk, createQemu, screendump, sendKey, start, stop, type Qemu } from "./client.ts";
 import { parseKeys } from "./keys.ts";
-import { collectStats, createStatsCollector } from "./stats.ts";
+import { collectStats, startCpuSampler } from "./stats.ts";
 
 const defaultIso = process.argv[2] ?? process.env.OLIGARCHY_ISO;
 if (defaultIso === undefined) {
@@ -27,7 +27,7 @@ if (defaultIso === undefined) {
 const addr = process.env.OLIGARCHY_ADDR ?? "127.0.0.1:42069";
 
 const sessions = new Map<string, Qemu>();
-const stats = createStatsCollector();
+const cpuSampler = startCpuSampler();
 
 const [host, port] = addr.split(":");
 createServer(async (req, res) => {
@@ -63,9 +63,8 @@ createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && url.pathname === "/stats") {
-      const payload = await collectStats(stats);
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(payload));
+      res.end(JSON.stringify(collectStats(cpuSampler, sessions.size)));
       return;
     }
 
