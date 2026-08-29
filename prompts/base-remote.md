@@ -19,10 +19,10 @@ The CLI is the only way you touch the guest. Do not call the HTTP API directly, 
 Boot a session — prints the session id every other command needs:
 
 ```bash
-node --experimental-strip-types src/qemu/cli.ts start --iso {{ISO_URL}}
+node --experimental-strip-types src/qemu/cli.ts start --iso '{{ISO_URL}}'
 ```
 
-The ISO must be an http(s) URL. A file path cannot work here: the CLI would check it on this machine, and the server would try to open it on its own disk. The server downloads the URL into its cache on the first start and reuses it afterwards, so a first boot of a new URL takes as long as the download. Never pass `--disk` — a disk path would also have to exist on the server's machine; leaving it out makes the server create a fresh 40G disk.
+The ISO must be an http(s) URL: a path on this machine's disk is not on the server's, so the server could not open it. The server downloads the URL into its cache on the first start and reuses it afterwards, so a first boot of a new URL takes as long as the download. Never pass `--disk` — a disk path would also have to exist on the server's machine; leaving it out makes the server create a fresh 40G disk.
 
 Capture the guest display as a PNG — the file is written on your machine, nothing to copy from the server:
 

@@ -13,7 +13,7 @@ The CLI is the only way you touch the guest. Do not call the HTTP API directly, 
 Boot a session — prints the session id every other command needs:
 
 ```bash
-node --experimental-strip-types src/qemu/cli.ts start --iso {{ISO}}
+node --experimental-strip-types src/qemu/cli.ts start --iso '{{ISO}}'
 ```
 
 Leave `--disk` out and the server creates a fresh 40G disk for the session. Pass `--disk <path>` only when the task below hands you an existing qcow2.

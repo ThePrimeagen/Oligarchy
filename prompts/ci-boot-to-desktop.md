@@ -16,7 +16,7 @@ Boot a session from the ISO and drive the guest through its installer: create th
 Boot — prints the session id every other command needs. Do not pass `--disk`; the server creates a fresh disk:
 
 ```bash
-node --experimental-strip-types src/qemu/cli.ts start --iso {{ISO}}
+node --experimental-strip-types src/qemu/cli.ts start --iso '{{ISO}}'
 ```
 
 Screenshot:
@@ -56,11 +56,11 @@ Use these wherever the guest asks. Anything it asks that is not listed here, ans
 
 Number the screenshots in order (`step-01.png`, `step-02.png`, ...) and keep every one; they are the run's audit trail.
 
-If a reboot drops you back at the ISO's boot menu instead of the installed system, pick the menu entry that boots the existing local disk. If the menu has no such entry, that is a FAIL — do not reinstall.
+If a reboot drops you back at the ISO's boot menu instead of the installed system, pick the menu entry that boots the existing local disk. If the menu has no such entry, or the guest lands back in the installer, that is a FAIL — never reinstall.
 
 ## Verdict
 
 Your reply must end with exactly one of these lines, nothing after it:
 
 - `PASS <session-id>` — a screenshot shows the installed system's desktop. Save that screenshot as `desktop.png` too.
-- `FAIL: <one line: the screen you were on and what went wrong>` — the screen has not changed in ten minutes, or the guest shows an error the answers above cannot get past. Keep all screenshots.
+- `FAIL: <one line: where you were and what went wrong>` — a CLI command fails and keeps failing on retry, the screen has not changed in ten minutes, or the guest shows an error the answers above cannot get past. Keep all screenshots.
