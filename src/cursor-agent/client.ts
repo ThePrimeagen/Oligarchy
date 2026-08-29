@@ -52,9 +52,16 @@ export async function stop(agent: CursorAgent): Promise<void> {
 /** One-shot: starts a session, prompts it, stops it, and returns the reply. */
 export async function oneShotPrompt(text: string): Promise<string> {
   const agent = await start();
+  let reply: string;
   try {
-    return await prompt(agent, text);
-  } finally {
-    await stop(agent);
+    reply = await prompt(agent, text);
+  } catch (err) {
+    // The prompt error is the one worth seeing: stop still runs, but its own
+    // failure is swallowed so it cannot replace err. Worst case the session
+    // stays unarchived.
+    await stop(agent).catch(() => {});
+    throw err;
   }
+  await stop(agent);
+  return reply;
 }
