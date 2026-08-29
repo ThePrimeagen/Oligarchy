@@ -30,7 +30,7 @@ Returns the session's current display as `image/png` bytes (QMP `screendump` und
 
 ## POST /send-keys
 
-Body `{"id", "keys", "encoding"}`. The server parses the key string (encoding `oligarchy`, see [how-to.md](../how-to.md)) and types it into the guest via QMP `send-key`. Returns `{"ok": "true"}`.
+Body `{"id", "keys", "encoding"}`. The server parses the key string (encoding `oligarchy`, see [how-to.md](how-to.md)) and types it into the guest via QMP `send-key`. Returns `{"ok": "true"}`.
 
 ## POST /stop — proxy only
 

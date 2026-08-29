@@ -31,7 +31,7 @@ Captures the session's current display as a PNG.
 
 Types a key string into the session.
 
-- `send-keys <id> <keys> [encoding]`; the encoding defaults to `oligarchy` and is passed through untouched — the server does the parsing. The encoding itself (literal characters, `<ENTER>`, `<C-c>`, ...) is documented in [how-to.md](../how-to.md) and implemented server-side in `src/qemu/keys.ts` and `pkg/qemu/keys.go`.
+- `send-keys <id> <keys> [encoding]`; the encoding defaults to `oligarchy` and is passed through untouched — the server does the parsing. The encoding itself (literal characters, `<ENTER>`, `<C-c>`, ...) is documented in [how-to.md](how-to.md) and implemented server-side in `src/qemu/keys.ts` and `pkg/qemu/keys.go`.
 - Wire call: `POST /send-keys` with `{"id", "keys", "encoding"}` → `{"ok": "true"}`.
 
 ## Errors and exit codes
