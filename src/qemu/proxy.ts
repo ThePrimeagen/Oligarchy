@@ -63,8 +63,9 @@ createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && url.pathname === "/stats") {
+      const payload = JSON.stringify(collectStats(cpuSampler, sessions.size));
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(collectStats(cpuSampler, sessions.size)));
+      res.end(payload);
       return;
     }
 

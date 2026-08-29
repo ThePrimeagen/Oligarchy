@@ -1,26 +1,25 @@
-// Simple host stats for the proxy's GET /stats endpoint: how many qemu
-// sessions this proxy is running (the sessions map is the source of truth),
-// how much memory the host has, and cpu utilization over the last 5 minutes.
+// Host stats for the proxy's GET /stats endpoint: how many qemu sessions the
+// proxy is running, how much memory the host has, and cpu utilization over
+// the last five minutes.
 //
-// A timer started with the server samples cpu utilization (the busy share of
-// cpu time between ticks) every 5 seconds into a rolling 5 minute window;
-// /stats reports the mean and the p10/p25/p75/p90 percentiles of that window.
-// Until the first tick lands the cpu numbers are null.
+// A timer started with the server samples the busy share of cpu time every
+// tick into a rolling window; /stats reports the window's mean and
+// p10/p25/p75/p90 percentiles. The cpu fields are null until the first tick.
 
 import os from "node:os";
 
 const SAMPLE_INTERVAL_MS = 5_000;
-const WINDOW_MS = 5 * 60 * 1000;
-const MAX_SAMPLES = Math.ceil(WINDOW_MS / SAMPLE_INTERVAL_MS);
+const MAX_SAMPLES = 60; // 60 samples x 5s ticks = a 5 minute window
 
 type CpuTimes = {
+  cores: number;
   idleMs: number;
   totalMs: number;
 };
 
 export type CpuSampler = {
   prev: CpuTimes;
-  /** Utilization percents, oldest first, capped to the 5 minute window. */
+  /** Utilization percents, oldest first. */
   samples: number[];
 };
 
@@ -41,7 +40,7 @@ export type Stats = {
   };
 };
 
-/** Starts the utilization timer; it never keeps the process alive (unref). */
+/** Starts the sampling timer; unref keeps it from holding the process open. */
 export function startCpuSampler(): CpuSampler {
   const sampler: CpuSampler = { prev: cpuTimes(), samples: [] };
   setInterval(() => sampleCpu(sampler), SAMPLE_INTERVAL_MS).unref();
@@ -72,27 +71,39 @@ export function collectStats(sampler: CpuSampler, qemus: number): Stats {
 }
 
 function sampleCpu(sampler: CpuSampler): void {
-  const next = cpuTimes();
-  const totalDelta = next.totalMs - sampler.prev.totalMs;
-  if (totalDelta > 0) {
-    const busyDelta = totalDelta - (next.idleMs - sampler.prev.idleMs);
-    sampler.samples.push(Math.min(100, Math.max(0, (busyDelta / totalDelta) * 100)));
+  try {
+    const next = cpuTimes();
+    const prev = sampler.prev;
+    sampler.prev = next;
+
+    const totalDelta = next.totalMs - prev.totalMs;
+    if (next.cores !== prev.cores || totalDelta <= 0) {
+      // os.cpus() can return no data, and cpu hotplug makes aggregate
+      // snapshots incomparable.
+      return;
+    }
+
+    const busyDelta = totalDelta - (next.idleMs - prev.idleMs);
+    sampler.samples.push((busyDelta / totalDelta) * 100);
     if (sampler.samples.length > MAX_SAMPLES) {
       sampler.samples.shift();
     }
+  } catch (error) {
+    // An uncaught throw in a timer callback would take down the whole proxy.
+    console.error("failed to sample cpu usage:", error);
   }
-  sampler.prev = next;
 }
 
 function cpuTimes(): CpuTimes {
+  const cpus = os.cpus();
   let idleMs = 0;
   let totalMs = 0;
-  for (const cpu of os.cpus()) {
+  for (const cpu of cpus) {
     const times = cpu.times;
     idleMs += times.idle;
     totalMs += times.user + times.nice + times.sys + times.idle + times.irq;
   }
-  return { idleMs, totalMs };
+  return { cores: cpus.length, idleMs, totalMs };
 }
 
 function mean(samples: number[]): number | null {
@@ -106,7 +117,6 @@ function mean(samples: number[]): number | null {
   return round1(sum / samples.length);
 }
 
-/** Linear-interpolated percentile of an ascending-sorted, non-empty-or-null array. */
 function percentile(sorted: number[], p: number): number | null {
   if (sorted.length === 0) {
     return null;
