@@ -53,7 +53,7 @@ Usage:
 }
 
 function addr(): string {
-  return process.env.OLIGARCHY_ADDR ?? DEFAULT_ADDR;
+  return process.env.OLIGARCHY_ADDR || DEFAULT_ADDR;
 }
 
 async function cmdStart(args: string[]): Promise<void> {
@@ -73,21 +73,18 @@ async function cmdStart(args: string[]): Promise<void> {
 }
 
 async function cmdGetImage(args: string[]): Promise<void> {
+  // The three accepted forms: <id>, <id> -o <file>, and -o <file> <id>.
   let id = "";
   let out = "";
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === "-o" && i + 1 < args.length) {
-      out = args[i + 1];
-      i++;
-      continue;
-    }
-    if (id === "" && !args[i].startsWith("-")) {
-      id = args[i];
-      continue;
-    }
-    throw new Error("usage: oligarchy get-image <id> [-o file]");
-  }
-  if (id === "") {
+  if (args.length === 1) {
+    id = args[0];
+  } else if (args.length === 3 && args[1] === "-o") {
+    id = args[0];
+    out = args[2];
+  } else if (args.length === 3 && args[0] === "-o") {
+    out = args[1];
+    id = args[2];
+  } else {
     throw new Error("usage: oligarchy get-image <id> [-o file]");
   }
   const res = await fetch(`http://${addr()}/image?id=${encodeURIComponent(id)}`);
@@ -124,30 +121,21 @@ async function postJSON(path: string, body: unknown): Promise<string> {
   return res.text();
 }
 
-// Extracts {"error": "..."} from a failed response; falls back to the raw
-// body, then to a generic message, matching the Go client.
+// The server writes errors as {"error": "..."}; anything else (a proxy in
+// the way, a wrong port) falls back to the raw body.
 async function readAPIError(res: Response): Promise<string> {
   const data = await res.text();
   try {
-    const body = JSON.parse(data) as { error?: unknown };
-    if (typeof body.error === "string" && body.error !== "") {
-      return body.error;
-    }
+    return (JSON.parse(data) as { error: string }).error;
   } catch {
-    // Not JSON: fall through to the raw body.
+    return data || "request failed";
   }
-  if (data !== "") {
-    return data;
-  }
-  return "request failed";
 }
 
 function errorMessage(err: unknown): string {
-  if (err instanceof Error) {
-    // Node's fetch buries the useful detail (ECONNREFUSED etc.) in the cause.
-    return err.cause instanceof Error ? `${err.message}: ${err.cause.message}` : err.message;
-  }
-  return String(err);
+  const e = err as Error;
+  // Node's fetch buries the useful detail (ECONNREFUSED etc.) in the cause.
+  return e.cause instanceof Error ? `${e.message}: ${e.cause.message}` : e.message;
 }
 
 await main(process.argv.slice(2));
