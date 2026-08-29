@@ -4,8 +4,6 @@ The control plane spoken between the CLI and the proxy (`src/qemu/proxy.ts`).
 
 The proxy defaults to `127.0.0.1:42069`. Bodies are JSON except the PNG. Errors are `4xx`/`5xx` with `{"error": "<message>"}`.
 
-Every session-scoped request is recorded in the control-plane database (see [database.md](database.md)). A request carrying an `x-oligarchy-agent` header is attributed to that cloud agent; on `/start` the header also registers the agent as the session's driver — an agent drives exactly one session.
-
 ## POST /start
 
 Boots a QEMU session. Returns `{"id": "<uuid>"}`.
@@ -45,8 +43,4 @@ Body `{"id", "keys", "encoding"}`. The server parses the key string (encoding `o
 
 ## POST /stop
 
-Body `{"id"}`; kills the QEMU and removes its session directory. Returns `{"ok": "true"}`. The session is recorded as `aborted`: an end without a verdict.
-
-## POST /finish
-
-Body `{"id", "status", "reason"?}` with `status` either `"succeeded"` or `"failed"` — anything else is a 400. Like `/stop` it kills the QEMU and removes the session directory, but the session keeps the caller's verdict and reason. Returns `{"ok": "true"}`.
+Body `{"id"}`; kills the QEMU and removes its session directory. Returns `{"ok": "true"}`.

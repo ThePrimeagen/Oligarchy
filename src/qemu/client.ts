@@ -84,13 +84,13 @@ export async function createDisk(qemu: Qemu): Promise<string> {
 }
 
 /**
- * Launches QEMU and negotiates QMP over the session socket; resolves with
- * the QMP greeting. The session dir must already exist; createDisk creates it.
+ * Launches QEMU and negotiates QMP over the session socket.
+ * The session dir must already exist; createDisk creates it.
  */
 export async function start(
   qemu: Qemu,
   options: QemuStartOptions = {},
-): Promise<QemuGreetingResponse> {
+): Promise<QemuStartResult> {
   if (qemu.socket !== undefined) {
     throw new Error("qemu: already started");
   }
@@ -173,10 +173,9 @@ export async function start(
     socket.on("error", (err) => failAll(qemu, err));
     socket.on("close", () => failAll(qemu, new Error("qemu: socket closed")));
 
-    const welcome = await Promise.race([greeting, timeout]);
+    await Promise.race([greeting, timeout]);
     await Promise.race([execute(qemu, "qmp_capabilities", {}), timeout]);
-    // The data handler resolves the greeting only with the "QMP" message.
-    return welcome as QemuGreetingResponse;
+    return { id: qemu.id };
   } catch (err) {
     teardown(qemu, err);
     throw err;

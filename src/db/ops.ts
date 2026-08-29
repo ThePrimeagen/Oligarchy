@@ -1,9 +1,10 @@
 // The control-plane database interface. connectDatabase() turns DATABASE_URL
 // (a PlanetScale Postgres url; the password rides inside it) into the one
-// client the proxy threads through every operation below as its first
-// argument — no other file touches connection details.
+// client every operation below takes as its first argument — no other file
+// touches connection details.
 //
-// Write-only on purpose: the proxy records, replay tooling will read.
+// Write-only on purpose: recording happens here, reading belongs to replay
+// tooling.
 
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
@@ -13,7 +14,7 @@ export type Db = NodePgDatabase;
 export type ActionKind = (typeof actionKind.enumValues)[number];
 
 /**
- * Builds the database client from DATABASE_URL. A proxy that cannot record
+ * Builds the database client from DATABASE_URL. A server that cannot record
  * its sessions must not boot, so a missing url throws instead of degrading.
  */
 export function connectDatabase(): Db {
@@ -24,7 +25,7 @@ export function connectDatabase(): Db {
   return drizzle(url);
 }
 
-/** Creates the session row at /start, before any boot work happens. */
+/** Creates the session row, before any boot work happens. */
 export async function insertSession(db: Db, id: string, config: unknown, status: "downloading" | "running"): Promise<void> {
   await db.insert(sessions).values({ id, config, status });
 }
