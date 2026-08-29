@@ -11,7 +11,9 @@ import { bigint, customType, index, integer, jsonb, pgEnum, pgTable, text, times
 // drizzle-orm has no built-in bytea column type for postgres.
 const bytea = customType<{ data: Buffer }>({ dataType: () => "bytea" });
 
-export const sessionStatus = pgEnum("session_status", ["running", "succeeded", "failed", "aborted"]);
+// downloading = the ISO is being fetched from the internet; the session
+// exists but QEMU has not booted yet.
+export const sessionStatus = pgEnum("session_status", ["downloading", "running", "succeeded", "failed", "aborted"]);
 export const actionKind = pgEnum("action_kind", ["start", "send-keys", "get-image", "stop", "finish"]);
 
 export const sessions = pgTable("sessions", {
