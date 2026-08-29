@@ -29,8 +29,6 @@ type LaunchConfig = {
   smp: number;
 };
 
-await main(process.argv.slice(2));
-
 async function main(args: string[]): Promise<void> {
   if (args.length < 1) {
     usage();
@@ -279,3 +277,5 @@ function errorMessage(err: unknown): string {
   }
   return err.message;
 }
+
+await main(process.argv.slice(2));
