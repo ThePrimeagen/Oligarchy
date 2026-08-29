@@ -18,6 +18,9 @@ const DEFAULT_SMP = 2;
 const DEFAULT_MACHINE = "q35,accel=kvm";
 const DEFAULT_CPU = "host";
 const HANDSHAKE_MS = 10_000;
+// The QMP greeting carries no command id; its waiter lives in the pending map
+// under this key. Command ids count up from 1, so they never collide.
+const GREETING_ID = -1;
 
 export type QemuOptions = {
   tmp?: string;
@@ -33,9 +36,9 @@ export type QemuStartOptions = {
   iso?: string;
 };
 
-export type QemuPending = {
+type Pending = {
   resolve: (value: unknown) => void;
-  reject: (err: Error) => void;
+  reject: (err: unknown) => void;
 };
 
 export type Qemu = {
@@ -44,14 +47,11 @@ export type Qemu = {
   readonly diskPath: string;
   readonly sockPath: string;
   readonly options: QemuOptions;
-  readonly parser: JSONStreamParser;
-  readonly pending: Map<number, QemuPending>;
+  readonly pending: Map<number, Pending>;
   nextId: number;
-  proc: ChildProcess | undefined;
-  server: Server | undefined;
-  socket: Socket | undefined;
-  greetingResolve: ((msg: QemuGreetingResponse) => void) | undefined;
-  greetingReject: ((err: Error) => void) | undefined;
+  proc?: ChildProcess;
+  server?: Server;
+  socket?: Socket;
 };
 
 export function createQemu(options: QemuOptions = {}): Qemu {
@@ -63,21 +63,28 @@ export function createQemu(options: QemuOptions = {}): Qemu {
     diskPath: join(dir, "disk.qcow2"),
     sockPath: join(dir, "qmp.sock"),
     options,
-    parser: new JSONStreamParser(),
     pending: new Map(),
     nextId: 0,
-    proc: undefined,
-    server: undefined,
-    socket: undefined,
-    greetingResolve: undefined,
-    greetingReject: undefined,
   };
 }
 
 /** Creates the backing qcow2 at diskPath inside the session dir. */
 export async function createDisk(qemu: Qemu): Promise<string> {
   await mkdir(qemu.dir, { recursive: true, mode: 0o700 });
-  await qemuImgCreate(qemu.diskPath, qemu.options.diskSize ?? DEFAULT_DISK_SIZE);
+  const size = qemu.options.diskSize ?? DEFAULT_DISK_SIZE;
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(QEMU_IMG, ["create", "-f", "qcow2", qemu.diskPath, size], {
+      stdio: "ignore",
+    });
+    child.once("error", reject);
+    child.once("exit", (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`qemu-img create exited ${code}`));
+      }
+    });
+  });
   return qemu.diskPath;
 }
 
@@ -98,61 +105,48 @@ export async function start(
   const iso = options.iso ?? DEFAULT_ISO;
   await assertFile(iso, "iso");
 
+  const varsPath = join(qemu.dir, "OVMF_VARS.fd");
+  await copyFile(qemu.options.vars ?? DEFAULT_VARS, varsPath);
+  const args = qemuArgs({
+    sockPath: qemu.sockPath,
+    varsPath,
+    diskPath: disk,
+    iso,
+    code: qemu.options.code ?? DEFAULT_CODE,
+    memory: qemu.options.memory ?? DEFAULT_MEMORY,
+    smp: qemu.options.smp ?? DEFAULT_SMP,
+  });
+
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("qemu: handshake timeout")), HANDSHAKE_MS);
+  });
+
   try {
-    const varsPath = join(qemu.dir, "OVMF_VARS.fd");
-    await copyFile(qemu.options.vars ?? DEFAULT_VARS, varsPath);
-
-    const args = qemuArgs({
-      sockPath: qemu.sockPath,
-      varsPath,
-      diskPath: disk,
-      iso,
-      code: qemu.options.code ?? DEFAULT_CODE,
-      memory: qemu.options.memory ?? DEFAULT_MEMORY,
-      smp: qemu.options.smp ?? DEFAULT_SMP,
-    });
-
-    const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => {
-        reject(new Error("qemu: handshake timeout"));
-      }, HANDSHAKE_MS);
-    });
-
     const socket = await Promise.race([listenAndSpawn(qemu, args), timeout]);
     qemu.socket = socket;
-    const greeting = new Promise<QemuGreetingResponse>((resolve, reject) => {
-      qemu.greetingResolve = resolve;
-      qemu.greetingReject = reject;
-    });
 
+    const greeting = new Promise<unknown>((resolve, reject) => {
+      qemu.pending.set(GREETING_ID, { resolve, reject });
+    });
+    const parser = new JSONStreamParser();
     socket.setEncoding("utf8");
     socket.on("data", (chunk: string) => {
       try {
-        onData(qemu, chunk);
+        onData(qemu, parser, chunk);
       } catch (err) {
-        failAll(qemu, err instanceof Error ? err : new Error("qemu: invalid response"));
+        failAll(qemu, err);
         socket.destroy();
       }
     });
-    socket.on("error", (err) => {
-      failAll(qemu, err);
-    });
-    socket.on("close", () => {
-      failAll(qemu, new Error("qemu: socket closed"));
-    });
+    socket.on("error", (err) => failAll(qemu, err));
+    socket.on("close", () => failAll(qemu, new Error("qemu: socket closed")));
 
     await Promise.race([greeting, timeout]);
     await Promise.race([execute(qemu, "qmp_capabilities", {}), timeout]);
     return { id: qemu.id };
   } catch (err) {
-    failAll(qemu, err instanceof Error ? err : new Error("qemu: start failed"));
-    qemu.proc?.kill();
-    qemu.proc = undefined;
-    qemu.socket?.destroy();
-    qemu.socket = undefined;
-    qemu.server?.close();
-    qemu.server = undefined;
+    teardown(qemu, err);
     throw err;
   } finally {
     clearTimeout(timer);
@@ -160,13 +154,7 @@ export async function start(
 }
 
 export async function stop(qemu: Qemu): Promise<void> {
-  failAll(qemu, new Error("qemu: closed"));
-  qemu.socket?.destroy();
-  qemu.socket = undefined;
-  qemu.server?.close();
-  qemu.server = undefined;
-  qemu.proc?.kill();
-  qemu.proc = undefined;
+  teardown(qemu, new Error("qemu: closed"));
   await rm(qemu.dir, { recursive: true, force: true });
 }
 
@@ -215,48 +203,40 @@ export function qemuArgs(opts: {
   ];
 }
 
-function execute(qemu: Qemu, name: string, args: unknown): Promise<unknown> {
+async function execute(qemu: Qemu, name: string, args: unknown): Promise<unknown> {
   const socket = qemu.socket;
   if (socket === undefined) {
-    return Promise.reject(new Error("qemu: closed"));
+    throw new Error("qemu: closed");
   }
-  qemu.nextId += 1;
-  const id = qemu.nextId;
+  const id = ++qemu.nextId;
   return new Promise((resolve, reject) => {
     qemu.pending.set(id, { resolve, reject });
     socket.write(`${JSON.stringify({ execute: name, arguments: args, id })}\n`);
   });
 }
 
-function onData(qemu: Qemu, chunk: string): void {
-  qemu.parser.push(chunk);
-  for (;;) {
-    const msg = qemu.parser.pull();
-    if (msg === undefined) {
-      return;
-    }
+function onData(qemu: Qemu, parser: JSONStreamParser, chunk: string): void {
+  parser.push(chunk);
+  for (let msg = parser.pull(); msg !== undefined; msg = parser.pull()) {
     if ("QMP" in msg) {
-      qemu.greetingResolve?.(msg);
-      qemu.greetingResolve = undefined;
-      qemu.greetingReject = undefined;
+      qemu.pending.get(GREETING_ID)?.resolve(msg);
+      qemu.pending.delete(GREETING_ID);
       continue;
     }
     if ("event" in msg) {
       continue;
     }
-    if (!("id" in msg) || msg.id === undefined) {
-      continue;
-    }
-    const pending = qemu.pending.get(Number(msg.id));
+    const id = Number(msg.id);
+    const pending = qemu.pending.get(id);
     if (pending === undefined) {
       continue;
     }
-    qemu.pending.delete(Number(msg.id));
+    qemu.pending.delete(id);
     if ("error" in msg) {
       pending.reject(new Error(`${msg.error.class}: ${msg.error.desc}`));
-      continue;
+    } else {
+      pending.resolve(msg.return);
     }
-    pending.resolve(msg.return);
   }
 }
 
@@ -269,24 +249,29 @@ function listenAndSpawn(qemu: Qemu, args: string[]): Promise<Socket> {
     server.listen(qemu.sockPath, () => {
       const proc = spawn(QEMU_BIN, args, { stdio: "ignore" });
       qemu.proc = proc;
-      proc.once("error", (err) => {
-        reject(new Error(`qemu: ${err.message}`));
-      });
-      proc.once("exit", (code) => {
-        reject(new Error(`qemu: exited ${code} before QMP connect`));
-      });
+      proc.once("error", (err) => reject(new Error(`qemu: ${err.message}`)));
+      proc.once("exit", (code) => reject(new Error(`qemu: exited ${code} before QMP connect`)));
     });
   });
 }
 
-function failAll(qemu: Qemu, err: Error): void {
-  qemu.greetingReject?.(err);
-  qemu.greetingReject = undefined;
-  qemu.greetingResolve = undefined;
+/** Rejects every in-flight command (and the greeting waiter) with err. */
+function failAll(qemu: Qemu, err: unknown): void {
   for (const pending of qemu.pending.values()) {
     pending.reject(err);
   }
   qemu.pending.clear();
+}
+
+/** failAll, then discard the socket, server, and process. */
+function teardown(qemu: Qemu, err: unknown): void {
+  failAll(qemu, err);
+  qemu.socket?.destroy();
+  qemu.socket = undefined;
+  qemu.server?.close();
+  qemu.server = undefined;
+  qemu.proc?.kill();
+  qemu.proc = undefined;
 }
 
 async function assertFile(path: string, label: string): Promise<void> {
@@ -295,20 +280,4 @@ async function assertFile(path: string, label: string): Promise<void> {
   } catch {
     throw new Error(`qemu: ${label} not found: ${path}`);
   }
-}
-
-function qemuImgCreate(path: string, size: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(QEMU_IMG, ["create", "-f", "qcow2", path, size], {
-      stdio: "ignore",
-    });
-    child.once("error", reject);
-    child.once("exit", (code) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-      reject(new Error(`qemu-img create exited ${code}`));
-    });
-  });
 }
