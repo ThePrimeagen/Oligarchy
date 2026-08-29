@@ -15,6 +15,7 @@
     "typescript": "^7.0.2"
   },
   "dependencies": {
+    "@cursor/sdk": "^1.0.30",
     "drizzle-orm": "^0.45.2"
   }
 }
