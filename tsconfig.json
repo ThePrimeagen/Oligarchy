@@ -13,5 +13,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "oxlint.config.ts"]
+  "include": ["src/**/*.ts", "oxlint.config.ts", "drizzle.config.ts"]
 }
