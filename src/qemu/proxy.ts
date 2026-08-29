@@ -81,7 +81,6 @@ export async function fromSocket(socket: Socket): Promise<QemuProxy> {
     await execute(proxy, "qmp_capabilities");
     return proxy;
   } catch (err) {
-    failAll(pending, err);
     socket.destroy();
     throw err;
   }
@@ -111,8 +110,8 @@ export async function execute(proxy: QemuProxy, name: string, args?: unknown): P
 /** Captures the current guest display as a PNG. */
 export async function readImage(proxy: QemuProxy): Promise<Buffer> {
   const path = join(tmpdir(), `oligarchy-${process.pid}-${process.hrtime.bigint()}.png`);
-  await execute(proxy, "screendump", { filename: path, format: "png" });
   try {
+    await execute(proxy, "screendump", { filename: path, format: "png" });
     return await readFile(path);
   } finally {
     await rm(path, { force: true });

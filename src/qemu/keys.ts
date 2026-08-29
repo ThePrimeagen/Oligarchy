@@ -99,20 +99,21 @@ const MODIFIERS: Record<string, string> = {
 
 /** Turns an encoded key string into send-key chords of QEMU qcodes. */
 export function parseKeys(s: string, encoding = "oligarchy"): string[][] {
-  if (encoding.toLowerCase() !== "oligarchy") {
+  if (encoding !== "" && encoding.toLowerCase() !== "oligarchy") {
     throw new Error(`qemu: unknown key encoding "${encoding}"`);
   }
   const out: string[][] = [];
-  for (let i = 0; i < s.length; i++) {
-    if (s[i] === "<") {
-      const end = s.indexOf(">", i + 1);
+  const chars = Array.from(s);
+  for (let i = 0; i < chars.length; i++) {
+    if (chars[i] === "<") {
+      const end = chars.indexOf(">", i + 1);
       if (end < 0) {
         throw new Error("qemu: unterminated key sequence");
       }
-      out.push(angleChord(s.slice(i + 1, end)));
+      out.push(angleChord(chars.slice(i + 1, end).join("")));
       i = end;
     } else {
-      out.push(charChord(s[i]));
+      out.push(charChord(chars[i]));
     }
   }
   return out;
@@ -145,7 +146,7 @@ function keyName(name: string): string[] {
   if (named !== undefined) {
     return [named];
   }
-  if (name.length === 1) {
+  if (Array.from(name).length === 1) {
     return charChord(name);
   }
   // Accept any documented qcode token (f1..f24, kp_*, caps_lock, ...)

@@ -72,6 +72,7 @@ describe("parseKeys happy path", () => {
 
   it("accepts the oligarchy encoding by default and case-insensitively", () => {
     assert.deepEqual(parseKeys("a"), [["a"]]);
+    assert.deepEqual(parseKeys("a", ""), [["a"]]);
     assert.deepEqual(parseKeys("a", "oligarchy"), [["a"]]);
     assert.deepEqual(parseKeys("a", "OLIGARCHY"), [["a"]]);
   });
@@ -108,6 +109,9 @@ describe("parseKeys unhappy path", () => {
     });
     assert.throws(() => parseKeys("€"), {
       message: 'qemu: unsupported character "€"',
+    });
+    assert.throws(() => parseKeys("😀"), {
+      message: 'qemu: unsupported character "😀"',
     });
   });
 });
