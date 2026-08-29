@@ -14,11 +14,9 @@ const bytea = customType<{ data: Buffer }>({ dataType: () => "bytea" });
 // downloading = the ISO is being fetched from the internet; the session
 // exists but QEMU has not booted yet.
 export const sessionStatus = pgEnum("session_status", ["downloading", "running", "succeeded", "failed", "aborted"]);
-// An action records one QMP exchange with a session's QEMU. A stop or
-// finish exchanges nothing over QMP — the session's own status and reason
-// are their record — so those two kinds sit unused: removing a Postgres
-// enum value is a type rebuild, and the dead values wait instead.
-export const actionKind = pgEnum("action_kind", ["start", "send-keys", "get-image", "stop", "finish"]);
+// The only two states an exchange can finish in. An action that is still
+// running has no state yet (null, alongside a null finished_at).
+export const actionState = pgEnum("action_state", ["completed", "failed"]);
 
 export const sessions = pgTable("sessions", {
   // The uuid minted by the server at /start — not a database default.
@@ -59,22 +57,20 @@ export const actions = pgTable(
       .references(() => sessions.id),
     // Null when the request was not attributed to an agent (manual use).
     agentId: text("agent_id").references(() => agentRuns.agentId),
-    kind: actionKind("kind").notNull(),
-    // The exact JSON sent to QEMU over QMP (a QemuCommand):
-    // qmp_capabilities for start — the handshake — send-key for send-keys,
-    // screendump for get-image.
+    // The exact JSON sent to QEMU over QMP (a QemuCommand); its execute
+    // field names the command.
     request: jsonb("request").notNull(),
-    // The exact JSON QEMU sent back (a QemuResponse): the greeting for
-    // start, the {return} reply otherwise. The get-image PNG lives in
-    // images.
+    // How the exchange ended. completed: response is QEMU's exact reply
+    // (the greeting for qmp_capabilities at boot, the {return} reply
+    // otherwise; a get-image's PNG lives in images). failed: response is
+    // QEMU's {error} reply, or this server's error message when the failure
+    // never reached QEMU (a timeout, a dead socket).
+    state: actionState("state"),
     response: jsonb("response"),
-    // The error message returned, when the action failed.
-    error: text("error"),
-    // The row is inserted when the request starts and closed when it ends:
-    // a finished action has finished_at plus exactly one of response or
-    // error; a row with neither is a request whose completion never made it
-    // to the database — the proxy died running it, or the close failed.
-    // Handling time is finished_at - created_at.
+    // The row is inserted when the command goes out and closed when the
+    // exchange ends; state, response, and finished_at land together. A row
+    // where they are null is an exchange whose completion was never
+    // persisted. Handling time is finished_at - created_at.
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
   },

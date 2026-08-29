@@ -1,14 +1,14 @@
-CREATE TYPE "public"."action_kind" AS ENUM('start', 'send-keys', 'get-image', 'stop', 'finish');--> statement-breakpoint
-CREATE TYPE "public"."session_status" AS ENUM('running', 'succeeded', 'failed', 'aborted');--> statement-breakpoint
+CREATE TYPE "public"."action_state" AS ENUM('completed', 'failed');--> statement-breakpoint
+CREATE TYPE "public"."session_status" AS ENUM('downloading', 'running', 'succeeded', 'failed', 'aborted');--> statement-breakpoint
 CREATE TABLE "actions" (
 	"id" bigint PRIMARY KEY GENERATED ALWAYS AS IDENTITY (sequence name "actions_id_seq" INCREMENT BY 1 MINVALUE 1 MAXVALUE 9223372036854775807 START WITH 1 CACHE 1),
 	"session_id" uuid NOT NULL,
 	"agent_id" text,
-	"kind" "action_kind" NOT NULL,
 	"request" jsonb NOT NULL,
-	"error" text,
+	"state" "action_state",
+	"response" jsonb,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"duration_ms" integer NOT NULL
+	"finished_at" timestamp with time zone
 );
 --> statement-breakpoint
 CREATE TABLE "agent_runs" (

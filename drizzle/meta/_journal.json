@@ -5,29 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1788018530251,
+      "when": 1788036037958,
       "tag": "0000_init",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1788020983068,
-      "tag": "0001_downloading-status",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1788030913491,
-      "tag": "0002_action-response",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1788031393833,
-      "tag": "0003_action-start-finish",
       "breakpoints": true
     }
   ]

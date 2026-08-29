@@ -59,26 +59,26 @@ export async function registerAgent(db: Db, agentId: string, sessionId: string):
 }
 
 /**
- * One QMP exchange: the kind names it, and the request is the exact JSON
- * that kind sends to QEMU. A stop or finish exchanges nothing over QMP, so
- * it cannot form an action — the session's status and reason are its record.
+ * One QMP exchange: the exact JSON sent to QEMU, whose execute field names
+ * the command. Anything that exchanges nothing over QMP (a stop, a verdict)
+ * is not an action — the session's status and reason are its record.
  */
 export type Action = {
   sessionId: string;
   /** Absent when the request was not attributed to an agent (manual use). */
   agentId: string | undefined;
-} & (
-  | { kind: "start"; request: QemuCapabilitiesCommand }
-  | { kind: "send-keys"; request: QemuSendKeyCommand }
-  | { kind: "get-image"; request: QemuScreendumpCommand }
-);
+  request: QemuCommand;
+};
 
 /**
- * What closed the action: the exact JSON QEMU sent back — the greeting for
- * a start's handshake, the {return} reply otherwise — or the error message.
- * Never both.
+ * How the exchange ended — the only two states an action can finish in.
+ * completed: the response is QEMU's exact reply. failed: the response is
+ * QEMU's {error} reply, or this server's error message when the failure
+ * never reached QEMU (a timeout, a dead socket).
  */
-export type Outcome = { response: QemuResponse; error: null } | { response: null; error: string };
+export type Outcome =
+  | { state: "completed"; response: QemuGreetingResponse | QemuSuccessResponse }
+  | { state: "failed"; response: QemuErrorResponse | string };
 
 /**
  * Opens an action: one replay-log row per QMP exchange, inserted when the
@@ -91,7 +91,7 @@ export async function startAction(db: Db, action: Action): Promise<number> {
 }
 
 /**
- * Closes an action with its outcome and stamps finished_at. A successful
+ * Closes an action with its outcome and stamps finished_at. A completed
  * get-image passes its PNG, and the update and image insert land in one
  * transaction: images are 1:1 with their action, and a torn pair would
  * break that promise.
@@ -99,13 +99,13 @@ export async function startAction(db: Db, action: Action): Promise<number> {
 export async function finishAction(db: Db, id: number, outcome: Outcome, image?: Buffer): Promise<void> {
   // The database clock stamps both ends: finished_at - created_at is real
   // handling time, not cross-clock arithmetic.
-  const finishedAt = sql`now()`;
+  const close = { state: outcome.state, response: outcome.response, finishedAt: sql`now()` };
   if (image === undefined) {
-    await db.update(actions).set({ response: outcome.response, error: outcome.error, finishedAt }).where(eq(actions.id, id));
+    await db.update(actions).set(close).where(eq(actions.id, id));
     return;
   }
   await db.transaction(async (tx) => {
-    await tx.update(actions).set({ response: outcome.response, error: outcome.error, finishedAt }).where(eq(actions.id, id));
+    await tx.update(actions).set(close).where(eq(actions.id, id));
     await tx.insert(images).values({ actionId: id, data: image });
   });
 }
