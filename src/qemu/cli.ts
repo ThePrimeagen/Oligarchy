@@ -6,9 +6,7 @@
 //   node --experimental-strip-types src/qemu/cli.ts get-image <id> [-o file]
 //   node --experimental-strip-types src/qemu/cli.ts send-keys <id> <keys> [encoding]
 //
-// start also takes flags ahead of the positionals: -iso, -disk, -disk-size,
-// -vars, -code, -m (memory), -smp. The server address comes from
-// OLIGARCHY_ADDR (default 127.0.0.1:42069).
+// The server address comes from OLIGARCHY_ADDR (default 127.0.0.1:42069).
 
 import { stat, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -16,18 +14,6 @@ import { resolve } from "node:path";
 const DEFAULT_ADDR = "127.0.0.1:42069";
 const DEFAULT_ISO = "omarchy.iso";
 const DEFAULT_ENCODING = "oligarchy";
-
-// The POST /start request body, mirroring the Go LaunchConfig JSON shape.
-// Every field is always sent, zero values included, exactly like Go.
-type LaunchConfig = {
-  iso: string;
-  disk: string;
-  disk_size: string;
-  code: string;
-  vars: string;
-  memory: string;
-  smp: number;
-};
 
 async function main(args: string[]): Promise<void> {
   if (args.length < 1) {
@@ -67,66 +53,23 @@ Usage:
 }
 
 function addr(): string {
-  const env = process.env.OLIGARCHY_ADDR;
-  if (env !== undefined && env !== "") {
-    return env;
-  }
-  return DEFAULT_ADDR;
+  return process.env.OLIGARCHY_ADDR ?? DEFAULT_ADDR;
 }
 
-const START_FLAGS: readonly string[] = ["iso", "disk", "disk-size", "vars", "code", "m", "smp"];
-
-async function parseStartArgs(args: string[]): Promise<LaunchConfig> {
-  const { flags, positionals } = parseFlags(args, START_FLAGS);
-  let iso = flags.get("iso") ?? "";
-  let disk = flags.get("disk") ?? "";
-  let rest = positionals;
-  if (iso === "" && rest.length > 0) {
-    iso = rest[0];
-    rest = rest.slice(1);
-  }
-  if (disk === "" && rest.length > 0) {
-    disk = rest[0];
-    rest = rest.slice(1);
-  }
-  if (rest.length !== 0) {
+async function cmdStart(args: string[]): Promise<void> {
+  if (args.length > 2) {
     throw new Error("usage: oligarchy start [iso] [disk]");
   }
-  if (iso === "") {
-    iso = DEFAULT_ISO;
-  }
-  iso = resolve(iso);
+  const iso = resolve(args.length > 0 ? args[0] : DEFAULT_ISO);
   try {
     await stat(iso);
   } catch (err) {
     throw new Error(`iso: ${errorMessage(err)}`);
   }
-  if (disk !== "") {
-    disk = resolve(disk);
-  }
-  return {
-    iso,
-    disk,
-    disk_size: flags.get("disk-size") ?? "",
-    code: flags.get("code") ?? "",
-    vars: flags.get("vars") ?? "",
-    memory: flags.get("m") ?? "",
-    smp: parseSmp(flags.get("smp") ?? "0"),
-  };
-}
-
-// Parses -smp the way Go's flag package parses an int flag.
-function parseSmp(value: string): number {
-  if (!/^[+-]?\d+$/.test(value)) {
-    throw new Error(`invalid value "${value}" for flag -smp: parse error`);
-  }
-  return Number(value);
-}
-
-async function cmdStart(args: string[]): Promise<void> {
-  const cfg = await parseStartArgs(args);
-  const out = JSON.parse(await postJSON("/start", cfg)) as Partial<QemuStartResult>;
-  console.log(out.id ?? "");
+  // An undefined disk is left out of the JSON, so the server creates one.
+  const disk = args.length === 2 ? resolve(args[1]) : undefined;
+  const out = JSON.parse(await postJSON("/start", { iso, disk })) as QemuStartResult;
+  console.log(out.id);
 }
 
 async function cmdGetImage(args: string[]): Promise<void> {
@@ -156,80 +99,17 @@ async function cmdGetImage(args: string[]): Promise<void> {
     await writeFile(out, data, { mode: 0o644 });
     return;
   }
-  await new Promise<void>((resolveWrite, reject) => {
-    process.stdout.write(data, (err) => {
-      if (err === undefined || err === null) {
-        resolveWrite();
-      } else {
-        reject(err);
-      }
-    });
+  await new Promise<void>((done, fail) => {
+    process.stdout.write(data, (err) => (err ? fail(err) : done()));
   });
 }
 
 async function cmdSendKeys(args: string[]): Promise<void> {
-  const { positionals } = parseFlags(args, []);
-  if (positionals.length < 2 || positionals.length > 3) {
+  if (args.length < 2 || args.length > 3) {
     throw new Error("usage: oligarchy send-keys <id> <keys> [encoding]");
   }
-  const encoding = positionals.length === 3 ? positionals[2] : DEFAULT_ENCODING;
-  await postJSON("/send-keys", {
-    id: positionals[0],
-    keys: positionals[1],
-    encoding,
-  });
-}
-
-type ParsedArgs = {
-  flags: Map<string, string>;
-  positionals: string[];
-};
-
-// Parses leading -flag/--flag args the way Go's flag package does: parsing
-// stops at the first non-flag argument or a bare "--", values come from
-// "-flag=value" or the next argument, and unknown flags are an error.
-function parseFlags(args: string[], defined: readonly string[]): ParsedArgs {
-  const flags = new Map<string, string>();
-  let i = 0;
-  while (i < args.length) {
-    const arg = args[i];
-    if (arg.length < 2 || !arg.startsWith("-")) {
-      break;
-    }
-    let name = arg.slice(1);
-    if (name.startsWith("-")) {
-      if (name === "-") {
-        i++;
-        break;
-      }
-      name = name.slice(1);
-    }
-    if (name.startsWith("-") || name.startsWith("=")) {
-      throw new Error(`bad flag syntax: ${arg}`);
-    }
-    i++;
-    let value: string | undefined;
-    const eq = name.indexOf("=");
-    if (eq !== -1) {
-      value = name.slice(eq + 1);
-      name = name.slice(0, eq);
-    }
-    if (!defined.includes(name)) {
-      if (name === "help" || name === "h") {
-        throw new Error("flag: help requested");
-      }
-      throw new Error(`flag provided but not defined: -${name}`);
-    }
-    if (value === undefined) {
-      if (i >= args.length) {
-        throw new Error(`flag needs an argument: -${name}`);
-      }
-      value = args[i];
-      i++;
-    }
-    flags.set(name, value);
-  }
-  return { flags, positionals: args.slice(i) };
+  const encoding = args.length === 3 ? args[2] : DEFAULT_ENCODING;
+  await postJSON("/send-keys", { id: args[0], keys: args[1], encoding });
 }
 
 async function postJSON(path: string, body: unknown): Promise<string> {
@@ -247,35 +127,27 @@ async function postJSON(path: string, body: unknown): Promise<string> {
 // Extracts {"error": "..."} from a failed response; falls back to the raw
 // body, then to a generic message, matching the Go client.
 async function readAPIError(res: Response): Promise<string> {
-  let data: string;
+  const data = await res.text();
   try {
-    data = await res.text();
-  } catch (err) {
-    return errorMessage(err);
-  }
-  try {
-    const body = JSON.parse(data) as { error?: unknown } | null;
-    if (body !== null && typeof body.error === "string" && body.error !== "") {
+    const body = JSON.parse(data) as { error?: unknown };
+    if (typeof body.error === "string" && body.error !== "") {
       return body.error;
     }
   } catch {
     // Not JSON: fall through to the raw body.
   }
-  if (data.length > 0) {
+  if (data !== "") {
     return data;
   }
   return "request failed";
 }
 
 function errorMessage(err: unknown): string {
-  if (!(err instanceof Error)) {
-    return String(err);
+  if (err instanceof Error) {
+    // Node's fetch buries the useful detail (ECONNREFUSED etc.) in the cause.
+    return err.cause instanceof Error ? `${err.message}: ${err.cause.message}` : err.message;
   }
-  // Node's fetch buries the useful detail (ECONNREFUSED etc.) in the cause.
-  if (err.cause instanceof Error && err.cause.message !== "") {
-    return `${err.message}: ${err.cause.message}`;
-  }
-  return err.message;
+  return String(err);
 }
 
 await main(process.argv.slice(2));
