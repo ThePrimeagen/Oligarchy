@@ -1,5 +1,7 @@
 # Agent rules
 
+Check the field guide: [field-guide/index.markdown](field-guide/index.markdown).
+
 ## Vocabulary
 
 - When the user says "Kemu" (a speech-to-text rendering), they always mean QEMU. Read any such spelling as QEMU.
