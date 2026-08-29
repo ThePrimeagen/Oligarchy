@@ -1,35 +1,51 @@
-// The oligarchy proxy: a main file, not a library. It boots one QEMU
-// session from CLI/env parameters and serves an HTTP control plane for it.
+// The oligarchy proxy: a main file, not a library. It serves an HTTP control
+// plane that boots QEMU sessions and drives them by session uuid.
 //
 //   node --experimental-strip-types src/qemu/proxy.ts <iso>
 //
-// The iso comes from argv or OLIGARCHY_ISO; the listen address from
+// The default iso comes from argv or OLIGARCHY_ISO; the listen address from
 // OLIGARCHY_ADDR (default 127.0.0.1:42069).
 //
-//   GET  /image      -> PNG of the current guest display
-//   POST /send-keys  -> {"keys": "Hi<ENTER>", "encoding": "oligarchy"}
+//   POST /start      -> {"iso"?, "disk"?}; boots a qemu, returns {"id": uuid}
+//   GET  /image?id=  -> PNG of that session's guest display
+//   POST /send-keys  -> {"id", "keys": "Hi<ENTER>", "encoding"?}
 
-import { createServer } from "node:http";
+import { createServer, type IncomingMessage } from "node:http";
 import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { createDisk, createQemu, screendump, sendKey, start, stop } from "./client.ts";
+import { createDisk, createQemu, screendump, sendKey, start, stop, type Qemu } from "./client.ts";
 import { parseKeys } from "./keys.ts";
 
-const iso = process.argv[2] ?? process.env.OLIGARCHY_ISO;
-if (iso === undefined) {
+const defaultIso = process.argv[2] ?? process.env.OLIGARCHY_ISO;
+if (defaultIso === undefined) {
   console.error("usage: proxy <iso>  (or set OLIGARCHY_ISO)");
   process.exit(1);
 }
 const addr = process.env.OLIGARCHY_ADDR ?? "127.0.0.1:42069";
 
-const qemu = createQemu();
-await createDisk(qemu);
-await start(qemu, { iso });
+const sessions = new Map<string, Qemu>();
 
 const [host, port] = addr.split(":");
 createServer(async (req, res) => {
   try {
-    if (req.method === "GET" && req.url === "/image") {
+    const url = new URL(req.url ?? "/", `http://${addr}`);
+
+    if (req.method === "POST" && url.pathname === "/start") {
+      const raw = await body(req);
+      const cfg = (raw === "" ? {} : JSON.parse(raw)) as { iso?: string; disk?: string };
+      const qemu = createQemu();
+      if (cfg.disk === undefined) {
+        await createDisk(qemu);
+      }
+      await start(qemu, { iso: cfg.iso ?? defaultIso, disk: cfg.disk });
+      sessions.set(qemu.id, qemu);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ id: qemu.id }));
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/image") {
+      const qemu = session(url.searchParams.get("id"));
       const path = join(qemu.dir, `image-${process.hrtime.bigint()}.png`);
       try {
         await screendump(qemu, path);
@@ -42,12 +58,13 @@ createServer(async (req, res) => {
       return;
     }
 
-    if (req.method === "POST" && req.url === "/send-keys") {
-      let body = "";
-      for await (const chunk of req) {
-        body += chunk;
-      }
-      const { keys, encoding } = JSON.parse(body) as { keys: string; encoding?: string };
+    if (req.method === "POST" && url.pathname === "/send-keys") {
+      const { id, keys, encoding } = JSON.parse(await body(req)) as {
+        id?: string;
+        keys: string;
+        encoding?: string;
+      };
+      const qemu = session(id);
       for (const chord of parseKeys(keys, encoding)) {
         await sendKey(qemu, chord.map((code): QemuKeyValue => ({ type: "qcode", data: code })));
       }
@@ -63,11 +80,30 @@ createServer(async (req, res) => {
     res.end(JSON.stringify({ error: (err as Error).message }));
   }
 }).listen(Number(port), host, () => {
-  console.error(`oligarchy proxy listening on ${addr}, session ${qemu.id}`);
+  console.error(`oligarchy proxy listening on ${addr}`);
 });
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
-    void stop(qemu).then(() => process.exit(0));
+    void Promise.all([...sessions.values()].map(stop)).then(() => process.exit(0));
   });
+}
+
+function session(id: string | null | undefined): Qemu {
+  if (id === undefined || id === null || id === "") {
+    throw new Error("session id is required");
+  }
+  const qemu = sessions.get(id);
+  if (qemu === undefined) {
+    throw new Error(`unknown session "${id}"`);
+  }
+  return qemu;
+}
+
+async function body(req: IncomingMessage): Promise<string> {
+  let out = "";
+  for await (const chunk of req) {
+    out += chunk;
+  }
+  return out;
 }
