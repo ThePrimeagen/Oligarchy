@@ -7,5 +7,4 @@ The entry point for working on this repo. Start here, then follow the link you n
 - [The HTTP API](http-api.md) — the control-plane contract between the CLI and the proxy.
 - [The database](database.md) — the PlanetScale Postgres record of every session, and the `src/db/ops.ts` interface to it.
 - [Key encoding how-to](how-to.md) — the `oligarchy` key-string encoding used by `send-keys`.
-- [Prompts](../prompts/README.md) — ready-to-send prompt bases for agents driving a guest through the CLI, plus the CI boot-to-desktop prompt.
 - [Agent rules](../AGENTS.md) — vocabulary and hard TypeScript rules.
