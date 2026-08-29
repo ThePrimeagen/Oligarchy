@@ -9,6 +9,7 @@
 //   POST /start      -> {"iso"?, "disk"?}; boots a qemu, returns {"id": uuid}
 //   GET  /image?id=  -> PNG of that session's guest display
 //   POST /send-keys  -> {"id", "keys": "Hi<ENTER>", "encoding"?}
+//   POST /stop       -> {"id"}; kills the qemu and removes its session dir
 
 import { createServer, type IncomingMessage } from "node:http";
 import { readFile, rm } from "node:fs/promises";
@@ -55,6 +56,16 @@ createServer(async (req, res) => {
       } finally {
         await rm(path, { force: true });
       }
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/stop") {
+      const { id } = JSON.parse(await body(req)) as { id?: string };
+      const qemu = session(id);
+      sessions.delete(qemu.id);
+      await stop(qemu);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: "true" }));
       return;
     }
 
