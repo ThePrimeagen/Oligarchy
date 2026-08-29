@@ -86,10 +86,13 @@ createServer(async (req, res) => {
             // made it.
             await mkdir(qemu.dir, { recursive: true, mode: 0o700 });
           }
-          await start(qemu, { iso: isoPath, disk: cfg.disk });
+          const greeting = await start(qemu, { iso: isoPath, disk: cfg.disk });
           if (downloads) {
             await sessionRunning(db, qemu.id);
           }
+          // The QMP greeting is the start action's response: which QEMU
+          // answered, straight from the machine that booted.
+          return greeting;
         });
       } catch (err) {
         // A start that got as far as booting is torn down again: a session
@@ -125,14 +128,16 @@ createServer(async (req, res) => {
           agentId: agent,
           kind: "get-image",
           request: {},
+          response: null,
           error: errorMessage(err),
           durationMs: Date.now() - startedAt,
         }).catch(logDbError);
         throw err;
       }
+      // The PNG is the response; it lives in images, 1:1 with this action.
       await recordAction(
         db,
-        { sessionId: qemu.id, agentId: agent, kind: "get-image", request: {}, error: null, durationMs: Date.now() - startedAt },
+        { sessionId: qemu.id, agentId: agent, kind: "get-image", request: {}, response: {}, error: null, durationMs: Date.now() - startedAt },
         data,
       );
       res.writeHead(200, { "Content-Type": "image/png", "Content-Length": data.length });
@@ -160,6 +165,7 @@ createServer(async (req, res) => {
         } finally {
           await endSession(db, qemu.id, "aborted", null);
         }
+        return {};
       });
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: "true" }));
@@ -185,6 +191,7 @@ createServer(async (req, res) => {
         } finally {
           await endSession(db, qemu.id, status, reason ?? null);
         }
+        return {};
       });
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: "true" }));
@@ -202,6 +209,7 @@ createServer(async (req, res) => {
         for (const chord of parseKeys(keys, encoding)) {
           await sendKey(qemu, chord.map((code): QemuKeyValue => ({ type: "qcode", data: code })));
         }
+        return {};
       });
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: "true" }));
@@ -234,35 +242,36 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 }
 
 /**
- * Times work, records it as one action row — error message on failure, null
- * on success — and passes the outcome through. Recording a success is part
- * of the operation and may fail it; recording a failure must not replace the
- * real error, so that write only logs.
+ * Times work and records it as one action row: the work's return value is
+ * the action's response on success; a failure records the error message and
+ * a null response. Recording a success is part of the operation and may
+ * fail it; recording a failure must not replace the real error, so that
+ * write only logs.
  */
-async function recorded<T>(
+async function recorded(
   sessionId: string,
   agentId: string | undefined,
   kind: ActionKind,
   request: unknown,
-  work: () => Promise<T>,
-): Promise<T> {
+  work: () => Promise<unknown>,
+): Promise<void> {
   const startedAt = Date.now();
-  let result: T;
+  let response: unknown;
   try {
-    result = await work();
+    response = await work();
   } catch (err) {
     await recordAction(db, {
       sessionId,
       agentId,
       kind,
       request,
+      response: null,
       error: errorMessage(err),
       durationMs: Date.now() - startedAt,
     }).catch(logDbError);
     throw err;
   }
-  await recordAction(db, { sessionId, agentId, kind, request, error: null, durationMs: Date.now() - startedAt });
-  return result;
+  await recordAction(db, { sessionId, agentId, kind, request, response, error: null, durationMs: Date.now() - startedAt });
 }
 
 function logDbError(err: unknown): void {

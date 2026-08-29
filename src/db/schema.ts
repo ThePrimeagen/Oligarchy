@@ -59,6 +59,10 @@ export const actions = pgTable(
     // The payload as received: {keys, encoding} for send-keys, {iso, disk}
     // for start, {status, reason} for finish, {} otherwise.
     request: jsonb("request").notNull(),
+    // What came back on success: the QMP greeting for start, {} where the
+    // operation has nothing to say (the get-image PNG lives in images).
+    // Null when the request failed; error carries the message.
+    response: jsonb("response"),
     // Null means the request succeeded; otherwise the error message returned.
     error: text("error"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

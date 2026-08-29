@@ -63,6 +63,8 @@ export type Action = {
   kind: ActionKind;
   /** The payload as received; the session id lives in its own column. */
   request: unknown;
+  /** What came back on success — null when the request failed (see error). */
+  response: unknown;
   /** null when the request succeeded; otherwise the error message returned. */
   error: string | null;
   durationMs: number;
