@@ -73,7 +73,7 @@ export class QemuCLI {
     if (this.#closed) {
       throw new Error("qemu: closed");
     }
-    await this.#ensureDir();
+    await mkdir(this.#dir, { recursive: true, mode: 0o700 });
     if (!(await fileExists(this.diskPath))) {
       await qemuImgCreate(this.diskPath, this.#opts.diskSize ?? DEFAULT_DISK_SIZE);
     }
@@ -85,7 +85,8 @@ export class QemuCLI {
    * Listens on the QMP unix socket, launches QEMU against it, waits for
    * the greeting, and negotiates capabilities. Requires a disk: either
    * call createDisk() first or pass an existing one via options.disk.
-   * The ISO defaults to omarchy.iso in the project root.
+   * The session dir must already exist (createDisk creates it). The ISO
+   * defaults to omarchy.iso in the project root.
    */
   async start(options: QemuStartOptions = {}): Promise<QemuStartResult> {
     if (this.#closed) {
@@ -104,7 +105,6 @@ export class QemuCLI {
     await assertFile(iso, "iso");
 
     try {
-      await this.#ensureDir();
       const varsPath = join(this.#dir, "OVMF_VARS.fd");
       await copyFile(this.#opts.vars ?? DEFAULT_VARS, varsPath);
 
@@ -169,10 +169,6 @@ export class QemuCLI {
 
   async screendump(filename: string, format = "png"): Promise<void> {
     await this.#execute("screendump", { filename, format });
-  }
-
-  #ensureDir(): Promise<string | undefined> {
-    return mkdir(this.#dir, { recursive: true, mode: 0o700 });
   }
 
   #execute(name: string, args: unknown): Promise<unknown> {
