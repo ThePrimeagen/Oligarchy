@@ -1,8 +1,8 @@
 # The cloud client
 
-The interface contract for `src/cloud/client.ts` — a wrapper around the Cursor SDK (`@cursor/sdk`) that drives Cursor cloud agents with three verbs: `createCloud`, `prompt`, `stop`. Written before the implementation; build to this document. No test files, by maintainer instruction (same standing as the CLI — see [Philosophy](philosophy.md)).
+The interface contract for `src/cloud/client.ts` — a wrapper around the Cursor SDK (`@cursor/sdk`) that drives Cursor cloud agents with three verbs: `start`, `prompt`, `stop`. Written before the implementation; build to this document. No test files, by maintainer instruction (same standing as the CLI — see [Philosophy](philosophy.md)).
 
-A `Cloud` value is one **session**: one cloud agent, one durable server-side conversation, identified by the SDK's `bc-…` agent ID on `cloud.session`. Session IDs are plain strings and survive the process — any process can rejoin one by passing it to `createCloud`.
+A `Cloud` value is one **session**: one cloud agent, one durable server-side conversation, identified by the SDK's `bc-…` agent ID on `cloud.session`. Session IDs are plain strings and survive the process — any process can rejoin one by passing it to `start`.
 
 ## The interface
 
@@ -36,7 +36,7 @@ export type PromptOptions = {
 };
 
 /** Starts a new cloud agent session — or rejoins one when options.session is set. */
-export function createCloud(options: CloudOptions = {}): Promise<Cloud>;
+export function start(options: CloudOptions = {}): Promise<Cloud>;
 
 /** Sends text to the session and resolves with the reply once the run finishes. */
 export function prompt(
@@ -53,12 +53,12 @@ export function stop(cloud: Cloud): Promise<void>;
 
 | Verb | Cursor SDK calls |
 | --- | --- |
-| `createCloud`, new session | `Agent.create({ apiKey, model, cloud: {} })` → `session` from `agent.agentId` |
-| `createCloud`, rejoin | `Agent.resume(options.session, { apiKey, model })` |
+| `start`, new session | `Agent.create({ apiKey, model, cloud: {} })` → `session` from `agent.agentId` |
+| `start`, rejoin | `Agent.resume(options.session, { apiKey, model })` |
 | `prompt` | `agent.send(text, { model })` → `run.wait()` |
 | `stop` | `Agent.listRuns(cloud.session, { runtime: "cloud", limit: 1 })`, `run.cancel()` if running, then `Agent.archive(cloud.session, { apiKey })` and `agent.close()` |
 
-### createCloud
+### start
 
 - Without `session`: creates a cloud agent with no repository — an empty VM. (No-repo agents must be enabled for the account, and repository-scoped API keys cannot create them.) The session ID is on `cloud.session` immediately; the VM provisions when the first prompt runs, and that run passes through `CREATING` before `RUNNING`.
 - With `session`: rejoins the existing session. No network round-trip happens here — a bad or archived ID surfaces on the first `prompt` or `stop`, not at construction.
@@ -73,7 +73,7 @@ export function stop(cloud: Cloud): Promise<void>;
 ### stop
 
 - Cancel first, then archive, so a mid-run agent actually halts. Archiving is the SDK's soft delete: the transcript stays readable in Cursor and the agent can be unarchived from the dashboard.
-- Stopping a session you only have the ID of is rejoin-then-stop: `await stop(await createCloud({ session: id }))`.
+- Stopping a session you only have the ID of is rejoin-then-stop: `await stop(await start({ session: id }))`.
 - Stopping or prompting an already-archived session fails naturally with the SDK's own error (`ConfigurationError`, code `agent_archived`). No idempotency ceremony on top.
 
 ## Errors
@@ -83,9 +83,9 @@ The wrapper wraps nothing. SDK errors propagate as-is: `AuthenticationError` (ba
 ## Example
 
 ```typescript
-import { createCloud, prompt, stop } from "./src/cloud/client.ts";
+import { start, prompt, stop } from "./src/cloud/client.ts";
 
-const cloud = await createCloud({ model: "composer-2.5" });
+const cloud = await start({ model: "composer-2.5" });
 console.log(cloud.session); // bc-…
 
 await prompt(cloud, "Research QMP's screendump options and summarize.");
@@ -93,7 +93,7 @@ await prompt(cloud, "Now compare with the VNC framebuffer approach.");
 await stop(cloud);
 
 // Another process, later: rejoin by ID and continue.
-const rejoined = await createCloud({ session: savedSessionId });
+const rejoined = await start({ session: savedSessionId });
 await prompt(rejoined, "One more comparison: SPICE.");
 await stop(rejoined);
 ```
@@ -102,7 +102,7 @@ await stop(rejoined);
 
 Support only what is used:
 
-- **No separate `start` verb.** `createCloud` starts the session (or rejoins one). One constructor, no two-step ceremony — and because rejoining happens at construction, `prompt` needs no `session` option and never starts a session you didn't ask for.
+- **No separate constructor.** `start` is the factory: it starts the session (or rejoins one) and returns the state object in one call. And because rejoining happens at `start`, `prompt` needs no `session` option and never starts a session you didn't ask for.
 - **No repository option.** Sessions run on empty VMs. If repo-attached agents turn out to be needed, the extension is one optional field (`repo?: string` on `CloudOptions`); it stays out until asked for.
 - No streaming, no images, no per-run env vars, no metadata tags, no PR options, no list/inspect verbs, no timeouts.
 - Model is a plain id string, not the SDK's `ModelSelection` — no per-model params until something needs them.
