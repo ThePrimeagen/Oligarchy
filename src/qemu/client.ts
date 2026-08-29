@@ -8,8 +8,7 @@ import { JSONStreamParser } from "../qmp/json-stream.ts";
 
 const QEMU_BIN = "qemu-system-x86_64";
 const QEMU_IMG = "qemu-img";
-const PROJECT_ROOT = join(import.meta.dirname, "..", "..");
-export const DEFAULT_ISO = join(PROJECT_ROOT, "omarchy.iso");
+export const DEFAULT_ISO = join(import.meta.dirname, "..", "..", "omarchy.iso");
 const DEFAULT_DISK_SIZE = "40G";
 const DEFAULT_CODE = "/usr/share/edk2/x64/OVMF_CODE.4m.fd";
 const DEFAULT_VARS = "/usr/share/edk2/x64/OVMF_VARS.4m.fd";
@@ -18,9 +17,6 @@ const DEFAULT_SMP = 2;
 const DEFAULT_MACHINE = "q35,accel=kvm";
 const DEFAULT_CPU = "host";
 const HANDSHAKE_MS = 10_000;
-// The QMP greeting carries no command id; its waiter lives in the pending map
-// under this key. Command ids count up from 1, so they never collide.
-const GREETING_ID = -1;
 
 export type QemuOptions = {
   tmp?: string;
@@ -47,7 +43,7 @@ export type Qemu = {
   readonly diskPath: string;
   readonly sockPath: string;
   readonly options: QemuOptions;
-  readonly pending: Map<number, Pending>;
+  readonly pending: Map<number | "greeting", Pending>;
   nextId: number;
   proc?: ChildProcess;
   server?: Server;
@@ -123,17 +119,52 @@ export async function start(
   });
 
   try {
-    const socket = await Promise.race([listenAndSpawn(qemu, args), timeout]);
+    const connection = new Promise<Socket>((resolve, reject) => {
+      const server = createServer();
+      qemu.server = server;
+      server.once("error", reject);
+      server.once("connection", resolve);
+      server.listen(qemu.sockPath, () => {
+        const proc = spawn(QEMU_BIN, args, { stdio: "ignore" });
+        qemu.proc = proc;
+        proc.once("error", (err) => reject(new Error(`qemu: ${err.message}`)));
+        proc.once("exit", (code) =>
+          reject(new Error(`qemu: exited ${code} before QMP connect`)),
+        );
+      });
+    });
+    const socket = await Promise.race([connection, timeout]);
     qemu.socket = socket;
 
     const greeting = new Promise<unknown>((resolve, reject) => {
-      qemu.pending.set(GREETING_ID, { resolve, reject });
+      qemu.pending.set("greeting", { resolve, reject });
     });
     const parser = new JSONStreamParser();
     socket.setEncoding("utf8");
     socket.on("data", (chunk: string) => {
       try {
-        onData(qemu, parser, chunk);
+        parser.push(chunk);
+        for (let msg = parser.pull(); msg !== undefined; msg = parser.pull()) {
+          if ("QMP" in msg) {
+            qemu.pending.get("greeting")?.resolve(msg);
+            qemu.pending.delete("greeting");
+            continue;
+          }
+          if ("event" in msg) {
+            continue;
+          }
+          const id = msg.id as number;
+          const pending = qemu.pending.get(id);
+          if (pending === undefined) {
+            continue;
+          }
+          qemu.pending.delete(id);
+          if ("error" in msg) {
+            pending.reject(new Error(`${msg.error.class}: ${msg.error.desc}`));
+          } else {
+            pending.resolve(msg.return);
+          }
+        }
       } catch (err) {
         failAll(qemu, err);
         socket.destroy();
@@ -215,47 +246,6 @@ async function execute(qemu: Qemu, name: string, args: unknown): Promise<unknown
   });
 }
 
-function onData(qemu: Qemu, parser: JSONStreamParser, chunk: string): void {
-  parser.push(chunk);
-  for (let msg = parser.pull(); msg !== undefined; msg = parser.pull()) {
-    if ("QMP" in msg) {
-      qemu.pending.get(GREETING_ID)?.resolve(msg);
-      qemu.pending.delete(GREETING_ID);
-      continue;
-    }
-    if ("event" in msg) {
-      continue;
-    }
-    const id = Number(msg.id);
-    const pending = qemu.pending.get(id);
-    if (pending === undefined) {
-      continue;
-    }
-    qemu.pending.delete(id);
-    if ("error" in msg) {
-      pending.reject(new Error(`${msg.error.class}: ${msg.error.desc}`));
-    } else {
-      pending.resolve(msg.return);
-    }
-  }
-}
-
-function listenAndSpawn(qemu: Qemu, args: string[]): Promise<Socket> {
-  return new Promise((resolve, reject) => {
-    const server = createServer();
-    qemu.server = server;
-    server.once("error", reject);
-    server.once("connection", resolve);
-    server.listen(qemu.sockPath, () => {
-      const proc = spawn(QEMU_BIN, args, { stdio: "ignore" });
-      qemu.proc = proc;
-      proc.once("error", (err) => reject(new Error(`qemu: ${err.message}`)));
-      proc.once("exit", (code) => reject(new Error(`qemu: exited ${code} before QMP connect`)));
-    });
-  });
-}
-
-/** Rejects every in-flight command (and the greeting waiter) with err. */
 function failAll(qemu: Qemu, err: unknown): void {
   for (const pending of qemu.pending.values()) {
     pending.reject(err);
@@ -263,7 +253,6 @@ function failAll(qemu: Qemu, err: unknown): void {
   qemu.pending.clear();
 }
 
-/** failAll, then discard the socket, server, and process. */
 function teardown(qemu: Qemu, err: unknown): void {
   failAll(qemu, err);
   qemu.socket?.destroy();
