@@ -10,10 +10,12 @@ Boots a QEMU session. Returns `{"id": "<uuid>"}`.
 
 The body is JSON with two keys, both optional (an empty body works too):
 
-- `iso` — guest ISO path. Defaults to the proxy's own default ISO (its argv, or `OLIGARCHY_ISO`).
+- `iso` — guest ISO path or http(s) url. Defaults to the proxy's own default ISO (its argv, or `OLIGARCHY_ISO`).
 - `disk` — qcow2 path, which must already exist. When the key is **absent**, the proxy creates a fresh disk (40G virtual) in the session dir.
 
 Clients that want the server-managed disk must therefore omit the key, not send `""`. The CLI does this; keep it that way.
+
+A url iso is downloaded into `~/.oligarchy/isos` on first use — verified against the publisher's `<url>.sha256` sidecar when one is published — and served from that cache on every later start. The cache file is the url with `:`, `/`, and every other character a file name cannot hold replaced by `_`. A `manifest.json` beside the isos records each entry's status: while a download runs, a claim whose heartbeat advances as bytes flow; once cached, when it was cached and last used, so the cache can be pruned by size later. A start that finds a live claim — another proxy mid-download — waits and rechecks every ten seconds instead of downloading the same iso twice; a claim gone three beats stale is a dead downloader, and the start takes the download over.
 
 ## GET /image?id=<id>
 
