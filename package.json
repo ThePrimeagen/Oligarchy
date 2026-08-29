@@ -4,15 +4,18 @@
   "type": "module",
   "scripts": {
     "test": "node --test --experimental-strip-types src/qmp/json-stream.test.ts src/qemu/keys.test.ts",
-    "lint": "oxlint --type-aware --type-check"
+    "lint": "oxlint --type-aware --type-check",
+    "db:generate": "drizzle-kit generate"
   },
   "devDependencies": {
     "@types/node": "^26.4.0",
+    "drizzle-kit": "^0.31.10",
     "oxlint": "^1.80.0",
     "oxlint-tsgolint": "^7.0.2001",
     "typescript": "^7.0.2"
   },
   "dependencies": {
-    "@cursor/sdk": "^1.0.30"
+    "@cursor/sdk": "^1.0.30",
+    "drizzle-orm": "^0.45.2"
   }
 }
