@@ -1,8 +1,8 @@
 // Drizzle schema for the control-plane database (PlanetScale Postgres).
 //
 // Four tables: sessions (one row per QEMU boot), agent_runs (which cloud
-// agents drove it), actions (every control-plane request, in order), and
-// images (the PNG each get-image returned).
+// agents drove it), actions (every QMP exchange, in order), and images
+// (the PNG each get-image returned).
 //
 // Replaying a session is: actions WHERE session_id ORDER BY created_at, id.
 
@@ -14,6 +14,10 @@ const bytea = customType<{ data: Buffer }>({ dataType: () => "bytea" });
 // downloading = the ISO is being fetched from the internet; the session
 // exists but QEMU has not booted yet.
 export const sessionStatus = pgEnum("session_status", ["downloading", "running", "succeeded", "failed", "aborted"]);
+// An action records one QMP exchange with a session's QEMU. A stop or
+// finish exchanges nothing over QMP — the session's own status and reason
+// are their record — so those two kinds sit unused: removing a Postgres
+// enum value is a type rebuild, and the dead values wait instead.
 export const actionKind = pgEnum("action_kind", ["start", "send-keys", "get-image", "stop", "finish"]);
 
 export const sessions = pgTable("sessions", {
@@ -56,11 +60,13 @@ export const actions = pgTable(
     // Null when the request was not attributed to an agent (manual use).
     agentId: text("agent_id").references(() => agentRuns.agentId),
     kind: actionKind("kind").notNull(),
-    // The payload as received: {keys, encoding} for send-keys, {iso, disk}
-    // for start, {status, reason} for finish, {} otherwise.
+    // The exact JSON sent to QEMU over QMP (a QemuCommand):
+    // qmp_capabilities for start — the handshake — send-key for send-keys,
+    // screendump for get-image.
     request: jsonb("request").notNull(),
-    // What came back on success: the QMP greeting for start, {} where the
-    // operation has nothing to say (the get-image PNG lives in images).
+    // The exact JSON QEMU sent back (a QemuResponse): the greeting for
+    // start, the {return} reply otherwise. The get-image PNG lives in
+    // images.
     response: jsonb("response"),
     // The error message returned, when the action failed.
     error: text("error"),

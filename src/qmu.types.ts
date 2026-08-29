@@ -43,6 +43,28 @@ declare global {
     data: string | number;
   };
 
+  // The commands this program sends: the exact JSON written to the QMP
+  // socket, one type per command in use.
+  type QemuCapabilitiesCommand = {
+    execute: "qmp_capabilities";
+    arguments: Record<string, never>;
+    id: number;
+  };
+
+  type QemuSendKeyCommand = {
+    execute: "send-key";
+    arguments: { keys: QemuKeyValue[] };
+    id: number;
+  };
+
+  type QemuScreendumpCommand = {
+    execute: "screendump";
+    arguments: { filename: string; format: string };
+    id: number;
+  };
+
+  type QemuCommand = QemuCapabilitiesCommand | QemuSendKeyCommand | QemuScreendumpCommand;
+
   type QemuStartResult = {
     id: string;
   };

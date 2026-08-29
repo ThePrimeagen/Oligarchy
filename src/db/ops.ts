@@ -8,10 +8,9 @@
 
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
-import { actionKind, actions, agentRuns, images, sessions } from "./schema.ts";
+import { actions, agentRuns, images, sessions } from "./schema.ts";
 
 export type Db = NodePgDatabase;
-export type ActionKind = (typeof actionKind.enumValues)[number];
 
 /**
  * Builds the database client from DATABASE_URL. A server that cannot record
@@ -59,25 +58,32 @@ export async function registerAgent(db: Db, agentId: string, sessionId: string):
   await db.insert(agentRuns).values({ agentId, sessionId });
 }
 
+/**
+ * One QMP exchange: the kind names it, and the request is the exact JSON
+ * that kind sends to QEMU. A stop or finish exchanges nothing over QMP, so
+ * it cannot form an action — the session's status and reason are its record.
+ */
 export type Action = {
   sessionId: string;
   /** Absent when the request was not attributed to an agent (manual use). */
   agentId: string | undefined;
-  kind: ActionKind;
-  /** The payload as received; the session id lives in its own column. */
-  request: unknown;
-};
-
-/** What closed the action: the response on success, the error on failure. */
-export type Outcome = {
-  response: unknown;
-  error: string | null;
-};
+} & (
+  | { kind: "start"; request: QemuCapabilitiesCommand }
+  | { kind: "send-keys"; request: QemuSendKeyCommand }
+  | { kind: "get-image"; request: QemuScreendumpCommand }
+);
 
 /**
- * Opens an action: one replay-log row per control-plane request, inserted
- * when the request starts. Returns the action's id — the auto-incrementing
- * number finishAction closes it by.
+ * What closed the action: the exact JSON QEMU sent back — the greeting for
+ * a start's handshake, the {return} reply otherwise — or the error message.
+ * Never both.
+ */
+export type Outcome = { response: QemuResponse; error: null } | { response: null; error: string };
+
+/**
+ * Opens an action: one replay-log row per QMP exchange, inserted when the
+ * command goes out. Returns the action's id — the auto-incrementing number
+ * finishAction closes it by.
  */
 export async function startAction(db: Db, action: Action): Promise<number> {
   const [row] = await db.insert(actions).values(action).returning({ id: actions.id });

@@ -15,13 +15,15 @@ One PlanetScale Postgres database holds the record of everything the proxy does.
 | `sessionRunning` | `db, id` | status → `running` once the QEMU is up after a download |
 | `endSession` | `db, id, status, reason` | verdict (`succeeded`/`failed`/`aborted`), reason, `ended_at` — on the session and its open agent runs, in one transaction stamped by one `now()` |
 | `registerAgent` | `db, agentId, sessionId` | the agent_runs row tying a cloud agent to the session it drives; a second registration is a database error by design |
-| `startAction` | `db, {sessionId, agentId, kind, request}` | opens the action row the moment the request starts; returns its auto-incrementing id |
-| `finishAction` | `db, id, {response, error}, image?` | closes it: the response or the error, plus `finished_at`. A successful get-image passes its PNG and the update + image insert land in one transaction — images are 1:1 with their action |
+| `startAction` | `db, {sessionId, agentId, kind, request: QemuCommand}` | opens the action row the moment the command goes out; returns its auto-incrementing id |
+| `finishAction` | `db, id, {response: QemuResponse \| null, error}, image?` | closes it: QEMU's reply or the error, plus `finished_at`. A successful get-image passes its PNG and the update + image insert land in one transaction — images are 1:1 with their action |
 
 ## The shape of an action
 
-An action is opened, then closed, and its id is what relates the two. `startAction` inserts the row with the request payload the moment work starts; `finishAction` closes it by id with what came back — the response on success (the QMP greeting for a start; `{}` where the operation has nothing to say), the error message on failure. `finished_at` stamps the close, from the database clock, so handling time is `finished_at - created_at` with no cross-clock arithmetic. A row that never finished is a truthful record of a request whose completion was never persisted — the server died running it, or the closing write failed.
+An action is one QMP exchange, opened then closed, its id relating the two. `startAction` inserts the row with the exact command JSON sent to QEMU — `QemuCommand`: `qmp_capabilities` for a start's handshake, `send-key`, `screendump`. `finishAction` closes it by id with the exact JSON QEMU sent back — `QemuResponse`: the greeting for a start, the `{return}` reply otherwise — or the error message when it failed. A get-image's PNG is what QEMU wrote into the session dir and the server read back: the raw bytes ride the closing update into `images`, 1:1 by action id. A stop or finish exchanges nothing with QEMU, so it gets no action; the session's status and reason are its record.
+
+`finished_at` stamps the close, from the database clock, so handling time is `finished_at - created_at` with no cross-clock arithmetic. A row that never finished is a truthful record of a command whose completion was never persisted — the server died running it, or the closing write failed.
 
 ## Replaying a session
 
-`actions WHERE session_id ORDER BY created_at, id` — the identity id is the tiebreaker when timestamps collide, and `created_at` is arrival time because the row is inserted at start. `sessions.config` holds the effective launch config (defaults applied), so a replay can boot an identical machine.
+`actions WHERE session_id ORDER BY created_at, id` — the identity id is the tiebreaker when timestamps collide, and `created_at` is when the command went out because the row is inserted at start. `sessions.config` holds the effective launch config (defaults applied), so a replay can boot an identical machine.
