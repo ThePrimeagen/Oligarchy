@@ -6,4 +6,5 @@ The entry point for working on this repo. Start here, then follow the link you n
 - [The CLI](cli.md) — what `src/qemu/cli.ts` does and why, command by command.
 - [The HTTP API](http-api.md) — the control-plane contract between the CLI and the proxy.
 - [Key encoding how-to](how-to.md) — the `oligarchy` key-string encoding used by `send-keys`.
+- [Prompts](../prompts/README.md) — ready-to-send prompt bases for agents driving a guest through the CLI, plus the CI boot-to-desktop prompt.
 - [Agent rules](../AGENTS.md) — vocabulary and hard TypeScript rules.
