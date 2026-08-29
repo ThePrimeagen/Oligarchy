@@ -9,9 +9,8 @@
 //   GET  /image      -> PNG of the current guest display
 //   POST /send-keys  -> {"keys": "Hi<ENTER>", "encoding": "oligarchy"}
 
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer } from "node:http";
 import { readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createDisk, createQemu, screendump, sendKey, start, stop } from "./client.ts";
 import { parseKeys } from "./keys.ts";
@@ -27,25 +26,11 @@ const qemu = createQemu();
 await createDisk(qemu);
 await start(qemu, { iso });
 
-const server = createServer((req, res) => {
-  void handle(req, res);
-});
 const [host, port] = addr.split(":");
-server.listen(Number(port), host, () => {
-  console.error(`oligarchy proxy listening on ${addr}, session ${qemu.id}`);
-});
-
-for (const signal of ["SIGINT", "SIGTERM"] as const) {
-  process.once(signal, () => {
-    server.close();
-    void stop(qemu).then(() => process.exit(0));
-  });
-}
-
-async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
+createServer(async (req, res) => {
   try {
     if (req.method === "GET" && req.url === "/image") {
-      const path = join(tmpdir(), `oligarchy-${process.pid}-${process.hrtime.bigint()}.png`);
+      const path = join(qemu.dir, `image-${process.hrtime.bigint()}.png`);
       try {
         await screendump(qemu, path);
         const data = await readFile(path);
@@ -62,7 +47,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       for await (const chunk of req) {
         body += chunk;
       }
-      const { keys = "", encoding } = JSON.parse(body) as { keys?: string; encoding?: string };
+      const { keys, encoding } = JSON.parse(body) as { keys: string; encoding?: string };
       for (const chord of parseKeys(keys, encoding)) {
         await sendKey(qemu, chord.map((code): QemuKeyValue => ({ type: "qcode", data: code })));
       }
@@ -75,6 +60,14 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     res.end(JSON.stringify({ error: "not found" }));
   } catch (err) {
     res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+    res.end(JSON.stringify({ error: (err as Error).message }));
   }
+}).listen(Number(port), host, () => {
+  console.error(`oligarchy proxy listening on ${addr}, session ${qemu.id}`);
+});
+
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.once(signal, () => {
+    void stop(qemu).then(() => process.exit(0));
+  });
 }
