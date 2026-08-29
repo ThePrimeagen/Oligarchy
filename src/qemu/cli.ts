@@ -1,5 +1,5 @@
-// The oligarchy CLI: a main file, not a library. It drives an oligarchy
-// control plane (the Go oligarchy-server or src/qemu/proxy.ts) over HTTP.
+// The oligarchy CLI: a main file, not a library. It drives the oligarchy
+// control plane (src/qemu/proxy.ts) over HTTP.
 //
 //   node --experimental-strip-types src/qemu/cli.ts start [--iso <path>] [--disk <path>]
 //   node --experimental-strip-types src/qemu/cli.ts get-image <id> [-o file]
@@ -42,7 +42,7 @@ async function main(args: string[]): Promise<void> {
 }
 
 function usage(): void {
-  console.error(`oligarchy is the client for oligarchy-server
+  console.error(`oligarchy is the client for the oligarchy proxy
 
 Usage:
   oligarchy start [--iso <path>] [--disk <path>]

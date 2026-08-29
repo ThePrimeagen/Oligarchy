@@ -1,9 +1,6 @@
-/bin/
 *.iso
 *.qcow2
 *.png
 /OVMF_VARS.fd
-/oligarchy
-/oligarchy-server
 /.env
 /node_modules
