@@ -13,7 +13,7 @@
 //   POST /stop       -> {"id"}; kills the qemu and removes its session dir
 
 import { createServer, type IncomingMessage } from "node:http";
-import { readFile, rm } from "node:fs/promises";
+import { mkdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { createDisk, createQemu, screendump, sendKey, start, stop, type Qemu } from "./client.ts";
 import { parseKeys } from "./keys.ts";
@@ -40,6 +40,10 @@ createServer(async (req, res) => {
       const qemu = createQemu();
       if (cfg.disk === undefined) {
         await createDisk(qemu);
+      } else {
+        // start() puts the firmware copy and the QMP socket in the session
+        // dir; with a caller-provided disk, createDisk never made it.
+        await mkdir(qemu.dir, { recursive: true, mode: 0o700 });
       }
       await start(qemu, { iso: cfg.iso ?? defaultIso, disk: cfg.disk });
       sessions.set(qemu.id, qemu);
