@@ -1,8 +1,7 @@
-// The oligarchy CLI: a main file, not a library. The TypeScript twin of
-// cmd/oligarchy-client, it drives an oligarchy control plane (the Go
-// oligarchy-server or src/qemu/proxy.ts) over HTTP.
+// The oligarchy CLI: a main file, not a library. It drives an oligarchy
+// control plane (the Go oligarchy-server or src/qemu/proxy.ts) over HTTP.
 //
-//   node --experimental-strip-types src/qemu/cli.ts start [iso] [disk]
+//   node --experimental-strip-types src/qemu/cli.ts start [--iso <path>] [--disk <path>]
 //   node --experimental-strip-types src/qemu/cli.ts get-image <id> [-o file]
 //   node --experimental-strip-types src/qemu/cli.ts send-keys <id> <keys> [encoding]
 //
@@ -46,7 +45,7 @@ function usage(): void {
   console.error(`oligarchy is the client for oligarchy-server
 
 Usage:
-  oligarchy start [iso] [disk]
+  oligarchy start [--iso <path>] [--disk <path>]
   oligarchy get-image <id> [-o file]
   oligarchy send-keys <id> <keys> [encoding]
 `);
@@ -57,18 +56,33 @@ function addr(): string {
 }
 
 async function cmdStart(args: string[]): Promise<void> {
-  if (args.length > 2) {
-    throw new Error("usage: oligarchy start [iso] [disk]");
+  if (args.length % 2 !== 0) {
+    throw new Error("usage: oligarchy start [--iso <path>] [--disk <path>]");
   }
-  const iso = resolve(args.length > 0 ? args[0] : DEFAULT_ISO);
+  let iso = "";
+  let disk = "";
+  for (let i = 0; i < args.length; i += 2) {
+    if (args[i] === "--iso") {
+      iso = args[i + 1];
+    } else if (args[i] === "--disk") {
+      disk = args[i + 1];
+    } else {
+      throw new Error("usage: oligarchy start [--iso <path>] [--disk <path>]");
+    }
+  }
+  iso = resolve(iso === "" ? DEFAULT_ISO : iso);
   try {
     await stat(iso);
   } catch (err) {
     throw new Error(`iso: ${errorMessage(err)}`);
   }
-  // An undefined disk is left out of the JSON, so the server creates one.
-  const disk = args.length === 2 ? resolve(args[1]) : undefined;
-  const out = JSON.parse(await postJSON("/start", { iso, disk })) as QemuStartResult;
+  const out = JSON.parse(
+    await postJSON("/start", {
+      iso,
+      // An undefined disk is left out of the JSON, so the server creates one.
+      disk: disk === "" ? undefined : resolve(disk),
+    }),
+  ) as QemuStartResult;
   console.log(out.id);
 }
 
