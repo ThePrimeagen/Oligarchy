@@ -1,0 +1,49 @@
+name: migrations
+
+on:
+  pull_request:
+
+jobs:
+  append-only:
+    name: migrations are append-only
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # Committed migrations are history: they may only be added, never
+      # changed. The journal is the one file the generator itself appends to.
+      - name: fail if an existing migration file was edited, deleted, or renamed
+        run: |
+          violations=$(git diff --name-status --diff-filter=MDR \
+            "origin/${{ github.base_ref }}...HEAD" \
+            -- 'drizzle/' ':(exclude)drizzle/meta/_journal.json')
+          if [ -n "$violations" ]; then
+            echo "Migrations are append-only. These files were edited, deleted, or renamed:"
+            echo "$violations"
+            echo "Revert them and add a new migration instead (npm run db:generate)."
+            exit 1
+          fi
+
+  schema-in-sync:
+    name: migrations match the drizzle schema
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npx drizzle-kit check
+      # If the schema changed without a migration, generate produces new
+      # files and the tree goes dirty — that is the failure.
+      - name: fail if drizzle-kit generate produces changes
+        run: |
+          npm run db:generate
+          drift=$(git status --porcelain drizzle/)
+          if [ -n "$drift" ]; then
+            echo "src/db/schema.ts does not match the committed migrations:"
+            echo "$drift"
+            echo "Run 'npm run db:generate' and commit the result."
+            exit 1
+          fi
