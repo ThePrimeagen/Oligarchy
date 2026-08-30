@@ -69,10 +69,12 @@ createServer(async (req, res) => {
       // session to hang on: a url iso enters as "downloading", a local path
       // goes straight to "running".
       await insertSession(db, qemu.id, { iso: isoName, disk: cfg.disk }, isUrl ? "downloading" : "running");
-      if (cfg.agent !== undefined) {
-        await registerAgent(db, cfg.agent, qemu.id);
-      }
       try {
+        // Inside the try: a rejected registration (the agent already drives
+        // a session) must close this session as failed, not leave it open.
+        if (cfg.agent !== undefined) {
+          await registerAgent(db, cfg.agent, qemu.id);
+        }
         const iso = await getIso(db, isoName, { sessionId: qemu.id, agentId: cfg.agent });
         if (cfg.disk === undefined) {
           await createDisk(qemu);
