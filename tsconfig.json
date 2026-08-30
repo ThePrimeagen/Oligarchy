@@ -5,6 +5,8 @@
     "module": "nodenext",
     "moduleResolution": "nodenext",
     "strict": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "hono/jsx",
     "verbatimModuleSyntax": true,
     "allowJs": false,
     "allowImportingTsExtensions": true,
@@ -13,5 +15,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "oxlint.config.ts", "drizzle.config.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "oxlint.config.ts", "drizzle.config.ts"]
 }
