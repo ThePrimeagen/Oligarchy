@@ -61,7 +61,23 @@ declare global {
     id: number;
   };
 
-  type QemuCommand = QemuCapabilitiesCommand | QemuSendKeyCommand | QemuScreendumpCommand;
+  type QemuInputButton = "left" | "middle" | "right" | "wheel-up" | "wheel-down";
+
+  type QemuInputEvent =
+    | { type: "abs"; data: { axis: "x" | "y"; value: number } }
+    | { type: "btn"; data: { button: QemuInputButton; down: boolean } };
+
+  type QemuInputSendEventCommand = {
+    execute: "input-send-event";
+    arguments: { events: QemuInputEvent[] };
+    id: number;
+  };
+
+  type QemuCommand =
+    | QemuCapabilitiesCommand
+    | QemuSendKeyCommand
+    | QemuScreendumpCommand
+    | QemuInputSendEventCommand;
 
   type QemuStartResult = {
     id: string;

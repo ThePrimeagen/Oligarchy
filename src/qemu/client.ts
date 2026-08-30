@@ -199,6 +199,46 @@ export async function sendKey(qemu: Qemu, keys: QemuKeyValue[], record?: QemuExc
   await execute(qemu, "send-key", { keys }, record);
 }
 
+// QEMU INPUT_EVENT_ABS_MAX: tablet axes are 0..0x7fff.
+const TABLET_AXIS_MAX = 0x7fff;
+// Two down/up pairs in one events list look like one click to the guest.
+const MULTI_CLICK_GAP_MS = 50;
+
+export async function sendMouse(
+  qemu: Qemu,
+  x: number,
+  y: number,
+  button?: QemuInputButton,
+  clicks = 1,
+  record?: QemuExchangeRecorder,
+): Promise<void> {
+  const abs: QemuInputEvent[] = [
+    { type: "abs", data: { axis: "x", value: Math.round(x * TABLET_AXIS_MAX) } },
+    { type: "abs", data: { axis: "y", value: Math.round(y * TABLET_AXIS_MAX) } },
+  ];
+  if (button === undefined) {
+    await execute(qemu, "input-send-event", { events: abs }, record);
+    return;
+  }
+  for (let i = 0; i < clicks; i++) {
+    await execute(
+      qemu,
+      "input-send-event",
+      {
+        events: [
+          ...abs,
+          { type: "btn", data: { button, down: true } },
+          { type: "btn", data: { button, down: false } },
+        ],
+      },
+      record,
+    );
+    if (i + 1 < clicks) {
+      await new Promise<void>((resolve) => setTimeout(resolve, MULTI_CLICK_GAP_MS));
+    }
+  }
+}
+
 export async function screendump(
   qemu: Qemu,
   filename: string,
@@ -232,6 +272,11 @@ function qemuArgs(opts: {
     `if=pflash,format=raw,file=${opts.varsPath}`,
     "-display",
     "gtk",
+    // usb-tablet is the absolute pointer; without it, input-send-event abs has no handler.
+    "-device",
+    "qemu-xhci",
+    "-device",
+    "usb-tablet",
     "-chardev",
     `socket,id=qmp,path=${opts.sockPath}`,
     "-mon",

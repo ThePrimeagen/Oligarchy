@@ -48,3 +48,26 @@ node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-keys <id
 - `<` and `>` as characters: `<LT>` and `<GT>`.
 
 Quote the key string so the shell does not eat `<`, `>`, or spaces.
+
+## Send mouse
+
+Coordinates are fractions of the last screenshot: `0` is the top or left edge, `1` is the bottom or right. From a pixel `(px, py)` on a `W×H` image, `x = px / (W - 1)` and `y = py / (H - 1)`.
+
+```bash
+# move the pointer (Hyprland focuses the window under it)
+node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-mouse <id> 0.5 0.5
+
+# left click
+node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-mouse <id> 0.5 0.5 left
+
+# double-click
+node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-mouse <id> 0.3 0.2 left 2
+
+# right-click
+node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-mouse <id> 0.8 0.1 right
+
+# scroll three ticks
+node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-mouse <id> 0.5 0.5 wheel-down 3
+```
+
+Omit the button to move only. `button` is `left`, `middle`, `right`, `wheel-up`, or `wheel-down`. `clicks` is how many times that button is pulsed.

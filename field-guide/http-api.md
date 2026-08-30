@@ -4,7 +4,7 @@ The control plane spoken between the CLI and the proxy (`src/qemu/proxy.ts`).
 
 The proxy defaults to `127.0.0.1:42069`. Bodies are JSON except the PNG. Errors are `4xx`/`5xx` with `{"error": "<message>"}`.
 
-Session-driving requests (`/start`, `/image`, `/send-keys`) carry the calling agent's id — `agent` in the POST body, a query param on the GET — so the server attributes the session's [actions](database.md) to that agent. The agent id is required: this control plane is driven by agents, and a request that names none is refused with a 400. `/stop` carries none because a stop exchanges nothing over QMP and is not an action — it carries the session's verdict instead; `/stats` has no session at all.
+Session-driving requests (`/start`, `/image`, `/send-keys`, `/send-mouse`) carry the calling agent's id — `agent` in the POST body, a query param on the GET — so the server attributes the session's [actions](database.md) to that agent. The agent id is required: this control plane is driven by agents, and a request that names none is refused with a 400. `/stop` carries none because a stop exchanges nothing over QMP and is not an action — it carries the session's verdict instead; `/stats` has no session at all.
 
 ## POST /start
 
@@ -44,8 +44,12 @@ Stats for the machine the proxy runs on, plus how many sessions it is running:
 
 Body `{"id", "keys", "encoding"?, "agent"}`. The server parses the key string (`encoding` defaults to `oligarchy`, see [how-to.md](how-to.md)) and types it into the guest via QMP `send-key`. Returns `{"ok": "true"}`.
 
+## POST /send-mouse
+
+Body `{"id", "x", "y", "button"?, "clicks"?, "agent"}`. Moves the pointer to `(x, y)` — each a number in `0..1`, the fraction of the screenshot from the top-left — via QMP `input-send-event`. With no `button`, that is the whole command: a move, so Hyprland focus can follow the pointer. With `button` (`left`, `middle`, `right`, `wheel-up`, `wheel-down`), the server then pulses that button `clicks` times (`clicks` defaults to 1). Returns `{"ok": "true"}`.
+
 ## POST /stop
 
 Body `{"id", "status"?, "reason"?}`; kills the QEMU and removes its session directory, then closes the session row with the verdict — `succeeded`, `failed`, or `aborted` — and the optional reason. A stop without a verdict is an abort: a machine killed with nothing to say for itself. Returns `{"ok": "true"}`.
 
-Once a session is running, each `/image` or `/send-keys` request for it restarts a ten-minute inactivity window. If no command arrives before that window expires, the proxy removes and kills the session automatically, closes it with status `timed_out` and reason `no command received for 10 minutes`, and writes the same event to the session log. `timed_out` is proxy-owned and is not an accepted `/stop` verdict.
+Once a session is running, each `/image`, `/send-keys`, or `/send-mouse` request for it restarts a ten-minute inactivity window. If no command arrives before that window expires, the proxy removes and kills the session automatically, closes it with status `timed_out` and reason `no command received for 10 minutes`, and writes the same event to the session log. `timed_out` is proxy-owned and is not an accepted `/stop` verdict.

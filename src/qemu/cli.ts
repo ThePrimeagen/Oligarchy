@@ -23,6 +23,9 @@ async function main(args: string[]): Promise<void> {
       case "send-keys":
         await cmdSendKeys(agent, args.slice(3));
         break;
+      case "send-mouse":
+        await cmdSendMouse(agent, args.slice(3));
+        break;
       default:
         usage();
         process.exitCode = 2;
@@ -40,6 +43,7 @@ Usage:
   oligarchy --agent-id <agent> start [--iso <path>] [--disk <path>]
   oligarchy --agent-id <agent> get-image <id> [-o file]
   oligarchy --agent-id <agent> send-keys <id> <keys> [encoding]
+  oligarchy --agent-id <agent> send-mouse <id> <x> <y> [button [clicks]]
 `);
 }
 
@@ -116,6 +120,34 @@ async function cmdSendKeys(agent: string, args: string[]): Promise<void> {
   }
   const encoding = args.length === 3 ? args[2] : DEFAULT_ENCODING;
   await postJSON("/send-keys", { id: args[0], keys: args[1], encoding, agent });
+}
+
+async function cmdSendMouse(agent: string, args: string[]): Promise<void> {
+  if (args.length < 3 || args.length > 5) {
+    throw new Error("usage: oligarchy --agent-id <agent> send-mouse <id> <x> <y> [button [clicks]]");
+  }
+  const x = Number(args[1]);
+  const y = Number(args[2]);
+  if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 1 || y < 0 || y > 1) {
+    throw new Error("mouse: x and y must be in 0..1");
+  }
+  const body: { id: string; x: number; y: number; agent: string; button?: string; clicks?: number } = {
+    id: args[0],
+    x,
+    y,
+    agent,
+  };
+  if (args.length >= 4) {
+    body.button = args[3];
+  }
+  if (args.length === 5) {
+    const clicks = Number(args[4]);
+    if (!Number.isInteger(clicks) || clicks < 1) {
+      throw new Error("usage: oligarchy --agent-id <agent> send-mouse <id> <x> <y> [button [clicks]]");
+    }
+    body.clicks = clicks;
+  }
+  await postJSON("/send-mouse", body);
 }
 
 async function postJSON(path: string, body: unknown): Promise<string> {
