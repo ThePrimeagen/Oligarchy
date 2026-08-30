@@ -1,20 +1,21 @@
 # Driving a guest
 
-How to operate a session over the control plane: send keys, look, decide.
-Everything here was learned driving a full Omarchy install to the desktop.
+How to operate a session over the control plane: send keys, move the mouse,
+look, decide. Everything here was learned driving a full Omarchy install to
+the desktop.
 
 ## The loop
 
-Send keys, wait about three seconds, take an image, read it, decide. That is
-the whole method. Never sleep more than ten seconds between actions — things
-happen quickly, and a long blind wait is how a session gets away from you.
-When something genuinely slow is running (an installer's progress bar, a
+Send keys or mouse, wait about three seconds, take an image, read it, decide.
+That is the whole method. Never sleep more than ten seconds between actions —
+things happen quickly, and a long blind wait is how a session gets away from
+you. When something genuinely slow is running (an installer's progress bar, a
 reboot, a first boot), the loop does not change: keep taking images and
 reading them instead of trusting a long sleep.
 
-Every send-keys chord and every image is recorded as an action in the
-database, so the loop leaves a complete flight recorder behind — replaying
-what you did is `actions WHERE session_id ORDER BY created_at, id`.
+Every send-keys chord, every send-mouse, and every image is recorded as an
+action in the database, so the loop leaves a complete flight recorder behind
+— replaying what you did is `actions WHERE session_id ORDER BY created_at, id`.
 
 ## Look before you type
 
@@ -33,10 +34,13 @@ re-sending: double-typed input is worse than late input.
 
 ## Focus is mouse-shaped
 
-The control plane has no mouse, and Hyprland as Omarchy ships it focuses the
-window under the pointer. Window-manager chords (`<M-Enter>`, `<M-2>`,
-`<M-w>`) land no matter what has focus; plain text lands wherever the pointer
-says. When a desktop plays focus games, switch to a TTY with `<C-A-F3>` — a
+Hyprland as Omarchy ships it focuses the window under the pointer. Move the
+pointer onto the window you mean to type into (`send-mouse <id> x y`), then
+send keys. Window-manager chords (`<M-Enter>`, `<M-2>`, `<M-w>`) land no
+matter what has focus; plain text lands wherever the pointer says. A greeter
+or installer button is a left click at that point (`send-mouse <id> x y left`);
+a double-click launches, a right-click opens a menu, `wheel-down` scrolls.
+When a desktop still plays focus games, switch to a TTY with `<C-A-F3>` — a
 text console is focus-proof, and a username/password login there is the
 cleanest proof of a working system.
 
@@ -46,8 +50,10 @@ TUI pickers may not filter when you type — letters can reset the selection
 instead. Navigate with batched arrows (`<Down>` repeated in one send-keys),
 then an image to verify the cursor position before `<Enter>`.
 
-## The keys you will actually use
+## The keys and clicks you will actually use
 
 The full encoding is in [how-to.md](how-to.md). The drive used little beyond:
 literal text, `<Enter>`, `<Esc>`, `<Tab>`, `<Down>`, `<M-...>` for Super
-chords, `<C-A-F3>` for TTY switching, and a bare `<META_L>` tap.
+chords, `<C-A-F3>` for TTY switching, and a bare `<META_L>` tap. On a
+desktop, add `send-mouse` at the button or window you can see: a move to
+focus, a left click to sign in, a double-click to launch.

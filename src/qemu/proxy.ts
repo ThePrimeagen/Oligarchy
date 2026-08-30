@@ -7,7 +7,7 @@ import { NodeHttpServer, NodeRuntime } from "@effect/platform-node";
 import { flushLogs, log } from "../db/log.ts";
 import { connectDatabase, endSession, finishAction, insertSession, registerAgent, sessionRunning, startAction } from "../db/ops.ts";
 import { flushSentry, initSentry } from "../sentry.ts";
-import { createDisk, createQemu, screendump, sendKey, start, stop, type Qemu } from "./client.ts";
+import { createDisk, createQemu, screendump, sendKey, sendMouse, start, stop, type Qemu } from "./client.ts";
 import { getIso } from "./iso.ts";
 import { parseKeys } from "./keys.ts";
 import { collectStats, startCpuSampler } from "./stats.ts";
@@ -106,6 +106,15 @@ const SendKeysBody = Schema.Struct({
   id: Schema.String,
   keys: Schema.String,
   encoding: Schema.optionalKey(Schema.String),
+  agent: Schema.NonEmptyString,
+});
+
+const SendMouseBody = Schema.Struct({
+  id: Schema.String,
+  x: Schema.Number,
+  y: Schema.Number,
+  button: Schema.optionalKey(Schema.Literals(["left", "middle", "right", "wheel-up", "wheel-down"])),
+  clicks: Schema.optionalKey(Schema.Number),
   agent: Schema.NonEmptyString,
 });
 
@@ -274,6 +283,28 @@ const routes = HttpRouter.use((router) =>
         catch: (err) => exchangeFailed(err, { sessionId: qemu.id, agentId: agent }),
       });
       log(db, { text: `session ${qemu.id}: sent ${chords.length} chords in ${Date.now() - started}ms`, sessionId: qemu.id, agentId: agent });
+      return HttpServerResponse.jsonUnsafe({ ok: "true" });
+    }) satisfies RouteHandler, { uninterruptible: true });
+
+    yield* router.add("POST", "/send-mouse", Effect.gen(function* () {
+      const started = Date.now();
+      const { id, x, y, button, clicks, agent } = yield* jsonBody(SendMouseBody);
+      const qemu = yield* session(id, agent);
+      if (!(x >= 0 && x <= 1 && y >= 0 && y <= 1)) {
+        return yield* Effect.fail(badRequest("mouse: x and y must be in 0..1", { sessionId: qemu.id, agentId: agent }));
+      }
+      if (clicks !== undefined && (!Number.isInteger(clicks) || clicks < 1)) {
+        return yield* Effect.fail(badRequest("mouse: clicks must be a positive integer", { sessionId: qemu.id, agentId: agent }));
+      }
+      yield* Effect.tryPromise({
+        try: () => sendMouse(qemu, x, y, button, clicks, recorder(qemu.id, agent)),
+        catch: (err) => exchangeFailed(err, { sessionId: qemu.id, agentId: agent }),
+      });
+      log(db, {
+        text: `session ${qemu.id}: mouse ${x} ${y}${button === undefined ? "" : ` ${button}${clicks === undefined || clicks === 1 ? "" : ` ×${clicks}`}`} in ${Date.now() - started}ms`,
+        sessionId: qemu.id,
+        agentId: agent,
+      });
       return HttpServerResponse.jsonUnsafe({ ok: "true" });
     }) satisfies RouteHandler, { uninterruptible: true });
 

@@ -6,6 +6,7 @@ The TypeScript client for the oligarchy control plane. It sends HTTP requests to
 node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> start [--iso <path>] [--disk <path>]
 node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> get-image <id> [-o file]
 node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-keys <id> <keys> [encoding]
+node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-mouse <id> <x> <y> [button [clicks]]
 ```
 
 The server address comes from `OLIGARCHY_ADDR`, default `127.0.0.1:42069`.
@@ -35,6 +36,13 @@ Types a key string into the session.
 
 - `send-keys <id> <keys> [encoding]`; the encoding defaults to `oligarchy` and is passed through untouched — the server does the parsing. The encoding itself (literal characters, `<ENTER>`, `<C-c>`, ...) is documented in [how-to.md](how-to.md) and implemented server-side in `src/qemu/keys.ts`.
 - Wire call: `POST /send-keys` with `{"id", "keys", "encoding", "agent"}` → `{"ok": "true"}`.
+
+## send-mouse
+
+Moves the pointer, and optionally clicks or scrolls, at a point on the screenshot.
+
+- `send-mouse <id> <x> <y> [button [clicks]]`. `x` and `y` are fractions of the screenshot, `0..1` from the top-left; the CLI rejects anything else before calling the server. Omit `button` to move only. `button` is `left`, `middle`, `right`, `wheel-up`, or `wheel-down`; `clicks` defaults to 1 and is a pulse count (a double-click is `left 2`, three wheel ticks is `wheel-down 3`).
+- Wire call: `POST /send-mouse` with `{"id", "x", "y", "button"?, "clicks"?, "agent"}` → `{"ok": "true"}`.
 
 ## Errors and exit codes
 

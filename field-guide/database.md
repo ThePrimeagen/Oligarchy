@@ -1,6 +1,6 @@
 # The control-plane database
 
-One PlanetScale Postgres database holds the record of everything the proxy does. `src/db/schema.ts` defines the five tables (sessions, agent_runs, actions, images, logs); `src/db/ops.ts` writes the control-plane record, `src/db/log.ts` writes its attributed log lines, and `src/db/query.ts` reads recent sessions for the dashboard. Every path uses Drizzle; node-postgres is only the transport. The proxy records through this interface as it runs: the session row lands before any start work (`downloading` for a url iso), every QMP exchange opens and closes an action row via the recorder hook threaded into the qemu client, a get-image's PNG rides the closing transaction, `/stop` closes the session with its verdict, and ten minutes without a command closes it as `timed_out` with the reason. Alongside those rows, every major action narrates itself through `log()` — starting, running, image served, chords sent, stopped, timed out, shutdown, iso cache traffic — with how long the work took, and every refused or failed request is one error line attributed as far as the handler knew, so the logs alone tell the session's story, refusals included, and the state tables carry the exact records.
+One PlanetScale Postgres database holds the record of everything the proxy does. `src/db/schema.ts` defines the five tables (sessions, agent_runs, actions, images, logs); `src/db/ops.ts` writes the control-plane record, `src/db/log.ts` writes its attributed log lines, and `src/db/query.ts` reads recent sessions for the dashboard. Every path uses Drizzle; node-postgres is only the transport. The proxy records through this interface as it runs: the session row lands before any start work (`downloading` for a url iso), every QMP exchange opens and closes an action row via the recorder hook threaded into the qemu client, a get-image's PNG rides the closing transaction, `/stop` closes the session with its verdict, and ten minutes without a command closes it as `timed_out` with the reason. Alongside those rows, every major action narrates itself through `log()` — starting, running, image served, chords sent, mouse sent, stopped, timed out, shutdown, iso cache traffic — with how long the work took, and every refused or failed request is one error line attributed as far as the handler knew, so the logs alone tell the session's story, refusals included, and the state tables carry the exact records.
 
 ## The state that threads through
 
@@ -20,7 +20,7 @@ One PlanetScale Postgres database holds the record of everything the proxy does.
 
 ## The shape of an action
 
-An action is one QMP exchange, opened then closed, its id relating the two. `startAction` inserts the row with the exact command JSON sent to QEMU (`QemuCommand` — `qmp_capabilities`, `send-key`, `screendump`; the `execute` field names the command, so there is no separate kind column). `finishAction` closes it by id in one of the only two states an exchange can finish in:
+An action is one QMP exchange, opened then closed, its id relating the two. `startAction` inserts the row with the exact command JSON sent to QEMU (`QemuCommand` — `qmp_capabilities`, `send-key`, `screendump`, `input-send-event`; the `execute` field names the command, so there is no separate kind column). `finishAction` closes it by id in one of the only two states an exchange can finish in:
 
 - **`completed`** — the response is QEMU's exact reply: the greeting for the boot handshake, the `{return}` reply otherwise. A get-image's PNG is what QEMU wrote into the session dir and the server read back; the raw bytes ride the closing update into `images`, 1:1 by action id.
 - **`failed`** — the response is the error: QEMU's `{error}` reply when it answered, or this server's error message when the failure never reached QEMU (a timeout, a dead socket). There is no separate error column.
@@ -31,7 +31,7 @@ A still-running exchange has no state yet: `state`, `response`, and `finished_at
 
 `log()` writes one line twice — to stderr, and as a logs row — in call order behind a chain; a failed insert reports itself to stderr and never fails the caller. The stamp is the database's, taken at the insert: a stalled database lands queued lines late, and id, not `created_at`, is the truth of their order. Every line carries a level, the `log_level` enum, declared in ascending severity so `WHERE level >= 'error'` reads the scary lines:
 
-- **info** — the default, and the normal story: the proxy listening, a session starting / running / stopped, an image served, chords sent, iso cache hits and downloads.
+- **info** — the default, and the normal story: the proxy listening, a session starting / running / stopped, an image served, chords sent, mouse sent, iso cache hits and downloads.
 - **warning** — something was off but the operation went on: a download heartbeat that failed to write, an iso with no published sha256 to check against.
 - **error** — an operation failed: one line per failed request from the HTTP boundary (a refused request is a failed request, so a bad key string or an unknown session id lands here too, attributed when the id is one this server could have minted), an action close that could not be recorded, a session that would not stop or record at shutdown, and a defect — a bug behind the client's generic 500 — with its stack.
 - **fatal** — the proxy is going down, written right before the exit: the listen failing at boot (the port is taken).
@@ -44,7 +44,7 @@ Paths that end in `process.exit` — shutdown, a fatal — await `flushLogs()` t
 
 ## Timing
 
-Two clocks, each for what it is good at. Action rows are stamped by the database — `finished_at - created_at` is per-exchange handling time with no cross-clock arithmetic. The proxy's log lines carry request-level wall time measured at the server — `running; started in 45123ms`, `image; 48213 bytes in 87ms`, `sent 6 chords in 412ms` — the numbers the action rows cannot give, because a request spans many exchanges (send-keys) or work that is no exchange at all (a download, a disk create, the boot handshake).
+Two clocks, each for what it is good at. Action rows are stamped by the database — `finished_at - created_at` is per-exchange handling time with no cross-clock arithmetic. The proxy's log lines carry request-level wall time measured at the server — `running; started in 45123ms`, `image; 48213 bytes in 87ms`, `sent 6 chords in 412ms`, `mouse 0.5 0.5 left in 12ms` — the numbers the action rows cannot give, because a request spans many exchanges (send-keys, a multi-click send-mouse) or work that is no exchange at all (a download, a disk create, the boot handshake).
 
 ## Replaying a session
 
