@@ -64,12 +64,26 @@ const sessions = new Map<string, Qemu>();
 const cpuSampler = startCpuSampler();
 
 // One action row per QMP exchange: opened as the command goes out, closed
-// with the outcome when the reply lands (see database.md).
+// with the outcome when the reply lands (see database.md). A close that
+// cannot be recorded is logged against its session before it surfaces —
+// the open row it leaves behind is the state database.md documents, and
+// the caller (client.ts) still decides whether the failure is swallowed
+// (after a failed exchange) or surfaced (after a completed one).
 function recorder(sessionId: string, agentId: string): QemuExchangeRecorder {
   return async (command) => {
     const id = await startAction(db, { sessionId, agentId, request: command });
     return async (outcome) => {
-      await finishAction(db, id, outcome);
+      try {
+        await finishAction(db, id, outcome);
+      } catch (err) {
+        const e = err as Error;
+        log(db, {
+          text: `db: closing action ${id} failed: ${e.cause instanceof Error ? e.cause.message : e.message}`,
+          sessionId,
+          agentId,
+        });
+        throw err;
+      }
     };
   };
 }
@@ -115,8 +129,12 @@ function session(id: string, agentId?: string): Effect.Effect<Qemu, ApiError> {
   if (qemu === undefined) {
     // An unknown id is session history worth keeping: an agent still
     // driving a stopped session shows up here. logs has no foreign keys
-    // by design, so a line naming a gone session is welcome.
-    log(db, { text: `refused: unknown session "${id}"`, sessionId: id, agentId });
+    // by design, so a line naming a gone session is welcome — but its
+    // session_id column is a uuid, so only an id this server could have
+    // minted gets a row. Garbage ids just get their 404.
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+      log(db, { text: `refused: unknown session "${id}"`, sessionId: id, agentId });
+    }
     return Effect.fail({ _tag: "UnknownSession", id });
   }
   return Effect.succeed(qemu);
@@ -388,8 +406,10 @@ const respond = HttpRouter.middleware<{ handles: ApiError }>()((handler) =>
     Effect.catchTags(respondTable),
     Effect.catchDefect((defect) =>
       Effect.sync(() => {
-        // A defect is a bug: the stack names the spot, so it rides the line.
-        log(db, { text: `request handler defect: ${(defect as Error).stack ?? String(defect)}` });
+        // A defect is a bug: the stack names the spot, so it rides the
+        // line. A defect is also by definition not ours, so the boundary
+        // that keeps the process alive assumes nothing about its shape.
+        log(db, { text: `request handler defect: ${defect instanceof Error ? defect.stack ?? defect.message : String(defect)}` });
         return errorBody(500, "internal error");
       })
     ),
