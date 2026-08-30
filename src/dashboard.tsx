@@ -97,7 +97,7 @@ const SessionList: FC<SessionListProps> = ({ sessions }) => (
 );
 
 const SessionError: FC = () => (
-  <div class="empty-state empty-state--error" role="alert">
+  <div class="empty-state empty-state--error">
     <p>Sessions are unavailable.</p>
     <span>Try refreshing in a moment.</span>
   </div>
