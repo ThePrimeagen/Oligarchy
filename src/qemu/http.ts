@@ -150,6 +150,15 @@ export const errorResponses = HttpRouter.middleware(
         : ErrorReporter.report(cause).pipe(
             Effect.andThen(Effect.succeed(internalServerErrorResponse)),
           );
-    }),
+    }).pipe(
+      Effect.map((response) =>
+        response.status === 415
+          ? HttpServerResponse.jsonUnsafe(
+              { error: "unsupported content type" },
+              { status: 415 },
+            )
+          : response,
+      ),
+    ),
   { global: true },
 );
