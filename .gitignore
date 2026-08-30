@@ -4,3 +4,4 @@
 /OVMF_VARS.fd
 /.env
 /node_modules
+/.wrangler
