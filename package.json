@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "dev": "wrangler dev",
     "test": "node --test --experimental-strip-types src/qmp/json-stream.test.ts src/qemu/keys.test.ts",
     "lint": "oxlint --type-aware --type-check",
     "db:generate": "drizzle-kit generate"
@@ -13,7 +14,8 @@
     "drizzle-kit": "^0.31.10",
     "oxlint": "^1.80.0",
     "oxlint-tsgolint": "^7.0.2001",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "wrangler": "^4.127.1"
   },
   "dependencies": {
     "@cursor/sdk": "^1.0.30",
