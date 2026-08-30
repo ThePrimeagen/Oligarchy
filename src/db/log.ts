@@ -42,7 +42,10 @@ export function log(entry: string | LogEntry): void {
     try {
       await db.insert(logs).values(line);
     } catch (err) {
-      console.error(`db: log insert failed: ${(err as Error).message}`);
+      // Drizzle buries the reason (ECONNREFUSED etc.) in the cause; its own
+      // message is the failed SQL and the params — noise here.
+      const e = err as Error;
+      console.error(`db: log insert failed: ${e.cause instanceof Error ? e.cause.message : e.message}`);
     }
   });
 }
