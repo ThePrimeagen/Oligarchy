@@ -1,6 +1,6 @@
 # The control-plane database
 
-One PlanetScale Postgres database holds the record of everything the proxy does. `src/db/schema.ts` defines the five tables (sessions, agent_runs, actions, images, logs); `src/db/ops.ts` is the only code that touches them, except logs, which belongs to `log()` in `src/db/log.ts` — a line to stderr and the same line as a row, at a severity level, attributed to a session and an agent when the caller has them, taking the same client. The proxy records through this interface as it runs: the session row lands before any boot work (`downloading` for a url iso), every QMP exchange opens and closes an action row via the recorder hook threaded into the qemu client, a get-image's PNG rides the closing transaction, and `/stop` closes the session with its verdict. Alongside those rows, every major action narrates itself through `log()` — starting, running, image served, chords sent, stopped, shutdown, iso cache traffic — with how long the work took, so the logs alone tell the session's story and the state tables carry the exact records.
+One PlanetScale Postgres database holds the record of everything the proxy does. `src/db/schema.ts` defines the five tables (sessions, agent_runs, actions, images, logs); `src/db/ops.ts` is the only code that touches them, except logs, which belongs to `log()` in `src/db/log.ts` — a line to stderr and the same line as a row, at a severity level, attributed to a session and an agent when the caller has them, taking the same client. The proxy records through this interface as it runs: the session row lands before any start work (`downloading` for a url iso), every QMP exchange opens and closes an action row via the recorder hook threaded into the qemu client, a get-image's PNG rides the closing transaction, and `/stop` closes the session with its verdict. Alongside those rows, every major action narrates itself through `log()` — starting, running, image served, chords sent, stopped, shutdown, iso cache traffic — with how long the work took, and every refused or failed request is one error line attributed as far as the handler knew, so the logs alone tell the session's story, refusals included, and the state tables carry the exact records.
 
 ## The state that threads through
 
@@ -12,7 +12,7 @@ One PlanetScale Postgres database holds the record of everything the proxy does.
 | --- | --- | --- |
 | `connectDatabase` | — | nothing; builds the `Db` client from `DATABASE_URL`, throws when unset |
 | `insertSession` | `db, id, config, status` | the session row, before any boot work; status `downloading` for a url iso, else `running` |
-| `sessionRunning` | `db, id` | status → `running` once the QEMU is up after a download |
+| `sessionRunning` | `db, id` | status → `running` once the QEMU is up, whatever status the session entered in |
 | `endSession` | `db, id, status, reason` | verdict (`succeeded`/`failed`/`aborted`), reason, `ended_at` — on the session and its open agent runs, in one transaction stamped by one `now()` |
 | `registerAgent` | `db, agentId, sessionId` | the agent_runs row tying a cloud agent to the session it drives; a second registration is a database error by design |
 | `startAction` | `db, {sessionId, agentId, request: QemuCommand}` | opens the action row the moment the command goes out; returns its auto-incrementing id |
@@ -33,7 +33,7 @@ A still-running exchange has no state yet: `state`, `response`, and `finished_at
 
 - **info** — the default, and the normal story: the proxy listening, a session starting / running / stopped, an image served, chords sent, iso cache hits and downloads.
 - **warning** — something was off but the operation went on: a download heartbeat that failed to write, an iso with no published sha256 to check against.
-- **error** — an operation failed: one line per failed request from the HTTP boundary's catch-all, a session that would not stop or record at shutdown.
+- **error** — an operation failed: one line per failed request from the HTTP boundary (a refused request is a failed request, so a bad key string or an unknown session id lands here too, attributed when the id is one this server could have minted), an action close that could not be recorded, a session that would not stop or record at shutdown, and a defect — a bug behind the client's generic 500 — with its stack.
 - **fatal** — the proxy is going down, written right before the exit: the listen failing at boot (the port is taken).
 
 Levels are severity of the operation, not of the state it records: a `/stop` carrying a `failed` verdict still logs at info — the stop worked; the verdict lives on the session row. For the same reason a failed `/start` is one error line from the boundary, not two — attributed to the session and agent as far as the handler got before it threw, with the session row's `failed` status and reason as the state record.

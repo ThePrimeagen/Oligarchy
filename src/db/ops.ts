@@ -29,7 +29,7 @@ export async function insertSession(db: Db, id: string, config: unknown, status:
   await db.insert(sessions).values({ id, config, status });
 }
 
-/** Flips a session out of "downloading" once its QEMU is up. */
+/** Marks the session running once its QEMU is up. */
 export async function sessionRunning(db: Db, id: string): Promise<void> {
   await db.update(sessions).set({ status: "running" }).where(eq(sessions.id, id));
 }
@@ -65,8 +65,8 @@ export async function registerAgent(db: Db, agentId: string, sessionId: string):
  */
 export type Action = {
   sessionId: string;
-  /** Absent when the request was not attributed to an agent (manual use). */
-  agentId: string | undefined;
+  /** The agent driving the session — every request names one. */
+  agentId: string;
   request: QemuCommand;
 };
 

@@ -19,8 +19,8 @@ import { log } from "../db/log.ts";
 import type { Db } from "../db/ops.ts";
 
 // Who an iso event is logged for: the session whose /start needs the iso,
-// and the agent driving it when there is one.
-type Who = { sessionId: string; agentId?: string };
+// and the agent driving it.
+type Who = { sessionId: string; agentId: string };
 
 const ISO_DIR = join(homedir(), ".oligarchy", "isos");
 const MANIFEST_PATH = join(ISO_DIR, "manifest.json");
