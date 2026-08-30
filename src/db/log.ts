@@ -2,30 +2,14 @@
 // line into the logs table, attributed to a QEMU session and a cloud agent
 // when the caller has them:
 //
-//   log("iso: cache pruned");
-//   log({ text: `iso: downloading ${url}`, sessionId, agentId });
+//   log(db, "iso: cache pruned");
+//   log(db, { text: `iso: downloading ${url}`, sessionId, agentId });
 //
-// The database is DATABASE_URL (PlanetScale Postgres); a process that
-// imports this module without it set fails at startup.
+// The db is the one client connectDatabase() built (see ops.ts); this file
+// never touches connection details.
 
-import { drizzle } from "drizzle-orm/node-postgres";
+import type { Db } from "./ops.ts";
 import { logs } from "./schema.ts";
-
-// An empty string must fail too: pg would silently fall back to its
-// localhost defaults instead of connecting to the real database.
-const url = process.env.DATABASE_URL;
-if (url === undefined || url === "") {
-  throw new Error("db: DATABASE_URL is not set");
-}
-
-// Drizzle creates and owns the pg pool. allowExitOnIdle: that pool is
-// background machinery and must never keep the importing process alive.
-const db = drizzle({ connection: { connectionString: url, allowExitOnIdle: true } });
-// An idle client dropped by the server (a restart, a failover) surfaces as a
-// pool error; without a listener Node crashes the process on it.
-db.$client.on("error", (err) => {
-  console.error(`db: pool error: ${err.message}`);
-});
 
 export type LogEntry = {
   text: string;
@@ -40,7 +24,7 @@ export type LogEntry = {
 // and never fails the caller or the lines behind it.
 let chain: Promise<void> = Promise.resolve();
 
-export function log(entry: string | LogEntry): void {
+export function log(db: Db, entry: string | LogEntry): void {
   const line: LogEntry = typeof entry === "string" ? { text: entry } : entry;
   console.error(line.text);
   chain = chain.then(async () => {

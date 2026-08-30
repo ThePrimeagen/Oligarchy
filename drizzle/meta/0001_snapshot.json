@@ -1,6 +1,6 @@
 {
-  "id": "ae0e9574-9b9a-4cac-a051-85d1f02ef834",
-  "prevId": "993740ce-178a-45d3-af50-22d7919125a9",
+  "id": "759cc127-d63f-48f0-851b-8e0f377cc451",
+  "prevId": "fc55b77e-4315-4672-b63d-19f1677f7cf8",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -37,22 +37,22 @@
           "primaryKey": false,
           "notNull": false
         },
-        "kind": {
-          "name": "kind",
-          "type": "action_kind",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
         "request": {
           "name": "request",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true
         },
-        "error": {
-          "name": "error",
-          "type": "text",
+        "state": {
+          "name": "state",
+          "type": "action_state",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "response": {
+          "name": "response",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -63,11 +63,11 @@
           "notNull": true,
           "default": "now()"
         },
-        "duration_ms": {
-          "name": "duration_ms",
-          "type": "integer",
+        "finished_at": {
+          "name": "finished_at",
+          "type": "timestamp with time zone",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         }
       },
       "indexes": {
@@ -228,6 +228,77 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.logs": {
+      "name": "logs",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigint",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "logs_id_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "9223372036854775807",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "session_id": {
+          "name": "session_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "agent_id": {
+          "name": "agent_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "text": {
+          "name": "text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "logs_session_id_idx": {
+          "name": "logs_session_id_idx",
+          "columns": [
+            {
+              "expression": "session_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.sessions": {
       "name": "sessions",
       "schema": "",
@@ -282,15 +353,12 @@
     }
   },
   "enums": {
-    "public.action_kind": {
-      "name": "action_kind",
+    "public.action_state": {
+      "name": "action_state",
       "schema": "public",
       "values": [
-        "start",
-        "send-keys",
-        "get-image",
-        "stop",
-        "finish"
+        "completed",
+        "failed"
       ]
     },
     "public.session_status": {
