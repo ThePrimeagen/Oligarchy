@@ -9,7 +9,9 @@
 // boot, and every session, QMP exchange, image, and iso event is recorded
 // as it happens. Major actions also land in the logs table through log():
 // the lifecycle at info with how long each took, failed requests at error,
-// the death of the proxy at fatal (see field-guide/database.md).
+// the death of the proxy at fatal (see field-guide/database.md). Error and
+// fatal lines also go to Sentry. 4xx request refusals stay in the logs
+// table and skip Sentry — they are the client's mistake.
 //
 //   POST /start      -> {"iso"?, "disk"?, "agent"}; boots a qemu, returns
 //                       {"id": uuid}; an http(s) iso is downloaded into
@@ -46,10 +48,13 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstab
 import { NodeHttpServer, NodeRuntime } from "@effect/platform-node";
 import { flushLogs, log } from "../db/log.ts";
 import { connectDatabase, endSession, finishAction, insertSession, registerAgent, sessionRunning, startAction } from "../db/ops.ts";
+import { flushSentry, initSentry } from "../sentry.ts";
 import { createDisk, createQemu, screendump, sendKey, start, stop, type Qemu } from "./client.ts";
 import { getIso } from "./iso.ts";
 import { parseKeys } from "./keys.ts";
 import { collectStats, startCpuSampler } from "./stats.ts";
+
+initSentry();
 
 const defaultIso = process.argv[2] ?? process.env.OLIGARCHY_ISO;
 if (defaultIso === undefined) {
@@ -93,7 +98,7 @@ function recorder(sessionId: string, agentId: string): QemuExchangeRecorder {
       try {
         await finishAction(db, id, outcome);
       } catch (err) {
-        log(db, { level: "error", text: `db: closing action ${id} failed: ${errorDetail(err)}`, sessionId, agentId });
+        log(db, { level: "error", text: `db: closing action ${id} failed: ${errorDetail(err)}`, sessionId, agentId }, { cause: err });
         throw err;
       }
     };
@@ -112,8 +117,8 @@ function recorder(sessionId: string, agentId: string): QemuExchangeRecorder {
 type ApiError =
   | { readonly _tag: "BadRequest"; readonly message: string; readonly sessionId?: string; readonly agentId?: string }
   | { readonly _tag: "UnknownSession"; readonly id: string; readonly agentId?: string }
-  | { readonly _tag: "StartFailed"; readonly message: string; readonly sessionId: string; readonly agentId: string }
-  | { readonly _tag: "ExchangeFailed"; readonly message: string; readonly sessionId: string; readonly agentId: string }
+  | { readonly _tag: "StartFailed"; readonly message: string; readonly cause: unknown; readonly sessionId: string; readonly agentId: string }
+  | { readonly _tag: "ExchangeFailed"; readonly message: string; readonly cause: unknown; readonly sessionId: string; readonly agentId: string }
   | { readonly _tag: "Internal"; readonly cause: unknown; readonly sessionId: string; readonly agentId?: string };
 
 function badRequest(message: string, who: { sessionId?: string; agentId?: string } = {}): ApiError {
@@ -123,11 +128,11 @@ function badRequest(message: string, who: { sessionId?: string; agentId?: string
 // The cast is the same contract the rest of the repo leans on: everything
 // the wrapped subsystems throw is an Error.
 function startFailed(err: unknown, who: { sessionId: string; agentId: string }): ApiError {
-  return { _tag: "StartFailed", message: (err as Error).message, ...who };
+  return { _tag: "StartFailed", message: (err as Error).message, cause: err, ...who };
 }
 
 function exchangeFailed(err: unknown, who: { sessionId: string; agentId: string }): ApiError {
-  return { _tag: "ExchangeFailed", message: (err as Error).message, ...who };
+  return { _tag: "ExchangeFailed", message: (err as Error).message, cause: err, ...who };
 }
 
 function internal(cause: unknown, who: { sessionId: string; agentId?: string }): ApiError {
@@ -235,7 +240,7 @@ async function launchQemu(qemu: Qemu, cfg: { disk?: string; agent: string }, iso
     // The start error is the one worth seeing if cleanup fails too.
     await stop(qemu).catch(() => {});
     await endSession(db, qemu.id, "failed", (err as Error).message).catch((e: unknown) => {
-      log(db, { level: "error", text: `db: recording a failed start failed too: ${(e as Error).message}`, sessionId: qemu.id, agentId: cfg.agent });
+      log(db, { level: "error", text: `db: recording a failed start failed too: ${(e as Error).message}`, sessionId: qemu.id, agentId: cfg.agent }, { cause: e });
     });
     throw err;
   }
@@ -319,7 +324,7 @@ const routes = HttpRouter.use((router) =>
             Effect.promise(async () => {
               if (opened !== undefined && outcome !== undefined && outcome.state === "failed") {
                 await finishAction(db, opened, outcome).catch((e: unknown) => {
-                  log(db, { level: "error", text: `db: recording a failed screendump failed too: ${(e as Error).message}`, sessionId: qemu.id, agentId: agent });
+                  log(db, { level: "error", text: `db: recording a failed screendump failed too: ${(e as Error).message}`, sessionId: qemu.id, agentId: agent }, { cause: e });
                 });
               }
             })
@@ -397,17 +402,26 @@ function errorBody(status: number, message: string): HttpServerResponse.HttpServ
 // One error line per failed request — method, url, and what went wrong —
 // attributed as far as the route knew, then the wire answer. The log line
 // and the client's message differ only for Internal: the client gets no
-// internals. When Sentry arrives, its captureException belongs here and
-// in the defect arm below, nowhere else.
+// internals. Sentry is fed from log(): 5xx send the cause, 4xx skip
+// (the client's mistake), and the defect arm below passes the defect.
 function answer(
   request: HttpServerRequest.HttpServerRequest,
   status: number,
   message: string,
-  who: { sessionId?: string; agentId?: string },
+  who: { sessionId?: string; agentId?: string; cause?: unknown },
   detail = message,
 ): Effect.Effect<HttpServerResponse.HttpServerResponse> {
   return Effect.sync(() => {
-    log(db, { level: "error", text: `${request.method} ${request.originalUrl} failed: ${detail}`, ...who });
+    log(
+      db,
+      {
+        level: "error",
+        text: `${request.method} ${request.originalUrl} failed: ${detail}`,
+        sessionId: who.sessionId,
+        agentId: who.agentId,
+      },
+      status < 500 ? { skipSentry: true } : { cause: who.cause },
+    );
     return errorBody(status, message);
   });
 }
@@ -446,10 +460,14 @@ const respond = HttpRouter.middleware<{ handles: ApiError }>()((handler) =>
           // A defect is a bug: the stack names the spot, so it rides the
           // line. A defect is also by definition not ours, so the boundary
           // that keeps the process alive assumes nothing about its shape.
-          log(db, {
-            level: "error",
-            text: `${request.method} ${request.originalUrl} failed: ${defect instanceof Error ? defect.stack ?? defect.message : String(defect)}`,
-          });
+          log(
+            db,
+            {
+              level: "error",
+              text: `${request.method} ${request.originalUrl} failed: ${defect instanceof Error ? defect.stack ?? defect.message : String(defect)}`,
+            },
+            { cause: defect },
+          );
           return errorBody(500, "internal error");
         })
       ),
@@ -472,7 +490,7 @@ async function stopTimedOutSessions(): Promise<void> {
       } catch (err) {
         // stop() has already destroyed the socket and signaled QEMU before
         // removing the directory, so still close the database record.
-        log(db, { level: "error", text: `session ${qemu.id}: timeout cleanup failed: ${errorDetail(err)}`, sessionId: qemu.id });
+        log(db, { level: "error", text: `session ${qemu.id}: timeout cleanup failed: ${errorDetail(err)}`, sessionId: qemu.id }, { cause: err });
       }
       await endSession(db, qemu.id, "timed_out", SESSION_TIMEOUT_REASON);
       log(db, { text: `session ${qemu.id}: timed out; ${SESSION_TIMEOUT_REASON}`, sessionId: qemu.id });
@@ -485,7 +503,7 @@ async function stopTimedOutSessions(): Promise<void> {
         level: "error",
         text: `session ${timedOut[i].qemu.id}: recording timeout failed: ${errorDetail(result.reason)}`,
         sessionId: timedOut[i].qemu.id,
-      });
+      }, { cause: result.reason });
     }
   }
 }
@@ -499,7 +517,7 @@ const sessionTimeoutTimer = setInterval(() => {
   timeoutCleanupRunning = true;
   timeoutCleanup = stopTimedOutSessions()
     .catch((err: unknown) => {
-      log(db, { level: "error", text: `session timeout cleanup failed: ${errorDetail(err)}` });
+      log(db, { level: "error", text: `session timeout cleanup failed: ${errorDetail(err)}` }, { cause: err });
     })
     .finally(() => {
       timeoutCleanupRunning = false;
@@ -527,7 +545,7 @@ const drainSessions = Layer.effectDiscard(
           } catch (err) {
             // Logged here, where the session is known — the sessions that
             // fail are the ones whose absence from the story matters most.
-            log(db, { level: "error", text: `shutdown: session ${qemu.id}: ${(err as Error).message}`, sessionId: qemu.id });
+            log(db, { level: "error", text: `shutdown: session ${qemu.id}: ${(err as Error).message}`, sessionId: qemu.id }, { cause: err });
             throw err;
           }
         }),
@@ -549,8 +567,8 @@ const main = Layer.effectDiscard(
   Effect.sync(() => {
     log(db, `oligarchy proxy listening on ${addr}`);
     server.on("error", (err) => {
-      log(db, { level: "fatal", text: `proxy: ${err.message}` });
-      void flushLogs().then(() => process.exit(1));
+      log(db, { level: "fatal", text: `proxy: ${err.message}` }, { cause: err });
+      void flushLogs().then(flushSentry).then(() => process.exit(1));
     });
   }),
 ).pipe(
@@ -561,18 +579,19 @@ const main = Layer.effectDiscard(
 // The exit contract is unchanged: a clean shutdown (signals included) exits
 // 0, a session whose cleanup failed makes it 1, and a server that could not
 // come up is a fatal line and exit 1. Every exit path flushes the log chain
-// first — the last lines are the ones most worth having when the proxy is
-// gone — and runMain's own error report is off: the fatal line is the story.
+// and Sentry first — the last lines are the ones most worth having when the
+// proxy is gone — and runMain's own error report is off: the fatal line is
+// the story.
 NodeRuntime.runMain(
   Layer.launch(main).pipe(
     // The platform's ServeError says nothing itself; the reason (the port
     // is taken) is the cause underneath.
-    Effect.tapError((err) => Effect.sync(() => log(db, { level: "fatal", text: `proxy: ${errorDetail(err)}` }))),
+    Effect.tapError((err) => Effect.sync(() => log(db, { level: "fatal", text: `proxy: ${errorDetail(err)}` }, { cause: err }))),
   ),
   {
     disableErrorReporting: true,
     teardown: (exit, onExit) => {
-      void flushLogs().then(() => {
+      void flushLogs().then(flushSentry).then(() => {
         if (Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)) {
           return onExit(1);
         }
