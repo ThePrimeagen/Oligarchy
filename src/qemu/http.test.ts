@@ -35,7 +35,10 @@ const handlers = HttpApiBuilder.group(api, "control", (handlers) =>
   }),
 );
 
-const testServices = [handlers, NodeHttpServer.layerHttpServices];
+const testServices = Layer.mergeAll(
+  handlers,
+  NodeHttpServer.layerHttpServices,
+);
 
 describe("Effect HTTP contract happy path", () => {
   it("round trips every JSON endpoint through the generated client", async () => {
