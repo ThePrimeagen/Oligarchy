@@ -58,11 +58,19 @@ if (defaultIso === undefined) {
 }
 const addr = process.env.OLIGARCHY_ADDR ?? "127.0.0.1:42069";
 const [host, port] = addr.split(":");
+const SESSION_TIMEOUT_MS = 10 * 60 * 1000;
+const SESSION_TIMEOUT_CHECK_MS = 10_000;
+const SESSION_TIMEOUT_REASON = "no command received for 10 minutes";
 
 // A control plane that cannot record its sessions must not boot.
 const db = connectDatabase();
 
-const sessions = new Map<string, Qemu>();
+type LiveSession = {
+  qemu: Qemu;
+  lastCommandAt: number;
+};
+
+const sessions = new Map<string, LiveSession>();
 const cpuSampler = startCpuSampler();
 
 // Drizzle buries the reason (ECONNREFUSED etc.) in the cause; its own
@@ -130,11 +138,14 @@ function session(id: string, agentId?: string): Effect.Effect<Qemu, ApiError> {
   if (id === "") {
     return Effect.fail(badRequest("session id is required", { agentId }));
   }
-  const qemu = sessions.get(id);
-  if (qemu === undefined) {
+  const live = sessions.get(id);
+  if (live === undefined) {
     return Effect.fail({ _tag: "UnknownSession", id, agentId });
   }
-  return Effect.succeed(qemu);
+  // A valid request for a live session is a command even when the QMP
+  // exchange it starts later fails.
+  live.lastCommandAt = Date.now();
+  return Effect.succeed(live.qemu);
 }
 
 // What each request must say, stated once as schemas: the schema is the
@@ -255,7 +266,7 @@ function startSession(cfg: typeof StartBody.Type, started: number): Effect.Effec
       try: () => launchQemu(qemu, cfg, isoName),
       catch: (err) => startFailed(err, { sessionId: qemu.id, agentId: cfg.agent }),
     });
-    sessions.set(qemu.id, qemu);
+    sessions.set(qemu.id, { qemu, lastCommandAt: Date.now() });
     // Wall time from request to a live QMP handshake, download included —
     // per-exchange timing lives on the action rows.
     log(db, { text: `session ${qemu.id}: running; started in ${Date.now() - started}ms`, sessionId: qemu.id, agentId: cfg.agent });
@@ -445,6 +456,57 @@ const respond = HttpRouter.middleware<{ handles: ApiError }>()((handler) =>
     )
   ), { global: true });
 
+// Sessions nobody is driving are killed after ten minutes. The timer is
+// bounded by the sessions map, does not hold the server open, and catches
+// every tick so cleanup trouble cannot bring down the proxy.
+async function stopTimedOutSessions(): Promise<void> {
+  const now = Date.now();
+  const timedOut = [...sessions.values()].filter((live) => now - live.lastCommandAt >= SESSION_TIMEOUT_MS);
+  for (const live of timedOut) {
+    sessions.delete(live.qemu.id);
+  }
+  const results = await Promise.allSettled(
+    timedOut.map(async ({ qemu }) => {
+      try {
+        await stop(qemu);
+      } catch (err) {
+        // stop() has already destroyed the socket and signaled QEMU before
+        // removing the directory, so still close the database record.
+        log(db, { level: "error", text: `session ${qemu.id}: timeout cleanup failed: ${errorDetail(err)}`, sessionId: qemu.id });
+      }
+      await endSession(db, qemu.id, "timed_out", SESSION_TIMEOUT_REASON);
+      log(db, { text: `session ${qemu.id}: timed out; ${SESSION_TIMEOUT_REASON}`, sessionId: qemu.id });
+    }),
+  );
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i];
+    if (result.status === "rejected") {
+      log(db, {
+        level: "error",
+        text: `session ${timedOut[i].qemu.id}: recording timeout failed: ${errorDetail(result.reason)}`,
+        sessionId: timedOut[i].qemu.id,
+      });
+    }
+  }
+}
+
+let timeoutCleanup: Promise<void> = Promise.resolve();
+let timeoutCleanupRunning = false;
+const sessionTimeoutTimer = setInterval(() => {
+  if (timeoutCleanupRunning) {
+    return;
+  }
+  timeoutCleanupRunning = true;
+  timeoutCleanup = stopTimedOutSessions()
+    .catch((err: unknown) => {
+      log(db, { level: "error", text: `session timeout cleanup failed: ${errorDetail(err)}` });
+    })
+    .finally(() => {
+      timeoutCleanupRunning = false;
+    });
+}, SESSION_TIMEOUT_CHECK_MS);
+sessionTimeoutTimer.unref();
+
 // Settled, not raced: one session failing to stop or record must not cut
 // short the cleanup of the others. The finalizer runs when the server's
 // scope closes — a SIGINT/SIGTERM interrupts runMain's fiber and every
@@ -453,9 +515,11 @@ let shutdownFailed = false;
 const drainSessions = Layer.effectDiscard(
   Effect.addFinalizer(() =>
     Effect.promise(async () => {
+      clearInterval(sessionTimeoutTimer);
+      await timeoutCleanup;
       log(db, `proxy: shutting down; stopping ${sessions.size} sessions`);
       const results = await Promise.allSettled(
-        [...sessions.values()].map(async (qemu) => {
+        [...sessions.values()].map(async ({ qemu }) => {
           try {
             await stop(qemu);
             await endSession(db, qemu.id, "aborted", "proxy shutdown");
