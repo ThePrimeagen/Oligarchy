@@ -1,8 +1,7 @@
 # Driving a guest
 
 How to operate a session over the control plane: send keys, look, decide.
-Everything here was learned driving a full Omarchy install to the desktop;
-each rule is the difference between a three-second step and a lost hour.
+Everything here was learned driving a full Omarchy install to the desktop.
 
 ## The loop
 
@@ -27,19 +26,19 @@ never a key.
 ## Rendering lags the keys
 
 The guest can accept keys seconds before it draws them — an empty prompt does
-not mean the keys were lost, and a freshly launched terminal swallows
-whatever arrives before its shell is up. Wait out the launch (image until the
-prompt exists), then type. If typed text has not appeared, take another image
-before re-sending: double-typed input is worse than late input.
+not mean the keys were lost. Keys sent while a terminal was still launching
+never reached its shell. Wait out the launch (image until the prompt exists),
+then type. If typed text has not appeared, take another image before
+re-sending: double-typed input is worse than late input.
 
 ## Focus is mouse-shaped
 
-The control plane has no mouse, and Wayland compositors focus what the
-pointer hovers. Window-manager chords (`<M-Enter>`, `<M-2>`, `<M-w>`) land no
-matter what has focus; plain text lands wherever the pointer says. When a
-desktop plays focus games, switch to a TTY with `<C-A-F3>` — a text console
-is focus-proof, and a username/password login there is the cleanest proof of
-a working system.
+The control plane has no mouse, and Hyprland as Omarchy ships it focuses the
+window under the pointer. Window-manager chords (`<M-Enter>`, `<M-2>`,
+`<M-w>`) land no matter what has focus; plain text lands wherever the pointer
+says. When a desktop plays focus games, switch to a TTY with `<C-A-F3>` — a
+text console is focus-proof, and a username/password login there is the
+cleanest proof of a working system.
 
 ## Menus want arrows
 
