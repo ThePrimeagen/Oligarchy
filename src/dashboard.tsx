@@ -147,7 +147,9 @@ const app = new Hono<{ Bindings: Bindings }>();
 
 app.use(async (context, next) => {
   if (new URL(context.req.url).hostname === "clicker.oligarchy.trm.sh") {
-    return context.html(clickerPage);
+    return context.html(clickerPage, 200, {
+      "cache-control": "public, max-age=31536000, immutable",
+    });
   }
   await next();
 });
