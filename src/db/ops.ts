@@ -17,9 +17,21 @@ export type Db = NodePgDatabase;
  * its sessions must not boot, so a missing url throws instead of degrading.
  */
 export function connectDatabase(): Db {
-  const url = process.env.DATABASE_URL;
+  let url = process.env.DATABASE_URL;
   if (url === undefined || url === "") {
     throw new Error("db: DATABASE_URL is not set");
+  }
+  // pg-connection-string treats sslrootcert as a file path. libpq's
+  // sslrootcert=system means the system CA store, which is already pg's
+  // default — drop the param so the driver does not open a file named
+  // "system" (ENOENT). sslmode=verify-full stays and does the verifying.
+  const q = url.indexOf("?");
+  if (q !== -1) {
+    const params = url.slice(q + 1).split("&");
+    const kept = params.filter((p) => p !== "sslrootcert=system");
+    if (kept.length !== params.length) {
+      url = kept.length === 0 ? url.slice(0, q) : url.slice(0, q + 1) + kept.join("&");
+    }
   }
   return drizzle(url);
 }
