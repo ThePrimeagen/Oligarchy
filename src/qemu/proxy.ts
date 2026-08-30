@@ -30,7 +30,7 @@ import { createServer } from "node:http";
 import { join } from "node:path";
 import { connectDatabase, endSession, finishAction, insertSession, registerAgent, sessionRunning, startAction } from "../db/ops.ts";
 import { createDisk, createQemu, screendump, sendKey, start, stop, type Qemu } from "./client.ts";
-import { api } from "./http.ts";
+import { api, errorResponses } from "./http.ts";
 import { getIso } from "./iso.ts";
 import { parseKeys } from "./keys.ts";
 import { collectStats, startCpuSampler } from "./stats.ts";
@@ -234,7 +234,10 @@ const controlLayer = HttpApiBuilder.group(api, "control", (handlers) =>
 );
 
 const apiLayer = HttpRouter.serve(
-  HttpApiBuilder.layer(api).pipe(Layer.provide(controlLayer)),
+  Layer.mergeAll(
+    HttpApiBuilder.layer(api).pipe(Layer.provide(controlLayer)),
+    errorResponses,
+  ),
   { disableLogger: true },
 ).pipe(
   Layer.provide(

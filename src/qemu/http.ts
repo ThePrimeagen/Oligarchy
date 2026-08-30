@@ -1,7 +1,13 @@
-import { Schema } from "effect";
+import { Cause, Effect, ErrorReporter, Schema } from "effect";
+import {
+  HttpRouter,
+  HttpServerError,
+  HttpServerResponse,
+} from "effect/unstable/http";
 import {
   HttpApi,
   HttpApiEndpoint,
+  HttpApiError,
   HttpApiGroup,
   HttpApiSchema,
 } from "effect/unstable/httpapi";
@@ -89,3 +95,52 @@ const control = HttpApiGroup.make("control").add(
 );
 
 export const api = HttpApi.make("oligarchy").add(control);
+
+export const errorResponses = HttpRouter.middleware(
+  (httpEffect) =>
+    Effect.catchCause(httpEffect, (cause) => {
+      const failure = Cause.squash(cause);
+      if (HttpApiError.HttpApiSchemaError.is(failure)) {
+        if (
+          failure.kind === "Params" ||
+          failure.kind === "Headers" ||
+          failure.kind === "Query" ||
+          failure.kind === "Payload"
+        ) {
+          return Effect.succeed(
+            HttpServerResponse.jsonUnsafe(
+              {
+                error: `invalid request ${failure.kind.toLowerCase()}: ${
+                  failure.cause.message
+                }`,
+              },
+              { status: 400 },
+            ),
+          );
+        }
+        return ErrorReporter.report(cause).pipe(
+          Effect.andThen(
+            Effect.succeed(
+              HttpServerResponse.jsonUnsafe(
+                { error: "internal server error" },
+                { status: 500 },
+              ),
+            ),
+          ),
+        );
+      }
+      if (
+        HttpServerError.isHttpServerError(failure) &&
+        failure.reason._tag === "RouteNotFound"
+      ) {
+        return Effect.succeed(
+          HttpServerResponse.jsonUnsafe(
+            { error: "not found" },
+            { status: 404 },
+          ),
+        );
+      }
+      return Effect.failCause(cause);
+    }),
+  { global: true },
+);
