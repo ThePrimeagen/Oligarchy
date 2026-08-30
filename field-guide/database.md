@@ -4,13 +4,13 @@ One PlanetScale Postgres database holds the record of everything the proxy does.
 
 ## The state that threads through
 
-`connectDatabase()` builds one drizzle client from `DATABASE_URL` (the password rides inside the url). That client is the server state: every operation below is a standalone function taking it as its first argument, so no other code carries connection details around. A missing `DATABASE_URL` throws — a control plane that cannot record its sessions is not allowed to limp into requests (see the [philosophy](philosophy.md): startup requirements fail at startup).
+`connectDatabase()` builds one drizzle client from `DATABASE_URL` (the password rides inside the url). That client is the server state: every operation below is a standalone function taking it as its first argument, so no other code carries connection details around. A missing or unparseable `DATABASE_URL` throws — a control plane that cannot record its sessions is not allowed to limp into requests (see the [philosophy](philosophy.md): startup requirements fail at startup). One parameter is rewritten on the way in: PlanetScale urls end in `sslmode=verify-full&sslrootcert=system`, and node-postgres reads `sslrootcert` as a literal file path — a file named `system` does not exist, so the first query would die with ENOENT. Node's default TLS verification already is the system trust store that value asks for, so `connectDatabase()` drops the parameter and passes the rest of the url through, `sslmode=verify-full` included.
 
 ## The operations
 
 | Function | Arguments | What it writes |
 | --- | --- | --- |
-| `connectDatabase` | — | nothing; builds the `Db` client from `DATABASE_URL`, throws when unset |
+| `connectDatabase` | — | nothing; builds the `Db` client from `DATABASE_URL` (dropping a `sslrootcert=system` parameter), throws when unset or unparseable |
 | `insertSession` | `db, id, config, status` | the session row, before any boot work; status `downloading` for a url iso, else `running` |
 | `sessionRunning` | `db, id` | status → `running` once the QEMU is up, whatever status the session entered in |
 | `endSession` | `db, id, status, reason` | verdict (`succeeded`/`failed`/`aborted`/`timed_out`), reason, `ended_at` — on the session and its open agent runs, in one transaction stamped by one `now()` |
