@@ -201,7 +201,7 @@ export async function sendKey(qemu: Qemu, keys: QemuKeyValue[], record?: QemuExc
 
 // QEMU INPUT_EVENT_ABS_MAX: tablet axes are 0..0x7fff.
 const TABLET_AXIS_MAX = 0x7fff;
-// Two down/up pairs in one events list look like one click to the guest.
+// guest double-click detection needs a gap between successive press/release pairs
 const MULTI_CLICK_GAP_MS = 50;
 
 export async function sendMouse(
@@ -220,17 +220,19 @@ export async function sendMouse(
     await execute(qemu, "input-send-event", { events: abs }, record);
     return;
   }
+  // usb-tablet applies the event list then syncs once: down and up in the same
+  // list leave the button unchanged, so the guest never sees a click.
   for (let i = 0; i < clicks; i++) {
     await execute(
       qemu,
       "input-send-event",
-      {
-        events: [
-          ...abs,
-          { type: "btn", data: { button, down: true } },
-          { type: "btn", data: { button, down: false } },
-        ],
-      },
+      { events: [...abs, { type: "btn", data: { button, down: true } }] },
+      record,
+    );
+    await execute(
+      qemu,
+      "input-send-event",
+      { events: [{ type: "btn", data: { button, down: false } }] },
       record,
     );
     if (i + 1 < clicks) {
