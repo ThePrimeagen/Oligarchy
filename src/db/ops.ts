@@ -65,8 +65,8 @@ export async function registerAgent(db: Db, agentId: string, sessionId: string):
  */
 export type Action = {
   sessionId: string;
-  /** Absent when the request was not attributed to an agent (manual use). */
-  agentId: string | undefined;
+  /** The agent driving the session — every request names one. */
+  agentId: string;
   request: QemuCommand;
 };
 

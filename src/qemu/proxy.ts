@@ -120,8 +120,10 @@ function session(id: string): Effect.Effect<Qemu, ApiError> {
 // the decode error's own words. agent is required on every session-driving
 // request — this control plane is driven by agents, and a request that
 // names no agent has no business being sent (the CLI already refuses to).
-// /stop stays agentless by design: a stop exchanges nothing over QMP and
-// is not an action, it carries the session's verdict instead.
+// The wire key is "agent"; its value is the agent's id, which the code and
+// the database call agentId — one value, two spellings. /stop stays
+// agentless by design: a stop exchanges nothing over QMP and is not an
+// action, it carries the session's verdict instead.
 const StartBody = Schema.Struct({
   iso: Schema.optionalKey(Schema.String),
   disk: Schema.optionalKey(Schema.String),
