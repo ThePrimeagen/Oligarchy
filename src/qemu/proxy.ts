@@ -13,7 +13,7 @@
 // qemu, iso, keys, and db stay Promise/throw code; this file lifts them at
 // the edge with tryPromise and turns every failure into {"error": "..."}.
 //
-//   POST /start      -> {"iso"?, "disk"?, "agent"?}; boots a qemu, returns
+//   POST /start      -> {"agent", "iso"?, "disk"?}; boots a qemu, returns
 //                       {"id": uuid}; an http(s) iso is downloaded into
 //                       ~/.oligarchy/isos once (a start that finds a running
 //                       download waits for it) and reused from there on
@@ -136,21 +136,26 @@ function session(id: string | null | undefined): Qemu {
 
 const startSession = Effect.gen(function* () {
   const cfg = yield* readJson(StartBody);
+  if (cfg.agent === undefined || cfg.agent === "") {
+    return yield* Effect.fail(opError(new Error("agent is required")));
+  }
+  const agent = cfg.agent;
   const isoName = cfg.iso ?? defaultIso;
   const isUrl = isoName.startsWith("http://") || isoName.startsWith("https://");
   const qemu = createQemu();
-  // The session row exists before any boot work, so iso events have a
-  // session to hang on: a url iso enters as "downloading", a local path
-  // goes straight to "running".
-  yield* fromPromise(() => insertSession(db, qemu.id, { iso: isoName, disk: cfg.disk }, isUrl ? "downloading" : "running"));
+  // Session + agent are one initialization. The two writes stay separate
+  // (no db refactor) but they are not operational errors: if either
+  // fails, something is very wrong and the start dies.
+  yield* Effect.orDie(
+    Effect.tryPromise(() =>
+      insertSession(db, qemu.id, { iso: isoName, disk: cfg.disk }, isUrl ? "downloading" : "running").then(() =>
+        registerAgent(db, agent, qemu.id),
+      ),
+    ),
+  );
   yield* fromPromise(async () => {
     try {
-      // Inside the try: a rejected registration (the agent already drives
-      // a session) must close this session as failed, not leave it open.
-      if (cfg.agent !== undefined) {
-        await registerAgent(db, cfg.agent, qemu.id);
-      }
-      const iso = await getIso(db, isoName, { sessionId: qemu.id, agentId: cfg.agent });
+      const iso = await getIso(db, isoName, { sessionId: qemu.id, agentId: agent });
       if (cfg.disk === undefined) {
         await createDisk(qemu);
       } else {
@@ -158,7 +163,7 @@ const startSession = Effect.gen(function* () {
         // dir; with a caller-provided disk, createDisk never made it.
         await mkdir(qemu.dir, { recursive: true, mode: 0o700 });
       }
-      await start(qemu, { iso, disk: cfg.disk }, recorder(qemu.id, cfg.agent));
+      await start(qemu, { iso, disk: cfg.disk }, recorder(qemu.id, agent));
       if (isUrl) {
         await sessionRunning(db, qemu.id);
       }
@@ -245,17 +250,17 @@ const sendKeys = Effect.gen(function* () {
   return HttpServerResponse.jsonUnsafe({ ok: "true" });
 });
 
-function clientResponse(err: unknown): HttpServerResponse.HttpServerResponse {
-  const status = errorMessage(err) === "not found" ? 404 : 400;
+function clientResponse(err: unknown, status: number): HttpServerResponse.HttpServerResponse {
   return HttpServerResponse.jsonUnsafe({ error: errorMessage(err) }, { status });
 }
 
 function fromCause<E>(cause: Cause.Cause<E>): HttpServerResponse.HttpServerResponse {
   const failed = Option.getOrUndefined(Cause.findErrorOption(cause));
   if (failed !== undefined) {
-    return clientResponse(failed);
+    return clientResponse(failed, errorMessage(failed) === "not found" ? 404 : 400);
   }
-  return clientResponse(Cause.squash(cause));
+  // Die: session init, or anything else that is not an operational fail.
+  return clientResponse(Cause.squash(cause), 500);
 }
 
 // Handler errors become the {"error": "..."} the CLI already prints.
