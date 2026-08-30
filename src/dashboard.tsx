@@ -178,7 +178,13 @@ app.get("/sessions", async (context) => {
     );
   } catch (error) {
     console.error("dashboard: listing sessions:", (error as Error).message);
-    return context.html(<SessionError />, 500);
+    return context.html(
+      <>
+        <SessionStatus sessions={null} outOfBand />
+        <SessionError />
+      </>,
+      500,
+    );
   }
 });
 
