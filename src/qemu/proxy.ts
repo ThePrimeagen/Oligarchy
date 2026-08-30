@@ -125,19 +125,20 @@ function session(id: string): Effect.Effect<Qemu, ApiError> {
 const StartBody = Schema.Struct({
   iso: Schema.optionalKey(Schema.String),
   disk: Schema.optionalKey(Schema.String),
-  agent: Schema.String,
+  // Non-empty like the CLI's own --agent-id check: "" is not an agent.
+  agent: Schema.NonEmptyString,
 });
 
 const ImageParams = Schema.Struct({
   id: Schema.String,
-  agent: Schema.String,
+  agent: Schema.NonEmptyString,
 });
 
 const SendKeysBody = Schema.Struct({
   id: Schema.String,
   keys: Schema.String,
   encoding: Schema.optionalKey(Schema.String),
-  agent: Schema.String,
+  agent: Schema.NonEmptyString,
 });
 
 // The verdict rides the shape: a bad status never reaches the handler, so

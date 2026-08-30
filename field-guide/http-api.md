@@ -42,7 +42,7 @@ Stats for the machine the proxy runs on, plus how many sessions it is running:
 
 ## POST /send-keys
 
-Body `{"id", "keys", "encoding", "agent"}`. The server parses the key string (encoding `oligarchy`, see [how-to.md](how-to.md)) and types it into the guest via QMP `send-key`. Returns `{"ok": "true"}`.
+Body `{"id", "keys", "encoding"?, "agent"}`. The server parses the key string (`encoding` defaults to `oligarchy`, see [how-to.md](how-to.md)) and types it into the guest via QMP `send-key`. Returns `{"ok": "true"}`.
 
 ## POST /stop
 
