@@ -21,11 +21,16 @@
 //                       its session dir, and records the verdict (default
 //                       aborted)
 
-import { createServer, type IncomingMessage } from "node:http";
+import { NodeHttpServer, NodeRuntime } from "@effect/platform-node";
+import { Effect, Layer } from "effect";
+import { HttpRouter } from "effect/unstable/http";
+import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { mkdir, readFile, rm } from "node:fs/promises";
+import { createServer } from "node:http";
 import { join } from "node:path";
 import { connectDatabase, endSession, finishAction, insertSession, registerAgent, sessionRunning, startAction } from "../db/ops.ts";
 import { createDisk, createQemu, screendump, sendKey, start, stop, type Qemu } from "./client.ts";
+import { api } from "./http.ts";
 import { getIso } from "./iso.ts";
 import { parseKeys } from "./keys.ts";
 import { collectStats, startCpuSampler } from "./stats.ts";
@@ -55,166 +60,192 @@ function recorder(sessionId: string, agentId: string | undefined): QemuExchangeR
 }
 
 const [host, port] = addr.split(":");
-createServer(async (req, res) => {
-  try {
-    const url = new URL(req.url ?? "/", `http://${addr}`);
-
-    if (req.method === "POST" && url.pathname === "/start") {
-      const raw = await body(req);
-      const cfg = (raw === "" ? {} : JSON.parse(raw)) as { iso?: string; disk?: string; agent?: string };
-      const isoName = cfg.iso ?? defaultIso;
-      const isUrl = isoName.startsWith("http://") || isoName.startsWith("https://");
-      const qemu = createQemu();
-      // The session row exists before any boot work, so iso events have a
-      // session to hang on: a url iso enters as "downloading", a local path
-      // goes straight to "running".
-      await insertSession(db, qemu.id, { iso: isoName, disk: cfg.disk }, isUrl ? "downloading" : "running");
-      try {
-        // Inside the try: a rejected registration (the agent already drives
-        // a session) must close this session as failed, not leave it open.
-        if (cfg.agent !== undefined) {
-          await registerAgent(db, cfg.agent, qemu.id);
-        }
-        const iso = await getIso(db, isoName, { sessionId: qemu.id, agentId: cfg.agent });
-        if (cfg.disk === undefined) {
-          await createDisk(qemu);
-        } else {
-          // start() puts the firmware copy and the QMP socket in the session
-          // dir; with a caller-provided disk, createDisk never made it.
-          await mkdir(qemu.dir, { recursive: true, mode: 0o700 });
-        }
-        await start(qemu, { iso, disk: cfg.disk }, recorder(qemu.id, cfg.agent));
-        if (isUrl) {
-          await sessionRunning(db, qemu.id);
-        }
-      } catch (err) {
-        // The qemu must not outlive its failed start — a machine the map
-        // never held would be unreachable and unkillable through the API.
-        // The boot error is the one worth seeing if cleanup fails too.
-        await stop(qemu).catch(() => {});
-        await endSession(db, qemu.id, "failed", (err as Error).message).catch((e: unknown) => {
-          console.error(`db: recording a failed start failed too: ${(e as Error).message}`);
-        });
-        throw err;
-      }
-      sessions.set(qemu.id, qemu);
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ id: qemu.id }));
-      return;
-    }
-
-    if (req.method === "GET" && url.pathname === "/image") {
-      const qemu = session(url.searchParams.get("id"));
-      const agent = url.searchParams.get("agent") ?? undefined;
-      const path = join(qemu.dir, `image-${process.hrtime.bigint()}.png`);
-      // The PNG is read back only after the exchange closes, and the images
-      // row must ride the same transaction that closes the action (they are
-      // 1:1) — so the recorder only stashes, and the handler closes.
-      let opened: number | undefined;
-      let outcome: QemuExchangeOutcome | undefined;
-      try {
-        await screendump(qemu, path, "png", async (command) => {
-          opened = await startAction(db, { sessionId: qemu.id, agentId: agent, request: command });
-          return async (result) => {
-            outcome = result;
-          };
-        });
-        const data = await readFile(path);
-        // screendump resolved, so the recorder ran: opened and outcome are set.
-        await finishAction(db, opened!, outcome!, data);
-        res.writeHead(200, { "Content-Type": "image/png", "Content-Length": data.length });
-        res.end(data);
-      } catch (err) {
-        // Only a failed exchange is closed without an image. A completed one
-        // whose image write failed stays open — the row state database.md
-        // documents as a completion that was never persisted; closing it
-        // imageless would break the 1:1 promise instead.
-        if (opened !== undefined && outcome !== undefined && outcome.state === "failed") {
-          await finishAction(db, opened, outcome).catch((e: unknown) => {
-            console.error(`db: recording a failed screendump failed too: ${(e as Error).message}`);
-          });
-        }
-        throw err;
-      } finally {
-        await rm(path, { force: true });
-      }
-      return;
-    }
-
-    if (req.method === "GET" && url.pathname === "/stats") {
-      const payload = JSON.stringify(collectStats(cpuSampler, sessions.size));
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(payload);
-      return;
-    }
-
-    if (req.method === "POST" && url.pathname === "/stop") {
-      const { id, status, reason } = JSON.parse(await body(req)) as {
-        id?: string;
-        status?: "succeeded" | "failed" | "aborted";
-        reason?: string;
-      };
-      // The verdict is checked before the machine dies: a bad status must
-      // not kill the qemu and then fail to record the end.
-      if (status !== undefined && status !== "succeeded" && status !== "failed" && status !== "aborted") {
-        throw new Error(`unknown status "${status as string}"`);
-      }
-      const qemu = session(id);
-      sessions.delete(qemu.id);
-      await stop(qemu);
-      // The stop ends the session; a stop without a verdict is an abort.
-      await endSession(db, qemu.id, status ?? "aborted", reason ?? null);
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: "true" }));
-      return;
-    }
-
-    if (req.method === "POST" && url.pathname === "/send-keys") {
-      const { id, keys, encoding, agent } = JSON.parse(await body(req)) as {
-        id?: string;
-        keys: string;
-        encoding?: string;
-        agent?: string;
-      };
-      const qemu = session(id);
-      const record = recorder(qemu.id, agent);
-      for (const chord of parseKeys(keys, encoding)) {
-        await sendKey(qemu, chord.map((code): QemuKeyValue => ({ type: "qcode", data: code })), record);
-      }
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: "true" }));
-      return;
-    }
-
-    res.writeHead(404, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "not found" }));
-  } catch (err) {
-    res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: (err as Error).message }));
-  }
-}).listen(Number(port), host, () => {
-  console.error(`oligarchy proxy listening on ${addr}`);
-});
-
-for (const signal of ["SIGINT", "SIGTERM"] as const) {
-  process.once(signal, () => {
-    // Settled, not raced: one session failing to stop or record must not
-    // cut short the cleanup of the others.
-    void Promise.allSettled(
-      [...sessions.values()].map(async (qemu) => {
-        await stop(qemu);
-        await endSession(db, qemu.id, "aborted", "proxy shutdown");
+const controlLayer = HttpApiBuilder.group(api, "control", (handlers) =>
+  handlers.handleAll({
+    start: ({ payload }) =>
+      Effect.tryPromise({
+        try: async () => {
+          const cfg = payload ?? {};
+          const isoName = cfg.iso ?? defaultIso;
+          const isUrl =
+            isoName.startsWith("http://") ||
+            isoName.startsWith("https://");
+          const qemu = createQemu();
+          // The session row exists before any boot work, so iso events have a
+          // session to hang on: a url iso enters as "downloading", a local path
+          // goes straight to "running".
+          await insertSession(
+            db,
+            qemu.id,
+            { iso: isoName, disk: cfg.disk },
+            isUrl ? "downloading" : "running",
+          );
+          try {
+            // Inside the try: a rejected registration (the agent already drives
+            // a session) must close this session as failed, not leave it open.
+            if (cfg.agent !== undefined) {
+              await registerAgent(db, cfg.agent, qemu.id);
+            }
+            const iso = await getIso(db, isoName, {
+              sessionId: qemu.id,
+              agentId: cfg.agent,
+            });
+            if (cfg.disk === undefined) {
+              await createDisk(qemu);
+            } else {
+              // start() puts the firmware copy and the QMP socket in the session
+              // dir; with a caller-provided disk, createDisk never made it.
+              await mkdir(qemu.dir, { recursive: true, mode: 0o700 });
+            }
+            await start(
+              qemu,
+              { iso, disk: cfg.disk },
+              recorder(qemu.id, cfg.agent),
+            );
+            if (isUrl) {
+              await sessionRunning(db, qemu.id);
+            }
+          } catch (err) {
+            // The qemu must not outlive its failed start — a machine the map
+            // never held would be unreachable and unkillable through the API.
+            // The boot error is the one worth seeing if cleanup fails too.
+            await stop(qemu).catch(() => {});
+            await endSession(
+              db,
+              qemu.id,
+              "failed",
+              err instanceof Error ? err.message : String(err),
+            ).catch((recordError: unknown) => {
+              console.error(
+                `db: recording a failed start failed too: ${
+                  recordError instanceof Error
+                    ? recordError.message
+                    : String(recordError)
+                }`,
+              );
+            });
+            throw err;
+          }
+          sessions.set(qemu.id, qemu);
+          return { id: qemu.id };
+        },
+        catch: operationError,
       }),
-    ).then((results) => {
-      for (const result of results) {
-        if (result.status === "rejected") {
-          console.error(`shutdown: ${(result.reason as Error).message}`);
-        }
-      }
-      process.exit(results.some((result) => result.status === "rejected") ? 1 : 0);
-    });
-  });
-}
+    image: ({ query }) =>
+      Effect.tryPromise({
+        try: async () => {
+          const qemu = session(query.id);
+          const agent = query.agent;
+          const path = join(
+            qemu.dir,
+            `image-${process.hrtime.bigint()}.png`,
+          );
+          // The PNG is read back only after the exchange closes, and the images
+          // row must ride the same transaction that closes the action (they are
+          // 1:1) — so the recorder only stashes, and the handler closes.
+          let opened: number | undefined;
+          let outcome: QemuExchangeOutcome | undefined;
+          try {
+            await screendump(qemu, path, "png", async (command) => {
+              opened = await startAction(db, {
+                sessionId: qemu.id,
+                agentId: agent,
+                request: command,
+              });
+              return async (result) => {
+                outcome = result;
+              };
+            });
+            const data = await readFile(path);
+            // screendump resolved, so the recorder ran: opened and outcome are set.
+            if (opened === undefined || outcome === undefined) {
+              throw new Error(
+                "screendump completed without a recorded QMP exchange",
+              );
+            }
+            await finishAction(db, opened, outcome, data);
+            return data;
+          } catch (err) {
+            // Only a failed exchange is closed without an image. A completed one
+            // whose image write failed stays open — the row state database.md
+            // documents as a completion that was never persisted; closing it
+            // imageless would break the 1:1 promise instead.
+            if (
+              opened !== undefined &&
+              outcome !== undefined &&
+              outcome.state === "failed"
+            ) {
+              await finishAction(db, opened, outcome).catch(
+                (recordError: unknown) => {
+                  console.error(
+                    `db: recording a failed screendump failed too: ${
+                      recordError instanceof Error
+                        ? recordError.message
+                        : String(recordError)
+                    }`,
+                  );
+                },
+              );
+            }
+            throw err;
+          } finally {
+            await rm(path, { force: true });
+          }
+        },
+        catch: operationError,
+      }),
+    stats: () => Effect.sync(() => collectStats(cpuSampler, sessions.size)),
+    stop: ({ payload: { id, status, reason } }) =>
+      Effect.tryPromise({
+        try: async () => {
+          const qemu = session(id);
+          sessions.delete(qemu.id);
+          await stop(qemu);
+          // The stop ends the session; a stop without a verdict is an abort.
+          await endSession(
+            db,
+            qemu.id,
+            status ?? "aborted",
+            reason ?? null,
+          );
+          return { ok: "true" };
+        },
+        catch: operationError,
+      }),
+    sendKeys: ({ payload: { id, keys, encoding, agent } }) =>
+      Effect.tryPromise({
+        try: async () => {
+          const qemu = session(id);
+          const record = recorder(qemu.id, agent);
+          for (const chord of parseKeys(keys, encoding)) {
+            await sendKey(
+              qemu,
+              chord.map(
+                (code): QemuKeyValue => ({ type: "qcode", data: code }),
+              ),
+              record,
+            );
+          }
+          return { ok: "true" };
+        },
+        catch: operationError,
+      }),
+  }),
+);
+
+const apiLayer = HttpRouter.serve(
+  HttpApiBuilder.layer(api).pipe(Layer.provide(controlLayer)),
+  { disableLogger: true },
+).pipe(
+  Layer.provide(
+    NodeHttpServer.layer(createServer, { host, port: Number(port) }),
+  ),
+);
+
+Layer.launch(apiLayer).pipe(
+  Effect.ensuring(shutdownSessions()),
+  NodeRuntime.runMain,
+);
 
 function session(id: string | null | undefined): Qemu {
   if (id === undefined || id === null || id === "") {
@@ -227,10 +258,36 @@ function session(id: string | null | undefined): Qemu {
   return qemu;
 }
 
-async function body(req: IncomingMessage): Promise<string> {
-  let out = "";
-  for await (const chunk of req) {
-    out += chunk;
-  }
-  return out;
+function operationError(cause: unknown): Error & { readonly error: string } {
+  const error =
+    cause instanceof Error
+      ? cause
+      : new Error("internal server error", { cause });
+  return Object.assign(error, { error: error.message });
+}
+
+function shutdownSessions(): Effect.Effect<void> {
+  return Effect.promise(async () => {
+    // Settled, not raced: one session failing to stop or record must not
+    // cut short the cleanup of the others.
+    const results = await Promise.allSettled(
+      [...sessions.values()].map(async (qemu) => {
+        await stop(qemu);
+        await endSession(db, qemu.id, "aborted", "proxy shutdown");
+      }),
+    );
+    let failed = false;
+    for (const result of results) {
+      if (result.status === "rejected") {
+        failed = true;
+        const error = result.reason;
+        console.error(
+          `shutdown: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+    if (failed) {
+      throw new Error("one or more sessions failed to shut down");
+    }
+  });
 }
