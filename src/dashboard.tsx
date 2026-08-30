@@ -7,6 +7,7 @@ import { SENTRY_DSN } from "./sentry-dsn.ts";
 
 const HTMX_URL = "https://cdn.jsdelivr.net/npm/htmx.org@4.0.0";
 const HTMX_INTEGRITY = "sha384-BvJpBiO8Kh31EqtJe5DRIeWrHWnCGkwytKs9NKFi86Hhw96dEqdEMzZDeK9iEGTc";
+const SESSION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 type Bindings = {
   HYPERDRIVE: {
@@ -57,6 +58,7 @@ const SessionList: FC<SessionListProps> = ({ sessions }) => (
     <ol>
       {sessions.map((session) => {
         const isoName = session.config.iso.split("/").at(-1) ?? session.config.iso;
+        const isRemoteIso = session.config.iso.startsWith("https://") || session.config.iso.startsWith("http://");
         return (
           <li>
             <article class="session">
@@ -66,7 +68,7 @@ const SessionList: FC<SessionListProps> = ({ sessions }) => (
                 ) : (
                   <img
                     class="session__image"
-                    src={`/images/${session.imageActionId}`}
+                    src={`/sessions/${session.id}/image`}
                     alt={`Last captured frame from session ${session.id}`}
                     loading="lazy"
                   />
@@ -80,7 +82,11 @@ const SessionList: FC<SessionListProps> = ({ sessions }) => (
               <div class="session__details">
                 <div class="session__version">
                   <span>Omarchy version</span>
-                  <a href={session.config.iso}>{isoName}</a>
+                  {isRemoteIso ? (
+                    <a href={session.config.iso}>{isoName}</a>
+                  ) : (
+                    <span class="session__version-name">{isoName}</span>
+                  )}
                 </div>
                 <code title={session.id}>{session.id}</code>
                 {session.status === "failed" && session.reason !== null ? (
@@ -192,20 +198,20 @@ app.get("/sessions", async (context) => {
   }
 });
 
-app.get("/images/:actionId", async (context) => {
-  const actionId = Number(context.req.param("actionId"));
-  if (!Number.isSafeInteger(actionId) || actionId < 1) {
+app.get("/sessions/:sessionId/image", async (context) => {
+  const sessionId = context.req.param("sessionId");
+  if (!SESSION_ID_PATTERN.test(sessionId)) {
     return context.notFound();
   }
 
   try {
-    const image = await getSessionImage(context.env.HYPERDRIVE.connectionString, actionId);
+    const image = await getSessionImage(context.env.HYPERDRIVE.connectionString, sessionId);
     if (image === undefined) {
       return context.notFound();
     }
     return new Response(new Uint8Array(image), {
       headers: {
-        "cache-control": "public, max-age=31536000, immutable",
+        "cache-control": "no-store",
         "content-type": "image/png",
       },
     });

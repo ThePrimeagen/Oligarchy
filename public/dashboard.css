@@ -251,11 +251,18 @@ main {
   text-transform: uppercase;
 }
 
-.session__version a {
+.session__version a,
+.session__version .session__version-name {
   color: var(--terminal-cyan);
+  font-size: inherit;
   font-weight: 700;
+  letter-spacing: normal;
   overflow-wrap: anywhere;
   text-align: right;
+  text-transform: none;
+}
+
+.session__version a {
   text-underline-offset: 0.2em;
 }
 
