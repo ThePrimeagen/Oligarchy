@@ -12,6 +12,11 @@ Check the field guide: [field-guide/index.md](field-guide/index.md).
 - We do not use classes. Never write a class. Use a functional style instead: plain state objects created by factory functions, operated on by standalone functions that take the state object as their first argument.
 - Use the TypeScript `private` modifier for private class members and methods. Never use JavaScript private identifiers (`#name`). TypeScript `private` works good enough.
 
+## Comments
+
+- Do not write comments. Code says what it does; a comment restating it is noise. This covers doc comments, file headers, and narration of any kind.
+- The one exception is a genuinely tricky edge case whose intent cannot live in the code: an upstream bug worked around, an ordering that correctness depends on, a deliberate race, a magic number's meaning. One or two lines naming the constraint, nothing more.
+
 ## Tests
 
 - Do not add tests unless explicitly told to.
