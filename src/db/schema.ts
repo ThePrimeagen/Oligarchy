@@ -24,12 +24,17 @@ export const logLevel = pgEnum("log_level", ["info", "warning", "error", "fatal"
 // running has no state yet (null, alongside a null finished_at).
 export const actionState = pgEnum("action_state", ["completed", "failed"]);
 
+export type SessionConfig = {
+  iso: string;
+  disk?: string;
+};
+
 export const sessions = pgTable("sessions", {
   // The uuid minted by the server at /start — not a database default.
   id: uuid("id").primaryKey(),
   // The effective launch config after server defaults were applied, so a
   // replay can boot an identical machine — not just what the client asked for.
-  config: jsonb("config").notNull(),
+  config: jsonb("config").$type<SessionConfig>().notNull(),
   status: sessionStatus("status").notNull().default("running"),
   // Optional explanation for the verdict, in practice the failure reason.
   reason: text("reason"),

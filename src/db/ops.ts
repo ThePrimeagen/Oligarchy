@@ -8,7 +8,7 @@
 
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
-import { actions, agentRuns, images, sessions } from "./schema.ts";
+import { actions, agentRuns, images, sessions, type SessionConfig } from "./schema.ts";
 
 export type Db = NodePgDatabase;
 
@@ -43,7 +43,7 @@ export function connectDatabase(): Db {
 }
 
 /** Creates the session row, before any boot work happens. */
-export async function insertSession(db: Db, id: string, config: unknown, status: SessionStartStatus): Promise<void> {
+export async function insertSession(db: Db, id: string, config: SessionConfig, status: SessionStartStatus): Promise<void> {
   await db.insert(sessions).values({ id, config, status });
 }
 
