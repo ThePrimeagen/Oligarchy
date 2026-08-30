@@ -16,6 +16,11 @@ type SessionListProps = {
   sessions: Session[];
 };
 
+type SessionStatusProps = {
+  sessions: Session[] | null;
+  outOfBand?: boolean;
+};
+
 const dateTime = new Intl.DateTimeFormat("en-US", {
   month: "short",
   day: "numeric",
@@ -26,58 +31,68 @@ const dateTime = new Intl.DateTimeFormat("en-US", {
   timeZoneName: "short",
 });
 
+const SessionStatus: FC<SessionStatusProps> = ({ sessions, outOfBand = false }) => (
+  <span id="session-status" hx-swap-oob={outOfBand ? "innerHTML" : undefined}>
+    {sessions === null
+      ? "Sessions unavailable"
+      : sessions.length === 0
+        ? "No sessions recorded"
+        : (
+            <>
+              Updated{" "}
+              <time dateTime={sessions[0].queriedAt.toISOString()}>{dateTime.format(sessions[0].queriedAt)}</time>
+            </>
+          )}
+  </span>
+);
+
 const SessionList: FC<SessionListProps> = ({ sessions }) => (
   sessions.length === 0 ? (
-    <div class="empty-state" role="status">
+    <div class="empty-state">
       <p>No sessions recorded yet.</p>
     </div>
   ) : (
-    <>
-      <p class="session-list__updated" role="status">
-        Updated <time dateTime={sessions[0].queriedAt.toISOString()}>{dateTime.format(sessions[0].queriedAt)}</time>
-      </p>
-      <ol>
-        {sessions.map((session) => (
-          <li>
-            <article class="session">
-              <div class="session__heading">
-                <code>{session.id}</code>
-                <span class={`status status--${session.status}`}>{session.status}</span>
+    <ol>
+      {sessions.map((session) => (
+        <li>
+          <article class="session">
+            <div class="session__heading">
+              <code>{session.id}</code>
+              <span class={`status status--${session.status}`}>{session.status}</span>
+            </div>
+            <dl>
+              <div>
+                <dt>Image</dt>
+                <dd>{session.config.iso}</dd>
               </div>
-              <dl>
+              <div>
+                <dt>Started</dt>
+                <dd>
+                  <time dateTime={session.startedAt.toISOString()}>{dateTime.format(session.startedAt)}</time>
+                </dd>
+              </div>
+              <div>
+                <dt>Ended</dt>
+                <dd>
+                  {session.endedAt === null ? (
+                    "In progress"
+                  ) : (
+                    <time dateTime={session.endedAt.toISOString()}>{dateTime.format(session.endedAt)}</time>
+                  )}
+                </dd>
+              </div>
+              {session.config.disk === undefined ? null : (
                 <div>
-                  <dt>Image</dt>
-                  <dd>{session.config.iso}</dd>
+                  <dt>Disk</dt>
+                  <dd>{session.config.disk}</dd>
                 </div>
-                <div>
-                  <dt>Started</dt>
-                  <dd>
-                    <time dateTime={session.startedAt.toISOString()}>{dateTime.format(session.startedAt)}</time>
-                  </dd>
-                </div>
-                <div>
-                  <dt>Ended</dt>
-                  <dd>
-                    {session.endedAt === null ? (
-                      "In progress"
-                    ) : (
-                      <time dateTime={session.endedAt.toISOString()}>{dateTime.format(session.endedAt)}</time>
-                    )}
-                  </dd>
-                </div>
-                {session.config.disk === undefined ? null : (
-                  <div>
-                    <dt>Disk</dt>
-                    <dd>{session.config.disk}</dd>
-                  </div>
-                )}
-              </dl>
-              {session.reason === null ? null : <p class="session__reason">{session.reason}</p>}
-            </article>
-          </li>
-        ))}
-      </ol>
-    </>
+              )}
+            </dl>
+            {session.reason === null ? null : <p class="session__reason">{session.reason}</p>}
+          </article>
+        </li>
+      ))}
+    </ol>
   )
 );
 
@@ -112,6 +127,9 @@ const Home: FC<HomeProps> = ({ sessions }) => (
           Refresh
         </button>
       </div>
+      <p class="session-list__updated" aria-live="polite">
+        <SessionStatus sessions={sessions} />
+      </p>
       <div id="session-list" class="session-list">
         {sessions === null ? <SessionError /> : <SessionList sessions={sessions} />}
       </div>
@@ -152,7 +170,12 @@ app.get("/", async (context) => {
 app.get("/sessions", async (context) => {
   try {
     const sessions = await listSessions(context.env.HYPERDRIVE.connectionString);
-    return context.html(<SessionList sessions={sessions} />);
+    return context.html(
+      <>
+        <SessionStatus sessions={sessions} outOfBand />
+        <SessionList sessions={sessions} />
+      </>,
+    );
   } catch (error) {
     console.error("dashboard: listing sessions:", (error as Error).message);
     return context.html(<SessionError />, 500);

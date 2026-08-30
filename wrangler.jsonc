@@ -12,9 +12,7 @@
   "hyperdrive": [
     {
       "binding": "HYPERDRIVE",
-      "id": "da54bf43f004492996574a6db26d8895",
-      // Optional. Use this to connect to a local database during development.
-      "localConnectionString": "postgresql://user:password@localhost:5432/databasename"
+      "id": "da54bf43f004492996574a6db26d8895"
     }
   ],
   "placement": {
