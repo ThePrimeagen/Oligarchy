@@ -7,7 +7,9 @@
 // OLIGARCHY_ADDR (default 127.0.0.1:42069). The control-plane database comes
 // from DATABASE_URL — a proxy that cannot record its sessions refuses to
 // boot, and every session, QMP exchange, image, and iso event is recorded
-// as it happens (see field-guide/database.md).
+// as it happens. Major actions also land in the logs table through log():
+// the lifecycle at info with how long each took, failed requests at error,
+// the death of the proxy at fatal (see field-guide/database.md).
 //
 //   POST /start      -> {"iso"?, "disk"?, "agent"?}; boots a qemu, returns
 //                       {"id": uuid}; an http(s) iso is downloaded into
@@ -24,6 +26,7 @@
 import { createServer, type IncomingMessage } from "node:http";
 import { mkdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { flushLogs, log } from "../db/log.ts";
 import { connectDatabase, endSession, finishAction, insertSession, registerAgent, sessionRunning, startAction } from "../db/ops.ts";
 import { createDisk, createQemu, screendump, sendKey, start, stop, type Qemu } from "./client.ts";
 import { getIso } from "./iso.ts";
@@ -60,6 +63,7 @@ createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://${addr}`);
 
     if (req.method === "POST" && url.pathname === "/start") {
+      const started = Date.now();
       const raw = await body(req);
       const cfg = (raw === "" ? {} : JSON.parse(raw)) as { iso?: string; disk?: string; agent?: string };
       const isoName = cfg.iso ?? defaultIso;
@@ -69,6 +73,11 @@ createServer(async (req, res) => {
       // session to hang on: a url iso enters as "downloading", a local path
       // goes straight to "running".
       await insertSession(db, qemu.id, { iso: isoName, disk: cfg.disk }, isUrl ? "downloading" : "running");
+      log(db, {
+        text: `session ${qemu.id}: starting; iso ${isoName}${cfg.disk === undefined ? "" : `, disk ${cfg.disk}`}`,
+        sessionId: qemu.id,
+        agentId: cfg.agent,
+      });
       try {
         // Inside the try: a rejected registration (the agent already drives
         // a session) must close this session as failed, not leave it open.
@@ -98,12 +107,16 @@ createServer(async (req, res) => {
         throw err;
       }
       sessions.set(qemu.id, qemu);
+      // Wall time from request to a live QMP handshake, download included —
+      // per-exchange timing lives on the action rows.
+      log(db, { text: `session ${qemu.id}: running; started in ${Date.now() - started}ms`, sessionId: qemu.id, agentId: cfg.agent });
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ id: qemu.id }));
       return;
     }
 
     if (req.method === "GET" && url.pathname === "/image") {
+      const started = Date.now();
       const qemu = session(url.searchParams.get("id"));
       const agent = url.searchParams.get("agent") ?? undefined;
       const path = join(qemu.dir, `image-${process.hrtime.bigint()}.png`);
@@ -122,6 +135,7 @@ createServer(async (req, res) => {
         const data = await readFile(path);
         // screendump resolved, so the recorder ran: opened and outcome are set.
         await finishAction(db, opened!, outcome!, data);
+        log(db, { text: `session ${qemu.id}: image; ${data.length} bytes in ${Date.now() - started}ms`, sessionId: qemu.id, agentId: agent });
         res.writeHead(200, { "Content-Type": "image/png", "Content-Length": data.length });
         res.end(data);
       } catch (err) {
@@ -164,6 +178,10 @@ createServer(async (req, res) => {
       await stop(qemu);
       // The stop ends the session; a stop without a verdict is an abort.
       await endSession(db, qemu.id, status ?? "aborted", reason ?? null);
+      log(db, {
+        text: `session ${qemu.id}: stopped; ${status ?? "aborted"}${reason === undefined ? "" : `; ${reason}`}`,
+        sessionId: qemu.id,
+      });
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: "true" }));
       return;
@@ -176,11 +194,16 @@ createServer(async (req, res) => {
         encoding?: string;
         agent?: string;
       };
+      const started = Date.now();
       const qemu = session(id);
       const record = recorder(qemu.id, agent);
-      for (const chord of parseKeys(keys, encoding)) {
+      const chords = parseKeys(keys, encoding);
+      for (const chord of chords) {
         await sendKey(qemu, chord.map((code): QemuKeyValue => ({ type: "qcode", data: code })), record);
       }
+      // The request-level story; each chord is its own action row with its
+      // own timing.
+      log(db, { text: `session ${qemu.id}: sent ${chords.length} chords in ${Date.now() - started}ms`, sessionId: qemu.id, agentId: agent });
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: "true" }));
       return;
@@ -189,28 +212,44 @@ createServer(async (req, res) => {
     res.writeHead(404, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "not found" }));
   } catch (err) {
+    // One error line per failed request. Session attribution lives where
+    // the detail does: a failed start on the session row's reason, a failed
+    // exchange on its action row.
+    log(db, { level: "error", text: `${req.method ?? ""} ${req.url ?? "/"} failed: ${(err as Error).message}` });
     res.writeHead(400, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: (err as Error).message }));
   }
-}).listen(Number(port), host, () => {
-  console.error(`oligarchy proxy listening on ${addr}`);
-});
+})
+  .on("error", (err) => {
+    // The listen failing (the port is taken) or the acceptor breaking is
+    // the death of the proxy: say so, get the line out, and go down.
+    log(db, { level: "fatal", text: `proxy: ${err.message}` });
+    void flushLogs().then(() => process.exit(1));
+  })
+  .listen(Number(port), host, () => {
+    log(db, `oligarchy proxy listening on ${addr}`);
+  });
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
+    log(db, `proxy: ${signal}; stopping ${sessions.size} sessions`);
     // Settled, not raced: one session failing to stop or record must not
     // cut short the cleanup of the others.
     void Promise.allSettled(
       [...sessions.values()].map(async (qemu) => {
         await stop(qemu);
         await endSession(db, qemu.id, "aborted", "proxy shutdown");
+        log(db, { text: `session ${qemu.id}: stopped; aborted; proxy shutdown`, sessionId: qemu.id });
       }),
-    ).then((results) => {
+    ).then(async (results) => {
       for (const result of results) {
         if (result.status === "rejected") {
-          console.error(`shutdown: ${(result.reason as Error).message}`);
+          log(db, { level: "error", text: `shutdown: ${(result.reason as Error).message}` });
         }
       }
+      // The exit must not outrun the queued rows — the shutdown story is
+      // the part most worth having when the proxy is gone.
+      await flushLogs();
       process.exit(results.some((result) => result.status === "rejected") ? 1 : 0);
     });
   });
