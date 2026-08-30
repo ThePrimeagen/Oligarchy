@@ -17,15 +17,12 @@
 :root {
   color-scheme: dark;
   --background-night: #1a1b26;
-  --background-storm: #24283b;
-  --terminal-black: #414868;
   --terminal-blue: #7aa2f7;
   --terminal-cyan: #7dcfff;
   --terminal-white: #c0caf5;
   --turquoise: #b4f9f8;
   --green: #9ece6a;
   --failed: #f7768e;
-  --border: rgb(65 72 104 / 80%);
   --transition: 0.15s cubic-bezier(0.33, 1, 0.68, 1);
   font-family: "JetBrains Mono", monospace;
   background: var(--background-night);
@@ -58,14 +55,13 @@ code {
 }
 
 main {
-  width: min(100% - 2rem, 76rem);
+  width: min(100% - 2rem, 32rem);
   margin-inline: auto;
-  padding-block: clamp(3rem, 9vw, 7rem);
+  padding-block: 3rem 5rem;
 }
 
 .hero {
-  max-width: 64rem;
-  margin-bottom: clamp(4rem, 10vw, 8rem);
+  margin-bottom: 4rem;
 }
 
 .hero__eyebrow,
@@ -101,8 +97,7 @@ main {
 }
 
 .sessions {
-  padding-top: 1.5rem;
-  border-top: max(1px, 0.0625em) solid var(--border);
+  width: 100%;
 }
 
 .sessions__heading {
@@ -124,7 +119,7 @@ main {
   height: 2.9em;
   padding-inline: 1em;
   border: 0;
-  border-radius: 0.4em;
+  border-radius: 0;
   background: var(--terminal-blue);
   box-shadow:
     0 1px 0 rgb(0 0 0 / 10%),
@@ -152,7 +147,7 @@ main {
 
 .session-list ol {
   display: grid;
-  gap: 1rem;
+  gap: 3rem;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -167,40 +162,37 @@ main {
 }
 
 .session {
-  padding: clamp(1rem, 3vw, 1.5rem);
-  border: max(1px, 0.0625em) solid var(--border);
-  border-radius: 0.5rem;
-  background: rgb(36 40 59 / 70%);
-  transition:
-    border-color var(--transition),
-    background var(--transition);
-}
-
-.session:hover {
-  border-color: var(--terminal-blue);
-  background: var(--background-storm);
-}
-
-.session__heading {
-  display: flex;
-  align-items: start;
-  justify-content: space-between;
+  display: grid;
   gap: 1rem;
-  padding-bottom: 1rem;
-  border-bottom: max(1px, 0.0625em) solid var(--border);
 }
 
-.session__heading code {
-  overflow-wrap: anywhere;
-  color: var(--terminal-cyan);
-  font-weight: 700;
+.session__visual {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  margin: 0;
+  overflow: hidden;
+  background: #000;
+}
+
+.session__image,
+.session__placeholder {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.session__image {
+  object-fit: cover;
 }
 
 .status {
-  flex: none;
-  padding: 0.25em 0.6em;
+  position: absolute;
+  right: 0.75rem;
+  bottom: 0.75rem;
+  padding: 0.35em 0.7em;
   border: 1px solid currentcolor;
   border-radius: 999px;
+  background: rgb(26 27 38 / 92%);
   font-size: 0.7em;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -229,19 +221,29 @@ main {
   color: var(--terminal-white);
 }
 
-.session dl {
+.status--centered {
+  top: 50%;
+  right: auto;
+  bottom: auto;
+  left: 50%;
+  padding: 0.6em 1em;
+  font-size: 1em;
+  transform: translate(-50%, -50%);
+}
+
+.session__details {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 1.25rem;
-  margin: 1.25rem 0 0;
+  gap: 0.75rem;
 }
 
-.session dl div:first-child {
-  grid-column: span 3;
+.session__version {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 1rem;
 }
 
-.session dt {
-  margin-bottom: 0.35rem;
+.session__version span {
   color: var(--terminal-blue);
   font-size: 0.7em;
   font-weight: 700;
@@ -249,18 +251,36 @@ main {
   text-transform: uppercase;
 }
 
-.session dd {
-  margin: 0;
+.session__version a {
+  color: var(--terminal-cyan);
+  font-weight: 700;
   overflow-wrap: anywhere;
-  color: var(--terminal-white);
+  text-align: right;
+  text-underline-offset: 0.2em;
+}
+
+.session__version a:hover {
+  color: var(--turquoise);
+}
+
+.session__details > code {
+  color: var(--terminal-blue);
+  font-size: 0.7em;
+  overflow-wrap: anywhere;
 }
 
 .session__reason {
-  margin: 1.25rem 0 0;
-  padding-top: 1rem;
-  border-top: max(1px, 0.0625em) solid var(--border);
+  margin: 0.5rem 0 0;
   color: var(--failed);
   overflow-wrap: anywhere;
+}
+
+.session__reason strong {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: 0.7em;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .empty-state {
@@ -268,8 +288,6 @@ main {
   min-height: 14rem;
   place-content: center;
   padding: 2rem;
-  border: max(1px, 0.0625em) dashed var(--border);
-  border-radius: 0.5rem;
   text-align: center;
 }
 
@@ -285,35 +303,13 @@ main {
   color: var(--terminal-blue);
 }
 
-.empty-state--error {
-  border-color: var(--failed);
+.empty-state--error p {
+  color: var(--failed);
 }
 
 @keyframes brand-shift {
   to {
     background-position: 240% 0;
-  }
-}
-
-@media (max-width: 42rem) {
-  .sessions__heading {
-    align-items: center;
-  }
-
-  .session__heading {
-    display: grid;
-  }
-
-  .status {
-    width: fit-content;
-  }
-
-  .session dl {
-    grid-template-columns: 1fr;
-  }
-
-  .session dl div:first-child {
-    grid-column: auto;
   }
 }
 

@@ -2,7 +2,7 @@ import * as Sentry from "@sentry/cloudflare";
 import { Hono } from "hono";
 import type { FC } from "hono/jsx";
 import { jsxRenderer } from "hono/jsx-renderer";
-import { listSessions, type Session } from "./db/query.ts";
+import { getSessionImage, listSessions, type Session } from "./db/query.ts";
 import { SENTRY_DSN } from "./sentry-dsn.ts";
 
 const HTMX_URL = "https://cdn.jsdelivr.net/npm/htmx.org@4.0.0";
@@ -55,45 +55,45 @@ const SessionList: FC<SessionListProps> = ({ sessions }) => (
     </div>
   ) : (
     <ol>
-      {sessions.map((session) => (
-        <li>
-          <article class="session">
-            <div class="session__heading">
-              <code>{session.id}</code>
-              <span class={`status status--${session.status}`}>{session.status}</span>
-            </div>
-            <dl>
-              <div>
-                <dt>Image</dt>
-                <dd>{session.config.iso}</dd>
-              </div>
-              <div>
-                <dt>Started</dt>
-                <dd>
-                  <time dateTime={session.startedAt.toISOString()}>{dateTime.format(session.startedAt)}</time>
-                </dd>
-              </div>
-              <div>
-                <dt>Ended</dt>
-                <dd>
-                  {session.endedAt === null ? (
-                    "In progress"
-                  ) : (
-                    <time dateTime={session.endedAt.toISOString()}>{dateTime.format(session.endedAt)}</time>
-                  )}
-                </dd>
-              </div>
-              {session.config.disk === undefined ? null : (
-                <div>
-                  <dt>Disk</dt>
-                  <dd>{session.config.disk}</dd>
+      {sessions.map((session) => {
+        const isoName = session.config.iso.split("/").at(-1) ?? session.config.iso;
+        return (
+          <li>
+            <article class="session">
+              <figure class="session__visual">
+                {session.imageActionId === null ? (
+                  <div class="session__placeholder" role="img" aria-label="No screenshot captured"></div>
+                ) : (
+                  <img
+                    class="session__image"
+                    src={`/images/${session.imageActionId}`}
+                    alt={`Last captured frame from session ${session.id}`}
+                    loading="lazy"
+                  />
+                )}
+                <span
+                  class={`status status--${session.status}${session.imageActionId === null ? " status--centered" : ""}`}
+                >
+                  {session.status === "timed_out" ? "timed out" : session.status}
+                </span>
+              </figure>
+              <div class="session__details">
+                <div class="session__version">
+                  <span>Omarchy version</span>
+                  <a href={session.config.iso}>{isoName}</a>
                 </div>
-              )}
-            </dl>
-            {session.reason === null ? null : <p class="session__reason">{session.reason}</p>}
-          </article>
-        </li>
-      ))}
+                <code title={session.id}>{session.id}</code>
+                {session.status === "failed" && session.reason !== null ? (
+                  <p class="session__reason">
+                    <strong>Last failure</strong>
+                    {session.reason}
+                  </p>
+                ) : null}
+              </div>
+            </article>
+          </li>
+        );
+      })}
     </ol>
   )
 );
@@ -189,6 +189,30 @@ app.get("/sessions", async (context) => {
       </>,
       500,
     );
+  }
+});
+
+app.get("/images/:actionId", async (context) => {
+  const actionId = Number(context.req.param("actionId"));
+  if (!Number.isSafeInteger(actionId) || actionId < 1) {
+    return context.notFound();
+  }
+
+  try {
+    const image = await getSessionImage(context.env.HYPERDRIVE.connectionString, actionId);
+    if (image === undefined) {
+      return context.notFound();
+    }
+    return new Response(new Uint8Array(image), {
+      headers: {
+        "cache-control": "public, max-age=31536000, immutable",
+        "content-type": "image/png",
+      },
+    });
+  } catch (error) {
+    Sentry.captureException(error);
+    console.error("dashboard: loading session image:", (error as Error).message);
+    return context.body(null, 500);
   }
 });
 
