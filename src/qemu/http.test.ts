@@ -4,7 +4,12 @@ import { NodeHttpServer } from "@effect/platform-node";
 import { Effect, ErrorReporter, Layer } from "effect";
 import { HttpRouter } from "effect/unstable/http";
 import { HttpApiBuilder, HttpApiTest } from "effect/unstable/httpapi";
-import { api, errorResponses, operationError } from "./http.ts";
+import {
+  api,
+  errorResponses,
+  makeErrorReporter,
+  operationError,
+} from "./http.ts";
 
 const handlers = HttpApiBuilder.group(api, "control", (handlers) =>
   handlers.handleAll({
@@ -235,7 +240,7 @@ describe("Effect HTTP contract unhappy path", () => {
     ).pipe(
       Layer.provide(
         ErrorReporter.layer([
-          ErrorReporter.make(({ error }) => {
+          makeErrorReporter((error) => {
             reported.push(error.message);
           }),
         ]),
@@ -245,6 +250,15 @@ describe("Effect HTTP contract unhappy path", () => {
       disableLogger: true,
     });
     try {
+      const malformed = await web.handler(
+        new Request("http://localhost/send-keys", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ id: 1 }),
+        }),
+      );
+      assert.equal(malformed.status, 400);
+
       const operational = await web.handler(
         new Request("http://localhost/send-keys", {
           method: "POST",
