@@ -15,6 +15,13 @@
       "when": 1788020983068,
       "tag": "0001_downloading-status",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788051289530,
+      "tag": "0002_logs",
+      "breakpoints": true
     }
   ]
 }
