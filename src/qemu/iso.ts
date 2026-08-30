@@ -148,7 +148,7 @@ async function download(db: Db, url: string, file: string, path: string, who: Wh
           if (Date.now() - beatAt >= HEARTBEAT_MS) {
             beatAt = Date.now();
             updateManifest(file, "downloading").catch((err: unknown) => {
-              log(db, { text: `iso: heartbeat failed: ${(err as Error).message}`, ...who });
+              log(db, { level: "warning", text: `iso: heartbeat failed: ${(err as Error).message}`, ...who });
             });
           }
           yield chunk;
@@ -159,7 +159,7 @@ async function download(db: Db, url: string, file: string, path: string, who: Wh
     const digest = hash.digest("hex");
     const published = await publishedSha256(url);
     if (published === undefined) {
-      log(db, { text: `iso: no ${url}.sha256 published; skipping the checksum check`, ...who });
+      log(db, { level: "warning", text: `iso: no ${url}.sha256 published; skipping the checksum check`, ...who });
     } else if (published !== digest) {
       throw new Error(`iso: sha256 mismatch: ${url}: published ${published}, downloaded ${digest}`);
     }
