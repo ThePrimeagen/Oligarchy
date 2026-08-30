@@ -20,7 +20,7 @@ export async function listSessions(connectionString: string): Promise<Session[]>
       reason: sessions.reason,
       startedAt: sessions.startedAt,
       endedAt: sessions.endedAt,
-      queriedAt: sql<Date>`CURRENT_TIMESTAMP`,
+      queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(sessions.startedAt),
     })
     .from(sessions)
     .orderBy(desc(sessions.startedAt))
