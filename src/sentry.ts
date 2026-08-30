@@ -49,5 +49,6 @@ export function flushSentry(): Promise<void> {
   if (dsn === undefined || dsn === "") {
     return Promise.resolve();
   }
-  return Sentry.flush().then(() => undefined);
+  // Two seconds: a stalled ingest must not hold the exit.
+  return Sentry.flush(2_000).then(() => undefined);
 }

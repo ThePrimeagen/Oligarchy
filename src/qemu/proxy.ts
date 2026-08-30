@@ -569,7 +569,7 @@ const main = Layer.effectDiscard(
     log(db, `oligarchy proxy listening on ${addr}`);
     server.on("error", (err) => {
       log(db, { level: "fatal", text: `proxy: ${err.message}` }, { cause: err });
-      void Promise.all([flushLogs(), flushSentry()]).then(() => process.exit(1));
+      void flushLogs().then(flushSentry).then(() => process.exit(1));
     });
   }),
 ).pipe(
@@ -592,7 +592,7 @@ NodeRuntime.runMain(
   {
     disableErrorReporting: true,
     teardown: (exit, onExit) => {
-      void Promise.all([flushLogs(), flushSentry()]).then(() => {
+      void flushLogs().then(flushSentry).then(() => {
         if (Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)) {
           return onExit(1);
         }
