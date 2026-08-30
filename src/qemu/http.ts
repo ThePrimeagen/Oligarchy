@@ -24,6 +24,16 @@ export function operationError(error: Error): OperationError {
   });
 }
 
+export function makeErrorReporter(
+  report: (error: Error) => void,
+): ErrorReporter.ErrorReporter {
+  return ErrorReporter.make(({ cause, error }) => {
+    if (!isRequestSchemaError(Cause.squash(cause))) {
+      report(error);
+    }
+  });
+}
+
 const OperationErrorSchema = Schema.Struct({
   error: Schema.String,
 }).pipe(HttpApiSchema.status(400));
@@ -118,12 +128,7 @@ export const errorResponses = HttpRouter.middleware(
     Effect.catchCause(httpEffect, (cause) => {
       const failure = Cause.squash(cause);
       if (HttpApiError.HttpApiSchemaError.is(failure)) {
-        if (
-          failure.kind === "Params" ||
-          failure.kind === "Headers" ||
-          failure.kind === "Query" ||
-          failure.kind === "Payload"
-        ) {
+        if (isRequestSchemaError(failure)) {
           return Effect.succeed(
             HttpServerResponse.jsonUnsafe(
               {
@@ -174,3 +179,13 @@ export const errorResponses = HttpRouter.middleware(
     ),
   { global: true },
 );
+
+function isRequestSchemaError(failure: unknown): boolean {
+  return (
+    HttpApiError.HttpApiSchemaError.is(failure) &&
+    (failure.kind === "Params" ||
+      failure.kind === "Headers" ||
+      failure.kind === "Query" ||
+      failure.kind === "Payload")
+  );
+}

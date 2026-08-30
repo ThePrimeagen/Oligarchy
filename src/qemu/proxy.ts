@@ -33,6 +33,7 @@ import { createDisk, createQemu, screendump, sendKey, start, stop, type Qemu } f
 import {
   api,
   errorResponses,
+  makeErrorReporter,
   operationError,
   type OperationError,
 } from "./http.ts";
@@ -52,7 +53,7 @@ const db = connectDatabase();
 
 const sessions = new Map<string, Qemu>();
 const cpuSampler = startCpuSampler();
-const errorReporter = ErrorReporter.make(({ error }) => {
+const errorReporter = makeErrorReporter((error) => {
   console.error(error);
 });
 
