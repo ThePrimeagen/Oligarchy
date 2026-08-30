@@ -17,9 +17,9 @@
   },
   "dependencies": {
     "@cursor/sdk": "^1.0.30",
-    "@effect/platform-node": "^4.0.0-rc.112",
+    "@effect/platform-node": "4.0.0-rc.112",
     "drizzle-orm": "^0.45.2",
-    "effect": "^4.0.0-rc.112",
+    "effect": "4.0.0-rc.112",
     "pg": "^8.23.0"
   },
   "engines": {
