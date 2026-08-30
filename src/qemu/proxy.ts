@@ -476,10 +476,22 @@ const drainSessions = Layer.effectDiscard(
 // serve's built-in request logger and listen line are off: the proxy keeps
 // its stderr contract — one boot line, error lines only. The boot line
 // goes through log() too: a proxy restart in the record explains sessions
-// that ended as "aborted, proxy shutdown".
-const main = Layer.effectDiscard(Effect.sync(() => log(db, `oligarchy proxy listening on ${addr}`))).pipe(
+// that ended as "aborted, proxy shutdown". The platform guards only the
+// listen itself and drops its error listener once the server is up, so a
+// later server error (the acceptor breaking) gets the same death master
+// gave it: one fatal line, the flush, exit 1.
+const server = createServer();
+const main = Layer.effectDiscard(
+  Effect.sync(() => {
+    log(db, `oligarchy proxy listening on ${addr}`);
+    server.on("error", (err) => {
+      log(db, { level: "fatal", text: `proxy: ${err.message}` });
+      void flushLogs().then(() => process.exit(1));
+    });
+  }),
+).pipe(
   Layer.provide(HttpRouter.serve(Layer.mergeAll(routes, respond, drainSessions), { disableLogger: true, disableListenLog: true })),
-  Layer.provide(NodeHttpServer.layer(() => createServer(), { host, port: Number(port) })),
+  Layer.provide(NodeHttpServer.layer(() => server, { host, port: Number(port) })),
 );
 
 // The exit contract is unchanged: a clean shutdown (signals included) exits
