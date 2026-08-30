@@ -266,6 +266,7 @@ async function execute(qemu: Qemu, name: string, args: unknown, record?: QemuExc
     });
     throw err;
   }
+  // Outside the try: a failing close must surface as itself, not relabel the completed exchange as failed.
   await close?.({ state: "completed", response });
   return response.return;
 }
