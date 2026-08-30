@@ -9,9 +9,14 @@ export const sessionStatus = pgEnum("session_status", ["downloading", "running",
 export const logLevel = pgEnum("log_level", ["info", "warning", "error", "fatal"]);
 export const actionState = pgEnum("action_state", ["completed", "failed"]);
 
+export type SessionConfig = {
+  iso: string;
+  disk?: string;
+};
+
 export const sessions = pgTable("sessions", {
   id: uuid("id").primaryKey(),
-  config: jsonb("config").notNull(),
+  config: jsonb("config").$type<SessionConfig>().notNull(),
   status: sessionStatus("status").notNull().default("running"),
   reason: text("reason"),
   startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
