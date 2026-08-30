@@ -4,17 +4,17 @@ The control plane spoken between the CLI and the proxy (`src/qemu/proxy.ts`).
 
 The proxy defaults to `127.0.0.1:42069`. Bodies are JSON except the PNG. Errors are `4xx`/`5xx` with `{"error": "<message>"}`.
 
-Session-driving requests (`/start`, `/image`, `/send-keys`) carry the calling agent's id — `agent` in the POST body, a query param on the GET — so the server attributes the session's [actions](database.md) to that agent. The CLI always sends it; a request without one is unattributed manual use (the schema's null `agent_id`). `/stop` carries none because a stop exchanges nothing over QMP and is not an action — it carries the session's verdict instead; `/stats` has no session at all.
+Session-driving requests (`/start`, `/image`, `/send-keys`) carry the calling agent's id — `agent` in the POST body, a query param on the GET — so the server attributes the session's [actions](database.md) to that agent. The agent id is required: this control plane is driven by agents, and a request that names none is refused with a 400. `/stop` carries none because a stop exchanges nothing over QMP and is not an action — it carries the session's verdict instead; `/stats` has no session at all.
 
 ## POST /start
 
 Boots a QEMU session. Returns `{"id": "<uuid>"}`.
 
-The body is JSON with three keys, all optional (an empty body works too):
+The body is JSON with three keys — `agent` required, the rest optional:
 
 - `iso` — guest ISO path or http(s) url. Defaults to the proxy's own default ISO (its argv, or `OLIGARCHY_ISO`).
 - `disk` — qcow2 path, which must already exist. When the key is **absent**, the proxy creates a fresh disk (40G virtual) in the session dir.
-- `agent` — the calling agent's id, for attribution. Absent means unattributed manual use.
+- `agent` — the calling agent's id, for attribution. Required.
 
 Clients that want the server-managed disk must therefore omit the key, not send `""`. The CLI does this; keep it that way.
 

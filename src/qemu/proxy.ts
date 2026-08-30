@@ -9,25 +9,28 @@
 // boot, and every session, QMP exchange, image, and iso event is recorded
 // as it happens (see field-guide/database.md).
 //
-//   POST /start      -> {"iso"?, "disk"?, "agent"?}; boots a qemu, returns
+//   POST /start      -> {"iso"?, "disk"?, "agent"}; boots a qemu, returns
 //                       {"id": uuid}; an http(s) iso is downloaded into
 //                       ~/.oligarchy/isos once (a start that finds a running
 //                       download waits for it) and reused from there on
 //                       later starts
 //   GET  /image?id=&agent= -> PNG of that session's guest display
 //   GET  /stats      -> qemu count + host memory + cpu percentiles (last 5m)
-//   POST /send-keys  -> {"id", "keys": "Hi<ENTER>", "encoding"?, "agent"?}
+//   POST /send-keys  -> {"id", "keys": "Hi<ENTER>", "encoding"?, "agent"}
 //   POST /stop       -> {"id", "status"?, "reason"?}; kills the qemu, removes
 //                       its session dir, and records the verdict (default
 //                       aborted)
 //
-// The HTTP layer is Effect (v4). Each route is an Effect whose error type
-// names the operational errors it can answer with — the ApiError union
-// below — and the respond middleware is the one place that turns each tag
-// into the wire shape {"error": message}. The compiler closes the loop: a
-// route cannot fail with anything outside the union, and the middleware
-// cannot omit a tag. Anything else that goes wrong is a defect — a bug —
-// logged in full on stderr and shown to the client only as a generic 500.
+// The HTTP layer is Effect (v4). Request shapes are Schema structs decoded
+// at the boundary — the one place input is validated — and the agent id is
+// required on every session-driving request. Each route is an Effect whose
+// error type names the operational errors it can answer with — the
+// ApiError union below — and the respond middleware is the one place that
+// turns each tag into the wire shape {"error": message}. The compiler
+// closes the loop: a route cannot fail with anything outside the union,
+// and the middleware cannot omit a tag. Anything else that goes wrong is a
+// defect — a bug — logged in full on stderr and shown to the client only
+// as a generic 500.
 // The subsystems the routes call (the qemu client, the iso cache, the db
 // ops) are still promise code, untouched by this spike; their failures are
 // mapped into the coarser tags at each call site, and sharpen into precise
@@ -36,7 +39,7 @@
 import { createServer } from "node:http";
 import { mkdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { Cause, Effect, Exit, Layer } from "effect";
+import { Cause, Effect, Exit, Layer, Schema } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { NodeHttpServer, NodeRuntime } from "@effect/platform-node";
 import { connectDatabase, endSession, finishAction, insertSession, registerAgent, sessionRunning, startAction } from "../db/ops.ts";
@@ -61,7 +64,7 @@ const cpuSampler = startCpuSampler();
 
 // One action row per QMP exchange: opened as the command goes out, closed
 // with the outcome when the reply lands (see database.md).
-function recorder(sessionId: string, agentId: string | undefined): QemuExchangeRecorder {
+function recorder(sessionId: string, agentId: string): QemuExchangeRecorder {
   return async (command) => {
     const id = await startAction(db, { sessionId, agentId, request: command });
     return async (outcome) => {
@@ -101,8 +104,8 @@ function internal(cause: unknown): ApiError {
   return { _tag: "Internal", cause };
 }
 
-function session(id: string | undefined): Effect.Effect<Qemu, ApiError> {
-  if (id === undefined || id === "") {
+function session(id: string): Effect.Effect<Qemu, ApiError> {
+  if (id === "") {
     return Effect.fail(badRequest("session id is required"));
   }
   const qemu = sessions.get(id);
@@ -112,12 +115,56 @@ function session(id: string | undefined): Effect.Effect<Qemu, ApiError> {
   return Effect.succeed(qemu);
 }
 
-// The request body as text. A failed read is the request's problem (the
-// client hung up mid-body), answered like any other bad request.
-const bodyText: Effect.Effect<string, ApiError, HttpServerRequest.HttpServerRequest> = Effect.flatMap(
-  HttpServerRequest.HttpServerRequest,
-  (request) => Effect.mapError(request.text, (err) => badRequest(err.message)),
-);
+// What each request must say, stated once as schemas: the schema is the
+// accepted input, and a request that does not match it is answered with
+// the decode error's own words. agent is required on every session-driving
+// request — this control plane is driven by agents, and a request that
+// names no agent has no business being sent (the CLI already refuses to).
+// /stop stays agentless by design: a stop exchanges nothing over QMP and
+// is not an action, it carries the session's verdict instead.
+const StartBody = Schema.Struct({
+  iso: Schema.optionalKey(Schema.String),
+  disk: Schema.optionalKey(Schema.String),
+  agent: Schema.String,
+});
+
+const ImageParams = Schema.Struct({
+  id: Schema.String,
+  agent: Schema.String,
+});
+
+const SendKeysBody = Schema.Struct({
+  id: Schema.String,
+  keys: Schema.String,
+  encoding: Schema.optionalKey(Schema.String),
+  agent: Schema.String,
+});
+
+// The verdict rides the shape: a bad status never reaches the handler, so
+// it cannot kill the qemu and then fail to record the end.
+const StopBody = Schema.Struct({
+  id: Schema.String,
+  status: Schema.optionalKey(Schema.Literals(["succeeded", "failed", "aborted"])),
+  reason: Schema.optionalKey(Schema.String),
+});
+
+// The one decoded JSON body per POST route. A body that does not read as
+// JSON or does not match its schema is the client's mistake — answered
+// with JSON.parse's own message (it names the exact spot the body went
+// wrong; the platform's request.json hides it) or the decode error's.
+function jsonBody<S extends Schema.Constraint>(
+  schema: S,
+): Effect.Effect<S["Type"], ApiError, HttpServerRequest.HttpServerRequest | S["DecodingServices"]> {
+  return Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const raw = yield* Effect.mapError(request.text, (err) => badRequest(err.message));
+    const body = yield* Effect.try({
+      try: () => JSON.parse(raw) as unknown,
+      catch: (err) => badRequest((err as Error).message),
+    });
+    return yield* Effect.mapError(Schema.decodeUnknownEffect(schema)(body), (err) => badRequest(err.message));
+  });
+}
 
 // The route contract, stated as a type so it is checked, not promised: a
 // route answers with a response or fails with an ApiError — nothing else.
@@ -128,13 +175,11 @@ type RouteHandler = Effect.Effect<HttpServerResponse.HttpServerResponse, ApiErro
 
 // The boot work behind /start — still promise code end to end, because the
 // qemu client, iso cache, and db ops are out of this spike's scope.
-async function boot(qemu: Qemu, cfg: { disk?: string; agent?: string }, isoName: string, isUrl: boolean): Promise<void> {
+async function boot(qemu: Qemu, cfg: { disk?: string; agent: string }, isoName: string, isUrl: boolean): Promise<void> {
   try {
     // Inside the try: a rejected registration (the agent already drives
     // a session) must close this session as failed, not leave it open.
-    if (cfg.agent !== undefined) {
-      await registerAgent(db, cfg.agent, qemu.id);
-    }
+    await registerAgent(db, cfg.agent, qemu.id);
     const iso = await getIso(db, isoName, { sessionId: qemu.id, agentId: cfg.agent });
     if (cfg.disk === undefined) {
       await createDisk(qemu);
@@ -168,13 +213,7 @@ async function boot(qemu: Qemu, cfg: { disk?: string; agent?: string }, isoName:
 const routes = HttpRouter.use((router) =>
   Effect.gen(function* () {
     yield* router.add("POST", "/start", Effect.gen(function* () {
-      const raw = yield* bodyText;
-      const cfg = raw === ""
-        ? {}
-        : yield* Effect.try({
-          try: () => JSON.parse(raw) as { iso?: string; disk?: string; agent?: string },
-          catch: (err) => badRequest((err as Error).message),
-        });
+      const cfg = yield* jsonBody(StartBody);
       const isoName = cfg.iso ?? defaultIso;
       const isUrl = isoName.startsWith("http://") || isoName.startsWith("https://");
       const qemu = createQemu();
@@ -194,11 +233,9 @@ const routes = HttpRouter.use((router) =>
     }) satisfies RouteHandler, { uninterruptible: true });
 
     yield* router.add("GET", "/image", Effect.gen(function* () {
-      // A repeated query param arrives parsed as an array; the first value
-      // is the one url.searchParams.get() answered with before.
-      const search = yield* HttpServerRequest.ParsedSearchParams;
-      const qemu = yield* session(typeof search.id === "string" ? search.id : search.id?.[0]);
-      const agent = typeof search.agent === "string" ? search.agent : search.agent?.[0];
+      const params = yield* Effect.mapError(HttpRouter.schemaParams(ImageParams), (err) => badRequest(err.message));
+      const qemu = yield* session(params.id);
+      const agent = params.agent;
       const path = join(qemu.dir, `image-${process.hrtime.bigint()}.png`);
       // The PNG is read back only after the exchange closes, and the images
       // row must ride the same transaction that closes the action (they are
@@ -247,16 +284,7 @@ const routes = HttpRouter.use((router) =>
     yield* router.add("GET", "/stats", Effect.sync(() => HttpServerResponse.jsonUnsafe(collectStats(cpuSampler, sessions.size))) satisfies RouteHandler);
 
     yield* router.add("POST", "/stop", Effect.gen(function* () {
-      const raw = yield* bodyText;
-      const { id, status, reason } = yield* Effect.try({
-        try: () => JSON.parse(raw) as { id?: string; status?: "succeeded" | "failed" | "aborted"; reason?: string },
-        catch: (err) => badRequest((err as Error).message),
-      });
-      // The verdict is checked before the machine dies: a bad status must
-      // not kill the qemu and then fail to record the end.
-      if (status !== undefined && status !== "succeeded" && status !== "failed" && status !== "aborted") {
-        yield* Effect.fail(badRequest(`unknown status "${status as string}"`));
-      }
+      const { id, status, reason } = yield* jsonBody(StopBody);
       const qemu = yield* session(id);
       sessions.delete(qemu.id);
       yield* Effect.tryPromise({ try: () => stop(qemu), catch: internal });
@@ -266,11 +294,7 @@ const routes = HttpRouter.use((router) =>
     }) satisfies RouteHandler, { uninterruptible: true });
 
     yield* router.add("POST", "/send-keys", Effect.gen(function* () {
-      const raw = yield* bodyText;
-      const { id, keys, encoding, agent } = yield* Effect.try({
-        try: () => JSON.parse(raw) as { id?: string; keys: string; encoding?: string; agent?: string },
-        catch: (err) => badRequest((err as Error).message),
-      });
+      const { id, keys, encoding, agent } = yield* jsonBody(SendKeysBody);
       const qemu = yield* session(id);
       // parseKeys throws only on bad input, so every failure is the client's.
       const chords = yield* Effect.try({
