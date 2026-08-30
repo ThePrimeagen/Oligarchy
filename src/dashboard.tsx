@@ -20,6 +20,7 @@ app.use(
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Oligarchy</title>
+        <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
         <link rel="stylesheet" href="/dashboard.css" />
         <script src={HTMX_URL} integrity={HTMX_INTEGRITY} crossorigin="anonymous"></script>
       </head>
