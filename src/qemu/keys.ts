@@ -1,6 +1,3 @@
-// Key-string parsing for the oligarchy encoding: literal characters plus
-// angle-bracket names and modifiers, e.g. "Hi<ENTER>" or "<C-S-c>".
-
 const NAMED: Record<string, string> = {
   ENTER: "ret",
   RETURN: "ret",
@@ -42,7 +39,6 @@ const NAMED: Record<string, string> = {
   META_L: "meta_l",
 };
 
-// Punctuation that needs shift on a US keyboard, mapped to the unshifted qcode.
 const SHIFTED: Record<string, string> = {
   "!": "1",
   "@": "2",
@@ -97,7 +93,6 @@ const MODIFIERS: Record<string, string> = {
   META: "meta_l",
 };
 
-/** Turns an encoded key string into send-key chords of QEMU qcodes. */
 export function parseKeys(s: string, encoding = "oligarchy"): string[][] {
   if (encoding !== "" && encoding.toLowerCase() !== "oligarchy") {
     throw new Error(`qemu: unknown key encoding "${encoding}"`);
@@ -119,7 +114,6 @@ export function parseKeys(s: string, encoding = "oligarchy"): string[][] {
   return out;
 }
 
-/** Parses the inside of <...>: optional dash-separated modifiers, then a key. */
 function angleChord(inner: string): string[] {
   if (inner === "") {
     throw new Error("qemu: empty key sequence");

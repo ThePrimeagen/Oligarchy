@@ -1,11 +1,3 @@
-// Host stats for the proxy's GET /stats endpoint: how many qemu sessions the
-// proxy is running, how much memory the host has, and cpu utilization over
-// the last five minutes.
-//
-// A timer started with the server samples the busy share of cpu time every
-// tick into a rolling window; /stats reports the window's mean and
-// p10/p25/p75/p90 percentiles. The cpu fields are 0 until the first tick.
-
 import os from "node:os";
 import { capture } from "../sentry.ts";
 
@@ -20,7 +12,6 @@ type CpuTimes = {
 
 export type CpuSampler = {
   prev: CpuTimes;
-  /** Utilization percents, oldest first. */
   samples: number[];
 };
 
@@ -41,7 +32,6 @@ export type Stats = {
   };
 };
 
-/** Starts the sampling timer; unref keeps it from holding the process open. */
 export function startCpuSampler(): CpuSampler {
   const sampler: CpuSampler = { prev: cpuTimes(), samples: [] };
   setInterval(() => sampleCpu(sampler), SAMPLE_INTERVAL_MS).unref();
