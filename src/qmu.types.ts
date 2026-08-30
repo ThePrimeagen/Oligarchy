@@ -68,4 +68,18 @@ declare global {
   type QemuStartResult = {
     id: string;
   };
+
+  // How one QMP exchange ended. completed: QEMU's exact reply (the greeting
+  // for qmp_capabilities at boot). failed: QEMU's {error} reply, or this
+  // server's error message when the failure never reached QEMU.
+  type QemuExchangeOutcome =
+    | { state: "completed"; response: QemuGreetingResponse | QemuSuccessResponse }
+    | { state: "failed"; response: QemuErrorResponse | string };
+
+  // The proxy's hook into the wire: awaited with the exact command JSON
+  // before it goes out (a refused insert fails the exchange up front); the
+  // returned close lands the outcome when the reply arrives.
+  type QemuExchangeRecorder = (
+    command: QemuCommand,
+  ) => Promise<(outcome: QemuExchangeOutcome) => Promise<void>>;
 }

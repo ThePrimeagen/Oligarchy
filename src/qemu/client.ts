@@ -90,6 +90,7 @@ export async function createDisk(qemu: Qemu): Promise<string> {
 export async function start(
   qemu: Qemu,
   options: QemuStartOptions = {},
+  record?: QemuExchangeRecorder,
 ): Promise<QemuStartResult> {
   if (qemu.socket !== undefined) {
     throw new Error("qemu: already started");
@@ -160,9 +161,11 @@ export async function start(
           }
           qemu.pending.delete(id);
           if ("error" in msg) {
-            pending.reject(new Error(`${msg.error.class}: ${msg.error.desc}`));
+            // QEMU's raw {error} reply rides the rejection so a recorder
+            // can store the exact JSON, not just the flattened message.
+            pending.reject(Object.assign(new Error(`${msg.error.class}: ${msg.error.desc}`), { qmp: msg }));
           } else {
-            pending.resolve(msg.return);
+            pending.resolve(msg);
           }
         }
       } catch (err) {
@@ -173,8 +176,18 @@ export async function start(
     socket.on("error", (err) => failAll(qemu, err));
     socket.on("close", () => failAll(qemu, new Error("qemu: socket closed")));
 
-    await Promise.race([greeting, timeout]);
-    await Promise.race([execute(qemu, "qmp_capabilities", {}), timeout]);
+    const greetingMsg = (await Promise.race([greeting, timeout])) as QemuGreetingResponse;
+    // The greeting is the recorded reply for the boot's qmp_capabilities:
+    // its own {return} is empty, the greeting is what the handshake said.
+    const bootRecord: QemuExchangeRecorder | undefined =
+      record === undefined
+        ? undefined
+        : async (command) => {
+            const close = await record(command);
+            return (outcome) =>
+              close(outcome.state === "completed" ? { state: "completed", response: greetingMsg } : outcome);
+          };
+    await Promise.race([execute(qemu, "qmp_capabilities", {}, bootRecord), timeout]);
     return { id: qemu.id };
   } catch (err) {
     teardown(qemu, err);
@@ -190,12 +203,17 @@ export async function stop(qemu: Qemu): Promise<void> {
   await rm(qemu.dir, { recursive: true, force: true });
 }
 
-export async function sendKey(qemu: Qemu, keys: QemuKeyValue[]): Promise<void> {
-  await execute(qemu, "send-key", { keys });
+export async function sendKey(qemu: Qemu, keys: QemuKeyValue[], record?: QemuExchangeRecorder): Promise<void> {
+  await execute(qemu, "send-key", { keys }, record);
 }
 
-export async function screendump(qemu: Qemu, filename: string, format = "png"): Promise<void> {
-  await execute(qemu, "screendump", { filename, format });
+export async function screendump(
+  qemu: Qemu,
+  filename: string,
+  format = "png",
+  record?: QemuExchangeRecorder,
+): Promise<void> {
+  await execute(qemu, "screendump", { filename, format }, record);
 }
 
 function qemuArgs(opts: {
@@ -235,16 +253,35 @@ function qemuArgs(opts: {
   ];
 }
 
-async function execute(qemu: Qemu, name: string, args: unknown): Promise<unknown> {
+async function execute(qemu: Qemu, name: string, args: unknown, record?: QemuExchangeRecorder): Promise<unknown> {
   const socket = qemu.socket;
   if (socket === undefined) {
     throw new Error("qemu: closed");
   }
   const id = ++qemu.nextId;
-  return new Promise((resolve, reject) => {
-    qemu.pending.set(id, { resolve, reject });
-    socket.write(`${JSON.stringify({ execute: name, arguments: args, id })}\n`);
-  });
+  const command = { execute: name, arguments: args, id } as QemuCommand;
+  // The row opens before the command goes out — awaited, so a refused
+  // insert fails the exchange up front instead of dying unhandled later.
+  const close = record === undefined ? undefined : await record(command);
+  let response: QemuSuccessResponse;
+  try {
+    response = (await new Promise<unknown>((resolve, reject) => {
+      qemu.pending.set(id, { resolve, reject });
+      socket.write(`${JSON.stringify(command)}\n`);
+    })) as QemuSuccessResponse;
+  } catch (err) {
+    const failure = (err as { qmp?: QemuErrorResponse }).qmp ?? (err as Error).message;
+    // The exchange error is the one worth seeing; a failed close cannot
+    // replace it (the one-shot cleanup pattern in cursor-agent/client.ts).
+    await close?.({ state: "failed", response: failure }).catch((closeErr: unknown) => {
+      console.error(`db: recording a failed exchange failed too: ${(closeErr as Error).message}`);
+    });
+    throw err;
+  }
+  // Closed outside the catch: a failing close surfaces as itself and can
+  // never relabel a completed exchange as failed.
+  await close?.({ state: "completed", response });
+  return response.return;
 }
 
 function failAll(qemu: Qemu, err: unknown): void {

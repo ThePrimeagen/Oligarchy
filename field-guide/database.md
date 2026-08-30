@@ -1,6 +1,6 @@
 # The control-plane database
 
-One PlanetScale Postgres database holds the record of everything the proxy does. `src/db/schema.ts` defines the four tables (sessions, agent_runs, actions, images); `src/db/ops.ts` is the only code that touches them. Nothing calls the interface yet — wiring it into the proxy is its own change.
+One PlanetScale Postgres database holds the record of everything the proxy does. `src/db/schema.ts` defines the five tables (sessions, agent_runs, actions, images, logs); `src/db/ops.ts` is the only code that touches them, except logs, which belongs to `log()` in `src/db/log.ts` — a debug line to stderr and the same line as a row, attributed to a session and an agent when the caller has them, taking the same client. The proxy records through this interface as it runs: the session row lands before any boot work (`downloading` for a url iso), every QMP exchange opens and closes an action row via the recorder hook threaded into the qemu client, a get-image's PNG rides the closing transaction, iso cache traffic goes through `log()`, and `/stop` closes the session with its verdict.
 
 ## The state that threads through
 

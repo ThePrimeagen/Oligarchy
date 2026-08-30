@@ -1,10 +1,12 @@
 // Drizzle schema for the control-plane database (PlanetScale Postgres).
 //
-// Four tables: sessions (one row per QEMU boot), agent_runs (which cloud
-// agents drove it), actions (every QMP exchange, in order), and images
-// (the PNG each get-image returned).
+// Five tables: sessions (one row per QEMU boot), agent_runs (which cloud
+// agents drove it), actions (every QMP exchange, in order), images (the
+// PNG each get-image returned), and logs (debug lines from db.log, each
+// pinned to a session and an agent when the writer had them).
 //
 // Replaying a session is: actions WHERE session_id ORDER BY created_at, id.
+// Debugging one is that plus: logs WHERE session_id, same order.
 
 import { bigint, customType, index, jsonb, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
@@ -85,3 +87,23 @@ export const images = pgTable("images", {
   // Blob for now: when images move somewhere smarter, only this table changes.
   data: bytea("data").notNull(),
 });
+
+// Debug lines written by log() in src/db/log.ts; every line also goes to
+// stderr. session_id and agent_id are attribution, not relations — a log
+// must never be refused because the row it names is missing or already
+// gone, so neither is a foreign key.
+export const logs = pgTable(
+  "logs",
+  {
+    // Assigned in insert order; the tiebreaker for lines whose created_at
+    // collide.
+    id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+    // The QEMU session the line belongs to; null for server-wide work.
+    sessionId: uuid("session_id"),
+    // The cloud agent the line is attributed to; null when none was involved.
+    agentId: text("agent_id"),
+    text: text("text").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("logs_session_id_idx").on(table.sessionId)],
+);
