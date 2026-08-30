@@ -25,7 +25,7 @@ export function connectDatabase(): Db {
 }
 
 /** Creates the session row, before any boot work happens. */
-export async function insertSession(db: Db, id: string, config: unknown, status: "downloading" | "running"): Promise<void> {
+export async function insertSession(db: Db, id: string, config: unknown, status: SessionStartStatus): Promise<void> {
   await db.insert(sessions).values({ id, config, status });
 }
 
@@ -39,7 +39,12 @@ export async function sessionRunning(db: Db, id: string): Promise<void> {
  * on every agent run still driving it. One transaction: a session cannot end
  * while its runs stay open.
  */
-export async function endSession(db: Db, id: string, status: "succeeded" | "failed" | "aborted", reason: string | null): Promise<void> {
+export async function endSession(
+  db: Db,
+  id: string,
+  status: SessionEndStatus,
+  reason: string | null,
+): Promise<void> {
   // now() is transaction-start time in Postgres: the session and its runs
   // stamp the same instant, from the same clock that wrote started_at.
   const endedAt = sql`now()`;
