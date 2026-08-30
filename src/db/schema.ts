@@ -1,9 +1,11 @@
-import { bigint, customType, index, jsonb, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { bigint, customType, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 // drizzle-orm has no built-in bytea column type for postgres.
 const bytea = customType<{ data: Buffer }>({ dataType: () => "bytea" });
 
 export const sessionStatus = pgEnum("session_status", ["downloading", "running", "succeeded", "failed", "aborted", "timed_out"]);
+export const testSuiteStatus = pgEnum("test_suite_status", ["running", "passed", "failed", "aborted"]);
+export const testResultState = pgEnum("test_result_state", ["passed", "failed"]);
 // Declared in ascending severity: Postgres orders enums by declaration, so
 // "WHERE level >= 'error'" reads the scary lines.
 export const logLevel = pgEnum("log_level", ["info", "warning", "error", "fatal"]);
@@ -76,4 +78,63 @@ export const logs = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index("logs_session_id_idx").on(table.sessionId)],
+);
+
+// A definition is the stored instruction an agent is handed. Rows are append-only:
+// results reference the exact words the agent was given, so an edit is the next
+// (slug, version), never a rewrite of a row that results already point at.
+export const testDefinitions = pgTable(
+  "test_definitions",
+  {
+    id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+    slug: text("slug").notNull(),
+    version: integer("version").notNull(),
+    title: text("title").notNull(),
+    // What to do, quoted verbatim into the agent's prompt.
+    instruction: text("instruction").notNull(),
+    // What evidence closes the test, e.g. "a screendump showing Time zone: Asia/Tokyo".
+    proof: text("proof").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("test_definitions_slug_version_idx").on(table.slug, table.version)],
+);
+
+// One execution of a named set of definitions. The orchestrator owns the row: it
+// opens the suite and declares the verdict once the results are in. Counts are not
+// stored — planned and reported are both readable off the test_results rows.
+export const testSuites = pgTable("test_suites", {
+  id: uuid("id").primaryKey(),
+  name: text("name").notNull(),
+  status: testSuiteStatus("status").notNull().default("running"),
+  reason: text("reason"),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  endedAt: timestamp("ended_at", { withTimezone: true }),
+});
+
+// One row per definition in the suite, inserted open when the suite starts and
+// closed by the agent's report — the actions pattern: a row whose state and
+// finished_at are still null is a test that never reported, visible as such.
+export const testResults = pgTable(
+  "test_results",
+  {
+    id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+    suiteId: uuid("suite_id")
+      .notNull()
+      .references(() => testSuites.id),
+    definitionId: bigint("definition_id", { mode: "number" })
+      .notNull()
+      .references(() => testDefinitions.id),
+    // Null until the close: the report carries only the agent id, and the proxy
+    // resolves the agent's session through agent_runs, so attribution is recorded
+    // fact, not an upfront guess about which instance will run the test.
+    sessionId: uuid("session_id").references(() => sessions.id),
+    state: testResultState("state"),
+    reason: text("reason"),
+    // The screendump action whose stored image proves the verdict; null when the
+    // proof lives in prose (e.g. a comparison across two instances' images).
+    evidenceActionId: bigint("evidence_action_id", { mode: "number" }).references(() => actions.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (table) => [index("test_results_suite_id_idx").on(table.suiteId)],
 );
