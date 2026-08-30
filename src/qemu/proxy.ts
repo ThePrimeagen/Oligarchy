@@ -147,11 +147,13 @@ const startSession = Effect.gen(function* () {
   // (no db refactor) but they are not operational errors: if either
   // fails, something is very wrong and the start dies.
   yield* Effect.orDie(
-    Effect.tryPromise(() =>
-      insertSession(db, qemu.id, { iso: isoName, disk: cfg.disk }, isUrl ? "downloading" : "running").then(() =>
-        registerAgent(db, agent, qemu.id),
-      ),
-    ),
+    Effect.tryPromise({
+      try: () =>
+        insertSession(db, qemu.id, { iso: isoName, disk: cfg.disk }, isUrl ? "downloading" : "running").then(() =>
+          registerAgent(db, agent, qemu.id),
+        ),
+      catch: opError,
+    }),
   );
   yield* fromPromise(async () => {
     try {
