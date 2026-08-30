@@ -4,7 +4,7 @@ import { NodeHttpServer } from "@effect/platform-node";
 import { Effect, Layer } from "effect";
 import { HttpRouter } from "effect/unstable/http";
 import { HttpApiBuilder, HttpApiTest } from "effect/unstable/httpapi";
-import { api } from "./http.ts";
+import { api, errorResponses } from "./http.ts";
 
 const handlers = HttpApiBuilder.group(api, "control", (handlers) =>
   handlers.handleAll({
@@ -91,11 +91,14 @@ describe("Effect HTTP contract happy path", () => {
   });
 
   it("returns image bytes with the declared PNG content type", async () => {
-    const appLayer = HttpApiBuilder.layer(api).pipe(
-      Layer.provide(handlers),
-      Layer.provide(NodeHttpServer.layerHttpServices),
+    const appLayer = Layer.mergeAll(
+      HttpApiBuilder.layer(api).pipe(
+        Layer.provide(handlers),
+        Layer.provide(NodeHttpServer.layerHttpServices),
+      ),
+      errorResponses,
     );
-    const web = HttpRouter.toWebHandler(Layer.mergeAll(appLayer), {
+    const web = HttpRouter.toWebHandler(appLayer, {
       disableLogger: true,
     });
     try {
@@ -134,11 +137,14 @@ describe("Effect HTTP contract unhappy path", () => {
   });
 
   it("rejects a malformed JSON payload before invoking a handler", async () => {
-    const appLayer = HttpApiBuilder.layer(api).pipe(
-      Layer.provide(handlers),
-      Layer.provide(NodeHttpServer.layerHttpServices),
+    const appLayer = Layer.mergeAll(
+      HttpApiBuilder.layer(api).pipe(
+        Layer.provide(handlers),
+        Layer.provide(NodeHttpServer.layerHttpServices),
+      ),
+      errorResponses,
     );
-    const web = HttpRouter.toWebHandler(Layer.mergeAll(appLayer), {
+    const web = HttpRouter.toWebHandler(appLayer, {
       disableLogger: true,
     });
     try {
@@ -150,6 +156,32 @@ describe("Effect HTTP contract unhappy path", () => {
         }),
       );
       assert.equal(response.status, 400);
+      assert.match(
+        await response.text(),
+        /^\{"error":"invalid request payload: .+"\}$/,
+      );
+    } finally {
+      await web.dispose();
+    }
+  });
+
+  it("returns the JSON error contract when no route matches", async () => {
+    const appLayer = Layer.mergeAll(
+      HttpApiBuilder.layer(api).pipe(
+        Layer.provide(handlers),
+        Layer.provide(NodeHttpServer.layerHttpServices),
+      ),
+      errorResponses,
+    );
+    const web = HttpRouter.toWebHandler(appLayer, {
+      disableLogger: true,
+    });
+    try {
+      const response = await web.handler(
+        new Request("http://localhost/not-found"),
+      );
+      assert.equal(response.status, 404);
+      assert.deepEqual(await response.json(), { error: "not found" });
     } finally {
       await web.dispose();
     }
