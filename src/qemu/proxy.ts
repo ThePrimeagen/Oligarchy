@@ -59,6 +59,10 @@ function recorder(sessionId: string, agentId: string | undefined): QemuExchangeR
 
 const [host, port] = addr.split(":");
 createServer(async (req, res) => {
+  // Filled in as the handler learns them, so the catch can attribute the
+  // failure line to the session and agent the request was about.
+  let sessionId: string | undefined;
+  let agentId: string | undefined;
   try {
     const url = new URL(req.url ?? "/", `http://${addr}`);
 
@@ -69,6 +73,8 @@ createServer(async (req, res) => {
       const isoName = cfg.iso ?? defaultIso;
       const isUrl = isoName.startsWith("http://") || isoName.startsWith("https://");
       const qemu = createQemu();
+      sessionId = qemu.id;
+      agentId = cfg.agent;
       // The session row exists before any boot work, so iso events have a
       // session to hang on: a url iso enters as "downloading", a local path
       // goes straight to "running".
@@ -119,6 +125,8 @@ createServer(async (req, res) => {
       const started = Date.now();
       const qemu = session(url.searchParams.get("id"));
       const agent = url.searchParams.get("agent") ?? undefined;
+      sessionId = qemu.id;
+      agentId = agent;
       const path = join(qemu.dir, `image-${process.hrtime.bigint()}.png`);
       // The PNG is read back only after the exchange closes, and the images
       // row must ride the same transaction that closes the action (they are
@@ -174,6 +182,7 @@ createServer(async (req, res) => {
         throw new Error(`unknown status "${status as string}"`);
       }
       const qemu = session(id);
+      sessionId = qemu.id;
       sessions.delete(qemu.id);
       await stop(qemu);
       // The stop ends the session; a stop without a verdict is an abort.
@@ -188,14 +197,16 @@ createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && url.pathname === "/send-keys") {
+      const started = Date.now();
       const { id, keys, encoding, agent } = JSON.parse(await body(req)) as {
         id?: string;
         keys: string;
         encoding?: string;
         agent?: string;
       };
-      const started = Date.now();
+      agentId = agent;
       const qemu = session(id);
+      sessionId = qemu.id;
       const record = recorder(qemu.id, agent);
       const chords = parseKeys(keys, encoding);
       for (const chord of chords) {
@@ -212,10 +223,9 @@ createServer(async (req, res) => {
     res.writeHead(404, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "not found" }));
   } catch (err) {
-    // One error line per failed request. Session attribution lives where
-    // the detail does: a failed start on the session row's reason, a failed
-    // exchange on its action row.
-    log(db, { level: "error", text: `${req.method ?? ""} ${req.url ?? "/"} failed: ${(err as Error).message}` });
+    // One error line per failed request, attributed as far as the handler
+    // got before it threw.
+    log(db, { level: "error", text: `${req.method ?? ""} ${req.url ?? "/"} failed: ${(err as Error).message}`, sessionId, agentId });
     res.writeHead(400, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: (err as Error).message }));
   }
@@ -237,16 +247,18 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     // cut short the cleanup of the others.
     void Promise.allSettled(
       [...sessions.values()].map(async (qemu) => {
-        await stop(qemu);
-        await endSession(db, qemu.id, "aborted", "proxy shutdown");
-        log(db, { text: `session ${qemu.id}: stopped; aborted; proxy shutdown`, sessionId: qemu.id });
+        try {
+          await stop(qemu);
+          await endSession(db, qemu.id, "aborted", "proxy shutdown");
+          log(db, { text: `session ${qemu.id}: stopped; aborted; proxy shutdown`, sessionId: qemu.id });
+        } catch (err) {
+          // Logged here, where the session is known — the sessions that
+          // fail are the ones whose absence from the story matters most.
+          log(db, { level: "error", text: `shutdown: session ${qemu.id}: ${(err as Error).message}`, sessionId: qemu.id });
+          throw err;
+        }
       }),
     ).then(async (results) => {
-      for (const result of results) {
-        if (result.status === "rejected") {
-          log(db, { level: "error", text: `shutdown: ${(result.reason as Error).message}` });
-        }
-      }
       // The exit must not outrun the queued rows — the shutdown story is
       // the part most worth having when the proxy is gone.
       await flushLogs();
