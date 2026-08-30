@@ -1,7 +1,9 @@
+import * as Sentry from "@sentry/cloudflare";
 import { Hono } from "hono";
 import type { FC } from "hono/jsx";
 import { jsxRenderer } from "hono/jsx-renderer";
 import { listSessions, type Session } from "./db/query.ts";
+import { SENTRY_DSN } from "./sentry-dsn.ts";
 
 const HTMX_URL = "https://cdn.jsdelivr.net/npm/htmx.org@4.0.0";
 const HTMX_INTEGRITY = "sha384-BvJpBiO8Kh31EqtJe5DRIeWrHWnCGkwytKs9NKFi86Hhw96dEqdEMzZDeK9iEGTc";
@@ -188,4 +190,10 @@ app.get("/sessions", async (context) => {
   }
 });
 
-export default app;
+export default Sentry.withSentry(
+  () => ({
+    dsn: SENTRY_DSN,
+    dataCollection: {},
+  }),
+  app,
+);

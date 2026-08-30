@@ -220,7 +220,8 @@ main {
   color: var(--green);
 }
 
-.status--failed {
+.status--failed,
+.status--timed_out {
   color: var(--failed);
 }
 

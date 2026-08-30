@@ -15,7 +15,7 @@ const bytea = customType<{ data: Buffer }>({ dataType: () => "bytea" });
 
 // downloading = the ISO is being fetched from the internet; the session
 // exists but QEMU has not booted yet.
-export const sessionStatus = pgEnum("session_status", ["downloading", "running", "succeeded", "failed", "aborted"]);
+export const sessionStatus = pgEnum("session_status", ["downloading", "running", "succeeded", "failed", "aborted", "timed_out"]);
 // Declared in ascending severity: Postgres orders enums by declaration, so
 // "WHERE level >= 'error'" reads the scary lines. fatal is the line written
 // on the way down — the process exits right after it.

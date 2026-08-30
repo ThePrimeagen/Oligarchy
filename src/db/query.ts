@@ -6,7 +6,7 @@ export type Session = {
     iso: string;
     disk?: string;
   };
-  status: "downloading" | "running" | "succeeded" | "failed" | "aborted";
+  status: SessionStartStatus | SessionEndStatus;
   reason: string | null;
   startedAt: Date;
   endedAt: Date | null;

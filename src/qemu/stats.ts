@@ -7,6 +7,7 @@
 // p10/p25/p75/p90 percentiles. The cpu fields are 0 until the first tick.
 
 import os from "node:os";
+import { capture } from "../sentry.ts";
 
 const SAMPLE_INTERVAL_MS = 5_000;
 const MAX_SAMPLES = 60; // 60 samples x 5s ticks = a 5 minute window
@@ -91,6 +92,7 @@ function sampleCpu(sampler: CpuSampler): void {
   } catch (error) {
     // An uncaught throw in a timer callback would take down the whole proxy.
     console.error("failed to sample cpu usage:", error);
+    capture({ text: "failed to sample cpu usage", level: "error", cause: error });
   }
 }
 
