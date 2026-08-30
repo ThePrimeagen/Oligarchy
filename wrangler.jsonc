@@ -1,0 +1,23 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "oligarchy-dashboard",
+  "main": "src/dashboard.tsx",
+  "assets": {
+    "directory": "./public"
+  },
+  "compatibility_date": "2026-08-30",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "da54bf43f004492996574a6db26d8895",
+      // Optional. Use this to connect to a local database during development.
+      "localConnectionString": "postgresql://user:password@localhost:5432/databasename"
+    }
+  ],
+  "placement": {
+    "region": "aws:us-east-1"
+  }
+}
