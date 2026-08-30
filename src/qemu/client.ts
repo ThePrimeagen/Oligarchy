@@ -223,18 +223,21 @@ export async function sendMouse(
   // usb-tablet applies the event list then syncs once: down and up in the same
   // list leave the button unchanged, so the guest never sees a click.
   for (let i = 0; i < clicks; i++) {
-    await execute(
-      qemu,
-      "input-send-event",
-      { events: [...abs, { type: "btn", data: { button, down: true } }] },
-      record,
-    );
-    await execute(
-      qemu,
-      "input-send-event",
-      { events: [{ type: "btn", data: { button, down: false } }] },
-      record,
-    );
+    try {
+      await execute(
+        qemu,
+        "input-send-event",
+        { events: [...abs, { type: "btn", data: { button, down: true } }] },
+        record,
+      );
+    } finally {
+      await execute(
+        qemu,
+        "input-send-event",
+        { events: [{ type: "btn", data: { button, down: false } }] },
+        record,
+      );
+    }
     if (i + 1 < clicks) {
       await new Promise<void>((resolve) => setTimeout(resolve, MULTI_CLICK_GAP_MS));
     }
