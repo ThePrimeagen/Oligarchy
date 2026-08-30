@@ -1,11 +1,14 @@
 // The oligarchy CLI: a main file, not a library. It drives the oligarchy
 // control plane (src/qemu/proxy.ts) over HTTP.
 //
-//   node --experimental-strip-types src/qemu/cli.ts start [--iso <path>] [--disk <path>]
-//   node --experimental-strip-types src/qemu/cli.ts get-image <id> [-o file]
-//   node --experimental-strip-types src/qemu/cli.ts send-keys <id> <keys> [encoding]
+//   node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> start [--iso <path>] [--disk <path>]
+//   node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> get-image <id> [-o file]
+//   node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-keys <id> <keys> [encoding]
 //
 // The server address comes from OLIGARCHY_ADDR (default 127.0.0.1:42069).
+// --agent-id leads every invocation: this client is driven by agents, not
+// humans, and every request names the agent so the server can attribute the
+// session's actions to it.
 
 import { stat, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -15,21 +18,24 @@ const DEFAULT_ISO = "omarchy.iso";
 const DEFAULT_ENCODING = "oligarchy";
 
 async function main(args: string[]): Promise<void> {
-  if (args.length < 1) {
+  // --agent-id leads every invocation. This client is used by agents, not
+  // humans; a request that names no agent has no business being sent.
+  if (args.length < 3 || args[0] !== "--agent-id" || args[1] === "") {
     usage();
     process.exitCode = 2;
     return;
   }
+  const agent = args[1];
   try {
-    switch (args[0]) {
+    switch (args[2]) {
       case "start":
-        await cmdStart(args.slice(1));
+        await cmdStart(agent, args.slice(3));
         break;
       case "get-image":
-        await cmdGetImage(args.slice(1));
+        await cmdGetImage(agent, args.slice(3));
         break;
       case "send-keys":
-        await cmdSendKeys(args.slice(1));
+        await cmdSendKeys(agent, args.slice(3));
         break;
       default:
         usage();
@@ -45,9 +51,9 @@ function usage(): void {
   console.error(`oligarchy is the client for the oligarchy proxy
 
 Usage:
-  oligarchy start [--iso <path>] [--disk <path>]
-  oligarchy get-image <id> [-o file]
-  oligarchy send-keys <id> <keys> [encoding]
+  oligarchy --agent-id <agent> start [--iso <path>] [--disk <path>]
+  oligarchy --agent-id <agent> get-image <id> [-o file]
+  oligarchy --agent-id <agent> send-keys <id> <keys> [encoding]
 `);
 }
 
@@ -55,9 +61,9 @@ function addr(): string {
   return process.env.OLIGARCHY_ADDR || DEFAULT_ADDR;
 }
 
-async function cmdStart(args: string[]): Promise<void> {
+async function cmdStart(agent: string, args: string[]): Promise<void> {
   if (args.length % 2 !== 0) {
-    throw new Error("usage: oligarchy start [--iso <path>] [--disk <path>]");
+    throw new Error("usage: oligarchy --agent-id <agent> start [--iso <path>] [--disk <path>]");
   }
   let iso = "";
   let disk = "";
@@ -67,7 +73,7 @@ async function cmdStart(args: string[]): Promise<void> {
     } else if (args[i] === "--disk") {
       disk = args[i + 1];
     } else {
-      throw new Error("usage: oligarchy start [--iso <path>] [--disk <path>]");
+      throw new Error("usage: oligarchy --agent-id <agent> start [--iso <path>] [--disk <path>]");
     }
   }
   iso = iso === "" ? DEFAULT_ISO : iso;
@@ -86,12 +92,13 @@ async function cmdStart(args: string[]): Promise<void> {
       iso,
       // An undefined disk is left out of the JSON, so the server creates one.
       disk: disk === "" ? undefined : resolve(disk),
+      agent,
     }),
   ) as QemuStartResult;
   console.log(out.id);
 }
 
-async function cmdGetImage(args: string[]): Promise<void> {
+async function cmdGetImage(agent: string, args: string[]): Promise<void> {
   // The three accepted forms: <id>, <id> -o <file>, and -o <file> <id>.
   let id = "";
   let out = "";
@@ -104,9 +111,9 @@ async function cmdGetImage(args: string[]): Promise<void> {
     out = args[1];
     id = args[2];
   } else {
-    throw new Error("usage: oligarchy get-image <id> [-o file]");
+    throw new Error("usage: oligarchy --agent-id <agent> get-image <id> [-o file]");
   }
-  const res = await fetch(`http://${addr()}/image?id=${encodeURIComponent(id)}`);
+  const res = await fetch(`http://${addr()}/image?id=${encodeURIComponent(id)}&agent=${encodeURIComponent(agent)}`);
   if (res.status !== 200) {
     throw new Error(await readAPIError(res));
   }
@@ -120,12 +127,12 @@ async function cmdGetImage(args: string[]): Promise<void> {
   });
 }
 
-async function cmdSendKeys(args: string[]): Promise<void> {
+async function cmdSendKeys(agent: string, args: string[]): Promise<void> {
   if (args.length < 2 || args.length > 3) {
-    throw new Error("usage: oligarchy send-keys <id> <keys> [encoding]");
+    throw new Error("usage: oligarchy --agent-id <agent> send-keys <id> <keys> [encoding]");
   }
   const encoding = args.length === 3 ? args[2] : DEFAULT_ENCODING;
-  await postJSON("/send-keys", { id: args[0], keys: args[1], encoding });
+  await postJSON("/send-keys", { id: args[0], keys: args[1], encoding, agent });
 }
 
 async function postJSON(path: string, body: unknown): Promise<string> {

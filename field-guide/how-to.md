@@ -4,11 +4,13 @@ The CLI talks to a running proxy (`src/qemu/proxy.ts`). Start the proxy first, t
 
 ```bash
 node --experimental-strip-types src/qemu/proxy.ts omarchy.iso
-node --experimental-strip-types src/qemu/cli.ts start
-node --experimental-strip-types src/qemu/cli.ts start --iso omarchy.iso --disk qemu-img.qcow2
+node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> start
+node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> start --iso omarchy.iso --disk qemu-img.qcow2
 ```
 
 Both default to `127.0.0.1:42069`. Override with `OLIGARCHY_ADDR`.
+
+Every CLI invocation leads with `--agent-id <agent>`, the calling agent's id — required, see [cli.md](cli.md).
 
 ## Get an image
 
@@ -16,10 +18,10 @@ Captures the current guest desktop as a PNG.
 
 ```bash
 # write to a file
-node --experimental-strip-types src/qemu/cli.ts get-image <id> -o desktop.png
+node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> get-image <id> -o desktop.png
 
 # write PNG bytes to stdout
-node --experimental-strip-types src/qemu/cli.ts get-image <id> > desktop.png
+node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> get-image <id> > desktop.png
 ```
 
 `-o` can sit before or after the session id.
@@ -27,15 +29,15 @@ node --experimental-strip-types src/qemu/cli.ts get-image <id> > desktop.png
 ## Send keys
 
 ```bash
-node --experimental-strip-types src/qemu/cli.ts send-keys <id> "hello"
-node --experimental-strip-types src/qemu/cli.ts send-keys <id> "hello<ENTER>"
-node --experimental-strip-types src/qemu/cli.ts send-keys <id> "<C-c>"
+node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-keys <id> "hello"
+node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-keys <id> "hello<ENTER>"
+node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-keys <id> "<C-c>"
 ```
 
 The key string uses the `oligarchy` encoding (that name is optional; it is the default):
 
 ```bash
-node --experimental-strip-types src/qemu/cli.ts send-keys <id> "Hi<ENTER>" oligarchy
+node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-keys <id> "Hi<ENTER>" oligarchy
 ```
 
 ### Encoding

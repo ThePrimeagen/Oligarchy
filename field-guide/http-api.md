@@ -4,20 +4,23 @@ The control plane spoken between the CLI and the proxy (`src/qemu/proxy.ts`).
 
 The proxy defaults to `127.0.0.1:42069`. Bodies are JSON except the PNG. Errors are `4xx`/`5xx` with `{"error": "<message>"}`.
 
+Session-driving requests (`/start`, `/image`, `/send-keys`) carry the calling agent's id — `agent` in the POST body, a query param on the GET — so the server can attribute the session's [actions](database.md) to that agent. The CLI always sends it; a request without one is unattributed manual use (the schema's null `agent_id`). The proxy does not record it yet: that lands with the database wiring. `/stop` carries none because a stop exchanges nothing over QMP and is not an action; `/stats` has no session at all.
+
 ## POST /start
 
 Boots a QEMU session. Returns `{"id": "<uuid>"}`.
 
-The body is JSON with two keys, both optional (an empty body works too):
+The body is JSON with three keys, all optional (an empty body works too):
 
 - `iso` — guest ISO path or http(s) url. Defaults to the proxy's own default ISO (its argv, or `OLIGARCHY_ISO`).
 - `disk` — qcow2 path, which must already exist. When the key is **absent**, the proxy creates a fresh disk (40G virtual) in the session dir.
+- `agent` — the calling agent's id, for attribution. Absent means unattributed manual use.
 
 Clients that want the server-managed disk must therefore omit the key, not send `""`. The CLI does this; keep it that way.
 
 A url iso is downloaded into `~/.oligarchy/isos` on first use — verified against the publisher's `<url>.sha256` sidecar when one is published — and served from that cache on every later start. The cache file is the url with `:`, `/`, and every other character a file name cannot hold replaced by `_`. A `manifest.json` beside the isos records each entry's status: while a download runs, a claim whose heartbeat advances as bytes flow; once cached, when it was cached and last used, so the cache can be pruned by size later. A start that finds a live claim — another proxy mid-download — waits and rechecks every ten seconds instead of downloading the same iso twice; a claim gone three beats stale is a dead downloader, and the start takes the download over.
 
-## GET /image?id=<id>
+## GET /image?id=<id>&agent=<agent>
 
 Returns the session's current display as `image/png` bytes (QMP `screendump` under the hood).
 
@@ -39,7 +42,7 @@ Stats for the machine the proxy runs on, plus how many sessions it is running:
 
 ## POST /send-keys
 
-Body `{"id", "keys", "encoding"}`. The server parses the key string (encoding `oligarchy`, see [how-to.md](how-to.md)) and types it into the guest via QMP `send-key`. Returns `{"ok": "true"}`.
+Body `{"id", "keys", "encoding", "agent"}`. The server parses the key string (encoding `oligarchy`, see [how-to.md](how-to.md)) and types it into the guest via QMP `send-key`. Returns `{"ok": "true"}`.
 
 ## POST /stop
 
