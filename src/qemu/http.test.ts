@@ -28,10 +28,15 @@ const handlers = HttpApiBuilder.group(api, "control", (handlers) =>
         },
       }),
     stop: () => Effect.succeed({ ok: "true" }),
-    sendKeys: ({ payload }) =>
-      payload.id === "missing"
-        ? Effect.fail({ error: 'unknown session "missing"' })
-        : Effect.succeed({ ok: "true" }),
+    sendKeys: ({ payload }) => {
+      if (payload.id === "defect") {
+        return Effect.die(new Error("database password is secret"));
+      }
+      if (payload.id === "missing") {
+        return Effect.fail({ error: 'unknown session "missing"' });
+      }
+      return Effect.succeed({ ok: "true" });
+    },
   }),
 );
 
@@ -182,6 +187,34 @@ describe("Effect HTTP contract unhappy path", () => {
       );
       assert.equal(response.status, 404);
       assert.deepEqual(await response.json(), { error: "not found" });
+    } finally {
+      await web.dispose();
+    }
+  });
+
+  it("reports a safe JSON error without exposing unexpected defects", async () => {
+    const appLayer = Layer.mergeAll(
+      HttpApiBuilder.layer(api).pipe(
+        Layer.provide(handlers),
+        Layer.provide(NodeHttpServer.layerHttpServices),
+      ),
+      errorResponses,
+    );
+    const web = HttpRouter.toWebHandler(appLayer, {
+      disableLogger: true,
+    });
+    try {
+      const response = await web.handler(
+        new Request("http://localhost/send-keys", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ id: "defect", keys: "a" }),
+        }),
+      );
+      assert.equal(response.status, 500);
+      assert.deepEqual(await response.json(), {
+        error: "internal server error",
+      });
     } finally {
       await web.dispose();
     }
