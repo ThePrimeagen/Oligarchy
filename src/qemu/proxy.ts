@@ -174,9 +174,9 @@ function jsonBody<S extends Schema.Constraint>(
 // 500 at runtime.
 type RouteHandler = Effect.Effect<HttpServerResponse.HttpServerResponse, ApiError, HttpRouter.Provided>;
 
-// The work behind /start — still promise code end to end, because the
+// The launch half of /start — still promise code end to end, because the
 // qemu client, iso cache, and db ops are out of this spike's scope.
-async function startSession(qemu: Qemu, cfg: { disk?: string; agent: string }, isoName: string): Promise<void> {
+async function launchQemu(qemu: Qemu, cfg: { disk?: string; agent: string }, isoName: string): Promise<void> {
   try {
     // Inside the try: a rejected registration (the agent already drives
     // a session) must close this session as failed, not leave it open.
@@ -206,6 +206,30 @@ async function startSession(qemu: Qemu, cfg: { disk?: string; agent: string }, i
   }
 }
 
+// Everything /start does once its body is decoded: create the session
+// row, launch the machine, and only then let the sessions map hold it.
+// Returns the new session's id; fails with ApiError and nothing else.
+function startSession(cfg: typeof StartBody.Type): Effect.Effect<string, ApiError> {
+  return Effect.gen(function* () {
+    const isoName = cfg.iso ?? defaultIso;
+    const isUrl = isoName.startsWith("http://") || isoName.startsWith("https://");
+    const qemu = createQemu();
+    // The session row exists before any start work, so iso events have a
+    // session to hang on: a url iso enters as "downloading", a local path
+    // goes straight to "running".
+    yield* Effect.tryPromise({
+      try: () => insertSession(db, qemu.id, { iso: isoName, disk: cfg.disk }, isUrl ? "downloading" : "running"),
+      catch: internal,
+    });
+    yield* Effect.tryPromise({
+      try: () => launchQemu(qemu, cfg, isoName),
+      catch: startFailed,
+    });
+    sessions.set(qemu.id, qemu);
+    return qemu.id;
+  });
+}
+
 // The four session-driving routes are uninterruptible: the server
 // interrupts a request's fiber when the client disconnects, and a state
 // transition must not be torn in half by a vanished client — a booted
@@ -216,22 +240,8 @@ const routes = HttpRouter.use((router) =>
   Effect.gen(function* () {
     yield* router.add("POST", "/start", Effect.gen(function* () {
       const cfg = yield* jsonBody(StartBody);
-      const isoName = cfg.iso ?? defaultIso;
-      const isUrl = isoName.startsWith("http://") || isoName.startsWith("https://");
-      const qemu = createQemu();
-      // The session row exists before any start work, so iso events have a
-      // session to hang on: a url iso enters as "downloading", a local path
-      // goes straight to "running".
-      yield* Effect.tryPromise({
-        try: () => insertSession(db, qemu.id, { iso: isoName, disk: cfg.disk }, isUrl ? "downloading" : "running"),
-        catch: internal,
-      });
-      yield* Effect.tryPromise({
-        try: () => startSession(qemu, cfg, isoName),
-        catch: startFailed,
-      });
-      sessions.set(qemu.id, qemu);
-      return HttpServerResponse.jsonUnsafe({ id: qemu.id });
+      const id = yield* startSession(cfg);
+      return HttpServerResponse.jsonUnsafe({ id });
     }) satisfies RouteHandler, { uninterruptible: true });
 
     yield* router.add("GET", "/image", Effect.gen(function* () {
