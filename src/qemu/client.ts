@@ -239,7 +239,7 @@ function qemuArgs(opts: {
     "-drive",
     `if=pflash,format=raw,file=${opts.varsPath}`,
     "-display",
-    "gtk",
+    "none",
     "-chardev",
     `socket,id=qmp,path=${opts.sockPath}`,
     "-mon",

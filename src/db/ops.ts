@@ -21,7 +21,19 @@ export function connectDatabase(): Db {
   if (url === undefined || url === "") {
     throw new Error("db: DATABASE_URL is not set");
   }
-  return drizzle(url);
+  // PlanetScale's copied URL includes sslrootcert=system. That word is
+  // special to libpq 16; node-postgres treats it as a filename and throws
+  // ENOENT. Drop it and verify against Node's system CA store — the same
+  // thing sslmode=verify-full & sslrootcert=system means in psql.
+  const parsed = new URL(url);
+  parsed.searchParams.delete("sslrootcert");
+  parsed.searchParams.delete("sslmode");
+  return drizzle({
+    connection: {
+      connectionString: parsed.toString(),
+      ssl: { rejectUnauthorized: true },
+    },
+  });
 }
 
 /** Creates the session row, before any boot work happens. */
