@@ -64,16 +64,6 @@ main {
   margin-bottom: 4rem;
 }
 
-.hero__eyebrow,
-.sessions__eyebrow {
-  margin: 0 0 0.75rem;
-  color: var(--terminal-cyan);
-  font-size: 0.75em;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-
 .brand {
   width: fit-content;
   color: var(--terminal-blue);
@@ -87,13 +77,6 @@ main {
   text-indent: -0.08em;
   -webkit-text-fill-color: transparent;
   animation: brand-shift 8s linear infinite;
-}
-
-.hero__intro {
-  max-width: 48rem;
-  margin: 1.5rem 0 0;
-  color: var(--terminal-white);
-  font-size: clamp(1rem, 2vw, 1.25rem);
 }
 
 .sessions {

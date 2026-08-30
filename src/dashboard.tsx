@@ -118,17 +118,14 @@ type HomeProps = {
 const Home: FC<HomeProps> = ({ sessions }) => (
   <main>
     <header class="hero">
-      <p class="hero__eyebrow">QEMU session archive</p>
       <div class="brand" aria-label="Omarchy">
         OMARCHY
       </div>
-      <p class="hero__intro">Machines driven by agents, recorded from first boot to final verdict.</p>
     </header>
 
     <section class="sessions" aria-labelledby="sessions-heading">
       <div class="sessions__heading">
         <div>
-          <p class="sessions__eyebrow">Control plane</p>
           <h1 id="sessions-heading">Sessions</h1>
         </div>
         <button class="button" type="button" hx-get="/sessions" hx-target="#session-list" hx-swap="innerHTML">
