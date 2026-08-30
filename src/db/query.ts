@@ -10,11 +10,13 @@ export type Session = {
   reason: string | null;
   startedAt: Date;
   endedAt: Date | null;
+  queriedAt: Date;
 };
 
 export async function listSessions(connectionString: string): Promise<Session[]> {
   const client = new Client({ connectionString });
   await client.connect();
+  // The database timestamp shown by the UI also keeps status reads out of Hyperdrive's query cache.
   const result = await client.query<Session>(`
     SELECT
       id,
@@ -22,7 +24,8 @@ export async function listSessions(connectionString: string): Promise<Session[]>
       status,
       reason,
       started_at AS "startedAt",
-      ended_at AS "endedAt"
+      ended_at AS "endedAt",
+      CURRENT_TIMESTAMP AS "queriedAt"
     FROM sessions
     ORDER BY started_at DESC
     LIMIT 50

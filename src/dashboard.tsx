@@ -27,12 +27,15 @@ const dateTime = new Intl.DateTimeFormat("en-US", {
 });
 
 const SessionList: FC<SessionListProps> = ({ sessions }) => (
-  <div id="session-list" class="session-list" aria-live="polite">
-    {sessions.length === 0 ? (
-      <div class="empty-state">
-        <p>No sessions recorded yet.</p>
-      </div>
-    ) : (
+  sessions.length === 0 ? (
+    <div class="empty-state">
+      <p>No sessions recorded yet.</p>
+    </div>
+  ) : (
+    <>
+      <p class="session-list__updated">
+        Updated <time dateTime={sessions[0].queriedAt.toISOString()}>{dateTime.format(sessions[0].queriedAt)}</time>
+      </p>
       <ol>
         {sessions.map((session) => (
           <li>
@@ -74,16 +77,14 @@ const SessionList: FC<SessionListProps> = ({ sessions }) => (
           </li>
         ))}
       </ol>
-    )}
-  </div>
+    </>
+  )
 );
 
 const SessionError: FC = () => (
-  <div id="session-list" class="session-list" aria-live="polite">
-    <div class="empty-state empty-state--error">
-      <p>Sessions are unavailable.</p>
-      <span>Try refreshing in a moment.</span>
-    </div>
+  <div class="empty-state empty-state--error">
+    <p>Sessions are unavailable.</p>
+    <span>Try refreshing in a moment.</span>
   </div>
 );
 
@@ -107,11 +108,13 @@ const Home: FC<HomeProps> = ({ sessions }) => (
           <p class="sessions__eyebrow">Control plane</p>
           <h1 id="sessions-heading">Sessions</h1>
         </div>
-        <button class="button" type="button" hx-get="/sessions" hx-target="#session-list" hx-swap="outerHTML">
+        <button class="button" type="button" hx-get="/sessions" hx-target="#session-list" hx-swap="innerHTML">
           Refresh
         </button>
       </div>
-      {sessions === null ? <SessionError /> : <SessionList sessions={sessions} />}
+      <div id="session-list" class="session-list" aria-live="polite">
+        {sessions === null ? <SessionError /> : <SessionList sessions={sessions} />}
+      </div>
     </section>
   </main>
 );

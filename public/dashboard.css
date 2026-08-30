@@ -158,6 +158,14 @@ main {
   list-style: none;
 }
 
+.session-list__updated {
+  margin: 0 0 0.75rem;
+  color: var(--terminal-blue);
+  font-size: 0.7em;
+  text-align: right;
+  text-transform: uppercase;
+}
+
 .session {
   padding: clamp(1rem, 3vw, 1.5rem);
   border: max(1px, 0.0625em) solid var(--border);
@@ -233,7 +241,7 @@ main {
 
 .session dt {
   margin-bottom: 0.35rem;
-  color: var(--terminal-black);
+  color: var(--terminal-blue);
   font-size: 0.7em;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -251,6 +259,7 @@ main {
   padding-top: 1rem;
   border-top: max(1px, 0.0625em) solid var(--border);
   color: var(--failed);
+  overflow-wrap: anywhere;
 }
 
 .empty-state {
@@ -272,7 +281,7 @@ main {
 
 .empty-state span {
   margin-top: 0.5rem;
-  color: var(--terminal-black);
+  color: var(--terminal-blue);
 }
 
 .empty-state--error {
