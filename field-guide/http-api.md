@@ -4,7 +4,7 @@ The control plane spoken between the CLI and the proxy (`src/qemu/proxy.ts`).
 
 The proxy defaults to `127.0.0.1:42069`. Bodies are JSON except the PNG. Errors are `4xx`/`5xx` with `{"error": "<message>"}`.
 
-Session-driving requests (`/start`, `/image`, `/send-keys`) carry the calling agent's id — `agent` in the POST body, a query param on the GET — so the server can attribute the session's [actions](database.md) to that agent. The CLI always sends it; a request without one is unattributed manual use (the schema's null `agent_id`). The proxy does not record it yet: that lands with the database wiring. `/stop` carries none because a stop exchanges nothing over QMP and is not an action; `/stats` has no session at all.
+Session-driving requests (`/start`, `/image`, `/send-keys`) carry the calling agent's id — `agent` in the POST body, a query param on the GET — so the server attributes the session's [actions](database.md) to that agent. The CLI always sends it; a request without one is unattributed manual use (the schema's null `agent_id`). `/stop` carries none because a stop exchanges nothing over QMP and is not an action — it carries the session's verdict instead; `/stats` has no session at all.
 
 ## POST /start
 
@@ -46,4 +46,4 @@ Body `{"id", "keys", "encoding", "agent"}`. The server parses the key string (en
 
 ## POST /stop
 
-Body `{"id"}`; kills the QEMU and removes its session directory. Returns `{"ok": "true"}`.
+Body `{"id", "status"?, "reason"?}`; kills the QEMU and removes its session directory, then closes the session row with the verdict — `succeeded`, `failed`, or `aborted` — and the optional reason. A stop without a verdict is an abort: a machine killed with nothing to say for itself. Returns `{"ok": "true"}`.
