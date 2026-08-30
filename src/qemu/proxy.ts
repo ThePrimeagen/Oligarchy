@@ -7,7 +7,9 @@
 // OLIGARCHY_ADDR (default 127.0.0.1:42069). The control-plane database comes
 // from DATABASE_URL — a proxy that cannot record its sessions refuses to
 // boot, and every session, QMP exchange, image, and iso event is recorded
-// as it happens (see field-guide/database.md).
+// as it happens. Major actions also land in the logs table through log():
+// the lifecycle at info with how long each took, failed requests at error,
+// the death of the proxy at fatal (see field-guide/database.md).
 //
 //   POST /start      -> {"iso"?, "disk"?, "agent"}; boots a qemu, returns
 //                       {"id": uuid}; an http(s) iso is downloaded into
@@ -42,7 +44,7 @@ import { join } from "node:path";
 import { Cause, Effect, Exit, Layer, Schema } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { NodeHttpServer, NodeRuntime } from "@effect/platform-node";
-import { log } from "../db/log.ts";
+import { flushLogs, log } from "../db/log.ts";
 import { connectDatabase, endSession, finishAction, insertSession, registerAgent, sessionRunning, startAction } from "../db/ops.ts";
 import { createDisk, createQemu, screendump, sendKey, start, stop, type Qemu } from "./client.ts";
 import { getIso } from "./iso.ts";
@@ -63,6 +65,13 @@ const db = connectDatabase();
 const sessions = new Map<string, Qemu>();
 const cpuSampler = startCpuSampler();
 
+// Drizzle buries the reason (ECONNREFUSED etc.) in the cause; its own
+// message is the failed SQL and the params — noise in a log line.
+function errorDetail(err: unknown): string {
+  const e = err as Error;
+  return e.cause instanceof Error ? e.cause.message : e.message;
+}
+
 // One action row per QMP exchange: opened as the command goes out, closed
 // with the outcome when the reply lands (see database.md). A close that
 // cannot be recorded is logged against its session before it surfaces —
@@ -76,12 +85,7 @@ function recorder(sessionId: string, agentId: string): QemuExchangeRecorder {
       try {
         await finishAction(db, id, outcome);
       } catch (err) {
-        const e = err as Error;
-        log(db, {
-          text: `db: closing action ${id} failed: ${e.cause instanceof Error ? e.cause.message : e.message}`,
-          sessionId,
-          agentId,
-        });
+        log(db, { level: "error", text: `db: closing action ${id} failed: ${errorDetail(err)}`, sessionId, agentId });
         throw err;
       }
     };
@@ -93,49 +97,42 @@ function recorder(sessionId: string, agentId: string): QemuExchangeRecorder {
 // mistakes and carry their message onto the wire; StartFailed and
 // ExchangeFailed are operations that genuinely failed and whose message is
 // exactly what the driving agent needs to read; Internal is ours — the
-// cause is logged here and the client learns nothing but "internal error".
+// cause is logged and the client learns nothing but "internal error".
+// Every tag carries the session and agent as far as its route knew them,
+// so the respond middleware's one error line per failed request lands
+// where a session inspection will find it.
 type ApiError =
-  | { readonly _tag: "BadRequest"; readonly message: string }
-  | { readonly _tag: "UnknownSession"; readonly id: string }
-  | { readonly _tag: "StartFailed"; readonly message: string }
-  | { readonly _tag: "ExchangeFailed"; readonly message: string }
+  | { readonly _tag: "BadRequest"; readonly message: string; readonly sessionId?: string; readonly agentId?: string }
+  | { readonly _tag: "UnknownSession"; readonly id: string; readonly agentId?: string }
+  | { readonly _tag: "StartFailed"; readonly message: string; readonly sessionId: string; readonly agentId: string }
+  | { readonly _tag: "ExchangeFailed"; readonly message: string; readonly sessionId: string; readonly agentId: string }
   | { readonly _tag: "Internal"; readonly cause: unknown; readonly sessionId: string; readonly agentId?: string };
 
-function badRequest(message: string): ApiError {
-  return { _tag: "BadRequest", message };
+function badRequest(message: string, who: { sessionId?: string; agentId?: string } = {}): ApiError {
+  return { _tag: "BadRequest", message, ...who };
 }
 
 // The cast is the same contract the rest of the repo leans on: everything
 // the wrapped subsystems throw is an Error.
-function startFailed(err: unknown): ApiError {
-  return { _tag: "StartFailed", message: (err as Error).message };
+function startFailed(err: unknown, who: { sessionId: string; agentId: string }): ApiError {
+  return { _tag: "StartFailed", message: (err as Error).message, ...who };
 }
 
-function exchangeFailed(err: unknown): ApiError {
-  return { _tag: "ExchangeFailed", message: (err as Error).message };
+function exchangeFailed(err: unknown, who: { sessionId: string; agentId: string }): ApiError {
+  return { _tag: "ExchangeFailed", message: (err as Error).message, ...who };
 }
 
-// Internal failures carry their session so the respond middleware can put
-// the log line where a session inspection will find it.
 function internal(cause: unknown, who: { sessionId: string; agentId?: string }): ApiError {
   return { _tag: "Internal", cause, ...who };
 }
 
 function session(id: string, agentId?: string): Effect.Effect<Qemu, ApiError> {
   if (id === "") {
-    return Effect.fail(badRequest("session id is required"));
+    return Effect.fail(badRequest("session id is required", { agentId }));
   }
   const qemu = sessions.get(id);
   if (qemu === undefined) {
-    // An unknown id is session history worth keeping: an agent still
-    // driving a stopped session shows up here. logs has no foreign keys
-    // by design, so a line naming a gone session is welcome — but its
-    // session_id column is a uuid, so only an id this server could have
-    // minted gets a row. Garbage ids just get their 404.
-    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
-      log(db, { text: `refused: unknown session "${id}"`, sessionId: id, agentId });
-    }
-    return Effect.fail({ _tag: "UnknownSession", id });
+    return Effect.fail({ _tag: "UnknownSession", id, agentId });
   }
   return Effect.succeed(qemu);
 }
@@ -227,7 +224,7 @@ async function launchQemu(qemu: Qemu, cfg: { disk?: string; agent: string }, iso
     // The start error is the one worth seeing if cleanup fails too.
     await stop(qemu).catch(() => {});
     await endSession(db, qemu.id, "failed", (err as Error).message).catch((e: unknown) => {
-      log(db, { text: `db: recording a failed start failed too: ${(e as Error).message}`, sessionId: qemu.id, agentId: cfg.agent });
+      log(db, { level: "error", text: `db: recording a failed start failed too: ${(e as Error).message}`, sessionId: qemu.id, agentId: cfg.agent });
     });
     throw err;
   }
@@ -236,7 +233,8 @@ async function launchQemu(qemu: Qemu, cfg: { disk?: string; agent: string }, iso
 // Everything /start does once its body is decoded: create the session
 // row, launch the machine, and only then let the sessions map hold it.
 // Returns the new session's id; fails with ApiError and nothing else.
-function startSession(cfg: typeof StartBody.Type): Effect.Effect<string, ApiError> {
+// started is the request's clock, ticking since before the body was read.
+function startSession(cfg: typeof StartBody.Type, started: number): Effect.Effect<string, ApiError> {
   return Effect.gen(function* () {
     const isoName = cfg.iso ?? defaultIso;
     const isUrl = isoName.startsWith("http://") || isoName.startsWith("https://");
@@ -248,11 +246,19 @@ function startSession(cfg: typeof StartBody.Type): Effect.Effect<string, ApiErro
       try: () => insertSession(db, qemu.id, { iso: isoName, disk: cfg.disk }, isUrl ? "downloading" : "running"),
       catch: (cause) => internal(cause, { sessionId: qemu.id, agentId: cfg.agent }),
     });
+    log(db, {
+      text: `session ${qemu.id}: starting; iso ${isoName}${cfg.disk === undefined ? "" : `, disk ${cfg.disk}`}`,
+      sessionId: qemu.id,
+      agentId: cfg.agent,
+    });
     yield* Effect.tryPromise({
       try: () => launchQemu(qemu, cfg, isoName),
-      catch: startFailed,
+      catch: (err) => startFailed(err, { sessionId: qemu.id, agentId: cfg.agent }),
     });
     sessions.set(qemu.id, qemu);
+    // Wall time from request to a live QMP handshake, download included —
+    // per-exchange timing lives on the action rows.
+    log(db, { text: `session ${qemu.id}: running; started in ${Date.now() - started}ms`, sessionId: qemu.id, agentId: cfg.agent });
     return qemu.id;
   });
 }
@@ -266,12 +272,14 @@ function startSession(cfg: typeof StartBody.Type): Effect.Effect<string, ApiErro
 const routes = HttpRouter.use((router) =>
   Effect.gen(function* () {
     yield* router.add("POST", "/start", Effect.gen(function* () {
+      const started = Date.now();
       const cfg = yield* jsonBody(StartBody);
-      const id = yield* startSession(cfg);
+      const id = yield* startSession(cfg, started);
       return HttpServerResponse.jsonUnsafe({ id });
     }) satisfies RouteHandler, { uninterruptible: true });
 
     yield* router.add("GET", "/image", Effect.gen(function* () {
+      const started = Date.now();
       const params = yield* Effect.mapError(HttpRouter.schemaParams(ImageParams), (err) => badRequest(err.message));
       const qemu = yield* session(params.id, params.agent);
       const agent = params.agent;
@@ -290,7 +298,7 @@ const routes = HttpRouter.use((router) =>
                 outcome = result;
               };
             }),
-          catch: exchangeFailed,
+          catch: (err) => exchangeFailed(err, { sessionId: qemu.id, agentId: agent }),
         }).pipe(
           // Only a failed exchange is closed without an image. A completed
           // one whose image write failed stays open — the row state
@@ -300,7 +308,7 @@ const routes = HttpRouter.use((router) =>
             Effect.promise(async () => {
               if (opened !== undefined && outcome !== undefined && outcome.state === "failed") {
                 await finishAction(db, opened, outcome).catch((e: unknown) => {
-                  log(db, { text: `db: recording a failed screendump failed too: ${(e as Error).message}`, sessionId: qemu.id, agentId: agent });
+                  log(db, { level: "error", text: `db: recording a failed screendump failed too: ${(e as Error).message}`, sessionId: qemu.id, agentId: agent });
                 });
               }
             })
@@ -315,6 +323,7 @@ const routes = HttpRouter.use((router) =>
           },
           catch: (cause) => internal(cause, { sessionId: qemu.id, agentId: agent }),
         });
+        log(db, { text: `session ${qemu.id}: image; ${data.length} bytes in ${Date.now() - started}ms`, sessionId: qemu.id, agentId: agent });
         return HttpServerResponse.uint8Array(data, { contentType: "image/png" });
       });
       return yield* Effect.ensuring(png, Effect.promise(() => rm(path, { force: true })));
@@ -332,22 +341,23 @@ const routes = HttpRouter.use((router) =>
         try: () => endSession(db, qemu.id, status ?? "aborted", reason ?? null),
         catch: (cause) => internal(cause, { sessionId: qemu.id }),
       });
+      log(db, {
+        text: `session ${qemu.id}: stopped; ${status ?? "aborted"}${reason === undefined ? "" : `; ${reason}`}`,
+        sessionId: qemu.id,
+      });
       return HttpServerResponse.jsonUnsafe({ ok: "true" });
     }) satisfies RouteHandler, { uninterruptible: true });
 
     yield* router.add("POST", "/send-keys", Effect.gen(function* () {
+      const started = Date.now();
       const { id, keys, encoding, agent } = yield* jsonBody(SendKeysBody);
       const qemu = yield* session(id, agent);
       // parseKeys throws only on bad input, so every failure is the
-      // client's — and a refused key string is part of the session's
-      // story, so it lands in the logs beside the actions it never became.
+      // client's — attributed, so the refused key string lands in the
+      // session's story beside the actions it never became.
       const chords = yield* Effect.try({
         try: () => parseKeys(keys, encoding),
-        catch: (err) => {
-          const message = (err as Error).message;
-          log(db, { text: `send-keys rejected: ${message}`, sessionId: qemu.id, agentId: agent });
-          return badRequest(message);
-        },
+        catch: (err) => badRequest((err as Error).message, { sessionId: qemu.id, agentId: agent }),
       });
       const record = recorder(qemu.id, agent);
       yield* Effect.tryPromise({
@@ -356,8 +366,11 @@ const routes = HttpRouter.use((router) =>
             await sendKey(qemu, chord.map((code): QemuKeyValue => ({ type: "qcode", data: code })), record);
           }
         },
-        catch: exchangeFailed,
+        catch: (err) => exchangeFailed(err, { sessionId: qemu.id, agentId: agent }),
       });
+      // The request-level story; each chord is its own action row with its
+      // own timing.
+      log(db, { text: `session ${qemu.id}: sent ${chords.length} chords in ${Date.now() - started}ms`, sessionId: qemu.id, agentId: agent });
       return HttpServerResponse.jsonUnsafe({ ok: "true" });
     }) satisfies RouteHandler, { uninterruptible: true });
 
@@ -370,49 +383,66 @@ function errorBody(status: number, message: string): HttpServerResponse.HttpServ
   return HttpServerResponse.jsonUnsafe({ error: message }, { status });
 }
 
+// One error line per failed request — method, url, and what went wrong —
+// attributed as far as the route knew, then the wire answer. The log line
+// and the client's message differ only for Internal: the client gets no
+// internals. When Sentry arrives, its captureException belongs here and
+// in the defect arm below, nowhere else.
+function answer(
+  request: HttpServerRequest.HttpServerRequest,
+  status: number,
+  message: string,
+  who: { sessionId?: string; agentId?: string },
+  detail = message,
+): Effect.Effect<HttpServerResponse.HttpServerResponse> {
+  return Effect.sync(() => {
+    log(db, { level: "error", text: `${request.method} ${request.originalUrl} failed: ${detail}`, ...who });
+    return errorBody(status, message);
+  });
+}
+
 // Every operational error, said once: this table is the whole client-facing
 // error contract. Its type is total over ApiError's tags — catchTags alone
 // would let an arm silently fall through to the platform's default 500, so
 // the table says every tag must have a row, and dropping one (or adding a
-// tag to ApiError without one) does not compile. Defects — bugs, part of
-// no route's type — stay off the wire: they are logged and the client sees
-// a generic 500. Both failure arms record through log(), the same funnel
-// the iso cache uses — stderr always, a logs row when the database can
-// take one, pinned to the session when it is known. When Sentry arrives,
-// its captureException belongs in those two arms and nowhere else.
-const respondTable: {
+// tag to ApiError without one) does not compile.
+function respondTable(request: HttpServerRequest.HttpServerRequest): {
   readonly [K in ApiError["_tag"]]: (err: Extract<ApiError, { _tag: K }>) => Effect.Effect<HttpServerResponse.HttpServerResponse>;
-} = {
-  BadRequest: (err) => Effect.succeed(errorBody(400, err.message)),
-  UnknownSession: (err) => Effect.succeed(errorBody(404, `unknown session "${err.id}"`)),
-  StartFailed: (err) => Effect.succeed(errorBody(502, err.message)),
-  ExchangeFailed: (err) => Effect.succeed(errorBody(502, err.message)),
-  Internal: (err) =>
-    Effect.sync(() => {
-      // Drizzle buries the reason (ECONNREFUSED etc.) in the cause; its own
-      // message is the failed SQL and the params — noise here.
-      const e = err.cause as Error;
-      log(db, {
-        text: `request failed: ${e.cause instanceof Error ? e.cause.message : e.message}`,
-        sessionId: err.sessionId,
+} {
+  return {
+    BadRequest: (err) => answer(request, 400, err.message, err),
+    UnknownSession: (err) =>
+      answer(request, 404, `unknown session "${err.id}"`, {
+        // logs.session_id is a uuid column, and logs has no foreign keys by
+        // design — so an id this server could have minted is attributed (an
+        // agent still driving a stopped session is history worth keeping),
+        // while garbage ids get the line without the attribution.
+        sessionId: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(err.id) ? err.id : undefined,
         agentId: err.agentId,
-      });
-      return errorBody(500, "internal error");
-    }),
-};
+      }),
+    StartFailed: (err) => answer(request, 502, err.message, err),
+    ExchangeFailed: (err) => answer(request, 502, err.message, err),
+    Internal: (err) => answer(request, 500, "internal error", err, errorDetail(err.cause)),
+  };
+}
 
 const respond = HttpRouter.middleware<{ handles: ApiError }>()((handler) =>
-  handler.pipe(
-    Effect.catchTags(respondTable),
-    Effect.catchDefect((defect) =>
-      Effect.sync(() => {
-        // A defect is a bug: the stack names the spot, so it rides the
-        // line. A defect is also by definition not ours, so the boundary
-        // that keeps the process alive assumes nothing about its shape.
-        log(db, { text: `request handler defect: ${defect instanceof Error ? defect.stack ?? defect.message : String(defect)}` });
-        return errorBody(500, "internal error");
-      })
-    ),
+  Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) =>
+    handler.pipe(
+      Effect.catchTags(respondTable(request)),
+      Effect.catchDefect((defect) =>
+        Effect.sync(() => {
+          // A defect is a bug: the stack names the spot, so it rides the
+          // line. A defect is also by definition not ours, so the boundary
+          // that keeps the process alive assumes nothing about its shape.
+          log(db, {
+            level: "error",
+            text: `${request.method} ${request.originalUrl} failed: ${defect instanceof Error ? defect.stack ?? defect.message : String(defect)}`,
+          });
+          return errorBody(500, "internal error");
+        })
+      ),
+    )
   ), { global: true });
 
 // Settled, not raced: one session failing to stop or record must not cut
@@ -423,22 +453,22 @@ let shutdownFailed = false;
 const drainSessions = Layer.effectDiscard(
   Effect.addFinalizer(() =>
     Effect.promise(async () => {
-      // The array keeps result order, so a failure logs against the
-      // session it belongs to. The insert is best-effort — the process
-      // exits right after — and stderr always gets the line.
-      const machines = [...sessions.values()];
+      log(db, `proxy: shutting down; stopping ${sessions.size} sessions`);
       const results = await Promise.allSettled(
-        machines.map(async (qemu) => {
-          await stop(qemu);
-          await endSession(db, qemu.id, "aborted", "proxy shutdown");
+        [...sessions.values()].map(async (qemu) => {
+          try {
+            await stop(qemu);
+            await endSession(db, qemu.id, "aborted", "proxy shutdown");
+            log(db, { text: `session ${qemu.id}: stopped; aborted; proxy shutdown`, sessionId: qemu.id });
+          } catch (err) {
+            // Logged here, where the session is known — the sessions that
+            // fail are the ones whose absence from the story matters most.
+            log(db, { level: "error", text: `shutdown: session ${qemu.id}: ${(err as Error).message}`, sessionId: qemu.id });
+            throw err;
+          }
         }),
       );
-      for (const [i, result] of results.entries()) {
-        if (result.status === "rejected") {
-          log(db, { text: `shutdown: ${(result.reason as Error).message}`, sessionId: machines[i].id });
-          shutdownFailed = true;
-        }
-      }
+      shutdownFailed = results.some((result) => result.status === "rejected");
     })
   ),
 );
@@ -454,12 +484,24 @@ const main = Layer.effectDiscard(Effect.sync(() => log(db, `oligarchy proxy list
 
 // The exit contract is unchanged: a clean shutdown (signals included) exits
 // 0, a session whose cleanup failed makes it 1, and a server that could not
-// boot is a plain failure.
-NodeRuntime.runMain(Layer.launch(main), {
-  teardown: (exit, onExit) => {
-    if (Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)) {
-      return onExit(1);
-    }
-    onExit(shutdownFailed ? 1 : 0);
+// come up is a fatal line and exit 1. Every exit path flushes the log chain
+// first — the last lines are the ones most worth having when the proxy is
+// gone — and runMain's own error report is off: the fatal line is the story.
+NodeRuntime.runMain(
+  Layer.launch(main).pipe(
+    // The platform's ServeError says nothing itself; the reason (the port
+    // is taken) is the cause underneath.
+    Effect.tapError((err) => Effect.sync(() => log(db, { level: "fatal", text: `proxy: ${errorDetail(err)}` }))),
+  ),
+  {
+    disableErrorReporting: true,
+    teardown: (exit, onExit) => {
+      void flushLogs().then(() => {
+        if (Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)) {
+          return onExit(1);
+        }
+        onExit(shutdownFailed ? 1 : 0);
+      });
+    },
   },
-});
+);

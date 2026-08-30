@@ -15,6 +15,13 @@
       "when": 1788053298435,
       "tag": "0001_logs",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788096311562,
+      "tag": "0002_daffy_juggernaut",
+      "breakpoints": true
     }
   ]
 }

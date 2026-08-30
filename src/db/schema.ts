@@ -2,8 +2,8 @@
 //
 // Five tables: sessions (one row per QEMU boot), agent_runs (which cloud
 // agents drove it), actions (every QMP exchange, in order), images (the
-// PNG each get-image returned), and logs (debug lines from db.log, each
-// pinned to a session and an agent when the writer had them).
+// PNG each get-image returned), and logs (lines from db.log at a severity
+// level, each pinned to a session and an agent when the writer had them).
 //
 // Replaying a session is: actions WHERE session_id ORDER BY created_at, id.
 // Debugging one is that plus: logs WHERE session_id, same order.
@@ -16,6 +16,10 @@ const bytea = customType<{ data: Buffer }>({ dataType: () => "bytea" });
 // downloading = the ISO is being fetched from the internet; the session
 // exists but QEMU has not booted yet.
 export const sessionStatus = pgEnum("session_status", ["downloading", "running", "succeeded", "failed", "aborted"]);
+// Declared in ascending severity: Postgres orders enums by declaration, so
+// "WHERE level >= 'error'" reads the scary lines. fatal is the line written
+// on the way down — the process exits right after it.
+export const logLevel = pgEnum("log_level", ["info", "warning", "error", "fatal"]);
 // The only two states an exchange can finish in. An action that is still
 // running has no state yet (null, alongside a null finished_at).
 export const actionState = pgEnum("action_state", ["completed", "failed"]);
@@ -103,6 +107,9 @@ export const logs = pgTable(
     sessionId: uuid("session_id"),
     // The cloud agent the line is attributed to; null when none was involved.
     agentId: text("agent_id"),
+    // Severity, defaulting to info: most lines are the normal story, and a
+    // writer should not have to say so (see log.ts for what each level means).
+    level: logLevel("level").notNull().default("info"),
     text: text("text").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

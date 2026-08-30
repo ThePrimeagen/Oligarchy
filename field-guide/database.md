@@ -1,6 +1,6 @@
 # The control-plane database
 
-One PlanetScale Postgres database holds the record of everything the proxy does. `src/db/schema.ts` defines the five tables (sessions, agent_runs, actions, images, logs); `src/db/ops.ts` is the only code that touches them, except logs, which belongs to `log()` in `src/db/log.ts` — a debug line to stderr and the same line as a row, attributed to a session and an agent when the caller has them, taking the same client. The proxy records through this interface as it runs: the session row lands before any start work (`downloading` for a url iso), every QMP exchange opens and closes an action row via the recorder hook threaded into the qemu client, a get-image's PNG rides the closing transaction, and `/stop` closes the session with its verdict. Everything else worth keeping goes through `log()`, pinned to its session and agent where they are known: iso cache traffic, refused requests that name a session (an unknown or already-stopped id, a rejected key string), internal failures and defects behind a generic 500, failed-cleanup and shutdown lines, and the proxy's own boot line — so `logs WHERE session_id` plus the actions is the whole story of a session, refusals included.
+One PlanetScale Postgres database holds the record of everything the proxy does. `src/db/schema.ts` defines the five tables (sessions, agent_runs, actions, images, logs); `src/db/ops.ts` is the only code that touches them, except logs, which belongs to `log()` in `src/db/log.ts` — a line to stderr and the same line as a row, at a severity level, attributed to a session and an agent when the caller has them, taking the same client. The proxy records through this interface as it runs: the session row lands before any start work (`downloading` for a url iso), every QMP exchange opens and closes an action row via the recorder hook threaded into the qemu client, a get-image's PNG rides the closing transaction, and `/stop` closes the session with its verdict. Alongside those rows, every major action narrates itself through `log()` — starting, running, image served, chords sent, stopped, shutdown, iso cache traffic — with how long the work took, and every refused or failed request is one error line attributed as far as the handler knew, so the logs alone tell the session's story, refusals included, and the state tables carry the exact records.
 
 ## The state that threads through
 
@@ -27,6 +27,23 @@ An action is one QMP exchange, opened then closed, its id relating the two. `sta
 
 A still-running exchange has no state yet: `state`, `response`, and `finished_at` land together at the close, so a row where they are null is a command whose completion was never persisted — the server died running it, or the closing write failed. `finished_at` comes from the database clock, so handling time is `finished_at - created_at` with no cross-clock arithmetic. Anything that exchanges nothing over QMP (a stop, a verdict) is not an action; the session's status and reason are its record.
 
+## The log stream
+
+`log()` writes one line twice — to stderr, and as a logs row — in call order behind a chain; a failed insert reports itself to stderr and never fails the caller. The stamp is the database's, taken at the insert: a stalled database lands queued lines late, and id, not `created_at`, is the truth of their order. Every line carries a level, the `log_level` enum, declared in ascending severity so `WHERE level >= 'error'` reads the scary lines:
+
+- **info** — the default, and the normal story: the proxy listening, a session starting / running / stopped, an image served, chords sent, iso cache hits and downloads.
+- **warning** — something was off but the operation went on: a download heartbeat that failed to write, an iso with no published sha256 to check against.
+- **error** — an operation failed: one line per failed request from the HTTP boundary (a refused request is a failed request, so a bad key string or an unknown session id lands here too, attributed when the id is one this server could have minted), an action close that could not be recorded, a session that would not stop or record at shutdown, and a defect — a bug behind the client's generic 500 — with its stack.
+- **fatal** — the proxy is going down, written right before the exit: the listen failing at boot (the port is taken).
+
+Levels are severity of the operation, not of the state it records: a `/stop` carrying a `failed` verdict still logs at info — the stop worked; the verdict lives on the session row. For the same reason a failed `/start` is one error line from the boundary, not two — attributed to the session and agent as far as the handler got before it threw, with the session row's `failed` status and reason as the state record.
+
+Paths that end in `process.exit` — shutdown, a fatal — await `flushLogs()` first, the chain settling, so the last lines are not lost with the process. The db's own write failures (a log insert refused, a "recording the failure failed too") report to stderr only: a database that is not taking writes cannot hold the line saying so.
+
+## Timing
+
+Two clocks, each for what it is good at. Action rows are stamped by the database — `finished_at - created_at` is per-exchange handling time with no cross-clock arithmetic. The proxy's log lines carry request-level wall time measured at the server — `running; started in 45123ms`, `image; 48213 bytes in 87ms`, `sent 6 chords in 412ms` — the numbers the action rows cannot give, because a request spans many exchanges (send-keys) or work that is no exchange at all (a download, a disk create, the boot handshake).
+
 ## Replaying a session
 
-`actions WHERE session_id ORDER BY created_at, id` — the identity id is the tiebreaker when timestamps collide, and `created_at` is when the command went out because the row is inserted at start. `sessions.config` holds the effective launch config (defaults applied), so a replay can boot an identical machine.
+`actions WHERE session_id ORDER BY created_at, id` — the identity id is the tiebreaker when timestamps collide, and `created_at` is when the command went out because the row is inserted at start. `sessions.config` holds the effective launch config (defaults applied), so a replay can boot an identical machine. Debugging one is the same order over logs: `logs WHERE session_id ORDER BY created_at, id` is the session narrated with levels and durations, and the two interleave on `created_at` into the full timeline.
