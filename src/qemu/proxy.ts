@@ -22,15 +22,20 @@
 //                       aborted)
 
 import { NodeHttpServer, NodeRuntime } from "@effect/platform-node";
-import { Effect, Layer } from "effect";
+import { Cause, Effect, ErrorReporter, Exit, Layer, Runtime } from "effect";
 import { HttpRouter } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
-import { mkdir, readFile, rm } from "node:fs/promises";
+import { mkdir, readFile, rm, stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { connectDatabase, endSession, finishAction, insertSession, registerAgent, sessionRunning, startAction } from "../db/ops.ts";
 import { createDisk, createQemu, screendump, sendKey, start, stop, type Qemu } from "./client.ts";
-import { api, errorResponses } from "./http.ts";
+import {
+  api,
+  errorResponses,
+  operationError,
+  type OperationError,
+} from "./http.ts";
 import { getIso } from "./iso.ts";
 import { parseKeys } from "./keys.ts";
 import { collectStats, startCpuSampler } from "./stats.ts";
@@ -47,6 +52,9 @@ const db = connectDatabase();
 
 const sessions = new Map<string, Qemu>();
 const cpuSampler = startCpuSampler();
+const errorReporter = ErrorReporter.make(({ error }) => {
+  console.error(error);
+});
 
 // One action row per QMP exchange: opened as the command goes out, closed
 // with the outcome when the reply lands (see database.md).
@@ -63,68 +71,97 @@ const [host, port] = addr.split(":");
 const controlLayer = HttpApiBuilder.group(api, "control", (handlers) =>
   handlers.handleAll({
     start: ({ payload }) =>
-      Effect.promise(async () => {
+      Effect.gen(function* () {
         const cfg = payload ?? {};
         const isoName = cfg.iso ?? defaultIso;
         const isUrl =
           isoName.startsWith("http://") ||
           isoName.startsWith("https://");
         const qemu = createQemu();
+
         // The session row exists before any boot work, so iso events have a
         // session to hang on: a url iso enters as "downloading", a local path
         // goes straight to "running".
-        await insertSession(
-          db,
-          qemu.id,
-          { iso: isoName, disk: cfg.disk },
-          isUrl ? "downloading" : "running",
-        );
-        try {
-          // Inside the try: a rejected registration (the agent already drives
-          // a session) must close this session as failed, not leave it open.
-          if (cfg.agent !== undefined) {
-            await registerAgent(db, cfg.agent, qemu.id);
-          }
-          const iso = await getIso(db, isoName, {
-            sessionId: qemu.id,
-            agentId: cfg.agent,
-          });
-          if (cfg.disk === undefined) {
-            await createDisk(qemu);
-          } else {
-            // start() puts the firmware copy and the QMP socket in the session
-            // dir; with a caller-provided disk, createDisk never made it.
-            await mkdir(qemu.dir, { recursive: true, mode: 0o700 });
-          }
-          await start(
-            qemu,
-            { iso, disk: cfg.disk },
-            recorder(qemu.id, cfg.agent),
-          );
-          if (isUrl) {
-            await sessionRunning(db, qemu.id);
-          }
-        } catch (err) {
-          // The qemu must not outlive its failed start — a machine the map
-          // never held would be unreachable and unkillable through the API.
-          // The boot error is the one worth seeing if cleanup fails too.
-          await stop(qemu).catch(() => {});
-          await endSession(
+        yield* Effect.promise(() =>
+          insertSession(
             db,
             qemu.id,
-            "failed",
-            err instanceof Error ? err.message : String(err),
-          ).catch((recordError: unknown) => {
-            console.error(
-              `db: recording a failed start failed too: ${
-                recordError instanceof Error
-                  ? recordError.message
-                  : String(recordError)
-              }`,
+            { iso: isoName, disk: cfg.disk },
+            isUrl ? "downloading" : "running",
+          ),
+        );
+
+        const boot = Effect.gen(function* () {
+          // Inside the try: a rejected registration (the agent already drives
+          // a session) must close this session as failed, not leave it open.
+          const agent = cfg.agent;
+          if (agent !== undefined) {
+            yield* Effect.promise(() =>
+              registerAgent(db, agent, qemu.id),
             );
-          });
-          throw err;
-        }
+          }
+
+          const who = { sessionId: qemu.id, agentId: cfg.agent };
+          const iso = isUrl
+            ? yield* Effect.promise(() => getIso(db, isoName, who))
+            : yield* Effect.tryPromise({
+                try: () => getIso(db, isoName, who),
+                catch: (error) => operationError(error as Error),
+              });
+
+          if (cfg.disk === undefined) {
+            yield* Effect.promise(() => createDisk(qemu));
+          } else {
+            const disk = cfg.disk;
+            yield* Effect.tryPromise({
+              try: () => stat(disk),
+              catch: () =>
+                operationError(new Error(`qemu: disk not found: ${disk}`)),
+            });
+            // start() puts the firmware copy and the QMP socket in the session
+            // dir; with a caller-provided disk, createDisk never made it.
+            yield* Effect.promise(() =>
+              mkdir(qemu.dir, { recursive: true, mode: 0o700 }),
+            );
+          }
+
+          yield* Effect.promise(() =>
+            start(
+              qemu,
+              { iso, disk: cfg.disk },
+              recorder(qemu.id, cfg.agent),
+            ),
+          );
+          if (isUrl) {
+            yield* Effect.promise(() => sessionRunning(db, qemu.id));
+          }
+        }).pipe(
+          Effect.onError((cause) => {
+            const error = Cause.squash(cause);
+            return Effect.promise(async () => {
+              // The qemu must not outlive its failed start — a machine the map
+              // never held would be unreachable and unkillable through the API.
+              // The boot error is the one worth seeing if cleanup fails too.
+              await stop(qemu).catch(() => {});
+              await endSession(
+                db,
+                qemu.id,
+                "failed",
+                error instanceof Error ? error.message : String(error),
+              ).catch((recordError: unknown) => {
+                console.error(
+                  `db: recording a failed start failed too: ${
+                    recordError instanceof Error
+                      ? recordError.message
+                      : String(recordError)
+                  }`,
+                );
+              });
+            });
+          }),
+        );
+
+        yield* boot;
         sessions.set(qemu.id, qemu);
         return { id: qemu.id };
       }),
@@ -212,7 +249,7 @@ const controlLayer = HttpApiBuilder.group(api, "control", (handlers) =>
         const qemu = yield* session(id);
         const chords = yield* Effect.try({
           try: () => parseKeys(keys, encoding),
-          catch: (error) => ({ error: (error as Error).message }),
+          catch: (error) => operationError(error as Error),
         });
         return yield* Effect.promise(async () => {
           const record = recorder(qemu.id, agent);
@@ -244,19 +281,30 @@ const apiLayer = HttpRouter.serve(
 );
 
 Layer.launch(apiLayer).pipe(
+  Effect.provide(ErrorReporter.layer([errorReporter])),
   Effect.ensuring(shutdownSessions()),
-  NodeRuntime.runMain,
+  NodeRuntime.runMain({
+    teardown: (exit, onExit) => {
+      if (Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)) {
+        onExit(0);
+        return;
+      }
+      Runtime.defaultTeardown(exit, onExit);
+    },
+  }),
 );
 
 function session(
   id: string,
-): Effect.Effect<Qemu, { readonly error: string }> {
+): Effect.Effect<Qemu, OperationError> {
   if (id === "") {
-    return Effect.fail({ error: "session id is required" });
+    return Effect.fail(operationError(new Error("session id is required")));
   }
   const qemu = sessions.get(id);
   if (qemu === undefined) {
-    return Effect.fail({ error: `unknown session "${id}"` });
+    return Effect.fail(
+      operationError(new Error(`unknown session "${id}"`)),
+    );
   }
   return Effect.succeed(qemu);
 }

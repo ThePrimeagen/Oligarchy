@@ -12,7 +12,19 @@ import {
   HttpApiSchema,
 } from "effect/unstable/httpapi";
 
-const OperationError = Schema.Struct({
+export type OperationError = Error & {
+  readonly error: string;
+  readonly [ErrorReporter.ignore]: true;
+};
+
+export function operationError(error: Error): OperationError {
+  return Object.assign(error, {
+    error: error.message,
+    [ErrorReporter.ignore]: true as const,
+  });
+}
+
+const OperationErrorSchema = Schema.Struct({
   error: Schema.String,
 }).pipe(HttpApiSchema.status(400));
 
@@ -66,7 +78,7 @@ const control = HttpApiGroup.make("control").add(
   HttpApiEndpoint.post("start", "/start", {
     payload: [StartRequest, Schema.Undefined],
     success: IdRequest,
-    error: OperationError,
+    error: OperationErrorSchema,
   }),
   HttpApiEndpoint.get("image", "/image", {
     query: {
@@ -76,21 +88,21 @@ const control = HttpApiGroup.make("control").add(
     success: Schema.Uint8Array.pipe(
       HttpApiSchema.asUint8Array({ contentType: "image/png" }),
     ),
-    error: OperationError,
+    error: OperationErrorSchema,
   }),
   HttpApiEndpoint.get("stats", "/stats", {
     success: StatsResponse,
-    error: OperationError,
+    error: OperationErrorSchema,
   }),
   HttpApiEndpoint.post("stop", "/stop", {
     payload: StopRequest,
     success: OkResponse,
-    error: OperationError,
+    error: OperationErrorSchema,
   }),
   HttpApiEndpoint.post("sendKeys", "/send-keys", {
     payload: SendKeysRequest,
     success: OkResponse,
-    error: OperationError,
+    error: OperationErrorSchema,
   }),
 );
 
