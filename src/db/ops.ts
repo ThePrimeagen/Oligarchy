@@ -42,7 +42,7 @@ export async function sessionRunning(db: Db, id: string): Promise<void> {
 export async function endSession(
   db: Db,
   id: string,
-  status: "succeeded" | "failed" | "aborted" | "timed_out",
+  status: SessionEndStatus,
   reason: string | null,
 ): Promise<void> {
   // now() is transaction-start time in Postgres: the session and its runs
