@@ -14,12 +14,30 @@ export type Db = NodePgDatabase;
 
 /**
  * Builds the database client from DATABASE_URL. A server that cannot record
- * its sessions must not boot, so a missing url throws instead of degrading.
+ * its sessions must not boot, so a missing or unparseable url throws instead
+ * of degrading.
  */
 export function connectDatabase(): Db {
   const url = process.env.DATABASE_URL;
   if (url === undefined || url === "") {
     throw new Error("db: DATABASE_URL is not set");
+  }
+  // canParse instead of letting new URL throw: that TypeError carries the
+  // url — password included — into the logs.
+  if (!URL.canParse(url)) {
+    throw new Error("db: DATABASE_URL is not a valid url");
+  }
+  // PlanetScale urls carry sslrootcert=system — libpq 16's "verify against
+  // the system trust store". node-postgres has no such special value: it
+  // reads sslrootcert as a literal file path, so the first query dies with
+  // ENOENT, no file named "system" (node-postgres#3101). Node's default TLS
+  // verification already is the system trust store, so dropping the
+  // parameter keeps the exact semantics the url asks for — the
+  // sslmode=verify-full beside it stays, and pg honors it.
+  const parsed = new URL(url);
+  if (parsed.searchParams.get("sslrootcert") === "system") {
+    parsed.searchParams.delete("sslrootcert");
+    return drizzle(parsed.toString());
   }
   return drizzle(url);
 }
