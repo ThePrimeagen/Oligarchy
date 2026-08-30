@@ -30,7 +30,7 @@ import { createServer } from "node:http";
 import { join } from "node:path";
 import { NodeHttpServer, NodeRuntime } from "@effect/platform-node";
 import { Cause, Effect, Layer, Option, Schema } from "effect";
-import { HttpRouter, HttpServerError, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { connectDatabase, endSession, finishAction, insertSession, registerAgent, sessionRunning, startAction } from "../db/ops.ts";
 import { createDisk, createQemu, screendump, sendKey, start, stop, type Qemu } from "./client.ts";
 import { getIso } from "./iso.ts";
@@ -65,28 +65,21 @@ function recorder(sessionId: string, agentId: string | undefined): QemuExchangeR
 // The HTTP layer's only error: a sentence the client can print. qemu / iso /
 // db still throw Error; we lift the message here and never let an unknown
 // value become {"error": undefined}.
-const OpError = Schema.Struct({
-  _tag: Schema.tag("OpError"),
-  message: Schema.String,
-});
-type OpError = typeof OpError.Type;
+type OpError = { readonly _tag: "OpError"; readonly message: string };
 
 function errorMessage(err: unknown): string {
-  if (HttpServerError.isHttpServerError(err) && err.reason._tag === "RouteNotFound") {
-    return "not found";
-  }
-  if (typeof err === "object" && err !== null && "_tag" in err && err._tag === "RouteNotFound") {
-    return "not found";
-  }
-  if (typeof err === "object" && err !== null && "message" in err && typeof err.message === "string" && err.message !== "") {
-    return err.message;
-  }
   const e = err as Error;
-  return e.cause instanceof Error ? `${e.message}: ${e.cause.message}` : String(e.message ?? err);
+  if (e.cause instanceof Error) {
+    return `${e.message}: ${e.cause.message}`;
+  }
+  if (typeof e.message === "string" && e.message !== "") {
+    return e.message;
+  }
+  return String(err);
 }
 
 function opError(err: unknown): OpError {
-  return OpError.make({ message: errorMessage(err) });
+  return { _tag: "OpError", message: errorMessage(err) };
 }
 
 function fromPromise<A>(f: (signal: AbortSignal) => Promise<A>): Effect.Effect<A, OpError> {
@@ -300,16 +293,22 @@ const Shutdown = Layer.effectDiscard(
 );
 
 const Routes = Layer.mergeAll(
-  HttpRouter.add("POST", "/start", asHttp(startSession)),
-  HttpRouter.add("GET", "/image", asHttp(getImage)),
+  HttpRouter.add("POST", "/start", asHttp(startSession), { uninterruptible: true }),
+  HttpRouter.add("GET", "/image", asHttp(getImage), { uninterruptible: true }),
   HttpRouter.add("GET", "/stats", asHttp(getStats)),
-  HttpRouter.add("POST", "/stop", asHttp(stopSession)),
-  HttpRouter.add("POST", "/send-keys", asHttp(sendKeys)),
+  HttpRouter.add("POST", "/stop", asHttp(stopSession), { uninterruptible: true }),
+  HttpRouter.add("POST", "/send-keys", asHttp(sendKeys), { uninterruptible: true }),
   HttpRouter.add("*", "/*", HttpServerResponse.jsonUnsafe({ error: "not found" }, { status: 404 })),
   Shutdown,
 );
 
-const App = HttpRouter.serve(Routes, { disableLogger: true, disableListenLog: true }).pipe(
+const App = HttpRouter.serve(Routes, {
+  disableLogger: true,
+  disableListenLog: true,
+  // The old handler compared URL.pathname literally. FindMyWay's defaults
+  // fold case, trailing slashes, and duplicate slashes.
+  routerConfig: { caseSensitive: true, ignoreTrailingSlash: false, ignoreDuplicateSlashes: false },
+}).pipe(
   Layer.provide(NodeHttpServer.layer(() => createServer(), { host, port: Number(port) })),
 );
 
