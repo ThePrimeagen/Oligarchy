@@ -182,8 +182,8 @@ export async function start(
     const bootRecord: QemuExchangeRecorder | undefined =
       record === undefined
         ? undefined
-        : (command) => {
-            const close = record(command);
+        : async (command) => {
+            const close = await record(command);
             return (outcome) =>
               close(outcome.state === "completed" ? { state: "completed", response: greetingMsg } : outcome);
           };
@@ -260,25 +260,28 @@ async function execute(qemu: Qemu, name: string, args: unknown, record?: QemuExc
   }
   const id = ++qemu.nextId;
   const command = { execute: name, arguments: args, id } as QemuCommand;
-  // The recording opens as the command goes out and closes when the reply
-  // lands, so the row's timestamps are the exchange's real ones.
-  const close = record?.(command);
+  // The row opens before the command goes out — awaited, so a refused
+  // insert fails the exchange up front instead of dying unhandled later.
+  const close = record === undefined ? undefined : await record(command);
+  let response: QemuSuccessResponse;
   try {
-    const response = (await new Promise<unknown>((resolve, reject) => {
+    response = (await new Promise<unknown>((resolve, reject) => {
       qemu.pending.set(id, { resolve, reject });
       socket.write(`${JSON.stringify(command)}\n`);
     })) as QemuSuccessResponse;
-    await close?.({ state: "completed", response });
-    return response.return;
   } catch (err) {
-    const response = (err as { qmp?: QemuErrorResponse }).qmp ?? (err as Error).message;
+    const failure = (err as { qmp?: QemuErrorResponse }).qmp ?? (err as Error).message;
     // The exchange error is the one worth seeing; a failed close cannot
     // replace it (the one-shot cleanup pattern in cursor-agent/client.ts).
-    await close?.({ state: "failed", response }).catch((closeErr: unknown) => {
+    await close?.({ state: "failed", response: failure }).catch((closeErr: unknown) => {
       console.error(`db: recording a failed exchange failed too: ${(closeErr as Error).message}`);
     });
     throw err;
   }
+  // Closed outside the catch: a failing close surfaces as itself and can
+  // never relabel a completed exchange as failed.
+  await close?.({ state: "completed", response });
+  return response.return;
 }
 
 function failAll(qemu: Qemu, err: unknown): void {

@@ -46,10 +46,10 @@ const cpuSampler = startCpuSampler();
 // One action row per QMP exchange: opened as the command goes out, closed
 // with the outcome when the reply lands (see database.md).
 function recorder(sessionId: string, agentId: string | undefined): QemuExchangeRecorder {
-  return (command) => {
-    const opened = startAction(db, { sessionId, agentId, request: command });
+  return async (command) => {
+    const id = await startAction(db, { sessionId, agentId, request: command });
     return async (outcome) => {
-      await finishAction(db, await opened, outcome);
+      await finishAction(db, id, outcome);
     };
   };
 }
@@ -84,16 +84,18 @@ createServer(async (req, res) => {
           await mkdir(qemu.dir, { recursive: true, mode: 0o700 });
         }
         await start(qemu, { iso, disk: cfg.disk }, recorder(qemu.id, cfg.agent));
+        if (isUrl) {
+          await sessionRunning(db, qemu.id);
+        }
       } catch (err) {
-        // The session's record must say it never made it up; the boot error
-        // is the one worth seeing if even that write fails.
+        // The qemu must not outlive its failed start — a machine the map
+        // never held would be unreachable and unkillable through the API.
+        // The boot error is the one worth seeing if cleanup fails too.
+        await stop(qemu).catch(() => {});
         await endSession(db, qemu.id, "failed", (err as Error).message).catch((e: unknown) => {
           console.error(`db: recording a failed start failed too: ${(e as Error).message}`);
         });
         throw err;
-      }
-      if (isUrl) {
-        await sessionRunning(db, qemu.id);
       }
       sessions.set(qemu.id, qemu);
       res.writeHead(200, { "Content-Type": "application/json" });
@@ -108,25 +110,27 @@ createServer(async (req, res) => {
       // The PNG is read back only after the exchange closes, and the images
       // row must ride the same transaction that closes the action (they are
       // 1:1) — so the recorder only stashes, and the handler closes.
-      let opened: Promise<number> | undefined;
+      let opened: number | undefined;
       let outcome: QemuExchangeOutcome | undefined;
       try {
-        await screendump(qemu, path, "png", (command) => {
-          opened = startAction(db, { sessionId: qemu.id, agentId: agent, request: command });
+        await screendump(qemu, path, "png", async (command) => {
+          opened = await startAction(db, { sessionId: qemu.id, agentId: agent, request: command });
           return async (result) => {
             outcome = result;
           };
         });
         const data = await readFile(path);
         // screendump resolved, so the recorder ran: opened and outcome are set.
-        await finishAction(db, await opened!, outcome!, data);
+        await finishAction(db, opened!, outcome!, data);
         res.writeHead(200, { "Content-Type": "image/png", "Content-Length": data.length });
         res.end(data);
       } catch (err) {
-        // A failed exchange still gets closed — just without an image; the
-        // exchange error is the one worth seeing if the close fails too.
-        if (opened !== undefined && outcome !== undefined) {
-          await finishAction(db, await opened, outcome).catch((e: unknown) => {
+        // Only a failed exchange is closed without an image. A completed one
+        // whose image write failed stays open — the row state database.md
+        // documents as a completion that was never persisted; closing it
+        // imageless would break the 1:1 promise instead.
+        if (opened !== undefined && outcome !== undefined && outcome.state === "failed") {
+          await finishAction(db, opened, outcome).catch((e: unknown) => {
             console.error(`db: recording a failed screendump failed too: ${(e as Error).message}`);
           });
         }
@@ -150,6 +154,11 @@ createServer(async (req, res) => {
         status?: "succeeded" | "failed" | "aborted";
         reason?: string;
       };
+      // The verdict is checked before the machine dies: a bad status must
+      // not kill the qemu and then fail to record the end.
+      if (status !== undefined && status !== "succeeded" && status !== "failed" && status !== "aborted") {
+        throw new Error(`unknown status "${status as string}"`);
+      }
       const qemu = session(id);
       sessions.delete(qemu.id);
       await stop(qemu);
@@ -189,18 +198,21 @@ createServer(async (req, res) => {
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
-    void Promise.all(
+    // Settled, not raced: one session failing to stop or record must not
+    // cut short the cleanup of the others.
+    void Promise.allSettled(
       [...sessions.values()].map(async (qemu) => {
         await stop(qemu);
         await endSession(db, qemu.id, "aborted", "proxy shutdown");
       }),
-    ).then(
-      () => process.exit(0),
-      (err: unknown) => {
-        console.error(`shutdown: ${(err as Error).message}`);
-        process.exit(1);
-      },
-    );
+    ).then((results) => {
+      for (const result of results) {
+        if (result.status === "rejected") {
+          console.error(`shutdown: ${(result.reason as Error).message}`);
+        }
+      }
+      process.exit(results.some((result) => result.status === "rejected") ? 1 : 0);
+    });
   });
 }
 

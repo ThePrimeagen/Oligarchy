@@ -76,7 +76,10 @@ declare global {
     | { state: "completed"; response: QemuGreetingResponse | QemuSuccessResponse }
     | { state: "failed"; response: QemuErrorResponse | string };
 
-  // The proxy's hook into the wire: called with the exact command JSON as it
-  // goes out; the returned close lands the outcome when the reply arrives.
-  type QemuExchangeRecorder = (command: QemuCommand) => (outcome: QemuExchangeOutcome) => Promise<void>;
+  // The proxy's hook into the wire: awaited with the exact command JSON
+  // before it goes out (a refused insert fails the exchange up front); the
+  // returned close lands the outcome when the reply arrives.
+  type QemuExchangeRecorder = (
+    command: QemuCommand,
+  ) => Promise<(outcome: QemuExchangeOutcome) => Promise<void>>;
 }
