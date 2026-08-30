@@ -75,14 +75,14 @@ function recorder(sessionId: string, agentId: string): QemuExchangeRecorder {
 
 // Every operational error a route can answer with, as plain tagged values
 // (no classes — AGENTS.md). BadRequest and UnknownSession are the client's
-// mistakes and carry their message onto the wire; BootFailed and
+// mistakes and carry their message onto the wire; StartFailed and
 // ExchangeFailed are operations that genuinely failed and whose message is
 // exactly what the driving agent needs to read; Internal is ours — the
 // cause is logged here and the client learns nothing but "internal error".
 type ApiError =
   | { readonly _tag: "BadRequest"; readonly message: string }
   | { readonly _tag: "UnknownSession"; readonly id: string }
-  | { readonly _tag: "BootFailed"; readonly message: string }
+  | { readonly _tag: "StartFailed"; readonly message: string }
   | { readonly _tag: "ExchangeFailed"; readonly message: string }
   | { readonly _tag: "Internal"; readonly cause: unknown };
 
@@ -92,8 +92,8 @@ function badRequest(message: string): ApiError {
 
 // The cast is the same contract the rest of the repo leans on: everything
 // the wrapped subsystems throw is an Error.
-function bootFailed(err: unknown): ApiError {
-  return { _tag: "BootFailed", message: (err as Error).message };
+function startFailed(err: unknown): ApiError {
+  return { _tag: "StartFailed", message: (err as Error).message };
 }
 
 function exchangeFailed(err: unknown): ApiError {
@@ -174,9 +174,9 @@ function jsonBody<S extends Schema.Constraint>(
 // 500 at runtime.
 type RouteHandler = Effect.Effect<HttpServerResponse.HttpServerResponse, ApiError, HttpRouter.Provided>;
 
-// The boot work behind /start — still promise code end to end, because the
+// The work behind /start — still promise code end to end, because the
 // qemu client, iso cache, and db ops are out of this spike's scope.
-async function boot(qemu: Qemu, cfg: { disk?: string; agent: string }, isoName: string): Promise<void> {
+async function startSession(qemu: Qemu, cfg: { disk?: string; agent: string }, isoName: string): Promise<void> {
   try {
     // Inside the try: a rejected registration (the agent already drives
     // a session) must close this session as failed, not leave it open.
@@ -197,7 +197,7 @@ async function boot(qemu: Qemu, cfg: { disk?: string; agent: string }, isoName: 
   } catch (err) {
     // The qemu must not outlive its failed start — a machine the map
     // never held would be unreachable and unkillable through the API.
-    // The boot error is the one worth seeing if cleanup fails too.
+    // The start error is the one worth seeing if cleanup fails too.
     await stop(qemu).catch(() => {});
     await endSession(db, qemu.id, "failed", (err as Error).message).catch((e: unknown) => {
       console.error(`db: recording a failed start failed too: ${(e as Error).message}`);
@@ -219,7 +219,7 @@ const routes = HttpRouter.use((router) =>
       const isoName = cfg.iso ?? defaultIso;
       const isUrl = isoName.startsWith("http://") || isoName.startsWith("https://");
       const qemu = createQemu();
-      // The session row exists before any boot work, so iso events have a
+      // The session row exists before any start work, so iso events have a
       // session to hang on: a url iso enters as "downloading", a local path
       // goes straight to "running".
       yield* Effect.tryPromise({
@@ -227,8 +227,8 @@ const routes = HttpRouter.use((router) =>
         catch: internal,
       });
       yield* Effect.tryPromise({
-        try: () => boot(qemu, cfg, isoName),
-        catch: bootFailed,
+        try: () => startSession(qemu, cfg, isoName),
+        catch: startFailed,
       });
       sessions.set(qemu.id, qemu);
       return HttpServerResponse.jsonUnsafe({ id: qemu.id });
@@ -337,7 +337,7 @@ const respondTable: {
 } = {
   BadRequest: (err) => Effect.succeed(errorBody(400, err.message)),
   UnknownSession: (err) => Effect.succeed(errorBody(404, `unknown session "${err.id}"`)),
-  BootFailed: (err) => Effect.succeed(errorBody(502, err.message)),
+  StartFailed: (err) => Effect.succeed(errorBody(502, err.message)),
   ExchangeFailed: (err) => Effect.succeed(errorBody(502, err.message)),
   Internal: (err) => Effect.as(Effect.logError("request failed", err.cause), errorBody(500, "internal error")),
 };
