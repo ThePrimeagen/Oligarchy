@@ -119,11 +119,12 @@ const bodyText: Effect.Effect<string, ApiError, HttpServerRequest.HttpServerRequ
   (request) => Effect.mapError(request.text, (err) => badRequest(err.message)),
 );
 
-// A repeated query param arrives parsed as an array; the first value is
-// the one url.searchParams.get() answered with before.
-function first(value: string | ReadonlyArray<string> | undefined): string | undefined {
-  return typeof value === "string" ? value : value?.[0];
-}
+// The route contract, stated as a type so it is checked, not promised: a
+// route answers with a response or fails with an ApiError — nothing else.
+// Every handler below carries `satisfies RouteHandler`, so a new failure
+// sneaking into a route is a compile error at that route, not a mystery
+// 500 at runtime.
+type RouteHandler = Effect.Effect<HttpServerResponse.HttpServerResponse, ApiError, HttpRouter.Provided>;
 
 // The boot work behind /start — still promise code end to end, because the
 // qemu client, iso cache, and db ops are out of this spike's scope.
@@ -158,6 +159,12 @@ async function boot(qemu: Qemu, cfg: { disk?: string; agent?: string }, isoName:
   }
 }
 
+// The four session-driving routes are uninterruptible: the server
+// interrupts a request's fiber when the client disconnects, and a state
+// transition must not be torn in half by a vanished client — a booted
+// machine the map never received would be unreachable and unkillable, a
+// killed machine could go unrecorded. The old handler always ran to
+// completion; these keep doing so, and only the reply is lost.
 const routes = HttpRouter.use((router) =>
   Effect.gen(function* () {
     yield* router.add("POST", "/start", Effect.gen(function* () {
@@ -184,12 +191,14 @@ const routes = HttpRouter.use((router) =>
       });
       sessions.set(qemu.id, qemu);
       return HttpServerResponse.jsonUnsafe({ id: qemu.id });
-    }));
+    }) satisfies RouteHandler, { uninterruptible: true });
 
     yield* router.add("GET", "/image", Effect.gen(function* () {
+      // A repeated query param arrives parsed as an array; the first value
+      // is the one url.searchParams.get() answered with before.
       const search = yield* HttpServerRequest.ParsedSearchParams;
-      const qemu = yield* session(first(search.id));
-      const agent = first(search.agent);
+      const qemu = yield* session(typeof search.id === "string" ? search.id : search.id?.[0]);
+      const agent = typeof search.agent === "string" ? search.agent : search.agent?.[0];
       const path = join(qemu.dir, `image-${process.hrtime.bigint()}.png`);
       // The PNG is read back only after the exchange closes, and the images
       // row must ride the same transaction that closes the action (they are
@@ -233,9 +242,9 @@ const routes = HttpRouter.use((router) =>
         return HttpServerResponse.uint8Array(data, { contentType: "image/png" });
       });
       return yield* Effect.ensuring(png, Effect.promise(() => rm(path, { force: true })));
-    }));
+    }) satisfies RouteHandler, { uninterruptible: true });
 
-    yield* router.add("GET", "/stats", Effect.sync(() => HttpServerResponse.jsonUnsafe(collectStats(cpuSampler, sessions.size))));
+    yield* router.add("GET", "/stats", Effect.sync(() => HttpServerResponse.jsonUnsafe(collectStats(cpuSampler, sessions.size))) satisfies RouteHandler);
 
     yield* router.add("POST", "/stop", Effect.gen(function* () {
       const raw = yield* bodyText;
@@ -254,7 +263,7 @@ const routes = HttpRouter.use((router) =>
       // The stop ends the session; a stop without a verdict is an abort.
       yield* Effect.tryPromise({ try: () => endSession(db, qemu.id, status ?? "aborted", reason ?? null), catch: internal });
       return HttpServerResponse.jsonUnsafe({ ok: "true" });
-    }));
+    }) satisfies RouteHandler, { uninterruptible: true });
 
     yield* router.add("POST", "/send-keys", Effect.gen(function* () {
       const raw = yield* bodyText;
@@ -278,7 +287,7 @@ const routes = HttpRouter.use((router) =>
         catch: exchangeFailed,
       });
       return HttpServerResponse.jsonUnsafe({ ok: "true" });
-    }));
+    }) satisfies RouteHandler, { uninterruptible: true });
 
     // The proxy's own 404, kept as JSON like every other reply.
     yield* router.add("*", "*", HttpServerResponse.jsonUnsafe({ error: "not found" }, { status: 404 }));
@@ -290,20 +299,26 @@ function errorBody(status: number, message: string): HttpServerResponse.HttpServ
 }
 
 // Every operational error, said once: this table is the whole client-facing
-// error contract, and dropping a tag from it (or adding one to ApiError
-// without a row here) does not compile. Defects — bugs, never part of any
-// route's type — stay off the wire: the full cause goes to stderr and the
-// client sees a generic 500. When Sentry arrives, its captureException
-// belongs in the Internal and defect arms below and nowhere else.
+// error contract. Its type is total over ApiError's tags — catchTags alone
+// would let an arm silently fall through to the platform's default 500, so
+// the table says every tag must have a row, and dropping one (or adding a
+// tag to ApiError without one) does not compile. Defects — bugs, part of
+// no route's type — stay off the wire: the full cause goes to stderr and
+// the client sees a generic 500. When Sentry arrives, its captureException
+// belongs in the Internal and defect arms and nowhere else.
+const respondTable: {
+  readonly [K in ApiError["_tag"]]: (err: Extract<ApiError, { _tag: K }>) => Effect.Effect<HttpServerResponse.HttpServerResponse>;
+} = {
+  BadRequest: (err) => Effect.succeed(errorBody(400, err.message)),
+  UnknownSession: (err) => Effect.succeed(errorBody(404, `unknown session "${err.id}"`)),
+  BootFailed: (err) => Effect.succeed(errorBody(502, err.message)),
+  ExchangeFailed: (err) => Effect.succeed(errorBody(502, err.message)),
+  Internal: (err) => Effect.as(Effect.logError("request failed", err.cause), errorBody(500, "internal error")),
+};
+
 const respond = HttpRouter.middleware<{ handles: ApiError }>()((handler) =>
   handler.pipe(
-    Effect.catchTags({
-      BadRequest: (err) => Effect.succeed(errorBody(400, err.message)),
-      UnknownSession: (err) => Effect.succeed(errorBody(404, `unknown session "${err.id}"`)),
-      BootFailed: (err) => Effect.succeed(errorBody(502, err.message)),
-      ExchangeFailed: (err) => Effect.succeed(errorBody(502, err.message)),
-      Internal: (err) => Effect.as(Effect.logError("request failed", err.cause), errorBody(500, "internal error")),
-    }),
+    Effect.catchTags(respondTable),
     Effect.catchDefect((defect) => Effect.as(Effect.logError("request handler defect", defect), errorBody(500, "internal error"))),
   ), { global: true });
 
