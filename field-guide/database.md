@@ -38,7 +38,9 @@ A still-running exchange has no state yet: `state`, `response`, and `finished_at
 
 Levels are severity of the operation, not of the state it records: a `/stop` carrying a `failed` verdict still logs at info — the stop worked; the verdict lives on the session row. For the same reason a failed `/start` is one error line from the boundary, not two — attributed to the session and agent as far as the handler got before it threw, with the session row's `failed` status and reason as the state record.
 
-Paths that end in `process.exit` — shutdown, a fatal — await `flushLogs()` first, the chain settling, so the last lines are not lost with the process. The db's own write failures (a log insert refused, a "recording the failure failed too") report to stderr only: a database that is not taking writes cannot hold the line saying so.
+Paths that end in `process.exit` — shutdown, a fatal — await `flushLogs()` and `flushSentry()` first, the chain settling, so the last lines are not lost with the process. The db's own write failures (a log insert refused, a "recording the failure failed too") report to stderr and to Sentry: a database that is not taking writes cannot hold the line saying so.
+
+When `SENTRY_DSN` is set, `log()` also sends error and fatal lines to Sentry, with the exception when the caller has one. 4xx request refusals stay in the logs table and skip Sentry — they are the client's mistake. A missing DSN is a no-op.
 
 ## Timing
 

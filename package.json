@@ -20,6 +20,7 @@
   "dependencies": {
     "@cursor/sdk": "^1.0.30",
     "@effect/platform-node": "4.0.0-rc.112",
+    "@sentry/node": "^10.72.0",
     "drizzle-orm": "^0.45.2",
     "effect": "4.0.0-rc.112",
     "hono": "^4.13.5",
