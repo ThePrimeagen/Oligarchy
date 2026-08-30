@@ -83,7 +83,7 @@ describe("Effect HTTP contract happy path", () => {
           }),
           { ok: "true" },
         );
-      }).pipe(Effect.provide(testServices)),
+      }).pipe(Effect.provide(testServices), Effect.scoped),
     );
   });
 
@@ -126,7 +126,7 @@ describe("Effect HTTP contract unhappy path", () => {
           }),
         );
         assert.deepEqual(failure, { error: 'unknown session "missing"' });
-      }).pipe(Effect.provide(testServices)),
+      }).pipe(Effect.provide(testServices), Effect.scoped),
     );
   });
 
