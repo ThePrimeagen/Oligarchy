@@ -96,6 +96,11 @@ const control = HttpApiGroup.make("control").add(
 
 export const api = HttpApi.make("oligarchy").add(control);
 
+const internalServerErrorResponse = HttpServerResponse.jsonUnsafe(
+  { error: "internal server error" },
+  { status: 500 },
+);
+
 export const errorResponses = HttpRouter.middleware(
   (httpEffect) =>
     Effect.catchCause(httpEffect, (cause) => {
@@ -119,28 +124,32 @@ export const errorResponses = HttpRouter.middleware(
           );
         }
         return ErrorReporter.report(cause).pipe(
-          Effect.andThen(
-            Effect.succeed(
-              HttpServerResponse.jsonUnsafe(
-                { error: "internal server error" },
-                { status: 500 },
-              ),
+          Effect.andThen(Effect.succeed(internalServerErrorResponse)),
+        );
+      }
+      if (HttpServerError.isHttpServerError(failure)) {
+        if (failure.reason._tag === "RouteNotFound") {
+          return Effect.succeed(
+            HttpServerResponse.jsonUnsafe(
+              { error: "not found" },
+              { status: 404 },
             ),
-          ),
-        );
+          );
+        }
+        if (failure.reason._tag === "RequestParseError") {
+          return Effect.succeed(
+            HttpServerResponse.jsonUnsafe(
+              { error: failure.reason.message },
+              { status: 400 },
+            ),
+          );
+        }
       }
-      if (
-        HttpServerError.isHttpServerError(failure) &&
-        failure.reason._tag === "RouteNotFound"
-      ) {
-        return Effect.succeed(
-          HttpServerResponse.jsonUnsafe(
-            { error: "not found" },
-            { status: 404 },
-          ),
-        );
-      }
-      return Effect.failCause(cause);
+      return Cause.hasInterruptsOnly(cause)
+        ? Effect.failCause(cause)
+        : ErrorReporter.report(cause).pipe(
+            Effect.andThen(Effect.succeed(internalServerErrorResponse)),
+          );
     }),
   { global: true },
 );
