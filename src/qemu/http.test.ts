@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { NodeHttpServer } from "@effect/platform-node";
-import { Effect, Layer } from "effect";
+import { Effect, ErrorReporter, Layer } from "effect";
 import { HttpRouter } from "effect/unstable/http";
 import { HttpApiBuilder, HttpApiTest } from "effect/unstable/httpapi";
-import { api, errorResponses } from "./http.ts";
+import { api, errorResponses, operationError } from "./http.ts";
 
 const handlers = HttpApiBuilder.group(api, "control", (handlers) =>
   handlers.handleAll({
@@ -35,7 +35,9 @@ const handlers = HttpApiBuilder.group(api, "control", (handlers) =>
         );
       }
       if (payload.id === "missing") {
-        return Effect.fail({ error: 'unknown session "missing"' });
+        return Effect.fail(
+          operationError(new Error('unknown session "missing"')),
+        );
       }
       return Effect.succeed({ ok: "true" });
     },
@@ -223,17 +225,35 @@ describe("Effect HTTP contract unhappy path", () => {
   });
 
   it("reports a rejected legacy promise without exposing the defect", async () => {
+    const reported: Array<string> = [];
     const appLayer = Layer.mergeAll(
       HttpApiBuilder.layer(api).pipe(
         Layer.provide(handlers),
         Layer.provide(NodeHttpServer.layerHttpServices),
       ),
       errorResponses,
+    ).pipe(
+      Layer.provide(
+        ErrorReporter.layer([
+          ErrorReporter.make(({ error }) => {
+            reported.push(error.message);
+          }),
+        ]),
+      ),
     );
     const web = HttpRouter.toWebHandler(appLayer, {
       disableLogger: true,
     });
     try {
+      const operational = await web.handler(
+        new Request("http://localhost/send-keys", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ id: "missing", keys: "a" }),
+        }),
+      );
+      assert.equal(operational.status, 400);
+
       const response = await web.handler(
         new Request("http://localhost/send-keys", {
           method: "POST",
@@ -245,6 +265,7 @@ describe("Effect HTTP contract unhappy path", () => {
       assert.deepEqual(await response.json(), {
         error: "internal server error",
       });
+      assert.deepEqual(reported, ["database password is secret"]);
     } finally {
       await web.dispose();
     }
