@@ -25,7 +25,7 @@ export function connectDatabase(): Db {
 }
 
 /** Creates the session row, before any boot work happens. */
-export async function insertSession(db: Db, id: string, config: unknown, status: "downloading" | "running"): Promise<void> {
+export async function insertSession(db: Db, id: string, config: unknown, status: SessionStartStatus): Promise<void> {
   await db.insert(sessions).values({ id, config, status });
 }
 
