@@ -9,6 +9,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.4.0",
+    "@types/pg": "^8.23.1",
     "drizzle-kit": "^0.31.10",
     "oxlint": "^1.80.0",
     "oxlint-tsgolint": "^7.0.2001",
@@ -16,6 +17,7 @@
   },
   "dependencies": {
     "@cursor/sdk": "^1.0.30",
-    "drizzle-orm": "^0.45.2"
+    "drizzle-orm": "^0.45.2",
+    "pg": "^8.23.0"
   }
 }
