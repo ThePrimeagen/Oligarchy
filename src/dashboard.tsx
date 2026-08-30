@@ -163,6 +163,7 @@ app.get("/", async (context) => {
     const sessions = await listSessions(context.env.HYPERDRIVE.connectionString);
     return context.render(<Home sessions={sessions} />);
   } catch (error) {
+    Sentry.captureException(error);
     console.error("dashboard: listing sessions:", (error as Error).message);
     context.status(500);
     return context.render(<Home sessions={null} />);
@@ -179,6 +180,7 @@ app.get("/sessions", async (context) => {
       </>,
     );
   } catch (error) {
+    Sentry.captureException(error);
     console.error("dashboard: listing sessions:", (error as Error).message);
     return context.html(
       <>
