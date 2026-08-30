@@ -204,7 +204,7 @@ const controlLayer = HttpApiBuilder.group(api, "control", (handlers) =>
             status ?? "aborted",
             reason ?? null,
           );
-          return { ok: "true" };
+          return { ok: "true" as const };
         });
       }),
     sendKeys: ({ payload: { id, keys, encoding, agent } }) =>
@@ -225,7 +225,7 @@ const controlLayer = HttpApiBuilder.group(api, "control", (handlers) =>
               record,
             );
           }
-          return { ok: "true" };
+          return { ok: "true" as const };
         });
       }),
   }),
