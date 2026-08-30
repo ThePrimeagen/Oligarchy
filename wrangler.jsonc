@@ -5,6 +5,10 @@
   "assets": {
     "directory": "./public"
   },
+  "routes": [
+    { "pattern": "oligarchy.trm.sh", "custom_domain": true },
+    { "pattern": "clicker.oligarchy.trm.sh", "custom_domain": true }
+  ],
   "compatibility_date": "2026-08-30",
   "compatibility_flags": [
     "nodejs_compat"

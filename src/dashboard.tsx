@@ -2,6 +2,7 @@ import * as Sentry from "@sentry/cloudflare";
 import { Hono } from "hono";
 import type { FC } from "hono/jsx";
 import { jsxRenderer } from "hono/jsx-renderer";
+import { clickerPage } from "./clicker.ts";
 import { getSessionImage, listSessions, type Session } from "./db/query.ts";
 import { SENTRY_DSN } from "./sentry-dsn.ts";
 
@@ -143,6 +144,13 @@ const Home: FC<HomeProps> = ({ sessions }) => (
 );
 
 const app = new Hono<{ Bindings: Bindings }>();
+
+app.use(async (context, next) => {
+  if (new URL(context.req.url).hostname === "clicker.oligarchy.trm.sh") {
+    return context.html(clickerPage);
+  }
+  await next();
+});
 
 app.use(
   jsxRenderer(({ children }) => (
