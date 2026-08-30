@@ -1,20 +1,17 @@
-// Sentry for the proxy. Init reads SENTRY_DSN; with no DSN every call is a
-// no-op so a local boot does not need a project. capture() is what log()
-// calls for error and fatal (and for the log-insert failure that cannot
-// go through log() again). flush() is for the process.exit paths so the
-// last event is not dropped.
+// Sentry for the proxy. The DSN is the Cloudflare project's — this process
+// is Node (QEMU cannot run on a worker), so the SDK is @sentry/node, and
+// Effect's respond middleware plus log() decide what is an event: 5xx and
+// operational failures, not 4xx. capture() is what log() calls for error
+// and fatal (and for the log-insert failure that cannot go through log()
+// again). flush() is for the process.exit paths so the last event is not
+// dropped.
 
 import * as Sentry from "@sentry/node";
-
-const dsn = process.env.SENTRY_DSN;
+import { SENTRY_DSN } from "./sentry-dsn.ts";
 
 export function initSentry(): void {
-  if (dsn === undefined || dsn === "") {
-    return;
-  }
   Sentry.init({
-    dsn,
-    environment: process.env.SENTRY_ENVIRONMENT,
+    dsn: SENTRY_DSN,
   });
 }
 
@@ -25,9 +22,6 @@ export function capture(ctx: {
   agentId?: string;
   cause?: unknown;
 }): void {
-  if (dsn === undefined || dsn === "") {
-    return;
-  }
   Sentry.withScope((scope) => {
     if (ctx.sessionId !== undefined) {
       scope.setTag("session_id", ctx.sessionId);
@@ -46,9 +40,6 @@ export function capture(ctx: {
 }
 
 export function flushSentry(): Promise<void> {
-  if (dsn === undefined || dsn === "") {
-    return Promise.resolve();
-  }
   // Two seconds: a stalled ingest must not hold the exit.
   return Sentry.flush(2_000).then(() => undefined);
 }

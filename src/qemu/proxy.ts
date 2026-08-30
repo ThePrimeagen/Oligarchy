@@ -10,9 +10,8 @@
 // as it happens. Major actions also land in the logs table through log():
 // the lifecycle at info with how long each took, failed requests at error,
 // the death of the proxy at fatal (see field-guide/database.md). Error and
-// fatal lines also go to Sentry when SENTRY_DSN is set; SENTRY_ENVIRONMENT
-// is forwarded when set. A missing DSN is a no-op — Sentry is not required
-// to drive guests.
+// fatal lines also go to Sentry. 4xx request refusals stay in the logs
+// table and skip Sentry — they are the client's mistake.
 //
 //   POST /start      -> {"iso"?, "disk"?, "agent"}; boots a qemu, returns
 //                       {"id": uuid}; an http(s) iso is downloaded into

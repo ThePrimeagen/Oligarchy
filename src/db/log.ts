@@ -7,12 +7,12 @@
 //   log(db, { text: `iso: downloading ${url}`, sessionId, agentId });
 //   log(db, { level: "error", text: `POST /start failed: ${message}` });
 //
-// error and fatal also go to Sentry when SENTRY_DSN is set — that is the
-// one reporting path, so a failed request, a db write that would not
-// record, and a dying proxy show up in the same place. A 4xx is still an
-// error line (a refused request is a failed request) but is the client's
-// mistake: the caller passes skipSentry. The optional cause is the
-// exception Sentry should group on; without one the text is the event.
+// error and fatal also go to Sentry — that is the one reporting path, so
+// a failed request, a db write that would not record, and a dying proxy
+// show up in the same place. A 4xx is still an error line (a refused
+// request is a failed request) but is the client's mistake: the caller
+// passes skipSentry. The optional cause is the exception Sentry should
+// group on; without one the text is the event.
 //
 // The db is the one client connectDatabase() built (see ops.ts); this file
 // never touches connection details.

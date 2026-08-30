@@ -40,7 +40,7 @@ Levels are severity of the operation, not of the state it records: a `/stop` car
 
 Paths that end in `process.exit` — shutdown, a fatal — await `flushLogs()` then `flushSentry()` first, the chain settling, so the last lines (and a log-insert failure discovered while flushing) are not lost with the process. The db's own write failures (a log insert refused, a "recording the failure failed too") report to stderr and to Sentry: a database that is not taking writes cannot hold the line saying so.
 
-When `SENTRY_DSN` is set, `log()` also sends error and fatal lines to Sentry, with the exception when the caller has one. 4xx request refusals stay in the logs table and skip Sentry — they are the client's mistake. A missing DSN is a no-op.
+`log()` also sends error and fatal lines to Sentry, with the exception when the caller has one. 4xx request refusals stay in the logs table and skip Sentry — they are the client's mistake. The dashboard worker is wrapped with `@sentry/cloudflare`; the proxy reports through `@sentry/node` because it is a Node process (it boots QEMU). Both use the same project DSN.
 
 ## Timing
 
