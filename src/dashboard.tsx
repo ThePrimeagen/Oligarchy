@@ -1,5 +1,5 @@
 import * as Sentry from "@sentry/cloudflare";
-import { Hono, type ExecutionContext } from "hono";
+import { Hono } from "hono";
 import type { FC } from "hono/jsx";
 import { jsxRenderer } from "hono/jsx-renderer";
 import { SENTRY_DSN } from "./sentry-dsn.ts";
@@ -50,9 +50,5 @@ export default Sentry.withSentry(
     dsn: SENTRY_DSN,
     dataCollection: {},
   }),
-  {
-    async fetch(request: Request, env: unknown, ctx: ExecutionContext) {
-      return app.fetch(request, env, ctx);
-    },
-  },
+  app,
 );
