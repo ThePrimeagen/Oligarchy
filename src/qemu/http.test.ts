@@ -30,7 +30,9 @@ const handlers = HttpApiBuilder.group(api, "control", (handlers) =>
     stop: () => Effect.succeed({ ok: "true" }),
     sendKeys: ({ payload }) => {
       if (payload.id === "defect") {
-        return Effect.die(new Error("database password is secret"));
+        return Effect.promise(() =>
+          Promise.reject(new Error("database password is secret")),
+        );
       }
       if (payload.id === "missing") {
         return Effect.fail({ error: 'unknown session "missing"' });
@@ -192,7 +194,35 @@ describe("Effect HTTP contract unhappy path", () => {
     }
   });
 
-  it("reports a safe JSON error without exposing unexpected defects", async () => {
+  it("returns the JSON error contract for unsupported content types", async () => {
+    const appLayer = Layer.mergeAll(
+      HttpApiBuilder.layer(api).pipe(
+        Layer.provide(handlers),
+        Layer.provide(NodeHttpServer.layerHttpServices),
+      ),
+      errorResponses,
+    );
+    const web = HttpRouter.toWebHandler(appLayer, {
+      disableLogger: true,
+    });
+    try {
+      const response = await web.handler(
+        new Request("http://localhost/send-keys", {
+          method: "POST",
+          headers: { "content-type": "text/plain" },
+          body: JSON.stringify({ id: "session-1", keys: "a" }),
+        }),
+      );
+      assert.equal(response.status, 415);
+      assert.deepEqual(await response.json(), {
+        error: "unsupported content type",
+      });
+    } finally {
+      await web.dispose();
+    }
+  });
+
+  it("reports a rejected legacy promise without exposing the defect", async () => {
     const appLayer = Layer.mergeAll(
       HttpApiBuilder.layer(api).pipe(
         Layer.provide(handlers),
