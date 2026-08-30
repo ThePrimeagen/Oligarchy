@@ -28,12 +28,12 @@ const dateTime = new Intl.DateTimeFormat("en-US", {
 
 const SessionList: FC<SessionListProps> = ({ sessions }) => (
   sessions.length === 0 ? (
-    <div class="empty-state">
+    <div class="empty-state" role="status">
       <p>No sessions recorded yet.</p>
     </div>
   ) : (
     <>
-      <p class="session-list__updated">
+      <p class="session-list__updated" role="status">
         Updated <time dateTime={sessions[0].queriedAt.toISOString()}>{dateTime.format(sessions[0].queriedAt)}</time>
       </p>
       <ol>
@@ -82,7 +82,7 @@ const SessionList: FC<SessionListProps> = ({ sessions }) => (
 );
 
 const SessionError: FC = () => (
-  <div class="empty-state empty-state--error">
+  <div class="empty-state empty-state--error" role="alert">
     <p>Sessions are unavailable.</p>
     <span>Try refreshing in a moment.</span>
   </div>
@@ -112,7 +112,7 @@ const Home: FC<HomeProps> = ({ sessions }) => (
           Refresh
         </button>
       </div>
-      <div id="session-list" class="session-list" aria-live="polite">
+      <div id="session-list" class="session-list">
         {sessions === null ? <SessionError /> : <SessionList sessions={sessions} />}
       </div>
     </section>
