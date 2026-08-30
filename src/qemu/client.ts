@@ -63,7 +63,6 @@ export function createQemu(options: QemuOptions = {}): Qemu {
   };
 }
 
-/** Creates the backing qcow2 at diskPath inside the session dir. */
 export async function createDisk(qemu: Qemu): Promise<string> {
   await mkdir(qemu.dir, { recursive: true, mode: 0o700 });
   const size = qemu.options.diskSize ?? DEFAULT_DISK_SIZE;
@@ -83,10 +82,6 @@ export async function createDisk(qemu: Qemu): Promise<string> {
   return qemu.diskPath;
 }
 
-/**
- * Launches QEMU and negotiates QMP over the session socket.
- * The session dir must already exist; createDisk creates it.
- */
 export async function start(
   qemu: Qemu,
   options: QemuStartOptions = {},
@@ -118,8 +113,7 @@ export async function start(
     timer = setTimeout(() => reject(new Error("qemu: handshake timeout")), HANDSHAKE_MS);
   });
 
-  // QEMU connects to us: listen on the session socket, then spawn. The
-  // listener accepts the one QMP connection and is closed in the finally.
+  // QEMU connects to us: listen on the session socket, then spawn.
   const server = createServer();
   try {
     const connection = new Promise<Socket>((resolve, reject) => {
@@ -161,8 +155,7 @@ export async function start(
           }
           qemu.pending.delete(id);
           if ("error" in msg) {
-            // QEMU's raw {error} reply rides the rejection so a recorder
-            // can store the exact JSON, not just the flattened message.
+            // The raw {error} reply rides the rejection so a recorder can store the exact JSON.
             pending.reject(Object.assign(new Error(`${msg.error.class}: ${msg.error.desc}`), { qmp: msg }));
           } else {
             pending.resolve(msg);
@@ -177,8 +170,7 @@ export async function start(
     socket.on("close", () => failAll(qemu, new Error("qemu: socket closed")));
 
     const greetingMsg = (await Promise.race([greeting, timeout])) as QemuGreetingResponse;
-    // The greeting is the recorded reply for the boot's qmp_capabilities:
-    // its own {return} is empty, the greeting is what the handshake said.
+    // The greeting is the recorded reply for the boot's qmp_capabilities: its own {return} is empty.
     const bootRecord: QemuExchangeRecorder | undefined =
       record === undefined
         ? undefined
@@ -260,8 +252,6 @@ async function execute(qemu: Qemu, name: string, args: unknown, record?: QemuExc
   }
   const id = ++qemu.nextId;
   const command = { execute: name, arguments: args, id } as QemuCommand;
-  // The row opens before the command goes out — awaited, so a refused
-  // insert fails the exchange up front instead of dying unhandled later.
   const close = record === undefined ? undefined : await record(command);
   let response: QemuSuccessResponse;
   try {
@@ -271,15 +261,12 @@ async function execute(qemu: Qemu, name: string, args: unknown, record?: QemuExc
     })) as QemuSuccessResponse;
   } catch (err) {
     const failure = (err as { qmp?: QemuErrorResponse }).qmp ?? (err as Error).message;
-    // The exchange error is the one worth seeing; a failed close cannot
-    // replace it (the one-shot cleanup pattern in cursor-agent/client.ts).
     await close?.({ state: "failed", response: failure }).catch((closeErr: unknown) => {
       console.error(`db: recording a failed exchange failed too: ${(closeErr as Error).message}`);
     });
     throw err;
   }
-  // Closed outside the catch: a failing close surfaces as itself and can
-  // never relabel a completed exchange as failed.
+  // Outside the try: a failing close must surface as itself, not relabel the completed exchange as failed.
   await close?.({ state: "completed", response });
   return response.return;
 }

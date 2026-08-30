@@ -11,8 +11,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      # Committed migrations are history: they may only be added, never
-      # changed. The journal is the one file the generator itself appends to.
       - name: fail if an existing migration file was edited, deleted, or renamed
         run: |
           violations=$(git diff --name-status --diff-filter=MDRT \
@@ -35,8 +33,6 @@ jobs:
           node-version: 22
       - run: npm ci
       - run: npx drizzle-kit check
-      # If the schema changed without a migration, generate produces new
-      # files and the tree goes dirty — that is the failure.
       - name: fail if drizzle-kit generate produces changes
         run: |
           npm run db:generate

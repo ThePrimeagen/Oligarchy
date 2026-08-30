@@ -43,8 +43,6 @@ declare global {
     data: string | number;
   };
 
-  // The commands this program sends: the exact JSON written to the QMP
-  // socket, one type per command in use.
   type QemuCapabilitiesCommand = {
     execute: "qmp_capabilities";
     arguments: Record<string, never>;
@@ -69,16 +67,14 @@ declare global {
     id: string;
   };
 
-  // How one QMP exchange ended. completed: QEMU's exact reply (the greeting
-  // for qmp_capabilities at boot). failed: QEMU's {error} reply, or this
-  // server's error message when the failure never reached QEMU.
+  // failed: QEMU's {error} reply, or this server's error message when the failure
+  // never reached QEMU (a timeout, a dead socket).
   type QemuExchangeOutcome =
     | { state: "completed"; response: QemuGreetingResponse | QemuSuccessResponse }
     | { state: "failed"; response: QemuErrorResponse | string };
 
-  // The proxy's hook into the wire: awaited with the exact command JSON
-  // before it goes out (a refused insert fails the exchange up front); the
-  // returned close lands the outcome when the reply arrives.
+  // Awaited with the exact command before it goes out (a refused insert fails the
+  // exchange up front); the returned close records the outcome when the reply lands.
   type QemuExchangeRecorder = (
     command: QemuCommand,
   ) => Promise<(outcome: QemuExchangeOutcome) => Promise<void>>;

@@ -16,6 +16,11 @@ Check the field guide: [field-guide/index.md](field-guide/index.md).
 
 - Every database query and mutation must use Drizzle. Never call a database driver's query API directly or introduce another ORM or query builder. Database drivers are transports passed to Drizzle, nothing more.
 
+## Comments
+
+- Do not write comments. Code says what it does; a comment restating it is noise. This covers doc comments, file headers, and narration of any kind.
+- The one exception is a genuinely tricky edge case whose intent cannot live in the code: an upstream bug worked around, an ordering that correctness depends on, a deliberate race, a magic number's meaning. One or two lines naming the constraint, nothing more.
+
 ## Tests
 
 - Do not add tests unless explicitly told to.

@@ -1,15 +1,3 @@
-// The oligarchy CLI: a main file, not a library. It drives the oligarchy
-// control plane (src/qemu/proxy.ts) over HTTP.
-//
-//   node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> start [--iso <path>] [--disk <path>]
-//   node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> get-image <id> [-o file]
-//   node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-keys <id> <keys> [encoding]
-//
-// The server address comes from OLIGARCHY_ADDR (default 127.0.0.1:42069).
-// --agent-id leads every invocation: this client is driven by agents, not
-// humans, and every request names the agent so the server can attribute the
-// session's actions to it.
-
 import { stat, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
@@ -18,8 +6,6 @@ const DEFAULT_ISO = "omarchy.iso";
 const DEFAULT_ENCODING = "oligarchy";
 
 async function main(args: string[]): Promise<void> {
-  // --agent-id leads every invocation. This client is used by agents, not
-  // humans; a request that names no agent has no business being sent.
   if (args.length < 3 || args[0] !== "--agent-id" || args[1] === "") {
     usage();
     process.exitCode = 2;
@@ -77,8 +63,6 @@ async function cmdStart(agent: string, args: string[]): Promise<void> {
     }
   }
   iso = iso === "" ? DEFAULT_ISO : iso;
-  // An http(s) iso is the server's to download and cache; only a file path
-  // is resolved and checked here.
   if (!iso.startsWith("http://") && !iso.startsWith("https://")) {
     iso = resolve(iso);
     try {
@@ -99,7 +83,6 @@ async function cmdStart(agent: string, args: string[]): Promise<void> {
 }
 
 async function cmdGetImage(agent: string, args: string[]): Promise<void> {
-  // The three accepted forms: <id>, <id> -o <file>, and -o <file> <id>.
   let id = "";
   let out = "";
   if (args.length === 1) {
@@ -147,8 +130,6 @@ async function postJSON(path: string, body: unknown): Promise<string> {
   return res.text();
 }
 
-// The server writes errors as {"error": "..."}; anything else (a proxy in
-// the way, a wrong port) falls back to the raw body.
 async function readAPIError(res: Response): Promise<string> {
   const data = await res.text();
   try {
