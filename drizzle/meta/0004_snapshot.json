@@ -1,5 +1,5 @@
 {
-  "id": "24933767-73e5-4028-aff6-4c47f0c70652",
+  "id": "36c1075f-5097-449c-aa49-76f2d17a5816",
   "prevId": "284f210d-02b8-4d5a-9745-6f570f26af63",
   "version": "7",
   "dialect": "postgresql",
@@ -521,17 +521,23 @@
         }
       },
       "indexes": {
-        "test_results_suite_id_idx": {
-          "name": "test_results_suite_id_idx",
+        "test_results_suite_definition_idx": {
+          "name": "test_results_suite_definition_idx",
           "columns": [
             {
               "expression": "suite_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
+            },
+            {
+              "expression": "definition_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
             }
           ],
-          "isUnique": false,
+          "isUnique": true,
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -577,15 +583,15 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "test_results_evidence_action_id_actions_id_fk": {
-          "name": "test_results_evidence_action_id_actions_id_fk",
+        "test_results_evidence_action_id_images_action_id_fk": {
+          "name": "test_results_evidence_action_id_images_action_id_fk",
           "tableFrom": "test_results",
-          "tableTo": "actions",
+          "tableTo": "images",
           "columnsFrom": [
             "evidence_action_id"
           ],
           "columnsTo": [
-            "id"
+            "action_id"
           ],
           "onDelete": "no action",
           "onUpdate": "no action"

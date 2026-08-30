@@ -34,6 +34,6 @@ CREATE TABLE "test_suites" (
 ALTER TABLE "test_results" ADD CONSTRAINT "test_results_suite_id_test_suites_id_fk" FOREIGN KEY ("suite_id") REFERENCES "public"."test_suites"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "test_results" ADD CONSTRAINT "test_results_definition_id_test_definitions_id_fk" FOREIGN KEY ("definition_id") REFERENCES "public"."test_definitions"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "test_results" ADD CONSTRAINT "test_results_session_id_sessions_id_fk" FOREIGN KEY ("session_id") REFERENCES "public"."sessions"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "test_results" ADD CONSTRAINT "test_results_evidence_action_id_actions_id_fk" FOREIGN KEY ("evidence_action_id") REFERENCES "public"."actions"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "test_results" ADD CONSTRAINT "test_results_evidence_action_id_images_action_id_fk" FOREIGN KEY ("evidence_action_id") REFERENCES "public"."images"("action_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "test_definitions_slug_version_idx" ON "test_definitions" USING btree ("slug","version");--> statement-breakpoint
-CREATE INDEX "test_results_suite_id_idx" ON "test_results" USING btree ("suite_id");
+CREATE UNIQUE INDEX "test_results_suite_definition_idx" ON "test_results" USING btree ("suite_id","definition_id");

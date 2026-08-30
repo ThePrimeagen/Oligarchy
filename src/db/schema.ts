@@ -80,9 +80,10 @@ export const logs = pgTable(
   (table) => [index("logs_session_id_idx").on(table.sessionId)],
 );
 
-// A definition is the stored instruction an agent is handed. Rows are append-only:
-// results reference the exact words the agent was given, so an edit is the next
-// (slug, version), never a rewrite of a row that results already point at.
+// A definition is the stored instruction an agent is handed — what to do, and the
+// proof that closes it. Rows are append-only: results reference the exact words the
+// agent was given, so an edit is the next (slug, version), never a rewrite of a row
+// that results already point at.
 export const testDefinitions = pgTable(
   "test_definitions",
   {
@@ -90,9 +91,7 @@ export const testDefinitions = pgTable(
     slug: text("slug").notNull(),
     version: integer("version").notNull(),
     title: text("title").notNull(),
-    // What to do, quoted verbatim into the agent's prompt.
     instruction: text("instruction").notNull(),
-    // What evidence closes the test, e.g. "a screendump showing Time zone: Asia/Tokyo".
     proof: text("proof").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -130,11 +129,13 @@ export const testResults = pgTable(
     sessionId: uuid("session_id").references(() => sessions.id),
     state: testResultState("state"),
     reason: text("reason"),
-    // The screendump action whose stored image proves the verdict; null when the
-    // proof lives in prose (e.g. a comparison across two instances' images).
-    evidenceActionId: bigint("evidence_action_id", { mode: "number" }).references(() => actions.id),
+    // The stored image that proves the verdict; null when the proof lives in prose
+    // (e.g. a comparison across two instances' images).
+    evidenceActionId: bigint("evidence_action_id", { mode: "number" }).references(() => images.actionId),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
   },
-  (table) => [index("test_results_suite_id_idx").on(table.suiteId)],
+  // One result per definition per suite: the orchestrator re-inserting a suite's
+  // rows is a database error by design. The index also serves suite lookups.
+  (table) => [uniqueIndex("test_results_suite_definition_idx").on(table.suiteId, table.definitionId)],
 );
