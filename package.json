@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test --experimental-strip-types src/qmp/json-stream.test.ts src/qemu/keys.test.ts",
+    "test": "node --test --experimental-strip-types src/qmp/json-stream.test.ts src/qemu/keys.test.ts src/qemu/http.test.ts",
     "lint": "oxlint --type-aware --type-check",
     "db:generate": "drizzle-kit generate"
   },
@@ -17,7 +17,9 @@
   },
   "dependencies": {
     "@cursor/sdk": "^1.0.30",
+    "@effect/platform-node": "^4.0.0-rc.112",
     "drizzle-orm": "^0.45.2",
+    "effect": "^4.0.0-rc.112",
     "pg": "^8.23.0"
   }
 }
