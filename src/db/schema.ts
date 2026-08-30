@@ -57,7 +57,8 @@ export const actions = pgTable(
     sessionId: uuid("session_id")
       .notNull()
       .references(() => sessions.id),
-    // Null when the request was not attributed to an agent (manual use).
+    // Kept nullable for historical rows; the proxy now always writes an
+    // agent id (the HTTP layer requires one on every driving request).
     agentId: text("agent_id").references(() => agentRuns.agentId),
     // The exact JSON sent to QEMU over QMP (a QemuCommand); its execute
     // field names the command.
