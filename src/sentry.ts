@@ -1,11 +1,3 @@
-// Sentry for the proxy. The DSN is the Cloudflare project's — this process
-// is Node (QEMU cannot run on a worker), so the SDK is @sentry/node, and
-// Effect's respond middleware plus log() decide what is an event: 5xx and
-// operational failures, not 4xx. capture() is what log() calls for error
-// and fatal (and for the log-insert failure that cannot go through log()
-// again). flush() is for the process.exit paths so the last event is not
-// dropped.
-
 import * as Sentry from "@sentry/node";
 import { SENTRY_DSN } from "./sentry-dsn.ts";
 
