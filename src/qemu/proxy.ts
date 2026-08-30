@@ -176,7 +176,7 @@ type RouteHandler = Effect.Effect<HttpServerResponse.HttpServerResponse, ApiErro
 
 // The boot work behind /start — still promise code end to end, because the
 // qemu client, iso cache, and db ops are out of this spike's scope.
-async function boot(qemu: Qemu, cfg: { disk?: string; agent: string }, isoName: string, isUrl: boolean): Promise<void> {
+async function boot(qemu: Qemu, cfg: { disk?: string; agent: string }, isoName: string): Promise<void> {
   try {
     // Inside the try: a rejected registration (the agent already drives
     // a session) must close this session as failed, not leave it open.
@@ -190,9 +190,10 @@ async function boot(qemu: Qemu, cfg: { disk?: string; agent: string }, isoName: 
       await mkdir(qemu.dir, { recursive: true, mode: 0o700 });
     }
     await start(qemu, { iso, disk: cfg.disk }, recorder(qemu.id, cfg.agent));
-    if (isUrl) {
-      await sessionRunning(db, qemu.id);
-    }
+    // Unconditional: the machine is up, so the row says running — no
+    // re-checking how the iso arrived. For a session that entered as
+    // "running" this update changes nothing.
+    await sessionRunning(db, qemu.id);
   } catch (err) {
     // The qemu must not outlive its failed start — a machine the map
     // never held would be unreachable and unkillable through the API.
@@ -226,7 +227,7 @@ const routes = HttpRouter.use((router) =>
         catch: internal,
       });
       yield* Effect.tryPromise({
-        try: () => boot(qemu, cfg, isoName, isUrl),
+        try: () => boot(qemu, cfg, isoName),
         catch: bootFailed,
       });
       sessions.set(qemu.id, qemu);
