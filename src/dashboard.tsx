@@ -119,11 +119,12 @@ const SessionError: FC = () => (
   </div>
 );
 
-type PageId = "results" | "definitions";
+type PageId = "results" | "definitions" | "prompts";
 
 const PAGES = [
   { id: "results", href: "/", label: "Test results" },
   { id: "definitions", href: "/definitions", label: "Test definitions" },
+  { id: "prompts", href: "/prompts", label: "Base prompts" },
 ] as const;
 
 const Menu: FC<{ page: PageId }> = ({ page }) => (
@@ -184,10 +185,9 @@ const Home: FC<HomeProps> = ({ sessions }) => (
 
 type DefinitionsProps = {
   definitions: TestDefinition[] | null;
-  prompts: TestBasePrompt[] | null;
 };
 
-const Definitions: FC<DefinitionsProps> = ({ definitions, prompts }) => (
+const Definitions: FC<DefinitionsProps> = ({ definitions }) => (
   <Shell page="definitions">
     <section class="records" aria-labelledby="definitions-heading">
       <div class="sessions__heading">
@@ -229,9 +229,18 @@ const Definitions: FC<DefinitionsProps> = ({ definitions, prompts }) => (
         )}
       </div>
     </section>
+  </Shell>
+);
+
+type PromptsProps = {
+  prompts: TestBasePrompt[] | null;
+};
+
+const Prompts: FC<PromptsProps> = ({ prompts }) => (
+  <Shell page="prompts">
     <section class="records" aria-labelledby="prompts-heading">
       <div class="sessions__heading">
-        <h2 id="prompts-heading">Base prompts</h2>
+        <h1 id="prompts-heading">Base prompts</h1>
       </div>
       <div class="record-list">
         {prompts === null ? (
@@ -248,10 +257,10 @@ const Definitions: FC<DefinitionsProps> = ({ definitions, prompts }) => (
             {prompts.map((prompt) => (
               <li>
                 <article class="record">
-                  <h3>{prompt.name}</h3>
+                  <h2>{prompt.name}</h2>
                   <time dateTime={prompt.createdAt.toISOString()}>{dateTime.format(prompt.createdAt)}</time>
                   <div class="record__field">
-                    <h4>Prompt</h4>
+                    <h3>Prompt</h3>
                     <p>{prompt.prompt}</p>
                   </div>
                 </article>
@@ -296,25 +305,27 @@ app.get("/", async (context) => {
 });
 
 app.get("/definitions", async (context) => {
-  const connectionString = context.env.HYPERDRIVE.connectionString;
-  let definitions: TestDefinition[] | null = null;
-  let prompts: TestBasePrompt[] | null = null;
   try {
-    definitions = await listTestDefinitions(connectionString);
+    const definitions = await listTestDefinitions(context.env.HYPERDRIVE.connectionString);
+    return context.render(<Definitions definitions={definitions} />);
   } catch (error) {
     Sentry.captureException(error);
     console.error("dashboard: listing test definitions:", (error as Error).message);
+    context.status(500);
+    return context.render(<Definitions definitions={null} />);
   }
+});
+
+app.get("/prompts", async (context) => {
   try {
-    prompts = await listTestBasePrompts(connectionString);
+    const prompts = await listTestBasePrompts(context.env.HYPERDRIVE.connectionString);
+    return context.render(<Prompts prompts={prompts} />);
   } catch (error) {
     Sentry.captureException(error);
     console.error("dashboard: listing base prompts:", (error as Error).message);
-  }
-  if (definitions === null && prompts === null) {
     context.status(500);
+    return context.render(<Prompts prompts={null} />);
   }
-  return context.render(<Definitions definitions={definitions} prompts={prompts} />);
 });
 
 app.get("/sessions", async (context) => {
