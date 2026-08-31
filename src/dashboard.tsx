@@ -1,8 +1,16 @@
 import * as Sentry from "@sentry/cloudflare";
 import { Hono } from "hono";
-import type { FC } from "hono/jsx";
+import type { FC, PropsWithChildren } from "hono/jsx";
 import { jsxRenderer } from "hono/jsx-renderer";
-import { getSessionImage, listSessions, type Session } from "./db/query.ts";
+import {
+  getSessionImage,
+  listSessions,
+  listTestBasePrompts,
+  listTestDefinitions,
+  type Session,
+  type TestBasePrompt,
+  type TestDefinition,
+} from "./db/query.ts";
 import { SENTRY_DSN } from "./sentry-dsn.ts";
 
 const HTMX_URL = "https://cdn.jsdelivr.net/npm/htmx.org@4.0.0";
@@ -111,22 +119,55 @@ const SessionError: FC = () => (
   </div>
 );
 
-type HomeProps = {
-  sessions: Session[] | null;
-};
+type PageId = "results" | "definitions" | "prompts";
 
-const Home: FC<HomeProps> = ({ sessions }) => (
+const PAGES = [
+  { id: "results", href: "/", label: "Test results" },
+  { id: "definitions", href: "/definitions", label: "Test definitions" },
+  { id: "prompts", href: "/prompts", label: "Base prompts" },
+] as const;
+
+const Menu: FC<{ page: PageId }> = ({ page }) => (
+  <details class="menu">
+    <summary class="menu__toggle" aria-label="Menu">
+      <span class="menu__icon" aria-hidden="true"></span>
+    </summary>
+    <nav class="menu__nav" aria-label="Pages">
+      {PAGES.map((item) => (
+        <a
+          href={item.href}
+          class={item.id === page ? "menu__link menu__link--current" : "menu__link"}
+          aria-current={item.id === page ? "page" : undefined}
+        >
+          {item.label}
+        </a>
+      ))}
+    </nav>
+  </details>
+);
+
+const Shell: FC<PropsWithChildren<{ page: PageId }>> = ({ page, children }) => (
   <main>
+    <Menu page={page} />
     <header class="hero">
       <div class="brand" aria-label="Omarchy">
         OMARCHY
       </div>
     </header>
+    {children}
+  </main>
+);
 
+type HomeProps = {
+  sessions: Session[] | null;
+};
+
+const Home: FC<HomeProps> = ({ sessions }) => (
+  <Shell page="results">
     <section class="sessions" aria-labelledby="sessions-heading">
       <div class="sessions__heading">
         <div>
-          <h1 id="sessions-heading">Sessions</h1>
+          <h1 id="sessions-heading">Test results</h1>
         </div>
         <button class="button" type="button" hx-get="/sessions" hx-target="#session-list" hx-swap="innerHTML">
           Refresh
@@ -139,7 +180,97 @@ const Home: FC<HomeProps> = ({ sessions }) => (
         {sessions === null ? <SessionError /> : <SessionList sessions={sessions} />}
       </div>
     </section>
-  </main>
+  </Shell>
+);
+
+type DefinitionsProps = {
+  definitions: TestDefinition[] | null;
+};
+
+const Definitions: FC<DefinitionsProps> = ({ definitions }) => (
+  <Shell page="definitions">
+    <section class="records" aria-labelledby="definitions-heading">
+      <div class="sessions__heading">
+        <h1 id="definitions-heading">Test definitions</h1>
+      </div>
+      <div class="record-list">
+        {definitions === null ? (
+          <div class="empty-state empty-state--error">
+            <p>Test definitions are unavailable.</p>
+            <span>Try refreshing in a moment.</span>
+          </div>
+        ) : definitions.length === 0 ? (
+          <div class="empty-state">
+            <p>No test definitions yet.</p>
+          </div>
+        ) : (
+          <ol>
+            {definitions.map((definition) => (
+              <li>
+                <article class="record">
+                  <h2>{definition.name}</h2>
+                  <time dateTime={definition.createdAt.toISOString()}>{dateTime.format(definition.createdAt)}</time>
+                  <div class="record__field">
+                    <h3>Description</h3>
+                    <p>{definition.description}</p>
+                  </div>
+                  <div class="record__field">
+                    <h3>Instruction</h3>
+                    <p>{definition.instruction}</p>
+                  </div>
+                  <div class="record__field">
+                    <h3>Proof</h3>
+                    <p>{definition.proof}</p>
+                  </div>
+                </article>
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
+    </section>
+  </Shell>
+);
+
+type PromptsProps = {
+  prompts: TestBasePrompt[] | null;
+};
+
+const Prompts: FC<PromptsProps> = ({ prompts }) => (
+  <Shell page="prompts">
+    <section class="records" aria-labelledby="prompts-heading">
+      <div class="sessions__heading">
+        <h1 id="prompts-heading">Base prompts</h1>
+      </div>
+      <div class="record-list">
+        {prompts === null ? (
+          <div class="empty-state empty-state--error">
+            <p>Base prompts are unavailable.</p>
+            <span>Try refreshing in a moment.</span>
+          </div>
+        ) : prompts.length === 0 ? (
+          <div class="empty-state">
+            <p>No base prompts yet.</p>
+          </div>
+        ) : (
+          <ol>
+            {prompts.map((prompt) => (
+              <li>
+                <article class="record">
+                  <h2>{prompt.name}</h2>
+                  <time dateTime={prompt.createdAt.toISOString()}>{dateTime.format(prompt.createdAt)}</time>
+                  <div class="record__field">
+                    <h3>Prompt</h3>
+                    <p>{prompt.prompt}</p>
+                  </div>
+                </article>
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
+    </section>
+  </Shell>
 );
 
 const app = new Hono<{ Bindings: Bindings }>();
@@ -151,7 +282,7 @@ app.use(
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta name="theme-color" content="#1a1b26" />
-        <title>Omarchy Sessions</title>
+        <title>Omarchy</title>
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
         <link rel="stylesheet" href="/dashboard.css" />
         <script src={HTMX_URL} integrity={HTMX_INTEGRITY} crossorigin="anonymous"></script>
@@ -170,6 +301,30 @@ app.get("/", async (context) => {
     console.error("dashboard: listing sessions:", (error as Error).message);
     context.status(500);
     return context.render(<Home sessions={null} />);
+  }
+});
+
+app.get("/definitions", async (context) => {
+  try {
+    const definitions = await listTestDefinitions(context.env.HYPERDRIVE.connectionString);
+    return context.render(<Definitions definitions={definitions} />);
+  } catch (error) {
+    Sentry.captureException(error);
+    console.error("dashboard: listing test definitions:", (error as Error).message);
+    context.status(500);
+    return context.render(<Definitions definitions={null} />);
+  }
+});
+
+app.get("/prompts", async (context) => {
+  try {
+    const prompts = await listTestBasePrompts(context.env.HYPERDRIVE.connectionString);
+    return context.render(<Prompts prompts={prompts} />);
+  } catch (error) {
+    Sentry.captureException(error);
+    console.error("dashboard: listing base prompts:", (error as Error).message);
+    context.status(500);
+    return context.render(<Prompts prompts={null} />);
   }
 });
 

@@ -1,12 +1,15 @@
 import { desc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Client } from "pg";
-import { actions, images, sessions } from "./schema.ts";
+import { actions, images, sessions, testBasePrompts, testDefinitions } from "./schema.ts";
 
 export type Session = typeof sessions.$inferSelect & {
   imageActionId: number | null;
   queriedAt: Date;
 };
+
+export type TestDefinition = typeof testDefinitions.$inferSelect;
+export type TestBasePrompt = typeof testBasePrompts.$inferSelect;
 
 async function connectDatabase(connectionString: string) {
   const client = new Client({ connectionString });
@@ -69,4 +72,14 @@ export async function getSessionImage(connectionString: string, sessionId: strin
     .orderBy(desc(actions.id))
     .limit(1);
   return row?.data;
+}
+
+export async function listTestDefinitions(connectionString: string): Promise<TestDefinition[]> {
+  const db = await connectDatabase(connectionString);
+  return db.select().from(testDefinitions).orderBy(testDefinitions.name);
+}
+
+export async function listTestBasePrompts(connectionString: string): Promise<TestBasePrompt[]> {
+  const db = await connectDatabase(connectionString);
+  return db.select().from(testBasePrompts).orderBy(testBasePrompts.name);
 }
