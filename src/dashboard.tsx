@@ -119,12 +119,11 @@ const SessionError: FC = () => (
   </div>
 );
 
-type PageId = "results" | "definitions" | "prompts";
+type PageId = "results" | "definitions";
 
 const PAGES = [
   { id: "results", href: "/", label: "Test results" },
   { id: "definitions", href: "/definitions", label: "Test definitions" },
-  { id: "prompts", href: "/prompts", label: "Base prompts" },
 ] as const;
 
 const Menu: FC<{ page: PageId }> = ({ page }) => (
@@ -183,111 +182,83 @@ const Home: FC<HomeProps> = ({ sessions }) => (
   </Shell>
 );
 
-type DefinitionListProps = {
-  definitions: TestDefinition[];
-};
-
-const DefinitionList: FC<DefinitionListProps> = ({ definitions }) => (
-  definitions.length === 0 ? (
-    <div class="empty-state">
-      <p>No test definitions yet.</p>
-    </div>
-  ) : (
-    <ol>
-      {definitions.map((definition) => (
-        <li>
-          <article class="record">
-            <h2>{definition.name}</h2>
-            <time dateTime={definition.createdAt.toISOString()}>{dateTime.format(definition.createdAt)}</time>
-            <div class="record__field">
-              <h3>Description</h3>
-              <p>{definition.description}</p>
-            </div>
-            <div class="record__field">
-              <h3>Instruction</h3>
-              <p>{definition.instruction}</p>
-            </div>
-            <div class="record__field">
-              <h3>Proof</h3>
-              <p>{definition.proof}</p>
-            </div>
-          </article>
-        </li>
-      ))}
-    </ol>
-  )
-);
-
-const DefinitionError: FC = () => (
-  <div class="empty-state empty-state--error">
-    <p>Test definitions are unavailable.</p>
-    <span>Try refreshing in a moment.</span>
-  </div>
-);
-
 type DefinitionsProps = {
   definitions: TestDefinition[] | null;
+  prompts: TestBasePrompt[] | null;
 };
 
-const Definitions: FC<DefinitionsProps> = ({ definitions }) => (
+const Definitions: FC<DefinitionsProps> = ({ definitions, prompts }) => (
   <Shell page="definitions">
     <section class="records" aria-labelledby="definitions-heading">
       <div class="sessions__heading">
         <h1 id="definitions-heading">Test definitions</h1>
       </div>
       <div class="record-list">
-        {definitions === null ? <DefinitionError /> : <DefinitionList definitions={definitions} />}
+        {definitions === null ? (
+          <div class="empty-state empty-state--error">
+            <p>Test definitions are unavailable.</p>
+            <span>Try refreshing in a moment.</span>
+          </div>
+        ) : definitions.length === 0 ? (
+          <div class="empty-state">
+            <p>No test definitions yet.</p>
+          </div>
+        ) : (
+          <ol>
+            {definitions.map((definition) => (
+              <li>
+                <article class="record">
+                  <h2>{definition.name}</h2>
+                  <time dateTime={definition.createdAt.toISOString()}>{dateTime.format(definition.createdAt)}</time>
+                  <div class="record__field">
+                    <h3>Description</h3>
+                    <p>{definition.description}</p>
+                  </div>
+                  <div class="record__field">
+                    <h3>Instruction</h3>
+                    <p>{definition.instruction}</p>
+                  </div>
+                  <div class="record__field">
+                    <h3>Proof</h3>
+                    <p>{definition.proof}</p>
+                  </div>
+                </article>
+              </li>
+            ))}
+          </ol>
+        )}
       </div>
     </section>
-  </Shell>
-);
-
-type PromptListProps = {
-  prompts: TestBasePrompt[];
-};
-
-const PromptList: FC<PromptListProps> = ({ prompts }) => (
-  prompts.length === 0 ? (
-    <div class="empty-state">
-      <p>No base prompts yet.</p>
-    </div>
-  ) : (
-    <ol>
-      {prompts.map((prompt) => (
-        <li>
-          <article class="record">
-            <h2>{prompt.name}</h2>
-            <time dateTime={prompt.createdAt.toISOString()}>{dateTime.format(prompt.createdAt)}</time>
-            <div class="record__field">
-              <h3>Prompt</h3>
-              <p>{prompt.prompt}</p>
-            </div>
-          </article>
-        </li>
-      ))}
-    </ol>
-  )
-);
-
-const PromptError: FC = () => (
-  <div class="empty-state empty-state--error">
-    <p>Base prompts are unavailable.</p>
-    <span>Try refreshing in a moment.</span>
-  </div>
-);
-
-type PromptsProps = {
-  prompts: TestBasePrompt[] | null;
-};
-
-const Prompts: FC<PromptsProps> = ({ prompts }) => (
-  <Shell page="prompts">
     <section class="records" aria-labelledby="prompts-heading">
       <div class="sessions__heading">
-        <h1 id="prompts-heading">Base prompts</h1>
+        <h2 id="prompts-heading">Base prompts</h2>
       </div>
       <div class="record-list">
-        {prompts === null ? <PromptError /> : <PromptList prompts={prompts} />}
+        {prompts === null ? (
+          <div class="empty-state empty-state--error">
+            <p>Base prompts are unavailable.</p>
+            <span>Try refreshing in a moment.</span>
+          </div>
+        ) : prompts.length === 0 ? (
+          <div class="empty-state">
+            <p>No base prompts yet.</p>
+          </div>
+        ) : (
+          <ol>
+            {prompts.map((prompt) => (
+              <li>
+                <article class="record">
+                  <h2>{prompt.name}</h2>
+                  <time dateTime={prompt.createdAt.toISOString()}>{dateTime.format(prompt.createdAt)}</time>
+                  <div class="record__field">
+                    <h3>Prompt</h3>
+                    <p>{prompt.prompt}</p>
+                  </div>
+                </article>
+              </li>
+            ))}
+          </ol>
+        )}
       </div>
     </section>
   </Shell>
@@ -326,25 +297,15 @@ app.get("/", async (context) => {
 
 app.get("/definitions", async (context) => {
   try {
-    const definitions = await listTestDefinitions(context.env.HYPERDRIVE.connectionString);
-    return context.render(<Definitions definitions={definitions} />);
+    const connectionString = context.env.HYPERDRIVE.connectionString;
+    const definitions = await listTestDefinitions(connectionString);
+    const prompts = await listTestBasePrompts(connectionString);
+    return context.render(<Definitions definitions={definitions} prompts={prompts} />);
   } catch (error) {
     Sentry.captureException(error);
     console.error("dashboard: listing test definitions:", (error as Error).message);
     context.status(500);
-    return context.render(<Definitions definitions={null} />);
-  }
-});
-
-app.get("/prompts", async (context) => {
-  try {
-    const prompts = await listTestBasePrompts(context.env.HYPERDRIVE.connectionString);
-    return context.render(<Prompts prompts={prompts} />);
-  } catch (error) {
-    Sentry.captureException(error);
-    console.error("dashboard: listing base prompts:", (error as Error).message);
-    context.status(500);
-    return context.render(<Prompts prompts={null} />);
+    return context.render(<Definitions definitions={null} prompts={null} />);
   }
 });
 
