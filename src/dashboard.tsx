@@ -248,10 +248,10 @@ const Definitions: FC<DefinitionsProps> = ({ definitions, prompts }) => (
             {prompts.map((prompt) => (
               <li>
                 <article class="record">
-                  <h2>{prompt.name}</h2>
+                  <h3>{prompt.name}</h3>
                   <time dateTime={prompt.createdAt.toISOString()}>{dateTime.format(prompt.createdAt)}</time>
                   <div class="record__field">
-                    <h3>Prompt</h3>
+                    <h4>Prompt</h4>
                     <p>{prompt.prompt}</p>
                   </div>
                 </article>
@@ -296,17 +296,25 @@ app.get("/", async (context) => {
 });
 
 app.get("/definitions", async (context) => {
+  const connectionString = context.env.HYPERDRIVE.connectionString;
+  let definitions: TestDefinition[] | null = null;
+  let prompts: TestBasePrompt[] | null = null;
   try {
-    const connectionString = context.env.HYPERDRIVE.connectionString;
-    const definitions = await listTestDefinitions(connectionString);
-    const prompts = await listTestBasePrompts(connectionString);
-    return context.render(<Definitions definitions={definitions} prompts={prompts} />);
+    definitions = await listTestDefinitions(connectionString);
   } catch (error) {
     Sentry.captureException(error);
     console.error("dashboard: listing test definitions:", (error as Error).message);
-    context.status(500);
-    return context.render(<Definitions definitions={null} prompts={null} />);
   }
+  try {
+    prompts = await listTestBasePrompts(connectionString);
+  } catch (error) {
+    Sentry.captureException(error);
+    console.error("dashboard: listing base prompts:", (error as Error).message);
+  }
+  if (definitions === null && prompts === null) {
+    context.status(500);
+  }
+  return context.render(<Definitions definitions={definitions} prompts={prompts} />);
 });
 
 app.get("/sessions", async (context) => {
