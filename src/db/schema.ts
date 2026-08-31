@@ -5,7 +5,7 @@ const bytea = customType<{ data: Buffer }>({ dataType: () => "bytea" });
 
 export const sessionStatus = pgEnum("session_status", ["downloading", "running", "succeeded", "failed", "aborted", "timed_out"]);
 export const testSuiteStatus = pgEnum("test_suite_status", ["running", "passed", "failed", "aborted", "timed_out"]);
-export const testResultState = pgEnum("test_result_state", ["running", "passed", "failed", "aborted", "timed_out"]);
+export const testResultState = pgEnum("test_result_state", ["pending", "running", "passed", "failed", "aborted", "timed_out"]);
 // Declared in ascending severity: Postgres orders enums by declaration, so
 // "WHERE level >= 'error'" reads the scary lines.
 export const logLevel = pgEnum("log_level", ["info", "warning", "error", "fatal"]);
@@ -111,10 +111,11 @@ export const testSuites = pgTable("test_suites", {
   endedAt: timestamp("ended_at", { withTimezone: true }),
 });
 
-// One row per definition in the suite, inserted running when the suite starts.
-// The agent's report closes it passed or failed; the orchestrator closes the rest
-// when it closes the suite — timed_out when the report never came, aborted when
-// the suite was stopped on purpose.
+// One row per definition in the suite, inserted pending: capacity decides when it
+// runs, and the orchestrator marks it running when it spawns the driver. The agent's
+// report closes it passed or failed; the orchestrator closes the rest when it closes
+// the suite — timed_out when the report never came, aborted when the suite was
+// stopped on purpose.
 export const testResults = pgTable(
   "test_results",
   {
@@ -129,11 +130,8 @@ export const testResults = pgTable(
     // resolves the agent's session through agent_runs, so attribution is recorded
     // fact, not an upfront guess about which instance will run the test.
     sessionId: uuid("session_id").references(() => sessions.id),
-    state: testResultState("state").notNull().default("running"),
+    state: testResultState("state").notNull().default("pending"),
     reason: text("reason"),
-    // The stored image that proves the verdict; null when the proof lives in prose
-    // (e.g. a comparison across two instances' images).
-    evidenceActionId: bigint("evidence_action_id", { mode: "number" }).references(() => images.actionId),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
   },

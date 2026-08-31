@@ -1,5 +1,5 @@
 {
-  "id": "b911fcea-cb58-48c6-8284-c8d8694b1372",
+  "id": "b7b47798-89f6-478a-ab65-ad926569a342",
   "prevId": "284f210d-02b8-4d5a-9745-6f570f26af63",
   "version": "7",
   "dialect": "postgresql",
@@ -493,17 +493,11 @@
           "typeSchema": "public",
           "primaryKey": false,
           "notNull": true,
-          "default": "'running'"
+          "default": "'pending'"
         },
         "reason": {
           "name": "reason",
           "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "evidence_action_id": {
-          "name": "evidence_action_id",
-          "type": "bigint",
           "primaryKey": false,
           "notNull": false
         },
@@ -580,19 +574,6 @@
           ],
           "columnsTo": [
             "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "test_results_evidence_action_id_images_action_id_fk": {
-          "name": "test_results_evidence_action_id_images_action_id_fk",
-          "tableFrom": "test_results",
-          "tableTo": "images",
-          "columnsFrom": [
-            "evidence_action_id"
-          ],
-          "columnsTo": [
-            "action_id"
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
@@ -692,6 +673,7 @@
       "name": "test_result_state",
       "schema": "public",
       "values": [
+        "pending",
         "running",
         "passed",
         "failed",
