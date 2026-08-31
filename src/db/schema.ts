@@ -4,7 +4,7 @@ import { bigint, customType, index, integer, jsonb, pgEnum, pgTable, text, times
 const bytea = customType<{ data: Buffer }>({ dataType: () => "bytea" });
 
 export const sessionStatus = pgEnum("session_status", ["downloading", "running", "succeeded", "failed", "aborted", "timed_out"]);
-export const testSuiteStatus = pgEnum("test_suite_status", ["running", "passed", "failed", "aborted", "timed_out"]);
+export const testSuiteStatus = pgEnum("test_suite_status", ["pending", "running", "passed", "failed", "aborted", "timed_out"]);
 export const testResultState = pgEnum("test_result_state", ["pending", "running", "passed", "failed", "aborted", "timed_out"]);
 // Declared in ascending severity: Postgres orders enums by declaration, so
 // "WHERE level >= 'error'" reads the scary lines.
@@ -105,7 +105,7 @@ export const testDefinitions = pgTable(
 export const testSuites = pgTable("test_suites", {
   id: uuid("id").primaryKey(),
   name: text("name").notNull(),
-  status: testSuiteStatus("status").notNull().default("running"),
+  status: testSuiteStatus("status").notNull().default("pending"),
   reason: text("reason"),
   startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
   endedAt: timestamp("ended_at", { withTimezone: true }),

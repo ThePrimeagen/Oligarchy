@@ -1,5 +1,5 @@
 {
-  "id": "b7b47798-89f6-478a-ab65-ad926569a342",
+  "id": "89f71796-bea3-4149-88c1-6987536031e5",
   "prevId": "284f210d-02b8-4d5a-9745-6f570f26af63",
   "version": "7",
   "dialect": "postgresql",
@@ -607,7 +607,7 @@
           "typeSchema": "public",
           "primaryKey": false,
           "notNull": true,
-          "default": "'running'"
+          "default": "'pending'"
         },
         "reason": {
           "name": "reason",
@@ -685,6 +685,7 @@
       "name": "test_suite_status",
       "schema": "public",
       "values": [
+        "pending",
         "running",
         "passed",
         "failed",
