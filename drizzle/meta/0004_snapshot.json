@@ -1,5 +1,5 @@
 {
-  "id": "45713cba-e1c2-4b97-8b67-aedf2810fa67",
+  "id": "b911fcea-cb58-48c6-8284-c8d8694b1372",
   "prevId": "284f210d-02b8-4d5a-9745-6f570f26af63",
   "version": "7",
   "dialect": "postgresql",
@@ -492,7 +492,8 @@
           "type": "test_result_state",
           "typeSchema": "public",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true,
+          "default": "'running'"
         },
         "reason": {
           "name": "reason",
@@ -691,8 +692,11 @@
       "name": "test_result_state",
       "schema": "public",
       "values": [
+        "running",
         "passed",
-        "failed"
+        "failed",
+        "aborted",
+        "timed_out"
       ]
     },
     "public.test_suite_status": {

@@ -5,7 +5,7 @@ const bytea = customType<{ data: Buffer }>({ dataType: () => "bytea" });
 
 export const sessionStatus = pgEnum("session_status", ["downloading", "running", "succeeded", "failed", "aborted", "timed_out"]);
 export const testSuiteStatus = pgEnum("test_suite_status", ["running", "passed", "failed", "aborted", "timed_out"]);
-export const testResultState = pgEnum("test_result_state", ["passed", "failed"]);
+export const testResultState = pgEnum("test_result_state", ["running", "passed", "failed", "aborted", "timed_out"]);
 // Declared in ascending severity: Postgres orders enums by declaration, so
 // "WHERE level >= 'error'" reads the scary lines.
 export const logLevel = pgEnum("log_level", ["info", "warning", "error", "fatal"]);
@@ -100,8 +100,8 @@ export const testDefinitions = pgTable(
 
 // One execution of a named set of definitions. The orchestrator owns the row: it
 // opens the suite and declares the verdict once the results are in — or timed_out
-// when reports stop coming, its tests left visibly unreported (state null). Counts
-// are not stored — planned and reported are both readable off the test_results rows.
+// when reports stop coming. Counts are not stored — planned and reported are both
+// readable off the test_results rows.
 export const testSuites = pgTable("test_suites", {
   id: uuid("id").primaryKey(),
   name: text("name").notNull(),
@@ -111,9 +111,10 @@ export const testSuites = pgTable("test_suites", {
   endedAt: timestamp("ended_at", { withTimezone: true }),
 });
 
-// One row per definition in the suite, inserted open when the suite starts and
-// closed by the agent's report — the actions pattern: a row whose state and
-// finished_at are still null is a test that never reported, visible as such.
+// One row per definition in the suite, inserted running when the suite starts.
+// The agent's report closes it passed or failed; the orchestrator closes the rest
+// when it closes the suite — timed_out when the report never came, aborted when
+// the suite was stopped on purpose.
 export const testResults = pgTable(
   "test_results",
   {
@@ -128,7 +129,7 @@ export const testResults = pgTable(
     // resolves the agent's session through agent_runs, so attribution is recorded
     // fact, not an upfront guess about which instance will run the test.
     sessionId: uuid("session_id").references(() => sessions.id),
-    state: testResultState("state"),
+    state: testResultState("state").notNull().default("running"),
     reason: text("reason"),
     // The stored image that proves the verdict; null when the proof lives in prose
     // (e.g. a comparison across two instances' images).
