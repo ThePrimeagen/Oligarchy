@@ -98,6 +98,22 @@ export const testDefinitions = pgTable(
   (table) => [uniqueIndex("test_definitions_name_version_idx").on(table.name, table.version)],
 );
 
+// A base prompt is the shared preamble composed into an agent's prompt ahead of a
+// definition's instruction — the driving discipline every mission repeats. Same
+// append-only rule as definitions: an edit is the next (name, version), so the
+// exact words any past agent received stay reconstructible.
+export const testBasePrompts = pgTable(
+  "test_base_prompts",
+  {
+    id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+    name: text("name").notNull(),
+    version: integer("version").notNull(),
+    prompt: text("prompt").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("test_base_prompts_name_version_idx").on(table.name, table.version)],
+);
+
 // One execution of a set of definitions. The orchestrator owns the row: it opens
 // the run and declares the verdict once the results are in — or timed_out when
 // reports stop coming. Counts are not stored — planned and reported are both
