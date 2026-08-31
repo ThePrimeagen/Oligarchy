@@ -15,6 +15,10 @@
       "id": "da54bf43f004492996574a6db26d8895"
     }
   ],
+  "routes": [
+    { "pattern": "oligarchy.trm.sh", "custom_domain": true },
+    { "pattern": "clicker.oligarchy.trm.sh", "custom_domain": true }
+  ],
   "placement": {
     "region": "aws:us-east-1"
   }
