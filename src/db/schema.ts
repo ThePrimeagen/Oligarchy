@@ -80,22 +80,22 @@ export const logs = pgTable(
   (table) => [index("logs_session_id_idx").on(table.sessionId)],
 );
 
-// A definition is the stored instruction an agent is handed — what to do, and the
-// proof that closes it. Rows are append-only: results reference the exact words the
-// agent was given, so an edit is the next (slug, version), never a rewrite of a row
-// that results already point at.
+// A definition is the stored mission an agent is handed — what it is about, what to
+// do, and the proof that closes it. Rows are append-only: results reference the
+// exact words the agent was given, so an edit is the next (name, version), never a
+// rewrite of a row that results already point at.
 export const testDefinitions = pgTable(
   "test_definitions",
   {
     id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
-    slug: text("slug").notNull(),
+    name: text("name").notNull(),
     version: integer("version").notNull(),
-    title: text("title").notNull(),
+    description: text("description").notNull(),
     instruction: text("instruction").notNull(),
     proof: text("proof").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [uniqueIndex("test_definitions_slug_version_idx").on(table.slug, table.version)],
+  (table) => [uniqueIndex("test_definitions_name_version_idx").on(table.name, table.version)],
 );
 
 // One execution of a set of definitions. The orchestrator owns the row: it opens
