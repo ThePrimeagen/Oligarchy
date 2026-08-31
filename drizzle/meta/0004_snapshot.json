@@ -1,5 +1,5 @@
 {
-  "id": "83826d17-47c7-422d-bd00-f1fb9a1bc251",
+  "id": "0201bcd0-6c7e-4bf2-a2fe-9e3a64b622de",
   "prevId": "284f210d-02b8-4d5a-9745-6f570f26af63",
   "version": "7",
   "dialect": "postgresql",
@@ -487,9 +487,9 @@
           "primaryKey": false,
           "notNull": false
         },
-        "state": {
-          "name": "state",
-          "type": "test_result_state",
+        "status": {
+          "name": "status",
+          "type": "test_result_status",
           "typeSchema": "public",
           "primaryKey": false,
           "notNull": true,
@@ -669,8 +669,8 @@
         "timed_out"
       ]
     },
-    "public.test_result_state": {
-      "name": "test_result_state",
+    "public.test_result_status": {
+      "name": "test_result_status",
       "schema": "public",
       "values": [
         "pending",

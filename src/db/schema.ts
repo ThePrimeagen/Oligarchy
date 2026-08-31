@@ -5,7 +5,7 @@ const bytea = customType<{ data: Buffer }>({ dataType: () => "bytea" });
 
 export const sessionStatus = pgEnum("session_status", ["downloading", "running", "succeeded", "failed", "aborted", "timed_out"]);
 export const testRunStatus = pgEnum("test_run_status", ["pending", "running", "passed", "failed", "aborted", "timed_out"]);
-export const testResultState = pgEnum("test_result_state", ["pending", "running", "passed", "failed", "aborted", "timed_out"]);
+export const testResultStatus = pgEnum("test_result_status", ["pending", "running", "passed", "failed", "aborted", "timed_out"]);
 // Declared in ascending severity: Postgres orders enums by declaration, so
 // "WHERE level >= 'error'" reads the scary lines.
 export const logLevel = pgEnum("log_level", ["info", "warning", "error", "fatal"]);
@@ -130,7 +130,7 @@ export const testResults = pgTable(
     // resolves the agent's session through agent_runs, so attribution is recorded
     // fact, not an upfront guess about which instance will run the test.
     sessionId: uuid("session_id").references(() => sessions.id),
-    state: testResultState("state").notNull().default("pending"),
+    status: testResultStatus("status").notNull().default("pending"),
     reason: text("reason"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     finishedAt: timestamp("finished_at", { withTimezone: true }),

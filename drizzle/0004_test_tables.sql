@@ -1,4 +1,4 @@
-CREATE TYPE "public"."test_result_state" AS ENUM('pending', 'running', 'passed', 'failed', 'aborted', 'timed_out');--> statement-breakpoint
+CREATE TYPE "public"."test_result_status" AS ENUM('pending', 'running', 'passed', 'failed', 'aborted', 'timed_out');--> statement-breakpoint
 CREATE TYPE "public"."test_run_status" AS ENUM('pending', 'running', 'passed', 'failed', 'aborted', 'timed_out');--> statement-breakpoint
 CREATE TABLE "test_definitions" (
 	"id" bigint PRIMARY KEY GENERATED ALWAYS AS IDENTITY (sequence name "test_definitions_id_seq" INCREMENT BY 1 MINVALUE 1 MAXVALUE 9223372036854775807 START WITH 1 CACHE 1),
@@ -15,7 +15,7 @@ CREATE TABLE "test_results" (
 	"run_id" uuid NOT NULL,
 	"definition_id" bigint NOT NULL,
 	"session_id" uuid,
-	"state" "test_result_state" DEFAULT 'pending' NOT NULL,
+	"status" "test_result_status" DEFAULT 'pending' NOT NULL,
 	"reason" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"finished_at" timestamp with time zone
