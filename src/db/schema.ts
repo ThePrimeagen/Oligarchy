@@ -4,7 +4,7 @@ import { bigint, customType, index, integer, jsonb, pgEnum, pgTable, text, times
 const bytea = customType<{ data: Buffer }>({ dataType: () => "bytea" });
 
 export const sessionStatus = pgEnum("session_status", ["downloading", "running", "succeeded", "failed", "aborted", "timed_out"]);
-export const testSuiteStatus = pgEnum("test_suite_status", ["pending", "running", "passed", "failed", "aborted", "timed_out"]);
+export const testRunStatus = pgEnum("test_run_status", ["pending", "running", "passed", "failed", "aborted", "timed_out"]);
 export const testResultState = pgEnum("test_result_state", ["pending", "running", "passed", "failed", "aborted", "timed_out"]);
 // Declared in ascending severity: Postgres orders enums by declaration, so
 // "WHERE level >= 'error'" reads the scary lines.
@@ -98,31 +98,31 @@ export const testDefinitions = pgTable(
   (table) => [uniqueIndex("test_definitions_slug_version_idx").on(table.slug, table.version)],
 );
 
-// One execution of a named set of definitions. The orchestrator owns the row: it
-// opens the suite and declares the verdict once the results are in — or timed_out
-// when reports stop coming. Counts are not stored — planned and reported are both
+// One execution of a set of definitions. The orchestrator owns the row: it opens
+// the run and declares the verdict once the results are in — or timed_out when
+// reports stop coming. Counts are not stored — planned and reported are both
 // readable off the test_results rows.
-export const testSuites = pgTable("test_suites", {
+export const testRuns = pgTable("test_runs", {
   id: uuid("id").primaryKey(),
   name: text("name").notNull(),
-  status: testSuiteStatus("status").notNull().default("pending"),
+  status: testRunStatus("status").notNull().default("pending"),
   reason: text("reason"),
   startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
   endedAt: timestamp("ended_at", { withTimezone: true }),
 });
 
-// One row per definition in the suite, inserted pending: capacity decides when it
+// One row per definition in the run, inserted pending: capacity decides when it
 // runs, and the orchestrator marks it running when it spawns the driver. The agent's
 // report closes it passed or failed; the orchestrator closes the rest when it closes
-// the suite — timed_out when the report never came, aborted when the suite was
-// stopped on purpose.
+// the run — timed_out when the report never came, aborted when the run was stopped
+// on purpose.
 export const testResults = pgTable(
   "test_results",
   {
     id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
-    suiteId: uuid("suite_id")
+    runId: uuid("run_id")
       .notNull()
-      .references(() => testSuites.id),
+      .references(() => testRuns.id),
     definitionId: bigint("definition_id", { mode: "number" })
       .notNull()
       .references(() => testDefinitions.id),
@@ -135,7 +135,7 @@ export const testResults = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
   },
-  // One result per definition per suite: the orchestrator re-inserting a suite's
-  // rows is a database error by design. The index also serves suite lookups.
-  (table) => [uniqueIndex("test_results_suite_definition_idx").on(table.suiteId, table.definitionId)],
+  // One result per definition per run: the orchestrator re-inserting a run's rows
+  // is a database error by design. The index also serves run lookups.
+  (table) => [uniqueIndex("test_results_run_definition_idx").on(table.runId, table.definitionId)],
 );

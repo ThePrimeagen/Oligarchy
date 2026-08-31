@@ -1,5 +1,5 @@
 {
-  "id": "89f71796-bea3-4149-88c1-6987536031e5",
+  "id": "83826d17-47c7-422d-bd00-f1fb9a1bc251",
   "prevId": "284f210d-02b8-4d5a-9745-6f570f26af63",
   "version": "7",
   "dialect": "postgresql",
@@ -469,8 +469,8 @@
             "cycle": false
           }
         },
-        "suite_id": {
-          "name": "suite_id",
+        "run_id": {
+          "name": "run_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
@@ -516,11 +516,11 @@
         }
       },
       "indexes": {
-        "test_results_suite_definition_idx": {
-          "name": "test_results_suite_definition_idx",
+        "test_results_run_definition_idx": {
+          "name": "test_results_run_definition_idx",
           "columns": [
             {
-              "expression": "suite_id",
+              "expression": "run_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -539,12 +539,12 @@
         }
       },
       "foreignKeys": {
-        "test_results_suite_id_test_suites_id_fk": {
-          "name": "test_results_suite_id_test_suites_id_fk",
+        "test_results_run_id_test_runs_id_fk": {
+          "name": "test_results_run_id_test_runs_id_fk",
           "tableFrom": "test_results",
-          "tableTo": "test_suites",
+          "tableTo": "test_runs",
           "columnsFrom": [
-            "suite_id"
+            "run_id"
           ],
           "columnsTo": [
             "id"
@@ -585,8 +585,8 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.test_suites": {
-      "name": "test_suites",
+    "public.test_runs": {
+      "name": "test_runs",
       "schema": "",
       "columns": {
         "id": {
@@ -603,7 +603,7 @@
         },
         "status": {
           "name": "status",
-          "type": "test_suite_status",
+          "type": "test_run_status",
           "typeSchema": "public",
           "primaryKey": false,
           "notNull": true,
@@ -681,8 +681,8 @@
         "timed_out"
       ]
     },
-    "public.test_suite_status": {
-      "name": "test_suite_status",
+    "public.test_run_status": {
+      "name": "test_run_status",
       "schema": "public",
       "values": [
         "pending",
