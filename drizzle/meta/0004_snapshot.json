@@ -1,5 +1,5 @@
 {
-  "id": "915272fc-fa69-44d8-9925-134514df67c1",
+  "id": "38482ac7-468d-4120-b7da-15d24e0c16a9",
   "prevId": "284f210d-02b8-4d5a-9745-6f570f26af63",
   "version": "7",
   "dialect": "postgresql",
@@ -386,12 +386,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "version": {
-          "name": "version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
         "prompt": {
           "name": "prompt",
           "type": "text",
@@ -407,17 +401,11 @@
         }
       },
       "indexes": {
-        "test_base_prompts_name_version_idx": {
-          "name": "test_base_prompts_name_version_idx",
+        "test_base_prompts_name_idx": {
+          "name": "test_base_prompts_name_idx",
           "columns": [
             {
               "expression": "name",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "version",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -463,12 +451,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "version": {
-          "name": "version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
         "description": {
           "name": "description",
           "type": "text",
@@ -496,17 +478,11 @@
         }
       },
       "indexes": {
-        "test_definitions_name_version_idx": {
-          "name": "test_definitions_name_version_idx",
+        "test_definitions_name_idx": {
+          "name": "test_definitions_name_idx",
           "columns": [
             {
               "expression": "name",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "version",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

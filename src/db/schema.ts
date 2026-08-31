@@ -1,4 +1,4 @@
-import { bigint, customType, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { bigint, customType, index, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 // drizzle-orm has no built-in bytea column type for postgres.
 const bytea = customType<{ data: Buffer }>({ dataType: () => "bytea" });
@@ -81,37 +81,32 @@ export const logs = pgTable(
 );
 
 // A definition is the stored mission an agent is handed — what it is about, what to
-// do, and the proof that closes it. Rows are append-only: results reference the
-// exact words the agent was given, so an edit is the next (name, version), never a
-// rewrite of a row that results already point at.
+// do, and the proof that closes it. Rows are edited in place; name is the lookup key.
 export const testDefinitions = pgTable(
   "test_definitions",
   {
     id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
     name: text("name").notNull(),
-    version: integer("version").notNull(),
     description: text("description").notNull(),
     instruction: text("instruction").notNull(),
     proof: text("proof").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [uniqueIndex("test_definitions_name_version_idx").on(table.name, table.version)],
+  (table) => [uniqueIndex("test_definitions_name_idx").on(table.name)],
 );
 
 // A base prompt is the shared preamble composed into an agent's prompt ahead of a
-// definition's instruction — the driving discipline every mission repeats. Same
-// append-only rule as definitions: an edit is the next (name, version), so the
-// exact words any past agent received stay reconstructible.
+// definition's instruction — the driving discipline every mission repeats. Edited
+// in place like definitions; name is the lookup key.
 export const testBasePrompts = pgTable(
   "test_base_prompts",
   {
     id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
     name: text("name").notNull(),
-    version: integer("version").notNull(),
     prompt: text("prompt").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [uniqueIndex("test_base_prompts_name_version_idx").on(table.name, table.version)],
+  (table) => [uniqueIndex("test_base_prompts_name_idx").on(table.name)],
 );
 
 // One execution of a set of definitions. The orchestrator owns the row: it opens
