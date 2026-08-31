@@ -60,6 +60,100 @@ main {
   padding-block: 3rem 5rem;
 }
 
+.menu {
+  position: fixed;
+  top: 1rem;
+  left: 1rem;
+  z-index: 2;
+}
+
+.menu__toggle {
+  display: grid;
+  width: 2.75rem;
+  height: 2.75rem;
+  place-items: center;
+  border: 1px solid var(--terminal-blue);
+  background: rgb(26 27 38 / 92%);
+  color: var(--terminal-blue);
+  cursor: pointer;
+  list-style: none;
+}
+
+.menu__toggle::-webkit-details-marker,
+.menu__toggle::marker {
+  content: none;
+  display: none;
+}
+
+.menu__toggle:hover,
+.menu[open] .menu__toggle {
+  border-color: var(--turquoise);
+  color: var(--turquoise);
+}
+
+.menu__toggle:focus-visible {
+  outline: 2px solid var(--turquoise);
+  outline-offset: 3px;
+}
+
+.menu__icon,
+.menu__icon::before,
+.menu__icon::after {
+  display: block;
+  width: 1.15rem;
+  height: 2px;
+  background: currentcolor;
+}
+
+.menu__icon {
+  position: relative;
+}
+
+.menu__icon::before,
+.menu__icon::after {
+  position: absolute;
+  left: 0;
+  content: "";
+}
+
+.menu__icon::before {
+  top: -0.35rem;
+}
+
+.menu__icon::after {
+  top: 0.35rem;
+}
+
+.menu__nav {
+  display: grid;
+  min-width: 16rem;
+  margin-top: 0.5rem;
+  padding: 0.4rem 0;
+  border: 1px solid var(--terminal-blue);
+  background: rgb(26 27 38 / 96%);
+}
+
+.menu__link {
+  padding: 0.7em 1.1em;
+  color: var(--terminal-blue);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-decoration: none;
+  text-transform: uppercase;
+}
+
+.menu__link:hover {
+  color: var(--turquoise);
+}
+
+.menu__link--current {
+  color: var(--turquoise);
+}
+
+.menu__link--current::before {
+  content: "▸ ";
+}
+
 .hero {
   margin-bottom: 4rem;
 }
@@ -271,6 +365,58 @@ main {
   font-size: 0.7em;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+.records {
+  width: 100%;
+}
+
+.record-list ol {
+  display: grid;
+  gap: 3rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.record {
+  display: grid;
+  gap: 1.1rem;
+}
+
+.record > h2 {
+  margin: 0;
+  color: var(--terminal-white);
+  font-size: 1.25em;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.record > time {
+  color: var(--terminal-blue);
+  font-size: 0.7em;
+  text-transform: uppercase;
+}
+
+.record__field {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.record__field h3 {
+  margin: 0;
+  color: var(--terminal-blue);
+  font-size: 0.7em;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.record__field p {
+  margin: 0;
+  color: var(--terminal-white);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .empty-state {
