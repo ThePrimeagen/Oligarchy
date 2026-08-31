@@ -1,5 +1,5 @@
 {
-  "id": "36c1075f-5097-449c-aa49-76f2d17a5816",
+  "id": "45713cba-e1c2-4b97-8b67-aedf2810fa67",
   "prevId": "284f210d-02b8-4d5a-9745-6f570f26af63",
   "version": "7",
   "dialect": "postgresql",
@@ -702,7 +702,8 @@
         "running",
         "passed",
         "failed",
-        "aborted"
+        "aborted",
+        "timed_out"
       ]
     }
   },

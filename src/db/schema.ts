@@ -4,7 +4,7 @@ import { bigint, customType, index, integer, jsonb, pgEnum, pgTable, text, times
 const bytea = customType<{ data: Buffer }>({ dataType: () => "bytea" });
 
 export const sessionStatus = pgEnum("session_status", ["downloading", "running", "succeeded", "failed", "aborted", "timed_out"]);
-export const testSuiteStatus = pgEnum("test_suite_status", ["running", "passed", "failed", "aborted"]);
+export const testSuiteStatus = pgEnum("test_suite_status", ["running", "passed", "failed", "aborted", "timed_out"]);
 export const testResultState = pgEnum("test_result_state", ["passed", "failed"]);
 // Declared in ascending severity: Postgres orders enums by declaration, so
 // "WHERE level >= 'error'" reads the scary lines.
@@ -99,8 +99,9 @@ export const testDefinitions = pgTable(
 );
 
 // One execution of a named set of definitions. The orchestrator owns the row: it
-// opens the suite and declares the verdict once the results are in. Counts are not
-// stored — planned and reported are both readable off the test_results rows.
+// opens the suite and declares the verdict once the results are in — or timed_out
+// when reports stop coming, its tests left visibly unreported (state null). Counts
+// are not stored — planned and reported are both readable off the test_results rows.
 export const testSuites = pgTable("test_suites", {
   id: uuid("id").primaryKey(),
   name: text("name").notNull(),
