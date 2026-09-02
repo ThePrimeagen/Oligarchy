@@ -6,10 +6,14 @@ export function initSentry(): void {
     dsn: SENTRY_DSN,
     tracesSampleRate: 1,
     traceLifecycle: "stream",
+    integrations: [
+      Sentry.httpIntegration({ spans: false }),
+      Sentry.nativeNodeFetchIntegration({ spans: false }),
+    ],
   });
 }
 
-export type QemuSpan = ReturnType<typeof Sentry.startInactiveSpan>;
+export type QemuSpan = Sentry.Span;
 
 export function startQemuSpan(sessionId: string, agentId: string): QemuSpan {
   return Sentry.startInactiveSpan({
@@ -30,7 +34,7 @@ export function finishQemuSpan(span: QemuSpan, status: SessionEndStatus): void {
   } else if (status === "timed_out") {
     span.setStatus({ code: 2, message: "deadline_exceeded" });
   } else if (status === "aborted") {
-    span.setStatus({ code: 2, message: "cancelled" });
+    span.setStatus({ code: 2, message: "aborted" });
   } else {
     span.setStatus({ code: 2, message: "internal_error" });
   }

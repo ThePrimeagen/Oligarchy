@@ -34,7 +34,7 @@ type LiveSession = {
   lastCommandAt: number;
   span: QemuSpan;
   intent?: QemuSpan;
-  actions: Set<Promise<void>>;
+  actionSpans: Set<QemuSpan>;
 };
 
 function finishOpenIntent(live: LiveSession, status: "completed" | "cancelled"): void {
@@ -49,6 +49,26 @@ const sessions = new Map<string, LiveSession>();
 const openSessions = new Set<LiveSession>();
 const cpuSampler = startCpuSampler();
 
+function finishLiveActionSpan(
+  live: LiveSession,
+  span: QemuSpan,
+  state: QemuExchangeOutcome["state"],
+): void {
+  if (!live.actionSpans.delete(span)) {
+    return;
+  }
+  finishQemuActionSpan(span, state);
+}
+
+function finishLiveSession(live: LiveSession, status: SessionEndStatus): void {
+  openSessions.delete(live);
+  for (const span of live.actionSpans) {
+    finishLiveActionSpan(live, span, "failed");
+  }
+  finishOpenIntent(live, "cancelled");
+  finishQemuSpan(live.span, status);
+}
+
 // Drizzle buries the reason (ECONNREFUSED etc.) in the cause; its own message is the failed SQL.
 function errorDetail(err: unknown): string {
   const e = err as Error;
@@ -57,35 +77,24 @@ function errorDetail(err: unknown): string {
 
 function recorder(live: LiveSession): QemuExchangeRecorder {
   return async (command) => {
-    let finishTracking!: () => void;
-    const active = new Promise<void>((resolve) => {
-      finishTracking = resolve;
-    });
-    live.actions.add(active);
     const sessionId = live.qemu.id;
     const agentId = live.agent;
     const span = startQemuActionSpan(live.intent ?? live.span, sessionId, agentId, command.execute);
+    live.actionSpans.add(span);
     let id: number;
     try {
       id = await startAction(db, { sessionId, agentId, request: command });
     } catch (err) {
-      finishQemuActionSpan(span, "failed");
-      live.actions.delete(active);
-      finishTracking();
+      finishLiveActionSpan(live, span, "failed");
       throw err;
     }
     return async (outcome) => {
-      let state = outcome.state;
+      finishLiveActionSpan(live, span, outcome.state);
       try {
         await finishAction(db, id, outcome);
       } catch (err) {
-        state = "failed";
         log(db, { level: "error", text: `db: closing action ${id} failed: ${errorDetail(err)}`, sessionId, agentId }, { cause: err });
         throw err;
-      } finally {
-        finishQemuActionSpan(span, state);
-        live.actions.delete(active);
-        finishTracking();
       }
     };
   };
@@ -217,7 +226,6 @@ async function launchQemu(
     await sessionRunning(db, qemu.id);
   } catch (err) {
     await stop(qemu).catch(() => {});
-    await Promise.all(live.actions);
     await endSession(db, qemu.id, "failed", (err as Error).message).catch((e: unknown) => {
       log(db, { level: "error", text: `db: recording a failed start failed too: ${(e as Error).message}`, sessionId: qemu.id, agentId: cfg.agent }, { cause: e });
     });
@@ -230,15 +238,12 @@ function startSession(cfg: typeof StartBody.Type, started: number, display: Qemu
     const isUrl = cfg.iso.startsWith("http://") || cfg.iso.startsWith("https://");
     const qemu = createQemu({ display, automation });
     const span = startQemuSpan(qemu.id, cfg.agent);
-    const actions = new Set<Promise<void>>();
-    const live = { qemu, agent: cfg.agent, lastCommandAt: Date.now(), span, actions };
+    const live = { qemu, agent: cfg.agent, lastCommandAt: Date.now(), span, actionSpans: new Set<QemuSpan>() };
     openSessions.add(live);
     yield* Effect.tryPromise({
       try: () => insertSession(db, qemu.id, { iso: cfg.iso, disk: cfg.disk }, isUrl ? "downloading" : "running"),
       catch: (cause) => {
-        if (openSessions.delete(live)) {
-          finishQemuSpan(span, "failed");
-        }
+        finishLiveSession(live, "failed");
         return internal(cause, { sessionId: qemu.id, agentId: cfg.agent });
       },
     });
@@ -250,9 +255,7 @@ function startSession(cfg: typeof StartBody.Type, started: number, display: Qemu
     yield* Effect.tryPromise({
       try: () => launchQemu(live, cfg),
       catch: (err) => {
-        if (openSessions.delete(live)) {
-          finishQemuSpan(span, "failed");
-        }
+        finishLiveSession(live, "failed");
         return startFailed(err, { sessionId: qemu.id, agentId: cfg.agent });
       },
     });
@@ -287,27 +290,21 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
       let opened: number | undefined;
       let outcome: QemuExchangeOutcome | undefined;
       let actionSpan: QemuSpan | undefined;
-      let activeAction: Promise<void> | undefined;
-      let finishTracking: (() => void) | undefined;
       const png = Effect.gen(function* () {
         yield* Effect.tryPromise({
           try: () =>
             screendump(qemu, path, "png", async (command) => {
-              activeAction = new Promise<void>((resolve) => {
-                finishTracking = resolve;
-              });
-              live.actions.add(activeAction);
               actionSpan = startQemuActionSpan(live.intent ?? live.span, qemu.id, agent, command.execute);
+              live.actionSpans.add(actionSpan);
               try {
                 opened = await startAction(db, { sessionId: qemu.id, agentId: agent, request: command });
               } catch (err) {
-                finishQemuActionSpan(actionSpan, "failed");
-                live.actions.delete(activeAction);
-                finishTracking!();
+                finishLiveActionSpan(live, actionSpan, "failed");
                 throw err;
               }
               return async (result) => {
                 outcome = result;
+                finishLiveActionSpan(live, actionSpan!, result.state);
               };
             }),
           catch: (err) => exchangeFailed(err, { sessionId: qemu.id, agentId: agent }),
@@ -320,9 +317,6 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
                 await finishAction(db, opened, outcome).catch((e: unknown) => {
                   log(db, { level: "error", text: `db: recording a failed screendump failed too: ${(e as Error).message}`, sessionId: qemu.id, agentId: agent }, { cause: e });
                 });
-                finishQemuActionSpan(actionSpan!, "failed");
-                live.actions.delete(activeAction!);
-                finishTracking!();
               }
             })
           ),
@@ -332,15 +326,9 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
             const data = await readFile(path);
             // screendump resolved, so the recorder ran: opened and outcome are set.
             await finishAction(db, opened!, outcome!, data);
-            finishQemuActionSpan(actionSpan!, outcome!.state);
-            live.actions.delete(activeAction!);
-            finishTracking!();
             return data;
           },
           catch: (cause) => {
-            finishQemuActionSpan(actionSpan!, "failed");
-            live.actions.delete(activeAction!);
-            finishTracking!();
             return internal(cause, { sessionId: qemu.id, agentId: agent });
           },
         });
@@ -371,37 +359,20 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
       const finalStatus = status ?? "aborted";
       sessions.delete(qemu.id);
       yield* Effect.tryPromise({
-        try: async () => {
-          try {
-            await stop(qemu);
-          } catch (cause) {
-            await Promise.all(live.actions);
-            throw cause;
-          }
-          await Promise.all(live.actions);
-        },
+        try: () => stop(qemu),
         catch: (cause) => {
-          if (openSessions.delete(live)) {
-            finishOpenIntent(live, "cancelled");
-            finishQemuSpan(live.span, "failed");
-          }
+          finishLiveSession(live, "failed");
           return internal(cause, { sessionId: qemu.id, agentId: agent });
         },
       });
       yield* Effect.tryPromise({
         try: () => endSession(db, qemu.id, finalStatus, reason ?? null),
         catch: (cause) => {
-          if (openSessions.delete(live)) {
-            finishOpenIntent(live, "cancelled");
-            finishQemuSpan(live.span, "failed");
-          }
+          finishLiveSession(live, finalStatus);
           return internal(cause, { sessionId: qemu.id, agentId: agent });
         },
       });
-      if (openSessions.delete(live)) {
-        finishOpenIntent(live, "cancelled");
-        finishQemuSpan(live.span, finalStatus);
-      }
+      finishLiveSession(live, finalStatus);
       log(db, {
         text: `session ${qemu.id}: stopped; ${finalStatus}${reason === undefined ? "" : `; ${reason}`}`,
         sessionId: qemu.id,
@@ -555,22 +526,18 @@ async function stopTimedOutSessions(): Promise<void> {
   }
   const results = await Promise.allSettled(
     timedOut.map(async (live) => {
-      const { qemu, span, actions } = live;
+      const { qemu } = live;
       try {
         await stop(qemu);
       } catch (err) {
         // stop() already destroyed the socket and signaled QEMU, so still close the record.
         log(db, { level: "error", text: `session ${qemu.id}: timeout cleanup failed: ${errorDetail(err)}`, sessionId: qemu.id }, { cause: err });
       }
-      await Promise.all(actions);
       try {
         await endSession(db, qemu.id, "timed_out", SESSION_TIMEOUT_REASON);
         log(db, { text: `session ${qemu.id}: timed out; ${SESSION_TIMEOUT_REASON}`, sessionId: qemu.id });
       } finally {
-        if (openSessions.delete(live)) {
-          finishOpenIntent(live, "cancelled");
-          finishQemuSpan(span, "timed_out");
-        }
+        finishLiveSession(live, "timed_out");
       }
     }),
   );
@@ -612,24 +579,18 @@ const drainSessions = Layer.effectDiscard(
       log(db, `proxy: shutting down; stopping ${sessions.size} sessions`);
       const results = await Promise.allSettled(
         [...sessions.values()].map(async (live) => {
-          const { qemu, span, actions } = live;
+          const { qemu } = live;
+          let status: SessionEndStatus = "failed";
           try {
             await stop(qemu);
-            await Promise.all(actions);
+            status = "aborted";
             await endSession(db, qemu.id, "aborted", "proxy shutdown");
-            if (openSessions.delete(live)) {
-              finishOpenIntent(live, "cancelled");
-              finishQemuSpan(span, "aborted");
-            }
             log(db, { text: `session ${qemu.id}: stopped; aborted; proxy shutdown`, sessionId: qemu.id });
           } catch (err) {
-            await Promise.all(actions);
-            if (openSessions.delete(live)) {
-              finishOpenIntent(live, "cancelled");
-              finishQemuSpan(span, "failed");
-            }
             log(db, { level: "error", text: `shutdown: session ${qemu.id}: ${(err as Error).message}`, sessionId: qemu.id }, { cause: err });
             throw err;
+          } finally {
+            finishLiveSession(live, status);
           }
         }),
       );
@@ -646,6 +607,7 @@ const main = (display: QemuDisplay, automation: boolean) => Layer.effectDiscard(
   Effect.sync(() => {
     log(db, `oligarchy proxy listening on ${addr}; display ${display}${automation ? "; automation" : ""}`);
     server.on("error", (err) => {
+      // Later accept errors must not exit before the first fatal flush finishes.
       if (serverFailing) {
         return;
       }
@@ -655,15 +617,11 @@ const main = (display: QemuDisplay, automation: boolean) => Layer.effectDiscard(
       const open = [...openSessions];
       openSessions.clear();
       sessions.clear();
-      void Promise.allSettled(
-        open.map(async (live) => {
-          const { qemu, span, actions } = live;
-          await stop(qemu).catch(() => {});
-          await Promise.all(actions);
-          finishOpenIntent(live, "cancelled");
-          finishQemuSpan(span, "failed");
-        }),
-      ).then(flushLogs).then(flushSentry).then(() => process.exit(1));
+      const stops = open.map((live) => stop(live.qemu).catch(() => {}));
+      for (const live of open) {
+        finishLiveSession(live, "failed");
+      }
+      void Promise.all(stops).then(flushLogs).then(flushSentry).then(() => process.exit(1));
     });
   }),
 ).pipe(

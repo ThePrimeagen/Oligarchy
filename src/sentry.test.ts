@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
+import { once } from "node:events";
+import { createServer } from "node:http";
 import { afterEach, describe, it } from "node:test";
 import * as Sentry from "@sentry/node";
 import {
   finishQemuActionSpan,
   finishQemuSpan,
+  initSentry,
   startQemuActionSpan,
   startQemuSpan,
 } from "./sentry.ts";
@@ -51,6 +54,39 @@ function captureSpans(): { spans: () => Promise<StreamedSpan[]> } {
 
 afterEach(async () => {
   await Sentry.close(1_000);
+});
+
+describe("initSentry", () => {
+  it("does not trace proxy HTTP requests or fetches", async () => {
+    initSentry();
+    const client = Sentry.getClient();
+    assert.ok(client !== undefined);
+    Object.assign(client, {
+      _transport: {
+        send: async () => ({}),
+        flush: async () => true,
+      },
+    });
+    let started = 0;
+    client.on("spanStart", () => {
+      started++;
+    });
+    const server = createServer((_request, response) => {
+      response.end("ok");
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    assert.ok(address !== null && typeof address !== "string");
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${address.port}/test`);
+      assert.equal(await response.text(), "ok");
+      assert.equal(started, 0);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
 });
 
 describe("QEMU spans happy path", () => {
@@ -115,5 +151,29 @@ describe("QEMU spans unhappy path", () => {
     assert.equal(spans.length, 1);
     assert.equal(spans[0].status, "error");
     assert.equal(spans[0].attributes.session_status.value, "failed");
+  });
+
+  it("marks an aborted session as an error", async () => {
+    const captured = captureSpans();
+    const session = startQemuSpan("session-4", "agent-4");
+
+    finishQemuSpan(session, "aborted");
+
+    const spans = await captured.spans();
+    assert.equal(spans.length, 1);
+    assert.equal(spans[0].status, "error");
+    assert.equal(spans[0].attributes.session_status.value, "aborted");
+  });
+
+  it("marks a timed-out session as an error", async () => {
+    const captured = captureSpans();
+    const session = startQemuSpan("session-5", "agent-5");
+
+    finishQemuSpan(session, "timed_out");
+
+    const spans = await captured.spans();
+    assert.equal(spans.length, 1);
+    assert.equal(spans[0].status, "error");
+    assert.equal(spans[0].attributes.session_status.value, "timed_out");
   });
 });
