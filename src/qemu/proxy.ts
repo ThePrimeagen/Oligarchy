@@ -363,12 +363,14 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
       const qemu = live.qemu;
       const finalStatus = status ?? "aborted";
       sessions.delete(qemu.id);
-      yield* Effect.tryPromise({
-        try: () => stop(qemu),
-        catch: (cause) => {
-          finishLiveSession(live, "failed");
-          return internal(cause, { sessionId: qemu.id, agentId: agent });
-        },
+      // stop() destroys the socket and signals QEMU before it removes the dir, so
+      // a cleanup failure still leaves a dead machine: log it, but close the record.
+      yield* Effect.promise(async () => {
+        try {
+          await stop(qemu);
+        } catch (err) {
+          log(db, { level: "error", text: `session ${qemu.id}: stop cleanup failed: ${errorDetail(err)}`, sessionId: qemu.id, agentId: agent }, { cause: err });
+        }
       });
       yield* Effect.tryPromise({
         try: () => endSession(db, qemu.id, finalStatus, reason ?? null),
@@ -622,11 +624,22 @@ const main = (display: QemuDisplay, automation: boolean) => Layer.effectDiscard(
       const open = [...openSessions];
       openSessions.clear();
       sessions.clear();
-      const stops = open.map((live) => stop(live.qemu).catch(() => {}));
-      for (const live of open) {
-        finishLiveSession(live, "failed");
-      }
-      void Promise.all(stops).then(flushLogs).then(flushSentry).then(() => process.exit(1));
+      // The acceptor is gone, not the database: still close each open session's row
+      // so a proxy crash does not leave sessions stuck 'running' forever.
+      const cleanup = open.map(async (live) => {
+        try {
+          await stop(live.qemu);
+        } catch {
+          // already going down; the row close below is what matters
+        }
+        try {
+          await endSession(db, live.qemu.id, "aborted", `proxy error: ${err.message}`);
+        } catch (e) {
+          log(db, { level: "error", text: `shutdown: session ${live.qemu.id}: ${errorDetail(e)}`, sessionId: live.qemu.id }, { cause: e });
+        }
+        finishLiveSession(live, "aborted");
+      });
+      void Promise.allSettled(cleanup).then(flushLogs).then(flushSentry).then(() => process.exit(1));
     });
   }),
 ).pipe(
