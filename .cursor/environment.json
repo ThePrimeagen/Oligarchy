@@ -1,0 +1,11 @@
+{
+  "name": "oligarchy",
+  "install": "bash .cursor/install.sh",
+  "start": "bash .cursor/start.sh",
+  "terminals": [
+    {
+      "name": "proxy",
+      "command": "DATABASE_URL=\"postgresql://oligarchy:oligarchy@127.0.0.1:5432/oligarchy\" ./server 42069 --automation"
+    }
+  ]
+}
