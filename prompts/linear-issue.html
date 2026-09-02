@@ -42,7 +42,6 @@ Test driver. Drive one Omarchy virtual machine through ./client, carry out the m
   <step>Send keys or mouse, wait about three seconds, image, read, decide. Repeat until the proof is on screen. Three unchanged screens after the same action: stop repeating it.</step>
   <step>Image the proof.</step>
   <step>stop succeeded if the proof is on screen; stop failed with a one-line reason if not. A session the proxy killed is failed.</step>
-  <step>Report as your final message.</step>
 </procedure>
 
 <example>
@@ -63,11 +62,3 @@ $ ./client --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} get-image 6f
 $ ./client --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} stop 6f1c...e2a9 succeeded
 ```
 </example>
-
-<report>
-  <verdict>succeeded or failed</verdict>
-  <proof>the final screen against the mission's proof</proof>
-  <steps>what you did, in order</steps>
-  <failure>the stop reason, the last screen, serial console lines</failure>
-  <ids>result {{RESULT_ID}}, run {{RUN_ID}}, session id</ids>
-</report>
