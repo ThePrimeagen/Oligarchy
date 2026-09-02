@@ -8,6 +8,7 @@ import { flushLogs, log } from "./db/log.ts";
 import { testDefinitions, testResults, testRuns } from "./db/schema.ts";
 
 const LINEAR_API_URL = "https://api.linear.app/graphql";
+const SUB_AGENT = "Grok 4.6 high fast (cursor-grok-4.6-high-fast)";
 
 const HttpsUrl = Schema.String.check(
   Schema.makeFilter(
@@ -77,6 +78,7 @@ export function linearTicketDescription(experiment: Experiment, test: Experiment
     TEST_INSTRUCTION: test.instruction,
     TEST_PROOF: test.proof,
     CLIENT_MD: readFileSync(new URL("../client.md", import.meta.url), "utf8").trimEnd(),
+    SUB_AGENT,
   };
   return template.replace(/\{\{([A-Z_]+)\}\}/g, (_, name: string) => {
     const value = values[name];
