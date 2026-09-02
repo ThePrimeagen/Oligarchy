@@ -50,6 +50,7 @@ export type Qemu = {
   readonly options: QemuOptions;
   readonly pending: Map<number | "greeting", Pending>;
   nextId: number;
+  closed: boolean;
   proc?: ChildProcess;
   socket?: Socket;
 };
@@ -66,6 +67,7 @@ export function createQemu(options: QemuOptions = {}): Qemu {
     options,
     pending: new Map(),
     nextId: 0,
+    closed: false,
   };
 }
 
@@ -93,6 +95,9 @@ export async function start(
   options: QemuStartOptions,
   record?: QemuExchangeRecorder,
 ): Promise<QemuStartResult> {
+  if (qemu.closed) {
+    throw new Error("qemu: closed");
+  }
   if (qemu.socket !== undefined) {
     throw new Error("qemu: already started");
   }
@@ -128,6 +133,10 @@ export async function start(
       server.once("error", reject);
       server.once("connection", resolve);
       server.listen(qemu.sockPath, () => {
+        if (qemu.closed) {
+          reject(new Error("qemu: closed"));
+          return;
+        }
         const proc = spawn(QEMU_BIN, args, { stdio: "ignore" });
         qemu.proc = proc;
         proc.once("error", (err) => reject(new Error(`qemu: ${err.message}`)));
@@ -199,6 +208,7 @@ export async function start(
 }
 
 export async function stop(qemu: Qemu): Promise<void> {
+  qemu.closed = true;
   teardown(qemu, new Error("qemu: closed"));
   await rm(qemu.dir, { recursive: true, force: true });
 }
@@ -323,6 +333,10 @@ async function execute(qemu: Qemu, name: string, args: unknown, record?: QemuExc
   const close = record === undefined ? undefined : await record(command);
   let response: QemuSuccessResponse;
   try {
+    // stop() can close the captured socket while the recorder is opening the action.
+    if (qemu.socket !== socket) {
+      throw new Error("qemu: closed");
+    }
     response = (await new Promise<unknown>((resolve, reject) => {
       qemu.pending.set(id, { resolve, reject });
       socket.write(`${JSON.stringify(command)}\n`);

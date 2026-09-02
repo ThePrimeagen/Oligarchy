@@ -8,7 +8,7 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstab
 import { NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node";
 import { flushLogs, log } from "../db/log.ts";
 import { connectDatabase, endSession, finishAction, insertSession, registerAgent, sessionRunning, startAction } from "../db/ops.ts";
-import { flushSentry, initSentry } from "../sentry.ts";
+import { finishQemuActionSpan, finishQemuSpan, flushSentry, initSentry, startQemuActionSpan, startQemuSpan, type QemuSpan } from "../sentry.ts";
 import { QEMU_DISPLAYS, createDisk, createQemu, missingHostRequirements, screendump, sendKey, sendMouse, start, stop, type Qemu, type QemuDisplay } from "./client.ts";
 import { getIso } from "./iso.ts";
 import { parseKeys } from "./keys.ts";
@@ -29,9 +29,12 @@ type LiveSession = {
   qemu: Qemu;
   agent: string;
   lastCommandAt: number;
+  span: QemuSpan;
+  actions: Set<Promise<void>>;
 };
 
 const sessions = new Map<string, LiveSession>();
+const openSessions = new Set<LiveSession>();
 const cpuSampler = startCpuSampler();
 
 // Drizzle buries the reason (ECONNREFUSED etc.) in the cause; its own message is the failed SQL.
@@ -40,15 +43,40 @@ function errorDetail(err: unknown): string {
   return e.cause instanceof Error ? e.cause.message : e.message;
 }
 
-function recorder(sessionId: string, agentId: string): QemuExchangeRecorder {
+function recorder(
+  sessionId: string,
+  agentId: string,
+  parentSpan: QemuSpan,
+  actions: Set<Promise<void>>,
+): QemuExchangeRecorder {
   return async (command) => {
-    const id = await startAction(db, { sessionId, agentId, request: command });
+    let finishTracking!: () => void;
+    const active = new Promise<void>((resolve) => {
+      finishTracking = resolve;
+    });
+    actions.add(active);
+    const span = startQemuActionSpan(parentSpan, sessionId, agentId, command.execute);
+    let id: number;
+    try {
+      id = await startAction(db, { sessionId, agentId, request: command });
+    } catch (err) {
+      finishQemuActionSpan(span, "failed");
+      actions.delete(active);
+      finishTracking();
+      throw err;
+    }
     return async (outcome) => {
+      let state = outcome.state;
       try {
         await finishAction(db, id, outcome);
       } catch (err) {
+        state = "failed";
         log(db, { level: "error", text: `db: closing action ${id} failed: ${errorDetail(err)}`, sessionId, agentId }, { cause: err });
         throw err;
+      } finally {
+        finishQemuActionSpan(span, state);
+        actions.delete(active);
+        finishTracking();
       }
     };
   };
@@ -78,7 +106,7 @@ function internal(cause: unknown, who: { sessionId: string; agentId?: string }):
   return { _tag: "Internal", cause, ...who };
 }
 
-function session(id: string, agentId: string): Effect.Effect<Qemu, ApiError> {
+function session(id: string, agentId: string): Effect.Effect<LiveSession, ApiError> {
   if (id === "") {
     return Effect.fail(badRequest("session id is required", { agentId }));
   }
@@ -96,7 +124,7 @@ function session(id: string, agentId: string): Effect.Effect<Qemu, ApiError> {
   }
   // A valid request counts as activity even when the exchange it starts later fails.
   live.lastCommandAt = Date.now();
-  return Effect.succeed(live.qemu);
+  return Effect.succeed(live);
 }
 
 const StartBody = Schema.Struct({
@@ -150,7 +178,12 @@ function jsonBody<S extends Schema.Constraint>(
 
 type RouteHandler = Effect.Effect<HttpServerResponse.HttpServerResponse, ApiError, HttpRouter.Provided>;
 
-async function launchQemu(qemu: Qemu, cfg: typeof StartBody.Type): Promise<void> {
+async function launchQemu(
+  qemu: Qemu,
+  cfg: typeof StartBody.Type,
+  span: QemuSpan,
+  actions: Set<Promise<void>>,
+): Promise<void> {
   try {
     await registerAgent(db, cfg.agent, qemu.id);
     const iso = await getIso(db, cfg.iso, { sessionId: qemu.id, agentId: cfg.agent });
@@ -160,10 +193,11 @@ async function launchQemu(qemu: Qemu, cfg: typeof StartBody.Type): Promise<void>
       // start() expects the session dir; with a caller-provided disk, createDisk never made it.
       await mkdir(qemu.dir, { recursive: true, mode: 0o700 });
     }
-    await start(qemu, { iso, disk: cfg.disk }, recorder(qemu.id, cfg.agent));
+    await start(qemu, { iso, disk: cfg.disk }, recorder(qemu.id, cfg.agent, span, actions));
     await sessionRunning(db, qemu.id);
   } catch (err) {
     await stop(qemu).catch(() => {});
+    await Promise.all(actions);
     await endSession(db, qemu.id, "failed", (err as Error).message).catch((e: unknown) => {
       log(db, { level: "error", text: `db: recording a failed start failed too: ${(e as Error).message}`, sessionId: qemu.id, agentId: cfg.agent }, { cause: e });
     });
@@ -175,9 +209,18 @@ function startSession(cfg: typeof StartBody.Type, started: number, display: Qemu
   return Effect.gen(function* () {
     const isUrl = cfg.iso.startsWith("http://") || cfg.iso.startsWith("https://");
     const qemu = createQemu({ display, automation });
+    const span = startQemuSpan(qemu.id, cfg.agent);
+    const actions = new Set<Promise<void>>();
+    const live = { qemu, agent: cfg.agent, lastCommandAt: Date.now(), span, actions };
+    openSessions.add(live);
     yield* Effect.tryPromise({
       try: () => insertSession(db, qemu.id, { iso: cfg.iso, disk: cfg.disk }, isUrl ? "downloading" : "running"),
-      catch: (cause) => internal(cause, { sessionId: qemu.id, agentId: cfg.agent }),
+      catch: (cause) => {
+        if (openSessions.delete(live)) {
+          finishQemuSpan(span, "failed");
+        }
+        return internal(cause, { sessionId: qemu.id, agentId: cfg.agent });
+      },
     });
     log(db, {
       text: `session ${qemu.id}: starting; iso ${cfg.iso}${cfg.disk === undefined ? "" : `, disk ${cfg.disk}`}`,
@@ -185,10 +228,16 @@ function startSession(cfg: typeof StartBody.Type, started: number, display: Qemu
       agentId: cfg.agent,
     });
     yield* Effect.tryPromise({
-      try: () => launchQemu(qemu, cfg),
-      catch: (err) => startFailed(err, { sessionId: qemu.id, agentId: cfg.agent }),
+      try: () => launchQemu(qemu, cfg, span, actions),
+      catch: (err) => {
+        if (openSessions.delete(live)) {
+          finishQemuSpan(span, "failed");
+        }
+        return startFailed(err, { sessionId: qemu.id, agentId: cfg.agent });
+      },
     });
-    sessions.set(qemu.id, { qemu, agent: cfg.agent, lastCommandAt: Date.now() });
+    live.lastCommandAt = Date.now();
+    sessions.set(qemu.id, live);
     log(db, { text: `session ${qemu.id}: running; started in ${Date.now() - started}ms`, sessionId: qemu.id, agentId: cfg.agent });
     return qemu.id;
   });
@@ -209,18 +258,34 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
     yield* router.add("GET", "/image", Effect.gen(function* () {
       const started = Date.now();
       const params = yield* Effect.mapError(HttpRouter.schemaParams(ImageParams), (err) => badRequest(err.message));
-      const qemu = yield* session(params.id, params.agent);
+      const live = yield* session(params.id, params.agent);
+      const qemu = live.qemu;
       const agent = params.agent;
       const path = join(qemu.dir, `image-${process.hrtime.bigint()}.png`);
       // The images row must ride the same transaction that closes the action (they are
       // 1:1), so the recorder only stashes and the route closes.
       let opened: number | undefined;
       let outcome: QemuExchangeOutcome | undefined;
+      let actionSpan: QemuSpan | undefined;
+      let activeAction: Promise<void> | undefined;
+      let finishTracking: (() => void) | undefined;
       const png = Effect.gen(function* () {
         yield* Effect.tryPromise({
           try: () =>
             screendump(qemu, path, "png", async (command) => {
-              opened = await startAction(db, { sessionId: qemu.id, agentId: agent, request: command });
+              activeAction = new Promise<void>((resolve) => {
+                finishTracking = resolve;
+              });
+              live.actions.add(activeAction);
+              actionSpan = startQemuActionSpan(live.span, qemu.id, agent, command.execute);
+              try {
+                opened = await startAction(db, { sessionId: qemu.id, agentId: agent, request: command });
+              } catch (err) {
+                finishQemuActionSpan(actionSpan, "failed");
+                live.actions.delete(activeAction);
+                finishTracking!();
+                throw err;
+              }
               return async (result) => {
                 outcome = result;
               };
@@ -235,6 +300,9 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
                 await finishAction(db, opened, outcome).catch((e: unknown) => {
                   log(db, { level: "error", text: `db: recording a failed screendump failed too: ${(e as Error).message}`, sessionId: qemu.id, agentId: agent }, { cause: e });
                 });
+                finishQemuActionSpan(actionSpan!, "failed");
+                live.actions.delete(activeAction!);
+                finishTracking!();
               }
             })
           ),
@@ -244,9 +312,17 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
             const data = await readFile(path);
             // screendump resolved, so the recorder ran: opened and outcome are set.
             await finishAction(db, opened!, outcome!, data);
+            finishQemuActionSpan(actionSpan!, outcome!.state);
+            live.actions.delete(activeAction!);
+            finishTracking!();
             return data;
           },
-          catch: (cause) => internal(cause, { sessionId: qemu.id, agentId: agent }),
+          catch: (cause) => {
+            finishQemuActionSpan(actionSpan!, "failed");
+            live.actions.delete(activeAction!);
+            finishTracking!();
+            return internal(cause, { sessionId: qemu.id, agentId: agent });
+          },
         });
         log(db, { text: `session ${qemu.id}: image; ${data.length} bytes in ${Date.now() - started}ms`, sessionId: qemu.id, agentId: agent });
         return HttpServerResponse.uint8Array(data, { contentType: "image/png" });
@@ -257,7 +333,7 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
     yield* router.add("GET", "/serial", Effect.gen(function* () {
       const started = Date.now();
       const params = yield* Effect.mapError(HttpRouter.schemaParams(ImageParams), (err) => badRequest(err.message));
-      const qemu = yield* session(params.id, params.agent);
+      const { qemu } = yield* session(params.id, params.agent);
       const data = yield* Effect.tryPromise({
         try: () => readFile(qemu.serialPath),
         catch: (cause) => internal(cause, { sessionId: qemu.id, agentId: params.agent }),
@@ -270,15 +346,41 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
 
     yield* router.add("POST", "/stop", Effect.gen(function* () {
       const { id, agent, status, reason } = yield* jsonBody(StopBody);
-      const qemu = yield* session(id, agent);
+      const live = yield* session(id, agent);
+      const qemu = live.qemu;
+      const finalStatus = status ?? "aborted";
       sessions.delete(qemu.id);
-      yield* Effect.tryPromise({ try: () => stop(qemu), catch: (cause) => internal(cause, { sessionId: qemu.id, agentId: agent }) });
       yield* Effect.tryPromise({
-        try: () => endSession(db, qemu.id, status ?? "aborted", reason ?? null),
-        catch: (cause) => internal(cause, { sessionId: qemu.id, agentId: agent }),
+        try: async () => {
+          try {
+            await stop(qemu);
+          } catch (cause) {
+            await Promise.all(live.actions);
+            throw cause;
+          }
+          await Promise.all(live.actions);
+        },
+        catch: (cause) => {
+          if (openSessions.delete(live)) {
+            finishQemuSpan(live.span, "failed");
+          }
+          return internal(cause, { sessionId: qemu.id, agentId: agent });
+        },
       });
+      yield* Effect.tryPromise({
+        try: () => endSession(db, qemu.id, finalStatus, reason ?? null),
+        catch: (cause) => {
+          if (openSessions.delete(live)) {
+            finishQemuSpan(live.span, "failed");
+          }
+          return internal(cause, { sessionId: qemu.id, agentId: agent });
+        },
+      });
+      if (openSessions.delete(live)) {
+        finishQemuSpan(live.span, finalStatus);
+      }
       log(db, {
-        text: `session ${qemu.id}: stopped; ${status ?? "aborted"}${reason === undefined ? "" : `; ${reason}`}`,
+        text: `session ${qemu.id}: stopped; ${finalStatus}${reason === undefined ? "" : `; ${reason}`}`,
         sessionId: qemu.id,
         agentId: agent,
       });
@@ -288,12 +390,13 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
     yield* router.add("POST", "/send-keys", Effect.gen(function* () {
       const started = Date.now();
       const { id, keys, encoding, agent } = yield* jsonBody(SendKeysBody);
-      const qemu = yield* session(id, agent);
+      const live = yield* session(id, agent);
+      const qemu = live.qemu;
       const chords = yield* Effect.try({
         try: () => parseKeys(keys, encoding),
         catch: (err) => badRequest((err as Error).message, { sessionId: qemu.id, agentId: agent }),
       });
-      const record = recorder(qemu.id, agent);
+      const record = recorder(qemu.id, agent, live.span, live.actions);
       yield* Effect.tryPromise({
         try: async () => {
           for (const chord of chords) {
@@ -309,7 +412,8 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
     yield* router.add("POST", "/send-mouse", Effect.gen(function* () {
       const started = Date.now();
       const { id, x, y, button, clicks, agent } = yield* jsonBody(SendMouseBody);
-      const qemu = yield* session(id, agent);
+      const live = yield* session(id, agent);
+      const qemu = live.qemu;
       if (!(x >= 0 && x <= 1 && y >= 0 && y <= 1)) {
         return yield* Effect.fail(badRequest("mouse: x and y must be in 0..1", { sessionId: qemu.id, agentId: agent }));
       }
@@ -317,7 +421,7 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
         return yield* Effect.fail(badRequest("mouse: clicks must be a positive integer", { sessionId: qemu.id, agentId: agent }));
       }
       yield* Effect.tryPromise({
-        try: () => sendMouse(qemu, x, y, button, clicks, recorder(qemu.id, agent)),
+        try: () => sendMouse(qemu, x, y, button, clicks, recorder(qemu.id, agent, live.span, live.actions)),
         catch: (err) => exchangeFailed(err, { sessionId: qemu.id, agentId: agent }),
       });
       log(db, {
@@ -405,15 +509,23 @@ async function stopTimedOutSessions(): Promise<void> {
     sessions.delete(live.qemu.id);
   }
   const results = await Promise.allSettled(
-    timedOut.map(async ({ qemu }) => {
+    timedOut.map(async (live) => {
+      const { qemu, span, actions } = live;
       try {
         await stop(qemu);
       } catch (err) {
         // stop() already destroyed the socket and signaled QEMU, so still close the record.
         log(db, { level: "error", text: `session ${qemu.id}: timeout cleanup failed: ${errorDetail(err)}`, sessionId: qemu.id }, { cause: err });
       }
-      await endSession(db, qemu.id, "timed_out", SESSION_TIMEOUT_REASON);
-      log(db, { text: `session ${qemu.id}: timed out; ${SESSION_TIMEOUT_REASON}`, sessionId: qemu.id });
+      await Promise.all(actions);
+      try {
+        await endSession(db, qemu.id, "timed_out", SESSION_TIMEOUT_REASON);
+        log(db, { text: `session ${qemu.id}: timed out; ${SESSION_TIMEOUT_REASON}`, sessionId: qemu.id });
+      } finally {
+        if (openSessions.delete(live)) {
+          finishQemuSpan(span, "timed_out");
+        }
+      }
     }),
   );
   for (let i = 0; i < results.length; i++) {
@@ -453,12 +565,21 @@ const drainSessions = Layer.effectDiscard(
       await timeoutCleanup;
       log(db, `proxy: shutting down; stopping ${sessions.size} sessions`);
       const results = await Promise.allSettled(
-        [...sessions.values()].map(async ({ qemu }) => {
+        [...sessions.values()].map(async (live) => {
+          const { qemu, span, actions } = live;
           try {
             await stop(qemu);
+            await Promise.all(actions);
             await endSession(db, qemu.id, "aborted", "proxy shutdown");
+            if (openSessions.delete(live)) {
+              finishQemuSpan(span, "aborted");
+            }
             log(db, { text: `session ${qemu.id}: stopped; aborted; proxy shutdown`, sessionId: qemu.id });
           } catch (err) {
+            await Promise.all(actions);
+            if (openSessions.delete(live)) {
+              finishQemuSpan(span, "failed");
+            }
             log(db, { level: "error", text: `shutdown: session ${qemu.id}: ${(err as Error).message}`, sessionId: qemu.id }, { cause: err });
             throw err;
           }
@@ -472,12 +593,27 @@ const drainSessions = Layer.effectDiscard(
 // The platform drops its error listener once the server is up; a later server error
 // (the acceptor breaking) still needs the fatal line, the flush, and exit 1.
 const server = createServer();
+let serverFailing = false;
 const main = (display: QemuDisplay, automation: boolean) => Layer.effectDiscard(
   Effect.sync(() => {
     log(db, `oligarchy proxy listening on ${addr}; display ${display}${automation ? "; automation" : ""}`);
     server.on("error", (err) => {
+      if (serverFailing) {
+        return;
+      }
+      serverFailing = true;
       log(db, { level: "fatal", text: `proxy: ${err.message}` }, { cause: err });
-      void flushLogs().then(flushSentry).then(() => process.exit(1));
+      clearInterval(sessionTimeoutTimer);
+      const open = [...openSessions];
+      openSessions.clear();
+      sessions.clear();
+      void Promise.allSettled(
+        open.map(async ({ qemu, span, actions }) => {
+          await stop(qemu).catch(() => {});
+          await Promise.all(actions);
+          finishQemuSpan(span, "failed");
+        }),
+      ).then(flushLogs).then(flushSentry).then(() => process.exit(1));
     });
   }),
 ).pipe(
