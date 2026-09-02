@@ -2,6 +2,10 @@
 
 Check the field guide: [field-guide/index.md](field-guide/index.md).
 
+## Branches
+
+- All development happens on `master`. Do not create feature branches, `cursor/*` branches, or pull requests. Work on `master`, commit to `master`, push `master`.
+
 ## Vocabulary
 
 - When the user says "Kemu" (a speech-to-text rendering), they always mean QEMU. Read any such spelling as QEMU.
