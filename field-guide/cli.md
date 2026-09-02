@@ -18,7 +18,7 @@ The server address comes from `OLIGARCHY_ADDR`, default `127.0.0.1:42069`.
 
 ## experiment new
 
-Creates one pending test run (ISO URL and server URL stored on the run) and one pending result for every stored test definition, then opens one Linear issue per definition. Each issue carries that definition's details plus the result UUID, the run UUID, the ISO URL, and the server URL, and is labeled `agent test` plus the required `--version` value. Missing labels are created on the Linear team. The command reads `DATABASE_URL` and `LINEAR_API_TOKEN` from `.env`, uses the first Linear team available to that API token, writes the creation line through the database logger, and prints the run and Linear issues as JSON.
+Creates one pending test run (ISO URL and server URL stored on the run) and one pending result for every stored test definition, then opens one Linear issue per definition. Each issue carries that definition's details plus the result UUID, the run UUID, the ISO URL, and the server URL, and is labeled `agent test` plus the required `--version` value. Missing labels are created on the Linear team. The command reads `DATABASE_URL` and `LINEAR_API_TOKEN` from the environment (a `.env` fills in missing variables only), uses the first Linear team available to that API token, writes the creation line through the database logger, and prints the run and Linear issues as JSON.
 
 The ISO must be an HTTPS URL. The server may be an HTTP or HTTPS URL. `--version` is required and must be non-empty. Effect accepts both `--flag=<value>` and `--flag <value>`.
 

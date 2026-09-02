@@ -4,22 +4,31 @@ Consult this table of contents first. Read only the section you need.
 
 | Section | Line |
 |---------|-----:|
-| [Important](#important) | 20 |
-| [Invoke](#invoke) | 24 |
-| [start](#start) | 40 |
-| [get-image](#get-image) | 54 |
-| [get-serial](#get-serial) | 65 |
-| [send-keys](#send-keys) | 87 |
-| [send-mouse](#send-mouse) | 99 |
-| [stop](#stop) | 113 |
-| [experiment new](#experiment-new) | 125 |
-| [Keys](#keys) | 135 |
-| [Mouse](#mouse) | 147 |
-| [The loop](#the-loop) | 155 |
+| [Important](#important) | 21 |
+| [Environment](#environment) | 25 |
+| [Invoke](#invoke) | 33 |
+| [start](#start) | 49 |
+| [get-image](#get-image) | 63 |
+| [get-serial](#get-serial) | 74 |
+| [send-keys](#send-keys) | 96 |
+| [send-mouse](#send-mouse) | 108 |
+| [stop](#stop) | 122 |
+| [experiment new](#experiment-new) | 134 |
+| [Keys](#keys) | 144 |
+| [Mouse](#mouse) | 156 |
+| [The loop](#the-loop) | 164 |
 
 ## Important
 
 If you are the client, or an agent driving the client: do not look at code. Only use the client. Never consider the code, never read the code, never have opinions about the code. Run the client and do the task that was given — specified in Linear, or given to you manually.
+
+## Environment
+
+`DATABASE_URL`, `LINEAR_API_TOKEN`, and the Cloudflare credentials are already in this process. Use them. Do not start a local database. Do not write a `.env`.
+
+If `DATABASE_URL` is missing, that is a failure. Stop.
+
+The proxy and `experiment new` read these from the environment. A missing `DATABASE_URL` or `LINEAR_API_TOKEN` exits 1.
 
 ## Invoke
 
@@ -124,7 +133,7 @@ A stop with no status is an abort. `status` is `succeeded`, `failed`, or `aborte
 
 ## experiment new
 
-Creates one pending test run and one Linear issue per stored test definition. Not used while driving a guest.
+Creates one pending test run and one Linear issue per stored test definition. Not used while driving a guest. Reads `DATABASE_URL` and `LINEAR_API_TOKEN` from the environment.
 
 ```bash
 ./client experiment new --iso https://example.com/omarchy.iso --server_url=https://qemu.example.com --version 1.2.3
