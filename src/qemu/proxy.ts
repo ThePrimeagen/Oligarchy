@@ -504,7 +504,7 @@ const proxy = Command.make(
         userMessage: "--automation is exclusive",
       }));
     }
-    const resolved = Option.getOrElse(display, () => "none");
+    const resolved: QemuDisplay = Option.getOrElse(display, () => "none");
     return Effect.gen(function* () {
       const missing = yield* Effect.promise(() => missingHostRequirements(resolved));
       if (missing.length > 0) {
