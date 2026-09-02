@@ -11,6 +11,7 @@ import {
   type TestBasePrompt,
   type TestDefinition,
 } from "./db/query.ts";
+import { clickerPage } from "./clicker.ts";
 import { SENTRY_DSN } from "./sentry-dsn.ts";
 
 const HTMX_URL = "https://cdn.jsdelivr.net/npm/htmx.org@4.0.0";
@@ -274,6 +275,13 @@ const Prompts: FC<PromptsProps> = ({ prompts }) => (
 );
 
 const app = new Hono<{ Bindings: Bindings }>();
+
+app.use(async (context, next) => {
+  if (new URL(context.req.url).hostname === "clicker.oligarchy.trm.sh") {
+    return context.html(clickerPage);
+  }
+  await next();
+});
 
 app.use(
   jsxRenderer(({ children }) => (
