@@ -4,19 +4,20 @@ Consult this table of contents first. Read only the section you need.
 
 | Section | Line |
 |---------|-----:|
-| [Important](#important) | 21 |
-| [Environment](#environment) | 25 |
-| [Invoke](#invoke) | 33 |
-| [start](#start) | 49 |
-| [get-image](#get-image) | 63 |
-| [get-serial](#get-serial) | 74 |
-| [send-keys](#send-keys) | 96 |
-| [send-mouse](#send-mouse) | 108 |
-| [stop](#stop) | 122 |
-| [experiment new](#experiment-new) | 134 |
-| [Keys](#keys) | 144 |
-| [Mouse](#mouse) | 156 |
-| [The loop](#the-loop) | 164 |
+| [Important](#important) | 22 |
+| [Environment](#environment) | 26 |
+| [Invoke](#invoke) | 34 |
+| [start](#start) | 50 |
+| [get-image](#get-image) | 64 |
+| [get-serial](#get-serial) | 75 |
+| [send-keys](#send-keys) | 97 |
+| [send-mouse](#send-mouse) | 109 |
+| [intent](#intent) | 123 |
+| [stop](#stop) | 134 |
+| [experiment new](#experiment-new) | 146 |
+| [Keys](#keys) | 156 |
+| [Mouse](#mouse) | 168 |
+| [The loop](#the-loop) | 176 |
 
 ## Important
 
@@ -119,6 +120,17 @@ Moves the pointer, and optionally clicks or scrolls, at a point on the screensho
 
 `x` and `y` are fractions of the screenshot, `0..1` from the top-left. Omit `button` to move only. `button` is `left`, `middle`, `right`, `wheel-up`, or `wheel-down`. `clicks` defaults to 1 — a double-click is `left 2`. See [Mouse](#mouse).
 
+## intent
+
+Declares what you are about to do on the session, before you do it. Required around every action: start an intent, run the commands that fulfill it, end it. One intent may cover many commands, sleeps, and images. One intent is active at a time: a second start while one is open fails, and so does an end with none open. End the open intent before `stop`.
+
+```bash
+./client --agent-id <agent> intent start --session_id <id> --test_result_id <result> --message "wait for the boot menu"
+./client --agent-id <agent> intent end --session_id <id>
+```
+
+Every value is a flag. `--test_result_id` is the result id from your Linear ticket. Quote `--message` so the shell keeps spaces.
+
 ## stop
 
 Kills the session. `--agent-id` must be the agent that started it.
@@ -162,6 +174,8 @@ Hyprland as Omarchy ships it focuses the window under the pointer. Move onto the
 A greeter or installer button is a left click at that point. A double-click launches. A right-click opens a menu. `wheel-down` scrolls.
 
 ## The loop
+
+Every action runs inside an [intent](#intent): start one that says what you are about to do, do the work, end it.
 
 Send keys or mouse, wait about three seconds, take an image, read it, decide. That is the whole method. Never sleep more than ten seconds between actions. When something genuinely slow is running, keep taking images instead of trusting a long sleep.
 
