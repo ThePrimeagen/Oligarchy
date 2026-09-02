@@ -1,153 +1,206 @@
+#!/usr/bin/env -S node --experimental-strip-types
 import { stat, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { NodeRuntime, NodeServices } from "@effect/platform-node";
+import { Console, Effect, Option, Schema } from "effect";
+import { Argument, CliError, Command, Flag } from "effect/unstable/cli";
+import { experimentCommand } from "../experiment.ts";
 
 const DEFAULT_ADDR = "127.0.0.1:42069";
 const DEFAULT_ISO = "omarchy.iso";
 const DEFAULT_ENCODING = "oligarchy";
 
-async function main(args: string[]): Promise<void> {
-  if (args.length < 3 || args[0] !== "--agent-id" || args[1] === "") {
-    usage();
-    process.exitCode = 2;
-    return;
+const UnitInterval = Schema.Number.check(
+  Schema.isBetween({ minimum: 0, maximum: 1 }, { message: "mouse: x and y must be in 0..1" }),
+);
+
+const client = Command.make("client").pipe(
+  Command.withSharedFlags({
+    agentId: Flag.string("agent-id").pipe(
+      Flag.withSchema(Schema.NonEmptyString),
+      Flag.optional,
+      Flag.withDescription("Calling agent's id"),
+    ),
+  }),
+  Command.withDescription("The client for the oligarchy proxy"),
+);
+
+function requireAgent(agentId: Option.Option<string>): Effect.Effect<string, CliError.UserError> {
+  if (Option.isNone(agentId)) {
+    return Effect.fail(fail(new Error("Missing required flag: --agent-id")));
   }
-  const agent = args[1];
-  try {
-    switch (args[2]) {
-      case "start":
-        await cmdStart(agent, args.slice(3));
-        break;
-      case "get-image":
-        await cmdGetImage(agent, args.slice(3));
-        break;
-      case "send-keys":
-        await cmdSendKeys(agent, args.slice(3));
-        break;
-      case "send-mouse":
-        await cmdSendMouse(agent, args.slice(3));
-        break;
-      default:
-        usage();
-        process.exitCode = 2;
+  return Effect.succeed(agentId.value);
+}
+
+function fail(cause: unknown): CliError.UserError {
+  const e = cause as Error;
+  let text = errorMessage(cause);
+  if (e.stack !== undefined) {
+    text += `\n${e.stack}`;
+  }
+  if (e.cause instanceof Error && e.cause.stack !== undefined && e.cause.stack !== e.stack) {
+    text += `\n${e.cause.stack}`;
+  }
+  return new CliError.UserError({ cause, userMessage: text });
+}
+
+const start = Command.make(
+  "start",
+  {
+    iso: Flag.string("iso").pipe(Flag.withDefault(DEFAULT_ISO)),
+    disk: Flag.string("disk").pipe(Flag.optional),
+  },
+  Effect.fn(function* ({ iso, disk }) {
+    const { agentId } = yield* client;
+    const agent = yield* requireAgent(agentId);
+    let image = iso;
+    if (!image.startsWith("http://") && !image.startsWith("https://")) {
+      image = resolve(image);
+      yield* Effect.tryPromise({
+        try: () => stat(image),
+        catch: (err) => fail(new Error(`iso: ${errorMessage(err)}`)),
+      });
     }
-  } catch (err) {
-    console.error(errorMessage(err));
-    process.exitCode = 1;
-  }
-}
+    const out = JSON.parse(
+      yield* Effect.tryPromise({
+        try: () =>
+          postJSON("/start", {
+            iso: image,
+            // An undefined disk is left out of the JSON, so the server creates one.
+            disk: Option.isNone(disk) ? undefined : resolve(disk.value),
+            agent,
+          }),
+        catch: fail,
+      }),
+    ) as QemuStartResult;
+    yield* Console.log(out.id);
+  }),
+);
 
-function usage(): void {
-  console.error(`oligarchy is the client for the oligarchy proxy
+const getImage = Command.make(
+  "get-image",
+  {
+    output: Flag.string("output").pipe(Flag.withAlias("o"), Flag.optional),
+    id: Argument.string("id"),
+  },
+  Effect.fn(function* ({ id, output }) {
+    const { agentId } = yield* client;
+    const agent = yield* requireAgent(agentId);
+    const res = yield* Effect.tryPromise({
+      try: () => fetch(`http://${addr()}/image?id=${encodeURIComponent(id)}&agent=${encodeURIComponent(agent)}`),
+      catch: fail,
+    });
+    if (res.status !== 200) {
+      const message = yield* Effect.tryPromise({
+        try: () => readAPIError(res),
+        catch: fail,
+      });
+      return yield* Effect.fail(fail(new Error(message)));
+    }
+    const data = Buffer.from(
+      yield* Effect.tryPromise({
+        try: () => res.arrayBuffer(),
+        catch: fail,
+      }),
+    );
+    if (Option.isSome(output)) {
+      yield* Effect.tryPromise({
+        try: () => writeFile(output.value, data, { mode: 0o644 }),
+        catch: fail,
+      });
+      return;
+    }
+    yield* Effect.tryPromise({
+      try: () =>
+        new Promise<void>((done, failWrite) => {
+          process.stdout.write(data, (err) => (err ? failWrite(err) : done()));
+        }),
+      catch: fail,
+    });
+  }),
+);
 
-Usage:
-  oligarchy --agent-id <agent> start [--iso <path>] [--disk <path>]
-  oligarchy --agent-id <agent> get-image <id> [-o file]
-  oligarchy --agent-id <agent> send-keys <id> <keys> [encoding]
-  oligarchy --agent-id <agent> send-mouse <id> <x> <y> [button [clicks]]
-`);
-}
+const sendKeys = Command.make(
+  "send-keys",
+  {
+    id: Argument.string("id"),
+    keys: Argument.string("keys"),
+    encoding: Argument.string("encoding").pipe(Argument.withDefault(DEFAULT_ENCODING)),
+  },
+  Effect.fn(function* ({ id, keys, encoding }) {
+    const { agentId } = yield* client;
+    const agent = yield* requireAgent(agentId);
+    yield* Effect.tryPromise({
+      try: () => postJSON("/send-keys", { id, keys, encoding, agent }),
+      catch: fail,
+    });
+  }),
+);
+
+const sendMouse = Command.make(
+  "send-mouse",
+  {
+    id: Argument.string("id"),
+    x: Argument.float("x").pipe(Argument.withSchema(UnitInterval)),
+    y: Argument.float("y").pipe(Argument.withSchema(UnitInterval)),
+    button: Argument.choice("button", ["left", "middle", "right", "wheel-up", "wheel-down"]).pipe(Argument.optional),
+    clicks: Argument.integer("clicks").pipe(
+      Argument.withSchema(Schema.Number.check(Schema.isGreaterThanOrEqualTo(1))),
+      Argument.optional,
+    ),
+  },
+  Effect.fn(function* ({ id, x, y, button, clicks }) {
+    const { agentId } = yield* client;
+    const agent = yield* requireAgent(agentId);
+    const body: { id: string; x: number; y: number; agent: string; button?: string; clicks?: number } = {
+      id,
+      x,
+      y,
+      agent,
+    };
+    if (Option.isSome(button)) {
+      body.button = button.value;
+    }
+    if (Option.isSome(clicks)) {
+      body.clicks = clicks.value;
+    }
+    yield* Effect.tryPromise({
+      try: () => postJSON("/send-mouse", body),
+      catch: fail,
+    });
+  }),
+);
+
+const stop = Command.make(
+  "stop",
+  {
+    id: Argument.string("id"),
+    status: Argument.choice("status", ["succeeded", "failed", "aborted"]).pipe(Argument.optional),
+    reason: Argument.string("reason").pipe(Argument.optional),
+  },
+  Effect.fn(function* ({ id, status, reason }) {
+    const { agentId } = yield* client;
+    const agent = yield* requireAgent(agentId);
+    const body: { id: string; agent: string; status?: string; reason?: string } = { id, agent };
+    if (Option.isSome(status)) {
+      body.status = status.value;
+    }
+    if (Option.isSome(reason)) {
+      body.reason = reason.value;
+    }
+    yield* Effect.tryPromise({
+      try: () => postJSON("/stop", body),
+      catch: fail,
+    });
+  }),
+);
+
+const app = client.pipe(
+  Command.withSubcommands([experimentCommand, start, getImage, sendKeys, sendMouse, stop]),
+);
 
 function addr(): string {
   return process.env.OLIGARCHY_ADDR || DEFAULT_ADDR;
-}
-
-async function cmdStart(agent: string, args: string[]): Promise<void> {
-  if (args.length % 2 !== 0) {
-    throw new Error("usage: oligarchy --agent-id <agent> start [--iso <path>] [--disk <path>]");
-  }
-  let iso = "";
-  let disk = "";
-  for (let i = 0; i < args.length; i += 2) {
-    if (args[i] === "--iso") {
-      iso = args[i + 1];
-    } else if (args[i] === "--disk") {
-      disk = args[i + 1];
-    } else {
-      throw new Error("usage: oligarchy --agent-id <agent> start [--iso <path>] [--disk <path>]");
-    }
-  }
-  iso = iso === "" ? DEFAULT_ISO : iso;
-  if (!iso.startsWith("http://") && !iso.startsWith("https://")) {
-    iso = resolve(iso);
-    try {
-      await stat(iso);
-    } catch (err) {
-      throw new Error(`iso: ${errorMessage(err)}`);
-    }
-  }
-  const out = JSON.parse(
-    await postJSON("/start", {
-      iso,
-      // An undefined disk is left out of the JSON, so the server creates one.
-      disk: disk === "" ? undefined : resolve(disk),
-      agent,
-    }),
-  ) as QemuStartResult;
-  console.log(out.id);
-}
-
-async function cmdGetImage(agent: string, args: string[]): Promise<void> {
-  let id = "";
-  let out = "";
-  if (args.length === 1) {
-    id = args[0];
-  } else if (args.length === 3 && args[1] === "-o") {
-    id = args[0];
-    out = args[2];
-  } else if (args.length === 3 && args[0] === "-o") {
-    out = args[1];
-    id = args[2];
-  } else {
-    throw new Error("usage: oligarchy --agent-id <agent> get-image <id> [-o file]");
-  }
-  const res = await fetch(`http://${addr()}/image?id=${encodeURIComponent(id)}&agent=${encodeURIComponent(agent)}`);
-  if (res.status !== 200) {
-    throw new Error(await readAPIError(res));
-  }
-  const data = Buffer.from(await res.arrayBuffer());
-  if (out !== "") {
-    await writeFile(out, data, { mode: 0o644 });
-    return;
-  }
-  await new Promise<void>((done, fail) => {
-    process.stdout.write(data, (err) => (err ? fail(err) : done()));
-  });
-}
-
-async function cmdSendKeys(agent: string, args: string[]): Promise<void> {
-  if (args.length < 2 || args.length > 3) {
-    throw new Error("usage: oligarchy --agent-id <agent> send-keys <id> <keys> [encoding]");
-  }
-  const encoding = args.length === 3 ? args[2] : DEFAULT_ENCODING;
-  await postJSON("/send-keys", { id: args[0], keys: args[1], encoding, agent });
-}
-
-async function cmdSendMouse(agent: string, args: string[]): Promise<void> {
-  if (args.length < 3 || args.length > 5) {
-    throw new Error("usage: oligarchy --agent-id <agent> send-mouse <id> <x> <y> [button [clicks]]");
-  }
-  const x = Number(args[1]);
-  const y = Number(args[2]);
-  if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 1 || y < 0 || y > 1) {
-    throw new Error("mouse: x and y must be in 0..1");
-  }
-  const body: { id: string; x: number; y: number; agent: string; button?: string; clicks?: number } = {
-    id: args[0],
-    x,
-    y,
-    agent,
-  };
-  if (args.length >= 4) {
-    body.button = args[3];
-  }
-  if (args.length === 5) {
-    const clicks = Number(args[4]);
-    if (!Number.isInteger(clicks) || clicks < 1) {
-      throw new Error("usage: oligarchy --agent-id <agent> send-mouse <id> <x> <y> [button [clicks]]");
-    }
-    body.clicks = clicks;
-  }
-  await postJSON("/send-mouse", body);
 }
 
 async function postJSON(path: string, body: unknown): Promise<string> {
@@ -173,8 +226,14 @@ async function readAPIError(res: Response): Promise<string> {
 
 function errorMessage(err: unknown): string {
   const e = err as Error;
-  // Node's fetch buries the useful detail (ECONNREFUSED etc.) in the cause.
+  // Node's fetch and Drizzle bury the useful detail in the cause.
   return e.cause instanceof Error ? `${e.message}: ${e.cause.message}` : e.message;
 }
 
-await main(process.argv.slice(2));
+NodeRuntime.runMain(
+  app.pipe(
+    Command.run({ version: "0.0.0" }),
+    Effect.provide(NodeServices.layer),
+  ),
+  { disableErrorReporting: true },
+);

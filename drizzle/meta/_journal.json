@@ -36,6 +36,48 @@
       "when": 1788186210202,
       "tag": "0004_test_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1788281314664,
+      "tag": "0005_natural_makkari",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788281322263,
+      "tag": "0006_first_steve_rogers",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1788281330236,
+      "tag": "0007_chilly_firelord",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1788281338704,
+      "tag": "0008_wise_george_stacy",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1788281395468,
+      "tag": "0009_lowly_forge",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1788282643408,
+      "tag": "0010_melodic_avengers",
+      "breakpoints": true
     }
   ]
 }

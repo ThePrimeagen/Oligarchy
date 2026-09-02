@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { mkdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { loadEnvFile } from "node:process";
 import { Cause, Effect, Exit, Layer, Schema } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { NodeHttpServer, NodeRuntime } from "@effect/platform-node";
@@ -12,13 +13,9 @@ import { getIso } from "./iso.ts";
 import { parseKeys } from "./keys.ts";
 import { collectStats, startCpuSampler } from "./stats.ts";
 
+loadEnvFile();
 initSentry();
 
-const defaultIso = process.argv[2] ?? process.env.OLIGARCHY_ISO;
-if (defaultIso === undefined) {
-  console.error("usage: proxy <iso>  (or set OLIGARCHY_ISO)");
-  process.exit(1);
-}
 const addr = process.env.OLIGARCHY_ADDR ?? "127.0.0.1:42069";
 const [host, port] = addr.split(":");
 const SESSION_TIMEOUT_MS = 10 * 60 * 1000;
@@ -29,6 +26,7 @@ const db = connectDatabase();
 
 type LiveSession = {
   qemu: Qemu;
+  agent: string;
   lastCommandAt: number;
 };
 
@@ -58,6 +56,7 @@ function recorder(sessionId: string, agentId: string): QemuExchangeRecorder {
 type ApiError =
   | { readonly _tag: "BadRequest"; readonly message: string; readonly sessionId?: string; readonly agentId?: string }
   | { readonly _tag: "UnknownSession"; readonly id: string; readonly agentId?: string }
+  | { readonly _tag: "Forbidden"; readonly message: string; readonly sessionId: string; readonly agentId: string }
   | { readonly _tag: "StartFailed"; readonly message: string; readonly cause: unknown; readonly sessionId: string; readonly agentId: string }
   | { readonly _tag: "ExchangeFailed"; readonly message: string; readonly cause: unknown; readonly sessionId: string; readonly agentId: string }
   | { readonly _tag: "Internal"; readonly cause: unknown; readonly sessionId: string; readonly agentId?: string };
@@ -78,7 +77,7 @@ function internal(cause: unknown, who: { sessionId: string; agentId?: string }):
   return { _tag: "Internal", cause, ...who };
 }
 
-function session(id: string, agentId?: string): Effect.Effect<Qemu, ApiError> {
+function session(id: string, agentId: string): Effect.Effect<Qemu, ApiError> {
   if (id === "") {
     return Effect.fail(badRequest("session id is required", { agentId }));
   }
@@ -86,13 +85,21 @@ function session(id: string, agentId?: string): Effect.Effect<Qemu, ApiError> {
   if (live === undefined) {
     return Effect.fail({ _tag: "UnknownSession", id, agentId });
   }
+  if (live.agent !== agentId) {
+    return Effect.fail({
+      _tag: "Forbidden",
+      message: `agent "${agentId}" does not own session "${id}"`,
+      sessionId: id,
+      agentId,
+    });
+  }
   // A valid request counts as activity even when the exchange it starts later fails.
   live.lastCommandAt = Date.now();
   return Effect.succeed(live.qemu);
 }
 
 const StartBody = Schema.Struct({
-  iso: Schema.optionalKey(Schema.String),
+  iso: Schema.NonEmptyString,
   disk: Schema.optionalKey(Schema.String),
   agent: Schema.NonEmptyString,
 });
@@ -118,9 +125,9 @@ const SendMouseBody = Schema.Struct({
   agent: Schema.NonEmptyString,
 });
 
-// /stop is agentless by design: it exchanges nothing over QMP and is not an action.
 const StopBody = Schema.Struct({
   id: Schema.String,
+  agent: Schema.NonEmptyString,
   status: Schema.optionalKey(Schema.Literals(["succeeded", "failed", "aborted"])),
   reason: Schema.optionalKey(Schema.String),
 });
@@ -142,10 +149,10 @@ function jsonBody<S extends Schema.Constraint>(
 
 type RouteHandler = Effect.Effect<HttpServerResponse.HttpServerResponse, ApiError, HttpRouter.Provided>;
 
-async function launchQemu(qemu: Qemu, cfg: { disk?: string; agent: string }, isoName: string): Promise<void> {
+async function launchQemu(qemu: Qemu, cfg: typeof StartBody.Type): Promise<void> {
   try {
     await registerAgent(db, cfg.agent, qemu.id);
-    const iso = await getIso(db, isoName, { sessionId: qemu.id, agentId: cfg.agent });
+    const iso = await getIso(db, cfg.iso, { sessionId: qemu.id, agentId: cfg.agent });
     if (cfg.disk === undefined) {
       await createDisk(qemu);
     } else {
@@ -165,23 +172,22 @@ async function launchQemu(qemu: Qemu, cfg: { disk?: string; agent: string }, iso
 
 function startSession(cfg: typeof StartBody.Type, started: number): Effect.Effect<string, ApiError> {
   return Effect.gen(function* () {
-    const isoName = cfg.iso ?? defaultIso;
-    const isUrl = isoName.startsWith("http://") || isoName.startsWith("https://");
+    const isUrl = cfg.iso.startsWith("http://") || cfg.iso.startsWith("https://");
     const qemu = createQemu();
     yield* Effect.tryPromise({
-      try: () => insertSession(db, qemu.id, { iso: isoName, disk: cfg.disk }, isUrl ? "downloading" : "running"),
+      try: () => insertSession(db, qemu.id, { iso: cfg.iso, disk: cfg.disk }, isUrl ? "downloading" : "running"),
       catch: (cause) => internal(cause, { sessionId: qemu.id, agentId: cfg.agent }),
     });
     log(db, {
-      text: `session ${qemu.id}: starting; iso ${isoName}${cfg.disk === undefined ? "" : `, disk ${cfg.disk}`}`,
+      text: `session ${qemu.id}: starting; iso ${cfg.iso}${cfg.disk === undefined ? "" : `, disk ${cfg.disk}`}`,
       sessionId: qemu.id,
       agentId: cfg.agent,
     });
     yield* Effect.tryPromise({
-      try: () => launchQemu(qemu, cfg, isoName),
+      try: () => launchQemu(qemu, cfg),
       catch: (err) => startFailed(err, { sessionId: qemu.id, agentId: cfg.agent }),
     });
-    sessions.set(qemu.id, { qemu, lastCommandAt: Date.now() });
+    sessions.set(qemu.id, { qemu, agent: cfg.agent, lastCommandAt: Date.now() });
     log(db, { text: `session ${qemu.id}: running; started in ${Date.now() - started}ms`, sessionId: qemu.id, agentId: cfg.agent });
     return qemu.id;
   });
@@ -250,17 +256,18 @@ const routes = HttpRouter.use((router) =>
     yield* router.add("GET", "/stats", Effect.sync(() => HttpServerResponse.jsonUnsafe(collectStats(cpuSampler, sessions.size))) satisfies RouteHandler);
 
     yield* router.add("POST", "/stop", Effect.gen(function* () {
-      const { id, status, reason } = yield* jsonBody(StopBody);
-      const qemu = yield* session(id);
+      const { id, agent, status, reason } = yield* jsonBody(StopBody);
+      const qemu = yield* session(id, agent);
       sessions.delete(qemu.id);
-      yield* Effect.tryPromise({ try: () => stop(qemu), catch: (cause) => internal(cause, { sessionId: qemu.id }) });
+      yield* Effect.tryPromise({ try: () => stop(qemu), catch: (cause) => internal(cause, { sessionId: qemu.id, agentId: agent }) });
       yield* Effect.tryPromise({
         try: () => endSession(db, qemu.id, status ?? "aborted", reason ?? null),
-        catch: (cause) => internal(cause, { sessionId: qemu.id }),
+        catch: (cause) => internal(cause, { sessionId: qemu.id, agentId: agent }),
       });
       log(db, {
         text: `session ${qemu.id}: stopped; ${status ?? "aborted"}${reason === undefined ? "" : `; ${reason}`}`,
         sessionId: qemu.id,
+        agentId: agent,
       });
       return HttpServerResponse.jsonUnsafe({ ok: "true" });
     }) satisfies RouteHandler, { uninterruptible: true });
@@ -344,6 +351,7 @@ function respondTable(request: HttpServerRequest.HttpServerRequest): {
 } {
   return {
     BadRequest: (err) => answer(request, 400, err.message, err),
+    Forbidden: (err) => answer(request, 403, err.message, err),
     UnknownSession: (err) =>
       answer(request, 404, `unknown session "${err.id}"`, {
         // logs.session_id is a uuid column: attribute ids this server could have

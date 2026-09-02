@@ -1,32 +1,45 @@
 # The CLI (`src/qemu/cli.ts`)
 
-The TypeScript client for the oligarchy control plane. It sends HTTP requests to a running proxy (`src/qemu/proxy.ts`) and prints the result. It is a main file, not a library: running it executes `main`, and it exports nothing.
+The TypeScript client for the oligarchy control plane. It sends HTTP requests to a running proxy (`src/qemu/proxy.ts`) and prints the result. It is a main file, not a library: running it executes the Effect command tree, and it exports nothing. Every invocation is parsed by `effect/unstable/cli` (`Command`, `Flag`, `Argument`).
 
 ```bash
+client experiment new --iso <https-url> --server_url=<http-or-https-url> --version <version>
 node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> start [--iso <path>] [--disk <path>]
 node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> get-image <id> [-o file]
 node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-keys <id> <keys> [encoding]
 node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-mouse <id> <x> <y> [button [clicks]]
+node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> stop <id> [status [reason]]
 ```
 
 The server address comes from `OLIGARCHY_ADDR`, default `127.0.0.1:42069`.
 
-`--agent-id <agent>` leads every invocation, required with no default: every request carries the calling agent's id so the server can attribute the session's actions to that agent. This client is used by agents, not humans — the inconvenience of typing it is deliberate. An invocation without it prints usage and exits `2`, same as a missing command; `main` peels the pair off before dispatching, so the commands themselves never parse it.
+`--agent-id <agent>` is a shared flag on the root command, required for every QEMU command and unused by `experiment`. It may sit before or after the subcommand name. This client is used by agents, not humans — the inconvenience of typing it is deliberate. An invocation without it is a missing-option error.
+
+## experiment new
+
+Creates one pending test run (ISO URL and server URL stored on the run) and one pending result for every stored test definition, then opens one Linear issue per definition. Each issue carries that definition's details plus the result UUID, the run UUID, the ISO URL, and the server URL, and is labeled `agent test` plus the required `--version` value. Missing labels are created on the Linear team. The command reads `DATABASE_URL` and `LINEAR_API_TOKEN` from `.env`, uses the first Linear team available to that API token, writes the creation line through the database logger, and prints the run and Linear issues as JSON.
+
+The ISO must be an HTTPS URL. The server may be an HTTP or HTTPS URL. `--version` is required and must be non-empty. Effect accepts both `--flag=<value>` and `--flag <value>`.
+
+Run the root wrapper directly:
+
+```bash
+./client experiment new --iso https://example.com/omarchy.iso --server_url=https://qemu.example.com --version 1.2.3
+```
 
 ## start
 
 Boots a QEMU session and prints its session id (a UUID). Every other command takes that id.
 
-- Arguments are strict `--flag value` pairs: `--iso <path>` and `--disk <path>`, either order, both optional. Anything else — positionals, unknown flags, a flag without a value — is a usage error. These are intentionally the only two options: the qemu client underneath supports more (memory, SMP, firmware paths), neither the proxy nor the CLI exposes them.
-- The ISO defaults to `omarchy.iso` in the current directory, mostly a debug convenience. A path is resolved to absolute and must exist; the CLI fails fast with the real path in the error instead of making the server discover it. An http(s) url is passed through untouched — downloading and caching it is the server's job (see [http-api.md](http-api.md)).
-- The disk is resolved to an absolute path when given. When not given, the `disk` key is omitted from the JSON entirely, not sent as `""`: the proxy creates the default disk only when the key is absent — an empty string would be taken as a real path. `JSON.stringify` dropping `undefined` properties is what makes the omission work.
+- Flags are `--iso <path>` and `--disk <path>`, either order. `--iso` defaults to `omarchy.iso` in the current directory, a debug convenience; the server has no default of its own and refuses a start that omits `iso`. A path is resolved to absolute and must exist; the CLI fails fast with the real path in the error instead of making the server discover it. An http(s) url is passed through untouched — downloading and caching it is the server's job (see [http-api.md](http-api.md)).
+- `--disk` is optional. When given it is resolved to an absolute path. When not given, the `disk` key is omitted from the JSON entirely, not sent as `""`: the proxy creates the default disk only when the key is absent — an empty string would be taken as a real path. `JSON.stringify` dropping `undefined` properties is what makes the omission work.
 - Wire call: `POST /start` with `{"iso": "...", "disk"?: "...", "agent": "..."}` → `{"id": "<uuid>"}`.
 
 ## get-image
 
 Captures the session's current display as a PNG.
 
-- Exactly three accepted argument forms: `<id>`, `<id> -o <file>`, and `-o <file> <id>`.
+- `--output` / `-o` is optional and may sit before or after the session id.
 - With `-o`, the PNG is written to the file (mode 0644); without it, raw PNG bytes go to stdout, so redirect: `... get-image <id> > shot.png`.
 - Wire call: `GET /image?id=<id>&agent=<agent>` → `image/png` bytes.
 
@@ -41,15 +54,23 @@ Types a key string into the session.
 
 Moves the pointer, and optionally clicks or scrolls, at a point on the screenshot.
 
-- `send-mouse <id> <x> <y> [button [clicks]]`. `x` and `y` are fractions of the screenshot, `0..1` from the top-left; the CLI rejects anything else before calling the server. Omit `button` to move only. `button` is `left`, `middle`, `right`, `wheel-up`, or `wheel-down`; `clicks` defaults to 1 and is a pulse count (a double-click is `left 2`, three wheel ticks is `wheel-down 3`).
+- `send-mouse <id> <x> <y> [button [clicks]]`. `x` and `y` are fractions of the screenshot, `0..1` from the top-left; the CLI rejects anything else before calling the server. Omit `button` to move only. `button` is `left`, `middle`, `right`, `wheel-up`, or `wheel-down`; `clicks` defaults to 1 on the server and is a pulse count (a double-click is `left 2`, three wheel ticks is `wheel-down 3`).
 - Wire call: `POST /send-mouse` with `{"id", "x", "y", "button"?, "clicks"?, "agent"}` → `{"ok": "true"}`.
+
+## stop
+
+Kills the session. Only the agent that started it can stop it; a different `--agent-id` is a 403.
+
+- `stop <id> [status [reason]]`. `status` is `succeeded`, `failed`, or `aborted`. Omit both to abort: a machine killed with nothing to say for itself. `reason` is optional text stored on the session row.
+- An undefined status or reason is left out of the JSON, so the server applies its own defaults (`aborted`, no reason).
+- Wire call: `POST /stop` with `{"id", "agent", "status"?, "reason?"}` → `{"ok": "true"}`.
 
 ## Errors and exit codes
 
-- `0` success; `1` any command failure, including a command's own usage errors; `2` a missing `--agent-id`, no command, or an unknown command. The codes come from the retired Go client — see [porting](philosophy.md#porting-the-reference-implementation-is-the-spec).
-- Failed requests print the server's `{"error": "..."}` message. A non-JSON error body is printed raw; an empty one prints `request failed`.
+- Effect's runner exits `0` on success and `1` on a parse error or command failure. Failed requests print the server's `{"error": "..."}` message. A non-JSON error body is printed raw; an empty one prints `request failed`.
 - Network failures print `fetch failed: <cause>` — the cause (e.g. `connect ECONNREFUSED ...`) is unwrapped on purpose, because `fetch failed` alone says nothing.
+- Database failures do the same unwrap: Drizzle's message is the failed SQL, and the Postgres reason lives on `cause`. Command failures print that combined message and the stack.
 
 ## Reading the file
 
-`main` peels the leading `--agent-id` pair, then dispatches to one `cmd*` function per command, passing the agent id first. Each command parses its own remaining arguments inline and throws usage errors, which `main` prints to stderr. Three shared helpers: `postJSON` (POST, status check, body text), `readAPIError` (error body to message), and `errorMessage` (thrown error to printable string, unwrapping `cause`). There is no other machinery — see the [philosophy](philosophy.md) for why it should stay that way.
+The root `client` command shares `--agent-id` with its subcommands. QEMU handlers yield the parent command and fail if the flag is missing. `experiment` is a sibling subcommand with its own `new` command. HTTP helpers stay local to the file: `postJSON`, `readAPIError`, and `errorMessage`. There is no other machinery — see the [philosophy](philosophy.md) for why it should stay that way.

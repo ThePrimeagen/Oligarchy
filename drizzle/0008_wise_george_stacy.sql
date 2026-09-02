@@ -1,0 +1,1 @@
+DROP INDEX "test_results_result_id_idx";

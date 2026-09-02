@@ -3,14 +3,14 @@
 The CLI talks to a running proxy (`src/qemu/proxy.ts`). Start the proxy first, then boot a session and drive it by the id `start` prints.
 
 ```bash
-node --experimental-strip-types src/qemu/proxy.ts omarchy.iso
-node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> start
-node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> start --iso omarchy.iso --disk qemu-img.qcow2
+./server 42069
+./client --agent-id <agent> start
+./client --agent-id <agent> start --iso omarchy.iso --disk qemu-img.qcow2
 ```
 
-Both default to `127.0.0.1:42069`. Override with `OLIGARCHY_ADDR`.
+`./server <port>` binds `127.0.0.1` on that port and loads `.env` from the current directory (`DATABASE_URL` and the rest). Variables already in the environment win, so the port from `./server` is not overwritten. Every start request must include an ISO; the server has none of its own. The client defaults `--iso` to `omarchy.iso` and reads the address from `OLIGARCHY_ADDR` (default `127.0.0.1:42069`).
 
-Every CLI invocation leads with `--agent-id <agent>`, the calling agent's id — required, see [cli.md](cli.md).
+Every QEMU invocation carries `--agent-id <agent>`, the calling agent's id — required, before or after the subcommand, see [cli.md](cli.md).
 
 ## Get an image
 
@@ -71,3 +71,15 @@ node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-mouse <i
 ```
 
 Omit the button to move only. `button` is `left`, `middle`, `right`, `wheel-up`, or `wheel-down`. `clicks` is how many times that button is pulsed.
+
+## Stop
+
+Kills the session. `--agent-id` must be the agent that started it.
+
+```bash
+./client --agent-id <agent> stop <id>
+./client --agent-id <agent> stop <id> succeeded
+./client --agent-id <agent> stop <id> failed "installer hung"
+```
+
+A stop with no status is an abort. `status` is `succeeded`, `failed`, or `aborted`; `reason` is optional text and needs a status in front of it.

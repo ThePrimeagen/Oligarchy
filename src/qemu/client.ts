@@ -8,7 +8,6 @@ import { JSONStreamParser } from "../qmp/json-stream.ts";
 
 const QEMU_BIN = "qemu-system-x86_64";
 const QEMU_IMG = "qemu-img";
-export const DEFAULT_ISO = join(import.meta.dirname, "..", "..", "omarchy.iso");
 const DEFAULT_DISK_SIZE = "40G";
 const DEFAULT_CODE = "/usr/share/edk2/x64/OVMF_CODE.4m.fd";
 const DEFAULT_VARS = "/usr/share/edk2/x64/OVMF_VARS.4m.fd";
@@ -29,7 +28,7 @@ export type QemuOptions = {
 
 export type QemuStartOptions = {
   disk?: string;
-  iso?: string;
+  iso: string;
 };
 
 type Pending = {
@@ -84,7 +83,7 @@ export async function createDisk(qemu: Qemu): Promise<string> {
 
 export async function start(
   qemu: Qemu,
-  options: QemuStartOptions = {},
+  options: QemuStartOptions,
   record?: QemuExchangeRecorder,
 ): Promise<QemuStartResult> {
   if (qemu.socket !== undefined) {
@@ -93,8 +92,7 @@ export async function start(
 
   const disk = options.disk ?? qemu.diskPath;
   await assertFile(disk, "disk");
-  const iso = options.iso ?? DEFAULT_ISO;
-  await assertFile(iso, "iso");
+  await assertFile(options.iso, "iso");
 
   const varsPath = join(qemu.dir, "OVMF_VARS.fd");
   await copyFile(qemu.options.vars ?? DEFAULT_VARS, varsPath);
@@ -102,7 +100,7 @@ export async function start(
     sockPath: qemu.sockPath,
     varsPath,
     diskPath: disk,
-    iso,
+    iso: options.iso,
     code: qemu.options.code ?? DEFAULT_CODE,
     memory: qemu.options.memory ?? DEFAULT_MEMORY,
     smp: qemu.options.smp ?? DEFAULT_SMP,
