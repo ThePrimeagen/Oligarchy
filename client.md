@@ -123,7 +123,7 @@ Moves the pointer, and optionally clicks or scrolls, at a point on the screensho
 
 ## intent
 
-Declares what you are about to do on the session, before you do it. Required around every action: start an intent, run the commands that fulfill it, end it. One intent may cover many commands, sleeps, and images. One intent is active at a time: a second start while one is open fails, and so does an end with none open. End the open intent before `stop`.
+Declares what you are about to do on the session, before you do it. Required around every action: start an intent, run the commands that fulfill it, end it. One intent may cover many commands, sleeps, and images. One intent is active at a time: a second start while one is open fails with `Cannot start one intent when one's already running. Please end your previous intent.`, and so does an end with none open. End the open intent before `stop`.
 
 ```bash
 ./client --agent-id <agent> intent start --session_id <id> --test_result_id <result> --message "wait for the boot menu"
