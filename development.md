@@ -2,10 +2,6 @@
 
 Check the field guide: [field-guide/index.md](field-guide/index.md).
 
-## Branches
-
-- Never commit or push to `master`. Create a feature branch, push that branch, and open a pull request.
-
 ## Host
 
 The proxy needs `qemu-system-x86_64`, `qemu-img`, and OVMF at `/usr/share/edk2/x64/OVMF_CODE.4m.fd` and `OVMF_VARS.4m.fd`. `--display gtk` also needs `DISPLAY` and a QEMU build that lists gtk; `egl-headless` needs a DRM render node under `/dev/dri`. The proxy checks what it is about to use at startup and exits 1 with the missing list. There is no setup script.
