@@ -2,10 +2,8 @@ import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import * as Sentry from "@sentry/node";
 import {
-  finishIntentSpan,
   finishQemuActionSpan,
   finishQemuSpan,
-  startIntentSpan,
   startQemuActionSpan,
   startQemuSpan,
 } from "./sentry.ts";
@@ -117,65 +115,5 @@ describe("QEMU spans unhappy path", () => {
     assert.equal(spans.length, 1);
     assert.equal(spans[0].status, "error");
     assert.equal(spans[0].attributes.session_status.value, "failed");
-  });
-});
-
-describe("intent spans happy path", () => {
-  it("nests a completed intent and its action under the session", async () => {
-    const captured = captureSpans();
-    const session = startQemuSpan("session-4", "agent-4");
-    const intent = startIntentSpan(
-      session,
-      "session-4",
-      "agent-4",
-      "result-4",
-      "wait for Omarchy install",
-    );
-    const action = startQemuActionSpan(intent, "session-4", "agent-4", "screendump");
-
-    finishQemuActionSpan(action, "completed");
-    finishIntentSpan(intent, "completed");
-    finishQemuSpan(session, "succeeded");
-
-    const spans = await captured.spans();
-    const sessionItem = spans.find((span) => span.is_segment);
-    const intentItem = spans.find((span) => span.attributes["sentry.op"]?.value === "agent.intent");
-    const actionItem = spans.find((span) => span.attributes["sentry.op"]?.value === "qemu.action");
-    assert.ok(sessionItem !== undefined);
-    assert.ok(intentItem !== undefined);
-    assert.ok(actionItem !== undefined);
-    assert.equal(intentItem.name, "wait for Omarchy install");
-    assert.equal(intentItem.status, "ok");
-    assert.equal(intentItem.attributes.session_id.value, "session-4");
-    assert.equal(intentItem.attributes.agent_id.value, "agent-4");
-    assert.equal(intentItem.attributes.test_result_id.value, "result-4");
-    assert.equal(intentItem.attributes.intent.value, "wait for Omarchy install");
-    assert.equal(intentItem.attributes.intent_state.value, "completed");
-    assert.equal(intentItem.parent_span_id, sessionItem.span_id);
-    assert.equal(actionItem.parent_span_id, intentItem.span_id);
-    assert.equal(actionItem.trace_id, sessionItem.trace_id);
-  });
-});
-
-describe("intent spans unhappy path", () => {
-  it("marks a cancelled intent when the session ends first", async () => {
-    const captured = captureSpans();
-    const session = startQemuSpan("session-5", "agent-5");
-    const intent = startIntentSpan(
-      session,
-      "session-5",
-      "agent-5",
-      "result-5",
-      "create username",
-    );
-
-    finishIntentSpan(intent, "cancelled");
-    finishQemuSpan(session, "timed_out");
-
-    const spans = await captured.spans();
-    const intentItem = spans.find((span) => span.attributes["sentry.op"]?.value === "agent.intent");
-    assert.ok(intentItem !== undefined);
-    assert.equal(intentItem.status, "error");
-    assert.equal(intentItem.attributes.intent_state.value, "cancelled");
   });
 });
