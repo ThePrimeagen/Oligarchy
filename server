@@ -1,6 +1,7 @@
 #!/bin/sh
 if [ -z "$1" ]; then
-  echo "usage: server <port> [--display <backend>] [--automation]" >&2
+  echo "usage: server <port> [--display <backend>] [--vga <std|virtio|virtio-gl>]" >&2
+  echo "       server <port> --automation" >&2
   exit 1
 fi
 export OLIGARCHY_ADDR="127.0.0.1:$1"
