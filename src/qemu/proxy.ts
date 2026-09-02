@@ -97,10 +97,15 @@ type ApiError =
   | { readonly _tag: "Forbidden"; readonly message: string; readonly sessionId: string; readonly agentId: string }
   | { readonly _tag: "StartFailed"; readonly message: string; readonly cause: unknown; readonly sessionId: string; readonly agentId: string }
   | { readonly _tag: "ExchangeFailed"; readonly message: string; readonly cause: unknown; readonly sessionId: string; readonly agentId: string }
-  | { readonly _tag: "Internal"; readonly cause: unknown; readonly sessionId: string; readonly agentId?: string };
+  | { readonly _tag: "Internal"; readonly cause: unknown; readonly sessionId: string; readonly agentId?: string }
+  | { readonly _tag: "Failed"; readonly message: string; readonly sessionId: string; readonly agentId: string };
 
 function badRequest(message: string, who: { sessionId?: string; agentId?: string } = {}): ApiError {
   return { _tag: "BadRequest", message, ...who };
+}
+
+function failed(message: string, who: { sessionId: string; agentId: string }): ApiError {
+  return { _tag: "Failed", message, ...who };
 }
 
 function startFailed(err: unknown, who: { sessionId: string; agentId: string }): ApiError {
@@ -459,7 +464,10 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
       const { id, agent, test_result_id, message } = yield* jsonBody(IntentStartBody);
       const live = yield* session(id, agent);
       if (live.intent !== undefined) {
-        return yield* Effect.fail(badRequest("intent already active", { sessionId: live.qemu.id, agentId: agent }));
+        return yield* Effect.fail(failed(
+          "Cannot start one intent when one's already running. Please end your previous intent.",
+          { sessionId: live.qemu.id, agentId: agent },
+        ));
       }
       live.intent = startIntentSpan(live.span, live.qemu.id, agent, test_result_id, message);
       log(db, { text: `session ${live.qemu.id}: intent start; ${message}`, sessionId: live.qemu.id, agentId: agent });
@@ -513,6 +521,7 @@ function respondTable(request: HttpServerRequest.HttpServerRequest): {
 } {
   return {
     BadRequest: (err) => answer(request, 400, err.message, err),
+    Failed: (err) => answer(request, 500, err.message, err),
     Forbidden: (err) => answer(request, 403, err.message, err),
     UnknownSession: (err) =>
       answer(request, 404, `unknown session "${err.id}"`, {

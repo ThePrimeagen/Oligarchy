@@ -58,7 +58,7 @@ Body `{"id", "x", "y", "button"?, "clicks"?, "agent"}`. Moves the pointer to `(x
 
 ## POST /intent/start
 
-Body `{"id", "agent", "test_result_id", "message"}`. Opens the session's one intent span (name is `message`, `op` is `agent.intent`) as a child of the QEMU session span. A second start while one is still open is a 400. Returns `{"ok": "true"}`.
+Body `{"id", "agent", "test_result_id", "message"}`. Opens the session's one intent span (name is `message`, `op` is `agent.intent`) as a child of the QEMU session span. A second start while one is still open is a 500: `Cannot start one intent when one's already running. Please end your previous intent.` Returns `{"ok": "true"}`.
 
 ## POST /intent/end
 
