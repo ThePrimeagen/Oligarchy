@@ -21,6 +21,10 @@ const client = Command.make("client").pipe(
       Flag.optional,
       Flag.withDescription("Calling agent's id"),
     ),
+    serverUrl: Flag.string("server-url").pipe(
+      Flag.withDefault(DEFAULT_ADDR),
+      Flag.withDescription("Proxy address (host:port)"),
+    ),
   }),
   Command.withDescription("The client for the oligarchy proxy"),
 );
@@ -51,7 +55,7 @@ const start = Command.make(
     disk: Flag.string("disk").pipe(Flag.optional),
   },
   Effect.fn(function* ({ iso, disk }) {
-    const { agentId } = yield* client;
+    const { agentId, serverUrl } = yield* client;
     const agent = yield* requireAgent(agentId);
     let image = iso;
     if (!image.startsWith("http://") && !image.startsWith("https://")) {
@@ -64,7 +68,7 @@ const start = Command.make(
     const out = JSON.parse(
       yield* Effect.tryPromise({
         try: () =>
-          postJSON("/start", {
+          postJSON(serverUrl, "/start", {
             iso: image,
             // An undefined disk is left out of the JSON, so the server creates one.
             disk: Option.isNone(disk) ? undefined : resolve(disk.value),
@@ -84,10 +88,10 @@ const getImage = Command.make(
     id: Argument.string("id"),
   },
   Effect.fn(function* ({ id, output }) {
-    const { agentId } = yield* client;
+    const { agentId, serverUrl } = yield* client;
     const agent = yield* requireAgent(agentId);
     const res = yield* Effect.tryPromise({
-      try: () => fetch(`http://${addr()}/image?id=${encodeURIComponent(id)}&agent=${encodeURIComponent(agent)}`),
+      try: () => fetch(`http://${serverUrl}/image?id=${encodeURIComponent(id)}&agent=${encodeURIComponent(agent)}`),
       catch: fail,
     });
     if (res.status !== 200) {
@@ -127,10 +131,10 @@ const getSerial = Command.make(
     id: Argument.string("id"),
   },
   Effect.fn(function* ({ id, output }) {
-    const { agentId } = yield* client;
+    const { agentId, serverUrl } = yield* client;
     const agent = yield* requireAgent(agentId);
     const res = yield* Effect.tryPromise({
-      try: () => fetch(`http://${addr()}/serial?id=${encodeURIComponent(id)}&agent=${encodeURIComponent(agent)}`),
+      try: () => fetch(`http://${serverUrl}/serial?id=${encodeURIComponent(id)}&agent=${encodeURIComponent(agent)}`),
       catch: fail,
     });
     if (res.status !== 200) {
@@ -171,10 +175,10 @@ const sendKeys = Command.make(
     encoding: Argument.string("encoding").pipe(Argument.withDefault(DEFAULT_ENCODING)),
   },
   Effect.fn(function* ({ id, keys, encoding }) {
-    const { agentId } = yield* client;
+    const { agentId, serverUrl } = yield* client;
     const agent = yield* requireAgent(agentId);
     yield* Effect.tryPromise({
-      try: () => postJSON("/send-keys", { id, keys, encoding, agent }),
+      try: () => postJSON(serverUrl, "/send-keys", { id, keys, encoding, agent }),
       catch: fail,
     });
   }),
@@ -193,7 +197,7 @@ const sendMouse = Command.make(
     ),
   },
   Effect.fn(function* ({ id, x, y, button, clicks }) {
-    const { agentId } = yield* client;
+    const { agentId, serverUrl } = yield* client;
     const agent = yield* requireAgent(agentId);
     const body: { id: string; x: number; y: number; agent: string; button?: string; clicks?: number } = {
       id,
@@ -208,7 +212,7 @@ const sendMouse = Command.make(
       body.clicks = clicks.value;
     }
     yield* Effect.tryPromise({
-      try: () => postJSON("/send-mouse", body),
+      try: () => postJSON(serverUrl, "/send-mouse", body),
       catch: fail,
     });
   }),
@@ -222,7 +226,7 @@ const stop = Command.make(
     reason: Argument.string("reason").pipe(Argument.optional),
   },
   Effect.fn(function* ({ id, status, reason }) {
-    const { agentId } = yield* client;
+    const { agentId, serverUrl } = yield* client;
     const agent = yield* requireAgent(agentId);
     const body: { id: string; agent: string; status?: string; reason?: string } = { id, agent };
     if (Option.isSome(status)) {
@@ -232,7 +236,7 @@ const stop = Command.make(
       body.reason = reason.value;
     }
     yield* Effect.tryPromise({
-      try: () => postJSON("/stop", body),
+      try: () => postJSON(serverUrl, "/stop", body),
       catch: fail,
     });
   }),
@@ -242,12 +246,8 @@ const app = client.pipe(
   Command.withSubcommands([experimentCommand, start, getImage, getSerial, sendKeys, sendMouse, stop]),
 );
 
-function addr(): string {
-  return process.env.OLIGARCHY_ADDR || DEFAULT_ADDR;
-}
-
-async function postJSON(path: string, body: unknown): Promise<string> {
-  const res = await fetch(`http://${addr()}${path}`, {
+async function postJSON(addr: string, path: string, body: unknown): Promise<string> {
+  const res = await fetch(`http://${addr}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
