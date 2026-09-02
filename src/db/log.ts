@@ -41,7 +41,7 @@ function write(line: LogEntry): void {
   const tag = line.agentId ?? "global";
   const text = line.level === undefined || line.level === "info" ? line.text : `${line.level}: ${line.text}`;
   const color = line.agentId === undefined ? "gray" : colorFor(line.agentId);
-  console.error(styleText(color, `[${tag}] ${text}`));
+  console.error(styleText(color, `[${tag}] ${text}`, { stream: process.stderr }));
 }
 
 export function log(
