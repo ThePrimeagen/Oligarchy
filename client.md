@@ -36,7 +36,7 @@ The proxy, `experiment new`, and `test-results` read these from the environment.
 
 Every QEMU command requires `--agent-id <your-id>`. The flag may sit before or after the subcommand. An invocation without it fails.
 
-The proxy is `--server-url`, a full URL used exactly as given, default `http://127.0.0.1:42069`. The flag may sit before or after the subcommand. The proxy must already be running.
+The proxy is `--server-url`, a full URL used exactly as given, default `http://127.0.0.1:42069`. The flag may sit before or after the subcommand. The proxy must already be running. The hosted proxy is `https://runner.oligarchy.trm.sh`.
 
 ```bash
 ./client --agent-id <agent> [--server-url <url>] <command> ...

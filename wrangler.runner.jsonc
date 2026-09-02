@@ -1,0 +1,15 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "oligarchy-runner",
+  "main": "src/runner.ts",
+  "compatibility_date": "2026-08-30",
+  "kv_namespaces": [
+    {
+      "binding": "ORIGIN",
+      "id": "c57f718566014dcbbc7928cf179c539a"
+    }
+  ],
+  "routes": [
+    { "pattern": "runner.oligarchy.trm.sh", "custom_domain": true }
+  ]
+}
