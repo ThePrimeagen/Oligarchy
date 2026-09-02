@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { existsSync } from "node:fs";
 import { mkdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { loadEnvFile } from "node:process";
@@ -14,7 +15,9 @@ import { getIso } from "./iso.ts";
 import { parseKeys } from "./keys.ts";
 import { collectStats, startCpuSampler } from "./stats.ts";
 
-loadEnvFile();
+if (existsSync(".env")) {
+  loadEnvFile();
+}
 initSentry();
 
 const addr = process.env.OLIGARCHY_ADDR ?? "127.0.0.1:42069";

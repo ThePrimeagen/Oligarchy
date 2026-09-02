@@ -23,10 +23,4 @@ sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='oligarchy'"
 
 npm ci
 
-# Node's loadEnvFile() does not override an already-set DATABASE_URL, so any injected
-# production secret still wins over this file; the dev commands set the local url inline.
-if [ ! -f .env ]; then
-  echo 'DATABASE_URL=postgresql://oligarchy:oligarchy@127.0.0.1:5432/oligarchy' > .env
-fi
-
 DATABASE_URL='postgresql://oligarchy:oligarchy@127.0.0.1:5432/oligarchy' npm run db:migrate

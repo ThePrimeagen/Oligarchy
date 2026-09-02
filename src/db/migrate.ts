@@ -1,9 +1,12 @@
+import { existsSync } from "node:fs";
 import { loadEnvFile } from "node:process";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { closeDatabase, connectDatabase } from "./ops.ts";
 
 async function main(): Promise<void> {
-  loadEnvFile();
+  if (existsSync(".env")) {
+    loadEnvFile();
+  }
   const db = connectDatabase();
   try {
     await migrate(db, { migrationsFolder: "drizzle" });
