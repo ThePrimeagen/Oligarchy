@@ -14,6 +14,7 @@
   </rules>
 
   <run>
+    <linear_ticket>{{LINEAR_TICKET}}</linear_ticket>
     <run_id>{{RUN_ID}}</run_id>
     <result_id>{{RESULT_ID}}</result_id>
     <version>{{VERSION}}</version>
@@ -30,7 +31,7 @@
 
   <client>
     <location>./client at the root of the checked-out repository. Run it from there.</location>
-    <agent_id>Your agent id is the result id. Every command carries --agent-id {{RESULT_ID}}. Never use another id.</agent_id>
+    <agent_id>Your agent id is this Linear ticket. Every command carries --agent-id {{LINEAR_TICKET}}. Never use another id.</agent_id>
     <proxy>OLIGARCHY_ADDR names the proxy as host:port with no scheme. For this run that is the host and port of {{SERVER_URL}}.</proxy>
     <guide><![CDATA[
 {{CLIENT_MD}}
@@ -49,24 +50,24 @@
   <example><![CDATA[
 One drive, from boot to verdict. The session id is abbreviated.
 
-$ ./client --agent-id {{RESULT_ID}} start --iso {{ISO_URL}}
+$ ./client --agent-id {{LINEAR_TICKET}} start --iso {{ISO_URL}}
 6f1c...e2a9
-$ ./client --agent-id {{RESULT_ID}} get-image 6f1c...e2a9 -o screen.png
+$ ./client --agent-id {{LINEAR_TICKET}} get-image 6f1c...e2a9 -o screen.png
     look at screen.png: a boot menu, first entry highlighted
-$ ./client --agent-id {{RESULT_ID}} send-keys 6f1c...e2a9 "<ENTER>"
+$ ./client --agent-id {{LINEAR_TICKET}} send-keys 6f1c...e2a9 "<ENTER>"
     wait about three seconds
-$ ./client --agent-id {{RESULT_ID}} get-image 6f1c...e2a9 -o screen.png
+$ ./client --agent-id {{LINEAR_TICKET}} get-image 6f1c...e2a9 -o screen.png
     look at screen.png: still booting; image again in a few seconds
-$ ./client --agent-id {{RESULT_ID}} get-image 6f1c...e2a9 -o screen.png
+$ ./client --agent-id {{LINEAR_TICKET}} get-image 6f1c...e2a9 -o screen.png
     look at screen.png: a welcome screen with a button near the bottom centre
-$ ./client --agent-id {{RESULT_ID}} send-mouse 6f1c...e2a9 0.5 0.86 left
+$ ./client --agent-id {{LINEAR_TICKET}} send-mouse 6f1c...e2a9 0.5 0.86 left
     wait about three seconds
-$ ./client --agent-id {{RESULT_ID}} get-image 6f1c...e2a9 -o screen.png
+$ ./client --agent-id {{LINEAR_TICKET}} get-image 6f1c...e2a9 -o screen.png
     look at screen.png: the next screen; decide the next action
     ... the loop continues until the proof is on screen ...
-$ ./client --agent-id {{RESULT_ID}} get-image 6f1c...e2a9 -o proof.png
+$ ./client --agent-id {{LINEAR_TICKET}} get-image 6f1c...e2a9 -o proof.png
     look at proof.png: the proof is visible
-$ ./client --agent-id {{RESULT_ID}} stop 6f1c...e2a9 succeeded
+$ ./client --agent-id {{LINEAR_TICKET}} stop 6f1c...e2a9 succeeded
     ]]></example>
 
   <report>
