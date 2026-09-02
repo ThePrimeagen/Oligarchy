@@ -1,17 +1,3 @@
-<!--
-Body of the Linear issue opened for one test result: one issue per test definition per run.
-Double braces mark a variable. Each one is a value we already house:
-
-  RUN_ID            test_runs.id                  the run this result belongs to
-  RESULT_ID         test_results.result_id        this result; doubles as the driver's agent id
-  VERSION           experiment new, version flag  the Omarchy version under test
-  ISO_URL           test_runs.iso                 https url of the ISO to boot
-  SERVER_URL        test_runs.server_url          the oligarchy proxy the client talks to
-  TEST_NAME         test_definitions.name
-  TEST_DESCRIPTION  test_definitions.description
-  TEST_INSTRUCTION  test_definitions.instruction
-  TEST_PROOF        test_definitions.proof
--->
 <agent_test>
 
   <role>
