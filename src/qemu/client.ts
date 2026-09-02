@@ -16,6 +16,10 @@ const DEFAULT_SMP = 2;
 const DEFAULT_MACHINE = "q35,accel=kvm";
 const DEFAULT_CPU = "host";
 const HANDSHAKE_MS = 10_000;
+// `-display help` minus curses, which needs QEMU's stdio and the proxy detaches it.
+export const QEMU_DISPLAYS = ["none", "gtk", "sdl", "egl-headless", "spice-app", "dbus"] as const;
+export type QemuDisplay = (typeof QEMU_DISPLAYS)[number];
+const DEFAULT_DISPLAY: QemuDisplay = "none";
 
 export type QemuOptions = {
   tmp?: string;
@@ -24,6 +28,7 @@ export type QemuOptions = {
   vars?: string;
   memory?: string;
   smp?: number;
+  display?: QemuDisplay;
 };
 
 export type QemuStartOptions = {
@@ -104,6 +109,7 @@ export async function start(
     code: qemu.options.code ?? DEFAULT_CODE,
     memory: qemu.options.memory ?? DEFAULT_MEMORY,
     smp: qemu.options.smp ?? DEFAULT_SMP,
+    display: qemu.options.display ?? DEFAULT_DISPLAY,
   });
 
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -259,6 +265,7 @@ function qemuArgs(opts: {
   code: string;
   memory: string;
   smp: number;
+  display: QemuDisplay;
 }): string[] {
   return [
     "-machine",
@@ -273,8 +280,10 @@ function qemuArgs(opts: {
     `if=pflash,format=raw,readonly=on,file=${opts.code}`,
     "-drive",
     `if=pflash,format=raw,file=${opts.varsPath}`,
+    // screendump renders the default VGA on demand, so `none` still captures; never add
+    // -nodefaults or -vga none, which remove the console screendump reads.
     "-display",
-    "gtk",
+    opts.display,
     // usb-tablet is the absolute pointer; without it, input-send-event abs has no handler.
     "-device",
     "qemu-xhci",

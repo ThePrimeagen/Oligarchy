@@ -1,7 +1,8 @@
 #!/bin/sh
 if [ -z "$1" ]; then
-  echo "usage: server <port>" >&2
+  echo "usage: server <port> [--display <backend>]" >&2
   exit 1
 fi
 export OLIGARCHY_ADDR="127.0.0.1:$1"
-exec node --experimental-strip-types "$(dirname "$0")/src/qemu/proxy.ts"
+shift
+exec node --experimental-strip-types "$(dirname "$0")/src/qemu/proxy.ts" "$@"

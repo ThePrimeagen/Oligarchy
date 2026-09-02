@@ -3,12 +3,13 @@ import { mkdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { loadEnvFile } from "node:process";
 import { Cause, Effect, Exit, Layer, Schema } from "effect";
+import { Command, Flag } from "effect/unstable/cli";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
-import { NodeHttpServer, NodeRuntime } from "@effect/platform-node";
+import { NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node";
 import { flushLogs, log } from "../db/log.ts";
 import { connectDatabase, endSession, finishAction, insertSession, registerAgent, sessionRunning, startAction } from "../db/ops.ts";
 import { flushSentry, initSentry } from "../sentry.ts";
-import { createDisk, createQemu, screendump, sendKey, sendMouse, start, stop, type Qemu } from "./client.ts";
+import { QEMU_DISPLAYS, createDisk, createQemu, screendump, sendKey, sendMouse, start, stop, type Qemu, type QemuDisplay } from "./client.ts";
 import { getIso } from "./iso.ts";
 import { parseKeys } from "./keys.ts";
 import { collectStats, startCpuSampler } from "./stats.ts";
@@ -170,10 +171,10 @@ async function launchQemu(qemu: Qemu, cfg: typeof StartBody.Type): Promise<void>
   }
 }
 
-function startSession(cfg: typeof StartBody.Type, started: number): Effect.Effect<string, ApiError> {
+function startSession(cfg: typeof StartBody.Type, started: number, display: QemuDisplay): Effect.Effect<string, ApiError> {
   return Effect.gen(function* () {
     const isUrl = cfg.iso.startsWith("http://") || cfg.iso.startsWith("https://");
-    const qemu = createQemu();
+    const qemu = createQemu({ display });
     yield* Effect.tryPromise({
       try: () => insertSession(db, qemu.id, { iso: cfg.iso, disk: cfg.disk }, isUrl ? "downloading" : "running"),
       catch: (cause) => internal(cause, { sessionId: qemu.id, agentId: cfg.agent }),
@@ -196,12 +197,12 @@ function startSession(cfg: typeof StartBody.Type, started: number): Effect.Effec
 // The session-driving routes are uninterruptible: a client disconnect interrupts the
 // request's fiber, and a state transition torn in half leaves a machine the sessions
 // map never received — unreachable and unkillable — or a kill that went unrecorded.
-const routes = HttpRouter.use((router) =>
+const routes = (display: QemuDisplay) => HttpRouter.use((router) =>
   Effect.gen(function* () {
     yield* router.add("POST", "/start", Effect.gen(function* () {
       const started = Date.now();
       const cfg = yield* jsonBody(StartBody);
-      const id = yield* startSession(cfg, started);
+      const id = yield* startSession(cfg, started, display);
       return HttpServerResponse.jsonUnsafe({ id });
     }) satisfies RouteHandler, { uninterruptible: true });
 
@@ -459,22 +460,37 @@ const drainSessions = Layer.effectDiscard(
 // The platform drops its error listener once the server is up; a later server error
 // (the acceptor breaking) still needs the fatal line, the flush, and exit 1.
 const server = createServer();
-const main = Layer.effectDiscard(
+const main = (display: QemuDisplay) => Layer.effectDiscard(
   Effect.sync(() => {
-    log(db, `oligarchy proxy listening on ${addr}`);
+    log(db, `oligarchy proxy listening on ${addr}; display ${display}`);
     server.on("error", (err) => {
       log(db, { level: "fatal", text: `proxy: ${err.message}` }, { cause: err });
       void flushLogs().then(flushSentry).then(() => process.exit(1));
     });
   }),
 ).pipe(
-  Layer.provide(HttpRouter.serve(Layer.mergeAll(routes, respond, drainSessions), { disableLogger: true, disableListenLog: true })),
+  Layer.provide(HttpRouter.serve(Layer.mergeAll(routes(display), respond, drainSessions), { disableLogger: true, disableListenLog: true })),
   Layer.provide(NodeHttpServer.layer(() => server, { host, port: Number(port) })),
 );
 
+const proxy = Command.make(
+  "proxy",
+  {
+    display: Flag.choice("display", QEMU_DISPLAYS).pipe(
+      Flag.withDefault("none"),
+      Flag.withDescription("QEMU display backend for every session; none captures without showing a window"),
+    ),
+  },
+  ({ display }) =>
+    Layer.launch(main(display)).pipe(
+      Effect.tapError((err) => Effect.sync(() => log(db, { level: "fatal", text: `proxy: ${errorDetail(err)}` }, { cause: err }))),
+    ),
+).pipe(Command.withDescription("The oligarchy proxy: boots QEMU sessions and drives them over QMP"));
+
 NodeRuntime.runMain(
-  Layer.launch(main).pipe(
-    Effect.tapError((err) => Effect.sync(() => log(db, { level: "fatal", text: `proxy: ${errorDetail(err)}` }, { cause: err }))),
+  proxy.pipe(
+    Command.run({ version: "0.0.0" }),
+    Effect.provide(NodeServices.layer),
   ),
   {
     disableErrorReporting: true,
