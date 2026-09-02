@@ -16,6 +16,9 @@ const DEFAULT_SMP = 2;
 const DEFAULT_MACHINE = "q35,accel=kvm";
 const DEFAULT_CPU = "host";
 const HANDSHAKE_MS = 10_000;
+// A QMP reply is near-instant; anything this long means QEMU is wedged with its
+// socket still open (so the close teardown never fires). Fail the command instead.
+const COMMAND_TIMEOUT_MS = 30_000;
 // `-display help` minus curses, which needs QEMU's stdio and the proxy detaches it.
 export const QEMU_DISPLAYS = ["none", "gtk", "sdl", "egl-headless", "spice-app", "dbus"] as const;
 export type QemuDisplay = (typeof QEMU_DISPLAYS)[number];
@@ -342,7 +345,21 @@ async function execute(qemu: Qemu, name: string, args: unknown, record?: QemuExc
       throw new Error("qemu: closed");
     }
     response = (await new Promise<unknown>((resolve, reject) => {
-      qemu.pending.set(id, { resolve, reject });
+      const timer = setTimeout(() => {
+        qemu.pending.delete(id);
+        reject(new Error(`qemu: ${name} timed out`));
+      }, COMMAND_TIMEOUT_MS);
+      timer.unref();
+      qemu.pending.set(id, {
+        resolve: (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        reject: (err) => {
+          clearTimeout(timer);
+          reject(err);
+        },
+      });
       socket.write(`${JSON.stringify(command)}\n`);
     })) as QemuSuccessResponse;
   } catch (err) {
