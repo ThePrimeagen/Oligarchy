@@ -238,8 +238,51 @@ const stop = Command.make(
   }),
 );
 
+const intentStart = Command.make(
+  "start",
+  {
+    id: Argument.string("id"),
+    testResultId: Argument.string("test-result-id"),
+    message: Argument.string("message"),
+  },
+  Effect.fn(function* ({ id, testResultId, message }) {
+    const { agentId } = yield* client;
+    const agent = yield* requireAgent(agentId);
+    yield* Effect.tryPromise({
+      try: () =>
+        postJSON("/intent/start", {
+          id,
+          agent,
+          test_result_id: testResultId,
+          message,
+        }),
+      catch: fail,
+    });
+  }),
+);
+
+const intentEnd = Command.make(
+  "end",
+  {
+    id: Argument.string("id"),
+  },
+  Effect.fn(function* ({ id }) {
+    const { agentId } = yield* client;
+    const agent = yield* requireAgent(agentId);
+    yield* Effect.tryPromise({
+      try: () => postJSON("/intent/end", { id, agent }),
+      catch: fail,
+    });
+  }),
+);
+
+const intent = Command.make("intent").pipe(
+  Command.withDescription("Start or end the session's one active intent"),
+  Command.withSubcommands([intentStart, intentEnd]),
+);
+
 const app = client.pipe(
-  Command.withSubcommands([experimentCommand, start, getImage, getSerial, sendKeys, sendMouse, stop]),
+  Command.withSubcommands([experimentCommand, start, getImage, getSerial, sendKeys, sendMouse, stop, intent]),
 );
 
 function addr(): string {

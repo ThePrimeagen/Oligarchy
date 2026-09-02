@@ -110,6 +110,108 @@ describe("./client happy path", () => {
     assert.notEqual(spaced.code, 0);
     assert.match(spaced.stderr, /LINEAR_API_TOKEN is not set/);
   });
+
+  it("forwards intent start to the proxy", async () => {
+    let finishRequest!: (value: { method: string | undefined; url: string | undefined; body: unknown }) => void;
+    const request = new Promise<{ method: string | undefined; url: string | undefined; body: unknown }>((done) => {
+      finishRequest = done;
+    });
+    const server = createServer((incoming, response) => {
+      let body = "";
+      incoming.setEncoding("utf8");
+      incoming.on("data", (data: string) => {
+        body += data;
+      });
+      incoming.on("end", () => {
+        response.writeHead(200, { "Content-Type": "application/json" });
+        response.end('{"ok":"true"}');
+        finishRequest({
+          method: incoming.method,
+          url: incoming.url,
+          body: JSON.parse(body) as unknown,
+        });
+      });
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    assert.ok(address !== null && typeof address !== "string");
+
+    try {
+      const result = await runClient(
+        [
+          "--agent-id",
+          "agent-1",
+          "intent",
+          "start",
+          "session-1",
+          "result-1",
+          "wait for Omarchy install",
+        ],
+        { OLIGARCHY_ADDR: `127.0.0.1:${address.port}` },
+      );
+      assert.equal(result.code, 0);
+      assert.equal(result.stdout, "");
+      assert.deepEqual(await request, {
+        method: "POST",
+        url: "/intent/start",
+        body: {
+          id: "session-1",
+          agent: "agent-1",
+          test_result_id: "result-1",
+          message: "wait for Omarchy install",
+        },
+      });
+    } finally {
+      await new Promise<void>((done) => server.close(() => done()));
+    }
+  });
+
+  it("forwards intent end to the proxy", async () => {
+    let finishRequest!: (value: { method: string | undefined; url: string | undefined; body: unknown }) => void;
+    const request = new Promise<{ method: string | undefined; url: string | undefined; body: unknown }>((done) => {
+      finishRequest = done;
+    });
+    const server = createServer((incoming, response) => {
+      let body = "";
+      incoming.setEncoding("utf8");
+      incoming.on("data", (data: string) => {
+        body += data;
+      });
+      incoming.on("end", () => {
+        response.writeHead(200, { "Content-Type": "application/json" });
+        response.end('{"ok":"true"}');
+        finishRequest({
+          method: incoming.method,
+          url: incoming.url,
+          body: JSON.parse(body) as unknown,
+        });
+      });
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    assert.ok(address !== null && typeof address !== "string");
+
+    try {
+      const result = await runClient(
+        ["--agent-id", "agent-1", "intent", "end", "session-1"],
+        { OLIGARCHY_ADDR: `127.0.0.1:${address.port}` },
+      );
+      assert.equal(result.code, 0);
+      assert.equal(result.stdout, "");
+      assert.deepEqual(await request, {
+        method: "POST",
+        url: "/intent/end",
+        body: {
+          id: "session-1",
+          agent: "agent-1",
+        },
+      });
+    } finally {
+      await new Promise<void>((done) => server.close(() => done()));
+    }
+  });
 });
 
 describe("./client unhappy path", () => {
@@ -193,5 +295,23 @@ describe("./client unhappy path", () => {
 
     assert.notEqual(result.code, 0);
     assert.match(result.stderr, /server_url must be a valid http or https url/);
+  });
+
+  it("rejects intent start without --agent-id", async () => {
+    const result = await runClient([
+      "intent",
+      "start",
+      "session-1",
+      "result-1",
+      "wait for Omarchy install",
+    ]);
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /--agent-id/);
+  });
+
+  it("rejects intent end without a session id", async () => {
+    const result = await runClient(["--agent-id", "agent-1", "intent", "end"]);
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /id/);
   });
 });

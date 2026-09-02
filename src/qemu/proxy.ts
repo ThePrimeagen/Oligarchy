@@ -9,7 +9,7 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstab
 import { NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node";
 import { flushLogs, log } from "../db/log.ts";
 import { connectDatabase, endSession, finishAction, insertSession, registerAgent, sessionRunning, startAction } from "../db/ops.ts";
-import { finishQemuActionSpan, finishQemuSpan, flushSentry, initSentry, startQemuActionSpan, startQemuSpan, type QemuSpan } from "../sentry.ts";
+import { finishIntentSpan, finishQemuActionSpan, finishQemuSpan, flushSentry, initSentry, startIntentSpan, startQemuActionSpan, startQemuSpan, type QemuSpan } from "../sentry.ts";
 import { QEMU_DISPLAYS, createDisk, createQemu, missingHostRequirements, screendump, sendKey, sendMouse, start, stop, type Qemu, type QemuDisplay } from "./client.ts";
 import { getIso } from "./iso.ts";
 import { parseKeys } from "./keys.ts";
@@ -33,8 +33,17 @@ type LiveSession = {
   agent: string;
   lastCommandAt: number;
   span: QemuSpan;
+  intent?: QemuSpan;
   actions: Set<Promise<void>>;
 };
+
+function finishOpenIntent(live: LiveSession, status: "completed" | "cancelled"): void {
+  if (live.intent === undefined) {
+    return;
+  }
+  finishIntentSpan(live.intent, status);
+  live.intent = undefined;
+}
 
 const sessions = new Map<string, LiveSession>();
 const openSessions = new Set<LiveSession>();
@@ -164,6 +173,18 @@ const StopBody = Schema.Struct({
   reason: Schema.optionalKey(Schema.String),
 });
 
+const IntentStartBody = Schema.Struct({
+  id: Schema.String,
+  agent: Schema.NonEmptyString,
+  test_result_id: Schema.NonEmptyString,
+  message: Schema.NonEmptyString,
+});
+
+const IntentEndBody = Schema.Struct({
+  id: Schema.String,
+  agent: Schema.NonEmptyString,
+});
+
 // JSON.parse instead of the platform's request.json: its error names the exact spot the body went wrong.
 function jsonBody<S extends Schema.Constraint>(
   schema: S,
@@ -280,7 +301,7 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
                 finishTracking = resolve;
               });
               live.actions.add(activeAction);
-              actionSpan = startQemuActionSpan(live.span, qemu.id, agent, command.execute);
+              actionSpan = startQemuActionSpan(live.intent ?? live.span, qemu.id, agent, command.execute);
               try {
                 opened = await startAction(db, { sessionId: qemu.id, agentId: agent, request: command });
               } catch (err) {
@@ -365,6 +386,7 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
         },
         catch: (cause) => {
           if (openSessions.delete(live)) {
+            finishOpenIntent(live, "cancelled");
             finishQemuSpan(live.span, "failed");
           }
           return internal(cause, { sessionId: qemu.id, agentId: agent });
@@ -374,12 +396,14 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
         try: () => endSession(db, qemu.id, finalStatus, reason ?? null),
         catch: (cause) => {
           if (openSessions.delete(live)) {
+            finishOpenIntent(live, "cancelled");
             finishQemuSpan(live.span, "failed");
           }
           return internal(cause, { sessionId: qemu.id, agentId: agent });
         },
       });
       if (openSessions.delete(live)) {
+        finishOpenIntent(live, "cancelled");
         finishQemuSpan(live.span, finalStatus);
       }
       log(db, {
@@ -399,7 +423,7 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
         try: () => parseKeys(keys, encoding),
         catch: (err) => badRequest((err as Error).message, { sessionId: qemu.id, agentId: agent }),
       });
-      const record = recorder(qemu.id, agent, live.span, live.actions);
+      const record = recorder(qemu.id, agent, live.intent ?? live.span, live.actions);
       yield* Effect.tryPromise({
         try: async () => {
           for (const chord of chords) {
@@ -424,7 +448,7 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
         return yield* Effect.fail(badRequest("mouse: clicks must be a positive integer", { sessionId: qemu.id, agentId: agent }));
       }
       yield* Effect.tryPromise({
-        try: () => sendMouse(qemu, x, y, button, clicks, recorder(qemu.id, agent, live.span, live.actions)),
+        try: () => sendMouse(qemu, x, y, button, clicks, recorder(qemu.id, agent, live.intent ?? live.span, live.actions)),
         catch: (err) => exchangeFailed(err, { sessionId: qemu.id, agentId: agent }),
       });
       log(db, {
@@ -432,6 +456,28 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
         sessionId: qemu.id,
         agentId: agent,
       });
+      return HttpServerResponse.jsonUnsafe({ ok: "true" });
+    }) satisfies RouteHandler, { uninterruptible: true });
+
+    yield* router.add("POST", "/intent/start", Effect.gen(function* () {
+      const { id, agent, test_result_id, message } = yield* jsonBody(IntentStartBody);
+      const live = yield* session(id, agent);
+      if (live.intent !== undefined) {
+        return yield* Effect.fail(badRequest("intent already active", { sessionId: live.qemu.id, agentId: agent }));
+      }
+      live.intent = startIntentSpan(live.span, live.qemu.id, agent, test_result_id, message);
+      log(db, { text: `session ${live.qemu.id}: intent start; ${message}`, sessionId: live.qemu.id, agentId: agent });
+      return HttpServerResponse.jsonUnsafe({ ok: "true" });
+    }) satisfies RouteHandler, { uninterruptible: true });
+
+    yield* router.add("POST", "/intent/end", Effect.gen(function* () {
+      const { id, agent } = yield* jsonBody(IntentEndBody);
+      const live = yield* session(id, agent);
+      if (live.intent === undefined) {
+        return yield* Effect.fail(badRequest("no active intent", { sessionId: live.qemu.id, agentId: agent }));
+      }
+      finishOpenIntent(live, "completed");
+      log(db, { text: `session ${live.qemu.id}: intent end`, sessionId: live.qemu.id, agentId: agent });
       return HttpServerResponse.jsonUnsafe({ ok: "true" });
     }) satisfies RouteHandler, { uninterruptible: true });
 
@@ -526,6 +572,7 @@ async function stopTimedOutSessions(): Promise<void> {
         log(db, { text: `session ${qemu.id}: timed out; ${SESSION_TIMEOUT_REASON}`, sessionId: qemu.id });
       } finally {
         if (openSessions.delete(live)) {
+          finishOpenIntent(live, "cancelled");
           finishQemuSpan(span, "timed_out");
         }
       }
@@ -575,12 +622,14 @@ const drainSessions = Layer.effectDiscard(
             await Promise.all(actions);
             await endSession(db, qemu.id, "aborted", "proxy shutdown");
             if (openSessions.delete(live)) {
+              finishOpenIntent(live, "cancelled");
               finishQemuSpan(span, "aborted");
             }
             log(db, { text: `session ${qemu.id}: stopped; aborted; proxy shutdown`, sessionId: qemu.id });
           } catch (err) {
             await Promise.all(actions);
             if (openSessions.delete(live)) {
+              finishOpenIntent(live, "cancelled");
               finishQemuSpan(span, "failed");
             }
             log(db, { level: "error", text: `shutdown: session ${qemu.id}: ${(err as Error).message}`, sessionId: qemu.id }, { cause: err });
@@ -611,9 +660,11 @@ const main = (display: QemuDisplay, automation: boolean) => Layer.effectDiscard(
       openSessions.clear();
       sessions.clear();
       void Promise.allSettled(
-        open.map(async ({ qemu, span, actions }) => {
+        open.map(async (live) => {
+          const { qemu, span, actions } = live;
           await stop(qemu).catch(() => {});
           await Promise.all(actions);
+          finishOpenIntent(live, "cancelled");
           finishQemuSpan(span, "failed");
         }),
       ).then(flushLogs).then(flushSentry).then(() => process.exit(1));
