@@ -5,6 +5,7 @@ import { NodeRuntime, NodeServices } from "@effect/platform-node";
 import { Console, Effect, Option, Schema } from "effect";
 import { Argument, CliError, Command, Flag } from "effect/unstable/cli";
 import { experimentCommand } from "../experiment.ts";
+import { runTestResults } from "../test-results.ts";
 
 const DEFAULT_ADDR = "127.0.0.1:42069";
 const DEFAULT_ISO = "omarchy.iso";
@@ -242,8 +243,34 @@ const stop = Command.make(
   }),
 );
 
+const testResults = Command.make(
+  "test-results",
+  {
+    id: Flag.string("id").pipe(Flag.withDescription("Test result id")),
+    status: Flag.choiceWithValue("status", [
+      ["success", "passed"],
+      ["failed", "failed"],
+    ]).pipe(Flag.withDescription("Whether the test succeeded")),
+    reason: Flag.string("reason").pipe(Flag.optional, Flag.withDescription("Why the test passed or failed")),
+  },
+  Effect.fn(function* ({ id, status, reason }) {
+    const { agentId } = yield* client;
+    const agent = yield* requireAgent(agentId);
+    yield* Effect.tryPromise({
+      try: () =>
+        runTestResults({
+          id,
+          agentId: agent,
+          status,
+          reason: Option.isNone(reason) ? undefined : reason.value,
+        }),
+      catch: fail,
+    });
+  }),
+);
+
 const app = client.pipe(
-  Command.withSubcommands([experimentCommand, start, getImage, getSerial, sendKeys, sendMouse, stop]),
+  Command.withSubcommands([experimentCommand, testResults, start, getImage, getSerial, sendKeys, sendMouse, stop]),
 );
 
 async function postJSON(addr: string, path: string, body: unknown): Promise<string> {
