@@ -1,5 +1,6 @@
+import { spawn } from "node:child_process";
 import { createServer } from "node:http";
-import { mkdir, readFile, rm } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { loadEnvFile } from "node:process";
 import { Cause, Effect, Exit, Layer, Option, Schema } from "effect";
@@ -469,6 +470,70 @@ const drainSessions = Layer.effectDiscard(
   ),
 );
 
+const QEMU_BIN = "qemu-system-x86_64";
+const QEMU_IMG = "qemu-img";
+const DEFAULT_CODE = "/usr/share/edk2/x64/OVMF_CODE.4m.fd";
+const DEFAULT_VARS = "/usr/share/edk2/x64/OVMF_VARS.4m.fd";
+
+async function missingHostRequirements(display: QemuDisplay): Promise<string[]> {
+  const missing: string[] = [];
+  let qemuFound = false;
+  for (const bin of [QEMU_BIN, QEMU_IMG] as const) {
+    const found = await new Promise<boolean>((resolve) => {
+      const child = spawn("/bin/sh", ["-c", `command -v ${bin}`], { stdio: "ignore" });
+      child.once("error", () => resolve(false));
+      child.once("exit", (code) => resolve(code === 0));
+    });
+    if (bin === QEMU_BIN) {
+      qemuFound = found;
+    }
+    if (!found) {
+      missing.push(`${bin} not on PATH`);
+    }
+  }
+  for (const [path, label] of [
+    [DEFAULT_CODE, "OVMF code"],
+    [DEFAULT_VARS, "OVMF vars"],
+  ] as const) {
+    try {
+      await stat(path);
+    } catch {
+      missing.push(`${label} not found: ${path}`);
+    }
+  }
+  if (display === "gtk" && (process.env.DISPLAY === undefined || process.env.DISPLAY === "")) {
+    missing.push("DISPLAY is not set (needed for --display gtk)");
+  }
+  if (display === "egl-headless") {
+    try {
+      const nodes = await readdir("/dev/dri");
+      if (!nodes.some((name) => name.startsWith("renderD"))) {
+        missing.push("no DRM render node in /dev/dri (needed for --display egl-headless)");
+      }
+    } catch {
+      missing.push("/dev/dri not found (needed for --display egl-headless)");
+    }
+  }
+  if (display !== "none" && qemuFound) {
+    const help = await new Promise<string>((resolve, reject) => {
+      const child = spawn(QEMU_BIN, ["-display", "help"], { stdio: ["ignore", "pipe", "pipe"] });
+      let out = "";
+      child.stdout?.on("data", (chunk) => {
+        out += String(chunk);
+      });
+      child.stderr?.on("data", (chunk) => {
+        out += String(chunk);
+      });
+      child.once("error", reject);
+      child.once("exit", () => resolve(out));
+    });
+    if (!help.split("\n").map((line) => line.trim()).includes(display)) {
+      missing.push(`${QEMU_BIN} was built without display backend ${display}`);
+    }
+  }
+  return missing;
+}
+
 // The platform drops its error listener once the server is up; a later server error
 // (the acceptor breaking) still needs the fatal line, the flush, and exit 1.
 const server = createServer();
@@ -504,7 +569,16 @@ const proxy = Command.make(
         userMessage: "--automation is exclusive",
       }));
     }
-    return Layer.launch(main(Option.getOrElse(display, () => "none"), automation)).pipe(
+    const resolved = Option.getOrElse(display, () => "none");
+    return Effect.gen(function* () {
+      const missing = yield* Effect.promise(() => missingHostRequirements(resolved));
+      if (missing.length > 0) {
+        const text = `missing host requirements:\n${missing.join("\n")}`;
+        console.error(`proxy: ${text}`);
+        return yield* Effect.fail(new Error(text));
+      }
+      return yield* Layer.launch(main(resolved, automation));
+    }).pipe(
       Effect.tapError((err) => Effect.sync(() => log(db, { level: "fatal", text: `proxy: ${errorDetail(err)}` }, { cause: err }))),
     );
   },
