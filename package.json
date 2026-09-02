@@ -8,7 +8,7 @@
   "scripts": {
     "client": "node --experimental-strip-types src/qemu/cli.ts",
     "dev": "wrangler dev --remote",
-    "test": "node --test --experimental-strip-types src/client.test.ts src/experiment.test.ts src/qmp/json-stream.test.ts src/qemu/client.test.ts src/qemu/keys.test.ts src/sentry.test.ts",
+    "test": "node --test --experimental-strip-types src/client.test.ts src/experiment.test.ts src/qmp/json-stream.test.ts src/qemu/client.test.ts src/qemu/keys.test.ts src/sentry.test.ts src/test-results.test.ts",
     "lint": "oxlint --type-aware --type-check",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node --experimental-strip-types src/db/migrate.ts"
