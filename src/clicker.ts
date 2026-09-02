@@ -74,18 +74,14 @@ export const clickerPage = `<!doctype html>
       let grabY = 0;
       let dragging = false;
 
-      function contained() {
-        const r = red.getBoundingClientRect();
-        const t = target.getBoundingClientRect();
-        return r.left >= t.left && r.top >= t.top && r.right <= t.right && r.bottom <= t.bottom;
-      }
-
       function place(nextX, nextY) {
         x = Math.min(Math.max(0, nextX), innerWidth - size);
         y = Math.min(Math.max(0, nextY), innerHeight - size);
         red.style.left = x + "px";
         red.style.top = y + "px";
-        target.classList.toggle("in", contained());
+        const r = red.getBoundingClientRect();
+        const t = target.getBoundingClientRect();
+        target.classList.toggle("in", r.left >= t.left && r.top >= t.top && r.right <= t.right && r.bottom <= t.bottom);
       }
 
       blue.addEventListener("click", () => {
