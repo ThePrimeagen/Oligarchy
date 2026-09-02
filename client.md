@@ -34,10 +34,10 @@ The proxy and `experiment new` read these from the environment. A missing `DATAB
 
 Every QEMU command requires `--agent-id <your-id>`. The flag may sit before or after the subcommand. An invocation without it fails.
 
-The proxy address is `OLIGARCHY_ADDR`, default `127.0.0.1:42069`. The proxy must already be running.
+The proxy address is `--server-url`, default `127.0.0.1:42069`. The flag may sit before or after the subcommand. The proxy must already be running.
 
 ```bash
-./client --agent-id <agent> <command> ...
+./client --agent-id <agent> [--server-url <host:port>] <command> ...
 ```
 
 `start` prints a session id. Every other QEMU command takes that id.

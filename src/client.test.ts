@@ -57,10 +57,15 @@ describe("./client happy path", () => {
     assert.ok(address !== null && typeof address !== "string");
 
     try {
-      const result = await runClient(
-        ["--agent-id", "agent-1", "send-keys", "session-1", "hello"],
-        { OLIGARCHY_ADDR: `127.0.0.1:${address.port}` },
-      );
+      const result = await runClient([
+        "--agent-id",
+        "agent-1",
+        "--server-url",
+        `127.0.0.1:${address.port}`,
+        "send-keys",
+        "session-1",
+        "hello",
+      ]);
       assert.equal(result.code, 0);
       assert.equal(result.stdout, "");
       assert.deepEqual(await request, {
