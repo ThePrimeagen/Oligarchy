@@ -55,25 +55,22 @@ function errorDetail(err: unknown): string {
   return e.cause instanceof Error ? e.cause.message : e.message;
 }
 
-function recorder(
-  sessionId: string,
-  agentId: string,
-  parentSpan: QemuSpan,
-  actions: Set<Promise<void>>,
-): QemuExchangeRecorder {
+function recorder(live: LiveSession): QemuExchangeRecorder {
   return async (command) => {
     let finishTracking!: () => void;
     const active = new Promise<void>((resolve) => {
       finishTracking = resolve;
     });
-    actions.add(active);
-    const span = startQemuActionSpan(parentSpan, sessionId, agentId, command.execute);
+    live.actions.add(active);
+    const sessionId = live.qemu.id;
+    const agentId = live.agent;
+    const span = startQemuActionSpan(live.intent ?? live.span, sessionId, agentId, command.execute);
     let id: number;
     try {
       id = await startAction(db, { sessionId, agentId, request: command });
     } catch (err) {
       finishQemuActionSpan(span, "failed");
-      actions.delete(active);
+      live.actions.delete(active);
       finishTracking();
       throw err;
     }
@@ -87,7 +84,7 @@ function recorder(
         throw err;
       } finally {
         finishQemuActionSpan(span, state);
-        actions.delete(active);
+        live.actions.delete(active);
         finishTracking();
       }
     };
@@ -203,11 +200,10 @@ function jsonBody<S extends Schema.Constraint>(
 type RouteHandler = Effect.Effect<HttpServerResponse.HttpServerResponse, ApiError, HttpRouter.Provided>;
 
 async function launchQemu(
-  qemu: Qemu,
+  live: LiveSession,
   cfg: typeof StartBody.Type,
-  span: QemuSpan,
-  actions: Set<Promise<void>>,
 ): Promise<void> {
+  const qemu = live.qemu;
   try {
     await registerAgent(db, cfg.agent, qemu.id);
     const iso = await getIso(db, cfg.iso, { sessionId: qemu.id, agentId: cfg.agent });
@@ -217,11 +213,11 @@ async function launchQemu(
       // start() expects the session dir; with a caller-provided disk, createDisk never made it.
       await mkdir(qemu.dir, { recursive: true, mode: 0o700 });
     }
-    await start(qemu, { iso, disk: cfg.disk }, recorder(qemu.id, cfg.agent, span, actions));
+    await start(qemu, { iso, disk: cfg.disk }, recorder(live));
     await sessionRunning(db, qemu.id);
   } catch (err) {
     await stop(qemu).catch(() => {});
-    await Promise.all(actions);
+    await Promise.all(live.actions);
     await endSession(db, qemu.id, "failed", (err as Error).message).catch((e: unknown) => {
       log(db, { level: "error", text: `db: recording a failed start failed too: ${(e as Error).message}`, sessionId: qemu.id, agentId: cfg.agent }, { cause: e });
     });
@@ -252,7 +248,7 @@ function startSession(cfg: typeof StartBody.Type, started: number, display: Qemu
       agentId: cfg.agent,
     });
     yield* Effect.tryPromise({
-      try: () => launchQemu(qemu, cfg, span, actions),
+      try: () => launchQemu(live, cfg),
       catch: (err) => {
         if (openSessions.delete(live)) {
           finishQemuSpan(span, "failed");
@@ -423,7 +419,7 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
         try: () => parseKeys(keys, encoding),
         catch: (err) => badRequest((err as Error).message, { sessionId: qemu.id, agentId: agent }),
       });
-      const record = recorder(qemu.id, agent, live.intent ?? live.span, live.actions);
+      const record = recorder(live);
       yield* Effect.tryPromise({
         try: async () => {
           for (const chord of chords) {
@@ -448,7 +444,7 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
         return yield* Effect.fail(badRequest("mouse: clicks must be a positive integer", { sessionId: qemu.id, agentId: agent }));
       }
       yield* Effect.tryPromise({
-        try: () => sendMouse(qemu, x, y, button, clicks, recorder(qemu.id, agent, live.intent ?? live.span, live.actions)),
+        try: () => sendMouse(qemu, x, y, button, clicks, recorder(live)),
         catch: (err) => exchangeFailed(err, { sessionId: qemu.id, agentId: agent }),
       });
       log(db, {
