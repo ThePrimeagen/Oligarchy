@@ -90,7 +90,8 @@ export function finishIntentSpan(span: QemuSpan, status: "completed" | "cancelle
   if (status === "completed") {
     span.setStatus({ code: 1 });
   } else {
-    span.setStatus({ code: 2, message: "cancelled" });
+    // Sentry maps status message "cancelled" to ok.
+    span.setStatus({ code: 2, message: "aborted" });
   }
   span.end();
 }
