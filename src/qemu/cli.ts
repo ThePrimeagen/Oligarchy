@@ -193,7 +193,9 @@ const sendMouse = Command.make(
     y: Argument.float("y").pipe(Argument.withSchema(UnitInterval)),
     button: Argument.choice("button", ["left", "middle", "right", "wheel-up", "wheel-down"]).pipe(Argument.optional),
     clicks: Argument.integer("clicks").pipe(
-      Argument.withSchema(Schema.Number.check(Schema.isGreaterThanOrEqualTo(1))),
+      Argument.withSchema(
+        Schema.Number.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(100)),
+      ),
       Argument.optional,
     ),
   },

@@ -25,6 +25,9 @@ const [host, port] = addr.split(":");
 const SESSION_TIMEOUT_MS = 10 * 60 * 1000;
 const SESSION_TIMEOUT_CHECK_MS = 10_000;
 const SESSION_TIMEOUT_REASON = "no command received for 10 minutes";
+// A click is two QMP exchanges and two action rows; cap the pulse count so one
+// request cannot enqueue an unbounded amount of work.
+const MAX_CLICKS = 100;
 
 const db = connectDatabase();
 
@@ -417,8 +420,8 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
       if (!(x >= 0 && x <= 1 && y >= 0 && y <= 1)) {
         return yield* Effect.fail(badRequest("mouse: x and y must be in 0..1", { sessionId: qemu.id, agentId: agent }));
       }
-      if (clicks !== undefined && (!Number.isInteger(clicks) || clicks < 1)) {
-        return yield* Effect.fail(badRequest("mouse: clicks must be a positive integer", { sessionId: qemu.id, agentId: agent }));
+      if (clicks !== undefined && (!Number.isInteger(clicks) || clicks < 1 || clicks > MAX_CLICKS)) {
+        return yield* Effect.fail(badRequest(`mouse: clicks must be an integer in 1..${MAX_CLICKS}`, { sessionId: qemu.id, agentId: agent }));
       }
       yield* Effect.tryPromise({
         try: () => sendMouse(qemu, x, y, button, clicks, recorder(live)),
@@ -673,10 +676,13 @@ const proxy = Command.make(
     return Effect.gen(function* () {
       const missing = yield* Effect.promise(() => missingHostRequirements(resolved));
       if (missing.length > 0) {
-        const text = `missing host requirements:\n${missing.join("\n")}`;
-        console.error(`proxy: ${text}`);
-        return yield* Effect.fail(new Error(text));
+        return yield* Effect.fail(new Error(`missing host requirements:\n${missing.join("\n")}`));
       }
+      // Fail at startup, not on the first request, if the control-plane DB is unreachable.
+      yield* Effect.tryPromise({
+        try: () => db.$client.query("select 1"),
+        catch: (cause) => new Error(`database unreachable: ${errorDetail(cause)}`),
+      });
       return yield* Layer.launch(main(resolved, automation));
     }).pipe(
       Effect.tapError((err) => Effect.sync(() => log(db, { level: "fatal", text: `proxy: ${errorDetail(err)}` }, { cause: err }))),
