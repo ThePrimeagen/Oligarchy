@@ -1,6 +1,5 @@
-import { spawn } from "node:child_process";
 import { createServer } from "node:http";
-import { mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
+import { mkdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { loadEnvFile } from "node:process";
 import { Cause, Effect, Exit, Layer, Option, Schema } from "effect";
@@ -10,7 +9,7 @@ import { NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node
 import { flushLogs, log } from "../db/log.ts";
 import { connectDatabase, endSession, finishAction, insertSession, registerAgent, sessionRunning, startAction } from "../db/ops.ts";
 import { flushSentry, initSentry } from "../sentry.ts";
-import { QEMU_DISPLAYS, createDisk, createQemu, screendump, sendKey, sendMouse, start, stop, type Qemu, type QemuDisplay } from "./client.ts";
+import { QEMU_DISPLAYS, QEMU_VGAS, createDisk, createQemu, screendump, sendKey, sendMouse, start, stop, type Qemu, type QemuDisplay, type QemuVga } from "./client.ts";
 import { getIso } from "./iso.ts";
 import { parseKeys } from "./keys.ts";
 import { collectStats, startCpuSampler } from "./stats.ts";
@@ -172,10 +171,10 @@ async function launchQemu(qemu: Qemu, cfg: typeof StartBody.Type): Promise<void>
   }
 }
 
-function startSession(cfg: typeof StartBody.Type, started: number, display: QemuDisplay, automation: boolean): Effect.Effect<string, ApiError> {
+function startSession(cfg: typeof StartBody.Type, started: number, display: QemuDisplay, vga: QemuVga): Effect.Effect<string, ApiError> {
   return Effect.gen(function* () {
     const isUrl = cfg.iso.startsWith("http://") || cfg.iso.startsWith("https://");
-    const qemu = createQemu({ display, automation });
+    const qemu = createQemu({ display, vga });
     yield* Effect.tryPromise({
       try: () => insertSession(db, qemu.id, { iso: cfg.iso, disk: cfg.disk }, isUrl ? "downloading" : "running"),
       catch: (cause) => internal(cause, { sessionId: qemu.id, agentId: cfg.agent }),
@@ -198,12 +197,12 @@ function startSession(cfg: typeof StartBody.Type, started: number, display: Qemu
 // The session-driving routes are uninterruptible: a client disconnect interrupts the
 // request's fiber, and a state transition torn in half leaves a machine the sessions
 // map never received — unreachable and unkillable — or a kill that went unrecorded.
-const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((router) =>
+const routes = (display: QemuDisplay, vga: QemuVga) => HttpRouter.use((router) =>
   Effect.gen(function* () {
     yield* router.add("POST", "/start", Effect.gen(function* () {
       const started = Date.now();
       const cfg = yield* jsonBody(StartBody);
-      const id = yield* startSession(cfg, started, display, automation);
+      const id = yield* startSession(cfg, started, display, vga);
       return HttpServerResponse.jsonUnsafe({ id });
     }) satisfies RouteHandler, { uninterruptible: true });
 
@@ -470,83 +469,19 @@ const drainSessions = Layer.effectDiscard(
   ),
 );
 
-const QEMU_BIN = "qemu-system-x86_64";
-const QEMU_IMG = "qemu-img";
-const DEFAULT_CODE = "/usr/share/edk2/x64/OVMF_CODE.4m.fd";
-const DEFAULT_VARS = "/usr/share/edk2/x64/OVMF_VARS.4m.fd";
-
-async function missingHostRequirements(display: QemuDisplay): Promise<string[]> {
-  const missing: string[] = [];
-  let qemuFound = false;
-  for (const bin of [QEMU_BIN, QEMU_IMG] as const) {
-    const found = await new Promise<boolean>((resolve) => {
-      const child = spawn("/bin/sh", ["-c", `command -v ${bin}`], { stdio: "ignore" });
-      child.once("error", () => resolve(false));
-      child.once("exit", (code) => resolve(code === 0));
-    });
-    if (bin === QEMU_BIN) {
-      qemuFound = found;
-    }
-    if (!found) {
-      missing.push(`${bin} not on PATH`);
-    }
-  }
-  for (const [path, label] of [
-    [DEFAULT_CODE, "OVMF code"],
-    [DEFAULT_VARS, "OVMF vars"],
-  ] as const) {
-    try {
-      await stat(path);
-    } catch {
-      missing.push(`${label} not found: ${path}`);
-    }
-  }
-  if (display === "gtk" && (process.env.DISPLAY === undefined || process.env.DISPLAY === "")) {
-    missing.push("DISPLAY is not set (needed for --display gtk)");
-  }
-  if (display === "egl-headless") {
-    try {
-      const nodes = await readdir("/dev/dri");
-      if (!nodes.some((name) => name.startsWith("renderD"))) {
-        missing.push("no DRM render node in /dev/dri (needed for --display egl-headless)");
-      }
-    } catch {
-      missing.push("/dev/dri not found (needed for --display egl-headless)");
-    }
-  }
-  if (display !== "none" && qemuFound) {
-    const help = await new Promise<string>((resolve, reject) => {
-      const child = spawn(QEMU_BIN, ["-display", "help"], { stdio: ["ignore", "pipe", "pipe"] });
-      let out = "";
-      child.stdout?.on("data", (chunk) => {
-        out += String(chunk);
-      });
-      child.stderr?.on("data", (chunk) => {
-        out += String(chunk);
-      });
-      child.once("error", reject);
-      child.once("exit", () => resolve(out));
-    });
-    if (!help.split("\n").map((line) => line.trim()).includes(display)) {
-      missing.push(`${QEMU_BIN} was built without display backend ${display}`);
-    }
-  }
-  return missing;
-}
-
 // The platform drops its error listener once the server is up; a later server error
 // (the acceptor breaking) still needs the fatal line, the flush, and exit 1.
 const server = createServer();
-const main = (display: QemuDisplay, automation: boolean) => Layer.effectDiscard(
+const main = (display: QemuDisplay, vga: QemuVga) => Layer.effectDiscard(
   Effect.sync(() => {
-    log(db, `oligarchy proxy listening on ${addr}; display ${display}${automation ? "; automation" : ""}`);
+    log(db, `oligarchy proxy listening on ${addr}; display ${display}; vga ${vga}`);
     server.on("error", (err) => {
       log(db, { level: "fatal", text: `proxy: ${err.message}` }, { cause: err });
       void flushLogs().then(flushSentry).then(() => process.exit(1));
     });
   }),
 ).pipe(
-  Layer.provide(HttpRouter.serve(Layer.mergeAll(routes(display, automation), respond, drainSessions), { disableLogger: true, disableListenLog: true })),
+  Layer.provide(HttpRouter.serve(Layer.mergeAll(routes(display, vga), respond, drainSessions), { disableLogger: true, disableListenLog: true })),
   Layer.provide(NodeHttpServer.layer(() => server, { host, port: Number(port) })),
 );
 
@@ -555,30 +490,31 @@ const proxy = Command.make(
   {
     display: Flag.choice("display", QEMU_DISPLAYS).pipe(
       Flag.optional,
-      Flag.withDescription("QEMU display backend for every session; none captures without showing a window"),
+      Flag.withDescription("QEMU display backend for every session; defaults to none"),
+    ),
+    vga: Flag.choice("vga", QEMU_VGAS).pipe(
+      Flag.optional,
+      Flag.withDescription("Guest VGA: std is QEMU's default card; virtio and virtio-gl replace it"),
     ),
     automation: Flag.boolean("automation").pipe(
       Flag.withDefault(false),
-      Flag.withDescription("Force the automation QEMU profile for every session"),
+      Flag.withDescription("Force -display none and virtio-vga; cannot be combined with --display or --vga"),
     ),
   },
-  ({ display, automation }) => {
-    if (automation && Option.isSome(display)) {
-      return Effect.fail(new CliError.UserError({
-        cause: new Error("--automation is exclusive"),
-        userMessage: "--automation is exclusive",
-      }));
+  ({ display, vga, automation }) => {
+    if (automation && (Option.isSome(display) || Option.isSome(vga))) {
+      return Effect.fail(
+        new CliError.UserError({
+          cause: new Error("--automation cannot be combined with --display or --vga"),
+        }),
+      );
     }
-    const resolved = Option.getOrElse(display, () => "none");
-    return Effect.gen(function* () {
-      const missing = yield* Effect.promise(() => missingHostRequirements(resolved));
-      if (missing.length > 0) {
-        const text = `missing host requirements:\n${missing.join("\n")}`;
-        console.error(`proxy: ${text}`);
-        return yield* Effect.fail(new Error(text));
-      }
-      return yield* Layer.launch(main(resolved, automation));
-    }).pipe(
+    return Layer.launch(
+      main(
+        automation ? "none" : Option.getOrElse(display, () => "none"),
+        automation ? "virtio" : Option.getOrElse(vga, () => "std"),
+      ),
+    ).pipe(
       Effect.tapError((err) => Effect.sync(() => log(db, { level: "fatal", text: `proxy: ${errorDetail(err)}` }, { cause: err }))),
     );
   },
