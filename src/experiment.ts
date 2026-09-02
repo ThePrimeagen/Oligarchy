@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { loadEnvFile } from "node:process";
 import { Effect, Schema } from "effect";
 import { CliError, Command, Flag } from "effect/unstable/cli";
@@ -305,7 +306,9 @@ export async function createExperiment(
 }
 
 export async function newExperiment(input: { iso: string; serverUrl: string; version: string }): Promise<void> {
-  loadEnvFile();
+  if (existsSync(".env")) {
+    loadEnvFile();
+  }
 
   const token = process.env.LINEAR_API_TOKEN;
   if (token === undefined || token === "") {
