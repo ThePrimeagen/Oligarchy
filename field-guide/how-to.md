@@ -4,16 +4,18 @@ The CLI talks to a running proxy (`src/qemu/proxy.ts`). Start the proxy first, t
 
 ```bash
 ./server 42069
+./server 42069 --automation
 ./server 42069 --display gtk
 ./server 42069 --vga virtio
 ./server 42069 --display gtk --vga virtio-gl
+./server 42069 --display none --vga virtio
 ./client --agent-id <agent> start
 ./client --agent-id <agent> start --iso omarchy.iso --disk qemu-img.qcow2
 ```
 
 `./server <port>` binds `127.0.0.1` on that port and loads `.env` from the current directory (`DATABASE_URL` and the rest). Variables already in the environment win, so the port from `./server` is not overwritten. Every start request must include an ISO; the server has none of its own. The client defaults `--iso` to `omarchy.iso` and reads the address from `OLIGARCHY_ADDR` (default `127.0.0.1:42069`).
 
-Sessions boot headless: QEMU runs with `-display none`, so nothing appears on the host while a guest starts or runs, and `get-image` is the only view of it. To watch a session, start the proxy with `--display gtk` (or `sdl`) and every session it boots opens a window instead. `egl-headless`, `spice-app`, and `dbus` are accepted too and handed straight to QEMU; they show nothing on their own. `--vga virtio` keeps that headless path and gives the guest a virtio-gpu instead of Bochs. `--vga virtio-gl` is 3D (virgl) and cannot use `-display none` — pair it with `egl-headless` or `gtk`. See [http-api.md](http-api.md) for what the flags do and do not change.
+Sessions boot headless: QEMU runs with `-display none`, so nothing appears on the host while a guest starts or runs, and `get-image` is the only view of it. `--automation` is the agent setup: `-display none` and virtio-vga (not virtio-vga-gl), and it cannot be combined with `--display` or `--vga`. To watch a session, start the proxy with `--display gtk` (or `sdl`) and every session it boots opens a window instead. `egl-headless`, `spice-app`, and `dbus` are accepted too and handed straight to QEMU; they show nothing on their own. `--vga virtio` keeps that headless path and gives the guest a virtio-gpu instead of Bochs. `--vga virtio-gl` is 3D (virgl) and cannot use `-display none` — pair it with `egl-headless` or `gtk`. See [http-api.md](http-api.md) for what the flags do and do not change.
 
 Every QEMU invocation carries `--agent-id <agent>`, the calling agent's id — required, before or after the subcommand, see [cli.md](cli.md).
 

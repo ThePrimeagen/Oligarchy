@@ -2,8 +2,8 @@ import { createServer } from "node:http";
 import { mkdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { loadEnvFile } from "node:process";
-import { Cause, Effect, Exit, Layer, Schema } from "effect";
-import { Command, Flag } from "effect/unstable/cli";
+import { Cause, Effect, Exit, Layer, Option, Schema } from "effect";
+import { CliError, Command, Flag } from "effect/unstable/cli";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node";
 import { flushLogs, log } from "../db/log.ts";
@@ -489,18 +489,35 @@ const proxy = Command.make(
   "proxy",
   {
     display: Flag.choice("display", QEMU_DISPLAYS).pipe(
-      Flag.withDefault("none"),
-      Flag.withDescription("QEMU display backend for every session; none captures without showing a window"),
+      Flag.optional,
+      Flag.withDescription("QEMU display backend for every session; defaults to none"),
     ),
     vga: Flag.choice("vga", QEMU_VGAS).pipe(
-      Flag.withDefault("std"),
+      Flag.optional,
       Flag.withDescription("Guest VGA: std is QEMU's default card; virtio and virtio-gl replace it"),
     ),
-  },
-  ({ display, vga }) =>
-    Layer.launch(main(display, vga)).pipe(
-      Effect.tapError((err) => Effect.sync(() => log(db, { level: "fatal", text: `proxy: ${errorDetail(err)}` }, { cause: err }))),
+    automation: Flag.boolean("automation").pipe(
+      Flag.withDefault(false),
+      Flag.withDescription("Force -display none and virtio-vga; cannot be combined with --display or --vga"),
     ),
+  },
+  ({ display, vga, automation }) => {
+    if (automation && (Option.isSome(display) || Option.isSome(vga))) {
+      return Effect.fail(
+        new CliError.UserError({
+          cause: new Error("--automation cannot be combined with --display or --vga"),
+        }),
+      );
+    }
+    return Layer.launch(
+      main(
+        automation ? "none" : Option.getOrElse(display, () => "none"),
+        automation ? "virtio" : Option.getOrElse(vga, () => "std"),
+      ),
+    ).pipe(
+      Effect.tapError((err) => Effect.sync(() => log(db, { level: "fatal", text: `proxy: ${errorDetail(err)}` }, { cause: err }))),
+    );
+  },
 ).pipe(Command.withDescription("The oligarchy proxy: boots QEMU sessions and drives them over QMP"));
 
 NodeRuntime.runMain(
