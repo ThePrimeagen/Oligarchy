@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { copyFile, mkdir, readdir, rm, stat } from "node:fs/promises";
+import { constants } from "node:fs";
+import { access, copyFile, mkdir, readdir, rm, stat } from "node:fs/promises";
 import { createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -124,9 +125,15 @@ export async function start(
     automation: qemu.options.automation === true,
   });
 
+  // QEMU's stdio is otherwise discarded, so a boot failure (bad KVM, a rejected
+  // arg) would reach us as a bare timeout. Keep the tail of stderr to name it.
+  let stderr = "";
+  const withStderr = (message: string): string =>
+    stderr === "" ? message : `${message}: ${stderr.trim()}`;
+
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error("qemu: handshake timeout")), HANDSHAKE_MS);
+    timer = setTimeout(() => reject(new Error(withStderr("qemu: handshake timeout"))), HANDSHAKE_MS);
   });
 
   // QEMU connects to us: listen on the session socket, then spawn.
@@ -140,11 +147,14 @@ export async function start(
           reject(new Error("qemu: closed"));
           return;
         }
-        const proc = spawn(QEMU_BIN, args, { stdio: "ignore" });
+        const proc = spawn(QEMU_BIN, args, { stdio: ["ignore", "ignore", "pipe"] });
         qemu.proc = proc;
+        proc.stderr?.on("data", (chunk) => {
+          stderr = (stderr + String(chunk)).slice(-4096);
+        });
         proc.once("error", (err) => reject(new Error(`qemu: ${err.message}`)));
         proc.once("exit", (code) =>
-          reject(new Error(`qemu: exited ${code} before QMP connect`)),
+          reject(new Error(withStderr(`qemu: exited ${code} before QMP connect`))),
         );
       });
     });
@@ -423,6 +433,12 @@ export async function missingHostRequirements(display: QemuDisplay): Promise<str
       missing.push(`${label} not found: ${path}`);
     }
   }
+  // Every session boots with accel=kvm, so the device must be usable by this process.
+  try {
+    await access("/dev/kvm", constants.R_OK | constants.W_OK);
+  } catch {
+    missing.push("/dev/kvm is not readable and writable (needed for accel=kvm)");
+  }
   if (display === "gtk" && (process.env.DISPLAY === undefined || process.env.DISPLAY === "")) {
     missing.push("DISPLAY is not set (needed for --display gtk)");
   }
@@ -447,7 +463,8 @@ export async function missingHostRequirements(display: QemuDisplay): Promise<str
         out += String(chunk);
       });
       child.once("error", reject);
-      child.once("exit", () => resolve(out));
+      // close, not exit: exit can fire before the piped stdout is fully read.
+      child.once("close", () => resolve(out));
     });
     if (!help.split("\n").map((line) => line.trim()).includes(display)) {
       missing.push(`${QEMU_BIN} was built without display backend ${display}`);
