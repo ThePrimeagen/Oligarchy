@@ -6,16 +6,16 @@ Consult this table of contents first. Read only the section you need.
 |---------|-----:|
 | [Important](#important) | 20 |
 | [Invoke](#invoke) | 24 |
-| [start](#start) | 43 |
-| [get-image](#get-image) | 57 |
-| [get-serial](#get-serial) | 68 |
-| [send-keys](#send-keys) | 90 |
-| [send-mouse](#send-mouse) | 102 |
-| [stop](#stop) | 116 |
-| [experiment new](#experiment-new) | 128 |
-| [Keys](#keys) | 138 |
-| [Mouse](#mouse) | 150 |
-| [The loop](#the-loop) | 158 |
+| [start](#start) | 40 |
+| [get-image](#get-image) | 54 |
+| [get-serial](#get-serial) | 65 |
+| [send-keys](#send-keys) | 87 |
+| [send-mouse](#send-mouse) | 99 |
+| [stop](#stop) | 113 |
+| [experiment new](#experiment-new) | 125 |
+| [Keys](#keys) | 135 |
+| [Mouse](#mouse) | 147 |
+| [The loop](#the-loop) | 155 |
 
 ## Important
 
@@ -23,15 +23,12 @@ If you are the client, or an agent driving the client: do not look at code. Only
 
 ## Invoke
 
-`./client` and `./cl` are the same program.
-
 Every QEMU command requires `--agent-id <your-id>`. The flag may sit before or after the subcommand. An invocation without it fails.
 
 The proxy address is `OLIGARCHY_ADDR`, default `127.0.0.1:42069`. The proxy must already be running.
 
 ```bash
 ./client --agent-id <agent> <command> ...
-./cl --agent-id <agent> <command> ...
 ```
 
 `start` prints a session id. Every other QEMU command takes that id.
