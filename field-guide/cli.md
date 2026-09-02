@@ -12,7 +12,7 @@ The TypeScript client for the oligarchy control plane. It sends HTTP requests to
 ./client --agent-id <agent> stop <id> [status [reason]]
 ```
 
-The server address comes from `OLIGARCHY_ADDR`, default `127.0.0.1:42069`.
+The server address comes from `--server-url`, default `127.0.0.1:42069`. It is a shared flag on the root command and may sit before or after the subcommand name.
 
 `--agent-id <agent>` is a shared flag on the root command, required for every QEMU command and unused by `experiment`. It may sit before or after the subcommand name. This client is used by agents, not humans — the inconvenience of typing it is deliberate. An invocation without it is a missing-option error.
 
@@ -82,4 +82,4 @@ Kills the session. Only the agent that started it can stop it; a different `--ag
 
 ## Reading the file
 
-The root `client` command shares `--agent-id` with its subcommands. QEMU handlers yield the parent command and fail if the flag is missing. `experiment` is a sibling subcommand with its own `new` command. HTTP helpers stay local to the file: `postJSON`, `readAPIError`, and `errorMessage`. There is no other machinery — see the [philosophy](philosophy.md) for why it should stay that way.
+The root `client` command shares `--agent-id` and `--server-url` with its subcommands. QEMU handlers yield the parent command and fail if `--agent-id` is missing. `experiment` is a sibling subcommand with its own `new` command. HTTP helpers stay local to the file: `postJSON`, `readAPIError`, and `errorMessage`. There is no other machinery — see the [philosophy](philosophy.md) for why it should stay that way.
