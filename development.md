@@ -4,7 +4,7 @@ Check the field guide: [field-guide/index.md](field-guide/index.md).
 
 ## Branches
 
-- All development happens on `master`. Do not create feature branches, `cursor/*` branches, or pull requests. Work on `master`, commit to `master`, push `master`.
+- Never commit or push to `master`. Create a feature branch, push that branch, and open a pull request.
 
 ## Host
 
