@@ -7,7 +7,7 @@ import { Argument, CliError, Command, Flag } from "effect/unstable/cli";
 import { experimentCommand } from "../experiment.ts";
 import { runTestResults } from "../test-results.ts";
 
-const DEFAULT_ADDR = "127.0.0.1:42069";
+const DEFAULT_SERVER_URL = "http://127.0.0.1:42069";
 const DEFAULT_ISO = "omarchy.iso";
 const DEFAULT_ENCODING = "oligarchy";
 
@@ -23,8 +23,8 @@ const client = Command.make("client").pipe(
       Flag.withDescription("Calling agent's id"),
     ),
     serverUrl: Flag.string("server-url").pipe(
-      Flag.withDefault(DEFAULT_ADDR),
-      Flag.withDescription("Proxy address (host:port)"),
+      Flag.withDefault(DEFAULT_SERVER_URL),
+      Flag.withDescription("Proxy URL, used as given"),
     ),
   }),
   Command.withDescription("The client for the oligarchy proxy"),
@@ -92,7 +92,7 @@ const getImage = Command.make(
     const { agentId, serverUrl } = yield* client;
     const agent = yield* requireAgent(agentId);
     const res = yield* Effect.tryPromise({
-      try: () => fetch(`http://${serverUrl}/image?id=${encodeURIComponent(id)}&agent=${encodeURIComponent(agent)}`),
+      try: () => fetch(`${serverUrl}/image?id=${encodeURIComponent(id)}&agent=${encodeURIComponent(agent)}`),
       catch: fail,
     });
     if (res.status !== 200) {
@@ -135,7 +135,7 @@ const getSerial = Command.make(
     const { agentId, serverUrl } = yield* client;
     const agent = yield* requireAgent(agentId);
     const res = yield* Effect.tryPromise({
-      try: () => fetch(`http://${serverUrl}/serial?id=${encodeURIComponent(id)}&agent=${encodeURIComponent(agent)}`),
+      try: () => fetch(`${serverUrl}/serial?id=${encodeURIComponent(id)}&agent=${encodeURIComponent(agent)}`),
       catch: fail,
     });
     if (res.status !== 200) {
@@ -316,8 +316,8 @@ const app = client.pipe(
   Command.withSubcommands([experimentCommand, testResults, start, getImage, getSerial, sendKeys, sendMouse, stop, intent]),
 );
 
-async function postJSON(addr: string, path: string, body: unknown): Promise<string> {
-  const res = await fetch(`http://${addr}${path}`, {
+async function postJSON(serverUrl: string, path: string, body: unknown): Promise<string> {
+  const res = await fetch(`${serverUrl}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

@@ -1,2 +1,4 @@
-For development, read [development.md](development.md) and the [field guide](field-guide/index.md).
-If you are an agent driving the client, please read [client.md](client.md). The first 19 lines are the table of contents for the client. Consult the table of contents first.
+Two kinds of agent work here.
+
+- A developing agent changes the code. Read [development.md](development.md) and the [field guide](field-guide/index.md).
+- A driving agent uses `./client` to complete a task given in Linear. It never reads or changes code. Read [client.md](client.md); its first 21 lines are the table of contents, consult that first.

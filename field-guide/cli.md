@@ -15,13 +15,13 @@ The TypeScript client for the oligarchy control plane. It sends HTTP requests to
 ./client --agent-id <agent> stop <id> [status [reason]]
 ```
 
-The server address comes from `--server-url`, default `127.0.0.1:42069`. It is a shared flag on the root command and may sit before or after the subcommand name.
+The server comes from `--server-url`, a full URL used exactly as given (no scheme is ever added), default `http://127.0.0.1:42069`. It is a shared flag on the root command and may sit before or after the subcommand name.
 
 `--agent-id <agent>` is a shared flag on the root command, required for every QEMU command, for `test-results`, and for `intent`, unused by `experiment`. It may sit before or after the subcommand name. This client is used by agents, not humans — the inconvenience of typing it is deliberate. An invocation without it is a missing-option error.
 
 ## experiment new
 
-Creates one pending test run (ISO URL and server URL stored on the run) and one pending result for every stored test definition, then opens one Linear issue per definition. Each issue carries that definition's details plus the result UUID, the run UUID, the ISO URL, and the server URL, and is labeled `agent test` plus the required `--version` value. Missing labels are created on the Linear team. The command reads `DATABASE_URL` and `LINEAR_API_TOKEN` from the environment (a `.env` fills in missing variables only), uses the first Linear team available to that API token, writes the creation line through the database logger, and prints the run and Linear issues as JSON.
+Creates one pending test run (ISO URL and server URL stored on the run) and one pending result for every stored test definition, then opens one Linear issue per definition. Each issue is created with its title and labels (`agent test` plus the required `--version` value; missing labels are created on the Linear team), then described in a second call, because the body names the issue's own identifier as the driver's `--agent-id` and Linear assigns that identifier on create. The body is `prompts/linear-issue.html` with its `{{VARIABLES}}` filled: `LINEAR_TICKET`, `RUN_ID`, `RESULT_ID`, `VERSION`, `ISO_URL`, `SERVER_URL`, the definition's `TEST_NAME`, `TEST_DESCRIPTION`, `TEST_INSTRUCTION`, and `TEST_PROOF`, and `CLIENT_MD`, the contents of `client.md`. A variable in the template with no value is an error. The command reads `DATABASE_URL` and `LINEAR_API_TOKEN` from the environment (a `.env` fills in missing variables only), uses the first Linear team available to that API token, writes the creation line through the database logger, and prints the run and Linear issues as JSON.
 
 The ISO must be an HTTPS URL. The server may be an HTTP or HTTPS URL. `--version` is required and must be non-empty. Effect accepts both `--flag=<value>` and `--flag <value>`.
 

@@ -61,7 +61,7 @@ describe("./client happy path", () => {
         "--agent-id",
         "agent-1",
         "--server-url",
-        `127.0.0.1:${address.port}`,
+        `http://127.0.0.1:${address.port}`,
         "send-keys",
         "session-1",
         "hello",
