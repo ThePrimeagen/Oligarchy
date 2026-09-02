@@ -6,7 +6,7 @@ Durable preferences for how code is written in this repo. They come from the mai
 
 Optimize for the person reading the file top to bottom. A function should be inspectable in one pass: read it, know what it does. This is explicitly not "Clean Code" — no Uncle Bob. No tiny single-use helpers, no layers, no interfaces with one implementation, no abstraction bought before it is needed. A little repetition is fine when it keeps each site readable on its own.
 
-`src/qemu/cli.ts` is the reference example: one main file, one function per command, three small shared helpers (`postJSON`, `readAPIError`, `errorMessage`), nothing else.
+`src/qemu/cli.ts` is the reference example: one main file, one Effect `Command` per subcommand, three small shared helpers (`postJSON`, `readAPIError`, `errorMessage`), nothing else. Argument parsing is Effect's CLI (`Command`, `Flag`, `Argument`) — not a hand-rolled flag package.
 
 ## Support only what is used
 
@@ -20,7 +20,7 @@ Trust the contracts of our own components. If a failure cannot happen given the 
 
 Guards this repo deliberately does not have:
 
-- `cmdStart` trusts that a 200 from `/start` carries `{"id": ...}`; it does not re-validate our own server's response shape.
+- `start` trusts that a 200 from `/start` carries `{"id": ...}`; it does not re-validate our own server's response shape.
 - `readAPIError` parses `{"error": ...}` in one try/catch. A malformed error body from our own servers is not a case worth code.
 - `errorMessage` casts to `Error` because everything thrown in the file is one. There is no branch for non-`Error` throws.
 - The cpu sampler's baseline is not nullable. It is established at construction; there is no universe where the sampler exists without it, and the type says so. Do not soften a construction-time requirement into a `| null` union to survive a failure that cannot happen.
@@ -50,7 +50,7 @@ A loop or timer that runs for the life of the process owes three guarantees: it 
 
 ## No normalization functions
 
-No generic parsing or normalizing machinery where direct expressions do the job. State the accepted input directly: `cmdGetImage` lists its three valid argument forms as three conditions; `cmdStart` reads its arguments as literal `--flag value` pairs. An earlier version of the CLI re-implemented Go's `flag` package semantics — fifty lines of parser for two flags. It was deleted. Do not bring it back.
+No generic parsing or normalizing machinery where direct expressions do the job. CLI args go through Effect's `Command` / `Flag` / `Argument` at the process boundary; do not re-implement a flag package beside it.
 
 ## Keep what earns its place
 
@@ -64,7 +64,7 @@ Simplicity is not deleting necessary behavior. Things that stay, and why:
 
 ## Porting: the reference implementation is the spec
 
-When a component mirrors another, the reference's observable behavior beats general convention. The CLI was ported from a since-deleted Go client, and it exits 1 on per-command usage errors because that client did — even though exit 2 is the more common convention. The user-facing interface may deliberately diverge — the Go client took positionals, this CLI takes `--iso`/`--disk` — but wire behavior must match the server exactly.
+When a component mirrors another, the reference's observable behavior beats general convention. The CLI was ported from a since-deleted Go client. Effect's runner exits 1 on parse and command failures. The user-facing interface may deliberately diverge — the Go client took positionals, this CLI takes `--iso`/`--disk` — but wire behavior must match the server exactly.
 
 ## Tests
 

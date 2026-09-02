@@ -109,13 +109,16 @@ export const testBasePrompts = pgTable(
   (table) => [uniqueIndex("test_base_prompts_name_idx").on(table.name)],
 );
 
-// One execution of a set of definitions. The orchestrator owns the row: it opens
-// the run and declares the verdict once the results are in — or timed_out when
-// reports stop coming. Counts are not stored — planned and reported are both
-// readable off the test_results rows.
+// One execution of a set of definitions against one ISO and one control-plane
+// server. The orchestrator owns the row: it opens the run and declares the
+// verdict once the results are in — or timed_out when reports stop coming.
+// Counts are not stored — planned and reported are both readable off the
+// test_results rows.
 export const testRuns = pgTable("test_runs", {
-  id: uuid("id").primaryKey(),
+  id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
+  iso: text("iso").notNull(),
+  serverUrl: text("server_url").notNull(),
   status: testRunStatus("status").notNull().default("pending"),
   reason: text("reason"),
   startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
@@ -130,7 +133,7 @@ export const testRuns = pgTable("test_runs", {
 export const testResults = pgTable(
   "test_results",
   {
-    id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+    id: uuid("result_id").primaryKey().defaultRandom(),
     runId: uuid("run_id")
       .notNull()
       .references(() => testRuns.id),

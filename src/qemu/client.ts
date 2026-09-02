@@ -8,7 +8,6 @@ import { JSONStreamParser } from "../qmp/json-stream.ts";
 
 const QEMU_BIN = "qemu-system-x86_64";
 const QEMU_IMG = "qemu-img";
-export const DEFAULT_ISO = join(import.meta.dirname, "..", "..", "omarchy.iso");
 const DEFAULT_DISK_SIZE = "40G";
 const DEFAULT_CODE = "/usr/share/edk2/x64/OVMF_CODE.4m.fd";
 const DEFAULT_VARS = "/usr/share/edk2/x64/OVMF_VARS.4m.fd";
@@ -17,6 +16,10 @@ const DEFAULT_SMP = 2;
 const DEFAULT_MACHINE = "q35,accel=kvm";
 const DEFAULT_CPU = "host";
 const HANDSHAKE_MS = 10_000;
+// `-display help` minus curses, which needs QEMU's stdio and the proxy detaches it.
+export const QEMU_DISPLAYS = ["none", "gtk", "sdl", "egl-headless", "spice-app", "dbus"] as const;
+export type QemuDisplay = (typeof QEMU_DISPLAYS)[number];
+const DEFAULT_DISPLAY: QemuDisplay = "none";
 
 export type QemuOptions = {
   tmp?: string;
@@ -25,11 +28,12 @@ export type QemuOptions = {
   vars?: string;
   memory?: string;
   smp?: number;
+  display?: QemuDisplay;
 };
 
 export type QemuStartOptions = {
   disk?: string;
-  iso?: string;
+  iso: string;
 };
 
 type Pending = {
@@ -86,7 +90,7 @@ export async function createDisk(qemu: Qemu): Promise<string> {
 
 export async function start(
   qemu: Qemu,
-  options: QemuStartOptions = {},
+  options: QemuStartOptions,
   record?: QemuExchangeRecorder,
 ): Promise<QemuStartResult> {
   if (qemu.socket !== undefined) {
@@ -95,8 +99,7 @@ export async function start(
 
   const disk = options.disk ?? qemu.diskPath;
   await assertFile(disk, "disk");
-  const iso = options.iso ?? DEFAULT_ISO;
-  await assertFile(iso, "iso");
+  await assertFile(options.iso, "iso");
 
   const varsPath = join(qemu.dir, "OVMF_VARS.fd");
   await copyFile(qemu.options.vars ?? DEFAULT_VARS, varsPath);
@@ -105,10 +108,11 @@ export async function start(
     serialPath: qemu.serialPath,
     varsPath,
     diskPath: disk,
-    iso,
+    iso: options.iso,
     code: qemu.options.code ?? DEFAULT_CODE,
     memory: qemu.options.memory ?? DEFAULT_MEMORY,
     smp: qemu.options.smp ?? DEFAULT_SMP,
+    display: qemu.options.display ?? DEFAULT_DISPLAY,
   });
 
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -265,6 +269,7 @@ function qemuArgs(opts: {
   code: string;
   memory: string;
   smp: number;
+  display: QemuDisplay;
 }): string[] {
   return [
     "-machine",
@@ -279,12 +284,10 @@ function qemuArgs(opts: {
     `if=pflash,format=raw,readonly=on,file=${opts.code}`,
     "-drive",
     `if=pflash,format=raw,file=${opts.varsPath}`,
+    // screendump renders the default VGA on demand, so `none` still captures; never add
+    // -nodefaults or -vga none, which remove the console screendump reads.
     "-display",
-    "gtk,gl=on",
-    "-vga",
-    "none",
-    "-device",
-    "virtio-vga-gl",
+    opts.display,
     // usb-tablet is the absolute pointer; without it, input-send-event abs has no handler.
     "-device",
     "qemu-xhci",

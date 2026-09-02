@@ -1,8 +1,9 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
+import type { Pool } from "pg";
 import { actions, agentRuns, images, sessions, type SessionConfig } from "./schema.ts";
 
-export type Db = NodePgDatabase;
+export type Db = NodePgDatabase & { $client: Pool };
 
 export function connectDatabase(): Db {
   const url = process.env.DATABASE_URL;
@@ -25,6 +26,10 @@ export function connectDatabase(): Db {
     return drizzle(parsed.toString());
   }
   return drizzle(url);
+}
+
+export async function closeDatabase(db: Db): Promise<void> {
+  await db.$client.end();
 }
 
 export async function insertSession(db: Db, id: string, config: SessionConfig, status: SessionStartStatus): Promise<void> {

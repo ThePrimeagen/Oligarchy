@@ -2,17 +2,19 @@
 
 The control plane spoken between the CLI and the proxy (`src/qemu/proxy.ts`).
 
-The proxy defaults to `127.0.0.1:42069`. Bodies are JSON except the PNG and the serial log. Errors are `4xx`/`5xx` with `{"error": "<message>"}`.
+The proxy defaults to `127.0.0.1:42069`. `./server <port>` binds that host on the given port and loads `.env`. The server takes no ISO. Bodies are JSON except the PNG and the serial log. Errors are `4xx`/`5xx` with `{"error": "<message>"}`.
 
-Session-driving requests (`/start`, `/image`, `/serial`, `/send-keys`, `/send-mouse`) carry the calling agent's id — `agent` in the POST body, a query param on the GET — so the server attributes the session's [actions](database.md) to that agent. The agent id is required: this control plane is driven by agents, and a request that names none is refused with a 400. `/stop` carries none because a stop exchanges nothing over QMP and is not an action — it carries the session's verdict instead; `/stats` has no session at all. `/serial` is the same kind of non-exchange: it reads a host file QEMU is writing, so it is not an action.
+`./server <port> --display <backend>` picks the QEMU display backend for every session the proxy boots; the value goes straight to QEMU's `-display`. The default is `none`: the guest still gets its VGA card, but no window is opened on the host at boot or while running, and QEMU needs no `DISPLAY` or `WAYLAND_DISPLAY`. `/image` is unaffected — QMP `screendump` asks the VGA device to render its framebuffer on demand and reads the result, so it does not depend on any display backend. Likewise `/send-keys` and `/send-mouse` reach the guest over QMP, not through a window; with `none`, no host window can grab the keyboard or pointer and type into an agent's session by accident. The other accepted values are `gtk`, `sdl`, `egl-headless`, `spice-app`, and `dbus`; anything else is refused at startup. `curses` is not offered because the proxy detaches QEMU's stdio. Do not reach for `-nographic`, `-nodefaults`, or `-vga none` to go headless: the first redirects serial to stdio, and the other two remove the VGA console that `screendump` reads.
+
+Session-driving requests (`/start`, `/image`, `/serial`, `/send-keys`, `/send-mouse`, `/stop`) carry the calling agent's id — `agent` in the POST body, a query param on the GET — so the server attributes the session's [actions](database.md) to that agent. The agent id is required: this control plane is driven by agents, and a request that names none is refused with a 400. After start, `/image`, `/serial`, `/send-keys`, `/send-mouse`, and `/stop` must name the agent that started the session; any other agent is a 403. A stop still exchanges nothing over QMP and is not an action — it carries the session's verdict. `/stats` has no session at all. `/serial` is the same kind of non-exchange: it reads a host file QEMU is writing, so it is not an action.
 
 ## POST /start
 
 Boots a QEMU session. Returns `{"id": "<uuid>"}`.
 
-The body is JSON with three keys — `agent` required, the rest optional:
+The body is JSON with three keys — `iso` and `agent` required, `disk` optional:
 
-- `iso` — guest ISO path or http(s) url. Defaults to the proxy's own default ISO (its argv, or `OLIGARCHY_ISO`).
+- `iso` — guest ISO path or http(s) url. Required.
 - `disk` — qcow2 path, which must already exist. When the key is **absent**, the proxy creates a fresh disk (40G virtual) in the session dir.
 - `agent` — the calling agent's id, for attribution. Required.
 
@@ -54,6 +56,8 @@ Body `{"id", "x", "y", "button"?, "clicks"?, "agent"}`. Moves the pointer to `(x
 
 ## POST /stop
 
-Body `{"id", "status"?, "reason"?}`; kills the QEMU and removes its session directory, then closes the session row with the verdict — `succeeded`, `failed`, or `aborted` — and the optional reason. A stop without a verdict is an abort: a machine killed with nothing to say for itself. Returns `{"ok": "true"}`.
+Body `{"id", "agent", "status"?, "reason"?}`. `id` and `agent` are required: the pair must be the session this proxy is running and the agent that started it. A missing agent is a 400; an unknown session is a 404; a known session owned by a different agent is a 403. On a match, kills the QEMU and removes its session directory, then closes the session row with the verdict — `succeeded`, `failed`, or `aborted` — and the optional reason. A stop without a verdict is an abort: a machine killed with nothing to say for itself. Returns `{"ok": "true"}`.
+
+Timeouts and proxy shutdown still kill sessions without an agent — those are proxy-owned, not a caller claiming a session.
 
 Once a session is running, each `/image`, `/serial`, `/send-keys`, or `/send-mouse` request for it restarts a ten-minute inactivity window. If no command arrives before that window expires, the proxy removes and kills the session automatically, closes it with status `timed_out` and reason `no command received for 10 minutes`, and writes the same event to the session log. `timed_out` is proxy-owned and is not an accepted `/stop` verdict.

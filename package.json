@@ -2,11 +2,16 @@
   "name": "oligarchy",
   "private": true,
   "type": "module",
+  "bin": {
+    "client": "src/qemu/cli.ts"
+  },
   "scripts": {
+    "client": "node --experimental-strip-types src/qemu/cli.ts",
     "dev": "wrangler dev --remote",
-    "test": "node --test --experimental-strip-types src/qmp/json-stream.test.ts src/qemu/keys.test.ts",
+    "test": "node --test --experimental-strip-types src/client.test.ts src/experiment.test.ts src/qmp/json-stream.test.ts src/qemu/keys.test.ts",
     "lint": "oxlint --type-aware --type-check",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "node --experimental-strip-types src/db/migrate.ts"
   },
   "devDependencies": {
     "@types/node": "^26.4.0",
