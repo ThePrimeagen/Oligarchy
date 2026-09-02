@@ -144,8 +144,11 @@ describe("./client happy path", () => {
           "agent-1",
           "intent",
           "start",
+          "--session_id",
           "session-1",
+          "--test_result_id",
           "result-1",
+          "--message",
           "wait for Omarchy install",
         ],
         { OLIGARCHY_ADDR: `127.0.0.1:${address.port}` },
@@ -195,7 +198,7 @@ describe("./client happy path", () => {
 
     try {
       const result = await runClient(
-        ["--agent-id", "agent-1", "intent", "end", "session-1"],
+        ["--agent-id", "agent-1", "intent", "end", "--session_id", "session-1"],
         { OLIGARCHY_ADDR: `127.0.0.1:${address.port}` },
       );
       assert.equal(result.code, 0);
@@ -301,17 +304,20 @@ describe("./client unhappy path", () => {
     const result = await runClient([
       "intent",
       "start",
+      "--session_id",
       "session-1",
+      "--test_result_id",
       "result-1",
+      "--message",
       "wait for Omarchy install",
     ]);
     assert.notEqual(result.code, 0);
     assert.match(result.stderr, /--agent-id/);
   });
 
-  it("rejects intent end without a session id", async () => {
+  it("rejects intent end without --session_id", async () => {
     const result = await runClient(["--agent-id", "agent-1", "intent", "end"]);
     assert.notEqual(result.code, 0);
-    assert.match(result.stderr, /id/);
+    assert.match(result.stderr, /session_id/);
   });
 });

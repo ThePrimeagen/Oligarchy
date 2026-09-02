@@ -241,17 +241,17 @@ const stop = Command.make(
 const intentStart = Command.make(
   "start",
   {
-    id: Argument.string("id"),
-    testResultId: Argument.string("test-result-id"),
-    message: Argument.string("message"),
+    sessionId: Flag.string("session_id").pipe(Flag.withSchema(Schema.NonEmptyString)),
+    testResultId: Flag.string("test_result_id").pipe(Flag.withSchema(Schema.NonEmptyString)),
+    message: Flag.string("message").pipe(Flag.withSchema(Schema.NonEmptyString)),
   },
-  Effect.fn(function* ({ id, testResultId, message }) {
+  Effect.fn(function* ({ sessionId, testResultId, message }) {
     const { agentId } = yield* client;
     const agent = yield* requireAgent(agentId);
     yield* Effect.tryPromise({
       try: () =>
         postJSON("/intent/start", {
-          id,
+          id: sessionId,
           agent,
           test_result_id: testResultId,
           message,
@@ -264,13 +264,13 @@ const intentStart = Command.make(
 const intentEnd = Command.make(
   "end",
   {
-    id: Argument.string("id"),
+    sessionId: Flag.string("session_id").pipe(Flag.withSchema(Schema.NonEmptyString)),
   },
-  Effect.fn(function* ({ id }) {
+  Effect.fn(function* ({ sessionId }) {
     const { agentId } = yield* client;
     const agent = yield* requireAgent(agentId);
     yield* Effect.tryPromise({
-      try: () => postJSON("/intent/end", { id, agent }),
+      try: () => postJSON("/intent/end", { id: sessionId, agent }),
       catch: fail,
     });
   }),
