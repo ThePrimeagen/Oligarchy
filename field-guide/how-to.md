@@ -28,12 +28,13 @@ node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> get-image <id
 
 ## Get the serial console
 
-Reads everything the guest has written to `/dev/ttyS0` since boot. That is how logs leave a machine whose graphical shell has crashed — switch to a TTY, dump journalctl onto the serial port, then pull the file. `>` in a key string is `<GT>`; `|` can be typed as itself.
+Reads everything the guest has written to `/dev/ttyS0` since boot. That is how logs leave a machine whose graphical shell has crashed — switch to a TTY, dump journalctl onto the serial port, then pull the file. `/dev/ttyS0` is root:uucp, so the write is `sudo tee`; a user `>` gets permission denied. `|` can be typed as itself.
 
 ```bash
 node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-keys <id> "<C-A-F3>"
 # image until the login prompt, then username and password
-node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-keys <id> "journalctl -b --no-pager <GT> /dev/ttyS0<ENTER>"
+node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-keys <id> "journalctl -b --no-pager | sudo tee /dev/ttyS0<ENTER>"
+# if sudo asks, send the user password
 node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> get-serial <id> -o journal.txt
 ```
 

@@ -43,12 +43,15 @@ a double-click launches, a right-click opens a menu, `wheel-down` scrolls.
 When a desktop still plays focus games, switch to a TTY with `<C-A-F3>` — a
 text console is focus-proof, and a username/password login there is the
 cleanest proof of a working system. The same TTY is how logs leave a crashed
-desktop: Quickshell dying does not take tty3 with it. Log in, write the
-journal to the serial port (`journalctl -b --no-pager <GT> /dev/ttyS0`), then
-`get-serial`. User-session failures (the shell, the greeter) are
-`journalctl --user -b --no-pager <GT> /dev/ttyS0`. Crash files dump the same
-way: `cat ~/.cache/quickshell/crashes/*/… <GT> /dev/ttyS0`. Screenshot the
-TTY only to confirm the prompt; the text itself comes out on serial.
+desktop: Quickshell dying does not take tty3 with it. Log in, dump the
+journal onto the serial port
+(`journalctl -b --no-pager | sudo tee /dev/ttyS0`), then `get-serial`.
+`/dev/ttyS0` is root:uucp, so the write has to be root — a user redirect
+gets permission denied. User-session failures (the shell, the greeter) are
+`journalctl --user -b --no-pager | sudo tee /dev/ttyS0`. Crash files dump
+the same way: `cat ~/.cache/quickshell/crashes/*/* | sudo tee /dev/ttyS0`.
+Screenshot the TTY only to confirm the prompt and any sudo password;
+the text itself comes out on serial.
 
 ## Menus want arrows
 
