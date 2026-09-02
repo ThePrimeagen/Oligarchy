@@ -183,8 +183,12 @@ export async function start(
         socket.destroy();
       }
     });
-    socket.on("error", (err) => failAll(qemu, err));
-    socket.on("close", () => failAll(qemu, new Error("qemu: socket closed")));
+    // A socket error or close after the handshake means QEMU is gone. Tear the
+    // session down so qemu.socket is cleared: otherwise execute() writes to a
+    // dead socket, Node drops the write silently, and the command hangs forever.
+    socket.on("error", (err) => teardown(qemu, err));
+    socket.on("close", () => teardown(qemu, new Error("qemu: socket closed")));
+    qemu.proc?.once("exit", () => teardown(qemu, new Error("qemu: exited")));
 
     const greetingMsg = (await Promise.race([greeting, timeout])) as QemuGreetingResponse;
     // The greeting is the recorded reply for the boot's qmp_capabilities: its own {return} is empty.
