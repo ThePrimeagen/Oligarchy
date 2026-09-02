@@ -29,7 +29,7 @@ A still-running exchange has no state yet: `state`, `response`, and `finished_at
 
 ## The log stream
 
-`log()` writes one line twice — to stderr, and as a logs row — in call order behind a chain; a failed insert reports itself to stderr and never fails the caller. The stamp is the database's, taken at the insert: a stalled database lands queued lines late, and id, not `created_at`, is the truth of their order. Every line carries a level, the `log_level` enum, declared in ascending severity so `WHERE level >= 'error'` reads the scary lines:
+`log()` writes one line twice — to stderr, and as a logs row — in call order behind a chain; a failed insert reports itself to stderr and never fails the caller. Each stderr line starts with `[<agent-id>]` in a color derived from that id, or `[global]` in gray when the line has no agent; the color is the same for every line of that agent so interleaved output stays attributable. The stamp is the database's, taken at the insert: a stalled database lands queued lines late, and id, not `created_at`, is the truth of their order. Every line carries a level, the `log_level` enum, declared in ascending severity so `WHERE level >= 'error'` reads the scary lines:
 
 - **info** — the default, and the normal story: the proxy listening, a session starting / running / stopped, an image served, chords sent, mouse sent, iso cache hits and downloads.
 - **warning** — something was off but the operation went on: a download heartbeat that failed to write, an iso with no published sha256 to check against.
