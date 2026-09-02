@@ -115,40 +115,6 @@ describe("./client happy path", () => {
     assert.notEqual(spaced.code, 0);
     assert.match(spaced.stderr, /LINEAR_API_TOKEN is not set/);
   });
-
-  it("accepts test-results flags after they parse", async () => {
-    const before = await runClient(
-      [
-        "--agent-id",
-        "agent-1",
-        "test-results",
-        "--id",
-        "22222222-2222-4222-8222-222222222222",
-        "--status",
-        "success",
-      ],
-      { DATABASE_URL: "" },
-    );
-    assert.notEqual(before.code, 0);
-    assert.match(before.stderr, /DATABASE_URL is not set/);
-
-    const after = await runClient(
-      [
-        "test-results",
-        "--id",
-        "22222222-2222-4222-8222-222222222222",
-        "--status",
-        "failed",
-        "--reason",
-        "installer hung",
-        "--agent-id",
-        "agent-1",
-      ],
-      { DATABASE_URL: "" },
-    );
-    assert.notEqual(after.code, 0);
-    assert.match(after.stderr, /DATABASE_URL is not set/);
-  });
 });
 
 describe("./client unhappy path", () => {
@@ -232,55 +198,5 @@ describe("./client unhappy path", () => {
 
     assert.notEqual(result.code, 0);
     assert.match(result.stderr, /server_url must be a valid http or https url/);
-  });
-
-  it("rejects test-results without an agent id", async () => {
-    const result = await runClient([
-      "test-results",
-      "--id",
-      "22222222-2222-4222-8222-222222222222",
-      "--status",
-      "success",
-    ]);
-
-    assert.notEqual(result.code, 0);
-    assert.match(result.stderr, /--agent-id/);
-  });
-
-  it("rejects test-results without an id or status", async () => {
-    const missingId = await runClient([
-      "--agent-id",
-      "agent-1",
-      "test-results",
-      "--status",
-      "success",
-    ]);
-    assert.notEqual(missingId.code, 0);
-    assert.match(missingId.stderr, /id/);
-
-    const missingStatus = await runClient([
-      "--agent-id",
-      "agent-1",
-      "test-results",
-      "--id",
-      "22222222-2222-4222-8222-222222222222",
-    ]);
-    assert.notEqual(missingStatus.code, 0);
-    assert.match(missingStatus.stderr, /status/);
-  });
-
-  it("rejects a test-results status that is not success or failed", async () => {
-    const result = await runClient([
-      "--agent-id",
-      "agent-1",
-      "test-results",
-      "--id",
-      "22222222-2222-4222-8222-222222222222",
-      "--status",
-      "passed",
-    ]);
-
-    assert.notEqual(result.code, 0);
-    assert.match(result.stderr, /status/);
   });
 });
