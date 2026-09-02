@@ -219,7 +219,6 @@ async function launchQemu(
 ): Promise<void> {
   const qemu = live.qemu;
   try {
-    await registerAgent(db, cfg.agent, qemu.id);
     const iso = await getIso(db, cfg.iso, { sessionId: qemu.id, agentId: cfg.agent });
     if (cfg.disk === undefined) {
       await createDisk(qemu);
@@ -227,6 +226,10 @@ async function launchQemu(
       // start() expects the session dir; with a caller-provided disk, createDisk never made it.
       await mkdir(qemu.dir, { recursive: true, mode: 0o700 });
     }
+    // Register right before boot: the handshake records an action that references
+    // agent_runs, so this must precede start(), but a failed download or disk
+    // create before here must not burn the agent id on its one-registration key.
+    await registerAgent(db, cfg.agent, qemu.id);
     await start(qemu, { iso, disk: cfg.disk }, recorder(live));
     await sessionRunning(db, qemu.id);
   } catch (err) {
