@@ -234,6 +234,25 @@ export async function sendKey(qemu: Qemu, keys: QemuKeyValue[], record?: QemuExc
   await execute(qemu, "send-key", { keys }, record);
 }
 
+// QEMU's keyboard queue holds ~1024 input events and silently drops the rest.
+// send-key acks immediately but the guest drains slowly, so a long string sent as
+// fast as QMP acks overflows the queue and loses keys. Pace chords under the drain
+// rate; measured against real QEMU, 60ms/chord keeps a 1000-char string lossless.
+const KEY_CHORD_GAP_MS = 60;
+
+export async function sendKeys(
+  qemu: Qemu,
+  chords: string[][],
+  record?: QemuExchangeRecorder,
+): Promise<void> {
+  for (let i = 0; i < chords.length; i++) {
+    await sendKey(qemu, chords[i].map((code): QemuKeyValue => ({ type: "qcode", data: code })), record);
+    if (i + 1 < chords.length) {
+      await new Promise<void>((resolve) => setTimeout(resolve, KEY_CHORD_GAP_MS));
+    }
+  }
+}
+
 // QEMU INPUT_EVENT_ABS_MAX: tablet axes are 0..0x7fff.
 const TABLET_AXIS_MAX = 0x7fff;
 // guest double-click detection needs a gap between successive press/release pairs

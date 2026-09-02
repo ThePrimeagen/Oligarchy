@@ -10,7 +10,7 @@ import { NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node
 import { flushLogs, log } from "../db/log.ts";
 import { connectDatabase, endSession, finishAction, insertSession, registerAgent, sessionRunning, startAction } from "../db/ops.ts";
 import { finishIntentSpan, finishQemuActionSpan, finishQemuSpan, flushSentry, initSentry, startIntentSpan, startQemuActionSpan, startQemuSpan, type QemuSpan } from "../sentry.ts";
-import { QEMU_DISPLAYS, createDisk, createQemu, missingHostRequirements, screendump, sendKey, sendMouse, start, stop, type Qemu, type QemuDisplay } from "./client.ts";
+import { QEMU_DISPLAYS, createDisk, createQemu, missingHostRequirements, screendump, sendKeys, sendMouse, start, stop, type Qemu, type QemuDisplay } from "./client.ts";
 import { getIso } from "./iso.ts";
 import { parseKeys } from "./keys.ts";
 import { collectStats, startCpuSampler } from "./stats.ts";
@@ -397,11 +397,7 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
       });
       const record = recorder(live);
       yield* Effect.tryPromise({
-        try: async () => {
-          for (const chord of chords) {
-            await sendKey(qemu, chord.map((code): QemuKeyValue => ({ type: "qcode", data: code })), record);
-          }
-        },
+        try: () => sendKeys(qemu, chords, record),
         catch: (err) => exchangeFailed(err, { sessionId: qemu.id, agentId: agent }),
       });
       log(db, { text: `session ${qemu.id}: sent ${chords.length} chords in ${Date.now() - started}ms`, sessionId: qemu.id, agentId: agent });
