@@ -134,7 +134,7 @@ async function linearTeamId(token: string): Promise<string> {
 async function linearLabelId(token: string, teamId: string, name: string): Promise<string> {
   const found = await linearRequest<{ issueLabels: { nodes: { id: string }[] } }>(
     token,
-    "query ExperimentLabel($name: String!, $teamId: String!) { issueLabels(filter: { name: { eq: $name }, team: { id: { eq: $teamId } } }, first: 1) { nodes { id } } }",
+    "query ExperimentLabel($name: String!, $teamId: ID!) { issueLabels(filter: { name: { eq: $name }, team: { id: { eq: $teamId } } }, first: 1) { nodes { id } } }",
     { name, teamId },
   );
   const existing = found.issueLabels.nodes[0];
