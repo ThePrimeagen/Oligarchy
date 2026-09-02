@@ -3,13 +3,13 @@
 The TypeScript client for the oligarchy control plane. It sends HTTP requests to a running proxy (`src/qemu/proxy.ts`) and prints the result. It is a main file, not a library: running it executes the Effect command tree, and it exports nothing. Every invocation is parsed by `effect/unstable/cli` (`Command`, `Flag`, `Argument`).
 
 ```bash
-client experiment new --iso <https-url> --server_url=<http-or-https-url> --version <version>
-node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> start [--iso <path>] [--disk <path>]
-node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> get-image <id> [-o file]
-node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> get-serial <id> [-o file]
-node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-keys <id> <keys> [encoding]
-node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-mouse <id> <x> <y> [button [clicks]]
-node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> stop <id> [status [reason]]
+./client experiment new --iso <https-url> --server_url=<http-or-https-url> --version <version>
+./client --agent-id <agent> start [--iso <path>] [--disk <path>]
+./client --agent-id <agent> get-image <id> [-o file]
+./client --agent-id <agent> get-serial <id> [-o file]
+./client --agent-id <agent> send-keys <id> <keys> [encoding]
+./client --agent-id <agent> send-mouse <id> <x> <y> [button [clicks]]
+./client --agent-id <agent> stop <id> [status [reason]]
 ```
 
 The server address comes from `OLIGARCHY_ADDR`, default `127.0.0.1:42069`.

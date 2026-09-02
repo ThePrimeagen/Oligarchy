@@ -22,10 +22,10 @@ Captures the current guest desktop as a PNG.
 
 ```bash
 # write to a file
-node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> get-image <id> -o desktop.png
+./client --agent-id <agent> get-image <id> -o desktop.png
 
 # write PNG bytes to stdout
-node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> get-image <id> > desktop.png
+./client --agent-id <agent> get-image <id> > desktop.png
 ```
 
 `-o` can sit before or after the session id.
@@ -35,12 +35,12 @@ node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> get-image <id
 Reads everything the guest has written to `/dev/ttyS0` since boot. That is how logs leave a machine whose graphical shell has crashed — switch to a TTY, stop the serial getty systemd starts on the UART, dump journalctl onto the serial port, then pull the file. `/dev/ttyS0` is root:uucp, so the write is `sudo tee`; a user `>` gets permission denied. `|` can be typed as itself.
 
 ```bash
-node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-keys <id> "<C-A-F3>"
+./client --agent-id <agent> send-keys <id> "<C-A-F3>"
 # image until the login prompt, then username and password
-node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-keys <id> "sudo systemctl stop serial-getty@ttyS0<ENTER>"
-node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-keys <id> "journalctl -b --no-pager | sudo tee /dev/ttyS0<ENTER>"
+./client --agent-id <agent> send-keys <id> "sudo systemctl stop serial-getty@ttyS0<ENTER>"
+./client --agent-id <agent> send-keys <id> "journalctl -b --no-pager | sudo tee /dev/ttyS0<ENTER>"
 # if sudo asks, send the user password
-node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> get-serial <id> -o journal.txt
+./client --agent-id <agent> get-serial <id> -o journal.txt
 ```
 
 `-o` can sit before or after the session id. Without it, bytes go to stdout.
@@ -48,15 +48,15 @@ node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> get-serial <i
 ## Send keys
 
 ```bash
-node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-keys <id> "hello"
-node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-keys <id> "hello<ENTER>"
-node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-keys <id> "<C-c>"
+./client --agent-id <agent> send-keys <id> "hello"
+./client --agent-id <agent> send-keys <id> "hello<ENTER>"
+./client --agent-id <agent> send-keys <id> "<C-c>"
 ```
 
 The key string uses the `oligarchy` encoding (that name is optional; it is the default):
 
 ```bash
-node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-keys <id> "Hi<ENTER>" oligarchy
+./client --agent-id <agent> send-keys <id> "Hi<ENTER>" oligarchy
 ```
 
 ### Encoding
@@ -74,19 +74,19 @@ Coordinates are fractions of the last screenshot: `0` is the top or left edge, `
 
 ```bash
 # move the pointer (Hyprland focuses the window under it)
-node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-mouse <id> 0.5 0.5
+./client --agent-id <agent> send-mouse <id> 0.5 0.5
 
 # left click
-node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-mouse <id> 0.5 0.5 left
+./client --agent-id <agent> send-mouse <id> 0.5 0.5 left
 
 # double-click
-node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-mouse <id> 0.3 0.2 left 2
+./client --agent-id <agent> send-mouse <id> 0.3 0.2 left 2
 
 # right-click
-node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-mouse <id> 0.8 0.1 right
+./client --agent-id <agent> send-mouse <id> 0.8 0.1 right
 
 # scroll three ticks
-node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-mouse <id> 0.5 0.5 wheel-down 3
+./client --agent-id <agent> send-mouse <id> 0.5 0.5 wheel-down 3
 ```
 
 Omit the button to move only. `button` is `left`, `middle`, `right`, `wheel-up`, or `wheel-down`. `clicks` is how many times that button is pulsed.
