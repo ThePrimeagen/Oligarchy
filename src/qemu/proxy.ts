@@ -247,6 +247,18 @@ const routes = HttpRouter.use((router) =>
       return yield* Effect.ensuring(png, Effect.promise(() => rm(path, { force: true })));
     }) satisfies RouteHandler, { uninterruptible: true });
 
+    yield* router.add("GET", "/serial", Effect.gen(function* () {
+      const started = Date.now();
+      const params = yield* Effect.mapError(HttpRouter.schemaParams(ImageParams), (err) => badRequest(err.message));
+      const qemu = yield* session(params.id, params.agent);
+      const data = yield* Effect.tryPromise({
+        try: () => readFile(qemu.serialPath),
+        catch: (cause) => internal(cause, { sessionId: qemu.id, agentId: params.agent }),
+      });
+      log(db, { text: `session ${qemu.id}: serial; ${data.length} bytes in ${Date.now() - started}ms`, sessionId: qemu.id, agentId: params.agent });
+      return HttpServerResponse.uint8Array(data, { contentType: "text/plain" });
+    }) satisfies RouteHandler, { uninterruptible: true });
+
     yield* router.add("GET", "/stats", Effect.sync(() => HttpServerResponse.jsonUnsafe(collectStats(cpuSampler, sessions.size))) satisfies RouteHandler);
 
     yield* router.add("POST", "/stop", Effect.gen(function* () {

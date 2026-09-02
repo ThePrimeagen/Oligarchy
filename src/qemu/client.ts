@@ -42,6 +42,7 @@ export type Qemu = {
   readonly dir: string;
   readonly diskPath: string;
   readonly sockPath: string;
+  readonly serialPath: string;
   readonly options: QemuOptions;
   readonly pending: Map<number | "greeting", Pending>;
   nextId: number;
@@ -57,6 +58,7 @@ export function createQemu(options: QemuOptions = {}): Qemu {
     dir,
     diskPath: join(dir, "disk.qcow2"),
     sockPath: join(dir, "qmp.sock"),
+    serialPath: join(dir, "serial.log"),
     options,
     pending: new Map(),
     nextId: 0,
@@ -100,6 +102,7 @@ export async function start(
   await copyFile(qemu.options.vars ?? DEFAULT_VARS, varsPath);
   const args = qemuArgs({
     sockPath: qemu.sockPath,
+    serialPath: qemu.serialPath,
     varsPath,
     diskPath: disk,
     iso,
@@ -255,6 +258,7 @@ export async function screendump(
 
 function qemuArgs(opts: {
   sockPath: string;
+  serialPath: string;
   varsPath: string;
   diskPath: string;
   iso: string;
@@ -286,6 +290,10 @@ function qemuArgs(opts: {
     `socket,id=qmp,path=${opts.sockPath}`,
     "-mon",
     "chardev=qmp,mode=control",
+    "-chardev",
+    `file,id=serial,path=${opts.serialPath}`,
+    "-serial",
+    "chardev:serial",
     "-cdrom",
     opts.iso,
     "-boot",

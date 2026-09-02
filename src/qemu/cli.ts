@@ -20,6 +20,9 @@ async function main(args: string[]): Promise<void> {
       case "get-image":
         await cmdGetImage(agent, args.slice(3));
         break;
+      case "get-serial":
+        await cmdGetSerial(agent, args.slice(3));
+        break;
       case "send-keys":
         await cmdSendKeys(agent, args.slice(3));
         break;
@@ -42,6 +45,7 @@ function usage(): void {
 Usage:
   oligarchy --agent-id <agent> start [--iso <path>] [--disk <path>]
   oligarchy --agent-id <agent> get-image <id> [-o file]
+  oligarchy --agent-id <agent> get-serial <id> [-o file]
   oligarchy --agent-id <agent> send-keys <id> <keys> [encoding]
   oligarchy --agent-id <agent> send-mouse <id> <x> <y> [button [clicks]]
 `);
@@ -101,6 +105,34 @@ async function cmdGetImage(agent: string, args: string[]): Promise<void> {
     throw new Error("usage: oligarchy --agent-id <agent> get-image <id> [-o file]");
   }
   const res = await fetch(`http://${addr()}/image?id=${encodeURIComponent(id)}&agent=${encodeURIComponent(agent)}`);
+  if (res.status !== 200) {
+    throw new Error(await readAPIError(res));
+  }
+  const data = Buffer.from(await res.arrayBuffer());
+  if (out !== "") {
+    await writeFile(out, data, { mode: 0o644 });
+    return;
+  }
+  await new Promise<void>((done, fail) => {
+    process.stdout.write(data, (err) => (err ? fail(err) : done()));
+  });
+}
+
+async function cmdGetSerial(agent: string, args: string[]): Promise<void> {
+  let id = "";
+  let out = "";
+  if (args.length === 1) {
+    id = args[0];
+  } else if (args.length === 3 && args[1] === "-o") {
+    id = args[0];
+    out = args[2];
+  } else if (args.length === 3 && args[0] === "-o") {
+    out = args[1];
+    id = args[2];
+  } else {
+    throw new Error("usage: oligarchy --agent-id <agent> get-serial <id> [-o file]");
+  }
+  const res = await fetch(`http://${addr()}/serial?id=${encodeURIComponent(id)}&agent=${encodeURIComponent(agent)}`);
   if (res.status !== 200) {
     throw new Error(await readAPIError(res));
   }
