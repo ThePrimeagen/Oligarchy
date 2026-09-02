@@ -5,7 +5,7 @@
   "terminals": [
     {
       "name": "proxy",
-      "command": "DATABASE_URL=\"postgresql://oligarchy:oligarchy@127.0.0.1:5432/oligarchy\" ./server 42069 --automation"
+      "command": "./server 42069 --automation"
     }
   ]
 }
