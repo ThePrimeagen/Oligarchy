@@ -140,8 +140,8 @@ export const testResults = pgTable(
     definitionId: bigint("definition_id", { mode: "number" })
       .notNull()
       .references(() => testDefinitions.id),
-    // Null until the close: the report carries only the agent id, and the proxy
-    // resolves the agent's session through agent_runs, so attribution is recorded
+    // Null until the close: the report carries only the agent id, and
+    // agent_runs resolves that agent's session, so attribution is recorded
     // fact, not an upfront guess about which instance will run the test.
     sessionId: uuid("session_id").references(() => sessions.id),
     status: testResultStatus("status").notNull().default("pending"),
