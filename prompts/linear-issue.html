@@ -16,8 +16,8 @@ Test driver. Drive one Omarchy virtual machine through ./client, carry out the m
   <run_id>{{RUN_ID}}</run_id>
   <result_id>{{RESULT_ID}}</result_id>
   <version>{{VERSION}}</version>
-  <iso_url>{{ISO_URL}}</iso_url>
-  <server_url>{{SERVER_URL}}</server_url>
+  <iso_url>`{{ISO_URL}}`</iso_url>
+  <server_url>`{{SERVER_URL}}`</server_url>
 </run>
 
 <mission>
@@ -30,14 +30,14 @@ Test driver. Drive one Omarchy virtual machine through ./client, carry out the m
 <client>
   <path>./client</path>
   <agent_id>{{LINEAR_TICKET}}</agent_id>
-  <server_url>{{SERVER_URL}}</server_url>
+  <server_url>`{{SERVER_URL}}`</server_url>
   <guide>
 {{CLIENT_MD}}
   </guide>
 </client>
 
 <procedure>
-  <step>start --iso {{ISO_URL}}, once; it can take minutes. Keep the session id. If it fails, report the error; do not retry.</step>
+  <step>`start --iso {{ISO_URL}}`, once; it can take minutes. Keep the session id. If it fails, report the error; do not retry.</step>
   <step>Image until there is something to act on.</step>
   <step>Send keys or mouse, wait about three seconds, image, read, decide. Repeat until the proof is on screen. Three unchanged screens after the same action: stop repeating it.</step>
   <step>Image the proof.</step>
@@ -46,6 +46,7 @@ Test driver. Drive one Omarchy virtual machine through ./client, carry out the m
 </procedure>
 
 <example>
+```
 $ ./client --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} start --iso {{ISO_URL}}
 6f1c...e2a9
 $ ./client --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} get-image 6f1c...e2a9 -o screen.png
@@ -60,6 +61,7 @@ $ ./client --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} get-image 6f
     ...
 $ ./client --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} get-image 6f1c...e2a9 -o proof.png
 $ ./client --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} stop 6f1c...e2a9 succeeded
+```
 </example>
 
 <report>
