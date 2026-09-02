@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import type { Socket } from "node:net";
 import { describe, it } from "node:test";
-import { createQemu, sendKey } from "./client.ts";
+import { createQemu, sendKey, start, stop } from "./client.ts";
 
 const keys = [{ type: "qcode", data: "a" }] satisfies QemuKeyValue[];
 
@@ -65,6 +65,18 @@ describe("sendKey recorder unhappy path", () => {
     assert.deepEqual(outcome, {
       state: "failed",
       response: "qemu: closed",
+    });
+  });
+});
+
+describe("stopped QEMU", () => {
+  it("cannot start again", async () => {
+    const qemu = createQemu();
+
+    await stop(qemu);
+
+    await assert.rejects(() => start(qemu, { iso: "missing.iso" }), {
+      message: "qemu: closed",
     });
   });
 });
