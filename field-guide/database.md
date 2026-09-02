@@ -29,7 +29,7 @@ A still-running exchange has no state yet: `state`, `response`, and `finished_at
 
 ## The log stream
 
-`log()` writes one line twice — to stderr, and as a logs row — in call order behind a chain; a failed insert reports itself to stderr and never fails the caller. The stamp is the database's, taken at the insert: a stalled database lands queued lines late, and id, not `created_at`, is the truth of their order. Every line carries a level, the `log_level` enum, declared in ascending severity so `WHERE level >= 'error'` reads the scary lines:
+`log()` writes one line twice — to stdout, and as a logs row — in call order behind a chain; a failed insert reports itself to stdout and never fails the caller. The stdout line starts with `[<agent-id>]` in a color derived from that id, or `[global]` in gray when the line has no agent; the color is the same for every line of that agent so interleaved output stays attributable. The logs row is the original text, level, and attribution — the prefix and color are stdout only. The stamp is the database's, taken at the insert: a stalled database lands queued lines late, and id, not `created_at`, is the truth of their order. Every line carries a level, the `log_level` enum, declared in ascending severity so `WHERE level >= 'error'` reads the scary lines:
 
 - **info** — the default, and the normal story: the proxy listening, a session starting / running / stopped, an image served, chords sent, mouse sent, iso cache hits and downloads.
 - **warning** — something was off but the operation went on: a download heartbeat that failed to write, an iso with no published sha256 to check against.
@@ -38,7 +38,7 @@ A still-running exchange has no state yet: `state`, `response`, and `finished_at
 
 Levels are severity of the operation, not of the state it records: a `/stop` carrying a `failed` verdict still logs at info — the stop worked; the verdict lives on the session row. For the same reason a failed `/start` is one error line from the boundary, not two — attributed to the session and agent as far as the handler got before it threw, with the session row's `failed` status and reason as the state record.
 
-Paths that end in `process.exit` — shutdown, a fatal — await `flushLogs()` then `flushSentry()` first, the chain settling, so the last lines (and a log-insert failure discovered while flushing) are not lost with the process. The db's own write failures (a log insert refused, a "recording the failure failed too") report to stderr and to Sentry: a database that is not taking writes cannot hold the line saying so.
+Paths that end in `process.exit` — shutdown, a fatal — await `flushLogs()` then `flushSentry()` first, the chain settling, so the last lines (and a log-insert failure discovered while flushing) are not lost with the process. The db's own write failures (a log insert refused, a "recording the failure failed too") report to stdout and to Sentry: a database that is not taking writes cannot hold the line saying so.
 
 `log()` also sends error and fatal lines to Sentry, with the exception when the caller has one. 4xx request refusals stay in the logs table and skip Sentry — they are the client's mistake. The dashboard worker is wrapped with `@sentry/cloudflare`; the proxy reports through `@sentry/node` because it is a Node process (it boots QEMU). Both use the same project DSN.
 
