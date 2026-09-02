@@ -6,6 +6,10 @@
     {
       "name": "proxy",
       "command": "./server 42069 --automation"
+    },
+    {
+      "name": "tunnel",
+      "command": "bash .cursor/tunnel.sh"
     }
   ]
 }
