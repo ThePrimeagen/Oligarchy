@@ -65,6 +65,37 @@ export function finishQemuActionSpan(span: QemuSpan, state: QemuExchangeOutcome[
   span.end();
 }
 
+export function startIntentSpan(
+  parentSpan: QemuSpan,
+  sessionId: string,
+  agentId: string,
+  testResultId: string,
+  message: string,
+): QemuSpan {
+  return Sentry.startInactiveSpan({
+    name: message,
+    op: "agent.intent",
+    parentSpan,
+    attributes: {
+      session_id: sessionId,
+      agent_id: agentId,
+      test_result_id: testResultId,
+      intent: message,
+    },
+  });
+}
+
+export function finishIntentSpan(span: QemuSpan, status: "completed" | "cancelled"): void {
+  span.setAttribute("intent_state", status);
+  if (status === "completed") {
+    span.setStatus({ code: 1 });
+  } else {
+    // Sentry maps status message "cancelled" to ok.
+    span.setStatus({ code: 2, message: "aborted" });
+  }
+  span.end();
+}
+
 export function capture(ctx: {
   text: string;
   level: "warning" | "error" | "fatal";
