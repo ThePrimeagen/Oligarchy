@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { loadEnvFile } from "node:process";
 import { Effect, Schema } from "effect";
 import { CliError, Command, Flag } from "effect/unstable/cli";
@@ -63,25 +63,28 @@ type LinearResponse<T> = {
   errors?: { message: string }[];
 };
 
-export function linearTicketDescription(experiment: Experiment, test: ExperimentTest): string {
-  return `# ${test.name}
-
-- Result ID: \`${test.id}\`
-- Test suite run: \`${experiment.id}\`
-- ISO: ${experiment.iso}
-- Server URL: ${experiment.serverUrl}
-
-**Description**
-
-${test.description}
-
-**Instruction**
-
-${test.instruction}
-
-**Proof**
-
-${test.proof}`;
+export function linearTicketDescription(experiment: Experiment, test: ExperimentTest, ticket: string): string {
+  const template = readFileSync(new URL("../prompts/linear-issue.html", import.meta.url), "utf8");
+  const values: Record<string, string> = {
+    LINEAR_TICKET: ticket,
+    RUN_ID: experiment.id,
+    RESULT_ID: test.id,
+    VERSION: experiment.version,
+    ISO_URL: experiment.iso,
+    SERVER_URL: experiment.serverUrl,
+    TEST_NAME: test.name,
+    TEST_DESCRIPTION: test.description,
+    TEST_INSTRUCTION: test.instruction,
+    TEST_PROOF: test.proof,
+    CLIENT_MD: readFileSync(new URL("../client.md", import.meta.url), "utf8").trimEnd(),
+  };
+  return template.replace(/\{\{([A-Z_]+)\}\}/g, (_, name: string) => {
+    const value = values[name];
+    if (value === undefined) {
+      throw new Error(`linear: prompts/linear-issue.html uses {{${name}}}, which has no value`);
+    }
+    return value;
+  });
 }
 
 async function linearRequest<T>(
@@ -178,14 +181,15 @@ export async function createLinearTicket(
   test: ExperimentTest,
 ): Promise<LinearTicket> {
   const teamId = await linearTeamId(token);
-  return createLinearIssue(token, teamId, await linearLabelIds(token, teamId, experiment.version), experiment, test);
+  const ticket = await createLinearIssue(token, teamId, await linearLabelIds(token, teamId, experiment.version), test);
+  await describeLinearIssue(token, ticket, experiment, test);
+  return ticket;
 }
 
 async function createLinearIssue(
   token: string,
   teamId: string,
   labelIds: string[],
-  experiment: Experiment,
   test: ExperimentTest,
 ): Promise<LinearTicket> {
   const result = await linearRequest<{
@@ -209,7 +213,6 @@ async function createLinearIssue(
       input: {
         teamId,
         title: `Omarchy: ${test.name}`,
-        description: linearTicketDescription(experiment, test),
         labelIds,
       },
     },
@@ -218,6 +221,28 @@ async function createLinearIssue(
     throw new Error("linear: issue creation failed");
   }
   return result.issueCreate.issue;
+}
+
+// Linear assigns the identifier on create, and the description names it as the
+// driver's agent id, so the body can only land in a second call.
+async function describeLinearIssue(
+  token: string,
+  ticket: LinearTicket,
+  experiment: Experiment,
+  test: ExperimentTest,
+): Promise<void> {
+  const result = await linearRequest<{ issueUpdate: { success: boolean } }>(
+    token,
+    `mutation ExperimentIssueDescribe($id: String!, $input: IssueUpdateInput!) {
+  issueUpdate(id: $id, input: $input) {
+    success
+  }
+}`,
+    { id: ticket.id, input: { description: linearTicketDescription(experiment, test, ticket.identifier) } },
+  );
+  if (!result.issueUpdate.success) {
+    throw new Error(`linear: describing ${ticket.identifier} failed`);
+  }
 }
 
 export async function createExperiment(
@@ -276,7 +301,9 @@ export async function createExperiment(
     const teamId = await linearTeamId(token);
     const labelIds = await linearLabelIds(token, teamId, experiment.version);
     for (const test of experiment.tests) {
-      tickets.push(await createLinearIssue(token, teamId, labelIds, experiment, test));
+      const ticket = await createLinearIssue(token, teamId, labelIds, test);
+      tickets.push(ticket);
+      await describeLinearIssue(token, ticket, experiment, test);
     }
   } catch (err) {
     const created = tickets.map((ticket) => ticket.identifier).join(", ");

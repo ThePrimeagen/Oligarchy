@@ -115,20 +115,27 @@ function issueResponse(identifier: string) {
   });
 }
 
-describe("linearTicketDescription", () => {
-  it("includes the run, result, ISO, server, and this definition only", () => {
-    const test = experiment.tests[0];
-    const description = linearTicketDescription(experiment, test);
+function describeResponse() {
+  return Response.json({ data: { issueUpdate: { success: true } } });
+}
 
-    assert.match(description, new RegExp(experiment.id));
-    assert.match(description, new RegExp(experiment.iso));
-    assert.match(description, new RegExp(experiment.serverUrl));
-    assert.match(description, new RegExp(test.name));
-    assert.match(description, new RegExp(test.description));
-    assert.match(description, new RegExp(test.instruction));
-    assert.match(description, new RegExp(test.proof));
-    assert.ok(description.includes(`Result ID: \`${test.id}\``));
-    assert.ok(description.includes(`Test suite run: \`${experiment.id}\``));
+describe("linearTicketDescription", () => {
+  it("renders the template with the ticket, run, result, ISO, server, client guide, and this definition only", () => {
+    const test = experiment.tests[0];
+    const description = linearTicketDescription(experiment, test, "OLI-42");
+
+    assert.equal(description.includes("{{"), false);
+    assert.ok(description.includes("<agent_id>OLI-42</agent_id>"));
+    assert.ok(description.includes(`--agent-id OLI-42 --server-url ${experiment.serverUrl} start --iso ${experiment.iso}`));
+    assert.ok(description.includes(`<run_id>${experiment.id}</run_id>`));
+    assert.ok(description.includes(`<result_id>${test.id}</result_id>`));
+    assert.ok(description.includes(`<version>${experiment.version}</version>`));
+    assert.ok(description.includes(`<name>${test.name}</name>`));
+    assert.ok(description.includes(`<description>${test.description}</description>`));
+    assert.ok(description.includes(`<instruction>${test.instruction}</instruction>`));
+    assert.ok(description.includes(`<proof>${test.proof}</proof>`));
+    assert.ok(description.includes("# Client\n"));
+    assert.ok(description.includes("## The loop"));
     assert.equal(description.includes(experiment.tests[1].name), false);
     assert.equal(description.includes(experiment.tests[1].id), false);
   });
@@ -152,6 +159,9 @@ describe("createLinearTicket happy path", () => {
           data: { issueLabels: { nodes: [{ id: labelId(String(body.variables?.name)) }] } },
         });
       }
+      if (body.query.includes("issueUpdate")) {
+        return describeResponse();
+      }
       return issueResponse("OLI-42");
     });
 
@@ -162,18 +172,23 @@ describe("createLinearTicket happy path", () => {
       identifier: "OLI-42",
       url: "https://linear.app/issue/OLI-42",
     });
-    assert.equal(requests.length, 4);
+    assert.equal(requests.length, 5);
     assert.equal(requests[0].headers.get("Authorization"), "linear-token");
     assert.match(requests[0].body.query, /teams\(first: 1\)/);
+    assert.match(requests[1].body.query, /\$teamId: ID!/);
     assert.deepEqual(requests[1].body.variables, { name: "agent test", teamId: "team-id" });
     assert.deepEqual(requests[2].body.variables, { name: experiment.version, teamId: "team-id" });
     assert.deepEqual(requests[3].body.variables, {
       input: {
         teamId: "team-id",
         title: `Omarchy: ${test.name}`,
-        description: linearTicketDescription(experiment, test),
         labelIds: [labelId("agent test"), labelId(experiment.version)],
       },
+    });
+    assert.match(requests[4].body.query, /issueUpdate\(id: \$id/);
+    assert.deepEqual(requests[4].body.variables, {
+      id: "issue-OLI-42",
+      input: { description: linearTicketDescription(experiment, test, "OLI-42") },
     });
   });
 
@@ -201,6 +216,9 @@ describe("createLinearTicket happy path", () => {
             },
           },
         });
+      }
+      if (body.query.includes("issueUpdate")) {
+        return describeResponse();
       }
       return issueResponse("OLI-42");
     });
@@ -286,6 +304,7 @@ describe("createExperiment happy path", () => {
     ] satisfies TestDefinition[];
     const { db, inserts } = testDatabase(definitions);
     const issueBodies: { query: string; variables?: Record<string, unknown> }[] = [];
+    const descriptions: { query: string; variables?: Record<string, unknown> }[] = [];
     mock.method(console, "error", () => undefined);
     mock.method(globalThis, "fetch", async (_input: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1]) => {
       const parsed = await parseLinearRequest(init);
@@ -296,6 +315,10 @@ describe("createExperiment happy path", () => {
         return Response.json({
           data: { issueLabels: { nodes: [{ id: labelId(String(parsed.variables?.name)) }] } },
         });
+      }
+      if (parsed.query.includes("issueUpdate")) {
+        descriptions.push(parsed);
+        return describeResponse();
       }
       issueBodies.push(parsed);
       return issueResponse(`OLI-${41 + issueBodies.length}`);
@@ -330,14 +353,18 @@ describe("createExperiment happy path", () => {
       },
     ]);
     assert.equal(issueBodies.length, definitions.length);
+    assert.equal(descriptions.length, definitions.length);
     for (const [index, test] of result.experiment.tests.entries()) {
       assert.deepEqual(issueBodies[index].variables, {
         input: {
           teamId: "team-id",
           title: `Omarchy: ${test.name}`,
-          description: linearTicketDescription(result.experiment, test),
           labelIds: [labelId("agent test"), labelId("1.2.3")],
         },
+      });
+      assert.deepEqual(descriptions[index].variables, {
+        id: result.tickets[index].id,
+        input: { description: linearTicketDescription(result.experiment, test, result.tickets[index].identifier) },
       });
     }
     assert.equal(inserts[0].table, testRuns);
@@ -422,7 +449,7 @@ describe("createExperiment unhappy path", () => {
     });
   });
 
-  it("names tickets already created when a later Linear issue fails", async () => {
+  it("names every ticket created, including one whose description failed", async () => {
     const definitions = [
       {
         id: 1,
@@ -442,7 +469,7 @@ describe("createExperiment unhappy path", () => {
       },
     ] satisfies TestDefinition[];
     const { db, updates } = testDatabase(definitions);
-    let request = 0;
+    let created = 0;
     mock.method(globalThis, "fetch", async (_input: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1]) => {
       const body = await parseLinearRequest(init);
       if (body.query.includes("teams(first: 1)")) {
@@ -453,11 +480,14 @@ describe("createExperiment unhappy path", () => {
           data: { issueLabels: { nodes: [{ id: labelId(String(body.variables?.name)) }] } },
         });
       }
-      request++;
-      if (request === 1) {
-        return issueResponse("OLI-42");
+      if (body.query.includes("issueUpdate")) {
+        if ((body.variables?.id as string) === "issue-OLI-43") {
+          return new Response("unauthorized", { status: 401 });
+        }
+        return describeResponse();
       }
-      return new Response("unauthorized", { status: 401 });
+      created++;
+      return issueResponse(`OLI-${41 + created}`);
     });
 
     await assert.rejects(
@@ -467,9 +497,9 @@ describe("createExperiment unhappy path", () => {
           serverUrl: "https://qemu.example.com",
           version: "1.2.3",
         }),
-      { message: "linear: request failed (401): unauthorized; created OLI-42" },
+      { message: "linear: request failed (401): unauthorized; created OLI-42, OLI-43" },
     );
     const runFailure = updates[0].values as { reason: string };
-    assert.equal(runFailure.reason, "linear: request failed (401): unauthorized; created OLI-42");
+    assert.equal(runFailure.reason, "linear: request failed (401): unauthorized; created OLI-42, OLI-43");
   });
 });
