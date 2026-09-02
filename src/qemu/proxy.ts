@@ -9,7 +9,7 @@ import { NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node
 import { flushLogs, log } from "../db/log.ts";
 import { connectDatabase, endSession, finishAction, insertSession, registerAgent, sessionRunning, startAction } from "../db/ops.ts";
 import { flushSentry, initSentry } from "../sentry.ts";
-import { QEMU_DISPLAYS, createDisk, createQemu, screendump, sendKey, sendMouse, start, stop, type Qemu, type QemuDisplay } from "./client.ts";
+import { QEMU_DISPLAYS, createDisk, createQemu, missingHostRequirements, screendump, sendKey, sendMouse, start, stop, type Qemu, type QemuDisplay } from "./client.ts";
 import { getIso } from "./iso.ts";
 import { parseKeys } from "./keys.ts";
 import { collectStats, startCpuSampler } from "./stats.ts";
@@ -504,7 +504,16 @@ const proxy = Command.make(
         userMessage: "--automation is exclusive",
       }));
     }
-    return Layer.launch(main(Option.getOrElse(display, () => "none"), automation)).pipe(
+    const resolved = Option.getOrElse(display, () => "none");
+    return Effect.gen(function* () {
+      const missing = yield* Effect.promise(() => missingHostRequirements(resolved));
+      if (missing.length > 0) {
+        const text = `missing host requirements:\n${missing.join("\n")}`;
+        console.error(`proxy: ${text}`);
+        return yield* Effect.fail(new Error(text));
+      }
+      return yield* Layer.launch(main(resolved, automation));
+    }).pipe(
       Effect.tapError((err) => Effect.sync(() => log(db, { level: "fatal", text: `proxy: ${errorDetail(err)}` }, { cause: err }))),
     );
   },

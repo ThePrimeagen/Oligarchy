@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { copyFile, mkdir, rm, stat } from "node:fs/promises";
+import { copyFile, mkdir, readdir, rm, stat } from "node:fs/promises";
 import { createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -360,4 +360,63 @@ async function assertFile(path: string, label: string): Promise<void> {
   } catch {
     throw new Error(`qemu: ${label} not found: ${path}`);
   }
+}
+
+export async function missingHostRequirements(display: QemuDisplay): Promise<string[]> {
+  const missing: string[] = [];
+  let qemuFound = false;
+  for (const bin of [QEMU_BIN, QEMU_IMG] as const) {
+    const found = await new Promise<boolean>((resolve) => {
+      const child = spawn("/bin/sh", ["-c", `command -v ${bin}`], { stdio: "ignore" });
+      child.once("error", () => resolve(false));
+      child.once("exit", (code) => resolve(code === 0));
+    });
+    if (bin === QEMU_BIN) {
+      qemuFound = found;
+    }
+    if (!found) {
+      missing.push(`${bin} not on PATH`);
+    }
+  }
+  for (const [path, label] of [
+    [DEFAULT_CODE, "OVMF code"],
+    [DEFAULT_VARS, "OVMF vars"],
+  ] as const) {
+    try {
+      await stat(path);
+    } catch {
+      missing.push(`${label} not found: ${path}`);
+    }
+  }
+  if (display === "gtk" && (process.env.DISPLAY === undefined || process.env.DISPLAY === "")) {
+    missing.push("DISPLAY is not set (needed for --display gtk)");
+  }
+  if (display === "egl-headless") {
+    try {
+      const nodes = await readdir("/dev/dri");
+      if (!nodes.some((name) => name.startsWith("renderD"))) {
+        missing.push("no DRM render node in /dev/dri (needed for --display egl-headless)");
+      }
+    } catch {
+      missing.push("/dev/dri not found (needed for --display egl-headless)");
+    }
+  }
+  if (display !== "none" && qemuFound) {
+    const help = await new Promise<string>((resolve, reject) => {
+      const child = spawn(QEMU_BIN, ["-display", "help"], { stdio: ["ignore", "pipe", "pipe"] });
+      let out = "";
+      child.stdout?.on("data", (chunk) => {
+        out += String(chunk);
+      });
+      child.stderr?.on("data", (chunk) => {
+        out += String(chunk);
+      });
+      child.once("error", reject);
+      child.once("exit", () => resolve(out));
+    });
+    if (!help.split("\n").map((line) => line.trim()).includes(display)) {
+      missing.push(`${QEMU_BIN} was built without display backend ${display}`);
+    }
+  }
+  return missing;
 }
