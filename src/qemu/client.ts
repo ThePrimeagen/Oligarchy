@@ -20,10 +20,6 @@ const HANDSHAKE_MS = 10_000;
 export const QEMU_DISPLAYS = ["none", "gtk", "sdl", "egl-headless", "spice-app", "dbus"] as const;
 export type QemuDisplay = (typeof QEMU_DISPLAYS)[number];
 const DEFAULT_DISPLAY: QemuDisplay = "none";
-export const QEMU_VGAS = ["std", "virtio", "virtio-gl"] as const;
-export type QemuVga = (typeof QEMU_VGAS)[number];
-const DEFAULT_VGA: QemuVga = "std";
-
 export type QemuOptions = {
   tmp?: string;
   diskSize?: string;
@@ -32,7 +28,7 @@ export type QemuOptions = {
   memory?: string;
   smp?: number;
   display?: QemuDisplay;
-  vga?: QemuVga;
+  automation?: boolean;
 };
 
 export type QemuStartOptions = {
@@ -117,7 +113,7 @@ export async function start(
     memory: qemu.options.memory ?? DEFAULT_MEMORY,
     smp: qemu.options.smp ?? DEFAULT_SMP,
     display: qemu.options.display ?? DEFAULT_DISPLAY,
-    vga: qemu.options.vga ?? DEFAULT_VGA,
+    automation: qemu.options.automation === true,
   });
 
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -275,16 +271,10 @@ function qemuArgs(opts: {
   memory: string;
   smp: number;
   display: QemuDisplay;
-  vga: QemuVga;
+  automation: boolean;
 }): string[] {
-  const display =
-    opts.vga === "virtio-gl" && (opts.display === "gtk" || opts.display === "sdl")
-      ? `${opts.display},gl=on`
-      : opts.display;
-  // virtio-vga-gl needs host GL: none dies at start; gtk/sdl get ,gl=on.
   // -vga none without a replacement device removes the console screendump reads.
-  const vga =
-    opts.vga === "std" ? [] : ["-vga", "none", "-device", opts.vga === "virtio" ? "virtio-vga" : "virtio-vga-gl"];
+  const vga = opts.automation ? ["-vga", "none", "-device", "virtio-vga"] : [];
   return [
     "-machine",
     DEFAULT_MACHINE,
@@ -299,7 +289,7 @@ function qemuArgs(opts: {
     "-drive",
     `if=pflash,format=raw,file=${opts.varsPath}`,
     "-display",
-    display,
+    opts.display,
     ...vga,
     // usb-tablet is the absolute pointer; without it, input-send-event abs has no handler.
     "-device",
