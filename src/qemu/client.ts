@@ -280,7 +280,11 @@ function qemuArgs(opts: {
     "-drive",
     `if=pflash,format=raw,file=${opts.varsPath}`,
     "-display",
-    "gtk",
+    "gtk,gl=on",
+    "-vga",
+    "none",
+    "-device",
+    "virtio-vga-gl",
     // usb-tablet is the absolute pointer; without it, input-send-event abs has no handler.
     "-device",
     "qemu-xhci",
