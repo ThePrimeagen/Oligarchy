@@ -4,6 +4,7 @@ The TypeScript client for the oligarchy control plane. It sends HTTP requests to
 
 ```bash
 ./client experiment new --iso <https-url> --server_url=<http-or-https-url> --version <version>
+./client --agent-id <agent> test-results --id <result-id> --status success|failed [--reason <text>]
 ./client --agent-id <agent> start [--iso <path>] [--disk <path>]
 ./client --agent-id <agent> get-image <id> [-o file]
 ./client --agent-id <agent> get-serial <id> [-o file]
@@ -16,7 +17,7 @@ The TypeScript client for the oligarchy control plane. It sends HTTP requests to
 
 The server address comes from `--server-url`, default `127.0.0.1:42069`. It is a shared flag on the root command and may sit before or after the subcommand name.
 
-`--agent-id <agent>` is a shared flag on the root command, required for every QEMU command and unused by `experiment`. It may sit before or after the subcommand name. This client is used by agents, not humans — the inconvenience of typing it is deliberate. An invocation without it is a missing-option error.
+`--agent-id <agent>` is a shared flag on the root command, required for every QEMU command, for `test-results`, and for `intent`, unused by `experiment`. It may sit before or after the subcommand name. This client is used by agents, not humans — the inconvenience of typing it is deliberate. An invocation without it is a missing-option error.
 
 ## experiment new
 
@@ -28,6 +29,17 @@ Run the root wrapper directly:
 
 ```bash
 ./client experiment new --iso https://example.com/omarchy.iso --server_url=https://qemu.example.com --version 1.2.3
+```
+
+## test-results
+
+Closes one pending test result. The command writes the database itself — it does not call the proxy. `--id` is the result UUID printed on the Linear issue. `--status` is `success` or `failed` (`success` is stored as `passed`). `--reason` is optional text stored on the result row. `--agent-id` is required: the command looks up that agent's session in `agent_runs` and records it on the result.
+
+Missing `DATABASE_URL` is a failure. An unknown result id is a failure.
+
+```bash
+./client --agent-id <agent> test-results --id 22222222-2222-4222-8222-222222222222 --status success
+./client --agent-id <agent> test-results --id 22222222-2222-4222-8222-222222222222 --status failed --reason "installer hung"
 ```
 
 ## start
@@ -91,4 +103,4 @@ Kills the session. Only the agent that started it can stop it; a different `--ag
 
 ## Reading the file
 
-The root `client` command shares `--agent-id` and `--server-url` with its subcommands. QEMU handlers yield the parent command and fail if `--agent-id` is missing. `experiment` is a sibling subcommand with its own `new` command. HTTP helpers stay local to the file: `postJSON`, `readAPIError`, and `errorMessage`. There is no other machinery — see the [philosophy](philosophy.md) for why it should stay that way.
+The root `client` command shares `--agent-id` and `--server-url` with its subcommands. QEMU handlers, `test-results`, and `intent` yield the parent command and fail if `--agent-id` is missing. `experiment` is a sibling subcommand with its own `new` command. `test-results` is a sibling that writes the result row through `src/test-results.ts`. HTTP helpers stay local to the file: `postJSON`, `readAPIError`, and `errorMessage`. There is no other machinery — see the [philosophy](philosophy.md) for why it should stay that way.

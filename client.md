@@ -4,19 +4,20 @@ Consult this table of contents first. Read only the section you need.
 
 | Section | Line |
 |---------|-----:|
-| [Important](#important) | 21 |
-| [Environment](#environment) | 25 |
-| [Invoke](#invoke) | 33 |
-| [start](#start) | 49 |
-| [get-image](#get-image) | 63 |
-| [get-serial](#get-serial) | 74 |
-| [send-keys](#send-keys) | 96 |
-| [send-mouse](#send-mouse) | 108 |
-| [stop](#stop) | 122 |
-| [experiment new](#experiment-new) | 134 |
-| [Keys](#keys) | 144 |
-| [Mouse](#mouse) | 156 |
-| [The loop](#the-loop) | 164 |
+| [Important](#important) | 22 |
+| [Environment](#environment) | 26 |
+| [Invoke](#invoke) | 34 |
+| [start](#start) | 50 |
+| [get-image](#get-image) | 64 |
+| [get-serial](#get-serial) | 75 |
+| [send-keys](#send-keys) | 97 |
+| [send-mouse](#send-mouse) | 109 |
+| [stop](#stop) | 123 |
+| [experiment new](#experiment-new) | 135 |
+| [test-results](#test-results) | 145 |
+| [Keys](#keys) | 156 |
+| [Mouse](#mouse) | 168 |
+| [The loop](#the-loop) | 176 |
 
 ## Important
 
@@ -28,7 +29,7 @@ If you are the client, or an agent driving the client: do not look at code. Only
 
 If `DATABASE_URL` is missing, that is a failure. Stop.
 
-The proxy and `experiment new` read these from the environment. A missing `DATABASE_URL` or `LINEAR_API_TOKEN` exits 1.
+The proxy, `experiment new`, and `test-results` read these from the environment. A missing `DATABASE_URL` or `LINEAR_API_TOKEN` exits 1.
 
 ## Invoke
 
@@ -140,6 +141,17 @@ Creates one pending test run and one Linear issue per stored test definition. No
 ```
 
 `--iso` must be an HTTPS URL. `--server_url` may be HTTP or HTTPS. `--version` is required.
+
+## test-results
+
+Closes one pending test result. Reads `DATABASE_URL` from the environment. `--agent-id` is required.
+
+```bash
+./client --agent-id <agent> test-results --id <result-id> --status success
+./client --agent-id <agent> test-results --id <result-id> --status failed --reason "installer hung"
+```
+
+`--id` is the result UUID from the Linear issue. `--status` is `success` or `failed`. `--reason` is optional text stored on the result row.
 
 ## Keys
 
