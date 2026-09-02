@@ -118,11 +118,11 @@ function failed(message: string, who: { sessionId: string; agentId: string }): A
 }
 
 function startFailed(err: unknown, who: { sessionId: string; agentId: string }): ApiError {
-  return { _tag: "StartFailed", message: (err as Error).message, cause: err, ...who };
+  return { _tag: "StartFailed", message: errorDetail(err), cause: err, ...who };
 }
 
 function exchangeFailed(err: unknown, who: { sessionId: string; agentId: string }): ApiError {
-  return { _tag: "ExchangeFailed", message: (err as Error).message, cause: err, ...who };
+  return { _tag: "ExchangeFailed", message: errorDetail(err), cause: err, ...who };
 }
 
 function internal(cause: unknown, who: { sessionId: string; agentId?: string }): ApiError {
@@ -234,7 +234,7 @@ async function launchQemu(
     await sessionRunning(db, qemu.id);
   } catch (err) {
     await stop(qemu).catch(() => {});
-    await endSession(db, qemu.id, "failed", (err as Error).message).catch((e: unknown) => {
+    await endSession(db, qemu.id, "failed", errorDetail(err)).catch((e: unknown) => {
       log(db, { level: "error", text: `db: recording a failed start failed too: ${(e as Error).message}`, sessionId: qemu.id, agentId: cfg.agent }, { cause: e });
     });
     throw err;
