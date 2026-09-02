@@ -2,14 +2,14 @@ import { createServer } from "node:http";
 import { mkdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { loadEnvFile } from "node:process";
-import { Cause, Effect, Exit, Layer, Schema } from "effect";
-import { Command, Flag } from "effect/unstable/cli";
+import { Cause, Effect, Exit, Layer, Option, Schema } from "effect";
+import { CliError, Command, Flag } from "effect/unstable/cli";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node";
 import { flushLogs, log } from "../db/log.ts";
 import { connectDatabase, endSession, finishAction, insertSession, registerAgent, sessionRunning, startAction } from "../db/ops.ts";
 import { flushSentry, initSentry } from "../sentry.ts";
-import { QEMU_DISPLAYS, createDisk, createQemu, screendump, sendKey, sendMouse, start, stop, type Qemu, type QemuDisplay } from "./client.ts";
+import { QEMU_DISPLAYS, createDisk, createQemu, missingHostRequirements, screendump, sendKey, sendMouse, start, stop, type Qemu, type QemuDisplay } from "./client.ts";
 import { getIso } from "./iso.ts";
 import { parseKeys } from "./keys.ts";
 import { collectStats, startCpuSampler } from "./stats.ts";
@@ -171,10 +171,10 @@ async function launchQemu(qemu: Qemu, cfg: typeof StartBody.Type): Promise<void>
   }
 }
 
-function startSession(cfg: typeof StartBody.Type, started: number, display: QemuDisplay): Effect.Effect<string, ApiError> {
+function startSession(cfg: typeof StartBody.Type, started: number, display: QemuDisplay, automation: boolean): Effect.Effect<string, ApiError> {
   return Effect.gen(function* () {
     const isUrl = cfg.iso.startsWith("http://") || cfg.iso.startsWith("https://");
-    const qemu = createQemu({ display });
+    const qemu = createQemu({ display, automation });
     yield* Effect.tryPromise({
       try: () => insertSession(db, qemu.id, { iso: cfg.iso, disk: cfg.disk }, isUrl ? "downloading" : "running"),
       catch: (cause) => internal(cause, { sessionId: qemu.id, agentId: cfg.agent }),
@@ -197,12 +197,12 @@ function startSession(cfg: typeof StartBody.Type, started: number, display: Qemu
 // The session-driving routes are uninterruptible: a client disconnect interrupts the
 // request's fiber, and a state transition torn in half leaves a machine the sessions
 // map never received — unreachable and unkillable — or a kill that went unrecorded.
-const routes = (display: QemuDisplay) => HttpRouter.use((router) =>
+const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((router) =>
   Effect.gen(function* () {
     yield* router.add("POST", "/start", Effect.gen(function* () {
       const started = Date.now();
       const cfg = yield* jsonBody(StartBody);
-      const id = yield* startSession(cfg, started, display);
+      const id = yield* startSession(cfg, started, display, automation);
       return HttpServerResponse.jsonUnsafe({ id });
     }) satisfies RouteHandler, { uninterruptible: true });
 
@@ -252,6 +252,18 @@ const routes = (display: QemuDisplay) => HttpRouter.use((router) =>
         return HttpServerResponse.uint8Array(data, { contentType: "image/png" });
       });
       return yield* Effect.ensuring(png, Effect.promise(() => rm(path, { force: true })));
+    }) satisfies RouteHandler, { uninterruptible: true });
+
+    yield* router.add("GET", "/serial", Effect.gen(function* () {
+      const started = Date.now();
+      const params = yield* Effect.mapError(HttpRouter.schemaParams(ImageParams), (err) => badRequest(err.message));
+      const qemu = yield* session(params.id, params.agent);
+      const data = yield* Effect.tryPromise({
+        try: () => readFile(qemu.serialPath),
+        catch: (cause) => internal(cause, { sessionId: qemu.id, agentId: params.agent }),
+      });
+      log(db, { text: `session ${qemu.id}: serial; ${data.length} bytes in ${Date.now() - started}ms`, sessionId: qemu.id, agentId: params.agent });
+      return HttpServerResponse.uint8Array(data, { contentType: "text/plain" });
     }) satisfies RouteHandler, { uninterruptible: true });
 
     yield* router.add("GET", "/stats", Effect.sync(() => HttpServerResponse.jsonUnsafe(collectStats(cpuSampler, sessions.size))) satisfies RouteHandler);
@@ -460,16 +472,16 @@ const drainSessions = Layer.effectDiscard(
 // The platform drops its error listener once the server is up; a later server error
 // (the acceptor breaking) still needs the fatal line, the flush, and exit 1.
 const server = createServer();
-const main = (display: QemuDisplay) => Layer.effectDiscard(
+const main = (display: QemuDisplay, automation: boolean) => Layer.effectDiscard(
   Effect.sync(() => {
-    log(db, `oligarchy proxy listening on ${addr}; display ${display}`);
+    log(db, `oligarchy proxy listening on ${addr}; display ${display}${automation ? "; automation" : ""}`);
     server.on("error", (err) => {
       log(db, { level: "fatal", text: `proxy: ${err.message}` }, { cause: err });
       void flushLogs().then(flushSentry).then(() => process.exit(1));
     });
   }),
 ).pipe(
-  Layer.provide(HttpRouter.serve(Layer.mergeAll(routes(display), respond, drainSessions), { disableLogger: true, disableListenLog: true })),
+  Layer.provide(HttpRouter.serve(Layer.mergeAll(routes(display, automation), respond, drainSessions), { disableLogger: true, disableListenLog: true })),
   Layer.provide(NodeHttpServer.layer(() => server, { host, port: Number(port) })),
 );
 
@@ -477,14 +489,34 @@ const proxy = Command.make(
   "proxy",
   {
     display: Flag.choice("display", QEMU_DISPLAYS).pipe(
-      Flag.withDefault("none"),
+      Flag.optional,
       Flag.withDescription("QEMU display backend for every session; none captures without showing a window"),
     ),
-  },
-  ({ display }) =>
-    Layer.launch(main(display)).pipe(
-      Effect.tapError((err) => Effect.sync(() => log(db, { level: "fatal", text: `proxy: ${errorDetail(err)}` }, { cause: err }))),
+    automation: Flag.boolean("automation").pipe(
+      Flag.withDefault(false),
+      Flag.withDescription("Force the automation QEMU profile for every session"),
     ),
+  },
+  ({ display, automation }) => {
+    if (automation && Option.isSome(display)) {
+      return Effect.fail(new CliError.UserError({
+        cause: new Error("--automation is exclusive"),
+        userMessage: "--automation is exclusive",
+      }));
+    }
+    const resolved: QemuDisplay = Option.getOrElse(display, () => "none");
+    return Effect.gen(function* () {
+      const missing = yield* Effect.promise(() => missingHostRequirements(resolved));
+      if (missing.length > 0) {
+        const text = `missing host requirements:\n${missing.join("\n")}`;
+        console.error(`proxy: ${text}`);
+        return yield* Effect.fail(new Error(text));
+      }
+      return yield* Layer.launch(main(resolved, automation));
+    }).pipe(
+      Effect.tapError((err) => Effect.sync(() => log(db, { level: "fatal", text: `proxy: ${errorDetail(err)}` }, { cause: err }))),
+    );
+  },
 ).pipe(Command.withDescription("The oligarchy proxy: boots QEMU sessions and drives them over QMP"));
 
 NodeRuntime.runMain(

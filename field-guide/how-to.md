@@ -5,13 +5,14 @@ The CLI talks to a running proxy (`src/qemu/proxy.ts`). Start the proxy first, t
 ```bash
 ./server 42069
 ./server 42069 --display gtk
+./server 42069 --automation
 ./client --agent-id <agent> start
 ./client --agent-id <agent> start --iso omarchy.iso --disk qemu-img.qcow2
 ```
 
 `./server <port>` binds `127.0.0.1` on that port and loads `.env` from the current directory (`DATABASE_URL` and the rest). Variables already in the environment win, so the port from `./server` is not overwritten. Every start request must include an ISO; the server has none of its own. The client defaults `--iso` to `omarchy.iso` and reads the address from `OLIGARCHY_ADDR` (default `127.0.0.1:42069`).
 
-Sessions boot headless: QEMU runs with `-display none`, so nothing appears on the host while a guest starts or runs, and `get-image` is the only view of it. To watch a session, start the proxy with `--display gtk` (or `sdl`) and every session it boots opens a window instead. `egl-headless`, `spice-app`, and `dbus` are accepted too and handed straight to QEMU; they show nothing on their own. See [http-api.md](http-api.md) for what the flag does and does not change.
+Sessions boot headless: QEMU runs with `-display none`, so nothing appears on the host while a guest starts or runs, and `get-image` is the only view of it. To watch a session, start the proxy with `--display gtk` (or `sdl`) and every session it boots opens a window instead. `egl-headless`, `spice-app`, and `dbus` are accepted too and handed straight to QEMU; they show nothing on their own. `--automation` is the one flag for agent setup: it forces `-display none` and `-vga none -device virtio-vga` (not virtio-vga-gl) for every session. It cannot be combined with `--display` or leftover `--vga`. The proxy refuses to boot if qemu, qemu-img, OVMF, or the selected display backend is missing on the host. See [http-api.md](http-api.md) for what the flags do and do not change.
 
 Every QEMU invocation carries `--agent-id <agent>`, the calling agent's id — required, before or after the subcommand, see [cli.md](cli.md).
 
@@ -28,6 +29,21 @@ node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> get-image <id
 ```
 
 `-o` can sit before or after the session id.
+
+## Get the serial console
+
+Reads everything the guest has written to `/dev/ttyS0` since boot. That is how logs leave a machine whose graphical shell has crashed — switch to a TTY, stop the serial getty systemd starts on the UART, dump journalctl onto the serial port, then pull the file. `/dev/ttyS0` is root:uucp, so the write is `sudo tee`; a user `>` gets permission denied. `|` can be typed as itself.
+
+```bash
+node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-keys <id> "<C-A-F3>"
+# image until the login prompt, then username and password
+node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-keys <id> "sudo systemctl stop serial-getty@ttyS0<ENTER>"
+node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-keys <id> "journalctl -b --no-pager | sudo tee /dev/ttyS0<ENTER>"
+# if sudo asks, send the user password
+node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> get-serial <id> -o journal.txt
+```
+
+`-o` can sit before or after the session id. Without it, bytes go to stdout.
 
 ## Send keys
 

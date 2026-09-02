@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { copyFile, mkdir, rm, stat } from "node:fs/promises";
+import { copyFile, mkdir, readdir, rm, stat } from "node:fs/promises";
 import { createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,7 +20,6 @@ const HANDSHAKE_MS = 10_000;
 export const QEMU_DISPLAYS = ["none", "gtk", "sdl", "egl-headless", "spice-app", "dbus"] as const;
 export type QemuDisplay = (typeof QEMU_DISPLAYS)[number];
 const DEFAULT_DISPLAY: QemuDisplay = "none";
-
 export type QemuOptions = {
   tmp?: string;
   diskSize?: string;
@@ -29,6 +28,7 @@ export type QemuOptions = {
   memory?: string;
   smp?: number;
   display?: QemuDisplay;
+  automation?: boolean;
 };
 
 export type QemuStartOptions = {
@@ -46,6 +46,7 @@ export type Qemu = {
   readonly dir: string;
   readonly diskPath: string;
   readonly sockPath: string;
+  readonly serialPath: string;
   readonly options: QemuOptions;
   readonly pending: Map<number | "greeting", Pending>;
   nextId: number;
@@ -61,6 +62,7 @@ export function createQemu(options: QemuOptions = {}): Qemu {
     dir,
     diskPath: join(dir, "disk.qcow2"),
     sockPath: join(dir, "qmp.sock"),
+    serialPath: join(dir, "serial.log"),
     options,
     pending: new Map(),
     nextId: 0,
@@ -103,6 +105,7 @@ export async function start(
   await copyFile(qemu.options.vars ?? DEFAULT_VARS, varsPath);
   const args = qemuArgs({
     sockPath: qemu.sockPath,
+    serialPath: qemu.serialPath,
     varsPath,
     diskPath: disk,
     iso: options.iso,
@@ -110,6 +113,7 @@ export async function start(
     memory: qemu.options.memory ?? DEFAULT_MEMORY,
     smp: qemu.options.smp ?? DEFAULT_SMP,
     display: qemu.options.display ?? DEFAULT_DISPLAY,
+    automation: qemu.options.automation === true,
   });
 
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -259,6 +263,7 @@ export async function screendump(
 
 function qemuArgs(opts: {
   sockPath: string;
+  serialPath: string;
   varsPath: string;
   diskPath: string;
   iso: string;
@@ -266,7 +271,10 @@ function qemuArgs(opts: {
   memory: string;
   smp: number;
   display: QemuDisplay;
+  automation: boolean;
 }): string[] {
+  // -vga none without a replacement device removes the console screendump reads.
+  const vga = opts.automation ? ["-vga", "none", "-device", "virtio-vga"] : [];
   return [
     "-machine",
     DEFAULT_MACHINE,
@@ -280,10 +288,9 @@ function qemuArgs(opts: {
     `if=pflash,format=raw,readonly=on,file=${opts.code}`,
     "-drive",
     `if=pflash,format=raw,file=${opts.varsPath}`,
-    // screendump renders the default VGA on demand, so `none` still captures; never add
-    // -nodefaults or -vga none, which remove the console screendump reads.
     "-display",
     opts.display,
+    ...vga,
     // usb-tablet is the absolute pointer; without it, input-send-event abs has no handler.
     "-device",
     "qemu-xhci",
@@ -293,6 +300,10 @@ function qemuArgs(opts: {
     `socket,id=qmp,path=${opts.sockPath}`,
     "-mon",
     "chardev=qmp,mode=control",
+    "-chardev",
+    `file,id=serial,path=${opts.serialPath}`,
+    "-serial",
+    "chardev:serial",
     "-cdrom",
     opts.iso,
     "-boot",
@@ -349,4 +360,63 @@ async function assertFile(path: string, label: string): Promise<void> {
   } catch {
     throw new Error(`qemu: ${label} not found: ${path}`);
   }
+}
+
+export async function missingHostRequirements(display: QemuDisplay): Promise<string[]> {
+  const missing: string[] = [];
+  let qemuFound = false;
+  for (const bin of [QEMU_BIN, QEMU_IMG] as const) {
+    const found = await new Promise<boolean>((resolve) => {
+      const child = spawn("/bin/sh", ["-c", `command -v ${bin}`], { stdio: "ignore" });
+      child.once("error", () => resolve(false));
+      child.once("exit", (code) => resolve(code === 0));
+    });
+    if (bin === QEMU_BIN) {
+      qemuFound = found;
+    }
+    if (!found) {
+      missing.push(`${bin} not on PATH`);
+    }
+  }
+  for (const [path, label] of [
+    [DEFAULT_CODE, "OVMF code"],
+    [DEFAULT_VARS, "OVMF vars"],
+  ] as const) {
+    try {
+      await stat(path);
+    } catch {
+      missing.push(`${label} not found: ${path}`);
+    }
+  }
+  if (display === "gtk" && (process.env.DISPLAY === undefined || process.env.DISPLAY === "")) {
+    missing.push("DISPLAY is not set (needed for --display gtk)");
+  }
+  if (display === "egl-headless") {
+    try {
+      const nodes = await readdir("/dev/dri");
+      if (!nodes.some((name) => name.startsWith("renderD"))) {
+        missing.push("no DRM render node in /dev/dri (needed for --display egl-headless)");
+      }
+    } catch {
+      missing.push("/dev/dri not found (needed for --display egl-headless)");
+    }
+  }
+  if (display !== "none" && qemuFound) {
+    const help = await new Promise<string>((resolve, reject) => {
+      const child = spawn(QEMU_BIN, ["-display", "help"], { stdio: ["ignore", "pipe", "pipe"] });
+      let out = "";
+      child.stdout?.on("data", (chunk) => {
+        out += String(chunk);
+      });
+      child.stderr?.on("data", (chunk) => {
+        out += String(chunk);
+      });
+      child.once("error", reject);
+      child.once("exit", () => resolve(out));
+    });
+    if (!help.split("\n").map((line) => line.trim()).includes(display)) {
+      missing.push(`${QEMU_BIN} was built without display backend ${display}`);
+    }
+  }
+  return missing;
 }

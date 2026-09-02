@@ -6,6 +6,7 @@ The TypeScript client for the oligarchy control plane. It sends HTTP requests to
 client experiment new --iso <https-url> --server_url=<http-or-https-url> --version <version>
 node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> start [--iso <path>] [--disk <path>]
 node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> get-image <id> [-o file]
+node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> get-serial <id> [-o file]
 node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-keys <id> <keys> [encoding]
 node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-mouse <id> <x> <y> [button [clicks]]
 node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> stop <id> [status [reason]]
@@ -42,6 +43,14 @@ Captures the session's current display as a PNG.
 - `--output` / `-o` is optional and may sit before or after the session id.
 - With `-o`, the PNG is written to the file (mode 0644); without it, raw PNG bytes go to stdout, so redirect: `... get-image <id> > shot.png`.
 - Wire call: `GET /image?id=<id>&agent=<agent>` → `image/png` bytes.
+
+## get-serial
+
+Reads the guest's serial console as text. The guest writes here when something prints to `/dev/ttyS0` — that is how journalctl and crash logs leave a machine whose desktop shell is dead.
+
+- `--output` / `-o` is optional and may sit before or after the session id.
+- With `-o`, the bytes are written to the file (mode 0644); without it, they go to stdout.
+- Wire call: `GET /serial?id=<id>&agent=<agent>` → `text/plain` bytes.
 
 ## send-keys
 

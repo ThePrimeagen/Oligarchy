@@ -120,6 +120,49 @@ const getImage = Command.make(
   }),
 );
 
+const getSerial = Command.make(
+  "get-serial",
+  {
+    output: Flag.string("output").pipe(Flag.withAlias("o"), Flag.optional),
+    id: Argument.string("id"),
+  },
+  Effect.fn(function* ({ id, output }) {
+    const { agentId } = yield* client;
+    const agent = yield* requireAgent(agentId);
+    const res = yield* Effect.tryPromise({
+      try: () => fetch(`http://${addr()}/serial?id=${encodeURIComponent(id)}&agent=${encodeURIComponent(agent)}`),
+      catch: fail,
+    });
+    if (res.status !== 200) {
+      const message = yield* Effect.tryPromise({
+        try: () => readAPIError(res),
+        catch: fail,
+      });
+      return yield* Effect.fail(fail(new Error(message)));
+    }
+    const data = Buffer.from(
+      yield* Effect.tryPromise({
+        try: () => res.arrayBuffer(),
+        catch: fail,
+      }),
+    );
+    if (Option.isSome(output)) {
+      yield* Effect.tryPromise({
+        try: () => writeFile(output.value, data, { mode: 0o644 }),
+        catch: fail,
+      });
+      return;
+    }
+    yield* Effect.tryPromise({
+      try: () =>
+        new Promise<void>((done, failWrite) => {
+          process.stdout.write(data, (err) => (err ? failWrite(err) : done()));
+        }),
+      catch: fail,
+    });
+  }),
+);
+
 const sendKeys = Command.make(
   "send-keys",
   {
@@ -196,7 +239,7 @@ const stop = Command.make(
 );
 
 const app = client.pipe(
-  Command.withSubcommands([experimentCommand, start, getImage, sendKeys, sendMouse, stop]),
+  Command.withSubcommands([experimentCommand, start, getImage, getSerial, sendKeys, sendMouse, stop]),
 );
 
 function addr(): string {
