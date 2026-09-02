@@ -59,6 +59,7 @@ describe("parseKeys happy path", () => {
     assert.deepEqual(parseKeys("<F13>"), [["f13"]]);
     assert.deepEqual(parseKeys("<kp_enter>"), [["kp_enter"]]);
     assert.deepEqual(parseKeys("<caps_lock>"), [["caps_lock"]]);
+    assert.deepEqual(parseKeys("<unmapped>"), [["unmapped"]]);
   });
 
   it("keeps literal and angle chords in input order", () => {
@@ -100,6 +101,18 @@ describe("parseKeys unhappy path", () => {
   it("throws on an unknown modifier", () => {
     assert.throws(() => parseKeys("<X-c>"), {
       message: 'qemu: unknown modifier "X"',
+    });
+  });
+
+  it("throws on a raw token carrying non-qcode characters", () => {
+    assert.throws(() => parseKeys("<f}>"), {
+      message: 'qemu: unknown key "f}"',
+    });
+    assert.throws(() => parseKeys("<f{>"), {
+      message: 'qemu: unknown key "f{"',
+    });
+    assert.throws(() => parseKeys("<foo bar>"), {
+      message: 'qemu: unknown key "foo bar"',
     });
   });
 

@@ -25,7 +25,6 @@ const NAMED: Record<string, string> = {
   PGDN: "pgdn",
   PAGEDOWN: "pgdn",
   LT: "less",
-  GT: "dot",
   MENU: "menu",
   CAPSLOCK: "caps_lock",
   NUMLOCK: "num_lock",
@@ -144,9 +143,10 @@ function keyName(name: string): string[] {
     return charChord(name);
   }
   // Accept any documented qcode token (f1..f24, kp_*, caps_lock, ...)
-  // rather than maintain the full list here.
+  // rather than maintain the full list here. Qcodes are lowercase [a-z0-9_];
+  // rejecting anything else keeps a stray "f}" out of the QMP stream.
   const lower = name.toLowerCase();
-  if (lower === "unmapped" || lower.includes("_") || lower.startsWith("f")) {
+  if (/^[a-z0-9_]+$/.test(lower) && (lower === "unmapped" || lower.includes("_") || lower.startsWith("f"))) {
     return [lower];
   }
   throw new Error(`qemu: unknown key "${name}"`);
