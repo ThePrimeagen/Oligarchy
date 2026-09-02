@@ -12,7 +12,7 @@ The TypeScript client for the oligarchy control plane. It sends HTTP requests to
 ./client --agent-id <agent> stop <id> [status [reason]]
 ```
 
-The server address comes from `--server-url`, default `127.0.0.1:42069`. It is a shared flag on the root command and may sit before or after the subcommand name.
+The server comes from `--server-url`, a full URL used exactly as given (no scheme is ever added), default `http://127.0.0.1:42069`. It is a shared flag on the root command and may sit before or after the subcommand name.
 
 `--agent-id <agent>` is a shared flag on the root command, required for every QEMU command and unused by `experiment`. It may sit before or after the subcommand name. This client is used by agents, not humans — the inconvenience of typing it is deliberate. An invocation without it is a missing-option error.
 
