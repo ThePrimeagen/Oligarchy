@@ -26,6 +26,19 @@ node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> get-image <id
 
 `-o` can sit before or after the session id.
 
+## Get the serial console
+
+Reads everything the guest has written to `/dev/ttyS0` since boot. That is how logs leave a machine whose graphical shell has crashed — switch to a TTY, dump journalctl onto the serial port, then pull the file. `>` in a key string is `<GT>`; `|` can be typed as itself.
+
+```bash
+node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-keys <id> "<C-A-F3>"
+# image until the login prompt, then username and password
+node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> send-keys <id> "journalctl -b --no-pager <GT> /dev/ttyS0<ENTER>"
+node --experimental-strip-types src/qemu/cli.ts --agent-id <agent> get-serial <id> -o journal.txt
+```
+
+`-o` can sit before or after the session id. Without it, bytes go to stdout.
+
 ## Send keys
 
 ```bash
