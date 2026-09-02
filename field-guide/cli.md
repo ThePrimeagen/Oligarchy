@@ -10,12 +10,14 @@ The TypeScript client for the oligarchy control plane. It sends HTTP requests to
 ./client --agent-id <agent> get-serial <id> [-o file]
 ./client --agent-id <agent> send-keys <id> <keys> [encoding]
 ./client --agent-id <agent> send-mouse <id> <x> <y> [button [clicks]]
+./client --agent-id <agent> intent start --session_id <id> --test_result_id <id> --message <message>
+./client --agent-id <agent> intent end --session_id <id>
 ./client --agent-id <agent> stop <id> [status [reason]]
 ```
 
 The server address comes from `--server-url`, default `127.0.0.1:42069`. It is a shared flag on the root command and may sit before or after the subcommand name.
 
-`--agent-id <agent>` is a shared flag on the root command, required for every QEMU command and for `test-results`, unused by `experiment`. It may sit before or after the subcommand name. This client is used by agents, not humans — the inconvenience of typing it is deliberate. An invocation without it is a missing-option error.
+`--agent-id <agent>` is a shared flag on the root command, required for every QEMU command, for `test-results`, and for `intent`, unused by `experiment`. It may sit before or after the subcommand name. This client is used by agents, not humans — the inconvenience of typing it is deliberate. An invocation without it is a missing-option error.
 
 ## experiment new
 
@@ -78,6 +80,13 @@ Moves the pointer, and optionally clicks or scrolls, at a point on the screensho
 - `send-mouse <id> <x> <y> [button [clicks]]`. `x` and `y` are fractions of the screenshot, `0..1` from the top-left; the CLI rejects anything else before calling the server. Omit `button` to move only. `button` is `left`, `middle`, `right`, `wheel-up`, or `wheel-down`; `clicks` defaults to 1 on the server and is a pulse count (a double-click is `left 2`, three wheel ticks is `wheel-down 3`).
 - Wire call: `POST /send-mouse` with `{"id", "x", "y", "button"?, "clicks"?, "agent"}` → `{"ok": "true"}`.
 
+## intent start / intent end
+
+Records the agent's current intent on the session. One intent is active at a time; it is not stacked. Start before the work that fulfills the intent, then end when that work is done. Every value is a flag; the only positionals are the verbs. Quote `--message` so the shell keeps spaces.
+
+- `intent start --session_id <id> --test_result_id <id> --message <message>`. Wire call: `POST /intent/start` with `{"id", "agent", "test_result_id", "message"}` → `{"ok": "true"}`.
+- `intent end --session_id <id>`. Ends the session's one active intent. Wire call: `POST /intent/end` with `{"id", "agent"}` → `{"ok": "true"}`.
+
 ## stop
 
 Kills the session. Only the agent that started it can stop it; a different `--agent-id` is a 403.
@@ -94,4 +103,4 @@ Kills the session. Only the agent that started it can stop it; a different `--ag
 
 ## Reading the file
 
-The root `client` command shares `--agent-id` and `--server-url` with its subcommands. QEMU handlers and `test-results` yield the parent command and fail if `--agent-id` is missing. `experiment` is a sibling subcommand with its own `new` command. `test-results` is a sibling that writes the result row through `src/test-results.ts`. HTTP helpers stay local to the file: `postJSON`, `readAPIError`, and `errorMessage`. There is no other machinery — see the [philosophy](philosophy.md) for why it should stay that way.
+The root `client` command shares `--agent-id` and `--server-url` with its subcommands. QEMU handlers, `test-results`, and `intent` yield the parent command and fail if `--agent-id` is missing. `experiment` is a sibling subcommand with its own `new` command. `test-results` is a sibling that writes the result row through `src/test-results.ts`. HTTP helpers stay local to the file: `postJSON`, `readAPIError`, and `errorMessage`. There is no other machinery — see the [philosophy](philosophy.md) for why it should stay that way.
