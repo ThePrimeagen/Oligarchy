@@ -242,8 +242,51 @@ const stop = Command.make(
   }),
 );
 
+const intentStart = Command.make(
+  "start",
+  {
+    sessionId: Flag.string("session_id").pipe(Flag.withSchema(Schema.NonEmptyString)),
+    testResultId: Flag.string("test_result_id").pipe(Flag.withSchema(Schema.NonEmptyString)),
+    message: Flag.string("message").pipe(Flag.withSchema(Schema.NonEmptyString)),
+  },
+  Effect.fn(function* ({ sessionId, testResultId, message }) {
+    const { agentId } = yield* client;
+    const agent = yield* requireAgent(agentId);
+    yield* Effect.tryPromise({
+      try: () =>
+        postJSON("/intent/start", {
+          id: sessionId,
+          agent,
+          test_result_id: testResultId,
+          message,
+        }),
+      catch: fail,
+    });
+  }),
+);
+
+const intentEnd = Command.make(
+  "end",
+  {
+    sessionId: Flag.string("session_id").pipe(Flag.withSchema(Schema.NonEmptyString)),
+  },
+  Effect.fn(function* ({ sessionId }) {
+    const { agentId } = yield* client;
+    const agent = yield* requireAgent(agentId);
+    yield* Effect.tryPromise({
+      try: () => postJSON("/intent/end", { id: sessionId, agent }),
+      catch: fail,
+    });
+  }),
+);
+
+const intent = Command.make("intent").pipe(
+  Command.withDescription("Start or end the session's one active intent"),
+  Command.withSubcommands([intentStart, intentEnd]),
+);
+
 const app = client.pipe(
-  Command.withSubcommands([experimentCommand, start, getImage, getSerial, sendKeys, sendMouse, stop]),
+  Command.withSubcommands([experimentCommand, start, getImage, getSerial, sendKeys, sendMouse, stop, intent]),
 );
 
 async function postJSON(serverUrl: string, path: string, body: unknown): Promise<string> {

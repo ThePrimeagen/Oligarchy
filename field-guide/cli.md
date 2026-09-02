@@ -9,6 +9,8 @@ The TypeScript client for the oligarchy control plane. It sends HTTP requests to
 ./client --agent-id <agent> get-serial <id> [-o file]
 ./client --agent-id <agent> send-keys <id> <keys> [encoding]
 ./client --agent-id <agent> send-mouse <id> <x> <y> [button [clicks]]
+./client --agent-id <agent> intent start --session_id <id> --test_result_id <id> --message <message>
+./client --agent-id <agent> intent end --session_id <id>
 ./client --agent-id <agent> stop <id> [status [reason]]
 ```
 
@@ -65,6 +67,13 @@ Moves the pointer, and optionally clicks or scrolls, at a point on the screensho
 
 - `send-mouse <id> <x> <y> [button [clicks]]`. `x` and `y` are fractions of the screenshot, `0..1` from the top-left; the CLI rejects anything else before calling the server. Omit `button` to move only. `button` is `left`, `middle`, `right`, `wheel-up`, or `wheel-down`; `clicks` defaults to 1 on the server and is a pulse count (a double-click is `left 2`, three wheel ticks is `wheel-down 3`).
 - Wire call: `POST /send-mouse` with `{"id", "x", "y", "button"?, "clicks"?, "agent"}` → `{"ok": "true"}`.
+
+## intent start / intent end
+
+Records the agent's current intent on the session. One intent is active at a time; it is not stacked. Start before the work that fulfills the intent, then end when that work is done. Every value is a flag; the only positionals are the verbs. Quote `--message` so the shell keeps spaces.
+
+- `intent start --session_id <id> --test_result_id <id> --message <message>`. Wire call: `POST /intent/start` with `{"id", "agent", "test_result_id", "message"}` → `{"ok": "true"}`.
+- `intent end --session_id <id>`. Ends the session's one active intent. Wire call: `POST /intent/end` with `{"id", "agent"}` → `{"ok": "true"}`.
 
 ## stop
 
