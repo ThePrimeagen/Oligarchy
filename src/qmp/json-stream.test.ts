@@ -94,6 +94,22 @@ describe("JSONStreamParser happy path", () => {
     parser.push('{"foo":1}');
     assert.deepEqual(parser.pull(), { foo: 1 });
   });
+
+  it("frames an object with braces inside a string value", () => {
+    const parser = new JSONStreamParser();
+    parser.push('{"error":{"class":"GenericError","desc":"value \'f}\'"},"id":2}');
+    assert.deepEqual(parser.pull(), {
+      error: { class: "GenericError", desc: "value 'f}'" },
+      id: 2,
+    });
+    assert.equal(parser.pull(), undefined);
+  });
+
+  it("frames a string containing an escaped quote before a brace", () => {
+    const parser = new JSONStreamParser();
+    parser.push('{"desc":"a \\" b }","id":7}');
+    assert.deepEqual(parser.pull(), { desc: 'a " b }', id: 7 });
+  });
 });
 
 describe("JSONStreamParser unhappy path", () => {
@@ -116,5 +132,13 @@ describe("JSONStreamParser unhappy path", () => {
     const numbers = new JSONStreamParser();
     numbers.push("42");
     assert.equal(numbers.pull(), undefined);
+  });
+
+  it("keeps an object with an unterminated string incomplete", () => {
+    const parser = new JSONStreamParser();
+    parser.push('{"desc":"unterminated } ');
+    assert.equal(parser.pull(), undefined);
+    parser.push('more"}');
+    assert.deepEqual(parser.pull(), { desc: "unterminated } more" });
   });
 });
