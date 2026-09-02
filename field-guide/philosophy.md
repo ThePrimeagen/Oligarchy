@@ -74,6 +74,6 @@ The default verification is running the real thing: boot the server, hit the end
 
 ## Style
 
-- No classes, ever. Factory functions returning plain state objects, operated on by standalone functions. See [AGENTS.md](../AGENTS.md).
+- No classes, ever. Factory functions returning plain state objects, operated on by standalone functions. See [development.md](../development.md).
 - Executables are main files, not libraries: they run top level and export nothing (`src/qemu/cli.ts`, `src/qemu/proxy.ts`).
 - Changes get a review pass against this document's bar. Review suggestions that add guards or ceremony get declined, with the reason stated. Machine reviews are held to the same bar as the code they review: a reviewer that introduces nullable state for impossible failures, or strips the comments that carry design intent, gets that half of its diff reverted.
