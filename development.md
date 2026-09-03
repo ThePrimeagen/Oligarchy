@@ -6,6 +6,8 @@ Check the field guide: [field-guide/index.md](field-guide/index.md).
 
 The proxy needs `qemu-system-x86_64`, `qemu-img`, and OVMF at `/usr/share/edk2/x64/OVMF_CODE.4m.fd` and `OVMF_VARS.4m.fd`. `--display gtk` also needs `DISPLAY` and a QEMU build that lists gtk; `egl-headless` needs a DRM render node under `/dev/dri`. The proxy checks what it is about to use at startup and exits 1 with the missing list. There is no setup script.
 
+`./server` runs the proxy behind the [wrapper](field-guide/wrapper.md), which needs `git` and a checkout whose branch tracks an upstream it can `git pull --ff-only` from without a prompt. A change to `package-lock.json`, `drizzle/`, or `src/qemu/wrapper.ts` is not rolled: run `npm ci` and `npm run db:migrate`, then restart the wrapper.
+
 ## Vocabulary
 
 - When the user says "Kemu" (a speech-to-text rendering), they always mean QEMU. Read any such spelling as QEMU.

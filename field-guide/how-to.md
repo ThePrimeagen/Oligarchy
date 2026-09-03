@@ -1,6 +1,6 @@
 # Oligarchy how-to
 
-The CLI talks to a running proxy (`src/qemu/proxy.ts`). Start the proxy first, then boot a session and drive it by the id `start` prints.
+The CLI talks to a running proxy (`src/qemu/proxy.ts`) through the [wrapper](wrapper.md) `./server` runs. Start the server first, then boot a session and drive it by the id `start` prints.
 
 ```bash
 ./server 42069
@@ -10,7 +10,7 @@ The CLI talks to a running proxy (`src/qemu/proxy.ts`). Start the proxy first, t
 ./client --agent-id <agent> start --iso omarchy.iso --disk qemu-img.qcow2
 ```
 
-`./server <port>` binds `127.0.0.1` on that port and reads `DATABASE_URL` from the environment. A `.env` in the current directory fills in missing variables only; already-set values win, so the port from `./server` is not overwritten. Missing `DATABASE_URL` is a startup failure. Every start request must include an ISO; the server has none of its own. The client defaults `--iso` to `omarchy.iso` and `--server-url` to `http://127.0.0.1:42069`; the URL is used as given.
+`./server <port>` binds `127.0.0.1` on that port and reads `DATABASE_URL` from the environment. A `.env` in the current directory fills in missing variables only; already-set values win, so the port from `./server` is not overwritten. Missing `DATABASE_URL` is a startup failure. What listens on the port is the [wrapper](wrapper.md): it runs the proxy as a child, pulls every 30 minutes, and when the code changed boots a new proxy for new sessions while the old one finishes its own. `kill -USR2 <wrapper pid>` checks for updates right away. Every start request must include an ISO; the server has none of its own. The client defaults `--iso` to `omarchy.iso` and `--server-url` to `http://127.0.0.1:42069`; the URL is used as given.
 
 Sessions boot headless: QEMU runs with `-display none`, so nothing appears on the host while a guest starts or runs, and `get-image` is the only view of it. To watch a session, start the proxy with `--display gtk` (or `sdl`) and every session it boots opens a window instead. `egl-headless`, `spice-app`, and `dbus` are accepted too and handed straight to QEMU; they show nothing on their own. `--automation` is the one flag for agent setup: it forces `-display none` and `-vga none -device virtio-vga` (not virtio-vga-gl) for every session. It cannot be combined with `--display` or leftover `--vga`. The proxy refuses to boot if qemu, qemu-img, OVMF, or the selected display backend is missing on the host. See [http-api.md](http-api.md) for what the flags do and do not change.
 

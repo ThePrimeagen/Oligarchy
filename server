@@ -5,4 +5,4 @@ if [ -z "$1" ]; then
 fi
 export OLIGARCHY_ADDR="127.0.0.1:$1"
 shift
-exec node --experimental-strip-types "$(dirname "$0")/src/qemu/proxy.ts" "$@"
+exec node --experimental-strip-types "$(dirname "$0")/src/qemu/wrapper.ts" "$@"
