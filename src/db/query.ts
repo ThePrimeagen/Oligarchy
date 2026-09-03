@@ -59,21 +59,6 @@ export async function listSessions(connectionString: string): Promise<Session[]>
   return rows;
 }
 
-export async function getSessionImage(connectionString: string, sessionId: string): Promise<Buffer | undefined> {
-  const db = await connectDatabase(connectionString);
-  const [row] = await db
-    .select({
-      data: images.data,
-      queriedAt: sql`CURRENT_TIMESTAMP`,
-    })
-    .from(images)
-    .innerJoin(actions, eq(actions.id, images.actionId))
-    .where(eq(actions.sessionId, sessionId))
-    .orderBy(desc(actions.id))
-    .limit(1);
-  return row?.data;
-}
-
 export async function getImage(connectionString: string, actionId: number): Promise<Buffer | undefined> {
   const db = await connectDatabase(connectionString);
   const [row] = await db

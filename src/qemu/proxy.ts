@@ -124,7 +124,7 @@ type ApiError =
   | { readonly _tag: "Forbidden"; readonly message: string; readonly sessionId: string; readonly agentId: string }
   | { readonly _tag: "StartFailed"; readonly message: string; readonly cause: unknown; readonly sessionId: string; readonly agentId: string }
   | { readonly _tag: "ExchangeFailed"; readonly message: string; readonly cause: unknown; readonly sessionId: string; readonly agentId: string }
-  | { readonly _tag: "Internal"; readonly cause: unknown; readonly sessionId: string; readonly agentId?: string }
+  | { readonly _tag: "Internal"; readonly cause: unknown; readonly sessionId?: string; readonly agentId?: string }
   | { readonly _tag: "Failed"; readonly message: string; readonly sessionId: string; readonly agentId: string };
 
 function badRequest(message: string, who: { sessionId?: string; agentId?: string } = {}): ApiError {
@@ -143,7 +143,7 @@ function exchangeFailed(err: unknown, who: { sessionId: string; agentId: string 
   return { _tag: "ExchangeFailed", message: errorDetail(err), cause: err, ...who };
 }
 
-function internal(cause: unknown, who: { sessionId: string; agentId?: string }): ApiError {
+function internal(cause: unknown, who: { sessionId?: string; agentId?: string } = {}): ApiError {
   return { _tag: "Internal", cause, ...who };
 }
 
@@ -377,7 +377,7 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
     yield* router.add("GET", "/images/:id", Effect.gen(function* () {
       const params = yield* Effect.mapError(HttpRouter.schemaPathParams(StoredImageParams), (err) => badRequest(err.message));
       const actionId = Number(params.id);
-      if (!Number.isInteger(actionId)) {
+      if (!Number.isSafeInteger(actionId)) {
         return errorBody(404, "not found");
       }
       const data = yield* Effect.tryPromise({
