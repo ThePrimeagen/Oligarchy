@@ -5,7 +5,7 @@
   "terminals": [
     {
       "name": "proxy",
-      "command": "./server 42069 --automation"
+      "command": "./server --port 42069 --automation"
     }
   ]
 }

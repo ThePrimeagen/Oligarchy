@@ -26,8 +26,8 @@ if (token === undefined || token === "") {
 
 initSentry();
 
-const addr = process.env.OLIGARCHY_ADDR ?? "127.0.0.1:42069";
-const [host, port] = addr.split(":");
+const DEFAULT_HOST = "127.0.0.1";
+const DEFAULT_PORT = 42069;
 const SESSION_TIMEOUT_MS = 10 * 60 * 1000;
 const SESSION_TIMEOUT_CHECK_MS = 10_000;
 const SESSION_TIMEOUT_REASON = "no command received for 10 minutes";
@@ -631,9 +631,9 @@ const drainSessions = Layer.effectDiscard(
 // (the acceptor breaking) still needs the fatal line, the flush, and exit 1.
 const server = createServer();
 let serverFailing = false;
-const main = (display: QemuDisplay, automation: boolean) => Layer.effectDiscard(
+const main = (display: QemuDisplay, automation: boolean, port: number) => Layer.effectDiscard(
   Effect.sync(() => {
-    log(db, `oligarchy proxy listening on ${addr}; display ${display}${automation ? "; automation" : ""}`);
+    log(db, `oligarchy proxy listening on ${DEFAULT_HOST}:${port}; display ${display}${automation ? "; automation" : ""}`);
     server.on("error", (err) => {
       // Later accept errors must not exit before the first fatal flush finishes.
       if (serverFailing) {
@@ -665,7 +665,7 @@ const main = (display: QemuDisplay, automation: boolean) => Layer.effectDiscard(
   }),
 ).pipe(
   Layer.provide(HttpRouter.serve(Layer.mergeAll(routes(display, automation), respond, drainSessions), { disableLogger: true, disableListenLog: true })),
-  Layer.provide(NodeHttpServer.layer(() => server, { host, port: Number(port) })),
+  Layer.provide(NodeHttpServer.layer(() => server, { host: DEFAULT_HOST, port })),
 );
 
 const proxy = Command.make(
@@ -679,8 +679,12 @@ const proxy = Command.make(
       Flag.withDefault(false),
       Flag.withDescription("Force the automation QEMU profile for every session"),
     ),
+    port: Flag.integer("port").pipe(
+      Flag.withDefault(DEFAULT_PORT),
+      Flag.withDescription("Listen port"),
+    ),
   },
-  ({ display, automation }) => {
+  ({ display, automation, port }) => {
     if (automation && Option.isSome(display)) {
       return Effect.fail(new CliError.UserError({
         cause: new Error("--automation is exclusive"),
@@ -698,7 +702,7 @@ const proxy = Command.make(
         try: () => pingDatabase(db),
         catch: (cause) => new Error(`database unreachable: ${errorDetail(cause)}`),
       });
-      return yield* Layer.launch(main(resolved, automation));
+      return yield* Layer.launch(main(resolved, automation, port));
     }).pipe(
       Effect.tapError((err) => Effect.sync(() => log(db, { level: "fatal", text: `proxy: ${errorDetail(err)}` }, { cause: err }))),
     );
