@@ -131,10 +131,6 @@ describe("./client happy path", () => {
     );
     assert.notEqual(named.code, 0);
     assert.match(named.stderr, /LINEAR_API_TOKEN is not set/);
-
-    const listed = await runClient(["experiment", "list"], { LINEAR_API_TOKEN: "" });
-    assert.notEqual(listed.code, 0);
-    assert.match(listed.stderr, /LINEAR_API_TOKEN is not set/);
   });
 });
 

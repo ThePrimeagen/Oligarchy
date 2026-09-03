@@ -384,7 +384,7 @@ function fail(cause: unknown): CliError.UserError {
   return new CliError.UserError({ cause, userMessage: text });
 }
 
-export async function listLinearBacklog(token: string): Promise<LinearBacklogTicket[]> {
+async function listLinearBacklog(token: string): Promise<LinearBacklogTicket[]> {
   const tickets: LinearBacklogTicket[] = [];
   let after: string | undefined;
   const filter = {
@@ -413,7 +413,7 @@ export async function listLinearBacklog(token: string): Promise<LinearBacklogTic
     }
   }
 }`,
-      after === undefined ? { filter } : { filter, after },
+      { filter, after },
     );
     tickets.push(...page.issues.nodes);
     if (!page.issues.pageInfo.hasNextPage) {
@@ -426,7 +426,7 @@ export async function listLinearBacklog(token: string): Promise<LinearBacklogTic
   }
 }
 
-export async function listExperiment(): Promise<void> {
+async function listExperiment(): Promise<void> {
   if (existsSync(".env")) {
     loadEnvFile();
   }
@@ -440,7 +440,7 @@ export async function listExperiment(): Promise<void> {
   console.log(JSON.stringify(tickets));
 }
 
-export const experimentListCommand = Command.make(
+const experimentListCommand = Command.make(
   "list",
   {},
   Effect.fn(function* () {
