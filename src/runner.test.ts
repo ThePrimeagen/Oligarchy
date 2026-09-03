@@ -36,6 +36,20 @@ describe("runner state and command execution happy path", () => {
     });
   });
 
+  it("rotates agentId after stop so a new session can start", async () => {
+    const fetchFn: typeof fetch = async (input, init) => {
+      return new Response(JSON.stringify({ ok: "true" }), { status: 200 });
+    };
+
+    const runner = createRunner({ serverUrl: "http://127.0.0.1:42069", token: "tok", fetch: fetchFn });
+    const originalAgentId = runner.agentId;
+    runner.sessionId = "session-123";
+
+    await stopRunnerSession(runner);
+    assert.notEqual(runner.agentId, originalAgentId);
+    assert.equal(runner.sessionId, undefined);
+  });
+
   it("executes send-keys with rest of line passed as string", async () => {
     let capturedUrl: string | undefined;
     let capturedBody: unknown;
@@ -127,6 +141,22 @@ describe("runner state and command execution unhappy path", () => {
       () => executeRunnerLine(runner, "start"),
       { message: "A session is already running (existing-session). Stop it before starting a new one." },
     );
+  });
+
+  it("rejects start with invalid arguments", async () => {
+    const runner = createRunner({ serverUrl: "http://127.0.0.1:42069", token: "tok" });
+    await assert.rejects(() => executeRunnerLine(runner, "start --iso"), {
+      message: "Missing value for --iso",
+    });
+    await assert.rejects(() => executeRunnerLine(runner, "start --iso="), {
+      message: "Missing value for --iso",
+    });
+    await assert.rejects(() => executeRunnerLine(runner, "start --disk"), {
+      message: "Missing value for --disk",
+    });
+    await assert.rejects(() => executeRunnerLine(runner, "start --unknown"), {
+      message: "Unknown option for start: --unknown",
+    });
   });
 
   it("rejects when OLIGARCHY_TOKEN is missing", () => {
@@ -228,12 +258,13 @@ describe("cleanup on exit / kill happy path", () => {
     };
 
     const runner = createRunner({ serverUrl: "http://127.0.0.1:42069", token: "tok", fetch: fetchFn });
+    const originalAgent = runner.agentId;
     runner.sessionId = "session-123";
 
     await stopRunnerSession(runner, "aborted", "runner exited");
     assert.deepEqual(stoppedBody, {
       id: "session-123",
-      agent: runner.agentId,
+      agent: originalAgent,
       status: "aborted",
       reason: "runner exited",
     });

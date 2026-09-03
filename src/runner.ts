@@ -45,6 +45,7 @@ export type RunnerState = {
   sessionId?: string;
   activeIntent?: string;
   testResultId?: string;
+  startingPromise?: Promise<string>;
 };
 
 export function createRunner(options: RunnerOptions = {}): RunnerState {
@@ -236,6 +237,7 @@ export async function stopRunnerSession(
 
   runner.sessionId = undefined;
   runner.activeIntent = undefined;
+  runner.agentId = `runner-${randomUUID().slice(0, 8)}`;
   return `Session ${sessionId} stopped${status !== undefined ? ` (${status}${reason !== undefined ? `: ${reason}` : ""})` : ""}.`;
 }
 
@@ -280,19 +282,38 @@ export async function executeRunnerLine(runner: RunnerState, line: string): Prom
       if (runner.sessionId !== undefined) {
         throw new Error(`A session is already running (${runner.sessionId}). Stop it before starting a new one.`);
       }
+      if (runner.startingPromise !== undefined) {
+        throw new Error("A session is currently starting. Please wait.");
+      }
 
       let iso = DEFAULT_ISO;
       let disk: string | undefined;
 
       for (let i = 1; i < parts.length; i++) {
-        if (parts[i] === "--iso" && parts[i + 1] !== undefined) {
+        if (parts[i] === "--iso") {
+          if (parts[i + 1] === undefined) {
+            throw new Error("Missing value for --iso");
+          }
           iso = parts[++i];
         } else if (parts[i].startsWith("--iso=")) {
-          iso = parts[i].slice(6);
-        } else if (parts[i] === "--disk" && parts[i + 1] !== undefined) {
+          const val = parts[i].slice(6);
+          if (val === "") {
+            throw new Error("Missing value for --iso");
+          }
+          iso = val;
+        } else if (parts[i] === "--disk") {
+          if (parts[i + 1] === undefined) {
+            throw new Error("Missing value for --disk");
+          }
           disk = parts[++i];
         } else if (parts[i].startsWith("--disk=")) {
-          disk = parts[i].slice(7);
+          const val = parts[i].slice(7);
+          if (val === "") {
+            throw new Error("Missing value for --disk");
+          }
+          disk = val;
+        } else {
+          throw new Error(`Unknown option for start: ${parts[i]}`);
         }
       }
 
@@ -311,7 +332,15 @@ export async function executeRunnerLine(runner: RunnerState, line: string): Prom
         startPayload.disk = disk;
       }
 
-      const raw = await runner.postStart(runner.serverUrl, startPayload, runner.token);
+      const starting = runner.postStart(runner.serverUrl, startPayload, runner.token);
+      runner.startingPromise = starting;
+
+      let raw: string;
+      try {
+        raw = await starting;
+      } finally {
+        runner.startingPromise = undefined;
+      }
 
       const parsed = JSON.parse(raw) as { id: string };
       runner.sessionId = parsed.id;
@@ -517,6 +546,13 @@ export async function runInteractiveSession(serverUrl?: string): Promise<void> {
   const cleanup = async () => {
     if (cleanupRunning) return;
     cleanupRunning = true;
+    if (runner.startingPromise !== undefined) {
+      try {
+        const raw = await runner.startingPromise;
+        const parsed = JSON.parse(raw) as { id: string };
+        runner.sessionId = parsed.id;
+      } catch {}
+    }
     if (runner.sessionId !== undefined) {
       try {
         await stopRunnerSession(runner, "aborted", "runner terminated");
