@@ -12,36 +12,79 @@ export type LogEntry = {
   agentId?: string;
 };
 
-const AGENT_COLORS = [
-  "cyan",
-  "green",
-  "yellow",
-  "magenta",
-  "blue",
-  "cyanBright",
-  "greenBright",
-  "yellowBright",
-  "magentaBright",
-  "blueBright",
-] as const;
+const ROSE_PINE_MAIN = {
+  love: "#eb6f92",
+  gold: "#f6c177",
+  rose: "#ebbcba",
+  pine: "#31748f",
+  foam: "#9ccfd8",
+  iris: "#c4a7e7",
+  leaf: "#95b1ac",
+  text: "#e0def4",
+  subtle: "#908caa",
+  muted: "#6e6a86",
+  highlightHigh: "#524f67",
+  highlightMed: "#403d52",
+  overlay: "#26233a",
+  highlightLow: "#21202e",
+  surface: "#1f1d2e",
+  base: "#191724",
+  nc: "#16141f",
+} as const;
+
+const AGENT_COLORS: readonly string[] = Object.values(ROSE_PINE_MAIN);
+
+const assigned = new Map<string, string>();
+let next = 0;
 
 // Inserts are chained so rows land in call order; a failed insert reports itself to
 // stdout and never fails the caller or the lines behind it.
 let chain: Promise<void> = Promise.resolve();
 
-function colorFor(agentId: string): (typeof AGENT_COLORS)[number] {
-  let hash = 0;
-  for (let i = 0; i < agentId.length; i++) {
-    hash = (hash * 31 + agentId.charCodeAt(i)) >>> 0;
+function colorFor(agentId: string): string {
+  const have = assigned.get(agentId);
+  if (have !== undefined) {
+    return have;
   }
-  return AGENT_COLORS[hash % AGENT_COLORS.length];
+  const taken = new Set(assigned.values());
+  let pick = next;
+  for (let i = 0; i < AGENT_COLORS.length; i++) {
+    const idx = (next + i) % AGENT_COLORS.length;
+    if (!taken.has(AGENT_COLORS[idx])) {
+      pick = idx;
+      break;
+    }
+  }
+  const color = AGENT_COLORS[pick];
+  next = (pick + 1) % AGENT_COLORS.length;
+  assigned.set(agentId, color);
+  return color;
+}
+
+export function releaseAgentColor(agentId: string): void {
+  assigned.delete(agentId);
+}
+
+function paint(hex: string, text: string): string {
+  if (!process.stdout.hasColors(2 ** 24)) {
+    return text;
+  }
+  const n = Number.parseInt(hex.slice(1), 16);
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  return `\x1b[38;2;${r};${g};${b}m${text}\x1b[39m`;
 }
 
 function write(line: LogEntry): void {
   const tag = line.agentId ?? "global";
   const text = line.level === undefined || line.level === "info" ? line.text : `${line.level}: ${line.text}`;
-  const color = line.agentId === undefined ? "gray" : colorFor(line.agentId);
-  console.log(styleText(color, `[${tag}] ${text}`, { stream: process.stdout }));
+  const rendered = `[${tag}] ${text}`;
+  if (line.agentId === undefined) {
+    console.log(styleText("gray", rendered, { stream: process.stdout }));
+    return;
+  }
+  console.log(paint(colorFor(line.agentId), rendered));
 }
 
 export function log(
