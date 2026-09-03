@@ -4,22 +4,24 @@ Consult this table of contents first. Read only the section you need.
 
 | Section | Line |
 |---------|-----:|
-| [Important](#important) | 24 |
-| [Environment](#environment) | 28 |
-| [Invoke](#invoke) | 36 |
-| [start](#start) | 52 |
-| [get-image](#get-image) | 66 |
-| [get-serial](#get-serial) | 77 |
-| [send-keys](#send-keys) | 99 |
-| [send-mouse](#send-mouse) | 111 |
-| [intent](#intent) | 125 |
-| [stop](#stop) | 136 |
-| [experiment new](#experiment-new) | 148 |
-| [experiment run](#experiment-run) | 159 |
-| [test-results](#test-results) | 169 |
-| [Keys](#keys) | 180 |
-| [Mouse](#mouse) | 192 |
-| [The loop](#the-loop) | 200 |
+| [Important](#important) | 26 |
+| [Environment](#environment) | 30 |
+| [Invoke](#invoke) | 38 |
+| [start](#start) | 54 |
+| [get-image](#get-image) | 68 |
+| [get-serial](#get-serial) | 79 |
+| [send-keys](#send-keys) | 101 |
+| [send-mouse](#send-mouse) | 113 |
+| [intent](#intent) | 127 |
+| [stop](#stop) | 138 |
+| [experiment new](#experiment-new) | 150 |
+| [experiment list](#experiment-list) | 161 |
+| [experiment run](#experiment-run) | 171 |
+| [test-def](#test-def) | 181 |
+| [test-results](#test-results) | 191 |
+| [Keys](#keys) | 202 |
+| [Mouse](#mouse) | 214 |
+| [The loop](#the-loop) | 222 |
 
 ## Important
 
@@ -31,7 +33,7 @@ If you are the client, or an agent driving the client: do not look at code. Only
 
 If `DATABASE_URL` is missing, that is a failure. Stop.
 
-The proxy, `experiment new`, and `test-results` read these from the environment. A missing `DATABASE_URL` or `LINEAR_API_TOKEN` exits 1. `experiment run` reads `CURSOR_API_TOKEN`; a missing one exits 1.
+The proxy, `experiment new`, `experiment list`, `test-def`, and `test-results` read these from the environment. A missing `DATABASE_URL` or `LINEAR_API_TOKEN` exits 1. `experiment list` needs `LINEAR_API_TOKEN` only. `experiment run` reads `CURSOR_API_TOKEN`; a missing one exits 1.
 
 ## Invoke
 
@@ -156,6 +158,16 @@ Creates one pending test run and one Linear issue per stored test definition. Pa
 
 `--iso` must be an HTTPS URL. `--server_url` may be HTTP or HTTPS. `--version` is required. `--name` is the stored definition's name. A name that matches no definition is a failure.
 
+## experiment list
+
+Prints every Linear issue on the Oligarchy team whose status type is backlog. Not used while driving a guest. Reads `LINEAR_API_TOKEN` from the environment. A missing token exits 1.
+
+```bash
+./client experiment list
+```
+
+Each issue is printed as JSON: `id`, `identifier`, `title`, and `url`. An empty backlog prints `[]`.
+
 ## experiment run
 
 Spawns a Cursor cloud agent that drives one Linear ticket. Not used while driving a guest. Reads `CURSOR_API_TOKEN` from the environment.
@@ -165,6 +177,16 @@ Spawns a Cursor cloud agent that drives one Linear ticket. Not used while drivin
 ```
 
 `--ticket` is the Linear issue identifier created by `experiment new`. `--server_url` may be HTTP or HTTPS; the agent is told to pass it as `--server-url` on every client command. The command prints a link to the agent as soon as it is started and does not wait for it to finish.
+
+## test-def
+
+Lists stored test definition names. `--list` is required. Not used while driving a guest. Reads `DATABASE_URL` from the environment.
+
+```bash
+./client test-def --list
+```
+
+`--list` prints one name per line and nothing else. A missing `--list` is a failure.
 
 ## test-results
 
