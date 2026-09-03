@@ -28,6 +28,9 @@ const SESSION_TIMEOUT_REASON = "no command received for 10 minutes";
 // A click is two QMP exchanges and two action rows; cap the pulse count so one
 // request cannot enqueue an unbounded amount of work.
 const MAX_CLICKS = 100;
+// Each chord is a QMP exchange and an action row, paced ~60ms apart; cap the count so
+// one request cannot run for many minutes or write thousands of rows.
+const MAX_KEYS = 1000;
 
 const db = connectDatabase();
 
@@ -403,6 +406,9 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
         try: () => parseKeys(keys, encoding),
         catch: (err) => badRequest((err as Error).message, { sessionId: qemu.id, agentId: agent }),
       });
+      if (chords.length > MAX_KEYS) {
+        return yield* Effect.fail(badRequest(`send-keys: at most ${MAX_KEYS} keys per request`, { sessionId: qemu.id, agentId: agent }));
+      }
       const record = recorder(live);
       yield* Effect.tryPromise({
         try: () => sendKeys(qemu, chords, record),
