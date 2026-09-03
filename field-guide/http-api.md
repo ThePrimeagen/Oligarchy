@@ -26,11 +26,11 @@ A url iso is downloaded into `~/.oligarchy/isos` on first use — verified again
 
 ## GET /image?id=<id>&agent=<agent>
 
-Returns the session's current display as `image/png` bytes (QMP `screendump` under the hood). The stored copy is 1:1 with that action; the response includes `x-image-url: https://oligarchy.trm.sh/images/<action-id>`, the same URL written on the `qemu.action` span, so the PNG can be opened without the token.
+Returns the session's current display as `image/png` bytes (QMP `screendump` under the hood). The stored copy is 1:1 with that action and is addressed by a uuid, not the sequential action id; the response includes `x-image-url: https://oligarchy.trm.sh/images/<uuid>`, the same URL written on the `qemu.action` span, so the PNG can be opened without the token.
 
 ## GET /images/:id
 
-Returns a stored PNG by its action id. No `Authorization` header. Unknown or non-numeric ids are 404. The dashboard serves the same path at `https://oligarchy.trm.sh/images/:id`.
+Returns a stored PNG by its uuid. No `Authorization` header. Unknown or malformed ids are 404. The dashboard serves the same path at `https://oligarchy.trm.sh/images/:id`.
 
 ## GET /serial?id=<id>&agent=<agent>
 

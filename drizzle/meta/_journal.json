@@ -78,6 +78,13 @@
       "when": 1788282643408,
       "tag": "0010_melodic_avengers",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1788453039323,
+      "tag": "0011_futuristic_black_bolt",
+      "breakpoints": true
     }
   ]
 }

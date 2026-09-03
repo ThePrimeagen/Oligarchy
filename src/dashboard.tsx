@@ -71,18 +71,18 @@ const SessionList: FC<SessionListProps> = ({ sessions }) => (
           <li>
             <article class="session">
               <figure class="session__visual">
-                {session.imageActionId === null ? (
+                {session.imageId === null ? (
                   <div class="session__placeholder" role="img" aria-label="No screenshot captured"></div>
                 ) : (
                   <img
                     class="session__image"
-                    src={`/images/${session.imageActionId}`}
+                    src={`/images/${session.imageId}`}
                     alt={`Last captured frame from session ${session.id}`}
                     loading="lazy"
                   />
                 )}
                 <span
-                  class={`status status--${session.status}${session.imageActionId === null ? " status--centered" : ""}`}
+                  class={`status status--${session.status}${session.imageId === null ? " status--centered" : ""}`}
                 >
                   {session.status === "timed_out" ? "timed out" : session.status}
                 </span>
@@ -358,8 +358,8 @@ app.get("/sessions", async (context) => {
 });
 
 app.get("/images/:id", async (context) => {
-  const id = Number(context.req.param("id"));
-  if (!Number.isSafeInteger(id)) {
+  const id = context.req.param("id");
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
     return context.notFound();
   }
 

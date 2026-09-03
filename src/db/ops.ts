@@ -78,7 +78,7 @@ export async function startAction(db: Db, action: Action): Promise<number> {
   return row.id;
 }
 
-export async function finishAction(db: Db, id: number, outcome: Outcome, image?: Buffer): Promise<void> {
+export async function finishAction(db: Db, id: number, outcome: Outcome, image?: { id: string; data: Buffer }): Promise<void> {
   const close = { state: outcome.state, response: outcome.response, finishedAt: sql`now()` };
   if (image === undefined) {
     await db.update(actions).set(close).where(eq(actions.id, id));
@@ -86,11 +86,11 @@ export async function finishAction(db: Db, id: number, outcome: Outcome, image?:
   }
   await db.transaction(async (tx) => {
     await tx.update(actions).set(close).where(eq(actions.id, id));
-    await tx.insert(images).values({ actionId: id, data: image });
+    await tx.insert(images).values({ id: image.id, actionId: id, data: image.data });
   });
 }
 
-export async function getImage(db: Db, actionId: number): Promise<Buffer | undefined> {
-  const [row] = await db.select({ data: images.data }).from(images).where(eq(images.actionId, actionId));
+export async function getImage(db: Db, id: string): Promise<Buffer | undefined> {
+  const [row] = await db.select({ data: images.data }).from(images).where(eq(images.id, id));
   return row?.data;
 }

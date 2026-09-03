@@ -4,7 +4,7 @@ import { Client } from "pg";
 import { actions, images, sessions, testBasePrompts, testDefinitions } from "./schema.ts";
 
 export type Session = typeof sessions.$inferSelect & {
-  imageActionId: number | null;
+  imageId: string | null;
   queriedAt: Date;
 };
 
@@ -33,7 +33,7 @@ export async function listSessions(connectionString: string): Promise<Session[]>
     .limit(50)
     .as("recent_sessions");
   const latestImage = db
-    .select({ actionId: images.actionId })
+    .select({ id: images.id })
     .from(images)
     .innerJoin(actions, eq(actions.id, images.actionId))
     .where(eq(actions.sessionId, recentSessions.id))
@@ -50,7 +50,7 @@ export async function listSessions(connectionString: string): Promise<Session[]>
       reason: recentSessions.reason,
       startedAt: recentSessions.startedAt,
       endedAt: recentSessions.endedAt,
-      imageActionId: latestImage.actionId,
+      imageId: latestImage.id,
       queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(recentSessions.startedAt),
     })
     .from(recentSessions)
@@ -59,7 +59,7 @@ export async function listSessions(connectionString: string): Promise<Session[]>
   return rows;
 }
 
-export async function getImage(connectionString: string, actionId: number): Promise<Buffer | undefined> {
+export async function getImage(connectionString: string, id: string): Promise<Buffer | undefined> {
   const db = await connectDatabase(connectionString);
   const [row] = await db
     .select({
@@ -67,7 +67,7 @@ export async function getImage(connectionString: string, actionId: number): Prom
       queriedAt: sql`CURRENT_TIMESTAMP`,
     })
     .from(images)
-    .where(eq(images.actionId, actionId));
+    .where(eq(images.id, id));
   return row?.data;
 }
 

@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -30,8 +31,8 @@ const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 42069;
 const STORED_IMAGE_ORIGIN = "https://oligarchy.trm.sh";
 
-function storedImageUrl(actionId: number): string {
-  return `${STORED_IMAGE_ORIGIN}/images/${actionId}`;
+function storedImageUrl(id: string): string {
+  return `${STORED_IMAGE_ORIGIN}/images/${id}`;
 }
 
 const SESSION_TIMEOUT_MS = 10 * 60 * 1000;
@@ -317,6 +318,7 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
       const path = join(qemu.dir, `image-${process.hrtime.bigint()}.png`);
       // The images row must ride the same transaction that closes the action (they are
       // 1:1), so the recorder only stashes and the route closes.
+      const imageId = randomUUID();
       let opened: number | undefined;
       let outcome: QemuExchangeOutcome | undefined;
       let actionSpan: QemuSpan | undefined;
@@ -335,7 +337,7 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
               return async (result) => {
                 outcome = result;
                 if (result.state === "completed") {
-                  actionSpan!.setAttribute("image_url", storedImageUrl(opened!));
+                  actionSpan!.setAttribute("image_url", storedImageUrl(imageId));
                 }
                 finishLiveActionSpan(live, actionSpan!, result.state);
               };
@@ -358,17 +360,17 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
           try: async () => {
             const data = await readFile(path);
             // screendump resolved, so the recorder ran: opened and outcome are set.
-            await finishAction(db, opened!, outcome!, data);
+            await finishAction(db, opened!, outcome!, { id: imageId, data });
             return data;
           },
           catch: (cause) => {
             return internal(cause, { sessionId: qemu.id, agentId: agent });
           },
         });
-        log(db, { text: `session ${qemu.id}: image; ${data.length} bytes in ${Date.now() - started}ms; ${storedImageUrl(opened!)}`, sessionId: qemu.id, agentId: agent });
+        log(db, { text: `session ${qemu.id}: image; ${data.length} bytes in ${Date.now() - started}ms; ${storedImageUrl(imageId)}`, sessionId: qemu.id, agentId: agent });
         return HttpServerResponse.uint8Array(data, {
           contentType: "image/png",
-          headers: { "x-image-url": storedImageUrl(opened!) },
+          headers: { "x-image-url": storedImageUrl(imageId) },
         });
       });
       return yield* Effect.ensuring(png, Effect.promise(() => rm(path, { force: true })));
@@ -376,12 +378,11 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
 
     yield* router.add("GET", "/images/:id", Effect.gen(function* () {
       const params = yield* Effect.mapError(HttpRouter.schemaPathParams(StoredImageParams), (err) => badRequest(err.message));
-      const actionId = Number(params.id);
-      if (!Number.isSafeInteger(actionId)) {
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(params.id)) {
         return errorBody(404, "not found");
       }
       const data = yield* Effect.tryPromise({
-        try: () => getImage(db, actionId),
+        try: () => getImage(db, params.id),
         catch: (cause) => internal(cause, {}),
       });
       if (data === undefined) {
