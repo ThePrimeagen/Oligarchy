@@ -146,13 +146,14 @@ A stop with no status is an abort. `status` is `succeeded`, `failed`, or `aborte
 
 ## experiment new
 
-Creates one pending test run and one Linear issue per stored test definition. Not used while driving a guest. Reads `DATABASE_URL` and `LINEAR_API_TOKEN` from the environment.
+Creates one pending test run and one Linear issue per stored test definition. Pass `--name` (or `--slug`) to create a run for one existing definition instead of every definition. Not used while driving a guest. Reads `DATABASE_URL` and `LINEAR_API_TOKEN` from the environment.
 
 ```bash
 ./client experiment new --iso https://example.com/omarchy.iso --server_url=https://qemu.example.com --version 1.2.3
+./client experiment new --iso https://example.com/omarchy.iso --server_url=https://qemu.example.com --version 1.2.3 --name "Install Omarchy"
 ```
 
-`--iso` must be an HTTPS URL. `--server_url` may be HTTP or HTTPS. `--version` is required.
+`--iso` must be an HTTPS URL. `--server_url` may be HTTP or HTTPS. `--version` is required. `--name` / `--slug` is the stored definition's name. A name that matches no definition is a failure.
 
 ## test-results
 

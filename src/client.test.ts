@@ -114,6 +114,40 @@ describe("./client happy path", () => {
     );
     assert.notEqual(spaced.code, 0);
     assert.match(spaced.stderr, /LINEAR_API_TOKEN is not set/);
+
+    const named = await runClient(
+      [
+        "experiment",
+        "new",
+        "--iso",
+        "https://example.com/omarchy.iso",
+        "--server_url=https://qemu.example.com",
+        "--version",
+        "1.2.3",
+        "--name",
+        "Install Omarchy",
+      ],
+      { LINEAR_API_TOKEN: "" },
+    );
+    assert.notEqual(named.code, 0);
+    assert.match(named.stderr, /LINEAR_API_TOKEN is not set/);
+
+    const slug = await runClient(
+      [
+        "experiment",
+        "new",
+        "--iso",
+        "https://example.com/omarchy.iso",
+        "--server_url=https://qemu.example.com",
+        "--version",
+        "1.2.3",
+        "--slug",
+        "Install Omarchy",
+      ],
+      { LINEAR_API_TOKEN: "" },
+    );
+    assert.notEqual(slug.code, 0);
+    assert.match(slug.stderr, /LINEAR_API_TOKEN is not set/);
   });
 });
 

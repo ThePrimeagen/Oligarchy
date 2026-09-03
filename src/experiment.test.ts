@@ -38,7 +38,7 @@ const experiment = {
 
 type TestDefinition = typeof testDefinitions.$inferSelect;
 
-function testDatabase(definitions: TestDefinition[]) {
+function testDatabase(definitions: TestDefinition[], named: TestDefinition[] = definitions) {
   const inserts: { table: unknown; values: unknown }[] = [];
   const updates: { table: unknown; values: unknown }[] = [];
   const insert = (table: unknown) => ({
@@ -75,6 +75,7 @@ function testDatabase(definitions: TestDefinition[]) {
         assert.equal(table, testDefinitions);
         return {
           orderBy: async () => definitions,
+          where: async () => named,
         };
       },
     }),
@@ -388,6 +389,72 @@ describe("createExperiment happy path", () => {
       text: `experiment ${result.experiment.id} created; 2 tests; OLI-42, OLI-43`,
     });
   });
+
+  it("creates the run, one pending result, and one Linear ticket for a named definition", async () => {
+    const definitions = [
+      {
+        id: 1,
+        name: "Install Omarchy",
+        description: "Install the operating system",
+        instruction: "Complete the installer",
+        proof: "The desktop is visible",
+        createdAt: new Date("2026-09-01T00:00:00Z"),
+      },
+      {
+        id: 2,
+        name: "Open a terminal",
+        description: "Verify the terminal starts",
+        instruction: "Launch the terminal",
+        proof: "A terminal window is visible",
+        createdAt: new Date("2026-09-01T00:00:00Z"),
+      },
+    ] satisfies TestDefinition[];
+    const { db, inserts } = testDatabase(definitions, [definitions[0]]);
+    mock.method(console, "error", () => undefined);
+    mock.method(globalThis, "fetch", async (_input: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1]) => {
+      const parsed = await parseLinearRequest(init);
+      if (parsed.query.includes("teams(first: 1)")) {
+        return Response.json({ data: { teams: { nodes: [{ id: "team-id" }] } } });
+      }
+      if (parsed.query.includes("issueLabels")) {
+        return Response.json({
+          data: { issueLabels: { nodes: [{ id: labelId(String(parsed.variables?.name)) }] } },
+        });
+      }
+      if (parsed.query.includes("issueUpdate")) {
+        return describeResponse();
+      }
+      return issueResponse("OLI-42");
+    });
+
+    const result = await createExperiment(db, "linear-token", {
+      iso: "https://example.com/omarchy.iso",
+      serverUrl: "https://qemu.example.com",
+      version: "1.2.3",
+      name: "Install Omarchy",
+    });
+
+    assert.equal(result.experiment.tests.length, 1);
+    assert.equal(result.experiment.tests[0].name, "Install Omarchy");
+    assert.equal(result.experiment.tests[0].definitionId, 1);
+    assert.deepEqual(result.tickets, [
+      {
+        id: "issue-OLI-42",
+        identifier: "OLI-42",
+        url: "https://linear.app/issue/OLI-42",
+      },
+    ]);
+    assert.deepEqual(inserts[1].values, [
+      {
+        runId: result.experiment.id,
+        definitionId: 1,
+        status: "pending",
+      },
+    ]);
+    assert.deepEqual(inserts[2].values, {
+      text: `experiment ${result.experiment.id} created; 1 tests; OLI-42`,
+    });
+  });
 });
 
 describe("createExperiment unhappy path", () => {
@@ -403,6 +470,34 @@ describe("createExperiment unhappy path", () => {
           version: "1.2.3",
         }),
       { message: "experiment: no test definitions found" },
+    );
+    assert.deepEqual(inserts, []);
+    assert.deepEqual(updates, []);
+  });
+
+  it("rejects a name that matches no test definition", async () => {
+    const definitions = [
+      {
+        id: 1,
+        name: "Install Omarchy",
+        description: "Install the operating system",
+        instruction: "Complete the installer",
+        proof: "The desktop is visible",
+        createdAt: new Date("2026-09-01T00:00:00Z"),
+      },
+    ] satisfies TestDefinition[];
+    const { db, inserts, updates } = testDatabase(definitions, []);
+    mock.method(globalThis, "fetch", async () => assert.fail("Linear should not be called"));
+
+    await assert.rejects(
+      () =>
+        createExperiment(db, "linear-token", {
+          iso: "https://example.com/omarchy.iso",
+          serverUrl: "https://qemu.example.com",
+          version: "1.2.3",
+          name: "Change lighting",
+        }),
+      { message: "experiment: no test definition named Change lighting" },
     );
     assert.deepEqual(inserts, []);
     assert.deepEqual(updates, []);
