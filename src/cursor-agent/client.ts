@@ -10,11 +10,7 @@ const GROK_4_6_FAST_XHIGH: ModelSelection = {
   ],
 };
 
-export type PromptOptions = {
-  model?: ModelSelection;
-};
-
-export async function prompt(text: string, options: PromptOptions = {}): Promise<void> {
+export async function prompt(text: string, options: { model?: ModelSelection } = {}): Promise<void> {
   const apiKey = process.env.CURSOR_API_TOKEN;
   if (apiKey === undefined || apiKey === "") {
     throw new Error("cursor-agent: CURSOR_API_TOKEN is not set");
