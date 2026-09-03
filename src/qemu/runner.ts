@@ -1,5 +1,5 @@
 #!/usr/bin/env -S node --experimental-strip-types
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { loadEnvFile } from "node:process";
@@ -22,12 +22,14 @@ if (process.argv.length > 3 || process.argv[2]?.startsWith("-") === true) {
 }
 
 const serverUrl = process.argv[2] ?? "http://127.0.0.1:42069";
-const agentId = `runner-${randomUUID().slice(0, 8)}`;
 const cliPath = fileURLToPath(new URL("./cli.ts", import.meta.url));
 
+// The proxy keys one session per agent id (agent_runs primary key), so every start
+// mints a fresh id; later commands and the stop must use the id that booted the session.
+let agentId = `runner-${randomUUID()}`;
 let sessionId: string | undefined;
 let intentOpen = false;
-let running: ChildProcess | undefined;
+let startInFlight: Promise<ClientResult> | undefined;
 let shuttingDown = false;
 
 const COMMANDS = ["start", "get-image", "get-serial", "send-keys", "send-mouse", "intent", "stop", "status", "help", "exit", "quit"];
@@ -52,35 +54,7 @@ function completer(line: string): [string[], string] {
 const rl = createInterface({ input: process.stdin, output: process.stdout, completer });
 rl.on("SIGINT", () => void shutdown());
 process.on("SIGTERM", () => void shutdown());
-
-const pending: string[] = [];
-let closed = false;
-let notify: (() => void) | undefined;
-rl.on("line", (line) => {
-  pending.push(line);
-  notify?.();
-});
-rl.on("close", () => {
-  closed = true;
-  notify?.();
-});
-
-// Piped input can close stdin while lines are still queued; drain them before shutting down.
-async function nextLine(): Promise<string | undefined> {
-  for (;;) {
-    const line = pending.shift();
-    if (line !== undefined) {
-      return line;
-    }
-    if (closed) {
-      return undefined;
-    }
-    await new Promise<void>((resolve) => {
-      notify = resolve;
-    });
-    notify = undefined;
-  }
-}
+process.on("SIGHUP", () => void shutdown());
 
 type ClientResult = { code: number; stdout: Buffer; stderr: string };
 
@@ -91,17 +65,12 @@ function runClient(args: string[]): Promise<ClientResult> {
       ["--experimental-strip-types", "--disable-warning=ExperimentalWarning", cliPath, "--agent-id", agentId, "--server-url", serverUrl, ...args],
       { stdio: ["ignore", "pipe", "pipe"] },
     );
-    running = child;
     const out: Buffer[] = [];
     const err: Buffer[] = [];
     child.stdout.on("data", (chunk: Buffer) => out.push(chunk));
     child.stderr.on("data", (chunk: Buffer) => err.push(chunk));
-    child.on("error", (cause) => {
-      running = undefined;
-      reject(cause);
-    });
+    child.on("error", reject);
     child.on("close", (code) => {
-      running = undefined;
       resolve({ code: code ?? 1, stdout: Buffer.concat(out), stderr: Buffer.concat(err).toString("utf8").trim() });
     });
   });
@@ -112,19 +81,6 @@ function requireSession(): string | undefined {
     console.log("no session. run start first.");
   }
   return sessionId;
-}
-
-function unquote(text: string): string {
-  if (text.length >= 2 && text.startsWith('"') && text.endsWith('"')) {
-    return text.slice(1, -1);
-  }
-  return text;
-}
-
-function errorMessage(cause: unknown): string {
-  const error = cause as Error;
-  // Node's fetch and spawn bury the useful detail in the cause.
-  return error.cause instanceof Error ? `${error.message}: ${error.cause.message}` : error.message;
 }
 
 const imageProtocol = (() => {
@@ -152,7 +108,7 @@ function renderImage(png: Buffer): void {
     return;
   }
   if (imageProtocol === "iterm") {
-    process.stdout.write(`\x1b]1337;File=inline=1;size=${png.length};width=100%;preserveAspectRatio=1:${png.toString("base64")}\x07\n`);
+    process.stdout.write(`\x1b]1337;File=inline=1;size=${png.length};width=100%:${png.toString("base64")}\x07\n`);
     return;
   }
   const image = decodePng(png);
@@ -176,22 +132,17 @@ function renderImage(png: Buffer): void {
   process.stdout.write(text);
 }
 
-type Png = { width: number; height: number; channels: number; pixels: Buffer };
+type Png = { width: number; height: number; pixels: Buffer };
 
 function pixelAt(image: Png, col: number, row: number, scale: number): [number, number, number] {
   const px = Math.min(image.width - 1, Math.floor((col + 0.5) * scale));
   const py = Math.min(image.height - 1, Math.floor((row + 0.5) * scale));
-  const i = (py * image.width + px) * image.channels;
+  const i = (py * image.width + px) * 3;
   return [image.pixels[i], image.pixels[i + 1], image.pixels[i + 2]];
 }
 
-const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-
-// QEMU's screendump writes non-interlaced 8-bit RGB; that is the only shape decoded here.
+// QEMU's screendump writes a non-interlaced 8-bit RGB PNG; that is the only shape decoded here.
 function decodePng(png: Buffer): Png {
-  if (!png.subarray(0, 8).equals(PNG_SIGNATURE)) {
-    throw new Error("not a png");
-  }
   let width = 0;
   let height = 0;
   let bitDepth = 0;
@@ -215,12 +166,11 @@ function decodePng(png: Buffer): Png {
     }
     offset += length + 12;
   }
-  if (bitDepth !== 8 || (colorType !== 2 && colorType !== 6) || interlace !== 0) {
+  if (bitDepth !== 8 || colorType !== 2 || interlace !== 0) {
     throw new Error(`unsupported png: bit depth ${bitDepth}, color type ${colorType}, interlace ${interlace}`);
   }
-  const channels = colorType === 2 ? 3 : 4;
   const raw = inflateSync(Buffer.concat(idat));
-  const stride = width * channels;
+  const stride = width * 3;
   const pixels = Buffer.allocUnsafe(height * stride);
   for (let y = 0; y < height; y++) {
     const filter = raw[y * (stride + 1)];
@@ -228,9 +178,9 @@ function decodePng(png: Buffer): Png {
     const rowOut = y * stride;
     for (let x = 0; x < stride; x++) {
       const value = raw[rowIn + x];
-      const left = x >= channels ? pixels[rowOut + x - channels] : 0;
+      const left = x >= 3 ? pixels[rowOut + x - 3] : 0;
       const up = y > 0 ? pixels[rowOut + x - stride] : 0;
-      const upLeft = y > 0 && x >= channels ? pixels[rowOut + x - stride - channels] : 0;
+      const upLeft = y > 0 && x >= 3 ? pixels[rowOut + x - stride - 3] : 0;
       let unfiltered: number;
       if (filter === 0) {
         unfiltered = value;
@@ -248,7 +198,7 @@ function decodePng(png: Buffer): Png {
       pixels[rowOut + x] = unfiltered & 0xff;
     }
   }
-  return { width, height, channels, pixels };
+  return { width, height, pixels };
 }
 
 function paeth(a: number, b: number, c: number): number {
@@ -283,14 +233,17 @@ async function dispatch(line: string): Promise<void> {
       if (words.length === 2) {
         args.push("--disk", words[1]);
       }
+      agentId = `runner-${randomUUID()}`;
       console.log("booting; a first-time iso download can take a while...");
-      const result = await runClient(args);
+      startInFlight = runClient(args);
+      const result = await startInFlight;
+      startInFlight = undefined;
       if (result.code !== 0) {
         console.log(result.stderr);
         return;
       }
       sessionId = result.stdout.toString("utf8").trim();
-      intentOpen = false;
+      console.log(`agent   ${agentId}`);
       console.log(`session ${sessionId}`);
       return;
     }
@@ -330,7 +283,7 @@ async function dispatch(line: string): Promise<void> {
         console.log("usage: send-keys <keys>");
         return;
       }
-      const result = await runClient(["send-keys", id, unquote(rest)]);
+      const result = await runClient(["send-keys", id, rest]);
       console.log(result.code === 0 ? "ok" : result.stderr);
       return;
     }
@@ -360,7 +313,7 @@ async function dispatch(line: string): Promise<void> {
           console.log("usage: intent start <message>");
           return;
         }
-        const result = await runClient(["intent", "start", "--session_id", id, "--test_result_id", "manual", "--message", unquote(message)]);
+        const result = await runClient(["intent", "start", "--session_id", id, "--test_result_id", "manual", "--message", message]);
         if (result.code !== 0) {
           console.log(result.stderr);
           return;
@@ -402,17 +355,15 @@ async function dispatch(line: string): Promise<void> {
         args.push(status);
         const reason = rest.slice(status.length).trim();
         if (reason !== "") {
-          args.push(unquote(reason));
+          args.push(reason);
         }
       }
       const result = await runClient(args);
-      if (result.code !== 0) {
-        console.log(result.stderr);
-        return;
-      }
+      // Clear the session either way: a failed stop means the proxy already lost it
+      // (killed on timeout, gone), so keeping the id would only wedge the next start.
       sessionId = undefined;
       intentOpen = false;
-      console.log(`stopped ${id}`);
+      console.log(result.code === 0 ? `stopped ${id}` : result.stderr);
       return;
     }
     case "status": {
@@ -452,16 +403,16 @@ async function shutdown(): Promise<void> {
   }
   shuttingDown = true;
   rl.close();
-  if (running !== undefined) {
-    running.kill();
+  // A start killed mid-boot still boots on the proxy (/start is uninterruptible), so wait
+  // for the id it returns and stop that, rather than leaving an unreachable session behind.
+  const inflight = startInFlight;
+  if (inflight !== undefined) {
+    const result = await inflight;
+    if (sessionId === undefined && result.code === 0) {
+      sessionId = result.stdout.toString("utf8").trim();
+    }
   }
   if (sessionId !== undefined) {
-    if (intentOpen) {
-      const ended = await runClient(["intent", "end", "--session_id", sessionId]);
-      if (ended.code !== 0) {
-        console.log(ended.stderr);
-      }
-    }
     console.log(`stopping session ${sessionId}`);
     const result = await runClient(["stop", sessionId]);
     console.log(result.code === 0 ? "stopped" : result.stderr);
@@ -473,27 +424,24 @@ function promptText(): string {
   return sessionId === undefined ? "runner> " : `runner ${sessionId.slice(0, 8)}> `;
 }
 
-console.log(`agent  ${agentId}`);
 console.log(`server ${serverUrl}`);
 console.log('tab lists commands, "help" explains them, "exit" stops the session and leaves');
 
-for (;;) {
+rl.setPrompt(promptText());
+rl.prompt();
+for await (const line of rl) {
+  const trimmed = line.trim();
+  if (trimmed !== "") {
+    try {
+      await dispatch(trimmed);
+    } catch (cause) {
+      console.log((cause as Error).message);
+    }
+  }
   if (shuttingDown) {
     break;
   }
   rl.setPrompt(promptText());
   rl.prompt();
-  const line = (await nextLine())?.trim();
-  if (line === undefined) {
-    await shutdown();
-    break;
-  }
-  if (line === "") {
-    continue;
-  }
-  try {
-    await dispatch(line);
-  } catch (cause) {
-    console.log(errorMessage(cause));
-  }
 }
+await shutdown();
