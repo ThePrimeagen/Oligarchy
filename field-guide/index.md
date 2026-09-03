@@ -6,6 +6,7 @@ The development entry point for this repo. Start here, then follow the link you 
 - [Driving a guest](driving.md) — the operating loop: send keys or mouse, wait three seconds, image, decide.
 - [The CLI](cli.md) — what `src/qemu/cli.ts` does and why, command by command.
 - [The HTTP API](http-api.md) — the control-plane contract between the CLI and the proxy.
+- [The wrapper](wrapper.md) — what `./server` actually runs: the reverse proxy that pulls every 30 minutes and rolls the proxy over without killing sessions.
 - [The database](database.md) — the PlanetScale Postgres record of every session, and the `src/db/ops.ts` interface to it.
 - [How-to](how-to.md) — the `oligarchy` key-string encoding and send-mouse coordinates.
 - [Development](../development.md) — vocabulary and hard TypeScript rules.
