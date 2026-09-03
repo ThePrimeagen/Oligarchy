@@ -4,22 +4,23 @@ Consult this table of contents first. Read only the section you need.
 
 | Section | Line |
 |---------|-----:|
-| [Important](#important) | 24 |
-| [Environment](#environment) | 28 |
-| [Invoke](#invoke) | 36 |
-| [start](#start) | 52 |
-| [get-image](#get-image) | 66 |
-| [get-serial](#get-serial) | 77 |
-| [send-keys](#send-keys) | 99 |
-| [send-mouse](#send-mouse) | 111 |
-| [intent](#intent) | 125 |
-| [stop](#stop) | 136 |
-| [experiment new](#experiment-new) | 148 |
-| [test-def](#test-def) | 159 |
-| [test-results](#test-results) | 169 |
-| [Keys](#keys) | 180 |
-| [Mouse](#mouse) | 192 |
-| [The loop](#the-loop) | 200 |
+| [Important](#important) | 25 |
+| [Environment](#environment) | 29 |
+| [Invoke](#invoke) | 37 |
+| [start](#start) | 53 |
+| [get-image](#get-image) | 67 |
+| [get-serial](#get-serial) | 78 |
+| [send-keys](#send-keys) | 100 |
+| [send-mouse](#send-mouse) | 112 |
+| [intent](#intent) | 126 |
+| [stop](#stop) | 137 |
+| [experiment new](#experiment-new) | 149 |
+| [experiment list](#experiment-list) | 160 |
+| [test-def](#test-def) | 170 |
+| [test-results](#test-results) | 180 |
+| [Keys](#keys) | 191 |
+| [Mouse](#mouse) | 203 |
+| [The loop](#the-loop) | 211 |
 
 ## Important
 
@@ -31,7 +32,7 @@ If you are the client, or an agent driving the client: do not look at code. Only
 
 If `DATABASE_URL` is missing, that is a failure. Stop.
 
-The proxy, `experiment new`, `test-def`, and `test-results` read these from the environment. A missing `DATABASE_URL` or `LINEAR_API_TOKEN` exits 1.
+The proxy, `experiment new`, `experiment list`, `test-def`, and `test-results` read these from the environment. A missing `DATABASE_URL` or `LINEAR_API_TOKEN` exits 1. `experiment list` needs `LINEAR_API_TOKEN` only.
 
 ## Invoke
 
@@ -155,6 +156,16 @@ Creates one pending test run and one Linear issue per stored test definition. Pa
 ```
 
 `--iso` must be an HTTPS URL. `--server_url` may be HTTP or HTTPS. `--version` is required. `--name` is the stored definition's name. A name that matches no definition is a failure.
+
+## experiment list
+
+Prints every Linear issue on the Oligarchy team whose status type is backlog. Not used while driving a guest. Reads `LINEAR_API_TOKEN` from the environment. A missing token exits 1.
+
+```bash
+./client experiment list
+```
+
+Each issue is printed as JSON: `id`, `identifier`, `title`, and `url`. An empty backlog prints `[]`.
 
 ## test-def
 
