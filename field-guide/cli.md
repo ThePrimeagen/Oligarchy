@@ -3,10 +3,10 @@
 The TypeScript client for the oligarchy control plane. It sends HTTP requests to a running proxy (`src/qemu/proxy.ts`) and prints the result. It is a main file, not a library: running it executes the Effect command tree, and it exports nothing. Every invocation is parsed by `effect/unstable/cli` (`Command`, `Flag`, `Argument`).
 
 ```bash
-./client experiment new --iso <https-url> --server_url=<http-or-https-url> --version <version> [--name <definition>]
-./client experiment list
-./client experiment run --ticket <linear-ticket> --server_url=<http-or-https-url>
-./client test-def --list
+./client test --list [--details] [--name <definition>]
+./client test new --iso <https-url> --server_url=<http-or-https-url> --version <version> [--name <definition>]
+./client test list
+./client test run --ticket <linear-ticket> --server_url=<http-or-https-url>
 ./client --agent-id <agent> test-results --id <result-id> --status success|failed [--reason <text>]
 ./client --agent-id <agent> start [--iso <path>] [--disk <path>]
 ./client --agent-id <agent> get-image <id> [-o file]
@@ -20,9 +20,20 @@ The TypeScript client for the oligarchy control plane. It sends HTTP requests to
 
 The server comes from `--server-url`, a full URL used exactly as given (no scheme is ever added), default `http://127.0.0.1:42069`. It is a shared flag on the root command and may sit before or after the subcommand name.
 
-`--agent-id <agent>` is a shared flag on the root command, required for every QEMU command, for `test-results`, and for `intent`, unused by `experiment` and `test-def`. It may sit before or after the subcommand name. This client is used by agents, not humans — the inconvenience of typing it is deliberate. An invocation without it is a missing-option error.
+`--agent-id <agent>` is a shared flag on the root command, required for every QEMU command, for `test-results`, and for `intent`, unused by `test`. It may sit before or after the subcommand name. This client is used by agents, not humans — the inconvenience of typing it is deliberate. An invocation without it is a missing-option error.
 
-## experiment new
+## test
+
+Prints stored test definitions. `--list` is required; invoking `test` without it or a subcommand is a failure. Without `--details`, one name per line. `--details` prints every field as JSON (`id`, `name`, `description`, `instruction`, `proof`, `createdAt`). `--name` selects one definition by its unique name; an unknown name is a failure. The command reads `DATABASE_URL` from the environment (a `.env` fills in missing variables only) and does not call the proxy. Missing `DATABASE_URL` is a failure.
+
+```bash
+./client test --list
+./client test --list --details
+./client test --list --name lock-screen
+./client test --list --details --name lock-screen
+```
+
+## test new
 
 Creates one pending test run (ISO URL and server URL stored on the run) and one pending result for every stored test definition, then opens one Linear issue per definition. `--name` selects one existing definition by its unique name and creates that one result and issue instead. An unknown name is a failure. Each issue is created with its title and labels (`agent test` plus the required `--version` value; missing labels are created on the Linear team), then described in a second call, because the body names the issue's own identifier as the driver's `--agent-id` and Linear assigns that identifier on create. The body is `prompts/linear-issue.html` with its `{{VARIABLES}}` filled: `LINEAR_TICKET`, `RUN_ID`, `RESULT_ID`, `VERSION`, `ISO_URL`, `SERVER_URL`, the definition's `TEST_NAME`, `TEST_DESCRIPTION`, `TEST_INSTRUCTION`, and `TEST_PROOF`, `CLIENT_MD`, the contents of `client.md`, and `SUB_AGENT`, the reviewer model. A variable in the template with no value is an error. The command reads `DATABASE_URL` and `LINEAR_API_TOKEN` from the environment (a `.env` fills in missing variables only), uses the first Linear team available to that API token, writes the creation line through the database logger, and prints the run and Linear issues as JSON.
 
@@ -31,19 +42,19 @@ The ISO must be an HTTPS URL. The server may be an HTTP or HTTPS URL. `--version
 Run the root wrapper directly:
 
 ```bash
-./client experiment new --iso https://example.com/omarchy.iso --server_url=https://qemu.example.com --version 1.2.3
-./client experiment new --iso https://example.com/omarchy.iso --server_url=https://qemu.example.com --version 1.2.3 --name "Install Omarchy"
+./client test new --iso https://example.com/omarchy.iso --server_url=https://qemu.example.com --version 1.2.3
+./client test new --iso https://example.com/omarchy.iso --server_url=https://qemu.example.com --version 1.2.3 --name "Install Omarchy"
 ```
 
-## experiment list
+## test list
 
 Prints every Linear issue on the Oligarchy team whose workflow state type is `backlog`. The command reads `LINEAR_API_TOKEN` from the environment (a `.env` fills in missing variables only). It does not use the database. It walks Linear's issue pages until `hasNextPage` is false, then prints a JSON array of `{id, identifier, title, url}`. An empty backlog is `[]`. A missing token or a Linear failure is a command failure.
 
 ```bash
-./client experiment list
+./client test list
 ```
 
-## experiment run
+## test run
 
 Spawns the Cursor cloud agent that drives one Linear ticket. The command renders `prompts/driving-agent.html` with `LINEAR_TICKET` and `SERVER_URL` and hands the text to `prompt` in `src/cursor-agent/client.ts`, the one function that wraps `@cursor/sdk`: it creates a cloud agent on this repository, sends the text as the agent's first run, and returns once Cursor has accepted the run. It never waits for the agent. On success it prints `Agent here, go check it out for more information: https://cursor.com/agents/<agent-id>`.
 
@@ -52,15 +63,7 @@ The agent runs Grok 4.6 in fast mode at extra-high effort (`{ id: "grok-4.6", pa
 `--ticket` must be non-empty. `--server_url` may be HTTP or HTTPS; the prompt tells the driver to pass it as `--server-url` on every `./client` command.
 
 ```bash
-./client experiment run --ticket OLI-42 --server_url https://qemu.example.com
-```
-
-## test-def
-
-Prints every stored test definition name, one per line, and nothing else. `--list` is required; invoking the command without it is a failure. The command reads `DATABASE_URL` from the environment (a `.env` fills in missing variables only) and does not call the proxy. Missing `DATABASE_URL` is a failure.
-
-```bash
-./client test-def --list
+./client test run --ticket OLI-42 --server_url https://qemu.example.com
 ```
 
 ## test-results
@@ -135,4 +138,4 @@ Kills the session. Only the agent that started it can stop it; a different `--ag
 
 ## Reading the file
 
-The root `client` command shares `--agent-id` and `--server-url` with its subcommands. QEMU handlers, `test-results`, and `intent` yield the parent command and fail if `--agent-id` is missing. `experiment` is a sibling subcommand with `new`, `list`, and `run`. `test-def` is a sibling that lists definition names through `src/test-def.ts`. `test-results` is a sibling that writes the result row through `src/test-results.ts`. HTTP helpers stay local to the file: `postJSON`, `readAPIError`, and `errorMessage`. There is no other machinery — see the [philosophy](philosophy.md) for why it should stay that way.
+The root `client` command shares `--agent-id` and `--server-url` with its subcommands. QEMU handlers, `test-results`, and `intent` yield the parent command and fail if `--agent-id` is missing. `test` is a sibling subcommand: `--list` / `--details` / `--name` print stored definitions through `src/test-def.ts`; `new`, `list`, and `run` live as its subcommands. `test-results` is a sibling that writes the result row through `src/test-results.ts`. HTTP helpers stay local to the file: `postJSON`, `readAPIError`, and `errorMessage`. There is no other machinery — see the [philosophy](philosophy.md) for why it should stay that way.
