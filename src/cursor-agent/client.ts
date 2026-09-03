@@ -1,56 +1,30 @@
-import { Agent } from "@cursor/sdk";
+import { Agent, type ModelSelection } from "@cursor/sdk";
 
-export type StartOptions = {
-  model?: string;
+const REPOSITORY = "https://github.com/ThePrimeagen/Oligarchy";
+
+const GROK_4_6_FAST_XHIGH: ModelSelection = {
+  id: "grok-4.6",
+  params: [
+    { id: "effort", value: "xhigh" },
+    { id: "fast", value: "true" },
+  ],
 };
 
-export type CursorAgent = {
-  readonly session: string;
-};
-
-export async function start(options: StartOptions = {}): Promise<CursorAgent> {
-  const handle = await Agent.create({
-    model: options.model === undefined ? undefined : { id: options.model },
-    cloud: {},
+export async function prompt(text: string, options: { model?: ModelSelection } = {}): Promise<void> {
+  const apiKey = process.env.CURSOR_API_TOKEN;
+  if (apiKey === undefined || apiKey === "") {
+    throw new Error("cursor-agent: CURSOR_API_TOKEN is not set");
+  }
+  const agent = await Agent.create({
+    apiKey,
+    model: options.model ?? GROK_4_6_FAST_XHIGH,
+    cloud: { repos: [{ url: REPOSITORY }] },
   });
-  const session = handle.agentId;
-  handle.close();
-  return { session };
-}
-
-export async function prompt(agent: CursorAgent, text: string): Promise<string> {
-  const handle = await Agent.resume(agent.session);
+  // send resolves once the cloud run exists; the agent keeps working after this returns.
   try {
-    const run = await handle.send(text);
-    const result = await run.wait();
-    if (result.status !== "finished") {
-      const detail = result.error === undefined ? "" : `: ${result.error.message}`;
-      throw new Error(`cursor-agent: run ${result.status}${detail}`);
-    }
-    return result.result ?? "";
+    await agent.send(text);
   } finally {
-    handle.close();
+    agent.close();
   }
-}
-
-export async function stop(agent: CursorAgent): Promise<void> {
-  const runs = await Agent.listRuns(agent.session, { runtime: "cloud", limit: 1 });
-  const run = runs.items.at(0);
-  if (run?.status === "running") {
-    await run.cancel();
-  }
-  await Agent.archive(agent.session);
-}
-
-export async function oneShotPrompt(text: string): Promise<string> {
-  const agent = await start();
-  let reply: string;
-  try {
-    reply = await prompt(agent, text);
-  } catch (err) {
-    await stop(agent).catch(() => {});
-    throw err;
-  }
-  await stop(agent);
-  return reply;
+  console.log(`Agent here, go check it out for more information: https://cursor.com/agents/${agent.agentId}`);
 }

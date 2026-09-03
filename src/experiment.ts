@@ -3,6 +3,7 @@ import { loadEnvFile } from "node:process";
 import { Effect, Option, Schema } from "effect";
 import { CliError, Command, Flag } from "effect/unstable/cli";
 import { eq, sql } from "drizzle-orm";
+import { prompt } from "./cursor-agent/client.ts";
 import { closeDatabase, connectDatabase, type Db } from "./db/ops.ts";
 import { flushLogs, log } from "./db/log.ts";
 import { testDefinitions, testResults, testRuns } from "./db/schema.ts";
@@ -68,9 +69,19 @@ type LinearResponse<T> = {
   errors?: { message: string }[];
 };
 
+function renderPrompt(file: string, values: Record<string, string>): string {
+  const template = readFileSync(new URL(`../prompts/${file}`, import.meta.url), "utf8");
+  return template.replace(/\{\{([A-Z_]+)\}\}/g, (_, name: string) => {
+    const value = values[name];
+    if (value === undefined) {
+      throw new Error(`experiment: prompts/${file} uses {{${name}}}, which has no value`);
+    }
+    return value;
+  });
+}
+
 export function linearTicketDescription(experiment: Experiment, test: ExperimentTest, ticket: string): string {
-  const template = readFileSync(new URL("../prompts/linear-issue.html", import.meta.url), "utf8");
-  const values: Record<string, string> = {
+  return renderPrompt("linear-issue.html", {
     LINEAR_TICKET: ticket,
     RUN_ID: experiment.id,
     RESULT_ID: test.id,
@@ -83,14 +94,11 @@ export function linearTicketDescription(experiment: Experiment, test: Experiment
     TEST_PROOF: test.proof,
     CLIENT_MD: readFileSync(new URL("../client.md", import.meta.url), "utf8").trimEnd(),
     SUB_AGENT,
-  };
-  return template.replace(/\{\{([A-Z_]+)\}\}/g, (_, name: string) => {
-    const value = values[name];
-    if (value === undefined) {
-      throw new Error(`linear: prompts/linear-issue.html uses {{${name}}}, which has no value`);
-    }
-    return value;
   });
+}
+
+export function drivingAgentPrompt(ticket: string, serverUrl: string): string {
+  return renderPrompt("driving-agent.html", { LINEAR_TICKET: ticket, SERVER_URL: serverUrl });
 }
 
 async function linearRequest<T>(
@@ -372,6 +380,13 @@ export async function newExperiment(input: { iso: string; serverUrl: string; ver
   }
 }
 
+export async function runExperiment(input: { ticket: string; serverUrl: string }): Promise<void> {
+  if (existsSync(".env")) {
+    loadEnvFile();
+  }
+  await prompt(drivingAgentPrompt(input.ticket, input.serverUrl));
+}
+
 function fail(cause: unknown): CliError.UserError {
   const e = cause as Error;
   let text = e.cause instanceof Error ? `${e.message}: ${e.cause.message}` : e.message;
@@ -486,6 +501,26 @@ export const experimentNewCommand = Command.make(
   }),
 );
 
+const experimentRunCommand = Command.make(
+  "run",
+  {
+    ticket: Flag.string("ticket").pipe(
+      Flag.withSchema(Schema.NonEmptyString),
+      Flag.withDescription("Linear ticket the driving agent completes"),
+    ),
+    serverUrl: Flag.string("server_url").pipe(
+      Flag.withSchema(HttpUrl),
+      Flag.withDescription("HTTP or HTTPS URL of the oligarchy server"),
+    ),
+  },
+  Effect.fn(function* ({ ticket, serverUrl }) {
+    yield* Effect.tryPromise({
+      try: () => runExperiment({ ticket, serverUrl }),
+      catch: fail,
+    });
+  }),
+);
+
 export const experimentCommand = Command.make("experiment").pipe(
-  Command.withSubcommands([experimentNewCommand, experimentListCommand]),
+  Command.withSubcommands([experimentNewCommand, experimentListCommand, experimentRunCommand]),
 );

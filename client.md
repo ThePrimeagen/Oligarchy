@@ -4,23 +4,24 @@ Consult this table of contents first. Read only the section you need.
 
 | Section | Line |
 |---------|-----:|
-| [Important](#important) | 25 |
-| [Environment](#environment) | 29 |
-| [Invoke](#invoke) | 37 |
-| [start](#start) | 53 |
-| [get-image](#get-image) | 67 |
-| [get-serial](#get-serial) | 78 |
-| [send-keys](#send-keys) | 100 |
-| [send-mouse](#send-mouse) | 112 |
-| [intent](#intent) | 126 |
-| [stop](#stop) | 137 |
-| [experiment new](#experiment-new) | 149 |
-| [experiment list](#experiment-list) | 160 |
-| [test-def](#test-def) | 170 |
-| [test-results](#test-results) | 180 |
-| [Keys](#keys) | 191 |
-| [Mouse](#mouse) | 203 |
-| [The loop](#the-loop) | 211 |
+| [Important](#important) | 26 |
+| [Environment](#environment) | 30 |
+| [Invoke](#invoke) | 38 |
+| [start](#start) | 54 |
+| [get-image](#get-image) | 68 |
+| [get-serial](#get-serial) | 79 |
+| [send-keys](#send-keys) | 101 |
+| [send-mouse](#send-mouse) | 113 |
+| [intent](#intent) | 127 |
+| [stop](#stop) | 138 |
+| [experiment new](#experiment-new) | 150 |
+| [experiment list](#experiment-list) | 161 |
+| [experiment run](#experiment-run) | 171 |
+| [test-def](#test-def) | 181 |
+| [test-results](#test-results) | 191 |
+| [Keys](#keys) | 202 |
+| [Mouse](#mouse) | 214 |
+| [The loop](#the-loop) | 222 |
 
 ## Important
 
@@ -32,7 +33,7 @@ If you are the client, or an agent driving the client: do not look at code. Only
 
 If `DATABASE_URL` is missing, that is a failure. Stop.
 
-The proxy, `experiment new`, `experiment list`, `test-def`, and `test-results` read these from the environment. A missing `DATABASE_URL` or `LINEAR_API_TOKEN` exits 1. `experiment list` needs `LINEAR_API_TOKEN` only.
+The proxy, `experiment new`, `experiment list`, `test-def`, and `test-results` read these from the environment. A missing `DATABASE_URL` or `LINEAR_API_TOKEN` exits 1. `experiment list` needs `LINEAR_API_TOKEN` only. `experiment run` reads `CURSOR_API_TOKEN`; a missing one exits 1.
 
 ## Invoke
 
@@ -166,6 +167,16 @@ Prints every Linear issue on the Oligarchy team whose status type is backlog. No
 ```
 
 Each issue is printed as JSON: `id`, `identifier`, `title`, and `url`. An empty backlog prints `[]`.
+
+## experiment run
+
+Spawns a Cursor cloud agent that drives one Linear ticket. Not used while driving a guest. Reads `CURSOR_API_TOKEN` from the environment.
+
+```bash
+./client experiment run --ticket OLI-42 --server_url https://qemu.example.com
+```
+
+`--ticket` is the Linear issue identifier created by `experiment new`. `--server_url` may be HTTP or HTTPS; the agent is told to pass it as `--server-url` on every client command. The command prints a link to the agent as soon as it is started and does not wait for it to finish.
 
 ## test-def
 
