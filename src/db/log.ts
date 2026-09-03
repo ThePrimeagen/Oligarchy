@@ -1,3 +1,4 @@
+import { WriteStream } from "node:tty";
 import { styleText } from "node:util";
 import { capture } from "../sentry.ts";
 import type { Db } from "./ops.ts";
@@ -12,36 +13,74 @@ export type LogEntry = {
   agentId?: string;
 };
 
-const AGENT_COLORS = [
-  "cyan",
-  "green",
-  "yellow",
-  "magenta",
-  "blue",
-  "cyanBright",
-  "greenBright",
-  "yellowBright",
-  "magentaBright",
-  "blueBright",
-] as const;
+const ROSE_PINE_MAIN = {
+  love: "#eb6f92",
+  gold: "#f6c177",
+  rose: "#ebbcba",
+  pine: "#31748f",
+  foam: "#9ccfd8",
+  iris: "#c4a7e7",
+  leaf: "#95b1ac",
+  text: "#e0def4",
+  subtle: "#908caa",
+  muted: "#6e6a86",
+} as const;
+
+const AGENT_COLORS: readonly string[] = Object.values(ROSE_PINE_MAIN);
+
+const colors = new Map<string, string>();
+let next = 0;
 
 // Inserts are chained so rows land in call order; a failed insert reports itself to
 // stdout and never fails the caller or the lines behind it.
 let chain: Promise<void> = Promise.resolve();
 
-function colorFor(agentId: string): (typeof AGENT_COLORS)[number] {
-  let hash = 0;
-  for (let i = 0; i < agentId.length; i++) {
-    hash = (hash * 31 + agentId.charCodeAt(i)) >>> 0;
+export function acquireAgentColor(agentId: string): void {
+  if (colors.has(agentId)) {
+    return;
   }
-  return AGENT_COLORS[hash % AGENT_COLORS.length];
+  const taken = new Set(colors.values());
+  let pick = next;
+  for (let i = 0; i < AGENT_COLORS.length; i++) {
+    const idx = (next + i) % AGENT_COLORS.length;
+    if (!taken.has(AGENT_COLORS[idx])) {
+      pick = idx;
+      break;
+    }
+  }
+  colors.set(agentId, AGENT_COLORS[pick]);
+  next = (pick + 1) % AGENT_COLORS.length;
+}
+
+export function releaseAgentColor(agentId: string): void {
+  colors.delete(agentId);
+}
+
+function paint(hex: string, text: string): string {
+  if (process.stdout.isTTY !== true && process.env.FORCE_COLOR === undefined) {
+    return text;
+  }
+  // 16, not 24-bit: tmux and FORCE_COLOR=1 report 256/16 and still render 38;2.
+  if (!WriteStream.prototype.hasColors.call(process.stdout, 16)) {
+    return text;
+  }
+  const n = Number.parseInt(hex.slice(1), 16);
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  return `\x1b[38;2;${r};${g};${b}m${text}\x1b[39m`;
 }
 
 function write(line: LogEntry): void {
   const tag = line.agentId ?? "global";
   const text = line.level === undefined || line.level === "info" ? line.text : `${line.level}: ${line.text}`;
-  const color = line.agentId === undefined ? "gray" : colorFor(line.agentId);
-  console.log(styleText(color, `[${tag}] ${text}`, { stream: process.stdout }));
+  const rendered = `[${tag}] ${text}`;
+  const hex = line.agentId === undefined ? undefined : colors.get(line.agentId);
+  if (hex === undefined) {
+    console.log(styleText("gray", rendered, { stream: process.stdout }));
+    return;
+  }
+  console.log(paint(hex, rendered));
 }
 
 export function log(
