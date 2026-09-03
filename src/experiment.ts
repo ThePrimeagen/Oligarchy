@@ -7,6 +7,7 @@ import { prompt } from "./cursor-agent/client.ts";
 import { closeDatabase, connectDatabase, type Db } from "./db/ops.ts";
 import { flushLogs, log } from "./db/log.ts";
 import { testDefinitions, testResults, testRuns } from "./db/schema.ts";
+import { listTestDefinitions } from "./test-def.ts";
 
 const LINEAR_API_URL = "https://api.linear.app/graphql";
 const SUB_AGENT = "Grok 4.6 high fast (cursor-grok-4.6-high-fast)";
@@ -20,7 +21,7 @@ const HttpsUrl = Schema.String.check(
       const url = new URL(value);
       return url.protocol === "https:" && url.hostname !== "";
     },
-    { message: "experiment: iso must be a valid https url" },
+    { message: "test: iso must be a valid https url" },
   ),
 );
 
@@ -33,7 +34,7 @@ const HttpUrl = Schema.String.check(
       const url = new URL(value);
       return (url.protocol === "http:" || url.protocol === "https:") && url.hostname !== "";
     },
-    { message: "experiment: server_url must be a valid http or https url" },
+    { message: "test: server_url must be a valid http or https url" },
   ),
 );
 
@@ -74,7 +75,7 @@ function renderPrompt(file: string, values: Record<string, string>): string {
   return template.replace(/\{\{([A-Z_]+)\}\}/g, (_, name: string) => {
     const value = values[name];
     if (value === undefined) {
-      throw new Error(`experiment: prompts/${file} uses {{${name}}}, which has no value`);
+      throw new Error(`test: prompts/${file} uses {{${name}}}, which has no value`);
     }
     return value;
   });
@@ -270,8 +271,8 @@ export async function createExperiment(
   if (definitions.length === 0) {
     throw new Error(
       input.name === undefined
-        ? "experiment: no test definitions found"
-        : `experiment: no test definition named ${input.name}`,
+        ? "test: no test definitions found"
+        : `test: no test definition named ${input.name}`,
     );
   }
 
@@ -346,7 +347,7 @@ export async function createExperiment(
 
   log(
     db,
-    `experiment ${experiment.id} created; ${experiment.tests.length} tests; ${tickets.map((ticket) => ticket.identifier).join(", ")}`,
+    `test ${experiment.id} created; ${experiment.tests.length} tests; ${tickets.map((ticket) => ticket.identifier).join(", ")}`,
   );
   await flushLogs();
   return { experiment, tickets };
@@ -359,7 +360,7 @@ export async function newExperiment(input: { iso: string; serverUrl: string; ver
 
   const token = process.env.LINEAR_API_TOKEN;
   if (token === undefined || token === "") {
-    throw new Error("experiment: LINEAR_API_TOKEN is not set");
+    throw new Error("test: LINEAR_API_TOKEN is not set");
   }
 
   const db = connectDatabase();
@@ -448,7 +449,7 @@ async function listExperiment(): Promise<void> {
 
   const token = process.env.LINEAR_API_TOKEN;
   if (token === undefined || token === "") {
-    throw new Error("experiment: LINEAR_API_TOKEN is not set");
+    throw new Error("test: LINEAR_API_TOKEN is not set");
   }
 
   const tickets = await listLinearBacklog(token);
@@ -484,7 +485,7 @@ export const experimentNewCommand = Command.make(
     name: Flag.string("name").pipe(
       Flag.withSchema(Schema.NonEmptyString),
       Flag.optional,
-      Flag.withDescription("Create an experiment for this test definition only"),
+      Flag.withDescription("Create a test for this test definition only"),
     ),
   },
   Effect.fn(function* ({ iso, serverUrl, version, name }) {
@@ -521,6 +522,39 @@ const experimentRunCommand = Command.make(
   }),
 );
 
-export const experimentCommand = Command.make("experiment").pipe(
-  Command.withSubcommands([experimentNewCommand, experimentListCommand, experimentRunCommand]),
-);
+export const experimentCommand = Command.make(
+  "test",
+  {
+    list: Flag.boolean("list").pipe(
+      Flag.withDefault(false),
+      Flag.withDescription("List stored test definitions"),
+    ),
+    details: Flag.boolean("details").pipe(
+      Flag.withDefault(false),
+      Flag.withDescription("Print every field of stored test definitions"),
+    ),
+    name: Flag.string("name").pipe(
+      Flag.withSchema(Schema.NonEmptyString),
+      Flag.optional,
+      Flag.withDescription("Print this test definition only"),
+    ),
+  },
+  Effect.fn(function* ({ list, details, name }) {
+    if (!list) {
+      return yield* Effect.fail(
+        new CliError.UserError({
+          cause: new Error("test: --list is required"),
+          userMessage: "test: --list is required",
+        }),
+      );
+    }
+    yield* Effect.tryPromise({
+      try: () =>
+        listTestDefinitions({
+          details,
+          name: Option.isNone(name) ? undefined : name.value,
+        }),
+      catch: fail,
+    });
+  }),
+).pipe(Command.withSubcommands([experimentNewCommand, experimentListCommand, experimentRunCommand]));

@@ -13,7 +13,7 @@ async function runClient(args: string[], env: NodeJS.ProcessEnv = {}): Promise<{
   stderr: string;
 }> {
   const child = spawn(CLIENT, args, {
-    env: { ...process.env, ...env },
+    env: { ...process.env, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --disable-warning=ExperimentalWarning`.trim(), ...env },
   });
   let stdout = "";
   let stderr = "";
@@ -83,10 +83,10 @@ describe("./client happy path", () => {
     }
   });
 
-  it("accepts experiment flags after they parse", async () => {
+  it("accepts test flags after they parse", async () => {
     const equals = await runClient(
       [
-        "experiment",
+        "test",
         "new",
         "--iso",
         "https://example.com/omarchy.iso",
@@ -101,7 +101,7 @@ describe("./client happy path", () => {
 
     const spaced = await runClient(
       [
-        "experiment",
+        "test",
         "new",
         "--server_url",
         "http://127.0.0.1:42069",
@@ -117,7 +117,7 @@ describe("./client happy path", () => {
 
     const named = await runClient(
       [
-        "experiment",
+        "test",
         "new",
         "--iso",
         "https://example.com/omarchy.iso",
@@ -133,7 +133,35 @@ describe("./client happy path", () => {
     assert.match(named.stderr, /LINEAR_API_TOKEN is not set/);
   });
 
-  it("experiment run kicks off a cloud agent through the Cursor API and prints its link", async () => {
+  it("lists stored test definition names", async () => {
+    const result = await runClient(["test", "--list"]);
+    assert.equal(result.stderr, "");
+    assert.equal(result.code, 0);
+    const names = result.stdout.split("\n").filter((line) => line !== "");
+    assert.ok(names.includes("lock-screen"));
+    assert.equal(result.stdout.includes("{"), false);
+  });
+
+  it("lists one stored test definition name", async () => {
+    const result = await runClient(["test", "--list", "--name", "lock-screen"]);
+    assert.equal(result.stderr, "");
+    assert.equal(result.code, 0);
+    assert.equal(result.stdout, "lock-screen\n");
+  });
+
+  it("prints every field of one named test definition", async () => {
+    const result = await runClient(["test", "--list", "--details", "--name", "lock-screen"]);
+    assert.equal(result.stderr, "");
+    assert.equal(result.code, 0);
+    const rows = JSON.parse(result.stdout) as { name: string; description: string; instruction: string; proof: string }[];
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].name, "lock-screen");
+    assert.ok(rows[0].description.length > 0);
+    assert.ok(rows[0].instruction.length > 0);
+    assert.ok(rows[0].proof.length > 0);
+  });
+
+  it("test run kicks off a cloud agent through the Cursor API and prints its link", async () => {
     const requests: { method: string | undefined; url: string | undefined; body: string }[] = [];
     const server = createServer((incoming, response) => {
       let body = "";
@@ -184,7 +212,7 @@ describe("./client happy path", () => {
 
     try {
       const result = await runClient(
-        ["experiment", "run", "--ticket", "OLI-42", "--server_url", "https://qemu.example.com"],
+        ["test", "run", "--ticket", "OLI-42", "--server_url", "https://qemu.example.com"],
         { CURSOR_API_TOKEN: "test-token", CURSOR_BACKEND_URL: `http://127.0.0.1:${address.port}` },
       );
       assert.equal(result.stderr, "");
@@ -216,16 +244,16 @@ describe("./client happy path", () => {
     }
   });
 
-  it("accepts experiment run flags after they parse", async () => {
+  it("accepts test run flags after they parse", async () => {
     const equals = await runClient(
-      ["experiment", "run", "--ticket", "OLI-42", "--server_url=https://qemu.example.com"],
+      ["test", "run", "--ticket", "OLI-42", "--server_url=https://qemu.example.com"],
       { CURSOR_API_TOKEN: "" },
     );
     assert.notEqual(equals.code, 0);
     assert.match(equals.stderr, /CURSOR_API_TOKEN is not set/);
 
     const spaced = await runClient(
-      ["experiment", "run", "--server_url", "http://127.0.0.1:42069", "--ticket", "OLI-42"],
+      ["test", "run", "--server_url", "http://127.0.0.1:42069", "--ticket", "OLI-42"],
       { CURSOR_API_TOKEN: "" },
     );
     assert.notEqual(spaced.code, 0);
@@ -236,7 +264,7 @@ describe("./client happy path", () => {
 describe("./client unhappy path", () => {
   it("rejects an ISO that is not HTTPS", async () => {
     const result = await runClient([
-      "experiment",
+      "test",
       "new",
       "--iso",
       "http://example.com/omarchy.iso",
@@ -252,7 +280,7 @@ describe("./client unhappy path", () => {
 
   it("rejects an HTTPS ISO without a host", async () => {
     const result = await runClient([
-      "experiment",
+      "test",
       "new",
       "--iso",
       "https://?",
@@ -267,7 +295,7 @@ describe("./client unhappy path", () => {
 
   it("rejects a missing ISO or server URL", async () => {
     const missingIso = await runClient([
-      "experiment",
+      "test",
       "new",
       "--server_url=https://qemu.example.com",
       "--version",
@@ -277,7 +305,7 @@ describe("./client unhappy path", () => {
     assert.match(missingIso.stderr, /iso/);
 
     const missingServer = await runClient([
-      "experiment",
+      "test",
       "new",
       "--iso",
       "https://example.com/omarchy.iso",
@@ -290,7 +318,7 @@ describe("./client unhappy path", () => {
 
   it("rejects a missing version", async () => {
     const result = await runClient([
-      "experiment",
+      "test",
       "new",
       "--iso",
       "https://example.com/omarchy.iso",
@@ -303,7 +331,7 @@ describe("./client unhappy path", () => {
 
   it("rejects a server URL outside HTTP and HTTPS", async () => {
     const result = await runClient([
-      "experiment",
+      "test",
       "new",
       "--iso",
       "https://example.com/omarchy.iso",
@@ -316,9 +344,9 @@ describe("./client unhappy path", () => {
     assert.match(result.stderr, /server_url must be a valid http or https url/);
   });
 
-  it("rejects experiment run without a ticket or a server URL", async () => {
+  it("rejects test run without a ticket or a server URL", async () => {
     const missingTicket = await runClient(
-      ["experiment", "run", "--server_url", "https://qemu.example.com"],
+      ["test", "run", "--server_url", "https://qemu.example.com"],
       { CURSOR_API_TOKEN: "test-token" },
     );
     assert.notEqual(missingTicket.code, 0);
@@ -326,7 +354,7 @@ describe("./client unhappy path", () => {
     assert.match(missingTicket.stderr, /Missing required flag: --ticket/);
 
     const emptyTicket = await runClient(
-      ["experiment", "run", "--ticket", "", "--server_url", "https://qemu.example.com"],
+      ["test", "run", "--ticket", "", "--server_url", "https://qemu.example.com"],
       { CURSOR_API_TOKEN: "test-token" },
     );
     assert.notEqual(emptyTicket.code, 0);
@@ -334,7 +362,7 @@ describe("./client unhappy path", () => {
     assert.match(emptyTicket.stderr, /--ticket.*length of at least 1/);
 
     const missingServer = await runClient(
-      ["experiment", "run", "--ticket", "OLI-42"],
+      ["test", "run", "--ticket", "OLI-42"],
       { CURSOR_API_TOKEN: "test-token" },
     );
     assert.notEqual(missingServer.code, 0);
@@ -342,14 +370,26 @@ describe("./client unhappy path", () => {
     assert.match(missingServer.stderr, /Missing required flag: --server_url/);
   });
 
-  it("rejects an experiment run server URL outside HTTP and HTTPS", async () => {
+  it("rejects a test run server URL outside HTTP and HTTPS", async () => {
     const result = await runClient(
-      ["experiment", "run", "--ticket", "OLI-42", "--server_url=ssh://qemu.example.com"],
+      ["test", "run", "--ticket", "OLI-42", "--server_url=ssh://qemu.example.com"],
       { CURSOR_API_TOKEN: "test-token" },
     );
 
     assert.notEqual(result.code, 0);
     assert.equal(result.stdout.includes("Agent here"), false);
     assert.match(result.stderr, /server_url must be a valid http or https url/);
+  });
+
+  it("rejects test without --list", async () => {
+    const result = await runClient(["test"]);
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /test: --list is required/);
+  });
+
+  it("rejects a test definition name that does not exist", async () => {
+    const result = await runClient(["test", "--list", "--name", "missing-definition"]);
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /test: no test definition named missing-definition/);
   });
 });

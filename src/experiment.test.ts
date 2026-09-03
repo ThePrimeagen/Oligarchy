@@ -388,7 +388,7 @@ describe("createExperiment happy path", () => {
     );
     assert.equal(inserts[2].table, logs);
     assert.deepEqual(inserts[2].values, {
-      text: `experiment ${result.experiment.id} created; 2 tests; OLI-42, OLI-43`,
+      text: `test ${result.experiment.id} created; 2 tests; OLI-42, OLI-43`,
     });
   });
 
@@ -454,7 +454,7 @@ describe("createExperiment happy path", () => {
       },
     ]);
     assert.deepEqual(inserts[2].values, {
-      text: `experiment ${result.experiment.id} created; 1 tests; OLI-42`,
+      text: `test ${result.experiment.id} created; 1 tests; OLI-42`,
     });
   });
 });
@@ -471,7 +471,7 @@ describe("createExperiment unhappy path", () => {
           serverUrl: "https://qemu.example.com",
           version: "1.2.3",
         }),
-      { message: "experiment: no test definitions found" },
+      { message: "test: no test definitions found" },
     );
     assert.deepEqual(inserts, []);
     assert.deepEqual(updates, []);
@@ -499,7 +499,7 @@ describe("createExperiment unhappy path", () => {
           version: "1.2.3",
           name: "Change lighting",
         }),
-      { message: "experiment: no test definition named Change lighting" },
+      { message: "test: no test definition named Change lighting" },
     );
     assert.deepEqual(inserts, []);
     assert.deepEqual(updates, []);
