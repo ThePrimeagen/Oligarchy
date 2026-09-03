@@ -13,7 +13,7 @@ async function runClient(args: string[], env: NodeJS.ProcessEnv = {}): Promise<{
   stderr: string;
 }> {
   const child = spawn(CLIENT, args, {
-    env: { ...process.env, ...env },
+    env: { ...process.env, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --disable-warning=ExperimentalWarning`.trim(), ...env },
   });
   let stdout = "";
   let stderr = "";
