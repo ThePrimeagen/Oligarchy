@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { createInterface } from "node:readline";
@@ -11,6 +13,7 @@ if (existsSync(".env")) {
 const DEFAULT_SERVER_URL = "http://127.0.0.1:42069";
 const DEFAULT_ISO = "omarchy.iso";
 const DEFAULT_ENCODING = "oligarchy";
+const START_TIMEOUT_MS = 45 * 60 * 1000;
 
 export const CLIENT_ACTIONS = [
   "start",
@@ -34,6 +37,7 @@ export type RunnerOptions = {
   agentId?: string;
   token?: string;
   fetch?: typeof fetch;
+  postStart?: (serverUrl: string, body: unknown, token: string) => Promise<string>;
 };
 
 export type RunnerState = {
@@ -41,6 +45,7 @@ export type RunnerState = {
   agentId: string;
   token: string;
   fetch: typeof fetch;
+  postStart: (serverUrl: string, body: unknown, token: string) => Promise<string>;
   sessionId?: string;
   activeIntent?: string;
   testResultId?: string;
@@ -48,11 +53,15 @@ export type RunnerState = {
 
 export function createRunner(options: RunnerOptions = {}): RunnerState {
   const token = options.token ?? process.env.OLIGARCHY_TOKEN ?? "";
+  if (token === "") {
+    throw new Error("OLIGARCHY_TOKEN is not set");
+  }
   return {
     serverUrl: options.serverUrl ?? DEFAULT_SERVER_URL,
     agentId: options.agentId ?? `runner-${randomUUID().slice(0, 8)}`,
     token,
     fetch: options.fetch ?? globalThis.fetch,
+    postStart: options.postStart ?? defaultPostStart,
   };
 }
 
@@ -168,16 +177,60 @@ function parseArgs(raw: string): string[] {
   return args;
 }
 
+function defaultPostStart(serverUrl: string, body: unknown, token: string): Promise<string> {
+  const url = new URL(`${serverUrl}/start`);
+  const send = url.protocol === "https:" ? httpsRequest : httpRequest;
+  const payload = JSON.stringify(body);
+  return new Promise<string>((resolveReq, reject) => {
+    const req = send(
+      url,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(payload),
+        },
+      },
+      (res) => {
+        let data = "";
+        res.setEncoding("utf8");
+        res.on("data", (chunk) => {
+          data += chunk;
+        });
+        res.on("error", reject);
+        res.on("end", () => {
+          const status = res.statusCode!;
+          if (status >= 200 && status < 300) {
+            resolveReq(data);
+          } else {
+            let message = data;
+            try {
+              const parsed = JSON.parse(data) as { error?: string };
+              if (parsed.error !== undefined) {
+                message = parsed.error;
+              }
+            } catch {}
+            reject(new Error(message || "start: request failed"));
+          }
+        });
+      },
+    );
+    req.setTimeout(START_TIMEOUT_MS, () => req.destroy(new Error("start: no response within timeout")));
+    req.on("error", reject);
+    req.end(payload);
+  });
+}
+
 async function requestJson(
   runner: RunnerState,
   path: string,
   method: string,
   body?: unknown,
 ): Promise<string> {
-  const headers: Record<string, string> = {};
-  if (runner.token !== "") {
-    headers.Authorization = `Bearer ${runner.token}`;
-  }
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${runner.token}`,
+  };
   if (body !== undefined) {
     headers["Content-Type"] = "application/json";
   }
@@ -204,27 +257,24 @@ async function requestJson(
 
 export async function stopRunnerSession(
   runner: RunnerState,
-  status: "succeeded" | "failed" | "aborted" = "aborted",
-  reason = "runner exited",
+  status?: "succeeded" | "failed" | "aborted",
+  reason?: string,
 ): Promise<string> {
   if (runner.sessionId === undefined) {
     return "No active session.";
   }
   const sessionId = runner.sessionId;
+
+  await requestJson(runner, "/stop", "POST", {
+    id: sessionId,
+    agent: runner.agentId,
+    status,
+    reason,
+  });
+
   runner.sessionId = undefined;
   runner.activeIntent = undefined;
-
-  try {
-    await requestJson(runner, "/stop", "POST", {
-      id: sessionId,
-      agent: runner.agentId,
-      status,
-      reason,
-    });
-    return `Session ${sessionId} stopped (${status}: ${reason}).`;
-  } catch (err) {
-    return `Failed to stop session ${sessionId}: ${(err as Error).message}`;
-  }
+  return `Session ${sessionId} stopped${status !== undefined ? ` (${status}${reason !== undefined ? `: ${reason}` : ""})` : ""}.`;
 }
 
 export async function executeRunnerLine(runner: RunnerState, line: string): Promise<string> {
@@ -264,6 +314,10 @@ export async function executeRunnerLine(runner: RunnerState, line: string): Prom
     }
 
     case "start": {
+      if (runner.sessionId !== undefined) {
+        throw new Error(`A session is already running (${runner.sessionId}). Stop it before starting a new one.`);
+      }
+
       let iso = DEFAULT_ISO;
       let disk: string | undefined;
 
@@ -286,11 +340,15 @@ export async function executeRunnerLine(runner: RunnerState, line: string): Prom
         disk = resolve(disk);
       }
 
-      const raw = await requestJson(runner, "/start", "POST", {
+      const startPayload: { iso: string; disk?: string; agent: string } = {
         iso,
-        disk,
         agent: runner.agentId,
-      });
+      };
+      if (disk !== undefined) {
+        startPayload.disk = disk;
+      }
+
+      const raw = await runner.postStart(runner.serverUrl, startPayload, runner.token);
 
       const parsed = JSON.parse(raw) as { id: string };
       runner.sessionId = parsed.id;
@@ -309,10 +367,7 @@ export async function executeRunnerLine(runner: RunnerState, line: string): Prom
         }
       }
 
-      const headers: Record<string, string> = {};
-      if (runner.token !== "") {
-        headers.Authorization = `Bearer ${runner.token}`;
-      }
+      const headers = { Authorization: `Bearer ${runner.token}` };
       const url = `${runner.serverUrl}/image?id=${encodeURIComponent(runner.sessionId)}&agent=${encodeURIComponent(runner.agentId)}`;
       const res = await runner.fetch(url, { headers });
       if (res.status !== 200) {
@@ -343,10 +398,7 @@ export async function executeRunnerLine(runner: RunnerState, line: string): Prom
         }
       }
 
-      const headers: Record<string, string> = {};
-      if (runner.token !== "") {
-        headers.Authorization = `Bearer ${runner.token}`;
-      }
+      const headers = { Authorization: `Bearer ${runner.token}` };
       const url = `${runner.serverUrl}/serial?id=${encodeURIComponent(runner.sessionId)}&agent=${encodeURIComponent(runner.agentId)}`;
       const res = await runner.fetch(url, { headers });
       if (res.status !== 200) {
@@ -472,7 +524,7 @@ export async function executeRunnerLine(runner: RunnerState, line: string): Prom
       if (runner.sessionId === undefined) {
         throw new Error("No active session. Run 'start' first.");
       }
-      const status = (parts[1] as "succeeded" | "failed" | "aborted") ?? "succeeded";
+      const status = parts[1] as "succeeded" | "failed" | "aborted" | undefined;
       const reason = parts[2];
       return await stopRunnerSession(runner, status, reason);
     }
@@ -506,8 +558,12 @@ export async function runInteractiveSession(serverUrl?: string): Promise<void> {
     cleanupRunning = true;
     if (runner.sessionId !== undefined) {
       console.log(`\nStopping session ${runner.sessionId}...`);
-      await stopRunnerSession(runner, "aborted", "runner terminated");
-      console.log("Session stopped. Exiting.");
+      try {
+        await stopRunnerSession(runner, "aborted", "runner terminated");
+        console.log("Session stopped. Exiting.");
+      } catch (err) {
+        console.error(`Failed to stop session: ${(err as Error).message}`);
+      }
     }
   };
 
@@ -515,6 +571,9 @@ export async function runInteractiveSession(serverUrl?: string): Promise<void> {
     void cleanup().then(() => process.exit(0));
   });
   process.once("SIGTERM", () => {
+    void cleanup().then(() => process.exit(0));
+  });
+  process.once("SIGHUP", () => {
     void cleanup().then(() => process.exit(0));
   });
 
@@ -549,6 +608,8 @@ export async function runInteractiveSession(serverUrl?: string): Promise<void> {
     rl.prompt();
   }
 
+  // Handle EOF (Ctrl+D) when the async iterator finishes without an exit command
+  await cleanup();
   rl.close();
 }
 
@@ -566,4 +627,3 @@ if (process.argv[1] === import.meta.filename) {
   }
   await runInteractiveSession(serverUrl);
 }
-
