@@ -429,6 +429,7 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
           return internal(cause, { sessionId: qemu.id, agentId: agent });
         },
       });
+      // Color is released in finishLiveSession; log first so the stopped line keeps it.
       log(db, {
         text: `session ${qemu.id}: stopped; ${finalStatus}${reason === undefined ? "" : `; ${reason}`}`,
         sessionId: qemu.id,

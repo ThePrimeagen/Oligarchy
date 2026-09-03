@@ -24,13 +24,6 @@ const ROSE_PINE_MAIN = {
   text: "#e0def4",
   subtle: "#908caa",
   muted: "#6e6a86",
-  highlightHigh: "#524f67",
-  highlightMed: "#403d52",
-  overlay: "#26233a",
-  highlightLow: "#21202e",
-  surface: "#1f1d2e",
-  base: "#191724",
-  nc: "#16141f",
 } as const;
 
 const AGENT_COLORS: readonly string[] = Object.values(ROSE_PINE_MAIN);
@@ -67,6 +60,7 @@ function paint(hex: string, text: string): string {
   if (process.stdout.isTTY !== true && process.env.FORCE_COLOR === undefined) {
     return text;
   }
+  // 16, not 24-bit: tmux and FORCE_COLOR=1 report 256/16 and still render 38;2.
   if (!WriteStream.prototype.hasColors.call(process.stdout, 16)) {
     return text;
   }
