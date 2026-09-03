@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { loadEnvFile } from "node:process";
-import { Effect, Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 import { CliError, Command, Flag } from "effect/unstable/cli";
 import { eq, sql } from "drizzle-orm";
 import { closeDatabase, connectDatabase, type Db } from "./db/ops.ts";
@@ -250,11 +250,17 @@ async function describeLinearIssue(
 export async function createExperiment(
   db: Db,
   token: string,
-  input: { iso: string; serverUrl: string; version: string },
+  input: { iso: string; serverUrl: string; version: string; name?: string },
 ): Promise<{ experiment: Experiment; tickets: LinearTicket[] }> {
-  const definitions = await db.select().from(testDefinitions).orderBy(testDefinitions.name);
+  const definitions = input.name === undefined
+    ? await db.select().from(testDefinitions).orderBy(testDefinitions.name)
+    : await db.select().from(testDefinitions).where(eq(testDefinitions.name, input.name));
   if (definitions.length === 0) {
-    throw new Error("experiment: no test definitions found");
+    throw new Error(
+      input.name === undefined
+        ? "experiment: no test definitions found"
+        : `experiment: no test definition named ${input.name}`,
+    );
   }
 
   const created = await db.transaction(async (tx) => {
@@ -334,7 +340,7 @@ export async function createExperiment(
   return { experiment, tickets };
 }
 
-export async function newExperiment(input: { iso: string; serverUrl: string; version: string }): Promise<void> {
+export async function newExperiment(input: { iso: string; serverUrl: string; version: string; name?: string }): Promise<void> {
   if (existsSync(".env")) {
     loadEnvFile();
   }
@@ -389,10 +395,21 @@ export const experimentNewCommand = Command.make(
       Flag.withSchema(Schema.NonEmptyString),
       Flag.withDescription("Version label attached to every Linear ticket"),
     ),
+    name: Flag.string("name").pipe(
+      Flag.withSchema(Schema.NonEmptyString),
+      Flag.optional,
+      Flag.withDescription("Create an experiment for this test definition only"),
+    ),
   },
-  Effect.fn(function* ({ iso, serverUrl, version }) {
+  Effect.fn(function* ({ iso, serverUrl, version, name }) {
     yield* Effect.tryPromise({
-      try: () => newExperiment({ iso, serverUrl, version }),
+      try: () =>
+        newExperiment({
+          iso,
+          serverUrl,
+          version,
+          name: Option.isNone(name) ? undefined : name.value,
+        }),
       catch: fail,
     });
   }),
