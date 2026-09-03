@@ -8,7 +8,7 @@ import { CliError, Command, Flag } from "effect/unstable/cli";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node";
 import { flushLogs, log } from "../db/log.ts";
-import { connectDatabase, endSession, finishAction, insertSession, pingDatabase, registerAgent, sessionRunning, startAction } from "../db/ops.ts";
+import { connectDatabase, endSession, finishAction, getImage, insertSession, pingDatabase, registerAgent, sessionRunning, startAction } from "../db/ops.ts";
 import { finishIntentSpan, finishQemuActionSpan, finishQemuSpan, flushSentry, initSentry, startIntentSpan, startQemuActionSpan, startQemuSpan, type QemuSpan } from "../sentry.ts";
 import { QEMU_DISPLAYS, createDisk, createQemu, missingHostRequirements, screendump, sendKeys, sendMouse, start, stop, type Qemu, type QemuDisplay } from "./client.ts";
 import { getIso } from "./iso.ts";
@@ -28,6 +28,12 @@ initSentry();
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 42069;
+const STORED_IMAGE_ORIGIN = "https://oligarchy.trm.sh";
+
+function storedImageUrl(actionId: number): string {
+  return `${STORED_IMAGE_ORIGIN}/images/${actionId}`;
+}
+
 const SESSION_TIMEOUT_MS = 10 * 60 * 1000;
 const SESSION_TIMEOUT_CHECK_MS = 10_000;
 const SESSION_TIMEOUT_REASON = "no command received for 10 minutes";
@@ -171,6 +177,10 @@ const StartBody = Schema.Struct({
 const ImageParams = Schema.Struct({
   id: Schema.String,
   agent: Schema.NonEmptyString,
+});
+
+const StoredImageParams = Schema.Struct({
+  id: Schema.String,
 });
 
 const SendKeysBody = Schema.Struct({
@@ -324,6 +334,9 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
               }
               return async (result) => {
                 outcome = result;
+                if (result.state === "completed") {
+                  actionSpan!.setAttribute("image_url", storedImageUrl(opened!));
+                }
                 finishLiveActionSpan(live, actionSpan!, result.state);
               };
             }),
@@ -352,11 +365,30 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
             return internal(cause, { sessionId: qemu.id, agentId: agent });
           },
         });
-        log(db, { text: `session ${qemu.id}: image; ${data.length} bytes in ${Date.now() - started}ms`, sessionId: qemu.id, agentId: agent });
-        return HttpServerResponse.uint8Array(data, { contentType: "image/png" });
+        log(db, { text: `session ${qemu.id}: image; ${data.length} bytes in ${Date.now() - started}ms; ${storedImageUrl(opened!)}`, sessionId: qemu.id, agentId: agent });
+        return HttpServerResponse.uint8Array(data, {
+          contentType: "image/png",
+          headers: { "x-image-url": storedImageUrl(opened!) },
+        });
       });
       return yield* Effect.ensuring(png, Effect.promise(() => rm(path, { force: true })));
     }) satisfies RouteHandler, { uninterruptible: true });
+
+    yield* router.add("GET", "/images/:id", Effect.gen(function* () {
+      const params = yield* Effect.mapError(HttpRouter.schemaPathParams(StoredImageParams), (err) => badRequest(err.message));
+      const actionId = Number(params.id);
+      if (!Number.isInteger(actionId)) {
+        return errorBody(404, "not found");
+      }
+      const data = yield* Effect.tryPromise({
+        try: () => getImage(db, actionId),
+        catch: (cause) => internal(cause, {}),
+      });
+      if (data === undefined) {
+        return errorBody(404, "not found");
+      }
+      return HttpServerResponse.uint8Array(data, { contentType: "image/png" });
+    }) satisfies RouteHandler);
 
     yield* router.add("GET", "/serial", Effect.gen(function* () {
       const started = Date.now();
@@ -525,7 +557,11 @@ function respondTable(request: HttpServerRequest.HttpServerRequest): {
 
 const respond = HttpRouter.middleware<{ handles: ApiError }>()((handler) =>
   Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) => {
-    if (request.headers.authorization !== `Bearer ${token}`) {
+    const path = request.url.split("?")[0];
+    if (
+      request.headers.authorization !== `Bearer ${token}`
+      && !(request.method === "GET" && path.startsWith("/images/"))
+    ) {
       return answer(request, 401, "unauthorized", {});
     }
     return handler.pipe(

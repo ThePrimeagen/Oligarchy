@@ -89,3 +89,8 @@ export async function finishAction(db: Db, id: number, outcome: Outcome, image?:
     await tx.insert(images).values({ actionId: id, data: image });
   });
 }
+
+export async function getImage(db: Db, actionId: number): Promise<Buffer | undefined> {
+  const [row] = await db.select({ data: images.data }).from(images).where(eq(images.actionId, actionId));
+  return row?.data;
+}

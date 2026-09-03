@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import type { FC, PropsWithChildren } from "hono/jsx";
 import { jsxRenderer } from "hono/jsx-renderer";
 import {
+  getImage,
   getSessionImage,
   listSessions,
   listTestBasePrompts,
@@ -77,7 +78,7 @@ const SessionList: FC<SessionListProps> = ({ sessions }) => (
                 ) : (
                   <img
                     class="session__image"
-                    src={`/sessions/${session.id}/image`}
+                    src={`/images/${session.imageActionId}`}
                     alt={`Last captured frame from session ${session.id}`}
                     loading="lazy"
                   />
@@ -355,6 +356,30 @@ app.get("/sessions", async (context) => {
       </>,
       500,
     );
+  }
+});
+
+app.get("/images/:id", async (context) => {
+  const id = Number(context.req.param("id"));
+  if (!Number.isInteger(id)) {
+    return context.notFound();
+  }
+
+  try {
+    const image = await getImage(context.env.HYPERDRIVE.connectionString, id);
+    if (image === undefined) {
+      return context.notFound();
+    }
+    return new Response(new Uint8Array(image), {
+      headers: {
+        "cache-control": "no-store",
+        "content-type": "image/png",
+      },
+    });
+  } catch (error) {
+    Sentry.captureException(error);
+    console.error("dashboard: loading image:", (error as Error).message);
+    return context.body(null, 500);
   }
 });
 

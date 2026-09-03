@@ -74,6 +74,18 @@ export async function getSessionImage(connectionString: string, sessionId: strin
   return row?.data;
 }
 
+export async function getImage(connectionString: string, actionId: number): Promise<Buffer | undefined> {
+  const db = await connectDatabase(connectionString);
+  const [row] = await db
+    .select({
+      data: images.data,
+      queriedAt: sql`CURRENT_TIMESTAMP`,
+    })
+    .from(images)
+    .where(eq(images.actionId, actionId));
+  return row?.data;
+}
+
 export async function listTestDefinitions(connectionString: string): Promise<TestDefinition[]> {
   const db = await connectDatabase(connectionString);
   return db.select().from(testDefinitions).orderBy(testDefinitions.name);
