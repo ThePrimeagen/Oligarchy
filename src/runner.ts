@@ -28,10 +28,6 @@ export const CLIENT_ACTIONS = [
   "exit",
 ] as const;
 
-export type TerminalImageOptions = {
-  protocol?: "iterm2" | "kitty" | "none";
-};
-
 export type RunnerOptions = {
   serverUrl?: string;
   agentId?: string;
@@ -65,44 +61,10 @@ export function createRunner(options: RunnerOptions = {}): RunnerState {
   };
 }
 
-export function detectTerminalImageProtocol(): "iterm2" | "kitty" | "none" {
-  const termProgram = process.env.TERM_PROGRAM;
-  const term = process.env.TERM ?? "";
-  const lcTerm = process.env.LC_TERMINAL;
-
-  if (termProgram === "iTerm.app" || termProgram === "WezTerm" || lcTerm === "iTerm2") {
-    return "iterm2";
-  }
-  if (termProgram === "kitty" || term.includes("kitty")) {
-    return "kitty";
-  }
-  if (process.env.GHOSTTY_RESOURCES_DIR !== undefined) {
-    return "kitty";
-  }
-  return "iterm2";
-}
-
-export function formatTerminalImage(data: Buffer, options: TerminalImageOptions = {}): string {
+export function formatTerminalImage(data: Buffer): string {
   if (data.length === 0) {
     throw new Error("Cannot display empty image");
   }
-  const protocol = options.protocol ?? detectTerminalImageProtocol();
-  if (protocol === "kitty") {
-    const b64 = data.toString("base64");
-    const chunkSize = 4096;
-    let out = "";
-    for (let i = 0; i < b64.length; i += chunkSize) {
-      const chunk = b64.slice(i, i + chunkSize);
-      const isLast = i + chunkSize >= b64.length;
-      if (i === 0) {
-        out += `\x1b_Ga=T,f=100,m=${isLast ? 0 : 1};${chunk}\x1b\\`;
-      } else {
-        out += `\x1b_Gm=${isLast ? 0 : 1};${chunk}\x1b\\`;
-      }
-    }
-    return `${out}\n`;
-  }
-
   const b64 = data.toString("base64");
   return `\x1b]1337;File=inline=1;width=auto;height=auto:${b64}\x07\n`;
 }
@@ -295,7 +257,8 @@ export async function executeRunnerLine(runner: RunnerState, line: string): Prom
         "  get-serial [-o <path>]                   Read guest serial output",
         "  send-keys <keys> [encoding]              Send key string (e.g. 'hello<ENTER>')",
         "  send-mouse <x> <y> [button] [clicks]     Send mouse pointer / click (0..1 coords)",
-        "  intent start --message <msg> [--test_result_id <id>]  Declare intent",
+        "  intent start --message <msg>             Declare intent",
+        "  intent <message>                         Declare intent shorthand",
         "  intent end                               Complete active intent",
         "  intent                                   Show current active intent",
         "  stop [status] [reason]                   Stop current QEMU session",
@@ -382,8 +345,7 @@ export async function executeRunnerLine(runner: RunnerState, line: string): Prom
         return `Image saved to ${outputPath}`;
       }
 
-      const imgSequence = formatTerminalImage(buffer);
-      return `${imgSequence}Image displayed (${buffer.length} bytes)`;
+      return formatTerminalImage(buffer);
     }
 
     case "get-serial": {
@@ -419,16 +381,22 @@ export async function executeRunnerLine(runner: RunnerState, line: string): Prom
       if (runner.sessionId === undefined) {
         throw new Error("No active session. Run 'start' first.");
       }
-      const keys = parts[1];
-      if (keys === undefined) {
+      const rawAfterCmd = trimmed.slice(command.length).trim();
+      if (rawAfterCmd === "") {
         throw new Error("send-keys requires keys argument (e.g. send-keys \"hello<ENTER>\")");
       }
-      const encoding = parts[2] ?? DEFAULT_ENCODING;
+      let keys = rawAfterCmd;
+      if (
+        (keys.startsWith('"') && keys.endsWith('"'))
+        || (keys.startsWith("'") && keys.endsWith("'"))
+      ) {
+        keys = keys.slice(1, -1);
+      }
 
       await requestJson(runner, "/send-keys", "POST", {
         id: runner.sessionId,
         keys,
-        encoding,
+        encoding: DEFAULT_ENCODING,
         agent: runner.agentId,
       });
       return "Keys sent: ok";
@@ -545,22 +513,13 @@ export async function executeRunnerLine(runner: RunnerState, line: string): Prom
 export async function runInteractiveSession(serverUrl?: string): Promise<void> {
   const runner = createRunner({ serverUrl });
 
-  console.log("=== Oligarchy Client Runner ===");
-  console.log(`Server URL: ${runner.serverUrl}`);
-  console.log(`Agent ID:   ${runner.agentId}`);
-  console.log("Press TAB for available commands, or type 'help' for usage.");
-  console.log("Ctrl+C or 'exit' will cleanly stop any running session.");
-  console.log("");
-
   let cleanupRunning = false;
   const cleanup = async () => {
     if (cleanupRunning) return;
     cleanupRunning = true;
     if (runner.sessionId !== undefined) {
-      console.log(`\nStopping session ${runner.sessionId}...`);
       try {
         await stopRunnerSession(runner, "aborted", "runner terminated");
-        console.log("Session stopped. Exiting.");
       } catch (err) {
         console.error(`Failed to stop session: ${(err as Error).message}`);
       }
@@ -580,7 +539,7 @@ export async function runInteractiveSession(serverUrl?: string): Promise<void> {
   const rl = createInterface({
     input: process.stdin,
     output: process.stdout,
-    prompt: "oligarchy> ",
+    prompt: "> ",
     completer: (line: string) => completeRunnerLine(runner, line),
   });
 
@@ -602,13 +561,9 @@ export async function runInteractiveSession(serverUrl?: string): Promise<void> {
       console.error(`Error: ${(err as Error).message}`);
     }
 
-    const intentPrompt = runner.activeIntent !== undefined ? ` [${runner.activeIntent}]` : "";
-    const sessionPrompt = runner.sessionId !== undefined ? ` (${runner.sessionId.slice(0, 8)})` : "";
-    rl.setPrompt(`oligarchy${sessionPrompt}${intentPrompt}> `);
     rl.prompt();
   }
 
-  // Handle EOF (Ctrl+D) when the async iterator finishes without an exit command
   await cleanup();
   rl.close();
 }

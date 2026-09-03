@@ -36,7 +36,7 @@ describe("runner state and command execution happy path", () => {
     });
   });
 
-  it("executes send-keys with session id tracked automatically", async () => {
+  it("executes send-keys with rest of line passed as string", async () => {
     let capturedUrl: string | undefined;
     let capturedBody: unknown;
     const fetchFn: typeof fetch = async (input, init) => {
@@ -48,11 +48,11 @@ describe("runner state and command execution happy path", () => {
     const runner = createRunner({ serverUrl: "http://127.0.0.1:42069", token: "tok", fetch: fetchFn });
     runner.sessionId = "session-123";
 
-    const output = await executeRunnerLine(runner, "send-keys hello<ENTER>");
+    const output = await executeRunnerLine(runner, "send-keys hello world<ENTER>");
     assert.equal(capturedUrl, "http://127.0.0.1:42069/send-keys");
     assert.deepEqual(capturedBody, {
       id: "session-123",
-      keys: "hello<ENTER>",
+      keys: "hello world<ENTER>",
       encoding: "oligarchy",
       agent: runner.agentId,
     });
@@ -201,20 +201,12 @@ describe("tab completion unhappy path", () => {
 });
 
 describe("terminal image rendering happy path", () => {
-  it("generates iTerm2 inline image escape sequence", () => {
+  it("generates simple inline image escape sequence", () => {
     const png = Buffer.from("fake-png-bytes");
-    const output = formatTerminalImage(png, { protocol: "iterm2" });
+    const output = formatTerminalImage(png);
     assert.ok(output.startsWith("\x1b]1337;File="));
     assert.ok(output.includes(png.toString("base64")));
     assert.ok(output.endsWith("\x07\n"));
-  });
-
-  it("generates kitty inline image escape sequence", () => {
-    const png = Buffer.from("fake-png-bytes");
-    const output = formatTerminalImage(png, { protocol: "kitty" });
-    assert.ok(output.startsWith("\x1b_G"));
-    assert.ok(output.includes("f=100"));
-    assert.ok(output.endsWith("\x1b\\\n"));
   });
 });
 
