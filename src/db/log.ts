@@ -1,3 +1,4 @@
+import { WriteStream } from "node:tty";
 import { styleText } from "node:util";
 import { capture } from "../sentry.ts";
 import type { Db } from "./ops.ts";
@@ -35,6 +36,7 @@ const ROSE_PINE_MAIN = {
 const AGENT_COLORS: readonly string[] = Object.values(ROSE_PINE_MAIN);
 
 const assigned = new Map<string, string>();
+const live = new Set<string>();
 let next = 0;
 
 // Inserts are chained so rows land in call order; a failed insert reports itself to
@@ -46,7 +48,10 @@ function colorFor(agentId: string): string {
   if (have !== undefined) {
     return have;
   }
-  const taken = new Set(assigned.values());
+  const taken = new Set<string>();
+  for (const id of live) {
+    taken.add(assigned.get(id)!);
+  }
   let pick = next;
   for (let i = 0; i < AGENT_COLORS.length; i++) {
     const idx = (next + i) % AGENT_COLORS.length;
@@ -61,12 +66,19 @@ function colorFor(agentId: string): string {
   return color;
 }
 
+export function acquireAgentColor(agentId: string): void {
+  colorFor(agentId);
+  live.add(agentId);
+}
+
 export function releaseAgentColor(agentId: string): void {
+  live.delete(agentId);
   assigned.delete(agentId);
 }
 
 function paint(hex: string, text: string): string {
-  if (!process.stdout.hasColors(2 ** 24)) {
+  // Piped stdout is a Socket and has no hasColors; the TTY method still honors FORCE_COLOR.
+  if (!WriteStream.prototype.hasColors.call(process.stdout, 2 ** 24)) {
     return text;
   }
   const n = Number.parseInt(hex.slice(1), 16);

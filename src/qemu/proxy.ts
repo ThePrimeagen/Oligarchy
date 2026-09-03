@@ -8,7 +8,7 @@ import { Cause, Effect, Exit, Layer, Option, Schema } from "effect";
 import { CliError, Command, Flag } from "effect/unstable/cli";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node";
-import { flushLogs, log, releaseAgentColor } from "../db/log.ts";
+import { acquireAgentColor, flushLogs, log, releaseAgentColor } from "../db/log.ts";
 import { connectDatabase, endSession, finishAction, getImage, insertSession, pingDatabase, registerAgent, sessionRunning, startAction } from "../db/ops.ts";
 import { finishIntentSpan, finishQemuActionSpan, finishQemuSpan, flushSentry, initSentry, startIntentSpan, startQemuActionSpan, startQemuSpan, type QemuSpan } from "../sentry.ts";
 import { QEMU_DISPLAYS, createDisk, createQemu, missingHostRequirements, screendump, sendKeys, sendMouse, start, stop, type Qemu, type QemuDisplay } from "./client.ts";
@@ -272,6 +272,7 @@ function startSession(cfg: typeof StartBody.Type, started: number, display: Qemu
     const span = startQemuSpan(qemu.id, cfg.agent);
     const live = { qemu, agent: cfg.agent, lastCommandAt: Date.now(), span, actionSpans: new Set<QemuSpan>() };
     openSessions.add(live);
+    acquireAgentColor(cfg.agent);
     yield* Effect.tryPromise({
       try: () => insertSession(db, qemu.id, { iso: cfg.iso, disk: cfg.disk }, isUrl ? "downloading" : "running"),
       catch: (cause) => {
