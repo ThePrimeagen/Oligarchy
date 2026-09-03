@@ -507,7 +507,7 @@ const server = createServer((req, res) => {
 });
 server.on("error", (err) => fatal(`listen ${addr}: ${err.message}`, err));
 server.on("listening", () => {
-  say(`listening on ${host}:${(server.address() as AddressInfo).port}`);
+  say(`listening on ${host}:${(server.address() as AddressInfo).port}; pid ${process.pid}; SIGUSR2 checks for updates now`);
   pullTimer = setInterval(() => {
     void check();
   }, PULL_INTERVAL_MS);

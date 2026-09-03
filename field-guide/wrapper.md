@@ -20,7 +20,7 @@
 
 ## Rolling
 
-Every 30 minutes, and at once on `SIGUSR2` (`kill -USR2 <wrapper pid>` after pushing):
+Every 30 minutes, and at once on `SIGUSR2` (`kill -USR2 <wrapper pid>` after pushing; the pid is on the `listening` line):
 
 1. `git pull --ff-only`, with `GIT_TERMINAL_PROMPT=0` so a credential prompt fails instead of hanging, killed after 5 minutes. A failure is an error line and a Sentry event, but the check goes on, so a pull done by hand still rolls.
 2. HEAD equal to the current backend's commit is `up to date`. Done.
