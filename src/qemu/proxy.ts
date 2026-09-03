@@ -8,7 +8,7 @@ import { CliError, Command, Flag } from "effect/unstable/cli";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node";
 import { flushLogs, log } from "../db/log.ts";
-import { connectDatabase, endSession, finishAction, insertSession, registerAgent, sessionRunning, startAction } from "../db/ops.ts";
+import { connectDatabase, endSession, finishAction, insertSession, pingDatabase, registerAgent, sessionRunning, startAction } from "../db/ops.ts";
 import { finishIntentSpan, finishQemuActionSpan, finishQemuSpan, flushSentry, initSentry, startIntentSpan, startQemuActionSpan, startQemuSpan, type QemuSpan } from "../sentry.ts";
 import { QEMU_DISPLAYS, createDisk, createQemu, missingHostRequirements, screendump, sendKeys, sendMouse, start, stop, type Qemu, type QemuDisplay } from "./client.ts";
 import { getIso } from "./iso.ts";
@@ -680,7 +680,7 @@ const proxy = Command.make(
       }
       // Fail at startup, not on the first request, if the control-plane DB is unreachable.
       yield* Effect.tryPromise({
-        try: () => db.$client.query("select 1"),
+        try: () => pingDatabase(db),
         catch: (cause) => new Error(`database unreachable: ${errorDetail(cause)}`),
       });
       return yield* Layer.launch(main(resolved, automation));

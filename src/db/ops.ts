@@ -32,6 +32,10 @@ export async function closeDatabase(db: Db): Promise<void> {
   await db.$client.end();
 }
 
+export async function pingDatabase(db: Db): Promise<void> {
+  await db.execute(sql`select 1`);
+}
+
 export async function insertSession(db: Db, id: string, config: SessionConfig, status: SessionStartStatus): Promise<void> {
   await db.insert(sessions).values({ id, config, status });
 }
