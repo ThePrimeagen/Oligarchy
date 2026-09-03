@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -8,7 +9,7 @@ import { CliError, Command, Flag } from "effect/unstable/cli";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node";
 import { flushLogs, log } from "../db/log.ts";
-import { connectDatabase, endSession, finishAction, insertSession, pingDatabase, registerAgent, sessionRunning, startAction } from "../db/ops.ts";
+import { connectDatabase, endSession, finishAction, getImage, insertSession, pingDatabase, registerAgent, sessionRunning, startAction } from "../db/ops.ts";
 import { finishIntentSpan, finishQemuActionSpan, finishQemuSpan, flushSentry, initSentry, startIntentSpan, startQemuActionSpan, startQemuSpan, type QemuSpan } from "../sentry.ts";
 import { QEMU_DISPLAYS, createDisk, createQemu, missingHostRequirements, screendump, sendKeys, sendMouse, start, stop, type Qemu, type QemuDisplay } from "./client.ts";
 import { getIso } from "./iso.ts";
@@ -28,6 +29,12 @@ initSentry();
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 42069;
+const STORED_IMAGE_ORIGIN = "https://oligarchy.trm.sh";
+
+function storedImageUrl(id: string): string {
+  return `${STORED_IMAGE_ORIGIN}/images/${id}`;
+}
+
 const SESSION_TIMEOUT_MS = 10 * 60 * 1000;
 const SESSION_TIMEOUT_CHECK_MS = 10_000;
 const SESSION_TIMEOUT_REASON = "no command received for 10 minutes";
@@ -118,7 +125,7 @@ type ApiError =
   | { readonly _tag: "Forbidden"; readonly message: string; readonly sessionId: string; readonly agentId: string }
   | { readonly _tag: "StartFailed"; readonly message: string; readonly cause: unknown; readonly sessionId: string; readonly agentId: string }
   | { readonly _tag: "ExchangeFailed"; readonly message: string; readonly cause: unknown; readonly sessionId: string; readonly agentId: string }
-  | { readonly _tag: "Internal"; readonly cause: unknown; readonly sessionId: string; readonly agentId?: string }
+  | { readonly _tag: "Internal"; readonly cause: unknown; readonly sessionId?: string; readonly agentId?: string }
   | { readonly _tag: "Failed"; readonly message: string; readonly sessionId: string; readonly agentId: string };
 
 function badRequest(message: string, who: { sessionId?: string; agentId?: string } = {}): ApiError {
@@ -137,7 +144,7 @@ function exchangeFailed(err: unknown, who: { sessionId: string; agentId: string 
   return { _tag: "ExchangeFailed", message: errorDetail(err), cause: err, ...who };
 }
 
-function internal(cause: unknown, who: { sessionId: string; agentId?: string }): ApiError {
+function internal(cause: unknown, who: { sessionId?: string; agentId?: string } = {}): ApiError {
   return { _tag: "Internal", cause, ...who };
 }
 
@@ -171,6 +178,10 @@ const StartBody = Schema.Struct({
 const ImageParams = Schema.Struct({
   id: Schema.String,
   agent: Schema.NonEmptyString,
+});
+
+const StoredImageParams = Schema.Struct({
+  id: Schema.String,
 });
 
 const SendKeysBody = Schema.Struct({
@@ -307,6 +318,7 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
       const path = join(qemu.dir, `image-${process.hrtime.bigint()}.png`);
       // The images row must ride the same transaction that closes the action (they are
       // 1:1), so the recorder only stashes and the route closes.
+      const imageId = randomUUID();
       let opened: number | undefined;
       let outcome: QemuExchangeOutcome | undefined;
       let actionSpan: QemuSpan | undefined;
@@ -324,6 +336,9 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
               }
               return async (result) => {
                 outcome = result;
+                if (result.state === "completed") {
+                  actionSpan!.setAttribute("image_url", storedImageUrl(imageId));
+                }
                 finishLiveActionSpan(live, actionSpan!, result.state);
               };
             }),
@@ -345,18 +360,36 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
           try: async () => {
             const data = await readFile(path);
             // screendump resolved, so the recorder ran: opened and outcome are set.
-            await finishAction(db, opened!, outcome!, data);
+            await finishAction(db, opened!, outcome!, { id: imageId, data });
             return data;
           },
           catch: (cause) => {
             return internal(cause, { sessionId: qemu.id, agentId: agent });
           },
         });
-        log(db, { text: `session ${qemu.id}: image; ${data.length} bytes in ${Date.now() - started}ms`, sessionId: qemu.id, agentId: agent });
-        return HttpServerResponse.uint8Array(data, { contentType: "image/png" });
+        log(db, { text: `session ${qemu.id}: image; ${data.length} bytes in ${Date.now() - started}ms; ${storedImageUrl(imageId)}`, sessionId: qemu.id, agentId: agent });
+        return HttpServerResponse.uint8Array(data, {
+          contentType: "image/png",
+          headers: { "x-image-url": storedImageUrl(imageId) },
+        });
       });
       return yield* Effect.ensuring(png, Effect.promise(() => rm(path, { force: true })));
     }) satisfies RouteHandler, { uninterruptible: true });
+
+    yield* router.add("GET", "/images/:id", Effect.gen(function* () {
+      const params = yield* Effect.mapError(HttpRouter.schemaPathParams(StoredImageParams), (err) => badRequest(err.message));
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(params.id)) {
+        return errorBody(404, "not found");
+      }
+      const data = yield* Effect.tryPromise({
+        try: () => getImage(db, params.id),
+        catch: (cause) => internal(cause, {}),
+      });
+      if (data === undefined) {
+        return errorBody(404, "not found");
+      }
+      return HttpServerResponse.uint8Array(data, { contentType: "image/png" });
+    }) satisfies RouteHandler);
 
     yield* router.add("GET", "/serial", Effect.gen(function* () {
       const started = Date.now();
@@ -525,7 +558,11 @@ function respondTable(request: HttpServerRequest.HttpServerRequest): {
 
 const respond = HttpRouter.middleware<{ handles: ApiError }>()((handler) =>
   Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) => {
-    if (request.headers.authorization !== `Bearer ${token}`) {
+    const path = request.url.split("?")[0];
+    if (
+      request.headers.authorization !== `Bearer ${token}`
+      && !(request.method === "GET" && path.startsWith("/images/"))
+    ) {
       return answer(request, 401, "unauthorized", {});
     }
     return handler.pipe(

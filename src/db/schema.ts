@@ -58,12 +58,17 @@ export const actions = pgTable(
   (table) => [index("actions_session_id_idx").on(table.sessionId)],
 );
 
-export const images = pgTable("images", {
-  actionId: bigint("action_id", { mode: "number" })
-    .primaryKey()
-    .references(() => actions.id),
-  data: bytea("data").notNull(),
-});
+export const images = pgTable(
+  "images",
+  {
+    id: uuid("id").notNull().defaultRandom(),
+    actionId: bigint("action_id", { mode: "number" })
+      .primaryKey()
+      .references(() => actions.id),
+    data: bytea("data").notNull(),
+  },
+  (table) => [uniqueIndex("images_id_idx").on(table.id)],
+);
 
 // session_id and agent_id are attribution, not relations: a log must never be refused
 // because the row it names is missing or already gone, so neither is a foreign key.

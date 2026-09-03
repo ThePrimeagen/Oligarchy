@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import type { FC, PropsWithChildren } from "hono/jsx";
 import { jsxRenderer } from "hono/jsx-renderer";
 import {
-  getSessionImage,
+  getImage,
   listSessions,
   listTestBasePrompts,
   listTestDefinitions,
@@ -16,7 +16,6 @@ import { SENTRY_DSN } from "./sentry-dsn.ts";
 
 const HTMX_URL = "https://cdn.jsdelivr.net/npm/htmx.org@4.0.0";
 const HTMX_INTEGRITY = "sha384-BvJpBiO8Kh31EqtJe5DRIeWrHWnCGkwytKs9NKFi86Hhw96dEqdEMzZDeK9iEGTc";
-const SESSION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 type Bindings = {
   HYPERDRIVE: {
@@ -72,18 +71,18 @@ const SessionList: FC<SessionListProps> = ({ sessions }) => (
           <li>
             <article class="session">
               <figure class="session__visual">
-                {session.imageActionId === null ? (
+                {session.imageId === null ? (
                   <div class="session__placeholder" role="img" aria-label="No screenshot captured"></div>
                 ) : (
                   <img
                     class="session__image"
-                    src={`/sessions/${session.id}/image`}
+                    src={`/images/${session.imageId}`}
                     alt={`Last captured frame from session ${session.id}`}
                     loading="lazy"
                   />
                 )}
                 <span
-                  class={`status status--${session.status}${session.imageActionId === null ? " status--centered" : ""}`}
+                  class={`status status--${session.status}${session.imageId === null ? " status--centered" : ""}`}
                 >
                   {session.status === "timed_out" ? "timed out" : session.status}
                 </span>
@@ -358,14 +357,14 @@ app.get("/sessions", async (context) => {
   }
 });
 
-app.get("/sessions/:sessionId/image", async (context) => {
-  const sessionId = context.req.param("sessionId");
-  if (!SESSION_ID_PATTERN.test(sessionId)) {
+app.get("/images/:id", async (context) => {
+  const id = context.req.param("id");
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
     return context.notFound();
   }
 
   try {
-    const image = await getSessionImage(context.env.HYPERDRIVE.connectionString, sessionId);
+    const image = await getImage(context.env.HYPERDRIVE.connectionString, id);
     if (image === undefined) {
       return context.notFound();
     }
@@ -377,7 +376,7 @@ app.get("/sessions/:sessionId/image", async (context) => {
     });
   } catch (error) {
     Sentry.captureException(error);
-    console.error("dashboard: loading session image:", (error as Error).message);
+    console.error("dashboard: loading image:", (error as Error).message);
     return context.body(null, 500);
   }
 });
