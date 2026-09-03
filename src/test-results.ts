@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { loadEnvFile } from "node:process";
 import { eq, sql } from "drizzle-orm";
 import { closeDatabase, connectDatabase } from "./db/ops.ts";
-import { acquireAgentColor, flushLogs, log } from "./db/log.ts";
+import { acquireLogColor, flushLogs, log } from "./db/log.ts";
 import { agentRuns, testResults } from "./db/schema.ts";
 
 export async function runTestResults(input: {
@@ -34,7 +34,7 @@ export async function runTestResults(input: {
     if (row === undefined) {
       throw new Error(`test-results: result ${input.id} not found`);
     }
-    acquireAgentColor(input.agentId);
+    acquireLogColor(agent?.sessionId ?? input.agentId);
     log(db, {
       text: `test result ${input.id}: ${input.status}${input.reason === undefined ? "" : `; ${input.reason}`}`,
       agentId: input.agentId,

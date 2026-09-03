@@ -35,8 +35,8 @@ let next = 0;
 // stdout and never fails the caller or the lines behind it.
 let chain: Promise<void> = Promise.resolve();
 
-export function acquireAgentColor(agentId: string): void {
-  if (colors.has(agentId)) {
+export function acquireLogColor(id: string): void {
+  if (colors.has(id)) {
     return;
   }
   const taken = new Set(colors.values());
@@ -48,12 +48,12 @@ export function acquireAgentColor(agentId: string): void {
       break;
     }
   }
-  colors.set(agentId, AGENT_COLORS[pick]);
+  colors.set(id, AGENT_COLORS[pick]);
   next = (pick + 1) % AGENT_COLORS.length;
 }
 
-export function releaseAgentColor(agentId: string): void {
-  colors.delete(agentId);
+export function releaseLogColor(id: string): void {
+  colors.delete(id);
 }
 
 function paint(hex: string, text: string): string {
@@ -75,7 +75,7 @@ function write(line: LogEntry): void {
   const tag = line.agentId ?? "global";
   const text = line.level === undefined || line.level === "info" ? line.text : `${line.level}: ${line.text}`;
   const rendered = `[${tag}] ${text}`;
-  const hex = line.agentId === undefined ? undefined : colors.get(line.agentId);
+  const hex = line.agentId === undefined ? undefined : colors.get(line.sessionId ?? line.agentId);
   if (hex === undefined) {
     console.log(styleText("gray", rendered, { stream: process.stdout }));
     return;
