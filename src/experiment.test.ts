@@ -3,7 +3,9 @@ import { afterEach, describe, it, mock } from "node:test";
 import {
   createExperiment,
   createLinearTicket,
+  drivingAgentPrompt,
   linearTicketDescription,
+  runExperiment,
   type Experiment,
 } from "./experiment.ts";
 import type { Db } from "./db/ops.ts";
@@ -596,5 +598,88 @@ describe("createExperiment unhappy path", () => {
     );
     const runFailure = updates[0].values as { reason: string };
     assert.equal(runFailure.reason, "linear: request failed (401): unauthorized; created OLI-42, OLI-43");
+  });
+});
+
+describe("drivingAgentPrompt", () => {
+  it("renders the kickoff prompt with the ticket and the server URL", () => {
+    const text = drivingAgentPrompt("OLI-42", "https://qemu.example.com");
+
+    assert.equal(text.includes("{{"), false);
+    assert.ok(text.includes("Review Linear ticket OLI-42"));
+    assert.ok(text.includes("https://qemu.example.com"));
+    assert.ok(text.includes("--server-url"));
+    assert.ok(text.includes("./client"));
+  });
+});
+
+const savedCursorToken = process.env.CURSOR_API_TOKEN;
+
+function restoreCursorToken() {
+  if (savedCursorToken === undefined) {
+    delete process.env.CURSOR_API_TOKEN;
+  } else {
+    process.env.CURSOR_API_TOKEN = savedCursorToken;
+  }
+}
+
+describe("runExperiment happy path", () => {
+  afterEach(restoreCursorToken);
+
+  it("kicks off a cloud agent with the rendered driver prompt and prints its link", async () => {
+    process.env.CURSOR_API_TOKEN = "test-token";
+    const created: { agentId: string; prompt: { text: string } }[] = [];
+    mock.method(globalThis, "fetch", async (input: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1]) => {
+      const url = input as string;
+      if (init?.method === "GET" && url.endsWith("/v1/models")) {
+        return Response.json({ items: [{ id: "grok-4.6", displayName: "Cursor Grok 4.6" }] });
+      }
+      if (init?.method === "POST" && url.endsWith("/v1/agents")) {
+        const body = JSON.parse(init.body as string) as { agentId: string; prompt: { text: string } };
+        created.push(body);
+        const now = new Date().toISOString();
+        return Response.json({
+          agent: {
+            id: body.agentId,
+            status: "ACTIVE",
+            url: `https://cursor.com/agents/${body.agentId}`,
+            createdAt: now,
+            updatedAt: now,
+            latestRunId: "run-22222222-2222-4222-8222-222222222222",
+          },
+          run: {
+            id: "run-22222222-2222-4222-8222-222222222222",
+            agentId: body.agentId,
+            status: "CREATING",
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+      }
+      return Response.json({ error: { code: "not_found", message: "not found" } }, { status: 404 });
+    });
+    const log = mock.method(console, "log", () => undefined);
+
+    await runExperiment({ ticket: "OLI-42", serverUrl: "https://qemu.example.com" });
+
+    assert.equal(created.length, 1);
+    assert.equal(created[0].prompt.text, drivingAgentPrompt("OLI-42", "https://qemu.example.com"));
+    assert.deepEqual(log.mock.calls[0].arguments, [
+      `Agent here, go check it out for more information: https://cursor.com/agents/${created[0].agentId}`,
+    ]);
+  });
+});
+
+describe("runExperiment unhappy path", () => {
+  afterEach(restoreCursorToken);
+
+  it("rejects when CURSOR_API_TOKEN is empty and never calls Cursor", async () => {
+    process.env.CURSOR_API_TOKEN = "";
+    const fetchMock = mock.method(globalThis, "fetch", async () => assert.fail("Cursor should not be called"));
+
+    await assert.rejects(() => runExperiment({ ticket: "OLI-42", serverUrl: "https://qemu.example.com" }), {
+      message: "cursor-agent: CURSOR_API_TOKEN is not set",
+    });
+    assert.equal(fetchMock.mock.callCount(), 0);
   });
 });

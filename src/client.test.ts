@@ -132,6 +132,105 @@ describe("./client happy path", () => {
     assert.notEqual(named.code, 0);
     assert.match(named.stderr, /LINEAR_API_TOKEN is not set/);
   });
+
+  it("experiment run kicks off a cloud agent through the Cursor API and prints its link", async () => {
+    const requests: { method: string | undefined; url: string | undefined; body: string }[] = [];
+    const server = createServer((incoming, response) => {
+      let body = "";
+      incoming.setEncoding("utf8");
+      incoming.on("data", (data: string) => {
+        body += data;
+      });
+      incoming.on("end", () => {
+        requests.push({ method: incoming.method, url: incoming.url, body });
+        if (incoming.method === "GET" && incoming.url === "/v1/models") {
+          response.writeHead(200, { "Content-Type": "application/json" });
+          response.end(JSON.stringify({ items: [{ id: "grok-4.6", displayName: "Cursor Grok 4.6" }] }));
+          return;
+        }
+        if (incoming.method === "POST" && incoming.url === "/v1/agents") {
+          const { agentId } = JSON.parse(body) as { agentId: string };
+          const now = new Date().toISOString();
+          response.writeHead(200, { "Content-Type": "application/json" });
+          response.end(
+            JSON.stringify({
+              agent: {
+                id: agentId,
+                status: "ACTIVE",
+                url: `https://cursor.com/agents/${agentId}`,
+                createdAt: now,
+                updatedAt: now,
+                latestRunId: "run-22222222-2222-4222-8222-222222222222",
+              },
+              run: {
+                id: "run-22222222-2222-4222-8222-222222222222",
+                agentId,
+                status: "CREATING",
+                createdAt: now,
+                updatedAt: now,
+              },
+            }),
+          );
+          return;
+        }
+        response.writeHead(404, { "Content-Type": "application/json" });
+        response.end('{"error":{"code":"not_found","message":"not found"}}');
+      });
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    assert.ok(address !== null && typeof address !== "string");
+
+    try {
+      const result = await runClient(
+        ["experiment", "run", "--ticket", "OLI-42", "--server_url", "https://qemu.example.com"],
+        { CURSOR_API_TOKEN: "test-token", CURSOR_BACKEND_URL: `http://127.0.0.1:${address.port}` },
+      );
+      assert.equal(result.stderr, "");
+      assert.equal(result.code, 0);
+      const created = requests.filter((request) => request.method === "POST" && request.url === "/v1/agents");
+      assert.equal(created.length, 1);
+      const body = JSON.parse(created[0].body) as {
+        agentId: string;
+        prompt: { text: string };
+        model: unknown;
+        repos: unknown;
+      };
+      assert.equal(
+        result.stdout,
+        `Agent here, go check it out for more information: https://cursor.com/agents/${body.agentId}\n`,
+      );
+      assert.ok(body.prompt.text.includes("Review Linear ticket OLI-42"));
+      assert.ok(body.prompt.text.includes("https://qemu.example.com"));
+      assert.deepEqual(body.model, {
+        id: "grok-4.6",
+        params: [
+          { id: "effort", value: "xhigh" },
+          { id: "fast", value: "true" },
+        ],
+      });
+      assert.deepEqual(body.repos, [{ url: "https://github.com/ThePrimeagen/Oligarchy" }]);
+    } finally {
+      await new Promise<void>((done) => server.close(() => done()));
+    }
+  });
+
+  it("accepts experiment run flags after they parse", async () => {
+    const equals = await runClient(
+      ["experiment", "run", "--ticket", "OLI-42", "--server_url=https://qemu.example.com"],
+      { CURSOR_API_TOKEN: "" },
+    );
+    assert.notEqual(equals.code, 0);
+    assert.match(equals.stderr, /CURSOR_API_TOKEN is not set/);
+
+    const spaced = await runClient(
+      ["experiment", "run", "--server_url", "http://127.0.0.1:42069", "--ticket", "OLI-42"],
+      { CURSOR_API_TOKEN: "" },
+    );
+    assert.notEqual(spaced.code, 0);
+    assert.match(spaced.stderr, /CURSOR_API_TOKEN is not set/);
+  });
 });
 
 describe("./client unhappy path", () => {
@@ -214,6 +313,43 @@ describe("./client unhappy path", () => {
     ]);
 
     assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /server_url must be a valid http or https url/);
+  });
+
+  it("rejects experiment run without a ticket or a server URL", async () => {
+    const missingTicket = await runClient(
+      ["experiment", "run", "--server_url", "https://qemu.example.com"],
+      { CURSOR_API_TOKEN: "test-token" },
+    );
+    assert.notEqual(missingTicket.code, 0);
+    assert.equal(missingTicket.stdout.includes("Agent here"), false);
+    assert.match(missingTicket.stderr, /Missing required flag: --ticket/);
+
+    const emptyTicket = await runClient(
+      ["experiment", "run", "--ticket", "", "--server_url", "https://qemu.example.com"],
+      { CURSOR_API_TOKEN: "test-token" },
+    );
+    assert.notEqual(emptyTicket.code, 0);
+    assert.equal(emptyTicket.stdout.includes("Agent here"), false);
+    assert.match(emptyTicket.stderr, /--ticket.*length of at least 1/);
+
+    const missingServer = await runClient(
+      ["experiment", "run", "--ticket", "OLI-42"],
+      { CURSOR_API_TOKEN: "test-token" },
+    );
+    assert.notEqual(missingServer.code, 0);
+    assert.equal(missingServer.stdout.includes("Agent here"), false);
+    assert.match(missingServer.stderr, /Missing required flag: --server_url/);
+  });
+
+  it("rejects an experiment run server URL outside HTTP and HTTPS", async () => {
+    const result = await runClient(
+      ["experiment", "run", "--ticket", "OLI-42", "--server_url=ssh://qemu.example.com"],
+      { CURSOR_API_TOKEN: "test-token" },
+    );
+
+    assert.notEqual(result.code, 0);
+    assert.equal(result.stdout.includes("Agent here"), false);
     assert.match(result.stderr, /server_url must be a valid http or https url/);
   });
 });
