@@ -1,6 +1,6 @@
 # Oligarchy how-to
 
-The CLI talks to a running proxy (`src/qemu/proxy.ts`). Start the proxy first, then boot a session and drive it by the id `start` prints.
+The CLI talks to a running proxy (`src/qemu/proxy.ts`) through the [wrapper](wrapper.md) `./server` runs. Start the server first, then boot a session and drive it by the id `start` prints.
 
 ```bash
 ./server 42069

@@ -13,9 +13,9 @@
 
 - `POST /start` goes to the current backend; a 200 records `id → backend`.
 - Everything else goes to the backend that owns the session named by body `id` (POST) or query `id` (GET), else to the current backend. The wrapper never answers for a session itself: an unknown id reaches the current proxy, which answers its own `404 unknown session`. A `/stop` that returns 200 forgets the id. An id whose proxy timed it out keeps routing to that proxy and gets the real 404 until the backend exits, which drops every id it owned.
-- `GET /stats` is the one thing the wrapper answers itself: it asks every live backend and returns one body with `qemus` summed across all of them, so the count is the host's, draining machines included. One backend failing to answer within 5 seconds is a 502.
+- `GET /stats` is the one thing the wrapper answers itself: it asks every live backend and returns one body with `qemus` summed across all of them, so the count is the host's, draining machines included. One backend going silent for 5 seconds is a 502.
 - Nothing to route to — the current backend died and its replacement is not up — is `503 {"error": "no backend is running"}`; sessions on a draining backend keep working through it.
-- Bodies are buffered (they are small JSON; 1 MiB is a 413) and forwarded byte for byte; responses stream. Hop-by-hop headers are dropped and `host` rewritten. No timeout: `/start` legitimately takes as long as its ISO download and boot. A client that disconnects does not abort the upstream request — the proxy's routes are uninterruptible anyway, and the wrapper still needs the `/start` answer to learn the id.
+- Bodies are buffered (they are small JSON; 1 MiB is a 413) and forwarded byte for byte; responses stream, except a `/start` answer, which is read whole to learn the id before it is passed on. Hop-by-hop headers are dropped and `host` rewritten. No timeout: `/start` legitimately takes as long as its ISO download and boot. A client that disconnects does not abort the upstream request — the proxy's routes are uninterruptible anyway, and the wrapper still needs the `/start` answer to learn the id.
 - A backend that resets the connection is `502 {"error": "backend 127.0.0.1:<port> (pid <pid>, <commit>): <reason>"}`; if the response had already started, the client connection is dropped.
 
 ## Rolling
@@ -27,7 +27,9 @@ Every 30 minutes, and at once on `SIGUSR2` (`kill -USR2 <wrapper pid>` after pus
 3. A range that touches `package-lock.json`, `drizzle/`, or `src/qemu/wrapper.ts` is refused: a roll swaps proxy processes and nothing else, and those need `npm ci`, `npm run db:migrate`, or a new wrapper process. The refusal is an error line on every tick until the wrapper is restarted after the install.
 4. Otherwise a backend boots at HEAD. Ready, and it becomes current while the old one is `draining`. Not ready, and `roll ... failed` leaves the old backend current; the next tick tries again, so a broken commit is retried every 30 minutes until a fix lands and rolls by itself.
 
-Draining backends are checked every 10 seconds: `qemus` of 0 on their `/stats` and no request in flight through the wrapper means SIGTERM. Both halves matter — a `/start` still booting there has not reached the proxy's session map yet, and a `/stop` leaves that map before it answers. A stopped proxy with no sessions exits 0 in a second or two, logged as `exited 0`.
+Draining backends are checked every 10 seconds: `qemus` of 0 on their `/stats` and no request in flight through the wrapper means SIGTERM. Both halves matter — a `/start` still booting there has not reached the proxy's session map yet, and a `/stop` leaves that map before it answers. A stopped proxy with no sessions exits 0 in a second or two, logged as `exited 0`. One still running 30 seconds after the SIGTERM (a proxy stuck flushing its last log lines to a database that is not answering) has its process group SIGKILLed instead, at shutdown too.
+
+The refusal in step 3 compares against the commit last deployed, not the backend currently serving, so it holds while the wrapper is recovering from a crash with no current backend.
 
 ## Failures
 
