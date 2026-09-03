@@ -15,6 +15,7 @@ const PULL_TIMEOUT_MS = 5 * 60 * 1000;
 const DRAIN_CHECK_MS = 10_000;
 const READY_TIMEOUT_MS = 60_000;
 const READY_POLL_MS = 250;
+const STOP_TIMEOUT_MS = 30_000;
 const STATS_TIMEOUT_MS = 5_000;
 const MAX_BODY_BYTES = 1024 * 1024;
 // A roll swaps proxy processes and nothing else: a lockfile change needs npm ci, a migration
@@ -36,6 +37,7 @@ type Stats = Record<string, unknown> & { qemus: number };
 const backends = new Set<Backend>();
 const sessions = new Map<string, Backend>();
 let current: Backend | undefined;
+let deployed = "";
 let recovered = "";
 let checking = false;
 let checkAgain = false;
@@ -179,9 +181,7 @@ function exited(backend: Backend, exit: string): void {
     // Its QEMUs share its process group; a proxy that died hard never stopped them.
     try {
       process.kill(-backend.proc.pid!, "SIGKILL");
-    } catch {
-      // nothing left in the group
-    }
+    } catch {}
     if (was === "current") {
       current = undefined;
       say("no backend is running; requests get 503 until one starts");
@@ -205,32 +205,55 @@ function exited(backend: Backend, exit: string): void {
   }
 }
 
-async function waitReady(backend: Backend): Promise<void> {
-  const deadline = Date.now() + READY_TIMEOUT_MS;
-  while (backend.phase === "starting") {
-    try {
-      await getStats(backend);
-      return;
-    } catch {
-      // not listening yet
-    }
-    if (Date.now() > deadline) {
+function stop(backend: Backend): void {
+  backend.phase = "stopping";
+  backend.proc.kill("SIGTERM");
+  // A proxy can hang in its own shutdown (a database that will not take its last log lines); it must not leak.
+  setTimeout(() => {
+    if (backend.phase === "stopping") {
+      fail(`${label(backend)} still running ${STOP_TIMEOUT_MS / 1000}s after SIGTERM; killing its process group`);
       try {
         process.kill(-backend.proc.pid!, "SIGKILL");
-      } catch {
-        // already gone
-      }
-      throw new Error(`not ready within ${READY_TIMEOUT_MS / 1000}s`);
+      } catch {}
     }
-    await sleep(READY_POLL_MS);
-  }
-  throw new Error(backend.phase === "exited" ? `exited ${backend.exit}` : "shutting down");
+  }, STOP_TIMEOUT_MS).unref();
 }
 
-async function start(commit: string): Promise<Backend> {
-  const backend = spawnBackend(commit, await freePort());
-  await waitReady(backend);
-  return backend;
+async function start(commit: string): Promise<void> {
+  const port = await freePort();
+  if (shuttingDown) {
+    throw new Error("shutting down");
+  }
+  const backend = spawnBackend(commit, port);
+  const deadline = Date.now() + READY_TIMEOUT_MS;
+  let ready = false;
+  while (!ready && backend.phase === "starting") {
+    try {
+      await getStats(backend);
+      ready = true;
+    } catch {
+      if (Date.now() > deadline) {
+        try {
+          process.kill(-backend.proc.pid!, "SIGKILL");
+        } catch {}
+        throw new Error(`not ready within ${READY_TIMEOUT_MS / 1000}s`);
+      }
+      await sleep(READY_POLL_MS);
+    }
+  }
+  // The exit event can land while the readiness answer is still on the wire.
+  if (backend.phase !== "starting") {
+    throw new Error(backend.phase === "exited" ? `exited ${backend.exit}` : "shutting down");
+  }
+  const old = current;
+  backend.phase = "current";
+  current = backend;
+  deployed = commit;
+  say(`${label(backend)} ready; new sessions route here`);
+  if (old !== undefined) {
+    old.phase = "draining";
+    say(`${label(old)} draining; ${[...sessions.values()].filter((owner) => owner === old).length} sessions`);
+  }
 }
 
 async function check(): Promise<void> {
@@ -248,6 +271,10 @@ async function check(): Promise<void> {
       try {
         say(`pull: ${(await git(["pull", "--ff-only"], PULL_TIMEOUT_MS)).split("\n")[0]}`);
       } catch (err) {
+        // shutdown kills a pull in flight; that is not a failed pull
+        if (shuttingDown) {
+          return;
+        }
         fail(`pull failed: ${message(err)}`, err);
       }
       if (shuttingDown) {
@@ -258,41 +285,26 @@ async function check(): Promise<void> {
         say(`up to date at ${head.slice(0, 7)}`);
         continue;
       }
-      if (current === undefined) {
-        say(`starting a backend at ${head.slice(0, 7)}`);
-      } else {
-        const changed = await git(["diff", "--name-only", current.commit, head, "--", ...RESTART_PATHS]);
-        if (changed !== "") {
-          fail(
-            `cannot roll ${current.commit.slice(0, 7)} -> ${head.slice(0, 7)}: ${changed.split("\n").join(", ")} changed; run npm ci and npm run db:migrate, then restart the wrapper`,
-          );
-          continue;
-        }
-        say(`rolling ${current.commit.slice(0, 7)} -> ${head.slice(0, 7)}`);
+      const changed = await git(["diff", "--name-only", deployed, head, "--", ...RESTART_PATHS]);
+      if (changed !== "") {
+        fail(
+          `cannot roll ${deployed.slice(0, 7)} -> ${head.slice(0, 7)}: ${changed.split("\n").join(", ")} changed; run npm ci and npm run db:migrate, then restart the wrapper`,
+        );
+        continue;
       }
-      let fresh: Backend;
+      say(current === undefined ? `starting a backend at ${head.slice(0, 7)}` : `rolling ${current.commit.slice(0, 7)} -> ${head.slice(0, 7)}`);
       try {
-        fresh = await start(head);
+        await start(head);
       } catch (err) {
         if (!shuttingDown) {
           fail(`roll to ${head.slice(0, 7)} failed: ${message(err)}`, err);
         }
-        continue;
-      }
-      if (shuttingDown) {
-        return;
-      }
-      const old = current;
-      fresh.phase = "current";
-      current = fresh;
-      say(`${label(fresh)} ready; new sessions route here`);
-      if (old !== undefined) {
-        old.phase = "draining";
-        say(`${label(old)} draining; ${[...sessions.values()].filter((owner) => owner === old).length} sessions`);
       }
     } while (checkAgain);
   } catch (err) {
-    fail(`update check failed: ${message(err)}`, err);
+    if (!shuttingDown) {
+      fail(`update check failed: ${message(err)}`, err);
+    }
   } finally {
     checking = false;
   }
@@ -312,9 +324,8 @@ async function drain(): Promise<void> {
     }
     // qemus counts booted machines only: a /start still booting there is inflight, not a qemu.
     if (backend.phase === "draining" && qemus === 0 && backend.inflight === 0) {
-      backend.phase = "stopping";
       say(`${label(backend)} stopping; no sessions left`);
-      backend.proc.kill("SIGTERM");
+      stop(backend);
     }
   }
 }
@@ -339,37 +350,44 @@ function forward(
       delete headers[name];
     }
     const upstream = request({ host: "127.0.0.1", port: backend.port, method: req.method, path: req.url, headers, agent: false }, (up) => {
-      const status = up.statusCode!;
-      const head = { ...up.headers };
-      for (const name of HOP_BY_HOP) {
-        delete head[name];
-      }
-      up.on("error", failWith);
-      if (buffered) {
-        const chunks: Buffer[] = [];
-        up.on("data", (chunk: Buffer) => chunks.push(chunk));
-        up.on("end", () => {
-          const answer = Buffer.concat(chunks);
-          if (!res.destroyed) {
-            res.writeHead(status, { ...head, "content-length": answer.length });
-            res.end(answer);
-          }
-          done({ status, body: answer });
-        });
-        return;
-      }
-      if (res.destroyed) {
-        up.resume();
-      } else {
-        res.writeHead(status, head);
-        up.pipe(res);
-        // A client that leaves mid-response must not stall the backend: keep draining its reply.
-        res.on("close", () => {
-          up.unpipe(res);
+      // This callback runs outside the handler's try: a throw here would be uncaught.
+      try {
+        const status = up.statusCode!;
+        const head = { ...up.headers };
+        for (const name of HOP_BY_HOP) {
+          delete head[name];
+        }
+        up.on("error", failWith);
+        if (buffered) {
+          const chunks: Buffer[] = [];
+          up.on("data", (chunk: Buffer) => chunks.push(chunk));
+          up.on("end", () => {
+            const answer = Buffer.concat(chunks);
+            if (!res.destroyed) {
+              res.writeHead(status, { ...head, "content-length": answer.length });
+              res.end(answer);
+            }
+            done({ status, body: answer });
+          });
+          return;
+        }
+        if (res.destroyed) {
           up.resume();
-        });
+        } else {
+          res.writeHead(status, head);
+          res.on("error", failWith);
+          up.pipe(res);
+          // A client that leaves mid-response must not stall the backend: keep draining its reply.
+          res.on("close", () => {
+            up.unpipe(res);
+            up.resume();
+          });
+        }
+        up.on("end", () => done({ status, body: Buffer.alloc(0) }));
+      } catch (err) {
+        up.resume();
+        failWith(err);
       }
-      up.on("end", () => done({ status, body: Buffer.alloc(0) }));
     });
     upstream.on("error", failWith);
     upstream.on("close", () => {
@@ -518,9 +536,7 @@ function shutdown(signal: string): void {
     for (const backend of backends) {
       try {
         process.kill(-backend.proc.pid!, "SIGKILL");
-      } catch {
-        // already gone
-      }
+      } catch {}
     }
     process.exit(1);
   }
@@ -531,8 +547,7 @@ function shutdown(signal: string): void {
   server.close();
   say(`shutting down (${signal}); stopping ${backends.size} backends`);
   for (const backend of backends) {
-    backend.phase = "stopping";
-    backend.proc.kill("SIGTERM");
+    stop(backend);
   }
   if (backends.size === 0) {
     finish();
@@ -563,22 +578,22 @@ async function main(): Promise<void> {
     return;
   }
   say(`repo ${REPO} at ${head.slice(0, 7)}`);
-  let first: Backend;
+  // Under the check flag so a SIGUSR2 during boot waits for this backend instead of starting a second one.
+  checking = true;
   try {
-    first = await start(head);
+    await start(head);
   } catch (err) {
     if (!shuttingDown) {
       fatal(`backend at ${head.slice(0, 7)} failed to start: ${message(err)}`, err);
     }
     return;
+  } finally {
+    checking = false;
   }
-  if (shuttingDown) {
-    return;
-  }
-  first.phase = "current";
-  current = first;
-  say(`${label(first)} ready; new sessions route here`);
   server.listen(Number(port), host);
+  if (checkAgain) {
+    void check();
+  }
 }
 
 void main().catch((err: unknown) => fatal(`startup failed: ${message(err)}`, err));
