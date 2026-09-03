@@ -1,4 +1,6 @@
 #!/usr/bin/env -S node --experimental-strip-types
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import { stat, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { NodeRuntime, NodeServices } from "@effect/platform-node";
@@ -10,6 +12,11 @@ import { runTestResults } from "../test-results.ts";
 const DEFAULT_SERVER_URL = "http://127.0.0.1:42069";
 const DEFAULT_ISO = "omarchy.iso";
 const DEFAULT_ENCODING = "oligarchy";
+
+// /start blocks until the ISO is fetched and QEMU boots; a first-time URL download can
+// outlast fetch's 300s header timeout, which fetch does not let a caller raise per
+// request. So /start goes through node:http (postStart) with this idle ceiling instead.
+const START_TIMEOUT_MS = 45 * 60 * 1000;
 
 const UnitInterval = Schema.Number.check(
   Schema.isBetween({ minimum: 0, maximum: 1 }, { message: "mouse: x and y must be in 0..1" }),
@@ -69,7 +76,7 @@ const start = Command.make(
     const out = JSON.parse(
       yield* Effect.tryPromise({
         try: () =>
-          postJSON(serverUrl, "/start", {
+          postStart(serverUrl, {
             iso: image,
             // An undefined disk is left out of the JSON, so the server creates one.
             disk: Option.isNone(disk) ? undefined : resolve(disk.value),
@@ -193,7 +200,9 @@ const sendMouse = Command.make(
     y: Argument.float("y").pipe(Argument.withSchema(UnitInterval)),
     button: Argument.choice("button", ["left", "middle", "right", "wheel-up", "wheel-down"]).pipe(Argument.optional),
     clicks: Argument.integer("clicks").pipe(
-      Argument.withSchema(Schema.Number.check(Schema.isGreaterThanOrEqualTo(1))),
+      Argument.withSchema(
+        Schema.Number.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(100)),
+      ),
       Argument.optional,
     ),
   },
@@ -328,8 +337,47 @@ async function postJSON(serverUrl: string, path: string, body: unknown): Promise
   return res.text();
 }
 
+// /start alone can outlast fetch's fixed 300s header timeout, so it uses node:http,
+// whose idle timeout is the only ceiling — the connection sits quiet while the server
+// downloads the ISO and boots, then the reply arrives in one short burst.
+function postStart(serverUrl: string, body: unknown): Promise<string> {
+  const url = new URL(`${serverUrl}/start`);
+  const send = url.protocol === "https:" ? httpsRequest : httpRequest;
+  const payload = JSON.stringify(body);
+  return new Promise<string>((resolve, reject) => {
+    const req = send(
+      url,
+      { method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) } },
+      (res) => {
+        let data = "";
+        res.setEncoding("utf8");
+        res.on("data", (chunk) => {
+          data += chunk;
+        });
+        // A reset mid-body emits res error but never end, so without this the promise
+        // (and its timeout, gone with the destroyed socket) would hang forever.
+        res.on("error", reject);
+        res.on("end", () => {
+          const status = res.statusCode!;
+          if (status >= 200 && status < 300) {
+            resolve(data);
+          } else {
+            reject(new Error(apiError(data)));
+          }
+        });
+      },
+    );
+    req.setTimeout(START_TIMEOUT_MS, () => req.destroy(new Error("start: no response within timeout")));
+    req.on("error", reject);
+    req.end(payload);
+  });
+}
+
 async function readAPIError(res: Response): Promise<string> {
-  const data = await res.text();
+  return apiError(await res.text());
+}
+
+function apiError(data: string): string {
   try {
     return (JSON.parse(data) as { error: string }).error;
   } catch {

@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { copyFile, mkdir, readdir, rm, stat } from "node:fs/promises";
+import { constants } from "node:fs";
+import { access, copyFile, mkdir, readdir, rm, stat } from "node:fs/promises";
 import { createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,6 +17,9 @@ const DEFAULT_SMP = 2;
 const DEFAULT_MACHINE = "q35,accel=kvm";
 const DEFAULT_CPU = "host";
 const HANDSHAKE_MS = 10_000;
+// A QMP reply is near-instant; anything this long means QEMU is wedged with its
+// socket still open (so the close teardown never fires). Fail the command instead.
+const COMMAND_TIMEOUT_MS = 30_000;
 // `-display help` minus curses, which needs QEMU's stdio and the proxy detaches it.
 export const QEMU_DISPLAYS = ["none", "gtk", "sdl", "egl-headless", "spice-app", "dbus"] as const;
 export type QemuDisplay = (typeof QEMU_DISPLAYS)[number];
@@ -121,9 +125,15 @@ export async function start(
     automation: qemu.options.automation === true,
   });
 
+  // QEMU's stdio is otherwise discarded, so a boot failure (bad KVM, a rejected
+  // arg) would reach us as a bare timeout. Keep the tail of stderr to name it.
+  let stderr = "";
+  const withStderr = (message: string): string =>
+    stderr === "" ? message : `${message}: ${stderr.trim()}`;
+
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error("qemu: handshake timeout")), HANDSHAKE_MS);
+    timer = setTimeout(() => reject(new Error(withStderr("qemu: handshake timeout"))), HANDSHAKE_MS);
   });
 
   // QEMU connects to us: listen on the session socket, then spawn.
@@ -137,11 +147,15 @@ export async function start(
           reject(new Error("qemu: closed"));
           return;
         }
-        const proc = spawn(QEMU_BIN, args, { stdio: "ignore" });
+        const proc = spawn(QEMU_BIN, args, { stdio: ["ignore", "ignore", "pipe"] });
         qemu.proc = proc;
+        proc.stderr!.on("data", (chunk) => {
+          stderr = (stderr + String(chunk)).slice(-4096);
+        });
         proc.once("error", (err) => reject(new Error(`qemu: ${err.message}`)));
-        proc.once("exit", (code) =>
-          reject(new Error(`qemu: exited ${code} before QMP connect`)),
+        // close, not exit: exit can fire before the piped stderr is fully drained.
+        proc.once("close", (code) =>
+          reject(new Error(withStderr(`qemu: exited ${code} before QMP connect`))),
         );
       });
     });
@@ -183,8 +197,11 @@ export async function start(
         socket.destroy();
       }
     });
-    socket.on("error", (err) => failAll(qemu, err));
-    socket.on("close", () => failAll(qemu, new Error("qemu: socket closed")));
+    // A socket error or close after the handshake means QEMU is gone (its exit closes
+    // this socket). Tear the session down so qemu.socket is cleared: otherwise execute()
+    // writes to a dead socket, Node drops the write silently, and the command hangs.
+    socket.on("error", (err) => teardown(qemu, err));
+    socket.on("close", () => teardown(qemu, new Error("qemu: socket closed")));
 
     const greetingMsg = (await Promise.race([greeting, timeout])) as QemuGreetingResponse;
     // The greeting is the recorded reply for the boot's qmp_capabilities: its own {return} is empty.
@@ -215,6 +232,25 @@ export async function stop(qemu: Qemu): Promise<void> {
 
 export async function sendKey(qemu: Qemu, keys: QemuKeyValue[], record?: QemuExchangeRecorder): Promise<void> {
   await execute(qemu, "send-key", { keys }, record);
+}
+
+// QEMU's keyboard queue holds ~1024 input events and silently drops the rest.
+// send-key acks immediately but the guest drains slowly, so a long string sent as
+// fast as QMP acks overflows the queue and loses keys. Pace chords under the drain
+// rate; measured against real QEMU, 60ms/chord keeps a 1000-char string lossless.
+const KEY_CHORD_GAP_MS = 60;
+
+export async function sendKeys(
+  qemu: Qemu,
+  chords: string[][],
+  record?: QemuExchangeRecorder,
+): Promise<void> {
+  for (let i = 0; i < chords.length; i++) {
+    await sendKey(qemu, chords[i].map((code): QemuKeyValue => ({ type: "qcode", data: code })), record);
+    if (i + 1 < chords.length) {
+      await new Promise<void>((resolve) => setTimeout(resolve, KEY_CHORD_GAP_MS));
+    }
+  }
 }
 
 // QEMU INPUT_EVENT_ABS_MAX: tablet axes are 0..0x7fff.
@@ -338,7 +374,21 @@ async function execute(qemu: Qemu, name: string, args: unknown, record?: QemuExc
       throw new Error("qemu: closed");
     }
     response = (await new Promise<unknown>((resolve, reject) => {
-      qemu.pending.set(id, { resolve, reject });
+      const timer = setTimeout(() => {
+        qemu.pending.delete(id);
+        reject(new Error(`qemu: ${name} timed out`));
+      }, COMMAND_TIMEOUT_MS);
+      timer.unref();
+      qemu.pending.set(id, {
+        resolve: (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        reject: (err) => {
+          clearTimeout(timer);
+          reject(err);
+        },
+      });
       socket.write(`${JSON.stringify(command)}\n`);
     })) as QemuSuccessResponse;
   } catch (err) {
@@ -402,6 +452,12 @@ export async function missingHostRequirements(display: QemuDisplay): Promise<str
       missing.push(`${label} not found: ${path}`);
     }
   }
+  // Every session boots with accel=kvm, so the device must be usable by this process.
+  try {
+    await access("/dev/kvm", constants.R_OK | constants.W_OK);
+  } catch {
+    missing.push("/dev/kvm is not readable and writable (needed for accel=kvm)");
+  }
   if (display === "gtk" && (process.env.DISPLAY === undefined || process.env.DISPLAY === "")) {
     missing.push("DISPLAY is not set (needed for --display gtk)");
   }
@@ -426,7 +482,8 @@ export async function missingHostRequirements(display: QemuDisplay): Promise<str
         out += String(chunk);
       });
       child.once("error", reject);
-      child.once("exit", () => resolve(out));
+      // close, not exit: exit can fire before the piped stdout is fully read.
+      child.once("close", () => resolve(out));
     });
     if (!help.split("\n").map((line) => line.trim()).includes(display)) {
       missing.push(`${QEMU_BIN} was built without display backend ${display}`);

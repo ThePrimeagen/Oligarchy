@@ -8,9 +8,9 @@ import { CliError, Command, Flag } from "effect/unstable/cli";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node";
 import { flushLogs, log } from "../db/log.ts";
-import { connectDatabase, endSession, finishAction, insertSession, registerAgent, sessionRunning, startAction } from "../db/ops.ts";
+import { connectDatabase, endSession, finishAction, insertSession, pingDatabase, registerAgent, sessionRunning, startAction } from "../db/ops.ts";
 import { finishIntentSpan, finishQemuActionSpan, finishQemuSpan, flushSentry, initSentry, startIntentSpan, startQemuActionSpan, startQemuSpan, type QemuSpan } from "../sentry.ts";
-import { QEMU_DISPLAYS, createDisk, createQemu, missingHostRequirements, screendump, sendKey, sendMouse, start, stop, type Qemu, type QemuDisplay } from "./client.ts";
+import { QEMU_DISPLAYS, createDisk, createQemu, missingHostRequirements, screendump, sendKeys, sendMouse, start, stop, type Qemu, type QemuDisplay } from "./client.ts";
 import { getIso } from "./iso.ts";
 import { parseKeys } from "./keys.ts";
 import { collectStats, startCpuSampler } from "./stats.ts";
@@ -25,6 +25,12 @@ const [host, port] = addr.split(":");
 const SESSION_TIMEOUT_MS = 10 * 60 * 1000;
 const SESSION_TIMEOUT_CHECK_MS = 10_000;
 const SESSION_TIMEOUT_REASON = "no command received for 10 minutes";
+// A click is two QMP exchanges and two action rows; cap the pulse count so one
+// request cannot enqueue an unbounded amount of work.
+const MAX_CLICKS = 100;
+// Each chord is a QMP exchange and an action row, paced ~60ms apart; cap the count so
+// one request cannot run for many minutes or write thousands of rows.
+const MAX_KEYS = 1000;
 
 const db = connectDatabase();
 
@@ -118,11 +124,11 @@ function failed(message: string, who: { sessionId: string; agentId: string }): A
 }
 
 function startFailed(err: unknown, who: { sessionId: string; agentId: string }): ApiError {
-  return { _tag: "StartFailed", message: (err as Error).message, cause: err, ...who };
+  return { _tag: "StartFailed", message: errorDetail(err), cause: err, ...who };
 }
 
 function exchangeFailed(err: unknown, who: { sessionId: string; agentId: string }): ApiError {
-  return { _tag: "ExchangeFailed", message: (err as Error).message, cause: err, ...who };
+  return { _tag: "ExchangeFailed", message: errorDetail(err), cause: err, ...who };
 }
 
 function internal(cause: unknown, who: { sessionId: string; agentId?: string }): ApiError {
@@ -219,7 +225,6 @@ async function launchQemu(
 ): Promise<void> {
   const qemu = live.qemu;
   try {
-    await registerAgent(db, cfg.agent, qemu.id);
     const iso = await getIso(db, cfg.iso, { sessionId: qemu.id, agentId: cfg.agent });
     if (cfg.disk === undefined) {
       await createDisk(qemu);
@@ -227,11 +232,15 @@ async function launchQemu(
       // start() expects the session dir; with a caller-provided disk, createDisk never made it.
       await mkdir(qemu.dir, { recursive: true, mode: 0o700 });
     }
+    // Register right before boot: the handshake records an action that references
+    // agent_runs, so this must precede start(), but a failed download or disk
+    // create before here must not burn the agent id on its one-registration key.
+    await registerAgent(db, cfg.agent, qemu.id);
     await start(qemu, { iso, disk: cfg.disk }, recorder(live));
     await sessionRunning(db, qemu.id);
   } catch (err) {
     await stop(qemu).catch(() => {});
-    await endSession(db, qemu.id, "failed", (err as Error).message).catch((e: unknown) => {
+    await endSession(db, qemu.id, "failed", errorDetail(err)).catch((e: unknown) => {
       log(db, { level: "error", text: `db: recording a failed start failed too: ${(e as Error).message}`, sessionId: qemu.id, agentId: cfg.agent }, { cause: e });
     });
     throw err;
@@ -363,12 +372,14 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
       const qemu = live.qemu;
       const finalStatus = status ?? "aborted";
       sessions.delete(qemu.id);
-      yield* Effect.tryPromise({
-        try: () => stop(qemu),
-        catch: (cause) => {
-          finishLiveSession(live, "failed");
-          return internal(cause, { sessionId: qemu.id, agentId: agent });
-        },
+      // stop() destroys the socket and signals QEMU before it removes the dir, so
+      // a cleanup failure still leaves a dead machine: log it, but close the record.
+      yield* Effect.promise(async () => {
+        try {
+          await stop(qemu);
+        } catch (err) {
+          log(db, { level: "error", text: `session ${qemu.id}: stop cleanup failed: ${errorDetail(err)}`, sessionId: qemu.id, agentId: agent }, { cause: err });
+        }
       });
       yield* Effect.tryPromise({
         try: () => endSession(db, qemu.id, finalStatus, reason ?? null),
@@ -395,13 +406,12 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
         try: () => parseKeys(keys, encoding),
         catch: (err) => badRequest((err as Error).message, { sessionId: qemu.id, agentId: agent }),
       });
+      if (chords.length > MAX_KEYS) {
+        return yield* Effect.fail(badRequest(`send-keys: at most ${MAX_KEYS} keys per request`, { sessionId: qemu.id, agentId: agent }));
+      }
       const record = recorder(live);
       yield* Effect.tryPromise({
-        try: async () => {
-          for (const chord of chords) {
-            await sendKey(qemu, chord.map((code): QemuKeyValue => ({ type: "qcode", data: code })), record);
-          }
-        },
+        try: () => sendKeys(qemu, chords, record),
         catch: (err) => exchangeFailed(err, { sessionId: qemu.id, agentId: agent }),
       });
       log(db, { text: `session ${qemu.id}: sent ${chords.length} chords in ${Date.now() - started}ms`, sessionId: qemu.id, agentId: agent });
@@ -416,8 +426,8 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
       if (!(x >= 0 && x <= 1 && y >= 0 && y <= 1)) {
         return yield* Effect.fail(badRequest("mouse: x and y must be in 0..1", { sessionId: qemu.id, agentId: agent }));
       }
-      if (clicks !== undefined && (!Number.isInteger(clicks) || clicks < 1)) {
-        return yield* Effect.fail(badRequest("mouse: clicks must be a positive integer", { sessionId: qemu.id, agentId: agent }));
+      if (clicks !== undefined && (!Number.isInteger(clicks) || clicks < 1 || clicks > MAX_CLICKS)) {
+        return yield* Effect.fail(badRequest(`mouse: clicks must be an integer in 1..${MAX_CLICKS}`, { sessionId: qemu.id, agentId: agent }));
       }
       yield* Effect.tryPromise({
         try: () => sendMouse(qemu, x, y, button, clicks, recorder(live)),
@@ -626,11 +636,22 @@ const main = (display: QemuDisplay, automation: boolean) => Layer.effectDiscard(
       const open = [...openSessions];
       openSessions.clear();
       sessions.clear();
-      const stops = open.map((live) => stop(live.qemu).catch(() => {}));
-      for (const live of open) {
-        finishLiveSession(live, "failed");
-      }
-      void Promise.all(stops).then(flushLogs).then(flushSentry).then(() => process.exit(1));
+      // The acceptor is gone, not the database: still close each open session's row
+      // so a proxy crash does not leave sessions stuck 'running' forever.
+      const cleanup = open.map(async (live) => {
+        try {
+          await stop(live.qemu);
+        } catch {
+          // already going down; the row close below is what matters
+        }
+        try {
+          await endSession(db, live.qemu.id, "aborted", `proxy error: ${err.message}`);
+        } catch (e) {
+          log(db, { level: "error", text: `shutdown: session ${live.qemu.id}: ${errorDetail(e)}`, sessionId: live.qemu.id }, { cause: e });
+        }
+        finishLiveSession(live, "aborted");
+      });
+      void Promise.allSettled(cleanup).then(flushLogs).then(flushSentry).then(() => process.exit(1));
     });
   }),
 ).pipe(
@@ -661,10 +682,13 @@ const proxy = Command.make(
     return Effect.gen(function* () {
       const missing = yield* Effect.promise(() => missingHostRequirements(resolved));
       if (missing.length > 0) {
-        const text = `missing host requirements:\n${missing.join("\n")}`;
-        console.error(`proxy: ${text}`);
-        return yield* Effect.fail(new Error(text));
+        return yield* Effect.fail(new Error(`missing host requirements:\n${missing.join("\n")}`));
       }
+      // Fail at startup, not on the first request, if the control-plane DB is unreachable.
+      yield* Effect.tryPromise({
+        try: () => pingDatabase(db),
+        catch: (cause) => new Error(`database unreachable: ${errorDetail(cause)}`),
+      });
       return yield* Layer.launch(main(resolved, automation));
     }).pipe(
       Effect.tapError((err) => Effect.sync(() => log(db, { level: "fatal", text: `proxy: ${errorDetail(err)}` }, { cause: err }))),

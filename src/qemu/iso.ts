@@ -150,12 +150,18 @@ async function download(db: Db, url: string, file: string, path: string, who: Wh
 // the digest. A 200 whose body is not a digest (a soft-404 page) counts as no sidecar,
 // not as a mismatch.
 async function publishedSha256(url: string): Promise<string | undefined> {
-  const res = await fetch(`${url}.sha256`);
-  if (!res.ok) {
+  // The sidecar is optional, so a fetch failure counts as "none published" — it must
+  // not discard an already-complete download by rejecting the whole start.
+  try {
+    const res = await fetch(`${url}.sha256`);
+    if (!res.ok) {
+      return undefined;
+    }
+    const token = (await res.text()).trim().split(/\s+/)[0].toLowerCase();
+    return /^[0-9a-f]{64}$/.test(token) ? token : undefined;
+  } catch {
     return undefined;
   }
-  const token = (await res.text()).trim().split(/\s+/)[0].toLowerCase();
-  return /^[0-9a-f]{64}$/.test(token) ? token : undefined;
 }
 
 async function readManifest(): Promise<Record<string, ManifestEntry>> {
