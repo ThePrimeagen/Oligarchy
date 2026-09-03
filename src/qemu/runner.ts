@@ -60,10 +60,13 @@ type ClientResult = { code: number; stdout: Buffer; stderr: string };
 
 function runClient(args: string[]): Promise<ClientResult> {
   return new Promise((resolve, reject) => {
+    // Own process group: a terminal hangup or Ctrl-C reaches the whole foreground group,
+    // and a start killed mid-boot still boots on the proxy. Detached, the child survives to
+    // hand back its session id so shutdown can stop it instead of orphaning the QEMU.
     const child = spawn(
       process.execPath,
       ["--experimental-strip-types", "--disable-warning=ExperimentalWarning", cliPath, "--agent-id", agentId, "--server-url", serverUrl, ...args],
-      { stdio: ["ignore", "pipe", "pipe"] },
+      { stdio: ["ignore", "pipe", "pipe"], detached: true },
     );
     const out: Buffer[] = [];
     const err: Buffer[] = [];
