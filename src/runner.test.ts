@@ -1,0 +1,257 @@
+import assert from "node:assert/strict";
+import { resolve } from "node:path";
+import { describe, it } from "node:test";
+import {
+  createRunner,
+  executeRunnerLine,
+  formatTerminalImage,
+  completeRunnerLine,
+  stopRunnerSession,
+  type RunnerState,
+} from "./runner.ts";
+
+describe("runner state and command execution happy path", () => {
+  it("initializes runner with serverUrl and unique agentId", () => {
+    const runner = createRunner({ serverUrl: "http://127.0.0.1:42069" });
+    assert.equal(runner.serverUrl, "http://127.0.0.1:42069");
+    assert.ok(runner.agentId.length > 0);
+    assert.equal(runner.sessionId, undefined);
+  });
+
+  it("executes start command, updates sessionId and returns it", async () => {
+    let capturedBody: unknown;
+    const fetchFn: typeof fetch = async (input, init) => {
+      capturedBody = JSON.parse(init?.body as string);
+      return new Response(JSON.stringify({ id: "session-test-uuid" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    const runner = createRunner({ serverUrl: "http://127.0.0.1:42069", token: "tok", fetch: fetchFn });
+    const output = await executeRunnerLine(runner, "start --iso test.iso");
+
+    assert.equal(runner.sessionId, "session-test-uuid");
+    assert.match(output, /session-test-uuid/);
+    assert.deepEqual(capturedBody, {
+      iso: resolve("test.iso"),
+      agent: runner.agentId,
+    });
+  });
+
+  it("executes send-keys with session id tracked automatically", async () => {
+    let capturedUrl: string | undefined;
+    let capturedBody: unknown;
+    const fetchFn: typeof fetch = async (input, init) => {
+      capturedUrl = String(input);
+      capturedBody = JSON.parse(init?.body as string);
+      return new Response(JSON.stringify({ ok: "true" }), { status: 200 });
+    };
+
+    const runner = createRunner({ serverUrl: "http://127.0.0.1:42069", token: "tok", fetch: fetchFn });
+    runner.sessionId = "session-123";
+
+    const output = await executeRunnerLine(runner, "send-keys hello<ENTER>");
+    assert.equal(capturedUrl, "http://127.0.0.1:42069/send-keys");
+    assert.deepEqual(capturedBody, {
+      id: "session-123",
+      keys: "hello<ENTER>",
+      encoding: "oligarchy",
+      agent: runner.agentId,
+    });
+    assert.match(output, /ok/);
+  });
+
+  it("executes send-mouse with tracked session", async () => {
+    let capturedBody: unknown;
+    const fetchFn: typeof fetch = async (input, init) => {
+      capturedBody = JSON.parse(init?.body as string);
+      return new Response(JSON.stringify({ ok: "true" }), { status: 200 });
+    };
+
+    const runner = createRunner({ serverUrl: "http://127.0.0.1:42069", token: "tok", fetch: fetchFn });
+    runner.sessionId = "session-123";
+
+    await executeRunnerLine(runner, "send-mouse 0.5 0.5 left 2");
+    assert.deepEqual(capturedBody, {
+      id: "session-123",
+      x: 0.5,
+      y: 0.5,
+      button: "left",
+      clicks: 2,
+      agent: runner.agentId,
+    });
+  });
+
+  it("executes intent start and intent end tracking active intent", async () => {
+    const bodies: unknown[] = [];
+    const fetchFn: typeof fetch = async (input, init) => {
+      bodies.push(JSON.parse(init?.body as string));
+      return new Response(JSON.stringify({ ok: "true" }), { status: 200 });
+    };
+
+    const runner = createRunner({ serverUrl: "http://127.0.0.1:42069", token: "tok", fetch: fetchFn });
+    runner.sessionId = "session-123";
+
+    await executeRunnerLine(runner, "intent start --message \"test intent message\" --test_result_id res-1");
+    assert.equal(runner.activeIntent, "test intent message");
+
+    await executeRunnerLine(runner, "intent end");
+    assert.equal(runner.activeIntent, undefined);
+    assert.equal(bodies.length, 2);
+
+    await executeRunnerLine(runner, "intent \"shorthand intent\"");
+    assert.equal(runner.activeIntent, "shorthand intent");
+    await executeRunnerLine(runner, "intent end");
+  });
+});
+
+describe("runner state and command execution unhappy path", () => {
+  it("rejects commands requiring session when no session is active", async () => {
+    const runner = createRunner({ serverUrl: "http://127.0.0.1:42069" });
+    await assert.rejects(
+      () => executeRunnerLine(runner, "send-keys hello"),
+      { message: "No active session. Run 'start' first." },
+    );
+    await assert.rejects(
+      () => executeRunnerLine(runner, "get-image"),
+      { message: "No active session. Run 'start' first." },
+    );
+    await assert.rejects(
+      () => executeRunnerLine(runner, "send-mouse 0.5 0.5"),
+      { message: "No active session. Run 'start' first." },
+    );
+  });
+
+  it("handles server error responses gracefully", async () => {
+    const fetchFn = async () => {
+      return new Response(JSON.stringify({ error: "Session crashed" }), { status: 500 });
+    };
+
+    const runner = createRunner({ serverUrl: "http://127.0.0.1:42069", token: "tok", fetch: fetchFn });
+    runner.sessionId = "session-123";
+
+    await assert.rejects(
+      () => executeRunnerLine(runner, "send-keys hello"),
+      { message: "Session crashed" },
+    );
+  });
+
+  it("rejects unknown commands", async () => {
+    const runner = createRunner({ serverUrl: "http://127.0.0.1:42069" });
+    await assert.rejects(
+      () => executeRunnerLine(runner, "unknown-command foo"),
+      { message: "Unknown command: unknown-command" },
+    );
+  });
+});
+
+describe("tab completion happy path", () => {
+  it("completes top-level actions when line is empty or prefix matches", () => {
+    const runner = createRunner();
+    const [completions, match] = completeRunnerLine(runner, "");
+    assert.ok(completions.includes("start"));
+    assert.ok(completions.includes("send-keys"));
+    assert.ok(completions.includes("get-image"));
+    assert.ok(completions.includes("send-mouse"));
+    assert.ok(completions.includes("intent"));
+    assert.ok(completions.includes("stop"));
+    assert.equal(match, "");
+
+    const [sCompletions, sMatch] = completeRunnerLine(runner, "se");
+    assert.deepEqual(sCompletions, ["send-keys", "send-mouse"]);
+    assert.equal(sMatch, "se");
+  });
+
+  it("completes intent subcommands", () => {
+    const runner = createRunner();
+    const [completions, match] = completeRunnerLine(runner, "intent ");
+    assert.deepEqual(completions, ["start", "end"]);
+    assert.equal(match, "");
+  });
+});
+
+describe("tab completion unhappy path", () => {
+  it("returns empty completions for non-matching input", () => {
+    const runner = createRunner();
+    const [completions, match] = completeRunnerLine(runner, "xyz");
+    assert.deepEqual(completions, []);
+    assert.equal(match, "xyz");
+  });
+});
+
+describe("terminal image rendering happy path", () => {
+  it("generates iTerm2 inline image escape sequence", () => {
+    const png = Buffer.from("fake-png-bytes");
+    const output = formatTerminalImage(png, { protocol: "iterm2" });
+    assert.ok(output.startsWith("\x1b]1337;File="));
+    assert.ok(output.includes(png.toString("base64")));
+    assert.ok(output.endsWith("\x07\n"));
+  });
+
+  it("generates kitty inline image escape sequence", () => {
+    const png = Buffer.from("fake-png-bytes");
+    const output = formatTerminalImage(png, { protocol: "kitty" });
+    assert.ok(output.startsWith("\x1b_G"));
+    assert.ok(output.includes("f=100"));
+    assert.ok(output.endsWith("\x1b\\\n"));
+  });
+});
+
+describe("terminal image rendering unhappy path", () => {
+  it("handles empty or invalid image buffer", () => {
+    assert.throws(
+      () => formatTerminalImage(Buffer.alloc(0)),
+      { message: "Cannot display empty image" },
+    );
+  });
+});
+
+describe("cleanup on exit / kill happy path", () => {
+  it("calls stop on proxy when session is active and clears session", async () => {
+    let stoppedBody: unknown;
+    const fetchFn: typeof fetch = async (input, init) => {
+      stoppedBody = JSON.parse(init?.body as string);
+      return new Response(JSON.stringify({ ok: "true" }), { status: 200 });
+    };
+
+    const runner = createRunner({ serverUrl: "http://127.0.0.1:42069", token: "tok", fetch: fetchFn });
+    runner.sessionId = "session-123";
+
+    await stopRunnerSession(runner);
+    assert.deepEqual(stoppedBody, {
+      id: "session-123",
+      agent: runner.agentId,
+      status: "aborted",
+      reason: "runner exited",
+    });
+    assert.equal(runner.sessionId, undefined);
+  });
+});
+
+describe("cleanup on exit / kill unhappy path", () => {
+  it("does not throw if stop fails during cleanup", async () => {
+    const fetchFn = async () => {
+      throw new Error("Network offline");
+    };
+
+    const runner = createRunner({ serverUrl: "http://127.0.0.1:42069", token: "tok", fetch: fetchFn });
+    runner.sessionId = "session-123";
+
+    // Should not throw
+    await stopRunnerSession(runner);
+    assert.equal(runner.sessionId, undefined);
+  });
+
+  it("does nothing if no active session", async () => {
+    let called = false;
+    const fetchFn = async () => {
+      called = true;
+      return new Response("{}");
+    };
+
+    const runner = createRunner({ serverUrl: "http://127.0.0.1:42069", token: "tok", fetch: fetchFn });
+    await stopRunnerSession(runner);
+    assert.equal(called, false);
+  });
+});

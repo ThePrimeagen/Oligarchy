@@ -3,12 +3,14 @@
   "private": true,
   "type": "module",
   "bin": {
-    "client": "src/qemu/cli.ts"
+    "client": "src/qemu/cli.ts",
+    "runner": "src/runner.ts"
   },
   "scripts": {
     "client": "node --experimental-strip-types src/qemu/cli.ts",
+    "runner": "node --experimental-strip-types src/runner.ts",
     "dev": "wrangler dev --remote",
-    "test": "node --test --experimental-strip-types src/client.test.ts src/cursor-agent/client.test.ts src/experiment.test.ts src/qmp/json-stream.test.ts src/qemu/client.test.ts src/qemu/keys.test.ts src/sentry.test.ts src/test-def.test.ts",
+    "test": "node --test --experimental-strip-types src/client.test.ts src/cursor-agent/client.test.ts src/experiment.test.ts src/qmp/json-stream.test.ts src/qemu/client.test.ts src/qemu/keys.test.ts src/sentry.test.ts src/test-def.test.ts src/runner.test.ts",
     "lint": "oxlint --type-aware --type-check",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node --experimental-strip-types src/db/migrate.ts"
