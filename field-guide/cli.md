@@ -4,6 +4,7 @@ The TypeScript client for the oligarchy control plane. It sends HTTP requests to
 
 ```bash
 ./client experiment new --iso <https-url> --server_url=<http-or-https-url> --version <version> [--name <definition>]
+./client experiment run --ticket <linear-ticket> --server_url=<http-or-https-url>
 ./client --agent-id <agent> test-results --id <result-id> --status success|failed [--reason <text>]
 ./client --agent-id <agent> start [--iso <path>] [--disk <path>]
 ./client --agent-id <agent> get-image <id> [-o file]
@@ -30,6 +31,18 @@ Run the root wrapper directly:
 ```bash
 ./client experiment new --iso https://example.com/omarchy.iso --server_url=https://qemu.example.com --version 1.2.3
 ./client experiment new --iso https://example.com/omarchy.iso --server_url=https://qemu.example.com --version 1.2.3 --name "Install Omarchy"
+```
+
+## experiment run
+
+Spawns the Cursor cloud agent that drives one Linear ticket. The command renders `prompts/driving-agent.html` with `LINEAR_TICKET` and `SERVER_URL` and hands the text to `prompt` in `src/cursor-agent/client.ts`, the one function that wraps `@cursor/sdk`: it creates a cloud agent on this repository, sends the text as the agent's first run, and returns once Cursor has accepted the run. It never waits for the agent. On success it prints `Agent here, go check it out for more information: https://cursor.com/agents/<agent-id>`.
+
+The agent runs Grok 4.6 in fast mode at extra-high effort (`{ id: "grok-4.6", params: [{ id: "effort", value: "xhigh" }, { id: "fast", value: "true" }] }`, as `Cursor.models.list()` names it); `prompt` takes an optional `{ model }` to choose another. The API key is `CURSOR_API_TOKEN`, read from the environment (a `.env` fills in missing variables only); a missing one is a failure, and so is a token Cursor refuses or a model it does not offer. Cloud agents started through the SDK are hidden from the default list at cursor.com/agents; filter by Source > SDK to see them.
+
+`--ticket` must be non-empty. `--server_url` may be HTTP or HTTPS; the prompt tells the driver to pass it as `--server-url` on every `./client` command.
+
+```bash
+./client experiment run --ticket OLI-42 --server_url https://qemu.example.com
 ```
 
 ## test-results
@@ -104,4 +117,4 @@ Kills the session. Only the agent that started it can stop it; a different `--ag
 
 ## Reading the file
 
-The root `client` command shares `--agent-id` and `--server-url` with its subcommands. QEMU handlers, `test-results`, and `intent` yield the parent command and fail if `--agent-id` is missing. `experiment` is a sibling subcommand with its own `new` command. `test-results` is a sibling that writes the result row through `src/test-results.ts`. HTTP helpers stay local to the file: `postJSON`, `readAPIError`, and `errorMessage`. There is no other machinery — see the [philosophy](philosophy.md) for why it should stay that way.
+The root `client` command shares `--agent-id` and `--server-url` with its subcommands. QEMU handlers, `test-results`, and `intent` yield the parent command and fail if `--agent-id` is missing. `experiment` is a sibling subcommand with its own `new` and `run` commands. `test-results` is a sibling that writes the result row through `src/test-results.ts`. HTTP helpers stay local to the file: `postJSON`, `readAPIError`, and `errorMessage`. There is no other machinery — see the [philosophy](philosophy.md) for why it should stay that way.

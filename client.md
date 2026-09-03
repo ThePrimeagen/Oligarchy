@@ -4,21 +4,22 @@ Consult this table of contents first. Read only the section you need.
 
 | Section | Line |
 |---------|-----:|
-| [Important](#important) | 23 |
-| [Environment](#environment) | 27 |
-| [Invoke](#invoke) | 35 |
-| [start](#start) | 51 |
-| [get-image](#get-image) | 65 |
-| [get-serial](#get-serial) | 76 |
-| [send-keys](#send-keys) | 98 |
-| [send-mouse](#send-mouse) | 110 |
-| [intent](#intent) | 124 |
-| [stop](#stop) | 135 |
-| [experiment new](#experiment-new) | 147 |
-| [test-results](#test-results) | 157 |
-| [Keys](#keys) | 168 |
-| [Mouse](#mouse) | 180 |
-| [The loop](#the-loop) | 188 |
+| [Important](#important) | 24 |
+| [Environment](#environment) | 28 |
+| [Invoke](#invoke) | 36 |
+| [start](#start) | 52 |
+| [get-image](#get-image) | 66 |
+| [get-serial](#get-serial) | 77 |
+| [send-keys](#send-keys) | 99 |
+| [send-mouse](#send-mouse) | 111 |
+| [intent](#intent) | 125 |
+| [stop](#stop) | 136 |
+| [experiment new](#experiment-new) | 148 |
+| [experiment run](#experiment-run) | 159 |
+| [test-results](#test-results) | 169 |
+| [Keys](#keys) | 180 |
+| [Mouse](#mouse) | 192 |
+| [The loop](#the-loop) | 200 |
 
 ## Important
 
@@ -30,7 +31,7 @@ If you are the client, or an agent driving the client: do not look at code. Only
 
 If `DATABASE_URL` is missing, that is a failure. Stop.
 
-The proxy, `experiment new`, and `test-results` read these from the environment. A missing `DATABASE_URL` or `LINEAR_API_TOKEN` exits 1.
+The proxy, `experiment new`, and `test-results` read these from the environment. A missing `DATABASE_URL` or `LINEAR_API_TOKEN` exits 1. `experiment run` reads `CURSOR_API_TOKEN`; a missing one exits 1.
 
 ## Invoke
 
@@ -154,6 +155,16 @@ Creates one pending test run and one Linear issue per stored test definition. Pa
 ```
 
 `--iso` must be an HTTPS URL. `--server_url` may be HTTP or HTTPS. `--version` is required. `--name` is the stored definition's name. A name that matches no definition is a failure.
+
+## experiment run
+
+Spawns a Cursor cloud agent that drives one Linear ticket. Not used while driving a guest. Reads `CURSOR_API_TOKEN` from the environment.
+
+```bash
+./client experiment run --ticket OLI-42 --server_url https://qemu.example.com
+```
+
+`--ticket` is the Linear issue identifier created by `experiment new`. `--server_url` may be HTTP or HTTPS; the agent is told to pass it as `--server-url` on every client command. The command prints a link to the agent as soon as it is started and does not wait for it to finish.
 
 ## test-results
 
