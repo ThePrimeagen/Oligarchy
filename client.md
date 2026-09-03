@@ -29,11 +29,11 @@ If you are the client, or an agent driving the client: do not look at code. Only
 
 ## Environment
 
-`DATABASE_URL`, `LINEAR_API_TOKEN`, and the Cloudflare credentials are already in this process. Use them. Do not start a local database. Do not write a `.env`.
+`DATABASE_URL`, `LINEAR_API_TOKEN`, `OLIGARCHY_TOKEN`, and the Cloudflare credentials are already in this process. Use them. Do not start a local database. Do not write a `.env`.
 
-If `DATABASE_URL` is missing, that is a failure. Stop.
+If `DATABASE_URL` or `OLIGARCHY_TOKEN` is missing, that is a failure. Stop.
 
-The proxy, `test --list`, `test new`, `test list`, and `test-results` read these from the environment. A missing `DATABASE_URL` or `LINEAR_API_TOKEN` exits 1. `test list` needs `LINEAR_API_TOKEN` only. `test run` reads `CURSOR_API_TOKEN`; a missing one exits 1.
+The proxy and the client both read `OLIGARCHY_TOKEN` from the environment. The client sends it on every request to the proxy. Starting either without it exits 1. The proxy, `test --list`, `test new`, and `test-results` also read `DATABASE_URL` from the environment. A missing `DATABASE_URL` or `LINEAR_API_TOKEN` exits 1. `test list` needs `LINEAR_API_TOKEN` only. `test run` reads `CURSOR_API_TOKEN`; a missing one exits 1.
 
 ## Invoke
 

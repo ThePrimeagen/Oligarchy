@@ -1,13 +1,24 @@
 #!/usr/bin/env -S node --experimental-strip-types
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
+import { existsSync } from "node:fs";
 import { stat, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { loadEnvFile } from "node:process";
 import { NodeRuntime, NodeServices } from "@effect/platform-node";
 import { Console, Effect, Option, Schema } from "effect";
 import { Argument, CliError, Command, Flag } from "effect/unstable/cli";
 import { experimentCommand } from "../experiment.ts";
 import { runTestResults } from "../test-results.ts";
+
+if (existsSync(".env")) {
+  loadEnvFile();
+}
+
+const token = process.env.OLIGARCHY_TOKEN;
+if (token === undefined || token === "") {
+  throw new Error("OLIGARCHY_TOKEN is not set");
+}
 
 const DEFAULT_SERVER_URL = "http://127.0.0.1:42069";
 const DEFAULT_ISO = "omarchy.iso";
@@ -99,7 +110,10 @@ const getImage = Command.make(
     const { agentId, serverUrl } = yield* client;
     const agent = yield* requireAgent(agentId);
     const res = yield* Effect.tryPromise({
-      try: () => fetch(`${serverUrl}/image?id=${encodeURIComponent(id)}&agent=${encodeURIComponent(agent)}`),
+      try: () =>
+        fetch(`${serverUrl}/image?id=${encodeURIComponent(id)}&agent=${encodeURIComponent(agent)}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
       catch: fail,
     });
     if (res.status !== 200) {
@@ -142,7 +156,10 @@ const getSerial = Command.make(
     const { agentId, serverUrl } = yield* client;
     const agent = yield* requireAgent(agentId);
     const res = yield* Effect.tryPromise({
-      try: () => fetch(`${serverUrl}/serial?id=${encodeURIComponent(id)}&agent=${encodeURIComponent(agent)}`),
+      try: () =>
+        fetch(`${serverUrl}/serial?id=${encodeURIComponent(id)}&agent=${encodeURIComponent(agent)}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
       catch: fail,
     });
     if (res.status !== 200) {
@@ -338,7 +355,7 @@ const app = client.pipe(
 async function postJSON(serverUrl: string, path: string, body: unknown): Promise<string> {
   const res = await fetch(`${serverUrl}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
   if (res.status < 200 || res.status >= 300) {
@@ -357,7 +374,7 @@ function postStart(serverUrl: string, body: unknown): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     const req = send(
       url,
-      { method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) } },
+      { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) } },
       (res) => {
         let data = "";
         res.setEncoding("utf8");

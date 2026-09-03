@@ -18,6 +18,12 @@ import { collectStats, startCpuSampler } from "./stats.ts";
 if (existsSync(".env")) {
   loadEnvFile();
 }
+
+const token = process.env.OLIGARCHY_TOKEN;
+if (token === undefined || token === "") {
+  throw new Error("OLIGARCHY_TOKEN is not set");
+}
+
 initSentry();
 
 const DEFAULT_HOST = "127.0.0.1";
@@ -518,8 +524,11 @@ function respondTable(request: HttpServerRequest.HttpServerRequest): {
 }
 
 const respond = HttpRouter.middleware<{ handles: ApiError }>()((handler) =>
-  Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) =>
-    handler.pipe(
+  Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) => {
+    if (request.headers.authorization !== `Bearer ${token}`) {
+      return answer(request, 401, "unauthorized", {});
+    }
+    return handler.pipe(
       Effect.catchTags(respondTable(request)),
       Effect.catchDefect((defect) =>
         Effect.sync(() => {
@@ -534,8 +543,8 @@ const respond = HttpRouter.middleware<{ handles: ApiError }>()((handler) =>
           return errorBody(500, "internal error");
         })
       ),
-    )
-  ), { global: true });
+    );
+  }), { global: true });
 
 async function stopTimedOutSessions(): Promise<void> {
   const now = Date.now();
