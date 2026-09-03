@@ -59,6 +59,10 @@ export type LinearTicket = {
   url: string;
 };
 
+type LinearBacklogTicket = LinearTicket & {
+  title: string;
+};
+
 type LinearResponse<T> = {
   data?: T;
   errors?: { message: string }[];
@@ -380,6 +384,73 @@ function fail(cause: unknown): CliError.UserError {
   return new CliError.UserError({ cause, userMessage: text });
 }
 
+export async function listLinearBacklog(token: string): Promise<LinearBacklogTicket[]> {
+  const tickets: LinearBacklogTicket[] = [];
+  let after: string | undefined;
+  const filter = {
+    team: { name: { eq: "Oligarchy" } },
+    state: { type: { eq: "backlog" } },
+  };
+  for (;;) {
+    const page = await linearRequest<{
+      issues: {
+        nodes: LinearBacklogTicket[];
+        pageInfo: { hasNextPage: boolean; endCursor: string | null };
+      };
+    }>(
+      token,
+      `query ExperimentBacklog($filter: IssueFilter!, $after: String) {
+  issues(first: 100, after: $after, filter: $filter) {
+    nodes {
+      id
+      identifier
+      title
+      url
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}`,
+      after === undefined ? { filter } : { filter, after },
+    );
+    tickets.push(...page.issues.nodes);
+    if (!page.issues.pageInfo.hasNextPage) {
+      return tickets;
+    }
+    if (page.issues.pageInfo.endCursor === null) {
+      throw new Error("linear: invalid response");
+    }
+    after = page.issues.pageInfo.endCursor;
+  }
+}
+
+export async function listExperiment(): Promise<void> {
+  if (existsSync(".env")) {
+    loadEnvFile();
+  }
+
+  const token = process.env.LINEAR_API_TOKEN;
+  if (token === undefined || token === "") {
+    throw new Error("experiment: LINEAR_API_TOKEN is not set");
+  }
+
+  const tickets = await listLinearBacklog(token);
+  console.log(JSON.stringify(tickets));
+}
+
+export const experimentListCommand = Command.make(
+  "list",
+  {},
+  Effect.fn(function* () {
+    yield* Effect.tryPromise({
+      try: () => listExperiment(),
+      catch: fail,
+    });
+  }),
+);
+
 export const experimentNewCommand = Command.make(
   "new",
   {
@@ -416,5 +487,5 @@ export const experimentNewCommand = Command.make(
 );
 
 export const experimentCommand = Command.make("experiment").pipe(
-  Command.withSubcommands([experimentNewCommand]),
+  Command.withSubcommands([experimentNewCommand, experimentListCommand]),
 );

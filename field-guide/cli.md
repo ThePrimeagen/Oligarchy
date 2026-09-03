@@ -4,6 +4,7 @@ The TypeScript client for the oligarchy control plane. It sends HTTP requests to
 
 ```bash
 ./client experiment new --iso <https-url> --server_url=<http-or-https-url> --version <version> [--name <definition>]
+./client experiment list
 ./client --agent-id <agent> test-results --id <result-id> --status success|failed [--reason <text>]
 ./client --agent-id <agent> start [--iso <path>] [--disk <path>]
 ./client --agent-id <agent> get-image <id> [-o file]
@@ -30,6 +31,14 @@ Run the root wrapper directly:
 ```bash
 ./client experiment new --iso https://example.com/omarchy.iso --server_url=https://qemu.example.com --version 1.2.3
 ./client experiment new --iso https://example.com/omarchy.iso --server_url=https://qemu.example.com --version 1.2.3 --name "Install Omarchy"
+```
+
+## experiment list
+
+Prints every Linear issue on the Oligarchy team whose workflow state type is `backlog`. The command reads `LINEAR_API_TOKEN` from the environment (a `.env` fills in missing variables only). It does not use the database. It walks Linear's issue pages until `hasNextPage` is false, then prints a JSON array of `{id, identifier, title, url}`. An empty backlog is `[]`. A missing token or a Linear failure is a command failure.
+
+```bash
+./client experiment list
 ```
 
 ## test-results
@@ -104,4 +113,4 @@ Kills the session. Only the agent that started it can stop it; a different `--ag
 
 ## Reading the file
 
-The root `client` command shares `--agent-id` and `--server-url` with its subcommands. QEMU handlers, `test-results`, and `intent` yield the parent command and fail if `--agent-id` is missing. `experiment` is a sibling subcommand with its own `new` command. `test-results` is a sibling that writes the result row through `src/test-results.ts`. HTTP helpers stay local to the file: `postJSON`, `readAPIError`, and `errorMessage`. There is no other machinery — see the [philosophy](philosophy.md) for why it should stay that way.
+The root `client` command shares `--agent-id` and `--server-url` with its subcommands. QEMU handlers, `test-results`, and `intent` yield the parent command and fail if `--agent-id` is missing. `experiment` is a sibling subcommand with `new` and `list`. `test-results` is a sibling that writes the result row through `src/test-results.ts`. HTTP helpers stay local to the file: `postJSON`, `readAPIError`, and `errorMessage`. There is no other machinery — see the [philosophy](philosophy.md) for why it should stay that way.

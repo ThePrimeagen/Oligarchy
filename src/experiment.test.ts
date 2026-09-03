@@ -4,6 +4,7 @@ import {
   createExperiment,
   createLinearTicket,
   linearTicketDescription,
+  listLinearBacklog,
   type Experiment,
 } from "./experiment.ts";
 import type { Db } from "./db/ops.ts";
@@ -596,5 +597,170 @@ describe("createExperiment unhappy path", () => {
     );
     const runFailure = updates[0].values as { reason: string };
     assert.equal(runFailure.reason, "linear: request failed (401): unauthorized; created OLI-42, OLI-43");
+  });
+});
+
+describe("listLinearBacklog happy path", () => {
+  it("lists every Oligarchy issue whose state type is backlog", async () => {
+    const requests: { query: string; variables?: Record<string, unknown> }[] = [];
+    mock.method(globalThis, "fetch", async (_input: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1]) => {
+      const body = await parseLinearRequest(init);
+      requests.push(body);
+      return Response.json({
+        data: {
+          issues: {
+            nodes: [
+              {
+                id: "issue-OLI-28",
+                identifier: "OLI-28",
+                title: "Omarchy: lock-screen",
+                url: "https://linear.app/issue/OLI-28",
+              },
+              {
+                id: "issue-OLI-29",
+                identifier: "OLI-29",
+                title: "Omarchy: wallpaper",
+                url: "https://linear.app/issue/OLI-29",
+              },
+            ],
+            pageInfo: { hasNextPage: false, endCursor: null },
+          },
+        },
+      });
+    });
+
+    const tickets = await listLinearBacklog("linear-token");
+
+    assert.deepEqual(tickets, [
+      {
+        id: "issue-OLI-28",
+        identifier: "OLI-28",
+        title: "Omarchy: lock-screen",
+        url: "https://linear.app/issue/OLI-28",
+      },
+      {
+        id: "issue-OLI-29",
+        identifier: "OLI-29",
+        title: "Omarchy: wallpaper",
+        url: "https://linear.app/issue/OLI-29",
+      },
+    ]);
+    assert.equal(requests.length, 1);
+    assert.match(requests[0].query, /issues\(/);
+    assert.deepEqual(requests[0].variables, {
+      filter: {
+        team: { name: { eq: "Oligarchy" } },
+        state: { type: { eq: "backlog" } },
+      },
+    });
+  });
+
+  it("follows Linear pages until the backlog is complete", async () => {
+    const cursors: (string | undefined)[] = [];
+    mock.method(globalThis, "fetch", async (_input: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1]) => {
+      const body = await parseLinearRequest(init);
+      cursors.push(body.variables?.after as string | undefined);
+      if (body.variables?.after === undefined) {
+        return Response.json({
+          data: {
+            issues: {
+              nodes: [
+                {
+                  id: "issue-OLI-28",
+                  identifier: "OLI-28",
+                  title: "Omarchy: lock-screen",
+                  url: "https://linear.app/issue/OLI-28",
+                },
+              ],
+              pageInfo: { hasNextPage: true, endCursor: "cursor-1" },
+            },
+          },
+        });
+      }
+      return Response.json({
+        data: {
+          issues: {
+            nodes: [
+              {
+                id: "issue-OLI-29",
+                identifier: "OLI-29",
+                title: "Omarchy: wallpaper",
+                url: "https://linear.app/issue/OLI-29",
+              },
+            ],
+            pageInfo: { hasNextPage: false, endCursor: "cursor-2" },
+          },
+        },
+      });
+    });
+
+    const tickets = await listLinearBacklog("linear-token");
+
+    assert.deepEqual(cursors, [undefined, "cursor-1"]);
+    assert.deepEqual(
+      tickets.map((ticket) => ticket.identifier),
+      ["OLI-28", "OLI-29"],
+    );
+  });
+
+  it("returns an empty list when the backlog has no issues", async () => {
+    mock.method(globalThis, "fetch", async () =>
+      Response.json({
+        data: {
+          issues: {
+            nodes: [],
+            pageInfo: { hasNextPage: false, endCursor: null },
+          },
+        },
+      }),
+    );
+
+    const tickets = await listLinearBacklog("linear-token");
+
+    assert.deepEqual(tickets, []);
+  });
+});
+
+describe("listLinearBacklog unhappy path", () => {
+  it("reports an HTTP failure", async () => {
+    mock.method(globalThis, "fetch", async () => new Response("unauthorized", { status: 401 }));
+
+    await assert.rejects(() => listLinearBacklog("bad-token"), {
+      message: "linear: request failed (401): unauthorized",
+    });
+  });
+
+  it("reports a GraphQL failure", async () => {
+    mock.method(globalThis, "fetch", async () =>
+      Response.json({ errors: [{ message: "API key has no access" }] }),
+    );
+
+    await assert.rejects(() => listLinearBacklog("bad-token"), {
+      message: "linear: API key has no access",
+    });
+  });
+
+  it("rejects a page that claims another page without a cursor", async () => {
+    mock.method(globalThis, "fetch", async () =>
+      Response.json({
+        data: {
+          issues: {
+            nodes: [
+              {
+                id: "issue-OLI-28",
+                identifier: "OLI-28",
+                title: "Omarchy: lock-screen",
+                url: "https://linear.app/issue/OLI-28",
+              },
+            ],
+            pageInfo: { hasNextPage: true, endCursor: null },
+          },
+        },
+      }),
+    );
+
+    await assert.rejects(() => listLinearBacklog("linear-token"), {
+      message: "linear: invalid response",
+    });
   });
 });
