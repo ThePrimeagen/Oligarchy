@@ -10,6 +10,8 @@ import { afterEach, describe, it } from "node:test";
 const WORKSPACE = resolve(import.meta.dirname, "../..");
 // The wrapper checks draining backends every 10s; give a drain-dependent wait one full tick of slack.
 const DRAIN_WAIT_MS = 15_000;
+// A regression must fail the test, not hang the suite.
+const SLOW = { timeout: 60_000 };
 
 type Fixture = { root: string; origin: string; work: string; checkout: string };
 
@@ -158,7 +160,7 @@ async function main(): Promise<void> {
     console.log(\`stub \${VERSION}: child pid \${child.pid}\`);
   }
   server.listen(Number(port), host, () => {
-    console.log(\`stub \${VERSION}: listening on \${port}\`);
+    console.log(\`stub \${VERSION}: listening on \${port} with flags [\${process.argv.slice(2).join(" ")}]\`);
     if (MODE.includes("crash")) {
       setTimeout(() => process.exit(1), 1_000);
     }
@@ -177,6 +179,7 @@ function makeFixture(version = "v1", mode = ""): Fixture {
   mkdirSync(join(fixture.work, "src/qemu"), { recursive: true });
   cpSync(join(WORKSPACE, "src/qemu/wrapper.ts"), join(fixture.work, "src/qemu/wrapper.ts"));
   cpSync(join(WORKSPACE, "src/sentry.ts"), join(fixture.work, "src/sentry.ts"));
+  cpSync(join(WORKSPACE, "server"), join(fixture.work, "server"));
   writeFileSync(join(fixture.work, "src/sentry-dsn.ts"), 'export const SENTRY_DSN = "";\n');
   writeFileSync(join(fixture.work, "src/qemu/proxy.ts"), stubProxy(version, mode));
   writeFileSync(join(fixture.work, ".gitignore"), "node_modules\ngate\n");
@@ -202,8 +205,12 @@ function push(fixture: Fixture, version: string, mode = "", extra: Record<string
   return git(fixture.work, "rev-parse", "HEAD").slice(0, 7);
 }
 
-function startWrapper(fixture: Fixture, addr = "127.0.0.1:0"): Wrapper {
-  const proc = spawn(process.execPath, ["--experimental-strip-types", join(fixture.checkout, "src/qemu/wrapper.ts")], {
+function startWrapper(
+  fixture: Fixture,
+  addr = "127.0.0.1:0",
+  command = [process.execPath, "--experimental-strip-types", join(fixture.checkout, "src/qemu/wrapper.ts")],
+): Wrapper {
+  const proc = spawn(command[0], command.slice(1), {
     cwd: fixture.checkout,
     env: { ...process.env, OLIGARCHY_ADDR: addr },
     stdio: ["ignore", "pipe", "pipe"],
@@ -309,12 +316,13 @@ afterEach(async () => {
 });
 
 describe("./server wrapper happy path", () => {
-  it("boots a backend from HEAD and routes session requests to the backend that owns them", async () => {
+  it("boots a backend from HEAD and routes session requests to the backend that owns them", SLOW, async () => {
     const fixture = makeFixture();
     const head = git(fixture.checkout, "rev-parse", "HEAD").slice(0, 7);
-    const wrapper = startWrapper(fixture);
+    const wrapper = startWrapper(fixture, "unused", ["sh", join(fixture.checkout, "server"), "0", "--automation"]);
     await wrapper.waitFor(backendLine("ready", head));
     await listening(wrapper);
+    assert.match(wrapper.output(), /stub v1: listening on \d+ with flags \[--automation\]/);
 
     const session = await startSession(wrapper.port);
     assert.equal(session.backend, "v1");
@@ -350,7 +358,7 @@ describe("./server wrapper happy path", () => {
     assert.equal(gone.status, 404);
   });
 
-  it("sums qemus over every live backend in /stats and fails the sum when one backend cannot be counted", async () => {
+  it("sums qemus over every live backend in /stats and fails the sum when one backend cannot be counted", SLOW, async () => {
     const fixture = makeFixture();
     const wrapper = startWrapper(fixture);
     await wrapper.waitFor(backendLine("ready"));
@@ -388,7 +396,7 @@ describe("./server wrapper happy path", () => {
     assert.equal((recovered.json() as { qemus: number }).qemus, 3);
   });
 
-  it("rolls to a new commit on SIGUSR2, keeps old sessions on the old backend, and stops it once they are gone", async () => {
+  it("rolls to a new commit on SIGUSR2, keeps old sessions on the old backend, and stops it once they are gone", SLOW, async () => {
     const fixture = makeFixture();
     const wrapper = startWrapper(fixture);
     const v1 = await wrapper.waitFor(backendLine("ready"));
@@ -433,7 +441,25 @@ describe("./server wrapper happy path", () => {
     assert.equal(still.backend, "v2");
   });
 
-  it("keeps a draining backend alive while a /start is still booting on it, even if that client goes away", async () => {
+  it("defers a SIGUSR2 that arrives while the first backend is still booting", SLOW, async () => {
+    const fixture = makeFixture("v1", "gated");
+    const wrapper = startWrapper(fixture);
+    await wrapper.waitFor(backendLine("starting"));
+    wrapper.proc.kill("SIGUSR2");
+    await wrapper.waitFor(/wrapper: SIGUSR2; checking for updates now/);
+    await sleep(300);
+    assert.doesNotMatch(wrapper.output(), /wrapper: pull:/);
+
+    writeFileSync(join(fixture.checkout, "gate"), "");
+    await wrapper.waitFor(backendLine("ready"));
+    await listening(wrapper);
+    await wrapper.waitFor(/wrapper: up to date at [0-9a-f]{7}/);
+    assert.equal(wrapper.output().match(/\) starting/g)!.length, 1);
+    const session = await startSession(wrapper.port);
+    assert.equal(session.backend, "v1");
+  });
+
+  it("keeps a draining backend alive while a /start is still booting on it, even if that client goes away", SLOW, async () => {
     const fixture = makeFixture();
     const wrapper = startWrapper(fixture);
     const v1 = await wrapper.waitFor(backendLine("ready"));
@@ -469,7 +495,7 @@ describe("./server wrapper happy path", () => {
 });
 
 describe("./server wrapper unhappy path", () => {
-  it("keeps the old backend when the new commit cannot start, then rolls once a fix lands", async () => {
+  it("keeps the old backend when the new commit cannot start, then rolls once a fix lands", SLOW, async () => {
     const fixture = makeFixture();
     const wrapper = startWrapper(fixture);
     const v1 = await wrapper.waitFor(backendLine("ready"));
@@ -489,7 +515,7 @@ describe("./server wrapper unhappy path", () => {
     assert.equal(session.backend, "v3");
   });
 
-  it("reports a failed pull and keeps serving, and still rolls when HEAD moved by hand", async () => {
+  it("reports a failed pull and keeps serving, and still rolls when HEAD moved by hand", SLOW, async () => {
     const fixture = makeFixture();
     const wrapper = startWrapper(fixture);
     await wrapper.waitFor(backendLine("ready"));
@@ -512,7 +538,7 @@ describe("./server wrapper unhappy path", () => {
     assert.equal(session.backend, "v2");
   });
 
-  it("survives the current backend dying: kills its process group, answers 503 until a replacement is ready, and keeps routing draining sessions", async () => {
+  it("survives the current backend dying: kills its process group, answers 503 until a replacement is ready, and keeps routing draining sessions", SLOW, async () => {
     const fixture = makeFixture();
     const wrapper = startWrapper(fixture);
     await wrapper.waitFor(backendLine("ready"));
@@ -554,16 +580,15 @@ describe("./server wrapper unhappy path", () => {
     assert.equal(lost.backend, "v2");
   });
 
-  it("restarts a crashing backend once per commit and then waits for the next update check", async () => {
+  it("restarts a crashing backend once per commit and then waits for the next update check", SLOW, async () => {
     const fixture = makeFixture("v1", "crash");
     const wrapper = startWrapper(fixture);
     await wrapper.waitFor(backendLine("ready"));
     await listening(wrapper);
 
-    await wrapper.waitFor(backendLine("exited 1 unexpectedly"));
-    await wrapper.waitFor(backendLine("ready"), 5_000, wrapper.output().length);
+    const crashed = await wrapper.waitFor(backendLine("exited 1 unexpectedly"));
+    await wrapper.waitFor(backendLine("ready"), 5_000, wrapper.output().indexOf(crashed[0]));
     await wrapper.waitFor(/wrapper: backend at [0-9a-f]{7} already restarted once; waiting for the next update check/);
-    await sleep(1_500);
     assert.equal(wrapper.output().match(/exited 1 unexpectedly/g)!.length, 2);
     assert.equal(wrapper.output().match(/\) starting/g)!.length, 2);
     const stats = await call(wrapper.port, "GET", "/stats");
@@ -573,7 +598,7 @@ describe("./server wrapper unhappy path", () => {
     assert.equal(await wrapper.exited, 0);
   });
 
-  it("refuses to roll past a change to dependencies, migrations, or the wrapper itself", async () => {
+  it("refuses to roll past a change to dependencies, migrations, or the wrapper itself", SLOW, async () => {
     const fixture = makeFixture();
     const wrapper = startWrapper(fixture);
     const v1 = await wrapper.waitFor(backendLine("ready"));
@@ -596,7 +621,22 @@ describe("./server wrapper unhappy path", () => {
     assert.equal(still.backend, "v1");
   });
 
-  it("turns a backend that resets the connection into a 502, or a broken response when headers were already out", async () => {
+  it("refuses a restart-needed change even when it arrives while recovering from a crash", SLOW, async () => {
+    const fixture = makeFixture();
+    const wrapper = startWrapper(fixture);
+    const v1 = await wrapper.waitFor(backendLine("ready"));
+    await listening(wrapper);
+
+    const v2 = push(fixture, "v2", "", { "package-lock.json": "{}\n" });
+    process.kill(Number(v1[2]), "SIGKILL");
+    await wrapper.waitFor(backendLine("exited SIGKILL unexpectedly", v1[3]));
+    await wrapper.waitFor(new RegExp(`wrapper: error: cannot roll ${v1[3]} -> ${v2}: package-lock.json changed; `));
+    assert.doesNotMatch(wrapper.output(), backendLine("starting", v2));
+    const stats = await call(wrapper.port, "GET", "/stats");
+    assert.equal(stats.status, 503);
+  });
+
+  it("turns a backend that resets the connection into a 502, or a broken response when headers were already out", SLOW, async () => {
     const fixture = makeFixture();
     const wrapper = startWrapper(fixture);
     const v1 = await wrapper.waitFor(backendLine("ready"));
@@ -614,7 +654,7 @@ describe("./server wrapper unhappy path", () => {
     assert.equal(wrapper.proc.exitCode, null);
   });
 
-  it("forwards nothing when the client aborts mid-body or sends more than a megabyte", async () => {
+  it("forwards nothing when the client aborts mid-body or sends more than a megabyte", SLOW, async () => {
     const fixture = makeFixture();
     const wrapper = startWrapper(fixture);
     await wrapper.waitFor(backendLine("ready"));
@@ -637,7 +677,7 @@ describe("./server wrapper unhappy path", () => {
     assert.equal(wrapper.proc.exitCode, null);
   });
 
-  it("exits 1 when the first backend cannot start or the public port is taken", async () => {
+  it("exits 1 when the first backend cannot start or the public port is taken", SLOW, async () => {
     const broken = startWrapper(makeFixture("v1", "exit1"));
     assert.equal(await broken.exited, 1);
     assert.match(broken.output(), /wrapper: fatal: backend at [0-9a-f]{7} failed to start: .*exited 1/);
@@ -660,7 +700,7 @@ describe("./server wrapper unhappy path", () => {
     }
   });
 
-  it("stops every backend on SIGTERM and exits 0 with nothing left behind", async () => {
+  it("stops every backend on SIGTERM and exits 0 with nothing left behind", SLOW, async () => {
     const fixture = makeFixture();
     const wrapper = startWrapper(fixture);
     const v1 = await wrapper.waitFor(backendLine("ready"));
