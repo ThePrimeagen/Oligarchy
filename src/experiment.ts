@@ -398,7 +398,6 @@ export const experimentNewCommand = Command.make(
     name: Flag.string("name").pipe(
       Flag.withSchema(Schema.NonEmptyString),
       Flag.optional,
-      Flag.withAlias("--slug"),
       Flag.withDescription("Create an experiment for this test definition only"),
     ),
   },
