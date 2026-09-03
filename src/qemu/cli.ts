@@ -7,6 +7,7 @@ import { NodeRuntime, NodeServices } from "@effect/platform-node";
 import { Console, Effect, Option, Schema } from "effect";
 import { Argument, CliError, Command, Flag } from "effect/unstable/cli";
 import { experimentCommand } from "../experiment.ts";
+import { listTestDefinitions } from "../test-def.ts";
 import { runTestResults } from "../test-results.ts";
 
 const DEFAULT_SERVER_URL = "http://127.0.0.1:42069";
@@ -252,6 +253,19 @@ const stop = Command.make(
   }),
 );
 
+const testDef = Command.make(
+  "test-def",
+  {
+    list: Flag.boolean("list").pipe(Flag.withDescription("List stored test definition names")),
+  },
+  Effect.fn(function* () {
+    yield* Effect.tryPromise({
+      try: () => listTestDefinitions(),
+      catch: fail,
+    });
+  }),
+);
+
 const testResults = Command.make(
   "test-results",
   {
@@ -322,7 +336,18 @@ const intent = Command.make("intent").pipe(
 );
 
 const app = client.pipe(
-  Command.withSubcommands([experimentCommand, testResults, start, getImage, getSerial, sendKeys, sendMouse, stop, intent]),
+  Command.withSubcommands([
+    experimentCommand,
+    testDef,
+    testResults,
+    start,
+    getImage,
+    getSerial,
+    sendKeys,
+    sendMouse,
+    stop,
+    intent,
+  ]),
 );
 
 async function postJSON(serverUrl: string, path: string, body: unknown): Promise<string> {

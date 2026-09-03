@@ -4,21 +4,22 @@ Consult this table of contents first. Read only the section you need.
 
 | Section | Line |
 |---------|-----:|
-| [Important](#important) | 23 |
-| [Environment](#environment) | 27 |
-| [Invoke](#invoke) | 35 |
-| [start](#start) | 51 |
-| [get-image](#get-image) | 65 |
-| [get-serial](#get-serial) | 76 |
-| [send-keys](#send-keys) | 98 |
-| [send-mouse](#send-mouse) | 110 |
-| [intent](#intent) | 124 |
-| [stop](#stop) | 135 |
-| [experiment new](#experiment-new) | 147 |
-| [test-results](#test-results) | 157 |
-| [Keys](#keys) | 168 |
-| [Mouse](#mouse) | 180 |
-| [The loop](#the-loop) | 188 |
+| [Important](#important) | 24 |
+| [Environment](#environment) | 28 |
+| [Invoke](#invoke) | 36 |
+| [start](#start) | 52 |
+| [get-image](#get-image) | 66 |
+| [get-serial](#get-serial) | 77 |
+| [send-keys](#send-keys) | 99 |
+| [send-mouse](#send-mouse) | 111 |
+| [intent](#intent) | 125 |
+| [stop](#stop) | 136 |
+| [experiment new](#experiment-new) | 148 |
+| [test-def](#test-def) | 159 |
+| [test-results](#test-results) | 169 |
+| [Keys](#keys) | 180 |
+| [Mouse](#mouse) | 192 |
+| [The loop](#the-loop) | 200 |
 
 ## Important
 
@@ -30,7 +31,7 @@ If you are the client, or an agent driving the client: do not look at code. Only
 
 If `DATABASE_URL` is missing, that is a failure. Stop.
 
-The proxy, `experiment new`, and `test-results` read these from the environment. A missing `DATABASE_URL` or `LINEAR_API_TOKEN` exits 1.
+The proxy, `experiment new`, `test-def`, and `test-results` read these from the environment. A missing `DATABASE_URL` or `LINEAR_API_TOKEN` exits 1.
 
 ## Invoke
 
@@ -154,6 +155,16 @@ Creates one pending test run and one Linear issue per stored test definition. Pa
 ```
 
 `--iso` must be an HTTPS URL. `--server_url` may be HTTP or HTTPS. `--version` is required. `--name` is the stored definition's name. A name that matches no definition is a failure.
+
+## test-def
+
+Lists stored test definition names. `--list` is required. Not used while driving a guest. Reads `DATABASE_URL` from the environment.
+
+```bash
+./client test-def --list
+```
+
+`--list` prints one name per line and nothing else. A missing `--list` is a failure.
 
 ## test-results
 
