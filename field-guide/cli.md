@@ -4,6 +4,7 @@ The TypeScript client for the oligarchy control plane. It sends HTTP requests to
 
 ```bash
 ./client experiment new --iso <https-url> --server_url=<http-or-https-url> --version <version> [--name <definition>]
+./client test-def --list
 ./client --agent-id <agent> test-results --id <result-id> --status success|failed [--reason <text>]
 ./client --agent-id <agent> start [--iso <path>] [--disk <path>]
 ./client --agent-id <agent> get-image <id> [-o file]
@@ -17,7 +18,7 @@ The TypeScript client for the oligarchy control plane. It sends HTTP requests to
 
 The server comes from `--server-url`, a full URL used exactly as given (no scheme is ever added), default `http://127.0.0.1:42069`. It is a shared flag on the root command and may sit before or after the subcommand name.
 
-`--agent-id <agent>` is a shared flag on the root command, required for every QEMU command, for `test-results`, and for `intent`, unused by `experiment`. It may sit before or after the subcommand name. This client is used by agents, not humans — the inconvenience of typing it is deliberate. An invocation without it is a missing-option error.
+`--agent-id <agent>` is a shared flag on the root command, required for every QEMU command, for `test-results`, and for `intent`, unused by `experiment` and `test-def`. It may sit before or after the subcommand name. This client is used by agents, not humans — the inconvenience of typing it is deliberate. An invocation without it is a missing-option error.
 
 ## experiment new
 
@@ -30,6 +31,14 @@ Run the root wrapper directly:
 ```bash
 ./client experiment new --iso https://example.com/omarchy.iso --server_url=https://qemu.example.com --version 1.2.3
 ./client experiment new --iso https://example.com/omarchy.iso --server_url=https://qemu.example.com --version 1.2.3 --name "Install Omarchy"
+```
+
+## test-def
+
+Prints every stored test definition name, one per line, and nothing else. `--list` is required; invoking the command without it is a failure. The command reads `DATABASE_URL` from the environment (a `.env` fills in missing variables only) and does not call the proxy. Missing `DATABASE_URL` is a failure.
+
+```bash
+./client test-def --list
 ```
 
 ## test-results
@@ -104,4 +113,4 @@ Kills the session. Only the agent that started it can stop it; a different `--ag
 
 ## Reading the file
 
-The root `client` command shares `--agent-id` and `--server-url` with its subcommands. QEMU handlers, `test-results`, and `intent` yield the parent command and fail if `--agent-id` is missing. `experiment` is a sibling subcommand with its own `new` command. `test-results` is a sibling that writes the result row through `src/test-results.ts`. HTTP helpers stay local to the file: `postJSON`, `readAPIError`, and `errorMessage`. There is no other machinery — see the [philosophy](philosophy.md) for why it should stay that way.
+The root `client` command shares `--agent-id` and `--server-url` with its subcommands. QEMU handlers, `test-results`, and `intent` yield the parent command and fail if `--agent-id` is missing. `experiment` is a sibling subcommand with its own `new` command. `test-def` is a sibling that lists definition names through `src/test-def.ts`. `test-results` is a sibling that writes the result row through `src/test-results.ts`. HTTP helpers stay local to the file: `postJSON`, `readAPIError`, and `errorMessage`. There is no other machinery — see the [philosophy](philosophy.md) for why it should stay that way.
