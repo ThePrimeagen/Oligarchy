@@ -35,23 +35,18 @@ const ROSE_PINE_MAIN = {
 
 const AGENT_COLORS: readonly string[] = Object.values(ROSE_PINE_MAIN);
 
-const assigned = new Map<string, string>();
-const live = new Set<string>();
+const colors = new Map<string, string>();
 let next = 0;
 
 // Inserts are chained so rows land in call order; a failed insert reports itself to
 // stdout and never fails the caller or the lines behind it.
 let chain: Promise<void> = Promise.resolve();
 
-function colorFor(agentId: string): string {
-  const have = assigned.get(agentId);
-  if (have !== undefined) {
-    return have;
+export function acquireAgentColor(agentId: string): void {
+  if (colors.has(agentId)) {
+    return;
   }
-  const taken = new Set<string>();
-  for (const id of live) {
-    taken.add(assigned.get(id)!);
-  }
+  const taken = new Set(colors.values());
   let pick = next;
   for (let i = 0; i < AGENT_COLORS.length; i++) {
     const idx = (next + i) % AGENT_COLORS.length;
@@ -60,25 +55,19 @@ function colorFor(agentId: string): string {
       break;
     }
   }
-  const color = AGENT_COLORS[pick];
+  colors.set(agentId, AGENT_COLORS[pick]);
   next = (pick + 1) % AGENT_COLORS.length;
-  assigned.set(agentId, color);
-  return color;
-}
-
-export function acquireAgentColor(agentId: string): void {
-  colorFor(agentId);
-  live.add(agentId);
 }
 
 export function releaseAgentColor(agentId: string): void {
-  live.delete(agentId);
-  assigned.delete(agentId);
+  colors.delete(agentId);
 }
 
 function paint(hex: string, text: string): string {
-  // Piped stdout is a Socket and has no hasColors; the TTY method still honors FORCE_COLOR.
-  if (!WriteStream.prototype.hasColors.call(process.stdout, 2 ** 24)) {
+  if (process.stdout.isTTY !== true && process.env.FORCE_COLOR === undefined) {
+    return text;
+  }
+  if (!WriteStream.prototype.hasColors.call(process.stdout, 16)) {
     return text;
   }
   const n = Number.parseInt(hex.slice(1), 16);
@@ -92,11 +81,12 @@ function write(line: LogEntry): void {
   const tag = line.agentId ?? "global";
   const text = line.level === undefined || line.level === "info" ? line.text : `${line.level}: ${line.text}`;
   const rendered = `[${tag}] ${text}`;
-  if (line.agentId === undefined) {
+  const hex = line.agentId === undefined ? undefined : colors.get(line.agentId);
+  if (hex === undefined) {
     console.log(styleText("gray", rendered, { stream: process.stdout }));
     return;
   }
-  console.log(paint(colorFor(line.agentId), rendered));
+  console.log(paint(hex, rendered));
 }
 
 export function log(
