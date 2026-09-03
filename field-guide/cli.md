@@ -18,7 +18,7 @@ The TypeScript client for the oligarchy control plane. It sends HTTP requests to
 ./client --agent-id <agent> stop <id> [status [reason]]
 ```
 
-The server comes from `--server-url`, a full URL used exactly as given (no scheme is ever added), default `http://127.0.0.1:42069`. It is a shared flag on the root command and may sit before or after the subcommand name.
+The server comes from `--server-url`, a full URL used exactly as given (no scheme is ever added), default `http://127.0.0.1:42069`. It is a shared flag on the root command and may sit before or after the subcommand name. The CLI reads `OLIGARCHY_TOKEN` from the environment (a `.env` fills in missing variables only) and sends it as `Authorization: Bearer <token>` on every proxy request. A missing token is a startup failure.
 
 `--agent-id <agent>` is a shared flag on the root command, required for every QEMU command, for `test-results`, and for `intent`, unused by `test`. It may sit before or after the subcommand name. This client is used by agents, not humans — the inconvenience of typing it is deliberate. An invocation without it is a missing-option error.
 
@@ -138,4 +138,4 @@ Kills the session. Only the agent that started it can stop it; a different `--ag
 
 ## Reading the file
 
-The root `client` command shares `--agent-id` and `--server-url` with its subcommands. QEMU handlers, `test-results`, and `intent` yield the parent command and fail if `--agent-id` is missing. `test` is a sibling subcommand: `--list` / `--details` / `--name` print stored definitions through `src/test-def.ts`; `new`, `list`, and `run` live as its subcommands. `test-results` is a sibling that writes the result row through `src/test-results.ts`. HTTP helpers stay local to the file: `postJSON`, `readAPIError`, and `errorMessage`. There is no other machinery — see the [philosophy](philosophy.md) for why it should stay that way.
+The file reads `OLIGARCHY_TOKEN` at startup and fails if it is missing. The root `client` command shares `--agent-id` and `--server-url` with its subcommands. QEMU handlers, `test-results`, and `intent` yield the parent command and fail if `--agent-id` is missing. `test` is a sibling subcommand: `--list` / `--details` / `--name` print stored definitions through `src/test-def.ts`; `new`, `list`, and `run` live as its subcommands. `test-results` is a sibling that writes the result row through `src/test-results.ts`. HTTP helpers stay local to the file: `postJSON`, `readAPIError`, and `errorMessage`. There is no other machinery — see the [philosophy](philosophy.md) for why it should stay that way.

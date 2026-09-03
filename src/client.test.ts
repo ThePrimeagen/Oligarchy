@@ -31,8 +31,8 @@ async function runClient(args: string[], env: NodeJS.ProcessEnv = {}): Promise<{
 
 describe("./client happy path", () => {
   it("forwards a QEMU command to the TypeScript client", async () => {
-    let finishRequest!: (value: { method: string | undefined; url: string | undefined; body: unknown }) => void;
-    const request = new Promise<{ method: string | undefined; url: string | undefined; body: unknown }>((done) => {
+    let finishRequest!: (value: { method: string | undefined; url: string | undefined; authorization: string | undefined; body: unknown }) => void;
+    const request = new Promise<{ method: string | undefined; url: string | undefined; authorization: string | undefined; body: unknown }>((done) => {
       finishRequest = done;
     });
     const server = createServer((incoming, response) => {
@@ -47,6 +47,7 @@ describe("./client happy path", () => {
         finishRequest({
           method: incoming.method,
           url: incoming.url,
+          authorization: incoming.headers.authorization,
           body: JSON.parse(body) as unknown,
         });
       });
@@ -57,20 +58,24 @@ describe("./client happy path", () => {
     assert.ok(address !== null && typeof address !== "string");
 
     try {
-      const result = await runClient([
-        "--agent-id",
-        "agent-1",
-        "--server-url",
-        `http://127.0.0.1:${address.port}`,
-        "send-keys",
-        "session-1",
-        "hello",
-      ]);
+      const result = await runClient(
+        [
+          "--agent-id",
+          "agent-1",
+          "--server-url",
+          `http://127.0.0.1:${address.port}`,
+          "send-keys",
+          "session-1",
+          "hello",
+        ],
+        { OLIGARCHY_TOKEN: "test-token" },
+      );
       assert.equal(result.code, 0);
       assert.equal(result.stdout, "");
       assert.deepEqual(await request, {
         method: "POST",
         url: "/send-keys",
+        authorization: "Bearer test-token",
         body: {
           id: "session-1",
           keys: "hello",
