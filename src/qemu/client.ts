@@ -149,11 +149,12 @@ export async function start(
         }
         const proc = spawn(QEMU_BIN, args, { stdio: ["ignore", "ignore", "pipe"] });
         qemu.proc = proc;
-        proc.stderr?.on("data", (chunk) => {
+        proc.stderr!.on("data", (chunk) => {
           stderr = (stderr + String(chunk)).slice(-4096);
         });
         proc.once("error", (err) => reject(new Error(`qemu: ${err.message}`)));
-        proc.once("exit", (code) =>
+        // close, not exit: exit can fire before the piped stderr is fully drained.
+        proc.once("close", (code) =>
           reject(new Error(withStderr(`qemu: exited ${code} before QMP connect`))),
         );
       });
@@ -196,12 +197,11 @@ export async function start(
         socket.destroy();
       }
     });
-    // A socket error or close after the handshake means QEMU is gone. Tear the
-    // session down so qemu.socket is cleared: otherwise execute() writes to a
-    // dead socket, Node drops the write silently, and the command hangs forever.
+    // A socket error or close after the handshake means QEMU is gone (its exit closes
+    // this socket). Tear the session down so qemu.socket is cleared: otherwise execute()
+    // writes to a dead socket, Node drops the write silently, and the command hangs.
     socket.on("error", (err) => teardown(qemu, err));
     socket.on("close", () => teardown(qemu, new Error("qemu: socket closed")));
-    qemu.proc?.once("exit", () => teardown(qemu, new Error("qemu: exited")));
 
     const greetingMsg = (await Promise.race([greeting, timeout])) as QemuGreetingResponse;
     // The greeting is the recorded reply for the boot's qmp_capabilities: its own {return} is empty.
