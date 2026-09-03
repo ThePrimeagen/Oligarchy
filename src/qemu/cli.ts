@@ -354,8 +354,11 @@ function postStart(serverUrl: string, body: unknown): Promise<string> {
         res.on("data", (chunk) => {
           data += chunk;
         });
+        // A reset mid-body emits res error but never end, so without this the promise
+        // (and its timeout, gone with the destroyed socket) would hang forever.
+        res.on("error", reject);
         res.on("end", () => {
-          const status = res.statusCode ?? 0;
+          const status = res.statusCode!;
           if (status >= 200 && status < 300) {
             resolve(data);
           } else {
