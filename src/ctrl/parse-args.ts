@@ -19,13 +19,13 @@ const HttpUrl = Schema.String.check(
   ),
 );
 
-const shared = {
-  serverUrl: Flag.string("server-url").pipe(
-    Flag.withFallbackConfig(Config.string("SERVER_URL")),
-    Flag.withSchema(HttpUrl),
-    Flag.withDescription("Oligarchy server URL; SERVER_URL when omitted"),
-  ),
-};
+// Declared by every action that talks about a proxy; test run does not, its driver reads
+// the url from the ticket.
+export const serverUrl = Flag.string("server-url").pipe(
+  Flag.withFallbackConfig(Config.string("SERVER_URL")),
+  Flag.withSchema(HttpUrl),
+  Flag.withDescription("Oligarchy server URL; SERVER_URL when omitted"),
+);
 
 export type CtrlSpec = {
   env: Record<string, string>;
@@ -35,7 +35,6 @@ export type CtrlSpec = {
 export type CtrlArgs<Spec extends CtrlSpec> = Command.Command.Config.Infer<Spec["flags"]> & {
   [Key in keyof Spec["env"]]: string;
 } & {
-  serverUrl: string;
   databaseUrl: string;
 };
 
@@ -58,8 +57,8 @@ export function parseCtrlArgs<const Env extends Record<string, string>, const Fl
   }
   return Effect.runPromise(
     Effect.gen(function* () {
-      let parsed: Command.Command.Config.Infer<typeof shared & Flags> | undefined;
-      const command = Command.make(name, { ...shared, ...spec.flags }, (input) =>
+      let parsed: Command.Command.Config.Infer<Flags> | undefined;
+      const command = Command.make(name, spec.flags, (input) =>
         Effect.sync(() => {
           parsed = input;
         }),

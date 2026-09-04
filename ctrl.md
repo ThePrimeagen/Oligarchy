@@ -38,7 +38,7 @@ If you are an agent driving a guest, you need two of these: [test start](#test-s
 
 The action comes first. Every value is a flag; there are no positional arguments. Flags may sit in any order after the action.
 
-- `--server-url <url>` — the oligarchy server, a full http or https URL. Required on every action; falls back to `SERVER_URL` from the environment. There is no default.
+- `--server-url <url>` — the oligarchy server, a full http or https URL. Required on every action but `test run`; falls back to `SERVER_URL` from the environment. There is no default.
 - `DATABASE_URL` — read from the environment by every action. `test new` and `test list` also read `LINEAR_API_TOKEN`; `test run` also reads `CURSOR_API_TOKEN`; `session --dump` also reads `OLIGARCHY_TOKEN`, the proxy's bearer token — the other `session` selectors never need it. A `.env` in the current directory fills in missing variables only. A missing variable means exit 1.
 
 A command that works exits 0. A command that fails exits 1 and prints the error: one headline, then the stack trace and the cause behind it. Read the headline first. `./ctrl <action> --help` prints that action's flags.
@@ -90,15 +90,15 @@ Prints every Linear issue on the Oligarchy team whose status type is backlog, as
 ## test run
 
 ```
-./ctrl test run --server-url <url> --ticket <linear-ticket>
+./ctrl test run --ticket <linear-ticket>
 ```
 
-Spawns a Cursor cloud agent that drives one Linear ticket, told to pass `--server-url` on every `./client` and `./ctrl` command. Prints a link to the agent as soon as it starts; does not wait for it. Not used while driving a guest. Reads `CURSOR_API_TOKEN`.
+Spawns a Cursor cloud agent that drives one Linear ticket. The ticket carries the proxy URL, so this is the one action that takes no `--server-url`. Prints a link to the agent as soon as it starts; does not wait for it. Not used while driving a guest. Reads `CURSOR_API_TOKEN`.
 
 - `--ticket <linear-ticket>` — the issue identifier created by `test new`.
 
 ```bash
-./ctrl test run --server-url https://qemu.example.com --ticket OLI-42
+./ctrl test run --ticket OLI-42
 ```
 
 ## test start

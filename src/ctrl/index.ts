@@ -16,7 +16,7 @@ actions:
   session list [--count <n>] [--active] [--json]
   session --session-id <id> --logs|--test-def|--test-results|--actions|--all|--dump
 
-Every action reads DATABASE_URL and takes --server-url (or SERVER_URL).
+Every action reads DATABASE_URL; every action but test run takes --server-url (or SERVER_URL).
 ctrl <action> --help prints that action's flags.`;
 
 const [action, ...argv] = process.argv.slice(2);

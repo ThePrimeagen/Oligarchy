@@ -118,15 +118,18 @@ function angleChord(inner: string): string[] {
     throw new Error("qemu: empty key sequence");
   }
   const parts = inner.split("-");
+  // The minus key is itself the separator: "C--" splits to ["C", "", ""], so a trailing
+  // pair of empty parts is the "-" key, not an empty modifier and an empty key.
+  const minusKey = parts.length >= 2 && parts[parts.length - 1] === "" && parts[parts.length - 2] === "";
   const chord: string[] = [];
-  for (const part of parts.slice(0, -1)) {
+  for (const part of parts.slice(0, minusKey ? -2 : -1)) {
     const mod = MODIFIERS[part.toUpperCase()];
     if (mod === undefined) {
       throw new Error(`qemu: unknown modifier "${part}"`);
     }
     chord.push(mod);
   }
-  const name = parts[parts.length - 1];
+  const name = minusKey ? "-" : parts[parts.length - 1];
   // <GT> is shift+dot on a US keyboard.
   if (name.toUpperCase() === "GT") {
     return [...chord, "shift", "dot"];
