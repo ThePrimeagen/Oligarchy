@@ -19,13 +19,22 @@ const endFlags = {
 export type IntentStartArgs = ClientArgs<typeof startFlags>;
 export type IntentEndArgs = ClientArgs<typeof endFlags>;
 
-export function intentRun(argv: readonly string[]): Promise<void> {
+const USAGE = `usage: client intent start --session-id <id> --test-result-id <id> --message <text>
+       client intent end --session-id <id>
+
+client intent start --help and client intent end --help print their flags.`;
+
+export async function intentRun(argv: readonly string[]): Promise<void> {
   const [verb, ...rest] = argv;
   switch (verb) {
     case "start":
       return intentStartRun(rest);
     case "end":
       return intentEndRun(rest);
+    case "--help":
+    case "-h":
+      console.log(USAGE);
+      return;
     default:
       throw new Error(`intent: expected start or end${verb === undefined ? "" : `, got ${verb}`}`);
   }

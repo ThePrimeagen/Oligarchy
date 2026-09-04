@@ -93,7 +93,15 @@ export type TestStartArgs = CtrlArgs<typeof startSpec>;
 
 export type TestDefinitionRow = typeof testDefinitions.$inferSelect;
 
-export function testRun(argv: readonly string[]): Promise<void> {
+const USAGE = `usage: ctrl test --list [--details] [--name <definition>]
+       ctrl test new --iso <https-url> --version <version> [--name <definition>]
+       ctrl test list
+       ctrl test run --ticket <linear-ticket>
+       ctrl test start --session-id <id> --test-result-id <id>
+
+Every form takes --server-url <url> (or SERVER_URL). ctrl test <verb> --help prints that verb's flags.`;
+
+export async function testRun(argv: readonly string[]): Promise<void> {
   const [verb, ...rest] = argv;
   switch (verb) {
     case "new":
@@ -104,6 +112,10 @@ export function testRun(argv: readonly string[]): Promise<void> {
       return testRunRun(rest);
     case "start":
       return testStartRun(rest);
+    case "--help":
+    case "-h":
+      console.log(USAGE);
+      return;
     default:
       return testDefinitionsRun(argv);
   }

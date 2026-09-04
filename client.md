@@ -164,7 +164,7 @@ A greeter or installer button is a left click at that point. A double-click laun
 
 ## The loop
 
-Every action runs inside an [intent](#intent): start one that says what you are about to do, do the work, end it.
+Every guest action — keys, mouse, images — runs inside an [intent](#intent): start one that says what you are about to do, do the work, end it. Only `start`, `./ctrl`, and `stop` sit outside one.
 
 Send keys or mouse, wait about three seconds, take an image, read it, decide. That is the whole method. Never sleep more than ten seconds between actions. When something genuinely slow is running, keep taking images instead of trusting a long sleep.
 

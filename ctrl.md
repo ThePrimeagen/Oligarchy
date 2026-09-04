@@ -91,7 +91,7 @@ Ties a pending test result to the session that is running it. The result already
 
 ## test-results
 
-Closes one pending test result. `--agent-id` is required and must be the agent that drove the session.
+Closes one pending test result. `--agent-id` is required: that agent's session is looked up and recorded on the result.
 
 ```bash
 ./ctrl test-results --agent-id <agent> --server-url <url> --id <result-id> --status success
