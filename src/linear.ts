@@ -164,13 +164,9 @@ export async function linearAssigneeId(token: string): Promise<string> {
 
 export async function createLinearTicket(token: string, experiment: Experiment, test: ExperimentTest): Promise<LinearTicket> {
   const teamId = await linearTeamId(token);
-  const ticket = await createLinearIssue(
-    token,
-    teamId,
-    await linearLabelIds(token, teamId, experiment.version),
-    await linearAssigneeId(token),
-    test,
-  );
+  const labelIds = await linearLabelIds(token, teamId, experiment.version);
+  const assigneeId = await linearAssigneeId(token);
+  const ticket = await createLinearIssue(token, teamId, labelIds, assigneeId, test);
   await describeLinearIssue(token, ticket, experiment, test);
   return ticket;
 }
