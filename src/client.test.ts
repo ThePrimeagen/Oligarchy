@@ -342,7 +342,10 @@ describe("./client unhappy path", () => {
 
     const intent = await runClient(["intent", "--agent-id", "agent-1"]);
     assert.notEqual(intent.code, 0);
-    assert.match(intent.stderr, /^intent: expected start or end\nError: intent: expected start or end\n\s+at intentRun /);
+    assert.match(
+      intent.stderr,
+      /^intent: expected start or end, got --agent-id\nError: intent: expected start or end, got --agent-id\n\s+at intentRun .*src\/client\/actions\/intent\.ts:\d+:\d+/,
+    );
   });
 
   it("prints the server's error as a headline, then the stack, and exits 1", async () => {

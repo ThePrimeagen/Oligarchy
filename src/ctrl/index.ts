@@ -43,8 +43,11 @@ try {
   // Effect already rendered parse failures with the action's help.
   if (!CliError.isCliError(err)) {
     const e = err as Error;
-    // Drizzle's message is the failed SQL; the Postgres reason lives on the cause.
+    // Drizzle's message is the failed SQL and the Postgres reason lives on the cause: one
+    // headline that says both, then the error as Node renders it — stack, cause chain,
+    // and every property.
     console.error(e.cause instanceof Error ? `${e.message}: ${e.cause.message}` : e.message);
+    console.error(e);
   }
   process.exit(1);
 }
