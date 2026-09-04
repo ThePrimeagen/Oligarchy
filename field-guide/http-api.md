@@ -17,7 +17,7 @@ Boots a QEMU session. Returns `{"id": "<uuid>"}`.
 The body is JSON with three keys — `iso` and `agent` required, `disk` optional:
 
 - `iso` — guest ISO path or http(s) url. Required.
-- `disk` — qcow2 path, which must already exist. When the key is **absent**, the proxy creates a fresh disk (40G virtual) in the session dir.
+- `disk` — qcow2 path, which must already exist. It is checked before anything else the start does — before the iso download and before the agent is registered — so a wrong path fails fast (`qemu: disk not found: <path>`) without spending the agent's one registration. When the key is **absent**, the proxy creates a fresh disk (40G virtual) in the session dir.
 - `agent` — the calling agent's id, for attribution. Required.
 
 Clients that want the server-managed disk must therefore omit the key, not send `""`. The CLI does this; keep it that way.

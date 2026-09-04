@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rm } from "node:fs/promises";
+import { mkdir, readFile, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { loadEnvFile } from "node:process";
 import { Cause, Effect, Exit, Layer, Option, Queue, Schema, Stream } from "effect";
@@ -286,6 +286,16 @@ function jsonBody<S extends Schema.Constraint>(
 type RouteHandler = Effect.Effect<HttpServerResponse.HttpServerResponse, ApiError, HttpRouter.Provided>;
 
 async function launchQemu(
+    // Checked before anything else: a wrong disk path must not cost an iso download, and
+    // it must fail ahead of registerAgent, or the agent's one registration is spent on a
+    // machine that never booted.
+    if (cfg.disk !== undefined) {
+      try {
+        await stat(cfg.disk);
+      } catch {
+        throw new Error(`qemu: disk not found: ${cfg.disk}`);
+      }
+    }
   live: LiveSession,
   cfg: typeof StartBody.Type,
 ): Promise<void> {
