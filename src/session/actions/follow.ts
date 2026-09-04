@@ -38,37 +38,28 @@ const STATUS_COLOR: Record<Extract<FollowEvent, { type: "session" }>["status"], 
 };
 
 export function pickFollowSession(
-  rows: SessionListItem[],
+  rows: SessionListItem[] | Promise<SessionListItem[]>,
   input: NodeJS.ReadStream,
   output: NodeJS.WriteStream,
   cursorColumn: number,
 ): Promise<string | undefined> {
-  const sessions = rows
-    .filter((row): row is SessionListItem & { status: "downloading" | "running" } => row.status === "running" || row.status === "downloading")
-    .sort((a, b) => Number(a.status === "downloading") - Number(b.status === "downloading"));
-  if (sessions.length === 0) {
-    output.write("\r\nno running or pending sessions\r\n");
-    return Promise.resolve(undefined);
-  }
-
+  let sessions: (SessionListItem & { status: "downloading" | "running" })[] | undefined;
   let selected = 0;
-  let drawn = false;
-  const lineCount = sessions.length + 2;
+  let lineCount = 1;
   const previousKeypressListeners = input.listeners("keypress");
   const inputWasPaused = input.isPaused();
   for (const listener of previousKeypressListeners) {
     input.removeListener("keypress", listener);
   }
 
-  const drawPicker = (): void => {
-    if (drawn) {
+  const drawPicker = (redraw: boolean): void => {
+    if (redraw) {
       output.write(`\x1b[${lineCount - 1}A\r`);
     } else {
-      output.write("\x1b[?25l\r\n");
-      drawn = true;
+      output.write("\r");
     }
     output.write("\x1b[2K  active sessions\r\n");
-    for (const [index, session] of sessions.entries()) {
+    for (const [index, session] of sessions!.entries()) {
       const marker = index === selected ? "\x1b[36m›\x1b[0m" : " ";
       const status = `${PICKER_STATUS_COLOR[session.status]}${PICKER_STATUS_LABEL[session.status].padEnd(PICKER_STATUS_WIDTH)}${RESET}`;
       output.write(`\x1b[2K${marker} ${status}  ${session.id}\r\n`);
@@ -76,8 +67,9 @@ export function pickFollowSession(
     output.write("\x1b[2K  ↑/↓ or tab navigate • enter select • esc cancel");
   };
 
-  return new Promise((resolve) => {
-    const finish = (sessionId: string | undefined): void => {
+  return new Promise((resolve, reject) => {
+    const leave = (done: () => void): void => {
+      input.pause();
       input.removeListener("keypress", onKeypress);
       output.write("\r");
       for (let line = 0; line < lineCount; line++) {
@@ -96,27 +88,50 @@ export function pickFollowSession(
         if (!inputWasPaused) {
           input.resume();
         }
-        resolve(sessionId);
+        done();
       });
     };
 
     const onKeypress = (_text: string | undefined, key: Key): void => {
+      if (sessions === undefined) {
+        return;
+      }
       if (key.name === "up" || (key.name === "tab" && key.shift)) {
         selected = (selected - 1 + sessions.length) % sessions.length;
-        drawPicker();
+        drawPicker(true);
       } else if (key.name === "down" || key.name === "tab") {
         selected = (selected + 1) % sessions.length;
-        drawPicker();
+        drawPicker(true);
       } else if (key.name === "return" || key.name === "enter") {
-        finish(sessions[selected].id);
+        leave(() => resolve(sessions![selected].id));
       } else if (key.name === "escape" || (key.ctrl && key.name === "c")) {
-        finish(undefined);
+        leave(() => resolve(undefined));
       }
     };
 
     input.on("keypress", onKeypress);
-    drawPicker();
+    output.write("\x1b[?25l\r\n\x1b[2K  loading sessions...");
     input.resume();
+    void Promise.resolve(rows).then(
+      (listed) => {
+        sessions = listed
+          .filter(
+            (row): row is SessionListItem & { status: "downloading" | "running" } =>
+              row.status === "running" || row.status === "downloading",
+          )
+          .sort((a, b) => Number(a.status === "downloading") - Number(b.status === "downloading"));
+        if (sessions.length === 0) {
+          leave(() => {
+            output.write("\r\nno running or pending sessions\r\n");
+            resolve(undefined);
+          });
+          return;
+        }
+        lineCount = sessions.length + 2;
+        drawPicker(false);
+      },
+      (err) => leave(() => reject(err)),
+    );
   });
 }
 

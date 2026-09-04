@@ -31,18 +31,23 @@ const COMMANDS = ["start", "get-image", "get-serial", "send-keys", "send-mouse",
 async function completions(line: string): Promise<CompleterResult> {
   const followArg = /^\s*follow\s+(\S*)$/.exec(line);
   if (followArg !== null) {
-    const result = await runCtrl(session, ["session", "list", "--count", "10", "--json"]);
-    if (result.code !== 0) {
-      process.stdout.write(`\r\n${result.stderr}\r\n${rl.getPrompt()}${line}`);
+    const rows = runCtrl(session, ["session", "list", "--count", "10", "--json"]).then((result) => {
+      if (result.code !== 0) {
+        throw new Error(result.stderr);
+      }
+      const listed = (JSON.parse(result.stdout.toString("utf8")) as SessionListItem[]).filter((row) => row.id.startsWith(followArg[1]));
+      if (!listed.some((row) => row.status === "running" || row.status === "downloading")) {
+        throw new Error("no running or pending sessions");
+      }
+      return listed;
+    });
+    try {
+      const sessionId = await pickFollowSession(rows, process.stdin, process.stdout, rl.getCursorPos().cols);
+      return [sessionId === undefined ? [] : [sessionId], followArg[1]];
+    } catch (err) {
+      process.stdout.write(`\r\n${(err as Error).message}\r\n${rl.getPrompt()}${line}`);
       return [[], followArg[1]];
     }
-    const rows = (JSON.parse(result.stdout.toString("utf8")) as SessionListItem[]).filter((row) => row.id.startsWith(followArg[1]));
-    if (!rows.some((row) => row.status === "running" || row.status === "downloading")) {
-      process.stdout.write(`\r\nno running or pending sessions\r\n${rl.getPrompt()}${line}`);
-      return [[], followArg[1]];
-    }
-    const sessionId = await pickFollowSession(rows, process.stdin, process.stdout, rl.getCursorPos().cols);
-    return [sessionId === undefined ? [] : [sessionId], followArg[1]];
   }
   const intentArg = /^\s*intent\s+(\S*)$/.exec(line);
   if (intentArg !== null) {

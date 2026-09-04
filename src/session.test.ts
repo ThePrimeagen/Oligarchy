@@ -8,7 +8,7 @@ import { createInterface, type AsyncCompleter, type CompleterResult } from "node
 import { PassThrough } from "node:stream";
 import { describe, it } from "node:test";
 import { deflateSync } from "node:zlib";
-import { pickFollowSession } from "./session/actions/follow.ts";
+import { pickFollowSession, type SessionListItem } from "./session/actions/follow.ts";
 
 const SESSION = resolve(import.meta.dirname, "../session");
 const SESSION_ID = "6f1c0000-0000-4000-8000-00000000e2a9";
@@ -221,6 +221,27 @@ function close(server: Server): Promise<void> {
 }
 
 describe("./session follow completion", () => {
+  it("owns input while the session list is loading so a fast Enter cannot submit follow", async () => {
+    const term = pickerTerminal();
+    let provideRows: (rows: SessionListItem[]) => void = () => undefined;
+    const rows = new Promise<SessionListItem[]>((resolve) => {
+      provideRows = resolve;
+    });
+    const selection = pickFollowSession(rows, term.input, term.output, 16);
+    term.input.emit("keypress", "\r", { name: "return" });
+    provideRows([{ id: FOLLOWED_ID, status: "running", startedAt: "2026-09-04T11:59:55.000Z" }]);
+    await new Promise((resolve) => setImmediate(resolve));
+    let resolved = false;
+    void selection.then(() => {
+      resolved = true;
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(resolved, false);
+    term.input.emit("keypress", "\r", { name: "return" });
+    assert.equal(await selection, FOLLOWED_ID);
+  });
+
   it("shows running sessions first, colors statuses, and selects with the keyboard", async () => {
     const term = pickerTerminal();
     const selection = pickFollowSession(
@@ -233,6 +254,7 @@ describe("./session follow completion", () => {
       term.output,
       16,
     );
+    await new Promise((resolve) => setImmediate(resolve));
     term.input.emit("keypress", "\t", { name: "tab", shift: false });
     term.input.emit("keypress", "\r", { name: "return" });
 
@@ -275,6 +297,7 @@ describe("./session follow completion", () => {
     readline.on("line", (line) => submitted.push(line));
     readline.write("follow ");
     term.input.emit("keypress", "\t", { name: "tab" });
+    await new Promise((resolve) => setImmediate(resolve));
     term.input.emit("keypress", "\r", { name: "return" });
     term.input.emit("keypress", "\n", { name: "enter" });
     await new Promise((resolve) => setImmediate(resolve));
@@ -305,6 +328,7 @@ describe("./session follow completion", () => {
       term.output,
       16,
     );
+    await new Promise((resolve) => setImmediate(resolve));
     term.input.emit("keypress", "\x1b", { name: "escape" });
 
     assert.equal(await selection, undefined);
