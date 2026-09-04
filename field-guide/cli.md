@@ -11,6 +11,7 @@ Three TypeScript executables share one shape. `./client` (`src/client/index.ts`)
 ./client intent start --agent-id <agent> --server-url <url> --session-id <id> --test-result-id <id> --message <message>
 ./client intent end --agent-id <agent> --server-url <url> --session-id <id>
 ./client stop --agent-id <agent> --server-url <url> --session-id <id> [--status <status>] [--reason <text>]
+./client follow --agent-id <agent> --server-url <url> --session-id <id>
 
 ./ctrl test --list [--details] [--name <definition>] --server-url <url>
 ./ctrl test new --iso <https-url> --version <version> [--name <definition>] --server-url <url>
@@ -91,6 +92,14 @@ Kills the session. Only the agent that started it can stop it; a different `--ag
 - An undefined status or reason is left out of the JSON, so the server applies its own defaults (`aborted`, no reason).
 - Wire call: `POST /stop` with `{"id", "agent", "status"?, "reason?"}` → `{"ok": "true"}`.
 
+### follow
+
+Watches a session that is pending or running and prints its events to stdout, one JSON object per line, until the session ends. It is an observer, not a driver: any agent may follow any session, and following is not a command, so it does not reset the session's inactivity window. The events are the `FollowEvent` shape in `src/session.d.ts` — `session` (status), `intent` (`started` with the message, then `completed` or `cancelled`), `action` (`running` with the action's name — `send-keys`, `send-mouse`, `get-image`, `get-serial` — then `completed` or `failed` by id), and `image` (the PNG as base64) — documented under `GET /follow` in [http-api.md](http-api.md).
+
+- `--session-id` names the session. A session that has already ended is a failure that names its status; an unknown id is a failure.
+- The stream goes through `node:http`, not `fetch`: a quiet session would otherwise be cut off by undici's five-minute body timeout.
+- Wire call: `GET /follow?id=<id>` → `application/x-ndjson` lines until the session ends.
+
 ## Ctrl actions
 
 `src/ctrl/actions/*.ts`. `test.ts` exports `testRun`, a switch over `new`, `list`, `run`, and `start`; anything else parses as `test --list`. The Linear API — team, label, and assignee lookup, issue create and describe, backlog paging, and the two prompt renderers — lives in `src/linear.ts`. The one function that wraps `@cursor/sdk` is `prompt` in `src/cursor-agent/client.ts`.
@@ -135,23 +144,34 @@ Prints stored logs, the test definition, the test result, and the actions for on
 
 ## The session REPL
 
-`./session [--server-url <url>]` is the interactive way to drive one guest. `src/session/parse-args.ts` parses that one flag the same way the others do (`SERVER_URL` fallback, then `http://127.0.0.1:42069`; `OLIGARCHY_TOKEN` through `Config`; `--help` and a stray positional behave as everywhere else), then `index.ts` runs a readline REPL with tab completion. Each line is split into a command word and the rest; `dispatch` is a `switch` over the command, and each case is one file under `src/session/actions/` taking the `Session` state and the rest of the line. The state is a plain object from `createSession` in `src/session/client.ts` — `serverUrl`, `agentId`, `sessionId`, `intentOpen`, `startInFlight` — operated on by standalone functions, per [development.md](../development.md).
+`./session [--server-url <url>]` is the interactive way to drive one guest. `src/session/parse-args.ts` parses that one flag the same way the others do (`SERVER_URL` fallback, then `http://127.0.0.1:42069`; `OLIGARCHY_TOKEN` through `Config`; `--help` and a stray positional behave as everywhere else), then `index.ts` runs a readline REPL with tab completion. Each line is split into a command word and the rest; `dispatch` is a `switch` over the command, and each case is one file under `src/session/actions/` taking the `Session` state and the rest of the line. The state is a plain object from `createSession` in `src/session/client.ts` — `serverUrl`, `agentId`, `sessionId`, `intentOpen`, `startInFlight`, `following` — operated on by standalone functions, per [development.md](../development.md).
 
 Every command runs `./client` as a child process (`runClient`) with `--agent-id` and `--server-url` appended, so the REPL owns no HTTP of its own and the client's flag parsing and error rendering are the single source of truth. The REPL grammar is terse because a person types it; the action files translate it into the client's flags:
 
 | You type | The client runs |
 | --- | --- |
 | `start [iso] [disk]` | `start [--iso <iso>] [--disk <disk>]` |
-| `get-image` | `get-image --session-id <id>`, then renders the PNG inline (kitty or iTerm protocol, else ANSI half-blocks from `src/session/image.ts`) |
+| `get-image` | `get-image --session-id <id>`, then renders the PNG inline (kitty or iTerm protocol, else ANSI half-blocks from `src/terminal/image.ts`) |
 | `get-serial` | `get-serial --session-id <id>` |
 | `send-keys <keys>` | `send-keys --session-id <id> --keys <rest of line>` |
 | `send-mouse <x> <y> [button] [clicks]` | `send-mouse --session-id <id> --x <x> --y <y> [--button <b>] [--clicks <n>]` |
 | `intent start <message>` | `intent start --session-id <id> --test-result-id manual --message <rest of line>` |
 | `intent end` | `intent end --session-id <id>` |
 | `stop [status] [reason]` | `stop --session-id <id> [--status <s>] [--reason <rest>]` |
+| `follow <session-id>` | `follow --session-id <id>`, streamed; see [Following a session](#following-a-session) |
 | `status`, `help`, `exit` / `quit` | nothing; local |
 
 Every `start` mints a fresh agent id (`session-<uuid>`), because the proxy keys one session per agent. A failed command prints the client's stderr — the headline and the stack — and keeps the session; a failed `stop` clears it anyway, since the proxy has already lost it. `exit`, stdin closing, Ctrl-C, SIGTERM, and SIGHUP all run `shutdown`: wait for an in-flight start (the proxy's `/start` is uninterruptible and would otherwise leave an orphan QEMU), stop the session, exit 0. The client child is spawned detached in its own process group for the same reason: a hangup that reaches the foreground group must not kill a start before it hands back its id.
+
+### Following a session
+
+`follow <session-id>` watches another session — typically one an agent is driving — live. It is the one REPL command that takes the whole screen. `src/session/actions/follow.ts` spawns `./client follow --session-id <id>` and reads its stdout line by line; on the first event it switches to the terminal's alternate screen and draws:
+
+- Down the left, forty columns wide: a header (`following <id8> <status>`, the status colored as `ctrl session list` colors it), then one line per intent at the margin and one line per action indented two spaces under the intent it ran in — an action with no intent open sits at the margin too. A running line is gray with a spinning braille glyph (redrawn every 80ms); a completed line is green with `✓`; a failed action or a cancelled intent is red with `✗`. Only the action's name is shown — `send-keys`, `send-mouse`, `get-image`, `get-serial` — nothing about its arguments. Lines that no longer fit scroll off the top for good; the list keeps at most 200 entries.
+- On the right, every remaining column: the session's latest image, placed with the kitty graphics protocol (`src/terminal/image.ts`, `placeImage`), scaled to fit the box while keeping its aspect ratio (a terminal cell is taken as twice as tall as it is wide). Each new `get-image` replaces it.
+- Bottom-left: `ctrl-c detaches`.
+
+Every line is overwritten at a fixed width with absolute cursor moves and nothing ever writes a newline, so the screen never scrolls and the image stays where it was put. On resize the screen and its images are cleared and redrawn. Ctrl-C while following kills the client child and detaches — the REPL's SIGINT handler checks `session.following` first — and the main screen comes back with `detached from <id>`. The screen is handed back inside the child's `close` listener, so `shutdown` on SIGTERM or SIGHUP can kill the child, await its close, and exit with the terminal restored. When the followed session ends the stream ends, the view leaves the screen, and the REPL prints `session <id> <status>`; a stream that ends while the status is still `pending` or `running` was cut by the proxy because this follower stopped reading, and prints `dropped from <id>: this follower fell behind`. A refused follow (a finished or unknown session) never takes the screen; the client's headline is printed at the prompt. The command needs a terminal that speaks the kitty graphics protocol — ghostty or kitty — and refuses otherwise, before calling the proxy. Alacritty has no image protocol at all, so it cannot host the view.
 
 ## Errors and exit codes
 

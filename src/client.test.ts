@@ -298,13 +298,43 @@ describe("./client happy path", () => {
     }
   });
 
+  it("follow streams the proxy's event lines to stdout as they arrive and exits 0 when the stream ends", async () => {
+    const received: Received[] = [];
+    const server = createServer((incoming, response) => {
+      received.push({ method: incoming.method, url: incoming.url, authorization: incoming.headers.authorization, body: undefined });
+      response.writeHead(200, { "Content-Type": "application/x-ndjson" });
+      response.write('{"type":"session","status":"running"}\n');
+      setTimeout(() => {
+        response.write('{"type":"action","id":1,"name":"send-keys","state":"running"}\n');
+        response.end('{"type":"session","status":"succeeded"}\n');
+      }, 200);
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    assert.ok(address !== null && typeof address !== "string");
+    try {
+      const result = await runClient(["follow", "--agent-id", "agent-1", "--server-url", `http://127.0.0.1:${address.port}`, "--session-id", "session-1"]);
+      assert.equal(result.stderr, "");
+      assert.equal(result.code, 0);
+      assert.equal(
+        result.stdout,
+        '{"type":"session","status":"running"}\n{"type":"action","id":1,"name":"send-keys","state":"running"}\n{"type":"session","status":"succeeded"}\n',
+      );
+      assert.deepEqual(received, [{ method: "GET", url: "/follow?id=session-1", authorization: "Bearer test-token", body: undefined }]);
+    } finally {
+      await close(server);
+    }
+  });
+
   it("prints the actions for --help", async () => {
     const result = await runClient(["--help"]);
     assert.equal(result.code, 0);
     assert.match(result.stdout, /start/);
     assert.match(result.stdout, /intent start/);
     assert.match(result.stdout, /stop --session-id/);
-    assert.doesNotMatch(result.stdout, /(get-image|get-serial|send-keys|send-mouse|stop) <id>/);
+    assert.match(result.stdout, /follow --session-id/);
+    assert.doesNotMatch(result.stdout, /(get-image|get-serial|send-keys|send-mouse|stop|follow) <id>/);
   });
 });
 
@@ -416,6 +446,26 @@ describe("./client unhappy path", () => {
     const stopPositional = await runClient(["stop", "--agent-id", "agent-1", "--session-id", "session-1", "failed"]);
     assert.notEqual(stopPositional.code, 0);
     assert.match(stopPositional.stderr, /Unexpected positional argument: "failed"/);
+  });
+
+  it("follow prints the proxy's refusal as a headline, then the stack, and exits 1 without printing a stream", async () => {
+    const proxy = await stubProxy(() => ({ status: 409, body: '{"error":"session \\"session-1\\" has already completed (succeeded)"}' }));
+    try {
+      const result = await runClient(["follow", "--agent-id", "agent-1", "--server-url", proxy.url, "--session-id", "session-1"]);
+      assert.equal(result.code, 1);
+      assert.equal(result.stdout, "");
+      const [headline, stackHead, ...frames] = result.stderr.split("\n");
+      assert.equal(headline, 'session "session-1" has already completed (succeeded)');
+      assert.equal(stackHead, 'Error: session "session-1" has already completed (succeeded)');
+      assert.match(frames.join("\n"), /^\s+at .*src\/client\/http\.ts:\d+:\d+/m);
+      assert.equal(proxy.received[0].url, "/follow?id=session-1");
+    } finally {
+      await close(proxy.server);
+    }
+
+    const missingId = await runClient(["follow", "--agent-id", "agent-1"]);
+    assert.notEqual(missingId.code, 0);
+    assert.match(missingId.stderr, /Missing required flag: --session-id/);
   });
 
   it("spells out a refused connection: headline, stack, and the cause with its own stack and code", async () => {

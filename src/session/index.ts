@@ -1,6 +1,8 @@
 #!/usr/bin/env -S node --experimental-strip-types
+import { once } from "node:events";
 import { createInterface } from "node:readline";
 import { CliError } from "effect/unstable/cli";
+import { followRun } from "./actions/follow.ts";
 import { getImageRun } from "./actions/get-image.ts";
 import { getSerialRun } from "./actions/get-serial.ts";
 import { intentRun } from "./actions/intent.ts";
@@ -20,10 +22,11 @@ send-mouse <x> <y> [button] [clicks]  move, click, or scroll; x and y are 0..1 f
 intent start <message>                declare what you are about to do
 intent end                            close the open intent
 stop [status] [reason]                stop the session; status is succeeded, failed, or aborted
+follow <session-id>                   watch another session live: its actions down the left, its latest image on the right; ctrl-c detaches
 status                                show agent, server, session, and intent
 exit                                  stop the session and leave`;
 
-const COMMANDS = ["start", "get-image", "get-serial", "send-keys", "send-mouse", "intent", "stop", "status", "help", "exit", "quit"];
+const COMMANDS = ["start", "get-image", "get-serial", "send-keys", "send-mouse", "intent", "stop", "follow", "status", "help", "exit", "quit"];
 
 function completer(line: string): [string[], string] {
   const intentArg = /^\s*intent\s+(\S*)$/.exec(line);
@@ -58,7 +61,14 @@ const session = createSession(args.serverUrl);
 let shuttingDown = false;
 
 const rl = createInterface({ input: process.stdin, output: process.stdout, completer });
-rl.on("SIGINT", () => void shutdown());
+// While a follow holds the screen, Ctrl-C detaches from it; otherwise it leaves.
+rl.on("SIGINT", () => {
+  if (session.following !== undefined) {
+    session.following.kill();
+    return;
+  }
+  void shutdown();
+});
 process.on("SIGTERM", () => void shutdown());
 process.on("SIGHUP", () => void shutdown());
 
@@ -87,6 +97,9 @@ async function dispatch(line: string): Promise<void> {
     case "stop":
       await stopRun(session, rest);
       break;
+    case "follow":
+      await followRun(session, rest);
+      break;
     case "status":
       statusRun(session);
       break;
@@ -108,6 +121,12 @@ async function shutdown(): Promise<void> {
   }
   shuttingDown = true;
   rl.close();
+  // The follow child is in its own process group, so a hangup or SIGTERM here never reaches
+  // it; its close is what hands the screen back, so wait for that before exiting.
+  if (session.following !== undefined) {
+    session.following.kill();
+    await once(session.following, "close");
+  }
   // A start killed mid-boot still boots on the proxy (/start is uninterruptible), so wait
   // for the id it returns and stop that, rather than leaving an unreachable session behind.
   const inflight = session.startInFlight;

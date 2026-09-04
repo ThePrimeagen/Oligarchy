@@ -55,6 +55,11 @@ export async function endSession(
   });
 }
 
+export async function getSessionStatus(db: Db, id: string): Promise<SessionStartStatus | SessionEndStatus | undefined> {
+  const [row] = await db.select({ status: sessions.status }).from(sessions).where(eq(sessions.id, id));
+  return row?.status;
+}
+
 export async function registerAgent(db: Db, agentId: string, sessionId: string): Promise<void> {
   await db.insert(agentRuns).values({ agentId, sessionId });
 }
