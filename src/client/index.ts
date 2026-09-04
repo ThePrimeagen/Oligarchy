@@ -1,5 +1,6 @@
 #!/usr/bin/env -S node --experimental-strip-types
 import { CliError } from "effect/unstable/cli";
+import { followRun } from "./actions/follow.ts";
 import { getImageRun } from "./actions/get-image.ts";
 import { getSerialRun } from "./actions/get-serial.ts";
 import { intentRun } from "./actions/intent.ts";
@@ -19,6 +20,7 @@ actions:
   intent start --session-id <id> --test-result-id <id> --message <text>
   intent end --session-id <id>
   stop --session-id <id> [--status succeeded|failed|aborted] [--reason <text>]
+  follow --session-id <id>
 
 Every value is a flag; there are no positional arguments.
 client <action> --help prints that action's flags.`;
@@ -47,6 +49,9 @@ try {
       break;
     case "stop":
       await stopRun(argv);
+      break;
+    case "follow":
+      await followRun(argv);
       break;
     case "--help":
     case "-h":

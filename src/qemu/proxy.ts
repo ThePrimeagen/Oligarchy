@@ -4,12 +4,12 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { loadEnvFile } from "node:process";
-import { Cause, Effect, Exit, Layer, Option, Schema } from "effect";
+import { Cause, Effect, Exit, Layer, Option, Queue, Schema, Stream } from "effect";
 import { CliError, Command, Flag } from "effect/unstable/cli";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node";
 import { acquireAgentColor, flushLogs, log, releaseAgentColor } from "../db/log.ts";
-import { connectDatabase, endSession, finishAction, getImage, insertSession, pingDatabase, registerAgent, sessionRunning, startAction } from "../db/ops.ts";
+import { connectDatabase, endSession, finishAction, getImage, getSessionStatus, insertSession, pingDatabase, registerAgent, sessionRunning, startAction } from "../db/ops.ts";
 import { finishIntentSpan, finishQemuActionSpan, finishQemuSpan, flushSentry, initSentry, startIntentSpan, startQemuActionSpan, startQemuSpan, type QemuSpan } from "../sentry.ts";
 import { QEMU_DISPLAYS, createDisk, createQemu, missingHostRequirements, screendump, sendKeys, sendMouse, start, stop, type Qemu, type QemuDisplay } from "./client.ts";
 import { getIso } from "./iso.ts";
@@ -49,6 +49,7 @@ const MAX_CLICKS = 100;
 // Each chord is a QMP exchange and an action row, paced ~60ms apart; cap the count so
 // one request cannot run for many minutes or write thousands of rows.
 const MAX_KEYS = 1000;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const db = connectDatabase(databaseUrl);
 
@@ -57,16 +58,25 @@ type LiveSession = {
   agent: string;
   lastCommandAt: number;
   span: QemuSpan;
-  intent?: QemuSpan;
+  intent?: { span: QemuSpan; message: string };
   actionSpans: Set<QemuSpan>;
+  followers: Set<Queue.Queue<FollowEvent, Cause.Done>>;
+  actionSeq: number;
 };
+
+function emitFollow(live: LiveSession, event: FollowEvent): void {
+  for (const follower of live.followers) {
+    Queue.offerUnsafe(follower, event);
+  }
+}
 
 function finishOpenIntent(live: LiveSession, status: "completed" | "cancelled"): void {
   if (live.intent === undefined) {
     return;
   }
-  finishIntentSpan(live.intent, status);
+  finishIntentSpan(live.intent.span, status);
   live.intent = undefined;
+  emitFollow(live, { type: "intent", state: status });
 }
 
 const sessions = new Map<string, LiveSession>();
@@ -92,6 +102,22 @@ function finishLiveSession(live: LiveSession, status: SessionEndStatus): void {
   }
   finishOpenIntent(live, "cancelled");
   finishQemuSpan(live.span, status);
+  emitFollow(live, { type: "session", status });
+  for (const follower of live.followers) {
+    Queue.endUnsafe(follower);
+  }
+  live.followers.clear();
+}
+
+// Brackets one request's work for the followers: a running line when it starts, then its verdict.
+function followed<A, R>(live: LiveSession, name: string, work: Effect.Effect<A, ApiError, R>): Effect.Effect<A, ApiError, R> {
+  live.actionSeq++;
+  const id = live.actionSeq;
+  emitFollow(live, { type: "action", id, name, state: "running" });
+  return work.pipe(
+    Effect.tap(() => Effect.sync(() => emitFollow(live, { type: "action", id, state: "completed" }))),
+    Effect.tapError(() => Effect.sync(() => emitFollow(live, { type: "action", id, state: "failed" }))),
+  );
 }
 
 // Drizzle buries the reason (ECONNREFUSED etc.) in the cause; its own message is the failed SQL.
@@ -104,7 +130,7 @@ function recorder(live: LiveSession): QemuExchangeRecorder {
   return async (command) => {
     const sessionId = live.qemu.id;
     const agentId = live.agent;
-    const span = startQemuActionSpan(live.intent ?? live.span, sessionId, agentId, command.execute);
+    const span = startQemuActionSpan(live.intent?.span ?? live.span, sessionId, agentId, command.execute);
     live.actionSpans.add(span);
     let id: number;
     try {
@@ -132,10 +158,15 @@ type ApiError =
   | { readonly _tag: "StartFailed"; readonly message: string; readonly cause: unknown; readonly sessionId: string; readonly agentId: string }
   | { readonly _tag: "ExchangeFailed"; readonly message: string; readonly cause: unknown; readonly sessionId: string; readonly agentId: string }
   | { readonly _tag: "Internal"; readonly cause: unknown; readonly sessionId?: string; readonly agentId?: string }
-  | { readonly _tag: "Failed"; readonly message: string; readonly sessionId: string; readonly agentId: string };
+  | { readonly _tag: "Failed"; readonly message: string; readonly sessionId: string; readonly agentId: string }
+  | { readonly _tag: "Conflict"; readonly message: string; readonly sessionId: string };
 
 function badRequest(message: string, who: { sessionId?: string; agentId?: string } = {}): ApiError {
   return { _tag: "BadRequest", message, ...who };
+}
+
+function conflict(message: string, sessionId: string): ApiError {
+  return { _tag: "Conflict", message, sessionId };
 }
 
 function failed(message: string, who: { sessionId: string; agentId: string }): ApiError {
@@ -187,6 +218,11 @@ const ImageParams = Schema.Struct({
 });
 
 const StoredImageParams = Schema.Struct({
+  id: Schema.String,
+});
+
+// A follower watches; it does not drive, so it names no agent.
+const FollowParams = Schema.Struct({
   id: Schema.String,
 });
 
@@ -275,7 +311,15 @@ function startSession(cfg: typeof StartBody.Type, started: number, display: Qemu
     const isUrl = cfg.iso.startsWith("http://") || cfg.iso.startsWith("https://");
     const qemu = createQemu({ display, automation });
     const span = startQemuSpan(qemu.id, cfg.agent);
-    const live = { qemu, agent: cfg.agent, lastCommandAt: Date.now(), span, actionSpans: new Set<QemuSpan>() };
+    const live: LiveSession = {
+      qemu,
+      agent: cfg.agent,
+      lastCommandAt: Date.now(),
+      span,
+      actionSpans: new Set(),
+      followers: new Set(),
+      actionSeq: 0,
+    };
     openSessions.add(live);
     acquireAgentColor(cfg.agent);
     yield* Effect.tryPromise({
@@ -299,6 +343,7 @@ function startSession(cfg: typeof StartBody.Type, started: number, display: Qemu
     });
     live.lastCommandAt = Date.now();
     sessions.set(qemu.id, live);
+    emitFollow(live, { type: "session", status: "running" });
     log(db, { text: `session ${qemu.id}: running; started in ${Date.now() - started}ms`, sessionId: qemu.id, agentId: cfg.agent });
     return qemu.id;
   });
@@ -333,7 +378,7 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
         yield* Effect.tryPromise({
           try: () =>
             screendump(qemu, path, "png", async (command) => {
-              actionSpan = startQemuActionSpan(live.intent ?? live.span, qemu.id, agent, command.execute);
+              actionSpan = startQemuActionSpan(live.intent?.span ?? live.span, qemu.id, agent, command.execute);
               live.actionSpans.add(actionSpan);
               try {
                 opened = await startAction(db, { sessionId: qemu.id, agentId: agent, request: command });
@@ -374,18 +419,19 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
             return internal(cause, { sessionId: qemu.id, agentId: agent });
           },
         });
+        emitFollow(live, { type: "image", id: imageId, png: data.toString("base64") });
         log(db, { text: `session ${qemu.id}: image; ${data.length} bytes in ${Date.now() - started}ms; ${storedImageUrl(imageId)}`, sessionId: qemu.id, agentId: agent });
         return HttpServerResponse.uint8Array(data, {
           contentType: "image/png",
           headers: { "x-image-url": storedImageUrl(imageId) },
         });
       });
-      return yield* Effect.ensuring(png, Effect.promise(() => rm(path, { force: true })));
+      return yield* followed(live, "get-image", Effect.ensuring(png, Effect.promise(() => rm(path, { force: true }))));
     }) satisfies RouteHandler, { uninterruptible: true });
 
     yield* router.add("GET", "/images/:id", Effect.gen(function* () {
       const params = yield* Effect.mapError(HttpRouter.schemaPathParams(StoredImageParams), (err) => badRequest(err.message));
-      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(params.id)) {
+      if (!UUID.test(params.id)) {
         return errorBody(404, "not found");
       }
       const data = yield* Effect.tryPromise({
@@ -398,14 +444,54 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
       return HttpServerResponse.uint8Array(data, { contentType: "image/png" });
     }) satisfies RouteHandler);
 
+    yield* router.add("GET", "/follow", Effect.gen(function* () {
+      const { id } = yield* Effect.mapError(HttpRouter.schemaParams(FollowParams), (err) => badRequest(err.message));
+      const live = sessions.get(id) ?? [...openSessions].find((open) => open.qemu.id === id);
+      if (live === undefined) {
+        const status = UUID.test(id)
+          ? yield* Effect.tryPromise({ try: () => getSessionStatus(db, id), catch: (cause) => internal(cause, { sessionId: id }) })
+          : undefined;
+        if (status === undefined) {
+          return yield* Effect.fail<ApiError>({ _tag: "UnknownSession", id });
+        }
+        // A row still downloading or running that this proxy does not hold was booted
+        // by another proxy, or by one that died with it.
+        return yield* Effect.fail(conflict(
+          status === "downloading" || status === "running"
+            ? `session "${id}" is not running on this proxy`
+            : `session "${id}" has already completed (${status})`,
+          id,
+        ));
+      }
+      // Registered here, synchronously after the lookup, so a session that ends before
+      // the body starts streaming still ends this queue rather than leaving it hanging.
+      const queue = yield* Queue.unbounded<FollowEvent, Cause.Done>();
+      live.followers.add(queue);
+      log(db, { text: `session ${id}: follower attached`, sessionId: id, agentId: live.agent });
+      Queue.offerUnsafe(queue, { type: "session", status: sessions.has(id) ? "running" : "pending" });
+      if (live.intent !== undefined) {
+        Queue.offerUnsafe(queue, { type: "intent", state: "started", message: live.intent.message });
+      }
+      const body = Stream.fromQueue(queue).pipe(
+        Stream.map((event) => new TextEncoder().encode(`${JSON.stringify(event)}\n`)),
+        Stream.ensuring(Effect.sync(() => {
+          if (live.followers.delete(queue)) {
+            log(db, { text: `session ${id}: follower detached`, sessionId: id, agentId: live.agent });
+          }
+        })),
+      );
+      return HttpServerResponse.stream(body, { contentType: "application/x-ndjson" });
+    }) satisfies RouteHandler);
+
     yield* router.add("GET", "/serial", Effect.gen(function* () {
       const started = Date.now();
       const params = yield* Effect.mapError(HttpRouter.schemaParams(ImageParams), (err) => badRequest(err.message));
-      const { qemu } = yield* session(params.id, params.agent);
-      const data = yield* Effect.tryPromise({
+      const live = yield* session(params.id, params.agent);
+      const qemu = live.qemu;
+      const data = yield* followed(live, "get-serial", Effect.tryPromise({
         try: () => readFile(qemu.serialPath),
         catch: (cause) => internal(cause, { sessionId: qemu.id, agentId: params.agent }),
-      });
+      }));
       log(db, { text: `session ${qemu.id}: serial; ${data.length} bytes in ${Date.now() - started}ms`, sessionId: qemu.id, agentId: params.agent });
       return HttpServerResponse.uint8Array(data, { contentType: "text/plain" });
     }) satisfies RouteHandler, { uninterruptible: true });
@@ -457,10 +543,10 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
         return yield* Effect.fail(badRequest(`send-keys: at most ${MAX_KEYS} keys per request`, { sessionId: qemu.id, agentId: agent }));
       }
       const record = recorder(live);
-      yield* Effect.tryPromise({
+      yield* followed(live, "send-keys", Effect.tryPromise({
         try: () => sendKeys(qemu, chords, record),
         catch: (err) => exchangeFailed(err, { sessionId: qemu.id, agentId: agent }),
-      });
+      }));
       log(db, { text: `session ${qemu.id}: sent ${chords.length} chords in ${Date.now() - started}ms`, sessionId: qemu.id, agentId: agent });
       return HttpServerResponse.jsonUnsafe({ ok: "true" });
     }) satisfies RouteHandler, { uninterruptible: true });
@@ -476,10 +562,10 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
       if (clicks !== undefined && (!Number.isInteger(clicks) || clicks < 1 || clicks > MAX_CLICKS)) {
         return yield* Effect.fail(badRequest(`mouse: clicks must be an integer in 1..${MAX_CLICKS}`, { sessionId: qemu.id, agentId: agent }));
       }
-      yield* Effect.tryPromise({
+      yield* followed(live, "send-mouse", Effect.tryPromise({
         try: () => sendMouse(qemu, x, y, button, clicks, recorder(live)),
         catch: (err) => exchangeFailed(err, { sessionId: qemu.id, agentId: agent }),
-      });
+      }));
       log(db, {
         text: `session ${qemu.id}: mouse ${x} ${y}${button === undefined ? "" : ` ${button}${clicks === undefined || clicks === 1 ? "" : ` ×${clicks}`}`} in ${Date.now() - started}ms`,
         sessionId: qemu.id,
@@ -497,7 +583,8 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
           { sessionId: live.qemu.id, agentId: agent },
         ));
       }
-      live.intent = startIntentSpan(live.span, live.qemu.id, agent, test_result_id, message);
+      live.intent = { span: startIntentSpan(live.span, live.qemu.id, agent, test_result_id, message), message };
+      emitFollow(live, { type: "intent", state: "started", message });
       log(db, { text: `session ${live.qemu.id}: intent start; ${message}`, sessionId: live.qemu.id, agentId: agent });
       return HttpServerResponse.jsonUnsafe({ ok: "true" });
     }) satisfies RouteHandler, { uninterruptible: true });
@@ -551,11 +638,12 @@ function respondTable(request: HttpServerRequest.HttpServerRequest): {
     BadRequest: (err) => answer(request, 400, err.message, err),
     Failed: (err) => answer(request, 500, err.message, err),
     Forbidden: (err) => answer(request, 403, err.message, err),
+    Conflict: (err) => answer(request, 409, err.message, err),
     UnknownSession: (err) =>
       answer(request, 404, `unknown session "${err.id}"`, {
         // logs.session_id is a uuid column: attribute ids this server could have
         // minted, drop the attribution for garbage.
-        sessionId: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(err.id) ? err.id : undefined,
+        sessionId: UUID.test(err.id) ? err.id : undefined,
         agentId: err.agentId,
       }),
     StartFailed: (err) => answer(request, 502, err.message, err),

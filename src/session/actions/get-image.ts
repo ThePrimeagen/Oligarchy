@@ -1,5 +1,5 @@
 import { requireSession, runClient, type Session } from "../client.ts";
-import { renderImage } from "../image.ts";
+import { renderImage } from "../../terminal/image.ts";
 
 export async function getImageRun(session: Session): Promise<void> {
   const id = requireSession(session);

@@ -1,8 +1,11 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import type { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 
 const CLIENT = fileURLToPath(new URL("../client/index.ts", import.meta.url));
+
+export type ClientChild = ChildProcessByStdio<null, Readable, Readable>;
 
 export type ClientResult = {
   code: number;
@@ -16,10 +19,11 @@ export type Session = {
   sessionId: string | undefined;
   intentOpen: boolean;
   startInFlight: Promise<ClientResult> | undefined;
+  following: ClientChild | undefined;
 };
 
 export function createSession(serverUrl: string): Session {
-  return { serverUrl, agentId: freshAgentId(), sessionId: undefined, intentOpen: false, startInFlight: undefined };
+  return { serverUrl, agentId: freshAgentId(), sessionId: undefined, intentOpen: false, startInFlight: undefined, following: undefined };
 }
 
 // The proxy keys one session per agent id (agent_runs primary key), so every start
@@ -28,25 +32,29 @@ export function freshAgentId(): string {
   return `session-${randomUUID()}`;
 }
 
+// Own process group: a terminal hangup or Ctrl-C reaches the whole foreground group,
+// and a start killed mid-boot still boots on the proxy. Detached, the child survives to
+// hand back its session id so shutdown can stop it instead of orphaning the QEMU.
+export function spawnClient(session: Session, args: string[]): ClientChild {
+  return spawn(
+    process.execPath,
+    [
+      "--experimental-strip-types",
+      "--disable-warning=ExperimentalWarning",
+      CLIENT,
+      ...args,
+      "--agent-id",
+      session.agentId,
+      "--server-url",
+      session.serverUrl,
+    ],
+    { stdio: ["ignore", "pipe", "pipe"], detached: true },
+  );
+}
+
 export function runClient(session: Session, args: string[]): Promise<ClientResult> {
   return new Promise((resolve, reject) => {
-    // Own process group: a terminal hangup or Ctrl-C reaches the whole foreground group,
-    // and a start killed mid-boot still boots on the proxy. Detached, the child survives to
-    // hand back its session id so shutdown can stop it instead of orphaning the QEMU.
-    const child = spawn(
-      process.execPath,
-      [
-        "--experimental-strip-types",
-        "--disable-warning=ExperimentalWarning",
-        CLIENT,
-        ...args,
-        "--agent-id",
-        session.agentId,
-        "--server-url",
-        session.serverUrl,
-      ],
-      { stdio: ["ignore", "pipe", "pipe"], detached: true },
-    );
+    const child = spawnClient(session, args);
     const out: Buffer[] = [];
     const err: Buffer[] = [];
     child.stdout.on("data", (chunk: Buffer) => out.push(chunk));

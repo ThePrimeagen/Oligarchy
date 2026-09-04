@@ -76,6 +76,31 @@ export function postStart(proxy: Proxy, body: unknown): Promise<string> {
   });
 }
 
+// A follow stays open for as long as the session lives, and fetch would cut it off after
+// five quiet minutes (undici's body timeout); node:http has no such ceiling.
+export function getStream(proxy: Proxy, path: string, out: NodeJS.WritableStream): Promise<void> {
+  const url = new URL(`${proxy.serverUrl}${path}`);
+  const send = url.protocol === "https:" ? httpsRequest : httpRequest;
+  return new Promise<void>((resolve, reject) => {
+    const req = send(url, { headers: { Authorization: `Bearer ${proxy.token}` } }, (res) => {
+      res.on("error", reject);
+      if (res.statusCode !== 200) {
+        let data = "";
+        res.setEncoding("utf8");
+        res.on("data", (chunk) => {
+          data += chunk;
+        });
+        res.on("end", () => reject(new Error(apiError(data))));
+        return;
+      }
+      res.on("end", resolve);
+      res.pipe(out, { end: false });
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+
 function apiError(data: string): string {
   try {
     return (JSON.parse(data) as { error: string }).error;

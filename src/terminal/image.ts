@@ -12,6 +12,41 @@ const imageProtocol = (() => {
   return "ansi";
 })();
 
+// Only the kitty protocol can pin an image to a screen cell (ghostty and kitty speak it);
+// iTerm's and the half-block fallback only flow inline with the text.
+export const canPlaceImages = imageProtocol === "kitty";
+
+export type ImageBox = { col: number; row: number; cols: number; rows: number };
+
+// A terminal cell is about twice as tall as it is wide; the fit assumes that ratio
+// because the true cell size in pixels is not knowable without a terminal query.
+const CELL_ASPECT = 2;
+
+export function placeImage(png: Buffer, box: ImageBox): void {
+  const width = png.readUInt32BE(16);
+  const height = png.readUInt32BE(20);
+  let cols = box.cols;
+  let rows = Math.max(1, Math.round(((height / width) * cols) / CELL_ASPECT));
+  if (rows > box.rows) {
+    rows = box.rows;
+    cols = Math.max(1, Math.round((width / height) * rows * CELL_ASPECT));
+  }
+  const data = png.toString("base64");
+  // Same image id every time, so the previous placement goes before the new one lands;
+  // q=2 keeps the terminal from answering on stdin, where a readline would read it.
+  let out = `\x1b_Ga=d,d=I,i=1,q=2\x1b\\\x1b[${box.row};${box.col}H`;
+  for (let i = 0; i < data.length; i += 4096) {
+    const first = i === 0 ? `a=T,f=100,i=1,q=2,C=1,c=${cols},r=${rows},` : "";
+    const more = i + 4096 < data.length ? 1 : 0;
+    out += `\x1b_G${first}m=${more};${data.slice(i, i + 4096)}\x1b\\`;
+  }
+  process.stdout.write(out);
+}
+
+export function clearImages(): void {
+  process.stdout.write("\x1b_Ga=d,d=A,q=2\x1b\\");
+}
+
 export function renderImage(png: Buffer): void {
   const cols = process.stdout.columns ?? 80;
   if (imageProtocol === "kitty") {
