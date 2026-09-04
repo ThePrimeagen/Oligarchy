@@ -1,22 +1,12 @@
-import { createInterface, type Key } from "node:readline";
+import { createInterface, type CompleterResult, type Key } from "node:readline";
 import { canPlaceImages, clearImages, placeImage } from "../../terminal/image.ts";
-import { type Session, spawnClient } from "../client.ts";
+import { type Session, runCtrl, spawnClient } from "../client.ts";
 
 export type SessionListItem = {
   id: string;
-  status: "downloading" | "running" | "succeeded" | "failed" | "aborted" | "timed_out";
+  status: "downloading" | "running";
   startedAt: string;
 };
-
-const PICKER_STATUS_WIDTH = "running".length;
-const PICKER_STATUS_COLOR = {
-  downloading: "\x1b[90m",
-  running: "\x1b[33m",
-} as const;
-const PICKER_STATUS_LABEL = {
-  downloading: "pending",
-  running: "running",
-} as const;
 
 // The action column; the image takes every column to its right.
 const LEFT_COLS = 40;
@@ -28,6 +18,7 @@ const GRAY = "\x1b[90m";
 const GREEN = "\x1b[32m";
 const RED = "\x1b[31m";
 const RESET = "\x1b[0m";
+const CRLF_DELAY_MS = 100;
 const STATUS_COLOR: Record<Extract<FollowEvent, { type: "session" }>["status"], string> = {
   pending: GRAY,
   running: "\x1b[33m",
@@ -37,53 +28,95 @@ const STATUS_COLOR: Record<Extract<FollowEvent, { type: "session" }>["status"], 
   timed_out: "\x1b[35m",
 };
 
+let closePicker: (() => void) | undefined;
+let cancelSessionList: (() => void) | undefined;
+
 export function enableFollowPickerCompletion(readline: { line: string }): void {
-  const input = readline as { line: string; isCompletionEnabled: boolean };
-  let isCompletionEnabled = input.isCompletionEnabled;
+  const interfaceState = readline as { line: string; isCompletionEnabled: boolean };
+  let isCompletionEnabled = interfaceState.isCompletionEnabled;
   // Node disables completion before the final character of an input chunk. Keep it
   // enabled for follow so a Tab and Enter received together still enter the picker.
-  Object.defineProperty(input, "isCompletionEnabled", {
-    get: () => isCompletionEnabled || /^\s*follow\s+/.test(input.line),
+  Object.defineProperty(interfaceState, "isCompletionEnabled", {
+    get: () => isCompletionEnabled || /^\s*follow\s+/.test(interfaceState.line),
     set: (enabled: boolean) => {
       isCompletionEnabled = enabled;
     },
   });
 }
 
+export function closeFollowPicker(): void {
+  cancelSessionList?.();
+  closePicker?.();
+}
+
+export async function completeFollow(
+  session: Session,
+  readline: { getCursorPos(): { cols: number }; prompt(preserveCursor?: boolean): void },
+  prefix: string,
+): Promise<CompleterResult> {
+  const controller = new AbortController();
+  cancelSessionList = () => controller.abort();
+  const rows = runCtrl(session, ["session", "list", "--count", "10", "--active", "--json"], controller.signal).then((result) => {
+    if (result.code !== 0) {
+      throw new Error(result.stderr);
+    }
+    const matching = (JSON.parse(result.stdout.toString("utf8")) as SessionListItem[]).filter((row) => row.id.startsWith(prefix));
+    if (prefix !== "" && matching.length === 0) {
+      throw new Error("no matching running or pending sessions");
+    }
+    return matching;
+  });
+  try {
+    const sessionId = await pickFollowSession(rows, process.stdin, process.stdout, readline.getCursorPos().cols);
+    return [sessionId === undefined ? [] : [sessionId], prefix];
+  } catch (err) {
+    process.stdout.write(`\r\n${(err as Error).message}\r\n`);
+    readline.prompt(true);
+    return [[], prefix];
+  } finally {
+    cancelSessionList = undefined;
+  }
+}
+
 export function pickFollowSession(
-  rows: SessionListItem[] | Promise<SessionListItem[]>,
+  rows: Promise<SessionListItem[]>,
   input: NodeJS.ReadStream,
   output: NodeJS.WriteStream,
   cursorColumn: number,
 ): Promise<string | undefined> {
-  let sessions: (SessionListItem & { status: "downloading" | "running" })[] | undefined;
+  let sessions: SessionListItem[] | undefined;
   let selected = 0;
   let lineCount = 1;
+  let visibleCount = 1;
   let closed = false;
   const previousKeypressListeners = input.listeners("keypress");
-  const inputWasPaused = input.isPaused();
   for (const listener of previousKeypressListeners) {
     input.removeListener("keypress", listener);
   }
 
-  const drawPicker = (redraw: boolean): void => {
+  const drawPicker = (listed: SessionListItem[], redraw: boolean): void => {
     if (redraw) {
       output.write(`\x1b[${lineCount - 1}A\r`);
     } else {
       output.write("\r");
     }
-    output.write("\x1b[2K  active sessions\r\n");
-    for (const [index, session] of sessions!.entries()) {
+    const columns = output.columns ?? 80;
+    const first = Math.min(selected, listed.length - visibleCount);
+    output.write(`\x1b[2K${"  active sessions".slice(0, columns)}\r\n`);
+    for (const [offset, session] of listed.slice(first, first + visibleCount).entries()) {
+      const index = first + offset;
       const marker = index === selected ? "\x1b[36m›\x1b[0m" : " ";
-      const status = `${PICKER_STATUS_COLOR[session.status]}${PICKER_STATUS_LABEL[session.status].padEnd(PICKER_STATUS_WIDTH)}${RESET}`;
-      output.write(`\x1b[2K${marker} ${status}  ${session.id}\r\n`);
+      const label = session.status === "running" ? "running" : "pending";
+      const id = session.id.slice(0, Math.max(0, columns - 11));
+      output.write(`\x1b[2K${marker} ${STATUS_COLOR[label]}${label}${RESET}  ${id}\r\n`);
     }
-    output.write("\x1b[2K  ↑/↓ or tab navigate • enter select • esc cancel");
+    output.write(`\x1b[2K${"  ↑/↓ or tab navigate • enter select • esc/ctrl-c cancel".slice(0, columns)}`);
   };
 
   return new Promise((resolve, reject) => {
-    const leave = (done: () => void): void => {
+    const leave = (done: () => void, swallowLineFeed = false): void => {
       closed = true;
+      closePicker = undefined;
       input.pause();
       input.removeListener("keypress", onKeypress);
       output.write("\r");
@@ -95,54 +128,70 @@ export function pickFollowSession(
       }
       output.write(`\x1b[1A\x1b[${cursorColumn + 1}G\x1b[?25h`);
       // One terminal Enter can parse as CR and LF keypresses. Restore readline
-      // after the current input chunk so its trailing keypress cannot submit the line.
+      // after that pair so the LF cannot submit the completed command.
       queueMicrotask(() => {
-        for (const listener of previousKeypressListeners) {
-          input.on("keypress", listener);
+        const restoreReadline = () => {
+          for (const listener of previousKeypressListeners) {
+            input.on("keypress", listener);
+          }
+        };
+        if (!swallowLineFeed) {
+          restoreReadline();
+          done();
+          return;
         }
-        if (!inputWasPaused) {
-          input.resume();
-        }
+        const timer = setTimeout(() => {
+          input.removeListener("keypress", afterEnter);
+          restoreReadline();
+        }, CRLF_DELAY_MS);
+        timer.unref();
+        const afterEnter = (text: string | undefined, key: Key): void => {
+          clearTimeout(timer);
+          input.removeListener("keypress", afterEnter);
+          restoreReadline();
+          if (!(text === "\n" && key.name === "enter")) {
+            input.emit("keypress", text, key);
+          }
+        };
+        input.on("keypress", afterEnter);
         done();
       });
     };
 
     const onKeypress = (_text: string | undefined, key: Key): void => {
       if (key.name === "escape" || (key.ctrl && key.name === "c")) {
+        cancelSessionList?.();
         leave(() => resolve(undefined));
       } else if (sessions === undefined) {
         return;
       } else if (key.name === "up" || (key.name === "tab" && key.shift)) {
         selected = (selected - 1 + sessions.length) % sessions.length;
-        drawPicker(true);
+        drawPicker(sessions, true);
       } else if (key.name === "down" || key.name === "tab") {
         selected = (selected + 1) % sessions.length;
-        drawPicker(true);
+        drawPicker(sessions, true);
       } else if (key.name === "return" || key.name === "enter") {
-        leave(() => resolve(sessions![selected].id));
+        leave(() => resolve(sessions![selected].id), true);
       }
     };
 
+    closePicker = () => leave(() => resolve(undefined));
     input.on("keypress", onKeypress);
     output.write("\x1b[?25l\r\n\x1b[2K  loading sessions...");
     input.resume();
-    void Promise.resolve(rows).then(
+    void rows.then(
       (listed) => {
         if (closed) {
           return;
         }
-        sessions = listed
-          .filter(
-            (row): row is SessionListItem & { status: "downloading" | "running" } =>
-              row.status === "running" || row.status === "downloading",
-          )
-          .sort((a, b) => Number(a.status === "downloading") - Number(b.status === "downloading"));
+        sessions = listed;
         if (sessions.length === 0) {
           leave(() => reject(new Error("no running or pending sessions")));
           return;
         }
-        lineCount = sessions.length + 2;
-        drawPicker(false);
+        visibleCount = Math.max(1, Math.min(sessions.length, (output.rows ?? 24) - 3));
+        lineCount = visibleCount + 2;
+        drawPicker(sessions, false);
       },
       (err) => {
         if (!closed) {
