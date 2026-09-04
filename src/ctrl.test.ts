@@ -155,7 +155,7 @@ describe("./ctrl happy path", () => {
     assert.ok(address !== null && typeof address !== "string");
 
     try {
-      const result = await runCtrl(["test", "run", "--ticket", "OLI-42", "--server-url", SERVER], {
+      const result = await runCtrl(["test", "run", "--ticket", "OLI-42"], {
         CURSOR_API_TOKEN: "test-token",
         CURSOR_BACKEND_URL: `http://127.0.0.1:${address.port}`,
       });
@@ -186,16 +186,15 @@ describe("./ctrl happy path", () => {
     }
   });
 
-  it("test run accepts --server-url before or after --ticket", async () => {
-    const equals = await runCtrl(["test", "run", "--ticket", "OLI-42", `--server-url=${SERVER}`], { CURSOR_API_TOKEN: "" });
-    assert.notEqual(equals.code, 0);
-    assert.match(equals.stderr, /CURSOR_API_TOKEN is not set/);
+  it("test run takes no server URL: the ticket alone parses, and --server-url is unrecognized", async () => {
+    const ticketOnly = await runCtrl(["test", "run", "--ticket", "OLI-42"], { CURSOR_API_TOKEN: "" });
+    assert.notEqual(ticketOnly.code, 0);
+    assert.match(ticketOnly.stderr, /CURSOR_API_TOKEN is not set/);
 
-    const spaced = await runCtrl(["test", "run", "--server-url", "http://127.0.0.1:42069", "--ticket", "OLI-42"], {
-      CURSOR_API_TOKEN: "",
-    });
-    assert.notEqual(spaced.code, 0);
-    assert.match(spaced.stderr, /CURSOR_API_TOKEN is not set/);
+    const withServer = await runCtrl(["test", "run", "--ticket", "OLI-42", `--server-url=${SERVER}`], { CURSOR_API_TOKEN: "test-token" });
+    assert.notEqual(withServer.code, 0);
+    assert.equal(withServer.stdout.includes("Agent here"), false);
+    assert.match(withServer.stderr, /Unrecognized flag: --server-url/);
   });
 
   it("prints the actions for --help", async () => {
@@ -363,30 +362,16 @@ describe("./ctrl unhappy path", () => {
     assert.match(result.stderr, /DATABASE_URL is not set/);
   });
 
-  it("rejects test run without a ticket or a server URL", async () => {
-    const missingTicket = await runCtrl(["test", "run", "--server-url", SERVER], { CURSOR_API_TOKEN: "test-token" });
+  it("rejects test run without a ticket", async () => {
+    const missingTicket = await runCtrl(["test", "run"], { CURSOR_API_TOKEN: "test-token" });
     assert.notEqual(missingTicket.code, 0);
     assert.equal(missingTicket.stdout.includes("Agent here"), false);
     assert.match(missingTicket.stderr, /Missing required flag: --ticket/);
 
-    const emptyTicket = await runCtrl(["test", "run", "--ticket", "", "--server-url", SERVER], { CURSOR_API_TOKEN: "test-token" });
+    const emptyTicket = await runCtrl(["test", "run", "--ticket", ""], { CURSOR_API_TOKEN: "test-token" });
     assert.notEqual(emptyTicket.code, 0);
     assert.equal(emptyTicket.stdout.includes("Agent here"), false);
     assert.match(emptyTicket.stderr, /--ticket.*length of at least 1/);
-
-    const missingServer = await runCtrl(["test", "run", "--ticket", "OLI-42"], { CURSOR_API_TOKEN: "test-token" });
-    assert.notEqual(missingServer.code, 0);
-    assert.equal(missingServer.stdout.includes("Agent here"), false);
-    assert.match(missingServer.stderr, /Missing required flag: --server-url/);
-  });
-
-  it("rejects a test run server URL outside HTTP and HTTPS", async () => {
-    const result = await runCtrl(["test", "run", "--ticket", "OLI-42", "--server-url=ssh://qemu.example.com"], {
-      CURSOR_API_TOKEN: "test-token",
-    });
-    assert.notEqual(result.code, 0);
-    assert.equal(result.stdout.includes("Agent here"), false);
-    assert.match(result.stderr, /server-url must be a valid http or https url/);
   });
 
   it("rejects test without --list", async () => {
