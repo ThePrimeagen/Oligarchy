@@ -54,6 +54,14 @@ describe("parseKeys happy path", () => {
     assert.deepEqual(parseKeys("<GT>"), [["shift", "dot"]]);
   });
 
+  it("takes a trailing - as the minus key, alone or under modifiers", () => {
+    assert.deepEqual(parseKeys("<->"), [["minus"]]);
+    assert.deepEqual(parseKeys("<C-->"), [["ctrl", "minus"]]);
+    assert.deepEqual(parseKeys("<A-->"), [["alt", "minus"]]);
+    assert.deepEqual(parseKeys("<C-S-->"), [["ctrl", "shift", "minus"]]);
+    assert.deepEqual(parseKeys("a<C-->b"), [["a"], ["ctrl", "minus"], ["b"]]);
+  });
+
   it("accepts f-keys and raw qcode tokens", () => {
     assert.deepEqual(parseKeys("<F1>"), [["f1"]]);
     assert.deepEqual(parseKeys("<F13>"), [["f13"]]);
@@ -101,6 +109,18 @@ describe("parseKeys unhappy path", () => {
   it("throws on an unknown modifier", () => {
     assert.throws(() => parseKeys("<X-c>"), {
       message: 'qemu: unknown modifier "X"',
+    });
+  });
+
+  it("throws on a modifier with no key and on an empty modifier before minus", () => {
+    assert.throws(() => parseKeys("<C->"), {
+      message: 'qemu: unknown key ""',
+    });
+    assert.throws(() => parseKeys("<-->"), {
+      message: 'qemu: unknown modifier ""',
+    });
+    assert.throws(() => parseKeys("<C--->"), {
+      message: 'qemu: unknown modifier ""',
     });
   });
 
