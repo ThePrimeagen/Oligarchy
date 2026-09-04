@@ -362,7 +362,9 @@ describe("./client unhappy path", () => {
   });
 
   it("unwraps a refused connection", async () => {
-    const result = await runClient(["send-keys", "--agent-id", "agent-1", "--server-url", "http://127.0.0.1:1", "session-1", "hello"]);
+    const closed = await stubProxy(ok);
+    await close(closed.server);
+    const result = await runClient(["send-keys", "--agent-id", "agent-1", "--server-url", closed.url, "session-1", "hello"]);
     assert.equal(result.code, 1);
     assert.match(result.stderr, /fetch failed: .*ECONNREFUSED/);
   });
