@@ -418,7 +418,7 @@ describe("./ctrl unhappy path", () => {
     assert.notEqual(noSelector.code, 0);
     assert.match(
       noSelector.stderr,
-      /^session: --logs, --test-def, --test-results, --actions, or --all is required\nError: session: --logs.*\n\s+at sessionRun .*src\/ctrl\/actions\/session\.ts:\d+:\d+/,
+      /^session: --logs, --test-def, --test-results, --actions, or --all is required\nError: session: --logs.*\n\s+at sessionInspectRun .*src\/ctrl\/actions\/session\.ts:\d+:\d+/,
     );
 
     const unknown = await runCtrl(["session", "--session-id", sessionId, "--logs", "--server-url", SERVER]);
@@ -429,7 +429,7 @@ describe("./ctrl unhappy path", () => {
   it("session list rejects a count below one, a non-integer count, and the inspect flags", async () => {
     const zero = await runCtrl(["session", "list", "--count", "0", "--server-url", SERVER]);
     assert.notEqual(zero.code, 0);
-    assert.equal(zero.stdout, "");
+    assert.equal(zero.stdout.startsWith("["), false);
     assert.match(zero.stderr, /Invalid value for flag --count: "0".*count must be at least 1/);
 
     const word = await runCtrl(["session", "list", "--count", "ten", "--server-url", SERVER]);

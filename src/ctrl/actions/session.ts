@@ -1,11 +1,29 @@
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { Schema } from "effect";
 import { Flag } from "effect/unstable/cli";
 import { closeDatabase, connectDatabase } from "../../db/ops.ts";
 import { actions, logs, sessions, testDefinitions, testResults } from "../../db/schema.ts";
 import { type CtrlArgs, parseCtrlArgs } from "../parse-args.ts";
 
-const spec = {
+const DEFAULT_COUNT = 10;
+
+const USAGE = `usage: ctrl session list [--count <n>]
+       ctrl session --session-id <id> --logs|--test-def|--test-results|--actions|--all
+
+Every form takes --server-url <url> (or SERVER_URL). ctrl session list --help and ctrl session --session-id <id> --help print their flags.`;
+
+const listSpec = {
+  env: {},
+  flags: {
+    count: Flag.integer("count").pipe(
+      Flag.withSchema(Schema.Number.check(Schema.isGreaterThanOrEqualTo(1, { message: "count must be at least 1" }))),
+      Flag.withDefault(DEFAULT_COUNT),
+      Flag.withDescription("How many of the most recent sessions to print"),
+    ),
+  },
+};
+
+const inspectSpec = {
   env: {},
   flags: {
     sessionId: Flag.string("session-id").pipe(Flag.withSchema(Schema.NonEmptyString), Flag.withDescription("Session id")),
@@ -23,10 +41,36 @@ const spec = {
   },
 };
 
-export type SessionArgs = CtrlArgs<typeof spec>;
+export type SessionListArgs = CtrlArgs<typeof listSpec>;
+export type SessionInspectArgs = CtrlArgs<typeof inspectSpec>;
 
 export async function sessionRun(argv: readonly string[]): Promise<void> {
-  const args: SessionArgs = await parseCtrlArgs("session", spec, argv);
+  const [verb, ...rest] = argv;
+  switch (verb) {
+    case "list":
+      return sessionListRun(rest);
+    case "--help":
+    case "-h":
+      console.log(USAGE);
+      return;
+    default:
+      return sessionInspectRun(argv);
+  }
+}
+
+export async function sessionListRun(argv: readonly string[]): Promise<void> {
+  const args: SessionListArgs = await parseCtrlArgs("session list", listSpec, argv);
+  const db = connectDatabase(args.databaseUrl);
+  try {
+    const rows = await db.select().from(sessions).orderBy(desc(sessions.startedAt), desc(sessions.id)).limit(args.count);
+    console.log(JSON.stringify(rows));
+  } finally {
+    await closeDatabase(db);
+  }
+}
+
+export async function sessionInspectRun(argv: readonly string[]): Promise<void> {
+  const args: SessionInspectArgs = await parseCtrlArgs("session", inspectSpec, argv);
   if (!args.logs && !args.testDef && !args.testResults && !args.actions && !args.all) {
     throw new Error("session: --logs, --test-def, --test-results, --actions, or --all is required");
   }
