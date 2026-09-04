@@ -10,6 +10,8 @@ One PlanetScale Postgres database holds the record of everything the proxy does.
 
 `ctrl test-results` is the agent's report. It takes the result UUID, the agent id, `success` or `failed`, and an optional reason, looks up the agent's session in `agent_runs`, and closes that `test_results` row (`passed` or `failed`, reason, session, `finished_at`). The command writes the database itself; the proxy is not involved. An unknown result id is a failure.
 
+`ctrl session list` reads the newest sessions (`ORDER BY started_at DESC, id DESC LIMIT --count`, default 10) and prints the rows as JSON. It does not write.
+
 `ctrl session` reads one session's logs, actions, attributed test result, and that result's definition. `--logs` and `--actions` are `WHERE session_id ORDER BY created_at, id`. `--test-results` and `--test-def` follow `test_results.session_id` onto the definition. `--all` prints all four. An unknown session is a failure. The command does not write.
 
 `npm run db:migrate` reads `DATABASE_URL` from the environment (a `.env` fills in missing variables only), applies the generated migrations in `drizzle/`, and closes the one-shot database pool. Missing `DATABASE_URL` is a failure.
