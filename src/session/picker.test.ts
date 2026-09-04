@@ -47,7 +47,7 @@ describe("follow session picker happy path", () => {
     assert.equal(await selection, DOWNLOADING_ID);
     const output = term.readOutput();
     assert.ok(output.indexOf(RUNNING_ID) < output.indexOf(DOWNLOADING_ID));
-    assert.match(output, new RegExp(`\\x1b\\[33mrunning\\s+\\x1b\\[0m\\s+${RUNNING_ID}`));
+    assert.match(output, new RegExp(`\\x1b\\[33mrunning\\s*\\x1b\\[0m\\s+${RUNNING_ID}`));
     assert.match(output, new RegExp(`\\x1b\\[90mpending\\s*\\x1b\\[0m\\s+${DOWNLOADING_ID}`));
     assert.equal(output.includes("00000000-0000-4000-8000-000000000001"), false);
   });
