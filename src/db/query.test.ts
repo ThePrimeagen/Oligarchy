@@ -84,11 +84,12 @@ describe("db/query happy path", () => {
 describe("db/query unhappy path", () => {
   it("surfaces the Postgres error from a failed query and still ends the connection", async () => {
     const result = await runQuery(
-      'try {\n  await query.getImage(url, "not-a-uuid");\n} catch (err) {\n  console.error(err.message);\n  process.exitCode = 3;\n}',
+      'try {\n  await query.getImage(url, "not-a-uuid");\n} catch (err) {\n  console.error(`${err.message}: ${err.cause.message}`);\n  process.exitCode = 3;\n}',
       databaseUrl(),
     );
     assert.equal(result.hung, false, "process did not exit: the pg client was not ended after the failed query");
     assert.equal(result.code, 3);
+    assert.match(result.stderr, /Failed query: select "data"/);
     assert.match(result.stderr, /invalid input syntax for type uuid/);
   });
 
