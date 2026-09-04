@@ -660,6 +660,23 @@ describe("newExperiment server URL happy path", () => {
     assert.equal(fetchMock.mock.callCount(), 0);
   });
 
+  it("uses SERVER_URL even when the flag is invalid", async () => {
+    process.env.SERVER_URL = "https://from.env.example";
+    process.env.LINEAR_API_TOKEN = "";
+    const fetchMock = mock.method(globalThis, "fetch", async () => assert.fail("Linear should not be called"));
+
+    await assert.rejects(
+      () =>
+        newExperiment({
+          iso: "https://example.com/omarchy.iso",
+          serverUrl: "ssh://ignored.example",
+          version: "1.2.3",
+        }),
+      { message: "test: LINEAR_API_TOKEN is not set" },
+    );
+    assert.equal(fetchMock.mock.callCount(), 0);
+  });
+
   it("uses the default when SERVER_URL and the flag are omitted", async () => {
     delete process.env.SERVER_URL;
     process.env.LINEAR_API_TOKEN = "";

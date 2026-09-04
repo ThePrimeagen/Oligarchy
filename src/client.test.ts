@@ -324,6 +324,23 @@ describe("./client unhappy path", () => {
     assert.match(missingIso.stderr, /iso/);
   });
 
+  it("uses SERVER_URL even when --server_url is invalid", async () => {
+    const result = await runClient(
+      [
+        "test",
+        "new",
+        "--iso",
+        "https://example.com/omarchy.iso",
+        "--server_url=ssh://ignored.example",
+        "--version",
+        "1.2.3",
+      ],
+      { LINEAR_API_TOKEN: "", SERVER_URL: "https://from.env.example" },
+    );
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /LINEAR_API_TOKEN is not set/);
+  });
+
   it("rejects a SERVER_URL outside HTTP and HTTPS", async () => {
     const result = await runClient(
       ["test", "new", "--iso", "https://example.com/omarchy.iso", "--version", "1.2.3"],

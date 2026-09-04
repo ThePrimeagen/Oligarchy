@@ -481,7 +481,6 @@ export const experimentNewCommand = Command.make(
       Flag.withDescription("HTTPS URL of the ISO"),
     ),
     serverUrl: Flag.string("server_url").pipe(
-      Flag.withSchema(HttpUrl),
       Flag.optional,
       Flag.withDescription("HTTP or HTTPS URL of the oligarchy server"),
     ),
