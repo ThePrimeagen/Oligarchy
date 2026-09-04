@@ -12,7 +12,7 @@ One PlanetScale Postgres database holds the record of everything the proxy does.
 
 `ctrl session list` reads the newest sessions (`ORDER BY started_at DESC, id DESC LIMIT --count`, default 10) and prints colored status, age, and id lines. `--active` reads only running and downloading sessions, running first and newest first within each status. `--json` prints the selected rows as one JSON array instead. It does not write.
 
-`ctrl session` reads one session's logs, actions, attributed test result, and that result's definition. `--logs` and `--actions` are `WHERE session_id ORDER BY created_at, id`. `--test-results` and `--test-def` follow `test_results.session_id` onto the definition. `--all` prints all four. `--dump` only confirms the session row exists, then asks the proxy for the serial console — the one record that lives on the proxy host, not here. An unknown session is a failure. The command does not write.
+`ctrl session` reads one session's logs, actions, attributed test result, and that result's definition. `--logs` and `--actions` are `WHERE session_id ORDER BY created_at, id`. `--test-results` and `--test-def` follow `test_results.session_id` onto the definition. `--all` prints all four. `--dump` only confirms the session row exists, then asks the proxy for the serial console — the one record that lives on the proxy host, not here. An unknown session is a failure. The command does not write; the proxy logs a `--dump` read as it logs every request, but that line is the proxy's.
 
 `npm run db:migrate` reads `DATABASE_URL` from the environment (a `.env` fills in missing variables only), applies the generated migrations in `drizzle/`, and closes the one-shot database pool. Missing `DATABASE_URL` is a failure.
 

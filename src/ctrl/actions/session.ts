@@ -4,7 +4,7 @@ import { Flag } from "effect/unstable/cli";
 import { getBytes } from "../../client/http.ts";
 import { closeDatabase, connectDatabase } from "../../db/ops.ts";
 import { actions, logs, sessions, testDefinitions, testResults } from "../../db/schema.ts";
-import { type CtrlArgs, parseCtrlArgs } from "../parse-args.ts";
+import { type CtrlArgs, parseCtrlArgs, requireEnv } from "../parse-args.ts";
 
 const DEFAULT_COUNT = 10;
 
@@ -30,7 +30,7 @@ const listSpec = {
 };
 
 const inspectSpec = {
-  env: { token: "OLIGARCHY_TOKEN" },
+  env: {},
   flags: {
     sessionId: Flag.string("session-id").pipe(Flag.withSchema(Schema.NonEmptyString), Flag.withDescription("Session id")),
     logs: Flag.boolean("logs").pipe(Flag.withDefault(false), Flag.withDescription("Print session logs")),
@@ -144,20 +144,14 @@ export async function sessionInspectRun(argv: readonly string[]): Promise<void> 
   if (inspecting && args.dump) {
     throw new Error("session: --dump does not combine with --logs, --test-def, --test-results, --actions, or --all");
   }
+  if (args.dump) {
+    return sessionDumpRun(args, await requireEnv("OLIGARCHY_TOKEN"));
+  }
   const db = connectDatabase(args.databaseUrl);
   try {
     const [session] = await db.select({ id: sessions.id }).from(sessions).where(eq(sessions.id, args.sessionId));
     if (session === undefined) {
       throw new Error(`session: no session ${args.sessionId}`);
-    }
-
-    if (args.dump) {
-      // Postgres matched the id however it was cased; the proxy's map and paths hold the canonical form.
-      const data = await getBytes(args, `/dump?id=${encodeURIComponent(session.id)}`);
-      await new Promise<void>((done, fail) => {
-        process.stdout.write(data, (err) => (err ? fail(err) : done()));
-      });
-      return;
     }
 
     const out: {
@@ -200,6 +194,23 @@ export async function sessionInspectRun(argv: readonly string[]): Promise<void> 
 
     const values = [out.logs, out.results, out.test_definition, out.actions].filter((value) => value !== undefined);
     console.log(JSON.stringify(values.length === 1 ? values[0] : out));
+  } finally {
+    await closeDatabase(db);
+  }
+}
+
+async function sessionDumpRun(args: SessionInspectArgs, token: string): Promise<void> {
+  const db = connectDatabase(args.databaseUrl);
+  try {
+    const [session] = await db.select({ id: sessions.id }).from(sessions).where(eq(sessions.id, args.sessionId));
+    if (session === undefined) {
+      throw new Error(`session: no session ${args.sessionId}`);
+    }
+    // Postgres matched the id however it was cased; the proxy's map and paths hold the canonical form.
+    const data = await getBytes({ serverUrl: args.serverUrl, token }, `/dump?id=${encodeURIComponent(session.id)}`);
+    await new Promise<void>((done, fail) => {
+      process.stdout.write(data, (err) => (err ? fail(err) : done()));
+    });
   } finally {
     await closeDatabase(db);
   }

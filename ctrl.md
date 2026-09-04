@@ -39,7 +39,7 @@ If you are an agent driving a guest, you need two of these: [test start](#test-s
 The action comes first. Every value is a flag; there are no positional arguments. Flags may sit in any order after the action.
 
 - `--server-url <url>` — the oligarchy server, a full http or https URL. Required on every action; falls back to `SERVER_URL` from the environment. There is no default.
-- `DATABASE_URL` — read from the environment by every action. `test new` and `test list` also read `LINEAR_API_TOKEN`; `test run` also reads `CURSOR_API_TOKEN`; `session --session-id` always also reads `OLIGARCHY_TOKEN`, the proxy's bearer token, because its `--dump` calls the proxy. A `.env` in the current directory fills in missing variables only. A missing variable means exit 1.
+- `DATABASE_URL` — read from the environment by every action. `test new` and `test list` also read `LINEAR_API_TOKEN`; `test run` also reads `CURSOR_API_TOKEN`; `session --dump` also reads `OLIGARCHY_TOKEN`, the proxy's bearer token — the other `session` selectors never need it. A `.env` in the current directory fills in missing variables only. A missing variable means exit 1.
 
 A command that works exits 0. A command that fails exits 1 and prints the error: one headline, then the stack trace and the cause behind it. Read the headline first. `./ctrl <action> --help` prints that action's flags.
 

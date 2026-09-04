@@ -577,15 +577,20 @@ describe("./ctrl unhappy path", () => {
     assert.match(result.stderr, /code: 'ECONNREFUSED'/);
   });
 
-  it("session --session-id requires OLIGARCHY_TOKEN before doing anything, with --dump and with the JSON selectors alike", async () => {
+  it("session --dump requires OLIGARCHY_TOKEN before calling the proxy; the JSON selectors never need it", async () => {
+    const sessionId = await anySessionId();
     const proxy = await stubProxy({ status: 200, body: "never read\n" });
     try {
-      for (const selector of ["--dump", "--logs"]) {
-        const result = await runCtrl(["session", "--session-id", randomUUID(), selector, "--server-url", proxy.url], { OLIGARCHY_TOKEN: "" });
-        assert.equal(result.code, 1);
-        assert.equal(result.stdout, "");
-        assert.match(result.stderr, /OLIGARCHY_TOKEN is not set/);
-      }
+      const dump = await runCtrl(["session", "--session-id", sessionId, "--dump", "--server-url", proxy.url], { OLIGARCHY_TOKEN: "" });
+      assert.equal(dump.code, 1);
+      assert.equal(dump.stdout, "");
+      assert.match(dump.stderr, /^OLIGARCHY_TOKEN is not set\n/);
+      assert.deepEqual(proxy.received, []);
+
+      const logs = await runCtrl(["session", "--session-id", sessionId, "--logs", "--server-url", proxy.url], { OLIGARCHY_TOKEN: "" });
+      assert.equal(logs.stderr, "");
+      assert.equal(logs.code, 0);
+      assert.ok(Array.isArray(JSON.parse(logs.stdout)));
       assert.deepEqual(proxy.received, []);
     } finally {
       await close(proxy.server);

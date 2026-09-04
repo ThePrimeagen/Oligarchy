@@ -43,6 +43,11 @@ function envValue(variable: string): Effect.Effect<string, Error> {
   return Config.nonEmptyString(variable).pipe(Effect.mapError(() => new Error(`${variable} is not set`)));
 }
 
+// For a variable only one flag of an action needs: read it after parsing, when that flag is set.
+export function requireEnv(variable: string): Promise<string> {
+  return Effect.runPromise(envValue(variable));
+}
+
 export function parseCtrlArgs<const Env extends Record<string, string>, const Flags extends Command.Command.Config>(
   name: string,
   spec: { env: Env; flags: Flags },
