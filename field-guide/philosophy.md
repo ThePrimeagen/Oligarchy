@@ -6,7 +6,7 @@ Durable preferences for how code is written in this repo. They come from the mai
 
 Optimize for the person reading the file top to bottom. A function should be inspectable in one pass: read it, know what it does. This is explicitly not "Clean Code" — no Uncle Bob. No tiny single-use helpers, no layers, no interfaces with one implementation, no abstraction bought before it is needed. A little repetition is fine when it keeps each site readable on its own.
 
-`src/qemu/cli.ts` is the reference example: one main file, one Effect `Command` per subcommand, three small shared helpers (`postJSON`, `readAPIError`, `errorMessage`), nothing else. Argument parsing is Effect's CLI (`Command`, `Flag`, `Argument`) — not a hand-rolled flag package.
+`src/client/` is the reference example: `index.ts` is a `switch` over the action name, each action is one file under `actions/` that declares its flags, derives its arg type from them, calls `parseClientArgs` on its first line, and then does its one thing with plain `async`/`await`; the HTTP helpers (`postJSON`, `getBytes`, `postStart`) sit in `http.ts`; nothing else. `src/ctrl/` has the identical shape. Argument parsing is Effect's CLI (`Command`, `Flag`) inside `parse-args.ts` — not a hand-rolled flag package — and that file is the only place Effect's runtime is invoked.
 
 ## Support only what is used
 
@@ -21,8 +21,8 @@ Trust the contracts of our own components. If a failure cannot happen given the 
 Guards this repo deliberately does not have:
 
 - `start` trusts that a 200 from `/start` carries `{"id": ...}`; it does not re-validate our own server's response shape.
-- `readAPIError` parses `{"error": ...}` in one try/catch. A malformed error body from our own servers is not a case worth code.
-- `errorMessage` casts to `Error` because everything thrown in the file is one. There is no branch for non-`Error` throws.
+- `apiError` parses `{"error": ...}` in one try/catch. A malformed error body from our own servers is not a case worth code.
+- The `catch` in each `index.ts` casts to `Error` because everything thrown below it is one. There is no branch for non-`Error` throws.
 - The cpu sampler's baseline is not nullable. It is established at construction; there is no universe where the sampler exists without it, and the type says so. Do not soften a construction-time requirement into a `| null` union to survive a failure that cannot happen.
 - Utilization has no 0–100 clamp: monotonic counters over an identical core set cannot leave that range. A clamp that cannot fire is noise.
 
@@ -50,7 +50,7 @@ A loop or timer that runs for the life of the process owes three guarantees: it 
 
 ## No normalization functions
 
-No generic parsing or normalizing machinery where direct expressions do the job. CLI args go through Effect's `Command` / `Flag` / `Argument` at the process boundary; do not re-implement a flag package beside it.
+No generic parsing or normalizing machinery where direct expressions do the job. CLI args go through Effect's `Command` / `Flag` at the process boundary; do not re-implement a flag package beside it.
 
 ## Keep what earns its place
 
@@ -58,13 +58,13 @@ Simplicity is not deleting necessary behavior. Things that stay, and why:
 
 - Paths sent to the server are absolutized: the server runs in a different working directory.
 - The CLI stats the ISO before calling the server: the client-side error is immediate and names the real path.
-- `errorMessage` unwraps `fetch`'s `cause`: without it, a refused connection prints only "fetch failed".
+- The `catch` in `index.ts` unwraps `fetch`'s `cause`: without it, a refused connection prints only "fetch failed".
 - Comments exist only where the intent is invisible in the code — e.g. why `start` omits the `disk` key from its JSON instead of sending an empty string.
 - A constant carries its meaning when its name and value cannot: `MAX_SAMPLES = 60` says "60 samples × 5s ticks = a 5 minute window", because "five minutes" appears nowhere else in the code.
 
 ## Porting: the reference implementation is the spec
 
-When a component mirrors another, the reference's observable behavior beats general convention. The CLI was ported from a since-deleted Go client. Effect's runner exits 1 on parse and command failures. The user-facing interface may deliberately diverge — the Go client took positionals, this CLI takes `--iso`/`--disk` — but wire behavior must match the server exactly.
+When a component mirrors another, the reference's observable behavior beats general convention. The client was ported from a since-deleted Go client, and later split into one file per action. Parse and command failures exit 1. The user-facing interface may deliberately diverge — the Go client took positionals, this client takes only flags (`--session-id`, `--iso`, `--keys`, ...) and puts the action first — but wire behavior must match the server exactly.
 
 ## Tests
 
@@ -75,5 +75,5 @@ The default verification is running the real thing: boot the server, hit the end
 ## Style
 
 - No classes, ever. Factory functions returning plain state objects, operated on by standalone functions. See [development.md](../development.md).
-- Executables are main files, not libraries: they run top level and export nothing (`src/qemu/cli.ts`, `src/qemu/proxy.ts`).
+- Executables are main files, not libraries: they run top level and export nothing (`src/client/index.ts`, `src/ctrl/index.ts`, `src/qemu/proxy.ts`). The action files they dispatch to export their `<action>Run` and nothing they do not need to.
 - Changes get a review pass against this document's bar. Review suggestions that add guards or ceremony get declined, with the reason stated. Machine reviews are held to the same bar as the code they review: a reviewer that introduces nullable state for impossible failures, or strips the comments that carry design intent, gets that half of its diff reverted.

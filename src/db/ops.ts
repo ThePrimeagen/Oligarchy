@@ -5,11 +5,7 @@ import { actions, agentRuns, images, sessions, type SessionConfig } from "./sche
 
 export type Db = NodePgDatabase & { $client: Pool };
 
-export function connectDatabase(): Db {
-  const url = process.env.DATABASE_URL;
-  if (url === undefined || url === "") {
-    throw new Error("db: DATABASE_URL is not set");
-  }
+export function connectDatabase(url: string): Db {
   // canParse instead of letting new URL throw: that TypeError carries the url —
   // password included — into the logs.
   if (!URL.canParse(url)) {

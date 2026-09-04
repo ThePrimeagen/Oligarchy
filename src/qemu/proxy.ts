@@ -25,6 +25,11 @@ if (token === undefined || token === "") {
   throw new Error("OLIGARCHY_TOKEN is not set");
 }
 
+const databaseUrl = process.env.DATABASE_URL;
+if (databaseUrl === undefined || databaseUrl === "") {
+  throw new Error("DATABASE_URL is not set");
+}
+
 initSentry();
 
 const DEFAULT_HOST = "127.0.0.1";
@@ -45,7 +50,7 @@ const MAX_CLICKS = 100;
 // one request cannot run for many minutes or write thousands of rows.
 const MAX_KEYS = 1000;
 
-const db = connectDatabase();
+const db = connectDatabase(databaseUrl);
 
 type LiveSession = {
   qemu: Qemu;

@@ -1,2 +1,0 @@
-#!/bin/sh
-exec node --experimental-strip-types "$(dirname "$0")/src/qemu/runner.ts" "$@"

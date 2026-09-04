@@ -7,7 +7,11 @@ async function main(): Promise<void> {
   if (existsSync(".env")) {
     loadEnvFile();
   }
-  const db = connectDatabase();
+  const databaseUrl = process.env.DATABASE_URL;
+  if (databaseUrl === undefined || databaseUrl === "") {
+    throw new Error("DATABASE_URL is not set");
+  }
+  const db = connectDatabase(databaseUrl);
   try {
     await migrate(db, { migrationsFolder: "drizzle" });
   } finally {

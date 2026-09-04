@@ -1,11 +1,12 @@
 <role>
-You are a driving agent that uses the `./client` to complete your task. You are not a developing agent.
+You are a driving agent that uses ./client and ./ctrl to complete your task. You are not a developing agent.
 </role>
 
 <task>
-* DO NOT READY ANY FILE, Just follow the linear ticket's information
+* DO NOT READ ANY FILE, Just follow the linear ticket's information
 * Review Linear ticket {{LINEAR_TICKET}} and complete your task.  Use Linear MCP To get Linear Ticket information out
-* Help with ./client is in linear and the help menu is extensive.  ./client --help
+* The ticket carries the full guide for ./client (drives the guest) and ./ctrl (records the result). `./client <action> --help` and `./ctrl <action> --help` print each action's flags.
+* Every value is a flag; there are no positional arguments. Pass `--server-url {{SERVER_URL}}` on every ./client and ./ctrl command, and `--agent-id {{LINEAR_TICKET}}` on every ./client command and on ./ctrl test-results.
 </task>
 
 <agent-id>

@@ -5,16 +5,7 @@ import { prompt } from "./client.ts";
 const RUN_ID = "run-22222222-2222-4222-8222-222222222222";
 const AGENT_ID_PATTERN = /^bc-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-const savedToken = process.env.CURSOR_API_TOKEN;
-
-afterEach(() => {
-  mock.restoreAll();
-  if (savedToken === undefined) {
-    delete process.env.CURSOR_API_TOKEN;
-  } else {
-    process.env.CURSOR_API_TOKEN = savedToken;
-  }
-});
+afterEach(() => mock.restoreAll());
 
 type CursorRequest = {
   method: string;
@@ -70,12 +61,11 @@ function createdAgent(requests: CursorRequest[]) {
 
 describe("prompt happy path", () => {
   it("kicks off a cloud agent on the repository with Grok 4.6 fast, extra high, and prints its link", async () => {
-    process.env.CURSOR_API_TOKEN = "test-token";
     const requests: CursorRequest[] = [];
     mock.method(globalThis, "fetch", cursorApi(requests));
     const log = mock.method(console, "log", () => undefined);
 
-    await prompt("Review Linear ticket OLI-42 and complete your task.");
+    await prompt("test-token", "Review Linear ticket OLI-42 and complete your task.");
 
     const created = createdAgent(requests);
     assert.equal(created.url, "https://api.cursor.com/v1/agents");
@@ -103,12 +93,11 @@ describe("prompt happy path", () => {
   });
 
   it("sends the model given in the options instead of the default", async () => {
-    process.env.CURSOR_API_TOKEN = "test-token";
     const requests: CursorRequest[] = [];
     mock.method(globalThis, "fetch", cursorApi(requests));
     mock.method(console, "log", () => undefined);
 
-    await prompt("hello", { model: { id: "composer-2.5" } });
+    await prompt("test-token", "hello", { model: { id: "composer-2.5" } });
 
     const body = createdAgent(requests).body as { model: unknown };
     assert.deepEqual(body.model, { id: "composer-2.5" });
@@ -116,34 +105,22 @@ describe("prompt happy path", () => {
 });
 
 describe("prompt unhappy path", () => {
-  it("rejects when CURSOR_API_TOKEN is not set and never calls Cursor", async () => {
-    delete process.env.CURSOR_API_TOKEN;
-    const fetchMock = mock.method(globalThis, "fetch", async () => assert.fail("Cursor should not be called"));
-    const log = mock.method(console, "log", () => undefined);
-
-    await assert.rejects(() => prompt("hello"), { message: "cursor-agent: CURSOR_API_TOKEN is not set" });
-    assert.equal(fetchMock.mock.callCount(), 0);
-    assert.equal(log.mock.callCount(), 0);
-  });
-
   it("rejects when Cursor refuses the token and prints nothing", async () => {
-    process.env.CURSOR_API_TOKEN = "bad-token";
     mock.method(globalThis, "fetch", async () =>
       Response.json({ error: { code: "unauthorized", message: "Invalid API key" } }, { status: 401 }),
     );
     const log = mock.method(console, "log", () => undefined);
 
-    await assert.rejects(() => prompt("hello"), { message: "Invalid API key" });
+    await assert.rejects(() => prompt("bad-token", "hello"), { message: "Invalid API key" });
     assert.equal(log.mock.callCount(), 0);
   });
 
   it("rejects a model Cursor does not offer before creating an agent", async () => {
-    process.env.CURSOR_API_TOKEN = "test-token";
     const requests: CursorRequest[] = [];
     mock.method(globalThis, "fetch", cursorApi(requests));
     const log = mock.method(console, "log", () => undefined);
 
-    await assert.rejects(() => prompt("hello", { model: { id: "grok-9" } }), {
+    await assert.rejects(() => prompt("test-token", "hello", { model: { id: "grok-9" } }), {
       message: /Model 'grok-9' is not available or invalid/,
     });
     assert.equal(requests.some((request) => request.method === "POST" && request.url.endsWith("/v1/agents")), false);
