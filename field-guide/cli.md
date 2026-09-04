@@ -7,7 +7,9 @@ The TypeScript client for the oligarchy control plane. It sends HTTP requests to
 ./client test new --iso <https-url> [--server_url=<http-or-https-url>] --version <version> [--name <definition>]
 ./client test list
 ./client test run --ticket <linear-ticket> --server_url=<http-or-https-url>
+./client test start --session_id <id> --test_result_id <result-id>
 ./client --agent-id <agent> test-results --id <result-id> --status success|failed [--reason <text>]
+./client session --session-id <id> --logs|--test-def|--test-results|--actions|--all
 ./client --agent-id <agent> start [--iso <path>] [--disk <path>]
 ./client --agent-id <agent> get-image <id> [-o file]
 ./client --agent-id <agent> get-serial <id> [-o file]
@@ -20,7 +22,7 @@ The TypeScript client for the oligarchy control plane. It sends HTTP requests to
 
 The server comes from `--server-url`, a full URL used exactly as given (no scheme is ever added), default `http://127.0.0.1:42069`. It is a shared flag on the root command and may sit before or after the subcommand name. The CLI reads `OLIGARCHY_TOKEN` from the environment (a `.env` fills in missing variables only) and sends it as `Authorization: Bearer <token>` on every proxy request. A missing token is a startup failure.
 
-`--agent-id <agent>` is a shared flag on the root command, required for every QEMU command, for `test-results`, and for `intent`, unused by `test`. It may sit before or after the subcommand name. This client is used by agents, not humans — the inconvenience of typing it is deliberate. An invocation without it is a missing-option error.
+`--agent-id <agent>` is a shared flag on the root command, required for every QEMU command, for `test-results`, and for `intent`, unused by `test` and `session`. It may sit before or after the subcommand name. This client is used by agents, not humans — the inconvenience of typing it is deliberate. An invocation without it is a missing-option error.
 
 ## test
 
@@ -67,6 +69,16 @@ The agent runs Grok 4.6 in fast mode at extra-high effort (`{ id: "grok-4.6", pa
 ./client test run --ticket OLI-42 --server_url https://qemu.example.com
 ```
 
+## test start
+
+Writes the session onto a pending test result and marks it running. The command writes the database itself — it does not call the proxy. `--test_result_id` is the result UUID printed on the Linear issue. `--session_id` is the session UUID printed by `start`. The result already carries its definition id; the command does not take one.
+
+Missing `DATABASE_URL` is a failure. An unknown session id, or a result that is missing or not pending, is a failure.
+
+```bash
+./client test start --session_id 11111111-1111-4111-8111-111111111111 --test_result_id 22222222-2222-4222-8222-222222222222
+```
+
 ## test-results
 
 Closes one pending test result. The command writes the database itself — it does not call the proxy. `--id` is the result UUID printed on the Linear issue. `--status` is `success` or `failed` (`success` is stored as `passed`). `--reason` is optional text stored on the result row. `--agent-id` is required: the command looks up that agent's session in `agent_runs` and records it on the result.
@@ -76,6 +88,22 @@ Missing `DATABASE_URL` is a failure. An unknown result id is a failure.
 ```bash
 ./client --agent-id <agent> test-results --id 22222222-2222-4222-8222-222222222222 --status success
 ./client --agent-id <agent> test-results --id 22222222-2222-4222-8222-222222222222 --status failed --reason "installer hung"
+```
+
+## session
+
+Prints stored logs, the test definition, the test result, and the actions for one session. The command reads the database itself — it does not call the proxy. `--session-id` is the session UUID. At least one selector is required: `--logs`, `--test-def`, `--test-results`, `--actions`, or `--all`.
+
+`--logs` and `--actions` print that table's rows as JSON, oldest first (`created_at`, then `id`). `--test-results` prints the result row attributed to the session, or `null`. `--test-def` prints the definition that result ran, or `null`. `--all` prints `{ logs, results, test_definition, actions }`. Combining selectors prints an object with those keys.
+
+Missing `DATABASE_URL` is a failure. An unknown session id is a failure.
+
+```bash
+./client session --session-id 11111111-1111-4111-8111-111111111111 --logs
+./client session --session-id 11111111-1111-4111-8111-111111111111 --test-def
+./client session --session-id 11111111-1111-4111-8111-111111111111 --test-results
+./client session --session-id 11111111-1111-4111-8111-111111111111 --actions
+./client session --session-id 11111111-1111-4111-8111-111111111111 --all
 ```
 
 ## start
@@ -139,4 +167,4 @@ Kills the session. Only the agent that started it can stop it; a different `--ag
 
 ## Reading the file
 
-The file reads `OLIGARCHY_TOKEN` at startup and fails if it is missing. The root `client` command shares `--agent-id` and `--server-url` with its subcommands. QEMU handlers, `test-results`, and `intent` yield the parent command and fail if `--agent-id` is missing. `test` is a sibling subcommand: `--list` / `--details` / `--name` print stored definitions through `src/test-def.ts`; `new`, `list`, and `run` live as its subcommands. `test-results` is a sibling that writes the result row through `src/test-results.ts`. HTTP helpers stay local to the file: `postJSON`, `readAPIError`, and `errorMessage`. There is no other machinery — see the [philosophy](philosophy.md) for why it should stay that way.
+The file reads `OLIGARCHY_TOKEN` at startup and fails if it is missing. The root `client` command shares `--agent-id` and `--server-url` with its subcommands. QEMU handlers, `test-results`, and `intent` yield the parent command and fail if `--agent-id` is missing. `test` is a sibling subcommand: `--list` / `--details` / `--name` print stored definitions through `src/test-def.ts`; `new`, `list`, `run`, and `start` live as its subcommands. `test-results` is a sibling that writes the result row through `src/test-results.ts`. `session` is a sibling that reads logs, the test definition, the result, and actions through `src/session-info.ts`. HTTP helpers stay local to the file: `postJSON`, `readAPIError`, and `errorMessage`. There is no other machinery — see the [philosophy](philosophy.md) for why it should stay that way.
