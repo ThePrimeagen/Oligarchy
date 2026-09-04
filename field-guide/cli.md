@@ -70,7 +70,7 @@ Types a key string into the session.
 
 Moves the pointer, and optionally clicks or scrolls, at a point on the screenshot.
 
-- `send-mouse --session-id <id> --x <x> --y <y> [--button <button>] [--clicks <n>]`. `--x` and `--y` are fractions of the screenshot, `0..1` from the top-left; the CLI rejects anything else before calling the server. Omit `--button` to move only. `--button` is `left`, `middle`, `right`, `wheel-up`, or `wheel-down`; `--clicks` defaults to 1 on the server and is a pulse count (a double-click is `--button left --clicks 2`, three wheel ticks is `--button wheel-down --clicks 3`).
+- `send-mouse --session-id <id> --x <x> --y <y> [--button <button>] [--clicks <n>]`. `--x` and `--y` are fractions of the screenshot, `0..1` from the top-left; the CLI rejects anything else before calling the server. Omit `--button` to move only. `--button` is `left`, `middle`, `right`, `wheel-up`, or `wheel-down`; `--clicks` defaults to 1 on the server and is a pulse count (a double-click is `--button left --clicks 2`, three wheel ticks is `--button wheel-down --clicks 3`); `--clicks` without `--button` is refused by the CLI, because the server would move and silently drop it.
 - Wire call: `POST /send-mouse` with `{"id", "x", "y", "button"?, "clicks"?, "agent"}` → `{"ok": "true"}`.
 
 ### intent start / intent end

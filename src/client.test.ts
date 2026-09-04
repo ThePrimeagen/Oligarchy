@@ -369,6 +369,18 @@ describe("./client unhappy path", () => {
     }
   });
 
+  it("rejects send-mouse --clicks without --button before calling the proxy", async () => {
+    const proxy = await stubProxy(ok);
+    try {
+      const result = await runClient(["send-mouse", "--agent-id", "agent-1", "--server-url", proxy.url, "--session-id", "session-1", "--x", "0.5", "--y", "0.5", "--clicks", "2"]);
+      assert.equal(result.code, 1);
+      assert.equal(result.stderr, "send-mouse: --clicks needs --button\n");
+      assert.deepEqual(proxy.received, []);
+    } finally {
+      await close(proxy.server);
+    }
+  });
+
   it("rejects a start whose local ISO does not exist before calling the proxy", async () => {
     const proxy = await stubProxy(ok);
     try {

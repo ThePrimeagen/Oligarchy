@@ -89,7 +89,7 @@ Coordinates are fractions of the last screenshot: `0` is the top or left edge, `
 ./client send-mouse --agent-id <agent> --server-url <url> --session-id <id> --x 0.5 --y 0.5 --button wheel-down --clicks 3
 ```
 
-Omit `--button` to move only. `--button` is `left`, `middle`, `right`, `wheel-up`, or `wheel-down`. `--clicks` is how many times that button is pulsed.
+Omit `--button` to move only. `--button` is `left`, `middle`, `right`, `wheel-up`, or `wheel-down`. `--clicks` is how many times that button is pulsed and needs `--button`.
 
 ## Stop
 

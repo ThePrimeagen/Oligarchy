@@ -26,6 +26,10 @@ export type SendMouseArgs = ClientArgs<typeof flags>;
 
 export async function sendMouseRun(argv: readonly string[]): Promise<void> {
   const args: SendMouseArgs = await parseClientArgs("send-mouse", flags, argv);
+  // The proxy moves and ignores clicks when there is no button; say so here instead.
+  if (Option.isSome(args.clicks) && Option.isNone(args.button)) {
+    throw new Error("send-mouse: --clicks needs --button");
+  }
   const body: { id: string; x: number; y: number; agent: string; button?: string; clicks?: number } = {
     id: args.sessionId,
     x: args.x,

@@ -117,7 +117,7 @@ Moves the pointer, and optionally clicks or scrolls, at a point on the screensho
 ./client send-mouse --agent-id <agent> --server-url <url> --session-id <id> --x 0.5 --y 0.5 --button wheel-down --clicks 3
 ```
 
-`--x` and `--y` are fractions of the screenshot, `0..1` from the top-left. Omit `--button` to move only. `--button` is `left`, `middle`, `right`, `wheel-up`, or `wheel-down`. `--clicks` defaults to 1 — a double-click is `--button left --clicks 2`. See [Mouse](#mouse).
+`--x` and `--y` are fractions of the screenshot, `0..1` from the top-left. Omit `--button` to move only. `--button` is `left`, `middle`, `right`, `wheel-up`, or `wheel-down`. `--clicks` defaults to 1 and needs `--button` — a double-click is `--button left --clicks 2`. See [Mouse](#mouse).
 
 ## intent
 
