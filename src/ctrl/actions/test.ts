@@ -16,7 +16,7 @@ import {
   type LinearTicket,
   listLinearBacklog,
 } from "../../linear.ts";
-import { type CtrlArgs, parseCtrlArgs } from "../parse-args.ts";
+import { type CtrlArgs, parseCtrlArgs, serverUrl } from "../parse-args.ts";
 
 const HttpsUrl = Schema.String.check(
   Schema.makeFilter(
@@ -34,6 +34,7 @@ const HttpsUrl = Schema.String.check(
 const definitionsSpec = {
   env: {},
   flags: {
+    serverUrl,
     list: Flag.boolean("list").pipe(Flag.withDescription("List stored test definitions")),
     details: Flag.boolean("details").pipe(Flag.withDefault(false), Flag.withDescription("Print every field as JSON")),
     name: Flag.string("name").pipe(
@@ -47,6 +48,7 @@ const definitionsSpec = {
 const newSpec = {
   env: { linearToken: "LINEAR_API_TOKEN" },
   flags: {
+    serverUrl,
     iso: Flag.string("iso").pipe(Flag.withSchema(HttpsUrl), Flag.withDescription("HTTPS URL of the ISO")),
     version: Flag.string("version").pipe(
       Flag.withSchema(Schema.NonEmptyString),
@@ -62,7 +64,7 @@ const newSpec = {
 
 const listSpec = {
   env: { linearToken: "LINEAR_API_TOKEN" },
-  flags: {},
+  flags: { serverUrl },
 };
 
 const runSpec = {
@@ -78,6 +80,7 @@ const runSpec = {
 const startSpec = {
   env: {},
   flags: {
+    serverUrl,
     sessionId: Flag.string("session-id").pipe(Flag.withSchema(Schema.NonEmptyString), Flag.withDescription("Session id")),
     testResultId: Flag.string("test-result-id").pipe(
       Flag.withSchema(Schema.NonEmptyString),
@@ -100,7 +103,7 @@ const USAGE = `usage: ctrl test --list [--details] [--name <definition>]
        ctrl test run --ticket <linear-ticket>
        ctrl test start --session-id <id> --test-result-id <id>
 
-Every form takes --server-url <url> (or SERVER_URL). ctrl test <verb> --help prints that verb's flags.`;
+Every form but run takes --server-url <url> (or SERVER_URL). ctrl test <verb> --help prints that verb's flags.`;
 
 export async function testRun(argv: readonly string[]): Promise<void> {
   const [verb, ...rest] = argv;

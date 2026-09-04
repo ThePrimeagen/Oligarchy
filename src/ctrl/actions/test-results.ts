@@ -4,11 +4,12 @@ import { Flag } from "effect/unstable/cli";
 import { acquireAgentColor, flushLogs, log } from "../../db/log.ts";
 import { closeDatabase, connectDatabase } from "../../db/ops.ts";
 import { agentRuns, testResults } from "../../db/schema.ts";
-import { type CtrlArgs, parseCtrlArgs } from "../parse-args.ts";
+import { type CtrlArgs, parseCtrlArgs, serverUrl } from "../parse-args.ts";
 
 const spec = {
   env: {},
   flags: {
+    serverUrl,
     agentId: Flag.string("agent-id").pipe(Flag.withSchema(Schema.NonEmptyString), Flag.withDescription("Calling agent's id")),
     id: Flag.string("id").pipe(Flag.withSchema(Schema.NonEmptyString), Flag.withDescription("Test result id")),
     status: Flag.choiceWithValue("status", [

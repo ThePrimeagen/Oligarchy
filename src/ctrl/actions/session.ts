@@ -3,7 +3,7 @@ import { Schema } from "effect";
 import { Flag } from "effect/unstable/cli";
 import { closeDatabase, connectDatabase } from "../../db/ops.ts";
 import { actions, logs, sessions, testDefinitions, testResults } from "../../db/schema.ts";
-import { type CtrlArgs, parseCtrlArgs } from "../parse-args.ts";
+import { type CtrlArgs, parseCtrlArgs, serverUrl } from "../parse-args.ts";
 
 const DEFAULT_COUNT = 10;
 
@@ -15,6 +15,7 @@ Every form takes --server-url <url> (or SERVER_URL). ctrl session list --help an
 const listSpec = {
   env: {},
   flags: {
+    serverUrl,
     count: Flag.integer("count").pipe(
       Flag.withSchema(Schema.Number.check(Schema.isGreaterThanOrEqualTo(1, { message: "count must be at least 1" }))),
       Flag.withDefault(DEFAULT_COUNT),
@@ -31,6 +32,7 @@ const listSpec = {
 const inspectSpec = {
   env: {},
   flags: {
+    serverUrl,
     sessionId: Flag.string("session-id").pipe(Flag.withSchema(Schema.NonEmptyString), Flag.withDescription("Session id")),
     logs: Flag.boolean("logs").pipe(Flag.withDefault(false), Flag.withDescription("Print session logs")),
     testDef: Flag.boolean("test-def").pipe(Flag.withDefault(false), Flag.withDescription("Print the session's test definition")),
