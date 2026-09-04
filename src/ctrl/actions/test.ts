@@ -10,6 +10,7 @@ import {
   describeLinearIssue,
   drivingAgentPrompt,
   type Experiment,
+  linearAssigneeId,
   linearLabelIds,
   linearTeamId,
   type LinearTicket,
@@ -237,8 +238,9 @@ export async function createExperiment(
   try {
     const teamId = await linearTeamId(token);
     const labelIds = await linearLabelIds(token, teamId, experiment.version);
+    const assigneeId = await linearAssigneeId(token);
     for (const test of experiment.tests) {
-      const ticket = await createLinearIssue(token, teamId, labelIds, test);
+      const ticket = await createLinearIssue(token, teamId, labelIds, assigneeId, test);
       tickets.push(ticket);
       await describeLinearIssue(token, ticket, experiment, test);
     }
