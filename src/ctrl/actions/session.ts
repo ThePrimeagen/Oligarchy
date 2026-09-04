@@ -7,7 +7,7 @@ import { type CtrlArgs, parseCtrlArgs } from "../parse-args.ts";
 
 const DEFAULT_COUNT = 10;
 
-const USAGE = `usage: ctrl session list [--count <n>] [--json]
+const USAGE = `usage: ctrl session list [--count <n>] [--active] [--json]
        ctrl session --session-id <id> --logs|--test-def|--test-results|--actions|--all
 
 Every form takes --server-url <url> (or SERVER_URL). ctrl session list --help and ctrl session --session-id <id> --help print their flags.`;
@@ -19,6 +19,10 @@ const listSpec = {
       Flag.withSchema(Schema.Number.check(Schema.isGreaterThanOrEqualTo(1, { message: "count must be at least 1" }))),
       Flag.withDefault(DEFAULT_COUNT),
       Flag.withDescription("How many of the most recent sessions to print"),
+    ),
+    active: Flag.boolean("active").pipe(
+      Flag.withDefault(false),
+      Flag.withDescription("Print only active sessions, running before downloads"),
     ),
     json: Flag.boolean("json").pipe(Flag.withDefault(false), Flag.withDescription("Print the sessions as a JSON array")),
   },
@@ -63,11 +67,28 @@ export async function sessionListRun(argv: readonly string[]): Promise<void> {
   const args: SessionListArgs = await parseCtrlArgs("session list", listSpec, argv);
   const db = connectDatabase(args.databaseUrl);
   try {
-    const rows = await db
-      .select({ id: sessions.id, status: sessions.status, startedAt: sessions.startedAt })
-      .from(sessions)
-      .orderBy(desc(sessions.startedAt), desc(sessions.id))
-      .limit(args.count);
+    let rows: SessionRow[];
+    if (args.active) {
+      const running = await db
+        .select({ id: sessions.id, status: sessions.status, startedAt: sessions.startedAt })
+        .from(sessions)
+        .where(eq(sessions.status, "running"))
+        .orderBy(desc(sessions.startedAt), desc(sessions.id))
+        .limit(args.count);
+      const downloading = await db
+        .select({ id: sessions.id, status: sessions.status, startedAt: sessions.startedAt })
+        .from(sessions)
+        .where(eq(sessions.status, "downloading"))
+        .orderBy(desc(sessions.startedAt), desc(sessions.id))
+        .limit(args.count - running.length);
+      rows = [...running, ...downloading];
+    } else {
+      rows = await db
+        .select({ id: sessions.id, status: sessions.status, startedAt: sessions.startedAt })
+        .from(sessions)
+        .orderBy(desc(sessions.startedAt), desc(sessions.id))
+        .limit(args.count);
+    }
     printSessions(rows, args.json);
   } finally {
     await closeDatabase(db);

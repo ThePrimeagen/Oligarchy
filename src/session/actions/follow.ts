@@ -56,7 +56,7 @@ export async function completeFollow(
 ): Promise<CompleterResult> {
   const controller = new AbortController();
   cancelSessionList = () => controller.abort();
-  const rows = runCtrl(session, ["session", "list", "--count", "10", "--json"], controller.signal).then((result) => {
+  const rows = runCtrl(session, ["session", "list", "--count", "10", "--active", "--json"], controller.signal).then((result) => {
     if (result.code !== 0) {
       throw new Error(result.stderr);
     }
@@ -68,9 +68,6 @@ export async function completeFollow(
   });
   try {
     const sessionId = await pickFollowSession(rows, process.stdin, process.stdout, readline.getCursorPos().cols);
-    if (sessionId === undefined) {
-      controller.abort();
-    }
     return [sessionId === undefined ? [] : [sessionId], prefix];
   } catch (err) {
     process.stdout.write(`\r\n${(err as Error).message}\r\n`);
@@ -118,9 +115,6 @@ export function pickFollowSession(
 
   return new Promise((resolve, reject) => {
     const leave = (done: () => void, swallowLineFeed = false): void => {
-      if (closed) {
-        return;
-      }
       closed = true;
       closePicker = undefined;
       input.pause();

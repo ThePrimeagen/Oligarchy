@@ -241,6 +241,23 @@ describe("./ctrl happy path", () => {
     assert.ok(one.stdout.split("\n").filter((line) => line !== "").length <= 1);
   });
 
+  it("session list --active --json returns only active sessions with running rows first", async () => {
+    const result = await runCtrl(["session", "list", "--active", "--json", "--count", "10", "--server-url", SERVER]);
+    assert.equal(result.stderr, "");
+    assert.equal(result.code, 0);
+    const rows = JSON.parse(result.stdout) as { status: string }[];
+    assert.ok(rows.length <= 10);
+    let pendingSeen = false;
+    for (const row of rows) {
+      assert.match(row.status, /^(running|downloading)$/);
+      if (row.status === "downloading") {
+        pendingSeen = true;
+      } else {
+        assert.equal(pendingSeen, false);
+      }
+    }
+  });
+
   it("session --help names both forms", async () => {
     const result = await runCtrl(["session", "--help"]);
     assert.equal(result.code, 0);
@@ -250,6 +267,12 @@ describe("./ctrl happy path", () => {
 });
 
 describe("./ctrl unhappy path", () => {
+  it("rejects --active on session inspection", async () => {
+    const result = await runCtrl(["session", "--session-id", randomUUID(), "--logs", "--active", "--server-url", SERVER]);
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /Unrecognized flag: --active/);
+  });
+
   it("rejects an ISO that is not HTTPS", async () => {
     const result = await runCtrl([
       "test",
