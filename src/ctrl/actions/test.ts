@@ -276,7 +276,7 @@ export async function testListRun(argv: readonly string[]): Promise<void> {
 
 export async function testRunRun(argv: readonly string[]): Promise<void> {
   const args: TestRunArgs = await parseCtrlArgs("test run", runSpec, argv);
-  await prompt(args.cursorToken, drivingAgentPrompt(args.ticket, args.serverUrl));
+  await prompt(args.cursorToken, drivingAgentPrompt(args.ticket));
 }
 
 export async function testStartRun(argv: readonly string[]): Promise<void> {

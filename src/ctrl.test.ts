@@ -171,7 +171,8 @@ describe("./ctrl happy path", () => {
       };
       assert.equal(result.stdout, `Agent here, go check it out for more information: https://cursor.com/agents/${body.agentId}\n`);
       assert.ok(body.prompt.text.includes("Review Linear ticket OLI-42"));
-      assert.ok(body.prompt.text.includes(SERVER));
+      // The server url reaches the driver through the Linear ticket, not the kickoff prompt.
+      assert.equal(body.prompt.text.includes(SERVER), false);
       assert.deepEqual(body.model, {
         id: "grok-4.6",
         params: [

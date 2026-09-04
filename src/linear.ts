@@ -66,8 +66,8 @@ export function linearTicketDescription(experiment: Experiment, test: Experiment
   });
 }
 
-export function drivingAgentPrompt(ticket: string, serverUrl: string): string {
-  return renderPrompt("driving-agent.html", { LINEAR_TICKET: ticket, SERVER_URL: serverUrl });
+export function drivingAgentPrompt(ticket: string): string {
+  return renderPrompt("driving-agent.html", { LINEAR_TICKET: ticket });
 }
 
 async function linearRequest<T>(token: string, query: string, variables?: Record<string, unknown>): Promise<T> {

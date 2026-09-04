@@ -93,15 +93,15 @@ describe("linearTicketDescription happy path", () => {
 });
 
 describe("drivingAgentPrompt happy path", () => {
-  it("renders the kickoff prompt with the ticket, the server URL, and both binaries", () => {
-    const text = drivingAgentPrompt("OLI-42", "https://qemu.example.com");
+  it("renders the kickoff prompt from the ticket alone; the server url is in the ticket", () => {
+    const text = drivingAgentPrompt("OLI-42");
 
     assert.equal(text.includes("{{"), false);
     assert.ok(text.includes("Review Linear ticket OLI-42"));
-    assert.ok(text.includes("https://qemu.example.com"));
-    assert.ok(text.includes("--server-url"));
+    assert.ok(text.includes("<agent-id> OLI-42 </agent-id>"));
     assert.ok(text.includes("./client"));
-    assert.ok(text.includes("./ctrl"));
+    assert.equal(text.includes("--server-url"), false);
+    assert.equal(text.includes("http"), false);
   });
 });
 

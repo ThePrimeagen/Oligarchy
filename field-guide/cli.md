@@ -120,7 +120,7 @@ Prints every Linear issue on the Oligarchy team whose workflow state type is `ba
 
 ### test run
 
-Spawns the Cursor cloud agent that drives one Linear ticket. The command renders `prompts/driving-agent.html` with `LINEAR_TICKET` and `SERVER_URL` and hands the text to `prompt(apiKey, text)`: it creates a cloud agent on this repository, sends the text as the agent's first run, and returns once Cursor has accepted the run. It never waits for the agent. On success it prints `Agent here, go check it out for more information: https://cursor.com/agents/<agent-id>`.
+Spawns the Cursor cloud agent that drives one Linear ticket. The command renders `prompts/driving-agent.html` with `LINEAR_TICKET` alone — the server URL reaches the driver through the ticket body, not the kickoff prompt — and hands the text to `prompt(apiKey, text)`: it creates a cloud agent on this repository, sends the text as the agent's first run, and returns once Cursor has accepted the run. It never waits for the agent. On success it prints `Agent here, go check it out for more information: https://cursor.com/agents/<agent-id>`.
 
 The agent runs Grok 4.6 in fast mode at extra-high effort (`{ id: "grok-4.6", params: [{ id: "effort", value: "xhigh" }, { id: "fast", value: "true" }] }`, as `Cursor.models.list()` names it); `prompt` takes an optional `{ model }` to choose another. A token Cursor refuses, or a model it does not offer, is a failure. Cloud agents started through the SDK are hidden from the default list at cursor.com/agents; filter by Source > SDK to see them.
 
