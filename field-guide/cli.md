@@ -1,6 +1,6 @@
-# The CLIs (`src/client/`, `src/ctrl/`)
+# The CLIs (`src/client/`, `src/ctrl/`, `src/session/`)
 
-Two TypeScript executables share one shape. `./client` (`src/client/index.ts`) drives a guest: it sends HTTP requests to a running proxy (`src/qemu/proxy.ts`) and prints the result. `./ctrl` (`src/ctrl/index.ts`) keeps the record: it writes and reads the database, opens Linear issues, and spawns driving agents. Neither is a library. Each `index.ts` is a `switch` over the first argument; each case awaits one `<action>Run(argv)` from its own file under `actions/`; there is no barrel file. Every action parses its arguments on its first line with `effect/unstable/cli` (`Command`, `Flag`), and only then does its work with plain `async`/`await`. Every value is a flag; neither executable has a positional argument.
+Three TypeScript executables share one shape. `./client` (`src/client/index.ts`) drives a guest: it sends HTTP requests to a running proxy (`src/qemu/proxy.ts`) and prints the result. `./ctrl` (`src/ctrl/index.ts`) keeps the record: it writes and reads the database, opens Linear issues, and spawns driving agents. `./session` (`src/session/index.ts`) is the one for a human at a keyboard: a running program that drives one guest interactively by spawning `./client` for each command and showing the display inline (see [session](#session)). None is a library. Each `index.ts` is a `switch` — over the first argument for `client` and `ctrl`, over each typed line for `session` — and each case awaits one `<action>Run(...)` from its own file under `actions/`; there is no barrel file. Every action parses its arguments on its first line with `effect/unstable/cli` (`Command`, `Flag`), and only then does its work with plain `async`/`await`. Every value is a flag; no executable has a positional argument.
 
 ```bash
 ./client start --agent-id <agent> --server-url <url> [--iso <path>] [--disk <path>]
@@ -19,6 +19,8 @@ Two TypeScript executables share one shape. `./client` (`src/client/index.ts`) d
 ./ctrl test start --session-id <id> --test-result-id <result-id> --server-url <url>
 ./ctrl test-results --agent-id <agent> --id <result-id> --status success|failed [--reason <text>] --server-url <url>
 ./ctrl session --session-id <id> --logs|--test-def|--test-results|--actions|--all --server-url <url>
+
+./session [--server-url <url>]
 ```
 
 The action is always the first argument; flags follow in any order, and Effect accepts both `--flag <value>` and `--flag=<value>`. Every flag is kebab-case. `./client --help` and `./ctrl --help` print the action list; `<action> --help` prints that action's flags, rendered by Effect.
@@ -126,11 +128,31 @@ Prints stored logs, the test definition, the test result, and the actions for on
 
 `--logs` and `--actions` print that table's rows as JSON, oldest first (`created_at`, then `id`). `--test-results` prints the result row attributed to the session, or `null`. `--test-def` prints the definition that result ran, or `null`. `--all` prints `{ logs, results, test_definition, actions }`. Combining selectors prints an object with those keys. An unknown session id is a failure.
 
+## session
+
+`./session [--server-url <url>]` is the interactive way to drive one guest. `src/session/parse-args.ts` parses that one flag the same way the others do (`SERVER_URL` fallback, then `http://127.0.0.1:42069`; `OLIGARCHY_TOKEN` through `Config`; `--help` and a stray positional behave as everywhere else), then `index.ts` runs a readline REPL with tab completion. Each line is split into a command word and the rest; `dispatch` is a `switch` over the command, and each case is one file under `src/session/actions/` taking the `Session` state and the rest of the line. The state is a plain object from `createSession` in `src/session/client.ts` — `serverUrl`, `agentId`, `sessionId`, `intentOpen`, `startInFlight` — operated on by standalone functions, per [development.md](../development.md).
+
+Every command runs `./client` as a child process (`runClient`) with `--agent-id` and `--server-url` appended, so the REPL owns no HTTP of its own and the client's flag parsing and error rendering are the single source of truth. The REPL grammar is terse because a person types it; the action files translate it into the client's flags:
+
+| You type | The client runs |
+| --- | --- |
+| `start [iso] [disk]` | `start [--iso <iso>] [--disk <disk>]` |
+| `get-image` | `get-image --session-id <id>`, then renders the PNG inline (kitty or iTerm protocol, else ANSI half-blocks from `src/session/image.ts`) |
+| `get-serial` | `get-serial --session-id <id>` |
+| `send-keys <keys>` | `send-keys --session-id <id> --keys <rest of line>` |
+| `send-mouse <x> <y> [button] [clicks]` | `send-mouse --session-id <id> --x <x> --y <y> [--button <b>] [--clicks <n>]` |
+| `intent start <message>` | `intent start --session-id <id> --test-result-id manual --message <rest of line>` |
+| `intent end` | `intent end --session-id <id>` |
+| `stop [status] [reason]` | `stop --session-id <id> [--status <s>] [--reason <rest>]` |
+| `status`, `help`, `exit` / `quit` | nothing; local |
+
+Every `start` mints a fresh agent id (`session-<uuid>`), because the proxy keys one session per agent. A failed command prints the client's stderr — the headline and the stack — and keeps the session; a failed `stop` clears it anyway, since the proxy has already lost it. `exit`, stdin closing, Ctrl-C, SIGTERM, and SIGHUP all run `shutdown`: wait for an in-flight start (the proxy's `/start` is uninterruptible and would otherwise leave an orphan QEMU), stop the session, exit 0. The client child is spawned detached in its own process group for the same reason: a hangup that reaches the foreground group must not kill a start before it hands back its id.
+
 ## Errors and exit codes
 
-- Both `index.ts` files exit `0` on success and `1` on a parse error, an unknown action, or a command failure. Effect renders parse errors (usage plus the error) as they happen; the `catch` in `index.ts` recognizes them with `CliError.isCliError` and only sets the exit code, so nothing is printed twice.
+- `client` and `ctrl` exit `0` on success and `1` on a parse error, an unknown action, or a command failure; `session` exits `1` on a parse error or missing token and `0` when it leaves, reporting each command's outcome inline. Effect renders parse errors (usage plus the error) as they happen; the `catch` in `index.ts` recognizes them with `CliError.isCliError` and only sets the exit code, so nothing is printed twice.
 - Every other failure is spelled out in full. First a headline: the error's message with its `cause` message appended when there is one — `fetch failed: connect ECONNREFUSED 127.0.0.1:42069`, because `fetch failed` alone says nothing; for Drizzle, the failed SQL and the Postgres reason. Then the error as Node renders it (`console.error(err)`): its stack, then `[cause]` (or Drizzle's own `cause:` property) with that error's stack, then every property on it — `code: 'ECONNREFUSED'`, `syscall`, `address`, `port`. The frames name the action file and the helper that threw, so a failure can be read back to the line without reproducing it. Failed proxy requests carry the server's `{"error": "..."}` message as the headline; a non-JSON error body is printed raw; an empty one prints `request failed`.
 
 ## Reading the files
 
-Start at `src/client/index.ts` or `src/ctrl/index.ts`: the usage text, the switch, the catch. Each case names the action file to open next. In an action file, the flag config and the derived `*Args` type sit at the top, and `<action>Run` reads top to bottom: parse, then do the one thing. `parse-args.ts` is the only place Effect's runtime is invoked. There is no other machinery — see the [philosophy](philosophy.md) for why it should stay that way.
+Start at `src/client/index.ts`, `src/ctrl/index.ts`, or `src/session/index.ts`: the usage text, the switch, the catch (for `session`, the REPL loop and `shutdown`). Each case names the action file to open next. In an action file, the flag config and the derived `*Args` type sit at the top, and `<action>Run` reads top to bottom: parse, then do the one thing. `parse-args.ts` is the only place Effect's runtime is invoked. There is no other machinery — see the [philosophy](philosophy.md) for why it should stay that way.

@@ -4,7 +4,7 @@ The development entry point for this repo. Start here, then follow the link you 
 
 - [Philosophy](philosophy.md) — how code is written here: simple, small surface, every real error handled, no unneeded guards.
 - [Driving a guest](driving.md) — the operating loop: send keys or mouse, wait three seconds, image, decide.
-- [The CLIs](cli.md) — what `./client` (`src/client/`) and `./ctrl` (`src/ctrl/`) do and why, action by action, and how both parse their arguments.
+- [The CLIs](cli.md) — what `./client` (`src/client/`), `./ctrl` (`src/ctrl/`), and the interactive `./session` (`src/session/`) do and why, action by action, and how all three parse their arguments.
 - [The HTTP API](http-api.md) — the control-plane contract between the CLI and the proxy.
 - [The database](database.md) — the PlanetScale Postgres record of every session, and the `src/db/ops.ts` interface to it.
 - [How-to](how-to.md) — the `oligarchy` key-string encoding and send-mouse coordinates.
