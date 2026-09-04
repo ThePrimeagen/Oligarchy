@@ -7,6 +7,7 @@
   },
   "scripts": {
     "client": "node --experimental-strip-types src/qemu/cli.ts",
+    "runner": "node --experimental-strip-types src/qemu/runner.ts",
     "dev": "wrangler dev --remote",
     "test": "node --test --experimental-strip-types src/client.test.ts src/cursor-agent/client.test.ts src/test.test.ts src/qmp/json-stream.test.ts src/qemu/client.test.ts src/qemu/keys.test.ts src/sentry.test.ts src/test-def.test.ts",
     "lint": "oxlint --type-aware --type-check",
