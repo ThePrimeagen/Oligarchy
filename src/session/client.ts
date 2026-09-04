@@ -67,12 +67,12 @@ export function runClient(session: Session, args: string[]): Promise<ClientResul
   });
 }
 
-export function runCtrl(session: Session, args: string[]): Promise<ClientResult> {
+export function runCtrl(session: Session, args: string[], signal: AbortSignal): Promise<ClientResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(
       process.execPath,
       ["--experimental-strip-types", "--disable-warning=ExperimentalWarning", CTRL, ...args, "--server-url", session.serverUrl],
-      { stdio: ["ignore", "pipe", "pipe"] },
+      { stdio: ["ignore", "pipe", "pipe"], signal },
     );
     const out: Buffer[] = [];
     const err: Buffer[] = [];
