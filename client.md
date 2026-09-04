@@ -42,7 +42,7 @@ The action comes first. Every value after it is a flag; there are no positional 
 
 `start` prints a session id. Every other action takes it as `--session-id <id>`. Then `./ctrl test start` ties that session to the result id from the Linear ticket.
 
-A command that works exits 0. A command that fails exits 1 and prints the error. `./client <action> --help` prints that action's flags.
+A command that works exits 0. A command that fails exits 1 and prints the error: one headline, then the stack trace and the cause behind it. Read the headline first. `./client <action> --help` prints that action's flags.
 
 If no command arrives for ten minutes, the proxy kills the session.
 

@@ -10,7 +10,7 @@
 
 The action comes first. Every action takes `--server-url <url>`, the same server URL you pass to `./client`; it may sit anywhere after the action. When omitted, `SERVER_URL` from the environment is used. There is no default.
 
-A command that works exits 0. A command that fails exits 1 and prints the error. `./ctrl <action> --help` prints that action's flags.
+A command that works exits 0. A command that fails exits 1 and prints the error: one headline, then the stack trace and the cause behind it. Read the headline first. `./ctrl <action> --help` prints that action's flags.
 
 ## test start
 

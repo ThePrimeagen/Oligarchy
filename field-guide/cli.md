@@ -129,7 +129,7 @@ Prints stored logs, the test definition, the test result, and the actions for on
 ## Errors and exit codes
 
 - Both `index.ts` files exit `0` on success and `1` on a parse error, an unknown action, or a command failure. Effect renders parse errors (usage plus the error) as they happen; the `catch` in `index.ts` recognizes them with `CliError.isCliError` and only sets the exit code, so nothing is printed twice.
-- Every other failure prints one line: the error's message, with its `cause` appended when there is one. Network failures print `fetch failed: <cause>` — the cause (e.g. `connect ECONNREFUSED ...`) is unwrapped on purpose, because `fetch failed` alone says nothing. Database failures do the same unwrap: Drizzle's message is the failed SQL, and the Postgres reason lives on `cause`. Failed proxy requests print the server's `{"error": "..."}` message; a non-JSON error body is printed raw; an empty one prints `request failed`.
+- Every other failure is spelled out in full. First a headline: the error's message with its `cause` message appended when there is one — `fetch failed: connect ECONNREFUSED 127.0.0.1:42069`, because `fetch failed` alone says nothing; for Drizzle, the failed SQL and the Postgres reason. Then the error as Node renders it (`console.error(err)`): its stack, then `[cause]` (or Drizzle's own `cause:` property) with that error's stack, then every property on it — `code: 'ECONNREFUSED'`, `syscall`, `address`, `port`. The frames name the action file and the helper that threw, so a failure can be read back to the line without reproducing it. Failed proxy requests carry the server's `{"error": "..."}` message as the headline; a non-JSON error body is printed raw; an empty one prints `request failed`.
 
 ## Reading the files
 
