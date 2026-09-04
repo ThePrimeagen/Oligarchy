@@ -32,7 +32,7 @@ The proxy and the client both read `OLIGARCHY_TOKEN` from the environment. The c
 
 ## Invoke
 
-The action comes first. Every action takes `--agent-id <your-id>` and `--server-url <url>`; they may sit anywhere after the action. An invocation without `--agent-id` fails.
+The action comes first. Every value after it is a flag; there are no positional arguments. Every action takes `--agent-id <your-id>` and `--server-url <url>`; flags may sit in any order after the action. An invocation without `--agent-id` fails.
 
 ```bash
 ./client <action> --agent-id <agent> --server-url <url> ...
@@ -40,7 +40,7 @@ The action comes first. Every action takes `--agent-id <your-id>` and `--server-
 
 `--server-url` is the proxy, a full URL used exactly as given. When omitted, `SERVER_URL` from the environment is used, then `http://127.0.0.1:42069`. The proxy must already be running.
 
-`start` prints a session id. Every other action takes that id. Then `./ctrl test start` ties that session to the result id from the Linear ticket.
+`start` prints a session id. Every other action takes it as `--session-id <id>`. Then `./ctrl test start` ties that session to the result id from the Linear ticket.
 
 A command that works exits 0. A command that fails exits 1 and prints the error. `./client <action> --help` prints that action's flags.
 
@@ -65,30 +65,30 @@ Boots a QEMU session and prints its session id.
 Captures the guest display as a PNG. This is the only view of a headless session. Look before you type.
 
 ```bash
-./client get-image --agent-id <agent> --server-url <url> <id> -o desktop.png
-./client get-image --agent-id <agent> --server-url <url> <id> > desktop.png
+./client get-image --agent-id <agent> --server-url <url> --session-id <id> -o desktop.png
+./client get-image --agent-id <agent> --server-url <url> --session-id <id> > desktop.png
 ```
 
-`-o` / `--output` may sit before or after the session id. Without it, PNG bytes go to stdout.
+`-o` / `--output` is optional. Without it, PNG bytes go to stdout.
 
 ## get-serial
 
 Reads everything the guest has written to `/dev/ttyS0` since boot. Empty until something writes. Use this when the desktop is dead and you need logs.
 
 ```bash
-./client get-serial --agent-id <agent> --server-url <url> <id> -o journal.txt
-./client get-serial --agent-id <agent> --server-url <url> <id>
+./client get-serial --agent-id <agent> --server-url <url> --session-id <id> -o journal.txt
+./client get-serial --agent-id <agent> --server-url <url> --session-id <id>
 ```
 
-`-o` / `--output` may sit before or after the session id. Without it, bytes go to stdout.
+`-o` / `--output` is optional. Without it, bytes go to stdout.
 
 To dump the journal onto serial: switch to a TTY, log in, stop the serial getty, then tee the journal. `/dev/ttyS0` is root:uucp — a user redirect is permission denied.
 
 ```bash
-./client send-keys --agent-id <agent> --server-url <url> <id> "<C-A-F3>"
-./client send-keys --agent-id <agent> --server-url <url> <id> "sudo systemctl stop serial-getty@ttyS0<ENTER>"
-./client send-keys --agent-id <agent> --server-url <url> <id> "journalctl -b --no-pager | sudo tee /dev/ttyS0<ENTER>"
-./client get-serial --agent-id <agent> --server-url <url> <id> -o journal.txt
+./client send-keys --agent-id <agent> --server-url <url> --session-id <id> --keys "<C-A-F3>"
+./client send-keys --agent-id <agent> --server-url <url> --session-id <id> --keys "sudo systemctl stop serial-getty@ttyS0<ENTER>"
+./client send-keys --agent-id <agent> --server-url <url> --session-id <id> --keys "journalctl -b --no-pager | sudo tee /dev/ttyS0<ENTER>"
+./client get-serial --agent-id <agent> --server-url <url> --session-id <id> -o journal.txt
 ```
 
 Image until the login prompt before typing the username and password. If sudo asks, send the user password. User-session failures are `journalctl --user -b --no-pager | sudo tee /dev/ttyS0`.
@@ -98,26 +98,26 @@ Image until the login prompt before typing the username and password. If sudo as
 Types a key string into the session. Quote the string so the shell does not eat `<`, `>`, or spaces.
 
 ```bash
-./client send-keys --agent-id <agent> --server-url <url> <id> "hello"
-./client send-keys --agent-id <agent> --server-url <url> <id> "hello<ENTER>"
-./client send-keys --agent-id <agent> --server-url <url> <id> "<C-c>"
+./client send-keys --agent-id <agent> --server-url <url> --session-id <id> --keys "hello"
+./client send-keys --agent-id <agent> --server-url <url> --session-id <id> --keys "hello<ENTER>"
+./client send-keys --agent-id <agent> --server-url <url> --session-id <id> --keys "<C-c>"
 ```
 
-The encoding is `oligarchy`. You do not need to pass it. See [Keys](#keys).
+`--encoding` defaults to `oligarchy`. You do not need to pass it. See [Keys](#keys).
 
 ## send-mouse
 
 Moves the pointer, and optionally clicks or scrolls, at a point on the screenshot.
 
 ```bash
-./client send-mouse --agent-id <agent> --server-url <url> <id> 0.5 0.5
-./client send-mouse --agent-id <agent> --server-url <url> <id> 0.5 0.5 left
-./client send-mouse --agent-id <agent> --server-url <url> <id> 0.3 0.2 left 2
-./client send-mouse --agent-id <agent> --server-url <url> <id> 0.8 0.1 right
-./client send-mouse --agent-id <agent> --server-url <url> <id> 0.5 0.5 wheel-down 3
+./client send-mouse --agent-id <agent> --server-url <url> --session-id <id> --x 0.5 --y 0.5
+./client send-mouse --agent-id <agent> --server-url <url> --session-id <id> --x 0.5 --y 0.5 --button left
+./client send-mouse --agent-id <agent> --server-url <url> --session-id <id> --x 0.3 --y 0.2 --button left --clicks 2
+./client send-mouse --agent-id <agent> --server-url <url> --session-id <id> --x 0.8 --y 0.1 --button right
+./client send-mouse --agent-id <agent> --server-url <url> --session-id <id> --x 0.5 --y 0.5 --button wheel-down --clicks 3
 ```
 
-`x` and `y` are fractions of the screenshot, `0..1` from the top-left. Omit `button` to move only. `button` is `left`, `middle`, `right`, `wheel-up`, or `wheel-down`. `clicks` defaults to 1 — a double-click is `left 2`. See [Mouse](#mouse).
+`--x` and `--y` are fractions of the screenshot, `0..1` from the top-left. Omit `--button` to move only. `--button` is `left`, `middle`, `right`, `wheel-up`, or `wheel-down`. `--clicks` defaults to 1 — a double-click is `--button left --clicks 2`. See [Mouse](#mouse).
 
 ## intent
 
@@ -128,19 +128,19 @@ Declares what you are about to do on the session, before you do it. Required aro
 ./client intent end --agent-id <agent> --server-url <url> --session-id <id>
 ```
 
-Every value is a flag. `--test-result-id` is the result id from your Linear ticket. Quote `--message` so the shell keeps spaces.
+`--test-result-id` is the result id from your Linear ticket. Quote `--message` so the shell keeps spaces.
 
 ## stop
 
 Kills the session. `--agent-id` must be the agent that started it.
 
 ```bash
-./client stop --agent-id <agent> --server-url <url> <id>
-./client stop --agent-id <agent> --server-url <url> <id> succeeded
-./client stop --agent-id <agent> --server-url <url> <id> failed "installer hung"
+./client stop --agent-id <agent> --server-url <url> --session-id <id>
+./client stop --agent-id <agent> --server-url <url> --session-id <id> --status succeeded
+./client stop --agent-id <agent> --server-url <url> --session-id <id> --status failed --reason "installer hung"
 ```
 
-A stop with no status is an abort. `status` is `succeeded`, `failed`, or `aborted`. `reason` is optional text and needs a status in front of it.
+A stop with no `--status` is an abort. `--status` is `succeeded`, `failed`, or `aborted`. `--reason` is optional text.
 
 ## Keys
 

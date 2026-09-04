@@ -62,14 +62,15 @@ $ ./ctrl test start --server-url {{SERVER_URL}} --session-id 6f1c...e2a9 --test-
 
 # before starting any series of actions, always start an intent
 $ ./client intent start --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --session-id 6f1c...e2a9 --test-result-id {{RESULT_ID}} --message "wait for the boot menu"
-$ ./client get-image --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} 6f1c...e2a9 -o screen.png
+$ ./client get-image --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --session-id 6f1c...e2a9 -o screen.png
     black screen
+$ ./client send-keys --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --session-id 6f1c...e2a9 --keys "<ENTER>"
 # ... series of actions ended ...
 $ ./client intent end --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --session-id 6f1c...e2a9
 # ... continue on until complete ...
 
 # when the proof is on screen, close the result, then the session
 $ ./ctrl test-results --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --id {{RESULT_ID}} --status success
-$ ./client stop --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} 6f1c...e2a9 succeeded
+$ ./client stop --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --session-id 6f1c...e2a9 --status succeeded
 ```
 </example-session>

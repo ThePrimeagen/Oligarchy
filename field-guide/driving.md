@@ -35,10 +35,10 @@ re-sending: double-typed input is worse than late input.
 ## Focus is mouse-shaped
 
 Hyprland as Omarchy ships it focuses the window under the pointer. Move the
-pointer onto the window you mean to type into (`send-mouse <id> x y`), then
+pointer onto the window you mean to type into (`send-mouse --session-id <id> --x <x> --y <y>`), then
 send keys. Window-manager chords (`<M-Enter>`, `<M-2>`, `<M-w>`) land no
 matter what has focus; plain text lands wherever the pointer says. A greeter
-or installer button is a left click at that point (`send-mouse <id> x y left`);
+or installer button is a left click at that point (`send-mouse --session-id <id> --x <x> --y <y> --button left`);
 a double-click launches, a right-click opens a menu, `wheel-down` scrolls.
 When a desktop still plays focus games, switch to a TTY with `<C-A-F3>` — a
 text console is focus-proof, and a username/password login there is the

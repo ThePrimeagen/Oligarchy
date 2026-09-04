@@ -1,16 +1,16 @@
 # The CLIs (`src/client/`, `src/ctrl/`)
 
-Two TypeScript executables share one shape. `./client` (`src/client/index.ts`) drives a guest: it sends HTTP requests to a running proxy (`src/qemu/proxy.ts`) and prints the result. `./ctrl` (`src/ctrl/index.ts`) keeps the record: it writes and reads the database, opens Linear issues, and spawns driving agents. Neither is a library. Each `index.ts` is a `switch` over the first argument; each case awaits one `<action>Run(argv)` from its own file under `actions/`; there is no barrel file. Every action parses its arguments on its first line with `effect/unstable/cli` (`Command`, `Flag`, `Argument`), and only then does its work with plain `async`/`await`.
+Two TypeScript executables share one shape. `./client` (`src/client/index.ts`) drives a guest: it sends HTTP requests to a running proxy (`src/qemu/proxy.ts`) and prints the result. `./ctrl` (`src/ctrl/index.ts`) keeps the record: it writes and reads the database, opens Linear issues, and spawns driving agents. Neither is a library. Each `index.ts` is a `switch` over the first argument; each case awaits one `<action>Run(argv)` from its own file under `actions/`; there is no barrel file. Every action parses its arguments on its first line with `effect/unstable/cli` (`Command`, `Flag`), and only then does its work with plain `async`/`await`. Every value is a flag; neither executable has a positional argument.
 
 ```bash
 ./client start --agent-id <agent> --server-url <url> [--iso <path>] [--disk <path>]
-./client get-image --agent-id <agent> --server-url <url> <id> [-o file]
-./client get-serial --agent-id <agent> --server-url <url> <id> [-o file]
-./client send-keys --agent-id <agent> --server-url <url> <id> <keys> [encoding]
-./client send-mouse --agent-id <agent> --server-url <url> <id> <x> <y> [button [clicks]]
+./client get-image --agent-id <agent> --server-url <url> --session-id <id> [-o file]
+./client get-serial --agent-id <agent> --server-url <url> --session-id <id> [-o file]
+./client send-keys --agent-id <agent> --server-url <url> --session-id <id> --keys <keys> [--encoding <encoding>]
+./client send-mouse --agent-id <agent> --server-url <url> --session-id <id> --x <0..1> --y <0..1> [--button <button>] [--clicks <n>]
 ./client intent start --agent-id <agent> --server-url <url> --session-id <id> --test-result-id <id> --message <message>
 ./client intent end --agent-id <agent> --server-url <url> --session-id <id>
-./client stop --agent-id <agent> --server-url <url> <id> [status [reason]]
+./client stop --agent-id <agent> --server-url <url> --session-id <id> [--status <status>] [--reason <text>]
 
 ./ctrl test --list [--details] [--name <definition>] --server-url <url>
 ./ctrl test new --iso <https-url> --version <version> [--name <definition>] --server-url <url>
@@ -25,7 +25,7 @@ The action is always the first argument; flags follow in any order, and Effect a
 
 ## Parsing: `parseClientArgs` and `parseCtrlArgs`
 
-Each executable has one parser, `src/client/parse-args.ts` and `src/ctrl/parse-args.ts`, and every action calls it first. The parser is generic over the action's flag config: the action declares its flags with `Flag`/`Argument`, derives its arg type from that declaration (`ClientArgs<typeof flags>`, `CtrlArgs<typeof spec>`), and gets back one object holding the parsed flags and the environment together. Under the hood the parser builds a `Command` from the shared flags plus the action's, runs it with `Command.runWith` so Effect does the parsing, help, and error rendering, then reads the environment through Effect's `Config`. `--help` and `--version` render and exit 0 before anything else happens. A parse failure is rendered by Effect (the action's usage plus the error) and exits 1. A `.env` in the working directory fills in missing variables only.
+Each executable has one parser, `src/client/parse-args.ts` and `src/ctrl/parse-args.ts`, and every action calls it first. The parser is generic over the action's flag config: the action declares its flags with `Flag`, derives its arg type from that declaration (`ClientArgs<typeof flags>`, `CtrlArgs<typeof spec>`), and gets back one object holding the parsed flags and the environment together. Under the hood the parser builds a `Command` from the shared flags plus the action's, runs it with `Command.runWith` so Effect does the parsing, help, and error rendering, then reads the environment through Effect's `Config`. `--help` and `--version` render and exit 0 before anything else happens. A parse failure is rendered by Effect (the action's usage plus the error) and exits 1. A `.env` in the working directory fills in missing variables only.
 
 The client's shared surface, added to every action: `--agent-id` (required, non-empty), `--server-url` (a full URL used exactly as given; falls back to `SERVER_URL`, then `http://127.0.0.1:42069`), and `OLIGARCHY_TOKEN` from the environment, sent as `Authorization: Bearer <token>` on every request. A missing token is `OLIGARCHY_TOKEN is not set`.
 
@@ -47,15 +47,15 @@ Boots a QEMU session and prints its session id (a UUID). Every other action take
 
 Captures the session's current display as a PNG.
 
-- `--output` / `-o` is optional and may sit before or after the session id.
-- With `-o`, the PNG is written to the file (mode 0644); without it, raw PNG bytes go to stdout, so redirect: `... get-image ... <id> > shot.png`.
+- `--session-id` names the session. `--output` / `-o` is optional.
+- With `-o`, the PNG is written to the file (mode 0644); without it, raw PNG bytes go to stdout, so redirect: `... get-image ... --session-id <id> > shot.png`.
 - Wire call: `GET /image?id=<id>&agent=<agent>` → `image/png` bytes.
 
 ### get-serial
 
 Reads the guest's serial console as text. The guest writes here when something prints to `/dev/ttyS0` — that is how journalctl and crash logs leave a machine whose desktop shell is dead.
 
-- `--output` / `-o` is optional and may sit before or after the session id.
+- `--session-id` names the session. `--output` / `-o` is optional.
 - With `-o`, the bytes are written to the file (mode 0644); without it, they go to stdout.
 - Wire call: `GET /serial?id=<id>&agent=<agent>` → `text/plain` bytes.
 
@@ -63,19 +63,19 @@ Reads the guest's serial console as text. The guest writes here when something p
 
 Types a key string into the session.
 
-- `send-keys <id> <keys> [encoding]`; the encoding defaults to `oligarchy` and is passed through untouched — the server does the parsing. The encoding itself (literal characters, `<ENTER>`, `<C-c>`, ...) is documented in [how-to.md](how-to.md) and implemented server-side in `src/qemu/keys.ts`.
+- `send-keys --session-id <id> --keys <keys> [--encoding <encoding>]`; `--encoding` defaults to `oligarchy` and is passed through untouched — the server does the parsing. The encoding itself (literal characters, `<ENTER>`, `<C-c>`, ...) is documented in [how-to.md](how-to.md) and implemented server-side in `src/qemu/keys.ts`.
 - Wire call: `POST /send-keys` with `{"id", "keys", "encoding", "agent"}` → `{"ok": "true"}`.
 
 ### send-mouse
 
 Moves the pointer, and optionally clicks or scrolls, at a point on the screenshot.
 
-- `send-mouse <id> <x> <y> [button [clicks]]`. `x` and `y` are fractions of the screenshot, `0..1` from the top-left; the CLI rejects anything else before calling the server. Omit `button` to move only. `button` is `left`, `middle`, `right`, `wheel-up`, or `wheel-down`; `clicks` defaults to 1 on the server and is a pulse count (a double-click is `left 2`, three wheel ticks is `wheel-down 3`).
+- `send-mouse --session-id <id> --x <x> --y <y> [--button <button>] [--clicks <n>]`. `--x` and `--y` are fractions of the screenshot, `0..1` from the top-left; the CLI rejects anything else before calling the server. Omit `--button` to move only. `--button` is `left`, `middle`, `right`, `wheel-up`, or `wheel-down`; `--clicks` defaults to 1 on the server and is a pulse count (a double-click is `--button left --clicks 2`, three wheel ticks is `--button wheel-down --clicks 3`).
 - Wire call: `POST /send-mouse` with `{"id", "x", "y", "button"?, "clicks"?, "agent"}` → `{"ok": "true"}`.
 
 ### intent start / intent end
 
-`intent.ts` exports `intentRun`, a switch over `start` and `end` that calls `intentStartRun` or `intentEndRun`; each has its own flags and parses them first. Records the agent's current intent on the session. One intent is active at a time; it is not stacked. Start before the work that fulfills the intent, then end when that work is done. Every value is a flag; the only positionals are the verbs. Quote `--message` so the shell keeps spaces.
+`intent.ts` exports `intentRun`, a switch over `start` and `end` that calls `intentStartRun` or `intentEndRun`; each has its own flags and parses them first. Records the agent's current intent on the session. One intent is active at a time; it is not stacked. Start before the work that fulfills the intent, then end when that work is done. The verbs `start` and `end` are the only bare words after the action. Quote `--message` so the shell keeps spaces.
 
 - `intent start --session-id <id> --test-result-id <id> --message <message>`. Wire call: `POST /intent/start` with `{"id", "agent", "test_result_id", "message"}` → `{"ok": "true"}`.
 - `intent end --session-id <id>`. Ends the session's one active intent. Wire call: `POST /intent/end` with `{"id", "agent"}` → `{"ok": "true"}`.
@@ -84,7 +84,7 @@ Moves the pointer, and optionally clicks or scrolls, at a point on the screensho
 
 Kills the session. Only the agent that started it can stop it; a different `--agent-id` is a 403.
 
-- `stop <id> [status [reason]]`. `status` is `succeeded`, `failed`, or `aborted`. Omit both to abort: a machine killed with nothing to say for itself. `reason` is optional text stored on the session row.
+- `stop --session-id <id> [--status <status>] [--reason <text>]`. `--status` is `succeeded`, `failed`, or `aborted`. Omit both to abort: a machine killed with nothing to say for itself. `--reason` is optional text stored on the session row.
 - An undefined status or reason is left out of the JSON, so the server applies its own defaults (`aborted`, no reason).
 - Wire call: `POST /stop` with `{"id", "agent", "status"?, "reason?"}` → `{"ok": "true"}`.
 

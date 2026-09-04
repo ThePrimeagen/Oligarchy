@@ -6,7 +6,7 @@ Durable preferences for how code is written in this repo. They come from the mai
 
 Optimize for the person reading the file top to bottom. A function should be inspectable in one pass: read it, know what it does. This is explicitly not "Clean Code" — no Uncle Bob. No tiny single-use helpers, no layers, no interfaces with one implementation, no abstraction bought before it is needed. A little repetition is fine when it keeps each site readable on its own.
 
-`src/client/` is the reference example: `index.ts` is a `switch` over the action name, each action is one file under `actions/` that declares its flags, derives its arg type from them, calls `parseClientArgs` on its first line, and then does its one thing with plain `async`/`await`; the HTTP helpers (`postJSON`, `getBytes`, `postStart`) sit in `http.ts`; nothing else. `src/ctrl/` has the identical shape. Argument parsing is Effect's CLI (`Command`, `Flag`, `Argument`) inside `parse-args.ts` — not a hand-rolled flag package — and that file is the only place Effect's runtime is invoked.
+`src/client/` is the reference example: `index.ts` is a `switch` over the action name, each action is one file under `actions/` that declares its flags, derives its arg type from them, calls `parseClientArgs` on its first line, and then does its one thing with plain `async`/`await`; the HTTP helpers (`postJSON`, `getBytes`, `postStart`) sit in `http.ts`; nothing else. `src/ctrl/` has the identical shape. Argument parsing is Effect's CLI (`Command`, `Flag`) inside `parse-args.ts` — not a hand-rolled flag package — and that file is the only place Effect's runtime is invoked.
 
 ## Support only what is used
 
@@ -50,7 +50,7 @@ A loop or timer that runs for the life of the process owes three guarantees: it 
 
 ## No normalization functions
 
-No generic parsing or normalizing machinery where direct expressions do the job. CLI args go through Effect's `Command` / `Flag` / `Argument` at the process boundary; do not re-implement a flag package beside it.
+No generic parsing or normalizing machinery where direct expressions do the job. CLI args go through Effect's `Command` / `Flag` at the process boundary; do not re-implement a flag package beside it.
 
 ## Keep what earns its place
 
@@ -64,7 +64,7 @@ Simplicity is not deleting necessary behavior. Things that stay, and why:
 
 ## Porting: the reference implementation is the spec
 
-When a component mirrors another, the reference's observable behavior beats general convention. The client was ported from a since-deleted Go client, and later split into one file per action. Parse and command failures exit 1. The user-facing interface may deliberately diverge — the Go client took positionals, this client takes `--iso`/`--disk` and puts the action first — but wire behavior must match the server exactly.
+When a component mirrors another, the reference's observable behavior beats general convention. The client was ported from a since-deleted Go client, and later split into one file per action. Parse and command failures exit 1. The user-facing interface may deliberately diverge — the Go client took positionals, this client takes only flags (`--session-id`, `--iso`, `--keys`, ...) and puts the action first — but wire behavior must match the server exactly.
 
 ## Tests
 
