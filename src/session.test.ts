@@ -4,12 +4,16 @@ import { spawn } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import { resolve } from "node:path";
 import { once } from "node:events";
+import { createInterface, type AsyncCompleter, type CompleterResult } from "node:readline";
+import { PassThrough } from "node:stream";
 import { describe, it } from "node:test";
 import { deflateSync } from "node:zlib";
+import { pickFollowSession } from "./session/actions/follow.ts";
 
 const SESSION = resolve(import.meta.dirname, "../session");
 const SESSION_ID = "6f1c0000-0000-4000-8000-00000000e2a9";
 const FOLLOWED_ID = "7a2d0000-0000-4000-8000-00000000f011";
+const PENDING_ID = "ff88a0b1-0851-47a7-91d3-acbfb20b8673";
 const ENDED_ID = "8b3e0000-0000-4000-8000-00000000a1c2";
 const DROPPED_ID = "5d0a0000-0000-4000-8000-00000000c3e4";
 const ENDLESS_ID = "4e1b0000-0000-4000-8000-00000000d4f5";
@@ -77,6 +81,25 @@ async function runTtySession(input: string, afterInput: string, env: NodeJS.Proc
   });
   const [code] = await once(child, "close");
   return { code: code as number | null, output };
+}
+
+function pickerTerminal(): {
+  input: NodeJS.ReadStream;
+  output: NodeJS.WriteStream;
+  readOutput: () => string;
+} {
+  const inputStream = new PassThrough();
+  const outputStream = new PassThrough();
+  let written = "";
+  outputStream.setEncoding("utf8");
+  outputStream.on("data", (data: string) => {
+    written += data;
+  });
+  const input = inputStream as unknown as NodeJS.ReadStream;
+  const output = outputStream as unknown as NodeJS.WriteStream;
+  Object.assign(input, { isTTY: true, isRaw: false, setRawMode: () => input });
+  Object.assign(output, { isTTY: true, columns: 100, rows: 24 });
+  return { input, output, readOutput: () => written };
 }
 
 type Received = { method: string | undefined; url: string | undefined; authorization: string | undefined; body: unknown };
@@ -196,6 +219,98 @@ async function stubProxy(): Promise<{ server: Server; url: string; received: Rec
 function close(server: Server): Promise<void> {
   return new Promise<void>((done) => server.close(() => done()));
 }
+
+describe("./session follow completion", () => {
+  it("shows running sessions first, colors statuses, and selects with the keyboard", async () => {
+    const term = pickerTerminal();
+    const selection = pickFollowSession(
+      [
+        { id: PENDING_ID, status: "downloading", startedAt: "2026-09-04T11:58:30.000Z" },
+        { id: "00000000-0000-4000-8000-000000000001", status: "succeeded", startedAt: "2026-09-04T11:58:00.000Z" },
+        { id: FOLLOWED_ID, status: "running", startedAt: "2026-09-04T11:59:55.000Z" },
+      ],
+      term.input,
+      term.output,
+      16,
+    );
+    term.input.emit("keypress", "\t", { name: "tab", shift: false });
+    term.input.emit("keypress", "\r", { name: "return" });
+
+    assert.equal(await selection, PENDING_ID);
+    const output = term.readOutput();
+    assert.ok(output.indexOf(FOLLOWED_ID) < output.indexOf(PENDING_ID));
+    assert.match(output, new RegExp(`\\x1b\\[33mrunning\\s*\\x1b\\[0m\\s+${FOLLOWED_ID}`));
+    assert.match(output, new RegExp(`\\x1b\\[90mpending\\s*\\x1b\\[0m\\s+${PENDING_ID}`));
+    assert.equal(output.includes("00000000-0000-4000-8000-000000000001"), false);
+  });
+
+  it("leaves the selected UUID editable when Enter produces two keypresses", async () => {
+    const term = pickerTerminal();
+    const complete = async (line: string): Promise<CompleterResult> => {
+      const followArg = /^follow\s+(\S*)$/.exec(line);
+      assert.ok(followArg !== null);
+      const sessionId = await pickFollowSession(
+        [{ id: FOLLOWED_ID, status: "running", startedAt: "2026-09-04T11:59:55.000Z" }],
+        term.input,
+        term.output,
+        16,
+      );
+      return [sessionId === undefined ? [] : [sessionId], followArg[1]];
+    };
+    const completer: AsyncCompleter = (line, callback) => {
+      void complete(line).then(
+        (result) => callback(null, result),
+        (err) => callback(err as Error),
+      );
+    };
+    const termName = process.env.TERM;
+    process.env.TERM = "xterm-256color";
+    const readline = createInterface({ input: term.input, output: term.output, completer, terminal: true });
+    if (termName === undefined) {
+      delete process.env.TERM;
+    } else {
+      process.env.TERM = termName;
+    }
+    const submitted: string[] = [];
+    readline.on("line", (line) => submitted.push(line));
+    readline.write("follow ");
+    term.input.emit("keypress", "\t", { name: "tab" });
+    term.input.emit("keypress", "\r", { name: "return" });
+    term.input.emit("keypress", "\n", { name: "enter" });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(submitted, []);
+    assert.equal(readline.line, `follow ${FOLLOWED_ID}`);
+    readline.close();
+  });
+
+  it("reports that there is nothing to follow when no active sessions exist", async () => {
+    const term = pickerTerminal();
+    const selection = await pickFollowSession(
+      [{ id: ENDED_ID, status: "failed", startedAt: "2026-09-04T11:58:00.000Z" }],
+      term.input,
+      term.output,
+      16,
+    );
+
+    assert.equal(selection, undefined);
+    assert.match(term.readOutput(), /no running or pending sessions/);
+  });
+
+  it("cancels without selecting when escape is pressed", async () => {
+    const term = pickerTerminal();
+    const selection = pickFollowSession(
+      [{ id: FOLLOWED_ID, status: "running", startedAt: "2026-09-04T11:59:55.000Z" }],
+      term.input,
+      term.output,
+      16,
+    );
+    term.input.emit("keypress", "\x1b", { name: "escape" });
+
+    assert.equal(await selection, undefined);
+    assert.match(term.readOutput(), /\x1b\[\?25l.*\x1b\[\?25h/s);
+  });
+});
 
 describe("./session happy path", () => {
   it("drives one session through every command with the client's flags and one agent id", async () => {

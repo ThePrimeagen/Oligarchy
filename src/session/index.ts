@@ -1,8 +1,8 @@
 #!/usr/bin/env -S node --experimental-strip-types
 import { once } from "node:events";
-import { createInterface } from "node:readline";
+import { createInterface, type AsyncCompleter, type CompleterResult } from "node:readline";
 import { CliError } from "effect/unstable/cli";
-import { followRun } from "./actions/follow.ts";
+import { followRun, pickFollowSession, type SessionListItem } from "./actions/follow.ts";
 import { getImageRun } from "./actions/get-image.ts";
 import { getSerialRun } from "./actions/get-serial.ts";
 import { intentRun } from "./actions/intent.ts";
@@ -13,7 +13,6 @@ import { statusRun } from "./actions/status.ts";
 import { STOP_STATUSES, stopRun } from "./actions/stop.ts";
 import { createSession, runCtrl } from "./client.ts";
 import { parseSessionArgs } from "./parse-args.ts";
-import { pickFollowSession, type SessionListItem } from "./picker.ts";
 
 const HELP = `start [iso] [disk]                    boot a qemu session (default iso: omarchy.iso)
 get-image                             show the guest display inline
@@ -29,7 +28,7 @@ exit                                  stop the session and leave`;
 
 const COMMANDS = ["start", "get-image", "get-serial", "send-keys", "send-mouse", "intent", "stop", "follow", "status", "help", "exit", "quit"];
 
-async function completer(line: string): Promise<[string[], string]> {
+async function completions(line: string): Promise<CompleterResult> {
   const followArg = /^\s*follow\s+(\S*)$/.exec(line);
   if (followArg !== null) {
     const result = await runCtrl(session, ["session", "list", "--count", "10", "--json"]);
@@ -59,6 +58,13 @@ async function completer(line: string): Promise<[string[], string]> {
   }
   return [COMMANDS.filter((command) => command.startsWith(word)), word];
 }
+
+const completer: AsyncCompleter = (line, callback) => {
+  void completions(line).then(
+    (result) => callback(null, result),
+    (err) => callback(err as Error),
+  );
+};
 
 let args;
 try {
