@@ -139,7 +139,7 @@ Closes one pending test result with the verdict.
 ./ctrl session list --server-url <url> [--count <n>]
 ```
 
-Prints the most recent sessions, newest first, as JSON rows: `id`, `config`, `status`, `reason`, `startedAt`, `endedAt`. Not used while driving a guest.
+Prints the most recent sessions, newest first, one per line: the status, colored (green `succeeded`, red `failed`, yellow `running`, gray `downloading`, bright red `aborted`, magenta `timed_out`); how long ago it started (`45s ago`, `12m ago`, `1h30m ago`, `3d5h ago`); then the session id. Not used while driving a guest.
 
 - `--count <n>` — how many sessions to print, at least 1. Default 10.
 
