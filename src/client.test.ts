@@ -304,7 +304,7 @@ describe("./client happy path", () => {
     assert.match(result.stdout, /start/);
     assert.match(result.stdout, /intent start/);
     assert.match(result.stdout, /stop --session-id/);
-    assert.equal(result.stdout.includes("<id>"), false);
+    assert.doesNotMatch(result.stdout, /(get-image|get-serial|send-keys|send-mouse|stop) <id>/);
   });
 });
 
@@ -382,9 +382,13 @@ describe("./client unhappy path", () => {
   });
 
   it("rejects a positional session id and a missing --keys", async () => {
-    const positional = await runClient(["send-keys", "--agent-id", "agent-1", "session-1", "--keys", "hello"]);
+    const positional = await runClient(["send-keys", "--agent-id", "agent-1", "--session-id", "session-1", "extra", "--keys", "hello"]);
     assert.notEqual(positional.code, 0);
-    assert.match(positional.stderr, /Unexpected positional argument: "session-1"/);
+    assert.match(positional.stderr, /Unexpected positional argument: "extra"/);
+
+    const noFlag = await runClient(["send-keys", "--agent-id", "agent-1", "session-1", "--keys", "hello"]);
+    assert.notEqual(noFlag.code, 0);
+    assert.match(noFlag.stderr, /Missing required flag: --session-id/);
 
     const missingKeys = await runClient(["send-keys", "--agent-id", "agent-1", "--session-id", "session-1"]);
     assert.notEqual(missingKeys.code, 0);

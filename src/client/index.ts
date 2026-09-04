@@ -12,14 +12,15 @@ const USAGE = `usage: client <action> --agent-id <agent> [--server-url <url>] ..
 
 actions:
   start [--iso <path|url>] [--disk <path>]
-  get-image <id> [-o <file>]
-  get-serial <id> [-o <file>]
-  send-keys <id> <keys> [encoding]
-  send-mouse <id> <x> <y> [button [clicks]]
+  get-image --session-id <id> [-o <file>]
+  get-serial --session-id <id> [-o <file>]
+  send-keys --session-id <id> --keys <keys> [--encoding <encoding>]
+  send-mouse --session-id <id> --x <0..1> --y <0..1> [--button <button>] [--clicks <n>]
   intent start --session-id <id> --test-result-id <id> --message <text>
   intent end --session-id <id>
-  stop <id> [status [reason]]
+  stop --session-id <id> [--status succeeded|failed|aborted] [--reason <text>]
 
+Every value is a flag; there are no positional arguments.
 client <action> --help prints that action's flags.`;
 
 const [action, ...argv] = process.argv.slice(2);
