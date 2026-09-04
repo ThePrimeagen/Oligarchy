@@ -70,6 +70,9 @@ describe("linearTicketDescription happy path", () => {
     assert.ok(description.includes(`start --agent-id OLI-42 --server-url ${experiment.serverUrl} --iso ${experiment.iso}`));
     assert.ok(description.includes(`./ctrl test start --server-url ${experiment.serverUrl} --session-id`));
     assert.ok(description.includes(`./ctrl test-results --agent-id OLI-42 --server-url ${experiment.serverUrl} --id ${test.id}`));
+    assert.ok(description.includes(`./client get-image --agent-id OLI-42 --server-url ${experiment.serverUrl} --session-id`));
+    assert.ok(description.includes(`./client stop --agent-id OLI-42 --server-url ${experiment.serverUrl} --session-id`));
+    assert.equal(description.includes("<id>"), false);
     assert.ok(description.includes(`<run_id>${experiment.id}</run_id>`));
     assert.ok(description.includes(`<result_id>${test.id}</result_id>`));
     assert.ok(description.includes(`<version>${experiment.version}</version>`));

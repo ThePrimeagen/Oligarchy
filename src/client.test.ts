@@ -90,7 +90,9 @@ describe("./client happy path", () => {
         "agent-1",
         "--server-url",
         proxy.url,
+        "--session-id",
         "session-1",
+        "--keys",
         "hello",
       ]);
       assert.equal(result.stderr, "");
@@ -112,7 +114,7 @@ describe("./client happy path", () => {
   it("takes the server from SERVER_URL when --server-url is omitted", async () => {
     const proxy = await stubProxy(ok);
     try {
-      const result = await runClient(["send-keys", "--agent-id", "agent-1", "session-1", "hello"], {
+      const result = await runClient(["send-keys", "--agent-id", "agent-1", "--session-id", "session-1", "--keys", "hello"], {
         SERVER_URL: proxy.url,
       });
       assert.equal(result.stderr, "");
@@ -162,6 +164,7 @@ describe("./client happy path", () => {
         "agent-1",
         "--server-url",
         proxy.url,
+        "--session-id",
         "session-1",
         "-o",
         output,
@@ -182,7 +185,7 @@ describe("./client happy path", () => {
   it("get-serial writes the bytes to stdout without --output", async () => {
     const proxy = await stubProxy(() => ({ status: 200, headers: { "Content-Type": "text/plain" }, body: "boot log\n" }));
     try {
-      const result = await runClient(["get-serial", "--agent-id", "agent-1", "--server-url", proxy.url, "session-1"]);
+      const result = await runClient(["get-serial", "--agent-id", "agent-1", "--server-url", proxy.url, "--session-id", "session-1"]);
       assert.equal(result.stderr, "");
       assert.equal(result.code, 0);
       assert.equal(result.stdout, "boot log\n");
@@ -192,7 +195,7 @@ describe("./client happy path", () => {
     }
   });
 
-  it("send-mouse posts the point, button, and clicks", async () => {
+  it("send-mouse posts the point, button, and clicks, and omits button and clicks when not given", async () => {
     const proxy = await stubProxy(ok);
     try {
       const result = await runClient([
@@ -201,15 +204,24 @@ describe("./client happy path", () => {
         "agent-1",
         "--server-url",
         proxy.url,
+        "--session-id",
         "session-1",
+        "--x",
         "0.5",
+        "--y",
         "0.25",
+        "--button",
         "left",
+        "--clicks",
         "2",
       ]);
       assert.equal(result.stderr, "");
       assert.equal(result.code, 0);
       assert.deepEqual(proxy.received[0].body, { id: "session-1", x: 0.5, y: 0.25, agent: "agent-1", button: "left", clicks: 2 });
+      const move = await runClient(["send-mouse", "--agent-id", "agent-1", "--server-url", proxy.url, "--session-id", "session-1", "--x", "0", "--y", "1"]);
+      assert.equal(move.stderr, "");
+      assert.equal(move.code, 0);
+      assert.deepEqual(proxy.received[1].body, { id: "session-1", x: 0, y: 1, agent: "agent-1" });
     } finally {
       await close(proxy.server);
     }
@@ -258,7 +270,7 @@ describe("./client happy path", () => {
     }
   });
 
-  it("stop posts the verdict and reason", async () => {
+  it("stop posts the verdict and reason, and a bare stop posts neither", async () => {
     const proxy = await stubProxy(ok);
     try {
       const result = await runClient([
@@ -267,13 +279,20 @@ describe("./client happy path", () => {
         "agent-1",
         "--server-url",
         proxy.url,
+        "--session-id",
         "session-1",
+        "--status",
         "failed",
+        "--reason",
         "installer hung",
       ]);
       assert.equal(result.stderr, "");
       assert.equal(result.code, 0);
       assert.deepEqual(proxy.received[0].body, { id: "session-1", agent: "agent-1", status: "failed", reason: "installer hung" });
+      const abort = await runClient(["stop", "--agent-id", "agent-1", "--server-url", proxy.url, "--session-id", "session-1"]);
+      assert.equal(abort.stderr, "");
+      assert.equal(abort.code, 0);
+      assert.deepEqual(proxy.received[1].body, { id: "session-1", agent: "agent-1" });
     } finally {
       await close(proxy.server);
     }
@@ -284,13 +303,14 @@ describe("./client happy path", () => {
     assert.equal(result.code, 0);
     assert.match(result.stdout, /start/);
     assert.match(result.stdout, /intent start/);
-    assert.match(result.stdout, /stop/);
+    assert.match(result.stdout, /stop --session-id/);
+    assert.equal(result.stdout.includes("<id>"), false);
   });
 });
 
 describe("./client unhappy path", () => {
   it("rejects a QEMU action without --agent-id", async () => {
-    const result = await runClient(["send-keys", "session-1", "hello"]);
+    const result = await runClient(["send-keys", "--session-id", "session-1", "--keys", "hello"]);
     assert.notEqual(result.code, 0);
     assert.match(result.stderr, /Missing required flag: --agent-id/);
   });
@@ -304,7 +324,7 @@ describe("./client unhappy path", () => {
   it("rejects a missing OLIGARCHY_TOKEN before calling the proxy", async () => {
     const proxy = await stubProxy(ok);
     try {
-      const result = await runClient(["send-keys", "--agent-id", "agent-1", "--server-url", proxy.url, "session-1", "hello"], {
+      const result = await runClient(["send-keys", "--agent-id", "agent-1", "--server-url", proxy.url, "--session-id", "session-1", "--keys", "hello"], {
         OLIGARCHY_TOKEN: "",
       });
       assert.notEqual(result.code, 0);
@@ -328,7 +348,7 @@ describe("./client unhappy path", () => {
   it("prints the server's error and exits 1", async () => {
     const proxy = await stubProxy(() => ({ status: 404, body: '{"error":"no session session-1"}' }));
     try {
-      const result = await runClient(["send-keys", "--agent-id", "agent-1", "--server-url", proxy.url, "session-1", "hello"]);
+      const result = await runClient(["send-keys", "--agent-id", "agent-1", "--server-url", proxy.url, "--session-id", "session-1", "--keys", "hello"]);
       assert.equal(result.code, 1);
       assert.equal(result.stdout, "");
       assert.equal(result.stderr, "no session session-1\n");
@@ -340,9 +360,9 @@ describe("./client unhappy path", () => {
   it("rejects a send-mouse coordinate outside 0..1 before calling the proxy", async () => {
     const proxy = await stubProxy(ok);
     try {
-      const result = await runClient(["send-mouse", "--agent-id", "agent-1", "--server-url", proxy.url, "session-1", "1.5", "0.5"]);
+      const result = await runClient(["send-mouse", "--agent-id", "agent-1", "--server-url", proxy.url, "--session-id", "session-1", "--x", "1.5", "--y", "0.5"]);
       assert.notEqual(result.code, 0);
-      assert.match(result.stderr, /x and y must be in 0\.\.1/);
+      assert.match(result.stderr, /Invalid value for flag --x: .*--x and --y must be in 0\.\.1/);
       assert.deepEqual(proxy.received, []);
     } finally {
       await close(proxy.server);
@@ -361,10 +381,24 @@ describe("./client unhappy path", () => {
     }
   });
 
+  it("rejects a positional session id and a missing --keys", async () => {
+    const positional = await runClient(["send-keys", "--agent-id", "agent-1", "session-1", "--keys", "hello"]);
+    assert.notEqual(positional.code, 0);
+    assert.match(positional.stderr, /Unexpected positional argument: "session-1"/);
+
+    const missingKeys = await runClient(["send-keys", "--agent-id", "agent-1", "--session-id", "session-1"]);
+    assert.notEqual(missingKeys.code, 0);
+    assert.match(missingKeys.stderr, /Missing required flag: --keys/);
+
+    const stopPositional = await runClient(["stop", "--agent-id", "agent-1", "--session-id", "session-1", "failed"]);
+    assert.notEqual(stopPositional.code, 0);
+    assert.match(stopPositional.stderr, /Unexpected positional argument: "failed"/);
+  });
+
   it("unwraps a refused connection", async () => {
     const closed = await stubProxy(ok);
     await close(closed.server);
-    const result = await runClient(["send-keys", "--agent-id", "agent-1", "--server-url", closed.url, "session-1", "hello"]);
+    const result = await runClient(["send-keys", "--agent-id", "agent-1", "--server-url", closed.url, "--session-id", "session-1", "--keys", "hello"]);
     assert.equal(result.code, 1);
     assert.match(result.stderr, /fetch failed: .*ECONNREFUSED/);
   });
