@@ -73,14 +73,19 @@ function paint(hex: string, text: string): string {
 
 function write(line: LogEntry): void {
   const tag = line.agentId ?? "global";
-  const text = line.level === undefined || line.level === "info" ? line.text : `${line.level}: ${line.text}`;
-  const rendered = `[${tag}] ${text}`;
+  const session = line.sessionId === undefined ? "" : `session ${line.sessionId}: `;
+  const message = session !== "" ? line.text.replace(session, "") : line.text;
+  const text = line.level === undefined || line.level === "info" ? message : `${line.level}: ${message}`;
   const hex = line.agentId === undefined ? undefined : colors.get(line.agentId);
-  if (hex === undefined) {
-    console.log(styleText("gray", rendered, { stream: process.stdout }));
-    return;
-  }
-  console.log(paint(hex, rendered));
+  const ticket = hex === undefined
+    ? styleText("gray", tag, { stream: process.stdout })
+    : paint(hex, tag);
+  const rest = line.sessionId === undefined
+    ? styleText("white", `] ${text}`, { stream: process.stdout })
+    : `${styleText("white", "] ", { stream: process.stdout })}${styleText("gray", line.sessionId, { stream: process.stdout })}${styleText("white", `: ${text}`, { stream: process.stdout })}`;
+  console.log(
+    `${styleText("white", "[", { stream: process.stdout })}${ticket}${rest}`,
+  );
 }
 
 export function log(
