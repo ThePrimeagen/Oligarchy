@@ -11,7 +11,7 @@ import { NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node
 import { acquireAgentColor, flushLogs, log, releaseAgentColor } from "../db/log.ts";
 import { connectDatabase, endSession, finishAction, getImage, getSessionStatus, insertSession, pingDatabase, registerAgent, sessionRunning, startAction } from "../db/ops.ts";
 import { finishIntentSpan, finishQemuActionSpan, finishQemuSpan, flushSentry, initSentry, startIntentSpan, startQemuActionSpan, startQemuSpan, type QemuSpan } from "../sentry.ts";
-import { QEMU_DISPLAYS, createDisk, createQemu, missingHostRequirements, screendump, sendKeys, sendMouse, start, stop, type Qemu, type QemuDisplay } from "./client.ts";
+import { QEMU_DISPLAYS, createDisk, createQemu, missingHostRequirements, screendump, sendKeys, sendMouse, sessionDir, start, stop, type Qemu, type QemuDisplay } from "./client.ts";
 import { getIso } from "./iso.ts";
 import { parseKeys } from "./keys.ts";
 import { collectStats, startCpuSampler } from "./stats.ts";
@@ -228,8 +228,8 @@ const StoredImageParams = Schema.Struct({
   id: Schema.String,
 });
 
-// A follower watches; it does not drive, so it names no agent.
-const FollowParams = Schema.Struct({
+// A follower watches; it does not drive, so it names no agent. A dump reads; same.
+const SessionParams = Schema.Struct({
   id: Schema.String,
 });
 
@@ -453,7 +453,7 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
     }) satisfies RouteHandler);
 
     yield* router.add("GET", "/follow", Effect.gen(function* () {
-      const { id } = yield* Effect.mapError(HttpRouter.schemaParams(FollowParams), (err) => badRequest(err.message));
+      const { id } = yield* Effect.mapError(HttpRouter.schemaParams(SessionParams), (err) => badRequest(err.message));
       const live = sessions.get(id) ?? [...openSessions].find((open) => open.qemu.id === id);
       if (live === undefined) {
         const status = UUID.test(id)
@@ -506,6 +506,31 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
       log(db, { text: `serial; ${data.length} bytes in ${Date.now() - started}ms`, sessionId: qemu.id, agentId: params.agent });
       return HttpServerResponse.uint8Array(data, { contentType: "text/plain" });
     }) satisfies RouteHandler, { uninterruptible: true });
+
+    yield* router.add("GET", "/dump", Effect.gen(function* () {
+      const started = Date.now();
+      const { id } = yield* Effect.mapError(HttpRouter.schemaParams(SessionParams), (err) => badRequest(err.message));
+      if (!UUID.test(id)) {
+        return yield* Effect.fail<ApiError>({ _tag: "UnknownSession", id });
+      }
+      const live = sessions.get(id);
+      // A session this proxy no longer holds may still have its directory: a proxy that
+      // died mid-session never removed it, and its QEMU kept writing the console.
+      const path = live === undefined ? join(sessionDir(id), "serial.log") : live.qemu.serialPath;
+      const data = yield* Effect.tryPromise({
+        try: () => readFile(path),
+        catch: (cause) =>
+          live === undefined && (cause as NodeJS.ErrnoException).code === "ENOENT"
+            ? conflict(`session "${id}" is not running on this proxy and left no console on disk`, id)
+            : internal(cause, { sessionId: id, agentId: live?.agent }),
+      });
+      log(db, {
+        text: `dump; ${data.length} bytes from ${live === undefined ? "disk" : "the running machine"} in ${Date.now() - started}ms`,
+        sessionId: id,
+        agentId: live?.agent,
+      });
+      return HttpServerResponse.uint8Array(data, { contentType: "text/plain" });
+    }) satisfies RouteHandler);
 
     yield* router.add("GET", "/stats", Effect.sync(() => HttpServerResponse.jsonUnsafe(collectStats(cpuSampler, sessions.size))) satisfies RouteHandler);
 

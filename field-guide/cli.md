@@ -20,7 +20,7 @@ Three TypeScript executables share one shape. `./client` (`src/client/index.ts`)
 ./ctrl test start --session-id <id> --test-result-id <result-id> --server-url <url>
 ./ctrl test-results --agent-id <agent> --id <result-id> --status success|failed [--reason <text>] --server-url <url>
 ./ctrl session list [--count <n>] [--active] [--json] --server-url <url>
-./ctrl session --session-id <id> --logs|--test-def|--test-results|--actions|--all --server-url <url>
+./ctrl session --session-id <id> --logs|--test-def|--test-results|--actions|--all|--dump --server-url <url>
 
 ./session [--server-url <url>]
 ```
@@ -33,7 +33,7 @@ Each executable has one parser, `src/client/parse-args.ts` and `src/ctrl/parse-a
 
 The client's shared surface, added to every action: `--agent-id` (required, non-empty), `--server-url` (a full URL used exactly as given; falls back to `SERVER_URL`, then `http://127.0.0.1:42069`), and `OLIGARCHY_TOKEN` from the environment, sent as `Authorization: Bearer <token>` on every request. A missing token is `OLIGARCHY_TOKEN is not set`.
 
-The ctrl's shared surface: `--server-url` (falls back to `SERVER_URL`; must be http or https; no default, because the URL ends up in Linear tickets and agent prompts where `localhost` is never right) and `DATABASE_URL` from the environment. An action's spec names the further variables it needs — `LINEAR_API_TOKEN` for `test new` and `test list`, `CURSOR_API_TOKEN` for `test run` — and the parser reads them the same way, so a missing one is `LINEAR_API_TOKEN is not set` before any work starts. The parsed `databaseUrl` goes to `connectDatabase(url)`; the parsed token goes to `prompt(apiKey, text)`. Nothing below the parser reads `process.env`.
+The ctrl's shared surface: `--server-url` (falls back to `SERVER_URL`; must be http or https; no default, because the URL ends up in Linear tickets and agent prompts where `localhost` is never right) and `DATABASE_URL` from the environment. An action's spec names the further variables it needs — `LINEAR_API_TOKEN` for `test new` and `test list`, `CURSOR_API_TOKEN` for `test run`, `OLIGARCHY_TOKEN` for `session --session-id`, whose `--dump` calls the proxy — and the parser reads them the same way, so a missing one is `LINEAR_API_TOKEN is not set` before any work starts. The parsed `databaseUrl` goes to `connectDatabase(url)`; the parsed token goes to `prompt(apiKey, text)` or, with `serverUrl`, to the client's `getBytes`. Nothing below the parser reads `process.env`.
 
 ## Client actions
 
@@ -138,9 +138,11 @@ Prints the most recent sessions for a human, newest first: `SELECT id, status, s
 
 ### session
 
-Prints stored logs, the test definition, the test result, and the actions for one session. `--session-id` is the session UUID. At least one selector is required: `--logs`, `--test-def`, `--test-results`, `--actions`, or `--all`.
+Prints stored logs, the test definition, the test result, and the actions for one session, or dumps its serial console. `--session-id` is the session UUID. At least one selector is required: `--logs`, `--test-def`, `--test-results`, `--actions`, `--all`, or `--dump`.
 
 `--logs` and `--actions` print that table's rows as JSON, oldest first (`created_at`, then `id`). `--test-results` prints the result row attributed to the session, or `null`. `--test-def` prints the definition that result ran, or `null`. `--all` prints `{ logs, results, test_definition, actions }`. Combining selectors prints an object with those keys. An unknown session id is a failure.
+
+`--dump` is the one selector that leaves the database: after the session row is confirmed to exist, it calls `GET /dump?id=<id>` on the proxy at `--server-url` with `OLIGARCHY_TOKEN` (through the client's `getBytes`) and writes the bytes to stdout raw — a console is read by a person, not parsed, so it is never JSON-quoted, and for the same reason it does not combine with the JSON selectors. The proxy answers with the session's serial console whether the session is still running there or died leaving its directory behind (see `GET /dump` in [http-api.md](http-api.md)); a session that is neither is the proxy's refusal, printed as the headline. It is a read: no agent id, no action row, and the session's inactivity window is untouched.
 
 ## The session REPL
 

@@ -14,7 +14,7 @@ actions:
   test start --session-id <id> --test-result-id <id>
   test-results --agent-id <agent> --id <id> --status success|failed [--reason <text>]
   session list [--count <n>] [--active] [--json]
-  session --session-id <id> --logs|--test-def|--test-results|--actions|--all
+  session --session-id <id> --logs|--test-def|--test-results|--actions|--all|--dump
 
 Every action reads DATABASE_URL and takes --server-url (or SERVER_URL).
 ctrl <action> --help prints that action's flags.`;
