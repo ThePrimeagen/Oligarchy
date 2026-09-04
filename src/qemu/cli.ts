@@ -9,6 +9,7 @@ import { NodeRuntime, NodeServices } from "@effect/platform-node";
 import { Console, Effect, Option, Schema } from "effect";
 import { Argument, CliError, Command, Flag } from "effect/unstable/cli";
 import { experimentCommand } from "../experiment.ts";
+import { getSession } from "../session-info.ts";
 import { runTestResults } from "../test-results.ts";
 
 if (existsSync(".env")) {
@@ -269,6 +270,50 @@ const stop = Command.make(
   }),
 );
 
+const session = Command.make(
+  "session",
+  {
+    sessionId: Flag.string("session-id").pipe(
+      Flag.withSchema(Schema.NonEmptyString),
+      Flag.withDescription("Session id"),
+    ),
+    logs: Flag.boolean("logs").pipe(Flag.withDefault(false), Flag.withDescription("Print session logs")),
+    testDef: Flag.boolean("test-def").pipe(
+      Flag.withDefault(false),
+      Flag.withDescription("Print the session's test definition"),
+    ),
+    results: Flag.boolean("test-results").pipe(
+      Flag.withDefault(false),
+      Flag.withDescription("Print the session's test result"),
+    ),
+    actions: Flag.boolean("actions").pipe(Flag.withDefault(false), Flag.withDescription("Print session actions")),
+    all: Flag.boolean("all").pipe(
+      Flag.withDefault(false),
+      Flag.withDescription("Print logs, test definition, test results, and actions"),
+    ),
+  },
+  Effect.fn(function* ({ sessionId, logs, testDef, results, actions, all }) {
+    if (!logs && !testDef && !results && !actions && !all) {
+      return yield* Effect.fail(
+        new CliError.UserError({
+          cause: new Error("session: --logs, --test-def, --test-results, --actions, or --all is required"),
+          userMessage: "session: --logs, --test-def, --test-results, --actions, or --all is required",
+        }),
+      );
+    }
+    yield* Effect.tryPromise({
+      try: () =>
+        getSession(sessionId, {
+          logs: all || logs,
+          testDef: all || testDef,
+          testResults: all || results,
+          actions: all || actions,
+        }),
+      catch: fail,
+    });
+  }),
+);
+
 const testResults = Command.make(
   "test-results",
   {
@@ -341,6 +386,7 @@ const intent = Command.make("intent").pipe(
 const app = client.pipe(
   Command.withSubcommands([
     experimentCommand,
+    session,
     testResults,
     start,
     getImage,

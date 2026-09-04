@@ -4,24 +4,25 @@ Consult this table of contents first. Read only the section you need.
 
 | Section | Line |
 |---------|-----:|
-| [Important](#important) | 26 |
-| [Environment](#environment) | 30 |
-| [Invoke](#invoke) | 38 |
-| [start](#start) | 54 |
-| [get-image](#get-image) | 68 |
-| [get-serial](#get-serial) | 79 |
-| [send-keys](#send-keys) | 101 |
-| [send-mouse](#send-mouse) | 113 |
-| [intent](#intent) | 127 |
-| [stop](#stop) | 138 |
-| [test](#test) | 150 |
-| [test new](#test-new) | 163 |
-| [test list](#test-list) | 174 |
-| [test run](#test-run) | 184 |
-| [test-results](#test-results) | 194 |
-| [Keys](#keys) | 205 |
-| [Mouse](#mouse) | 217 |
-| [The loop](#the-loop) | 225 |
+| [Important](#important) | 27 |
+| [Environment](#environment) | 31 |
+| [Invoke](#invoke) | 39 |
+| [start](#start) | 55 |
+| [get-image](#get-image) | 69 |
+| [get-serial](#get-serial) | 80 |
+| [send-keys](#send-keys) | 102 |
+| [send-mouse](#send-mouse) | 114 |
+| [intent](#intent) | 128 |
+| [stop](#stop) | 139 |
+| [test](#test) | 151 |
+| [test new](#test-new) | 164 |
+| [test list](#test-list) | 175 |
+| [test run](#test-run) | 185 |
+| [test-results](#test-results) | 195 |
+| [session](#session) | 206 |
+| [Keys](#keys) | 220 |
+| [Mouse](#mouse) | 232 |
+| [The loop](#the-loop) | 240 |
 
 ## Important
 
@@ -33,7 +34,7 @@ If you are the client, or an agent driving the client: do not look at code. Only
 
 If `DATABASE_URL` or `OLIGARCHY_TOKEN` is missing, that is a failure. Stop.
 
-The proxy and the client both read `OLIGARCHY_TOKEN` from the environment. The client sends it on every request to the proxy. Starting either without it exits 1. The proxy, `test --list`, `test new`, and `test-results` also read `DATABASE_URL` from the environment. A missing `DATABASE_URL` or `LINEAR_API_TOKEN` exits 1. `test list` needs `LINEAR_API_TOKEN` only. `test run` reads `CURSOR_API_TOKEN`; a missing one exits 1.
+The proxy and the client both read `OLIGARCHY_TOKEN` from the environment. The client sends it on every request to the proxy. Starting either without it exits 1. The proxy, `test --list`, `test new`, `test-results`, and `session` also read `DATABASE_URL` from the environment. A missing `DATABASE_URL` or `LINEAR_API_TOKEN` exits 1. `test list` needs `LINEAR_API_TOKEN` only. `test run` reads `CURSOR_API_TOKEN`; a missing one exits 1.
 
 ## Invoke
 
@@ -201,6 +202,20 @@ Closes one pending test result. Reads `DATABASE_URL` from the environment. `--ag
 ```
 
 `--id` is the result UUID from the Linear issue. `--status` is `success` or `failed`. `--reason` is optional text stored on the result row.
+
+## session
+
+Prints stored logs, the test definition, the test result, and actions for a session. Not used while driving a guest. Reads `DATABASE_URL` from the environment.
+
+```bash
+./client session --session-id <id> --logs
+./client session --session-id <id> --test-def
+./client session --session-id <id> --test-results
+./client session --session-id <id> --actions
+./client session --session-id <id> --all
+```
+
+`--session-id` is required. At least one of `--logs`, `--test-def`, `--test-results`, `--actions`, or `--all` is required. A single selector prints that value as JSON. `--all` prints `{ logs, results, test_definition, actions }`. An unknown session is a failure.
 
 ## Keys
 
