@@ -11,14 +11,28 @@ function ago(seconds: number): Date {
   return new Date(NOW - seconds * 1000);
 }
 
-function printed(rows: Parameters<typeof printSessions>[0]): string[] {
+function printed(rows: Parameters<typeof printSessions>[0], json = false): string[] {
   mock.method(Date, "now", () => NOW);
   const log = mock.method(console, "log", () => undefined);
-  printSessions(rows);
+  printSessions(rows, json);
   return log.mock.calls.map((call) => call.arguments.join(" "));
 }
 
 describe("printSessions happy path", () => {
+  it("prints JSON session objects for machine consumers", () => {
+    const lines = printed(
+      [
+        { id: "d889e62f-212a-4ee4-a299-7e21b02b5308", status: "running", startedAt: ago(5) },
+        { id: "ff88a0b1-0851-47a7-91d3-acbfb20b8673", status: "downloading", startedAt: ago(90) },
+      ],
+      true,
+    );
+    assert.deepEqual(JSON.parse(lines.join("\n")), [
+      { id: "d889e62f-212a-4ee4-a299-7e21b02b5308", status: "running", startedAt: "2026-09-04T11:59:55.000Z" },
+      { id: "ff88a0b1-0851-47a7-91d3-acbfb20b8673", status: "downloading", startedAt: "2026-09-04T11:58:30.000Z" },
+    ]);
+  });
+
   it("prints one line per session in the order given: colored status, age, then the plain id", () => {
     const lines = printed([
       { id: "d889e62f-212a-4ee4-a299-7e21b02b5308", status: "running", startedAt: ago(5) },
@@ -75,6 +89,10 @@ describe("printSessions happy path", () => {
 });
 
 describe("printSessions unhappy path", () => {
+  it("prints an empty JSON array when there are no sessions", () => {
+    assert.deepEqual(printed([], true), ["[]"]);
+  });
+
   it("prints nothing for no sessions", () => {
     assert.deepEqual(printed([]), []);
   });

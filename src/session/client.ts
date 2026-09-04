@@ -4,6 +4,7 @@ import type { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 
 const CLIENT = fileURLToPath(new URL("../client/index.ts", import.meta.url));
+const CTRL = fileURLToPath(new URL("../ctrl/index.ts", import.meta.url));
 
 export type ClientChild = ChildProcessByStdio<null, Readable, Readable>;
 
@@ -55,6 +56,24 @@ export function spawnClient(session: Session, args: string[]): ClientChild {
 export function runClient(session: Session, args: string[]): Promise<ClientResult> {
   return new Promise((resolve, reject) => {
     const child = spawnClient(session, args);
+    const out: Buffer[] = [];
+    const err: Buffer[] = [];
+    child.stdout.on("data", (chunk: Buffer) => out.push(chunk));
+    child.stderr.on("data", (chunk: Buffer) => err.push(chunk));
+    child.on("error", reject);
+    child.on("close", (code) => {
+      resolve({ code: code ?? 1, stdout: Buffer.concat(out), stderr: Buffer.concat(err).toString("utf8").trim() });
+    });
+  });
+}
+
+export function runCtrl(session: Session, args: string[]): Promise<ClientResult> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      process.execPath,
+      ["--experimental-strip-types", "--disable-warning=ExperimentalWarning", CTRL, ...args, "--server-url", session.serverUrl],
+      { stdio: ["ignore", "pipe", "pipe"] },
+    );
     const out: Buffer[] = [];
     const err: Buffer[] = [];
     child.stdout.on("data", (chunk: Buffer) => out.push(chunk));

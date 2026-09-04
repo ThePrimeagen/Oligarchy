@@ -49,6 +49,36 @@ async function runSession(args: string[], lines: string[], env: NodeJS.ProcessEn
   return { code: code as number | null, stdout, stderr };
 }
 
+async function runTtySession(input: string, afterInput: string, env: NodeJS.ProcessEnv = {}): Promise<{
+  code: number | null;
+  output: string;
+}> {
+  const child = spawn("script", ["-qfec", `${SESSION} --server-url http://127.0.0.1:1`, "/dev/null"], {
+    env: {
+      ...process.env,
+      NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --disable-warning=ExperimentalWarning`.trim(),
+      OLIGARCHY_TOKEN: "test-token",
+      DATABASE_URL: "",
+      SERVER_URL: "",
+      TERM: "xterm-256color",
+      ...env,
+    },
+  });
+  let output = "";
+  let inputSent = false;
+  child.stdout.setEncoding("utf8");
+  child.stdout.on("data", (data: string) => {
+    output += data;
+    if (!inputSent && output.includes("session> ")) {
+      inputSent = true;
+      child.stdin.write(input);
+      setTimeout(() => child.stdin.end(afterInput), 1800);
+    }
+  });
+  const [code] = await once(child, "close");
+  return { code: code as number | null, output };
+}
+
 type Received = { method: string | undefined; url: string | undefined; authorization: string | undefined; body: unknown };
 
 // A 2x2 8-bit RGB PNG, the shape QEMU's screendump writes: red, green / blue, white.
@@ -301,6 +331,13 @@ describe("./session happy path", () => {
 });
 
 describe("./session unhappy path", () => {
+  it("reports a failed ctrl session list and keeps the prompt usable", async () => {
+    const result = await runTtySession("follow \t", "\x15exit\r");
+    assert.equal(result.code, 0);
+    assert.match(result.output, /DATABASE_URL is not set/);
+    assert.ok((result.output.match(/session> /g) ?? []).length >= 2);
+  });
+
   it("refuses commands before start, unknown commands, and a malformed send-mouse without calling the proxy", async () => {
     const proxy = await stubProxy();
     try {

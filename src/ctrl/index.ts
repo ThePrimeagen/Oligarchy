@@ -13,7 +13,7 @@ actions:
   test run --ticket <linear-ticket>
   test start --session-id <id> --test-result-id <id>
   test-results --agent-id <agent> --id <id> --status success|failed [--reason <text>]
-  session list [--count <n>]
+  session list [--count <n>] [--json]
   session --session-id <id> --logs|--test-def|--test-results|--actions|--all
 
 Every action reads DATABASE_URL and takes --server-url (or SERVER_URL).

@@ -32,7 +32,7 @@ If you are an agent driving a guest, you need two of these: [test start](#test-s
 ./ctrl test run       --ticket <linear-ticket>
 ./ctrl test start     --session-id <id> --test-result-id <id>
 ./ctrl test-results   --agent-id <agent> --id <id> --status success|failed [--reason <text>]
-./ctrl session list   [--count <n>]
+./ctrl session list   [--count <n>] [--json]
 ./ctrl session        --session-id <id> --logs|--test-def|--test-results|--actions|--all
 ```
 
@@ -136,12 +136,13 @@ Closes one pending test result with the verdict.
 ## session list
 
 ```
-./ctrl session list --server-url <url> [--count <n>]
+./ctrl session list --server-url <url> [--count <n>] [--json]
 ```
 
 Prints the most recent sessions, newest first, one per line: the status, colored (green `succeeded`, red `failed`, yellow `running`, gray `downloading`, bright red `aborted`, magenta `timed_out`); how long ago it started (`45s ago`, `12m ago`, `1h30m ago`, `3d5h ago`); then the session id. Not used while driving a guest.
 
 - `--count <n>` — how many sessions to print, at least 1. Default 10.
+- `--json` — print one JSON array of `{ id, status, startedAt }` objects instead of the colored lines.
 
 ```bash
 ./ctrl session list --server-url https://qemu.example.com --count 25

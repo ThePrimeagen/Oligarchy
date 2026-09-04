@@ -11,8 +11,9 @@ import { sendMouseRun } from "./actions/send-mouse.ts";
 import { startRun } from "./actions/start.ts";
 import { statusRun } from "./actions/status.ts";
 import { STOP_STATUSES, stopRun } from "./actions/stop.ts";
-import { createSession } from "./client.ts";
+import { createSession, runCtrl } from "./client.ts";
 import { parseSessionArgs } from "./parse-args.ts";
+import { pickFollowSession, type SessionListItem } from "./picker.ts";
 
 const HELP = `start [iso] [disk]                    boot a qemu session (default iso: omarchy.iso)
 get-image                             show the guest display inline
@@ -22,13 +23,28 @@ send-mouse <x> <y> [button] [clicks]  move, click, or scroll; x and y are 0..1 f
 intent start <message>                declare what you are about to do
 intent end                            close the open intent
 stop [status] [reason]                stop the session; status is succeeded, failed, or aborted
-follow <session-id>                   watch another session live: its actions down the left, its latest image on the right; ctrl-c detaches
+follow <session-id>                   watch another session live; type "follow " then tab to choose an active session
 status                                show agent, server, session, and intent
 exit                                  stop the session and leave`;
 
 const COMMANDS = ["start", "get-image", "get-serial", "send-keys", "send-mouse", "intent", "stop", "follow", "status", "help", "exit", "quit"];
 
-function completer(line: string): [string[], string] {
+async function completer(line: string): Promise<[string[], string]> {
+  const followArg = /^\s*follow\s+(\S*)$/.exec(line);
+  if (followArg !== null) {
+    const result = await runCtrl(session, ["session", "list", "--count", "10", "--json"]);
+    if (result.code !== 0) {
+      process.stdout.write(`\r\n${result.stderr}\r\n${rl.getPrompt()}${line}`);
+      return [[], followArg[1]];
+    }
+    const rows = (JSON.parse(result.stdout.toString("utf8")) as SessionListItem[]).filter((row) => row.id.startsWith(followArg[1]));
+    if (!rows.some((row) => row.status === "running" || row.status === "downloading")) {
+      process.stdout.write(`\r\nno running or pending sessions\r\n${rl.getPrompt()}${line}`);
+      return [[], followArg[1]];
+    }
+    const sessionId = await pickFollowSession(rows, process.stdin, process.stdout, rl.getCursorPos().cols);
+    return [sessionId === undefined ? [] : [sessionId], followArg[1]];
+  }
   const intentArg = /^\s*intent\s+(\S*)$/.exec(line);
   if (intentArg !== null) {
     return [["start", "end"].filter((word) => word.startsWith(intentArg[1])), intentArg[1]];
@@ -148,7 +164,7 @@ function promptText(): string {
 }
 
 console.log(`server ${session.serverUrl}`);
-console.log('tab lists commands, "help" explains them, "exit" stops the session and leaves');
+console.log('tab lists commands; "follow " then tab lists active sessions; "help" explains them');
 
 rl.setPrompt(promptText());
 rl.prompt();

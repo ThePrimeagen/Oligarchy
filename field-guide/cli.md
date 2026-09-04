@@ -19,7 +19,7 @@ Three TypeScript executables share one shape. `./client` (`src/client/index.ts`)
 ./ctrl test run --ticket <linear-ticket> --server-url <url>
 ./ctrl test start --session-id <id> --test-result-id <result-id> --server-url <url>
 ./ctrl test-results --agent-id <agent> --id <result-id> --status success|failed [--reason <text>] --server-url <url>
-./ctrl session list [--count <n>] --server-url <url>
+./ctrl session list [--count <n>] [--json] --server-url <url>
 ./ctrl session --session-id <id> --logs|--test-def|--test-results|--actions|--all --server-url <url>
 
 ./session [--server-url <url>]
@@ -134,7 +134,7 @@ Closes one pending test result. `--id` is the result UUID printed on the Linear 
 
 ### session list
 
-Prints the most recent sessions for a human, newest first: `SELECT id, status, started_at FROM sessions ORDER BY started_at DESC, id DESC LIMIT <count>`, one line each. The status comes first, padded to a column and colored by ANSI SGR code — green `succeeded`, red `failed`, yellow `running`, gray `downloading`, bright red `aborted`, magenta `timed_out` — then how long ago the session started, then the id in the terminal's default color. The age is a plain calculation, not a package: seconds under a minute (`45s ago`), minutes under an hour (`12m ago`), hours with leftover minutes under a day (`1h30m ago`, `2h ago`), else days with leftover hours (`3d5h ago`). It is clamped at `0s ago`, because the row's clock is the database's and can sit a few seconds ahead of the machine running `ctrl`. `--count` defaults to 10 and must be at least 1. `session.ts` exports `sessionRun`, a switch like `testRun`'s: `list` goes to `sessionListRun`, anything else to `sessionInspectRun` below.
+Prints the most recent sessions for a human, newest first: `SELECT id, status, started_at FROM sessions ORDER BY started_at DESC, id DESC LIMIT <count>`, one line each. The status comes first, padded to a column and colored by ANSI SGR code — green `succeeded`, red `failed`, yellow `running`, gray `downloading`, bright red `aborted`, magenta `timed_out` — then how long ago the session started, then the id in the terminal's default color. The age is a plain calculation, not a package: seconds under a minute (`45s ago`), minutes under an hour (`12m ago`), hours with leftover minutes under a day (`1h30m ago`, `2h ago`), else days with leftover hours (`3d5h ago`). It is clamped at `0s ago`, because the row's clock is the database's and can sit a few seconds ahead of the machine running `ctrl`. `--json` instead prints one array of `{ id, status, startedAt }` objects for machine consumers. `--count` defaults to 10 and must be at least 1. `session.ts` exports `sessionRun`, a switch like `testRun`'s: `list` goes to `sessionListRun`, anything else to `sessionInspectRun` below.
 
 ### session
 
@@ -146,7 +146,7 @@ Prints stored logs, the test definition, the test result, and the actions for on
 
 `./session [--server-url <url>]` is the interactive way to drive one guest. `src/session/parse-args.ts` parses that one flag the same way the others do (`SERVER_URL` fallback, then `http://127.0.0.1:42069`; `OLIGARCHY_TOKEN` through `Config`; `--help` and a stray positional behave as everywhere else), then `index.ts` runs a readline REPL with tab completion. Each line is split into a command word and the rest; `dispatch` is a `switch` over the command, and each case is one file under `src/session/actions/` taking the `Session` state and the rest of the line. The state is a plain object from `createSession` in `src/session/client.ts` — `serverUrl`, `agentId`, `sessionId`, `intentOpen`, `startInFlight`, `following` — operated on by standalone functions, per [development.md](../development.md).
 
-Every command runs `./client` as a child process (`runClient`) with `--agent-id` and `--server-url` appended, so the REPL owns no HTTP of its own and the client's flag parsing and error rendering are the single source of truth. The REPL grammar is terse because a person types it; the action files translate it into the client's flags:
+Every command runs `./client` as a child process (`runClient`) with `--agent-id` and `--server-url` appended, so the REPL owns no HTTP of its own and the client's flag parsing and error rendering are the single source of truth. At `follow `, Tab runs `./ctrl session list --count 10 --json`, keeps its `running` and `downloading` rows, orders the running rows first, and opens a colored picker; up, down, Tab, and Shift-Tab move, Enter completes the session id, and Escape cancels. The picker calls downloading sessions `pending`, matching the follow view's status. The REPL grammar is terse because a person types it; the action files translate it into the client's flags:
 
 | You type | The client runs |
 | --- | --- |
@@ -158,7 +158,7 @@ Every command runs `./client` as a child process (`runClient`) with `--agent-id`
 | `intent start <message>` | `intent start --session-id <id> --test-result-id manual --message <rest of line>` |
 | `intent end` | `intent end --session-id <id>` |
 | `stop [status] [reason]` | `stop --session-id <id> [--status <s>] [--reason <rest>]` |
-| `follow <session-id>` | `follow --session-id <id>`, streamed; see [Following a session](#following-a-session) |
+| `follow <session-id>` | `follow --session-id <id>`, streamed; type `follow ` then Tab to choose an active id; see [Following a session](#following-a-session) |
 | `status`, `help`, `exit` / `quit` | nothing; local |
 
 Every `start` mints a fresh agent id (`session-<uuid>`), because the proxy keys one session per agent. A failed command prints the client's stderr — the headline and the stack — and keeps the session; a failed `stop` clears it anyway, since the proxy has already lost it. `exit`, stdin closing, Ctrl-C, SIGTERM, and SIGHUP all run `shutdown`: wait for an in-flight start (the proxy's `/start` is uninterruptible and would otherwise leave an orphan QEMU), stop the session, exit 0. The client child is spawned detached in its own process group for the same reason: a hangup that reaches the foreground group must not kill a start before it hands back its id.
