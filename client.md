@@ -5,18 +5,18 @@ Consult this table of contents first. Read only the section you need.
 | Section | Line |
 |---------|-----:|
 | [Important](#important) | 21 |
-| [Environment](#environment) | 27 |
-| [Invoke](#invoke) | 33 |
-| [start](#start) | 49 |
-| [get-image](#get-image) | 63 |
-| [get-serial](#get-serial) | 74 |
-| [send-keys](#send-keys) | 96 |
-| [send-mouse](#send-mouse) | 108 |
-| [intent](#intent) | 122 |
-| [stop](#stop) | 133 |
-| [Keys](#keys) | 145 |
-| [Mouse](#mouse) | 157 |
-| [The loop](#the-loop) | 165 |
+| [Synopsis](#synopsis) | 27 |
+| [start](#start) | 50 |
+| [get-image](#get-image) | 65 |
+| [get-serial](#get-serial) | 80 |
+| [send-keys](#send-keys) | 95 |
+| [send-mouse](#send-mouse) | 111 |
+| [intent start](#intent-start) | 128 |
+| [intent end](#intent-end) | 144 |
+| [stop](#stop) | 158 |
+| [Keys](#keys) | 174 |
+| [Mouse](#mouse) | 186 |
+| [The loop](#the-loop) | 194 |
 
 ## Important
 
@@ -24,123 +24,152 @@ If you are the client, or an agent driving the client: do not look at code. Only
 
 `./client` drives the guest. Recording the test result is `./ctrl`, described in its own guide.
 
-## Environment
+## Synopsis
 
-`OLIGARCHY_TOKEN` is already in this process. Use it. Do not write a `.env`.
+```
+./client <action> --agent-id <agent> [--server-url <url>] ...
 
-The proxy and the client both read `OLIGARCHY_TOKEN` from the environment. The client sends it on every request to the proxy. Starting either without it exits 1. Nothing else is read from the environment, except `SERVER_URL` as the fallback for `--server-url`.
-
-## Invoke
-
-The action comes first. Every value after it is a flag; there are no positional arguments. Every action takes `--agent-id <your-id>` and `--server-url <url>`; flags may sit in any order after the action. An invocation without `--agent-id` fails.
-
-```bash
-./client <action> --agent-id <agent> --server-url <url> ...
+./client start      [--iso <path|url>] [--disk <path>]
+./client get-image  --session-id <id> [-o <file>]
+./client get-serial --session-id <id> [-o <file>]
+./client send-keys  --session-id <id> --keys <keys> [--encoding <encoding>]
+./client send-mouse --session-id <id> --x <0..1> --y <0..1> [--button <button>] [--clicks <n>]
+./client intent start --session-id <id> --test-result-id <id> --message <text>
+./client intent end   --session-id <id>
+./client stop       --session-id <id> [--status succeeded|failed|aborted] [--reason <text>]
 ```
 
-`--server-url` is the proxy, a full URL used exactly as given. When omitted, `SERVER_URL` from the environment is used, then `http://127.0.0.1:42069`. The proxy must already be running.
+The action comes first. Every value is a flag; there are no positional arguments. Flags may sit in any order after the action.
 
-`start` prints a session id. Every other action takes it as `--session-id <id>`. Then `./ctrl test start` ties that session to the result id from the Linear ticket.
+- `--agent-id <agent>` — your id, from the Linear ticket. Required on every action.
+- `--server-url <url>` — the proxy, a full URL used exactly as given. Falls back to `SERVER_URL` from the environment, then `http://127.0.0.1:42069`.
+- `OLIGARCHY_TOKEN` — read from the environment and sent on every request. It is already set; do not write a `.env`. Missing means exit 1.
 
-A command that works exits 0. A command that fails exits 1 and prints the error: one headline, then the stack trace and the cause behind it. Read the headline first. `./client <action> --help` prints that action's flags.
-
-If no command arrives for ten minutes, the proxy kills the session.
+`start` prints a session id; every other action takes it as `--session-id`. A command that works exits 0. A command that fails exits 1 and prints the error: one headline, then the stack trace and the cause behind it. Read the headline first. `./client <action> --help` prints that action's flags. If no command arrives for ten minutes, the proxy kills the session.
 
 ## start
 
-Boots a QEMU session and prints its session id.
-
-```bash
-./client start --agent-id <agent> --server-url <url>
-./client start --agent-id <agent> --server-url <url> --iso omarchy.iso
-./client start --agent-id <agent> --server-url <url> --iso https://example.com/omarchy.iso
-./client start --agent-id <agent> --server-url <url> --iso omarchy.iso --disk disk.qcow2
+```
+./client start --agent-id <agent> --server-url <url> [--iso <path|url>] [--disk <path>]
 ```
 
-- `--iso` defaults to `omarchy.iso` in the current directory. A local path must exist. An http(s) URL is passed through; the server downloads and caches it.
-- `--disk` is optional. Omit it and the server creates a fresh disk.
+Boots a QEMU session and prints its session id.
+
+- `--iso <path|url>` — the ISO. A local path must exist; an http(s) URL is downloaded and cached by the server. Default `omarchy.iso` in the current directory.
+- `--disk <path>` — an existing qcow2 disk. Omit it and the server creates a fresh one.
+
+```bash
+./client start --agent-id OLI-42 --server-url https://qemu.example.com --iso https://example.com/omarchy.iso
+```
 
 ## get-image
 
-Captures the guest display as a PNG. This is the only view of a headless session. Look before you type.
-
-```bash
-./client get-image --agent-id <agent> --server-url <url> --session-id <id> -o desktop.png
-./client get-image --agent-id <agent> --server-url <url> --session-id <id> > desktop.png
+```
+./client get-image --agent-id <agent> --server-url <url> --session-id <id> [-o <file>]
 ```
 
-`-o` / `--output` is optional. Without it, PNG bytes go to stdout.
+Captures the guest display as a PNG. This is the only view of a headless session. Look before you type.
+
+- `--session-id <id>` — the session.
+- `-o <file>`, `--output <file>` — write the PNG here. Without it, PNG bytes go to stdout.
+
+```bash
+./client get-image --agent-id OLI-42 --server-url https://qemu.example.com --session-id 6f1c...e2a9 -o desktop.png
+```
 
 ## get-serial
 
-Reads everything the guest has written to `/dev/ttyS0` since boot. Empty until something writes. Use this when the desktop is dead and you need logs.
-
-```bash
-./client get-serial --agent-id <agent> --server-url <url> --session-id <id> -o journal.txt
-./client get-serial --agent-id <agent> --server-url <url> --session-id <id>
+```
+./client get-serial --agent-id <agent> --server-url <url> --session-id <id> [-o <file>]
 ```
 
-`-o` / `--output` is optional. Without it, bytes go to stdout.
+Reads everything the guest has written to `/dev/ttyS0` since boot. Empty until something writes. Use it when the desktop is dead and you need logs: switch to a TTY with `<C-A-F3>`, log in, `sudo systemctl stop serial-getty@ttyS0`, then `journalctl -b --no-pager | sudo tee /dev/ttyS0` (`--user` for a user-session failure), then read the serial. `/dev/ttyS0` is root:uucp — a user redirect is permission denied.
 
-To dump the journal onto serial: switch to a TTY, log in, stop the serial getty, then tee the journal. `/dev/ttyS0` is root:uucp — a user redirect is permission denied.
+- `--session-id <id>` — the session.
+- `-o <file>`, `--output <file>` — write the text here. Without it, bytes go to stdout.
 
 ```bash
-./client send-keys --agent-id <agent> --server-url <url> --session-id <id> --keys "<C-A-F3>"
-./client send-keys --agent-id <agent> --server-url <url> --session-id <id> --keys "sudo systemctl stop serial-getty@ttyS0<ENTER>"
-./client send-keys --agent-id <agent> --server-url <url> --session-id <id> --keys "journalctl -b --no-pager | sudo tee /dev/ttyS0<ENTER>"
-./client get-serial --agent-id <agent> --server-url <url> --session-id <id> -o journal.txt
+./client get-serial --agent-id OLI-42 --server-url https://qemu.example.com --session-id 6f1c...e2a9 -o journal.txt
 ```
-
-Image until the login prompt before typing the username and password. If sudo asks, send the user password. User-session failures are `journalctl --user -b --no-pager | sudo tee /dev/ttyS0`.
 
 ## send-keys
 
-Types a key string into the session. Quote the string so the shell does not eat `<`, `>`, or spaces.
-
-```bash
-./client send-keys --agent-id <agent> --server-url <url> --session-id <id> --keys "hello"
-./client send-keys --agent-id <agent> --server-url <url> --session-id <id> --keys "hello<ENTER>"
-./client send-keys --agent-id <agent> --server-url <url> --session-id <id> --keys "<C-c>"
+```
+./client send-keys --agent-id <agent> --server-url <url> --session-id <id> --keys <keys> [--encoding <encoding>]
 ```
 
-`--encoding` defaults to `oligarchy`. You do not need to pass it. See [Keys](#keys).
+Types a key string into the session.
+
+- `--session-id <id>` — the session.
+- `--keys <keys>` — the key string, in the `oligarchy` encoding. See [Keys](#keys). Quote it so the shell keeps `<`, `>`, and spaces.
+- `--encoding <encoding>` — the key string's encoding. Default `oligarchy`; you do not need to pass it.
+
+```bash
+./client send-keys --agent-id OLI-42 --server-url https://qemu.example.com --session-id 6f1c...e2a9 --keys "hello<ENTER>"
+```
 
 ## send-mouse
 
-Moves the pointer, and optionally clicks or scrolls, at a point on the screenshot.
-
-```bash
-./client send-mouse --agent-id <agent> --server-url <url> --session-id <id> --x 0.5 --y 0.5
-./client send-mouse --agent-id <agent> --server-url <url> --session-id <id> --x 0.5 --y 0.5 --button left
-./client send-mouse --agent-id <agent> --server-url <url> --session-id <id> --x 0.3 --y 0.2 --button left --clicks 2
-./client send-mouse --agent-id <agent> --server-url <url> --session-id <id> --x 0.8 --y 0.1 --button right
-./client send-mouse --agent-id <agent> --server-url <url> --session-id <id> --x 0.5 --y 0.5 --button wheel-down --clicks 3
+```
+./client send-mouse --agent-id <agent> --server-url <url> --session-id <id> --x <0..1> --y <0..1> [--button <button>] [--clicks <n>]
 ```
 
-`--x` and `--y` are fractions of the screenshot, `0..1` from the top-left. Omit `--button` to move only. `--button` is `left`, `middle`, `right`, `wheel-up`, or `wheel-down`. `--clicks` defaults to 1 and needs `--button` — a double-click is `--button left --clicks 2`. See [Mouse](#mouse).
+Moves the pointer to a point on the screenshot, and optionally clicks or scrolls there.
 
-## intent
-
-Declares what you are about to do on the session, before you do it. Required around every action: start an intent, run the commands that fulfill it, end it. One intent may cover many commands, sleeps, and images. One intent is active at a time: a second start while one is open fails with `Cannot start one intent when one's already running. Please end your previous intent.`, and so does an end with none open. End the open intent before `stop`.
+- `--session-id <id>` — the session.
+- `--x <0..1>`, `--y <0..1>` — fractions of the screenshot from the top-left. See [Mouse](#mouse).
+- `--button <button>` — `left`, `middle`, `right`, `wheel-up`, or `wheel-down`. Omit to move only.
+- `--clicks <n>` — how many times to pulse `--button`, 1..100. Default 1. Needs `--button`.
 
 ```bash
-./client intent start --agent-id <agent> --server-url <url> --session-id <id> --test-result-id <result> --message "wait for the boot menu"
+./client send-mouse --agent-id OLI-42 --server-url https://qemu.example.com --session-id 6f1c...e2a9 --x 0.3 --y 0.2 --button left --clicks 2
+```
+
+## intent start
+
+```
+./client intent start --agent-id <agent> --server-url <url> --session-id <id> --test-result-id <id> --message <text>
+```
+
+Declares what you are about to do on the session, before you do it. One intent is active at a time: a second start while one is open fails with `Cannot start one intent when one's already running. Please end your previous intent.` One intent may cover many commands, sleeps, and images.
+
+- `--session-id <id>` — the session.
+- `--test-result-id <id>` — the result id from your Linear ticket.
+- `--message <text>` — what you are about to do. Quote it so the shell keeps spaces.
+
+```bash
+./client intent start --agent-id OLI-42 --server-url https://qemu.example.com --session-id 6f1c...e2a9 --test-result-id 2222...2222 --message "wait for the boot menu"
+```
+
+## intent end
+
+```
 ./client intent end --agent-id <agent> --server-url <url> --session-id <id>
 ```
 
-`--test-result-id` is the result id from your Linear ticket. Quote `--message` so the shell keeps spaces.
+Ends the open intent. Ending with none open fails. End the open intent before `stop`.
+
+- `--session-id <id>` — the session.
+
+```bash
+./client intent end --agent-id OLI-42 --server-url https://qemu.example.com --session-id 6f1c...e2a9
+```
 
 ## stop
 
-Kills the session. `--agent-id` must be the agent that started it.
-
-```bash
-./client stop --agent-id <agent> --server-url <url> --session-id <id>
-./client stop --agent-id <agent> --server-url <url> --session-id <id> --status succeeded
-./client stop --agent-id <agent> --server-url <url> --session-id <id> --status failed --reason "installer hung"
+```
+./client stop --agent-id <agent> --server-url <url> --session-id <id> [--status succeeded|failed|aborted] [--reason <text>]
 ```
 
-A stop with no `--status` is an abort. `--status` is `succeeded`, `failed`, or `aborted`. `--reason` is optional text.
+Kills the session. `--agent-id` must be the agent that started it.
+
+- `--session-id <id>` — the session.
+- `--status <status>` — the verdict: `succeeded`, `failed`, or `aborted`. Omit it and the stop is an abort.
+- `--reason <text>` — optional text stored with the verdict.
+
+```bash
+./client stop --agent-id OLI-42 --server-url https://qemu.example.com --session-id 6f1c...e2a9 --status failed --reason "installer hung"
+```
 
 ## Keys
 
@@ -164,7 +193,7 @@ A greeter or installer button is a left click at that point. A double-click laun
 
 ## The loop
 
-Every guest action — keys, mouse, images — runs inside an [intent](#intent): start one that says what you are about to do, do the work, end it. Only `start`, `./ctrl`, and `stop` sit outside one.
+Every guest action — keys, mouse, images — runs inside an intent: start one that says what you are about to do, do the work, end it. Only `start`, `./ctrl`, and `stop` sit outside one.
 
 Send keys or mouse, wait about three seconds, take an image, read it, decide. That is the whole method. Never sleep more than ten seconds between actions. When something genuinely slow is running, keep taking images instead of trusting a long sleep.
 
