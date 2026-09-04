@@ -1,13 +1,9 @@
 import { requireSession, runClient, type Session } from "../client.ts";
 import { renderImage } from "../image.ts";
 
-export async function getImageRun(session: Session, rest: string): Promise<void> {
+export async function getImageRun(session: Session): Promise<void> {
   const id = requireSession(session);
   if (id === undefined) {
-    return;
-  }
-  if (rest !== "") {
-    console.log("usage: get-image");
     return;
   }
   const result = await runClient(session, ["get-image", "--session-id", id]);

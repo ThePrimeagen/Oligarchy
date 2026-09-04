@@ -16,7 +16,7 @@ Sessions boot headless: QEMU runs with `-display none`, so nothing appears on th
 
 The action is the first argument and every value after it is a flag. Every invocation carries `--agent-id <agent>`, the calling agent's id — required, anywhere after the action — and `--server-url <url>`, see [cli.md](cli.md). Recording the result is `./ctrl`, see [ctrl.md](../ctrl.md).
 
-To drive a guest by hand, run `./session [--server-url <url>]` instead: it keeps the session id and agent id for you, shows `get-image` inline, and stops the session when you leave. Type `help` at its prompt; see [cli.md](cli.md#session).
+To drive a guest by hand, run `./session [--server-url <url>]` instead: it keeps the session id and agent id for you, shows `get-image` inline, and stops the session when you leave. Type `help` at its prompt; see [cli.md](cli.md#the-session-repl).
 
 ## Get an image
 

@@ -70,10 +70,10 @@ async function dispatch(line: string): Promise<void> {
       await startRun(session, rest);
       break;
     case "get-image":
-      await getImageRun(session, rest);
+      await getImageRun(session);
       break;
     case "get-serial":
-      await getSerialRun(session, rest);
+      await getSerialRun(session);
       break;
     case "send-keys":
       await sendKeysRun(session, rest);

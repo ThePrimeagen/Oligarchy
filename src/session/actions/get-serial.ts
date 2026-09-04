@@ -1,12 +1,8 @@
 import { requireSession, runClient, type Session } from "../client.ts";
 
-export async function getSerialRun(session: Session, rest: string): Promise<void> {
+export async function getSerialRun(session: Session): Promise<void> {
   const id = requireSession(session);
   if (id === undefined) {
-    return;
-  }
-  if (rest !== "") {
-    console.log("usage: get-serial");
     return;
   }
   const result = await runClient(session, ["get-serial", "--session-id", id]);

@@ -15,12 +15,7 @@ const flags = {
   ),
 };
 
-export type SessionArgs = {
-  serverUrl: string;
-  token: string;
-};
-
-export function parseSessionArgs(argv: readonly string[]): Promise<SessionArgs> {
+export function parseSessionArgs(argv: readonly string[]): Promise<{ serverUrl: string }> {
   if (existsSync(".env")) {
     loadEnvFile();
   }
@@ -37,10 +32,9 @@ export function parseSessionArgs(argv: readonly string[]): Promise<SessionArgs> 
       if (parsed === undefined) {
         process.exit(0);
       }
-      const token = yield* Config.nonEmptyString("OLIGARCHY_TOKEN").pipe(
-        Effect.mapError(() => new Error("OLIGARCHY_TOKEN is not set")),
-      );
-      return { serverUrl: parsed.serverUrl, token };
+      // The client children read it from the environment; fail here, before the first prompt.
+      yield* Config.nonEmptyString("OLIGARCHY_TOKEN").pipe(Effect.mapError(() => new Error("OLIGARCHY_TOKEN is not set")));
+      return { serverUrl: parsed.serverUrl };
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 }
