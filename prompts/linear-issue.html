@@ -48,33 +48,15 @@ Test driver. Drive one Omarchy virtual machine through ./client, carry out the m
 ```
 $ ./client --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} start --iso {{ISO_URL}}
 6f1c...e2a9
+# Before starting any session, always link the test-results to the session.
+$ ./client --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} test start --session_id 6f1c...e2a9 --test_result_id {{RESULT_ID}}
+
+# before starting any series of actions, always start an intent
 $ ./client --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} intent start --session_id 6f1c...e2a9 --test_result_id {{RESULT_ID}} --message "wait for the boot menu"
 $ ./client --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} get-image 6f1c...e2a9 -o screen.png
     black screen
-$ sleep 5
-$ ./client --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} get-image 6f1c...e2a9 -o screen.png
-    boot menu, first entry highlighted
+# ... series of actions ended ...
 $ ./client --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} intent end --session_id 6f1c...e2a9
-$ ./client --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} intent start --session_id 6f1c...e2a9 --test_result_id {{RESULT_ID}} --message "boot the first entry, wait for the welcome screen"
-$ ./client --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} send-keys 6f1c...e2a9 "<ENTER>"
-$ sleep 3
-$ ./client --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} get-image 6f1c...e2a9 -o screen.png
-    still booting
-$ sleep 5
-$ ./client --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} get-image 6f1c...e2a9 -o screen.png
-    welcome screen, button near the bottom centre
-$ ./client --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} intent end --session_id 6f1c...e2a9
-$ ./client --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} intent start --session_id 6f1c...e2a9 --test_result_id {{RESULT_ID}} --message "click the button"
-$ ./client --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} send-mouse 6f1c...e2a9 0.5 0.86 left
-$ sleep 3
-$ ./client --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} get-image 6f1c...e2a9 -o screen.png
-    next screen
-$ ./client --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} intent end --session_id 6f1c...e2a9
-    ...
-$ ./client --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} intent start --session_id 6f1c...e2a9 --test_result_id {{RESULT_ID}} --message "capture the proof"
-$ ./client --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} get-image 6f1c...e2a9 -o proof.png
-    the proof
-$ ./client --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} intent end --session_id 6f1c...e2a9
-$ ./client --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} stop 6f1c...e2a9 succeeded
+# ... continue on until complete ...
 ```
 </example-session>
