@@ -17,7 +17,7 @@ Boots a QEMU session. Returns `{"id": "<uuid>"}`.
 The body is JSON with three keys — `iso` and `agent` required, `disk` optional:
 
 - `iso` — guest ISO path or http(s) url. Required.
-- `disk` — qcow2 path, which must already exist. When the key is **absent**, the proxy creates a fresh disk (40G virtual) in the session dir.
+- `disk` — qcow2 path, which must already exist. It is checked before anything else the start does — before the iso download and before the agent is registered — so a wrong path fails fast (`qemu: disk not found: <path>`) without spending the agent's one registration. When the key is **absent**, the proxy creates a fresh disk (40G virtual) in the session dir.
 - `agent` — the calling agent's id, for attribution. Required.
 
 Clients that want the server-managed disk must therefore omit the key, not send `""`. The CLI does this; keep it that way.
@@ -85,7 +85,7 @@ Body `{"id", "x", "y", "button"?, "clicks"?, "agent"}`. Moves the pointer to `(x
 
 ## POST /intent/start
 
-Body `{"id", "agent", "test_result_id", "message"}`. Opens the session's one intent span (name is `message`, `op` is `agent.intent`) as a child of the QEMU session span. A second start while one is still open is a 500: `Cannot start one intent when one's already running. Please end your previous intent.` Returns `{"ok": "true"}`.
+Body `{"id", "agent", "test_result_id", "message"}`. Opens the session's one intent span (name is `message`, `op` is `agent.intent`) as a child of the QEMU session span. A second start while one is still open is a 400: `Cannot start one intent when one's already running. Please end your previous intent.` Returns `{"ok": "true"}`.
 
 ## POST /intent/end
 

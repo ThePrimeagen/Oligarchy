@@ -93,20 +93,20 @@ describe("linearTicketDescription happy path", () => {
 });
 
 describe("drivingAgentPrompt happy path", () => {
-  it("renders the kickoff prompt with the ticket, the server URL, and both binaries", () => {
-    const text = drivingAgentPrompt("OLI-42", "https://qemu.example.com");
+  it("renders the kickoff prompt from the ticket alone; the server url is in the ticket", () => {
+    const text = drivingAgentPrompt("OLI-42");
 
     assert.equal(text.includes("{{"), false);
     assert.ok(text.includes("Review Linear ticket OLI-42"));
-    assert.ok(text.includes("https://qemu.example.com"));
-    assert.ok(text.includes("--server-url"));
+    assert.ok(text.includes("<agent-id> OLI-42 </agent-id>"));
     assert.ok(text.includes("./client"));
-    assert.ok(text.includes("./ctrl"));
+    assert.equal(text.includes("--server-url"), false);
+    assert.equal(text.includes("http"), false);
   });
 });
 
 describe("createLinearTicket happy path", () => {
-  it("resolves the first team, existing labels, and creates an issue for one definition", async () => {
+  it("resolves the Oligarchy team by name, existing labels, and creates an issue for one definition", async () => {
     const test = experiment.tests[0];
     const requests: { headers: Headers; body: { query: string; variables?: Record<string, unknown> } }[] = [];
     mock.method(globalThis, "fetch", async (_input: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1]) => {
@@ -115,7 +115,7 @@ describe("createLinearTicket happy path", () => {
         headers: new Headers(init?.headers),
         body,
       });
-      if (body.query.includes("teams(first: 1)")) {
+      if (body.query.includes("teams(")) {
         return Response.json({ data: { teams: { nodes: [{ id: "team-id" }] } } });
       }
       if (body.query.includes("issueLabels")) {
@@ -141,7 +141,8 @@ describe("createLinearTicket happy path", () => {
     });
     assert.equal(requests.length, 6);
     assert.equal(requests[0].headers.get("Authorization"), "linear-token");
-    assert.match(requests[0].body.query, /teams\(first: 1\)/);
+    assert.match(requests[0].body.query, /teams\(filter: \{ name: \{ eq: \$name \} \}, first: 1\)/);
+    assert.deepEqual(requests[0].body.variables, { name: "Oligarchy" });
     assert.match(requests[1].body.query, /\$teamId: ID!/);
     assert.deepEqual(requests[1].body.variables, { name: "agent test", teamId: "team-id" });
     assert.deepEqual(requests[2].body.variables, { name: experiment.version, teamId: "team-id" });
@@ -166,7 +167,7 @@ describe("createLinearTicket happy path", () => {
     const created: string[] = [];
     mock.method(globalThis, "fetch", async (_input: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1]) => {
       const body = await parseLinearRequest(init);
-      if (body.query.includes("teams(first: 1)")) {
+      if (body.query.includes("teams(")) {
         return Response.json({ data: { teams: { nodes: [{ id: "team-id" }] } } });
       }
       if (body.query.includes("issueLabels")) {
@@ -219,18 +220,28 @@ describe("createLinearTicket unhappy path", () => {
     });
   });
 
-  it("rejects an account without an accessible team", async () => {
-    mock.method(globalThis, "fetch", async () => Response.json({ data: { teams: { nodes: [] } } }));
+  it("rejects a token that cannot see a team named Oligarchy, even when it sees others", async () => {
+    const requests: { query: string; variables?: Record<string, unknown> }[] = [];
+    mock.method(globalThis, "fetch", async (_input: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1]) => {
+      const body = await parseLinearRequest(init);
+      requests.push(body);
+      const filter = body.variables as { name?: string } | undefined;
+      return Response.json({
+        data: { teams: { nodes: filter?.name === "Oligarchy" ? [] : [{ id: "some-other-team" }] } },
+      });
+    });
 
     await assert.rejects(() => createLinearTicket("linear-token", experiment, experiment.tests[0]), {
-      message: "linear: no accessible teams",
+      message: "linear: no team named Oligarchy",
     });
+    assert.equal(requests.length, 1);
+    assert.deepEqual(requests[0].variables, { name: "Oligarchy" });
   });
 
   it("rejects when prime@terminal.shop is not a workspace user", async () => {
     mock.method(globalThis, "fetch", async (_input: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1]) => {
       const body = await parseLinearRequest(init);
-      if (body.query.includes("teams(first: 1)")) {
+      if (body.query.includes("teams(")) {
         return Response.json({ data: { teams: { nodes: [{ id: "team-id" }] } } });
       }
       if (body.query.includes("issueLabels")) {
@@ -249,7 +260,7 @@ describe("createLinearTicket unhappy path", () => {
   it("reports a label creation failure", async () => {
     mock.method(globalThis, "fetch", async (_input: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1]) => {
       const body = await parseLinearRequest(init);
-      if (body.query.includes("teams(first: 1)")) {
+      if (body.query.includes("teams(")) {
         return Response.json({ data: { teams: { nodes: [{ id: "team-id" }] } } });
       }
       if (body.query.includes("issueLabels")) {
@@ -273,7 +284,7 @@ describe("createLinearTicket unhappy path", () => {
   it("reports a description failure by ticket", async () => {
     mock.method(globalThis, "fetch", async (_input: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1]) => {
       const body = await parseLinearRequest(init);
-      if (body.query.includes("teams(first: 1)")) {
+      if (body.query.includes("teams(")) {
         return Response.json({ data: { teams: { nodes: [{ id: "team-id" }] } } });
       }
       if (body.query.includes("issueLabels")) {

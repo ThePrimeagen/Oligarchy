@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 
 const LINEAR_API_URL = "https://api.linear.app/graphql";
+const LINEAR_TEAM = "Oligarchy";
 const AGENT_TEST_LABEL = "agent test";
 const ASSIGNEE_EMAIL = "prime@terminal.shop";
 const SUB_AGENT = "Grok 4.6 high fast (cursor-grok-4.6-high-fast)";
@@ -66,8 +67,8 @@ export function linearTicketDescription(experiment: Experiment, test: Experiment
   });
 }
 
-export function drivingAgentPrompt(ticket: string, serverUrl: string): string {
-  return renderPrompt("driving-agent.html", { LINEAR_TICKET: ticket, SERVER_URL: serverUrl });
+export function drivingAgentPrompt(ticket: string): string {
+  return renderPrompt("driving-agent.html", { LINEAR_TICKET: ticket });
 }
 
 async function linearRequest<T>(token: string, query: string, variables?: Record<string, unknown>): Promise<T> {
@@ -102,11 +103,12 @@ async function linearRequest<T>(token: string, query: string, variables?: Record
 export async function linearTeamId(token: string): Promise<string> {
   const teams = await linearRequest<{ teams: { nodes: { id: string }[] } }>(
     token,
-    "query ExperimentTeams { teams(first: 1) { nodes { id } } }",
+    "query ExperimentTeam($name: String!) { teams(filter: { name: { eq: $name } }, first: 1) { nodes { id } } }",
+    { name: LINEAR_TEAM },
   );
   const team = teams.teams.nodes[0];
   if (team === undefined) {
-    throw new Error("linear: no accessible teams");
+    throw new Error(`linear: no team named ${LINEAR_TEAM}`);
   }
   return team.id;
 }
@@ -236,7 +238,7 @@ export async function listLinearBacklog(token: string): Promise<LinearBacklogTic
   const tickets: LinearBacklogTicket[] = [];
   let after: string | undefined;
   const filter = {
-    team: { name: { eq: "Oligarchy" } },
+    team: { name: { eq: LINEAR_TEAM } },
     state: { type: { eq: "backlog" } },
   };
   for (;;) {

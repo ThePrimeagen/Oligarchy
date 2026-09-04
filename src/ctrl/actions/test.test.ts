@@ -153,10 +153,12 @@ describe("createExperiment happy path", () => {
     const { db, inserts } = testDatabase(definitions);
     const issueBodies: { query: string; variables?: Record<string, unknown> }[] = [];
     const descriptions: { query: string; variables?: Record<string, unknown> }[] = [];
+    const teamLookups: Record<string, unknown>[] = [];
     mock.method(console, "error", () => undefined);
     mock.method(globalThis, "fetch", async (_input: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1]) => {
       const parsed = await parseLinearRequest(init);
-      if (parsed.query.includes("teams(first: 1)")) {
+      if (parsed.query.includes("teams(")) {
+        teamLookups.push(parsed.variables ?? {});
         return Response.json({ data: { teams: { nodes: [{ id: "team-id" }] } } });
       }
       if (parsed.query.includes("issueLabels")) {
@@ -200,6 +202,7 @@ describe("createExperiment happy path", () => {
         url: "https://linear.app/issue/OLI-43",
       },
     ]);
+    assert.deepEqual(teamLookups, [{ name: "Oligarchy" }]);
     assert.equal(issueBodies.length, definitions.length);
     assert.equal(descriptions.length, definitions.length);
     for (const [index, test] of result.experiment.tests.entries()) {
@@ -243,7 +246,7 @@ describe("createExperiment happy path", () => {
     mock.method(console, "error", () => undefined);
     mock.method(globalThis, "fetch", async (_input: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1]) => {
       const parsed = await parseLinearRequest(init);
-      if (parsed.query.includes("teams(first: 1)")) {
+      if (parsed.query.includes("teams(")) {
         return Response.json({ data: { teams: { nodes: [{ id: "team-id" }] } } });
       }
       if (parsed.query.includes("issueLabels")) {
@@ -362,7 +365,7 @@ describe("createExperiment unhappy path", () => {
     let created = 0;
     mock.method(globalThis, "fetch", async (_input: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1]) => {
       const body = await parseLinearRequest(init);
-      if (body.query.includes("teams(first: 1)")) {
+      if (body.query.includes("teams(")) {
         return Response.json({ data: { teams: { nodes: [{ id: "team-id" }] } } });
       }
       if (body.query.includes("issueLabels")) {
