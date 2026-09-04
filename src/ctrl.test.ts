@@ -202,7 +202,45 @@ describe("./ctrl happy path", () => {
     assert.equal(result.code, 0);
     assert.match(result.stdout, /test start/);
     assert.match(result.stdout, /test-results/);
-    assert.match(result.stdout, /session/);
+    assert.match(result.stdout, /session list \[--count <n>\]/);
+    assert.match(result.stdout, /session --session-id/);
+  });
+
+  it("session list prints the last ten sessions, newest first, as JSON", async () => {
+    const result = await runCtrl(["session", "list", "--server-url", SERVER]);
+    assert.equal(result.stderr, "");
+    assert.equal(result.code, 0);
+    const rows = JSON.parse(result.stdout) as { id: string; status: string; startedAt: string; config: unknown }[];
+    assert.ok(Array.isArray(rows));
+    assert.ok(rows.length <= 10);
+    for (const row of rows) {
+      assert.match(row.id, /^[0-9a-f-]{36}$/);
+      assert.equal(typeof row.status, "string");
+      assert.ok(row.config !== undefined);
+      assert.ok(Number.isFinite(Date.parse(row.startedAt)));
+    }
+    for (let i = 1; i < rows.length; i++) {
+      assert.ok(Date.parse(rows[i - 1].startedAt) >= Date.parse(rows[i].startedAt));
+    }
+  });
+
+  it("session list --count bounds the listing", async () => {
+    const two = await runCtrl(["session", "list", "--count", "2", "--server-url", SERVER]);
+    assert.equal(two.stderr, "");
+    assert.equal(two.code, 0);
+    assert.ok((JSON.parse(two.stdout) as unknown[]).length <= 2);
+
+    const one = await runCtrl(["session", "list", "--count=1"], { SERVER_URL: SERVER });
+    assert.equal(one.stderr, "");
+    assert.equal(one.code, 0);
+    assert.ok((JSON.parse(one.stdout) as unknown[]).length <= 1);
+  });
+
+  it("session --help names both forms", async () => {
+    const result = await runCtrl(["session", "--help"]);
+    assert.equal(result.code, 0);
+    assert.match(result.stdout, /ctrl session list \[--count <n>\]/);
+    assert.match(result.stdout, /ctrl session --session-id <id>/);
   });
 });
 
@@ -380,12 +418,31 @@ describe("./ctrl unhappy path", () => {
     assert.notEqual(noSelector.code, 0);
     assert.match(
       noSelector.stderr,
-      /^session: --logs, --test-def, --test-results, --actions, or --all is required\nError: session: --logs.*\n\s+at sessionRun .*src\/ctrl\/actions\/session\.ts:\d+:\d+/,
+      /^session: --logs, --test-def, --test-results, --actions, or --all is required\nError: session: --logs.*\n\s+at sessionInspectRun .*src\/ctrl\/actions\/session\.ts:\d+:\d+/,
     );
 
     const unknown = await runCtrl(["session", "--session-id", sessionId, "--logs", "--server-url", SERVER]);
     assert.notEqual(unknown.code, 0);
     assert.match(unknown.stderr, new RegExp(`^session: no session ${sessionId}\nError: session: no session ${sessionId}\n\\s+at `));
+  });
+
+  it("session list rejects a count below one, a non-integer count, and the inspect flags", async () => {
+    const zero = await runCtrl(["session", "list", "--count", "0", "--server-url", SERVER]);
+    assert.notEqual(zero.code, 0);
+    assert.equal(zero.stdout.startsWith("["), false);
+    assert.match(zero.stderr, /Invalid value for flag --count: "0".*count must be at least 1/);
+
+    const word = await runCtrl(["session", "list", "--count", "ten", "--server-url", SERVER]);
+    assert.notEqual(word.code, 0);
+    assert.match(word.stderr, /Invalid value for flag --count: "ten"/);
+
+    const inspectFlag = await runCtrl(["session", "list", "--session-id", randomUUID(), "--server-url", SERVER]);
+    assert.notEqual(inspectFlag.code, 0);
+    assert.match(inspectFlag.stderr, /Unrecognized flag: --session-id/);
+
+    const countOnInspect = await runCtrl(["session", "--session-id", randomUUID(), "--logs", "--count", "3", "--server-url", SERVER]);
+    assert.notEqual(countOnInspect.code, 0);
+    assert.match(countOnInspect.stderr, /Unrecognized flag: --count/);
   });
 
   it("spells out a database that refuses the connection: headline, stack, and the cause", async () => {

@@ -4,16 +4,17 @@ Consult this table of contents first. Read only the section you need.
 
 | Section | Line |
 |---------|-----:|
-| [Important](#important) | 18 |
-| [Environment](#environment) | 24 |
-| [Invoke](#invoke) | 28 |
-| [test](#test) | 38 |
-| [test new](#test-new) | 51 |
-| [test list](#test-list) | 62 |
-| [test run](#test-run) | 72 |
-| [test start](#test-start) | 82 |
-| [test-results](#test-results) | 92 |
-| [session](#session) | 103 |
+| [Important](#important) | 19 |
+| [Environment](#environment) | 25 |
+| [Invoke](#invoke) | 29 |
+| [test](#test) | 39 |
+| [test new](#test-new) | 52 |
+| [test list](#test-list) | 63 |
+| [test run](#test-run) | 73 |
+| [test start](#test-start) | 83 |
+| [test-results](#test-results) | 93 |
+| [session list](#session-list) | 104 |
+| [session](#session) | 115 |
 
 ## Important
 
@@ -99,6 +100,17 @@ Closes one pending test result. `--agent-id` is required: that agent's session i
 ```
 
 `--id` is the result UUID from the Linear issue. `--status` is `success` or `failed`. `--reason` is optional text stored on the result row.
+
+## session list
+
+Prints the most recent sessions, newest first, as JSON. Not used while driving a guest.
+
+```bash
+./ctrl session list --server-url <url>
+./ctrl session list --server-url <url> --count 25
+```
+
+`--count` is how many sessions to print, default 10; it must be at least 1. Each row is the session as stored: `id`, `config`, `status`, `reason`, `startedAt`, `endedAt`.
 
 ## session
 

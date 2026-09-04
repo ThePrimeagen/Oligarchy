@@ -18,6 +18,7 @@ Three TypeScript executables share one shape. `./client` (`src/client/index.ts`)
 ./ctrl test run --ticket <linear-ticket> --server-url <url>
 ./ctrl test start --session-id <id> --test-result-id <result-id> --server-url <url>
 ./ctrl test-results --agent-id <agent> --id <result-id> --status success|failed [--reason <text>] --server-url <url>
+./ctrl session list [--count <n>] --server-url <url>
 ./ctrl session --session-id <id> --logs|--test-def|--test-results|--actions|--all --server-url <url>
 
 ./session [--server-url <url>]
@@ -121,6 +122,10 @@ Writes the session onto a pending test result and marks it running. `--test-resu
 ### test-results
 
 Closes one pending test result. `--id` is the result UUID printed on the Linear issue. `--status` is `success` or `failed` (`success` is stored as `passed`). `--reason` is optional text stored on the result row. `--agent-id` is required: the command looks up that agent's session in `agent_runs` and records it on the result. An unknown result id is a failure.
+
+### session list
+
+Prints the most recent sessions as JSON, newest first: `SELECT * FROM sessions ORDER BY started_at DESC, id DESC LIMIT <count>`. `--count` defaults to 10 and must be at least 1. `session.ts` exports `sessionRun`, a switch like `testRun`'s: `list` goes to `sessionListRun`, anything else to `sessionInspectRun` below.
 
 ### session
 
