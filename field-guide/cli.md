@@ -7,6 +7,7 @@ The TypeScript client for the oligarchy control plane. It sends HTTP requests to
 ./client test new --iso <https-url> [--server_url=<http-or-https-url>] --version <version> [--name <definition>]
 ./client test list
 ./client test run --ticket <linear-ticket> --server_url=<http-or-https-url>
+./client test start --session_id <id> --test_result_id <result-id>
 ./client --agent-id <agent> test-results --id <result-id> --status success|failed [--reason <text>]
 ./client session --session-id <id> --logs|--test-def|--test-results|--actions|--all
 ./client --agent-id <agent> start [--iso <path>] [--disk <path>]
@@ -66,6 +67,16 @@ The agent runs Grok 4.6 in fast mode at extra-high effort (`{ id: "grok-4.6", pa
 
 ```bash
 ./client test run --ticket OLI-42 --server_url https://qemu.example.com
+```
+
+## test start
+
+Writes the session onto a pending test result and marks it running. The command writes the database itself — it does not call the proxy. `--test_result_id` is the result UUID printed on the Linear issue. `--session_id` is the session UUID printed by `start`. The result already carries its definition id; the command does not take one.
+
+Missing `DATABASE_URL` is a failure. An unknown session id, or a result that is missing or not pending, is a failure.
+
+```bash
+./client test start --session_id 11111111-1111-4111-8111-111111111111 --test_result_id 22222222-2222-4222-8222-222222222222
 ```
 
 ## test-results
@@ -156,4 +167,4 @@ Kills the session. Only the agent that started it can stop it; a different `--ag
 
 ## Reading the file
 
-The file reads `OLIGARCHY_TOKEN` at startup and fails if it is missing. The root `client` command shares `--agent-id` and `--server-url` with its subcommands. QEMU handlers, `test-results`, and `intent` yield the parent command and fail if `--agent-id` is missing. `test` is a sibling subcommand: `--list` / `--details` / `--name` print stored definitions through `src/test-def.ts`; `new`, `list`, and `run` live as its subcommands. `test-results` is a sibling that writes the result row through `src/test-results.ts`. `session` is a sibling that reads logs, the test definition, the result, and actions through `src/session-info.ts`. HTTP helpers stay local to the file: `postJSON`, `readAPIError`, and `errorMessage`. There is no other machinery — see the [philosophy](philosophy.md) for why it should stay that way.
+The file reads `OLIGARCHY_TOKEN` at startup and fails if it is missing. The root `client` command shares `--agent-id` and `--server-url` with its subcommands. QEMU handlers, `test-results`, and `intent` yield the parent command and fail if `--agent-id` is missing. `test` is a sibling subcommand: `--list` / `--details` / `--name` print stored definitions through `src/test-def.ts`; `new`, `list`, `run`, and `start` live as its subcommands. `test-results` is a sibling that writes the result row through `src/test-results.ts`. `session` is a sibling that reads logs, the test definition, the result, and actions through `src/session-info.ts`. HTTP helpers stay local to the file: `postJSON`, `readAPIError`, and `errorMessage`. There is no other machinery — see the [philosophy](philosophy.md) for why it should stay that way.

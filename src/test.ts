@@ -8,6 +8,7 @@ import { closeDatabase, connectDatabase, type Db } from "./db/ops.ts";
 import { flushLogs, log } from "./db/log.ts";
 import { testDefinitions, testResults, testRuns } from "./db/schema.ts";
 import { listTestDefinitions } from "./test-def.ts";
+import { startTestResult } from "./test-results.ts";
 
 const LINEAR_API_URL = "https://api.linear.app/graphql";
 const DEFAULT_SERVER_URL = "http://127.0.0.1:42069";
@@ -508,6 +509,26 @@ export const experimentNewCommand = Command.make(
   }),
 );
 
+const experimentStartCommand = Command.make(
+  "start",
+  {
+    sessionId: Flag.string("session_id").pipe(
+      Flag.withSchema(Schema.NonEmptyString),
+      Flag.withDescription("Session id"),
+    ),
+    testResultId: Flag.string("test_result_id").pipe(
+      Flag.withSchema(Schema.NonEmptyString),
+      Flag.withDescription("Test result id"),
+    ),
+  },
+  Effect.fn(function* ({ sessionId, testResultId }) {
+    yield* Effect.tryPromise({
+      try: () => startTestResult({ id: testResultId, sessionId }),
+      catch: fail,
+    });
+  }),
+);
+
 const experimentRunCommand = Command.make(
   "run",
   {
@@ -563,4 +584,6 @@ export const experimentCommand = Command.make(
       catch: fail,
     });
   }),
-).pipe(Command.withSubcommands([experimentNewCommand, experimentListCommand, experimentRunCommand]));
+).pipe(
+  Command.withSubcommands([experimentNewCommand, experimentListCommand, experimentRunCommand, experimentStartCommand]),
+);

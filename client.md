@@ -4,25 +4,26 @@ Consult this table of contents first. Read only the section you need.
 
 | Section | Line |
 |---------|-----:|
-| [Important](#important) | 27 |
-| [Environment](#environment) | 31 |
-| [Invoke](#invoke) | 43 |
-| [start](#start) | 59 |
-| [get-image](#get-image) | 73 |
-| [get-serial](#get-serial) | 84 |
-| [send-keys](#send-keys) | 106 |
-| [send-mouse](#send-mouse) | 118 |
-| [intent](#intent) | 132 |
-| [stop](#stop) | 143 |
-| [test](#test) | 155 |
-| [test new](#test-new) | 168 |
-| [test list](#test-list) | 180 |
-| [test run](#test-run) | 190 |
-| [test-results](#test-results) | 200 |
-| [session](#session) | 211 |
-| [Keys](#keys) | 225 |
-| [Mouse](#mouse) | 237 |
-| [The loop](#the-loop) | 245 |
+| [Important](#important) | 28 |
+| [Environment](#environment) | 32 |
+| [Invoke](#invoke) | 40 |
+| [start](#start) | 56 |
+| [get-image](#get-image) | 70 |
+| [get-serial](#get-serial) | 81 |
+| [send-keys](#send-keys) | 103 |
+| [send-mouse](#send-mouse) | 115 |
+| [intent](#intent) | 129 |
+| [stop](#stop) | 140 |
+| [test](#test) | 152 |
+| [test new](#test-new) | 165 |
+| [test list](#test-list) | 177 |
+| [test run](#test-run) | 187 |
+| [test start](#test-start) | 197 |
+| [test-results](#test-results) | 207 |
+| [session](#session) | 218 |
+| [Keys](#keys) | 232 |
+| [Mouse](#mouse) | 244 |
+| [The loop](#the-loop) | 252 |
 
 ## Important
 
@@ -34,7 +35,7 @@ If you are the client, or an agent driving the client: do not look at code. Only
 
 If `DATABASE_URL` or `OLIGARCHY_TOKEN` is missing, that is a failure. Stop.
 
-The proxy and the client both read `OLIGARCHY_TOKEN` from the environment. The client sends it on every request to the proxy. Starting either without it exits 1. The proxy, `test --list`, `test new`, `test-results`, and `session` also read `DATABASE_URL` from the environment. A missing `DATABASE_URL` or `LINEAR_API_TOKEN` exits 1. `test new` also reads `SERVER_URL`; if it is set, that URL is stored on the run and written into every Linear issue. If it is unset, `--server_url` is used, then `http://127.0.0.1:42069`. `test list` needs `LINEAR_API_TOKEN` only. `test run` reads `CURSOR_API_TOKEN`; a missing one exits 1.
+The proxy and the client both read `OLIGARCHY_TOKEN` from the environment. The client sends it on every request to the proxy. Starting either without it exits 1. The proxy, `test --list`, `test new`, `test start`, `test-results`, and `session` also read `DATABASE_URL` from the environment. A missing `DATABASE_URL` or `LINEAR_API_TOKEN` exits 1. `test new` also reads `SERVER_URL`; if it is set, that URL is stored on the run and written into every Linear issue. If it is unset, `--server_url` is used, then `http://127.0.0.1:42069`. `test list` needs `LINEAR_API_TOKEN` only. `test run` reads `CURSOR_API_TOKEN`; a missing one exits 1.
 
 ## Invoke
 
@@ -46,7 +47,7 @@ The proxy is `--server-url`, a full URL used exactly as given, default `http://1
 ./client --agent-id <agent> [--server-url <url>] <command> ...
 ```
 
-`start` prints a session id. Every other QEMU command takes that id.
+`start` prints a session id. Every other QEMU command takes that id. Then `test start` ties that session to the result id from the Linear ticket.
 
 A command that works exits 0. A command that fails exits 1 and prints the error.
 
@@ -192,6 +193,16 @@ Spawns a Cursor cloud agent that drives one Linear ticket. Not used while drivin
 ```
 
 `--ticket` is the Linear issue identifier created by `test new`. `--server_url` may be HTTP or HTTPS; the agent is told to pass it as `--server-url` on every client command. The command prints a link to the agent as soon as it is started and does not wait for it to finish.
+
+## test start
+
+Ties a pending test result to the session that is running it. Reads `DATABASE_URL` from the environment. The result already names its definition; pass the result id and the session id only.
+
+```bash
+./client test start --session_id <id> --test_result_id <result-id>
+```
+
+`--session_id` is the id printed by `start`. `--test_result_id` is the result UUID from the Linear issue. An unknown session, or a result that is missing or not pending, is a failure.
 
 ## test-results
 

@@ -145,9 +145,8 @@ export const testResults = pgTable(
     definitionId: bigint("definition_id", { mode: "number" })
       .notNull()
       .references(() => testDefinitions.id),
-    // Null until the close: the report carries only the agent id, and
-    // agent_runs resolves that agent's session, so attribution is recorded
-    // fact, not an upfront guess about which instance will run the test.
+    // Null until test start writes the session, or until the close if start
+    // was never called. Attribution is recorded fact, not an upfront guess.
     sessionId: uuid("session_id").references(() => sessions.id),
     status: testResultStatus("status").notNull().default("pending"),
     reason: text("reason"),
