@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, inArray, sql } from "drizzle-orm";
 import { Schema } from "effect";
 import { Flag } from "effect/unstable/cli";
 import { closeDatabase, connectDatabase } from "../../db/ops.ts";
@@ -69,19 +69,12 @@ export async function sessionListRun(argv: readonly string[]): Promise<void> {
   try {
     let rows: SessionRow[];
     if (args.active) {
-      const running = await db
+      rows = await db
         .select({ id: sessions.id, status: sessions.status, startedAt: sessions.startedAt })
         .from(sessions)
-        .where(eq(sessions.status, "running"))
-        .orderBy(desc(sessions.startedAt), desc(sessions.id))
+        .where(inArray(sessions.status, ["running", "downloading"]))
+        .orderBy(desc(sql`${sessions.status} = ${"running"}`), desc(sessions.startedAt), desc(sessions.id))
         .limit(args.count);
-      const downloading = await db
-        .select({ id: sessions.id, status: sessions.status, startedAt: sessions.startedAt })
-        .from(sessions)
-        .where(eq(sessions.status, "downloading"))
-        .orderBy(desc(sessions.startedAt), desc(sessions.id))
-        .limit(args.count - running.length);
-      rows = [...running, ...downloading];
     } else {
       rows = await db
         .select({ id: sessions.id, status: sessions.status, startedAt: sessions.startedAt })

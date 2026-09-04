@@ -318,9 +318,8 @@ describe("./session follow completion", () => {
     const term = pickerTerminal();
     const selection = pickFollowSession(
       Promise.resolve([
-        { id: PENDING_ID, status: "downloading", startedAt: "2026-09-04T11:58:30.000Z" },
-        { id: "00000000-0000-4000-8000-000000000001", status: "succeeded", startedAt: "2026-09-04T11:58:00.000Z" },
         { id: FOLLOWED_ID, status: "running", startedAt: "2026-09-04T11:59:55.000Z" },
+        { id: PENDING_ID, status: "downloading", startedAt: "2026-09-04T11:58:30.000Z" },
       ]),
       term.input,
       term.output,
@@ -335,7 +334,6 @@ describe("./session follow completion", () => {
     assert.ok(output.indexOf(FOLLOWED_ID) < output.indexOf(PENDING_ID));
     assert.match(output, new RegExp(`\\x1b\\[33mrunning\\s*\\x1b\\[0m\\s+${FOLLOWED_ID}`));
     assert.match(output, new RegExp(`\\x1b\\[90mpending\\s*\\x1b\\[0m\\s+${PENDING_ID}`));
-    assert.equal(output.includes("00000000-0000-4000-8000-000000000001"), false);
   });
 
   it("leaves the selected UUID editable when LF arrives after the selected CR", async () => {
@@ -383,12 +381,7 @@ describe("./session follow completion", () => {
   it("reports that there is nothing to follow when no active sessions exist", async () => {
     const term = pickerTerminal();
     await assert.rejects(
-      pickFollowSession(
-        Promise.resolve([{ id: ENDED_ID, status: "failed", startedAt: "2026-09-04T11:58:00.000Z" }]),
-        term.input,
-        term.output,
-        16,
-      ),
+      pickFollowSession(Promise.resolve([]), term.input, term.output, 16),
       /no running or pending sessions/,
     );
 

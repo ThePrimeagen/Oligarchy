@@ -4,7 +4,7 @@ import { type Session, runCtrl, spawnClient } from "../client.ts";
 
 export type SessionListItem = {
   id: string;
-  status: "downloading" | "running" | "succeeded" | "failed" | "aborted" | "timed_out";
+  status: "downloading" | "running";
   startedAt: string;
 };
 
@@ -184,9 +184,7 @@ export function pickFollowSession(
         if (closed) {
           return;
         }
-        sessions = listed
-          .filter((row) => row.status === "running" || row.status === "downloading")
-          .sort((a, b) => Number(a.status === "downloading") - Number(b.status === "downloading"));
+        sessions = listed;
         if (sessions.length === 0) {
           leave(() => reject(new Error("no running or pending sessions")));
           return;
