@@ -165,7 +165,6 @@ type ApiError =
   | { readonly _tag: "StartFailed"; readonly message: string; readonly cause: unknown; readonly sessionId: string; readonly agentId: string }
   | { readonly _tag: "ExchangeFailed"; readonly message: string; readonly cause: unknown; readonly sessionId: string; readonly agentId: string }
   | { readonly _tag: "Internal"; readonly cause: unknown; readonly sessionId?: string; readonly agentId?: string }
-  | { readonly _tag: "Failed"; readonly message: string; readonly sessionId: string; readonly agentId: string }
   | { readonly _tag: "Conflict"; readonly message: string; readonly sessionId: string };
 
 function badRequest(message: string, who: { sessionId?: string; agentId?: string } = {}): ApiError {
@@ -174,10 +173,6 @@ function badRequest(message: string, who: { sessionId?: string; agentId?: string
 
 function conflict(message: string, sessionId: string): ApiError {
   return { _tag: "Conflict", message, sessionId };
-}
-
-function failed(message: string, who: { sessionId: string; agentId: string }): ApiError {
-  return { _tag: "Failed", message, ...who };
 }
 
 function startFailed(err: unknown, who: { sessionId: string; agentId: string }): ApiError {
@@ -286,6 +281,11 @@ function jsonBody<S extends Schema.Constraint>(
 type RouteHandler = Effect.Effect<HttpServerResponse.HttpServerResponse, ApiError, HttpRouter.Provided>;
 
 async function launchQemu(
+  live: LiveSession,
+  cfg: typeof StartBody.Type,
+): Promise<void> {
+  const qemu = live.qemu;
+  try {
     // Checked before anything else: a wrong disk path must not cost an iso download, and
     // it must fail ahead of registerAgent, or the agent's one registration is spent on a
     // machine that never booted.
@@ -296,11 +296,6 @@ async function launchQemu(
         throw new Error(`qemu: disk not found: ${cfg.disk}`);
       }
     }
-  live: LiveSession,
-  cfg: typeof StartBody.Type,
-): Promise<void> {
-  const qemu = live.qemu;
-  try {
     const iso = await getIso(db, cfg.iso, { sessionId: qemu.id, agentId: cfg.agent });
     if (cfg.disk === undefined) {
       await createDisk(qemu);
@@ -599,7 +594,7 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
       const { id, agent, test_result_id, message } = yield* jsonBody(IntentStartBody);
       const live = yield* session(id, agent);
       if (live.intent !== undefined) {
-        return yield* Effect.fail(failed(
+        return yield* Effect.fail(badRequest(
           "Cannot start one intent when one's already running. Please end your previous intent.",
           { sessionId: live.qemu.id, agentId: agent },
         ));
@@ -657,7 +652,6 @@ function respondTable(request: HttpServerRequest.HttpServerRequest): {
 } {
   return {
     BadRequest: (err) => answer(request, 400, err.message, err),
-    Failed: (err) => answer(request, 500, err.message, err),
     Forbidden: (err) => answer(request, 403, err.message, err),
     Conflict: (err) => answer(request, 409, err.message, err),
     UnknownSession: (err) =>
