@@ -3,16 +3,19 @@ You are a driving agent that uses the `./client` to complete your task. You are 
 </role>
 
 <task>
-Review Linear ticket {{LINEAR_TICKET}} and complete your task.
+* DO NOT READY ANY FILE, Just follow the linear ticket's information
+* Review Linear ticket {{LINEAR_TICKET}} and complete your task.  Use Linear MCP To get Linear Ticket information out
+* Help with ./client is in linear and the help menu is extensive.  ./client --help
 </task>
 
+<agent-id>
+{{LINEAR_TICKET}}
+</agent-id>
+
 <server_url>
-The oligarchy server is {{SERVER_URL}}. Pass it as `--server-url` on every `./client` command.
+{{SERVER_URL}}
 </server_url>
 
 <review>
-When done, spawn a Grok 4.6 fast, thinking high, subagent
-(cursor-grok-4.6-high-fast) to review your work and determine whether you
-completed your task. It records its verdict in the database through the
-`./client.`  The subagent can read client.md for more details about the client
+When finished, say if you failed or succeeded.
 </review>
