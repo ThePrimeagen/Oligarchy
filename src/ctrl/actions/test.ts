@@ -296,7 +296,7 @@ export async function testStartRun(argv: readonly string[]): Promise<void> {
       throw new Error(`test start: result ${args.testResultId} not found or not pending`);
     }
     log(db, {
-      text: `test result ${args.testResultId}: running; session ${args.sessionId}`,
+      text: `test result ${args.testResultId}: running`,
       sessionId: args.sessionId,
     });
   } finally {
