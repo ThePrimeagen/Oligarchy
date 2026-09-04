@@ -16,7 +16,7 @@ Three TypeScript executables share one shape. `./client` (`src/client/index.ts`)
 ./ctrl test --list [--details] [--name <definition>] --server-url <url>
 ./ctrl test new --iso <https-url> --version <version> [--name <definition>] --server-url <url>
 ./ctrl test list --server-url <url>
-./ctrl test run --ticket <linear-ticket> --server-url <url>
+./ctrl test run --ticket <linear-ticket>
 ./ctrl test start --session-id <id> --test-result-id <result-id> --server-url <url>
 ./ctrl test-results --agent-id <agent> --id <result-id> --status success|failed [--reason <text>] --server-url <url>
 ./ctrl session list [--count <n>] [--active] [--json] --server-url <url>
@@ -29,11 +29,11 @@ The action is always the first argument; flags follow in any order, and Effect a
 
 ## Parsing: `parseClientArgs` and `parseCtrlArgs`
 
-Each executable has one parser, `src/client/parse-args.ts` and `src/ctrl/parse-args.ts`, and every action calls it first. The parser is generic over the action's flag config: the action declares its flags with `Flag`, derives its arg type from that declaration (`ClientArgs<typeof flags>`, `CtrlArgs<typeof spec>`), and gets back one object holding the parsed flags and the environment together. Under the hood the parser builds a `Command` from the shared flags plus the action's, runs it with `Command.runWith` so Effect does the parsing, help, and error rendering, then reads the environment through Effect's `Config`. `--help` and `--version` render and exit 0 before anything else happens. A parse failure is rendered by Effect (the action's usage plus the error) and exits 1. A `.env` in the working directory fills in missing variables only.
+Each executable has one parser, `src/client/parse-args.ts` and `src/ctrl/parse-args.ts`, and every action calls it first. The parser is generic over the action's flag config: the action declares its flags with `Flag`, derives its arg type from that declaration (`ClientArgs<typeof flags>`, `CtrlArgs<typeof spec>`), and gets back one object holding the parsed flags and the environment together. Under the hood the parser builds a `Command` from the action's flags, runs it with `Command.runWith` so Effect does the parsing, help, and error rendering, then reads the environment through Effect's `Config`. `--help` and `--version` render and exit 0 before anything else happens. A parse failure is rendered by Effect (the action's usage plus the error) and exits 1. A `.env` in the working directory fills in missing variables only.
 
 The client's shared surface, added to every action: `--agent-id` (required, non-empty), `--server-url` (a full URL used exactly as given; falls back to `SERVER_URL`, then `http://127.0.0.1:42069`), and `OLIGARCHY_TOKEN` from the environment, sent as `Authorization: Bearer <token>` on every request. A missing token is `OLIGARCHY_TOKEN is not set`.
 
-The ctrl's shared surface: `--server-url` (falls back to `SERVER_URL`; must be http or https; no default, because the URL ends up in Linear tickets and agent prompts where `localhost` is never right) and `DATABASE_URL` from the environment. An action's spec names the further variables it needs — `LINEAR_API_TOKEN` for `test new` and `test list`, `CURSOR_API_TOKEN` for `test run` — and the parser reads them the same way, so a missing one is `LINEAR_API_TOKEN is not set` before any work starts. The parsed `databaseUrl` goes to `connectDatabase(url)`; the parsed token goes to `prompt(apiKey, text)`. Nothing below the parser reads `process.env`.
+The ctrl's shared surface is `DATABASE_URL` from the environment, read for every action. `--server-url` (falls back to `SERVER_URL`; must be http or https; no default, because the URL ends up in Linear tickets where `localhost` is never right) is one exported flag, `serverUrl` in `src/ctrl/parse-args.ts`, that every action but `test run` puts in its own flag config — `test run` names no proxy, its driver reads the URL from the ticket. An action's spec names the further variables it needs — `LINEAR_API_TOKEN` for `test new` and `test list`, `CURSOR_API_TOKEN` for `test run` — and the parser reads them the same way, so a missing one is `LINEAR_API_TOKEN is not set` before any work starts. The parsed `databaseUrl` goes to `connectDatabase(url)`; the parsed token goes to `prompt(apiKey, text)`. Nothing below the parser reads `process.env`.
 
 ## Client actions
 
