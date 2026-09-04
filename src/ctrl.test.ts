@@ -378,10 +378,21 @@ describe("./ctrl unhappy path", () => {
     const sessionId = randomUUID();
     const noSelector = await runCtrl(["session", "--session-id", sessionId, "--server-url", SERVER]);
     assert.notEqual(noSelector.code, 0);
-    assert.match(noSelector.stderr, /session: --logs, --test-def, --test-results, --actions, or --all is required/);
+    assert.match(
+      noSelector.stderr,
+      /^session: --logs, --test-def, --test-results, --actions, or --all is required\nError: session: --logs.*\n\s+at sessionRun .*src\/ctrl\/actions\/session\.ts:\d+:\d+/,
+    );
 
     const unknown = await runCtrl(["session", "--session-id", sessionId, "--logs", "--server-url", SERVER]);
     assert.notEqual(unknown.code, 0);
-    assert.match(unknown.stderr, new RegExp(`session: no session ${sessionId}`));
+    assert.match(unknown.stderr, new RegExp(`^session: no session ${sessionId}\nError: session: no session ${sessionId}\n\\s+at `));
+  });
+
+  it("spells out a database that refuses the connection: headline, stack, and the cause", async () => {
+    const result = await runCtrl(["test", "--list", "--server-url", SERVER], { DATABASE_URL: "postgres://user:pw@127.0.0.1:1/oligarchy" });
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /^Failed query: select .* from "test_definitions".*: connect ECONNREFUSED 127\.0\.0\.1:1\n/);
+    assert.match(result.stderr, /\[cause\]: (Aggregate)?Error: connect ECONNREFUSED 127\.0\.0\.1:1\n\s+at /);
+    assert.match(result.stderr, /code: 'ECONNREFUSED'/);
   });
 });

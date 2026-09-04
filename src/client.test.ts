@@ -342,16 +342,20 @@ describe("./client unhappy path", () => {
 
     const intent = await runClient(["intent", "--agent-id", "agent-1"]);
     assert.notEqual(intent.code, 0);
-    assert.match(intent.stderr, /intent: expected start or end/);
+    assert.match(intent.stderr, /^intent: expected start or end\nError: intent: expected start or end\n\s+at intentRun /);
   });
 
-  it("prints the server's error and exits 1", async () => {
+  it("prints the server's error as a headline, then the stack, and exits 1", async () => {
     const proxy = await stubProxy(() => ({ status: 404, body: '{"error":"no session session-1"}' }));
     try {
       const result = await runClient(["send-keys", "--agent-id", "agent-1", "--server-url", proxy.url, "--session-id", "session-1", "--keys", "hello"]);
       assert.equal(result.code, 1);
       assert.equal(result.stdout, "");
-      assert.equal(result.stderr, "no session session-1\n");
+      const [headline, stackHead, ...frames] = result.stderr.split("\n");
+      assert.equal(headline, "no session session-1");
+      assert.equal(stackHead, "Error: no session session-1");
+      assert.match(frames.join("\n"), /^\s+at .*src\/client\/http\.ts:\d+:\d+/m);
+      assert.match(frames.join("\n"), /^\s+at .*src\/client\/actions\/send-keys\.ts:\d+:\d+/m);
     } finally {
       await close(proxy.server);
     }
@@ -374,7 +378,7 @@ describe("./client unhappy path", () => {
     try {
       const result = await runClient(["send-mouse", "--agent-id", "agent-1", "--server-url", proxy.url, "--session-id", "session-1", "--x", "0.5", "--y", "0.5", "--clicks", "2"]);
       assert.equal(result.code, 1);
-      assert.equal(result.stderr, "send-mouse: --clicks needs --button\n");
+      assert.match(result.stderr, /^send-mouse: --clicks needs --button\nError: send-mouse: --clicks needs --button\n\s+at sendMouseRun /);
       assert.deepEqual(proxy.received, []);
     } finally {
       await close(proxy.server);
@@ -411,11 +415,14 @@ describe("./client unhappy path", () => {
     assert.match(stopPositional.stderr, /Unexpected positional argument: "failed"/);
   });
 
-  it("unwraps a refused connection", async () => {
+  it("spells out a refused connection: headline, stack, and the cause with its own stack and code", async () => {
     const closed = await stubProxy(ok);
     await close(closed.server);
     const result = await runClient(["send-keys", "--agent-id", "agent-1", "--server-url", closed.url, "--session-id", "session-1", "--keys", "hello"]);
     assert.equal(result.code, 1);
-    assert.match(result.stderr, /fetch failed: .*ECONNREFUSED/);
+    assert.match(result.stderr, /^fetch failed: connect ECONNREFUSED 127\.0\.0\.1:\d+\n/);
+    assert.match(result.stderr, /^TypeError: fetch failed\n\s+at /m);
+    assert.match(result.stderr, /\[cause\]: Error: connect ECONNREFUSED 127\.0\.0\.1:\d+\n\s+at /);
+    assert.match(result.stderr, /code: 'ECONNREFUSED'/);
   });
 });
