@@ -11,6 +11,8 @@ const SESSION = resolve(import.meta.dirname, "../session");
 const SESSION_ID = "6f1c0000-0000-4000-8000-00000000e2a9";
 const FOLLOWED_ID = "7a2d0000-0000-4000-8000-00000000f011";
 const ENDED_ID = "8b3e0000-0000-4000-8000-00000000a1c2";
+const DROPPED_ID = "5d0a0000-0000-4000-8000-00000000c3e4";
+const ENDLESS_ID = "4e1b0000-0000-4000-8000-00000000d4f5";
 const IMAGE_ID = "9c4f0000-0000-4000-8000-00000000b2d3";
 const KITTY_PLACE = /\x1b_Ga=T,f=100,i=1,q=2,C=1,c=\d+,r=\d+,m=0;([A-Za-z0-9+/=]+)\x1b\\/;
 const ALT_SCREEN_ON = "\x1b[?1049h";
@@ -100,6 +102,17 @@ async function stubProxy(): Promise<{ server: Server; url: string; received: Rec
         response.end("boot log\n");
         return;
       }
+      if (incoming.url === `/follow?id=${DROPPED_ID}`) {
+        response.writeHead(200, { "Content-Type": "application/x-ndjson" });
+        response.end('{"type":"session","status":"running"}\n');
+        return;
+      }
+      if (incoming.url === `/follow?id=${ENDLESS_ID}`) {
+        response.writeHead(200, { "Content-Type": "application/x-ndjson" });
+        response.write('{"type":"session","status":"running"}\n{"type":"intent","state":"started","message":"still going"}\n');
+        server.once("close", () => response.end());
+        return;
+      }
       if (incoming.url === `/follow?id=${ENDED_ID}`) {
         response.writeHead(409, { "Content-Type": "application/json" });
         response.end(JSON.stringify({ error: `session "${ENDED_ID}" has already completed (succeeded)` }));
@@ -118,6 +131,8 @@ async function stubProxy(): Promise<{ server: Server; url: string; received: Rec
           { type: "action", id: 3, name: "send-mouse", state: "running" },
           { type: "action", id: 3, state: "failed" },
           { type: "intent", state: "completed" },
+          { type: "action", id: 4, name: "get-serial", state: "running" },
+          { type: "action", id: 4, state: "completed" },
           { type: "session", status: "succeeded" },
         ];
         response.writeHead(200, { "Content-Type": "application/x-ndjson" });
@@ -253,6 +268,7 @@ describe("./session happy path", () => {
       assert.ok(view.indexOf("wait for the boot menu") < view.indexOf("send-keys"), "the intent is drawn above its actions");
       assert.match(view, /\x1b\[\d+;2H\x1b\[32m✓ wait for the boot menu/, "intents start at the margin");
       assert.match(view, /\x1b\[\d+;2H  \x1b\[32m✓ send-keys/, "actions are indented under the intent");
+      assert.match(view, /\x1b\[\d+;2H\x1b\[32m✓ get-serial/, "an action outside any intent sits at the margin");
 
       const placed = KITTY_PLACE.exec(view);
       assert.ok(placed !== null, "the image is placed with the kitty graphics protocol");
@@ -333,6 +349,45 @@ describe("./session unhappy path", () => {
       assert.ok(result.stdout.includes("follow needs the kitty graphics protocol (ghostty or kitty)"));
       assert.equal(result.stdout.includes(ALT_SCREEN_ON), false);
       assert.deepEqual(proxy.received, []);
+    } finally {
+      await close(proxy.server);
+    }
+  });
+
+  it("follow says so when the proxy ends the stream before the session did, and restores the screen on a signal", async () => {
+    const proxy = await stubProxy();
+    try {
+      const dropped = await runSession(["--server-url", proxy.url], [`follow ${DROPPED_ID}`, "status", "exit"], { TERM_PROGRAM: "ghostty" });
+      assert.equal(dropped.stderr, "");
+      assert.equal(dropped.code, 0);
+      assert.ok(dropped.stdout.includes(ALT_SCREEN_OFF));
+      assert.ok(dropped.stdout.includes(`dropped from ${DROPPED_ID}: this follower fell behind`));
+      assert.ok(dropped.stdout.includes("session none"));
+
+      const child = spawn(SESSION, ["--server-url", proxy.url], {
+        env: {
+          ...process.env,
+          NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --disable-warning=ExperimentalWarning`.trim(),
+          OLIGARCHY_TOKEN: "test-token",
+          SERVER_URL: "",
+          TERM: "dumb",
+          TERM_PROGRAM: "ghostty",
+        },
+      });
+      let stdout = "";
+      child.stdout.setEncoding("utf8");
+      child.stdout.on("data", (data: string) => {
+        stdout += data;
+        if (stdout.includes("still going") && !child.killed) {
+          child.kill("SIGTERM");
+        }
+      });
+      child.stdin.write(`follow ${ENDLESS_ID}\n`);
+      const [code] = await once(child, "close");
+      assert.equal(code, 0);
+      assert.ok(stdout.includes(ALT_SCREEN_ON));
+      assert.ok(stdout.includes("\x1b[?25h\x1b[?1049l"), "the cursor and main screen come back before the REPL exits");
+      assert.ok(stdout.indexOf(ALT_SCREEN_ON) < stdout.indexOf(ALT_SCREEN_OFF));
     } finally {
       await close(proxy.server);
     }

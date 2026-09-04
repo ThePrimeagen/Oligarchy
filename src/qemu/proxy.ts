@@ -49,6 +49,9 @@ const MAX_CLICKS = 100;
 // Each chord is a QMP exchange and an action row, paced ~60ms apart; cap the count so
 // one request cannot run for many minutes or write thousands of rows.
 const MAX_KEYS = 1000;
+// A follower this many events behind has stopped reading; it is dropped rather than
+// letting its queue hold every image the session takes from then on.
+const FOLLOW_BACKLOG = 64;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const db = connectDatabase(databaseUrl);
@@ -59,6 +62,7 @@ type LiveSession = {
   lastCommandAt: number;
   span: QemuSpan;
   intent?: { span: QemuSpan; message: string };
+  image?: { id: string; png: string };
   actionSpans: Set<QemuSpan>;
   followers: Set<Queue.Queue<FollowEvent, Cause.Done>>;
   actionSeq: number;
@@ -66,7 +70,11 @@ type LiveSession = {
 
 function emitFollow(live: LiveSession, event: FollowEvent): void {
   for (const follower of live.followers) {
-    Queue.offerUnsafe(follower, event);
+    if (!Queue.offerUnsafe(follower, event)) {
+      live.followers.delete(follower);
+      Queue.endUnsafe(follower);
+      log(db, { level: "warning", text: `session ${live.qemu.id}: follower dropped; ${FOLLOW_BACKLOG} events behind`, sessionId: live.qemu.id, agentId: live.agent });
+    }
   }
 }
 
@@ -114,9 +122,8 @@ function followed<A, R>(live: LiveSession, name: string, work: Effect.Effect<A, 
   live.actionSeq++;
   const id = live.actionSeq;
   emitFollow(live, { type: "action", id, name, state: "running" });
-  return work.pipe(
-    Effect.tap(() => Effect.sync(() => emitFollow(live, { type: "action", id, state: "completed" }))),
-    Effect.tapError(() => Effect.sync(() => emitFollow(live, { type: "action", id, state: "failed" }))),
+  return Effect.onExit(work, (exit) =>
+    Effect.sync(() => emitFollow(live, { type: "action", id, state: Exit.isSuccess(exit) ? "completed" : "failed" }))
   );
 }
 
@@ -419,7 +426,8 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
             return internal(cause, { sessionId: qemu.id, agentId: agent });
           },
         });
-        emitFollow(live, { type: "image", id: imageId, png: data.toString("base64") });
+        live.image = { id: imageId, png: data.toString("base64") };
+        emitFollow(live, { type: "image", ...live.image });
         log(db, { text: `session ${qemu.id}: image; ${data.length} bytes in ${Date.now() - started}ms; ${storedImageUrl(imageId)}`, sessionId: qemu.id, agentId: agent });
         return HttpServerResponse.uint8Array(data, {
           contentType: "image/png",
@@ -465,12 +473,15 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
       }
       // Registered here, synchronously after the lookup, so a session that ends before
       // the body starts streaming still ends this queue rather than leaving it hanging.
-      const queue = yield* Queue.unbounded<FollowEvent, Cause.Done>();
+      const queue = yield* Queue.dropping<FollowEvent, Cause.Done>(FOLLOW_BACKLOG);
       live.followers.add(queue);
       log(db, { text: `session ${id}: follower attached`, sessionId: id, agentId: live.agent });
       Queue.offerUnsafe(queue, { type: "session", status: sessions.has(id) ? "running" : "pending" });
       if (live.intent !== undefined) {
         Queue.offerUnsafe(queue, { type: "intent", state: "started", message: live.intent.message });
+      }
+      if (live.image !== undefined) {
+        Queue.offerUnsafe(queue, { type: "image", ...live.image });
       }
       const body = Stream.fromQueue(queue).pipe(
         Stream.map((event) => new TextEncoder().encode(`${JSON.stringify(event)}\n`)),

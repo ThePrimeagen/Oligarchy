@@ -1,4 +1,5 @@
 #!/usr/bin/env -S node --experimental-strip-types
+import { once } from "node:events";
 import { createInterface } from "node:readline";
 import { CliError } from "effect/unstable/cli";
 import { followRun } from "./actions/follow.ts";
@@ -120,8 +121,12 @@ async function shutdown(): Promise<void> {
   }
   shuttingDown = true;
   rl.close();
-  // The follow child is in its own process group, so a hangup or SIGTERM here never reaches it.
-  session.following?.kill();
+  // The follow child is in its own process group, so a hangup or SIGTERM here never reaches
+  // it; its close is what hands the screen back, so wait for that before exiting.
+  if (session.following !== undefined) {
+    session.following.kill();
+    await once(session.following, "close");
+  }
   // A start killed mid-boot still boots on the proxy (/start is uninterruptible), so wait
   // for the id it returns and stop that, rather than leaving an unreachable session behind.
   const inflight = session.startInFlight;

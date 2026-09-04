@@ -47,13 +47,13 @@ The lines, in the `FollowEvent` shape from `src/session.d.ts`:
 {"type": "image", "id": "<uuid>", "png": "<base64>"}
 ```
 
-- The first line is always the session's status. If an intent is open when the follower attaches, its `started` line comes next, so the follower knows what the actions it is about to see belong to.
+- The first line is always the session's status. If an intent is open when the follower attaches, its `started` line comes next, so the follower knows what the actions it is about to see belong to; if the session has taken an image, the latest one follows, so the follower has a picture before the next `get-image`.
 - An `action` is one request — `/send-keys`, `/send-mouse`, `/image`, `/serial` — not one QMP exchange; a twenty-chord `send-keys` is one `running` line and one `completed` line, correlated by `id`, a counter per session. Only the name is carried, no arguments. A request refused before any work (a bad key string, a coordinate out of range) never appears.
 - `image` carries the PNG a completed `/image` returned, base64-encoded, with the same uuid as `GET /images/:id`. It lands before that action's `completed` line.
 - `intent` `cancelled` is a session that ended with its intent still open.
 - The last line is the session's end status, and then the stream closes. A stop, a timeout, a failed start, and proxy shutdown all end the stream this way.
 
-Followers are held on the live session in memory; a follower that disconnects is dropped, and every follower is closed when the session ends. Attach and detach are logged at info as `session <id>: follower attached` / `detached`.
+Followers are held on the live session in memory, each behind a queue of 64 events; a follower that disconnects is dropped, one that falls 64 events behind (it stopped reading) has its stream ended early — the only way a stream ends without a final `session` line — and every follower is closed when the session ends. Attach and detach are logged at info as `session <id>: follower attached` / `detached`; a follower dropped for falling behind is a warning.
 
 ## GET /serial?id=<id>&agent=<agent>
 

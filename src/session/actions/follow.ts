@@ -23,6 +23,7 @@ const STATUS_COLOR: Record<Extract<FollowEvent, { type: "session" }>["status"], 
 
 type Entry = {
   id: number | "intent";
+  indent: 0 | 2;
   name: string;
   state: "running" | "completed" | "failed";
 };
@@ -42,7 +43,7 @@ function apply(view: View, event: FollowEvent): void {
       break;
     case "intent":
       if (event.state === "started") {
-        view.entries.push({ id: "intent", name: event.message, state: "running" });
+        view.entries.push({ id: "intent", indent: 0, name: event.message, state: "running" });
       } else {
         const open = view.entries.findLast((entry) => entry.id === "intent" && entry.state === "running");
         if (open !== undefined) {
@@ -52,7 +53,8 @@ function apply(view: View, event: FollowEvent): void {
       break;
     case "action":
       if (event.state === "running") {
-        view.entries.push({ id: event.id, name: event.name, state: "running" });
+        const intent = view.entries.findLast((entry) => entry.id === "intent");
+        view.entries.push({ id: event.id, indent: intent?.state === "running" ? 2 : 0, name: event.name, state: "running" });
       } else {
         const entry = view.entries.find((candidate) => candidate.id === event.id);
         if (entry !== undefined) {
@@ -84,11 +86,10 @@ function draw(view: View): void {
       out += " ".repeat(LEFT_COLS - 1);
       continue;
     }
-    const indent = entry.id === "intent" ? 0 : 2;
-    const width = LEFT_COLS - 3 - indent;
+    const width = LEFT_COLS - 3 - entry.indent;
     const label = entry.name.length > width ? `${entry.name.slice(0, width - 1)}…` : entry.name;
     const mark = entry.state === "running" ? `${GRAY}${glyph}` : entry.state === "completed" ? `${GREEN}✓` : `${RED}✗`;
-    out += `${" ".repeat(indent)}${mark} ${label}${RESET}${" ".repeat(width - label.length)}`;
+    out += `${" ".repeat(entry.indent)}${mark} ${label}${RESET}${" ".repeat(width - label.length)}`;
   }
   out += `\x1b[${rows};2H${GRAY}ctrl-c detaches${RESET}`;
   process.stdout.write(out);
@@ -124,6 +125,7 @@ export async function followRun(session: Session, rest: string): Promise<void> {
   let spinner: NodeJS.Timeout | undefined;
   const redraw = () => {
     process.stdout.write("\x1b[2J");
+    clearImages();
     draw(view);
     drawImage(view);
   };
@@ -146,22 +148,29 @@ export async function followRun(session: Session, rest: string): Promise<void> {
     }
   });
 
+  // The screen is handed back inside the close listener itself, so anyone else awaiting
+  // this child's close (shutdown, on a signal) finds the terminal already restored.
   const code = await new Promise<number | null>((resolve, reject) => {
     child.on("error", reject);
-    child.on("close", resolve);
+    child.on("close", (code) => {
+      if (onScreen) {
+        clearInterval(spinner);
+        process.stdout.off("resize", redraw);
+        clearImages();
+        process.stdout.write("\x1b[?25h\x1b[?1049l");
+      }
+      resolve(code);
+    });
   });
   session.following = undefined;
-  if (onScreen) {
-    clearInterval(spinner);
-    process.stdout.off("resize", redraw);
-    clearImages();
-    process.stdout.write("\x1b[?25h\x1b[?1049l");
-  }
   if (child.killed) {
     console.log(`detached from ${id}`);
-  } else if (code === 0) {
-    console.log(`session ${id} ${view.status}`);
-  } else {
+  } else if (code !== 0) {
     console.log(Buffer.concat(err).toString("utf8").trim());
+  } else if (view.status === "pending" || view.status === "running") {
+    // The proxy only ends a stream early when the follower stopped reading it.
+    console.log(`dropped from ${id}: this follower fell behind`);
+  } else {
+    console.log(`session ${id} ${view.status}`);
   }
 }
