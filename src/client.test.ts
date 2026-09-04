@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { createServer } from "node:http";
-import { resolve } from "node:path";
+import { createServer, type Server } from "node:http";
+import { readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { once } from "node:events";
 import { describe, it } from "node:test";
 
@@ -13,7 +15,13 @@ async function runClient(args: string[], env: NodeJS.ProcessEnv = {}): Promise<{
   stderr: string;
 }> {
   const child = spawn(CLIENT, args, {
-    env: { ...process.env, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --disable-warning=ExperimentalWarning`.trim(), OLIGARCHY_TOKEN: "test-token", ...env },
+    env: {
+      ...process.env,
+      NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --disable-warning=ExperimentalWarning`.trim(),
+      OLIGARCHY_TOKEN: "test-token",
+      SERVER_URL: "",
+      ...env,
+    },
   });
   let stdout = "";
   let stderr = "";
@@ -29,402 +37,333 @@ async function runClient(args: string[], env: NodeJS.ProcessEnv = {}): Promise<{
   return { code: code as number | null, stdout, stderr };
 }
 
+type Received = {
+  method: string | undefined;
+  url: string | undefined;
+  authorization: string | undefined;
+  body: unknown;
+};
+
+async function stubProxy(
+  reply: (received: Received) => { status: number; headers?: Record<string, string>; body: string | Buffer },
+): Promise<{ server: Server; url: string; received: Received[] }> {
+  const received: Received[] = [];
+  const server = createServer((incoming, response) => {
+    let body = "";
+    incoming.setEncoding("utf8");
+    incoming.on("data", (data: string) => {
+      body += data;
+    });
+    incoming.on("end", () => {
+      const request: Received = {
+        method: incoming.method,
+        url: incoming.url,
+        authorization: incoming.headers.authorization,
+        body: body === "" ? undefined : (JSON.parse(body) as unknown),
+      };
+      received.push(request);
+      const out = reply(request);
+      response.writeHead(out.status, { "Content-Type": "application/json", ...out.headers });
+      response.end(out.body);
+    });
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address !== null && typeof address !== "string");
+  return { server, url: `http://127.0.0.1:${address.port}`, received };
+}
+
+function close(server: Server): Promise<void> {
+  return new Promise<void>((done) => server.close(() => done()));
+}
+
+const ok = () => ({ status: 200, body: '{"ok":"true"}' });
+
 describe("./client happy path", () => {
-  it("forwards a QEMU command to the TypeScript client", async () => {
-    let finishRequest!: (value: { method: string | undefined; url: string | undefined; authorization: string | undefined; body: unknown }) => void;
-    const request = new Promise<{ method: string | undefined; url: string | undefined; authorization: string | undefined; body: unknown }>((done) => {
-      finishRequest = done;
-    });
-    const server = createServer((incoming, response) => {
-      let body = "";
-      incoming.setEncoding("utf8");
-      incoming.on("data", (data: string) => {
-        body += data;
-      });
-      incoming.on("end", () => {
-        response.writeHead(200, { "Content-Type": "application/json" });
-        response.end('{"ok":"true"}');
-        finishRequest({
-          method: incoming.method,
-          url: incoming.url,
-          authorization: incoming.headers.authorization,
-          body: JSON.parse(body) as unknown,
-        });
-      });
-    });
-    server.listen(0, "127.0.0.1");
-    await once(server, "listening");
-    const address = server.address();
-    assert.ok(address !== null && typeof address !== "string");
-
+  it("send-keys posts the key string with the agent and the default encoding", async () => {
+    const proxy = await stubProxy(ok);
     try {
-      const result = await runClient(
-        [
-          "--agent-id",
-          "agent-1",
-          "--server-url",
-          `http://127.0.0.1:${address.port}`,
-          "send-keys",
-          "session-1",
-          "hello",
-        ],
-        { OLIGARCHY_TOKEN: "test-token" },
-      );
-      assert.equal(result.code, 0);
-      assert.equal(result.stdout, "");
-      assert.deepEqual(await request, {
-        method: "POST",
-        url: "/send-keys",
-        authorization: "Bearer test-token",
-        body: {
-          id: "session-1",
-          keys: "hello",
-          encoding: "oligarchy",
-          agent: "agent-1",
-        },
-      });
-    } finally {
-      await new Promise<void>((done) => server.close(() => done()));
-    }
-  });
-
-  it("accepts test flags after they parse", async () => {
-    const equals = await runClient(
-      [
-        "test",
-        "new",
-        "--iso",
-        "https://example.com/omarchy.iso",
-        "--server_url=https://qemu.example.com",
-        "--version",
-        "1.2.3",
-      ],
-      { LINEAR_API_TOKEN: "" },
-    );
-    assert.notEqual(equals.code, 0);
-    assert.match(equals.stderr, /LINEAR_API_TOKEN is not set/);
-
-    const spaced = await runClient(
-      [
-        "test",
-        "new",
-        "--server_url",
-        "http://127.0.0.1:42069",
-        "--iso",
-        "https://example.com/omarchy.iso",
-        "--version",
-        "1.2.3",
-      ],
-      { LINEAR_API_TOKEN: "" },
-    );
-    assert.notEqual(spaced.code, 0);
-    assert.match(spaced.stderr, /LINEAR_API_TOKEN is not set/);
-
-    const named = await runClient(
-      [
-        "test",
-        "new",
-        "--iso",
-        "https://example.com/omarchy.iso",
-        "--server_url=https://qemu.example.com",
-        "--version",
-        "1.2.3",
-        "--name",
-        "Install Omarchy",
-      ],
-      { LINEAR_API_TOKEN: "" },
-    );
-    assert.notEqual(named.code, 0);
-    assert.match(named.stderr, /LINEAR_API_TOKEN is not set/);
-
-    const fromEnv = await runClient(
-      ["test", "new", "--iso", "https://example.com/omarchy.iso", "--version", "1.2.3"],
-      { LINEAR_API_TOKEN: "", SERVER_URL: "https://from.env.example" },
-    );
-    assert.notEqual(fromEnv.code, 0);
-    assert.match(fromEnv.stderr, /LINEAR_API_TOKEN is not set/);
-
-    const defaulted = await runClient(
-      ["test", "new", "--iso", "https://example.com/omarchy.iso", "--version", "1.2.3"],
-      { LINEAR_API_TOKEN: "", SERVER_URL: "" },
-    );
-    assert.notEqual(defaulted.code, 0);
-    assert.match(defaulted.stderr, /LINEAR_API_TOKEN is not set/);
-  });
-
-  it("lists stored test definition names", async () => {
-    const result = await runClient(["test", "--list"]);
-    assert.equal(result.stderr, "");
-    assert.equal(result.code, 0);
-    const names = result.stdout.split("\n").filter((line) => line !== "");
-    assert.ok(names.includes("lock-screen"));
-    assert.equal(result.stdout.includes("{"), false);
-  });
-
-  it("lists one stored test definition name", async () => {
-    const result = await runClient(["test", "--list", "--name", "lock-screen"]);
-    assert.equal(result.stderr, "");
-    assert.equal(result.code, 0);
-    assert.equal(result.stdout, "lock-screen\n");
-  });
-
-  it("prints every field of one named test definition", async () => {
-    const result = await runClient(["test", "--list", "--details", "--name", "lock-screen"]);
-    assert.equal(result.stderr, "");
-    assert.equal(result.code, 0);
-    const rows = JSON.parse(result.stdout) as { name: string; description: string; instruction: string; proof: string }[];
-    assert.equal(rows.length, 1);
-    assert.equal(rows[0].name, "lock-screen");
-    assert.ok(rows[0].description.length > 0);
-    assert.ok(rows[0].instruction.length > 0);
-    assert.ok(rows[0].proof.length > 0);
-  });
-
-  it("test run kicks off a cloud agent through the Cursor API and prints its link", async () => {
-    const requests: { method: string | undefined; url: string | undefined; body: string }[] = [];
-    const server = createServer((incoming, response) => {
-      let body = "";
-      incoming.setEncoding("utf8");
-      incoming.on("data", (data: string) => {
-        body += data;
-      });
-      incoming.on("end", () => {
-        requests.push({ method: incoming.method, url: incoming.url, body });
-        if (incoming.method === "GET" && incoming.url === "/v1/models") {
-          response.writeHead(200, { "Content-Type": "application/json" });
-          response.end(JSON.stringify({ items: [{ id: "grok-4.6", displayName: "Cursor Grok 4.6" }] }));
-          return;
-        }
-        if (incoming.method === "POST" && incoming.url === "/v1/agents") {
-          const { agentId } = JSON.parse(body) as { agentId: string };
-          const now = new Date().toISOString();
-          response.writeHead(200, { "Content-Type": "application/json" });
-          response.end(
-            JSON.stringify({
-              agent: {
-                id: agentId,
-                status: "ACTIVE",
-                url: `https://cursor.com/agents/${agentId}`,
-                createdAt: now,
-                updatedAt: now,
-                latestRunId: "run-22222222-2222-4222-8222-222222222222",
-              },
-              run: {
-                id: "run-22222222-2222-4222-8222-222222222222",
-                agentId,
-                status: "CREATING",
-                createdAt: now,
-                updatedAt: now,
-              },
-            }),
-          );
-          return;
-        }
-        response.writeHead(404, { "Content-Type": "application/json" });
-        response.end('{"error":{"code":"not_found","message":"not found"}}');
-      });
-    });
-    server.listen(0, "127.0.0.1");
-    await once(server, "listening");
-    const address = server.address();
-    assert.ok(address !== null && typeof address !== "string");
-
-    try {
-      const result = await runClient(
-        ["test", "run", "--ticket", "OLI-42", "--server_url", "https://qemu.example.com"],
-        { CURSOR_API_TOKEN: "test-token", CURSOR_BACKEND_URL: `http://127.0.0.1:${address.port}` },
-      );
+      const result = await runClient([
+        "send-keys",
+        "--agent-id",
+        "agent-1",
+        "--server-url",
+        proxy.url,
+        "session-1",
+        "hello",
+      ]);
       assert.equal(result.stderr, "");
       assert.equal(result.code, 0);
-      const created = requests.filter((request) => request.method === "POST" && request.url === "/v1/agents");
-      assert.equal(created.length, 1);
-      const body = JSON.parse(created[0].body) as {
-        agentId: string;
-        prompt: { text: string };
-        model: unknown;
-        repos: unknown;
-      };
-      assert.equal(
-        result.stdout,
-        `Agent here, go check it out for more information: https://cursor.com/agents/${body.agentId}\n`,
-      );
-      assert.ok(body.prompt.text.includes("Review Linear ticket OLI-42"));
-      assert.ok(body.prompt.text.includes("https://qemu.example.com"));
-      assert.deepEqual(body.model, {
-        id: "grok-4.6",
-        params: [
-          { id: "effort", value: "xhigh" },
-          { id: "fast", value: "true" },
-        ],
-      });
-      assert.deepEqual(body.repos, [{ url: "https://github.com/ThePrimeagen/Oligarchy" }]);
+      assert.equal(result.stdout, "");
+      assert.deepEqual(proxy.received, [
+        {
+          method: "POST",
+          url: "/send-keys",
+          authorization: "Bearer test-token",
+          body: { id: "session-1", keys: "hello", encoding: "oligarchy", agent: "agent-1" },
+        },
+      ]);
     } finally {
-      await new Promise<void>((done) => server.close(() => done()));
+      await close(proxy.server);
     }
   });
 
-  it("accepts test run flags after they parse", async () => {
-    const equals = await runClient(
-      ["test", "run", "--ticket", "OLI-42", "--server_url=https://qemu.example.com"],
-      { CURSOR_API_TOKEN: "" },
-    );
-    assert.notEqual(equals.code, 0);
-    assert.match(equals.stderr, /CURSOR_API_TOKEN is not set/);
+  it("takes the server from SERVER_URL when --server-url is omitted", async () => {
+    const proxy = await stubProxy(ok);
+    try {
+      const result = await runClient(["send-keys", "--agent-id", "agent-1", "session-1", "hello"], {
+        SERVER_URL: proxy.url,
+      });
+      assert.equal(result.stderr, "");
+      assert.equal(result.code, 0);
+      assert.equal(proxy.received.length, 1);
+    } finally {
+      await close(proxy.server);
+    }
+  });
 
-    const spaced = await runClient(
-      ["test", "run", "--server_url", "http://127.0.0.1:42069", "--ticket", "OLI-42"],
-      { CURSOR_API_TOKEN: "" },
-    );
-    assert.notEqual(spaced.code, 0);
-    assert.match(spaced.stderr, /CURSOR_API_TOKEN is not set/);
+  it("start posts the ISO url and agent, omits a missing disk, and prints the id", async () => {
+    const proxy = await stubProxy(() => ({ status: 200, body: '{"id":"11111111-1111-4111-8111-111111111111"}' }));
+    try {
+      const result = await runClient([
+        "start",
+        "--agent-id",
+        "agent-1",
+        "--server-url",
+        proxy.url,
+        "--iso",
+        "https://example.com/omarchy.iso",
+      ]);
+      assert.equal(result.stderr, "");
+      assert.equal(result.code, 0);
+      assert.equal(result.stdout, "11111111-1111-4111-8111-111111111111\n");
+      assert.deepEqual(proxy.received, [
+        {
+          method: "POST",
+          url: "/start",
+          authorization: "Bearer test-token",
+          body: { iso: "https://example.com/omarchy.iso", agent: "agent-1" },
+        },
+      ]);
+    } finally {
+      await close(proxy.server);
+    }
+  });
+
+  it("get-image writes the PNG bytes to --output", async () => {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+    const proxy = await stubProxy(() => ({ status: 200, headers: { "Content-Type": "image/png" }, body: png }));
+    const output = join(tmpdir(), `oligarchy-client-test-${process.pid}.png`);
+    try {
+      const result = await runClient([
+        "get-image",
+        "--agent-id",
+        "agent-1",
+        "--server-url",
+        proxy.url,
+        "session-1",
+        "-o",
+        output,
+      ]);
+      assert.equal(result.stderr, "");
+      assert.equal(result.code, 0);
+      assert.equal(result.stdout, "");
+      assert.deepEqual(await readFile(output), png);
+      assert.equal(proxy.received[0].method, "GET");
+      assert.equal(proxy.received[0].url, "/image?id=session-1&agent=agent-1");
+      assert.equal(proxy.received[0].authorization, "Bearer test-token");
+    } finally {
+      await close(proxy.server);
+      await rm(output, { force: true });
+    }
+  });
+
+  it("get-serial writes the bytes to stdout without --output", async () => {
+    const proxy = await stubProxy(() => ({ status: 200, headers: { "Content-Type": "text/plain" }, body: "boot log\n" }));
+    try {
+      const result = await runClient(["get-serial", "--agent-id", "agent-1", "--server-url", proxy.url, "session-1"]);
+      assert.equal(result.stderr, "");
+      assert.equal(result.code, 0);
+      assert.equal(result.stdout, "boot log\n");
+      assert.equal(proxy.received[0].url, "/serial?id=session-1&agent=agent-1");
+    } finally {
+      await close(proxy.server);
+    }
+  });
+
+  it("send-mouse posts the point, button, and clicks", async () => {
+    const proxy = await stubProxy(ok);
+    try {
+      const result = await runClient([
+        "send-mouse",
+        "--agent-id",
+        "agent-1",
+        "--server-url",
+        proxy.url,
+        "session-1",
+        "0.5",
+        "0.25",
+        "left",
+        "2",
+      ]);
+      assert.equal(result.stderr, "");
+      assert.equal(result.code, 0);
+      assert.deepEqual(proxy.received[0].body, { id: "session-1", x: 0.5, y: 0.25, agent: "agent-1", button: "left", clicks: 2 });
+    } finally {
+      await close(proxy.server);
+    }
+  });
+
+  it("intent start and intent end take kebab-case flags", async () => {
+    const proxy = await stubProxy(ok);
+    try {
+      const started = await runClient([
+        "intent",
+        "start",
+        "--agent-id",
+        "agent-1",
+        "--server-url",
+        proxy.url,
+        "--session-id",
+        "session-1",
+        "--test-result-id",
+        "result-1",
+        "--message",
+        "wait for the boot menu",
+      ]);
+      assert.equal(started.stderr, "");
+      assert.equal(started.code, 0);
+      const ended = await runClient([
+        "intent",
+        "end",
+        "--agent-id",
+        "agent-1",
+        "--server-url",
+        proxy.url,
+        "--session-id",
+        "session-1",
+      ]);
+      assert.equal(ended.stderr, "");
+      assert.equal(ended.code, 0);
+      assert.deepEqual(
+        proxy.received.map((request) => [request.url, request.body]),
+        [
+          ["/intent/start", { id: "session-1", agent: "agent-1", test_result_id: "result-1", message: "wait for the boot menu" }],
+          ["/intent/end", { id: "session-1", agent: "agent-1" }],
+        ],
+      );
+    } finally {
+      await close(proxy.server);
+    }
+  });
+
+  it("stop posts the verdict and reason", async () => {
+    const proxy = await stubProxy(ok);
+    try {
+      const result = await runClient([
+        "stop",
+        "--agent-id",
+        "agent-1",
+        "--server-url",
+        proxy.url,
+        "session-1",
+        "failed",
+        "installer hung",
+      ]);
+      assert.equal(result.stderr, "");
+      assert.equal(result.code, 0);
+      assert.deepEqual(proxy.received[0].body, { id: "session-1", agent: "agent-1", status: "failed", reason: "installer hung" });
+    } finally {
+      await close(proxy.server);
+    }
+  });
+
+  it("prints the actions for --help", async () => {
+    const result = await runClient(["--help"]);
+    assert.equal(result.code, 0);
+    assert.match(result.stdout, /start/);
+    assert.match(result.stdout, /intent start/);
+    assert.match(result.stdout, /stop/);
   });
 });
 
 describe("./client unhappy path", () => {
-  it("rejects an ISO that is not HTTPS", async () => {
-    const result = await runClient([
-      "test",
-      "new",
-      "--iso",
-      "http://example.com/omarchy.iso",
-      "--server_url=https://qemu.example.com",
-      "--version",
-      "1.2.3",
-    ]);
-
+  it("rejects a QEMU action without --agent-id", async () => {
+    const result = await runClient(["send-keys", "session-1", "hello"]);
     assert.notEqual(result.code, 0);
-    assert.equal(result.stdout.includes("{"), false);
-    assert.match(result.stderr, /iso must be a valid https url/);
+    assert.match(result.stderr, /Missing required flag: --agent-id/);
   });
 
-  it("rejects an HTTPS ISO without a host", async () => {
-    const result = await runClient([
-      "test",
-      "new",
-      "--iso",
-      "https://?",
-      "--server_url=https://qemu.example.com",
-      "--version",
-      "1.2.3",
-    ]);
-
+  it("rejects an underscore flag", async () => {
+    const result = await runClient(["intent", "end", "--agent-id", "agent-1", "--session_id", "session-1"]);
     assert.notEqual(result.code, 0);
-    assert.match(result.stderr, /iso must be a valid https url/);
+    assert.match(result.stderr, /Unrecognized flag: --session_id/);
   });
 
-  it("rejects a missing ISO", async () => {
-    const missingIso = await runClient([
-      "test",
-      "new",
-      "--server_url=https://qemu.example.com",
-      "--version",
-      "1.2.3",
-    ]);
-    assert.notEqual(missingIso.code, 0);
-    assert.match(missingIso.stderr, /iso/);
+  it("rejects a missing OLIGARCHY_TOKEN before calling the proxy", async () => {
+    const proxy = await stubProxy(ok);
+    try {
+      const result = await runClient(["send-keys", "--agent-id", "agent-1", "--server-url", proxy.url, "session-1", "hello"], {
+        OLIGARCHY_TOKEN: "",
+      });
+      assert.notEqual(result.code, 0);
+      assert.match(result.stderr, /OLIGARCHY_TOKEN is not set/);
+      assert.deepEqual(proxy.received, []);
+    } finally {
+      await close(proxy.server);
+    }
   });
 
-  it("uses SERVER_URL even when --server_url is invalid", async () => {
-    const result = await runClient(
-      [
-        "test",
-        "new",
-        "--iso",
-        "https://example.com/omarchy.iso",
-        "--server_url=ssh://ignored.example",
-        "--version",
-        "1.2.3",
-      ],
-      { LINEAR_API_TOKEN: "", SERVER_URL: "https://from.env.example" },
-    );
-    assert.notEqual(result.code, 0);
-    assert.match(result.stderr, /LINEAR_API_TOKEN is not set/);
+  it("rejects an unknown action and an intent without start or end", async () => {
+    const unknown = await runClient(["reboot", "--agent-id", "agent-1"]);
+    assert.notEqual(unknown.code, 0);
+    assert.match(unknown.stderr, /unknown action: reboot/);
+
+    const intent = await runClient(["intent", "--agent-id", "agent-1"]);
+    assert.notEqual(intent.code, 0);
+    assert.match(intent.stderr, /intent: expected start or end/);
   });
 
-  it("rejects a SERVER_URL outside HTTP and HTTPS", async () => {
-    const result = await runClient(
-      ["test", "new", "--iso", "https://example.com/omarchy.iso", "--version", "1.2.3"],
-      { SERVER_URL: "ssh://qemu.example.com" },
-    );
-
-    assert.notEqual(result.code, 0);
-    assert.match(result.stderr, /server_url must be a valid http or https url/);
+  it("prints the server's error and exits 1", async () => {
+    const proxy = await stubProxy(() => ({ status: 404, body: '{"error":"no session session-1"}' }));
+    try {
+      const result = await runClient(["send-keys", "--agent-id", "agent-1", "--server-url", proxy.url, "session-1", "hello"]);
+      assert.equal(result.code, 1);
+      assert.equal(result.stdout, "");
+      assert.equal(result.stderr, "no session session-1\n");
+    } finally {
+      await close(proxy.server);
+    }
   });
 
-  it("rejects a missing version", async () => {
-    const result = await runClient([
-      "test",
-      "new",
-      "--iso",
-      "https://example.com/omarchy.iso",
-      "--server_url=https://qemu.example.com",
-    ]);
-
-    assert.notEqual(result.code, 0);
-    assert.match(result.stderr, /version/);
+  it("rejects a send-mouse coordinate outside 0..1 before calling the proxy", async () => {
+    const proxy = await stubProxy(ok);
+    try {
+      const result = await runClient(["send-mouse", "--agent-id", "agent-1", "--server-url", proxy.url, "session-1", "1.5", "0.5"]);
+      assert.notEqual(result.code, 0);
+      assert.match(result.stderr, /x and y must be in 0\.\.1/);
+      assert.deepEqual(proxy.received, []);
+    } finally {
+      await close(proxy.server);
+    }
   });
 
-  it("rejects a server URL outside HTTP and HTTPS", async () => {
-    const result = await runClient([
-      "test",
-      "new",
-      "--iso",
-      "https://example.com/omarchy.iso",
-      "--server_url=ssh://qemu.example.com",
-      "--version",
-      "1.2.3",
-    ]);
-
-    assert.notEqual(result.code, 0);
-    assert.match(result.stderr, /server_url must be a valid http or https url/);
+  it("rejects a start whose local ISO does not exist before calling the proxy", async () => {
+    const proxy = await stubProxy(ok);
+    try {
+      const result = await runClient(["start", "--agent-id", "agent-1", "--server-url", proxy.url, "--iso", "missing.iso"]);
+      assert.notEqual(result.code, 0);
+      assert.match(result.stderr, /iso: .*missing\.iso/);
+      assert.deepEqual(proxy.received, []);
+    } finally {
+      await close(proxy.server);
+    }
   });
 
-  it("rejects test run without a ticket or a server URL", async () => {
-    const missingTicket = await runClient(
-      ["test", "run", "--server_url", "https://qemu.example.com"],
-      { CURSOR_API_TOKEN: "test-token" },
-    );
-    assert.notEqual(missingTicket.code, 0);
-    assert.equal(missingTicket.stdout.includes("Agent here"), false);
-    assert.match(missingTicket.stderr, /Missing required flag: --ticket/);
-
-    const emptyTicket = await runClient(
-      ["test", "run", "--ticket", "", "--server_url", "https://qemu.example.com"],
-      { CURSOR_API_TOKEN: "test-token" },
-    );
-    assert.notEqual(emptyTicket.code, 0);
-    assert.equal(emptyTicket.stdout.includes("Agent here"), false);
-    assert.match(emptyTicket.stderr, /--ticket.*length of at least 1/);
-
-    const missingServer = await runClient(
-      ["test", "run", "--ticket", "OLI-42"],
-      { CURSOR_API_TOKEN: "test-token" },
-    );
-    assert.notEqual(missingServer.code, 0);
-    assert.equal(missingServer.stdout.includes("Agent here"), false);
-    assert.match(missingServer.stderr, /Missing required flag: --server_url/);
-  });
-
-  it("rejects a test run server URL outside HTTP and HTTPS", async () => {
-    const result = await runClient(
-      ["test", "run", "--ticket", "OLI-42", "--server_url=ssh://qemu.example.com"],
-      { CURSOR_API_TOKEN: "test-token" },
-    );
-
-    assert.notEqual(result.code, 0);
-    assert.equal(result.stdout.includes("Agent here"), false);
-    assert.match(result.stderr, /server_url must be a valid http or https url/);
-  });
-
-  it("rejects test without --list", async () => {
-    const result = await runClient(["test"]);
-    assert.notEqual(result.code, 0);
-    assert.match(result.stderr, /test: --list is required/);
-  });
-
-  it("rejects a test definition name that does not exist", async () => {
-    const result = await runClient(["test", "--list", "--name", "missing-definition"]);
-    assert.notEqual(result.code, 0);
-    assert.match(result.stderr, /test: no test definition named missing-definition/);
+  it("unwraps a refused connection", async () => {
+    const result = await runClient(["send-keys", "--agent-id", "agent-1", "--server-url", "http://127.0.0.1:1", "session-1", "hello"]);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /fetch failed: .*ECONNREFUSED/);
   });
 });
