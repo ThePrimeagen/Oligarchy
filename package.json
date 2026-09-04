@@ -4,14 +4,15 @@
   "type": "module",
   "bin": {
     "client": "src/client/index.ts",
-    "ctrl": "src/ctrl/index.ts"
+    "ctrl": "src/ctrl/index.ts",
+    "session": "src/session/index.ts"
   },
   "scripts": {
     "client": "node --experimental-strip-types src/client/index.ts",
     "ctrl": "node --experimental-strip-types src/ctrl/index.ts",
-    "runner": "node --experimental-strip-types src/qemu/runner.ts",
+    "session": "node --experimental-strip-types src/session/index.ts",
     "dev": "wrangler dev --remote",
-    "test": "node --test --experimental-strip-types src/client.test.ts src/ctrl.test.ts src/ctrl/actions/test.test.ts src/linear.test.ts src/cursor-agent/client.test.ts src/qmp/json-stream.test.ts src/qemu/client.test.ts src/qemu/keys.test.ts src/sentry.test.ts",
+    "test": "node --test --experimental-strip-types src/client.test.ts src/ctrl.test.ts src/session.test.ts src/ctrl/actions/test.test.ts src/linear.test.ts src/cursor-agent/client.test.ts src/qmp/json-stream.test.ts src/qemu/client.test.ts src/qemu/keys.test.ts src/sentry.test.ts",
     "lint": "oxlint --type-aware --type-check",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node --experimental-strip-types src/db/migrate.ts"
