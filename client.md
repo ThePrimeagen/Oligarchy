@@ -6,23 +6,23 @@ Consult this table of contents first. Read only the section you need.
 |---------|-----:|
 | [Important](#important) | 27 |
 | [Environment](#environment) | 31 |
-| [Invoke](#invoke) | 39 |
-| [start](#start) | 55 |
-| [get-image](#get-image) | 69 |
-| [get-serial](#get-serial) | 80 |
-| [send-keys](#send-keys) | 102 |
-| [send-mouse](#send-mouse) | 114 |
-| [intent](#intent) | 128 |
-| [stop](#stop) | 139 |
-| [test](#test) | 151 |
-| [test new](#test-new) | 164 |
-| [test list](#test-list) | 175 |
-| [test run](#test-run) | 185 |
-| [test-results](#test-results) | 195 |
-| [session](#session) | 206 |
-| [Keys](#keys) | 220 |
-| [Mouse](#mouse) | 232 |
-| [The loop](#the-loop) | 240 |
+| [Invoke](#invoke) | 43 |
+| [start](#start) | 59 |
+| [get-image](#get-image) | 73 |
+| [get-serial](#get-serial) | 84 |
+| [send-keys](#send-keys) | 106 |
+| [send-mouse](#send-mouse) | 118 |
+| [intent](#intent) | 132 |
+| [stop](#stop) | 143 |
+| [test](#test) | 155 |
+| [test new](#test-new) | 168 |
+| [test list](#test-list) | 180 |
+| [test run](#test-run) | 190 |
+| [test-results](#test-results) | 200 |
+| [session](#session) | 211 |
+| [Keys](#keys) | 225 |
+| [Mouse](#mouse) | 237 |
+| [The loop](#the-loop) | 245 |
 
 ## Important
 
@@ -34,7 +34,7 @@ If you are the client, or an agent driving the client: do not look at code. Only
 
 If `DATABASE_URL` or `OLIGARCHY_TOKEN` is missing, that is a failure. Stop.
 
-The proxy and the client both read `OLIGARCHY_TOKEN` from the environment. The client sends it on every request to the proxy. Starting either without it exits 1. The proxy, `test --list`, `test new`, `test-results`, and `session` also read `DATABASE_URL` from the environment. A missing `DATABASE_URL` or `LINEAR_API_TOKEN` exits 1. `test list` needs `LINEAR_API_TOKEN` only. `test run` reads `CURSOR_API_TOKEN`; a missing one exits 1.
+The proxy and the client both read `OLIGARCHY_TOKEN` from the environment. The client sends it on every request to the proxy. Starting either without it exits 1. The proxy, `test --list`, `test new`, `test-results`, and `session` also read `DATABASE_URL` from the environment. A missing `DATABASE_URL` or `LINEAR_API_TOKEN` exits 1. `test new` also reads `SERVER_URL`; if it is set, that URL is stored on the run and written into every Linear issue. If it is unset, `--server_url` is used, then `http://127.0.0.1:42069`. `test list` needs `LINEAR_API_TOKEN` only. `test run` reads `CURSOR_API_TOKEN`; a missing one exits 1.
 
 ## Invoke
 
@@ -163,14 +163,15 @@ Lists stored test definitions. `--list` is required. Not used while driving a gu
 
 ## test new
 
-Creates one pending test run and one Linear issue per stored test definition. Pass `--name` to create a run for one existing definition instead of every definition. Not used while driving a guest. Reads `DATABASE_URL` and `LINEAR_API_TOKEN` from the environment.
+Creates one pending test run and one Linear issue per stored test definition. Pass `--name` to create a run for one existing definition instead of every definition. Not used while driving a guest. Reads `DATABASE_URL`, `LINEAR_API_TOKEN`, and `SERVER_URL` from the environment.
 
 ```bash
+./client test new --iso https://example.com/omarchy.iso --version 1.2.3
 ./client test new --iso https://example.com/omarchy.iso --server_url=https://qemu.example.com --version 1.2.3
 ./client test new --iso https://example.com/omarchy.iso --server_url=https://qemu.example.com --version 1.2.3 --name "Install Omarchy"
 ```
 
-`--iso` must be an HTTPS URL. `--server_url` may be HTTP or HTTPS. `--version` is required. `--name` is the stored definition's name. A name that matches no definition is a failure.
+`--iso` must be an HTTPS URL. `--server_url` may be HTTP or HTTPS and is optional. `SERVER_URL` is used first, then `--server_url`, then `http://127.0.0.1:42069`. `--version` is required. `--name` is the stored definition's name. A name that matches no definition is a failure.
 
 ## test list
 

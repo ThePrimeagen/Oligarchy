@@ -4,7 +4,7 @@ The TypeScript client for the oligarchy control plane. It sends HTTP requests to
 
 ```bash
 ./client test --list [--details] [--name <definition>]
-./client test new --iso <https-url> --server_url=<http-or-https-url> --version <version> [--name <definition>]
+./client test new --iso <https-url> [--server_url=<http-or-https-url>] --version <version> [--name <definition>]
 ./client test list
 ./client test run --ticket <linear-ticket> --server_url=<http-or-https-url>
 ./client --agent-id <agent> test-results --id <result-id> --status success|failed [--reason <text>]
@@ -36,13 +36,14 @@ Prints stored test definitions. `--list` is required; invoking `test` without it
 
 ## test new
 
-Creates one pending test run (ISO URL and server URL stored on the run) and one pending result for every stored test definition, then opens one Linear issue per definition. `--name` selects one existing definition by its unique name and creates that one result and issue instead. An unknown name is a failure. Each issue is created with its title and labels (`agent test` plus the required `--version` value; missing labels are created on the Linear team), then described in a second call, because the body names the issue's own identifier as the driver's `--agent-id` and Linear assigns that identifier on create. The body is `prompts/linear-issue.html` with its `{{VARIABLES}}` filled: `LINEAR_TICKET`, `RUN_ID`, `RESULT_ID`, `VERSION`, `ISO_URL`, `SERVER_URL`, the definition's `TEST_NAME`, `TEST_DESCRIPTION`, `TEST_INSTRUCTION`, and `TEST_PROOF`, `CLIENT_MD`, the contents of `client.md`, and `SUB_AGENT`, the reviewer model. A variable in the template with no value is an error. The command reads `DATABASE_URL` and `LINEAR_API_TOKEN` from the environment (a `.env` fills in missing variables only), uses the first Linear team available to that API token, writes the creation line through the database logger, and prints the run and Linear issues as JSON.
+Creates one pending test run (ISO URL and server URL stored on the run) and one pending result for every stored test definition, then opens one Linear issue per definition. `--name` selects one existing definition by its unique name and creates that one result and issue instead. An unknown name is a failure. Each issue is created with its title and labels (`agent test` plus the required `--version` value; missing labels are created on the Linear team), then described in a second call, because the body names the issue's own identifier as the driver's `--agent-id` and Linear assigns that identifier on create. The body is `prompts/linear-issue.html` with its `{{VARIABLES}}` filled: `LINEAR_TICKET`, `RUN_ID`, `RESULT_ID`, `VERSION`, `ISO_URL`, `SERVER_URL`, the definition's `TEST_NAME`, `TEST_DESCRIPTION`, `TEST_INSTRUCTION`, and `TEST_PROOF`, `CLIENT_MD`, the contents of `client.md`, and `SUB_AGENT`, the reviewer model. A variable in the template with no value is an error. The command reads `DATABASE_URL`, `LINEAR_API_TOKEN`, and `SERVER_URL` from the environment (a `.env` fills in missing variables only), uses the first Linear team available to that API token, writes the creation line through the database logger, and prints the run and Linear issues as JSON.
 
-The ISO must be an HTTPS URL. The server may be an HTTP or HTTPS URL. `--version` is required and must be non-empty. `--name` is optional. Effect accepts both `--flag=<value>` and `--flag <value>`.
+The ISO must be an HTTPS URL. The server may be an HTTP or HTTPS URL. `SERVER_URL` is used first, then `--server_url`, then `http://127.0.0.1:42069`. `--version` is required and must be non-empty. `--name` is optional. Effect accepts both `--flag=<value>` and `--flag <value>`.
 
 Run the root wrapper directly:
 
 ```bash
+./client test new --iso https://example.com/omarchy.iso --version 1.2.3
 ./client test new --iso https://example.com/omarchy.iso --server_url=https://qemu.example.com --version 1.2.3
 ./client test new --iso https://example.com/omarchy.iso --server_url=https://qemu.example.com --version 1.2.3 --name "Install Omarchy"
 ```
