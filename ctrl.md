@@ -65,7 +65,7 @@ Lists stored test definitions, one name per line. Not used while driving a guest
 ./ctrl test new --server-url <url> --iso <https-url> --version <version> [--name <definition>]
 ```
 
-Creates one pending test run and one Linear issue per stored test definition, and prints them as JSON. `--server-url` is stored on the run and written into every issue as the proxy the driving agent talks to. Not used while driving a guest. Reads `LINEAR_API_TOKEN`.
+Creates one pending test run and one Linear issue per stored test definition, and prints them as JSON. Each issue is assigned to `prime@terminal.shop`. `--server-url` is stored on the run and written into every issue as the proxy the driving agent talks to. Not used while driving a guest. Reads `LINEAR_API_TOKEN`.
 
 - `--iso <https-url>` — the ISO the agents boot. Must be HTTPS.
 - `--version <version>` — the version label attached to every issue.

@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 
 const LINEAR_API_URL = "https://api.linear.app/graphql";
 const AGENT_TEST_LABEL = "agent test";
+const ASSIGNEE_EMAIL = "prime@terminal.shop";
 const SUB_AGENT = "Grok 4.6 high fast (cursor-grok-4.6-high-fast)";
 
 export type ExperimentTest = {
@@ -148,9 +149,24 @@ export async function linearLabelIds(token: string, teamId: string, version: str
   return [await linearLabelId(token, teamId, AGENT_TEST_LABEL), await linearLabelId(token, teamId, version)];
 }
 
+export async function linearAssigneeId(token: string): Promise<string> {
+  const users = await linearRequest<{ users: { nodes: { id: string }[] } }>(
+    token,
+    "query ExperimentAssignee($email: String!) { users(filter: { email: { eq: $email } }, first: 1) { nodes { id } } }",
+    { email: ASSIGNEE_EMAIL },
+  );
+  const user = users.users.nodes[0];
+  if (user === undefined) {
+    throw new Error(`linear: no user ${ASSIGNEE_EMAIL}`);
+  }
+  return user.id;
+}
+
 export async function createLinearTicket(token: string, experiment: Experiment, test: ExperimentTest): Promise<LinearTicket> {
   const teamId = await linearTeamId(token);
-  const ticket = await createLinearIssue(token, teamId, await linearLabelIds(token, teamId, experiment.version), test);
+  const labelIds = await linearLabelIds(token, teamId, experiment.version);
+  const assigneeId = await linearAssigneeId(token);
+  const ticket = await createLinearIssue(token, teamId, labelIds, assigneeId, test);
   await describeLinearIssue(token, ticket, experiment, test);
   return ticket;
 }
@@ -159,6 +175,7 @@ export async function createLinearIssue(
   token: string,
   teamId: string,
   labelIds: string[],
+  assigneeId: string,
   test: ExperimentTest,
 ): Promise<LinearTicket> {
   const result = await linearRequest<{
@@ -183,6 +200,7 @@ export async function createLinearIssue(
         teamId,
         title: `Omarchy: ${test.name}`,
         labelIds,
+        assigneeId,
       },
     },
   );

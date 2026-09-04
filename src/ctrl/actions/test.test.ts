@@ -164,6 +164,9 @@ describe("createExperiment happy path", () => {
           data: { issueLabels: { nodes: [{ id: labelId(String(parsed.variables?.name)) }] } },
         });
       }
+      if (parsed.query.includes("users(filter")) {
+        return Response.json({ data: { users: { nodes: [{ id: "user-id" }] } } });
+      }
       if (parsed.query.includes("issueUpdate")) {
         descriptions.push(parsed);
         return describeResponse();
@@ -205,6 +208,7 @@ describe("createExperiment happy path", () => {
           teamId: "team-id",
           title: `Omarchy: ${test.name}`,
           labelIds: [labelId("agent test"), labelId("1.2.3")],
+          assigneeId: "user-id",
         },
       });
       assert.deepEqual(descriptions[index].variables, {
@@ -246,6 +250,9 @@ describe("createExperiment happy path", () => {
         return Response.json({
           data: { issueLabels: { nodes: [{ id: labelId(String(parsed.variables?.name)) }] } },
         });
+      }
+      if (parsed.query.includes("users(filter")) {
+        return Response.json({ data: { users: { nodes: [{ id: "user-id" }] } } });
       }
       if (parsed.query.includes("issueUpdate")) {
         return describeResponse();
@@ -362,6 +369,9 @@ describe("createExperiment unhappy path", () => {
         return Response.json({
           data: { issueLabels: { nodes: [{ id: labelId(String(body.variables?.name)) }] } },
         });
+      }
+      if (body.query.includes("users(filter")) {
+        return Response.json({ data: { users: { nodes: [{ id: "user-id" }] } } });
       }
       if (body.query.includes("issueUpdate")) {
         if ((body.variables?.id as string) === "issue-OLI-43") {

@@ -123,6 +123,9 @@ describe("createLinearTicket happy path", () => {
           data: { issueLabels: { nodes: [{ id: labelId(String(body.variables?.name)) }] } },
         });
       }
+      if (body.query.includes("users(filter")) {
+        return Response.json({ data: { users: { nodes: [{ id: "user-id" }] } } });
+      }
       if (body.query.includes("issueUpdate")) {
         return describeResponse();
       }
@@ -136,21 +139,23 @@ describe("createLinearTicket happy path", () => {
       identifier: "OLI-42",
       url: "https://linear.app/issue/OLI-42",
     });
-    assert.equal(requests.length, 5);
+    assert.equal(requests.length, 6);
     assert.equal(requests[0].headers.get("Authorization"), "linear-token");
     assert.match(requests[0].body.query, /teams\(first: 1\)/);
     assert.match(requests[1].body.query, /\$teamId: ID!/);
     assert.deepEqual(requests[1].body.variables, { name: "agent test", teamId: "team-id" });
     assert.deepEqual(requests[2].body.variables, { name: experiment.version, teamId: "team-id" });
-    assert.deepEqual(requests[3].body.variables, {
+    assert.deepEqual(requests[3].body.variables, { email: "prime@terminal.shop" });
+    assert.deepEqual(requests[4].body.variables, {
       input: {
         teamId: "team-id",
         title: `Omarchy: ${test.name}`,
         labelIds: [labelId("agent test"), labelId(experiment.version)],
+        assigneeId: "user-id",
       },
     });
-    assert.match(requests[4].body.query, /issueUpdate\(id: \$id/);
-    assert.deepEqual(requests[4].body.variables, {
+    assert.match(requests[5].body.query, /issueUpdate\(id: \$id/);
+    assert.deepEqual(requests[5].body.variables, {
       id: "issue-OLI-42",
       input: { description: linearTicketDescription(experiment, test, "OLI-42") },
     });
@@ -180,6 +185,9 @@ describe("createLinearTicket happy path", () => {
             },
           },
         });
+      }
+      if (body.query.includes("users(filter")) {
+        return Response.json({ data: { users: { nodes: [{ id: "user-id" }] } } });
       }
       if (body.query.includes("issueUpdate")) {
         return describeResponse();
@@ -219,6 +227,25 @@ describe("createLinearTicket unhappy path", () => {
     });
   });
 
+  it("rejects when prime@terminal.shop is not a workspace user", async () => {
+    mock.method(globalThis, "fetch", async (_input: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1]) => {
+      const body = await parseLinearRequest(init);
+      if (body.query.includes("teams(first: 1)")) {
+        return Response.json({ data: { teams: { nodes: [{ id: "team-id" }] } } });
+      }
+      if (body.query.includes("issueLabels")) {
+        return Response.json({
+          data: { issueLabels: { nodes: [{ id: labelId(String(body.variables?.name)) }] } },
+        });
+      }
+      return Response.json({ data: { users: { nodes: [] } } });
+    });
+
+    await assert.rejects(() => createLinearTicket("linear-token", experiment, experiment.tests[0]), {
+      message: "linear: no user prime@terminal.shop",
+    });
+  });
+
   it("reports a label creation failure", async () => {
     mock.method(globalThis, "fetch", async (_input: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1]) => {
       const body = await parseLinearRequest(init);
@@ -253,6 +280,9 @@ describe("createLinearTicket unhappy path", () => {
         return Response.json({
           data: { issueLabels: { nodes: [{ id: labelId(String(body.variables?.name)) }] } },
         });
+      }
+      if (body.query.includes("users(filter")) {
+        return Response.json({ data: { users: { nodes: [{ id: "user-id" }] } } });
       }
       if (body.query.includes("issueUpdate")) {
         return Response.json({ data: { issueUpdate: { success: false } } });
