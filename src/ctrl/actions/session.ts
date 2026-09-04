@@ -152,7 +152,8 @@ export async function sessionInspectRun(argv: readonly string[]): Promise<void> 
     }
 
     if (args.dump) {
-      const data = await getBytes(args, `/dump?id=${encodeURIComponent(args.sessionId)}`);
+      // Postgres matched the id however it was cased; the proxy's map and paths hold the canonical form.
+      const data = await getBytes(args, `/dump?id=${encodeURIComponent(session.id)}`);
       await new Promise<void>((done, fail) => {
         process.stdout.write(data, (err) => (err ? fail(err) : done()));
       });

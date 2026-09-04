@@ -520,8 +520,8 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
       const data = yield* Effect.tryPromise({
         try: () => readFile(path),
         catch: (cause) =>
-          live === undefined && (cause as NodeJS.ErrnoException).code === "ENOENT"
-            ? conflict(`session "${id}" is not running on this proxy and left no console on disk`, id)
+          (cause as NodeJS.ErrnoException).code === "ENOENT"
+            ? conflict(`session "${id}" has no console on this proxy`, id)
             : internal(cause, { sessionId: id, agentId: live?.agent }),
       });
       log(db, {

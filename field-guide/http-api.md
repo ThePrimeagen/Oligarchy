@@ -64,8 +64,8 @@ Returns the session's serial console as `text/plain` bytes — whatever the gues
 Returns the session's serial console as `text/plain` bytes, for a session this proxy is running or one it has lost. Names no agent and is not an action: it is a read for whoever holds the token — `ctrl session --dump` — so it does not restart the session's inactivity window and is not shown to followers.
 
 - A session in this proxy's map answers with its console as it stands, the same bytes `/serial` returns.
-- A session the proxy does not hold is looked for on disk: its directory, `<tmpdir>/oligarchy-<id>`, survives a proxy that died mid-session (a stop, a timeout, and an orderly shutdown all remove it), and QEMU keeps appending to `serial.log` there for as long as it lives. If the file is there, its contents are the answer — the console up to the moment the guest died or was killed.
-- Neither is 409 `session "<id>" is not running on this proxy and left no console on disk`. An id that is not a UUID is 404 `unknown session "<id>"` before the disk is looked at: this proxy only ever mints UUIDs, and the id names a path.
+- A session the proxy does not hold is looked for on disk: its directory, `<tmpdir>/oligarchy-<id>`, survives a proxy that died mid-session (a stop, a timeout, a failed start, and an orderly shutdown all remove it), and QEMU keeps appending to `serial.log` there for as long as it lives. If the file is there, its contents are the answer — the console up to the moment the guest died or was killed.
+- No file is 409 `session "<id>" has no console on this proxy`: the session ended here and was cleaned up, it belongs to another proxy, it is still downloading its iso and has not booted, or a stop or timeout removed it while this read was in flight. An id that is not a UUID is 404 `unknown session "<id>"` before the disk is looked at: this proxy only ever mints UUIDs, and the id names a path.
 
 Logged at info as `dump; <n> bytes from the running machine in <ms>ms` or `dump; <n> bytes from disk in <ms>ms`, attributed to the session and, when it is running, its agent.
 

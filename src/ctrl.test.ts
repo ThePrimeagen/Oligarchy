@@ -250,15 +250,15 @@ describe("./ctrl happy path", () => {
     }
   });
 
-  it("session --dump takes the proxy from SERVER_URL and prints an empty console as nothing", async () => {
+  it("session --dump takes the proxy from SERVER_URL, sends the id as the database spells it, and prints an empty console as nothing", async () => {
     const sessionId = await anySessionId();
     const proxy = await stubProxy({ status: 200, body: "" });
     try {
-      const result = await runCtrl(["session", "--session-id", sessionId, "--dump"], { SERVER_URL: proxy.url });
+      const result = await runCtrl(["session", "--session-id", sessionId.toUpperCase(), "--dump"], { SERVER_URL: proxy.url });
       assert.equal(result.stderr, "");
       assert.equal(result.code, 0);
       assert.equal(result.stdout, "");
-      assert.equal(proxy.received.length, 1);
+      assert.deepEqual(proxy.received, [{ method: "GET", url: `/dump?id=${sessionId}`, authorization: "Bearer test-token" }]);
     } finally {
       await close(proxy.server);
     }
@@ -549,15 +549,15 @@ describe("./ctrl unhappy path", () => {
     const sessionId = await anySessionId();
     const proxy = await stubProxy({
       status: 409,
-      body: JSON.stringify({ error: `session "${sessionId}" is not running on this proxy and left no console on disk` }),
+      body: JSON.stringify({ error: `session "${sessionId}" has no console on this proxy` }),
     });
     try {
       const result = await runCtrl(["session", "--session-id", sessionId, "--dump", "--server-url", proxy.url]);
       assert.equal(result.code, 1);
       assert.equal(result.stdout, "");
       const [headline, stackHead, ...frames] = result.stderr.split("\n");
-      assert.equal(headline, `session "${sessionId}" is not running on this proxy and left no console on disk`);
-      assert.equal(stackHead, `Error: session "${sessionId}" is not running on this proxy and left no console on disk`);
+      assert.equal(headline, `session "${sessionId}" has no console on this proxy`);
+      assert.equal(stackHead, `Error: session "${sessionId}" has no console on this proxy`);
       assert.match(frames.join("\n"), /^\s+at .*src\/client\/http\.ts:\d+:\d+/m);
       assert.match(frames.join("\n"), /^\s+at .*src\/ctrl\/actions\/session\.ts:\d+:\d+/m);
       assert.equal(proxy.received.length, 1);
@@ -577,13 +577,15 @@ describe("./ctrl unhappy path", () => {
     assert.match(result.stderr, /code: 'ECONNREFUSED'/);
   });
 
-  it("session --session-id requires OLIGARCHY_TOKEN before doing anything", async () => {
+  it("session --session-id requires OLIGARCHY_TOKEN before doing anything, with --dump and with the JSON selectors alike", async () => {
     const proxy = await stubProxy({ status: 200, body: "never read\n" });
     try {
-      const result = await runCtrl(["session", "--session-id", randomUUID(), "--dump", "--server-url", proxy.url], { OLIGARCHY_TOKEN: "" });
-      assert.equal(result.code, 1);
-      assert.equal(result.stdout, "");
-      assert.match(result.stderr, /OLIGARCHY_TOKEN is not set/);
+      for (const selector of ["--dump", "--logs"]) {
+        const result = await runCtrl(["session", "--session-id", randomUUID(), selector, "--server-url", proxy.url], { OLIGARCHY_TOKEN: "" });
+        assert.equal(result.code, 1);
+        assert.equal(result.stdout, "");
+        assert.match(result.stderr, /OLIGARCHY_TOKEN is not set/);
+      }
       assert.deepEqual(proxy.received, []);
     } finally {
       await close(proxy.server);

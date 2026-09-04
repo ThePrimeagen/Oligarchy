@@ -39,7 +39,7 @@ If you are an agent driving a guest, you need two of these: [test start](#test-s
 The action comes first. Every value is a flag; there are no positional arguments. Flags may sit in any order after the action.
 
 - `--server-url <url>` — the oligarchy server, a full http or https URL. Required on every action; falls back to `SERVER_URL` from the environment. There is no default.
-- `DATABASE_URL` — read from the environment by every action. `test new` and `test list` also read `LINEAR_API_TOKEN`; `test run` also reads `CURSOR_API_TOKEN`; `session --session-id` also reads `OLIGARCHY_TOKEN`, the proxy's bearer token, for `--dump`. A `.env` in the current directory fills in missing variables only. A missing variable means exit 1.
+- `DATABASE_URL` — read from the environment by every action. `test new` and `test list` also read `LINEAR_API_TOKEN`; `test run` also reads `CURSOR_API_TOKEN`; `session --session-id` always also reads `OLIGARCHY_TOKEN`, the proxy's bearer token, because its `--dump` calls the proxy. A `.env` in the current directory fills in missing variables only. A missing variable means exit 1.
 
 A command that works exits 0. A command that fails exits 1 and prints the error: one headline, then the stack trace and the cause behind it. Read the headline first. `./ctrl <action> --help` prints that action's flags.
 
@@ -163,7 +163,7 @@ Prints what is stored for one session, as JSON. At least one selector is require
 - `--test-results` — the test result attributed to it, or `null`.
 - `--actions` — its QMP actions, oldest first.
 - `--all` — all four: `{ logs, results, test_definition, actions }`.
-- `--dump` — the session's serial console, printed raw, not as JSON. Asks the proxy at `--server-url`: a session running there answers with the console as it stands; a session it no longer holds still answers when its directory survived on the proxy host — a proxy that died mid-session never removed it — with everything the guest wrote to `/dev/ttyS0` up to the end. Neither running nor left on disk is a failure. Does not combine with the other selectors; redirect stdout to keep it (`> console.txt`). Reads `OLIGARCHY_TOKEN`.
+- `--dump` — the session's serial console, printed raw, not as JSON. Asks the proxy at `--server-url`: a session running there answers with the console as it stands; a session it no longer holds still answers when its directory survived on the proxy host — a proxy that died mid-session never removed it — with everything the guest wrote to `/dev/ttyS0` up to the end. A session that is neither is a failure: `session "<id>" has no console on this proxy`. Does not combine with the other selectors; redirect stdout to keep it (`> console.txt`). Reads `OLIGARCHY_TOKEN`.
 
 ```bash
 ./ctrl session --server-url https://qemu.example.com --session-id 6f1c...e2a9 --all
