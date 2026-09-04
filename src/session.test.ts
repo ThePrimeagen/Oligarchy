@@ -242,6 +242,26 @@ describe("./session follow completion", () => {
     assert.equal(await selection, FOLLOWED_ID);
   });
 
+  it("cancels with Escape or Ctrl-C while the session list is loading", async () => {
+    for (const [text, key] of [
+      ["\x1b", { name: "escape" }],
+      ["\x03", { name: "c", ctrl: true }],
+    ] as const) {
+      const term = pickerTerminal();
+      let provideRows: (rows: SessionListItem[]) => void = () => undefined;
+      const rows = new Promise<SessionListItem[]>((resolve) => {
+        provideRows = resolve;
+      });
+      const selection = pickFollowSession(rows, term.input, term.output, 16);
+      term.input.emit("keypress", text, key);
+
+      assert.equal(await selection, undefined);
+      provideRows([{ id: FOLLOWED_ID, status: "running", startedAt: "2026-09-04T11:59:55.000Z" }]);
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(term.readOutput().includes(FOLLOWED_ID), false);
+    }
+  });
+
   it("shows running sessions first, colors statuses, and selects with the keyboard", async () => {
     const term = pickerTerminal();
     const selection = pickFollowSession(
@@ -309,15 +329,17 @@ describe("./session follow completion", () => {
 
   it("reports that there is nothing to follow when no active sessions exist", async () => {
     const term = pickerTerminal();
-    const selection = await pickFollowSession(
-      [{ id: ENDED_ID, status: "failed", startedAt: "2026-09-04T11:58:00.000Z" }],
-      term.input,
-      term.output,
-      16,
+    await assert.rejects(
+      pickFollowSession(
+        [{ id: ENDED_ID, status: "failed", startedAt: "2026-09-04T11:58:00.000Z" }],
+        term.input,
+        term.output,
+        16,
+      ),
+      /no running or pending sessions/,
     );
 
-    assert.equal(selection, undefined);
-    assert.match(term.readOutput(), /no running or pending sessions/);
+    assert.doesNotMatch(term.readOutput(), /no running or pending sessions/);
   });
 
   it("cancels without selecting when escape is pressed", async () => {
@@ -470,6 +492,13 @@ describe("./session happy path", () => {
 });
 
 describe("./session unhappy path", () => {
+  it("enters follow completion when Tab and Enter arrive in one PTY write", async () => {
+    const result = await runTtySession("follow \t\r", "\x15exit\r");
+    assert.equal(result.code, 0);
+    assert.match(result.output, /DATABASE_URL is not set/);
+    assert.doesNotMatch(result.output, /usage: follow <session-id>/);
+  });
+
   it("reports a failed ctrl session list and keeps the prompt usable", async () => {
     const result = await runTtySession("follow \t", "\x15exit\r");
     assert.equal(result.code, 0);

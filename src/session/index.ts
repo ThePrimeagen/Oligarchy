@@ -2,7 +2,7 @@
 import { once } from "node:events";
 import { createInterface, type AsyncCompleter, type CompleterResult } from "node:readline";
 import { CliError } from "effect/unstable/cli";
-import { followRun, pickFollowSession, type SessionListItem } from "./actions/follow.ts";
+import { enableFollowPickerCompletion, followRun, pickFollowSession, type SessionListItem } from "./actions/follow.ts";
 import { getImageRun } from "./actions/get-image.ts";
 import { getSerialRun } from "./actions/get-serial.ts";
 import { intentRun } from "./actions/intent.ts";
@@ -35,11 +35,7 @@ async function completions(line: string): Promise<CompleterResult> {
       if (result.code !== 0) {
         throw new Error(result.stderr);
       }
-      const listed = (JSON.parse(result.stdout.toString("utf8")) as SessionListItem[]).filter((row) => row.id.startsWith(followArg[1]));
-      if (!listed.some((row) => row.status === "running" || row.status === "downloading")) {
-        throw new Error("no running or pending sessions");
-      }
-      return listed;
+      return (JSON.parse(result.stdout.toString("utf8")) as SessionListItem[]).filter((row) => row.id.startsWith(followArg[1]));
     });
     try {
       const sessionId = await pickFollowSession(rows, process.stdin, process.stdout, rl.getCursorPos().cols);
@@ -88,6 +84,7 @@ const session = createSession(args.serverUrl);
 let shuttingDown = false;
 
 const rl = createInterface({ input: process.stdin, output: process.stdout, completer });
+enableFollowPickerCompletion(rl);
 // While a follow holds the screen, Ctrl-C detaches from it; otherwise it leaves.
 rl.on("SIGINT", () => {
   if (session.following !== undefined) {

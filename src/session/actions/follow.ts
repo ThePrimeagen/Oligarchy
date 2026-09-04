@@ -37,6 +37,19 @@ const STATUS_COLOR: Record<Extract<FollowEvent, { type: "session" }>["status"], 
   timed_out: "\x1b[35m",
 };
 
+export function enableFollowPickerCompletion(readline: { line: string }): void {
+  const input = readline as { line: string; isCompletionEnabled: boolean };
+  let isCompletionEnabled = input.isCompletionEnabled;
+  // Node disables completion before the final character of an input chunk. Keep it
+  // enabled for follow so a Tab and Enter received together still enter the picker.
+  Object.defineProperty(input, "isCompletionEnabled", {
+    get: () => isCompletionEnabled || /^\s*follow\s+/.test(input.line),
+    set: (enabled: boolean) => {
+      isCompletionEnabled = enabled;
+    },
+  });
+}
+
 export function pickFollowSession(
   rows: SessionListItem[] | Promise<SessionListItem[]>,
   input: NodeJS.ReadStream,
@@ -46,6 +59,7 @@ export function pickFollowSession(
   let sessions: (SessionListItem & { status: "downloading" | "running" })[] | undefined;
   let selected = 0;
   let lineCount = 1;
+  let closed = false;
   const previousKeypressListeners = input.listeners("keypress");
   const inputWasPaused = input.isPaused();
   for (const listener of previousKeypressListeners) {
@@ -69,6 +83,7 @@ export function pickFollowSession(
 
   return new Promise((resolve, reject) => {
     const leave = (done: () => void): void => {
+      closed = true;
       input.pause();
       input.removeListener("keypress", onKeypress);
       output.write("\r");
@@ -93,10 +108,11 @@ export function pickFollowSession(
     };
 
     const onKeypress = (_text: string | undefined, key: Key): void => {
-      if (sessions === undefined) {
+      if (key.name === "escape" || (key.ctrl && key.name === "c")) {
+        leave(() => resolve(undefined));
+      } else if (sessions === undefined) {
         return;
-      }
-      if (key.name === "up" || (key.name === "tab" && key.shift)) {
+      } else if (key.name === "up" || (key.name === "tab" && key.shift)) {
         selected = (selected - 1 + sessions.length) % sessions.length;
         drawPicker(true);
       } else if (key.name === "down" || key.name === "tab") {
@@ -104,8 +120,6 @@ export function pickFollowSession(
         drawPicker(true);
       } else if (key.name === "return" || key.name === "enter") {
         leave(() => resolve(sessions![selected].id));
-      } else if (key.name === "escape" || (key.ctrl && key.name === "c")) {
-        leave(() => resolve(undefined));
       }
     };
 
@@ -114,6 +128,9 @@ export function pickFollowSession(
     input.resume();
     void Promise.resolve(rows).then(
       (listed) => {
+        if (closed) {
+          return;
+        }
         sessions = listed
           .filter(
             (row): row is SessionListItem & { status: "downloading" | "running" } =>
@@ -121,16 +138,17 @@ export function pickFollowSession(
           )
           .sort((a, b) => Number(a.status === "downloading") - Number(b.status === "downloading"));
         if (sessions.length === 0) {
-          leave(() => {
-            output.write("\r\nno running or pending sessions\r\n");
-            resolve(undefined);
-          });
+          leave(() => reject(new Error("no running or pending sessions")));
           return;
         }
         lineCount = sessions.length + 2;
         drawPicker(false);
       },
-      (err) => leave(() => reject(err)),
+      (err) => {
+        if (!closed) {
+          leave(() => reject(err));
+        }
+      },
     );
   });
 }
