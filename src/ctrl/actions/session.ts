@@ -89,7 +89,7 @@ const RESET = "\x1b[0m";
 const STATUS_WIDTH = "downloading".length;
 const AGE_WIDTH = "23h59m ago".length + 1;
 
-export function printSessions(rows: SessionRow[], json = false): void {
+export function printSessions(rows: SessionRow[], json: boolean): void {
   if (json) {
     console.log(JSON.stringify(rows));
     return;

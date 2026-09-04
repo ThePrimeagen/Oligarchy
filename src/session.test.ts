@@ -8,7 +8,7 @@ import { createInterface, type AsyncCompleter, type CompleterResult } from "node
 import { PassThrough } from "node:stream";
 import { describe, it } from "node:test";
 import { deflateSync } from "node:zlib";
-import { pickFollowSession, type SessionListItem } from "./session/actions/follow.ts";
+import { closeFollowPicker, pickFollowSession, type SessionListItem } from "./session/actions/follow.ts";
 
 const SESSION = resolve(import.meta.dirname, "../session");
 const SESSION_ID = "6f1c0000-0000-4000-8000-00000000e2a9";
@@ -70,20 +70,33 @@ async function runTtySession(input: string, afterInput: string, env: NodeJS.Proc
   });
   let output = "";
   let inputSent = false;
+  let afterInputSent = false;
+  let failSafe: NodeJS.Timeout | undefined;
   child.stdout.setEncoding("utf8");
   child.stdout.on("data", (data: string) => {
     output += data;
     if (!inputSent && output.includes("session> ")) {
       inputSent = true;
       child.stdin.write(input);
-      setTimeout(() => child.stdin.end(afterInput), 1800);
+      failSafe = setTimeout(() => {
+        if (!afterInputSent) {
+          afterInputSent = true;
+          child.stdin.end(afterInput);
+        }
+      }, 5000);
+    }
+    if (inputSent && !afterInputSent && output.includes("DATABASE_URL is not set")) {
+      afterInputSent = true;
+      clearTimeout(failSafe);
+      setImmediate(() => child.stdin.end(afterInput));
     }
   });
   const [code] = await once(child, "close");
+  clearTimeout(failSafe);
   return { code: code as number | null, output };
 }
 
-function pickerTerminal(): {
+function pickerTerminal(columns = 100, rows = 24): {
   input: NodeJS.ReadStream;
   output: NodeJS.WriteStream;
   readOutput: () => string;
@@ -98,7 +111,7 @@ function pickerTerminal(): {
   const input = inputStream as unknown as NodeJS.ReadStream;
   const output = outputStream as unknown as NodeJS.WriteStream;
   Object.assign(input, { isTTY: true, isRaw: false, setRawMode: () => input });
-  Object.assign(output, { isTTY: true, columns: 100, rows: 24 });
+  Object.assign(output, { isTTY: true, columns, rows });
   return { input, output, readOutput: () => written };
 }
 
@@ -262,14 +275,53 @@ describe("./session follow completion", () => {
     }
   });
 
+  it("restores the terminal when shutdown closes a loading picker", async () => {
+    const term = pickerTerminal();
+    let provideRows: (rows: SessionListItem[]) => void = () => undefined;
+    const rows = new Promise<SessionListItem[]>((resolve) => {
+      provideRows = resolve;
+    });
+    const selection = pickFollowSession(rows, term.input, term.output, 16);
+    closeFollowPicker();
+
+    assert.equal(await selection, undefined);
+    provideRows([{ id: FOLLOWED_ID, status: "running", startedAt: "2026-09-04T11:59:55.000Z" }]);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.match(term.readOutput(), /\x1b\[\?25l.*\x1b\[\?25h/s);
+    assert.equal(term.readOutput().includes(FOLLOWED_ID), false);
+  });
+
+  it("bounds and truncates the picker on a narrow, short terminal", async () => {
+    const term = pickerTerminal(30, 6);
+    const rows: SessionListItem[] = Array.from({ length: 10 }, (_, index) => ({
+      id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+      status: "running",
+      startedAt: "2026-09-04T11:59:55.000Z",
+    }));
+    const selection = pickFollowSession(Promise.resolve(rows), term.input, term.output, 16);
+    await new Promise((resolve) => setImmediate(resolve));
+    term.input.emit("keypress", "", { name: "up" });
+    term.input.emit("keypress", "\r", { name: "return" });
+
+    assert.equal(await selection, rows[9].id);
+    const output = term.readOutput();
+    const finalDraw = output.slice(output.lastIndexOf("active sessions"));
+    const plain = finalDraw.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "");
+    const lines = plain.split("\r\n");
+    assert.equal(lines.length, 5);
+    for (const line of lines) {
+      assert.ok(line.replaceAll("\r", "").length <= 30);
+    }
+  });
+
   it("shows running sessions first, colors statuses, and selects with the keyboard", async () => {
     const term = pickerTerminal();
     const selection = pickFollowSession(
-      [
+      Promise.resolve([
         { id: PENDING_ID, status: "downloading", startedAt: "2026-09-04T11:58:30.000Z" },
         { id: "00000000-0000-4000-8000-000000000001", status: "succeeded", startedAt: "2026-09-04T11:58:00.000Z" },
         { id: FOLLOWED_ID, status: "running", startedAt: "2026-09-04T11:59:55.000Z" },
-      ],
+      ]),
       term.input,
       term.output,
       16,
@@ -286,13 +338,13 @@ describe("./session follow completion", () => {
     assert.equal(output.includes("00000000-0000-4000-8000-000000000001"), false);
   });
 
-  it("leaves the selected UUID editable when Enter produces two keypresses", async () => {
+  it("leaves the selected UUID editable when LF arrives after the selected CR", async () => {
     const term = pickerTerminal();
     const complete = async (line: string): Promise<CompleterResult> => {
       const followArg = /^follow\s+(\S*)$/.exec(line);
       assert.ok(followArg !== null);
       const sessionId = await pickFollowSession(
-        [{ id: FOLLOWED_ID, status: "running", startedAt: "2026-09-04T11:59:55.000Z" }],
+        Promise.resolve([{ id: FOLLOWED_ID, status: "running", startedAt: "2026-09-04T11:59:55.000Z" }]),
         term.input,
         term.output,
         16,
@@ -319,6 +371,7 @@ describe("./session follow completion", () => {
     term.input.emit("keypress", "\t", { name: "tab" });
     await new Promise((resolve) => setImmediate(resolve));
     term.input.emit("keypress", "\r", { name: "return" });
+    await new Promise((resolve) => setTimeout(resolve, 50));
     term.input.emit("keypress", "\n", { name: "enter" });
     await new Promise((resolve) => setImmediate(resolve));
 
@@ -331,7 +384,7 @@ describe("./session follow completion", () => {
     const term = pickerTerminal();
     await assert.rejects(
       pickFollowSession(
-        [{ id: ENDED_ID, status: "failed", startedAt: "2026-09-04T11:58:00.000Z" }],
+        Promise.resolve([{ id: ENDED_ID, status: "failed", startedAt: "2026-09-04T11:58:00.000Z" }]),
         term.input,
         term.output,
         16,
@@ -345,7 +398,7 @@ describe("./session follow completion", () => {
   it("cancels without selecting when escape is pressed", async () => {
     const term = pickerTerminal();
     const selection = pickFollowSession(
-      [{ id: FOLLOWED_ID, status: "running", startedAt: "2026-09-04T11:59:55.000Z" }],
+      Promise.resolve([{ id: FOLLOWED_ID, status: "running", startedAt: "2026-09-04T11:59:55.000Z" }]),
       term.input,
       term.output,
       16,
