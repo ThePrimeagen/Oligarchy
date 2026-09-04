@@ -69,6 +69,39 @@ describe("db/query happy path", () => {
     assert.ok(names.includes("lock-screen"));
   });
 
+  it("lists sessions with their latest image id and ends the connection", async () => {
+    const result = await runQuery(
+      "const rows = await query.listSessions(url);\nconsole.log(JSON.stringify(rows.map((row) => [typeof row.id, typeof row.status, row.imageId === null || typeof row.imageId, row.queriedAt instanceof Date])));",
+      databaseUrl(),
+    );
+    assert.equal(result.hung, false, "process did not exit: the pg client was not ended");
+    assert.equal(result.stderr, "");
+    assert.equal(result.code, 0);
+    const rows = JSON.parse(result.stdout) as [string, string, true | string, boolean][];
+    assert.ok(rows.length <= 50);
+    for (const [id, status, imageId, queriedAtIsDate] of rows) {
+      assert.equal(id, "string");
+      assert.equal(status, "string");
+      assert.ok(imageId === true || imageId === "string");
+      assert.equal(queriedAtIsDate, true);
+    }
+  });
+
+  it("lists base prompts and ends the connection", async () => {
+    const result = await runQuery(
+      "const rows = await query.listTestBasePrompts(url);\nconsole.log(JSON.stringify(rows.map((row) => [typeof row.name, typeof row.prompt])));",
+      databaseUrl(),
+    );
+    assert.equal(result.hung, false, "process did not exit: the pg client was not ended");
+    assert.equal(result.stderr, "");
+    assert.equal(result.code, 0);
+    const rows = JSON.parse(result.stdout) as [string, string][];
+    for (const [name, prompt] of rows) {
+      assert.equal(name, "string");
+      assert.equal(prompt, "string");
+    }
+  });
+
   it("returns undefined for an unknown image id and still exits", async () => {
     const result = await runQuery(
       'const image = await query.getImage(url, "00000000-0000-4000-8000-000000000000");\nconsole.log(String(image));',
