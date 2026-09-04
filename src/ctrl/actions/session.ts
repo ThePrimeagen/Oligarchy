@@ -62,10 +62,52 @@ export async function sessionListRun(argv: readonly string[]): Promise<void> {
   const args: SessionListArgs = await parseCtrlArgs("session list", listSpec, argv);
   const db = connectDatabase(args.databaseUrl);
   try {
-    const rows = await db.select().from(sessions).orderBy(desc(sessions.startedAt), desc(sessions.id)).limit(args.count);
-    console.log(JSON.stringify(rows));
+    const rows = await db
+      .select({ id: sessions.id, status: sessions.status, startedAt: sessions.startedAt })
+      .from(sessions)
+      .orderBy(desc(sessions.startedAt), desc(sessions.id))
+      .limit(args.count);
+    printSessions(rows);
   } finally {
     await closeDatabase(db);
+  }
+}
+
+type SessionRow = Pick<typeof sessions.$inferSelect, "id" | "status" | "startedAt">;
+
+const STATUS_COLOR: Record<SessionRow["status"], string> = {
+  downloading: "\x1b[90m",
+  running: "\x1b[33m",
+  succeeded: "\x1b[32m",
+  failed: "\x1b[31m",
+  aborted: "\x1b[91m",
+  timed_out: "\x1b[35m",
+};
+
+const RESET = "\x1b[0m";
+const STATUS_WIDTH = "downloading".length;
+const AGE_WIDTH = "23h59m ago".length + 1;
+
+export function printSessions(rows: SessionRow[]): void {
+  const now = Date.now();
+  for (const row of rows) {
+    // The row's clock is the database's; a few seconds ahead of ours is normal and must not read as negative.
+    const seconds = Math.max(0, Math.floor((now - row.startedAt.getTime()) / 1000));
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+    let age: string;
+    if (seconds < 60) {
+      age = `${seconds}s ago`;
+    } else if (minutes < 60) {
+      age = `${minutes}m ago`;
+    } else if (hours < 24) {
+      age = minutes % 60 === 0 ? `${hours}h ago` : `${hours}h${minutes % 60}m ago`;
+    } else {
+      age = hours % 24 === 0 ? `${days}d ago` : `${days}d${hours % 24}h ago`;
+    }
+    const status = `${STATUS_COLOR[row.status]}${row.status.padEnd(STATUS_WIDTH)}${RESET}`;
+    console.log(`${status}  ${age.padEnd(AGE_WIDTH)}  ${row.id}`);
   }
 }
 
