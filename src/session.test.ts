@@ -4,12 +4,16 @@ import { spawn } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import { resolve } from "node:path";
 import { once } from "node:events";
+import { createInterface, type AsyncCompleter, type CompleterResult } from "node:readline";
+import { PassThrough } from "node:stream";
 import { describe, it } from "node:test";
 import { deflateSync } from "node:zlib";
+import { pickFollowSession, type SessionListItem } from "./session/actions/follow.ts";
 
 const SESSION = resolve(import.meta.dirname, "../session");
 const SESSION_ID = "6f1c0000-0000-4000-8000-00000000e2a9";
 const FOLLOWED_ID = "7a2d0000-0000-4000-8000-00000000f011";
+const PENDING_ID = "ff88a0b1-0851-47a7-91d3-acbfb20b8673";
 const ENDED_ID = "8b3e0000-0000-4000-8000-00000000a1c2";
 const DROPPED_ID = "5d0a0000-0000-4000-8000-00000000c3e4";
 const ENDLESS_ID = "4e1b0000-0000-4000-8000-00000000d4f5";
@@ -47,6 +51,55 @@ async function runSession(args: string[], lines: string[], env: NodeJS.ProcessEn
   child.stdin.end(lines.map((line) => `${line}\n`).join(""));
   const [code] = await once(child, "close");
   return { code: code as number | null, stdout, stderr };
+}
+
+async function runTtySession(input: string, afterInput: string, env: NodeJS.ProcessEnv = {}): Promise<{
+  code: number | null;
+  output: string;
+}> {
+  const child = spawn("script", ["-qfec", `${SESSION} --server-url http://127.0.0.1:1`, "/dev/null"], {
+    env: {
+      ...process.env,
+      NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --disable-warning=ExperimentalWarning`.trim(),
+      OLIGARCHY_TOKEN: "test-token",
+      DATABASE_URL: "",
+      SERVER_URL: "",
+      TERM: "xterm-256color",
+      ...env,
+    },
+  });
+  let output = "";
+  let inputSent = false;
+  child.stdout.setEncoding("utf8");
+  child.stdout.on("data", (data: string) => {
+    output += data;
+    if (!inputSent && output.includes("session> ")) {
+      inputSent = true;
+      child.stdin.write(input);
+      setTimeout(() => child.stdin.end(afterInput), 1800);
+    }
+  });
+  const [code] = await once(child, "close");
+  return { code: code as number | null, output };
+}
+
+function pickerTerminal(): {
+  input: NodeJS.ReadStream;
+  output: NodeJS.WriteStream;
+  readOutput: () => string;
+} {
+  const inputStream = new PassThrough();
+  const outputStream = new PassThrough();
+  let written = "";
+  outputStream.setEncoding("utf8");
+  outputStream.on("data", (data: string) => {
+    written += data;
+  });
+  const input = inputStream as unknown as NodeJS.ReadStream;
+  const output = outputStream as unknown as NodeJS.WriteStream;
+  Object.assign(input, { isTTY: true, isRaw: false, setRawMode: () => input });
+  Object.assign(output, { isTTY: true, columns: 100, rows: 24 });
+  return { input, output, readOutput: () => written };
 }
 
 type Received = { method: string | undefined; url: string | undefined; authorization: string | undefined; body: unknown };
@@ -166,6 +219,144 @@ async function stubProxy(): Promise<{ server: Server; url: string; received: Rec
 function close(server: Server): Promise<void> {
   return new Promise<void>((done) => server.close(() => done()));
 }
+
+describe("./session follow completion", () => {
+  it("owns input while the session list is loading so a fast Enter cannot submit follow", async () => {
+    const term = pickerTerminal();
+    let provideRows: (rows: SessionListItem[]) => void = () => undefined;
+    const rows = new Promise<SessionListItem[]>((resolve) => {
+      provideRows = resolve;
+    });
+    const selection = pickFollowSession(rows, term.input, term.output, 16);
+    term.input.emit("keypress", "\r", { name: "return" });
+    provideRows([{ id: FOLLOWED_ID, status: "running", startedAt: "2026-09-04T11:59:55.000Z" }]);
+    await new Promise((resolve) => setImmediate(resolve));
+    let resolved = false;
+    void selection.then(() => {
+      resolved = true;
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(resolved, false);
+    term.input.emit("keypress", "\r", { name: "return" });
+    assert.equal(await selection, FOLLOWED_ID);
+  });
+
+  it("cancels with Escape or Ctrl-C while the session list is loading", async () => {
+    for (const [text, key] of [
+      ["\x1b", { name: "escape" }],
+      ["\x03", { name: "c", ctrl: true }],
+    ] as const) {
+      const term = pickerTerminal();
+      let provideRows: (rows: SessionListItem[]) => void = () => undefined;
+      const rows = new Promise<SessionListItem[]>((resolve) => {
+        provideRows = resolve;
+      });
+      const selection = pickFollowSession(rows, term.input, term.output, 16);
+      term.input.emit("keypress", text, key);
+
+      assert.equal(await selection, undefined);
+      provideRows([{ id: FOLLOWED_ID, status: "running", startedAt: "2026-09-04T11:59:55.000Z" }]);
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(term.readOutput().includes(FOLLOWED_ID), false);
+    }
+  });
+
+  it("shows running sessions first, colors statuses, and selects with the keyboard", async () => {
+    const term = pickerTerminal();
+    const selection = pickFollowSession(
+      [
+        { id: PENDING_ID, status: "downloading", startedAt: "2026-09-04T11:58:30.000Z" },
+        { id: "00000000-0000-4000-8000-000000000001", status: "succeeded", startedAt: "2026-09-04T11:58:00.000Z" },
+        { id: FOLLOWED_ID, status: "running", startedAt: "2026-09-04T11:59:55.000Z" },
+      ],
+      term.input,
+      term.output,
+      16,
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    term.input.emit("keypress", "\t", { name: "tab", shift: false });
+    term.input.emit("keypress", "\r", { name: "return" });
+
+    assert.equal(await selection, PENDING_ID);
+    const output = term.readOutput();
+    assert.ok(output.indexOf(FOLLOWED_ID) < output.indexOf(PENDING_ID));
+    assert.match(output, new RegExp(`\\x1b\\[33mrunning\\s*\\x1b\\[0m\\s+${FOLLOWED_ID}`));
+    assert.match(output, new RegExp(`\\x1b\\[90mpending\\s*\\x1b\\[0m\\s+${PENDING_ID}`));
+    assert.equal(output.includes("00000000-0000-4000-8000-000000000001"), false);
+  });
+
+  it("leaves the selected UUID editable when Enter produces two keypresses", async () => {
+    const term = pickerTerminal();
+    const complete = async (line: string): Promise<CompleterResult> => {
+      const followArg = /^follow\s+(\S*)$/.exec(line);
+      assert.ok(followArg !== null);
+      const sessionId = await pickFollowSession(
+        [{ id: FOLLOWED_ID, status: "running", startedAt: "2026-09-04T11:59:55.000Z" }],
+        term.input,
+        term.output,
+        16,
+      );
+      return [sessionId === undefined ? [] : [sessionId], followArg[1]];
+    };
+    const completer: AsyncCompleter = (line, callback) => {
+      void complete(line).then(
+        (result) => callback(null, result),
+        (err) => callback(err as Error),
+      );
+    };
+    const termName = process.env.TERM;
+    process.env.TERM = "xterm-256color";
+    const readline = createInterface({ input: term.input, output: term.output, completer, terminal: true });
+    if (termName === undefined) {
+      delete process.env.TERM;
+    } else {
+      process.env.TERM = termName;
+    }
+    const submitted: string[] = [];
+    readline.on("line", (line) => submitted.push(line));
+    readline.write("follow ");
+    term.input.emit("keypress", "\t", { name: "tab" });
+    await new Promise((resolve) => setImmediate(resolve));
+    term.input.emit("keypress", "\r", { name: "return" });
+    term.input.emit("keypress", "\n", { name: "enter" });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(submitted, []);
+    assert.equal(readline.line, `follow ${FOLLOWED_ID}`);
+    readline.close();
+  });
+
+  it("reports that there is nothing to follow when no active sessions exist", async () => {
+    const term = pickerTerminal();
+    await assert.rejects(
+      pickFollowSession(
+        [{ id: ENDED_ID, status: "failed", startedAt: "2026-09-04T11:58:00.000Z" }],
+        term.input,
+        term.output,
+        16,
+      ),
+      /no running or pending sessions/,
+    );
+
+    assert.doesNotMatch(term.readOutput(), /no running or pending sessions/);
+  });
+
+  it("cancels without selecting when escape is pressed", async () => {
+    const term = pickerTerminal();
+    const selection = pickFollowSession(
+      [{ id: FOLLOWED_ID, status: "running", startedAt: "2026-09-04T11:59:55.000Z" }],
+      term.input,
+      term.output,
+      16,
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    term.input.emit("keypress", "\x1b", { name: "escape" });
+
+    assert.equal(await selection, undefined);
+    assert.match(term.readOutput(), /\x1b\[\?25l.*\x1b\[\?25h/s);
+  });
+});
 
 describe("./session happy path", () => {
   it("drives one session through every command with the client's flags and one agent id", async () => {
@@ -301,6 +492,20 @@ describe("./session happy path", () => {
 });
 
 describe("./session unhappy path", () => {
+  it("enters follow completion when Tab and Enter arrive in one PTY write", async () => {
+    const result = await runTtySession("follow \t\r", "\x15exit\r");
+    assert.equal(result.code, 0);
+    assert.match(result.output, /DATABASE_URL is not set/);
+    assert.doesNotMatch(result.output, /usage: follow <session-id>/);
+  });
+
+  it("reports a failed ctrl session list and keeps the prompt usable", async () => {
+    const result = await runTtySession("follow \t", "\x15exit\r");
+    assert.equal(result.code, 0);
+    assert.match(result.output, /DATABASE_URL is not set/);
+    assert.ok((result.output.match(/session> /g) ?? []).length >= 2);
+  });
+
   it("refuses commands before start, unknown commands, and a malformed send-mouse without calling the proxy", async () => {
     const proxy = await stubProxy();
     try {

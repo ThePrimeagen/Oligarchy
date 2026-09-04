@@ -7,7 +7,7 @@ import { type CtrlArgs, parseCtrlArgs } from "../parse-args.ts";
 
 const DEFAULT_COUNT = 10;
 
-const USAGE = `usage: ctrl session list [--count <n>]
+const USAGE = `usage: ctrl session list [--count <n>] [--json]
        ctrl session --session-id <id> --logs|--test-def|--test-results|--actions|--all
 
 Every form takes --server-url <url> (or SERVER_URL). ctrl session list --help and ctrl session --session-id <id> --help print their flags.`;
@@ -20,6 +20,7 @@ const listSpec = {
       Flag.withDefault(DEFAULT_COUNT),
       Flag.withDescription("How many of the most recent sessions to print"),
     ),
+    json: Flag.boolean("json").pipe(Flag.withDefault(false), Flag.withDescription("Print the sessions as a JSON array")),
   },
 };
 
@@ -67,7 +68,7 @@ export async function sessionListRun(argv: readonly string[]): Promise<void> {
       .from(sessions)
       .orderBy(desc(sessions.startedAt), desc(sessions.id))
       .limit(args.count);
-    printSessions(rows);
+    printSessions(rows, args.json);
   } finally {
     await closeDatabase(db);
   }
@@ -88,7 +89,11 @@ const RESET = "\x1b[0m";
 const STATUS_WIDTH = "downloading".length;
 const AGE_WIDTH = "23h59m ago".length + 1;
 
-export function printSessions(rows: SessionRow[]): void {
+export function printSessions(rows: SessionRow[], json = false): void {
+  if (json) {
+    console.log(JSON.stringify(rows));
+    return;
+  }
   const now = Date.now();
   for (const row of rows) {
     // The row's clock is the database's; a few seconds ahead of ours is normal and must not read as negative.
