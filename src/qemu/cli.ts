@@ -8,7 +8,7 @@ import { loadEnvFile } from "node:process";
 import { NodeRuntime, NodeServices } from "@effect/platform-node";
 import { Console, Effect, Option, Schema } from "effect";
 import { Argument, CliError, Command, Flag } from "effect/unstable/cli";
-import { experimentCommand } from "../experiment.ts";
+import { experimentCommand } from "../test.ts";
 import { runTestResults } from "../test-results.ts";
 
 if (existsSync(".env")) {

@@ -8,7 +8,7 @@ import {
   newExperiment,
   runExperiment,
   type Experiment,
-} from "./experiment.ts";
+} from "./test.ts";
 import type { Db } from "./db/ops.ts";
 import { logs, testDefinitions, testResults, testRuns } from "./db/schema.ts";
 
