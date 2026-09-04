@@ -206,21 +206,26 @@ describe("./ctrl happy path", () => {
     assert.match(result.stdout, /session --session-id/);
   });
 
-  it("session list prints the last ten sessions, newest first, as JSON", async () => {
+  it("session list prints the last ten sessions as colored status, age, and id lines, newest first", async () => {
     const result = await runCtrl(["session", "list", "--server-url", SERVER]);
     assert.equal(result.stderr, "");
     assert.equal(result.code, 0);
-    const rows = JSON.parse(result.stdout) as { id: string; status: string; startedAt: string; config: unknown }[];
-    assert.ok(Array.isArray(rows));
-    assert.ok(rows.length <= 10);
-    for (const row of rows) {
-      assert.match(row.id, /^[0-9a-f-]{36}$/);
-      assert.equal(typeof row.status, "string");
-      assert.ok(row.config !== undefined);
-      assert.ok(Number.isFinite(Date.parse(row.startedAt)));
+    assert.equal(result.stdout.includes("{"), false);
+    const lines = result.stdout.split("\n").filter((line) => line !== "");
+    assert.ok(lines.length <= 10);
+    const ages: number[] = [];
+    for (const line of lines) {
+      const [status, rest, ...extra] = line.split("\x1b[0m");
+      assert.deepEqual(extra, [], `unexpected session list line: ${JSON.stringify(line)}`);
+      assert.ok(status.startsWith("\x1b["), `status is not colored: ${JSON.stringify(line)}`);
+      assert.match(status.slice(status.indexOf("m") + 1), /^(downloading|running|succeeded|failed|aborted|timed_out) *$/);
+      const match = rest.match(/^ {2}((?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)? ago) *  ([0-9a-f-]{36})$/);
+      assert.ok(match !== null, `unexpected session list line: ${JSON.stringify(line)}`);
+      const [, , days = "0", hours = "0", minutes = "0", seconds = "0"] = match;
+      ages.push(((Number(days) * 24 + Number(hours)) * 60 + Number(minutes)) * 60 + Number(seconds));
     }
-    for (let i = 1; i < rows.length; i++) {
-      assert.ok(Date.parse(rows[i - 1].startedAt) >= Date.parse(rows[i].startedAt));
+    for (let i = 1; i < ages.length; i++) {
+      assert.ok(ages[i - 1] <= ages[i]);
     }
   });
 
@@ -228,12 +233,12 @@ describe("./ctrl happy path", () => {
     const two = await runCtrl(["session", "list", "--count", "2", "--server-url", SERVER]);
     assert.equal(two.stderr, "");
     assert.equal(two.code, 0);
-    assert.ok((JSON.parse(two.stdout) as unknown[]).length <= 2);
+    assert.ok(two.stdout.split("\n").filter((line) => line !== "").length <= 2);
 
     const one = await runCtrl(["session", "list", "--count=1"], { SERVER_URL: SERVER });
     assert.equal(one.stderr, "");
     assert.equal(one.code, 0);
-    assert.ok((JSON.parse(one.stdout) as unknown[]).length <= 1);
+    assert.ok(one.stdout.split("\n").filter((line) => line !== "").length <= 1);
   });
 
   it("session --help names both forms", async () => {
@@ -429,7 +434,7 @@ describe("./ctrl unhappy path", () => {
   it("session list rejects a count below one, a non-integer count, and the inspect flags", async () => {
     const zero = await runCtrl(["session", "list", "--count", "0", "--server-url", SERVER]);
     assert.notEqual(zero.code, 0);
-    assert.equal(zero.stdout.startsWith("["), false);
+    assert.doesNotMatch(zero.stdout, / ago {2,}[0-9a-f-]{36}$/m);
     assert.match(zero.stderr, /Invalid value for flag --count: "0".*count must be at least 1/);
 
     const word = await runCtrl(["session", "list", "--count", "ten", "--server-url", SERVER]);
