@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { createServer } from "node:http";
+import { createServer, type Server } from "node:http";
 import { resolve } from "node:path";
 import { once } from "node:events";
 import { describe, it } from "node:test";
@@ -18,6 +18,7 @@ async function runCtrl(args: string[], env: NodeJS.ProcessEnv = {}): Promise<{
     env: {
       ...process.env,
       NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --disable-warning=ExperimentalWarning`.trim(),
+      OLIGARCHY_TOKEN: "test-token",
       SERVER_URL: "",
       ...env,
     },
@@ -34,6 +35,35 @@ async function runCtrl(args: string[], env: NodeJS.ProcessEnv = {}): Promise<{
   });
   const [code] = await once(child, "close");
   return { code: code as number | null, stdout, stderr };
+}
+
+type Received = { method: string | undefined; url: string | undefined; authorization: string | undefined };
+
+async function stubProxy(reply: { status: number; body: string }): Promise<{ server: Server; url: string; received: Received[] }> {
+  const received: Received[] = [];
+  const server = createServer((incoming, response) => {
+    received.push({ method: incoming.method, url: incoming.url, authorization: incoming.headers.authorization });
+    response.writeHead(reply.status, { "Content-Type": reply.status === 200 ? "text/plain" : "application/json" });
+    response.end(reply.body);
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address !== null && typeof address !== "string");
+  return { server, url: `http://127.0.0.1:${address.port}`, received };
+}
+
+function close(server: Server): Promise<void> {
+  return new Promise<void>((done) => server.close(() => done()));
+}
+
+async function anySessionId(): Promise<string> {
+  const listed = await runCtrl(["session", "list", "--count", "1", "--json", "--server-url", SERVER]);
+  assert.equal(listed.stderr, "");
+  assert.equal(listed.code, 0);
+  const rows = JSON.parse(listed.stdout) as { id: string }[];
+  assert.equal(rows.length, 1, "the database holds no session to dump");
+  return rows[0].id;
 }
 
 describe("./ctrl happy path", () => {
@@ -203,7 +233,35 @@ describe("./ctrl happy path", () => {
     assert.match(result.stdout, /test start/);
     assert.match(result.stdout, /test-results/);
     assert.match(result.stdout, /session list \[--count <n>\]/);
-    assert.match(result.stdout, /session --session-id/);
+    assert.match(result.stdout, /session --session-id <id> --logs\|--test-def\|--test-results\|--actions\|--all\|--dump/);
+  });
+
+  it("session --dump asks the proxy for the session's dump with the token and prints the bytes raw", async () => {
+    const sessionId = await anySessionId();
+    const proxy = await stubProxy({ status: 200, body: "[    0.000000] Linux version 6.12\nkernel panic - not syncing\n" });
+    try {
+      const result = await runCtrl(["session", "--session-id", sessionId, "--dump", "--server-url", proxy.url]);
+      assert.equal(result.stderr, "");
+      assert.equal(result.code, 0);
+      assert.equal(result.stdout, "[    0.000000] Linux version 6.12\nkernel panic - not syncing\n");
+      assert.deepEqual(proxy.received, [{ method: "GET", url: `/dump?id=${sessionId}`, authorization: "Bearer test-token" }]);
+    } finally {
+      await close(proxy.server);
+    }
+  });
+
+  it("session --dump takes the proxy from SERVER_URL, sends the id as the database spells it, and prints an empty console as nothing", async () => {
+    const sessionId = await anySessionId();
+    const proxy = await stubProxy({ status: 200, body: "" });
+    try {
+      const result = await runCtrl(["session", "--session-id", sessionId.toUpperCase(), "--dump"], { SERVER_URL: proxy.url });
+      assert.equal(result.stderr, "");
+      assert.equal(result.code, 0);
+      assert.equal(result.stdout, "");
+      assert.deepEqual(proxy.received, [{ method: "GET", url: `/dump?id=${sessionId}`, authorization: "Bearer test-token" }]);
+    } finally {
+      await close(proxy.server);
+    }
   });
 
   it("session list prints the last ten sessions as colored status, age, and id lines, newest first", async () => {
@@ -262,7 +320,7 @@ describe("./ctrl happy path", () => {
     const result = await runCtrl(["session", "--help"]);
     assert.equal(result.code, 0);
     assert.match(result.stdout, /ctrl session list \[--count <n>\]/);
-    assert.match(result.stdout, /ctrl session --session-id <id>/);
+    assert.match(result.stdout, /ctrl session --session-id <id> --logs\|--test-def\|--test-results\|--actions\|--all\|--dump/);
   });
 });
 
@@ -432,12 +490,97 @@ describe("./ctrl unhappy path", () => {
     assert.notEqual(noSelector.code, 0);
     assert.match(
       noSelector.stderr,
-      /^session: --logs, --test-def, --test-results, --actions, or --all is required\nError: session: --logs.*\n\s+at sessionInspectRun .*src\/ctrl\/actions\/session\.ts:\d+:\d+/,
+      /^session: --logs, --test-def, --test-results, --actions, --all, or --dump is required\nError: session: --logs.*\n\s+at sessionInspectRun .*src\/ctrl\/actions\/session\.ts:\d+:\d+/,
     );
 
     const unknown = await runCtrl(["session", "--session-id", sessionId, "--logs", "--server-url", SERVER]);
     assert.notEqual(unknown.code, 0);
     assert.match(unknown.stderr, new RegExp(`^session: no session ${sessionId}\nError: session: no session ${sessionId}\n\\s+at `));
+  });
+
+  it("session --dump rejects an unknown session before calling the proxy", async () => {
+    const sessionId = randomUUID();
+    const proxy = await stubProxy({ status: 200, body: "never read\n" });
+    try {
+      const result = await runCtrl(["session", "--session-id", sessionId, "--dump", "--server-url", proxy.url]);
+      assert.equal(result.code, 1);
+      assert.equal(result.stdout, "");
+      assert.match(result.stderr, new RegExp(`^session: no session ${sessionId}\nError: session: no session ${sessionId}\n\\s+at `));
+      assert.deepEqual(proxy.received, []);
+    } finally {
+      await close(proxy.server);
+    }
+  });
+
+  it("session --dump does not combine with the JSON selectors", async () => {
+    const sessionId = await anySessionId();
+    const proxy = await stubProxy({ status: 200, body: "never read\n" });
+    try {
+      for (const selector of ["--logs", "--all"]) {
+        const result = await runCtrl(["session", "--session-id", sessionId, "--dump", selector, "--server-url", proxy.url]);
+        assert.equal(result.code, 1);
+        assert.equal(result.stdout, "");
+        assert.match(
+          result.stderr,
+          /^session: --dump does not combine with --logs, --test-def, --test-results, --actions, or --all\nError: session: --dump .*\n\s+at sessionInspectRun /,
+        );
+      }
+      assert.deepEqual(proxy.received, []);
+    } finally {
+      await close(proxy.server);
+    }
+  });
+
+  it("session --dump prints the proxy's refusal as a headline, then the stack, and exits 1", async () => {
+    const sessionId = await anySessionId();
+    const proxy = await stubProxy({
+      status: 409,
+      body: JSON.stringify({ error: `session "${sessionId}" has no console on this proxy` }),
+    });
+    try {
+      const result = await runCtrl(["session", "--session-id", sessionId, "--dump", "--server-url", proxy.url]);
+      assert.equal(result.code, 1);
+      assert.equal(result.stdout, "");
+      const [headline, stackHead, ...frames] = result.stderr.split("\n");
+      assert.equal(headline, `session "${sessionId}" has no console on this proxy`);
+      assert.equal(stackHead, `Error: session "${sessionId}" has no console on this proxy`);
+      assert.match(frames.join("\n"), /^\s+at .*src\/client\/http\.ts:\d+:\d+/m);
+      assert.match(frames.join("\n"), /^\s+at .*src\/ctrl\/actions\/session\.ts:\d+:\d+/m);
+      assert.equal(proxy.received.length, 1);
+    } finally {
+      await close(proxy.server);
+    }
+  });
+
+  it("session --dump spells out a proxy that refuses the connection", async () => {
+    const sessionId = await anySessionId();
+    const closed = await stubProxy({ status: 200, body: "" });
+    await close(closed.server);
+    const result = await runCtrl(["session", "--session-id", sessionId, "--dump", "--server-url", closed.url]);
+    assert.equal(result.code, 1);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /^fetch failed: connect ECONNREFUSED 127\.0\.0\.1:\d+\n/);
+    assert.match(result.stderr, /code: 'ECONNREFUSED'/);
+  });
+
+  it("session --dump requires OLIGARCHY_TOKEN before calling the proxy; the JSON selectors never need it", async () => {
+    const sessionId = await anySessionId();
+    const proxy = await stubProxy({ status: 200, body: "never read\n" });
+    try {
+      const dump = await runCtrl(["session", "--session-id", sessionId, "--dump", "--server-url", proxy.url], { OLIGARCHY_TOKEN: "" });
+      assert.equal(dump.code, 1);
+      assert.equal(dump.stdout, "");
+      assert.match(dump.stderr, /^OLIGARCHY_TOKEN is not set\n/);
+      assert.deepEqual(proxy.received, []);
+
+      const logs = await runCtrl(["session", "--session-id", sessionId, "--logs", "--server-url", proxy.url], { OLIGARCHY_TOKEN: "" });
+      assert.equal(logs.stderr, "");
+      assert.equal(logs.code, 0);
+      assert.ok(Array.isArray(JSON.parse(logs.stdout)));
+      assert.deepEqual(proxy.received, []);
+    } finally {
+      await close(proxy.server);
+    }
   });
 
   it("session list rejects a count below one, a non-integer count, and the inspect flags", async () => {

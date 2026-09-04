@@ -1,14 +1,15 @@
 import { desc, eq, inArray, sql } from "drizzle-orm";
 import { Schema } from "effect";
 import { Flag } from "effect/unstable/cli";
+import { getBytes } from "../../client/http.ts";
 import { closeDatabase, connectDatabase } from "../../db/ops.ts";
 import { actions, logs, sessions, testDefinitions, testResults } from "../../db/schema.ts";
-import { type CtrlArgs, parseCtrlArgs, serverUrl } from "../parse-args.ts";
+import { type CtrlArgs, parseCtrlArgs, requireEnv, serverUrl } from "../parse-args.ts";
 
 const DEFAULT_COUNT = 10;
 
 const USAGE = `usage: ctrl session list [--count <n>] [--active] [--json]
-       ctrl session --session-id <id> --logs|--test-def|--test-results|--actions|--all
+       ctrl session --session-id <id> --logs|--test-def|--test-results|--actions|--all|--dump
 
 Every form takes --server-url <url> (or SERVER_URL). ctrl session list --help and ctrl session --session-id <id> --help print their flags.`;
 
@@ -44,6 +45,10 @@ const inspectSpec = {
     all: Flag.boolean("all").pipe(
       Flag.withDefault(false),
       Flag.withDescription("Print logs, test definition, test results, and actions"),
+    ),
+    dump: Flag.boolean("dump").pipe(
+      Flag.withDefault(false),
+      Flag.withDescription("Print the session's serial console from the proxy: the running machine's, or what a dead one left on disk"),
     ),
   },
 };
@@ -134,8 +139,15 @@ export function printSessions(rows: SessionRow[], json: boolean): void {
 
 export async function sessionInspectRun(argv: readonly string[]): Promise<void> {
   const args: SessionInspectArgs = await parseCtrlArgs("session", inspectSpec, argv);
-  if (!args.logs && !args.testDef && !args.testResults && !args.actions && !args.all) {
-    throw new Error("session: --logs, --test-def, --test-results, --actions, or --all is required");
+  const inspecting = args.logs || args.testDef || args.testResults || args.actions || args.all;
+  if (!inspecting && !args.dump) {
+    throw new Error("session: --logs, --test-def, --test-results, --actions, --all, or --dump is required");
+  }
+  if (inspecting && args.dump) {
+    throw new Error("session: --dump does not combine with --logs, --test-def, --test-results, --actions, or --all");
+  }
+  if (args.dump) {
+    return sessionDumpRun(args, await requireEnv("OLIGARCHY_TOKEN"));
   }
   const db = connectDatabase(args.databaseUrl);
   try {
@@ -184,6 +196,23 @@ export async function sessionInspectRun(argv: readonly string[]): Promise<void> 
 
     const values = [out.logs, out.results, out.test_definition, out.actions].filter((value) => value !== undefined);
     console.log(JSON.stringify(values.length === 1 ? values[0] : out));
+  } finally {
+    await closeDatabase(db);
+  }
+}
+
+async function sessionDumpRun(args: SessionInspectArgs, token: string): Promise<void> {
+  const db = connectDatabase(args.databaseUrl);
+  try {
+    const [session] = await db.select({ id: sessions.id }).from(sessions).where(eq(sessions.id, args.sessionId));
+    if (session === undefined) {
+      throw new Error(`session: no session ${args.sessionId}`);
+    }
+    // Postgres matched the id however it was cased; the proxy's map and paths hold the canonical form.
+    const data = await getBytes({ serverUrl: args.serverUrl, token }, `/dump?id=${encodeURIComponent(session.id)}`);
+    await new Promise<void>((done, fail) => {
+      process.stdout.write(data, (err) => (err ? fail(err) : done()));
+    });
   } finally {
     await closeDatabase(db);
   }

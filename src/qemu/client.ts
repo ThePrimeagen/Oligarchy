@@ -59,9 +59,13 @@ export type Qemu = {
   socket?: Socket;
 };
 
+export function sessionDir(id: string, tmp = tmpdir()): string {
+  return join(tmp, `oligarchy-${id}`);
+}
+
 export function createQemu(options: QemuOptions = {}): Qemu {
   const id = randomUUID();
-  const dir = join(options.tmp ?? tmpdir(), `oligarchy-${id}`);
+  const dir = sessionDir(id, options.tmp);
   return {
     id,
     dir,
