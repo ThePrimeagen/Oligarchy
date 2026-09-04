@@ -27,6 +27,7 @@ The proxy, `db:migrate`, and every `ctrl` action read `DATABASE_URL` from the pr
 | `connectDatabase` | `url` | nothing; builds the `Db` client from the url (dropping a `sslrootcert=system` parameter), throws when it does not parse |
 | `insertSession` | `db, id, config, status` | the session row, before any boot work; status `downloading` for a url iso, else `running` |
 | `sessionRunning` | `db, id` | status → `running` once the QEMU is up, whatever status the session entered in |
+| `getSessionStatus` | `db, id` | nothing; reads one session's status, or nothing for an unknown id — how `/follow` names why a session it does not hold cannot be followed |
 | `endSession` | `db, id, status, reason` | verdict (`succeeded`/`failed`/`aborted`/`timed_out`), reason, `ended_at` — on the session and its open agent runs, in one transaction stamped by one `now()` |
 | `registerAgent` | `db, agentId, sessionId` | the agent_runs row tying a cloud agent to the session it drives; a second registration is a database error by design |
 | `startAction` | `db, {sessionId, agentId, request: QemuCommand}` | opens the action row the moment the command goes out; returns its auto-incrementing id |

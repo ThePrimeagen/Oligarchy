@@ -8,7 +8,7 @@ The proxy defaults to `127.0.0.1:42069`. `./server --port <port>` binds that hos
 
 `./server --automation` is the one flag that sets everything automation needs. It can sit with `--port`. Every session the proxy boots then uses `-display none` and `-vga none -device virtio-vga` (not `virtio-vga-gl`). Serial UART, usb-tablet, and the rest of the existing qemu args stay. The guest gets a virtio-gpu DRM device instead of QEMU's default std/Bochs card — the card Quickshell cannot open. `/image` still works: QMP `screendump` reads the virtio console. `--automation` is exclusive: `--display` (including `--display none`) and leftover `--vga` are refused at startup. Without `--automation`, the proxy keeps the defaults: `-display none`, QEMU's own std/Bochs VGA, no extra device. `--display gtk` and the other backends still work on that path. The proxy refuses to boot if qemu, qemu-img, OVMF, or the selected display backend is missing on the host.
 
-Session-driving requests (`/start`, `/image`, `/serial`, `/send-keys`, `/send-mouse`, `/intent/start`, `/intent/end`, `/stop`) carry the calling agent's id — `agent` in the POST body, a query param on the GET — so the server attributes the session's [actions](database.md) to that agent. The agent id is required: this control plane is driven by agents, and a request that names none is refused with a 400. After start, `/image`, `/serial`, `/send-keys`, `/send-mouse`, `/intent/start`, `/intent/end`, and `/stop` must name the agent that started the session; any other agent is a 403. A stop still exchanges nothing over QMP and is not an action — it carries the session's verdict. `/stats` has no session at all. `/images/:id` is the stored PNG for a finished get-image; it has no session, no agent, and no token. `/serial` is the same kind of non-exchange: it reads a host file QEMU is writing, so it is not an action. Intent start and end are not QMP exchanges either: they open and close the session's one Sentry intent span. A QMP action that starts while that span is open is recorded as its child.
+Session-driving requests (`/start`, `/image`, `/serial`, `/send-keys`, `/send-mouse`, `/intent/start`, `/intent/end`, `/stop`) carry the calling agent's id — `agent` in the POST body, a query param on the GET — so the server attributes the session's [actions](database.md) to that agent. The agent id is required: this control plane is driven by agents, and a request that names none is refused with a 400. After start, `/image`, `/serial`, `/send-keys`, `/send-mouse`, `/intent/start`, `/intent/end`, and `/stop` must name the agent that started the session; any other agent is a 403. A stop still exchanges nothing over QMP and is not an action — it carries the session's verdict. `/stats` has no session at all. `/images/:id` is the stored PNG for a finished get-image; it has no session, no agent, and no token. `/serial` is the same kind of non-exchange: it reads a host file QEMU is writing, so it is not an action. Intent start and end are not QMP exchanges either: they open and close the session's one Sentry intent span. A QMP action that starts while that span is open is recorded as its child. `/follow` watches a session without driving it: it names no agent, needs the token, and does not count as activity for the session's inactivity window.
 
 ## POST /start
 
@@ -31,6 +31,29 @@ Returns the session's current display as `image/png` bytes (QMP `screendump` und
 ## GET /images/:id
 
 Returns a stored PNG by its uuid. No `Authorization` header. Unknown or malformed ids are 404. The dashboard serves the same path at `https://oligarchy.trm.sh/images/:id`.
+
+## GET /follow?id=<id>
+
+Streams one session's life as it happens: `application/x-ndjson`, one JSON object per line, open until the session ends. The session must be pending (booting: its `/start` has not returned) or running on this proxy. A pending session streams `{"type": "session", "status": "pending"}` at once and `running` when the boot completes, so a follower can attach the moment the id is known. A session that has already ended is 409 `session "<id>" has already completed (<status>)`; a row still `downloading` or `running` that this proxy does not hold (another proxy's, or a dead proxy's) is 409 `session "<id>" is not running on this proxy`; an id with no row is 404.
+
+The lines, in the `FollowEvent` shape from `src/session.d.ts`:
+
+```json
+{"type": "session", "status": "pending" | "running" | "succeeded" | "failed" | "aborted" | "timed_out"}
+{"type": "intent", "state": "started", "message": "<message>"}
+{"type": "intent", "state": "completed" | "cancelled"}
+{"type": "action", "id": 7, "name": "send-keys" | "send-mouse" | "get-image" | "get-serial", "state": "running"}
+{"type": "action", "id": 7, "state": "completed" | "failed"}
+{"type": "image", "id": "<uuid>", "png": "<base64>"}
+```
+
+- The first line is always the session's status. If an intent is open when the follower attaches, its `started` line comes next, so the follower knows what the actions it is about to see belong to.
+- An `action` is one request — `/send-keys`, `/send-mouse`, `/image`, `/serial` — not one QMP exchange; a twenty-chord `send-keys` is one `running` line and one `completed` line, correlated by `id`, a counter per session. Only the name is carried, no arguments. A request refused before any work (a bad key string, a coordinate out of range) never appears.
+- `image` carries the PNG a completed `/image` returned, base64-encoded, with the same uuid as `GET /images/:id`. It lands before that action's `completed` line.
+- `intent` `cancelled` is a session that ended with its intent still open.
+- The last line is the session's end status, and then the stream closes. A stop, a timeout, a failed start, and proxy shutdown all end the stream this way.
+
+Followers are held on the live session in memory; a follower that disconnects is dropped, and every follower is closed when the session ends. Attach and detach are logged at info as `session <id>: follower attached` / `detached`.
 
 ## GET /serial?id=<id>&agent=<agent>
 
