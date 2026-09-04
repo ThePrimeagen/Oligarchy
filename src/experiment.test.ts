@@ -5,6 +5,7 @@ import {
   createLinearTicket,
   drivingAgentPrompt,
   linearTicketDescription,
+  newExperiment,
   runExperiment,
   type Experiment,
 } from "./experiment.ts";
@@ -622,6 +623,88 @@ function restoreCursorToken() {
     process.env.CURSOR_API_TOKEN = savedCursorToken;
   }
 }
+
+const savedServerUrl = process.env.SERVER_URL;
+const savedLinearToken = process.env.LINEAR_API_TOKEN;
+
+function restoreNewExperimentEnv() {
+  if (savedServerUrl === undefined) {
+    delete process.env.SERVER_URL;
+  } else {
+    process.env.SERVER_URL = savedServerUrl;
+  }
+  if (savedLinearToken === undefined) {
+    delete process.env.LINEAR_API_TOKEN;
+  } else {
+    process.env.LINEAR_API_TOKEN = savedLinearToken;
+  }
+}
+
+describe("newExperiment server URL happy path", () => {
+  afterEach(restoreNewExperimentEnv);
+
+  it("accepts SERVER_URL and does not require a flag", async () => {
+    process.env.SERVER_URL = "https://from.env.example";
+    process.env.LINEAR_API_TOKEN = "";
+    const fetchMock = mock.method(globalThis, "fetch", async () => assert.fail("Linear should not be called"));
+
+    await assert.rejects(
+      () =>
+        newExperiment({
+          iso: "https://example.com/omarchy.iso",
+          serverUrl: "https://qemu.example.com",
+          version: "1.2.3",
+        }),
+      { message: "test: LINEAR_API_TOKEN is not set" },
+    );
+    assert.equal(fetchMock.mock.callCount(), 0);
+  });
+
+  it("uses the default when SERVER_URL and the flag are omitted", async () => {
+    delete process.env.SERVER_URL;
+    process.env.LINEAR_API_TOKEN = "";
+    const fetchMock = mock.method(globalThis, "fetch", async () => assert.fail("Linear should not be called"));
+
+    await assert.rejects(
+      () => newExperiment({ iso: "https://example.com/omarchy.iso", version: "1.2.3" }),
+      { message: "test: LINEAR_API_TOKEN is not set" },
+    );
+    assert.equal(fetchMock.mock.callCount(), 0);
+  });
+});
+
+describe("newExperiment server URL unhappy path", () => {
+  afterEach(restoreNewExperimentEnv);
+
+  it("rejects a SERVER_URL outside HTTP and HTTPS", async () => {
+    process.env.SERVER_URL = "ssh://qemu.example.com";
+    process.env.LINEAR_API_TOKEN = "linear-token";
+    const fetchMock = mock.method(globalThis, "fetch", async () => assert.fail("Linear should not be called"));
+
+    await assert.rejects(
+      () => newExperiment({ iso: "https://example.com/omarchy.iso", version: "1.2.3" }),
+      { message: "test: server_url must be a valid http or https url" },
+    );
+    assert.equal(fetchMock.mock.callCount(), 0);
+  });
+
+  it("uses SERVER_URL before a valid --server_url flag", async () => {
+    process.env.SERVER_URL = "ssh://qemu.example.com";
+    process.env.LINEAR_API_TOKEN = "linear-token";
+    const fetchMock = mock.method(globalThis, "fetch", async () => assert.fail("Linear should not be called"));
+
+    await assert.rejects(
+      () =>
+        newExperiment({
+          iso: "https://example.com/omarchy.iso",
+          serverUrl: "https://qemu.example.com",
+          version: "1.2.3",
+        }),
+      { message: "test: server_url must be a valid http or https url" },
+    );
+    assert.equal(fetchMock.mock.callCount(), 0);
+  });
+});
 
 describe("runExperiment happy path", () => {
   afterEach(restoreCursorToken);

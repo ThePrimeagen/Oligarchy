@@ -136,6 +136,20 @@ describe("./client happy path", () => {
     );
     assert.notEqual(named.code, 0);
     assert.match(named.stderr, /LINEAR_API_TOKEN is not set/);
+
+    const fromEnv = await runClient(
+      ["test", "new", "--iso", "https://example.com/omarchy.iso", "--version", "1.2.3"],
+      { LINEAR_API_TOKEN: "", SERVER_URL: "https://from.env.example" },
+    );
+    assert.notEqual(fromEnv.code, 0);
+    assert.match(fromEnv.stderr, /LINEAR_API_TOKEN is not set/);
+
+    const defaulted = await runClient(
+      ["test", "new", "--iso", "https://example.com/omarchy.iso", "--version", "1.2.3"],
+      { LINEAR_API_TOKEN: "", SERVER_URL: "" },
+    );
+    assert.notEqual(defaulted.code, 0);
+    assert.match(defaulted.stderr, /LINEAR_API_TOKEN is not set/);
   });
 
   it("lists stored test definition names", async () => {
@@ -298,7 +312,7 @@ describe("./client unhappy path", () => {
     assert.match(result.stderr, /iso must be a valid https url/);
   });
 
-  it("rejects a missing ISO or server URL", async () => {
+  it("rejects a missing ISO", async () => {
     const missingIso = await runClient([
       "test",
       "new",
@@ -308,17 +322,16 @@ describe("./client unhappy path", () => {
     ]);
     assert.notEqual(missingIso.code, 0);
     assert.match(missingIso.stderr, /iso/);
+  });
 
-    const missingServer = await runClient([
-      "test",
-      "new",
-      "--iso",
-      "https://example.com/omarchy.iso",
-      "--version",
-      "1.2.3",
-    ]);
-    assert.notEqual(missingServer.code, 0);
-    assert.match(missingServer.stderr, /server_url/);
+  it("rejects a SERVER_URL outside HTTP and HTTPS", async () => {
+    const result = await runClient(
+      ["test", "new", "--iso", "https://example.com/omarchy.iso", "--version", "1.2.3"],
+      { SERVER_URL: "ssh://qemu.example.com" },
+    );
+
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /server_url must be a valid http or https url/);
   });
 
   it("rejects a missing version", async () => {

@@ -10,6 +10,7 @@ import { testDefinitions, testResults, testRuns } from "./db/schema.ts";
 import { listTestDefinitions } from "./test-def.ts";
 
 const LINEAR_API_URL = "https://api.linear.app/graphql";
+const DEFAULT_SERVER_URL = "http://127.0.0.1:42069";
 const SUB_AGENT = "Grok 4.6 high fast (cursor-grok-4.6-high-fast)";
 
 const HttpsUrl = Schema.String.check(
@@ -353,10 +354,15 @@ export async function createExperiment(
   return { experiment, tickets };
 }
 
-export async function newExperiment(input: { iso: string; serverUrl: string; version: string; name?: string }): Promise<void> {
+export async function newExperiment(input: { iso: string; serverUrl?: string; version: string; name?: string }): Promise<void> {
   if (existsSync(".env")) {
     loadEnvFile();
   }
+
+  const fromEnv = process.env.SERVER_URL;
+  const serverUrl = Schema.decodeUnknownSync(HttpUrl)(
+    fromEnv !== undefined && fromEnv !== "" ? fromEnv : (input.serverUrl ?? DEFAULT_SERVER_URL),
+  );
 
   const token = process.env.LINEAR_API_TOKEN;
   if (token === undefined || token === "") {
@@ -365,7 +371,7 @@ export async function newExperiment(input: { iso: string; serverUrl: string; ver
 
   const db = connectDatabase();
   try {
-    const result = await createExperiment(db, token, input);
+    const result = await createExperiment(db, token, { ...input, serverUrl });
     console.log(
       JSON.stringify({
         id: result.experiment.id,
@@ -476,6 +482,7 @@ export const experimentNewCommand = Command.make(
     ),
     serverUrl: Flag.string("server_url").pipe(
       Flag.withSchema(HttpUrl),
+      Flag.optional,
       Flag.withDescription("HTTP or HTTPS URL of the oligarchy server"),
     ),
     version: Flag.string("version").pipe(
@@ -493,7 +500,7 @@ export const experimentNewCommand = Command.make(
       try: () =>
         newExperiment({
           iso,
-          serverUrl,
+          serverUrl: Option.isNone(serverUrl) ? undefined : serverUrl.value,
           version,
           name: Option.isNone(name) ? undefined : name.value,
         }),
