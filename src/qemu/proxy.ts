@@ -73,7 +73,7 @@ function emitFollow(live: LiveSession, event: FollowEvent): void {
     if (!Queue.offerUnsafe(follower, event)) {
       live.followers.delete(follower);
       Queue.endUnsafe(follower);
-      log(db, { level: "warning", text: `session ${live.qemu.id}: follower dropped; ${FOLLOW_BACKLOG} events behind`, sessionId: live.qemu.id, agentId: live.agent });
+      log(db, { level: "warning", text: `follower dropped; ${FOLLOW_BACKLOG} events behind`, sessionId: live.qemu.id, agentId: live.agent });
     }
   }
 }
@@ -337,7 +337,7 @@ function startSession(cfg: typeof StartBody.Type, started: number, display: Qemu
       },
     });
     log(db, {
-      text: `session ${qemu.id}: starting; iso ${cfg.iso}${cfg.disk === undefined ? "" : `, disk ${cfg.disk}`}`,
+      text: `starting; iso ${cfg.iso}${cfg.disk === undefined ? "" : `, disk ${cfg.disk}`}`,
       sessionId: qemu.id,
       agentId: cfg.agent,
     });
@@ -351,7 +351,7 @@ function startSession(cfg: typeof StartBody.Type, started: number, display: Qemu
     live.lastCommandAt = Date.now();
     sessions.set(qemu.id, live);
     emitFollow(live, { type: "session", status: "running" });
-    log(db, { text: `session ${qemu.id}: running; started in ${Date.now() - started}ms`, sessionId: qemu.id, agentId: cfg.agent });
+    log(db, { text: `running; started in ${Date.now() - started}ms`, sessionId: qemu.id, agentId: cfg.agent });
     return qemu.id;
   });
 }
@@ -428,7 +428,7 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
         });
         live.image = { id: imageId, png: data.toString("base64") };
         emitFollow(live, { type: "image", ...live.image });
-        log(db, { text: `session ${qemu.id}: image; ${data.length} bytes in ${Date.now() - started}ms; ${storedImageUrl(imageId)}`, sessionId: qemu.id, agentId: agent });
+        log(db, { text: `image; ${data.length} bytes in ${Date.now() - started}ms; ${storedImageUrl(imageId)}`, sessionId: qemu.id, agentId: agent });
         return HttpServerResponse.uint8Array(data, {
           contentType: "image/png",
           headers: { "x-image-url": storedImageUrl(imageId) },
@@ -475,7 +475,7 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
       // the body starts streaming still ends this queue rather than leaving it hanging.
       const queue = yield* Queue.dropping<FollowEvent, Cause.Done>(FOLLOW_BACKLOG);
       live.followers.add(queue);
-      log(db, { text: `session ${id}: follower attached`, sessionId: id, agentId: live.agent });
+      log(db, { text: "follower attached", sessionId: id, agentId: live.agent });
       Queue.offerUnsafe(queue, { type: "session", status: sessions.has(id) ? "running" : "pending" });
       if (live.intent !== undefined) {
         Queue.offerUnsafe(queue, { type: "intent", state: "started", message: live.intent.message });
@@ -487,7 +487,7 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
         Stream.map((event) => new TextEncoder().encode(`${JSON.stringify(event)}\n`)),
         Stream.ensuring(Effect.sync(() => {
           if (live.followers.delete(queue)) {
-            log(db, { text: `session ${id}: follower detached`, sessionId: id, agentId: live.agent });
+            log(db, { text: "follower detached", sessionId: id, agentId: live.agent });
           }
         })),
       );
@@ -503,7 +503,7 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
         try: () => readFile(qemu.serialPath),
         catch: (cause) => internal(cause, { sessionId: qemu.id, agentId: params.agent }),
       }));
-      log(db, { text: `session ${qemu.id}: serial; ${data.length} bytes in ${Date.now() - started}ms`, sessionId: qemu.id, agentId: params.agent });
+      log(db, { text: `serial; ${data.length} bytes in ${Date.now() - started}ms`, sessionId: qemu.id, agentId: params.agent });
       return HttpServerResponse.uint8Array(data, { contentType: "text/plain" });
     }) satisfies RouteHandler, { uninterruptible: true });
 
@@ -521,7 +521,7 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
         try {
           await stop(qemu);
         } catch (err) {
-          log(db, { level: "error", text: `session ${qemu.id}: stop cleanup failed: ${errorDetail(err)}`, sessionId: qemu.id, agentId: agent }, { cause: err });
+          log(db, { level: "error", text: `stop cleanup failed: ${errorDetail(err)}`, sessionId: qemu.id, agentId: agent }, { cause: err });
         }
       });
       yield* Effect.tryPromise({
@@ -533,7 +533,7 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
       });
       // Color is released in finishLiveSession; log first so the stopped line keeps it.
       log(db, {
-        text: `session ${qemu.id}: stopped; ${finalStatus}${reason === undefined ? "" : `; ${reason}`}`,
+        text: `stopped; ${finalStatus}${reason === undefined ? "" : `; ${reason}`}`,
         sessionId: qemu.id,
         agentId: agent,
       });
@@ -558,7 +558,7 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
         try: () => sendKeys(qemu, chords, record),
         catch: (err) => exchangeFailed(err, { sessionId: qemu.id, agentId: agent }),
       }));
-      log(db, { text: `session ${qemu.id}: sent ${chords.length} chords in ${Date.now() - started}ms`, sessionId: qemu.id, agentId: agent });
+      log(db, { text: `sent ${chords.length} chords in ${Date.now() - started}ms`, sessionId: qemu.id, agentId: agent });
       return HttpServerResponse.jsonUnsafe({ ok: "true" });
     }) satisfies RouteHandler, { uninterruptible: true });
 
@@ -578,7 +578,7 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
         catch: (err) => exchangeFailed(err, { sessionId: qemu.id, agentId: agent }),
       }));
       log(db, {
-        text: `session ${qemu.id}: mouse ${x} ${y}${button === undefined ? "" : ` ${button}${clicks === undefined || clicks === 1 ? "" : ` ×${clicks}`}`} in ${Date.now() - started}ms`,
+        text: `mouse ${x} ${y}${button === undefined ? "" : ` ${button}${clicks === undefined || clicks === 1 ? "" : ` ×${clicks}`}`} in ${Date.now() - started}ms`,
         sessionId: qemu.id,
         agentId: agent,
       });
@@ -596,7 +596,7 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
       }
       live.intent = { span: startIntentSpan(live.span, live.qemu.id, agent, test_result_id, message), message };
       emitFollow(live, { type: "intent", state: "started", message });
-      log(db, { text: `session ${live.qemu.id}: intent start; ${message}`, sessionId: live.qemu.id, agentId: agent });
+      log(db, { text: `intent start; ${message}`, sessionId: live.qemu.id, agentId: agent });
       return HttpServerResponse.jsonUnsafe({ ok: "true" });
     }) satisfies RouteHandler, { uninterruptible: true });
 
@@ -607,7 +607,7 @@ const routes = (display: QemuDisplay, automation: boolean) => HttpRouter.use((ro
         return yield* Effect.fail(badRequest("no active intent", { sessionId: live.qemu.id, agentId: agent }));
       }
       finishOpenIntent(live, "completed");
-      log(db, { text: `session ${live.qemu.id}: intent end`, sessionId: live.qemu.id, agentId: agent });
+      log(db, { text: "intent end", sessionId: live.qemu.id, agentId: agent });
       return HttpServerResponse.jsonUnsafe({ ok: "true" });
     }) satisfies RouteHandler, { uninterruptible: true });
 
@@ -703,11 +703,11 @@ async function stopTimedOutSessions(): Promise<void> {
         await stop(qemu);
       } catch (err) {
         // stop() already destroyed the socket and signaled QEMU, so still close the record.
-        log(db, { level: "error", text: `session ${qemu.id}: timeout cleanup failed: ${errorDetail(err)}`, sessionId: qemu.id }, { cause: err });
+        log(db, { level: "error", text: `timeout cleanup failed: ${errorDetail(err)}`, sessionId: qemu.id }, { cause: err });
       }
       try {
         await endSession(db, qemu.id, "timed_out", SESSION_TIMEOUT_REASON);
-        log(db, { text: `session ${qemu.id}: timed out; ${SESSION_TIMEOUT_REASON}`, sessionId: qemu.id });
+        log(db, { text: `timed out; ${SESSION_TIMEOUT_REASON}`, sessionId: qemu.id });
       } finally {
         finishLiveSession(live, "timed_out");
       }
@@ -718,7 +718,7 @@ async function stopTimedOutSessions(): Promise<void> {
     if (result.status === "rejected") {
       log(db, {
         level: "error",
-        text: `session ${timedOut[i].qemu.id}: recording timeout failed: ${errorDetail(result.reason)}`,
+        text: `recording timeout failed: ${errorDetail(result.reason)}`,
         sessionId: timedOut[i].qemu.id,
       }, { cause: result.reason });
     }
@@ -757,9 +757,9 @@ const drainSessions = Layer.effectDiscard(
             await stop(qemu);
             status = "aborted";
             await endSession(db, qemu.id, "aborted", "proxy shutdown");
-            log(db, { text: `session ${qemu.id}: stopped; aborted; proxy shutdown`, sessionId: qemu.id });
+            log(db, { text: "stopped; aborted; proxy shutdown", sessionId: qemu.id });
           } catch (err) {
-            log(db, { level: "error", text: `shutdown: session ${qemu.id}: ${(err as Error).message}`, sessionId: qemu.id }, { cause: err });
+            log(db, { level: "error", text: `shutdown: ${(err as Error).message}`, sessionId: qemu.id }, { cause: err });
             throw err;
           } finally {
             finishLiveSession(live, status);
@@ -800,7 +800,7 @@ const main = (display: QemuDisplay, automation: boolean, port: number) => Layer.
         try {
           await endSession(db, live.qemu.id, "aborted", `proxy error: ${err.message}`);
         } catch (e) {
-          log(db, { level: "error", text: `shutdown: session ${live.qemu.id}: ${errorDetail(e)}`, sessionId: live.qemu.id }, { cause: e });
+          log(db, { level: "error", text: `shutdown: ${errorDetail(e)}`, sessionId: live.qemu.id }, { cause: e });
         }
         finishLiveSession(live, "aborted");
       });

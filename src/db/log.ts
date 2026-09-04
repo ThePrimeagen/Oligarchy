@@ -73,9 +73,7 @@ function paint(hex: string, text: string): string {
 
 function write(line: LogEntry): void {
   const tag = line.agentId ?? "global";
-  const session = line.sessionId === undefined ? "" : `session ${line.sessionId}: `;
-  const message = session !== "" ? line.text.replace(session, "") : line.text;
-  const text = line.level === undefined || line.level === "info" ? message : `${line.level}: ${message}`;
+  const text = line.level === undefined || line.level === "info" ? line.text : `${line.level}: ${line.text}`;
   const hex = line.agentId === undefined ? undefined : colors.get(line.agentId);
   const ticket = hex === undefined
     ? styleText("gray", tag, { stream: process.stdout })

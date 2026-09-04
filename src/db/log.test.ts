@@ -46,7 +46,7 @@ describe("log output", () => {
     acquireAgentColor(AGENT_ID);
 
     log(db, {
-      text: `session ${SESSION_ID}: sent 9 chords in 1546ms`,
+      text: "sent 9 chords in 1546ms",
       sessionId: SESSION_ID,
       agentId: AGENT_ID,
     });
