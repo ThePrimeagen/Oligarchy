@@ -1182,7 +1182,9 @@ origin. There is no `journalctl` key — that stream is not separately available
   virtio-serial channel nobody speaks is unused hardware.
 - `proxy` is the control-plane `logs` rows for the session, formatted `created_at level text`.
 - `qemu` is the QEMU process stderr tail (last 4096 bytes): KVM, device and host boot failures.
-  It is read from `QemuHandle.stderrTail` after `kill`, once the drain has finished.
+  It is read from `QemuHandle.stderrTail` before `kill` (the tail already holds what QEMU wrote
+  while the guest was failing). Closing the scope interrupts the drain fiber, so a post-kill
+  read can miss bytes written on SIGTERM.
 - `actions` is the QMP flight recorder for the session, formatted
   `created_at id state request[ response]`. Screenshots stay on `images`; they already outlive
   the process and are binary.

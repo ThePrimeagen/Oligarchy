@@ -769,12 +769,13 @@ const make = Effect.gen(function* () {
       return yield* Errors.unknownSession(live.id, live.agent);
     }
     // The session dir dies with kill; the serial has to be read while the file still exists.
+    // QEMU stderr is the in-memory tail drained so far. Reading it after kill is racy: closing
+    // the scope interrupts the drain fiber, so a death line written on SIGTERM can be lost.
     const serialText = finalStatus === "failed" ? yield* readSerialText(live) : "";
+    const qemuText = finalStatus === "failed" ? yield* live.qemu.stderrTail : "";
     // The kill destroys the socket and signals QEMU before it removes the dir, so a cleanup
     // failure still leaves a dead machine: log it, but close the record.
     yield* killLogged(live, "stop cleanup failed", live.agent);
-    // After kill the stderr drain is finished: the tail names a host/KVM death.
-    const qemuText = finalStatus === "failed" ? yield* live.qemu.stderrTail : "";
     yield* sessionStore
       .endSession(live.id, finalStatus, reason ?? null)
       .pipe(

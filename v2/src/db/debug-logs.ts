@@ -32,10 +32,7 @@ const formatActions = (
   rows
     .map((row) => {
       const state = row.state ?? "open";
-      const response =
-        row.response === null || row.response === undefined
-          ? ""
-          : ` ${JSON.stringify(row.response)}`;
+      const response = row.response === null ? "" : ` ${JSON.stringify(row.response)}`;
       return `${row.createdAt.toISOString()} ${String(row.id)} ${state} ${JSON.stringify(row.request)}${response}`;
     })
     .join("\n");

@@ -1219,7 +1219,7 @@ describe("stop", () => {
   );
 
   it.effect(
-    "a failed stop reads serial, kills, then qemu stderr, then saves after the stopped line",
+    "a failed stop reads serial and qemu stderr, then kills, then saves after the stopped line",
     () =>
       Effect.gen(function* () {
         const order: Array<string> = [];
@@ -1263,10 +1263,10 @@ describe("stop", () => {
               reason: "installer hung",
             });
             expect(h.fsCalls).toContain(`readFile ${serialPath(h, id)}`);
-            const tail = order.slice(order.indexOf("kill"));
+            const tail = order.slice(order.indexOf("qemu"));
             expect(tail).toEqual([
-              "kill",
               "qemu",
+              "kill",
               "stopped; failed; installer hung",
               "flush",
               "save",
