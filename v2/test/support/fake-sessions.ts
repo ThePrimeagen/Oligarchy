@@ -60,6 +60,7 @@ const liveSession = (id: string, agent: string): Effect.Effect<Sessions.LiveSess
         sendKeys: die("sendKeys"),
         sendMouse: die("sendMouse"),
         screendump: die("screendump"),
+        stderrTail: Effect.die("Unexpected QemuHandle.stderrTail"),
       },
       span,
       scope: Scope.makeUnsafe(),

@@ -117,6 +117,24 @@ export const logs = pgTable(
   (table) => [index("logs_session_id_idx").on(table.sessionId)],
 );
 
+// One snapshot per failed session, keyed by origin. journalctl / dmesg / compositor
+// crashes are not separate streams: they appear in `serial` only if the guest wrote
+// them to the UART. session_id is the key; a second save is a database error by design.
+export type DebugLogSources = {
+  readonly serial: string;
+  readonly proxy: string;
+  readonly qemu: string;
+  readonly actions: string;
+};
+
+export const debugLogs = pgTable("debug_logs", {
+  sessionId: uuid("session_id")
+    .primaryKey()
+    .references(() => sessions.id),
+  sources: jsonb("sources").$type<DebugLogSources>().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // A definition is the stored mission an agent is handed — what it is about, what to
 // do, and the proof that closes it. Rows are edited in place; name is the lookup key.
 export const testDefinitions = pgTable(

@@ -33,7 +33,8 @@ export type Call =
       readonly chords: ReadonlyArray<ReadonlyArray<string>>;
     }
   | { readonly _tag: "sendMouse"; readonly id: string; readonly input: MouseInput }
-  | { readonly _tag: "screendump"; readonly id: string };
+  | { readonly _tag: "screendump"; readonly id: string }
+  | { readonly _tag: "stderrTail"; readonly id: string };
 
 // Every hook defaults to success; a hook that fails scripts that step's failure.
 export type Script = {
@@ -60,6 +61,9 @@ export type Script = {
   >;
   // Where session directories live; `sessionDir(id)` is `${tmp}/oligarchy-${id}`.
   readonly tmp?: string;
+  // The QEMU process stderr tail a failed stop snapshots. `stderrTail` wins when both are set.
+  readonly stderr?: string;
+  readonly stderrTail?: () => Effect.Effect<string>;
 };
 
 export type FakeQemu = {
@@ -198,6 +202,10 @@ export const fakeQemu = (script: Script = {}): FakeQemu => {
             script.screendump?.() ?? Effect.succeed(PNG),
           );
         }),
+      stderrTail: Effect.suspend(() => {
+        calls.push({ _tag: "stderrTail", id });
+        return script.stderrTail?.() ?? Effect.succeed(script.stderr ?? "");
+      }),
     };
   };
 

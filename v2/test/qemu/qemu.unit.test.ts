@@ -195,6 +195,16 @@ describe("Qemu.start happy path", () => {
       );
       expect(commands(socket)).toEqual([{ execute: "qmp_capabilities", arguments: {}, id: 1 }]);
       expect(recording.outcomes).toEqual([{ state: "completed", response: FakeSocket.GREETING }]);
+      expect(yield* handle.stderrTail).toBe("");
+    }),
+  );
+
+  it.effect("exposes the QEMU stderr tail on the handle", () =>
+    Effect.gen(function* () {
+      const { qemu } = yield* fixture({ qemu: { stderr: "kvm: not available\n" } });
+      const handle = yield* boot(qemu, FakeSocket.recorder().record);
+      yield* settle;
+      expect(yield* handle.stderrTail).toBe("kvm: not available\n");
     }),
   );
 

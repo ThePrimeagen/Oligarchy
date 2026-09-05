@@ -143,12 +143,13 @@ export const intercepting = (): Intercepted => {
       }
     }
   };
-  const next = (predicate: (call: Call) => boolean) =>
-    Effect.gen(function* () {
-      const deferred = yield* Deferred.make<Call>();
-      waiters.push({ predicate, deferred });
-      return yield* Deferred.await(deferred);
-    });
+  // Register before the effect runs. A `forkChild` waiter that yields first can miss a
+  // write that settles on another fiber in the same turn (the ISO heartbeat flake).
+  const next = (predicate: (call: Call) => boolean): Effect.Effect<Call> => {
+    const deferred = Deferred.makeUnsafe<Call>();
+    waiters.push({ predicate, deferred });
+    return Deferred.await(deferred);
+  };
   // Recorded once the operation has settled, so a waiter sees the effect on disk.
   const recorded = <A, E>(
     method: string,

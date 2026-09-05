@@ -21,6 +21,7 @@ import {
   Tracer,
 } from "effect";
 import * as Actions from "../db/actions.ts";
+import * as DebugLogs from "../db/debug-logs.ts";
 import * as SessionStore from "../db/sessions.ts";
 import * as ExternalFailure from "../external-failure.ts";
 import * as Log from "../observability/log.ts";
@@ -193,6 +194,7 @@ const make = Effect.gen(function* () {
   const stats = yield* Stats.Stats;
   const sessionStore = yield* SessionStore.SessionStore;
   const actionStore = yield* Actions.ActionStore;
+  const debugLogs = yield* DebugLogs.DebugLogStore;
   const log = yield* Log.Log;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -718,6 +720,40 @@ const make = Effect.gen(function* () {
     return yield* log.info("intent end", { sessionId: live.id, agentId: live.agent });
   });
 
+  const readSerialText = (live: LiveSession): Effect.Effect<string> =>
+    fs.readFile(live.qemu.serialPath).pipe(
+      Effect.map((bytes) => new TextDecoder().decode(bytes)),
+      Effect.catch((error) =>
+        error.reason._tag === "NotFound"
+          ? Effect.succeed("")
+          : log
+              .error(`debug log: serial read failed: ${detail(error)}`, {
+                sessionId: live.id,
+                agentId: live.agent,
+                cause: error,
+              })
+              .pipe(Effect.as("")),
+      ),
+    );
+
+  const saveDebugLog = (
+    live: LiveSession,
+    captured: { readonly serial: string; readonly qemu: string },
+  ): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      // Drain the log queue so the snapshot includes the stopped line just offered.
+      yield* log.flush;
+      yield* debugLogs.saveFailedSession(live.id, captured).pipe(
+        Effect.catch((error) =>
+          log.error(`debug log save failed: ${detail(error)}`, {
+            sessionId: live.id,
+            agentId: live.agent,
+            cause: error,
+          }),
+        ),
+      );
+    });
+
   const stop = Effect.fn("Sessions.stop")(function* (
     live: LiveSession,
     status: Domain.StopStatus | undefined,
@@ -732,6 +768,11 @@ const make = Effect.gen(function* () {
     if (!owned) {
       return yield* Errors.unknownSession(live.id, live.agent);
     }
+    // The session dir dies with kill; the serial has to be read while the file still exists.
+    // QEMU stderr is the in-memory tail drained so far. Reading it after kill is racy: closing
+    // the scope interrupts the drain fiber, so a death line written on SIGTERM can be lost.
+    const serialText = finalStatus === "failed" ? yield* readSerialText(live) : "";
+    const qemuText = finalStatus === "failed" ? yield* live.qemu.stderrTail : "";
     // The kill destroys the socket and signals QEMU before it removes the dir, so a cleanup
     // failure still leaves a dead machine: log it, but close the record.
     yield* killLogged(live, "stop cleanup failed", live.agent);
@@ -749,6 +790,9 @@ const make = Effect.gen(function* () {
       sessionId: live.id,
       agentId: live.agent,
     });
+    if (finalStatus === "failed") {
+      yield* saveDebugLog(live, { serial: serialText, qemu: qemuText });
+    }
     return yield* finishLiveSession(live, finalStatus);
   });
 
@@ -930,6 +974,7 @@ export class Sessions extends Context.Service<Sessions>()("@oligarchy/proxy/Sess
     | Stats.Stats
     | SessionStore.SessionStore
     | Actions.ActionStore
+    | DebugLogs.DebugLogStore
     | Log.Log
     | FileSystem.FileSystem
     | Path.Path

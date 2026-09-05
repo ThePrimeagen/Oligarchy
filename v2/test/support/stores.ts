@@ -1,5 +1,6 @@
 import { Effect, Layer, Option } from "effect";
 import * as Actions from "../../src/db/actions.ts";
+import * as DebugLogs from "../../src/db/debug-logs.ts";
 import * as Logs from "../../src/db/logs.ts";
 import * as DbSchema from "../../src/db/schema.ts";
 import * as Sessions from "../../src/db/sessions.ts";
@@ -224,6 +225,37 @@ export const fakeLogStore = (
 };
 
 // ---------------------------------------------------------------------------
+// DebugLogStore
+// ---------------------------------------------------------------------------
+
+export type FakeDebugLogStore = {
+  readonly saves: Array<{
+    readonly sessionId: string;
+    readonly serial: string;
+    readonly qemu: string;
+  }>;
+  readonly layer: Layer.Layer<DebugLogs.DebugLogStore>;
+};
+
+export const fakeDebugLogStore = (
+  overrides: Partial<typeof DebugLogs.DebugLogStore.Service> = {},
+): FakeDebugLogStore => {
+  const saves: Array<{
+    readonly sessionId: string;
+    readonly serial: string;
+    readonly qemu: string;
+  }> = [];
+  const service = DebugLogs.DebugLogStore.of({
+    saveFailedSession: (sessionId, captured) =>
+      Effect.sync(() => {
+        saves.push({ sessionId, serial: captured.serial, qemu: captured.qemu });
+      }),
+    ...overrides,
+  });
+  return { saves, layer: Layer.succeed(DebugLogs.DebugLogStore)(service) };
+};
+
+// ---------------------------------------------------------------------------
 // TestStore
 // ---------------------------------------------------------------------------
 
@@ -357,11 +389,13 @@ export const fakeStores = () => {
   const actions = fakeActionStore();
   const logs = fakeLogStore();
   const tests = fakeTestStore();
+  const debugLogs = fakeDebugLogStore();
   return {
     sessions,
     actions,
     logs,
     tests,
-    layer: Layer.mergeAll(sessions.layer, actions.layer, logs.layer, tests.layer),
+    debugLogs,
+    layer: Layer.mergeAll(sessions.layer, actions.layer, logs.layer, tests.layer, debugLogs.layer),
   };
 };

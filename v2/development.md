@@ -108,7 +108,9 @@ bugs; anything not listed here is a regression.
 - `v2/` holds `package.json`, `package-lock.json`, `tsconfig.json`, `.oxlintrc.json`,
   `.oxfmtrc.json`, `.editorconfig`, `vitest.config.ts`, `vitest.global-setup.ts` (Testcontainers
   Postgres, migrations, seed), `vitest.d.ts`, `drizzle.config.ts`, `wrangler.jsonc`, `drizzle/`
-  (generated migrations, byte-identical to `v1/`), `public/` and `prompts/` (moved as-is), the
+  (generated migrations; 0000–0011 match `v1/`, 0012 adds `debug_logs` with a `sources` jsonb
+  map), `public/` and `prompts/`
+  (moved as-is), the
   operator documents, this document, the four `v2/` wrappers, `src/` and `test/`.
 
 `v2/src/`: one directory per process plus the shared kernel; `main.ts` files are the entries.
@@ -118,7 +120,7 @@ src/
 ├── shared/      domain.ts  errors.ts  contract.ts  api.ts
 ├── config.ts    external-failure.ts
 ├── observability/  dsn.ts  instrument.ts  sentry.ts  log.ts  render.ts
-├── db/          schema.ts  client.ts  sessions.ts  actions.ts  logs.ts  tests.ts  migrate.ts
+├── db/          schema.ts  client.ts  sessions.ts  actions.ts  logs.ts  debug-logs.ts  tests.ts  migrate.ts
 ├── qmp/         framing.ts  socket.ts  client.ts
 ├── qemu/        keys.ts  args.ts  host.ts  process.ts  qemu.ts  iso.ts  stats.ts
 ├── proxy/       sessions.ts  middleware.ts  handlers.ts  command.ts  main.ts
@@ -956,16 +958,17 @@ export class QmpListen extends Context.Service<QmpListen, QmpListenService>()(
   through a `Deferred<number | null>` (`null` for a signal death); join the drain fiber before
   reading the tail after exit, so `qemu: exited <code> before QMP connect[: <stderr>]` carries the
   whole tail. `Process.spawn(executable, args)` returns `QemuProcess { exited, exitedBeforeConnect,
-  withStderr }` and no more (no pid, no raw tail); `spawnQemu(args)` is `spawn(Args.QEMU_BIN,
-  args)`. Readiness is a bounded wait (`Effect.timeoutOrElse`); secrets go to children on
-  stdin as a `Stream`, never argv. The session's `spawnFollow` exit carries `{ code, killed,
-  stderr }` so the REPL can tell a detach from a refusal.
+  withStderr, stderrTail }`; `stderrTail` is the raw drained bytes (last 4096). `spawnQemu(args)`
+  is `spawn(Args.QEMU_BIN, args)`. Readiness is a bounded wait (`Effect.timeoutOrElse`); secrets
+  go to children on stdin as a `Stream`, never argv. The session's `spawnFollow` exit carries
+  `{ code, killed, stderr }` so the REPL can tell a detach from a refusal.
 - `Qemu` boots in two steps under the session's scope: `Qemu.prepare(id, disk)` (below) returns
   `Prepared { id, dir, diskPath }`, `diskPath` the caller's disk or the fresh qcow2; `Qemu.start(
   prepared, { iso, display, automation, record })` listens on `<dir>/qmp.sock`, spawns QEMU
   (`-display` is `display` as given; the command already resolved `--automation` to `none`), races
   `accept` against the process exiting, and returns `QemuHandle { id, dir, serialPath, sendKeys,
-  sendMouse, screendump }`; a dead QEMU is noticed by the next command failing, not by a watcher.
+  sendMouse, screendump, stderrTail }`; a dead QEMU is noticed by the next command failing, not by
+  a watcher.
 - File I/O goes through `FileSystem.FileSystem` and `Path.Path` from `NodeServices.layer`; write
   private files atomically (`writeFile(tmp, bytes, { mode: 0o600 })` then `rename`), create
   private directories with `makeDirectory(dir, { recursive: true, mode: 0o700 })`, recover
@@ -1035,13 +1038,14 @@ const prepare = Effect.fn("Qemu.prepare")(function* (id: string, disk: string | 
 - `normalizeDatabaseUrl` guards with `URL.canParse` (`db: DATABASE_URL is not a valid url`, and the
   password never lands in a message), drops `sslrootcert=system` (node-postgres reads it as a file
   path) and keeps `sslmode=verify-full`.
-- Repositories are `Context.Service`s (`SessionStore`, `ActionStore`, `LogStore`, `TestStore`)
+- Repositories are `Context.Service`s (`SessionStore`, `ActionStore`, `LogStore`, `DebugLogStore`, `TestStore`)
   whose methods are `Effect.fn("db.<name>")` functions that `yield* Database` once in `make`.
   Drizzle-typed columns are trusted; the `jsonb` columns (`sessions.config`, `actions.request`,
   `actions.response`) are written from schema-typed values and read back as Drizzle types them.
-- `src/db/schema.ts` is v1's schema formatted by oxfmt: semantically identical (`drizzle-kit
-  check` and the `schema-in-sync` job pass against the moved migrations), not byte-identical. Its
-  `pgEnum` lists and the `Schema.Literals` in `domain.ts` are maintained by hand together. Row
+- `src/db/schema.ts` is v1's schema formatted by oxfmt, plus `debug_logs` (v2-only). The v1
+  tables stay semantically identical (`drizzle-kit check` and the `schema-in-sync` job pass
+  against the moved migrations), not byte-identical. Its `pgEnum` lists and the `Schema.Literals`
+  in `domain.ts` are maintained by hand together. Row
   stamps come from Postgres `now()` in the statement; Effect-side time from
   `Clock.currentTimeMillis`. `registerAgent`'s primary key makes one session per agent; a second
   registration is a `DatabaseError` by design. `TestStore.closeResult(resultId, status, reason,
@@ -1109,9 +1113,9 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
   `intent end`.
 - Replay is `actions WHERE session_id ORDER BY created_at, id`; the identity id breaks timestamp
   ties. `sessions.config` holds the effective launch config so a replay boots an identical machine.
-- The tables: `sessions`, `agent_runs`, `actions`, `images`, `logs`, `test_definitions`,
-  `test_base_prompts`, `test_runs`, `test_results`, declared in `src/db/schema.ts` exactly as v1
-  declares them.
+- The tables: `sessions`, `agent_runs`, `actions`, `images`, `logs`, `debug_logs`,
+  `test_definitions`, `test_base_prompts`, `test_runs`, `test_results`, declared in
+  `src/db/schema.ts`. v1 declared every table except `debug_logs`.
 
 ## Log stream
 
@@ -1160,6 +1164,42 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
 - `Log` installs no Effect `Logger`; `emit` formats, writes and offers synchronously. `console.*`
   appears only in `src/dashboard/**` and `vitest.global-setup.ts`. Test log output through the
   fake `Log` layer (`test/support/log.ts`) or `Log.layerStdout` with `TestConsole.logLines`.
+
+## Failed-session debug log
+
+A `/stop` with status `failed` writes one `debug_logs` row keyed by `session_id` after the
+stopped line and before the session scope is closed. The row is the crash artifact: everything
+that would otherwise vanish with the machine, plus the control-plane lines already offered for
+that session, including `stopped; failed`. `sources` is a jsonb map so each chunk is labeled by
+origin. There is no `journalctl` key — that stream is not separately available.
+
+- `serial` is the guest UART (`/dev/ttyS0` → `<session-dir>/serial.log`; see Operating loop).
+  The guest journal, dmesg, user-session journal, coredumps and compositor crash folders live
+  inside the guest. A live ISO keeps them in RAM (`-boot order=d` boots the CD, the qcow2 is
+  empty until an install writes it), so mounting the disk after QEMU dies yields nothing.
+  `journalctl`, `dmesg`, Hyprland and Quickshell text appear here only if something wrote them
+  to the UART. `qemu-guest-agent` / `guest-exec` is not on the Omarchy desktop ISO, and a
+  virtio-serial channel nobody speaks is unused hardware.
+- `proxy` is the control-plane `logs` rows for the session, formatted `created_at level text`.
+- `qemu` is the QEMU process stderr tail (last 4096 bytes): KVM, device and host boot failures.
+  It is read from `QemuHandle.stderrTail` before `kill` (the tail already holds what QEMU wrote
+  while the guest was failing). Closing the scope interrupts the drain fiber, so a post-kill
+  read can miss bytes written on SIGTERM.
+- `actions` is the QMP flight recorder for the session, formatted
+  `created_at id state request[ response]`. Screenshots stay on `images`; they already outlive
+  the process and are binary.
+- `kill` closes the session scope: QEMU dies and the prepare finalizer removes the directory.
+  The serial file has to be read first. A missing file is an empty serial (nothing wrote); any
+  other read failure is `debug log: serial read failed: <detail>` at error and the serial is
+  stored empty. Every `sources` key is always present; an origin that produced nothing is `""`.
+- `Log.flush` runs before the insert so `listLogs` sees every offered row, the stopped line
+  included. Each source is capped at 1 MiB independently; a longer value keeps the tail (the
+  crash and the verdict) and starts `[truncated]\n`.
+- The insert is best-effort: `debug log save failed: <detail>` at error and the stop still
+  closes the session. A second save for the same session is a `DatabaseError` by design; stop
+  writes at most once. Succeeded, aborted and timed-out stops do not write a row — those
+  verdicts are not a failed test session.
+- The columns: `session_id` (primary key, references `sessions.id`), `sources`, `created_at`.
 
 ## Sentry
 

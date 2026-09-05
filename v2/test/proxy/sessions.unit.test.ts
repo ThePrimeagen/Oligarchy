@@ -82,6 +82,7 @@ type Options = {
   readonly resolveIso?: FakeQemu.Resolve;
   readonly sessionStore?: Parameters<typeof Stores.fakeSessionStore>[0];
   readonly actionStore?: Parameters<typeof Stores.fakeActionStore>[0];
+  readonly debugLogStore?: Parameters<typeof Stores.fakeDebugLogStore>[0];
   readonly log?: Layer.Layer<Log.Log>;
   readonly shutdown?: Sessions.Shutdown;
 };
@@ -89,6 +90,7 @@ type Options = {
 const harness = (options: Options = {}) => {
   const sessions = Stores.fakeSessionStore(options.sessionStore);
   const actions = Stores.fakeActionStore(options.actionStore);
+  const debugLogs = Stores.fakeDebugLogStore(options.debugLogStore);
   const log = FakeLog.fakeLog();
   const tracer = Recording.recording();
   const qemu = FakeQemu.fakeQemu(options.script);
@@ -119,6 +121,7 @@ const harness = (options: Options = {}) => {
         FakeQemu.fakeStats,
         sessions.layer,
         actions.layer,
+        debugLogs.layer,
         options.log ?? log.layer,
         fs,
         Path.layer,
@@ -130,7 +133,7 @@ const harness = (options: Options = {}) => {
   // whichever fiber calls a method.
   const run = <A, E>(body: Effect.Effect<A, E, Sessions.Sessions>): Effect.Effect<A, E> =>
     body.pipe(Effect.provide(layer.pipe(Layer.provideMerge(tracer.layer))));
-  return { sessions, actions, log, tracer, qemu, iso, files, fsCalls, run };
+  return { sessions, actions, debugLogs, log, tracer, qemu, iso, files, fsCalls, run };
 };
 
 type Harness = ReturnType<typeof harness>;
@@ -1210,6 +1213,146 @@ describe("stop", () => {
           ]);
           expect(endedWith(spanNamed(h, "QEMU session"))).toBe("aborted");
           expect(line(h, "stopped")).toBeUndefined();
+        }),
+      );
+    }),
+  );
+
+  it.effect(
+    "a failed stop reads serial and qemu stderr, then kills, then saves after the stopped line",
+    () =>
+      Effect.gen(function* () {
+        const order: Array<string> = [];
+        const record = (text: string) =>
+          Effect.sync(() => {
+            order.push(text);
+          });
+        let saved:
+          | { readonly sessionId: string; readonly serial: string; readonly qemu: string }
+          | undefined;
+        const h = harness({
+          script: {
+            stop: () => record("kill"),
+            stderrTail: () => record("qemu").pipe(Effect.as("kvm denied")),
+          },
+          debugLogStore: {
+            saveFailedSession: (sessionId, captured) =>
+              Effect.sync(() => {
+                saved = { sessionId, serial: captured.serial, qemu: captured.qemu };
+                order.push("save");
+              }),
+          },
+          log: Layer.succeed(Log.Log)({
+            info: record,
+            warning: record,
+            error: record,
+            fatal: record,
+            acquireColor: () => Effect.void,
+            releaseColor: () => Effect.void,
+            flush: record("flush"),
+          }),
+        });
+        yield* h.run(
+          Effect.gen(function* () {
+            const { sessions, id, live } = yield* start();
+            h.files.set(serialPath(h, id), Effect.succeed(SERIAL));
+            yield* sessions.stop(live, "failed", "installer hung");
+            expect(h.sessions.sessions[0]).toMatchObject({
+              id,
+              status: "failed",
+              reason: "installer hung",
+            });
+            expect(h.fsCalls).toContain(`readFile ${serialPath(h, id)}`);
+            const tail = order.slice(order.indexOf("qemu"));
+            expect(tail).toEqual([
+              "qemu",
+              "kill",
+              "stopped; failed; installer hung",
+              "flush",
+              "save",
+            ]);
+            expect(saved).toEqual({ sessionId: id, serial: "boot log\n", qemu: "kvm denied" });
+          }),
+        );
+      }),
+  );
+
+  it.effect("a succeeded or aborted stop does not write a debug log", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      yield* h.run(
+        Effect.gen(function* () {
+          const first = yield* start();
+          h.files.set(serialPath(h, first.id), Effect.succeed(SERIAL));
+          yield* first.sessions.stop(first.live, "succeeded", "installed");
+          const second = yield* start(OTHER_AGENT);
+          h.files.set(serialPath(h, second.id), Effect.succeed(SERIAL));
+          yield* second.sessions.stop(second.live, undefined, "gave up");
+          expect(h.debugLogs.saves).toEqual([]);
+          expect(h.sessions.sessions.map((row) => row.status)).toEqual(["succeeded", "aborted"]);
+        }),
+      );
+    }),
+  );
+
+  it.effect("a missing serial still writes a debug log and the stop succeeds", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      yield* h.run(
+        Effect.gen(function* () {
+          const { sessions, id, live } = yield* start();
+          yield* sessions.stop(live, "failed", "desktop dead");
+          expect(h.debugLogs.saves).toEqual([{ sessionId: id, serial: "", qemu: "" }]);
+          expect(h.sessions.sessions[0]).toMatchObject({ id, status: "failed" });
+          expect(line(h, "debug log:")).toBeUndefined();
+        }),
+      );
+    }),
+  );
+
+  it.effect("a serial the host cannot read is logged and the debug log is still saved", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      yield* h.run(
+        Effect.gen(function* () {
+          const { sessions, id, live } = yield* start();
+          h.files.set(serialPath(h, id), Effect.fail(denied("readFile", serialPath(h, id))));
+          yield* sessions.stop(live, "failed", "gave up");
+          expect(h.debugLogs.saves).toEqual([{ sessionId: id, serial: "", qemu: "" }]);
+          expect(line(h, "debug log: serial read failed:")).toMatchObject({
+            level: "error",
+            sessionId: id,
+            agentId: AGENT,
+            skipSentry: false,
+          });
+          expect(h.sessions.sessions[0]).toMatchObject({ id, status: "failed" });
+        }),
+      );
+    }),
+  );
+
+  it.effect("a debug log that cannot be saved is logged and the stop still closes", () =>
+    Effect.gen(function* () {
+      const h = harness({
+        debugLogStore: {
+          saveFailedSession: () =>
+            Effect.fail(failure("saveFailedSession", "connect ECONNREFUSED")),
+        },
+      });
+      yield* h.run(
+        Effect.gen(function* () {
+          const { sessions, id, live } = yield* start();
+          h.files.set(serialPath(h, id), Effect.succeed(SERIAL));
+          yield* sessions.stop(live, "failed", "gave up");
+          expect(h.sessions.sessions[0]).toMatchObject({ id, status: "failed", reason: "gave up" });
+          expect(line(h, "debug log save failed:")).toMatchObject({
+            level: "error",
+            text: "debug log save failed: connect ECONNREFUSED",
+            sessionId: id,
+            agentId: AGENT,
+            skipSentry: false,
+          });
+          expect(line(h, "stopped")).toMatchObject({ text: "stopped; failed; gave up" });
         }),
       );
     }),
