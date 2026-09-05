@@ -134,12 +134,15 @@ export const SessionsLive = (display: Domain.QemuDisplay, automation: boolean) =
       ),
   );
 
-// This proxy only ever mints uuids: anything else names no stored image.
+const notFound = HttpServerResponse.jsonUnsafe({ error: "not found" }, { status: 404 });
+
+// This proxy only ever mints uuids: anything else names no stored image. An unknown image is an
+// answer, not a failed request: it is served raw so the boundary writes no error line for it.
 export const ImagesLive = HttpApiBuilder.group(Api.ProxyApi, "Images", (handlers) =>
-  handlers.handle("storedImage", ({ params }) =>
+  handlers.handleRaw("storedImage", ({ params }) =>
     Effect.gen(function* () {
       if (!Domain.isSessionId(params.id)) {
-        return yield* Errors.NotFound.make({});
+        return notFound;
       }
       const actions = yield* Actions.ActionStore;
       const image = yield* actions
@@ -149,19 +152,12 @@ export const ImagesLive = HttpApiBuilder.group(Api.ProxyApi, "Images", (handlers
             Errors.Internal.make({ message: "internal error", cause: error }),
           ),
         );
-      return yield* Option.match(image, {
-        onNone: () => Effect.fail(Errors.NotFound.make({})),
-        onSome: (data) => Effect.succeed(data),
-      });
+      return Option.getOrElse(image, () => notFound);
     }),
   ),
 );
 
-export const NotFoundRoute = HttpRouter.add(
-  "*",
-  "*",
-  HttpServerResponse.jsonUnsafe({ error: "not found" }, { status: 404 }),
-);
+export const NotFoundRoute = HttpRouter.add("*", "*", notFound);
 
 export const routes = (display: Domain.QemuDisplay, automation: boolean) =>
   Layer.mergeAll(

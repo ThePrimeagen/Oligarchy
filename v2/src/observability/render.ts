@@ -1,6 +1,6 @@
 import { WriteStream } from "node:tty";
 import { styleText } from "node:util";
-import { Cause, Console, Effect, Option, Schema } from "effect";
+import { Cause, Console, Effect, Option } from "effect";
 import { CliError } from "effect/unstable/cli";
 import * as ExternalFailure from "../external-failure.ts";
 import type * as Domain from "../shared/domain.ts";
@@ -9,18 +9,8 @@ import type * as Domain from "../shared/domain.ts";
 // Failures
 // ---------------------------------------------------------------------------
 
-const errorInstance = Schema.decodeUnknownOption(Schema.ErrorInstance());
-const messageField = Schema.decodeUnknownOption(Schema.Struct({ message: Schema.String }));
-
-const messageOf = (value: unknown): string | undefined => {
-  const error = errorInstance(value);
-  if (Option.isSome(error)) {
-    return error.value.message;
-  }
-  return Option.getOrUndefined(Option.map(messageField(value), (found) => found.message));
-};
-
-export const errorDetail = (cause: unknown): string => messageOf(cause) ?? String(cause);
+export const errorDetail = (cause: unknown): string =>
+  ExternalFailure.messageOf(cause) ?? String(cause);
 
 // `message` alone, or `message: cause.message` when the error carries a cause with a message.
 export const headline = (error: unknown): string => {
@@ -29,7 +19,7 @@ export const headline = (error: unknown): string => {
   if (cause === error) {
     return message;
   }
-  const detail = messageOf(cause);
+  const detail = ExternalFailure.messageOf(cause);
   return detail === undefined ? message : `${message}: ${detail}`;
 };
 

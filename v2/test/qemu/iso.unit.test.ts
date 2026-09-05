@@ -412,6 +412,51 @@ describe("getIso with a url: download", () => {
     ),
   );
 
+  it.effect("follows a redirect for the iso and for its sidecar", () =>
+    withServices(
+      Effect.gen(function* () {
+        const MOVED = "https://cdn.example.com/omarchy/omarchy-3.0.iso";
+        const redirect = (to: string) =>
+          new Response(null, { status: 302, headers: { location: to } });
+        const { iso, http, cached } = yield* fixture((_request, url) => {
+          switch (url.toString()) {
+            case URL_ISO:
+              return redirect(MOVED);
+            case MOVED:
+              return new Response(BYTES, { status: 200 });
+            case `${URL_ISO}.sha256`:
+              return redirect(`${MOVED}.sha256`);
+            case `${MOVED}.sha256`:
+              return sidecarFor(DIGEST);
+            default:
+              return new Response("nope", { status: 404 });
+          }
+        });
+        expect(yield* iso.getIso(URL_ISO, WHO)).toBe(cached);
+        expect(http.requests.map((request) => request.url)).toEqual([
+          URL_ISO,
+          MOVED,
+          `${URL_ISO}.sha256`,
+          `${MOVED}.sha256`,
+        ]);
+      }),
+    ),
+  );
+
+  it.effect("gives up after 20 redirects with the last hop's status", () =>
+    withServices(
+      Effect.gen(function* () {
+        const { iso, http } = yield* fixture(
+          (_request, url) =>
+            new Response(null, { status: 302, headers: { location: `${url.toString()}/again` } }),
+        );
+        const error = yield* Effect.flip(iso.getIso(URL_ISO, WHO));
+        expect(error.message).toBe(`iso: download failed: ${URL_ISO}: HTTP 302`);
+        expect(http.requests).toHaveLength(21);
+      }),
+    ),
+  );
+
   it.effect("shares one download between concurrent requests for the same url", () =>
     withServices(
       Effect.gen(function* () {

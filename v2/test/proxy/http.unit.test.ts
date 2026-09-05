@@ -1,6 +1,16 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { Cause, Deferred, Effect, Fiber, Layer, Redacted, Stream } from "effect";
+import {
+  Cause,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  PlatformError,
+  Redacted,
+  Stream,
+} from "effect";
 import {
   HttpBody,
   HttpClient,
@@ -12,6 +22,7 @@ import { HttpApiClient, HttpApiMiddleware } from "effect/unstable/httpapi";
 import { NodeHttpServer } from "@effect/platform-node";
 import * as Config from "../../src/config.ts";
 import * as Log from "../../src/observability/log.ts";
+import * as Render from "../../src/observability/render.ts";
 import * as Handlers from "../../src/proxy/handlers.ts";
 import * as Api from "../../src/shared/api.ts";
 import * as Contract from "../../src/shared/contract.ts";
@@ -323,7 +334,7 @@ describe("Images endpoint", () => {
     }),
   );
 
-  it.effect("GET /images/<non-uuid> and an unknown uuid are 404 not found", () =>
+  it.effect("GET /images/<non-uuid> and an unknown uuid are 404 not found and never logged", () =>
     Effect.gen(function* () {
       const fixed = fixture();
       yield* Effect.gen(function* () {
@@ -331,18 +342,45 @@ describe("Images endpoint", () => {
         for (const id of ["nope", "00000000-0000-4000-8000-000000000000"]) {
           const response = yield* http.get(`/images/${id}`);
           expect(response.status).toBe(404);
+          expect(response.headers["content-type"]).toContain("application/json");
           expect(yield* response.json).toEqual({ error: "not found" });
         }
         const api = yield* client;
         const error = yield* Effect.flip(api.Images.storedImage({ params: { id: "nope" } }));
         expect(error._tag).toBe("NotFound");
       }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.log.lines.map((line) => line.text)).toEqual([
-        "GET /images/nope failed: not found",
-        "GET /images/00000000-0000-4000-8000-000000000000 failed: not found",
-        "GET /images/nope failed: not found",
+      expect(fixed.log.lines).toEqual([]);
+    }),
+  );
+
+  it.effect("GET /images/<uuid> whose lookup fails is 500 logged with the driver's reason", () =>
+    Effect.gen(function* () {
+      const fixed = fixture({
+        actions: Stores.fakeActionStore({
+          getImage: () =>
+            Effect.fail(
+              Errors.DatabaseError.make({
+                operation: "getImage",
+                message: "Failed query: select from images",
+                cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
+              }),
+            ),
+        }),
+      });
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const response = yield* http.get(`/images/${IMAGE_ID}`);
+        expect(response.status).toBe(500);
+        expect(yield* response.json).toEqual({ error: "internal error" });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.log.lines).toMatchObject([
+        {
+          level: "error",
+          text: `GET /images/${IMAGE_ID} failed: connect ECONNREFUSED 127.0.0.1:5432`,
+          skipSentry: false,
+          cause: { _tag: "DatabaseError" },
+        },
       ]);
-      expect(fixed.log.lines.every((line) => line.skipSentry)).toBe(true);
     }),
   );
 });
@@ -871,7 +909,7 @@ describe("Sessions failures", () => {
   );
 
   it.effect(
-    "an Internal raised by Sessions is 500 internal error with the cause's message logged",
+    "an Internal raised by Sessions is 500 internal error, logged with the driver's reason",
     () =>
       Effect.gen(function* () {
         const failure = Errors.DatabaseError.make({
@@ -906,7 +944,7 @@ describe("Sessions failures", () => {
         }).pipe(Effect.provide(serve(fixed)));
         expect(fixed.log.lines[0]).toEqual({
           level: "error",
-          text: "POST /stop failed: Failed query: update sessions",
+          text: "POST /stop failed: connect ECONNREFUSED 127.0.0.1:5432",
           sessionId: SESSION_ID,
           agentId: AGENT_ID,
           skipSentry: false,
@@ -914,6 +952,64 @@ describe("Sessions failures", () => {
         });
         expect(fixed.reporter.reported).toEqual([]);
       }),
+  );
+
+  it.effect("an Internal carrying a platform error is logged with Node's own message", () =>
+    Effect.gen(function* () {
+      const failure = PlatformError.systemError({
+        _tag: "NotFound",
+        module: "FileSystem",
+        method: "readFile",
+        pathOrDescriptor: "/tmp/oligarchy-x/serial.log",
+        cause: new Error("ENOENT: no such file or directory, open '/tmp/oligarchy-x/serial.log'"),
+      });
+      const fixed = fixture({
+        sessions: FakeSessions.fakeSessions({
+          serial: (live) =>
+            Effect.fail(
+              Errors.Internal.make({
+                message: "internal error",
+                cause: failure,
+                sessionId: live.id,
+                agentId: live.agent,
+              }),
+            ),
+        }),
+      });
+      yield* Effect.gen(function* () {
+        const api = yield* client;
+        yield* Effect.flip(api.Sessions.serial({ query: { id: SESSION_ID, agent: AGENT_ID } }));
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.log.lines[0]?.text).toBe(
+        `GET /serial?id=${SESSION_ID}&agent=${AGENT_ID} failed: ENOENT: no such file or directory, open '/tmp/oligarchy-x/serial.log'`,
+      );
+    }),
+  );
+
+  it.effect("an Internal whose cause carries no cause of its own is logged with its message", () =>
+    Effect.gen(function* () {
+      const fixed = fixture({
+        sessions: FakeSessions.fakeSessions({
+          stop: (live) =>
+            Effect.fail(
+              Errors.Internal.make({
+                message: "internal error",
+                cause: Errors.DatabaseError.make({
+                  operation: "endSession",
+                  message: "pool ended",
+                }),
+                sessionId: live.id,
+                agentId: live.agent,
+              }),
+            ),
+        }),
+      });
+      yield* Effect.gen(function* () {
+        const api = yield* client;
+        yield* Effect.flip(api.Sessions.stop({ payload: stopBody }));
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.log.lines[0]?.text).toBe("POST /stop failed: pool ended");
+    }),
   );
 });
 
@@ -974,14 +1070,21 @@ describe("defects", () => {
         const wrong = yield* client.pipe(Effect.provide(bearer("wrong")));
         yield* Effect.flip(wrong.Sessions.serial({ query: { id: SESSION_ID, agent: AGENT_ID } }));
       }).pipe(Effect.provide(serve(fixed, stdout)));
-      const messages = fixed.reporter.reported.map((report) => report.error.message);
-      expect(messages).toContain("kaboom");
-      expect(messages).toContain("connect ECONNREFUSED 127.0.0.1:5432");
-      expect(messages).not.toContain('unknown session "nope"');
-      expect(messages).not.toContain("unauthorized");
-      const withSession = fixed.reporter.reported.find(
-        (report) => report.error.message === "connect ECONNREFUSED 127.0.0.1:5432",
+      // The log line is what reports; the cause it carries is what Sentry is handed.
+      expect(fixed.reporter.reported).toHaveLength(2);
+      const causes = fixed.reporter.reported.map((report) =>
+        Render.errorDetail(report.error.cause),
       );
+      expect(causes).toContain("kaboom");
+      expect(causes).toContain("connect ECONNREFUSED 127.0.0.1:5432");
+      const withSession = fixed.reporter.reported.find(
+        (report) =>
+          Render.errorDetail(report.error.cause) === "connect ECONNREFUSED 127.0.0.1:5432",
+      );
+      expect(withSession?.error.message).toBe(
+        `GET /serial?id=${SESSION_ID}&agent=${AGENT_ID} failed: connect ECONNREFUSED 127.0.0.1:5432`,
+      );
+      expect(withSession?.severity).toBe("Error");
       expect(withSession?.annotations).toMatchObject({
         session_id: SESSION_ID,
         agent_id: AGENT_ID,
@@ -991,7 +1094,7 @@ describe("defects", () => {
 });
 
 describe("interruption", () => {
-  it.live("POST /start completes even when the client disconnects mid-start", () =>
+  it.effect("POST /start completes even when the client disconnects mid-start", () =>
     Effect.gen(function* () {
       const entered = yield* Deferred.make<void>();
       const release = yield* Deferred.make<void>();
@@ -1015,8 +1118,11 @@ describe("interruption", () => {
           }),
         );
         yield* Deferred.await(entered);
+        // The interrupt lands on the client fiber: the connection is gone, the handler is not.
         yield* Fiber.interrupt(request);
-        yield* Effect.sleep("50 millis");
+        const exit = yield* Fiber.await(request);
+        expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true);
+        expect(Deferred.isDoneUnsafe(finished)).toBe(false);
         yield* Deferred.succeed(release, undefined);
         yield* Deferred.await(finished);
       }).pipe(Effect.provide(serve(fixed)));

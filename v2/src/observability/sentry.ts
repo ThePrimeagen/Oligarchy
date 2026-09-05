@@ -14,6 +14,7 @@ import {
   Tracer,
 } from "effect";
 import type * as Domain from "../shared/domain.ts";
+import * as Errors from "../shared/errors.ts";
 
 // ---------------------------------------------------------------------------
 // Reporter: error and fatal lines, defects and 5xx failures
@@ -46,7 +47,11 @@ export const reporter: ErrorReporter.ErrorReporter = ErrorReporter.make(
   ({ error, severity, attributes, fiber }) => {
     const annotations = fiber.getRef(References.CurrentLogAnnotations);
     const context = { ...annotations, ...attributes };
-    Sentry.captureException(error, {
+    // A log line brings the level and the text (`extra.log`); the exception Sentry groups on is
+    // the cause it carries, as it always was. A line without a cause is the exception itself.
+    const exception =
+      error.name === Errors.LogLine.identifier && error.cause !== undefined ? error.cause : error;
+    Sentry.captureException(exception, {
       level: toSentryLevel(severity),
       tags: Object.assign({}, tag(context, "session_id"), tag(context, "agent_id")),
       extra: context,
@@ -147,23 +152,33 @@ export const endIntentSpan = (
   return endSpan(span, state === "completed" ? Exit.void : Exit.fail("aborted"));
 };
 
-export const withActionSpan =
-  (parent: Tracer.Span, command: string, sessionId: string, agentId: string) =>
-  <A, E, R>(self: Effect.Effect<A, E, R>): Effect.Effect<A, E, Exclude<R, Tracer.ParentSpan>> =>
-    self.pipe(
-      Effect.tap(() => Effect.annotateCurrentSpan("action_state", "completed")),
-      Effect.tapError(() => Effect.annotateCurrentSpan("action_state", "failed")),
-      Effect.withSpan(`QMP ${command}`, {
-        parent,
-        annotations: exported,
-        attributes: {
-          "sentry.op": "qemu.action",
-          session_id: sessionId,
-          agent_id: agentId,
-          "qemu.command": command,
-        },
-      }),
-    );
+// One QMP exchange, under the open intent or the session; held by hand like the two above because
+// it opens in the recorder's open callback and ends in its close, not around one Effect.
+export const actionSpan = (
+  parent: Tracer.Span,
+  command: string,
+  sessionId: string,
+  agentId: string,
+): Effect.Effect<Tracer.Span> =>
+  Effect.makeSpan(`QMP ${command}`, {
+    parent,
+    annotations: exported,
+    attributes: {
+      "sentry.op": "qemu.action",
+      session_id: sessionId,
+      agent_id: agentId,
+      "qemu.command": command,
+    },
+  });
 
-export const annotateImageUrl = (url: string): Effect.Effect<void> =>
-  Effect.annotateCurrentSpan("image_url", url);
+export const endActionSpan = (
+  span: Tracer.Span,
+  state: Domain.ActionState,
+  imageUrl?: string,
+): Effect.Effect<void> => {
+  span.attribute("action_state", state);
+  if (imageUrl !== undefined) {
+    span.attribute("image_url", imageUrl);
+  }
+  return endSpan(span, state === "completed" ? Exit.void : Exit.fail("internal_error"));
+};

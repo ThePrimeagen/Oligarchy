@@ -8,6 +8,7 @@ import {
   Fiber,
   FileSystem,
   Layer,
+  MutableRef,
   Option,
   Path,
   PlatformError,
@@ -168,6 +169,10 @@ const line = (h: Harness, prefix: string): FakeLog.Line | undefined =>
 const collect = (stream: Stream.Stream<Domain.FollowEvent>, n: number) =>
   Stream.runCollect(Stream.take(stream, n));
 
+// How many machines the proxy holds, as /stats reports it.
+const qemus = (sessions: { readonly stats: Effect.Effect<Contract.Stats> }) =>
+  Effect.map(sessions.stats, (stats) => stats.qemus);
+
 const failure = (operation: string, detail: string): Errors.DatabaseError =>
   Errors.DatabaseError.make({
     operation,
@@ -181,7 +186,7 @@ const failure = (operation: string, detail: string): Errors.DatabaseError =>
 
 describe("start", () => {
   it.effect(
-    "inserts the row before the download, stats the disk first and registers right before boot",
+    "inserts the row before the download, stats the disk first, prepares the machine and registers right before boot",
     () =>
       Effect.gen(function* () {
         const order: Array<string> = [];
@@ -200,6 +205,10 @@ describe("start", () => {
               }),
           },
           script: {
+            prepare: () =>
+              Effect.sync(() => {
+                order.push("prepare");
+              }),
             boot: (input) =>
               Effect.sync(() => {
                 order.push(`start ${input.iso}`);
@@ -213,18 +222,24 @@ describe("start", () => {
             const id = yield* sessions.start(startBody(URL_ISO, AGENT, DISK), "gtk", true);
             expect(Domain.isSessionId(id)).toBe(true);
             expect(h.fsCalls).toEqual([`stat ${DISK}`]);
-            expect(order).toEqual(["getIso", "registerAgent", "start /cache/omarchy.iso"]);
+            expect(order).toEqual([
+              "getIso",
+              "prepare",
+              "registerAgent",
+              "start /cache/omarchy.iso",
+            ]);
             expect(rowsAtDownload).toEqual(["downloading"]);
             expect(h.iso.calls).toEqual([{ name: URL_ISO, sessionId: id, agentId: AGENT }]);
             expect(h.sessions.sessions).toMatchObject([
               { id, status: "running", config: { iso: URL_ISO, disk: DISK }, reason: null },
             ]);
             expect(h.qemu.calls).toEqual([
+              { _tag: "prepare", id, disk: DISK },
               {
                 _tag: "start",
                 id,
                 iso: "/cache/omarchy.iso",
-                disk: DISK,
+                diskPath: DISK,
                 display: "gtk",
                 automation: true,
               },
@@ -249,7 +264,7 @@ describe("start", () => {
                 response: FakeQemu.GREETING,
               },
             ]);
-            expect(yield* sessions.count).toBe(1);
+            expect(yield* qemus(sessions)).toBe(1);
           }),
         );
       }),
@@ -303,6 +318,44 @@ describe("start", () => {
     }),
   );
 
+  it.effect("a failing qemu-img leaves the agent unregistered and the row failed", () =>
+    Effect.gen(function* () {
+      let prepares = 0;
+      const h = harness({
+        script: {
+          prepare: () =>
+            Effect.suspend(() =>
+              ++prepares === 1
+                ? Effect.fail(Errors.QemuStartError.make({ message: "qemu-img create exited 1" }))
+                : Effect.void,
+            ),
+        },
+      });
+      yield* h.run(
+        Effect.gen(function* () {
+          const sessions = yield* Sessions.Sessions;
+          const error = yield* Effect.flip(sessions.start(startBody(URL_ISO), "none", false));
+          expect(error).toMatchObject({
+            _tag: "StartFailed",
+            message: "qemu-img create exited 1",
+            agentId: AGENT,
+          });
+          expect(h.iso.calls).toHaveLength(1);
+          expect(h.sessions.agentRuns).toEqual([]);
+          expect(h.qemu.calls.map((call) => call._tag)).toEqual(["prepare"]);
+          expect(h.sessions.sessions).toMatchObject([
+            { status: "failed", reason: "qemu-img create exited 1" },
+          ]);
+          expect(h.log.released).toEqual([AGENT]);
+          // The registration was never spent: the same agent boots on its next try.
+          const id = yield* sessions.start(startBody(), "none", false);
+          expect(h.sessions.agentRuns).toMatchObject([{ agentId: AGENT, sessionId: id }]);
+          expect(yield* qemus(sessions)).toBe(1);
+        }),
+      );
+    }),
+  );
+
   it.effect(
     "a boot failure stops the machine, ends the row failed with the detail and fails StartFailed",
     () =>
@@ -326,7 +379,7 @@ describe("start", () => {
             const id = error.sessionId;
             expect(error.message).toBe("qemu: handshake timeout: kvm: disabled");
             expect(error.agentId).toBe(AGENT);
-            expect(h.qemu.calls.map((call) => call._tag)).toEqual(["start", "stop"]);
+            expect(h.qemu.calls.map((call) => call._tag)).toEqual(["prepare", "start", "stop"]);
             expect(h.sessions.sessions).toMatchObject([
               { id, status: "failed", reason: "qemu: handshake timeout: kvm: disabled" },
             ]);
@@ -341,7 +394,7 @@ describe("start", () => {
               _tag: "Conflict",
               message: `session "${id}" has already completed (failed)`,
             });
-            expect(yield* sessions.count).toBe(0);
+            expect(yield* qemus(sessions)).toBe(0);
             expect(texts(h)).toEqual([`starting; iso ${ISO}`]);
           }),
         );
@@ -711,7 +764,7 @@ describe("sendKeys", () => {
             sessionId: id,
             agentId: AGENT,
           });
-          expect(h.qemu.calls.map((call) => call._tag)).toEqual(["start"]);
+          expect(h.qemu.calls.map((call) => call._tag)).toEqual(["prepare", "start"]);
           expect(h.actions.actions).toHaveLength(1);
           yield* sessions.sendKeys(live, "ok", undefined);
           expect(yield* collect(events, 3)).toEqual([
@@ -835,7 +888,7 @@ describe("sendMouse", () => {
               message: "mouse: clicks must be an integer in 1..100",
             });
           }
-          expect(h.qemu.calls.map((call) => call._tag)).toEqual(["start"]);
+          expect(h.qemu.calls.map((call) => call._tag)).toEqual(["prepare", "start"]);
         }),
       );
     }),
@@ -1020,8 +1073,8 @@ describe("stop", () => {
           expect(yield* Effect.flip(sessions.lookup(id, AGENT))).toMatchObject({
             _tag: "UnknownSession",
           });
-          expect(yield* sessions.count).toBe(0);
-          expect(h.qemu.calls.map((call) => call._tag)).toEqual(["start", "stop"]);
+          expect(yield* qemus(sessions)).toBe(0);
+          expect(h.qemu.calls.map((call) => call._tag)).toEqual(["prepare", "start", "stop"]);
           expect(h.sessions.sessions[0]).toMatchObject({ id, status: "aborted", reason: null });
           expect(h.sessions.sessions[0]?.endedAt).not.toBeNull();
           expect(h.sessions.agentRuns[0]?.endedAt).not.toBeNull();
@@ -1092,6 +1145,51 @@ describe("stop", () => {
     }),
   );
 
+  it.effect("a stop racing the sweep is unknown session: the session gets one verdict", () =>
+    Effect.gen(function* () {
+      const gate = yield* Deferred.make<void>();
+      const ended: Array<string> = [];
+      const h = harness({
+        sessionStore: {
+          endSession: (id, status) =>
+            Effect.gen(function* () {
+              ended.push(`${status} ${id}`);
+              if (status === "timed_out") {
+                yield* Deferred.await(gate);
+              }
+            }),
+        },
+      });
+      yield* h.run(
+        Effect.gen(function* () {
+          const { sessions, id, live } = yield* start();
+          const events = yield* sessions.follow(id);
+          yield* TestClock.adjust("10 minutes");
+          // The sweep has taken the session and is closing its record.
+          expect(ended).toEqual([`timed_out ${id}`]);
+          const error = yield* Effect.flip(sessions.stop(live, "succeeded", "done"));
+          expect(error).toMatchObject({
+            _tag: "UnknownSession",
+            id,
+            message: `unknown session "${id}"`,
+            agentId: AGENT,
+          });
+          yield* Deferred.succeed(gate, undefined);
+          expect(yield* Stream.runCollect(events)).toEqual([
+            { type: "session", status: "running" },
+            { type: "session", status: "timed_out" },
+          ]);
+          expect(ended).toEqual([`timed_out ${id}`]);
+          expect(h.qemu.calls.filter((call) => call._tag === "stop")).toHaveLength(1);
+          expect(
+            texts(h).filter((text) => text.startsWith("stopped") || text.startsWith("timed out")),
+          ).toEqual(["timed out; no command received for 10 minutes"]);
+          expect(endedWith(spanNamed(h, "QEMU session"))).toBe("deadline_exceeded");
+        }),
+      );
+    }),
+  );
+
   it.effect("a record that cannot be closed fails Internal after the session is finished", () =>
     Effect.gen(function* () {
       const h = harness({
@@ -1105,7 +1203,7 @@ describe("stop", () => {
           const events = yield* sessions.follow(id);
           const error = yield* Effect.flip(sessions.stop(live, undefined, undefined));
           expect(error).toMatchObject({ _tag: "Internal", sessionId: id, agentId: AGENT });
-          expect(h.qemu.calls.map((call) => call._tag)).toEqual(["start", "stop"]);
+          expect(h.qemu.calls.map((call) => call._tag)).toEqual(["prepare", "start", "stop"]);
           expect(yield* Stream.runCollect(events)).toEqual([
             { type: "session", status: "running" },
             { type: "session", status: "aborted" },
@@ -1417,13 +1515,13 @@ describe("timeouts", () => {
           const { sessions, id } = yield* start();
           const events = yield* sessions.follow(id);
           yield* TestClock.adjust("590 seconds");
-          expect(yield* sessions.count).toBe(1);
+          expect(yield* qemus(sessions)).toBe(1);
           yield* TestClock.adjust("10 seconds");
-          expect(yield* sessions.count).toBe(0);
+          expect(yield* qemus(sessions)).toBe(0);
           expect(yield* Effect.flip(sessions.lookup(id, AGENT))).toMatchObject({
             _tag: "UnknownSession",
           });
-          expect(h.qemu.calls.map((call) => call._tag)).toEqual(["start", "stop"]);
+          expect(h.qemu.calls.map((call) => call._tag)).toEqual(["prepare", "start", "stop"]);
           expect(h.sessions.sessions[0]).toMatchObject({
             id,
             status: "timed_out",
@@ -1456,10 +1554,10 @@ describe("timeouts", () => {
           yield* TestClock.adjust("9 minutes");
           yield* sessions.lookup(id, AGENT);
           yield* TestClock.adjust("9 minutes");
-          expect(yield* sessions.count).toBe(1);
+          expect(yield* qemus(sessions)).toBe(1);
           expect(h.sessions.sessions[0]?.status).toBe("running");
           yield* TestClock.adjust("1 minute");
-          expect(yield* sessions.count).toBe(0);
+          expect(yield* qemus(sessions)).toBe(0);
           expect(h.sessions.sessions[0]?.status).toBe("timed_out");
         }),
       );
@@ -1514,7 +1612,7 @@ describe("timeouts", () => {
             { type: "session", status: "timed_out" },
           ]);
           expect(endedWith(spanNamed(h, "QEMU session"))).toBe("deadline_exceeded");
-          expect(yield* sessions.count).toBe(0);
+          expect(yield* qemus(sessions)).toBe(0);
         }),
       );
     }),
@@ -1544,11 +1642,11 @@ describe("timeouts", () => {
           expect(ended).toEqual([`timed_out ${first.id}`]);
           yield* TestClock.adjust("2 minutes");
           expect(ended).toEqual([`timed_out ${first.id}`]);
-          expect(yield* first.sessions.count).toBe(1);
+          expect(yield* qemus(first.sessions)).toBe(1);
           yield* Deferred.succeed(gate, undefined);
           yield* TestClock.adjust("10 seconds");
           expect(ended).toEqual([`timed_out ${first.id}`, `timed_out ${second.id}`]);
-          expect(yield* first.sessions.count).toBe(0);
+          expect(yield* qemus(first.sessions)).toBe(0);
         }),
       );
     }),
@@ -1563,8 +1661,8 @@ describe("drain", () => {
   it.effect("stops every session as aborted with the shutdown reason", () =>
     Effect.gen(function* () {
       const shutdown: Sessions.Shutdown = {
-        reason: Ref.makeUnsafe("proxy shutdown"),
-        failed: Ref.makeUnsafe(false),
+        reason: MutableRef.make("proxy shutdown"),
+        failed: MutableRef.make(false),
       };
       const h = harness({ shutdown });
       const drained = yield* h.run(
@@ -1578,7 +1676,14 @@ describe("drain", () => {
           return { reader, ids: [first.id, second.id] };
         }),
       );
-      expect(h.qemu.calls.map((call) => call._tag)).toEqual(["start", "start", "stop", "stop"]);
+      expect(h.qemu.calls.map((call) => call._tag)).toEqual([
+        "prepare",
+        "start",
+        "prepare",
+        "start",
+        "stop",
+        "stop",
+      ]);
       expect(h.sessions.sessions.map((row) => [row.status, row.reason])).toEqual([
         ["aborted", "proxy shutdown"],
         ["aborted", "proxy shutdown"],
@@ -1609,21 +1714,21 @@ describe("drain", () => {
         "aborted",
       ]);
       expect(h.log.released.sort()).toEqual([AGENT, OTHER_AGENT]);
-      expect(yield* Ref.get(shutdown.failed)).toBe(false);
+      expect(MutableRef.get(shutdown.failed)).toBe(false);
     }),
   );
 
   it.effect("reads the reason the server error path sets", () =>
     Effect.gen(function* () {
       const shutdown: Sessions.Shutdown = {
-        reason: Ref.makeUnsafe("proxy shutdown"),
-        failed: Ref.makeUnsafe(false),
+        reason: MutableRef.make("proxy shutdown"),
+        failed: MutableRef.make(false),
       };
       const h = harness({ shutdown });
       yield* h.run(
         Effect.gen(function* () {
           yield* start();
-          yield* Ref.set(shutdown.reason, "proxy error: listen EADDRINUSE");
+          MutableRef.set(shutdown.reason, "proxy error: listen EADDRINUSE");
         }),
       );
       expect(h.sessions.sessions[0]).toMatchObject({
@@ -1640,8 +1745,8 @@ describe("drain", () => {
   it.effect("sessions that cannot be closed mark the shutdown failed", () =>
     Effect.gen(function* () {
       const shutdown: Sessions.Shutdown = {
-        reason: Ref.makeUnsafe("proxy shutdown"),
-        failed: Ref.makeUnsafe(false),
+        reason: MutableRef.make("proxy shutdown"),
+        failed: MutableRef.make(false),
       };
       const unkillable: Array<string> = [];
       const ended: Array<string> = [];
@@ -1670,7 +1775,7 @@ describe("drain", () => {
           return [first.id, second.id, third.id];
         }),
       );
-      expect(yield* Ref.get(shutdown.failed)).toBe(true);
+      expect(MutableRef.get(shutdown.failed)).toBe(true);
       const logged = h.log.lines.filter((entry) => entry.text.startsWith("shutdown:"));
       expect(logged).toMatchObject([
         { level: "error", text: "shutdown: Failed query: endSession", sessionId: ids[0] },
@@ -1718,13 +1823,13 @@ describe("stats", () => {
         Effect.gen(function* () {
           const sessions = yield* Sessions.Sessions;
           expect((yield* sessions.stats).qemus).toBe(0);
-          expect(yield* sessions.count).toBe(0);
+          expect(yield* qemus(sessions)).toBe(0);
           const { live } = yield* start();
           yield* start(OTHER_AGENT);
           expect(yield* sessions.stats).toEqual(
             Contract.Stats.make({ qemus: 2, ...FakeQemu.ZERO_STATS }),
           );
-          expect(yield* sessions.count).toBe(2);
+          expect(yield* qemus(sessions)).toBe(2);
           yield* sessions.stop(live, undefined, undefined);
           expect((yield* sessions.stats).qemus).toBe(1);
         }),

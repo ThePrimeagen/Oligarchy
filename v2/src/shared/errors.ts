@@ -1,4 +1,11 @@
-import { Effect, ErrorReporter, Schema, SchemaAST, SchemaTransformation } from "effect";
+import {
+  Effect,
+  ErrorReporter,
+  type LogLevel,
+  Schema,
+  SchemaAST,
+  SchemaTransformation,
+} from "effect";
 import { HttpApiSchema } from "effect/unstable/httpapi";
 import * as Domain from "./domain.ts";
 
@@ -8,16 +15,6 @@ import * as Domain from "./domain.ts";
 // and that log line is the single Sentry report (with the cause when the status is 500 or above),
 // so HttpApiBuilder's own reporting of the same failure is silenced.
 // ---------------------------------------------------------------------------
-
-type Attribution = Readonly<Record<string, string>>;
-
-// logs.session_id is a uuid column: only an id this server could have minted is attributed.
-const attribution = (sessionId: string | undefined, agentId: string | undefined): Attribution =>
-  Object.assign(
-    {},
-    sessionId === undefined ? undefined : { session_id: sessionId },
-    agentId === undefined ? undefined : { agent_id: agentId },
-  );
 
 const fixedMessage = <const M extends string>(message: M) =>
   Schema.Literal(message).pipe(Schema.withConstructorDefault(Effect.succeed(message)));
@@ -34,18 +31,12 @@ export class BadRequest extends Schema.TaggedError<BadRequest>(
   { httpApiStatus: 400 },
 ) {
   override readonly [ErrorReporter.ignore] = true;
-  override get [ErrorReporter.attributes](): Attribution {
-    return attribution(this.sessionId, this.agentId);
-  }
 }
 
 export class Unauthorized extends Schema.TaggedError<Unauthorized>(
   "@oligarchy/shared/errors/Unauthorized",
 )("Unauthorized", { message: fixedMessage("unauthorized") }, { httpApiStatus: 401 }) {
   override readonly [ErrorReporter.ignore] = true;
-  override get [ErrorReporter.attributes](): Attribution {
-    return attribution(undefined, undefined);
-  }
 }
 
 export class Forbidden extends Schema.TaggedError<Forbidden>("@oligarchy/shared/errors/Forbidden")(
@@ -54,9 +45,6 @@ export class Forbidden extends Schema.TaggedError<Forbidden>("@oligarchy/shared/
   { httpApiStatus: 403 },
 ) {
   override readonly [ErrorReporter.ignore] = true;
-  override get [ErrorReporter.attributes](): Attribution {
-    return attribution(this.sessionId, this.agentId);
-  }
 }
 
 export class UnknownSession extends Schema.TaggedError<UnknownSession>(
@@ -67,9 +55,6 @@ export class UnknownSession extends Schema.TaggedError<UnknownSession>(
   { httpApiStatus: 404 },
 ) {
   override readonly [ErrorReporter.ignore] = true;
-  override get [ErrorReporter.attributes](): Attribution {
-    return attribution(Domain.isSessionId(this.id) ? this.id : undefined, this.agentId);
-  }
 }
 
 export const unknownSession = (id: string, agentId?: string): UnknownSession =>
@@ -83,9 +68,6 @@ export class NotFound extends Schema.TaggedError<NotFound>("@oligarchy/shared/er
   { httpApiStatus: 404 },
 ) {
   override readonly [ErrorReporter.ignore] = true;
-  override get [ErrorReporter.attributes](): Attribution {
-    return attribution(undefined, undefined);
-  }
 }
 
 export class Conflict extends Schema.TaggedError<Conflict>("@oligarchy/shared/errors/Conflict")(
@@ -94,9 +76,6 @@ export class Conflict extends Schema.TaggedError<Conflict>("@oligarchy/shared/er
   { httpApiStatus: 409 },
 ) {
   override readonly [ErrorReporter.ignore] = true;
-  override get [ErrorReporter.attributes](): Attribution {
-    return attribution(this.sessionId, undefined);
-  }
 }
 
 export class StartFailed extends Schema.TaggedError<StartFailed>(
@@ -112,9 +91,6 @@ export class StartFailed extends Schema.TaggedError<StartFailed>(
   { httpApiStatus: 502 },
 ) {
   override readonly [ErrorReporter.ignore] = true;
-  override get [ErrorReporter.attributes](): Attribution {
-    return attribution(this.sessionId, this.agentId);
-  }
 }
 
 export class ExchangeFailed extends Schema.TaggedError<ExchangeFailed>(
@@ -130,9 +106,6 @@ export class ExchangeFailed extends Schema.TaggedError<ExchangeFailed>(
   { httpApiStatus: 502 },
 ) {
   override readonly [ErrorReporter.ignore] = true;
-  override get [ErrorReporter.attributes](): Attribution {
-    return attribution(this.sessionId, this.agentId);
-  }
 }
 
 export class Internal extends Schema.TaggedError<Internal>("@oligarchy/shared/errors/Internal")(
@@ -146,9 +119,6 @@ export class Internal extends Schema.TaggedError<Internal>("@oligarchy/shared/er
   { httpApiStatus: 500 },
 ) {
   override readonly [ErrorReporter.ignore] = true;
-  override get [ErrorReporter.attributes](): Attribution {
-    return attribution(this.sessionId, this.agentId);
-  }
 }
 
 export type ApiError =
@@ -187,11 +157,10 @@ export const apiStatus = (error: ApiError): number => httpStatus(apiErrorClasses
 
 const WireBody = Schema.Struct({ error: Schema.String });
 
-// { error: string } on the wire, the class on the type side, the status annotated on the codec.
+// { error: string } on the wire, the class on the type side, the class's own status on the codec.
 const wireError = <S extends Schema.Codec<unknown, { readonly message: string }>>(
   schema: S,
   fromMessage: (message: string) => S["Encoded"],
-  status: number,
 ): Schema.Codec<S["Type"], { readonly error: string }> =>
   WireBody.pipe(
     Schema.decodeTo(
@@ -201,54 +170,45 @@ const wireError = <S extends Schema.Codec<unknown, { readonly message: string }>
         encode: (encoded) => ({ error: encoded.message }),
       }),
     ),
-    HttpApiSchema.status(status),
+    HttpApiSchema.status(httpStatus(schema)),
   );
 
 export const BadRequestWire = wireError(
   BadRequest,
   (message) => ({ _tag: "BadRequest", message }) as const,
-  400,
 );
 export const UnauthorizedWire = wireError(
   Unauthorized,
   () => ({ _tag: "Unauthorized", message: "unauthorized" }) as const,
-  401,
 );
 export const ForbiddenWire = wireError(
   Forbidden,
   (message) => ({ _tag: "Forbidden", message, sessionId: "", agentId: "" }) as const,
-  403,
 );
 export const UnknownSessionWire = wireError(
   UnknownSession,
   (message) => ({ _tag: "UnknownSession", id: "", message }) as const,
-  404,
 );
 export const NotFoundWire = wireError(
   NotFound,
   () => ({ _tag: "NotFound", message: "not found" }) as const,
-  404,
 );
 export const ConflictWire = wireError(
   Conflict,
   (message) => ({ _tag: "Conflict", message, sessionId: "" }) as const,
-  409,
 );
 export const StartFailedWire = wireError(
   StartFailed,
   (message) => ({ _tag: "StartFailed", message, sessionId: "", agentId: "" }) as const,
-  502,
 );
 export const ExchangeFailedWire = wireError(
   ExchangeFailed,
   (message) => ({ _tag: "ExchangeFailed", message, sessionId: "", agentId: "" }) as const,
-  502,
 );
 // A decoded Internal has no defect to carry: the wire only says "internal error".
 export const InternalWire = wireError(
   Internal,
   () => ({ _tag: "Internal", message: "internal error", cause: null }) as const,
-  500,
 );
 
 // ---------------------------------------------------------------------------
@@ -372,3 +332,21 @@ export class ChildExit extends Schema.TaggedError<ChildExit>("@oligarchy/shared/
 export class PngDecodeError extends Schema.TaggedError<PngDecodeError>(
   "@oligarchy/shared/errors/PngDecodeError",
 )("PngDecodeError", { message: Schema.String }) {}
+
+// An error or fatal log line as the reporter receives it: the text is its message, the level its
+// severity, and the cause (when the line has one) is what Sentry is handed.
+export class LogLine extends Schema.TaggedError<LogLine>("@oligarchy/observability/log/LogLine")(
+  "LogLine",
+  {
+    text: Schema.String,
+    level: Schema.Literals(["error", "fatal"]),
+    cause: Schema.optionalKey(Schema.Defect()),
+  },
+) {
+  override get message(): string {
+    return this.text;
+  }
+  override get [ErrorReporter.severity](): LogLevel.Severity {
+    return this.level === "fatal" ? "Fatal" : "Error";
+  }
+}

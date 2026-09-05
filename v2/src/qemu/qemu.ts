@@ -26,10 +26,16 @@ const TABLET_AXIS_MAX = 0x7fff;
 // Guest double-click detection needs a gap between successive press/release pairs.
 const MULTI_CLICK_GAP_MS = 50;
 
-export type StartInput = {
+// A session dir with its firmware copy and the disk QEMU boots from: the caller's, or the fresh
+// qcow2 `prepare` created in the dir.
+export type Prepared = {
   readonly id: string;
+  readonly dir: string;
+  readonly diskPath: string;
+};
+
+export type StartInput = {
   readonly iso: string;
-  readonly disk?: string;
   readonly display: Domain.QemuDisplay;
   readonly automation: boolean;
   readonly record: Client.Recorder;
@@ -57,13 +63,18 @@ export type QemuHandle = {
   readonly screendump: (
     record: Client.Recorder,
   ) => Effect.Effect<Uint8Array, Client.ExecuteError | PlatformError.PlatformError>;
-  // Resolves once the QMP socket is gone, with the reason.
-  readonly exited: Effect.Effect<Errors.QmpClosed>;
 };
 
 export type QemuService = {
-  // Leaving the scope kills QEMU, closes its socket and removes the session dir.
+  // The session dir, the OVMF vars copy and, without a caller's disk, the default qcow2. Its
+  // finalizer removes the dir; registered first, so it runs after `start`'s kill.
+  readonly prepare: (
+    id: string,
+    disk: string | undefined,
+  ) => Effect.Effect<Prepared, Errors.QemuStartError, Scope.Scope>;
+  // Leaving the scope kills QEMU and closes its socket.
   readonly start: (
+    prepared: Prepared,
     input: StartInput,
   ) => Effect.Effect<QemuHandle, Errors.QemuStartError | Errors.DatabaseError, Scope.Scope>;
   readonly sessionDir: (id: string) => string;
@@ -88,47 +99,42 @@ const make: Effect.Effect<
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const withSpawner = Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner);
 
-  const assertFile = (file: string, label: string): Effect.Effect<void, Errors.QemuStartError> =>
-    fs.stat(file).pipe(
-      Effect.asVoid,
-      Effect.mapError((error) =>
-        Errors.QemuStartError.make({ message: `qemu: ${label} not found: ${file}`, cause: error }),
-      ),
-    );
-
-  const start = Effect.fn("Qemu.start")(function* (input: StartInput) {
-    const dir = sessionDir(input.id);
-    const diskPath = path.join(dir, "disk.qcow2");
-    const sockPath = path.join(dir, "qmp.sock");
-    const serialPath = path.join(dir, "serial.log");
-    const varsPath = path.join(dir, "OVMF_VARS.fd");
+  const prepare = Effect.fn("Qemu.prepare")(function* (id: string, disk: string | undefined) {
+    const dir = sessionDir(id);
     yield* fs
       .makeDirectory(dir, { recursive: true, mode: 0o700 })
       .pipe(Effect.mapError(startError));
-    // Registered first so it runs last: QEMU is dead and the socket closed before the dir goes.
+    // Registered before anything `start` registers, so it runs last: QEMU is dead and the socket
+    // closed before the dir goes.
     yield* Effect.addFinalizer(() =>
       fs.remove(dir, { recursive: true, force: true }).pipe(
         Effect.catch((error) =>
           log.error(`qemu: removing ${dir} failed: ${Process.detail(error)}`, {
-            sessionId: input.id,
+            sessionId: id,
             cause: error,
           }),
         ),
       ),
     );
-    if (input.disk !== undefined) {
-      yield* assertFile(input.disk, "disk");
-    }
-    yield* assertFile(input.iso, "iso");
-    if (input.disk === undefined) {
+    const diskPath = path.join(dir, "disk.qcow2");
+    if (disk === undefined) {
       yield* withSpawner(Process.createDisk(diskPath, Args.DEFAULT_DISK_SIZE));
     }
-    yield* fs.copyFile(Args.OVMF_VARS, varsPath).pipe(Effect.mapError(startError));
+    yield* fs
+      .copyFile(Args.OVMF_VARS, path.join(dir, "OVMF_VARS.fd"))
+      .pipe(Effect.mapError(startError));
+    return { id, dir, diskPath: disk ?? diskPath } satisfies Prepared;
+  });
+
+  const start = Effect.fn("Qemu.start")(function* (prepared: Prepared, input: StartInput) {
+    const { id, dir } = prepared;
+    const sockPath = path.join(dir, "qmp.sock");
+    const serialPath = path.join(dir, "serial.log");
     const args = Args.qemuArgs({
       sockPath,
       serialPath,
-      varsPath,
-      diskPath: input.disk ?? diskPath,
+      varsPath: path.join(dir, "OVMF_VARS.fd"),
+      diskPath: prepared.diskPath,
       iso: input.iso,
       display: input.display,
       automation: input.automation,
@@ -226,18 +232,10 @@ const make: Effect.Effect<
       }).pipe(Effect.ensuring(Effect.ignore(fs.remove(file, { force: true }))));
     });
 
-    return {
-      id: input.id,
-      dir,
-      serialPath,
-      sendKeys,
-      sendMouse,
-      screendump,
-      exited: client.closed,
-    } satisfies QemuHandle;
+    return { id, dir, serialPath, sendKeys, sendMouse, screendump } satisfies QemuHandle;
   });
 
-  return { start, sessionDir } satisfies QemuService;
+  return { prepare, start, sessionDir } satisfies QemuService;
 });
 
 export class Qemu extends Context.Service<Qemu>()("@oligarchy/qemu/Qemu", { make }) {

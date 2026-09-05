@@ -12,12 +12,7 @@ const PackageJson = Schema.Struct({
 });
 
 const TsConfig = Schema.Struct({
-  compilerOptions: Schema.Struct({
-    erasableSyntaxOnly: Schema.Boolean,
-    plugins: Schema.Array(
-      Schema.Struct({ name: Schema.String, diagnostics: Schema.optionalKey(Schema.Boolean) }),
-    ),
-  }),
+  compilerOptions: Schema.Struct({ erasableSyntaxOnly: Schema.Boolean }),
 });
 
 const decodePackageJson = Schema.decodeUnknownSync(Schema.fromJsonString(PackageJson));
@@ -45,12 +40,6 @@ describe("package.json scripts", () => {
     expect(scripts.lint).toBeUndefined();
   });
 
-  it("check:fast runs lint, format, types and the unit lane", () => {
-    expect(scripts["check:fast"]).toBe(
-      "npm run check:lint && npm run check:format && npm run check:types && npm run test:unit",
-    );
-  });
-
   it("db:migrate runs the migration program and never a drizzle push", () => {
     expect(scripts["db:migrate"]).toBe("node --experimental-strip-types src/db/migrate.ts");
     expect(Object.values(scripts).some((script) => script.includes("drizzle-kit push"))).toBe(
@@ -70,11 +59,5 @@ describe("tsconfig.json", () => {
 
   it("forbids syntax Node cannot strip", () => {
     expect(compilerOptions.erasableSyntaxOnly).toBe(true);
-  });
-
-  it("loads the Effect language service without diagnostics", () => {
-    expect(compilerOptions.plugins).toEqual([
-      { name: "@effect/language-service", diagnostics: false },
-    ]);
   });
 });

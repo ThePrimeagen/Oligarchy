@@ -60,7 +60,6 @@ const liveSession = (id: string, agent: string): Effect.Effect<Sessions.LiveSess
         sendKeys: die("sendKeys"),
         sendMouse: die("sendMouse"),
         screendump: die("screendump"),
-        exited: Effect.die("Unexpected QemuHandle.exited"),
       },
       span,
       scope: Scope.makeUnsafe(),
@@ -151,7 +150,6 @@ export const fakeSessions = (
         stop: (session, status, reason) => record("stop", session.id, status, reason),
         follow: (id) => known("follow", id).pipe(Effect.as(Stream.fromIterable(FOLLOW_EVENTS))),
         stats: record("stats").pipe(Effect.as(STATS)),
-        count: Effect.sync(() => sessions.size),
         ...overrides,
       });
     }),

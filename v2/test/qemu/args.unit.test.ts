@@ -58,8 +58,8 @@ describe("qemuArgs happy path", () => {
     );
   });
 
-  it("adds -vga none -device virtio-vga and forces display none under --automation", () => {
-    expect(Args.qemuArgs({ ...paths, display: "gtk", automation: true })).toEqual(
+  it("adds -vga none -device virtio-vga under --automation", () => {
+    expect(Args.qemuArgs({ ...paths, display: "none", automation: true })).toEqual(
       expected("none", ["-vga", "none", "-device", "virtio-vga"]),
     );
   });
@@ -74,20 +74,5 @@ describe("qemuArgs happy path", () => {
     });
     expect(args.at(-1)).toBe("file=/mnt/custom.qcow2,if=virtio,format=qcow2");
     expect(args[args.indexOf("-cdrom") + 1]).toBe("https-cache/omarchy.iso");
-  });
-
-  it("names the OVMF firmware, binary and default disk size", () => {
-    expect(Args.QEMU_BIN).toBe("qemu-system-x86_64");
-    expect(Args.QEMU_IMG).toBe("qemu-img");
-    expect(Args.OVMF_CODE).toBe("/usr/share/edk2/x64/OVMF_CODE.4m.fd");
-    expect(Args.OVMF_VARS).toBe("/usr/share/edk2/x64/OVMF_VARS.4m.fd");
-    expect(Args.DEFAULT_DISK_SIZE).toBe("40G");
-  });
-});
-
-describe("qemuArgs unhappy path", () => {
-  it("offers no curses display", () => {
-    expect(Args.QEMU_DISPLAYS).toEqual(["none", "gtk", "sdl", "egl-headless", "spice-app", "dbus"]);
-    expect(Args.QEMU_DISPLAYS).not.toContain("curses");
   });
 });

@@ -160,7 +160,7 @@ const angleChord = (inner: string): Result.Result<Chord, Errors.KeysError> => {
     }
     chord.push(modifier);
   }
-  const name = minusKey ? "-" : (parts[parts.length - 1] ?? "");
+  const name = minusKey ? "-" : parts[parts.length - 1];
   // <GT> is shift+dot on a US keyboard.
   if (name.toUpperCase() === "GT") {
     return Result.succeed([...chord, "shift", "dot"]);
@@ -175,7 +175,7 @@ export const parseKeys = (keys: string, encoding = "oligarchy"): Parsed => {
   const out: Array<Chord> = [];
   const chars = Array.from(keys);
   for (let i = 0; i < chars.length; i++) {
-    const char = chars[i] ?? "";
+    const char = chars[i];
     let chord: Result.Result<Chord, Errors.KeysError>;
     if (char === "<") {
       const end = chars.indexOf(">", i + 1);

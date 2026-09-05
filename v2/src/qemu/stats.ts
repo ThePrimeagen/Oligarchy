@@ -68,7 +68,7 @@ const percentile = (sorted: ReadonlyArray<number>, p: number): number => {
   const lower = Math.floor(index);
   const upper = Math.ceil(index);
   const weight = index - lower;
-  return round1((sorted[lower] ?? 0) * (1 - weight) + (sorted[upper] ?? 0) * weight);
+  return round1(sorted[lower] * (1 - weight) + sorted[upper] * weight);
 };
 
 const make = (source: Source): Effect.Effect<StatsService, never, Scope.Scope | Log.Log> =>

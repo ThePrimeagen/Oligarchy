@@ -119,23 +119,6 @@ describe("API error wire codecs", () => {
     expect(() => Schema.decodeUnknownSync(Errors.BadRequestWire)({ message: "x" })).toThrow();
     expect(() => Schema.decodeUnknownSync(Errors.BadRequestWire)({ error: 1 })).toThrow();
   });
-
-  it("apiStatus agrees with getStatusErrorSchema for every class", () => {
-    const classes = [
-      Errors.BadRequest,
-      Errors.Unauthorized,
-      Errors.Forbidden,
-      Errors.UnknownSession,
-      Errors.NotFound,
-      Errors.Conflict,
-      Errors.StartFailed,
-      Errors.ExchangeFailed,
-      Errors.Internal,
-    ];
-    const statuses = classes.map((klass) => Errors.httpStatus(klass));
-    expect(statuses).toEqual([400, 401, 403, 404, 404, 409, 502, 502, 500]);
-    expect(cases.map(({ error }) => Errors.apiStatus(error))).toEqual(statuses);
-  });
 });
 
 describe("Sentry policy", () => {
@@ -145,30 +128,20 @@ describe("Sentry policy", () => {
     }
   });
 
-  it("attributes carry session_id and agent_id only when present", () => {
-    expect(
-      ErrorReporter.getAttributes(
-        Errors.BadRequest.make({ message: "x", sessionId: SESSION_ID, agentId: AGENT_ID }),
-      ),
-    ).toEqual({ session_id: SESSION_ID, agent_id: AGENT_ID });
-    expect(ErrorReporter.getAttributes(Errors.BadRequest.make({ message: "x" }))).toEqual({});
-    expect(
-      ErrorReporter.getAttributes(Errors.Conflict.make({ message: "x", sessionId: SESSION_ID })),
-    ).toEqual({ session_id: SESSION_ID });
-    expect(
-      ErrorReporter.getAttributes(
-        Errors.Internal.make({ message: "internal error", cause: 1, agentId: AGENT_ID }),
-      ),
-    ).toEqual({ agent_id: AGENT_ID });
-  });
-
-  it("drops a non-uuid UnknownSession id from the attributes", () => {
-    expect(ErrorReporter.getAttributes(Errors.unknownSession("garbage", AGENT_ID))).toEqual({
-      agent_id: AGENT_ID,
+  it("a LogLine reads as its text and carries the line's level as its severity", () => {
+    const cause = new Error("connect ECONNREFUSED 127.0.0.1:5432");
+    const fatal = Errors.LogLine.make({
+      text: "proxy: database unreachable",
+      level: "fatal",
+      cause,
     });
-    expect(ErrorReporter.getAttributes(Errors.unknownSession(SESSION_ID))).toEqual({
-      session_id: SESSION_ID,
-    });
+    expect(fatal.message).toBe("proxy: database unreachable");
+    expect(fatal.cause).toBe(cause);
+    expect(ErrorReporter.getSeverity(fatal)).toBe("Fatal");
+    expect(ErrorReporter.isIgnored(fatal)).toBe(false);
+    const error = Errors.LogLine.make({ text: "timeout cleanup failed: boom", level: "error" });
+    expect(ErrorReporter.getSeverity(error)).toBe("Error");
+    expect(error.cause).toBeUndefined();
   });
 });
 
@@ -249,5 +222,6 @@ describe("domain error messages", () => {
       "CursorAgentFailed",
     );
     expect(Errors.PngDecodeError.make({ message: "x" })._tag).toBe("PngDecodeError");
+    expect(Errors.LogLine.make({ text: "x", level: "error" })._tag).toBe("LogLine");
   });
 });

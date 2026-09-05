@@ -40,7 +40,7 @@ export const qemuArgs = (input: ArgsInput): ReadonlyArray<string> => {
     "-drive",
     `if=pflash,format=raw,file=${input.varsPath}`,
     "-display",
-    input.automation ? "none" : input.display,
+    input.display,
     ...vga,
     // usb-tablet is the absolute pointer; without it, input-send-event abs has no handler.
     "-device",

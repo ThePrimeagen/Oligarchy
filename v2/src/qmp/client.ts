@@ -29,15 +29,12 @@ export type ExecuteError =
   | Errors.DatabaseError;
 
 export type QmpClient = {
-  readonly greeting: Domain.QmpGreeting;
   readonly execute: (
     request: QmpRequest,
     record?: Recorder,
   ) => Effect.Effect<Schema.Json, ExecuteError>;
   // Resolves once the socket is gone, with the reason.
   readonly closed: Effect.Effect<Errors.QmpClosed>;
-  // Commands awaiting a reply.
-  readonly pending: Effect.Effect<number>;
 };
 
 type Pending = {
@@ -230,10 +227,5 @@ export const handshake = Effect.fn("Qmp.handshake")(function* (
           );
   yield* execute({ execute: "qmp_capabilities", arguments: {} }, bootRecord);
 
-  return {
-    greeting: greetingMessage,
-    execute,
-    closed: Deferred.await(closed),
-    pending: Effect.sync(() => pending.size),
-  } satisfies QmpClient;
+  return { execute, closed: Deferred.await(closed) } satisfies QmpClient;
 });

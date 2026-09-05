@@ -102,7 +102,8 @@ describe("QEMU spans happy path", () => {
     Effect.gen(function* () {
       const captured = capture();
       const session = yield* Sentry.sessionSpan(SESSION_ID, AGENT_ID);
-      yield* Effect.void.pipe(Sentry.withActionSpan(session, "send-key", SESSION_ID, AGENT_ID));
+      const action = yield* Sentry.actionSpan(session, "send-key", SESSION_ID, AGENT_ID);
+      yield* Sentry.endActionSpan(action, "completed");
 
       const [actionItem] = yield* captured.spans;
       expect(actionItem?.name).toBe("QMP send-key");
@@ -141,9 +142,8 @@ describe("QEMU spans happy path", () => {
         "result-1",
         "open a terminal",
       );
-      yield* Sentry.annotateImageUrl("https://oligarchy.trm.sh/images/x").pipe(
-        Sentry.withActionSpan(intent, "screendump", SESSION_ID, AGENT_ID),
-      );
+      const action = yield* Sentry.actionSpan(intent, "screendump", SESSION_ID, AGENT_ID);
+      yield* Sentry.endActionSpan(action, "completed", "https://oligarchy.trm.sh/images/x");
       yield* Sentry.endIntentSpan(intent, "completed");
       yield* Sentry.endSessionSpan(session, "succeeded");
 
@@ -168,12 +168,8 @@ describe("QEMU spans unhappy path", () => {
     Effect.gen(function* () {
       const captured = capture();
       const session = yield* Sentry.sessionSpan(SESSION_ID, AGENT_ID);
-      const failure = yield* Effect.flip(
-        Effect.fail(Errors.QmpTimeout.make({ command: "screendump" })).pipe(
-          Sentry.withActionSpan(session, "screendump", SESSION_ID, AGENT_ID),
-        ),
-      );
-      expect(failure._tag).toBe("QmpTimeout");
+      const action = yield* Sentry.actionSpan(session, "screendump", SESSION_ID, AGENT_ID);
+      yield* Sentry.endActionSpan(action, "failed");
       yield* Sentry.endSessionSpan(session, "succeeded");
 
       const spans = yield* captured.spans;
@@ -182,6 +178,8 @@ describe("QEMU spans unhappy path", () => {
       expect(sessionItem?.status).toBe("ok");
       expect(actionItem?.status).toBe("error");
       expect(attribute(actionItem, "action_state")).toBe("failed");
+      expect(attribute(actionItem, "sentry.status.message")).toBe("internal_error");
+      expect(actionItem?.attributes.image_url).toBeUndefined();
     }).pipe(Effect.provide(Sentry.SentryLive)),
   );
 
@@ -261,7 +259,9 @@ describe("only the named spans reach Sentry", () => {
       yield* traced();
       yield* Effect.void.pipe(Effect.withSpan("Sessions.start"));
       const session = yield* Sentry.sessionSpan(SESSION_ID, AGENT_ID);
-      yield* traced().pipe(Sentry.withActionSpan(session, "send-key", SESSION_ID, AGENT_ID));
+      const action = yield* Sentry.actionSpan(session, "send-key", SESSION_ID, AGENT_ID);
+      yield* traced();
+      yield* Sentry.endActionSpan(action, "completed");
       yield* Sentry.endSessionSpan(session, "succeeded");
       const spans = yield* captured.spans;
       expect(spans.map((span) => span.name).sort()).toEqual(["QEMU session", "QMP send-key"]);
@@ -328,6 +328,35 @@ describe("reporter", () => {
         log: "starting",
       });
       expect(events[0]?.exception?.values[0]?.value).toBe("qemu: handshake timeout");
+    }).pipe(Effect.provide(Sentry.SentryLive)),
+  );
+
+  it.live("captures the cause a log line carries, at the line's level", () =>
+    Effect.gen(function* () {
+      const captured = capture();
+      const cause = new Error("connect ECONNREFUSED 127.0.0.1:5432");
+      yield* ErrorReporter.report(
+        Cause.fail(
+          Errors.LogLine.make({ text: "proxy: database unreachable", level: "fatal", cause }),
+        ),
+      ).pipe(Effect.annotateLogs({ log: "proxy: database unreachable" }));
+      yield* ErrorReporter.report(
+        Cause.fail(Errors.LogLine.make({ text: "timeout cleanup failed: boom", level: "error" })),
+      );
+      const events = yield* captured.events;
+      expect(events).toHaveLength(2);
+      const [fatal, error] = events;
+      // The exception Sentry groups on is the cause, as it always was; the line is its context.
+      expect(fatal?.level).toBe("fatal");
+      expect(fatal?.exception?.values).toHaveLength(1);
+      expect(fatal?.exception?.values[0]).toMatchObject({
+        type: "Error",
+        value: "connect ECONNREFUSED 127.0.0.1:5432",
+      });
+      expect(fatal?.extra).toEqual({ log: "proxy: database unreachable" });
+      // Without a cause the line itself is the exception.
+      expect(error?.level).toBe("error");
+      expect(error?.exception?.values[0]?.value).toBe("timeout cleanup failed: boom");
     }).pipe(Effect.provide(Sentry.SentryLive)),
   );
 

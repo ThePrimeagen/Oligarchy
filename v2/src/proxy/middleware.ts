@@ -2,6 +2,7 @@ import { Cause, Effect, Layer, Redacted, Schema, type Types } from "effect";
 import { HttpServerRequest } from "effect/unstable/http";
 import { HttpApiError } from "effect/unstable/httpapi";
 import * as Config from "../config.ts";
+import * as ExternalFailure from "../external-failure.ts";
 import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
 import * as Api from "../shared/api.ts";
@@ -79,8 +80,12 @@ const attribution = (error: Errors.ApiError): Log.Attribution => {
   return error satisfies never;
 };
 
+// An Internal's cause is a wrapper (drizzle's `Failed query: …`, a PlatformError); the reason worth
+// a log line is the driver's or Node's, one level down.
 const detail = (error: Errors.ApiError): string =>
-  error._tag === "Internal" ? Render.errorDetail(error.cause) : error.message;
+  error._tag === "Internal"
+    ? Render.errorDetail(ExternalFailure.causeOf(error.cause))
+    : error.message;
 
 // A refusal (< 500) is the caller's problem and skips Sentry; a failure carries its cause there.
 const report = (error: Errors.ApiError): Log.Report =>

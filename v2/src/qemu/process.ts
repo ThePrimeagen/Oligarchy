@@ -10,11 +10,10 @@ export const STDERR_TAIL_BYTES = 4096;
 export const FORCE_KILL_AFTER = "5 seconds";
 
 export type QemuProcess = {
-  readonly pid: number;
-  readonly stderrTail: Effect.Effect<string>;
   // The exit code, or null for a signal death; resolves only once stderr is drained.
   readonly exited: Effect.Effect<number | null>;
   readonly exitedBeforeConnect: Effect.Effect<never, Errors.QemuStartError>;
+  // `message`, then `: <stderr tail>` when QEMU wrote one.
   readonly withStderr: (message: string) => Effect.Effect<string>;
 };
 
@@ -75,22 +74,17 @@ export const spawn = Effect.fn("Process.spawn")(function* (
     }),
     { startImmediately: true },
   );
-  const stderrTail = Ref.get(tail);
   const withStderr = (message: string): Effect.Effect<string> =>
-    Effect.map(stderrTail, (stderr) => (stderr === "" ? message : `${message}: ${stderr.trim()}`));
+    Effect.map(Ref.get(tail), (stderr) =>
+      stderr === "" ? message : `${message}: ${stderr.trim()}`,
+    );
   const exited = Deferred.await(exit);
   const exitedBeforeConnect: Effect.Effect<never, Errors.QemuStartError> = Effect.gen(function* () {
     const code = yield* exited;
     const message = yield* withStderr(`qemu: exited ${String(code)} before QMP connect`);
     return yield* Errors.QemuStartError.make({ message });
   });
-  return {
-    pid: handle.pid,
-    stderrTail,
-    exited,
-    exitedBeforeConnect,
-    withStderr,
-  } satisfies QemuProcess;
+  return { exited, exitedBeforeConnect, withStderr } satisfies QemuProcess;
 });
 
 export const spawnQemu = (args: ReadonlyArray<string>) => spawn(Args.QEMU_BIN, args);

@@ -44,10 +44,7 @@ describe("handshake", () => {
       const log = FakeLog.fakeLog();
       const recording = recorder();
       yield* fake.feed(FakeSocket.greetingLine());
-      const client = yield* Client.handshake(fake.socket, recording.record).pipe(
-        Effect.provide(log.layer),
-      );
-      expect(client.greeting).toEqual(FakeSocket.GREETING);
+      yield* Client.handshake(fake.socket, recording.record).pipe(Effect.provide(log.layer));
       expect(fake.written).toEqual(['{"execute":"qmp_capabilities","arguments":{},"id":1}\n']);
       expect(recording.commands).toEqual([{ execute: "qmp_capabilities", arguments: {}, id: 1 }]);
       expect(recording.outcomes).toEqual([{ state: "completed", response: FakeSocket.GREETING }]);
@@ -66,7 +63,10 @@ describe("handshake", () => {
       expect(fiber.pollUnsafe()).toBeUndefined();
       yield* fake.feed(FakeSocket.greetingLine());
       const client = yield* Fiber.join(fiber);
-      expect(client.greeting).toEqual(FakeSocket.GREETING);
+      expect(commandsWritten(fake)).toEqual(["qmp_capabilities"]);
+      // Handshaken: the next command goes out numbered after the boot's and is answered.
+      expect(yield* client.execute(sendKey)).toEqual({});
+      expect(FakeSocket.writtenCommands(fake).map((command) => command.id)).toEqual([1, 2]);
     }),
   );
 
@@ -143,7 +143,6 @@ describe("execute", () => {
       yield* fake.feed(FakeSocket.successLine(2, { first: true }));
       expect(yield* Fiber.join(second)).toEqual({ second: true });
       expect(yield* Fiber.join(first)).toEqual({ first: true });
-      expect(yield* client.pending).toBe(0);
     }),
   );
 
@@ -191,7 +190,6 @@ describe("execute", () => {
       expect(recording.outcomes).toEqual([
         { state: "failed", response: "qemu: send-key timed out" },
       ]);
-      expect(yield* client.pending).toBe(0);
       yield* fake.feed(FakeSocket.successLine(2));
       const next = yield* Effect.forkChild(client.execute(sendKey));
       yield* Effect.yieldNow;
@@ -336,7 +334,6 @@ describe("socket lifecycle", () => {
       const first = yield* Effect.forkChild(Effect.flip(client.execute(sendKey)));
       const second = yield* Effect.forkChild(Effect.flip(client.execute(screendump)));
       yield* Effect.yieldNow;
-      expect(yield* client.pending).toBe(2);
       yield* fake.disconnect;
       expect(yield* Fiber.join(first)).toMatchObject({
         _tag: "QmpClosed",
@@ -349,7 +346,6 @@ describe("socket lifecycle", () => {
       const closed = yield* client.closed;
       expect(closed.message).toBe("qemu: socket closed");
       expect(fake.isClosed()).toBe(true);
-      expect(yield* client.pending).toBe(0);
     }),
   );
 
@@ -380,14 +376,17 @@ describe("socket lifecycle", () => {
     }),
   );
 
-  it.effect("removes the pending entry of an interrupted execute", () =>
+  it.effect("an interrupted execute ignores its late reply and the client keeps working", () =>
     Effect.gen(function* () {
-      const { client } = yield* connect();
+      const { fake, client } = yield* connect();
       const fiber = yield* Effect.forkChild(client.execute(sendKey));
       yield* Effect.yieldNow;
-      expect(yield* client.pending).toBe(1);
       yield* Fiber.interrupt(fiber);
-      expect(yield* client.pending).toBe(0);
+      yield* fake.feed(FakeSocket.successLine(2, "too late"));
+      const next = yield* Effect.forkChild(client.execute(screendump));
+      yield* Effect.yieldNow;
+      yield* fake.feed(FakeSocket.successLine(3, "fresh"));
+      expect(yield* Fiber.join(next)).toBe("fresh");
     }),
   );
 

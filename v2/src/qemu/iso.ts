@@ -17,6 +17,7 @@ import { HttpClient } from "effect/unstable/http";
 import * as ExternalFailure from "../external-failure.ts";
 import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
+import * as Domain from "../shared/domain.ts";
 import * as Errors from "../shared/errors.ts";
 import * as Qemu from "./qemu.ts";
 
@@ -83,7 +84,8 @@ const make: Effect.Effect<
 > = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const http = yield* HttpClient.HttpClient;
+  // Release CDNs answer with a redirect; fetch followed up to 20 and so does this.
+  const http = (yield* HttpClient.HttpClient).pipe(HttpClient.followRedirects(20));
   const log = yield* Log.Log;
   const host = yield* Host;
   const isoDir = path.join(host.homeDir, ".oligarchy", "isos");
@@ -140,7 +142,7 @@ const make: Effect.Effect<
         return Option.none();
       }
       const text = yield* response.text;
-      const token = text.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
+      const token = text.trim().split(/\s+/, 1)[0].toLowerCase();
       return /^[0-9a-f]{64}$/.test(token) ? Option.some(token) : Option.none();
     }).pipe(Effect.orElseSucceed(() => Option.none()));
 
@@ -238,7 +240,7 @@ const make: Effect.Effect<
     });
 
   const getIso = Effect.fn("Iso.getIso")(function* (name: string, who: Who) {
-    if (!name.startsWith("http://") && !name.startsWith("https://")) {
+    if (!Domain.isIsoUrl(name)) {
       const resolved = path.resolve(name);
       const info = yield* fs
         .stat(resolved)

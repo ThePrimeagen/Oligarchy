@@ -37,30 +37,33 @@ const alive = (pid: number): boolean => {
   }
 };
 
-const untilTail = (spawned: Process.QemuProcess, expected: string) =>
+// The stderr tail as `withStderr` renders it, once the expected text has arrived.
+const untilStderr = (spawned: Process.QemuProcess, expected: string) =>
   Effect.gen(function* () {
     for (let attempt = 0; attempt < 100; attempt++) {
-      const tail = yield* spawned.stderrTail;
-      if (tail.includes(expected)) {
-        return tail;
+      const text = yield* spawned.withStderr("tail");
+      if (text.includes(expected)) {
+        return text;
       }
       yield* Effect.sleep("10 millis");
     }
-    return yield* spawned.stderrTail;
+    return yield* spawned.withStderr("tail");
   });
 
 describe("spawn", () => {
   it.live("captures the stderr tail of a running process and kills it when the scope closes", () =>
     Effect.gen(function* () {
       const scope = yield* Scope.make();
-      const spawned = yield* Process.spawn("sh", ["-c", "echo err >&2; exec sleep 30"]).pipe(
-        Scope.provide(scope),
-        Effect.provide(NodeServices.layer),
-      );
-      expect(yield* untilTail(spawned, "err")).toBe("err\n");
-      expect(alive(spawned.pid)).toBe(true);
+      const pidFile = join(bin, "child.pid");
+      const spawned = yield* Process.spawn("sh", [
+        "-c",
+        `echo $$ > "${pidFile}"; echo err >&2; exec sleep 30`,
+      ]).pipe(Scope.provide(scope), Effect.provide(NodeServices.layer));
+      expect(yield* untilStderr(spawned, "err")).toBe("tail: err");
+      const pid = Number(readFileSync(pidFile, "utf8").trim());
+      expect(alive(pid)).toBe(true);
       yield* Scope.close(scope, Exit.void);
-      expect(alive(spawned.pid)).toBe(false);
+      expect(alive(pid)).toBe(false);
     }),
   );
 

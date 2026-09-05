@@ -1,16 +1,6 @@
 import { createServer } from "node:http";
 import { NodeHttpClient, NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node";
-import {
-  Cause,
-  Console,
-  Deferred,
-  Effect,
-  Exit,
-  Layer,
-  MutableRef,
-  Ref,
-  type Runtime,
-} from "effect";
+import { Cause, Deferred, Effect, Exit, Layer, MutableRef, type Runtime } from "effect";
 import { Command } from "effect/unstable/cli";
 import { HttpMiddleware, HttpRouter, HttpServerError } from "effect/unstable/http";
 import * as Config from "../config.ts";
@@ -49,7 +39,7 @@ const server = createServer();
 const serverFailed = Deferred.makeUnsafe<never, HttpServerError.ServeError>();
 server.on("error", (cause) => {
   if (Deferred.doneUnsafe(serverFailed, Exit.fail(new HttpServerError.ServeError({ cause })))) {
-    MutableRef.set(shutdown.reason.ref, `proxy error: ${cause.message}`);
+    MutableRef.set(shutdown.reason, `proxy error: ${cause.message}`);
   }
 });
 
@@ -106,12 +96,10 @@ const proxyCommand = ProxyCommand.makeProxyCommand({
 // failure no Log exists to record, so it is printed here. Every later failure logs its own fatal
 // line; a defect has nothing else to say for it.
 const program = Effect.gen(function* () {
-  const services = yield* Layer.build(MainLive).pipe(
-    Effect.tapCause((cause) => Console.error(Render.renderFailure(cause))),
-  );
+  const services = yield* Layer.build(MainLive).pipe(Effect.tapCause(Render.reportFailure));
   yield* Command.run(proxyCommand, { version: Api.VERSION }).pipe(
     Effect.provide(services),
-    Effect.tapDefect((defect) => Console.error(Render.renderFailure(Cause.die(defect)))),
+    Effect.tapDefect((defect) => Render.reportFailure(Cause.die(defect))),
   );
 }).pipe(Effect.scoped);
 
@@ -121,7 +109,7 @@ const teardown: Runtime.Teardown = (exit, onExit) => {
     onExit(1);
     return;
   }
-  onExit(Ref.getUnsafe(shutdown.failed) ? 1 : 0);
+  onExit(MutableRef.get(shutdown.failed) ? 1 : 0);
 };
 
 NodeRuntime.runMain(program, { disableErrorReporting: true, teardown });

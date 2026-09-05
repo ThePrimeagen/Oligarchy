@@ -2,12 +2,12 @@ import {
   Cause,
   Clock,
   Context,
-  Deferred,
   Effect,
   Exit,
   Fiber,
   FileSystem,
   Layer,
+  MutableRef,
   Option,
   Path,
   Queue,
@@ -48,8 +48,6 @@ const MAX_KEYS = 1000;
 // A follower this many events behind has stopped reading; it is dropped rather than letting its
 // queue hold every image the session takes from then on.
 const FOLLOW_BACKLOG = 64;
-// The status message Sentry showed for a failed action, now the failure the action span ends with.
-const ACTION_FAILED = "internal_error";
 
 type Follower = Queue.Queue<Domain.FollowEvent, Cause.Done>;
 
@@ -110,11 +108,12 @@ export type SessionsService = {
     message: string,
   ) => Effect.Effect<void, Errors.BadRequest>;
   readonly intentEnd: (live: LiveSession) => Effect.Effect<void, Errors.BadRequest>;
+  // Fails unknownSession when the sweep took the session first: one session, one verdict.
   readonly stop: (
     live: LiveSession,
     status: Domain.StopStatus | undefined,
     reason: string | undefined,
-  ) => Effect.Effect<void, Errors.Internal>;
+  ) => Effect.Effect<void, Errors.Internal | Errors.UnknownSession>;
   readonly follow: (
     id: string,
   ) => Effect.Effect<
@@ -122,18 +121,21 @@ export type SessionsService = {
     Errors.UnknownSession | Errors.Conflict | Errors.Internal
   >;
   readonly stats: Effect.Effect<Contract.Stats>;
-  readonly count: Effect.Effect<number>;
 };
 
 // What the drain finalizer reads and reports: the reason every surviving session's row is closed
 // with (main's server error path replaces the default) and whether a session refused to close.
+// MutableRefs, because main writes from a Node listener and the teardown reads outside Effect.
 export type Shutdown = {
-  readonly reason: Ref.Ref<string>;
-  readonly failed: Ref.Ref<boolean>;
+  readonly reason: MutableRef.MutableRef<string>;
+  readonly failed: MutableRef.MutableRef<boolean>;
 };
 
 export const Shutdown = Context.Reference<Shutdown>("@oligarchy/proxy/sessions/Shutdown", {
-  defaultValue: () => ({ reason: Ref.makeUnsafe(SHUTDOWN_REASON), failed: Ref.makeUnsafe(false) }),
+  defaultValue: () => ({
+    reason: MutableRef.make(SHUTDOWN_REASON),
+    failed: MutableRef.make(false),
+  }),
 });
 
 const isDatabaseError = Schema.is(Errors.DatabaseError);
@@ -185,8 +187,6 @@ const exchangeFailed = (error: unknown, live: OpenSession): Errors.ExchangeFaile
 const badRequest = (message: string, live: OpenSession): Errors.BadRequest =>
   Errors.BadRequest.make({ message, sessionId: live.id, agentId: live.agent });
 
-const isUrl = (iso: string): boolean => iso.startsWith("http://") || iso.startsWith("https://");
-
 const make = Effect.gen(function* () {
   const qemu = yield* Qemu.Qemu;
   const iso = yield* Iso.Iso;
@@ -197,17 +197,10 @@ const make = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const shutdown = yield* Shutdown;
-  const scope = yield* Scope.Scope;
 
   // Running machines, by id; and every session this proxy holds, booting ones included.
   const sessions = yield* Ref.make<ReadonlyMap<string, LiveSession>>(new Map());
   const openSessions = yield* Ref.make<ReadonlyMap<string, OpenSession>>(new Map());
-  // withActionSpan ends its span with the fiber that carries it; the handle that settles that fiber
-  // lives here so LiveSession carries plain spans.
-  const settlers = new Map<
-    Tracer.Span,
-    (state: Domain.ActionState, imageUrl: Option.Option<string>) => Effect.Effect<void>
-  >();
 
   const elapsed = (started: number) =>
     Effect.map(Clock.currentTimeMillis, (now) => String(now - started));
@@ -259,6 +252,7 @@ const make = Effect.gen(function* () {
   // action spans and the recorder
   // -------------------------------------------------------------------------
 
+  // Open from the recorder's open to its close, under the open intent or the session.
   const openActionSpan = (
     live: OpenSession,
     command: Domain.QmpCommand,
@@ -268,48 +262,24 @@ const make = Effect.gen(function* () {
         onNone: () => live.span,
         onSome: (intent) => intent.span,
       });
-      const ready = yield* Deferred.make<Tracer.Span>();
-      const settled = yield* Deferred.make<Option.Option<string>, string>();
-      // The span lives as long as this fiber: from the recorder opening to its close.
-      const fiber = yield* Effect.gen(function* () {
-        yield* Deferred.succeed(ready, yield* Effect.orDie(Effect.currentSpan));
-        const imageUrl = yield* Deferred.await(settled);
-        if (Option.isSome(imageUrl)) {
-          yield* Sentry.annotateImageUrl(imageUrl.value);
-        }
-      }).pipe(
-        Sentry.withActionSpan(parent, command.execute, live.id, live.agent),
-        Effect.ignore,
-        Effect.forkIn(scope, { startImmediately: true }),
-      );
-      const span = yield* Deferred.await(ready);
-      settlers.set(span, (state, imageUrl) =>
-        (state === "completed"
-          ? Deferred.succeed(settled, imageUrl)
-          : Deferred.fail(settled, ACTION_FAILED)
-        ).pipe(Effect.andThen(Fiber.await(fiber)), Effect.asVoid),
-      );
+      const span = yield* Sentry.actionSpan(parent, command.execute, live.id, live.agent);
       yield* Ref.update(live.actionSpans, (spans) => withItem(spans, span));
       return span;
     });
 
+  // Ends the span once: a session ending with actions in flight fails what is still open.
   const settleActionSpan = (
     live: OpenSession,
     span: Tracer.Span,
     state: Domain.ActionState,
-    imageUrl: Option.Option<string>,
+    imageUrl?: string,
   ): Effect.Effect<void> =>
     Effect.gen(function* () {
       const open = yield* Ref.modify(live.actionSpans, (spans) =>
         spans.has(span) ? [true, without(spans, span)] : [false, spans],
       );
-      if (!open) {
-        return;
-      }
-      const settle = settlers.get(span);
-      settlers.delete(span);
-      if (settle !== undefined) {
-        yield* settle(state, imageUrl);
+      if (open) {
+        yield* Sentry.endActionSpan(span, state, imageUrl);
       }
     });
 
@@ -319,7 +289,7 @@ const make = Effect.gen(function* () {
       const span = yield* openActionSpan(live, command);
       const id = yield* actionStore
         .startAction({ sessionId: live.id, agentId: live.agent, request: command })
-        .pipe(Effect.tapError(() => settleActionSpan(live, span, "failed", Option.none())));
+        .pipe(Effect.tapError(() => settleActionSpan(live, span, "failed")));
       return { span, id };
     });
 
@@ -331,7 +301,7 @@ const make = Effect.gen(function* () {
         ({ span, id }) =>
           (outcome) =>
             Effect.gen(function* () {
-              yield* settleActionSpan(live, span, outcome.state, Option.none());
+              yield* settleActionSpan(live, span, outcome.state);
               yield* actionStore.finishAction(id, outcome).pipe(
                 Effect.tapError((error) =>
                   log.error(`db: closing action ${String(id)} failed: ${detail(error)}`, {
@@ -369,7 +339,7 @@ const make = Effect.gen(function* () {
       yield* Ref.update(openSessions, (map) => mapWithout(map, [live.id]));
       yield* log.releaseColor(live.agent);
       for (const span of yield* Ref.get(live.actionSpans)) {
-        yield* settleActionSpan(live, span, "failed", Option.none());
+        yield* settleActionSpan(live, span, "failed");
       }
       yield* finishOpenIntent(live, "cancelled");
       yield* Sentry.endSessionSpan(live.span, status);
@@ -424,19 +394,13 @@ const make = Effect.gen(function* () {
           );
       }
       const isoPath = yield* iso.getIso(body.iso, { sessionId: live.id, agentId: live.agent });
+      const prepared = yield* qemu.prepare(live.id, disk).pipe(Scope.provide(live.scope));
       // Register right before boot: the handshake records an action that references agent_runs,
-      // so this must precede start(), but a failed download before here must not burn the agent
-      // id on its one-registration key.
+      // so this must precede start(), but a failed download or disk create before here must not
+      // burn the agent id on its one-registration key.
       yield* sessionStore.registerAgent(live.agent, live.id);
-      const base = {
-        id: live.id,
-        iso: isoPath,
-        display,
-        automation,
-        record: recorder(live),
-      };
       const handle = yield* qemu
-        .start(disk === undefined ? base : { ...base, disk })
+        .start(prepared, { iso: isoPath, display, automation, record: recorder(live) })
         .pipe(Scope.provide(live.scope));
       yield* sessionStore.sessionRunning(live.id);
       return handle;
@@ -485,7 +449,7 @@ const make = Effect.gen(function* () {
       .insertSession(
         id,
         disk === undefined ? { iso: body.iso } : { iso: body.iso, disk },
-        isUrl(body.iso) ? "downloading" : "running",
+        Domain.isIsoUrl(body.iso) ? "downloading" : "running",
       )
       .pipe(
         Effect.catch((cause) =>
@@ -568,7 +532,7 @@ const make = Effect.gen(function* () {
               live,
               span,
               result.state,
-              result.state === "completed" ? Option.some(url) : Option.none(),
+              result.state === "completed" ? url : undefined,
             );
           });
       });
@@ -760,7 +724,14 @@ const make = Effect.gen(function* () {
     reason: string | undefined,
   ) {
     const finalStatus = status ?? "aborted";
-    yield* Ref.update(sessions, (map) => mapWithout(map, [live.id]));
+    // The sweep may have taken the session between the lookup and here; whoever removes the id
+    // owns its one verdict, and the other caller sees the session as already gone.
+    const owned = yield* Ref.modify(sessions, (map) =>
+      map.has(live.id) ? [true, mapWithout(map, [live.id])] : [false, map],
+    );
+    if (!owned) {
+      return yield* Errors.unknownSession(live.id, live.agent);
+    }
     // The kill destroys the socket and signals QEMU before it removes the dir, so a cleanup
     // failure still leaves a dead machine: log it, but close the record.
     yield* killLogged(live, "stop cleanup failed", live.agent);
@@ -778,7 +749,7 @@ const make = Effect.gen(function* () {
       sessionId: live.id,
       agentId: live.agent,
     });
-    yield* finishLiveSession(live, finalStatus);
+    return yield* finishLiveSession(live, finalStatus);
   });
 
   // -------------------------------------------------------------------------
@@ -924,12 +895,12 @@ const make = Effect.gen(function* () {
     // Clear the sweep, then await one in flight: the tick is uninterruptible, so this waits.
     yield* Fiber.interrupt(sweeper);
     const draining = [...(yield* Ref.getAndSet(sessions, new Map())).values()];
-    const reason = yield* Ref.get(shutdown.reason);
+    const reason = MutableRef.get(shutdown.reason);
     yield* log.info(`proxy: shutting down; stopping ${String(draining.length)} sessions`);
     const exits = yield* Effect.forEach(draining, (live) => Effect.exit(drainOne(live, reason)), {
       concurrency: "unbounded",
     });
-    yield* Ref.set(shutdown.failed, exits.some(Exit.isFailure));
+    MutableRef.set(shutdown.failed, exits.some(Exit.isFailure));
   });
   yield* Effect.addFinalizer(() => drain);
 
@@ -946,7 +917,6 @@ const make = Effect.gen(function* () {
     stop,
     follow,
     stats: Effect.flatMap(Ref.get(sessions), (map) => stats.collect(map.size)),
-    count: Effect.map(Ref.get(sessions), (map) => map.size),
   };
   return service;
 });

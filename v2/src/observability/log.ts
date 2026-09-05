@@ -6,9 +6,7 @@ import {
   Effect,
   ErrorReporter,
   Layer,
-  LogLevel,
   Queue,
-  Schema,
   Scope,
 } from "effect";
 import * as Logs from "../db/logs.ts";
@@ -35,22 +33,6 @@ export type LogService = {
 export const Colors = Context.Reference<boolean>("@oligarchy/observability/log/Colors", {
   defaultValue: () => Render.stdoutColors,
 });
-
-// An error or fatal line reported without a cause: Sentry sees the text itself.
-class LogLine extends Schema.TaggedError<LogLine>("@oligarchy/observability/log/LogLine")(
-  "LogLine",
-  {
-    text: Schema.String,
-    level: Schema.Literals(["error", "fatal"]),
-  },
-) {
-  override get message(): string {
-    return this.text;
-  }
-  override get [ErrorReporter.severity](): LogLevel.Severity {
-    return this.level === "fatal" ? "Fatal" : "Error";
-  }
-}
 
 type Row = Parameters<typeof Logs.LogStore.Service.insertLog>[0];
 
@@ -192,11 +174,12 @@ const makeLog = (
           if (report.skipSentry === true) {
             return;
           }
-          const cause =
+          // The line carries the level to the reporter; a bare cause would report as `error`.
+          const line =
             report.cause === undefined
-              ? Cause.fail(LogLine.make({ text, level }))
-              : Cause.die(report.cause);
-          yield* reportCause(cause).pipe(Effect.annotateLogs(annotations(text, report)));
+              ? Errors.LogLine.make({ text, level })
+              : Errors.LogLine.make({ text, level, cause: report.cause });
+          yield* reportCause(Cause.fail(line)).pipe(Effect.annotateLogs(annotations(text, report)));
         });
 
     return {

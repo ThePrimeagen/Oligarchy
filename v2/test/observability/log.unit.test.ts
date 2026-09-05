@@ -183,7 +183,10 @@ describe("Log Sentry policy", () => {
       }).pipe(Effect.provide(Log.Log.layerStdout.pipe(Layer.provide(reporter.layer))));
       expect(reporter.reported).toHaveLength(1);
       const [report] = reporter.reported;
-      expect(report?.error.message).toBe("connect ECONNREFUSED");
+      expect(report?.error.name).toBe(Errors.LogLine.identifier);
+      expect(report?.error.message).toBe("stop cleanup failed: connect ECONNREFUSED");
+      expect(report?.error.cause).toMatchObject({ message: "connect ECONNREFUSED" });
+      expect(report?.severity).toBe("Error");
       expect(report?.annotations).toEqual({
         session_id: SESSION_ID,
         agent_id: AGENT_ID,
@@ -191,6 +194,36 @@ describe("Log Sentry policy", () => {
       });
       expect(yield* consoleLines).toEqual([
         `[OLI-61] ${SESSION_ID}: error: stop cleanup failed: connect ECONNREFUSED`,
+      ]);
+    }),
+  );
+
+  it.effect("fatal with a cause reports the line at Fatal with the cause on it", () =>
+    Effect.gen(function* () {
+      const reporter = Reporter.collect();
+      const cause = Errors.DatabaseError.make({
+        operation: "ping",
+        message: "database unreachable: connect ECONNREFUSED 127.0.0.1:5432",
+        cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
+      });
+      yield* Effect.gen(function* () {
+        const log = yield* Log.Log;
+        yield* log.fatal("proxy: database unreachable: connect ECONNREFUSED 127.0.0.1:5432", {
+          cause,
+        });
+      }).pipe(Effect.provide(Log.Log.layerStdout.pipe(Layer.provide(reporter.layer))));
+      expect(reporter.reported).toHaveLength(1);
+      const [report] = reporter.reported;
+      expect(report?.severity).toBe("Fatal");
+      expect(report?.error.message).toBe(
+        "proxy: database unreachable: connect ECONNREFUSED 127.0.0.1:5432",
+      );
+      expect(report?.error.cause).toMatchObject({
+        _tag: "DatabaseError",
+        message: "database unreachable: connect ECONNREFUSED 127.0.0.1:5432",
+      });
+      expect(yield* consoleLines).toEqual([
+        "[global] fatal: proxy: database unreachable: connect ECONNREFUSED 127.0.0.1:5432",
       ]);
     }),
   );
@@ -231,7 +264,8 @@ describe("Log Sentry policy", () => {
       expect(report?.error.message).toBe(
         "proxy: missing host requirements:\nqemu-system-x86_64 not on PATH",
       );
-      expect(report?.error.name).toBe("@oligarchy/observability/log/LogLine");
+      expect(report?.error.name).toBe(Errors.LogLine.identifier);
+      expect(report?.error.cause).toBeUndefined();
       expect(report?.severity).toBe("Fatal");
       expect(report?.annotations).toEqual({
         log: "proxy: missing host requirements:\nqemu-system-x86_64 not on PATH",

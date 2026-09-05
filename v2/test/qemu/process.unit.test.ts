@@ -23,8 +23,7 @@ describe("spawnQemu happy path", () => {
         extendEnv: true,
         detached: false,
       });
-      expect(process.pid).toBe(spawned?.pid);
-      expect(yield* process.stderrTail).toBe("");
+      expect(yield* process.withStderr("qemu: handshake timeout")).toBe("qemu: handshake timeout");
     }),
   );
 
@@ -35,7 +34,7 @@ describe("spawnQemu happy path", () => {
       const process = yield* Process.spawnQemu(ARGS).pipe(Effect.provide(spawner.layer));
       yield* spawner.spawned[0]?.exit(0) ?? Effect.void;
       expect(yield* process.exited).toBe(0);
-      const tail = yield* process.stderrTail;
+      const tail = (yield* process.withStderr("qemu")).slice("qemu: ".length);
       expect(tail).toHaveLength(Process.STDERR_TAIL_BYTES);
       expect(tail.endsWith("END")).toBe(true);
     }),

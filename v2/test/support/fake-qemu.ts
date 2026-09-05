@@ -8,7 +8,7 @@ import * as Contract from "../../src/shared/contract.ts";
 import type * as Domain from "../../src/shared/domain.ts";
 import type * as Errors from "../../src/shared/errors.ts";
 
-export type StartInput = Parameters<Qemu.QemuService["start"]>[0];
+export type StartInput = Parameters<Qemu.QemuService["start"]>[1];
 export type MouseInput = Parameters<Qemu.QemuHandle["sendMouse"]>[0];
 export type ExchangeError =
   | Errors.QmpError
@@ -17,11 +17,12 @@ export type ExchangeError =
   | Errors.DatabaseError;
 
 export type Call =
+  | { readonly _tag: "prepare"; readonly id: string; readonly disk: string | undefined }
   | {
       readonly _tag: "start";
       readonly id: string;
       readonly iso: string;
-      readonly disk: string | undefined;
+      readonly diskPath: string;
       readonly display: Domain.QemuDisplay;
       readonly automation: boolean;
     }
@@ -36,6 +37,11 @@ export type Call =
 
 // Every hook defaults to success; a hook that fails scripts that step's failure.
 export type Script = {
+  // The session dir, disk and firmware: a failing qemu-img create fails here.
+  readonly prepare?: (
+    id: string,
+    disk: string | undefined,
+  ) => Effect.Effect<void, Errors.QemuStartError>;
   // Runs once the handle's release is registered and before the handshake is recorded.
   readonly boot?: (
     input: StartInput,
@@ -115,9 +121,9 @@ export const fakeQemu = (script: Script = {}): FakeQemu => {
   const tmp = script.tmp ?? "/tmp";
   const sessionDir = (id: string): string => `${tmp}/oligarchy-${id}`;
 
-  const makeHandle = (boot: StartInput, seq: Ref.Ref<number>): Qemu.QemuHandle => {
-    const id = boot.id;
-    const dir = sessionDir(id);
+  const makeHandle = (prepared: Qemu.Prepared, seq: Ref.Ref<number>): Qemu.QemuHandle => {
+    const id = prepared.id;
+    const dir = prepared.dir;
     const next = Ref.updateAndGet(seq, (n) => n + 1);
     const inputEvents = (
       events: ReadonlyArray<Domain.QmpInputEvent>,
@@ -192,32 +198,38 @@ export const fakeQemu = (script: Script = {}): FakeQemu => {
             script.screendump?.() ?? Effect.succeed(PNG),
           );
         }),
-      exited: Effect.never,
     };
   };
 
   const service = Qemu.Qemu.of({
-    start: (input) =>
+    prepare: (id, disk) =>
+      Effect.gen(function* () {
+        calls.push({ _tag: "prepare", id, disk });
+        yield* script.prepare?.(id, disk) ?? Effect.void;
+        const dir = sessionDir(id);
+        return { id, dir, diskPath: disk ?? `${dir}/disk.qcow2` };
+      }),
+    start: (prepared, input) =>
       Effect.gen(function* () {
         calls.push({
           _tag: "start",
-          id: input.id,
+          id: prepared.id,
           iso: input.iso,
-          disk: input.disk,
+          diskPath: prepared.diskPath,
           display: input.display,
           automation: input.automation,
         });
         yield* Effect.addFinalizer(() =>
           Effect.suspend(() => {
-            calls.push({ _tag: "stop", id: input.id });
-            return script.stop?.(input.id) ?? Effect.void;
+            calls.push({ _tag: "stop", id: prepared.id });
+            return script.stop?.(prepared.id) ?? Effect.void;
           }),
         );
         yield* script.boot?.(input) ?? Effect.void;
         // The greeting is the recorded reply to the boot's qmp_capabilities.
         const close = yield* input.record({ execute: "qmp_capabilities", arguments: {}, id: 1 });
         yield* close({ state: "completed", response: GREETING });
-        return makeHandle(input, yield* Ref.make(1));
+        return makeHandle(prepared, yield* Ref.make(1));
       }),
     sessionDir,
   });
