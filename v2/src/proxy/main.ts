@@ -6,6 +6,7 @@ import { HttpMiddleware, HttpRouter, HttpServerError } from "effect/unstable/htt
 import * as Config from "../config.ts";
 import * as Actions from "../db/actions.ts";
 import * as Client from "../db/client.ts";
+import * as DebugLogs from "../db/debug-logs.ts";
 import * as Logs from "../db/logs.ts";
 import * as SessionStore from "../db/sessions.ts";
 import * as Log from "../observability/log.ts";
@@ -75,6 +76,7 @@ const DatabaseLive = Layer.unwrap(
 const MainLive = Layer.mergeAll(
   SessionStore.SessionStore.layer,
   Actions.ActionStore.layer,
+  DebugLogs.DebugLogStore.layer,
   Log.Log.layer,
 ).pipe(
   Layer.provideMerge(Logs.LogStore.layer),

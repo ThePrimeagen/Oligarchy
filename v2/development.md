@@ -108,7 +108,8 @@ bugs; anything not listed here is a regression.
 - `v2/` holds `package.json`, `package-lock.json`, `tsconfig.json`, `.oxlintrc.json`,
   `.oxfmtrc.json`, `.editorconfig`, `vitest.config.ts`, `vitest.global-setup.ts` (Testcontainers
   Postgres, migrations, seed), `vitest.d.ts`, `drizzle.config.ts`, `wrangler.jsonc`, `drizzle/`
-  (generated migrations, byte-identical to `v1/`), `public/` and `prompts/` (moved as-is), the
+  (generated migrations; 0000–0011 match `v1/`, 0012 adds `debug_logs`), `public/` and `prompts/`
+  (moved as-is), the
   operator documents, this document, the four `v2/` wrappers, `src/` and `test/`.
 
 `v2/src/`: one directory per process plus the shared kernel; `main.ts` files are the entries.
@@ -118,7 +119,7 @@ src/
 ├── shared/      domain.ts  errors.ts  contract.ts  api.ts
 ├── config.ts    external-failure.ts
 ├── observability/  dsn.ts  instrument.ts  sentry.ts  log.ts  render.ts
-├── db/          schema.ts  client.ts  sessions.ts  actions.ts  logs.ts  tests.ts  migrate.ts
+├── db/          schema.ts  client.ts  sessions.ts  actions.ts  logs.ts  debug-logs.ts  tests.ts  migrate.ts
 ├── qmp/         framing.ts  socket.ts  client.ts
 ├── qemu/        keys.ts  args.ts  host.ts  process.ts  qemu.ts  iso.ts  stats.ts
 ├── proxy/       sessions.ts  middleware.ts  handlers.ts  command.ts  main.ts
@@ -1035,13 +1036,14 @@ const prepare = Effect.fn("Qemu.prepare")(function* (id: string, disk: string | 
 - `normalizeDatabaseUrl` guards with `URL.canParse` (`db: DATABASE_URL is not a valid url`, and the
   password never lands in a message), drops `sslrootcert=system` (node-postgres reads it as a file
   path) and keeps `sslmode=verify-full`.
-- Repositories are `Context.Service`s (`SessionStore`, `ActionStore`, `LogStore`, `TestStore`)
+- Repositories are `Context.Service`s (`SessionStore`, `ActionStore`, `LogStore`, `DebugLogStore`, `TestStore`)
   whose methods are `Effect.fn("db.<name>")` functions that `yield* Database` once in `make`.
   Drizzle-typed columns are trusted; the `jsonb` columns (`sessions.config`, `actions.request`,
   `actions.response`) are written from schema-typed values and read back as Drizzle types them.
-- `src/db/schema.ts` is v1's schema formatted by oxfmt: semantically identical (`drizzle-kit
-  check` and the `schema-in-sync` job pass against the moved migrations), not byte-identical. Its
-  `pgEnum` lists and the `Schema.Literals` in `domain.ts` are maintained by hand together. Row
+- `src/db/schema.ts` is v1's schema formatted by oxfmt, plus `debug_logs` (v2-only). The v1
+  tables stay semantically identical (`drizzle-kit check` and the `schema-in-sync` job pass
+  against the moved migrations), not byte-identical. Its `pgEnum` lists and the `Schema.Literals`
+  in `domain.ts` are maintained by hand together. Row
   stamps come from Postgres `now()` in the statement; Effect-side time from
   `Clock.currentTimeMillis`. `registerAgent`'s primary key makes one session per agent; a second
   registration is a `DatabaseError` by design. `TestStore.closeResult(resultId, status, reason,
@@ -1109,9 +1111,9 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
   `intent end`.
 - Replay is `actions WHERE session_id ORDER BY created_at, id`; the identity id breaks timestamp
   ties. `sessions.config` holds the effective launch config so a replay boots an identical machine.
-- The tables: `sessions`, `agent_runs`, `actions`, `images`, `logs`, `test_definitions`,
-  `test_base_prompts`, `test_runs`, `test_results`, declared in `src/db/schema.ts` exactly as v1
-  declares them.
+- The tables: `sessions`, `agent_runs`, `actions`, `images`, `logs`, `debug_logs`,
+  `test_definitions`, `test_base_prompts`, `test_runs`, `test_results`, declared in
+  `src/db/schema.ts`. v1 declared every table except `debug_logs`.
 
 ## Log stream
 
@@ -1160,6 +1162,34 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
 - `Log` installs no Effect `Logger`; `emit` formats, writes and offers synchronously. `console.*`
   appears only in `src/dashboard/**` and `vitest.global-setup.ts`. Test log output through the
   fake `Log` layer (`test/support/log.ts`) or `Log.layerStdout` with `TestConsole.logLines`.
+
+## Failed-session debug log
+
+A `/stop` with status `failed` writes one `debug_logs` row keyed by `session_id` before the
+session scope is closed. The row is the crash artifact: everything that would otherwise vanish
+with the machine, plus the proxy lines already offered for that session.
+
+- The guest journal, dmesg, user-session journal, coredumps and compositor crash folders live
+  inside the guest. A live ISO keeps them in RAM (`-boot order=d` boots the CD, the qcow2 is
+  empty until an install writes it), so mounting the disk after QEMU dies yields nothing. The
+  designed egress is `/dev/ttyS0` → `<session-dir>/serial.log` (see Operating loop): an agent
+  that dumps `journalctl` onto the UART leaves the text there; a kernel `console=ttyS0` would
+  too. `qemu-guest-agent` / `guest-exec` is not on the Omarchy desktop ISO, and a virtio-serial
+  channel nobody speaks is unused hardware.
+- `kill` closes the session scope: QEMU dies and the prepare finalizer removes the directory.
+  The serial file has to be read first. A missing file is an empty serial (nothing wrote); any
+  other read failure is `debug log: serial read failed: <detail>` at error and the serial is
+  stored empty.
+- `Log.flush` runs before the insert so `listLogs` sees every offered row. The snapshot is
+  `created_at level text` per line. Each text column is capped at 1 MiB (`MAX_DEBUG_TEXT` in
+  `debug-logs.ts`); a longer value is cut and ends `\n[truncated]`.
+- The insert is best-effort: `debug log save failed: <detail>` at error and the stop still
+  closes the session. A second save for the same session is a `DatabaseError` by design; stop
+  writes at most once. Succeeded, aborted and timed-out stops do not write a row — those
+  verdicts are not a failed test session.
+- The columns: `session_id` (primary key, references `sessions.id`), `serial`, `proxy_logs`,
+  `created_at`. Actions and screenshots stay on their own tables; they already outlive the
+  process. QEMU's stderr tail names a host boot failure, not a guest crash, and is not copied.
 
 ## Sentry
 
