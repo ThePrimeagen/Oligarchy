@@ -17,6 +17,9 @@ import { SENTRY_DSN } from "../observability/dsn.ts";
 const HTMX_URL = "https://cdn.jsdelivr.net/npm/htmx.org@4.0.0";
 const HTMX_INTEGRITY = "sha384-BvJpBiO8Kh31EqtJe5DRIeWrHWnCGkwytKs9NKFi86Hhw96dEqdEMzZDeK9iEGTc";
 
+const errorMessage = (cause: unknown): string =>
+  cause instanceof Error ? cause.message : String(cause);
+
 type Bindings = {
   HYPERDRIVE: {
     connectionString: string;
@@ -295,7 +298,7 @@ app.use(async (context, next) => {
   if (new URL(context.req.url).hostname === "clicker.oligarchy.trm.sh") {
     return context.html(clickerPage);
   }
-  await next();
+  return next();
 });
 
 app.use(
@@ -321,7 +324,7 @@ app.get("/", async (context) => {
     return context.render(<Home sessions={sessions} />);
   } catch (error) {
     Sentry.captureException(error);
-    console.error("dashboard: listing sessions:", (error as Error).message);
+    console.error("dashboard: listing sessions:", errorMessage(error));
     context.status(500);
     return context.render(<Home sessions={null} />);
   }
@@ -333,7 +336,7 @@ app.get("/definitions", async (context) => {
     return context.render(<Definitions definitions={definitions} />);
   } catch (error) {
     Sentry.captureException(error);
-    console.error("dashboard: listing test definitions:", (error as Error).message);
+    console.error("dashboard: listing test definitions:", errorMessage(error));
     context.status(500);
     return context.render(<Definitions definitions={null} />);
   }
@@ -345,7 +348,7 @@ app.get("/prompts", async (context) => {
     return context.render(<Prompts prompts={prompts} />);
   } catch (error) {
     Sentry.captureException(error);
-    console.error("dashboard: listing base prompts:", (error as Error).message);
+    console.error("dashboard: listing base prompts:", errorMessage(error));
     context.status(500);
     return context.render(<Prompts prompts={null} />);
   }
@@ -362,7 +365,7 @@ app.get("/sessions", async (context) => {
     );
   } catch (error) {
     Sentry.captureException(error);
-    console.error("dashboard: listing sessions:", (error as Error).message);
+    console.error("dashboard: listing sessions:", errorMessage(error));
     return context.html(
       <>
         <SessionStatus sessions={null} outOfBand />
@@ -392,7 +395,7 @@ app.get("/images/:id", async (context) => {
     });
   } catch (error) {
     Sentry.captureException(error);
-    console.error("dashboard: loading image:", (error as Error).message);
+    console.error("dashboard: loading image:", errorMessage(error));
     return context.body(null, 500);
   }
 });
