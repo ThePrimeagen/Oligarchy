@@ -111,6 +111,10 @@ export const TestResultStatus = Schema.Literals([
 ]).annotate({ identifier: "@oligarchy/shared/domain/TestResultStatus" });
 export type TestResultStatus = typeof TestResultStatus.Type;
 
+// An ISO named by url is downloaded and cached by the proxy; anything else is a path.
+export const isIsoUrl = (iso: string): boolean =>
+  iso.startsWith("http://") || iso.startsWith("https://");
+
 export const SessionConfig = Schema.Struct({
   iso: Schema.String,
   disk: Schema.optionalKey(Schema.String),

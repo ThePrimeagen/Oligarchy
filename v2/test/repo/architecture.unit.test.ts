@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -24,23 +24,22 @@ const BOUNDARY_FILES = new Set([
   "src/observability/instrument.ts",
   "src/observability/render.ts",
   "src/db/client.ts",
-  "src/ctrl/cursor.ts",
 ]);
 
 const isBoundary = (path: string): boolean =>
   BOUNDARY_FILES.has(path) || /^src\/[^/]+\/main\.ts$/.test(path);
 
-// Non-boundary files allowed exactly one node:* import. Effect's Crypto.digest is one-shot; a
-// multi-gigabyte ISO is hashed with node:crypto's streaming createHash.
+// Non-boundary files allowed exactly one node:* import. Effect's Crypto.digest is one-shot, so a
+// multi-gigabyte ISO is hashed with node:crypto's streaming createHash; Effect has no inflate, so
+// a PNG's deflate stream is opened with node:zlib.
 const NODE_IMPORT_EXCEPTIONS: ReadonlyMap<string, string> = new Map([
   ["src/qemu/iso.ts", "node:crypto"],
+  ["src/session/image.ts", "node:zlib"],
 ]);
 
 // Files allowed to call `Effect.run*`, each with the calls it may make.
 const RUN_ALLOWED: ReadonlyMap<string, ReadonlyArray<string>> = new Map([
-  ["src/observability/log.ts", ["runForkWith"]],
   ["src/db/client.ts", ["runForkWith", "runPromiseExitWith"]],
-  ["src/qmp/socket.ts", ["runForkWith"]],
 ]);
 
 const stripStringsAndComments = (source: string): string =>
@@ -93,9 +92,13 @@ describe("boundary files", () => {
     ).toEqual([]);
   });
 
-  it("the boundary list names files that exist or belong to later packages", () => {
-    for (const path of BOUNDARY_FILES) {
-      expect(path.startsWith("src/")).toBe(true);
+  it("the boundary and exception lists name files that exist", () => {
+    for (const path of [
+      ...BOUNDARY_FILES,
+      ...NODE_IMPORT_EXCEPTIONS.keys(),
+      ...RUN_ALLOWED.keys(),
+    ]) {
+      expect(existsSync(join(root, path)), path).toBe(true);
     }
   });
 });
