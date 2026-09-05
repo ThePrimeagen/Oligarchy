@@ -586,8 +586,10 @@ describe("client local checks", () => {
     }),
   );
 
+  // v1 printed Node's own message after `iso: `; the platform wrapper's `NotFound: FileSystem.stat`
+  // preamble must not appear.
   it.effect(
-    "start with a missing local iso is a CommandError naming the path before any request",
+    "start with a missing local iso is a CommandError with the ENOENT message before any request",
     () =>
       Effect.gen(function* () {
         const recorder = FakeHttp.recordRequests(ok);
@@ -595,7 +597,9 @@ describe("client local checks", () => {
           run(["start", ...shared, "--iso", "missing.iso"], { http: recorder.layer }),
         );
         expect(error._tag).toBe("CommandError");
-        expect(error.message).toMatch(/^iso: .*missing\.iso/);
+        expect(error.message).toMatch(
+          /^iso: ENOENT: no such file or directory, stat '\/.*\/missing\.iso'$/,
+        );
         expect(recorder.requests).toEqual([]);
       }),
   );
@@ -605,7 +609,9 @@ describe("client local checks", () => {
       const recorder = FakeHttp.recordRequests(ok);
       const error = yield* Effect.flip(run(["start", ...shared], { http: recorder.layer }));
       expect(error._tag).toBe("CommandError");
-      expect(error.message).toMatch(/^iso: .*omarchy\.iso/);
+      expect(error.message).toMatch(
+        /^iso: ENOENT: no such file or directory, stat '\/.*\/omarchy\.iso'$/,
+      );
       expect(recorder.requests).toEqual([]);
     }),
   );

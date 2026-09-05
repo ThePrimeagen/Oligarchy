@@ -103,7 +103,8 @@ export class TestStore extends Context.Service<TestStore>()("@oligarchy/db/TestS
       return rows.length > 0;
     });
 
-    // A null session leaves the id `test start` wrote in place.
+    // A null reason or session leaves what an earlier command wrote in place: the key is absent,
+    // where a `null` value would be written as NULL.
     const closeResult = Effect.fn("db.closeResult")(function* (
       resultId: string,
       status: "passed" | "failed",
@@ -115,7 +116,8 @@ export class TestStore extends Context.Service<TestStore>()("@oligarchy/db/TestS
           .update(DbSchema.testResults)
           .set(
             Object.assign(
-              { status, reason, finishedAt: sql`now()` },
+              { status, finishedAt: sql`now()` },
+              reason === null ? undefined : { reason },
               sessionId === null ? undefined : { sessionId },
             ),
           )

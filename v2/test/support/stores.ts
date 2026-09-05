@@ -321,7 +321,9 @@ export const fakeTestStore = (
           return false;
         }
         row.status = status;
-        row.reason = reason;
+        if (reason !== null) {
+          row.reason = reason;
+        }
         if (sessionId !== null) {
           row.sessionId = sessionId;
         }

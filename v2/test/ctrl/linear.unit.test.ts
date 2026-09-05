@@ -1,11 +1,12 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { NodeFileSystem } from "@effect/platform-node";
-import { Cause, Effect, Layer, Redacted, Result } from "effect";
+import { Cause, Effect, FileSystem, Layer, Redacted, Result } from "effect";
 import { HttpClientError, type HttpClientRequest } from "effect/unstable/http";
 import * as Linear from "../../src/ctrl/linear.ts";
 import * as Render from "../../src/observability/render.ts";
 import * as Errors from "../../src/shared/errors.ts";
+import * as FakeFs from "../support/fake-fs.ts";
 import * as FakeHttp from "../support/fake-http.ts";
 
 const TOKEN = "linear-token-s3ntinel";
@@ -102,12 +103,35 @@ const withHttp = (respond: (body: GraphQl) => Response) =>
 
 const linear = (token = TOKEN) => Linear.Linear.layer(Redacted.make(token));
 
-const prompts = Linear.loadPrompts.pipe(Effect.provide(NodeFileSystem.layer));
+const issuePrompts = Linear.loadIssuePrompts.pipe(Effect.provide(NodeFileSystem.layer));
+
+const drivingPrompt = Linear.loadDrivingPrompt.pipe(Effect.provide(NodeFileSystem.layer));
+
+// A FileSystem over the prompt files whose reads matching `unreadable` fail, recording the
+// path of every read so a test can say which files a loader touched.
+const promptFs = (
+  unreadable: RegExp,
+): { readonly reads: Array<string>; readonly layer: Layer.Layer<FileSystem.FileSystem> } => {
+  const reads: Array<string> = [];
+  const layer = FileSystem.layerNoop({
+    readFileString: (path) =>
+      Effect.suspend(() => {
+        reads.push(path);
+        return unreadable.test(path)
+          ? Effect.fail(FakeFs.permissionDenied("open", path))
+          : Effect.succeed(`contents of ${path}`);
+      }),
+  });
+  return { reads, layer };
+};
+
+const fileNames = (paths: ReadonlyArray<string>): ReadonlyArray<string> =>
+  paths.map((path) => path.slice(path.lastIndexOf("/") + 1));
 
 // The whole ticket flow as `test new` runs it for one definition.
 const createTicket = Effect.gen(function* () {
   const client = yield* Linear.Linear;
-  const loaded = yield* prompts;
+  const loaded = yield* issuePrompts;
   const teamId = yield* client.teamId;
   const labelIds = yield* client.labelIds(teamId, experiment.version);
   const assigneeId = yield* client.assigneeId;
@@ -149,12 +173,59 @@ describe("renderPrompt", () => {
   });
 });
 
+describe("loadDrivingPrompt", () => {
+  it.effect("reads prompts/driving-agent.html and nothing else (happy)", () =>
+    Effect.gen(function* () {
+      const fs = promptFs(/\/(client\.md|ctrl-linear\.md|linear-issue\.html)$/);
+      const template = yield* Linear.loadDrivingPrompt.pipe(Effect.provide(fs.layer));
+      expect(fileNames(fs.reads)).toEqual(["driving-agent.html"]);
+      expect(template).toMatch(/^contents of .*\/prompts\/driving-agent\.html$/);
+    }),
+  );
+
+  it.effect("fails as a LinearError naming the template when it is unreadable (unhappy)", () =>
+    Effect.gen(function* () {
+      const fs = promptFs(/driving-agent\.html$/);
+      const error = yield* Effect.flip(Linear.loadDrivingPrompt.pipe(Effect.provide(fs.layer)));
+      expect(error).toMatchObject({ _tag: "LinearError", operation: "prompts" });
+      expect(error.message).toMatch(/^linear: .*driving-agent\.html/);
+      expect(error.cause).toBeDefined();
+    }),
+  );
+});
+
+describe("loadIssuePrompts", () => {
+  it.effect("reads the ticket template and both guides, not the kickoff template (happy)", () =>
+    Effect.gen(function* () {
+      const fs = promptFs(/driving-agent\.html$/);
+      const loaded = yield* Linear.loadIssuePrompts.pipe(Effect.provide(fs.layer));
+      expect([...fileNames(fs.reads)].sort()).toEqual([
+        "client.md",
+        "ctrl-linear.md",
+        "linear-issue.html",
+      ]);
+      expect(loaded.linearIssue).toMatch(/\/prompts\/linear-issue\.html$/);
+      expect(loaded.clientMd).toMatch(/\/client\.md$/);
+      expect(loaded.ctrlMd).toMatch(/\/ctrl-linear\.md$/);
+    }),
+  );
+
+  it.effect("fails as a LinearError naming an unreadable guide (unhappy)", () =>
+    Effect.gen(function* () {
+      const fs = promptFs(/\/client\.md$/);
+      const error = yield* Effect.flip(Linear.loadIssuePrompts.pipe(Effect.provide(fs.layer)));
+      expect(error).toMatchObject({ _tag: "LinearError", operation: "prompts" });
+      expect(error.message).toMatch(/^linear: .*client\.md/);
+    }),
+  );
+});
+
 describe("linearTicketDescription happy path", () => {
   it.effect(
     "renders the ticket, run, result, ISO, server, both guides, and this definition only",
     () =>
       Effect.gen(function* () {
-        const loaded = yield* prompts;
+        const loaded = yield* issuePrompts;
         const description = Result.getOrThrow(
           Linear.linearTicketDescription(experiment, firstTest, "OLI-42", loaded),
         );
@@ -204,7 +275,6 @@ describe("linearTicketDescription unhappy path", () => {
   it("fails when the template names a value the experiment does not carry", () => {
     const rendered = Linear.linearTicketDescription(experiment, firstTest, "OLI-42", {
       linearIssue: "{{RUN_ID}} {{NOPE}}",
-      drivingAgent: "",
       clientMd: "",
       ctrlMd: "",
     });
@@ -222,8 +292,8 @@ describe("drivingAgentPrompt", () => {
     "renders the kickoff prompt from the ticket alone; the server url is in the ticket",
     () =>
       Effect.gen(function* () {
-        const loaded = yield* prompts;
-        const text = Result.getOrThrow(Linear.drivingAgentPrompt("OLI-42", loaded));
+        const template = yield* drivingPrompt;
+        const text = Result.getOrThrow(Linear.drivingAgentPrompt("OLI-42", template));
         expect(text.includes("{{")).toBe(false);
         // The formatter wrapped the template between "ticket" and the placeholder.
         expect(text).toMatch(/Review Linear ticket\s+OLI-42/);
@@ -235,12 +305,7 @@ describe("drivingAgentPrompt", () => {
   );
 
   it("fails on a template asking for more than the ticket (unhappy)", () => {
-    const rendered = Linear.drivingAgentPrompt("OLI-42", {
-      linearIssue: "",
-      drivingAgent: "{{LINEAR_TICKET}} {{SERVER_URL}}",
-      clientMd: "",
-      ctrlMd: "",
-    });
+    const rendered = Linear.drivingAgentPrompt("OLI-42", "{{LINEAR_TICKET}} {{SERVER_URL}}");
     expect(Result.isFailure(rendered)).toBe(true);
     if (Result.isFailure(rendered)) {
       expect(rendered.failure.message).toBe(
@@ -259,7 +324,7 @@ describe("Linear happy path", () => {
         const ticket = yield* createTicket.pipe(
           Effect.provide(linear().pipe(Layer.provide(http.layer))),
         );
-        const loaded = yield* prompts;
+        const loaded = yield* issuePrompts;
 
         expect(ticket).toEqual({
           id: "issue-OLI-42",

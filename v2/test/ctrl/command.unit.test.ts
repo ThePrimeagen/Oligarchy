@@ -1,7 +1,7 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { NodeFileSystem, NodeServices } from "@effect/platform-node";
-import { Cause, Effect, Exit, Layer, Redacted, Result } from "effect";
+import { Cause, Effect, Exit, FileSystem, Layer, Redacted, Result } from "effect";
 import { TestClock, TestConsole } from "effect/testing";
 import { CliError, Command } from "effect/unstable/cli";
 import * as CtrlCommand from "../../src/ctrl/command.ts";
@@ -11,6 +11,7 @@ import * as Api from "../../src/shared/api.ts";
 import * as Errors from "../../src/shared/errors.ts";
 import * as Config from "../support/config.ts";
 import * as FakeCursor from "../support/fake-cursor.ts";
+import * as FakeFs from "../support/fake-fs.ts";
 import * as FakeHttp from "../support/fake-http.ts";
 import * as FakeLinear from "../support/fake-linear.ts";
 import * as FakeLog from "../support/log.ts";
@@ -120,6 +121,8 @@ const harness = (
     readonly linear?: FakeLinear.FakeLinear;
     readonly cursor?: FakeCursor.FakeCursor;
     readonly proxy?: FakeProxy;
+    // Replaces the real FileSystem the prompt templates are read from.
+    readonly fs?: Layer.Layer<FileSystem.FileSystem>;
   } = {},
 ) => {
   const stores = Stores.fakeStores();
@@ -144,14 +147,36 @@ const harness = (
     },
     proxy: proxy.connect,
   });
+  // A later layer's service wins the merge, so the fake FileSystem replaces Node's.
+  const services =
+    options.fs === undefined ? NodeServices.layer : Layer.merge(NodeServices.layer, options.fs);
   const run = (args: ReadonlyArray<string>, env: Record<string, string> = WITH_DB) =>
     Command.runWith(command, { version: Api.VERSION })(args).pipe(
-      Effect.provide(
-        Layer.mergeAll(NodeServices.layer, stdio.layer, Config.withEnv(env), FakeHttp.die),
-      ),
+      Effect.provide(Layer.mergeAll(services, stdio.layer, Config.withEnv(env), FakeHttp.die)),
       Effect.exit,
     );
   return { stores, log, linear, cursor, proxy, touched, stdio, run };
+};
+
+const DRIVING_AGENT_PATH = /\/prompts\/driving-agent\.html$/;
+const TEMPLATE = "Review Linear ticket {{LINEAR_TICKET}}\n";
+
+// A FileSystem that serves one template for every prompt file except the ones matched, which
+// fail as an unreadable file in the checkout would.
+const promptFs = (
+  unreadable: RegExp,
+): { readonly reads: Array<string>; readonly layer: Layer.Layer<FileSystem.FileSystem> } => {
+  const reads: Array<string> = [];
+  const layer = FileSystem.layerNoop({
+    readFileString: (path) =>
+      Effect.suspend(() => {
+        reads.push(path);
+        return unreadable.test(path)
+          ? Effect.fail(FakeFs.permissionDenied("open", path))
+          : Effect.succeed(TEMPLATE);
+      }),
+  });
+  return { reads, layer };
 };
 
 const failure = (exit: Exit.Exit<void, unknown>): unknown => {
@@ -173,7 +198,9 @@ const stdout = Effect.map(TestConsole.logLines, (lines) => lines.map(String));
 
 const lastJson = Effect.map(stdout, (lines) => JSON.parse(lines.at(-1) ?? ""));
 
-const prompts = Linear.loadPrompts.pipe(Effect.provide(NodeFileSystem.layer));
+const issuePrompts = Linear.loadIssuePrompts.pipe(Effect.provide(NodeFileSystem.layer));
+
+const drivingPrompt = Linear.loadDrivingPrompt.pipe(Effect.provide(NodeFileSystem.layer));
 
 // ---------------------------------------------------------------------------
 // test --list
@@ -296,7 +323,7 @@ describe("test new", () => {
           [run?.id, 2, "pending"],
         ]);
 
-        const loaded = yield* prompts;
+        const loaded = yield* issuePrompts;
         const experiment: Linear.Experiment = {
           id: run?.id ?? "",
           iso: "https://example.com/omarchy.iso",
@@ -475,6 +502,27 @@ describe("test new", () => {
     }),
   );
 
+  it.effect("fails the run naming an unreadable guide before any ticket is created (unhappy)", () =>
+    Effect.gen(function* () {
+      const fs = promptFs(/\/client\.md$/);
+      const h = harness({ fs: fs.layer });
+      h.stores.tests.definitions.push(install);
+      const exit = yield* h.run([...NEW, "--server-url", SERVER], WITH_LINEAR);
+      expect(failure(exit)).toMatchObject({
+        _tag: "LinearError",
+        operation: "prompts",
+        message: expect.stringMatching(/^linear: .*client\.md/),
+      });
+      expect(fs.reads.some((path) => DRIVING_AGENT_PATH.test(path))).toBe(false);
+      expect(h.linear.calls).toEqual([]);
+      expect(h.stores.tests.runs[0]).toMatchObject({
+        status: "failed",
+        reason: expect.stringMatching(/^linear: .*client\.md/),
+      });
+      expect(h.stores.tests.results.map((row) => row.status)).toEqual(["failed"]);
+    }),
+  );
+
   it.effect("rejects an ISO that is not HTTPS or has no host (unhappy)", () =>
     Effect.gen(function* () {
       const h = harness();
@@ -588,9 +636,12 @@ describe("test run", () => {
       const h = harness({ cursor: FakeCursor.fakeCursor({ agentId: "bc-42" }) });
       const exit = yield* h.run(["test", "run", "--ticket", "OLI-42"], WITH_CURSOR);
       expect(Exit.isSuccess(exit)).toBe(true);
-      const loaded = yield* prompts;
+      const template = yield* drivingPrompt;
       expect(h.cursor.calls).toEqual([
-        { text: Result.getOrThrow(Linear.drivingAgentPrompt("OLI-42", loaded)), model: undefined },
+        {
+          text: Result.getOrThrow(Linear.drivingAgentPrompt("OLI-42", template)),
+          model: undefined,
+        },
       ]);
       expect(h.cursor.calls[0]?.text).toMatch(/Review Linear ticket\s+OLI-42/);
       expect(h.cursor.calls[0]?.text.includes(SERVER)).toBe(false);
@@ -598,6 +649,39 @@ describe("test run", () => {
         "Agent here, go check it out for more information: https://cursor.com/agents/bc-42",
       ]);
       expect(h.touched).toEqual(["database", "cursor"]);
+    }),
+  );
+
+  // v1 read prompts/driving-agent.html alone here; the guides `test new` embeds are not its
+  // business, so a checkout with an unreadable client.md still kicks the agent off.
+  it.effect(
+    "reads only the kickoff template: an unreadable client.md does not stop it (happy)",
+    () =>
+      Effect.gen(function* () {
+        const fs = promptFs(/\/client\.md$/);
+        const h = harness({ cursor: FakeCursor.fakeCursor({ agentId: "bc-42" }), fs: fs.layer });
+        const exit = yield* h.run(["test", "run", "--ticket", "OLI-42"], WITH_CURSOR);
+        expect(Exit.isSuccess(exit)).toBe(true);
+        expect(fs.reads).toHaveLength(1);
+        expect(fs.reads[0]).toMatch(DRIVING_AGENT_PATH);
+        expect(h.cursor.calls).toEqual([
+          { text: "Review Linear ticket OLI-42\n", model: undefined },
+        ]);
+      }),
+  );
+
+  it.effect("fails naming the kickoff template when it is unreadable (unhappy)", () =>
+    Effect.gen(function* () {
+      const fs = promptFs(DRIVING_AGENT_PATH);
+      const h = harness({ cursor: FakeCursor.fakeCursor({ agentId: "bc-42" }), fs: fs.layer });
+      const exit = yield* h.run(["test", "run", "--ticket", "OLI-42"], WITH_CURSOR);
+      expect(failure(exit)).toMatchObject({
+        _tag: "LinearError",
+        operation: "prompts",
+        message: expect.stringMatching(/^linear: .*driving-agent\.html/),
+      });
+      expect(h.cursor.calls).toEqual([]);
+      expect(yield* stdout).toEqual([]);
     }),
   );
 
@@ -678,6 +762,7 @@ describe("test start", () => {
       ]);
       expect(Exit.isSuccess(exit)).toBe(true);
       expect(h.stores.tests.results[0]).toMatchObject({ status: "running", sessionId: SESSION_ID });
+      // The line belongs to the session alone: no agent, so no palette colour is taken.
       expect(h.log.lines).toEqual([
         {
           level: "info",
@@ -688,6 +773,7 @@ describe("test start", () => {
           cause: undefined,
         },
       ]);
+      expect(h.log.acquired).toEqual([]);
       expect(yield* stdout).toEqual([]);
     }),
   );
@@ -812,6 +898,36 @@ describe("test-results", () => {
           cause: undefined,
         },
       ]);
+      // v1 took the agent's palette colour before its line, so the line renders in colour.
+      expect(h.log.acquired).toEqual(["agent-1"]);
+    }),
+  );
+
+  it.effect("without --reason leaves the reason an earlier verdict stored (happy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.tests.results.push({
+        ...result(RESULT_ID, "passed", SESSION_ID),
+        reason: "it locked",
+      });
+      const exit = yield* h.run([
+        "test-results",
+        "--agent-id",
+        "agent-1",
+        "--id",
+        RESULT_ID,
+        "--status",
+        "failed",
+        "--server-url",
+        SERVER,
+      ]);
+      expect(Exit.isSuccess(exit)).toBe(true);
+      expect(h.stores.tests.results[0]).toMatchObject({
+        status: "failed",
+        sessionId: SESSION_ID,
+        reason: "it locked",
+      });
+      expect(h.log.lines.map((line) => line.text)).toEqual([`test result ${RESULT_ID}: failed`]);
     }),
   );
 
@@ -843,10 +959,11 @@ describe("test-results", () => {
         expect(h.log.lines.map((line) => [line.text, line.sessionId, line.agentId])).toEqual([
           [`test result ${RESULT_ID}: failed; installer hung`, undefined, "agent-1"],
         ]);
+        expect(h.log.acquired).toEqual(["agent-1"]);
       }),
   );
 
-  it.effect("rejects an unknown result (unhappy)", () =>
+  it.effect("rejects an unknown result and takes no colour for it (unhappy)", () =>
     Effect.gen(function* () {
       const h = harness();
       const exit = yield* h.run([
@@ -867,6 +984,7 @@ describe("test-results", () => {
         message: `test-results: result ${RESULT_ID} not found`,
       });
       expect(h.log.lines).toEqual([]);
+      expect(h.log.acquired).toEqual([]);
     }),
   );
 

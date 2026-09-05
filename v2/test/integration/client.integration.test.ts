@@ -472,7 +472,9 @@ describe("./client unhappy path", () => {
       "missing.iso",
     ]);
     expect(result.code).toBe(1);
-    expect(firstLine(result.stderr)).toMatch(/^iso: .*missing\.iso/);
+    expect(firstLine(result.stderr)).toMatch(
+      /^iso: ENOENT: no such file or directory, stat '\/.*\/missing\.iso'$/,
+    );
     expect(stub.requests).toEqual([]);
   });
 

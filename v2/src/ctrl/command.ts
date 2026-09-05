@@ -275,7 +275,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
 
     const tickets: Array<Linear.LinearTicket> = [];
     const createTickets = Effect.gen(function* () {
-      const prompts = yield* Linear.loadPrompts;
+      const prompts = yield* Linear.loadIssuePrompts;
       const teamId = yield* linear.teamId;
       const labelIds = yield* linear.labelIds(teamId, experiment.version);
       const assigneeId = yield* linear.assigneeId;
@@ -325,8 +325,8 @@ export const makeCtrlCommand = (deps: Deps = live) => {
   // test run --ticket <linear-ticket>
   const testRun = Effect.fn("ctrl.test.run")(function* (input: { readonly ticket: string }) {
     const agents = yield* Cursor.CursorAgents;
-    const prompts = yield* Linear.loadPrompts;
-    const text = yield* Effect.fromResult(Linear.drivingAgentPrompt(input.ticket, prompts));
+    const template = yield* Linear.loadDrivingPrompt;
+    const text = yield* Effect.fromResult(Linear.drivingAgentPrompt(input.ticket, template));
     const { agentId } = yield* agents.prompt(text);
     yield* Console.log(Render.agentLink(Cursor.agentUrl(agentId)));
   });
@@ -382,6 +382,8 @@ export const makeCtrlCommand = (deps: Deps = live) => {
       onNone: () => "",
       onSome: (text) => `; ${text}`,
     });
+    // The agent has no live session on this process, so its colour is taken here for the line.
+    yield* log.acquireColor(input.agentId);
     yield* log.info(
       `test result ${input.id}: ${input.status}${reason}`,
       Object.assign(

@@ -310,6 +310,17 @@ Postgres.describeWithDatabase("database", () => {
         const [closed] = yield* tests.resultForSession(sessionId);
         expect(closed?.result).toMatchObject({ status: "passed", reason: "it locked", sessionId });
         expect(closed?.result.finishedAt).toBeInstanceOf(Date);
+        // A verdict without a reason leaves the stored one, as v1's undefined did.
+        expect(yield* tests.closeResult(result.id, "failed", null, null)).toBe(true);
+        const [reclosed] = yield* tests.resultForSession(sessionId);
+        expect(reclosed?.result).toMatchObject({
+          status: "failed",
+          reason: "it locked",
+          sessionId,
+        });
+        expect(yield* tests.closeResult(result.id, "failed", "installer hung", null)).toBe(true);
+        const [reasoned] = yield* tests.resultForSession(sessionId);
+        expect(reasoned?.result.reason).toBe("installer hung");
         expect(yield* tests.closeResult(uuid(), "failed", null, null)).toBe(false);
         expect(yield* tests.resultForSession(uuid())).toEqual([]);
       }),

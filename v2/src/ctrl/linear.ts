@@ -61,10 +61,9 @@ export type CreateIssueInput = {
 // Prompts
 // ---------------------------------------------------------------------------
 
-// The templates and the two guides they embed, read once per command.
-export type Prompts = {
+// The ticket template and the two guides it embeds, read once per `test new`.
+export type IssuePrompts = {
   readonly linearIssue: string;
-  readonly drivingAgent: string;
   readonly clientMd: string;
   readonly ctrlMd: string;
 };
@@ -83,26 +82,35 @@ const PROMPT_PATHS = {
   ctrlMd: besideModule("../../ctrl-linear.md"),
 };
 
-export const loadPrompts: Effect.Effect<Prompts, Errors.LinearError, FileSystem.FileSystem> =
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const read = (path: string) =>
-      fs.readFileString(path).pipe(
-        Effect.mapError((error) =>
-          Errors.LinearError.make({
-            operation: "prompts",
-            message: `linear: ${error.message}`,
-            cause: error,
-          }),
-        ),
-      );
-    return {
-      linearIssue: yield* read(PROMPT_PATHS.linearIssue),
-      drivingAgent: yield* read(PROMPT_PATHS.drivingAgent),
-      clientMd: yield* read(PROMPT_PATHS.clientMd),
-      ctrlMd: yield* read(PROMPT_PATHS.ctrlMd),
-    } satisfies Prompts;
-  });
+const readPrompt = Effect.fn("Linear.readPrompt")(function* (path: string) {
+  const fs = yield* FileSystem.FileSystem;
+  return yield* fs.readFileString(path).pipe(
+    Effect.mapError((error) =>
+      Errors.LinearError.make({
+        operation: "prompts",
+        message: `linear: ${error.message}`,
+        cause: error,
+      }),
+    ),
+  );
+});
+
+// `test run` reads its kickoff template alone: the guides `test new` embeds are not its business,
+// so an unreadable one cannot stop it.
+export const loadDrivingPrompt: Effect.Effect<string, Errors.LinearError, FileSystem.FileSystem> =
+  readPrompt(PROMPT_PATHS.drivingAgent);
+
+export const loadIssuePrompts: Effect.Effect<
+  IssuePrompts,
+  Errors.LinearError,
+  FileSystem.FileSystem
+> = Effect.gen(function* () {
+  return {
+    linearIssue: yield* readPrompt(PROMPT_PATHS.linearIssue),
+    clientMd: yield* readPrompt(PROMPT_PATHS.clientMd),
+    ctrlMd: yield* readPrompt(PROMPT_PATHS.ctrlMd),
+  } satisfies IssuePrompts;
+});
 
 const PLACEHOLDER = /\{\{([A-Z_]+)\}\}/g;
 
@@ -136,7 +144,7 @@ export const linearTicketDescription = (
   experiment: Experiment,
   test: ExperimentTest,
   ticket: string,
-  prompts: Prompts,
+  prompts: IssuePrompts,
 ): Result.Result<string, Errors.LinearError> =>
   renderPrompt(prompts.linearIssue, LINEAR_ISSUE_FILE, {
     LINEAR_TICKET: ticket,
@@ -156,9 +164,9 @@ export const linearTicketDescription = (
 
 export const drivingAgentPrompt = (
   ticket: string,
-  prompts: Prompts,
+  template: string,
 ): Result.Result<string, Errors.LinearError> =>
-  renderPrompt(prompts.drivingAgent, DRIVING_AGENT_FILE, { LINEAR_TICKET: ticket });
+  renderPrompt(template, DRIVING_AGENT_FILE, { LINEAR_TICKET: ticket });
 
 // ---------------------------------------------------------------------------
 // GraphQL

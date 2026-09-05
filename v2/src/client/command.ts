@@ -1,7 +1,9 @@
 import { Console, Effect, FileSystem, Option, Path, Stdio, Stream } from "effect";
 import { Command } from "effect/unstable/cli";
 import * as Config from "../config.ts";
+import * as ExternalFailure from "../external-failure.ts";
 import * as Contract from "../shared/contract.ts";
+import * as Domain from "../shared/domain.ts";
 import * as Errors from "../shared/errors.ts";
 import * as Flags from "./flags.ts";
 import * as ProxyClient from "./proxy-client.ts";
@@ -15,18 +17,20 @@ const connect = Effect.fn("client.connect")(function* (serverUrl: string) {
   return yield* ProxyClient.connect({ serverUrl, token });
 });
 
-const isUrl = (iso: string): boolean => iso.startsWith("http://") || iso.startsWith("https://");
-
-// A local ISO is checked here so the message names the file, before the proxy is asked.
+// A local ISO is checked here so the message names the file, before the proxy is asked. The
+// message is Node's own (`ENOENT: no such file or directory, stat '…'`), as v1 printed it, not
+// the platform wrapper's.
 const localIso = Effect.fn("client.localIso")(function* (iso: string) {
   const path = yield* Path.Path;
   const fs = yield* FileSystem.FileSystem;
   const absolute = path.resolve(iso);
-  yield* fs
-    .stat(absolute)
-    .pipe(
-      Effect.mapError((error) => Errors.CommandError.make({ message: `iso: ${error.message}` })),
-    );
+  yield* fs.stat(absolute).pipe(
+    Effect.mapError((error) =>
+      Errors.CommandError.make({
+        message: `iso: ${ExternalFailure.describeThrowable(ExternalFailure.causeOf(error), error.message)}`,
+      }),
+    ),
+  );
   return absolute;
 });
 
@@ -49,7 +53,7 @@ const start = Command.make(
   Effect.fn("client.start")(function* (input: Input<typeof startFlags>) {
     const proxy = yield* connect(input.serverUrl);
     const path = yield* Path.Path;
-    const iso = isUrl(input.iso) ? input.iso : yield* localIso(input.iso);
+    const iso = Domain.isIsoUrl(input.iso) ? input.iso : yield* localIso(input.iso);
     const body = Option.match(input.disk, {
       onNone: () => Contract.StartBody.make({ iso, agent: input.agentId }),
       onSome: (disk) =>
