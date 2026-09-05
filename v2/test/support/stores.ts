@@ -242,15 +242,6 @@ export const fakeDebugLogStore = (
       Effect.sync(() => {
         saves.push({ sessionId, serial });
       }),
-    getDebugLog: (sessionId) =>
-      Effect.sync(() => {
-        const saved = saves.find((row) => sameId(row.sessionId, sessionId));
-        return Option.map(Option.fromUndefinedOr(saved), (row) => ({
-          sessionId: row.sessionId,
-          serial: row.serial,
-          proxyLogs: "",
-        }));
-      }),
     ...overrides,
   });
   return { saves, layer: Layer.succeed(DebugLogs.DebugLogStore)(service) };

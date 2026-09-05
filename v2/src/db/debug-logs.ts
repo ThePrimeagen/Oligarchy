@@ -1,31 +1,23 @@
-import { eq } from "drizzle-orm";
-import { Array as Arr, Context, Effect, Layer, Option } from "effect";
-import type * as Domain from "../shared/domain.ts";
+import { Context, Effect, Layer } from "effect";
 import * as Client from "./client.ts";
 import * as Logs from "./logs.ts";
 import * as DbSchema from "./schema.ts";
 
 // PlanetScale Postgres will take more, but a full journal plus the proxy story is diagnostic
-// in the first megabyte; a larger insert is a row we do not need to carry.
-export const MAX_DEBUG_TEXT = 1_048_576;
+// in the first megabyte; a larger insert is a row we do not need to carry. The tail is kept:
+// the crash and the verdict are at the end.
+const MAX_DEBUG_TEXT = 1_048_576;
+const TRUNCATED = "[truncated]\n";
 
-export const truncateDebugText = (text: string): string =>
-  text.length <= MAX_DEBUG_TEXT ? text : `${text.slice(0, MAX_DEBUG_TEXT)}\n[truncated]`;
+const truncateDebugText = (text: string): string =>
+  text.length <= MAX_DEBUG_TEXT
+    ? text
+    : `${TRUNCATED}${text.slice(TRUNCATED.length - MAX_DEBUG_TEXT)}`;
 
-export type ProxyLogRow = {
-  readonly level: Domain.LogLevel;
-  readonly text: string;
-  readonly createdAt: Date;
-};
-
-export const formatProxyLogs = (rows: ReadonlyArray<ProxyLogRow>): string =>
+const formatProxyLogs = (
+  rows: ReadonlyArray<{ readonly level: string; readonly text: string; readonly createdAt: Date }>,
+): string =>
   rows.map((row) => `${row.createdAt.toISOString()} ${row.level} ${row.text}`).join("\n");
-
-export type DebugLog = {
-  readonly sessionId: string;
-  readonly serial: string;
-  readonly proxyLogs: string;
-};
 
 export class DebugLogStore extends Context.Service<DebugLogStore>()("@oligarchy/db/DebugLogStore", {
   make: Effect.gen(function* () {
@@ -46,18 +38,7 @@ export class DebugLogStore extends Context.Service<DebugLogStore>()("@oligarchy/
       );
     });
 
-    const getDebugLog = Effect.fn("db.getDebugLog")(function* (sessionId: string) {
-      const rows = yield* database.run("getDebugLog", (db) =>
-        db.select().from(DbSchema.debugLogs).where(eq(DbSchema.debugLogs.sessionId, sessionId)),
-      );
-      return Option.map(Arr.head(rows), (row): DebugLog => ({
-        sessionId: row.sessionId,
-        serial: row.serial,
-        proxyLogs: row.proxyLogs,
-      }));
-    });
-
-    return { saveFailedSession, getDebugLog };
+    return { saveFailedSession };
   }),
 }) {
   static readonly layer = Layer.effect(this)(this.make);

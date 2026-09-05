@@ -274,6 +274,7 @@ Postgres.describeWithDatabase("database", () => {
         const sessions = yield* Sessions.SessionStore;
         const logs = yield* Logs.LogStore;
         const debugLogs = yield* DebugLogs.DebugLogStore;
+        const database = yield* Client.Database;
         const sessionId = uuid();
         yield* sessions.insertSession(sessionId, { iso: "x" }, "running");
         yield* logs.insertLog({
@@ -289,15 +290,19 @@ Postgres.describeWithDatabase("database", () => {
           agentId: "OLI-1",
         });
         yield* debugLogs.saveFailedSession(sessionId, "journalctl\nfailed unit");
-        const saved = yield* debugLogs.getDebugLog(sessionId);
-        expect(Option.isSome(saved)).toBe(true);
-        if (Option.isSome(saved)) {
-          expect(saved.value.sessionId).toBe(sessionId);
-          expect(saved.value.serial).toBe("journalctl\nfailed unit");
-          expect(saved.value.proxyLogs).toContain("info running; started in 12ms");
-          expect(saved.value.proxyLogs).toContain("error GET /image failed: qemu: closed");
-        }
-        expect(yield* debugLogs.getDebugLog(uuid())).toEqual(Option.none());
+        const [saved] = yield* database.run("select", (db) =>
+          db.select().from(DbSchema.debugLogs).where(eq(DbSchema.debugLogs.sessionId, sessionId)),
+        );
+        expect(saved).toMatchObject({
+          sessionId,
+          serial: "journalctl\nfailed unit",
+        });
+        expect(saved?.proxyLogs).toContain("info running; started in 12ms");
+        expect(saved?.proxyLogs).toContain("error GET /image failed: qemu: closed");
+        const missing = yield* database.run("select", (db) =>
+          db.select().from(DbSchema.debugLogs).where(eq(DbSchema.debugLogs.sessionId, uuid())),
+        );
+        expect(missing).toEqual([]);
       }),
     );
 
@@ -305,6 +310,7 @@ Postgres.describeWithDatabase("database", () => {
       Effect.gen(function* () {
         const sessions = yield* Sessions.SessionStore;
         const debugLogs = yield* DebugLogs.DebugLogStore;
+        const database = yield* Client.Database;
         const sessionId = uuid();
         yield* sessions.insertSession(sessionId, { iso: "x" }, "running");
         yield* debugLogs.saveFailedSession(sessionId, "first");
@@ -313,11 +319,10 @@ Postgres.describeWithDatabase("database", () => {
         expect(error.operation).toBe("saveFailedSession");
         expect(error.message).toContain("Failed query");
         expect(String(error.cause)).toContain("duplicate key");
-        const saved = yield* debugLogs.getDebugLog(sessionId);
-        expect(Option.isSome(saved)).toBe(true);
-        if (Option.isSome(saved)) {
-          expect(saved.value.serial).toBe("first");
-        }
+        const [saved] = yield* database.run("select", (db) =>
+          db.select().from(DbSchema.debugLogs).where(eq(DbSchema.debugLogs.sessionId, sessionId)),
+        );
+        expect(saved?.serial).toBe("first");
       }),
     );
 
@@ -331,20 +336,22 @@ Postgres.describeWithDatabase("database", () => {
       }),
     );
 
-    scoped.effect("DebugLogStore truncates a serial that exceeds the cap", () =>
+    scoped.effect("DebugLogStore keeps the tail when a serial exceeds the cap", () =>
       Effect.gen(function* () {
         const sessions = yield* Sessions.SessionStore;
         const debugLogs = yield* DebugLogs.DebugLogStore;
+        const database = yield* Client.Database;
         const sessionId = uuid();
         yield* sessions.insertSession(sessionId, { iso: "x" }, "running");
-        const serial = "z".repeat(DebugLogs.MAX_DEBUG_TEXT + 50);
+        const serial = `head-noise\n${"z".repeat(1_048_576)}crash-tail`;
         yield* debugLogs.saveFailedSession(sessionId, serial);
-        const saved = yield* debugLogs.getDebugLog(sessionId);
-        expect(Option.isSome(saved)).toBe(true);
-        if (Option.isSome(saved)) {
-          expect(saved.value.serial).toBe(DebugLogs.truncateDebugText(serial));
-          expect(saved.value.proxyLogs).toBe("");
-        }
+        const [saved] = yield* database.run("select", (db) =>
+          db.select().from(DbSchema.debugLogs).where(eq(DbSchema.debugLogs.sessionId, sessionId)),
+        );
+        expect(saved?.serial.startsWith("[truncated]\n")).toBe(true);
+        expect(saved?.serial.endsWith("crash-tail")).toBe(true);
+        expect(saved?.serial.length).toBe(1_048_576);
+        expect(saved?.proxyLogs).toBe("");
       }),
     );
 

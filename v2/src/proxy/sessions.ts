@@ -720,24 +720,25 @@ const make = Effect.gen(function* () {
     return yield* log.info("intent end", { sessionId: live.id, agentId: live.agent });
   });
 
-  const persistDebugLog = (live: LiveSession): Effect.Effect<void> =>
+  const readSerialText = (live: LiveSession): Effect.Effect<string> =>
+    fs.readFile(live.qemu.serialPath).pipe(
+      Effect.map((bytes) => new TextDecoder().decode(bytes)),
+      Effect.catch((error) =>
+        error.reason._tag === "NotFound"
+          ? Effect.succeed("")
+          : log
+              .error(`debug log: serial read failed: ${detail(error)}`, {
+                sessionId: live.id,
+                agentId: live.agent,
+                cause: error,
+              })
+              .pipe(Effect.as("")),
+      ),
+    );
+
+  const saveDebugLog = (live: LiveSession, serialText: string): Effect.Effect<void> =>
     Effect.gen(function* () {
-      // The session dir dies with kill; the serial has to be read while the file still exists.
-      const serialText = yield* fs.readFile(live.qemu.serialPath).pipe(
-        Effect.map((bytes) => new TextDecoder().decode(bytes)),
-        Effect.catch((error) =>
-          error.reason._tag === "NotFound"
-            ? Effect.succeed("")
-            : log
-                .error(`debug log: serial read failed: ${detail(error)}`, {
-                  sessionId: live.id,
-                  agentId: live.agent,
-                  cause: error,
-                })
-                .pipe(Effect.as("")),
-        ),
-      );
-      // Drain the log queue so the snapshot includes every line offered before this save.
+      // Drain the log queue so the snapshot includes the stopped line just offered.
       yield* log.flush;
       yield* debugLogs.saveFailedSession(live.id, serialText).pipe(
         Effect.catch((error) =>
@@ -764,9 +765,8 @@ const make = Effect.gen(function* () {
     if (!owned) {
       return yield* Errors.unknownSession(live.id, live.agent);
     }
-    if (finalStatus === "failed") {
-      yield* persistDebugLog(live);
-    }
+    // The session dir dies with kill; the serial has to be read while the file still exists.
+    const serialText = finalStatus === "failed" ? yield* readSerialText(live) : "";
     // The kill destroys the socket and signals QEMU before it removes the dir, so a cleanup
     // failure still leaves a dead machine: log it, but close the record.
     yield* killLogged(live, "stop cleanup failed", live.agent);
@@ -784,6 +784,9 @@ const make = Effect.gen(function* () {
       sessionId: live.id,
       agentId: live.agent,
     });
+    if (finalStatus === "failed") {
+      yield* saveDebugLog(live, serialText);
+    }
     return yield* finishLiveSession(live, finalStatus);
   });
 

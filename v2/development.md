@@ -1165,9 +1165,10 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
 
 ## Failed-session debug log
 
-A `/stop` with status `failed` writes one `debug_logs` row keyed by `session_id` before the
-session scope is closed. The row is the crash artifact: everything that would otherwise vanish
-with the machine, plus the proxy lines already offered for that session.
+A `/stop` with status `failed` writes one `debug_logs` row keyed by `session_id` after the
+stopped line and before the session scope is closed. The row is the crash artifact: everything
+that would otherwise vanish with the machine, plus the proxy lines already offered for that
+session, including `stopped; failed`.
 
 - The guest journal, dmesg, user-session journal, coredumps and compositor crash folders live
   inside the guest. A live ISO keeps them in RAM (`-boot order=d` boots the CD, the qcow2 is
@@ -1180,9 +1181,9 @@ with the machine, plus the proxy lines already offered for that session.
   The serial file has to be read first. A missing file is an empty serial (nothing wrote); any
   other read failure is `debug log: serial read failed: <detail>` at error and the serial is
   stored empty.
-- `Log.flush` runs before the insert so `listLogs` sees every offered row. The snapshot is
-  `created_at level text` per line. Each text column is capped at 1 MiB (`MAX_DEBUG_TEXT` in
-  `debug-logs.ts`); a longer value is cut and ends `\n[truncated]`.
+- `Log.flush` runs before the insert so `listLogs` sees every offered row, the stopped line
+  included. The snapshot is `created_at level text` per line. Each text column is capped at
+  1 MiB; a longer value keeps the tail (the crash and the verdict) and starts `[truncated]\n`.
 - The insert is best-effort: `debug log save failed: <detail>` at error and the stop still
   closes the session. A second save for the same session is a `DatabaseError` by design; stop
   writes at most once. Succeeded, aborted and timed-out stops do not write a row — those

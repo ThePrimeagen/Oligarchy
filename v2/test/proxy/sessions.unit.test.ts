@@ -1218,9 +1218,33 @@ describe("stop", () => {
     }),
   );
 
-  it.effect("a failed stop saves the guest serial as a debug log before the machine dies", () =>
+  it.effect("a failed stop reads the serial, then kills, then saves after the stopped line", () =>
     Effect.gen(function* () {
-      const h = harness();
+      const order: Array<string> = [];
+      const record = (text: string) =>
+        Effect.sync(() => {
+          order.push(text);
+        });
+      const h = harness({
+        script: {
+          stop: () => record("kill"),
+        },
+        debugLogStore: {
+          saveFailedSession: (sessionId, serial) =>
+            Effect.sync(() => {
+              order.push(`save ${sessionId} ${serial}`);
+            }),
+        },
+        log: Layer.succeed(Log.Log)({
+          info: record,
+          warning: record,
+          error: record,
+          fatal: record,
+          acquireColor: () => Effect.void,
+          releaseColor: () => Effect.void,
+          flush: record("flush"),
+        }),
+      });
       yield* h.run(
         Effect.gen(function* () {
           const { sessions, id, live } = yield* start();
@@ -1231,14 +1255,14 @@ describe("stop", () => {
             status: "failed",
             reason: "installer hung",
           });
-          expect(h.debugLogs.saves).toEqual([{ sessionId: id, serial: "boot log\n" }]);
-          expect(h.qemu.calls.map((call) => call._tag)).toEqual(["prepare", "start", "stop"]);
           expect(h.fsCalls).toContain(`readFile ${serialPath(h, id)}`);
-          expect(line(h, "stopped")).toMatchObject({
-            text: "stopped; failed; installer hung",
-            sessionId: id,
-            agentId: AGENT,
-          });
+          const tail = order.slice(order.indexOf("kill"));
+          expect(tail).toEqual([
+            "kill",
+            "stopped; failed; installer hung",
+            "flush",
+            `save ${id} boot log\n`,
+          ]);
         }),
       );
     }),
