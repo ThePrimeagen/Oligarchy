@@ -1,2 +1,2 @@
 #!/bin/sh
-exec node --experimental-strip-types "$(dirname "$0")/src/ctrl/index.ts" "$@"
+exec "$(dirname "$0")/v2/ctrl" "$@"

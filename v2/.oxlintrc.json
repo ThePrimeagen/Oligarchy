@@ -1,0 +1,53 @@
+{
+  "$schema": "./node_modules/@effect/tsgo/oxlint-schema.json",
+  "options": { "typeAware": true },
+  "plugins": ["effecttsgo", "typescript"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "perf": "error",
+    "nursery": "off",
+    "pedantic": "off",
+    "restriction": "off",
+    "style": "off"
+  },
+  "rules": {
+    "typescript/no-unnecessary-type-parameters": "error",
+    "id-denylist": ["error", "isRecord"],
+    "no-underscore-dangle": ["error", { "allow": ["_tag", "__dirname", "__filename"] }],
+    "no-await-in-loop": "off",
+    "effecttsgo/class-self-mismatch": "error",
+    "effecttsgo/effect-fn-implicit-any": "error",
+    "effecttsgo/floating-effect": "error",
+    "effecttsgo/floating-effect-in-vitest": "error",
+    "effecttsgo/missing-effect-context": "error",
+    "effecttsgo/missing-effect-error": "error",
+    "effecttsgo/missing-layer-context": "error",
+    "effecttsgo/missing-return-yield-star": "error",
+    "effecttsgo/missing-star-in-yield-effect-gen": "error",
+    "effecttsgo/non-object-effect-service-type": "error",
+    "effecttsgo/outdated-api": "error",
+    "effecttsgo/overridden-schema-constructor": "error",
+    "effecttsgo/promise-in-effect-success": "error",
+    "effecttsgo/schema-literal-non-finite": "error",
+    "effecttsgo/schema-opaque-instance-member": "error",
+    "effecttsgo/strict-effect-provide": "error"
+  },
+  "overrides": [
+    {
+      "files": [
+        "src/**/main.ts",
+        "src/observability/instrument.ts",
+        "test/**/*.ts",
+        "vitest.global-setup.ts"
+      ],
+      "rules": { "effecttsgo/strict-effect-provide": "off" }
+    },
+    {
+      "files": ["test/**/*.ts", "vitest.global-setup.ts"],
+      "rules": { "typescript/no-floating-promises": "off" }
+    }
+  ],
+  "env": { "builtin": true, "node": true, "es2022": true },
+  "ignorePatterns": ["**/node_modules/**", "**/.wrangler/**", "drizzle/**", "public/**"]
+}

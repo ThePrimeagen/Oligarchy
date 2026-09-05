@@ -1,0 +1,23 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "oligarchy-dashboard",
+  "main": "src/dashboard/dashboard.tsx",
+  "assets": {
+    "directory": "./public",
+  },
+  "compatibility_date": "2026-08-30",
+  "compatibility_flags": ["nodejs_compat"],
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "da54bf43f004492996574a6db26d8895",
+    },
+  ],
+  "routes": [
+    { "pattern": "oligarchy.trm.sh", "custom_domain": true },
+    { "pattern": "clicker.oligarchy.trm.sh", "custom_domain": true },
+  ],
+  "placement": {
+    "region": "aws:us-east-1",
+  },
+}

@@ -1,0 +1,2 @@
+#!/bin/sh
+exec node --experimental-strip-types --import "$(dirname "$0")/src/observability/instrument.ts" "$(dirname "$0")/src/proxy/main.ts" "$@"

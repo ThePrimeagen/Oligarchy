@@ -15,22 +15,25 @@ jobs:
         run: |
           violations=$(git diff --name-status --diff-filter=MDRT \
             "origin/${{ github.base_ref }}...HEAD" \
-            -- 'drizzle/' ':(exclude)drizzle/meta/_journal.json')
+            -- 'v2/drizzle/' ':(exclude)v2/drizzle/meta/_journal.json')
           if [ -n "$violations" ]; then
             echo "Migrations are append-only. These files were edited, deleted, or renamed:"
             echo "$violations"
-            echo "Revert them and add a new migration instead (npm run db:generate)."
+            echo "Revert them and add a new migration instead (cd v2 && npm run db:generate)."
             exit 1
           fi
 
   schema-in-sync:
     name: migrations match the drizzle schema
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: v2
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 26
       - run: npm ci
       - run: npx drizzle-kit check
       - name: fail if drizzle-kit generate produces changes
@@ -40,6 +43,20 @@ jobs:
           if [ -n "$drift" ]; then
             echo "src/db/schema.ts does not match the committed migrations:"
             echo "$drift"
-            echo "Run 'npm run db:generate' and commit the result."
+            echo "Run 'npm run db:generate' in v2/ and commit the result."
             exit 1
           fi
+
+  checks:
+    name: lint, format, types, unit tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: v2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+      - run: npm ci
+      - run: npm run check:fast

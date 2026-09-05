@@ -7,4 +7,7 @@ if [ -z "${DATABASE_URL:-}" ]; then
   exit 1
 fi
 
-npm install
+cd v2
+npm ci --ignore-scripts
+# The tsgo patch only affects lint; a driving agent's environment must not fail on it.
+npm run prepare || echo "install: effect-tsgo patch skipped" >&2

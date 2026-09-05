@@ -1,0 +1,2 @@
+ALTER TABLE "test_results" ADD COLUMN "result_id" uuid DEFAULT gen_random_uuid() NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX "test_results_result_id_idx" ON "test_results" USING btree ("result_id");

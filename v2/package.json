@@ -1,0 +1,61 @@
+{
+  "name": "oligarchy-v2",
+  "private": true,
+  "bin": {
+    "client": "src/client/main.ts",
+    "ctrl": "src/ctrl/main.ts",
+    "session": "src/session/main.ts"
+  },
+  "type": "module",
+  "scripts": {
+    "client": "node --experimental-strip-types src/client/main.ts",
+    "ctrl": "node --experimental-strip-types src/ctrl/main.ts",
+    "session": "node --experimental-strip-types src/session/main.ts",
+    "server": "node --experimental-strip-types --import ./src/observability/instrument.ts src/proxy/main.ts",
+    "dev": "wrangler dev --remote",
+    "check:lint": "oxlint --deny-warnings .",
+    "check:format": "oxfmt --check .",
+    "format": "oxfmt .",
+    "check:types": "tsc --noEmit -p tsconfig.json",
+    "test:unit": "vitest run --project unit",
+    "test:integration": "vitest run --project integration --maxWorkers 1",
+    "check:fast": "npm run check:lint && npm run check:format && npm run check:types && npm run test:unit",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "node --experimental-strip-types src/db/migrate.ts",
+    "prepare": "effect-tsgo patch --oxlint"
+  },
+  "dependencies": {
+    "@cursor/sdk": "^1.0.30",
+    "@effect/platform-node": "4.0.0-rc.112",
+    "@sentry/cloudflare": "10.73.0",
+    "@sentry/effect": "10.73.0",
+    "@sentry/node": "10.73.0",
+    "drizzle-orm": "^0.45.2",
+    "effect": "4.0.0-rc.112",
+    "hono": "^4.13.5",
+    "pg": "^8.23.0"
+  },
+  "devDependencies": {
+    "@effect/tsgo": "0.41.0",
+    "@effect/vitest": "4.0.0-rc.112",
+    "@testcontainers/postgresql": "^11.14.0",
+    "@types/node": "^26.4.0",
+    "@types/pg": "^8.23.1",
+    "drizzle-kit": "^0.31.10",
+    "oxfmt": "0.66.0",
+    "oxlint": "1.81.0",
+    "oxlint-tsgolint": "7.0.2001",
+    "typescript": "7.0.2",
+    "vitest": "^4.1.11",
+    "wrangler": "^4.127.1"
+  },
+  "overrides": {
+    "@effect/platform-node": "4.0.0-rc.112",
+    "@effect/platform-node-shared": "4.0.0-rc.112",
+    "@effect/vitest": "4.0.0-rc.112",
+    "effect": "4.0.0-rc.112"
+  },
+  "engines": {
+    "node": ">=26"
+  }
+}
