@@ -139,9 +139,9 @@ describe("API error wire codecs", () => {
 });
 
 describe("Sentry policy", () => {
-  it("marks every 4xx as ignored and no 5xx", () => {
-    for (const { error, status } of cases) {
-      expect(ErrorReporter.isIgnored(error)).toBe(status < 500);
+  it("marks every API error as ignored: the boundary log line is the one Sentry report", () => {
+    for (const { error } of cases) {
+      expect(ErrorReporter.isIgnored(error)).toBe(true);
     }
   });
 

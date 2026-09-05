@@ -317,13 +317,7 @@ describe("reporter", () => {
     Effect.gen(function* () {
       const captured = capture();
       yield* ErrorReporter.report(
-        Cause.fail(
-          Errors.StartFailed.make({
-            message: "qemu: handshake timeout",
-            sessionId: SESSION_ID,
-            agentId: AGENT_ID,
-          }),
-        ),
+        Cause.fail(Errors.QemuStartError.make({ message: "qemu: handshake timeout" })),
       ).pipe(Effect.annotateLogs({ session_id: SESSION_ID, agent_id: AGENT_ID, log: "starting" }));
       const events = yield* captured.events;
       expect(events).toHaveLength(1);

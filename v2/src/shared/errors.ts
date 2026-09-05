@@ -3,7 +3,10 @@ import { HttpApiSchema } from "effect/unstable/httpapi";
 import * as Domain from "./domain.ts";
 
 // ---------------------------------------------------------------------------
-// API errors: the wire body is { "error": "<message>" }; the class is what handlers raise
+// API errors: the wire body is { "error": "<message>" }; the class is what handlers raise.
+// Every one is ErrorReporter.ignore'd: the ApiBoundary middleware logs each failed request once
+// and that log line is the single Sentry report (with the cause when the status is 500 or above),
+// so HttpApiBuilder's own reporting of the same failure is silenced.
 // ---------------------------------------------------------------------------
 
 type Attribution = Readonly<Record<string, string>>;
@@ -108,6 +111,7 @@ export class StartFailed extends Schema.TaggedError<StartFailed>(
   },
   { httpApiStatus: 502 },
 ) {
+  override readonly [ErrorReporter.ignore] = true;
   override get [ErrorReporter.attributes](): Attribution {
     return attribution(this.sessionId, this.agentId);
   }
@@ -125,6 +129,7 @@ export class ExchangeFailed extends Schema.TaggedError<ExchangeFailed>(
   },
   { httpApiStatus: 502 },
 ) {
+  override readonly [ErrorReporter.ignore] = true;
   override get [ErrorReporter.attributes](): Attribution {
     return attribution(this.sessionId, this.agentId);
   }
@@ -140,6 +145,7 @@ export class Internal extends Schema.TaggedError<Internal>("@oligarchy/shared/er
   },
   { httpApiStatus: 500 },
 ) {
+  override readonly [ErrorReporter.ignore] = true;
   override get [ErrorReporter.attributes](): Attribution {
     return attribution(this.sessionId, this.agentId);
   }

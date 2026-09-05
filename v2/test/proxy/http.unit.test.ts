@@ -770,7 +770,7 @@ describe("Sessions failures", () => {
     }),
   );
 
-  it.effect("an ExchangeFailed is 502 with its cause on the log line and reported", () =>
+  it.effect("an ExchangeFailed is 502 with its cause on the log line; the log line reports", () =>
     Effect.gen(function* () {
       const timeout = Errors.QmpTimeout.make({ command: "screendump" });
       const fixed = fixture({
@@ -820,14 +820,13 @@ describe("Sessions failures", () => {
           cause: timeout,
         },
       ]);
-      expect(fixed.reporter.reported.map((report) => report.error.message)).toEqual([
-        "qemu: screendump timed out",
-        "qemu: screendump timed out",
-      ]);
+      // Every API error is ErrorReporter.ignore'd; the Log line above is the one report (see the
+      // real-Log test below), so a faked Log leaves the reporter untouched.
+      expect(fixed.reporter.reported).toEqual([]);
     }),
   );
 
-  it.effect("a StartFailed without a cause is 502 and still reported", () =>
+  it.effect("a StartFailed without a cause is 502 and logged without a cause", () =>
     Effect.gen(function* () {
       const fixed = fixture({
         sessions: FakeSessions.fakeSessions({
@@ -867,10 +866,7 @@ describe("Sessions failures", () => {
           cause: undefined,
         },
       ]);
-      expect(fixed.reporter.reported).toHaveLength(1);
-      expect(fixed.reporter.reported[0]?.error.message).toBe(
-        "qemu: disk not found: /tmp/nope.qcow2",
-      );
+      expect(fixed.reporter.reported).toEqual([]);
     }),
   );
 
@@ -916,41 +912,39 @@ describe("Sessions failures", () => {
           skipSentry: false,
           cause: failure,
         });
-        expect(fixed.reporter.reported.length).toBeGreaterThan(0);
+        expect(fixed.reporter.reported).toEqual([]);
       }),
   );
 });
 
 describe("defects", () => {
-  it.effect(
-    "a handler defect is 500 internal error, logged with the pretty cause and reported",
-    () =>
-      Effect.gen(function* () {
-        const defect = new Error("boom");
-        const fixed = fixture({
-          sessions: FakeSessions.fakeSessions({ stats: Effect.die(defect) }),
-        });
-        yield* Effect.gen(function* () {
-          const api = yield* client;
-          const error = yield* Effect.flip(api.Sessions.stats());
-          expect(error).toMatchObject({ _tag: "Internal", message: "internal error" });
-          const http = yield* HttpClient.HttpClient;
-          const raw = yield* http.get("/stats", { headers: { authorization: `Bearer ${TOKEN}` } });
-          expect(raw.status).toBe(500);
-          expect(yield* raw.json).toEqual({ error: "internal error" });
-        }).pipe(Effect.provide(serve(fixed)));
-        expect(fixed.log.lines).toHaveLength(2);
-        expect(fixed.log.lines[0]).toEqual({
-          level: "error",
-          text: `GET /stats failed: ${Cause.pretty(Cause.die(defect))}`,
-          sessionId: undefined,
-          agentId: undefined,
-          skipSentry: false,
-          cause: defect,
-        });
-        expect(fixed.log.lines[0]?.text).toContain("Error: boom");
-        expect(fixed.reporter.reported.length).toBeGreaterThan(0);
-      }),
+  it.effect("a handler defect is 500 internal error, logged with the pretty cause", () =>
+    Effect.gen(function* () {
+      const defect = new Error("boom");
+      const fixed = fixture({
+        sessions: FakeSessions.fakeSessions({ stats: Effect.die(defect) }),
+      });
+      yield* Effect.gen(function* () {
+        const api = yield* client;
+        const error = yield* Effect.flip(api.Sessions.stats());
+        expect(error).toMatchObject({ _tag: "Internal", message: "internal error" });
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.get("/stats", { headers: { authorization: `Bearer ${TOKEN}` } });
+        expect(raw.status).toBe(500);
+        expect(yield* raw.json).toEqual({ error: "internal error" });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.log.lines).toHaveLength(2);
+      expect(fixed.log.lines[0]).toEqual({
+        level: "error",
+        text: `GET /stats failed: ${Cause.pretty(Cause.die(defect))}`,
+        sessionId: undefined,
+        agentId: undefined,
+        skipSentry: false,
+        cause: defect,
+      });
+      expect(fixed.log.lines[0]?.text).toContain("Error: boom");
+      expect(fixed.reporter.reported).toEqual([]);
+    }),
   );
 
   it.effect("the real Log reports a 5xx cause and a defect to the reporter, never a 4xx", () =>
