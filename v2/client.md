@@ -2,21 +2,21 @@
 
 Consult this table of contents first. Read only the section you need.
 
-| Section                       | Line |
-| ----------------------------- | ---: |
-| [Important](#important)       |   21 |
-| [Synopsis](#synopsis)         |   27 |
-| [start](#start)               |   50 |
-| [get-image](#get-image)       |   65 |
-| [get-serial](#get-serial)     |   80 |
-| [send-keys](#send-keys)       |   95 |
-| [send-mouse](#send-mouse)     |  111 |
-| [intent start](#intent-start) |  128 |
-| [intent end](#intent-end)     |  144 |
-| [stop](#stop)                 |  158 |
-| [Keys](#keys)                 |  174 |
-| [Mouse](#mouse)               |  186 |
-| [The loop](#the-loop)         |  194 |
+| Section | Line |
+|---------|-----:|
+| [Important](#important) | 21 |
+| [Synopsis](#synopsis) | 27 |
+| [start](#start) | 50 |
+| [get-image](#get-image) | 65 |
+| [get-serial](#get-serial) | 80 |
+| [send-keys](#send-keys) | 95 |
+| [send-mouse](#send-mouse) | 111 |
+| [intent start](#intent-start) | 128 |
+| [intent end](#intent-end) | 144 |
+| [stop](#stop) | 158 |
+| [Keys](#keys) | 174 |
+| [Mouse](#mouse) | 186 |
+| [The loop](#the-loop) | 194 |
 
 ## Important
 

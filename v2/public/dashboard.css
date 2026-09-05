@@ -167,13 +167,7 @@ main {
 .brand {
   width: fit-content;
   color: var(--terminal-blue);
-  background: linear-gradient(
-    90deg,
-    var(--terminal-blue),
-    var(--terminal-cyan),
-    var(--turquoise),
-    var(--terminal-blue)
-  );
+  background: linear-gradient(90deg, var(--terminal-blue), var(--terminal-cyan), var(--turquoise), var(--terminal-blue));
   background-size: 240% 100%;
   background-clip: text;
   font-size: clamp(3rem, 13vw, 9rem);

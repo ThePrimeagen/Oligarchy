@@ -2,18 +2,18 @@
 
 Consult this table of contents first. Read only the section you need.
 
-| Section                       | Line |
-| ----------------------------- | ---: |
-| [Important](#important)       |   18 |
-| [Synopsis](#synopsis)         |   24 |
-| [test --list](#test---list)   |   46 |
-| [test new](#test-new)         |   62 |
-| [test list](#test-list)       |   78 |
-| [test run](#test-run)         |   90 |
-| [test start](#test-start)     |  104 |
-| [test-results](#test-results) |  119 |
-| [session list](#session-list) |  136 |
-| [session](#session)           |  150 |
+| Section | Line |
+|---------|-----:|
+| [Important](#important) | 18 |
+| [Synopsis](#synopsis) | 24 |
+| [test --list](#test---list) | 46 |
+| [test new](#test-new) | 62 |
+| [test list](#test-list) | 78 |
+| [test run](#test-run) | 90 |
+| [test start](#test-start) | 104 |
+| [test-results](#test-results) | 119 |
+| [session list](#session-list) | 136 |
+| [session](#session) | 150 |
 
 ## Important
 
