@@ -117,6 +117,18 @@ export const logs = pgTable(
   (table) => [index("logs_session_id_idx").on(table.sessionId)],
 );
 
+// One snapshot per failed session: the guest serial (gone with the session dir on a clean
+// stop) and the proxy log lines as they stood when the verdict was written. session_id is
+// the key; a second save for the same session is a database error by design.
+export const debugLogs = pgTable("debug_logs", {
+  sessionId: uuid("session_id")
+    .primaryKey()
+    .references(() => sessions.id),
+  serial: text("serial").notNull(),
+  proxyLogs: text("proxy_logs").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // A definition is the stored mission an agent is handed — what it is about, what to
 // do, and the proof that closes it. Rows are edited in place; name is the lookup key.
 export const testDefinitions = pgTable(

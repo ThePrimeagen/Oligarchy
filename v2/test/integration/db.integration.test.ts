@@ -5,6 +5,7 @@ import { Cause, Context, Effect, Exit, Layer, Option, Redacted, Scope } from "ef
 import { TestConsole } from "effect/testing";
 import * as Actions from "../../src/db/actions.ts";
 import * as Client from "../../src/db/client.ts";
+import * as DebugLogs from "../../src/db/debug-logs.ts";
 import * as Logs from "../../src/db/logs.ts";
 import * as Migrate from "../../src/db/migrate.ts";
 import * as DbSchema from "../../src/db/schema.ts";
@@ -265,6 +266,85 @@ Postgres.describeWithDatabase("database", () => {
         expect(rows[0]).toMatchObject({ level: "info", sessionId, agentId: "OLI-1" });
         expect(rows[1]).toMatchObject({ level: "error", agentId: null });
         expect(yield* logs.listLogs(uuid())).toEqual([]);
+      }),
+    );
+
+    scoped.effect("DebugLogStore snapshots serial and proxy logs for a session", () =>
+      Effect.gen(function* () {
+        const sessions = yield* Sessions.SessionStore;
+        const logs = yield* Logs.LogStore;
+        const debugLogs = yield* DebugLogs.DebugLogStore;
+        const sessionId = uuid();
+        yield* sessions.insertSession(sessionId, { iso: "x" }, "running");
+        yield* logs.insertLog({
+          text: "running; started in 12ms",
+          level: "info",
+          sessionId,
+          agentId: "OLI-1",
+        });
+        yield* logs.insertLog({
+          text: "GET /image failed: qemu: closed",
+          level: "error",
+          sessionId,
+          agentId: "OLI-1",
+        });
+        yield* debugLogs.saveFailedSession(sessionId, "journalctl\nfailed unit");
+        const saved = yield* debugLogs.getDebugLog(sessionId);
+        expect(Option.isSome(saved)).toBe(true);
+        if (Option.isSome(saved)) {
+          expect(saved.value.sessionId).toBe(sessionId);
+          expect(saved.value.serial).toBe("journalctl\nfailed unit");
+          expect(saved.value.proxyLogs).toContain("info running; started in 12ms");
+          expect(saved.value.proxyLogs).toContain("error GET /image failed: qemu: closed");
+        }
+        expect(yield* debugLogs.getDebugLog(uuid())).toEqual(Option.none());
+      }),
+    );
+
+    scoped.effect("DebugLogStore refuses a second debug log for the same session", () =>
+      Effect.gen(function* () {
+        const sessions = yield* Sessions.SessionStore;
+        const debugLogs = yield* DebugLogs.DebugLogStore;
+        const sessionId = uuid();
+        yield* sessions.insertSession(sessionId, { iso: "x" }, "running");
+        yield* debugLogs.saveFailedSession(sessionId, "first");
+        const error = yield* Effect.flip(debugLogs.saveFailedSession(sessionId, "second"));
+        expect(error._tag).toBe("DatabaseError");
+        expect(error.operation).toBe("saveFailedSession");
+        expect(error.message).toContain("Failed query");
+        expect(String(error.cause)).toContain("duplicate key");
+        const saved = yield* debugLogs.getDebugLog(sessionId);
+        expect(Option.isSome(saved)).toBe(true);
+        if (Option.isSome(saved)) {
+          expect(saved.value.serial).toBe("first");
+        }
+      }),
+    );
+
+    scoped.effect("DebugLogStore refuses a debug log for an unknown session", () =>
+      Effect.gen(function* () {
+        const debugLogs = yield* DebugLogs.DebugLogStore;
+        const error = yield* Effect.flip(debugLogs.saveFailedSession(uuid(), "orphan"));
+        expect(error._tag).toBe("DatabaseError");
+        expect(error.operation).toBe("saveFailedSession");
+        expect(error.message).toContain("Failed query");
+      }),
+    );
+
+    scoped.effect("DebugLogStore truncates a serial that exceeds the cap", () =>
+      Effect.gen(function* () {
+        const sessions = yield* Sessions.SessionStore;
+        const debugLogs = yield* DebugLogs.DebugLogStore;
+        const sessionId = uuid();
+        yield* sessions.insertSession(sessionId, { iso: "x" }, "running");
+        const serial = "z".repeat(DebugLogs.MAX_DEBUG_TEXT + 50);
+        yield* debugLogs.saveFailedSession(sessionId, serial);
+        const saved = yield* debugLogs.getDebugLog(sessionId);
+        expect(Option.isSome(saved)).toBe(true);
+        if (Option.isSome(saved)) {
+          expect(saved.value.serial).toBe(DebugLogs.truncateDebugText(serial));
+          expect(saved.value.proxyLogs).toBe("");
+        }
       }),
     );
 
