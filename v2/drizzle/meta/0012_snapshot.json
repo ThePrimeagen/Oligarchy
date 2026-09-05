@@ -1,5 +1,5 @@
 {
-  "id": "5f615aed-84e7-4ca8-a10a-c5ac2adb5c57",
+  "id": "7792ff54-5c31-4745-baab-5f4fea15c861",
   "prevId": "8d972388-de4f-4616-82b9-a6130adaee96",
   "version": "7",
   "dialect": "postgresql",
@@ -199,15 +199,9 @@
           "primaryKey": true,
           "notNull": true
         },
-        "serial": {
-          "name": "serial",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "proxy_logs": {
-          "name": "proxy_logs",
-          "type": "text",
+        "sources": {
+          "name": "sources",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": true
         },

@@ -108,8 +108,8 @@ bugs; anything not listed here is a regression.
 - `v2/` holds `package.json`, `package-lock.json`, `tsconfig.json`, `.oxlintrc.json`,
   `.oxfmtrc.json`, `.editorconfig`, `vitest.config.ts`, `vitest.global-setup.ts` (Testcontainers
   Postgres, migrations, seed), `vitest.d.ts`, `drizzle.config.ts`, `wrangler.jsonc`, `drizzle/`
-  (generated migrations; 0000–0011 match `v1/`, 0012 adds `debug_logs`, 0013 replaces its text
-  columns with a `sources` jsonb map), `public/` and `prompts/`
+  (generated migrations; 0000–0011 match `v1/`, 0012 adds `debug_logs` with a `sources` jsonb
+  map), `public/` and `prompts/`
   (moved as-is), the
   operator documents, this document, the four `v2/` wrappers, `src/` and `test/`.
 

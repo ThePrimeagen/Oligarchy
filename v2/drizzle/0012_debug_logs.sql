@@ -1,7 +1,6 @@
 CREATE TABLE "debug_logs" (
 	"session_id" uuid PRIMARY KEY NOT NULL,
-	"serial" text NOT NULL,
-	"proxy_logs" text NOT NULL,
+	"sources" jsonb NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
