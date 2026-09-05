@@ -75,10 +75,10 @@ const DatabaseLive = Layer.unwrap(
 // Sentry sits beneath Log so the log rows flush before Sentry does, and Log captures the reporter.
 const MainLive = Layer.mergeAll(
   SessionStore.SessionStore.layer,
-  Actions.ActionStore.layer,
   DebugLogs.DebugLogStore.layer,
   Log.Log.layer,
 ).pipe(
+  Layer.provideMerge(Actions.ActionStore.layer),
   Layer.provideMerge(Logs.LogStore.layer),
   Layer.provideMerge(DatabaseLive),
   Layer.provideMerge(Config.ProxyConfig.layer),

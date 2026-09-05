@@ -1,4 +1,5 @@
 import { Context, Effect, Layer } from "effect";
+import * as Actions from "./actions.ts";
 import * as Client from "./client.ts";
 import * as Logs from "./logs.ts";
 import * as DbSchema from "./schema.ts";
@@ -19,21 +20,47 @@ const formatProxyLogs = (
 ): string =>
   rows.map((row) => `${row.createdAt.toISOString()} ${row.level} ${row.text}`).join("\n");
 
+const formatActions = (
+  rows: ReadonlyArray<{
+    readonly id: number;
+    readonly createdAt: Date;
+    readonly state: string | null;
+    readonly request: unknown;
+    readonly response: unknown;
+  }>,
+): string =>
+  rows
+    .map((row) => {
+      const state = row.state ?? "open";
+      const response =
+        row.response === null || row.response === undefined
+          ? ""
+          : ` ${JSON.stringify(row.response)}`;
+      return `${row.createdAt.toISOString()} ${String(row.id)} ${state} ${JSON.stringify(row.request)}${response}`;
+    })
+    .join("\n");
+
 export class DebugLogStore extends Context.Service<DebugLogStore>()("@oligarchy/db/DebugLogStore", {
   make: Effect.gen(function* () {
     const database = yield* Client.Database;
     const logs = yield* Logs.LogStore;
+    const actions = yield* Actions.ActionStore;
 
     const saveFailedSession = Effect.fn("db.saveFailedSession")(function* (
       sessionId: string,
-      serial: string,
+      captured: { readonly serial: string; readonly qemu: string },
     ) {
-      const rows = yield* logs.listLogs(sessionId);
+      const logRows = yield* logs.listLogs(sessionId);
+      const actionRows = yield* actions.listActions(sessionId);
       yield* database.run("saveFailedSession", (db) =>
         db.insert(DbSchema.debugLogs).values({
           sessionId,
-          serial: truncateDebugText(serial),
-          proxyLogs: truncateDebugText(formatProxyLogs(rows)),
+          sources: {
+            serial: truncateDebugText(captured.serial),
+            proxy: truncateDebugText(formatProxyLogs(logRows)),
+            qemu: truncateDebugText(captured.qemu),
+            actions: truncateDebugText(formatActions(actionRows)),
+          },
         }),
       );
     });

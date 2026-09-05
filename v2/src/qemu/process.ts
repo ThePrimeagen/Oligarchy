@@ -15,6 +15,8 @@ export type QemuProcess = {
   readonly exitedBeforeConnect: Effect.Effect<never, Errors.QemuStartError>;
   // `message`, then `: <stderr tail>` when QEMU wrote one.
   readonly withStderr: (message: string) => Effect.Effect<string>;
+  // The raw tail as drained so far (last STDERR_TAIL_BYTES). After exit it is complete.
+  readonly stderrTail: Effect.Effect<string>;
 };
 
 // The thrown value's own message behind a platform failure (Node's `spawn x ENOENT`), else the
@@ -74,17 +76,16 @@ export const spawn = Effect.fn("Process.spawn")(function* (
     }),
     { startImmediately: true },
   );
+  const stderrTail = Ref.get(tail);
   const withStderr = (message: string): Effect.Effect<string> =>
-    Effect.map(Ref.get(tail), (stderr) =>
-      stderr === "" ? message : `${message}: ${stderr.trim()}`,
-    );
+    Effect.map(stderrTail, (stderr) => (stderr === "" ? message : `${message}: ${stderr.trim()}`));
   const exited = Deferred.await(exit);
   const exitedBeforeConnect: Effect.Effect<never, Errors.QemuStartError> = Effect.gen(function* () {
     const code = yield* exited;
     const message = yield* withStderr(`qemu: exited ${String(code)} before QMP connect`);
     return yield* Errors.QemuStartError.make({ message });
   });
-  return { exited, exitedBeforeConnect, withStderr } satisfies QemuProcess;
+  return { exited, exitedBeforeConnect, withStderr, stderrTail } satisfies QemuProcess;
 });
 
 export const spawnQemu = (args: ReadonlyArray<string>) => spawn(Args.QEMU_BIN, args);

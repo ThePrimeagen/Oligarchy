@@ -63,6 +63,7 @@ export type QemuHandle = {
   readonly screendump: (
     record: Client.Recorder,
   ) => Effect.Effect<Uint8Array, Client.ExecuteError | PlatformError.PlatformError>;
+  readonly stderrTail: Effect.Effect<string>;
 };
 
 export type QemuService = {
@@ -232,7 +233,15 @@ const make: Effect.Effect<
       }).pipe(Effect.ensuring(Effect.ignore(fs.remove(file, { force: true }))));
     });
 
-    return { id, dir, serialPath, sendKeys, sendMouse, screendump } satisfies QemuHandle;
+    return {
+      id,
+      dir,
+      serialPath,
+      sendKeys,
+      sendMouse,
+      screendump,
+      stderrTail: qemu.stderrTail,
+    } satisfies QemuHandle;
   });
 
   return { prepare, start, sessionDir } satisfies QemuService;

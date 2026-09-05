@@ -40,6 +40,19 @@ describe("spawnQemu happy path", () => {
     }),
   );
 
+  it.effect("exposes the raw stderr tail, including when it is empty", () =>
+    Effect.gen(function* () {
+      const spawner = FakeSpawner.fakeSpawner(() => ({ stderr: "  kvm: not available\n" }));
+      const process = yield* Process.spawnQemu(ARGS).pipe(Effect.provide(spawner.layer));
+      yield* spawner.spawned[0]?.exit(1) ?? Effect.void;
+      yield* process.exited;
+      expect(yield* process.stderrTail).toBe("  kvm: not available\n");
+      const quiet = FakeSpawner.fakeSpawner(() => ({}));
+      const silent = yield* Process.spawnQemu(ARGS).pipe(Effect.provide(quiet.layer));
+      expect(yield* silent.stderrTail).toBe("");
+    }),
+  );
+
   it.effect("appends the trimmed stderr tail to a message, or nothing when empty", () =>
     Effect.gen(function* () {
       const spawner = FakeSpawner.fakeSpawner(() => ({ stderr: "  kvm: not available\n" }));

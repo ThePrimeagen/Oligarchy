@@ -229,18 +229,26 @@ export const fakeLogStore = (
 // ---------------------------------------------------------------------------
 
 export type FakeDebugLogStore = {
-  readonly saves: Array<{ readonly sessionId: string; readonly serial: string }>;
+  readonly saves: Array<{
+    readonly sessionId: string;
+    readonly serial: string;
+    readonly qemu: string;
+  }>;
   readonly layer: Layer.Layer<DebugLogs.DebugLogStore>;
 };
 
 export const fakeDebugLogStore = (
   overrides: Partial<typeof DebugLogs.DebugLogStore.Service> = {},
 ): FakeDebugLogStore => {
-  const saves: Array<{ readonly sessionId: string; readonly serial: string }> = [];
+  const saves: Array<{
+    readonly sessionId: string;
+    readonly serial: string;
+    readonly qemu: string;
+  }> = [];
   const service = DebugLogs.DebugLogStore.of({
-    saveFailedSession: (sessionId, serial) =>
+    saveFailedSession: (sessionId, captured) =>
       Effect.sync(() => {
-        saves.push({ sessionId, serial });
+        saves.push({ sessionId, serial: captured.serial, qemu: captured.qemu });
       }),
     ...overrides,
   });

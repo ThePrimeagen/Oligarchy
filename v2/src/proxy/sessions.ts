@@ -736,11 +736,14 @@ const make = Effect.gen(function* () {
       ),
     );
 
-  const saveDebugLog = (live: LiveSession, serialText: string): Effect.Effect<void> =>
+  const saveDebugLog = (
+    live: LiveSession,
+    captured: { readonly serial: string; readonly qemu: string },
+  ): Effect.Effect<void> =>
     Effect.gen(function* () {
       // Drain the log queue so the snapshot includes the stopped line just offered.
       yield* log.flush;
-      yield* debugLogs.saveFailedSession(live.id, serialText).pipe(
+      yield* debugLogs.saveFailedSession(live.id, captured).pipe(
         Effect.catch((error) =>
           log.error(`debug log save failed: ${detail(error)}`, {
             sessionId: live.id,
@@ -770,6 +773,8 @@ const make = Effect.gen(function* () {
     // The kill destroys the socket and signals QEMU before it removes the dir, so a cleanup
     // failure still leaves a dead machine: log it, but close the record.
     yield* killLogged(live, "stop cleanup failed", live.agent);
+    // After kill the stderr drain is finished: the tail names a host/KVM death.
+    const qemuText = finalStatus === "failed" ? yield* live.qemu.stderrTail : "";
     yield* sessionStore
       .endSession(live.id, finalStatus, reason ?? null)
       .pipe(
@@ -785,7 +790,7 @@ const make = Effect.gen(function* () {
       agentId: live.agent,
     });
     if (finalStatus === "failed") {
-      yield* saveDebugLog(live, serialText);
+      yield* saveDebugLog(live, { serial: serialText, qemu: qemuText });
     }
     return yield* finishLiveSession(live, finalStatus);
   });

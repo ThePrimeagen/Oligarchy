@@ -26,7 +26,10 @@ export const migratedLayer: Layer.Layer<
   | Tests.TestStore
 > = Layer.mergeAll(
   Sessions.SessionStore.layer,
-  Actions.ActionStore.layer,
   DebugLogs.DebugLogStore.layer,
   Tests.TestStore.layer,
-).pipe(Layer.provideMerge(Logs.LogStore.layer), Layer.provideMerge(DatabaseLive(getDbUrl())));
+).pipe(
+  Layer.provideMerge(Actions.ActionStore.layer),
+  Layer.provideMerge(Logs.LogStore.layer),
+  Layer.provideMerge(DatabaseLive(getDbUrl())),
+);

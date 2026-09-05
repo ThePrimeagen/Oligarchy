@@ -269,14 +269,17 @@ Postgres.describeWithDatabase("database", () => {
       }),
     );
 
-    scoped.effect("DebugLogStore snapshots serial and proxy logs for a session", () =>
+    scoped.effect("DebugLogStore snapshots each origin into sources", () =>
       Effect.gen(function* () {
         const sessions = yield* Sessions.SessionStore;
         const logs = yield* Logs.LogStore;
+        const actions = yield* Actions.ActionStore;
         const debugLogs = yield* DebugLogs.DebugLogStore;
         const database = yield* Client.Database;
         const sessionId = uuid();
+        const agentId = `agent-${sessionId}`;
         yield* sessions.insertSession(sessionId, { iso: "x" }, "running");
+        yield* sessions.registerAgent(agentId, sessionId);
         yield* logs.insertLog({
           text: "running; started in 12ms",
           level: "info",
@@ -289,16 +292,33 @@ Postgres.describeWithDatabase("database", () => {
           sessionId,
           agentId: "OLI-1",
         });
-        yield* debugLogs.saveFailedSession(sessionId, "journalctl\nfailed unit");
+        yield* actions.startAction({
+          sessionId,
+          agentId,
+          request: {
+            execute: "screendump",
+            arguments: { filename: "/tmp/x.png", format: "png" },
+            id: 7,
+          },
+        });
+        yield* debugLogs.saveFailedSession(sessionId, {
+          serial: "journalctl\nfailed unit",
+          qemu: "kvm: not available\n",
+        });
         const [saved] = yield* database.run("select", (db) =>
           db.select().from(DbSchema.debugLogs).where(eq(DbSchema.debugLogs.sessionId, sessionId)),
         );
-        expect(saved).toMatchObject({
-          sessionId,
-          serial: "journalctl\nfailed unit",
-        });
-        expect(saved?.proxyLogs).toContain("info running; started in 12ms");
-        expect(saved?.proxyLogs).toContain("error GET /image failed: qemu: closed");
+        expect(Object.keys(saved?.sources ?? {}).sort()).toEqual([
+          "actions",
+          "proxy",
+          "qemu",
+          "serial",
+        ]);
+        expect(saved?.sources.serial).toBe("journalctl\nfailed unit");
+        expect(saved?.sources.qemu).toBe("kvm: not available\n");
+        expect(saved?.sources.proxy).toContain("info running; started in 12ms");
+        expect(saved?.sources.proxy).toContain("error GET /image failed: qemu: closed");
+        expect(saved?.sources.actions).toContain("screendump");
         const missing = yield* database.run("select", (db) =>
           db.select().from(DbSchema.debugLogs).where(eq(DbSchema.debugLogs.sessionId, uuid())),
         );
@@ -313,8 +333,10 @@ Postgres.describeWithDatabase("database", () => {
         const database = yield* Client.Database;
         const sessionId = uuid();
         yield* sessions.insertSession(sessionId, { iso: "x" }, "running");
-        yield* debugLogs.saveFailedSession(sessionId, "first");
-        const error = yield* Effect.flip(debugLogs.saveFailedSession(sessionId, "second"));
+        yield* debugLogs.saveFailedSession(sessionId, { serial: "first", qemu: "" });
+        const error = yield* Effect.flip(
+          debugLogs.saveFailedSession(sessionId, { serial: "second", qemu: "" }),
+        );
         expect(error._tag).toBe("DatabaseError");
         expect(error.operation).toBe("saveFailedSession");
         expect(error.message).toContain("Failed query");
@@ -322,21 +344,23 @@ Postgres.describeWithDatabase("database", () => {
         const [saved] = yield* database.run("select", (db) =>
           db.select().from(DbSchema.debugLogs).where(eq(DbSchema.debugLogs.sessionId, sessionId)),
         );
-        expect(saved?.serial).toBe("first");
+        expect(saved?.sources.serial).toBe("first");
       }),
     );
 
     scoped.effect("DebugLogStore refuses a debug log for an unknown session", () =>
       Effect.gen(function* () {
         const debugLogs = yield* DebugLogs.DebugLogStore;
-        const error = yield* Effect.flip(debugLogs.saveFailedSession(uuid(), "orphan"));
+        const error = yield* Effect.flip(
+          debugLogs.saveFailedSession(uuid(), { serial: "orphan", qemu: "" }),
+        );
         expect(error._tag).toBe("DatabaseError");
         expect(error.operation).toBe("saveFailedSession");
         expect(error.message).toContain("Failed query");
       }),
     );
 
-    scoped.effect("DebugLogStore keeps the tail when a serial exceeds the cap", () =>
+    scoped.effect("DebugLogStore keeps each origin's tail when a source exceeds the cap", () =>
       Effect.gen(function* () {
         const sessions = yield* Sessions.SessionStore;
         const debugLogs = yield* DebugLogs.DebugLogStore;
@@ -344,14 +368,19 @@ Postgres.describeWithDatabase("database", () => {
         const sessionId = uuid();
         yield* sessions.insertSession(sessionId, { iso: "x" }, "running");
         const serial = `head-noise\n${"z".repeat(1_048_576)}crash-tail`;
-        yield* debugLogs.saveFailedSession(sessionId, serial);
+        yield* debugLogs.saveFailedSession(sessionId, {
+          serial,
+          qemu: "kvm: not available\n",
+        });
         const [saved] = yield* database.run("select", (db) =>
           db.select().from(DbSchema.debugLogs).where(eq(DbSchema.debugLogs.sessionId, sessionId)),
         );
-        expect(saved?.serial.startsWith("[truncated]\n")).toBe(true);
-        expect(saved?.serial.endsWith("crash-tail")).toBe(true);
-        expect(saved?.serial.length).toBe(1_048_576);
-        expect(saved?.proxyLogs).toBe("");
+        expect(saved?.sources.serial.startsWith("[truncated]\n")).toBe(true);
+        expect(saved?.sources.serial.endsWith("crash-tail")).toBe(true);
+        expect(saved?.sources.serial.length).toBe(1_048_576);
+        expect(saved?.sources.qemu).toBe("kvm: not available\n");
+        expect(saved?.sources.proxy).toBe("");
+        expect(saved?.sources.actions).toBe("");
       }),
     );
 

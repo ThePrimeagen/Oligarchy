@@ -108,7 +108,8 @@ bugs; anything not listed here is a regression.
 - `v2/` holds `package.json`, `package-lock.json`, `tsconfig.json`, `.oxlintrc.json`,
   `.oxfmtrc.json`, `.editorconfig`, `vitest.config.ts`, `vitest.global-setup.ts` (Testcontainers
   Postgres, migrations, seed), `vitest.d.ts`, `drizzle.config.ts`, `wrangler.jsonc`, `drizzle/`
-  (generated migrations; 0000–0011 match `v1/`, 0012 adds `debug_logs`), `public/` and `prompts/`
+  (generated migrations; 0000–0011 match `v1/`, 0012 adds `debug_logs`, 0013 replaces its text
+  columns with a `sources` jsonb map), `public/` and `prompts/`
   (moved as-is), the
   operator documents, this document, the four `v2/` wrappers, `src/` and `test/`.
 
@@ -957,16 +958,17 @@ export class QmpListen extends Context.Service<QmpListen, QmpListenService>()(
   through a `Deferred<number | null>` (`null` for a signal death); join the drain fiber before
   reading the tail after exit, so `qemu: exited <code> before QMP connect[: <stderr>]` carries the
   whole tail. `Process.spawn(executable, args)` returns `QemuProcess { exited, exitedBeforeConnect,
-  withStderr }` and no more (no pid, no raw tail); `spawnQemu(args)` is `spawn(Args.QEMU_BIN,
-  args)`. Readiness is a bounded wait (`Effect.timeoutOrElse`); secrets go to children on
-  stdin as a `Stream`, never argv. The session's `spawnFollow` exit carries `{ code, killed,
-  stderr }` so the REPL can tell a detach from a refusal.
+  withStderr, stderrTail }`; `stderrTail` is the raw drained bytes (last 4096). `spawnQemu(args)`
+  is `spawn(Args.QEMU_BIN, args)`. Readiness is a bounded wait (`Effect.timeoutOrElse`); secrets
+  go to children on stdin as a `Stream`, never argv. The session's `spawnFollow` exit carries
+  `{ code, killed, stderr }` so the REPL can tell a detach from a refusal.
 - `Qemu` boots in two steps under the session's scope: `Qemu.prepare(id, disk)` (below) returns
   `Prepared { id, dir, diskPath }`, `diskPath` the caller's disk or the fresh qcow2; `Qemu.start(
   prepared, { iso, display, automation, record })` listens on `<dir>/qmp.sock`, spawns QEMU
   (`-display` is `display` as given; the command already resolved `--automation` to `none`), races
   `accept` against the process exiting, and returns `QemuHandle { id, dir, serialPath, sendKeys,
-  sendMouse, screendump }`; a dead QEMU is noticed by the next command failing, not by a watcher.
+  sendMouse, screendump, stderrTail }`; a dead QEMU is noticed by the next command failing, not by
+  a watcher.
 - File I/O goes through `FileSystem.FileSystem` and `Path.Path` from `NodeServices.layer`; write
   private files atomically (`writeFile(tmp, bytes, { mode: 0o600 })` then `rename`), create
   private directories with `makeDirectory(dir, { recursive: true, mode: 0o700 })`, recover
@@ -1167,30 +1169,35 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
 
 A `/stop` with status `failed` writes one `debug_logs` row keyed by `session_id` after the
 stopped line and before the session scope is closed. The row is the crash artifact: everything
-that would otherwise vanish with the machine, plus the proxy lines already offered for that
-session, including `stopped; failed`.
+that would otherwise vanish with the machine, plus the control-plane lines already offered for
+that session, including `stopped; failed`. `sources` is a jsonb map so each chunk is labeled by
+origin. There is no `journalctl` key — that stream is not separately available.
 
-- The guest journal, dmesg, user-session journal, coredumps and compositor crash folders live
+- `serial` is the guest UART (`/dev/ttyS0` → `<session-dir>/serial.log`; see Operating loop).
+  The guest journal, dmesg, user-session journal, coredumps and compositor crash folders live
   inside the guest. A live ISO keeps them in RAM (`-boot order=d` boots the CD, the qcow2 is
-  empty until an install writes it), so mounting the disk after QEMU dies yields nothing. The
-  designed egress is `/dev/ttyS0` → `<session-dir>/serial.log` (see Operating loop): an agent
-  that dumps `journalctl` onto the UART leaves the text there; a kernel `console=ttyS0` would
-  too. `qemu-guest-agent` / `guest-exec` is not on the Omarchy desktop ISO, and a virtio-serial
-  channel nobody speaks is unused hardware.
+  empty until an install writes it), so mounting the disk after QEMU dies yields nothing.
+  `journalctl`, `dmesg`, Hyprland and Quickshell text appear here only if something wrote them
+  to the UART. `qemu-guest-agent` / `guest-exec` is not on the Omarchy desktop ISO, and a
+  virtio-serial channel nobody speaks is unused hardware.
+- `proxy` is the control-plane `logs` rows for the session, formatted `created_at level text`.
+- `qemu` is the QEMU process stderr tail (last 4096 bytes): KVM, device and host boot failures.
+  It is read from `QemuHandle.stderrTail` after `kill`, once the drain has finished.
+- `actions` is the QMP flight recorder for the session, formatted
+  `created_at id state request[ response]`. Screenshots stay on `images`; they already outlive
+  the process and are binary.
 - `kill` closes the session scope: QEMU dies and the prepare finalizer removes the directory.
   The serial file has to be read first. A missing file is an empty serial (nothing wrote); any
   other read failure is `debug log: serial read failed: <detail>` at error and the serial is
-  stored empty.
+  stored empty. Every `sources` key is always present; an origin that produced nothing is `""`.
 - `Log.flush` runs before the insert so `listLogs` sees every offered row, the stopped line
-  included. The snapshot is `created_at level text` per line. Each text column is capped at
-  1 MiB; a longer value keeps the tail (the crash and the verdict) and starts `[truncated]\n`.
+  included. Each source is capped at 1 MiB independently; a longer value keeps the tail (the
+  crash and the verdict) and starts `[truncated]\n`.
 - The insert is best-effort: `debug log save failed: <detail>` at error and the stop still
   closes the session. A second save for the same session is a `DatabaseError` by design; stop
   writes at most once. Succeeded, aborted and timed-out stops do not write a row — those
   verdicts are not a failed test session.
-- The columns: `session_id` (primary key, references `sessions.id`), `serial`, `proxy_logs`,
-  `created_at`. Actions and screenshots stay on their own tables; they already outlive the
-  process. QEMU's stderr tail names a host boot failure, not a guest crash, and is not copied.
+- The columns: `session_id` (primary key, references `sessions.id`), `sources`, `created_at`.
 
 ## Sentry
 

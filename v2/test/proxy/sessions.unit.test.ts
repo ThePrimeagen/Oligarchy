@@ -1218,54 +1218,63 @@ describe("stop", () => {
     }),
   );
 
-  it.effect("a failed stop reads the serial, then kills, then saves after the stopped line", () =>
-    Effect.gen(function* () {
-      const order: Array<string> = [];
-      const record = (text: string) =>
-        Effect.sync(() => {
-          order.push(text);
-        });
-      const h = harness({
-        script: {
-          stop: () => record("kill"),
-        },
-        debugLogStore: {
-          saveFailedSession: (sessionId, serial) =>
-            Effect.sync(() => {
-              order.push(`save ${sessionId} ${serial}`);
-            }),
-        },
-        log: Layer.succeed(Log.Log)({
-          info: record,
-          warning: record,
-          error: record,
-          fatal: record,
-          acquireColor: () => Effect.void,
-          releaseColor: () => Effect.void,
-          flush: record("flush"),
-        }),
-      });
-      yield* h.run(
-        Effect.gen(function* () {
-          const { sessions, id, live } = yield* start();
-          h.files.set(serialPath(h, id), Effect.succeed(SERIAL));
-          yield* sessions.stop(live, "failed", "installer hung");
-          expect(h.sessions.sessions[0]).toMatchObject({
-            id,
-            status: "failed",
-            reason: "installer hung",
+  it.effect(
+    "a failed stop reads serial, kills, then qemu stderr, then saves after the stopped line",
+    () =>
+      Effect.gen(function* () {
+        const order: Array<string> = [];
+        const record = (text: string) =>
+          Effect.sync(() => {
+            order.push(text);
           });
-          expect(h.fsCalls).toContain(`readFile ${serialPath(h, id)}`);
-          const tail = order.slice(order.indexOf("kill"));
-          expect(tail).toEqual([
-            "kill",
-            "stopped; failed; installer hung",
-            "flush",
-            `save ${id} boot log\n`,
-          ]);
-        }),
-      );
-    }),
+        let saved:
+          | { readonly sessionId: string; readonly serial: string; readonly qemu: string }
+          | undefined;
+        const h = harness({
+          script: {
+            stop: () => record("kill"),
+            stderrTail: () => record("qemu").pipe(Effect.as("kvm denied")),
+          },
+          debugLogStore: {
+            saveFailedSession: (sessionId, captured) =>
+              Effect.sync(() => {
+                saved = { sessionId, serial: captured.serial, qemu: captured.qemu };
+                order.push("save");
+              }),
+          },
+          log: Layer.succeed(Log.Log)({
+            info: record,
+            warning: record,
+            error: record,
+            fatal: record,
+            acquireColor: () => Effect.void,
+            releaseColor: () => Effect.void,
+            flush: record("flush"),
+          }),
+        });
+        yield* h.run(
+          Effect.gen(function* () {
+            const { sessions, id, live } = yield* start();
+            h.files.set(serialPath(h, id), Effect.succeed(SERIAL));
+            yield* sessions.stop(live, "failed", "installer hung");
+            expect(h.sessions.sessions[0]).toMatchObject({
+              id,
+              status: "failed",
+              reason: "installer hung",
+            });
+            expect(h.fsCalls).toContain(`readFile ${serialPath(h, id)}`);
+            const tail = order.slice(order.indexOf("kill"));
+            expect(tail).toEqual([
+              "kill",
+              "qemu",
+              "stopped; failed; installer hung",
+              "flush",
+              "save",
+            ]);
+            expect(saved).toEqual({ sessionId: id, serial: "boot log\n", qemu: "kvm denied" });
+          }),
+        );
+      }),
   );
 
   it.effect("a succeeded or aborted stop does not write a debug log", () =>
@@ -1293,7 +1302,7 @@ describe("stop", () => {
         Effect.gen(function* () {
           const { sessions, id, live } = yield* start();
           yield* sessions.stop(live, "failed", "desktop dead");
-          expect(h.debugLogs.saves).toEqual([{ sessionId: id, serial: "" }]);
+          expect(h.debugLogs.saves).toEqual([{ sessionId: id, serial: "", qemu: "" }]);
           expect(h.sessions.sessions[0]).toMatchObject({ id, status: "failed" });
           expect(line(h, "debug log:")).toBeUndefined();
         }),
@@ -1309,7 +1318,7 @@ describe("stop", () => {
           const { sessions, id, live } = yield* start();
           h.files.set(serialPath(h, id), Effect.fail(denied("readFile", serialPath(h, id))));
           yield* sessions.stop(live, "failed", "gave up");
-          expect(h.debugLogs.saves).toEqual([{ sessionId: id, serial: "" }]);
+          expect(h.debugLogs.saves).toEqual([{ sessionId: id, serial: "", qemu: "" }]);
           expect(line(h, "debug log: serial read failed:")).toMatchObject({
             level: "error",
             sessionId: id,

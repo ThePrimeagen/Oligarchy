@@ -92,6 +92,13 @@
       "when": 1788629298705,
       "tag": "0012_heavy_junta",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1788630303925,
+      "tag": "0013_debug_log_sources",
+      "breakpoints": true
     }
   ]
 }
