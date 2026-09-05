@@ -479,6 +479,7 @@ const make = Effect.gen(function* () {
       actionSpans: yield* Ref.make<ReadonlySet<Tracer.Span>>(new Set()),
     };
     yield* Ref.update(openSessions, (map) => mapWith(map, id, live));
+    yield* log.acquireColor(agent);
     const disk = body.disk;
     yield* sessionStore
       .insertSession(
@@ -810,6 +811,11 @@ const make = Effect.gen(function* () {
     // starts streaming still ends this queue rather than leaving it hanging.
     const queue = yield* Queue.dropping<Domain.FollowEvent, Cause.Done>(FOLLOW_BACKLOG);
     yield* Ref.update(live.followers, (set) => withItem(set, queue));
+    // finishLiveSession leaves openSessions first and ends the followers last; a registration
+    // that lands between those two steps would otherwise never be ended.
+    if (!(yield* Ref.get(openSessions)).has(live.id)) {
+      Queue.endUnsafe(queue);
+    }
     yield* log.info("follower attached", { sessionId: id, agentId: live.agent });
     Queue.offerUnsafe(queue, {
       type: "session",

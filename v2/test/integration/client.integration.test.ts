@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,9 +19,14 @@ type Run = {
   readonly stderr: string;
 };
 
-const runClient = (args: ReadonlyArray<string>, env: Record<string, string> = {}): Promise<Run> =>
+const runClient = (
+  args: ReadonlyArray<string>,
+  env: Record<string, string> = {},
+  cwd: string = process.cwd(),
+): Promise<Run> =>
   new Promise((resolve, reject) => {
     const child = spawn(CLIENT, args, {
+      cwd,
       env: {
         ...process.env,
         NODE_OPTIONS:
@@ -328,6 +333,24 @@ describe("./client unhappy path", () => {
     const result = await runClient(["intent", "end", "--agent-id", AGENT, "--session_id", SESSION]);
     expect(result.code).toBe(1);
     expect(result.stderr).toMatch(/--session_id/);
+  });
+
+  it("prints the cause when the layers themselves fail: an unreadable .env", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "oligarchy-client-env-"));
+    // A directory named .env exists, so the provider tries to read it and fails with EISDIR.
+    await mkdir(join(dir, ".env"));
+    try {
+      const result = await runClient(
+        ["start", "--agent-id", AGENT, "--server-url", "http://127.0.0.1:1"],
+        {},
+        dir,
+      );
+      expect(result.code).toBe(1);
+      expect(result.stderr).toMatch(/EISDIR|\.env/);
+      expect(result.stderr).not.toContain("USAGE");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it("rejects a missing OLIGARCHY_TOKEN before calling the proxy", async () => {

@@ -7,6 +7,7 @@ import * as Errors from "../shared/errors.ts";
 import * as Args from "./args.ts";
 
 export const STDERR_TAIL_BYTES = 4096;
+export const FORCE_KILL_AFTER = "5 seconds";
 
 export type QemuProcess = {
   readonly pid: number;
@@ -41,6 +42,10 @@ export const spawn = Effect.fn("Process.spawn")(function* (
         stderr: "pipe",
         extendEnv: true,
         detached: false,
+        // Releasing the scope waits for the exit; a QEMU that ignores SIGTERM must not wedge a
+        // stop, the sweep, or shutdown behind it.
+        killSignal: "SIGTERM",
+        forceKillAfter: FORCE_KILL_AFTER,
       }),
     )
     .pipe(Effect.mapError((error) => startError("qemu", error)));

@@ -25,6 +25,7 @@ export type LogService = {
   readonly warning: (text: string, attribution?: Attribution) => Effect.Effect<void>;
   readonly error: (text: string, report?: Report) => Effect.Effect<void>;
   readonly fatal: (text: string, report?: Report) => Effect.Effect<void>;
+  readonly acquireColor: (agentId: string) => Effect.Effect<void>;
   readonly releaseColor: (agentId: string) => Effect.Effect<void>;
   // Resolves when every offered row has been inserted or its failure reported.
   readonly flush: Effect.Effect<void>;
@@ -136,10 +137,11 @@ const makeLog = (
     const palette = new Map<string, string>();
     let next = 0;
 
-    const colorOf = (agentId: string): string => {
-      const existing = palette.get(agentId);
-      if (existing !== undefined) {
-        return existing;
+    // A colour belongs to a live session: acquired when it is created, released when it ends. A
+    // line for any other agent id (a refused start, a ctrl read) stays gray, as it always has.
+    const acquireColor = (agentId: string): void => {
+      if (palette.has(agentId)) {
+        return;
       }
       const taken = new Set(palette.values());
       let pick = next;
@@ -150,10 +152,8 @@ const makeLog = (
           break;
         }
       }
-      const color = Render.AGENT_COLORS[pick];
-      palette.set(agentId, color);
+      palette.set(agentId, Render.AGENT_COLORS[pick]);
       next = (pick + 1) % Render.AGENT_COLORS.length;
-      return color;
     };
 
     const write = (line: Render.LogLine) => Console.log(Render.renderLogLine(line, colors));
@@ -166,7 +166,8 @@ const makeLog = (
       attribution: Attribution,
     ): Effect.Effect<void> =>
       Effect.gen(function* () {
-        const color = attribution.agentId === undefined ? undefined : colorOf(attribution.agentId);
+        const color =
+          attribution.agentId === undefined ? undefined : palette.get(attribution.agentId);
         yield* write(
           Object.assign(
             { text, level },
@@ -203,6 +204,10 @@ const makeLog = (
       warning: (text, attribution = {}) => emit("warning", text, attribution),
       error: reported("error"),
       fatal: reported("fatal"),
+      acquireColor: (agentId) =>
+        Effect.sync(() => {
+          acquireColor(agentId);
+        }),
       releaseColor: (agentId) =>
         Effect.sync(() => {
           palette.delete(agentId);

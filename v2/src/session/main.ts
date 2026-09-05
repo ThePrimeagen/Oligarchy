@@ -1,6 +1,6 @@
 import { NodeServices } from "@effect/platform-node";
-import { Cause, Console, Effect, Layer, Runtime } from "effect";
-import { CliConfig, CliError, CliOutput, Command, GlobalFlag } from "effect/unstable/cli";
+import { Effect, Layer, Runtime } from "effect";
+import { CliConfig, CliOutput, Command, GlobalFlag } from "effect/unstable/cli";
 import * as Config from "../config.ts";
 import * as Render from "../observability/render.ts";
 import * as Api from "../shared/api.ts";
@@ -26,19 +26,10 @@ const MainLive = Layer.mergeAll(
   HostLive,
 ).pipe(Layer.provideMerge(NodeServices.layer));
 
-// Effect renders parse failures with the usage itself; everything else gets one headline and
-// the cause. The REPL never fails after the prompt: a failure here is a parse or token failure.
-const render = <E>(cause: Cause.Cause<E>): Effect.Effect<void> => {
-  const text = Render.renderFailure(cause);
-  return text === "" || CliError.isCliError(Cause.squash(cause))
-    ? Effect.void
-    : Console.error(text);
-};
-
 const main = Command.run(SessionCommand.command, { version: Api.VERSION }).pipe(
-  Effect.tapCause(render),
   Effect.provide(MainLive),
   Effect.scoped,
+  Effect.tapCause(Render.reportFailure),
 );
 
 // Not NodeRuntime.runMain: that interrupts the root fiber on SIGTERM, while this REPL answers

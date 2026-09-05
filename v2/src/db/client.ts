@@ -79,7 +79,6 @@ export const runInTransaction = <TX, A, E, R>(
   });
 
 export type DatabaseService = {
-  readonly db: Db;
   readonly run: <A>(
     operation: string,
     query: (db: Db) => Promise<A>,
@@ -122,7 +121,6 @@ const makeDatabase = (
     const run = <A>(operation: string, query: (db: Db) => Promise<A>) =>
       attempt(operation, () => query(db));
     return {
-      db,
       run,
       transaction: (operation, body) =>
         runInTransaction(operation, (fn) => db.transaction(fn), body),

@@ -248,26 +248,29 @@ export const makeCtrlCommand = (deps: Deps = live) => {
       definitions,
     });
     const resultIds = new Map(created.results.map((row) => [row.definitionId, row.id] as const));
+    // createRun inserts one result per definition in the same transaction; a missing one is a
+    // broken invariant, never a smaller experiment.
+    const experimentTests = yield* Effect.forEach(definitions, (definition) => {
+      const id = resultIds.get(definition.id);
+      return id === undefined
+        ? Effect.die(
+            new Error(`test: run ${created.runId} has no result for definition ${definition.name}`),
+          )
+        : Effect.succeed({
+            id,
+            definitionId: definition.id,
+            name: definition.name,
+            description: definition.description,
+            instruction: definition.instruction,
+            proof: definition.proof,
+          });
+    });
     const experiment: Linear.Experiment = {
       id: created.runId,
       iso: input.iso,
       serverUrl: input.serverUrl,
       version: input.version,
-      tests: definitions.flatMap((definition) => {
-        const id = resultIds.get(definition.id);
-        return id === undefined
-          ? []
-          : [
-              {
-                id,
-                definitionId: definition.id,
-                name: definition.name,
-                description: definition.description,
-                instruction: definition.instruction,
-                proof: definition.proof,
-              },
-            ];
-      }),
+      tests: experimentTests,
     };
 
     const tickets: Array<Linear.LinearTicket> = [];

@@ -1,6 +1,7 @@
 import { WriteStream } from "node:tty";
 import { styleText } from "node:util";
-import { Cause, Option, Schema } from "effect";
+import { Cause, Console, Effect, Option, Schema } from "effect";
+import { CliError } from "effect/unstable/cli";
 import * as ExternalFailure from "../external-failure.ts";
 import type * as Domain from "../shared/domain.ts";
 
@@ -37,6 +38,18 @@ export const renderFailure = <E>(cause: Cause.Cause<E>): string =>
 
 // ---------------------------------------------------------------------------
 // Log lines
+// The process boundary's one print: Effect has already rendered help and usage errors, so a
+// CliError says nothing more; an interrupt says nothing; everything else is one headline, then
+// the cause. It needs no services, so it sits outside the layers and also covers their failures.
+export const reportFailure = <E>(cause: Cause.Cause<E>): Effect.Effect<void> => {
+  const failure = Cause.findErrorOption(cause);
+  if (Option.isSome(failure) && CliError.isCliError(failure.value)) {
+    return Effect.void;
+  }
+  const text = renderFailure(cause);
+  return text === "" ? Effect.void : Console.error(text);
+};
+
 // ---------------------------------------------------------------------------
 
 const ROSE_PINE_MAIN = {

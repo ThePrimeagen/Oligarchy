@@ -263,6 +263,8 @@ describe("Log colours", () => {
   it.effect("gives two agents different colours and the first agent Rose Pine love", () =>
     Effect.gen(function* () {
       const log = yield* Log.Log;
+      yield* log.acquireColor("A");
+      yield* log.acquireColor("B");
       yield* log.info("a", { agentId: "A" });
       yield* log.info("b", { agentId: "B" });
       yield* log.info("a again", { agentId: "A" });
@@ -278,11 +280,13 @@ describe("Log colours", () => {
       const log = yield* Log.Log;
       const agents = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"];
       for (const agent of agents) {
+        yield* log.acquireColor(agent);
         yield* log.info("x", { agentId: agent });
       }
       const lines = (yield* TestConsole.logLines).map(String);
       expect(new Set(lines.map(ticket)).size).toBe(10);
       yield* log.releaseColor("C");
+      yield* log.acquireColor("K");
       yield* log.info("y", { agentId: "K" });
       const after = (yield* TestConsole.logLines).map(String);
       expect(ticket(after[10] ?? "")).toBe(ticket(lines[2] ?? ""));
@@ -295,6 +299,18 @@ describe("Log colours", () => {
       yield* log.info("hello");
       const lines = (yield* TestConsole.logLines).map(String);
       expect(lines[0]).toBe("\x1b[37m[\x1b[39m\x1b[90mglobal\x1b[39m\x1b[37m] hello\x1b[39m");
+    }).pipe(Effect.provide(colored)),
+  );
+
+  it.effect("an agent id that never acquired a colour stays gray and takes no palette slot", () =>
+    Effect.gen(function* () {
+      const log = yield* Log.Log;
+      yield* log.error("POST /start failed: nope", { agentId: "OLI-999", skipSentry: true });
+      yield* log.acquireColor("A");
+      yield* log.info("a", { agentId: "A" });
+      const lines = (yield* TestConsole.logLines).map(String);
+      expect(ticket(lines[0] ?? "")).toBe("\x1b[90m");
+      expect(ticket(lines[1] ?? "")).toBe("\x1b[38;2;235;111;146m");
     }).pipe(Effect.provide(colored)),
   );
 });

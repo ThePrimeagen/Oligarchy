@@ -121,11 +121,10 @@ describe("Database.make", () => {
     }),
   );
 
-  it.effect("run returns the resolved value and exposes the drizzle instance", () =>
+  it.effect("run returns the resolved value", () =>
     Effect.gen(function* () {
       const database = yield* Client.Database.make(url);
       expect(yield* database.run("select", () => Promise.resolve("ok"))).toBe("ok");
-      expect(database.db.$client).toBeDefined();
     }),
   );
 

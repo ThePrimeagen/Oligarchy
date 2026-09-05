@@ -1,7 +1,6 @@
-import { Cause, Console, Effect, FileSystem, Option, Path, Stdio, Stream } from "effect";
-import { CliError, Command } from "effect/unstable/cli";
+import { Console, Effect, FileSystem, Option, Path, Stdio, Stream } from "effect";
+import { Command } from "effect/unstable/cli";
 import * as Config from "../config.ts";
-import * as Render from "../observability/render.ts";
 import * as Contract from "../shared/contract.ts";
 import * as Errors from "../shared/errors.ts";
 import * as Flags from "./flags.ts";
@@ -236,14 +235,3 @@ export const makeClientCommand = () =>
       follow,
     ]),
   );
-
-// The process boundary's one print: Effect has already rendered help and usage errors, so a
-// CliError says nothing more; everything else is one headline, then the cause.
-export const report = <E>(cause: Cause.Cause<E>): Effect.Effect<void> => {
-  const failure = Cause.findErrorOption(cause);
-  if (Option.isSome(failure) && CliError.isCliError(failure.value)) {
-    return Effect.void;
-  }
-  const text = Render.renderFailure(cause);
-  return text === "" ? Effect.void : Console.error(text);
-};

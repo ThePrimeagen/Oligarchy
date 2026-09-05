@@ -1000,6 +1000,7 @@ describe("stop", () => {
       warning: record,
       error: record,
       fatal: record,
+      acquireColor: (agentId) => record(`acquireColor ${agentId}`),
       releaseColor: (agentId) => record(`releaseColor ${agentId}`),
       flush: Effect.void,
     };
