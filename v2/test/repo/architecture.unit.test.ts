@@ -30,6 +30,12 @@ const BOUNDARY_FILES = new Set([
 const isBoundary = (path: string): boolean =>
   BOUNDARY_FILES.has(path) || /^src\/[^/]+\/main\.ts$/.test(path);
 
+// Non-boundary files allowed exactly one node:* import. Effect's Crypto.digest is one-shot; a
+// multi-gigabyte ISO is hashed with node:crypto's streaming createHash.
+const NODE_IMPORT_EXCEPTIONS: ReadonlyMap<string, string> = new Map([
+  ["src/qemu/iso.ts", "node:crypto"],
+]);
+
 // Files allowed to call `Effect.run*`, each with the calls it may make.
 const RUN_ALLOWED: ReadonlyMap<string, ReadonlyArray<string>> = new Map([
   ["src/observability/log.ts", ["runForkWith"]],
@@ -56,7 +62,9 @@ describe("boundary files", () => {
       violations((path, source) =>
         isBoundary(path)
           ? []
-          : [...source.matchAll(/from\s+"(node:[^"]+)"/g)].map((m) => m[1] ?? ""),
+          : [...source.matchAll(/from\s+"(node:[^"]+)"/g)]
+              .map((m) => m[1] ?? "")
+              .filter((module) => NODE_IMPORT_EXCEPTIONS.get(path) !== module),
       ),
     ).toEqual([]);
   });
