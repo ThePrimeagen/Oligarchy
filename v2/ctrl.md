@@ -33,7 +33,7 @@ If you are an agent driving a guest, you need two of these: [test start](#test-s
 ./ctrl test start     --session-id <id> --test-result-id <id>
 ./ctrl test-results   --agent-id <agent> --id <id> --status success|failed [--reason <text>]
 ./ctrl session list   [--count <n>] [--active] [--json]
-./ctrl session        --session-id <id> --logs|--test-def|--test-results|--actions|--all|--dump
+./ctrl session        --session-id <id> --logs|--test-def|--test-results|--actions|--debug-logs|--all|--dump
 ```
 
 The action comes first. Every value is a flag; there are no positional arguments. Flags may sit in any order after the action.
@@ -152,7 +152,7 @@ Prints the most recent sessions, newest first, one per line: the status, colored
 ## session
 
 ```
-./ctrl session --server-url <url> --session-id <id> --logs|--test-def|--test-results|--actions|--all|--dump
+./ctrl session --server-url <url> --session-id <id> --logs|--test-def|--test-results|--actions|--debug-logs|--all|--dump
 ```
 
 Prints what is stored for one session, as JSON. At least one selector is required; one selector prints that value, several print an object keyed by them. An unknown session is a failure. Not used while driving a guest.
@@ -162,7 +162,8 @@ Prints what is stored for one session, as JSON. At least one selector is require
 - `--test-def` — the test definition its result ran, or `null`.
 - `--test-results` — the test result attributed to it, or `null`.
 - `--actions` — its QMP actions, oldest first.
-- `--all` — all four: `{ logs, results, test_definition, actions }`.
+- `--debug-logs` — the debug log the proxy saved when the session ended any way but `succeeded` (a `failed` or `aborted` stop, the ten-minute timeout, a proxy shutdown), or `null`. `{ sessionId, sources: { serial, proxy, qemu, actions }, createdAt }`: `serial` is everything the guest wrote to `/dev/ttyS0`, `proxy` the session's log lines as `created_at level text`, `qemu` the last 4 KiB of QEMU's stderr, `actions` the QMP exchanges as `created_at id state request[ response]`. Each is capped at 1 MiB, keeping the end.
+- `--all` — all five: `{ logs, results, test_definition, actions, debug_log }`.
 - `--dump` — the session's serial console, printed raw, not as JSON. Asks the proxy at `--server-url`: a session running there answers with the console as it stands; a session it no longer holds still answers when its directory survived on the proxy host — a proxy that died mid-session never removed it — with everything the guest wrote to `/dev/ttyS0` up to the end. A session that is neither is a failure: `session "<id>" has no console on this proxy`. Does not combine with the other selectors; redirect stdout to keep it (`> console.txt`). Reads `OLIGARCHY_TOKEN`.
 
 ```bash

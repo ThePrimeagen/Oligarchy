@@ -736,14 +736,17 @@ const make = Effect.gen(function* () {
       ),
     );
 
-  const saveDebugLog = (
-    live: LiveSession,
-    captured: { readonly serial: string; readonly qemu: string },
-  ): Effect.Effect<void> =>
+  type Captured = { readonly serial: string; readonly qemu: string };
+
+  // What vanishes with the machine, read before the kill: the console file and QEMU's stderr.
+  const captureDebugLog = (live: LiveSession): Effect.Effect<Captured> =>
+    Effect.all({ serial: readSerialText(live), qemu: live.qemu.stderrTail });
+
+  const saveDebugLog = (live: LiveSession, captured: Captured): Effect.Effect<void> =>
     Effect.gen(function* () {
       // Drain the log queue so the snapshot includes the stopped line just offered.
       yield* log.flush;
-      yield* debugLogs.saveFailedSession(live.id, captured).pipe(
+      yield* debugLogs.saveDebugLog(live.id, captured).pipe(
         Effect.catch((error) =>
           log.error(`debug log save failed: ${detail(error)}`, {
             sessionId: live.id,
@@ -768,11 +771,11 @@ const make = Effect.gen(function* () {
     if (!owned) {
       return yield* Errors.unknownSession(live.id, live.agent);
     }
-    // The session dir dies with kill; the serial has to be read while the file still exists.
-    // QEMU stderr is the in-memory tail drained so far. Reading it after kill is racy: closing
-    // the scope interrupts the drain fiber, so a death line written on SIGTERM can be lost.
-    const serialText = finalStatus === "failed" ? yield* readSerialText(live) : "";
-    const qemuText = finalStatus === "failed" ? yield* live.qemu.stderrTail : "";
+    // Every end but a succeeded stop is a session to explain. The session dir dies with kill; the
+    // serial has to be read while the file still exists. QEMU stderr is the in-memory tail
+    // drained so far. Reading it after kill is racy: closing the scope interrupts the drain
+    // fiber, so a death line written on SIGTERM can be lost.
+    const captured = finalStatus === "succeeded" ? undefined : yield* captureDebugLog(live);
     // The kill destroys the socket and signals QEMU before it removes the dir, so a cleanup
     // failure still leaves a dead machine: log it, but close the record.
     yield* killLogged(live, "stop cleanup failed", live.agent);
@@ -790,8 +793,8 @@ const make = Effect.gen(function* () {
       sessionId: live.id,
       agentId: live.agent,
     });
-    if (finalStatus === "failed") {
-      yield* saveDebugLog(live, { serial: serialText, qemu: qemuText });
+    if (captured !== undefined) {
+      yield* saveDebugLog(live, captured);
     }
     return yield* finishLiveSession(live, finalStatus);
   });
@@ -853,12 +856,14 @@ const make = Effect.gen(function* () {
 
   const timeOut = (live: LiveSession): Effect.Effect<void, Errors.DatabaseError> =>
     Effect.gen(function* () {
+      const captured = yield* captureDebugLog(live);
       // The kill already destroyed the socket and signalled QEMU, so still close the record.
       yield* killLogged(live, "timeout cleanup failed", undefined);
       yield* sessionStore
         .endSession(live.id, "timed_out", SESSION_TIMEOUT_REASON)
         .pipe(
           Effect.andThen(log.info(`timed out; ${SESSION_TIMEOUT_REASON}`, { sessionId: live.id })),
+          Effect.andThen(saveDebugLog(live, captured)),
           Effect.ensuring(finishLiveSession(live, "timed_out")),
         );
     });
@@ -920,10 +925,12 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const status = yield* Ref.make<Domain.SessionEndStatus>("failed");
       yield* Effect.gen(function* () {
+        const captured = yield* captureDebugLog(live);
         yield* kill(live);
         yield* Ref.set(status, "aborted");
         yield* sessionStore.endSession(live.id, "aborted", reason);
         yield* log.info(`stopped; aborted; ${reason}`, { sessionId: live.id });
+        yield* saveDebugLog(live, captured);
       }).pipe(
         Effect.catchCause((cause) => {
           const error = Cause.squash(cause);

@@ -301,7 +301,7 @@ Postgres.describeWithDatabase("database", () => {
             id: 7,
           },
         });
-        yield* debugLogs.saveFailedSession(sessionId, {
+        yield* debugLogs.saveDebugLog(sessionId, {
           serial: "journalctl\nfailed unit",
           qemu: "kvm: not available\n",
         });
@@ -323,6 +323,13 @@ Postgres.describeWithDatabase("database", () => {
           db.select().from(DbSchema.debugLogs).where(eq(DbSchema.debugLogs.sessionId, uuid())),
         );
         expect(missing).toEqual([]);
+        // The read path ctrl uses: the row as saved, None for a session without one.
+        const read = yield* debugLogs.getDebugLog(sessionId);
+        expect(Option.isSome(read)).toBe(true);
+        expect(Option.getOrThrow(read).sources.serial).toBe("journalctl\nfailed unit");
+        expect(Option.getOrThrow(read).sessionId).toBe(sessionId);
+        expect(Option.getOrThrow(read).createdAt).toBeInstanceOf(Date);
+        expect(Option.isNone(yield* debugLogs.getDebugLog(uuid()))).toBe(true);
       }),
     );
 
@@ -333,12 +340,12 @@ Postgres.describeWithDatabase("database", () => {
         const database = yield* Client.Database;
         const sessionId = uuid();
         yield* sessions.insertSession(sessionId, { iso: "x" }, "running");
-        yield* debugLogs.saveFailedSession(sessionId, { serial: "first", qemu: "" });
+        yield* debugLogs.saveDebugLog(sessionId, { serial: "first", qemu: "" });
         const error = yield* Effect.flip(
-          debugLogs.saveFailedSession(sessionId, { serial: "second", qemu: "" }),
+          debugLogs.saveDebugLog(sessionId, { serial: "second", qemu: "" }),
         );
         expect(error._tag).toBe("DatabaseError");
-        expect(error.operation).toBe("saveFailedSession");
+        expect(error.operation).toBe("saveDebugLog");
         expect(error.message).toContain("Failed query");
         expect(String(error.cause)).toContain("duplicate key");
         const [saved] = yield* database.run("select", (db) =>
@@ -352,10 +359,10 @@ Postgres.describeWithDatabase("database", () => {
       Effect.gen(function* () {
         const debugLogs = yield* DebugLogs.DebugLogStore;
         const error = yield* Effect.flip(
-          debugLogs.saveFailedSession(uuid(), { serial: "orphan", qemu: "" }),
+          debugLogs.saveDebugLog(uuid(), { serial: "orphan", qemu: "" }),
         );
         expect(error._tag).toBe("DatabaseError");
-        expect(error.operation).toBe("saveFailedSession");
+        expect(error.operation).toBe("saveDebugLog");
         expect(error.message).toContain("Failed query");
       }),
     );
@@ -368,7 +375,7 @@ Postgres.describeWithDatabase("database", () => {
         const sessionId = uuid();
         yield* sessions.insertSession(sessionId, { iso: "x" }, "running");
         const serial = `head-noise\n${"z".repeat(1_048_576)}crash-tail`;
-        yield* debugLogs.saveFailedSession(sessionId, {
+        yield* debugLogs.saveDebugLog(sessionId, {
           serial,
           qemu: "kvm: not available\n",
         });

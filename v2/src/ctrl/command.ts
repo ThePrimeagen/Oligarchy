@@ -15,6 +15,7 @@ import type { HttpClient } from "effect/unstable/http";
 import * as ProxyClient from "../client/proxy-client.ts";
 import * as Config from "../config.ts";
 import * as Actions from "../db/actions.ts";
+import * as DebugLogs from "../db/debug-logs.ts";
 import * as Client from "../db/client.ts";
 import * as Logs from "../db/logs.ts";
 import * as Sessions from "../db/sessions.ts";
@@ -33,6 +34,7 @@ export type Stores =
   | Sessions.SessionStore
   | Actions.ActionStore
   | Logs.LogStore
+  | DebugLogs.DebugLogStore
   | Tests.TestStore
   | Log.Log;
 
@@ -61,10 +63,14 @@ export type Deps = {
 const databaseLayers = (url: Redacted.Redacted): Layer.Layer<Stores, Errors.DatabaseError> =>
   Layer.mergeAll(
     Sessions.SessionStore.layer,
-    Actions.ActionStore.layer,
     Tests.TestStore.layer,
-    Log.Log.layer.pipe(Layer.provideMerge(Logs.LogStore.layer)),
-  ).pipe(Layer.provide(Client.Database.layer(url)));
+    DebugLogs.DebugLogStore.layer,
+    Log.Log.layer,
+  ).pipe(
+    Layer.provideMerge(Actions.ActionStore.layer),
+    Layer.provideMerge(Logs.LogStore.layer),
+    Layer.provide(Client.Database.layer(url)),
+  );
 
 export const live: Deps = {
   database: databaseLayers,
@@ -425,6 +431,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     readonly testDef: boolean;
     readonly testResults: boolean;
     readonly actions: boolean;
+    readonly debugLogs: boolean;
     readonly all: boolean;
   };
 
@@ -433,6 +440,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     const logs = yield* Logs.LogStore;
     const tests = yield* Tests.TestStore;
     const actions = yield* Actions.ActionStore;
+    const debugLogs = yield* DebugLogs.DebugLogStore;
     yield* orRefuse(sessions.sessionExists(id), `session: no session ${id}`);
 
     const parts: Array<readonly [string, unknown]> = [];
@@ -463,12 +471,15 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     if (input.all || input.actions) {
       parts.push(["actions", yield* actions.listActions(id)]);
     }
+    if (input.all || input.debugLogs) {
+      parts.push(["debug_log", Option.getOrNull(yield* debugLogs.getDebugLog(id))]);
+    }
     // One selector prints its bare value; several print an object keyed by selector.
     const single = parts.length === 1 ? parts[0] : undefined;
     yield* printJson(single === undefined ? Object.fromEntries(parts) : single[1]);
   });
 
-  // session --session-id <id> --logs|--test-def|--test-results|--actions|--all|--dump
+  // session --session-id <id> --logs|--test-def|--test-results|--actions|--debug-logs|--all|--dump
   const sessionInspect = Effect.fn("ctrl.session.inspect")(function* (
     input: Selectors & {
       readonly serverUrl: string;
@@ -477,15 +488,20 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     },
   ) {
     const inspecting =
-      input.logs || input.testDef || input.testResults || input.actions || input.all;
+      input.logs ||
+      input.testDef ||
+      input.testResults ||
+      input.actions ||
+      input.debugLogs ||
+      input.all;
     if (!inspecting && !input.dump) {
       return yield* refuse(
-        "session: --logs, --test-def, --test-results, --actions, --all, or --dump is required",
+        "session: --logs, --test-def, --test-results, --actions, --debug-logs, --all, or --dump is required",
       );
     }
     if (inspecting && input.dump) {
       return yield* refuse(
-        "session: --dump does not combine with --logs, --test-def, --test-results, --actions, or --all",
+        "session: --dump does not combine with --logs, --test-def, --test-results, --actions, --debug-logs, or --all",
       );
     }
     return yield* input.dump
@@ -613,7 +629,11 @@ export const makeCtrlCommand = (deps: Deps = live) => {
       testDef: toggle("test-def", "Print the session's test definition"),
       testResults: toggle("test-results", "Print the session's test result"),
       actions: toggle("actions", "Print session actions"),
-      all: toggle("all", "Print logs, test definition, test results, and actions"),
+      debugLogs: toggle(
+        "debug-logs",
+        "Print the session's debug log (serial, proxy, qemu, actions), saved when it did not succeed",
+      ),
+      all: toggle("all", "Print logs, test definition, test results, actions, and debug log"),
       dump: toggle(
         "dump",
         "Print the session's serial console from the proxy: the running machine's, or what a dead one left on disk",
@@ -622,7 +642,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     sessionInspect,
   ).pipe(
     Command.withDescription(
-      "session --session-id <id> --logs|--test-def|--test-results|--actions|--all|--dump; or list",
+      "session --session-id <id> --logs|--test-def|--test-results|--actions|--debug-logs|--all|--dump; or list",
     ),
     Command.provide(withDb),
     Command.withSubcommands([sessionListCommand]),

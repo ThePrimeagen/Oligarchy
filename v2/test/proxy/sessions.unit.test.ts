@@ -1077,7 +1077,12 @@ describe("stop", () => {
             _tag: "UnknownSession",
           });
           expect(yield* qemus(sessions)).toBe(0);
-          expect(h.qemu.calls.map((call) => call._tag)).toEqual(["prepare", "start", "stop"]);
+          expect(h.qemu.calls.map((call) => call._tag)).toEqual([
+            "prepare",
+            "start",
+            "stderrTail",
+            "stop",
+          ]);
           expect(h.sessions.sessions[0]).toMatchObject({ id, status: "aborted", reason: null });
           expect(h.sessions.sessions[0]?.endedAt).not.toBeNull();
           expect(h.sessions.agentRuns[0]?.endedAt).not.toBeNull();
@@ -1206,7 +1211,12 @@ describe("stop", () => {
           const events = yield* sessions.follow(id);
           const error = yield* Effect.flip(sessions.stop(live, undefined, undefined));
           expect(error).toMatchObject({ _tag: "Internal", sessionId: id, agentId: AGENT });
-          expect(h.qemu.calls.map((call) => call._tag)).toEqual(["prepare", "start", "stop"]);
+          expect(h.qemu.calls.map((call) => call._tag)).toEqual([
+            "prepare",
+            "start",
+            "stderrTail",
+            "stop",
+          ]);
           expect(yield* Stream.runCollect(events)).toEqual([
             { type: "session", status: "running" },
             { type: "session", status: "aborted" },
@@ -1236,7 +1246,7 @@ describe("stop", () => {
             stderrTail: () => record("qemu").pipe(Effect.as("kvm denied")),
           },
           debugLogStore: {
-            saveFailedSession: (sessionId, captured) =>
+            saveDebugLog: (sessionId, captured) =>
               Effect.sync(() => {
                 saved = { sessionId, serial: captured.serial, qemu: captured.qemu };
                 order.push("save");
@@ -1277,7 +1287,7 @@ describe("stop", () => {
       }),
   );
 
-  it.effect("a succeeded or aborted stop does not write a debug log", () =>
+  it.effect("a succeeded stop does not write a debug log; an aborted stop does", () =>
     Effect.gen(function* () {
       const h = harness();
       yield* h.run(
@@ -1285,13 +1295,95 @@ describe("stop", () => {
           const first = yield* start();
           h.files.set(serialPath(h, first.id), Effect.succeed(SERIAL));
           yield* first.sessions.stop(first.live, "succeeded", "installed");
+          expect(h.debugLogs.saves).toEqual([]);
           const second = yield* start(OTHER_AGENT);
           h.files.set(serialPath(h, second.id), Effect.succeed(SERIAL));
           yield* second.sessions.stop(second.live, undefined, "gave up");
-          expect(h.debugLogs.saves).toEqual([]);
+          expect(h.debugLogs.saves).toEqual([
+            { sessionId: second.id, serial: "boot log\n", qemu: "" },
+          ]);
           expect(h.sessions.sessions.map((row) => row.status)).toEqual(["succeeded", "aborted"]);
         }),
       );
+    }),
+  );
+
+  it.effect(
+    "the sweep's timeout reads the serial and QEMU stderr before the kill and saves after the timed out line",
+    () =>
+      Effect.gen(function* () {
+        const order: Array<string> = [];
+        const record = (text: string) =>
+          Effect.sync(() => {
+            order.push(text);
+          });
+        let saved:
+          | { readonly sessionId: string; readonly serial: string; readonly qemu: string }
+          | undefined;
+        const h = harness({
+          script: {
+            stop: () => record("kill"),
+            stderrTail: () => record("qemu").pipe(Effect.as("kvm denied")),
+          },
+          debugLogStore: {
+            saveDebugLog: (sessionId, captured) =>
+              Effect.sync(() => {
+                saved = { sessionId, serial: captured.serial, qemu: captured.qemu };
+                order.push("save");
+              }),
+          },
+          log: Layer.succeed(Log.Log)({
+            info: record,
+            warning: record,
+            error: record,
+            fatal: record,
+            acquireColor: () => Effect.void,
+            releaseColor: () => Effect.void,
+            flush: record("flush"),
+          }),
+        });
+        yield* h.run(
+          Effect.gen(function* () {
+            const { sessions, id } = yield* start();
+            h.files.set(serialPath(h, id), Effect.succeed(SERIAL));
+            yield* TestClock.adjust("10 minutes");
+            expect(yield* qemus(sessions)).toBe(0);
+            expect(h.sessions.sessions[0]).toMatchObject({ id, status: "timed_out" });
+            expect(order.slice(order.indexOf("qemu"))).toEqual([
+              "qemu",
+              "kill",
+              "timed out; no command received for 10 minutes",
+              "flush",
+              "save",
+            ]);
+            expect(saved).toEqual({ sessionId: id, serial: "boot log\n", qemu: "kvm denied" });
+          }),
+        );
+      }),
+  );
+
+  it.effect("the drain saves a debug log for every session it aborts", () =>
+    Effect.gen(function* () {
+      const shutdown: Sessions.Shutdown = {
+        reason: MutableRef.make("proxy shutdown"),
+        failed: MutableRef.make(false),
+      };
+      const h = harness({ shutdown });
+      const ids = yield* h.run(
+        Effect.gen(function* () {
+          const first = yield* start(AGENT);
+          const second = yield* start(OTHER_AGENT);
+          h.files.set(serialPath(h, first.id), Effect.succeed(SERIAL));
+          return [first.id, second.id];
+        }),
+      );
+      expect(h.sessions.sessions.map((row) => row.status)).toEqual(["aborted", "aborted"]);
+      expect(h.debugLogs.saves.map((save) => save.sessionId).sort()).toEqual([...ids].sort());
+      // The second session has no console file: an empty serial, still saved.
+      expect(h.debugLogs.saves.find((save) => save.sessionId === ids[0])?.serial).toBe(
+        "boot log\n",
+      );
+      expect(h.debugLogs.saves.find((save) => save.sessionId === ids[1])?.serial).toBe("");
     }),
   );
 
@@ -1335,8 +1427,7 @@ describe("stop", () => {
     Effect.gen(function* () {
       const h = harness({
         debugLogStore: {
-          saveFailedSession: () =>
-            Effect.fail(failure("saveFailedSession", "connect ECONNREFUSED")),
+          saveDebugLog: () => Effect.fail(failure("saveDebugLog", "connect ECONNREFUSED")),
         },
       });
       yield* h.run(
@@ -1664,7 +1755,12 @@ describe("timeouts", () => {
           expect(yield* Effect.flip(sessions.lookup(id, AGENT))).toMatchObject({
             _tag: "UnknownSession",
           });
-          expect(h.qemu.calls.map((call) => call._tag)).toEqual(["prepare", "start", "stop"]);
+          expect(h.qemu.calls.map((call) => call._tag)).toEqual([
+            "prepare",
+            "start",
+            "stderrTail",
+            "stop",
+          ]);
           expect(h.sessions.sessions[0]).toMatchObject({
             id,
             status: "timed_out",
@@ -1824,7 +1920,9 @@ describe("drain", () => {
         "start",
         "prepare",
         "start",
+        "stderrTail",
         "stop",
+        "stderrTail",
         "stop",
       ]);
       expect(h.sessions.sessions.map((row) => [row.status, row.reason])).toEqual([

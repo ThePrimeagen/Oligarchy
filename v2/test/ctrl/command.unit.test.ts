@@ -1124,6 +1124,18 @@ describe("session list", () => {
 // session inspect
 // ---------------------------------------------------------------------------
 
+const debugLog = {
+  sessionId: SESSION_ID,
+  sources: {
+    serial: "omarchy login: ",
+    proxy: "2026-09-03T00:00:03.000Z info stopped; failed; installer hung",
+    qemu: "",
+    actions:
+      '2026-09-03T00:00:01.000Z 1 completed {"execute":"qmp_capabilities","arguments":{},"id":1} {"return":{}}',
+  },
+  createdAt: new Date("2026-09-03T00:00:04Z"),
+};
+
 const seedInspect = (h: ReturnType<typeof harness>) => {
   h.stores.sessions.sessions.push(session(SESSION_ID, "succeeded", ago(500)));
   h.stores.tests.definitions.push(install);
@@ -1225,11 +1237,12 @@ describe("session inspect", () => {
     }),
   );
 
-  it.effect("--all prints { logs, results, test_definition, actions } (happy)", () =>
+  it.effect("--all prints { logs, results, test_definition, actions, debug_log } (happy)", () =>
     Effect.gen(function* () {
       const h = harness();
       seedInspect(h);
       h.stores.tests.results.push(result(RESULT_ID, "passed", SESSION_ID));
+      h.stores.debugLogs.rows.set(SESSION_ID, debugLog);
       const exit = yield* h.run([
         "session",
         "--session-id",
@@ -1240,9 +1253,75 @@ describe("session inspect", () => {
       ]);
       expect(Exit.isSuccess(exit)).toBe(true);
       const printed = yield* lastJson;
-      expect(Object.keys(printed)).toEqual(["logs", "results", "test_definition", "actions"]);
+      expect(Object.keys(printed)).toEqual([
+        "logs",
+        "results",
+        "test_definition",
+        "actions",
+        "debug_log",
+      ]);
       expect(printed.test_definition).toMatchObject({ name: "Install Omarchy" });
       expect(printed.actions).toHaveLength(1);
+      expect(printed.debug_log).toEqual({
+        ...debugLog,
+        createdAt: debugLog.createdAt.toISOString(),
+      });
+    }),
+  );
+
+  it.effect("--debug-logs prints the bare debug log row (happy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      seedInspect(h);
+      h.stores.debugLogs.rows.set(SESSION_ID, debugLog);
+      const exit = yield* h.run([
+        "session",
+        "--session-id",
+        SESSION_ID,
+        "--debug-logs",
+        "--server-url",
+        SERVER,
+      ]);
+      expect(Exit.isSuccess(exit)).toBe(true);
+      const printed = yield* lastJson;
+      expect(printed).toEqual({ ...debugLog, createdAt: debugLog.createdAt.toISOString() });
+      expect(printed.sources.serial).toBe("omarchy login: ");
+    }),
+  );
+
+  it.effect("--debug-logs prints null when the session has none (happy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      seedInspect(h);
+      const exit = yield* h.run([
+        "session",
+        "--session-id",
+        SESSION_ID,
+        "--debug-logs",
+        "--server-url",
+        SERVER,
+      ]);
+      expect(Exit.isSuccess(exit)).toBe(true);
+      expect(yield* stdout).toEqual(["null"]);
+    }),
+  );
+
+  it.effect("--debug-logs on an unknown session is a failure (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      seedInspect(h);
+      const exit = yield* h.run([
+        "session",
+        "--session-id",
+        OTHER_SESSION_ID,
+        "--debug-logs",
+        "--server-url",
+        SERVER,
+      ]);
+      expect(failure(exit)).toMatchObject({
+        _tag: "CommandError",
+        message: `session: no session ${OTHER_SESSION_ID}`,
+      });
     }),
   );
 
@@ -1271,7 +1350,7 @@ describe("session inspect", () => {
       expect(failure(exit)).toMatchObject({
         _tag: "CommandError",
         message:
-          "session: --logs, --test-def, --test-results, --actions, --all, or --dump is required",
+          "session: --logs, --test-def, --test-results, --actions, --debug-logs, --all, or --dump is required",
       });
     }),
   );
@@ -1290,7 +1369,7 @@ describe("session inspect", () => {
         );
         expect(failure(exit)).toMatchObject({
           message:
-            "session: --dump does not combine with --logs, --test-def, --test-results, --actions, or --all",
+            "session: --dump does not combine with --logs, --test-def, --test-results, --actions, --debug-logs, or --all",
         });
       }
       expect(h.proxy.calls).toEqual([]);

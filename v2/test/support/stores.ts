@@ -234,6 +234,8 @@ export type FakeDebugLogStore = {
     readonly serial: string;
     readonly qemu: string;
   }>;
+  // Rows `getDebugLog` answers with, keyed by session id; seeded by ctrl tests.
+  readonly rows: Map<string, DebugLogs.DebugLogRow>;
   readonly layer: Layer.Layer<DebugLogs.DebugLogStore>;
 };
 
@@ -245,14 +247,16 @@ export const fakeDebugLogStore = (
     readonly serial: string;
     readonly qemu: string;
   }> = [];
+  const rows = new Map<string, DebugLogs.DebugLogRow>();
   const service = DebugLogs.DebugLogStore.of({
-    saveFailedSession: (sessionId, captured) =>
+    saveDebugLog: (sessionId, captured) =>
       Effect.sync(() => {
         saves.push({ sessionId, serial: captured.serial, qemu: captured.qemu });
       }),
+    getDebugLog: (sessionId) => Effect.sync(() => Option.fromUndefinedOr(rows.get(sessionId))),
     ...overrides,
   });
-  return { saves, layer: Layer.succeed(DebugLogs.DebugLogStore)(service) };
+  return { saves, rows, layer: Layer.succeed(DebugLogs.DebugLogStore)(service) };
 };
 
 // ---------------------------------------------------------------------------

@@ -1165,13 +1165,17 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
   appears only in `src/dashboard/**` and `vitest.global-setup.ts`. Test log output through the
   fake `Log` layer (`test/support/log.ts`) or `Log.layerStdout` with `TestConsole.logLines`.
 
-## Failed-session debug log
+## Session debug log
 
-A `/stop` with status `failed` writes one `debug_logs` row keyed by `session_id` after the
-stopped line and before the session scope is closed. The row is the crash artifact: everything
-that would otherwise vanish with the machine, plus the control-plane lines already offered for
-that session, including `stopped; failed`. `sources` is a jsonb map so each chunk is labeled by
-origin. There is no `journalctl` key — that stream is not separately available.
+Every session end but a `succeeded` stop writes one `debug_logs` row keyed by `session_id`: a
+`/stop` carrying `failed` or `aborted`, the sweep's ten-minute timeout, and the drain at
+shutdown. The row is written after the final line (`stopped; <status>…` or `timed out; …`) and
+before the session scope is closed. It is the crash artifact: everything that would otherwise
+vanish with the machine, plus the control-plane lines already offered for that session, the
+verdict included. `sources` is a jsonb map so each chunk is labeled by origin. There is no
+`journalctl` key — that stream is not separately available. `ctrl session --debug-logs` prints
+the row (`null` when the session succeeded or predates the table); `--all` includes it as
+`debug_log`.
 
 - `serial` is the guest UART (`/dev/ttyS0` → `<session-dir>/serial.log`; see Operating loop).
   The guest journal, dmesg, user-session journal, coredumps and compositor crash folders live
@@ -1189,16 +1193,17 @@ origin. There is no `journalctl` key — that stream is not separately available
   `created_at id state request[ response]`. Screenshots stay on `images`; they already outlive
   the process and are binary.
 - `kill` closes the session scope: QEMU dies and the prepare finalizer removes the directory.
-  The serial file has to be read first. A missing file is an empty serial (nothing wrote); any
+  `captureDebugLog` reads the serial file and the stderr tail first, on every one of the three
+  paths (stop, sweep, drain). A missing file is an empty serial (nothing wrote); any
   other read failure is `debug log: serial read failed: <detail>` at error and the serial is
   stored empty. Every `sources` key is always present; an origin that produced nothing is `""`.
 - `Log.flush` runs before the insert so `listLogs` sees every offered row, the stopped line
   included. Each source is capped at 1 MiB independently; a longer value keeps the tail (the
   crash and the verdict) and starts `[truncated]\n`.
 - The insert is best-effort: `debug log save failed: <detail>` at error and the stop still
-  closes the session. A second save for the same session is a `DatabaseError` by design; stop
-  writes at most once. Succeeded, aborted and timed-out stops do not write a row — those
-  verdicts are not a failed test session.
+  closes the session. A second save for the same session is a `DatabaseError` by design; each
+  session ends once, so each writes at most once. A succeeded stop does not write a row — there
+  is nothing to explain.
 - The columns: `session_id` (primary key, references `sessions.id`), `sources`, `created_at`.
 
 ## Sentry

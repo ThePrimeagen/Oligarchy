@@ -1,4 +1,5 @@
-import { Context, Effect, Layer } from "effect";
+import { eq } from "drizzle-orm";
+import { Context, Effect, Layer, Option } from "effect";
 import * as Actions from "./actions.ts";
 import * as Client from "./client.ts";
 import * as Logs from "./logs.ts";
@@ -37,19 +38,21 @@ const formatActions = (
     })
     .join("\n");
 
+export type DebugLogRow = typeof DbSchema.debugLogs.$inferSelect;
+
 export class DebugLogStore extends Context.Service<DebugLogStore>()("@oligarchy/db/DebugLogStore", {
   make: Effect.gen(function* () {
     const database = yield* Client.Database;
     const logs = yield* Logs.LogStore;
     const actions = yield* Actions.ActionStore;
 
-    const saveFailedSession = Effect.fn("db.saveFailedSession")(function* (
+    const saveDebugLog = Effect.fn("db.saveDebugLog")(function* (
       sessionId: string,
       captured: { readonly serial: string; readonly qemu: string },
     ) {
       const logRows = yield* logs.listLogs(sessionId);
       const actionRows = yield* actions.listActions(sessionId);
-      yield* database.run("saveFailedSession", (db) =>
+      yield* database.run("saveDebugLog", (db) =>
         db.insert(DbSchema.debugLogs).values({
           sessionId,
           sources: {
@@ -62,7 +65,15 @@ export class DebugLogStore extends Context.Service<DebugLogStore>()("@oligarchy/
       );
     });
 
-    return { saveFailedSession };
+    // The row as saved, for `ctrl session --debug-logs`; None when the session never wrote one.
+    const getDebugLog = Effect.fn("db.getDebugLog")(function* (sessionId: string) {
+      const rows = yield* database.run("getDebugLog", (db) =>
+        db.select().from(DbSchema.debugLogs).where(eq(DbSchema.debugLogs.sessionId, sessionId)),
+      );
+      return Option.fromUndefinedOr(rows[0]);
+    });
+
+    return { saveDebugLog, getDebugLog };
   }),
 }) {
   static readonly layer = Layer.effect(this)(this.make);
