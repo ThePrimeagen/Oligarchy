@@ -31,6 +31,12 @@ they moved unchanged and this document does not repeat them.
   `.cursor/environment.json` runs `./server --port 42069 --automation` unchanged.
 - A `.env` in the working directory fills missing variables only; an already-set variable always
   wins, and an empty value counts as unset (`SERVER_URL=""` falls back to the default).
+- Session directories live under `os.tmpdir()`, so `TMPDIR` decides where a machine's disk goes.
+  Each Omarchy install writes 6 to 7 GB into its `disk.qcow2`; a tmpfs `/tmp` fills after a few
+  concurrent sessions. Point `TMPDIR` at disk-backed storage for the proxy.
+- The proxy's stdout is the convenience copy of the log; the `logs` rows and Sentry are the record.
+  A write refused by a full filesystem is dropped, never fatal: redirect stdout to a filesystem that
+  can fill only if losing those lines is acceptable.
 - Install with `npm ci` inside `v2/`; `prepare` runs `effect-tsgo patch --oxlint` so the
   `effecttsgo/*` rules are active for lint. The commands, all from `v2/`: `npm run check:lint`,
   `npm run check:format`, `npm run check:types`, `npm run test:unit`, `npm run test:integration`,
@@ -68,13 +74,32 @@ Durable preferences from the maintainer; when they conflict with generic best pr
 - Nulls are a tax on every consumer. The cpu window reports 0 before its first sample, not
   `number | null`; reserve `null` for an absence a consumer must distinguish and act on.
 - Background work lives and dies with the server: a loop is `Effect.forkScoped` in the server
-  scope, its tick is guarded, and its state is bounded.
+  scope, its tick is guarded, and its state is bounded (the one exception, the log row queue, is
+  unbounded by policy; see Log stream).
 - Keep what earns its place: paths sent to the server are absolutised because the server runs
   elsewhere; the CLI stats the ISO first so the error names the real path; `start` omits the
   `disk` key instead of sending `""` because the proxy creates the default disk only when the key
   is absent; `MAX_SAMPLES = 60` carries "60 samples of 5 s is a five-minute window".
 - Porting: the reference implementation is the spec; `v1/` is the reference and wire behaviour
-  never diverges. Exact ports: never probe or fall back to a neighbouring port.
+  never diverges beyond the list below. Exact ports: never probe or fall back to a neighbouring
+  port.
+
+## Changes from v1
+
+Every deliberate behaviour change against `v1/`, so a transcript comparison does not read them as
+bugs; anything not listed here is a regression.
+
+- A CLI failure is rendered as the headline (`message[: cause message]`) then `Cause.pretty`; v1
+  printed the headline then `console.error(error)`.
+- A transport failure's headline is `<METHOD> <url> failed: <cause>` (example under HttpApi client).
+- Bare `./client`, `./client intent` and `./ctrl` print help and exit 0 (v1: usage, exit 1); an
+  unknown action (`./client bogus`) is an Effect CLI usage error, exit 1, not `client: unknown
+  action: bogus`.
+- A malformed JSON body is 400 `Expected a valid JSON body`; v1 relayed `JSON.parse`'s message.
+- A defect's boundary log detail is `Cause.pretty` of the die, not `stack ?? message`.
+- The catch-all 404 `{"error":"not found"}` answers before the bearer check, so an unauthenticated
+  request to an unrouted path is 404 where v1 answered 401.
+- A `/stop` that loses the race with the sweep is 404 `unknown session "<id>"`; v1 settled twice.
 
 ## Layout
 
@@ -119,11 +144,16 @@ src/
   `@oligarchy/<dir>/<Service>` for services (`@oligarchy/db/Database`, `@oligarchy/proxy/Sessions`).
 - Only the boundary files may import `node:*`, read `process.*`, or use `setTimeout`,
   `setInterval`, `new Promise` or `async`: `qmp/socket.ts`, `proxy/main.ts` (so
-  `server.on("error")` can be attached), `session/readline.ts`, `qemu/stats.ts`, `qemu/qemu.ts`,
-  `observability/instrument.ts`, `observability/render.ts`, `db/client.ts`, `ctrl/cursor.ts` and
-  every `src/**/main.ts`; `src/dashboard/**` and `test/**` are not scanned. One named exception:
-  `src/qemu/iso.ts` imports `node:crypto` alone, to hash a multi-gigabyte ISO with the streaming
-  `createHash`. `test/repo/architecture.unit.test.ts` enforces the list.
+  `server.on("error")` and the stdout `error` listeners can be attached), `session/readline.ts`,
+  `qemu/stats.ts`, `qemu/qemu.ts`, `observability/instrument.ts`, `observability/render.ts`,
+  `db/client.ts` and every `src/**/main.ts`; `src/dashboard/**` and `test/**` are not scanned.
+  Two files get exactly one `node:*` import: `src/qemu/iso.ts` imports `node:crypto` to hash a
+  multi-gigabyte ISO with the streaming `createHash` (Effect's `Crypto.digest` is one-shot), and
+  `src/session/image.ts` imports `node:zlib` for `inflateSync` (Effect has no inflate).
+  `ctrl/cursor.ts` needs no exemption: the SDK is wrapped in `Effect.tryPromise`.
+- `test/repo/architecture.unit.test.ts` enforces the lists and checks that every listed file
+  exists. To add a boundary file or a `node:*` exception, add it to `BOUNDARY_FILES` (or
+  `NODE_IMPORT_EXCEPTIONS`) there and to the bullet above in one change; nothing else grants it.
 
 ## Core rules
 
@@ -138,7 +168,8 @@ src/
 - Never disable Schema checks. A failing constructor means the data or schema is wrong.
 - Keep pure mapping, formatting, and object construction outside Effect (`ctrl/render.ts`,
   `qemu/keys.ts`, `qemu/args.ts`, `qmp/framing.ts`, `session/grammar.ts`, `session/image.ts`, the
-  view halves of `session/picker.ts` and `session/follow-view.ts`).
+  view halves of `session/picker.ts` and `session/follow-view.ts`); a failure there is a `Result`
+  (`image.ts` wraps `inflateSync` in a `try`: `bad png data: <zlib reason>`).
 - Reach services with `yield*` inside the Effect that needs them, never as function parameters; a
   plain factory taking values is allowed only where a unit test constructs the seam directly
   (`Database.make(url)`, `Stats.make(source)`, `makeProxyCommand(server)`, `makeCtrlCommand(deps)`).
@@ -221,15 +252,16 @@ const MainLive = Layer.mergeAll(
   `cause: Schema.optionalKey(Schema.Defect())`, or `cause: Schema.Defect()` when there always is
   one (`Internal`, `ProxyUnreachable`, `CursorAgentFailed`). The boundary renders
   `message[: cause message]`.
-- Put the HTTP status on the class as `{ httpApiStatus: N }` and on its wire codec with
-  `HttpApiSchema.status(N)`; `test/shared/errors.unit.test.ts` asserts the two agree. Handlers
-  never build error responses. `Errors.httpStatus(schema)` reads the annotation (500 when absent);
-  `Errors.apiStatus(error)` looks the class up in a table that `satisfies Record<ApiError["_tag"],
-  Schema.Top>`, so a tag without an arm does not compile.
+- Put the HTTP status on the class once, as `{ httpApiStatus: N }`; the wire codec derives it
+  (`wireError(schema, fromMessage)` ends in `HttpApiSchema.status(httpStatus(schema))`), so the
+  two cannot disagree. Handlers never build error responses. `Errors.httpStatus(schema)` reads the
+  annotation (500 when absent); `Errors.apiStatus(error)` looks the class up in a table that
+  `satisfies Record<ApiError["_tag"], Schema.Top>`, so a tag without an arm does not compile.
 - Mark every API error class, 4xx and 5xx alike, with `override readonly [ErrorReporter.ignore] =
-  true`, and put `session_id`/`agent_id` on `override get [ErrorReporter.attributes]()`. Why: the
-  `ApiBoundary` middleware logs each failed request once and that log line is the single Sentry
-  report (with the cause from 500 up), so HttpApiBuilder's own reporting is silenced.
+  true` and nothing else: no `[ErrorReporter.attributes]` getter (the reporter never reads one on
+  an ignored error). Why: the `ApiBoundary` middleware logs each failed request once, attributing
+  `sessionId`/`agentId` itself from the error's fields (`attribution` in `middleware.ts`), and that
+  line is the single Sentry report (with the cause from 500 up); HttpApiBuilder's own is silenced.
 - Fixed-message errors take a constructor default: `Unauthorized.make({})`, `NotFound.make({})`
   and `Contract.Ok.make({})` are valid, and `Internal.make({ cause })` fills `"internal error"`.
 - The wire body of every API error is `{ "error": "<message>" }`. The class is what handlers raise;
@@ -239,11 +271,12 @@ const MainLive = Layer.mergeAll(
 - Translate infrastructure failures once, at the module boundary, with one helper per module
   (`Database.run`/`Client.attempt`, `ProxyClient`'s `run(label, effect)`, `Process.detail`);
   classify an `HttpClientError` by its `response` status and `error.reason`, never by message;
-  convert `unknown` thrown values with the probes in `external-failure.ts` (`describeThrowable`,
-  `causeOf`); wrap Promise SDKs with `Effect.tryPromise({ try, catch })` and a typed `catch`.
+  convert `unknown` thrown values with the probes in `src/external-failure.ts` (`messageOf`,
+  `describeThrowable`, `causeOf`; there is no `ExternalFailure` class), `causeOf` unwrapping a
+  wrapper where the line should name the driver's or Node's message; wrap Promise SDKs with
+  `Effect.tryPromise({ try, catch })` and a typed `catch`.
 
-`BadRequest` in `src/shared/errors.ts`: status on the class, opted out of Sentry, attribution for
-the reporter.
+`BadRequest` in `src/shared/errors.ts`: status on the class, opted out of Sentry, nothing else.
 
 ```ts
 export class BadRequest extends Schema.TaggedError<BadRequest>(
@@ -258,23 +291,19 @@ export class BadRequest extends Schema.TaggedError<BadRequest>(
   { httpApiStatus: 400 },
 ) {
   override readonly [ErrorReporter.ignore] = true;
-  override get [ErrorReporter.attributes](): Attribution {
-    return attribution(this.sessionId, this.agentId);
-  }
 }
 ```
 
-Its wire codec, same file: `{ error }` on the wire, the class on the type side, the status on the
-codec.
+Its wire codec, same file: `{ error }` on the wire, the class on the type side, the class's own
+status on the codec.
 
 ```ts
 const WireBody = Schema.Struct({ error: Schema.String });
 
-// { error: string } on the wire, the class on the type side, the status annotated on the codec.
+// { error: string } on the wire, the class on the type side, the class's own status on the codec.
 const wireError = <S extends Schema.Codec<unknown, { readonly message: string }>>(
   schema: S,
   fromMessage: (message: string) => S["Encoded"],
-  status: number,
 ): Schema.Codec<S["Type"], { readonly error: string }> =>
   WireBody.pipe(
     Schema.decodeTo(
@@ -284,13 +313,12 @@ const wireError = <S extends Schema.Codec<unknown, { readonly message: string }>
         encode: (encoded) => ({ error: encoded.message }),
       }),
     ),
-    HttpApiSchema.status(status),
+    HttpApiSchema.status(httpStatus(schema)),
   );
 
 export const BadRequestWire = wireError(
   BadRequest,
   (message) => ({ _tag: "BadRequest", message }) as const,
-  400,
 );
 ```
 
@@ -302,7 +330,8 @@ boundary.
 - The API errors: 400 `BadRequest { message, sessionId?, agentId? }`; 401 `Unauthorized`
   (`unauthorized`); 403 `Forbidden { message, sessionId, agentId }`; 404
   `UnknownSession { id, message, agentId? }` (built by `unknownSession(id, agentId?)`, attributed
-  to the id only when it is a uuid); 404 `NotFound` (`not found`); 409
+  to the id only when it is a uuid); 404 `NotFound` (`not found`; declared on `GET /images/:id` in
+  `api.ts`, though the handler answers that 404 raw and never raises it); 409
   `Conflict { message, sessionId }`; 502 `StartFailed` and
   `ExchangeFailed { message, cause?, sessionId, agentId }`; 500 `Internal { message: "internal
   error", cause, sessionId?, agentId? }`. `ApiError` is their union.
@@ -313,7 +342,10 @@ boundary.
   (all `{ message, cause? }`), `HostRequirementsMissing { missing }`, `KeysError { message }`,
   `ProxyRefusal { status, message }`, `ProxyUnreachable { message, cause }`, `LinearError {
   operation, message, status?, cause? }`, `CursorAgentFailed { message, retryable, cause }`,
-  `ChildExit { command, code, stderr }` (its message is the stderr), `PngDecodeError { message }`.
+  `ChildExit { command, code, stderr }` (its message is the stderr), `PngDecodeError { message }`,
+  and `LogLine { text, level, cause? }` (identifier `@oligarchy/observability/log/LogLine`): an
+  `error` or `fatal` log line as the reporter receives it, `message` the text and
+  `[ErrorReporter.severity]` from `level`.
 
 ## Schema
 
@@ -475,7 +507,9 @@ export class ProxyConfig extends Context.Service<ProxyConfig>()("@oligarchy/conf
   with `fs.writeFile(path, bytes, { mode: 0o644 })`.
 - A client handler reads `Config.oligarchyToken` and connects before any local check, so
   `OLIGARCHY_TOKEN is not set` precedes every request; local refusals (`send-mouse: --clicks needs
-  --button`, `iso: <ENOENT message>`) come before the request; the request comes last.
+  --button`; a missing local ISO is Node's own `iso: ENOENT: no such file or directory, stat
+  '<absolute path>'` from the `PlatformError`'s cause, never `NotFound: FileSystem.stat …`) come
+  before the request; the request comes last.
 - `--help` is side-effect free: no network, no database, no spawn. No business logic in the CLI.
 - Run with `Command.run(cmd, { version: Api.VERSION })` (argv from `Stdio`, provided by
   `NodeServices.layer`). It renders help, usage errors and `UserError`s itself before re-failing;
@@ -555,15 +589,21 @@ The listen line is `oligarchy proxy listening on 127.0.0.1:<port>; display <d>[;
   malformed JSON body is `Expected a valid JSON body`), 401 and 500 (`{"error":"internal error"}`,
   a defect) through the group middleware, so they are not listed per row. Every 4xx and 5xx body is
   `{"error":"<message>"}`; `{"ok":"true"}` carries the string `"true"`; anything unrouted is 404
-  `{"error":"not found"}` and is not logged, while `GET /images/<not a uuid or unknown>` is 404
-  `not found` and logged (`GET /images/x failed: not found`, skipping Sentry).
+  `{"error":"not found"}` and is not logged, and neither is `GET /images/<not a uuid or unknown>`:
+  the handler answers that 404 raw, so no error line or row is written (v1 parity); a database
+  failure on that route is still a logged 500.
 - Session lookup on every driving route: `session id is required` (400), `unknown session "<id>"`
   (404), `agent "<agent>" does not own session "<id>"` (403). The lookup resets the inactivity
   window even when the work that follows fails; `/follow` and `/dump` never reset it.
-- `POST /start`: `iso` is a path or an http(s) URL (cached under `~/.oligarchy/isos` with
+- `POST /start`: `iso` is a path or an http(s) URL (`Domain.isIsoUrl`, the one prefix test the
+  client, `Iso.getIso` and `Sessions.start` share). A URL is cached under `~/.oligarchy/isos` with
   `manifest.json`, `.partial-<pid>` downloads, an optional `<url>.sha256` sidecar, a 10 s heartbeat
-  and poll, 30 s stale); `disk` is stat'ed before the download and before the agent is registered
-  (`qemu: disk not found: <path>`); an absent `disk` creates a 40G qcow2. A boot failure is 502.
+  and poll, 30 s stale; the downloader follows up to 20 redirects (`HttpClient.followRedirects(20)`,
+  ISO and sidecar alike), a 21st failing `iso: download failed: <url>: HTTP 302`. The order is
+  fixed: stat the caller's `disk` (`qemu: disk not found: <path>`), fetch the ISO, `Qemu.prepare`
+  (dir, default 40G qcow2, OVMF vars), `registerAgent`, `Qemu.start`; a wrong disk costs no
+  download, and a failed download or `qemu-img` never burns the agent's one registration. A boot
+  failure is 502.
 - `GET /follow`: 404 `unknown session "<id>"`; 409 `session "<id>" is not running on this proxy`
   for a row this proxy does not hold, `session "<id>" has already completed (<status>)` for a
   finished one.
@@ -574,6 +614,8 @@ The listen line is `oligarchy proxy listening on 127.0.0.1:<port>; display <d>[;
   p25, p75, p90}}`; `qemus` is the size of the sessions map; cpu is a 5 s sampler over 60 samples
   reporting 0 before the first; `usedBytes = totalBytes - freeBytes`.
 - `POST /stop`: default status `aborted`, no reason; `timed_out` is proxy-owned and not accepted.
+  `stop` claims the id with `Ref.modify` on the sessions map; when the sweep removed it first the
+  request is 404 `unknown session "<id>"`, so a session gets one verdict and one final follow line.
 - `POST /send-keys`: 400 with the `parseKeys` message or `send-keys: at most 1000 keys per
   request`; 60 ms between chords.
 - `POST /send-mouse`: `x`/`y` in `0..1` (`mouse: x and y must be in 0..1`), `round(v * 0x7fff)`
@@ -615,6 +657,7 @@ The listen line is `oligarchy proxy listening on 127.0.0.1:<port>; display <d>[;
   exchange; `id` is a per-session counter, only the name is carried, and a request refused before
   any work never appears. `image` lands before that action's `completed` line and carries the same
   uuid as `GET /images/:id`. `intent` `cancelled` is a session that ended with its intent open.
+  The follow view decodes `png` with `Result.getOrThrow`: bad base64 from our own proxy is a defect.
 - Each follower is a `Queue.dropping(64)`; when `Queue.offerUnsafe` returns `false` the follower is
   ended with `Queue.endUnsafe`, logged `follower dropped; 64 events behind` at warning, and removed:
   the only way a stream ends without a final `session` line. Attaching logs `follower attached`, a
@@ -643,15 +686,20 @@ The listen line is `oligarchy proxy listening on 127.0.0.1:<port>; display <d>[;
   `HttpApiSchema.withHeaders({ body: png, headers: { "x-image-url": url } })`); every
   session-driving handler is uninterruptible (a client that disconnects mid-`/start` must not leave
   an orphan QEMU); `follow`, `dump` and `stats` are interruptible; `handleRaw` when the handler
-  owns the `HttpServerResponse` (`follow`). `Handlers.routes(display, automation)` merges
-  `HttpApiBuilder.layer(ProxyApi)` over the groups and middlewares with the catch-all 404
-  (`HttpRouter.add("*", "*", HttpServerResponse.jsonUnsafe({ error: "not found" }, { status: 404
-  }))`), the only raw route.
+  owns the `HttpServerResponse`: `follow` (the NDJSON stream) and `storedImage`, whose two 404s
+  return the catch-all's `notFound` response rather than raising, so the boundary writes no error
+  line for an unknown image. `Handlers.routes(display, automation)` merges
+  `HttpApiBuilder.layer(ProxyApi)` over the groups and middlewares with the catch-all
+  `HttpRouter.add("*", "*", notFound)`, the only route outside the api.
 - `ApiBoundary` turns `HttpApiError.HttpApiSchemaError` into `BadRequest` (400), re-fails a
   declared `ApiError`, sends anything else down the defect path, turns a defect into `Internal`
   (500), and logs every failed request as one error line `<METHOD> <url> failed: <detail>`
-  attributed as far as the handler knew, with `skipSentry` below 500 and the cause from 500 up (a
-  defect's detail is `Cause.pretty` of the die).
+  attributed as far as the handler knew, with `skipSentry` below 500 and the cause from 500 up.
+  `detail` is the error's `message`, except for `Internal`, whose cause is a wrapper (drizzle's
+  `Failed query: …`, a `PlatformError`): the line carries `causeOf(error.cause)`, the driver's or
+  Node's message one level down (`POST /stop failed: connect ECONNREFUSED 127.0.0.1:5432`, `…
+  failed: ENOENT: no such file or directory, open '…/serial.log'`), as v1 logged it. A defect's
+  detail is `Cause.pretty` of the die.
 - Serve with `HttpRouter.serve(Handlers.routes(display, automation), { disableLogger: true,
   disableListenLog: true })` (never Effect's built-in request logger) over
   `NodeHttpServer.layer(() => server, { host, port })`.
@@ -765,13 +813,18 @@ sendMouse, intentStart, intentEnd, stop, follow }`, each call wrapped in `run`.
   the assignee is `prime@terminal.shop`; titles are `Omarchy: <name>`; an issue is created then
   described in a second call because the body names its own identifier; the backlog pages with
   `first: 100` until `hasNextPage` is false. GraphQL query texts are copied from `v1/src/linear.ts`.
-- `Linear.loadPrompts` (an Effect over `FileSystem`) reads `prompts/linear-issue.html`,
-  `prompts/driving-agent.html`, `client.md` and `ctrl-linear.md` by path relative to the module
-  into a `Prompts` record, once per command. The pure renderers take it:
-  `linearTicketDescription(experiment, test, ticket, prompts)` and
-  `drivingAgentPrompt(ticket, prompts)` fill `{{NAME}}` from `LINEAR_TICKET, RUN_ID, RESULT_ID,
-  VERSION, ISO_URL, SERVER_URL, TEST_NAME, TEST_DESCRIPTION, TEST_INSTRUCTION, TEST_PROOF,
-  CLIENT_MD, CTRL_MD, SUB_AGENT` (`Grok 4.6 high fast (cursor-grok-4.6-high-fast)`) into a `Result`.
+- Each command reads only the templates it renders, once, by path relative to the module:
+  `Linear.loadIssuePrompts` (an Effect over `FileSystem`) reads `prompts/linear-issue.html`,
+  `client.md` and `ctrl-linear.md` into an `IssuePrompts` record for `test new`;
+  `Linear.loadDrivingPrompt` reads `prompts/driving-agent.html` alone for `test run`, so an
+  unreadable guide cannot stop a run. The pure renderers `linearTicketDescription(experiment,
+  test, ticket, prompts)` and `drivingAgentPrompt(ticket, template)` fill `{{NAME}}` from
+  `LINEAR_TICKET, RUN_ID, RESULT_ID, VERSION, ISO_URL, SERVER_URL, TEST_NAME, TEST_DESCRIPTION,
+  TEST_INSTRUCTION, TEST_PROOF, CLIENT_MD, CTRL_MD, SUB_AGENT` (`Grok 4.6 high fast
+  (cursor-grok-4.6-high-fast)`) into a `Result`.
+- `ctrl test-results` calls `log.acquireColor(agentId)` before its `test result <id>: <status>[;
+  <reason>]` line (the agent has no live session on that process); a verdict without `--reason`
+  leaves the stored reason in place (`TestStore.closeResult` omits the key, as for `session_id`).
 - Wrap `@cursor/sdk` in `src/ctrl/cursor.ts` as `CursorAgents`, the one file that imports it:
   `Effect.acquireUseRelease` around `Agent.create({ apiKey, model, cloud: { repos: [{ url }] } })`,
   `agent.send(text)`, and a release of `Effect.sync(() => agent.close())`; `create` and `send`
@@ -846,7 +899,7 @@ const request = <S extends Schema.Top>(
   `open` flag is re-checked after it (`qemu: closed`); an `{error}` reply is `QmpError { command,
   class, desc, raw }`. A failing recorder close after a failed exchange only logs
   `db: recording a failed exchange failed too: <message>`; after a completed exchange it surfaces.
-  The client also exposes `greeting`, `closed` (the reason, once gone) and `pending` (a count).
+  The client is `{ execute, closed }`, `closed` resolving with the reason once the socket is gone.
 - The handshake is the readiness probe: `Effect.timeoutOrElse` at `HANDSHAKE_MS` (10 s) around
   the greeting and again in `Qemu.start` around accept and handshake
   (`qemu: handshake timeout[: <stderr>]`); the greeting is recorded as the reply to
@@ -890,9 +943,10 @@ export class QmpListen extends Context.Service<QmpListen, QmpListenService>()(
 - Leaving the scope stops the child: the spawner's own release sends `killSignal`, escalates to
   `SIGKILL` after `forceKillAfter`, and awaits the exit. Add a finalizer only to record an expected
   exit. QEMU runs with `stdin: "ignore", stdout: "ignore", stderr: "pipe", extendEnv: true,
-  detached: false, killSignal: "SIGTERM", forceKillAfter: FORCE_KILL_AFTER` (`"5 seconds"`, so a
-  QEMU that ignores `SIGTERM` cannot wedge a stop, the sweep or shutdown), inheriting the proxy's
-  environment and nothing more.
+  detached: false, killSignal: "SIGTERM", forceKillAfter: FORCE_KILL_AFTER` (`"5 seconds"`),
+  inheriting the proxy's environment and nothing more: a stop, the sweep or shutdown sends QEMU
+  `SIGTERM`, waits at most five seconds, then `SIGKILL`, so a wedged machine cannot hold `/stop`,
+  the sweep tick or the drain (the release awaits the exit, unlike v1's `proc.kill()`).
 - `env` replaces the inherited environment unless `extendEnv: true`; the session REPL's `./client`
   and `./ctrl` children use `extendEnv: true` (how they read `OLIGARCHY_TOKEN`; nothing secret is
   on argv), and `./client` is `detached: true` so a hangup that reaches the foreground group cannot
@@ -901,9 +955,17 @@ export class QmpListen extends Context.Service<QmpListen, QmpListenService>()(
 - Keep the last 4096 bytes of stderr in a `Ref` drained by a `forkScoped` fiber; publish exit
   through a `Deferred<number | null>` (`null` for a signal death); join the drain fiber before
   reading the tail after exit, so `qemu: exited <code> before QMP connect[: <stderr>]` carries the
-  whole tail. Readiness is a bounded wait (`Effect.timeoutOrElse`); secrets go to children on
+  whole tail. `Process.spawn(executable, args)` returns `QemuProcess { exited, exitedBeforeConnect,
+  withStderr }` and no more (no pid, no raw tail); `spawnQemu(args)` is `spawn(Args.QEMU_BIN,
+  args)`. Readiness is a bounded wait (`Effect.timeoutOrElse`); secrets go to children on
   stdin as a `Stream`, never argv. The session's `spawnFollow` exit carries `{ code, killed,
   stderr }` so the REPL can tell a detach from a refusal.
+- `Qemu` boots in two steps under the session's scope: `Qemu.prepare(id, disk)` (below) returns
+  `Prepared { id, dir, diskPath }`, `diskPath` the caller's disk or the fresh qcow2; `Qemu.start(
+  prepared, { iso, display, automation, record })` listens on `<dir>/qmp.sock`, spawns QEMU
+  (`-display` is `display` as given; the command already resolved `--automation` to `none`), races
+  `accept` against the process exiting, and returns `QemuHandle { id, dir, serialPath, sendKeys,
+  sendMouse, screendump }`; a dead QEMU is noticed by the next command failing, not by a watcher.
 - File I/O goes through `FileSystem.FileSystem` and `Path.Path` from `NodeServices.layer`; write
   private files atomically (`writeFile(tmp, bytes, { mode: 0o600 })` then `rename`), create
   private directories with `makeDirectory(dir, { recursive: true, mode: 0o700 })`, recover
@@ -912,35 +974,36 @@ export class QmpListen extends Context.Service<QmpListen, QmpListenService>()(
   `<path>.partial-<pid>` then renamed. URLs are WHATWG `URL`/`URL.canParse`; Effect's `Url` module
   is unused.
 
-`Process.spawn` in `src/qemu/process.ts` (an excerpt): a scoped handle, a bounded stderr tail, exit
-as a `Deferred`; `spawnQemu(args)` is `spawn(Args.QEMU_BIN, args)`.
+`Qemu.prepare` in `src/qemu/qemu.ts`: the session dir with its removal registered first, the
+default disk through `qemu-img` (`Process.createDisk`), the firmware copy; `start` spawns QEMU
+into the same scope afterwards, so the dir outlives the machine.
 
 ```ts
-export const spawn = Effect.fn("Process.spawn")(function* (
-  executable: string,
-  args: ReadonlyArray<string>,
-) {
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const handle = yield* spawner
-    .spawn(
-      // Not detached: the child shares the proxy's process group, as it always has.
-      ChildProcess.make(executable, args, {
-        stdin: "ignore",
-        stdout: "ignore",
-        stderr: "pipe",
-        extendEnv: true,
-        detached: false,
-        // Releasing the scope waits for the exit; a QEMU that ignores SIGTERM must not wedge a
-        // stop, the sweep, or shutdown behind it.
-        killSignal: "SIGTERM",
-        forceKillAfter: FORCE_KILL_AFTER,
-      }),
-    )
-    .pipe(Effect.mapError((error) => startError("qemu", error)));
-  const tail = yield* Ref.make("");
-  const exit = yield* Deferred.make<number | null>();
-  // ... a forkScoped fiber keeps the last STDERR_TAIL_BYTES of stderr in `tail`; `exit` completes
-  // only after Fiber.join(drain); stderrTail, withStderr, exited and exitedBeforeConnect
+const prepare = Effect.fn("Qemu.prepare")(function* (id: string, disk: string | undefined) {
+  const dir = sessionDir(id);
+  yield* fs
+    .makeDirectory(dir, { recursive: true, mode: 0o700 })
+    .pipe(Effect.mapError(startError));
+  // Registered before anything `start` registers, so it runs last: QEMU is dead and the socket
+  // closed before the dir goes.
+  yield* Effect.addFinalizer(() =>
+    fs.remove(dir, { recursive: true, force: true }).pipe(
+      Effect.catch((error) =>
+        log.error(`qemu: removing ${dir} failed: ${Process.detail(error)}`, {
+          sessionId: id,
+          cause: error,
+        }),
+      ),
+    ),
+  );
+  const diskPath = path.join(dir, "disk.qcow2");
+  if (disk === undefined) {
+    yield* withSpawner(Process.createDisk(diskPath, Args.DEFAULT_DISK_SIZE));
+  }
+  yield* fs
+    .copyFile(Args.OVMF_VARS, path.join(dir, "OVMF_VARS.fd"))
+    .pipe(Effect.mapError(startError));
+  return { id, dir, diskPath: disk ?? diskPath } satisfies Prepared;
 });
 ```
 
@@ -953,7 +1016,7 @@ export const spawn = Effect.fn("Process.spawn")(function* (
   (`database unreachable: <detail>`).
 - Drizzle 0.45 (`drizzle-orm/node-postgres`) with drizzle-kit 0.31 and `pg`, behind the service.
   Why not drizzle 1.0: its kit rewrites `drizzle/`, and migrations are append-only. Why not
-  `@effect/sql-pg`: `schema.ts` and `drizzle/**` move byte-for-byte and the service is the Effect
+  `@effect/sql-pg`: `schema.ts` and `drizzle/**` move as they are and the service is the Effect
   boundary. Every query uses Drizzle; never the driver's query API, another ORM, or ad-hoc SQL.
 - The service exposes `run`, `transaction` and `ping`, not the raw drizzle instance.
   `run(operation, (db) => promise)` is `Client.attempt(operation, thunk)` over the instance:
@@ -976,11 +1039,14 @@ export const spawn = Effect.fn("Process.spawn")(function* (
   whose methods are `Effect.fn("db.<name>")` functions that `yield* Database` once in `make`.
   Drizzle-typed columns are trusted; the `jsonb` columns (`sessions.config`, `actions.request`,
   `actions.response`) are written from schema-typed values and read back as Drizzle types them.
-- `src/db/schema.ts` is byte-identical to `v1/`, so its `pgEnum` lists and the `Schema.Literals`
-  in `domain.ts` are maintained by hand together. Row stamps come from Postgres `now()` in the
-  statement; Effect-side time from `Clock.currentTimeMillis`. `registerAgent`'s primary key makes
-  one session per agent; a second registration is a `DatabaseError` by design.
-  `TestStore.closeResult(resultId, status, reason, sessionId)` keeps `session_id` on `null`.
+- `src/db/schema.ts` is v1's schema formatted by oxfmt: semantically identical (`drizzle-kit
+  check` and the `schema-in-sync` job pass against the moved migrations), not byte-identical. Its
+  `pgEnum` lists and the `Schema.Literals` in `domain.ts` are maintained by hand together. Row
+  stamps come from Postgres `now()` in the statement; Effect-side time from
+  `Clock.currentTimeMillis`. `registerAgent`'s primary key makes one session per agent; a second
+  registration is a `DatabaseError` by design. `TestStore.closeResult(resultId, status, reason,
+  sessionId)` omits a `null` `reason` or `sessionId` from the update (drizzle writes `null` but
+  skips an absent key), so an earlier command's values stay.
 
 `Client.runInTransaction` in `src/db/client.ts`: one re-entry, the body's cause re-raised as
 itself.
@@ -1044,7 +1110,8 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
 - Replay is `actions WHERE session_id ORDER BY created_at, id`; the identity id breaks timestamp
   ties. `sessions.config` holds the effective launch config so a replay boots an identical machine.
 - The tables: `sessions`, `agent_runs`, `actions`, `images`, `logs`, `test_definitions`,
-  `test_base_prompts`, `test_runs`, `test_results`. `src/db/schema.ts` is byte-identical to `v1/`.
+  `test_base_prompts`, `test_runs`, `test_results`, declared in `src/db/schema.ts` exactly as v1
+  declares them.
 
 ## Log stream
 
@@ -1053,16 +1120,23 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
   variable is in the attribution (`sessionId`, `agentId`) or in the text after the `;`, as in
   `log.info(\`running; started in ${String(ms)}ms\`, { sessionId, agentId })`.
 - Each line is written twice: to stdout through `Console.log` when the method runs, and as a
-  `logs` row `Queue.offerUnsafe`d to an unbounded queue drained by one `forkScoped` fiber that
-  inserts in call order. A failed insert writes `db: log insert failed: <cause message>` to stdout,
-  reports it to Sentry as a defect, and never fails the caller. `id`, not `created_at`, orders rows.
+  `logs` row `Queue.offerUnsafe`d to a `Queue.unbounded` drained by one `forkScoped` fiber that
+  inserts in call order. The queue is unbounded by policy, as v1's promise chain was: a log call
+  never blocks or drops a row because the database is slow; a long outage costs memory, accepted.
+  A failed insert writes `db: log insert failed: <cause message>` to stdout, reports it to Sentry
+  as a defect, and never fails the caller. `id`, not `created_at`, orders rows.
+- stdout is the convenience copy; the rows and Sentry are the record. The proxy's `main.ts`
+  attaches a no-op `error` listener to `process.stdout` and `process.stderr`, so a write refused by
+  a full filesystem (`ENOSPC`) drops that line instead of raising an uncaught exception per line,
+  which took a proxy down under six installs filling a tmpfs.
 - The stdout line is `[<agent>] text` with the agent in a Rose Pine colour taken round-robin by
-  `acquireColor` in `Sessions.start` and released by `releaseColor` when the session ends (any
-  other agent id stays gray), `[global] text` in gray with no agent, `[agent] gray(sessionId):
-  text` with a session, and a `<level>: ` prefix for non-info lines. Colour is the `Log.Colors`
-  `Context.Reference`, defaulting to `Render.stdoutColors` (a TTY or `FORCE_COLOR`, and
-  `hasColors(16)`); tests override it. The row is the original text, level and attribution;
-  prefix and colour are stdout only.
+  `acquireColor` (`Sessions.start` before the row is inserted; `ctrl test-results` before its
+  line) and released by `releaseColor` when the session ends; `emit` only looks the colour up, so
+  any other agent id stays gray and failed requests cannot grow the palette. `[global] text` is
+  gray with no agent, `[agent] gray(sessionId): text` with a session, and non-info lines carry a
+  `<level>: ` prefix. Colour is the `Log.Colors` `Context.Reference`, defaulting to
+  `Render.stdoutColors` (a TTY or `FORCE_COLOR`, and `hasColors(16)`); tests override it. The row
+  is the original text, level and attribution; prefix and colour are stdout only.
 - Levels are the `log_level` enum in ascending severity and mean severity of the operation, not of
   the state recorded: `info` is the normal story (listening, starting, running, image, serial,
   chords, mouse, intent, stopped, iso cache traffic); `warning` is degraded but went on (a heartbeat
@@ -1072,9 +1146,11 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
   proxy going down, written right before the exit. A `/stop` carrying a `failed` verdict logs at
   info: the stop worked.
 - `error` and `fatal` report to the `ErrorReporter`s captured when the layer was built, unless
-  `skipSentry` is set: with a `cause`, `Cause.die(cause)` at level `error`; without one, a
-  `LogLine` tagged error whose message is the text, at `error` or `fatal`. 4xx request refusals set
-  `skipSentry`: they are the client's mistake.
+  `skipSentry` is set: always as `Cause.fail(Errors.LogLine.make({ text, level, cause? }))`, so the
+  line's own `[ErrorReporter.severity]` carries the level. The reporter hands Sentry the `cause`
+  when the line has one (what Sentry groups on, as v1) and the `LogLine` itself otherwise, at the
+  line's level either way: `log.fatal("proxy: …", { cause })` arrives as `fatal`, never `error`.
+  4xx request refusals set `skipSentry`: they are the client's mistake.
 - `flush` resolves when every offered row has been inserted or its failure reported; the layer
   finalizer runs `flush` before the drain fiber is interrupted, and `Log.layer` (over `LogStore`)
   sits above `Database` so the flush completes before the pool closes. `Log.layer` reads
@@ -1096,23 +1172,26 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
   `@sentry/cloudflare` only in `src/dashboard/`. All three are pinned to one version so
   `@sentry/core` is not duplicated (`SentryEffectTracer` relies on one `getActiveSpan()`).
 - Route exceptions through one `ErrorReporter.make` installed with `ErrorReporter.layer([reporter])`
-  (below); never call `captureException` elsewhere. Tags are `session_id`/`agent_id` from
-  `fiber.getRef(References.CurrentLogAnnotations)` merged with `[ErrorReporter.attributes]`;
-  Effect's `Warn` maps to `warning`, `Fatal` to `fatal`, every other severity to `error`.
+  (below); never call `captureException` elsewhere. Tags are `session_id`/`agent_id` read from
+  `fiber.getRef(References.CurrentLogAnnotations)` (the `Log` methods annotate them, with the text
+  as `log`) merged with the reporter's `attributes`, which no error of ours sets; Effect's `Warn`
+  maps to `warning`, `Fatal` to `fatal`, every other severity to `error`.
 - Install the tracer with `Layer.succeed(Tracer.Tracer)(tracer)`, where `tracer` is a
   `Tracer.make` wrapping `SentryEffectTracer`: a span whose annotations carry the private
   `Exported` reference goes to `SentryEffectTracer.span`, every other span is a
   `Tracer.NativeSpan` no-op. Only `Sentry.sessionSpan`, `Sentry.intentSpan` and
-  `Sentry.withActionSpan` set it, so `Effect.fn("Service.method")` spans never reach Sentry.
-- Two long-lived spans are held by hand with `Effect.makeSpan(name, { root?, parent?, annotations,
-  attributes })`, `span.attribute(k, v)` and `span.end(nanos, exit)`: `QEMU session` (op
-  `qemu.session`, attributes `session_id`, `agent_id`, ending with `session_status`) from
-  `sessionSpan(sessionId, agentId)` / `endSessionSpan(span, status)`, and the intent span named by
-  its message (op `agent.intent`, attributes `session_id`, `agent_id`, `test_result_id`, `intent`,
-  ending with `intent_state`) from `intentSpan(parent, ...)` / `endIntentSpan(span, state)`.
-  Actions are `QMP <cmd>` (op `qemu.action`, `session_id`, `agent_id`, `qemu.command`,
-  `action_state`, `image_url` on a screendump) through `withActionSpan(parent, command, sessionId,
-  agentId)`, an `Effect.withSpan` under the open intent or the session.
+  `Sentry.actionSpan` set it, so `Effect.fn("Service.method")` spans never reach Sentry.
+- All three exported spans are held by hand with `Effect.makeSpan(name, { root?, parent?,
+  annotations, attributes })`, `span.attribute(k, v)` and `span.end(nanos, exit)`, because each
+  opens and ends in different Effects: `QEMU session` (op `qemu.session`, attributes `session_id`,
+  `agent_id`, ending with `session_status`) from `sessionSpan(sessionId, agentId)` /
+  `endSessionSpan(span, status)`; the intent span named by its message (op `agent.intent`,
+  attributes `session_id`, `agent_id`, `test_result_id`, `intent`, ending with `intent_state`)
+  from `intentSpan(parent, ...)` / `endIntentSpan(span, state)`; and `QMP <cmd>` (op
+  `qemu.action`, `session_id`, `agent_id`, `qemu.command`, ending with `action_state` and
+  `image_url` on a completed screendump) from `actionSpan(parent, command, sessionId, agentId)` in
+  the recorder's open and `endActionSpan(span, state, imageUrl?)` in its close, under the open
+  intent or the session; a session ending fails its open action spans. No per-action fiber.
 - The Sentry op is the `"sentry.op"` attribute. Status comes from the `Exit` (`statusExit`):
   success is `ok`; `Exit.fail("deadline_exceeded")` for `timed_out`, `Exit.fail("aborted")` for
   `aborted` and for a cancelled intent (Sentry maps `cancelled` to ok, hence `aborted`),
@@ -1127,22 +1206,30 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
 - Test the policy with `ErrorReporter.make` collecting errors (`test/support/reporter.ts`), a
   recording `Tracer` (`test/support/tracer.ts`) and an in-memory Sentry transport; never mock it.
 
-`SentryLive` in `src/observability/sentry.ts` (an excerpt; `Exported` is the private annotation
-reference and `tag`/`toSentryLevel` its helpers): reporter, tracer, flush.
+The reporter in `src/observability/sentry.ts` (`tag`/`toSentryLevel` are its helpers): one
+`captureException` per reported cause, a `LogLine` unwrapped to the cause it carries.
 
 ```ts
 export const reporter: ErrorReporter.ErrorReporter = ErrorReporter.make(
   ({ error, severity, attributes, fiber }) => {
     const annotations = fiber.getRef(References.CurrentLogAnnotations);
     const context = { ...annotations, ...attributes };
-    Sentry.captureException(error, {
+    // A log line brings the level and the text (`extra.log`); the exception Sentry groups on is
+    // the cause it carries, as it always was. A line without a cause is the exception itself.
+    const exception =
+      error.name === Errors.LogLine.identifier && error.cause !== undefined ? error.cause : error;
+    Sentry.captureException(exception, {
       level: toSentryLevel(severity),
       tags: Object.assign({}, tag(context, "session_id"), tag(context, "agent_id")),
       extra: context,
     });
   },
 );
+```
 
+`SentryLive`, same file (`Exported` is the private annotation reference): tracer and flush.
+
+```ts
 const tracer = Tracer.make({
   span(options) {
     return Context.getOrElse(options.annotations, Exported, () => false)
@@ -1171,8 +1258,10 @@ attributes })` and ends with `span.attribute("session_status", status)` then
 - Every long-lived thing lives in a `Scope`: `Effect.acquireRelease` in layers,
   `Effect.addFinalizer` in scoped effects, `Effect.acquireUseRelease` for a local use,
   `Effect.forkScoped` for loops. A live session owns a `Scope.make()` closed with
-  `Scope.close(scope, Exit.void)` by `stop`, the sweep or the drain; QEMU is started under
-  `Scope.provide(live.scope)`; action-span fibers are `Effect.forkIn` the `Sessions` layer scope.
+  `Scope.close(scope, Exit.void)` by `stop`, the sweep or the drain; `Qemu.prepare` and
+  `Qemu.start` run under `Scope.provide(live.scope)`, so closing it kills QEMU, closes the socket
+  and removes the dir in that order. `Effect.forkIn(effect, scope)` ties a fiber to a named scope
+  (the REPL's boot fiber, the follow view's spinner); `Sessions` forks nothing per action.
 - Timeouts are always `Effect.timeoutOrElse({ duration, orElse })`; races are `Effect.raceFirst`.
 - Bridge callback APIs with `Effect.callback((resume) => { ...; return Effect.sync(cleanup) })`
   (resume at most once, return the cleanup) and event sources with `Stream.callback((queue) => ...)`
@@ -1211,8 +1300,7 @@ detach(live, queue)))`; `emit(live, event)` offers to every queue with `Queue.of
   module returns an Effect; the only other sanctioned runners are `Effect.runForkWith(context)` and
   `Effect.runPromiseExitWith(context)` re-entering Effect from a non-Effect callback after
   `const context = yield* Effect.context<R>()`; `test/repo/architecture.unit.test.ts` allows them
-  in `db/client.ts` (`pool.on("error")`, drizzle's `transaction`) and `runForkWith` alone in
-  `observability/log.ts` and `qmp/socket.ts`, unused there today.
+  in `src/db/client.ts` alone (`pool.on("error")`, drizzle's `transaction`), nowhere else.
 - The CLIs run `Command.run(cmd, { version })` directly under `runMain`; only the proxy
   `Layer.launch`es, and its stop condition is `Effect.raceFirst(Layer.launch(serve(display,
   automation, port)), Deferred.await(serverFailed))` inside the command handler.
@@ -1220,8 +1308,11 @@ detach(live, queue)))`; `emit(live, event)` offers to every queue with `Queue.of
   reverse order (sessions drained and closed `aborted` with `proxy shutdown`, the log flushed,
   Sentry flushed, the pool closed). Component layers never install signal handlers. The session
   REPL is the exception: `Runtime.makeRunMain` installs none, and the REPL answers `SIGINT`
-  (readline), `SIGTERM` and `SIGHUP` (`Readline.signals`, the `Host.termination` Effect) itself,
-  killing the follow child, awaiting a boot in flight and stopping the session.
+  (readline), `SIGTERM` and `SIGHUP` (`Readline.signals`, the `Host.termination` Effect) itself.
+  Its shutdown order is fixed: interrupt the completions fiber first (an open follow picker clears
+  the lines under the prompt as it leaves, wiping anything printed before), close readline, kill
+  the follow child and await its close, await a boot in flight, then print `stopping session <id>`
+  and stop the session.
 - Exit codes come from `Runtime.defaultTeardown` (`Runtime.errorExitCode` or 1 on failure) for the
   CLIs; the proxy passes a custom `teardown` mapping interruption to 0 unless the drain failed, and
   any other failure to 1. Never mutate `process.exitCode`; the session's runner owns `process.exit`.
@@ -1232,12 +1323,13 @@ detach(live, queue)))`; `emit(live, event)` offers to every queue with `Queue.of
   `HttpServerError.ServeError`, sets the drain reason to `proxy error: <msg>`, and exits 1; a
   second error is ignored. Shutdown logs `proxy: shutting down; stopping N sessions`, then
   `stopped; aborted; proxy shutdown` per session.
-- `Sessions.Shutdown` is a `Context.Reference` `{ reason: Ref<string>; failed: Ref<boolean> }`:
-  `main.ts` holds `Sessions.Shutdown.defaultValue()`, provides it to the `Sessions` layer, writes
-  `reason` from the server `error` listener and reads `failed` in the teardown; the drain reads
-  `reason` and sets `failed` when a settlement rejected. `MainLive` is built with `Layer.build`
-  before the command runs, so a missing variable or a bad `DATABASE_URL`, the one failure no `Log`
-  exists to record, prints `<NAME> is not set` and `Cause.pretty` on stderr.
+- `Sessions.Shutdown` is a `Context.Reference` `{ reason: MutableRef<string>; failed:
+  MutableRef<boolean> }` (`MutableRef`, because both ends sit outside Effect): `main.ts` holds
+  `Sessions.Shutdown.defaultValue()`, provides it to the `Sessions` layer, sets `reason` from the
+  Node `error` listener and reads `failed` in the teardown; the drain reads `reason` and sets
+  `failed` when a settlement rejected. `MainLive` is built with `Layer.build` before the command
+  runs, so a missing variable or a bad `DATABASE_URL`, the one failure no `Log` exists to record,
+  prints `<NAME> is not set` and `Cause.pretty` on stderr through `Render.reportFailure`.
 
 `src/proxy/main.ts` (an excerpt): the server is created here so its `error` event can end the
 race; `ServerLive(display, automation, port)` is `Layer.effectDiscard(listenLine)` over
@@ -1246,23 +1338,23 @@ race; `ServerLive(display, automation, port)` is `Layer.effectDiscard(listenLine
 
 ```ts
 const shutdown = Sessions.Shutdown.defaultValue();
+process.stdout.on("error", () => {});
+process.stderr.on("error", () => {});
 
 const server = createServer();
 const serverFailed = Deferred.makeUnsafe<never, HttpServerError.ServeError>();
 server.on("error", (cause) => {
   if (Deferred.doneUnsafe(serverFailed, Exit.fail(new HttpServerError.ServeError({ cause })))) {
-    MutableRef.set(shutdown.reason.ref, `proxy error: ${cause.message}`);
+    MutableRef.set(shutdown.reason, `proxy error: ${cause.message}`);
   }
 });
 // ... ServerLive(display, automation, port), MainLive, proxyCommand
 
 const program = Effect.gen(function* () {
-  const services = yield* Layer.build(MainLive).pipe(
-    Effect.tapCause((cause) => Console.error(Render.renderFailure(cause))),
-  );
+  const services = yield* Layer.build(MainLive).pipe(Effect.tapCause(Render.reportFailure));
   yield* Command.run(proxyCommand, { version: Api.VERSION }).pipe(
     Effect.provide(services),
-    Effect.tapDefect((defect) => Console.error(Render.renderFailure(Cause.die(defect)))),
+    Effect.tapDefect((defect) => Render.reportFailure(Cause.die(defect))),
   );
 }).pipe(Effect.scoped);
 
@@ -1271,7 +1363,7 @@ const teardown: Runtime.Teardown = (exit, onExit) => {
     onExit(1);
     return;
   }
-  onExit(Ref.getUnsafe(shutdown.failed) ? 1 : 0);
+  onExit(MutableRef.get(shutdown.failed) ? 1 : 0);
 };
 
 NodeRuntime.runMain(program, { disableErrorReporting: true, teardown });
@@ -1323,13 +1415,17 @@ Developers need the same model of a drive as the agents `prompts/linear-issue.ht
   `npm run test:unit`, part of `check:fast`) and `test/integration/*.integration.test.ts` (spawned
   executables, sockets, containers, processes; `npm run test:integration`). `passWithNoTests` is
   false. Anything that needs `qemu-system-x86_64` is integration and gated on the binary.
-- Import `describe`, `expect` and a plain `it` from `vitest`; import `it` from `@effect/vitest`
-  where `it.effect` or `it.live` is used, and `layer(L, { timeout })((it) => ...)` only for the
-  migrated container. `expect` everywhere; `assert` only where `expect` cannot narrow.
+- Two `it`s: a pure test (`test/repo/*`, `qemu/keys`, `qmp/framing`, `session/grammar`, `shared/*`,
+  the black-box CLI process tests) imports `describe`, `expect` and `it` from `vitest`; an Effect
+  test imports `it` from `@effect/vitest` (`describe` and `expect` still from `vitest`) and uses
+  `it.effect` or `it.live`, and `layer(L, { timeout })((it) => ...)` only for the migrated
+  container. `expect` everywhere; `assert` only where `expect` cannot narrow.
 - `it.effect` gives every body its own `Scope`, `TestClock` and `TestConsole`; drive timers with
   `TestClock.adjust`; assert output with `TestConsole.logLines`; `it.live` only for real clocks,
-  sockets, processes and the Sentry SDK. A fresh fake layer per `it.effect`,
-  `NodeHttpServer.layerTest` included; the shared `layer(...)` only for the container.
+  sockets, processes (the integration lane) and the Sentry SDK (`observability/sentry`). Never a
+  real `Effect.sleep` to let an interrupt land; `Fiber.await` the interrupted fiber or a `Deferred`.
+  A fresh fake layer per `it.effect`, `NodeHttpServer.layerTest` included; the shared `layer(...)`
+  only for the container.
 - Fakes are `Layer.succeed(Tag)(Tag.of({...}))` factories that record their calls
   (`fakeLog().lines`, `fakeQemu().calls`, `fakeSessionStore().sessions`) with every unused member
   `Effect.die("Unexpected <Service>.<method>")`, kept under `test/support/`: `config.ts`
@@ -1338,8 +1434,9 @@ Developers need the same model of a drive as the agents `prompts/linear-issue.ht
   and `stub-cursor.ts` for the process tests, and `postgres.ts`. Never `vi.mock`, `vi.spyOn`, or
   a `fetch` stub.
 - Assert failures with `Effect.flip` and `expect(error).toMatchObject({ _tag, message })`;
-  `Effect.exit` only when a defect or interruption is under test (`Cause.hasDies`). Every failure
-  test also asserts a sentinel secret is absent from the rendered error.
+  `Effect.exit` only when a defect or interruption is under test (`Cause.hasDies`). A failure test
+  whose input carries a secret (a token, a `DATABASE_URL` password: `config`, `db/client`, the proxy
+  and dashboard process tests) also asserts that sentinel is absent from the rendered error.
 - Test an `HttpApi` in-process with `HttpRouter.serve(Handlers.routes("none", false), {
   disableLogger: true, disableListenLog: true }).pipe(Layer.provide(fakes),
   Layer.provideMerge(NodeHttpServer.layerTest), Layer.provideMerge(bearer(TOKEN)))` and
@@ -1349,20 +1446,25 @@ Developers need the same model of a drive as the agents `prompts/linear-issue.ht
   and `TestConsole`; assert `ShowHelp` with `errors.length === 0` for help and that no service was
   touched. Add a black-box process test per CLI that pins exit codes and the first stderr line;
   for the proxy: readiness through the client, SIGINT and SIGTERM, SIGKILL escalation, the pid gone
-  and the port refusing. Spawn helpers may be plain functions inside the test file.
+  and the port refusing, and serving on (refusals, `/stats`, exit 0 on SIGTERM) with stdout and
+  stderr opened on `/dev/full`. Spawn helpers may be plain functions inside the test file.
 - Postgres tests run against Testcontainers with the real migrations and the seed in
   `vitest.global-setup.ts` and read `inject("dbUrl")` (`Postgres.describeWithDatabase` skips when
   it is empty); they skip locally without Docker and fail in CI (`CI` or
   `OLIGARCHY_REQUIRE_DATABASE=1`). Unit tests never touch a database. No test connects to the
   production database, calls Linear or Cursor, boots QEMU, or migrates a remote database.
 - Encode repository invariants oxlint cannot express as source-scanning tests in `test/repo/`: the
-  boundary-file allow-list, `Effect.run*` placement, every `Flag.boolean` defaulted, HttpApi
-  ownership, namespace imports with `.ts`, deep-path Effect imports, no `as` but `as const`,
-  `@oligarchy/` identifiers, no `Data.TaggedError`, `class Error` or re-export, the script names,
-  no `"warn"`, `erasableSyntaxOnly` and the language-service plugin.
-- Tests are behaviour across a boundary; do not test static constants, literal order or config
-  objects. Delete obsolete tests with their feature. Test vendor behaviour (QMP frames, Linear
-  responses, Cursor errors) with exact captured fixtures; label a synthetic fixture synthetic.
+  boundary-file allow-list, the `node:*` exceptions and `Effect.run*` placement (each list checked
+  to name files that exist), every `Flag.boolean` defaulted, HttpApi ownership, namespace imports
+  with `.ts`, deep-path Effect imports, no `as` but `as const`, `@oligarchy/` identifiers, no
+  `Data.TaggedError`, `class Error` or re-export, the script names (no `drizzle-kit push`), no
+  `"warn"`, `erasableSyntaxOnly` and the language-service plugin.
+- Tests are behaviour across a boundary; do not test static constants (`QEMU_BIN`, the OVMF paths),
+  literal order, a table entry by entry, or config objects (the exact `check:fast` string). Delete
+  obsolete tests with their feature, and never export a member for a test to read: assert the
+  behaviour (`execute` after close fails `qemu: closed`; `sessions.stats` reports `qemus`). Test
+  vendor behaviour (QMP frames, Linear responses, Cursor errors) with exact captured fixtures;
+  label a synthetic fixture synthetic.
 
 One `it.effect` over the real fakes with `Effect.flip`.
 
@@ -1389,7 +1491,6 @@ it.effect("refuses a foreign agent", () =>
       _tag: "Forbidden",
       message: `agent "OLI-62" does not own session "${id}"`,
     });
-    expect(Cause.pretty(Cause.fail(error))).not.toContain("secret-token");
   }).pipe(Effect.provide(SessionsLive)),
 );
 ```
