@@ -110,13 +110,7 @@ export const apply = (view: View, event: Domain.FollowEvent): View => {
         ),
       };
     case "image":
-      return {
-        ...view,
-        png: Result.match(Encoding.decodeBase64(event.png), {
-          onFailure: () => view.png,
-          onSuccess: Option.some,
-        }),
-      };
+      return { ...view, png: Option.some(Result.getOrThrow(Encoding.decodeBase64(event.png))) };
   }
   return event satisfies never;
 };
@@ -126,7 +120,7 @@ export const tick = (view: View): View => ({ ...view, frame: view.frame + 1 });
 // Every line is written over in full at a fixed width and nothing ever wraps or writes a
 // newline, so the screen never scrolls and the image placement to the right stays put.
 export const draw = (view: View, rows: number): string => {
-  const glyph = SPINNER[view.frame % SPINNER.length] ?? "";
+  const glyph = SPINNER[view.frame % SPINNER.length];
   const header = `following ${view.id.slice(0, 8)} `;
   let out = `\x1b[1;2H${header}${STATUS_COLOR[view.status]}${view.status}${RESET}${" ".repeat(
     LEFT_COLS - 1 - header.length - view.status.length,

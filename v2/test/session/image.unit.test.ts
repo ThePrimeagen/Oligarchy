@@ -238,15 +238,26 @@ describe("decodePng", () => {
     expect(Array.from(decoded.pixels)).toEqual(Array.from(pixels));
   });
 
-  it("inflates stored, fixed-Huffman and dynamic-Huffman deflate streams", () => {
+  it("round-trips pixels through zlib's deflateSync at every compression level", () => {
     for (const [pixels, size, level] of [
       [noise(30, 30), 30, 0],
-      [TINY_PIXELS, 2, 9],
+      [TINY_PIXELS, 2, 1],
+      [gradient(64, 64), 64, 6],
       [gradient(64, 64), 64, 9],
     ] as const) {
       const decoded = Result.getOrThrow(Image.decodePng(makePng(size, size, pixels, { level })));
       expect(Array.from(decoded.pixels)).toEqual(Array.from(pixels));
     }
+  });
+
+  it("decodes a screendump-sized image with the filters a PNG writer picks", () => {
+    const pixels = gradient(320, 200);
+    const png = makePng(320, 200, pixels, { filter: (row) => (row * 3) % 5 });
+    const decoded = Result.getOrThrow(Image.decodePng(png));
+    expect(decoded.width).toBe(320);
+    expect(decoded.height).toBe(200);
+    expect(decoded.pixels.length).toBe(320 * 200 * 3);
+    expect(Buffer.from(decoded.pixels).equals(Buffer.from(pixels))).toBe(true);
   });
 
   it("rejects 16-bit, non-RGB and interlaced images with the exact message", () => {
@@ -277,7 +288,7 @@ describe("decodePng", () => {
     }
   });
 
-  it("rejects a corrupt deflate stream", () => {
+  it("rejects a corrupt deflate stream with zlib's reason, as a failure not a throw", () => {
     const png = tinyPng();
     const corrupt = new Uint8Array(png);
     // The first IDAT payload starts after the signature (8), IHDR (25) and the IDAT header (8).
@@ -286,8 +297,40 @@ describe("decodePng", () => {
     const result = Image.decodePng(corrupt);
     expect(Result.isFailure(result)).toBe(true);
     if (Result.isFailure(result)) {
-      expect(result.failure._tag).toBe("PngDecodeError");
-      expect(result.failure.message.startsWith("bad png data")).toBe(true);
+      expect(result.failure).toMatchObject({
+        _tag: "PngDecodeError",
+        message: "bad png data: incorrect header check",
+      });
     }
+  });
+
+  it("rejects a deflate stream cut short with zlib's reason", () => {
+    const raw = Buffer.alloc(2 * 7);
+    for (let y = 0; y < 2; y++) {
+      raw.set(TINY_PIXELS.subarray(y * 6, y * 6 + 6), y * 7 + 1);
+    }
+    const compressed = deflateSync(raw);
+    const ihdr = Buffer.alloc(13);
+    ihdr.writeUInt32BE(2, 0);
+    ihdr.writeUInt32BE(2, 4);
+    ihdr[8] = 8;
+    ihdr[9] = 2;
+    const truncated = new Uint8Array(
+      Buffer.concat([
+        Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+        chunk("IHDR", ihdr),
+        chunk("IDAT", compressed.subarray(0, compressed.length - 4)),
+        chunk("IEND", Buffer.alloc(0)),
+      ]),
+    );
+    const result = Image.decodePng(truncated);
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(result.failure).toMatchObject({
+        _tag: "PngDecodeError",
+        message: "bad png data: unexpected end of file",
+      });
+    }
+    expect(Result.isFailure(Image.renderImage(truncated, "ansi", 80))).toBe(true);
   });
 });

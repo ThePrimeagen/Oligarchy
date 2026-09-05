@@ -84,21 +84,6 @@ export type Command =
   | { readonly _tag: "malformed"; readonly command: MalformedCommand; readonly usage: string }
   | { readonly _tag: "unknown"; readonly command: string };
 
-const CLIENT_TAGS: ReadonlySet<string> = new Set([
-  "start",
-  "get-image",
-  "get-serial",
-  "send-keys",
-  "send-mouse",
-  "intent-start",
-  "intent-end",
-  "stop",
-  "follow",
-]);
-
-export const isClientCommand = (command: Command): command is ClientCommand =>
-  CLIENT_TAGS.has(command._tag);
-
 // These print `no session. run start first.` before their usage is judged.
 export const needsSession = (command: MalformedCommand): boolean =>
   command === "send-keys" ||
@@ -118,7 +103,7 @@ const words = (rest: string): ReadonlyArray<string> => (rest === "" ? [] : rest.
 const isStopStatus = Schema.is(Domain.StopStatus);
 
 const parseIntent = (rest: string): Command => {
-  const verb = rest.split(/\s+/, 1)[0] ?? "";
+  const verb = rest.split(/\s+/, 1)[0];
   const message = rest.slice(verb.length).trim();
   switch (verb) {
     case "start":
@@ -136,7 +121,7 @@ const parseStop = (rest: string): Command => {
   if (rest === "") {
     return { _tag: "stop", status: Option.none(), reason: Option.none() };
   }
-  const status = rest.split(/\s+/, 1)[0] ?? "";
+  const status = rest.split(/\s+/, 1)[0];
   if (!isStopStatus(status)) {
     return malformed("stop", "usage: stop [succeeded|failed|aborted] [reason]");
   }
@@ -150,7 +135,7 @@ const parseStop = (rest: string): Command => {
 
 export const parseLine = (line: string): Command => {
   const trimmed = line.trim();
-  const command = trimmed.split(/\s+/, 1)[0] ?? "";
+  const command = trimmed.split(/\s+/, 1)[0];
   const rest = trimmed.slice(command.length).trim();
   switch (command) {
     case "start": {
@@ -278,15 +263,15 @@ const startingWith = (candidates: ReadonlyArray<string>, word: string): Completi
 export const complete = (line: string): Completing => {
   const followArg = /^\s*follow\s+(\S*)$/.exec(line);
   if (followArg !== null) {
-    return { _tag: "follow", prefix: followArg[1] ?? "" };
+    return { _tag: "follow", prefix: followArg[1] };
   }
   const intentArg = /^\s*intent\s+(\S*)$/.exec(line);
   if (intentArg !== null) {
-    return { _tag: "words", completion: startingWith(["start", "end"], intentArg[1] ?? "") };
+    return { _tag: "words", completion: startingWith(["start", "end"], intentArg[1]) };
   }
   const stopArg = /^\s*stop\s+(\S*)$/.exec(line);
   if (stopArg !== null) {
-    return { _tag: "words", completion: startingWith(STOP_STATUSES, stopArg[1] ?? "") };
+    return { _tag: "words", completion: startingWith(STOP_STATUSES, stopArg[1]) };
   }
   const word = line.trimStart();
   if (/\s/.test(word)) {

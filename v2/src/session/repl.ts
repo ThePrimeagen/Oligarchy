@@ -294,9 +294,12 @@ const onSigint = (repl: Repl): Effect.Effect<void> =>
     Option.match({ onNone: () => repl.requestExit, onSome: (following) => following.kill }),
   );
 
-const shutdown = (repl: Repl): Effect.Effect<void, never, Env> =>
+const shutdown = (repl: Repl, completions: Fiber.Fiber<void>): Effect.Effect<void, never, Env> =>
   Effect.gen(function* () {
     const { session } = repl;
+    // An open follow picker owns the lines under the prompt and clears them as it leaves, so it
+    // goes first: anything printed before that would be wiped.
+    yield* Fiber.interrupt(completions);
     yield* Readline.close(repl.terminal.handle);
     // The follow child is in its own process group, so a hangup or SIGTERM here never reaches
     // it; its close is what hands the screen back, so wait for that before exiting.
@@ -345,7 +348,7 @@ export const run = Effect.fn("Repl.run")(function* (serverUrl: string) {
       };
       yield* Console.log(`server ${serverUrl}`);
       yield* Console.log(Grammar.HINT);
-      yield* Effect.forkScoped(
+      const completions = yield* Effect.forkScoped(
         Stream.runForEach(terminal.completions, (request) => reporting(complete(repl, request))),
       );
       yield* Effect.forkScoped(Stream.runForEach(terminal.sigints, () => onSigint(repl)));
@@ -363,7 +366,7 @@ export const run = Effect.fn("Repl.run")(function* (serverUrl: string) {
         }),
       );
       yield* Effect.raceFirst(loop, Deferred.await(exitRequested));
-      yield* shutdown(repl);
+      yield* shutdown(repl, completions);
     }),
   );
 });

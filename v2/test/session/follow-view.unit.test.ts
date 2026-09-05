@@ -1,6 +1,7 @@
+import { deflateSync } from "node:zlib";
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { type Cause, Effect, Fiber, Option, Queue, Stream } from "effect";
+import { Cause, Effect, Exit, Fiber, Option, Queue, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import * as FollowView from "../../src/session/follow-view.ts";
 import * as Image from "../../src/session/image.ts";
@@ -9,11 +10,26 @@ import { fakeTty } from "../support/fake-tty.ts";
 
 const FOLLOWED_ID = "7a2d0000-0000-4000-8000-00000000f011";
 const IMAGE_ID = "9c4f0000-0000-4000-8000-00000000b2d3";
-// A 2x2 RGB PNG (only the IHDR dimensions matter to placement).
-const TINY_PNG = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAF0lEQVR4nGP4z8DAwPCfgYGB4T8DAwMDAB1cBf6DrvMVAAAAAElFTkSuQmCC",
-  "base64",
-);
+// A 2x2 8-bit RGB PNG (only the IHDR dimensions matter to placement).
+const TINY_PNG = ((): Buffer => {
+  const chunk = (type: string, data: Buffer): Buffer => {
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(data.length);
+    return Buffer.concat([length, Buffer.from(type, "latin1"), data, Buffer.alloc(4)]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(2, 0);
+  ihdr.writeUInt32BE(2, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 2;
+  const rows = Buffer.from([0, 255, 0, 0, 0, 255, 0, 0, 0, 0, 255, 255, 255, 255]);
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", ihdr),
+    chunk("IDAT", deflateSync(rows)),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
+})();
 const TINY_PNG_BASE64 = TINY_PNG.toString("base64");
 
 const settle: Effect.Effect<void> = Effect.gen(function* () {
@@ -301,6 +317,27 @@ describe("follow view runner", () => {
         FollowView.run(FOLLOWED_ID, Stream.make("not json"), tty.output),
       );
       expect(exit._tag).toBe("Failure");
+    }),
+  );
+
+  it.effect("an image whose png is not base64 is a defect that still hands the screen back", () =>
+    Effect.gen(function* () {
+      const bad: Domain.FollowEvent = { type: "image", id: IMAGE_ID, png: "%%not base64%%" };
+      expect(() => FollowView.apply(FollowView.initialView(FOLLOWED_ID), bad)).toThrow();
+      const tty = fakeTty();
+      const exit = yield* Effect.exit(
+        FollowView.run(
+          FOLLOWED_ID,
+          Stream.make(
+            encode({ type: "session", status: "running" }).trimEnd(),
+            encode(bad).trimEnd(),
+          ),
+          tty.output,
+        ),
+      );
+      expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true);
+      expect(tty.written()).toContain(FollowView.ENTER_SCREEN);
+      expect(tty.written().endsWith(`${Image.clearImages}${FollowView.LEAVE_SCREEN}`)).toBe(true);
     }),
   );
 });

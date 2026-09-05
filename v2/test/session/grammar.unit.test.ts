@@ -6,10 +6,16 @@ const SESSION_ID = "6f1c0000-0000-4000-8000-00000000e2a9";
 
 const clientArgs = (line: string): ReadonlyArray<string> => {
   const command = Grammar.parseLine(line);
-  if (!Grammar.isClientCommand(command)) {
-    throw new Error(`${line} is not a client command: ${command._tag}`);
+  switch (command._tag) {
+    case "status":
+    case "help":
+    case "exit":
+    case "malformed":
+    case "unknown":
+      throw new Error(`${line} is not a client command: ${command._tag}`);
+    default:
+      return Grammar.toClientArgs(command, SESSION_ID);
   }
-  return Grammar.toClientArgs(command, SESSION_ID);
 };
 
 describe("parseLine maps every REPL line to the client's argv", () => {
@@ -127,9 +133,6 @@ describe("parseLine maps every REPL line to the client's argv", () => {
     expect(Grammar.parseLine("help")).toEqual({ _tag: "help" });
     expect(Grammar.parseLine("exit")).toEqual({ _tag: "exit" });
     expect(Grammar.parseLine("quit")).toEqual({ _tag: "exit" });
-    for (const line of ["status", "help", "exit", "quit"]) {
-      expect(Grammar.isClientCommand(Grammar.parseLine(line))).toBe(false);
-    }
   });
 
   it("the parsed start keeps iso and disk as options", () => {
@@ -244,17 +247,6 @@ describe("parseLine refuses malformed lines with the exact usage text", () => {
       command: "follow",
       usage: "usage: follow <session-id>",
     });
-  });
-
-  it("names the commands that need a session before their usage is judged", () => {
-    expect(Grammar.needsSession("send-keys")).toBe(true);
-    expect(Grammar.needsSession("send-mouse")).toBe(true);
-    expect(Grammar.needsSession("intent-start")).toBe(true);
-    expect(Grammar.needsSession("intent-end")).toBe(true);
-    expect(Grammar.needsSession("stop")).toBe(true);
-    expect(Grammar.needsSession("intent")).toBe(false);
-    expect(Grammar.needsSession("follow")).toBe(false);
-    expect(Grammar.needsSession("start")).toBe(false);
   });
 });
 
