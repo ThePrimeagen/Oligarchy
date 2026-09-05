@@ -1,5 +1,14 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { accessSync, constants, mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import {
+  accessSync,
+  closeSync,
+  constants,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  rmSync,
+  symlinkSync,
+} from "node:fs";
 import { createServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
@@ -336,6 +345,56 @@ describe("proxy serving", () => {
 
       await expect(request(port, "GET", "/stats")).rejects.toThrow();
     });
+
+  // A proxy whose stdout is a file on a full disk: Node reports each failed log write as a stream
+  // 'error' that, unhandled, is an uncaught exception per line and took a proxy down under six
+  // installs filling a tmpfs. The rows and Sentry are the record; the lines are dropped.
+  it.live.skipIf(!hasQemu || dbUrl === "")(
+    "keeps serving when stdout and stderr cannot be written",
+    () =>
+      Effect.promise(async () => {
+        const port = await freePort();
+        const full = openSync("/dev/full", "w");
+        const dir = mkdtempSync(join(tmpdir(), "oligarchy-proxy-test-"));
+        const child = spawn(SERVER, ["--port", String(port)], {
+          cwd: dir,
+          env: environment({}),
+          stdio: ["ignore", full, full],
+        });
+        const exited = new Promise<number | null>((resolve) => {
+          child.on("close", (code) => {
+            rmSync(dir, { recursive: true, force: true });
+            resolve(code);
+          });
+        });
+        try {
+          const deadline = Date.now() + 30_000;
+          let up = false;
+          while (!up && Date.now() < deadline) {
+            up = await request(port, "GET", "/stats", { authorization: `Bearer ${TOKEN}` })
+              .then((response) => response.status === 200)
+              .catch(() => false);
+            if (!up) await new Promise((wake) => setTimeout(wake, 200));
+          }
+          expect(up).toBe(true);
+          // Every refusal writes an error line to the dead stdout.
+          for (let i = 0; i < 20; i++) {
+            expect((await request(port, "POST", "/send-keys")).status).toBe(401);
+          }
+          await new Promise((wake) => setTimeout(wake, 500));
+          expect(child.exitCode).toBeNull();
+          expect(
+            (await request(port, "GET", "/stats", { authorization: `Bearer ${TOKEN}` })).status,
+          ).toBe(200);
+          child.kill("SIGTERM");
+          expect(await exited).toBe(0);
+        } finally {
+          closeSync(full);
+          if (child.exitCode === null) child.kill("SIGKILL");
+        }
+      }),
+    120_000,
+  );
 
   it.live.skipIf(!hasQemu || dbUrl === "")(
     "listens, answers /stats, 401 and 404, and exits 0 on SIGINT",

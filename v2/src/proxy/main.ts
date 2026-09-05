@@ -36,6 +36,12 @@ const HOST = "127.0.0.1";
 // Shared with the Sessions drain: the reason surviving rows close with, and whether one refused.
 const shutdown = Sessions.Shutdown.defaultValue();
 
+// stdout is the convenience copy of the log; the rows and Sentry are the record. When it is a file
+// on a full disk, Node reports the failed write as an 'error' event that, unhandled, is an uncaught
+// exception per line — which took a proxy down under six installs filling a tmpfs. Drop the line.
+process.stdout.on("error", () => {});
+process.stderr.on("error", () => {});
+
 // The platform drops its error listener once the server is up; a later server error (the
 // acceptor breaking) still needs the fatal line, the drain and exit 1. Only the first counts:
 // later accept errors must not exit before the first fatal flush finishes.
