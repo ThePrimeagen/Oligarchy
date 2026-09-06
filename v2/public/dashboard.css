@@ -478,6 +478,53 @@ main {
   white-space: pre-wrap;
 }
 
+.model-chart {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.model-chart__row {
+  display: grid;
+  grid-template-columns: minmax(6.5rem, 9.5rem) 1fr;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.model-chart__name {
+  color: var(--terminal-white);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.model-chart__bar {
+  display: flex;
+  min-height: 1.6rem;
+  overflow: hidden;
+  background: rgb(122 162 247 / 12%);
+}
+
+.model-chart__ok,
+.model-chart__failed {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.6em;
+  padding-inline: 0.35em;
+  color: var(--background-night);
+  font-weight: 700;
+}
+
+.model-chart__ok {
+  background: var(--green);
+}
+
+.model-chart__failed {
+  background: var(--failed);
+}
+
 .empty-state {
   display: grid;
   min-height: 14rem;

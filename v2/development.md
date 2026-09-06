@@ -1271,6 +1271,13 @@ and drizzle, the same tables the Effect `TestStore` writes. It does not call `Pr
 - `definitionStats` folds those 50 rows by definition name: succeeded, failed, and every other
   session status as `other`, plus the distinct `test_results.model` values. Sessions that are not
   tied to a definition are omitted from the table, not counted as a row.
+- The test-definitions page lists every `test_definitions` row and, separately,
+  `listTestResultOutcomes` (every `test_results` row joined to its definition: name, model,
+  status). `modelStats` folds those outcomes by `test_results.model`: `passed` is succeeded,
+  `failed` is failed. A null model, and every status that is not `passed` or `failed`, is omitted;
+  a model that then has no counts is omitted. Each definition card draws one stacked bar per
+  remaining model (name on the left, succeeded green and failed red, counts inside the segments).
+  If the outcomes query fails, the definitions still render and the charts are omitted.
 - Route failures are `Sentry.captureException` on `@sentry/cloudflare` (`withSentry` wraps the
   app, `SENTRY_DSN` from `dsn.ts`). Effect's `ErrorReporter` is not installed here; that is the
   one place `captureException` is called outside `observability/`.

@@ -124,6 +124,44 @@ console.log(JSON.stringify(query.definitionStats(rows)));
     ]);
   });
 
+  it("lists test result outcomes with definition name and model and ends the connection", async () => {
+    const result = await runQuery(
+      `
+const { eq } = await import("drizzle-orm");
+const { drizzle } = await import("drizzle-orm/node-postgres");
+const { Client } = await import("pg");
+const schema = await import(${JSON.stringify(SCHEMA)});
+const client = new Client({ connectionString: url });
+await client.connect();
+const db = drizzle(client);
+const [lock] = await db.select({ id: schema.testDefinitions.id }).from(schema.testDefinitions).where(eq(schema.testDefinitions.name, "lock-screen"));
+const [install] = await db.insert(schema.testDefinitions).values({ name: "install-outcomes", description: "d", instruction: "i", proof: "p" }).returning({ id: schema.testDefinitions.id });
+const [run] = await db.insert(schema.testRuns).values({ name: "Omarchy experiment", iso: "https://example.com/omarchy.iso", serverUrl: "http://127.0.0.1:42069" }).returning({ id: schema.testRuns.id });
+await db.insert(schema.testResults).values([
+  { runId: run.id, definitionId: lock.id, status: "passed", model: "grok-4.6" },
+  { runId: run.id, definitionId: install.id, status: "failed", model: "composer-2.5" },
+]);
+await client.end();
+const rows = await query.listTestResultOutcomes(url);
+const counted = query.modelStats(rows.filter((row) => row.definitionName === "lock-screen" || row.definitionName === "install-outcomes"));
+console.log(rows.filter((row) => row.definitionName === "lock-screen" || row.definitionName === "install-outcomes").map((row) => [row.definitionName, row.model, row.status].join(" ")).sort().join("\\n"));
+console.log(JSON.stringify(counted));
+`,
+      dbUrl,
+    );
+    expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    const printed = lines(result.stdout);
+    const stats = printed.at(-1);
+    const listed = printed.slice(0, -1);
+    expect(listed).toEqual(["install-outcomes composer-2.5 failed", "lock-screen grok-4.6 passed"]);
+    expect(JSON.parse(stats ?? "")).toEqual([
+      { model: "composer-2.5", succeeded: 0, failed: 1 },
+      { model: "grok-4.6", succeeded: 1, failed: 0 },
+    ]);
+  });
+
   it("lists base prompts and ends the connection", async () => {
     const result = await runQuery(
       "const rows = await query.listTestBasePrompts(url);\nconsole.log(rows.map((row) => `${row.name} ${typeof row.prompt}`).join('\\n'));",
@@ -171,6 +209,17 @@ describe("dashboard/query unhappy path: unreachable database", () => {
   it("surfaces a refused connection and exits without echoing the password", async () => {
     const result = await runQuery(
       "try {\n  await query.listTestDefinitions(url);\n} catch (err) {\n  console.error(err.message);\n  process.exitCode = 3;\n}",
+      REFUSED_URL,
+    );
+    expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
+    expect(result.code).toBe(3);
+    expect(result.stderr).toMatch(/ECONNREFUSED/);
+    expect(result.stderr).not.toContain(SENTINEL_PASSWORD);
+  });
+
+  it("surfaces a refused connection from listTestResultOutcomes without echoing the password", async () => {
+    const result = await runQuery(
+      "try {\n  await query.listTestResultOutcomes(url);\n} catch (err) {\n  console.error(err.message);\n  process.exitCode = 3;\n}",
       REFUSED_URL,
     );
     expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);

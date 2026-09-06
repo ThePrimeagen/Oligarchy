@@ -28,6 +28,18 @@ export type DefinitionStat = {
   readonly models: ReadonlyArray<string>;
 };
 
+export type TestResultOutcome = {
+  readonly definitionName: string;
+  readonly model: string | null;
+  readonly status: (typeof testResults.$inferSelect)["status"];
+};
+
+export type ModelStat = {
+  readonly model: string;
+  readonly succeeded: number;
+  readonly failed: number;
+};
+
 // One connection per call, ended whether the query returned, threw, or never connected;
 // a client left open holds a Hyperdrive connection for the rest of the request.
 async function withDatabase<T>(
@@ -78,6 +90,29 @@ export function definitionStats(rows: ReadonlyArray<Session>): DefinitionStat[] 
       failed: current.failed,
       other: current.other,
       models: [...current.models].sort(),
+    }));
+}
+
+export function modelStats(rows: ReadonlyArray<TestResultOutcome>): ModelStat[] {
+  const byModel = new Map<string, { succeeded: number; failed: number }>();
+  for (const row of rows) {
+    if (row.model === null || (row.status !== "passed" && row.status !== "failed")) {
+      continue;
+    }
+    const current = byModel.get(row.model) ?? { succeeded: 0, failed: 0 };
+    if (row.status === "passed") {
+      current.succeeded += 1;
+    } else {
+      current.failed += 1;
+    }
+    byModel.set(row.model, current);
+  }
+  return [...byModel.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([model, current]) => ({
+      model,
+      succeeded: current.succeeded,
+      failed: current.failed,
     }));
 }
 
@@ -143,6 +178,19 @@ export function getImage(connectionString: string, id: string): Promise<Buffer |
 export function listTestDefinitions(connectionString: string): Promise<TestDefinition[]> {
   return withDatabase(connectionString, (db) =>
     db.select().from(testDefinitions).orderBy(testDefinitions.name),
+  );
+}
+
+export function listTestResultOutcomes(connectionString: string): Promise<TestResultOutcome[]> {
+  return withDatabase(connectionString, (db) =>
+    db
+      .select({
+        definitionName: testDefinitions.name,
+        model: testResults.model,
+        status: testResults.status,
+      })
+      .from(testResults)
+      .innerJoin(testDefinitions, eq(testDefinitions.id, testResults.definitionId)),
   );
 }
 
