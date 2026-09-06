@@ -278,7 +278,7 @@ const Home: FC<HomeProps> = ({ sessions }) => (
 
 type DefinitionsProps = {
   definitions: TestDefinition[] | null;
-  outcomes: TestResultOutcome[] | null;
+  outcomes: TestResultOutcome[];
 };
 
 const Definitions: FC<DefinitionsProps> = ({ definitions, outcomes }) => (
@@ -306,13 +306,11 @@ const Definitions: FC<DefinitionsProps> = ({ definitions, outcomes }) => (
                   <time dateTime={definition.createdAt.toISOString()}>
                     {dateTime.format(definition.createdAt)}
                   </time>
-                  {outcomes === null ? null : (
-                    <ModelChart
-                      stats={modelStats(
-                        outcomes.filter((row) => row.definitionName === definition.name),
-                      )}
-                    />
-                  )}
+                  <ModelChart
+                    stats={modelStats(
+                      outcomes.filter((row) => row.definitionName === definition.name),
+                    )}
+                  />
                   <div class="record__field">
                     <h3>Description</h3>
                     <p>{definition.description}</p>
@@ -418,20 +416,16 @@ app.get("/", async (context) => {
 
 app.get("/definitions", async (context) => {
   try {
-    const definitions = await listTestDefinitions(context.env.HYPERDRIVE.connectionString);
-    try {
-      const outcomes = await listTestResultOutcomes(context.env.HYPERDRIVE.connectionString);
-      return context.render(<Definitions definitions={definitions} outcomes={outcomes} />);
-    } catch (error) {
-      Sentry.captureException(error);
-      console.error("dashboard: listing test result outcomes:", errorMessage(error));
-      return context.render(<Definitions definitions={definitions} outcomes={null} />);
-    }
+    const [definitions, outcomes] = await Promise.all([
+      listTestDefinitions(context.env.HYPERDRIVE.connectionString),
+      listTestResultOutcomes(context.env.HYPERDRIVE.connectionString),
+    ]);
+    return context.render(<Definitions definitions={definitions} outcomes={outcomes} />);
   } catch (error) {
     Sentry.captureException(error);
-    console.error("dashboard: listing test definitions:", errorMessage(error));
+    console.error("dashboard: loading the definitions page:", errorMessage(error));
     context.status(500);
-    return context.render(<Definitions definitions={null} outcomes={null} />);
+    return context.render(<Definitions definitions={null} outcomes={[]} />);
   }
 });
 

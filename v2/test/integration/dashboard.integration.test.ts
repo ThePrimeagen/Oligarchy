@@ -127,14 +127,13 @@ console.log(JSON.stringify(query.definitionStats(rows)));
   it("lists test result outcomes with definition name and model and ends the connection", async () => {
     const result = await runQuery(
       `
-const { eq } = await import("drizzle-orm");
 const { drizzle } = await import("drizzle-orm/node-postgres");
 const { Client } = await import("pg");
 const schema = await import(${JSON.stringify(SCHEMA)});
 const client = new Client({ connectionString: url });
 await client.connect();
 const db = drizzle(client);
-const [lock] = await db.select({ id: schema.testDefinitions.id }).from(schema.testDefinitions).where(eq(schema.testDefinitions.name, "lock-screen"));
+const [lock] = await db.insert(schema.testDefinitions).values({ name: "lock-outcomes", description: "d", instruction: "i", proof: "p" }).returning({ id: schema.testDefinitions.id });
 const [install] = await db.insert(schema.testDefinitions).values({ name: "install-outcomes", description: "d", instruction: "i", proof: "p" }).returning({ id: schema.testDefinitions.id });
 const [run] = await db.insert(schema.testRuns).values({ name: "Omarchy experiment", iso: "https://example.com/omarchy.iso", serverUrl: "http://127.0.0.1:42069" }).returning({ id: schema.testRuns.id });
 await db.insert(schema.testResults).values([
@@ -143,8 +142,8 @@ await db.insert(schema.testResults).values([
 ]);
 await client.end();
 const rows = await query.listTestResultOutcomes(url);
-const counted = query.modelStats(rows.filter((row) => row.definitionName === "lock-screen" || row.definitionName === "install-outcomes"));
-console.log(rows.filter((row) => row.definitionName === "lock-screen" || row.definitionName === "install-outcomes").map((row) => [row.definitionName, row.model, row.status].join(" ")).sort().join("\\n"));
+const counted = query.modelStats(rows.filter((row) => row.definitionName === "lock-outcomes" || row.definitionName === "install-outcomes"));
+console.log(rows.filter((row) => row.definitionName === "lock-outcomes" || row.definitionName === "install-outcomes").map((row) => [row.definitionName, row.model, row.status].join(" ")).sort().join("\\n"));
 console.log(JSON.stringify(counted));
 `,
       dbUrl,
@@ -155,7 +154,10 @@ console.log(JSON.stringify(counted));
     const printed = lines(result.stdout);
     const stats = printed.at(-1);
     const listed = printed.slice(0, -1);
-    expect(listed).toEqual(["install-outcomes composer-2.5 failed", "lock-screen grok-4.6 passed"]);
+    expect(listed).toEqual([
+      "install-outcomes composer-2.5 failed",
+      "lock-outcomes grok-4.6 passed",
+    ]);
     expect(JSON.parse(stats ?? "")).toEqual([
       { model: "composer-2.5", succeeded: 0, failed: 1 },
       { model: "grok-4.6", succeeded: 1, failed: 0 },

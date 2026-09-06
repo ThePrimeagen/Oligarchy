@@ -1277,7 +1277,8 @@ and drizzle, the same tables the Effect `TestStore` writes. It does not call `Pr
   `failed` is failed. A null model, and every status that is not `passed` or `failed`, is omitted;
   a model that then has no counts is omitted. Each definition card draws one stacked bar per
   remaining model (name on the left, succeeded green and failed red, counts inside the segments).
-  If the outcomes query fails, the definitions still render and the charts are omitted.
+  The two queries run together; a failure of either is the same route error as a failed
+  definition list.
 - Route failures are `Sentry.captureException` on `@sentry/cloudflare` (`withSentry` wraps the
   app, `SENTRY_DSN` from `dsn.ts`). Effect's `ErrorReporter` is not installed here; that is the
   one place `captureException` is called outside `observability/`.
