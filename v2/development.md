@@ -109,7 +109,8 @@ bugs; anything not listed here is a regression.
   `.oxfmtrc.json`, `.editorconfig`, `vitest.config.ts`, `vitest.global-setup.ts` (Testcontainers
   Postgres, migrations, seed), `vitest.d.ts`, `drizzle.config.ts`, `wrangler.jsonc`, `drizzle/`
   (generated migrations; 0000–0011 match `v1/`, 0012 adds `debug_logs` with a `sources` jsonb
-  map, 0013 adds `test_runs.model`), `public/` and `prompts/`
+  map, 0013 adds `test_runs.model`, 0014 unique-indexes `test_results.session_id`), `public/`
+  and `prompts/`
   (moved as-is), the
   operator documents, this document, the four `v2/` wrappers, `src/` and `test/`.
 
@@ -1118,7 +1119,8 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
   `test_definitions`, `test_base_prompts`, `test_runs`, `test_results`, declared in
   `src/db/schema.ts`. v1 declared every table except `debug_logs`. `test_runs.model` is the
   Cursor model id the run's agents use (`grok-4.6` today); `createRun` writes it and the
-  column default covers rows that predate the migration.
+  column default covers rows that predate the migration. `test_results.session_id` is unique
+  when set, so one session cannot belong to two results.
 
 ## Log stream
 
@@ -1211,15 +1213,15 @@ the row (`null` when the session succeeded or predates the table); `--all` inclu
 
 ## Dashboard
 
-The dashboard is a Hono Worker (`src/dashboard/`), not Effect. Cloudflare Workers cannot run
-the Node `Database` pool or `ErrorReporter`; the Worker talks to Postgres through Hyperdrive
+The dashboard is a Hono Worker (`src/dashboard/`), not Effect. The Worker has no Effect
+runtime and the Effect reporter uses `@sentry/node`; it talks to Postgres through Hyperdrive
 and drizzle, the same tables the Effect `TestStore` writes. It does not call `ProxyApi`.
 
 - `query.ts` opens one `pg.Client` per request, runs the query, and ends the client in
   `finally` so a Hyperdrive connection is never held past the response.
-- The test-results page lists the last 50 `sessions` (newest `started_at` first), each joined
-  to at most one `test_results` / `test_definitions` / `test_runs` row (lateral, like the
-  latest image). A session with no result shows no test name and no model.
+- The test-results page lists the last 50 `sessions` (newest `started_at` first), left-joined
+  to `test_results` / `test_definitions` / `test_runs`. `test_results.session_id` is unique, so
+  the join cannot duplicate a session. A session with no result shows no test name and no model.
 - `definitionStats` folds those 50 rows by definition name: succeeded, failed, and every other
   session status as `other`, plus the distinct `test_runs.model` values. Sessions that are not
   tied to a definition are omitted from the table, not counted as a row.

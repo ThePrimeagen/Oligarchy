@@ -206,7 +206,11 @@ export const testResults = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
   },
-  // One result per definition per run: the orchestrator re-inserting a run's rows
-  // is a database error by design. The index also serves run lookups.
-  (table) => [uniqueIndex("test_results_run_definition_idx").on(table.runId, table.definitionId)],
+  // One result per definition per run, and one result per session once attributed:
+  // a second write of either is a database error by design. Postgres unique
+  // indexes still allow many NULL session_ids (pending results).
+  (table) => [
+    uniqueIndex("test_results_run_definition_idx").on(table.runId, table.definitionId),
+    uniqueIndex("test_results_session_id_idx").on(table.sessionId),
+  ],
 );

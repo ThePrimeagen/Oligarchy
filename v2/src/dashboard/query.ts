@@ -105,17 +105,6 @@ export function listSessions(connectionString: string): Promise<Session[]> {
       .orderBy(desc(actions.id))
       .limit(1)
       .as("latest_image");
-    const linkedTest = db
-      .select({
-        definitionName: testDefinitions.name,
-        model: testRuns.model,
-      })
-      .from(testResults)
-      .innerJoin(testDefinitions, eq(testDefinitions.id, testResults.definitionId))
-      .innerJoin(testRuns, eq(testRuns.id, testResults.runId))
-      .where(eq(testResults.sessionId, recentSessions.id))
-      .limit(1)
-      .as("linked_test");
 
     // The database timestamp shown by the UI also keeps status reads out of Hyperdrive's query cache.
     return db
@@ -128,12 +117,14 @@ export function listSessions(connectionString: string): Promise<Session[]> {
         endedAt: recentSessions.endedAt,
         imageId: latestImage.id,
         queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(recentSessions.startedAt),
-        definitionName: linkedTest.definitionName,
-        model: linkedTest.model,
+        definitionName: testDefinitions.name,
+        model: testRuns.model,
       })
       .from(recentSessions)
+      .leftJoin(testResults, eq(testResults.sessionId, recentSessions.id))
+      .leftJoin(testDefinitions, eq(testDefinitions.id, testResults.definitionId))
+      .leftJoin(testRuns, eq(testRuns.id, testResults.runId))
       .leftJoinLateral(latestImage, sql`true`)
-      .leftJoinLateral(linkedTest, sql`true`)
       .orderBy(desc(recentSessions.startedAt));
   });
 }
