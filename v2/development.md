@@ -6,8 +6,8 @@ and every string the proxy, the CLIs and the database promise to their callers. 
 document the Effect API; API truth is `node_modules/effect/src`, `node_modules/effect/AGENTS.md`,
 `node_modules/effect/ai-docs/src`, `node_modules/@effect/platform-node/src` and
 `node_modules/@effect/vitest/README.md`, all `4.0.0-rc.112`, and a name that is not there does not
-exist. Operator and agent documents are `client.md`, `ctrl.md`, `ctrl-linear.md` and `prompts/`;
-they moved unchanged and this document does not repeat them.
+exist. Operator and agent documents are `client.md`, `ctrl.md`, `ctrl-linear.md`,
+`ctrl-diagnose.md` and `prompts/`; this document does not repeat them.
 
 ## Host
 
@@ -124,7 +124,7 @@ src/
 ├── qemu/        keys.ts  args.ts  host.ts  process.ts  qemu.ts  iso.ts  stats.ts
 ├── proxy/       sessions.ts  middleware.ts  handlers.ts  command.ts  main.ts
 ├── client/      flags.ts  proxy-client.ts  command.ts  main.ts
-├── ctrl/        linear.ts  cursor.ts  render.ts  command.ts  main.ts
+├── ctrl/        linear.ts  cursor.ts  prompts.ts  render.ts  command.ts  main.ts
 ├── session/     readline.ts  children.ts  state.ts  grammar.ts  image.ts  picker.ts
 │                follow-view.ts  repl.ts  command.ts  main.ts
 └── dashboard/   dashboard.tsx  clicker.ts  query.ts   (Hono Worker, not Effect;
@@ -343,7 +343,8 @@ boundary.
   (`qemu: <command> timed out`), `QmpClosed`, `QmpProtocolError`, `QemuStartError` and `IsoError`
   (all `{ message, cause? }`), `HostRequirementsMissing { missing }`, `KeysError { message }`,
   `ProxyRefusal { status, message }`, `ProxyUnreachable { message, cause }`, `LinearError {
-  operation, message, status?, cause? }`, `CursorAgentFailed { message, retryable, cause }`,
+  operation, message, status?, cause? }`, `PromptError { message, cause? }` (a template that cannot
+  be read or names a placeholder without a value), `CursorAgentFailed { message, retryable, cause }`,
   `ChildExit { command, code, stderr }` (its message is the stderr), `PngDecodeError { message }`,
   and `LogLine { text, level, cause? }` (identifier `@oligarchy/observability/log/LogLine`): an
   `error` or `fatal` log line as the reporter receives it, `message` the text and
@@ -355,8 +356,8 @@ boundary.
   boundary (`contract.ts`); `Schema.Struct` for local, wire-probe, or row shapes;
   `Schema.TaggedUnion` for closed sum types keyed on `_tag`, built with `.cases.Tag.make` and
   eliminated with `.match`; `Schema.Literals([...])` for closed vocabularies, whose `.literals`
-  feed `Flag.choice` (`Domain.MouseButton`, `Domain.StopStatus`, `Args.QEMU_DISPLAYS`) so the
-  vocabulary and the flag cannot drift.
+  feed `Flag.choice` (`Domain.MouseButton`, `Domain.StopStatus`, `Domain.DiagnosisVerdict`,
+  `Args.QEMU_DISPLAYS`) so the vocabulary and the flag cannot drift.
 - When the wire discriminates on a field other than `_tag` (QMP's `execute`, `return`, `error`,
   `event`; the follow line's `type`), use `Schema.Union` of `Schema.Struct`s with a
   `Schema.Literal` discriminant and dispatch with a `switch` ending in `satisfies never`, or with
@@ -536,8 +537,11 @@ export class ProxyConfig extends Context.Service<ProxyConfig>()("@oligarchy/conf
 - Ctrl: `--server-url` is required (no default, `server-url must be a valid http or https url`) on
   every action but `test run`, where it is an unrecognised flag; `iso must be a valid https url`;
   `count must be at least 1`; `--key` and `--type` are `Domain.ErrorTypeKey` (`key must be
-  snake_case: a-z, 0-9 and _, starting with a letter`); `--status` is `Flag.choiceWithValue`
-  mapping `success` to `passed`; refusals are `CommandError`s. `makeCtrlCommand(deps)` takes the layer factories (`database(url)`,
+  snake_case: a-z, 0-9 and _, starting with a letter`), `--type` optional on `diagnose`;
+  `--verdict` is `Flag.choice` over `Domain.DiagnosisVerdict.literals`; `--status` is
+  `Flag.choiceWithValue` mapping `success` to `passed`; refusals are `CommandError`s. `diagnose`
+  is a group like `test`: its own flags and handler for the bare form, `run` as a subcommand.
+  `makeCtrlCommand(deps)` takes the layer factories (`database(url)`,
   `linear(token)`, `cursor(apiKey)`, `proxy(options)`), `live` by default, so a test substitutes
   fakes. The proxy's `makeProxyCommand({ missingHostRequirements, serve, serverFailed })` takes the
   host check, the server as `serve(display, automation, port)` and the `Deferred` a server error
@@ -809,22 +813,31 @@ sendMouse, intentStart, intentEnd, stop, follow }`, each call wrapped in `run`.
   `linear: request failed (<status>)[: <text>]`; an undecodable body, a missing `data` or a further
   page without a cursor is `linear: invalid response`; GraphQL `errors` are `linear: <messages
   joined by "; ">`; the rest: `linear: no team named Oligarchy`, `linear: label creation failed`,
-  `linear: no user prime@terminal.shop`, `linear: issue creation failed`, `linear: describing
-  <identifier> failed`, `linear: prompts/<file> uses {{NAME}}, which has no value`, and
-  `linear: <platform message>` when a template cannot be read.
+  `linear: no user prime@terminal.shop`, `linear: issue creation failed`, and `linear: describing
+  <identifier> failed`.
 - The team is `Oligarchy`; labels are `agent test` and the run's version, created when missing;
   the assignee is `prime@terminal.shop`; titles are `Omarchy: <name>`; an issue is created then
   described in a second call because the body names its own identifier; the backlog pages with
   `first: 100` until `hasNextPage` is false. GraphQL query texts are copied from `v1/src/linear.ts`.
-- Each command reads only the templates it renders, once, by path relative to the module:
-  `Linear.loadIssuePrompts` (an Effect over `FileSystem`) reads `prompts/linear-issue.html`,
-  `client.md` and `ctrl-linear.md` into an `IssuePrompts` record for `test new`;
-  `Linear.loadDrivingPrompt` reads `prompts/driving-agent.html` alone for `test run`, so an
-  unreadable guide cannot stop a run. The pure renderers `linearTicketDescription(experiment,
-  test, ticket, prompts)` and `drivingAgentPrompt(ticket, template)` fill `{{NAME}}` from
-  `LINEAR_TICKET, RUN_ID, RESULT_ID, VERSION, ISO_URL, SERVER_URL, TEST_NAME, TEST_DESCRIPTION,
-  TEST_INSTRUCTION, TEST_PROOF, CLIENT_MD, CTRL_MD, SUB_AGENT` (`Grok 4.6 high fast
-  (cursor-grok-4.6-high-fast)`) into a `Result`.
+- Every text ctrl hands an agent is a template under `prompts/` filled by `src/ctrl/prompts.ts`,
+  the one place placeholders are replaced: `Prompts.render(template, file, values)` fills every
+  `{{NAME}}` and fails a `Result` with `PromptError` `prompt: prompts/<file> uses {{NAME}}, which
+  has no value` on the first name without one; `Prompts.read` maps an unreadable file to
+  `PromptError` `prompt: <platform message>`. Each command reads only the templates it renders,
+  once, by path relative to the module: `loadIssuePrompts` (an Effect over `FileSystem`) reads
+  `prompts/linear-issue.html`, `client.md` and `ctrl-linear.md` into an `IssuePrompts` record for
+  `test new`; `loadDrivingPrompt` reads `prompts/driving-agent.html` alone for `test run`, so an
+  unreadable guide cannot stop a run; `loadDiagnosisPrompts` reads `prompts/diagnosing-agent.html`
+  and `ctrl-diagnose.md` into a `DiagnosisPrompts` record for `diagnose run`. The value maps:
+  `linearTicketDescription(experiment, test, ticket, prompts)` fills `LINEAR_TICKET, RUN_ID,
+  RESULT_ID, VERSION, ISO_URL, SERVER_URL, TEST_NAME, TEST_DESCRIPTION, TEST_INSTRUCTION,
+  TEST_PROOF, CLIENT_MD, CTRL_MD, SUB_AGENT` (`Grok 4.6 high fast (cursor-grok-4.6-high-fast)`);
+  `drivingAgentPrompt(ticket, template)` fills `LINEAR_TICKET`; `diagnosingAgentPrompt(sessionId,
+  serverUrl, prompts)` fills `SESSION_ID, SERVER_URL, CTRL_MD` — the reviewer is told the session
+  and the proxy and reads everything else back with `ctrl session`. In `test new` the templates
+  are read inside the ticket loop's effect, before the first Linear call, so a `PromptError` fails
+  the run with its message as the reason (`Effect.catchTags` beside the `LinearError` arm) and
+  names no ticket; `linear.ts` is the GraphQL client alone.
 - `ctrl test-results` calls `log.acquireColor(agentId)` before its `test result <id>: <status>[;
   <reason>]` line (the agent has no live session on that process); a verdict without `--reason`
   leaves the stored reason in place (`TestStore.closeResult` omits the key, as for `session_id`).
@@ -835,8 +848,8 @@ sendMouse, intentStart, intentEnd, stop, follow }`, each call wrapped in `run`.
   `CursorAgentFailed { message, retryable, cause }` (the SDK's own `isRetryable` when it has one).
   The default model is `GROK_4_6_FAST_XHIGH`, `{ id: "grok-4.6", params: [{ id: "effort", value:
   "xhigh" }, { id: "fast", value: "true" }] }`, on `https://github.com/ThePrimeagen/Oligarchy`;
-  `test run` prints `Agent here, go check it out for more information:
-  https://cursor.com/agents/<id>` and never waits for the agent.
+  `test run` and `diagnose run` print `Agent here, go check it out for more information:
+  https://cursor.com/agents/<id>` and never wait for the agent.
 
 `request` in `src/ctrl/linear.ts` (an excerpt; the POST and the status branch are elided): the
 envelope first, the operation's `data` second.
@@ -1036,6 +1049,10 @@ const prepare = Effect.fn("Qemu.prepare")(function* (id: string, disk: string | 
 - Multi-step writes run in one transaction: `endSession` stamps the session and its open
   `agent_runs` with one `now()`; `finishAction` with an image writes `actions` and `images`
   together; `createRun` inserts the run and its results together; `failRun` closes both.
+- `SessionStore.getSession(id)` is the whole row as an `Option` (`ctrl session --status`);
+  `sessionExists` answers the canonical id and `getSessionStatus` the status alone.
+  `TestStore.resultForSession(sessionId)` inner-joins the result to its definition and its run,
+  `{ result, definition, run }[]`.
 - `normalizeDatabaseUrl` guards with `URL.canParse` (`db: DATABASE_URL is not a valid url`, and the
   password never lands in a message), drops `sslrootcert=system` (node-postgres reads it as a file
   path) and keeps `sslmode=verify-full`.
@@ -1101,8 +1118,10 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
 - A completed `get-image` passes `{ id, data }` and the update plus the `images` insert land in one
   transaction; images are 1:1 with their action and addressed by a uuid, served at
   `GET /images/<uuid>` here and at `https://oligarchy.trm.sh/images/<uuid>`
-  (`Contract.StoredImageUrl(id)`). A screendump whose image write failed leaves the action row
-  open; only a failed exchange is closed without an image.
+  (`Contract.StoredImageUrl(id)`), and listed per session by `ActionStore.listImages` (`images ⋈
+  actions`, `{ id, actionId, createdAt }` in action order) for `ctrl session --images`, which adds
+  that `url`. A screendump whose image write failed leaves the action row open; only a failed
+  exchange is closed without an image.
 - `finished_at - created_at` is per-exchange handling time on one clock. Request-level wall time is
   the log line's (`running; started in <ms>ms`, `image; <n> bytes in <ms>ms; <url>`,
   `serial; <n> bytes in <ms>ms`, `dump; <n> bytes from disk|the running machine in <ms>ms`,
@@ -1215,47 +1234,72 @@ the row (`null` when the session succeeded or predates the table); `--all` inclu
 
 ## Post-run diagnosis
 
-A diagnosis names the cause of a session that ended any way but `succeeded` (`failed`,
-`aborted`, `timed_out`), written after the run by whoever read the evidence (`debug_logs`,
-`actions`, `images`). Its vocabulary is data, not an enum: `post_run_error_types` starts empty and
-grows one row per distinct cause the moment that cause is first seen, through `ctrl error-type
-new`, never through a migration. Why: a `pgEnum` value can be added only by a code change and a
-migration and can never be removed; a lookup table is an insert, carries the description the key
-needs, and a type can be renamed or, once nothing carries it, deleted.
+A diagnosis is a reviewer's verdict on one ended session, written after the run by whoever read
+the evidence (`images` against the definition's proof, `actions`, `debug_logs`): did the proof
+land, and when it did not, why. Every ended session gets one — `succeeded` as much as `failed`,
+`aborted` or `timed_out` — because the driver's own verdict is a claim to check, not a fact; the
+reviewer's verdict may contradict the session status and the test result, and the summary says
+why. The driver never diagnoses: it marks its result passed or failed and stops. The vocabulary of
+causes is data, not an enum: `post_run_error_types` starts empty and grows one row per distinct
+cause the moment that cause is first seen, through `ctrl error-type new`, never through a
+migration. Why: a `pgEnum` value can be added only by a code change and a migration and can never
+be removed; a lookup table is an insert, carries the description the key needs, and a type can be
+renamed or, once nothing carries it, deleted.
 
 - `post_run_error_types`: `key` (primary key, `text`), `description`, `created_at`. `key` is a
   `Domain.ErrorTypeKey`, `^[a-z][a-z0-9_]*$`, refused at the flag with `key must be snake_case:
   a-z, 0-9 and _, starting with a letter`; the table itself has no check, the CLI is the boundary.
   There is no seeded row, no `unclassified` or `other`: a failure that cannot be named yet is not
   diagnosed yet.
-- `post_run_diagnosis`: `session_id` (primary key, references `sessions.id`), `error_type`
-  (`NOT NULL`, references `post_run_error_types.key`, `ON UPDATE CASCADE`), `summary`, `model`,
-  `created_at`, plus an index on `error_type` for the per-type counts. No column is nullable and
-  no row exists until someone diagnoses: a session without a row is one nobody has diagnosed.
-  `model` is the Cursor model id that wrote the diagnosis, as `test_results.model` is the one that
-  drove the session. The key is the session: a second diagnosis is refused and the first stands.
-  Renaming a key follows into the diagnoses that carry it; deleting a type in use is a
-  `DatabaseError` from the foreign key.
+- `post_run_diagnosis`: `session_id` (primary key, references `sessions.id`), `verdict` (the
+  `diagnosis_verdict` enum, `passed | failed`, `NOT NULL`, maintained by hand with
+  `Domain.DiagnosisVerdict`), `error_type` (nullable, references `post_run_error_types.key`, `ON
+  UPDATE CASCADE`), `summary`, `model`, `created_at`, an index on `error_type` for the per-type
+  counts, and the check `(verdict = 'passed') = (error_type IS NULL)`: a pass has no cause to name
+  and a failure always names one, so the one nullable column is exactly the absence a reader must
+  act on. No row exists until someone diagnoses: a session without a row is one nobody has
+  reviewed. `model` is the Cursor model id that wrote the diagnosis, as `test_results.model` is
+  the one that drove the session. The key is the session: a second diagnosis is refused and the
+  first stands. Renaming a key follows into the diagnoses that carry it; deleting a type in use is
+  a `DatabaseError` from the foreign key.
 - `DiagnosisStore` (`src/db/diagnosis.ts`): `createErrorType(key, description)` and
-  `saveDiagnosis({ sessionId, errorType, summary, model })` are `insert … on conflict do nothing
-  returning` and answer `false` when the key or the session already has its row, so a duplicate is
-  a sentence from the command, not a constraint name; `listErrorTypes` orders by key;
+  `saveDiagnosis({ sessionId, verdict, errorType, summary, model })` are `insert … on conflict do
+  nothing returning` and answer `false` when the key or the session already has its row, so a
+  duplicate is a sentence from the command, not a constraint name; `listErrorTypes` orders by key;
   `findErrorType(key)` and `getDiagnosis(sessionId)` are `Option`s. An unknown type or session in
-  `saveDiagnosis` is the foreign key's `DatabaseError`; the command checks both first.
+  `saveDiagnosis` is the foreign key's `DatabaseError`, a verdict and type that disagree the
+  check's; the command rules all three out first.
 - `ctrl error-type new --key <key> --description <text>` logs `error type created; <key>`; its
   only output is that line's stdout copy (`[global] error type created; <key>`). A taken key is
   `error-type new: <key> already exists`. `ctrl error-type list [--json]` prints `<key padded to
   the longest>  <description>` per row, or the rows as JSON; an empty table prints nothing, or
   `[]`. Bare `ctrl error-type` prints help and exits 0.
-- `ctrl diagnose --session-id <id> --type <key> --summary <text> --model <id>` refuses, in this
-  order: `diagnose: no session <id>`, `diagnose: session <id> succeeded; nothing to diagnose`,
-  `diagnose: session <id> is still running|downloading`, `diagnose: no error type <key>; create it
-  with ./ctrl error-type new`, `diagnose: session <id> already has a diagnosis`; then it logs
-  `diagnosed; <key>; <model>` attributed to the session, and that line's stdout copy
-  (`[global] <session id>: diagnosed; <key>; <model>`) is its only output. All refusals are
-  `CommandError`s.
-- `ctrl session --diagnosis` prints the row (`{ sessionId, errorType, summary, model, createdAt
-  }`) or `null`; `--all` includes it last as `diagnosis`.
+- `ctrl diagnose --session-id <id> --verdict passed|failed [--type <key>] --summary <text> --model
+  <id>` refuses, in this order: `diagnose: no session <id>`, `diagnose: session <id> is still
+  running|downloading`, `diagnose: --verdict failed needs --type`, `diagnose: --verdict passed
+  takes no --type`, `diagnose: no error type <key>; create it with ./ctrl error-type new`,
+  `diagnose: session <id> already has a diagnosis`; then it logs `diagnosed; <verdict>[; <key>];
+  <model>` attributed to the session, and that line's stdout copy (`[global] <session id>:
+  diagnosed; failed; <key>; <model>`, `[global] <session id>: diagnosed; passed; <model>`) is its
+  only output. All refusals are `CommandError`s.
+- `ctrl diagnose run --session-id <id>` spawns the reviewer: it refuses `diagnose run: no session
+  <id>`, `diagnose run: session <id> is still running|downloading` and `diagnose run: session <id>
+  already has a diagnosis` before reading a template or spawning anything (an agent whose
+  `diagnose` would be refused is a run wasted), then renders `prompts/diagnosing-agent.html` with
+  `SESSION_ID`, `SERVER_URL` and `ctrl-diagnose.md` as `CTRL_MD`, prompts `CursorAgents` with the
+  default model, and prints the agent link. It reads `DATABASE_URL` then `CURSOR_API_TOKEN`, in
+  that order, after parsing. The reviewer's brief is deliberately thin — the session and the
+  proxy — because `ctrl session --all` reaches everything from the session id: the session row,
+  its result and that result's definition and run, the logs, actions, images, debug log and any
+  diagnosis.
+- `ctrl session --diagnosis` prints the row (`{ sessionId, verdict, errorType, summary, model,
+  createdAt }`, `errorType` `null` on a pass) or `null`; `--all` includes it last as `diagnosis`.
+  `--status` prints the session row (keyed `session` in `--all`, first), `--test-run` the run
+  (`test_run`, after `test_definition`), `--images` the screenshots as `{ id, actionId, url,
+  createdAt }` (`images`, after `actions`, `[]` when none). Without a selector the refusal names
+  them all: `session: --status, --logs, --test-def, --test-results, --test-run, --actions,
+  --images, --debug-logs, --diagnosis, --all, or --dump is required`; `--dump` with any of them is
+  `session: --dump does not combine with <the same list>, or --all`.
 
 ## Dashboard
 
