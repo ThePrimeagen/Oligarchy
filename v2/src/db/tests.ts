@@ -6,7 +6,6 @@ import * as DbSchema from "./schema.ts";
 export type RunInput = {
   readonly iso: string;
   readonly serverUrl: string;
-  readonly model: string;
   readonly definitions: ReadonlyArray<{ readonly id: number }>;
 };
 
@@ -55,7 +54,6 @@ export class TestStore extends Context.Service<TestStore>()("@oligarchy/db/TestS
                 input.definitions.map((definition) => ({
                   runId: run.id,
                   definitionId: definition.id,
-                  model: input.model,
                   status: "pending" as const,
                 })),
               )
@@ -92,11 +90,12 @@ export class TestStore extends Context.Service<TestStore>()("@oligarchy/db/TestS
     const startResult = Effect.fn("db.startResult")(function* (
       resultId: string,
       sessionId: string,
+      model: string,
     ) {
       const rows = yield* database.run("startResult", (db) =>
         db
           .update(DbSchema.testResults)
-          .set({ sessionId, status: "running" })
+          .set({ sessionId, status: "running", model })
           .where(
             and(eq(DbSchema.testResults.id, resultId), eq(DbSchema.testResults.status, "pending")),
           )

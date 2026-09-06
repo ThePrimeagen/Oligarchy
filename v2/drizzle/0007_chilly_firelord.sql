@@ -1,1 +1,0 @@
-ALTER TABLE "test_results" ADD PRIMARY KEY ("result_id");

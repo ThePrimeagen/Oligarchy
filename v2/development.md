@@ -107,12 +107,8 @@ bugs; anything not listed here is a regression.
   it. `v2/` is the rewrite. The root holds `AGENTS.md`, the wrappers, `.gitignore` and `.cursor/`.
 - `v2/` holds `package.json`, `package-lock.json`, `tsconfig.json`, `.oxlintrc.json`,
   `.oxfmtrc.json`, `.editorconfig`, `vitest.config.ts`, `vitest.global-setup.ts` (Testcontainers
-  Postgres, migrations, seed), `vitest.d.ts`, `drizzle.config.ts`, `wrangler.jsonc`, `drizzle/`
-  (generated migrations; 0000–0011 match `v1/`, 0012 adds `debug_logs` with a `sources` jsonb
-  map, 0013 unique-indexes `test_results.session_id`, 0014 moves `model` from
-  `test_runs` onto `test_results` so one run can mix models), `public/`
-  and `prompts/`
-  (moved as-is), the
+  Postgres, migrations, seed), `vitest.d.ts`, `drizzle.config.ts`, `wrangler.jsonc`, `drizzle/`,
+  `public/` and `prompts/` (moved as-is), the
   operator documents, this document, the four `v2/` wrappers, `src/` and `test/`.
 
 `v2/src/`: one directory per process plus the shared kernel; `main.ts` files are the entries.
@@ -1037,7 +1033,7 @@ const prepare = Effect.fn("Qemu.prepare")(function* (id: string, disk: string | 
   only run queries and never acquire a scope.
 - Multi-step writes run in one transaction: `endSession` stamps the session and its open
   `agent_runs` with one `now()`; `finishAction` with an image writes `actions` and `images`
-  together; `createRun` inserts the run and its results (each result carrying `model`) together; `failRun` closes both.
+  together; `createRun` inserts the run and its results together; `failRun` closes both.
 - `normalizeDatabaseUrl` guards with `URL.canParse` (`db: DATABASE_URL is not a valid url`, and the
   password never lands in a message), drops `sslrootcert=system` (node-postgres reads it as a file
   path) and keeps `sslmode=verify-full`.
@@ -1046,8 +1042,7 @@ const prepare = Effect.fn("Qemu.prepare")(function* (id: string, disk: string | 
   Drizzle-typed columns are trusted; the `jsonb` columns (`sessions.config`, `actions.request`,
   `actions.response`) are written from schema-typed values and read back as Drizzle types them.
 - `src/db/schema.ts` is v1's schema formatted by oxfmt, plus `debug_logs` (v2-only). The v1
-  tables stay semantically identical (`drizzle-kit check` and the `schema-in-sync` job pass
-  against the moved migrations), not byte-identical. Its `pgEnum` lists and the `Schema.Literals`
+  tables stay semantically identical, not byte-identical. Its `pgEnum` lists and the `Schema.Literals`
   in `domain.ts` are maintained by hand together. Row
   stamps come from Postgres `now()` in the statement; Effect-side time from
   `Clock.currentTimeMillis`. `registerAgent`'s primary key makes one session per agent; a second
@@ -1119,9 +1114,8 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
 - The tables: `sessions`, `agent_runs`, `actions`, `images`, `logs`, `debug_logs`,
   `test_definitions`, `test_base_prompts`, `test_runs`, `test_results`, declared in
   `src/db/schema.ts`. v1 declared every table except `debug_logs`. `test_results.model` is the
-  Cursor model id that result's agent used (`grok-4.6` today); `createRun` writes it on every
-  result and the column default covers rows that predate the migration. One run can mix
-  models. `test_results.session_id` is unique when set, so one session cannot belong to two
+  Cursor model id that result's agent used, or null until `test start` writes it. One run can
+  mix models. `test_results.session_id` is unique when set, so one session cannot belong to two
   results.
 
 ## Log stream

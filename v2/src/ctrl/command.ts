@@ -251,7 +251,6 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     const created = yield* tests.createRun({
       iso: input.iso,
       serverUrl: input.serverUrl,
-      model: Cursor.GROK_4_6_FAST_XHIGH.id,
       definitions,
     });
     const resultIds = new Map(created.results.map((row) => [row.definitionId, row.id] as const));
@@ -338,10 +337,11 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     yield* Console.log(Render.agentLink(Cursor.agentUrl(agentId)));
   });
 
-  // test start --session-id <id> --test-result-id <id>
+  // test start --session-id <id> --test-result-id <id> --model <id>
   const testStart = Effect.fn("ctrl.test.start")(function* (input: {
     readonly sessionId: string;
     readonly testResultId: string;
+    readonly model: string;
   }) {
     const sessions = yield* Sessions.SessionStore;
     const tests = yield* Tests.TestStore;
@@ -350,7 +350,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
       sessions.sessionExists(input.sessionId),
       `test start: no session ${input.sessionId}`,
     );
-    yield* tests.startResult(input.testResultId, input.sessionId).pipe(
+    yield* tests.startResult(input.testResultId, input.sessionId, input.model).pipe(
       Effect.filterOrFail(
         (started) => started,
         () => refuse(`test start: result ${input.testResultId} not found or not pending`),
@@ -558,10 +558,14 @@ export const makeCtrlCommand = (deps: Deps = live) => {
         Flag.withSchema(Schema.NonEmptyString),
         Flag.withDescription("Test result id from the Linear ticket"),
       ),
+      model: Flag.string("model").pipe(
+        Flag.withSchema(Schema.NonEmptyString),
+        Flag.withDescription("Cursor model id that is running this result"),
+      ),
     },
     testStart,
   ).pipe(
-    Command.withDescription("Tie a pending test result to the session that runs it"),
+    Command.withDescription("Tie a pending test result to the session and model that run it"),
     Command.provide(withDb),
   );
 

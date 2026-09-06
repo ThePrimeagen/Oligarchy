@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
@@ -44,6 +44,24 @@ describe("package.json scripts", () => {
     expect(scripts["db:migrate"]).toBe("node --experimental-strip-types src/db/migrate.ts");
     expect(Object.values(scripts).some((script) => script.includes("drizzle-kit push"))).toBe(
       false,
+    );
+  });
+});
+
+const Journal = Schema.Struct({
+  entries: Schema.Array(Schema.Struct({ idx: Schema.Number, tag: Schema.String })),
+});
+const decodeJournal = Schema.decodeUnknownSync(Schema.fromJsonString(Journal));
+
+describe("drizzle migrations", () => {
+  it("journal tags match the sql files one-to-one, and idx matches the tag prefix", () => {
+    const journal = decodeJournal(read("drizzle/meta/_journal.json"));
+    const sqls = readdirSync(join(root, "drizzle"))
+      .filter((name) => name.endsWith(".sql"))
+      .sort();
+    expect(sqls).toEqual(journal.entries.map((entry) => `${entry.tag}.sql`));
+    expect(journal.entries.map((entry) => entry.idx)).toEqual(
+      journal.entries.map((entry) => Number(entry.tag.slice(0, 4))),
     );
   });
 });

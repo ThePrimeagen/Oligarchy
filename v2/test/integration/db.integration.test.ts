@@ -412,7 +412,6 @@ Postgres.describeWithDatabase("database", () => {
         const created = yield* tests.createRun({
           iso: "https://example.com/omarchy.iso",
           serverUrl: "http://127.0.0.1:42069",
-          model: "grok-4.6",
           definitions: [{ id: definition.id }],
         });
         expect(created.results).toHaveLength(1);
@@ -421,13 +420,14 @@ Postgres.describeWithDatabase("database", () => {
 
         const sessionId = uuid();
         yield* sessions.insertSession(sessionId, { iso: "x" }, "running");
-        expect(yield* tests.startResult(result.id, sessionId)).toBe(true);
-        expect(yield* tests.startResult(result.id, sessionId)).toBe(false);
-        expect(yield* tests.startResult(uuid(), sessionId)).toBe(false);
+        expect(yield* tests.startResult(result.id, sessionId, "composer-2.5")).toBe(true);
+        expect(yield* tests.startResult(result.id, sessionId, "composer-2.5")).toBe(false);
+        expect(yield* tests.startResult(uuid(), sessionId, "composer-2.5")).toBe(false);
 
         const joined = yield* tests.resultForSession(sessionId);
         expect(joined).toHaveLength(1);
         expect(joined[0]?.result.status).toBe("running");
+        expect(joined[0]?.result.model).toBe("composer-2.5");
         expect(joined[0]?.definition.name).toBe("lock-screen");
 
         expect(yield* tests.closeResult(result.id, "passed", "it locked", null)).toBe(true);
@@ -450,9 +450,10 @@ Postgres.describeWithDatabase("database", () => {
       }),
     );
 
-    scoped.effect("createRun writes model on each result, not the run", () =>
+    scoped.effect("createRun leaves model null; startResult writes the model that ran", () =>
       Effect.gen(function* () {
         const tests = yield* Tests.TestStore;
+        const sessions = yield* Sessions.SessionStore;
         const database = yield* Client.Database;
         const lock = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
         const [install] = yield* database.run("insert", (db) =>
@@ -469,36 +470,65 @@ Postgres.describeWithDatabase("database", () => {
         const created = yield* tests.createRun({
           iso: "https://example.com/omarchy.iso",
           serverUrl: "http://127.0.0.1:42069",
-          model: "grok-4.6",
           definitions: [{ id: lock.id }, { id: install.id }],
         });
         const [run] = yield* database.run("select", (db) =>
           db.select().from(DbSchema.testRuns).where(eq(DbSchema.testRuns.id, created.runId)),
         );
         expect(run).not.toHaveProperty("model");
-        const results = yield* database.run("select", (db) =>
+        const pending = yield* database.run("select", (db) =>
           db
             .select()
             .from(DbSchema.testResults)
             .where(eq(DbSchema.testResults.runId, created.runId)),
         );
-        expect(results.map((row) => row.model)).toEqual(["grok-4.6", "grok-4.6"]);
-        yield* database.run("update", (db) =>
-          db
-            .update(DbSchema.testResults)
-            .set({ model: "composer-2.5" })
-            .where(eq(DbSchema.testResults.id, created.results[1].id)),
+        expect(pending.map((row) => row.model)).toEqual([null, null]);
+        const firstSession = uuid();
+        const secondSession = uuid();
+        yield* sessions.insertSession(firstSession, { iso: "x" }, "running");
+        yield* sessions.insertSession(secondSession, { iso: "x" }, "running");
+        expect(yield* tests.startResult(created.results[0].id, firstSession, "grok-4.6")).toBe(
+          true,
         );
-        const updated = yield* database.run("select", (db) =>
+        expect(yield* tests.startResult(created.results[1].id, secondSession, "composer-2.5")).toBe(
+          true,
+        );
+        const started = yield* database.run("select", (db) =>
           db
             .select()
             .from(DbSchema.testResults)
             .where(eq(DbSchema.testResults.runId, created.runId)),
         );
-        expect([...new Set(updated.map((row) => row.model))].sort()).toEqual([
-          "composer-2.5",
-          "grok-4.6",
-        ]);
+        expect(
+          [...new Set(started.map((row) => row.model))].sort((left, right) =>
+            (left ?? "").localeCompare(right ?? ""),
+          ),
+        ).toEqual(["composer-2.5", "grok-4.6"]);
+      }),
+    );
+
+    scoped.effect("a result may store a null model", () =>
+      Effect.gen(function* () {
+        const tests = yield* Tests.TestStore;
+        const database = yield* Client.Database;
+        const lock = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
+        const [run] = yield* database.run("insert", (db) =>
+          db
+            .insert(DbSchema.testRuns)
+            .values({
+              name: "Omarchy experiment",
+              iso: "https://example.com/omarchy.iso",
+              serverUrl: "http://127.0.0.1:42069",
+            })
+            .returning({ id: DbSchema.testRuns.id }),
+        );
+        const [result] = yield* database.run("insert", (db) =>
+          db
+            .insert(DbSchema.testResults)
+            .values({ runId: run.id, definitionId: lock.id, status: "pending" })
+            .returning({ id: DbSchema.testResults.id, model: DbSchema.testResults.model }),
+        );
+        expect(result.model).toBeNull();
       }),
     );
 
@@ -510,19 +540,19 @@ Postgres.describeWithDatabase("database", () => {
         const first = yield* tests.createRun({
           iso: "https://example.com/omarchy.iso",
           serverUrl: "http://127.0.0.1:42069",
-          model: "grok-4.6",
           definitions: [{ id: definition.id }],
         });
         const second = yield* tests.createRun({
           iso: "https://example.com/omarchy.iso",
           serverUrl: "http://127.0.0.1:42069",
-          model: "grok-4.6",
           definitions: [{ id: definition.id }],
         });
         const sessionId = uuid();
         yield* sessions.insertSession(sessionId, { iso: "x" }, "running");
-        expect(yield* tests.startResult(first.results[0].id, sessionId)).toBe(true);
-        const error = yield* Effect.flip(tests.startResult(second.results[0].id, sessionId));
+        expect(yield* tests.startResult(first.results[0].id, sessionId, "composer-2.5")).toBe(true);
+        const error = yield* Effect.flip(
+          tests.startResult(second.results[0].id, sessionId, "composer-2.5"),
+        );
         expect(error._tag).toBe("DatabaseError");
         expect(error.message).toMatch(/test_results_session_id_idx/);
       }),
@@ -536,7 +566,6 @@ Postgres.describeWithDatabase("database", () => {
         const created = yield* tests.createRun({
           iso: "https://example.com/omarchy.iso",
           serverUrl: "http://127.0.0.1:42069",
-          model: "grok-4.6",
           definitions: [{ id: definition.id }],
         });
         yield* tests.failRun(created.runId, "linear: request failed (401)");
@@ -558,7 +587,7 @@ Postgres.describeWithDatabase("database", () => {
         );
         expect(results.map((row) => row.status)).toEqual(["failed"]);
         expect(results[0]?.reason).toBe("linear: request failed (401)");
-        expect(results[0]?.model).toBe("grok-4.6");
+        expect(results[0]?.model).toBeNull();
         expect(results[0]?.finishedAt?.getTime()).toBe(run?.endedAt?.getTime());
       }),
     );

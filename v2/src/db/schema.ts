@@ -199,9 +199,8 @@ export const testResults = pgTable(
     // Null until test start writes the session, or until the close if start
     // was never called. Attribution is recorded fact, not an upfront guess.
     sessionId: uuid("session_id").references(() => sessions.id),
-    // Default matches the only model the control plane has kicked off with, so
-    // rows that predate the column still have a value the dashboard can show.
-    model: text("model").notNull().default("grok-4.6"),
+    // Null until test start writes the Cursor model id that is running this result.
+    model: text("model"),
     status: testResultStatus("status").notNull().default("pending"),
     reason: text("reason"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
