@@ -186,15 +186,7 @@ export const drivingAgentPrompt = (
 export type DiagnosisBrief = {
   readonly sessionId: string;
   readonly ticket: string;
-  readonly runId: string;
-  readonly resultId: string;
-  readonly version: string;
-  readonly iso: string;
   readonly serverUrl: string;
-  readonly name: string;
-  readonly description: string;
-  readonly instruction: string;
-  readonly proof: string;
 };
 
 export const diagnosisTicketDescription = (
@@ -204,15 +196,7 @@ export const diagnosisTicketDescription = (
   renderPrompt(template, LINEAR_DIAGNOSIS_FILE, {
     LINEAR_TICKET: brief.ticket,
     SESSION_ID: brief.sessionId,
-    RUN_ID: brief.runId,
-    RESULT_ID: brief.resultId,
-    VERSION: brief.version,
-    ISO_URL: brief.iso,
     SERVER_URL: brief.serverUrl,
-    TEST_NAME: brief.name,
-    TEST_DESCRIPTION: brief.description,
-    TEST_INSTRUCTION: brief.instruction,
-    TEST_PROOF: brief.proof,
   });
 
 export const diagnosisAgentPrompt = (

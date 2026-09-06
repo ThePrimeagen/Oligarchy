@@ -114,15 +114,7 @@ const diagnosisKickoff = Linear.loadDiagnosisAgentPrompt.pipe(Effect.provide(Nod
 const diagnosisBrief = {
   sessionId: "6f1c0000-0000-4000-8000-00000000e2a9",
   ticket: "OLI-99",
-  runId: experiment.id,
-  resultId: firstTest.id,
-  version: experiment.version,
-  iso: experiment.iso,
   serverUrl: experiment.serverUrl,
-  name: firstTest.name,
-  description: firstTest.description,
-  instruction: firstTest.instruction,
-  proof: firstTest.proof,
 } satisfies Linear.DiagnosisBrief;
 
 // A FileSystem over the prompt files whose reads matching `unreadable` fail, recording the
@@ -384,43 +376,42 @@ describe("loadDiagnosisAgentPrompt", () => {
 });
 
 describe("diagnosisTicketDescription happy path", () => {
-  it.effect("renders the session, mission, server, and diagnose loop; never the client", () =>
-    Effect.gen(function* () {
-      const template = yield* diagnosisPrompt;
-      const description = Result.getOrThrow(
-        Linear.diagnosisTicketDescription(diagnosisBrief, template),
-      );
+  it.effect(
+    "renders the ticket, session, and server; everything else comes from session --all",
+    () =>
+      Effect.gen(function* () {
+        const template = yield* diagnosisPrompt;
+        const description = Result.getOrThrow(
+          Linear.diagnosisTicketDescription(diagnosisBrief, template),
+        );
 
-      expect(description.includes("{{")).toBe(false);
-      expect(description).toContain(`<linear_ticket>${diagnosisBrief.ticket}</linear_ticket>`);
-      expect(description).toContain(`<session_id>${diagnosisBrief.sessionId}</session_id>`);
-      expect(description).toContain(`<run_id>${diagnosisBrief.runId}</run_id>`);
-      expect(description).toContain(`<result_id>${diagnosisBrief.resultId}</result_id>`);
-      expect(description).toContain(`<version>${diagnosisBrief.version}</version>`);
-      expect(description).toContain(`<name>${diagnosisBrief.name}</name>`);
-      expect(description).toContain(`<description>${diagnosisBrief.description}</description>`);
-      expect(description).toContain(`<instruction>${diagnosisBrief.instruction}</instruction>`);
-      expect(description).toContain(`<proof>${diagnosisBrief.proof}</proof>`);
-      expect(description).toContain(
-        `./ctrl session --server-url ${diagnosisBrief.serverUrl} --session-id ${diagnosisBrief.sessionId} --all`,
-      );
-      expect(description).toContain(
-        `./ctrl error-type list --server-url ${diagnosisBrief.serverUrl}`,
-      );
-      expect(description).toContain(
-        `./ctrl diagnose --server-url ${diagnosisBrief.serverUrl} --session-id ${diagnosisBrief.sessionId}`,
-      );
-      expect(description).toContain("--model <the Cursor model id you are running as>");
-      expect(description).toContain("https://oligarchy.trm.sh/images/");
-      expect(description).not.toContain("./client");
-      expect(description).not.toContain("./ctrl test start");
-      expect(description).not.toContain("./ctrl test-results");
-      expect(description).not.toContain("send-keys");
-      expect(description.includes("--session_id")).toBe(false);
-      expect(description.includes("--server_url")).toBe(false);
-      expect(description.includes(secondTest.name)).toBe(false);
-      expect(description.includes(secondTest.id)).toBe(false);
-    }),
+        expect(description.includes("{{")).toBe(false);
+        expect(description).toContain(`<linear_ticket>${diagnosisBrief.ticket}</linear_ticket>`);
+        expect(description).toContain(`<session_id>${diagnosisBrief.sessionId}</session_id>`);
+        expect(description).toContain(`<server_url>\`${diagnosisBrief.serverUrl}\`</server_url>`);
+        expect(description).toContain(
+          `./ctrl session --server-url ${diagnosisBrief.serverUrl} --session-id ${diagnosisBrief.sessionId} --all`,
+        );
+        expect(description).toContain(
+          `./ctrl error-type list --server-url ${diagnosisBrief.serverUrl}`,
+        );
+        expect(description).toContain(
+          `./ctrl diagnose --server-url ${diagnosisBrief.serverUrl} --session-id ${diagnosisBrief.sessionId}`,
+        );
+        expect(description).toContain("--model <the Cursor model id you are running as>");
+        expect(description).toContain("https://oligarchy.trm.sh/images/");
+        expect(description).not.toContain("<run_id>");
+        expect(description).not.toContain("<result_id>");
+        expect(description).not.toContain("<version>");
+        expect(description).not.toContain("<iso_url>");
+        expect(description).not.toContain("<mission>");
+        expect(description).not.toContain("./client");
+        expect(description).not.toContain("./ctrl test start");
+        expect(description).not.toContain("./ctrl test-results");
+        expect(description).not.toContain("send-keys");
+        expect(description.includes("--session_id")).toBe(false);
+        expect(description.includes("--server_url")).toBe(false);
+      }),
   );
 });
 
@@ -431,6 +422,16 @@ describe("diagnosisTicketDescription unhappy path", () => {
     if (Result.isFailure(rendered)) {
       expect(rendered.failure.message).toBe(
         "linear: prompts/linear-diagnosis.html uses {{NOPE}}, which has no value",
+      );
+    }
+  });
+
+  it("fails when the template asks for a run or result id (unhappy)", () => {
+    const rendered = Linear.diagnosisTicketDescription(diagnosisBrief, "{{SESSION_ID}} {{RUN_ID}}");
+    expect(Result.isFailure(rendered)).toBe(true);
+    if (Result.isFailure(rendered)) {
+      expect(rendered.failure.message).toBe(
+        "linear: prompts/linear-diagnosis.html uses {{RUN_ID}}, which has no value",
       );
     }
   });

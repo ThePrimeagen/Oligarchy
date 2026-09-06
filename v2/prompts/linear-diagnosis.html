@@ -15,19 +15,8 @@ Post-run diagnosis. Name the cause of one Omarchy session that did not succeed, 
 <run>
   <linear_ticket>{{LINEAR_TICKET}}</linear_ticket>
   <session_id>{{SESSION_ID}}</session_id>
-  <run_id>{{RUN_ID}}</run_id>
-  <result_id>{{RESULT_ID}}</result_id>
-  <version>{{VERSION}}</version>
-  <iso_url>`{{ISO_URL}}`</iso_url>
   <server_url>`{{SERVER_URL}}`</server_url>
 </run>
-
-<mission>
-  <name>{{TEST_NAME}}</name>
-  <description>{{TEST_DESCRIPTION}}</description>
-  <instruction>{{TEST_INSTRUCTION}}</instruction>
-  <proof>{{TEST_PROOF}}</proof>
-</mission>
 
 <ctrl>
   <path>./ctrl</path>
@@ -44,7 +33,7 @@ Post-run diagnosis. Name the cause of one Omarchy session that did not succeed, 
 
 Every value is a flag. `--server-url` is the oligarchy server; it falls back to `SERVER_URL` from the environment and has no default. `DATABASE_URL` is already in this process; do not write a `.env`. `session --dump` also reads `OLIGARCHY_TOKEN`, already set. A command that works exits 0. A command that fails exits 1 and prints the error: one headline, then the stack trace and the cause behind it. Read the headline first. `./ctrl <action> --help` prints that action's flags.
 
-session --all prints `{ logs, results, test_definition, actions, debug_log, diagnosis }`. A completed screenshot is a proxy log line `image; <n> bytes in <ms>ms; https://oligarchy.trm.sh/images/<uuid>` — open those URLs; they need no token. debug_log.sources.serial is the UART; --dump is the same console if the debug log is missing. test_definition is the mission; results is the driver's verdict. diagnosis is null until you write it.
+session --all prints `{ logs, results, test_definition, actions, debug_log, diagnosis }`. The run, the result, and the mission live there — derive them from the session. A completed screenshot is a proxy log line `image; <n> bytes in <ms>ms; https://oligarchy.trm.sh/images/<uuid>` — open those URLs; they need no token. debug_log.sources.serial is the UART; --dump is the same console if the debug log is missing. test_definition is the mission; results is the driver's verdict. diagnosis is null until you write it.
 
 error-type list prints every key and description. A key is snake_case, a-z, 0-9 and _, starting with a letter. error-type new adds one; a taken key fails `error-type new: <key> already exists`.
 

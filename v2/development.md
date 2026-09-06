@@ -828,9 +828,9 @@ sendMouse, intentStart, intentEnd, stop, follow }`, each call wrapped in `run`.
   RESULT_ID, VERSION, ISO_URL, SERVER_URL, TEST_NAME, TEST_DESCRIPTION, TEST_INSTRUCTION,
   TEST_PROOF, CLIENT_MD, CTRL_MD, SUB_AGENT` (`Grok 4.6 high fast
   (cursor-grok-4.6-high-fast)`) into a `Result`. `diagnosisTicketDescription(brief, template)`
-  fills `LINEAR_TICKET, SESSION_ID, RUN_ID, RESULT_ID, VERSION, ISO_URL, SERVER_URL,
-  TEST_NAME, TEST_DESCRIPTION, TEST_INSTRUCTION, TEST_PROOF`. `diagnosisAgentPrompt(ticket,
-  template)` fills `LINEAR_TICKET` only, as the kickoff does for a drive.
+  fills `LINEAR_TICKET, SESSION_ID, SERVER_URL` only: the run, the result, and the mission
+  are on the session. `diagnosisAgentPrompt(ticket, template)` fills `LINEAR_TICKET` only, as
+  the kickoff does for a drive.
 - `ctrl test-results` calls `log.acquireColor(agentId)` before its `test result <id>: <status>[;
   <reason>]` line (the agent has no live session on that process); a verdict without `--reason`
   leaves the stored reason in place (`TestStore.closeResult` omits the key, as for `session_id`).
@@ -1263,8 +1263,8 @@ needs, and a type can be renamed or, once nothing carries it, deleted.
 - `ctrl session --diagnosis` prints the row (`{ sessionId, errorType, summary, model, createdAt
   }`) or `null`; `--all` includes it last as `diagnosis`.
 - The Linear briefing is `prompts/linear-diagnosis.html`; its kickoff is
-  `prompts/diagnosis-agent.html`. They name the session and the mission. They do not embed
-  `client.md`.
+  `prompts/diagnosis-agent.html`. They name the ticket, the session, and the server. They do
+  not embed `client.md`. The run, the result, and the mission come from `session --all`.
 
 ## Dashboard
 
