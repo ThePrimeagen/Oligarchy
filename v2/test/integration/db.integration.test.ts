@@ -495,10 +495,36 @@ Postgres.describeWithDatabase("database", () => {
             .from(DbSchema.testResults)
             .where(eq(DbSchema.testResults.runId, created.runId)),
         );
-        expect([...new Set(updated.map((row) => row.model))].sort()).toEqual([
-          "composer-2.5",
-          "grok-4.6",
-        ]);
+        expect(
+          [...new Set(updated.map((row) => row.model))].sort((left, right) =>
+            (left ?? "").localeCompare(right ?? ""),
+          ),
+        ).toEqual(["composer-2.5", "grok-4.6"]);
+      }),
+    );
+
+    scoped.effect("a result may store a null model", () =>
+      Effect.gen(function* () {
+        const tests = yield* Tests.TestStore;
+        const database = yield* Client.Database;
+        const lock = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
+        const [run] = yield* database.run("insert", (db) =>
+          db
+            .insert(DbSchema.testRuns)
+            .values({
+              name: "Omarchy experiment",
+              iso: "https://example.com/omarchy.iso",
+              serverUrl: "http://127.0.0.1:42069",
+            })
+            .returning({ id: DbSchema.testRuns.id }),
+        );
+        const [result] = yield* database.run("insert", (db) =>
+          db
+            .insert(DbSchema.testResults)
+            .values({ runId: run.id, definitionId: lock.id, status: "pending" })
+            .returning({ id: DbSchema.testResults.id, model: DbSchema.testResults.model }),
+        );
+        expect(result.model).toBeNull();
       }),
     );
 

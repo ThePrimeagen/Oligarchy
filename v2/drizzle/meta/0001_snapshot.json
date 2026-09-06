@@ -1,5 +1,5 @@
 {
-  "id": "233638f4-1c35-4c18-a1e8-53997c53a4f0",
+  "id": "330abe02-d793-4eec-8b15-a6151fc32ca0",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -603,8 +603,7 @@
           "name": "model",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
-          "default": "'grok-4.6'"
+          "notNull": false
         },
         "status": {
           "name": "status",

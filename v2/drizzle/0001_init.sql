@@ -72,7 +72,7 @@ CREATE TABLE "test_results" (
 	"run_id" uuid NOT NULL,
 	"definition_id" bigint NOT NULL,
 	"session_id" uuid,
-	"model" text DEFAULT 'grok-4.6' NOT NULL,
+	"model" text,
 	"status" "test_result_status" DEFAULT 'pending' NOT NULL,
 	"reason" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,

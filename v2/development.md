@@ -107,10 +107,8 @@ bugs; anything not listed here is a regression.
   it. `v2/` is the rewrite. The root holds `AGENTS.md`, the wrappers, `.gitignore` and `.cursor/`.
 - `v2/` holds `package.json`, `package-lock.json`, `tsconfig.json`, `.oxlintrc.json`,
   `.oxfmtrc.json`, `.editorconfig`, `vitest.config.ts`, `vitest.global-setup.ts` (Testcontainers
-  Postgres, migrations, seed), `vitest.d.ts`, `drizzle.config.ts`, `wrangler.jsonc`, `drizzle/`
-  (one generated baseline, `0001_init`, of the current schema), `public/`
-  and `prompts/`
-  (moved as-is), the
+  Postgres, migrations, seed), `vitest.d.ts`, `drizzle.config.ts`, `wrangler.jsonc`, `drizzle/`,
+  `public/` and `prompts/` (moved as-is), the
   operator documents, this document, the four `v2/` wrappers, `src/` and `test/`.
 
 `v2/src/`: one directory per process plus the shared kernel; `main.ts` files are the entries.
@@ -1044,8 +1042,7 @@ const prepare = Effect.fn("Qemu.prepare")(function* (id: string, disk: string | 
   Drizzle-typed columns are trusted; the `jsonb` columns (`sessions.config`, `actions.request`,
   `actions.response`) are written from schema-typed values and read back as Drizzle types them.
 - `src/db/schema.ts` is v1's schema formatted by oxfmt, plus `debug_logs` (v2-only). The v1
-  tables stay semantically identical (`drizzle-kit check` and the `schema-in-sync` job pass
-  against the moved migrations), not byte-identical. Its `pgEnum` lists and the `Schema.Literals`
+  tables stay semantically identical, not byte-identical. Its `pgEnum` lists and the `Schema.Literals`
   in `domain.ts` are maintained by hand together. Row
   stamps come from Postgres `now()` in the statement; Effect-side time from
   `Clock.currentTimeMillis`. `registerAgent`'s primary key makes one session per agent; a second
@@ -1117,10 +1114,9 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
 - The tables: `sessions`, `agent_runs`, `actions`, `images`, `logs`, `debug_logs`,
   `test_definitions`, `test_base_prompts`, `test_runs`, `test_results`, declared in
   `src/db/schema.ts`. v1 declared every table except `debug_logs`. `test_results.model` is the
-  Cursor model id that result's agent used (`grok-4.6` today); `createRun` writes it on every
-  result and the column default covers rows that predate the migration. One run can mix
-  models. `test_results.session_id` is unique when set, so one session cannot belong to two
-  results.
+  Cursor model id that result's agent used, or null. `createRun` writes it on every result. One
+  run can mix models. `test_results.session_id` is unique when set, so one session cannot belong
+  to two results.
 
 ## Log stream
 
@@ -1612,29 +1608,6 @@ Schema and module rules above already cover most of them; the rest:
   A service shape that intentionally exposes a requirement carries
   `/** @effect-expect-leaking X */`. Idempotency keys on every side-effecting SDK call and a unique
   index behind every "create once".
-
-## Migrations
-
-- The database schema lives in `v2/src/db/schema.ts`. Migrations under `v2/drizzle/` are generated
-  from it with `npm run db:generate`, never written or edited by hand, and never applied with
-  `drizzle-kit push`. `0001_init` is the baseline of the current schema (the v1 chain and the
-  later `debug_logs` / `model` / `session_id` unique-index steps were collapsed when the
-  database was wiped). Further schema changes append `0002`, `0003`, …
-- Migrations are append-only after that baseline. Never edit, delete, or rename anything under
-  `v2/drizzle/`, not the `.sql` files, not the `meta/` snapshots. To change the schema, edit
-  `v2/src/db/schema.ts` and generate a new migration. The one exception is
-  `v2/drizzle/meta/_journal.json`, which the generator itself appends to. The append-only job
-  allows one kind of reset: the base branch has more than one `.sql` file and the PR has
-  exactly one.
-- CI enforces both rules: an edited migration fails the build, and so does a schema that does not
-  match the committed migrations (`.github/workflows/migrations.yml`, `append-only` and
-  `schema-in-sync`, working directory `v2`, Node 26). A third job, `checks`, runs
-  `npm run check:fast`.
-- Applying migrations is deployment-owned: `npm run db:migrate` runs `src/db/migrate.ts`, whose
-  `program` reads `Config.databaseUrl`, builds `Database.make(url)` in a scope, and runs
-  `migrateDatabase` (`database.run("migrate", (db) => migrate(db, { migrationsFolder: "drizzle"
-  }))`); it prints `database migrations applied` and fails with `DATABASE_URL is not set` (a `.env`
-  fills missing variables only). Tests only ever migrate an ephemeral container.
 
 ## Review
 
