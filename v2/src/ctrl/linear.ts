@@ -70,6 +70,8 @@ export type IssuePrompts = {
 
 const LINEAR_ISSUE_FILE = "linear-issue.html";
 const DRIVING_AGENT_FILE = "driving-agent.html";
+const LINEAR_DIAGNOSIS_FILE = "linear-diagnosis.html";
+const DIAGNOSIS_AGENT_FILE = "diagnosis-agent.html";
 
 // The files sit beside the package, not the working directory: resolve them from this module.
 const besideModule = (relative: string): string =>
@@ -78,6 +80,8 @@ const besideModule = (relative: string): string =>
 const PROMPT_PATHS = {
   linearIssue: besideModule(`../../prompts/${LINEAR_ISSUE_FILE}`),
   drivingAgent: besideModule(`../../prompts/${DRIVING_AGENT_FILE}`),
+  linearDiagnosis: besideModule(`../../prompts/${LINEAR_DIAGNOSIS_FILE}`),
+  diagnosisAgent: besideModule(`../../prompts/${DIAGNOSIS_AGENT_FILE}`),
   clientMd: besideModule("../../client.md"),
   ctrlMd: besideModule("../../ctrl-linear.md"),
 };
@@ -99,6 +103,17 @@ const readPrompt = Effect.fn("Linear.readPrompt")(function* (path: string) {
 // so an unreadable one cannot stop it.
 export const loadDrivingPrompt: Effect.Effect<string, Errors.LinearError, FileSystem.FileSystem> =
   readPrompt(PROMPT_PATHS.drivingAgent);
+
+// Diagnosis reads its ticket template and its kickoff alone: the driving guides are not its
+// business, so an unreadable client.md cannot stop a diagnosis.
+export const loadDiagnosisPrompt: Effect.Effect<string, Errors.LinearError, FileSystem.FileSystem> =
+  readPrompt(PROMPT_PATHS.linearDiagnosis);
+
+export const loadDiagnosisAgentPrompt: Effect.Effect<
+  string,
+  Errors.LinearError,
+  FileSystem.FileSystem
+> = readPrompt(PROMPT_PATHS.diagnosisAgent);
 
 export const loadIssuePrompts: Effect.Effect<
   IssuePrompts,
@@ -167,6 +182,44 @@ export const drivingAgentPrompt = (
   template: string,
 ): Result.Result<string, Errors.LinearError> =>
   renderPrompt(template, DRIVING_AGENT_FILE, { LINEAR_TICKET: ticket });
+
+export type DiagnosisBrief = {
+  readonly sessionId: string;
+  readonly ticket: string;
+  readonly runId: string;
+  readonly resultId: string;
+  readonly version: string;
+  readonly iso: string;
+  readonly serverUrl: string;
+  readonly name: string;
+  readonly description: string;
+  readonly instruction: string;
+  readonly proof: string;
+};
+
+export const diagnosisTicketDescription = (
+  brief: DiagnosisBrief,
+  template: string,
+): Result.Result<string, Errors.LinearError> =>
+  renderPrompt(template, LINEAR_DIAGNOSIS_FILE, {
+    LINEAR_TICKET: brief.ticket,
+    SESSION_ID: brief.sessionId,
+    RUN_ID: brief.runId,
+    RESULT_ID: brief.resultId,
+    VERSION: brief.version,
+    ISO_URL: brief.iso,
+    SERVER_URL: brief.serverUrl,
+    TEST_NAME: brief.name,
+    TEST_DESCRIPTION: brief.description,
+    TEST_INSTRUCTION: brief.instruction,
+    TEST_PROOF: brief.proof,
+  });
+
+export const diagnosisAgentPrompt = (
+  ticket: string,
+  template: string,
+): Result.Result<string, Errors.LinearError> =>
+  renderPrompt(template, DIAGNOSIS_AGENT_FILE, { LINEAR_TICKET: ticket });
 
 // ---------------------------------------------------------------------------
 // GraphQL

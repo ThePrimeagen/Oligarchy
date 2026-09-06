@@ -107,6 +107,24 @@ const issuePrompts = Linear.loadIssuePrompts.pipe(Effect.provide(NodeFileSystem.
 
 const drivingPrompt = Linear.loadDrivingPrompt.pipe(Effect.provide(NodeFileSystem.layer));
 
+const diagnosisPrompt = Linear.loadDiagnosisPrompt.pipe(Effect.provide(NodeFileSystem.layer));
+
+const diagnosisKickoff = Linear.loadDiagnosisAgentPrompt.pipe(Effect.provide(NodeFileSystem.layer));
+
+const diagnosisBrief = {
+  sessionId: "6f1c0000-0000-4000-8000-00000000e2a9",
+  ticket: "OLI-99",
+  runId: experiment.id,
+  resultId: firstTest.id,
+  version: experiment.version,
+  iso: experiment.iso,
+  serverUrl: experiment.serverUrl,
+  name: firstTest.name,
+  description: firstTest.description,
+  instruction: firstTest.instruction,
+  proof: firstTest.proof,
+} satisfies Linear.DiagnosisBrief;
+
 // A FileSystem over the prompt files whose reads matching `unreadable` fail, recording the
 // path of every read so a test can say which files a loader touched.
 const promptFs = (
@@ -312,6 +330,132 @@ describe("drivingAgentPrompt", () => {
     if (Result.isFailure(rendered)) {
       expect(rendered.failure.message).toBe(
         "linear: prompts/driving-agent.html uses {{SERVER_URL}}, which has no value",
+      );
+    }
+  });
+});
+
+describe("loadDiagnosisPrompt", () => {
+  it.effect("reads prompts/linear-diagnosis.html and nothing else (happy)", () =>
+    Effect.gen(function* () {
+      const fs = promptFs(
+        /\/(client\.md|ctrl-linear\.md|linear-issue\.html|driving-agent\.html|diagnosis-agent\.html)$/,
+      );
+      const template = yield* Linear.loadDiagnosisPrompt.pipe(Effect.provide(fs.layer));
+      expect(fileNames(fs.reads)).toEqual(["linear-diagnosis.html"]);
+      expect(template).toMatch(/^contents of .*\/prompts\/linear-diagnosis\.html$/);
+    }),
+  );
+
+  it.effect("fails as a LinearError naming the template when it is unreadable (unhappy)", () =>
+    Effect.gen(function* () {
+      const fs = promptFs(/linear-diagnosis\.html$/);
+      const error = yield* Effect.flip(Linear.loadDiagnosisPrompt.pipe(Effect.provide(fs.layer)));
+      expect(error).toMatchObject({ _tag: "LinearError", operation: "prompts" });
+      expect(error.message).toMatch(/^linear: .*linear-diagnosis\.html/);
+      expect(error.cause).toBeDefined();
+    }),
+  );
+});
+
+describe("loadDiagnosisAgentPrompt", () => {
+  it.effect("reads prompts/diagnosis-agent.html and nothing else (happy)", () =>
+    Effect.gen(function* () {
+      const fs = promptFs(
+        /\/(client\.md|ctrl-linear\.md|linear-issue\.html|linear-diagnosis\.html)$/,
+      );
+      const template = yield* Linear.loadDiagnosisAgentPrompt.pipe(Effect.provide(fs.layer));
+      expect(fileNames(fs.reads)).toEqual(["diagnosis-agent.html"]);
+      expect(template).toMatch(/^contents of .*\/prompts\/diagnosis-agent\.html$/);
+    }),
+  );
+
+  it.effect("fails as a LinearError naming the template when it is unreadable (unhappy)", () =>
+    Effect.gen(function* () {
+      const fs = promptFs(/diagnosis-agent\.html$/);
+      const error = yield* Effect.flip(
+        Linear.loadDiagnosisAgentPrompt.pipe(Effect.provide(fs.layer)),
+      );
+      expect(error).toMatchObject({ _tag: "LinearError", operation: "prompts" });
+      expect(error.message).toMatch(/^linear: .*diagnosis-agent\.html/);
+      expect(error.cause).toBeDefined();
+    }),
+  );
+});
+
+describe("diagnosisTicketDescription happy path", () => {
+  it.effect("renders the session, mission, server, and diagnose loop; never the client", () =>
+    Effect.gen(function* () {
+      const template = yield* diagnosisPrompt;
+      const description = Result.getOrThrow(
+        Linear.diagnosisTicketDescription(diagnosisBrief, template),
+      );
+
+      expect(description.includes("{{")).toBe(false);
+      expect(description).toContain(`<linear_ticket>${diagnosisBrief.ticket}</linear_ticket>`);
+      expect(description).toContain(`<session_id>${diagnosisBrief.sessionId}</session_id>`);
+      expect(description).toContain(`<run_id>${diagnosisBrief.runId}</run_id>`);
+      expect(description).toContain(`<result_id>${diagnosisBrief.resultId}</result_id>`);
+      expect(description).toContain(`<version>${diagnosisBrief.version}</version>`);
+      expect(description).toContain(`<name>${diagnosisBrief.name}</name>`);
+      expect(description).toContain(`<description>${diagnosisBrief.description}</description>`);
+      expect(description).toContain(`<instruction>${diagnosisBrief.instruction}</instruction>`);
+      expect(description).toContain(`<proof>${diagnosisBrief.proof}</proof>`);
+      expect(description).toContain(
+        `./ctrl session --server-url ${diagnosisBrief.serverUrl} --session-id ${diagnosisBrief.sessionId} --all`,
+      );
+      expect(description).toContain(
+        `./ctrl error-type list --server-url ${diagnosisBrief.serverUrl}`,
+      );
+      expect(description).toContain(
+        `./ctrl diagnose --server-url ${diagnosisBrief.serverUrl} --session-id ${diagnosisBrief.sessionId}`,
+      );
+      expect(description).toContain("--model <the Cursor model id you are running as>");
+      expect(description).toContain("https://oligarchy.trm.sh/images/");
+      expect(description).not.toContain("./client");
+      expect(description).not.toContain("./ctrl test start");
+      expect(description).not.toContain("./ctrl test-results");
+      expect(description).not.toContain("send-keys");
+      expect(description.includes("--session_id")).toBe(false);
+      expect(description.includes("--server_url")).toBe(false);
+      expect(description.includes(secondTest.name)).toBe(false);
+      expect(description.includes(secondTest.id)).toBe(false);
+    }),
+  );
+});
+
+describe("diagnosisTicketDescription unhappy path", () => {
+  it("fails when the template names a value the brief does not carry", () => {
+    const rendered = Linear.diagnosisTicketDescription(diagnosisBrief, "{{SESSION_ID}} {{NOPE}}");
+    expect(Result.isFailure(rendered)).toBe(true);
+    if (Result.isFailure(rendered)) {
+      expect(rendered.failure.message).toBe(
+        "linear: prompts/linear-diagnosis.html uses {{NOPE}}, which has no value",
+      );
+    }
+  });
+});
+
+describe("diagnosisAgentPrompt", () => {
+  it.effect("renders the kickoff prompt from the ticket alone; the session is in the ticket", () =>
+    Effect.gen(function* () {
+      const template = yield* diagnosisKickoff;
+      const text = Result.getOrThrow(Linear.diagnosisAgentPrompt("OLI-99", template));
+      expect(text.includes("{{")).toBe(false);
+      expect(text).toMatch(/Review Linear ticket\s+OLI-99/);
+      expect(text).toContain("./ctrl");
+      expect(text.includes("./client")).toBe(false);
+      expect(text.includes("--server-url")).toBe(false);
+      expect(text.includes("http")).toBe(false);
+    }),
+  );
+
+  it("fails on a template asking for more than the ticket (unhappy)", () => {
+    const rendered = Linear.diagnosisAgentPrompt("OLI-99", "{{LINEAR_TICKET}} {{SESSION_ID}}");
+    expect(Result.isFailure(rendered)).toBe(true);
+    if (Result.isFailure(rendered)) {
+      expect(rendered.failure.message).toBe(
+        "linear: prompts/diagnosis-agent.html uses {{SESSION_ID}}, which has no value",
       );
     }
   });
