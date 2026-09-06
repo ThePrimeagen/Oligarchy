@@ -114,7 +114,7 @@ Ties a pending test result to the session that is running it and records the Cur
 - `--model <id>` — the Cursor model id that is running this result.
 
 ```bash
-./ctrl test start --server-url https://qemu.example.com --session-id 6f1c...e2a9 --test-result-id 2222...2222 --model grok-4.6
+./ctrl test start --server-url https://qemu.example.com --session-id 6f1c...e2a9 --test-result-id 2222...2222 --model <the Cursor model id you are running as>
 ```
 
 ## test-results
