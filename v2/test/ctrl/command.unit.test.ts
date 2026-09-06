@@ -322,8 +322,8 @@ describe("test new", () => {
         expect(run).not.toHaveProperty("model");
         const results = h.stores.tests.results;
         expect(results.map((row) => [row.runId, row.definitionId, row.status, row.model])).toEqual([
-          [run?.id, 1, "pending", "grok-4.6"],
-          [run?.id, 2, "pending", "grok-4.6"],
+          [run?.id, 1, "pending", null],
+          [run?.id, 2, "pending", null],
         ]);
 
         const loaded = yield* issuePrompts;

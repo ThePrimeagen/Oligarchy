@@ -310,7 +310,7 @@ export const fakeTestStore = (
             runId,
             definitionId: definition.id,
             sessionId: null,
-            model: input.model,
+            model: null,
             status: "pending",
             reason: null,
             createdAt: new Date(),

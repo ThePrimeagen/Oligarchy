@@ -251,7 +251,6 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     const created = yield* tests.createRun({
       iso: input.iso,
       serverUrl: input.serverUrl,
-      model: Cursor.GROK_4_6_FAST_XHIGH.id,
       definitions,
     });
     const resultIds = new Map(created.results.map((row) => [row.definitionId, row.id] as const));

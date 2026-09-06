@@ -199,6 +199,7 @@ export const testResults = pgTable(
     // Null until test start writes the session, or until the close if start
     // was never called. Attribution is recorded fact, not an upfront guess.
     sessionId: uuid("session_id").references(() => sessions.id),
+    // Null until test start writes the Cursor model id that is running this result.
     model: text("model"),
     status: testResultStatus("status").notNull().default("pending"),
     reason: text("reason"),
