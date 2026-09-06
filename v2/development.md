@@ -1033,7 +1033,7 @@ const prepare = Effect.fn("Qemu.prepare")(function* (id: string, disk: string | 
   only run queries and never acquire a scope.
 - Multi-step writes run in one transaction: `endSession` stamps the session and its open
   `agent_runs` with one `now()`; `finishAction` with an image writes `actions` and `images`
-  together; `createRun` inserts the run and its results (each result carrying `model`) together; `failRun` closes both.
+  together; `createRun` inserts the run and its results together; `failRun` closes both.
 - `normalizeDatabaseUrl` guards with `URL.canParse` (`db: DATABASE_URL is not a valid url`, and the
   password never lands in a message), drops `sslrootcert=system` (node-postgres reads it as a file
   path) and keeps `sslmode=verify-full`.
@@ -1114,9 +1114,9 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
 - The tables: `sessions`, `agent_runs`, `actions`, `images`, `logs`, `debug_logs`,
   `test_definitions`, `test_base_prompts`, `test_runs`, `test_results`, declared in
   `src/db/schema.ts`. v1 declared every table except `debug_logs`. `test_results.model` is the
-  Cursor model id that result's agent used, or null. `createRun` writes a planned model on every
-  result; `test start` writes the model that actually ran. One run can mix models.
-  `test_results.session_id` is unique when set, so one session cannot belong to two results.
+  Cursor model id that result's agent used, or null until `test start` writes it. One run can
+  mix models. `test_results.session_id` is unique when set, so one session cannot belong to two
+  results.
 
 ## Log stream
 
@@ -1608,6 +1608,25 @@ Schema and module rules above already cover most of them; the rest:
   A service shape that intentionally exposes a requirement carries
   `/** @effect-expect-leaking X */`. Idempotency keys on every side-effecting SDK call and a unique
   index behind every "create once".
+
+## Migrations
+
+- The database schema lives in `v2/src/db/schema.ts`. Migrations under `v2/drizzle/` are generated
+  from it with `npm run db:generate`, never written or edited by hand, and never applied with
+  `drizzle-kit push`.
+- Migrations are append-only. Never edit, delete, or rename anything under `v2/drizzle/`, not the
+  `.sql` files, not the `meta/` snapshots. To change the schema, edit `v2/src/db/schema.ts` and
+  generate a new migration. The one exception is `v2/drizzle/meta/_journal.json`, which the
+  generator itself appends to.
+- CI enforces both rules: an edited migration fails the build, and so does a schema that does not
+  match the committed migrations (`.github/workflows/migrations.yml`, `append-only` and
+  `schema-in-sync`, working directory `v2`, Node 26). A third job, `checks`, runs
+  `npm run check:fast`.
+- Applying migrations is deployment-owned: `npm run db:migrate` runs `src/db/migrate.ts`, whose
+  `program` reads `Config.databaseUrl`, builds `Database.make(url)` in a scope, and runs
+  `migrateDatabase` (`database.run("migrate", (db) => migrate(db, { migrationsFolder: "drizzle"
+  }))`); it prints `database migrations applied` and fails with `DATABASE_URL is not set` (a `.env`
+  fills missing variables only). Tests only ever migrate an ephemeral container.
 
 ## Review
 

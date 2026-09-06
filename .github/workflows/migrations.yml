@@ -16,6 +16,7 @@ jobs:
           base_sql=$(git ls-tree -r --name-only "origin/${{ github.base_ref }}" -- 'v2/drizzle/' \
             | grep '\.sql$' | wc -l)
           head_sql=$(find v2/drizzle -maxdepth 1 -name '*.sql' | wc -l)
+          # One-shot for collapsing the chain to a single 0001_init. Remove once master is that baseline.
           if [ "$head_sql" -eq 1 ] && [ "$base_sql" -gt 1 ]; then
             echo "Reset from ${base_sql} migrations to a single baseline; append-only skipped."
             exit 0
