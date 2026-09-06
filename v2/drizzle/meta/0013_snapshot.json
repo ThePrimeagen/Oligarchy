@@ -1,5 +1,5 @@
 {
-  "id": "296acc6a-5138-4053-a330-5763b866d8a3",
+  "id": "ff3d374d-41bb-44dd-9d3c-54c47676e488",
   "prevId": "7792ff54-5c31-4745-baab-5f4fea15c861",
   "version": "7",
   "dialect": "postgresql",
@@ -639,6 +639,21 @@
             },
             {
               "expression": "definition_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "test_results_session_id_idx": {
+          "name": "test_results_session_id_idx",
+          "columns": [
+            {
+              "expression": "session_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

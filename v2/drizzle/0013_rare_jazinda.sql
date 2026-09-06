@@ -1,1 +1,0 @@
-ALTER TABLE "test_runs" ADD COLUMN "model" text DEFAULT 'grok-4.6' NOT NULL;

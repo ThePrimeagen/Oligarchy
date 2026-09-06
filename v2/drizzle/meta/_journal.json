@@ -96,15 +96,8 @@
     {
       "idx": 13,
       "version": "7",
-      "when": 1788664467829,
-      "tag": "0013_rare_jazinda",
-      "breakpoints": true
-    },
-    {
-      "idx": 14,
-      "version": "7",
-      "when": 1788664955642,
-      "tag": "0014_glamorous_paladin",
+      "when": 1788700445403,
+      "tag": "0013_tan_gargoyle",
       "breakpoints": true
     }
   ]

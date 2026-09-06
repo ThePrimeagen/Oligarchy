@@ -109,7 +109,7 @@ bugs; anything not listed here is a regression.
   `.oxfmtrc.json`, `.editorconfig`, `vitest.config.ts`, `vitest.global-setup.ts` (Testcontainers
   Postgres, migrations, seed), `vitest.d.ts`, `drizzle.config.ts`, `wrangler.jsonc`, `drizzle/`
   (generated migrations; 0000–0011 match `v1/`, 0012 adds `debug_logs` with a `sources` jsonb
-  map, 0013 adds `test_runs.model`, 0014 unique-indexes `test_results.session_id`), `public/`
+  map, 0013 adds `test_runs.model` and unique-indexes `test_results.session_id`), `public/`
   and `prompts/`
   (moved as-is), the
   operator documents, this document, the four `v2/` wrappers, `src/` and `test/`.
