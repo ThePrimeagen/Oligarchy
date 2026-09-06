@@ -8,6 +8,7 @@ export type SessionRow = {
 };
 
 export type TestDefinitionRow = typeof DbSchema.testDefinitions.$inferSelect;
+export type ErrorTypeRow = typeof DbSchema.postRunErrorTypes.$inferSelect;
 
 export const STATUS_COLOR: Readonly<Record<Domain.SessionStatus, string>> = {
   downloading: "\x1b[90m",
@@ -60,6 +61,17 @@ export const renderTestDefinitions = (
   rows: ReadonlyArray<TestDefinitionRow>,
   details: boolean,
 ): ReadonlyArray<string> => (details ? [json(rows)] : rows.map((row) => row.name));
+
+export const renderErrorTypes = (
+  rows: ReadonlyArray<ErrorTypeRow>,
+  asJson: boolean,
+): ReadonlyArray<string> => {
+  if (asJson) {
+    return [json(rows)];
+  }
+  const width = Math.max(0, ...rows.map((row) => row.key.length));
+  return rows.map((row) => `${row.key.padEnd(width)}  ${row.description}`);
+};
 
 export const agentLink = (url: string): string =>
   `Agent here, go check it out for more information: ${url}`;

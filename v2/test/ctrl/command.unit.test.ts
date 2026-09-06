@@ -152,12 +152,16 @@ const harness = (
   // A later layer's service wins the merge, so the fake FileSystem replaces Node's.
   const services =
     options.fs === undefined ? NodeServices.layer : Layer.merge(NodeServices.layer, options.fs);
-  const run = (args: ReadonlyArray<string>, env: Record<string, string> = WITH_DB) =>
+  const program = (args: ReadonlyArray<string>, env: Record<string, string>) =>
     Command.runWith(command, { version: Api.VERSION })(args).pipe(
       Effect.provide(Layer.mergeAll(services, stdio.layer, Config.withEnv(env), FakeHttp.die)),
-      Effect.exit,
     );
-  return { stores, log, linear, cursor, proxy, touched, stdio, run };
+  const run = (args: ReadonlyArray<string>, env: Record<string, string> = WITH_DB) =>
+    Effect.exit(program(args, env));
+  // The failure itself, for a command refused after parsing.
+  const fail = (args: ReadonlyArray<string>, env: Record<string, string> = WITH_DB) =>
+    Effect.flip(program(args, env));
+  return { stores, log, linear, cursor, proxy, touched, stdio, run, fail };
 };
 
 const DRIVING_AGENT_PATH = /\/prompts\/driving-agent\.html$/;
@@ -1169,6 +1173,439 @@ describe("session list", () => {
 });
 
 // ---------------------------------------------------------------------------
+// error-type new / list
+// ---------------------------------------------------------------------------
+
+type ErrorTypeRow = typeof DbSchema.postRunErrorTypes.$inferSelect;
+type DiagnosisRow = typeof DbSchema.postRunDiagnosis.$inferSelect;
+
+const bootHang: ErrorTypeRow = {
+  key: "guest_boot_hang",
+  description: "The guest never reached the login screen",
+  createdAt: new Date("2026-09-02T00:00:00Z"),
+};
+
+const misread: ErrorTypeRow = {
+  key: "agent_misread_screen",
+  description: "The agent acted on a screen it described wrongly",
+  createdAt: new Date("2026-09-02T00:00:01Z"),
+};
+
+const diagnosis: DiagnosisRow = {
+  sessionId: SESSION_ID,
+  errorType: bootHang.key,
+  summary: "Serial shows the kernel waiting on the root device; the ISO never mounted",
+  model: MODEL,
+  createdAt: new Date("2026-09-03T00:00:05Z"),
+};
+
+const NEW_TYPE = [
+  "error-type",
+  "new",
+  "--key",
+  bootHang.key,
+  "--description",
+  bootHang.description,
+  "--server-url",
+  SERVER,
+];
+
+describe("error-type new", () => {
+  it.effect("stores the key and description and logs the creation (happy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      const exit = yield* h.run(NEW_TYPE);
+      expect(Exit.isSuccess(exit)).toBe(true);
+      expect(h.stores.diagnosis.errorTypes).toHaveLength(1);
+      expect(h.stores.diagnosis.errorTypes[0]).toMatchObject({
+        key: bootHang.key,
+        description: bootHang.description,
+      });
+      expect(h.stores.diagnosis.errorTypes[0]?.createdAt).toBeInstanceOf(Date);
+      expect(h.log.lines).toEqual([
+        {
+          level: "info",
+          text: `error type created; ${bootHang.key}`,
+          sessionId: undefined,
+          agentId: undefined,
+          skipSentry: false,
+          cause: undefined,
+        },
+      ]);
+      expect(yield* stdout).toEqual([]);
+      expect(h.touched).toEqual(["database"]);
+    }),
+  );
+
+  it.effect("refuses a key that already exists and leaves the stored description (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.diagnosis.errorTypes.push(bootHang);
+      const error = yield* h.fail([
+        "error-type",
+        "new",
+        "--key",
+        bootHang.key,
+        "--description",
+        "a second meaning",
+        "--server-url",
+        SERVER,
+      ]);
+      expect(error).toMatchObject({
+        _tag: "CommandError",
+        message: `error-type new: ${bootHang.key} already exists`,
+      });
+      expect(h.stores.diagnosis.errorTypes).toEqual([bootHang]);
+      expect(h.log.lines).toEqual([]);
+    }),
+  );
+
+  it.effect("refuses a key that is not snake_case before touching the database (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      for (const key of ["Guest Boot Hang", "guest-boot-hang", "7_days", ""]) {
+        const exit = yield* h.run([
+          "error-type",
+          "new",
+          "--key",
+          key,
+          "--description",
+          "d",
+          "--server-url",
+          SERVER,
+        ]);
+        expect(helpErrors(exit).join("\n"), key).toMatch(
+          /key must be snake_case: a-z, 0-9 and _, starting with a letter/,
+        );
+      }
+      expect(h.touched).toEqual([]);
+    }),
+  );
+
+  it.effect("requires --key and a non-empty --description (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      const noKey = yield* h.run([
+        "error-type",
+        "new",
+        "--description",
+        "d",
+        "--server-url",
+        SERVER,
+      ]);
+      expect(helpErrors(noKey).join("\n")).toMatch(/Missing required flag: --key/);
+      const noDescription = yield* h.run([
+        "error-type",
+        "new",
+        "--key",
+        bootHang.key,
+        "--server-url",
+        SERVER,
+      ]);
+      expect(helpErrors(noDescription).join("\n")).toMatch(/Missing required flag: --description/);
+      const empty = yield* h.run([
+        "error-type",
+        "new",
+        "--key",
+        bootHang.key,
+        "--description",
+        "",
+        "--server-url",
+        SERVER,
+      ]);
+      expect(helpErrors(empty).join("\n")).toMatch(/--description.*length of at least 1/s);
+      expect(h.touched).toEqual([]);
+    }),
+  );
+});
+
+describe("error-type list", () => {
+  it.effect("prints key and description columns ordered by key (happy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.diagnosis.errorTypes.push(bootHang, misread);
+      const exit = yield* h.run(["error-type", "list", "--server-url", SERVER]);
+      expect(Exit.isSuccess(exit)).toBe(true);
+      expect(yield* stdout).toEqual([
+        `agent_misread_screen  ${misread.description}`,
+        `guest_boot_hang       ${bootHang.description}`,
+      ]);
+      expect(h.touched).toEqual(["database"]);
+    }),
+  );
+
+  it.effect("--json prints the rows as a JSON array (happy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.diagnosis.errorTypes.push(bootHang);
+      const exit = yield* h.run(["error-type", "list", "--json", "--server-url", SERVER]);
+      expect(Exit.isSuccess(exit)).toBe(true);
+      expect(yield* lastJson).toEqual([
+        { ...bootHang, createdAt: bootHang.createdAt.toISOString() },
+      ]);
+    }),
+  );
+
+  it.effect("prints nothing as text and [] as JSON when there are no types (happy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      expect(Exit.isSuccess(yield* h.run(["error-type", "list", "--server-url", SERVER]))).toBe(
+        true,
+      );
+      expect(
+        Exit.isSuccess(yield* h.run(["error-type", "list", "--json", "--server-url", SERVER])),
+      ).toBe(true);
+      expect(yield* stdout).toEqual(["[]"]);
+    }),
+  );
+
+  it.effect("bare error-type prints help and touches nothing (happy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      const exit = yield* h.run(["error-type"], {});
+      expect(helpErrors(exit)).toEqual([]);
+      expect(h.touched).toEqual([]);
+    }),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// diagnose
+// ---------------------------------------------------------------------------
+
+const DIAGNOSE = [
+  "diagnose",
+  "--session-id",
+  SESSION_ID,
+  "--type",
+  bootHang.key,
+  "--summary",
+  diagnosis.summary,
+  "--model",
+  MODEL,
+  "--server-url",
+  SERVER,
+];
+
+describe("diagnose", () => {
+  it.effect("writes one diagnosis for a failed session and logs it (happy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
+      h.stores.diagnosis.errorTypes.push(bootHang);
+      const exit = yield* h.run(DIAGNOSE);
+      expect(Exit.isSuccess(exit)).toBe(true);
+      expect(h.stores.diagnosis.diagnoses).toHaveLength(1);
+      expect(h.stores.diagnosis.diagnoses[0]).toMatchObject({
+        sessionId: SESSION_ID,
+        errorType: bootHang.key,
+        summary: diagnosis.summary,
+        model: MODEL,
+      });
+      expect(h.stores.diagnosis.diagnoses[0]?.createdAt).toBeInstanceOf(Date);
+      expect(h.log.lines).toEqual([
+        {
+          level: "info",
+          text: `diagnosed; ${bootHang.key}; ${MODEL}`,
+          sessionId: SESSION_ID,
+          agentId: undefined,
+          skipSentry: false,
+          cause: undefined,
+        },
+      ]);
+      expect(h.log.acquired).toEqual([]);
+      expect(yield* stdout).toEqual([]);
+      expect(h.touched).toEqual(["database"]);
+    }),
+  );
+
+  it.effect("accepts aborted and timed_out sessions: every end but succeeded (happy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.sessions.sessions.push(
+        session(SESSION_ID, "aborted", ago(500)),
+        session(OTHER_SESSION_ID, "timed_out", ago(400)),
+      );
+      h.stores.diagnosis.errorTypes.push(bootHang);
+      expect(Exit.isSuccess(yield* h.run(DIAGNOSE))).toBe(true);
+      expect(
+        Exit.isSuccess(
+          yield* h.run([
+            "diagnose",
+            "--session-id",
+            OTHER_SESSION_ID,
+            "--type",
+            bootHang.key,
+            "--summary",
+            "the sweep closed it",
+            "--model",
+            MODEL,
+            "--server-url",
+            SERVER,
+          ]),
+        ),
+      ).toBe(true);
+      expect(h.stores.diagnosis.diagnoses.map((row) => row.sessionId)).toEqual([
+        SESSION_ID,
+        OTHER_SESSION_ID,
+      ]);
+    }),
+  );
+
+  it.effect("rejects an unknown session before touching the types (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.diagnosis.errorTypes.push(bootHang);
+      expect(yield* h.fail(DIAGNOSE)).toMatchObject({
+        _tag: "CommandError",
+        message: `diagnose: no session ${SESSION_ID}`,
+      });
+      expect(h.stores.diagnosis.diagnoses).toEqual([]);
+      expect(h.log.lines).toEqual([]);
+    }),
+  );
+
+  it.effect("rejects a session that succeeded: there is nothing to diagnose (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.sessions.sessions.push(session(SESSION_ID, "succeeded", ago(500)));
+      h.stores.diagnosis.errorTypes.push(bootHang);
+      expect(yield* h.fail(DIAGNOSE)).toMatchObject({
+        _tag: "CommandError",
+        message: `diagnose: session ${SESSION_ID} succeeded; nothing to diagnose`,
+      });
+      expect(h.stores.diagnosis.diagnoses).toEqual([]);
+    }),
+  );
+
+  it.effect("rejects a session that is still running or downloading (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.sessions.sessions.push(
+        session(SESSION_ID, "running", ago(5)),
+        session(OTHER_SESSION_ID, "downloading", ago(5)),
+      );
+      h.stores.diagnosis.errorTypes.push(bootHang);
+      expect(yield* h.fail(DIAGNOSE)).toMatchObject({
+        _tag: "CommandError",
+        message: `diagnose: session ${SESSION_ID} is still running`,
+      });
+      const downloading = yield* h.fail([
+        "diagnose",
+        "--session-id",
+        OTHER_SESSION_ID,
+        "--type",
+        bootHang.key,
+        "--summary",
+        "s",
+        "--model",
+        MODEL,
+        "--server-url",
+        SERVER,
+      ]);
+      expect(downloading).toMatchObject({
+        _tag: "CommandError",
+        message: `diagnose: session ${OTHER_SESSION_ID} is still downloading`,
+      });
+      expect(h.stores.diagnosis.diagnoses).toEqual([]);
+    }),
+  );
+
+  it.effect("rejects an error type that does not exist and names the fix (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
+      expect(yield* h.fail(DIAGNOSE)).toMatchObject({
+        _tag: "CommandError",
+        message: `diagnose: no error type ${bootHang.key}; create it with ./ctrl error-type new`,
+      });
+      expect(h.stores.diagnosis.diagnoses).toEqual([]);
+      expect(h.log.lines).toEqual([]);
+    }),
+  );
+
+  it.effect("rejects a second diagnosis for the same session and keeps the first (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
+      h.stores.diagnosis.errorTypes.push(bootHang, misread);
+      expect(Exit.isSuccess(yield* h.run(DIAGNOSE))).toBe(true);
+      const second = yield* h.fail([
+        "diagnose",
+        "--session-id",
+        SESSION_ID,
+        "--type",
+        misread.key,
+        "--summary",
+        "on reflection",
+        "--model",
+        MODEL,
+        "--server-url",
+        SERVER,
+      ]);
+      expect(second).toMatchObject({
+        _tag: "CommandError",
+        message: `diagnose: session ${SESSION_ID} already has a diagnosis`,
+      });
+      expect(h.stores.diagnosis.diagnoses).toHaveLength(1);
+      expect(h.stores.diagnosis.diagnoses[0]?.errorType).toBe(bootHang.key);
+      expect(h.log.lines.map((line) => line.text)).toEqual([
+        `diagnosed; ${bootHang.key}; ${MODEL}`,
+      ]);
+    }),
+  );
+
+  it.effect("refuses a bad --type, and a missing or empty --summary or --model (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      const badType = yield* h.run([
+        "diagnose",
+        "--session-id",
+        SESSION_ID,
+        "--type",
+        "Guest Boot",
+        "--summary",
+        "s",
+        "--model",
+        MODEL,
+        "--server-url",
+        SERVER,
+      ]);
+      expect(helpErrors(badType).join("\n")).toMatch(
+        /key must be snake_case: a-z, 0-9 and _, starting with a letter/,
+      );
+      const noSummary = yield* h.run([
+        "diagnose",
+        "--session-id",
+        SESSION_ID,
+        "--type",
+        bootHang.key,
+        "--model",
+        MODEL,
+        "--server-url",
+        SERVER,
+      ]);
+      expect(helpErrors(noSummary).join("\n")).toMatch(/Missing required flag: --summary/);
+      const emptyModel = yield* h.run([
+        "diagnose",
+        "--session-id",
+        SESSION_ID,
+        "--type",
+        bootHang.key,
+        "--summary",
+        "s",
+        "--model",
+        "",
+        "--server-url",
+        SERVER,
+      ]);
+      expect(helpErrors(emptyModel).join("\n")).toMatch(/--model.*length of at least 1/s);
+      expect(h.touched).toEqual([]);
+    }),
+  );
+});
+
+// ---------------------------------------------------------------------------
 // session inspect
 // ---------------------------------------------------------------------------
 
@@ -1285,35 +1722,97 @@ describe("session inspect", () => {
     }),
   );
 
-  it.effect("--all prints { logs, results, test_definition, actions, debug_log } (happy)", () =>
+  it.effect(
+    "--all prints { logs, results, test_definition, actions, debug_log, diagnosis } (happy)",
+    () =>
+      Effect.gen(function* () {
+        const h = harness();
+        seedInspect(h);
+        h.stores.tests.results.push(result(RESULT_ID, "passed", SESSION_ID));
+        h.stores.debugLogs.rows.set(SESSION_ID, debugLog);
+        h.stores.diagnosis.errorTypes.push(bootHang);
+        h.stores.diagnosis.diagnoses.push(diagnosis);
+        const exit = yield* h.run([
+          "session",
+          "--session-id",
+          SESSION_ID,
+          "--all",
+          "--server-url",
+          SERVER,
+        ]);
+        expect(Exit.isSuccess(exit)).toBe(true);
+        const printed = yield* lastJson;
+        expect(Object.keys(printed)).toEqual([
+          "logs",
+          "results",
+          "test_definition",
+          "actions",
+          "debug_log",
+          "diagnosis",
+        ]);
+        expect(printed.test_definition).toMatchObject({ name: "Install Omarchy" });
+        expect(printed.actions).toHaveLength(1);
+        expect(printed.debug_log).toEqual({
+          ...debugLog,
+          createdAt: debugLog.createdAt.toISOString(),
+        });
+        expect(printed.diagnosis).toEqual({
+          ...diagnosis,
+          createdAt: diagnosis.createdAt.toISOString(),
+        });
+      }),
+  );
+
+  it.effect("--diagnosis prints the bare diagnosis row, null when there is none (happy)", () =>
     Effect.gen(function* () {
       const h = harness();
       seedInspect(h);
-      h.stores.tests.results.push(result(RESULT_ID, "passed", SESSION_ID));
-      h.stores.debugLogs.rows.set(SESSION_ID, debugLog);
-      const exit = yield* h.run([
+      const none = yield* h.run([
         "session",
         "--session-id",
         SESSION_ID,
-        "--all",
+        "--diagnosis",
         "--server-url",
         SERVER,
       ]);
-      expect(Exit.isSuccess(exit)).toBe(true);
-      const printed = yield* lastJson;
-      expect(Object.keys(printed)).toEqual([
-        "logs",
-        "results",
-        "test_definition",
-        "actions",
-        "debug_log",
+      expect(Exit.isSuccess(none)).toBe(true);
+      expect(yield* stdout).toEqual(["null"]);
+      h.stores.diagnosis.errorTypes.push(bootHang);
+      h.stores.diagnosis.diagnoses.push(diagnosis);
+      const some = yield* h.run([
+        "session",
+        "--session-id",
+        SESSION_ID,
+        "--diagnosis",
+        "--server-url",
+        SERVER,
       ]);
-      expect(printed.test_definition).toMatchObject({ name: "Install Omarchy" });
-      expect(printed.actions).toHaveLength(1);
-      expect(printed.debug_log).toEqual({
-        ...debugLog,
-        createdAt: debugLog.createdAt.toISOString(),
+      expect(Exit.isSuccess(some)).toBe(true);
+      expect(yield* lastJson).toEqual({
+        ...diagnosis,
+        createdAt: diagnosis.createdAt.toISOString(),
       });
+      expect(h.proxy.calls).toEqual([]);
+    }),
+  );
+
+  it.effect("--diagnosis on an unknown session is a failure (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      seedInspect(h);
+      const error = yield* h.fail([
+        "session",
+        "--session-id",
+        OTHER_SESSION_ID,
+        "--diagnosis",
+        "--server-url",
+        SERVER,
+      ]);
+      expect(error).toMatchObject({
+        _tag: "CommandError",
+        message: `session: no session ${OTHER_SESSION_ID}`,
+      });
+      expect(yield* stdout).toEqual([]);
     }),
   );
 
@@ -1398,7 +1897,7 @@ describe("session inspect", () => {
       expect(failure(exit)).toMatchObject({
         _tag: "CommandError",
         message:
-          "session: --logs, --test-def, --test-results, --actions, --debug-logs, --all, or --dump is required",
+          "session: --logs, --test-def, --test-results, --actions, --debug-logs, --diagnosis, --all, or --dump is required",
       });
     }),
   );
@@ -1407,7 +1906,7 @@ describe("session inspect", () => {
     Effect.gen(function* () {
       const h = harness();
       seedInspect(h);
-      for (const selector of ["--logs", "--all"]) {
+      for (const selector of ["--logs", "--diagnosis", "--all"]) {
         const exit = yield* h.run(
           ["session", "--session-id", SESSION_ID, "--dump", selector, "--server-url", SERVER],
           {
@@ -1417,7 +1916,7 @@ describe("session inspect", () => {
         );
         expect(failure(exit)).toMatchObject({
           message:
-            "session: --dump does not combine with --logs, --test-def, --test-results, --actions, --debug-logs, or --all",
+            "session: --dump does not combine with --logs, --test-def, --test-results, --actions, --debug-logs, --diagnosis, or --all",
         });
       }
       expect(h.proxy.calls).toEqual([]);
@@ -1678,6 +2177,9 @@ describe("environment order", () => {
           ],
           ["session", "list", "--server-url", SERVER],
           ["session", "--session-id", SESSION_ID, "--logs", "--server-url", SERVER],
+          NEW_TYPE,
+          ["error-type", "list", "--server-url", SERVER],
+          DIAGNOSE,
         ]) {
           const exit = yield* h.run(args, {
             DATABASE_URL: "",
@@ -1704,6 +2206,9 @@ describe("--server-url", () => {
     ["test-results", "--agent-id", "a", "--id", RESULT_ID, "--status", "success"],
     ["session", "list"],
     ["session", "--session-id", SESSION_ID, "--logs"],
+    NEW_TYPE.slice(0, -2),
+    ["error-type", "list"],
+    DIAGNOSE.slice(0, -2),
   ];
 
   it.effect("is required on every action but test run (unhappy)", () =>
@@ -1769,6 +2274,10 @@ describe("--help", () => {
           ["test-results", "--help"],
           ["session", "--help"],
           ["session", "list", "--help"],
+          ["error-type", "--help"],
+          ["error-type", "new", "--help"],
+          ["error-type", "list", "--help"],
+          ["diagnose", "--help"],
         ]) {
           // The built-in --help renders and succeeds; runMain exits 0.
           const exit = yield* h.run(args, {});
@@ -1779,6 +2288,8 @@ describe("--help", () => {
         const printed = (yield* stdout).join("\n");
         expect(printed).toMatch(/test-results/);
         expect(printed).toMatch(/session/);
+        expect(printed).toMatch(/error-type/);
+        expect(printed).toMatch(/diagnose/);
       }),
   );
 

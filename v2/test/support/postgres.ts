@@ -3,6 +3,7 @@ import { Layer, Redacted } from "effect";
 import * as Actions from "../../src/db/actions.ts";
 import * as Client from "../../src/db/client.ts";
 import * as DebugLogs from "../../src/db/debug-logs.ts";
+import * as Diagnosis from "../../src/db/diagnosis.ts";
 import * as Logs from "../../src/db/logs.ts";
 import * as Sessions from "../../src/db/sessions.ts";
 import * as Tests from "../../src/db/tests.ts";
@@ -23,10 +24,12 @@ export const migratedLayer: Layer.Layer<
   | Actions.ActionStore
   | Logs.LogStore
   | DebugLogs.DebugLogStore
+  | Diagnosis.DiagnosisStore
   | Tests.TestStore
 > = Layer.mergeAll(
   Sessions.SessionStore.layer,
   DebugLogs.DebugLogStore.layer,
+  Diagnosis.DiagnosisStore.layer,
   Tests.TestStore.layer,
 ).pipe(
   Layer.provideMerge(Actions.ActionStore.layer),

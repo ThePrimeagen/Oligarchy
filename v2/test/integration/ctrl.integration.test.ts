@@ -3,6 +3,9 @@ import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { Client } from "pg";
+import * as DbSchema from "../../src/db/schema.ts";
 import * as Postgres from "../support/postgres.ts";
 import * as StubCursor from "../support/stub-cursor.ts";
 import * as StubProxy from "../support/stub-proxy.ts";
@@ -65,6 +68,27 @@ const runCtrl = (args: ReadonlyArray<string>, env: Record<string, string> = {}):
   });
 
 const firstLine = (text: string): string => text.split("\n")[0] ?? "";
+
+// No ctrl action ends a session, so a failed one is seeded straight into the container.
+const seedFailedSession = async (): Promise<string> => {
+  const sessionId = randomUUID();
+  const client = new Client({ connectionString: Postgres.getDbUrl() });
+  await client.connect();
+  try {
+    await drizzle({ client })
+      .insert(DbSchema.sessions)
+      .values({
+        id: sessionId,
+        config: { iso: "x" },
+        status: "failed",
+        reason: "installer hung",
+        endedAt: new Date(),
+      });
+  } finally {
+    await client.end();
+  }
+  return sessionId;
+};
 
 const lines = (text: string): ReadonlyArray<string> =>
   text.split("\n").filter((line) => line !== "");
@@ -245,6 +269,21 @@ describe("./ctrl without a database", () => {
       ["test", "run", "--ticket", "OLI-42"],
       ["session", "list", "--server-url", SERVER],
       ["session", "--session-id", SUCCEEDED_ID, "--logs", "--server-url", SERVER],
+      ["error-type", "new", "--key", "k", "--description", "d", "--server-url", SERVER],
+      ["error-type", "list", "--server-url", SERVER],
+      [
+        "diagnose",
+        "--session-id",
+        SUCCEEDED_ID,
+        "--type",
+        "k",
+        "--summary",
+        "s",
+        "--model",
+        "m",
+        "--server-url",
+        SERVER,
+      ],
     ]) {
       const result = await runCtrl(args, {
         DATABASE_URL: "",
@@ -392,6 +431,48 @@ describe("./ctrl without a database", () => {
       [
         ["session", "--session-id", randomUUID(), "--logs", "--count", "3", "--server-url", SERVER],
         /Unrecognized flag: --count/,
+        env,
+      ],
+      [
+        ["error-type", "new", "--key", "Guest Boot", "--description", "d", "--server-url", SERVER],
+        /key must be snake_case: a-z, 0-9 and _, starting with a letter/,
+        env,
+      ],
+      [
+        ["error-type", "new", "--key", "guest_boot_hang", "--server-url", SERVER],
+        /Missing required flag: --description/,
+        env,
+      ],
+      [
+        [
+          "diagnose",
+          "--session-id",
+          randomUUID(),
+          "--type",
+          "guest-boot-hang",
+          "--summary",
+          "s",
+          "--model",
+          "m",
+          "--server-url",
+          SERVER,
+        ],
+        /key must be snake_case: a-z, 0-9 and _, starting with a letter/,
+        env,
+      ],
+      [
+        [
+          "diagnose",
+          "--session-id",
+          randomUUID(),
+          "--type",
+          "k",
+          "--model",
+          "m",
+          "--server-url",
+          SERVER,
+        ],
+        /Missing required flag: --summary/,
         env,
       ],
     ];
@@ -579,7 +660,7 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
     expect(stub.requests).toEqual([]);
   });
 
-  it("session --all prints { logs, results, test_definition, actions } for a seeded session", async () => {
+  it("session --all prints { logs, results, test_definition, actions, debug_log, diagnosis } for a seeded session", async () => {
     const result = await runCtrl([
       "session",
       "--session-id",
@@ -591,11 +672,193 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
     expect(result.stderr).toBe("");
     expect(result.code).toBe(0);
     const printed: Record<string, unknown> = JSON.parse(result.stdout);
-    expect(Object.keys(printed)).toEqual(["logs", "results", "test_definition", "actions"]);
+    expect(Object.keys(printed)).toEqual([
+      "logs",
+      "results",
+      "test_definition",
+      "actions",
+      "debug_log",
+      "diagnosis",
+    ]);
     expect(Array.isArray(printed.logs)).toBe(true);
     expect(Array.isArray(printed.actions)).toBe(true);
     expect(printed.results).toBeNull();
     expect(printed.test_definition).toBeNull();
+    expect(printed.debug_log).toBeNull();
+    expect(printed.diagnosis).toBeNull();
+  });
+
+  it("error-type new stores a type that error-type list prints, and refuses the key twice", async () => {
+    const key = `guest_boot_hang_${randomUUID().replaceAll("-", "_")}`;
+    const created = await runCtrl([
+      "error-type",
+      "new",
+      "--key",
+      key,
+      "--description",
+      "never reached login",
+      "--server-url",
+      SERVER,
+    ]);
+    expect(created.stderr).toBe("");
+    expect(created.code).toBe(0);
+    // The Log service's stdout copy of the logs row; no agent, so [global].
+    expect(created.stdout).toBe(`[global] error type created; ${key}\n`);
+
+    const listed = await runCtrl(["error-type", "list", "--server-url", SERVER]);
+    expect(listed.stderr).toBe("");
+    expect(listed.code).toBe(0);
+    expect(lines(listed.stdout).some((line) => line.startsWith(`${key} `))).toBe(true);
+    expect(lines(listed.stdout).some((line) => line.endsWith("  never reached login"))).toBe(true);
+
+    const asJson = await runCtrl(["error-type", "list", "--json"], { SERVER_URL: SERVER });
+    expect(asJson.code).toBe(0);
+    const rows: Array<{ key: string; description: string; createdAt: string }> = JSON.parse(
+      asJson.stdout,
+    );
+    expect(rows.find((row) => row.key === key)).toMatchObject({
+      description: "never reached login",
+    });
+
+    const again = await runCtrl([
+      "error-type",
+      "new",
+      "--key",
+      key,
+      "--description",
+      "a second meaning",
+      "--server-url",
+      SERVER,
+    ]);
+    expect(again.code).toBe(1);
+    expect(again.stdout).toBe("");
+    expect(firstLine(again.stderr)).toBe(`error-type new: ${key} already exists`);
+    expect(again.stderr).toMatch(/CommandError/);
+  });
+
+  it("diagnose refuses an unknown session, a succeeded session, and an unknown type", async () => {
+    const sessionId = randomUUID();
+    const diagnose = (id: string, type: string) =>
+      runCtrl([
+        "diagnose",
+        "--session-id",
+        id,
+        "--type",
+        type,
+        "--summary",
+        "the kernel waited on the root device",
+        "--model",
+        "composer-2.5",
+        "--server-url",
+        SERVER,
+      ]);
+    const unknown = await diagnose(sessionId, "guest_boot_hang");
+    expect(unknown.code).toBe(1);
+    expect(unknown.stdout).toBe("");
+    expect(firstLine(unknown.stderr)).toBe(`diagnose: no session ${sessionId}`);
+
+    const succeeded = await diagnose(SUCCEEDED_ID, "guest_boot_hang");
+    expect(succeeded.code).toBe(1);
+    expect(firstLine(succeeded.stderr)).toBe(
+      `diagnose: session ${SUCCEEDED_ID} succeeded; nothing to diagnose`,
+    );
+
+    const running = await diagnose(RUNNING_ID, "guest_boot_hang");
+    expect(running.code).toBe(1);
+    expect(firstLine(running.stderr)).toBe(`diagnose: session ${RUNNING_ID} is still running`);
+
+    const failed = await seedFailedSession();
+    const key = `never_${randomUUID().replaceAll("-", "_")}`;
+    const missing = await diagnose(failed, key);
+    expect(missing.code).toBe(1);
+    expect(missing.stdout).toBe("");
+    expect(firstLine(missing.stderr)).toBe(
+      `diagnose: no error type ${key}; create it with ./ctrl error-type new`,
+    );
+    expect(missing.stderr).toMatch(/CommandError/);
+  });
+
+  it("session --diagnosis prints null for a session without one", async () => {
+    const result = await runCtrl([
+      "session",
+      "--session-id",
+      SUCCEEDED_ID,
+      "--diagnosis",
+      "--server-url",
+      SERVER,
+    ]);
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe("null\n");
+  });
+
+  it("diagnose writes the row for a failed session once; session --diagnosis prints it", async () => {
+    const sessionId = await seedFailedSession();
+    const key = `installer_hang_${randomUUID().replaceAll("-", "_")}`;
+    expect(
+      (
+        await runCtrl([
+          "error-type",
+          "new",
+          "--key",
+          key,
+          "--description",
+          "the installer never finished",
+          "--server-url",
+          SERVER,
+        ])
+      ).code,
+    ).toBe(0);
+
+    const diagnose = (type: string, summary: string) =>
+      runCtrl([
+        "diagnose",
+        "--session-id",
+        sessionId,
+        "--type",
+        type,
+        "--summary",
+        summary,
+        "--model",
+        "composer-2.5",
+        "--server-url",
+        SERVER,
+      ]);
+    const first = await diagnose(key, "serial stops after the partition step");
+    expect(first.stderr).toBe("");
+    expect(first.code).toBe(0);
+    expect(first.stdout).toBe(`[global] ${sessionId}: diagnosed; ${key}; composer-2.5\n`);
+
+    const second = await diagnose(key, "on reflection");
+    expect(second.code).toBe(1);
+    expect(second.stdout).toBe("");
+    expect(firstLine(second.stderr)).toBe(`diagnose: session ${sessionId} already has a diagnosis`);
+
+    const printed = await runCtrl([
+      "session",
+      "--session-id",
+      sessionId,
+      "--diagnosis",
+      "--server-url",
+      SERVER,
+    ]);
+    expect(printed.stderr).toBe("");
+    expect(printed.code).toBe(0);
+    const row: { sessionId: string; errorType: string; summary: string; model: string } =
+      JSON.parse(printed.stdout);
+    expect(row).toMatchObject({
+      sessionId,
+      errorType: key,
+      summary: "serial stops after the partition step",
+      model: "composer-2.5",
+    });
+    expect(Object.keys(row).sort()).toEqual([
+      "createdAt",
+      "errorType",
+      "model",
+      "sessionId",
+      "summary",
+    ]);
   });
 
   it("session requires a selector and rejects an unknown session", async () => {
@@ -609,7 +872,7 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
     ]);
     expect(noSelector.code).toBe(1);
     expect(firstLine(noSelector.stderr)).toBe(
-      "session: --logs, --test-def, --test-results, --actions, --all, or --dump is required",
+      "session: --logs, --test-def, --test-results, --actions, --debug-logs, --diagnosis, --all, or --dump is required",
     );
     expect(noSelector.stderr).toMatch(/CommandError/);
     expect(noSelector.stderr).not.toMatch(/at sessionInspectRun/);
@@ -686,7 +949,7 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
 
   it("session --dump does not combine with the JSON selectors", async () => {
     const stub = await proxy();
-    for (const selector of ["--logs", "--all"]) {
+    for (const selector of ["--logs", "--diagnosis", "--all"]) {
       const result = await runCtrl([
         "session",
         "--session-id",
@@ -699,7 +962,7 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
       expect(result.code).toBe(1);
       expect(result.stdout).toBe("");
       expect(firstLine(result.stderr)).toBe(
-        "session: --dump does not combine with --logs, --test-def, --test-results, --actions, or --all",
+        "session: --dump does not combine with --logs, --test-def, --test-results, --actions, --debug-logs, --diagnosis, or --all",
       );
     }
     expect(stub.requests).toEqual([]);
