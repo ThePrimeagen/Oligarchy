@@ -6,8 +6,8 @@ and every string the proxy, the CLIs and the database promise to their callers. 
 document the Effect API; API truth is `node_modules/effect/src`, `node_modules/effect/AGENTS.md`,
 `node_modules/effect/ai-docs/src`, `node_modules/@effect/platform-node/src` and
 `node_modules/@effect/vitest/README.md`, all `4.0.0-rc.112`, and a name that is not there does not
-exist. Operator and agent documents are `client.md`, `ctrl.md`, `ctrl-linear.md`, `ctrl-diagnose.md`
-and `prompts/`; they moved unchanged and this document does not repeat them.
+exist. Operator and agent documents are `client.md`, `ctrl.md`, `ctrl-linear.md` and `prompts/`;
+they moved unchanged and this document does not repeat them.
 
 ## Host
 
@@ -1256,8 +1256,6 @@ needs, and a type can be renamed or, once nothing carries it, deleted.
   `CommandError`s.
 - `ctrl session --diagnosis` prints the row (`{ sessionId, errorType, summary, model, createdAt
   }`) or `null`; `--all` includes it last as `diagnosis`.
-- The Linear-facing guide is `ctrl-diagnose.md`: session evidence, the error-type vocabulary,
-  `diagnose`, and the loop. It does not repeat the driving commands.
 
 ## Dashboard
 

@@ -214,7 +214,7 @@ Prints every error type, ordered by key, one per line: the key, two spaces, the 
 ./ctrl diagnose --server-url <url> --session-id <id> --type <key> --summary <text> --model <id>
 ```
 
-Records the cause of one session that ended any way but `succeeded`: a `failed` or `aborted` stop, or the ten-minute timeout. Read the evidence first (`session --debug-logs`, `--actions`, the images), then name the cause with a type from [error-type list](#error-type-list); when no type fits, create one with [error-type new](#error-type-new) and diagnose with it. One diagnosis per session: a second is a failure and the first stands. Not used while driving a guest. The Linear-facing guide is `ctrl-diagnose.md`.
+Records the cause of one session that ended any way but `succeeded`: a `failed` or `aborted` stop, or the ten-minute timeout. Read the evidence first (`session --debug-logs`, `--actions`, the images), then name the cause with a type from [error-type list](#error-type-list); when no type fits, create one with [error-type new](#error-type-new) and diagnose with it. One diagnosis per session: a second is a failure and the first stands. Not used while driving a guest.
 
 - `--session-id <id>` — the session. Unknown, still running or downloading, or `succeeded` is a failure (`diagnose: session <id> succeeded; nothing to diagnose`).
 - `--type <key>` — an existing error type key. A key that is not in the table is a failure: `diagnose: no error type <key>; create it with ./ctrl error-type new`.
