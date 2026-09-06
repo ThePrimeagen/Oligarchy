@@ -1,6 +1,7 @@
 import { Effect, Layer, Option } from "effect";
 import * as Actions from "../../src/db/actions.ts";
 import * as DebugLogs from "../../src/db/debug-logs.ts";
+import * as Diagnosis from "../../src/db/diagnosis.ts";
 import * as Logs from "../../src/db/logs.ts";
 import * as DbSchema from "../../src/db/schema.ts";
 import * as Sessions from "../../src/db/sessions.ts";
@@ -260,6 +261,54 @@ export const fakeDebugLogStore = (
 };
 
 // ---------------------------------------------------------------------------
+// DiagnosisStore
+// ---------------------------------------------------------------------------
+
+export type FakeDiagnosisStore = {
+  readonly errorTypes: Array<Diagnosis.ErrorTypeRow>;
+  readonly diagnoses: Array<Diagnosis.DiagnosisRow>;
+  readonly layer: Layer.Layer<Diagnosis.DiagnosisStore>;
+};
+
+// Keys are unique and a session is diagnosed once: the second write is a false, as the real
+// store's `on conflict do nothing` answers.
+export const fakeDiagnosisStore = (
+  overrides: Partial<typeof Diagnosis.DiagnosisStore.Service> = {},
+): FakeDiagnosisStore => {
+  const errorTypes: Array<Diagnosis.ErrorTypeRow> = [];
+  const diagnoses: Array<Diagnosis.DiagnosisRow> = [];
+  const findType = (key: string) => errorTypes.find((row) => row.key === key);
+  const service = Diagnosis.DiagnosisStore.of({
+    createErrorType: (key, description) =>
+      Effect.sync(() => {
+        if (findType(key) !== undefined) {
+          return false;
+        }
+        errorTypes.push({ key, description, createdAt: new Date() });
+        return true;
+      }),
+    listErrorTypes: Effect.sync(() =>
+      [...errorTypes].sort((left, right) => left.key.localeCompare(right.key)),
+    ),
+    findErrorType: (key) => Effect.sync(() => Option.fromUndefinedOr(findType(key))),
+    saveDiagnosis: (input) =>
+      Effect.sync(() => {
+        if (diagnoses.some((row) => sameId(row.sessionId, input.sessionId))) {
+          return false;
+        }
+        diagnoses.push({ ...input, createdAt: new Date() });
+        return true;
+      }),
+    getDiagnosis: (sessionId) =>
+      Effect.sync(() =>
+        Option.fromUndefinedOr(diagnoses.find((row) => sameId(row.sessionId, sessionId))),
+      ),
+    ...overrides,
+  });
+  return { errorTypes, diagnoses, layer: Layer.succeed(Diagnosis.DiagnosisStore)(service) };
+};
+
+// ---------------------------------------------------------------------------
 // TestStore
 // ---------------------------------------------------------------------------
 
@@ -396,12 +445,21 @@ export const fakeStores = () => {
   const logs = fakeLogStore();
   const tests = fakeTestStore();
   const debugLogs = fakeDebugLogStore();
+  const diagnosis = fakeDiagnosisStore();
   return {
     sessions,
     actions,
     logs,
     tests,
     debugLogs,
-    layer: Layer.mergeAll(sessions.layer, actions.layer, logs.layer, tests.layer, debugLogs.layer),
+    diagnosis,
+    layer: Layer.mergeAll(
+      sessions.layer,
+      actions.layer,
+      logs.layer,
+      tests.layer,
+      debugLogs.layer,
+      diagnosis.layer,
+    ),
   };
 };

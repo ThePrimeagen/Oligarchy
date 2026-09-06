@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Effect, Exit, Schema } from "effect";
+import { Cause, Effect, Exit, Schema } from "effect";
 import * as Domain from "../../src/shared/domain.ts";
 
 const SESSION_ID = "1baaad43-674b-4bdb-88d7-3f18fce50aba";
@@ -55,6 +55,29 @@ describe("brands", () => {
   it("refuses an empty AgentId", () => {
     expect(Schema.is(Domain.AgentId)("OLI-61")).toBe(true);
     expect(Schema.is(Domain.AgentId)("")).toBe(false);
+  });
+
+  it("accepts a snake_case ErrorTypeKey and refuses anything else", () => {
+    const is = Schema.is(Domain.ErrorTypeKey);
+    expect(is("guest_boot_hang")).toBe(true);
+    expect(is("timeout")).toBe(true);
+    expect(is("http_502")).toBe(true);
+    expect(is("")).toBe(false);
+    expect(is("Guest Boot Hang")).toBe(false);
+    expect(is("guest-boot-hang")).toBe(false);
+    expect(is("7_days")).toBe(false);
+    expect(is("_leading")).toBe(false);
+    expect(is("GUEST")).toBe(false);
+  });
+
+  it("names the key rule in the ErrorTypeKey decode failure", () => {
+    const exit = Schema.decodeUnknownExit(Domain.ErrorTypeKey)("Guest Boot");
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      expect(String(Cause.squash(exit.cause))).toMatch(
+        /key must be snake_case: a-z, 0-9 and _, starting with a letter/,
+      );
+    }
   });
 });
 

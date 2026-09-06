@@ -6,6 +6,7 @@ import { TestConsole } from "effect/testing";
 import * as Actions from "../../src/db/actions.ts";
 import * as Client from "../../src/db/client.ts";
 import * as DebugLogs from "../../src/db/debug-logs.ts";
+import * as Diagnosis from "../../src/db/diagnosis.ts";
 import * as Logs from "../../src/db/logs.ts";
 import * as Migrate from "../../src/db/migrate.ts";
 import * as DbSchema from "../../src/db/schema.ts";
@@ -17,6 +18,9 @@ import * as Support from "../support/config.ts";
 import * as Postgres from "../support/postgres.ts";
 
 const uuid = (): string => crypto.randomUUID();
+
+// A fresh snake_case key per test: the container's tables outlive each test body.
+const errorKey = (stem: string): string => `${stem}_${uuid().replaceAll("-", "_")}`;
 
 const SEEDED_SUCCEEDED = "11111111-1111-4111-8111-111111111111";
 const SEEDED_RUNNING = "22222222-2222-4222-8222-222222222222";
@@ -389,6 +393,167 @@ Postgres.describeWithDatabase("database", () => {
         expect(saved?.sources.proxy).toBe("");
         expect(saved?.sources.actions).toBe("");
       }),
+    );
+
+    scoped.effect("DiagnosisStore creates, lists and finds error types; a taken key is false", () =>
+      Effect.gen(function* () {
+        const diagnosis = yield* Diagnosis.DiagnosisStore;
+        const boot = errorKey("guest_boot_hang");
+        const misread = errorKey("agent_misread_screen");
+        expect(yield* diagnosis.createErrorType(boot, "never reached login")).toBe(true);
+        expect(yield* diagnosis.createErrorType(misread, "acted on a misread screen")).toBe(true);
+        expect(yield* diagnosis.createErrorType(boot, "a second meaning")).toBe(false);
+
+        const listed = yield* diagnosis.listErrorTypes;
+        const keys = listed.map((row) => row.key);
+        expect(keys).toContain(boot);
+        expect(keys).toContain(misread);
+        expect(keys).toEqual([...keys].sort((left, right) => left.localeCompare(right)));
+        expect(listed.find((row) => row.key === boot)?.description).toBe("never reached login");
+        expect(listed.find((row) => row.key === boot)?.createdAt).toBeInstanceOf(Date);
+
+        const found = yield* diagnosis.findErrorType(boot);
+        expect(Option.getOrThrow(found)).toMatchObject({
+          key: boot,
+          description: "never reached login",
+        });
+        expect(yield* diagnosis.findErrorType(errorKey("nope"))).toEqual(Option.none());
+      }),
+    );
+
+    scoped.effect("DiagnosisStore writes one diagnosis per session and reads it back", () =>
+      Effect.gen(function* () {
+        const sessions = yield* Sessions.SessionStore;
+        const diagnosis = yield* Diagnosis.DiagnosisStore;
+        const database = yield* Client.Database;
+        const sessionId = uuid();
+        const boot = errorKey("guest_boot_hang");
+        const misread = errorKey("agent_misread_screen");
+        yield* sessions.insertSession(sessionId, { iso: "x" }, "running");
+        yield* sessions.endSession(sessionId, "failed", "installer hung");
+        yield* diagnosis.createErrorType(boot, "never reached login");
+        yield* diagnosis.createErrorType(misread, "acted on a misread screen");
+
+        expect(
+          yield* diagnosis.saveDiagnosis({
+            sessionId,
+            errorType: boot,
+            summary: "the kernel waited on the root device",
+            model: "composer-2.5",
+          }),
+        ).toBe(true);
+        // The key is the session: a second diagnosis is a false and the first stands.
+        expect(
+          yield* diagnosis.saveDiagnosis({
+            sessionId: sessionId.toUpperCase(),
+            errorType: misread,
+            summary: "on reflection",
+            model: "grok-4.6",
+          }),
+        ).toBe(false);
+
+        const read = Option.getOrThrow(yield* diagnosis.getDiagnosis(sessionId));
+        expect(read).toMatchObject({
+          sessionId,
+          errorType: boot,
+          summary: "the kernel waited on the root device",
+          model: "composer-2.5",
+        });
+        expect(read.createdAt).toBeInstanceOf(Date);
+        expect(Object.keys(read).sort()).toEqual([
+          "createdAt",
+          "errorType",
+          "model",
+          "sessionId",
+          "summary",
+        ]);
+        expect(yield* diagnosis.getDiagnosis(uuid())).toEqual(Option.none());
+        const rows = yield* database.run("select", (db) =>
+          db
+            .select()
+            .from(DbSchema.postRunDiagnosis)
+            .where(eq(DbSchema.postRunDiagnosis.sessionId, sessionId)),
+        );
+        expect(rows).toHaveLength(1);
+      }),
+    );
+
+    scoped.effect("DiagnosisStore refuses a diagnosis naming an unknown type or session", () =>
+      Effect.gen(function* () {
+        const sessions = yield* Sessions.SessionStore;
+        const diagnosis = yield* Diagnosis.DiagnosisStore;
+        const sessionId = uuid();
+        yield* sessions.insertSession(sessionId, { iso: "x" }, "running");
+        yield* sessions.endSession(sessionId, "failed", null);
+        const unknownType = yield* Effect.flip(
+          diagnosis.saveDiagnosis({
+            sessionId,
+            errorType: errorKey("never_created"),
+            summary: "s",
+            model: "composer-2.5",
+          }),
+        );
+        expect(unknownType._tag).toBe("DatabaseError");
+        expect(unknownType.operation).toBe("saveDiagnosis");
+        expect(unknownType.message).toContain("Failed query");
+        expect(String(unknownType.cause)).toMatch(/foreign key/);
+        expect(yield* diagnosis.getDiagnosis(sessionId)).toEqual(Option.none());
+
+        const boot = errorKey("guest_boot_hang");
+        yield* diagnosis.createErrorType(boot, "never reached login");
+        const unknownSession = yield* Effect.flip(
+          diagnosis.saveDiagnosis({
+            sessionId: uuid(),
+            errorType: boot,
+            summary: "s",
+            model: "composer-2.5",
+          }),
+        );
+        expect(unknownSession._tag).toBe("DatabaseError");
+        expect(unknownSession.operation).toBe("saveDiagnosis");
+        expect(String(unknownSession.cause)).toMatch(/foreign key/);
+      }),
+    );
+
+    scoped.effect(
+      "renaming an error type follows into its diagnoses; deleting one in use is refused",
+      () =>
+        Effect.gen(function* () {
+          const sessions = yield* Sessions.SessionStore;
+          const diagnosis = yield* Diagnosis.DiagnosisStore;
+          const database = yield* Client.Database;
+          const sessionId = uuid();
+          const before = errorKey("guest_boot_hang");
+          const after = errorKey("guest_boot_stall");
+          yield* sessions.insertSession(sessionId, { iso: "x" }, "running");
+          yield* sessions.endSession(sessionId, "timed_out", null);
+          yield* diagnosis.createErrorType(before, "never reached login");
+          yield* diagnosis.saveDiagnosis({
+            sessionId,
+            errorType: before,
+            summary: "s",
+            model: "composer-2.5",
+          });
+
+          const refused = yield* Effect.flip(
+            database.run("delete", (db) =>
+              db
+                .delete(DbSchema.postRunErrorTypes)
+                .where(eq(DbSchema.postRunErrorTypes.key, before)),
+            ),
+          );
+          expect(refused._tag).toBe("DatabaseError");
+          expect(String(refused.cause)).toMatch(/foreign key/);
+
+          yield* database.run("rename", (db) =>
+            db
+              .update(DbSchema.postRunErrorTypes)
+              .set({ key: after })
+              .where(eq(DbSchema.postRunErrorTypes.key, before)),
+          );
+          expect(Option.getOrThrow(yield* diagnosis.getDiagnosis(sessionId)).errorType).toBe(after);
+          expect(yield* diagnosis.findErrorType(before)).toEqual(Option.none());
+        }),
     );
 
     scoped.effect("TestStore reads the seeded definitions and prompts", () =>

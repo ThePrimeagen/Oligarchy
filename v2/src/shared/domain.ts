@@ -20,6 +20,17 @@ export const ImageId = Schema.String.check(Schema.isUUID())
   .annotate({ identifier: "@oligarchy/shared/domain/ImageId" });
 export type ImageId = typeof ImageId.Type;
 
+// The key of a post-run error type: what a diagnosis carries and an operator types. snake_case
+// so it reads in a table, a shell and a GROUP BY without quoting.
+export const ErrorTypeKey = Schema.String.check(
+  Schema.isPattern(/^[a-z][a-z0-9_]*$/, {
+    message: "key must be snake_case: a-z, 0-9 and _, starting with a letter",
+  }),
+)
+  .pipe(Schema.brand("ErrorTypeKey"))
+  .annotate({ identifier: "@oligarchy/shared/domain/ErrorTypeKey" });
+export type ErrorTypeKey = typeof ErrorTypeKey.Type;
+
 export const SessionStatus = Schema.Literals([
   "downloading",
   "running",

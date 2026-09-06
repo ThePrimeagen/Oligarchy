@@ -17,10 +17,12 @@ import * as Config from "../config.ts";
 import * as Actions from "../db/actions.ts";
 import * as DebugLogs from "../db/debug-logs.ts";
 import * as Client from "../db/client.ts";
+import * as Diagnosis from "../db/diagnosis.ts";
 import * as Logs from "../db/logs.ts";
 import * as Sessions from "../db/sessions.ts";
 import * as Tests from "../db/tests.ts";
 import * as Log from "../observability/log.ts";
+import * as Domain from "../shared/domain.ts";
 import * as Errors from "../shared/errors.ts";
 import * as Cursor from "./cursor.ts";
 import * as Linear from "./linear.ts";
@@ -35,6 +37,7 @@ export type Stores =
   | Actions.ActionStore
   | Logs.LogStore
   | DebugLogs.DebugLogStore
+  | Diagnosis.DiagnosisStore
   | Tests.TestStore
   | Log.Log;
 
@@ -65,6 +68,7 @@ const databaseLayers = (url: Redacted.Redacted): Layer.Layer<Stores, Errors.Data
     Sessions.SessionStore.layer,
     Tests.TestStore.layer,
     DebugLogs.DebugLogStore.layer,
+    Diagnosis.DiagnosisStore.layer,
     Log.Log.layer,
   ).pipe(
     Layer.provideMerge(Actions.ActionStore.layer),
@@ -134,6 +138,15 @@ const nameFlag = (description: string) =>
     Flag.optional,
     Flag.withDescription(description),
   );
+
+const modelFlag = (description: string) =>
+  Flag.string("model").pipe(
+    Flag.withSchema(Schema.NonEmptyString),
+    Flag.withDescription(description),
+  );
+
+const errorTypeKeyFlag = (name: string, description: string) =>
+  Flag.string(name).pipe(Flag.withSchema(Domain.ErrorTypeKey), Flag.withDescription(description));
 
 const toggle = (name: string, description: string) =>
   Flag.boolean(name).pipe(Flag.withDefault(false), Flag.withDescription(description));
@@ -403,6 +416,73 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     );
   });
 
+  // error-type new --key <key> --description <text>
+  const errorTypeNew = Effect.fn("ctrl.error-type.new")(function* (input: {
+    readonly key: string;
+    readonly description: string;
+  }) {
+    const diagnosis = yield* Diagnosis.DiagnosisStore;
+    const log = yield* Log.Log;
+    yield* diagnosis.createErrorType(input.key, input.description).pipe(
+      Effect.filterOrFail(
+        (created) => created,
+        () => refuse(`error-type new: ${input.key} already exists`),
+      ),
+    );
+    yield* log.info(`error type ${input.key} created`);
+  });
+
+  // error-type list [--json]
+  const errorTypeList = Effect.fn("ctrl.error-type.list")(function* (input: {
+    readonly json: boolean;
+  }) {
+    const diagnosis = yield* Diagnosis.DiagnosisStore;
+    const rows = yield* diagnosis.listErrorTypes;
+    yield* printLines(Render.renderErrorTypes(rows, input.json));
+  });
+
+  // diagnose --session-id <id> --type <key> --summary <text> --model <id>
+  const diagnose = Effect.fn("ctrl.diagnose")(function* (input: {
+    readonly sessionId: string;
+    readonly type: string;
+    readonly summary: string;
+    readonly model: string;
+  }) {
+    const sessions = yield* Sessions.SessionStore;
+    const diagnosis = yield* Diagnosis.DiagnosisStore;
+    const log = yield* Log.Log;
+    const status = yield* orRefuse(
+      sessions.getSessionStatus(input.sessionId),
+      `diagnose: no session ${input.sessionId}`,
+    );
+    if (status === "succeeded") {
+      return yield* refuse(`diagnose: session ${input.sessionId} succeeded; nothing to diagnose`);
+    }
+    if (status === "running" || status === "downloading") {
+      return yield* refuse(`diagnose: session ${input.sessionId} is still ${status}`);
+    }
+    yield* orRefuse(
+      diagnosis.findErrorType(input.type),
+      `diagnose: no error type ${input.type}; create it with ./ctrl error-type new`,
+    );
+    yield* diagnosis
+      .saveDiagnosis({
+        sessionId: input.sessionId,
+        errorType: input.type,
+        summary: input.summary,
+        model: input.model,
+      })
+      .pipe(
+        Effect.filterOrFail(
+          (saved) => saved,
+          () => refuse(`diagnose: session ${input.sessionId} already has a diagnosis`),
+        ),
+      );
+    return yield* log.info(`diagnosed; ${input.type}; ${input.model}`, {
+      sessionId: input.sessionId,
+    });
+  });
+
   // session list [--count <n>] [--active] [--json]
   const sessionList = Effect.fn("ctrl.session.list")(function* (input: {
     readonly count: number;
@@ -433,6 +513,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     readonly testResults: boolean;
     readonly actions: boolean;
     readonly debugLogs: boolean;
+    readonly diagnosis: boolean;
     readonly all: boolean;
   };
 
@@ -442,6 +523,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     const tests = yield* Tests.TestStore;
     const actions = yield* Actions.ActionStore;
     const debugLogs = yield* DebugLogs.DebugLogStore;
+    const diagnosis = yield* Diagnosis.DiagnosisStore;
     yield* orRefuse(sessions.sessionExists(id), `session: no session ${id}`);
 
     const parts: Array<readonly [string, unknown]> = [];
@@ -475,12 +557,15 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     if (input.all || input.debugLogs) {
       parts.push(["debug_log", Option.getOrNull(yield* debugLogs.getDebugLog(id))]);
     }
+    if (input.all || input.diagnosis) {
+      parts.push(["diagnosis", Option.getOrNull(yield* diagnosis.getDiagnosis(id))]);
+    }
     // One selector prints its bare value; several print an object keyed by selector.
     const single = parts.length === 1 ? parts[0] : undefined;
     yield* printJson(single === undefined ? Object.fromEntries(parts) : single[1]);
   });
 
-  // session --session-id <id> --logs|--test-def|--test-results|--actions|--debug-logs|--all|--dump
+  // session --session-id <id> --logs|--test-def|--test-results|--actions|--debug-logs|--diagnosis|--all|--dump
   const sessionInspect = Effect.fn("ctrl.session.inspect")(function* (
     input: Selectors & {
       readonly serverUrl: string;
@@ -494,15 +579,16 @@ export const makeCtrlCommand = (deps: Deps = live) => {
       input.testResults ||
       input.actions ||
       input.debugLogs ||
+      input.diagnosis ||
       input.all;
     if (!inspecting && !input.dump) {
       return yield* refuse(
-        "session: --logs, --test-def, --test-results, --actions, --debug-logs, --all, or --dump is required",
+        "session: --logs, --test-def, --test-results, --actions, --debug-logs, --diagnosis, --all, or --dump is required",
       );
     }
     if (inspecting && input.dump) {
       return yield* refuse(
-        "session: --dump does not combine with --logs, --test-def, --test-results, --actions, --debug-logs, or --all",
+        "session: --dump does not combine with --logs, --test-def, --test-results, --actions, --debug-logs, --diagnosis, or --all",
       );
     }
     return yield* input.dump
@@ -558,10 +644,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
         Flag.withSchema(Schema.NonEmptyString),
         Flag.withDescription("Test result id from the Linear ticket"),
       ),
-      model: Flag.string("model").pipe(
-        Flag.withSchema(Schema.NonEmptyString),
-        Flag.withDescription("Cursor model id that is running this result"),
-      ),
+      model: modelFlag("Cursor model id that is running this result"),
     },
     testStart,
   ).pipe(
@@ -638,7 +721,11 @@ export const makeCtrlCommand = (deps: Deps = live) => {
         "debug-logs",
         "Print the session's debug log (serial, proxy, qemu, actions), saved when it did not succeed",
       ),
-      all: toggle("all", "Print logs, test definition, test results, actions, and debug log"),
+      diagnosis: toggle("diagnosis", "Print the session's post-run diagnosis, written by diagnose"),
+      all: toggle(
+        "all",
+        "Print logs, test definition, test results, actions, debug log, and diagnosis",
+      ),
       dump: toggle(
         "dump",
         "Print the session's serial console from the proxy: the running machine's, or what a dead one left on disk",
@@ -647,16 +734,73 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     sessionInspect,
   ).pipe(
     Command.withDescription(
-      "session --session-id <id> --logs|--test-def|--test-results|--actions|--debug-logs|--all|--dump; or list",
+      "session --session-id <id> --logs|--test-def|--test-results|--actions|--debug-logs|--diagnosis|--all|--dump; or list",
     ),
     Command.provide(withDb),
     Command.withSubcommands([sessionListCommand]),
+  );
+
+  const errorTypeNewCommand = Command.make(
+    "new",
+    {
+      serverUrl: serverUrlFlag,
+      key: errorTypeKeyFlag("key", "snake_case key the diagnoses of this type carry"),
+      description: Flag.string("description").pipe(
+        Flag.withSchema(Schema.NonEmptyString),
+        Flag.withDescription("What a failure of this type looks like"),
+      ),
+    },
+    errorTypeNew,
+  ).pipe(
+    Command.withDescription("Add an error type to the diagnosis vocabulary"),
+    Command.provide(withDb),
+  );
+
+  const errorTypeListCommand = Command.make(
+    "list",
+    {
+      serverUrl: serverUrlFlag,
+      json: toggle("json", "Print the types as a JSON array"),
+    },
+    errorTypeList,
+  ).pipe(
+    Command.withDescription("Print every error type with its description, ordered by key"),
+    Command.provide(withDb),
+  );
+
+  const errorTypeCommand = Command.make("error-type").pipe(
+    Command.withDescription("error-type new --key <key> --description <text>; or list"),
+    Command.withSubcommands([errorTypeNewCommand, errorTypeListCommand]),
+  );
+
+  const diagnoseCommand = Command.make(
+    "diagnose",
+    {
+      serverUrl: serverUrlFlag,
+      sessionId: sessionIdFlag,
+      type: errorTypeKeyFlag("type", "Error type key; error-type list prints them"),
+      summary: Flag.string("summary").pipe(
+        Flag.withSchema(Schema.NonEmptyString),
+        Flag.withDescription("What happened, read from the evidence"),
+      ),
+      model: modelFlag("Cursor model id that is writing this diagnosis"),
+    },
+    diagnose,
+  ).pipe(
+    Command.withDescription("Record the cause of a session that ended any way but succeeded"),
+    Command.provide(withDb),
   );
 
   return Command.make("ctrl").pipe(
     Command.withDescription(
       "Record and inspect Oligarchy test runs. Every action reads DATABASE_URL; every action but test run takes --server-url (or SERVER_URL).",
     ),
-    Command.withSubcommands([testCommand, testResultsCommand, sessionCommand]),
+    Command.withSubcommands([
+      testCommand,
+      testResultsCommand,
+      sessionCommand,
+      errorTypeCommand,
+      diagnoseCommand,
+    ]),
   );
 };

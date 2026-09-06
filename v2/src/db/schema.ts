@@ -135,6 +135,38 @@ export const debugLogs = pgTable("debug_logs", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// The vocabulary a diagnosis is written in. It is data, not an enum, so a new kind of
+// failure is an insert the moment it is first seen, never a migration; it starts empty and
+// grows one row per distinct cause. key is the value a diagnosis carries, so a diagnosis
+// reads without a join; a rename cascades into the diagnoses that carry it, and a type in
+// use cannot be deleted.
+export const postRunErrorTypes = pgTable("post_run_error_types", {
+  key: text("key").primaryKey(),
+  description: text("description").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// One diagnosis per session that ended any way but succeeded, written after the run by
+// whoever read the evidence (debug_logs, actions, images). session_id is the key: a second
+// diagnosis is refused, and a session without a row is one nobody has diagnosed yet — there
+// is no placeholder type and no nullable column. model is the Cursor model id that wrote
+// the diagnosis, as test_results.model is the one that drove the session.
+export const postRunDiagnosis = pgTable(
+  "post_run_diagnosis",
+  {
+    sessionId: uuid("session_id")
+      .primaryKey()
+      .references(() => sessions.id),
+    errorType: text("error_type")
+      .notNull()
+      .references(() => postRunErrorTypes.key, { onUpdate: "cascade" }),
+    summary: text("summary").notNull(),
+    model: text("model").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("post_run_diagnosis_error_type_idx").on(table.errorType)],
+);
+
 // A definition is the stored mission an agent is handed — what it is about, what to
 // do, and the proof that closes it. Rows are edited in place; name is the lookup key.
 export const testDefinitions = pgTable(
