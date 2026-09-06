@@ -118,7 +118,8 @@ src/
 ├── shared/      domain.ts  errors.ts  contract.ts  api.ts
 ├── config.ts    external-failure.ts
 ├── observability/  dsn.ts  instrument.ts  sentry.ts  log.ts  render.ts
-├── db/          schema.ts  client.ts  sessions.ts  actions.ts  logs.ts  debug-logs.ts  tests.ts  migrate.ts
+├── db/          schema.ts  client.ts  sessions.ts  actions.ts  logs.ts  debug-logs.ts  diagnosis.ts
+│                tests.ts  migrate.ts
 ├── qmp/         framing.ts  socket.ts  client.ts
 ├── qemu/        keys.ts  args.ts  host.ts  process.ts  qemu.ts  iso.ts  stats.ts
 ├── proxy/       sessions.ts  middleware.ts  handlers.ts  command.ts  main.ts
@@ -534,8 +535,9 @@ export class ProxyConfig extends Context.Service<ProxyConfig>()("@oligarchy/conf
   are refused by their flag schemas.
 - Ctrl: `--server-url` is required (no default, `server-url must be a valid http or https url`) on
   every action but `test run`, where it is an unrecognised flag; `iso must be a valid https url`;
-  `count must be at least 1`; `--status` is `Flag.choiceWithValue` mapping `success` to `passed`;
-  refusals are `CommandError`s. `makeCtrlCommand(deps)` takes the layer factories (`database(url)`,
+  `count must be at least 1`; `--key` and `--type` are `Domain.ErrorTypeKey` (`key must be
+  snake_case: a-z, 0-9 and _, starting with a letter`); `--status` is `Flag.choiceWithValue`
+  mapping `success` to `passed`; refusals are `CommandError`s. `makeCtrlCommand(deps)` takes the layer factories (`database(url)`,
   `linear(token)`, `cursor(apiKey)`, `proxy(options)`), `live` by default, so a test substitutes
   fakes. The proxy's `makeProxyCommand({ missingHostRequirements, serve, serverFailed })` takes the
   host check, the server as `serve(display, automation, port)` and the `Deferred` a server error
@@ -1037,13 +1039,16 @@ const prepare = Effect.fn("Qemu.prepare")(function* (id: string, disk: string | 
 - `normalizeDatabaseUrl` guards with `URL.canParse` (`db: DATABASE_URL is not a valid url`, and the
   password never lands in a message), drops `sslrootcert=system` (node-postgres reads it as a file
   path) and keeps `sslmode=verify-full`.
-- Repositories are `Context.Service`s (`SessionStore`, `ActionStore`, `LogStore`, `DebugLogStore`, `TestStore`)
-  whose methods are `Effect.fn("db.<name>")` functions that `yield* Database` once in `make`.
-  Drizzle-typed columns are trusted; the `jsonb` columns (`sessions.config`, `actions.request`,
-  `actions.response`) are written from schema-typed values and read back as Drizzle types them.
-- `src/db/schema.ts` is v1's schema formatted by oxfmt, plus `debug_logs` (v2-only). The v1
-  tables stay semantically identical, not byte-identical. Its `pgEnum` lists and the `Schema.Literals`
-  in `domain.ts` are maintained by hand together. Row
+- Repositories are `Context.Service`s (`SessionStore`, `ActionStore`, `LogStore`, `DebugLogStore`,
+  `DiagnosisStore`, `TestStore`) whose methods are `Effect.fn("db.<name>")` functions that
+  `yield* Database` once in `make`. Drizzle-typed columns are trusted; the `jsonb` columns
+  (`sessions.config`, `actions.request`, `actions.response`) are written from schema-typed values
+  and read back as Drizzle types them.
+- `src/db/schema.ts` is v1's schema formatted by oxfmt, plus `debug_logs`, `post_run_error_types`
+  and `post_run_diagnosis` (v2-only). The v1 tables stay semantically identical, not
+  byte-identical. Its `pgEnum` lists and the `Schema.Literals` in `domain.ts` are maintained by
+  hand together; `post_run_error_types` is the one vocabulary that is data, not an enum (see
+  Post-run diagnosis). Row
   stamps come from Postgres `now()` in the statement; Effect-side time from
   `Clock.currentTimeMillis`. `registerAgent`'s primary key makes one session per agent; a second
   registration is a `DatabaseError` by design. `TestStore.closeResult(resultId, status, reason,
@@ -1112,8 +1117,9 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
 - Replay is `actions WHERE session_id ORDER BY created_at, id`; the identity id breaks timestamp
   ties. `sessions.config` holds the effective launch config so a replay boots an identical machine.
 - The tables: `sessions`, `agent_runs`, `actions`, `images`, `logs`, `debug_logs`,
-  `test_definitions`, `test_base_prompts`, `test_runs`, `test_results`, declared in
-  `src/db/schema.ts`. v1 declared every table except `debug_logs`. `test_results.model` is the
+  `post_run_error_types`, `post_run_diagnosis`, `test_definitions`, `test_base_prompts`,
+  `test_runs`, `test_results`, declared in `src/db/schema.ts`. v1 declared every table except
+  `debug_logs`, `post_run_error_types` and `post_run_diagnosis`. `test_results.model` is the
   Cursor model id that result's agent used, or null until `test start` writes it. One run can
   mix models. `test_results.session_id` is unique when set, so one session cannot belong to two
   results.
@@ -1176,7 +1182,7 @@ vanish with the machine, plus the control-plane lines already offered for that s
 verdict included. `sources` is a jsonb map so each chunk is labeled by origin. There is no
 `journalctl` key — that stream is not separately available. `ctrl session --debug-logs` prints
 the row (`null` when the session succeeded or predates the table); `--all` includes it as
-`debug_log`.
+`debug_log`. The cause it shows is named afterwards in `post_run_diagnosis` (Post-run diagnosis).
 
 - `serial` is the guest UART (`/dev/ttyS0` → `<session-dir>/serial.log`; see Operating loop).
   The guest journal, dmesg, user-session journal, coredumps and compositor crash folders live
@@ -1206,6 +1212,48 @@ the row (`null` when the session succeeded or predates the table); `--all` inclu
   session ends once, so each writes at most once. A succeeded stop does not write a row — there
   is nothing to explain.
 - The columns: `session_id` (primary key, references `sessions.id`), `sources`, `created_at`.
+
+## Post-run diagnosis
+
+A diagnosis names the cause of a session that ended any way but `succeeded` (`failed`,
+`aborted`, `timed_out`), written after the run by whoever read the evidence (`debug_logs`,
+`actions`, `images`). Its vocabulary is data, not an enum: `post_run_error_types` starts empty and
+grows one row per distinct cause the moment that cause is first seen, through `ctrl error-type
+new`, never through a migration. Why: a `pgEnum` value can be added only by a code change and a
+migration and can never be removed; a lookup table is an insert, carries the description the key
+needs, and a type can be renamed or, once nothing carries it, deleted.
+
+- `post_run_error_types`: `key` (primary key, `text`), `description`, `created_at`. `key` is a
+  `Domain.ErrorTypeKey`, `^[a-z][a-z0-9_]*$`, refused at the flag with `key must be snake_case:
+  a-z, 0-9 and _, starting with a letter`; the table itself has no check, the CLI is the boundary.
+  There is no seeded row, no `unclassified` or `other`: a failure that cannot be named yet is not
+  diagnosed yet.
+- `post_run_diagnosis`: `session_id` (primary key, references `sessions.id`), `error_type`
+  (`NOT NULL`, references `post_run_error_types.key`, `ON UPDATE CASCADE`), `summary`, `model`,
+  `created_at`, plus an index on `error_type` for the per-type counts. No column is nullable and
+  no row exists until someone diagnoses: a session without a row is one nobody has diagnosed.
+  `model` is the Cursor model id that wrote the diagnosis, as `test_results.model` is the one that
+  drove the session. The key is the session: a second diagnosis is refused and the first stands.
+  Renaming a key follows into the diagnoses that carry it; deleting a type in use is a
+  `DatabaseError` from the foreign key.
+- `DiagnosisStore` (`src/db/diagnosis.ts`): `createErrorType(key, description)` and
+  `saveDiagnosis({ sessionId, errorType, summary, model })` are `insert … on conflict do nothing
+  returning` and answer `false` when the key or the session already has its row, so a duplicate is
+  a sentence from the command, not a constraint name; `listErrorTypes` orders by key;
+  `findErrorType(key)` and `getDiagnosis(sessionId)` are `Option`s. An unknown type or session in
+  `saveDiagnosis` is the foreign key's `DatabaseError`; the command checks both first.
+- `ctrl error-type new --key <key> --description <text>` logs `error type <key> created` and
+  prints nothing; a taken key is `error-type new: <key> already exists`. `ctrl error-type list
+  [--json]` prints `<key padded to the longest>  <description>` per row, or the rows as JSON;
+  an empty table prints nothing, or `[]`. Bare `ctrl error-type` prints help and exits 0.
+- `ctrl diagnose --session-id <id> --type <key> --summary <text> --model <id>` refuses, in this
+  order: `diagnose: no session <id>`, `diagnose: session <id> succeeded; nothing to diagnose`,
+  `diagnose: session <id> is still running|downloading`, `diagnose: no error type <key>; create it
+  with ./ctrl error-type new`, `diagnose: session <id> already has a diagnosis`; then it logs
+  `diagnosed; <key>; <model>` attributed to the session and prints nothing. All are
+  `CommandError`s.
+- `ctrl session --diagnosis` prints the row (`{ sessionId, errorType, summary, model, createdAt
+  }`) or `null`; `--all` includes it last as `diagnosis`.
 
 ## Dashboard
 
