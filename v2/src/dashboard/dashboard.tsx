@@ -8,10 +8,14 @@ import {
   listSessions,
   listTestBasePrompts,
   listTestDefinitions,
+  listTestResultOutcomes,
+  modelStats,
   type DefinitionStat,
+  type ModelStat,
   type Session,
   type TestBasePrompt,
   type TestDefinition,
+  type TestResultOutcome,
 } from "./query.ts";
 import { clickerPage } from "./clicker.ts";
 import { SENTRY_DSN } from "../observability/dsn.ts";
@@ -63,6 +67,36 @@ const SessionStatus: FC<SessionStatusProps> = ({ sessions, outOfBand = false }) 
     )}
   </span>
 );
+
+const ModelChart: FC<{ stats: ReadonlyArray<ModelStat> }> = ({ stats }) =>
+  stats.length === 0 ? null : (
+    <div class="record__field">
+      <h3>Results by model</h3>
+      <ul class="model-chart">
+        {stats.map((row) => (
+          <li class="model-chart__row">
+            <span class="model-chart__name">{row.model}</span>
+            <div
+              class="model-chart__bar"
+              role="img"
+              aria-label={`${row.model}: ${String(row.succeeded)} succeeded, ${String(row.failed)} failed`}
+            >
+              {row.succeeded > 0 ? (
+                <span class="model-chart__ok" style={{ flexGrow: row.succeeded, flexBasis: 0 }}>
+                  {row.succeeded}
+                </span>
+              ) : null}
+              {row.failed > 0 ? (
+                <span class="model-chart__failed" style={{ flexGrow: row.failed, flexBasis: 0 }}>
+                  {row.failed}
+                </span>
+              ) : null}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 
 const DefinitionScoreboard: FC<{ stats: ReadonlyArray<DefinitionStat> }> = ({ stats }) =>
   stats.length === 0 ? null : (
@@ -244,9 +278,10 @@ const Home: FC<HomeProps> = ({ sessions }) => (
 
 type DefinitionsProps = {
   definitions: TestDefinition[] | null;
+  outcomes: TestResultOutcome[];
 };
 
-const Definitions: FC<DefinitionsProps> = ({ definitions }) => (
+const Definitions: FC<DefinitionsProps> = ({ definitions, outcomes }) => (
   <Shell page="definitions">
     <section class="records" aria-labelledby="definitions-heading">
       <div class="sessions__heading">
@@ -271,6 +306,11 @@ const Definitions: FC<DefinitionsProps> = ({ definitions }) => (
                   <time dateTime={definition.createdAt.toISOString()}>
                     {dateTime.format(definition.createdAt)}
                   </time>
+                  <ModelChart
+                    stats={modelStats(
+                      outcomes.filter((row) => row.definitionName === definition.name),
+                    )}
+                  />
                   <div class="record__field">
                     <h3>Description</h3>
                     <p>{definition.description}</p>
@@ -376,13 +416,16 @@ app.get("/", async (context) => {
 
 app.get("/definitions", async (context) => {
   try {
-    const definitions = await listTestDefinitions(context.env.HYPERDRIVE.connectionString);
-    return context.render(<Definitions definitions={definitions} />);
+    const [definitions, outcomes] = await Promise.all([
+      listTestDefinitions(context.env.HYPERDRIVE.connectionString),
+      listTestResultOutcomes(context.env.HYPERDRIVE.connectionString),
+    ]);
+    return context.render(<Definitions definitions={definitions} outcomes={outcomes} />);
   } catch (error) {
     Sentry.captureException(error);
-    console.error("dashboard: listing test definitions:", errorMessage(error));
+    console.error("dashboard: loading the definitions page:", errorMessage(error));
     context.status(500);
-    return context.render(<Definitions definitions={null} />);
+    return context.render(<Definitions definitions={null} outcomes={[]} />);
   }
 });
 
