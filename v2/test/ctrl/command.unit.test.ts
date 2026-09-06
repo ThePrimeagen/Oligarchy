@@ -71,6 +71,7 @@ const result = (
   runId: RUN_ID,
   definitionId,
   sessionId,
+  model: "grok-4.6",
   status,
   reason: null,
   createdAt: new Date("2026-09-03T00:00:00Z"),
