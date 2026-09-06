@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { Client } from "pg";
 import * as Postgres from "../support/postgres.ts";
 import * as StubCursor from "../support/stub-cursor.ts";
 import * as StubProxy from "../support/stub-proxy.ts";
@@ -678,7 +679,8 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
     ]);
     expect(created.stderr).toBe("");
     expect(created.code).toBe(0);
-    expect(created.stdout).toBe("");
+    // The Log service's stdout copy of the logs row; no agent, so [global].
+    expect(created.stdout).toBe(`[global] error type ${key} created\n`);
 
     const listed = await runCtrl(["error-type", "list", "--server-url", SERVER]);
     expect(listed.stderr).toBe("");
@@ -759,6 +761,86 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
     expect(result.stderr).toBe("");
     expect(result.code).toBe(0);
     expect(result.stdout).toBe("null\n");
+  });
+
+  it("diagnose writes the row for a failed session once; session --diagnosis prints it", async () => {
+    // No ctrl action ends a session, so the failed session is seeded straight into the container.
+    const sessionId = randomUUID();
+    const client = new Client({ connectionString: Postgres.getDbUrl() });
+    await client.connect();
+    try {
+      await client.query(
+        `insert into sessions (id, config, status, reason, ended_at) values ($1, '{"iso":"x"}', 'failed', 'installer hung', now())`,
+        [sessionId],
+      );
+    } finally {
+      await client.end();
+    }
+    const key = `installer_hang_${randomUUID().replaceAll("-", "_")}`;
+    expect(
+      (
+        await runCtrl([
+          "error-type",
+          "new",
+          "--key",
+          key,
+          "--description",
+          "the installer never finished",
+          "--server-url",
+          SERVER,
+        ])
+      ).code,
+    ).toBe(0);
+
+    const diagnose = (type: string, summary: string) =>
+      runCtrl([
+        "diagnose",
+        "--session-id",
+        sessionId,
+        "--type",
+        type,
+        "--summary",
+        summary,
+        "--model",
+        "composer-2.5",
+        "--server-url",
+        SERVER,
+      ]);
+    const first = await diagnose(key, "serial stops after the partition step");
+    expect(first.stderr).toBe("");
+    expect(first.code).toBe(0);
+    expect(first.stdout).toBe(`[global] ${sessionId}: diagnosed; ${key}; composer-2.5\n`);
+
+    const second = await diagnose(key, "on reflection");
+    expect(second.code).toBe(1);
+    expect(second.stdout).toBe("");
+    expect(firstLine(second.stderr)).toBe(`diagnose: session ${sessionId} already has a diagnosis`);
+
+    const printed = await runCtrl([
+      "session",
+      "--session-id",
+      sessionId,
+      "--diagnosis",
+      "--server-url",
+      SERVER,
+    ]);
+    expect(printed.stderr).toBe("");
+    expect(printed.code).toBe(0);
+    const row: { sessionId: string; errorType: string; summary: string; model: string } =
+      JSON.parse(printed.stdout);
+    expect(row).toMatchObject({
+      sessionId,
+      errorType: key,
+      summary: "serial stops after the partition step",
+      model: "composer-2.5",
+    });
+    expect(Object.keys(row).sort()).toEqual([
+      "createdAt",
+      "errorType",
+      "model",
+      "sessionId",
+      "summary",
+    ]);
   });
 
   it("session requires a selector and rejects an unknown session", async () => {
