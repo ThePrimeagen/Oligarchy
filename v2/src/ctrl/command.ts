@@ -22,10 +22,12 @@ import * as Logs from "../db/logs.ts";
 import * as Sessions from "../db/sessions.ts";
 import * as Tests from "../db/tests.ts";
 import * as Log from "../observability/log.ts";
+import * as Contract from "../shared/contract.ts";
 import * as Domain from "../shared/domain.ts";
 import * as Errors from "../shared/errors.ts";
 import * as Cursor from "./cursor.ts";
 import * as Linear from "./linear.ts";
+import * as Prompts from "./prompts.ts";
 import * as Render from "./render.ts";
 
 // ---------------------------------------------------------------------------
@@ -284,7 +286,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
             proof: definition.proof,
           });
     });
-    const experiment: Linear.Experiment = {
+    const experiment: Prompts.Experiment = {
       id: created.runId,
       iso: input.iso,
       serverUrl: input.serverUrl,
@@ -294,7 +296,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
 
     const tickets: Array<Linear.LinearTicket> = [];
     const createTickets = Effect.gen(function* () {
-      const prompts = yield* Linear.loadIssuePrompts;
+      const prompts = yield* Prompts.loadIssuePrompts;
       const teamId = yield* linear.teamId;
       const labelIds = yield* linear.labelIds(teamId, experiment.version);
       const assigneeId = yield* linear.assigneeId;
@@ -307,23 +309,27 @@ export const makeCtrlCommand = (deps: Deps = live) => {
         });
         tickets.push(ticket);
         const description = yield* Effect.fromResult(
-          Linear.linearTicketDescription(experiment, test, ticket.identifier, prompts),
+          Prompts.linearTicketDescription(experiment, test, ticket.identifier, prompts),
         );
         yield* linear.describeIssue(ticket, description);
       }
     });
     // A Linear failure fails the run and every result with the reason, naming the tickets that
-    // did get created so they can be cleaned up by hand.
+    // did get created so they can be cleaned up by hand. The templates are read before the first
+    // ticket, so an unreadable one fails the run with no ticket to name.
     yield* createTickets.pipe(
-      Effect.catchTag("LinearError", (error) =>
-        Effect.gen(function* () {
-          const identifiers = tickets.map((ticket) => ticket.identifier).join(", ");
-          const reason =
-            identifiers === "" ? error.message : `${error.message}; created ${identifiers}`;
-          yield* tests.failRun(experiment.id, reason);
-          return yield* identifiers === "" ? error : withReason(error, reason);
-        }),
-      ),
+      Effect.catchTags({
+        PromptError: (error) =>
+          Effect.flatMap(tests.failRun(experiment.id, error.message), () => Effect.fail(error)),
+        LinearError: (error) =>
+          Effect.gen(function* () {
+            const identifiers = tickets.map((ticket) => ticket.identifier).join(", ");
+            const reason =
+              identifiers === "" ? error.message : `${error.message}; created ${identifiers}`;
+            yield* tests.failRun(experiment.id, reason);
+            return yield* identifiers === "" ? error : withReason(error, reason);
+          }),
+      }),
     );
 
     yield* log.info(
@@ -344,8 +350,8 @@ export const makeCtrlCommand = (deps: Deps = live) => {
   // test run --ticket <linear-ticket>
   const testRun = Effect.fn("ctrl.test.run")(function* (input: { readonly ticket: string }) {
     const agents = yield* Cursor.CursorAgents;
-    const template = yield* Linear.loadDrivingPrompt;
-    const text = yield* Effect.fromResult(Linear.drivingAgentPrompt(input.ticket, template));
+    const template = yield* Prompts.loadDrivingPrompt;
+    const text = yield* Effect.fromResult(Prompts.drivingAgentPrompt(input.ticket, template));
     const { agentId } = yield* agents.prompt(text);
     yield* Console.log(Render.agentLink(Cursor.agentUrl(agentId)));
   });
@@ -441,34 +447,45 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     yield* printLines(Render.renderErrorTypes(rows, input.json));
   });
 
-  // diagnose --session-id <id> --type <key> --summary <text> --model <id>
+  // A session is reviewed once it has ended, whatever the driver said about it.
+  const endedSession = Effect.fn("ctrl.endedSession")(function* (action: string, id: string) {
+    const sessions = yield* Sessions.SessionStore;
+    return yield* orRefuse(sessions.getSessionStatus(id), `${action}: no session ${id}`).pipe(
+      Effect.filterOrFail(
+        (status) => status !== "running" && status !== "downloading",
+        (status) => refuse(`${action}: session ${id} is still ${status}`),
+      ),
+    );
+  });
+
+  // diagnose --session-id <id> --verdict passed|failed [--type <key>] --summary <text> --model <id>
   const diagnose = Effect.fn("ctrl.diagnose")(function* (input: {
     readonly sessionId: string;
-    readonly type: string;
+    readonly verdict: Domain.DiagnosisVerdict;
+    readonly type: Option.Option<string>;
     readonly summary: string;
     readonly model: string;
   }) {
-    const sessions = yield* Sessions.SessionStore;
     const diagnosis = yield* Diagnosis.DiagnosisStore;
     const log = yield* Log.Log;
-    const status = yield* orRefuse(
-      sessions.getSessionStatus(input.sessionId),
-      `diagnose: no session ${input.sessionId}`,
-    );
-    if (status === "succeeded") {
-      return yield* refuse(`diagnose: session ${input.sessionId} succeeded; nothing to diagnose`);
+    yield* endedSession("diagnose", input.sessionId);
+    if (input.verdict === "failed" && Option.isNone(input.type)) {
+      return yield* refuse("diagnose: --verdict failed needs --type");
     }
-    if (status === "running" || status === "downloading") {
-      return yield* refuse(`diagnose: session ${input.sessionId} is still ${status}`);
+    if (input.verdict === "passed" && Option.isSome(input.type)) {
+      return yield* refuse("diagnose: --verdict passed takes no --type");
     }
-    yield* orRefuse(
-      diagnosis.findErrorType(input.type),
-      `diagnose: no error type ${input.type}; create it with ./ctrl error-type new`,
-    );
+    if (Option.isSome(input.type)) {
+      yield* orRefuse(
+        diagnosis.findErrorType(input.type.value),
+        `diagnose: no error type ${input.type.value}; create it with ./ctrl error-type new`,
+      );
+    }
     yield* diagnosis
       .saveDiagnosis({
         sessionId: input.sessionId,
-        errorType: input.type,
+        verdict: input.verdict,
+        errorType: Option.getOrNull(input.type),
         summary: input.summary,
         model: input.model,
       })
@@ -478,9 +495,37 @@ export const makeCtrlCommand = (deps: Deps = live) => {
           () => refuse(`diagnose: session ${input.sessionId} already has a diagnosis`),
         ),
       );
-    return yield* log.info(`diagnosed; ${input.type}; ${input.model}`, {
+    const cause = Option.match(input.type, {
+      onNone: () => "",
+      onSome: (key) => `${key}; `,
+    });
+    return yield* log.info(`diagnosed; ${input.verdict}; ${cause}${input.model}`, {
       sessionId: input.sessionId,
     });
+  });
+
+  // diagnose run --session-id <id>
+  const diagnoseRun = Effect.fn("ctrl.diagnose.run")(function* (input: {
+    readonly serverUrl: string;
+    readonly sessionId: string;
+  }) {
+    const diagnosis = yield* Diagnosis.DiagnosisStore;
+    const agents = yield* Cursor.CursorAgents;
+    yield* endedSession("diagnose run", input.sessionId);
+    // A reviewer whose diagnose would be refused is an agent run wasted: refuse it here instead.
+    yield* diagnosis
+      .getDiagnosis(input.sessionId)
+      .pipe(
+        Effect.filterOrFail(Option.isNone, () =>
+          refuse(`diagnose run: session ${input.sessionId} already has a diagnosis`),
+        ),
+      );
+    const prompts = yield* Prompts.loadDiagnosisPrompts;
+    const text = yield* Effect.fromResult(
+      Prompts.diagnosingAgentPrompt(input.sessionId, input.serverUrl, prompts),
+    );
+    const { agentId } = yield* agents.prompt(text);
+    yield* Console.log(Render.agentLink(Cursor.agentUrl(agentId)));
   });
 
   // session list [--count <n>] [--active] [--json]
@@ -508,14 +553,20 @@ export const makeCtrlCommand = (deps: Deps = live) => {
   });
 
   type Selectors = {
+    readonly status: boolean;
     readonly logs: boolean;
     readonly testDef: boolean;
     readonly testResults: boolean;
+    readonly testRun: boolean;
     readonly actions: boolean;
+    readonly images: boolean;
     readonly debugLogs: boolean;
     readonly diagnosis: boolean;
     readonly all: boolean;
   };
+
+  const SELECTORS =
+    "--status, --logs, --test-def, --test-results, --test-run, --actions, --images, --debug-logs, --diagnosis";
 
   const sessionJson = Effect.fn("ctrl.session.json")(function* (id: string, input: Selectors) {
     const sessions = yield* Sessions.SessionStore;
@@ -524,13 +575,16 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     const actions = yield* Actions.ActionStore;
     const debugLogs = yield* DebugLogs.DebugLogStore;
     const diagnosis = yield* Diagnosis.DiagnosisStore;
-    yield* orRefuse(sessions.sessionExists(id), `session: no session ${id}`);
+    const session = yield* orRefuse(sessions.getSession(id), `session: no session ${id}`);
 
     const parts: Array<readonly [string, unknown]> = [];
+    if (input.all || input.status) {
+      parts.push(["session", session]);
+    }
     if (input.all || input.logs) {
       parts.push(["logs", yield* logs.listLogs(id)]);
     }
-    if (input.all || input.testResults || input.testDef) {
+    if (input.all || input.testResults || input.testDef || input.testRun) {
       const row = yield* tests.resultForSession(id).pipe(
         Effect.filterOrFail(
           (rows) => rows.length <= 1,
@@ -550,9 +604,27 @@ export const makeCtrlCommand = (deps: Deps = live) => {
           Option.match(row, { onNone: () => null, onSome: (joined) => joined.definition }),
         ]);
       }
+      if (input.all || input.testRun) {
+        parts.push([
+          "test_run",
+          Option.match(row, { onNone: () => null, onSome: (joined) => joined.run }),
+        ]);
+      }
     }
     if (input.all || input.actions) {
       parts.push(["actions", yield* actions.listActions(id)]);
+    }
+    if (input.all || input.images) {
+      const rows = yield* actions.listImages(id);
+      parts.push([
+        "images",
+        rows.map((row) => ({
+          id: row.id,
+          actionId: row.actionId,
+          url: Contract.StoredImageUrl(row.id),
+          createdAt: row.createdAt,
+        })),
+      ]);
     }
     if (input.all || input.debugLogs) {
       parts.push(["debug_log", Option.getOrNull(yield* debugLogs.getDebugLog(id))]);
@@ -565,7 +637,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     yield* printJson(single === undefined ? Object.fromEntries(parts) : single[1]);
   });
 
-  // session --session-id <id> --logs|--test-def|--test-results|--actions|--debug-logs|--diagnosis|--all|--dump
+  // session --session-id <id> --status|--logs|--test-def|--test-results|--test-run|--actions|--images|--debug-logs|--diagnosis|--all|--dump
   const sessionInspect = Effect.fn("ctrl.session.inspect")(function* (
     input: Selectors & {
       readonly serverUrl: string;
@@ -574,22 +646,21 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     },
   ) {
     const inspecting =
+      input.status ||
       input.logs ||
       input.testDef ||
       input.testResults ||
+      input.testRun ||
       input.actions ||
+      input.images ||
       input.debugLogs ||
       input.diagnosis ||
       input.all;
     if (!inspecting && !input.dump) {
-      return yield* refuse(
-        "session: --logs, --test-def, --test-results, --actions, --debug-logs, --diagnosis, --all, or --dump is required",
-      );
+      return yield* refuse(`session: ${SELECTORS}, --all, or --dump is required`);
     }
     if (inspecting && input.dump) {
-      return yield* refuse(
-        "session: --dump does not combine with --logs, --test-def, --test-results, --actions, --debug-logs, --diagnosis, or --all",
-      );
+      return yield* refuse(`session: --dump does not combine with ${SELECTORS}, or --all`);
     }
     return yield* input.dump
       ? sessionDump(input.sessionId, input.serverUrl)
@@ -713,10 +784,13 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     {
       serverUrl: serverUrlFlag,
       sessionId: sessionIdFlag,
+      status: toggle("status", "Print the session row: how it ended, why, and what it booted"),
       logs: toggle("logs", "Print session logs"),
       testDef: toggle("test-def", "Print the session's test definition"),
       testResults: toggle("test-results", "Print the session's test result"),
+      testRun: toggle("test-run", "Print the test run the session's result belongs to"),
       actions: toggle("actions", "Print session actions"),
+      images: toggle("images", "Print the session's screenshots: id, action, url, when"),
       debugLogs: toggle(
         "debug-logs",
         "Print the session's debug log (serial, proxy, qemu, actions), saved when it did not succeed",
@@ -724,7 +798,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
       diagnosis: toggle("diagnosis", "Print the session's post-run diagnosis, written by diagnose"),
       all: toggle(
         "all",
-        "Print logs, test definition, test results, actions, debug log, and diagnosis",
+        "Print the session, logs, test result, definition and run, actions, images, debug log, and diagnosis",
       ),
       dump: toggle(
         "dump",
@@ -734,7 +808,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     sessionInspect,
   ).pipe(
     Command.withDescription(
-      "session --session-id <id> --logs|--test-def|--test-results|--actions|--debug-logs|--diagnosis|--all|--dump; or list",
+      "session --session-id <id> --status|--logs|--test-def|--test-results|--test-run|--actions|--images|--debug-logs|--diagnosis|--all|--dump; or list",
     ),
     Command.provide(withDb),
     Command.withSubcommands([sessionListCommand]),
@@ -773,12 +847,27 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     Command.withSubcommands([errorTypeNewCommand, errorTypeListCommand]),
   );
 
+  const diagnoseRunCommand = Command.make(
+    "run",
+    { serverUrl: serverUrlFlag, sessionId: sessionIdFlag },
+    diagnoseRun,
+  ).pipe(
+    Command.withDescription("Kick off a Cursor cloud agent that reviews one ended session"),
+    Command.provide(withDbAndCursor),
+  );
+
   const diagnoseCommand = Command.make(
     "diagnose",
     {
       serverUrl: serverUrlFlag,
       sessionId: sessionIdFlag,
-      type: errorTypeKeyFlag("type", "Error type key; error-type list prints them"),
+      verdict: Flag.choice("verdict", Domain.DiagnosisVerdict.literals).pipe(
+        Flag.withDescription("Whether the proof landed, as the evidence shows it"),
+      ),
+      type: errorTypeKeyFlag(
+        "type",
+        "Error type key of a failed verdict; error-type list prints them",
+      ).pipe(Flag.optional),
       summary: Flag.string("summary").pipe(
         Flag.withSchema(Schema.NonEmptyString),
         Flag.withDescription("What happened, read from the evidence"),
@@ -787,8 +876,11 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     },
     diagnose,
   ).pipe(
-    Command.withDescription("Record the cause of a session that ended any way but succeeded"),
+    Command.withDescription(
+      "diagnose --session-id <id> --verdict passed|failed [--type <key>] --summary <text> --model <id>; or run",
+    ),
     Command.provide(withDb),
+    Command.withSubcommands([diagnoseRunCommand]),
   );
 
   return Command.make("ctrl").pipe(

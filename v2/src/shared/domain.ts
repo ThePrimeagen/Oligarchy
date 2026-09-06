@@ -122,6 +122,13 @@ export const TestResultStatus = Schema.Literals([
 ]).annotate({ identifier: "@oligarchy/shared/domain/TestResultStatus" });
 export type TestResultStatus = typeof TestResultStatus.Type;
 
+// A post-run reviewer's verdict on a session's test: did the proof land. Maintained by hand with
+// the `diagnosis_verdict` pgEnum in `db/schema.ts`.
+export const DiagnosisVerdict = Schema.Literals(["passed", "failed"]).annotate({
+  identifier: "@oligarchy/shared/domain/DiagnosisVerdict",
+});
+export type DiagnosisVerdict = typeof DiagnosisVerdict.Type;
+
 // An ISO named by url is downloaded and cached by the proxy; anything else is a path.
 export const isIsoUrl = (iso: string): boolean =>
   iso.startsWith("http://") || iso.startsWith("https://");

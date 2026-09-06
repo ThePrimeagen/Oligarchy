@@ -73,7 +73,23 @@ export class ActionStore extends Context.Service<ActionStore>()("@oligarchy/db/A
       );
     });
 
-    return { startAction, finishAction, getImage, listActions };
+    // The session's screenshots in the order they were taken; the bytes stay behind `getImage`.
+    const listImages = Effect.fn("db.listImages")(function* (sessionId: string) {
+      return yield* database.run("listImages", (db) =>
+        db
+          .select({
+            id: DbSchema.images.id,
+            actionId: DbSchema.images.actionId,
+            createdAt: DbSchema.actions.createdAt,
+          })
+          .from(DbSchema.images)
+          .innerJoin(DbSchema.actions, eq(DbSchema.images.actionId, DbSchema.actions.id))
+          .where(eq(DbSchema.actions.sessionId, sessionId))
+          .orderBy(DbSchema.actions.createdAt, DbSchema.actions.id),
+      );
+    });
+
+    return { startAction, finishAction, getImage, listActions, listImages };
   }),
 }) {
   static readonly layer = Layer.effect(this)(this.make);

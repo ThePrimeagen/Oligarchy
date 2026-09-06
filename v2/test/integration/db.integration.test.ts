@@ -64,6 +64,18 @@ Postgres.describeWithDatabase("database", () => {
 
         yield* store.endSession(id, "succeeded", "done");
 
+        // getSession is the whole row, as `ctrl session --status` prints it.
+        const read = Option.getOrThrow(yield* store.getSession(id.toUpperCase()));
+        expect(read).toMatchObject({
+          id,
+          config: { iso: "omarchy.iso", disk: "/tmp/disk.qcow2" },
+          status: "succeeded",
+          reason: "done",
+        });
+        expect(read.startedAt).toBeInstanceOf(Date);
+        expect(read.endedAt).toBeInstanceOf(Date);
+        expect(yield* store.getSession(uuid())).toEqual(Option.none());
+
         const [session] = yield* database.run("select", (db) =>
           db.select().from(DbSchema.sessions).where(eq(DbSchema.sessions.id, id)),
         );
@@ -159,6 +171,62 @@ Postgres.describeWithDatabase("database", () => {
           expect([...image.value]).toEqual([137, 80, 78, 71]);
         }
         expect(yield* actions.getImage(uuid())).toEqual(Option.none());
+      }),
+    );
+
+    scoped.effect("ActionStore lists a session's images in action order, nobody else's", () =>
+      Effect.gen(function* () {
+        const sessions = yield* Sessions.SessionStore;
+        const actions = yield* Actions.ActionStore;
+        const sessionId = uuid();
+        const otherId = uuid();
+        const agentId = `agent-${sessionId}`;
+        const otherAgent = `agent-${otherId}`;
+        yield* sessions.insertSession(sessionId, { iso: "x" }, "running");
+        yield* sessions.insertSession(otherId, { iso: "x" }, "running");
+        yield* sessions.registerAgent(agentId, sessionId);
+        yield* sessions.registerAgent(otherAgent, otherId);
+        const screendump = {
+          execute: "screendump",
+          arguments: { filename: "/tmp/x.png", format: "png" },
+          id: 1,
+        } as const;
+        const shot = (session: string, agent: string) =>
+          Effect.gen(function* () {
+            const actionId = yield* actions.startAction({
+              sessionId: session,
+              agentId: agent,
+              request: screendump,
+            });
+            const imageId = uuid();
+            yield* actions.finishAction(
+              actionId,
+              { state: "completed", response: { return: {} } },
+              { id: imageId, data: new Uint8Array([137]) },
+            );
+            return { id: imageId, actionId };
+          });
+        expect(yield* actions.listImages(sessionId)).toEqual([]);
+        const first = yield* shot(sessionId, agentId);
+        yield* shot(otherId, otherAgent);
+        const second = yield* shot(sessionId, agentId);
+        // A screendump that failed leaves no image behind and so no entry here.
+        const failed = yield* actions.startAction({ sessionId, agentId, request: screendump });
+        yield* actions.finishAction(failed, {
+          state: "failed",
+          response: { error: { class: "GenericError", desc: "no display" } },
+        });
+
+        const listed = yield* actions.listImages(sessionId);
+        expect(listed.map((row) => [row.id, row.actionId])).toEqual([
+          [first.id, first.actionId],
+          [second.id, second.actionId],
+        ]);
+        for (const row of listed) {
+          expect(row.createdAt).toBeInstanceOf(Date);
+          expect(Object.keys(row).sort()).toEqual(["actionId", "createdAt", "id"]);
+        }
+        expect(yield* actions.listImages(uuid())).toEqual([]);
       }),
     );
 
@@ -437,6 +505,7 @@ Postgres.describeWithDatabase("database", () => {
         expect(
           yield* diagnosis.saveDiagnosis({
             sessionId,
+            verdict: "failed",
             errorType: boot,
             summary: "the kernel waited on the root device",
             model: "composer-2.5",
@@ -446,6 +515,7 @@ Postgres.describeWithDatabase("database", () => {
         expect(
           yield* diagnosis.saveDiagnosis({
             sessionId: sessionId.toUpperCase(),
+            verdict: "failed",
             errorType: misread,
             summary: "on reflection",
             model: "grok-4.6",
@@ -455,6 +525,7 @@ Postgres.describeWithDatabase("database", () => {
         const read = Option.getOrThrow(yield* diagnosis.getDiagnosis(sessionId));
         expect(read).toMatchObject({
           sessionId,
+          verdict: "failed",
           errorType: boot,
           summary: "the kernel waited on the root device",
           model: "composer-2.5",
@@ -466,6 +537,7 @@ Postgres.describeWithDatabase("database", () => {
           "model",
           "sessionId",
           "summary",
+          "verdict",
         ]);
         expect(yield* diagnosis.getDiagnosis(uuid())).toEqual(Option.none());
         const rows = yield* database.run("select", (db) =>
@@ -475,6 +547,72 @@ Postgres.describeWithDatabase("database", () => {
             .where(eq(DbSchema.postRunDiagnosis.sessionId, sessionId)),
         );
         expect(rows).toHaveLength(1);
+      }),
+    );
+
+    scoped.effect(
+      "DiagnosisStore writes a passed verdict without a cause, on any ended session",
+      () =>
+        Effect.gen(function* () {
+          const sessions = yield* Sessions.SessionStore;
+          const diagnosis = yield* Diagnosis.DiagnosisStore;
+          const succeeded = uuid();
+          const failed = uuid();
+          yield* sessions.insertSession(succeeded, { iso: "x" }, "running");
+          yield* sessions.endSession(succeeded, "succeeded", "lock screen on screen");
+          yield* sessions.insertSession(failed, { iso: "x" }, "running");
+          yield* sessions.endSession(failed, "failed", "gave up");
+          for (const sessionId of [succeeded, failed]) {
+            expect(
+              yield* diagnosis.saveDiagnosis({
+                sessionId,
+                verdict: "passed",
+                errorType: null,
+                summary: "the last image shows the proof",
+                model: "composer-2.5",
+              }),
+            ).toBe(true);
+            expect(Option.getOrThrow(yield* diagnosis.getDiagnosis(sessionId))).toMatchObject({
+              sessionId,
+              verdict: "passed",
+              errorType: null,
+            });
+          }
+        }),
+    );
+
+    scoped.effect("the table refuses a passed verdict with a cause and a failed one without", () =>
+      Effect.gen(function* () {
+        const sessions = yield* Sessions.SessionStore;
+        const diagnosis = yield* Diagnosis.DiagnosisStore;
+        const sessionId = uuid();
+        const boot = errorKey("guest_boot_hang");
+        yield* sessions.insertSession(sessionId, { iso: "x" }, "running");
+        yield* sessions.endSession(sessionId, "failed", null);
+        yield* diagnosis.createErrorType(boot, "never reached login");
+        const typedPass = yield* Effect.flip(
+          diagnosis.saveDiagnosis({
+            sessionId,
+            verdict: "passed",
+            errorType: boot,
+            summary: "s",
+            model: "composer-2.5",
+          }),
+        );
+        expect(typedPass).toMatchObject({ _tag: "DatabaseError", operation: "saveDiagnosis" });
+        expect(String(typedPass.cause)).toMatch(/check constraint/);
+        const untypedFailure = yield* Effect.flip(
+          diagnosis.saveDiagnosis({
+            sessionId,
+            verdict: "failed",
+            errorType: null,
+            summary: "s",
+            model: "composer-2.5",
+          }),
+        );
+        expect(untypedFailure).toMatchObject({ _tag: "DatabaseError", operation: "saveDiagnosis" });
+        expect(String(untypedFailure.cause)).toMatch(/check constraint/);
+        expect(yield* diagnosis.getDiagnosis(sessionId)).toEqual(Option.none());
       }),
     );
 
@@ -488,6 +626,7 @@ Postgres.describeWithDatabase("database", () => {
         const unknownType = yield* Effect.flip(
           diagnosis.saveDiagnosis({
             sessionId,
+            verdict: "failed",
             errorType: errorKey("never_created"),
             summary: "s",
             model: "composer-2.5",
@@ -506,6 +645,7 @@ Postgres.describeWithDatabase("database", () => {
         const unknownSession = yield* Effect.flip(
           diagnosis.saveDiagnosis({
             sessionId: uuid(),
+            verdict: "failed",
             errorType: boot,
             summary: "s",
             model: "composer-2.5",
@@ -535,6 +675,7 @@ Postgres.describeWithDatabase("database", () => {
           yield* diagnosis.createErrorType(before, "never reached login");
           yield* diagnosis.saveDiagnosis({
             sessionId,
+            verdict: "failed",
             errorType: before,
             summary: "s",
             model: "composer-2.5",
@@ -603,6 +744,12 @@ Postgres.describeWithDatabase("database", () => {
         expect(joined[0]?.result.status).toBe("running");
         expect(joined[0]?.result.model).toBe("composer-2.5");
         expect(joined[0]?.definition.name).toBe("lock-screen");
+        expect(joined[0]?.run).toMatchObject({
+          id: created.runId,
+          iso: "https://example.com/omarchy.iso",
+          serverUrl: "http://127.0.0.1:42069",
+          status: "pending",
+        });
 
         expect(yield* tests.closeResult(result.id, "passed", "it locked", null)).toBe(true);
         const [closed] = yield* tests.resultForSession(sessionId);

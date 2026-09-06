@@ -69,21 +69,18 @@ const runCtrl = (args: ReadonlyArray<string>, env: Record<string, string> = {}):
 
 const firstLine = (text: string): string => text.split("\n")[0] ?? "";
 
-// No ctrl action ends a session, so a failed one is seeded straight into the container.
-const seedFailedSession = async (): Promise<string> => {
+// No ctrl action ends a session, so an ended one is seeded straight into the container.
+const seedEndedSession = async (
+  status: "succeeded" | "failed" = "failed",
+  reason = "installer hung",
+): Promise<string> => {
   const sessionId = randomUUID();
   const client = new Client({ connectionString: Postgres.getDbUrl() });
   await client.connect();
   try {
     await drizzle({ client })
       .insert(DbSchema.sessions)
-      .values({
-        id: sessionId,
-        config: { iso: "x" },
-        status: "failed",
-        reason: "installer hung",
-        endedAt: new Date(),
-      });
+      .values({ id: sessionId, config: { iso: "x" }, status, reason, endedAt: new Date() });
   } finally {
     await client.end();
   }
@@ -137,6 +134,7 @@ describe("./ctrl without a database", () => {
       ["test", "--help"],
       ["session", "--help"],
       ["test", "run", "--help"],
+      ["diagnose", "run", "--help"],
     ]) {
       const result = await runCtrl(args, { DATABASE_URL: "" });
       expect(result.code).toBe(0);
@@ -275,6 +273,8 @@ describe("./ctrl without a database", () => {
         "diagnose",
         "--session-id",
         SUCCEEDED_ID,
+        "--verdict",
+        "failed",
         "--type",
         "k",
         "--summary",
@@ -284,6 +284,7 @@ describe("./ctrl without a database", () => {
         "--server-url",
         SERVER,
       ],
+      ["diagnose", "run", "--session-id", SUCCEEDED_ID, "--server-url", SERVER],
     ]) {
       const result = await runCtrl(args, {
         DATABASE_URL: "",
@@ -448,6 +449,8 @@ describe("./ctrl without a database", () => {
           "diagnose",
           "--session-id",
           randomUUID(),
+          "--verdict",
+          "failed",
           "--type",
           "guest-boot-hang",
           "--summary",
@@ -465,6 +468,8 @@ describe("./ctrl without a database", () => {
           "diagnose",
           "--session-id",
           randomUUID(),
+          "--verdict",
+          "failed",
           "--type",
           "k",
           "--model",
@@ -474,6 +479,50 @@ describe("./ctrl without a database", () => {
         ],
         /Missing required flag: --summary/,
         env,
+      ],
+      [
+        [
+          "diagnose",
+          "--session-id",
+          randomUUID(),
+          "--type",
+          "k",
+          "--summary",
+          "s",
+          "--model",
+          "m",
+          "--server-url",
+          SERVER,
+        ],
+        /Missing required flag: --verdict/,
+        env,
+      ],
+      [
+        [
+          "diagnose",
+          "--session-id",
+          randomUUID(),
+          "--verdict",
+          "succeeded",
+          "--summary",
+          "s",
+          "--model",
+          "m",
+          "--server-url",
+          SERVER,
+        ],
+        /Invalid value for flag --verdict: "succeeded"/,
+        env,
+      ],
+      [
+        ["diagnose", "run", "--server-url", SERVER],
+        /Missing required flag: --session-id/,
+        { ...env, CURSOR_API_TOKEN: "c" },
+      ],
+      [
+        ["diagnose", "run", "--session-id", randomUUID()],
+        /Missing required flag: --server-url/,
+        { ...env, CURSOR_API_TOKEN: "c" },
       ],
     ];
     for (const [args, expected, environment] of cases) {
@@ -660,7 +709,7 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
     expect(stub.requests).toEqual([]);
   });
 
-  it("session --all prints { logs, results, test_definition, actions, debug_log, diagnosis } for a seeded session", async () => {
+  it("session --all prints { session, logs, results, test_definition, test_run, actions, images, debug_log, diagnosis } for a seeded session", async () => {
     const result = await runCtrl([
       "session",
       "--session-id",
@@ -673,19 +722,52 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
     expect(result.code).toBe(0);
     const printed: Record<string, unknown> = JSON.parse(result.stdout);
     expect(Object.keys(printed)).toEqual([
+      "session",
       "logs",
       "results",
       "test_definition",
+      "test_run",
       "actions",
+      "images",
       "debug_log",
       "diagnosis",
     ]);
+    expect(printed.session).toMatchObject({
+      id: RUNNING_ID,
+      status: "running",
+      config: { iso: "y" },
+    });
     expect(Array.isArray(printed.logs)).toBe(true);
     expect(Array.isArray(printed.actions)).toBe(true);
+    expect(printed.images).toEqual([]);
     expect(printed.results).toBeNull();
     expect(printed.test_definition).toBeNull();
+    expect(printed.test_run).toBeNull();
     expect(printed.debug_log).toBeNull();
     expect(printed.diagnosis).toBeNull();
+  });
+
+  it("session --status prints the bare session row", async () => {
+    const result = await runCtrl([
+      "session",
+      "--session-id",
+      SUCCEEDED_ID,
+      "--status",
+      "--server-url",
+      SERVER,
+    ]);
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    const row: Record<string, unknown> = JSON.parse(result.stdout);
+    expect(row).toMatchObject({ id: SUCCEEDED_ID, status: "succeeded", config: { iso: "x" } });
+    expect(Object.keys(row).sort()).toEqual([
+      "config",
+      "endedAt",
+      "id",
+      "reason",
+      "startedAt",
+      "status",
+    ]);
   });
 
   it("error-type new stores a type that error-type list prints, and refuses the key twice", async () => {
@@ -736,15 +818,14 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
     expect(again.stderr).toMatch(/CommandError/);
   });
 
-  it("diagnose refuses an unknown session, a succeeded session, and an unknown type", async () => {
+  it("diagnose refuses an unknown session, a running session, a verdict without its type, and an unknown type", async () => {
     const sessionId = randomUUID();
-    const diagnose = (id: string, type: string) =>
+    const diagnose = (id: string, ...verdict: ReadonlyArray<string>) =>
       runCtrl([
         "diagnose",
         "--session-id",
         id,
-        "--type",
-        type,
+        ...verdict,
         "--summary",
         "the kernel waited on the root device",
         "--model",
@@ -752,30 +833,69 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
         "--server-url",
         SERVER,
       ]);
-    const unknown = await diagnose(sessionId, "guest_boot_hang");
+    const unknown = await diagnose(sessionId, "--verdict", "failed", "--type", "guest_boot_hang");
     expect(unknown.code).toBe(1);
     expect(unknown.stdout).toBe("");
     expect(firstLine(unknown.stderr)).toBe(`diagnose: no session ${sessionId}`);
 
-    const succeeded = await diagnose(SUCCEEDED_ID, "guest_boot_hang");
-    expect(succeeded.code).toBe(1);
-    expect(firstLine(succeeded.stderr)).toBe(
-      `diagnose: session ${SUCCEEDED_ID} succeeded; nothing to diagnose`,
-    );
-
-    const running = await diagnose(RUNNING_ID, "guest_boot_hang");
+    const running = await diagnose(RUNNING_ID, "--verdict", "failed", "--type", "guest_boot_hang");
     expect(running.code).toBe(1);
     expect(firstLine(running.stderr)).toBe(`diagnose: session ${RUNNING_ID} is still running`);
 
-    const failed = await seedFailedSession();
+    const failed = await seedEndedSession();
+    const untyped = await diagnose(failed, "--verdict", "failed");
+    expect(untyped.code).toBe(1);
+    expect(firstLine(untyped.stderr)).toBe("diagnose: --verdict failed needs --type");
+
+    const typedPass = await diagnose(failed, "--verdict", "passed", "--type", "guest_boot_hang");
+    expect(typedPass.code).toBe(1);
+    expect(firstLine(typedPass.stderr)).toBe("diagnose: --verdict passed takes no --type");
+
     const key = `never_${randomUUID().replaceAll("-", "_")}`;
-    const missing = await diagnose(failed, key);
+    const missing = await diagnose(failed, "--verdict", "failed", "--type", key);
     expect(missing.code).toBe(1);
     expect(missing.stdout).toBe("");
     expect(firstLine(missing.stderr)).toBe(
       `diagnose: no error type ${key}; create it with ./ctrl error-type new`,
     );
     expect(missing.stderr).toMatch(/CommandError/);
+  });
+
+  it("diagnose records a passed verdict on a succeeded session; session --diagnosis prints it with a null type", async () => {
+    const sessionId = await seedEndedSession("succeeded", "lock screen on screen");
+    const result = await runCtrl([
+      "diagnose",
+      "--session-id",
+      sessionId,
+      "--verdict",
+      "passed",
+      "--summary",
+      "the last image shows the lock screen with the clock",
+      "--model",
+      "composer-2.5",
+      "--server-url",
+      SERVER,
+    ]);
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe(`[global] ${sessionId}: diagnosed; passed; composer-2.5\n`);
+
+    const printed = await runCtrl([
+      "session",
+      "--session-id",
+      sessionId,
+      "--diagnosis",
+      "--server-url",
+      SERVER,
+    ]);
+    expect(printed.code).toBe(0);
+    expect(JSON.parse(printed.stdout)).toMatchObject({
+      sessionId,
+      verdict: "passed",
+      errorType: null,
+      summary: "the last image shows the lock screen with the clock",
+      model: "composer-2.5",
+    });
   });
 
   it("session --diagnosis prints null for a session without one", async () => {
@@ -793,7 +913,7 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
   });
 
   it("diagnose writes the row for a failed session once; session --diagnosis prints it", async () => {
-    const sessionId = await seedFailedSession();
+    const sessionId = await seedEndedSession();
     const key = `installer_hang_${randomUUID().replaceAll("-", "_")}`;
     expect(
       (
@@ -815,6 +935,8 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
         "diagnose",
         "--session-id",
         sessionId,
+        "--verdict",
+        "failed",
         "--type",
         type,
         "--summary",
@@ -827,7 +949,7 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
     const first = await diagnose(key, "serial stops after the partition step");
     expect(first.stderr).toBe("");
     expect(first.code).toBe(0);
-    expect(first.stdout).toBe(`[global] ${sessionId}: diagnosed; ${key}; composer-2.5\n`);
+    expect(first.stdout).toBe(`[global] ${sessionId}: diagnosed; failed; ${key}; composer-2.5\n`);
 
     const second = await diagnose(key, "on reflection");
     expect(second.code).toBe(1);
@@ -848,6 +970,7 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
       JSON.parse(printed.stdout);
     expect(row).toMatchObject({
       sessionId,
+      verdict: "failed",
       errorType: key,
       summary: "serial stops after the partition step",
       model: "composer-2.5",
@@ -858,7 +981,79 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
       "model",
       "sessionId",
       "summary",
+      "verdict",
     ]);
+  });
+
+  it("diagnose run kicks off a reviewer through the Cursor API with the session and server in its prompt", async () => {
+    const stub = await cursor();
+    const sessionId = await seedEndedSession();
+    const result = await runCtrl(
+      ["diagnose", "run", "--session-id", sessionId, "--server-url", SERVER],
+      { CURSOR_API_TOKEN: TOKEN, CURSOR_BACKEND_URL: stub.url },
+    );
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    const created = StubCursor.createdAgents(stub);
+    expect(created).toHaveLength(1);
+    const body: { agentId: string; prompt: { text: string }; model: unknown } = JSON.parse(
+      created[0]?.body ?? "{}",
+    );
+    expect(result.stdout).toBe(
+      `Agent here, go check it out for more information: https://cursor.com/agents/${body.agentId}\n`,
+    );
+    expect(body.prompt.text).toContain(`<session_id>${sessionId}</session_id>`);
+    expect(body.prompt.text).toContain(`--server-url ${SERVER} --session-id ${sessionId}`);
+    expect(body.prompt.text).toContain("## diagnose");
+    expect(body.prompt.text.includes("{{")).toBe(false);
+    expect(body.model).toEqual({
+      id: "grok-4.6",
+      params: [
+        { id: "effort", value: "xhigh" },
+        { id: "fast", value: "true" },
+      ],
+    });
+  });
+
+  it("diagnose run refuses an unknown, a running, and an already diagnosed session before calling Cursor", async () => {
+    const stub = await cursor();
+    const env = { CURSOR_API_TOKEN: TOKEN, CURSOR_BACKEND_URL: stub.url };
+    const run = (id: string) =>
+      runCtrl(["diagnose", "run", "--session-id", id, "--server-url", SERVER], env);
+    const unknownId = randomUUID();
+    const unknown = await run(unknownId);
+    expect(unknown.code).toBe(1);
+    expect(unknown.stdout).toBe("");
+    expect(firstLine(unknown.stderr)).toBe(`diagnose run: no session ${unknownId}`);
+
+    const running = await run(RUNNING_ID);
+    expect(running.code).toBe(1);
+    expect(firstLine(running.stderr)).toBe(`diagnose run: session ${RUNNING_ID} is still running`);
+
+    const diagnosed = await seedEndedSession("succeeded", "done");
+    expect(
+      (
+        await runCtrl([
+          "diagnose",
+          "--session-id",
+          diagnosed,
+          "--verdict",
+          "passed",
+          "--summary",
+          "s",
+          "--model",
+          "composer-2.5",
+          "--server-url",
+          SERVER,
+        ])
+      ).code,
+    ).toBe(0);
+    const again = await run(diagnosed);
+    expect(again.code).toBe(1);
+    expect(firstLine(again.stderr)).toBe(
+      `diagnose run: session ${diagnosed} already has a diagnosis`,
+    );
+    expect(StubCursor.createdAgents(stub)).toEqual([]);
   });
 
   it("session requires a selector and rejects an unknown session", async () => {
@@ -872,7 +1067,7 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
     ]);
     expect(noSelector.code).toBe(1);
     expect(firstLine(noSelector.stderr)).toBe(
-      "session: --logs, --test-def, --test-results, --actions, --debug-logs, --diagnosis, --all, or --dump is required",
+      "session: --status, --logs, --test-def, --test-results, --test-run, --actions, --images, --debug-logs, --diagnosis, --all, or --dump is required",
     );
     expect(noSelector.stderr).toMatch(/CommandError/);
     expect(noSelector.stderr).not.toMatch(/at sessionInspectRun/);
@@ -962,7 +1157,7 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
       expect(result.code).toBe(1);
       expect(result.stdout).toBe("");
       expect(firstLine(result.stderr)).toBe(
-        "session: --dump does not combine with --logs, --test-def, --test-results, --actions, --debug-logs, --diagnosis, or --all",
+        "session: --dump does not combine with --status, --logs, --test-def, --test-results, --test-run, --actions, --images, --debug-logs, --diagnosis, or --all",
       );
     }
     expect(stub.requests).toEqual([]);

@@ -79,6 +79,7 @@ export const fakeSessionStore = (
       }),
     getSessionStatus: (id) =>
       Effect.sync(() => Option.map(Option.fromUndefinedOr(find(id)), (row) => row.status)),
+    getSession: (id) => Effect.sync(() => Option.fromUndefinedOr(find(id))),
     sessionExists: (id) =>
       Effect.sync(() => Option.map(Option.fromUndefinedOr(find(id)), (row) => row.id)),
     registerAgent: (agentId, sessionId) =>
@@ -172,6 +173,22 @@ export const fakeActionStore = (
           .sort(
             (left, right) =>
               left.createdAt.getTime() - right.createdAt.getTime() || left.id - right.id,
+          ),
+      ),
+    // The images ⋈ actions join, in action order, as the real store answers it.
+    listImages: (sessionId) =>
+      Effect.sync(() =>
+        images
+          .flatMap((image) => {
+            const action = actions.find((row) => row.id === image.actionId);
+            return action === undefined || !sameId(action.sessionId, sessionId)
+              ? []
+              : [{ id: image.id, actionId: image.actionId, createdAt: action.createdAt }];
+          })
+          .sort(
+            (left, right) =>
+              left.createdAt.getTime() - right.createdAt.getTime() ||
+              left.actionId - right.actionId,
           ),
       ),
     ...overrides,
@@ -416,6 +433,7 @@ export const fakeTestStore = (
         row.finishedAt = new Date();
         return true;
       }),
+    // Inner joins, as the real query: a result whose definition or run is missing is no row.
     resultForSession: (sessionId) =>
       Effect.sync(() =>
         results.flatMap((result) => {
@@ -423,7 +441,8 @@ export const fakeTestStore = (
             return [];
           }
           const definition = definitions.find((row) => row.id === result.definitionId);
-          return definition === undefined ? [] : [{ result, definition }];
+          const run = runs.find((row) => sameId(row.id, result.runId));
+          return definition === undefined || run === undefined ? [] : [{ result, definition, run }];
         }),
       ),
     ...overrides,
