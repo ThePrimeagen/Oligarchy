@@ -450,6 +450,58 @@ Postgres.describeWithDatabase("database", () => {
       }),
     );
 
+    scoped.effect("createRun writes model on each result, not the run", () =>
+      Effect.gen(function* () {
+        const tests = yield* Tests.TestStore;
+        const database = yield* Client.Database;
+        const lock = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
+        const [install] = yield* database.run("insert", (db) =>
+          db
+            .insert(DbSchema.testDefinitions)
+            .values({
+              name: `install-models-${uuid()}`,
+              description: "d",
+              instruction: "i",
+              proof: "p",
+            })
+            .returning({ id: DbSchema.testDefinitions.id }),
+        );
+        const created = yield* tests.createRun({
+          iso: "https://example.com/omarchy.iso",
+          serverUrl: "http://127.0.0.1:42069",
+          model: "grok-4.6",
+          definitions: [{ id: lock.id }, { id: install.id }],
+        });
+        const [run] = yield* database.run("select", (db) =>
+          db.select().from(DbSchema.testRuns).where(eq(DbSchema.testRuns.id, created.runId)),
+        );
+        expect(run).not.toHaveProperty("model");
+        const results = yield* database.run("select", (db) =>
+          db
+            .select()
+            .from(DbSchema.testResults)
+            .where(eq(DbSchema.testResults.runId, created.runId)),
+        );
+        expect(results.map((row) => row.model)).toEqual(["grok-4.6", "grok-4.6"]);
+        yield* database.run("update", (db) =>
+          db
+            .update(DbSchema.testResults)
+            .set({ model: "composer-2.5" })
+            .where(eq(DbSchema.testResults.id, created.results[1].id)),
+        );
+        const updated = yield* database.run("select", (db) =>
+          db
+            .select()
+            .from(DbSchema.testResults)
+            .where(eq(DbSchema.testResults.runId, created.runId)),
+        );
+        expect([...new Set(updated.map((row) => row.model))].sort()).toEqual([
+          "composer-2.5",
+          "grok-4.6",
+        ]);
+      }),
+    );
+
     scoped.effect("TestStore refuses a second result for the same session (unhappy)", () =>
       Effect.gen(function* () {
         const tests = yield* Tests.TestStore;
@@ -493,10 +545,10 @@ Postgres.describeWithDatabase("database", () => {
         );
         expect(run).toMatchObject({
           name: "Omarchy experiment",
-          model: "grok-4.6",
           status: "failed",
           reason: "linear: request failed (401)",
         });
+        expect(run).not.toHaveProperty("model");
         expect(run?.endedAt).toBeInstanceOf(Date);
         const results = yield* database.run("select", (db) =>
           db
@@ -506,6 +558,7 @@ Postgres.describeWithDatabase("database", () => {
         );
         expect(results.map((row) => row.status)).toEqual(["failed"]);
         expect(results[0]?.reason).toBe("linear: request failed (401)");
+        expect(results[0]?.model).toBe("grok-4.6");
         expect(results[0]?.finishedAt?.getTime()).toBe(run?.endedAt?.getTime());
       }),
     );

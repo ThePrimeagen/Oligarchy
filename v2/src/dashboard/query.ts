@@ -8,7 +8,6 @@ import {
   testBasePrompts,
   testDefinitions,
   testResults,
-  testRuns,
 } from "../db/schema.ts";
 
 export type Session = typeof sessions.$inferSelect & {
@@ -118,12 +117,11 @@ export function listSessions(connectionString: string): Promise<Session[]> {
         imageId: latestImage.id,
         queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(recentSessions.startedAt),
         definitionName: testDefinitions.name,
-        model: testRuns.model,
+        model: testResults.model,
       })
       .from(recentSessions)
       .leftJoin(testResults, eq(testResults.sessionId, recentSessions.id))
       .leftJoin(testDefinitions, eq(testDefinitions.id, testResults.definitionId))
-      .leftJoin(testRuns, eq(testRuns.id, testResults.runId))
       .leftJoinLateral(latestImage, sql`true`)
       .orderBy(desc(recentSessions.startedAt));
   });

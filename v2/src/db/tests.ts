@@ -44,7 +44,6 @@ export class TestStore extends Context.Service<TestStore>()("@oligarchy/db/TestS
                 name: "Omarchy experiment",
                 iso: input.iso,
                 serverUrl: input.serverUrl,
-                model: input.model,
                 status: "pending",
               })
               .returning({ id: DbSchema.testRuns.id }),
@@ -56,6 +55,7 @@ export class TestStore extends Context.Service<TestStore>()("@oligarchy/db/TestS
                 input.definitions.map((definition) => ({
                   runId: run.id,
                   definitionId: definition.id,
+                  model: input.model,
                   status: "pending" as const,
                 })),
               )

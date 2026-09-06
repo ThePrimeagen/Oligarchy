@@ -168,15 +168,13 @@ export const testBasePrompts = pgTable(
 // server. The orchestrator owns the row: it opens the run and declares the
 // verdict once the results are in — or timed_out when reports stop coming.
 // Counts are not stored — planned and reported are both readable off the
-// test_results rows. model is the Cursor model id the run's agents use.
+// test_results rows. The Cursor model lives on each result: one run can mix
+// models.
 export const testRuns = pgTable("test_runs", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
   iso: text("iso").notNull(),
   serverUrl: text("server_url").notNull(),
-  // Default matches the only model the control plane has kicked off with, so
-  // rows that predate the column still have a value the dashboard can show.
-  model: text("model").notNull().default("grok-4.6"),
   status: testRunStatus("status").notNull().default("pending"),
   reason: text("reason"),
   startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
@@ -187,7 +185,7 @@ export const testRuns = pgTable("test_runs", {
 // runs, and the orchestrator marks it running when it spawns the driver. The agent's
 // report closes it passed or failed; the orchestrator closes the rest when it closes
 // the run — timed_out when the report never came, aborted when the run was stopped
-// on purpose.
+// on purpose. model is the Cursor model id that result's agent used.
 export const testResults = pgTable(
   "test_results",
   {
@@ -201,6 +199,9 @@ export const testResults = pgTable(
     // Null until test start writes the session, or until the close if start
     // was never called. Attribution is recorded fact, not an upfront guess.
     sessionId: uuid("session_id").references(() => sessions.id),
+    // Default matches the only model the control plane has kicked off with, so
+    // rows that predate the column still have a value the dashboard can show.
+    model: text("model").notNull().default("grok-4.6"),
     status: testResultStatus("status").notNull().default("pending"),
     reason: text("reason"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

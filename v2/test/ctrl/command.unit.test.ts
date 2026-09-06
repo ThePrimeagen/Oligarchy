@@ -314,14 +314,14 @@ describe("test new", () => {
           name: "Omarchy experiment",
           iso: "https://example.com/omarchy.iso",
           serverUrl: SERVER,
-          model: "grok-4.6",
           status: "pending",
           reason: null,
         });
+        expect(run).not.toHaveProperty("model");
         const results = h.stores.tests.results;
-        expect(results.map((row) => [row.runId, row.definitionId, row.status])).toEqual([
-          [run?.id, 1, "pending"],
-          [run?.id, 2, "pending"],
+        expect(results.map((row) => [row.runId, row.definitionId, row.status, row.model])).toEqual([
+          [run?.id, 1, "pending", "grok-4.6"],
+          [run?.id, 2, "pending", "grok-4.6"],
         ]);
 
         const loaded = yield* issuePrompts;
