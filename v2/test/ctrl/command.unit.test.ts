@@ -314,6 +314,7 @@ describe("test new", () => {
           name: "Omarchy experiment",
           iso: "https://example.com/omarchy.iso",
           serverUrl: SERVER,
+          model: "grok-4.6",
           status: "pending",
           reason: null,
         });

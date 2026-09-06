@@ -299,6 +299,7 @@ export const fakeTestStore = (
           name: "Omarchy experiment",
           iso: input.iso,
           serverUrl: input.serverUrl,
+          model: input.model,
           status: "pending",
           reason: null,
           startedAt: new Date(),

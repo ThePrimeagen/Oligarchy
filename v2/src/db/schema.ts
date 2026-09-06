@@ -168,12 +168,15 @@ export const testBasePrompts = pgTable(
 // server. The orchestrator owns the row: it opens the run and declares the
 // verdict once the results are in — or timed_out when reports stop coming.
 // Counts are not stored — planned and reported are both readable off the
-// test_results rows.
+// test_results rows. model is the Cursor model id the run's agents use.
 export const testRuns = pgTable("test_runs", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
   iso: text("iso").notNull(),
   serverUrl: text("server_url").notNull(),
+  // Default matches the only model the control plane has kicked off with, so
+  // rows that predate the column still have a value the dashboard can show.
+  model: text("model").notNull().default("grok-4.6"),
   status: testRunStatus("status").notNull().default("pending"),
   reason: text("reason"),
   startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
@@ -203,7 +206,11 @@ export const testResults = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
   },
-  // One result per definition per run: the orchestrator re-inserting a run's rows
-  // is a database error by design. The index also serves run lookups.
-  (table) => [uniqueIndex("test_results_run_definition_idx").on(table.runId, table.definitionId)],
+  // One result per definition per run, and one result per session once attributed:
+  // a second write of either is a database error by design. Postgres unique
+  // indexes still allow many NULL session_ids (pending results).
+  (table) => [
+    uniqueIndex("test_results_run_definition_idx").on(table.runId, table.definitionId),
+    uniqueIndex("test_results_session_id_idx").on(table.sessionId),
+  ],
 );

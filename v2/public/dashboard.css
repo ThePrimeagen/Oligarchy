@@ -229,6 +229,52 @@ main {
   outline-offset: 3px;
 }
 
+.scoreboard {
+  width: 100%;
+  margin: 0 0 2.5rem;
+  border-collapse: collapse;
+  color: var(--terminal-white);
+}
+
+.scoreboard caption {
+  margin-bottom: 0.85rem;
+  color: var(--terminal-blue);
+  font-size: 0.7em;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.scoreboard th,
+.scoreboard td {
+  padding: 0.55rem 0.4rem;
+  border-bottom: 1px solid rgb(122 162 247 / 22%);
+  text-align: right;
+}
+
+.scoreboard thead th {
+  color: var(--terminal-blue);
+  font-size: 0.7em;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.scoreboard tbody th {
+  color: var(--terminal-white);
+  font-weight: 700;
+  text-align: left;
+}
+
+.scoreboard__ok {
+  color: var(--green);
+}
+
+.scoreboard__failed {
+  color: var(--failed);
+}
+
 .session-list ol {
   display: grid;
   gap: 3rem;

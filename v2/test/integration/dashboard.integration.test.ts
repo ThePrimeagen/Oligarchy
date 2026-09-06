@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, inject, it } from "vitest";
 
 const QUERY = fileURLToPath(new URL("../../src/dashboard/query.ts", import.meta.url));
+const SCHEMA = fileURLToPath(new URL("../../src/db/schema.ts", import.meta.url));
 const SENTINEL_PASSWORD = "sentinel-secret-pw";
 const REFUSED_URL = `postgres://user:${SENTINEL_PASSWORD}@127.0.0.1:1/oligarchy`;
 const SEEDED_SESSION_ID = "11111111-1111-4111-8111-111111111111";
@@ -71,7 +72,7 @@ describe.skipIf(dbUrl === "")("dashboard/query happy path", () => {
 
   it("lists sessions with their latest image id and ends the connection", async () => {
     const result = await runQuery(
-      "const rows = await query.listSessions(url);\nconsole.log(rows.map((row) => [row.id, typeof row.status, row.imageId === null ? 'null' : typeof row.imageId, row.queriedAt instanceof Date].join(' ')).join('\\n'));",
+      "const rows = await query.listSessions(url);\nconsole.log(rows.map((row) => [row.id, typeof row.status, row.imageId === null ? 'null' : typeof row.imageId, row.queriedAt instanceof Date, row.definitionName === null ? 'null' : row.definitionName, row.model === null ? 'null' : row.model].join(' ')).join('\\n'));",
       dbUrl,
     );
     expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
@@ -81,9 +82,41 @@ describe.skipIf(dbUrl === "")("dashboard/query happy path", () => {
     expect(rows.length).toBeGreaterThan(0);
     expect(rows.length).toBeLessThanOrEqual(50);
     for (const row of rows) {
-      expect(row).toMatch(/^[0-9a-f-]{36} string (null|string) true$/);
+      expect(row).toMatch(/^[0-9a-f-]{36} string (null|string) true \S+ \S+$/);
     }
     expect(rows.some((row) => row.startsWith(`${SEEDED_SESSION_ID} `))).toBe(true);
+  });
+
+  it("joins a linked session to its test definition and run model (happy)", async () => {
+    const result = await runQuery(
+      `
+const { eq } = await import("drizzle-orm");
+const { drizzle } = await import("drizzle-orm/node-postgres");
+const { Client } = await import("pg");
+const schema = await import(${JSON.stringify(SCHEMA)});
+const client = new Client({ connectionString: url });
+await client.connect();
+const db = drizzle(client);
+const [definition] = await db.select({ id: schema.testDefinitions.id }).from(schema.testDefinitions).where(eq(schema.testDefinitions.name, "lock-screen"));
+const [run] = await db.insert(schema.testRuns).values({ name: "Omarchy experiment", iso: "https://example.com/omarchy.iso", serverUrl: "http://127.0.0.1:42069", model: "grok-4.6" }).returning({ id: schema.testRuns.id });
+await db.insert(schema.testResults).values({ runId: run.id, definitionId: definition.id, sessionId: ${JSON.stringify(SEEDED_SESSION_ID)}, status: "passed" });
+await client.end();
+const rows = await query.listSessions(url);
+const seeded = rows.find((row) => row.id === ${JSON.stringify(SEEDED_SESSION_ID)});
+const unlinked = rows.find((row) => row.id !== ${JSON.stringify(SEEDED_SESSION_ID)});
+console.log([seeded?.definitionName, seeded?.model, unlinked?.definitionName === null ? "null" : "linked"].join(" "));
+console.log(JSON.stringify(query.definitionStats(rows)));
+`,
+      dbUrl,
+    );
+    expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    const [linked, stats] = lines(result.stdout);
+    expect(linked).toBe("lock-screen grok-4.6 null");
+    expect(JSON.parse(stats ?? "")).toEqual([
+      { name: "lock-screen", succeeded: 1, failed: 0, other: 0, models: ["grok-4.6"] },
+    ]);
   });
 
   it("lists base prompts and ends the connection", async () => {

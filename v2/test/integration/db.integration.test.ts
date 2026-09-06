@@ -412,6 +412,7 @@ Postgres.describeWithDatabase("database", () => {
         const created = yield* tests.createRun({
           iso: "https://example.com/omarchy.iso",
           serverUrl: "http://127.0.0.1:42069",
+          model: "grok-4.6",
           definitions: [{ id: definition.id }],
         });
         expect(created.results).toHaveLength(1);
@@ -449,6 +450,32 @@ Postgres.describeWithDatabase("database", () => {
       }),
     );
 
+    scoped.effect("TestStore refuses a second result for the same session (unhappy)", () =>
+      Effect.gen(function* () {
+        const tests = yield* Tests.TestStore;
+        const sessions = yield* Sessions.SessionStore;
+        const definition = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
+        const first = yield* tests.createRun({
+          iso: "https://example.com/omarchy.iso",
+          serverUrl: "http://127.0.0.1:42069",
+          model: "grok-4.6",
+          definitions: [{ id: definition.id }],
+        });
+        const second = yield* tests.createRun({
+          iso: "https://example.com/omarchy.iso",
+          serverUrl: "http://127.0.0.1:42069",
+          model: "grok-4.6",
+          definitions: [{ id: definition.id }],
+        });
+        const sessionId = uuid();
+        yield* sessions.insertSession(sessionId, { iso: "x" }, "running");
+        expect(yield* tests.startResult(first.results[0].id, sessionId)).toBe(true);
+        const error = yield* Effect.flip(tests.startResult(second.results[0].id, sessionId));
+        expect(error._tag).toBe("DatabaseError");
+        expect(error.message).toMatch(/test_results_session_id_idx/);
+      }),
+    );
+
     scoped.effect("TestStore.failRun marks the run and every result failed", () =>
       Effect.gen(function* () {
         const tests = yield* Tests.TestStore;
@@ -457,6 +484,7 @@ Postgres.describeWithDatabase("database", () => {
         const created = yield* tests.createRun({
           iso: "https://example.com/omarchy.iso",
           serverUrl: "http://127.0.0.1:42069",
+          model: "grok-4.6",
           definitions: [{ id: definition.id }],
         });
         yield* tests.failRun(created.runId, "linear: request failed (401)");
@@ -465,6 +493,7 @@ Postgres.describeWithDatabase("database", () => {
         );
         expect(run).toMatchObject({
           name: "Omarchy experiment",
+          model: "grok-4.6",
           status: "failed",
           reason: "linear: request failed (401)",
         });
