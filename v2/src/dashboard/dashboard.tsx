@@ -3,10 +3,12 @@ import { Hono } from "hono";
 import type { FC, PropsWithChildren } from "hono/jsx";
 import { jsxRenderer } from "hono/jsx-renderer";
 import {
+  definitionStats,
   getImage,
   listSessions,
   listTestBasePrompts,
   listTestDefinitions,
+  type DefinitionStat,
   type Session,
   type TestBasePrompt,
   type TestDefinition,
@@ -62,63 +64,105 @@ const SessionStatus: FC<SessionStatusProps> = ({ sessions, outOfBand = false }) 
   </span>
 );
 
+const DefinitionScoreboard: FC<{ stats: ReadonlyArray<DefinitionStat> }> = ({ stats }) =>
+  stats.length === 0 ? null : (
+    <table class="scoreboard">
+      <caption>Last 50 sessions by test definition</caption>
+      <thead>
+        <tr>
+          <th>Test</th>
+          <th>Succeeded</th>
+          <th>Failed</th>
+          <th>Other</th>
+          <th>Model</th>
+        </tr>
+      </thead>
+      <tbody>
+        {stats.map((row) => (
+          <tr>
+            <th>{row.name}</th>
+            <td class="scoreboard__ok">{row.succeeded}</td>
+            <td class="scoreboard__failed">{row.failed}</td>
+            <td>{row.other}</td>
+            <td>{row.models.length === 0 ? "—" : row.models.join(", ")}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+
 const SessionList: FC<SessionListProps> = ({ sessions }) =>
   sessions.length === 0 ? (
     <div class="empty-state">
       <p>No sessions recorded yet.</p>
     </div>
   ) : (
-    <ol>
-      {sessions.map((session) => {
-        const isoName = session.config.iso.split("/").at(-1) ?? session.config.iso;
-        const isRemoteIso =
-          session.config.iso.startsWith("https://") || session.config.iso.startsWith("http://");
-        return (
-          <li>
-            <article class="session">
-              <figure class="session__visual">
-                {session.imageId === null ? (
-                  <div
-                    class="session__placeholder"
-                    role="img"
-                    aria-label="No screenshot captured"
-                  ></div>
-                ) : (
-                  <img
-                    class="session__image"
-                    src={`/images/${session.imageId}`}
-                    alt={`Last captured frame from session ${session.id}`}
-                    loading="lazy"
-                  />
-                )}
-                <span
-                  class={`status status--${session.status}${session.imageId === null ? " status--centered" : ""}`}
-                >
-                  {session.status === "timed_out" ? "timed out" : session.status}
-                </span>
-              </figure>
-              <div class="session__details">
-                <div class="session__version">
-                  <span>Omarchy version</span>
-                  {isRemoteIso ? (
-                    <a href={session.config.iso}>{isoName}</a>
+    <>
+      <DefinitionScoreboard stats={definitionStats(sessions)} />
+      <ol>
+        {sessions.map((session) => {
+          const isoName = session.config.iso.split("/").at(-1) ?? session.config.iso;
+          const isRemoteIso =
+            session.config.iso.startsWith("https://") || session.config.iso.startsWith("http://");
+          return (
+            <li>
+              <article class="session">
+                <figure class="session__visual">
+                  {session.imageId === null ? (
+                    <div
+                      class="session__placeholder"
+                      role="img"
+                      aria-label="No screenshot captured"
+                    ></div>
                   ) : (
-                    <span class="session__version-name">{isoName}</span>
+                    <img
+                      class="session__image"
+                      src={`/images/${session.imageId}`}
+                      alt={`Last captured frame from session ${session.id}`}
+                      loading="lazy"
+                    />
                   )}
+                  <span
+                    class={`status status--${session.status}${session.imageId === null ? " status--centered" : ""}`}
+                  >
+                    {session.status === "timed_out" ? "timed out" : session.status}
+                  </span>
+                </figure>
+                <div class="session__details">
+                  {session.definitionName === null ? null : (
+                    <div class="session__version">
+                      <span>Test</span>
+                      <span class="session__version-name">{session.definitionName}</span>
+                    </div>
+                  )}
+                  {session.model === null ? null : (
+                    <div class="session__version">
+                      <span>Model</span>
+                      <span class="session__version-name">{session.model}</span>
+                    </div>
+                  )}
+                  <div class="session__version">
+                    <span>Omarchy version</span>
+                    {isRemoteIso ? (
+                      <a href={session.config.iso}>{isoName}</a>
+                    ) : (
+                      <span class="session__version-name">{isoName}</span>
+                    )}
+                  </div>
+                  <code title={session.id}>{session.id}</code>
+                  {session.status === "failed" && session.reason !== null ? (
+                    <p class="session__reason">
+                      <strong>Last failure</strong>
+                      {session.reason}
+                    </p>
+                  ) : null}
                 </div>
-                <code title={session.id}>{session.id}</code>
-                {session.status === "failed" && session.reason !== null ? (
-                  <p class="session__reason">
-                    <strong>Last failure</strong>
-                    {session.reason}
-                  </p>
-                ) : null}
-              </div>
-            </article>
-          </li>
-        );
-      })}
-    </ol>
+              </article>
+            </li>
+          );
+        })}
+      </ol>
+    </>
   );
 
 const SessionError: FC = () => (

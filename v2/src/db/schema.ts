@@ -168,12 +168,15 @@ export const testBasePrompts = pgTable(
 // server. The orchestrator owns the row: it opens the run and declares the
 // verdict once the results are in — or timed_out when reports stop coming.
 // Counts are not stored — planned and reported are both readable off the
-// test_results rows.
+// test_results rows. model is the Cursor model id the run's agents use.
 export const testRuns = pgTable("test_runs", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
   iso: text("iso").notNull(),
   serverUrl: text("server_url").notNull(),
+  // Default matches the only model the control plane has kicked off with, so
+  // rows that predate the column still have a value the dashboard can show.
+  model: text("model").notNull().default("grok-4.6"),
   status: testRunStatus("status").notNull().default("pending"),
   reason: text("reason"),
   startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),

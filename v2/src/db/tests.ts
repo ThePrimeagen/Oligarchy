@@ -6,6 +6,7 @@ import * as DbSchema from "./schema.ts";
 export type RunInput = {
   readonly iso: string;
   readonly serverUrl: string;
+  readonly model: string;
   readonly definitions: ReadonlyArray<{ readonly id: number }>;
 };
 
@@ -43,6 +44,7 @@ export class TestStore extends Context.Service<TestStore>()("@oligarchy/db/TestS
                 name: "Omarchy experiment",
                 iso: input.iso,
                 serverUrl: input.serverUrl,
+                model: input.model,
                 status: "pending",
               })
               .returning({ id: DbSchema.testRuns.id }),

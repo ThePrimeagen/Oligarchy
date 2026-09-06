@@ -1,15 +1,33 @@
 import { desc, eq, sql } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Client } from "pg";
-import { actions, images, sessions, testBasePrompts, testDefinitions } from "../db/schema.ts";
+import {
+  actions,
+  images,
+  sessions,
+  testBasePrompts,
+  testDefinitions,
+  testResults,
+  testRuns,
+} from "../db/schema.ts";
 
 export type Session = typeof sessions.$inferSelect & {
   imageId: string | null;
   queriedAt: Date;
+  definitionName: string | null;
+  model: string | null;
 };
 
 export type TestDefinition = typeof testDefinitions.$inferSelect;
 export type TestBasePrompt = typeof testBasePrompts.$inferSelect;
+
+export type DefinitionStat = {
+  readonly name: string;
+  readonly succeeded: number;
+  readonly failed: number;
+  readonly other: number;
+  readonly models: ReadonlyArray<string>;
+};
 
 // One connection per call, ended whether the query returned, threw, or never connected;
 // a client left open holds a Hyperdrive connection for the rest of the request.
@@ -24,6 +42,44 @@ async function withDatabase<T>(
   } finally {
     await client.end();
   }
+}
+
+export function definitionStats(rows: ReadonlyArray<Session>): DefinitionStat[] {
+  const byName = new Map<
+    string,
+    { succeeded: number; failed: number; other: number; models: Set<string> }
+  >();
+  for (const session of rows) {
+    if (session.definitionName === null) {
+      continue;
+    }
+    const current = byName.get(session.definitionName) ?? {
+      succeeded: 0,
+      failed: 0,
+      other: 0,
+      models: new Set<string>(),
+    };
+    if (session.status === "succeeded") {
+      current.succeeded += 1;
+    } else if (session.status === "failed") {
+      current.failed += 1;
+    } else {
+      current.other += 1;
+    }
+    if (session.model !== null) {
+      current.models.add(session.model);
+    }
+    byName.set(session.definitionName, current);
+  }
+  return [...byName.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([name, current]) => ({
+      name,
+      succeeded: current.succeeded,
+      failed: current.failed,
+      other: current.other,
+      models: [...current.models].sort(),
+    }));
 }
 
 export function listSessions(connectionString: string): Promise<Session[]> {
@@ -49,6 +105,17 @@ export function listSessions(connectionString: string): Promise<Session[]> {
       .orderBy(desc(actions.id))
       .limit(1)
       .as("latest_image");
+    const linkedTest = db
+      .select({
+        definitionName: testDefinitions.name,
+        model: testRuns.model,
+      })
+      .from(testResults)
+      .innerJoin(testDefinitions, eq(testDefinitions.id, testResults.definitionId))
+      .innerJoin(testRuns, eq(testRuns.id, testResults.runId))
+      .where(eq(testResults.sessionId, recentSessions.id))
+      .limit(1)
+      .as("linked_test");
 
     // The database timestamp shown by the UI also keeps status reads out of Hyperdrive's query cache.
     return db
@@ -61,9 +128,12 @@ export function listSessions(connectionString: string): Promise<Session[]> {
         endedAt: recentSessions.endedAt,
         imageId: latestImage.id,
         queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(recentSessions.startedAt),
+        definitionName: linkedTest.definitionName,
+        model: linkedTest.model,
       })
       .from(recentSessions)
       .leftJoinLateral(latestImage, sql`true`)
+      .leftJoinLateral(linkedTest, sql`true`)
       .orderBy(desc(recentSessions.startedAt));
   });
 }
