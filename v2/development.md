@@ -108,9 +108,7 @@ bugs; anything not listed here is a regression.
 - `v2/` holds `package.json`, `package-lock.json`, `tsconfig.json`, `.oxlintrc.json`,
   `.oxfmtrc.json`, `.editorconfig`, `vitest.config.ts`, `vitest.global-setup.ts` (Testcontainers
   Postgres, migrations, seed), `vitest.d.ts`, `drizzle.config.ts`, `wrangler.jsonc`, `drizzle/`
-  (generated migrations; 0000–0011 match `v1/`, 0012 adds `debug_logs` with a `sources` jsonb
-  map, 0013 unique-indexes `test_results.session_id`, 0014 moves `model` from
-  `test_runs` onto `test_results` so one run can mix models), `public/`
+  (one generated baseline, `0001_init`, of the current schema), `public/`
   and `prompts/`
   (moved as-is), the
   operator documents, this document, the four `v2/` wrappers, `src/` and `test/`.
@@ -1619,11 +1617,15 @@ Schema and module rules above already cover most of them; the rest:
 
 - The database schema lives in `v2/src/db/schema.ts`. Migrations under `v2/drizzle/` are generated
   from it with `npm run db:generate`, never written or edited by hand, and never applied with
-  `drizzle-kit push`.
-- Migrations are append-only. Never edit, delete, or rename anything under `v2/drizzle/`, not the
-  `.sql` files, not the `meta/` snapshots. To change the schema, edit `v2/src/db/schema.ts` and
-  generate a new migration. The one exception is `v2/drizzle/meta/_journal.json`, which the
-  generator itself appends to.
+  `drizzle-kit push`. `0001_init` is the baseline of the current schema (the v1 chain and the
+  later `debug_logs` / `model` / `session_id` unique-index steps were collapsed when the
+  database was wiped). Further schema changes append `0002`, `0003`, …
+- Migrations are append-only after that baseline. Never edit, delete, or rename anything under
+  `v2/drizzle/`, not the `.sql` files, not the `meta/` snapshots. To change the schema, edit
+  `v2/src/db/schema.ts` and generate a new migration. The one exception is
+  `v2/drizzle/meta/_journal.json`, which the generator itself appends to. A tree that contains
+  exactly one `.sql` file is a new baseline (the append-only job allows that reset and nothing
+  else).
 - CI enforces both rules: an edited migration fails the build, and so does a schema that does not
   match the committed migrations (`.github/workflows/migrations.yml`, `append-only` and
   `schema-in-sync`, working directory `v2`, Node 26). A third job, `checks`, runs
