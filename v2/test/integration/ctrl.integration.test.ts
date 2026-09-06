@@ -3,7 +3,9 @@ import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { drizzle } from "drizzle-orm/node-postgres";
 import { Client } from "pg";
+import * as DbSchema from "../../src/db/schema.ts";
 import * as Postgres from "../support/postgres.ts";
 import * as StubCursor from "../support/stub-cursor.ts";
 import * as StubProxy from "../support/stub-proxy.ts";
@@ -769,10 +771,15 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
     const client = new Client({ connectionString: Postgres.getDbUrl() });
     await client.connect();
     try {
-      await client.query(
-        `insert into sessions (id, config, status, reason, ended_at) values ($1, '{"iso":"x"}', 'failed', 'installer hung', now())`,
-        [sessionId],
-      );
+      await drizzle({ client })
+        .insert(DbSchema.sessions)
+        .values({
+          id: sessionId,
+          config: { iso: "x" },
+          status: "failed",
+          reason: "installer hung",
+          endedAt: new Date(),
+        });
     } finally {
       await client.end();
     }
