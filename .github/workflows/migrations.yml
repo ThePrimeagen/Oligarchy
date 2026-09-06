@@ -13,9 +13,11 @@ jobs:
           fetch-depth: 0
       - name: fail if an existing migration file was edited, deleted, or renamed
         run: |
-          sql_count=$(find v2/drizzle -maxdepth 1 -name '*.sql' | wc -l)
-          if [ "$sql_count" -eq 1 ]; then
-            echo "Single baseline migration; append-only skipped for a reset."
+          base_sql=$(git ls-tree -r --name-only "origin/${{ github.base_ref }}" -- 'v2/drizzle/' \
+            | grep '\.sql$' | wc -l)
+          head_sql=$(find v2/drizzle -maxdepth 1 -name '*.sql' | wc -l)
+          if [ "$head_sql" -eq 1 ] && [ "$base_sql" -gt 1 ]; then
+            echo "Reset from ${base_sql} migrations to a single baseline; append-only skipped."
             exit 0
           fi
           violations=$(git diff --name-status --diff-filter=MDRT \

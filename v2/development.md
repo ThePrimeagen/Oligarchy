@@ -1623,9 +1623,9 @@ Schema and module rules above already cover most of them; the rest:
 - Migrations are append-only after that baseline. Never edit, delete, or rename anything under
   `v2/drizzle/`, not the `.sql` files, not the `meta/` snapshots. To change the schema, edit
   `v2/src/db/schema.ts` and generate a new migration. The one exception is
-  `v2/drizzle/meta/_journal.json`, which the generator itself appends to. A tree that contains
-  exactly one `.sql` file is a new baseline (the append-only job allows that reset and nothing
-  else).
+  `v2/drizzle/meta/_journal.json`, which the generator itself appends to. The append-only job
+  allows one kind of reset: the base branch has more than one `.sql` file and the PR has
+  exactly one.
 - CI enforces both rules: an edited migration fails the build, and so does a schema that does not
   match the committed migrations (`.github/workflows/migrations.yml`, `append-only` and
   `schema-in-sync`, working directory `v2`, Node 26). A third job, `checks`, runs

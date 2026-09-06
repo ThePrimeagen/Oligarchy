@@ -49,17 +49,20 @@ describe("package.json scripts", () => {
 });
 
 const Journal = Schema.Struct({
-  entries: Schema.Array(Schema.Struct({ tag: Schema.String })),
+  entries: Schema.Array(Schema.Struct({ idx: Schema.Number, tag: Schema.String })),
 });
 const decodeJournal = Schema.decodeUnknownSync(Schema.fromJsonString(Journal));
 
 describe("drizzle migrations", () => {
-  it("journal tags match the sql files one-to-one", () => {
+  it("journal tags match the sql files one-to-one, and idx matches the tag prefix", () => {
     const journal = decodeJournal(read("drizzle/meta/_journal.json"));
     const sqls = readdirSync(join(root, "drizzle"))
       .filter((name) => name.endsWith(".sql"))
       .sort();
     expect(sqls).toEqual(journal.entries.map((entry) => `${entry.tag}.sql`));
+    expect(journal.entries.map((entry) => entry.idx)).toEqual(
+      journal.entries.map((entry) => Number(entry.tag.slice(0, 4))),
+    );
   });
 });
 
