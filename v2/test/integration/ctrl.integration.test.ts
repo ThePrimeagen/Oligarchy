@@ -465,6 +465,8 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
       sessionId,
       "--test-result-id",
       randomUUID(),
+      "--model",
+      "grok-4.6",
       "--server-url",
       SERVER,
     ]);

@@ -1114,9 +1114,9 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
 - The tables: `sessions`, `agent_runs`, `actions`, `images`, `logs`, `debug_logs`,
   `test_definitions`, `test_base_prompts`, `test_runs`, `test_results`, declared in
   `src/db/schema.ts`. v1 declared every table except `debug_logs`. `test_results.model` is the
-  Cursor model id that result's agent used, or null. `createRun` writes it on every result. One
-  run can mix models. `test_results.session_id` is unique when set, so one session cannot belong
-  to two results.
+  Cursor model id that result's agent used, or null. `createRun` writes a planned model on every
+  result; `test start` writes the model that actually ran. One run can mix models.
+  `test_results.session_id` is unique when set, so one session cannot belong to two results.
 
 ## Log stream
 

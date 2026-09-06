@@ -339,7 +339,7 @@ export const fakeTestStore = (
           }
         }
       }),
-    startResult: (resultId, sessionId) =>
+    startResult: (resultId, sessionId, model) =>
       Effect.sync(() => {
         const row = results.find(
           (result) => sameId(result.id, resultId) && result.status === "pending",
@@ -349,6 +349,7 @@ export const fakeTestStore = (
         }
         row.sessionId = sessionId;
         row.status = "running";
+        row.model = model;
         return true;
       }),
     closeResult: (resultId, status, reason, sessionId) =>

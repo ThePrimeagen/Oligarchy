@@ -27,6 +27,7 @@ const OTHER_SESSION_ID = "2caaad43-674b-4bdb-88d7-3f18fce50aba";
 const RESULT_ID = "22222222-2222-4222-8222-222222222222";
 const OTHER_RESULT_ID = "33333333-3333-4333-8333-333333333333";
 const RUN_ID = "11111111-1111-4111-8111-111111111111";
+const MODEL = "composer-2.5";
 
 const WITH_DB = { DATABASE_URL: "postgres://user:pw@127.0.0.1:5432/oligarchy" };
 
@@ -747,7 +748,7 @@ describe("test run", () => {
 // ---------------------------------------------------------------------------
 
 describe("test start", () => {
-  it.effect("records the session on a pending result and marks it running (happy)", () =>
+  it.effect("records the session and model on a pending result and marks it running (happy)", () =>
     Effect.gen(function* () {
       const h = harness();
       h.stores.sessions.sessions.push(session(SESSION_ID, "running", ago(10)));
@@ -759,11 +760,17 @@ describe("test start", () => {
         SESSION_ID,
         "--test-result-id",
         RESULT_ID,
+        "--model",
+        MODEL,
         "--server-url",
         SERVER,
       ]);
       expect(Exit.isSuccess(exit)).toBe(true);
-      expect(h.stores.tests.results[0]).toMatchObject({ status: "running", sessionId: SESSION_ID });
+      expect(h.stores.tests.results[0]).toMatchObject({
+        status: "running",
+        sessionId: SESSION_ID,
+        model: MODEL,
+      });
       // The line belongs to the session alone: no agent, so no palette colour is taken.
       expect(h.log.lines).toEqual([
         {
@@ -791,6 +798,8 @@ describe("test start", () => {
         SESSION_ID,
         "--test-result-id",
         RESULT_ID,
+        "--model",
+        MODEL,
         "--server-url",
         SERVER,
       ]);
@@ -815,6 +824,8 @@ describe("test start", () => {
         SESSION_ID,
         "--test-result-id",
         RESULT_ID,
+        "--model",
+        MODEL,
         "--server-url",
         SERVER,
       ]);
@@ -828,6 +839,8 @@ describe("test start", () => {
         SESSION_ID,
         "--test-result-id",
         OTHER_RESULT_ID,
+        "--model",
+        MODEL,
         "--server-url",
         SERVER,
       ]);
@@ -835,6 +848,39 @@ describe("test start", () => {
         message: `test start: result ${OTHER_RESULT_ID} not found or not pending`,
       });
       expect(h.stores.tests.results[0]?.sessionId).toBe(OTHER_SESSION_ID);
+    }),
+  );
+
+  it.effect("rejects a missing or empty model (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.sessions.sessions.push(session(SESSION_ID, "running", ago(10)));
+      h.stores.tests.results.push(result(RESULT_ID, "pending", null));
+      const missing = yield* h.run([
+        "test",
+        "start",
+        "--session-id",
+        SESSION_ID,
+        "--test-result-id",
+        RESULT_ID,
+        "--server-url",
+        SERVER,
+      ]);
+      expect(helpErrors(missing).join("\n")).toMatch(/Missing required flag: --model/);
+      const empty = yield* h.run([
+        "test",
+        "start",
+        "--session-id",
+        SESSION_ID,
+        "--test-result-id",
+        RESULT_ID,
+        "--model",
+        "",
+        "--server-url",
+        SERVER,
+      ]);
+      expect(helpErrors(empty).join("\n")).toMatch(/--model.*length of at least 1/s);
+      expect(h.stores.tests.results[0]).toMatchObject({ status: "pending", model: "grok-4.6" });
     }),
   );
 
@@ -1614,6 +1660,8 @@ describe("environment order", () => {
             SESSION_ID,
             "--test-result-id",
             RESULT_ID,
+            "--model",
+            MODEL,
             "--server-url",
             SERVER,
           ],
@@ -1652,7 +1700,7 @@ describe("--server-url", () => {
     ["test", "--list"],
     NEW,
     ["test", "list"],
-    ["test", "start", "--session-id", SESSION_ID, "--test-result-id", RESULT_ID],
+    ["test", "start", "--session-id", SESSION_ID, "--test-result-id", RESULT_ID, "--model", MODEL],
     ["test-results", "--agent-id", "a", "--id", RESULT_ID, "--status", "success"],
     ["session", "list"],
     ["session", "--session-id", SESSION_ID, "--logs"],

@@ -92,11 +92,12 @@ export class TestStore extends Context.Service<TestStore>()("@oligarchy/db/TestS
     const startResult = Effect.fn("db.startResult")(function* (
       resultId: string,
       sessionId: string,
+      model: string,
     ) {
       const rows = yield* database.run("startResult", (db) =>
         db
           .update(DbSchema.testResults)
-          .set({ sessionId, status: "running" })
+          .set({ sessionId, status: "running", model })
           .where(
             and(eq(DbSchema.testResults.id, resultId), eq(DbSchema.testResults.status, "pending")),
           )

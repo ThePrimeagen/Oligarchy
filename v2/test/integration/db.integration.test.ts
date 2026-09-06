@@ -421,13 +421,14 @@ Postgres.describeWithDatabase("database", () => {
 
         const sessionId = uuid();
         yield* sessions.insertSession(sessionId, { iso: "x" }, "running");
-        expect(yield* tests.startResult(result.id, sessionId)).toBe(true);
-        expect(yield* tests.startResult(result.id, sessionId)).toBe(false);
-        expect(yield* tests.startResult(uuid(), sessionId)).toBe(false);
+        expect(yield* tests.startResult(result.id, sessionId, "composer-2.5")).toBe(true);
+        expect(yield* tests.startResult(result.id, sessionId, "composer-2.5")).toBe(false);
+        expect(yield* tests.startResult(uuid(), sessionId, "composer-2.5")).toBe(false);
 
         const joined = yield* tests.resultForSession(sessionId);
         expect(joined).toHaveLength(1);
         expect(joined[0]?.result.status).toBe("running");
+        expect(joined[0]?.result.model).toBe("composer-2.5");
         expect(joined[0]?.definition.name).toBe("lock-screen");
 
         expect(yield* tests.closeResult(result.id, "passed", "it locked", null)).toBe(true);
@@ -547,8 +548,10 @@ Postgres.describeWithDatabase("database", () => {
         });
         const sessionId = uuid();
         yield* sessions.insertSession(sessionId, { iso: "x" }, "running");
-        expect(yield* tests.startResult(first.results[0].id, sessionId)).toBe(true);
-        const error = yield* Effect.flip(tests.startResult(second.results[0].id, sessionId));
+        expect(yield* tests.startResult(first.results[0].id, sessionId, "composer-2.5")).toBe(true);
+        const error = yield* Effect.flip(
+          tests.startResult(second.results[0].id, sessionId, "composer-2.5"),
+        );
         expect(error._tag).toBe("DatabaseError");
         expect(error.message).toMatch(/test_results_session_id_idx/);
       }),

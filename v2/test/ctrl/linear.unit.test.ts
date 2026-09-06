@@ -238,6 +238,7 @@ describe("linearTicketDescription happy path", () => {
         expect(description).toContain(
           `./ctrl test start --server-url ${experiment.serverUrl} --session-id`,
         );
+        expect(description).toContain("--model grok-4.6");
         expect(description).toContain(
           `./ctrl test-results --agent-id OLI-42 --server-url ${experiment.serverUrl} --id ${firstTest.id}`,
         );

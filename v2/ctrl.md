@@ -11,9 +11,9 @@ Consult this table of contents first. Read only the section you need.
 | [test list](#test-list) | 78 |
 | [test run](#test-run) | 90 |
 | [test start](#test-start) | 104 |
-| [test-results](#test-results) | 119 |
-| [session list](#session-list) | 136 |
-| [session](#session) | 150 |
+| [test-results](#test-results) | 120 |
+| [session list](#session-list) | 137 |
+| [session](#session) | 153 |
 
 ## Important
 
@@ -30,7 +30,7 @@ If you are an agent driving a guest, you need two of these: [test start](#test-s
 ./ctrl test new       --iso <https-url> --version <version> [--name <definition>]
 ./ctrl test list
 ./ctrl test run       --ticket <linear-ticket>
-./ctrl test start     --session-id <id> --test-result-id <id>
+./ctrl test start     --session-id <id> --test-result-id <id> --model <id>
 ./ctrl test-results   --agent-id <agent> --id <id> --status success|failed [--reason <text>]
 ./ctrl session list   [--count <n>] [--active] [--json]
 ./ctrl session        --session-id <id> --logs|--test-def|--test-results|--actions|--debug-logs|--all|--dump
@@ -104,16 +104,17 @@ Spawns a Cursor cloud agent that drives one Linear ticket. The ticket carries th
 ## test start
 
 ```
-./ctrl test start --server-url <url> --session-id <id> --test-result-id <id>
+./ctrl test start --server-url <url> --session-id <id> --test-result-id <id> --model <id>
 ```
 
-Ties a pending test result to the session that is running it. The result already names its definition. An unknown session, or a result that is missing or not pending, is a failure.
+Ties a pending test result to the session that is running it and records the Cursor model that is running it. The result already names its definition. An unknown session, or a result that is missing or not pending, is a failure.
 
 - `--session-id <id>` — the id printed by `./client start`.
 - `--test-result-id <id>` — the result UUID from the Linear issue.
+- `--model <id>` — the Cursor model id that is running this result.
 
 ```bash
-./ctrl test start --server-url https://qemu.example.com --session-id 6f1c...e2a9 --test-result-id 2222...2222
+./ctrl test start --server-url https://qemu.example.com --session-id 6f1c...e2a9 --test-result-id 2222...2222 --model grok-4.6
 ```
 
 ## test-results
