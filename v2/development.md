@@ -820,11 +820,17 @@ sendMouse, intentStart, intentEnd, stop, follow }`, each call wrapped in `run`.
   `Linear.loadIssuePrompts` (an Effect over `FileSystem`) reads `prompts/linear-issue.html`,
   `client.md` and `ctrl-linear.md` into an `IssuePrompts` record for `test new`;
   `Linear.loadDrivingPrompt` reads `prompts/driving-agent.html` alone for `test run`, so an
-  unreadable guide cannot stop a run. The pure renderers `linearTicketDescription(experiment,
-  test, ticket, prompts)` and `drivingAgentPrompt(ticket, template)` fill `{{NAME}}` from
-  `LINEAR_TICKET, RUN_ID, RESULT_ID, VERSION, ISO_URL, SERVER_URL, TEST_NAME, TEST_DESCRIPTION,
-  TEST_INSTRUCTION, TEST_PROOF, CLIENT_MD, CTRL_MD, SUB_AGENT` (`Grok 4.6 high fast
-  (cursor-grok-4.6-high-fast)`) into a `Result`.
+  unreadable guide cannot stop a run. `Linear.loadDiagnosisPrompt` reads
+  `prompts/linear-diagnosis.html` alone; `Linear.loadDiagnosisAgentPrompt` reads
+  `prompts/diagnosis-agent.html` alone: the driving guides are not a diagnosis's business.
+  The pure renderers `linearTicketDescription(experiment, test, ticket, prompts)` and
+  `drivingAgentPrompt(ticket, template)` fill `{{NAME}}` from `LINEAR_TICKET, RUN_ID,
+  RESULT_ID, VERSION, ISO_URL, SERVER_URL, TEST_NAME, TEST_DESCRIPTION, TEST_INSTRUCTION,
+  TEST_PROOF, CLIENT_MD, CTRL_MD, SUB_AGENT` (`Grok 4.6 high fast
+  (cursor-grok-4.6-high-fast)`) into a `Result`. `diagnosisTicketDescription(brief, template)`
+  fills `LINEAR_TICKET, SESSION_ID, SERVER_URL` only: the run, the result, and the mission
+  are on the session. `diagnosisAgentPrompt(ticket, template)` fills `LINEAR_TICKET` only, as
+  the kickoff does for a drive.
 - `ctrl test-results` calls `log.acquireColor(agentId)` before its `test result <id>: <status>[;
   <reason>]` line (the agent has no live session on that process); a verdict without `--reason`
   leaves the stored reason in place (`TestStore.closeResult` omits the key, as for `session_id`).
@@ -1256,6 +1262,9 @@ needs, and a type can be renamed or, once nothing carries it, deleted.
   `CommandError`s.
 - `ctrl session --diagnosis` prints the row (`{ sessionId, errorType, summary, model, createdAt
   }`) or `null`; `--all` includes it last as `diagnosis`.
+- The Linear briefing is `prompts/linear-diagnosis.html`; its kickoff is
+  `prompts/diagnosis-agent.html`. They name the ticket, the session, and the server. They do
+  not embed `client.md`. The run, the result, and the mission come from `session --all`.
 
 ## Dashboard
 
