@@ -109,7 +109,8 @@ bugs; anything not listed here is a regression.
   `.oxfmtrc.json`, `.editorconfig`, `vitest.config.ts`, `vitest.global-setup.ts` (Testcontainers
   Postgres, migrations, seed), `vitest.d.ts`, `drizzle.config.ts`, `wrangler.jsonc`, `drizzle/`
   (generated migrations; 0000–0011 match `v1/`, 0012 adds `debug_logs` with a `sources` jsonb
-  map, 0013 adds `test_runs.model` and unique-indexes `test_results.session_id`), `public/`
+  map, 0013 unique-indexes `test_results.session_id`, 0014 moves `model` from
+  `test_runs` onto `test_results` so one run can mix models), `public/`
   and `prompts/`
   (moved as-is), the
   operator documents, this document, the four `v2/` wrappers, `src/` and `test/`.
@@ -1036,7 +1037,7 @@ const prepare = Effect.fn("Qemu.prepare")(function* (id: string, disk: string | 
   only run queries and never acquire a scope.
 - Multi-step writes run in one transaction: `endSession` stamps the session and its open
   `agent_runs` with one `now()`; `finishAction` with an image writes `actions` and `images`
-  together; `createRun` inserts the run (including `model`) and its results together; `failRun` closes both.
+  together; `createRun` inserts the run and its results (each result carrying `model`) together; `failRun` closes both.
 - `normalizeDatabaseUrl` guards with `URL.canParse` (`db: DATABASE_URL is not a valid url`, and the
   password never lands in a message), drops `sslrootcert=system` (node-postgres reads it as a file
   path) and keeps `sslmode=verify-full`.
@@ -1117,10 +1118,11 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
   ties. `sessions.config` holds the effective launch config so a replay boots an identical machine.
 - The tables: `sessions`, `agent_runs`, `actions`, `images`, `logs`, `debug_logs`,
   `test_definitions`, `test_base_prompts`, `test_runs`, `test_results`, declared in
-  `src/db/schema.ts`. v1 declared every table except `debug_logs`. `test_runs.model` is the
-  Cursor model id the run's agents use (`grok-4.6` today); `createRun` writes it and the
-  column default covers rows that predate the migration. `test_results.session_id` is unique
-  when set, so one session cannot belong to two results.
+  `src/db/schema.ts`. v1 declared every table except `debug_logs`. `test_results.model` is the
+  Cursor model id that result's agent used (`grok-4.6` today); `createRun` writes it on every
+  result and the column default covers rows that predate the migration. One run can mix
+  models. `test_results.session_id` is unique when set, so one session cannot belong to two
+  results.
 
 ## Log stream
 
@@ -1220,10 +1222,10 @@ and drizzle, the same tables the Effect `TestStore` writes. It does not call `Pr
 - `query.ts` opens one `pg.Client` per request, runs the query, and ends the client in
   `finally` so a Hyperdrive connection is never held past the response.
 - The test-results page lists the last 50 `sessions` (newest `started_at` first), left-joined
-  to `test_results` / `test_definitions` / `test_runs`. `test_results.session_id` is unique, so
-  the join cannot duplicate a session. A session with no result shows no test name and no model.
+  to `test_results` / `test_definitions`. `test_results.session_id` is unique, so the join
+  cannot duplicate a session. A session with no result shows no test name and no model.
 - `definitionStats` folds those 50 rows by definition name: succeeded, failed, and every other
-  session status as `other`, plus the distinct `test_runs.model` values. Sessions that are not
+  session status as `other`, plus the distinct `test_results.model` values. Sessions that are not
   tied to a definition are omitted from the table, not counted as a row.
 - Route failures are `Sentry.captureException` on `@sentry/cloudflare` (`withSentry` wraps the
   app, `SENTRY_DSN` from `dsn.ts`). Effect's `ErrorReporter` is not installed here; that is the

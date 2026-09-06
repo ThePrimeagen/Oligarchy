@@ -33,7 +33,7 @@ describe("definitionStats happy path", () => {
     ]);
   });
 
-  it("lists each model seen for a definition", () => {
+  it("lists each result's model for a definition, even when they differ", () => {
     const stats = definitionStats([
       session("succeeded", "lock-screen", "grok-4.6"),
       session("failed", "lock-screen", "composer-2.5"),

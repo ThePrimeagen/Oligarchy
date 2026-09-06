@@ -87,7 +87,7 @@ describe.skipIf(dbUrl === "")("dashboard/query happy path", () => {
     expect(rows.some((row) => row.startsWith(`${SEEDED_SESSION_ID} `))).toBe(true);
   });
 
-  it("joins a linked session to its test definition and run model (happy)", async () => {
+  it("joins each session to its result model, including two models on one run (happy)", async () => {
     const result = await runQuery(
       `
 const { eq } = await import("drizzle-orm");
@@ -97,14 +97,18 @@ const schema = await import(${JSON.stringify(SCHEMA)});
 const client = new Client({ connectionString: url });
 await client.connect();
 const db = drizzle(client);
-const [definition] = await db.select({ id: schema.testDefinitions.id }).from(schema.testDefinitions).where(eq(schema.testDefinitions.name, "lock-screen"));
-const [run] = await db.insert(schema.testRuns).values({ name: "Omarchy experiment", iso: "https://example.com/omarchy.iso", serverUrl: "http://127.0.0.1:42069", model: "grok-4.6" }).returning({ id: schema.testRuns.id });
-await db.insert(schema.testResults).values({ runId: run.id, definitionId: definition.id, sessionId: ${JSON.stringify(SEEDED_SESSION_ID)}, status: "passed" });
+const [lock] = await db.select({ id: schema.testDefinitions.id }).from(schema.testDefinitions).where(eq(schema.testDefinitions.name, "lock-screen"));
+const [install] = await db.insert(schema.testDefinitions).values({ name: "install", description: "d", instruction: "i", proof: "p" }).returning({ id: schema.testDefinitions.id });
+const [run] = await db.insert(schema.testRuns).values({ name: "Omarchy experiment", iso: "https://example.com/omarchy.iso", serverUrl: "http://127.0.0.1:42069" }).returning({ id: schema.testRuns.id });
+await db.insert(schema.testResults).values([
+  { runId: run.id, definitionId: lock.id, sessionId: ${JSON.stringify(SEEDED_SESSION_ID)}, status: "passed", model: "grok-4.6" },
+  { runId: run.id, definitionId: install.id, sessionId: "22222222-2222-4222-8222-222222222222", status: "failed", model: "composer-2.5" },
+]);
 await client.end();
 const rows = await query.listSessions(url);
-const seeded = rows.find((row) => row.id === ${JSON.stringify(SEEDED_SESSION_ID)});
-const unlinked = rows.find((row) => row.id !== ${JSON.stringify(SEEDED_SESSION_ID)});
-console.log([seeded?.definitionName, seeded?.model, unlinked?.definitionName === null ? "null" : "linked"].join(" "));
+const lockRow = rows.find((row) => row.id === ${JSON.stringify(SEEDED_SESSION_ID)});
+const installRow = rows.find((row) => row.id === "22222222-2222-4222-8222-222222222222");
+console.log([lockRow?.definitionName, lockRow?.model, installRow?.definitionName, installRow?.model].join(" "));
 console.log(JSON.stringify(query.definitionStats(rows)));
 `,
       dbUrl,
@@ -113,8 +117,9 @@ console.log(JSON.stringify(query.definitionStats(rows)));
     expect(result.stderr).toBe("");
     expect(result.code).toBe(0);
     const [linked, stats] = lines(result.stdout);
-    expect(linked).toBe("lock-screen grok-4.6 null");
+    expect(linked).toBe("lock-screen grok-4.6 install composer-2.5");
     expect(JSON.parse(stats ?? "")).toEqual([
+      { name: "install", succeeded: 0, failed: 0, other: 1, models: ["composer-2.5"] },
       { name: "lock-screen", succeeded: 1, failed: 0, other: 0, models: ["grok-4.6"] },
     ]);
   });
