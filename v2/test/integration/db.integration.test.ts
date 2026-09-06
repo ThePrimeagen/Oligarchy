@@ -487,7 +487,9 @@ Postgres.describeWithDatabase("database", () => {
         const secondSession = uuid();
         yield* sessions.insertSession(firstSession, { iso: "x" }, "running");
         yield* sessions.insertSession(secondSession, { iso: "x" }, "running");
-        expect(yield* tests.startResult(created.results[0].id, firstSession, "grok-4.6")).toBe(true);
+        expect(yield* tests.startResult(created.results[0].id, firstSession, "grok-4.6")).toBe(
+          true,
+        );
         expect(yield* tests.startResult(created.results[1].id, secondSession, "composer-2.5")).toBe(
           true,
         );
