@@ -172,6 +172,7 @@ const TEMPLATE = "Review Linear ticket {{LINEAR_TICKET}}\n";
 // fail as an unreadable file in the checkout would.
 const promptFs = (
   unreadable: RegExp,
+  template = TEMPLATE,
 ): { readonly reads: Array<string>; readonly layer: Layer.Layer<FileSystem.FileSystem> } => {
   const reads: Array<string> = [];
   const layer = FileSystem.layerNoop({
@@ -180,7 +181,7 @@ const promptFs = (
         reads.push(path);
         return unreadable.test(path)
           ? Effect.fail(FakeFs.permissionDenied("open", path))
-          : Effect.succeed(TEMPLATE);
+          : Effect.succeed(template);
       }),
   });
   return { reads, layer };
@@ -530,6 +531,30 @@ describe("test new", () => {
       });
       expect(h.stores.tests.results.map((row) => row.status)).toEqual(["failed"]);
     }),
+  );
+
+  it.effect(
+    "names the ticket created when its description cannot be rendered, and describes nothing (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        // The ticket template asks for a value no run carries; the guides render fine.
+        const fs = promptFs(/never/, "{{RUN_ID}} {{NOPE}}");
+        const h = harness({ fs: fs.layer });
+        h.stores.tests.definitions.push(install);
+        const exit = yield* h.run([...NEW, "--server-url", SERVER], WITH_LINEAR);
+        const message =
+          "prompt: prompts/linear-issue.html uses {{NOPE}}, which has no value; created OLI-42";
+        expect(failure(exit)).toMatchObject({ _tag: "PromptError", message });
+        expect(h.linear.calls.map((call) => call.method)).toEqual([
+          "teamId",
+          "labelIds",
+          "assigneeId",
+          "createIssue",
+        ]);
+        expect(h.stores.tests.runs[0]).toMatchObject({ status: "failed", reason: message });
+        expect(h.stores.tests.results.map((row) => row.status)).toEqual(["failed"]);
+        expect(yield* stdout).toEqual([]);
+      }),
   );
 
   it.effect("rejects an ISO that is not HTTPS or has no host (unhappy)", () =>

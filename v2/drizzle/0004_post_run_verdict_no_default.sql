@@ -1,0 +1,1 @@
+ALTER TABLE "post_run_diagnosis" ALTER COLUMN "verdict" DROP DEFAULT;

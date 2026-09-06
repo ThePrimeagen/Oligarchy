@@ -1,6 +1,6 @@
 {
-  "id": "6f52c8ab-d424-44ac-991c-58ec5bfa5675",
-  "prevId": "d8cfe425-dc91-4adc-b0b1-43fb441efaa2",
+  "id": "4fe04af5-4592-4785-ae0e-bd2fca6a78bf",
+  "prevId": "6f52c8ab-d424-44ac-991c-58ec5bfa5675",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -391,8 +391,7 @@
           "type": "diagnosis_verdict",
           "typeSchema": "public",
           "primaryKey": false,
-          "notNull": true,
-          "default": "'failed'"
+          "notNull": true
         },
         "error_type": {
           "name": "error_type",

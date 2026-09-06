@@ -1261,7 +1261,10 @@ renamed or, once nothing carries it, deleted.
   reviewed. `model` is the Cursor model id that wrote the diagnosis, as `test_results.model` is
   the one that drove the session. The key is the session: a second diagnosis is refused and the
   first stands. Renaming a key follows into the diagnoses that carry it; deleting a type in use is
-  a `DatabaseError` from the foreign key.
+  a `DatabaseError` from the foreign key. `verdict` arrived in two generated migrations:
+  `0003_post_run_verdict` adds it `DEFAULT 'failed' NOT NULL`, so every diagnosis written before
+  it — each naming a cause — reads as the failure it was, and `0004_post_run_verdict_no_default`
+  drops the default, so the column is exactly what `saveDiagnosis` writes.
 - `DiagnosisStore` (`src/db/diagnosis.ts`): `createErrorType(key, description)` and
   `saveDiagnosis({ sessionId, verdict, errorType, summary, model })` are `insert … on conflict do
   nothing returning` and answer `false` when the key or the session already has its row, so a

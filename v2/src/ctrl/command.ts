@@ -314,21 +314,26 @@ export const makeCtrlCommand = (deps: Deps = live) => {
         yield* linear.describeIssue(ticket, description);
       }
     });
-    // A Linear failure fails the run and every result with the reason, naming the tickets that
-    // did get created so they can be cleaned up by hand. The templates are read before the first
-    // ticket, so an unreadable one fails the run with no ticket to name.
+    // A failure fails the run and every result with the reason, naming the tickets that did get
+    // created so they can be cleaned up by hand; the error goes on carrying that reason.
+    const failRunWith = <E extends { readonly message: string }>(
+      error: E,
+      namingTickets: (reason: string) => E,
+    ) =>
+      Effect.gen(function* () {
+        const identifiers = tickets.map((ticket) => ticket.identifier).join(", ");
+        const reason =
+          identifiers === "" ? error.message : `${error.message}; created ${identifiers}`;
+        yield* tests.failRun(experiment.id, reason);
+        return yield* Effect.fail(identifiers === "" ? error : namingTickets(reason));
+      });
     yield* createTickets.pipe(
       Effect.catchTags({
+        LinearError: (error) => failRunWith(error, (reason) => withReason(error, reason)),
+        // The templates are read before the first ticket, so the only template failure that can
+        // follow one is a rendering failure, which carries no cause.
         PromptError: (error) =>
-          Effect.flatMap(tests.failRun(experiment.id, error.message), () => Effect.fail(error)),
-        LinearError: (error) =>
-          Effect.gen(function* () {
-            const identifiers = tickets.map((ticket) => ticket.identifier).join(", ");
-            const reason =
-              identifiers === "" ? error.message : `${error.message}; created ${identifiers}`;
-            yield* tests.failRun(experiment.id, reason);
-            return yield* identifiers === "" ? error : withReason(error, reason);
-          }),
+          failRunWith(error, (reason) => Errors.PromptError.make({ message: reason })),
       }),
     );
 
