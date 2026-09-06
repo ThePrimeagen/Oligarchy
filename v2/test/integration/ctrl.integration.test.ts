@@ -69,6 +69,27 @@ const runCtrl = (args: ReadonlyArray<string>, env: Record<string, string> = {}):
 
 const firstLine = (text: string): string => text.split("\n")[0] ?? "";
 
+// No ctrl action ends a session, so a failed one is seeded straight into the container.
+const seedFailedSession = async (): Promise<string> => {
+  const sessionId = randomUUID();
+  const client = new Client({ connectionString: Postgres.getDbUrl() });
+  await client.connect();
+  try {
+    await drizzle({ client })
+      .insert(DbSchema.sessions)
+      .values({
+        id: sessionId,
+        config: { iso: "x" },
+        status: "failed",
+        reason: "installer hung",
+        endedAt: new Date(),
+      });
+  } finally {
+    await client.end();
+  }
+  return sessionId;
+};
+
 const lines = (text: string): ReadonlyArray<string> =>
   text.split("\n").filter((line) => line !== "");
 
@@ -682,7 +703,7 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
     expect(created.stderr).toBe("");
     expect(created.code).toBe(0);
     // The Log service's stdout copy of the logs row; no agent, so [global].
-    expect(created.stdout).toBe(`[global] error type ${key} created\n`);
+    expect(created.stdout).toBe(`[global] error type created; ${key}\n`);
 
     const listed = await runCtrl(["error-type", "list", "--server-url", SERVER]);
     expect(listed.stderr).toBe("");
@@ -746,9 +767,15 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
     expect(running.code).toBe(1);
     expect(firstLine(running.stderr)).toBe(`diagnose: session ${RUNNING_ID} is still running`);
 
-    const missing = await diagnose(sessionId, `never_${randomUUID().replaceAll("-", "_")}`);
+    const failed = await seedFailedSession();
+    const key = `never_${randomUUID().replaceAll("-", "_")}`;
+    const missing = await diagnose(failed, key);
     expect(missing.code).toBe(1);
-    expect(firstLine(missing.stderr)).toBe(`diagnose: no session ${sessionId}`);
+    expect(missing.stdout).toBe("");
+    expect(firstLine(missing.stderr)).toBe(
+      `diagnose: no error type ${key}; create it with ./ctrl error-type new`,
+    );
+    expect(missing.stderr).toMatch(/CommandError/);
   });
 
   it("session --diagnosis prints null for a session without one", async () => {
@@ -766,23 +793,7 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
   });
 
   it("diagnose writes the row for a failed session once; session --diagnosis prints it", async () => {
-    // No ctrl action ends a session, so the failed session is seeded straight into the container.
-    const sessionId = randomUUID();
-    const client = new Client({ connectionString: Postgres.getDbUrl() });
-    await client.connect();
-    try {
-      await drizzle({ client })
-        .insert(DbSchema.sessions)
-        .values({
-          id: sessionId,
-          config: { iso: "x" },
-          status: "failed",
-          reason: "installer hung",
-          endedAt: new Date(),
-        });
-    } finally {
-      await client.end();
-    }
+    const sessionId = await seedFailedSession();
     const key = `installer_hang_${randomUUID().replaceAll("-", "_")}`;
     expect(
       (

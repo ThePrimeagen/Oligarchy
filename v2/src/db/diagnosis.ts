@@ -19,8 +19,7 @@ export class DiagnosisStore extends Context.Service<DiagnosisStore>()(
     make: Effect.gen(function* () {
       const database = yield* Client.Database;
 
-      // false when the key is already taken: the primary key decides, and a conflict is an
-      // answer the command reads, not a database error.
+      // false when the key is taken: a conflict is an answer the command reads, not an error.
       const createErrorType = Effect.fn("db.createErrorType")(function* (
         key: string,
         description: string,
@@ -35,9 +34,11 @@ export class DiagnosisStore extends Context.Service<DiagnosisStore>()(
         return rows.length > 0;
       });
 
-      const listErrorTypes = database.run("listErrorTypes", (db) =>
-        db.select().from(DbSchema.postRunErrorTypes).orderBy(DbSchema.postRunErrorTypes.key),
-      );
+      const listErrorTypes = Effect.fn("db.listErrorTypes")(function* () {
+        return yield* database.run("listErrorTypes", (db) =>
+          db.select().from(DbSchema.postRunErrorTypes).orderBy(DbSchema.postRunErrorTypes.key),
+        );
+      });
 
       const findErrorType = Effect.fn("db.findErrorType")(function* (key: string) {
         const rows = yield* database.run("findErrorType", (db) =>
@@ -49,9 +50,7 @@ export class DiagnosisStore extends Context.Service<DiagnosisStore>()(
         return Arr.head(rows);
       });
 
-      // false when the session already has its diagnosis: the first one stands. An unknown
-      // type or session is a DatabaseError from the foreign keys; the command checks both
-      // first so the operator reads a sentence, not a constraint name.
+      // false when the session already has its diagnosis: the first one stands.
       const saveDiagnosis = Effect.fn("db.saveDiagnosis")(function* (input: DiagnosisInput) {
         const rows = yield* database.run("saveDiagnosis", (db) =>
           db

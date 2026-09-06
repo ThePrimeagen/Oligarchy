@@ -152,12 +152,16 @@ const harness = (
   // A later layer's service wins the merge, so the fake FileSystem replaces Node's.
   const services =
     options.fs === undefined ? NodeServices.layer : Layer.merge(NodeServices.layer, options.fs);
-  const run = (args: ReadonlyArray<string>, env: Record<string, string> = WITH_DB) =>
+  const program = (args: ReadonlyArray<string>, env: Record<string, string>) =>
     Command.runWith(command, { version: Api.VERSION })(args).pipe(
       Effect.provide(Layer.mergeAll(services, stdio.layer, Config.withEnv(env), FakeHttp.die)),
-      Effect.exit,
     );
-  return { stores, log, linear, cursor, proxy, touched, stdio, run };
+  const run = (args: ReadonlyArray<string>, env: Record<string, string> = WITH_DB) =>
+    Effect.exit(program(args, env));
+  // The failure itself, for a command refused after parsing.
+  const fail = (args: ReadonlyArray<string>, env: Record<string, string> = WITH_DB) =>
+    Effect.flip(program(args, env));
+  return { stores, log, linear, cursor, proxy, touched, stdio, run, fail };
 };
 
 const DRIVING_AGENT_PATH = /\/prompts\/driving-agent\.html$/;
@@ -1221,7 +1225,7 @@ describe("error-type new", () => {
       expect(h.log.lines).toEqual([
         {
           level: "info",
-          text: `error type ${bootHang.key} created`,
+          text: `error type created; ${bootHang.key}`,
           sessionId: undefined,
           agentId: undefined,
           skipSentry: false,
@@ -1237,7 +1241,7 @@ describe("error-type new", () => {
     Effect.gen(function* () {
       const h = harness();
       h.stores.diagnosis.errorTypes.push(bootHang);
-      const exit = yield* h.run([
+      const error = yield* h.fail([
         "error-type",
         "new",
         "--key",
@@ -1247,7 +1251,7 @@ describe("error-type new", () => {
         "--server-url",
         SERVER,
       ]);
-      expect(failure(exit)).toMatchObject({
+      expect(error).toMatchObject({
         _tag: "CommandError",
         message: `error-type new: ${bootHang.key} already exists`,
       });
@@ -1452,8 +1456,7 @@ describe("diagnose", () => {
     Effect.gen(function* () {
       const h = harness();
       h.stores.diagnosis.errorTypes.push(bootHang);
-      const exit = yield* h.run(DIAGNOSE);
-      expect(failure(exit)).toMatchObject({
+      expect(yield* h.fail(DIAGNOSE)).toMatchObject({
         _tag: "CommandError",
         message: `diagnose: no session ${SESSION_ID}`,
       });
@@ -1467,8 +1470,7 @@ describe("diagnose", () => {
       const h = harness();
       h.stores.sessions.sessions.push(session(SESSION_ID, "succeeded", ago(500)));
       h.stores.diagnosis.errorTypes.push(bootHang);
-      const exit = yield* h.run(DIAGNOSE);
-      expect(failure(exit)).toMatchObject({
+      expect(yield* h.fail(DIAGNOSE)).toMatchObject({
         _tag: "CommandError",
         message: `diagnose: session ${SESSION_ID} succeeded; nothing to diagnose`,
       });
@@ -1484,10 +1486,11 @@ describe("diagnose", () => {
         session(OTHER_SESSION_ID, "downloading", ago(5)),
       );
       h.stores.diagnosis.errorTypes.push(bootHang);
-      expect(failure(yield* h.run(DIAGNOSE))).toMatchObject({
+      expect(yield* h.fail(DIAGNOSE)).toMatchObject({
+        _tag: "CommandError",
         message: `diagnose: session ${SESSION_ID} is still running`,
       });
-      const downloading = yield* h.run([
+      const downloading = yield* h.fail([
         "diagnose",
         "--session-id",
         OTHER_SESSION_ID,
@@ -1500,7 +1503,8 @@ describe("diagnose", () => {
         "--server-url",
         SERVER,
       ]);
-      expect(failure(downloading)).toMatchObject({
+      expect(downloading).toMatchObject({
+        _tag: "CommandError",
         message: `diagnose: session ${OTHER_SESSION_ID} is still downloading`,
       });
       expect(h.stores.diagnosis.diagnoses).toEqual([]);
@@ -1511,8 +1515,7 @@ describe("diagnose", () => {
     Effect.gen(function* () {
       const h = harness();
       h.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
-      const exit = yield* h.run(DIAGNOSE);
-      expect(failure(exit)).toMatchObject({
+      expect(yield* h.fail(DIAGNOSE)).toMatchObject({
         _tag: "CommandError",
         message: `diagnose: no error type ${bootHang.key}; create it with ./ctrl error-type new`,
       });
@@ -1527,7 +1530,7 @@ describe("diagnose", () => {
       h.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
       h.stores.diagnosis.errorTypes.push(bootHang, misread);
       expect(Exit.isSuccess(yield* h.run(DIAGNOSE))).toBe(true);
-      const second = yield* h.run([
+      const second = yield* h.fail([
         "diagnose",
         "--session-id",
         SESSION_ID,
@@ -1540,7 +1543,7 @@ describe("diagnose", () => {
         "--server-url",
         SERVER,
       ]);
-      expect(failure(second)).toMatchObject({
+      expect(second).toMatchObject({
         _tag: "CommandError",
         message: `diagnose: session ${SESSION_ID} already has a diagnosis`,
       });
@@ -1797,7 +1800,7 @@ describe("session inspect", () => {
     Effect.gen(function* () {
       const h = harness();
       seedInspect(h);
-      const exit = yield* h.run([
+      const error = yield* h.fail([
         "session",
         "--session-id",
         OTHER_SESSION_ID,
@@ -1805,7 +1808,7 @@ describe("session inspect", () => {
         "--server-url",
         SERVER,
       ]);
-      expect(failure(exit)).toMatchObject({
+      expect(error).toMatchObject({
         _tag: "CommandError",
         message: `session: no session ${OTHER_SESSION_ID}`,
       });

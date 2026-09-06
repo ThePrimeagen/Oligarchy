@@ -404,7 +404,7 @@ Postgres.describeWithDatabase("database", () => {
         expect(yield* diagnosis.createErrorType(misread, "acted on a misread screen")).toBe(true);
         expect(yield* diagnosis.createErrorType(boot, "a second meaning")).toBe(false);
 
-        const listed = yield* diagnosis.listErrorTypes;
+        const listed = yield* diagnosis.listErrorTypes();
         const keys = listed.map((row) => row.key);
         expect(keys).toContain(boot);
         expect(keys).toContain(misread);
@@ -493,9 +493,11 @@ Postgres.describeWithDatabase("database", () => {
             model: "composer-2.5",
           }),
         );
-        expect(unknownType._tag).toBe("DatabaseError");
-        expect(unknownType.operation).toBe("saveDiagnosis");
-        expect(unknownType.message).toContain("Failed query");
+        expect(unknownType).toMatchObject({
+          _tag: "DatabaseError",
+          operation: "saveDiagnosis",
+          message: expect.stringContaining("Failed query"),
+        });
         expect(String(unknownType.cause)).toMatch(/foreign key/);
         expect(yield* diagnosis.getDiagnosis(sessionId)).toEqual(Option.none());
 
@@ -509,8 +511,11 @@ Postgres.describeWithDatabase("database", () => {
             model: "composer-2.5",
           }),
         );
-        expect(unknownSession._tag).toBe("DatabaseError");
-        expect(unknownSession.operation).toBe("saveDiagnosis");
+        expect(unknownSession).toMatchObject({
+          _tag: "DatabaseError",
+          operation: "saveDiagnosis",
+          message: expect.stringContaining("Failed query"),
+        });
         expect(String(unknownSession.cause)).toMatch(/foreign key/);
       }),
     );
@@ -542,7 +547,11 @@ Postgres.describeWithDatabase("database", () => {
                 .where(eq(DbSchema.postRunErrorTypes.key, before)),
             ),
           );
-          expect(refused._tag).toBe("DatabaseError");
+          expect(refused).toMatchObject({
+            _tag: "DatabaseError",
+            operation: "delete",
+            message: expect.stringContaining("Failed query"),
+          });
           expect(String(refused.cause)).toMatch(/foreign key/);
 
           yield* database.run("rename", (db) =>

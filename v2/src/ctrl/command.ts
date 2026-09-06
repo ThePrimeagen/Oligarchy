@@ -429,7 +429,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
         () => refuse(`error-type new: ${input.key} already exists`),
       ),
     );
-    yield* log.info(`error type ${input.key} created`);
+    yield* log.info(`error type created; ${input.key}`);
   });
 
   // error-type list [--json]
@@ -437,7 +437,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     readonly json: boolean;
   }) {
     const diagnosis = yield* Diagnosis.DiagnosisStore;
-    const rows = yield* diagnosis.listErrorTypes;
+    const rows = yield* diagnosis.listErrorTypes();
     yield* printLines(Render.renderErrorTypes(rows, input.json));
   });
 

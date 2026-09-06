@@ -62,7 +62,6 @@ export const renderTestDefinitions = (
   details: boolean,
 ): ReadonlyArray<string> => (details ? [json(rows)] : rows.map((row) => row.name));
 
-// Keys padded to the longest so the descriptions line up in one column.
 export const renderErrorTypes = (
   rows: ReadonlyArray<ErrorTypeRow>,
   asJson: boolean,

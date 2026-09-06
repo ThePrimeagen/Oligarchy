@@ -1242,15 +1242,17 @@ needs, and a type can be renamed or, once nothing carries it, deleted.
   a sentence from the command, not a constraint name; `listErrorTypes` orders by key;
   `findErrorType(key)` and `getDiagnosis(sessionId)` are `Option`s. An unknown type or session in
   `saveDiagnosis` is the foreign key's `DatabaseError`; the command checks both first.
-- `ctrl error-type new --key <key> --description <text>` logs `error type <key> created` and
-  prints nothing; a taken key is `error-type new: <key> already exists`. `ctrl error-type list
-  [--json]` prints `<key padded to the longest>  <description>` per row, or the rows as JSON;
-  an empty table prints nothing, or `[]`. Bare `ctrl error-type` prints help and exits 0.
+- `ctrl error-type new --key <key> --description <text>` logs `error type created; <key>`; its
+  only output is that line's stdout copy (`[global] error type created; <key>`). A taken key is
+  `error-type new: <key> already exists`. `ctrl error-type list [--json]` prints `<key padded to
+  the longest>  <description>` per row, or the rows as JSON; an empty table prints nothing, or
+  `[]`. Bare `ctrl error-type` prints help and exits 0.
 - `ctrl diagnose --session-id <id> --type <key> --summary <text> --model <id>` refuses, in this
   order: `diagnose: no session <id>`, `diagnose: session <id> succeeded; nothing to diagnose`,
   `diagnose: session <id> is still running|downloading`, `diagnose: no error type <key>; create it
   with ./ctrl error-type new`, `diagnose: session <id> already has a diagnosis`; then it logs
-  `diagnosed; <key>; <model>` attributed to the session and prints nothing. All are
+  `diagnosed; <key>; <model>` attributed to the session, and that line's stdout copy
+  (`[global] <session id>: diagnosed; <key>; <model>`) is its only output. All refusals are
   `CommandError`s.
 - `ctrl session --diagnosis` prints the row (`{ sessionId, errorType, summary, model, createdAt
   }`) or `null`; `--all` includes it last as `diagnosis`.

@@ -135,22 +135,16 @@ export const debugLogs = pgTable("debug_logs", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-// The vocabulary a diagnosis is written in. It is data, not an enum, so a new kind of
-// failure is an insert the moment it is first seen, never a migration; it starts empty and
-// grows one row per distinct cause. key is the value a diagnosis carries, so a diagnosis
-// reads without a join; a rename cascades into the diagnoses that carry it, and a type in
-// use cannot be deleted.
+// The diagnosis vocabulary as data, not an enum: a new kind of failure is an insert the
+// moment it is first seen, never a migration. Starts empty; a rename cascades.
 export const postRunErrorTypes = pgTable("post_run_error_types", {
   key: text("key").primaryKey(),
   description: text("description").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-// One diagnosis per session that ended any way but succeeded, written after the run by
-// whoever read the evidence (debug_logs, actions, images). session_id is the key: a second
-// diagnosis is refused, and a session without a row is one nobody has diagnosed yet — there
-// is no placeholder type and no nullable column. model is the Cursor model id that wrote
-// the diagnosis, as test_results.model is the one that drove the session.
+// One diagnosis per session that did not succeed, keyed by the session: a row absent is a
+// session nobody has diagnosed; no placeholder type, no nullable column. model wrote it.
 export const postRunDiagnosis = pgTable(
   "post_run_diagnosis",
   {

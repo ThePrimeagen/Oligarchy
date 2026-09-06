@@ -287,9 +287,8 @@ export const fakeDiagnosisStore = (
         errorTypes.push({ key, description, createdAt: new Date() });
         return true;
       }),
-    listErrorTypes: Effect.sync(() =>
-      [...errorTypes].sort((left, right) => left.key.localeCompare(right.key)),
-    ),
+    listErrorTypes: () =>
+      Effect.sync(() => [...errorTypes].sort((left, right) => left.key.localeCompare(right.key))),
     findErrorType: (key) => Effect.sync(() => Option.fromUndefinedOr(findType(key))),
     saveDiagnosis: (input) =>
       Effect.sync(() => {
