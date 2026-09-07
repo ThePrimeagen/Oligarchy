@@ -19,8 +19,3 @@ nvm alias default 26
 PATH="$(dirname "$(nvm which 26)"):$PATH"
 export PATH
 echo "install: node $(node --version), npm $(npm --version)"
-
-cd v2
-npm ci --ignore-scripts
-# The tsgo patch only affects lint; a driving agent's environment must not fail on it.
-npm run prepare || echo "install: effect-tsgo patch skipped" >&2
