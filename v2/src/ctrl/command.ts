@@ -286,7 +286,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
             proof: definition.proof,
           });
     });
-    const experiment: Prompts.Experiment = {
+    const experiment = {
       id: created.runId,
       iso: input.iso,
       serverUrl: input.serverUrl,
@@ -296,7 +296,6 @@ export const makeCtrlCommand = (deps: Deps = live) => {
 
     const tickets: Array<Linear.LinearTicket> = [];
     const createTickets = Effect.gen(function* () {
-      const prompts = yield* Prompts.loadIssuePrompts;
       const teamId = yield* linear.teamId;
       const labelIds = yield* linear.labelIds(teamId, experiment.version);
       const assigneeId = yield* linear.assigneeId;
@@ -308,9 +307,20 @@ export const makeCtrlCommand = (deps: Deps = live) => {
           assigneeId,
         });
         tickets.push(ticket);
-        const description = yield* Effect.fromResult(
-          Prompts.linearTicketDescription(experiment, test, ticket.identifier, prompts),
-        );
+        // Linear assigns the identifier on create, and the body names it as the driver's agent
+        // id, so the description can only be rendered once the ticket exists.
+        const description = yield* Prompts.render("linear-issue.html", {
+          LINEAR_TICKET: ticket.identifier,
+          RUN_ID: experiment.id,
+          RESULT_ID: test.id,
+          VERSION: experiment.version,
+          ISO_URL: experiment.iso,
+          SERVER_URL: experiment.serverUrl,
+          TEST_NAME: test.name,
+          TEST_DESCRIPTION: test.description,
+          TEST_INSTRUCTION: test.instruction,
+          TEST_PROOF: test.proof,
+        });
         yield* linear.describeIssue(ticket, description);
       }
     });
@@ -330,10 +340,15 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     yield* createTickets.pipe(
       Effect.catchTags({
         LinearError: (error) => failRunWith(error, (reason) => withReason(error, reason)),
-        // The templates are read before the first ticket, so the only template failure that can
-        // follow one is a rendering failure, which carries no cause.
         PromptError: (error) =>
-          failRunWith(error, (reason) => Errors.PromptError.make({ message: reason })),
+          failRunWith(error, (reason) =>
+            Errors.PromptError.make(
+              Object.assign(
+                { message: reason },
+                error.cause === undefined ? undefined : { cause: error.cause },
+              ),
+            ),
+          ),
       }),
     );
 
@@ -355,8 +370,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
   // test run --ticket <linear-ticket>
   const testRun = Effect.fn("ctrl.test.run")(function* (input: { readonly ticket: string }) {
     const agents = yield* Cursor.CursorAgents;
-    const template = yield* Prompts.loadDrivingPrompt;
-    const text = yield* Effect.fromResult(Prompts.drivingAgentPrompt(input.ticket, template));
+    const text = yield* Prompts.render("driving-agent.html", { LINEAR_TICKET: input.ticket });
     const { agentId } = yield* agents.prompt(text);
     yield* Console.log(Render.agentLink(Cursor.agentUrl(agentId)));
   });
@@ -525,10 +539,10 @@ export const makeCtrlCommand = (deps: Deps = live) => {
           refuse(`diagnose run: session ${input.sessionId} already has a diagnosis`),
         ),
       );
-    const prompts = yield* Prompts.loadDiagnosisPrompts;
-    const text = yield* Effect.fromResult(
-      Prompts.diagnosingAgentPrompt(input.sessionId, input.serverUrl, prompts),
-    );
+    const text = yield* Prompts.render("diagnosing-agent.html", {
+      SESSION_ID: input.sessionId,
+      SERVER_URL: input.serverUrl,
+    });
     const { agentId } = yield* agents.prompt(text);
     yield* Console.log(Render.agentLink(Cursor.agentUrl(agentId)));
   });

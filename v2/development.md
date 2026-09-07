@@ -819,25 +819,28 @@ sendMouse, intentStart, intentEnd, stop, follow }`, each call wrapped in `run`.
   the assignee is `prime@terminal.shop`; titles are `Omarchy: <name>`; an issue is created then
   described in a second call because the body names its own identifier; the backlog pages with
   `first: 100` until `hasNextPage` is false. GraphQL query texts are copied from `v1/src/linear.ts`.
-- Every text ctrl hands an agent is a template under `prompts/` filled by `src/ctrl/prompts.ts`,
-  the one place placeholders are replaced: `Prompts.render(template, file, values)` fills every
-  `{{NAME}}` and fails a `Result` with `PromptError` `prompt: prompts/<file> uses {{NAME}}, which
-  has no value` on the first name without one; `Prompts.read` maps an unreadable file to
-  `PromptError` `prompt: <platform message>`. Each command reads only the templates it renders,
-  once, by path relative to the module: `loadIssuePrompts` (an Effect over `FileSystem`) reads
-  `prompts/linear-issue.html`, `client.md` and `ctrl-linear.md` into an `IssuePrompts` record for
-  `test new`; `loadDrivingPrompt` reads `prompts/driving-agent.html` alone for `test run`, so an
-  unreadable guide cannot stop a run; `loadDiagnosisPrompts` reads `prompts/diagnosing-agent.html`
-  and `ctrl-diagnose.md` into a `DiagnosisPrompts` record for `diagnose run`. The value maps:
-  `linearTicketDescription(experiment, test, ticket, prompts)` fills `LINEAR_TICKET, RUN_ID,
-  RESULT_ID, VERSION, ISO_URL, SERVER_URL, TEST_NAME, TEST_DESCRIPTION, TEST_INSTRUCTION,
-  TEST_PROOF, CLIENT_MD, CTRL_MD, SUB_AGENT` (`Grok 4.6 high fast (cursor-grok-4.6-high-fast)`);
-  `drivingAgentPrompt(ticket, template)` fills `LINEAR_TICKET`; `diagnosingAgentPrompt(sessionId,
-  serverUrl, prompts)` fills `SESSION_ID, SERVER_URL, CTRL_MD` — the reviewer is told the session
-  and the proxy and reads everything else back with `ctrl session`. In `test new` the templates
-  are read inside the ticket loop's effect, before the first Linear call, so a `PromptError` fails
-  the run with its message as the reason (`Effect.catchTags` beside the `LinearError` arm) and
-  names no ticket; `linear.ts` is the GraphQL client alone.
+- Every text ctrl hands an agent is a template under `prompts/` filled by one function,
+  `Prompts.render(template, values)` in `src/ctrl/prompts.ts`: an Effect over `FileSystem` that
+  reads the template (`Prompts.Template` is `linear-issue.html | driving-agent.html |
+  diagnosing-agent.html`), reads the guides the template names, and fills every `{{NAME}}`.
+  `Prompts.Values` is the one shape a caller fills, keyed as the templates spell it and every key
+  optional: `LINEAR_TICKET, RUN_ID, RESULT_ID, SESSION_ID, VERSION, ISO_URL, SERVER_URL, TEST_NAME,
+  TEST_DESCRIPTION, TEST_INSTRUCTION, TEST_PROOF`; a key the caller has no value for is absent,
+  and a template that asks for it fails with `PromptError` `prompt: prompts/<file> uses {{NAME}},
+  which has no value` (the first such name in the template). The renderer's own values are the
+  constant `SUB_AGENT` (`Grok 4.6 high fast (cursor-grok-4.6-high-fast)`) and the guides,
+  `CLIENT_MD` (`client.md`), `CTRL_MD` (`ctrl-linear.md`) and `CTRL_DIAGNOSE_MD`
+  (`ctrl-diagnose.md`), each read beside the package, trimmed of its final newline, and only when
+  the template names it — so an unreadable guide cannot stop a command whose template does not
+  embed it, and nobody pre-reads anything. An unreadable template or guide is `PromptError`
+  `prompt: <platform message>` with the cause. `test new` renders `linear-issue.html` once per
+  ticket, after `createIssue`, because the body names the identifier Linear assigns; a
+  `PromptError` there fails the run like a `LinearError` does, the reason naming the tickets
+  created (`failRunWith` is the one place both arms do that, and a `PromptError` keeps its cause).
+  `test run` renders `driving-agent.html` from `LINEAR_TICKET` alone; `diagnose run` renders
+  `diagnosing-agent.html` from `SESSION_ID` and `SERVER_URL` — the reviewer is told the session
+  and the proxy and reads everything else back with `ctrl session`. `linear.ts` is the GraphQL
+  client alone.
 - `ctrl test-results` calls `log.acquireColor(agentId)` before its `test result <id>: <status>[;
   <reason>]` line (the agent has no live session on that process); a verdict without `--reason`
   leaves the stored reason in place (`TestStore.closeResult` omits the key, as for `session_id`).
@@ -1288,9 +1291,9 @@ renamed or, once nothing carries it, deleted.
 - `ctrl diagnose run --session-id <id>` spawns the reviewer: it refuses `diagnose run: no session
   <id>`, `diagnose run: session <id> is still running|downloading` and `diagnose run: session <id>
   already has a diagnosis` before reading a template or spawning anything (an agent whose
-  `diagnose` would be refused is a run wasted), then renders `prompts/diagnosing-agent.html` with
-  `SESSION_ID`, `SERVER_URL` and `ctrl-diagnose.md` as `CTRL_MD`, prompts `CursorAgents` with the
-  default model, and prints the agent link. It reads `DATABASE_URL` then `CURSOR_API_TOKEN`, in
+  `diagnose` would be refused is a run wasted), then renders `prompts/diagnosing-agent.html` from
+  `SESSION_ID` and `SERVER_URL` (the template embeds `ctrl-diagnose.md` as `CTRL_DIAGNOSE_MD`),
+  prompts `CursorAgents` with the default model, and prints the agent link. It reads `DATABASE_URL` then `CURSOR_API_TOKEN`, in
   that order, after parsing. The reviewer's brief is deliberately thin — the session and the
   proxy — because `ctrl session --all` reaches everything from the session id: the session row,
   its result and that result's definition and run, the logs, actions, images, debug log and any

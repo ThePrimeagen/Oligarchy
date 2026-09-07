@@ -1,7 +1,7 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { NodeFileSystem } from "@effect/platform-node";
-import { Cause, Effect, Layer, Redacted, Result } from "effect";
+import { Cause, Effect, Layer, Redacted } from "effect";
 import { HttpClientError, type HttpClientRequest } from "effect/unstable/http";
 import * as Linear from "../../src/ctrl/linear.ts";
 import * as Prompts from "../../src/ctrl/prompts.ts";
@@ -34,7 +34,7 @@ const experiment = {
       proof: "A terminal window is visible",
     },
   ],
-} satisfies Prompts.Experiment;
+};
 
 const firstTest = experiment.tests[0];
 
@@ -103,15 +103,23 @@ const withHttp = (respond: (body: GraphQl) => Response) =>
 const linear = (token = TOKEN) => Linear.Linear.layer(Redacted.make(token));
 
 // The ticket body is the prompt module's; a broken checkout is a defect here, not a Linear failure.
-const issuePrompts = Prompts.loadIssuePrompts.pipe(
-  Effect.provide(NodeFileSystem.layer),
-  Effect.orDie,
-);
+const describedAs = (ticket: string) =>
+  Prompts.render("linear-issue.html", {
+    LINEAR_TICKET: ticket,
+    RUN_ID: experiment.id,
+    RESULT_ID: firstTest.id,
+    VERSION: experiment.version,
+    ISO_URL: experiment.iso,
+    SERVER_URL: experiment.serverUrl,
+    TEST_NAME: firstTest.name,
+    TEST_DESCRIPTION: firstTest.description,
+    TEST_INSTRUCTION: firstTest.instruction,
+    TEST_PROOF: firstTest.proof,
+  }).pipe(Effect.provide(NodeFileSystem.layer), Effect.orDie);
 
 // The whole ticket flow as `test new` runs it for one definition.
 const createTicket = Effect.gen(function* () {
   const client = yield* Linear.Linear;
-  const loaded = yield* issuePrompts;
   const teamId = yield* client.teamId;
   const labelIds = yield* client.labelIds(teamId, experiment.version);
   const assigneeId = yield* client.assigneeId;
@@ -121,10 +129,7 @@ const createTicket = Effect.gen(function* () {
     labelIds,
     assigneeId,
   });
-  const description = yield* Effect.fromResult(
-    Prompts.linearTicketDescription(experiment, firstTest, ticket.identifier, loaded),
-  ).pipe(Effect.orDie);
-  yield* client.describeIssue(ticket, description);
+  yield* client.describeIssue(ticket, yield* describedAs(ticket.identifier));
   return ticket;
 });
 
@@ -140,7 +145,6 @@ describe("Linear happy path", () => {
         const ticket = yield* createTicket.pipe(
           Effect.provide(linear().pipe(Layer.provide(http.layer))),
         );
-        const loaded = yield* issuePrompts;
 
         expect(ticket).toEqual({
           id: "issue-OLI-42",
@@ -175,9 +179,7 @@ describe("Linear happy path", () => {
         expect(bodies[5]?.variables).toEqual({
           id: "issue-OLI-42",
           input: {
-            description: Result.getOrThrow(
-              Prompts.linearTicketDescription(experiment, firstTest, "OLI-42", loaded),
-            ),
+            description: yield* describedAs("OLI-42"),
           },
         });
       }),

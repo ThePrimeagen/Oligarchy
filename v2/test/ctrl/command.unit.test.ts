@@ -1,7 +1,7 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { NodeFileSystem, NodeServices } from "@effect/platform-node";
-import { Cause, Effect, Exit, FileSystem, Layer, Redacted, Result } from "effect";
+import { Cause, Effect, Exit, FileSystem, Layer, Redacted } from "effect";
 import { TestClock, TestConsole } from "effect/testing";
 import { CliError, Command } from "effect/unstable/cli";
 import * as CtrlCommand from "../../src/ctrl/command.ts";
@@ -206,11 +206,9 @@ const stdout = Effect.map(TestConsole.logLines, (lines) => lines.map(String));
 
 const lastJson = Effect.map(stdout, (lines) => JSON.parse(lines.at(-1) ?? ""));
 
-const issuePrompts = Prompts.loadIssuePrompts.pipe(Effect.provide(NodeFileSystem.layer));
-
-const drivingPrompt = Prompts.loadDrivingPrompt.pipe(Effect.provide(NodeFileSystem.layer));
-
-const diagnosisPrompts = Prompts.loadDiagnosisPrompts.pipe(Effect.provide(NodeFileSystem.layer));
+// The text a command hands an agent, rendered from the checkout's own templates and guides.
+const rendered = (template: Prompts.Template, values: Prompts.Values) =>
+  Prompts.render(template, values).pipe(Effect.provide(NodeFileSystem.layer));
 
 // ---------------------------------------------------------------------------
 // test --list
@@ -334,24 +332,22 @@ describe("test new", () => {
           [run?.id, 2, "pending", null],
         ]);
 
-        const loaded = yield* issuePrompts;
-        const experiment: Prompts.Experiment = {
-          id: run?.id ?? "",
-          iso: "https://example.com/omarchy.iso",
-          serverUrl: SERVER,
-          version: "1.2.3",
-          tests: [install, terminal].map((definition, index) => ({
-            id: results[index]?.id ?? "",
-            definitionId: definition.id,
-            name: definition.name,
-            description: definition.description,
-            instruction: definition.instruction,
-            proof: definition.proof,
-          })),
-        };
-        const descriptionOf = (test: Prompts.ExperimentTest, identifier: string) =>
-          Result.getOrThrow(Prompts.linearTicketDescription(experiment, test, identifier, loaded));
-        const [installTest, terminalTest] = experiment.tests;
+        // Each ticket is the one template filled with that definition's values and its own ids.
+        const descriptionOf = (definition: TestDefinitionRow, index: number, identifier: string) =>
+          rendered("linear-issue.html", {
+            LINEAR_TICKET: identifier,
+            RUN_ID: run?.id ?? "",
+            RESULT_ID: results[index]?.id ?? "",
+            VERSION: "1.2.3",
+            ISO_URL: "https://example.com/omarchy.iso",
+            SERVER_URL: SERVER,
+            TEST_NAME: definition.name,
+            TEST_DESCRIPTION: definition.description,
+            TEST_INSTRUCTION: definition.instruction,
+            TEST_PROOF: definition.proof,
+          });
+        const installDescription = yield* descriptionOf(install, 0, "OLI-42");
+        const terminalDescription = yield* descriptionOf(terminal, 1, "OLI-43");
         const labels = [FakeLinear.labelId("agent test"), FakeLinear.labelId("1.2.3")];
         expect(h.linear.calls).toEqual([
           { method: "teamId" },
@@ -369,7 +365,7 @@ describe("test new", () => {
           {
             method: "describeIssue",
             ticket: FakeLinear.ticketFor("OLI-42"),
-            description: installTest === undefined ? "" : descriptionOf(installTest, "OLI-42"),
+            description: installDescription,
           },
           {
             method: "createIssue",
@@ -383,7 +379,7 @@ describe("test new", () => {
           {
             method: "describeIssue",
             ticket: FakeLinear.ticketFor("OLI-43"),
-            description: terminalTest === undefined ? "" : descriptionOf(terminalTest, "OLI-43"),
+            description: terminalDescription,
           },
         ]);
 
@@ -513,24 +509,34 @@ describe("test new", () => {
     }),
   );
 
-  it.effect("fails the run naming an unreadable guide before any ticket is created (unhappy)", () =>
-    Effect.gen(function* () {
-      const fs = promptFs(/\/client\.md$/);
-      const h = harness({ fs: fs.layer });
-      h.stores.tests.definitions.push(install);
-      const exit = yield* h.run([...NEW, "--server-url", SERVER], WITH_LINEAR);
-      expect(failure(exit)).toMatchObject({
-        _tag: "PromptError",
-        message: expect.stringMatching(/^prompt: .*client\.md/),
-      });
-      expect(fs.reads.some((path) => DRIVING_AGENT_PATH.test(path))).toBe(false);
-      expect(h.linear.calls).toEqual([]);
-      expect(h.stores.tests.runs[0]).toMatchObject({
-        status: "failed",
-        reason: expect.stringMatching(/^prompt: .*client\.md/),
-      });
-      expect(h.stores.tests.results.map((row) => row.status)).toEqual(["failed"]);
-    }),
+  it.effect(
+    "fails the run naming the ticket created when a guide its description embeds is unreadable (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        // The guide is read while describing the first ticket, so that ticket already exists.
+        const fs = promptFs(/\/client\.md$/, "{{LINEAR_TICKET}} {{CLIENT_MD}}");
+        const h = harness({ fs: fs.layer });
+        h.stores.tests.definitions.push(install, terminal);
+        const exit = yield* h.run([...NEW, "--server-url", SERVER], WITH_LINEAR);
+        const error = failure(exit);
+        expect(error).toMatchObject({
+          _tag: "PromptError",
+          message: expect.stringMatching(/^prompt: .*client\.md.*; created OLI-42$/),
+          cause: expect.anything(),
+        });
+        expect(fs.reads.some((path) => DRIVING_AGENT_PATH.test(path))).toBe(false);
+        expect(h.linear.calls.map((call) => call.method)).toEqual([
+          "teamId",
+          "labelIds",
+          "assigneeId",
+          "createIssue",
+        ]);
+        expect(h.stores.tests.runs[0]).toMatchObject({
+          status: "failed",
+          reason: expect.stringMatching(/^prompt: .*client\.md.*; created OLI-42$/),
+        });
+        expect(h.stores.tests.results.map((row) => row.status)).toEqual(["failed", "failed"]);
+      }),
   );
 
   it.effect(
@@ -670,10 +676,9 @@ describe("test run", () => {
       const h = harness({ cursor: FakeCursor.fakeCursor({ agentId: "bc-42" }) });
       const exit = yield* h.run(["test", "run", "--ticket", "OLI-42"], WITH_CURSOR);
       expect(Exit.isSuccess(exit)).toBe(true);
-      const template = yield* drivingPrompt;
       expect(h.cursor.calls).toEqual([
         {
-          text: Result.getOrThrow(Prompts.drivingAgentPrompt("OLI-42", template)),
+          text: yield* rendered("driving-agent.html", { LINEAR_TICKET: "OLI-42" }),
           model: undefined,
         },
       ]);
@@ -1802,10 +1807,9 @@ describe("diagnose run", () => {
         h.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
         const exit = yield* h.run(DIAGNOSE_RUN, WITH_CURSOR);
         expect(Exit.isSuccess(exit)).toBe(true);
-        const loaded = yield* diagnosisPrompts;
         expect(h.cursor.calls).toEqual([
           {
-            text: Result.getOrThrow(Prompts.diagnosingAgentPrompt(SESSION_ID, SERVER, loaded)),
+            text: yield* rendered("diagnosing-agent.html", { SESSION_ID, SERVER_URL: SERVER }),
             model: undefined,
           },
         ]);
