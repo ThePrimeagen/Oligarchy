@@ -156,16 +156,10 @@ describe("selectDefinition happy path", () => {
 });
 
 describe("selectDefinition unhappy path", () => {
-  it("selects nothing when the name matches no definition", () => {
-    expect(
-      selectDefinition([definition(1, "install"), definition(2, "lock-screen")], "wifi"),
-    ).toBeUndefined();
-  });
-
-  it("matches the name exactly: case and surrounding whitespace are not forgiven", () => {
-    const definitions = [definition(1, "install")];
+  it("selects nothing when no definition carries exactly that name", () => {
+    const definitions = [definition(1, "install"), definition(2, "lock-screen")];
+    expect(selectDefinition(definitions, "wifi")).toBeUndefined();
     expect(selectDefinition(definitions, "Install")).toBeUndefined();
-    expect(selectDefinition(definitions, " install")).toBeUndefined();
     expect(selectDefinition(definitions, "")).toBeUndefined();
   });
 

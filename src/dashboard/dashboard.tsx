@@ -322,8 +322,11 @@ const Definitions: FC<DefinitionsProps> = ({ definitions, outcomes, name, select
           >
             {definitions.map((definition) => {
               const isCurrent = definition.id === selected?.id;
+              // The swap replaces the focused link; htmx puts focus back only on an element with
+              // the same id, so a keyboard user does not fall back to the top of the page.
               return (
                 <a
+                  id={`definition-${String(definition.id)}`}
                   href={definitionHref(definition.name)}
                   hx-get={definitionHref(definition.name)}
                   class={

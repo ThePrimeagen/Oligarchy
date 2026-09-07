@@ -529,10 +529,8 @@ main {
   color: var(--terminal-blue);
 }
 
-/* Narrow screens keep the scrolling list of cards; the sidebar and the missing-name notice belong
-   to the wide layout below. */
-.definitions__nav,
-.definitions__missing {
+/* Narrow screens keep the scrolling list of cards; the sidebar belongs to the wide layout below. */
+.definitions__nav {
   display: none;
 }
 
@@ -598,10 +596,6 @@ main {
     border-left-color: var(--turquoise);
     background: rgb(122 162 247 / 10%);
     color: var(--turquoise);
-  }
-
-  .definitions__missing {
-    display: grid;
   }
 
   .definitions__item {

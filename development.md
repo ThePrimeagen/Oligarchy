@@ -1348,14 +1348,15 @@ and drizzle, the same tables the Effect `TestStore` writes. It does not call `Pr
   selects nothing and the route answers 404 with the page intact (the sidebar still lists what
   exists, the detail column says `No test definition named <name>.`) rather than quietly opening
   another definition under that URL. Every card is in the HTML: a narrow screen (under 64rem)
-  keeps the scrolling list of cards and hides the sidebar and that notice; a wide screen widens
-  `main` (it carries `data-page` for this) and shows the names down the left, the current one
-  marked `aria-current="true"`, then only the current card: its results by model in the centre at
-  a larger scale, its description, instruction and proof on the right. A sidebar link is a plain
-  `href` to `/definitions?name=<encoded name>`; with htmx it fetches that page, swaps
-  `#definitions` in place (`hx-select`, inherited from the nav with `:inherited` as htmx 4
-  requires) and pushes the URL, so a reload or a shared link opens where the click did. The
-  unavailable and empty states are unchanged.
+  keeps the scrolling list of cards, that notice above them, and hides the sidebar; a wide screen
+  widens `main` (it carries `data-page` for this) and shows the names down the left, the current
+  one marked `aria-current="true"`, then only the current card: its results by model in the
+  centre at a larger scale, its description, instruction and proof on the right. A sidebar link
+  is a plain `href` to `/definitions?name=<encoded name>` with the id `definition-<row id>`; with
+  htmx it fetches that page, swaps `#definitions` in place (`hx-select`, inherited from the nav
+  with `:inherited` as htmx 4 requires) and pushes the URL, so a reload or a shared link opens
+  where the click did, and the id is what lets htmx hand focus back to the clicked link after the
+  swap. The unavailable and empty states are unchanged.
 - Route failures are `Sentry.captureException` on `@sentry/cloudflare` (`withSentry` wraps the
   app, `SENTRY_DSN` from `dsn.ts`). Effect's `ErrorReporter` is not installed here; that is the
   one place `captureException` is called outside `observability/`.
