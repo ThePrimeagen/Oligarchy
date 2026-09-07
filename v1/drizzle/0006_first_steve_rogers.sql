@@ -1,1 +1,0 @@
-ALTER TABLE "test_results" DROP COLUMN "id";
