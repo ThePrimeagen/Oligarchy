@@ -26,6 +26,20 @@ export class ApiBoundary extends HttpApiMiddleware.Service<ApiBoundary>()(
   },
 ) {}
 
+// The reverse proxy's boundary: the same code as ApiBoundary, declaring as well the two answers
+// only a router gives — a server that failed it and no server to place on.
+export class RouteBoundary extends HttpApiMiddleware.Service<RouteBoundary>()(
+  "@oligarchy/shared/api/RouteBoundary",
+  {
+    error: [
+      Errors.BadRequestWire,
+      Errors.InternalWire,
+      Errors.ServerFailedWire,
+      Errors.NoServerWire,
+    ],
+  },
+) {}
+
 const png = Schema.Uint8Array.pipe(HttpApiSchema.asUint8Array({ contentType: "image/png" }));
 const text = Schema.Uint8Array.pipe(HttpApiSchema.asUint8Array({ contentType: "text/plain" }));
 
@@ -121,5 +135,48 @@ export const storedImage = HttpApiEndpoint.get("storedImage", "/images/:id", {
 export class Images extends HttpApiGroup.make("Images").add(storedImage).middleware(ApiBoundary) {}
 
 export class ProxyApi extends HttpApi.make("OligarchyProxy").add(Sessions).add(Images) {}
+
+// The reverse proxy: the proxy's own endpoints, so the client that speaks to a server speaks to
+// it, minus /stats (a fleet has no one cpu), behind the routing boundary.
+export class RoutedSessions extends HttpApiGroup.make("Sessions")
+  .add(start)
+  .add(image)
+  .add(serial)
+  .add(dump)
+  .add(follow)
+  .add(stop)
+  .add(sendKeys)
+  .add(sendMouse)
+  .add(intentStart)
+  .add(intentEnd)
+  .middleware(BearerAuth)
+  .middleware(RouteBoundary) {}
+
+// Servers group: the fleet the reverse proxy places on; bearer required
+export const register = HttpApiEndpoint.post("register", "/servers", {
+  payload: Contract.ServerBody,
+  success: Contract.Ok,
+});
+
+export const unregister = HttpApiEndpoint.delete("unregister", "/servers", {
+  payload: Contract.ServerBody,
+  success: Contract.Ok,
+  error: Errors.NotFoundWire,
+});
+
+export const servers = HttpApiEndpoint.get("servers", "/servers", {
+  success: Contract.Servers,
+});
+
+export class Servers extends HttpApiGroup.make("Servers")
+  .add(register)
+  .add(unregister)
+  .add(servers)
+  .middleware(BearerAuth)
+  .middleware(RouteBoundary) {}
+
+export class ReverseProxyApi extends HttpApi.make("OligarchyReverseProxy")
+  .add(RoutedSessions)
+  .add(Servers) {}
 
 export const VERSION = "0.0.0";

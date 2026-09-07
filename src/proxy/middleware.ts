@@ -1,5 +1,5 @@
 import { Cause, Effect, Layer, Redacted, Schema, type Types } from "effect";
-import { HttpServerRequest } from "effect/unstable/http";
+import { HttpServerRequest, type HttpServerResponse } from "effect/unstable/http";
 import { HttpApiError } from "effect/unstable/httpapi";
 import * as Config from "../config.ts";
 import * as ExternalFailure from "../external-failure.ts";
@@ -36,6 +36,8 @@ const isApiError: (value: unknown) => value is Errors.ApiError = Schema.is(
     Errors.StartFailed,
     Errors.ExchangeFailed,
     Errors.Internal,
+    Errors.ServerFailed,
+    Errors.NoServer,
   ]),
 );
 
@@ -67,10 +69,13 @@ const attribution = (error: Errors.ApiError): Log.Attribution => {
         Domain.isSessionId(error.id) ? { sessionId: error.id } : undefined,
         error.agentId === undefined ? undefined : { agentId: error.agentId },
       );
+    case "NoServer":
+      return error.agentId === undefined ? {} : { agentId: error.agentId };
     case "BadRequest":
     case "StartFailed":
     case "ExchangeFailed":
     case "Internal":
+    case "ServerFailed":
       return Object.assign(
         {},
         error.sessionId === undefined ? undefined : { sessionId: error.sessionId },
@@ -93,28 +98,34 @@ const report = (error: Errors.ApiError): Log.Report =>
     ? { ...attribution(error), skipSentry: true }
     : { ...attribution(error), cause: "cause" in error ? error.cause : undefined };
 
-export const ApiBoundaryLive: Layer.Layer<Api.ApiBoundary, never, Log.Log> = Layer.effect(
-  Api.ApiBoundary,
-)(
-  Effect.gen(function* () {
-    const log = yield* Log.Log;
-    return Api.ApiBoundary.of((httpEffect) =>
-      Effect.gen(function* () {
-        const request = yield* HttpServerRequest.HttpServerRequest;
-        const failed = (text: string, how: Log.Report) =>
-          log.error(`${request.method} ${request.originalUrl} failed: ${text}`, how);
-        return yield* httpEffect.pipe(
-          Effect.catch(translate),
-          Effect.tapError((error) => failed(detail(error), report(error))),
-          Effect.catchDefect((defect) =>
-            failed(Cause.pretty(Cause.die(defect)), { cause: defect }).pipe(
-              Effect.andThen(
-                Effect.fail(Errors.Internal.make({ message: "internal error", cause: defect })),
-              ),
+// The one boundary: schema errors to 400, defects to 500, one log line per failed request. The
+// proxy and the reverse proxy wrap it in their own middleware tags, which differ only in the error
+// codecs they declare.
+const boundary = Effect.gen(function* () {
+  const log = yield* Log.Log;
+  return (httpEffect: Effect.Effect<HttpServerResponse.HttpServerResponse, Types.unhandled>) =>
+    Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      const failed = (text: string, how: Log.Report) =>
+        log.error(`${request.method} ${request.originalUrl} failed: ${text}`, how);
+      return yield* httpEffect.pipe(
+        Effect.catch(translate),
+        Effect.tapError((error) => failed(detail(error), report(error))),
+        Effect.catchDefect((defect) =>
+          failed(Cause.pretty(Cause.die(defect)), { cause: defect }).pipe(
+            Effect.andThen(
+              Effect.fail(Errors.Internal.make({ message: "internal error", cause: defect })),
             ),
           ),
-        );
-      }),
-    );
-  }),
-);
+        ),
+      );
+    });
+});
+
+export const ApiBoundaryLive: Layer.Layer<Api.ApiBoundary, never, Log.Log> = Layer.effect(
+  Api.ApiBoundary,
+)(Effect.map(boundary, (wrap) => Api.ApiBoundary.of(wrap)));
+
+export const RouteBoundaryLive: Layer.Layer<Api.RouteBoundary, never, Log.Log> = Layer.effect(
+  Api.RouteBoundary,
+)(Effect.map(boundary, (wrap) => Api.RouteBoundary.of(wrap)));

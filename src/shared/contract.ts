@@ -89,6 +89,21 @@ export class Stats extends Schema.Class<Stats>("@oligarchy/shared/contract/Stats
   cpu: Cpu,
 }) {}
 
+// POST and DELETE /servers on the reverse proxy: the one server the operator names.
+export class ServerBody extends Schema.Class<ServerBody>("@oligarchy/shared/contract/ServerBody")({
+  url: Domain.ServerUrl,
+}) {}
+
+// One registered server as GET /servers reports it; stats is null when its probe failed.
+export class Server extends Schema.Class<Server>("@oligarchy/shared/contract/Server")({
+  url: Schema.String,
+  stats: Schema.NullOr(Stats),
+}) {}
+
+export class Servers extends Schema.Class<Servers>("@oligarchy/shared/contract/Servers")({
+  servers: Schema.Array(Server),
+}) {}
+
 const STORED_IMAGE_ORIGIN = "https://oligarchy.trm.sh";
 
 export const StoredImageUrl = (id: string): string => `${STORED_IMAGE_ORIGIN}/images/${id}`;

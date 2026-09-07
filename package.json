@@ -12,6 +12,7 @@
     "ctrl": "node --experimental-strip-types src/ctrl/main.ts",
     "session": "node --experimental-strip-types src/session/main.ts",
     "server": "node --experimental-strip-types --import ./src/observability/instrument.ts src/proxy/main.ts",
+    "reverse-proxy": "node --experimental-strip-types --import ./src/observability/instrument.ts src/reverse-proxy/main.ts",
     "dev": "wrangler dev --remote",
     "check:lint": "oxlint --deny-warnings .",
     "check:format": "oxfmt --check .",

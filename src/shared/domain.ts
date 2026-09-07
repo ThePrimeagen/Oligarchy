@@ -133,6 +133,22 @@ export type DiagnosisVerdict = typeof DiagnosisVerdict.Type;
 export const isIsoUrl = (iso: string): boolean =>
   iso.startsWith("http://") || iso.startsWith("https://");
 
+// A server the reverse proxy forwards to, as an operator registers it: an http(s) url with a
+// host, used exactly as given, as --server-url is.
+export const ServerUrl = Schema.String.check(
+  Schema.makeFilter(
+    (value: string) => {
+      if (!URL.canParse(value)) {
+        return false;
+      }
+      const url = new URL(value);
+      return (url.protocol === "http:" || url.protocol === "https:") && url.hostname !== "";
+    },
+    { message: "url must be an http or https url" },
+  ),
+).annotate({ identifier: "@oligarchy/shared/domain/ServerUrl" });
+export type ServerUrl = typeof ServerUrl.Type;
+
 export const SessionConfig = Schema.Struct({
   iso: Schema.String,
   disk: Schema.optionalKey(Schema.String),

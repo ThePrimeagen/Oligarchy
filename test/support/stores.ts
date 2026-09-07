@@ -4,6 +4,7 @@ import * as DebugLogs from "../../src/db/debug-logs.ts";
 import * as Diagnosis from "../../src/db/diagnosis.ts";
 import * as Logs from "../../src/db/logs.ts";
 import * as DbSchema from "../../src/db/schema.ts";
+import * as Servers from "../../src/db/servers.ts";
 import * as Sessions from "../../src/db/sessions.ts";
 import * as Tests from "../../src/db/tests.ts";
 import * as Errors from "../../src/shared/errors.ts";
@@ -454,6 +455,55 @@ export const fakeTestStore = (
     results,
     layer: Layer.succeed(Tests.TestStore)(service),
   };
+};
+
+// ---------------------------------------------------------------------------
+// ServerStore
+// ---------------------------------------------------------------------------
+
+export type FakeServerStore = {
+  // Registered urls, in registration order.
+  readonly servers: Array<string>;
+  // Session id to the url of the server that started it.
+  readonly routes: Map<string, string>;
+  readonly layer: Layer.Layer<Servers.ServerStore>;
+};
+
+// A url registers once and a session is routed once, as the real keys promise: a second
+// registration is a no-op and a second route is the primary key's DatabaseError.
+export const fakeServerStore = (
+  overrides: Partial<typeof Servers.ServerStore.Service> = {},
+): FakeServerStore => {
+  const servers: Array<string> = [];
+  const routes = new Map<string, string>();
+  const service = Servers.ServerStore.of({
+    addServer: (url) =>
+      Effect.sync(() => {
+        if (!servers.includes(url)) {
+          servers.push(url);
+        }
+      }),
+    removeServer: (url) =>
+      Effect.sync(() => {
+        const index = servers.indexOf(url);
+        if (index === -1) {
+          return false;
+        }
+        servers.splice(index, 1);
+        return true;
+      }),
+    listServers: () => Effect.sync(() => [...servers]),
+    routeSession: (sessionId, url) =>
+      routes.has(sessionId)
+        ? Effect.fail(conflict("routeSession", "insert into session_servers"))
+        : Effect.sync(() => {
+            routes.set(sessionId, url);
+          }),
+    serverForSession: (sessionId) =>
+      Effect.sync(() => Option.fromUndefinedOr(routes.get(sessionId))),
+    ...overrides,
+  });
+  return { servers, routes, layer: Layer.succeed(Servers.ServerStore)(service) };
 };
 
 // Every store at once, sharing nothing: the common fixture for handler and command tests.

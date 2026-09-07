@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HttpApi, HttpApiClient, OpenApi } from "effect/unstable/httpapi";
+import { HttpApi, HttpApiClient, type HttpApiGroup, OpenApi } from "effect/unstable/httpapi";
 import * as Api from "../../src/shared/api.ts";
 
 type Route = {
@@ -11,9 +11,11 @@ type Route = {
   readonly middleware: ReadonlyArray<string>;
 };
 
-const routes = (): ReadonlyArray<Route> => {
+const routes = <Id extends string, Groups extends HttpApiGroup.Constraint>(
+  api: HttpApi.HttpApi<Id, Groups>,
+): ReadonlyArray<Route> => {
   const collected: Array<Route> = [];
-  HttpApi.reflect(Api.ProxyApi, {
+  HttpApi.reflect(api, {
     onGroup: () => undefined,
     onEndpoint: ({ group, endpoint, errors, middleware }) => {
       collected.push({
@@ -29,17 +31,23 @@ const routes = (): ReadonlyArray<Route> => {
   return collected;
 };
 
-const byIdentifier = (identifier: string): Route => {
-  const route = routes().find((candidate) => candidate.identifier === identifier);
+const byIdentifier = <Id extends string, Groups extends HttpApiGroup.Constraint>(
+  api: HttpApi.HttpApi<Id, Groups>,
+  identifier: string,
+): Route => {
+  const route = routes(api).find((candidate) => candidate.identifier === identifier);
   if (route === undefined) {
     throw new Error(`no endpoint ${identifier}`);
   }
   return route;
 };
 
+const ascending = (statuses: ReadonlyArray<number>): ReadonlyArray<number> =>
+  [...statuses].sort((a, b) => a - b);
+
 describe("ProxyApi", () => {
   it("declares every path with today's method", () => {
-    const table = routes().map(({ method, path }) => `${method} ${path}`);
+    const table = routes(Api.ProxyApi).map(({ method, path }) => `${method} ${path}`);
     expect(table.sort()).toEqual(
       [
         "POST /start",
@@ -79,10 +87,10 @@ describe("ProxyApi", () => {
   });
 
   it("does not declare endpoints the plan does not name", () => {
-    const table = routes().map(({ method, path }) => `${method} ${path}`);
+    const table = routes(Api.ProxyApi).map(({ method, path }) => `${method} ${path}`);
     expect(table).not.toContain("DELETE /start");
     expect(table).not.toContain("GET /start");
-    expect(routes().map((route) => route.identifier)).not.toContain("notFound");
+    expect(routes(Api.ProxyApi).map((route) => route.identifier)).not.toContain("notFound");
   });
 
   it("requires the bearer on every Sessions endpoint and on none of Images", () => {
@@ -90,7 +98,7 @@ describe("ProxyApi", () => {
     expect(spec.components.securitySchemes).toEqual({
       bearer: { type: "http", scheme: "Bearer" },
     });
-    for (const route of routes()) {
+    for (const route of routes(Api.ProxyApi)) {
       const item = spec.paths[route.path.replace(/:(\w+)/g, "{$1}")];
       expect(item).toBeDefined();
       const operation =
@@ -105,7 +113,7 @@ describe("ProxyApi", () => {
   });
 
   it("applies BearerAuth then ApiBoundary to Sessions and only ApiBoundary to Images", () => {
-    for (const route of routes()) {
+    for (const route of routes(Api.ProxyApi)) {
       if (route.group === "Sessions") {
         expect(route.middleware).toEqual([Api.BearerAuth.key, Api.ApiBoundary.key]);
       } else {
@@ -116,29 +124,125 @@ describe("ProxyApi", () => {
 
   it("declares the error statuses of §2.4 plus the middleware's 400, 401 and 500", () => {
     const sessions = [400, 401, 500];
-    expect(byIdentifier("start").errors).toEqual([...sessions, 502]);
-    expect(byIdentifier("image").errors).toEqual(
+    expect(byIdentifier(Api.ProxyApi, "start").errors).toEqual([...sessions, 502]);
+    expect(byIdentifier(Api.ProxyApi, "image").errors).toEqual(
       [...sessions, 403, 404, 502].sort((a, b) => a - b),
     );
-    expect(byIdentifier("serial").errors).toEqual([...sessions, 403, 404].sort((a, b) => a - b));
-    expect(byIdentifier("dump").errors).toEqual([...sessions, 404, 409].sort((a, b) => a - b));
-    expect(byIdentifier("follow").errors).toEqual([...sessions, 404, 409].sort((a, b) => a - b));
-    expect(byIdentifier("stats").errors).toEqual(sessions);
-    expect(byIdentifier("stop").errors).toEqual([...sessions, 403, 404].sort((a, b) => a - b));
-    expect(byIdentifier("sendKeys").errors).toEqual(
-      [...sessions, 403, 404, 502].sort((a, b) => a - b),
-    );
-    expect(byIdentifier("sendMouse").errors).toEqual(
-      [...sessions, 403, 404, 502].sort((a, b) => a - b),
-    );
-    expect(byIdentifier("intentStart").errors).toEqual(
+    expect(byIdentifier(Api.ProxyApi, "serial").errors).toEqual(
       [...sessions, 403, 404].sort((a, b) => a - b),
     );
-    expect(byIdentifier("intentEnd").errors).toEqual([...sessions, 403, 404].sort((a, b) => a - b));
-    expect(byIdentifier("storedImage").errors).toEqual([400, 404, 500]);
+    expect(byIdentifier(Api.ProxyApi, "dump").errors).toEqual(
+      [...sessions, 404, 409].sort((a, b) => a - b),
+    );
+    expect(byIdentifier(Api.ProxyApi, "follow").errors).toEqual(
+      [...sessions, 404, 409].sort((a, b) => a - b),
+    );
+    expect(byIdentifier(Api.ProxyApi, "stats").errors).toEqual(sessions);
+    expect(byIdentifier(Api.ProxyApi, "stop").errors).toEqual(
+      [...sessions, 403, 404].sort((a, b) => a - b),
+    );
+    expect(byIdentifier(Api.ProxyApi, "sendKeys").errors).toEqual(
+      [...sessions, 403, 404, 502].sort((a, b) => a - b),
+    );
+    expect(byIdentifier(Api.ProxyApi, "sendMouse").errors).toEqual(
+      [...sessions, 403, 404, 502].sort((a, b) => a - b),
+    );
+    expect(byIdentifier(Api.ProxyApi, "intentStart").errors).toEqual(
+      [...sessions, 403, 404].sort((a, b) => a - b),
+    );
+    expect(byIdentifier(Api.ProxyApi, "intentEnd").errors).toEqual(
+      [...sessions, 403, 404].sort((a, b) => a - b),
+    );
+    expect(byIdentifier(Api.ProxyApi, "storedImage").errors).toEqual([400, 404, 500]);
   });
 
   it("exposes the version string the CLIs report", () => {
     expect(Api.VERSION).toBe("0.0.0");
+  });
+});
+
+describe("ReverseProxyApi", () => {
+  const reverse = Api.ReverseProxyApi;
+
+  it("declares every routed path of ProxyApi but /stats and /images, plus the three server routes", () => {
+    const table = routes(reverse).map(({ method, path }) => `${method} ${path}`);
+    expect(table.sort()).toEqual(
+      [
+        "POST /start",
+        "GET /image",
+        "GET /serial",
+        "GET /dump",
+        "GET /follow",
+        "POST /stop",
+        "POST /send-keys",
+        "POST /send-mouse",
+        "POST /intent/start",
+        "POST /intent/end",
+        "POST /servers",
+        "DELETE /servers",
+        "GET /servers",
+      ].sort(),
+    );
+    expect(table).not.toContain("GET /stats");
+    expect(table).not.toContain("GET /images/:id");
+  });
+
+  it("keeps the routed endpoints' identifiers and inputs so the ProxyApi client reaches them", () => {
+    const proxy = routes(Api.ProxyApi);
+    for (const route of routes(reverse)) {
+      if (route.group !== "Sessions") {
+        continue;
+      }
+      const twin = proxy.find((candidate) => candidate.identifier === route.identifier);
+      expect(twin, route.identifier).toMatchObject({ method: route.method, path: route.path });
+    }
+    const urls = HttpApiClient.urlBuilder(reverse);
+    expect(urls.Servers.register()).toBe("/servers");
+    expect(urls.Servers.unregister()).toBe("/servers");
+    expect(urls.Servers.servers()).toBe("/servers");
+  });
+
+  it("requires the bearer and applies BearerAuth then RouteBoundary on every endpoint", () => {
+    const spec = OpenApi.fromApi(reverse);
+    for (const route of routes(reverse)) {
+      expect(route.middleware).toEqual([Api.BearerAuth.key, Api.RouteBoundary.key]);
+      const item = spec.paths[route.path];
+      const operation =
+        route.method === "GET"
+          ? item?.get
+          : route.method === "POST"
+            ? item?.post
+            : route.method === "DELETE"
+              ? item?.delete
+              : undefined;
+      expect(operation, `${route.method} ${route.path}`).toBeDefined();
+      expect(operation?.security).toEqual([{ bearer: [] }]);
+    }
+  });
+
+  it("declares the boundary's 400, 401, 500, 502 and 503 on every endpoint plus each endpoint's own", () => {
+    const boundary = [400, 401, 500, 502, 503];
+    expect(byIdentifier(reverse, "start").errors).toEqual(boundary);
+    expect(byIdentifier(reverse, "image").errors).toEqual(ascending([...boundary, 403, 404]));
+    expect(byIdentifier(reverse, "serial").errors).toEqual(ascending([...boundary, 403, 404]));
+    expect(byIdentifier(reverse, "dump").errors).toEqual(ascending([...boundary, 404, 409]));
+    expect(byIdentifier(reverse, "follow").errors).toEqual(ascending([...boundary, 404, 409]));
+    expect(byIdentifier(reverse, "stop").errors).toEqual(ascending([...boundary, 403, 404]));
+    expect(byIdentifier(reverse, "sendKeys").errors).toEqual(ascending([...boundary, 403, 404]));
+    expect(byIdentifier(reverse, "sendMouse").errors).toEqual(ascending([...boundary, 403, 404]));
+    expect(byIdentifier(reverse, "intentStart").errors).toEqual(ascending([...boundary, 403, 404]));
+    expect(byIdentifier(reverse, "intentEnd").errors).toEqual(ascending([...boundary, 403, 404]));
+    expect(byIdentifier(reverse, "register").errors).toEqual(boundary);
+    expect(byIdentifier(reverse, "unregister").errors).toEqual(ascending([...boundary, 404]));
+    expect(byIdentifier(reverse, "servers").errors).toEqual(boundary);
+  });
+
+  it("leaves ProxyApi untouched: no server routes and no RouteBoundary", () => {
+    const table = routes(Api.ProxyApi).map(({ method, path }) => `${method} ${path}`);
+    expect(table).not.toContain("POST /servers");
+    expect(table).not.toContain("GET /servers");
+    for (const route of routes(Api.ProxyApi)) {
+      expect(route.middleware).not.toContain(Api.RouteBoundary.key);
+    }
   });
 });
