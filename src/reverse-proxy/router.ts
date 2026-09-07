@@ -1,11 +1,11 @@
-import { Context, Effect, Layer, Option, Result, Schema } from "effect";
+import { Context, Effect, Layer, Option, Result, Schema, Stream } from "effect";
 import {
   type Headers,
   HttpBody,
   HttpClient,
   type HttpClientError,
   HttpClientRequest,
-  HttpClientResponse,
+  type HttpClientResponse,
   HttpMethod,
   type HttpServerRequest,
   HttpServerResponse,
@@ -29,7 +29,8 @@ const StartAnswer = Schema.fromJsonString(
   Schema.toCodecJson(Schema.Struct({ id: Domain.SessionId })),
 );
 const decodeStartAnswer = Schema.decodeUnknownEffect(StartAnswer);
-const decodeStats = HttpClientResponse.schemaBodyJson(Contract.Stats);
+const StatsAnswer = Schema.fromJsonString(Schema.toCodecJson(Contract.Stats));
+const decodeStatsAnswer = Schema.decodeUnknownEffect(StatsAnswer);
 
 export type RouterService = {
   // Probes GET /stats on the url, then remembers it; a url already registered is probed again.
@@ -98,60 +99,57 @@ const forwardedHeaders = (headers: Headers.Headers): Headers.Input => ({
   "x-image-url": headers["x-image-url"],
 });
 
-// The server's answer as it came: its status, its two headers, its body streamed unread.
-const passthrough = (
-  response: HttpClientResponse.HttpClientResponse,
-): HttpServerResponse.HttpServerResponse =>
-  HttpServerResponse.stream(response.stream, {
-    status: response.status,
-    headers: forwardedHeaders(response.headers),
-  });
-
 const make = Effect.gen(function* () {
   const store = yield* Servers.ServerStore;
   const log = yield* Log.Log;
   const http = yield* HttpClient.HttpClient;
   const { token } = yield* Config.ProxyConfig;
 
+  // prependUrl joins with exactly one slash, so `http://host/` and `http://host` reach the same
+  // /stats, as the generated client's baseUrl does.
   const probe = (
     url: string,
     who: Log.Attribution,
   ): Effect.Effect<Contract.Stats, Errors.ServerFailed> =>
-    http
-      .execute(HttpClientRequest.get(`${url}/stats`).pipe(HttpClientRequest.bearerToken(token)))
-      .pipe(
+    Effect.gen(function* () {
+      const response = yield* http
+        .execute(
+          HttpClientRequest.get("/stats").pipe(
+            HttpClientRequest.prependUrl(url),
+            HttpClientRequest.bearerToken(token),
+          ),
+        )
+        .pipe(Effect.mapError((error) => unreachable(url, error, who)));
+      if (response.status !== 200) {
+        // The status alone is the refusal; an unreadable body only loses its text.
+        const text = yield* response.text.pipe(Effect.orElseSucceed(() => ""));
+        return yield* serverFailed(
+          url,
+          `server ${url} answered ${String(response.status)}: ${ProxyClient.apiError(text)}`,
+          undefined,
+          who,
+        );
+      }
+      const text = yield* response.text.pipe(
         Effect.mapError((error) => unreachable(url, error, who)),
-        Effect.flatMap((response) =>
-          response.status === 200
-            ? decodeStats(response).pipe(
-                Effect.mapError((cause) =>
-                  serverFailed(url, `server ${url} answered 200 without stats`, cause, who),
-                ),
-              )
-            : response.text.pipe(
-                // The status alone is the refusal; an unreadable body only loses its text.
-                Effect.orElseSucceed(() => ""),
-                Effect.flatMap((text) =>
-                  serverFailed(
-                    url,
-                    `server ${url} answered ${String(response.status)}: ${ProxyClient.apiError(text)}`,
-                    undefined,
-                    who,
-                  ),
-                ),
-              ),
-        ),
-        Effect.timeoutOrElse({
-          duration: PROBE_TIMEOUT,
-          orElse: () =>
-            serverFailed(
-              url,
-              `server ${url} unreachable: no response within ${PROBE_TIMEOUT}`,
-              undefined,
-              who,
-            ),
-        }),
       );
+      return yield* decodeStatsAnswer(text).pipe(
+        Effect.mapError((cause) =>
+          serverFailed(url, `server ${url} answered 200 without stats`, cause, who),
+        ),
+      );
+    }).pipe(
+      Effect.timeoutOrElse({
+        duration: PROBE_TIMEOUT,
+        orElse: () =>
+          serverFailed(
+            url,
+            `server ${url} unreachable: no response within ${PROBE_TIMEOUT}`,
+            undefined,
+            who,
+          ),
+      }),
+    );
 
   // The request as it came: the same method, path and query, the body text under
   // application/json when the method carries one, and the bearer the servers share.
@@ -166,12 +164,34 @@ const make = Effect.gen(function* () {
         ? HttpBody.text(yield* Effect.orDie(request.text), "application/json")
         : HttpBody.empty;
       return yield* http.execute(
-        HttpClientRequest.make(request.method)(`${url}${request.url}`).pipe(
+        HttpClientRequest.make(request.method)(request.url).pipe(
+          HttpClientRequest.prependUrl(url),
           HttpClientRequest.bearerToken(token),
           HttpClientRequest.setBody(body),
         ),
       );
     });
+
+  // The server's answer as it came: its status, its two headers, its body streamed unread. The
+  // headers are on the wire before the body can fail, so a server that dies mid-stream ends the
+  // client's response short; the one line here is the record of it.
+  const passthrough = (
+    url: string,
+    response: HttpClientResponse.HttpClientResponse,
+    who: Log.Attribution,
+  ): HttpServerResponse.HttpServerResponse =>
+    HttpServerResponse.stream(
+      response.stream.pipe(
+        Stream.tapError((error) => {
+          const failure = unreachable(url, error, who);
+          return log.error(`forward cut short; ${failure.message}`, {
+            ...who,
+            cause: failure.cause,
+          });
+        }),
+      ),
+      { status: response.status, headers: forwardedHeaders(response.headers) },
+    );
 
   const register = Effect.fn("Router.register")(function* (url: string) {
     yield* probe(url, {});
@@ -278,7 +298,7 @@ const make = Effect.gen(function* () {
     const response = yield* send(route.value, request).pipe(
       Effect.mapError((error) => unreachable(route.value, error, who)),
     );
-    return passthrough(response);
+    return passthrough(route.value, response, who);
   });
 
   const service: RouterService = { register, unregister, servers, start, forward };

@@ -141,6 +141,18 @@ describe("server registration", () => {
     }),
   );
 
+  it.effect("a url with a trailing slash probes /stats with one slash and is stored as given", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const api = yield* reverseClient;
+        yield* api.Servers.register({ payload: serverBody(`${SERVER_A}/`) });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(upstreamCalls(fixed)).toEqual([`GET ${SERVER_A}/stats`]);
+      expect(fixed.store.servers).toEqual([`${SERVER_A}/`]);
+    }),
+  );
+
   it.effect("registering a url twice probes twice and keeps it once", () =>
     Effect.gen(function* () {
       const fixed = fixture();
@@ -352,6 +364,31 @@ describe("registration refusals", () => {
         const second = yield* Effect.flip(api.Servers.register({ payload: serverBody(SERVER_B) }));
         expect(second.message).toBe(`server ${SERVER_B} answered 503: request failed`);
       }).pipe(Effect.provide(serve(fixed)));
+    }),
+  );
+
+  it.effect("a 200 whose body cannot be read is 502 unreachable with the read failure", () =>
+    Effect.gen(function* () {
+      const fixed = fixture(
+        () =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.error(new Error("read ECONNRESET"));
+              },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+      );
+      yield* Effect.gen(function* () {
+        const api = yield* reverseClient;
+        const error = yield* Effect.flip(api.Servers.register({ payload: serverBody(SERVER_A) }));
+        expect(error).toMatchObject({
+          _tag: "ServerFailed",
+          message: `server ${SERVER_A} unreachable: read ECONNRESET`,
+        });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.store.servers).toEqual([]);
     }),
   );
 
@@ -693,6 +730,8 @@ describe("placement", () => {
           const error = yield* Effect.flip(api.Sessions.start({ payload: startBody }));
           expect(error).toMatchObject({ _tag: "Internal", message: "internal error" });
         }).pipe(Effect.provide(serve(fixed)));
+        // No compensating stop: the machine times out on its server, as the doc says.
+        expect(upstreamCalls(fixed)).toEqual([`GET ${SERVER_A}/stats`, `POST ${SERVER_A}/start`]);
         expect(fixed.log.lines).toEqual([
           {
             level: "error",
@@ -841,6 +880,92 @@ describe("forwarding", () => {
         expect(yield* Stream.mkString(Stream.decodeText(stream))).toBe(lines.join(""));
       }).pipe(Effect.provide(serve(fixed)));
       expect(upstreamCalls(fixed)).toEqual([`GET ${SERVER_A}/follow?id=${SESSION_ID}`]);
+    }),
+  );
+
+  it.effect("GET /follow streams each line as the server writes it, not once it has ended", () =>
+    Effect.gen(function* () {
+      const first = '{"type":"session","status":"running"}\n';
+      const second = '{"type":"session","status":"succeeded"}\n';
+      const encoder = new TextEncoder();
+      // The server writes the second line only once the test has read the first one: a proxy
+      // that buffered the body would deadlock here instead of streaming.
+      let releaseSecond: () => void = () => undefined;
+      const secondReleased = new Promise<void>((resolve) => {
+        releaseSecond = resolve;
+      });
+      const fixed = fixture(
+        () =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.enqueue(encoder.encode(first));
+              },
+              async pull(controller) {
+                await secondReleased;
+                controller.enqueue(encoder.encode(second));
+                controller.close();
+              },
+            }),
+            { status: 200, headers: { "content-type": "application/x-ndjson" } },
+          ),
+      );
+      fixed.store.routes.set(SESSION_ID, SERVER_A);
+      yield* Effect.gen(function* () {
+        const api = yield* proxyClient;
+        const stream = yield* api.Sessions.follow({ query: { id: SESSION_ID } });
+        const received: Array<string> = [];
+        yield* Stream.runForEach(Stream.decodeText(stream), (chunk) =>
+          Effect.sync(() => {
+            received.push(chunk);
+            if (received.join("") === first) {
+              releaseSecond();
+            }
+          }),
+        ).pipe(
+          Effect.timeoutOrElse({ duration: "5 seconds", orElse: () => Effect.die("buffered") }),
+        );
+        expect(received.join("")).toBe(first + second);
+      }).pipe(Effect.provide(serve(fixed)));
+    }),
+  );
+
+  it.effect("a routed session keeps its server after the server is unregistered", () =>
+    Effect.gen(function* () {
+      const fixed = fixture(
+        () => new Response("serial\n", { status: 200, headers: { "content-type": "text/plain" } }),
+      );
+      fixed.store.servers.push(SERVER_A);
+      fixed.store.routes.set(SESSION_ID, `${SERVER_A}/`);
+      yield* Effect.gen(function* () {
+        const operator = yield* reverseClient;
+        yield* operator.Servers.unregister({ payload: serverBody(SERVER_A) });
+        const api = yield* proxyClient;
+        const serial = yield* api.Sessions.serial({ query: { id: SESSION_ID, agent: AGENT_ID } });
+        expect(decoder.decode(serial)).toBe("serial\n");
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.store.servers).toEqual([]);
+      // A stored trailing slash joins with one slash, as registration does.
+      expect(upstreamCalls(fixed)).toEqual([
+        `GET ${SERVER_A}/serial?id=${SESSION_ID}&agent=${AGENT_ID}`,
+      ]);
+    }),
+  );
+
+  it.effect("a body is forwarded as the text it arrived as, spacing and key order included", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      fixed.store.routes.set(SESSION_ID, SERVER_A);
+      const text = `{ "agent" : "${AGENT_ID}",\n  "keys":"a b" , "id": "${SESSION_ID}" }`;
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const response = yield* http.post("/send-keys", {
+          headers: { authorization: AUTHORIZATION },
+          body: HttpBody.text(text, "application/json"),
+        });
+        expect(response.status).toBe(200);
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.upstream.requests.map((request) => request.body)).toEqual([text]);
     }),
   );
 
@@ -1081,6 +1206,46 @@ describe("forwarding refusals", () => {
           agentId: undefined,
           skipSentry: false,
         });
+      }),
+  );
+
+  it.effect(
+    "a server that dies mid-stream ends the client's answer short and logs forward cut short",
+    () =>
+      Effect.gen(function* () {
+        const encoder = new TextEncoder();
+        const fixed = fixture(
+          () =>
+            new Response(
+              new ReadableStream<Uint8Array>({
+                start(controller) {
+                  controller.enqueue(encoder.encode('{"type":"session","status":"running"}\n'));
+                  controller.error(new Error("read ECONNRESET"));
+                },
+              }),
+              { status: 200, headers: { "content-type": "application/x-ndjson" } },
+            ),
+        );
+        fixed.store.routes.set(SESSION_ID, SERVER_A);
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          const response = yield* http.get(`/follow?id=${SESSION_ID}`, {
+            headers: { authorization: AUTHORIZATION },
+          });
+          // The headers were on the wire before the body failed: a 200 whose body ends short.
+          expect(response.status).toBe(200);
+          const body = yield* Effect.exit(Stream.runCollect(Stream.decodeText(response.stream)));
+          expect(Exit.isSuccess(body) ? [...body.value].join("") : "").not.toContain("succeeded");
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.log.lines).toHaveLength(1);
+        expect(fixed.log.lines[0]).toMatchObject({
+          level: "error",
+          text: `forward cut short; server ${SERVER_A} unreachable: read ECONNRESET`,
+          sessionId: SESSION_ID,
+          agentId: undefined,
+          skipSentry: false,
+        });
+        expect(fixed.log.lines[0]?.cause).toBeInstanceOf(Error);
       }),
   );
 

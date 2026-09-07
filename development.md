@@ -867,15 +867,18 @@ the fleet and the routing table, both rows in the control-plane database.
   cpu; the per-server numbers are `GET /servers`. Why no `/images/:id`: a stored image's address
   is the dashboard's (`Contract.StoredImageUrl`), never a proxy's, and nothing calls it.
 - `POST /servers { url }`: `url` is a `Domain.ServerUrl`, an `http://` or `https://` url with a
-  host (`url must be an http or https url`, 400), used exactly as given, as `--server-url` is; a
-  url that is not a server's origin fails its probe. The reverse proxy probes `GET <url>/stats`
-  with the bearer: a transport failure is 502 `server <url> unreachable: <cause>`, a non-200 is
-  502 `server <url> answered <status>: <message>` (the `error` of a `{ "error" }` body, any other
-  body raw, an empty body `request failed`, as `ProxyClient.apiError` reads it), a 200 that does
-  not decode as `Contract.Stats` is 502 `server <url> answered 200 without stats`, and no answer
-  within `PROBE_TIMEOUT` (`"10 seconds"`) is 502 `server <url> unreachable: no response within 10
-  seconds`. A probe that passes inserts the `servers` row (`on conflict do nothing`: registering a
-  url twice is two probes and one row) and logs `server registered; <url>` at info each time.
+  host (`url must be an http or https url`, 400), stored exactly as given, as `--server-url` is,
+  and joined to each path with `HttpClientRequest.prependUrl` (one slash, as the generated
+  client's `baseUrl`), so `https://host/` and `https://host` both reach `/stats` but are two rows
+  if both are registered. The reverse proxy probes `GET <url>/stats` with the bearer: a transport
+  failure, on the connection or while reading the body, is 502 `server <url> unreachable:
+  <cause>`; a non-200 is 502 `server <url> answered <status>: <message>` (the `error` of a
+  `{ "error" }` body, any other body raw, an empty body `request failed`, as
+  `ProxyClient.apiError` reads it); a 200 whose body does not decode as `Contract.Stats` is 502
+  `server <url> answered 200 without stats`; and no answer within `PROBE_TIMEOUT` (`"10
+  seconds"`) is 502 `server <url> unreachable: no response within 10 seconds`. A probe that
+  passes inserts the `servers` row (`on conflict do nothing`: registering a url twice is two
+  probes and one row) and logs `server registered; <url>` at info each time.
 - `DELETE /servers { url }`: removes the row and logs `server removed; <url>`; a url that was not
   registered is 404 `not found`. Routes to that server stay: a removed server takes no new
   session and keeps the ones it has until they end, which is why `session_servers.server_url` is
@@ -901,12 +904,15 @@ the fleet and the routing table, both rows in the control-plane database.
   404 `unknown session "<id>"`, attributed to the id when it is a uuid and to the agent when the
   route carries one; the store is not read for a non-uuid (the column is `uuid`). Otherwise the
   request goes to the recorded server — the same method, the same path and query, the body text
-  exactly as it arrived under `Content-Type: application/json`, and the bearer — and the answer
-  comes back with its status, its `content-type` and `x-image-url` headers and its body streamed
-  unread, so a server's 403, 404, 409, 502 and its `/follow` stream reach the client as the
-  server wrote them and are not logged here. A server that cannot be reached is 502 `server <url>
-  unreachable: <cause>`, attributed to the session and the agent, the cause going to Sentry. The
-  reverse proxy never re-encodes what it forwards: the client's bytes are the server's bytes.
+  as it arrived under `Content-Type: application/json`, and the bearer — and the answer comes back
+  with its status, its `content-type` and `x-image-url` headers and its body streamed unread, so
+  a server's 403, 404, 409, 502 and its `/follow` stream reach the client as the server wrote
+  them and are not logged here. The decoded body is never rebuilt: the text the client sent is
+  the text the server reads. A server that cannot be reached is 502 `server <url> unreachable:
+  <cause>`, attributed to the session and the agent, the cause going to Sentry. A server that
+  dies while its answer is streaming cannot change the status already on the wire: the client's
+  response ends short and the one record is the error line `forward cut short; server <url>
+  unreachable: <cause>`, attributed the same way.
 - Routes are never deleted: a row for an ended session is history (where a session ran) and a
   request for it is the server's own 404, passed through; the `sessions` row says whether it
   ended.
@@ -918,8 +924,10 @@ the fleet and the routing table, both rows in the control-plane database.
   route is 404 `unknown session ""` here where the server answers 400 `session id is required`,
   and an unknown session is refused here before any server sees it.
 - Deliberately absent until a need shows it: a health loop (a dead server costs one `PROBE_TIMEOUT`
-  per start and per `GET /servers` until `DELETE /servers` forgets it), a capacity limit, retries,
-  a stop of the machine whose route could not be written, `/stats` and `/images/:id`.
+  per start and per `GET /servers` until `DELETE /servers` forgets it), a capacity limit or a
+  reservation (two starts probing at once see the same `qemus` and may pick the same server; a
+  booting machine is not yet counted), retries, a stop of the machine whose route could not be
+  written, `/stats` and `/images/:id`.
 
 The pieces: `src/shared/api.ts` declares `RouteBoundary` (the boundary middleware declaring
 `BadRequestWire`, `InternalWire`, `ServerFailedWire` and `NoServerWire`), `RoutedSessions` (the
@@ -931,8 +939,8 @@ errors they declare; `src/db/servers.ts` is `ServerStore` (`addServer`, `removeS
 `src/reverse-proxy/router.ts` is the `Router` service (`register`, `unregister`, `servers`,
 `start`, `forward`) over `ServerStore`, `Log`, `HttpClient` and `ProxyConfig`; `handlers.ts`
 binds the two groups and the catch-all; `command.ts` is `makeReverseProxyCommand({ serve,
-serverFailed })` with `serve(port)`; `main.ts` composes the graph as the proxy's does, without
-`Qemu`, `Iso`, `Stats`, `Sessions` or a `Shutdown`.
+serverFailed })` with `serve(port)`; `main.ts` composes the graph as the proxy's does, with the
+same `TracerDisabledWhen`, without `Qemu`, `Iso`, `Stats`, `Sessions` or a `Shutdown`.
 
 `forward` in `src/reverse-proxy/router.ts`: the route, the request as it came, the answer as it
 came.
@@ -945,15 +953,18 @@ const forward = Effect.fn("Router.forward")(function* (
 ) {
   // The column is uuid and servers mint nothing else: a non-uuid has no row to look for.
   const route = Domain.isSessionId(id)
-    ? yield* store.serverForSession(id).pipe(Effect.mapError((cause) => internal(cause, id, agent)))
+    ? yield* store
+        .serverForSession(id)
+        .pipe(Effect.mapError((cause) => internal(cause, id, agent)))
     : Option.none<string>();
   if (Option.isNone(route)) {
     return yield* Errors.unknownSession(id, agent);
   }
+  const who = agent === undefined ? { sessionId: id } : { sessionId: id, agentId: agent };
   const response = yield* send(route.value, request).pipe(
-    Effect.mapError((error) => unreachable(route.value, error, id, agent)),
+    Effect.mapError((error) => unreachable(route.value, error, who)),
   );
-  return passthrough(response);
+  return passthrough(route.value, response, who);
 });
 ```
 
@@ -1509,7 +1520,7 @@ and drizzle, the same tables the Effect `TestStore` writes. It does not call `Pr
 ## Sentry
 
 - Initialise the SDK before any Effect code in `src/observability/instrument.ts`, loaded by the
-  `server` wrapper's `--import`: `Sentry.init({ dsn: SENTRY_DSN, tracesSampleRate: 1,
+  `server` and `reverse-proxy` wrappers' `--import`: `Sentry.init({ dsn: SENTRY_DSN, tracesSampleRate: 1,
   traceLifecycle: "stream", integrations: [Sentry.httpIntegration({ spans: false }),
   Sentry.nativeNodeFetchIntegration({ spans: false })] })`. `SENTRY_DSN` in `dsn.ts` is the one
   hard-coded constant (public by design) and is shared with the dashboard.

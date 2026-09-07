@@ -928,8 +928,8 @@ Postgres.describeWithDatabase("database", () => {
         expect(yield* store.removeServer(first)).toBe(false);
         expect(yield* store.listServers()).not.toContain(first);
         expect(yield* store.listServers()).toContain(second);
-        // The reverse proxy's process test expects the shared database's fleet to be empty.
         expect(yield* store.removeServer(second)).toBe(true);
+        expect(yield* store.listServers()).not.toContain(second);
       }),
     );
 

@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { NodeHttpClient, NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node";
 import { Cause, Deferred, Effect, Exit, Layer, type Runtime } from "effect";
 import { Command } from "effect/unstable/cli";
-import { HttpRouter, HttpServerError } from "effect/unstable/http";
+import { HttpMiddleware, HttpRouter, HttpServerError } from "effect/unstable/http";
 import * as Config from "../config.ts";
 import * as Client from "../db/client.ts";
 import * as Logs from "../db/logs.ts";
@@ -42,6 +42,8 @@ const ServerLive = (port: number) =>
     ),
     Layer.provide(Router.Router.layer),
     Layer.provide(NodeHttpServer.layer(() => server, { host: HOST, port })),
+    // As on the proxy: no http.server span reaches Sentry.
+    Layer.provide(Layer.succeed(HttpMiddleware.TracerDisabledWhen)(() => true)),
   );
 
 const DatabaseLive = Layer.unwrap(

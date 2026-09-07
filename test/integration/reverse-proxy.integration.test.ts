@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, inject } from "vitest";
 import { it } from "@effect/vitest";
 import { Effect } from "effect";
+import { Client } from "pg";
 
 const REVERSE_PROXY = fileURLToPath(new URL("../../reverse-proxy", import.meta.url));
 const TOKEN = "t";
@@ -208,9 +209,21 @@ describe("reverse proxy startup refusals", () => {
   );
 });
 
+// The integration files share one database; the fleet this test expects is its own to arrange.
+const forgetEveryServer = async (): Promise<void> => {
+  const client = new Client({ connectionString: dbUrl });
+  await client.connect();
+  try {
+    await client.query("delete from servers");
+  } finally {
+    await client.end();
+  }
+};
+
 describe("reverse proxy serving", () => {
   const serving = (signal: "SIGINT" | "SIGTERM") =>
     Effect.promise(async () => {
+      await forgetEveryServer();
       const port = await freePort();
       const process = spawnReverseProxy(["--port", String(port)]);
       try {
