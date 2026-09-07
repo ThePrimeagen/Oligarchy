@@ -174,6 +174,8 @@ describe("render happy path", () => {
         expect(text).toContain("## diagnose");
         expect(text).toContain("--verdict passed|failed");
         expect(text).toContain("--images");
+        // The screenshots are evidence the reviewer looks at, through the database.
+        expect(text).toContain("./session image --image-id");
         // The reviewer drives nothing: no client guide, no ticket, no result id.
         expect(text).not.toContain("./client");
         expect(text).not.toContain("## test start");

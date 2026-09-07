@@ -190,7 +190,7 @@ Prints what is stored for one session, as JSON. At least one selector is require
 ./ctrl error-type new --server-url <url> --key <key> --description <text>
 ```
 
-Adds one error type to the vocabulary diagnoses are written in. The table starts empty and grows one type per distinct cause, the first time that cause is seen; there is no `other` or `unclassified`. A key that already exists is a failure: `error-type new: <key> already exists`. Not used while driving a guest.
+Adds one error type to the vocabulary diagnoses are written in. The table starts empty and grows one type per distinct cause, the first time that cause is seen; there is no `other` or `unclassified`. Minting is rare and deliberate: a reviewer reads the whole of [error-type list](#error-type-list) first and mints only when no description matches the cause in the evidence — a different wording or symptom of a known cause is not a new type. A key that already exists is a failure: `error-type new: <key> already exists`. Not used while driving a guest.
 
 - `--key <key>` — the identifier a diagnosis carries: snake_case, `a-z`, `0-9` and `_`, starting with a letter (`guest_boot_hang`). Anything else is refused before the database is touched.
 - `--description <text>` — what a failure of this type looks like, so the next reader picks the same key for the same cause.
@@ -219,7 +219,7 @@ Prints every error type, ordered by key, one per line: the key, two spaces, the 
 ./ctrl diagnose --server-url <url> --session-id <id> --verdict passed|failed [--type <key>] --summary <text> --model <id>
 ```
 
-Records a reviewer's verdict on one session that has ended, whatever the driver said about it: a `succeeded`, `failed` or `aborted` stop, or the ten-minute timeout. Read the evidence first (`session --all`: the images against the definition's proof, the actions, the debug log), then say whether the proof landed. A `failed` verdict names its cause with a type from [error-type list](#error-type-list); when no type fits, create one with [error-type new](#error-type-new) and diagnose with it. One diagnosis per session: a second is a failure and the first stands. Not used while driving a guest.
+Records the post-run diagnosis: a reviewer's verdict on one session that has ended, whatever the driver said about it: a `succeeded`, `failed` or `aborted` stop, or the ten-minute timeout. Read the evidence first (`session --all`; the final image through `./session image --image-id <id> -o <file>`, and the images around any step the logs or actions make suspect, against the definition's proof; the debug log), then say whether the proof landed. A `failed` verdict names its cause with the matching type from [error-type list](#error-type-list); only when none matches is one minted with [error-type new](#error-type-new), rarely. One diagnosis per session: a second is a failure and the first stands. Not used while driving a guest.
 
 - `--session-id <id>` — the session. Unknown, or still running or downloading, is a failure (`diagnose: session <id> is still running`).
 - `--verdict <verdict>` — `passed` when the proof is on screen, `failed` when it is not or the session never got there. The reviewer's own answer; it may contradict the session status and the test result.
