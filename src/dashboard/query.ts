@@ -93,6 +93,18 @@ export function definitionStats(rows: ReadonlyArray<Session>): DefinitionStat[] 
     }));
 }
 
+// The definition the wide layout opens on: the one ?name asks for, or the first listed when the
+// page is opened bare. A name nobody carries selects nothing, so the route can answer 404 rather
+// than quietly show another definition under a URL that names this one.
+export function selectDefinition(
+  definitions: ReadonlyArray<TestDefinition>,
+  name: string | undefined,
+): TestDefinition | undefined {
+  return name === undefined
+    ? definitions[0]
+    : definitions.find((definition) => definition.name === name);
+}
+
 export function modelStats(rows: ReadonlyArray<TestResultOutcome>): ModelStat[] {
   const byModel = new Map<string, { succeeded: number; failed: number }>();
   for (const row of rows) {

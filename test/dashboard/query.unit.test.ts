@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   definitionStats,
   modelStats,
+  selectDefinition,
   type Session,
+  type TestDefinition,
   type TestResultOutcome,
 } from "../../src/dashboard/query.ts";
 
@@ -129,5 +131,46 @@ describe("modelStats unhappy path", () => {
         outcome("passed", "lock-screen", "grok-4.6"),
       ]),
     ).toEqual([{ model: "grok-4.6", succeeded: 1, failed: 0 }]);
+  });
+});
+
+const definition = (id: number, name: string): TestDefinition => ({
+  id,
+  name,
+  description: "d",
+  instruction: "i",
+  proof: "p",
+  createdAt: new Date("2026-09-01T00:00:00Z"),
+});
+
+describe("selectDefinition happy path", () => {
+  it("selects the first definition when no name is asked for", () => {
+    const install = definition(1, "install");
+    expect(selectDefinition([install, definition(2, "lock-screen")], undefined)).toBe(install);
+  });
+
+  it("selects the definition whose name is asked for, wherever it sits in the list", () => {
+    const lock = definition(2, "lock-screen");
+    expect(selectDefinition([definition(1, "install"), lock], "lock-screen")).toBe(lock);
+  });
+});
+
+describe("selectDefinition unhappy path", () => {
+  it("selects nothing when the name matches no definition", () => {
+    expect(
+      selectDefinition([definition(1, "install"), definition(2, "lock-screen")], "wifi"),
+    ).toBeUndefined();
+  });
+
+  it("matches the name exactly: case and surrounding whitespace are not forgiven", () => {
+    const definitions = [definition(1, "install")];
+    expect(selectDefinition(definitions, "Install")).toBeUndefined();
+    expect(selectDefinition(definitions, " install")).toBeUndefined();
+    expect(selectDefinition(definitions, "")).toBeUndefined();
+  });
+
+  it("selects nothing from an empty list, with or without a name", () => {
+    expect(selectDefinition([], undefined)).toBeUndefined();
+    expect(selectDefinition([], "install")).toBeUndefined();
   });
 });

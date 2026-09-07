@@ -1339,9 +1339,23 @@ and drizzle, the same tables the Effect `TestStore` writes. It does not call `Pr
   status). `modelStats` folds those outcomes by `test_results.model`: `passed` is succeeded,
   `failed` is failed. A null model, and every status that is not `passed` or `failed`, is omitted;
   a model that then has no counts is omitted. Each definition card draws one stacked bar per
-  remaining model (name on the left, succeeded green and failed red, counts inside the segments).
-  The two queries run together; a failure of either is the same route error as a failed
-  definition list.
+  remaining model (name on the left, succeeded green and failed red, counts inside the segments)
+  under `Results by model`; a definition with no remaining model says `No passed or failed
+  results yet.` there instead. The two queries run together; a failure of either is the same
+  route error as a failed definition list.
+- `/definitions` takes an optional `?name=`. `selectDefinition` picks the current definition: the
+  one named, or the first listed when the page is opened bare; a name no definition carries
+  selects nothing and the route answers 404 with the page intact (the sidebar still lists what
+  exists, the detail column says `No test definition named <name>.`) rather than quietly opening
+  another definition under that URL. Every card is in the HTML: a narrow screen (under 64rem)
+  keeps the scrolling list of cards and hides the sidebar and that notice; a wide screen widens
+  `main` (it carries `data-page` for this) and shows the names down the left, the current one
+  marked `aria-current="true"`, then only the current card: its results by model in the centre at
+  a larger scale, its description, instruction and proof on the right. A sidebar link is a plain
+  `href` to `/definitions?name=<encoded name>`; with htmx it fetches that page, swaps
+  `#definitions` in place (`hx-select`, inherited from the nav with `:inherited` as htmx 4
+  requires) and pushes the URL, so a reload or a shared link opens where the click did. The
+  unavailable and empty states are unchanged.
 - Route failures are `Sentry.captureException` on `@sentry/cloudflare` (`withSentry` wraps the
   app, `SENTRY_DSN` from `dsn.ts`). Effect's `ErrorReporter` is not installed here; that is the
   one place `captureException` is called outside `observability/`.
