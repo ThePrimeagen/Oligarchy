@@ -308,6 +308,11 @@ export class LinearError extends Schema.TaggedError<LinearError>(
   cause: Schema.optionalKey(Schema.Defect()),
 }) {}
 
+// A prompt template that cannot be read, or names a placeholder its renderer has no value for.
+export class PromptError extends Schema.TaggedError<PromptError>(
+  "@oligarchy/shared/errors/PromptError",
+)("PromptError", { message: Schema.String, cause: Schema.optionalKey(Schema.Defect()) }) {}
+
 export class CursorAgentFailed extends Schema.TaggedError<CursorAgentFailed>(
   "@oligarchy/shared/errors/CursorAgentFailed",
 )("CursorAgentFailed", {

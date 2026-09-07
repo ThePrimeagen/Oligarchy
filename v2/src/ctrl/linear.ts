@@ -1,14 +1,4 @@
-import {
-  Array as Arr,
-  Context,
-  Effect,
-  FileSystem,
-  Layer,
-  Option,
-  Redacted,
-  Result,
-  Schema,
-} from "effect";
+import { Array as Arr, Context, Effect, Layer, Option, Redacted, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 import * as Errors from "../shared/errors.ts";
 
@@ -16,24 +6,6 @@ export const LINEAR_API_URL = "https://api.linear.app/graphql";
 export const LINEAR_TEAM = "Oligarchy";
 export const AGENT_TEST_LABEL = "agent test";
 export const ASSIGNEE_EMAIL = "prime@terminal.shop";
-export const SUB_AGENT = "Grok 4.6 high fast (cursor-grok-4.6-high-fast)";
-
-export type ExperimentTest = {
-  readonly id: string;
-  readonly definitionId: number;
-  readonly name: string;
-  readonly description: string;
-  readonly instruction: string;
-  readonly proof: string;
-};
-
-export type Experiment = {
-  readonly id: string;
-  readonly iso: string;
-  readonly serverUrl: string;
-  readonly version: string;
-  readonly tests: ReadonlyArray<ExperimentTest>;
-};
 
 export const LinearTicket = Schema.Struct({
   id: Schema.String,
@@ -56,117 +28,6 @@ export type CreateIssueInput = {
   readonly labelIds: ReadonlyArray<string>;
   readonly assigneeId: string;
 };
-
-// ---------------------------------------------------------------------------
-// Prompts
-// ---------------------------------------------------------------------------
-
-// The ticket template and the two guides it embeds, read once per `test new`.
-export type IssuePrompts = {
-  readonly linearIssue: string;
-  readonly clientMd: string;
-  readonly ctrlMd: string;
-};
-
-const LINEAR_ISSUE_FILE = "linear-issue.html";
-const DRIVING_AGENT_FILE = "driving-agent.html";
-
-// The files sit beside the package, not the working directory: resolve them from this module.
-const besideModule = (relative: string): string =>
-  decodeURIComponent(new URL(relative, import.meta.url).pathname);
-
-const PROMPT_PATHS = {
-  linearIssue: besideModule(`../../prompts/${LINEAR_ISSUE_FILE}`),
-  drivingAgent: besideModule(`../../prompts/${DRIVING_AGENT_FILE}`),
-  clientMd: besideModule("../../client.md"),
-  ctrlMd: besideModule("../../ctrl-linear.md"),
-};
-
-const readPrompt = Effect.fn("Linear.readPrompt")(function* (path: string) {
-  const fs = yield* FileSystem.FileSystem;
-  return yield* fs.readFileString(path).pipe(
-    Effect.mapError((error) =>
-      Errors.LinearError.make({
-        operation: "prompts",
-        message: `linear: ${error.message}`,
-        cause: error,
-      }),
-    ),
-  );
-});
-
-// `test run` reads its kickoff template alone: the guides `test new` embeds are not its business,
-// so an unreadable one cannot stop it.
-export const loadDrivingPrompt: Effect.Effect<string, Errors.LinearError, FileSystem.FileSystem> =
-  readPrompt(PROMPT_PATHS.drivingAgent);
-
-export const loadIssuePrompts: Effect.Effect<
-  IssuePrompts,
-  Errors.LinearError,
-  FileSystem.FileSystem
-> = Effect.gen(function* () {
-  return {
-    linearIssue: yield* readPrompt(PROMPT_PATHS.linearIssue),
-    clientMd: yield* readPrompt(PROMPT_PATHS.clientMd),
-    ctrlMd: yield* readPrompt(PROMPT_PATHS.ctrlMd),
-  } satisfies IssuePrompts;
-});
-
-const PLACEHOLDER = /\{\{([A-Z_]+)\}\}/g;
-
-export const renderPrompt = (
-  template: string,
-  file: string,
-  values: Readonly<Record<string, string>>,
-): Result.Result<string, Errors.LinearError> => {
-  const missing: Array<string> = [];
-  const rendered = template.replace(PLACEHOLDER, (match: string, name: string) => {
-    const value = values[name];
-    if (value === undefined) {
-      missing.push(name);
-      return match;
-    }
-    return value;
-  });
-  return Option.match(Arr.head(missing), {
-    onNone: () => Result.succeed(rendered),
-    onSome: (name) =>
-      Result.fail(
-        Errors.LinearError.make({
-          operation: "renderPrompt",
-          message: `linear: prompts/${file} uses {{${name}}}, which has no value`,
-        }),
-      ),
-  });
-};
-
-export const linearTicketDescription = (
-  experiment: Experiment,
-  test: ExperimentTest,
-  ticket: string,
-  prompts: IssuePrompts,
-): Result.Result<string, Errors.LinearError> =>
-  renderPrompt(prompts.linearIssue, LINEAR_ISSUE_FILE, {
-    LINEAR_TICKET: ticket,
-    RUN_ID: experiment.id,
-    RESULT_ID: test.id,
-    VERSION: experiment.version,
-    ISO_URL: experiment.iso,
-    SERVER_URL: experiment.serverUrl,
-    TEST_NAME: test.name,
-    TEST_DESCRIPTION: test.description,
-    TEST_INSTRUCTION: test.instruction,
-    TEST_PROOF: test.proof,
-    CLIENT_MD: prompts.clientMd.trimEnd(),
-    CTRL_MD: prompts.ctrlMd.trimEnd(),
-    SUB_AGENT,
-  });
-
-export const drivingAgentPrompt = (
-  ticket: string,
-  template: string,
-): Result.Result<string, Errors.LinearError> =>
-  renderPrompt(template, DRIVING_AGENT_FILE, { LINEAR_TICKET: ticket });
 
 // ---------------------------------------------------------------------------
 // GraphQL

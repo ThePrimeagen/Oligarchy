@@ -4,25 +4,26 @@ Consult this table of contents first. Read only the section you need.
 
 | Section | Line |
 |---------|-----:|
-| [Important](#important) | 21 |
-| [Synopsis](#synopsis) | 27 |
-| [test --list](#test---list) | 52 |
-| [test new](#test-new) | 68 |
-| [test list](#test-list) | 84 |
-| [test run](#test-run) | 96 |
-| [test start](#test-start) | 110 |
-| [test-results](#test-results) | 126 |
-| [session list](#session-list) | 143 |
-| [session](#session) | 159 |
-| [error-type new](#error-type-new) | 182 |
-| [error-type list](#error-type-list) | 197 |
-| [diagnose](#diagnose) | 211 |
+| [Important](#important) | 22 |
+| [Synopsis](#synopsis) | 28 |
+| [test --list](#test---list) | 54 |
+| [test new](#test-new) | 70 |
+| [test list](#test-list) | 86 |
+| [test run](#test-run) | 98 |
+| [test start](#test-start) | 112 |
+| [test-results](#test-results) | 128 |
+| [session list](#session-list) | 145 |
+| [session](#session) | 161 |
+| [error-type new](#error-type-new) | 187 |
+| [error-type list](#error-type-list) | 202 |
+| [diagnose](#diagnose) | 216 |
+| [diagnose run](#diagnose-run) | 235 |
 
 ## Important
 
-`./ctrl` is the control plane's record keeper: it creates test runs, opens their Linear tickets, spawns driving agents, ties a session to its result, closes the result, reads sessions back, and names the cause of a session that did not succeed. It never touches a guest — that is `./client`.
+`./ctrl` is the control plane's record keeper: it creates test runs, opens their Linear tickets, spawns driving agents, ties a session to its result, closes the result, reads sessions back, spawns reviewing agents, and records their verdict on every ended session. It never touches a guest — that is `./client`.
 
-If you are an agent driving a guest, you need two of these: [test start](#test-start) after `./client start`, and [test-results](#test-results) before `./client stop`. Do not look at code. Run the commands.
+If you are an agent driving a guest, you need two of these: [test start](#test-start) after `./client start`, and [test-results](#test-results) before `./client stop`. If you are an agent reviewing a session, you need [session](#session), [error-type list](#error-type-list), [error-type new](#error-type-new) and [diagnose](#diagnose). Do not look at code. Run the commands.
 
 ## Synopsis
 
@@ -36,16 +37,17 @@ If you are an agent driving a guest, you need two of these: [test start](#test-s
 ./ctrl test start     --session-id <id> --test-result-id <id> --model <id>
 ./ctrl test-results   --agent-id <agent> --id <id> --status success|failed [--reason <text>]
 ./ctrl session list   [--count <n>] [--active] [--json]
-./ctrl session        --session-id <id> --logs|--test-def|--test-results|--actions|--debug-logs|--diagnosis|--all|--dump
+./ctrl session        --session-id <id> --status|--logs|--test-def|--test-results|--test-run|--actions|--images|--debug-logs|--diagnosis|--all|--dump
 ./ctrl error-type new  --key <key> --description <text>
 ./ctrl error-type list [--json]
-./ctrl diagnose       --session-id <id> --type <key> --summary <text> --model <id>
+./ctrl diagnose       --session-id <id> --verdict passed|failed [--type <key>] --summary <text> --model <id>
+./ctrl diagnose run   --session-id <id>
 ```
 
 The action comes first. Every value is a flag; there are no positional arguments. Flags may sit in any order after the action.
 
 - `--server-url <url>` — the oligarchy server, a full http or https URL. Required on every action but `test run`; falls back to `SERVER_URL` from the environment. There is no default.
-- `DATABASE_URL` — read from the environment by every action. `test new` and `test list` also read `LINEAR_API_TOKEN`; `test run` also reads `CURSOR_API_TOKEN`; `session --dump` also reads `OLIGARCHY_TOKEN`, the proxy's bearer token — the other `session` selectors never need it. A `.env` in the current directory fills in missing variables only. A missing variable means exit 1.
+- `DATABASE_URL` — read from the environment by every action. `test new` and `test list` also read `LINEAR_API_TOKEN`; `test run` and `diagnose run` also read `CURSOR_API_TOKEN`; `session --dump` also reads `OLIGARCHY_TOKEN`, the proxy's bearer token — the other `session` selectors never need it. A `.env` in the current directory fills in missing variables only. A missing variable means exit 1.
 
 A command that works exits 0. A command that fails exits 1 and prints the error: one headline, then the stack trace and the cause behind it. Read the headline first. `./ctrl <action> --help` prints that action's flags.
 
@@ -159,19 +161,22 @@ Prints the most recent sessions, newest first, one per line: the status, colored
 ## session
 
 ```
-./ctrl session --server-url <url> --session-id <id> --logs|--test-def|--test-results|--actions|--debug-logs|--diagnosis|--all|--dump
+./ctrl session --server-url <url> --session-id <id> --status|--logs|--test-def|--test-results|--test-run|--actions|--images|--debug-logs|--diagnosis|--all|--dump
 ```
 
-Prints what is stored for one session, as JSON. At least one selector is required; one selector prints that value, several print an object keyed by them. An unknown session is a failure. Not used while driving a guest.
+Prints what is stored for one session, as JSON. At least one selector is required; one selector prints that value, several print an object keyed by them. An unknown session is a failure. Not used while driving a guest; a reviewing agent starts here, and the session id is all it needs — everything else is reached from it.
 
 - `--session-id <id>` — the session.
+- `--status` — the session row: `{ id, config, status, reason, startedAt, endedAt }`. `status` and `reason` are the driver's verdict as `./client stop` recorded it; `config` is what it booted.
 - `--logs` — its log lines, oldest first.
 - `--test-def` — the test definition its result ran, or `null`.
 - `--test-results` — the test result attributed to it, or `null`.
+- `--test-run` — the test run that result belongs to (`iso`, `serverUrl`, `status`), or `null`.
 - `--actions` — its QMP actions, oldest first.
+- `--images` — its screenshots, oldest first, as `{ id, actionId, url, createdAt }`; `url` serves the PNG without a token, and `./session image --image-id <id> [-o <file>]` prints the same PNG straight from the database. `[]` when none were taken.
 - `--debug-logs` — the debug log the proxy saved when the session ended any way but `succeeded` (a `failed` or `aborted` stop, the ten-minute timeout, a proxy shutdown), or `null`. `{ sessionId, sources: { serial, proxy, qemu, actions }, createdAt }`: `serial` is everything the guest wrote to `/dev/ttyS0`, `proxy` the session's log lines as `created_at level text`, `qemu` the last 4 KiB of QEMU's stderr, `actions` the QMP exchanges as `created_at id state request[ response]`. Each is capped at 1 MiB, keeping the end.
-- `--diagnosis` — the post-run diagnosis written with [diagnose](#diagnose), or `null` when nobody has diagnosed the session. `{ sessionId, errorType, summary, model, createdAt }`.
-- `--all` — all six: `{ logs, results, test_definition, actions, debug_log, diagnosis }`.
+- `--diagnosis` — the post-run diagnosis written with [diagnose](#diagnose), or `null` when nobody has reviewed the session. `{ sessionId, verdict, errorType, summary, model, createdAt }`; `errorType` is `null` on a `passed` verdict.
+- `--all` — all nine: `{ session, logs, results, test_definition, test_run, actions, images, debug_log, diagnosis }`.
 - `--dump` — the session's serial console, printed raw, not as JSON. Asks the proxy at `--server-url`: a session running there answers with the console as it stands; a session it no longer holds still answers when its directory survived on the proxy host — a proxy that died mid-session never removed it — with everything the guest wrote to `/dev/ttyS0` up to the end. A session that is neither is a failure: `session "<id>" has no console on this proxy`. Does not combine with the other selectors; redirect stdout to keep it (`> console.txt`). Reads `OLIGARCHY_TOKEN`.
 
 ```bash
@@ -185,7 +190,7 @@ Prints what is stored for one session, as JSON. At least one selector is require
 ./ctrl error-type new --server-url <url> --key <key> --description <text>
 ```
 
-Adds one error type to the vocabulary diagnoses are written in. The table starts empty and grows one type per distinct cause, the first time that cause is seen; there is no `other` or `unclassified`. A key that already exists is a failure: `error-type new: <key> already exists`. Not used while driving a guest.
+Adds one error type to the vocabulary diagnoses are written in. The table starts empty and grows one type per distinct cause, the first time that cause is seen; there is no `other` or `unclassified`. Minting is rare and deliberate: a reviewer reads the whole of [error-type list](#error-type-list) first and mints only when no description matches the cause in the evidence — a different wording or symptom of a known cause is not a new type. A key that already exists is a failure: `error-type new: <key> already exists`. Not used while driving a guest.
 
 - `--key <key>` — the identifier a diagnosis carries: snake_case, `a-z`, `0-9` and `_`, starting with a letter (`guest_boot_hang`). Anything else is refused before the database is touched.
 - `--description <text>` — what a failure of this type looks like, so the next reader picks the same key for the same cause.
@@ -211,16 +216,32 @@ Prints every error type, ordered by key, one per line: the key, two spaces, the 
 ## diagnose
 
 ```
-./ctrl diagnose --server-url <url> --session-id <id> --type <key> --summary <text> --model <id>
+./ctrl diagnose --server-url <url> --session-id <id> --verdict passed|failed [--type <key>] --summary <text> --model <id>
 ```
 
-Records the cause of one session that ended any way but `succeeded`: a `failed` or `aborted` stop, or the ten-minute timeout. Read the evidence first (`session --debug-logs`, `--actions`, the images), then name the cause with a type from [error-type list](#error-type-list); when no type fits, create one with [error-type new](#error-type-new) and diagnose with it. One diagnosis per session: a second is a failure and the first stands. Not used while driving a guest.
+Records the post-run diagnosis: a reviewer's verdict on one session that has ended, whatever the driver said about it: a `succeeded`, `failed` or `aborted` stop, or the ten-minute timeout. Read the evidence first (`session --all`; the final image through `./session image --image-id <id> -o <file>`, and the images around any step the logs or actions make suspect, against the definition's proof; the debug log), then say whether the proof landed. A `failed` verdict names its cause with the matching type from [error-type list](#error-type-list); only when none matches is one minted with [error-type new](#error-type-new), rarely. One diagnosis per session: a second is a failure and the first stands. Not used while driving a guest.
 
-- `--session-id <id>` — the session. Unknown, still running or downloading, or `succeeded` is a failure (`diagnose: session <id> succeeded; nothing to diagnose`).
-- `--type <key>` — an existing error type key. A key that is not in the table is a failure: `diagnose: no error type <key>; create it with ./ctrl error-type new`.
-- `--summary <text>` — what happened, in the reader's words, from the evidence.
+- `--session-id <id>` — the session. Unknown, or still running or downloading, is a failure (`diagnose: session <id> is still running`).
+- `--verdict <verdict>` — `passed` when the proof is on screen, `failed` when it is not or the session never got there. The reviewer's own answer; it may contradict the session status and the test result.
+- `--type <key>` — the cause of a `failed` verdict, an existing error type key. Required with `failed` (`diagnose: --verdict failed needs --type`), refused with `passed` (`diagnose: --verdict passed takes no --type`). A key that is not in the table is a failure: `diagnose: no error type <key>; create it with ./ctrl error-type new`.
+- `--summary <text>` — what happened, in the reviewer's words, from the evidence.
 - `--model <id>` — the Cursor model id that is writing this diagnosis.
 
 ```bash
-./ctrl diagnose --server-url https://qemu.example.com --session-id 6f1c...e2a9 --type guest_boot_hang --summary "Serial stops after 'Waiting for root device'; the ISO never mounted" --model <the Cursor model id you are running as>
+./ctrl diagnose --server-url https://qemu.example.com --session-id 6f1c...e2a9 --verdict failed --type guest_boot_hang --summary "Serial stops after 'Waiting for root device'; the ISO never mounted" --model <the Cursor model id you are running as>
+./ctrl diagnose --server-url https://qemu.example.com --session-id 6f1c...e2a9 --verdict passed --summary "The last image shows the lock screen with the clock; matches the proof" --model <the Cursor model id you are running as>
+```
+
+## diagnose run
+
+```
+./ctrl diagnose run --server-url <url> --session-id <id>
+```
+
+Spawns a Cursor cloud agent that reviews one ended session and records its verdict with [diagnose](#diagnose). The agent is handed the session id, `--server-url`, and the reviewer's guide (`ctrl-diagnose.md`), nothing else: it reads the rest back with [session](#session). Prints a link to the agent as soon as it starts; does not wait for it. Not used while driving a guest. Reads `CURSOR_API_TOKEN`.
+
+- `--session-id <id>` — the session. Unknown, still running or downloading, or already diagnosed is a failure (`diagnose run: session <id> already has a diagnosis`), before any agent is spawned.
+
+```bash
+./ctrl diagnose run --server-url https://qemu.example.com --session-id 6f1c...e2a9
 ```

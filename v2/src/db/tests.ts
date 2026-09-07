@@ -128,15 +128,21 @@ export class TestStore extends Context.Service<TestStore>()("@oligarchy/db/TestS
       return rows.length > 0;
     });
 
+    // The result a session ran, with the definition it tested and the run it belongs to.
     const resultForSession = Effect.fn("db.resultForSession")(function* (sessionId: string) {
       return yield* database.run("resultForSession", (db) =>
         db
-          .select({ result: DbSchema.testResults, definition: DbSchema.testDefinitions })
+          .select({
+            result: DbSchema.testResults,
+            definition: DbSchema.testDefinitions,
+            run: DbSchema.testRuns,
+          })
           .from(DbSchema.testResults)
           .innerJoin(
             DbSchema.testDefinitions,
             eq(DbSchema.testResults.definitionId, DbSchema.testDefinitions.id),
           )
+          .innerJoin(DbSchema.testRuns, eq(DbSchema.testResults.runId, DbSchema.testRuns.id))
           .where(eq(DbSchema.testResults.sessionId, sessionId)),
       );
     });

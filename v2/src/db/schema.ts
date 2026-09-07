@@ -1,5 +1,7 @@
+import { sql } from "drizzle-orm";
 import {
   bigint,
+  check,
   customType,
   index,
   jsonb,
@@ -42,6 +44,8 @@ export const testResultStatus = pgEnum("test_result_status", [
 // "WHERE level >= 'error'" reads the scary lines.
 export const logLevel = pgEnum("log_level", ["info", "warning", "error", "fatal"]);
 export const actionState = pgEnum("action_state", ["completed", "failed"]);
+// The reviewer's own answer to "did the proof land": the test's vocabulary, not the session's.
+export const diagnosisVerdict = pgEnum("diagnosis_verdict", ["passed", "failed"]);
 
 export type SessionConfig = {
   iso: string;
@@ -143,22 +147,30 @@ export const postRunErrorTypes = pgTable("post_run_error_types", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-// One diagnosis per session that did not succeed, keyed by the session: a row absent is a
-// session nobody has diagnosed; no placeholder type, no nullable column. model wrote it.
+// One diagnosis per ended session, keyed by the session: a row absent is a session nobody has
+// reviewed. verdict is the reviewer's, written after reading the evidence, and may disagree with
+// the driver's stop status and test result. error_type names the cause of a failed verdict and is
+// null exactly when the verdict is passed: a pass has no cause to name, and the check keeps the two
+// columns honest. model wrote it.
 export const postRunDiagnosis = pgTable(
   "post_run_diagnosis",
   {
     sessionId: uuid("session_id")
       .primaryKey()
       .references(() => sessions.id),
-    errorType: text("error_type")
-      .notNull()
-      .references(() => postRunErrorTypes.key, { onUpdate: "cascade" }),
+    verdict: diagnosisVerdict("verdict").notNull(),
+    errorType: text("error_type").references(() => postRunErrorTypes.key, { onUpdate: "cascade" }),
     summary: text("summary").notNull(),
     model: text("model").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index("post_run_diagnosis_error_type_idx").on(table.errorType)],
+  (table) => [
+    index("post_run_diagnosis_error_type_idx").on(table.errorType),
+    check(
+      "post_run_diagnosis_verdict_error_type_check",
+      sql`(${table.verdict} = 'passed') = (${table.errorType} IS NULL)`,
+    ),
+  ],
 );
 
 // A definition is the stored mission an agent is handed — what it is about, what to

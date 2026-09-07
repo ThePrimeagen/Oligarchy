@@ -1,13 +1,14 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { NodeFileSystem, NodeServices } from "@effect/platform-node";
-import { Cause, Effect, Exit, FileSystem, Layer, Redacted, Result } from "effect";
+import { Cause, Effect, Exit, FileSystem, Layer, Redacted } from "effect";
 import { TestClock, TestConsole } from "effect/testing";
 import { CliError, Command } from "effect/unstable/cli";
 import * as CtrlCommand from "../../src/ctrl/command.ts";
-import * as Linear from "../../src/ctrl/linear.ts";
+import * as Prompts from "../../src/ctrl/prompts.ts";
 import * as DbSchema from "../../src/db/schema.ts";
 import * as Api from "../../src/shared/api.ts";
+import * as Contract from "../../src/shared/contract.ts";
 import * as Errors from "../../src/shared/errors.ts";
 import * as Config from "../support/config.ts";
 import * as FakeCursor from "../support/fake-cursor.ts";
@@ -171,6 +172,7 @@ const TEMPLATE = "Review Linear ticket {{LINEAR_TICKET}}\n";
 // fail as an unreadable file in the checkout would.
 const promptFs = (
   unreadable: RegExp,
+  template = TEMPLATE,
 ): { readonly reads: Array<string>; readonly layer: Layer.Layer<FileSystem.FileSystem> } => {
   const reads: Array<string> = [];
   const layer = FileSystem.layerNoop({
@@ -179,7 +181,7 @@ const promptFs = (
         reads.push(path);
         return unreadable.test(path)
           ? Effect.fail(FakeFs.permissionDenied("open", path))
-          : Effect.succeed(TEMPLATE);
+          : Effect.succeed(template);
       }),
   });
   return { reads, layer };
@@ -204,9 +206,9 @@ const stdout = Effect.map(TestConsole.logLines, (lines) => lines.map(String));
 
 const lastJson = Effect.map(stdout, (lines) => JSON.parse(lines.at(-1) ?? ""));
 
-const issuePrompts = Linear.loadIssuePrompts.pipe(Effect.provide(NodeFileSystem.layer));
-
-const drivingPrompt = Linear.loadDrivingPrompt.pipe(Effect.provide(NodeFileSystem.layer));
+// The text a command hands an agent, rendered from the checkout's own templates and guides.
+const rendered = (template: Prompts.Template, values: Prompts.Values) =>
+  Prompts.render(template, values).pipe(Effect.provide(NodeFileSystem.layer));
 
 // ---------------------------------------------------------------------------
 // test --list
@@ -330,24 +332,22 @@ describe("test new", () => {
           [run?.id, 2, "pending", null],
         ]);
 
-        const loaded = yield* issuePrompts;
-        const experiment: Linear.Experiment = {
-          id: run?.id ?? "",
-          iso: "https://example.com/omarchy.iso",
-          serverUrl: SERVER,
-          version: "1.2.3",
-          tests: [install, terminal].map((definition, index) => ({
-            id: results[index]?.id ?? "",
-            definitionId: definition.id,
-            name: definition.name,
-            description: definition.description,
-            instruction: definition.instruction,
-            proof: definition.proof,
-          })),
-        };
-        const descriptionOf = (test: Linear.ExperimentTest, identifier: string) =>
-          Result.getOrThrow(Linear.linearTicketDescription(experiment, test, identifier, loaded));
-        const [installTest, terminalTest] = experiment.tests;
+        // Each ticket is the one template filled with that definition's values and its own ids.
+        const descriptionOf = (definition: TestDefinitionRow, index: number, identifier: string) =>
+          rendered("linear-issue.html", {
+            LINEAR_TICKET: identifier,
+            RUN_ID: run?.id ?? "",
+            RESULT_ID: results[index]?.id ?? "",
+            VERSION: "1.2.3",
+            ISO_URL: "https://example.com/omarchy.iso",
+            SERVER_URL: SERVER,
+            TEST_NAME: definition.name,
+            TEST_DESCRIPTION: definition.description,
+            TEST_INSTRUCTION: definition.instruction,
+            TEST_PROOF: definition.proof,
+          });
+        const installDescription = yield* descriptionOf(install, 0, "OLI-42");
+        const terminalDescription = yield* descriptionOf(terminal, 1, "OLI-43");
         const labels = [FakeLinear.labelId("agent test"), FakeLinear.labelId("1.2.3")];
         expect(h.linear.calls).toEqual([
           { method: "teamId" },
@@ -365,7 +365,7 @@ describe("test new", () => {
           {
             method: "describeIssue",
             ticket: FakeLinear.ticketFor("OLI-42"),
-            description: installTest === undefined ? "" : descriptionOf(installTest, "OLI-42"),
+            description: installDescription,
           },
           {
             method: "createIssue",
@@ -379,7 +379,7 @@ describe("test new", () => {
           {
             method: "describeIssue",
             ticket: FakeLinear.ticketFor("OLI-43"),
-            description: terminalTest === undefined ? "" : descriptionOf(terminalTest, "OLI-43"),
+            description: terminalDescription,
           },
         ]);
 
@@ -509,25 +509,58 @@ describe("test new", () => {
     }),
   );
 
-  it.effect("fails the run naming an unreadable guide before any ticket is created (unhappy)", () =>
-    Effect.gen(function* () {
-      const fs = promptFs(/\/client\.md$/);
-      const h = harness({ fs: fs.layer });
-      h.stores.tests.definitions.push(install);
-      const exit = yield* h.run([...NEW, "--server-url", SERVER], WITH_LINEAR);
-      expect(failure(exit)).toMatchObject({
-        _tag: "LinearError",
-        operation: "prompts",
-        message: expect.stringMatching(/^linear: .*client\.md/),
-      });
-      expect(fs.reads.some((path) => DRIVING_AGENT_PATH.test(path))).toBe(false);
-      expect(h.linear.calls).toEqual([]);
-      expect(h.stores.tests.runs[0]).toMatchObject({
-        status: "failed",
-        reason: expect.stringMatching(/^linear: .*client\.md/),
-      });
-      expect(h.stores.tests.results.map((row) => row.status)).toEqual(["failed"]);
-    }),
+  it.effect(
+    "fails the run naming the ticket created when a guide its description embeds is unreadable (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        // The guide is read while describing the first ticket, so that ticket already exists.
+        const fs = promptFs(/\/client\.md$/, "{{LINEAR_TICKET}} {{CLIENT_MD}}");
+        const h = harness({ fs: fs.layer });
+        h.stores.tests.definitions.push(install, terminal);
+        const exit = yield* h.run([...NEW, "--server-url", SERVER], WITH_LINEAR);
+        const error = failure(exit);
+        expect(error).toMatchObject({
+          _tag: "PromptError",
+          message: expect.stringMatching(/^prompt: .*client\.md.*; created OLI-42$/),
+          cause: expect.anything(),
+        });
+        expect(fs.reads.some((path) => DRIVING_AGENT_PATH.test(path))).toBe(false);
+        expect(h.linear.calls.map((call) => call.method)).toEqual([
+          "teamId",
+          "labelIds",
+          "assigneeId",
+          "createIssue",
+        ]);
+        expect(h.stores.tests.runs[0]).toMatchObject({
+          status: "failed",
+          reason: expect.stringMatching(/^prompt: .*client\.md.*; created OLI-42$/),
+        });
+        expect(h.stores.tests.results.map((row) => row.status)).toEqual(["failed", "failed"]);
+      }),
+  );
+
+  it.effect(
+    "names the ticket created when its description cannot be rendered, and describes nothing (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        // The ticket template asks for a value no run carries; the guides render fine.
+        const fs = promptFs(/never/, "{{RUN_ID}} {{NOPE}}");
+        const h = harness({ fs: fs.layer });
+        h.stores.tests.definitions.push(install);
+        const exit = yield* h.run([...NEW, "--server-url", SERVER], WITH_LINEAR);
+        const message =
+          "prompt: prompts/linear-issue.html uses {{NOPE}}, which has no value; created OLI-42";
+        expect(failure(exit)).toMatchObject({ _tag: "PromptError", message });
+        expect(h.linear.calls.map((call) => call.method)).toEqual([
+          "teamId",
+          "labelIds",
+          "assigneeId",
+          "createIssue",
+        ]);
+        expect(h.stores.tests.runs[0]).toMatchObject({ status: "failed", reason: message });
+        expect(h.stores.tests.results.map((row) => row.status)).toEqual(["failed"]);
+        expect(yield* stdout).toEqual([]);
+      }),
   );
 
   it.effect("rejects an ISO that is not HTTPS or has no host (unhappy)", () =>
@@ -643,10 +676,9 @@ describe("test run", () => {
       const h = harness({ cursor: FakeCursor.fakeCursor({ agentId: "bc-42" }) });
       const exit = yield* h.run(["test", "run", "--ticket", "OLI-42"], WITH_CURSOR);
       expect(Exit.isSuccess(exit)).toBe(true);
-      const template = yield* drivingPrompt;
       expect(h.cursor.calls).toEqual([
         {
-          text: Result.getOrThrow(Linear.drivingAgentPrompt("OLI-42", template)),
+          text: yield* rendered("driving-agent.html", { LINEAR_TICKET: "OLI-42" }),
           model: undefined,
         },
       ]);
@@ -683,9 +715,8 @@ describe("test run", () => {
       const h = harness({ cursor: FakeCursor.fakeCursor({ agentId: "bc-42" }), fs: fs.layer });
       const exit = yield* h.run(["test", "run", "--ticket", "OLI-42"], WITH_CURSOR);
       expect(failure(exit)).toMatchObject({
-        _tag: "LinearError",
-        operation: "prompts",
-        message: expect.stringMatching(/^linear: .*driving-agent\.html/),
+        _tag: "PromptError",
+        message: expect.stringMatching(/^prompt: .*driving-agent\.html/),
       });
       expect(h.cursor.calls).toEqual([]);
       expect(yield* stdout).toEqual([]);
@@ -1193,8 +1224,19 @@ const misread: ErrorTypeRow = {
 
 const diagnosis: DiagnosisRow = {
   sessionId: SESSION_ID,
+  verdict: "failed",
   errorType: bootHang.key,
   summary: "Serial shows the kernel waiting on the root device; the ISO never mounted",
+  model: MODEL,
+  createdAt: new Date("2026-09-03T00:00:05Z"),
+};
+
+// A pass names no cause: the reviewer saw the proof on screen.
+const passed: DiagnosisRow = {
+  sessionId: SESSION_ID,
+  verdict: "passed",
+  errorType: null,
+  summary: "The last image shows the lock screen with the clock; matches the proof",
   model: MODEL,
   createdAt: new Date("2026-09-03T00:00:05Z"),
 };
@@ -1377,6 +1419,8 @@ const DIAGNOSE = [
   "diagnose",
   "--session-id",
   SESSION_ID,
+  "--verdict",
+  "failed",
   "--type",
   bootHang.key,
   "--summary",
@@ -1387,8 +1431,31 @@ const DIAGNOSE = [
   SERVER,
 ];
 
+const DIAGNOSE_PASSED = [
+  "diagnose",
+  "--session-id",
+  SESSION_ID,
+  "--verdict",
+  "passed",
+  "--summary",
+  passed.summary,
+  "--model",
+  MODEL,
+  "--server-url",
+  SERVER,
+];
+
+const diagnoseLine = (text: string) => ({
+  level: "info",
+  text,
+  sessionId: SESSION_ID,
+  agentId: undefined,
+  skipSentry: false,
+  cause: undefined,
+});
+
 describe("diagnose", () => {
-  it.effect("writes one diagnosis for a failed session and logs it (happy)", () =>
+  it.effect("writes a failed verdict with its cause for a failed session and logs it (happy)", () =>
     Effect.gen(function* () {
       const h = harness();
       h.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
@@ -1398,28 +1465,96 @@ describe("diagnose", () => {
       expect(h.stores.diagnosis.diagnoses).toHaveLength(1);
       expect(h.stores.diagnosis.diagnoses[0]).toMatchObject({
         sessionId: SESSION_ID,
+        verdict: "failed",
         errorType: bootHang.key,
         summary: diagnosis.summary,
         model: MODEL,
       });
       expect(h.stores.diagnosis.diagnoses[0]?.createdAt).toBeInstanceOf(Date);
-      expect(h.log.lines).toEqual([
-        {
-          level: "info",
-          text: `diagnosed; ${bootHang.key}; ${MODEL}`,
-          sessionId: SESSION_ID,
-          agentId: undefined,
-          skipSentry: false,
-          cause: undefined,
-        },
-      ]);
+      expect(h.log.lines).toEqual([diagnoseLine(`diagnosed; failed; ${bootHang.key}; ${MODEL}`)]);
       expect(h.log.acquired).toEqual([]);
       expect(yield* stdout).toEqual([]);
       expect(h.touched).toEqual(["database"]);
     }),
   );
 
-  it.effect("accepts aborted and timed_out sessions: every end but succeeded (happy)", () =>
+  it.effect("writes a passed verdict, with no cause, for a succeeded session (happy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.sessions.sessions.push(session(SESSION_ID, "succeeded", ago(500)));
+      const exit = yield* h.run(DIAGNOSE_PASSED);
+      expect(Exit.isSuccess(exit)).toBe(true);
+      expect(h.stores.diagnosis.diagnoses).toEqual([
+        {
+          sessionId: SESSION_ID,
+          verdict: "passed",
+          errorType: null,
+          summary: passed.summary,
+          model: MODEL,
+          createdAt: expect.any(Date),
+        },
+      ]);
+      expect(h.log.lines).toEqual([diagnoseLine(`diagnosed; passed; ${MODEL}`)]);
+      expect(yield* stdout).toEqual([]);
+    }),
+  );
+
+  it.effect("the verdict is the reviewer's, not the driver's: it may disagree (happy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.sessions.sessions.push(
+        session(SESSION_ID, "succeeded", ago(500)),
+        session(OTHER_SESSION_ID, "failed", ago(400)),
+      );
+      h.stores.diagnosis.errorTypes.push(misread);
+      // The driver claimed success; the images say otherwise.
+      expect(
+        Exit.isSuccess(
+          yield* h.run([
+            "diagnose",
+            "--session-id",
+            SESSION_ID,
+            "--verdict",
+            "failed",
+            "--type",
+            misread.key,
+            "--summary",
+            "the final image is the installer, not the desktop",
+            "--model",
+            MODEL,
+            "--server-url",
+            SERVER,
+          ]),
+        ),
+      ).toBe(true);
+      // The driver gave up; the proof was on screen all along.
+      expect(
+        Exit.isSuccess(
+          yield* h.run([
+            "diagnose",
+            "--session-id",
+            OTHER_SESSION_ID,
+            "--verdict",
+            "passed",
+            "--summary",
+            "the last image shows the desktop the proof asks for",
+            "--model",
+            MODEL,
+            "--server-url",
+            SERVER,
+          ]),
+        ),
+      ).toBe(true);
+      expect(
+        h.stores.diagnosis.diagnoses.map((row) => [row.sessionId, row.verdict, row.errorType]),
+      ).toEqual([
+        [SESSION_ID, "failed", misread.key],
+        [OTHER_SESSION_ID, "passed", null],
+      ]);
+    }),
+  );
+
+  it.effect("accepts aborted and timed_out sessions: every session that has ended (happy)", () =>
     Effect.gen(function* () {
       const h = harness();
       h.stores.sessions.sessions.push(
@@ -1434,6 +1569,8 @@ describe("diagnose", () => {
             "diagnose",
             "--session-id",
             OTHER_SESSION_ID,
+            "--verdict",
+            "failed",
             "--type",
             bootHang.key,
             "--summary",
@@ -1465,19 +1602,6 @@ describe("diagnose", () => {
     }),
   );
 
-  it.effect("rejects a session that succeeded: there is nothing to diagnose (unhappy)", () =>
-    Effect.gen(function* () {
-      const h = harness();
-      h.stores.sessions.sessions.push(session(SESSION_ID, "succeeded", ago(500)));
-      h.stores.diagnosis.errorTypes.push(bootHang);
-      expect(yield* h.fail(DIAGNOSE)).toMatchObject({
-        _tag: "CommandError",
-        message: `diagnose: session ${SESSION_ID} succeeded; nothing to diagnose`,
-      });
-      expect(h.stores.diagnosis.diagnoses).toEqual([]);
-    }),
-  );
-
   it.effect("rejects a session that is still running or downloading (unhappy)", () =>
     Effect.gen(function* () {
       const h = harness();
@@ -1494,8 +1618,8 @@ describe("diagnose", () => {
         "diagnose",
         "--session-id",
         OTHER_SESSION_ID,
-        "--type",
-        bootHang.key,
+        "--verdict",
+        "passed",
         "--summary",
         "s",
         "--model",
@@ -1508,6 +1632,38 @@ describe("diagnose", () => {
         message: `diagnose: session ${OTHER_SESSION_ID} is still downloading`,
       });
       expect(h.stores.diagnosis.diagnoses).toEqual([]);
+    }),
+  );
+
+  it.effect("a failed verdict needs a type and a passed one takes none (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
+      h.stores.diagnosis.errorTypes.push(bootHang);
+      const untyped = yield* h.fail([
+        "diagnose",
+        "--session-id",
+        SESSION_ID,
+        "--verdict",
+        "failed",
+        "--summary",
+        "s",
+        "--model",
+        MODEL,
+        "--server-url",
+        SERVER,
+      ]);
+      expect(untyped).toMatchObject({
+        _tag: "CommandError",
+        message: "diagnose: --verdict failed needs --type",
+      });
+      const typed = yield* h.fail([...DIAGNOSE_PASSED, "--type", bootHang.key]);
+      expect(typed).toMatchObject({
+        _tag: "CommandError",
+        message: "diagnose: --verdict passed takes no --type",
+      });
+      expect(h.stores.diagnosis.diagnoses).toEqual([]);
+      expect(h.log.lines).toEqual([]);
     }),
   );
 
@@ -1530,77 +1686,267 @@ describe("diagnose", () => {
       h.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
       h.stores.diagnosis.errorTypes.push(bootHang, misread);
       expect(Exit.isSuccess(yield* h.run(DIAGNOSE))).toBe(true);
-      const second = yield* h.fail([
-        "diagnose",
-        "--session-id",
-        SESSION_ID,
-        "--type",
-        misread.key,
-        "--summary",
-        "on reflection",
-        "--model",
-        MODEL,
-        "--server-url",
-        SERVER,
-      ]);
+      const second = yield* h.fail(DIAGNOSE_PASSED);
       expect(second).toMatchObject({
         _tag: "CommandError",
         message: `diagnose: session ${SESSION_ID} already has a diagnosis`,
       });
       expect(h.stores.diagnosis.diagnoses).toHaveLength(1);
-      expect(h.stores.diagnosis.diagnoses[0]?.errorType).toBe(bootHang.key);
+      expect(h.stores.diagnosis.diagnoses[0]).toMatchObject({
+        verdict: "failed",
+        errorType: bootHang.key,
+      });
       expect(h.log.lines.map((line) => line.text)).toEqual([
-        `diagnosed; ${bootHang.key}; ${MODEL}`,
+        `diagnosed; failed; ${bootHang.key}; ${MODEL}`,
       ]);
     }),
   );
 
-  it.effect("refuses a bad --type, and a missing or empty --summary or --model (unhappy)", () =>
+  it.effect(
+    "refuses a missing or unknown --verdict, a bad --type, and a missing or empty --summary or --model (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const h = harness();
+        const noVerdict = yield* h.run([
+          "diagnose",
+          "--session-id",
+          SESSION_ID,
+          "--type",
+          bootHang.key,
+          "--summary",
+          "s",
+          "--model",
+          MODEL,
+          "--server-url",
+          SERVER,
+        ]);
+        expect(helpErrors(noVerdict).join("\n")).toMatch(/Missing required flag: --verdict/);
+        const badVerdict = yield* h.run([
+          "diagnose",
+          "--session-id",
+          SESSION_ID,
+          "--verdict",
+          "succeeded",
+          "--summary",
+          "s",
+          "--model",
+          MODEL,
+          "--server-url",
+          SERVER,
+        ]);
+        expect(helpErrors(badVerdict).join("\n")).toMatch(
+          /Invalid value for flag --verdict: "succeeded"/,
+        );
+        const badType = yield* h.run([
+          "diagnose",
+          "--session-id",
+          SESSION_ID,
+          "--verdict",
+          "failed",
+          "--type",
+          "Guest Boot",
+          "--summary",
+          "s",
+          "--model",
+          MODEL,
+          "--server-url",
+          SERVER,
+        ]);
+        expect(helpErrors(badType).join("\n")).toMatch(
+          /key must be snake_case: a-z, 0-9 and _, starting with a letter/,
+        );
+        const noSummary = yield* h.run([
+          "diagnose",
+          "--session-id",
+          SESSION_ID,
+          "--verdict",
+          "failed",
+          "--type",
+          bootHang.key,
+          "--model",
+          MODEL,
+          "--server-url",
+          SERVER,
+        ]);
+        expect(helpErrors(noSummary).join("\n")).toMatch(/Missing required flag: --summary/);
+        const emptyModel = yield* h.run([
+          "diagnose",
+          "--session-id",
+          SESSION_ID,
+          "--verdict",
+          "failed",
+          "--type",
+          bootHang.key,
+          "--summary",
+          "s",
+          "--model",
+          "",
+          "--server-url",
+          SERVER,
+        ]);
+        expect(helpErrors(emptyModel).join("\n")).toMatch(/--model.*length of at least 1/s);
+        expect(h.touched).toEqual([]);
+      }),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// diagnose run
+// ---------------------------------------------------------------------------
+
+const DIAGNOSE_RUN = ["diagnose", "run", "--session-id", SESSION_ID, "--server-url", SERVER];
+
+const DIAGNOSING_AGENT_PATH = /\/prompts\/diagnosing-agent\.html$/;
+
+describe("diagnose run", () => {
+  it.effect(
+    "kicks off the reviewer with the session, the server and the diagnosis guide, and prints its link (happy)",
+    () =>
+      Effect.gen(function* () {
+        const h = harness({ cursor: FakeCursor.fakeCursor({ agentId: "bc-42" }) });
+        h.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
+        const exit = yield* h.run(DIAGNOSE_RUN, WITH_CURSOR);
+        expect(Exit.isSuccess(exit)).toBe(true);
+        expect(h.cursor.calls).toEqual([
+          {
+            text: yield* rendered("diagnosing-agent.html", { SESSION_ID, SERVER_URL: SERVER }),
+            model: undefined,
+          },
+        ]);
+        const text = h.cursor.calls[0]?.text ?? "";
+        expect(text).toContain(`<session_id>${SESSION_ID}</session_id>`);
+        expect(text).toContain(SERVER);
+        expect(text).toContain("## diagnose");
+        expect(text.includes("{{")).toBe(false);
+        expect(yield* stdout).toEqual([
+          "Agent here, go check it out for more information: https://cursor.com/agents/bc-42",
+        ]);
+        expect(h.touched).toEqual(["database", "cursor"]);
+      }),
+  );
+
+  it.effect("reviews a succeeded session too, and takes the server from SERVER_URL (happy)", () =>
     Effect.gen(function* () {
       const h = harness();
-      const badType = yield* h.run([
-        "diagnose",
-        "--session-id",
-        SESSION_ID,
-        "--type",
-        "Guest Boot",
-        "--summary",
-        "s",
-        "--model",
-        MODEL,
-        "--server-url",
-        SERVER,
-      ]);
-      expect(helpErrors(badType).join("\n")).toMatch(
-        /key must be snake_case: a-z, 0-9 and _, starting with a letter/,
+      h.stores.sessions.sessions.push(session(SESSION_ID, "succeeded", ago(500)));
+      const exit = yield* h.run(["diagnose", "run", "--session-id", SESSION_ID], {
+        ...WITH_CURSOR,
+        SERVER_URL: SERVER,
+      });
+      expect(Exit.isSuccess(exit)).toBe(true);
+      expect(h.cursor.calls).toHaveLength(1);
+      expect(h.cursor.calls[0]?.text).toContain(
+        `--server-url ${SERVER} --session-id ${SESSION_ID}`,
       );
-      const noSummary = yield* h.run([
-        "diagnose",
-        "--session-id",
-        SESSION_ID,
-        "--type",
-        bootHang.key,
-        "--model",
-        MODEL,
-        "--server-url",
-        SERVER,
-      ]);
-      expect(helpErrors(noSummary).join("\n")).toMatch(/Missing required flag: --summary/);
-      const emptyModel = yield* h.run([
-        "diagnose",
-        "--session-id",
-        SESSION_ID,
-        "--type",
-        bootHang.key,
-        "--summary",
-        "s",
-        "--model",
-        "",
-        "--server-url",
-        SERVER,
-      ]);
-      expect(helpErrors(emptyModel).join("\n")).toMatch(/--model.*length of at least 1/s);
+    }),
+  );
+
+  it.effect("rejects an unknown session before reading a template or spawning (unhappy)", () =>
+    Effect.gen(function* () {
+      const fs = promptFs(/never/);
+      const h = harness({ fs: fs.layer });
+      expect(yield* h.fail(DIAGNOSE_RUN, WITH_CURSOR)).toMatchObject({
+        _tag: "CommandError",
+        message: `diagnose run: no session ${SESSION_ID}`,
+      });
+      expect(fs.reads).toEqual([]);
+      expect(h.cursor.calls).toEqual([]);
+      expect(yield* stdout).toEqual([]);
+    }),
+  );
+
+  it.effect("rejects a session that is still running or downloading (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.sessions.sessions.push(
+        session(SESSION_ID, "running", ago(5)),
+        session(OTHER_SESSION_ID, "downloading", ago(5)),
+      );
+      expect(yield* h.fail(DIAGNOSE_RUN, WITH_CURSOR)).toMatchObject({
+        _tag: "CommandError",
+        message: `diagnose run: session ${SESSION_ID} is still running`,
+      });
+      expect(
+        yield* h.fail(
+          ["diagnose", "run", "--session-id", OTHER_SESSION_ID, "--server-url", SERVER],
+          WITH_CURSOR,
+        ),
+      ).toMatchObject({
+        _tag: "CommandError",
+        message: `diagnose run: session ${OTHER_SESSION_ID} is still downloading`,
+      });
+      expect(h.cursor.calls).toEqual([]);
+    }),
+  );
+
+  it.effect("rejects a session that already has a diagnosis (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
+      h.stores.diagnosis.errorTypes.push(bootHang);
+      h.stores.diagnosis.diagnoses.push(diagnosis);
+      expect(yield* h.fail(DIAGNOSE_RUN, WITH_CURSOR)).toMatchObject({
+        _tag: "CommandError",
+        message: `diagnose run: session ${SESSION_ID} already has a diagnosis`,
+      });
+      expect(h.cursor.calls).toEqual([]);
+    }),
+  );
+
+  it.effect(
+    "fails naming the kickoff template when it is unreadable, and spawns nothing (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const fs = promptFs(DIAGNOSING_AGENT_PATH);
+        const h = harness({ fs: fs.layer });
+        h.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
+        expect(yield* h.fail(DIAGNOSE_RUN, WITH_CURSOR)).toMatchObject({
+          _tag: "PromptError",
+          message: expect.stringMatching(/^prompt: .*diagnosing-agent\.html/),
+        });
+        expect(h.cursor.calls).toEqual([]);
+        expect(yield* stdout).toEqual([]);
+      }),
+  );
+
+  it.effect("requires DATABASE_URL then CURSOR_API_TOKEN, after parsing (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      expect(yield* h.fail(DIAGNOSE_RUN, {})).toMatchObject({
+        _tag: "MissingVariable",
+        message: "DATABASE_URL is not set",
+      });
+      expect(yield* h.fail(DIAGNOSE_RUN, { ...WITH_DB, CURSOR_API_TOKEN: "" })).toMatchObject({
+        _tag: "MissingVariable",
+        message: "CURSOR_API_TOKEN is not set",
+      });
       expect(h.touched).toEqual([]);
+      expect(h.cursor.calls).toEqual([]);
+    }),
+  );
+
+  it.effect("requires --session-id and --server-url (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      const noSession = yield* h.run(["diagnose", "run", "--server-url", SERVER], WITH_CURSOR);
+      expect(helpErrors(noSession).join("\n")).toMatch(/Missing required flag: --session-id/);
+      const noServer = yield* h.run(["diagnose", "run", "--session-id", SESSION_ID], WITH_CURSOR);
+      expect(helpErrors(noServer).join("\n")).toMatch(/Missing required flag: --server-url/);
+      expect(h.touched).toEqual([]);
+    }),
+  );
+
+  it.effect("surfaces the SDK's refusal and prints nothing (unhappy)", () =>
+    Effect.gen(function* () {
+      const refused = Errors.CursorAgentFailed.make({
+        message: "Invalid API key",
+        retryable: false,
+        cause: new Error("Invalid API key"),
+      });
+      const h = harness({ cursor: FakeCursor.fakeCursor({ failure: refused }) });
+      h.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
+      expect(yield* h.fail(DIAGNOSE_RUN, WITH_CURSOR)).toBe(refused);
+      expect(yield* stdout).toEqual([]);
     }),
   );
 });
@@ -1621,9 +1967,23 @@ const debugLog = {
   createdAt: new Date("2026-09-03T00:00:04Z"),
 };
 
+const IMAGE_ID = "4d1c0f9e-6e1a-4c0b-9f0e-6b3f0e1c2d3a";
+
+const testRun: typeof DbSchema.testRuns.$inferSelect = {
+  id: RUN_ID,
+  name: "Omarchy experiment",
+  iso: "https://example.com/omarchy.iso",
+  serverUrl: SERVER,
+  status: "pending",
+  reason: null,
+  startedAt: new Date("2026-09-03T00:00:00Z"),
+  endedAt: null,
+};
+
 const seedInspect = (h: ReturnType<typeof harness>) => {
   h.stores.sessions.sessions.push(session(SESSION_ID, "succeeded", ago(500)));
   h.stores.tests.definitions.push(install);
+  h.stores.tests.runs.push(testRun);
   h.stores.logs.rows.push(
     { text: "starting; iso omarchy.iso", level: "info", sessionId: SESSION_ID, agentId: "OLI-42" },
     { text: "unrelated", level: "info", sessionId: OTHER_SESSION_ID, agentId: null },
@@ -1638,6 +1998,7 @@ const seedInspect = (h: ReturnType<typeof harness>) => {
     createdAt: new Date("2026-09-03T00:00:01Z"),
     finishedAt: new Date("2026-09-03T00:00:02Z"),
   });
+  h.stores.actions.images.push({ id: IMAGE_ID, actionId: 1, data: new Uint8Array([0x89]) });
 };
 
 describe("session inspect", () => {
@@ -1723,7 +2084,7 @@ describe("session inspect", () => {
   );
 
   it.effect(
-    "--all prints { logs, results, test_definition, actions, debug_log, diagnosis } (happy)",
+    "--all prints { session, logs, results, test_definition, test_run, actions, images, debug_log, diagnosis } (happy)",
     () =>
       Effect.gen(function* () {
         const h = harness();
@@ -1743,15 +2104,31 @@ describe("session inspect", () => {
         expect(Exit.isSuccess(exit)).toBe(true);
         const printed = yield* lastJson;
         expect(Object.keys(printed)).toEqual([
+          "session",
           "logs",
           "results",
           "test_definition",
+          "test_run",
           "actions",
+          "images",
           "debug_log",
           "diagnosis",
         ]);
+        expect(printed.session).toMatchObject({ id: SESSION_ID, status: "succeeded" });
         expect(printed.test_definition).toMatchObject({ name: "Install Omarchy" });
+        expect(printed.test_run).toEqual({
+          ...testRun,
+          startedAt: testRun.startedAt.toISOString(),
+        });
         expect(printed.actions).toHaveLength(1);
+        expect(printed.images).toEqual([
+          {
+            id: IMAGE_ID,
+            actionId: 1,
+            url: Contract.StoredImageUrl(IMAGE_ID),
+            createdAt: "2026-09-03T00:00:01.000Z",
+          },
+        ]);
         expect(printed.debug_log).toEqual({
           ...debugLog,
           createdAt: debugLog.createdAt.toISOString(),
@@ -1760,6 +2137,148 @@ describe("session inspect", () => {
           ...diagnosis,
           createdAt: diagnosis.createdAt.toISOString(),
         });
+      }),
+  );
+
+  it.effect(
+    "--status prints the bare session row: the driver's verdict and what it booted (happy)",
+    () =>
+      Effect.gen(function* () {
+        const h = harness();
+        seedInspect(h);
+        const row = h.stores.sessions.sessions[0];
+        if (row !== undefined) {
+          row.reason = "lock screen on screen";
+          row.endedAt = ago(100);
+        }
+        const exit = yield* h.run([
+          "session",
+          "--session-id",
+          SESSION_ID,
+          "--status",
+          "--server-url",
+          SERVER,
+        ]);
+        expect(Exit.isSuccess(exit)).toBe(true);
+        expect(yield* lastJson).toEqual({
+          id: SESSION_ID,
+          config: { iso: "omarchy.iso" },
+          status: "succeeded",
+          reason: "lock screen on screen",
+          startedAt: ago(500).toISOString(),
+          endedAt: ago(100).toISOString(),
+        });
+        expect(h.proxy.calls).toEqual([]);
+      }),
+  );
+
+  it.effect(
+    "--test-run prints the bare run the result belongs to, null without a result (happy)",
+    () =>
+      Effect.gen(function* () {
+        const h = harness();
+        seedInspect(h);
+        const none = yield* h.run([
+          "session",
+          "--session-id",
+          SESSION_ID,
+          "--test-run",
+          "--server-url",
+          SERVER,
+        ]);
+        expect(Exit.isSuccess(none)).toBe(true);
+        expect(yield* stdout).toEqual(["null"]);
+        h.stores.tests.results.push(result(RESULT_ID, "passed", SESSION_ID));
+        const some = yield* h.run([
+          "session",
+          "--session-id",
+          SESSION_ID,
+          "--test-run",
+          "--server-url",
+          SERVER,
+        ]);
+        expect(Exit.isSuccess(some)).toBe(true);
+        expect(yield* lastJson).toEqual({ ...testRun, startedAt: testRun.startedAt.toISOString() });
+      }),
+  );
+
+  it.effect(
+    "--images prints every screenshot with its url, oldest first, [] without any (happy)",
+    () =>
+      Effect.gen(function* () {
+        const h = harness();
+        seedInspect(h);
+        h.stores.actions.actions.push({
+          id: 2,
+          sessionId: SESSION_ID,
+          agentId: "OLI-42",
+          request: {
+            execute: "screendump",
+            arguments: { filename: "/tmp/s.png", format: "png" },
+            id: 2,
+          },
+          state: "completed",
+          response: { return: {} },
+          createdAt: new Date("2026-09-03T00:00:03Z"),
+          finishedAt: new Date("2026-09-03T00:00:04Z"),
+        });
+        // Another session's screenshot must not leak into this one's list.
+        h.stores.actions.actions.push({
+          id: 3,
+          sessionId: OTHER_SESSION_ID,
+          agentId: "OLI-43",
+          request: {
+            execute: "screendump",
+            arguments: { filename: "/tmp/o.png", format: "png" },
+            id: 3,
+          },
+          state: "completed",
+          response: { return: {} },
+          createdAt: new Date("2026-09-03T00:00:00Z"),
+          finishedAt: new Date("2026-09-03T00:00:00Z"),
+        });
+        const later = "5e2d1a0f-7f2b-4d1c-8a1f-7c4a1f2d3e4b";
+        const other = "6f3e2b1a-8a3c-4e2d-9b2a-8d5b2a3e4f5c";
+        h.stores.actions.images.push(
+          { id: later, actionId: 2, data: new Uint8Array([0x89]) },
+          { id: other, actionId: 3, data: new Uint8Array([0x89]) },
+        );
+        const exit = yield* h.run([
+          "session",
+          "--session-id",
+          SESSION_ID,
+          "--images",
+          "--server-url",
+          SERVER,
+        ]);
+        expect(Exit.isSuccess(exit)).toBe(true);
+        expect(yield* lastJson).toEqual([
+          {
+            id: IMAGE_ID,
+            actionId: 1,
+            url: Contract.StoredImageUrl(IMAGE_ID),
+            createdAt: "2026-09-03T00:00:01.000Z",
+          },
+          {
+            id: later,
+            actionId: 2,
+            url: Contract.StoredImageUrl(later),
+            createdAt: "2026-09-03T00:00:03.000Z",
+          },
+        ]);
+
+        const bare = harness();
+        bare.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
+        const empty = yield* bare.run([
+          "session",
+          "--session-id",
+          SESSION_ID,
+          "--images",
+          "--server-url",
+          SERVER,
+        ]);
+        expect(Exit.isSuccess(empty)).toBe(true);
+        expect((yield* stdout).at(-1)).toBe("[]");
       }),
   );
 
@@ -1897,7 +2416,7 @@ describe("session inspect", () => {
       expect(failure(exit)).toMatchObject({
         _tag: "CommandError",
         message:
-          "session: --logs, --test-def, --test-results, --actions, --debug-logs, --diagnosis, --all, or --dump is required",
+          "session: --status, --logs, --test-def, --test-results, --test-run, --actions, --images, --debug-logs, --diagnosis, --all, or --dump is required",
       });
     }),
   );
@@ -1906,7 +2425,7 @@ describe("session inspect", () => {
     Effect.gen(function* () {
       const h = harness();
       seedInspect(h);
-      for (const selector of ["--logs", "--diagnosis", "--all"]) {
+      for (const selector of ["--status", "--logs", "--images", "--diagnosis", "--all"]) {
         const exit = yield* h.run(
           ["session", "--session-id", SESSION_ID, "--dump", selector, "--server-url", SERVER],
           {
@@ -1916,7 +2435,7 @@ describe("session inspect", () => {
         );
         expect(failure(exit)).toMatchObject({
           message:
-            "session: --dump does not combine with --logs, --test-def, --test-results, --actions, --debug-logs, --diagnosis, or --all",
+            "session: --dump does not combine with --status, --logs, --test-def, --test-results, --test-run, --actions, --images, --debug-logs, --diagnosis, or --all",
         });
       }
       expect(h.proxy.calls).toEqual([]);
@@ -2180,6 +2699,7 @@ describe("environment order", () => {
           NEW_TYPE,
           ["error-type", "list", "--server-url", SERVER],
           DIAGNOSE,
+          DIAGNOSE_RUN,
         ]) {
           const exit = yield* h.run(args, {
             DATABASE_URL: "",
@@ -2209,6 +2729,7 @@ describe("--server-url", () => {
     NEW_TYPE.slice(0, -2),
     ["error-type", "list"],
     DIAGNOSE.slice(0, -2),
+    DIAGNOSE_RUN.slice(0, -2),
   ];
 
   it.effect("is required on every action but test run (unhappy)", () =>
@@ -2278,6 +2799,7 @@ describe("--help", () => {
           ["error-type", "new", "--help"],
           ["error-type", "list", "--help"],
           ["diagnose", "--help"],
+          ["diagnose", "run", "--help"],
         ]) {
           // The built-in --help renders and succeeds; runMain exits 0.
           const exit = yield* h.run(args, {});

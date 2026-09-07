@@ -1,14 +1,17 @@
 import { eq } from "drizzle-orm";
 import { Array as Arr, Context, Effect, Layer } from "effect";
+import type * as Domain from "../shared/domain.ts";
 import * as Client from "./client.ts";
 import * as DbSchema from "./schema.ts";
 
 export type ErrorTypeRow = typeof DbSchema.postRunErrorTypes.$inferSelect;
 export type DiagnosisRow = typeof DbSchema.postRunDiagnosis.$inferSelect;
 
+// errorType is null exactly when the verdict is passed; the table's check refuses anything else.
 export type DiagnosisInput = {
   readonly sessionId: string;
-  readonly errorType: string;
+  readonly verdict: Domain.DiagnosisVerdict;
+  readonly errorType: string | null;
   readonly summary: string;
   readonly model: string;
 };

@@ -26,7 +26,7 @@ const MainLive = Layer.mergeAll(
   HostLive,
 ).pipe(Layer.provideMerge(NodeServices.layer));
 
-const main = Command.run(SessionCommand.command, { version: Api.VERSION }).pipe(
+const main = Command.run(SessionCommand.makeSessionCommand(), { version: Api.VERSION }).pipe(
   Effect.provide(MainLive),
   Effect.scoped,
   Effect.tapCause(Render.reportFailure),

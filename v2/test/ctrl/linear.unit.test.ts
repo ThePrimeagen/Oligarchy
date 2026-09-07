@@ -1,12 +1,12 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { NodeFileSystem } from "@effect/platform-node";
-import { Cause, Effect, FileSystem, Layer, Redacted, Result } from "effect";
+import { Cause, Effect, Layer, Redacted } from "effect";
 import { HttpClientError, type HttpClientRequest } from "effect/unstable/http";
 import * as Linear from "../../src/ctrl/linear.ts";
+import * as Prompts from "../../src/ctrl/prompts.ts";
 import * as Render from "../../src/observability/render.ts";
 import * as Errors from "../../src/shared/errors.ts";
-import * as FakeFs from "../support/fake-fs.ts";
 import * as FakeHttp from "../support/fake-http.ts";
 
 const TOKEN = "linear-token-s3ntinel";
@@ -34,10 +34,9 @@ const experiment = {
       proof: "A terminal window is visible",
     },
   ],
-} satisfies Linear.Experiment;
+};
 
 const firstTest = experiment.tests[0];
-const secondTest = experiment.tests[1];
 
 type GraphQl = { readonly query: string; readonly variables?: Record<string, unknown> };
 
@@ -103,35 +102,24 @@ const withHttp = (respond: (body: GraphQl) => Response) =>
 
 const linear = (token = TOKEN) => Linear.Linear.layer(Redacted.make(token));
 
-const issuePrompts = Linear.loadIssuePrompts.pipe(Effect.provide(NodeFileSystem.layer));
-
-const drivingPrompt = Linear.loadDrivingPrompt.pipe(Effect.provide(NodeFileSystem.layer));
-
-// A FileSystem over the prompt files whose reads matching `unreadable` fail, recording the
-// path of every read so a test can say which files a loader touched.
-const promptFs = (
-  unreadable: RegExp,
-): { readonly reads: Array<string>; readonly layer: Layer.Layer<FileSystem.FileSystem> } => {
-  const reads: Array<string> = [];
-  const layer = FileSystem.layerNoop({
-    readFileString: (path) =>
-      Effect.suspend(() => {
-        reads.push(path);
-        return unreadable.test(path)
-          ? Effect.fail(FakeFs.permissionDenied("open", path))
-          : Effect.succeed(`contents of ${path}`);
-      }),
-  });
-  return { reads, layer };
-};
-
-const fileNames = (paths: ReadonlyArray<string>): ReadonlyArray<string> =>
-  paths.map((path) => path.slice(path.lastIndexOf("/") + 1));
+// The ticket body is the prompt module's; a broken checkout is a defect here, not a Linear failure.
+const describedAs = (ticket: string) =>
+  Prompts.render("linear-issue.html", {
+    LINEAR_TICKET: ticket,
+    RUN_ID: experiment.id,
+    RESULT_ID: firstTest.id,
+    VERSION: experiment.version,
+    ISO_URL: experiment.iso,
+    SERVER_URL: experiment.serverUrl,
+    TEST_NAME: firstTest.name,
+    TEST_DESCRIPTION: firstTest.description,
+    TEST_INSTRUCTION: firstTest.instruction,
+    TEST_PROOF: firstTest.proof,
+  }).pipe(Effect.provide(NodeFileSystem.layer), Effect.orDie);
 
 // The whole ticket flow as `test new` runs it for one definition.
 const createTicket = Effect.gen(function* () {
   const client = yield* Linear.Linear;
-  const loaded = yield* issuePrompts;
   const teamId = yield* client.teamId;
   const labelIds = yield* client.labelIds(teamId, experiment.version);
   const assigneeId = yield* client.assigneeId;
@@ -141,181 +129,12 @@ const createTicket = Effect.gen(function* () {
     labelIds,
     assigneeId,
   });
-  const description = yield* Effect.fromResult(
-    Linear.linearTicketDescription(experiment, firstTest, ticket.identifier, loaded),
-  );
-  yield* client.describeIssue(ticket, description);
+  yield* client.describeIssue(ticket, yield* describedAs(ticket.identifier));
   return ticket;
 });
 
 const failureOf = <A, R>(self: Effect.Effect<A, Errors.LinearError, R>) =>
   Effect.flip(self).pipe(Effect.provide(linear()));
-
-describe("renderPrompt", () => {
-  it("fills every placeholder (happy)", () => {
-    const rendered = Linear.renderPrompt("a {{ONE}} b {{TWO}} {{ONE}}", "x.html", {
-      ONE: "1",
-      TWO: "2",
-    });
-    expect(Result.isSuccess(rendered)).toBe(true);
-    expect(Result.getOrThrow(rendered)).toBe("a 1 b 2 1");
-  });
-
-  it("fails on a placeholder without a value (unhappy)", () => {
-    const rendered = Linear.renderPrompt("a {{MISSING}}", "linear-issue.html", { ONE: "1" });
-    expect(Result.isFailure(rendered)).toBe(true);
-    if (Result.isFailure(rendered)) {
-      expect(rendered.failure._tag).toBe("LinearError");
-      expect(rendered.failure.message).toBe(
-        "linear: prompts/linear-issue.html uses {{MISSING}}, which has no value",
-      );
-    }
-  });
-});
-
-describe("loadDrivingPrompt", () => {
-  it.effect("reads prompts/driving-agent.html and nothing else (happy)", () =>
-    Effect.gen(function* () {
-      const fs = promptFs(/\/(client\.md|ctrl-linear\.md|linear-issue\.html)$/);
-      const template = yield* Linear.loadDrivingPrompt.pipe(Effect.provide(fs.layer));
-      expect(fileNames(fs.reads)).toEqual(["driving-agent.html"]);
-      expect(template).toMatch(/^contents of .*\/prompts\/driving-agent\.html$/);
-    }),
-  );
-
-  it.effect("fails as a LinearError naming the template when it is unreadable (unhappy)", () =>
-    Effect.gen(function* () {
-      const fs = promptFs(/driving-agent\.html$/);
-      const error = yield* Effect.flip(Linear.loadDrivingPrompt.pipe(Effect.provide(fs.layer)));
-      expect(error).toMatchObject({ _tag: "LinearError", operation: "prompts" });
-      expect(error.message).toMatch(/^linear: .*driving-agent\.html/);
-      expect(error.cause).toBeDefined();
-    }),
-  );
-});
-
-describe("loadIssuePrompts", () => {
-  it.effect("reads the ticket template and both guides, not the kickoff template (happy)", () =>
-    Effect.gen(function* () {
-      const fs = promptFs(/driving-agent\.html$/);
-      const loaded = yield* Linear.loadIssuePrompts.pipe(Effect.provide(fs.layer));
-      expect([...fileNames(fs.reads)].sort()).toEqual([
-        "client.md",
-        "ctrl-linear.md",
-        "linear-issue.html",
-      ]);
-      expect(loaded.linearIssue).toMatch(/\/prompts\/linear-issue\.html$/);
-      expect(loaded.clientMd).toMatch(/\/client\.md$/);
-      expect(loaded.ctrlMd).toMatch(/\/ctrl-linear\.md$/);
-    }),
-  );
-
-  it.effect("fails as a LinearError naming an unreadable guide (unhappy)", () =>
-    Effect.gen(function* () {
-      const fs = promptFs(/\/client\.md$/);
-      const error = yield* Effect.flip(Linear.loadIssuePrompts.pipe(Effect.provide(fs.layer)));
-      expect(error).toMatchObject({ _tag: "LinearError", operation: "prompts" });
-      expect(error.message).toMatch(/^linear: .*client\.md/);
-    }),
-  );
-});
-
-describe("linearTicketDescription happy path", () => {
-  it.effect(
-    "renders the ticket, run, result, ISO, server, both guides, and this definition only",
-    () =>
-      Effect.gen(function* () {
-        const loaded = yield* issuePrompts;
-        const description = Result.getOrThrow(
-          Linear.linearTicketDescription(experiment, firstTest, "OLI-42", loaded),
-        );
-
-        expect(description.includes("{{")).toBe(false);
-        expect(description).toContain("<agent_id>OLI-42</agent_id>");
-        expect(description).toContain(
-          `start --agent-id OLI-42 --server-url ${experiment.serverUrl} --iso ${experiment.iso}`,
-        );
-        expect(description).toContain(
-          `./ctrl test start --server-url ${experiment.serverUrl} --session-id`,
-        );
-        expect(description).toContain("--model <the Cursor model id you are running as>");
-        expect(description).not.toContain("--model grok-4.6");
-        expect(description).toContain(
-          `./ctrl test-results --agent-id OLI-42 --server-url ${experiment.serverUrl} --id ${firstTest.id}`,
-        );
-        expect(description).toContain(
-          `./client get-image --agent-id OLI-42 --server-url ${experiment.serverUrl} --session-id`,
-        );
-        expect(description).toContain(
-          `./client stop --agent-id OLI-42 --server-url ${experiment.serverUrl} --session-id`,
-        );
-        expect(description).not.toMatch(
-          /(get-image|get-serial|send-keys|send-mouse|stop) (--agent-id <agent> --server-url <url> )?<id>/,
-        );
-        expect(description).toContain(`<run_id>${experiment.id}</run_id>`);
-        expect(description).toContain(`<result_id>${firstTest.id}</result_id>`);
-        expect(description).toContain(`<version>${experiment.version}</version>`);
-        expect(description).toContain(`<name>${firstTest.name}</name>`);
-        expect(description).toContain(`<description>${firstTest.description}</description>`);
-        expect(description).toContain(`<instruction>${firstTest.instruction}</instruction>`);
-        expect(description).toContain(`<proof>${firstTest.proof}</proof>`);
-        expect(description).toContain("# Client\n");
-        expect(description).toContain("## The loop");
-        expect(description).toContain("# Control\n");
-        expect(description).toContain("## test start");
-        expect(description).toContain("## test-results");
-        expect(description).toContain(Linear.SUB_AGENT);
-        expect(description.includes("--session_id")).toBe(false);
-        expect(description.includes("--server_url")).toBe(false);
-        expect(description.includes(secondTest.name)).toBe(false);
-        expect(description.includes(secondTest.id)).toBe(false);
-      }),
-  );
-});
-
-describe("linearTicketDescription unhappy path", () => {
-  it("fails when the template names a value the experiment does not carry", () => {
-    const rendered = Linear.linearTicketDescription(experiment, firstTest, "OLI-42", {
-      linearIssue: "{{RUN_ID}} {{NOPE}}",
-      clientMd: "",
-      ctrlMd: "",
-    });
-    expect(Result.isFailure(rendered)).toBe(true);
-    if (Result.isFailure(rendered)) {
-      expect(rendered.failure.message).toBe(
-        "linear: prompts/linear-issue.html uses {{NOPE}}, which has no value",
-      );
-    }
-  });
-});
-
-describe("drivingAgentPrompt", () => {
-  it.effect(
-    "renders the kickoff prompt from the ticket alone; the server url is in the ticket",
-    () =>
-      Effect.gen(function* () {
-        const template = yield* drivingPrompt;
-        const text = Result.getOrThrow(Linear.drivingAgentPrompt("OLI-42", template));
-        expect(text.includes("{{")).toBe(false);
-        // The formatter wrapped the template between "ticket" and the placeholder.
-        expect(text).toMatch(/Review Linear ticket\s+OLI-42/);
-        expect(text).toContain("<agent-id> OLI-42 </agent-id>");
-        expect(text).toContain("./client");
-        expect(text.includes("--server-url")).toBe(false);
-        expect(text.includes("http")).toBe(false);
-      }),
-  );
-
-  it("fails on a template asking for more than the ticket (unhappy)", () => {
-    const rendered = Linear.drivingAgentPrompt("OLI-42", "{{LINEAR_TICKET}} {{SERVER_URL}}");
-    expect(Result.isFailure(rendered)).toBe(true);
-    if (Result.isFailure(rendered)) {
-      expect(rendered.failure.message).toBe(
-        "linear: prompts/driving-agent.html uses {{SERVER_URL}}, which has no value",
-      );
-    }
-  });
-});
 
 describe("Linear happy path", () => {
   it.effect(
@@ -326,7 +145,6 @@ describe("Linear happy path", () => {
         const ticket = yield* createTicket.pipe(
           Effect.provide(linear().pipe(Layer.provide(http.layer))),
         );
-        const loaded = yield* issuePrompts;
 
         expect(ticket).toEqual({
           id: "issue-OLI-42",
@@ -361,9 +179,7 @@ describe("Linear happy path", () => {
         expect(bodies[5]?.variables).toEqual({
           id: "issue-OLI-42",
           input: {
-            description: Result.getOrThrow(
-              Linear.linearTicketDescription(experiment, firstTest, "OLI-42", loaded),
-            ),
+            description: yield* describedAs("OLI-42"),
           },
         });
       }),

@@ -66,6 +66,13 @@ export class SessionStore extends Context.Service<SessionStore>()("@oligarchy/db
       return Option.map(Arr.head(rows), (row) => row.status);
     });
 
+    const getSession = Effect.fn("db.getSession")(function* (id: string) {
+      const rows = yield* database.run("getSession", (db) =>
+        db.select().from(DbSchema.sessions).where(eq(DbSchema.sessions.id, id)),
+      );
+      return Arr.head(rows);
+    });
+
     // The canonical id from the row: Postgres matched however the caller cased it.
     const sessionExists = Effect.fn("db.sessionExists")(function* (id: string) {
       const rows = yield* database.run("sessionExists", (db) =>
@@ -128,6 +135,7 @@ export class SessionStore extends Context.Service<SessionStore>()("@oligarchy/db
       sessionRunning,
       endSession,
       getSessionStatus,
+      getSession,
       sessionExists,
       registerAgent,
       sessionForAgent,

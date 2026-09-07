@@ -1,9 +1,14 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { Client } from "pg";
+import * as DbSchema from "../../src/db/schema.ts";
+import * as Postgres from "../support/postgres.ts";
 import * as StubProxy from "../support/stub-proxy.ts";
 
 const ROOT = resolve(import.meta.dirname, "../../..");
@@ -55,6 +60,26 @@ const runSession = async (
   child.stdin.end(lines.map((line) => `${line}\n`).join(""));
   const [code] = await once(child, "close");
   return { code: typeof code === "number" ? code : null, stdout, stderr };
+};
+
+// `session image` prints a PNG: stdout is kept as bytes, not decoded.
+const runImage = async (
+  args: ReadonlyArray<string>,
+  env: NodeJS.ProcessEnv = {},
+): Promise<{ readonly code: number | null; readonly stdout: Buffer; readonly stderr: string }> => {
+  const child = spawn(SESSION, ["image", ...args], { cwd: CWD, env: baseEnv(env) });
+  const chunks: Array<Buffer> = [];
+  let stderr = "";
+  child.stdout.on("data", (data: Buffer) => {
+    chunks.push(data);
+  });
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (data: string) => {
+    stderr += data;
+  });
+  child.stdin.end();
+  const [code] = await once(child, "close");
+  return { code: typeof code === "number" ? code : null, stdout: Buffer.concat(chunks), stderr };
 };
 
 // A real terminal through `script`: readline runs in terminal mode, so Tab reaches the completer.
@@ -421,9 +446,11 @@ describe.skipIf(!ready)("./session unhappy path", () => {
 // The parser and the token check run before any child is needed.
 describe("./session arguments", () => {
   it("rejects a positional server url and an unknown flag", async () => {
+    // With `image` as a subcommand, a stray positional reads as a subcommand that does not exist.
     const positional = await runSession(["http://127.0.0.1:1"], []);
     expect(positional.code).not.toBe(0);
-    expect(positional.stderr).toMatch(/Unexpected positional argument: "http:\/\/127\.0\.0\.1:1"/);
+    expect(positional.stderr).toMatch(/Unknown subcommand "http:\/\/127\.0\.0\.1:1" for "session"/);
+    expect(positional.stdout.includes("session> ")).toBe(false);
 
     const underscore = await runSession(["--server_url", "http://127.0.0.1:1"], []);
     expect(underscore.code).not.toBe(0);
@@ -444,5 +471,91 @@ describe("./session arguments", () => {
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("--server-url");
     expect(result.stdout.includes("session> ")).toBe(false);
+  });
+
+  it("image --help exits 0 without a database; image wants a uuid, then DATABASE_URL", async () => {
+    const help = await runImage(["--help"], { DATABASE_URL: "" });
+    expect(help.code).toBe(0);
+    expect(help.stderr).toBe("");
+    expect(help.stdout.toString("utf8")).toContain("--image-id");
+
+    const notUuid = await runImage(["--image-id", "last.png"], { DATABASE_URL: "" });
+    expect(notUuid.code).toBe(1);
+    expect(notUuid.stderr).toMatch(/Invalid value for flag --image-id: "last\.png"/);
+    expect(notUuid.stderr).toMatch(/image-id must be a uuid/);
+
+    const noDatabase = await runImage(["--image-id", randomUUID()], {
+      DATABASE_URL: "",
+      OLIGARCHY_TOKEN: "",
+    });
+    expect(noDatabase.code).toBe(1);
+    expect(noDatabase.stdout).toHaveLength(0);
+    expect(noDatabase.stderr.startsWith("DATABASE_URL is not set")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// image, against the seeded container database
+// ---------------------------------------------------------------------------
+
+// A screendump and its PNG on a fresh session, as the proxy records them.
+const seedImage = async (): Promise<{ readonly imageId: string; readonly png: Uint8Array }> => {
+  const sessionId = randomUUID();
+  const imageId = randomUUID();
+  const png = StubProxy.tinyPng();
+  const client = new Client({ connectionString: Postgres.getDbUrl() });
+  await client.connect();
+  try {
+    const db = drizzle({ client });
+    await db.insert(DbSchema.sessions).values({ id: sessionId, config: { iso: "x" } });
+    const [action] = await db
+      .insert(DbSchema.actions)
+      .values({
+        sessionId,
+        request: {
+          execute: "screendump",
+          arguments: { filename: "/tmp/s.png", format: "png" },
+          id: 1,
+        },
+        state: "completed",
+        response: { return: {} },
+        finishedAt: new Date(),
+      })
+      .returning({ id: DbSchema.actions.id });
+    await db
+      .insert(DbSchema.images)
+      .values({ id: imageId, actionId: action.id, data: Buffer.from(png) });
+  } finally {
+    await client.end();
+  }
+  return { imageId, png };
+};
+
+Postgres.describeWithDatabase("./session image against the seeded database", () => {
+  const env = { DATABASE_URL: Postgres.getDbUrl(), OLIGARCHY_TOKEN: "" };
+
+  it("prints the stored PNG raw to stdout, and writes it with -o", async () => {
+    const { imageId, png } = await seedImage();
+    const printed = await runImage(["--image-id", imageId], env);
+    expect(printed.stderr).toBe("");
+    expect(printed.code).toBe(0);
+    expect([...printed.stdout]).toEqual([...png]);
+
+    const file = resolve(CWD, `oligarchy-${imageId}.png`);
+    const written = await runImage(["--image-id", imageId.toUpperCase(), "-o", file], env);
+    expect(written.stderr).toBe("");
+    expect(written.code).toBe(0);
+    expect(written.stdout).toHaveLength(0);
+    expect([...readFileSync(file)]).toEqual([...png]);
+    expect(statSync(file).mode & 0o777).toBe(0o644);
+  });
+
+  it("refuses an id no image has, headline first, and prints nothing", async () => {
+    const imageId = randomUUID();
+    const result = await runImage(["--image-id", imageId], env);
+    expect(result.code).toBe(1);
+    expect(result.stdout).toHaveLength(0);
+    expect(result.stderr.split("\n")[0]).toBe(`image: no image ${imageId}`);
+    expect(result.stderr).toMatch(/CommandError/);
   });
 });
