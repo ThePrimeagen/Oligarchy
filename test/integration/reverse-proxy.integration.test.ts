@@ -213,41 +213,44 @@ describe("reverse proxy serving", () => {
     Effect.promise(async () => {
       const port = await freePort();
       const process = spawnReverseProxy(["--port", String(port)]);
-      await process.waitFor(/oligarchy reverse proxy listening/);
-      expect(lines(process.stdout())).toContain(
-        `[global] oligarchy reverse proxy listening on 127.0.0.1:${String(port)}`,
-      );
+      try {
+        await process.waitFor(/oligarchy reverse proxy listening/);
+        expect(lines(process.stdout())).toContain(
+          `[global] oligarchy reverse proxy listening on 127.0.0.1:${String(port)}`,
+        );
 
-      const servers = await request(port, "GET", "/servers", {
-        authorization: `Bearer ${TOKEN}`,
-      });
-      expect(servers.status).toBe(200);
-      expect(servers.headers.get("content-type")).toContain("application/json");
-      expect(await servers.json()).toEqual({ servers: [] });
+        const servers = await request(port, "GET", "/servers", {
+          authorization: `Bearer ${TOKEN}`,
+        });
+        expect(servers.status).toBe(200);
+        expect(servers.headers.get("content-type")).toContain("application/json");
+        expect(await servers.json()).toEqual({ servers: [] });
 
-      const stats = await request(port, "GET", "/stats", { authorization: `Bearer ${TOKEN}` });
-      expect(stats.status).toBe(404);
-      expect(await stats.json()).toEqual({ error: "not found" });
+        const stats = await request(port, "GET", "/stats", { authorization: `Bearer ${TOKEN}` });
+        expect(stats.status).toBe(404);
+        expect(await stats.json()).toEqual({ error: "not found" });
 
-      const image = await request(port, "GET", `/images/${crypto.randomUUID()}`);
-      expect(image.status).toBe(404);
+        const image = await request(port, "GET", `/images/${crypto.randomUUID()}`);
+        expect(image.status).toBe(404);
 
-      const unauthorized = await request(port, "POST", "/send-keys");
-      expect(unauthorized.status).toBe(401);
-      expect(await unauthorized.json()).toEqual({ error: "unauthorized" });
+        const unauthorized = await request(port, "POST", "/send-keys");
+        expect(unauthorized.status).toBe(401);
+        expect(await unauthorized.json()).toEqual({ error: "unauthorized" });
 
-      // Nothing is registered in the fresh database: a start has nowhere to go.
-      const noServer = await request(
-        port,
-        "POST",
-        "/start",
-        { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
-        '{"iso":"omarchy.iso","agent":"OLI-1"}',
-      );
-      expect(noServer.status).toBe(503);
-      expect(await noServer.json()).toEqual({ error: "no server registered" });
-
-      process.child.kill(signal);
+        // Nothing is registered in the fresh database: a start has nowhere to go.
+        const noServer = await request(
+          port,
+          "POST",
+          "/start",
+          { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+          '{"iso":"omarchy.iso","agent":"OLI-1"}',
+        );
+        expect(noServer.status).toBe(503);
+        expect(await noServer.json()).toEqual({ error: "no server registered" });
+      } finally {
+        // A failed expectation must not leave the process listening past the test.
+        process.child.kill(signal);
+      }
       const { code } = await process.exited;
       expect(code, process.stdout()).toBe(0);
       const output = lines(process.stdout());
