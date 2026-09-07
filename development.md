@@ -871,12 +871,13 @@ the fleet and the routing table, both rows in the control-plane database.
   and joined to each path with `HttpClientRequest.prependUrl` (one slash, as the generated
   client's `baseUrl`), so `https://host/` and `https://host` both reach `/stats` but are two rows
   if both are registered. The reverse proxy probes `GET <url>/stats` with the bearer: a transport
-  failure, on the connection or while reading the body, is 502 `server <url> unreachable:
+  failure, on the connection or while reading a 200's body, is 502 `server <url> unreachable:
   <cause>`; a non-200 is 502 `server <url> answered <status>: <message>` (the `error` of a
-  `{ "error" }` body, any other body raw, an empty body `request failed`, as
-  `ProxyClient.apiError` reads it); a 200 whose body does not decode as `Contract.Stats` is 502
-  `server <url> answered 200 without stats`; and no answer within `PROBE_TIMEOUT` (`"10
-  seconds"`) is 502 `server <url> unreachable: no response within 10 seconds`. A probe that
+  `{ "error" }` body, any other body raw, an empty or unreadable body `request failed`, as
+  `ProxyClient.apiError` reads it: the status is the refusal, the text only names it); a 200
+  whose body does not decode as `Contract.Stats` is 502 `server <url> answered 200 without
+  stats`; and no answer within `PROBE_TIMEOUT` (`"10 seconds"`) is 502 `server <url>
+  unreachable: no response within 10 seconds`. A probe that
   passes inserts the `servers` row (`on conflict do nothing`: registering a url twice is two
   probes and one row) and logs `server registered; <url>` at info each time.
 - `DELETE /servers { url }`: removes the row and logs `server removed; <url>`; a url that was not

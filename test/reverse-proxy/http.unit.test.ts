@@ -820,7 +820,7 @@ describe("forwarding", () => {
       }),
   );
 
-  it.effect("GET /serial and GET /dump pass text/plain through", () =>
+  it.effect("GET /serial and GET /dump pass text/plain through, a stored slash joined once", () =>
     Effect.gen(function* () {
       const fixed = fixture(
         (_, url) =>
@@ -829,7 +829,7 @@ describe("forwarding", () => {
             headers: { "content-type": "text/plain" },
           }),
       );
-      fixed.store.routes.set(SESSION_ID, SERVER_A);
+      fixed.store.routes.set(SESSION_ID, `${SERVER_A}/`);
       yield* Effect.gen(function* () {
         const api = yield* proxyClient;
         const [serial, serialResponse] = yield* api.Sessions.serial({
@@ -889,7 +889,7 @@ describe("forwarding", () => {
       const second = '{"type":"session","status":"succeeded"}\n';
       const encoder = new TextEncoder();
       // The server writes the second line only once the test has read the first one: a proxy
-      // that buffered the body would deadlock here instead of streaming.
+      // that buffered the body would hang here until the test timeout instead of streaming.
       let releaseSecond: () => void = () => undefined;
       const secondReleased = new Promise<void>((resolve) => {
         releaseSecond = resolve;
@@ -922,21 +922,19 @@ describe("forwarding", () => {
               releaseSecond();
             }
           }),
-        ).pipe(
-          Effect.timeoutOrElse({ duration: "5 seconds", orElse: () => Effect.die("buffered") }),
         );
         expect(received.join("")).toBe(first + second);
       }).pipe(Effect.provide(serve(fixed)));
     }),
   );
 
-  it.effect("a routed session keeps its server after the server is unregistered", () =>
+  it.effect("a routed session keeps its server after that server is unregistered", () =>
     Effect.gen(function* () {
       const fixed = fixture(
         () => new Response("serial\n", { status: 200, headers: { "content-type": "text/plain" } }),
       );
       fixed.store.servers.push(SERVER_A);
-      fixed.store.routes.set(SESSION_ID, `${SERVER_A}/`);
+      fixed.store.routes.set(SESSION_ID, SERVER_A);
       yield* Effect.gen(function* () {
         const operator = yield* reverseClient;
         yield* operator.Servers.unregister({ payload: serverBody(SERVER_A) });
@@ -945,7 +943,6 @@ describe("forwarding", () => {
         expect(decoder.decode(serial)).toBe("serial\n");
       }).pipe(Effect.provide(serve(fixed)));
       expect(fixed.store.servers).toEqual([]);
-      // A stored trailing slash joins with one slash, as registration does.
       expect(upstreamCalls(fixed)).toEqual([
         `GET ${SERVER_A}/serial?id=${SESSION_ID}&agent=${AGENT_ID}`,
       ]);

@@ -7,7 +7,9 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, inject } from "vitest";
 import { it } from "@effect/vitest";
 import { Effect } from "effect";
-import { Client } from "pg";
+import * as Client from "../../src/db/client.ts";
+import * as DbSchema from "../../src/db/schema.ts";
+import * as Postgres from "../support/postgres.ts";
 
 const REVERSE_PROXY = fileURLToPath(new URL("../../reverse-proxy", import.meta.url));
 const TOKEN = "t";
@@ -209,72 +211,69 @@ describe("reverse proxy startup refusals", () => {
   );
 });
 
-// The integration files share one database; the fleet this test expects is its own to arrange.
-const forgetEveryServer = async (): Promise<void> => {
-  const client = new Client({ connectionString: dbUrl });
-  await client.connect();
-  try {
-    await client.query("delete from servers");
-  } finally {
-    await client.end();
-  }
-};
+// The integration files share one database; the empty fleet this test expects is its own to
+// arrange.
+const forgetEveryServer = Effect.gen(function* () {
+  const database = yield* Client.Database;
+  yield* database.run("forgetEveryServer", (db) => db.delete(DbSchema.servers));
+}).pipe(Effect.provide(Postgres.DatabaseLive(dbUrl)));
 
 describe("reverse proxy serving", () => {
   const serving = (signal: "SIGINT" | "SIGTERM") =>
-    Effect.promise(async () => {
-      await forgetEveryServer();
-      const port = await freePort();
-      const process = spawnReverseProxy(["--port", String(port)]);
-      try {
-        await process.waitFor(/oligarchy reverse proxy listening/);
-        expect(lines(process.stdout())).toContain(
-          `[global] oligarchy reverse proxy listening on 127.0.0.1:${String(port)}`,
-        );
+    forgetEveryServer.pipe(Effect.andThen(Effect.promise(() => served(signal))));
 
-        const servers = await request(port, "GET", "/servers", {
-          authorization: `Bearer ${TOKEN}`,
-        });
-        expect(servers.status).toBe(200);
-        expect(servers.headers.get("content-type")).toContain("application/json");
-        expect(await servers.json()).toEqual({ servers: [] });
+  const served = async (signal: "SIGINT" | "SIGTERM") => {
+    const port = await freePort();
+    const process = spawnReverseProxy(["--port", String(port)]);
+    try {
+      await process.waitFor(/oligarchy reverse proxy listening/);
+      expect(lines(process.stdout())).toContain(
+        `[global] oligarchy reverse proxy listening on 127.0.0.1:${String(port)}`,
+      );
 
-        const stats = await request(port, "GET", "/stats", { authorization: `Bearer ${TOKEN}` });
-        expect(stats.status).toBe(404);
-        expect(await stats.json()).toEqual({ error: "not found" });
+      const servers = await request(port, "GET", "/servers", {
+        authorization: `Bearer ${TOKEN}`,
+      });
+      expect(servers.status).toBe(200);
+      expect(servers.headers.get("content-type")).toContain("application/json");
+      expect(await servers.json()).toEqual({ servers: [] });
 
-        const image = await request(port, "GET", `/images/${crypto.randomUUID()}`);
-        expect(image.status).toBe(404);
+      const stats = await request(port, "GET", "/stats", { authorization: `Bearer ${TOKEN}` });
+      expect(stats.status).toBe(404);
+      expect(await stats.json()).toEqual({ error: "not found" });
 
-        const unauthorized = await request(port, "POST", "/send-keys");
-        expect(unauthorized.status).toBe(401);
-        expect(await unauthorized.json()).toEqual({ error: "unauthorized" });
+      const image = await request(port, "GET", `/images/${crypto.randomUUID()}`);
+      expect(image.status).toBe(404);
 
-        // Nothing is registered in the fresh database: a start has nowhere to go.
-        const noServer = await request(
-          port,
-          "POST",
-          "/start",
-          { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
-          '{"iso":"omarchy.iso","agent":"OLI-1"}',
-        );
-        expect(noServer.status).toBe(503);
-        expect(await noServer.json()).toEqual({ error: "no server registered" });
-      } finally {
-        // A failed expectation must not leave the process listening past the test.
-        process.child.kill(signal);
-      }
-      const { code } = await process.exited;
-      expect(code, process.stdout()).toBe(0);
-      const output = lines(process.stdout());
-      expect(output).toContain("[global] error: POST /send-keys failed: unauthorized");
-      expect(output).toContain("[OLI-1] error: POST /start failed: no server registered");
-      expect(output.some((line) => line.includes("GET /stats"))).toBe(false);
-      expect(output.some((line) => line.includes("/images/"))).toBe(false);
-      expect(process.stderr()).toBe("");
+      const unauthorized = await request(port, "POST", "/send-keys");
+      expect(unauthorized.status).toBe(401);
+      expect(await unauthorized.json()).toEqual({ error: "unauthorized" });
 
-      await expect(request(port, "GET", "/servers")).rejects.toThrow();
-    });
+      // Nothing is registered in the fresh database: a start has nowhere to go.
+      const noServer = await request(
+        port,
+        "POST",
+        "/start",
+        { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+        '{"iso":"omarchy.iso","agent":"OLI-1"}',
+      );
+      expect(noServer.status).toBe(503);
+      expect(await noServer.json()).toEqual({ error: "no server registered" });
+    } finally {
+      // A failed expectation must not leave the process listening past the test.
+      process.child.kill(signal);
+    }
+    const { code } = await process.exited;
+    expect(code, process.stdout()).toBe(0);
+    const output = lines(process.stdout());
+    expect(output).toContain("[global] error: POST /send-keys failed: unauthorized");
+    expect(output).toContain("[OLI-1] error: POST /start failed: no server registered");
+    expect(output.some((line) => line.includes("GET /stats"))).toBe(false);
+    expect(output.some((line) => line.includes("/images/"))).toBe(false);
+    expect(process.stderr()).toBe("");
+
+    await expect(request(port, "GET", "/servers")).rejects.toThrow();
+  };
 
   it.live.skipIf(dbUrl === "")(
     "listens, answers /servers, 401 and 404, and exits 0 on SIGINT",
