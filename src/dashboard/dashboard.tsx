@@ -10,6 +10,7 @@ import {
   listTestDefinitions,
   listTestResultOutcomes,
   modelStats,
+  selectDefinition,
   type DefinitionStat,
   type ModelStat,
   type Session,
@@ -68,10 +69,12 @@ const SessionStatus: FC<SessionStatusProps> = ({ sessions, outOfBand = false }) 
   </span>
 );
 
-const ModelChart: FC<{ stats: ReadonlyArray<ModelStat> }> = ({ stats }) =>
-  stats.length === 0 ? null : (
-    <div class="record__field">
-      <h3>Results by model</h3>
+const ModelChart: FC<{ stats: ReadonlyArray<ModelStat> }> = ({ stats }) => (
+  <div class="record__field">
+    <h3>Results by model</h3>
+    {stats.length === 0 ? (
+      <p class="model-chart__empty">No passed or failed results yet.</p>
+    ) : (
       <ul class="model-chart">
         {stats.map((row) => (
           <li class="model-chart__row">
@@ -95,8 +98,9 @@ const ModelChart: FC<{ stats: ReadonlyArray<ModelStat> }> = ({ stats }) =>
           </li>
         ))}
       </ul>
-    </div>
-  );
+    )}
+  </div>
+);
 
 const DefinitionScoreboard: FC<{ stats: ReadonlyArray<DefinitionStat> }> = ({ stats }) =>
   stats.length === 0 ? null : (
@@ -234,7 +238,7 @@ const Menu: FC<{ page: PageId }> = ({ page }) => (
 );
 
 const Shell: FC<PropsWithChildren<{ page: PageId }>> = ({ page, children }) => (
-  <main>
+  <main data-page={page}>
     <Menu page={page} />
     <header class="hero">
       <div class="brand" aria-label="Omarchy">
@@ -279,56 +283,113 @@ const Home: FC<HomeProps> = ({ sessions }) => (
 type DefinitionsProps = {
   definitions: TestDefinition[] | null;
   outcomes: TestResultOutcome[];
+  // The ?name the page was asked for, and the definition it resolved to: nothing when the name is
+  // unknown, so the wide layout can say so instead of opening on another definition.
+  name: string | undefined;
+  selected: TestDefinition | undefined;
 };
 
-const Definitions: FC<DefinitionsProps> = ({ definitions, outcomes }) => (
+const definitionHref = (name: string): string => `/definitions?name=${encodeURIComponent(name)}`;
+
+// Every card is in the page so a narrow screen keeps its scrolling list; the wide layout shows
+// the sidebar and only the current card. A sidebar click fetches the page for that name and swaps
+// this section in place (htmx 4 inherits an attribute only when told to), pushing the URL so a
+// reload or a shared link opens on the same definition.
+const Definitions: FC<DefinitionsProps> = ({ definitions, outcomes, name, selected }) => (
   <Shell page="definitions">
-    <section class="records" aria-labelledby="definitions-heading">
+    <section id="definitions" class="records definitions" aria-labelledby="definitions-heading">
       <div class="sessions__heading">
         <h1 id="definitions-heading">Test definitions</h1>
       </div>
-      <div class="record-list">
-        {definitions === null ? (
-          <div class="empty-state empty-state--error">
-            <p>Test definitions are unavailable.</p>
-            <span>Try refreshing in a moment.</span>
+      {definitions === null ? (
+        <div class="empty-state empty-state--error">
+          <p>Test definitions are unavailable.</p>
+          <span>Try refreshing in a moment.</span>
+        </div>
+      ) : definitions.length === 0 ? (
+        <div class="empty-state">
+          <p>No test definitions yet.</p>
+        </div>
+      ) : (
+        <div class="definitions__layout">
+          <nav
+            class="definitions__nav"
+            aria-label="Test definitions"
+            hx-target:inherited="#definitions"
+            hx-select:inherited="#definitions"
+            hx-swap:inherited="outerHTML"
+            hx-push-url:inherited="true"
+          >
+            {definitions.map((definition) => {
+              const isCurrent = definition.id === selected?.id;
+              // The swap replaces the focused link; htmx puts focus back only on an element with
+              // the same id, so a keyboard user does not fall back to the top of the page.
+              return (
+                <a
+                  id={`definition-${String(definition.id)}`}
+                  href={definitionHref(definition.name)}
+                  hx-get={definitionHref(definition.name)}
+                  class={
+                    isCurrent ? "definitions__link definitions__link--current" : "definitions__link"
+                  }
+                  aria-current={isCurrent ? "true" : undefined}
+                >
+                  {definition.name}
+                </a>
+              );
+            })}
+          </nav>
+          <div class="definitions__detail">
+            {selected === undefined ? (
+              <div class="empty-state definitions__missing">
+                <p>
+                  No test definition named <code>{name}</code>.
+                </p>
+                <span>Pick one from the list.</span>
+              </div>
+            ) : null}
+            <ol class="definitions__list">
+              {definitions.map((definition) => (
+                <li
+                  class={
+                    definition.id === selected?.id
+                      ? "definitions__item definitions__item--current"
+                      : "definitions__item"
+                  }
+                >
+                  <article class="record definition">
+                    <h2>{definition.name}</h2>
+                    <time dateTime={definition.createdAt.toISOString()}>
+                      {dateTime.format(definition.createdAt)}
+                    </time>
+                    <div class="definition__chart">
+                      <ModelChart
+                        stats={modelStats(
+                          outcomes.filter((row) => row.definitionName === definition.name),
+                        )}
+                      />
+                    </div>
+                    <div class="definition__fields">
+                      <div class="record__field">
+                        <h3>Description</h3>
+                        <p>{definition.description}</p>
+                      </div>
+                      <div class="record__field">
+                        <h3>Instruction</h3>
+                        <p>{definition.instruction}</p>
+                      </div>
+                      <div class="record__field">
+                        <h3>Proof</h3>
+                        <p>{definition.proof}</p>
+                      </div>
+                    </div>
+                  </article>
+                </li>
+              ))}
+            </ol>
           </div>
-        ) : definitions.length === 0 ? (
-          <div class="empty-state">
-            <p>No test definitions yet.</p>
-          </div>
-        ) : (
-          <ol>
-            {definitions.map((definition) => (
-              <li>
-                <article class="record">
-                  <h2>{definition.name}</h2>
-                  <time dateTime={definition.createdAt.toISOString()}>
-                    {dateTime.format(definition.createdAt)}
-                  </time>
-                  <ModelChart
-                    stats={modelStats(
-                      outcomes.filter((row) => row.definitionName === definition.name),
-                    )}
-                  />
-                  <div class="record__field">
-                    <h3>Description</h3>
-                    <p>{definition.description}</p>
-                  </div>
-                  <div class="record__field">
-                    <h3>Instruction</h3>
-                    <p>{definition.instruction}</p>
-                  </div>
-                  <div class="record__field">
-                    <h3>Proof</h3>
-                    <p>{definition.proof}</p>
-                  </div>
-                </article>
-              </li>
-            ))}
-          </ol>
-        )}
-      </div>
+        </div>
+      )}
     </section>
   </Shell>
 );
@@ -376,7 +437,7 @@ const Prompts: FC<PromptsProps> = ({ prompts }) => (
   </Shell>
 );
 
-const app = new Hono<{ Bindings: Bindings }>();
+export const app = new Hono<{ Bindings: Bindings }>();
 
 app.use(async (context, next) => {
   if (new URL(context.req.url).hostname === "clicker.oligarchy.trm.sh") {
@@ -415,17 +476,27 @@ app.get("/", async (context) => {
 });
 
 app.get("/definitions", async (context) => {
+  const name = context.req.query("name");
   try {
     const [definitions, outcomes] = await Promise.all([
       listTestDefinitions(context.env.HYPERDRIVE.connectionString),
       listTestResultOutcomes(context.env.HYPERDRIVE.connectionString),
     ]);
-    return context.render(<Definitions definitions={definitions} outcomes={outcomes} />);
+    const selected = selectDefinition(definitions, name);
+    // A stale link: the page still lists what exists, the status says the name does not.
+    if (name !== undefined && selected === undefined) {
+      context.status(404);
+    }
+    return context.render(
+      <Definitions definitions={definitions} outcomes={outcomes} name={name} selected={selected} />,
+    );
   } catch (error) {
     Sentry.captureException(error);
     console.error("dashboard: loading the definitions page:", errorMessage(error));
     context.status(500);
-    return context.render(<Definitions definitions={null} outcomes={[]} />);
+    return context.render(
+      <Definitions definitions={null} outcomes={[]} name={name} selected={undefined} />,
+    );
   }
 });
 

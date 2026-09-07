@@ -1,6 +1,10 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
+import { Client } from "pg";
 import { describe, expect, inject, it } from "vitest";
+import { app } from "../../src/dashboard/dashboard.tsx";
+import { testDefinitions, testResults, testRuns } from "../../src/db/schema.ts";
 
 const QUERY = fileURLToPath(new URL("../../src/dashboard/query.ts", import.meta.url));
 const SCHEMA = fileURLToPath(new URL("../../src/db/schema.ts", import.meta.url));
@@ -204,6 +208,128 @@ describe.skipIf(dbUrl === "")("dashboard/query unhappy path: failed query", () =
     expect(result.code).toBe(3);
     expect(result.stderr).toMatch(/Failed query: select "data"/);
     expect(result.stderr).toMatch(/invalid input syntax for type uuid/);
+  });
+});
+
+type Page = {
+  readonly status: number;
+  readonly html: string;
+};
+
+// The Worker in-process: the Hono app answers a Request with the Hyperdrive binding pointed at
+// the container, so the page is what production renders from these rows.
+const getPage = async (path: string, databaseUrl: string): Promise<Page> => {
+  const response = await app.request(path, undefined, {
+    HYPERDRIVE: { connectionString: databaseUrl },
+  });
+  return { status: response.status, html: await response.text() };
+};
+
+const seed = async (databaseUrl: string, run: (db: NodePgDatabase) => Promise<void>) => {
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    await run(drizzle(client));
+  } finally {
+    await client.end();
+  }
+};
+
+// The card the wide layout shows: the list item marked current, up to the next item or the end
+// of the list (the model chart nests its own list items, so a bare </li> is not the end).
+const currentCard = (html: string): string =>
+  /<li class="definitions__item definitions__item--current">([\s\S]*?)<\/li>\s*(?:<li class="definitions__item|<\/ol>)/.exec(
+    html,
+  )?.[1] ?? "";
+
+describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
+  it("lists every definition as a sidebar link and selects the first when no name is asked for", async () => {
+    const { status, html } = await getPage("/definitions", dbUrl);
+    expect(status).toBe(200);
+    expect(html).toContain('href="/definitions?name=lock-screen"');
+    expect(html.match(/aria-current="true"/g)).toHaveLength(1);
+    expect(currentCard(html)).toMatch(/<h2>[^<]+<\/h2>/);
+  });
+
+  it("selects the definition named by ?name, marks its link current and charts its results by model", async () => {
+    await seed(dbUrl, async (db) => {
+      const [charted] = await db
+        .insert(testDefinitions)
+        .values({ name: "wide layout", description: "d", instruction: "i", proof: "p" })
+        .returning({ id: testDefinitions.id });
+      // A run holds one result per definition, so each result here is its own run.
+      const outcomes = [
+        { status: "passed", model: "grok-4.6" },
+        { status: "failed", model: "grok-4.6" },
+        { status: "passed", model: "composer-2.5" },
+        { status: "pending", model: "gemini-3.8" },
+      ] as const;
+      const runs = await db
+        .insert(testRuns)
+        .values(
+          outcomes.map(() => ({
+            name: "wide",
+            iso: "https://example.com/omarchy.iso",
+            serverUrl: "http://127.0.0.1:42069",
+          })),
+        )
+        .returning({ id: testRuns.id });
+      await db.insert(testResults).values(
+        outcomes.map((outcome, index) => ({
+          runId: runs[index].id,
+          definitionId: charted.id,
+          status: outcome.status,
+          model: outcome.model,
+        })),
+      );
+    });
+    const { status, html } = await getPage("/definitions?name=wide%20layout", dbUrl);
+    expect(status).toBe(200);
+    expect(html).toMatch(
+      /<a [^>]*href="\/definitions\?name=wide%20layout"[^>]*aria-current="true"[^>]*>wide layout<\/a>/,
+    );
+    expect(html.match(/aria-current="true"/g)).toHaveLength(1);
+    const card = currentCard(html);
+    expect(card).toContain("<h2>wide layout</h2>");
+    expect(card).toContain('aria-label="composer-2.5: 1 succeeded, 0 failed"');
+    expect(card).toContain('aria-label="grok-4.6: 1 succeeded, 1 failed"');
+    expect(card).not.toContain("gemini-3.8");
+    expect(card).not.toContain("lock-screen");
+  });
+
+  it("says so in the chart when the selected definition has no passed or failed result yet", async () => {
+    await seed(dbUrl, async (db) => {
+      await db
+        .insert(testDefinitions)
+        .values({ name: "wide-unrun", description: "d", instruction: "i", proof: "p" });
+    });
+    const { status, html } = await getPage("/definitions?name=wide-unrun", dbUrl);
+    expect(status).toBe(200);
+    const card = currentCard(html);
+    expect(card).toContain("<h2>wide-unrun</h2>");
+    expect(card).toContain("No passed or failed results yet.");
+    expect(card).not.toContain('class="model-chart__bar"');
+  });
+});
+
+describe.skipIf(dbUrl === "")("dashboard/definitions page unhappy path", () => {
+  it("answers 404 for a name no definition carries, keeping the sidebar and selecting nothing", async () => {
+    const { status, html } = await getPage("/definitions?name=no-such-definition", dbUrl);
+    expect(status).toBe(404);
+    expect(html).toContain("No test definition named <code>no-such-definition</code>.");
+    expect(html).toContain('href="/definitions?name=lock-screen"');
+    expect(html).not.toContain('aria-current="true"');
+    expect(currentCard(html)).toBe("");
+  });
+});
+
+describe("dashboard/definitions page unhappy path: unreachable database", () => {
+  it("answers 500 with the unavailable message and never echoes the password", async () => {
+    const { status, html } = await getPage("/definitions?name=lock-screen", REFUSED_URL);
+    expect(status).toBe(500);
+    expect(html).toContain("Test definitions are unavailable.");
+    expect(html).not.toContain('href="/definitions?name=');
+    expect(html).not.toContain(SENTINEL_PASSWORD);
   });
 });
 

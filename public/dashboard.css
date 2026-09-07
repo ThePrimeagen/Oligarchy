@@ -525,6 +525,129 @@ main {
   background: var(--failed);
 }
 
+.model-chart__empty {
+  color: var(--terminal-blue);
+}
+
+/* Narrow screens keep the scrolling list of cards; the sidebar belongs to the wide layout below. */
+.definitions__nav {
+  display: none;
+}
+
+.definitions__list {
+  display: grid;
+  gap: 3rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.definition__fields {
+  display: grid;
+  gap: 1.1rem;
+}
+
+/* Wide screens: the definition names down the left, the current definition's results by model in
+   the centre and its text on the right. */
+@media (min-width: 64rem) {
+  main[data-page="definitions"] {
+    width: min(100% - 4rem, 96rem);
+  }
+
+  .definitions__layout {
+    display: grid;
+    grid-template-columns: minmax(10rem, 14rem) minmax(0, 1fr);
+    align-items: start;
+    gap: 3rem;
+  }
+
+  .definitions__nav {
+    display: grid;
+    position: sticky;
+    top: 2rem;
+    max-height: calc(100vh - 4rem);
+    overflow-y: auto;
+    border-left: 1px solid rgb(122 162 247 / 22%);
+  }
+
+  .definitions__link {
+    margin-left: -1px;
+    padding: 0.6em 1em;
+    border-left: 2px solid transparent;
+    color: var(--terminal-blue);
+    font-weight: 700;
+    overflow-wrap: anywhere;
+    text-decoration: none;
+    transition:
+      color var(--transition),
+      background var(--transition);
+  }
+
+  .definitions__link:hover {
+    color: var(--turquoise);
+  }
+
+  .definitions__link:focus-visible {
+    outline: 2px solid var(--turquoise);
+    outline-offset: 2px;
+  }
+
+  .definitions__link--current {
+    border-left-color: var(--turquoise);
+    background: rgb(122 162 247 / 10%);
+    color: var(--turquoise);
+  }
+
+  .definitions__item {
+    display: none;
+  }
+
+  .definitions__item--current {
+    display: block;
+  }
+
+  .definition {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    grid-template-areas:
+      "title title"
+      "time time"
+      "chart fields";
+    align-items: start;
+    column-gap: 4rem;
+  }
+
+  .definition > h2 {
+    grid-area: title;
+    font-size: 2em;
+  }
+
+  .definition > time {
+    grid-area: time;
+  }
+
+  .definition__chart {
+    grid-area: chart;
+  }
+
+  .definition__fields {
+    grid-area: fields;
+  }
+
+  .definition__chart .model-chart {
+    gap: 1rem;
+  }
+
+  .definition__chart .model-chart__row {
+    grid-template-columns: minmax(8rem, 14rem) 1fr;
+    gap: 1.25rem;
+  }
+
+  .definition__chart .model-chart__bar {
+    min-height: 3rem;
+    font-size: 1.2em;
+  }
+}
+
 .empty-state {
   display: grid;
   min-height: 14rem;
