@@ -676,18 +676,54 @@ describe("test run", () => {
       const h = harness({ cursor: FakeCursor.fakeCursor({ agentId: "bc-42" }) });
       const exit = yield* h.run(["test", "run", "--ticket", "OLI-42"], WITH_CURSOR);
       expect(Exit.isSuccess(exit)).toBe(true);
+      // Without --model the agent runs on the default, and the prompt names that default so the
+      // driver records it at test start.
       expect(h.cursor.calls).toEqual([
         {
-          text: yield* rendered("driving-agent.html", { LINEAR_TICKET: "OLI-42" }),
+          text: yield* rendered("driving-agent.html", {
+            LINEAR_TICKET: "OLI-42",
+            MODEL: "grok-4.6-xhigh-fast",
+          }),
           model: undefined,
         },
       ]);
       expect(h.cursor.calls[0]?.text).toMatch(/Review Linear ticket\s+OLI-42/);
+      expect(h.cursor.calls[0]?.text).toContain("<model> grok-4.6-xhigh-fast </model>");
       expect(h.cursor.calls[0]?.text.includes(SERVER)).toBe(false);
       expect(yield* stdout).toEqual([
         "Agent here, go check it out for more information: https://cursor.com/agents/bc-42",
       ]);
       expect(h.touched).toEqual(["database", "cursor"]);
+    }),
+  );
+
+  it.effect("--model runs the agent on that model and names it in the prompt (happy)", () =>
+    Effect.gen(function* () {
+      const h = harness({ cursor: FakeCursor.fakeCursor({ agentId: "bc-43" }) });
+      const exit = yield* h.run(
+        ["test", "run", "--ticket", "OLI-42", "--model", "composer-2.5"],
+        WITH_CURSOR,
+      );
+      expect(Exit.isSuccess(exit)).toBe(true);
+      expect(h.cursor.calls).toEqual([
+        {
+          text: yield* rendered("driving-agent.html", {
+            LINEAR_TICKET: "OLI-42",
+            MODEL: "composer-2.5",
+          }),
+          model: { id: "composer-2.5" },
+        },
+      ]);
+      expect(h.cursor.calls[0]?.text).toContain("--model composer-2.5");
+    }),
+  );
+
+  it.effect("an empty --model is refused before any agent starts (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness({ cursor: FakeCursor.fakeCursor({ agentId: "bc-44" }) });
+      const exit = yield* h.run(["test", "run", "--ticket", "OLI-42", "--model", ""], WITH_CURSOR);
+      expect(Exit.isFailure(exit)).toBe(true);
+      expect(h.cursor.calls).toEqual([]);
     }),
   );
 

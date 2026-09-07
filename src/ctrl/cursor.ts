@@ -17,6 +17,19 @@ export const GROK_4_6_FAST_XHIGH: Model = {
 
 export const agentUrl = (agentId: string): string => `https://cursor.com/agents/${agentId}`;
 
+// The one string a driver is told to record with `ctrl test start --model`: the id, then the
+// effort value, then `fast` when set, then any other param as `id-value` — the shape cursor-agent
+// spells its own slugs (`gpt-5.6-luna-none-fast`), so local and cloud drivers record alike.
+export const modelLabel = (model: Model): string =>
+  [
+    model.id,
+    ...(model.params ?? []).flatMap((param) => {
+      if (param.id === "effort") return [param.value];
+      if (param.id === "fast") return param.value === "true" ? ["fast"] : [];
+      return [`${param.id}-${param.value}`];
+    }),
+  ].join("-");
+
 export type CursorAgentsService = {
   readonly prompt: (
     text: string,

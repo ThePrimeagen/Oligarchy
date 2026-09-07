@@ -832,8 +832,8 @@ sendMouse, intentStart, intentEnd, stop, follow }`, each call wrapped in `run`.
   reads the template (`Prompts.Template` is `linear-issue.html | driving-agent.html |
   diagnosing-agent.html`), reads the guides the template names, and fills every `{{NAME}}`.
   `Prompts.Values` is the one shape a caller fills, keyed as the templates spell it and every key
-  optional: `LINEAR_TICKET, RUN_ID, RESULT_ID, SESSION_ID, VERSION, ISO_URL, SERVER_URL, TEST_NAME,
-  TEST_DESCRIPTION, TEST_INSTRUCTION, TEST_PROOF`; a key the caller has no value for is absent,
+  optional: `LINEAR_TICKET, MODEL, RUN_ID, RESULT_ID, SESSION_ID, VERSION, ISO_URL, SERVER_URL,
+  TEST_NAME, TEST_DESCRIPTION, TEST_INSTRUCTION, TEST_PROOF`; a key the caller has no value for is absent,
   and a template that asks for it fails with `PromptError` `prompt: prompts/<file> uses {{NAME}},
   which has no value` (the first such name in the template). The renderer's own values are the
   constant `SUB_AGENT` (`Grok 4.6 high fast (cursor-grok-4.6-high-fast)`) and the guides,
@@ -845,7 +845,11 @@ sendMouse, intentStart, intentEnd, stop, follow }`, each call wrapped in `run`.
   ticket, after `createIssue`, because the body names the identifier Linear assigns; a
   `PromptError` there fails the run like a `LinearError` does, the reason naming the tickets
   created (`failRunWith` is the one place both arms do that, and a `PromptError` keeps its cause).
-  `test run` renders `driving-agent.html` from `LINEAR_TICKET` alone; `diagnose run` renders
+  `test run` renders `driving-agent.html` from `LINEAR_TICKET` and `MODEL` — the model the agent
+  is started on, so the driver can record it with `test start --model`: the `--model` id given, or
+  `Cursor.modelLabel(GROK_4_6_FAST_XHIGH)`, `grok-4.6-xhigh-fast` (`modelLabel` is the id, the
+  effort value, `fast` when set, other params as `id-value`, the shape of cursor-agent's own slugs,
+  so a local driver kicked off with `gpt-5.6-luna-none-fast` records the same way); `diagnose run` renders
   `diagnosing-agent.html` from `SESSION_ID` and `SERVER_URL` — the reviewer is told the session
   and the proxy and reads everything else back with `ctrl session`. `linear.ts` is the GraphQL
   client alone.

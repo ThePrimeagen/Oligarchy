@@ -33,7 +33,7 @@ If you are an agent driving a guest, you need two of these: [test start](#test-s
 ./ctrl test --list    [--details] [--name <definition>]
 ./ctrl test new       --iso <https-url> --version <version> [--name <definition>]
 ./ctrl test list
-./ctrl test run       --ticket <linear-ticket>
+./ctrl test run       --ticket <linear-ticket> [--model <id>]
 ./ctrl test start     --session-id <id> --test-result-id <id> --model <id>
 ./ctrl test-results   --agent-id <agent> --id <id> --status success|failed [--reason <text>]
 ./ctrl session list   [--count <n>] [--active] [--json]
@@ -98,15 +98,17 @@ Prints every Linear issue on the Oligarchy team whose status type is backlog, as
 ## test run
 
 ```
-./ctrl test run --ticket <linear-ticket>
+./ctrl test run --ticket <linear-ticket> [--model <id>]
 ```
 
-Spawns a Cursor cloud agent that drives one Linear ticket. The ticket carries the proxy URL, so this is the one action that takes no `--server-url`. Prints a link to the agent as soon as it starts; does not wait for it. Not used while driving a guest. Reads `CURSOR_API_TOKEN`.
+Spawns a Cursor cloud agent that drives one Linear ticket. The ticket carries the proxy URL, so this is the one action that takes no `--server-url`. The kickoff prompt names the model the agent runs as, which the driver records with `test start --model`. Prints a link to the agent as soon as it starts; does not wait for it. Not used while driving a guest. Reads `CURSOR_API_TOKEN`.
 
 - `--ticket <linear-ticket>` — the issue identifier created by `test new`.
+- `--model <id>` — the Cursor model id to run the agent on. Omitted, the agent runs on the default (`grok-4.6`, effort xhigh, fast), named in the prompt as `grok-4.6-xhigh-fast`.
 
 ```bash
 ./ctrl test run --ticket OLI-42
+./ctrl test run --ticket OLI-42 --model composer-2.5
 ```
 
 ## test start

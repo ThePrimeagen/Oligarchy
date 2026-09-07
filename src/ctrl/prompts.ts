@@ -13,6 +13,8 @@ export type Template = "linear-issue.html" | "driving-agent.html" | "diagnosing-
 // no value for is absent; a template that asks for it does not render.
 export type Values = {
   readonly LINEAR_TICKET?: string;
+  // The model the driver runs as, which it records with `ctrl test start --model`.
+  readonly MODEL?: string;
   readonly RUN_ID?: string;
   readonly RESULT_ID?: string;
   readonly SESSION_ID?: string;

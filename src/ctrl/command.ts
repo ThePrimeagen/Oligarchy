@@ -368,10 +368,23 @@ export const makeCtrlCommand = (deps: Deps = live) => {
   });
 
   // test run --ticket <linear-ticket>
-  const testRun = Effect.fn("ctrl.test.run")(function* (input: { readonly ticket: string }) {
+  // test run --ticket <linear-ticket> [--model <id>]
+  const testRun = Effect.fn("ctrl.test.run")(function* (input: {
+    readonly ticket: string;
+    readonly model: Option.Option<string>;
+  }) {
     const agents = yield* Cursor.CursorAgents;
-    const text = yield* Prompts.render("driving-agent.html", { LINEAR_TICKET: input.ticket });
-    const { agentId } = yield* agents.prompt(text);
+    // The prompt names the model the agent runs as, so the driver can record it at test start:
+    // the id given, or the label of the default the agent is started on.
+    const selection = Option.map(input.model, (id): Cursor.Model => ({ id }));
+    const text = yield* Prompts.render("driving-agent.html", {
+      LINEAR_TICKET: input.ticket,
+      MODEL: Option.getOrElse(input.model, () => Cursor.modelLabel(Cursor.GROK_4_6_FAST_XHIGH)),
+    });
+    const { agentId } = yield* Option.match(selection, {
+      onNone: () => agents.prompt(text),
+      onSome: (model) => agents.prompt(text, model),
+    });
     yield* Console.log(Render.agentLink(Cursor.agentUrl(agentId)));
   });
 
@@ -718,6 +731,9 @@ export const makeCtrlCommand = (deps: Deps = live) => {
         Flag.withSchema(Schema.NonEmptyString),
         Flag.withDescription("Linear ticket the driving agent completes"),
       ),
+      model: modelFlag(
+        "Cursor model id to run the driving agent on; the default when omitted",
+      ).pipe(Flag.optional),
     },
     testRun,
   ).pipe(

@@ -1,4 +1,4 @@
-import { describe, expect } from "vitest";
+import { describe, expect, it as plain } from "vitest";
 import { it } from "@effect/vitest";
 import { Effect } from "effect";
 import * as Cursor from "../../src/ctrl/cursor.ts";
@@ -90,5 +90,27 @@ describe("CursorAgents.prompt unhappy path", () => {
       retryable: false,
       cause: "boom",
     });
+  });
+});
+
+// The label is what a driver is told to record with `ctrl test start --model`: the id, then the
+// effort and a `fast` marker, in the shape cursor-agent spells its own model slugs.
+describe("modelLabel", () => {
+  plain("names the default with its effort and speed", () => {
+    expect(Cursor.modelLabel(Cursor.GROK_4_6_FAST_XHIGH)).toBe("grok-4.6-xhigh-fast");
+  });
+
+  plain("a bare id is its own label; other params are appended as id-value", () => {
+    expect(Cursor.modelLabel({ id: "composer-2.5" })).toBe("composer-2.5");
+    expect(
+      Cursor.modelLabel({
+        id: "gpt-5.6",
+        params: [
+          { id: "effort", value: "low" },
+          { id: "fast", value: "false" },
+          { id: "context", value: "1m" },
+        ],
+      }),
+    ).toBe("gpt-5.6-low-context-1m");
   });
 });

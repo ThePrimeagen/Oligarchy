@@ -138,13 +138,21 @@ describe("render happy path", () => {
       }),
   );
 
-  it.effect("driving-agent.html: the ticket alone; the server url is in the ticket", () =>
+  it.effect("driving-agent.html: the ticket and the model; the server url is in the ticket", () =>
     Effect.gen(function* () {
-      const text = yield* real(Prompts.render("driving-agent.html", { LINEAR_TICKET: "OLI-42" }));
+      const text = yield* real(
+        Prompts.render("driving-agent.html", {
+          LINEAR_TICKET: "OLI-42",
+          MODEL: "gpt-5.6-luna-none-fast",
+        }),
+      );
       expect(text.includes("{{")).toBe(false);
       // The formatter wrapped the template between "ticket" and the placeholder.
       expect(text).toMatch(/Review Linear ticket\s+OLI-42/);
       expect(text).toContain("<agent-id> OLI-42 </agent-id>");
+      // The driver is told its model once and told what to do with it: test start records it.
+      expect(text).toContain("<model> gpt-5.6-luna-none-fast </model>");
+      expect(text).toContain("--model gpt-5.6-luna-none-fast");
       expect(text).toContain("./client");
       expect(text.includes("--server-url")).toBe(false);
       expect(text.includes("http")).toBe(false);
@@ -194,6 +202,13 @@ describe("render unhappy path", () => {
         expect(error._tag).toBe("PromptError");
         expect(error.message).toBe(
           "prompt: prompts/driving-agent.html uses {{LINEAR_TICKET}}, which has no value",
+        );
+        // A driver kicked off without a model would have nothing to record at test start.
+        const withoutModel = yield* Effect.flip(
+          real(Prompts.render("driving-agent.html", { LINEAR_TICKET: "OLI-42" })),
+        );
+        expect(withoutModel.message).toBe(
+          "prompt: prompts/driving-agent.html uses {{MODEL}}, which has no value",
         );
         const withoutTicket = yield* Effect.flip(
           real(Prompts.render("linear-issue.html", { SESSION_ID, SERVER_URL: SERVER })),
