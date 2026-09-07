@@ -7,7 +7,8 @@ document the Effect API; API truth is `node_modules/effect/src`, `node_modules/e
 `node_modules/effect/ai-docs/src`, `node_modules/@effect/platform-node/src` and
 `node_modules/@effect/vitest/README.md`, all `4.0.0-rc.112`, and a name that is not there does not
 exist. Operator and agent documents are `client.md`, `ctrl.md`, `ctrl-linear.md`,
-`ctrl-diagnose.md` and `prompts/`; this document does not repeat them.
+`ctrl-diagnose.md`, `SERVER_VS_REVERSE_PROXY.md` (the two processes' responsibilities and the
+reasoning behind the reverse proxy's design) and `prompts/`; this document does not repeat them.
 
 ## Host
 
