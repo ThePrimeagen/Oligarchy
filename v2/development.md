@@ -534,6 +534,14 @@ export class ProxyConfig extends Context.Service<ProxyConfig>()("@oligarchy/conf
   id; `iso` and `disk` are absolutised; `disk`, `status` and `reason` are omitted from the body
   when absent; `--x`/`--y` (`send-mouse: --x and --y must be in 0..1`) and `--clicks` (`1..100`)
   are refused by their flag schemas.
+- Session: bare `./session [--server-url <url>]` runs the REPL and wants `OLIGARCHY_TOKEN` before
+  the first prompt; `./session image --image-id <id> [-o <file>]` prints one stored screenshot as
+  PNG straight from the database (`DATABASE_URL`, read after parsing; nothing of the proxy or its
+  token), raw to stdout or to the file with mode `0o644`. The id is checked at the flag (`image-id
+  must be a uuid, as ctrl session --images prints it`); a uuid no image has is `image: no image
+  <id>`, a `CommandError`. `makeSessionCommand(deps)` takes `database(url)`, the `ActionStore` over
+  the pool, `live` by default. With `image` as a subcommand, a stray positional is `Unknown
+  subcommand "<arg>" for "session"`.
 - Ctrl: `--server-url` is required (no default, `server-url must be a valid http or https url`) on
   every action but `test run`, where it is an unrecognised flag; `iso must be a valid https url`;
   `count must be at least 1`; `--key` and `--type` are `Domain.ErrorTypeKey` (`key must be
@@ -1121,9 +1129,9 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
 - A completed `get-image` passes `{ id, data }` and the update plus the `images` insert land in one
   transaction; images are 1:1 with their action and addressed by a uuid, served at
   `GET /images/<uuid>` here and at `https://oligarchy.trm.sh/images/<uuid>`
-  (`Contract.StoredImageUrl(id)`), and listed per session by `ActionStore.listImages` (`images ⋈
+  (`Contract.StoredImageUrl(id)`), listed per session by `ActionStore.listImages` (`images ⋈
   actions`, `{ id, actionId, createdAt }` in action order) for `ctrl session --images`, which adds
-  that `url`. A screendump whose image write failed leaves the action row open; only a failed
+  that `url`, and printed by `./session image --image-id <id>` from the database alone. A screendump whose image write failed leaves the action row open; only a failed
   exchange is closed without an image.
 - `finished_at - created_at` is per-exchange handling time on one clock. Request-level wall time is
   the log line's (`running; started in <ms>ms`, `image; <n> bytes in <ms>ms; <url>`,

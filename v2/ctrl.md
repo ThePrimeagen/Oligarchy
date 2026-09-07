@@ -173,7 +173,7 @@ Prints what is stored for one session, as JSON. At least one selector is require
 - `--test-results` — the test result attributed to it, or `null`.
 - `--test-run` — the test run that result belongs to (`iso`, `serverUrl`, `status`), or `null`.
 - `--actions` — its QMP actions, oldest first.
-- `--images` — its screenshots, oldest first, as `{ id, actionId, url, createdAt }`; `url` serves the PNG without a token. `[]` when none were taken.
+- `--images` — its screenshots, oldest first, as `{ id, actionId, url, createdAt }`; `url` serves the PNG without a token, and `./session image --image-id <id> [-o <file>]` prints the same PNG straight from the database. `[]` when none were taken.
 - `--debug-logs` — the debug log the proxy saved when the session ended any way but `succeeded` (a `failed` or `aborted` stop, the ten-minute timeout, a proxy shutdown), or `null`. `{ sessionId, sources: { serial, proxy, qemu, actions }, createdAt }`: `serial` is everything the guest wrote to `/dev/ttyS0`, `proxy` the session's log lines as `created_at level text`, `qemu` the last 4 KiB of QEMU's stderr, `actions` the QMP exchanges as `created_at id state request[ response]`. Each is capped at 1 MiB, keeping the end.
 - `--diagnosis` — the post-run diagnosis written with [diagnose](#diagnose), or `null` when nobody has reviewed the session. `{ sessionId, verdict, errorType, summary, model, createdAt }`; `errorType` is `null` on a `passed` verdict.
 - `--all` — all nine: `{ session, logs, results, test_definition, test_run, actions, images, debug_log, diagnosis }`.

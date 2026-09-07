@@ -26,13 +26,14 @@ Prints everything stored for the session as one JSON object, keyed `session`, `l
 - `--test-run` — the run the result belongs to, or `null`: `iso`, `serverUrl`, `status`.
 - `--logs` — the proxy's log lines, oldest first: `starting`, `intent start; <message>` before every group of actions, `image; ... ; <url>` for every screenshot, `stopped; <status>; <reason>` at the end.
 - `--actions` — every QMP exchange, oldest first: the keys and mouse events sent, and QEMU's reply.
-- `--images` — every screenshot, oldest first, as `{ id, actionId, url, createdAt }`. The last one is what the driver saw when it delivered its verdict. Download one with `curl -sSo <file> <url>` and look at it.
+- `--images` — every screenshot, oldest first, as `{ id, actionId, url, createdAt }`. The last one is what the driver saw when it delivered its verdict. Fetch one with `./session image --image-id <id> -o <file>` — straight from the database, no proxy or token involved — and look at it.
 - `--debug-logs` — saved when the session ended any way but `succeeded`, else `null`: `sources.serial` is the guest's console, `sources.qemu` QEMU's stderr, `sources.proxy` and `sources.actions` the lines above as text.
 - `--diagnosis` — a diagnosis already recorded, or `null`. If it is not `null`, stop: the session has been reviewed.
 
 ```bash
 ./ctrl session --server-url https://qemu.example.com --session-id 6f1c...e2a9 --all > session.json
 ./ctrl session --server-url https://qemu.example.com --session-id 6f1c...e2a9 --images
+./session image --image-id 9b2f...2c3d -o last.png
 ```
 
 ## error-type list
