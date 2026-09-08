@@ -9,6 +9,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import * as ClientCommand from "../../src/client/command.ts";
 import * as Api from "../../src/shared/api.ts";
 import * as Support from "../support/config.ts";
+import * as FakeFs from "../support/fake-fs.ts";
 import * as FakeHttp from "../support/fake-http.ts";
 import * as Stdio from "../support/stdio.ts";
 
@@ -36,6 +37,7 @@ const SpawnerStub = Layer.succeed(ChildProcessSpawner.ChildProcessSpawner)(
 
 type Options = {
   readonly env?: Record<string, string>;
+  readonly fs?: Layer.Layer<FileSystem.FileSystem>;
   readonly http?: Layer.Layer<HttpClient.HttpClient>;
   readonly stdio?: Stdio.Captured;
 };
@@ -47,7 +49,7 @@ const run = (args: ReadonlyArray<string>, options: Options = {}) =>
         Support.withEnv(options.env ?? { OLIGARCHY_TOKEN: TOKEN }),
         options.http ?? FakeHttp.die,
         (options.stdio ?? Stdio.capture()).layer,
-        NodeFileSystem.layer,
+        options.fs ?? NodeFileSystem.layer,
         NodePath.layer,
         TerminalStub,
         SpawnerStub,
@@ -607,7 +609,10 @@ describe("client local checks", () => {
   it.effect("start defaults --iso to omarchy.iso in the working directory", () =>
     Effect.gen(function* () {
       const recorder = FakeHttp.recordRequests(ok);
-      const error = yield* Effect.flip(run(["start", ...shared], { http: recorder.layer }));
+      const fs = FileSystem.layerNoop({
+        stat: (path) => Effect.fail(FakeFs.notFound("stat", path)),
+      });
+      const error = yield* Effect.flip(run(["start", ...shared], { fs, http: recorder.layer }));
       expect(error._tag).toBe("CommandError");
       expect(error.message).toMatch(
         /^iso: ENOENT: no such file or directory, stat '\/.*\/omarchy\.iso'$/,
