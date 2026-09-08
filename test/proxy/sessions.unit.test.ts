@@ -252,7 +252,7 @@ describe("start", () => {
               "running; started in 0ms",
             ]);
             expect(h.log.lines[0]).toMatchObject({ level: "info", sessionId: id, agentId: AGENT });
-            const span = spanNamed(h, "QEMU session");
+            const span = spanNamed(h, AGENT);
             expect(span?.attributes.get("session_id")).toBe(id);
             expect(span?.attributes.get("agent_id")).toBe(AGENT);
             expect(span?.attributes.get("sentry.op")).toBe("qemu.session");
@@ -386,8 +386,8 @@ describe("start", () => {
             expect(h.sessions.sessions).toMatchObject([
               { id, status: "failed", reason: "qemu: handshake timeout: kvm: disabled" },
             ]);
-            expect(endedWith(spanNamed(h, "QEMU session"))).toBe("internal_error");
-            expect(spanNamed(h, "QEMU session")?.attributes.get("session_status")).toBe("failed");
+            expect(endedWith(spanNamed(h, AGENT))).toBe("internal_error");
+            expect(spanNamed(h, AGENT)?.attributes.get("session_status")).toBe("failed");
             expect(h.log.released).toEqual([AGENT]);
             expect(yield* Effect.flip(sessions.lookup(id, AGENT))).toMatchObject({
               _tag: "UnknownSession",
@@ -456,7 +456,7 @@ describe("start", () => {
             agentId: AGENT,
           });
           expect(h.iso.calls).toEqual([]);
-          expect(endedWith(spanNamed(h, "QEMU session"))).toBe("internal_error");
+          expect(endedWith(spanNamed(h, AGENT))).toBe("internal_error");
           expect(texts(h)).toEqual([]);
         }),
       );
@@ -552,7 +552,7 @@ describe("image", () => {
           expect(action?.attributes.get("qemu.command")).toBe("screendump");
           expect(endedWith(action)).toBe("ok");
           expect(Option.getOrUndefined(action?.parent ?? Option.none())?.spanId).toBe(
-            spanNamed(h, "QEMU session")?.spanId,
+            spanNamed(h, AGENT)?.spanId,
           );
           expect(line(h, "image;")).toMatchObject({
             level: "info",
@@ -1095,8 +1095,8 @@ describe("stop", () => {
           ]);
           expect(endedWith(spanNamed(h, "shut the lid"))).toBe("aborted");
           expect(spanNamed(h, "shut the lid")?.attributes.get("intent_state")).toBe("cancelled");
-          expect(endedWith(spanNamed(h, "QEMU session"))).toBe("aborted");
-          expect(spanNamed(h, "QEMU session")?.attributes.get("session_status")).toBe("aborted");
+          expect(endedWith(spanNamed(h, AGENT))).toBe("aborted");
+          expect(spanNamed(h, AGENT)?.attributes.get("session_status")).toBe("aborted");
           expect(yield* Ref.get(live.followers)).toEqual(new Set());
           expect(yield* Effect.flip(sessions.follow(id))).toMatchObject({
             _tag: "Conflict",
@@ -1124,7 +1124,7 @@ describe("stop", () => {
             sessionId: id,
             agentId: AGENT,
           });
-          expect(endedWith(spanNamed(h, "QEMU session"))).toBe("ok");
+          expect(endedWith(spanNamed(h, AGENT))).toBe("ok");
         }),
       );
     }),
@@ -1192,7 +1192,7 @@ describe("stop", () => {
           expect(
             texts(h).filter((text) => text.startsWith("stopped") || text.startsWith("timed out")),
           ).toEqual(["timed out; no command received for 10 minutes"]);
-          expect(endedWith(spanNamed(h, "QEMU session"))).toBe("deadline_exceeded");
+          expect(endedWith(spanNamed(h, AGENT))).toBe("deadline_exceeded");
         }),
       );
     }),
@@ -1221,7 +1221,7 @@ describe("stop", () => {
             { type: "session", status: "running" },
             { type: "session", status: "aborted" },
           ]);
-          expect(endedWith(spanNamed(h, "QEMU session"))).toBe("aborted");
+          expect(endedWith(spanNamed(h, AGENT))).toBe("aborted");
           expect(line(h, "stopped")).toBeUndefined();
         }),
       );
@@ -1696,8 +1696,8 @@ describe("timeouts", () => {
             sessionId: id,
             agentId: undefined,
           });
-          expect(endedWith(spanNamed(h, "QEMU session"))).toBe("deadline_exceeded");
-          expect(spanNamed(h, "QEMU session")?.attributes.get("session_status")).toBe("timed_out");
+          expect(endedWith(spanNamed(h, AGENT))).toBe("deadline_exceeded");
+          expect(spanNamed(h, AGENT)?.attributes.get("session_status")).toBe("timed_out");
           expect(yield* Stream.runCollect(events)).toEqual([
             { type: "session", status: "running" },
             { type: "session", status: "timed_out" },
@@ -1774,7 +1774,7 @@ describe("timeouts", () => {
             { type: "session", status: "running" },
             { type: "session", status: "timed_out" },
           ]);
-          expect(endedWith(spanNamed(h, "QEMU session"))).toBe("deadline_exceeded");
+          expect(endedWith(spanNamed(h, AGENT))).toBe("deadline_exceeded");
           expect(yield* qemus(sessions)).toBe(0);
         }),
       );
@@ -1874,9 +1874,13 @@ describe("drain", () => {
         { type: "session", status: "running" },
         { type: "session", status: "aborted" },
       ]);
-      expect(h.tracer.spans.filter((span) => span.name === "QEMU session").map(endedWith)).toEqual([
-        "aborted",
-        "aborted",
+      expect(
+        h.tracer.spans
+          .filter((span) => span.attributes.get("sentry.op") === "qemu.session")
+          .map((span) => [span.name, endedWith(span)]),
+      ).toEqual([
+        [AGENT, "aborted"],
+        [OTHER_AGENT, "aborted"],
       ]);
       expect(h.log.released.sort()).toEqual([AGENT, OTHER_AGENT]);
       expect(MutableRef.get(shutdown.failed)).toBe(false);
@@ -1956,11 +1960,15 @@ describe("drain", () => {
       expect(ended.sort()).toEqual([ids[0], ids[2]].sort());
       // A killed machine whose row would not close still ended aborted; one that would not die
       // ended failed.
-      const spans = h.tracer.spans.filter((span) => span.name === "QEMU session");
-      expect(spans.map((span) => [span.attributes.get("session_id"), endedWith(span)])).toEqual([
-        [ids[0], "aborted"],
-        [ids[1], "internal_error"],
-        [ids[2], "aborted"],
+      const spans = h.tracer.spans.filter(
+        (span) => span.attributes.get("sentry.op") === "qemu.session",
+      );
+      expect(
+        spans.map((span) => [span.name, span.attributes.get("session_id"), endedWith(span)]),
+      ).toEqual([
+        [AGENT, ids[0], "aborted"],
+        [OTHER_AGENT, ids[1], "internal_error"],
+        ["OLI-63", ids[2], "aborted"],
       ]);
       expect(h.log.released.sort()).toEqual([AGENT, OTHER_AGENT, "OLI-63"]);
     }),

@@ -94,7 +94,7 @@ export const SentryLive: Layer.Layer<never> = Layer.mergeAll(
 // ---------------------------------------------------------------------------
 
 export const sessionSpan = (sessionId: string, agentId: string): Effect.Effect<Tracer.Span> =>
-  Effect.makeSpan("QEMU session", {
+  Effect.makeSpan(agentId, {
     root: true,
     annotations: exported,
     attributes: { "sentry.op": "qemu.session", session_id: sessionId, agent_id: agentId },

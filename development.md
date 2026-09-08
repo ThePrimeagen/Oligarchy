@@ -739,6 +739,8 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
   `Exported` reference goes to `SentryEffectTracer.span`, every other span is a
   `Tracer.NativeSpan` no-op. Only the domain spans set it, so `Effect.fn("Service.method")` spans
   never reach Sentry.
+- The QEMU session root span is named with the supplied agent id; its `sentry.op` remains
+  `qemu.session`, and `session_id` and `agent_id` remain attributes.
 - A span whose open and end sit in different Effects is held by hand with `Effect.makeSpan(name,
   { root?, parent?, annotations, attributes })`, `span.attribute(k, v)` and `span.end(nanos,
   exit)`; a parent ending fails its open children. No per-operation fiber. The Sentry op is the
