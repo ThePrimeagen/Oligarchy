@@ -2,10 +2,11 @@
 
 Two processes now share the wire contract a client speaks. This document says which one is
 responsible for what, walks a request through both, and records what changed to add the second
-one and why each decision went the way it did. `development.md` remains the contract: its
-`Reverse proxy` section is the normative text; this document explains it. A third party is named
-where it matters: the dashboard Worker (`src/dashboard/`, Cloudflare, Hyperdrive), which is where
-stored screenshots are served from.
+one and why each decision went the way it did. `development.md` holds the conventions every
+process follows and names the reverse proxy only where it taught one; what the reverse proxy
+promises — its routes, texts, statuses and log lines — is pinned by its code and tests and
+written out for operators here. A third party is named where it matters: the dashboard Worker
+(`src/dashboard/`, Cloudflare, Hyperdrive), which is where stored screenshots are served from.
 
 | | The server (`./server`, `src/proxy/`) | The reverse proxy (`./reverse-proxy`, `src/reverse-proxy/`) |
 | --- | --- | --- |
@@ -63,6 +64,21 @@ The reverse proxy holds no session state. It knows three things, all of them row
 - Which server started each session: the server's 200 to `/start` carries the id it minted, and the
   reverse proxy writes `session_servers (session_id, server_url)` before answering the client. Every
   later request that names that id is forwarded to that server.
+
+Its routes, all behind `Authorization: Bearer <OLIGARCHY_TOKEN>` on `127.0.0.1:42070`:
+
+| Route | Input | Success | Refusals of its own |
+| --- | --- | --- | --- |
+| `POST /servers` | `{ "url" }` | `{"ok":"true"}` | 400 502 |
+| `DELETE /servers` | `{ "url" }` | `{"ok":"true"}` | 404 |
+| `GET /servers` | none | `{"servers":[{"url","stats"}]}` | none |
+| `POST /start` | as the proxy | the server's answer | 503, else the server's |
+| `GET /image`, `GET /serial`, `GET /follow`, `POST /stop`, `POST /send-keys`, `POST /send-mouse`, `POST /intent/start`, `POST /intent/end` | as the proxy | the server's answer | 404, else the server's |
+
+Every route may also answer 400 (a body or query the contract refuses), 401, 500 and 502 through
+the `RouteBoundary` middleware; `GET /stats`, `GET /images/:id` and anything else unrouted is the
+catch-all's 404 `{"error":"not found"}`, unlogged. The proxy's `/dump` was retired on master and
+is not routed here either: an ended session's console is read from the database by `ctrl`.
 
 The same fleet is on the diagnostics page, `http://127.0.0.1:55445/` by default: an unstyled text
 page listing every registered server with its `qemus`, memory and cpu, or `did not answer`, a
@@ -130,8 +146,8 @@ session and the agent.
    server's refusal; the server's `logs` row is the record.
 
 `GET /follow?id=<uuid>` is the same with a stream: the server's NDJSON lines pass through as
-they are written, and a client that disconnects releases the upstream stream because `follow`
-and `dump` are interruptible on both sides.
+they are written, and a client that disconnects releases the upstream stream because `follow` is
+interruptible on both sides.
 
 `./client stop …` passes through like `send-keys`. The route row stays: it is history (where the
 session ran), and a later request for the ended session gets the server's own 404.
@@ -282,7 +298,7 @@ errors; the switch ends in `satisfies never`, so a tag without an arm does not c
   `x-frame-options: DENY` so a framed copy cannot be click-jacked.
 - `handlers.ts` binds both groups. The session-driving routes are `uninterruptible`, for the
   proxy's own reason: a client that disconnects mid-`/start` must not tear the forward in half,
-  or the routing table never learns of the machine the server booted. `dump` and `follow` stay
+  or the routing table never learns of the machine the server booted. `follow` stays
   interruptible so an abandoned follower releases its upstream stream. The catch-all 404 is the
   proxy's `NotFoundRoute`, reused.
 - `command.ts` is `makeReverseProxyCommand({ serve, serverFailed })` with two flags, `--port`
@@ -353,11 +369,14 @@ Every surface has a happy and an unhappy test:
 
 ### `development.md`
 
-A new `Reverse proxy` section is the normative design: the process, the route table, every
-message and status, the placement rule, the forwarding rule, the log lines, what is uninterruptible,
-the divergences, and what is deliberately absent. The Layout, Host, Core rules, Errors, Schema,
-Config, CLI, HttpApi server, Database, Action record, Sentry, Runtime entry and Tests sections
-name the reverse proxy where it changes their inventories.
+That document owns conventions, not contracts, so the reverse proxy appears there only where it
+taught one: a second `HttpApi` is built from the first's endpoint values; an error only the second
+raises gets its codec on a second boundary tag over one implementation; a pass-through handler
+decodes nothing of the upstream answer; a second listener in one process is `HttpServer.serve`
+over a plain handler because `HttpRouter.serve` memoises one router per graph; an operator's
+tokenless page checks `Origin` and `Host`; the Toolchain, Layout, Core rules, Sentry, Runtime
+entry and Tests sections name the reverse proxy in their inventories. Everything the reverse proxy
+promises is in this document and pinned by its tests.
 
 ### Changes from review
 

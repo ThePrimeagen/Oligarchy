@@ -9,7 +9,6 @@ import {
   Layer,
   MutableRef,
   Option,
-  Path,
   Queue,
   Ref,
   Result,
@@ -91,9 +90,6 @@ export type SessionsService = {
     Errors.ExchangeFailed | Errors.Internal
   >;
   readonly serial: (live: LiveSession) => Effect.Effect<Uint8Array, Errors.Internal>;
-  readonly dump: (
-    id: string,
-  ) => Effect.Effect<Uint8Array, Errors.UnknownSession | Errors.Conflict | Errors.Internal>;
   readonly sendKeys: (
     live: LiveSession,
     keys: string,
@@ -197,7 +193,6 @@ const make = Effect.gen(function* () {
   const debugLogs = yield* DebugLogs.DebugLogStore;
   const log = yield* Log.Log;
   const fs = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
   const shutdown = yield* Shutdown;
 
   // Running machines, by id; and every session this proxy holds, booting ones included.
@@ -601,36 +596,6 @@ const make = Effect.gen(function* () {
     return data;
   });
 
-  const dump = Effect.fn("Sessions.dump")(function* (id: string) {
-    const started = yield* Clock.currentTimeMillis;
-    if (!Domain.isSessionId(id)) {
-      return yield* Errors.unknownSession(id);
-    }
-    const live = Option.fromUndefinedOr((yield* Ref.get(sessions)).get(id));
-    const agent = Option.getOrUndefined(Option.map(live, (running) => running.agent));
-    // A session this proxy no longer holds may still have its directory: a proxy that died
-    // mid-session never removed it, and its QEMU kept writing the console.
-    const target = Option.match(live, {
-      onNone: () => path.join(qemu.sessionDir(id), "serial.log"),
-      onSome: (running) => running.qemu.serialPath,
-    });
-    const data = yield* fs.readFile(target).pipe(
-      Effect.mapError((error) =>
-        error.reason._tag === "NotFound"
-          ? Errors.Conflict.make({
-              message: `session "${id}" has no console on this proxy`,
-              sessionId: id,
-            })
-          : internal(error, id, agent),
-      ),
-    );
-    yield* log.info(
-      `dump; ${String(data.length)} bytes from ${Option.isNone(live) ? "disk" : "the running machine"} in ${yield* elapsed(started)}ms`,
-      attribution(id, agent),
-    );
-    return data;
-  });
-
   const sendKeys = Effect.fn("Sessions.sendKeys")(function* (
     live: LiveSession,
     keys: string,
@@ -960,7 +925,6 @@ const make = Effect.gen(function* () {
     lookup,
     image,
     serial,
-    dump,
     sendKeys,
     sendMouse,
     intentStart,
@@ -984,6 +948,5 @@ export class Sessions extends Context.Service<Sessions>()("@oligarchy/proxy/Sess
     | DebugLogs.DebugLogStore
     | Log.Log
     | FileSystem.FileSystem
-    | Path.Path
   > = Layer.effect(this)(this.make);
 }

@@ -53,12 +53,6 @@ export const SessionsLive = (display: Domain.QemuDisplay, automation: boolean) =
           }),
         uninterruptible,
       )
-      .handle("dump", ({ query }) =>
-        Effect.gen(function* () {
-          const sessions = yield* Sessions.Sessions;
-          return yield* sessions.dump(query.id);
-        }),
-      )
       .handleRaw("follow", ({ query }) =>
         Effect.gen(function* () {
           const sessions = yield* Sessions.Sessions;

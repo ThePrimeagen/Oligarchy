@@ -137,22 +137,6 @@ describe("Sessions endpoints happy path", () => {
     }),
   );
 
-  it.effect("GET /dump returns text/plain bytes without a lookup", () =>
-    Effect.gen(function* () {
-      const fixed = fixture();
-      yield* Effect.gen(function* () {
-        const api = yield* client;
-        const [dump, response] = yield* api.Sessions.dump({
-          query: { id: SESSION_ID },
-          responseMode: "decoded-and-response",
-        });
-        expect(decoder.decode(dump)).toBe("[    0.000000] Linux version 6.12\n");
-        expect(response.headers["content-type"]).toBe("text/plain");
-      }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.sessions.calls).toEqual([{ method: "dump", args: [SESSION_ID] }]);
-    }),
-  );
-
   it.effect("GET /follow streams one NDJSON line per event without a lookup", () =>
     Effect.gen(function* () {
       const fixed = fixture();
@@ -320,7 +304,6 @@ describe("authentication", () => {
     ["POST", "/start", true],
     ["GET", "/image?id=x&agent=y", false],
     ["GET", "/serial?id=x&agent=y", false],
-    ["GET", "/dump?id=x", false],
     ["GET", "/follow?id=x", false],
     ["GET", "/stats", false],
     ["POST", "/stop", true],
@@ -568,7 +551,7 @@ describe("Sessions failures", () => {
           message: 'unknown session "garbage"',
         });
         const http = yield* HttpClient.HttpClient;
-        const raw = yield* http.get(`/dump?id=${unknown}`, {
+        const raw = yield* http.get(`/follow?id=${unknown}`, {
           headers: { authorization: `Bearer ${TOKEN}` },
         });
         expect(raw.status).toBe(404);
@@ -593,7 +576,7 @@ describe("Sessions failures", () => {
         },
         {
           level: "error",
-          text: `GET /dump?id=${unknown} failed: unknown session "${unknown}"`,
+          text: `GET /follow?id=${unknown} failed: unknown session "${unknown}"`,
           sessionId: unknown,
           agentId: undefined,
           skipSentry: true,
@@ -637,33 +620,19 @@ describe("Sessions failures", () => {
     }),
   );
 
-  it.effect("a Conflict from follow or dump is 409 with its message", () =>
+  it.effect("a Conflict from follow is 409 with its message", () =>
     Effect.gen(function* () {
       const conflict = Errors.Conflict.make({
         message: `session "${SESSION_ID}" is not running on this proxy`,
         sessionId: SESSION_ID,
       });
       const fixed = fixture({
-        sessions: FakeSessions.fakeSessions({
-          follow: () => Effect.fail(conflict),
-          dump: () =>
-            Effect.fail(
-              Errors.Conflict.make({
-                message: `session "${SESSION_ID}" has no console on this proxy`,
-                sessionId: SESSION_ID,
-              }),
-            ),
-        }),
+        sessions: FakeSessions.fakeSessions({ follow: () => Effect.fail(conflict) }),
       });
       yield* Effect.gen(function* () {
         const api = yield* client;
         const followed = yield* Effect.flip(api.Sessions.follow({ query: { id: SESSION_ID } }));
         expect(followed).toMatchObject({ _tag: "Conflict", message: conflict.message });
-        const dumped = yield* Effect.flip(api.Sessions.dump({ query: { id: SESSION_ID } }));
-        expect(dumped).toMatchObject({
-          _tag: "Conflict",
-          message: `session "${SESSION_ID}" has no console on this proxy`,
-        });
         const http = yield* HttpClient.HttpClient;
         const raw = yield* http.get(`/follow?id=${SESSION_ID}`, {
           headers: { authorization: `Bearer ${TOKEN}` },
@@ -673,15 +642,28 @@ describe("Sessions failures", () => {
       }).pipe(Effect.provide(serve(fixed)));
       expect(fixed.log.lines.map((line) => [line.text, line.sessionId, line.skipSentry])).toEqual([
         [`GET /follow?id=${SESSION_ID} failed: ${conflict.message}`, SESSION_ID, true],
-        [
-          `GET /dump?id=${SESSION_ID} failed: session "${SESSION_ID}" has no console on this proxy`,
-          SESSION_ID,
-          true,
-        ],
         [`GET /follow?id=${SESSION_ID} failed: ${conflict.message}`, SESSION_ID, true],
       ]);
       expect(fixed.reporter.reported).toEqual([]);
     }),
+  );
+
+  it.effect(
+    "GET /dump is gone: an unrouted 404 that reaches no handler and writes no log line",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture();
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          const raw = yield* http.get(`/dump?id=${SESSION_ID}`, {
+            headers: { authorization: `Bearer ${TOKEN}` },
+          });
+          expect(raw.status).toBe(404);
+          expect(yield* raw.json).toEqual({ error: "not found" });
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.sessions.calls).toEqual([]);
+        expect(fixed.log.lines).toEqual([]);
+      }),
   );
 
   it.effect("a BadRequest from a driving method is 400 and skips Sentry", () =>

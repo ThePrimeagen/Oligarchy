@@ -41,12 +41,6 @@ export const SessionsLive = HttpApiBuilder.group(Api.ReverseProxyApi, "Sessions"
         }),
       uninterruptible,
     )
-    .handle("dump", ({ query, request }) =>
-      Effect.gen(function* () {
-        const router = yield* Router.Router;
-        return yield* router.forward(request, query.id);
-      }),
-    )
     .handle("follow", ({ query, request }) =>
       Effect.gen(function* () {
         const router = yield* Router.Router;

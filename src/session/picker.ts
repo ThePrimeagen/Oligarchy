@@ -223,11 +223,8 @@ export const run = <E, R>(
   });
 
 // `ctrl session list` for the picker: running sessions first, narrowed by the typed prefix.
-export const listSessions = Effect.fn("Picker.listSessions")(function* (
-  serverUrl: string,
-  prefix: string,
-) {
-  const result = yield* Children.runCtrl(serverUrl, [
+export const listSessions = Effect.fn("Picker.listSessions")(function* (prefix: string) {
+  const result = yield* Children.runCtrl([
     "session",
     "list",
     "--count",
@@ -254,14 +251,13 @@ export const listSessions = Effect.fn("Picker.listSessions")(function* (
 
 // The completer's answer for `follow <prefix>`: the picked id, or nothing after printing why.
 export const completeFollow = Effect.fn("Picker.completeFollow")(function* (
-  session: State.Session,
   terminal: Readline.Terminal,
   prefix: string,
 ) {
   const host = yield* State.Host;
   const cursorColumn = yield* Readline.cursorColumn(terminal.handle);
   return yield* run(
-    listSessions(session.serverUrl, prefix),
+    listSessions(prefix),
     { takeKeypresses: terminal.takeKeypresses, output: host.output },
     cursorColumn,
   ).pipe(

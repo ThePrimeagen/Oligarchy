@@ -720,6 +720,66 @@ Postgres.describeWithDatabase("database", () => {
       }),
     );
 
+    // A definition is never updated: an edit is a new row with the same name and a higher id, and
+    // the latest wording of a name is its highest id.
+    scoped.effect("TestStore resolves a name to its newest row and lists one row per name", () =>
+      Effect.gen(function* () {
+        const tests = yield* Tests.TestStore;
+        const name = `revised-${uuid()}`;
+        const first = yield* tests.defineTestDefinition({
+          name,
+          description: "d1",
+          instruction: "i1",
+          proof: "p1",
+        });
+        const second = yield* tests.defineTestDefinition({
+          name,
+          description: "d1",
+          instruction: "i2",
+          proof: "p1",
+        });
+        expect(first).toEqual({ id: expect.any(Number), version: 1 });
+        expect(second).toEqual({ id: expect.any(Number), version: 2 });
+        expect(second.id).toBeGreaterThan(first.id);
+
+        const latest = Option.getOrThrow(yield* tests.findTestDefinition(name));
+        expect(latest).toMatchObject({ id: second.id, name, instruction: "i2" });
+
+        const listed = yield* tests.listTestDefinitions;
+        expect(listed.filter((row) => row.name === name)).toEqual([latest]);
+        const names = listed.map((row) => row.name);
+        expect(new Set(names).size).toBe(names.length);
+      }),
+    );
+
+    scoped.effect("TestStore lists a definition's history oldest first, and every name's", () =>
+      Effect.gen(function* () {
+        const tests = yield* Tests.TestStore;
+        const name = `history-${uuid()}`;
+        const first = yield* tests.defineTestDefinition({
+          name,
+          description: "d",
+          instruction: "i1",
+          proof: "p",
+        });
+        const second = yield* tests.defineTestDefinition({
+          name,
+          description: "d",
+          instruction: "i2",
+          proof: "p",
+        });
+        const named = yield* tests.listTestDefinitionHistory(Option.some(name));
+        expect(named.map((row) => [row.id, row.instruction])).toEqual([
+          [first.id, "i1"],
+          [second.id, "i2"],
+        ]);
+        const every = yield* tests.listTestDefinitionHistory(Option.none());
+        expect(every.filter((row) => row.name === name)).toEqual(named);
+        expect(every.map((row) => row.name)).toContain("lock-screen");
+        expect(yield* tests.listTestDefinitionHistory(Option.some(`nope-${uuid()}`))).toEqual([]);
+      }),
+    );
+
     scoped.effect("TestStore runs a result through its lifecycle", () =>
       Effect.gen(function* () {
         const tests = yield* Tests.TestStore;
@@ -740,11 +800,19 @@ Postgres.describeWithDatabase("database", () => {
         expect(yield* tests.startResult(result.id, sessionId, "composer-2.5")).toBe(false);
         expect(yield* tests.startResult(uuid(), sessionId, "composer-2.5")).toBe(false);
 
+        // A newer wording of the same name does not move the result: it pinned the row it ran.
+        const revised = yield* tests.defineTestDefinition({
+          name: "lock-screen",
+          description: definition.description,
+          instruction: `${definition.instruction} (revised ${uuid()})`,
+          proof: definition.proof,
+        });
+        expect(revised.id).toBeGreaterThan(definition.id);
         const joined = yield* tests.resultForSession(sessionId);
         expect(joined).toHaveLength(1);
         expect(joined[0]?.result.status).toBe("running");
         expect(joined[0]?.result.model).toBe("composer-2.5");
-        expect(joined[0]?.definition.name).toBe("lock-screen");
+        expect(joined[0]?.definition).toEqual(definition);
         expect(joined[0]?.run).toMatchObject({
           id: created.runId,
           iso: "https://example.com/omarchy.iso",

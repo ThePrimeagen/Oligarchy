@@ -120,7 +120,7 @@ describe("QEMU spans happy path", () => {
       const spans = yield* captured.spans;
       expect(spans).toHaveLength(2);
       const sessionItem = spans.find((span) => span.is_segment);
-      expect(sessionItem?.name).toBe("QEMU session");
+      expect(sessionItem?.name).toBe(AGENT_ID);
       expect(sessionItem?.status).toBe("ok");
       expect(attribute(sessionItem, "sentry.op")).toBe("qemu.session");
       expect(attribute(sessionItem, "session_id")).toBe(SESSION_ID);
@@ -148,7 +148,7 @@ describe("QEMU spans happy path", () => {
       yield* Sentry.endSessionSpan(session, "succeeded");
 
       const spans = yield* captured.spans;
-      const sessionItem = find(spans, "QEMU session");
+      const sessionItem = find(spans, AGENT_ID);
       const intentItem = find(spans, "open a terminal");
       const actionItem = find(spans, "QMP screendump");
       expect(intentItem?.parent_span_id).toBe(sessionItem?.span_id);
@@ -190,6 +190,7 @@ describe("QEMU spans unhappy path", () => {
       yield* Sentry.endSessionSpan(session, "failed");
       const spans = yield* captured.spans;
       expect(spans).toHaveLength(1);
+      expect(spans[0]?.name).toBe(AGENT_ID);
       expect(spans[0]?.status).toBe("error");
       expect(attribute(spans[0], "session_status")).toBe("failed");
       expect(attribute(spans[0], "sentry.status.message")).toBe("internal_error");
@@ -264,7 +265,7 @@ describe("only the named spans reach Sentry", () => {
       yield* Sentry.endActionSpan(action, "completed");
       yield* Sentry.endSessionSpan(session, "succeeded");
       const spans = yield* captured.spans;
-      expect(spans.map((span) => span.name).sort()).toEqual(["QEMU session", "QMP send-key"]);
+      expect(spans.map((span) => span.name).sort()).toEqual([AGENT_ID, "QMP send-key"].sort());
     }).pipe(Effect.provide(Sentry.SentryLive)),
   );
 

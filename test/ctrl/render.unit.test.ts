@@ -196,3 +196,34 @@ describe("renderTestDefinitions unhappy path", () => {
     expect(Render.renderTestDefinitions([], true)).toEqual(["[]"]);
   });
 });
+
+// The rows as the store lists a history: by name, then oldest first; the version is the row's
+// place among its name's rows, so a gap in the ids is not a gap in the versions.
+const installRevised = { ...install, id: 7, instruction: "Complete the installer, then log in" };
+
+describe("renderTestDefinitionHistory happy path", () => {
+  it("prints one line per wording, name then v<n>, numbering each name from 1", () => {
+    expect(Render.renderTestDefinitionHistory([install, installRevised, terminal], false)).toEqual([
+      "Install Omarchy v1",
+      "Install Omarchy v2",
+      "Open a terminal v1",
+    ]);
+  });
+
+  it("prints every row with its version as one JSON line", () => {
+    const lines = Render.renderTestDefinitionHistory([install, installRevised, terminal], true);
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0] ?? "")).toEqual([
+      { ...install, createdAt: install.createdAt.toISOString(), version: 1 },
+      { ...installRevised, createdAt: installRevised.createdAt.toISOString(), version: 2 },
+      { ...terminal, createdAt: terminal.createdAt.toISOString(), version: 1 },
+    ]);
+  });
+});
+
+describe("renderTestDefinitionHistory unhappy path", () => {
+  it("prints nothing for no rows and [] as JSON", () => {
+    expect(Render.renderTestDefinitionHistory([], false)).toEqual([]);
+    expect(Render.renderTestDefinitionHistory([], true)).toEqual(["[]"]);
+  });
+});

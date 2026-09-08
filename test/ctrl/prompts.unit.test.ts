@@ -104,12 +104,14 @@ describe("render happy path", () => {
         expect(description).toContain(
           `start --agent-id OLI-42 --server-url ${SERVER} --iso ${ticket.ISO_URL}`,
         );
-        expect(description).toContain(`./ctrl test start --server-url ${SERVER} --session-id`);
+        // ./ctrl reads the database; the proxy url is ./client's alone.
+        expect(description).toContain("./ctrl test start --session-id");
         expect(description).toContain("--model <the Cursor model id you are running as>");
         expect(description).not.toContain("--model grok-4.6");
         expect(description).toContain(
-          `./ctrl test-results --agent-id OLI-42 --server-url ${SERVER} --id ${ticket.RESULT_ID}`,
+          `./ctrl test-results --agent-id OLI-42 --id ${ticket.RESULT_ID}`,
         );
+        expect(description).not.toMatch(/\.\/ctrl [^\n]*--server-url/);
         expect(description).toContain(
           `./client get-image --agent-id OLI-42 --server-url ${SERVER} --session-id`,
         );
@@ -160,21 +162,21 @@ describe("render happy path", () => {
   );
 
   it.effect(
-    "diagnosing-agent.html: the session, the server and the diagnosis guide; nothing of the drive",
+    "diagnosing-agent.html: the session and the diagnosis guide; no proxy, nothing of the drive",
     () =>
       Effect.gen(function* () {
-        const text = yield* real(
-          Prompts.render("diagnosing-agent.html", { SESSION_ID, SERVER_URL: SERVER }),
-        );
+        const text = yield* real(Prompts.render("diagnosing-agent.html", { SESSION_ID }));
 
         expect(text.includes("{{")).toBe(false);
         expect(text).toContain(`<session_id>${SESSION_ID}</session_id>`);
-        expect(text).toContain(`<server_url>\`${SERVER}\`</server_url>`);
-        expect(text).toContain(
-          `./ctrl session --server-url ${SERVER} --session-id ${SESSION_ID} --all`,
-        );
-        expect(text).toContain(`./ctrl diagnose --server-url ${SERVER} --session-id ${SESSION_ID}`);
+        expect(text).toContain(`./ctrl session --session-id ${SESSION_ID} --all`);
+        expect(text).toContain(`./ctrl diagnose --session-id ${SESSION_ID}`);
         expect(text).toContain("--model <the Cursor model id you are running as>");
+        // The reviewer reads the database alone: no server url, no token, reaches it.
+        expect(text.includes("server_url")).toBe(false);
+        expect(text.includes("--server-url")).toBe(false);
+        expect(text.includes("SERVER_URL")).toBe(false);
+        expect(text.includes("OLIGARCHY_TOKEN")).toBe(false);
         expect(text).toContain("# Control\n");
         expect(text).toContain("## session");
         expect(text).toContain("## error-type list");
@@ -267,10 +269,9 @@ describe("render unhappy path", () => {
   it.effect("an unreadable guide the template does not name cannot stop a rendering", () =>
     Effect.gen(function* () {
       const fs = promptFs({ unreadable: /\/(client\.md|ctrl-linear\.md)$/ });
-      const text = yield* Prompts.render("diagnosing-agent.html", {
-        SESSION_ID,
-        SERVER_URL: SERVER,
-      }).pipe(Effect.provide(fs.layer));
+      const text = yield* Prompts.render("diagnosing-agent.html", { SESSION_ID }).pipe(
+        Effect.provide(fs.layer),
+      );
       expect(text).toBe("contents of diagnosing-agent.html");
       expect(fileNames(fs.reads)).toEqual(["diagnosing-agent.html"]);
     }),

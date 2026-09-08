@@ -41,7 +41,6 @@ export class RouteBoundary extends HttpApiMiddleware.Service<RouteBoundary>()(
 ) {}
 
 const png = Schema.Uint8Array.pipe(HttpApiSchema.asUint8Array({ contentType: "image/png" }));
-const text = Schema.Uint8Array.pipe(HttpApiSchema.asUint8Array({ contentType: "text/plain" }));
 
 // Sessions group: bearer required
 export const start = HttpApiEndpoint.post("start", "/start", {
@@ -58,18 +57,13 @@ export const image = HttpApiEndpoint.get("image", "/image", {
 
 export const serial = HttpApiEndpoint.get("serial", "/serial", {
   query: Contract.SessionQuery,
-  success: text,
+  success: Schema.Uint8Array.pipe(HttpApiSchema.asUint8Array({ contentType: "text/plain" })),
   error: [Errors.ForbiddenWire, Errors.UnknownSessionWire],
 });
 
-export const dump = HttpApiEndpoint.get("dump", "/dump", {
-  query: Contract.IdQuery,
-  success: text,
-  error: [Errors.UnknownSessionWire, Errors.ConflictWire],
-});
-
+// A follower watches, so it names no agent.
 export const follow = HttpApiEndpoint.get("follow", "/follow", {
-  query: Contract.IdQuery,
+  query: { id: Schema.String },
   success: HttpApiSchema.StreamUint8Array({ contentType: "application/x-ndjson" }),
   error: [Errors.UnknownSessionWire, Errors.ConflictWire],
 });
@@ -114,7 +108,6 @@ export class Sessions extends HttpApiGroup.make("Sessions")
   .add(start)
   .add(image)
   .add(serial)
-  .add(dump)
   .add(follow)
   .add(stats)
   .add(stop)
@@ -134,7 +127,6 @@ export class RoutedSessions extends HttpApiGroup.make("Sessions")
   .add(start)
   .add(image)
   .add(serial)
-  .add(dump)
   .add(follow)
   .add(stop)
   .add(sendKeys)

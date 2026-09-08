@@ -239,9 +239,9 @@ export const fakeQemu = (script: Script = {}): FakeQemu => {
         yield* close({ state: "completed", response: GREETING });
         return makeHandle(prepared, yield* Ref.make(1));
       }),
-    sessionDir,
   });
 
+  // `sessionDir` is the harness's: where a test finds the files the fake writes for a session.
   return { calls, sessionDir, layer: Layer.succeed(Qemu.Qemu)(service) };
 };
 

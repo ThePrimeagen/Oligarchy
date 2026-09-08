@@ -820,7 +820,7 @@ describe("forwarding", () => {
       }),
   );
 
-  it.effect("GET /serial and GET /dump pass text/plain through, a stored slash joined once", () =>
+  it.effect("GET /serial passes text/plain through, a stored slash joined once", () =>
     Effect.gen(function* () {
       const fixed = fixture(
         (_, url) =>
@@ -838,12 +838,9 @@ describe("forwarding", () => {
         });
         expect(decoder.decode(serial)).toBe("/serial log\n");
         expect(serialResponse.headers["content-type"]).toBe("text/plain");
-        const dump = yield* api.Sessions.dump({ query: { id: SESSION_ID } });
-        expect(decoder.decode(dump)).toBe("/dump log\n");
       }).pipe(Effect.provide(serve(fixed)));
       expect(upstreamCalls(fixed)).toEqual([
         `GET ${SERVER_A}/serial?id=${SESSION_ID}&agent=${AGENT_ID}`,
-        `GET ${SERVER_A}/dump?id=${SESSION_ID}`,
       ]);
     }),
   );
@@ -1105,7 +1102,7 @@ describe("forwarding refusals", () => {
           message: `unknown session "${SESSION_ID}"`,
         });
         const http = yield* HttpClient.HttpClient;
-        const raw = yield* http.get(`/dump?id=${SESSION_ID}`, {
+        const raw = yield* http.get(`/follow?id=${SESSION_ID}`, {
           headers: { authorization: AUTHORIZATION },
         });
         expect(raw.status).toBe(404);
@@ -1123,7 +1120,7 @@ describe("forwarding refusals", () => {
         },
         {
           level: "error",
-          text: `GET /dump?id=${SESSION_ID} failed: unknown session "${SESSION_ID}"`,
+          text: `GET /follow?id=${SESSION_ID} failed: unknown session "${SESSION_ID}"`,
           sessionId: SESSION_ID,
           agentId: undefined,
           skipSentry: true,
@@ -1180,7 +1177,7 @@ describe("forwarding refusals", () => {
           );
           expect(error._tag).toBe("ExchangeFailed");
           const http = yield* HttpClient.HttpClient;
-          const raw = yield* http.get(`/dump?id=${SESSION_ID}`, {
+          const raw = yield* http.get(`/follow?id=${SESSION_ID}`, {
             headers: { authorization: AUTHORIZATION },
           });
           expect(raw.status).toBe(502);
@@ -1198,7 +1195,7 @@ describe("forwarding refusals", () => {
         });
         expect(fixed.log.lines[0]?.cause).toBeInstanceOf(Error);
         expect(fixed.log.lines[1]).toMatchObject({
-          text: `GET /dump?id=${SESSION_ID} failed: server ${SERVER_A} unreachable: connect ECONNREFUSED 10.0.0.5:42069`,
+          text: `GET /follow?id=${SESSION_ID} failed: server ${SERVER_A} unreachable: connect ECONNREFUSED 10.0.0.5:42069`,
           sessionId: SESSION_ID,
           agentId: undefined,
           skipSentry: false,
@@ -1281,7 +1278,6 @@ describe("forwarding refusals", () => {
     ["POST", "/start", true],
     ["GET", `/image?id=${SESSION_ID}&agent=${AGENT_ID}`, false],
     ["GET", `/serial?id=${SESSION_ID}&agent=${AGENT_ID}`, false],
-    ["GET", `/dump?id=${SESSION_ID}`, false],
     ["GET", `/follow?id=${SESSION_ID}`, false],
     ["POST", "/stop", true],
     ["POST", "/send-keys", true],

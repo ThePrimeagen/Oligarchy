@@ -352,10 +352,32 @@ export const fakeTestStore = (
   const results: Array<TestResultRow> = [...(seed.results ?? [])];
   const byName = <Row extends { readonly name: string }>(rows: ReadonlyArray<Row>) =>
     [...rows].sort((left, right) => left.name.localeCompare(right.name));
+  // A definition's rows by name then id, as the real order by: a name's newest wording is its
+  // highest id.
+  const history = (name: Option.Option<string>) =>
+    definitions
+      .filter((row) => Option.match(name, { onNone: () => true, onSome: (n) => row.name === n }))
+      .sort((left, right) => left.name.localeCompare(right.name) || left.id - right.id);
+  const latest = (name: string) => history(Option.some(name)).at(-1);
   const service = Tests.TestStore.of({
-    listTestDefinitions: Effect.sync(() => byName(definitions)),
-    findTestDefinition: (name) =>
-      Effect.sync(() => Option.fromUndefinedOr(definitions.find((row) => row.name === name))),
+    listTestDefinitions: Effect.sync(() =>
+      history(Option.none()).filter((row) => row === latest(row.name)),
+    ),
+    findTestDefinition: (name) => Effect.sync(() => Option.fromUndefinedOr(latest(name))),
+    listTestDefinitionHistory: (name) => Effect.sync(() => history(name)),
+    defineTestDefinition: (input) =>
+      Effect.sync(() => {
+        const row: TestDefinitionRow = {
+          id: Math.max(0, ...definitions.map((definition) => definition.id)) + 1,
+          name: input.name,
+          description: input.description,
+          instruction: input.instruction,
+          proof: input.proof,
+          createdAt: new Date(),
+        };
+        definitions.push(row);
+        return { id: row.id, version: history(Option.some(input.name)).length };
+      }),
     listTestBasePrompts: Effect.sync(() => byName(basePrompts)),
     createRun: (input) =>
       Effect.sync(() => {

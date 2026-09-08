@@ -53,7 +53,6 @@ describe("ProxyApi", () => {
         "POST /start",
         "GET /image",
         "GET /serial",
-        "GET /dump",
         "GET /follow",
         "GET /stats",
         "POST /stop",
@@ -74,7 +73,6 @@ describe("ProxyApi", () => {
     expect(urls.Sessions.serial({ query: { id: "a b", agent: "x" } })).toBe(
       "/serial?id=a+b&agent=x",
     );
-    expect(urls.Sessions.dump({ query: { id: "abc" } })).toBe("/dump?id=abc");
     expect(urls.Sessions.follow({ query: { id: "abc" } })).toBe("/follow?id=abc");
     expect(urls.Sessions.stats()).toBe("/stats");
     expect(urls.Sessions.stop()).toBe("/stop");
@@ -88,6 +86,9 @@ describe("ProxyApi", () => {
     const table = routes(Api.ProxyApi).map(({ method, path }) => `${method} ${path}`);
     expect(table).not.toContain("DELETE /start");
     expect(table).not.toContain("GET /start");
+    // ctrl reads an ended session's console from the database's debug logs; a running one is
+    // its driver's, through /serial.
+    expect(table).not.toContain("GET /dump");
     expect(routes(Api.ProxyApi).map((route) => route.identifier)).not.toContain("notFound");
   });
 
@@ -121,9 +122,6 @@ describe("ProxyApi", () => {
     );
     expect(byIdentifier(Api.ProxyApi, "serial").errors).toEqual(
       [...sessions, 403, 404].sort((a, b) => a - b),
-    );
-    expect(byIdentifier(Api.ProxyApi, "dump").errors).toEqual(
-      [...sessions, 404, 409].sort((a, b) => a - b),
     );
     expect(byIdentifier(Api.ProxyApi, "follow").errors).toEqual(
       [...sessions, 404, 409].sort((a, b) => a - b),
@@ -161,7 +159,6 @@ describe("ReverseProxyApi", () => {
         "POST /start",
         "GET /image",
         "GET /serial",
-        "GET /dump",
         "GET /follow",
         "POST /stop",
         "POST /send-keys",
@@ -214,7 +211,6 @@ describe("ReverseProxyApi", () => {
     expect(byIdentifier(reverse, "start").errors).toEqual(boundary);
     expect(byIdentifier(reverse, "image").errors).toEqual(ascending([...boundary, 403, 404]));
     expect(byIdentifier(reverse, "serial").errors).toEqual(ascending([...boundary, 403, 404]));
-    expect(byIdentifier(reverse, "dump").errors).toEqual(ascending([...boundary, 404, 409]));
     expect(byIdentifier(reverse, "follow").errors).toEqual(ascending([...boundary, 404, 409]));
     expect(byIdentifier(reverse, "stop").errors).toEqual(ascending([...boundary, 403, 404]));
     expect(byIdentifier(reverse, "sendKeys").errors).toEqual(ascending([...boundary, 403, 404]));
