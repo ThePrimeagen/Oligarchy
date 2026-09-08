@@ -710,20 +710,22 @@ describe("Sessions failures", () => {
     }),
   );
 
-  it.effect("GET /dump is gone: the console is read from the database's debug logs", () =>
-    Effect.gen(function* () {
-      const fixed = fixture();
-      yield* Effect.gen(function* () {
-        const http = yield* HttpClient.HttpClient;
-        const raw = yield* http.get(`/dump?id=${SESSION_ID}`, {
-          headers: { authorization: `Bearer ${TOKEN}` },
-        });
-        expect(raw.status).toBe(404);
-        expect(yield* raw.json).toEqual({ error: "not found" });
-      }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.sessions.calls).toEqual([]);
-      expect(fixed.log.lines).toEqual([]);
-    }),
+  it.effect(
+    "GET /dump is gone: an unrouted 404 that reaches no handler and writes no log line",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture();
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          const raw = yield* http.get(`/dump?id=${SESSION_ID}`, {
+            headers: { authorization: `Bearer ${TOKEN}` },
+          });
+          expect(raw.status).toBe(404);
+          expect(yield* raw.json).toEqual({ error: "not found" });
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.sessions.calls).toEqual([]);
+        expect(fixed.log.lines).toEqual([]);
+      }),
   );
 
   it.effect("a BadRequest from a driving method is 400 and skips Sentry", () =>

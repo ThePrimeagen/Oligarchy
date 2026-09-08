@@ -27,7 +27,6 @@ export class ApiBoundary extends HttpApiMiddleware.Service<ApiBoundary>()(
 ) {}
 
 const png = Schema.Uint8Array.pipe(HttpApiSchema.asUint8Array({ contentType: "image/png" }));
-const text = Schema.Uint8Array.pipe(HttpApiSchema.asUint8Array({ contentType: "text/plain" }));
 
 // Sessions group: bearer required
 export const start = HttpApiEndpoint.post("start", "/start", {
@@ -44,12 +43,13 @@ export const image = HttpApiEndpoint.get("image", "/image", {
 
 export const serial = HttpApiEndpoint.get("serial", "/serial", {
   query: Contract.SessionQuery,
-  success: text,
+  success: Schema.Uint8Array.pipe(HttpApiSchema.asUint8Array({ contentType: "text/plain" })),
   error: [Errors.ForbiddenWire, Errors.UnknownSessionWire],
 });
 
+// A follower watches, so it names no agent.
 export const follow = HttpApiEndpoint.get("follow", "/follow", {
-  query: Contract.IdQuery,
+  query: { id: Schema.String },
   success: HttpApiSchema.StreamUint8Array({ contentType: "application/x-ndjson" }),
   error: [Errors.UnknownSessionWire, Errors.ConflictWire],
 });

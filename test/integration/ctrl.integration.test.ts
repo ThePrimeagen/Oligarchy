@@ -867,7 +867,7 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
     ]);
   });
 
-  it("diagnose run kicks off a reviewer through the Cursor API with the session and server in its prompt", async () => {
+  it("diagnose run kicks off a reviewer through the Cursor API with the session, and no proxy, in its prompt", async () => {
     const stub = await cursor();
     const sessionId = await seedEndedSession();
     const result = await runCtrl(["diagnose", "run", "--session-id", sessionId], {

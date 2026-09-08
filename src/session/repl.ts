@@ -278,7 +278,7 @@ const complete = (
         request.complete(completing.completion);
       });
     case "follow":
-      return Picker.completeFollow(repl.session, repl.terminal, completing.prefix).pipe(
+      return Picker.completeFollow(repl.terminal, completing.prefix).pipe(
         Effect.map((completion) => {
           request.complete(completion);
         }),

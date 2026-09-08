@@ -80,7 +80,8 @@ describe("ProxyApi", () => {
     const table = routes().map(({ method, path }) => `${method} ${path}`);
     expect(table).not.toContain("DELETE /start");
     expect(table).not.toContain("GET /start");
-    // ctrl reads consoles from the database's debug logs; the proxy serves none.
+    // ctrl reads an ended session's console from the database's debug logs; a running one is
+    // its driver's, through /serial.
     expect(table).not.toContain("GET /dump");
     expect(routes().map((route) => route.identifier)).not.toContain("notFound");
   });
