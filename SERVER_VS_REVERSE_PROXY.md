@@ -73,7 +73,8 @@ send the browser back to the page; a refusal (a url the rule rejects, a server t
 probe, a url that was never registered) renders the page again with `error: <reason>` on top.
 Because a page on another origin could make that same browser post here — and a registration
 hands the probed url the shared bearer — a browser's `Origin` must be the page's own or the POST
-is refused with 403; the page is also sent `no-store` and may not be framed.
+is refused with 403, and a `Host` that is not a loopback name (a DNS-rebound one) gets no page at
+all; the page is also sent `no-store` and may not be framed.
 
 Forwarding is deliberately dumb. The request goes upstream with the same method, the same path and
 query, the body text exactly as the client sent it, and the shared bearer; the answer comes back
@@ -275,8 +276,10 @@ errors; the switch ends in `satisfies never`, so a tag without an arm does not c
   tokenless mutating page must still refuse: a cross-site form post from the operator's own
   browser, which would have made the reverse proxy probe an attacker's url with the shared bearer.
   Both POSTs therefore check the browser's `Origin` against the `Host` it connected to (a client
-  sending no `Origin` is not a browser and already has the machine), and every answer carries
-  `cache-control: no-store` and `x-frame-options: DENY` so a framed copy cannot be click-jacked.
+  sending no `Origin` is not a browser and already has the machine); because a rebound DNS name
+  would make the two agree, a `Host` that is not `127.0.0.1`, `localhost` or `[::1]` is refused on
+  every route before anything is read; and every answer carries `cache-control: no-store` and
+  `x-frame-options: DENY` so a framed copy cannot be click-jacked.
 - `handlers.ts` binds both groups. The session-driving routes are `uninterruptible`, for the
   proxy's own reason: a client that disconnects mid-`/start` must not tear the forward in half,
   or the routing table never learns of the machine the server booted. `dump` and `follow` stay

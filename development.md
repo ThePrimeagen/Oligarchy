@@ -945,8 +945,11 @@ the fleet and the routing table, both rows in the control-plane database.
   any other origin can make the operator's browser post here, and a registration hands the probed
   url the shared bearer, both POSTs refuse a browser whose `Origin` is not `http://<the Host it
   connected to>` with 403 `origin <origin> is not this page` before reading the form; a request
-  without an `Origin` is not a browser's and is taken. Every page answer carries `cache-control:
-  no-store` and `x-frame-options: DENY`. The page is a plain `HttpServer.serve(handler)` over a
+  without an `Origin` is not a browser's and is taken. Because a name that resolves to 127.0.0.1
+  without being a loopback name (DNS rebinding) would make that `Origin` and `Host` agree, every
+  request whose `Host` is not `127.0.0.1`, `localhost` or `[::1]` (any port) is 403 `not this
+  page` as plain text, no fleet shown, logged `<METHOD> <path> failed: host <host> is not this
+  page`. Every page answer carries `cache-control: no-store` and `x-frame-options: DENY`. The page is a plain `HttpServer.serve(handler)` over a
   `switch` on method and path rather than a second `HttpRouter`, because `HttpRouter.serve`
   memoises one router per graph and a second would serve the API's routes too. Every url on the
   page is HTML-escaped: it is the operator's text.

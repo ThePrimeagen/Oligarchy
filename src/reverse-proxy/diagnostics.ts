@@ -70,6 +70,13 @@ const back = HttpServerResponse.redirect("/", { status: 303 });
 
 const notFound = HttpServerResponse.text("not found", { status: 404 });
 
+// The page listens on 127.0.0.1 and is reached by one of these names. A name that resolves here
+// but is not one of them is DNS rebinding: a page on evil.example:55445 whose Origin then matches
+// its Host. Such a request gets no page at all, not even the fleet.
+const LOOPBACK_HOSTNAMES: ReadonlySet<string> = new Set(["127.0.0.1", "localhost", "[::1]"]);
+
+const notThisPage = HttpServerResponse.text("not this page", { status: 403 });
+
 // The diagnostics page: the fleet with a delete button per server and an add box, on its own
 // loopback port and without a token, because a browser has no bearer to send. Three routes on a
 // switch: a router here would share the API's `HttpRouter` instance and serve its routes too.
@@ -102,14 +109,20 @@ export const handler: Effect.Effect<
   // hands the probed url the shared bearer. A browser names its origin on every POST; it must be
   // this page's own, the scheme and the Host it connected to. A client that sends no Origin is
   // not a browser and already has the machine.
+  const host = request.headers.host;
+  const hostname = URL.canParse(`http://${host}`) ? new URL(`http://${host}`).hostname : "";
   const foreign = Option.filter(
     Headers.get(request.headers, "origin"),
-    (origin) => origin !== `http://${request.headers.host}`,
+    (origin) => origin !== `http://${host}`,
   );
 
   const form = decodeForm.pipe(Effect.result);
 
   const respond = Effect.gen(function* () {
+    if (!LOOPBACK_HOSTNAMES.has(hostname)) {
+      yield* log.error(line(`host ${host} is not this page`), { skipSentry: true });
+      return notThisPage;
+    }
     switch (`${request.method} ${path}`) {
       case "GET /": {
         const servers = yield* router.servers;

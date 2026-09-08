@@ -8,6 +8,7 @@ import {
   HttpClientError,
   HttpClientRequest,
   HttpServer,
+  HttpServerRequest,
 } from "effect/unstable/http";
 import { NodeHttpServer } from "@effect/platform-node";
 import * as Config from "../../src/config.ts";
@@ -310,6 +311,67 @@ describe("a browser elsewhere", () => {
       expect(fixed.log.lines.map((line) => [line.text, line.skipSentry])).toEqual([
         ["POST /servers failed: origin https://evil.example is not this page", true],
         ["POST /servers/delete failed: origin null is not this page", true],
+      ]);
+    }),
+  );
+
+  // A name that resolves to 127.0.0.1 but is not a loopback name (DNS rebinding) would make a
+  // browser's Origin and Host agree; such a Host gets no page at all. fetch will not send a foreign
+  // Host, so these requests reach the handler directly.
+  it.effect("a Host that is not a loopback name is 403 not this page on every route", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      fixed.store.servers.push(SERVER_B);
+      const answer = (request: Request) =>
+        Diagnostics.handler.pipe(
+          Effect.provideService(
+            HttpServerRequest.HttpServerRequest,
+            HttpServerRequest.fromWeb(request),
+          ),
+        );
+      const evil = "evil.example:55445";
+      yield* Effect.gen(function* () {
+        const get = yield* answer(new Request(`http://${evil}/`, { headers: { host: evil } }));
+        expect(get.status).toBe(403);
+        const post = yield* answer(
+          new Request(`http://${evil}/servers`, {
+            method: "POST",
+            headers: {
+              host: evil,
+              origin: `http://${evil}`,
+              "content-type": "application/x-www-form-urlencoded",
+            },
+            body: `url=${encodeURIComponent(SERVER_A)}`,
+          }),
+        );
+        expect(post.status).toBe(403);
+        for (const host of ["localhost:55445", "127.0.0.1:55445", "[::1]:55445"]) {
+          const ok = yield* answer(new Request(`http://${host}/`, { headers: { host } }));
+          expect(ok.status, host).toBe(200);
+        }
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            Router.Router.layer.pipe(
+              Layer.provide(
+                Layer.mergeAll(
+                  fixed.store.layer,
+                  fixed.log.layer,
+                  fixed.upstream.layer,
+                  ProxyConfigLive,
+                ),
+              ),
+            ),
+            fixed.log.layer,
+          ),
+        ),
+      );
+      expect(fixed.store.servers).toEqual([SERVER_B]);
+      // The three loopback pages probed B; the refused requests probed nothing.
+      expect(fixed.upstream.requests).toHaveLength(3);
+      expect(fixed.log.lines.map((line) => [line.text, line.skipSentry])).toEqual([
+        [`GET / failed: host ${evil} is not this page`, true],
+        [`POST /servers failed: host ${evil} is not this page`, true],
       ]);
     }),
   );
