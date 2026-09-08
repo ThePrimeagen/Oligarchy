@@ -1,5 +1,5 @@
-import { and, eq, sql } from "drizzle-orm";
-import { Array as Arr, Context, Effect, Layer } from "effect";
+import { and, count, desc, eq, sql } from "drizzle-orm";
+import { Array as Arr, Context, Effect, Layer, Option } from "effect";
 import * as Client from "./client.ts";
 import * as DbSchema from "./schema.ts";
 
@@ -14,19 +14,80 @@ export type CreatedRun = {
   readonly results: ReadonlyArray<{ readonly id: string; readonly definitionId: number }>;
 };
 
+export type DefinitionInput = {
+  readonly name: string;
+  readonly description: string;
+  readonly instruction: string;
+  readonly proof: string;
+};
+
+export type DefinedDefinition = {
+  readonly id: number;
+  // The row's place among its name's rows by id: 1 for a new name.
+  readonly version: number;
+};
+
 export class TestStore extends Context.Service<TestStore>()("@oligarchy/db/TestStore", {
   make: Effect.gen(function* () {
     const database = yield* Client.Database;
 
+    // A name's newest wording is its highest id: one row per name, the newest.
     const listTestDefinitions = database.run("listTestDefinitions", (db) =>
-      db.select().from(DbSchema.testDefinitions).orderBy(DbSchema.testDefinitions.name),
+      db
+        .selectDistinctOn([DbSchema.testDefinitions.name])
+        .from(DbSchema.testDefinitions)
+        .orderBy(DbSchema.testDefinitions.name, desc(DbSchema.testDefinitions.id)),
     );
 
     const findTestDefinition = Effect.fn("db.findTestDefinition")(function* (name: string) {
       const rows = yield* database.run("findTestDefinition", (db) =>
-        db.select().from(DbSchema.testDefinitions).where(eq(DbSchema.testDefinitions.name, name)),
+        db
+          .select()
+          .from(DbSchema.testDefinitions)
+          .where(eq(DbSchema.testDefinitions.name, name))
+          .orderBy(desc(DbSchema.testDefinitions.id))
+          .limit(1),
       );
       return Arr.head(rows);
+    });
+
+    // Every wording, by name then oldest first; one name's when given.
+    const listTestDefinitionHistory = Effect.fn("db.listTestDefinitionHistory")(function* (
+      name: Option.Option<string>,
+    ) {
+      return yield* database.run("listTestDefinitionHistory", (db) =>
+        db
+          .select()
+          .from(DbSchema.testDefinitions)
+          .where(
+            Option.getOrUndefined(Option.map(name, (n) => eq(DbSchema.testDefinitions.name, n))),
+          )
+          .orderBy(DbSchema.testDefinitions.name, DbSchema.testDefinitions.id),
+      );
+    });
+
+    // The insert and the count land in one transaction, so the version printed is the one the
+    // new row holds.
+    const defineTestDefinition = Effect.fn("db.defineTestDefinition")(function* (
+      input: DefinitionInput,
+    ) {
+      return yield* database.transaction("defineTestDefinition", (tx) =>
+        Effect.gen(function* () {
+          const [row] = yield* Client.attempt("defineTestDefinition", () =>
+            tx
+              .insert(DbSchema.testDefinitions)
+              .values(input)
+              .returning({ id: DbSchema.testDefinitions.id }),
+          );
+          const [counted] = yield* Client.attempt("defineTestDefinition", () =>
+            tx
+              .select({ version: count() })
+              .from(DbSchema.testDefinitions)
+              .where(eq(DbSchema.testDefinitions.name, input.name)),
+          );
+          return { id: row.id, version: counted.version } satisfies DefinedDefinition;
+        }),
+      );
     });
 
     const listTestBasePrompts = database.run("listTestBasePrompts", (db) =>
@@ -150,6 +211,8 @@ export class TestStore extends Context.Service<TestStore>()("@oligarchy/db/TestS
     return {
       listTestDefinitions,
       findTestDefinition,
+      listTestDefinitionHistory,
+      defineTestDefinition,
       listTestBasePrompts,
       createRun,
       failRun,

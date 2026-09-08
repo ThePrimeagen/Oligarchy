@@ -478,7 +478,7 @@ main {
   white-space: pre-wrap;
 }
 
-.model-chart {
+.result-chart {
   display: grid;
   gap: 0.55rem;
   margin: 0;
@@ -486,28 +486,28 @@ main {
   list-style: none;
 }
 
-.model-chart__row {
+.result-chart__row {
   display: grid;
   grid-template-columns: minmax(6.5rem, 9.5rem) 1fr;
   align-items: center;
   gap: 0.75rem;
 }
 
-.model-chart__name {
+.result-chart__name {
   color: var(--terminal-white);
   font-weight: 700;
   overflow-wrap: anywhere;
 }
 
-.model-chart__bar {
+.result-chart__bar {
   display: flex;
   min-height: 1.6rem;
   overflow: hidden;
   background: rgb(122 162 247 / 12%);
 }
 
-.model-chart__ok,
-.model-chart__failed {
+.result-chart__ok,
+.result-chart__failed {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -517,16 +517,83 @@ main {
   font-weight: 700;
 }
 
-.model-chart__ok {
+.result-chart__ok {
   background: var(--green);
 }
 
-.model-chart__failed {
+.result-chart__failed {
   background: var(--failed);
 }
 
-.model-chart__empty {
+.result-chart__empty {
   color: var(--terminal-blue);
+}
+
+/* A definition's wordings, oldest first; the one the card shows is marked. */
+.definition__versions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.definition__version {
+  padding: 0.3em 0.8em;
+  border: 1px solid rgb(122 162 247 / 30%);
+  color: var(--terminal-blue);
+  font-weight: 700;
+  text-decoration: none;
+  transition:
+    color var(--transition),
+    background var(--transition),
+    border-color var(--transition);
+}
+
+.definition__version:hover {
+  color: var(--turquoise);
+}
+
+.definition__version:focus-visible {
+  outline: 2px solid var(--turquoise);
+  outline-offset: 2px;
+}
+
+.definition__version--current {
+  border-color: var(--turquoise);
+  background: rgb(122 162 247 / 10%);
+  color: var(--turquoise);
+}
+
+.definition__chart {
+  display: grid;
+  gap: 1.5rem;
+}
+
+/* The runs that used the wording shown, newest first. */
+.runs {
+  width: 100%;
+  border-collapse: collapse;
+  color: var(--terminal-white);
+}
+
+.runs th,
+.runs td {
+  padding: 0.55rem 0.4rem;
+  border-bottom: 1px solid rgb(122 162 247 / 22%);
+  text-align: left;
+  vertical-align: top;
+}
+
+.runs thead th {
+  color: var(--terminal-blue);
+  font-size: 0.7em;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.runs code {
+  font-size: 0.85em;
+  overflow-wrap: anywhere;
 }
 
 /* Narrow screens keep the scrolling list of cards; the sidebar belongs to the wide layout below. */
@@ -610,8 +677,10 @@ main {
     grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
     grid-template-areas:
       "title title"
+      "versions versions"
       "time time"
-      "chart fields";
+      "chart fields"
+      "runs runs";
     align-items: start;
     column-gap: 4rem;
   }
@@ -619,6 +688,10 @@ main {
   .definition > h2 {
     grid-area: title;
     font-size: 2em;
+  }
+
+  .definition__versions {
+    grid-area: versions;
   }
 
   .definition > time {
@@ -633,16 +706,20 @@ main {
     grid-area: fields;
   }
 
-  .definition__chart .model-chart {
+  .definition__runs {
+    grid-area: runs;
+  }
+
+  .definition__chart .result-chart {
     gap: 1rem;
   }
 
-  .definition__chart .model-chart__row {
+  .definition__chart .result-chart__row {
     grid-template-columns: minmax(8rem, 14rem) 1fr;
     gap: 1.25rem;
   }
 
-  .definition__chart .model-chart__bar {
+  .definition__chart .result-chart__bar {
     min-height: 3rem;
     font-size: 1.2em;
   }
