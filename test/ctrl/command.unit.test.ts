@@ -661,6 +661,28 @@ describe("test new", () => {
     }),
   );
 
+  it.effect("--name runs the newest wording of that definition, never an older one (happy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      // The older wording is listed last, so the newest wins by id, not by position.
+      h.stores.tests.definitions.push(installRevised, terminal, install);
+      const exit = yield* h.run(
+        [...NEW, "--server-url", SERVER, "--name", "Install Omarchy"],
+        WITH_LINEAR,
+      );
+      expect(Exit.isSuccess(exit)).toBe(true);
+      expect(h.stores.tests.results.map((row) => row.definitionId)).toEqual([installRevised.id]);
+      const described = h.linear.calls.filter((call) => call.method === "describeIssue");
+      expect(described).toHaveLength(1);
+      const description = described[0]?.method === "describeIssue" ? described[0].description : "";
+      expect(description).toContain(installRevised.instruction);
+      expect(description).not.toContain(`<instruction>${install.instruction}</instruction>`);
+      expect(h.log.lines.map((line) => line.text)).toEqual([
+        `test ${h.stores.tests.runs[0]?.id} created; 1 tests; OLI-42`,
+      ]);
+    }),
+  );
+
   it.effect("rejects an experiment with no test definitions before touching Linear (unhappy)", () =>
     Effect.gen(function* () {
       const h = harness();

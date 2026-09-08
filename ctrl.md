@@ -97,7 +97,7 @@ Creates one pending test run and one Linear issue per stored test definition, ea
 
 - `--iso <https-url>` — the ISO the agents boot. Must be HTTPS.
 - `--version <version>` — the version label attached to every issue.
-- `--name <definition>` — create a run for this one definition instead of every definition. A name that matches none is a failure.
+- `--name <definition>` — create a run for this one definition instead of every definition, in its newest wording like the rest. A name that matches none is a failure.
 
 ```bash
 ./ctrl test new --server-url https://qemu.example.com --iso https://example.com/omarchy.iso --version 1.2.3
