@@ -1,4 +1,4 @@
-import { desc, eq, sql } from "drizzle-orm";
+import { desc, eq, getTableColumns, sql } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Client } from "pg";
 import {
@@ -255,10 +255,14 @@ export function getImage(connectionString: string, id: string): Promise<Buffer |
   });
 }
 
-// Every wording of every definition, by name then oldest first.
+// Every wording of every definition, by name then oldest first. The clock in the select keeps the
+// list out of Hyperdrive's query cache: the page after a save must show the wording just written.
 export function listTestDefinitions(connectionString: string): Promise<TestDefinition[]> {
   return withDatabase(connectionString, (db) =>
-    db.select().from(testDefinitions).orderBy(testDefinitions.name, testDefinitions.id),
+    db
+      .select({ ...getTableColumns(testDefinitions), queriedAt: sql`CURRENT_TIMESTAMP` })
+      .from(testDefinitions)
+      .orderBy(testDefinitions.name, testDefinitions.id),
   );
 }
 
@@ -269,39 +273,32 @@ export type Wording = {
   readonly proof: string;
 };
 
-export type Revision =
-  | { readonly outcome: "unknown" }
-  | { readonly outcome: "unchanged" }
-  | { readonly outcome: "revised"; readonly id: number };
-
 // A new wording of a known name: a row is never updated, so the edit is an insert, and the newest
-// wording read again is not a new one. A name nobody carries is a new test, which is ctrl's.
+// wording read again is not a new one. A name nobody carries is a new test, which is ctrl's. The
+// newest wording is read past Hyperdrive's cache, the same way, so a save compares with what is.
 export function reviseTestDefinition(
   connectionString: string,
   wording: Wording,
-): Promise<Revision> {
+): Promise<"unknown" | "unchanged" | "revised"> {
   return withDatabase(connectionString, async (db) => {
     const [newest] = await db
-      .select()
+      .select({ ...getTableColumns(testDefinitions), queriedAt: sql`CURRENT_TIMESTAMP` })
       .from(testDefinitions)
       .where(eq(testDefinitions.name, wording.name))
       .orderBy(desc(testDefinitions.id))
       .limit(1);
     if (newest === undefined) {
-      return { outcome: "unknown" };
+      return "unknown";
     }
     if (
       newest.description === wording.description &&
       newest.instruction === wording.instruction &&
       newest.proof === wording.proof
     ) {
-      return { outcome: "unchanged" };
+      return "unchanged";
     }
-    const [row] = await db
-      .insert(testDefinitions)
-      .values(wording)
-      .returning({ id: testDefinitions.id });
-    return { outcome: "revised", id: row.id };
+    await db.insert(testDefinitions).values(wording);
+    return "revised";
   });
 }
 
