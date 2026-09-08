@@ -20,8 +20,8 @@ exist.
   `npm run check:types`, `npm run test:unit`, `npm run test:integration`, `npm run check:fast`
   (lint, format, types, unit in that order), `npm run db:generate`, `npm run db:migrate`,
   `npm run format`, `npm run dev` (the dashboard under wrangler). There is no bare `check`, `test`
-  or `lint` script; `test/repo/scripts.unit.test.ts` keeps it that way. Local runs use a local
-  Postgres migrated with `npm run db:migrate`, never the production `DATABASE_URL`.
+  or `lint` script. Local runs use a local Postgres migrated with `npm run db:migrate`, never the
+  production `DATABASE_URL`.
 - A `.env` in the working directory fills missing variables only; an already-set variable always
   wins, and an empty value counts as unset.
 
