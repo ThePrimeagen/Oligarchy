@@ -129,7 +129,7 @@ console.log(JSON.stringify(query.definitionStats(rows).filter((row) => row.name 
     ]);
   });
 
-  it("lists test result outcomes with definition id and name, model, and the run, and ends the connection", async () => {
+  it("lists test result outcomes with the wording's id, the model and the run, and ends the connection", async () => {
     const result = await runQuery(
       `
 const { drizzle } = await import("drizzle-orm/node-postgres");
@@ -147,9 +147,9 @@ await db.insert(schema.testResults).values([
 ]);
 await client.end();
 const rows = await query.listTestResultOutcomes(url);
-const ours = rows.filter((row) => row.definitionName === "lock-outcomes" || row.definitionName === "install-outcomes");
+const ours = rows.filter((row) => row.definitionId === lock.id || row.definitionId === install.id);
 const counted = query.modelStats(ours);
-console.log(ours.map((row) => [row.definitionName, row.definitionId === (row.definitionName === "lock-outcomes" ? lock.id : install.id), row.model, row.status, row.runId === run.id, row.iso, row.startedAt.getTime() === run.startedAt.getTime()].join(" ")).sort().join("\\n"));
+console.log(ours.map((row) => [row.definitionId === lock.id ? "lock" : "install", row.model, row.status, row.runId === run.id, row.iso, row.startedAt.getTime() === run.startedAt.getTime()].join(" ")).sort().join("\\n"));
 console.log(JSON.stringify(counted));
 `,
       dbUrl,
@@ -161,8 +161,8 @@ console.log(JSON.stringify(counted));
     const stats = printed.at(-1);
     const listed = printed.slice(0, -1);
     expect(listed).toEqual([
-      "install-outcomes true composer-2.5 failed true https://example.com/omarchy.iso true",
-      "lock-outcomes true grok-4.6 passed true https://example.com/omarchy.iso true",
+      "install composer-2.5 failed true https://example.com/omarchy.iso true",
+      "lock grok-4.6 passed true https://example.com/omarchy.iso true",
     ]);
     expect(JSON.parse(stats ?? "")).toEqual([
       { model: "composer-2.5", succeeded: 0, failed: 1 },

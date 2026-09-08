@@ -41,7 +41,6 @@ export type DefinitionStat = {
 // One result with the wording it pinned and the run it belongs to.
 export type TestResultOutcome = {
   readonly definitionId: number;
-  readonly definitionName: string;
   readonly model: string | null;
   readonly status: (typeof testResults.$inferSelect)["status"];
   readonly runId: string;
@@ -276,7 +275,6 @@ export function listTestResultOutcomes(connectionString: string): Promise<TestRe
     db
       .select({
         definitionId: testResults.definitionId,
-        definitionName: testDefinitions.name,
         model: testResults.model,
         status: testResults.status,
         runId: testResults.runId,
@@ -284,7 +282,6 @@ export function listTestResultOutcomes(connectionString: string): Promise<TestRe
         startedAt: testRuns.startedAt,
       })
       .from(testResults)
-      .innerJoin(testDefinitions, eq(testDefinitions.id, testResults.definitionId))
       .innerJoin(testRuns, eq(testRuns.id, testResults.runId)),
   );
 }

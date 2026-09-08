@@ -78,12 +78,10 @@ describe("definitionStats unhappy path", () => {
 
 const outcome = (
   status: TestResultOutcome["status"],
-  definitionName: string,
   model: string | null,
   definitionId = 1,
 ): TestResultOutcome => ({
   definitionId,
-  definitionName,
   model,
   status,
   runId: "11111111-1111-4111-8111-111111111111",
@@ -95,10 +93,10 @@ describe("modelStats happy path", () => {
   it("groups passed and failed results by model and sorts the models", () => {
     expect(
       modelStats([
-        outcome("passed", "lock-screen", "grok-4.6"),
-        outcome("failed", "lock-screen", "grok-4.6"),
-        outcome("failed", "lock-screen", "grok-4.6"),
-        outcome("passed", "install", "composer-2.5"),
+        outcome("passed", "grok-4.6"),
+        outcome("failed", "grok-4.6"),
+        outcome("failed", "grok-4.6"),
+        outcome("passed", "composer-2.5"),
       ]),
     ).toEqual([
       { model: "composer-2.5", succeeded: 1, failed: 0 },
@@ -107,12 +105,9 @@ describe("modelStats happy path", () => {
   });
 
   it("counts one model's results across definitions when the rows are not filtered", () => {
-    expect(
-      modelStats([
-        outcome("passed", "lock-screen", "grok-4.6"),
-        outcome("failed", "install", "grok-4.6"),
-      ]),
-    ).toEqual([{ model: "grok-4.6", succeeded: 1, failed: 1 }]);
+    expect(modelStats([outcome("passed", "grok-4.6"), outcome("failed", "grok-4.6")])).toEqual([
+      { model: "grok-4.6", succeeded: 1, failed: 1 },
+    ]);
   });
 });
 
@@ -124,13 +119,13 @@ describe("modelStats unhappy path", () => {
   it("omits results with no model, and statuses that are not passed or failed", () => {
     expect(
       modelStats([
-        outcome("passed", "lock-screen", null),
-        outcome("failed", "lock-screen", null),
-        outcome("pending", "lock-screen", "grok-4.6"),
-        outcome("running", "lock-screen", "grok-4.6"),
-        outcome("aborted", "lock-screen", "grok-4.6"),
-        outcome("timed_out", "lock-screen", "grok-4.6"),
-        outcome("passed", "lock-screen", "grok-4.6"),
+        outcome("passed", null),
+        outcome("failed", null),
+        outcome("pending", "grok-4.6"),
+        outcome("running", "grok-4.6"),
+        outcome("aborted", "grok-4.6"),
+        outcome("timed_out", "grok-4.6"),
+        outcome("passed", "grok-4.6"),
       ]),
     ).toEqual([{ model: "grok-4.6", succeeded: 1, failed: 0 }]);
   });
@@ -138,9 +133,9 @@ describe("modelStats unhappy path", () => {
   it("omits a model that has only pending, running, aborted or timed_out results", () => {
     expect(
       modelStats([
-        outcome("pending", "lock-screen", "composer-2.5"),
-        outcome("timed_out", "lock-screen", "composer-2.5"),
-        outcome("passed", "lock-screen", "grok-4.6"),
+        outcome("pending", "composer-2.5"),
+        outcome("timed_out", "composer-2.5"),
+        outcome("passed", "grok-4.6"),
       ]),
     ).toEqual([{ model: "grok-4.6", succeeded: 1, failed: 0 }]);
   });
@@ -229,11 +224,11 @@ describe("versionStats happy path", () => {
       versionStats(
         [lockV1, lockV2, lockV3],
         [
-          outcome("failed", "lock-screen", "grok-4.6", 2),
-          outcome("failed", "lock-screen", "composer-2.5", 2),
-          outcome("passed", "lock-screen", "grok-4.6", 2),
-          outcome("passed", "lock-screen", "grok-4.6", 9),
-          outcome("passed", "lock-screen", "grok-4.6", 9),
+          outcome("failed", "grok-4.6", 2),
+          outcome("failed", "composer-2.5", 2),
+          outcome("passed", "grok-4.6", 2),
+          outcome("passed", "grok-4.6", 9),
+          outcome("passed", "grok-4.6", 9),
         ],
       ),
     ).toEqual([
@@ -243,7 +238,7 @@ describe("versionStats happy path", () => {
   });
 
   it("counts a result with no model: the version ran it, whoever did", () => {
-    expect(versionStats([lockV1], [outcome("passed", "lock-screen", null, 2)])).toEqual([
+    expect(versionStats([lockV1], [outcome("passed", null, 2)])).toEqual([
       { version: 1, succeeded: 1, failed: 0 },
     ]);
   });
@@ -256,17 +251,17 @@ describe("versionStats unhappy path", () => {
       versionStats(
         [lockV1, lockV2],
         [
-          outcome("pending", "lock-screen", "grok-4.6", 2),
-          outcome("running", "lock-screen", "grok-4.6", 5),
-          outcome("aborted", "lock-screen", "grok-4.6", 5),
-          outcome("timed_out", "lock-screen", "grok-4.6", 5),
+          outcome("pending", "grok-4.6", 2),
+          outcome("running", "grok-4.6", 5),
+          outcome("aborted", "grok-4.6", 5),
+          outcome("timed_out", "grok-4.6", 5),
         ],
       ),
     ).toEqual([]);
   });
 
   it("ignores results of other definitions and returns nothing for no versions", () => {
-    expect(versionStats([lockV1], [outcome("passed", "install", "grok-4.6", 3)])).toEqual([]);
-    expect(versionStats([], [outcome("passed", "lock-screen", "grok-4.6", 2)])).toEqual([]);
+    expect(versionStats([lockV1], [outcome("passed", "grok-4.6", 3)])).toEqual([]);
+    expect(versionStats([], [outcome("passed", "grok-4.6", 2)])).toEqual([]);
   });
 });
