@@ -179,42 +179,38 @@ describe("groupDefinitions unhappy path", () => {
 });
 
 describe("selectDefinition happy path", () => {
-  it("selects the newest version of the first name when nothing is asked for", () => {
-    expect(selectDefinition(groupDefinitions(ROWS), undefined, undefined)).toBe(install);
-    expect(selectDefinition(groupDefinitions([lockV1, lockV2]), undefined, undefined)).toBe(lockV2);
+  it("selects the first name, with every one of its versions, when nothing is asked for", () => {
+    const [first] = groupDefinitions(ROWS);
+    expect(selectDefinition(groupDefinitions(ROWS), undefined)).toEqual(first);
+    expect(selectDefinition(groupDefinitions([lockV2, lockV1]), undefined)).toEqual({
+      name: "lock-screen",
+      versions: [lockV1, lockV2],
+    });
   });
 
-  it("selects the newest version of the name asked for, wherever it sits", () => {
-    expect(selectDefinition(groupDefinitions(ROWS), "lock-screen", undefined)).toBe(lockV3);
-    expect(selectDefinition(groupDefinitions(ROWS), "install", undefined)).toBe(install);
-  });
-
-  it("selects the version whose id is asked for under its name", () => {
-    expect(selectDefinition(groupDefinitions(ROWS), "lock-screen", "5")).toBe(lockV2);
-    expect(selectDefinition(groupDefinitions(ROWS), "lock-screen", "2")).toBe(lockV1);
+  it("selects the name asked for, wherever it sits, with every one of its versions", () => {
+    expect(selectDefinition(groupDefinitions(ROWS), "lock-screen")).toEqual({
+      name: "lock-screen",
+      versions: [lockV1, lockV2, lockV3],
+    });
+    expect(selectDefinition(groupDefinitions(ROWS), "install")).toEqual({
+      name: "install",
+      versions: [install],
+    });
   });
 });
 
 describe("selectDefinition unhappy path", () => {
   it("selects nothing when no definition carries exactly that name", () => {
     const groups = groupDefinitions(ROWS);
-    expect(selectDefinition(groups, "wifi", undefined)).toBeUndefined();
-    expect(selectDefinition(groups, "Install", undefined)).toBeUndefined();
-    expect(selectDefinition(groups, "", undefined)).toBeUndefined();
+    expect(selectDefinition(groups, "wifi")).toBeUndefined();
+    expect(selectDefinition(groups, "Install")).toBeUndefined();
+    expect(selectDefinition(groups, "")).toBeUndefined();
   });
 
-  it("selects nothing for an id that is not a version of that name", () => {
-    const groups = groupDefinitions(ROWS);
-    expect(selectDefinition(groups, "lock-screen", "3")).toBeUndefined();
-    expect(selectDefinition(groups, "lock-screen", "7")).toBeUndefined();
-    expect(selectDefinition(groups, "lock-screen", "abc")).toBeUndefined();
-    expect(selectDefinition(groups, "lock-screen", "")).toBeUndefined();
-  });
-
-  it("selects nothing from no groups, whatever is asked for", () => {
-    expect(selectDefinition([], undefined, undefined)).toBeUndefined();
-    expect(selectDefinition([], "install", undefined)).toBeUndefined();
-    expect(selectDefinition([], "install", "3")).toBeUndefined();
+  it("selects nothing from no groups, with or without a name", () => {
+    expect(selectDefinition([], undefined)).toBeUndefined();
+    expect(selectDefinition([], "install")).toBeUndefined();
   });
 });
 
