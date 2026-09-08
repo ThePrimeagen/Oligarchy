@@ -1,4 +1,4 @@
-import { desc, eq, sql } from "drizzle-orm";
+import { desc, eq, getTableColumns, sql } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Client } from "pg";
 import {
@@ -127,22 +127,14 @@ export function groupDefinitions(rows: ReadonlyArray<TestDefinition>): Definitio
     }));
 }
 
-// The wording the wide layout opens on: the newest of the name ?name asks for (the first listed
-// when the page is opened bare), or the one ?id names under it. A name nobody carries, or an id
-// that is not one of that name's wordings, selects nothing, so the route can answer 404 rather
-// than quietly show another wording under a URL that names this one.
+// The definition the wide layout opens on, every wording of it: the name ?name asks for, or the
+// first listed when the page is opened bare. A name nobody carries selects nothing, so the route
+// can answer 404 rather than quietly show another definition under a URL that names this one.
 export function selectDefinition(
   groups: ReadonlyArray<DefinitionVersions>,
   name: string | undefined,
-  id: string | undefined,
-): TestDefinition | undefined {
-  const group = name === undefined ? groups[0] : groups.find((entry) => entry.name === name);
-  if (group === undefined) {
-    return undefined;
-  }
-  return id === undefined
-    ? group.versions.at(-1)
-    : group.versions.find((version) => String(version.id) === id);
+): DefinitionVersions | undefined {
+  return name === undefined ? groups[0] : groups.find((group) => group.name === name);
 }
 
 // Passed and failed per wording of one name, oldest first; a wording with neither is left out.
@@ -263,11 +255,51 @@ export function getImage(connectionString: string, id: string): Promise<Buffer |
   });
 }
 
-// Every wording of every definition, by name then oldest first.
+// Every wording of every definition, by name then oldest first. The clock in the select keeps the
+// list out of Hyperdrive's query cache: the page after a save must show the wording just written.
 export function listTestDefinitions(connectionString: string): Promise<TestDefinition[]> {
   return withDatabase(connectionString, (db) =>
-    db.select().from(testDefinitions).orderBy(testDefinitions.name, testDefinitions.id),
+    db
+      .select({ ...getTableColumns(testDefinitions), queriedAt: sql`CURRENT_TIMESTAMP` })
+      .from(testDefinitions)
+      .orderBy(testDefinitions.name, testDefinitions.id),
   );
+}
+
+export type Wording = {
+  readonly name: string;
+  readonly description: string;
+  readonly instruction: string;
+  readonly proof: string;
+};
+
+// A new wording of a known name: a row is never updated, so the edit is an insert, and the newest
+// wording read again is not a new one. A name nobody carries is a new test, which is ctrl's. The
+// newest wording is read past Hyperdrive's cache, the same way, so a save compares with what is.
+export function reviseTestDefinition(
+  connectionString: string,
+  wording: Wording,
+): Promise<"unknown" | "unchanged" | "revised"> {
+  return withDatabase(connectionString, async (db) => {
+    const [newest] = await db
+      .select({ ...getTableColumns(testDefinitions), queriedAt: sql`CURRENT_TIMESTAMP` })
+      .from(testDefinitions)
+      .where(eq(testDefinitions.name, wording.name))
+      .orderBy(desc(testDefinitions.id))
+      .limit(1);
+    if (newest === undefined) {
+      return "unknown";
+    }
+    if (
+      newest.description === wording.description &&
+      newest.instruction === wording.instruction &&
+      newest.proof === wording.proof
+    ) {
+      return "unchanged";
+    }
+    await db.insert(testDefinitions).values(wording);
+    return "revised";
+  });
 }
 
 export function listTestResultOutcomes(connectionString: string): Promise<TestResultOutcome[]> {

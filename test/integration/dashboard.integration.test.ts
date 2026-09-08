@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { eq } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Client } from "pg";
 import { describe, expect, inject, it } from "vitest";
@@ -248,17 +249,86 @@ const currentCard = (html: string): string =>
 const currentLinks = (html: string): number =>
   (html.match(/class="definitions__link definitions__link--current"/g) ?? []).length;
 
-// The version strip of the current card: the links, in order, with the one marked current.
-const versionStrip = (
+// The wordings of the current card, in page order: each a <details> whose summary names the
+// version, the newest open, with the body that follows it up to the next wording or the list's end.
+type Wording = { readonly label: string; readonly open: boolean; readonly body: string };
+const wordings = (card: string): ReadonlyArray<Wording> =>
+  [
+    ...card.matchAll(
+      /<details class="definition__wording"([^>]*)>\s*<summary[^>]*>[\s\S]*?<span class="definition__wording-label">([^<]+)<\/span>[\s\S]*?<\/summary>([\s\S]*?)<\/details>/g,
+    ),
+  ].map(([, attributes, label, body]) => ({
+    label: label ?? "",
+    open: (attributes ?? "").includes("open"),
+    body: body ?? "",
+  }));
+
+// The edit form of the current card: the hidden name, each field's prefilled text, and the update
+// button's label and whether the page hands it over disabled.
+const editForm = (
   card: string,
-): ReadonlyArray<{ readonly href: string; readonly label: string; readonly current: boolean }> =>
-  [...card.matchAll(/<a ([^>]*class="definition__version[^"]*"[^>]*)>([^<]+)<\/a>/g)].map(
-    ([, attributes, label]) => ({
-      href: /href="([^"]+)"/.exec(attributes ?? "")?.[1] ?? "",
-      label: label ?? "",
-      current: (attributes ?? "").includes('aria-current="true"'),
-    }),
+): {
+  readonly name: string;
+  readonly fields: Record<string, string>;
+  readonly button: string;
+  readonly disabled: boolean;
+} => {
+  const form =
+    /<form method="post" action="\/definitions"[^>]*>([\s\S]*?)<\/form>/.exec(card)?.[1] ?? "";
+  const fields: Record<string, string> = {};
+  for (const [, field, text] of form.matchAll(
+    /<textarea name="([a-z]+)"[^>]*>([\s\S]*?)<\/textarea>/g,
+  )) {
+    fields[field ?? ""] = text ?? "";
+  }
+  const button = /<button([^>]*type="submit"[^>]*)>([\s\S]*?)<\/button>/.exec(form);
+  return {
+    name: /<input type="hidden" name="name" value="([^"]*)"/.exec(form)?.[1] ?? "",
+    fields,
+    button: button?.[2] ?? "",
+    disabled: (button?.[1] ?? "").includes("disabled"),
+  };
+};
+
+// A form submission as the browser sends it, answered without following the redirect.
+const postForm = async (
+  fields: Record<string, string>,
+  databaseUrl: string,
+): Promise<{
+  readonly status: number;
+  readonly location: string | null;
+  readonly text: string;
+}> => {
+  const response = await app.request(
+    "/definitions",
+    {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams(fields).toString(),
+    },
+    { HYPERDRIVE: { connectionString: databaseUrl } },
   );
+  return {
+    status: response.status,
+    location: response.headers.get("location"),
+    text: await response.text(),
+  };
+};
+
+const wordingsOf = async (databaseUrl: string, name: string): Promise<ReadonlyArray<string>> => {
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    const rows = await drizzle(client)
+      .select({ instruction: testDefinitions.instruction })
+      .from(testDefinitions)
+      .where(eq(testDefinitions.name, name))
+      .orderBy(testDefinitions.id);
+    return rows.map((row) => row.instruction);
+  } finally {
+    await client.end();
+  }
+};
 
 // Every result here is its own run: a run holds one result per definition.
 const seedResults = async (
@@ -326,19 +396,19 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
     expect(card).toContain('aria-label="v1: 2 succeeded, 1 failed"');
     expect(card).not.toContain("gemini-3.8:");
     expect(card).not.toContain("lock-screen");
-    // One wording so far: a strip of one, current. Every run that used it is listed, the pending
-    // one included, with its model and status.
-    expect(versionStrip(card).map((link) => [link.label, link.current])).toEqual([["v1", true]]);
+    // One wording so far, open. Every run that used it is listed under it, the pending one
+    // included, with its model and status.
+    const [only, ...rest] = wordings(card);
+    expect(rest).toEqual([]);
+    expect(only).toMatchObject({ label: "v1", open: true });
     for (const runId of runIds) {
-      expect(card).toContain(`<code>${runId}</code>`);
+      expect(only?.body).toContain(`<code>${runId}</code>`);
     }
-    expect(card).toContain("<td>gemini-3.8</td>");
-    expect(card).toContain("<td>pending</td>");
+    expect(only?.body).toContain("<td>gemini-3.8</td>");
+    expect(only?.body).toContain("<td>pending</td>");
   });
 
-  it("shows one name for two wordings, the newest selected, each charted by version", async () => {
-    let olderId = 0;
-    let newerId = 0;
+  it("lines a name's wordings up newest first, the newest open, each with its own runs", async () => {
     let olderRuns: ReadonlyArray<string> = [];
     let newerRuns: ReadonlyArray<string> = [];
     await seed(dbUrl, async (db) => {
@@ -350,8 +420,6 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
         .insert(testDefinitions)
         .values({ name: "wide-versions", description: "d", instruction: "second", proof: "p" })
         .returning({ id: testDefinitions.id });
-      olderId = older.id;
-      newerId = newer.id;
       olderRuns = await seedResults(db, older.id, [
         { status: "passed", model: "grok-4.6" },
         { status: "failed", model: "grok-4.6" },
@@ -359,57 +427,68 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
       newerRuns = await seedResults(db, newer.id, [{ status: "passed", model: "composer-2.5" }]);
     });
 
-    const newest = await getPage("/definitions?name=wide-versions", dbUrl);
-    expect(newest.status).toBe(200);
-    expect(newest.html.match(/href="\/definitions\?name=wide-versions"/g)).toHaveLength(1);
-    expect(currentLinks(newest.html)).toBe(1);
-    const newestCard = currentCard(newest.html);
-    expect(newestCard).toContain("<h2>wide-versions</h2>");
-    expect(versionStrip(newestCard)).toEqual([
-      {
-        href: `/definitions?name=wide-versions&amp;id=${String(olderId)}`,
-        label: "v1",
-        current: false,
-      },
-      {
-        href: `/definitions?name=wide-versions&amp;id=${String(newerId)}`,
-        label: "v2",
-        current: true,
-      },
-    ]);
-    expect(newestCard).toContain("<p>second</p>");
-    expect(newestCard).not.toContain("<p>first</p>");
-    // The model chart is the selected wording's; the version chart is the whole name's.
-    expect(newestCard).toContain('aria-label="composer-2.5: 1 succeeded, 0 failed"');
-    expect(newestCard).not.toContain('aria-label="grok-4.6:');
-    expect(newestCard).toContain('aria-label="v1: 1 succeeded, 1 failed"');
-    expect(newestCard).toContain('aria-label="v2: 1 succeeded, 0 failed"');
+    const { status, html } = await getPage("/definitions?name=wide-versions", dbUrl);
+    expect(status).toBe(200);
+    // One sidebar entry for the name, however many wordings it has.
+    expect(html.match(/href="\/definitions\?name=wide-versions"/g)).toHaveLength(1);
+    expect(currentLinks(html)).toBe(1);
+    const card = currentCard(html);
+    expect(card).toContain("<h2>wide-versions</h2>");
+    // The version chart spans the name; each wording carries its own text, model chart and runs.
+    expect(card).toContain('aria-label="v1: 1 succeeded, 1 failed"');
+    expect(card).toContain('aria-label="v2: 1 succeeded, 0 failed"');
+    const [v2, v1, ...rest] = wordings(card);
+    expect(rest).toEqual([]);
+    expect(v2).toMatchObject({ label: "v2", open: true });
+    expect(v1).toMatchObject({ label: "v1", open: false });
+    expect(v2?.body).toContain("<p>second</p>");
+    expect(v2?.body).not.toContain("<p>first</p>");
+    expect(v2?.body).toContain('aria-label="composer-2.5: 1 succeeded, 0 failed"');
+    expect(v2?.body).not.toContain("grok-4.6:");
     for (const runId of newerRuns) {
-      expect(newestCard).toContain(`<code>${runId}</code>`);
+      expect(v2?.body).toContain(`<code>${runId}</code>`);
     }
     for (const runId of olderRuns) {
-      expect(newestCard).not.toContain(runId);
+      expect(v2?.body).not.toContain(runId);
     }
+    expect(v1?.body).toContain("<p>first</p>");
+    expect(v1?.body).not.toContain("<p>second</p>");
+    expect(v1?.body).toContain('aria-label="grok-4.6: 1 succeeded, 1 failed"');
+    expect(v1?.body).not.toContain("composer-2.5:");
+    for (const runId of olderRuns) {
+      expect(v1?.body).toContain(`<code>${runId}</code>`);
+    }
+    for (const runId of newerRuns) {
+      expect(v1?.body).not.toContain(runId);
+    }
+  });
 
-    const older = await getPage(`/definitions?name=wide-versions&id=${String(olderId)}`, dbUrl);
-    expect(older.status).toBe(200);
-    expect(currentLinks(older.html)).toBe(1);
-    const olderCard = currentCard(older.html);
-    expect(versionStrip(olderCard).map((link) => [link.label, link.current])).toEqual([
-      ["v1", true],
-      ["v2", false],
-    ]);
-    expect(olderCard).toContain("<p>first</p>");
-    expect(olderCard).not.toContain("<p>second</p>");
-    expect(olderCard).toContain('aria-label="grok-4.6: 1 succeeded, 1 failed"');
-    expect(olderCard).not.toContain("composer-2.5:");
-    expect(olderCard).toContain('aria-label="v2: 1 succeeded, 0 failed"');
-    for (const runId of olderRuns) {
-      expect(olderCard).toContain(`<code>${runId}</code>`);
-    }
-    for (const runId of newerRuns) {
-      expect(olderCard).not.toContain(runId);
-    }
+  it("shows the newest wording in a form, the name fixed, its update button handed over disabled", async () => {
+    await seed(dbUrl, async (db) => {
+      await db.insert(testDefinitions).values([
+        { name: "wide-edit", description: "old d", instruction: "old i", proof: "old p" },
+        { name: "wide-edit", description: "new d", instruction: "new i", proof: "new p" },
+      ]);
+    });
+    const { status, html } = await getPage("/definitions?name=wide-edit", dbUrl);
+    expect(status).toBe(200);
+    const card = currentCard(html);
+    // The form is in the card as it is, not behind a fold; the page's script enables the button
+    // once a field differs from the text it was rendered with.
+    expect(card).not.toContain('<details class="definition__edit"');
+    expect(editForm(card)).toEqual({
+      name: "wide-edit",
+      fields: { description: "new d", instruction: "new i", proof: "new p" },
+      button: "Update",
+      disabled: true,
+    });
+    expect(card).toContain(
+      "Updating writes v3 of wide-edit; the earlier wordings keep their runs.",
+    );
+    expect(html).toContain('<script src="/dashboard.js" defer=""></script>');
+    // The name is not a field: it is what the wordings collapse under.
+    expect(card).not.toMatch(/<(input|textarea)[^>]*name="name"[^>]*type="text"/);
+    expect(card).not.toContain('class="definition__form-notice"');
   });
 
   it("says so in the charts and the run list when the selected definition has not run yet", async () => {
@@ -437,31 +516,136 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page unhappy path", () => {
     expect(currentLinks(html)).toBe(0);
     expect(currentCard(html)).toBe("");
   });
+});
 
-  it("answers 404 for an id that is not a version of that name, keeping the sidebar", async () => {
-    let otherId = 0;
+describe.skipIf(dbUrl === "")("dashboard/definitions edit happy path", () => {
+  it("saves a changed wording as the next version and returns to the name, which now opens on it", async () => {
     await seed(dbUrl, async (db) => {
-      const [other] = await db
-        .insert(testDefinitions)
-        .values({ name: "wide-other", description: "d", instruction: "i", proof: "p" })
-        .returning({ id: testDefinitions.id });
-      otherId = other.id;
+      await db.insert(testDefinitions).values([
+        { name: "wide-save", description: "d", instruction: "first", proof: "p" },
+        { name: "wide-save", description: "d", instruction: "second", proof: "p" },
+      ]);
     });
-    const { status, html } = await getPage(
-      `/definitions?name=lock-screen&id=${String(otherId)}`,
+    // Typed over two lines: the browser sends CRLF, the wording is stored with LF as ctrl writes it.
+    const saved = await postForm(
+      { name: "wide-save", description: "d", instruction: "third\r\nand more", proof: "p" },
       dbUrl,
     );
-    expect(status).toBe(404);
-    expect(html).toContain(
-      `No version <code>${String(otherId)}</code> of <code>lock-screen</code>.`,
-    );
-    expect(html).toContain('href="/definitions?name=lock-screen"');
-    expect(currentLinks(html)).toBe(0);
-    expect(currentCard(html)).toBe("");
+    expect(saved.status).toBe(303);
+    expect(saved.location).toBe("/definitions?name=wide-save");
+    expect(await wordingsOf(dbUrl, "wide-save")).toEqual(["first", "second", "third\nand more"]);
 
-    const garbage = await getPage("/definitions?name=lock-screen&id=abc", dbUrl);
-    expect(garbage.status).toBe(404);
-    expect(garbage.html).toContain("No version <code>abc</code> of <code>lock-screen</code>.");
+    const { status, html } = await getPage("/definitions?name=wide-save", dbUrl);
+    expect(status).toBe(200);
+    const card = currentCard(html);
+    const [newest] = wordings(card);
+    expect(newest).toMatchObject({ label: "v3", open: true });
+    expect(newest?.body).toContain("<p>third\nand more</p>");
+    expect(wordings(card).map((wording) => wording.label)).toEqual(["v3", "v2", "v1"]);
+    expect(editForm(card)).toMatchObject({
+      fields: { instruction: "third\nand more" },
+      button: "Update",
+      disabled: true,
+    });
+    expect(card).toContain(
+      "Updating writes v4 of wide-save; the earlier wordings keep their runs.",
+    );
+  });
+
+  it("saves a wording that changes one field only, the other two as they were (happy)", async () => {
+    await seed(dbUrl, async (db) => {
+      await db
+        .insert(testDefinitions)
+        .values({ name: "wide-one-field", description: "d", instruction: "i", proof: "p" });
+    });
+    const saved = await postForm(
+      { name: "wide-one-field", description: "d", instruction: "i", proof: "p2" },
+      dbUrl,
+    );
+    expect(saved.status).toBe(303);
+    const { html } = await getPage("/definitions?name=wide-one-field", dbUrl);
+    const [newest] = wordings(currentCard(html));
+    expect(newest?.body).toContain("<p>p2</p>");
+    expect(newest?.body).toContain("<p>i</p>");
+  });
+});
+
+describe.skipIf(dbUrl === "")("dashboard/definitions edit unhappy path", () => {
+  it("refuses a wording identical to the newest: nothing is written and the form says so", async () => {
+    await seed(dbUrl, async (db) => {
+      await db.insert(testDefinitions).values({
+        name: "wide-same",
+        description: "d",
+        instruction: "i\nover two lines",
+        proof: "p",
+      });
+    });
+    // A browser submits a textarea's newlines as CRLF; the wording ctrl wrote has LF.
+    const same = await postForm(
+      { name: "wide-same", description: "d", instruction: "i\r\nover two lines", proof: "p" },
+      dbUrl,
+    );
+    expect(same.status).toBe(303);
+    expect(same.location).toBe("/definitions?name=wide-same&edit=unchanged");
+    expect(await wordingsOf(dbUrl, "wide-same")).toEqual(["i\nover two lines"]);
+
+    const { status, html } = await getPage("/definitions?name=wide-same&edit=unchanged", dbUrl);
+    expect(status).toBe(200);
+    const card = currentCard(html);
+    expect(card).toContain('<p class="definition__form-notice" role="alert">');
+    expect(card).toContain("Nothing changed: the newest wording already reads like this.");
+  });
+
+  it("refuses an empty field: nothing is written and the form says so", async () => {
+    await seed(dbUrl, async (db) => {
+      await db
+        .insert(testDefinitions)
+        .values({ name: "wide-empty", description: "d", instruction: "i", proof: "p" });
+    });
+    const empty = await postForm(
+      { name: "wide-empty", description: "d", instruction: "", proof: "p" },
+      dbUrl,
+    );
+    expect(empty.status).toBe(303);
+    expect(empty.location).toBe("/definitions?name=wide-empty&edit=empty");
+    const missing = await postForm({ name: "wide-empty", description: "d", proof: "p" }, dbUrl);
+    expect(missing.status).toBe(303);
+    expect(missing.location).toBe("/definitions?name=wide-empty&edit=empty");
+    expect(await wordingsOf(dbUrl, "wide-empty")).toEqual(["i"]);
+
+    const { html } = await getPage("/definitions?name=wide-empty&edit=empty", dbUrl);
+    const card = currentCard(html);
+    expect(card).toContain('<p class="definition__form-notice" role="alert">');
+    expect(card).toContain("Every field needs text.");
+  });
+
+  it("answers 404 for a name nobody carries, or none at all: a new test is ctrl test define's", async () => {
+    const unknown = await postForm(
+      { name: "wide-nobody", description: "d", instruction: "i", proof: "p" },
+      dbUrl,
+    );
+    expect(unknown.status).toBe(404);
+    const nameless = await postForm({ description: "d", instruction: "i", proof: "p" }, dbUrl);
+    expect(nameless.status).toBe(404);
+    expect(await wordingsOf(dbUrl, "wide-nobody")).toEqual([]);
+  });
+
+  it("shows a stale ?edit value as no notice at all", async () => {
+    const { status, html } = await getPage("/definitions?name=lock-screen&edit=whatever", dbUrl);
+    expect(status).toBe(200);
+    expect(currentCard(html)).not.toContain('class="definition__form-notice"');
+  });
+});
+
+describe("dashboard/definitions edit unhappy path: unreachable database", () => {
+  it("answers 500 without echoing the password", async () => {
+    const result = await postForm(
+      { name: "lock-screen", description: "d", instruction: "i", proof: "p" },
+      REFUSED_URL,
+    );
+    expect(result.status).toBe(500);
+    expect(result.text).toContain("Test definitions are unavailable.");
+    expect(result.text).not.toContain(SENTINEL_PASSWORD);
   });
 });
 

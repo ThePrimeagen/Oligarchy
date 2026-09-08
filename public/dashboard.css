@@ -219,7 +219,7 @@ main {
     transform var(--transition);
 }
 
-.button:hover {
+.button:hover:not(:disabled) {
   background: var(--turquoise);
   transform: translateY(-1px);
 }
@@ -227,6 +227,13 @@ main {
 .button:focus-visible {
   outline: 2px solid var(--turquoise);
   outline-offset: 3px;
+}
+
+.button:disabled {
+  background: rgb(122 162 247 / 25%);
+  box-shadow: none;
+  color: rgb(26 27 38 / 70%);
+  cursor: not-allowed;
 }
 
 .scoreboard {
@@ -529,43 +536,124 @@ main {
   color: var(--terminal-blue);
 }
 
-/* A definition's wordings, oldest first; the one the card shows is marked. */
-.definition__versions {
+/* A definition's wordings, newest first; each folds open on its text, its chart and its runs. */
+.definition__wordings {
+  display: grid;
+  gap: 1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.definition__wording {
+  border: 1px solid rgb(122 162 247 / 22%);
+}
+
+.definition__wording > summary {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
-.definition__version {
-  padding: 0.3em 0.8em;
-  border: 1px solid rgb(122 162 247 / 30%);
+  align-items: baseline;
+  gap: 1rem;
+  padding: 0.8em 1em;
   color: var(--terminal-blue);
-  font-weight: 700;
-  text-decoration: none;
-  transition:
-    color var(--transition),
-    background var(--transition),
-    border-color var(--transition);
+  cursor: pointer;
+  list-style: none;
 }
 
-.definition__version:hover {
+.definition__wording > summary::-webkit-details-marker {
+  display: none;
+}
+
+.definition__wording > summary::before {
+  content: "▸";
   color: var(--turquoise);
 }
 
-.definition__version:focus-visible {
+.definition__wording[open] > summary::before {
+  content: "▾";
+}
+
+.definition__wording > summary:focus-visible {
   outline: 2px solid var(--turquoise);
-  outline-offset: 2px;
+  outline-offset: -2px;
 }
 
-.definition__version--current {
-  border-color: var(--turquoise);
-  background: rgb(122 162 247 / 10%);
-  color: var(--turquoise);
+.definition__wording-label {
+  color: var(--terminal-white);
+  font-size: 1.15em;
+  font-weight: 700;
+}
+
+.definition__wording > summary time {
+  font-size: 0.7em;
+  text-transform: uppercase;
+}
+
+.definition__wording-runs {
+  margin-left: auto;
+  font-size: 0.85em;
+}
+
+.definition__wording-body {
+  display: grid;
+  gap: 1.5rem;
+  padding: 0 1em 1.2em;
 }
 
 .definition__chart {
   display: grid;
   gap: 1.5rem;
+}
+
+/* The newest wording as a form: its update writes the next version, and the button stays gray until
+   a field differs from the text the page came with. */
+.definition__form {
+  display: grid;
+  gap: 1.1rem;
+  padding: 1.2em 1em;
+  border: 1px solid rgb(122 162 247 / 22%);
+}
+
+.definition__form-note,
+.definition__form-notice {
+  margin: 0;
+  color: var(--terminal-blue);
+}
+
+.definition__form-notice {
+  color: var(--failed);
+  font-weight: 700;
+}
+
+.definition__form-field {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.definition__form-field > span {
+  color: var(--terminal-blue);
+  font-size: 0.7em;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.definition__form textarea {
+  width: 100%;
+  padding: 0.6em 0.75em;
+  border: 1px solid rgb(122 162 247 / 30%);
+  background: rgb(122 162 247 / 6%);
+  color: var(--terminal-white);
+  font: inherit;
+  resize: vertical;
+}
+
+.definition__form textarea:focus-visible {
+  outline: 2px solid var(--turquoise);
+  outline-offset: 2px;
+}
+
+.definition__form .button {
+  justify-self: start;
 }
 
 /* The runs that used the wording shown, newest first. */
@@ -614,8 +702,9 @@ main {
   gap: 1.1rem;
 }
 
-/* Wide screens: the definition names down the left, the current definition's results by model in
-   the centre and its text on the right. */
+/* Wide screens: the definition names down the left; the current definition's results by version
+   beside its newest wording as a form, then its wordings newest first, each folding open on text,
+   chart and runs. */
 @media (min-width: 64rem) {
   main[data-page="definitions"] {
     width: min(100% - 4rem, 96rem);
@@ -677,10 +766,8 @@ main {
     grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
     grid-template-areas:
       "title title"
-      "versions versions"
-      "time time"
-      "chart fields"
-      "runs runs";
+      "chart form"
+      "wordings wordings";
     align-items: start;
     column-gap: 4rem;
   }
@@ -690,23 +777,36 @@ main {
     font-size: 2em;
   }
 
-  .definition__versions {
-    grid-area: versions;
-  }
-
-  .definition > time {
-    grid-area: time;
-  }
-
-  .definition__chart {
+  .definition > .definition__chart {
     grid-area: chart;
   }
 
-  .definition__fields {
+  .definition__form {
+    grid-area: form;
+  }
+
+  .definition__wordings {
+    grid-area: wordings;
+  }
+
+  /* Inside a wording: its text beside its chart, the runs beneath both. */
+  .definition__wording-body {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+    grid-template-areas:
+      "fields chart"
+      "runs runs";
+    column-gap: 4rem;
+  }
+
+  .definition__wording-body > .definition__fields {
     grid-area: fields;
   }
 
-  .definition__runs {
+  .definition__wording-body > .definition__chart {
+    grid-area: chart;
+  }
+
+  .definition__wording-body > .definition__runs {
     grid-area: runs;
   }
 

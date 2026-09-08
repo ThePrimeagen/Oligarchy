@@ -11,13 +11,13 @@ import {
   listTestDefinitions,
   listTestResultOutcomes,
   modelStats,
+  reviseTestDefinition,
   selectDefinition,
   versionStats,
   type DefinitionStat,
   type DefinitionVersions,
   type Session,
   type TestBasePrompt,
-  type TestDefinition,
   type TestResultOutcome,
 } from "./query.ts";
 import { clickerPage } from "./clicker.ts";
@@ -291,59 +291,74 @@ const Home: FC<HomeProps> = ({ sessions }) => (
   </Shell>
 );
 
+type EditNotice = "unchanged" | "empty";
+
+const EDIT_NOTICES: Record<EditNotice, string> = {
+  unchanged: "Nothing changed: the newest wording already reads like this.",
+  empty: "Every field needs text.",
+};
+
 type DefinitionsProps = {
   groups: DefinitionVersions[] | null;
   outcomes: TestResultOutcome[];
-  // The ?name and ?id the page was asked for, and the wording they resolved to: nothing when the
-  // name is unknown or the id is not one of its wordings, so the wide layout can say so instead
-  // of opening on another one.
+  // The ?name the page was asked for and the definition it resolved to: nothing when the name is
+  // unknown, so the wide layout can say so instead of opening on another one.
   name: string | undefined;
-  id: string | undefined;
-  selected: TestDefinition | undefined;
+  selected: DefinitionVersions | undefined;
+  // Why the last edit of the selected definition was refused, when it was.
+  notice: EditNotice | undefined;
 };
 
 const definitionHref = (name: string): string => `/definitions?name=${encodeURIComponent(name)}`;
-const versionHref = (name: string, id: number): string =>
-  `${definitionHref(name)}&id=${String(id)}`;
+const editHref = (name: string, notice: EditNotice): string =>
+  `${definitionHref(name)}&edit=${notice}`;
 
-// One name's card: the wording shown (the selected one, or the newest), its version strip, the
-// name's results by version beside the wording's by model, its text, and the runs that used it.
+const RunsTable: FC<{ runs: ReadonlyArray<TestResultOutcome> }> = ({ runs }) =>
+  runs.length === 0 ? (
+    <p class="result-chart__empty">No runs yet.</p>
+  ) : (
+    <table class="runs">
+      <thead>
+        <tr>
+          <th>Run</th>
+          <th>Omarchy version</th>
+          <th>Started</th>
+          <th>Model</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {runs.map((run) => (
+          <tr>
+            <td>
+              <code>{run.runId}</code>
+            </td>
+            <td>{run.iso.split("/").at(-1) ?? run.iso}</td>
+            <td>
+              <time dateTime={run.startedAt.toISOString()}>{dateTime.format(run.startedAt)}</time>
+            </td>
+            <td>{run.model ?? "—"}</td>
+            <td>{run.status === "timed_out" ? "timed out" : run.status}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+
+// One name's card: its results by version beside the newest wording as a form whose update writes
+// the next version, then every wording newest first, the newest open, each with its text, its
+// results by model and the runs that used it. The name is what the wordings collapse under, so it
+// is not a field.
 const DefinitionCard: FC<{
   group: DefinitionVersions;
-  shown: TestDefinition;
   outcomes: ReadonlyArray<TestResultOutcome>;
-}> = ({ group, shown, outcomes }) => {
-  const version = group.versions.indexOf(shown) + 1;
-  const runs = outcomes
-    .filter((row) => row.definitionId === shown.id)
-    .sort((left, right) => right.startedAt.getTime() - left.startedAt.getTime());
+  notice: EditNotice | undefined;
+}> = ({ group, outcomes, notice }) => {
+  const newest = group.versions[group.versions.length - 1];
+  const next = group.versions.length + 1;
   return (
     <article class="record definition">
       <h2>{group.name}</h2>
-      <nav
-        class="definition__versions"
-        aria-label={`Versions of ${group.name}`}
-        hx-target:inherited="#definitions"
-        hx-select:inherited="#definitions"
-        hx-swap:inherited="outerHTML"
-        hx-push-url:inherited="true"
-      >
-        {group.versions.map((wording, index) => (
-          <a
-            href={versionHref(group.name, wording.id)}
-            hx-get={versionHref(group.name, wording.id)}
-            class={
-              wording.id === shown.id
-                ? "definition__version definition__version--current"
-                : "definition__version"
-            }
-            aria-current={wording.id === shown.id ? "true" : undefined}
-          >
-            v{index + 1}
-          </a>
-        ))}
-      </nav>
-      <time dateTime={shown.createdAt.toISOString()}>{dateTime.format(shown.createdAt)}</time>
       <div class="definition__chart">
         <ResultChart
           title="Results by version"
@@ -353,73 +368,103 @@ const DefinitionCard: FC<{
             failed: row.failed,
           }))}
         />
-        <ResultChart
-          title={`Results by model, v${String(version)}`}
-          rows={modelStats(runs).map((row) => ({
-            label: row.model,
-            succeeded: row.succeeded,
-            failed: row.failed,
-          }))}
-        />
       </div>
-      <div class="definition__fields">
-        <div class="record__field">
-          <h3>Description</h3>
-          <p>{shown.description}</p>
-        </div>
-        <div class="record__field">
-          <h3>Instruction</h3>
-          <p>{shown.instruction}</p>
-        </div>
-        <div class="record__field">
-          <h3>Proof</h3>
-          <p>{shown.proof}</p>
-        </div>
-      </div>
-      <div class="record__field definition__runs">
-        <h3>Runs of v{version}</h3>
-        {runs.length === 0 ? (
-          <p class="result-chart__empty">No runs yet.</p>
-        ) : (
-          <table class="runs">
-            <thead>
-              <tr>
-                <th>Run</th>
-                <th>Omarchy version</th>
-                <th>Started</th>
-                <th>Model</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {runs.map((run) => (
-                <tr>
-                  <td>
-                    <code>{run.runId}</code>
-                  </td>
-                  <td>{run.iso.split("/").at(-1) ?? run.iso}</td>
-                  <td>
-                    <time dateTime={run.startedAt.toISOString()}>
-                      {dateTime.format(run.startedAt)}
-                    </time>
-                  </td>
-                  <td>{run.model ?? "—"}</td>
-                  <td>{run.status === "timed_out" ? "timed out" : run.status}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {/* The update button is handed over disabled; public/dashboard.js enables it once a field
+          differs from the wording it was rendered with, so an unchanged wording is not offered. */}
+      <form method="post" action="/definitions" class="definition__form">
+        <input type="hidden" name="name" value={group.name} />
+        <p class="definition__form-note">
+          Updating writes v{next} of {group.name}; the earlier wordings keep their runs.
+        </p>
+        {notice === undefined ? null : (
+          <p class="definition__form-notice" role="alert">
+            {EDIT_NOTICES[notice]}
+          </p>
         )}
-      </div>
+        <label class="definition__form-field">
+          <span>Description</span>
+          <textarea name="description" rows={3} required>
+            {newest.description}
+          </textarea>
+        </label>
+        <label class="definition__form-field">
+          <span>Instruction</span>
+          <textarea name="instruction" rows={6} required>
+            {newest.instruction}
+          </textarea>
+        </label>
+        <label class="definition__form-field">
+          <span>Proof</span>
+          <textarea name="proof" rows={3} required>
+            {newest.proof}
+          </textarea>
+        </label>
+        <button class="button" type="submit" disabled>
+          Update
+        </button>
+      </form>
+      <ul class="definition__wordings">
+        {group.versions.toReversed().map((wording, index) => {
+          const version = group.versions.length - index;
+          const runs = outcomes
+            .filter((row) => row.definitionId === wording.id)
+            .sort((left, right) => right.startedAt.getTime() - left.startedAt.getTime());
+          return (
+            <li>
+              <details class="definition__wording" open={version === group.versions.length}>
+                <summary>
+                  <span class="definition__wording-label">v{version}</span>
+                  <time dateTime={wording.createdAt.toISOString()}>
+                    {dateTime.format(wording.createdAt)}
+                  </time>
+                  <span class="definition__wording-runs">
+                    {runs.length} {runs.length === 1 ? "run" : "runs"}
+                  </span>
+                </summary>
+                <div class="definition__wording-body">
+                  <div class="definition__fields">
+                    <div class="record__field">
+                      <h3>Description</h3>
+                      <p>{wording.description}</p>
+                    </div>
+                    <div class="record__field">
+                      <h3>Instruction</h3>
+                      <p>{wording.instruction}</p>
+                    </div>
+                    <div class="record__field">
+                      <h3>Proof</h3>
+                      <p>{wording.proof}</p>
+                    </div>
+                  </div>
+                  <div class="definition__chart">
+                    <ResultChart
+                      title="Results by model"
+                      rows={modelStats(runs).map((row) => ({
+                        label: row.model,
+                        succeeded: row.succeeded,
+                        failed: row.failed,
+                      }))}
+                    />
+                  </div>
+                  <div class="record__field definition__runs">
+                    <h3>Runs</h3>
+                    <RunsTable runs={runs} />
+                  </div>
+                </div>
+              </details>
+            </li>
+          );
+        })}
+      </ul>
     </article>
   );
 };
 
 // Every card is in the page so a narrow screen keeps its scrolling list; the wide layout shows
-// the sidebar and only the current card. A sidebar or version click fetches the page for that
-// wording and swaps this section in place (htmx 4 inherits an attribute only when told to),
-// pushing the URL so a reload or a shared link opens on the same one.
-const Definitions: FC<DefinitionsProps> = ({ groups, outcomes, name, id, selected }) => (
+// the sidebar and only the current card. A sidebar click fetches the page for that name and swaps
+// this section in place (htmx 4 inherits an attribute only when told to), pushing the URL so a
+// reload or a shared link opens on the same definition.
+const Definitions: FC<DefinitionsProps> = ({ groups, outcomes, name, selected, notice }) => (
   <Shell page="definitions">
     <section id="definitions" class="records definitions" aria-labelledby="definitions-heading">
       <div class="sessions__heading">
@@ -448,10 +493,10 @@ const Definitions: FC<DefinitionsProps> = ({ groups, outcomes, name, id, selecte
               const isCurrent = group.name === selected?.name;
               // The swap replaces the focused link; htmx puts focus back only on an element with
               // the same id, so a keyboard user does not fall back to the top of the page. The
-              // newest wording's id stays the same across the name's versions.
+              // first wording's id is the name's for good.
               return (
                 <a
-                  id={`definition-${String(group.versions[group.versions.length - 1].id)}`}
+                  id={`definition-${String(group.versions[0].id)}`}
                   href={definitionHref(group.name)}
                   hx-get={definitionHref(group.name)}
                   class={
@@ -467,38 +512,28 @@ const Definitions: FC<DefinitionsProps> = ({ groups, outcomes, name, id, selecte
           <div class="definitions__detail">
             {selected === undefined ? (
               <div class="empty-state definitions__missing">
-                {groups.some((group) => group.name === name) ? (
-                  <p>
-                    No version <code>{id}</code> of <code>{name}</code>.
-                  </p>
-                ) : (
-                  <p>
-                    No test definition named <code>{name}</code>.
-                  </p>
-                )}
+                <p>
+                  No test definition named <code>{name}</code>.
+                </p>
                 <span>Pick one from the list.</span>
               </div>
             ) : null}
             <ol class="definitions__list">
-              {groups.map((group) => {
-                // Every card shows a name's newest wording but the current one, which shows the
-                // wording selected under it.
-                const shown =
-                  selected !== undefined && selected.name === group.name
-                    ? selected
-                    : group.versions[group.versions.length - 1];
-                return (
-                  <li
-                    class={
-                      group.name === selected?.name
-                        ? "definitions__item definitions__item--current"
-                        : "definitions__item"
-                    }
-                  >
-                    <DefinitionCard group={group} shown={shown} outcomes={outcomes} />
-                  </li>
-                );
-              })}
+              {groups.map((group) => (
+                <li
+                  class={
+                    group.name === selected?.name
+                      ? "definitions__item definitions__item--current"
+                      : "definitions__item"
+                  }
+                >
+                  <DefinitionCard
+                    group={group}
+                    outcomes={outcomes}
+                    notice={group.name === selected?.name ? notice : undefined}
+                  />
+                </li>
+              ))}
             </ol>
           </div>
         </div>
@@ -570,6 +605,7 @@ app.use(
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
         <link rel="stylesheet" href="/dashboard.css" />
         <script src={HTMX_URL} integrity={HTMX_INTEGRITY} crossorigin="anonymous"></script>
+        <script src="/dashboard.js" defer></script>
       </head>
       <body>{children}</body>
     </html>
@@ -590,28 +626,93 @@ app.get("/", async (context) => {
 
 app.get("/definitions", async (context) => {
   const name = context.req.query("name");
-  const id = context.req.query("id");
+  const edit = context.req.query("edit");
+  // Only the two refusals the edit route redirects with are a notice; anything else in ?edit is
+  // a stale or hand-made link and shows nothing.
+  const notice = edit === "unchanged" || edit === "empty" ? edit : undefined;
   try {
     const [definitions, outcomes] = await Promise.all([
       listTestDefinitions(context.env.HYPERDRIVE.connectionString),
       listTestResultOutcomes(context.env.HYPERDRIVE.connectionString),
     ]);
     const groups = groupDefinitions(definitions);
-    const selected = selectDefinition(groups, name, id);
-    // A stale link: the page still lists what exists, the status says the name or wording does
-    // not. An empty table selects nothing and is not a stale link.
-    if (groups.length > 0 && selected === undefined) {
+    const selected = selectDefinition(groups, name);
+    // A stale link: the page still lists what exists, the status says the name does not.
+    if (name !== undefined && selected === undefined) {
       context.status(404);
     }
     return context.render(
-      <Definitions groups={groups} outcomes={outcomes} name={name} id={id} selected={selected} />,
+      <Definitions
+        groups={groups}
+        outcomes={outcomes}
+        name={name}
+        selected={selected}
+        notice={notice}
+      />,
     );
   } catch (error) {
     Sentry.captureException(error);
     console.error("dashboard: loading the definitions page:", errorMessage(error));
     context.status(500);
     return context.render(
-      <Definitions groups={null} outcomes={[]} name={name} id={id} selected={undefined} />,
+      <Definitions
+        groups={null}
+        outcomes={[]}
+        name={name}
+        selected={undefined}
+        notice={undefined}
+      />,
+    );
+  }
+});
+
+// The edit form's save: the next wording of a known name. The browser's `required` keeps the
+// fields filled; a request that arrives without one is answered all the same.
+app.post("/definitions", async (context) => {
+  const body = await context.req.parseBody();
+  // A field is text with something in it; a file part is not this form's. A browser submits a
+  // textarea's newlines as CRLF; the wording is kept with LF, as ctrl writes it, so the same text
+  // posted back reads unchanged.
+  const text = (value: (typeof body)[string]): string | undefined =>
+    typeof value === "string" && value !== "" ? value.replaceAll("\r\n", "\n") : undefined;
+  const name = text(body.name);
+  if (name === undefined) {
+    return context.notFound();
+  }
+  const description = text(body.description);
+  const instruction = text(body.instruction);
+  const proof = text(body.proof);
+  if (description === undefined || instruction === undefined || proof === undefined) {
+    return context.redirect(editHref(name, "empty"), 303);
+  }
+  try {
+    const revision = await reviseTestDefinition(context.env.HYPERDRIVE.connectionString, {
+      name,
+      description,
+      instruction,
+      proof,
+    });
+    switch (revision) {
+      case "unknown":
+        return context.notFound();
+      case "unchanged":
+        return context.redirect(editHref(name, "unchanged"), 303);
+      case "revised":
+        return context.redirect(definitionHref(name), 303);
+    }
+    return revision satisfies never;
+  } catch (error) {
+    Sentry.captureException(error);
+    console.error("dashboard: saving a definition:", errorMessage(error));
+    context.status(500);
+    return context.render(
+      <Definitions
+        groups={null}
+        outcomes={[]}
+        name={name}
+        selected={undefined}
+        notice={undefined}
+      />,
     );
   }
 });
