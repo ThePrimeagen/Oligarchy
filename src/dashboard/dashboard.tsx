@@ -669,9 +669,11 @@ app.get("/definitions", async (context) => {
 // fields filled; a request that arrives without one is answered all the same.
 app.post("/definitions", async (context) => {
   const body = await context.req.parseBody();
-  // A field is text with something in it; a file part or a repeated field is not this form's.
+  // A field is text with something in it; a file part is not this form's. A browser submits a
+  // textarea's newlines as CRLF; the wording is kept with LF, as ctrl writes it, so the same text
+  // posted back reads unchanged.
   const text = (value: (typeof body)[string]): string | undefined =>
-    typeof value === "string" && value !== "" ? value : undefined;
+    typeof value === "string" && value !== "" ? value.replaceAll("\r\n", "\n") : undefined;
   const name = text(body.name);
   if (name === undefined) {
     return context.notFound();
@@ -689,7 +691,7 @@ app.post("/definitions", async (context) => {
       instruction,
       proof,
     });
-    switch (revision.outcome) {
+    switch (revision) {
       case "unknown":
         return context.notFound();
       case "unchanged":

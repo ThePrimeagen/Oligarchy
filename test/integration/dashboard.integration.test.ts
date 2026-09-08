@@ -510,23 +510,24 @@ describe.skipIf(dbUrl === "")("dashboard/definitions edit happy path", () => {
         { name: "wide-save", description: "d", instruction: "second", proof: "p" },
       ]);
     });
+    // Typed over two lines: the browser sends CRLF, the wording is stored with LF as ctrl writes it.
     const saved = await postForm(
-      { name: "wide-save", description: "d", instruction: "third", proof: "p" },
+      { name: "wide-save", description: "d", instruction: "third\r\nand more", proof: "p" },
       dbUrl,
     );
     expect(saved.status).toBe(303);
     expect(saved.location).toBe("/definitions?name=wide-save");
-    expect(await wordingsOf(dbUrl, "wide-save")).toEqual(["first", "second", "third"]);
+    expect(await wordingsOf(dbUrl, "wide-save")).toEqual(["first", "second", "third\nand more"]);
 
     const { status, html } = await getPage("/definitions?name=wide-save", dbUrl);
     expect(status).toBe(200);
     const card = currentCard(html);
     const [newest] = wordings(card);
     expect(newest).toMatchObject({ label: "v3", open: true });
-    expect(newest?.body).toContain("<p>third</p>");
+    expect(newest?.body).toContain("<p>third\nand more</p>");
     expect(wordings(card).map((wording) => wording.label)).toEqual(["v3", "v2", "v1"]);
     expect(editForm(card)).toMatchObject({
-      fields: { instruction: "third" },
+      fields: { instruction: "third\nand more" },
       button: "Save as v4",
     });
   });
@@ -552,17 +553,21 @@ describe.skipIf(dbUrl === "")("dashboard/definitions edit happy path", () => {
 describe.skipIf(dbUrl === "")("dashboard/definitions edit unhappy path", () => {
   it("refuses a wording identical to the newest: nothing is written and the form says so", async () => {
     await seed(dbUrl, async (db) => {
-      await db
-        .insert(testDefinitions)
-        .values({ name: "wide-same", description: "d", instruction: "i", proof: "p" });
+      await db.insert(testDefinitions).values({
+        name: "wide-same",
+        description: "d",
+        instruction: "i\nover two lines",
+        proof: "p",
+      });
     });
+    // A browser submits a textarea's newlines as CRLF; the wording ctrl wrote has LF.
     const same = await postForm(
-      { name: "wide-same", description: "d", instruction: "i", proof: "p" },
+      { name: "wide-same", description: "d", instruction: "i\r\nover two lines", proof: "p" },
       dbUrl,
     );
     expect(same.status).toBe(303);
     expect(same.location).toBe("/definitions?name=wide-same&edit=unchanged");
-    expect(await wordingsOf(dbUrl, "wide-same")).toEqual(["i"]);
+    expect(await wordingsOf(dbUrl, "wide-same")).toEqual(["i\nover two lines"]);
 
     const { status, html } = await getPage("/definitions?name=wide-same&edit=unchanged", dbUrl);
     expect(status).toBe(200);

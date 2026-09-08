@@ -706,8 +706,8 @@ main {
   gap: 1.1rem;
 }
 
-/* Wide screens: the definition names down the left, the current definition's results by model in
-   the centre and its text on the right. */
+/* Wide screens: the definition names down the left; the current definition's results by version
+   beside its edit form, then its wordings newest first, each folding open on text, chart and runs. */
 @media (min-width: 64rem) {
   main[data-page="definitions"] {
     width: min(100% - 4rem, 96rem);
