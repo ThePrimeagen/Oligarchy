@@ -45,7 +45,6 @@ describe("ProxyApi", () => {
         "POST /start",
         "GET /image",
         "GET /serial",
-        "GET /dump",
         "GET /follow",
         "GET /stats",
         "POST /stop",
@@ -67,7 +66,6 @@ describe("ProxyApi", () => {
     expect(urls.Sessions.serial({ query: { id: "a b", agent: "x" } })).toBe(
       "/serial?id=a+b&agent=x",
     );
-    expect(urls.Sessions.dump({ query: { id: "abc" } })).toBe("/dump?id=abc");
     expect(urls.Sessions.follow({ query: { id: "abc" } })).toBe("/follow?id=abc");
     expect(urls.Sessions.stats()).toBe("/stats");
     expect(urls.Sessions.stop()).toBe("/stop");
@@ -82,6 +80,9 @@ describe("ProxyApi", () => {
     const table = routes().map(({ method, path }) => `${method} ${path}`);
     expect(table).not.toContain("DELETE /start");
     expect(table).not.toContain("GET /start");
+    // ctrl reads an ended session's console from the database's debug logs; a running one is
+    // its driver's, through /serial.
+    expect(table).not.toContain("GET /dump");
     expect(routes().map((route) => route.identifier)).not.toContain("notFound");
   });
 
@@ -121,7 +122,6 @@ describe("ProxyApi", () => {
       [...sessions, 403, 404, 502].sort((a, b) => a - b),
     );
     expect(byIdentifier("serial").errors).toEqual([...sessions, 403, 404].sort((a, b) => a - b));
-    expect(byIdentifier("dump").errors).toEqual([...sessions, 404, 409].sort((a, b) => a - b));
     expect(byIdentifier("follow").errors).toEqual([...sessions, 404, 409].sort((a, b) => a - b));
     expect(byIdentifier("stats").errors).toEqual(sessions);
     expect(byIdentifier("stop").errors).toEqual([...sessions, 403, 404].sort((a, b) => a - b));

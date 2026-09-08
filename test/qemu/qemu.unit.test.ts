@@ -97,14 +97,6 @@ const settle = Effect.gen(function* () {
 });
 
 describe("Qemu.prepare happy path", () => {
-  it.effect("names the session dir under the temp dir", () =>
-    Effect.gen(function* () {
-      const { qemu } = yield* fixture();
-      expect(qemu.sessionDir(ID)).toBe(DIR);
-      expect(DIR.endsWith(`/oligarchy-${ID}`)).toBe(true);
-    }),
-  );
-
   it.effect("makes the dir, creates the disk, copies the firmware and spawns nothing else", () =>
     Effect.gen(function* () {
       const { events, spawner, fs, qemu } = yield* fixture();

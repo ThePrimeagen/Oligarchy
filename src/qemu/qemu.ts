@@ -78,7 +78,6 @@ export type QemuService = {
     prepared: Prepared,
     input: StartInput,
   ) => Effect.Effect<QemuHandle, Errors.QemuStartError | Errors.DatabaseError, Scope.Scope>;
-  readonly sessionDir: (id: string) => string;
 };
 
 const startError = (error: unknown): Errors.QemuStartError =>
@@ -244,7 +243,7 @@ const make: Effect.Effect<
     } satisfies QemuHandle;
   });
 
-  return { prepare, start, sessionDir } satisfies QemuService;
+  return { prepare, start } satisfies QemuService;
 });
 
 export class Qemu extends Context.Service<Qemu>()("@oligarchy/qemu/Qemu", { make }) {

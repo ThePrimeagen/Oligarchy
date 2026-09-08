@@ -113,15 +113,13 @@ export const spawnFollow = Effect.fn("Children.spawnFollow")(function* (
   return child;
 });
 
-// Attached to this process group, unlike the client: interrupting the fiber kills it.
-export const runCtrl = Effect.fn("Children.runCtrl")(function* (
-  serverUrl: string,
-  args: ReadonlyArray<string>,
-) {
+// Attached to this process group, unlike the client: interrupting the fiber kills it. ctrl reads
+// the database named by the inherited environment; the proxy url is the client's alone.
+export const runCtrl = Effect.fn("Children.runCtrl")(function* (args: ReadonlyArray<string>) {
   const host = yield* State.Host;
   const main = yield* entry("ctrl");
   return yield* collect(
-    ChildProcess.make(host.execPath, [...NODE_FLAGS, main, ...args, "--server-url", serverUrl], {
+    ChildProcess.make(host.execPath, [...NODE_FLAGS, main, ...args], {
       stdin: "ignore",
       stdout: "pipe",
       stderr: "pipe",

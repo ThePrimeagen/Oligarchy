@@ -76,7 +76,6 @@ Test driver. Drive one Omarchy virtual machine through ./client, record the resu
 <ctrl>
   <path>./ctrl</path>
   <agent_id>{{LINEAR_TICKET}}</agent_id>
-  <server_url>`{{SERVER_URL}}`</server_url>
   <guide>
 {{CTRL_MD}}
   </guide>
@@ -93,7 +92,7 @@ Test driver. Drive one Omarchy virtual machine through ./client, record the resu
 $ ./client start --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --iso {{ISO_URL}}
 6f1c...e2a9
 # Before starting any intent, always link the test result to the session.
-$ ./ctrl test start --server-url {{SERVER_URL}} --session-id 6f1c...e2a9 --test-result-id {{RESULT_ID}}
+$ ./ctrl test start --session-id 6f1c...e2a9 --test-result-id {{RESULT_ID}} --model <the Cursor model id you are running as>
 
 # before starting any series of actions, always start an intent
 $ ./client intent start --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --session-id 6f1c...e2a9 --test-result-id {{RESULT_ID}} --message "wait for the boot menu"
@@ -105,7 +104,7 @@ $ ./client intent end --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} -
 # ... continue on until complete ...
 
 # when the proof is on screen, close the result, then the session
-$ ./ctrl test-results --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --id {{RESULT_ID}} --status success
+$ ./ctrl test-results --agent-id {{LINEAR_TICKET}} --id {{RESULT_ID}} --status success
 $ ./client stop --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --session-id 6f1c...e2a9 --status succeeded
 ```
 </example-session>

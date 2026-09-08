@@ -8,9 +8,8 @@ import { Client } from "pg";
 import * as DbSchema from "../../src/db/schema.ts";
 import * as Postgres from "../support/postgres.ts";
 import * as StubCursor from "../support/stub-cursor.ts";
-import * as StubProxy from "../support/stub-proxy.ts";
 
-// The wrapper at the repository root.
+// The root wrapper.
 const CTRL = fileURLToPath(new URL("../../ctrl", import.meta.url));
 const EXIT_WITHIN_MS = 60_000;
 const SERVER = "https://qemu.example.com";
@@ -39,7 +38,8 @@ const runCtrl = (args: ReadonlyArray<string>, env: Record<string, string> = {}):
         NODE_OPTIONS:
           `${process.env.NODE_OPTIONS ?? ""} --disable-warning=ExperimentalWarning`.trim(),
         DATABASE_URL: Postgres.getDbUrl(),
-        OLIGARCHY_TOKEN: TOKEN,
+        // ctrl never talks to the proxy, so no action gets its token.
+        OLIGARCHY_TOKEN: "",
         SERVER_URL: "",
         LINEAR_API_TOKEN: "",
         CURSOR_API_TOKEN: "",
@@ -90,14 +90,7 @@ const seedEndedSession = async (
 const lines = (text: string): ReadonlyArray<string> =>
   text.split("\n").filter((line) => line !== "");
 
-const openProxies: Array<StubProxy.StubProxy> = [];
 const openCursors: Array<StubCursor.StubCursor> = [];
-
-const proxy = async (script?: StubProxy.Script): Promise<StubProxy.StubProxy> => {
-  const started = await StubProxy.startStubProxy(script);
-  openProxies.push(started);
-  return started;
-};
 
 const cursor = async (): Promise<StubCursor.StubCursor> => {
   const started = await StubCursor.startStubCursor();
@@ -106,10 +99,7 @@ const cursor = async (): Promise<StubCursor.StubCursor> => {
 };
 
 afterEach(async () => {
-  await Promise.all([
-    ...openProxies.splice(0).map((stub) => stub.close()),
-    ...openCursors.splice(0).map((stub) => stub.close()),
-  ]);
+  await Promise.all(openCursors.splice(0).map((stub) => stub.close()));
 });
 
 // ---------------------------------------------------------------------------
@@ -223,10 +213,7 @@ describe("./ctrl without a database", () => {
 
     const withServer = await runCtrl(
       ["test", "run", "--ticket", "OLI-42", `--server-url=${SERVER}`],
-      {
-        DATABASE_URL: UNUSED_DB,
-        CURSOR_API_TOKEN: TOKEN,
-      },
+      { DATABASE_URL: UNUSED_DB, CURSOR_API_TOKEN: TOKEN },
     );
     expect(withServer.code).toBe(1);
     expect(withServer.stdout.includes("Agent here")).toBe(false);
@@ -262,13 +249,37 @@ describe("./ctrl without a database", () => {
 
   it("rejects a missing DATABASE_URL before doing anything, on every database action", async () => {
     for (const args of [
-      ["test", "--list", "--server-url", SERVER],
-      ["test", "list", "--server-url", SERVER],
+      ["test", "--list"],
+      ["test", "list"],
       ["test", "run", "--ticket", "OLI-42"],
-      ["session", "list", "--server-url", SERVER],
-      ["session", "--session-id", SUCCEEDED_ID, "--logs", "--server-url", SERVER],
-      ["error-type", "new", "--key", "k", "--description", "d", "--server-url", SERVER],
-      ["error-type", "list", "--server-url", SERVER],
+      // Tickets written before --server-url left ctrl still name it here: it parses, unread.
+      [
+        "test",
+        "start",
+        "--session-id",
+        SUCCEEDED_ID,
+        "--test-result-id",
+        randomUUID(),
+        "--model",
+        "m",
+        "--server-url",
+        SERVER,
+      ],
+      [
+        "test-results",
+        "--agent-id",
+        "a",
+        "--id",
+        randomUUID(),
+        "--status",
+        "success",
+        "--server-url",
+        SERVER,
+      ],
+      ["session", "list"],
+      ["session", "--session-id", SUCCEEDED_ID, "--logs"],
+      ["error-type", "new", "--key", "k", "--description", "d"],
+      ["error-type", "list"],
       [
         "diagnose",
         "--session-id",
@@ -281,10 +292,8 @@ describe("./ctrl without a database", () => {
         "s",
         "--model",
         "m",
-        "--server-url",
-        SERVER,
       ],
-      ["diagnose", "run", "--session-id", SUCCEEDED_ID, "--server-url", SERVER],
+      ["diagnose", "run", "--session-id", SUCCEEDED_ID],
     ]) {
       const result = await runCtrl(args, {
         DATABASE_URL: "",
@@ -298,7 +307,7 @@ describe("./ctrl without a database", () => {
   });
 
   it("spells out a database that refuses the connection: the headline, then the cause (changed: R1)", async () => {
-    const result = await runCtrl(["test", "--list", "--server-url", SERVER], {
+    const result = await runCtrl(["test", "--list"], {
       DATABASE_URL: UNUSED_DB,
     });
     expect(result.code).toBe(1);
@@ -312,7 +321,26 @@ describe("./ctrl without a database", () => {
   it("rejects the usage errors of every action (unhappy)", async () => {
     const env = { DATABASE_URL: UNUSED_DB, LINEAR_API_TOKEN: "l" };
     const cases: ReadonlyArray<readonly [ReadonlyArray<string>, RegExp, Record<string, string>]> = [
-      [["test", "--server-url", SERVER], /Missing required flag: --list/, env],
+      [["test"], /Missing required flag: --list/, env],
+      // The proxy url is test new's alone; nothing else has a proxy to name.
+      [["test", "--list", "--server-url", SERVER], /Unrecognized flag: --server-url/, env],
+      [["session", "list", "--server-url", SERVER], /Unrecognized flag: --server-url/, env],
+      [
+        ["session", "--session-id", randomUUID(), "--logs", "--server-url", SERVER],
+        /Unrecognized flag: --server-url/,
+        env,
+      ],
+      [
+        ["session", "--session-id", randomUUID(), "--dump"],
+        /Unrecognized flag: --dump/,
+        { ...env, OLIGARCHY_TOKEN: "t" },
+      ],
+      [["error-type", "list", "--server-url", SERVER], /Unrecognized flag: --server-url/, env],
+      [
+        ["diagnose", "run", "--session-id", randomUUID(), "--server-url", SERVER],
+        /Unrecognized flag: --server-url/,
+        { ...env, CURSOR_API_TOKEN: "c" },
+      ],
       [
         [
           "test",
@@ -391,56 +419,39 @@ describe("./ctrl without a database", () => {
         { ...env, SERVER_URL: SERVER },
       ],
       [
-        ["test-results", "--id", randomUUID(), "--status", "success", "--server-url", SERVER],
+        ["test-results", "--id", randomUUID(), "--status", "success"],
         /Missing required flag: --agent-id/,
         env,
       ],
       [
-        [
-          "test",
-          "start",
-          "--session_id",
-          randomUUID(),
-          "--test_result_id",
-          randomUUID(),
-          "--server-url",
-          SERVER,
-        ],
+        ["test", "start", "--session_id", randomUUID(), "--test_result_id", randomUUID()],
         /Unrecognized flag: --session_id/,
         env,
       ],
       [
-        ["session", "list", "--count", "0", "--server-url", SERVER],
+        ["session", "list", "--count", "0"],
         /Invalid value for flag --count: "0"[\s\S]*count must be at least 1/,
         env,
       ],
+      [["session", "list", "--count", "ten"], /Invalid value for flag --count: "ten"/, env],
+      [["session", "list", "--session-id", randomUUID()], /Unrecognized flag: --session-id/, env],
       [
-        ["session", "list", "--count", "ten", "--server-url", SERVER],
-        /Invalid value for flag --count: "ten"/,
-        env,
-      ],
-      [
-        ["session", "list", "--session-id", randomUUID(), "--server-url", SERVER],
-        /Unrecognized flag: --session-id/,
-        env,
-      ],
-      [
-        ["session", "--session-id", randomUUID(), "--logs", "--active", "--server-url", SERVER],
+        ["session", "--session-id", randomUUID(), "--logs", "--active"],
         /Unrecognized flag: --active/,
         env,
       ],
       [
-        ["session", "--session-id", randomUUID(), "--logs", "--count", "3", "--server-url", SERVER],
+        ["session", "--session-id", randomUUID(), "--logs", "--count", "3"],
         /Unrecognized flag: --count/,
         env,
       ],
       [
-        ["error-type", "new", "--key", "Guest Boot", "--description", "d", "--server-url", SERVER],
+        ["error-type", "new", "--key", "Guest Boot", "--description", "d"],
         /key must be snake_case: a-z, 0-9 and _, starting with a letter/,
         env,
       ],
       [
-        ["error-type", "new", "--key", "guest_boot_hang", "--server-url", SERVER],
+        ["error-type", "new", "--key", "guest_boot_hang"],
         /Missing required flag: --description/,
         env,
       ],
@@ -457,8 +468,6 @@ describe("./ctrl without a database", () => {
           "s",
           "--model",
           "m",
-          "--server-url",
-          SERVER,
         ],
         /key must be snake_case: a-z, 0-9 and _, starting with a letter/,
         env,
@@ -474,26 +483,12 @@ describe("./ctrl without a database", () => {
           "k",
           "--model",
           "m",
-          "--server-url",
-          SERVER,
         ],
         /Missing required flag: --summary/,
         env,
       ],
       [
-        [
-          "diagnose",
-          "--session-id",
-          randomUUID(),
-          "--type",
-          "k",
-          "--summary",
-          "s",
-          "--model",
-          "m",
-          "--server-url",
-          SERVER,
-        ],
+        ["diagnose", "--session-id", randomUUID(), "--type", "k", "--summary", "s", "--model", "m"],
         /Missing required flag: --verdict/,
         env,
       ],
@@ -508,20 +503,13 @@ describe("./ctrl without a database", () => {
           "s",
           "--model",
           "m",
-          "--server-url",
-          SERVER,
         ],
         /Invalid value for flag --verdict: "succeeded"/,
         env,
       ],
       [
-        ["diagnose", "run", "--server-url", SERVER],
+        ["diagnose", "run"],
         /Missing required flag: --session-id/,
-        { ...env, CURSOR_API_TOKEN: "c" },
-      ],
-      [
-        ["diagnose", "run", "--session-id", randomUUID()],
-        /Missing required flag: --server-url/,
         { ...env, CURSOR_API_TOKEN: "c" },
       ],
     ];
@@ -540,28 +528,20 @@ describe("./ctrl without a database", () => {
 
 Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
   it("test --list prints the stored definition names, one per line", async () => {
-    const result = await runCtrl(["test", "--list", "--server-url", SERVER]);
+    const result = await runCtrl(["test", "--list"]);
     expect(result.stderr).toBe("");
     expect(result.code).toBe(0);
     expect(lines(result.stdout)).toContain(DEFINITION);
     expect(result.stdout.includes("{")).toBe(false);
 
-    const named = await runCtrl(["test", "--list", "--name", DEFINITION], { SERVER_URL: SERVER });
+    const named = await runCtrl(["test", "--list", "--name", DEFINITION]);
     expect(named.stderr).toBe("");
     expect(named.code).toBe(0);
     expect(named.stdout).toBe(`${DEFINITION}\n`);
   });
 
   it("test --list --details --name prints every field of one definition as JSON", async () => {
-    const result = await runCtrl([
-      "test",
-      "--list",
-      "--details",
-      "--name",
-      DEFINITION,
-      "--server-url",
-      SERVER,
-    ]);
+    const result = await runCtrl(["test", "--list", "--details", "--name", DEFINITION]);
     expect(result.stderr).toBe("");
     expect(result.code).toBe(0);
     const rows: Array<{ name: string; description: string; instruction: string; proof: string }> =
@@ -574,14 +554,7 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
   });
 
   it("test --list rejects a definition name that does not exist", async () => {
-    const result = await runCtrl([
-      "test",
-      "--list",
-      "--name",
-      "missing-definition",
-      "--server-url",
-      SERVER,
-    ]);
+    const result = await runCtrl(["test", "--list", "--name", "missing-definition"]);
     expect(result.code).toBe(1);
     expect(firstLine(result.stderr)).toBe("test: no test definition named missing-definition");
   });
@@ -597,8 +570,6 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
       randomUUID(),
       "--model",
       "grok-4.6",
-      "--server-url",
-      SERVER,
     ]);
     expect(start.code).toBe(1);
     expect(firstLine(start.stderr)).toBe(`test start: no session ${sessionId}`);
@@ -614,15 +585,13 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
       "failed",
       "--reason",
       "installer hung",
-      "--server-url",
-      SERVER,
     ]);
     expect(results.code).toBe(1);
     expect(firstLine(results.stderr)).toBe(`test-results: result ${resultId} not found`);
   });
 
   it("session list prints coloured status, age, and id lines, newest first", async () => {
-    const result = await runCtrl(["session", "list", "--server-url", SERVER]);
+    const result = await runCtrl(["session", "list"]);
     expect(result.stderr).toBe("");
     expect(result.code).toBe(0);
     expect(result.stdout.includes("{")).toBe(false);
@@ -654,28 +623,19 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
   });
 
   it("session list --count bounds the listing, from the flag and with --count=1", async () => {
-    const two = await runCtrl(["session", "list", "--count", "2", "--server-url", SERVER]);
+    const two = await runCtrl(["session", "list", "--count", "2"]);
     expect(two.stderr).toBe("");
     expect(two.code).toBe(0);
     expect(lines(two.stdout).length).toBeLessThanOrEqual(2);
 
-    const one = await runCtrl(["session", "list", "--count=1"], { SERVER_URL: SERVER });
+    const one = await runCtrl(["session", "list", "--count=1"]);
     expect(one.stderr).toBe("");
     expect(one.code).toBe(0);
     expect(lines(one.stdout)).toHaveLength(1);
   });
 
   it("session list --active --json returns only active sessions with running rows first", async () => {
-    const result = await runCtrl([
-      "session",
-      "list",
-      "--active",
-      "--json",
-      "--count",
-      "10",
-      "--server-url",
-      SERVER,
-    ]);
+    const result = await runCtrl(["session", "list", "--active", "--json", "--count", "10"]);
     expect(result.stderr).toBe("");
     expect(result.code).toBe(0);
     const rows: Array<{ id: string; status: string; startedAt: string }> = JSON.parse(
@@ -695,29 +655,15 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
     }
   });
 
-  it("session --logs prints the bare JSON array and never needs OLIGARCHY_TOKEN", async () => {
-    const stub = await proxy();
-    const result = await runCtrl(
-      ["session", "--session-id", SUCCEEDED_ID, "--logs", "--server-url", stub.url],
-      {
-        OLIGARCHY_TOKEN: "",
-      },
-    );
+  it("session --logs prints the bare JSON array and needs neither OLIGARCHY_TOKEN nor SERVER_URL", async () => {
+    const result = await runCtrl(["session", "--session-id", SUCCEEDED_ID, "--logs"]);
     expect(result.stderr).toBe("");
     expect(result.code).toBe(0);
     expect(Array.isArray(JSON.parse(result.stdout))).toBe(true);
-    expect(stub.requests).toEqual([]);
   });
 
   it("session --all prints { session, logs, results, test_definition, test_run, actions, images, debug_log, diagnosis } for a seeded session", async () => {
-    const result = await runCtrl([
-      "session",
-      "--session-id",
-      RUNNING_ID,
-      "--all",
-      "--server-url",
-      SERVER,
-    ]);
+    const result = await runCtrl(["session", "--session-id", RUNNING_ID, "--all"]);
     expect(result.stderr).toBe("");
     expect(result.code).toBe(0);
     const printed: Record<string, unknown> = JSON.parse(result.stdout);
@@ -748,14 +694,7 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
   });
 
   it("session --status prints the bare session row", async () => {
-    const result = await runCtrl([
-      "session",
-      "--session-id",
-      SUCCEEDED_ID,
-      "--status",
-      "--server-url",
-      SERVER,
-    ]);
+    const result = await runCtrl(["session", "--session-id", SUCCEEDED_ID, "--status"]);
     expect(result.stderr).toBe("");
     expect(result.code).toBe(0);
     const row: Record<string, unknown> = JSON.parse(result.stdout);
@@ -779,21 +718,19 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
       key,
       "--description",
       "never reached login",
-      "--server-url",
-      SERVER,
     ]);
     expect(created.stderr).toBe("");
     expect(created.code).toBe(0);
     // The Log service's stdout copy of the logs row; no agent, so [global].
     expect(created.stdout).toBe(`[global] error type created; ${key}\n`);
 
-    const listed = await runCtrl(["error-type", "list", "--server-url", SERVER]);
+    const listed = await runCtrl(["error-type", "list"]);
     expect(listed.stderr).toBe("");
     expect(listed.code).toBe(0);
     expect(lines(listed.stdout).some((line) => line.startsWith(`${key} `))).toBe(true);
     expect(lines(listed.stdout).some((line) => line.endsWith("  never reached login"))).toBe(true);
 
-    const asJson = await runCtrl(["error-type", "list", "--json"], { SERVER_URL: SERVER });
+    const asJson = await runCtrl(["error-type", "list", "--json"]);
     expect(asJson.code).toBe(0);
     const rows: Array<{ key: string; description: string; createdAt: string }> = JSON.parse(
       asJson.stdout,
@@ -809,8 +746,6 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
       key,
       "--description",
       "a second meaning",
-      "--server-url",
-      SERVER,
     ]);
     expect(again.code).toBe(1);
     expect(again.stdout).toBe("");
@@ -830,8 +765,6 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
         "the kernel waited on the root device",
         "--model",
         "composer-2.5",
-        "--server-url",
-        SERVER,
       ]);
     const unknown = await diagnose(sessionId, "--verdict", "failed", "--type", "guest_boot_hang");
     expect(unknown.code).toBe(1);
@@ -873,21 +806,12 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
       "the last image shows the lock screen with the clock",
       "--model",
       "composer-2.5",
-      "--server-url",
-      SERVER,
     ]);
     expect(result.stderr).toBe("");
     expect(result.code).toBe(0);
     expect(result.stdout).toBe(`[global] ${sessionId}: diagnosed; passed; composer-2.5\n`);
 
-    const printed = await runCtrl([
-      "session",
-      "--session-id",
-      sessionId,
-      "--diagnosis",
-      "--server-url",
-      SERVER,
-    ]);
+    const printed = await runCtrl(["session", "--session-id", sessionId, "--diagnosis"]);
     expect(printed.code).toBe(0);
     expect(JSON.parse(printed.stdout)).toMatchObject({
       sessionId,
@@ -899,14 +823,7 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
   });
 
   it("session --diagnosis prints null for a session without one", async () => {
-    const result = await runCtrl([
-      "session",
-      "--session-id",
-      SUCCEEDED_ID,
-      "--diagnosis",
-      "--server-url",
-      SERVER,
-    ]);
+    const result = await runCtrl(["session", "--session-id", SUCCEEDED_ID, "--diagnosis"]);
     expect(result.stderr).toBe("");
     expect(result.code).toBe(0);
     expect(result.stdout).toBe("null\n");
@@ -924,8 +841,6 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
           key,
           "--description",
           "the installer never finished",
-          "--server-url",
-          SERVER,
         ])
       ).code,
     ).toBe(0);
@@ -943,8 +858,6 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
         summary,
         "--model",
         "composer-2.5",
-        "--server-url",
-        SERVER,
       ]);
     const first = await diagnose(key, "serial stops after the partition step");
     expect(first.stderr).toBe("");
@@ -956,14 +869,7 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
     expect(second.stdout).toBe("");
     expect(firstLine(second.stderr)).toBe(`diagnose: session ${sessionId} already has a diagnosis`);
 
-    const printed = await runCtrl([
-      "session",
-      "--session-id",
-      sessionId,
-      "--diagnosis",
-      "--server-url",
-      SERVER,
-    ]);
+    const printed = await runCtrl(["session", "--session-id", sessionId, "--diagnosis"]);
     expect(printed.stderr).toBe("");
     expect(printed.code).toBe(0);
     const row: { sessionId: string; errorType: string; summary: string; model: string } =
@@ -985,13 +891,13 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
     ]);
   });
 
-  it("diagnose run kicks off a reviewer through the Cursor API with the session and server in its prompt", async () => {
+  it("diagnose run kicks off a reviewer through the Cursor API with the session, and no proxy, in its prompt", async () => {
     const stub = await cursor();
     const sessionId = await seedEndedSession();
-    const result = await runCtrl(
-      ["diagnose", "run", "--session-id", sessionId, "--server-url", SERVER],
-      { CURSOR_API_TOKEN: TOKEN, CURSOR_BACKEND_URL: stub.url },
-    );
+    const result = await runCtrl(["diagnose", "run", "--session-id", sessionId], {
+      CURSOR_API_TOKEN: TOKEN,
+      CURSOR_BACKEND_URL: stub.url,
+    });
     expect(result.stderr).toBe("");
     expect(result.code).toBe(0);
     const created = StubCursor.createdAgents(stub);
@@ -1003,9 +909,12 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
       `Agent here, go check it out for more information: https://cursor.com/agents/${body.agentId}\n`,
     );
     expect(body.prompt.text).toContain(`<session_id>${sessionId}</session_id>`);
-    expect(body.prompt.text).toContain(`--server-url ${SERVER} --session-id ${sessionId}`);
+    expect(body.prompt.text).toContain(`./ctrl session --session-id ${sessionId} --all`);
     expect(body.prompt.text).toContain("## diagnose");
     expect(body.prompt.text.includes("{{")).toBe(false);
+    // The reviewer reads the database alone; no proxy reaches its prompt.
+    expect(body.prompt.text.includes("--server-url")).toBe(false);
+    expect(body.prompt.text.includes(SERVER)).toBe(false);
     expect(body.model).toEqual({
       id: "grok-4.6",
       params: [
@@ -1018,8 +927,7 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
   it("diagnose run refuses an unknown, a running, and an already diagnosed session before calling Cursor", async () => {
     const stub = await cursor();
     const env = { CURSOR_API_TOKEN: TOKEN, CURSOR_BACKEND_URL: stub.url };
-    const run = (id: string) =>
-      runCtrl(["diagnose", "run", "--session-id", id, "--server-url", SERVER], env);
+    const run = (id: string) => runCtrl(["diagnose", "run", "--session-id", id], env);
     const unknownId = randomUUID();
     const unknown = await run(unknownId);
     expect(unknown.code).toBe(1);
@@ -1043,8 +951,6 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
           "s",
           "--model",
           "composer-2.5",
-          "--server-url",
-          SERVER,
         ])
       ).code,
     ).toBe(0);
@@ -1058,162 +964,17 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
 
   it("session requires a selector and rejects an unknown session", async () => {
     const sessionId = randomUUID();
-    const noSelector = await runCtrl([
-      "session",
-      "--session-id",
-      sessionId,
-      "--server-url",
-      SERVER,
-    ]);
+    const noSelector = await runCtrl(["session", "--session-id", sessionId]);
     expect(noSelector.code).toBe(1);
     expect(firstLine(noSelector.stderr)).toBe(
-      "session: --status, --logs, --test-def, --test-results, --test-run, --actions, --images, --debug-logs, --diagnosis, --all, or --dump is required",
+      "session: --status, --logs, --test-def, --test-results, --test-run, --actions, --images, --debug-logs, --diagnosis, or --all is required",
     );
     expect(noSelector.stderr).toMatch(/CommandError/);
     expect(noSelector.stderr).not.toMatch(/at sessionInspectRun/);
 
-    const unknown = await runCtrl([
-      "session",
-      "--session-id",
-      sessionId,
-      "--logs",
-      "--server-url",
-      SERVER,
-    ]);
+    const unknown = await runCtrl(["session", "--session-id", sessionId, "--logs"]);
     expect(unknown.code).toBe(1);
     expect(firstLine(unknown.stderr)).toBe(`session: no session ${sessionId}`);
-  });
-
-  it("session --dump asks the proxy for the dump with the token and prints the bytes raw", async () => {
-    const stub = await proxy();
-    const result = await runCtrl([
-      "session",
-      "--session-id",
-      SUCCEEDED_ID,
-      "--dump",
-      "--server-url",
-      stub.url,
-    ]);
-    expect(result.stderr).toBe("");
-    expect(result.code).toBe(0);
-    expect(result.stdout).toBe("[    0.000000] Linux version 6.12\nkernel panic - not syncing\n");
-    expect(stub.requests).toEqual([
-      {
-        method: "GET",
-        url: `/dump?id=${SUCCEEDED_ID}`,
-        authorization: `Bearer ${TOKEN}`,
-        body: undefined,
-      },
-    ]);
-  });
-
-  it("session --dump takes the proxy from SERVER_URL, sends the id as the database spells it, and prints an empty console as nothing", async () => {
-    const stub = await proxy(() => ({
-      status: 200,
-      headers: { "Content-Type": "text/plain" },
-      body: "",
-    }));
-    const result = await runCtrl(
-      ["session", "--session-id", SUCCEEDED_ID.toUpperCase(), "--dump"],
-      {
-        SERVER_URL: stub.url,
-      },
-    );
-    expect(result.stderr).toBe("");
-    expect(result.code).toBe(0);
-    expect(result.stdout).toBe("");
-    expect(stub.requests.map((request) => request.url)).toEqual([`/dump?id=${SUCCEEDED_ID}`]);
-  });
-
-  it("session --dump rejects an unknown session before calling the proxy", async () => {
-    const sessionId = randomUUID();
-    const stub = await proxy();
-    const result = await runCtrl([
-      "session",
-      "--session-id",
-      sessionId,
-      "--dump",
-      "--server-url",
-      stub.url,
-    ]);
-    expect(result.code).toBe(1);
-    expect(result.stdout).toBe("");
-    expect(firstLine(result.stderr)).toBe(`session: no session ${sessionId}`);
-    expect(stub.requests).toEqual([]);
-  });
-
-  it("session --dump does not combine with the JSON selectors", async () => {
-    const stub = await proxy();
-    for (const selector of ["--logs", "--diagnosis", "--all"]) {
-      const result = await runCtrl([
-        "session",
-        "--session-id",
-        SUCCEEDED_ID,
-        "--dump",
-        selector,
-        "--server-url",
-        stub.url,
-      ]);
-      expect(result.code).toBe(1);
-      expect(result.stdout).toBe("");
-      expect(firstLine(result.stderr)).toBe(
-        "session: --dump does not combine with --status, --logs, --test-def, --test-results, --test-run, --actions, --images, --debug-logs, --diagnosis, or --all",
-      );
-    }
-    expect(stub.requests).toEqual([]);
-  });
-
-  it("session --dump prints the proxy's refusal as the headline, then the cause, and exits 1", async () => {
-    const message = `session "${SUCCEEDED_ID}" has no console on this proxy`;
-    const stub = await proxy(() => StubProxy.refusal(409, message));
-    const result = await runCtrl([
-      "session",
-      "--session-id",
-      SUCCEEDED_ID,
-      "--dump",
-      "--server-url",
-      stub.url,
-    ]);
-    expect(result.code).toBe(1);
-    expect(result.stdout).toBe("");
-    expect(firstLine(result.stderr)).toBe(message);
-    expect(result.stderr).toMatch(/ProxyRefusal/);
-    expect(result.stderr).not.toMatch(/src\/client\/http\.ts/);
-    expect(stub.requests).toHaveLength(1);
-  });
-
-  it("session --dump spells out a proxy that refuses the connection (changed: R2)", async () => {
-    const closed = await StubProxy.startStubProxy();
-    await closed.close();
-    const result = await runCtrl([
-      "session",
-      "--session-id",
-      SUCCEEDED_ID,
-      "--dump",
-      "--server-url",
-      closed.url,
-    ]);
-    expect(result.code).toBe(1);
-    expect(result.stdout).toBe("");
-    expect(firstLine(result.stderr)).toMatch(
-      /^GET http:\/\/127\.0\.0\.1:\d+\/dump\?id=.* failed: .*ECONNREFUSED/,
-    );
-    expect(result.stderr).not.toMatch(/TypeError: fetch failed/);
-    expect(result.stderr).not.toMatch(/code: 'ECONNREFUSED'/);
-  });
-
-  it("session --dump requires OLIGARCHY_TOKEN before calling the proxy", async () => {
-    const stub = await proxy();
-    const result = await runCtrl(
-      ["session", "--session-id", SUCCEEDED_ID, "--dump", "--server-url", stub.url],
-      {
-        OLIGARCHY_TOKEN: "",
-      },
-    );
-    expect(result.code).toBe(1);
-    expect(result.stdout).toBe("");
-    expect(firstLine(result.stderr)).toBe("OLIGARCHY_TOKEN is not set");
-    expect(stub.requests).toEqual([]);
   });
 
   it("test new without LINEAR_API_TOKEN exits 1 after parsing and writes nothing", async () => {

@@ -444,16 +444,14 @@ describe("listSessions and completeFollow", () => {
       Path.layer,
     );
 
-  it.effect("runs ctrl session list with the server url and filters by prefix", () =>
+  it.effect("runs ctrl session list, with no server url, and filters by prefix", () =>
     Effect.gen(function* () {
       const tty = fakeTty();
       const spawner = FakeChildren.fakeSpawner(() => ({
         code: 0,
         stdout: JSON.stringify([running(FOLLOWED_ID), downloading(PENDING_ID)]),
       }));
-      const items = yield* Picker.listSessions("http://127.0.0.1:1", "ff").pipe(
-        Effect.provide(env(tty, spawner)),
-      );
+      const items = yield* Picker.listSessions("ff").pipe(Effect.provide(env(tty, spawner)));
       expect(items).toEqual([downloading(PENDING_ID)]);
       const [ctrl] = spawner.spawned;
       expect(ctrl?.command.command).toBe("/usr/bin/node");
@@ -462,6 +460,7 @@ describe("listSessions and completeFollow", () => {
         "--disable-warning=ExperimentalWarning",
       ]);
       expect(ctrl?.command.args[2]?.endsWith("/src/ctrl/main.ts")).toBe(true);
+      // ctrl reads the database the REPL's environment names; the proxy url is the client's.
       expect(ctrl?.command.args.slice(3)).toEqual([
         "session",
         "list",
@@ -469,8 +468,6 @@ describe("listSessions and completeFollow", () => {
         "10",
         "--active",
         "--json",
-        "--server-url",
-        "http://127.0.0.1:1",
       ]);
       expect(ctrl?.command.options.detached).toBe(false);
     }),
@@ -486,7 +483,7 @@ describe("listSessions and completeFollow", () => {
           stderr: "DATABASE_URL is not set\n",
         }));
         const failure = yield* Effect.flip(
-          Picker.listSessions("http://127.0.0.1:1", "").pipe(Effect.provide(env(tty, failing))),
+          Picker.listSessions("").pipe(Effect.provide(env(tty, failing))),
         );
         expect(failure._tag).toBe("ChildExit");
         expect(failure.message).toBe("DATABASE_URL is not set");
@@ -495,7 +492,7 @@ describe("listSessions and completeFollow", () => {
           stdout: JSON.stringify([running(FOLLOWED_ID)]),
         }));
         const noMatch = yield* Effect.flip(
-          Picker.listSessions("http://127.0.0.1:1", "zzz").pipe(Effect.provide(env(tty, empty))),
+          Picker.listSessions("zzz").pipe(Effect.provide(env(tty, empty))),
         );
         expect(noMatch).toMatchObject({
           _tag: "CommandError",
@@ -515,16 +512,15 @@ describe("listSessions and completeFollow", () => {
             : { code: 1, stderr: "DATABASE_URL is not set" },
         );
         const terminal = yield* Readline.open(tty.input, tty.output);
-        const session = yield* State.make("http://127.0.0.1:1");
         const fiber = yield* Effect.forkChild(
-          Picker.completeFollow(session, terminal, "").pipe(Effect.provide(env(tty, spawner))),
+          Picker.completeFollow(terminal, "").pipe(Effect.provide(env(tty, spawner))),
           { startImmediately: true },
         );
         yield* untilWritten(tty, "active sessions");
         tty.keypress("\r", { name: "return" });
         expect(yield* Fiber.join(fiber)).toEqual([[FOLLOWED_ID], ""]);
         const before = tty.written().length;
-        const failed = yield* Picker.completeFollow(session, terminal, "7a").pipe(
+        const failed = yield* Picker.completeFollow(terminal, "7a").pipe(
           Effect.provide(env(tty, spawner)),
         );
         expect(failed).toEqual([[], "7a"]);
