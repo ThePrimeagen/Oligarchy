@@ -121,13 +121,6 @@ export const defaultScript: Script = (received) => {
   if (pathname === "/serial") {
     return { status: 200, headers: { "Content-Type": "text/plain" }, body: "boot log\n" };
   }
-  if (pathname === "/dump") {
-    return {
-      status: 200,
-      headers: { "Content-Type": "text/plain" },
-      body: "[    0.000000] Linux version 6.12\nkernel panic - not syncing\n",
-    };
-  }
   if (pathname === "/follow") {
     switch (searchParams.get("id")) {
       case DROPPED_ID:

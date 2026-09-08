@@ -48,12 +48,6 @@ export const serial = HttpApiEndpoint.get("serial", "/serial", {
   error: [Errors.ForbiddenWire, Errors.UnknownSessionWire],
 });
 
-export const dump = HttpApiEndpoint.get("dump", "/dump", {
-  query: Contract.IdQuery,
-  success: text,
-  error: [Errors.UnknownSessionWire, Errors.ConflictWire],
-});
-
 export const follow = HttpApiEndpoint.get("follow", "/follow", {
   query: Contract.IdQuery,
   success: HttpApiSchema.StreamUint8Array({ contentType: "application/x-ndjson" }),
@@ -100,7 +94,6 @@ export class Sessions extends HttpApiGroup.make("Sessions")
   .add(start)
   .add(image)
   .add(serial)
-  .add(dump)
   .add(follow)
   .add(stats)
   .add(stop)

@@ -24,7 +24,6 @@ export const STARTED_ID: Uuid = "8f4e2c1a-6b7d-4e5f-9a0b-1c2d3e4f5a6b";
 export const IMAGE_ID: Uuid = "3c9b2f80-5a1e-4d6c-8b7a-9e0f1a2b3c4d";
 export const PNG: Uint8Array = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13]);
 export const SERIAL: Uint8Array = new TextEncoder().encode("omarchy login: ");
-export const DUMP: Uint8Array = new TextEncoder().encode("[    0.000000] Linux version 6.12\n");
 export const FOLLOW_EVENTS: ReadonlyArray<Domain.FollowEvent> = [
   { type: "session", status: "running" },
   { type: "action", id: 1, name: "send-keys", state: "running" },
@@ -142,7 +141,6 @@ export const fakeSessions = (
         image: (session) =>
           record("image", session.id).pipe(Effect.as({ png: PNG, imageId: IMAGE_ID })),
         serial: (session) => record("serial", session.id).pipe(Effect.as(SERIAL)),
-        dump: (id) => known("dump", id).pipe(Effect.as(DUMP)),
         sendKeys: (session, keys, encoding) => record("sendKeys", session.id, keys, encoding),
         sendMouse: (session, input) => record("sendMouse", session.id, input),
         intentStart: (session, testResultId, message) =>

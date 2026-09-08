@@ -208,20 +208,6 @@ describe("ProxyClient requests", () => {
       expect(recorder.requests[0]?.headers.authorization).toBe(`Bearer ${TOKEN}`);
     }),
   );
-
-  it.effect("dump gets /dump?id without an agent and returns the bytes", () =>
-    Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(
-        () => new Response("panic\n", { status: 200, headers: { "content-type": "text/plain" } }),
-      );
-      const proxy = yield* connect.pipe(Effect.provide(recorder.layer));
-      const bytes = yield* proxy.dump(SESSION);
-      expect(decoder.decode(bytes)).toBe("panic\n");
-      expect(recorder.requests[0]?.method).toBe("GET");
-      expect(recorder.requests[0]?.url).toBe(`${SERVER}/dump?id=${SESSION}`);
-      expect(recorder.requests[0]?.headers.authorization).toBe(`Bearer ${TOKEN}`);
-    }),
-  );
 });
 
 describe("ProxyClient refusals", () => {
@@ -261,7 +247,7 @@ describe("ProxyClient refusals", () => {
           new Response("Bad Gateway", { status: 500, headers: { "content-type": "text/html" } }),
       );
       const proxy = yield* connect.pipe(Effect.provide(recorder.layer));
-      const error = yield* Effect.flip(proxy.dump(SESSION));
+      const error = yield* Effect.flip(proxy.serial(SESSION, AGENT));
       expect(error).toMatchObject({ _tag: "ProxyRefusal", status: 500, message: "Bad Gateway" });
     }),
   );
