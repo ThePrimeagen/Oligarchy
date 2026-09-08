@@ -122,33 +122,29 @@ describe("runClient", () => {
 });
 
 describe("runCtrl", () => {
-  it.effect("spawns the ctrl entry attached to this process group with the server url last", () =>
-    Effect.gen(function* () {
-      const spawner = FakeChildren.fakeSpawner(() => ({ code: 0, stdout: "[]" }));
-      const result = yield* Children.runCtrl(SERVER_URL, ["session", "list", "--json"]).pipe(
-        Effect.provide(provide(spawner)),
-      );
-      expect(result.code).toBe(0);
-      expect(new TextDecoder().decode(result.stdout)).toBe("[]");
-      const [child] = spawner.spawned;
-      expect(child?.command.args[2]).toMatch(/^\/.*\/src\/ctrl\/main\.ts$/);
-      expect(child?.command.args.slice(3)).toEqual([
-        "session",
-        "list",
-        "--json",
-        "--server-url",
-        SERVER_URL,
-      ]);
-      expect(child?.command.options.detached).toBe(false);
-      expect(child?.command.options.extendEnv).toBe(true);
-    }),
+  it.effect(
+    "spawns the ctrl entry attached to this process group with the arguments as given: ctrl reads the database, so no server url",
+    () =>
+      Effect.gen(function* () {
+        const spawner = FakeChildren.fakeSpawner(() => ({ code: 0, stdout: "[]" }));
+        const result = yield* Children.runCtrl(["session", "list", "--json"]).pipe(
+          Effect.provide(provide(spawner)),
+        );
+        expect(result.code).toBe(0);
+        expect(new TextDecoder().decode(result.stdout)).toBe("[]");
+        const [child] = spawner.spawned;
+        expect(child?.command.args[2]).toMatch(/^\/.*\/src\/ctrl\/main\.ts$/);
+        expect(child?.command.args.slice(3)).toEqual(["session", "list", "--json"]);
+        expect(child?.command.options.detached).toBe(false);
+        expect(child?.command.options.extendEnv).toBe(true);
+      }),
   );
 
   it.effect("is killed when the fiber running it is interrupted", () =>
     Effect.gen(function* () {
       const spawner = FakeChildren.fakeSpawner(() => ({ code: 0, stdout: Stream.never }));
       const fiber = yield* Effect.forkChild(
-        Children.runCtrl(SERVER_URL, ["session", "list"]).pipe(Effect.provide(provide(spawner))),
+        Children.runCtrl(["session", "list"]).pipe(Effect.provide(provide(spawner))),
         { startImmediately: true },
       );
       yield* settle;

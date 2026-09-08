@@ -17,7 +17,6 @@ export type ProxyClientService = {
   readonly start: (body: Contract.StartBody) => Effect.Effect<Contract.StartResponse, Failure>;
   readonly image: (id: string, agent: string) => Effect.Effect<Uint8Array, Failure>;
   readonly serial: (id: string, agent: string) => Effect.Effect<Uint8Array, Failure>;
-  readonly dump: (id: string) => Effect.Effect<Uint8Array, Failure>;
   readonly sendKeys: (body: Contract.SendKeysBody) => Effect.Effect<void, Failure>;
   readonly sendMouse: (body: Contract.SendMouseBody) => Effect.Effect<void, Failure>;
   readonly intentStart: (body: Contract.IntentStartBody) => Effect.Effect<void, Failure>;
@@ -135,8 +134,6 @@ export const connect = Effect.fn("ProxyClient.connect")(function* (options: Conn
   const serial = (id: string, agent: string) =>
     run(label("GET", "/serial"), client.Sessions.serial({ query: { id, agent } }));
 
-  const dump = (id: string) => run(label("GET", "/dump"), client.Sessions.dump({ query: { id } }));
-
   const sendKeys = (body: Contract.SendKeysBody) =>
     run(label("POST", "/send-keys"), client.Sessions.sendKeys({ payload: body })).pipe(
       Effect.asVoid,
@@ -180,7 +177,6 @@ export const connect = Effect.fn("ProxyClient.connect")(function* (options: Conn
     start,
     image,
     serial,
-    dump,
     sendKeys,
     sendMouse,
     intentStart,

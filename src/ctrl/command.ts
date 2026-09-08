@@ -1,18 +1,6 @@
-import {
-  Array as Arr,
-  Clock,
-  Console,
-  Effect,
-  Layer,
-  Option,
-  Redacted,
-  Schema,
-  Stdio,
-  Stream,
-} from "effect";
+import { Array as Arr, Clock, Console, Effect, Layer, Option, Redacted, Schema } from "effect";
 import { CliError, Command, Flag } from "effect/unstable/cli";
 import type { HttpClient } from "effect/unstable/http";
-import * as ProxyClient from "../client/proxy-client.ts";
 import * as Config from "../config.ts";
 import * as Actions from "../db/actions.ts";
 import * as DebugLogs from "../db/debug-logs.ts";
@@ -43,25 +31,14 @@ export type Stores =
   | Tests.TestStore
   | Log.Log;
 
-// The one proxy call ctrl makes; the full client is WP-5's.
-export type DumpClient = {
-  readonly dump: (
-    id: string,
-  ) => Effect.Effect<Uint8Array, Errors.ProxyRefusal | Errors.ProxyUnreachable>;
-};
-
-export type ConnectProxy = (options: {
-  readonly serverUrl: string;
-  readonly token: Redacted.Redacted;
-}) => Effect.Effect<DumpClient, never, HttpClient.HttpClient>;
-
+// ctrl is the record keeper: every read and write is a database call. It never talks to a proxy;
+// Linear and Cursor are the only remote services it reaches.
 export type Deps = {
   readonly database: (url: Redacted.Redacted) => Layer.Layer<Stores, Errors.DatabaseError>;
   readonly linear: (
     token: Redacted.Redacted,
   ) => Layer.Layer<Linear.Linear, never, HttpClient.HttpClient>;
   readonly cursor: (apiKey: Redacted.Redacted) => Layer.Layer<Cursor.CursorAgents>;
-  readonly proxy: ConnectProxy;
 };
 
 // Log sits above the stores so its flush finalizer runs before the pool closes.
@@ -82,7 +59,6 @@ export const live: Deps = {
   database: databaseLayers,
   linear: Linear.Linear.layer,
   cursor: Cursor.CursorAgents.layer,
-  proxy: ProxyClient.connect,
 };
 
 // ---------------------------------------------------------------------------
@@ -121,12 +97,20 @@ const Count = Schema.Number.check(
 
 const DEFAULT_COUNT = 10;
 
-// Declared by every action that talks about a proxy; test run does not, its driver reads the url
-// from the ticket. No default: SERVER_URL or the flag, or a usage error.
+// test new alone: the proxy its drivers will talk to, stored on the run and written into every
+// ticket for ./client. No other action has a proxy to name. No default: SERVER_URL or the flag, or
+// a usage error.
 const serverUrlFlag = Flag.string("server-url").pipe(
   Flag.withFallbackConfig(Config.serverUrl),
   Flag.withSchema(HttpUrl),
-  Flag.withDescription("Oligarchy server URL; SERVER_URL when omitted"),
+  Flag.withDescription("Proxy the driving agents talk to; SERVER_URL when omitted"),
+);
+
+// Tickets written before --server-url left ctrl still name it on test start and test-results, and
+// a driver runs its ticket's lines as written: those two accept it and never read it.
+const legacyServerUrlFlag = Flag.string("server-url").pipe(
+  Flag.optional,
+  Flag.withDescription("Ignored; tickets written before it went still name it"),
 );
 
 const sessionIdFlag = Flag.string("session-id").pipe(
@@ -538,7 +522,6 @@ export const makeCtrlCommand = (deps: Deps = live) => {
 
   // diagnose run --session-id <id>
   const diagnoseRun = Effect.fn("ctrl.diagnose.run")(function* (input: {
-    readonly serverUrl: string;
     readonly sessionId: string;
   }) {
     const diagnosis = yield* Diagnosis.DiagnosisStore;
@@ -552,10 +535,8 @@ export const makeCtrlCommand = (deps: Deps = live) => {
           refuse(`diagnose run: session ${input.sessionId} already has a diagnosis`),
         ),
       );
-    const text = yield* Prompts.render("diagnosing-agent.html", {
-      SESSION_ID: input.sessionId,
-      SERVER_URL: input.serverUrl,
-    });
+    // The reviewer reads everything back from the database: the session id is all it needs.
+    const text = yield* Prompts.render("diagnosing-agent.html", { SESSION_ID: input.sessionId });
     const { agentId } = yield* agents.prompt(text);
     yield* Console.log(Render.agentLink(Cursor.agentUrl(agentId)));
   });
@@ -572,19 +553,9 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     yield* printLines(Render.renderSessions(rows, input.json, now));
   });
 
-  // Postgres matched the id however it was cased; the proxy's map and paths hold the canonical
-  // form.
-  const sessionDump = Effect.fn("ctrl.session.dump")(function* (id: string, server: string) {
-    const token = yield* Config.oligarchyToken;
-    const sessions = yield* Sessions.SessionStore;
-    const canonical = yield* orRefuse(sessions.sessionExists(id), `session: no session ${id}`);
-    const proxy = yield* deps.proxy({ serverUrl: server, token });
-    const bytes = yield* proxy.dump(canonical);
-    const stdio = yield* Stdio.Stdio;
-    yield* Stream.run(Stream.make(bytes), stdio.stdout());
-  });
-
-  type Selectors = {
+  // session --session-id <id> --status|--logs|--test-def|--test-results|--test-run|--actions|--images|--debug-logs|--diagnosis|--all
+  const sessionInspect = Effect.fn("ctrl.session.inspect")(function* (input: {
+    readonly sessionId: string;
     readonly status: boolean;
     readonly logs: boolean;
     readonly testDef: boolean;
@@ -595,12 +566,24 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     readonly debugLogs: boolean;
     readonly diagnosis: boolean;
     readonly all: boolean;
-  };
-
-  const SELECTORS =
-    "--status, --logs, --test-def, --test-results, --test-run, --actions, --images, --debug-logs, --diagnosis";
-
-  const sessionJson = Effect.fn("ctrl.session.json")(function* (id: string, input: Selectors) {
+  }) {
+    const selected =
+      input.status ||
+      input.logs ||
+      input.testDef ||
+      input.testResults ||
+      input.testRun ||
+      input.actions ||
+      input.images ||
+      input.debugLogs ||
+      input.diagnosis ||
+      input.all;
+    if (!selected) {
+      return yield* refuse(
+        "session: --status, --logs, --test-def, --test-results, --test-run, --actions, --images, --debug-logs, --diagnosis, or --all is required",
+      );
+    }
+    const id = input.sessionId;
     const sessions = yield* Sessions.SessionStore;
     const logs = yield* Logs.LogStore;
     const tests = yield* Tests.TestStore;
@@ -666,37 +649,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     }
     // One selector prints its bare value; several print an object keyed by selector.
     const single = parts.length === 1 ? parts[0] : undefined;
-    yield* printJson(single === undefined ? Object.fromEntries(parts) : single[1]);
-  });
-
-  // session --session-id <id> --status|--logs|--test-def|--test-results|--test-run|--actions|--images|--debug-logs|--diagnosis|--all|--dump
-  const sessionInspect = Effect.fn("ctrl.session.inspect")(function* (
-    input: Selectors & {
-      readonly serverUrl: string;
-      readonly sessionId: string;
-      readonly dump: boolean;
-    },
-  ) {
-    const inspecting =
-      input.status ||
-      input.logs ||
-      input.testDef ||
-      input.testResults ||
-      input.testRun ||
-      input.actions ||
-      input.images ||
-      input.debugLogs ||
-      input.diagnosis ||
-      input.all;
-    if (!inspecting && !input.dump) {
-      return yield* refuse(`session: ${SELECTORS}, --all, or --dump is required`);
-    }
-    if (inspecting && input.dump) {
-      return yield* refuse(`session: --dump does not combine with ${SELECTORS}, or --all`);
-    }
-    return yield* input.dump
-      ? sessionDump(input.sessionId, input.serverUrl)
-      : sessionJson(input.sessionId, input);
+    return yield* printJson(single === undefined ? Object.fromEntries(parts) : single[1]);
   });
 
   const testNewCommand = Command.make(
@@ -719,7 +672,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     Command.provide(withDbAndLinear),
   );
 
-  const testListCommand = Command.make("list", { serverUrl: serverUrlFlag }, testList).pipe(
+  const testListCommand = Command.make("list", {}, testList).pipe(
     Command.withDescription("Print the Oligarchy backlog from Linear as JSON"),
     Command.provide(withDbAndLinear),
   );
@@ -744,7 +697,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
   const testStartCommand = Command.make(
     "start",
     {
-      serverUrl: serverUrlFlag,
+      serverUrl: legacyServerUrlFlag,
       sessionId: sessionIdFlag,
       testResultId: Flag.string("test-result-id").pipe(
         Flag.withSchema(Schema.NonEmptyString),
@@ -761,7 +714,6 @@ export const makeCtrlCommand = (deps: Deps = live) => {
   const testCommand = Command.make(
     "test",
     {
-      serverUrl: serverUrlFlag,
       list,
       details: toggle("details", "Print every field as JSON"),
       name: nameFlag("Print this test definition only"),
@@ -778,7 +730,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
   const testResultsCommand = Command.make(
     "test-results",
     {
-      serverUrl: serverUrlFlag,
+      serverUrl: legacyServerUrlFlag,
       agentId: Flag.string("agent-id").pipe(
         Flag.withSchema(Schema.NonEmptyString),
         Flag.withDescription("Calling agent's id"),
@@ -802,7 +754,6 @@ export const makeCtrlCommand = (deps: Deps = live) => {
   const sessionListCommand = Command.make(
     "list",
     {
-      serverUrl: serverUrlFlag,
       count: Flag.integer("count").pipe(
         Flag.withSchema(Count),
         Flag.withDefault(DEFAULT_COUNT),
@@ -817,7 +768,6 @@ export const makeCtrlCommand = (deps: Deps = live) => {
   const sessionCommand = Command.make(
     "session",
     {
-      serverUrl: serverUrlFlag,
       sessionId: sessionIdFlag,
       status: toggle("status", "Print the session row: how it ended, why, and what it booted"),
       logs: toggle("logs", "Print session logs"),
@@ -835,15 +785,11 @@ export const makeCtrlCommand = (deps: Deps = live) => {
         "all",
         "Print the session, logs, test result, definition and run, actions, images, debug log, and diagnosis",
       ),
-      dump: toggle(
-        "dump",
-        "Print the session's serial console from the proxy: the running machine's, or what a dead one left on disk",
-      ),
     },
     sessionInspect,
   ).pipe(
     Command.withDescription(
-      "session --session-id <id> --status|--logs|--test-def|--test-results|--test-run|--actions|--images|--debug-logs|--diagnosis|--all|--dump; or list",
+      "session --session-id <id> --status|--logs|--test-def|--test-results|--test-run|--actions|--images|--debug-logs|--diagnosis|--all; or list",
     ),
     Command.provide(withDb),
     Command.withSubcommands([sessionListCommand]),
@@ -852,7 +798,6 @@ export const makeCtrlCommand = (deps: Deps = live) => {
   const errorTypeNewCommand = Command.make(
     "new",
     {
-      serverUrl: serverUrlFlag,
       key: errorTypeKeyFlag("key", "snake_case key the diagnoses of this type carry"),
       description: Flag.string("description").pipe(
         Flag.withSchema(Schema.NonEmptyString),
@@ -867,10 +812,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
 
   const errorTypeListCommand = Command.make(
     "list",
-    {
-      serverUrl: serverUrlFlag,
-      json: toggle("json", "Print the types as a JSON array"),
-    },
+    { json: toggle("json", "Print the types as a JSON array") },
     errorTypeList,
   ).pipe(
     Command.withDescription("Print every error type with its description, ordered by key"),
@@ -882,11 +824,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     Command.withSubcommands([errorTypeNewCommand, errorTypeListCommand]),
   );
 
-  const diagnoseRunCommand = Command.make(
-    "run",
-    { serverUrl: serverUrlFlag, sessionId: sessionIdFlag },
-    diagnoseRun,
-  ).pipe(
+  const diagnoseRunCommand = Command.make("run", { sessionId: sessionIdFlag }, diagnoseRun).pipe(
     Command.withDescription("Kick off a Cursor cloud agent that reviews one ended session"),
     Command.provide(withDbAndCursor),
   );
@@ -894,7 +832,6 @@ export const makeCtrlCommand = (deps: Deps = live) => {
   const diagnoseCommand = Command.make(
     "diagnose",
     {
-      serverUrl: serverUrlFlag,
       sessionId: sessionIdFlag,
       verdict: Flag.choice("verdict", Domain.DiagnosisVerdict.literals).pipe(
         Flag.withDescription("Whether the proof landed, as the evidence shows it"),
@@ -920,7 +857,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
 
   return Command.make("ctrl").pipe(
     Command.withDescription(
-      "Record and inspect Oligarchy test runs. Every action reads DATABASE_URL; every action but test run takes --server-url (or SERVER_URL).",
+      "Record and inspect Oligarchy test runs. Every action reads DATABASE_URL; test new alone takes --server-url (or SERVER_URL), the proxy its drivers talk to; test start and test-results accept it unread.",
     ),
     Command.withSubcommands([
       testCommand,

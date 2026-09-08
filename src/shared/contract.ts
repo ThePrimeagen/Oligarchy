@@ -21,9 +21,6 @@ export class Ok extends Schema.Class<Ok>("@oligarchy/shared/contract/Ok")({
 // Query fields for /image and /serial; a plain object so the client passes it as the query.
 export const SessionQuery = { id: Schema.String, agent: Schema.NonEmptyString };
 
-// Query fields for /follow and /dump: a follower watches and a dump reads, so neither names an agent.
-export const IdQuery = { id: Schema.String };
-
 export class SendKeysBody extends Schema.Class<SendKeysBody>(
   "@oligarchy/shared/contract/SendKeysBody",
 )({
