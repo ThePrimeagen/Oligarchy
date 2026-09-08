@@ -44,7 +44,8 @@ A stored screenshot has one address, `https://oligarchy.trm.sh/images/<uuid>`
 from the `images` table: a non-uuid or an unknown id is its 404, a query failure its 500. The
 proxy used to serve the same bytes at its own `/images/:id` as v1 had; that copy is gone, so
 neither the server nor the reverse proxy has an image route, and the path is the catch-all's 404
-on both. One address, one reader.
+on both. One HTTP address; the only other reader of the bytes is `./session image`, straight
+from the database.
 
 ### The reverse proxy knows where sessions live and nothing else
 
@@ -70,13 +71,17 @@ so it is a separate loopback port, `--diagnostics-port`, never the API's; put no
 it. Its two forms do what `POST /servers` and `DELETE /servers` do, through the same `Router`, and
 send the browser back to the page; a refusal (a url the rule rejects, a server that fails its
 probe, a url that was never registered) renders the page again with `error: <reason>` on top.
+Because a page on another origin could make that same browser post here — and a registration
+hands the probed url the shared bearer — a browser's `Origin` must be the page's own or the POST
+is refused with 403; the page is also sent `no-store` and may not be framed.
 
 Forwarding is deliberately dumb. The request goes upstream with the same method, the same path and
 query, the body text exactly as the client sent it, and the shared bearer; the answer comes back
 with its status, its `content-type` and `x-image-url` headers, and its body streamed without being
-read. The reverse proxy never decodes a server's refusal or re-encodes a body: a server's 403, 404,
-409 and 502 and its `/follow` stream reach the client as the server wrote them, and the reverse
-proxy logs nothing for them, because the server already did.
+read. The reverse proxy never decodes a server's refusal and never rebuilds the body it decoded
+(the client's text goes up as text): a server's 403, 404, 409 and 502 and its `/follow` stream
+reach the client as the server wrote them, and the reverse proxy logs nothing for them, because
+the server already did.
 
 ### What the reverse proxy refuses on its own
 
@@ -266,7 +271,12 @@ errors; the switch ends in `satisfies never`, so a tag without an arm does not c
   url rule, 502 for a failed probe, 404 for a url never registered) and writes the same
   `<METHOD> <path> failed: <reason>` line the API boundary writes; a database failure or a defect
   is a 500 page whose fleet section is omitted rather than shown empty. Every url on the page is
-  HTML-escaped; the page carries no style and no script.
+  HTML-escaped; the page carries no style and no script. The review found the one thing a
+  tokenless mutating page must still refuse: a cross-site form post from the operator's own
+  browser, which would have made the reverse proxy probe an attacker's url with the shared bearer.
+  Both POSTs therefore check the browser's `Origin` against the `Host` it connected to (a client
+  sending no `Origin` is not a browser and already has the machine), and every answer carries
+  `cache-control: no-store` and `x-frame-options: DENY` so a framed copy cannot be click-jacked.
 - `handlers.ts` binds both groups. The session-driving routes are `uninterruptible`, for the
   proxy's own reason: a client that disconnects mid-`/start` must not tear the forward in half,
   or the routing table never learns of the machine the server booted. `dump` and `follow` stay
@@ -381,7 +391,8 @@ used":
   `routed; <url>` line for a session because the reverse proxy writes to `logs`.
 - An in-memory route cache in front of the rows.
 - Any token, style or script on the diagnostics page. It is loopback-only text for the operator
-  at the keyboard; a login would need a second secret and a browser flow, neither asked for.
+  at the keyboard, defended against the one cross-site trick a browser allows by the `Origin`
+  check; a login would need a second secret and a browser flow, neither asked for.
 
 ## Running it
 

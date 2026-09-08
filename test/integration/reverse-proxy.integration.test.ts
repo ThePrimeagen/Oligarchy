@@ -192,11 +192,13 @@ describe("reverse proxy startup refusals", () => {
     }),
   );
 
-  it.live.skipIf(dbUrl === "")("an occupied port exits 1 with EADDRINUSE", () =>
+  // The other listener gets a free port, so only the occupied one can fail the bind.
+  const occupied = (flag: "--port" | "--diagnostics-port") =>
     Effect.promise(async () => {
       const { port, release } = await occupy();
+      const other = flag === "--port" ? "--diagnostics-port" : "--port";
       try {
-        const process = spawnReverseProxy(["--port", String(port)]);
+        const process = spawnReverseProxy([flag, String(port), other, String(await freePort())]);
         const { code } = await process.exited;
         expect(code).toBe(1);
         const fatal = lines(process.stdout()).find((line) =>
@@ -205,10 +207,18 @@ describe("reverse proxy startup refusals", () => {
         expect(fatal, process.stdout()).toBeDefined();
         expect(fatal).toContain("EADDRINUSE");
         expect(fatal).toContain(`127.0.0.1:${String(port)}`);
+        expect(process.stdout()).not.toContain("listening");
       } finally {
         await release();
       }
-    }),
+    });
+
+  it.live.skipIf(dbUrl === "")("an occupied port exits 1 with EADDRINUSE", () =>
+    occupied("--port"),
+  );
+
+  it.live.skipIf(dbUrl === "")("an occupied diagnostics port exits 1 with EADDRINUSE too", () =>
+    occupied("--diagnostics-port"),
   );
 });
 

@@ -144,6 +144,21 @@ describe("the page", () => {
       }),
   );
 
+  it.effect("the page is never cached or framed", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const response = yield* http.get("/");
+        expect(response.headers["cache-control"]).toBe("no-store");
+        expect(response.headers["x-frame-options"]).toBe("DENY");
+        const refusal = yield* http.post("/servers", { body: form("nope") });
+        expect(refusal.headers["cache-control"]).toBe("no-store");
+        expect(refusal.headers["x-frame-options"]).toBe("DENY");
+      }).pipe(Effect.provide(serve(fixed)));
+    }),
+  );
+
   it.effect("anything but the three routes is 404 not found and never logged", () =>
     Effect.gen(function* () {
       const fixed = fixture();
@@ -259,6 +274,65 @@ describe("adding a server", () => {
         });
         expect(fixed.log.lines[0]?.cause).toBeInstanceOf(Error);
       }),
+  );
+});
+
+describe("a browser elsewhere", () => {
+  // A page on another origin can make the operator's browser post here; the probe would then hand
+  // that url the shared bearer. The Origin a browser sends must be this page's own.
+  it.effect("a POST carrying a foreign Origin is 403 and touches nothing", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      fixed.store.servers.push(SERVER_B);
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const add = yield* http.post("/servers", {
+          body: form(SERVER_A),
+          headers: { origin: "https://evil.example" },
+        });
+        expect(add.status).toBe(403);
+        expect(yield* add.text).toContain(
+          "<p>error: origin https://evil.example is not this page</p>",
+        );
+        const remove = yield* http.post("/servers/delete", {
+          body: form(SERVER_B),
+          headers: { origin: "null" },
+        });
+        expect(remove.status).toBe(403);
+        expect(yield* remove.text).toContain("<p>error: origin null is not this page</p>");
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.store.servers).toEqual([SERVER_B]);
+      // Rendering the two refusal pages probed B; nothing was probed for the attacker's url.
+      expect(fixed.upstream.requests.map((request) => request.url)).toEqual([
+        `${SERVER_B}/stats`,
+        `${SERVER_B}/stats`,
+      ]);
+      expect(fixed.log.lines.map((line) => [line.text, line.skipSentry])).toEqual([
+        ["POST /servers failed: origin https://evil.example is not this page", true],
+        ["POST /servers/delete failed: origin null is not this page", true],
+      ]);
+    }),
+  );
+
+  it.effect("a POST whose Origin is this page's own host is accepted", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        // A browser's Origin is the scheme and the Host it connected to; the test client connects
+        // to 127.0.0.1 on the test server's port.
+        const address = (yield* HttpServer.HttpServer).address;
+        const port = address._tag === "TcpAddress" ? address.port : 0;
+        const response = yield* http
+          .post("/servers", {
+            body: form(SERVER_A),
+            headers: { origin: `http://127.0.0.1:${String(port)}` },
+          })
+          .pipe(manualRedirects);
+        expect(response.status).toBe(303);
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.store.servers).toEqual([SERVER_A]);
+    }),
   );
 });
 

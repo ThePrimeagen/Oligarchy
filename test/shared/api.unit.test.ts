@@ -63,8 +63,6 @@ describe("ProxyApi", () => {
         "POST /intent/end",
       ].sort(),
     );
-    // The stored image's one address is the dashboard's; no proxy serves it.
-    expect(table).not.toContain("GET /images/:id");
   });
 
   it("builds every url through the client url builder", () => {
@@ -176,7 +174,6 @@ describe("ReverseProxyApi", () => {
       ].sort(),
     );
     expect(table).not.toContain("GET /stats");
-    expect(table).not.toContain("GET /images/:id");
   });
 
   it("keeps the routed endpoints' identifiers and inputs so the ProxyApi client reaches them", () => {

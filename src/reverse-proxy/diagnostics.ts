@@ -1,5 +1,5 @@
-import { Cause, Effect, Result, Schema } from "effect";
-import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import { Cause, Effect, Option, Result, Schema } from "effect";
+import { Headers, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import * as ExternalFailure from "../external-failure.ts";
 import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
@@ -56,8 +56,14 @@ ${servers === undefined ? "" : `${fleet(servers)}\n`}<h2>add a server</h2>
 </html>
 `;
 
+// Never cached (the fleet changes under the back button) and never framed (a framed page's own
+// delete button could be clicked from another site).
 const html = (status: number, body: string): HttpServerResponse.HttpServerResponse =>
-  HttpServerResponse.text(body, { status, contentType: "text/html; charset=utf-8" });
+  HttpServerResponse.text(body, {
+    status,
+    contentType: "text/html; charset=utf-8",
+    headers: { "cache-control": "no-store", "x-frame-options": "DENY" },
+  });
 
 // After a successful add or delete the browser fetches the page afresh.
 const back = HttpServerResponse.redirect("/", { status: 303 });
@@ -78,8 +84,9 @@ export const handler: Effect.Effect<
   const path = new URL(request.url, "http://diagnostics").pathname;
   const line = (text: string) => `${request.method} ${request.url} failed: ${text}`;
 
-  // As the API boundary: one line per refused request, Sentry only from 500 up. The page comes
-  // back whole, the reason on top, so the operator can act on it where they are.
+  // As the API boundary: a refused request writes its line, Sentry only from 500 up. The page
+  // comes back whole, the reason on top, so the operator can act on it where they are; should the
+  // fleet then fail to read, that 500 writes its own line below.
   const refused = (
     status: number,
     message: string,
@@ -91,6 +98,15 @@ export const handler: Effect.Effect<
       return html(status, page(servers.servers, message));
     });
 
+  // A page on any other origin can make the operator's browser post here, and a registration
+  // hands the probed url the shared bearer. A browser names its origin on every POST; it must be
+  // this page's own, the scheme and the Host it connected to. A client that sends no Origin is
+  // not a browser and already has the machine.
+  const foreign = Option.filter(
+    Headers.get(request.headers, "origin"),
+    (origin) => origin !== `http://${request.headers.host}`,
+  );
+
   const form = decodeForm.pipe(Effect.result);
 
   const respond = Effect.gen(function* () {
@@ -100,6 +116,9 @@ export const handler: Effect.Effect<
         return html(200, page(servers.servers));
       }
       case "POST /servers": {
+        if (Option.isSome(foreign)) {
+          return yield* refused(403, `origin ${foreign.value} is not this page`);
+        }
         const submitted = yield* form;
         if (Result.isFailure(submitted)) {
           return yield* refused(400, URL_RULE);
@@ -110,6 +129,9 @@ export const handler: Effect.Effect<
         );
       }
       case "POST /servers/delete": {
+        if (Option.isSome(foreign)) {
+          return yield* refused(403, `origin ${foreign.value} is not this page`);
+        }
         const submitted = yield* form;
         if (Result.isFailure(submitted)) {
           return yield* refused(400, URL_RULE);

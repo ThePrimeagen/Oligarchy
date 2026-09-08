@@ -941,10 +941,15 @@ the fleet and the routing table, both rows in the control-plane database.
   form), 502 the probe's `ServerFailed` message, 404 `<url> is not registered`; a database
   failure or a defect is 500 `error: internal error` with the fleet omitted, not shown as empty.
   Every refusal writes the boundary's line, `<METHOD> <path> failed: <reason>`, Sentry from 500 up;
-  a path or method that is not one of the three is `not found`, 404, unlogged. The page is a plain
-  `HttpServer.serve(handler)` over a `switch` on method and path rather than a second
-  `HttpRouter`, because `HttpRouter.serve` memoises one router per graph and a second would
-  serve the API's routes too. Every url on the page is HTML-escaped: it is the operator's text.
+  a path or method that is not one of the three is `not found`, 404, unlogged. Because a page on
+  any other origin can make the operator's browser post here, and a registration hands the probed
+  url the shared bearer, both POSTs refuse a browser whose `Origin` is not `http://<the Host it
+  connected to>` with 403 `origin <origin> is not this page` before reading the form; a request
+  without an `Origin` is not a browser's and is taken. Every page answer carries `cache-control:
+  no-store` and `x-frame-options: DENY`. The page is a plain `HttpServer.serve(handler)` over a
+  `switch` on method and path rather than a second `HttpRouter`, because `HttpRouter.serve`
+  memoises one router per graph and a second would serve the API's routes too. Every url on the
+  page is HTML-escaped: it is the operator's text.
 - Deliberately absent until a need shows it: a health loop (a dead server costs one `PROBE_TIMEOUT`
   per start and per `GET /servers` until `DELETE /servers` forgets it), a capacity limit or a
   reservation (two starts probing at once see the same `qemus` and may pick the same server; a
@@ -962,9 +967,9 @@ errors they declare; `src/db/servers.ts` is `ServerStore` (`addServer`, `removeS
 `src/reverse-proxy/router.ts` is the `Router` service (`register`, `unregister`, `servers`,
 `start`, `forward`) over `ServerStore`, `Log`, `HttpClient` and `ProxyConfig`; `handlers.ts`
 binds the two groups and the catch-all; `diagnostics.ts` is the page's `handler`; `command.ts`
-is `makeReverseProxyCommand({ serve,
-serverFailed })` with `serve(port)`; `main.ts` composes the graph as the proxy's does, with the
-same `TracerDisabledWhen`, without `Qemu`, `Iso`, `Stats`, `Sessions` or a `Shutdown`.
+is `makeReverseProxyCommand({ serve, serverFailed })` with `serve(port, diagnosticsPort)`;
+`main.ts` composes the graph as the proxy's does, with the same `TracerDisabledWhen` and two
+`node:http` servers, without `Qemu`, `Iso`, `Stats`, `Sessions` or a `Shutdown`.
 
 `forward` in `src/reverse-proxy/router.ts`: the route, the request as it came, the answer as it
 came.
