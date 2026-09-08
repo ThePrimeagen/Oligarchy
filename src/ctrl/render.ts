@@ -62,6 +62,21 @@ export const renderTestDefinitions = (
   details: boolean,
 ): ReadonlyArray<string> => (details ? [json(rows)] : rows.map((row) => row.name));
 
+// Rows as the store lists a history, by name then oldest first: a row's version is its place
+// among its name's rows, so a gap in the ids is not a gap in the versions.
+export const renderTestDefinitionHistory = (
+  rows: ReadonlyArray<TestDefinitionRow>,
+  details: boolean,
+): ReadonlyArray<string> => {
+  const versioned = rows.map((row, index) => ({
+    ...row,
+    version: index - rows.findIndex((other) => other.name === row.name) + 1,
+  }));
+  return details
+    ? [json(versioned)]
+    : versioned.map((row) => `${row.name} v${String(row.version)}`);
+};
+
 export const renderErrorTypes = (
   rows: ReadonlyArray<ErrorTypeRow>,
   asJson: boolean,

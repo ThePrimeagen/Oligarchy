@@ -54,6 +54,20 @@ const terminal: TestDefinitionRow = {
   createdAt: new Date("2026-09-01T00:00:00Z"),
 };
 
+// A second wording of install: same name, higher id, so it is the one a run pins from now on.
+const installRevised: TestDefinitionRow = {
+  ...install,
+  id: 3,
+  instruction: "Complete the installer, then log in",
+  createdAt: new Date("2026-09-02T00:00:00Z"),
+};
+
+const jsonRow = (row: TestDefinitionRow, version: number) => ({
+  ...row,
+  createdAt: row.createdAt.toISOString(),
+  version,
+});
+
 const session = (id: string, status: SessionRow["status"], startedAt: Date): SessionRow => ({
   id,
   config: { iso: "omarchy.iso" },
@@ -298,6 +312,215 @@ describe("test --list", () => {
       expect(h.touched).toEqual([]);
     }),
   );
+
+  it.effect(
+    "prints each name once, and --details its newest wording, when one has several (happy)",
+    () =>
+      Effect.gen(function* () {
+        const h = harness();
+        h.stores.tests.definitions.push(installRevised, terminal, install);
+        const names = yield* h.run(["test", "--list", "--server-url", SERVER]);
+        expect(Exit.isSuccess(names)).toBe(true);
+        expect(yield* stdout).toEqual(["Install Omarchy", "Open a terminal"]);
+        const details = yield* h.run([
+          "test",
+          "--list",
+          "--details",
+          "--name",
+          "Install Omarchy",
+          "--server-url",
+          SERVER,
+        ]);
+        expect(Exit.isSuccess(details)).toBe(true);
+        expect(yield* lastJson).toEqual([
+          { ...installRevised, createdAt: installRevised.createdAt.toISOString() },
+        ]);
+      }),
+  );
+
+  it.effect(
+    "--history prints every wording of every definition, oldest first, as name v<n> (happy)",
+    () =>
+      Effect.gen(function* () {
+        const h = harness();
+        h.stores.tests.definitions.push(installRevised, terminal, install);
+        const exit = yield* h.run(["test", "--list", "--history", "--server-url", SERVER]);
+        expect(Exit.isSuccess(exit)).toBe(true);
+        expect(yield* stdout).toEqual([
+          "Install Omarchy v1",
+          "Install Omarchy v2",
+          "Open a terminal v1",
+        ]);
+        expect(h.touched).toEqual(["database"]);
+      }),
+  );
+
+  it.effect(
+    "--history --details --name prints one definition's wordings with their version as JSON (happy)",
+    () =>
+      Effect.gen(function* () {
+        const h = harness();
+        h.stores.tests.definitions.push(installRevised, terminal, install);
+        const exit = yield* h.run([
+          "test",
+          "--list",
+          "--history",
+          "--details",
+          "--name",
+          "Install Omarchy",
+          "--server-url",
+          SERVER,
+        ]);
+        expect(Exit.isSuccess(exit)).toBe(true);
+        expect(yield* lastJson).toEqual([jsonRow(install, 1), jsonRow(installRevised, 2)]);
+      }),
+  );
+
+  it.effect(
+    "--history prints nothing for no definitions, and rejects an unknown name (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const h = harness();
+        const empty = yield* h.run(["test", "--list", "--history", "--server-url", SERVER]);
+        expect(Exit.isSuccess(empty)).toBe(true);
+        expect(yield* stdout).toEqual([]);
+        h.stores.tests.definitions.push(install);
+        const exit = yield* h.run([
+          "test",
+          "--list",
+          "--history",
+          "--name",
+          "missing-definition",
+          "--server-url",
+          SERVER,
+        ]);
+        expect(failure(exit)).toMatchObject({
+          _tag: "CommandError",
+          message: "test: no test definition named missing-definition",
+        });
+        expect(yield* stdout).toEqual([]);
+      }),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// test define
+// ---------------------------------------------------------------------------
+
+const DEFINE = ["test", "define", "--server-url", SERVER];
+
+describe("test define", () => {
+  it.effect("defines a new test from all three fields and prints its id and version (happy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.tests.definitions.push(install);
+      const exit = yield* h.run([
+        ...DEFINE,
+        "--name",
+        "Change lighting",
+        "--description",
+        "Verify the theme switches",
+        "--instruction",
+        "Toggle dark mode",
+        "--proof",
+        "The wallpaper is dark",
+      ]);
+      expect(Exit.isSuccess(exit)).toBe(true);
+      const [, defined] = h.stores.tests.definitions;
+      expect(defined).toMatchObject({
+        name: "Change lighting",
+        description: "Verify the theme switches",
+        instruction: "Toggle dark mode",
+        proof: "The wallpaper is dark",
+      });
+      expect(defined?.id).toBeGreaterThan(install.id);
+      expect(yield* lastJson).toEqual({ id: defined?.id, name: "Change lighting", version: 1 });
+      expect(h.log.lines.map((line) => line.text)).toEqual([
+        `test definition defined; Change lighting v1; id ${String(defined?.id)}`,
+      ]);
+      expect(h.touched).toEqual(["database"]);
+    }),
+  );
+
+  it.effect("revises a known test from one flag, carrying the other fields forward (happy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.tests.definitions.push(install, terminal);
+      const exit = yield* h.run([
+        ...DEFINE,
+        "--name",
+        "Install Omarchy",
+        "--proof",
+        "The desktop shows the dock",
+      ]);
+      expect(Exit.isSuccess(exit)).toBe(true);
+      expect(h.stores.tests.definitions).toHaveLength(3);
+      expect(h.stores.tests.definitions[0]).toEqual(install);
+      const revised = h.stores.tests.definitions[2];
+      expect(revised).toMatchObject({
+        name: "Install Omarchy",
+        description: install.description,
+        instruction: install.instruction,
+        proof: "The desktop shows the dock",
+      });
+      expect(revised?.id).toBeGreaterThan(terminal.id);
+      expect(yield* lastJson).toEqual({ id: revised?.id, name: "Install Omarchy", version: 2 });
+      expect(h.log.lines.map((line) => line.text)).toEqual([
+        `test definition defined; Install Omarchy v2; id ${String(revised?.id)}`,
+      ]);
+    }),
+  );
+
+  it.effect(
+    "refuses a new name that is missing a field, before anything is written (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const h = harness();
+        const exit = yield* h.run([...DEFINE, "--name", "Change lighting", "--proof", "p"]);
+        expect(failure(exit)).toMatchObject({
+          _tag: "CommandError",
+          message: "test define: a new definition needs --description, --instruction and --proof",
+        });
+        expect(h.stores.tests.definitions).toEqual([]);
+        expect(h.log.lines).toEqual([]);
+        expect(yield* stdout).toEqual([]);
+      }),
+  );
+
+  it.effect("refuses a revision that changes nothing (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.tests.definitions.push(install);
+      const same = yield* h.run([...DEFINE, "--name", "Install Omarchy", "--proof", install.proof]);
+      expect(failure(same)).toMatchObject({
+        _tag: "CommandError",
+        message: "test define: Install Omarchy is unchanged",
+      });
+      const nothing = yield* h.run([...DEFINE, "--name", "Install Omarchy"]);
+      expect(failure(nothing)).toMatchObject({
+        message: "test define: Install Omarchy is unchanged",
+      });
+      expect(h.stores.tests.definitions).toEqual([install]);
+      expect(h.log.lines).toEqual([]);
+    }),
+  );
+
+  it.effect("requires --name, and DATABASE_URL after parsing (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      const unnamed = yield* h.run([...DEFINE, "--description", "d"]);
+      expect(helpErrors(unnamed).join("\n")).toMatch(/Missing required flag: --name/);
+      const empty = yield* h.run([...DEFINE, "--name", ""]);
+      expect(helpErrors(empty).join("\n")).toMatch(/--name.*length of at least 1/s);
+      expect(h.touched).toEqual([]);
+      const unset = yield* h.run([...DEFINE, "--name", "Change lighting"], {});
+      expect(failure(unset)).toMatchObject({
+        _tag: "MissingVariable",
+        message: "DATABASE_URL is not set",
+      });
+      expect(h.touched).toEqual([]);
+    }),
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -418,6 +641,23 @@ describe("test new", () => {
       expect(h.log.lines.map((line) => line.text)).toEqual([
         `test ${h.stores.tests.runs[0]?.id} created; 1 tests; OLI-42`,
       ]);
+    }),
+  );
+
+  it.effect("pins the newest wording of a definition that has several, and its text (happy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.tests.definitions.push(install, installRevised, terminal);
+      const exit = yield* h.run([...NEW, "--server-url", SERVER], WITH_LINEAR);
+      expect(Exit.isSuccess(exit)).toBe(true);
+      expect(h.stores.tests.results.map((row) => row.definitionId)).toEqual([
+        installRevised.id,
+        terminal.id,
+      ]);
+      const described = h.linear.calls.find((call) => call.method === "describeIssue");
+      expect(described?.method === "describeIssue" ? described.description : "").toContain(
+        installRevised.instruction,
+      );
     }),
   );
 
@@ -2824,6 +3064,7 @@ describe("--help", () => {
         for (const args of [
           ["--help"],
           ["test", "--help"],
+          ["test", "define", "--help"],
           ["test", "new", "--help"],
           ["test", "list", "--help"],
           ["test", "run", "--help"],

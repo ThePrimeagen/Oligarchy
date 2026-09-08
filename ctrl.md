@@ -4,20 +4,21 @@ Consult this table of contents first. Read only the section you need.
 
 | Section | Line |
 |---------|-----:|
-| [Important](#important) | 22 |
-| [Synopsis](#synopsis) | 28 |
-| [test --list](#test---list) | 54 |
-| [test new](#test-new) | 70 |
-| [test list](#test-list) | 86 |
-| [test run](#test-run) | 98 |
-| [test start](#test-start) | 112 |
-| [test-results](#test-results) | 128 |
-| [session list](#session-list) | 145 |
-| [session](#session) | 161 |
-| [error-type new](#error-type-new) | 187 |
-| [error-type list](#error-type-list) | 202 |
-| [diagnose](#diagnose) | 216 |
-| [diagnose run](#diagnose-run) | 235 |
+| [Important](#important) | 23 |
+| [Synopsis](#synopsis) | 29 |
+| [test --list](#test---list) | 56 |
+| [test define](#test-define) | 74 |
+| [test new](#test-new) | 90 |
+| [test list](#test-list) | 106 |
+| [test run](#test-run) | 118 |
+| [test start](#test-start) | 134 |
+| [test-results](#test-results) | 150 |
+| [session list](#session-list) | 167 |
+| [session](#session) | 183 |
+| [error-type new](#error-type-new) | 209 |
+| [error-type list](#error-type-list) | 224 |
+| [diagnose](#diagnose) | 238 |
+| [diagnose run](#diagnose-run) | 257 |
 
 ## Important
 
@@ -30,7 +31,8 @@ If you are an agent driving a guest, you need two of these: [test start](#test-s
 ```
 ./ctrl <action> --server-url <url> ...
 
-./ctrl test --list    [--details] [--name <definition>]
+./ctrl test --list    [--details] [--name <definition>] [--history]
+./ctrl test define    --name <definition> [--description <text>] [--instruction <text>] [--proof <text>]
 ./ctrl test new       --iso <https-url> --version <version> [--name <definition>]
 ./ctrl test list
 ./ctrl test run       --ticket <linear-ticket> [--model <id>]
@@ -54,17 +56,35 @@ A command that works exits 0. A command that fails exits 1 and prints the error:
 ## test --list
 
 ```
-./ctrl test --list --server-url <url> [--details] [--name <definition>]
+./ctrl test --list --server-url <url> [--details] [--name <definition>] [--history]
 ```
 
-Lists stored test definitions, one name per line. Not used while driving a guest.
+Lists stored test definitions, one name per line, each in its newest wording. Not used while driving a guest.
 
 - `--list` — required.
 - `--details` — print every field of each definition as JSON instead of the name.
 - `--name <definition>` — only this definition. A name that matches none is a failure.
+- `--history` — every wording of each definition instead of the newest only, oldest first, one per line as `<name> v<n>`; with `--details`, the rows as JSON, each carrying its `version`. `v1` is the first wording ever stored, `v<n>` the n-th; the `id` is the row a test result pins.
 
 ```bash
 ./ctrl test --list --server-url https://qemu.example.com --details --name lock-screen
+./ctrl test --list --server-url https://qemu.example.com --history --name lock-screen
+```
+
+## test define
+
+```
+./ctrl test define --server-url <url> --name <definition> [--description <text>] [--instruction <text>] [--proof <text>]
+```
+
+Stores a test definition, or a new wording of one, and prints it as JSON: `{ id, name, version }`. A wording is never edited in place: every result records the `id` it ran against, so the wording behind a past verdict is always the one the driver was handed, and the dashboard charts each version on its own. Not used while driving a guest.
+
+- `--name <definition>` — the test. A name nobody carries yet needs all three fields and becomes `v1`; a known name gets the next version, and `test new` runs that from then on.
+- `--description <text>`, `--instruction <text>`, `--proof <text>` — the wording. On a known name a field left out is carried forward from the newest wording, so one flag changes one field. Nothing changed is a failure: `test define: <name> is unchanged`.
+
+```bash
+./ctrl test define --server-url https://qemu.example.com --name lock-screen --description "Lock the screen" --instruction "Press Super+L" --proof "The lock screen shows the clock"
+./ctrl test define --server-url https://qemu.example.com --name lock-screen --proof "The lock screen shows the clock and the user's name"
 ```
 
 ## test new
@@ -73,7 +93,7 @@ Lists stored test definitions, one name per line. Not used while driving a guest
 ./ctrl test new --server-url <url> --iso <https-url> --version <version> [--name <definition>]
 ```
 
-Creates one pending test run and one Linear issue per stored test definition, and prints them as JSON. Each issue is assigned to `prime@terminal.shop`. `--server-url` is stored on the run and written into every issue as the proxy the driving agent talks to. Not used while driving a guest. Reads `LINEAR_API_TOKEN`.
+Creates one pending test run and one Linear issue per stored test definition, each in its newest wording, and prints them as JSON. Each issue is assigned to `prime@terminal.shop`. `--server-url` is stored on the run and written into every issue as the proxy the driving agent talks to. Not used while driving a guest. Reads `LINEAR_API_TOKEN`.
 
 - `--iso <https-url>` — the ISO the agents boot. Must be HTTPS.
 - `--version <version>` — the version label attached to every issue.
@@ -171,7 +191,7 @@ Prints what is stored for one session, as JSON. At least one selector is require
 - `--session-id <id>` — the session.
 - `--status` — the session row: `{ id, config, status, reason, startedAt, endedAt }`. `status` and `reason` are the driver's verdict as `./client stop` recorded it; `config` is what it booted.
 - `--logs` — its log lines, oldest first.
-- `--test-def` — the test definition its result ran, or `null`.
+- `--test-def` — the test definition its result ran, in the wording it ran (a later `test define` does not change it), or `null`.
 - `--test-results` — the test result attributed to it, or `null`.
 - `--test-run` — the test run that result belongs to (`iso`, `serverUrl`, `status`), or `null`.
 - `--actions` — its QMP actions, oldest first.

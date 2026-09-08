@@ -242,13 +242,73 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     }),
   );
 
-  // test --list [--details] [--name <definition>]
+  // test --list [--details] [--name <definition>] [--history]
   const testDefinitions = Effect.fn("ctrl.test.definitions")(function* (input: {
     readonly details: boolean;
     readonly name: Option.Option<string>;
+    readonly history: boolean;
   }) {
-    const rows = yield* selectDefinitions(input.name, false);
-    yield* printLines(Render.renderTestDefinitions(rows, input.details));
+    const tests = yield* Tests.TestStore;
+    const lines = input.history
+      ? yield* tests.listTestDefinitionHistory(input.name).pipe(
+          Effect.filterOrFail(
+            (wordings) => wordings.length > 0 || Option.isNone(input.name),
+            () => noDefinitions(input.name),
+          ),
+          Effect.map((wordings) => Render.renderTestDefinitionHistory(wordings, input.details)),
+        )
+      : Render.renderTestDefinitions(yield* selectDefinitions(input.name, false), input.details);
+    yield* printLines(lines);
+  });
+
+  // test define --name <definition> [--description <text>] [--instruction <text>] [--proof <text>]
+  const testDefine = Effect.fn("ctrl.test.define")(function* (input: {
+    readonly name: string;
+    readonly description: Option.Option<string>;
+    readonly instruction: Option.Option<string>;
+    readonly proof: Option.Option<string>;
+  }) {
+    const tests = yield* Tests.TestStore;
+    const log = yield* Log.Log;
+    const current = yield* tests.findTestDefinition(input.name);
+    const wording = yield* Option.match(current, {
+      // A new name is written whole.
+      onNone: () =>
+        Option.match(
+          Option.all({
+            description: input.description,
+            instruction: input.instruction,
+            proof: input.proof,
+          }),
+          {
+            onNone: () =>
+              Effect.fail(
+                refuse(
+                  "test define: a new definition needs --description, --instruction and --proof",
+                ),
+              ),
+            onSome: Effect.succeed,
+          },
+        ),
+      // A known name carries forward what was not given; the same text again is not a new wording.
+      onSome: (latest) => {
+        const next = {
+          description: Option.getOrElse(input.description, () => latest.description),
+          instruction: Option.getOrElse(input.instruction, () => latest.instruction),
+          proof: Option.getOrElse(input.proof, () => latest.proof),
+        };
+        return next.description === latest.description &&
+          next.instruction === latest.instruction &&
+          next.proof === latest.proof
+          ? Effect.fail(refuse(`test define: ${input.name} is unchanged`))
+          : Effect.succeed(next);
+      },
+    });
+    const defined = yield* tests.defineTestDefinition({ name: input.name, ...wording });
+    yield* log.info(
+      `test definition defined; ${input.name} v${String(defined.version)}; id ${String(defined.id)}`,
+    );
+    yield* printJson({ id: defined.id, name: input.name, version: defined.version });
   });
 
   // test new --iso <https-url> --version <version> [--name <definition>]
@@ -699,6 +759,35 @@ export const makeCtrlCommand = (deps: Deps = live) => {
       : sessionJson(input.sessionId, input);
   });
 
+  // A field of a definition's wording: given, it is written; absent on a known name, the newest
+  // wording's value is carried forward.
+  const wordingFlag = (name: string, description: string) =>
+    Flag.string(name).pipe(
+      Flag.withSchema(Schema.NonEmptyString),
+      Flag.optional,
+      Flag.withDescription(description),
+    );
+
+  const testDefineCommand = Command.make(
+    "define",
+    {
+      serverUrl: serverUrlFlag,
+      name: Flag.string("name").pipe(
+        Flag.withSchema(Schema.NonEmptyString),
+        Flag.withDescription("Test definition name; a known name gets a new wording"),
+      ),
+      description: wordingFlag("description", "What the test is about"),
+      instruction: wordingFlag("instruction", "What the driver does"),
+      proof: wordingFlag("proof", "What must be on screen for the test to pass"),
+    },
+    testDefine,
+  ).pipe(
+    Command.withDescription(
+      "Define a test, or a new wording of one; a wording is never edited in place",
+    ),
+    Command.provide(withDb),
+  );
+
   const testNewCommand = Command.make(
     "new",
     {
@@ -765,14 +854,21 @@ export const makeCtrlCommand = (deps: Deps = live) => {
       list,
       details: toggle("details", "Print every field as JSON"),
       name: nameFlag("Print this test definition only"),
+      history: toggle("history", "Print every wording of each definition, oldest first"),
     },
     testDefinitions,
   ).pipe(
     Command.withDescription(
-      "test --list [--details] [--name <definition>]; or new, list, run, start",
+      "test --list [--details] [--name <definition>] [--history]; or define, new, list, run, start",
     ),
     Command.provide(withDb),
-    Command.withSubcommands([testNewCommand, testListCommand, testRunCommand, testStartCommand]),
+    Command.withSubcommands([
+      testDefineCommand,
+      testNewCommand,
+      testListCommand,
+      testRunCommand,
+      testStartCommand,
+    ]),
   );
 
   const testResultsCommand = Command.make(
