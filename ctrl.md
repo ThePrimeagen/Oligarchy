@@ -11,13 +11,13 @@ Consult this table of contents first. Read only the section you need.
 | [test list](#test-list) | 86 |
 | [test run](#test-run) | 98 |
 | [test start](#test-start) | 114 |
-| [test-results](#test-results) | 130 |
-| [session list](#session-list) | 147 |
-| [session](#session) | 163 |
-| [error-type new](#error-type-new) | 189 |
-| [error-type list](#error-type-list) | 204 |
-| [diagnose](#diagnose) | 218 |
-| [diagnose run](#diagnose-run) | 237 |
+| [test-results](#test-results) | 131 |
+| [session list](#session-list) | 149 |
+| [session](#session) | 165 |
+| [error-type new](#error-type-new) | 190 |
+| [error-type list](#error-type-list) | 205 |
+| [diagnose](#diagnose) | 219 |
+| [diagnose run](#diagnose-run) | 238 |
 
 ## Important
 
@@ -47,7 +47,7 @@ If you are an agent driving a guest, you need two of these: [test start](#test-s
 The action comes first. Every value is a flag; there are no positional arguments. Flags may sit in any order after the action.
 
 - `DATABASE_URL` — read from the environment by every action; it is the only variable most of them need. `test new` and `test list` also read `LINEAR_API_TOKEN`; `test run` and `diagnose run` also read `CURSOR_API_TOKEN`. No action reads `OLIGARCHY_TOKEN`. A `.env` in the current directory fills in missing variables only. A missing variable means exit 1.
-- `--server-url <url>` — taken by `test new` alone: the proxy the driving agents will talk to, a full http or https URL, stored on the run and written into every ticket. Falls back to `SERVER_URL` from the environment; there is no default. Every other action refuses it as an unrecognized flag.
+- `--server-url <url>` — taken by `test new` alone: the proxy the driving agents will talk to, a full http or https URL, stored on the run and written into every ticket. Falls back to `SERVER_URL` from the environment; there is no default. `test start` and `test-results` accept it and ignore it, so a ticket written before it went still runs; every other action refuses it as an unrecognized flag.
 
 A command that works exits 0. A command that fails exits 1 and prints the error: one headline, then the stack trace and the cause behind it. Read the headline first. `./ctrl <action> --help` prints that action's flags.
 
@@ -122,6 +122,7 @@ Ties a pending test result to the session that is running it and records the Cur
 - `--session-id <id>` — the id printed by `./client start`.
 - `--test-result-id <id>` — the result UUID from the Linear issue.
 - `--model <id>` — the Cursor model id that is running this result.
+- `--server-url <url>` — accepted and ignored; tickets written before it went still name it.
 
 ```bash
 ./ctrl test start --session-id 6f1c...e2a9 --test-result-id 2222...2222 --model <the Cursor model id you are running as>
@@ -139,6 +140,7 @@ Closes one pending test result with the verdict.
 - `--id <id>` — the result UUID from the Linear issue.
 - `--status <status>` — `success` or `failed`.
 - `--reason <text>` — optional text stored on the result.
+- `--server-url <url>` — accepted and ignored; tickets written before it went still name it.
 
 ```bash
 ./ctrl test-results --agent-id OLI-42 --id 2222...2222 --status failed --reason "installer hung"

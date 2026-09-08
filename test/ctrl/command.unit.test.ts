@@ -2293,14 +2293,33 @@ describe("environment order", () => {
 });
 
 // The proxy url is data on test new alone: stored on the run and written into every ticket for the
-// drivers' ./client. Every other action reads the database and has no proxy to name.
+// drivers' ./client. Every other action reads the database and has no proxy to name; test start
+// and test-results still accept it unread, because tickets written before it went name it.
 describe("--server-url", () => {
+  const TEST_START = [
+    "test",
+    "start",
+    "--session-id",
+    SESSION_ID,
+    "--test-result-id",
+    RESULT_ID,
+    "--model",
+    MODEL,
+  ];
+  const TEST_RESULTS = [
+    "test-results",
+    "--agent-id",
+    "a",
+    "--id",
+    RESULT_ID,
+    "--status",
+    "success",
+  ];
+
   const withServer: ReadonlyArray<ReadonlyArray<string>> = [
     ["test", "--list"],
     ["test", "list"],
     ["test", "run", "--ticket", "OLI-42"],
-    ["test", "start", "--session-id", SESSION_ID, "--test-result-id", RESULT_ID, "--model", MODEL],
-    ["test-results", "--agent-id", "a", "--id", RESULT_ID, "--status", "success"],
     ["session", "list"],
     ["session", "--session-id", SESSION_ID, "--logs"],
     NEW_TYPE,
@@ -2318,29 +2337,83 @@ describe("--server-url", () => {
     }),
   );
 
-  it.effect("is unrecognized on every other action (unhappy)", () =>
-    Effect.gen(function* () {
-      const h = harness();
-      for (const args of withServer) {
-        const exit = yield* h.run(args, { ...WITH_LINEAR, CURSOR_API_TOKEN: "c" });
-        expect(helpErrors(exit).join("\n"), args.join(" ")).toMatch(
-          /Unrecognized flag: --server-url/,
-        );
-      }
-      expect(h.touched).toEqual([]);
-      expect(h.cursor.calls).toEqual([]);
-    }),
+  it.effect(
+    "is unrecognized on every action but test new, test start and test-results (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const h = harness();
+        for (const args of withServer) {
+          const exit = yield* h.run(args, { ...WITH_LINEAR, CURSOR_API_TOKEN: "c" });
+          expect(helpErrors(exit).join("\n"), args.join(" ")).toMatch(
+            /Unrecognized flag: --server-url/,
+          );
+        }
+        expect(h.touched).toEqual([]);
+        expect(h.cursor.calls).toEqual([]);
+      }),
+  );
+
+  it.effect(
+    "is accepted unread by test start and test-results: a ticket written before it went still runs (happy)",
+    () =>
+      Effect.gen(function* () {
+        const h = harness();
+        h.stores.sessions.sessions.push(session(SESSION_ID, "running", ago(10)));
+        h.stores.sessions.agentRuns.push({
+          agentId: "a",
+          sessionId: SESSION_ID,
+          startedAt: ago(10),
+          endedAt: null,
+        });
+        h.stores.tests.results.push(result(RESULT_ID, "pending", null));
+        // Not even a url: the value is never read, so it is never checked.
+        const legacy = ["--server-url", "not a url"];
+        expect(Exit.isSuccess(yield* h.run([...TEST_START, ...legacy]))).toBe(true);
+        expect(h.stores.tests.results[0]).toMatchObject({ status: "running", model: MODEL });
+        expect(Exit.isSuccess(yield* h.run([...TEST_RESULTS, ...legacy]))).toBe(true);
+        expect(h.stores.tests.results[0]).toMatchObject({
+          status: "passed",
+          sessionId: SESSION_ID,
+        });
+        expect(h.log.lines.map((line) => line.text)).toEqual([
+          `test result ${RESULT_ID}: running`,
+          `test result ${RESULT_ID}: passed`,
+        ]);
+      }),
   );
 
   it.effect("SERVER_URL in the environment is ignored by every action but test new (happy)", () =>
     Effect.gen(function* () {
-      const h = harness();
+      const h = harness({ cursor: FakeCursor.fakeCursor({ agentId: "bc-42" }) });
       h.stores.tests.definitions.push(install);
-      // A value the flag's schema would refuse: nothing but test new reads it.
-      const env = { ...WITH_DB, SERVER_URL: "ftp://env.example" };
-      expect(Exit.isSuccess(yield* h.run(["test", "--list"], env))).toBe(true);
-      expect(Exit.isSuccess(yield* h.run(["session", "list"], env))).toBe(true);
-      expect(Exit.isSuccess(yield* h.run(["error-type", "list"], env))).toBe(true);
+      h.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
+      h.stores.sessions.agentRuns.push({
+        agentId: "a",
+        sessionId: SESSION_ID,
+        startedAt: ago(500),
+        endedAt: ago(400),
+      });
+      h.stores.tests.results.push(result(RESULT_ID, "pending", null));
+      // A value test new's flag would refuse: nothing else reads it. In an order each step allows:
+      // the result is started before it is closed, the reviewer is kicked off before the
+      // diagnosis it would write exists.
+      const env = { ...WITH_LINEAR, CURSOR_API_TOKEN: "c", SERVER_URL: "ftp://env.example" };
+      for (const args of [
+        ["test", "--list"],
+        ["test", "list"],
+        ["test", "run", "--ticket", "OLI-42"],
+        TEST_START,
+        TEST_RESULTS,
+        ["session", "list"],
+        ["session", "--session-id", SESSION_ID, "--logs"],
+        NEW_TYPE,
+        ["error-type", "list"],
+        DIAGNOSE_RUN,
+        DIAGNOSE,
+      ]) {
+        expect(Exit.isSuccess(yield* h.run(args, env)), args.join(" ")).toBe(true);
+      }
+      expect(h.cursor.calls.some((call) => call.text.includes("ftp://env.example"))).toBe(false);
     }),
   );
 

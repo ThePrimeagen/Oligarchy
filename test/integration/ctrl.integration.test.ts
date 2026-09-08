@@ -252,6 +252,30 @@ describe("./ctrl without a database", () => {
       ["test", "--list"],
       ["test", "list"],
       ["test", "run", "--ticket", "OLI-42"],
+      // Tickets written before --server-url left ctrl still name it here: it parses, unread.
+      [
+        "test",
+        "start",
+        "--session-id",
+        SUCCEEDED_ID,
+        "--test-result-id",
+        randomUUID(),
+        "--model",
+        "m",
+        "--server-url",
+        SERVER,
+      ],
+      [
+        "test-results",
+        "--agent-id",
+        "a",
+        "--id",
+        randomUUID(),
+        "--status",
+        "success",
+        "--server-url",
+        SERVER,
+      ],
       ["session", "list"],
       ["session", "--session-id", SUCCEEDED_ID, "--logs"],
       ["error-type", "new", "--key", "k", "--description", "d"],
@@ -510,7 +534,7 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
     expect(lines(result.stdout)).toContain(DEFINITION);
     expect(result.stdout.includes("{")).toBe(false);
 
-    const named = await runCtrl(["test", "--list", "--name", DEFINITION], { SERVER_URL: SERVER });
+    const named = await runCtrl(["test", "--list", "--name", DEFINITION]);
     expect(named.stderr).toBe("");
     expect(named.code).toBe(0);
     expect(named.stdout).toBe(`${DEFINITION}\n`);
@@ -604,7 +628,7 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
     expect(two.code).toBe(0);
     expect(lines(two.stdout).length).toBeLessThanOrEqual(2);
 
-    const one = await runCtrl(["session", "list", "--count=1"], { SERVER_URL: SERVER });
+    const one = await runCtrl(["session", "list", "--count=1"]);
     expect(one.stderr).toBe("");
     expect(one.code).toBe(0);
     expect(lines(one.stdout)).toHaveLength(1);
@@ -706,7 +730,7 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
     expect(lines(listed.stdout).some((line) => line.startsWith(`${key} `))).toBe(true);
     expect(lines(listed.stdout).some((line) => line.endsWith("  never reached login"))).toBe(true);
 
-    const asJson = await runCtrl(["error-type", "list", "--json"], { SERVER_URL: SERVER });
+    const asJson = await runCtrl(["error-type", "list", "--json"]);
     expect(asJson.code).toBe(0);
     const rows: Array<{ key: string; description: string; createdAt: string }> = JSON.parse(
       asJson.stdout,

@@ -106,6 +106,13 @@ const serverUrlFlag = Flag.string("server-url").pipe(
   Flag.withDescription("Proxy the driving agents talk to; SERVER_URL when omitted"),
 );
 
+// Tickets written before --server-url left ctrl still name it on test start and test-results, and
+// a driver runs its ticket's lines as written: those two accept it and never read it.
+const legacyServerUrlFlag = Flag.string("server-url").pipe(
+  Flag.optional,
+  Flag.withDescription("Ignored; tickets written before it went still name it"),
+);
+
 const sessionIdFlag = Flag.string("session-id").pipe(
   Flag.withSchema(Schema.NonEmptyString),
   Flag.withDescription("Session id"),
@@ -690,6 +697,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
   const testStartCommand = Command.make(
     "start",
     {
+      serverUrl: legacyServerUrlFlag,
       sessionId: sessionIdFlag,
       testResultId: Flag.string("test-result-id").pipe(
         Flag.withSchema(Schema.NonEmptyString),
@@ -722,6 +730,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
   const testResultsCommand = Command.make(
     "test-results",
     {
+      serverUrl: legacyServerUrlFlag,
       agentId: Flag.string("agent-id").pipe(
         Flag.withSchema(Schema.NonEmptyString),
         Flag.withDescription("Calling agent's id"),
@@ -848,7 +857,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
 
   return Command.make("ctrl").pipe(
     Command.withDescription(
-      "Record and inspect Oligarchy test runs. Every action reads DATABASE_URL; test new alone takes --server-url (or SERVER_URL), the proxy its drivers talk to.",
+      "Record and inspect Oligarchy test runs. Every action reads DATABASE_URL; test new alone takes --server-url (or SERVER_URL), the proxy its drivers talk to; test start and test-results accept it unread.",
     ),
     Command.withSubcommands([
       testCommand,
