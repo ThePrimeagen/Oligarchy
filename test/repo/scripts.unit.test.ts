@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
@@ -69,6 +69,25 @@ describe("drizzle migrations", () => {
 describe(".oxlintrc.json", () => {
   it("never downgrades a rule to warn", () => {
     expect(readFileSync(join(root, ".oxlintrc.json"), "utf8")).not.toContain('"warn"');
+  });
+});
+
+describe(".github/workflows/migrations.yml", () => {
+  const workflow = read(".github/workflows/migrations.yml");
+
+  // The code lives at the root; a job that runs or scans a directory that is not there fails
+  // every pull request before its first step.
+  it("runs every job where the code lives and scans the migrations that exist", () => {
+    const scanned = [
+      ...workflow.matchAll(/working-directory:\s*(\S+)/g),
+      ...workflow.matchAll(/find (\S+)/g),
+      ...workflow.matchAll(/'(?::\(exclude\))?([^']*drizzle\/[^']*)'/g),
+    ].map(([, path]) => path);
+    expect(scanned.length).toBeGreaterThan(0);
+    for (const path of scanned) {
+      expect(existsSync(join(root, path)), path).toBe(true);
+    }
+    expect(workflow.includes("v2")).toBe(false);
   });
 });
 
