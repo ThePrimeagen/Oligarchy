@@ -1,4 +1,4 @@
-Spawn the latest Fable subagent on max mode and have it perform the following:
+Spawn the latest Grok Max Fast subagent on max mode and have it perform the following:
 Consider the conversation and the specific request from the user and the git diff for what has been changed.
 
 - Is the change set the simplest way to achieve the goal?
@@ -10,3 +10,4 @@ Consider the conversation and the specific request from the user and the git dif
 
 When the subagent is finished, please take the feedback and make fixes that are appropriate for the
 application.  Especially when it involves proper EffectJS usage.
+
