@@ -5,14 +5,16 @@ import { jsxRenderer } from "hono/jsx-renderer";
 import {
   definitionStats,
   getImage,
+  groupDefinitions,
   listSessions,
   listTestBasePrompts,
   listTestDefinitions,
   listTestResultOutcomes,
   modelStats,
   selectDefinition,
+  versionStats,
   type DefinitionStat,
-  type ModelStat,
+  type DefinitionVersions,
   type Session,
   type TestBasePrompt,
   type TestDefinition,
@@ -69,28 +71,35 @@ const SessionStatus: FC<SessionStatusProps> = ({ sessions, outOfBand = false }) 
   </span>
 );
 
-const ModelChart: FC<{ stats: ReadonlyArray<ModelStat> }> = ({ stats }) => (
+type ChartRow = {
+  readonly label: string;
+  readonly succeeded: number;
+  readonly failed: number;
+};
+
+// One stacked bar per row: succeeded then failed, each as wide as its share.
+const ResultChart: FC<{ title: string; rows: ReadonlyArray<ChartRow> }> = ({ title, rows }) => (
   <div class="record__field">
-    <h3>Results by model</h3>
-    {stats.length === 0 ? (
-      <p class="model-chart__empty">No passed or failed results yet.</p>
+    <h3>{title}</h3>
+    {rows.length === 0 ? (
+      <p class="result-chart__empty">No passed or failed results yet.</p>
     ) : (
-      <ul class="model-chart">
-        {stats.map((row) => (
-          <li class="model-chart__row">
-            <span class="model-chart__name">{row.model}</span>
+      <ul class="result-chart">
+        {rows.map((row) => (
+          <li class="result-chart__row">
+            <span class="result-chart__name">{row.label}</span>
             <div
-              class="model-chart__bar"
+              class="result-chart__bar"
               role="img"
-              aria-label={`${row.model}: ${String(row.succeeded)} succeeded, ${String(row.failed)} failed`}
+              aria-label={`${row.label}: ${String(row.succeeded)} succeeded, ${String(row.failed)} failed`}
             >
               {row.succeeded > 0 ? (
-                <span class="model-chart__ok" style={{ flexGrow: row.succeeded, flexBasis: 0 }}>
+                <span class="result-chart__ok" style={{ flexGrow: row.succeeded, flexBasis: 0 }}>
                   {row.succeeded}
                 </span>
               ) : null}
               {row.failed > 0 ? (
-                <span class="model-chart__failed" style={{ flexGrow: row.failed, flexBasis: 0 }}>
+                <span class="result-chart__failed" style={{ flexGrow: row.failed, flexBasis: 0 }}>
                   {row.failed}
                 </span>
               ) : null}
@@ -170,7 +179,9 @@ const SessionList: FC<SessionListProps> = ({ sessions }) =>
                   {session.definitionName === null ? null : (
                     <div class="session__version">
                       <span>Test</span>
-                      <span class="session__version-name">{session.definitionName}</span>
+                      <span class="session__version-name">
+                        {session.definitionName} v{session.definitionVersion}
+                      </span>
                     </div>
                   )}
                   {session.model === null ? null : (
@@ -281,32 +292,145 @@ const Home: FC<HomeProps> = ({ sessions }) => (
 );
 
 type DefinitionsProps = {
-  definitions: TestDefinition[] | null;
+  groups: DefinitionVersions[] | null;
   outcomes: TestResultOutcome[];
-  // The ?name the page was asked for, and the definition it resolved to: nothing when the name is
-  // unknown, so the wide layout can say so instead of opening on another definition.
+  // The ?name and ?id the page was asked for, and the wording they resolved to: nothing when the
+  // name is unknown or the id is not one of its wordings, so the wide layout can say so instead
+  // of opening on another one.
   name: string | undefined;
+  id: string | undefined;
   selected: TestDefinition | undefined;
 };
 
 const definitionHref = (name: string): string => `/definitions?name=${encodeURIComponent(name)}`;
+const versionHref = (name: string, id: number): string =>
+  `${definitionHref(name)}&id=${String(id)}`;
+
+// One name's card: the wording shown (the selected one, or the newest), its version strip, the
+// name's results by version beside the wording's by model, its text, and the runs that used it.
+const DefinitionCard: FC<{
+  group: DefinitionVersions;
+  shown: TestDefinition;
+  outcomes: ReadonlyArray<TestResultOutcome>;
+}> = ({ group, shown, outcomes }) => {
+  const version = group.versions.indexOf(shown) + 1;
+  const runs = outcomes
+    .filter((row) => row.definitionId === shown.id)
+    .sort((left, right) => right.startedAt.getTime() - left.startedAt.getTime());
+  return (
+    <article class="record definition">
+      <h2>{group.name}</h2>
+      <nav
+        class="definition__versions"
+        aria-label={`Versions of ${group.name}`}
+        hx-target:inherited="#definitions"
+        hx-select:inherited="#definitions"
+        hx-swap:inherited="outerHTML"
+        hx-push-url:inherited="true"
+      >
+        {group.versions.map((wording, index) => (
+          <a
+            href={versionHref(group.name, wording.id)}
+            hx-get={versionHref(group.name, wording.id)}
+            class={
+              wording.id === shown.id
+                ? "definition__version definition__version--current"
+                : "definition__version"
+            }
+            aria-current={wording.id === shown.id ? "true" : undefined}
+          >
+            v{index + 1}
+          </a>
+        ))}
+      </nav>
+      <time dateTime={shown.createdAt.toISOString()}>{dateTime.format(shown.createdAt)}</time>
+      <div class="definition__chart">
+        <ResultChart
+          title="Results by version"
+          rows={versionStats(group.versions, outcomes).map((row) => ({
+            label: `v${String(row.version)}`,
+            succeeded: row.succeeded,
+            failed: row.failed,
+          }))}
+        />
+        <ResultChart
+          title={`Results by model, v${String(version)}`}
+          rows={modelStats(runs).map((row) => ({
+            label: row.model,
+            succeeded: row.succeeded,
+            failed: row.failed,
+          }))}
+        />
+      </div>
+      <div class="definition__fields">
+        <div class="record__field">
+          <h3>Description</h3>
+          <p>{shown.description}</p>
+        </div>
+        <div class="record__field">
+          <h3>Instruction</h3>
+          <p>{shown.instruction}</p>
+        </div>
+        <div class="record__field">
+          <h3>Proof</h3>
+          <p>{shown.proof}</p>
+        </div>
+      </div>
+      <div class="record__field definition__runs">
+        <h3>Runs of v{version}</h3>
+        {runs.length === 0 ? (
+          <p class="result-chart__empty">No runs yet.</p>
+        ) : (
+          <table class="runs">
+            <thead>
+              <tr>
+                <th>Run</th>
+                <th>Omarchy version</th>
+                <th>Started</th>
+                <th>Model</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {runs.map((run) => (
+                <tr>
+                  <td>
+                    <code>{run.runId}</code>
+                  </td>
+                  <td>{run.iso.split("/").at(-1) ?? run.iso}</td>
+                  <td>
+                    <time dateTime={run.startedAt.toISOString()}>
+                      {dateTime.format(run.startedAt)}
+                    </time>
+                  </td>
+                  <td>{run.model ?? "—"}</td>
+                  <td>{run.status === "timed_out" ? "timed out" : run.status}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </article>
+  );
+};
 
 // Every card is in the page so a narrow screen keeps its scrolling list; the wide layout shows
-// the sidebar and only the current card. A sidebar click fetches the page for that name and swaps
-// this section in place (htmx 4 inherits an attribute only when told to), pushing the URL so a
-// reload or a shared link opens on the same definition.
-const Definitions: FC<DefinitionsProps> = ({ definitions, outcomes, name, selected }) => (
+// the sidebar and only the current card. A sidebar or version click fetches the page for that
+// wording and swaps this section in place (htmx 4 inherits an attribute only when told to),
+// pushing the URL so a reload or a shared link opens on the same one.
+const Definitions: FC<DefinitionsProps> = ({ groups, outcomes, name, id, selected }) => (
   <Shell page="definitions">
     <section id="definitions" class="records definitions" aria-labelledby="definitions-heading">
       <div class="sessions__heading">
         <h1 id="definitions-heading">Test definitions</h1>
       </div>
-      {definitions === null ? (
+      {groups === null ? (
         <div class="empty-state empty-state--error">
           <p>Test definitions are unavailable.</p>
           <span>Try refreshing in a moment.</span>
         </div>
-      ) : definitions.length === 0 ? (
+      ) : groups.length === 0 ? (
         <div class="empty-state">
           <p>No test definitions yet.</p>
         </div>
@@ -320,21 +444,22 @@ const Definitions: FC<DefinitionsProps> = ({ definitions, outcomes, name, select
             hx-swap:inherited="outerHTML"
             hx-push-url:inherited="true"
           >
-            {definitions.map((definition) => {
-              const isCurrent = definition.id === selected?.id;
+            {groups.map((group) => {
+              const isCurrent = group.name === selected?.name;
               // The swap replaces the focused link; htmx puts focus back only on an element with
-              // the same id, so a keyboard user does not fall back to the top of the page.
+              // the same id, so a keyboard user does not fall back to the top of the page. The
+              // newest wording's id stays the same across the name's versions.
               return (
                 <a
-                  id={`definition-${String(definition.id)}`}
-                  href={definitionHref(definition.name)}
-                  hx-get={definitionHref(definition.name)}
+                  id={`definition-${String(group.versions[group.versions.length - 1].id)}`}
+                  href={definitionHref(group.name)}
+                  hx-get={definitionHref(group.name)}
                   class={
                     isCurrent ? "definitions__link definitions__link--current" : "definitions__link"
                   }
                   aria-current={isCurrent ? "true" : undefined}
                 >
-                  {definition.name}
+                  {group.name}
                 </a>
               );
             })}
@@ -342,50 +467,38 @@ const Definitions: FC<DefinitionsProps> = ({ definitions, outcomes, name, select
           <div class="definitions__detail">
             {selected === undefined ? (
               <div class="empty-state definitions__missing">
-                <p>
-                  No test definition named <code>{name}</code>.
-                </p>
+                {groups.some((group) => group.name === name) ? (
+                  <p>
+                    No version <code>{id}</code> of <code>{name}</code>.
+                  </p>
+                ) : (
+                  <p>
+                    No test definition named <code>{name}</code>.
+                  </p>
+                )}
                 <span>Pick one from the list.</span>
               </div>
             ) : null}
             <ol class="definitions__list">
-              {definitions.map((definition) => (
-                <li
-                  class={
-                    definition.id === selected?.id
-                      ? "definitions__item definitions__item--current"
-                      : "definitions__item"
-                  }
-                >
-                  <article class="record definition">
-                    <h2>{definition.name}</h2>
-                    <time dateTime={definition.createdAt.toISOString()}>
-                      {dateTime.format(definition.createdAt)}
-                    </time>
-                    <div class="definition__chart">
-                      <ModelChart
-                        stats={modelStats(
-                          outcomes.filter((row) => row.definitionName === definition.name),
-                        )}
-                      />
-                    </div>
-                    <div class="definition__fields">
-                      <div class="record__field">
-                        <h3>Description</h3>
-                        <p>{definition.description}</p>
-                      </div>
-                      <div class="record__field">
-                        <h3>Instruction</h3>
-                        <p>{definition.instruction}</p>
-                      </div>
-                      <div class="record__field">
-                        <h3>Proof</h3>
-                        <p>{definition.proof}</p>
-                      </div>
-                    </div>
-                  </article>
-                </li>
-              ))}
+              {groups.map((group) => {
+                // Every card shows a name's newest wording but the current one, which shows the
+                // wording selected under it.
+                const shown =
+                  selected !== undefined && selected.name === group.name
+                    ? selected
+                    : group.versions[group.versions.length - 1];
+                return (
+                  <li
+                    class={
+                      group.name === selected?.name
+                        ? "definitions__item definitions__item--current"
+                        : "definitions__item"
+                    }
+                  >
+                    <DefinitionCard group={group} shown={shown} outcomes={outcomes} />
+                  </li>
+                );
+              })}
             </ol>
           </div>
         </div>
@@ -477,25 +590,28 @@ app.get("/", async (context) => {
 
 app.get("/definitions", async (context) => {
   const name = context.req.query("name");
+  const id = context.req.query("id");
   try {
     const [definitions, outcomes] = await Promise.all([
       listTestDefinitions(context.env.HYPERDRIVE.connectionString),
       listTestResultOutcomes(context.env.HYPERDRIVE.connectionString),
     ]);
-    const selected = selectDefinition(definitions, name);
-    // A stale link: the page still lists what exists, the status says the name does not.
-    if (name !== undefined && selected === undefined) {
+    const groups = groupDefinitions(definitions);
+    const selected = selectDefinition(groups, name, id);
+    // A stale link: the page still lists what exists, the status says the name or wording does
+    // not. An empty table selects nothing and is not a stale link.
+    if (groups.length > 0 && selected === undefined) {
       context.status(404);
     }
     return context.render(
-      <Definitions definitions={definitions} outcomes={outcomes} name={name} selected={selected} />,
+      <Definitions groups={groups} outcomes={outcomes} name={name} id={id} selected={selected} />,
     );
   } catch (error) {
     Sentry.captureException(error);
     console.error("dashboard: loading the definitions page:", errorMessage(error));
     context.status(500);
     return context.render(
-      <Definitions definitions={null} outcomes={[]} name={name} selected={undefined} />,
+      <Definitions groups={null} outcomes={[]} name={name} id={id} selected={undefined} />,
     );
   }
 });
