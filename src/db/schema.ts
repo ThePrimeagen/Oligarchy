@@ -174,7 +174,11 @@ export const postRunDiagnosis = pgTable(
 );
 
 // A definition is the stored mission an agent is handed — what it is about, what to
-// do, and the proof that closes it. Rows are edited in place; name is the lookup key.
+// do, and the proof that closes it. A row is never updated: an edit is a new row with
+// the same name and a higher id, so a result's definition_id names the exact wording
+// it ran against. A name's newest wording is its highest id, and its version is the
+// row's place among the name's rows by id; name is indexed for those lookups, not
+// unique.
 export const testDefinitions = pgTable(
   "test_definitions",
   {
@@ -185,12 +189,12 @@ export const testDefinitions = pgTable(
     proof: text("proof").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [uniqueIndex("test_definitions_name_idx").on(table.name)],
+  (table) => [index("test_definitions_name_idx").on(table.name)],
 );
 
 // A base prompt is the shared preamble composed into an agent's prompt ahead of a
 // definition's instruction — the driving discipline every mission repeats. Edited
-// in place like definitions; name is the lookup key.
+// in place, name the lookup key: nothing pins one yet, so nothing needs its history.
 export const testBasePrompts = pgTable(
   "test_base_prompts",
   {
