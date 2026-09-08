@@ -10,8 +10,8 @@ import * as Postgres from "../support/postgres.ts";
 import * as StubCursor from "../support/stub-cursor.ts";
 import * as StubProxy from "../support/stub-proxy.ts";
 
-// The root wrapper, which execs v2/ctrl.
-const CTRL = fileURLToPath(new URL("../../../ctrl", import.meta.url));
+// The wrapper at the repository root.
+const CTRL = fileURLToPath(new URL("../../ctrl", import.meta.url));
 const EXIT_WITHIN_MS = 60_000;
 const SERVER = "https://qemu.example.com";
 const TOKEN = "test-token";
