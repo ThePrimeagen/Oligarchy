@@ -121,6 +121,33 @@ export class Internal extends Schema.TaggedError<Internal>("@oligarchy/shared/er
   override readonly [ErrorReporter.ignore] = true;
 }
 
+// A server behind the reverse proxy that did not answer as a server does: unreachable, a refused
+// probe, or a 200 that is not stats or not an id. The message names the url and the reason.
+export class ServerFailed extends Schema.TaggedError<ServerFailed>(
+  "@oligarchy/shared/errors/ServerFailed",
+)(
+  "ServerFailed",
+  {
+    message: Schema.String,
+    url: Schema.String,
+    cause: Schema.optionalKey(Schema.Defect()),
+    sessionId: Schema.optionalKey(Schema.String),
+    agentId: Schema.optionalKey(Schema.String),
+  },
+  { httpApiStatus: 502 },
+) {
+  override readonly [ErrorReporter.ignore] = true;
+}
+
+// A start with nowhere to go: no server registered, or none answering its probe.
+export class NoServer extends Schema.TaggedError<NoServer>("@oligarchy/shared/errors/NoServer")(
+  "NoServer",
+  { message: Schema.String, agentId: Schema.optionalKey(Schema.String) },
+  { httpApiStatus: 503 },
+) {
+  override readonly [ErrorReporter.ignore] = true;
+}
+
 export type ApiError =
   | BadRequest
   | Unauthorized
@@ -130,7 +157,9 @@ export type ApiError =
   | Conflict
   | StartFailed
   | ExchangeFailed
-  | Internal;
+  | Internal
+  | ServerFailed
+  | NoServer;
 
 const resolveHttpApiStatus = SchemaAST.resolveAt("httpApiStatus");
 
@@ -151,6 +180,8 @@ const apiErrorClasses = {
   StartFailed,
   ExchangeFailed,
   Internal,
+  ServerFailed,
+  NoServer,
 } satisfies Record<ApiError["_tag"], Schema.Top>;
 
 export const apiStatus = (error: ApiError): number => httpStatus(apiErrorClasses[error._tag]);
@@ -209,6 +240,14 @@ export const ExchangeFailedWire = wireError(
 export const InternalWire = wireError(
   Internal,
   () => ({ _tag: "Internal", message: "internal error", cause: null }) as const,
+);
+export const ServerFailedWire = wireError(
+  ServerFailed,
+  (message) => ({ _tag: "ServerFailed", message, url: "" }) as const,
+);
+export const NoServerWire = wireError(
+  NoServer,
+  (message) => ({ _tag: "NoServer", message }) as const,
 );
 
 // ---------------------------------------------------------------------------

@@ -10,6 +10,7 @@ import * as Diagnosis from "../../src/db/diagnosis.ts";
 import * as Logs from "../../src/db/logs.ts";
 import * as Migrate from "../../src/db/migrate.ts";
 import * as DbSchema from "../../src/db/schema.ts";
+import * as Servers from "../../src/db/servers.ts";
 import * as Sessions from "../../src/db/sessions.ts";
 import * as Tests from "../../src/db/tests.ts";
 import * as Render from "../../src/observability/render.ts";
@@ -978,6 +979,54 @@ Postgres.describeWithDatabase("database", () => {
         expect(results[0]?.reason).toBe("linear: request failed (401)");
         expect(results[0]?.model).toBeNull();
         expect(results[0]?.finishedAt?.getTime()).toBe(run?.endedAt?.getTime());
+      }),
+    );
+
+    scoped.effect("ServerStore registers a url once, lists in registration order, forgets it", () =>
+      Effect.gen(function* () {
+        const store = yield* Servers.ServerStore;
+        const first = `http://10.0.0.5:${uuid().slice(0, 8)}`;
+        const second = `http://10.0.0.6:${uuid().slice(0, 8)}`;
+        yield* store.addServer(first);
+        yield* store.addServer(second);
+        yield* store.addServer(first);
+        const listed = yield* store.listServers();
+        expect(listed.filter((url) => url === first || url === second)).toEqual([first, second]);
+        expect(yield* store.removeServer(first)).toBe(true);
+        expect(yield* store.removeServer(first)).toBe(false);
+        expect(yield* store.listServers()).not.toContain(first);
+        expect(yield* store.listServers()).toContain(second);
+        expect(yield* store.removeServer(second)).toBe(true);
+        expect(yield* store.listServers()).not.toContain(second);
+      }),
+    );
+
+    scoped.effect("ServerStore routes a session once and answers where it went", () =>
+      Effect.gen(function* () {
+        const store = yield* Servers.ServerStore;
+        const sessions = yield* Sessions.SessionStore;
+        const id = uuid();
+        yield* sessions.insertSession(id, { iso: "x" }, "running");
+        expect(yield* store.serverForSession(id)).toEqual(Option.none());
+        yield* store.routeSession(id, "http://10.0.0.5:42069");
+        expect(yield* store.serverForSession(id)).toEqual(Option.some("http://10.0.0.5:42069"));
+        // The route outlives the server's registration: forgetting a server keeps its sessions.
+        expect(yield* store.serverForSession(id.toUpperCase())).toEqual(
+          Option.some("http://10.0.0.5:42069"),
+        );
+        const twice = yield* Effect.flip(store.routeSession(id, "http://10.0.0.6:42069"));
+        expect(twice).toMatchObject({ _tag: "DatabaseError", operation: "routeSession" });
+        expect(String(twice.cause)).toContain("duplicate key");
+        expect(yield* store.serverForSession(id)).toEqual(Option.some("http://10.0.0.5:42069"));
+      }),
+    );
+
+    scoped.effect("ServerStore refuses a route for a session that does not exist (unhappy)", () =>
+      Effect.gen(function* () {
+        const store = yield* Servers.ServerStore;
+        const error = yield* Effect.flip(store.routeSession(uuid(), "http://10.0.0.5:42069"));
+        expect(error).toMatchObject({ _tag: "DatabaseError", operation: "routeSession" });
+        expect(String(error.cause)).toContain("foreign key");
       }),
     );
 

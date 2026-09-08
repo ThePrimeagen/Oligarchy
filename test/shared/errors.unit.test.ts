@@ -88,6 +88,24 @@ const cases: ReadonlyArray<WireCase> = [
     }),
     status: 500,
   },
+  {
+    name: "ServerFailed",
+    wire: Errors.ServerFailedWire,
+    error: Errors.ServerFailed.make({
+      message: "server http://10.0.0.5:42069 unreachable: connect ECONNREFUSED 10.0.0.5:42069",
+      url: "http://10.0.0.5:42069",
+      cause: new Error("connect ECONNREFUSED 10.0.0.5:42069"),
+      sessionId: SESSION_ID,
+      agentId: AGENT_ID,
+    }),
+    status: 502,
+  },
+  {
+    name: "NoServer",
+    wire: Errors.NoServerWire,
+    error: Errors.NoServer.make({ message: "no server registered", agentId: AGENT_ID }),
+    status: 503,
+  },
 ];
 
 describe("API error wire codecs", () => {

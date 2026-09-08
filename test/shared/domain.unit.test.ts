@@ -79,6 +79,26 @@ describe("brands", () => {
       );
     }
   });
+
+  it("accepts an http or https url with a host as a ServerUrl and refuses anything else", () => {
+    const is = Schema.is(Domain.ServerUrl);
+    expect(is("http://10.0.0.5:42069")).toBe(true);
+    expect(is("https://qemu.example.com")).toBe(true);
+    expect(is("https://qemu.example.com/")).toBe(true);
+    expect(is("")).toBe(false);
+    expect(is("qemu.example.com:42069")).toBe(false);
+    expect(is("ftp://qemu.example.com")).toBe(false);
+    expect(is("http://")).toBe(false);
+    expect(is("not a url")).toBe(false);
+  });
+
+  it("names the url rule in the ServerUrl decode failure", () => {
+    const exit = Schema.decodeUnknownExit(Domain.ServerUrl)("qemu.example.com:42069");
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      expect(String(Cause.squash(exit.cause))).toMatch(/url must be an http or https url/);
+    }
+  });
 });
 
 describe("QmpInbound", () => {

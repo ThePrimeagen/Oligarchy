@@ -3,18 +3,21 @@
 How code is written here: the Effect conventions every process follows, the tooling, the tests
 and the review. It owns the abstract decisions and nothing else. What any one process promises its
 callers — routes, flags, log lines, wire shapes, refusal texts — lives in its code and the tests
-that pin it, and for operators in `client.md`, `ctrl.md`, `ctrl-linear.md`, `ctrl-diagnose.md`
-and `prompts/`; this document does not repeat them. It does not document the Effect API either;
-API truth is `node_modules/effect/src`, `node_modules/effect/AGENTS.md`,
-`node_modules/effect/ai-docs/src`, `node_modules/@effect/platform-node/src` and
-`node_modules/@effect/vitest/README.md`, all `4.0.0-rc.112`, and a name that is not there does not
+that pin it, and for operators in `client.md`, `ctrl.md`, `ctrl-linear.md`, `ctrl-diagnose.md`,
+`SERVER_VS_REVERSE_PROXY.md` (the server and the reverse proxy side by side, and the reasons behind
+the reverse proxy's design) and `prompts/`; this document does not repeat them. It does not
+document the Effect API either; API truth is `node_modules/effect/src`,
+`node_modules/effect/AGENTS.md`, `node_modules/effect/ai-docs/src`,
+`node_modules/@effect/platform-node/src` and `node_modules/@effect/vitest/README.md`, all
+`4.0.0-rc.112`, and a name that is not there does not
 exist.
 
 ## Toolchain
 
 - Run on Node 26 with npm. Every executable is a `#!/bin/sh` wrapper running
-  `node --experimental-strip-types` (`./server` adds `--import ./src/observability/instrument.ts`);
-  types are stripped, not transformed, so `erasableSyntaxOnly` stays on.
+  `node --experimental-strip-types` (`./server` and `./reverse-proxy` add
+  `--import ./src/observability/instrument.ts`); types are stripped, not transformed, so
+  `erasableSyntaxOnly` stays on.
 - Install with `npm ci`; `prepare` runs `effect-tsgo patch --oxlint` so the `effecttsgo/*` rules
   are active for lint. The commands: `npm run check:lint`, `npm run check:format`,
   `npm run check:types`, `npm run test:unit`, `npm run test:integration`, `npm run check:fast`
@@ -66,8 +69,8 @@ Durable preferences from the maintainer; when they conflict with generic best pr
 ## Layout
 
 - The root holds `AGENTS.md`, the executable wrappers (`./client`, `./ctrl`, `./server`,
-  `./session`), the tooling files, `drizzle/` (migrations), `public/` and `prompts/`, the operator
-  documents, this document, `src/` and `test/`.
+  `./reverse-proxy`, `./session`), the tooling files, `drizzle/` (migrations), `public/` and
+  `prompts/`, the operator documents, this document, `src/` and `test/`.
 - `src/` is one directory per process plus the shared kernel (`src/shared/`, `src/config.ts`,
   `src/external-failure.ts`, `src/observability/`, `src/db/`); `main.ts` files are the entries.
 - `src/dashboard/` is a Hono Worker, not Effect: it has no Effect runtime, reaches Postgres
@@ -115,7 +118,8 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   view); a failure there is a `Result`, a thrown value from a library wrapped in one `try`.
 - Reach services with `yield*` inside the Effect that needs them, never as function parameters; a
   plain factory taking values is allowed only where a unit test constructs the seam directly
-  (`Database.make(url)`, `Stats.make(source)`, `makeProxyCommand(server)`, `makeCtrlCommand(deps)`).
+  (`Database.make(url)`, `Stats.make(source)`, `makeProxyCommand(server)`,
+  `makeReverseProxyCommand(server)`, `makeCtrlCommand(deps)`).
 - Effect-native end-to-end: `Scope`, `Schedule`, `Clock`, `FileSystem`/`Path`,
   `ChildProcessSpawner`, `HttpClient`. Raw callback and Promise APIs, `async`/`await` included,
   appear only in the boundary files and `vitest.global-setup.ts`.
@@ -148,6 +152,11 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   `Layer.effectDiscard` for background loops and fail-fast preconditions.
 - Background fibers belong to the layer scope: `Effect.forkScoped`, never `Effect.runFork`. Do not
   use `Layer.fresh` in production, `ManagedRuntime`, or `Layer.catch` (not exported).
+- `HttpRouter.serve` provides the module-level `HttpRouter.layer`, so two `HttpRouter.serve`s in
+  one graph share one router and both listeners serve both route sets. A process with a second
+  listener (the reverse proxy's diagnostics page) serves it as `HttpServer.serve(handler)` over a
+  plain `HttpEffect` and its own `NodeHttpServer.layer`, each `NodeHttpServer.layer` provided
+  privately to its consumer; never a second router, never `Layer.fresh`.
 - `Effect.log*` is called only in `src/db/client.ts`: the pool's `error` listener and its release
   sit below `Log`, which does not exist yet when the pool is built.
 
@@ -464,9 +473,27 @@ NodeRuntime.runMain(main, { disableErrorReporting: true });
 ## HttpApi server
 
 - The contract lives in three files: `src/shared/api.ts` (middleware tags, `HttpApiEndpoint`s,
-  the groups, the `HttpApi`, `VERSION`), `contract.ts` (`Schema.Class` DTOs and shared query field
+  the groups, the `HttpApi`s, `VERSION`), `contract.ts` (`Schema.Class` DTOs and shared query field
   objects), `errors.ts` (errors and wire codecs). No handler code lives there; `HttpApiEndpoint`,
   `HttpApiGroup.make`, `HttpApi.make` appear only in `api.ts` (the architecture test checks it).
+- A second `HttpApi` that must be reachable by the client generated from the first (the reverse
+  proxy in front of the proxy) is built from the first's `HttpApiEndpoint` values, never from
+  redeclared paths, so methods, paths, queries and bodies cannot drift. An error the second api
+  raises and the first never does gets its codec on a second boundary middleware tag (rc.112 has
+  no way to add an error to an endpoint value, and the first api must not advertise a status it
+  never answers); the two tags wrap one boundary implementation.
+- A pass-through handler decodes nothing of the upstream answer: it forwards the request's own
+  `url`, the cached body text (HttpApi already decoded it, so `request.text` cannot fail a second
+  time) and the bearer, and returns `HttpServerResponse.stream(response.stream, { status, headers
+  })` with only the headers the contract names, so the upstream's refusal reaches the client as
+  written and is not logged twice. The status is on the wire before the body can fail, so the
+  stream is tapped for the one error line a mid-stream death leaves.
+- A page for an operator's browser has no bearer to send, so it listens on its own loopback port
+  with no token, and defends the two things a browser can be made to do from elsewhere: a
+  cross-site form post (a browser's `Origin` must be `http://` plus the `Host` it connected to; a
+  request without one is not a browser's) and DNS rebinding (the `Host` must be a loopback name,
+  else no page at all); every answer is `cache-control: no-store` and `x-frame-options: DENY`,
+  and every interpolated value is HTML-escaped. It is text, no style, no script.
 - Declare endpoints as `HttpApiEndpoint.get/post(name, path, { params, query, payload, success,
   error })`; binary via `Schema.Uint8Array.pipe(HttpApiSchema.asUint8Array({ contentType }))`,
   headers via `HttpApiSchema.WithHeaders`, byte streams via `HttpApiSchema.StreamUint8Array`.
@@ -722,7 +749,8 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
 ## Sentry
 
 - Initialise the SDK before any Effect code in `src/observability/instrument.ts`, loaded by the
-  `server` wrapper's `--import`: `Sentry.init({ dsn: SENTRY_DSN, tracesSampleRate: 1,
+  `server` and `reverse-proxy` wrappers' `--import`: `Sentry.init({ dsn: SENTRY_DSN,
+  tracesSampleRate: 1,
   traceLifecycle: "stream", integrations: [Sentry.httpIntegration({ spans: false }),
   Sentry.nativeNodeFetchIntegration({ spans: false })] })`. `SENTRY_DSN` in `dsn.ts` is the one
   hard-coded constant (public by design) and is shared with the dashboard.
@@ -843,7 +871,9 @@ export const SentryLive: Layer.Layer<never> = Layer.mergeAll(
 - A CLI runs `Command.run(cmd, { version })` directly under `runMain`; a server `Layer.launch`es
   inside its command handler, its stop condition `Effect.raceFirst(Layer.launch(serve),
   Deferred.await(serverFailed))`, the `Deferred` completed by the Node server's `error` listener
-  in `main.ts`, where the server is created so that listener can be attached.
+  in `main.ts`, where the server is created so that listener can be attached. A process with two
+  listeners creates both `node:http` servers there and both `error` listeners complete the one
+  `Deferred`; only the first counts.
 - `runMain` owns SIGINT and SIGTERM: the first signal interrupts the root fiber and scopes close in
   reverse order (work drained, the log flushed, Sentry flushed, the pool closed). Component layers
   never install signal handlers. A process that must answer signals itself uses
@@ -879,10 +909,12 @@ export const SentryLive: Layer.Layer<never> = Layer.mergeAll(
   an interrupt land; `Fiber.await` the interrupted fiber or a `Deferred`. A fresh fake layer per
   `it.effect`, `NodeHttpServer.layerTest` included; the shared `layer(...)` only for the container.
 - Fakes are `Layer.succeed(Tag)(Tag.of({...}))` factories that record their calls
-  (`fakeLog().lines`, `fakeQemu().calls`, `fakeSessionStore().sessions`) with every unused member
-  `Effect.die("Unexpected <Service>.<method>")`, kept under `test/support/`, one file per seam,
-  plus loopback stubs for the process tests and `postgres.ts`. Never `vi.mock`, `vi.spyOn`, or a
-  `fetch` stub.
+  (`fakeLog().lines`, `fakeQemu().calls`, `fakeSessionStore().sessions`,
+  `fakeServerStore().routes`) with every unused member `Effect.die("Unexpected
+  <Service>.<method>")`, kept under `test/support/`, one file per seam, plus loopback stubs for
+  the process tests and `postgres.ts`. Never `vi.mock`, `vi.spyOn`, or a `fetch` stub. A service
+  that calls other HTTP servers gets `FakeHttp.recordRequests(respond)` provided to its layer
+  alone, so the `HttpClient` in the test's scope still points at the server under test.
 - Assert failures with `Effect.flip` and `expect(error).toMatchObject({ _tag, message })`;
   `Effect.exit` only when a defect or interruption is under test (`Cause.hasDies`). A failure test
   whose input carries a secret (a token, a `DATABASE_URL` password) also asserts that sentinel is

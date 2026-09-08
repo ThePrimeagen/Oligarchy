@@ -173,6 +173,24 @@ export const postRunDiagnosis = pgTable(
   ],
 );
 
+// The fleet the reverse proxy places sessions on: one row per proxy an operator registered,
+// keyed by the url exactly as given. Registering twice is one row.
+export const servers = pgTable("servers", {
+  url: text("url").primaryKey(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Which server started a session, so every later request for it finds the machine. The row
+// outlives the reverse proxy process, which is why it is a row. server_url is attribution, not a
+// relation: forgetting a server must keep the sessions still running on it routable.
+export const sessionServers = pgTable("session_servers", {
+  sessionId: uuid("session_id")
+    .primaryKey()
+    .references(() => sessions.id),
+  serverUrl: text("server_url").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // A definition is the stored mission an agent is handed — what it is about, what to
 // do, and the proof that closes it. A row is never updated: an edit is a new row with
 // the same name and a higher id, so a result's definition_id names the exact wording
