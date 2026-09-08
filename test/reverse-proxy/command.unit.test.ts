@@ -58,16 +58,18 @@ const refused = Errors.DatabaseError.make({
   cause: new Error("connect ECONNREFUSED 127.0.0.1:1"),
 });
 
+type Served = readonly [port: number, diagnosticsPort: number];
+
 // The server layer and the failure signal the command is built from.
 const fakeServer = () => {
-  const served: Array<number> = [];
+  const served: Array<Served> = [];
   const listening = Deferred.makeUnsafe<void>();
   const serverFailed = Deferred.makeUnsafe<never, HttpServerError.ServeError>();
   const server: ReverseProxyCommand.ReverseProxyServer<never> = {
-    serve: (port) =>
+    serve: (port, diagnosticsPort) =>
       Layer.effectDiscard(
         Effect.gen(function* () {
-          served.push(port);
+          served.push([port, diagnosticsPort]);
           yield* Deferred.succeed(listening, undefined);
         }),
       ),
@@ -87,12 +89,16 @@ const run = (
   ).pipe(Effect.provide(Layer.mergeAll(CliTestLayer, log.layer, fakeDatabase(ping))));
 
 describe("reverse proxy command flags", () => {
-  it.effect("--port must be an integer", () =>
+  it.effect("--port and --diagnostics-port must be integers", () =>
     Effect.gen(function* () {
       const fake = fakeServer();
       const log = FakeLog.fakeLog();
-      const error = yield* Effect.flip(run(fake.server, ["--port", "forty"], log));
-      expect(error._tag).toBe("ShowHelp");
+      const port = yield* Effect.flip(run(fake.server, ["--port", "forty"], log));
+      expect(port._tag).toBe("ShowHelp");
+      const diagnostics = yield* Effect.flip(
+        run(fake.server, ["--diagnostics-port", "fifty"], log),
+      );
+      expect(diagnostics._tag).toBe("ShowHelp");
       expect(fake.served).toEqual([]);
       expect(log.lines).toEqual([]);
     }),
@@ -108,11 +114,12 @@ describe("reverse proxy command flags", () => {
       expect(log.lines).toEqual([]);
       const stdout = yield* TestConsole.logLines;
       expect(stdout.join("\n")).toContain("--port");
+      expect(stdout.join("\n")).toContain("--diagnostics-port");
       expect(stdout.join("\n")).not.toContain("--display");
     }),
   );
 
-  it.effect("defaults to port 42070 and pings the database before listening", () =>
+  it.effect("defaults to port 42070 with diagnostics on 55445 and pings the database first", () =>
     Effect.gen(function* () {
       const fake = fakeServer();
       const log = FakeLog.fakeLog();
@@ -121,19 +128,21 @@ describe("reverse proxy command flags", () => {
       yield* Fiber.interrupt(fiber);
       const exit = yield* Fiber.await(fiber);
       expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true);
-      expect(fake.served).toEqual([42070]);
+      expect(fake.served).toEqual([[42070, 55445]]);
       expect(log.lines).toEqual([]);
     }),
   );
 
-  it.effect("--port 1234 reaches the server as given", () =>
+  it.effect("--port 1234 --diagnostics-port 5678 reach the server as given", () =>
     Effect.gen(function* () {
       const fake = fakeServer();
       const log = FakeLog.fakeLog();
-      const fiber = yield* Effect.forkChild(run(fake.server, ["--port", "1234"], log));
+      const fiber = yield* Effect.forkChild(
+        run(fake.server, ["--port", "1234", "--diagnostics-port", "5678"], log),
+      );
       yield* Deferred.await(fake.listening);
       yield* Fiber.interrupt(fiber);
-      expect(fake.served).toEqual([1234]);
+      expect(fake.served).toEqual([[1234, 5678]]);
     }),
   );
 });

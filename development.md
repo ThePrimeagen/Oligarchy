@@ -2,9 +2,10 @@
 
 The one developer document for `v2/`, the Effect rewrite of oligarchy. It owns repository
 decisions: how services, errors, schemas, processes, the database and the tests are written here,
-and every string the proxy, the reverse proxy, the CLIs and the database promise to their callers. It does not
-document the Effect API; API truth is `node_modules/effect/src`, `node_modules/effect/AGENTS.md`,
-`node_modules/effect/ai-docs/src`, `node_modules/@effect/platform-node/src` and
+and every string the proxy, the reverse proxy, the CLIs and the database promise to their callers.
+It does not document the Effect API; API truth is `node_modules/effect/src`,
+`node_modules/effect/AGENTS.md`, `node_modules/effect/ai-docs/src`,
+`node_modules/@effect/platform-node/src` and
 `node_modules/@effect/vitest/README.md`, all `4.0.0-rc.112`, and a name that is not there does not
 exist. Operator and agent documents are `client.md`, `ctrl.md`, `ctrl-linear.md`,
 `ctrl-diagnose.md`, `SERVER_VS_REVERSE_PROXY.md` (the two processes' responsibilities and the
@@ -103,6 +104,10 @@ bugs; anything not listed here is a regression.
 - A defect's boundary log detail is `Cause.pretty` of the die, not `stack ?? message`.
 - The catch-all 404 `{"error":"not found"}` answers before the bearer check, so an unauthenticated
   request to an unrouted path is 404 where v1 answered 401.
+- `GET /images/:id` is no longer a proxy route (v1 served the stored PNG from the database
+  without a token). A stored image has one address, the dashboard's
+  `https://oligarchy.trm.sh/images/<uuid>`, served by the Worker over Hyperdrive; on a proxy the
+  path is the catch-all's 404, unlogged.
 - A `/stop` that loses the race with the sweep is 404 `unknown session "<id>"`; v1 settled twice.
 
 ## Layout
@@ -127,7 +132,7 @@ src/
 ├── qmp/         framing.ts  socket.ts  client.ts
 ├── qemu/        keys.ts  args.ts  host.ts  process.ts  qemu.ts  iso.ts  stats.ts
 ├── proxy/       sessions.ts  middleware.ts  handlers.ts  command.ts  main.ts
-├── reverse-proxy/  router.ts  handlers.ts  command.ts  main.ts
+├── reverse-proxy/  router.ts  handlers.ts  diagnostics.ts  command.ts  main.ts
 ├── client/      flags.ts  proxy-client.ts  command.ts  main.ts
 ├── ctrl/        linear.ts  cursor.ts  prompts.ts  render.ts  command.ts  main.ts
 ├── session/     readline.ts  children.ts  state.ts  grammar.ts  image.ts  picker.ts
@@ -338,8 +343,8 @@ boundary.
 - The API errors: 400 `BadRequest { message, sessionId?, agentId? }`; 401 `Unauthorized`
   (`unauthorized`); 403 `Forbidden { message, sessionId, agentId }`; 404
   `UnknownSession { id, message, agentId? }` (built by `unknownSession(id, agentId?)`, attributed
-  to the id only when it is a uuid); 404 `NotFound` (`not found`; declared on `GET /images/:id` in
-  `api.ts`, though the handler answers that 404 raw and never raises it); 409
+  to the id only when it is a uuid); 404 `NotFound` (`not found`; raised by the reverse proxy's
+  `DELETE /servers` for a url never registered, declared on no proxy endpoint); 409
   `Conflict { message, sessionId }`; 502 `StartFailed` and
   `ExchangeFailed { message, cause?, sessionId, agentId }`; 500 `Internal { message: "internal
   error", cause, sessionId?, agentId? }`; the reverse proxy's 502 `ServerFailed { message, url,
@@ -568,8 +573,9 @@ export class ProxyConfig extends Context.Service<ProxyConfig>()("@oligarchy/conf
   host check, the server as `serve(display, automation, port)` and the `Deferred` a server error
   completes; `--automation` with `--display` is a `CliError.UserError` (`--automation is
   exclusive`) that the CLI renders, never a fatal log line. The reverse proxy's
-  `makeReverseProxyCommand({ serve, serverFailed })` takes only `--port` (default 42070) and the
-  server as `serve(port)`: no host check, no display.
+  `makeReverseProxyCommand({ serve, serverFailed })` takes `--port` (default 42070) and
+  `--diagnostics-port` (default 55445) and the two listeners as one layer, `serve(port,
+  diagnosticsPort)`: no host check, no display.
 
 `src/client/main.ts`: the whole entry.
 
@@ -610,18 +616,15 @@ The listen line is `oligarchy proxy listening on 127.0.0.1:<port>; display <d>[;
 | `POST /send-mouse` | `id, x, y, button?, clicks?, agent` | `{"ok":"true"}` | 403 404 502 |
 | `POST /intent/start` | `id, agent, test_result_id, message` | `{"ok":"true"}` | 403 404 |
 | `POST /intent/end` | `id, agent` | `{"ok":"true"}` | 403 404 |
-| `GET /images/:id` | path `id` | `image/png` | 404, no auth |
 
-- Every route but `GET /images/:id` requires `Authorization: Bearer <OLIGARCHY_TOKEN>`; a missing
-  or wrong token is 401 `{"error":"unauthorized"}`. The compare is exact string equality on the
-  `Redacted` values.
+- Every route requires `Authorization: Bearer <OLIGARCHY_TOKEN>`; a missing or wrong token is 401
+  `{"error":"unauthorized"}`. The compare is exact string equality on the `Redacted` values.
 - Every `Sessions` route may also answer 400 (a bad body or query, message from the schema; a
   malformed JSON body is `Expected a valid JSON body`), 401 and 500 (`{"error":"internal error"}`,
   a defect) through the group middleware, so they are not listed per row. Every 4xx and 5xx body is
   `{"error":"<message>"}`; `{"ok":"true"}` carries the string `"true"`; anything unrouted is 404
-  `{"error":"not found"}` and is not logged, and neither is `GET /images/<not a uuid or unknown>`:
-  the handler answers that 404 raw, so no error line or row is written (v1 parity); a database
-  failure on that route is still a logged 500.
+  `{"error":"not found"}` and is not logged. `GET /images/:id` is unrouted here: a stored image's
+  one address is the dashboard's, `Contract.StoredImageUrl(id)` (Dashboard).
 - Session lookup on every driving route: `session id is required` (400), `unknown session "<id>"`
   (404), `agent "<agent>" does not own session "<id>"` (403). The lookup resets the inactivity
   window even when the work that follows fails; `/follow` and `/dump` never reset it.
@@ -686,7 +689,8 @@ The listen line is `oligarchy proxy listening on 127.0.0.1:<port>; display <d>[;
 - An `action` is one request (`/send-keys`, `/send-mouse`, `/image`, `/serial`), not one QMP
   exchange; `id` is a per-session counter, only the name is carried, and a request refused before
   any work never appears. `image` lands before that action's `completed` line and carries the same
-  uuid as `GET /images/:id`. `intent` `cancelled` is a session that ended with its intent open.
+  uuid as `Contract.StoredImageUrl`. `intent` `cancelled` is a session that ended with its intent
+  open.
   The follow view decodes `png` with `Result.getOrThrow`: bad base64 from our own proxy is a defect.
 - Each follower is a `Queue.dropping(64)`; when `Queue.offerUnsafe` returns `false` the follower is
   ended with `Queue.endUnsafe`, logged `follower dropped; 64 events behind` at warning, and removed:
@@ -698,7 +702,7 @@ The listen line is `oligarchy proxy listening on 127.0.0.1:<port>; display <d>[;
 ## HttpApi server
 
 - The contract lives in three files: `src/shared/api.ts` (middleware tags, `HttpApiEndpoint`s,
-  the `Sessions` and `Images` groups, `ProxyApi`, the reverse proxy's `RouteBoundary`,
+  the `Sessions` group, `ProxyApi`, the reverse proxy's `RouteBoundary`,
   `RoutedSessions`, `Servers` and `ReverseProxyApi`, `VERSION`), `contract.ts` (`Schema.Class`
   DTOs and the `SessionQuery`/`IdQuery` field objects), `errors.ts` (errors and wire codecs). No
   handler code lives there; `HttpApiEndpoint`, `HttpApiGroup.make`, `HttpApi.make` appear only in
@@ -708,20 +712,18 @@ The listen line is `oligarchy proxy listening on 127.0.0.1:<port>; display <d>[;
   headers via `HttpApiSchema.WithHeaders`, byte streams via `HttpApiSchema.StreamUint8Array`.
 - Group with `HttpApiGroup.make("Sessions").add(...).middleware(BearerAuth)
   .middleware(ApiBoundary)`; middleware `error` schemas merge into every endpoint of the group, so
-  400/401/500 are not listed per endpoint. `Images` carries only `ApiBoundary`. Middlewares wrap
-  in insertion order, so `ApiBoundary` is outermost and logs an `Unauthorized`. A missing bearer
-  header arrives as `Redacted.make("")`.
-- Implement groups in `src/proxy/handlers.ts` as `SessionsLive(display, automation)` and
-  `ImagesLive`: `HttpApiBuilder.group(ProxyApi, "Sessions", (handlers) => handlers.handle(name,
-  ({ payload, query, params }) => Effect.gen(...), { uninterruptible: true }))`, each handler
+  400/401/500 are not listed per endpoint. Middlewares wrap in insertion order, so `ApiBoundary`
+  is outermost and logs an `Unauthorized`. A missing bearer header arrives as `Redacted.make("")`.
+- Implement the group in `src/proxy/handlers.ts` as `SessionsLive(display, automation)`:
+  `HttpApiBuilder.group(ProxyApi, "Sessions", (handlers) => handlers.handle(name,
+  ({ payload, query }) => Effect.gen(...), { uninterruptible: true }))`, each handler
   `yield*`ing `Sessions` and consuming the decoded contract (`image` returns
   `HttpApiSchema.withHeaders({ body: png, headers: { "x-image-url": url } })`); every
   session-driving handler is uninterruptible (a client that disconnects mid-`/start` must not leave
   an orphan QEMU); `follow`, `dump` and `stats` are interruptible; `handleRaw` when the handler
-  owns the `HttpServerResponse`: `follow` (the NDJSON stream) and `storedImage`, whose two 404s
-  return the catch-all's `notFound` response rather than raising, so the boundary writes no error
-  line for an unknown image. `Handlers.routes(display, automation)` merges
-  `HttpApiBuilder.layer(ProxyApi)` over the groups and middlewares with the catch-all
+  owns the `HttpServerResponse`: `follow` (the NDJSON stream). `Handlers.routes(display,
+  automation)` merges `HttpApiBuilder.layer(ProxyApi)` over the group and middlewares with the
+  catch-all
   `HttpRouter.add("*", "*", notFound)`, the only route outside the api.
 - `ApiBoundary` turns `HttpApiError.HttpApiSchemaError` into `BadRequest` (400), re-fails a
   declared `ApiError`, sends anything else down the defect path, turns a defect into `Internal`
@@ -834,9 +836,10 @@ their `/stats`, and it routes every request that names a session to the server t
 session. It runs no QEMU, checks no host and holds no session state of its own: what it owns is
 the fleet and the routing table, both rows in the control-plane database.
 
-- Process: `./reverse-proxy [--port <n>]`, default `42070` (the servers keep `42069`; both run on
-  one host in development), bound to `127.0.0.1` like the proxy. The listen line is
-  `oligarchy reverse proxy listening on 127.0.0.1:<port>`. It reads `OLIGARCHY_TOKEN` then
+- Process: `./reverse-proxy [--port <n>] [--diagnostics-port <n>]`, defaults `42070` (the servers
+  keep `42069`; both run on one host in development) and `55445`, both bound to `127.0.0.1` like
+  the proxy. The listen line is `oligarchy reverse proxy listening on 127.0.0.1:<port>;
+  diagnostics on 127.0.0.1:<diagnostics port>`. It reads `OLIGARCHY_TOKEN` then
   `DATABASE_URL` through the same `ProxyConfig` the proxy reads, and the one token is shared by
   the client, the reverse proxy and every server: the reverse proxy checks the client's bearer and
   sends its own, identical, upstream. Startup order: parse flags, `database.ping`
@@ -857,7 +860,7 @@ the fleet and the routing table, both rows in the control-plane database.
 | `DELETE /servers` | `url` | `{"ok":"true"}` | 404 |
 | `GET /servers` | none | `{"servers":[{"url","stats"}]}` | none |
 | `POST /start` | as the proxy | the server's answer | 503, else the server's |
-| every `ProxyApi` route but `/start`, `/stats`, `/images/:id` | as the proxy | the server's answer | 404, else the server's |
+| every `ProxyApi` route but `/start` and `/stats` | as the proxy | the server's answer | 404, else the server's |
 
 - Every route requires `Authorization: Bearer <OLIGARCHY_TOKEN>`; a missing or wrong token is 401
   `{"error":"unauthorized"}`. Every route may also answer 400 (a bad body or query, message from
@@ -865,8 +868,8 @@ the fleet and the routing table, both rows in the control-plane database.
   database failure) and 502 `ServerFailed` through the `RouteBoundary` middleware, so they are not
   listed per row. Anything unrouted — `GET /stats`, `GET /images/:id`, `GET /nope`, `DELETE
   /start` — is 404 `{"error":"not found"}` and is not logged. Why no `/stats`: a fleet has no one
-  cpu; the per-server numbers are `GET /servers`. Why no `/images/:id`: a stored image's address
-  is the dashboard's (`Contract.StoredImageUrl`), never a proxy's, and nothing calls it.
+  cpu; the per-server numbers are `GET /servers`. `/images/:id` is unrouted on every proxy: a
+  stored image's one address is the dashboard's (`Contract.StoredImageUrl`).
 - `POST /servers { url }`: `url` is a `Domain.ServerUrl`, an `http://` or `https://` url with a
   host (`url must be an http or https url`, 400), stored exactly as given, as `--server-url` is,
   and joined to each path with `HttpClientRequest.prependUrl` (one slash, as the generated
@@ -925,11 +928,29 @@ the fleet and the routing table, both rows in the control-plane database.
 - Divergences from talking to a server directly, both refusals either way: an empty id on an agent
   route is 404 `unknown session ""` here where the server answers 400 `session id is required`,
   and an unknown session is refused here before any server sees it.
+- The diagnostics page, `http://127.0.0.1:<diagnostics port>/`, is the operator's view of the
+  fleet without a token — a browser has no bearer to send — so it listens on its own loopback
+  port, `--diagnostics-port` (default 55445), never on the API's, and nothing should be put in
+  front of it. It is unstyled text: `GET /` is the fleet as `GET /servers` reports it, one row per
+  server (`url`, `qemus`, `memory` as `used / total GB`, `cpu` as the mean percentage, or the one
+  cell `did not answer`), a `delete` button per row, `no servers registered` when the fleet is
+  empty, and an add box. `POST /servers` and `POST /servers/delete` take the form field `url` and
+  do exactly what the API routes do through the same `Router`, then answer 303 back to `/`. A
+  refusal renders the page whole with the reason on top as `error: <reason>` under the refusal's
+  status: 400 `url must be an http or https url` (a url the rule refuses, or a body that is not a
+  form), 502 the probe's `ServerFailed` message, 404 `<url> is not registered`; a database
+  failure or a defect is 500 `error: internal error` with the fleet omitted, not shown as empty.
+  Every refusal writes the boundary's line, `<METHOD> <path> failed: <reason>`, Sentry from 500 up;
+  a path or method that is not one of the three is `not found`, 404, unlogged. The page is a plain
+  `HttpServer.serve(handler)` over a `switch` on method and path rather than a second
+  `HttpRouter`, because `HttpRouter.serve` memoises one router per graph and a second would
+  serve the API's routes too. Every url on the page is HTML-escaped: it is the operator's text.
 - Deliberately absent until a need shows it: a health loop (a dead server costs one `PROBE_TIMEOUT`
   per start and per `GET /servers` until `DELETE /servers` forgets it), a capacity limit or a
   reservation (two starts probing at once see the same `qemus` and may pick the same server; a
   booting machine is not yet counted), retries, a stop of the machine whose route could not be
-  written, `/stats` and `/images/:id`.
+  written, `/stats`, and any registration a server could do for itself: today an operator adds a
+  server, over the API or on the diagnostics page.
 
 The pieces: `src/shared/api.ts` declares `RouteBoundary` (the boundary middleware declaring
 `BadRequestWire`, `InternalWire`, `ServerFailedWire` and `NoServerWire`), `RoutedSessions` (the
@@ -940,7 +961,8 @@ errors they declare; `src/db/servers.ts` is `ServerStore` (`addServer`, `removeS
 `listServers`, `routeSession`, `serverForSession`) over `servers` and `session_servers`;
 `src/reverse-proxy/router.ts` is the `Router` service (`register`, `unregister`, `servers`,
 `start`, `forward`) over `ServerStore`, `Log`, `HttpClient` and `ProxyConfig`; `handlers.ts`
-binds the two groups and the catch-all; `command.ts` is `makeReverseProxyCommand({ serve,
+binds the two groups and the catch-all; `diagnostics.ts` is the page's `handler`; `command.ts`
+is `makeReverseProxyCommand({ serve,
 serverFailed })` with `serve(port)`; `main.ts` composes the graph as the proxy's does, with the
 same `TracerDisabledWhen`, without `Qemu`, `Iso`, `Stats`, `Sessions` or a `Shutdown`.
 
@@ -1247,9 +1269,9 @@ const prepare = Effect.fn("Qemu.prepare")(function* (id: string, disk: string | 
   and read back as Drizzle types them.
 - `src/db/schema.ts` is v1's schema formatted by oxfmt, plus `debug_logs`, `post_run_error_types`,
   `post_run_diagnosis`, `servers` and `session_servers` (v2-only). The v1 tables stay
-  semantically identical, not byte-identical. Its `pgEnum` lists and the `Schema.Literals` in `domain.ts` are maintained by
-  hand together; `post_run_error_types` is the one vocabulary that is data, not an enum (see
-  Post-run diagnosis). Row
+  semantically identical, not byte-identical. Its `pgEnum` lists and the `Schema.Literals` in
+  `domain.ts` are maintained by hand together; `post_run_error_types` is the one vocabulary that
+  is data, not an enum (see Post-run diagnosis). Row
   stamps come from Postgres `now()` in the statement; Effect-side time from
   `Clock.currentTimeMillis`. `registerAgent`'s primary key makes one session per agent; a second
   registration is a `DatabaseError` by design. `TestStore.closeResult(resultId, status, reason,
@@ -1300,9 +1322,10 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
   for the boot handshake, the `{return}` otherwise) or `failed` with the error (QEMU's `{error}`
   reply, or this server's message when the failure never reached QEMU). There is no error column.
 - A completed `get-image` passes `{ id, data }` and the update plus the `images` insert land in one
-  transaction; images are 1:1 with their action and addressed by a uuid, served at
-  `GET /images/<uuid>` here and at `https://oligarchy.trm.sh/images/<uuid>`
-  (`Contract.StoredImageUrl(id)`), listed per session by `ActionStore.listImages` (`images ⋈
+  transaction; images are 1:1 with their action and addressed by a uuid, served by the dashboard
+  Worker alone at `https://oligarchy.trm.sh/images/<uuid>` (`Contract.StoredImageUrl(id)`, the
+  `x-image-url` header and the `url` of `ctrl session --images`; no proxy serves it), listed per
+  session by `ActionStore.listImages` (`images ⋈
   actions`, `{ id, actionId, createdAt }` in action order) for `ctrl session --images`, which adds
   that `url`, and printed by `./session image --image-id <id>` from the database alone. A screendump whose image write failed leaves the action row open; only a failed
   exchange is closed without an image.
@@ -1501,6 +1524,10 @@ and drizzle, the same tables the Effect `TestStore` writes. It does not call `Pr
 
 - `query.ts` opens one `pg.Client` per request, runs the query, and ends the client in
   `finally` so a Hyperdrive connection is never held past the response.
+- `GET /images/:id` serves a stored screenshot as `image/png` (`cache-control: no-store`) from
+  the `images` table: a non-uuid or an unknown id is the Worker's 404, a query failure a 500 with
+  a `captureException`. It is the one address of an image, `Contract.StoredImageUrl(id)`
+  (`https://oligarchy.trm.sh/images/<uuid>`); no proxy serves images.
 - The test-results page lists the last 50 `sessions` (newest `started_at` first), left-joined
   to `test_results` / `test_definitions`. `test_results.session_id` is unique, so the join
   cannot duplicate a session. A session with no result shows no test name and no model.
@@ -1522,9 +1549,10 @@ and drizzle, the same tables the Effect `TestStore` writes. It does not call `Pr
 ## Sentry
 
 - Initialise the SDK before any Effect code in `src/observability/instrument.ts`, loaded by the
-  `server` and `reverse-proxy` wrappers' `--import`: `Sentry.init({ dsn: SENTRY_DSN, tracesSampleRate: 1,
-  traceLifecycle: "stream", integrations: [Sentry.httpIntegration({ spans: false }),
-  Sentry.nativeNodeFetchIntegration({ spans: false })] })`. `SENTRY_DSN` in `dsn.ts` is the one
+  `server` and `reverse-proxy` wrappers' `--import`: `Sentry.init({ dsn: SENTRY_DSN,
+  tracesSampleRate: 1, traceLifecycle: "stream", integrations: [Sentry.httpIntegration({ spans:
+  false }), Sentry.nativeNodeFetchIntegration({ spans: false })] })`. `SENTRY_DSN` in `dsn.ts` is
+  the one
   hard-coded constant (public by design) and is shared with the dashboard.
 - `@sentry/node` and `@sentry/effect` are imported only in `src/observability/`;
   `@sentry/cloudflare` only in `src/dashboard/`. All three are pinned to one version so
@@ -1662,8 +1690,8 @@ detach(live, queue)))`; `emit(live, event)` offers to every queue with `Queue.of
   in `src/db/client.ts` alone (`pool.on("error")`, drizzle's `transaction`), nowhere else.
 - The CLIs run `Command.run(cmd, { version })` directly under `runMain`; only the proxy and the
   reverse proxy `Layer.launch`, and the stop condition is `Effect.raceFirst(Layer.launch(serve(
-  display, automation, port)), Deferred.await(serverFailed))` (`serve(port)` for the reverse
-  proxy) inside the command handler.
+  display, automation, port)), Deferred.await(serverFailed))` (`serve(port, diagnosticsPort)`
+  for the reverse proxy) inside the command handler.
 - `runMain` owns SIGINT and SIGTERM: the first signal interrupts the root fiber and scopes close in
   reverse order (sessions drained and closed `aborted` with `proxy shutdown`, the log flushed,
   Sentry flushed, the pool closed). Component layers never install signal handlers. The session
@@ -1683,9 +1711,10 @@ detach(live, queue)))`; `emit(live, event)` offers to every queue with `Queue.of
   `HttpServerError.ServeError`, sets the drain reason to `proxy error: <msg>`, and exits 1; a
   second error is ignored. Shutdown logs `proxy: shutting down; stopping N sessions`, then
   `stopped; aborted; proxy shutdown` per session. The reverse proxy's handler is the same minus
-  the host check: parse `--port`, `database.ping`, listen; its fatal line is `reverse proxy:
-  <detail>`, its teardown exits 1 on any failure but an interrupt and 0 otherwise, and it logs
-  nothing at shutdown because nothing of its own is stopping.
+  the host check: parse `--port` and `--diagnostics-port`, `database.ping`, listen on both; an
+  `error` on either listener is the fatal line; its fatal line is `reverse proxy: <detail>`, its
+  teardown exits 1 on any failure but an interrupt and 0 otherwise, and it logs nothing at
+  shutdown because nothing of its own is stopping.
 - `Sessions.Shutdown` is a `Context.Reference` `{ reason: MutableRef<string>; failed:
   MutableRef<boolean> }` (`MutableRef`, because both ends sit outside Effect): `main.ts` holds
   `Sessions.Shutdown.defaultValue()`, provides it to the `Sessions` layer, sets `reason` from the
@@ -1815,7 +1844,8 @@ Developers need the same model of a drive as the agents `prompts/linear-issue.ht
   stderr opened on `/dev/full`; for the reverse proxy: `--help`, a missing token, an unreachable
   database (no QEMU on the host is needed, so that one always runs), an occupied port, and serving
   (`GET /servers` empty, 401, 404 for `/stats` and `/images/:id`, 503 for a start with no server,
-  exit 0 on SIGINT and SIGTERM). Spawn helpers may be plain functions inside the test file.
+  the diagnostics page on its port with a dead server refused on it, exit 0 on SIGINT and
+  SIGTERM). Spawn helpers may be plain functions inside the test file.
 - Postgres tests run against Testcontainers with the real migrations and the seed in
   `vitest.global-setup.ts` and read `inject("dbUrl")` (`Postgres.describeWithDatabase` skips when
   it is empty); they skip locally without Docker and fail in CI (`CI` or

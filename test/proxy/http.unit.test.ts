@@ -31,7 +31,6 @@ import * as Errors from "../../src/shared/errors.ts";
 import * as FakeSessions from "../support/fake-sessions.ts";
 import * as FakeLog from "../support/log.ts";
 import * as Reporter from "../support/reporter.ts";
-import * as Stores from "../support/stores.ts";
 
 const TOKEN = "test-token";
 const { SESSION_ID, AGENT_ID, OTHER_AGENT_ID, STARTED_ID, IMAGE_ID } = FakeSessions;
@@ -49,14 +48,12 @@ const bearer = (token: string) =>
 type Fixture = {
   readonly sessions: FakeSessions.FakeSessions;
   readonly log: FakeLog.FakeLog;
-  readonly actions: Stores.FakeActionStore;
   readonly reporter: Reporter.Collector;
 };
 
 const fixture = (overrides: Partial<Fixture> = {}): Fixture => ({
   sessions: FakeSessions.fakeSessions(),
   log: FakeLog.fakeLog(),
-  actions: Stores.fakeActionStore(),
   reporter: Reporter.collect(),
   ...overrides,
 });
@@ -67,7 +64,7 @@ const serve = (fixed: Fixture, log: Layer.Layer<Log.Log> = fixed.log.layer) =>
     disableLogger: true,
     disableListenLog: true,
   }).pipe(
-    Layer.provide(Layer.mergeAll(fixed.sessions.layer, log, fixed.actions.layer, ProxyConfigLive)),
+    Layer.provide(Layer.mergeAll(fixed.sessions.layer, log, ProxyConfigLive)),
     Layer.provideMerge(NodeHttpServer.layerTest),
     Layer.provideMerge(fixed.reporter.layer),
     Layer.provideMerge(bearer(TOKEN)),
@@ -318,73 +315,6 @@ describe("Sessions endpoints happy path", () => {
   );
 });
 
-describe("Images endpoint", () => {
-  it.effect("GET /images/<uuid> serves the stored PNG without a token", () =>
-    Effect.gen(function* () {
-      const fixed = fixture();
-      fixed.actions.images.push({ id: IMAGE_ID, actionId: 1, data: FakeSessions.PNG });
-      yield* Effect.gen(function* () {
-        const http = yield* HttpClient.HttpClient;
-        const response = yield* http.get(`/images/${IMAGE_ID}`);
-        expect(response.status).toBe(200);
-        expect(response.headers["content-type"]).toBe("image/png");
-        expect([...new Uint8Array(yield* response.arrayBuffer)]).toEqual([...FakeSessions.PNG]);
-      }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.log.lines).toEqual([]);
-    }),
-  );
-
-  it.effect("GET /images/<non-uuid> and an unknown uuid are 404 not found and never logged", () =>
-    Effect.gen(function* () {
-      const fixed = fixture();
-      yield* Effect.gen(function* () {
-        const http = yield* HttpClient.HttpClient;
-        for (const id of ["nope", "00000000-0000-4000-8000-000000000000"]) {
-          const response = yield* http.get(`/images/${id}`);
-          expect(response.status).toBe(404);
-          expect(response.headers["content-type"]).toContain("application/json");
-          expect(yield* response.json).toEqual({ error: "not found" });
-        }
-        const api = yield* client;
-        const error = yield* Effect.flip(api.Images.storedImage({ params: { id: "nope" } }));
-        expect(error._tag).toBe("NotFound");
-      }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.log.lines).toEqual([]);
-    }),
-  );
-
-  it.effect("GET /images/<uuid> whose lookup fails is 500 logged with the driver's reason", () =>
-    Effect.gen(function* () {
-      const fixed = fixture({
-        actions: Stores.fakeActionStore({
-          getImage: () =>
-            Effect.fail(
-              Errors.DatabaseError.make({
-                operation: "getImage",
-                message: "Failed query: select from images",
-                cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
-              }),
-            ),
-        }),
-      });
-      yield* Effect.gen(function* () {
-        const http = yield* HttpClient.HttpClient;
-        const response = yield* http.get(`/images/${IMAGE_ID}`);
-        expect(response.status).toBe(500);
-        expect(yield* response.json).toEqual({ error: "internal error" });
-      }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.log.lines).toMatchObject([
-        {
-          level: "error",
-          text: `GET /images/${IMAGE_ID} failed: connect ECONNREFUSED 127.0.0.1:5432`,
-          skipSentry: false,
-          cause: { _tag: "DatabaseError" },
-        },
-      ]);
-    }),
-  );
-});
-
 describe("authentication", () => {
   const sessionsRoutes: ReadonlyArray<readonly [string, string, boolean]> = [
     ["POST", "/start", true],
@@ -480,25 +410,33 @@ describe("authentication", () => {
 });
 
 describe("catch-all", () => {
-  it.effect("GET /nope and DELETE /start are 404 not found and never logged", () =>
-    Effect.gen(function* () {
-      const fixed = fixture();
-      yield* Effect.gen(function* () {
-        const http = yield* HttpClient.HttpClient;
-        const headers = { authorization: `Bearer ${TOKEN}` };
-        const missing = yield* http.get("/nope", { headers });
-        expect(missing.status).toBe(404);
-        expect(yield* missing.json).toEqual({ error: "not found" });
-        const wrongMethod = yield* http.del("/start", { headers });
-        expect(wrongMethod.status).toBe(404);
-        expect(yield* wrongMethod.json).toEqual({ error: "not found" });
-        const noToken = yield* http.get("/nope");
-        expect(noToken.status).toBe(404);
-        expect(yield* noToken.json).toEqual({ error: "not found" });
-      }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.log.lines).toEqual([]);
-      expect(fixed.sessions.calls).toEqual([]);
-    }),
+  it.effect(
+    "GET /nope, DELETE /start and GET /images/<uuid> are 404 not found and never logged",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture();
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          const headers = { authorization: `Bearer ${TOKEN}` };
+          const missing = yield* http.get("/nope", { headers });
+          expect(missing.status).toBe(404);
+          expect(yield* missing.json).toEqual({ error: "not found" });
+          // The stored image's one address is the dashboard's; no proxy serves it.
+          for (const path of [`/images/${IMAGE_ID}`, "/images/nope"]) {
+            const image = yield* http.get(path, { headers });
+            expect(image.status).toBe(404);
+            expect(yield* image.json).toEqual({ error: "not found" });
+          }
+          const wrongMethod = yield* http.del("/start", { headers });
+          expect(wrongMethod.status).toBe(404);
+          expect(yield* wrongMethod.json).toEqual({ error: "not found" });
+          const noToken = yield* http.get("/nope");
+          expect(noToken.status).toBe(404);
+          expect(yield* noToken.json).toEqual({ error: "not found" });
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.log.lines).toEqual([]);
+        expect(fixed.sessions.calls).toEqual([]);
+      }),
   );
 });
 

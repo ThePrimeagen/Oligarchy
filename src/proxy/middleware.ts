@@ -9,8 +9,8 @@ import * as Api from "../shared/api.ts";
 import * as Domain from "../shared/domain.ts";
 import * as Errors from "../shared/errors.ts";
 
-// Every route but GET /images/* carries `Authorization: Bearer <OLIGARCHY_TOKEN>`; the compare is
-// exact, as it always was.
+// Every route carries `Authorization: Bearer <OLIGARCHY_TOKEN>`; the compare is exact, as it
+// always was.
 export const BearerAuthLive: Layer.Layer<Api.BearerAuth, never, Config.ProxyConfig> = Layer.effect(
   Api.BearerAuth,
 )(

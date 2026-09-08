@@ -144,12 +144,13 @@ const request = (
   );
 
 describe("reverse proxy startup refusals", () => {
-  it.live("--help exits 0 and lists --port alone", () =>
+  it.live("--help exits 0 and lists --port and --diagnostics-port", () =>
     Effect.promise(async () => {
       const process = spawnReverseProxy(["--help"]);
       const { code } = await process.exited;
       expect(code).toBe(0);
       expect(process.stdout()).toContain("--port");
+      expect(process.stdout()).toContain("--diagnostics-port");
       expect(process.stdout()).not.toContain("--display");
       expect(process.stdout()).not.toContain("--automation");
     }),
@@ -224,12 +225,39 @@ describe("reverse proxy serving", () => {
 
   const served = async (signal: "SIGINT" | "SIGTERM") => {
     const port = await freePort();
-    const process = spawnReverseProxy(["--port", String(port)]);
+    const diagnosticsPort = await freePort();
+    const process = spawnReverseProxy([
+      "--port",
+      String(port),
+      "--diagnostics-port",
+      String(diagnosticsPort),
+    ]);
     try {
       await process.waitFor(/oligarchy reverse proxy listening/);
       expect(lines(process.stdout())).toContain(
-        `[global] oligarchy reverse proxy listening on 127.0.0.1:${String(port)}`,
+        `[global] oligarchy reverse proxy listening on 127.0.0.1:${String(port)}; diagnostics on 127.0.0.1:${String(diagnosticsPort)}`,
       );
+
+      // The diagnostics page: no token, the empty fleet, and a dead server refused on the page.
+      const page = await request(diagnosticsPort, "GET", "/");
+      expect(page.status).toBe(200);
+      expect(page.headers.get("content-type")).toContain("text/html");
+      const html = await page.text();
+      expect(html).toContain("<h1>oligarchy reverse proxy</h1>");
+      expect(html).toContain("no servers registered");
+      const dead = await request(
+        diagnosticsPort,
+        "POST",
+        "/servers",
+        { "content-type": "application/x-www-form-urlencoded" },
+        "url=http%3A%2F%2F127.0.0.1%3A1",
+      );
+      expect(dead.status).toBe(502);
+      expect(await dead.text()).toContain(
+        "server http://127.0.0.1:1 unreachable: connect ECONNREFUSED",
+      );
+      const apiOnDiagnostics = await request(diagnosticsPort, "GET", "/servers");
+      expect(apiOnDiagnostics.status).toBe(404);
 
       const servers = await request(port, "GET", "/servers", {
         authorization: `Bearer ${TOKEN}`,
@@ -268,11 +296,19 @@ describe("reverse proxy serving", () => {
     const output = lines(process.stdout());
     expect(output).toContain("[global] error: POST /send-keys failed: unauthorized");
     expect(output).toContain("[OLI-1] error: POST /start failed: no server registered");
+    expect(
+      output.some((line) =>
+        line.startsWith(
+          "[global] error: POST /servers failed: server http://127.0.0.1:1 unreachable:",
+        ),
+      ),
+    ).toBe(true);
     expect(output.some((line) => line.includes("GET /stats"))).toBe(false);
     expect(output.some((line) => line.includes("/images/"))).toBe(false);
     expect(process.stderr()).toBe("");
 
     await expect(request(port, "GET", "/servers")).rejects.toThrow();
+    await expect(request(diagnosticsPort, "GET", "/")).rejects.toThrow();
   };
 
   it.live.skipIf(dbUrl === "")(

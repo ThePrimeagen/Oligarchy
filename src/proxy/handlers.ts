@@ -1,11 +1,9 @@
-import { Effect, Layer, Option, Stream } from "effect";
+import { Effect, Layer, Stream } from "effect";
 import { HttpRouter, HttpServerResponse } from "effect/unstable/http";
 import { HttpApiBuilder, HttpApiSchema } from "effect/unstable/httpapi";
-import * as Actions from "../db/actions.ts";
 import * as Api from "../shared/api.ts";
 import * as Contract from "../shared/contract.ts";
 import * as Domain from "../shared/domain.ts";
-import * as Errors from "../shared/errors.ts";
 import * as Middleware from "./middleware.ts";
 import * as Sessions from "./sessions.ts";
 
@@ -136,33 +134,12 @@ export const SessionsLive = (display: Domain.QemuDisplay, automation: boolean) =
 
 const notFound = HttpServerResponse.jsonUnsafe({ error: "not found" }, { status: 404 });
 
-// This proxy only ever mints uuids: anything else names no stored image. An unknown image is an
-// answer, not a failed request: it is served raw so the boundary writes no error line for it.
-export const ImagesLive = HttpApiBuilder.group(Api.ProxyApi, "Images", (handlers) =>
-  handlers.handleRaw("storedImage", ({ params }) =>
-    Effect.gen(function* () {
-      if (!Domain.isSessionId(params.id)) {
-        return notFound;
-      }
-      const actions = yield* Actions.ActionStore;
-      const image = yield* actions
-        .getImage(params.id)
-        .pipe(
-          Effect.mapError((error) =>
-            Errors.Internal.make({ message: "internal error", cause: error }),
-          ),
-        );
-      return Option.getOrElse(image, () => notFound);
-    }),
-  ),
-);
-
 export const NotFoundRoute = HttpRouter.add("*", "*", notFound);
 
 export const routes = (display: Domain.QemuDisplay, automation: boolean) =>
   Layer.mergeAll(
     HttpApiBuilder.layer(Api.ProxyApi).pipe(
-      Layer.provide(Layer.mergeAll(SessionsLive(display, automation), ImagesLive)),
+      Layer.provide(SessionsLive(display, automation)),
       Layer.provide(Layer.mergeAll(Middleware.BearerAuthLive, Middleware.ApiBoundaryLive)),
     ),
     NotFoundRoute,

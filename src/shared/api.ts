@@ -125,16 +125,8 @@ export class Sessions extends HttpApiGroup.make("Sessions")
   .middleware(BearerAuth)
   .middleware(ApiBoundary) {}
 
-// Images group: no auth
-export const storedImage = HttpApiEndpoint.get("storedImage", "/images/:id", {
-  params: { id: Schema.String },
-  success: png,
-  error: Errors.NotFoundWire,
-});
-
-export class Images extends HttpApiGroup.make("Images").add(storedImage).middleware(ApiBoundary) {}
-
-export class ProxyApi extends HttpApi.make("OligarchyProxy").add(Sessions).add(Images) {}
+// A stored image has one address, the dashboard's (Contract.StoredImageUrl); no proxy serves it.
+export class ProxyApi extends HttpApi.make("OligarchyProxy").add(Sessions) {}
 
 // The reverse proxy: the proxy's own endpoints, so the client that speaks to a server speaks to
 // it, minus /stats (a fleet has no one cpu), behind the routing boundary.
