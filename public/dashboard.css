@@ -219,7 +219,7 @@ main {
     transform var(--transition);
 }
 
-.button:hover {
+.button:hover:not(:disabled) {
   background: var(--turquoise);
   transform: translateY(-1px);
 }
@@ -227,6 +227,13 @@ main {
 .button:focus-visible {
   outline: 2px solid var(--turquoise);
   outline-offset: 3px;
+}
+
+.button:disabled {
+  background: rgb(122 162 247 / 25%);
+  box-shadow: none;
+  color: rgb(26 27 38 / 70%);
+  cursor: not-allowed;
 }
 
 .scoreboard {
@@ -597,24 +604,13 @@ main {
   gap: 1.5rem;
 }
 
-/* The edit form: the newest wording, ready to be saved as the next. */
-.definition__edit > summary {
-  display: inline-block;
-  line-height: 2.9em;
-  cursor: pointer;
-  list-style: none;
-}
-
-.definition__edit > summary::-webkit-details-marker {
-  display: none;
-}
-
+/* The newest wording as a form: its update writes the next version, and the button stays gray until
+   a field differs from the text the page came with. */
 .definition__form {
   display: grid;
   gap: 1.1rem;
-  margin-top: 1.1rem;
   padding: 1.2em 1em;
-  border: 1px solid var(--turquoise);
+  border: 1px solid rgb(122 162 247 / 22%);
 }
 
 .definition__form-note,
@@ -707,7 +703,8 @@ main {
 }
 
 /* Wide screens: the definition names down the left; the current definition's results by version
-   beside its edit form, then its wordings newest first, each folding open on text, chart and runs. */
+   beside its newest wording as a form, then its wordings newest first, each folding open on text,
+   chart and runs. */
 @media (min-width: 64rem) {
   main[data-page="definitions"] {
     width: min(100% - 4rem, 96rem);
@@ -769,7 +766,7 @@ main {
     grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
     grid-template-areas:
       "title title"
-      "chart edit"
+      "chart form"
       "wordings wordings";
     align-items: start;
     column-gap: 4rem;
@@ -784,8 +781,8 @@ main {
     grid-area: chart;
   }
 
-  .definition__edit {
-    grid-area: edit;
+  .definition__form {
+    grid-area: form;
   }
 
   .definition__wordings {

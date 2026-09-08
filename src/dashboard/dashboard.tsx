@@ -345,9 +345,10 @@ const RunsTable: FC<{ runs: ReadonlyArray<TestResultOutcome> }> = ({ runs }) =>
     </table>
   );
 
-// One name's card: its results by version, the edit form that saves the next version, then every
-// wording newest first, the newest open, each with its text, its results by model and the runs
-// that used it. The name is what the wordings collapse under, so it is not a field.
+// One name's card: its results by version beside the newest wording as a form whose update writes
+// the next version, then every wording newest first, the newest open, each with its text, its
+// results by model and the runs that used it. The name is what the wordings collapse under, so it
+// is not a field.
 const DefinitionCard: FC<{
   group: DefinitionVersions;
   outcomes: ReadonlyArray<TestResultOutcome>;
@@ -368,41 +369,40 @@ const DefinitionCard: FC<{
           }))}
         />
       </div>
-      <details class="definition__edit" open={notice !== undefined}>
-        <summary class="button">Edit</summary>
-        <form method="post" action="/definitions" class="definition__form">
-          <input type="hidden" name="name" value={group.name} />
-          <p class="definition__form-note">
-            Saving writes v{next} of {group.name}; the earlier wordings keep their runs.
+      {/* The update button is handed over disabled; public/dashboard.js enables it once a field
+          differs from the wording it was rendered with, so an unchanged wording is not offered. */}
+      <form method="post" action="/definitions" class="definition__form">
+        <input type="hidden" name="name" value={group.name} />
+        <p class="definition__form-note">
+          Updating writes v{next} of {group.name}; the earlier wordings keep their runs.
+        </p>
+        {notice === undefined ? null : (
+          <p class="definition__form-notice" role="alert">
+            {EDIT_NOTICES[notice]}
           </p>
-          {notice === undefined ? null : (
-            <p class="definition__form-notice" role="alert">
-              {EDIT_NOTICES[notice]}
-            </p>
-          )}
-          <label class="definition__form-field">
-            <span>Description</span>
-            <textarea name="description" rows={3} required>
-              {newest.description}
-            </textarea>
-          </label>
-          <label class="definition__form-field">
-            <span>Instruction</span>
-            <textarea name="instruction" rows={6} required>
-              {newest.instruction}
-            </textarea>
-          </label>
-          <label class="definition__form-field">
-            <span>Proof</span>
-            <textarea name="proof" rows={3} required>
-              {newest.proof}
-            </textarea>
-          </label>
-          <button class="button" type="submit">
-            Save as v{next}
-          </button>
-        </form>
-      </details>
+        )}
+        <label class="definition__form-field">
+          <span>Description</span>
+          <textarea name="description" rows={3} required>
+            {newest.description}
+          </textarea>
+        </label>
+        <label class="definition__form-field">
+          <span>Instruction</span>
+          <textarea name="instruction" rows={6} required>
+            {newest.instruction}
+          </textarea>
+        </label>
+        <label class="definition__form-field">
+          <span>Proof</span>
+          <textarea name="proof" rows={3} required>
+            {newest.proof}
+          </textarea>
+        </label>
+        <button class="button" type="submit" disabled>
+          Update
+        </button>
+      </form>
       <ul class="definition__wordings">
         {group.versions.toReversed().map((wording, index) => {
           const version = group.versions.length - index;
@@ -605,6 +605,7 @@ app.use(
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
         <link rel="stylesheet" href="/dashboard.css" />
         <script src={HTMX_URL} integrity={HTMX_INTEGRITY} crossorigin="anonymous"></script>
+        <script src="/dashboard.js" defer></script>
       </head>
       <body>{children}</body>
     </html>

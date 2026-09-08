@@ -263,10 +263,16 @@ const wordings = (card: string): ReadonlyArray<Wording> =>
     body: body ?? "",
   }));
 
-// The edit form of the current card: the hidden name and each field's prefilled text.
+// The edit form of the current card: the hidden name, each field's prefilled text, and the update
+// button's label and whether the page hands it over disabled.
 const editForm = (
   card: string,
-): { readonly name: string; readonly fields: Record<string, string>; readonly button: string } => {
+): {
+  readonly name: string;
+  readonly fields: Record<string, string>;
+  readonly button: string;
+  readonly disabled: boolean;
+} => {
   const form =
     /<form method="post" action="\/definitions"[^>]*>([\s\S]*?)<\/form>/.exec(card)?.[1] ?? "";
   const fields: Record<string, string> = {};
@@ -275,10 +281,12 @@ const editForm = (
   )) {
     fields[field ?? ""] = text ?? "";
   }
+  const button = /<button([^>]*type="submit"[^>]*)>([\s\S]*?)<\/button>/.exec(form);
   return {
     name: /<input type="hidden" name="name" value="([^"]*)"/.exec(form)?.[1] ?? "",
     fields,
-    button: /<button[^>]*type="submit"[^>]*>([\s\S]*?)<\/button>/.exec(form)?.[1] ?? "",
+    button: button?.[2] ?? "",
+    disabled: (button?.[1] ?? "").includes("disabled"),
   };
 };
 
@@ -455,7 +463,7 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
     }
   });
 
-  it("offers an edit form prefilled with the newest wording, the name fixed, saving as the next version", async () => {
+  it("shows the newest wording in a form, the name fixed, its update button handed over disabled", async () => {
     await seed(dbUrl, async (db) => {
       await db.insert(testDefinitions).values([
         { name: "wide-edit", description: "old d", instruction: "old i", proof: "old p" },
@@ -465,14 +473,22 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
     const { status, html } = await getPage("/definitions?name=wide-edit", dbUrl);
     expect(status).toBe(200);
     const card = currentCard(html);
+    // The form is in the card as it is, not behind a fold; the page's script enables the button
+    // once a field differs from the text it was rendered with.
+    expect(card).not.toContain('<details class="definition__edit"');
     expect(editForm(card)).toEqual({
       name: "wide-edit",
       fields: { description: "new d", instruction: "new i", proof: "new p" },
-      button: "Save as v3",
+      button: "Update",
+      disabled: true,
     });
+    expect(card).toContain(
+      "Updating writes v3 of wide-edit; the earlier wordings keep their runs.",
+    );
+    expect(html).toContain('<script src="/dashboard.js" defer=""></script>');
     // The name is not a field: it is what the wordings collapse under.
     expect(card).not.toMatch(/<(input|textarea)[^>]*name="name"[^>]*type="text"/);
-    expect(card).not.toContain('<details class="definition__edit" open');
+    expect(card).not.toContain('class="definition__form-notice"');
   });
 
   it("says so in the charts and the run list when the selected definition has not run yet", async () => {
@@ -528,8 +544,12 @@ describe.skipIf(dbUrl === "")("dashboard/definitions edit happy path", () => {
     expect(wordings(card).map((wording) => wording.label)).toEqual(["v3", "v2", "v1"]);
     expect(editForm(card)).toMatchObject({
       fields: { instruction: "third\nand more" },
-      button: "Save as v4",
+      button: "Update",
+      disabled: true,
     });
+    expect(card).toContain(
+      "Updating writes v4 of wide-save; the earlier wordings keep their runs.",
+    );
   });
 
   it("saves a wording that changes one field only, the other two as they were (happy)", async () => {
@@ -572,7 +592,7 @@ describe.skipIf(dbUrl === "")("dashboard/definitions edit unhappy path", () => {
     const { status, html } = await getPage("/definitions?name=wide-same&edit=unchanged", dbUrl);
     expect(status).toBe(200);
     const card = currentCard(html);
-    expect(card).toContain('<details class="definition__edit" open');
+    expect(card).toContain('<p class="definition__form-notice" role="alert">');
     expect(card).toContain("Nothing changed: the newest wording already reads like this.");
   });
 
@@ -595,7 +615,7 @@ describe.skipIf(dbUrl === "")("dashboard/definitions edit unhappy path", () => {
 
     const { html } = await getPage("/definitions?name=wide-empty&edit=empty", dbUrl);
     const card = currentCard(html);
-    expect(card).toContain('<details class="definition__edit" open');
+    expect(card).toContain('<p class="definition__form-notice" role="alert">');
     expect(card).toContain("Every field needs text.");
   });
 
@@ -613,7 +633,7 @@ describe.skipIf(dbUrl === "")("dashboard/definitions edit unhappy path", () => {
   it("shows a stale ?edit value as no notice at all", async () => {
     const { status, html } = await getPage("/definitions?name=lock-screen&edit=whatever", dbUrl);
     expect(status).toBe(200);
-    expect(currentCard(html)).not.toContain('<details class="definition__edit" open');
+    expect(currentCard(html)).not.toContain('class="definition__form-notice"');
   });
 });
 
