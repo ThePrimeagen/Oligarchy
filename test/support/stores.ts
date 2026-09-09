@@ -483,27 +483,40 @@ export const fakeTestStore = (
 // ServerStore
 // ---------------------------------------------------------------------------
 
+type Heartbeat = { readonly url: string; readonly stats: DbSchema.ServerStats };
+
 export type FakeServerStore = {
   // Registered urls, in registration order.
   readonly servers: Array<string>;
   // Session id to the url of the server that started it.
   readonly routes: Map<string, string>;
+  // Every heartbeat written, in order.
+  readonly heartbeats: Array<Heartbeat>;
   readonly layer: Layer.Layer<Servers.ServerStore>;
 };
 
 // A url registers once and a session is routed once, as the real keys promise: a second
-// registration is a no-op and a second route is the primary key's DatabaseError.
+// registration is a no-op and a second route is the primary key's DatabaseError. A heartbeat
+// registers the url too, as the real upsert does.
 export const fakeServerStore = (
   overrides: Partial<typeof Servers.ServerStore.Service> = {},
 ): FakeServerStore => {
   const servers: Array<string> = [];
   const routes = new Map<string, string>();
+  const heartbeats: Array<Heartbeat> = [];
   const service = Servers.ServerStore.of({
     addServer: (url) =>
       Effect.sync(() => {
         if (!servers.includes(url)) {
           servers.push(url);
         }
+      }),
+    heartbeat: (url, stats) =>
+      Effect.sync(() => {
+        if (!servers.includes(url)) {
+          servers.push(url);
+        }
+        heartbeats.push({ url, stats });
       }),
     removeServer: (url) =>
       Effect.sync(() => {
@@ -525,7 +538,7 @@ export const fakeServerStore = (
       Effect.sync(() => Option.fromUndefinedOr(routes.get(sessionId))),
     ...overrides,
   });
-  return { servers, routes, layer: Layer.succeed(Servers.ServerStore)(service) };
+  return { servers, routes, heartbeats, layer: Layer.succeed(Servers.ServerStore)(service) };
 };
 
 // Every store at once, sharing nothing: the common fixture for handler and command tests.

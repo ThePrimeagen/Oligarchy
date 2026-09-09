@@ -1,0 +1,48 @@
+import { Cause, Effect, Schedule, type Scope, Schema } from "effect";
+import * as Servers from "../db/servers.ts";
+import * as ExternalFailure from "../external-failure.ts";
+import * as Log from "../observability/log.ts";
+import * as Render from "../observability/render.ts";
+import * as Errors from "../shared/errors.ts";
+import * as Sessions from "./sessions.ts";
+
+// Every thirty seconds, and the dashboard polls as often: a server's row is never more than one
+// poll behind, and three missed writes are what the page calls silent.
+const HEARTBEAT_INTERVAL = "30 seconds";
+
+const isDatabaseError = Schema.is(Errors.DatabaseError);
+
+// Drizzle buries the reason (ECONNREFUSED etc.) in the cause; its own message is the failed SQL.
+const detail = (error: unknown): string =>
+  isDatabaseError(error)
+    ? Render.errorDetail(ExternalFailure.causeOf(error))
+    : Render.errorDetail(error);
+
+// Announces this server under `url`: its `servers` row is written now and every thirty seconds
+// with what it knows of itself, and the row's generation counts the writes, so a number that
+// stops moving is a server that stopped. A tick that fails is one error line; the next tick runs.
+export const announce = (
+  url: string,
+): Effect.Effect<void, never, Scope.Scope | Sessions.Sessions | Servers.ServerStore | Log.Log> =>
+  Effect.gen(function* () {
+    const sessions = yield* Sessions.Sessions;
+    const store = yield* Servers.ServerStore;
+    const log = yield* Log.Log;
+    const tick = sessions.stats.pipe(
+      Effect.flatMap((stats) =>
+        store.heartbeat(url, {
+          qemus: stats.qemus,
+          memory: { totalBytes: stats.memory.totalBytes, usedBytes: stats.memory.usedBytes },
+          cpu: { mean1m: stats.cpu.mean1m, mean2m: stats.cpu.mean2m, mean3m: stats.cpu.mean3m },
+        }),
+      ),
+      Effect.catchCause((cause) => {
+        const error = Cause.squash(cause);
+        return log.error(`heartbeat failed: ${detail(error)}`, { cause: error });
+      }),
+    );
+    yield* tick.pipe(
+      Effect.repeat(Schedule.spaced(HEARTBEAT_INTERVAL)),
+      Effect.forkScoped({ startImmediately: true }),
+    );
+  });

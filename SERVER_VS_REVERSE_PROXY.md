@@ -6,27 +6,28 @@ one and why each decision went the way it did. `development.md` holds the conven
 process follows and names the reverse proxy only where it taught one; what the reverse proxy
 promises — its routes, texts, statuses and log lines — is pinned by its code and tests and
 written out for operators here. A third party is named where it matters: the dashboard Worker
-(`src/dashboard/`, Cloudflare, Hyperdrive), which is where stored screenshots are served from.
+(`src/dashboard/`, Cloudflare, Hyperdrive), which is where stored screenshots and the fleet page
+are served from.
 
 | | The server (`./server`, `src/proxy/`) | The reverse proxy (`./reverse-proxy`, `src/reverse-proxy/`) |
 | --- | --- | --- |
 | One sentence | Boots and drives QEMU machines on one host | Sends each session's requests to the host that booted it |
-| Owns | The machines, the sessions map, the QMP sockets, the session directories | The fleet (`servers`) and the routing table (`session_servers`) |
+| Owns | The machines, the sessions map, the QMP sockets, the session directories, its own `servers` row | The fleet (`servers`) and the routing table (`session_servers`) |
 | Needs on its host | `qemu-system-x86_64`, `qemu-img`, OVMF, `/dev/kvm`, a display backend | Nothing but Node and a route to the database and the servers |
 | Reads | `OLIGARCHY_TOKEN`, `DATABASE_URL` | The same two, through the same `ProxyConfig` |
-| Default ports | `42069` | `42070` for the API, `55445` for the diagnostics page |
+| Default ports | `42069` | `42070` |
 | Speaks to clients | `ProxyApi`: the 11 `Sessions` routes, `/stats` among them | The same `Sessions` routes minus `/stats`, plus `POST/DELETE/GET /servers` |
-| Speaks to operators | Nothing beyond the API | The diagnostics page: the fleet, an add box, a delete button each |
+| Speaks to operators | Its `servers` row, rewritten every 30 s when started with `--url`; the dashboard shows it | Nothing beyond the API; the fleet page is the dashboard's |
 | Speaks to | QEMU over QMP, the database | The servers over HTTP (their own `ProxyApi`), the database |
-| Writes | `sessions`, `agent_runs`, `actions`, `images`, `debug_logs`, `logs` | `servers`, `session_servers`, `logs` |
+| Writes | `sessions`, `agent_runs`, `actions`, `images`, `debug_logs`, `logs`, its `servers` row | `servers`, `session_servers`, `logs` |
 | Serves images | No: `GET /images/:id` is the catch-all's 404 | No: the same 404 |
-| Background work | The 10 s timeout sweep, the cpu sampler, the log drain | The log drain only |
+| Background work | The 10 s timeout sweep, the cpu sampler, the 30 s heartbeat, the log drain | The log drain only |
 | At shutdown | Drains every session (`aborted`, `proxy shutdown`) | Nothing: the sessions are the servers' and the routes are rows |
 | Sentry spans | `QEMU session`, the intent, `QMP <cmd>` | None; only error lines report |
 
 ## Responsibilities
 
-### The server keeps everything it had, minus one route
+### The server keeps everything it had, minus one route, plus its heartbeat
 
 The server is unchanged in behaviour and on the wire but for one route: `GET /images/:id` is no
 longer a proxy route. It is still the only process that knows a QEMU exists: it checks the host at
@@ -36,6 +37,22 @@ stream, times sessions out after ten minutes, writes the debug log on every end 
 stop, and drains its machines when it is signalled. Its `Sessions` map is the truth for "what is
 running here". A client may still talk to a server directly; nothing in this change requires the
 reverse proxy.
+
+Started with `--url <url>`, the server also announces itself: once its listener is up and every
+thirty seconds after, it rewrites its own row in `servers` (keyed by that url) with what `/stats`
+would answer, cut to what the fleet page shows — its qemu count, memory in use and the cpu's one,
+two and three minute means — stamps `heartbeat_at` with the database's clock and counts
+`generation` up by one. Every write is a ping: a generation that stops moving is a server that
+stopped heartbeating — the process is down, or it cannot reach the database (its own log then has
+the `heartbeat failed` lines) — and the dashboard says so either way. The url is the address the
+reverse proxy reaches the server at (a tunnel's local port, say), which the server cannot see for
+itself, hence a flag and no default; without it the server announces nothing and is not on the
+page, which is what a development server wants. A heartbeat that fails is one `heartbeat failed:
+<reason>` error line, and the next one runs. `/stats` carries the three means too (`cpu.mean1m`,
+`mean2m`, `mean3m`, the newest 12, 24 and 36 of the sampler's 5 s samples beside `mean` over all
+60); they are required fields of `Contract.Stats`, so a reverse proxy of this version treats an
+older server's `/stats` as `answered 200 without stats` and skips it — deploy the servers before
+the reverse proxy, after `npm run db:migrate`.
 
 ### The dashboard serves the images
 
@@ -48,15 +65,35 @@ neither the server nor the reverse proxy has an image route, and the path is the
 on both. One HTTP address; the only other reader of the bytes is `./session image`, straight
 from the database.
 
+### The dashboard serves the fleet page
+
+`https://oligarchy.trm.sh/servers` is the fleet: the `servers` rows read over Hyperdrive, one
+line per server with its url, `qemus`, memory as `used / total GB`, the cpu's `1m / 2m / 3m`
+means, its `generation` and how long ago its heartbeat was, and a `delete` button; an add box
+below. The table is swapped in fresh every thirty seconds (htmx, `GET /servers/fleet`), the
+interval the servers write at, so a row is never more than one poll behind. A server whose
+heartbeat is more than ninety seconds old — three missed — shows `silent` in place of its stats;
+one an operator added that no server has claimed shows `never heard from`. Nothing on the page
+probes a server: what it shows is what the servers said, and the reverse proxy is not involved.
+
+`POST /servers` (form field `url`) adds a row under the same rule as the API (`url must be an http
+or https url`, 400 otherwise, the reason on top of the page); `POST /servers/delete` removes one
+(404 `<url> is not registered` when there is none). A server still running announces itself back
+within thirty seconds of being deleted: the row is the server's word, the button is for the ones
+that stopped talking. A database failure is a 500 page with `error: internal error` and no fleet
+section, so it never claims an empty fleet. The page is unstyled text outside the dashboard's
+shell and is served whole; access control is the dashboard's, not the page's.
+
 ### The reverse proxy knows where sessions live and nothing else
 
 The reverse proxy holds no session state. It knows three things, all of them rows:
 
-- Which servers exist, because an operator registered them (`POST /servers { url }`), and the
-  reverse proxy checked each one answered `GET /stats` before remembering it. Registering the same
-  url twice is two probes and one row; `DELETE /servers` forgets a server without touching the
-  sessions still running on it; `GET /servers` probes every server at once and reports each one's
-  stats, or `null` for one that did not answer.
+- Which servers exist, because a server announced itself (`./server --url`) or an operator
+  registered it — on the dashboard, or over `POST /servers { url }`, where the reverse proxy
+  checks the server answers `GET /stats` before remembering it. Registering the same url twice is
+  two probes and one row; `DELETE /servers` forgets a server without touching the sessions still
+  running on it; `GET /servers` probes every server at once and reports each one's stats, or
+  `null` for one that did not answer.
 - Where to put a new session: `POST /start` probes every registered server at once, skips the ones
   that fail (a `server skipped; …` warning each), and places the start on the one with the fewest
   `qemus`, ties to the earliest registered. With no server registered the answer is 503
@@ -80,17 +117,7 @@ the `RouteBoundary` middleware; `GET /stats`, `GET /images/:id` and anything els
 catch-all's 404 `{"error":"not found"}`, unlogged. The proxy's `/dump` was retired on master and
 is not routed here either: an ended session's console is read from the database by `ctrl`.
 
-The same fleet is on the diagnostics page, `http://127.0.0.1:55445/` by default: an unstyled text
-page listing every registered server with its `qemus`, memory and cpu, or `did not answer`, a
-`delete` button on each row, and an add box. It has no token — a browser has no bearer to send —
-so it is a separate loopback port, `--diagnostics-port`, never the API's; put nothing in front of
-it. Its two forms do what `POST /servers` and `DELETE /servers` do, through the same `Router`, and
-send the browser back to the page; a refusal (a url the rule rejects, a server that fails its
-probe, a url that was never registered) renders the page again with `error: <reason>` on top.
-Because a page on another origin could make that same browser post here — and a registration
-hands the probed url the shared bearer — a browser's `Origin` must be the page's own or the POST
-is refused with 403, and a `Host` that is not a loopback name (a DNS-rebound one) gets no page at
-all; the page is also sent `no-store` and may not be framed.
+The same fleet is on the dashboard's page (above); the reverse proxy serves no page of its own.
 
 Forwarding is deliberately dumb. The request goes upstream with the same method, the same path and
 query, the body text exactly as the client sent it, and the shared bearer; the answer comes back
@@ -215,8 +242,14 @@ errors; the switch ends in `satisfies never`, so a tag without an arm does not c
 
 ### `src/db/schema.ts`, `drizzle/0004_reverse_proxy.sql`, `src/db/servers.ts`
 
-- `servers (url text primary key, created_at)`: the fleet. The primary key makes registration
-  idempotent (`insert … on conflict do nothing`).
+- `servers (url text primary key, stats jsonb, generation bigint not null default 0,
+  heartbeat_at timestamptz, created_at)`: the fleet. The primary key makes registration
+  idempotent (`insert … on conflict do nothing`) and gives the heartbeat its upsert. The three
+  columns after the key came with the heartbeat (`drizzle/0006_server_heartbeat.sql`): `stats` is
+  what the server last said of itself (`ServerStats` in `schema.ts`: qemus, memory total and
+  used, the cpu's three means), `generation` counts its heartbeats, `heartbeat_at` is the
+  database's clock at the last one. `stats` and `heartbeat_at` are null together, for a row an
+  operator added that no server has claimed — the one absence the page must show as such.
 - `session_servers (session_id uuid primary key references sessions.id, server_url text not
   null, created_at)`: which server started a session. The primary key gives a session one route;
   the foreign key guarantees a route names a real session (the server has inserted the row by
@@ -235,9 +268,11 @@ errors; the switch ends in `satisfies never`, so a tag without an arm does not c
 - The migration was generated by `drizzle-kit generate --name reverse_proxy`; existing
   migrations are untouched and `drizzle-kit check` is clean.
 - `ServerStore` follows the repository pattern: a `Context.Service` whose methods are
-  `Effect.fn("db.<name>")` over `Database.run` — `addServer`, `removeServer` (answers whether a
-  row went, which `DELETE /servers` turns into its 404), `listServers` (registration order),
-  `routeSession`, `serverForSession` (an `Option`).
+  `Effect.fn("db.<name>")` over `Database.run` — `addServer`, `heartbeat` (one upsert: the row
+  comes into being at generation 1 or is rewritten at `generation + 1`, `heartbeat_at = now()`
+  either way), `removeServer` (answers whether a row went, which `DELETE /servers` turns into its
+  404), `listServers` (registration order), `routeSession`, `serverForSession` (an `Option`).
+  The server's `main.ts` provides the store to its graph for the heartbeat alone.
 
 ### `src/reverse-proxy/router.ts`: the one service
 
@@ -278,45 +313,31 @@ errors; the switch ends in `satisfies never`, so a tag without an arm does not c
 
 ### `handlers.ts`, `command.ts`, `main.ts`, `./reverse-proxy`, `package.json`
 
-- `diagnostics.ts` is the page: a `handler` served router-less with `HttpServer.serve` on its
-  own `NodeHttpServer`, because `HttpRouter.serve` memoises one `HttpRouter` per layer graph and
-  a second router would have served the API's routes on the diagnostics port too (and the doc
-  forbids `Layer.fresh` in production). Three routes on a `switch` over method and path: `GET /`
-  renders; `POST /servers` and `POST /servers/delete` decode the form field `url` with
-  `Domain.ServerUrl`, call `Router.register` or `Router.unregister`, and answer 303 to `/`. A
-  refusal renders the whole page with the reason on top under the refusal's status (400 for the
-  url rule, 502 for a failed probe, 404 for a url never registered) and writes the same
-  `<METHOD> <path> failed: <reason>` line the API boundary writes; a database failure or a defect
-  is a 500 page whose fleet section is omitted rather than shown empty. Every url on the page is
-  HTML-escaped; the page carries no style and no script. The review found the one thing a
-  tokenless mutating page must still refuse: a cross-site form post from the operator's own
-  browser, which would have made the reverse proxy probe an attacker's url with the shared bearer.
-  Both POSTs therefore check the browser's `Origin` against the `Host` it connected to (a client
-  sending no `Origin` is not a browser and already has the machine); because a rebound DNS name
-  would make the two agree, a `Host` that is not `127.0.0.1`, `localhost` or `[::1]` is refused on
-  every route before anything is read; and every answer carries `cache-control: no-store` and
-  `x-frame-options: DENY` so a framed copy cannot be click-jacked.
+- The reverse proxy used to serve the fleet page itself, on a second loopback listener
+  (`diagnostics.ts`, `--diagnostics-port`, default 55445), tokenless and defended against
+  cross-site posts and DNS rebinding because its add box made the reverse proxy probe a url with
+  the shared bearer. That page had to be reached through the reverse proxy's host, and what it
+  showed was a probe made as it loaded. It is gone: the page is the dashboard's, read from the
+  rows the servers write, and the reverse proxy has one listener again. What follows describes
+  what is left.
 - `handlers.ts` binds both groups. The session-driving routes are `uninterruptible`, for the
   proxy's own reason: a client that disconnects mid-`/start` must not tear the forward in half,
   or the routing table never learns of the machine the server booted. `follow` stays
   interruptible so an abandoned follower releases its upstream stream. The catch-all 404 is the
   proxy's `NotFoundRoute`, reused.
-- `command.ts` is `makeReverseProxyCommand({ serve, serverFailed })` with two flags, `--port`
-  (default 42070, one above the proxy so both run on a development host) and `--diagnostics-port`
-  (default 55445); `serve(port, diagnosticsPort)` is one layer holding both listeners. Its
-  startup is the
-  proxy's minus the host check: parse, `database.ping` (`database unreachable: <detail>`),
-  listen; a failure is the fatal line `reverse proxy: <detail>` and exit 1. About ten lines are
-  duplicated from the proxy's command rather than shared; a helper for two callers was judged
-  premature by the document's philosophy and by review.
+- `command.ts` is `makeReverseProxyCommand({ serve, serverFailed })` with one flag, `--port`
+  (default 42070, one above the proxy so both run on a development host); `serve(port)` is the
+  listener as a layer. Its startup is the proxy's minus the host check: parse, `database.ping`
+  (`database unreachable: <detail>`), listen; a failure is the fatal line `reverse proxy:
+  <detail>` and exit 1. About ten lines are duplicated from the proxy's command rather than
+  shared; a helper for two callers was judged premature by the document's philosophy and by
+  review.
 - `main.ts` composes the graph as the proxy's does — `ServerStore` and `Log` over `LogStore`,
   `Database`, `ProxyConfig`, `SentryLive`, the config provider, the Node HTTP client and
   services — without `Qemu`, `Iso`, `Stats`, `Sessions` or a `Shutdown` reference, with the same
-  `TracerDisabledWhen` so no `http.server` span reaches Sentry. It creates two `node:http`
-  servers, each with its own `NodeHttpServer` layer provided privately to its consumer (the API
-  router, the diagnostics handler); an `error` on either completes the same `serverFailed`. The
-  listen line names both: `oligarchy reverse proxy listening on 127.0.0.1:<port>; diagnostics on
-  127.0.0.1:<diagnostics port>`. Its teardown exits 1 on any failure but an interrupt and 0
+  `TracerDisabledWhen` so no `http.server` span reaches Sentry. It creates the `node:http` server
+  so its `error` listener can complete `serverFailed`. The listen line is `oligarchy reverse proxy
+  listening on 127.0.0.1:<port>`. Its teardown exits 1 on any failure but an interrupt and 0
   otherwise; it logs nothing at shutdown because nothing of its own is stopping.
 - `./reverse-proxy` is the fifth root wrapper, with the same `--import` of
   `src/observability/instrument.ts` as `./server`; `npm run reverse-proxy` is the script.
@@ -339,16 +360,26 @@ Every surface has a happy and an unhappy test:
   key order, a route outliving its server's removal, a server's 403 passing through unlogged),
   and refusals (unrouted uuid, non-uuid without a store read, unreachable server, database
   failure, 401 on all thirteen routes, 404 for `/stats` and `/images/:id`, malformed bodies).
-- `test/reverse-proxy/diagnostics.unit.test.ts` (11 cases) serves the page on a loopback server
-  with the same fakes: the empty page and its add form; a fleet with one answering and one dead
-  server, the delete forms, and a url with `"` and `<` escaped; the three-route 404; adding a
-  server (303, the probe, the row, the log line), a url the rule refuses (400, unprobed), a body
-  that is not a form (400), a server that does not answer (502, unstored, logged with the
-  cause); deleting (303 and the line; 404 for a url never registered); a database failure and a
-  defect as 500 pages with the boundary's log line. The test client is `fetch`, so the two
-  redirect cases ask for `redirect: "manual"` to see the 303 itself.
-- `test/reverse-proxy/command.unit.test.ts`: flags (both ports, their defaults and integer
-  checks), `--help`, the ping failure, a server error after listen, a listen failure.
+- `test/dashboard/servers.unit.test.ts` renders the page's components from fixed rows, no
+  database: a server heard from just now with every column, the empty fleet, the heartbeat's age
+  in seconds, minutes, hours and days, a server silent at ninety-one seconds and not at ninety, a
+  row never heard from, a url with `"` and `<` escaped in the cell and the delete form, the
+  reason on top of a refused page, the fleet omitted on a 500 page, the reason escaped.
+  `test/integration/dashboard.integration.test.ts` runs the routes against the container: the
+  page and the fragment from seeded rows (alive, silent, never heard from), adding once however
+  often posted, deleting, a url the rule refuses (400, nothing stored), a form without a url, a
+  url never registered (404), and an unreachable database (500 on every route, the fleet section
+  gone, never the password).
+- `test/proxy/heartbeat.unit.test.ts` runs the loop under the `TestClock` over the fake
+  `Sessions` and `ServerStore`: a write at once and every thirty seconds with the stats cut to
+  the row's shape, the loop ending with its scope, a refused write as one `heartbeat failed:
+  <driver's reason>` line with the next tick still writing, a defect logged the same way.
+  `test/proxy/command.unit.test.ts` pins `--url` reaching the server, its absence as none, a url
+  the rule refuses as a usage error touching nothing, and `--help` listing it.
+  `test/qemu/stats.unit.test.ts` pins the three means over the newest 12, 24 and 36 samples.
+- `test/reverse-proxy/command.unit.test.ts`: `--port` (its default and integer check),
+  `--diagnostics-port` as the usage error it now is, `--help`, the ping failure, a server error
+  after listen, a listen failure.
 - `test/proxy/http.unit.test.ts` lost its `Images` describe and pins `GET /images/<uuid>` as the
   catch-all's unlogged 404; `test/shared/api.unit.test.ts` pins `ProxyApi` as the one `Sessions`
   group with the bearer on every endpoint.
@@ -356,27 +387,27 @@ Every surface has a happy and an unhappy test:
   middleware order, per-endpoint statuses, `ProxyApi` without the reverse proxy's routes or
   boundary), `ServerUrl`.
 - `test/integration/db.integration.test.ts`: `ServerStore` against the migrated database,
-  including the primary key and foreign key refusals.
+  including the primary key and foreign key refusals, and the heartbeat: a first write at
+  generation 1 with its stats and stamp, a second counting up and rewriting, and one filling the
+  row an operator added, still one row.
 - `test/integration/reverse-proxy.integration.test.ts`: the black-box process — `--help`, a
   bad `--port`, a missing token, an unreachable database (this one needs neither QEMU nor Docker,
-  so it always runs), an occupied port, and serving (`GET /servers` empty, 401, 404 for `/stats`
-  and `/images/:id`, 503 for a start with no server, the diagnostics page on its own port with a
-  dead server refused on it and the API's paths 404 there, exit 0 on SIGINT and SIGTERM). It
-  empties the fleet table through the `Database` service before it starts, because the
-  integration files share one database.
-- `test/support/stores.ts` gained `fakeServerStore`; `test/support/postgres.ts` provides
-  `ServerStore` in the migrated layer.
+  so it always runs), an occupied port, and serving (`GET /servers` empty, a dead server refused
+  with 502 over the API, 401, 404 for `/stats` and `/images/:id`, 503 for a start with no server,
+  exit 0 on SIGINT and SIGTERM). It empties the fleet table through the `Database` service before
+  it starts, because the integration files share one database.
+- `test/support/stores.ts` gained `fakeServerStore`, which records heartbeats too;
+  `test/support/postgres.ts` provides `ServerStore` in the migrated layer.
 
 ### `development.md`
 
 That document owns conventions, not contracts, so the reverse proxy appears there only where it
 taught one: a second `HttpApi` is built from the first's endpoint values; an error only the second
 raises gets its codec on a second boundary tag over one implementation; a pass-through handler
-decodes nothing of the upstream answer; a second listener in one process is `HttpServer.serve`
-over a plain handler because `HttpRouter.serve` memoises one router per graph; an operator's
-tokenless page checks `Origin` and `Host`; the Toolchain, Layout, Core rules, Sentry, Runtime
-entry and Tests sections name the reverse proxy in their inventories. Everything the reverse proxy
-promises is in this document and pinned by its tests.
+decodes nothing of the upstream answer; an operator's page belongs to the dashboard, read from
+rows a process writes on a schedule; the Toolchain, Layout, Core rules, Sentry, Runtime entry and
+Tests sections name the reverse proxy in their inventories. Everything the reverse proxy promises
+is in this document and pinned by its tests.
 
 ### Changes from review
 
@@ -404,29 +435,30 @@ used":
 - Stopping the machine whose route could not be written. Bounded by the server's ten-minute
   timeout.
 - `/stats` on the reverse proxy.
-- Servers registering themselves. Today a server is added by an operator, over the API or on the
-  diagnostics page, and that is a known wart: a host that boots should be able to announce
-  itself. It stays manual until the shape of that announcement (who tells whom, and what a
-  server knows about its own public url) is decided; the page makes the manual step a visible
-  one-click one meanwhile.
-- `ctrl` and dashboard awareness of servers and routes. `ctrl session --logs` already shows the
+- Placement from the heartbeat rows instead of a live probe. The rows are at most thirty seconds
+  old and would spare `/start` its probes, but a probe answers "is it there now", which is the
+  question a placement asks; the rows answer the operator's "what has it been doing".
+- Dropping a silent server from placement on its own. The page shows it; deleting it is the
+  operator's call, for the reason the health loop above is not done.
+- `ctrl` awareness of servers and routes. `ctrl session --logs` already shows the
   `routed; <url>` line for a session because the reverse proxy writes to `logs`.
 - An in-memory route cache in front of the rows.
-- Any token, style or script on the diagnostics page. It is loopback-only text for the operator
-  at the keyboard, defended against the one cross-site trick a browser allows by the `Origin`
-  check; a login would need a second secret and a browser flow, neither asked for.
+- Any style or script on the fleet page beyond the poll, or a check of its own on who posts to
+  it: access is the dashboard's to control, and a forged add or delete is a row the next
+  heartbeat corrects.
 
 ## Running it
 
 ```sh
-# on each host that boots machines
-OLIGARCHY_TOKEN=… DATABASE_URL=… ./server --port 42069 --automation
+# on each host that boots machines; --url is the address the reverse proxy reaches it at, and
+# the server announces itself under it every 30 s (leave it off and the server stays out of the fleet)
+OLIGARCHY_TOKEN=… DATABASE_URL=… ./server --port 42069 --automation --url https://qemu-a.example.com
 
 # in front of them, on any host that reaches them and the database
-OLIGARCHY_TOKEN=… DATABASE_URL=… ./reverse-proxy --port 42070 --diagnostics-port 55445
+OLIGARCHY_TOKEN=… DATABASE_URL=… ./reverse-proxy --port 42070
 
-# register the hosts: on the page at http://127.0.0.1:55445/ (add box, delete buttons), or over
-# the API; either way the reverse proxy probes each one's /stats first
+# the fleet: https://oligarchy.trm.sh/servers, polled every 30 s, with an add box and a delete
+# button each. A server may also be registered over the API, which probes its /stats first
 curl -H "authorization: Bearer $OLIGARCHY_TOKEN" -H 'content-type: application/json' \
   -d '{"url":"https://qemu-a.example.com"}' http://127.0.0.1:42070/servers
 curl -H "authorization: Bearer $OLIGARCHY_TOKEN" http://127.0.0.1:42070/servers
@@ -439,4 +471,6 @@ The reverse proxy's stdout, like the server's, is the convenience copy; its rows
 Sentry reports are the record. The lines to know: `server registered; <url>`,
 `server removed; <url>`, `server skipped; <reason>` (a warning during placement),
 `routed; <url>` (attributed to the new session and its agent), `forward cut short; <reason>`, and
-`<METHOD> <url> failed: <reason>` for every request it refused itself.
+`<METHOD> <url> failed: <reason>` for every request it refused itself. On a server started with
+`--url`, the listen line ends `; announcing <url>` and a heartbeat that could not be written is
+`heartbeat failed: <reason>`.

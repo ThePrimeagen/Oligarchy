@@ -71,9 +71,14 @@ export class Memory extends Schema.Class<Memory>("@oligarchy/shared/contract/Mem
   freeBytes: Schema.Int,
 }) {}
 
+// Percent busy: mean and the percentiles over the sampler's five-minute window, and the mean
+// over its newest one, two and three minutes.
 export class Cpu extends Schema.Class<Cpu>("@oligarchy/shared/contract/Cpu")({
   cores: Schema.Int,
   mean: Schema.Number,
+  mean1m: Schema.Number,
+  mean2m: Schema.Number,
+  mean3m: Schema.Number,
   p10: Schema.Number,
   p25: Schema.Number,
   p75: Schema.Number,

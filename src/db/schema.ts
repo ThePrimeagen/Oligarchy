@@ -173,10 +173,25 @@ export const postRunDiagnosis = pgTable(
   ],
 );
 
-// The fleet the reverse proxy places sessions on: one row per proxy an operator registered,
-// keyed by the url exactly as given. Registering twice is one row.
+// What a server last said of itself, as the fleet page shows it: machines running, memory in
+// use, and the cpu busy over its newest one, two and three minutes, in percent.
+export type ServerStats = {
+  readonly qemus: number;
+  readonly memory: { readonly totalBytes: number; readonly usedBytes: number };
+  readonly cpu: { readonly mean1m: number; readonly mean2m: number; readonly mean3m: number };
+};
+
+// The fleet the reverse proxy places sessions on: one row per server, keyed by the url exactly
+// as given, written by an operator (the dashboard, POST /servers) or by the server itself. A
+// server announces itself every thirty seconds: the write rewrites stats, stamps heartbeat_at
+// and counts generation up, so a generation that stops moving is a server that stopped
+// heartbeating — down, or cut off from the database. stats and heartbeat_at are null together,
+// for a row an operator added that no server has claimed.
 export const servers = pgTable("servers", {
   url: text("url").primaryKey(),
+  stats: jsonb("stats").$type<ServerStats>(),
+  generation: bigint("generation", { mode: "number" }).notNull().default(0),
+  heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

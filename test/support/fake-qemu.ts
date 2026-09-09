@@ -274,7 +274,17 @@ export const fakeIso = (resolve: Resolve = (call) => Effect.succeed(call.name)):
 
 export const ZERO_STATS = {
   memory: Contract.Memory.make({ totalBytes: 0, usedBytes: 0, freeBytes: 0 }),
-  cpu: Contract.Cpu.make({ cores: 0, mean: 0, p10: 0, p25: 0, p75: 0, p90: 0 }),
+  cpu: Contract.Cpu.make({
+    cores: 0,
+    mean: 0,
+    mean1m: 0,
+    mean2m: 0,
+    mean3m: 0,
+    p10: 0,
+    p25: 0,
+    p75: 0,
+    p90: 0,
+  }),
 };
 
 // Stats that report zeros and echo the qemu count they are given.

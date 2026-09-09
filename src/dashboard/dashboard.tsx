@@ -1,30 +1,34 @@
 import * as Sentry from "@sentry/cloudflare";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
+import { html } from "hono/html";
 import type { FC, PropsWithChildren } from "hono/jsx";
 import { jsxRenderer } from "hono/jsx-renderer";
 import {
+  addServer,
   definitionStats,
   getImage,
   groupDefinitions,
+  listServers,
   listSessions,
   listTestBasePrompts,
   listTestDefinitions,
   listTestResultOutcomes,
   modelStats,
+  removeServer,
   reviseTestDefinition,
   selectDefinition,
   versionStats,
   type DefinitionStat,
   type DefinitionVersions,
+  type Server,
   type Session,
   type TestBasePrompt,
   type TestResultOutcome,
 } from "./query.ts";
 import { clickerPage } from "./clicker.ts";
+import { HTMX_INTEGRITY, HTMX_URL } from "./htmx.ts";
+import { Fleet, ServersPage } from "./servers.tsx";
 import { SENTRY_DSN } from "../observability/dsn.ts";
-
-const HTMX_URL = "https://cdn.jsdelivr.net/npm/htmx.org@4.0.0";
-const HTMX_INTEGRITY = "sha384-BvJpBiO8Kh31EqtJe5DRIeWrHWnCGkwytKs9NKFi86Hhw96dEqdEMzZDeK9iEGTc";
 
 const errorMessage = (cause: unknown): string =>
   cause instanceof Error ? cause.message : String(cause);
@@ -772,6 +776,95 @@ app.get("/images/:id", async (context) => {
     Sentry.captureException(error);
     console.error("dashboard: loading image:", errorMessage(error));
     return context.body(null, 500);
+  }
+});
+
+// The fleet page, outside the dashboard's shell: unstyled text served whole, not through the
+// renderer. Its rows are written by the servers themselves every thirty seconds
+// (src/proxy/heartbeat.ts) and read here as often. `servers` is absent only when the database
+// could not be read, so a 500 page does not claim an empty fleet.
+const serversPage = (
+  context: Context<{ Bindings: Bindings }>,
+  status: 200 | 400 | 404 | 500,
+  servers: Server[] | undefined,
+  error?: string,
+) => context.html(html`<!doctype html>${<ServersPage servers={servers} error={error} />}`, status);
+
+const SERVER_URL_RULE = "url must be an http or https url";
+
+// Domain.ServerUrl's rule, without Effect in the Worker: http or https with a host, kept as given.
+const isServerUrl = (url: string): boolean => {
+  if (!URL.canParse(url)) {
+    return false;
+  }
+  const parsed = new URL(url);
+  return (parsed.protocol === "http:" || parsed.protocol === "https:") && parsed.hostname !== "";
+};
+
+app.get("/servers", async (context) => {
+  try {
+    const servers = await listServers(context.env.HYPERDRIVE.connectionString);
+    return await serversPage(context, 200, servers);
+  } catch (error) {
+    Sentry.captureException(error);
+    console.error("dashboard: listing servers:", errorMessage(error));
+    return serversPage(context, 500, undefined, "internal error");
+  }
+});
+
+// What the page's poll swaps in.
+app.get("/servers/fleet", async (context) => {
+  try {
+    const servers = await listServers(context.env.HYPERDRIVE.connectionString);
+    return context.html(<Fleet servers={servers} />);
+  } catch (error) {
+    Sentry.captureException(error);
+    console.error("dashboard: listing servers:", errorMessage(error));
+    return context.html(<p>error: internal error</p>, 500);
+  }
+});
+
+// The add box. Nothing is probed: the server says whether it is there by announcing itself into
+// the row. A refusal renders the page again with the reason on top, so the operator can act on
+// it where they are.
+app.post("/servers", async (context) => {
+  const { url } = await context.req.parseBody();
+  const connectionString = context.env.HYPERDRIVE.connectionString;
+  try {
+    if (typeof url !== "string" || !isServerUrl(url)) {
+      return await serversPage(context, 400, await listServers(connectionString), SERVER_URL_RULE);
+    }
+    await addServer(connectionString, url);
+    return context.redirect("/servers", 303);
+  } catch (error) {
+    Sentry.captureException(error);
+    console.error("dashboard: adding a server:", errorMessage(error));
+    return serversPage(context, 500, undefined, "internal error");
+  }
+});
+
+// A row's delete button. Forgetting a server leaves the sessions routed to it routable; a server
+// still running announces itself back within thirty seconds.
+app.post("/servers/delete", async (context) => {
+  const { url } = await context.req.parseBody();
+  const connectionString = context.env.HYPERDRIVE.connectionString;
+  try {
+    if (typeof url !== "string" || !isServerUrl(url)) {
+      return await serversPage(context, 400, await listServers(connectionString), SERVER_URL_RULE);
+    }
+    if (!(await removeServer(connectionString, url))) {
+      return await serversPage(
+        context,
+        404,
+        await listServers(connectionString),
+        `${url} is not registered`,
+      );
+    }
+    return context.redirect("/servers", 303);
+  } catch (error) {
+    Sentry.captureException(error);
+    console.error("dashboard: removing a server:", errorMessage(error));
+    return serversPage(context, 500, undefined, "internal error");
   }
 });
 

@@ -4,6 +4,7 @@ import { Client } from "pg";
 import {
   actions,
   images,
+  servers,
   sessions,
   testBasePrompts,
   testDefinitions,
@@ -23,6 +24,15 @@ export type Session = typeof sessions.$inferSelect & {
 
 export type TestDefinition = typeof testDefinitions.$inferSelect;
 export type TestBasePrompt = typeof testBasePrompts.$inferSelect;
+
+// One server of the fleet with what it last said of itself, and the database's clock at the
+// read, so the page measures a heartbeat's age against the clock that stamped it.
+export type Server = Pick<
+  typeof servers.$inferSelect,
+  "url" | "stats" | "generation" | "heartbeatAt"
+> & {
+  readonly queriedAt: Date;
+};
 
 // One name's wordings, oldest first: versions[i] is version i + 1, and the last is the newest.
 export type DefinitionVersions = {
@@ -322,4 +332,39 @@ export function listTestBasePrompts(connectionString: string): Promise<TestBaseP
   return withDatabase(connectionString, (db) =>
     db.select().from(testBasePrompts).orderBy(testBasePrompts.name),
   );
+}
+
+// The fleet in registration order. The clock in the select is the one a heartbeat's age is read
+// against, and it keeps a poll out of Hyperdrive's query cache: every poll sees the newest write.
+export function listServers(connectionString: string): Promise<Server[]> {
+  return withDatabase(connectionString, (db) =>
+    db
+      .select({
+        url: servers.url,
+        stats: servers.stats,
+        generation: servers.generation,
+        heartbeatAt: servers.heartbeatAt,
+        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(servers.createdAt),
+      })
+      .from(servers)
+      .orderBy(servers.createdAt, servers.url),
+  );
+}
+
+// Registering a url twice is one row; the server fills the rest in when it announces itself.
+export function addServer(connectionString: string, url: string): Promise<void> {
+  return withDatabase(connectionString, async (db) => {
+    await db.insert(servers).values({ url }).onConflictDoNothing();
+  });
+}
+
+// false when nothing was registered under the url: the route turns that into its 404.
+export function removeServer(connectionString: string, url: string): Promise<boolean> {
+  return withDatabase(connectionString, async (db) => {
+    const rows = await db
+      .delete(servers)
+      .where(eq(servers.url, url))
+      .returning({ url: servers.url });
+    return rows.length > 0;
+  });
 }
