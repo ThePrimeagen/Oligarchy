@@ -34,6 +34,7 @@ based on the test definitions proof criteria.  Once you are done diagnosing, set
 
 <example-session>
 ```
+# Use Linear MCP to move {{LINEAR_TICKET}} to "In Review"
 SESSION_ID=`./ctrl session --search --test-result-id {{RESULT_ID}}`
 $ ./ctrl session --all > session.json
 # read session.status, results, test_definition.proof; then walk logs and actions
@@ -45,6 +46,7 @@ $ ./session image --image-id <the id of the image after the step you suspect> -o
 $ ./ctrl error-type list
 # a type whose description matches the cause? use it. none at all? only then ./ctrl error-type new
 $ ./ctrl diagnose --verdict failed --type guest_boot_hang --summary "Serial stops after 'Waiting for root device'; the last image is still the boot menu" --model <the Cursor model id you are running as>
+# Use Linear MCP to move {{LINEAR_TICKET}} to "Done" and label "failed" or "succeeded" based on the verdict
 ```
 </example-session>
 
