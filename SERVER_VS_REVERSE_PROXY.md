@@ -10,14 +10,14 @@ written out for operators here. A third party is named where it matters: the das
 
 | | The server (`./server`, `src/proxy/`) | The reverse proxy (`./reverse-proxy`, `src/reverse-proxy/`) |
 | --- | --- | --- |
-| One sentence | Boots and drives QEMU machines on one host | Sends each session's requests to the host that booted it |
+| One sentence | Boots and drives QEMU machines on one host | Sends each session's requests to the host that booted it, and spawns the agents that drive and review them |
 | Owns | The machines, the sessions map, the QMP sockets, the session directories | The fleet (`servers`) and the routing table (`session_servers`) |
-| Needs on its host | `qemu-system-x86_64`, `qemu-img`, OVMF, `/dev/kvm`, a display backend | Nothing but Node and a route to the database and the servers |
-| Reads | `OLIGARCHY_TOKEN`, `DATABASE_URL` | The same two, through the same `ProxyConfig` |
+| Needs on its host | `qemu-system-x86_64`, `qemu-img`, OVMF, `/dev/kvm`, a display backend | Nothing but Node and a route to the database, the servers and Cursor's API |
+| Reads | `OLIGARCHY_TOKEN`, `DATABASE_URL` | The same two, through the same `ProxyConfig`, then `CURSOR_API_TOKEN` |
 | Default ports | `42069` | `42070` for the API, `55445` for the diagnostics page |
-| Speaks to clients | `ProxyApi`: the 11 `Sessions` routes, `/stats` among them | The same `Sessions` routes minus `/stats`, plus `POST/DELETE/GET /servers` |
+| Speaks to clients | `ProxyApi`: the 11 `Sessions` routes, `/stats` among them | The same `Sessions` routes minus `/stats`, plus `POST/DELETE/GET /servers` and `POST /agent` |
 | Speaks to operators | Nothing beyond the API | The diagnostics page: the fleet, an add box, a delete button each |
-| Speaks to | QEMU over QMP, the database | The servers over HTTP (their own `ProxyApi`), the database |
+| Speaks to | QEMU over QMP, the database | The servers over HTTP (their own `ProxyApi`), the database, Cursor's API through `@cursor/sdk` |
 | Writes | `sessions`, `agent_runs`, `actions`, `images`, `debug_logs`, `logs` | `servers`, `session_servers`, `logs` |
 | Serves images | No: `GET /images/:id` is the catch-all's 404 | No: the same 404 |
 | Background work | The 10 s timeout sweep, the cpu sampler, the log drain | The log drain only |
@@ -48,9 +48,10 @@ neither the server nor the reverse proxy has an image route, and the path is the
 on both. One HTTP address; the only other reader of the bytes is `./session image`, straight
 from the database.
 
-### The reverse proxy knows where sessions live and nothing else
+### The reverse proxy knows where sessions live, and who to start on them
 
-The reverse proxy holds no session state. It knows three things, all of them rows:
+The reverse proxy holds no session state. It knows three things, all of them rows (a fourth, how
+to start an agent, is the section after this one):
 
 - Which servers exist, because an operator registered them (`POST /servers { url }`), and the
   reverse proxy checked each one answered `GET /stats` before remembering it. Registering the same
@@ -74,11 +75,55 @@ Its routes, all behind `Authorization: Bearer <OLIGARCHY_TOKEN>` on `127.0.0.1:4
 | `GET /servers` | none | `{"servers":[{"url","stats"}]}` | none |
 | `POST /start` | as the proxy | the server's answer | 503, else the server's |
 | `GET /image`, `GET /serial`, `GET /follow`, `POST /stop`, `POST /send-keys`, `POST /send-mouse`, `POST /intent/start`, `POST /intent/end` | as the proxy | the server's answer | 404, else the server's |
+| `POST /agent` | `{ "task", "type", "model"?, "reasoning"?, "fast"? }` | `{"id","url","model"}` | 400 502 |
 
 Every route may also answer 400 (a body or query the contract refuses), 401, 500 and 502 through
-the `RouteBoundary` middleware; `GET /stats`, `GET /images/:id` and anything else unrouted is the
-catch-all's 404 `{"error":"not found"}`, unlogged. The proxy's `/dump` was retired on master and
-is not routed here either: an ended session's console is read from the database by `ctrl`.
+the `RouteBoundary` middleware (`/agent` sits behind the proxy's `ApiBoundary`, which declares 400
+and 500; its 400 and 502 are its own); `GET /stats`, `GET /images/:id` and anything else unrouted
+is the catch-all's 404 `{"error":"not found"}`, unlogged. The proxy's `/dump` was retired on
+master and is not routed here either: an ended session's console is read from the database by
+`ctrl`.
+
+### The reverse proxy spawns the agents
+
+`POST /agent` is the one route where the reverse proxy does more than route: it starts the cloud
+agent that will drive or review a session. The body names the work and the worker:
+
+- `task` — what the agent works on: the Linear ticket identifier for a `driving-agent`
+  (`OLI-42`, which is also the agent id its session will carry), the session id for a
+  `diagnosing-agent`. A diagnosing task that is not a uuid is 400
+  `task must be a session id for a diagnosing-agent` before any template is read: a ticket there
+  would cost an agent run to find out.
+- `type` — `driving-agent` or `diagnosing-agent`: which prompt the agent is handed
+  (`prompts/driving-agent.html` with the ticket, `prompts/diagnosing-agent.html` with the session
+  and the reviewer's guide), the same texts `ctrl test run` and `ctrl diagnose run` send.
+- `model`, `reasoning`, `fast` — the model choice, in one vocabulary for every vendor: the model
+  as Cursor's catalog lists it, `reasoning` one of `none`, `low`, `medium`, `high`, `xhigh`,
+  `max`, and `fast` a boolean. No `model` means the default, `grok-4.6` at `high` running `fast`,
+  with `reasoning` and `fast` in the body still honoured (`{ "fast": false }` is `grok-4.6-high`).
+  A `model` given alone is asked for alone: Cursor's own defaults decide how hard it thinks and
+  whether it runs fast.
+
+The choice is mapped onto Cursor's catalog (`Cursor.models.list()`) at spawn time, so what the
+vendor cannot do is refused here, with what the model does take, instead of by Cursor once the
+agent exists: 400 `unknown model "<id>"`, `model "<id>" has no reasoning level` (a model without
+the knob), `model "<id>" has no reasoning level "<level>"; it has low, medium, high, xhigh`, or
+`model "<id>" has no fast mode`. Each vendor spells the knob its own way — `effort`, `reasoning`,
+`reasoning_effort`, and `extra-high` where we say `xhigh` — and the mapping speaks the vendor's
+spelling. A Cursor failure (a bad key, a rate limit) is 502 with Cursor's message.
+
+The agent is told its model as one label, `<model>-<reasoning>-fast` with each part present only
+when asked for (`grok-4.6-high-fast`, `composer-2.5`, `claude-opus-5-max`), because that label is
+what a driver records with `ctrl test start --model` and a reviewer with `ctrl diagnose --model`;
+the answer carries the same label so the caller knows what was written. The reverse proxy logs
+`agent spawned; <type>; <task>; <model>; <url>`, attributed to the ticket as agent id for a
+driver and to the session for a reviewer, and answers `{ "id": "bc-…", "url":
+"https://cursor.com/agents/bc-…", "model": "grok-4.6-high-fast" }` as soon as the agent exists; it
+never waits for it.
+
+Cursor cloud agents are the one way of spawning today. The seam for another is the `CursorAgents`
+layer (`src/ctrl/cursor.ts`): `prompt(text, choice?)` is the whole interface, and `/agent` knows
+nothing of the SDK behind it.
 
 The same fleet is on the diagnostics page, `http://127.0.0.1:55445/` by default: an unstyled text
 page listing every registered server with its `qemus`, memory and cpu, or `did not answer`, a
@@ -109,6 +154,9 @@ The reverse proxy answers a request itself only when it cannot or should not for
 | 401 `unauthorized` | Bearer missing or wrong | `<METHOD> <url> failed: unauthorized`, no Sentry |
 | 400 `<schema message>` | Body or query fails the contract (same schemas as the server) | same shape, no Sentry |
 | 400 `url must be an http or https url` | `POST/DELETE /servers` with a url that is not http(s) with a host | same shape, no Sentry |
+| 400 `task must be a session id for a diagnosing-agent` | `POST /agent` for a reviewer of something that is not a session | same shape, no Sentry |
+| 400 `unknown model "<id>"` / `model "<id>" has no reasoning level[ "<level>"; it has …]` / `model "<id>" has no fast mode` | `POST /agent` with a choice Cursor's catalog cannot honour | same shape, no Sentry, no agent started |
+| 502 `<Cursor's message>` | `POST /agent` when the Cursor SDK refuses or fails to start the agent | the SDK's error as the cause, reported |
 | 404 `unknown session "<id>"` | The id is not a uuid or has no `session_servers` row | attributed to the id (when a uuid) and the agent |
 | 404 `not found` | `DELETE /servers` for a url never registered; any unrouted path (`/stats`, `/images/:id`, `/nope`) | the DELETE is logged; the catch-all is not |
 | 502 `server <url> unreachable: <cause>` | The server refused the connection, reset it, or did not answer a probe within 10 s | attributed, cause to Sentry |
@@ -390,10 +438,99 @@ watchdog that could never fire. Declined with the reviewer's agreement: dropping
 `RouterService` type (the `SessionsService` and `LogService` convention) and sharing the ten
 duplicated startup lines.
 
+## The agent route, and why it is here
+
+The request was a way to spawn the agents that work the tickets without a keyboard at `ctrl`:
+"spawn off agent to do work" as one message to the reverse proxy, with room for other ways of
+spawning later, Cursor cloud agents first. The reverse proxy is the process every client already
+reaches with the shared bearer, and the only one that is always up, so it is where the message
+goes. It stays a relay for everything else.
+
+### `src/shared/domain.ts`, `contract.ts`, `errors.ts`, `api.ts`
+
+- `Domain.Reasoning` (`none`, `low`, `medium`, `high`, `xhigh`, `max`) and `Domain.AgentType`
+  (`driving-agent`, `diagnosing-agent`) are the two closed vocabularies; `Domain.ModelChoice`
+  `{ model, reasoning?, fast? }` is how a model is asked for everywhere, `Domain.DEFAULT_MODEL`
+  is `grok-4.6` high fast, and `Domain.modelLabel` builds the one string an agent records. They
+  live in `domain.ts` because `ctrl` and the reverse proxy both spawn.
+- `Contract.AgentBody` and `Contract.AgentStarted` are the request and the answer;
+  `Api.Agents` is a third group with the one endpoint, behind `BearerAuth` and the proxy's
+  `ApiBoundary`. Why not `RouteBoundary`: it declares 502 `ServerFailed` and 503 `NoServer`,
+  answers this route never gives, and the doc's rule is that an api must not advertise a status
+  it never answers. The route's own refusals are declared on the endpoint, which a new endpoint
+  can do.
+- `ModelUnavailable { message, model }`, status 400, is the catalog's refusal;
+  `CursorAgentFailed` gained a status, 502, and the `[ErrorReporter.ignore]` every API error
+  carries, so the boundary's line is the one report. Both have `{ "error" }` codecs and arms in
+  `apiErrorClasses` and the middleware's `attribution` (unattributed: the task is in the line).
+
+### `src/ctrl/cursor.ts`: one interface, the catalog as the judge
+
+`CursorAgents.prompt(text, choice = DEFAULT_MODEL)` replaced `prompt(text, ModelSelection?)`:
+the second argument is ours, not the SDK's. `select(choice, catalog)` is the pure mapping, a
+`Result`: find the model by id or alias, put the reasoning level on whichever of `effort`,
+`reasoning`, `reasoning_effort` the model has (taking `extra-high` for `xhigh` where that is the
+spelling), put `fast` on the `fast` switch, and refuse anything the model does not list. The
+catalog is asked on every prompt (`Cursor.models.list()`, one GET the SDK also makes for its own
+pre-flight) rather than hard-coded: the vendor's list is the truth and changes without us. What
+is not asked for is not sent, so the vendor's default variant stands for it.
+
+### `src/reverse-proxy/agents.ts`, `handlers.ts`, `main.ts`
+
+- `Agents.spawn(body)` is a plain `Effect.fn`, not a service: it reaches `CursorAgents`, `Log`
+  and the `FileSystem` (the templates) with `yield*`, and the handler calls it. It refuses a
+  diagnosing task that is not a uuid, builds the choice, renders the type's template with the
+  label, prompts, logs and answers. A template that cannot be read is an `Internal` (500), as a
+  database failure is on the routing side.
+- The handler is uninterruptible, as the driving routes are: a client gone mid-create must not
+  leave an agent created and never prompted, or prompted and answered to nobody.
+- `main.ts` builds `CursorLive` from `Config.cursorApiToken` above `ProxyConfig`, so a missing
+  `CURSOR_API_TOKEN` is reported after `OLIGARCHY_TOKEN` and `DATABASE_URL`, never before, and
+  the process refuses to start without it: the route would only fail later otherwise.
+
+### `ctrl`, the prompts, the default
+
+- `prompts/diagnosing-agent.html` gained `{{MODEL}}` and tells the reviewer to pass it to
+  `ctrl diagnose --model`, as the driving prompt already did for `test start`; who diagnosed is
+  recorded on the diagnosis row today, and now as the label rather than whatever the agent
+  believed it was. `ctrl diagnose run` takes `--model` like `test run`; both send `{ model }`
+  alone for a given id, and the default otherwise.
+- The default moved from `grok-4.6` xhigh fast to `grok-4.6` high fast, as asked.
+
+### Tests
+
+- `test/reverse-proxy/http.unit.test.ts` gained nine `/agent` cases over the real handler and
+  templates with a fake `CursorAgents`: the default and its label, a named model, `fast: false`
+  and `reasoning` on the default, a reviewer attributed to its session, a non-uuid reviewer task,
+  bodies the contract refuses, the catalog's 400, Cursor's 502, and an unreadable template's 500.
+  `/agent` joined the 401 sweep.
+- `test/ctrl/cursor.unit.test.ts` tests `select` against `test/support/cursor-catalog.ts`, six
+  entries captured from `Cursor.models.list()` on 2026-09-09; `test/support/stub-cursor.ts` lists
+  the same `grok-4.6` so the integration lanes see a catalog with knobs.
+- `test/integration/reverse-proxy.integration.test.ts` requires `CURSOR_API_TOKEN` at startup
+  and, when the database is there, POSTs `/agent` against the stub Cursor API through the real
+  SDK: the default model's params, the prompt, the label, the log line, and a level the stub's
+  `grok-4.6` refuses.
+
 ## Deliberately not done
 
 Each of these was considered and left for a need to show itself, per "support only what is
 used":
+
+- Checking a diagnosing task's session before spawning (ended, not yet diagnosed), as
+  `ctrl diagnose run` does. It would bring `SessionStore` and `DiagnosisStore` into the reverse
+  proxy for one route; the reviewer's `ctrl diagnose` refuses the same things, at the cost of the
+  run. `ctrl diagnose run` keeps its checks.
+- `--reasoning` and `--fast` on `ctrl test run` and `ctrl diagnose run`. `--model` takes the id
+  alone there, as before; the full choice is the route's.
+- A second spawning strategy. The `CursorAgents` layer is the seam; nothing else was asked for.
+- A `key` field in the `/agent` body. The key the caller must provide is the bearer every route
+  of this process already requires; a second way to present it would be a second thing to check.
+- A shape for a driving task. A Linear identifier's form is Linear's (`OLI-42` today, another
+  team's key tomorrow), and `ctrl test run --ticket` accepts any non-empty string; the session id
+  of a reviewer is ours (a uuid column) and is checked.
+- An idempotency key on the Cursor create. Nothing retries; a caller that repeats a `/agent` POST
+  gets a second agent, and the only key that could dedupe it would be the caller's.
 
 - A health loop. A dead server costs one 10 s probe per start and per `GET /servers` until
   `DELETE /servers` forgets it; a loop that dropped servers on its own would turn a flapping host
@@ -422,8 +559,8 @@ used":
 # on each host that boots machines
 OLIGARCHY_TOKEN=… DATABASE_URL=… ./server --port 42069 --automation
 
-# in front of them, on any host that reaches them and the database
-OLIGARCHY_TOKEN=… DATABASE_URL=… ./reverse-proxy --port 42070 --diagnostics-port 55445
+# in front of them, on any host that reaches them, the database and Cursor
+OLIGARCHY_TOKEN=… DATABASE_URL=… CURSOR_API_TOKEN=… ./reverse-proxy --port 42070 --diagnostics-port 55445
 
 # register the hosts: on the page at http://127.0.0.1:55445/ (add box, delete buttons), or over
 # the API; either way the reverse proxy probes each one's /stats first
@@ -433,10 +570,18 @@ curl -H "authorization: Bearer $OLIGARCHY_TOKEN" http://127.0.0.1:42070/servers
 
 # clients point at the reverse proxy and change nothing else
 ./client start --server-url http://127.0.0.1:42070 --agent-id OLI-42 --iso https://…/omarchy.iso
+
+# spawn the agent that drives a ticket, on the default model or one named; the answer is its link
+curl -H "authorization: Bearer $OLIGARCHY_TOKEN" -H 'content-type: application/json' \
+  -d '{"task":"OLI-42","type":"driving-agent"}' http://127.0.0.1:42070/agent
+curl -H "authorization: Bearer $OLIGARCHY_TOKEN" -H 'content-type: application/json' \
+  -d '{"task":"<session uuid>","type":"diagnosing-agent","model":"claude-opus-5","reasoning":"max"}' \
+  http://127.0.0.1:42070/agent
 ```
 
 The reverse proxy's stdout, like the server's, is the convenience copy; its rows in `logs` and its
 Sentry reports are the record. The lines to know: `server registered; <url>`,
 `server removed; <url>`, `server skipped; <reason>` (a warning during placement),
-`routed; <url>` (attributed to the new session and its agent), `forward cut short; <reason>`, and
-`<METHOD> <url> failed: <reason>` for every request it refused itself.
+`routed; <url>` (attributed to the new session and its agent), `forward cut short; <reason>`,
+`agent spawned; <type>; <task>; <model>; <url>` (attributed to the ticket as agent, or to the
+session), and `<METHOD> <url> failed: <reason>` for every request it refused itself.

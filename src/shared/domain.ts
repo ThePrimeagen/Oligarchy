@@ -129,6 +129,43 @@ export const DiagnosisVerdict = Schema.Literals(["passed", "failed"]).annotate({
 });
 export type DiagnosisVerdict = typeof DiagnosisVerdict.Type;
 
+// How hard a model is asked to think, in one vocabulary; each vendor spells it as a parameter of
+// its own, and a model offers a subset.
+export const Reasoning = Schema.Literals([
+  "none",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+]).annotate({ identifier: "@oligarchy/shared/domain/Reasoning" });
+export type Reasoning = typeof Reasoning.Type;
+
+// How an agent's model is asked for, wherever one is spawned from: the model as the vendor lists
+// it, and how hard and how fast it runs; a knob left out leaves the vendor's default.
+export type ModelChoice = {
+  readonly model: string;
+  readonly reasoning?: Reasoning;
+  readonly fast?: boolean;
+};
+
+export const DEFAULT_MODEL: ModelChoice = { model: "grok-4.6", reasoning: "high", fast: true };
+
+// The one string an agent is told it runs as and records (`ctrl test start --model`,
+// `ctrl diagnose --model`): the model, the reasoning, then `fast` when it runs fast.
+export const modelLabel = (choice: ModelChoice): string =>
+  [
+    choice.model,
+    ...(choice.reasoning === undefined ? [] : [choice.reasoning]),
+    ...(choice.fast === true ? ["fast"] : []),
+  ].join("-");
+
+// What a spawned agent does: drives one Linear ticket, or diagnoses one ended session.
+export const AgentType = Schema.Literals(["driving-agent", "diagnosing-agent"]).annotate({
+  identifier: "@oligarchy/shared/domain/AgentType",
+});
+export type AgentType = typeof AgentType.Type;
+
 // An ISO named by url is downloaded and cached by the proxy; anything else is a path.
 export const isIsoUrl = (iso: string): boolean =>
   iso.startsWith("http://") || iso.startsWith("https://");

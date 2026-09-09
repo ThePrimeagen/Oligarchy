@@ -1,11 +1,11 @@
-import type { ModelSelection } from "@cursor/sdk";
 import { Effect, Layer } from "effect";
 import * as Cursor from "../../src/ctrl/cursor.ts";
+import type * as Domain from "../../src/shared/domain.ts";
 import type * as Errors from "../../src/shared/errors.ts";
 
 export type PromptCall = {
   readonly text: string;
-  readonly model: ModelSelection | undefined;
+  readonly choice: Domain.ModelChoice | undefined;
 };
 
 export type FakeCursor = {
@@ -19,14 +19,14 @@ export const DEFAULT_AGENT_ID = "bc-11111111-1111-4111-8111-111111111111";
 export const fakeCursor = (
   script: {
     readonly agentId?: string;
-    readonly failure?: Errors.CursorAgentFailed;
+    readonly failure?: Errors.CursorAgentFailed | Errors.ModelUnavailable;
   } = {},
 ): FakeCursor => {
   const calls: Array<PromptCall> = [];
   const service: Cursor.CursorAgentsService = {
-    prompt: (text, model) =>
+    prompt: (text, choice) =>
       Effect.suspend(() => {
-        calls.push({ text, model });
+        calls.push({ text, choice });
         return script.failure === undefined
           ? Effect.succeed({ agentId: script.agentId ?? DEFAULT_AGENT_ID })
           : Effect.fail(script.failure);

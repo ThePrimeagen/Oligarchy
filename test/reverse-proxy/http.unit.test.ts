@@ -1,6 +1,6 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { Cause, Deferred, Effect, Exit, Fiber, Layer, Redacted, Stream } from "effect";
+import { Cause, Deferred, Effect, Exit, Fiber, FileSystem, Layer, Redacted, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import {
   HttpBody,
@@ -10,13 +10,16 @@ import {
   HttpRouter,
 } from "effect/unstable/http";
 import { HttpApiClient, HttpApiMiddleware } from "effect/unstable/httpapi";
-import { NodeHttpServer } from "@effect/platform-node";
+import { NodeFileSystem, NodeHttpServer } from "@effect/platform-node";
 import * as Config from "../../src/config.ts";
+import * as Prompts from "../../src/ctrl/prompts.ts";
 import * as Handlers from "../../src/reverse-proxy/handlers.ts";
 import * as Router from "../../src/reverse-proxy/router.ts";
 import * as Api from "../../src/shared/api.ts";
 import * as Contract from "../../src/shared/contract.ts";
 import * as Errors from "../../src/shared/errors.ts";
+import * as FakeCursor from "../support/fake-cursor.ts";
+import * as FakeFs from "../support/fake-fs.ts";
 import * as FakeHttp from "../support/fake-http.ts";
 import * as FakeLog from "../support/log.ts";
 import * as Reporter from "../support/reporter.ts";
@@ -71,6 +74,9 @@ type Fixture = {
   readonly upstream: FakeHttp.Recorder;
   readonly log: FakeLog.FakeLog;
   readonly reporter: Reporter.Collector;
+  readonly cursor: FakeCursor.FakeCursor;
+  // The prompt templates are read from beside the package: the real files unless a test says.
+  readonly fs: Layer.Layer<FileSystem.FileSystem>;
 };
 
 const fixture = (respond: FakeHttp.Respond = fleet, overrides: Partial<Fixture> = {}): Fixture => ({
@@ -78,6 +84,8 @@ const fixture = (respond: FakeHttp.Respond = fleet, overrides: Partial<Fixture> 
   upstream: FakeHttp.recordRequests(respond),
   log: FakeLog.fakeLog(),
   reporter: Reporter.collect(),
+  cursor: FakeCursor.fakeCursor({ agentId: "bc-42" }),
+  fs: NodeFileSystem.layer,
   ...overrides,
 });
 
@@ -92,7 +100,7 @@ const serve = (fixed: Fixture) =>
         ),
       ),
     ),
-    Layer.provide(Layer.mergeAll(fixed.log.layer, ProxyConfigLive)),
+    Layer.provide(Layer.mergeAll(fixed.log.layer, ProxyConfigLive, fixed.cursor.layer, fixed.fs)),
     Layer.provideMerge(NodeHttpServer.layerTest),
     Layer.provideMerge(fixed.reporter.layer),
     Layer.provideMerge(bearer(TOKEN)),
@@ -1088,6 +1096,360 @@ describe("forwarding", () => {
   );
 });
 
+describe("agent spawning", () => {
+  const AGENT_URL = "https://cursor.com/agents/bc-42";
+  const TICKET = "OLI-42";
+
+  const spawnBody = (body: {
+    readonly task: string;
+    readonly type: "driving-agent" | "diagnosing-agent";
+    readonly model?: string;
+    readonly reasoning?: "none" | "low" | "medium" | "high" | "xhigh" | "max";
+    readonly fast?: boolean;
+  }) => Contract.AgentBody.make(body);
+
+  // The very text the agent is handed, rendered from the real template as the handler does.
+  const rendered = (template: Prompts.Template, values: Prompts.Values) =>
+    Prompts.render(template, values).pipe(Effect.provide(NodeFileSystem.layer));
+
+  it.effect(
+    "POST /agent spawns a driving agent on grok-4.6 high fast with the ticket prompt, answers its link and logs it",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture();
+        yield* Effect.gen(function* () {
+          const api = yield* reverseClient;
+          const [started, response] = yield* api.Agents.spawn({
+            payload: spawnBody({ task: TICKET, type: "driving-agent" }),
+            responseMode: "decoded-and-response",
+          });
+          expect(started).toEqual(
+            Contract.AgentStarted.make({
+              id: "bc-42",
+              url: AGENT_URL,
+              model: "grok-4.6-high-fast",
+            }),
+          );
+          expect(yield* response.json).toEqual({
+            id: "bc-42",
+            url: AGENT_URL,
+            model: "grok-4.6-high-fast",
+          });
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.cursor.calls).toEqual([
+          {
+            text: yield* rendered("driving-agent.html", {
+              LINEAR_TICKET: TICKET,
+              MODEL: "grok-4.6-high-fast",
+            }),
+            choice: { model: "grok-4.6", reasoning: "high", fast: true },
+          },
+        ]);
+        const text = fixed.cursor.calls[0]?.text ?? "";
+        expect(text).toMatch(/Review Linear ticket\s+OLI-42/);
+        expect(text).toContain("<model> grok-4.6-high-fast </model>");
+        expect(text).toContain("--model grok-4.6-high-fast");
+        expect(text.includes("{{")).toBe(false);
+        // The ticket is the driver's agent id: the line is attributed to it, as its session's will be.
+        expect(fixed.log.lines).toEqual([
+          {
+            level: "info",
+            text: `agent spawned; driving-agent; ${TICKET}; grok-4.6-high-fast; ${AGENT_URL}`,
+            sessionId: undefined,
+            agentId: TICKET,
+            skipSentry: false,
+            cause: undefined,
+          },
+        ]);
+        expect(fixed.upstream.requests).toEqual([]);
+      }),
+  );
+
+  it.effect("a model named in the body is asked for as given, the vendor deciding the rest", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const api = yield* reverseClient;
+        const started = yield* api.Agents.spawn({
+          payload: spawnBody({ task: TICKET, type: "driving-agent", model: "composer-2.5" }),
+        });
+        expect(started.model).toBe("composer-2.5");
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.cursor.calls).toHaveLength(1);
+      expect(fixed.cursor.calls[0]?.choice).toEqual({ model: "composer-2.5" });
+      expect(fixed.cursor.calls[0]?.text).toContain("<model> composer-2.5 </model>");
+      expect(fixed.log.lines.map((line) => line.text)).toEqual([
+        `agent spawned; driving-agent; ${TICKET}; composer-2.5; ${AGENT_URL}`,
+      ]);
+    }),
+  );
+
+  it.effect("reasoning and fast in the body are kept, on a named model and on the default", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const api = yield* reverseClient;
+        const slow = yield* api.Agents.spawn({
+          payload: spawnBody({ task: TICKET, type: "driving-agent", fast: false }),
+        });
+        expect(slow.model).toBe("grok-4.6-high");
+        const harder = yield* api.Agents.spawn({
+          payload: spawnBody({ task: TICKET, type: "driving-agent", reasoning: "xhigh" }),
+        });
+        expect(harder.model).toBe("grok-4.6-xhigh-fast");
+        const named = yield* api.Agents.spawn({
+          payload: spawnBody({
+            task: TICKET,
+            type: "driving-agent",
+            model: "gpt-5.6-sol",
+            reasoning: "max",
+            fast: true,
+          }),
+        });
+        expect(named.model).toBe("gpt-5.6-sol-max-fast");
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.cursor.calls.map((call) => call.choice)).toEqual([
+        { model: "grok-4.6", reasoning: "high", fast: false },
+        { model: "grok-4.6", reasoning: "xhigh", fast: true },
+        { model: "gpt-5.6-sol", reasoning: "max", fast: true },
+      ]);
+    }),
+  );
+
+  it.effect(
+    "a diagnosing agent is handed the session and the diagnosis guide, attributed to the session",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture();
+        yield* Effect.gen(function* () {
+          const api = yield* reverseClient;
+          const started = yield* api.Agents.spawn({
+            payload: spawnBody({
+              task: SESSION_ID,
+              type: "diagnosing-agent",
+              model: "claude-opus-5",
+              reasoning: "max",
+            }),
+          });
+          expect(started).toEqual(
+            Contract.AgentStarted.make({ id: "bc-42", url: AGENT_URL, model: "claude-opus-5-max" }),
+          );
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.cursor.calls).toEqual([
+          {
+            text: yield* rendered("diagnosing-agent.html", {
+              SESSION_ID,
+              MODEL: "claude-opus-5-max",
+            }),
+            choice: { model: "claude-opus-5", reasoning: "max" },
+          },
+        ]);
+        const text = fixed.cursor.calls[0]?.text ?? "";
+        expect(text).toContain(`<session_id>${SESSION_ID}</session_id>`);
+        expect(text).toContain("--model claude-opus-5-max");
+        expect(text).toContain("## diagnose");
+        expect(text.includes("{{")).toBe(false);
+        expect(fixed.log.lines).toEqual([
+          {
+            level: "info",
+            text: `agent spawned; diagnosing-agent; ${SESSION_ID}; claude-opus-5-max; ${AGENT_URL}`,
+            sessionId: SESSION_ID,
+            agentId: undefined,
+            skipSentry: false,
+            cause: undefined,
+          },
+        ]);
+      }),
+  );
+
+  it.effect(
+    "a diagnosing agent whose task is not a session id is 400 before any template or agent",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture(fleet, { fs: FileSystem.layerNoop({}) });
+        yield* Effect.gen(function* () {
+          const api = yield* reverseClient;
+          const error = yield* Effect.flip(
+            api.Agents.spawn({ payload: spawnBody({ task: TICKET, type: "diagnosing-agent" }) }),
+          );
+          expect(error.message).toBe("task must be a session id for a diagnosing-agent");
+          const http = yield* HttpClient.HttpClient;
+          const raw = yield* http.post("/agent", {
+            headers: { authorization: AUTHORIZATION },
+            body: HttpBody.jsonUnsafe({ task: "garbage", type: "diagnosing-agent" }),
+          });
+          expect(raw.status).toBe(400);
+          expect(yield* raw.json).toEqual({
+            error: "task must be a session id for a diagnosing-agent",
+          });
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.cursor.calls).toEqual([]);
+        expect(fixed.log.lines).toEqual([
+          {
+            level: "error",
+            text: "POST /agent failed: task must be a session id for a diagnosing-agent",
+            sessionId: undefined,
+            agentId: undefined,
+            skipSentry: true,
+            cause: undefined,
+          },
+          {
+            level: "error",
+            text: "POST /agent failed: task must be a session id for a diagnosing-agent",
+            sessionId: undefined,
+            agentId: undefined,
+            skipSentry: true,
+            cause: undefined,
+          },
+        ]);
+        expect(fixed.reporter.reported).toEqual([]);
+      }),
+  );
+
+  it.effect("a type, task or reasoning outside the contract is 400 before anything runs", () =>
+    Effect.gen(function* () {
+      const fixed = fixture(fleet, { fs: FileSystem.layerNoop({}) });
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const headers = { authorization: AUTHORIZATION };
+        const cases: ReadonlyArray<readonly [unknown, string]> = [
+          [{ task: TICKET, type: "developing-agent" }, '["type"]'],
+          [{ task: "", type: "driving-agent" }, '["task"]'],
+          [{ type: "driving-agent" }, '["task"]'],
+          [{ task: TICKET, type: "driving-agent", reasoning: "extra-high" }, '["reasoning"]'],
+          [{ task: TICKET, type: "driving-agent", fast: "yes" }, '["fast"]'],
+          [{ task: TICKET, type: "driving-agent", model: "" }, '["model"]'],
+        ];
+        for (const [body, path] of cases) {
+          const raw = yield* http.post("/agent", { headers, body: HttpBody.jsonUnsafe(body) });
+          expect(raw.status, JSON.stringify(body)).toBe(400);
+          expect(yield* raw.json).toMatchObject({ error: expect.stringContaining(path) });
+        }
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.cursor.calls).toEqual([]);
+      expect(fixed.log.lines).toHaveLength(6);
+      expect(fixed.log.lines.every((line) => line.skipSentry)).toBe(true);
+    }),
+  );
+
+  it.effect("a model the catalog refuses is 400 with the refusal, and no agent starts", () =>
+    Effect.gen(function* () {
+      const refusal = Errors.ModelUnavailable.make({
+        message: 'model "composer-2.5" has no reasoning level',
+        model: "composer-2.5",
+      });
+      const fixed = fixture(fleet, { cursor: FakeCursor.fakeCursor({ failure: refusal }) });
+      yield* Effect.gen(function* () {
+        const api = yield* reverseClient;
+        const error = yield* Effect.flip(
+          api.Agents.spawn({
+            payload: spawnBody({
+              task: TICKET,
+              type: "driving-agent",
+              model: "composer-2.5",
+              reasoning: "high",
+            }),
+          }),
+        );
+        expect(error.message).toBe('model "composer-2.5" has no reasoning level');
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.post("/agent", {
+          headers: { authorization: AUTHORIZATION },
+          body: HttpBody.jsonUnsafe({
+            task: TICKET,
+            type: "driving-agent",
+            model: "composer-2.5",
+            reasoning: "high",
+          }),
+        });
+        expect(raw.status).toBe(400);
+        expect(yield* raw.json).toEqual({ error: 'model "composer-2.5" has no reasoning level' });
+      }).pipe(Effect.provide(serve(fixed)));
+      // The prompt was rendered and the choice made; the catalog said no.
+      expect(fixed.cursor.calls.map((call) => call.choice)).toEqual([
+        { model: "composer-2.5", reasoning: "high" },
+        { model: "composer-2.5", reasoning: "high" },
+      ]);
+      expect(fixed.log.lines).toHaveLength(2);
+      expect(fixed.log.lines[0]).toEqual({
+        level: "error",
+        text: 'POST /agent failed: model "composer-2.5" has no reasoning level',
+        sessionId: undefined,
+        agentId: undefined,
+        skipSentry: true,
+        cause: undefined,
+      });
+      expect(fixed.reporter.reported).toEqual([]);
+    }),
+  );
+
+  it.effect("a Cursor refusal is 502 with its message, logged with the cause", () =>
+    Effect.gen(function* () {
+      const cause = new Error("Invalid API key");
+      const failure = Errors.CursorAgentFailed.make({
+        message: "Invalid API key",
+        retryable: false,
+        cause,
+      });
+      const fixed = fixture(fleet, { cursor: FakeCursor.fakeCursor({ failure }) });
+      yield* Effect.gen(function* () {
+        const api = yield* reverseClient;
+        const error = yield* Effect.flip(
+          api.Agents.spawn({ payload: spawnBody({ task: TICKET, type: "driving-agent" }) }),
+        );
+        expect(error).toMatchObject({ _tag: "CursorAgentFailed", message: "Invalid API key" });
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.post("/agent", {
+          headers: { authorization: AUTHORIZATION },
+          body: HttpBody.jsonUnsafe({ task: TICKET, type: "driving-agent" }),
+        });
+        expect(raw.status).toBe(502);
+        expect(yield* raw.json).toEqual({ error: "Invalid API key" });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.log.lines).toHaveLength(2);
+      expect(fixed.log.lines[0]).toEqual({
+        level: "error",
+        text: "POST /agent failed: Invalid API key",
+        sessionId: undefined,
+        agentId: undefined,
+        skipSentry: false,
+        cause,
+      });
+    }),
+  );
+
+  it.effect(
+    "an unreadable template is 500 internal error naming the file, and no agent starts",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture(fleet, {
+          fs: FileSystem.layerNoop({
+            readFileString: (path) => Effect.fail(FakeFs.permissionDenied("open", path)),
+          }),
+        });
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          const raw = yield* http.post("/agent", {
+            headers: { authorization: AUTHORIZATION },
+            body: HttpBody.jsonUnsafe({ task: TICKET, type: "driving-agent" }),
+          });
+          expect(raw.status).toBe(500);
+          expect(yield* raw.json).toEqual({ error: "internal error" });
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.cursor.calls).toEqual([]);
+        expect(fixed.log.lines).toHaveLength(1);
+        expect(fixed.log.lines[0]).toMatchObject({
+          level: "error",
+          text: expect.stringMatching(
+            /^POST \/agent failed: PermissionDenied: FileSystem\.open \(.*\/prompts\/driving-agent\.html\)$/,
+          ),
+          skipSentry: false,
+        });
+        expect(fixed.log.lines[0]?.cause).toMatchObject({ _tag: "PromptError" });
+      }),
+  );
+});
+
 describe("forwarding refusals", () => {
   it.effect("a uuid nobody routed is 404 unknown session attributed to it and the agent", () =>
     Effect.gen(function* () {
@@ -1287,6 +1649,7 @@ describe("forwarding refusals", () => {
     ["POST", "/servers", true],
     ["DELETE", "/servers", true],
     ["GET", "/servers", false],
+    ["POST", "/agent", true],
   ];
 
   const request = (
@@ -1325,6 +1688,7 @@ describe("forwarding refusals", () => {
         }
       }).pipe(Effect.provide(serve(fixed)));
       expect(fixed.upstream.requests).toEqual([]);
+      expect(fixed.cursor.calls).toEqual([]);
       expect(fixed.log.lines).toHaveLength(everyRoute.length * 2);
       expect(
         fixed.log.lines.every(

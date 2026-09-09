@@ -148,6 +148,31 @@ export class NoServer extends Schema.TaggedError<NoServer>("@oligarchy/shared/er
   override readonly [ErrorReporter.ignore] = true;
 }
 
+// A model choice the vendor's catalog cannot honour: a model it does not list, or a reasoning
+// level or fast mode that model does not take. The caller's mistake, so 400; the message names
+// what the model does take.
+export class ModelUnavailable extends Schema.TaggedError<ModelUnavailable>(
+  "@oligarchy/shared/errors/ModelUnavailable",
+)("ModelUnavailable", { message: Schema.String, model: Schema.String }, { httpApiStatus: 400 }) {
+  override readonly [ErrorReporter.ignore] = true;
+}
+
+// The Cursor SDK refused or failed to start an agent; 502 because Cursor is the upstream that
+// failed the request.
+export class CursorAgentFailed extends Schema.TaggedError<CursorAgentFailed>(
+  "@oligarchy/shared/errors/CursorAgentFailed",
+)(
+  "CursorAgentFailed",
+  {
+    message: Schema.String,
+    retryable: Schema.Boolean,
+    cause: Schema.Defect(),
+  },
+  { httpApiStatus: 502 },
+) {
+  override readonly [ErrorReporter.ignore] = true;
+}
+
 export type ApiError =
   | BadRequest
   | Unauthorized
@@ -159,7 +184,9 @@ export type ApiError =
   | ExchangeFailed
   | Internal
   | ServerFailed
-  | NoServer;
+  | NoServer
+  | ModelUnavailable
+  | CursorAgentFailed;
 
 const resolveHttpApiStatus = SchemaAST.resolveAt("httpApiStatus");
 
@@ -182,6 +209,8 @@ const apiErrorClasses = {
   Internal,
   ServerFailed,
   NoServer,
+  ModelUnavailable,
+  CursorAgentFailed,
 } satisfies Record<ApiError["_tag"], Schema.Top>;
 
 export const apiStatus = (error: ApiError): number => httpStatus(apiErrorClasses[error._tag]);
@@ -248,6 +277,15 @@ export const ServerFailedWire = wireError(
 export const NoServerWire = wireError(
   NoServer,
   (message) => ({ _tag: "NoServer", message }) as const,
+);
+export const ModelUnavailableWire = wireError(
+  ModelUnavailable,
+  (message) => ({ _tag: "ModelUnavailable", message, model: "" }) as const,
+);
+// A decoded refusal has no SDK error to carry and nothing says it can be retried.
+export const CursorAgentFailedWire = wireError(
+  CursorAgentFailed,
+  (message) => ({ _tag: "CursorAgentFailed", message, retryable: false, cause: null }) as const,
 );
 
 // ---------------------------------------------------------------------------
@@ -351,14 +389,6 @@ export class LinearError extends Schema.TaggedError<LinearError>(
 export class PromptError extends Schema.TaggedError<PromptError>(
   "@oligarchy/shared/errors/PromptError",
 )("PromptError", { message: Schema.String, cause: Schema.optionalKey(Schema.Defect()) }) {}
-
-export class CursorAgentFailed extends Schema.TaggedError<CursorAgentFailed>(
-  "@oligarchy/shared/errors/CursorAgentFailed",
-)("CursorAgentFailed", {
-  message: Schema.String,
-  retryable: Schema.Boolean,
-  cause: Schema.Defect(),
-}) {}
 
 export class ChildExit extends Schema.TaggedError<ChildExit>("@oligarchy/shared/errors/ChildExit")(
   "ChildExit",
