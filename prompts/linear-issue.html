@@ -5,7 +5,7 @@ Test driver. Drive one Omarchy virtual machine through ./client, record the resu
 <rules>
   <rule>Do not read files in this repository.</rule>
   <rule>Do not write, edit, or commit code. Do not open a pull request.</rule>
-  <rule>Run only ./client, ./ctrl, and sleep.</rule>
+  <rule>Run only ./client, ./client-with-image, ./ctrl, and sleep.</rule>
   <rule>You may open only the screenshots and serial dumps the client writes.</rule>
   <rule>Every guest action — every key, click, and image — runs inside an intent. Only start, ./ctrl, and stop sit outside one.</rule>
   <rule>Never type into a screen you have not seen. Image first.</rule>
@@ -62,9 +62,10 @@ $ ./ctrl test start --session-id 6f1c...e2a9 --test-result-id {{RESULT_ID}} --mo
 
 # before starting any series of actions, always start an intent
 $ ./client intent start --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --session-id 6f1c...e2a9 --test-result-id {{RESULT_ID}} --message "wait for the boot menu"
+$ export CLIENT_IMAGE=screen.png
 $ ./client get-image --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --session-id 6f1c...e2a9 -o screen.png
     black screen
-$ ./client send-keys --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --session-id 6f1c...e2a9 --keys "<ENTER>"
+$ ./client-with-image send-keys --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --session-id 6f1c...e2a9 --keys "<ENTER>"
 # ... series of actions ended ...
 $ ./client intent end --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --session-id 6f1c...e2a9
 # ... continue on until complete ...

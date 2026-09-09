@@ -1,0 +1,57 @@
+#!/bin/sh
+set -eu
+
+if [ -z "${CLIENT_IMAGE:-}" ]; then
+  echo "CLIENT_IMAGE is not set" >&2
+  exit 1
+fi
+
+client="$(dirname "$0")/client"
+
+agent_id=
+session_id=
+server_url=
+prev=
+for arg in "$@"; do
+  if [ -n "$prev" ]; then
+    case "$prev" in
+      --agent-id) agent_id=$arg ;;
+      --session-id) session_id=$arg ;;
+      --server-url) server_url=$arg ;;
+    esac
+    prev=
+    continue
+  fi
+  case "$arg" in
+    --agent-id=*) agent_id=${arg#--agent-id=} ;;
+    --session-id=*) session_id=${arg#--session-id=} ;;
+    --server-url=*) server_url=${arg#--server-url=} ;;
+    --agent-id | --session-id | --server-url) prev=$arg ;;
+  esac
+done
+
+tmp=$(mktemp)
+trap 'rm -f "$tmp"' EXIT
+
+status=0
+"$client" "$@" >"$tmp" || status=$?
+cat "$tmp"
+if [ "$status" -ne 0 ]; then
+  exit "$status"
+fi
+
+if [ -z "$session_id" ] && [ "${1:-}" = "start" ]; then
+  IFS= read -r session_id <"$tmp" || true
+fi
+
+if [ -z "$session_id" ]; then
+  exit 0
+fi
+
+sleep 0.1
+
+set -- get-image --agent-id "$agent_id" --session-id "$session_id" -o "$CLIENT_IMAGE"
+if [ -n "$server_url" ]; then
+  set -- "$@" --server-url "$server_url"
+fi
+"$client" "$@"
