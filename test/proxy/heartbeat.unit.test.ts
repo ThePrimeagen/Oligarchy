@@ -1,6 +1,6 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { Effect, Exit, Layer, Scope } from "effect";
+import { Deferred, Effect, Exit, Fiber, Layer, Scope } from "effect";
 import { TestClock } from "effect/testing";
 import * as Heartbeat from "../../src/proxy/heartbeat.ts";
 import * as Errors from "../../src/shared/errors.ts";
@@ -77,6 +77,36 @@ describe("heartbeat happy path", () => {
       yield* Scope.close(scope, Exit.void);
       expect(store.servers).toEqual([other]);
       expect(log.lines).toEqual([]);
+    }),
+  );
+
+  it.effect("a write in flight finishes before the row is deleted", () =>
+    Effect.gen(function* () {
+      const writing = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const order: Array<string> = [];
+      const store = Stores.fakeServerStore({
+        heartbeat: () =>
+          Effect.gen(function* () {
+            order.push("write");
+            yield* Deferred.succeed(writing, undefined);
+            yield* Deferred.await(release);
+          }),
+        removeServer: () =>
+          Effect.sync(() => {
+            order.push("delete");
+            return true;
+          }),
+      });
+      const { scope } = yield* start(store);
+      yield* Deferred.await(writing);
+      const closed = yield* Effect.forkChild(Scope.close(scope, Exit.void));
+      yield* Effect.yieldNow;
+      expect(closed.pollUnsafe()).toBeUndefined();
+      expect(order).toEqual(["write"]);
+      yield* Deferred.succeed(release, undefined);
+      yield* Fiber.join(closed);
+      expect(order).toEqual(["write", "delete"]);
     }),
   );
 });

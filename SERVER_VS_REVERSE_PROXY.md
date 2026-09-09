@@ -375,9 +375,10 @@ Every surface has a happy and an unhappy test:
 - `test/proxy/heartbeat.unit.test.ts` runs the loop under the `TestClock` over the fake
   `Sessions` and `ServerStore`: a write at once and every thirty seconds with the stats cut to
   the row's shape, the loop ending with its scope, the row deleted on that close (other servers
-  left), a refused write as one `heartbeat failed: <driver's reason>` line with the next tick
-  still writing, a defect logged the same way, a refused delete as one `unannounce failed:
-  <driver's reason>` line that still lets the scope close, a missing row not an error.
+  left), a write in flight finishing before the delete, a refused write as one `heartbeat
+  failed: <driver's reason>` line with the next tick still writing, a defect logged the same way,
+  a refused delete as one `unannounce failed: <driver's reason>` line that still lets the scope
+  close, a missing row not an error.
   `test/proxy/command.unit.test.ts` pins `--url` reaching the server, its absence as none, a url
   the rule refuses as a usage error touching nothing, and `--help` listing it.
   `test/qemu/stats.unit.test.ts` pins the three means over the newest 12, 24 and 36 samples.
