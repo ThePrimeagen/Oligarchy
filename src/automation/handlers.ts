@@ -1,4 +1,5 @@
 import { Context, Effect, FileSystem, Layer, Redacted } from "effect";
+import { HttpServerRequest } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import * as Log from "../observability/log.ts";
 import * as ProxyHandlers from "../proxy/handlers.ts";
@@ -35,23 +36,31 @@ export const AutomationsLive = (record: string) =>
     ),
   );
 
-// handleRaw: Linear's HMAC is over the raw bytes, and the record is those same bytes. A JSON
-// payload schema would parse and lose the exact body.
+// No payload schema: Linear's HMAC is over the raw bytes, and the record is that same text. A
+// JSON payload would parse and lose the exact body. The request is the HttpServerRequest
+// service: handleRaw's request widens the requirements channel to unknown.
 export const LinearLive = (record: string) =>
   HttpApiBuilder.group(Api.AutomationApi, "Linear", (handlers) =>
-    handlers.handleRaw("linear", ({ request }) =>
+    handlers.handle("linear", () =>
       Effect.gen(function* () {
         const secret = yield* LinearWebhookSecret;
+        const request = yield* HttpServerRequest.HttpServerRequest;
         const fs = yield* FileSystem.FileSystem;
         const log = yield* Log.Log;
-        const bytes = new Uint8Array(yield* request.arrayBuffer);
-        if (!Signature.matches(Redacted.value(secret), request.headers["linear-signature"], bytes)) {
+        const bytes = new Uint8Array(
+          yield* request.arrayBuffer.pipe(
+            Effect.mapError((cause) => Errors.Internal.make({ cause })),
+          ),
+        );
+        if (
+          !Signature.matches(Redacted.value(secret), request.headers["linear-signature"], bytes)
+        ) {
           return yield* Errors.Unauthorized.make({});
         }
         const text = new TextDecoder().decode(bytes);
-        yield* fs.writeFileString(record, `${text}\n`, { flag: "a" }).pipe(
-          Effect.mapError((cause) => Errors.Internal.make({ cause })),
-        );
+        yield* fs
+          .writeFileString(record, `${text}\n`, { flag: "a" })
+          .pipe(Effect.mapError((cause) => Errors.Internal.make({ cause })));
         yield* log.info("linear webhook recorded");
         return ok;
       }),

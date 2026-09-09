@@ -232,24 +232,26 @@ describe("POST /automate refusals", () => {
       }),
   );
 
-  it.effect("GET /automate, GET /linear and anything unrouted are 404 not found and never logged", () =>
-    Effect.gen(function* () {
-      const fixed = fixture();
-      yield* Effect.gen(function* () {
-        const http = yield* HttpClient.HttpClient;
-        for (const path of ["/automate", "/linear", "/start", "/servers", "/nope"]) {
-          const response = yield* http.get(path);
-          expect(response.status, path).toBe(404);
-          expect(yield* response.json).toEqual({ error: "not found" });
-        }
-        const start = yield* http.post("/start", {
-          body: HttpBody.jsonUnsafe({ iso: "omarchy.iso", agent: TICKET }),
-        });
-        expect(start.status).toBe(404);
-      }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.file.writes).toEqual([]);
-      expect(fixed.log.lines).toEqual([]);
-    }),
+  it.effect(
+    "GET /automate, GET /linear and anything unrouted are 404 not found and never logged",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture();
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          for (const path of ["/automate", "/linear", "/start", "/servers", "/nope"]) {
+            const response = yield* http.get(path);
+            expect(response.status, path).toBe(404);
+            expect(yield* response.json).toEqual({ error: "not found" });
+          }
+          const start = yield* http.post("/start", {
+            body: HttpBody.jsonUnsafe({ iso: "omarchy.iso", agent: TICKET }),
+          });
+          expect(start.status).toBe(404);
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.file.writes).toEqual([]);
+        expect(fixed.log.lines).toEqual([]);
+      }),
   );
 });
 
