@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { NodeHttpClient, NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node";
 import { Cause, Deferred, Effect, Exit, Layer, type Runtime } from "effect";
 import { Command } from "effect/unstable/cli";
-import { HttpMiddleware, HttpRouter, HttpServer, HttpServerError } from "effect/unstable/http";
+import { HttpMiddleware, HttpRouter, HttpServerError } from "effect/unstable/http";
 import * as Config from "../config.ts";
 import * as Client from "../db/client.ts";
 import * as Logs from "../db/logs.ts";
@@ -12,7 +12,6 @@ import * as Render from "../observability/render.ts";
 import * as Sentry from "../observability/sentry.ts";
 import * as Api from "../shared/api.ts";
 import * as ReverseProxyCommand from "./command.ts";
-import * as Diagnostics from "./diagnostics.ts";
 import * as Handlers from "./handlers.ts";
 import * as Router from "./router.ts";
 
@@ -23,39 +22,25 @@ const HOST = "127.0.0.1";
 process.stdout.on("error", () => {});
 process.stderr.on("error", () => {});
 
-// The platform drops its error listener once a server is up; a later error on either listener
-// still needs the fatal line and exit 1. Only the first counts.
+// The platform drops its error listener once the server is up; a later error still needs the
+// fatal line and exit 1. Only the first counts.
 const server = createServer();
-const diagnosticsServer = createServer();
 const serverFailed = Deferred.makeUnsafe<never, HttpServerError.ServeError>();
-for (const listener of [server, diagnosticsServer]) {
-  listener.on("error", (cause) => {
-    Deferred.doneUnsafe(serverFailed, Exit.fail(new HttpServerError.ServeError({ cause })));
-  });
-}
+server.on("error", (cause) => {
+  Deferred.doneUnsafe(serverFailed, Exit.fail(new HttpServerError.ServeError({ cause })));
+});
 
-// Two listeners, each with its own HttpServer: the API behind the bearer on `port`, the
-// operator's page on `diagnosticsPort`. HttpRouter.serve memoises one router per graph, so the
-// page is a plain handler under HttpServer.serve rather than a second router.
-const ServerLive = (port: number, diagnosticsPort: number) =>
+// The API behind the bearer on `port`; the fleet page is the dashboard's (oligarchy.trm.sh/servers).
+const ServerLive = (port: number) =>
   Layer.effectDiscard(
     Effect.gen(function* () {
       const log = yield* Log.Log;
-      yield* log.info(
-        `oligarchy reverse proxy listening on ${HOST}:${String(port)}; diagnostics on ${HOST}:${String(diagnosticsPort)}`,
-      );
+      yield* log.info(`oligarchy reverse proxy listening on ${HOST}:${String(port)}`);
     }),
   ).pipe(
     Layer.provide(
       HttpRouter.serve(Handlers.routes, { disableLogger: true, disableListenLog: true }).pipe(
         Layer.provide(NodeHttpServer.layer(() => server, { host: HOST, port })),
-      ),
-    ),
-    Layer.provide(
-      HttpServer.serve(Diagnostics.handler).pipe(
-        Layer.provide(
-          NodeHttpServer.layer(() => diagnosticsServer, { host: HOST, port: diagnosticsPort }),
-        ),
       ),
     ),
     Layer.provide(Router.Router.layer),

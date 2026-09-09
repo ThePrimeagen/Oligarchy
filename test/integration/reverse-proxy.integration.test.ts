@@ -144,13 +144,13 @@ const request = (
   );
 
 describe("reverse proxy startup refusals", () => {
-  it.live("--help exits 0 and lists --port and --diagnostics-port", () =>
+  it.live("--help exits 0 and lists --port alone", () =>
     Effect.promise(async () => {
       const process = spawnReverseProxy(["--help"]);
       const { code } = await process.exited;
       expect(code).toBe(0);
       expect(process.stdout()).toContain("--port");
-      expect(process.stdout()).toContain("--diagnostics-port");
+      expect(process.stdout()).not.toContain("--diagnostics-port");
       expect(process.stdout()).not.toContain("--display");
       expect(process.stdout()).not.toContain("--automation");
     }),
@@ -192,13 +192,11 @@ describe("reverse proxy startup refusals", () => {
     }),
   );
 
-  // The other listener gets a free port, so only the occupied one can fail the bind.
-  const occupied = (flag: "--port" | "--diagnostics-port") =>
+  it.live.skipIf(dbUrl === "")("an occupied port exits 1 with EADDRINUSE", () =>
     Effect.promise(async () => {
       const { port, release } = await occupy();
-      const other = flag === "--port" ? "--diagnostics-port" : "--port";
       try {
-        const process = spawnReverseProxy([flag, String(port), other, String(await freePort())]);
+        const process = spawnReverseProxy(["--port", String(port)]);
         const { code } = await process.exited;
         expect(code).toBe(1);
         const fatal = lines(process.stdout()).find((line) =>
@@ -211,14 +209,7 @@ describe("reverse proxy startup refusals", () => {
       } finally {
         await release();
       }
-    });
-
-  it.live.skipIf(dbUrl === "")("an occupied port exits 1 with EADDRINUSE", () =>
-    occupied("--port"),
-  );
-
-  it.live.skipIf(dbUrl === "")("an occupied diagnostics port exits 1 with EADDRINUSE too", () =>
-    occupied("--diagnostics-port"),
+    }),
   );
 });
 
@@ -235,39 +226,12 @@ describe("reverse proxy serving", () => {
 
   const served = async (signal: "SIGINT" | "SIGTERM") => {
     const port = await freePort();
-    const diagnosticsPort = await freePort();
-    const process = spawnReverseProxy([
-      "--port",
-      String(port),
-      "--diagnostics-port",
-      String(diagnosticsPort),
-    ]);
+    const process = spawnReverseProxy(["--port", String(port)]);
     try {
       await process.waitFor(/oligarchy reverse proxy listening/);
       expect(lines(process.stdout())).toContain(
-        `[global] oligarchy reverse proxy listening on 127.0.0.1:${String(port)}; diagnostics on 127.0.0.1:${String(diagnosticsPort)}`,
+        `[global] oligarchy reverse proxy listening on 127.0.0.1:${String(port)}`,
       );
-
-      // The diagnostics page: no token, the empty fleet, and a dead server refused on the page.
-      const page = await request(diagnosticsPort, "GET", "/");
-      expect(page.status).toBe(200);
-      expect(page.headers.get("content-type")).toContain("text/html");
-      const html = await page.text();
-      expect(html).toContain("<h1>oligarchy reverse proxy</h1>");
-      expect(html).toContain("no servers registered");
-      const dead = await request(
-        diagnosticsPort,
-        "POST",
-        "/servers",
-        { "content-type": "application/x-www-form-urlencoded" },
-        "url=http%3A%2F%2F127.0.0.1%3A1",
-      );
-      expect(dead.status).toBe(502);
-      expect(await dead.text()).toContain(
-        "server http://127.0.0.1:1 unreachable: connect ECONNREFUSED",
-      );
-      const apiOnDiagnostics = await request(diagnosticsPort, "GET", "/servers");
-      expect(apiOnDiagnostics.status).toBe(404);
 
       const servers = await request(port, "GET", "/servers", {
         authorization: `Bearer ${TOKEN}`,
@@ -275,6 +239,19 @@ describe("reverse proxy serving", () => {
       expect(servers.status).toBe(200);
       expect(servers.headers.get("content-type")).toContain("application/json");
       expect(await servers.json()).toEqual({ servers: [] });
+
+      // Registering a dead server is refused over the API with the reason, and nothing is stored.
+      const dead = await request(
+        port,
+        "POST",
+        "/servers",
+        { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+        '{"url":"http://127.0.0.1:1"}',
+      );
+      expect(dead.status).toBe(502);
+      expect(await dead.text()).toContain(
+        "server http://127.0.0.1:1 unreachable: connect ECONNREFUSED",
+      );
 
       const stats = await request(port, "GET", "/stats", { authorization: `Bearer ${TOKEN}` });
       expect(stats.status).toBe(404);
@@ -318,7 +295,6 @@ describe("reverse proxy serving", () => {
     expect(process.stderr()).toBe("");
 
     await expect(request(port, "GET", "/servers")).rejects.toThrow();
-    await expect(request(diagnosticsPort, "GET", "/")).rejects.toThrow();
   };
 
   it.live.skipIf(dbUrl === "")(

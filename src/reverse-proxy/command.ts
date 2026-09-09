@@ -9,17 +9,11 @@ import * as Errors from "../shared/errors.ts";
 
 // One above the proxy's, so both run on one host in development.
 const DEFAULT_PORT = 42070;
-// The operator's page, on a port of its own: the API port wants a bearer on every request and a
-// browser has none to send.
-const DEFAULT_DIAGNOSTICS_PORT = 55445;
 
-// What main.ts hands the command: the two listeners as one layer for their ports, and the signal
-// a server error raises after listen.
+// What main.ts hands the command: the listener as a layer for its port, and the signal a server
+// error raises after listen.
 export type ReverseProxyServer<RServe> = {
-  readonly serve: (
-    port: number,
-    diagnosticsPort: number,
-  ) => Layer.Layer<never, HttpServerError.ServeError, RServe>;
+  readonly serve: (port: number) => Layer.Layer<never, HttpServerError.ServeError, RServe>;
   readonly serverFailed: Deferred.Deferred<never, HttpServerError.ServeError>;
 };
 
@@ -37,14 +31,8 @@ export const makeReverseProxyCommand = <RServe>(server: ReverseProxyServer<RServ
         Flag.withDefault(DEFAULT_PORT),
         Flag.withDescription("Listen port"),
       ),
-      diagnosticsPort: Flag.integer("diagnostics-port").pipe(
-        Flag.withDefault(DEFAULT_DIAGNOSTICS_PORT),
-        Flag.withDescription(
-          "Port of the diagnostics page: the servers, an add box, a delete button each",
-        ),
-      ),
     },
-    ({ port, diagnosticsPort }) =>
+    ({ port }) =>
       Effect.gen(function* () {
         const log = yield* Log.Log;
         const database = yield* Client.Database;
@@ -60,7 +48,7 @@ export const makeReverseProxyCommand = <RServe>(server: ReverseProxyServer<RServ
             ),
           );
           return yield* Effect.raceFirst(
-            Layer.launch(server.serve(port, diagnosticsPort)),
+            Layer.launch(server.serve(port)),
             Deferred.await(server.serverFailed),
           );
         });
