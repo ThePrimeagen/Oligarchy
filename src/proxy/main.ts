@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { NodeHttpClient, NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node";
-import { Cause, Deferred, Effect, Exit, Layer, MutableRef, type Runtime } from "effect";
+import { Cause, Deferred, Effect, Exit, Layer, MutableRef, Option, type Runtime } from "effect";
 import { Command } from "effect/unstable/cli";
 import { HttpMiddleware, HttpRouter, HttpServerError } from "effect/unstable/http";
 import * as Config from "../config.ts";
@@ -8,6 +8,7 @@ import * as Actions from "../db/actions.ts";
 import * as Client from "../db/client.ts";
 import * as DebugLogs from "../db/debug-logs.ts";
 import * as Logs from "../db/logs.ts";
+import * as Servers from "../db/servers.ts";
 import * as SessionStore from "../db/sessions.ts";
 import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
@@ -20,6 +21,7 @@ import * as Api from "../shared/api.ts";
 import type * as Domain from "../shared/domain.ts";
 import * as ProxyCommand from "./command.ts";
 import * as Handlers from "./handlers.ts";
+import * as Heartbeat from "./heartbeat.ts";
 import * as Sessions from "./sessions.ts";
 
 const HOST = "127.0.0.1";
@@ -44,13 +46,21 @@ server.on("error", (cause) => {
   }
 });
 
-const ServerLive = (display: Domain.QemuDisplay, automation: boolean, port: number) =>
+// The heartbeat starts once the listener is up, in the same scope: a port refusal announces
+// nothing, and the row stops being written when the server stops.
+const ServerLive = (
+  display: Domain.QemuDisplay,
+  automation: boolean,
+  port: number,
+  url: Option.Option<string>,
+) =>
   Layer.effectDiscard(
     Effect.gen(function* () {
       const log = yield* Log.Log;
       yield* log.info(
-        `oligarchy proxy listening on ${HOST}:${String(port)}; display ${display}${automation ? "; automation" : ""}`,
+        `oligarchy proxy listening on ${HOST}:${String(port)}; display ${display}${automation ? "; automation" : ""}${Option.match(url, { onNone: () => "", onSome: (announced) => `; announcing ${announced}` })}`,
       );
+      yield* Option.match(url, { onNone: () => Effect.void, onSome: Heartbeat.announce });
     }),
   ).pipe(
     Layer.provide(
@@ -76,6 +86,7 @@ const DatabaseLive = Layer.unwrap(
 const MainLive = Layer.mergeAll(
   SessionStore.SessionStore.layer,
   DebugLogs.DebugLogStore.layer,
+  Servers.ServerStore.layer,
   Log.Log.layer,
 ).pipe(
   Layer.provideMerge(Actions.ActionStore.layer),
