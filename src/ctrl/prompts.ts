@@ -71,9 +71,7 @@ const fill = (
   });
 };
 
-export const renderLinearIssue = Effect.fn("Prompts.renderLinearIssue")(function* (
-  values: Values,
-) {
+export const renderLinearIssue = Effect.fn("Prompts.renderLinearIssue")(function* (values: Values) {
   const text = yield* read(besideModule(`../../prompts/${TEMPLATE}`));
   const known: Record<string, string> = { SUB_AGENT, ...values };
   for (const [name, path] of Object.entries(GUIDES)) {
