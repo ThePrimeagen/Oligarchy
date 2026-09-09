@@ -236,9 +236,6 @@ describe("domain error messages", () => {
     expect(Errors.ProxyRefusal.make({ status: 409, message: "x" })._tag).toBe("ProxyRefusal");
     expect(Errors.ProxyUnreachable.make({ message: "x", cause: 1 })._tag).toBe("ProxyUnreachable");
     expect(Errors.LinearError.make({ operation: "team", message: "x" })._tag).toBe("LinearError");
-    expect(Errors.CursorAgentFailed.make({ message: "x", retryable: false, cause: 1 })._tag).toBe(
-      "CursorAgentFailed",
-    );
     expect(Errors.PngDecodeError.make({ message: "x" })._tag).toBe("PngDecodeError");
     expect(Errors.LogLine.make({ text: "x", level: "error" })._tag).toBe("LogLine");
   });

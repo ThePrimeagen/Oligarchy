@@ -87,6 +87,3 @@ export const renderErrorTypes = (
   const width = Math.max(0, ...rows.map((row) => row.key.length));
   return rows.map((row) => `${row.key.padEnd(width)}  ${row.description}`);
 };
-
-export const agentLink = (url: string): string =>
-  `Agent here, go check it out for more information: ${url}`;

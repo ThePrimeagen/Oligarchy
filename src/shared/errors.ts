@@ -352,14 +352,6 @@ export class PromptError extends Schema.TaggedError<PromptError>(
   "@oligarchy/shared/errors/PromptError",
 )("PromptError", { message: Schema.String, cause: Schema.optionalKey(Schema.Defect()) }) {}
 
-export class CursorAgentFailed extends Schema.TaggedError<CursorAgentFailed>(
-  "@oligarchy/shared/errors/CursorAgentFailed",
-)("CursorAgentFailed", {
-  message: Schema.String,
-  retryable: Schema.Boolean,
-  cause: Schema.Defect(),
-}) {}
-
 export class ChildExit extends Schema.TaggedError<ChildExit>("@oligarchy/shared/errors/ChildExit")(
   "ChildExit",
   {

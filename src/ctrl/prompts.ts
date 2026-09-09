@@ -7,17 +7,14 @@ import * as Errors from "../shared/errors.ts";
 
 export const SUB_AGENT = "Grok 4.6 high fast (cursor-grok-4.6-high-fast)";
 
-export type Template = "linear-issue.html" | "driving-agent.html" | "diagnosing-agent.html";
+export type Template = "linear-issue.html";
 
 // What a caller can put into a template, keyed as the template spells it. A key the caller has
 // no value for is absent; a template that asks for it does not render.
 export type Values = {
   readonly LINEAR_TICKET?: string;
-  // The model the driver runs as, which it records with `ctrl test start --model`.
-  readonly MODEL?: string;
   readonly RUN_ID?: string;
   readonly RESULT_ID?: string;
-  readonly SESSION_ID?: string;
   readonly VERSION?: string;
   readonly ISO_URL?: string;
   readonly SERVER_URL?: string;
@@ -36,7 +33,6 @@ const besideModule = (relative: string): string =>
 const GUIDES: Readonly<Record<string, string>> = {
   CLIENT_MD: besideModule("../../client.md"),
   CTRL_MD: besideModule("../../ctrl-linear.md"),
-  CTRL_DIAGNOSE_MD: besideModule("../../ctrl-diagnose.md"),
 };
 
 const PLACEHOLDER = /\{\{([A-Z_]+)\}\}/g;

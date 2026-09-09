@@ -54,18 +54,16 @@ describe("requiredRedacted", () => {
       expect(Redacted.value(yield* Config.oligarchyToken)).toBe("a");
       expect(Redacted.value(yield* Config.databaseUrl)).toBe("b");
       expect(Redacted.value(yield* Config.linearApiToken)).toBe("c");
-      expect(Redacted.value(yield* Config.cursorApiToken)).toBe("d");
-      expect(yield* Config.serverUrl).toBe("e");
-      expect(yield* Config.sessionId).toBe("f");
+      expect(yield* Config.serverUrl).toBe("d");
+      expect(yield* Config.sessionId).toBe("e");
     }).pipe(
       Effect.provide(
         Support.withEnv({
           OLIGARCHY_TOKEN: "a",
           DATABASE_URL: "b",
           LINEAR_API_TOKEN: "c",
-          CURSOR_API_TOKEN: "d",
-          SERVER_URL: "e",
-          SESSION_ID: "f",
+          SERVER_URL: "d",
+          SESSION_ID: "e",
         }),
       ),
     ),

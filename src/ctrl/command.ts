@@ -13,7 +13,6 @@ import * as Log from "../observability/log.ts";
 import * as Contract from "../shared/contract.ts";
 import * as Domain from "../shared/domain.ts";
 import * as Errors from "../shared/errors.ts";
-import * as Cursor from "./cursor.ts";
 import * as Linear from "./linear.ts";
 import * as Prompts from "./prompts.ts";
 import * as Render from "./render.ts";
@@ -32,13 +31,12 @@ export type Stores =
   | Log.Log;
 
 // ctrl is the record keeper: every read and write is a database call. It never talks to a proxy;
-// Linear and Cursor are the only remote services it reaches.
+// Linear is the only remote service it reaches.
 export type Deps = {
   readonly database: (url: Redacted.Redacted) => Layer.Layer<Stores, Errors.DatabaseError>;
   readonly linear: (
     token: Redacted.Redacted,
   ) => Layer.Layer<Linear.Linear, never, HttpClient.HttpClient>;
-  readonly cursor: (apiKey: Redacted.Redacted) => Layer.Layer<Cursor.CursorAgents>;
 };
 
 // Log sits above the stores so its flush finalizer runs before the pool closes.
@@ -58,7 +56,6 @@ const databaseLayers = (url: Redacted.Redacted): Layer.Layer<Stores, Errors.Data
 export const live: Deps = {
   database: databaseLayers,
   linear: Linear.Linear.layer,
-  cursor: Cursor.CursorAgents.layer,
 };
 
 // ---------------------------------------------------------------------------
@@ -217,14 +214,6 @@ export const makeCtrlCommand = (deps: Deps = live) => {
       const url = yield* Config.databaseUrl;
       const token = yield* Config.linearApiToken;
       return Layer.mergeAll(deps.database(url), deps.linear(token));
-    }),
-  );
-
-  const withDbAndCursor = Layer.unwrap(
-    Effect.gen(function* () {
-      const url = yield* Config.databaseUrl;
-      const apiKey = yield* Config.cursorApiToken;
-      return Layer.mergeAll(deps.database(url), deps.cursor(apiKey));
     }),
   );
 
@@ -413,27 +402,6 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     yield* printJson(yield* linear.listBacklog);
   });
 
-  // test run --ticket <linear-ticket>
-  // test run --ticket <linear-ticket> [--model <id>]
-  const testRun = Effect.fn("ctrl.test.run")(function* (input: {
-    readonly ticket: string;
-    readonly model: Option.Option<string>;
-  }) {
-    const agents = yield* Cursor.CursorAgents;
-    // The prompt names the model the agent runs as, so the driver can record it at test start:
-    // the id given, or the label of the default the agent is started on.
-    const selection = Option.map(input.model, (id): Cursor.Model => ({ id }));
-    const text = yield* Prompts.render("driving-agent.html", {
-      LINEAR_TICKET: input.ticket,
-      MODEL: Option.getOrElse(input.model, () => Cursor.modelLabel(Cursor.GROK_4_6_FAST_XHIGH)),
-    });
-    const { agentId } = yield* Option.match(selection, {
-      onNone: () => agents.prompt(text),
-      onSome: (model) => agents.prompt(text, model),
-    });
-    yield* Console.log(Render.agentLink(Cursor.agentUrl(agentId)));
-  });
-
   // test start --session-id <id> --test-result-id <id> --model <id>
   const testStart = Effect.fn("ctrl.test.start")(function* (input: {
     readonly sessionId: string;
@@ -580,27 +548,6 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     return yield* log.info(`diagnosed; ${input.verdict}; ${cause}${input.model}`, {
       sessionId: input.sessionId,
     });
-  });
-
-  // diagnose run --session-id <id>
-  const diagnoseRun = Effect.fn("ctrl.diagnose.run")(function* (input: {
-    readonly sessionId: string;
-  }) {
-    const diagnosis = yield* Diagnosis.DiagnosisStore;
-    const agents = yield* Cursor.CursorAgents;
-    yield* endedSession("diagnose run", input.sessionId);
-    // A reviewer whose diagnose would be refused is an agent run wasted: refuse it here instead.
-    yield* diagnosis
-      .getDiagnosis(input.sessionId)
-      .pipe(
-        Effect.filterOrFail(Option.isNone, () =>
-          refuse(`diagnose run: session ${input.sessionId} already has a diagnosis`),
-        ),
-      );
-    // The reviewer reads everything back from the database: the session id is all it needs.
-    const text = yield* Prompts.render("diagnosing-agent.html", { SESSION_ID: input.sessionId });
-    const { agentId } = yield* agents.prompt(text);
-    yield* Console.log(Render.agentLink(Cursor.agentUrl(agentId)));
   });
 
   // session list [--count <n>] [--active] [--json]
@@ -799,23 +746,6 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     Command.provide(withDbAndLinear),
   );
 
-  const testRunCommand = Command.make(
-    "run",
-    {
-      ticket: Flag.string("ticket").pipe(
-        Flag.withSchema(Schema.NonEmptyString),
-        Flag.withDescription("Linear ticket the driving agent completes"),
-      ),
-      model: modelFlag(
-        "Cursor model id to run the driving agent on; the default when omitted",
-      ).pipe(Flag.optional),
-    },
-    testRun,
-  ).pipe(
-    Command.withDescription("Kick off a Cursor cloud agent that drives one Linear ticket"),
-    Command.provide(withDbAndCursor),
-  );
-
   const testStartCommand = Command.make(
     "start",
     {
@@ -844,14 +774,13 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     testDefinitions,
   ).pipe(
     Command.withDescription(
-      "test --list [--details] [--name <definition>] [--history]; or define, new, list, run, start",
+      "test --list [--details] [--name <definition>] [--history]; or define, new, list, start",
     ),
     Command.provide(withDb),
     Command.withSubcommands([
       testDefineCommand,
       testNewCommand,
       testListCommand,
-      testRunCommand,
       testStartCommand,
     ]),
   );
@@ -960,11 +889,6 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     Command.withSubcommands([errorTypeNewCommand, errorTypeListCommand]),
   );
 
-  const diagnoseRunCommand = Command.make("run", { sessionId: sessionIdFlag }, diagnoseRun).pipe(
-    Command.withDescription("Kick off a Cursor cloud agent that reviews one ended session"),
-    Command.provide(withDbAndCursor),
-  );
-
   const diagnoseCommand = Command.make(
     "diagnose",
     {
@@ -985,10 +909,9 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     diagnose,
   ).pipe(
     Command.withDescription(
-      "diagnose --session-id <id> --verdict passed|failed [--type <key>] --summary <text> --model <id>; or run",
+      "diagnose --session-id <id> --verdict passed|failed [--type <key>] --summary <text> --model <id>",
     ),
     Command.provide(withDb),
-    Command.withSubcommands([diagnoseRunCommand]),
   );
 
   return Command.make("ctrl").pipe(

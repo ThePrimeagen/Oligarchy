@@ -4,26 +4,24 @@ Consult this table of contents first. Read only the section you need.
 
 | Section | Line |
 |---------|-----:|
-| [Important](#important) | 24 |
-| [Synopsis](#synopsis) | 30 |
-| [test --list](#test---list) | 59 |
-| [test define](#test-define) | 77 |
-| [test new](#test-new) | 93 |
-| [test list](#test-list) | 109 |
-| [test run](#test-run) | 121 |
-| [test start](#test-start) | 137 |
-| [test-results](#test-results) | 154 |
-| [session list](#session-list) | 172 |
-| [session](#session) | 188 |
-| [session --search](#session---search) | 213 |
-| [error-type new](#error-type-new) | 231 |
-| [error-type list](#error-type-list) | 246 |
-| [diagnose](#diagnose) | 260 |
-| [diagnose run](#diagnose-run) | 279 |
+| [Important](#important) | 22 |
+| [Synopsis](#synopsis) | 28 |
+| [test --list](#test---list) | 55 |
+| [test define](#test-define) | 73 |
+| [test new](#test-new) | 89 |
+| [test list](#test-list) | 105 |
+| [test start](#test-start) | 117 |
+| [test-results](#test-results) | 134 |
+| [session list](#session-list) | 152 |
+| [session](#session) | 168 |
+| [session --search](#session---search) | 193 |
+| [error-type new](#error-type-new) | 211 |
+| [error-type list](#error-type-list) | 226 |
+| [diagnose](#diagnose) | 240 |
 
 ## Important
 
-`./ctrl` is the control plane's record keeper: it creates test runs, opens their Linear tickets, spawns driving agents, ties a session to its result, closes the result, reads sessions back, spawns reviewing agents, and records their verdict on every ended session. Everything it reads and writes is in the database; it never touches a guest or a proxy — the guest is `./client`'s.
+`./ctrl` is the control plane's record keeper: it creates test runs, opens their Linear tickets, ties a session to its result, closes the result, reads sessions back, and records a verdict on every ended session. Everything it reads and writes is in the database; it never touches a guest or a proxy — the guest is `./client`'s.
 
 If you are an agent driving a guest, you need two of these: [test start](#test-start) after `./client start`, and [test-results](#test-results) before `./client stop`. If you are an agent reviewing a session, you need [session](#session), [error-type list](#error-type-list), [error-type new](#error-type-new) and [diagnose](#diagnose). Do not look at code. Run the commands.
 
@@ -36,7 +34,6 @@ If you are an agent driving a guest, you need two of these: [test start](#test-s
 ./ctrl test define    --name <definition> [--description <text>] [--instruction <text>] [--proof <text>]
 ./ctrl test new       --server-url <url> --iso <https-url> --version <version> [--name <definition>]
 ./ctrl test list
-./ctrl test run       --ticket <linear-ticket> [--model <id>]
 ./ctrl test start     --session-id <id> --test-result-id <id> --model <id>
 ./ctrl test-results   --agent-id <agent> --id <id> --status success|failed [--reason <text>]
 ./ctrl session list   [--count <n>] [--active] [--json]
@@ -45,13 +42,12 @@ If you are an agent driving a guest, you need two of these: [test start](#test-s
 ./ctrl error-type new  --key <key> --description <text>
 ./ctrl error-type list [--json]
 ./ctrl diagnose       --session-id <id> --verdict passed|failed [--type <key>] --summary <text> --model <id>
-./ctrl diagnose run   --session-id <id>
 ```
 
 The action comes first. Every value is a flag; there are no positional arguments. Flags may sit in any order after the action.
 
-- `DATABASE_URL` — read from the environment by every action; it is the only variable most of them need. `test new` and `test list` also read `LINEAR_API_TOKEN`; `test run` and `diagnose run` also read `CURSOR_API_TOKEN`. No action reads `OLIGARCHY_TOKEN`. A `.env` in the current directory fills in missing variables only. A missing variable means exit 1.
-- `--session-id <id>` — taken by `test start`, `session`, `diagnose` and `diagnose run`. Omitted, it is read from `SESSION_ID` in the environment; the flag wins when both are given, and an empty `SESSION_ID` counts as unset. Set it once — `SESSION_ID=$(./ctrl session --search --test-result-id <id>) && export SESSION_ID`, so a failed search stops there instead of exporting nothing — and every command that follows is about that session. Neither given is a usage error; on `session` without `--search` it is the refusal `session: --session-id or SESSION_ID is required`.
+- `DATABASE_URL` — read from the environment by every action; it is the only variable most of them need. `test new` and `test list` also read `LINEAR_API_TOKEN`. No action reads `OLIGARCHY_TOKEN`. A `.env` in the current directory fills in missing variables only. A missing variable means exit 1.
+- `--session-id <id>` — taken by `test start`, `session` and `diagnose`. Omitted, it is read from `SESSION_ID` in the environment; the flag wins when both are given, and an empty `SESSION_ID` counts as unset. Set it once — `SESSION_ID=$(./ctrl session --search --test-result-id <id>) && export SESSION_ID`, so a failed search stops there instead of exporting nothing — and every command that follows is about that session. Neither given is a usage error; on `session` without `--search` it is the refusal `session: --session-id or SESSION_ID is required`.
 - `--server-url <url>` — taken by `test new` alone: the proxy the driving agents will talk to, a full http or https URL, stored on the run and written into every ticket. Falls back to `SERVER_URL` from the environment; there is no default. `test start` and `test-results` accept it and ignore it, so a ticket written before it went still runs; every other action refuses it as an unrecognized flag.
 
 A command that works exits 0. A command that fails exits 1 and prints the error: one headline, then the stack trace and the cause behind it. Read the headline first. `./ctrl <action> --help` prints that action's flags.
@@ -116,22 +112,6 @@ Prints every Linear issue on the Oligarchy team whose status type is backlog, as
 
 ```bash
 ./ctrl test list
-```
-
-## test run
-
-```
-./ctrl test run --ticket <linear-ticket> [--model <id>]
-```
-
-Spawns a Cursor cloud agent that drives one Linear ticket. The ticket carries the proxy URL for the driver's `./client`. The kickoff prompt names the model the agent runs as, which the driver records with `test start --model`. Prints a link to the agent as soon as it starts; does not wait for it. Not used while driving a guest. Reads `CURSOR_API_TOKEN`.
-
-- `--ticket <linear-ticket>` — the issue identifier created by `test new`.
-- `--model <id>` — the Cursor model id to run the agent on. Omitted, the agent runs on the default (`grok-4.6`, effort xhigh, fast), named in the prompt as `grok-4.6-xhigh-fast`.
-
-```bash
-./ctrl test run --ticket OLI-42
-./ctrl test run --ticket OLI-42 --model composer-2.5
 ```
 
 ## test start
@@ -274,18 +254,4 @@ Records the post-run diagnosis: a reviewer's verdict on one session that has end
 ```bash
 ./ctrl diagnose --session-id 6f1c...e2a9 --verdict failed --type guest_boot_hang --summary "Serial stops after 'Waiting for root device'; the ISO never mounted" --model <the Cursor model id you are running as>
 ./ctrl diagnose --session-id 6f1c...e2a9 --verdict passed --summary "The last image shows the lock screen with the clock; matches the proof" --model <the Cursor model id you are running as>
-```
-
-## diagnose run
-
-```
-./ctrl diagnose run --session-id <id>
-```
-
-Spawns a Cursor cloud agent that reviews one ended session and records its verdict with [diagnose](#diagnose). The agent is handed the session id and the reviewer's guide (`ctrl-diagnose.md`), nothing else: it reads the rest back from the database with [session](#session). Prints a link to the agent as soon as it starts; does not wait for it. Not used while driving a guest. Reads `CURSOR_API_TOKEN`.
-
-- `--session-id <id>` — the session; `SESSION_ID` when omitted. Unknown, still running or downloading, or already diagnosed is a failure (`diagnose run: session <id> already has a diagnosis`), before any agent is spawned.
-
-```bash
-./ctrl diagnose run --session-id 6f1c...e2a9
 ```
