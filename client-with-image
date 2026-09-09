@@ -30,21 +30,23 @@ for arg in "$@"; do
   esac
 done
 
-tmp=$(mktemp)
-trap 'rm -f "$tmp"' EXIT
-
-status=0
-"$client" "$@" >"$tmp" || status=$?
-cat "$tmp"
-if [ "$status" -ne 0 ]; then
-  exit "$status"
+if [ "${1:-}" = "start" ]; then
+  tmp=$(mktemp)
+  trap 'rm -f "$tmp"' EXIT
+  status=0
+  "$client" "$@" >"$tmp" || status=$?
+  cat "$tmp"
+  if [ "$status" -ne 0 ]; then
+    exit "$status"
+  fi
+  if [ -z "$session_id" ]; then
+    IFS= read -r session_id <"$tmp" || true
+  fi
+else
+  "$client" "$@"
 fi
 
-if [ -z "$session_id" ] && [ "${1:-}" = "start" ]; then
-  IFS= read -r session_id <"$tmp" || true
-fi
-
-if [ -z "$session_id" ]; then
+if [ -z "$session_id" ] || [ "${1:-}" = "stop" ]; then
   exit 0
 fi
 

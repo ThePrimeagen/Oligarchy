@@ -206,6 +206,108 @@ describe("./client-with-image happy path", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it("does not screenshot after stop", async () => {
+    const stub = await proxy();
+    const dir = await mkdtemp(join(tmpdir(), "oligarchy-client-with-image-"));
+    const output = join(dir, "screen.png");
+    try {
+      const result = await runWrapper(
+        [
+          "stop",
+          "--agent-id",
+          AGENT,
+          "--server-url",
+          stub.url,
+          "--session-id",
+          SESSION,
+          "--status",
+          "succeeded",
+        ],
+        { CLIENT_IMAGE: output },
+      );
+      expect(result.stderr).toBe("");
+      expect(result.code).toBe(0);
+      expect(stub.requests).toEqual([
+        {
+          method: "POST",
+          url: "/stop",
+          authorization: `Bearer ${TOKEN}`,
+          body: { id: SESSION, agent: AGENT, status: "succeeded" },
+        },
+      ]);
+      await expect(readFile(output)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("follow streams stdout as the events arrive", async () => {
+    const stub = await proxy();
+    const dir = await mkdtemp(join(tmpdir(), "oligarchy-client-with-image-"));
+    const output = join(dir, "screen.png");
+    const child = spawn(
+      WRAPPER,
+      [
+        "follow",
+        "--agent-id",
+        AGENT,
+        "--server-url",
+        stub.url,
+        "--session-id",
+        StubProxy.ENDLESS_ID,
+      ],
+      {
+        detached: true,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: {
+          ...process.env,
+          NODE_OPTIONS:
+            `${process.env.NODE_OPTIONS ?? ""} --disable-warning=ExperimentalWarning`.trim(),
+          OLIGARCHY_TOKEN: TOKEN,
+          SERVER_URL: "",
+          CLIENT_IMAGE: output,
+        },
+      },
+    );
+    let stdout = "";
+    const gotData = new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error("follow produced no stdout while still running"));
+      }, 3_000);
+      child.stdout.setEncoding("utf8");
+      child.stdout.on("data", (data: string) => {
+        stdout += data;
+        clearTimeout(timeout);
+        resolve();
+      });
+      child.on("error", (cause) => {
+        clearTimeout(timeout);
+        reject(cause);
+      });
+    });
+    try {
+      await gotData;
+      expect(stdout.length).toBeGreaterThan(0);
+    } finally {
+      if (child.pid !== undefined) {
+        try {
+          process.kill(-child.pid, "SIGKILL");
+        } catch {
+          child.kill("SIGKILL");
+        }
+      }
+      await Promise.race([
+        new Promise<void>((resolve) => {
+          child.on("exit", () => resolve());
+        }),
+        new Promise<void>((resolve) => {
+          setTimeout(resolve, 1_000);
+        }),
+      ]);
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("./client-with-image unhappy path", () => {

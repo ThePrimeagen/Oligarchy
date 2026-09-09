@@ -59,7 +59,7 @@ The same arguments as `./client`, then a screenshot. Prefer this over calling `.
 - `CLIENT_IMAGE` — the PNG path. Required. Missing means exit 1, `CLIENT_IMAGE is not set`.
 - After the action succeeds, waits 100 ms, then writes the guest display to `CLIENT_IMAGE`.
 - The action's stdout is unchanged (`start` still prints the session id). `--session-id` comes from the flags, or from that printed id.
-- A failed action does not take a screenshot.
+- A failed action does not take a screenshot. `stop` does not either: the session is already gone.
 
 ```bash
 CLIENT_IMAGE=screen.png ./client-with-image send-keys --agent-id OLI-42 --server-url https://qemu.example.com --session-id 6f1c...e2a9 --keys "hello<ENTER>"
