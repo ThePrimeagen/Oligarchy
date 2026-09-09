@@ -1,10 +1,8 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { NodeFileSystem } from "@effect/platform-node";
 import { Cause, Effect, Layer, Redacted } from "effect";
 import { HttpClientError, type HttpClientRequest } from "effect/unstable/http";
 import * as Linear from "../../src/ctrl/linear.ts";
-import * as Prompts from "../../src/ctrl/prompts.ts";
 import * as Render from "../../src/observability/render.ts";
 import * as Errors from "../../src/shared/errors.ts";
 import * as FakeHttp from "../support/fake-http.ts";
@@ -102,20 +100,9 @@ const withHttp = (respond: (body: GraphQl) => Response) =>
 
 const linear = (token = TOKEN) => Linear.Linear.layer(Redacted.make(token));
 
-// The ticket body is the prompt module's; a broken checkout is a defect here, not a Linear failure.
-const describedAs = (ticket: string) =>
-  Prompts.render("linear-issue.html", {
-    LINEAR_TICKET: ticket,
-    RUN_ID: experiment.id,
-    RESULT_ID: firstTest.id,
-    VERSION: experiment.version,
-    ISO_URL: experiment.iso,
-    SERVER_URL: experiment.serverUrl,
-    TEST_NAME: firstTest.name,
-    TEST_DESCRIPTION: firstTest.description,
-    TEST_INSTRUCTION: firstTest.instruction,
-    TEST_PROOF: firstTest.proof,
-  }).pipe(Effect.provide(NodeFileSystem.layer), Effect.orDie);
+// The ticket body is opaque to the Linear client: any text stands in for the rendered prompt.
+const describedAs = (ticket: string): string =>
+  `${ticket}: ${firstTest.name} on ${experiment.iso} at ${experiment.serverUrl}; ${firstTest.instruction}`;
 
 // The whole ticket flow as `test new` runs it for one definition.
 const createTicket = Effect.gen(function* () {
@@ -129,7 +116,7 @@ const createTicket = Effect.gen(function* () {
     labelIds,
     assigneeId,
   });
-  yield* client.describeIssue(ticket, yield* describedAs(ticket.identifier));
+  yield* client.describeIssue(ticket, describedAs(ticket.identifier));
   return ticket;
 });
 
@@ -179,7 +166,7 @@ describe("Linear happy path", () => {
         expect(bodies[5]?.variables).toEqual({
           id: "issue-OLI-42",
           input: {
-            description: yield* describedAs("OLI-42"),
+            description: describedAs("OLI-42"),
           },
         });
       }),
