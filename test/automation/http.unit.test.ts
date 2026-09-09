@@ -1,71 +1,35 @@
 import { createHmac } from "node:crypto";
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { Effect, FileSystem, Layer, Redacted } from "effect";
+import { Effect, Layer, Redacted } from "effect";
 import { HttpBody, HttpClient, HttpRouter } from "effect/unstable/http";
 import { NodeHttpServer } from "@effect/platform-node";
 import * as Handlers from "../../src/automation/handlers.ts";
-import * as FakeFs from "../support/fake-fs.ts";
 import * as FakeLog from "../support/log.ts";
 import * as Reporter from "../support/reporter.ts";
+import * as Stores from "../support/stores.ts";
 
 const WEBHOOK_SECRET = "whsec_test";
-const RECORD = "./automation-logs";
 
 const SecretLive = Layer.succeed(Handlers.LinearWebhookSecret)(
   Handlers.LinearWebhookSecret.of(Redacted.make(WEBHOOK_SECRET)),
 );
 
-type Write = {
-  readonly path: string;
-  readonly data: Uint8Array;
-  readonly flag: FileSystem.OpenFlag | undefined;
-};
-
-type RecordFile = {
-  readonly writes: Array<Write>;
-  readonly layer: Layer.Layer<FileSystem.FileSystem>;
-};
-
-const denied = (path: string) => Effect.fail(FakeFs.permissionDenied("open", path));
-
-// A FileSystem that records every write, or refuses each one as a file it may not open.
-const recordFile = (refuse = false): RecordFile => {
-  const writes: Array<Write> = [];
-  const layer = FileSystem.layerNoop({
-    writeFile: (path, data, options) =>
-      refuse
-        ? denied(path)
-        : Effect.sync(() => {
-            writes.push({ path, data, flag: options?.flag });
-          }),
-  });
-  return { writes, layer };
-};
-
-const withNewline = (payload: string | Uint8Array): Uint8Array => {
-  const bytes = typeof payload === "string" ? new TextEncoder().encode(payload) : payload;
-  const out = new Uint8Array(bytes.length + 1);
-  out.set(bytes);
-  out[bytes.length] = 0x0a;
-  return out;
-};
-
 type Fixture = {
-  readonly file: RecordFile;
+  readonly stores: ReturnType<typeof Stores.fakeStores>;
   readonly log: FakeLog.FakeLog;
   readonly reporter: Reporter.Collector;
 };
 
-const fixture = (file: RecordFile = recordFile()): Fixture => ({
-  file,
+const fixture = (): Fixture => ({
+  stores: Stores.fakeStores(),
   log: FakeLog.fakeLog(),
   reporter: Reporter.collect(),
 });
 
 const serve = (fixed: Fixture) =>
-  HttpRouter.serve(Handlers.routes(RECORD), { disableLogger: true, disableListenLog: true }).pipe(
-    Layer.provide(Layer.mergeAll(fixed.file.layer, fixed.log.layer, SecretLive)),
+  HttpRouter.serve(Handlers.routes, { disableLogger: true, disableListenLog: true }).pipe(
+    Layer.provide(Layer.mergeAll(fixed.stores.layer, fixed.log.layer, SecretLive)),
     Layer.provideMerge(NodeHttpServer.layerTest),
     Layer.provideMerge(fixed.reporter.layer),
   );
@@ -85,10 +49,46 @@ const webhook = (http: HttpClient.HttpClient, payload: string | Uint8Array, sign
         : HttpBody.uint8Array(payload, "application/json"),
   });
 
+const seedResult = (
+  fixed: Fixture,
+  linearId: string,
+  resultId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+) => {
+  fixed.stores.tests.results.push({
+    id: resultId,
+    runId: "11111111-1111-4111-8111-111111111111",
+    definitionId: 1,
+    sessionId: null,
+    model: null,
+    linearId,
+    status: "pending",
+    reason: null,
+    createdAt: new Date(),
+    finishedAt: null,
+  });
+  return resultId;
+};
+
+const issueBody = (state: string, extras: Record<string, unknown> = {}) =>
+  JSON.stringify({
+    action: "update",
+    type: "Issue",
+    data: {
+      identifier: "OLI-1063",
+      state: {
+        id: "a9fe2d89-3cb3-47dd-8645-5d224f997134",
+        name: state,
+        type: state === "Needs Review" ? "started" : "unstarted",
+      },
+    },
+    updatedFrom: { state: { name: "Todo" } },
+    ...extras,
+  });
+
 describe("POST /linear", () => {
   const payload = '{"action":"update","type":"Issue","data":{"identifier":"OLI-1"}}';
 
-  it.effect("appends the exact body Linear sent, answers ok and logs it", () =>
+  it.effect("answers ok and logs a signed body that is not a queueable Issue state", () =>
     Effect.gen(function* () {
       const fixed = fixture();
       yield* Effect.gen(function* () {
@@ -97,7 +97,7 @@ describe("POST /linear", () => {
         expect(response.status).toBe(200);
         expect(yield* response.json).toEqual({ ok: "true" });
       }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.file.writes).toEqual([{ path: RECORD, data: withNewline(payload), flag: "a" }]);
+      expect(fixed.stores.automation.jobs).toEqual([]);
       expect(fixed.log.lines).toEqual([
         {
           level: "info",
@@ -112,45 +112,93 @@ describe("POST /linear", () => {
     }),
   );
 
-  it.effect("every signed delivery appends its own exact body, in order", () =>
+  it.effect("queues drive when Automation Needed arrives for a known ticket", () =>
     Effect.gen(function* () {
-      const first = '{"action":"create","type":"Issue"}';
-      const second = '{\n  "action": "update",\n  "type": "Comment"\n}';
+      const body = issueBody("Automation Needed");
       const fixed = fixture();
+      const resultId = seedResult(fixed, "OLI-1063");
       yield* Effect.gen(function* () {
         const http = yield* HttpClient.HttpClient;
-        expect((yield* webhook(http, first, sign(first))).status).toBe(200);
-        expect((yield* webhook(http, second, sign(second))).status).toBe(200);
+        expect((yield* webhook(http, body, sign(body))).status).toBe(200);
       }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.file.writes.map((write) => write.data)).toEqual([
-        withNewline(first),
-        withNewline(second),
+      expect(fixed.stores.automation.jobs).toEqual([
+        expect.objectContaining({ resultId, action: "drive", status: "pending" }),
       ]);
-      expect(FakeLog.texts(fixed.log)).toEqual([
-        "linear webhook recorded",
-        "linear webhook recorded",
+      expect(fixed.log.lines).toEqual([
+        {
+          level: "info",
+          text: "linear webhook queued drive; Automation Needed",
+          sessionId: undefined,
+          agentId: "OLI-1063",
+          skipSentry: false,
+          cause: undefined,
+        },
       ]);
     }),
   );
 
-  it.effect(
-    "appends a UTF-8 BOM body as the exact bytes Linear signed, plus a trailing newline",
-    () =>
-      Effect.gen(function* () {
-        const bom = new Uint8Array([
-          0xef,
-          0xbb,
-          0xbf,
-          ...new TextEncoder().encode('{"action":"update"}'),
-        ]);
-        const fixed = fixture();
-        yield* Effect.gen(function* () {
-          const http = yield* HttpClient.HttpClient;
-          const response = yield* webhook(http, bom, sign(bom));
-          expect(response.status).toBe(200);
-        }).pipe(Effect.provide(serve(fixed)));
-        expect(fixed.file.writes).toEqual([{ path: RECORD, data: withNewline(bom), flag: "a" }]);
-      }),
+  it.effect("queues diagnose when Needs Review arrives for a known ticket", () =>
+    Effect.gen(function* () {
+      const body = issueBody("Needs Review");
+      const fixed = fixture();
+      const resultId = seedResult(fixed, "OLI-1063");
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        expect((yield* webhook(http, body, sign(body))).status).toBe(200);
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.stores.automation.jobs).toEqual([
+        expect.objectContaining({ resultId, action: "diagnose", status: "pending" }),
+      ]);
+      expect(FakeLog.texts(fixed.log)).toEqual(["linear webhook queued diagnose; Needs Review"]);
+    }),
+  );
+
+  it.effect("ignores a queueable state when no result has that Linear id (unhappy)", () =>
+    Effect.gen(function* () {
+      const body = issueBody("Automation Needed");
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        expect((yield* webhook(http, body, sign(body))).status).toBe(200);
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.stores.automation.jobs).toEqual([]);
+      expect(FakeLog.texts(fixed.log)).toEqual([
+        "linear webhook ignored; no result for Automation Needed",
+      ]);
+      expect(fixed.log.lines[0]?.agentId).toBe("OLI-1063");
+    }),
+  );
+
+  it.effect("ignores a second drive for the same result (unhappy duplicate)", () =>
+    Effect.gen(function* () {
+      const body = issueBody("Automation Needed");
+      const fixed = fixture();
+      seedResult(fixed, "OLI-1063");
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        expect((yield* webhook(http, body, sign(body))).status).toBe(200);
+        expect((yield* webhook(http, body, sign(body))).status).toBe(200);
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.stores.automation.jobs).toHaveLength(1);
+      expect(FakeLog.texts(fixed.log)).toEqual([
+        "linear webhook queued drive; Automation Needed",
+        "linear webhook ignored; drive already queued",
+      ]);
+    }),
+  );
+
+  it.effect("records In Progress without enqueueing", () =>
+    Effect.gen(function* () {
+      const body = issueBody("In Progress");
+      const fixed = fixture();
+      seedResult(fixed, "OLI-1063");
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        expect((yield* webhook(http, body, sign(body))).status).toBe(200);
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.stores.automation.jobs).toEqual([]);
+      expect(FakeLog.texts(fixed.log)).toEqual(["linear webhook recorded; In Progress"]);
+    }),
   );
 });
 
@@ -158,7 +206,7 @@ describe("POST /linear refusals", () => {
   const payload = '{"action":"update"}';
 
   it.effect(
-    "a missing or wrong signature is 401 unauthorized, records nothing and logs one line each",
+    "a missing or wrong signature is 401 unauthorized, queues nothing and logs one line each",
     () =>
       Effect.gen(function* () {
         const fixed = fixture();
@@ -171,7 +219,7 @@ describe("POST /linear refusals", () => {
           expect(wrong.status).toBe(401);
           expect(yield* wrong.json).toEqual({ error: "unauthorized" });
         }).pipe(Effect.provide(serve(fixed)));
-        expect(fixed.file.writes).toEqual([]);
+        expect(fixed.stores.automation.jobs).toEqual([]);
         expect(fixed.log.lines).toEqual([
           {
             level: "error",
@@ -194,7 +242,7 @@ describe("POST /linear refusals", () => {
       }),
   );
 
-  it.effect("a valid signature of a different body is 401 and records nothing", () =>
+  it.effect("a valid signature of a different body is 401 and queues nothing", () =>
     Effect.gen(function* () {
       const fixed = fixture();
       yield* Effect.gen(function* () {
@@ -203,33 +251,8 @@ describe("POST /linear refusals", () => {
         expect(response.status).toBe(401);
         expect(yield* response.json).toEqual({ error: "unauthorized" });
       }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.file.writes).toEqual([]);
+      expect(fixed.stores.automation.jobs).toEqual([]);
     }),
-  );
-
-  it.effect(
-    "a record file that cannot be written is 500 internal error, logged with Node's reason",
-    () =>
-      Effect.gen(function* () {
-        const fixed = fixture(recordFile(true));
-        yield* Effect.gen(function* () {
-          const http = yield* HttpClient.HttpClient;
-          const raw = yield* webhook(http, payload, sign(payload));
-          expect(raw.status).toBe(500);
-          expect(yield* raw.json).toEqual({ error: "internal error" });
-        }).pipe(Effect.provide(serve(fixed)));
-        expect(fixed.file.writes).toEqual([]);
-        expect(fixed.log.lines).toHaveLength(1);
-        expect(fixed.log.lines[0]).toMatchObject({
-          level: "error",
-          text: `POST /linear failed: EACCES: permission denied, open '${RECORD}'`,
-          sessionId: undefined,
-          agentId: undefined,
-          skipSentry: false,
-        });
-        expect(fixed.log.lines[0]?.cause).toMatchObject({ _tag: "PlatformError" });
-        expect(fixed.reporter.reported).toEqual([]);
-      }),
   );
 
   it.effect(
@@ -254,7 +277,7 @@ describe("POST /linear refusals", () => {
           });
           expect(start.status).toBe(404);
         }).pipe(Effect.provide(serve(fixed)));
-        expect(fixed.file.writes).toEqual([]);
+        expect(fixed.stores.automation.jobs).toEqual([]);
         expect(fixed.log.lines).toEqual([]);
       }),
   );

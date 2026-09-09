@@ -741,8 +741,8 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
   sits above `Database` so the flush completes before the pool closes. `Log.layer` reads
   `ErrorReporter.CurrentErrorReporters` once at build, so `SentryLive` is provided beneath it,
   never only to callers. `Log.layerStdout` persists nothing: it is for tests and for a process
-  that keeps no rows (the automation service), whose record is stdout and Sentry. A fatal path
-  flushes the log, then Sentry, then exits.
+  that does not persist log rows (the automation service writes queue jobs, not log lines), whose
+  console copy is stdout and Sentry. A fatal path flushes the log, then Sentry, then exits.
 - `Log` installs no Effect `Logger`; `emit` formats, writes and offers synchronously. `console.*`
   appears only in `src/dashboard/**` and `vitest.global-setup.ts`. Test log output through the
   fake `Log` layer (`test/support/log.ts`) or `Log.layerStdout` with `TestConsole.logLines`.

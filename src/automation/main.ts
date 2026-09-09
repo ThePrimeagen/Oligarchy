@@ -4,6 +4,9 @@ import { Cause, Deferred, Effect, Exit, Layer, type Runtime } from "effect";
 import { Command } from "effect/unstable/cli";
 import { HttpMiddleware, HttpRouter, HttpServerError } from "effect/unstable/http";
 import * as Config from "../config.ts";
+import * as Automation from "../db/automation.ts";
+import * as Client from "../db/client.ts";
+import * as Tests from "../db/tests.ts";
 import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
 import * as Sentry from "../observability/sentry.ts";
@@ -13,11 +16,9 @@ import * as Handlers from "./handlers.ts";
 
 const HOST = "127.0.0.1";
 
-// Where every request lands, appended in the working directory as they asked.
-const RECORD = "./automation-logs";
-
-// stdout is the convenience copy of the log; Sentry is the record. A write refused by a full
-// filesystem is dropped, never an uncaught exception per line (see the proxy's main).
+// stdout is the convenience copy of the log; the automation_jobs rows and Sentry are the record.
+// A write refused by a full filesystem is dropped, never an uncaught exception per line
+// (see the proxy's main).
 process.stdout.on("error", () => {});
 process.stderr.on("error", () => {});
 
@@ -33,13 +34,11 @@ const ServerLive = (port: number) =>
   Layer.effectDiscard(
     Effect.gen(function* () {
       const log = yield* Log.Log;
-      yield* log.info(
-        `oligarchy automation listening on ${HOST}:${String(port)}; recording to ${RECORD}`,
-      );
+      yield* log.info(`oligarchy automation listening on ${HOST}:${String(port)}`);
     }),
   ).pipe(
     Layer.provide(
-      HttpRouter.serve(Handlers.routes(RECORD), {
+      HttpRouter.serve(Handlers.routes, {
         disableLogger: true,
         disableListenLog: true,
       }).pipe(Layer.provide(NodeHttpServer.layer(() => server, { host: HOST, port }))),
@@ -48,10 +47,17 @@ const ServerLive = (port: number) =>
     Layer.provide(Layer.succeed(HttpMiddleware.TracerDisabledWhen)(() => true)),
   );
 
-// LINEAR_WEBHOOK_SECRET is the one variable this process reads: Linear signs POST /linear with it.
-// No database: this service keeps no rows, so its log is stdout and Sentry. Sentry sits beneath
-// Log so Log captures the reporter.
-const MainLive = Layer.mergeAll(Log.Log.layerStdout, Handlers.LinearWebhookSecret.layer).pipe(
+const DatabaseLive = Layer.unwrap(Effect.map(Config.databaseUrl, Client.Database.layer));
+
+// LINEAR_WEBHOOK_SECRET signs POST /linear; DATABASE_URL holds the queue. Sentry sits beneath
+// Log so Log captures the reporter. Log is stdout: durable work is automation_jobs, not log rows.
+const MainLive = Layer.mergeAll(
+  Log.Log.layerStdout,
+  Handlers.LinearWebhookSecret.layer,
+  Tests.TestStore.layer,
+  Automation.AutomationStore.layer,
+).pipe(
+  Layer.provideMerge(DatabaseLive),
   Layer.provideMerge(Sentry.SentryLive),
   Layer.provideMerge(Config.providerLayer),
   Layer.provideMerge(NodeServices.layer),
@@ -59,9 +65,9 @@ const MainLive = Layer.mergeAll(Log.Log.layerStdout, Handlers.LinearWebhookSecre
 
 const command = AutomationCommand.makeAutomationCommand({ serve: ServerLive, serverFailed });
 
-// The graph is built before the command runs: a missing LINEAR_WEBHOOK_SECRET is the one failure
-// no Log exists to record, so it is printed here. Every later failure logs its own fatal line; a
-// defect has nothing else to say for it.
+// The graph is built before the command runs: a missing LINEAR_WEBHOOK_SECRET or DATABASE_URL is
+// the one failure no Log exists to record, so it is printed here. Every later failure logs its
+// own fatal line; a defect has nothing else to say for it.
 const program = Effect.gen(function* () {
   const services = yield* Layer.build(MainLive).pipe(Effect.tapCause(Render.reportFailure));
   yield* Command.run(command, { version: Api.VERSION }).pipe(
