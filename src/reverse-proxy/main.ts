@@ -3,6 +3,7 @@ import { NodeHttpClient, NodeHttpServer, NodeRuntime, NodeServices } from "@effe
 import { Cause, Deferred, Effect, Exit, Layer, type Runtime } from "effect";
 import { Command } from "effect/unstable/cli";
 import { HttpMiddleware, HttpRouter, HttpServer, HttpServerError } from "effect/unstable/http";
+import type { ChildProcessSpawner } from "effect/unstable/process";
 import * as Config from "../config.ts";
 import * as Cursor from "../ctrl/cursor.ts";
 import * as Client from "../db/client.ts";
@@ -11,10 +12,13 @@ import * as Servers from "../db/servers.ts";
 import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
 import * as Sentry from "../observability/sentry.ts";
+import * as Agents from "../shared/agents.ts";
 import * as Api from "../shared/api.ts";
+import type * as Errors from "../shared/errors.ts";
 import * as ReverseProxyCommand from "./command.ts";
 import * as Diagnostics from "./diagnostics.ts";
 import * as Handlers from "./handlers.ts";
+import * as OpenCode from "./opencode.ts";
 import * as Router from "./router.ts";
 
 const HOST = "127.0.0.1";
@@ -35,15 +39,29 @@ for (const listener of [server, diagnosticsServer]) {
   });
 }
 
+// The program that spawns the agents is the config file's word, known once the flags are parsed:
+// Cursor's cloud agents want CURSOR_API_TOKEN, a local opencode wants the binary on PATH. Either
+// is checked here, before the listeners come up.
+const AgentsLive = (
+  config: Config.ReverseProxyFile,
+): Layer.Layer<
+  Agents.Agents,
+  Errors.MissingVariable | Errors.HostRequirementsMissing,
+  ChildProcessSpawner.ChildProcessSpawner | Log.Log
+> =>
+  config["agent-executable"] === "cursor"
+    ? Layer.unwrap(Effect.map(Config.cursorApiToken, Cursor.layer))
+    : OpenCode.layer;
+
 // Two listeners, each with its own HttpServer: the API behind the bearer on `port`, the
 // operator's page on `diagnosticsPort`. HttpRouter.serve memoises one router per graph, so the
 // page is a plain handler under HttpServer.serve rather than a second router.
-const ServerLive = (port: number, diagnosticsPort: number) =>
+const ServerLive = (port: number, diagnosticsPort: number, config: Config.ReverseProxyFile) =>
   Layer.effectDiscard(
     Effect.gen(function* () {
       const log = yield* Log.Log;
       yield* log.info(
-        `oligarchy reverse proxy listening on ${HOST}:${String(port)}; diagnostics on ${HOST}:${String(diagnosticsPort)}`,
+        `oligarchy reverse proxy listening on ${HOST}:${String(port)}; diagnostics on ${HOST}:${String(diagnosticsPort)}; agents by ${config["agent-executable"]}`,
       );
     }),
   ).pipe(
@@ -60,6 +78,7 @@ const ServerLive = (port: number, diagnosticsPort: number) =>
       ),
     ),
     Layer.provide(Router.Router.layer),
+    Layer.provide(AgentsLive(config)),
     // As on the proxy: no http.server span reaches Sentry.
     Layer.provide(Layer.succeed(HttpMiddleware.TracerDisabledWhen)(() => true)),
   );
@@ -68,14 +87,8 @@ const DatabaseLive = Layer.unwrap(
   Effect.map(Config.ProxyConfig, (config) => Client.Database.layer(config.databaseUrl)),
 );
 
-// The reverse proxy spawns agents, so it needs the key at startup. Built above ProxyConfig, so a
-// missing CURSOR_API_TOKEN is reported after the proxy's two, never before.
-const CursorLive = Layer.unwrap(
-  Effect.map(Config.cursorApiToken, (apiKey) => Cursor.CursorAgents.layer(apiKey)),
-);
-
 // Sentry sits beneath Log so the log rows flush before Sentry does, and Log captures the reporter.
-const MainLive = Layer.mergeAll(Servers.ServerStore.layer, Log.Log.layer, CursorLive).pipe(
+const MainLive = Layer.mergeAll(Servers.ServerStore.layer, Log.Log.layer).pipe(
   Layer.provideMerge(Logs.LogStore.layer),
   Layer.provideMerge(DatabaseLive),
   Layer.provideMerge(Config.ProxyConfig.layer),

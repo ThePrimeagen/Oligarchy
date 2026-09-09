@@ -20,6 +20,8 @@ export type Spawned = {
   readonly kills: Array<string>;
   readonly isReleased: () => boolean;
   readonly isRunning: Effect.Effect<boolean>;
+  // Writes to stdout while running: what a child says after it started.
+  readonly writeStdout: (text: string) => Effect.Effect<void>;
   // Exits, then (as Node does) delivers the last stderr bytes and closes the pipes.
   readonly exit: (code: number, trailingStderr?: string) => Effect.Effect<void>;
   // Dies from a signal sent by someone else: no exit code, as Node reports it.
@@ -105,6 +107,10 @@ export const fakeSpawner = (script: Script = () => ({ exitCode: 0 })): FakeSpawn
         kills,
         isReleased: () => released,
         isRunning: Effect.map(Deferred.isDone(exitSignal), (done) => !done),
+        writeStdout: (text) =>
+          Effect.sync(() => {
+            emit(stdout, text);
+          }),
         exit: (code, trailingStderr) =>
           Effect.gen(function* () {
             yield* Deferred.succeed(exitSignal, code);

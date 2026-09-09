@@ -229,7 +229,7 @@ describe("ReverseProxyApi", () => {
     expect(byIdentifier(reverse, "servers").errors).toEqual(boundary);
   });
 
-  it("declares 400, 401 and 500 on /agent plus its own 400 model refusal and 502 Cursor failure", () => {
+  it("declares 400, 401 and 500 on /agent plus its own 400 model refusal and 502 agent failure", () => {
     expect(byIdentifier(reverse, "spawn")).toMatchObject({
       group: "Agents",
       method: "POST",

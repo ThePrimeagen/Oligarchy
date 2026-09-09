@@ -1,12 +1,20 @@
 import { Agent, Cursor, type ModelListItem, type ModelSelection } from "@cursor/sdk";
-import { Context, Effect, Layer, Option, Redacted, Result, Schema } from "effect";
+import { Effect, Layer, Option, Redacted, Result, Schema } from "effect";
 import * as ExternalFailure from "../external-failure.ts";
-import * as Domain from "../shared/domain.ts";
+import * as Agents from "../shared/agents.ts";
+import type * as Domain from "../shared/domain.ts";
 import * as Errors from "../shared/errors.ts";
 
 export const REPOSITORY = "https://github.com/ThePrimeagen/Oligarchy";
 
 export const agentUrl = (agentId: string): string => `https://cursor.com/agents/${agentId}`;
+
+// What a Cursor agent runs on when no model is asked for: grok-4.6 at effort high, running fast.
+export const DEFAULT_MODEL: Domain.ModelChoice = {
+  model: "grok-4.6",
+  reasoning: "high",
+  fast: true,
+};
 
 // The catalog as `Cursor.models.list()` answers it: each model with the parameters it takes.
 export type Catalog = ReadonlyArray<ModelListItem>;
@@ -65,21 +73,11 @@ export const select = (
   return Result.succeed({ id: choice.model, params });
 };
 
-export type CursorAgentsService = {
-  readonly prompt: (
-    text: string,
-    choice?: Domain.ModelChoice,
-  ) => Effect.Effect<
-    { readonly agentId: string },
-    Errors.ModelUnavailable | Errors.CursorAgentFailed
-  >;
-};
-
 // The SDK's errors carry `isRetryable` as an own field; anything else thrown is terminal.
 const retryFlag = Schema.decodeUnknownOption(Schema.Struct({ isRetryable: Schema.Boolean }));
 
-export const cursorAgentFailed = (thrown: unknown): Errors.CursorAgentFailed =>
-  Errors.CursorAgentFailed.make({
+export const agentFailed = (thrown: unknown): Errors.AgentFailed =>
+  Errors.AgentFailed.make({
     message: ExternalFailure.describeThrowable(thrown, "cursor: agent request failed"),
     retryable: Option.match(retryFlag(thrown), {
       onNone: () => false,
@@ -88,45 +86,42 @@ export const cursorAgentFailed = (thrown: unknown): Errors.CursorAgentFailed =>
     cause: thrown,
   });
 
-const makeCursorAgents = (apiKey: Redacted.Redacted): Effect.Effect<CursorAgentsService> =>
-  Effect.succeed({
-    // The catalog is asked each time: a choice is refused here, with what the model does take,
-    // rather than by the backend once the agent exists. send resolves once the cloud run exists;
-    // the agent keeps working after close().
-    prompt: Effect.fn("CursorAgents.prompt")(function* (
-      text: string,
-      choice: Domain.ModelChoice = Domain.DEFAULT_MODEL,
-    ) {
-      const catalog = yield* Effect.tryPromise({
-        try: () => Cursor.models.list({ apiKey: Redacted.value(apiKey) }),
-        catch: cursorAgentFailed,
-      });
-      const model = yield* Effect.fromResult(select(choice, catalog));
-      return yield* Effect.acquireUseRelease(
-        Effect.tryPromise({
-          try: () =>
-            Agent.create({
-              apiKey: Redacted.value(apiKey),
-              model,
-              cloud: { repos: [{ url: REPOSITORY }] },
-            }),
-          catch: cursorAgentFailed,
-        }),
-        (agent) =>
-          Effect.tryPromise({ try: () => agent.send(text), catch: cursorAgentFailed }).pipe(
-            Effect.as({ agentId: agent.agentId }),
-          ),
-        (agent) =>
-          Effect.sync(() => {
-            agent.close();
+// Cursor cloud agents: one created on the repository per prompt, watched on cursor.com.
+export const layer = (apiKey: Redacted.Redacted): Layer.Layer<Agents.Agents> =>
+  Layer.succeed(Agents.Agents)(
+    Agents.Agents.of({
+      defaultModel: DEFAULT_MODEL,
+      // The catalog is asked each time: a choice is refused here, with what the model does take,
+      // rather than by the backend once the agent exists. send resolves once the cloud run
+      // exists; the agent keeps working after close().
+      prompt: Effect.fn("Cursor.prompt")(function* (text: string, choice: Domain.ModelChoice) {
+        const catalog = yield* Effect.tryPromise({
+          try: () => Cursor.models.list({ apiKey: Redacted.value(apiKey) }),
+          catch: agentFailed,
+        });
+        const model = yield* Effect.fromResult(select(choice, catalog));
+        return yield* Effect.acquireUseRelease(
+          Effect.tryPromise({
+            try: () =>
+              Agent.create({
+                apiKey: Redacted.value(apiKey),
+                model,
+                cloud: { repos: [{ url: REPOSITORY }] },
+              }),
+            catch: agentFailed,
           }),
-      );
+          (agent) =>
+            Effect.tryPromise({ try: () => agent.send(text), catch: agentFailed }).pipe(
+              Effect.map((): Agents.Started => ({
+                agentId: agent.agentId,
+                url: agentUrl(agent.agentId),
+              })),
+            ),
+          (agent) =>
+            Effect.sync(() => {
+              agent.close();
+            }),
+        );
+      }),
     }),
-  } satisfies CursorAgentsService);
-
-export class CursorAgents extends Context.Service<CursorAgents>()("@oligarchy/ctrl/CursorAgents", {
-  make: makeCursorAgents,
-}) {
-  static readonly layer = (apiKey: Redacted.Redacted): Layer.Layer<CursorAgents> =>
-    Layer.effect(this)(this.make(apiKey));
-}
+  );

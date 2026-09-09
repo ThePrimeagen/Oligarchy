@@ -112,12 +112,13 @@ export class AgentBody extends Schema.Class<AgentBody>("@oligarchy/shared/contra
   fast: Schema.optionalKey(Schema.Boolean),
 }) {}
 
-// The agent that started: its id, where to watch it, and the model label it was told it runs as.
+// The agent that started: its id, the model label it was told it runs as, and where to watch it
+// when the program that runs it has a page for it (a cloud agent does; a local process has none).
 export class AgentStarted extends Schema.Class<AgentStarted>(
   "@oligarchy/shared/contract/AgentStarted",
 )({
   id: Schema.String,
-  url: Schema.String,
+  url: Schema.optionalKey(Schema.String),
   model: Schema.String,
 }) {}
 

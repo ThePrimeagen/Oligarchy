@@ -1,16 +1,15 @@
 import { describe, expect, it as plain } from "vitest";
 import { it } from "@effect/vitest";
-import { Effect, Result } from "effect";
+import { Effect, Redacted, Result } from "effect";
 import * as Cursor from "../../src/ctrl/cursor.ts";
-import * as Domain from "../../src/shared/domain.ts";
+import * as Agents from "../../src/shared/agents.ts";
+import type * as Domain from "../../src/shared/domain.ts";
 import * as Errors from "../../src/shared/errors.ts";
 import * as Catalog from "../support/cursor-catalog.ts";
-import * as FakeCursor from "../support/fake-cursor.ts";
+import * as FakeAgents from "../support/fake-agents.ts";
 
-const prompt = (text: string, choice?: Domain.ModelChoice) =>
-  Effect.flatMap(Cursor.CursorAgents, (agents) =>
-    choice === undefined ? agents.prompt(text) : agents.prompt(text, choice),
-  );
+const prompt = (text: string, choice: Domain.ModelChoice) =>
+  Effect.flatMap(Agents.Agents, (agents) => agents.prompt(text, choice));
 
 const selected = (choice: Domain.ModelChoice) =>
   Result.getOrThrow(Cursor.select(choice, Catalog.CATALOG));
@@ -27,7 +26,7 @@ const refused = (choice: Domain.ModelChoice): Errors.ModelUnavailable => {
 // choice in the vendor's params, or refuses it naming what the model does take.
 describe("select happy path", () => {
   plain("the default is grok-4.6 at effort high, running fast", () => {
-    expect(selected(Domain.DEFAULT_MODEL)).toEqual({
+    expect(selected(Cursor.DEFAULT_MODEL)).toEqual({
       id: "grok-4.6",
       params: [
         { id: "effort", value: "high" },
@@ -134,16 +133,26 @@ describe("select unhappy path", () => {
   });
 });
 
-describe("CursorAgents.prompt happy path", () => {
-  it.effect("returns the agent id and records the prompt text and the choice", () =>
+describe("Cursor agents happy path", () => {
+  it.effect("the layer is an Agents whose default is grok-4.6 high fast", () =>
     Effect.gen(function* () {
-      const cursor = FakeCursor.fakeCursor({ agentId: "bc-42" });
-      const created = yield* prompt("Review Linear ticket OLI-42 and complete your task.", {
+      const agents = yield* Agents.Agents.pipe(
+        Effect.provide(Cursor.layer(Redacted.make("cursor-key"))),
+      );
+      expect(agents.defaultModel).toEqual({ model: "grok-4.6", reasoning: "high", fast: true });
+      expect(Cursor.DEFAULT_MODEL).toEqual({ model: "grok-4.6", reasoning: "high", fast: true });
+    }),
+  );
+
+  it.effect("a prompt answers the agent's id and its page, and records the text and choice", () =>
+    Effect.gen(function* () {
+      const cursor = FakeAgents.fakeAgents({ started: FakeAgents.cursorStarted("bc-42") });
+      const started = yield* prompt("Review Linear ticket OLI-42 and complete your task.", {
         model: "grok-4.6",
         reasoning: "xhigh",
         fast: true,
       }).pipe(Effect.provide(cursor.layer));
-      expect(created).toEqual({ agentId: "bc-42" });
+      expect(started).toEqual({ agentId: "bc-42", url: "https://cursor.com/agents/bc-42" });
       expect(cursor.calls).toEqual([
         {
           text: "Review Linear ticket OLI-42 and complete your task.",
@@ -153,30 +162,24 @@ describe("CursorAgents.prompt happy path", () => {
     }),
   );
 
-  it.effect("without a choice the agent starts on the default", () =>
-    Effect.gen(function* () {
-      const cursor = FakeCursor.fakeCursor();
-      yield* prompt("hello").pipe(Effect.provide(cursor.layer));
-      expect(cursor.calls).toEqual([{ text: "hello", choice: undefined }]);
-    }),
-  );
-
   plain("kicks off on the repository and links the agent by id", () => {
     expect(Cursor.REPOSITORY).toBe("https://github.com/ThePrimeagen/Oligarchy");
     expect(Cursor.agentUrl("bc-42")).toBe("https://cursor.com/agents/bc-42");
   });
 });
 
-describe("CursorAgents.prompt unhappy path", () => {
-  it.effect("surfaces the SDK's refusal as CursorAgentFailed", () =>
+describe("Cursor agents unhappy path", () => {
+  it.effect("surfaces the SDK's refusal as AgentFailed", () =>
     Effect.gen(function* () {
-      const failure = Errors.CursorAgentFailed.make({
+      const failure = Errors.AgentFailed.make({
         message: "Invalid API key",
         retryable: false,
         cause: new Error("Invalid API key"),
       });
-      const cursor = FakeCursor.fakeCursor({ failure });
-      const error = yield* Effect.flip(prompt("hello")).pipe(Effect.provide(cursor.layer));
+      const cursor = FakeAgents.fakeAgents({ failure });
+      const error = yield* Effect.flip(prompt("hello", Cursor.DEFAULT_MODEL)).pipe(
+        Effect.provide(cursor.layer),
+      );
       expect(error).toBe(failure);
       expect(error).toMatchObject({ message: "Invalid API key", retryable: false });
     }),
@@ -188,7 +191,7 @@ describe("CursorAgents.prompt unhappy path", () => {
         model: "grok-9",
         message: 'unknown model "grok-9"',
       });
-      const cursor = FakeCursor.fakeCursor({ failure });
+      const cursor = FakeAgents.fakeAgents({ failure });
       const error = yield* Effect.flip(prompt("hello", { model: "grok-9" })).pipe(
         Effect.provide(cursor.layer),
       );
@@ -197,17 +200,17 @@ describe("CursorAgents.prompt unhappy path", () => {
   );
 
   plain("classifies a thrown SDK error by its message and retry flag", () => {
-    const retryable = Cursor.cursorAgentFailed(
+    const retryable = Cursor.agentFailed(
       Object.assign(new Error("rate limited"), { isRetryable: true }),
     );
     expect(retryable).toMatchObject({
-      _tag: "CursorAgentFailed",
+      _tag: "AgentFailed",
       message: "rate limited",
       retryable: true,
     });
     expect(retryable.cause).toBeInstanceOf(Error);
 
-    const terminal = Cursor.cursorAgentFailed(
+    const terminal = Cursor.agentFailed(
       Object.assign(new Error("Model 'grok-9' is not available or invalid"), {
         isRetryable: false,
       }),
@@ -219,7 +222,7 @@ describe("CursorAgents.prompt unhappy path", () => {
   });
 
   plain("falls back to a fixed message for a thrown value without one", () => {
-    const failure = Cursor.cursorAgentFailed("boom");
+    const failure = Cursor.agentFailed("boom");
     expect(failure).toMatchObject({
       message: "cursor: agent request failed",
       retryable: false,

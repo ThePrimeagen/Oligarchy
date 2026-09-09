@@ -3,6 +3,7 @@ import { it } from "@effect/vitest";
 import { Cause, Effect, FileSystem, Inspectable, Layer, Redacted } from "effect";
 import * as Config from "../../src/config.ts";
 import * as Support from "../support/config.ts";
+import * as FakeFs from "../support/fake-fs.ts";
 
 const SENTINEL = "s3cr3t-sentinel-value";
 
@@ -143,6 +144,104 @@ describe("providerLayer", () => {
         Config.providerLayer.pipe(Layer.provide(dotEnvFileSystem("OLIGARCHY_TEST_OTHER=1\n"))),
       ),
     ),
+  );
+});
+
+// The reverse proxy's file, read from the working directory by default like `.env`; a fixed table
+// of paths stands in for the directory.
+const files = (contents: Record<string, string>) =>
+  FileSystem.layerNoop({
+    readFileString: (path) => {
+      const text = contents[path];
+      return text === undefined
+        ? Effect.fail(FakeFs.notFound("readFileString", path))
+        : Effect.succeed(text);
+    },
+  });
+
+describe("readReverseProxyFile", () => {
+  it.effect("reads the agent executable from the default path", () =>
+    Effect.gen(function* () {
+      const config = yield* Config.readReverseProxyFile(Config.DEFAULT_REVERSE_PROXY_CONFIG);
+      expect(config).toEqual({ "agent-executable": "opencode" });
+      expect(Config.DEFAULT_REVERSE_PROXY_CONFIG).toBe(".reverse-proxy.oligarchy.json");
+    }).pipe(
+      Effect.provide(
+        files({ ".reverse-proxy.oligarchy.json": '{ "agent-executable": "opencode" }\n' }),
+      ),
+    ),
+  );
+
+  it.effect("reads cursor from the path given, ignoring keys it does not know", () =>
+    Effect.gen(function* () {
+      const config = yield* Config.readReverseProxyFile("/etc/oligarchy/rp.json");
+      expect(config["agent-executable"]).toBe("cursor");
+    }).pipe(
+      Effect.provide(
+        files({ "/etc/oligarchy/rp.json": '{"agent-executable":"cursor","port":42070}' }),
+      ),
+    ),
+  );
+
+  it.effect("a file that is not there is InvalidConfig naming the path", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(Config.readReverseProxyFile("/etc/oligarchy/rp.json"));
+      expect(error).toMatchObject({
+        _tag: "InvalidConfig",
+        path: "/etc/oligarchy/rp.json",
+        message: "config /etc/oligarchy/rp.json not found",
+      });
+    }).pipe(Effect.provide(files({}))),
+  );
+
+  it.effect("a file that cannot be read carries the platform failure", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(
+        Config.readReverseProxyFile(Config.DEFAULT_REVERSE_PROXY_CONFIG),
+      );
+      expect(error).toMatchObject({
+        _tag: "InvalidConfig",
+        path: ".reverse-proxy.oligarchy.json",
+        message: expect.stringMatching(
+          /^config \.reverse-proxy\.oligarchy\.json: PermissionDenied: FileSystem\.readFileString/,
+        ),
+      });
+      expect(error.cause).toMatchObject({ _tag: "PlatformError" });
+    }).pipe(
+      Effect.provide(
+        FileSystem.layerNoop({
+          readFileString: (path) => Effect.fail(FakeFs.permissionDenied("readFileString", path)),
+        }),
+      ),
+    ),
+  );
+
+  it.effect("a file that is not JSON, not an object, or without the key is refused", () =>
+    Effect.gen(function* () {
+      const refused = (path: string) =>
+        Effect.map(Effect.flip(Config.readReverseProxyFile(path)), (error) => error.message);
+      expect(yield* refused("text.json")).toBe("config text.json: Expected a valid JSON string");
+      expect(yield* refused("list.json")).toBe("config list.json: Expected object");
+      expect(yield* refused("empty.json")).toBe(
+        'config empty.json: Missing key\n  at ["agent-executable"]',
+      );
+    }).pipe(
+      Effect.provide(
+        files({ "text.json": "agent-executable: opencode", "list.json": "[]", "empty.json": "{}" }),
+      ),
+    ),
+  );
+
+  it.effect("an executable outside the vocabulary is refused naming the two it knows", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(Config.readReverseProxyFile("vim.json"));
+      expect(error).toMatchObject({
+        _tag: "InvalidConfig",
+        path: "vim.json",
+        message: 'config vim.json: Expected "cursor" | "opencode"\n  at ["agent-executable"]',
+      });
+      expect(error.cause).toMatchObject({ _tag: "SchemaError" });
+    }).pipe(Effect.provide(files({ "vim.json": '{"agent-executable":"vim"}' }))),
   );
 });
 

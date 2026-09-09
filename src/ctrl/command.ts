@@ -10,6 +10,7 @@ import * as Logs from "../db/logs.ts";
 import * as Sessions from "../db/sessions.ts";
 import * as Tests from "../db/tests.ts";
 import * as Log from "../observability/log.ts";
+import * as Agents from "../shared/agents.ts";
 import * as Contract from "../shared/contract.ts";
 import * as Domain from "../shared/domain.ts";
 import * as Errors from "../shared/errors.ts";
@@ -38,7 +39,7 @@ export type Deps = {
   readonly linear: (
     token: Redacted.Redacted,
   ) => Layer.Layer<Linear.Linear, never, HttpClient.HttpClient>;
-  readonly cursor: (apiKey: Redacted.Redacted) => Layer.Layer<Cursor.CursorAgents>;
+  readonly cursor: (apiKey: Redacted.Redacted) => Layer.Layer<Agents.Agents>;
 };
 
 // Log sits above the stores so its flush finalizer runs before the pool closes.
@@ -58,7 +59,7 @@ const databaseLayers = (url: Redacted.Redacted): Layer.Layer<Stores, Errors.Data
 export const live: Deps = {
   database: databaseLayers,
   linear: Linear.Linear.layer,
-  cursor: Cursor.CursorAgents.layer,
+  cursor: Cursor.layer,
 };
 
 // ---------------------------------------------------------------------------
@@ -412,10 +413,14 @@ export const makeCtrlCommand = (deps: Deps = live) => {
   });
 
   // The model an agent is started on: the id given, alone, so the vendor's defaults decide the
-  // rest; or the default. The prompt names it as the label the agent must record.
-  const modelChoice = (model: Option.Option<string>): Domain.ModelChoice =>
+  // rest; or the agent program's own default. The prompt names it as the label the agent must
+  // record.
+  const modelChoice = (
+    agents: Agents.AgentsService,
+    model: Option.Option<string>,
+  ): Domain.ModelChoice =>
     Option.match(model, {
-      onNone: () => Domain.DEFAULT_MODEL,
+      onNone: () => agents.defaultModel,
       onSome: (id) => ({ model: id }),
     });
 
@@ -424,14 +429,14 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     readonly ticket: string;
     readonly model: Option.Option<string>;
   }) {
-    const agents = yield* Cursor.CursorAgents;
-    const choice = modelChoice(input.model);
+    const agents = yield* Agents.Agents;
+    const choice = modelChoice(agents, input.model);
     const text = yield* Prompts.render("driving-agent.html", {
       LINEAR_TICKET: input.ticket,
       MODEL: Domain.modelLabel(choice),
     });
-    const { agentId } = yield* agents.prompt(text, choice);
-    yield* Console.log(Render.agentLink(Cursor.agentUrl(agentId)));
+    const started = yield* agents.prompt(text, choice);
+    yield* Console.log(Render.agentLink(started.url ?? started.agentId));
   });
 
   // test start --session-id <id> --test-result-id <id> --model <id>
@@ -588,7 +593,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     readonly model: Option.Option<string>;
   }) {
     const diagnosis = yield* Diagnosis.DiagnosisStore;
-    const agents = yield* Cursor.CursorAgents;
+    const agents = yield* Agents.Agents;
     yield* endedSession("diagnose run", input.sessionId);
     // A reviewer whose diagnose would be refused is an agent run wasted: refuse it here instead.
     yield* diagnosis
@@ -598,15 +603,15 @@ export const makeCtrlCommand = (deps: Deps = live) => {
           refuse(`diagnose run: session ${input.sessionId} already has a diagnosis`),
         ),
       );
-    const choice = modelChoice(input.model);
+    const choice = modelChoice(agents, input.model);
     // The reviewer reads everything back from the database: the session id and the model it
     // records with diagnose are all it needs.
     const text = yield* Prompts.render("diagnosing-agent.html", {
       SESSION_ID: input.sessionId,
       MODEL: Domain.modelLabel(choice),
     });
-    const { agentId } = yield* agents.prompt(text, choice);
-    yield* Console.log(Render.agentLink(Cursor.agentUrl(agentId)));
+    const started = yield* agents.prompt(text, choice);
+    yield* Console.log(Render.agentLink(started.url ?? started.agentId));
   });
 
   // session list [--count <n>] [--active] [--json]
