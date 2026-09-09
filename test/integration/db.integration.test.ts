@@ -58,8 +58,14 @@ Postgres.describeWithDatabase("database", () => {
         expect(yield* store.getSessionStatus(id)).toEqual(Option.some("downloading"));
         yield* store.sessionRunning(id);
         expect(yield* store.getSessionStatus(id)).toEqual(Option.some("running"));
+        // No agent yet: diagnose run asks this before it hands a reviewer a ticket.
+        expect(yield* store.agentForSession(id)).toEqual(Option.none());
         yield* store.registerAgent(agentId, id);
         expect(yield* store.sessionForAgent(agentId)).toEqual(Option.some(id));
+        // Both directions of the same row; the session id matches however it is cased.
+        expect(yield* store.agentForSession(id)).toEqual(Option.some(agentId));
+        expect(yield* store.agentForSession(id.toUpperCase())).toEqual(Option.some(agentId));
+        expect(yield* store.agentForSession(uuid())).toEqual(Option.none());
         expect(yield* store.sessionExists(id.toUpperCase())).toEqual(Option.some(id));
         expect(yield* store.sessionExists(uuid())).toEqual(Option.none());
 
