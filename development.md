@@ -15,7 +15,7 @@ exist.
 ## Toolchain
 
 - Run on Node 26 with npm. Every executable is a `#!/bin/sh` wrapper running
-  `node --experimental-strip-types` (`./server` and `./reverse-proxy` add
+  `node --experimental-strip-types` (`./server`, `./reverse-proxy` and `./automation` add
   `--import ./src/observability/instrument.ts`); types are stripped, not transformed, so
   `erasableSyntaxOnly` stays on.
 - Install with `npm ci`; `prepare` runs `effect-tsgo patch --oxlint` so the `effecttsgo/*` rules
@@ -69,8 +69,9 @@ Durable preferences from the maintainer; when they conflict with generic best pr
 ## Layout
 
 - The root holds `AGENTS.md`, the executable wrappers (`./client`, `./client-with-image`,
-  `./ctrl`, `./server`, `./reverse-proxy`, `./session`), the tooling files, `drizzle/` (migrations), `public/` and
-  `prompts/`, the operator documents, this document, `src/` and `test/`.
+  `./ctrl`, `./server`, `./reverse-proxy`, `./automation`, `./session`), the tooling files,
+  `drizzle/` (migrations), `public/` and `prompts/`, the operator documents, this document, `src/`
+  and `test/`.
 - `src/` is one directory per process plus the shared kernel (`src/shared/`, `src/config.ts`,
   `src/external-failure.ts`, `src/observability/`, `src/db/`); `main.ts` files are the entries.
 - `src/dashboard/` is a Hono Worker, not Effect: it has no Effect runtime, reaches Postgres
@@ -749,7 +750,7 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
 ## Sentry
 
 - Initialise the SDK before any Effect code in `src/observability/instrument.ts`, loaded by the
-  `server` and `reverse-proxy` wrappers' `--import`: `Sentry.init({ dsn: SENTRY_DSN,
+  `server`, `reverse-proxy` and `automation` wrappers' `--import`: `Sentry.init({ dsn: SENTRY_DSN,
   tracesSampleRate: 1,
   traceLifecycle: "stream", integrations: [Sentry.httpIntegration({ spans: false }),
   Sentry.nativeNodeFetchIntegration({ spans: false })] })`. `SENTRY_DSN` in `dsn.ts` is the one
