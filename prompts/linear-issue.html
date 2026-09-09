@@ -14,6 +14,7 @@ Test driver. Drive one Omarchy virtual machine through ./client, record the resu
   <rule>Never wait more than 5 seconds between commands. Image instead.</rule>
   <rule>When you are done, spawn a {{SUB_AGENT}} subagent and have it analyze your session to see if the proof is on screen and use ./ctrl test-results to finalize the result, then ./client stop to end the session.</rule>
   <rule>When you believe you have completed a task and it has ended in failure, please write the serial dump to the linear ticket.</rule>
+  <rule>Do not upload images to linear.</rule>
 </rules>
 
 <run>
@@ -57,8 +58,10 @@ Test driver. Drive one Omarchy virtual machine through ./client, record the resu
 
 <example-session>
 ```
+# Use Linear MCP to ensure ticket is "In Progress"
 $ ./client start --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --iso {{ISO_URL}}
 6f1c...e2a9
+# Use Linear MCP to make a comment `session-id=6f1c...e2a9`
 # Before starting any intent, always link the test result to the session.
 $ ./ctrl test start --session-id 6f1c...e2a9 --test-result-id {{RESULT_ID}} --model <the Cursor model id you are running as>
 
@@ -75,5 +78,6 @@ $ ./client intent end --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} -
 # when the proof is on screen, close the result, then the session
 $ ./ctrl test-results --agent-id {{LINEAR_TICKET}} --id {{RESULT_ID}} --status success
 $ ./client stop --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --session-id 6f1c...e2a9 --status succeeded
+# Use Linear MCP to ensure ticket is "Needs Review"
 ```
 </example-session>

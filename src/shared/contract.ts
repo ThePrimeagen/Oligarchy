@@ -106,6 +106,20 @@ export class Servers extends Schema.Class<Servers>("@oligarchy/shared/contract/S
   servers: Schema.Array(Server),
 }) {}
 
+// The record is one line per request, so a value with a line break in it is refused, not folded.
+const oneLine = Schema.NonEmptyString.check(
+  Schema.isPattern(/^[^\r\n]*$/, { message: "must not contain a line break" }),
+);
+
+// POST /automate on the automation service: the Linear ticket to drive and the model to drive it
+// with, both as the caller spelled them.
+export class AutomateBody extends Schema.Class<AutomateBody>(
+  "@oligarchy/shared/contract/AutomateBody",
+)({
+  ticket: oneLine,
+  model: oneLine,
+}) {}
+
 const STORED_IMAGE_ORIGIN = "https://oligarchy.trm.sh";
 
 export const StoredImageUrl = (id: string): string => `${STORED_IMAGE_ORIGIN}/images/${id}`;

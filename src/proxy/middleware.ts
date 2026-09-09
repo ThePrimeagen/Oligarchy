@@ -10,19 +10,20 @@ import * as Domain from "../shared/domain.ts";
 import * as Errors from "../shared/errors.ts";
 
 // Every route carries `Authorization: Bearer <OLIGARCHY_TOKEN>`; the compare is exact, as it
-// always was.
-export const BearerAuthLive: Layer.Layer<Api.BearerAuth, never, Config.ProxyConfig> = Layer.effect(
-  Api.BearerAuth,
-)(
-  Effect.gen(function* () {
-    const config = yield* Config.ProxyConfig;
-    return Api.BearerAuth.of({
+// always was. The token comes in as a value: the servers read it from ProxyConfig beside their
+// database url, the automation service reads it alone.
+export const bearerAuth = (token: Redacted.Redacted): Layer.Layer<Api.BearerAuth> =>
+  Layer.succeed(Api.BearerAuth)(
+    Api.BearerAuth.of({
       bearer: (httpEffect, { credential }) =>
-        Redacted.value(credential) === Redacted.value(config.token)
+        Redacted.value(credential) === Redacted.value(token)
           ? httpEffect
           : Effect.fail(Errors.Unauthorized.make({})),
-    });
-  }),
+    }),
+  );
+
+export const BearerAuthLive: Layer.Layer<Api.BearerAuth, never, Config.ProxyConfig> = Layer.unwrap(
+  Effect.map(Config.ProxyConfig, (config) => bearerAuth(config.token)),
 );
 
 const isApiError: (value: unknown) => value is Errors.ApiError = Schema.is(

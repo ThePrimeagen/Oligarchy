@@ -15,7 +15,7 @@ exist.
 ## Toolchain
 
 - Run on Node 26 with npm. Every executable is a `#!/bin/sh` wrapper running
-  `node --experimental-strip-types` (`./server` and `./reverse-proxy` add
+  `node --experimental-strip-types` (`./server`, `./reverse-proxy` and `./automation` add
   `--import ./src/observability/instrument.ts`); types are stripped, not transformed, so
   `erasableSyntaxOnly` stays on.
 - Install with `npm ci`; `prepare` runs `effect-tsgo patch --oxlint` so the `effecttsgo/*` rules
@@ -69,8 +69,9 @@ Durable preferences from the maintainer; when they conflict with generic best pr
 ## Layout
 
 - The root holds `AGENTS.md`, the executable wrappers (`./client`, `./client-with-image`,
-  `./ctrl`, `./server`, `./reverse-proxy`, `./session`), the tooling files, `drizzle/` (migrations), `public/` and
-  `prompts/`, the operator documents, this document, `src/` and `test/`.
+  `./ctrl`, `./server`, `./reverse-proxy`, `./automation`, `./session`), the tooling files,
+  `drizzle/` (migrations), `public/` and `prompts/`, the operator documents, this document, `src/`
+  and `test/`.
 - `src/` is one directory per process plus the shared kernel (`src/shared/`, `src/config.ts`,
   `src/external-failure.ts`, `src/observability/`, `src/db/`); `main.ts` files are the entries.
 - `src/dashboard/` is a Hono Worker, not Effect: it has no Effect runtime, reaches Postgres
@@ -739,8 +740,9 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
   finalizer runs `flush` before the drain fiber is interrupted, and `Log.layer` (over `LogStore`)
   sits above `Database` so the flush completes before the pool closes. `Log.layer` reads
   `ErrorReporter.CurrentErrorReporters` once at build, so `SentryLive` is provided beneath it,
-  never only to callers. `Log.layerStdout` persists nothing and is for tests. A fatal path flushes
-  the log, then Sentry, then exits.
+  never only to callers. `Log.layerStdout` persists nothing: it is for tests and for a process
+  that keeps no rows (the automation service), whose record is stdout and Sentry. A fatal path
+  flushes the log, then Sentry, then exits.
 - `Log` installs no Effect `Logger`; `emit` formats, writes and offers synchronously. `console.*`
   appears only in `src/dashboard/**` and `vitest.global-setup.ts`. Test log output through the
   fake `Log` layer (`test/support/log.ts`) or `Log.layerStdout` with `TestConsole.logLines`.
@@ -748,7 +750,7 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
 ## Sentry
 
 - Initialise the SDK before any Effect code in `src/observability/instrument.ts`, loaded by the
-  `server` and `reverse-proxy` wrappers' `--import`: `Sentry.init({ dsn: SENTRY_DSN,
+  `server`, `reverse-proxy` and `automation` wrappers' `--import`: `Sentry.init({ dsn: SENTRY_DSN,
   tracesSampleRate: 1,
   traceLifecycle: "stream", integrations: [Sentry.httpIntegration({ spans: false }),
   Sentry.nativeNodeFetchIntegration({ spans: false })] })`. `SENTRY_DSN` in `dsn.ts` is the one
