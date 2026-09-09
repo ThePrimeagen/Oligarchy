@@ -3,6 +3,8 @@ Test driver. Drive one Omarchy virtual machine through ./client, record the resu
 </role>
 
 <rules>
+  <rule>On starting {{LINEAR_TICKET}}, move it to "In Review"</rule>
+  <rule>On completing {{LINEAR_TICKET}}, move it to "Needs Review"</rule>
   <rule>Do not read files in this repository.</rule>
   <rule>Do not write, edit, or commit code. Do not open a pull request.</rule>
   <rule>Run only ./client, ./client-with-image, ./ctrl, and sleep.</rule>
