@@ -342,6 +342,9 @@ export const makeCtrlCommand = (deps: Deps = live) => {
           assigneeId,
         });
         tickets.push(ticket);
+        // Webhooks name the ticket by its human-readable id; store it on the result so the
+        // automation queue can find the row without parsing the ticket body.
+        yield* tests.setLinearId(test.id, ticket.identifier);
         // Linear assigns the identifier on create, and the body names it as the driver's agent
         // id, so the description can only be rendered once the ticket exists.
         const description = yield* Prompts.renderLinearIssue({
@@ -380,6 +383,15 @@ export const makeCtrlCommand = (deps: Deps = live) => {
             Errors.PromptError.make(
               Object.assign(
                 { message: reason },
+                error.cause === undefined ? undefined : { cause: error.cause },
+              ),
+            ),
+          ),
+        DatabaseError: (error) =>
+          failRunWith(error, (reason) =>
+            Errors.DatabaseError.make(
+              Object.assign(
+                { operation: error.operation, message: reason },
                 error.cause === undefined ? undefined : { cause: error.cause },
               ),
             ),

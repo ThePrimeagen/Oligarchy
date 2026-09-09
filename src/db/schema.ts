@@ -47,6 +47,16 @@ export const actionState = pgEnum("action_state", ["completed", "failed"]);
 // The reviewer's own answer to "did the proof land": the test's vocabulary, not the session's.
 export const diagnosisVerdict = pgEnum("diagnosis_verdict", ["passed", "failed"]);
 
+export const automationAction = pgEnum("automation_action", ["drive", "diagnose"]);
+export const automationJobStatus = pgEnum("automation_job_status", [
+  "pending",
+  "running",
+  "succeeded",
+  "failed",
+  "aborted",
+  "timed_out",
+]);
+
 export type SessionConfig = {
   iso: string;
   disk?: string;
@@ -277,6 +287,9 @@ export const testResults = pgTable(
     sessionId: uuid("session_id").references(() => sessions.id),
     // Null until test start writes the Cursor model id that is running this result.
     model: text("model"),
+    // Null until ctrl writes the Linear issue identifier (OLI-n) created for this result.
+    // The human-readable id is what webhooks carry; it is the reverse lookup key.
+    linearId: text("linear_id"),
     status: testResultStatus("status").notNull().default("pending"),
     reason: text("reason"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -288,5 +301,31 @@ export const testResults = pgTable(
   (table) => [
     uniqueIndex("test_results_run_definition_idx").on(table.runId, table.definitionId),
     uniqueIndex("test_results_session_id_idx").on(table.sessionId),
+    // One result per Linear ticket once assigned; many NULL linear_ids remain allowed.
+    uniqueIndex("test_results_linear_id_idx").on(table.linearId),
+  ],
+);
+
+// One automation step for a test result: drive the guest, or diagnose after. Inserted
+// pending; a worker claims the oldest pending row, runs it, and closes with a terminal
+// status. (result_id, action) is unique — one drive and one diagnose per result for now.
+// Queue order is created_at among pending rows; capacity limits stay out of this table.
+export const automationJobs = pgTable(
+  "automation_jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    resultId: uuid("result_id")
+      .notNull()
+      .references(() => testResults.id),
+    action: automationAction("action").notNull(),
+    status: automationJobStatus("status").notNull().default("pending"),
+    reason: text("reason"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("automation_jobs_result_action_idx").on(table.resultId, table.action),
+    index("automation_jobs_status_created_at_idx").on(table.status, table.createdAt),
   ],
 );

@@ -86,6 +86,7 @@ const result = (
   definitionId,
   sessionId,
   model: "grok-4.6",
+  linearId: null,
   status,
   reason: null,
   createdAt: new Date("2026-09-03T00:00:00Z"),
@@ -459,9 +460,11 @@ describe("test new", () => {
         });
         expect(run).not.toHaveProperty("model");
         const results = h.stores.tests.results;
-        expect(results.map((row) => [row.runId, row.definitionId, row.status, row.model])).toEqual([
-          [run?.id, 1, "pending", null],
-          [run?.id, 2, "pending", null],
+        expect(
+          results.map((row) => [row.runId, row.definitionId, row.status, row.model, row.linearId]),
+        ).toEqual([
+          [run?.id, 1, "pending", null, "OLI-42"],
+          [run?.id, 2, "pending", null, "OLI-43"],
         ]);
 
         // Each ticket is the one template filled with that definition's values and its own ids.
@@ -677,6 +680,7 @@ describe("test new", () => {
         "linear: request failed (401): unauthorized; created OLI-42, OLI-43",
       );
       expect(h.stores.tests.results.map((row) => row.status)).toEqual(["failed", "failed"]);
+      expect(h.stores.tests.results.map((row) => row.linearId)).toEqual(["OLI-42", "OLI-43"]);
     }),
   );
 

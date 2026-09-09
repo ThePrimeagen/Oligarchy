@@ -399,6 +399,7 @@ export const fakeTestStore = (
             definitionId: definition.id,
             sessionId: null,
             model: null,
+            linearId: null,
             status: "pending",
             reason: null,
             createdAt: new Date(),
@@ -456,6 +457,31 @@ export const fakeTestStore = (
         row.finishedAt = new Date();
         return true;
       }),
+    setLinearId: (resultId, linearId) =>
+      Effect.gen(function* () {
+        const row = results.find((result) => sameId(result.id, resultId));
+        if (row === undefined) {
+          return yield* Effect.die(new Error(`setLinearId: no result ${resultId}`));
+        }
+        if (
+          results.some(
+            (other) =>
+              other.linearId !== null && other.linearId === linearId && !sameId(other.id, resultId),
+          )
+        ) {
+          return yield* Effect.fail(
+            conflict("setLinearId", 'update "test_results" set "linear_id"'),
+          );
+        }
+        row.linearId = linearId;
+        return yield* Effect.void;
+      }),
+    findResultByLinearId: (linearId) =>
+      Effect.sync(() =>
+        Option.fromUndefinedOr(
+          results.find((row) => row.linearId !== null && row.linearId === linearId),
+        ),
+      ),
     findResult: (resultId) =>
       Effect.sync(() => Option.fromUndefinedOr(results.find((row) => sameId(row.id, resultId)))),
     // Inner joins, as the real query: a result whose definition or run is missing is no row.

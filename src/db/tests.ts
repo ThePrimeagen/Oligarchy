@@ -197,6 +197,30 @@ export class TestStore extends Context.Service<TestStore>()("@oligarchy/db/TestS
       return Arr.head(rows);
     });
 
+    // Persist the Linear identifier (OLI-n) created for this result so webhooks can find it.
+    // A missing result after createRun is a broken invariant, not a caller mistake.
+    const setLinearId = Effect.fn("db.setLinearId")(function* (resultId: string, linearId: string) {
+      const rows = yield* database.run("setLinearId", (db) =>
+        db
+          .update(DbSchema.testResults)
+          .set({ linearId })
+          .where(eq(DbSchema.testResults.id, resultId))
+          .returning({ id: DbSchema.testResults.id }),
+      );
+      if (rows.length === 0) {
+        return yield* Effect.die(new Error(`setLinearId: no result ${resultId}`));
+      }
+      return yield* Effect.void;
+    });
+
+    // Reverse lookup: the Linear human-readable id on the webhook → the result row.
+    const findResultByLinearId = Effect.fn("db.findResultByLinearId")(function* (linearId: string) {
+      const rows = yield* database.run("findResultByLinearId", (db) =>
+        db.select().from(DbSchema.testResults).where(eq(DbSchema.testResults.linearId, linearId)),
+      );
+      return Arr.head(rows);
+    });
+
     // The result a session ran, with the definition it tested and the run it belongs to.
     const resultForSession = Effect.fn("db.resultForSession")(function* (sessionId: string) {
       return yield* database.run("resultForSession", (db) =>
@@ -227,6 +251,8 @@ export class TestStore extends Context.Service<TestStore>()("@oligarchy/db/TestS
       startResult,
       closeResult,
       findResult,
+      setLinearId,
+      findResultByLinearId,
       resultForSession,
     };
   }),

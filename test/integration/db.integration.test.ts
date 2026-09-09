@@ -12,6 +12,7 @@ import * as Migrate from "../../src/db/migrate.ts";
 import * as DbSchema from "../../src/db/schema.ts";
 import * as Servers from "../../src/db/servers.ts";
 import * as Sessions from "../../src/db/sessions.ts";
+import * as Automation from "../../src/db/automation.ts";
 import * as Tests from "../../src/db/tests.ts";
 import * as Render from "../../src/observability/render.ts";
 import * as Errors from "../../src/shared/errors.ts";
@@ -993,6 +994,88 @@ Postgres.describeWithDatabase("database", () => {
         expect(results[0]?.model).toBeNull();
         expect(results[0]?.finishedAt?.getTime()).toBe(run?.endedAt?.getTime());
       }),
+    );
+
+    scoped.effect("TestStore.setLinearId writes the identifier and finds the result by it", () =>
+      Effect.gen(function* () {
+        const tests = yield* Tests.TestStore;
+        const definition = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
+        const created = yield* tests.createRun({
+          iso: "https://example.com/omarchy.iso",
+          serverUrl: "http://127.0.0.1:42069",
+          definitions: [{ id: definition.id }],
+        });
+        const resultId = created.results[0].id;
+        yield* tests.setLinearId(resultId, "OLI-100");
+        expect(Option.getOrThrow(yield* tests.findResult(resultId)).linearId).toBe("OLI-100");
+        expect(Option.getOrThrow(yield* tests.findResultByLinearId("OLI-100")).id).toBe(resultId);
+        expect(Option.isNone(yield* tests.findResultByLinearId("OLI-missing"))).toBe(true);
+        const missing = yield* Effect.exit(tests.setLinearId(uuid(), "OLI-101"));
+        expect(Exit.isFailure(missing) && Cause.hasDies(missing.cause)).toBe(true);
+      }),
+    );
+
+    scoped.effect(
+      "TestStore.setLinearId refuses a second result with the same linear id (unhappy)",
+      () =>
+        Effect.gen(function* () {
+          const tests = yield* Tests.TestStore;
+          const definition = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
+          const first = yield* tests.createRun({
+            iso: "https://example.com/omarchy.iso",
+            serverUrl: "http://127.0.0.1:42069",
+            definitions: [{ id: definition.id }],
+          });
+          const second = yield* tests.createRun({
+            iso: "https://example.com/omarchy.iso",
+            serverUrl: "http://127.0.0.1:42069",
+            definitions: [{ id: definition.id }],
+          });
+          yield* tests.setLinearId(first.results[0].id, "OLI-200");
+          const error = yield* Effect.flip(tests.setLinearId(second.results[0].id, "OLI-200"));
+          expect(error._tag).toBe("DatabaseError");
+          expect(error.operation).toBe("setLinearId");
+          expect(String(error.cause)).toContain("duplicate key");
+        }),
+    );
+
+    scoped.effect("AutomationStore enqueues a pending drive and diagnose for one result", () =>
+      Effect.gen(function* () {
+        const tests = yield* Tests.TestStore;
+        const automation = yield* Automation.AutomationStore;
+        const definition = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
+        const created = yield* tests.createRun({
+          iso: "https://example.com/omarchy.iso",
+          serverUrl: "http://127.0.0.1:42069",
+          definitions: [{ id: definition.id }],
+        });
+        const resultId = created.results[0].id;
+        const drive = yield* automation.enqueue({ resultId, action: "drive" });
+        const diagnose = yield* automation.enqueue({ resultId, action: "diagnose" });
+        expect(drive).toMatchObject({ resultId, action: "drive", status: "pending" });
+        expect(diagnose).toMatchObject({ resultId, action: "diagnose", status: "pending" });
+      }),
+    );
+
+    scoped.effect(
+      "AutomationStore refuses a second job for the same result and action (unhappy)",
+      () =>
+        Effect.gen(function* () {
+          const tests = yield* Tests.TestStore;
+          const automation = yield* Automation.AutomationStore;
+          const definition = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
+          const created = yield* tests.createRun({
+            iso: "https://example.com/omarchy.iso",
+            serverUrl: "http://127.0.0.1:42069",
+            definitions: [{ id: definition.id }],
+          });
+          const resultId = created.results[0].id;
+          yield* automation.enqueue({ resultId, action: "drive" });
+          const error = yield* Effect.flip(automation.enqueue({ resultId, action: "drive" }));
+          expect(error._tag).toBe("DatabaseError");
+          expect(error.operation).toBe("enqueueAutomationJob");
+          expect(String(error.cause)).toContain("duplicate key");
+        }),
     );
 
     scoped.effect("ServerStore registers a url once, lists in registration order, forgets it", () =>
