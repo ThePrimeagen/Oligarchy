@@ -13,11 +13,15 @@ import { createServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { eq } from "drizzle-orm";
 import { describe, expect, inject } from "vitest";
 import { it } from "@effect/vitest";
-import { Effect } from "effect";
+import { Effect, Schedule } from "effect";
+import * as Client from "../../src/db/client.ts";
+import * as DbSchema from "../../src/db/schema.ts";
+import * as Postgres from "../support/postgres.ts";
 
-const SERVER = fileURLToPath(new URL("../../../server", import.meta.url));
+const SERVER = fileURLToPath(new URL("../../server", import.meta.url));
 const TOKEN = "t";
 const UNREACHABLE = "postgres://user:sentinel-pw@127.0.0.1:1/oligarchy";
 const EXIT_WITHIN_MS = 60_000;
@@ -209,7 +213,7 @@ describe("proxy startup refusals", () => {
     }),
   );
 
-  it.live("--help exits 0 and lists the three flags", () =>
+  it.live("--help exits 0 and lists the four flags", () =>
     Effect.promise(async () => {
       const proxy = spawnProxy(["--help"]);
       const { code } = await proxy.exited;
@@ -217,6 +221,17 @@ describe("proxy startup refusals", () => {
       expect(proxy.stdout()).toContain("--display");
       expect(proxy.stdout()).toContain("--automation");
       expect(proxy.stdout()).toContain("--port");
+      expect(proxy.stdout()).toContain("--url");
+    }),
+  );
+
+  it.live("a --url that is not an http or https url exits 1 with the rule", () =>
+    Effect.promise(async () => {
+      const proxy = spawnProxy(["--url", "ftp://qemu.example.com"]);
+      const { code } = await proxy.exited;
+      expect(code).toBe(1);
+      expect(proxy.stderr()).toContain("url must be an http or https url");
+      expect(proxy.stdout()).not.toContain("listening");
     }),
   );
 
@@ -419,6 +434,54 @@ describe("proxy serving", () => {
           `[global] oligarchy proxy listening on 127.0.0.1:${String(port)}; display none; automation`,
         "SIGTERM",
       ),
+    120_000,
+  );
+
+  // The row a server writes under --url, read through the Database service; undefined until the
+  // first heartbeat lands.
+  const announced = (url: string) =>
+    Effect.gen(function* () {
+      const database = yield* Client.Database;
+      const rows = yield* database.run("announced", (db) =>
+        db.select().from(DbSchema.servers).where(eq(DbSchema.servers.url, url)),
+      );
+      return rows[0];
+    }).pipe(Effect.provide(Postgres.DatabaseLive(dbUrl)));
+
+  it.live.skipIf(!hasQemu || dbUrl === "")(
+    "--url names the url on the listen line and writes the server's row as its first heartbeat",
+    () =>
+      Effect.gen(function* () {
+        const port = yield* Effect.promise(freePort);
+        const url = `http://qemu-a.test:${String(port)}`;
+        const proxy = spawnProxy(["--automation", "--url", url, "--port", String(port)]);
+        const row = yield* Effect.gen(function* () {
+          yield* Effect.promise(() => proxy.waitFor(/oligarchy proxy listening/));
+          expect(lines(proxy.stdout())).toContain(
+            `[global] oligarchy proxy listening on 127.0.0.1:${String(port)}; display none; automation; announcing ${url}`,
+          );
+          // The first heartbeat is written right after the listen line; the insert takes a moment.
+          return yield* announced(url).pipe(
+            Effect.repeat({
+              until: (found) => found !== undefined,
+              schedule: Schedule.spaced("200 millis"),
+            }),
+            Effect.timeoutOrElse({ duration: "10 seconds", orElse: () => announced(url) }),
+          );
+        }).pipe(
+          // A failed expectation must not leave the process listening past the test.
+          Effect.ensuring(
+            Effect.sync(() => {
+              proxy.child.kill("SIGTERM");
+            }),
+          ),
+        );
+        expect(row).toMatchObject({ url, generation: 1, stats: { qemus: 0 } });
+        expect(row?.heartbeatAt).toBeInstanceOf(Date);
+        const { code } = yield* Effect.promise(() => proxy.exited);
+        expect(code, proxy.stdout()).toBe(0);
+        expect(proxy.stdout()).not.toContain("heartbeat failed");
+      }),
     120_000,
   );
 });

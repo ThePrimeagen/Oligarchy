@@ -8,7 +8,7 @@ import * as Sessions from "./sessions.ts";
 
 // Every thirty seconds, and the dashboard polls as often: a server's row is never more than one
 // poll behind, and three missed writes are what the page calls silent.
-export const HEARTBEAT_INTERVAL = "30 seconds";
+const HEARTBEAT_INTERVAL = "30 seconds";
 
 const isDatabaseError = Schema.is(Errors.DatabaseError);
 

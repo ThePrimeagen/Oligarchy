@@ -184,8 +184,9 @@ export type ServerStats = {
 // The fleet the reverse proxy places sessions on: one row per server, keyed by the url exactly
 // as given, written by an operator (the dashboard, POST /servers) or by the server itself. A
 // server announces itself every thirty seconds: the write rewrites stats, stamps heartbeat_at
-// and counts generation up, so a generation that stops moving is a server that stopped. stats
-// and heartbeat_at are null together, for a row an operator added that no server has claimed.
+// and counts generation up, so a generation that stops moving is a server that stopped
+// heartbeating — down, or cut off from the database. stats and heartbeat_at are null together,
+// for a row an operator added that no server has claimed.
 export const servers = pgTable("servers", {
   url: text("url").primaryKey(),
   stats: jsonb("stats").$type<ServerStats>(),

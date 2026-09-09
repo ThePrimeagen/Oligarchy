@@ -43,12 +43,16 @@ thirty seconds after, it rewrites its own row in `servers` (keyed by that url) w
 would answer, cut to what the fleet page shows — its qemu count, memory in use and the cpu's one,
 two and three minute means — stamps `heartbeat_at` with the database's clock and counts
 `generation` up by one. Every write is a ping: a generation that stops moving is a server that
-stopped, and the dashboard says so. The url is the address the reverse proxy reaches the server
-at (a tunnel's local port, say), which the server cannot see for itself, hence a flag and no
-default; without it the server announces nothing and is not on the page, which is what a
-development server wants. A heartbeat that fails is one `heartbeat failed: <reason>` error line,
-and the next one runs. `/stats` carries the three means too (`cpu.mean1m`, `mean2m`, `mean3m`,
-the newest 12, 24 and 36 of the sampler's 5 s samples beside `mean` over all 60).
+stopped heartbeating — the process is down, or it cannot reach the database (its own log then has
+the `heartbeat failed` lines) — and the dashboard says so either way. The url is the address the
+reverse proxy reaches the server at (a tunnel's local port, say), which the server cannot see for
+itself, hence a flag and no default; without it the server announces nothing and is not on the
+page, which is what a development server wants. A heartbeat that fails is one `heartbeat failed:
+<reason>` error line, and the next one runs. `/stats` carries the three means too (`cpu.mean1m`,
+`mean2m`, `mean3m`, the newest 12, 24 and 36 of the sampler's 5 s samples beside `mean` over all
+60); they are required fields of `Contract.Stats`, so a reverse proxy of this version treats an
+older server's `/stats` as `answered 200 without stats` and skips it — deploy the servers before
+the reverse proxy, after `npm run db:migrate`.
 
 ### The dashboard serves the images
 

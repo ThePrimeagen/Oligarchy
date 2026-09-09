@@ -24,11 +24,15 @@ const refused = Errors.DatabaseError.make({
 });
 
 // The loop in a scope of its own, so a test can close it and prove the ticking stops.
-const start = (store: Stores.FakeServerStore, log = FakeLog.fakeLog()) =>
+const start = (
+  store: Stores.FakeServerStore,
+  sessions = FakeSessions.fakeSessions(),
+  log = FakeLog.fakeLog(),
+) =>
   Effect.gen(function* () {
     const scope = yield* Scope.make();
     yield* Heartbeat.announce(URL).pipe(
-      Effect.provide(Layer.mergeAll(FakeSessions.fakeSessions().layer, store.layer, log.layer)),
+      Effect.provide(Layer.mergeAll(sessions.layer, store.layer, log.layer)),
       Scope.provide(scope),
     );
     return { scope, log };
@@ -100,24 +104,27 @@ describe("heartbeat unhappy path", () => {
       }),
   );
 
-  it.effect("a defect in a tick is logged the same way and does not end the loop", () =>
-    Effect.gen(function* () {
-      const boom = new Error("stats exploded");
-      let attempts = 0;
-      const store = Stores.fakeServerStore({
-        heartbeat: () =>
-          Effect.suspend(() => {
-            attempts += 1;
-            return attempts === 1 ? Effect.die(boom) : Effect.void;
+  it.effect(
+    "a defect reading the stats is logged the same way, nothing written, and the loop goes on",
+    () =>
+      Effect.gen(function* () {
+        const boom = new Error("stats exploded");
+        let reads = 0;
+        const sessions = FakeSessions.fakeSessions({
+          stats: Effect.suspend(() => {
+            reads += 1;
+            return reads === 1 ? Effect.die(boom) : Effect.succeed(FakeSessions.STATS);
           }),
-      });
-      const { log } = yield* start(store);
-      expect(log.lines).toMatchObject([
-        { level: "error", text: "heartbeat failed: stats exploded", cause: boom },
-      ]);
-      yield* TestClock.adjust("30 seconds");
-      expect(attempts).toBe(2);
-      expect(log.lines).toHaveLength(1);
-    }),
+        });
+        const store = Stores.fakeServerStore();
+        const { log } = yield* start(store, sessions);
+        expect(store.heartbeats).toEqual([]);
+        expect(log.lines).toMatchObject([
+          { level: "error", text: "heartbeat failed: stats exploded", cause: boom },
+        ]);
+        yield* TestClock.adjust("30 seconds");
+        expect(store.heartbeats).toEqual([{ url: URL, stats: ROW_STATS }]);
+        expect(log.lines).toHaveLength(1);
+      }),
   );
 });
