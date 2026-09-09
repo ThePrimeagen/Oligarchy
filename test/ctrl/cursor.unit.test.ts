@@ -118,6 +118,12 @@ describe("select unhappy path", () => {
     );
   });
 
+  plain("the levels a refusal lists are ours, xhigh where the vendor says extra-high", () => {
+    expect(refused({ model: "gpt-5.5", reasoning: "max" }).message).toBe(
+      'model "gpt-5.5" has no reasoning level "max"; it has none, low, medium, high, xhigh',
+    );
+  });
+
   plain("the model is checked first, then reasoning, then fast", () => {
     expect(refused({ model: "nope", reasoning: "max", fast: true }).message).toBe(
       'unknown model "nope"',

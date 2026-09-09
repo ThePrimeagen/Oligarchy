@@ -40,15 +40,17 @@ export const select = (
       );
     }
     const offered = reasoning.values.map((entry) => entry.value);
-    // Older GPT models spell our xhigh as extra-high.
+    // Older GPT models spell our xhigh as extra-high; the refusal lists what can be asked for,
+    // so it says xhigh there.
     const level =
       offered.find((value) => value === choice.reasoning) ??
       (choice.reasoning === "xhigh" ? offered.find((value) => value === "extra-high") : undefined);
     if (level === undefined) {
+      const levels = offered.map((value) => (value === "extra-high" ? "xhigh" : value));
       return Result.fail(
         unavailable(
           choice.model,
-          `model "${choice.model}" has no reasoning level "${choice.reasoning}"; it has ${offered.join(", ")}`,
+          `model "${choice.model}" has no reasoning level "${choice.reasoning}"; it has ${levels.join(", ")}`,
         ),
       );
     }

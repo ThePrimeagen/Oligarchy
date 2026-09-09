@@ -524,6 +524,13 @@ used":
 - `--reasoning` and `--fast` on `ctrl test run` and `ctrl diagnose run`. `--model` takes the id
   alone there, as before; the full choice is the route's.
 - A second spawning strategy. The `CursorAgents` layer is the seam; nothing else was asked for.
+- A `key` field in the `/agent` body. The key the caller must provide is the bearer every route
+  of this process already requires; a second way to present it would be a second thing to check.
+- A shape for a driving task. A Linear identifier's form is Linear's (`OLI-42` today, another
+  team's key tomorrow), and `ctrl test run --ticket` accepts any non-empty string; the session id
+  of a reviewer is ours (a uuid column) and is checked.
+- An idempotency key on the Cursor create. Nothing retries; a caller that repeats a `/agent` POST
+  gets a second agent, and the only key that could dedupe it would be the caller's.
 
 - A health loop. A dead server costs one 10 s probe per start and per `GET /servers` until
   `DELETE /servers` forgets it; a loop that dropped servers on its own would turn a flapping host
