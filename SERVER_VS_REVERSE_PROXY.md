@@ -22,7 +22,7 @@ are served from.
 | Writes | `sessions`, `agent_runs`, `actions`, `images`, `debug_logs`, `logs`, its `servers` row | `servers`, `session_servers`, `logs` |
 | Serves images | No: `GET /images/:id` is the catch-all's 404 | No: the same 404 |
 | Background work | The 10 s timeout sweep, the cpu sampler, the 30 s heartbeat, the log drain | The log drain only |
-| At shutdown | Drains every session (`aborted`, `proxy shutdown`) | Nothing: the sessions are the servers' and the routes are rows |
+| At shutdown | Drains every session (`aborted`, `proxy shutdown`); deletes its `servers` row | Nothing: the sessions are the servers' and the routes are rows |
 | Sentry spans | `QEMU session`, the intent, `QMP <cmd>` | None; only error lines report |
 
 ## Responsibilities
@@ -42,13 +42,15 @@ Started with `--url <url>`, the server also announces itself: once its listener 
 thirty seconds after, it rewrites its own row in `servers` (keyed by that url) with what `/stats`
 would answer, cut to what the fleet page shows — its qemu count, memory in use and the cpu's one,
 two and three minute means — stamps `heartbeat_at` with the database's clock and counts
-`generation` up by one. Every write is a ping: a generation that stops moving is a server that
-stopped heartbeating — the process is down, or it cannot reach the database (its own log then has
-the `heartbeat failed` lines) — and the dashboard says so either way. The url is the address the
-reverse proxy reaches the server at (a tunnel's local port, say), which the server cannot see for
-itself, hence a flag and no default; without it the server announces nothing and is not on the
-page, which is what a development server wants. A heartbeat that fails is one `heartbeat failed:
-<reason>` error line, and the next one runs. `/stats` carries the three means too (`cpu.mean1m`,
+`generation` up by one. A shutdown deletes that row, so a process that left is gone from the
+fleet and from placement. Every write is a ping: a generation that stops moving is a server that
+stopped without deleting — killed, or it cannot reach the database (its own log then has the
+`heartbeat failed` lines, and a delete that fails is `unannounce failed: <reason>`) — and the
+dashboard says so either way. The url is the address the reverse proxy reaches the server at (a
+tunnel's local port, say), which the server cannot see for itself, hence a flag and no default;
+without it the server announces nothing and is not on the page, which is what a development
+server wants. A heartbeat that fails is one `heartbeat failed: <reason>` error line, and the next
+one runs. `/stats` carries the three means too (`cpu.mean1m`,
 `mean2m`, `mean3m`, the newest 12, 24 and 36 of the sampler's 5 s samples beside `mean` over all
 60); they are required fields of `Contract.Stats`, so a reverse proxy of this version treats an
 older server's `/stats` as `answered 200 without stats` and skips it — deploy the servers before
@@ -80,7 +82,7 @@ probes a server: what it shows is what the servers said, and the reverse proxy i
 or https url`, 400 otherwise, the reason on top of the page); `POST /servers/delete` removes one
 (404 `<url> is not registered` when there is none). A server still running announces itself back
 within thirty seconds of being deleted: the row is the server's word, the button is for the ones
-that stopped talking. A database failure is a 500 page with `error: internal error` and no fleet
+that stopped without deleting. A database failure is a 500 page with `error: internal error` and no fleet
 section, so it never claims an empty fleet. The page is unstyled text outside the dashboard's
 shell and is served whole; access control is the dashboard's, not the page's.
 
@@ -372,8 +374,11 @@ Every surface has a happy and an unhappy test:
   gone, never the password).
 - `test/proxy/heartbeat.unit.test.ts` runs the loop under the `TestClock` over the fake
   `Sessions` and `ServerStore`: a write at once and every thirty seconds with the stats cut to
-  the row's shape, the loop ending with its scope, a refused write as one `heartbeat failed:
-  <driver's reason>` line with the next tick still writing, a defect logged the same way.
+  the row's shape, the loop ending with its scope, the row deleted on that close (other servers
+  left), a write in flight finishing before the delete, a refused write as one `heartbeat
+  failed: <driver's reason>` line with the next tick still writing, a defect logged the same way,
+  a refused delete as one `unannounce failed: <driver's reason>` line that still lets the scope
+  close, a missing row not an error.
   `test/proxy/command.unit.test.ts` pins `--url` reaching the server, its absence as none, a url
   the rule refuses as a usage error touching nothing, and `--help` listing it.
   `test/qemu/stats.unit.test.ts` pins the three means over the newest 12, 24 and 36 samples.
@@ -473,4 +478,5 @@ Sentry reports are the record. The lines to know: `server registered; <url>`,
 `routed; <url>` (attributed to the new session and its agent), `forward cut short; <reason>`, and
 `<METHOD> <url> failed: <reason>` for every request it refused itself. On a server started with
 `--url`, the listen line ends `; announcing <url>` and a heartbeat that could not be written is
-`heartbeat failed: <reason>`.
+`heartbeat failed: <reason>`. A shutdown deletes the row; a delete that could not be written is
+`unannounce failed: <reason>`.
