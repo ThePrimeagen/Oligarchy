@@ -49,15 +49,9 @@ const ServerLive = (port: number) =>
   );
 
 // LINEAR_WEBHOOK_SECRET is the one variable this process reads: Linear signs POST /linear with it.
-const WebhookSecretLive = Layer.unwrap(
-  Effect.map(Config.linearWebhookSecret, (secret) =>
-    Layer.succeed(Handlers.LinearWebhookSecret)(Handlers.LinearWebhookSecret.of(secret)),
-  ),
-);
-
 // No database: this service keeps no rows, so its log is stdout and Sentry. Sentry sits beneath
 // Log so Log captures the reporter.
-const MainLive = Layer.mergeAll(Log.Log.layerStdout, WebhookSecretLive).pipe(
+const MainLive = Layer.mergeAll(Log.Log.layerStdout, Handlers.LinearWebhookSecret.layer).pipe(
   Layer.provideMerge(Sentry.SentryLive),
   Layer.provideMerge(Config.providerLayer),
   Layer.provideMerge(NodeServices.layer),

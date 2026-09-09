@@ -1,6 +1,7 @@
 import { Context, Effect, FileSystem, Layer, Redacted } from "effect";
 import { HttpServerRequest } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
+import * as Config from "../config.ts";
 import * as Log from "../observability/log.ts";
 import * as ProxyHandlers from "../proxy/handlers.ts";
 import * as Middleware from "../proxy/middleware.ts";
@@ -11,13 +12,15 @@ import * as Signature from "./signature.ts";
 
 const ok = Contract.Ok.make({});
 
-export class LinearWebhookSecret extends Context.Service<LinearWebhookSecret, Redacted.Redacted>()(
+export class LinearWebhookSecret extends Context.Service<LinearWebhookSecret>()(
   "@oligarchy/automation/LinearWebhookSecret",
-) {}
+  { make: Config.linearWebhookSecret },
+) {
+  static readonly layer = Layer.effect(this)(this.make);
+}
 
 // No payload schema: Linear's HMAC is over the raw bytes, and the record is those same bytes
-// plus a trailing newline. A JSON payload would parse and lose the exact body. The request is
-// the HttpServerRequest service: handleRaw's request widens the requirements channel to unknown.
+// plus a trailing newline. A JSON payload would parse and lose the exact body.
 export const LinearLive = (record: string) =>
   HttpApiBuilder.group(Api.AutomationApi, "Linear", (handlers) =>
     handlers.handle("linear", () =>
