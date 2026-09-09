@@ -189,6 +189,14 @@ export class TestStore extends Context.Service<TestStore>()("@oligarchy/db/TestS
       return rows.length > 0;
     });
 
+    // The result by its id, whether or not a session has run it yet.
+    const findResult = Effect.fn("db.findResult")(function* (resultId: string) {
+      const rows = yield* database.run("findResult", (db) =>
+        db.select().from(DbSchema.testResults).where(eq(DbSchema.testResults.id, resultId)),
+      );
+      return Arr.head(rows);
+    });
+
     // The result a session ran, with the definition it tested and the run it belongs to.
     const resultForSession = Effect.fn("db.resultForSession")(function* (sessionId: string) {
       return yield* database.run("resultForSession", (db) =>
@@ -218,6 +226,7 @@ export class TestStore extends Context.Service<TestStore>()("@oligarchy/db/TestS
       failRun,
       startResult,
       closeResult,
+      findResult,
       resultForSession,
     };
   }),

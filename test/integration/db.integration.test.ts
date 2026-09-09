@@ -793,12 +793,25 @@ Postgres.describeWithDatabase("database", () => {
         expect(created.results).toHaveLength(1);
         const [result] = created.results;
         expect(result?.definitionId).toBe(definition.id);
+        // A result is found by its id from creation on; it names no session until start.
+        expect(Option.getOrThrow(yield* tests.findResult(result.id))).toMatchObject({
+          id: result.id,
+          runId: created.runId,
+          sessionId: null,
+          status: "pending",
+        });
 
         const sessionId = uuid();
         yield* sessions.insertSession(sessionId, { iso: "x" }, "running");
         expect(yield* tests.startResult(result.id, sessionId, "composer-2.5")).toBe(true);
         expect(yield* tests.startResult(result.id, sessionId, "composer-2.5")).toBe(false);
         expect(yield* tests.startResult(uuid(), sessionId, "composer-2.5")).toBe(false);
+        expect(Option.getOrThrow(yield* tests.findResult(result.id))).toMatchObject({
+          sessionId,
+          status: "running",
+          model: "composer-2.5",
+        });
+        expect(Option.isNone(yield* tests.findResult(uuid()))).toBe(true);
 
         // A newer wording of the same name does not move the result: it pinned the row it ran.
         const revised = yield* tests.defineTestDefinition({
