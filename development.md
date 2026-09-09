@@ -153,10 +153,8 @@ Durable preferences from the maintainer; when they conflict with generic best pr
 - Background fibers belong to the layer scope: `Effect.forkScoped`, never `Effect.runFork`. Do not
   use `Layer.fresh` in production, `ManagedRuntime`, or `Layer.catch` (not exported).
 - `HttpRouter.serve` provides the module-level `HttpRouter.layer`, so two `HttpRouter.serve`s in
-  one graph share one router and both listeners serve both route sets. A process with a second
-  listener (the reverse proxy's diagnostics page) serves it as `HttpServer.serve(handler)` over a
-  plain `HttpEffect` and its own `NodeHttpServer.layer`, each `NodeHttpServer.layer` provided
-  privately to its consumer; never a second router, never `Layer.fresh`.
+  one graph share one router and both listeners serve both route sets. A process has one
+  listener; a page for an operator is the dashboard's, not a second port (below).
 - `Effect.log*` is called only in `src/db/client.ts`: the pool's `error` listener and its release
   sit below `Log`, which does not exist yet when the pool is built.
 
@@ -488,12 +486,13 @@ NodeRuntime.runMain(main, { disableErrorReporting: true });
   })` with only the headers the contract names, so the upstream's refusal reaches the client as
   written and is not logged twice. The status is on the wire before the body can fail, so the
   stream is tapped for the one error line a mid-stream death leaves.
-- A page for an operator's browser has no bearer to send, so it listens on its own loopback port
-  with no token, and defends the two things a browser can be made to do from elsewhere: a
-  cross-site form post (a browser's `Origin` must be `http://` plus the `Host` it connected to; a
-  request without one is not a browser's) and DNS rebinding (the `Host` must be a loopback name,
-  else no page at all); every answer is `cache-control: no-store` and `x-frame-options: DENY`,
-  and every interpolated value is HTML-escaped. It is text, no style, no script.
+- A page for an operator's browser has no bearer to send, so no Effect process serves one: the
+  page is the dashboard's (`src/dashboard/`), behind its access control, and reads rows. What it
+  shows of a process is what that process wrote on a schedule (the server's `servers` row every
+  thirty seconds, its `generation` counting the writes, so a number that stops moving is a process
+  that stopped), never a call into the process from the Worker. The page is text: a table, a
+  form, and htmx polling one fragment at the interval the rows are written at; a value from a
+  row goes into it through JSX, never a string template.
 - Declare endpoints as `HttpApiEndpoint.get/post(name, path, { params, query, payload, success,
   error })`; binary via `Schema.Uint8Array.pipe(HttpApiSchema.asUint8Array({ contentType }))`,
   headers via `HttpApiSchema.WithHeaders`, byte streams via `HttpApiSchema.StreamUint8Array`.
@@ -871,9 +870,8 @@ export const SentryLive: Layer.Layer<never> = Layer.mergeAll(
 - A CLI runs `Command.run(cmd, { version })` directly under `runMain`; a server `Layer.launch`es
   inside its command handler, its stop condition `Effect.raceFirst(Layer.launch(serve),
   Deferred.await(serverFailed))`, the `Deferred` completed by the Node server's `error` listener
-  in `main.ts`, where the server is created so that listener can be attached. A process with two
-  listeners creates both `node:http` servers there and both `error` listeners complete the one
-  `Deferred`; only the first counts.
+  in `main.ts`, where the server is created so that listener can be attached; only the first
+  error counts.
 - `runMain` owns SIGINT and SIGTERM: the first signal interrupts the root fiber and scopes close in
   reverse order (work drained, the log flushed, Sentry flushed, the pool closed). Component layers
   never install signal handlers. A process that must answer signals itself uses
