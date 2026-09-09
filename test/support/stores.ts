@@ -98,6 +98,13 @@ export const fakeSessionStore = (
           (run) => run.sessionId,
         ),
       ),
+    agentForSession: (sessionId) =>
+      Effect.sync(() =>
+        Option.map(
+          Option.fromUndefinedOr(agentRuns.find((run) => sameId(run.sessionId, sessionId))),
+          (run) => run.agentId,
+        ),
+      ),
     listSessions: (count, active) =>
       Effect.sync(() => {
         const rows = active

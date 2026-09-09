@@ -103,6 +103,17 @@ export class SessionStore extends Context.Service<SessionStore>()("@oligarchy/db
       return Option.map(Arr.head(rows), (row) => row.sessionId);
     });
 
+    // The agent that drove the session — its Linear ticket, when a driver started it from one.
+    const agentForSession = Effect.fn("db.agentForSession")(function* (sessionId: string) {
+      const rows = yield* database.run("agentForSession", (db) =>
+        db
+          .select({ agentId: DbSchema.agentRuns.agentId })
+          .from(DbSchema.agentRuns)
+          .where(eq(DbSchema.agentRuns.sessionId, sessionId)),
+      );
+      return Option.map(Arr.head(rows), (row) => row.agentId);
+    });
+
     const listSessions = Effect.fn("db.listSessions")(function* (count: number, active: boolean) {
       const rows: ReadonlyArray<SessionSummary> = yield* database.run("listSessions", (db) => {
         const columns = {
@@ -139,6 +150,7 @@ export class SessionStore extends Context.Service<SessionStore>()("@oligarchy/db
       sessionExists,
       registerAgent,
       sessionForAgent,
+      agentForSession,
       listSessions,
     };
   }),
