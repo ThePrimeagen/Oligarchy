@@ -1,11 +1,11 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Client } from "pg";
 import { describe, expect, inject, it } from "vitest";
 import { app } from "../../src/dashboard/dashboard.tsx";
-import { sessions, testDefinitions, testResults, testRuns } from "../../src/db/schema.ts";
+import { servers, sessions, testDefinitions, testResults, testRuns } from "../../src/db/schema.ts";
 
 const QUERY = fileURLToPath(new URL("../../src/dashboard/query.ts", import.meta.url));
 const SCHEMA = fileURLToPath(new URL("../../src/db/schema.ts", import.meta.url));
@@ -294,13 +294,14 @@ const editForm = (
 const postForm = async (
   fields: Record<string, string>,
   databaseUrl: string,
+  path = "/definitions",
 ): Promise<{
   readonly status: number;
   readonly location: string | null;
   readonly text: string;
 }> => {
   const response = await app.request(
-    "/definitions",
+    path,
     {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -716,5 +717,149 @@ describe("dashboard/query unhappy path: unreachable database", () => {
     expect(result.code).toBe(3);
     expect(result.stderr).toMatch(/ECONNREFUSED/);
     expect(result.stderr).not.toContain(SENTINEL_PASSWORD);
+  });
+});
+
+const registeredUrls = async (databaseUrl: string): Promise<ReadonlyArray<string>> => {
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    const rows = await drizzle(client).select({ url: servers.url }).from(servers);
+    return rows.map((row) => row.url);
+  } finally {
+    await client.end();
+  }
+};
+
+describe.skipIf(dbUrl === "")("dashboard/servers page happy path", () => {
+  it("lists the fleet from its rows: one heard from just now, one silent, one never heard from", async () => {
+    // The integration files share one database; the fleet this page expects is its own to arrange.
+    await seed(dbUrl, async (db) => {
+      await db.delete(servers);
+      await db.insert(servers).values([
+        {
+          url: "http://10.1.0.1:42069",
+          stats: {
+            qemus: 2,
+            memory: { totalBytes: 66_900_000_000, usedBytes: 31_500_000_000 },
+            cpu: { mean1m: 12.3, mean2m: 11, mean3m: 9.8 },
+          },
+          generation: 42,
+          heartbeatAt: sql`now() - interval '12 seconds'`,
+        },
+        {
+          url: "http://10.1.0.2:42069",
+          stats: {
+            qemus: 3,
+            memory: { totalBytes: 16_000_000_000, usedBytes: 4_000_000_000 },
+            cpu: { mean1m: 50, mean2m: 40, mean3m: 30 },
+          },
+          generation: 7,
+          heartbeatAt: sql`now() - interval '5 minutes'`,
+        },
+        { url: "http://10.1.0.3:42069" },
+      ]);
+    });
+    const { status, html } = await getPage("/servers", dbUrl);
+    expect(status).toBe(200);
+    expect(html).toContain("<!doctype html>");
+    expect(html).toContain("<h1>oligarchy servers</h1>");
+    expect(html).toContain('<div id="fleet" hx-get="/servers/fleet" hx-trigger="every 30s">');
+    expect(html).toContain(
+      "<tr><td>http://10.1.0.1:42069</td><td>2</td><td>31.5 / 66.9 GB</td><td>12.3% / 11.0% / 9.8%</td><td>42</td><td>12 s ago</td>",
+    );
+    expect(html).toContain(
+      '<tr><td>http://10.1.0.2:42069</td><td colspan="3"><strong>silent</strong></td><td>7</td><td>5 min ago</td>',
+    );
+    expect(html).toContain(
+      '<tr><td>http://10.1.0.3:42069</td><td colspan="3">never heard from</td><td>0</td><td>never</td>',
+    );
+    expect(html).not.toContain("dashboard.css");
+  });
+
+  it("serves the fleet alone at /servers/fleet, what the page's poll swaps in", async () => {
+    const { status, html } = await getPage("/servers/fleet", dbUrl);
+    expect(status).toBe(200);
+    expect(html).toContain("<table>");
+    expect(html).toContain("<td>http://10.1.0.1:42069</td>");
+    expect(html).not.toContain("<html");
+    expect(html).not.toContain("add a server");
+  });
+
+  it("adds a server once, however often it is posted, and sends the browser back to the page", async () => {
+    const first = await postForm({ url: "http://10.1.0.9:42069" }, dbUrl, "/servers");
+    expect(first.status).toBe(303);
+    expect(first.location).toBe("/servers");
+    const again = await postForm({ url: "http://10.1.0.9:42069" }, dbUrl, "/servers");
+    expect(again.status).toBe(303);
+    const urls = await registeredUrls(dbUrl);
+    expect(urls.filter((url) => url === "http://10.1.0.9:42069")).toHaveLength(1);
+    const { html } = await getPage("/servers", dbUrl);
+    expect(html).toContain(
+      '<tr><td>http://10.1.0.9:42069</td><td colspan="3">never heard from</td><td>0</td><td>never</td>',
+    );
+  });
+
+  it("deletes a server and sends the browser back to the page", async () => {
+    const result = await postForm({ url: "http://10.1.0.9:42069" }, dbUrl, "/servers/delete");
+    expect(result.status).toBe(303);
+    expect(result.location).toBe("/servers");
+    expect(await registeredUrls(dbUrl)).not.toContain("http://10.1.0.9:42069");
+  });
+});
+
+describe.skipIf(dbUrl === "")("dashboard/servers page unhappy path", () => {
+  it("refuses a url that is not http or https: 400, the reason on top of the fleet, nothing stored", async () => {
+    const result = await postForm({ url: "ftp://qemu.example.com" }, dbUrl, "/servers");
+    expect(result.status).toBe(400);
+    expect(result.text).toContain("<p>error: url must be an http or https url</p>");
+    expect(result.text).toContain("<td>http://10.1.0.1:42069</td>");
+    expect(await registeredUrls(dbUrl)).not.toContain("ftp://qemu.example.com");
+  });
+
+  it("refuses a form without a url the same way", async () => {
+    const result = await postForm({ nope: "x" }, dbUrl, "/servers");
+    expect(result.status).toBe(400);
+    expect(result.text).toContain("<p>error: url must be an http or https url</p>");
+  });
+
+  it("answers 404 with the reason for deleting a url that was never registered", async () => {
+    const result = await postForm({ url: "http://10.1.0.77:42069" }, dbUrl, "/servers/delete");
+    expect(result.status).toBe(404);
+    expect(result.text).toContain("<p>error: http://10.1.0.77:42069 is not registered</p>");
+    expect(result.text).toContain("<td>http://10.1.0.1:42069</td>");
+  });
+});
+
+describe("dashboard/servers page unhappy path: unreachable database", () => {
+  it("answers 500 with internal error and no fleet, never echoing the password", async () => {
+    const { status, html } = await getPage("/servers", REFUSED_URL);
+    expect(status).toBe(500);
+    expect(html).toContain("<p>error: internal error</p>");
+    expect(html).not.toContain('id="fleet"');
+    expect(html).toContain("<h2>add a server</h2>");
+    expect(html).not.toContain(SENTINEL_PASSWORD);
+  });
+
+  it("the fleet fragment answers 500 with the reason, never echoing the password", async () => {
+    const { status, html } = await getPage("/servers/fleet", REFUSED_URL);
+    expect(status).toBe(500);
+    expect(html).toBe("<p>error: internal error</p>");
+    expect(html).not.toContain(SENTINEL_PASSWORD);
+  });
+
+  it("adding and deleting answer 500 the same way", async () => {
+    const added = await postForm({ url: "http://10.1.0.5:42069" }, REFUSED_URL, "/servers");
+    expect(added.status).toBe(500);
+    expect(added.text).toContain("<p>error: internal error</p>");
+    expect(added.text).not.toContain(SENTINEL_PASSWORD);
+    const deleted = await postForm(
+      { url: "http://10.1.0.5:42069" },
+      REFUSED_URL,
+      "/servers/delete",
+    );
+    expect(deleted.status).toBe(500);
+    expect(deleted.text).toContain("<p>error: internal error</p>");
+    expect(deleted.text).not.toContain(SENTINEL_PASSWORD);
   });
 });
