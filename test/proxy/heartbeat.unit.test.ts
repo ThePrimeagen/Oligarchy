@@ -1,6 +1,6 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { Effect, Exit, Layer, Scope } from "effect";
+import { Deferred, Effect, Exit, Fiber, Layer, Scope } from "effect";
 import { TestClock } from "effect/testing";
 import * as Heartbeat from "../../src/proxy/heartbeat.ts";
 import * as Errors from "../../src/shared/errors.ts";
@@ -66,6 +66,49 @@ describe("heartbeat happy path", () => {
       expect(store.heartbeats).toHaveLength(2);
     }),
   );
+
+  it.effect("deletes its own row when the scope closes, and leaves every other server", () =>
+    Effect.gen(function* () {
+      const store = Stores.fakeServerStore();
+      const other = "http://127.0.0.1:1";
+      store.servers.push(other);
+      const { scope, log } = yield* start(store);
+      expect(store.servers).toEqual([other, URL]);
+      yield* Scope.close(scope, Exit.void);
+      expect(store.servers).toEqual([other]);
+      expect(log.lines).toEqual([]);
+    }),
+  );
+
+  it.effect("a write in flight finishes before the row is deleted", () =>
+    Effect.gen(function* () {
+      const writing = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const order: Array<string> = [];
+      const store = Stores.fakeServerStore({
+        heartbeat: () =>
+          Effect.gen(function* () {
+            order.push("write");
+            yield* Deferred.succeed(writing, undefined);
+            yield* Deferred.await(release);
+          }),
+        removeServer: () =>
+          Effect.sync(() => {
+            order.push("delete");
+            return true;
+          }),
+      });
+      const { scope } = yield* start(store);
+      yield* Deferred.await(writing);
+      const closed = yield* Effect.forkChild(Scope.close(scope, Exit.void));
+      yield* Effect.yieldNow;
+      expect(closed.pollUnsafe()).toBeUndefined();
+      expect(order).toEqual(["write"]);
+      yield* Deferred.succeed(release, undefined);
+      yield* Fiber.join(closed);
+      expect(order).toEqual(["write", "delete"]);
+    }),
+  );
 });
 
 describe("heartbeat unhappy path", () => {
@@ -126,5 +169,51 @@ describe("heartbeat unhappy path", () => {
         expect(store.heartbeats).toEqual([{ url: URL, stats: ROW_STATS }]);
         expect(log.lines).toHaveLength(1);
       }),
+  );
+
+  it.effect(
+    "a refused delete is one error line with the driver's reason, and the scope still closes",
+    () =>
+      Effect.gen(function* () {
+        const refusedDelete = Errors.DatabaseError.make({
+          operation: "removeServer",
+          message: "Failed query: delete from servers",
+          cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
+        });
+        const store = Stores.fakeServerStore({
+          removeServer: () => Effect.fail(refusedDelete),
+        });
+        const { scope, log } = yield* start(store);
+        expect(store.servers).toEqual([URL]);
+        yield* Scope.close(scope, Exit.void);
+        expect(store.servers).toEqual([URL]);
+        expect(log.lines).toEqual([
+          {
+            level: "error",
+            text: "unannounce failed: connect ECONNREFUSED 127.0.0.1:5432",
+            sessionId: undefined,
+            agentId: undefined,
+            skipSentry: false,
+            cause: refusedDelete,
+          },
+        ]);
+      }),
+  );
+
+  it.effect("a missing row is not an error", () =>
+    Effect.gen(function* () {
+      const removals: Array<string> = [];
+      const store = Stores.fakeServerStore({
+        removeServer: (url) =>
+          Effect.sync(() => {
+            removals.push(url);
+            return false;
+          }),
+      });
+      const { scope, log } = yield* start(store);
+      yield* Scope.close(scope, Exit.void);
+      expect(removals).toEqual([URL]);
+      expect(log.lines).toEqual([]);
+    }),
   );
 });

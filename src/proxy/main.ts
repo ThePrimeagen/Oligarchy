@@ -47,7 +47,7 @@ server.on("error", (cause) => {
 });
 
 // The heartbeat starts once the listener is up, in the same scope: a port refusal announces
-// nothing, and the row stops being written when the server stops.
+// nothing, and a shutdown deletes the row it wrote.
 const ServerLive = (
   display: Domain.QemuDisplay,
   automation: boolean,

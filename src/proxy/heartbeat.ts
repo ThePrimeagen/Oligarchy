@@ -20,7 +20,11 @@ const detail = (error: unknown): string =>
 
 // Announces this server under `url`: its `servers` row is written now and every thirty seconds
 // with what it knows of itself, and the row's generation counts the writes, so a number that
-// stops moving is a server that stopped. A tick that fails is one error line; the next tick runs.
+// stops moving is a server that stopped without a chance to leave. A tick that fails is one
+// error line; the next tick runs. The row is this process's word on itself, so a shutdown
+// deletes it: registered before the loop so the fiber is interrupted first, a write in flight
+// finishes (the write is uninterruptible), then the row goes. A delete that fails is one
+// `unannounce failed` line; the process still exits.
 export const announce = (
   url: string,
 ): Effect.Effect<void, never, Scope.Scope | Sessions.Sessions | Servers.ServerStore | Log.Log> =>
@@ -30,16 +34,28 @@ export const announce = (
     const log = yield* Log.Log;
     const tick = sessions.stats.pipe(
       Effect.flatMap((stats) =>
-        store.heartbeat(url, {
-          qemus: stats.qemus,
-          memory: { totalBytes: stats.memory.totalBytes, usedBytes: stats.memory.usedBytes },
-          cpu: { mean1m: stats.cpu.mean1m, mean2m: stats.cpu.mean2m, mean3m: stats.cpu.mean3m },
-        }),
+        Effect.uninterruptible(
+          store.heartbeat(url, {
+            qemus: stats.qemus,
+            memory: { totalBytes: stats.memory.totalBytes, usedBytes: stats.memory.usedBytes },
+            cpu: { mean1m: stats.cpu.mean1m, mean2m: stats.cpu.mean2m, mean3m: stats.cpu.mean3m },
+          }),
+        ),
       ),
       Effect.catchCause((cause) => {
         const error = Cause.squash(cause);
         return log.error(`heartbeat failed: ${detail(error)}`, { cause: error });
       }),
+    );
+    // Before the loop: close interrupts the fiber first, then this runs.
+    yield* Effect.addFinalizer(() =>
+      store.removeServer(url).pipe(
+        Effect.catchCause((cause) => {
+          const error = Cause.squash(cause);
+          return log.error(`unannounce failed: ${detail(error)}`, { cause: error });
+        }),
+        Effect.asVoid,
+      ),
     );
     yield* tick.pipe(
       Effect.repeat(Schedule.spaced(HEARTBEAT_INTERVAL)),
