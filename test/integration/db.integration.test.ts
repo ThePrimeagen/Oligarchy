@@ -1001,6 +1001,65 @@ Postgres.describeWithDatabase("database", () => {
       }),
     );
 
+    scoped.effect(
+      "ServerStore heartbeat announces a server: generation 1 on the first write, then counting up with the stats rewritten",
+      () =>
+        Effect.gen(function* () {
+          const store = yield* Servers.ServerStore;
+          const database = yield* Client.Database;
+          const url = `http://10.0.0.7:${uuid().slice(0, 8)}`;
+          const first: DbSchema.ServerStats = {
+            qemus: 1,
+            memory: { totalBytes: 16_000, usedBytes: 4_000 },
+            cpu: { mean1m: 22.3, mean2m: 21.4, mean3m: 20.9 },
+          };
+          const rowOf = database.run("select", (db) =>
+            db.select().from(DbSchema.servers).where(eq(DbSchema.servers.url, url)),
+          );
+          yield* store.heartbeat(url, first);
+          expect(yield* store.listServers()).toContain(url);
+          const [row] = yield* rowOf;
+          expect(row).toMatchObject({ url, stats: first, generation: 1 });
+          expect(row?.heartbeatAt).toBeInstanceOf(Date);
+          const second: DbSchema.ServerStats = { ...first, qemus: 2 };
+          yield* store.heartbeat(url, second);
+          const rows = yield* rowOf;
+          expect(rows).toHaveLength(1);
+          expect(rows[0]).toMatchObject({ url, stats: second, generation: 2 });
+          expect(rows[0]?.heartbeatAt?.getTime()).toBeGreaterThanOrEqual(
+            row?.heartbeatAt?.getTime() ?? Number.POSITIVE_INFINITY,
+          );
+          expect(yield* store.removeServer(url)).toBe(true);
+        }),
+    );
+
+    scoped.effect(
+      "ServerStore heartbeat fills the row an operator added: still one row, generation 1",
+      () =>
+        Effect.gen(function* () {
+          const store = yield* Servers.ServerStore;
+          const database = yield* Client.Database;
+          const url = `http://10.0.0.8:${uuid().slice(0, 8)}`;
+          const rowOf = database.run("select", (db) =>
+            db.select().from(DbSchema.servers).where(eq(DbSchema.servers.url, url)),
+          );
+          yield* store.addServer(url);
+          const [added] = yield* rowOf;
+          expect(added).toMatchObject({ url, stats: null, generation: 0, heartbeatAt: null });
+          const stats: DbSchema.ServerStats = {
+            qemus: 0,
+            memory: { totalBytes: 66_900_000_000, usedBytes: 31_500_000_000 },
+            cpu: { mean1m: 12.3, mean2m: 11, mean3m: 9.8 },
+          };
+          yield* store.heartbeat(url, stats);
+          const rows = yield* rowOf;
+          expect(rows).toHaveLength(1);
+          expect(rows[0]).toMatchObject({ url, stats, generation: 1 });
+          expect(rows[0]?.heartbeatAt).toBeInstanceOf(Date);
+          expect(yield* store.removeServer(url)).toBe(true);
+        }),
+    );
+
     scoped.effect("ServerStore routes a session once and answers where it went", () =>
       Effect.gen(function* () {
         const store = yield* Servers.ServerStore;

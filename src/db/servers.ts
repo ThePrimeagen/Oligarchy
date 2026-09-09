@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { Array as Arr, Context, Effect, Layer, Option } from "effect";
 import * as Client from "./client.ts";
 import * as DbSchema from "./schema.ts";
@@ -11,6 +11,24 @@ export class ServerStore extends Context.Service<ServerStore>()("@oligarchy/db/S
     const addServer = Effect.fn("db.addServer")(function* (url: string) {
       yield* database.run("addServer", (db) =>
         db.insert(DbSchema.servers).values({ url }).onConflictDoNothing(),
+      );
+    });
+
+    // A server's own word on itself: its row comes into being on the first heartbeat or is
+    // rewritten, the generation counting every write, stamped by the database's clock.
+    const heartbeat = Effect.fn("db.heartbeat")(function* (
+      url: string,
+      stats: DbSchema.ServerStats,
+    ) {
+      const now = sql`now()`;
+      yield* database.run("heartbeat", (db) =>
+        db
+          .insert(DbSchema.servers)
+          .values({ url, stats, generation: 1, heartbeatAt: now })
+          .onConflictDoUpdate({
+            target: DbSchema.servers.url,
+            set: { stats, generation: sql`${DbSchema.servers.generation} + 1`, heartbeatAt: now },
+          }),
       );
     });
 
@@ -53,7 +71,7 @@ export class ServerStore extends Context.Service<ServerStore>()("@oligarchy/db/S
       return Option.map(Arr.head(rows), (row) => row.serverUrl);
     });
 
-    return { addServer, removeServer, listServers, routeSession, serverForSession };
+    return { addServer, heartbeat, removeServer, listServers, routeSession, serverForSession };
   }),
 }) {
   static readonly layer = Layer.effect(this)(this.make);

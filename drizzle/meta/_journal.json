@@ -36,6 +36,13 @@
       "when": 1788879827279,
       "tag": "0005_reverse_proxy",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788973448681,
+      "tag": "0006_server_heartbeat",
+      "breakpoints": true
     }
   ]
 }
