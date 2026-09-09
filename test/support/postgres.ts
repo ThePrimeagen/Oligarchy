@@ -7,6 +7,7 @@ import * as Diagnosis from "../../src/db/diagnosis.ts";
 import * as Logs from "../../src/db/logs.ts";
 import * as Servers from "../../src/db/servers.ts";
 import * as Sessions from "../../src/db/sessions.ts";
+import * as Automation from "../../src/db/automation.ts";
 import * as Tests from "../../src/db/tests.ts";
 
 // The Testcontainers database started by vitest.global-setup.ts; "" when Docker is absent.
@@ -27,12 +28,14 @@ export const migratedLayer: Layer.Layer<
   | DebugLogs.DebugLogStore
   | Diagnosis.DiagnosisStore
   | Tests.TestStore
+  | Automation.AutomationStore
   | Servers.ServerStore
 > = Layer.mergeAll(
   Sessions.SessionStore.layer,
   DebugLogs.DebugLogStore.layer,
   Diagnosis.DiagnosisStore.layer,
   Tests.TestStore.layer,
+  Automation.AutomationStore.layer,
   Servers.ServerStore.layer,
 ).pipe(
   Layer.provideMerge(Actions.ActionStore.layer),

@@ -12,6 +12,7 @@ import * as Migrate from "../../src/db/migrate.ts";
 import * as DbSchema from "../../src/db/schema.ts";
 import * as Servers from "../../src/db/servers.ts";
 import * as Sessions from "../../src/db/sessions.ts";
+import * as Automation from "../../src/db/automation.ts";
 import * as Tests from "../../src/db/tests.ts";
 import * as Render from "../../src/observability/render.ts";
 import * as Errors from "../../src/shared/errors.ts";
@@ -992,6 +993,137 @@ Postgres.describeWithDatabase("database", () => {
         expect(results[0]?.reason).toBe("linear: request failed (401)");
         expect(results[0]?.model).toBeNull();
         expect(results[0]?.finishedAt?.getTime()).toBe(run?.endedAt?.getTime());
+      }),
+    );
+
+    scoped.effect("TestStore.setLinearId writes the identifier and finds the result by it", () =>
+      Effect.gen(function* () {
+        const tests = yield* Tests.TestStore;
+        const definition = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
+        const created = yield* tests.createRun({
+          iso: "https://example.com/omarchy.iso",
+          serverUrl: "http://127.0.0.1:42069",
+          definitions: [{ id: definition.id }],
+        });
+        const resultId = created.results[0].id;
+        yield* tests.setLinearId(resultId, "OLI-100");
+        expect(Option.getOrThrow(yield* tests.findResult(resultId)).linearId).toBe("OLI-100");
+        expect(Option.getOrThrow(yield* tests.findResultByLinearId("OLI-100")).id).toBe(resultId);
+        expect(Option.isNone(yield* tests.findResultByLinearId("OLI-missing"))).toBe(true);
+        const missing = yield* Effect.flip(tests.setLinearId(uuid(), "OLI-101"));
+        expect(missing._tag).toBe("DatabaseError");
+        expect(missing.operation).toBe("setLinearId");
+      }),
+    );
+
+    scoped.effect(
+      "TestStore.setLinearId refuses a second result with the same linear id (unhappy)",
+      () =>
+        Effect.gen(function* () {
+          const tests = yield* Tests.TestStore;
+          const definition = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
+          const first = yield* tests.createRun({
+            iso: "https://example.com/omarchy.iso",
+            serverUrl: "http://127.0.0.1:42069",
+            definitions: [{ id: definition.id }],
+          });
+          const second = yield* tests.createRun({
+            iso: "https://example.com/omarchy.iso",
+            serverUrl: "http://127.0.0.1:42069",
+            definitions: [{ id: definition.id }],
+          });
+          yield* tests.setLinearId(first.results[0].id, "OLI-200");
+          const error = yield* Effect.flip(tests.setLinearId(second.results[0].id, "OLI-200"));
+          expect(error._tag).toBe("DatabaseError");
+          expect(error.operation).toBe("setLinearId");
+          expect(String(error.cause)).toContain("duplicate key");
+        }),
+    );
+
+    scoped.effect("AutomationStore enqueues, claims oldest pending, and finishes", () =>
+      Effect.gen(function* () {
+        const tests = yield* Tests.TestStore;
+        const automation = yield* Automation.AutomationStore;
+        const definition = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
+        const first = yield* tests.createRun({
+          iso: "https://example.com/omarchy.iso",
+          serverUrl: "http://127.0.0.1:42069",
+          definitions: [{ id: definition.id }],
+        });
+        const second = yield* tests.createRun({
+          iso: "https://example.com/omarchy.iso",
+          serverUrl: "http://127.0.0.1:42069",
+          definitions: [{ id: definition.id }],
+        });
+        const older = yield* automation.enqueue({
+          resultId: first.results[0].id,
+          action: "drive",
+        });
+        const newer = yield* automation.enqueue({
+          resultId: second.results[0].id,
+          action: "drive",
+        });
+        // Stamp created_at explicitly: TestClock would freeze Effect.sleep, and equal now()
+        // stamps are not a reliable queue order.
+        const database = yield* Client.Database;
+        yield* database.run("backdateAutomationJob", (db) =>
+          db
+            .update(DbSchema.automationJobs)
+            .set({ createdAt: new Date("2026-01-01T00:00:00.000Z") })
+            .where(eq(DbSchema.automationJobs.id, older.id)),
+        );
+        yield* database.run("backdateAutomationJob", (db) =>
+          db
+            .update(DbSchema.automationJobs)
+            .set({ createdAt: new Date("2026-01-01T00:00:01.000Z") })
+            .where(eq(DbSchema.automationJobs.id, newer.id)),
+        );
+        const claimed = Option.getOrThrow(yield* automation.claimNext(Option.some("drive")));
+        expect(claimed.id).toBe(older.id);
+        expect(claimed.status).toBe("running");
+        expect(claimed.startedAt).toBeInstanceOf(Date);
+        const claimedNext = Option.getOrThrow(yield* automation.claimNext(Option.some("drive")));
+        expect(claimedNext.id).toBe(newer.id);
+        expect(yield* automation.finish(older.id, "succeeded", null)).toBe(true);
+        expect(Option.getOrThrow(yield* automation.find(older.id))).toMatchObject({
+          status: "succeeded",
+          reason: null,
+        });
+        expect(yield* automation.finish(newer.id, "failed", "guest hung")).toBe(true);
+        expect(Option.getOrThrow(yield* automation.find(newer.id))).toMatchObject({
+          status: "failed",
+          reason: "guest hung",
+        });
+        expect(yield* automation.finish(newer.id, "aborted", null)).toBe(false);
+        expect(yield* automation.listForResult(first.results[0].id)).toHaveLength(1);
+      }),
+    );
+
+    scoped.effect(
+      "AutomationStore refuses a second job for the same result and action (unhappy)",
+      () =>
+        Effect.gen(function* () {
+          const tests = yield* Tests.TestStore;
+          const automation = yield* Automation.AutomationStore;
+          const definition = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
+          const created = yield* tests.createRun({
+            iso: "https://example.com/omarchy.iso",
+            serverUrl: "http://127.0.0.1:42069",
+            definitions: [{ id: definition.id }],
+          });
+          const resultId = created.results[0].id;
+          yield* automation.enqueue({ resultId, action: "drive" });
+          const error = yield* Effect.flip(automation.enqueue({ resultId, action: "drive" }));
+          expect(error._tag).toBe("DatabaseError");
+          expect(error.operation).toBe("enqueueAutomationJob");
+          expect(String(error.cause)).toContain("duplicate key");
+        }),
+    );
+
+    scoped.effect("AutomationStore.claimNext returns none when the queue is empty (unhappy)", () =>
+      Effect.gen(function* () {
+        const automation = yield* Automation.AutomationStore;
+        expect(Option.isNone(yield* automation.claimNext(Option.some("diagnose")))).toBe(true);
       }),
     );
 

@@ -221,3 +221,21 @@ describe("QmpExchangeOutcome", () => {
     expect(is({ state: "failed", response: { return: {} } })).toBe(false);
   });
 });
+
+describe("AutomationAction / AutomationJobStatus", () => {
+  it("accepts the queue actions and statuses", () => {
+    const isAction = Schema.is(Domain.AutomationAction);
+    const isStatus = Schema.is(Domain.AutomationJobStatus);
+    expect(isAction("drive")).toBe(true);
+    expect(isAction("diagnose")).toBe(true);
+    expect(isStatus("pending")).toBe(true);
+    expect(isStatus("succeeded")).toBe(true);
+  });
+
+  it("rejects unknown actions and statuses (unhappy)", () => {
+    const isAction = Schema.is(Domain.AutomationAction);
+    const isStatus = Schema.is(Domain.AutomationJobStatus);
+    expect(isAction("retry")).toBe(false);
+    expect(isStatus("queued")).toBe(false);
+  });
+});

@@ -129,6 +129,24 @@ export const DiagnosisVerdict = Schema.Literals(["passed", "failed"]).annotate({
 });
 export type DiagnosisVerdict = typeof DiagnosisVerdict.Type;
 
+// What an automation job does for a test result: drive the guest, or diagnose the session.
+export const AutomationAction = Schema.Literals(["drive", "diagnose"]).annotate({
+  identifier: "@oligarchy/shared/domain/AutomationAction",
+});
+export type AutomationAction = typeof AutomationAction.Type;
+
+// The automation queue's own lifecycle. Same words as FollowStatus: pending until claimed,
+// running while a worker holds it, then a terminal outcome.
+export const AutomationJobStatus = Schema.Literals([
+  "pending",
+  "running",
+  "succeeded",
+  "failed",
+  "aborted",
+  "timed_out",
+]).annotate({ identifier: "@oligarchy/shared/domain/AutomationJobStatus" });
+export type AutomationJobStatus = typeof AutomationJobStatus.Type;
+
 // An ISO named by url is downloaded and cached by the proxy; anything else is a path.
 export const isIsoUrl = (iso: string): boolean =>
   iso.startsWith("http://") || iso.startsWith("https://");

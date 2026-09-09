@@ -6,6 +6,7 @@ import * as Logs from "../../src/db/logs.ts";
 import * as DbSchema from "../../src/db/schema.ts";
 import * as Servers from "../../src/db/servers.ts";
 import * as Sessions from "../../src/db/sessions.ts";
+import * as Automation from "../../src/db/automation.ts";
 import * as Tests from "../../src/db/tests.ts";
 import * as Errors from "../../src/shared/errors.ts";
 
@@ -399,6 +400,7 @@ export const fakeTestStore = (
             definitionId: definition.id,
             sessionId: null,
             model: null,
+            linearId: null,
             status: "pending",
             reason: null,
             createdAt: new Date(),
@@ -456,6 +458,36 @@ export const fakeTestStore = (
         row.finishedAt = new Date();
         return true;
       }),
+    setLinearId: (resultId, linearId) =>
+      Effect.gen(function* () {
+        const row = results.find((result) => sameId(result.id, resultId));
+        if (row === undefined) {
+          return yield* Effect.fail(
+            Errors.DatabaseError.make({
+              operation: "setLinearId",
+              message: `setLinearId: no result ${resultId}`,
+            }),
+          );
+        }
+        if (
+          results.some(
+            (other) =>
+              other.linearId !== null && other.linearId === linearId && !sameId(other.id, resultId),
+          )
+        ) {
+          return yield* Effect.fail(
+            conflict("setLinearId", 'update "test_results" set "linear_id"'),
+          );
+        }
+        row.linearId = linearId;
+        return yield* Effect.void;
+      }),
+    findResultByLinearId: (linearId) =>
+      Effect.sync(() =>
+        Option.fromUndefinedOr(
+          results.find((row) => row.linearId !== null && row.linearId === linearId),
+        ),
+      ),
     findResult: (resultId) =>
       Effect.sync(() => Option.fromUndefinedOr(results.find((row) => sameId(row.id, resultId)))),
     // Inner joins, as the real query: a result whose definition or run is missing is no row.
@@ -544,6 +576,93 @@ export const fakeServerStore = (
 };
 
 // Every store at once, sharing nothing: the common fixture for handler and command tests.
+
+// ---------------------------------------------------------------------------
+// AutomationStore
+// ---------------------------------------------------------------------------
+
+type AutomationJobRow = typeof DbSchema.automationJobs.$inferSelect;
+
+export type FakeAutomationStore = {
+  readonly jobs: Array<AutomationJobRow>;
+  readonly layer: Layer.Layer<Automation.AutomationStore>;
+};
+
+export const fakeAutomationStore = (
+  overrides: Partial<typeof Automation.AutomationStore.Service> = {},
+): FakeAutomationStore => {
+  const jobs: Array<AutomationJobRow> = [];
+  const service = Automation.AutomationStore.of({
+    enqueue: (input) =>
+      Effect.gen(function* () {
+        if (
+          jobs.some((job) => sameId(job.resultId, input.resultId) && job.action === input.action)
+        ) {
+          return yield* Effect.fail(
+            conflict("enqueueAutomationJob", 'insert into "automation_jobs"'),
+          );
+        }
+        const row: AutomationJobRow = {
+          id: crypto.randomUUID(),
+          resultId: input.resultId,
+          action: input.action,
+          status: "pending",
+          reason: null,
+          createdAt: new Date(),
+          startedAt: null,
+          finishedAt: null,
+        };
+        jobs.push(row);
+        return row;
+      }),
+    claimNext: (action) =>
+      Effect.sync(() => {
+        const pending = jobs
+          .filter(
+            (job) =>
+              job.status === "pending" &&
+              Option.match(action, {
+                onNone: () => true,
+                onSome: (wanted) => job.action === wanted,
+              }),
+          )
+          .sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime());
+        const row = pending[0];
+        if (row === undefined) {
+          return Option.none();
+        }
+        row.status = "running";
+        row.startedAt = new Date();
+        return Option.some(row);
+      }),
+    finish: (jobId, status, reason) =>
+      Effect.sync(() => {
+        const row = jobs.find(
+          (job) => sameId(job.id, jobId) && (job.status === "pending" || job.status === "running"),
+        );
+        if (row === undefined) {
+          return false;
+        }
+        row.status = status;
+        if (reason !== null) {
+          row.reason = reason;
+        }
+        row.finishedAt = new Date();
+        return true;
+      }),
+    find: (jobId) =>
+      Effect.sync(() => Option.fromUndefinedOr(jobs.find((job) => sameId(job.id, jobId)))),
+    listForResult: (resultId) =>
+      Effect.sync(() =>
+        jobs
+          .filter((job) => sameId(job.resultId, resultId))
+          .sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime()),
+      ),
+    ...overrides,
+  });
+  return { jobs, layer: Layer.succeed(Automation.AutomationStore)(service) };
+};
+
 export const fakeStores = () => {
   const sessions = fakeSessionStore();
   const actions = fakeActionStore();
