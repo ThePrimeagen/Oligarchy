@@ -230,7 +230,8 @@ describe("automation serving", () => {
       expect(await automate.json()).toEqual({ error: "not found" });
       expect(existsSync(record)).toBe(false);
 
-      const webhookBody = '{"action":"update","type":"Issue","data":{"identifier":"OLI-9"}}';
+      const webhookBody =
+        '{"action":"update","type":"Issue","data":{"identifier":"OLI-9","state":{"id":"st-1","name":"Automation Needed","type":"unstarted"}},"updatedFrom":{"state":{"name":"Todo"}}}';
       const unsigned = await request(
         port,
         "POST",
@@ -276,7 +277,7 @@ describe("automation serving", () => {
     expect(code, process.stdout()).toBe(0);
     const output = lines(process.stdout());
     expect(output).toContain("[global] error: POST /linear failed: unauthorized");
-    expect(output).toContain("[global] linear webhook recorded");
+    expect(output).toContain("[OLI-9] linear webhook recorded; Automation Needed");
     expect(output.some((line) => line.includes("/automate"))).toBe(false);
     expect(output.some((line) => line.includes("/start"))).toBe(false);
     expect(process.stderr()).toBe("");
