@@ -176,8 +176,8 @@ const stdout = Effect.map(TestConsole.logLines, (lines) => lines.map(String));
 const lastJson = Effect.map(stdout, (lines) => JSON.parse(lines.at(-1) ?? ""));
 
 // The text a command hands an agent, rendered from the checkout's own templates and guides.
-const rendered = (template: Prompts.Template, values: Prompts.Values) =>
-  Prompts.render(template, values).pipe(Effect.provide(NodeFileSystem.layer));
+const rendered = (values: Prompts.Values) =>
+  Prompts.renderLinearIssue(values).pipe(Effect.provide(NodeFileSystem.layer));
 
 // ---------------------------------------------------------------------------
 // test --list
@@ -466,7 +466,7 @@ describe("test new", () => {
 
         // Each ticket is the one template filled with that definition's values and its own ids.
         const descriptionOf = (definition: TestDefinitionRow, index: number, identifier: string) =>
-          rendered("linear-issue.html", {
+          rendered({
             LINEAR_TICKET: identifier,
             RUN_ID: run?.id ?? "",
             RESULT_ID: results[index]?.id ?? "",

@@ -344,7 +344,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
         tickets.push(ticket);
         // Linear assigns the identifier on create, and the body names it as the driver's agent
         // id, so the description can only be rendered once the ticket exists.
-        const description = yield* Prompts.render("linear-issue.html", {
+        const description = yield* Prompts.renderLinearIssue({
           LINEAR_TICKET: ticket.identifier,
           RUN_ID: experiment.id,
           RESULT_ID: test.id,
