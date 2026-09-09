@@ -34,16 +34,17 @@ based on the test definitions proof criteria.  Once you are done diagnosing, set
 
 <example-session>
 ```
-$ ./ctrl session --session-id {{SESSION_ID}} --all > session.json
+SESSION_ID=`./ctrl session --search --test-result-id {{RESULT_ID}}`
+$ ./ctrl session --all > session.json
 # read session.status, results, test_definition.proof; then walk logs and actions
-$ ./ctrl session --session-id {{SESSION_ID}} --images
+$ ./ctrl session --images
 $ ./session image --image-id <the id of the last image> -o last.png
 # look at it: is the proof on screen?
 $ ./session image --image-id <the id of the image after the step you suspect> -o suspect.png
 # look at it: what did the driver actually see there?
 $ ./ctrl error-type list
 # a type whose description matches the cause? use it. none at all? only then ./ctrl error-type new
-$ ./ctrl diagnose --session-id {{SESSION_ID}} --verdict failed --type guest_boot_hang --summary "Serial stops after 'Waiting for root device'; the last image is still the boot menu" --model <the Cursor model id you are running as>
+$ ./ctrl diagnose --verdict failed --type guest_boot_hang --summary "Serial stops after 'Waiting for root device'; the last image is still the boot menu" --model <the Cursor model id you are running as>
 ```
 </example-session>
 
