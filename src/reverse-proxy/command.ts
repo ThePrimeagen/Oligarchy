@@ -1,6 +1,7 @@
 import { Deferred, Effect, Layer } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import type { HttpServerError } from "effect/unstable/http";
+import * as Config from "../config.ts";
 import * as Client from "../db/client.ts";
 import * as ExternalFailure from "../external-failure.ts";
 import * as Log from "../observability/log.ts";
@@ -13,17 +14,29 @@ const DEFAULT_PORT = 42070;
 // browser has none to send.
 const DEFAULT_DIAGNOSTICS_PORT = 55445;
 
-// What main.ts hands the command: the two listeners as one layer for their ports, and the signal
-// a server error raises after listen.
+// What main.ts hands the command: the two listeners as one layer for their ports and the config
+// file's word on the agent program, and the signal a server error raises after listen. The layer
+// fails before listening when the program's own requirement is missing: Cursor's key, or opencode
+// on PATH.
 export type ReverseProxyServer<RServe> = {
   readonly serve: (
     port: number,
     diagnosticsPort: number,
-  ) => Layer.Layer<never, HttpServerError.ServeError, RServe>;
+    config: Config.ReverseProxyFile,
+  ) => Layer.Layer<
+    never,
+    HttpServerError.ServeError | Errors.MissingVariable | Errors.HostRequirementsMissing,
+    RServe
+  >;
   readonly serverFailed: Deferred.Deferred<never, HttpServerError.ServeError>;
 };
 
-type StartupError = Errors.DatabaseError | HttpServerError.ServeError;
+type StartupError =
+  | Errors.InvalidConfig
+  | Errors.DatabaseError
+  | Errors.MissingVariable
+  | Errors.HostRequirementsMissing
+  | HttpServerError.ServeError;
 
 // A ServeError says nothing itself; the bind or accept error it wraps does.
 const detail = (error: StartupError): string =>
@@ -43,12 +56,20 @@ export const makeReverseProxyCommand = <RServe>(server: ReverseProxyServer<RServ
           "Port of the diagnostics page: the servers, an add box, a delete button each",
         ),
       ),
+      config: Flag.string("config").pipe(
+        Flag.withDefault(Config.DEFAULT_REVERSE_PROXY_CONFIG),
+        Flag.withDescription(
+          `Config file naming the agent program, cursor or opencode; ${Config.DEFAULT_REVERSE_PROXY_CONFIG} in the working directory when omitted`,
+        ),
+      ),
     },
-    ({ port, diagnosticsPort }) =>
+    ({ port, diagnosticsPort, config: configPath }) =>
       Effect.gen(function* () {
         const log = yield* Log.Log;
         const database = yield* Client.Database;
         const startup = Effect.gen(function* () {
+          // Configuration first: the file is read before anything is reached for.
+          const config = yield* Config.readReverseProxyFile(configPath);
           // The routes are rows: fail at startup, not on the first request, without the database.
           yield* database.ping.pipe(
             Effect.mapError((error) =>
@@ -60,7 +81,7 @@ export const makeReverseProxyCommand = <RServe>(server: ReverseProxyServer<RServ
             ),
           );
           return yield* Effect.raceFirst(
-            Layer.launch(server.serve(port, diagnosticsPort)),
+            Layer.launch(server.serve(port, diagnosticsPort, config)),
             Deferred.await(server.serverFailed),
           );
         });
@@ -72,6 +93,6 @@ export const makeReverseProxyCommand = <RServe>(server: ReverseProxyServer<RServ
       }),
   ).pipe(
     Command.withDescription(
-      "The oligarchy reverse proxy: registers servers and routes each session's requests to the server that started it",
+      "The oligarchy reverse proxy: registers servers, routes each session's requests to the server that started it, and spawns the agents its config names",
     ),
   );

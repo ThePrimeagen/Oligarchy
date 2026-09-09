@@ -10,18 +10,18 @@ written out for operators here. A third party is named where it matters: the das
 
 | | The server (`./server`, `src/proxy/`) | The reverse proxy (`./reverse-proxy`, `src/reverse-proxy/`) |
 | --- | --- | --- |
-| One sentence | Boots and drives QEMU machines on one host | Sends each session's requests to the host that booted it, and spawns the agents that drive and review them |
-| Owns | The machines, the sessions map, the QMP sockets, the session directories | The fleet (`servers`) and the routing table (`session_servers`) |
-| Needs on its host | `qemu-system-x86_64`, `qemu-img`, OVMF, `/dev/kvm`, a display backend | Nothing but Node and a route to the database, the servers and Cursor's API |
-| Reads | `OLIGARCHY_TOKEN`, `DATABASE_URL` | The same two, through the same `ProxyConfig`, then `CURSOR_API_TOKEN` |
+| One sentence | Boots and drives QEMU machines on one host | Sends each session's requests to the host that booted it, and spawns the agents that drive and review them through the program its config names |
+| Owns | The machines, the sessions map, the QMP sockets, the session directories | The fleet (`servers`), the routing table (`session_servers`), and the local agent runs when the program is opencode |
+| Needs on its host | `qemu-system-x86_64`, `qemu-img`, OVMF, `/dev/kvm`, a display backend | Node and a route to the database and the servers; a route to Cursor's API, or `opencode` on PATH, as the config says |
+| Reads | `OLIGARCHY_TOKEN`, `DATABASE_URL` | The same two, through the same `ProxyConfig`; `.reverse-proxy.oligarchy.json` (or `--config`); `CURSOR_API_TOKEN` when the config says cursor |
 | Default ports | `42069` | `42070` for the API, `55445` for the diagnostics page |
 | Speaks to clients | `ProxyApi`: the 11 `Sessions` routes, `/stats` among them | The same `Sessions` routes minus `/stats`, plus `POST/DELETE/GET /servers` and `POST /agent` |
 | Speaks to operators | Nothing beyond the API | The diagnostics page: the fleet, an add box, a delete button each |
-| Speaks to | QEMU over QMP, the database | The servers over HTTP (their own `ProxyApi`), the database, Cursor's API through `@cursor/sdk` |
+| Speaks to | QEMU over QMP, the database | The servers over HTTP (their own `ProxyApi`), the database, and Cursor's API through `@cursor/sdk` or a local `opencode run` per agent |
 | Writes | `sessions`, `agent_runs`, `actions`, `images`, `debug_logs`, `logs` | `servers`, `session_servers`, `logs` |
 | Serves images | No: `GET /images/:id` is the catch-all's 404 | No: the same 404 |
-| Background work | The 10 s timeout sweep, the cpu sampler, the log drain | The log drain only |
-| At shutdown | Drains every session (`aborted`, `proxy shutdown`) | Nothing: the sessions are the servers' and the routes are rows |
+| Background work | The 10 s timeout sweep, the cpu sampler, the log drain | The log drain; under opencode, a watcher per agent run |
+| At shutdown | Drains every session (`aborted`, `proxy shutdown`) | Kills its opencode runs (they are its own children); the sessions are the servers' and the routes are rows |
 | Sentry spans | `QEMU session`, the intent, `QMP <cmd>` | None; only error lines report |
 
 ## Responsibilities
@@ -86,8 +86,9 @@ master and is not routed here either: an ended session's console is read from th
 
 ### The reverse proxy spawns the agents
 
-`POST /agent` is the one route where the reverse proxy does more than route: it starts the cloud
-agent that will drive or review a session. The body names the work and the worker:
+`POST /agent` is the one route where the reverse proxy does more than route: it starts the agent
+that will drive or review a session, through the program the reverse proxy was started with (the
+section after this one). The body names the work and the worker:
 
 - `task` — what the agent works on: the Linear ticket identifier for a `driving-agent`
   (`OLI-42`, which is also the agent id its session will carry), the session id for a
@@ -98,32 +99,75 @@ agent that will drive or review a session. The body names the work and the worke
   (`prompts/driving-agent.html` with the ticket, `prompts/diagnosing-agent.html` with the session
   and the reviewer's guide), the same texts `ctrl test run` and `ctrl diagnose run` send.
 - `model`, `reasoning`, `fast` — the model choice, in one vocabulary for every vendor: the model
-  as Cursor's catalog lists it, `reasoning` one of `none`, `low`, `medium`, `high`, `xhigh`,
-  `max`, and `fast` a boolean. No `model` means the default, `grok-4.6` at `high` running `fast`,
-  with `reasoning` and `fast` in the body still honoured (`{ "fast": false }` is `grok-4.6-high`).
-  A `model` given alone is asked for alone: Cursor's own defaults decide how hard it thinks and
+  as the program names it (Cursor's catalog id such as `grok-4.6`; `provider/model` such as
+  `anthropic/claude-opus-4` for opencode), `reasoning` one of `none`, `low`, `medium`, `high`,
+  `xhigh`, `max`, and `fast` a boolean. No `model` means the program's own default — `grok-4.6`
+  at `high` running `fast` for Cursor, `opencode/grok-code` for opencode — with `reasoning` and
+  `fast` in the body still honoured (`{ "fast": false }` is `grok-4.6-high` under Cursor). A
+  `model` given alone is asked for alone: the vendor's own defaults decide how hard it thinks and
   whether it runs fast.
 
-The choice is mapped onto Cursor's catalog (`Cursor.models.list()`) at spawn time, so what the
-vendor cannot do is refused here, with what the model does take, instead of by Cursor once the
+Under Cursor the choice is mapped onto its catalog (`Cursor.models.list()`) at spawn time, so what
+the vendor cannot do is refused here, with what the model does take, instead of by Cursor once the
 agent exists: 400 `unknown model "<id>"`, `model "<id>" has no reasoning level` (a model without
 the knob), `model "<id>" has no reasoning level "<level>"; it has low, medium, high, xhigh`, or
 `model "<id>" has no fast mode`. Each vendor spells the knob its own way — `effort`, `reasoning`,
 `reasoning_effort`, and `extra-high` where we say `xhigh` — and the mapping speaks the vendor's
-spelling. A Cursor failure (a bad key, a rate limit) is 502 with Cursor's message.
+spelling. Under opencode the choice becomes `opencode run --model <provider/model>` with the
+reasoning level as `--variant <level>`; a model without a provider is 400
+`model "<id>" must be provider/model`, and `fast` is 400 `model "<id>" has no fast mode`, opencode
+having none. A failure of the program itself (a bad Cursor key, a rate limit, an opencode run that
+exits or errors before it has a session) is 502 with the program's message.
 
 The agent is told its model as one label, `<model>-<reasoning>-fast` with each part present only
-when asked for (`grok-4.6-high-fast`, `composer-2.5`, `claude-opus-5-max`), because that label is
-what a driver records with `ctrl test start --model` and a reviewer with `ctrl diagnose --model`;
-the answer carries the same label so the caller knows what was written. The reverse proxy logs
-`agent spawned; <type>; <task>; <model>; <url>`, attributed to the ticket as agent id for a
-driver and to the session for a reviewer, and answers `{ "id": "bc-…", "url":
-"https://cursor.com/agents/bc-…", "model": "grok-4.6-high-fast" }` as soon as the agent exists; it
-never waits for it.
+when asked for (`grok-4.6-high-fast`, `composer-2.5`, `claude-opus-5-max`,
+`anthropic/claude-opus-4-high`), because that label is what a driver records with
+`ctrl test start --model` and a reviewer with `ctrl diagnose --model`; the answer carries the same
+label so the caller knows what was written. The reverse proxy logs
+`agent spawned; <type>; <task>; <model>; <where>`, attributed to the ticket as agent id for a
+driver and to the session for a reviewer, and answers as soon as the agent exists; it never waits
+for it. `<where>` and the answer are the program's: a Cursor agent has a page,
+`{ "id": "bc-…", "url": "https://cursor.com/agents/bc-…", "model": "grok-4.6-high-fast" }`; an
+opencode run has only its session, `{ "id": "ses_…", "model": "opencode/grok-code" }` with no
+`url`, and the line names the session.
 
-Cursor cloud agents are the one way of spawning today. The seam for another is the `CursorAgents`
-layer (`src/ctrl/cursor.ts`): `prompt(text, choice?)` is the whole interface, and `/agent` knows
-nothing of the SDK behind it.
+### The agent program, and the config that names it
+
+Which program spawns the agents is decided when the reverse proxy starts, not per request: the
+config file `.reverse-proxy.oligarchy.json` in the working directory, or the one `--config <path>`
+names, says `{ "agent-executable": "cursor" }` or `{ "agent-executable": "opencode" }`. The file
+committed at the package root says `opencode`. It is read right after the flags, before the
+database is pinged; a missing file is fatal, `reverse proxy: config <path> not found`, and a file
+that says anything else is fatal with the schema's word
+(`config <path>: Expected "cursor" | "opencode"`). The listen line ends with which one was chosen:
+`…; agents by opencode`.
+
+Both programs implement one interface, the `Agents` service (`src/shared/agents.ts`):
+`prompt(text, choice)` answers `{ agentId, url? }` once the agent exists, and `defaultModel` is the
+program's own default, which `/agent` labels the prompt with when no model is asked for. `/agent`
+knows nothing of what is behind it.
+
+- **cursor** (`src/ctrl/cursor.ts`, the layer `ctrl test run` and `ctrl diagnose run` use too):
+  one cloud agent per prompt through `@cursor/sdk`, on the repository, watched on cursor.com.
+  Needs `CURSOR_API_TOKEN`, read once the config has said cursor and reported as
+  `reverse proxy: CURSOR_API_TOKEN is not set` when absent.
+- **opencode** (`src/reverse-proxy/opencode.ts`): one local process per prompt,
+  `opencode run --format json --model <provider/model> [--variant <level>]`, run from the package
+  root (where `./client` and `./ctrl` are, as a cloud agent has them in its checkout) with the
+  reverse proxy's environment and the prompt on stdin (opencode reads it whole when stdin is not a
+  terminal; argv has a size limit and shows in `ps`). Needs `opencode` on PATH, checked when the
+  layer is built: `reverse proxy: missing host requirements:` / `opencode not on PATH` otherwise.
+  The run says its session in its first JSON event, and that event is the answer: a run that
+  exits first is 502 `opencode: exited <code> before its first event[: <stderr tail>]`, one whose
+  first event is an error is 502 `opencode: <opencode's message>` and is killed, and one that has
+  said nothing within 60 seconds is killed and 502 `opencode: no event within 60 seconds`. A line
+  on stdout that is not an event (a share link, a warning) is read past. Every run lives in the
+  reverse proxy's own scope, not the request's: it works on after `/agent` was answered, is
+  watched out — `agent finished; <session>` at exit 0, an error line
+  `agent failed; <session>; exited <code>[: <stderr tail>]` otherwise — and is killed (SIGTERM,
+  then SIGKILL after 5 seconds) when the reverse proxy stops. What the agent says is opencode's
+  record, in its session (`opencode --session <id>`, `opencode export <id>`), not the reverse
+  proxy's log.
 
 The same fleet is on the diagnostics page, `http://127.0.0.1:55445/` by default: an unstyled text
 page listing every registered server with its `qemus`, memory and cpu, or `did not answer`, a
@@ -155,8 +199,8 @@ The reverse proxy answers a request itself only when it cannot or should not for
 | 400 `<schema message>` | Body or query fails the contract (same schemas as the server) | same shape, no Sentry |
 | 400 `url must be an http or https url` | `POST/DELETE /servers` with a url that is not http(s) with a host | same shape, no Sentry |
 | 400 `task must be a session id for a diagnosing-agent` | `POST /agent` for a reviewer of something that is not a session | same shape, no Sentry |
-| 400 `unknown model "<id>"` / `model "<id>" has no reasoning level[ "<level>"; it has …]` / `model "<id>" has no fast mode` | `POST /agent` with a choice Cursor's catalog cannot honour | same shape, no Sentry, no agent started |
-| 502 `<Cursor's message>` | `POST /agent` when the Cursor SDK refuses or fails to start the agent | the SDK's error as the cause, reported |
+| 400 `unknown model "<id>"` / `model "<id>" has no reasoning level[ "<level>"; it has …]` / `model "<id>" has no fast mode` / `model "<id>" must be provider/model` | `POST /agent` with a choice the agent program cannot honour (Cursor's catalog, or opencode's `provider/model` and no fast mode) | same shape, no Sentry, no agent started |
+| 502 `<the program's message>` | `POST /agent` when the Cursor SDK refuses or fails to start the agent, or an opencode run exits, errors or says nothing before it has a session | the SDK's error or the platform failure as the cause when there is one, reported |
 | 404 `unknown session "<id>"` | The id is not a uuid or has no `session_servers` row | attributed to the id (when a uuid) and the agent |
 | 404 `not found` | `DELETE /servers` for a url never registered; any unrouted path (`/stats`, `/images/:id`, `/nope`) | the DELETE is logged; the catch-all is not |
 | 502 `server <url> unreachable: <cause>` | The server refused the connection, reset it, or did not answer a probe within 10 s | attributed, cause to Sentry |
@@ -349,23 +393,30 @@ errors; the switch ends in `satisfies never`, so a tag without an arm does not c
   or the routing table never learns of the machine the server booted. `follow` stays
   interruptible so an abandoned follower releases its upstream stream. The catch-all 404 is the
   proxy's `NotFoundRoute`, reused.
-- `command.ts` is `makeReverseProxyCommand({ serve, serverFailed })` with two flags, `--port`
-  (default 42070, one above the proxy so both run on a development host) and `--diagnostics-port`
-  (default 55445); `serve(port, diagnosticsPort)` is one layer holding both listeners. Its
-  startup is the
-  proxy's minus the host check: parse, `database.ping` (`database unreachable: <detail>`),
+- `command.ts` is `makeReverseProxyCommand({ serve, serverFailed })` with three flags, `--port`
+  (default 42070, one above the proxy so both run on a development host), `--diagnostics-port`
+  (default 55445) and `--config` (default `.reverse-proxy.oligarchy.json`);
+  `serve(port, diagnosticsPort, config)` is one layer holding both listeners and the agent
+  program the config names. Its startup is the proxy's with the config file for the host check:
+  parse, read the config (`config <path> not found`, or the schema's word), `database.ping`
+  (`database unreachable: <detail>`), then the program's own requirement inside the layer
+  (`CURSOR_API_TOKEN is not set`, or `missing host requirements:` / `opencode not on PATH`),
   listen; a failure is the fatal line `reverse proxy: <detail>` and exit 1. About ten lines are
   duplicated from the proxy's command rather than shared; a helper for two callers was judged
   premature by the document's philosophy and by review.
 - `main.ts` composes the graph as the proxy's does — `ServerStore` and `Log` over `LogStore`,
   `Database`, `ProxyConfig`, `SentryLive`, the config provider, the Node HTTP client and
   services — without `Qemu`, `Iso`, `Stats`, `Sessions` or a `Shutdown` reference, with the same
-  `TracerDisabledWhen` so no `http.server` span reaches Sentry. It creates two `node:http`
-  servers, each with its own `NodeHttpServer` layer provided privately to its consumer (the API
-  router, the diagnostics handler); an `error` on either completes the same `serverFailed`. The
-  listen line names both: `oligarchy reverse proxy listening on 127.0.0.1:<port>; diagnostics on
-  127.0.0.1:<diagnostics port>`. Its teardown exits 1 on any failure but an interrupt and 0
-  otherwise; it logs nothing at shutdown because nothing of its own is stopping.
+  `TracerDisabledWhen` so no `http.server` span reaches Sentry. The `Agents` layer is not in that
+  graph: it depends on the config file, known only once the flags are parsed, so `serve` builds it
+  (`AgentsLive(config)`: `Cursor.layer` over `CURSOR_API_TOKEN`, or `OpenCode.layer`) beneath the
+  routes. It creates two `node:http` servers, each with its own `NodeHttpServer` layer provided
+  privately to its consumer (the API router, the diagnostics handler); an `error` on either
+  completes the same `serverFailed`. The listen line names both and the program:
+  `oligarchy reverse proxy listening on 127.0.0.1:<port>; diagnostics on
+  127.0.0.1:<diagnostics port>; agents by <cursor|opencode>`. Its teardown exits 1 on any
+  failure but an interrupt and 0 otherwise; it logs nothing of its own at shutdown, though an
+  opencode run killed on the way down leaves its `agent failed; …; exited on a signal` line.
 - `./reverse-proxy` is the fifth root wrapper, with the same `--import` of
   `src/observability/instrument.ts` as `./server`; `npm run reverse-proxy` is the script.
 
@@ -450,24 +501,28 @@ goes. It stays a relay for everything else.
 
 - `Domain.Reasoning` (`none`, `low`, `medium`, `high`, `xhigh`, `max`) and `Domain.AgentType`
   (`driving-agent`, `diagnosing-agent`) are the two closed vocabularies; `Domain.ModelChoice`
-  `{ model, reasoning?, fast? }` is how a model is asked for everywhere, `Domain.DEFAULT_MODEL`
-  is `grok-4.6` high fast, and `Domain.modelLabel` builds the one string an agent records. They
-  live in `domain.ts` because `ctrl` and the reverse proxy both spawn.
+  `{ model, reasoning?, fast? }` is how a model is asked for everywhere, and `Domain.modelLabel`
+  builds the one string an agent records. They live in `domain.ts` because `ctrl` and the
+  reverse proxy both spawn. The default is each program's own (`Cursor.DEFAULT_MODEL`,
+  `OpenCode.DEFAULT_MODEL`), carried on the `Agents` service as `defaultModel`.
 - `Contract.AgentBody` and `Contract.AgentStarted` are the request and the answer;
   `Api.Agents` is a third group with the one endpoint, behind `BearerAuth` and the proxy's
   `ApiBoundary`. Why not `RouteBoundary`: it declares 502 `ServerFailed` and 503 `NoServer`,
   answers this route never gives, and the doc's rule is that an api must not advertise a status
   it never answers. The route's own refusals are declared on the endpoint, which a new endpoint
   can do.
-- `ModelUnavailable { message, model }`, status 400, is the catalog's refusal;
-  `CursorAgentFailed` gained a status, 502, and the `[ErrorReporter.ignore]` every API error
-  carries, so the boundary's line is the one report. Both have `{ "error" }` codecs and arms in
+- `ModelUnavailable { message, model }`, status 400, is the program's refusal of a choice;
+  `AgentFailed { message, retryable, cause? }` (once `CursorAgentFailed`), status 502, is the
+  program failing to start the agent, with the `[ErrorReporter.ignore]` every API error carries,
+  so the boundary's line is the one report. Both have `{ "error" }` codecs and arms in
   `apiErrorClasses` and the middleware's `attribution` (unattributed: the task is in the line).
+  `AgentStarted.url` is an optional key: absent for a program without a page.
+- `InvalidConfig { path, message, cause? }` is the config file's refusal, a startup failure only.
 
 ### `src/ctrl/cursor.ts`: one interface, the catalog as the judge
 
-`CursorAgents.prompt(text, choice = DEFAULT_MODEL)` replaced `prompt(text, ModelSelection?)`:
-the second argument is ours, not the SDK's. `select(choice, catalog)` is the pure mapping, a
+`prompt(text, choice)` on the `Agents` service replaced `prompt(text, ModelSelection?)`: the
+second argument is ours, not the SDK's. `select(choice, catalog)` is the pure mapping, a
 `Result`: find the model by id or alias, put the reasoning level on whichever of `effort`,
 `reasoning`, `reasoning_effort` the model has (taking `extra-high` for `xhigh` where that is the
 spelling), put `fast` on the `fast` switch, and refuse anything the model does not list. The
@@ -475,18 +530,19 @@ catalog is asked on every prompt (`Cursor.models.list()`, one GET the SDK also m
 pre-flight) rather than hard-coded: the vendor's list is the truth and changes without us. What
 is not asked for is not sent, so the vendor's default variant stands for it.
 
-### `src/reverse-proxy/agents.ts`, `handlers.ts`, `main.ts`
+### `src/reverse-proxy/agent.ts`, `handlers.ts`, `main.ts`
 
-- `Agents.spawn(body)` is a plain `Effect.fn`, not a service: it reaches `CursorAgents`, `Log`
-  and the `FileSystem` (the templates) with `yield*`, and the handler calls it. It refuses a
-  diagnosing task that is not a uuid, builds the choice, renders the type's template with the
-  label, prompts, logs and answers. A template that cannot be read is an `Internal` (500), as a
-  database failure is on the routing side.
+- `Agent.spawn(body)` is a plain `Effect.fn`, not a service: it reaches `Agents`, `Log` and the
+  `FileSystem` (the templates) with `yield*`, and the handler calls it. It refuses a diagnosing
+  task that is not a uuid, builds the choice from the body over the program's default, renders
+  the type's template with the label, prompts, logs and answers. A template that cannot be read
+  is an `Internal` (500), as a database failure is on the routing side.
 - The handler is uninterruptible, as the driving routes are: a client gone mid-create must not
   leave an agent created and never prompted, or prompted and answered to nobody.
-- `main.ts` builds `CursorLive` from `Config.cursorApiToken` above `ProxyConfig`, so a missing
-  `CURSOR_API_TOKEN` is reported after `OLIGARCHY_TOKEN` and `DATABASE_URL`, never before, and
-  the process refuses to start without it: the route would only fail later otherwise.
+- `main.ts` builds the `Agents` layer from the config inside `serve`, so the program's own
+  requirement (`CURSOR_API_TOKEN`, or `opencode` on PATH) is reported after `OLIGARCHY_TOKEN`,
+  `DATABASE_URL`, the config file and the ping, and the process refuses to start without it: the
+  route would only fail later otherwise.
 
 ### `ctrl`, the prompts, the default
 
@@ -499,18 +555,32 @@ is not asked for is not sent, so the vendor's default variant stands for it.
 
 ### Tests
 
-- `test/reverse-proxy/http.unit.test.ts` gained nine `/agent` cases over the real handler and
-  templates with a fake `CursorAgents`: the default and its label, a named model, `fast: false`
-  and `reasoning` on the default, a reviewer attributed to its session, a non-uuid reviewer task,
-  bodies the contract refuses, the catalog's 400, Cursor's 502, and an unreadable template's 500.
-  `/agent` joined the 401 sweep.
+- `test/reverse-proxy/http.unit.test.ts` runs ten `/agent` cases over the real handler and
+  templates with a fake `Agents` (`test/support/fake-agents.ts`): the default and its label, a
+  named model, `fast: false` and `reasoning` on the default, a program's own default and a start
+  without a page (no `url`, the session in the line), a reviewer attributed to its session, a
+  non-uuid reviewer task, bodies the contract refuses, the program's 400, its 502, and an
+  unreadable template's 500. `/agent` joined the 401 sweep.
+- `test/reverse-proxy/opencode.unit.test.ts` runs the opencode layer over a scripted spawner:
+  the PATH check, the argv for a choice and its refusals, the prompt on stdin from the package
+  root, the first event as the answer (a non-event line read past, an event in pieces), an exit
+  before it, an error event, the 60 s timeout, the finish and failure lines, and the kill when
+  the layer's scope closes. `test/config/config.unit.test.ts` reads the config file: the default
+  path, another path, a file not there, unreadable, not JSON, not an object, without the key,
+  naming another program. `test/reverse-proxy/command.unit.test.ts` pins `--config`, the config
+  read before the ping, and the program's requirement as a fatal line.
 - `test/ctrl/cursor.unit.test.ts` tests `select` against `test/support/cursor-catalog.ts`, six
   entries captured from `Cursor.models.list()` on 2026-09-09; `test/support/stub-cursor.ts` lists
   the same `grok-4.6` so the integration lanes see a catalog with knobs.
-- `test/integration/reverse-proxy.integration.test.ts` requires `CURSOR_API_TOKEN` at startup
-  and, when the database is there, POSTs `/agent` against the stub Cursor API through the real
-  SDK: the default model's params, the prompt, the label, the log line, and a level the stub's
-  `grok-4.6` refuses.
+- `test/integration/reverse-proxy.integration.test.ts` writes a config into each process's
+  working directory (cursor, unless the test says), pins the missing and the refused file, and,
+  when the database is there: a cursor config wanting `CURSOR_API_TOKEN`, an opencode config on a
+  PATH without opencode, `/agent` against the stub Cursor API through the real SDK (the default
+  model's params, the prompt, the label, the log line, a level the stub's `grok-4.6` refuses),
+  and `/agent` with the committed config and a stand-in `opencode` on PATH (a shell script that
+  records its pid, argv and stdin and says one event): the argv, the prompt on stdin, the session
+  as the answer with no `url`, `--variant`, the two 400s, and every run dead once the reverse
+  proxy exited on SIGINT.
 
 ## Deliberately not done
 
@@ -523,7 +593,12 @@ used":
   run. `ctrl diagnose run` keeps its checks.
 - `--reasoning` and `--fast` on `ctrl test run` and `ctrl diagnose run`. `--model` takes the id
   alone there, as before; the full choice is the route's.
-- A second spawning strategy. The `CursorAgents` layer is the seam; nothing else was asked for.
+- A model or knobs for opencode in the config file. The program is the config's; the model is
+  the request's, and the built-in default (`opencode/grok-code`) is a constant as Cursor's is.
+- Reading opencode's output into the log. Its session is its record; the reverse proxy keeps the
+  start, the finish and a failure's stderr tail.
+- Leaving opencode runs alive past the reverse proxy. They are its children and die with it, as
+  the proxy's machines do; a cloud agent needs nothing here to go on.
 - A `key` field in the `/agent` body. The key the caller must provide is the bearer every route
   of this process already requires; a second way to present it would be a second thing to check.
 - A shape for a driving task. A Linear identifier's form is Linear's (`OLI-42` today, another
@@ -559,8 +634,12 @@ used":
 # on each host that boots machines
 OLIGARCHY_TOKEN=… DATABASE_URL=… ./server --port 42069 --automation
 
-# in front of them, on any host that reaches them, the database and Cursor
-OLIGARCHY_TOKEN=… DATABASE_URL=… CURSOR_API_TOKEN=… ./reverse-proxy --port 42070 --diagnostics-port 55445
+# in front of them, on any host that reaches them and the database. The agent program is the
+# config file's word: .reverse-proxy.oligarchy.json in the working directory (the committed one
+# says opencode, which must be on PATH), or another file named with --config; cursor wants
+# CURSOR_API_TOKEN and a route to Cursor's API instead.
+OLIGARCHY_TOKEN=… DATABASE_URL=… ./reverse-proxy --port 42070 --diagnostics-port 55445
+OLIGARCHY_TOKEN=… DATABASE_URL=… CURSOR_API_TOKEN=… ./reverse-proxy --config cursor.json
 
 # register the hosts: on the page at http://127.0.0.1:55445/ (add box, delete buttons), or over
 # the API; either way the reverse proxy probes each one's /stats first
@@ -571,11 +650,12 @@ curl -H "authorization: Bearer $OLIGARCHY_TOKEN" http://127.0.0.1:42070/servers
 # clients point at the reverse proxy and change nothing else
 ./client start --server-url http://127.0.0.1:42070 --agent-id OLI-42 --iso https://…/omarchy.iso
 
-# spawn the agent that drives a ticket, on the default model or one named; the answer is its link
+# spawn the agent that drives a ticket, on the program's default model or one named as the
+# program names it; the answer is the agent's link (cursor) or its session (opencode)
 curl -H "authorization: Bearer $OLIGARCHY_TOKEN" -H 'content-type: application/json' \
   -d '{"task":"OLI-42","type":"driving-agent"}' http://127.0.0.1:42070/agent
 curl -H "authorization: Bearer $OLIGARCHY_TOKEN" -H 'content-type: application/json' \
-  -d '{"task":"<session uuid>","type":"diagnosing-agent","model":"claude-opus-5","reasoning":"max"}' \
+  -d '{"task":"<session uuid>","type":"diagnosing-agent","model":"anthropic/claude-opus-4","reasoning":"high"}' \
   http://127.0.0.1:42070/agent
 ```
 
@@ -583,5 +663,7 @@ The reverse proxy's stdout, like the server's, is the convenience copy; its rows
 Sentry reports are the record. The lines to know: `server registered; <url>`,
 `server removed; <url>`, `server skipped; <reason>` (a warning during placement),
 `routed; <url>` (attributed to the new session and its agent), `forward cut short; <reason>`,
-`agent spawned; <type>; <task>; <model>; <url>` (attributed to the ticket as agent, or to the
-session), and `<METHOD> <url> failed: <reason>` for every request it refused itself.
+`agent spawned; <type>; <task>; <model>; <where>` (attributed to the ticket as agent, or to the
+session; `<where>` the agent's page or its session), under opencode `agent finished; <session>`
+and `agent failed; <session>; exited <code>[: <stderr tail>]`, and `<METHOD> <url> failed:
+<reason>` for every request it refused itself.

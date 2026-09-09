@@ -6,10 +6,55 @@ import {
   FileSystem,
   Layer,
   Redacted,
+  Schema,
 } from "effect";
 import * as Errors from "./shared/errors.ts";
 
 export const DEFAULT_SERVER_URL = "http://127.0.0.1:42069";
+
+// The reverse proxy's config file, looked for in the working directory like `.env` unless
+// `--config` names another: which program spawns its agents. Cursor cloud agents through the SDK,
+// or a local opencode on the reverse proxy's own host.
+export const DEFAULT_REVERSE_PROXY_CONFIG = ".reverse-proxy.oligarchy.json";
+
+// Unannotated on purpose: the refusal an operator reads says `Expected "cursor" | "opencode"`,
+// which an identifier would replace with its own name.
+const AgentExecutable = Schema.Literals(["cursor", "opencode"]);
+export type AgentExecutable = typeof AgentExecutable.Type;
+
+export const ReverseProxyFile = Schema.Struct({ "agent-executable": AgentExecutable });
+export type ReverseProxyFile = typeof ReverseProxyFile.Type;
+const ReverseProxyFileJson = Schema.fromJsonString(Schema.toCodecJson(ReverseProxyFile));
+const decodeReverseProxyFile = Schema.decodeUnknownEffect(ReverseProxyFileJson);
+
+// A file that is not there is the usual mistake (the wrong working directory, no --config) and
+// gets its own sentence; any other failure keeps the platform's or the schema's word.
+export const readReverseProxyFile = Effect.fn("Config.readReverseProxyFile")(function* (
+  path: string,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const text = yield* fs.readFileString(path).pipe(
+    Effect.mapError((error) =>
+      Errors.InvalidConfig.make({
+        path,
+        message:
+          error.reason._tag === "NotFound"
+            ? `config ${path} not found`
+            : `config ${path}: ${error.message}`,
+        cause: error,
+      }),
+    ),
+  );
+  return yield* decodeReverseProxyFile(text).pipe(
+    Effect.mapError((error) =>
+      Errors.InvalidConfig.make({
+        path,
+        message: `config ${path}: ${error.message}`,
+        cause: error,
+      }),
+    ),
+  );
+});
 
 // The environment first, then `.env` in the working directory when it exists: an already-set
 // variable always wins over the file.

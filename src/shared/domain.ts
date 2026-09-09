@@ -149,8 +149,6 @@ export type ModelChoice = {
   readonly fast?: boolean;
 };
 
-export const DEFAULT_MODEL: ModelChoice = { model: "grok-4.6", reasoning: "high", fast: true };
-
 // The one string an agent is told it runs as and records (`ctrl test start --model`,
 // `ctrl diagnose --model`): the model, the reasoning, then `fast` when it runs fast.
 export const modelLabel = (choice: ModelChoice): string =>

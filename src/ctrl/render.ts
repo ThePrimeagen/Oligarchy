@@ -88,5 +88,6 @@ export const renderErrorTypes = (
   return rows.map((row) => `${row.key.padEnd(width)}  ${row.description}`);
 };
 
-export const agentLink = (url: string): string =>
-  `Agent here, go check it out for more information: ${url}`;
+// The agent's page when its program has one, else the id the program knows it by.
+export const agentLink = (where: string): string =>
+  `Agent here, go check it out for more information: ${where}`;

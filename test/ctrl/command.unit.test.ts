@@ -11,7 +11,7 @@ import * as Api from "../../src/shared/api.ts";
 import * as Contract from "../../src/shared/contract.ts";
 import * as Errors from "../../src/shared/errors.ts";
 import * as Config from "../support/config.ts";
-import * as FakeCursor from "../support/fake-cursor.ts";
+import * as FakeAgents from "../support/fake-agents.ts";
 import * as FakeFs from "../support/fake-fs.ts";
 import * as FakeHttp from "../support/fake-http.ts";
 import * as FakeLinear from "../support/fake-linear.ts";
@@ -104,7 +104,7 @@ const ago = (seconds: number): Date => new Date(NOW - seconds * 1000);
 const harness = (
   options: {
     readonly linear?: FakeLinear.FakeLinear;
-    readonly cursor?: FakeCursor.FakeCursor;
+    readonly cursor?: FakeAgents.FakeAgents;
     // Replaces the real FileSystem the prompt templates are read from.
     readonly fs?: Layer.Layer<FileSystem.FileSystem>;
   } = {},
@@ -112,7 +112,7 @@ const harness = (
   const stores = Stores.fakeStores();
   const log = FakeLog.fakeLog();
   const linear = options.linear ?? FakeLinear.fakeLinear();
-  const cursor = options.cursor ?? FakeCursor.fakeCursor();
+  const cursor = options.cursor ?? FakeAgents.fakeAgents();
   const touched: Array<string> = [];
   const command = CtrlCommand.makeCtrlCommand({
     database: () => {
@@ -142,6 +142,10 @@ const harness = (
     Effect.flip(program(args, env));
   return { stores, log, linear, cursor, touched, run, fail };
 };
+
+// The Cursor agents ctrl spawns: each answers its id and the page to watch it on.
+const cursorAgent = (agentId: string) =>
+  FakeAgents.fakeAgents({ started: FakeAgents.cursorStarted(agentId) });
 
 const DRIVING_AGENT_PATH = /\/prompts\/driving-agent\.html$/;
 const TEMPLATE = "Review Linear ticket {{LINEAR_TICKET}}\n";
@@ -853,7 +857,7 @@ const WITH_CURSOR = { ...WITH_DB, CURSOR_API_TOKEN: "cursor-token" };
 describe("test run", () => {
   it.effect("kicks off the driving agent with the ticket prompt and prints its link (happy)", () =>
     Effect.gen(function* () {
-      const h = harness({ cursor: FakeCursor.fakeCursor({ agentId: "bc-42" }) });
+      const h = harness({ cursor: cursorAgent("bc-42") });
       const exit = yield* h.run(["test", "run", "--ticket", "OLI-42"], WITH_CURSOR);
       expect(Exit.isSuccess(exit)).toBe(true);
       // Without --model the agent runs on the default, grok-4.6 at effort high running fast, and
@@ -879,7 +883,7 @@ describe("test run", () => {
 
   it.effect("--model runs the agent on that model alone and names it in the prompt (happy)", () =>
     Effect.gen(function* () {
-      const h = harness({ cursor: FakeCursor.fakeCursor({ agentId: "bc-43" }) });
+      const h = harness({ cursor: cursorAgent("bc-43") });
       const exit = yield* h.run(
         ["test", "run", "--ticket", "OLI-42", "--model", "composer-2.5"],
         WITH_CURSOR,
@@ -899,13 +903,32 @@ describe("test run", () => {
     }),
   );
 
+  // The default is the agent program's own; an agent without a page to link is told by its id.
+  it.effect("without --model the agents layer's default is what the driver is told (happy)", () =>
+    Effect.gen(function* () {
+      const h = harness({
+        cursor: FakeAgents.fakeAgents({
+          started: { agentId: "ses_7f3a2b1c" },
+          defaultModel: { model: "opencode/grok-code" },
+        }),
+      });
+      const exit = yield* h.run(["test", "run", "--ticket", "OLI-42"], WITH_CURSOR);
+      expect(Exit.isSuccess(exit)).toBe(true);
+      expect(h.cursor.calls.map((call) => call.choice)).toEqual([{ model: "opencode/grok-code" }]);
+      expect(h.cursor.calls[0]?.text).toContain("<model> opencode/grok-code </model>");
+      expect(yield* stdout).toEqual([
+        "Agent here, go check it out for more information: ses_7f3a2b1c",
+      ]);
+    }),
+  );
+
   it.effect("a model the catalog refuses fails with the refusal and prints no link (unhappy)", () =>
     Effect.gen(function* () {
       const refusal = Errors.ModelUnavailable.make({
         message: 'unknown model "grok-9"',
         model: "grok-9",
       });
-      const h = harness({ cursor: FakeCursor.fakeCursor({ failure: refusal }) });
+      const h = harness({ cursor: FakeAgents.fakeAgents({ failure: refusal }) });
       expect(
         yield* h.fail(["test", "run", "--ticket", "OLI-42", "--model", "grok-9"], WITH_CURSOR),
       ).toBe(refusal);
@@ -915,7 +938,7 @@ describe("test run", () => {
 
   it.effect("an empty --model is refused before any agent starts (unhappy)", () =>
     Effect.gen(function* () {
-      const h = harness({ cursor: FakeCursor.fakeCursor({ agentId: "bc-44" }) });
+      const h = harness({ cursor: cursorAgent("bc-44") });
       const exit = yield* h.run(["test", "run", "--ticket", "OLI-42", "--model", ""], WITH_CURSOR);
       expect(Exit.isFailure(exit)).toBe(true);
       expect(h.cursor.calls).toEqual([]);
@@ -929,7 +952,7 @@ describe("test run", () => {
     () =>
       Effect.gen(function* () {
         const fs = promptFs(/\/client\.md$/);
-        const h = harness({ cursor: FakeCursor.fakeCursor({ agentId: "bc-42" }), fs: fs.layer });
+        const h = harness({ cursor: cursorAgent("bc-42"), fs: fs.layer });
         const exit = yield* h.run(["test", "run", "--ticket", "OLI-42"], WITH_CURSOR);
         expect(Exit.isSuccess(exit)).toBe(true);
         expect(fs.reads).toHaveLength(1);
@@ -946,7 +969,7 @@ describe("test run", () => {
   it.effect("fails naming the kickoff template when it is unreadable (unhappy)", () =>
     Effect.gen(function* () {
       const fs = promptFs(DRIVING_AGENT_PATH);
-      const h = harness({ cursor: FakeCursor.fakeCursor({ agentId: "bc-42" }), fs: fs.layer });
+      const h = harness({ cursor: cursorAgent("bc-42"), fs: fs.layer });
       const exit = yield* h.run(["test", "run", "--ticket", "OLI-42"], WITH_CURSOR);
       expect(failure(exit)).toMatchObject({
         _tag: "PromptError",
@@ -999,12 +1022,12 @@ describe("test run", () => {
 
   it.effect("surfaces the SDK's refusal and prints nothing (unhappy)", () =>
     Effect.gen(function* () {
-      const refused = Errors.CursorAgentFailed.make({
+      const refused = Errors.AgentFailed.make({
         message: "Invalid API key",
         retryable: false,
         cause: new Error("Invalid API key"),
       });
-      const h = harness({ cursor: FakeCursor.fakeCursor({ failure: refused }) });
+      const h = harness({ cursor: FakeAgents.fakeAgents({ failure: refused }) });
       const exit = yield* h.run(["test", "run", "--ticket", "OLI-42"], WITH_CURSOR);
       expect(failure(exit)).toBe(refused);
       expect(yield* stdout).toEqual([]);
@@ -1920,7 +1943,7 @@ describe("diagnose run", () => {
     "kicks off the reviewer with the session, the default model and the diagnosis guide, and prints its link (happy)",
     () =>
       Effect.gen(function* () {
-        const h = harness({ cursor: FakeCursor.fakeCursor({ agentId: "bc-42" }) });
+        const h = harness({ cursor: cursorAgent("bc-42") });
         h.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
         const exit = yield* h.run(DIAGNOSE_RUN, WITH_CURSOR);
         expect(Exit.isSuccess(exit)).toBe(true);
@@ -1950,6 +1973,29 @@ describe("diagnose run", () => {
       }),
   );
 
+  it.effect(
+    "without --model the reviewer runs on the agents layer's default, told by id (happy)",
+    () =>
+      Effect.gen(function* () {
+        const h = harness({
+          cursor: FakeAgents.fakeAgents({
+            started: { agentId: "ses_7f3a2b1c" },
+            defaultModel: { model: "opencode/grok-code" },
+          }),
+        });
+        h.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
+        const exit = yield* h.run(DIAGNOSE_RUN, WITH_CURSOR);
+        expect(Exit.isSuccess(exit)).toBe(true);
+        expect(h.cursor.calls.map((call) => call.choice)).toEqual([
+          { model: "opencode/grok-code" },
+        ]);
+        expect(h.cursor.calls[0]?.text).toContain("--model opencode/grok-code");
+        expect(yield* stdout).toEqual([
+          "Agent here, go check it out for more information: ses_7f3a2b1c",
+        ]);
+      }),
+  );
+
   it.effect("reviews a succeeded session too, and ignores SERVER_URL (happy)", () =>
     Effect.gen(function* () {
       const h = harness();
@@ -1966,7 +2012,7 @@ describe("diagnose run", () => {
     "--model runs the reviewer on that model alone and names it in the prompt (happy)",
     () =>
       Effect.gen(function* () {
-        const h = harness({ cursor: FakeCursor.fakeCursor({ agentId: "bc-43" }) });
+        const h = harness({ cursor: cursorAgent("bc-43") });
         h.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
         const exit = yield* h.run([...DIAGNOSE_RUN, "--model", "claude-opus-5"], WITH_CURSOR);
         expect(Exit.isSuccess(exit)).toBe(true);
@@ -2085,12 +2131,12 @@ describe("diagnose run", () => {
 
   it.effect("surfaces the SDK's refusal and prints nothing (unhappy)", () =>
     Effect.gen(function* () {
-      const refused = Errors.CursorAgentFailed.make({
+      const refused = Errors.AgentFailed.make({
         message: "Invalid API key",
         retryable: false,
         cause: new Error("Invalid API key"),
       });
-      const h = harness({ cursor: FakeCursor.fakeCursor({ failure: refused }) });
+      const h = harness({ cursor: FakeAgents.fakeAgents({ failure: refused }) });
       h.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
       expect(yield* h.fail(DIAGNOSE_RUN, WITH_CURSOR)).toBe(refused);
       expect(yield* stdout).toEqual([]);
@@ -2688,7 +2734,7 @@ describe("--server-url", () => {
 
   it.effect("SERVER_URL in the environment is ignored by every action but test new (happy)", () =>
     Effect.gen(function* () {
-      const h = harness({ cursor: FakeCursor.fakeCursor({ agentId: "bc-42" }) });
+      const h = harness({ cursor: cursorAgent("bc-42") });
       h.stores.tests.definitions.push(install);
       h.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
       h.stores.sessions.agentRuns.push({

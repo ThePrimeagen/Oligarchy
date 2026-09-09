@@ -116,9 +116,9 @@ const cases: ReadonlyArray<WireCase> = [
     status: 400,
   },
   {
-    name: "CursorAgentFailed",
-    wire: Errors.CursorAgentFailedWire,
-    error: Errors.CursorAgentFailed.make({
+    name: "AgentFailed",
+    wire: Errors.AgentFailedWire,
+    error: Errors.AgentFailed.make({
       message: "Invalid API key",
       retryable: false,
       cause: new Error("Invalid API key"),
@@ -255,9 +255,15 @@ describe("domain error messages", () => {
     expect(Errors.ProxyRefusal.make({ status: 409, message: "x" })._tag).toBe("ProxyRefusal");
     expect(Errors.ProxyUnreachable.make({ message: "x", cause: 1 })._tag).toBe("ProxyUnreachable");
     expect(Errors.LinearError.make({ operation: "team", message: "x" })._tag).toBe("LinearError");
-    expect(Errors.CursorAgentFailed.make({ message: "x", retryable: false, cause: 1 })._tag).toBe(
-      "CursorAgentFailed",
+    expect(Errors.AgentFailed.make({ message: "x", retryable: false, cause: 1 })._tag).toBe(
+      "AgentFailed",
     );
+    expect(Errors.AgentFailed.make({ message: "opencode: exited 1", retryable: false })._tag).toBe(
+      "AgentFailed",
+    );
+    expect(
+      Errors.InvalidConfig.make({ path: "rp.json", message: "config rp.json not found" }),
+    ).toMatchObject({ _tag: "InvalidConfig", message: "config rp.json not found" });
     expect(Errors.PngDecodeError.make({ message: "x" })._tag).toBe("PngDecodeError");
     expect(Errors.LogLine.make({ text: "x", level: "error" })._tag).toBe("LogLine");
   });

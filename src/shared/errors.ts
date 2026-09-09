@@ -157,16 +157,18 @@ export class ModelUnavailable extends Schema.TaggedError<ModelUnavailable>(
   override readonly [ErrorReporter.ignore] = true;
 }
 
-// The Cursor SDK refused or failed to start an agent; 502 because Cursor is the upstream that
-// failed the request.
-export class CursorAgentFailed extends Schema.TaggedError<CursorAgentFailed>(
-  "@oligarchy/shared/errors/CursorAgentFailed",
+// The agent program refused or failed to start an agent: the Cursor SDK said no, or a local
+// opencode exited or erred before it had a session. 502 because the program is the upstream that
+// failed the request; `retryable` is the SDK's word when it has one, and a thrown value or a
+// platform failure is the cause when there was one.
+export class AgentFailed extends Schema.TaggedError<AgentFailed>(
+  "@oligarchy/shared/errors/AgentFailed",
 )(
-  "CursorAgentFailed",
+  "AgentFailed",
   {
     message: Schema.String,
     retryable: Schema.Boolean,
-    cause: Schema.Defect(),
+    cause: Schema.optionalKey(Schema.Defect()),
   },
   { httpApiStatus: 502 },
 ) {
@@ -186,7 +188,7 @@ export type ApiError =
   | ServerFailed
   | NoServer
   | ModelUnavailable
-  | CursorAgentFailed;
+  | AgentFailed;
 
 const resolveHttpApiStatus = SchemaAST.resolveAt("httpApiStatus");
 
@@ -210,7 +212,7 @@ const apiErrorClasses = {
   ServerFailed,
   NoServer,
   ModelUnavailable,
-  CursorAgentFailed,
+  AgentFailed,
 } satisfies Record<ApiError["_tag"], Schema.Top>;
 
 export const apiStatus = (error: ApiError): number => httpStatus(apiErrorClasses[error._tag]);
@@ -282,10 +284,10 @@ export const ModelUnavailableWire = wireError(
   ModelUnavailable,
   (message) => ({ _tag: "ModelUnavailable", message, model: "" }) as const,
 );
-// A decoded refusal has no SDK error to carry and nothing says it can be retried.
-export const CursorAgentFailedWire = wireError(
-  CursorAgentFailed,
-  (message) => ({ _tag: "CursorAgentFailed", message, retryable: false, cause: null }) as const,
+// A decoded refusal has no cause to carry and nothing says it can be retried.
+export const AgentFailedWire = wireError(
+  AgentFailed,
+  (message) => ({ _tag: "AgentFailed", message, retryable: false }) as const,
 );
 
 // ---------------------------------------------------------------------------
@@ -303,6 +305,16 @@ export class MissingVariable extends Schema.TaggedError<MissingVariable>(
 export class CommandError extends Schema.TaggedError<CommandError>(
   "@oligarchy/shared/errors/CommandError",
 )("CommandError", { message: Schema.String }) {}
+
+// A process's config file (the reverse proxy's `.reverse-proxy.oligarchy.json`) that is not there,
+// cannot be read, or does not say what the schema asks; the message names the path.
+export class InvalidConfig extends Schema.TaggedError<InvalidConfig>(
+  "@oligarchy/shared/errors/InvalidConfig",
+)("InvalidConfig", {
+  path: Schema.String,
+  message: Schema.String,
+  cause: Schema.optionalKey(Schema.Defect()),
+}) {}
 
 export class DatabaseError extends Schema.TaggedError<DatabaseError>(
   "@oligarchy/shared/errors/DatabaseError",

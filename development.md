@@ -70,7 +70,8 @@ Durable preferences from the maintainer; when they conflict with generic best pr
 
 - The root holds `AGENTS.md`, the executable wrappers (`./client`, `./client-with-image`,
   `./ctrl`, `./server`, `./reverse-proxy`, `./session`), the tooling files, `drizzle/` (migrations), `public/` and
-  `prompts/`, the operator documents, this document, `src/` and `test/`.
+  `prompts/`, the reverse proxy's default config (`.reverse-proxy.oligarchy.json`), the operator
+  documents, this document, `src/` and `test/`.
 - `src/` is one directory per process plus the shared kernel (`src/shared/`, `src/config.ts`,
   `src/external-failure.ts`, `src/observability/`, `src/db/`); `main.ts` files are the entries.
 - `src/dashboard/` is a Hono Worker, not Effect: it has no Effect runtime, reaches Postgres
@@ -376,6 +377,14 @@ export const decodeFollowLine = (line: string): Effect.Effect<FollowEvent, Schem
   always the same one.
 - Configuration is either a hardcoded constant or a required value, never a silent optional; CLI
   knobs (`isTTY`, `FORCE_COLOR`, `TERM`, `execPath`) are read in `main.ts` and `render.ts` only.
+- A choice made once per process and not per request (the reverse proxy's agent program) is a
+  config file, not a variable: its schema and reader live in `src/config.ts`
+  (`ReverseProxyFile`, `readReverseProxyFile`), its default path is a constant the `--config`
+  flag falls back to, and it is read in the command handler right after the flags, before any
+  host check or ping. A file that is not there is `InvalidConfig` with `config <path> not
+  found`; anything else keeps the platform's or the schema's message. A layer that depends on
+  what the file says is built inside `serve`, not in `MainLive`, which is built before the flags
+  are parsed.
 
 `src/config.ts` (an excerpt): the provider chain, one accessor family and a process's pair.
 
@@ -621,6 +630,11 @@ export const ApiBoundaryLive: Layer.Layer<Api.ApiBoundary, never, Log.Log> = Lay
   through a `Deferred<number | null>` (`null` for a signal death); join the drain fiber before
   reading the tail after exit, so the failure carries the whole tail. Readiness is a bounded wait
   (`Effect.timeoutOrElse`); a dead child is noticed by the next command failing, not by a watcher.
+  A child nothing will speak to again (an opencode agent run, answered from its first line and
+  then left to work) is the exception: it is spawned into a scope forked from the owning layer's,
+  so it outlives the request and dies with the process, and one fiber in the layer's scope awaits
+  its exit, logs it and closes that scope, or the run's end would go unrecorded and its
+  finalizers uncollected.
 - Register the finalizer that must run last first: a directory's removal is added before anything
   created inside it, so the child is dead and its socket closed before the directory goes.
 - File I/O goes through `FileSystem.FileSystem` and `Path.Path` from `NodeServices.layer`; write

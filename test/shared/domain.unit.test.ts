@@ -122,8 +122,11 @@ describe("model choice", () => {
 
   // The label is what a driver records with `ctrl test start --model` and a reviewer with
   // `ctrl diagnose --model`: the model, then the reasoning, then `fast` when it runs fast.
-  it("labels the default grok-4.6-high-fast", () => {
-    expect(Domain.modelLabel(Domain.DEFAULT_MODEL)).toBe("grok-4.6-high-fast");
+  it("labels Cursor's default grok-4.6-high-fast and a provider/model as opencode names it", () => {
+    expect(Domain.modelLabel({ model: "grok-4.6", reasoning: "high", fast: true })).toBe(
+      "grok-4.6-high-fast",
+    );
+    expect(Domain.modelLabel({ model: "opencode/grok-code" })).toBe("opencode/grok-code");
   });
 
   it("labels a model by what was asked of it: id alone, with reasoning, with fast", () => {

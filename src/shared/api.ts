@@ -165,7 +165,7 @@ export class Servers extends HttpApiGroup.make("Servers")
 export const spawn = HttpApiEndpoint.post("spawn", "/agent", {
   payload: Contract.AgentBody,
   success: Contract.AgentStarted,
-  error: [Errors.ModelUnavailableWire, Errors.CursorAgentFailedWire],
+  error: [Errors.ModelUnavailableWire, Errors.AgentFailedWire],
 });
 
 export class Agents extends HttpApiGroup.make("Agents")

@@ -18,7 +18,7 @@ import * as Router from "../../src/reverse-proxy/router.ts";
 import * as Api from "../../src/shared/api.ts";
 import * as Contract from "../../src/shared/contract.ts";
 import * as Errors from "../../src/shared/errors.ts";
-import * as FakeCursor from "../support/fake-cursor.ts";
+import * as FakeAgents from "../support/fake-agents.ts";
 import * as FakeFs from "../support/fake-fs.ts";
 import * as FakeHttp from "../support/fake-http.ts";
 import * as FakeLog from "../support/log.ts";
@@ -74,7 +74,7 @@ type Fixture = {
   readonly upstream: FakeHttp.Recorder;
   readonly log: FakeLog.FakeLog;
   readonly reporter: Reporter.Collector;
-  readonly cursor: FakeCursor.FakeCursor;
+  readonly agents: FakeAgents.FakeAgents;
   // The prompt templates are read from beside the package: the real files unless a test says.
   readonly fs: Layer.Layer<FileSystem.FileSystem>;
 };
@@ -84,7 +84,7 @@ const fixture = (respond: FakeHttp.Respond = fleet, overrides: Partial<Fixture> 
   upstream: FakeHttp.recordRequests(respond),
   log: FakeLog.fakeLog(),
   reporter: Reporter.collect(),
-  cursor: FakeCursor.fakeCursor({ agentId: "bc-42" }),
+  agents: FakeAgents.fakeAgents({ started: FakeAgents.cursorStarted("bc-42") }),
   fs: NodeFileSystem.layer,
   ...overrides,
 });
@@ -100,7 +100,7 @@ const serve = (fixed: Fixture) =>
         ),
       ),
     ),
-    Layer.provide(Layer.mergeAll(fixed.log.layer, ProxyConfigLive, fixed.cursor.layer, fixed.fs)),
+    Layer.provide(Layer.mergeAll(fixed.log.layer, ProxyConfigLive, fixed.agents.layer, fixed.fs)),
     Layer.provideMerge(NodeHttpServer.layerTest),
     Layer.provideMerge(fixed.reporter.layer),
     Layer.provideMerge(bearer(TOKEN)),
@@ -1136,7 +1136,7 @@ describe("agent spawning", () => {
             model: "grok-4.6-high-fast",
           });
         }).pipe(Effect.provide(serve(fixed)));
-        expect(fixed.cursor.calls).toEqual([
+        expect(fixed.agents.calls).toEqual([
           {
             text: yield* rendered("driving-agent.html", {
               LINEAR_TICKET: TICKET,
@@ -1145,7 +1145,7 @@ describe("agent spawning", () => {
             choice: { model: "grok-4.6", reasoning: "high", fast: true },
           },
         ]);
-        const text = fixed.cursor.calls[0]?.text ?? "";
+        const text = fixed.agents.calls[0]?.text ?? "";
         expect(text).toMatch(/Review Linear ticket\s+OLI-42/);
         expect(text).toContain("<model> grok-4.6-high-fast </model>");
         expect(text).toContain("--model grok-4.6-high-fast");
@@ -1175,13 +1175,55 @@ describe("agent spawning", () => {
         });
         expect(started.model).toBe("composer-2.5");
       }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.cursor.calls).toHaveLength(1);
-      expect(fixed.cursor.calls[0]?.choice).toEqual({ model: "composer-2.5" });
-      expect(fixed.cursor.calls[0]?.text).toContain("<model> composer-2.5 </model>");
+      expect(fixed.agents.calls).toHaveLength(1);
+      expect(fixed.agents.calls[0]?.choice).toEqual({ model: "composer-2.5" });
+      expect(fixed.agents.calls[0]?.text).toContain("<model> composer-2.5 </model>");
       expect(fixed.log.lines.map((line) => line.text)).toEqual([
         `agent spawned; driving-agent; ${TICKET}; composer-2.5; ${AGENT_URL}`,
       ]);
     }),
+  );
+
+  // The agent program is chosen at startup; its default is what "no model" means, and its answer
+  // is what the caller gets: a local program has no page to link.
+  it.effect(
+    "no model means the agent program's default, and a program without a page answers without a url",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture(fleet, {
+          agents: FakeAgents.fakeAgents({
+            started: { agentId: "ses_7f3a2b1c" },
+            defaultModel: { model: "opencode/grok-code" },
+          }),
+        });
+        yield* Effect.gen(function* () {
+          const api = yield* reverseClient;
+          const [started, response] = yield* api.Agents.spawn({
+            payload: spawnBody({ task: TICKET, type: "driving-agent" }),
+            responseMode: "decoded-and-response",
+          });
+          expect(started).toEqual(
+            Contract.AgentStarted.make({ id: "ses_7f3a2b1c", model: "opencode/grok-code" }),
+          );
+          expect(yield* response.json).toEqual({ id: "ses_7f3a2b1c", model: "opencode/grok-code" });
+          const harder = yield* api.Agents.spawn({
+            payload: spawnBody({ task: TICKET, type: "driving-agent", reasoning: "high" }),
+          });
+          expect(harder.model).toBe("opencode/grok-code-high");
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.agents.calls.map((call) => call.choice)).toEqual([
+          { model: "opencode/grok-code" },
+          { model: "opencode/grok-code", reasoning: "high" },
+        ]);
+        expect(fixed.agents.calls[0]?.text).toContain("<model> opencode/grok-code </model>");
+        expect(fixed.log.lines.map((line) => [line.text, line.agentId])).toEqual([
+          [`agent spawned; driving-agent; ${TICKET}; opencode/grok-code; ses_7f3a2b1c`, TICKET],
+          [
+            `agent spawned; driving-agent; ${TICKET}; opencode/grok-code-high; ses_7f3a2b1c`,
+            TICKET,
+          ],
+        ]);
+      }),
   );
 
   it.effect("reasoning and fast in the body are kept, on a named model and on the default", () =>
@@ -1208,7 +1250,7 @@ describe("agent spawning", () => {
         });
         expect(named.model).toBe("gpt-5.6-sol-max-fast");
       }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.cursor.calls.map((call) => call.choice)).toEqual([
+      expect(fixed.agents.calls.map((call) => call.choice)).toEqual([
         { model: "grok-4.6", reasoning: "high", fast: false },
         { model: "grok-4.6", reasoning: "xhigh", fast: true },
         { model: "gpt-5.6-sol", reasoning: "max", fast: true },
@@ -1235,7 +1277,7 @@ describe("agent spawning", () => {
             Contract.AgentStarted.make({ id: "bc-42", url: AGENT_URL, model: "claude-opus-5-max" }),
           );
         }).pipe(Effect.provide(serve(fixed)));
-        expect(fixed.cursor.calls).toEqual([
+        expect(fixed.agents.calls).toEqual([
           {
             text: yield* rendered("diagnosing-agent.html", {
               SESSION_ID,
@@ -1244,7 +1286,7 @@ describe("agent spawning", () => {
             choice: { model: "claude-opus-5", reasoning: "max" },
           },
         ]);
-        const text = fixed.cursor.calls[0]?.text ?? "";
+        const text = fixed.agents.calls[0]?.text ?? "";
         expect(text).toContain(`<session_id>${SESSION_ID}</session_id>`);
         expect(text).toContain("--model claude-opus-5-max");
         expect(text).toContain("## diagnose");
@@ -1283,7 +1325,7 @@ describe("agent spawning", () => {
             error: "task must be a session id for a diagnosing-agent",
           });
         }).pipe(Effect.provide(serve(fixed)));
-        expect(fixed.cursor.calls).toEqual([]);
+        expect(fixed.agents.calls).toEqual([]);
         expect(fixed.log.lines).toEqual([
           {
             level: "error",
@@ -1326,7 +1368,7 @@ describe("agent spawning", () => {
           expect(yield* raw.json).toMatchObject({ error: expect.stringContaining(path) });
         }
       }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.cursor.calls).toEqual([]);
+      expect(fixed.agents.calls).toEqual([]);
       expect(fixed.log.lines).toHaveLength(6);
       expect(fixed.log.lines.every((line) => line.skipSentry)).toBe(true);
     }),
@@ -1338,7 +1380,7 @@ describe("agent spawning", () => {
         message: 'model "composer-2.5" has no reasoning level',
         model: "composer-2.5",
       });
-      const fixed = fixture(fleet, { cursor: FakeCursor.fakeCursor({ failure: refusal }) });
+      const fixed = fixture(fleet, { agents: FakeAgents.fakeAgents({ failure: refusal }) });
       yield* Effect.gen(function* () {
         const api = yield* reverseClient;
         const error = yield* Effect.flip(
@@ -1366,7 +1408,7 @@ describe("agent spawning", () => {
         expect(yield* raw.json).toEqual({ error: 'model "composer-2.5" has no reasoning level' });
       }).pipe(Effect.provide(serve(fixed)));
       // The prompt was rendered and the choice made; the catalog said no.
-      expect(fixed.cursor.calls.map((call) => call.choice)).toEqual([
+      expect(fixed.agents.calls.map((call) => call.choice)).toEqual([
         { model: "composer-2.5", reasoning: "high" },
         { model: "composer-2.5", reasoning: "high" },
       ]);
@@ -1383,21 +1425,21 @@ describe("agent spawning", () => {
     }),
   );
 
-  it.effect("a Cursor refusal is 502 with its message, logged with the cause", () =>
+  it.effect("the agent program's refusal is 502 with its message, logged with the cause", () =>
     Effect.gen(function* () {
       const cause = new Error("Invalid API key");
-      const failure = Errors.CursorAgentFailed.make({
+      const failure = Errors.AgentFailed.make({
         message: "Invalid API key",
         retryable: false,
         cause,
       });
-      const fixed = fixture(fleet, { cursor: FakeCursor.fakeCursor({ failure }) });
+      const fixed = fixture(fleet, { agents: FakeAgents.fakeAgents({ failure }) });
       yield* Effect.gen(function* () {
         const api = yield* reverseClient;
         const error = yield* Effect.flip(
           api.Agents.spawn({ payload: spawnBody({ task: TICKET, type: "driving-agent" }) }),
         );
-        expect(error).toMatchObject({ _tag: "CursorAgentFailed", message: "Invalid API key" });
+        expect(error).toMatchObject({ _tag: "AgentFailed", message: "Invalid API key" });
         const http = yield* HttpClient.HttpClient;
         const raw = yield* http.post("/agent", {
           headers: { authorization: AUTHORIZATION },
@@ -1436,7 +1478,7 @@ describe("agent spawning", () => {
           expect(raw.status).toBe(500);
           expect(yield* raw.json).toEqual({ error: "internal error" });
         }).pipe(Effect.provide(serve(fixed)));
-        expect(fixed.cursor.calls).toEqual([]);
+        expect(fixed.agents.calls).toEqual([]);
         expect(fixed.log.lines).toHaveLength(1);
         expect(fixed.log.lines[0]).toMatchObject({
           level: "error",
@@ -1688,7 +1730,7 @@ describe("forwarding refusals", () => {
         }
       }).pipe(Effect.provide(serve(fixed)));
       expect(fixed.upstream.requests).toEqual([]);
-      expect(fixed.cursor.calls).toEqual([]);
+      expect(fixed.agents.calls).toEqual([]);
       expect(fixed.log.lines).toHaveLength(everyRoute.length * 2);
       expect(
         fixed.log.lines.every(
