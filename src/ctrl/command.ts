@@ -777,12 +777,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
       "test --list [--details] [--name <definition>] [--history]; or define, new, list, start",
     ),
     Command.provide(withDb),
-    Command.withSubcommands([
-      testDefineCommand,
-      testNewCommand,
-      testListCommand,
-      testStartCommand,
-    ]),
+    Command.withSubcommands([testDefineCommand, testNewCommand, testListCommand, testStartCommand]),
   );
 
   const testResultsCommand = Command.make(

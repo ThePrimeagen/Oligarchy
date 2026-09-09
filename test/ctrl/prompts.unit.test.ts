@@ -60,7 +60,9 @@ describe("render happy path", () => {
           "ctrl-linear.md": "# Control\n\nRead the session.\n",
         },
       });
-      const text = yield* Prompts.render("linear-issue.html", ticket).pipe(Effect.provide(fs.layer));
+      const text = yield* Prompts.render("linear-issue.html", ticket).pipe(
+        Effect.provide(fs.layer),
+      );
       // The guide's trailing newline is trimmed so the closing tag sits under its last line.
       expect(text).toBe(
         `OLI-42 at ${SERVER}, again OLI-42; by ${Prompts.SUB_AGENT}\n<guide>\n# Control\n\nRead the session.\n</guide>`,
@@ -202,7 +204,9 @@ describe("render unhappy path", () => {
         unreadable: /\/(client\.md|ctrl-linear\.md)$/,
         contents: { "linear-issue.html": "ticket {{LINEAR_TICKET}}" },
       });
-      const text = yield* Prompts.render("linear-issue.html", ticket).pipe(Effect.provide(fs.layer));
+      const text = yield* Prompts.render("linear-issue.html", ticket).pipe(
+        Effect.provide(fs.layer),
+      );
       expect(text).toBe("ticket OLI-42");
       expect(fileNames(fs.reads)).toEqual(["linear-issue.html"]);
     }),

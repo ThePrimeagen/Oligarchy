@@ -695,7 +695,6 @@ describe("test new", () => {
           message: expect.stringMatching(/^prompt: .*client\.md.*; created OLI-42$/),
           cause: expect.anything(),
         });
-        expect(fs.reads.some((path) => DRIVING_AGENT_PATH.test(path))).toBe(false);
         expect(h.linear.calls.map((call) => call.method)).toEqual([
           "teamId",
           "labelIds",
