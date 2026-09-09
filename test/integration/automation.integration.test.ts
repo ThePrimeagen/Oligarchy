@@ -219,40 +219,16 @@ describe("automation serving", () => {
       expect(existsSync(record)).toBe(false);
       expect(existsSync(homeRecord)).toBe(false);
 
-      const incomplete = await request(
-        port,
-        "POST",
-        "/automate",
-        { "content-type": "application/json" },
-        '{"ticket":"OLI-1"}',
-      );
-      expect(incomplete.status).toBe(400);
-      expect(await incomplete.json()).toMatchObject({
-        error: expect.stringContaining('["model"]'),
-      });
-      expect(existsSync(record)).toBe(false);
-
-      const first = await request(
+      const automate = await request(
         port,
         "POST",
         "/automate",
         { "content-type": "application/json" },
         '{"ticket":"OLI-1","model":"grok-4.6"}',
       );
-      expect(first.status).toBe(200);
-      expect(first.headers.get("content-type")).toContain("application/json");
-      expect(await first.json()).toEqual({ ok: "true" });
-      const second = await request(
-        port,
-        "POST",
-        "/automate",
-        { "content-type": "application/json" },
-        '{"ticket":"OLI-2","model":"claude-opus-5"}',
-      );
-      expect(second.status).toBe(200);
-      expect(readFileSync(record, "utf8")).toBe(
-        "linear ticket OLI-1; model grok-4.6\nlinear ticket OLI-2; model claude-opus-5\n",
-      );
+      expect(automate.status).toBe(404);
+      expect(await automate.json()).toEqual({ error: "not found" });
+      expect(existsSync(record)).toBe(false);
 
       const webhookBody = '{"action":"update","type":"Issue","data":{"identifier":"OLI-9"}}';
       const unsigned = await request(
@@ -264,9 +240,7 @@ describe("automation serving", () => {
       );
       expect(unsigned.status).toBe(401);
       expect(await unsigned.json()).toEqual({ error: "unauthorized" });
-      expect(readFileSync(record, "utf8")).toBe(
-        "linear ticket OLI-1; model grok-4.6\nlinear ticket OLI-2; model claude-opus-5\n",
-      );
+      expect(existsSync(record)).toBe(false);
 
       const signed = await request(
         port,
@@ -276,10 +250,9 @@ describe("automation serving", () => {
         webhookBody,
       );
       expect(signed.status).toBe(200);
+      expect(signed.headers.get("content-type")).toContain("application/json");
       expect(await signed.json()).toEqual({ ok: "true" });
-      expect(readFileSync(record, "utf8")).toBe(
-        `linear ticket OLI-1; model grok-4.6\nlinear ticket OLI-2; model claude-opus-5\n${webhookBody}\n`,
-      );
+      expect(readFileSync(record, "utf8")).toBe(`${webhookBody}\n`);
       expect(existsSync(homeRecord)).toBe(false);
 
       const start = await request(
@@ -302,21 +275,17 @@ describe("automation serving", () => {
     const { code } = await process.exited;
     expect(code, process.stdout()).toBe(0);
     const output = lines(process.stdout());
-    // The schema's detail spans two lines: the missing key, then where.
-    expect(output).toContain("[global] error: POST /automate failed: Missing key");
-    expect(output).toContain('  at ["model"]');
-    expect(output).toContain("[OLI-1] automation recorded; grok-4.6");
-    expect(output).toContain("[OLI-2] automation recorded; claude-opus-5");
     expect(output).toContain("[global] error: POST /linear failed: unauthorized");
     expect(output).toContain("[global] linear webhook recorded");
+    expect(output.some((line) => line.includes("/automate"))).toBe(false);
     expect(output.some((line) => line.includes("/start"))).toBe(false);
     expect(process.stderr()).toBe("");
 
-    await expect(request(port, "GET", "/automate")).rejects.toThrow();
+    await expect(request(port, "GET", "/linear")).rejects.toThrow();
   };
 
   it.live(
-    "listens without a database, records /automate and a signed /linear, answers 401, 400 and 404, and exits 0 on SIGINT",
+    "listens without a database, records a signed /linear, answers 401 and 404, and exits 0 on SIGINT",
     () => Effect.promise(() => served("SIGINT")),
     120_000,
   );

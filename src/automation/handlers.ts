@@ -15,27 +15,6 @@ export class LinearWebhookSecret extends Context.Service<LinearWebhookSecret, Re
   "@oligarchy/automation/LinearWebhookSecret",
 ) {}
 
-// POST /automate, for now: one line per request appended to `record`, naming the ticket and the
-// model as they came. Spawning the agent those two describe is the next step and lands here.
-export const AutomationsLive = (record: string) =>
-  HttpApiBuilder.group(Api.AutomationApi, "Automations", (handlers) =>
-    handlers.handle("automate", ({ payload }) =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
-        const log = yield* Log.Log;
-        yield* fs
-          .writeFileString(record, `linear ticket ${payload.ticket}; model ${payload.model}\n`, {
-            flag: "a",
-          })
-          .pipe(
-            Effect.mapError((cause) => Errors.Internal.make({ cause, agentId: payload.ticket })),
-          );
-        yield* log.info(`automation recorded; ${payload.model}`, { agentId: payload.ticket });
-        return ok;
-      }),
-    ),
-  );
-
 // No payload schema: Linear's HMAC is over the raw bytes, and the record is those same bytes
 // plus a trailing newline. A JSON payload would parse and lose the exact body. The request is
 // the HttpServerRequest service: handleRaw's request widens the requirements channel to unknown.
@@ -69,11 +48,10 @@ export const LinearLive = (record: string) =>
     ),
   );
 
-// The bearer is left off: Linear signs /linear, and /automate is loopback-only.
+// The bearer is left off: Linear signs /linear.
 export const routes = (record: string) =>
   Layer.mergeAll(
     HttpApiBuilder.layer(Api.AutomationApi).pipe(
-      Layer.provide(AutomationsLive(record)),
       Layer.provide(LinearLive(record)),
       Layer.provide(Middleware.ApiBoundaryLive),
     ),
