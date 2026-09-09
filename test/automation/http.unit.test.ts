@@ -133,6 +133,40 @@ describe("POST /linear", () => {
     }),
   );
 
+  it.effect("logs the ticket and the state name when Linear sent an Issue with both", () =>
+    Effect.gen(function* () {
+      const body = JSON.stringify({
+        action: "update",
+        type: "Issue",
+        data: {
+          identifier: "OLI-1063",
+          state: {
+            id: "a9fe2d89-3cb3-47dd-8645-5d224f997134",
+            name: "Automation Needed",
+            type: "unstarted",
+          },
+        },
+        updatedFrom: { state: { name: "Todo" } },
+      });
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        expect((yield* webhook(http, body, sign(body))).status).toBe(200);
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.file.writes).toEqual([{ path: RECORD, data: withNewline(body), flag: "a" }]);
+      expect(fixed.log.lines).toEqual([
+        {
+          level: "info",
+          text: "linear webhook recorded; Automation Needed",
+          sessionId: undefined,
+          agentId: "OLI-1063",
+          skipSentry: false,
+          cause: undefined,
+        },
+      ]);
+    }),
+  );
+
   it.effect(
     "appends a UTF-8 BOM body as the exact bytes Linear signed, plus a trailing newline",
     () =>

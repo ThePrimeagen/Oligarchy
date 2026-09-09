@@ -1,4 +1,4 @@
-import { Context, Effect, FileSystem, Layer, Redacted } from "effect";
+import { Context, Effect, FileSystem, Layer, Option, Redacted } from "effect";
 import { HttpServerRequest } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import * as Config from "../config.ts";
@@ -9,6 +9,7 @@ import * as Api from "../shared/api.ts";
 import * as Contract from "../shared/contract.ts";
 import * as Errors from "../shared/errors.ts";
 import * as Signature from "./signature.ts";
+import * as Webhook from "./webhook.ts";
 
 const ok = Contract.Ok.make({});
 
@@ -45,7 +46,14 @@ export const LinearLive = (record: string) =>
         yield* fs
           .writeFile(record, recorded, { flag: "a" })
           .pipe(Effect.mapError((cause) => Errors.Internal.make({ cause })));
-        yield* log.info("linear webhook recorded");
+        const parsed = Option.map(Webhook.issue(bytes), Webhook.work);
+        if (Option.isSome(parsed)) {
+          yield* log.info(`linear webhook recorded; ${parsed.value.state}`, {
+            agentId: parsed.value.ticket,
+          });
+        } else {
+          yield* log.info("linear webhook recorded");
+        }
         return ok;
       }),
     ),
