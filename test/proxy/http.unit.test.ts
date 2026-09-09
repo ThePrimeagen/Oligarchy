@@ -172,7 +172,17 @@ describe("Sessions endpoints happy path", () => {
         expect(yield* bodyOf(response)).toEqual({
           qemus: 1,
           memory: { totalBytes: 16_000, usedBytes: 4_000, freeBytes: 12_000 },
-          cpu: { cores: 4, mean: 20.5, p10: 19.8, p25: 20.1, p75: 20.9, p90: 21.1 },
+          cpu: {
+            cores: 4,
+            mean: 20.5,
+            mean1m: 22.3,
+            mean2m: 21.4,
+            mean3m: 20.9,
+            p10: 19.8,
+            p25: 20.1,
+            p75: 20.9,
+            p90: 21.1,
+          },
         });
       }).pipe(Effect.provide(serve(fixed)));
       expect(FakeSessions.methods(fixed.sessions)).toEqual(["stats"]);

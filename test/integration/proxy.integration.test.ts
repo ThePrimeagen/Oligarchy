@@ -311,6 +311,9 @@ describe("proxy serving", () => {
         cpu: {
           cores: expect.any(Number),
           mean: expect.any(Number),
+          mean1m: expect.any(Number),
+          mean2m: expect.any(Number),
+          mean3m: expect.any(Number),
           p10: expect.any(Number),
           p25: expect.any(Number),
           p75: expect.any(Number),

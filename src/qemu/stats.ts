@@ -8,6 +8,8 @@ import * as Contract from "../shared/contract.ts";
 export const SAMPLE_INTERVAL_MS = 5_000;
 // 60 samples x 5s ticks = a 5 minute window.
 export const MAX_SAMPLES = 60;
+// 12 samples x 5s ticks = a minute: the newest 12, 24 and 36 are the three shorter means.
+const SAMPLES_PER_MINUTE = 60_000 / SAMPLE_INTERVAL_MS;
 
 export type CpuTimes = {
   readonly cores: number;
@@ -49,15 +51,15 @@ export type StatsService = {
 
 const round1 = (value: number): number => Math.round(value * 10) / 10;
 
-const mean = (sorted: ReadonlyArray<number>): number => {
-  if (sorted.length === 0) {
+const mean = (values: ReadonlyArray<number>): number => {
+  if (values.length === 0) {
     return 0;
   }
   let sum = 0;
-  for (const sample of sorted) {
+  for (const sample of values) {
     sum += sample;
   }
-  return round1(sum / sorted.length);
+  return round1(sum / values.length);
 };
 
 const percentile = (sorted: ReadonlyArray<number>, p: number): number => {
@@ -119,6 +121,10 @@ const make = (source: Source): Effect.Effect<StatsService, never, Scope.Scope | 
           cpu: Contract.Cpu.make({
             cores: source.cores(),
             mean: mean(sorted),
+            // samples is oldest first, so the tail is the newest minutes.
+            mean1m: mean(samples.slice(-SAMPLES_PER_MINUTE)),
+            mean2m: mean(samples.slice(-2 * SAMPLES_PER_MINUTE)),
+            mean3m: mean(samples.slice(-3 * SAMPLES_PER_MINUTE)),
             p10: percentile(sorted, 10),
             p25: percentile(sorted, 25),
             p75: percentile(sorted, 75),

@@ -32,7 +32,17 @@ export const FOLLOW_EVENTS: ReadonlyArray<Domain.FollowEvent> = [
 export const STATS: Contract.Stats = Contract.Stats.make({
   qemus: 1,
   memory: Contract.Memory.make({ totalBytes: 16_000, usedBytes: 4_000, freeBytes: 12_000 }),
-  cpu: Contract.Cpu.make({ cores: 4, mean: 20.5, p10: 19.8, p25: 20.1, p75: 20.9, p90: 21.1 }),
+  cpu: Contract.Cpu.make({
+    cores: 4,
+    mean: 20.5,
+    mean1m: 22.3,
+    mean2m: 21.4,
+    mean3m: 20.9,
+    p10: 19.8,
+    p25: 20.1,
+    p75: 20.9,
+    p90: 21.1,
+  }),
 });
 
 export type Call = { readonly method: string; readonly args: ReadonlyArray<unknown> };

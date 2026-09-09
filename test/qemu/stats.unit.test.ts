@@ -55,7 +55,17 @@ describe("Stats happy path", () => {
       expect(yield* stats.collect(3)).toEqual({
         qemus: 3,
         memory: { totalBytes: 16_000, usedBytes: 10_000, freeBytes: 6_000 },
-        cpu: { cores: 4, mean: 0, p10: 0, p25: 0, p75: 0, p90: 0 },
+        cpu: {
+          cores: 4,
+          mean: 0,
+          mean1m: 0,
+          mean2m: 0,
+          mean3m: 0,
+          p10: 0,
+          p25: 0,
+          p75: 0,
+          p90: 0,
+        },
       });
     }),
   );
@@ -75,6 +85,9 @@ describe("Stats happy path", () => {
       expect((yield* stats.collect(0)).cpu).toEqual({
         cores: 4,
         mean: 50,
+        mean1m: 50,
+        mean2m: 50,
+        mean3m: 50,
         p10: 50,
         p25: 50,
         p75: 50,
@@ -84,6 +97,9 @@ describe("Stats happy path", () => {
       expect((yield* stats.collect(0)).cpu).toEqual({
         cores: 4,
         mean: 70,
+        mean1m: 70,
+        mean2m: 70,
+        mean3m: 70,
         p10: 54,
         p25: 60,
         p75: 80,
@@ -108,6 +124,46 @@ describe("Stats happy path", () => {
       expect(cpu.mean).toBe(31.5);
       expect(cpu.p10).toBe(7.9);
       expect(cpu.p90).toBe(55.1);
+    }),
+  );
+
+  it.effect("the one, two and three minute means read the newest 12, 24 and 36 samples", () =>
+    Effect.gen(function* () {
+      // Sample i is exactly i% busy, as above: the newest 12 are 50..61, the newest 24 38..61,
+      // the newest 36 26..61, while the whole window is 2..61.
+      const snapshots: Array<Stats.CpuTimes> = [snapshot(1, 0, 0)];
+      let idle = 0;
+      for (let i = 1; i <= Stats.MAX_SAMPLES + 1; i++) {
+        idle += 100 - i;
+        snapshots.push(snapshot(1, idle, 100 * i));
+      }
+      const { stats } = yield* build(scripted(snapshots).source);
+      yield* TestClock.adjust(Stats.SAMPLE_INTERVAL_MS * (Stats.MAX_SAMPLES + 1));
+      const { cpu } = yield* stats.collect(0);
+      expect(cpu.mean).toBe(31.5);
+      expect(cpu.mean1m).toBe(55.5);
+      expect(cpu.mean2m).toBe(49.5);
+      expect(cpu.mean3m).toBe(43.5);
+    }),
+  );
+
+  it.effect("a mean whose minute is not yet full averages the samples there are", () =>
+    Effect.gen(function* () {
+      // Three samples: 10%, 20% and 60% busy. Every mean sees the same three.
+      const { stats } = yield* build(
+        scripted([
+          snapshot(1, 0, 0),
+          snapshot(1, 90, 100),
+          snapshot(1, 170, 200),
+          snapshot(1, 210, 300),
+        ]).source,
+      );
+      yield* TestClock.adjust(Stats.SAMPLE_INTERVAL_MS * 3);
+      const { cpu } = yield* stats.collect(0);
+      expect(cpu.mean).toBe(30);
+      expect(cpu.mean1m).toBe(30);
+      expect(cpu.mean2m).toBe(30);
+      expect(cpu.mean3m).toBe(30);
     }),
   );
 
