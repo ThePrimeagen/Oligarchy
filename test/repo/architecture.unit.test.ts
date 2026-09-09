@@ -31,10 +31,12 @@ const isBoundary = (path: string): boolean =>
 
 // Non-boundary files allowed exactly one node:* import. Effect's Crypto.digest is one-shot, so a
 // multi-gigabyte ISO is hashed with node:crypto's streaming createHash; Effect has no inflate, so
-// a PNG's deflate stream is opened with node:zlib.
+// a PNG's deflate stream is opened with node:zlib. Linear signs the raw webhook body with
+// HMAC-SHA256, which Effect's digest does not compute.
 const NODE_IMPORT_EXCEPTIONS: ReadonlyMap<string, string> = new Map([
   ["src/qemu/iso.ts", "node:crypto"],
   ["src/session/image.ts", "node:zlib"],
+  ["src/automation/signature.ts", "node:crypto"],
 ]);
 
 // Files allowed to call `Effect.run*`, each with the calls it may make.

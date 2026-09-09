@@ -9,7 +9,6 @@ import * as Config from "../config.ts";
 import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
 import * as Sentry from "../observability/sentry.ts";
-import * as Middleware from "../proxy/middleware.ts";
 import * as Api from "../shared/api.ts";
 import * as AutomationCommand from "./command.ts";
 import * as Handlers from "./handlers.ts";
@@ -51,12 +50,16 @@ const ServerLive = (port: number) =>
     Layer.provide(Layer.succeed(HttpMiddleware.TracerDisabledWhen)(() => true)),
   );
 
-// OLIGARCHY_TOKEN is the one variable this process reads.
-const BearerLive = Layer.unwrap(Effect.map(Config.oligarchyToken, Middleware.bearerAuth));
+// LINEAR_WEBHOOK_SECRET is the one variable this process reads: Linear signs POST /linear with it.
+const WebhookSecretLive = Layer.unwrap(
+  Effect.map(Config.linearWebhookSecret, (secret) =>
+    Layer.succeed(Handlers.LinearWebhookSecret)(Handlers.LinearWebhookSecret.of(secret)),
+  ),
+);
 
 // No database: this service keeps no rows, so its log is stdout and Sentry. Sentry sits beneath
 // Log so Log captures the reporter.
-const MainLive = Layer.mergeAll(Log.Log.layerStdout, BearerLive).pipe(
+const MainLive = Layer.mergeAll(Log.Log.layerStdout, WebhookSecretLive).pipe(
   Layer.provideMerge(Sentry.SentryLive),
   Layer.provideMerge(Config.providerLayer),
   Layer.provideMerge(NodeServices.layer),
@@ -64,9 +67,9 @@ const MainLive = Layer.mergeAll(Log.Log.layerStdout, BearerLive).pipe(
 
 const command = AutomationCommand.makeAutomationCommand({ serve: ServerLive, serverFailed });
 
-// The graph is built before the command runs: a missing OLIGARCHY_TOKEN is the one failure no Log
-// exists to record, so it is printed here. Every later failure logs its own fatal line; a defect
-// has nothing else to say for it.
+// The graph is built before the command runs: a missing LINEAR_WEBHOOK_SECRET is the one failure
+// no Log exists to record, so it is printed here. Every later failure logs its own fatal line; a
+// defect has nothing else to say for it.
 const program = Effect.gen(function* () {
   const services = yield* Layer.build(MainLive).pipe(Effect.tapCause(Render.reportFailure));
   yield* Command.run(command, { version: Api.VERSION }).pipe(

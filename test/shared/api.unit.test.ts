@@ -235,26 +235,33 @@ describe("ReverseProxyApi", () => {
 describe("AutomationApi", () => {
   const automation = Api.AutomationApi;
 
-  it("declares POST /automate and nothing else", () => {
+  it("declares POST /automate and POST /linear and nothing else", () => {
     const table = routes(automation).map(({ method, path }) => `${method} ${path}`);
-    expect(table).toEqual(["POST /automate"]);
+    expect(table).toEqual(["POST /automate", "POST /linear"]);
     expect(HttpApiClient.urlBuilder(automation).Automations.automate()).toBe("/automate");
+    expect(HttpApiClient.urlBuilder(automation).Linear.linear()).toBe("/linear");
   });
 
-  it("requires the bearer and applies BearerAuth then ApiBoundary", () => {
+  it("applies ApiBoundary and no bearer, on both routes", () => {
     const spec = OpenApi.fromApi(automation);
-    expect(spec.components.securitySchemes).toEqual({
-      bearer: { type: "http", scheme: "Bearer" },
-    });
-    const route = byIdentifier(automation, "automate");
-    expect(route.group).toBe("Automations");
-    expect(route.middleware).toEqual([Api.BearerAuth.key, Api.ApiBoundary.key]);
-    expect(spec.paths["/automate"]?.post?.security).toEqual([{ bearer: [] }]);
-    expect(route.errors).toEqual([400, 401, 500]);
+    expect(spec.components.securitySchemes).toBeUndefined();
+    const automate = byIdentifier(automation, "automate");
+    expect(automate.group).toBe("Automations");
+    expect(automate.middleware).toEqual([Api.ApiBoundary.key]);
+    expect(spec.paths["/automate"]?.post?.security).toBeUndefined();
+    expect(automate.errors).toEqual([400, 500]);
+    const linear = byIdentifier(automation, "linear");
+    expect(linear.group).toBe("Linear");
+    expect(linear.middleware).toEqual([Api.ApiBoundary.key]);
+    expect(spec.paths["/linear"]?.post?.security).toBeUndefined();
+    expect(linear.errors).toEqual([400, 401, 500]);
   });
 
-  it("is its own api: neither the proxy nor the reverse proxy answers /automate", () => {
-    expect(routes(Api.ProxyApi).map(({ path }) => path)).not.toContain("/automate");
-    expect(routes(Api.ReverseProxyApi).map(({ path }) => path)).not.toContain("/automate");
+  it("is its own api: neither the proxy nor the reverse proxy answers /automate or /linear", () => {
+    for (const api of [Api.ProxyApi, Api.ReverseProxyApi]) {
+      const paths = routes(api).map(({ path }) => path);
+      expect(paths).not.toContain("/automate");
+      expect(paths).not.toContain("/linear");
+    }
   });
 });

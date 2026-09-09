@@ -39,6 +39,6 @@ export const makeAutomationCommand = <RServe>(server: AutomationServer<RServe>) 
       }),
   ).pipe(
     Command.withDescription(
-      "The oligarchy automation service: POST /automate names a Linear ticket and a model, and each request is recorded as one line in ~/automation-test",
+      "The oligarchy automation service: POST /automate names a Linear ticket and a model; POST /linear records a signed Linear webhook as the exact body, one delivery per line in ~/automation-test",
     ),
   );

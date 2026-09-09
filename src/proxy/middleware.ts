@@ -9,9 +9,9 @@ import * as Api from "../shared/api.ts";
 import * as Domain from "../shared/domain.ts";
 import * as Errors from "../shared/errors.ts";
 
-// Every route carries `Authorization: Bearer <OLIGARCHY_TOKEN>`; the compare is exact, as it
-// always was. The token comes in as a value: the servers read it from ProxyConfig beside their
-// database url, the automation service reads it alone.
+// Every proxy and reverse-proxy route carries `Authorization: Bearer <OLIGARCHY_TOKEN>`; the
+// compare is exact, as it always was. The token comes in as a value: those servers read it from
+// ProxyConfig beside their database url. The automation service does not use this bearer.
 export const bearerAuth = (token: Redacted.Redacted): Layer.Layer<Api.BearerAuth> =>
   Layer.succeed(Api.BearerAuth)(
     Api.BearerAuth.of({
