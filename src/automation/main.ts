@@ -1,6 +1,4 @@
 import { createServer } from "node:http";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import { NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node";
 import { Cause, Deferred, Effect, Exit, Layer, type Runtime } from "effect";
 import { Command } from "effect/unstable/cli";
@@ -15,8 +13,8 @@ import * as Handlers from "./handlers.ts";
 
 const HOST = "127.0.0.1";
 
-// Where every request lands, one line each, in the operator's home directory as they asked.
-const RECORD = join(homedir(), "automation-test");
+// Where every request lands, one line each, in the working directory as they asked.
+const RECORD = "./automation-logs";
 
 // stdout is the convenience copy of the log; Sentry is the record. A write refused by a full
 // filesystem is dropped, never an uncaught exception per line (see the proxy's main).

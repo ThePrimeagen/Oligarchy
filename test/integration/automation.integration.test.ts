@@ -205,11 +205,11 @@ describe("automation serving", () => {
   const served = async (signal: "SIGINT" | "SIGTERM") => {
     const port = await freePort();
     const process = spawnAutomation(["--port", String(port)]);
-    const record = join(process.home, "automation-test");
+    const record = join(process.home, "automation-logs");
     try {
       await process.waitFor(/oligarchy automation listening/);
       expect(lines(process.stdout())).toContain(
-        `[global] oligarchy automation listening on 127.0.0.1:${String(port)}; recording to ${record}`,
+        `[global] oligarchy automation listening on 127.0.0.1:${String(port)}; recording to ./automation-logs`,
       );
       expect(existsSync(record)).toBe(false);
 

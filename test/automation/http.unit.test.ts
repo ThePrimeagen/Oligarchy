@@ -13,7 +13,7 @@ import * as FakeLog from "../support/log.ts";
 import * as Reporter from "../support/reporter.ts";
 
 const WEBHOOK_SECRET = "whsec_test";
-const RECORD = "/home/operator/automation-test";
+const RECORD = "./automation-logs";
 const TICKET = "OLI-61";
 const MODEL = "grok-4.6";
 
