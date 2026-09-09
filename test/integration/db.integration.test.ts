@@ -1010,9 +1010,8 @@ Postgres.describeWithDatabase("database", () => {
         expect(Option.getOrThrow(yield* tests.findResult(resultId)).linearId).toBe("OLI-100");
         expect(Option.getOrThrow(yield* tests.findResultByLinearId("OLI-100")).id).toBe(resultId);
         expect(Option.isNone(yield* tests.findResultByLinearId("OLI-missing"))).toBe(true);
-        const missing = yield* Effect.flip(tests.setLinearId(uuid(), "OLI-101"));
-        expect(missing._tag).toBe("DatabaseError");
-        expect(missing.operation).toBe("setLinearId");
+        const missing = yield* Effect.exit(tests.setLinearId(uuid(), "OLI-101"));
+        expect(Exit.isFailure(missing) && Cause.hasDies(missing.cause)).toBe(true);
       }),
     );
 

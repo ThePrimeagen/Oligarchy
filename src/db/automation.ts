@@ -30,7 +30,8 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
         return row;
       });
 
-      // Claim the oldest pending job (optionally of one action): lock it, mark running, return it.
+      // Claim the oldest unlocked pending job (optionally of one action): skip a row another
+      // worker already locked, mark this one running, return it.
       const claimNext = Effect.fn("db.claimNextAutomationJob")(function* (
         action: Option.Option<Domain.AutomationAction>,
       ) {
@@ -45,7 +46,7 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
                     .where(eq(DbSchema.automationJobs.status, "pending"))
                     .orderBy(asc(DbSchema.automationJobs.createdAt))
                     .limit(1)
-                    .for("update"),
+                    .for("update", { skipLocked: true }),
                 onSome: (wanted) =>
                   tx
                     .select()
@@ -58,7 +59,7 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
                     )
                     .orderBy(asc(DbSchema.automationJobs.createdAt))
                     .limit(1)
-                    .for("update"),
+                    .for("update", { skipLocked: true }),
               }),
             );
             const head = Arr.head(pending);

@@ -462,12 +462,7 @@ export const fakeTestStore = (
       Effect.gen(function* () {
         const row = results.find((result) => sameId(result.id, resultId));
         if (row === undefined) {
-          return yield* Effect.fail(
-            Errors.DatabaseError.make({
-              operation: "setLinearId",
-              message: `setLinearId: no result ${resultId}`,
-            }),
-          );
+          return yield* Effect.die(new Error(`setLinearId: no result ${resultId}`));
         }
         if (
           results.some(
@@ -663,11 +658,13 @@ export const fakeAutomationStore = (
   return { jobs, layer: Layer.succeed(Automation.AutomationStore)(service) };
 };
 
-export const fakeStores = () => {
+export const fakeStores = (
+  options: { readonly tests?: Partial<typeof Tests.TestStore.Service> } = {},
+) => {
   const sessions = fakeSessionStore();
   const actions = fakeActionStore();
   const logs = fakeLogStore();
-  const tests = fakeTestStore();
+  const tests = fakeTestStore({}, options.tests);
   const debugLogs = fakeDebugLogStore();
   const diagnosis = fakeDiagnosisStore();
   return {

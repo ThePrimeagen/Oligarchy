@@ -1,6 +1,5 @@
 import { and, count, desc, eq, sql } from "drizzle-orm";
 import { Array as Arr, Context, Effect, Layer, Option } from "effect";
-import * as Errors from "../shared/errors.ts";
 import * as Client from "./client.ts";
 import * as DbSchema from "./schema.ts";
 
@@ -199,7 +198,7 @@ export class TestStore extends Context.Service<TestStore>()("@oligarchy/db/TestS
     });
 
     // Persist the Linear identifier (OLI-n) created for this result so webhooks can find it.
-    // Missing result id is a broken invariant after ticket create — fail, do not soft-miss.
+    // A missing result after createRun is a broken invariant, not a caller mistake.
     const setLinearId = Effect.fn("db.setLinearId")(function* (resultId: string, linearId: string) {
       const rows = yield* database.run("setLinearId", (db) =>
         db
@@ -209,12 +208,7 @@ export class TestStore extends Context.Service<TestStore>()("@oligarchy/db/TestS
           .returning({ id: DbSchema.testResults.id }),
       );
       if (rows.length === 0) {
-        return yield* Effect.fail(
-          Errors.DatabaseError.make({
-            operation: "setLinearId",
-            message: `setLinearId: no result ${resultId}`,
-          }),
-        );
+        return yield* Effect.die(new Error(`setLinearId: no result ${resultId}`));
       }
       return yield* Effect.void;
     });
