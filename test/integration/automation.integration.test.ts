@@ -36,6 +36,7 @@ const environment = (home: string, overrides: Record<string, string>): NodeJS.Pr
     ...process.env,
     HOME: home,
     LINEAR_WEBHOOK_SECRET: WEBHOOK_SECRET,
+    NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --disable-warning=ExperimentalWarning`.trim(),
     https_proxy: "http://127.0.0.1:1",
     http_proxy: "http://127.0.0.1:1",
     no_proxy: "",
