@@ -51,7 +51,7 @@ If you are an agent driving a guest, you need two of these: [test start](#test-s
 The action comes first. Every value is a flag; there are no positional arguments. Flags may sit in any order after the action.
 
 - `DATABASE_URL` — read from the environment by every action; it is the only variable most of them need. `test new` and `test list` also read `LINEAR_API_TOKEN`; `test run` and `diagnose run` also read `CURSOR_API_TOKEN`. No action reads `OLIGARCHY_TOKEN`. A `.env` in the current directory fills in missing variables only. A missing variable means exit 1.
-- `--session-id <id>` — taken by `test start`, `session`, `diagnose` and `diagnose run`. Omitted, it is read from `SESSION_ID` in the environment; the flag wins when both are given, and an empty `SESSION_ID` counts as unset. Export it once — `export SESSION_ID=$(./ctrl session --search --test-result-id <id>)` — and every command that follows is about that session. Neither given is a usage error, or on `session` the refusal `session: --session-id or SESSION_ID is required`.
+- `--session-id <id>` — taken by `test start`, `session`, `diagnose` and `diagnose run`. Omitted, it is read from `SESSION_ID` in the environment; the flag wins when both are given, and an empty `SESSION_ID` counts as unset. Set it once — `SESSION_ID=$(./ctrl session --search --test-result-id <id>) && export SESSION_ID`, so a failed search stops there instead of exporting nothing — and every command that follows is about that session. Neither given is a usage error; on `session` without `--search` it is the refusal `session: --session-id or SESSION_ID is required`.
 - `--server-url <url>` — taken by `test new` alone: the proxy the driving agents will talk to, a full http or https URL, stored on the run and written into every ticket. Falls back to `SERVER_URL` from the environment; there is no default. `test start` and `test-results` accept it and ignore it, so a ticket written before it went still runs; every other action refuses it as an unrecognized flag.
 
 A command that works exits 0. A command that fails exits 1 and prints the error: one headline, then the stack trace and the cause behind it. Read the headline first. `./ctrl <action> --help` prints that action's flags.
@@ -220,11 +220,11 @@ The other way round from [session](#session): a test result id in, the id of the
 
 - `--search` — required; the verb of this form.
 - `--test-result-id <id>` — the result UUID from the Linear issue. Without `--search` it is refused (`session: --test-result-id needs --search`); `--search` without it likewise (`session: --search needs --test-result-id`).
-- The selectors are refused (`session: --search takes no selector`): inspect through the id printed. `--session-id` and `SESSION_ID` are not read; the result names the session.
+- The selectors are refused (`session: --search takes no selector`): inspect through the id printed. `--session-id` and `SESSION_ID` do not affect a search; the result names the session.
 
 ```bash
 ./ctrl session --search --test-result-id 2222...2222
-export SESSION_ID=$(./ctrl session --search --test-result-id 2222...2222)
+SESSION_ID=$(./ctrl session --search --test-result-id 2222...2222) && export SESSION_ID
 ./ctrl session --all
 ```
 

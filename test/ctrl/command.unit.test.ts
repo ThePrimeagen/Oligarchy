@@ -2489,7 +2489,7 @@ describe("session --search", () => {
     }),
   );
 
-  it.effect("reads neither --session-id nor SESSION_ID: the result names the session (happy)", () =>
+  it.effect("--session-id and SESSION_ID have no say: the result names the session (happy)", () =>
     Effect.gen(function* () {
       const h = harness();
       h.stores.tests.results.push(result(RESULT_ID, "passed", SESSION_ID));

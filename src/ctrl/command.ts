@@ -654,7 +654,8 @@ export const makeCtrlCommand = (deps: Deps = live) => {
       input.debugLogs ||
       input.diagnosis ||
       input.all;
-    // A search names its session through the result: --session-id and SESSION_ID are not read.
+    // A search names its session through the result: a parsed --session-id or SESSION_ID has no
+    // say in it.
     if (input.search) {
       const resultId = yield* orRefuse(
         Effect.succeed(input.testResultId),

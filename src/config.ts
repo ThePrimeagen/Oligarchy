@@ -47,7 +47,8 @@ export const cursorApiToken = requiredRedacted("CURSOR_API_TOKEN");
 export const serverUrl: EffectConfig.Config<string> = EffectConfig.string("SERVER_URL");
 
 // For Flag.withFallbackConfig on ctrl's --session-id: SESSION_ID="" is unset and the flag's own
-// rule applies, so a shell can `export SESSION_ID=$(./ctrl session --search ...)` once.
+// rule applies, so a shell can `SESSION_ID=$(./ctrl session --search ...) && export SESSION_ID`
+// once.
 export const sessionId: EffectConfig.Config<string> = EffectConfig.string("SESSION_ID");
 
 export class ProxyConfig extends Context.Service<ProxyConfig>()("@oligarchy/config/ProxyConfig", {
