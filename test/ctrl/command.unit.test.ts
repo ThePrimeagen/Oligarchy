@@ -2456,6 +2456,127 @@ describe("session inspect", () => {
 });
 
 // ---------------------------------------------------------------------------
+// session --search
+// ---------------------------------------------------------------------------
+
+// The other way round from inspection: a result id in, the session that ran it out, as one bare
+// line a shell can capture into SESSION_ID.
+const SEARCH = ["session", "--search", `--test-result-id=${RESULT_ID}`];
+
+describe("session --search", () => {
+  it.effect("prints the bare id of the session a result ran in (happy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.tests.results.push(
+        result(OTHER_RESULT_ID, "passed", OTHER_SESSION_ID),
+        result(RESULT_ID, "passed", SESSION_ID),
+      );
+      const exit = yield* h.run(SEARCH);
+      expect(Exit.isSuccess(exit)).toBe(true);
+      expect(yield* stdout).toEqual([SESSION_ID]);
+      expect(h.log.lines).toEqual([]);
+      expect(h.touched).toEqual(["database"]);
+    }),
+  );
+
+  it.effect("finds a result still running, with --test-result-id spaced (happy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.tests.results.push(result(RESULT_ID, "running", SESSION_ID));
+      const exit = yield* h.run(["session", "--search", "--test-result-id", RESULT_ID]);
+      expect(Exit.isSuccess(exit)).toBe(true);
+      expect(yield* stdout).toEqual([SESSION_ID]);
+    }),
+  );
+
+  it.effect("--session-id and SESSION_ID have no say: the result names the session (happy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.tests.results.push(result(RESULT_ID, "passed", SESSION_ID));
+      const flagged = yield* h.run([...SEARCH, "--session-id", OTHER_SESSION_ID]);
+      expect(Exit.isSuccess(flagged)).toBe(true);
+      const fromEnv = yield* h.run(SEARCH, { ...WITH_DB, SESSION_ID: OTHER_SESSION_ID });
+      expect(Exit.isSuccess(fromEnv)).toBe(true);
+      expect(yield* stdout).toEqual([SESSION_ID, SESSION_ID]);
+    }),
+  );
+
+  it.effect("rejects a result nobody has (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.tests.results.push(result(OTHER_RESULT_ID, "passed", SESSION_ID));
+      expect(yield* h.fail(SEARCH)).toMatchObject({
+        _tag: "CommandError",
+        message: `session: no test result ${RESULT_ID}`,
+      });
+      expect(yield* stdout).toEqual([]);
+    }),
+  );
+
+  it.effect("rejects a result no session has run yet (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.tests.results.push(result(RESULT_ID, "pending", null));
+      expect(yield* h.fail(SEARCH)).toMatchObject({
+        _tag: "CommandError",
+        message: `session: result ${RESULT_ID} has no session yet`,
+      });
+      expect(yield* stdout).toEqual([]);
+    }),
+  );
+
+  it.effect("--search needs --test-result-id, and --test-result-id needs --search (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      seedInspect(h);
+      h.stores.tests.results.push(result(RESULT_ID, "passed", SESSION_ID));
+      expect(yield* h.fail(["session", "--search"])).toMatchObject({
+        _tag: "CommandError",
+        message: "session: --search needs --test-result-id",
+      });
+      expect(
+        yield* h.fail([
+          "session",
+          "--session-id",
+          SESSION_ID,
+          "--test-result-id",
+          RESULT_ID,
+          "--logs",
+        ]),
+      ).toMatchObject({
+        _tag: "CommandError",
+        message: "session: --test-result-id needs --search",
+      });
+      expect(yield* stdout).toEqual([]);
+    }),
+  );
+
+  it.effect("--search takes no selector: inspection goes through the id it prints (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.tests.results.push(result(RESULT_ID, "passed", SESSION_ID));
+      expect(yield* h.fail([...SEARCH, "--all"])).toMatchObject({
+        _tag: "CommandError",
+        message: "session: --search takes no selector",
+      });
+      expect(yield* h.fail([...SEARCH, "--logs", "--status"])).toMatchObject({
+        message: "session: --search takes no selector",
+      });
+      expect(yield* stdout).toEqual([]);
+    }),
+  );
+
+  it.effect("rejects an empty --test-result-id before touching the database (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      const exit = yield* h.run(["session", "--search", "--test-result-id", ""]);
+      expect(helpErrors(exit).join("\n")).toMatch(/--test-result-id.*length of at least 1/s);
+      expect(h.touched).toEqual([]);
+    }),
+  );
+});
+
+// ---------------------------------------------------------------------------
 // Environment, server url, help
 // ---------------------------------------------------------------------------
 
@@ -2515,6 +2636,7 @@ describe("environment order", () => {
           ["test-results", "--agent-id", "a", "--id", RESULT_ID, "--status", "success"],
           ["session", "list"],
           ["session", "--session-id", SESSION_ID, "--logs"],
+          SEARCH,
           NEW_TYPE,
           ["error-type", "list"],
           DIAGNOSE,
@@ -2568,6 +2690,7 @@ describe("--server-url", () => {
     ["test", "run", "--ticket", "OLI-42"],
     ["session", "list"],
     ["session", "--session-id", SESSION_ID, "--logs"],
+    SEARCH,
     NEW_TYPE,
     ["error-type", "list"],
     DIAGNOSE,
@@ -2652,6 +2775,7 @@ describe("--server-url", () => {
         TEST_RESULTS,
         ["session", "list"],
         ["session", "--session-id", SESSION_ID, "--logs"],
+        SEARCH,
         NEW_TYPE,
         ["error-type", "list"],
         DIAGNOSE_RUN,
@@ -2696,6 +2820,132 @@ describe("--server-url", () => {
       expect(Exit.isSuccess(good)).toBe(true);
       expect(h.stores.tests.runs[0]?.serverUrl).toBe(SERVER);
     }),
+  );
+});
+
+// The session a command is about may come from the environment: SESSION_ID stands in for
+// --session-id on every action that takes it, and the flag wins when both are given.
+describe("SESSION_ID", () => {
+  const WITH_SESSION = { ...WITH_DB, SESSION_ID };
+
+  it.effect("stands in for --session-id on session (happy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      seedInspect(h);
+      const exit = yield* h.run(["session", "--status"], WITH_SESSION);
+      expect(Exit.isSuccess(exit)).toBe(true);
+      expect(yield* lastJson).toMatchObject({ id: SESSION_ID, status: "succeeded" });
+    }),
+  );
+
+  it.effect("stands in for --session-id on test start (happy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.sessions.sessions.push(session(SESSION_ID, "running", ago(10)));
+      h.stores.tests.results.push(result(RESULT_ID, "pending", null));
+      const exit = yield* h.run(
+        ["test", "start", "--test-result-id", RESULT_ID, "--model", MODEL],
+        WITH_SESSION,
+      );
+      expect(Exit.isSuccess(exit)).toBe(true);
+      expect(h.stores.tests.results[0]).toMatchObject({
+        status: "running",
+        sessionId: SESSION_ID,
+        model: MODEL,
+      });
+      expect(h.log.lines.map((line) => [line.text, line.sessionId])).toEqual([
+        [`test result ${RESULT_ID}: running`, SESSION_ID],
+      ]);
+    }),
+  );
+
+  it.effect("stands in for --session-id on diagnose run and diagnose (happy)", () =>
+    Effect.gen(function* () {
+      // A template of this test's own: the session is what reaches the reviewer, whatever else the
+      // checkout's kickoff template asks for.
+      const fs = promptFs(/never/, "<session_id>{{SESSION_ID}}</session_id>\n");
+      const h = harness({ cursor: FakeCursor.fakeCursor({ agentId: "bc-42" }), fs: fs.layer });
+      h.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
+      const run = yield* h.run(["diagnose", "run"], { ...WITH_SESSION, CURSOR_API_TOKEN: "c" });
+      expect(Exit.isSuccess(run)).toBe(true);
+      expect(h.cursor.calls).toHaveLength(1);
+      expect(h.cursor.calls[0]?.text).toContain(`<session_id>${SESSION_ID}</session_id>`);
+      h.stores.diagnosis.errorTypes.push(bootHang);
+      const written = yield* h.run(
+        [
+          "diagnose",
+          "--verdict",
+          "failed",
+          "--type",
+          bootHang.key,
+          "--summary",
+          diagnosis.summary,
+          "--model",
+          MODEL,
+        ],
+        WITH_SESSION,
+      );
+      expect(Exit.isSuccess(written)).toBe(true);
+      expect(h.stores.diagnosis.diagnoses.map((row) => row.sessionId)).toEqual([SESSION_ID]);
+      expect(h.log.lines.map((line) => line.sessionId)).toEqual([SESSION_ID]);
+    }),
+  );
+
+  it.effect("the flag wins over SESSION_ID (happy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      seedInspect(h);
+      h.stores.sessions.sessions.push(session(OTHER_SESSION_ID, "failed", ago(100)));
+      const exit = yield* h.run(
+        ["session", "--session-id", OTHER_SESSION_ID, "--status"],
+        WITH_SESSION,
+      );
+      expect(Exit.isSuccess(exit)).toBe(true);
+      expect(yield* lastJson).toMatchObject({ id: OTHER_SESSION_ID, status: "failed" });
+    }),
+  );
+
+  it.effect(
+    "session with neither is refused before the selector check, an empty SESSION_ID counting as unset (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const h = harness();
+        seedInspect(h);
+        expect(yield* h.fail(["session", "--status"])).toMatchObject({
+          _tag: "CommandError",
+          message: "session: --session-id or SESSION_ID is required",
+        });
+        expect(
+          yield* h.fail(["session", "--status"], { ...WITH_DB, SESSION_ID: "" }),
+        ).toMatchObject({
+          _tag: "CommandError",
+          message: "session: --session-id or SESSION_ID is required",
+        });
+        expect(yield* h.fail(["session"])).toMatchObject({
+          message: "session: --session-id or SESSION_ID is required",
+        });
+        expect(yield* stdout).toEqual([]);
+      }),
+  );
+
+  it.effect(
+    "test start, diagnose and diagnose run with neither are usage errors that touch nothing (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const h = harness();
+        for (const args of [
+          ["test", "start", "--test-result-id", RESULT_ID, "--model", MODEL],
+          ["diagnose", "--verdict", "passed", "--summary", "s", "--model", MODEL],
+          ["diagnose", "run"],
+        ]) {
+          const exit = yield* h.run(args, { ...WITH_DB, CURSOR_API_TOKEN: "c", SESSION_ID: "" });
+          expect(helpErrors(exit).join("\n"), args.join(" ")).toMatch(
+            /Missing required flag: --session-id/,
+          );
+        }
+        expect(h.touched).toEqual([]);
+        expect(h.cursor.calls).toEqual([]);
+      }),
   );
 });
 

@@ -4,21 +4,22 @@ Consult this table of contents first. Read only the section you need.
 
 | Section | Line |
 |---------|-----:|
-| [Important](#important) | 23 |
-| [Synopsis](#synopsis) | 29 |
-| [test --list](#test---list) | 56 |
-| [test define](#test-define) | 74 |
-| [test new](#test-new) | 90 |
-| [test list](#test-list) | 106 |
-| [test run](#test-run) | 118 |
-| [test start](#test-start) | 134 |
-| [test-results](#test-results) | 151 |
-| [session list](#session-list) | 169 |
-| [session](#session) | 185 |
-| [error-type new](#error-type-new) | 210 |
-| [error-type list](#error-type-list) | 225 |
-| [diagnose](#diagnose) | 239 |
-| [diagnose run](#diagnose-run) | 258 |
+| [Important](#important) | 24 |
+| [Synopsis](#synopsis) | 30 |
+| [test --list](#test---list) | 59 |
+| [test define](#test-define) | 77 |
+| [test new](#test-new) | 93 |
+| [test list](#test-list) | 109 |
+| [test run](#test-run) | 121 |
+| [test start](#test-start) | 137 |
+| [test-results](#test-results) | 154 |
+| [session list](#session-list) | 172 |
+| [session](#session) | 188 |
+| [session --search](#session---search) | 213 |
+| [error-type new](#error-type-new) | 231 |
+| [error-type list](#error-type-list) | 246 |
+| [diagnose](#diagnose) | 260 |
+| [diagnose run](#diagnose-run) | 279 |
 
 ## Important
 
@@ -40,6 +41,7 @@ If you are an agent driving a guest, you need two of these: [test start](#test-s
 ./ctrl test-results   --agent-id <agent> --id <id> --status success|failed [--reason <text>]
 ./ctrl session list   [--count <n>] [--active] [--json]
 ./ctrl session        --session-id <id> --status|--logs|--test-def|--test-results|--test-run|--actions|--images|--debug-logs|--diagnosis|--all
+./ctrl session        --search --test-result-id <id>
 ./ctrl error-type new  --key <key> --description <text>
 ./ctrl error-type list [--json]
 ./ctrl diagnose       --session-id <id> --verdict passed|failed [--type <key>] --summary <text> --model <id>
@@ -49,6 +51,7 @@ If you are an agent driving a guest, you need two of these: [test start](#test-s
 The action comes first. Every value is a flag; there are no positional arguments. Flags may sit in any order after the action.
 
 - `DATABASE_URL` — read from the environment by every action; it is the only variable most of them need. `test new` and `test list` also read `LINEAR_API_TOKEN`; `test run` and `diagnose run` also read `CURSOR_API_TOKEN`. No action reads `OLIGARCHY_TOKEN`. A `.env` in the current directory fills in missing variables only. A missing variable means exit 1.
+- `--session-id <id>` — taken by `test start`, `session`, `diagnose` and `diagnose run`. Omitted, it is read from `SESSION_ID` in the environment; the flag wins when both are given, and an empty `SESSION_ID` counts as unset. Set it once — `SESSION_ID=$(./ctrl session --search --test-result-id <id>) && export SESSION_ID`, so a failed search stops there instead of exporting nothing — and every command that follows is about that session. Neither given is a usage error; on `session` without `--search` it is the refusal `session: --session-id or SESSION_ID is required`.
 - `--server-url <url>` — taken by `test new` alone: the proxy the driving agents will talk to, a full http or https URL, stored on the run and written into every ticket. Falls back to `SERVER_URL` from the environment; there is no default. `test start` and `test-results` accept it and ignore it, so a ticket written before it went still runs; every other action refuses it as an unrecognized flag.
 
 A command that works exits 0. A command that fails exits 1 and prints the error: one headline, then the stack trace and the cause behind it. Read the headline first. `./ctrl <action> --help` prints that action's flags.
@@ -139,7 +142,7 @@ Spawns a Cursor cloud agent that drives one Linear ticket. The ticket carries th
 
 Ties a pending test result to the session that is running it and records the Cursor model that is running it. The result already names its definition. An unknown session, or a result that is missing or not pending, is a failure.
 
-- `--session-id <id>` — the id printed by `./client start`.
+- `--session-id <id>` — the id printed by `./client start`; `SESSION_ID` when omitted.
 - `--test-result-id <id>` — the result UUID from the Linear issue.
 - `--model <id>` — the Cursor model id that is running this result.
 - `--server-url <url>` — accepted and ignored; tickets written before it went still name it.
@@ -188,9 +191,9 @@ Prints the most recent sessions, newest first, one per line: the status, colored
 ./ctrl session --session-id <id> --status|--logs|--test-def|--test-results|--test-run|--actions|--images|--debug-logs|--diagnosis|--all
 ```
 
-Prints what is stored for one session, as JSON. At least one selector is required; one selector prints that value, several print an object keyed by them. An unknown session is a failure. Not used while driving a guest; a reviewing agent starts here, and the session id is all it needs — everything else is reached from it.
+Prints what is stored for one session, as JSON. At least one selector is required; one selector prints that value, several print an object keyed by them. An unknown session is a failure. Not used while driving a guest; a reviewing agent starts here, and the session id is all it needs — everything else is reached from it. With only a test result id in hand, [session --search](#session---search) finds the session first.
 
-- `--session-id <id>` — the session.
+- `--session-id <id>` — the session; `SESSION_ID` when omitted.
 - `--status` — the session row: `{ id, config, status, reason, startedAt, endedAt }`. `status` and `reason` are the driver's verdict as `./client stop` recorded it; `config` is what it booted.
 - `--logs` — its log lines, oldest first.
 - `--test-def` — the test definition its result ran, in the wording it ran (a later `test define` does not change it), or `null`.
@@ -205,6 +208,24 @@ Prints what is stored for one session, as JSON. At least one selector is require
 ```bash
 ./ctrl session --session-id 6f1c...e2a9 --all
 ./ctrl session --session-id 6f1c...e2a9 --debug-logs
+```
+
+## session --search
+
+```
+./ctrl session --search --test-result-id <id>
+```
+
+The other way round from [session](#session): a test result id in, the id of the session that ran it out, as one bare line and nothing else, so a shell can capture it into `SESSION_ID` and every command after reads it. A result nobody has (`session: no test result <id>`), or one no session has started yet (`session: result <id> has no session yet`), is a failure. Not used while driving a guest.
+
+- `--search` — required; the verb of this form.
+- `--test-result-id <id>` — the result UUID from the Linear issue. Without `--search` it is refused (`session: --test-result-id needs --search`); `--search` without it likewise (`session: --search needs --test-result-id`).
+- The selectors are refused (`session: --search takes no selector`): inspect through the id printed. `--session-id` and `SESSION_ID` do not affect a search; the result names the session.
+
+```bash
+./ctrl session --search --test-result-id 2222...2222
+SESSION_ID=$(./ctrl session --search --test-result-id 2222...2222) && export SESSION_ID
+./ctrl session --all
 ```
 
 ## error-type new
@@ -244,7 +265,7 @@ Prints every error type, ordered by key, one per line: the key, two spaces, the 
 
 Records the post-run diagnosis: a reviewer's verdict on one session that has ended, whatever the driver said about it: a `succeeded`, `failed` or `aborted` stop, or the ten-minute timeout. Read the evidence first (`session --all`; the final image through `./session image --image-id <id> -o <file>`, and the images around any step the logs or actions make suspect, against the definition's proof; the debug log), then say whether the proof landed. A `failed` verdict names its cause with the matching type from [error-type list](#error-type-list); only when none matches is one minted with [error-type new](#error-type-new), rarely. One diagnosis per session: a second is a failure and the first stands. Not used while driving a guest.
 
-- `--session-id <id>` — the session. Unknown, or still running or downloading, is a failure (`diagnose: session <id> is still running`).
+- `--session-id <id>` — the session; `SESSION_ID` when omitted. Unknown, or still running or downloading, is a failure (`diagnose: session <id> is still running`).
 - `--verdict <verdict>` — `passed` when the proof is on screen, `failed` when it is not or the session never got there. The reviewer's own answer; it may contradict the session status and the test result.
 - `--type <key>` — the cause of a `failed` verdict, an existing error type key. Required with `failed` (`diagnose: --verdict failed needs --type`), refused with `passed` (`diagnose: --verdict passed takes no --type`). A key that is not in the table is a failure: `diagnose: no error type <key>; create it with ./ctrl error-type new`.
 - `--summary <text>` — what happened, in the reviewer's words, from the evidence.
@@ -263,7 +284,7 @@ Records the post-run diagnosis: a reviewer's verdict on one session that has end
 
 Spawns a Cursor cloud agent that reviews one ended session and records its verdict with [diagnose](#diagnose). The agent is handed the session id and the reviewer's guide (`ctrl-diagnose.md`), nothing else: it reads the rest back from the database with [session](#session). Prints a link to the agent as soon as it starts; does not wait for it. Not used while driving a guest. Reads `CURSOR_API_TOKEN`.
 
-- `--session-id <id>` — the session. Unknown, still running or downloading, or already diagnosed is a failure (`diagnose run: session <id> already has a diagnosis`), before any agent is spawned.
+- `--session-id <id>` — the session; `SESSION_ID` when omitted. Unknown, still running or downloading, or already diagnosed is a failure (`diagnose run: session <id> already has a diagnosis`), before any agent is spawned.
 
 ```bash
 ./ctrl diagnose run --session-id 6f1c...e2a9

@@ -456,6 +456,8 @@ export const fakeTestStore = (
         row.finishedAt = new Date();
         return true;
       }),
+    findResult: (resultId) =>
+      Effect.sync(() => Option.fromUndefinedOr(results.find((row) => sameId(row.id, resultId)))),
     // Inner joins, as the real query: a result whose definition or run is missing is no row.
     resultForSession: (sessionId) =>
       Effect.sync(() =>
