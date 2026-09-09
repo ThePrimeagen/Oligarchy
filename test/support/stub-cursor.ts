@@ -1,7 +1,5 @@
 import { once } from "node:events";
 import { createServer, type Server } from "node:http";
-import type { ModelListItem } from "@cursor/sdk";
-import * as Catalog from "./cursor-catalog.ts";
 
 export type CursorRequest = {
   readonly method: string | undefined;
@@ -28,14 +26,13 @@ const readBody = (incoming: import("node:http").IncomingMessage): Promise<string
     incoming.on("end", () => resolve(body));
   });
 
-// A stand-in for api.cursor.com that @cursor/sdk reaches through CURSOR_BACKEND_URL: it lists the
-// catalog it is given (grok-4.6 with its knobs, as captured) and creates whatever agent it is
-// asked for, echoing the id the SDK minted.
+// A stand-in for api.cursor.com that @cursor/sdk reaches through CURSOR_BACKEND_URL: it lists one
+// model and creates whatever agent it is asked for, echoing the id the SDK minted.
 export const startStubCursor = async (
-  options: { readonly models?: ReadonlyArray<ModelListItem> } = {},
+  options: { readonly models?: ReadonlyArray<string> } = {},
 ): Promise<StubCursor> => {
   const requests: Array<CursorRequest> = [];
-  const models = options.models ?? [Catalog.GROK_4_6];
+  const models = options.models ?? ["grok-4.6"];
   const server: Server = createServer((incoming, response) => {
     void readBody(incoming).then((body) => {
       requests.push({
@@ -46,7 +43,11 @@ export const startStubCursor = async (
       });
       if (incoming.method === "GET" && incoming.url === "/v1/models") {
         response.writeHead(200, { "Content-Type": "application/json" });
-        response.end(JSON.stringify({ items: models }));
+        response.end(
+          JSON.stringify({
+            items: models.map((id) => ({ id, displayName: `Cursor ${id}` })),
+          }),
+        );
         return;
       }
       if (incoming.method === "POST" && incoming.url === "/v1/agents") {

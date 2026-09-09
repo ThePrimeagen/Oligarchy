@@ -101,48 +101,6 @@ describe("brands", () => {
   });
 });
 
-describe("model choice", () => {
-  it("accepts the six reasoning levels and refuses any other spelling", () => {
-    const is = Schema.is(Domain.Reasoning);
-    for (const level of ["none", "low", "medium", "high", "xhigh", "max"]) {
-      expect(is(level), level).toBe(true);
-    }
-    expect(is("extra-high")).toBe(false);
-    expect(is("mid")).toBe(false);
-    expect(is("")).toBe(false);
-  });
-
-  it("accepts the two agent types and refuses anything else", () => {
-    const is = Schema.is(Domain.AgentType);
-    expect(is("driving-agent")).toBe(true);
-    expect(is("diagnosing-agent")).toBe(true);
-    expect(is("developing-agent")).toBe(false);
-    expect(is("")).toBe(false);
-  });
-
-  // The label is what a driver records with `ctrl test start --model` and a reviewer with
-  // `ctrl diagnose --model`: the model, then the reasoning, then `fast` when it runs fast.
-  it("labels the default grok-4.6-high-fast", () => {
-    expect(Domain.modelLabel(Domain.DEFAULT_MODEL)).toBe("grok-4.6-high-fast");
-  });
-
-  it("labels a model by what was asked of it: id alone, with reasoning, with fast", () => {
-    expect(Domain.modelLabel({ model: "composer-2.5" })).toBe("composer-2.5");
-    expect(Domain.modelLabel({ model: "gpt-5.6-sol", reasoning: "max" })).toBe("gpt-5.6-sol-max");
-    expect(Domain.modelLabel({ model: "composer-2.5", fast: true })).toBe("composer-2.5-fast");
-    expect(Domain.modelLabel({ model: "grok-4.6", reasoning: "xhigh", fast: true })).toBe(
-      "grok-4.6-xhigh-fast",
-    );
-  });
-
-  it("leaves fast out of the label when the model is asked not to run fast", () => {
-    expect(Domain.modelLabel({ model: "grok-4.6", reasoning: "high", fast: false })).toBe(
-      "grok-4.6-high",
-    );
-    expect(Domain.modelLabel({ model: "composer-2.5", fast: false })).toBe("composer-2.5");
-  });
-});
-
 describe("QmpInbound", () => {
   const greeting = `{"QMP": {"version": {"qemu": {"micro": 0, "minor": 2, "major": 9}, "package": ""}, "capabilities": ["oob"]}}`;
   const success = `{"return": {}, "id": 1}`;

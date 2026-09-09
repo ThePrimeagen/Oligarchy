@@ -159,23 +159,8 @@ export class Servers extends HttpApiGroup.make("Servers")
   .middleware(BearerAuth)
   .middleware(RouteBoundary) {}
 
-// Agents group: one cloud agent per request, driving a ticket or diagnosing a session; bearer
-// required. It neither forwards nor places, so it sits behind the proxy's own boundary and
-// declares the two refusals of its own: a model the catalog cannot honour, and Cursor failing.
-export const spawn = HttpApiEndpoint.post("spawn", "/agent", {
-  payload: Contract.AgentBody,
-  success: Contract.AgentStarted,
-  error: [Errors.ModelUnavailableWire, Errors.CursorAgentFailedWire],
-});
-
-export class Agents extends HttpApiGroup.make("Agents")
-  .add(spawn)
-  .middleware(BearerAuth)
-  .middleware(ApiBoundary) {}
-
 export class ReverseProxyApi extends HttpApi.make("OligarchyReverseProxy")
   .add(RoutedSessions)
-  .add(Servers)
-  .add(Agents) {}
+  .add(Servers) {}
 
 export const VERSION = "0.0.0";

@@ -106,25 +106,6 @@ const cases: ReadonlyArray<WireCase> = [
     error: Errors.NoServer.make({ message: "no server registered", agentId: AGENT_ID }),
     status: 503,
   },
-  {
-    name: "ModelUnavailable",
-    wire: Errors.ModelUnavailableWire,
-    error: Errors.ModelUnavailable.make({
-      message: 'model "composer-2.5" has no reasoning level',
-      model: "composer-2.5",
-    }),
-    status: 400,
-  },
-  {
-    name: "CursorAgentFailed",
-    wire: Errors.CursorAgentFailedWire,
-    error: Errors.CursorAgentFailed.make({
-      message: "Invalid API key",
-      retryable: false,
-      cause: new Error("Invalid API key"),
-    }),
-    status: 502,
-  },
 ];
 
 describe("API error wire codecs", () => {

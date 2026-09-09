@@ -101,26 +101,6 @@ export class Servers extends Schema.Class<Servers>("@oligarchy/shared/contract/S
   servers: Schema.Array(Server),
 }) {}
 
-// POST /agent on the reverse proxy: what the agent works on (the Linear ticket a driving agent
-// completes, the session a diagnosing agent reviews), which kind it is, and the model. No model
-// means the default; reasoning and fast are kept as given.
-export class AgentBody extends Schema.Class<AgentBody>("@oligarchy/shared/contract/AgentBody")({
-  task: Schema.NonEmptyString,
-  type: Domain.AgentType,
-  model: Schema.optionalKey(Schema.NonEmptyString),
-  reasoning: Schema.optionalKey(Domain.Reasoning),
-  fast: Schema.optionalKey(Schema.Boolean),
-}) {}
-
-// The agent that started: its id, where to watch it, and the model label it was told it runs as.
-export class AgentStarted extends Schema.Class<AgentStarted>(
-  "@oligarchy/shared/contract/AgentStarted",
-)({
-  id: Schema.String,
-  url: Schema.String,
-  model: Schema.String,
-}) {}
-
 const STORED_IMAGE_ORIGIN = "https://oligarchy.trm.sh";
 
 export const StoredImageUrl = (id: string): string => `${STORED_IMAGE_ORIGIN}/images/${id}`;

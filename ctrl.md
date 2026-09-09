@@ -43,7 +43,7 @@ If you are an agent driving a guest, you need two of these: [test start](#test-s
 ./ctrl error-type new  --key <key> --description <text>
 ./ctrl error-type list [--json]
 ./ctrl diagnose       --session-id <id> --verdict passed|failed [--type <key>] --summary <text> --model <id>
-./ctrl diagnose run   --session-id <id> [--model <id>]
+./ctrl diagnose run   --session-id <id>
 ```
 
 The action comes first. Every value is a flag; there are no positional arguments. Flags may sit in any order after the action.
@@ -124,7 +124,7 @@ Prints every Linear issue on the Oligarchy team whose status type is backlog, as
 Spawns a Cursor cloud agent that drives one Linear ticket. The ticket carries the proxy URL for the driver's `./client`. The kickoff prompt names the model the agent runs as, which the driver records with `test start --model`. Prints a link to the agent as soon as it starts; does not wait for it. Not used while driving a guest. Reads `CURSOR_API_TOKEN`.
 
 - `--ticket <linear-ticket>` — the issue identifier created by `test new`.
-- `--model <id>` — the Cursor model id to run the agent on, as Cursor's catalog lists it (`composer-2.5`, `claude-opus-5`); the id alone, so Cursor's own defaults decide how hard it thinks and whether it runs fast, and the prompt names it as given. Omitted, the agent runs on the default (`grok-4.6`, effort high, fast), named in the prompt as `grok-4.6-high-fast`. An id the catalog does not list is a failure (`unknown model "<id>"`), before any agent starts.
+- `--model <id>` — the Cursor model id to run the agent on. Omitted, the agent runs on the default (`grok-4.6`, effort xhigh, fast), named in the prompt as `grok-4.6-xhigh-fast`.
 
 ```bash
 ./ctrl test run --ticket OLI-42
@@ -258,15 +258,13 @@ Records the post-run diagnosis: a reviewer's verdict on one session that has end
 ## diagnose run
 
 ```
-./ctrl diagnose run --session-id <id> [--model <id>]
+./ctrl diagnose run --session-id <id>
 ```
 
-Spawns a Cursor cloud agent that reviews one ended session and records its verdict with [diagnose](#diagnose). The agent is handed the session id, the model it runs as (which it records with `diagnose --model`) and the reviewer's guide (`ctrl-diagnose.md`), nothing else: it reads the rest back from the database with [session](#session). Prints a link to the agent as soon as it starts; does not wait for it. Not used while driving a guest. Reads `CURSOR_API_TOKEN`.
+Spawns a Cursor cloud agent that reviews one ended session and records its verdict with [diagnose](#diagnose). The agent is handed the session id and the reviewer's guide (`ctrl-diagnose.md`), nothing else: it reads the rest back from the database with [session](#session). Prints a link to the agent as soon as it starts; does not wait for it. Not used while driving a guest. Reads `CURSOR_API_TOKEN`.
 
 - `--session-id <id>` — the session. Unknown, still running or downloading, or already diagnosed is a failure (`diagnose run: session <id> already has a diagnosis`), before any agent is spawned.
-- `--model <id>` — the Cursor model id to run the reviewer on, as [test run](#test-run) takes it. Omitted, the default (`grok-4.6`, effort high, fast), named in the prompt as `grok-4.6-high-fast`.
 
 ```bash
 ./ctrl diagnose run --session-id 6f1c...e2a9
-./ctrl diagnose run --session-id 6f1c...e2a9 --model claude-opus-5
 ```

@@ -162,21 +162,15 @@ describe("render happy path", () => {
   );
 
   it.effect(
-    "diagnosing-agent.html: the session, the model and the diagnosis guide; no proxy, nothing of the drive",
+    "diagnosing-agent.html: the session and the diagnosis guide; no proxy, nothing of the drive",
     () =>
       Effect.gen(function* () {
-        const text = yield* real(
-          Prompts.render("diagnosing-agent.html", { SESSION_ID, MODEL: "claude-opus-5-max" }),
-        );
+        const text = yield* real(Prompts.render("diagnosing-agent.html", { SESSION_ID }));
 
         expect(text.includes("{{")).toBe(false);
         expect(text).toContain(`<session_id>${SESSION_ID}</session_id>`);
         expect(text).toContain(`./ctrl session --session-id ${SESSION_ID} --all`);
         expect(text).toContain(`./ctrl diagnose --session-id ${SESSION_ID}`);
-        // The reviewer is told its model once and what to do with it: diagnose records it. The
-        // guide it embeds keeps its own generic wording for the flag.
-        expect(text).toContain("<model>claude-opus-5-max</model>");
-        expect(text).toContain(`--model claude-opus-5-max`);
         expect(text).toContain("--model <the Cursor model id you are running as>");
         // The reviewer reads the database alone: no server url, no token, reaches it.
         expect(text.includes("server_url")).toBe(false);
@@ -217,13 +211,6 @@ describe("render unhappy path", () => {
         );
         expect(withoutModel.message).toBe(
           "prompt: prompts/driving-agent.html uses {{MODEL}}, which has no value",
-        );
-        // A reviewer kicked off without a model would have nothing to record with diagnose.
-        const reviewerWithoutModel = yield* Effect.flip(
-          real(Prompts.render("diagnosing-agent.html", { SESSION_ID })),
-        );
-        expect(reviewerWithoutModel.message).toBe(
-          "prompt: prompts/diagnosing-agent.html uses {{MODEL}}, which has no value",
         );
         const withoutTicket = yield* Effect.flip(
           real(Prompts.render("linear-issue.html", { SESSION_ID, SERVER_URL: SERVER })),
