@@ -322,17 +322,24 @@ describe("POST /linear", () => {
     }),
   );
 
-  it.effect("appends a UTF-8 BOM body as the exact bytes Linear signed, plus a trailing newline", () =>
-    Effect.gen(function* () {
-      const payload = new Uint8Array([0xef, 0xbb, 0xbf, ...new TextEncoder().encode('{"action":"update"}')]);
-      const fixed = fixture();
-      yield* Effect.gen(function* () {
-        const http = yield* HttpClient.HttpClient;
-        const response = yield* webhook(http, payload, sign(payload));
-        expect(response.status).toBe(200);
-      }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.file.writes).toEqual([{ path: RECORD, data: withNewline(payload), flag: "a" }]);
-    }),
+  it.effect(
+    "appends a UTF-8 BOM body as the exact bytes Linear signed, plus a trailing newline",
+    () =>
+      Effect.gen(function* () {
+        const bom = new Uint8Array([
+          0xef,
+          0xbb,
+          0xbf,
+          ...new TextEncoder().encode('{"action":"update"}'),
+        ]);
+        const fixed = fixture();
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          const response = yield* webhook(http, bom, sign(bom));
+          expect(response.status).toBe(200);
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.file.writes).toEqual([{ path: RECORD, data: withNewline(bom), flag: "a" }]);
+      }),
   );
 });
 
