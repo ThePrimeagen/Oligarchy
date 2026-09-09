@@ -66,6 +66,19 @@ describe("heartbeat happy path", () => {
       expect(store.heartbeats).toHaveLength(2);
     }),
   );
+
+  it.effect("deletes its own row when the scope closes, and leaves every other server", () =>
+    Effect.gen(function* () {
+      const store = Stores.fakeServerStore();
+      const other = "http://127.0.0.1:1";
+      store.servers.push(other);
+      const { scope, log } = yield* start(store);
+      expect(store.servers).toEqual([other, URL]);
+      yield* Scope.close(scope, Exit.void);
+      expect(store.servers).toEqual([other]);
+      expect(log.lines).toEqual([]);
+    }),
+  );
 });
 
 describe("heartbeat unhappy path", () => {
@@ -126,5 +139,51 @@ describe("heartbeat unhappy path", () => {
         expect(store.heartbeats).toEqual([{ url: URL, stats: ROW_STATS }]);
         expect(log.lines).toHaveLength(1);
       }),
+  );
+
+  it.effect(
+    "a refused delete is one error line with the driver's reason, and the scope still closes",
+    () =>
+      Effect.gen(function* () {
+        const refusedDelete = Errors.DatabaseError.make({
+          operation: "removeServer",
+          message: "Failed query: delete from servers",
+          cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
+        });
+        const store = Stores.fakeServerStore({
+          removeServer: () => Effect.fail(refusedDelete),
+        });
+        const { scope, log } = yield* start(store);
+        expect(store.servers).toEqual([URL]);
+        yield* Scope.close(scope, Exit.void);
+        expect(store.servers).toEqual([URL]);
+        expect(log.lines).toEqual([
+          {
+            level: "error",
+            text: "unannounce failed: connect ECONNREFUSED 127.0.0.1:5432",
+            sessionId: undefined,
+            agentId: undefined,
+            skipSentry: false,
+            cause: refusedDelete,
+          },
+        ]);
+      }),
+  );
+
+  it.effect("a missing row is not an error", () =>
+    Effect.gen(function* () {
+      const removals: Array<string> = [];
+      const store = Stores.fakeServerStore({
+        removeServer: (url) =>
+          Effect.sync(() => {
+            removals.push(url);
+            return false;
+          }),
+      });
+      const { scope, log } = yield* start(store);
+      yield* Scope.close(scope, Exit.void);
+      expect(removals).toEqual([URL]);
+      expect(log.lines).toEqual([]);
+    }),
   );
 });

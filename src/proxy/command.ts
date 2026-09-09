@@ -61,7 +61,7 @@ export const makeProxyCommand = <RHost, RServe>(server: ProxyServer<RHost, RServ
         Flag.withSchema(Domain.ServerUrl),
         Flag.optional,
         Flag.withDescription(
-          "Announce this server to the fleet under this url, every 30 seconds, as the reverse proxy reaches it",
+          "Announce this server to the fleet under this url, every 30 seconds, and delete the row on shutdown",
         ),
       ),
     },

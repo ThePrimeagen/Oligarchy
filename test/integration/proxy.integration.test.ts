@@ -449,7 +449,7 @@ describe("proxy serving", () => {
     }).pipe(Effect.provide(Postgres.DatabaseLive(dbUrl)));
 
   it.live.skipIf(!hasQemu || dbUrl === "")(
-    "--url names the url on the listen line and writes the server's row as its first heartbeat",
+    "--url names the url on the listen line, writes the server's row as its first heartbeat, and deletes it on SIGTERM",
     () =>
       Effect.gen(function* () {
         const port = yield* Effect.promise(freePort);
@@ -481,6 +481,8 @@ describe("proxy serving", () => {
         const { code } = yield* Effect.promise(() => proxy.exited);
         expect(code, proxy.stdout()).toBe(0);
         expect(proxy.stdout()).not.toContain("heartbeat failed");
+        expect(proxy.stdout()).not.toContain("unannounce failed");
+        expect(yield* announced(url)).toBeUndefined();
       }),
     120_000,
   );

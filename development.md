@@ -491,7 +491,7 @@ NodeRuntime.runMain(main, { disableErrorReporting: true });
   page is the dashboard's (`src/dashboard/`), behind its access control, and reads rows. What it
   shows of a process is what that process wrote on a schedule (the server's `servers` row every
   thirty seconds, its `generation` counting the writes, so a number that stops moving is a process
-  that stopped), never a call into the process from the Worker. The page is text: a table, a
+  that stopped without deleting its row), never a call into the process from the Worker. The page is text: a table, a
   form, and htmx polling one fragment at the interval the rows are written at; a value from a
   row goes into it through JSX, never a string template.
 - Declare endpoints as `HttpApiEndpoint.get/post(name, path, { params, query, payload, success,
