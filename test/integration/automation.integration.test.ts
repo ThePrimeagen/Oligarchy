@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { createHmac } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -9,13 +10,17 @@ import { it } from "@effect/vitest";
 import { Effect } from "effect";
 
 const AUTOMATION = fileURLToPath(new URL("../../automation", import.meta.url));
-const TOKEN = "t";
+const WEBHOOK_SECRET = "whsec_test";
 const EXIT_WITHIN_MS = 60_000;
+
+const sign = (payload: string): string =>
+  createHmac("sha256", WEBHOOK_SECRET).update(payload).digest("hex");
 
 type Process = {
   readonly child: ChildProcess;
-  // The process's HOME: an empty directory of its own, where the record file lands.
+  // Distinct from cwd: a write to $HOME/automation-logs must not satisfy the record-file checks.
   readonly home: string;
+  readonly cwd: string;
   readonly stdout: () => string;
   readonly stderr: () => string;
   readonly exited: Promise<{ readonly code: number | null; readonly signal: string | null }>;
@@ -30,7 +35,8 @@ const environment = (home: string, overrides: Record<string, string>): NodeJS.Pr
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     HOME: home,
-    OLIGARCHY_TOKEN: TOKEN,
+    LINEAR_WEBHOOK_SECRET: WEBHOOK_SECRET,
+    NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --disable-warning=ExperimentalWarning`.trim(),
     https_proxy: "http://127.0.0.1:1",
     http_proxy: "http://127.0.0.1:1",
     no_proxy: "",
@@ -38,19 +44,21 @@ const environment = (home: string, overrides: Record<string, string>): NodeJS.Pr
   };
   delete env.FORCE_COLOR;
   delete env.DATABASE_URL;
+  delete env.OLIGARCHY_TOKEN;
   return env;
 };
 
-// Each process runs in its own empty directory (no `.env` to read) that is also its HOME, so the
-// record file is the test's own; removed once it has exited.
+// Each process gets an empty cwd (no `.env`) and a different empty HOME, so a write under
+// $HOME cannot pass as ./automation-logs. Both directories are removed once it has exited.
 const spawnAutomation = (
   args: ReadonlyArray<string>,
   overrides: Record<string, string> = {},
 ): Process => {
-  const dir = mkdtempSync(join(tmpdir(), "oligarchy-automation-test-"));
+  const home = mkdtempSync(join(tmpdir(), "oligarchy-automation-home-"));
+  const cwd = mkdtempSync(join(tmpdir(), "oligarchy-automation-cwd-"));
   const child = spawn(AUTOMATION, args, {
-    cwd: dir,
-    env: environment(dir, overrides),
+    cwd,
+    env: environment(home, overrides),
     stdio: ["ignore", "pipe", "pipe"],
   });
   let stdout = "";
@@ -74,7 +82,8 @@ const spawnAutomation = (
     });
     child.on("close", (code, signal) => {
       clearTimeout(timer);
-      rmSync(dir, { recursive: true, force: true });
+      rmSync(cwd, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
       for (const listener of listeners) listener();
       resolve({ code, signal });
     });
@@ -103,7 +112,7 @@ const spawnAutomation = (
       listeners.add(check);
       check();
     });
-  return { child, home: dir, stdout: () => stdout, stderr: () => stderr, exited, waitFor };
+  return { child, home, cwd, stdout: () => stdout, stderr: () => stderr, exited, waitFor };
 };
 
 const portOf = (address: string | AddressInfo | null): number =>
@@ -165,12 +174,12 @@ describe("automation startup refusals", () => {
     }),
   );
 
-  it.live("a missing OLIGARCHY_TOKEN exits 1 with OLIGARCHY_TOKEN is not set", () =>
+  it.live("a missing LINEAR_WEBHOOK_SECRET exits 1 with LINEAR_WEBHOOK_SECRET is not set", () =>
     Effect.promise(async () => {
-      const process = spawnAutomation([], { OLIGARCHY_TOKEN: "" });
+      const process = spawnAutomation([], { LINEAR_WEBHOOK_SECRET: "" });
       const { code } = await process.exited;
       expect(code).toBe(1);
-      expect(process.stderr()).toContain("OLIGARCHY_TOKEN is not set");
+      expect(process.stderr()).toContain("LINEAR_WEBHOOK_SECRET is not set");
       expect(process.stdout()).not.toContain("listening");
     }),
   );
@@ -200,71 +209,65 @@ describe("automation serving", () => {
   const served = async (signal: "SIGINT" | "SIGTERM") => {
     const port = await freePort();
     const process = spawnAutomation(["--port", String(port)]);
-    const record = join(process.home, "automation-test");
+    const record = join(process.cwd, "automation-logs");
+    const homeRecord = join(process.home, "automation-logs");
     try {
       await process.waitFor(/oligarchy automation listening/);
       expect(lines(process.stdout())).toContain(
-        `[global] oligarchy automation listening on 127.0.0.1:${String(port)}; recording to ${record}`,
+        `[global] oligarchy automation listening on 127.0.0.1:${String(port)}; recording to ./automation-logs`,
       );
       expect(existsSync(record)).toBe(false);
+      expect(existsSync(homeRecord)).toBe(false);
 
-      const unauthorized = await request(
+      const automate = await request(
         port,
         "POST",
         "/automate",
         { "content-type": "application/json" },
         '{"ticket":"OLI-1","model":"grok-4.6"}',
       );
-      expect(unauthorized.status).toBe(401);
-      expect(await unauthorized.json()).toEqual({ error: "unauthorized" });
+      expect(automate.status).toBe(404);
+      expect(await automate.json()).toEqual({ error: "not found" });
       expect(existsSync(record)).toBe(false);
 
-      const incomplete = await request(
+      const webhookBody = '{"action":"update","type":"Issue","data":{"identifier":"OLI-9"}}';
+      const unsigned = await request(
         port,
         "POST",
-        "/automate",
-        { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
-        '{"ticket":"OLI-1"}',
+        "/linear",
+        { "content-type": "application/json" },
+        webhookBody,
       );
-      expect(incomplete.status).toBe(400);
-      expect(await incomplete.json()).toMatchObject({
-        error: expect.stringContaining('["model"]'),
-      });
+      expect(unsigned.status).toBe(401);
+      expect(await unsigned.json()).toEqual({ error: "unauthorized" });
       expect(existsSync(record)).toBe(false);
 
-      const first = await request(
+      const signed = await request(
         port,
         "POST",
-        "/automate",
-        { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
-        '{"ticket":"OLI-1","model":"grok-4.6"}',
+        "/linear",
+        { "content-type": "application/json", "linear-signature": sign(webhookBody) },
+        webhookBody,
       );
-      expect(first.status).toBe(200);
-      expect(first.headers.get("content-type")).toContain("application/json");
-      expect(await first.json()).toEqual({ ok: "true" });
-      const second = await request(
-        port,
-        "POST",
-        "/automate",
-        { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
-        '{"ticket":"OLI-2","model":"claude-opus-5"}',
-      );
-      expect(second.status).toBe(200);
-      expect(readFileSync(record, "utf8")).toBe(
-        "linear ticket OLI-1; model grok-4.6\nlinear ticket OLI-2; model claude-opus-5\n",
-      );
+      expect(signed.status).toBe(200);
+      expect(signed.headers.get("content-type")).toContain("application/json");
+      expect(await signed.json()).toEqual({ ok: "true" });
+      expect(readFileSync(record, "utf8")).toBe(`${webhookBody}\n`);
+      expect(existsSync(homeRecord)).toBe(false);
 
       const start = await request(
         port,
         "POST",
         "/start",
-        { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+        { "content-type": "application/json" },
         '{"iso":"omarchy.iso","agent":"OLI-1"}',
       );
       expect(start.status).toBe(404);
       expect(await start.json()).toEqual({ error: "not found" });
       const nope = await request(port, "GET", "/automate");
       expect(nope.status).toBe(404);
+      const noGet = await request(port, "GET", "/linear");
+      expect(noGet.status).toBe(404);
     } finally {
       // A failed expectation must not leave the process listening past the test.
       process.child.kill(signal);
@@ -272,20 +275,17 @@ describe("automation serving", () => {
     const { code } = await process.exited;
     expect(code, process.stdout()).toBe(0);
     const output = lines(process.stdout());
-    expect(output).toContain("[global] error: POST /automate failed: unauthorized");
-    // The schema's detail spans two lines: the missing key, then where.
-    expect(output).toContain("[global] error: POST /automate failed: Missing key");
-    expect(output).toContain('  at ["model"]');
-    expect(output).toContain("[OLI-1] automation recorded; grok-4.6");
-    expect(output).toContain("[OLI-2] automation recorded; claude-opus-5");
+    expect(output).toContain("[global] error: POST /linear failed: unauthorized");
+    expect(output).toContain("[global] linear webhook recorded");
+    expect(output.some((line) => line.includes("/automate"))).toBe(false);
     expect(output.some((line) => line.includes("/start"))).toBe(false);
     expect(process.stderr()).toBe("");
 
-    await expect(request(port, "GET", "/automate")).rejects.toThrow();
+    await expect(request(port, "GET", "/linear")).rejects.toThrow();
   };
 
   it.live(
-    "listens without a database, records each request, answers 401, 400 and 404, and exits 0 on SIGINT",
+    "listens without a database, records a signed /linear, answers 401 and 404, and exits 0 on SIGINT",
     () => Effect.promise(() => served("SIGINT")),
     120_000,
   );

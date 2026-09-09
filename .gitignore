@@ -3,6 +3,7 @@
 *.png
 /OVMF_VARS.fd
 /.env
+/automation-logs
 /node_modules
 /.wrangler
 /v1/node_modules

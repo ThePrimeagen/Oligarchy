@@ -1,6 +1,4 @@
 import { createServer } from "node:http";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import { NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node";
 import { Cause, Deferred, Effect, Exit, Layer, type Runtime } from "effect";
 import { Command } from "effect/unstable/cli";
@@ -9,15 +7,14 @@ import * as Config from "../config.ts";
 import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
 import * as Sentry from "../observability/sentry.ts";
-import * as Middleware from "../proxy/middleware.ts";
 import * as Api from "../shared/api.ts";
 import * as AutomationCommand from "./command.ts";
 import * as Handlers from "./handlers.ts";
 
 const HOST = "127.0.0.1";
 
-// Where every request lands, one line each, in the operator's home directory as they asked.
-const RECORD = join(homedir(), "automation-test");
+// Where every request lands, appended in the working directory as they asked.
+const RECORD = "./automation-logs";
 
 // stdout is the convenience copy of the log; Sentry is the record. A write refused by a full
 // filesystem is dropped, never an uncaught exception per line (see the proxy's main).
@@ -51,12 +48,10 @@ const ServerLive = (port: number) =>
     Layer.provide(Layer.succeed(HttpMiddleware.TracerDisabledWhen)(() => true)),
   );
 
-// OLIGARCHY_TOKEN is the one variable this process reads.
-const BearerLive = Layer.unwrap(Effect.map(Config.oligarchyToken, Middleware.bearerAuth));
-
+// LINEAR_WEBHOOK_SECRET is the one variable this process reads: Linear signs POST /linear with it.
 // No database: this service keeps no rows, so its log is stdout and Sentry. Sentry sits beneath
 // Log so Log captures the reporter.
-const MainLive = Layer.mergeAll(Log.Log.layerStdout, BearerLive).pipe(
+const MainLive = Layer.mergeAll(Log.Log.layerStdout, Handlers.LinearWebhookSecret.layer).pipe(
   Layer.provideMerge(Sentry.SentryLive),
   Layer.provideMerge(Config.providerLayer),
   Layer.provideMerge(NodeServices.layer),
@@ -64,9 +59,9 @@ const MainLive = Layer.mergeAll(Log.Log.layerStdout, BearerLive).pipe(
 
 const command = AutomationCommand.makeAutomationCommand({ serve: ServerLive, serverFailed });
 
-// The graph is built before the command runs: a missing OLIGARCHY_TOKEN is the one failure no Log
-// exists to record, so it is printed here. Every later failure logs its own fatal line; a defect
-// has nothing else to say for it.
+// The graph is built before the command runs: a missing LINEAR_WEBHOOK_SECRET is the one failure
+// no Log exists to record, so it is printed here. Every later failure logs its own fatal line; a
+// defect has nothing else to say for it.
 const program = Effect.gen(function* () {
   const services = yield* Layer.build(MainLive).pipe(Effect.tapCause(Render.reportFailure));
   yield* Command.run(command, { version: Api.VERSION }).pipe(

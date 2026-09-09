@@ -163,18 +163,16 @@ export class ReverseProxyApi extends HttpApi.make("OligarchyReverseProxy")
   .add(RoutedSessions)
   .add(Servers) {}
 
-// The automation service: one request names the Linear ticket to drive and the model to drive
-// it with; bearer required. It neither forwards nor places, so the proxy's own boundary suffices.
-export const automate = HttpApiEndpoint.post("automate", "/automate", {
-  payload: Contract.AutomateBody,
+// The automation service: POST /linear is Linear's signed webhook. No oligarchy bearer —
+// Linear signs the body. The proxy's own boundary suffices: this process neither forwards
+// nor places.
+export const linear = HttpApiEndpoint.post("linear", "/linear", {
   success: Contract.Ok,
+  error: Errors.UnauthorizedWire,
 });
 
-export class Automations extends HttpApiGroup.make("Automations")
-  .add(automate)
-  .middleware(BearerAuth)
-  .middleware(ApiBoundary) {}
+export class Linear extends HttpApiGroup.make("Linear").add(linear).middleware(ApiBoundary) {}
 
-export class AutomationApi extends HttpApi.make("OligarchyAutomation").add(Automations) {}
+export class AutomationApi extends HttpApi.make("OligarchyAutomation").add(Linear) {}
 
 export const VERSION = "0.0.0";

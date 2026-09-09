@@ -54,6 +54,7 @@ describe("requiredRedacted", () => {
       expect(Redacted.value(yield* Config.oligarchyToken)).toBe("a");
       expect(Redacted.value(yield* Config.databaseUrl)).toBe("b");
       expect(Redacted.value(yield* Config.linearApiToken)).toBe("c");
+      expect(Redacted.value(yield* Config.linearWebhookSecret)).toBe("f");
       expect(yield* Config.serverUrl).toBe("d");
       expect(yield* Config.sessionId).toBe("e");
     }).pipe(
@@ -62,6 +63,7 @@ describe("requiredRedacted", () => {
           OLIGARCHY_TOKEN: "a",
           DATABASE_URL: "b",
           LINEAR_API_TOKEN: "c",
+          LINEAR_WEBHOOK_SECRET: "f",
           SERVER_URL: "d",
           SESSION_ID: "e",
         }),
