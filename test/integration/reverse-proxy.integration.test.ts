@@ -10,11 +10,9 @@ import { Effect } from "effect";
 import * as Client from "../../src/db/client.ts";
 import * as DbSchema from "../../src/db/schema.ts";
 import * as Postgres from "../support/postgres.ts";
-import * as StubCursor from "../support/stub-cursor.ts";
 
 const REVERSE_PROXY = fileURLToPath(new URL("../../reverse-proxy", import.meta.url));
 const TOKEN = "t";
-const CURSOR_TOKEN = "cursor-t";
 const UNREACHABLE = "postgres://user:sentinel-pw@127.0.0.1:1/oligarchy";
 const EXIT_WITHIN_MS = 60_000;
 
@@ -29,15 +27,12 @@ type Process = {
 };
 
 // Sentry is initialised by the wrapper's --import; a proxy nobody listens on keeps the test
-// run's fatal lines out of the real project without touching the code under test. The Cursor
-// SDK is pointed at a stub the same way (CURSOR_BACKEND_URL), or at nothing.
+// run's fatal lines out of the real project without touching the code under test.
 const environment = (overrides: Record<string, string>): NodeJS.ProcessEnv => {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     OLIGARCHY_TOKEN: TOKEN,
     DATABASE_URL: dbUrl === "" ? UNREACHABLE : dbUrl,
-    CURSOR_API_TOKEN: CURSOR_TOKEN,
-    CURSOR_BACKEND_URL: "http://127.0.0.1:1",
     https_proxy: "http://127.0.0.1:1",
     http_proxy: "http://127.0.0.1:1",
     no_proxy: "",
@@ -173,24 +168,11 @@ describe("reverse proxy startup refusals", () => {
 
   it.live("a missing OLIGARCHY_TOKEN exits 1 with OLIGARCHY_TOKEN is not set", () =>
     Effect.promise(async () => {
-      const process = spawnReverseProxy([], { OLIGARCHY_TOKEN: "", CURSOR_API_TOKEN: "" });
+      const process = spawnReverseProxy([], { OLIGARCHY_TOKEN: "" });
       const { code } = await process.exited;
       expect(code).toBe(1);
       expect(process.stderr()).toContain("OLIGARCHY_TOKEN is not set");
-      expect(process.stderr()).not.toContain("CURSOR_API_TOKEN");
       expect(process.stderr()).not.toContain("sentinel-pw");
-    }),
-  );
-
-  // The reverse proxy spawns agents, so it needs the key at startup, after the proxy's two.
-  it.live("a missing CURSOR_API_TOKEN exits 1 with CURSOR_API_TOKEN is not set", () =>
-    Effect.promise(async () => {
-      const process = spawnReverseProxy([], { CURSOR_API_TOKEN: "" });
-      const { code } = await process.exited;
-      expect(code).toBe(1);
-      expect(process.stderr()).toContain("CURSOR_API_TOKEN is not set");
-      expect(process.stderr()).not.toContain("sentinel-pw");
-      expect(process.stdout()).not.toContain("listening");
     }),
   );
 
@@ -254,12 +236,12 @@ describe("reverse proxy serving", () => {
   const served = async (signal: "SIGINT" | "SIGTERM") => {
     const port = await freePort();
     const diagnosticsPort = await freePort();
-    const stub = await StubCursor.startStubCursor();
-    const process = spawnReverseProxy(
-      ["--port", String(port), "--diagnostics-port", String(diagnosticsPort)],
-      { CURSOR_BACKEND_URL: stub.url },
-    );
-    let spawnedUrl = "";
+    const process = spawnReverseProxy([
+      "--port",
+      String(port),
+      "--diagnostics-port",
+      String(diagnosticsPort),
+    ]);
     try {
       await process.waitFor(/oligarchy reverse proxy listening/);
       expect(lines(process.stdout())).toContain(
@@ -315,67 +297,15 @@ describe("reverse proxy serving", () => {
       );
       expect(noServer.status).toBe(503);
       expect(await noServer.json()).toEqual({ error: "no server registered" });
-
-      // An agent for a ticket, through the Cursor SDK to the stub: the default model, the
-      // driving prompt, and the link back.
-      const spawned = await request(
-        port,
-        "POST",
-        "/agent",
-        { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
-        '{"task":"OLI-2","type":"driving-agent"}',
-      );
-      expect(spawned.status).toBe(200);
-      const started: { id: string; url: string; model: string } = JSON.parse(await spawned.text());
-      expect(started.model).toBe("grok-4.6-high-fast");
-      expect(started.url).toBe(`https://cursor.com/agents/${started.id}`);
-      spawnedUrl = started.url;
-      const created = StubCursor.createdAgents(stub);
-      expect(created).toHaveLength(1);
-      expect(created[0]?.authorization).toBe(`Bearer ${CURSOR_TOKEN}`);
-      const body: { agentId: string; prompt: { text: string }; model: unknown } = JSON.parse(
-        created[0]?.body ?? "{}",
-      );
-      expect(body.agentId).toBe(started.id);
-      expect(body.prompt.text).toMatch(/Review Linear ticket\s+OLI-2/);
-      expect(body.prompt.text).toContain("<model> grok-4.6-high-fast </model>");
-      expect(body.model).toEqual({
-        id: "grok-4.6",
-        params: [
-          { id: "effort", value: "high" },
-          { id: "fast", value: "true" },
-        ],
-      });
-
-      // A level the stub's grok-4.6 does not offer: the catalog refuses it, no agent is created.
-      const refused = await request(
-        port,
-        "POST",
-        "/agent",
-        { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
-        '{"task":"OLI-3","type":"driving-agent","reasoning":"max"}',
-      );
-      expect(refused.status).toBe(400);
-      expect(await refused.json()).toEqual({
-        error: 'model "grok-4.6" has no reasoning level "max"; it has low, medium, high, xhigh',
-      });
-      expect(StubCursor.createdAgents(stub)).toHaveLength(1);
     } finally {
       // A failed expectation must not leave the process listening past the test.
       process.child.kill(signal);
-      await stub.close();
     }
     const { code } = await process.exited;
     expect(code, process.stdout()).toBe(0);
     const output = lines(process.stdout());
     expect(output).toContain("[global] error: POST /send-keys failed: unauthorized");
     expect(output).toContain("[OLI-1] error: POST /start failed: no server registered");
-    expect(output).toContain(
-      `[OLI-2] agent spawned; driving-agent; OLI-2; grok-4.6-high-fast; ${spawnedUrl}`,
-    );
-    expect(output).toContain(
-      '[global] error: POST /agent failed: model "grok-4.6" has no reasoning level "max"; it has low, medium, high, xhigh',
-    );
     expect(
       output.some((line) =>
         line.startsWith(
@@ -392,7 +322,7 @@ describe("reverse proxy serving", () => {
   };
 
   it.live.skipIf(dbUrl === "")(
-    "listens, answers /servers, /agent, 401 and 404, and exits 0 on SIGINT",
+    "listens, answers /servers, 401 and 404, and exits 0 on SIGINT",
     () => serving("SIGINT"),
     120_000,
   );

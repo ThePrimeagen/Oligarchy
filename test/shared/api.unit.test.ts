@@ -152,7 +152,7 @@ describe("ProxyApi", () => {
 describe("ReverseProxyApi", () => {
   const reverse = Api.ReverseProxyApi;
 
-  it("declares every routed path of ProxyApi but /stats, the three server routes and /agent", () => {
+  it("declares every routed path of ProxyApi but /stats, plus the three server routes", () => {
     const table = routes(reverse).map(({ method, path }) => `${method} ${path}`);
     expect(table.sort()).toEqual(
       [
@@ -168,7 +168,6 @@ describe("ReverseProxyApi", () => {
         "POST /servers",
         "DELETE /servers",
         "GET /servers",
-        "POST /agent",
       ].sort(),
     );
     expect(table).not.toContain("GET /stats");
@@ -187,18 +186,12 @@ describe("ReverseProxyApi", () => {
     expect(urls.Servers.register()).toBe("/servers");
     expect(urls.Servers.unregister()).toBe("/servers");
     expect(urls.Servers.servers()).toBe("/servers");
-    expect(urls.Agents.spawn()).toBe("/agent");
   });
 
-  // The routing groups answer with a server's failure or none to place on; the agent group
-  // answers neither, so it sits behind the proxy's own boundary and declares its two refusals.
-  it("requires the bearer and applies BearerAuth then a boundary on every endpoint", () => {
+  it("requires the bearer and applies BearerAuth then RouteBoundary on every endpoint", () => {
     const spec = OpenApi.fromApi(reverse);
     for (const route of routes(reverse)) {
-      expect(route.middleware, route.identifier).toEqual([
-        Api.BearerAuth.key,
-        route.group === "Agents" ? Api.ApiBoundary.key : Api.RouteBoundary.key,
-      ]);
+      expect(route.middleware).toEqual([Api.BearerAuth.key, Api.RouteBoundary.key]);
       const item = spec.paths[route.path];
       const operation =
         route.method === "GET"
@@ -229,20 +222,10 @@ describe("ReverseProxyApi", () => {
     expect(byIdentifier(reverse, "servers").errors).toEqual(boundary);
   });
 
-  it("declares 400, 401 and 500 on /agent plus its own 400 model refusal and 502 Cursor failure", () => {
-    expect(byIdentifier(reverse, "spawn")).toMatchObject({
-      group: "Agents",
-      method: "POST",
-      path: "/agent",
-      errors: [400, 401, 500, 502],
-    });
-  });
-
-  it("leaves ProxyApi untouched: no server or agent routes and no RouteBoundary", () => {
+  it("leaves ProxyApi untouched: no server routes and no RouteBoundary", () => {
     const table = routes(Api.ProxyApi).map(({ method, path }) => `${method} ${path}`);
     expect(table).not.toContain("POST /servers");
     expect(table).not.toContain("GET /servers");
-    expect(table).not.toContain("POST /agent");
     for (const route of routes(Api.ProxyApi)) {
       expect(route.middleware).not.toContain(Api.RouteBoundary.key);
     }

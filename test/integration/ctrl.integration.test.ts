@@ -193,7 +193,7 @@ describe("./ctrl without a database", () => {
     expect(body.model).toEqual({
       id: "grok-4.6",
       params: [
-        { id: "effort", value: "high" },
+        { id: "effort", value: "xhigh" },
         { id: "fast", value: "true" },
       ],
     });
@@ -202,22 +202,6 @@ describe("./ctrl without a database", () => {
       stub.requests.some((request) => request.method === "GET" && request.url === "/v1/models"),
     ).toBe(true);
     expect(created[0]?.authorization).toBe(`Bearer ${TOKEN}`);
-  });
-
-  it("test run --model asks the catalog and refuses a model it does not list, before any agent", async () => {
-    const stub = await cursor();
-    const result = await runCtrl(["test", "run", "--ticket", "OLI-42", "--model", "grok-9"], {
-      DATABASE_URL: UNUSED_DB,
-      CURSOR_API_TOKEN: TOKEN,
-      CURSOR_BACKEND_URL: stub.url,
-    });
-    expect(result.code).toBe(1);
-    expect(result.stdout).toBe("");
-    expect(firstLine(result.stderr)).toBe('unknown model "grok-9"');
-    expect(
-      stub.requests.some((request) => request.method === "GET" && request.url === "/v1/models"),
-    ).toBe(true);
-    expect(StubCursor.createdAgents(stub)).toEqual([]);
   });
 
   it("test run takes no server URL and wants CURSOR_API_TOKEN after parsing", async () => {
@@ -934,7 +918,7 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
     expect(body.model).toEqual({
       id: "grok-4.6",
       params: [
-        { id: "effort", value: "high" },
+        { id: "effort", value: "xhigh" },
         { id: "fast", value: "true" },
       ],
     });

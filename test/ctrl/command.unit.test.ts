@@ -856,19 +856,19 @@ describe("test run", () => {
       const h = harness({ cursor: FakeCursor.fakeCursor({ agentId: "bc-42" }) });
       const exit = yield* h.run(["test", "run", "--ticket", "OLI-42"], WITH_CURSOR);
       expect(Exit.isSuccess(exit)).toBe(true);
-      // Without --model the agent runs on the default, grok-4.6 at effort high running fast, and
-      // the prompt names that default so the driver records it at test start.
+      // Without --model the agent runs on the default, and the prompt names that default so the
+      // driver records it at test start.
       expect(h.cursor.calls).toEqual([
         {
           text: yield* rendered("driving-agent.html", {
             LINEAR_TICKET: "OLI-42",
-            MODEL: "grok-4.6-high-fast",
+            MODEL: "grok-4.6-xhigh-fast",
           }),
-          choice: { model: "grok-4.6", reasoning: "high", fast: true },
+          model: undefined,
         },
       ]);
       expect(h.cursor.calls[0]?.text).toMatch(/Review Linear ticket\s+OLI-42/);
-      expect(h.cursor.calls[0]?.text).toContain("<model> grok-4.6-high-fast </model>");
+      expect(h.cursor.calls[0]?.text).toContain("<model> grok-4.6-xhigh-fast </model>");
       expect(h.cursor.calls[0]?.text.includes(SERVER)).toBe(false);
       expect(yield* stdout).toEqual([
         "Agent here, go check it out for more information: https://cursor.com/agents/bc-42",
@@ -877,7 +877,7 @@ describe("test run", () => {
     }),
   );
 
-  it.effect("--model runs the agent on that model alone and names it in the prompt (happy)", () =>
+  it.effect("--model runs the agent on that model and names it in the prompt (happy)", () =>
     Effect.gen(function* () {
       const h = harness({ cursor: FakeCursor.fakeCursor({ agentId: "bc-43" }) });
       const exit = yield* h.run(
@@ -885,31 +885,16 @@ describe("test run", () => {
         WITH_CURSOR,
       );
       expect(Exit.isSuccess(exit)).toBe(true);
-      // The id alone: the vendor's own defaults decide how hard it thinks and how fast it runs.
       expect(h.cursor.calls).toEqual([
         {
           text: yield* rendered("driving-agent.html", {
             LINEAR_TICKET: "OLI-42",
             MODEL: "composer-2.5",
           }),
-          choice: { model: "composer-2.5" },
+          model: { id: "composer-2.5" },
         },
       ]);
       expect(h.cursor.calls[0]?.text).toContain("--model composer-2.5");
-    }),
-  );
-
-  it.effect("a model the catalog refuses fails with the refusal and prints no link (unhappy)", () =>
-    Effect.gen(function* () {
-      const refusal = Errors.ModelUnavailable.make({
-        message: 'unknown model "grok-9"',
-        model: "grok-9",
-      });
-      const h = harness({ cursor: FakeCursor.fakeCursor({ failure: refusal }) });
-      expect(
-        yield* h.fail(["test", "run", "--ticket", "OLI-42", "--model", "grok-9"], WITH_CURSOR),
-      ).toBe(refusal);
-      expect(yield* stdout).toEqual([]);
     }),
   );
 
@@ -935,10 +920,7 @@ describe("test run", () => {
         expect(fs.reads).toHaveLength(1);
         expect(fs.reads[0]).toMatch(DRIVING_AGENT_PATH);
         expect(h.cursor.calls).toEqual([
-          {
-            text: "Review Linear ticket OLI-42\n",
-            choice: { model: "grok-4.6", reasoning: "high", fast: true },
-          },
+          { text: "Review Linear ticket OLI-42\n", model: undefined },
         ]);
       }),
   );
@@ -1917,27 +1899,18 @@ const DIAGNOSING_AGENT_PATH = /\/prompts\/diagnosing-agent\.html$/;
 
 describe("diagnose run", () => {
   it.effect(
-    "kicks off the reviewer with the session, the default model and the diagnosis guide, and prints its link (happy)",
+    "kicks off the reviewer with the session and the diagnosis guide, and prints its link (happy)",
     () =>
       Effect.gen(function* () {
         const h = harness({ cursor: FakeCursor.fakeCursor({ agentId: "bc-42" }) });
         h.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
         const exit = yield* h.run(DIAGNOSE_RUN, WITH_CURSOR);
         expect(Exit.isSuccess(exit)).toBe(true);
-        // The prompt names the model the reviewer runs as, so it records it with diagnose.
         expect(h.cursor.calls).toEqual([
-          {
-            text: yield* rendered("diagnosing-agent.html", {
-              SESSION_ID,
-              MODEL: "grok-4.6-high-fast",
-            }),
-            choice: { model: "grok-4.6", reasoning: "high", fast: true },
-          },
+          { text: yield* rendered("diagnosing-agent.html", { SESSION_ID }), model: undefined },
         ]);
         const text = h.cursor.calls[0]?.text ?? "";
         expect(text).toContain(`<session_id>${SESSION_ID}</session_id>`);
-        expect(text).toContain("<model>grok-4.6-high-fast</model>");
-        expect(text).toContain("--model grok-4.6-high-fast");
         expect(text).toContain("## diagnose");
         expect(text.includes("{{")).toBe(false);
         // The reviewer reads the database alone: no proxy is named anywhere in its prompt.
@@ -1959,37 +1932,6 @@ describe("diagnose run", () => {
       expect(h.cursor.calls).toHaveLength(1);
       expect(h.cursor.calls[0]?.text).toContain(`--session-id ${SESSION_ID} --all`);
       expect(h.cursor.calls[0]?.text.includes(SERVER)).toBe(false);
-    }),
-  );
-
-  it.effect(
-    "--model runs the reviewer on that model alone and names it in the prompt (happy)",
-    () =>
-      Effect.gen(function* () {
-        const h = harness({ cursor: FakeCursor.fakeCursor({ agentId: "bc-43" }) });
-        h.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
-        const exit = yield* h.run([...DIAGNOSE_RUN, "--model", "claude-opus-5"], WITH_CURSOR);
-        expect(Exit.isSuccess(exit)).toBe(true);
-        expect(h.cursor.calls).toEqual([
-          {
-            text: yield* rendered("diagnosing-agent.html", { SESSION_ID, MODEL: "claude-opus-5" }),
-            choice: { model: "claude-opus-5" },
-          },
-        ]);
-        expect(h.cursor.calls[0]?.text).toContain("--model claude-opus-5");
-        expect(yield* stdout).toEqual([
-          "Agent here, go check it out for more information: https://cursor.com/agents/bc-43",
-        ]);
-      }),
-  );
-
-  it.effect("an empty --model is refused before any agent starts (unhappy)", () =>
-    Effect.gen(function* () {
-      const h = harness();
-      h.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
-      const exit = yield* h.run([...DIAGNOSE_RUN, "--model", ""], WITH_CURSOR);
-      expect(helpErrors(exit).join("\n")).toMatch(/--model.*length of at least 1/s);
-      expect(h.cursor.calls).toEqual([]);
     }),
   );
 
