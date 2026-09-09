@@ -36,9 +36,9 @@ export const AutomationsLive = (record: string) =>
     ),
   );
 
-// No payload schema: Linear's HMAC is over the raw bytes, and the record is that same text. A
-// JSON payload would parse and lose the exact body. The request is the HttpServerRequest
-// service: handleRaw's request widens the requirements channel to unknown.
+// No payload schema: Linear's HMAC is over the raw bytes, and the record is those same bytes
+// plus a trailing newline. A JSON payload would parse and lose the exact body. The request is
+// the HttpServerRequest service: handleRaw's request widens the requirements channel to unknown.
 export const LinearLive = (record: string) =>
   HttpApiBuilder.group(Api.AutomationApi, "Linear", (handlers) =>
     handlers.handle("linear", () =>
@@ -57,9 +57,11 @@ export const LinearLive = (record: string) =>
         ) {
           return yield* Errors.Unauthorized.make({});
         }
-        const text = new TextDecoder().decode(bytes);
+        const recorded = new Uint8Array(bytes.length + 1);
+        recorded.set(bytes);
+        recorded[bytes.length] = 0x0a;
         yield* fs
-          .writeFileString(record, `${text}\n`, { flag: "a" })
+          .writeFile(record, recorded, { flag: "a" })
           .pipe(Effect.mapError((cause) => Errors.Internal.make({ cause })));
         yield* log.info("linear webhook recorded");
         return ok;

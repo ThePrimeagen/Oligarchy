@@ -13,7 +13,7 @@ import * as Handlers from "./handlers.ts";
 
 const HOST = "127.0.0.1";
 
-// Where every request lands, one line each, in the working directory as they asked.
+// Where every request lands, appended in the working directory as they asked.
 const RECORD = "./automation-logs";
 
 // stdout is the convenience copy of the log; Sentry is the record. A write refused by a full

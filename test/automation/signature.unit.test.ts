@@ -13,12 +13,13 @@ describe("Signature.matches", () => {
     expect(Signature.matches(SECRET, sign(SECRET, BODY), BODY)).toBe(true);
   });
 
-  it("rejects a missing, empty, non-hex, short or wrong signature, and a different body or secret", () => {
+  it("rejects a missing, empty, non-hex, short, odd-length or wrong signature, and a different body or secret", () => {
     const good = sign(SECRET, BODY);
     expect(Signature.matches(SECRET, undefined, BODY)).toBe(false);
     expect(Signature.matches(SECRET, "", BODY)).toBe(false);
     expect(Signature.matches(SECRET, "not-hex", BODY)).toBe(false);
     expect(Signature.matches(SECRET, good.slice(0, 16), BODY)).toBe(false);
+    expect(Signature.matches(SECRET, `${good}f`, BODY)).toBe(false);
     expect(Signature.matches(SECRET, "00".repeat(32), BODY)).toBe(false);
     expect(Signature.matches(SECRET, good, new TextEncoder().encode("{}"))).toBe(false);
     expect(Signature.matches("other", good, BODY)).toBe(false);

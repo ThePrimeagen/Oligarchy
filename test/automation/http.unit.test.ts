@@ -23,7 +23,7 @@ const SecretLive = Layer.succeed(Handlers.LinearWebhookSecret)(
 
 type Write = {
   readonly path: string;
-  readonly data: string;
+  readonly data: string | Uint8Array;
   readonly flag: FileSystem.OpenFlag | undefined;
 };
 
@@ -32,18 +32,34 @@ type RecordFile = {
   readonly layer: Layer.Layer<FileSystem.FileSystem>;
 };
 
-// A FileSystem that records every string written, or refuses each write as a file it may not open.
+const denied = (path: string) => Effect.fail(FakeFs.permissionDenied("open", path));
+
+// A FileSystem that records every write, or refuses each one as a file it may not open.
 const recordFile = (refuse = false): RecordFile => {
   const writes: Array<Write> = [];
   const layer = FileSystem.layerNoop({
     writeFileString: (path, data, options) =>
       refuse
-        ? Effect.fail(FakeFs.permissionDenied("open", path))
+        ? denied(path)
+        : Effect.sync(() => {
+            writes.push({ path, data, flag: options?.flag });
+          }),
+    writeFile: (path, data, options) =>
+      refuse
+        ? denied(path)
         : Effect.sync(() => {
             writes.push({ path, data, flag: options?.flag });
           }),
   });
   return { writes, layer };
+};
+
+const withNewline = (payload: string | Uint8Array): Uint8Array => {
+  const bytes = typeof payload === "string" ? new TextEncoder().encode(payload) : payload;
+  const out = new Uint8Array(bytes.length + 1);
+  out.set(bytes);
+  out[bytes.length] = 0x0a;
+  return out;
 };
 
 type Fixture = {
@@ -69,16 +85,19 @@ const client = HttpApiClient.make(Api.AutomationApi);
 
 const body = (ticket: string, model: string) => Contract.AutomateBody.make({ ticket, model });
 
-const sign = (payload: string): string =>
+const sign = (payload: string | Uint8Array): string =>
   createHmac("sha256", WEBHOOK_SECRET).update(payload).digest("hex");
 
-const webhook = (http: HttpClient.HttpClient, payload: string, signature?: string) =>
+const webhook = (http: HttpClient.HttpClient, payload: string | Uint8Array, signature?: string) =>
   http.post("/linear", {
     headers:
       signature === undefined
         ? { "content-type": "application/json" }
         : { "content-type": "application/json", "linear-signature": signature },
-    body: HttpBody.text(payload, "application/json"),
+    body:
+      typeof payload === "string"
+        ? HttpBody.text(payload, "application/json")
+        : HttpBody.uint8Array(payload, "application/json"),
   });
 
 describe("POST /automate", () => {
@@ -267,7 +286,7 @@ describe("POST /linear", () => {
         expect(response.status).toBe(200);
         expect(yield* response.json).toEqual({ ok: "true" });
       }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.file.writes).toEqual([{ path: RECORD, data: `${payload}\n`, flag: "a" }]);
+      expect(fixed.file.writes).toEqual([{ path: RECORD, data: withNewline(payload), flag: "a" }]);
       expect(fixed.log.lines).toEqual([
         {
           level: "info",
@@ -292,11 +311,27 @@ describe("POST /linear", () => {
         expect((yield* webhook(http, first, sign(first))).status).toBe(200);
         expect((yield* webhook(http, second, sign(second))).status).toBe(200);
       }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.file.writes.map((write) => write.data)).toEqual([`${first}\n`, `${second}\n`]);
+      expect(fixed.file.writes.map((write) => write.data)).toEqual([
+        withNewline(first),
+        withNewline(second),
+      ]);
       expect(FakeLog.texts(fixed.log)).toEqual([
         "linear webhook recorded",
         "linear webhook recorded",
       ]);
+    }),
+  );
+
+  it.effect("appends a UTF-8 BOM body as the exact bytes Linear signed, plus a trailing newline", () =>
+    Effect.gen(function* () {
+      const payload = new Uint8Array([0xef, 0xbb, 0xbf, ...new TextEncoder().encode('{"action":"update"}')]);
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const response = yield* webhook(http, payload, sign(payload));
+        expect(response.status).toBe(200);
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.file.writes).toEqual([{ path: RECORD, data: withNewline(payload), flag: "a" }]);
     }),
   );
 });

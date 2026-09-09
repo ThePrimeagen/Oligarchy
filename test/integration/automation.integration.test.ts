@@ -18,8 +18,9 @@ const sign = (payload: string): string =>
 
 type Process = {
   readonly child: ChildProcess;
-  // The process's HOME: an empty directory of its own, where the record file lands.
+  // Distinct from cwd: a write to $HOME/automation-logs must not satisfy the record-file checks.
   readonly home: string;
+  readonly cwd: string;
   readonly stdout: () => string;
   readonly stderr: () => string;
   readonly exited: Promise<{ readonly code: number | null; readonly signal: string | null }>;
@@ -46,16 +47,17 @@ const environment = (home: string, overrides: Record<string, string>): NodeJS.Pr
   return env;
 };
 
-// Each process runs in its own empty directory (no `.env` to read) that is also its HOME, so the
-// record file is the test's own; removed once it has exited.
+// Each process gets an empty cwd (no `.env`) and a different empty HOME, so a write under
+// $HOME cannot pass as ./automation-logs. Both directories are removed once it has exited.
 const spawnAutomation = (
   args: ReadonlyArray<string>,
   overrides: Record<string, string> = {},
 ): Process => {
-  const dir = mkdtempSync(join(tmpdir(), "oligarchy-automation-test-"));
+  const home = mkdtempSync(join(tmpdir(), "oligarchy-automation-home-"));
+  const cwd = mkdtempSync(join(tmpdir(), "oligarchy-automation-cwd-"));
   const child = spawn(AUTOMATION, args, {
-    cwd: dir,
-    env: environment(dir, overrides),
+    cwd,
+    env: environment(home, overrides),
     stdio: ["ignore", "pipe", "pipe"],
   });
   let stdout = "";
@@ -79,7 +81,8 @@ const spawnAutomation = (
     });
     child.on("close", (code, signal) => {
       clearTimeout(timer);
-      rmSync(dir, { recursive: true, force: true });
+      rmSync(cwd, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
       for (const listener of listeners) listener();
       resolve({ code, signal });
     });
@@ -108,7 +111,7 @@ const spawnAutomation = (
       listeners.add(check);
       check();
     });
-  return { child, home: dir, stdout: () => stdout, stderr: () => stderr, exited, waitFor };
+  return { child, home, cwd, stdout: () => stdout, stderr: () => stderr, exited, waitFor };
 };
 
 const portOf = (address: string | AddressInfo | null): number =>
@@ -205,13 +208,15 @@ describe("automation serving", () => {
   const served = async (signal: "SIGINT" | "SIGTERM") => {
     const port = await freePort();
     const process = spawnAutomation(["--port", String(port)]);
-    const record = join(process.home, "automation-logs");
+    const record = join(process.cwd, "automation-logs");
+    const homeRecord = join(process.home, "automation-logs");
     try {
       await process.waitFor(/oligarchy automation listening/);
       expect(lines(process.stdout())).toContain(
         `[global] oligarchy automation listening on 127.0.0.1:${String(port)}; recording to ./automation-logs`,
       );
       expect(existsSync(record)).toBe(false);
+      expect(existsSync(homeRecord)).toBe(false);
 
       const incomplete = await request(
         port,
@@ -274,6 +279,7 @@ describe("automation serving", () => {
       expect(readFileSync(record, "utf8")).toBe(
         `linear ticket OLI-1; model grok-4.6\nlinear ticket OLI-2; model claude-opus-5\n${webhookBody}\n`,
       );
+      expect(existsSync(homeRecord)).toBe(false);
 
       const start = await request(
         port,
