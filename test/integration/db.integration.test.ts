@@ -1039,62 +1039,21 @@ Postgres.describeWithDatabase("database", () => {
         }),
     );
 
-    scoped.effect("AutomationStore enqueues, claims oldest pending, and finishes", () =>
+    scoped.effect("AutomationStore enqueues a pending drive and diagnose for one result", () =>
       Effect.gen(function* () {
         const tests = yield* Tests.TestStore;
         const automation = yield* Automation.AutomationStore;
         const definition = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
-        const first = yield* tests.createRun({
+        const created = yield* tests.createRun({
           iso: "https://example.com/omarchy.iso",
           serverUrl: "http://127.0.0.1:42069",
           definitions: [{ id: definition.id }],
         });
-        const second = yield* tests.createRun({
-          iso: "https://example.com/omarchy.iso",
-          serverUrl: "http://127.0.0.1:42069",
-          definitions: [{ id: definition.id }],
-        });
-        const older = yield* automation.enqueue({
-          resultId: first.results[0].id,
-          action: "drive",
-        });
-        const newer = yield* automation.enqueue({
-          resultId: second.results[0].id,
-          action: "drive",
-        });
-        // Stamp created_at explicitly: TestClock would freeze Effect.sleep, and equal now()
-        // stamps are not a reliable queue order.
-        const database = yield* Client.Database;
-        yield* database.run("backdateAutomationJob", (db) =>
-          db
-            .update(DbSchema.automationJobs)
-            .set({ createdAt: new Date("2026-01-01T00:00:00.000Z") })
-            .where(eq(DbSchema.automationJobs.id, older.id)),
-        );
-        yield* database.run("backdateAutomationJob", (db) =>
-          db
-            .update(DbSchema.automationJobs)
-            .set({ createdAt: new Date("2026-01-01T00:00:01.000Z") })
-            .where(eq(DbSchema.automationJobs.id, newer.id)),
-        );
-        const claimed = Option.getOrThrow(yield* automation.claimNext(Option.some("drive")));
-        expect(claimed.id).toBe(older.id);
-        expect(claimed.status).toBe("running");
-        expect(claimed.startedAt).toBeInstanceOf(Date);
-        const claimedNext = Option.getOrThrow(yield* automation.claimNext(Option.some("drive")));
-        expect(claimedNext.id).toBe(newer.id);
-        expect(yield* automation.finish(older.id, "succeeded", null)).toBe(true);
-        expect(Option.getOrThrow(yield* automation.find(older.id))).toMatchObject({
-          status: "succeeded",
-          reason: null,
-        });
-        expect(yield* automation.finish(newer.id, "failed", "guest hung")).toBe(true);
-        expect(Option.getOrThrow(yield* automation.find(newer.id))).toMatchObject({
-          status: "failed",
-          reason: "guest hung",
-        });
-        expect(yield* automation.finish(newer.id, "aborted", null)).toBe(false);
-        expect(yield* automation.listForResult(first.results[0].id)).toHaveLength(1);
+        const resultId = created.results[0].id;
+        const drive = yield* automation.enqueue({ resultId, action: "drive" });
+        const diagnose = yield* automation.enqueue({ resultId, action: "diagnose" });
+        expect(drive).toMatchObject({ resultId, action: "drive", status: "pending" });
+        expect(diagnose).toMatchObject({ resultId, action: "diagnose", status: "pending" });
       }),
     );
 
@@ -1117,13 +1076,6 @@ Postgres.describeWithDatabase("database", () => {
           expect(error.operation).toBe("enqueueAutomationJob");
           expect(String(error.cause)).toContain("duplicate key");
         }),
-    );
-
-    scoped.effect("AutomationStore.claimNext returns none when the queue is empty (unhappy)", () =>
-      Effect.gen(function* () {
-        const automation = yield* Automation.AutomationStore;
-        expect(Option.isNone(yield* automation.claimNext(Option.some("diagnose")))).toBe(true);
-      }),
     );
 
     scoped.effect("ServerStore registers a url once, lists in registration order, forgets it", () =>

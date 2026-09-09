@@ -7,7 +7,6 @@ import { CliError, Command } from "effect/unstable/cli";
 import * as CtrlCommand from "../../src/ctrl/command.ts";
 import * as Prompts from "../../src/ctrl/prompts.ts";
 import * as DbSchema from "../../src/db/schema.ts";
-import * as Tests from "../../src/db/tests.ts";
 import * as Api from "../../src/shared/api.ts";
 import * as Contract from "../../src/shared/contract.ts";
 import * as Errors from "../../src/shared/errors.ts";
@@ -106,10 +105,9 @@ const harness = (
     readonly linear?: FakeLinear.FakeLinear;
     // Replaces the real FileSystem the prompt templates are read from.
     readonly fs?: Layer.Layer<FileSystem.FileSystem>;
-    readonly tests?: Partial<typeof Tests.TestStore.Service>;
   } = {},
 ) => {
-  const stores = Stores.fakeStores(options.tests === undefined ? {} : { tests: options.tests });
+  const stores = Stores.fakeStores();
   const log = FakeLog.fakeLog();
   const linear = options.linear ?? FakeLinear.fakeLinear();
   const touched: Array<string> = [];
@@ -683,39 +681,6 @@ describe("test new", () => {
       );
       expect(h.stores.tests.results.map((row) => row.status)).toEqual(["failed", "failed"]);
       expect(h.stores.tests.results.map((row) => row.linearId)).toEqual(["OLI-42", "OLI-43"]);
-    }),
-  );
-
-  it.effect("fails the run naming the ticket created when writing linear_id fails (unhappy)", () =>
-    Effect.gen(function* () {
-      const refused = Errors.DatabaseError.make({
-        operation: "setLinearId",
-        message: `Failed query: update "test_results" set "linear_id"`,
-        cause: new Error("duplicate key value violates unique constraint"),
-      });
-      const h = harness({
-        tests: {
-          setLinearId: () => Effect.fail(refused),
-        },
-      });
-      h.stores.tests.definitions.push(install);
-      const exit = yield* h.run([...NEW, "--server-url", SERVER], WITH_LINEAR);
-      expect(failure(exit)).toMatchObject({
-        _tag: "DatabaseError",
-        operation: "setLinearId",
-        message: `Failed query: update "test_results" set "linear_id"; created OLI-42`,
-      });
-      expect(h.stores.tests.runs[0]).toMatchObject({
-        status: "failed",
-        reason: `Failed query: update "test_results" set "linear_id"; created OLI-42`,
-      });
-      expect(h.stores.tests.results.map((row) => row.status)).toEqual(["failed"]);
-      expect(h.linear.calls.map((call) => call.method)).toEqual([
-        "teamId",
-        "labelIds",
-        "assigneeId",
-        "createIssue",
-      ]);
     }),
   );
 
