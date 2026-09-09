@@ -104,7 +104,7 @@ const linear = (token = TOKEN) => Linear.Linear.layer(Redacted.make(token));
 
 // The ticket body is the prompt module's; a broken checkout is a defect here, not a Linear failure.
 const describedAs = (ticket: string) =>
-  Prompts.render("linear-issue.html", {
+  Prompts.renderLinearIssue({
     LINEAR_TICKET: ticket,
     RUN_ID: experiment.id,
     RESULT_ID: firstTest.id,

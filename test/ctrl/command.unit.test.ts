@@ -11,7 +11,6 @@ import * as Api from "../../src/shared/api.ts";
 import * as Contract from "../../src/shared/contract.ts";
 import * as Errors from "../../src/shared/errors.ts";
 import * as Config from "../support/config.ts";
-import * as FakeCursor from "../support/fake-cursor.ts";
 import * as FakeFs from "../support/fake-fs.ts";
 import * as FakeHttp from "../support/fake-http.ts";
 import * as FakeLinear from "../support/fake-linear.ts";
@@ -99,12 +98,10 @@ const ago = (seconds: number): Date => new Date(NOW - seconds * 1000);
 // Harness
 // ---------------------------------------------------------------------------
 
-// ctrl reaches nothing over HTTP but Linear and Cursor, both faked here: a request to anything
-// else dies.
+// ctrl reaches nothing over HTTP but Linear, faked here: a request to anything else dies.
 const harness = (
   options: {
     readonly linear?: FakeLinear.FakeLinear;
-    readonly cursor?: FakeCursor.FakeCursor;
     // Replaces the real FileSystem the prompt templates are read from.
     readonly fs?: Layer.Layer<FileSystem.FileSystem>;
   } = {},
@@ -112,7 +109,6 @@ const harness = (
   const stores = Stores.fakeStores();
   const log = FakeLog.fakeLog();
   const linear = options.linear ?? FakeLinear.fakeLinear();
-  const cursor = options.cursor ?? FakeCursor.fakeCursor();
   const touched: Array<string> = [];
   const command = CtrlCommand.makeCtrlCommand({
     database: () => {
@@ -122,10 +118,6 @@ const harness = (
     linear: () => {
       touched.push("linear");
       return linear.layer;
-    },
-    cursor: () => {
-      touched.push("cursor");
-      return cursor.layer;
     },
   });
   // A later layer's service wins the merge, so the fake FileSystem replaces Node's.
@@ -140,10 +132,9 @@ const harness = (
   // The failure itself, for a command refused after parsing.
   const fail = (args: ReadonlyArray<string>, env: Record<string, string> = WITH_DB) =>
     Effect.flip(program(args, env));
-  return { stores, log, linear, cursor, touched, run, fail };
+  return { stores, log, linear, touched, run, fail };
 };
 
-const DRIVING_AGENT_PATH = /\/prompts\/driving-agent\.html$/;
 const TEMPLATE = "Review Linear ticket {{LINEAR_TICKET}}\n";
 
 // A FileSystem that serves one template for every prompt file except the ones matched, which
@@ -185,8 +176,8 @@ const stdout = Effect.map(TestConsole.logLines, (lines) => lines.map(String));
 const lastJson = Effect.map(stdout, (lines) => JSON.parse(lines.at(-1) ?? ""));
 
 // The text a command hands an agent, rendered from the checkout's own templates and guides.
-const rendered = (template: Prompts.Template, values: Prompts.Values) =>
-  Prompts.render(template, values).pipe(Effect.provide(NodeFileSystem.layer));
+const rendered = (values: Prompts.Values) =>
+  Prompts.renderLinearIssue(values).pipe(Effect.provide(NodeFileSystem.layer));
 
 // ---------------------------------------------------------------------------
 // test --list
@@ -475,7 +466,7 @@ describe("test new", () => {
 
         // Each ticket is the one template filled with that definition's values and its own ids.
         const descriptionOf = (definition: TestDefinitionRow, index: number, identifier: string) =>
-          rendered("linear-issue.html", {
+          rendered({
             LINEAR_TICKET: identifier,
             RUN_ID: run?.id ?? "",
             RESULT_ID: results[index]?.id ?? "",
@@ -704,7 +695,6 @@ describe("test new", () => {
           message: expect.stringMatching(/^prompt: .*client\.md.*; created OLI-42$/),
           cause: expect.anything(),
         });
-        expect(fs.reads.some((path) => DRIVING_AGENT_PATH.test(path))).toBe(false);
         expect(h.linear.calls.map((call) => call.method)).toEqual([
           "teamId",
           "labelIds",
@@ -845,151 +835,22 @@ describe("test list", () => {
 });
 
 // ---------------------------------------------------------------------------
-// test run
+// gone Cursor agent kickoffs
 // ---------------------------------------------------------------------------
 
-const WITH_CURSOR = { ...WITH_DB, CURSOR_API_TOKEN: "cursor-token" };
-
-describe("test run", () => {
-  it.effect("kicks off the driving agent with the ticket prompt and prints its link (happy)", () =>
-    Effect.gen(function* () {
-      const h = harness({ cursor: FakeCursor.fakeCursor({ agentId: "bc-42" }) });
-      const exit = yield* h.run(["test", "run", "--ticket", "OLI-42"], WITH_CURSOR);
-      expect(Exit.isSuccess(exit)).toBe(true);
-      // Without --model the agent runs on the default, and the prompt names that default so the
-      // driver records it at test start.
-      expect(h.cursor.calls).toEqual([
-        {
-          text: yield* rendered("driving-agent.html", {
-            LINEAR_TICKET: "OLI-42",
-            MODEL: "grok-4.6-xhigh-fast",
-          }),
-          model: undefined,
-        },
-      ]);
-      expect(h.cursor.calls[0]?.text).toMatch(/Review Linear ticket\s+OLI-42/);
-      expect(h.cursor.calls[0]?.text).toContain("<model> grok-4.6-xhigh-fast </model>");
-      expect(h.cursor.calls[0]?.text.includes(SERVER)).toBe(false);
-      expect(yield* stdout).toEqual([
-        "Agent here, go check it out for more information: https://cursor.com/agents/bc-42",
-      ]);
-      expect(h.touched).toEqual(["database", "cursor"]);
-    }),
-  );
-
-  it.effect("--model runs the agent on that model and names it in the prompt (happy)", () =>
-    Effect.gen(function* () {
-      const h = harness({ cursor: FakeCursor.fakeCursor({ agentId: "bc-43" }) });
-      const exit = yield* h.run(
-        ["test", "run", "--ticket", "OLI-42", "--model", "composer-2.5"],
-        WITH_CURSOR,
-      );
-      expect(Exit.isSuccess(exit)).toBe(true);
-      expect(h.cursor.calls).toEqual([
-        {
-          text: yield* rendered("driving-agent.html", {
-            LINEAR_TICKET: "OLI-42",
-            MODEL: "composer-2.5",
-          }),
-          model: { id: "composer-2.5" },
-        },
-      ]);
-      expect(h.cursor.calls[0]?.text).toContain("--model composer-2.5");
-    }),
-  );
-
-  it.effect("an empty --model is refused before any agent starts (unhappy)", () =>
-    Effect.gen(function* () {
-      const h = harness({ cursor: FakeCursor.fakeCursor({ agentId: "bc-44" }) });
-      const exit = yield* h.run(["test", "run", "--ticket", "OLI-42", "--model", ""], WITH_CURSOR);
-      expect(Exit.isFailure(exit)).toBe(true);
-      expect(h.cursor.calls).toEqual([]);
-    }),
-  );
-
-  // v1 read prompts/driving-agent.html alone here; the guides `test new` embeds are not its
-  // business, so a checkout with an unreadable client.md still kicks the agent off.
-  it.effect(
-    "reads only the kickoff template: an unreadable client.md does not stop it (happy)",
-    () =>
-      Effect.gen(function* () {
-        const fs = promptFs(/\/client\.md$/);
-        const h = harness({ cursor: FakeCursor.fakeCursor({ agentId: "bc-42" }), fs: fs.layer });
-        const exit = yield* h.run(["test", "run", "--ticket", "OLI-42"], WITH_CURSOR);
-        expect(Exit.isSuccess(exit)).toBe(true);
-        expect(fs.reads).toHaveLength(1);
-        expect(fs.reads[0]).toMatch(DRIVING_AGENT_PATH);
-        expect(h.cursor.calls).toEqual([
-          { text: "Review Linear ticket OLI-42\n", model: undefined },
-        ]);
-      }),
-  );
-
-  it.effect("fails naming the kickoff template when it is unreadable (unhappy)", () =>
-    Effect.gen(function* () {
-      const fs = promptFs(DRIVING_AGENT_PATH);
-      const h = harness({ cursor: FakeCursor.fakeCursor({ agentId: "bc-42" }), fs: fs.layer });
-      const exit = yield* h.run(["test", "run", "--ticket", "OLI-42"], WITH_CURSOR);
-      expect(failure(exit)).toMatchObject({
-        _tag: "PromptError",
-        message: expect.stringMatching(/^prompt: .*driving-agent\.html/),
-      });
-      expect(h.cursor.calls).toEqual([]);
-      expect(yield* stdout).toEqual([]);
-    }),
-  );
-
-  it.effect("takes no server URL: --server-url is unrecognized (unhappy)", () =>
+describe("test run and diagnose run", () => {
+  it.effect("are unknown actions: they spawn no agent and touch nothing (unhappy)", () =>
     Effect.gen(function* () {
       const h = harness();
-      const exit = yield* h.run(
-        ["test", "run", "--ticket", "OLI-42", `--server-url=${SERVER}`],
-        WITH_CURSOR,
-      );
-      expect(helpErrors(exit).join("\n")).toMatch(/Unrecognized flag: --server-url/);
-      expect(h.cursor.calls).toEqual([]);
-      expect(yield* stdout).not.toContain(expect.stringContaining("Agent here"));
-    }),
-  );
-
-  it.effect("rejects a missing or empty ticket (unhappy)", () =>
-    Effect.gen(function* () {
-      const h = harness();
-      const missing = yield* h.run(["test", "run"], WITH_CURSOR);
-      expect(helpErrors(missing).join("\n")).toMatch(/Missing required flag: --ticket/);
-      const empty = yield* h.run(["test", "run", "--ticket", ""], WITH_CURSOR);
-      expect(helpErrors(empty).join("\n")).toMatch(/--ticket.*length of at least 1/s);
-      expect(h.cursor.calls).toEqual([]);
-    }),
-  );
-
-  it.effect("requires CURSOR_API_TOKEN after parsing and before any call (unhappy)", () =>
-    Effect.gen(function* () {
-      const h = harness();
-      const exit = yield* h.run(["test", "run", "--ticket", "OLI-42"], {
-        ...WITH_DB,
-        CURSOR_API_TOKEN: "",
-      });
-      expect(failure(exit)).toMatchObject({
-        _tag: "MissingVariable",
-        message: "CURSOR_API_TOKEN is not set",
-      });
-      expect(h.cursor.calls).toEqual([]);
+      for (const args of [
+        ["test", "run", "--ticket", "OLI-42"],
+        ["diagnose", "run", "--session-id", SESSION_ID],
+      ]) {
+        const exit = yield* h.run(args, {});
+        expect(helpErrors(exit).length, args.join(" ")).toBeGreaterThan(0);
+      }
       expect(h.touched).toEqual([]);
-    }),
-  );
-
-  it.effect("surfaces the SDK's refusal and prints nothing (unhappy)", () =>
-    Effect.gen(function* () {
-      const refused = Errors.CursorAgentFailed.make({
-        message: "Invalid API key",
-        retryable: false,
-        cause: new Error("Invalid API key"),
-      });
-      const h = harness({ cursor: FakeCursor.fakeCursor({ failure: refused }) });
-      const exit = yield* h.run(["test", "run", "--ticket", "OLI-42"], WITH_CURSOR);
-      expect(failure(exit)).toBe(refused);
-      expect(yield* stdout).toEqual([]);
+      expect(yield* stdout).not.toContain(expect.stringContaining("Agent here"));
     }),
   );
 });
@@ -1890,157 +1751,6 @@ describe("diagnose", () => {
 });
 
 // ---------------------------------------------------------------------------
-// diagnose run
-// ---------------------------------------------------------------------------
-
-const DIAGNOSE_RUN = ["diagnose", "run", "--session-id", SESSION_ID];
-
-const DIAGNOSING_AGENT_PATH = /\/prompts\/diagnosing-agent\.html$/;
-
-describe("diagnose run", () => {
-  it.effect(
-    "kicks off the reviewer with the session and the diagnosis guide, and prints its link (happy)",
-    () =>
-      Effect.gen(function* () {
-        const h = harness({ cursor: FakeCursor.fakeCursor({ agentId: "bc-42" }) });
-        h.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
-        const exit = yield* h.run(DIAGNOSE_RUN, WITH_CURSOR);
-        expect(Exit.isSuccess(exit)).toBe(true);
-        expect(h.cursor.calls).toEqual([
-          { text: yield* rendered("diagnosing-agent.html", { SESSION_ID }), model: undefined },
-        ]);
-        const text = h.cursor.calls[0]?.text ?? "";
-        expect(text).toContain(`<session_id>${SESSION_ID}</session_id>`);
-        expect(text).toContain("## diagnose");
-        expect(text.includes("{{")).toBe(false);
-        // The reviewer reads the database alone: no proxy is named anywhere in its prompt.
-        expect(text.includes("--server-url")).toBe(false);
-        expect(text.includes("SERVER_URL")).toBe(false);
-        expect(yield* stdout).toEqual([
-          "Agent here, go check it out for more information: https://cursor.com/agents/bc-42",
-        ]);
-        expect(h.touched).toEqual(["database", "cursor"]);
-      }),
-  );
-
-  it.effect("reviews a succeeded session too, and ignores SERVER_URL (happy)", () =>
-    Effect.gen(function* () {
-      const h = harness();
-      h.stores.sessions.sessions.push(session(SESSION_ID, "succeeded", ago(500)));
-      const exit = yield* h.run(DIAGNOSE_RUN, { ...WITH_CURSOR, SERVER_URL: SERVER });
-      expect(Exit.isSuccess(exit)).toBe(true);
-      expect(h.cursor.calls).toHaveLength(1);
-      expect(h.cursor.calls[0]?.text).toContain(`--session-id ${SESSION_ID} --all`);
-      expect(h.cursor.calls[0]?.text.includes(SERVER)).toBe(false);
-    }),
-  );
-
-  it.effect("rejects an unknown session before reading a template or spawning (unhappy)", () =>
-    Effect.gen(function* () {
-      const fs = promptFs(/never/);
-      const h = harness({ fs: fs.layer });
-      expect(yield* h.fail(DIAGNOSE_RUN, WITH_CURSOR)).toMatchObject({
-        _tag: "CommandError",
-        message: `diagnose run: no session ${SESSION_ID}`,
-      });
-      expect(fs.reads).toEqual([]);
-      expect(h.cursor.calls).toEqual([]);
-      expect(yield* stdout).toEqual([]);
-    }),
-  );
-
-  it.effect("rejects a session that is still running or downloading (unhappy)", () =>
-    Effect.gen(function* () {
-      const h = harness();
-      h.stores.sessions.sessions.push(
-        session(SESSION_ID, "running", ago(5)),
-        session(OTHER_SESSION_ID, "downloading", ago(5)),
-      );
-      expect(yield* h.fail(DIAGNOSE_RUN, WITH_CURSOR)).toMatchObject({
-        _tag: "CommandError",
-        message: `diagnose run: session ${SESSION_ID} is still running`,
-      });
-      expect(
-        yield* h.fail(["diagnose", "run", "--session-id", OTHER_SESSION_ID], WITH_CURSOR),
-      ).toMatchObject({
-        _tag: "CommandError",
-        message: `diagnose run: session ${OTHER_SESSION_ID} is still downloading`,
-      });
-      expect(h.cursor.calls).toEqual([]);
-    }),
-  );
-
-  it.effect("rejects a session that already has a diagnosis (unhappy)", () =>
-    Effect.gen(function* () {
-      const h = harness();
-      h.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
-      h.stores.diagnosis.errorTypes.push(bootHang);
-      h.stores.diagnosis.diagnoses.push(diagnosis);
-      expect(yield* h.fail(DIAGNOSE_RUN, WITH_CURSOR)).toMatchObject({
-        _tag: "CommandError",
-        message: `diagnose run: session ${SESSION_ID} already has a diagnosis`,
-      });
-      expect(h.cursor.calls).toEqual([]);
-    }),
-  );
-
-  it.effect(
-    "fails naming the kickoff template when it is unreadable, and spawns nothing (unhappy)",
-    () =>
-      Effect.gen(function* () {
-        const fs = promptFs(DIAGNOSING_AGENT_PATH);
-        const h = harness({ fs: fs.layer });
-        h.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
-        expect(yield* h.fail(DIAGNOSE_RUN, WITH_CURSOR)).toMatchObject({
-          _tag: "PromptError",
-          message: expect.stringMatching(/^prompt: .*diagnosing-agent\.html/),
-        });
-        expect(h.cursor.calls).toEqual([]);
-        expect(yield* stdout).toEqual([]);
-      }),
-  );
-
-  it.effect("requires DATABASE_URL then CURSOR_API_TOKEN, after parsing (unhappy)", () =>
-    Effect.gen(function* () {
-      const h = harness();
-      expect(yield* h.fail(DIAGNOSE_RUN, {})).toMatchObject({
-        _tag: "MissingVariable",
-        message: "DATABASE_URL is not set",
-      });
-      expect(yield* h.fail(DIAGNOSE_RUN, { ...WITH_DB, CURSOR_API_TOKEN: "" })).toMatchObject({
-        _tag: "MissingVariable",
-        message: "CURSOR_API_TOKEN is not set",
-      });
-      expect(h.touched).toEqual([]);
-      expect(h.cursor.calls).toEqual([]);
-    }),
-  );
-
-  it.effect("requires --session-id (unhappy)", () =>
-    Effect.gen(function* () {
-      const h = harness();
-      const noSession = yield* h.run(["diagnose", "run"], WITH_CURSOR);
-      expect(helpErrors(noSession).join("\n")).toMatch(/Missing required flag: --session-id/);
-      expect(h.touched).toEqual([]);
-    }),
-  );
-
-  it.effect("surfaces the SDK's refusal and prints nothing (unhappy)", () =>
-    Effect.gen(function* () {
-      const refused = Errors.CursorAgentFailed.make({
-        message: "Invalid API key",
-        retryable: false,
-        cause: new Error("Invalid API key"),
-      });
-      const h = harness({ cursor: FakeCursor.fakeCursor({ failure: refused }) });
-      h.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
-      expect(yield* h.fail(DIAGNOSE_RUN, WITH_CURSOR)).toBe(refused);
-      expect(yield* stdout).toEqual([]);
-    }),
-  );
-});
-
-// ---------------------------------------------------------------------------
 // session inspect
 // ---------------------------------------------------------------------------
 
@@ -2622,7 +2332,6 @@ describe("environment order", () => {
         for (const args of [
           ["test", "--list"],
           ["test", "list"],
-          ["test", "run", "--ticket", "OLI-42"],
           [
             "test",
             "start",
@@ -2640,12 +2349,10 @@ describe("environment order", () => {
           NEW_TYPE,
           ["error-type", "list"],
           DIAGNOSE,
-          DIAGNOSE_RUN,
         ]) {
           const exit = yield* h.run(args, {
             DATABASE_URL: "",
             LINEAR_API_TOKEN: "l",
-            CURSOR_API_TOKEN: "c",
           });
           expect(failure(exit)).toMatchObject({
             _tag: "MissingVariable",
@@ -2687,14 +2394,12 @@ describe("--server-url", () => {
     ["test", "--list", "--history"],
     ["test", "define", "--name", "Change lighting", "--proof", "p"],
     ["test", "list"],
-    ["test", "run", "--ticket", "OLI-42"],
     ["session", "list"],
     ["session", "--session-id", SESSION_ID, "--logs"],
     SEARCH,
     NEW_TYPE,
     ["error-type", "list"],
     DIAGNOSE,
-    DIAGNOSE_RUN,
   ].map((args) => [...args, "--server-url", SERVER]);
 
   it.effect("is required on test new (unhappy)", () =>
@@ -2712,13 +2417,12 @@ describe("--server-url", () => {
       Effect.gen(function* () {
         const h = harness();
         for (const args of withServer) {
-          const exit = yield* h.run(args, { ...WITH_LINEAR, CURSOR_API_TOKEN: "c" });
+          const exit = yield* h.run(args, WITH_LINEAR);
           expect(helpErrors(exit).join("\n"), args.join(" ")).toMatch(
             /Unrecognized flag: --server-url/,
           );
         }
         expect(h.touched).toEqual([]);
-        expect(h.cursor.calls).toEqual([]);
       }),
   );
 
@@ -2753,7 +2457,7 @@ describe("--server-url", () => {
 
   it.effect("SERVER_URL in the environment is ignored by every action but test new (happy)", () =>
     Effect.gen(function* () {
-      const h = harness({ cursor: FakeCursor.fakeCursor({ agentId: "bc-42" }) });
+      const h = harness();
       h.stores.tests.definitions.push(install);
       h.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
       h.stores.sessions.agentRuns.push({
@@ -2763,14 +2467,12 @@ describe("--server-url", () => {
         endedAt: ago(400),
       });
       h.stores.tests.results.push(result(RESULT_ID, "pending", null));
-      // A value test new's flag would refuse: nothing else reads it. In an order each step allows:
-      // the result is started before it is closed, the reviewer is kicked off before the
-      // diagnosis it would write exists.
-      const env = { ...WITH_LINEAR, CURSOR_API_TOKEN: "c", SERVER_URL: "ftp://env.example" };
+      // A value test new's flag would refuse: nothing else reads it. The result is started
+      // before it is closed; NEW_TYPE mints the key DIAGNOSE then writes.
+      const env = { ...WITH_LINEAR, SERVER_URL: "ftp://env.example" };
       for (const args of [
         ["test", "--list"],
         ["test", "list"],
-        ["test", "run", "--ticket", "OLI-42"],
         TEST_START,
         TEST_RESULTS,
         ["session", "list"],
@@ -2778,12 +2480,10 @@ describe("--server-url", () => {
         SEARCH,
         NEW_TYPE,
         ["error-type", "list"],
-        DIAGNOSE_RUN,
         DIAGNOSE,
       ]) {
         expect(Exit.isSuccess(yield* h.run(args, env)), args.join(" ")).toBe(true);
       }
-      expect(h.cursor.calls.some((call) => call.text.includes("ftp://env.example"))).toBe(false);
     }),
   );
 
@@ -2859,17 +2559,10 @@ describe("SESSION_ID", () => {
     }),
   );
 
-  it.effect("stands in for --session-id on diagnose run and diagnose (happy)", () =>
+  it.effect("stands in for --session-id on diagnose (happy)", () =>
     Effect.gen(function* () {
-      // A template of this test's own: the session is what reaches the reviewer, whatever else the
-      // checkout's kickoff template asks for.
-      const fs = promptFs(/never/, "<session_id>{{SESSION_ID}}</session_id>\n");
-      const h = harness({ cursor: FakeCursor.fakeCursor({ agentId: "bc-42" }), fs: fs.layer });
+      const h = harness();
       h.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
-      const run = yield* h.run(["diagnose", "run"], { ...WITH_SESSION, CURSOR_API_TOKEN: "c" });
-      expect(Exit.isSuccess(run)).toBe(true);
-      expect(h.cursor.calls).toHaveLength(1);
-      expect(h.cursor.calls[0]?.text).toContain(`<session_id>${SESSION_ID}</session_id>`);
       h.stores.diagnosis.errorTypes.push(bootHang);
       const written = yield* h.run(
         [
@@ -2929,22 +2622,20 @@ describe("SESSION_ID", () => {
   );
 
   it.effect(
-    "test start, diagnose and diagnose run with neither are usage errors that touch nothing (unhappy)",
+    "test start and diagnose with neither are usage errors that touch nothing (unhappy)",
     () =>
       Effect.gen(function* () {
         const h = harness();
         for (const args of [
           ["test", "start", "--test-result-id", RESULT_ID, "--model", MODEL],
           ["diagnose", "--verdict", "passed", "--summary", "s", "--model", MODEL],
-          ["diagnose", "run"],
         ]) {
-          const exit = yield* h.run(args, { ...WITH_DB, CURSOR_API_TOKEN: "c", SESSION_ID: "" });
+          const exit = yield* h.run(args, { ...WITH_DB, SESSION_ID: "" });
           expect(helpErrors(exit).join("\n"), args.join(" ")).toMatch(
             /Missing required flag: --session-id/,
           );
         }
         expect(h.touched).toEqual([]);
-        expect(h.cursor.calls).toEqual([]);
       }),
   );
 });
@@ -2961,7 +2652,6 @@ describe("--help", () => {
           ["test", "define", "--help"],
           ["test", "new", "--help"],
           ["test", "list", "--help"],
-          ["test", "run", "--help"],
           ["test", "start", "--help"],
           ["test-results", "--help"],
           ["session", "--help"],
@@ -2970,7 +2660,6 @@ describe("--help", () => {
           ["error-type", "new", "--help"],
           ["error-type", "list", "--help"],
           ["diagnose", "--help"],
-          ["diagnose", "run", "--help"],
         ]) {
           // The built-in --help renders and succeeds; runMain exits 0.
           const exit = yield* h.run(args, {});

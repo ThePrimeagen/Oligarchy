@@ -41,7 +41,6 @@ export const requiredRedacted = (
 export const oligarchyToken = requiredRedacted("OLIGARCHY_TOKEN");
 export const databaseUrl = requiredRedacted("DATABASE_URL");
 export const linearApiToken = requiredRedacted("LINEAR_API_TOKEN");
-export const cursorApiToken = requiredRedacted("CURSOR_API_TOKEN");
 
 // For Flag.withFallbackConfig: SERVER_URL="" is unset and the flag's default applies.
 export const serverUrl: EffectConfig.Config<string> = EffectConfig.string("SERVER_URL");

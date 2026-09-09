@@ -363,7 +363,7 @@ export const decodeFollowLine = (line: string): Effect.Effect<FollowEvent, Schem
 - Install the provider once at the entry with `Config.providerLayer`
   (`Layer<never, never, FileSystem>`): `ConfigProvider.fromEnv()` first,
   `ConfigProvider.fromDotEnv({ path: ".env" })` filling missing keys only when `.env` exists,
-  joined with `ConfigProvider.orElse`; an unreadable `.env` is a defect. Why: a cloud agent's
+  joined with `ConfigProvider.orElse`; an unreadable `.env` is a defect. Why: an already-set
   injected variable is never replaced by a file. `fromEnv` treats an empty value as absent.
 - Report a missing or invalid variable as `MissingVariable { name }`, rendered exactly
   `<NAME> is not set`; never a stack trace, never the value. The accessors are `Config.required`

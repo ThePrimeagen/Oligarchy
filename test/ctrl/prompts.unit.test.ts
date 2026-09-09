@@ -6,7 +6,7 @@ import * as Prompts from "../../src/ctrl/prompts.ts";
 import * as FakeFs from "../support/fake-fs.ts";
 
 const SERVER = "https://qemu.example.com";
-const SESSION_ID = "1baaad43-674b-4bdb-88d7-3f18fce50aba";
+const SUB_AGENT = "Grok 4.6 high fast (cursor-grok-4.6-high-fast)";
 
 // Every value a ticket asks for.
 const ticket = {
@@ -51,26 +51,23 @@ const promptFs = (
 const fileNames = (paths: ReadonlyArray<string>): ReadonlyArray<string> =>
   paths.map((path) => path.slice(path.lastIndexOf("/") + 1));
 
-describe("render happy path", () => {
-  it.effect("fills a template from the values, the constants, and the guides it names", () =>
+describe("renderLinearIssue happy path", () => {
+  it.effect("fills the ticket from the values, the constants, and the guides it names", () =>
     Effect.gen(function* () {
       const fs = promptFs({
         contents: {
-          "diagnosing-agent.html":
-            "{{SESSION_ID}} at {{SERVER_URL}}, again {{SESSION_ID}}; by {{SUB_AGENT}}\n<guide>\n{{CTRL_DIAGNOSE_MD}}\n</guide>",
-          "ctrl-diagnose.md": "# Control\n\nRead the session.\n",
+          "linear-issue.html":
+            "{{LINEAR_TICKET}} at {{SERVER_URL}}, again {{LINEAR_TICKET}}; by {{SUB_AGENT}}\n<guide>\n{{CTRL_MD}}\n</guide>",
+          "ctrl-linear.md": "# Control\n\nRead the session.\n",
         },
       });
-      const text = yield* Prompts.render("diagnosing-agent.html", {
-        SESSION_ID,
-        SERVER_URL: SERVER,
-      }).pipe(Effect.provide(fs.layer));
+      const text = yield* Prompts.renderLinearIssue(ticket).pipe(Effect.provide(fs.layer));
       // The guide's trailing newline is trimmed so the closing tag sits under its last line.
       expect(text).toBe(
-        `${SESSION_ID} at ${SERVER}, again ${SESSION_ID}; by ${Prompts.SUB_AGENT}\n<guide>\n# Control\n\nRead the session.\n</guide>`,
+        `OLI-42 at ${SERVER}, again OLI-42; by ${SUB_AGENT}\n<guide>\n# Control\n\nRead the session.\n</guide>`,
       );
-      // The template, then the one guide it names; client.md and ctrl-linear.md are never read.
-      expect(fileNames(fs.reads)).toEqual(["diagnosing-agent.html", "ctrl-diagnose.md"]);
+      // The template, then the one guide it names; client.md is never read.
+      expect(fileNames(fs.reads)).toEqual(["linear-issue.html", "ctrl-linear.md"]);
     }),
   );
 
@@ -81,15 +78,12 @@ describe("render happy path", () => {
         const fs = promptFs({
           unreadable: /\.md$/,
           contents: {
-            "driving-agent.html": "ticket {{LINEAR_TICKET}} {not a placeholder} {{lower}}",
+            "linear-issue.html": "ticket {{LINEAR_TICKET}} {not a placeholder} {{lower}}",
           },
         });
-        const text = yield* Prompts.render("driving-agent.html", {
-          ...ticket,
-          SESSION_ID,
-        }).pipe(Effect.provide(fs.layer));
+        const text = yield* Prompts.renderLinearIssue(ticket).pipe(Effect.provide(fs.layer));
         expect(text).toBe("ticket OLI-42 {not a placeholder} {{lower}}");
-        expect(fileNames(fs.reads)).toEqual(["driving-agent.html"]);
+        expect(fileNames(fs.reads)).toEqual(["linear-issue.html"]);
       }),
   );
 
@@ -97,7 +91,7 @@ describe("render happy path", () => {
     "linear-issue.html: the ticket, run, result, ISO, server, both guides, this test only",
     () =>
       Effect.gen(function* () {
-        const description = yield* real(Prompts.render("linear-issue.html", ticket));
+        const description = yield* real(Prompts.renderLinearIssue(ticket));
 
         expect(description.includes("{{")).toBe(false);
         expect(description).toContain("<agent_id>OLI-42</agent_id>");
@@ -134,100 +128,21 @@ describe("render happy path", () => {
         expect(description).toContain("## test start");
         expect(description).toContain("## test-results");
         expect(description).not.toContain("## diagnose");
-        expect(description).toContain(Prompts.SUB_AGENT);
+        expect(description).toContain(SUB_AGENT);
         expect(description.includes("--session_id")).toBe(false);
         expect(description.includes("--server_url")).toBe(false);
       }),
   );
-
-  it.effect("driving-agent.html: the ticket and the model; the server url is in the ticket", () =>
-    Effect.gen(function* () {
-      const text = yield* real(
-        Prompts.render("driving-agent.html", {
-          LINEAR_TICKET: "OLI-42",
-          MODEL: "gpt-5.6-luna-none-fast",
-        }),
-      );
-      expect(text.includes("{{")).toBe(false);
-      // The formatter wrapped the template between "ticket" and the placeholder.
-      expect(text).toMatch(/Review Linear ticket\s+OLI-42/);
-      expect(text).toContain("<agent-id> OLI-42 </agent-id>");
-      // The driver is told its model once and told what to do with it: test start records it.
-      expect(text).toContain("<model> gpt-5.6-luna-none-fast </model>");
-      expect(text).toContain("--model gpt-5.6-luna-none-fast");
-      expect(text).toContain("./client");
-      expect(text.includes("--server-url")).toBe(false);
-      expect(text.includes("http")).toBe(false);
-    }),
-  );
-
-  it.effect(
-    "diagnosing-agent.html: the session and the diagnosis guide; no proxy, nothing of the drive",
-    () =>
-      Effect.gen(function* () {
-        const text = yield* real(Prompts.render("diagnosing-agent.html", { SESSION_ID }));
-
-        expect(text.includes("{{")).toBe(false);
-        expect(text).toContain(`<session_id>${SESSION_ID}</session_id>`);
-        expect(text).toContain(`./ctrl session --session-id ${SESSION_ID} --all`);
-        expect(text).toContain(`./ctrl diagnose --session-id ${SESSION_ID}`);
-        expect(text).toContain("--model <the Cursor model id you are running as>");
-        // The reviewer reads the database alone: no server url, no token, reaches it.
-        expect(text.includes("server_url")).toBe(false);
-        expect(text.includes("--server-url")).toBe(false);
-        expect(text.includes("SERVER_URL")).toBe(false);
-        expect(text.includes("OLIGARCHY_TOKEN")).toBe(false);
-        expect(text).toContain("# Control\n");
-        expect(text).toContain("## session");
-        expect(text).toContain("## error-type list");
-        expect(text).toContain("## error-type new");
-        expect(text).toContain("## diagnose");
-        expect(text).toContain("--verdict passed|failed");
-        expect(text).toContain("--images");
-        // The screenshots are evidence the reviewer looks at, through the database.
-        expect(text).toContain("./session image --image-id");
-        // The reviewer drives nothing: no client guide, no ticket, no result id.
-        expect(text).not.toContain("./client");
-        expect(text).not.toContain("## test start");
-        expect(text).not.toContain("LINEAR_TICKET");
-        expect(text).not.toContain("--test-result-id");
-      }),
-  );
 });
 
-describe("render unhappy path", () => {
-  it.effect(
-    "a template asking for a ticket nobody has is refused, naming the template and the name",
-    () =>
-      Effect.gen(function* () {
-        const error = yield* Effect.flip(real(Prompts.render("driving-agent.html", {})));
-        expect(error._tag).toBe("PromptError");
-        expect(error.message).toBe(
-          "prompt: prompts/driving-agent.html uses {{LINEAR_TICKET}}, which has no value",
-        );
-        // A driver kicked off without a model would have nothing to record at test start.
-        const withoutModel = yield* Effect.flip(
-          real(Prompts.render("driving-agent.html", { LINEAR_TICKET: "OLI-42" })),
-        );
-        expect(withoutModel.message).toBe(
-          "prompt: prompts/driving-agent.html uses {{MODEL}}, which has no value",
-        );
-        const withoutTicket = yield* Effect.flip(
-          real(Prompts.render("linear-issue.html", { SESSION_ID, SERVER_URL: SERVER })),
-        );
-        expect(withoutTicket.message).toBe(
-          "prompt: prompts/linear-issue.html uses {{LINEAR_TICKET}}, which has no value",
-        );
-      }),
-  );
-
+describe("renderLinearIssue unhappy path", () => {
   it.effect("the first placeholder without a value is the one named, guides included", () =>
     Effect.gen(function* () {
       const fs = promptFs({
         contents: { "linear-issue.html": "{{RUN_ID}} {{NOPE}} {{ALSO}} {{CLIENT_MD}}" },
       });
       const error = yield* Effect.flip(
-        Prompts.render("linear-issue.html", ticket).pipe(Effect.provide(fs.layer)),
+        Prompts.renderLinearIssue(ticket).pipe(Effect.provide(fs.layer)),
       );
       expect(error).toMatchObject({
         _tag: "PromptError",
@@ -241,7 +156,7 @@ describe("render unhappy path", () => {
     Effect.gen(function* () {
       const fs = promptFs({ unreadable: /linear-issue\.html$/ });
       const error = yield* Effect.flip(
-        Prompts.render("linear-issue.html", ticket).pipe(Effect.provide(fs.layer)),
+        Prompts.renderLinearIssue(ticket).pipe(Effect.provide(fs.layer)),
       );
       expect(error._tag).toBe("PromptError");
       expect(error.message).toMatch(/^prompt: .*linear-issue\.html/);
@@ -257,7 +172,7 @@ describe("render unhappy path", () => {
         contents: { "linear-issue.html": "{{CLIENT_MD}} {{CTRL_MD}} {{LINEAR_TICKET}}" },
       });
       const error = yield* Effect.flip(
-        Prompts.render("linear-issue.html", ticket).pipe(Effect.provide(fs.layer)),
+        Prompts.renderLinearIssue(ticket).pipe(Effect.provide(fs.layer)),
       );
       expect(error._tag).toBe("PromptError");
       expect(error.message).toMatch(/^prompt: .*ctrl-linear\.md/);
@@ -268,12 +183,13 @@ describe("render unhappy path", () => {
 
   it.effect("an unreadable guide the template does not name cannot stop a rendering", () =>
     Effect.gen(function* () {
-      const fs = promptFs({ unreadable: /\/(client\.md|ctrl-linear\.md)$/ });
-      const text = yield* Prompts.render("diagnosing-agent.html", { SESSION_ID }).pipe(
-        Effect.provide(fs.layer),
-      );
-      expect(text).toBe("contents of diagnosing-agent.html");
-      expect(fileNames(fs.reads)).toEqual(["diagnosing-agent.html"]);
+      const fs = promptFs({
+        unreadable: /\/(client\.md|ctrl-linear\.md)$/,
+        contents: { "linear-issue.html": "ticket {{LINEAR_TICKET}}" },
+      });
+      const text = yield* Prompts.renderLinearIssue(ticket).pipe(Effect.provide(fs.layer));
+      expect(text).toBe("ticket OLI-42");
+      expect(fileNames(fs.reads)).toEqual(["linear-issue.html"]);
     }),
   );
 });

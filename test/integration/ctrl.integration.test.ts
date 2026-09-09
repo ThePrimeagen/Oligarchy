@@ -2,19 +2,17 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Client } from "pg";
 import * as DbSchema from "../../src/db/schema.ts";
 import * as Postgres from "../support/postgres.ts";
-import * as StubCursor from "../support/stub-cursor.ts";
 
 // The root wrapper.
 const CTRL = fileURLToPath(new URL("../../ctrl", import.meta.url));
 const EXIT_WITHIN_MS = 60_000;
 const SERVER = "https://qemu.example.com";
-const TOKEN = "test-token";
 // Parsed but never connected: only the actions that query need the container.
 const UNUSED_DB = "postgres://user:pw@127.0.0.1:1/oligarchy";
 
@@ -43,7 +41,6 @@ const runCtrl = (args: ReadonlyArray<string>, env: Record<string, string> = {}):
         OLIGARCHY_TOKEN: "",
         SERVER_URL: "",
         LINEAR_API_TOKEN: "",
-        CURSOR_API_TOKEN: "",
         // The session comes from the flag unless a test names it here.
         SESSION_ID: "",
         ...env,
@@ -133,20 +130,8 @@ const seedResult = async (sessionId: string | null): Promise<string> => {
 const lines = (text: string): ReadonlyArray<string> =>
   text.split("\n").filter((line) => line !== "");
 
-const openCursors: Array<StubCursor.StubCursor> = [];
-
-const cursor = async (): Promise<StubCursor.StubCursor> => {
-  const started = await StubCursor.startStubCursor();
-  openCursors.push(started);
-  return started;
-};
-
-afterEach(async () => {
-  await Promise.all(openCursors.splice(0).map((stub) => stub.close()));
-});
-
 // ---------------------------------------------------------------------------
-// Without a database: parsing, environment order, the Cursor kickoff
+// Without a database: parsing, environment order
 // ---------------------------------------------------------------------------
 
 describe("./ctrl without a database", () => {
@@ -166,8 +151,8 @@ describe("./ctrl without a database", () => {
       ["--help"],
       ["test", "--help"],
       ["session", "--help"],
-      ["test", "run", "--help"],
-      ["diagnose", "run", "--help"],
+      ["test", "start", "--help"],
+      ["diagnose", "--help"],
     ]) {
       const result = await runCtrl(args, { DATABASE_URL: "" });
       expect(result.code).toBe(0);
@@ -210,91 +195,22 @@ describe("./ctrl without a database", () => {
     expect(firstLine(fromEnv.stderr)).toBe("LINEAR_API_TOKEN is not set");
   });
 
-  it("test run kicks off a cloud agent through the Cursor API and prints its link", async () => {
-    const stub = await cursor();
-    const result = await runCtrl(["test", "run", "--ticket", "OLI-42"], {
-      DATABASE_URL: UNUSED_DB,
-      CURSOR_API_TOKEN: TOKEN,
-      CURSOR_BACKEND_URL: stub.url,
-    });
-    expect(result.stderr).toBe("");
-    expect(result.code).toBe(0);
-    const created = StubCursor.createdAgents(stub);
-    expect(created).toHaveLength(1);
-    const body: {
-      agentId: string;
-      prompt: { text: string };
-      model: unknown;
-      repos: unknown;
-    } = JSON.parse(created[0]?.body ?? "{}");
-    expect(result.stdout).toBe(
-      `Agent here, go check it out for more information: https://cursor.com/agents/${body.agentId}\n`,
-    );
-    expect(body.prompt.text).toMatch(/Review Linear ticket\s+OLI-42/);
-    // The server url reaches the driver through the Linear ticket, not the kickoff prompt.
-    expect(body.prompt.text.includes(SERVER)).toBe(false);
-    expect(body.model).toEqual({
-      id: "grok-4.6",
-      params: [
-        { id: "effort", value: "xhigh" },
-        { id: "fast", value: "true" },
-      ],
-    });
-    expect(body.repos).toEqual([{ url: "https://github.com/ThePrimeagen/Oligarchy" }]);
-    expect(
-      stub.requests.some((request) => request.method === "GET" && request.url === "/v1/models"),
-    ).toBe(true);
-    expect(created[0]?.authorization).toBe(`Bearer ${TOKEN}`);
-  });
-
-  it("test run takes no server URL and wants CURSOR_API_TOKEN after parsing", async () => {
-    const ticketOnly = await runCtrl(["test", "run", "--ticket", "OLI-42"], {
-      DATABASE_URL: UNUSED_DB,
-    });
-    expect(ticketOnly.code).toBe(1);
-    expect(firstLine(ticketOnly.stderr)).toBe("CURSOR_API_TOKEN is not set");
-
-    const withServer = await runCtrl(
-      ["test", "run", "--ticket", "OLI-42", `--server-url=${SERVER}`],
-      { DATABASE_URL: UNUSED_DB, CURSOR_API_TOKEN: TOKEN },
-    );
-    expect(withServer.code).toBe(1);
-    expect(withServer.stdout.includes("Agent here")).toBe(false);
-    expect(withServer.stderr).toMatch(/Unrecognized flag: --server-url/);
-
-    const missingTicket = await runCtrl(["test", "run"], {
-      DATABASE_URL: UNUSED_DB,
-      CURSOR_API_TOKEN: TOKEN,
-    });
-    expect(missingTicket.code).toBe(1);
-    expect(missingTicket.stderr).toMatch(/Missing required flag: --ticket/);
-
-    const emptyTicket = await runCtrl(["test", "run", "--ticket", ""], {
-      DATABASE_URL: UNUSED_DB,
-      CURSOR_API_TOKEN: TOKEN,
-    });
-    expect(emptyTicket.code).toBe(1);
-    expect(emptyTicket.stderr).toMatch(/--ticket[\s\S]*length of at least 1/);
-  });
-
-  it("test run surfaces a Cursor refusal as the headline and exits 1", async () => {
-    const stub = await cursor();
-    const result = await runCtrl(["test", "run", "--ticket", "OLI-42"], {
-      DATABASE_URL: UNUSED_DB,
-      CURSOR_API_TOKEN: TOKEN,
-      CURSOR_BACKEND_URL: `${stub.url}/nowhere`,
-    });
-    expect(result.code).toBe(1);
-    expect(result.stdout).toBe("");
-    expect(result.stderr.length).toBeGreaterThan(0);
-    expect(StubCursor.createdAgents(stub)).toEqual([]);
+  it("test run and diagnose run are unknown actions that spawn no agent", async () => {
+    for (const args of [
+      ["test", "run", "--ticket", "OLI-42"],
+      ["diagnose", "run", "--session-id", SUCCEEDED_ID],
+    ]) {
+      const result = await runCtrl(args, { DATABASE_URL: UNUSED_DB });
+      expect(result.code, args.join(" ")).toBe(1);
+      expect(result.stdout.includes("Agent here"), args.join(" ")).toBe(false);
+      expect(result.stdout.includes("{"), args.join(" ")).toBe(false);
+    }
   });
 
   it("rejects a missing DATABASE_URL before doing anything, on every database action", async () => {
     for (const args of [
       ["test", "--list"],
       ["test", "list"],
-      ["test", "run", "--ticket", "OLI-42"],
       // Tickets written before --server-url left ctrl still name it here: it parses, unread.
       [
         "test",
@@ -337,12 +253,10 @@ describe("./ctrl without a database", () => {
         "--model",
         "m",
       ],
-      ["diagnose", "run", "--session-id", SUCCEEDED_ID],
     ]) {
       const result = await runCtrl(args, {
         DATABASE_URL: "",
         LINEAR_API_TOKEN: "l",
-        CURSOR_API_TOKEN: "c",
       });
       expect(result.code).toBe(1);
       expect(result.stdout).toBe("");
@@ -375,12 +289,11 @@ describe("./ctrl without a database", () => {
     }
   });
 
-  it("test start, diagnose and diagnose run without --session-id or SESSION_ID are usage errors", async () => {
-    const env = { DATABASE_URL: UNUSED_DB, CURSOR_API_TOKEN: TOKEN };
+  it("test start and diagnose without --session-id or SESSION_ID are usage errors", async () => {
+    const env = { DATABASE_URL: UNUSED_DB };
     for (const args of [
       ["test", "start", "--test-result-id", randomUUID(), "--model", "m"],
       ["diagnose", "--verdict", "passed", "--summary", "s", "--model", "m"],
-      ["diagnose", "run"],
     ]) {
       const result = await runCtrl(args, env);
       expect(result.code, args.join(" ")).toBe(1);
@@ -420,9 +333,21 @@ describe("./ctrl without a database", () => {
       ],
       [["error-type", "list", "--server-url", SERVER], /Unrecognized flag: --server-url/, env],
       [
-        ["diagnose", "run", "--session-id", randomUUID(), "--server-url", SERVER],
+        [
+          "diagnose",
+          "--session-id",
+          randomUUID(),
+          "--verdict",
+          "passed",
+          "--summary",
+          "s",
+          "--model",
+          "m",
+          "--server-url",
+          SERVER,
+        ],
         /Unrecognized flag: --server-url/,
-        { ...env, CURSOR_API_TOKEN: "c" },
+        env,
       ],
       [
         [
@@ -599,11 +524,6 @@ describe("./ctrl without a database", () => {
         ],
         /Invalid value for flag --verdict: "succeeded"/,
         env,
-      ],
-      [
-        ["diagnose", "run"],
-        /Missing required flag: --session-id/,
-        { ...env, CURSOR_API_TOKEN: "c" },
       ],
     ];
     for (const [args, expected, environment] of cases) {
@@ -982,77 +902,6 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
       "summary",
       "verdict",
     ]);
-  });
-
-  it("diagnose run kicks off a reviewer through the Cursor API with the session, and no proxy, in its prompt", async () => {
-    const stub = await cursor();
-    const sessionId = await seedEndedSession();
-    const result = await runCtrl(["diagnose", "run", "--session-id", sessionId], {
-      CURSOR_API_TOKEN: TOKEN,
-      CURSOR_BACKEND_URL: stub.url,
-    });
-    expect(result.stderr).toBe("");
-    expect(result.code).toBe(0);
-    const created = StubCursor.createdAgents(stub);
-    expect(created).toHaveLength(1);
-    const body: { agentId: string; prompt: { text: string }; model: unknown } = JSON.parse(
-      created[0]?.body ?? "{}",
-    );
-    expect(result.stdout).toBe(
-      `Agent here, go check it out for more information: https://cursor.com/agents/${body.agentId}\n`,
-    );
-    expect(body.prompt.text).toContain(`<session_id>${sessionId}</session_id>`);
-    expect(body.prompt.text).toContain(`./ctrl session --session-id ${sessionId} --all`);
-    expect(body.prompt.text).toContain("## diagnose");
-    expect(body.prompt.text.includes("{{")).toBe(false);
-    // The reviewer reads the database alone; no proxy reaches its prompt.
-    expect(body.prompt.text.includes("--server-url")).toBe(false);
-    expect(body.prompt.text.includes(SERVER)).toBe(false);
-    expect(body.model).toEqual({
-      id: "grok-4.6",
-      params: [
-        { id: "effort", value: "xhigh" },
-        { id: "fast", value: "true" },
-      ],
-    });
-  });
-
-  it("diagnose run refuses an unknown, a running, and an already diagnosed session before calling Cursor", async () => {
-    const stub = await cursor();
-    const env = { CURSOR_API_TOKEN: TOKEN, CURSOR_BACKEND_URL: stub.url };
-    const run = (id: string) => runCtrl(["diagnose", "run", "--session-id", id], env);
-    const unknownId = randomUUID();
-    const unknown = await run(unknownId);
-    expect(unknown.code).toBe(1);
-    expect(unknown.stdout).toBe("");
-    expect(firstLine(unknown.stderr)).toBe(`diagnose run: no session ${unknownId}`);
-
-    const running = await run(RUNNING_ID);
-    expect(running.code).toBe(1);
-    expect(firstLine(running.stderr)).toBe(`diagnose run: session ${RUNNING_ID} is still running`);
-
-    const diagnosed = await seedEndedSession("succeeded", "done");
-    expect(
-      (
-        await runCtrl([
-          "diagnose",
-          "--session-id",
-          diagnosed,
-          "--verdict",
-          "passed",
-          "--summary",
-          "s",
-          "--model",
-          "composer-2.5",
-        ])
-      ).code,
-    ).toBe(0);
-    const again = await run(diagnosed);
-    expect(again.code).toBe(1);
-    expect(firstLine(again.stderr)).toBe(
-      `diagnose run: session ${diagnosed} already has a diagnosis`,
-    );
-    expect(StubCursor.createdAgents(stub)).toEqual([]);
   });
 
   it("session --search prints the session a result ran in, which SESSION_ID then names for inspection", async () => {
