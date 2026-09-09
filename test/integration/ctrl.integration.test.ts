@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Client } from "pg";
 import * as DbSchema from "../../src/db/schema.ts";
@@ -43,6 +44,8 @@ const runCtrl = (args: ReadonlyArray<string>, env: Record<string, string> = {}):
         SERVER_URL: "",
         LINEAR_API_TOKEN: "",
         CURSOR_API_TOKEN: "",
+        // The session comes from the flag unless a test names it here.
+        SESSION_ID: "",
         ...env,
       },
     });
@@ -85,6 +88,46 @@ const seedEndedSession = async (
     await client.end();
   }
   return sessionId;
+};
+
+// A run with one result for the seeded definition, tied to the session given, or to none: the
+// row `test new` would create, without Linear.
+const seedResult = async (sessionId: string | null): Promise<string> => {
+  const client = new Client({ connectionString: Postgres.getDbUrl() });
+  await client.connect();
+  try {
+    const db = drizzle({ client });
+    const [definition] = await db
+      .select({ id: DbSchema.testDefinitions.id })
+      .from(DbSchema.testDefinitions)
+      .where(eq(DbSchema.testDefinitions.name, DEFINITION))
+      .limit(1);
+    if (definition === undefined) {
+      throw new Error(`seed: no test definition ${DEFINITION}`);
+    }
+    const [run] = await db
+      .insert(DbSchema.testRuns)
+      .values({ name: "seed", iso: "https://example.com/omarchy.iso", serverUrl: SERVER })
+      .returning({ id: DbSchema.testRuns.id });
+    if (run === undefined) {
+      throw new Error("seed: no run inserted");
+    }
+    const [result] = await db
+      .insert(DbSchema.testResults)
+      .values({
+        runId: run.id,
+        definitionId: definition.id,
+        sessionId,
+        status: sessionId === null ? "pending" : "running",
+      })
+      .returning({ id: DbSchema.testResults.id });
+    if (result === undefined) {
+      throw new Error("seed: no result inserted");
+    }
+    return result.id;
+  } finally {
+    await client.end();
+  }
 };
 
 const lines = (text: string): ReadonlyArray<string> =>
@@ -278,6 +321,7 @@ describe("./ctrl without a database", () => {
       ],
       ["session", "list"],
       ["session", "--session-id", SUCCEEDED_ID, "--logs"],
+      ["session", "--search", "--test-result-id", randomUUID()],
       ["error-type", "new", "--key", "k", "--description", "d"],
       ["error-type", "list"],
       [
@@ -303,6 +347,45 @@ describe("./ctrl without a database", () => {
       expect(result.code).toBe(1);
       expect(result.stdout).toBe("");
       expect(firstLine(result.stderr)).toBe("DATABASE_URL is not set");
+    }
+  });
+
+  it("session refuses the flag pairs that cannot combine before any query, and wants a session from somewhere", async () => {
+    const env = { DATABASE_URL: UNUSED_DB };
+    const cases: ReadonlyArray<readonly [ReadonlyArray<string>, string]> = [
+      [["session", "--search"], "session: --search needs --test-result-id"],
+      [
+        ["session", "--search", "--test-result-id", randomUUID(), "--all"],
+        "session: --search takes no selector",
+      ],
+      [
+        ["session", "--session-id", randomUUID(), "--test-result-id", randomUUID(), "--logs"],
+        "session: --test-result-id needs --search",
+      ],
+      [["session", "--status"], "session: --session-id or SESSION_ID is required"],
+      [["session"], "session: --session-id or SESSION_ID is required"],
+    ];
+    for (const [args, headline] of cases) {
+      const result = await runCtrl(args, env);
+      expect(result.code, args.join(" ")).toBe(1);
+      expect(result.stdout, args.join(" ")).toBe("");
+      expect(firstLine(result.stderr), args.join(" ")).toBe(headline);
+      expect(result.stderr, args.join(" ")).toMatch(/CommandError/);
+      expect(result.stderr, args.join(" ")).not.toMatch(/ECONNREFUSED/);
+    }
+  });
+
+  it("test start, diagnose and diagnose run without --session-id or SESSION_ID are usage errors", async () => {
+    const env = { DATABASE_URL: UNUSED_DB, CURSOR_API_TOKEN: TOKEN };
+    for (const args of [
+      ["test", "start", "--test-result-id", randomUUID(), "--model", "m"],
+      ["diagnose", "--verdict", "passed", "--summary", "s", "--model", "m"],
+      ["diagnose", "run"],
+    ]) {
+      const result = await runCtrl(args, env);
+      expect(result.code, args.join(" ")).toBe(1);
+      expect(result.stdout.includes("{"), args.join(" ")).toBe(false);
+      expect(result.stderr, args.join(" ")).toMatch(/Missing required flag: --session-id/);
     }
   });
 
@@ -443,6 +526,16 @@ describe("./ctrl without a database", () => {
       [
         ["session", "--session-id", randomUUID(), "--logs", "--count", "3"],
         /Unrecognized flag: --count/,
+        env,
+      ],
+      [
+        ["session", "--search", "--test-result-id", ""],
+        /--test-result-id[\s\S]*length of at least 1/,
+        env,
+      ],
+      [
+        ["session", "--search", "--test-result-id", randomUUID(), "--server-url", SERVER],
+        /Unrecognized flag: --server-url/,
         env,
       ],
       [
@@ -960,6 +1053,64 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
       `diagnose run: session ${diagnosed} already has a diagnosis`,
     );
     expect(StubCursor.createdAgents(stub)).toEqual([]);
+  });
+
+  it("session --search prints the session a result ran in, which SESSION_ID then names for inspection", async () => {
+    const sessionId = await seedEndedSession("succeeded", "lock screen on screen");
+    const resultId = await seedResult(sessionId);
+    const found = await runCtrl(["session", "--search", `--test-result-id=${resultId}`]);
+    expect(found.stderr).toBe("");
+    expect(found.code).toBe(0);
+    expect(found.stdout).toBe(`${sessionId}\n`);
+
+    // The bare line is made to be captured: SESSION_ID=$(./ctrl session --search ...).
+    const inspected = await runCtrl(["session", "--status"], { SESSION_ID: sessionId });
+    expect(inspected.stderr).toBe("");
+    expect(inspected.code).toBe(0);
+    expect(JSON.parse(inspected.stdout)).toMatchObject({ id: sessionId, status: "succeeded" });
+
+    // The flag wins over the environment.
+    const flagged = await runCtrl(["session", "--session-id", SUCCEEDED_ID, "--status"], {
+      SESSION_ID: sessionId,
+    });
+    expect(flagged.code).toBe(0);
+    expect(JSON.parse(flagged.stdout)).toMatchObject({ id: SUCCEEDED_ID });
+
+    // SESSION_ID names the session for test start and diagnose too; here it starts the result
+    // a second seeded run holds and then reviews the same session.
+    const pendingId = await seedResult(null);
+    const startSession = await seedEndedSession("failed");
+    const started = await runCtrl(
+      ["test", "start", "--test-result-id", pendingId, "--model", "composer-2.5"],
+      { SESSION_ID: startSession },
+    );
+    expect(started.stderr).toBe("");
+    expect(started.code).toBe(0);
+    const startedSearch = await runCtrl(["session", "--search", "--test-result-id", pendingId]);
+    expect(startedSearch.code).toBe(0);
+    expect(startedSearch.stdout).toBe(`${startSession}\n`);
+    const diagnosed = await runCtrl(
+      ["diagnose", "--verdict", "passed", "--summary", "s", "--model", "composer-2.5"],
+      { SESSION_ID: startSession },
+    );
+    expect(diagnosed.stderr).toBe("");
+    expect(diagnosed.code).toBe(0);
+    expect(diagnosed.stdout).toBe(`[global] ${startSession}: diagnosed; passed; composer-2.5\n`);
+  });
+
+  it("session --search refuses a result nobody has and one no session has run yet", async () => {
+    const unknownId = randomUUID();
+    const unknown = await runCtrl(["session", "--search", "--test-result-id", unknownId]);
+    expect(unknown.code).toBe(1);
+    expect(unknown.stdout).toBe("");
+    expect(firstLine(unknown.stderr)).toBe(`session: no test result ${unknownId}`);
+    expect(unknown.stderr).toMatch(/CommandError/);
+
+    const pendingId = await seedResult(null);
+    const pending = await runCtrl(["session", "--search", "--test-result-id", pendingId]);
+    expect(pending.code).toBe(1);
+    expect(pending.stdout).toBe("");
+    expect(firstLine(pending.stderr)).toBe(`session: result ${pendingId} has no session yet`);
   });
 
   it("session requires a selector and rejects an unknown session", async () => {

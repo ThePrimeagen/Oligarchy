@@ -113,9 +113,11 @@ const legacyServerUrlFlag = Flag.string("server-url").pipe(
   Flag.withDescription("Ignored; tickets written before it went still name it"),
 );
 
+// The flag wins; SESSION_ID stands in when it is omitted, so a shell exports the id once.
 const sessionIdFlag = Flag.string("session-id").pipe(
+  Flag.withFallbackConfig(Config.sessionId),
   Flag.withSchema(Schema.NonEmptyString),
-  Flag.withDescription("Session id"),
+  Flag.withDescription("Session id; SESSION_ID when omitted"),
 );
 
 const nameFlag = (description: string) =>
@@ -613,9 +615,23 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     yield* printLines(Render.renderSessions(rows, input.json, now));
   });
 
+  // session --search --test-result-id <id>: the id of the session that ran the result, as one bare
+  // line a shell captures into SESSION_ID for the commands that follow.
+  const sessionSearch = Effect.fn("ctrl.session.search")(function* (resultId: string) {
+    const tests = yield* Tests.TestStore;
+    const row = yield* orRefuse(tests.findResult(resultId), `session: no test result ${resultId}`);
+    if (row.sessionId === null) {
+      return yield* refuse(`session: result ${resultId} has no session yet`);
+    }
+    return yield* Console.log(row.sessionId);
+  });
+
   // session --session-id <id> --status|--logs|--test-def|--test-results|--test-run|--actions|--images|--debug-logs|--diagnosis|--all
+  // session --search --test-result-id <id>
   const sessionInspect = Effect.fn("ctrl.session.inspect")(function* (input: {
-    readonly sessionId: string;
+    readonly sessionId: Option.Option<string>;
+    readonly search: boolean;
+    readonly testResultId: Option.Option<string>;
     readonly status: boolean;
     readonly logs: boolean;
     readonly testDef: boolean;
@@ -638,12 +654,29 @@ export const makeCtrlCommand = (deps: Deps = live) => {
       input.debugLogs ||
       input.diagnosis ||
       input.all;
+    // A search names its session through the result: --session-id and SESSION_ID are not read.
+    if (input.search) {
+      const resultId = yield* orRefuse(
+        Effect.succeed(input.testResultId),
+        "session: --search needs --test-result-id",
+      );
+      if (selected) {
+        return yield* refuse("session: --search takes no selector");
+      }
+      return yield* sessionSearch(resultId);
+    }
+    if (Option.isSome(input.testResultId)) {
+      return yield* refuse("session: --test-result-id needs --search");
+    }
+    const id = yield* orRefuse(
+      Effect.succeed(input.sessionId),
+      "session: --session-id or SESSION_ID is required",
+    );
     if (!selected) {
       return yield* refuse(
         "session: --status, --logs, --test-def, --test-results, --test-run, --actions, --images, --debug-logs, --diagnosis, or --all is required",
       );
     }
-    const id = input.sessionId;
     const sessions = yield* Sessions.SessionStore;
     const logs = yield* Logs.LogStore;
     const tests = yield* Tests.TestStore;
@@ -863,7 +896,14 @@ export const makeCtrlCommand = (deps: Deps = live) => {
   const sessionCommand = Command.make(
     "session",
     {
-      sessionId: sessionIdFlag,
+      // Optional here alone: a search names its session through the result.
+      sessionId: sessionIdFlag.pipe(Flag.optional),
+      search: toggle("search", "Print the id of the session that ran --test-result-id"),
+      testResultId: Flag.string("test-result-id").pipe(
+        Flag.withSchema(Schema.NonEmptyString),
+        Flag.optional,
+        Flag.withDescription("Test result id from the Linear ticket; with --search"),
+      ),
       status: toggle("status", "Print the session row: how it ended, why, and what it booted"),
       logs: toggle("logs", "Print session logs"),
       testDef: toggle("test-def", "Print the session's test definition"),
@@ -884,7 +924,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     sessionInspect,
   ).pipe(
     Command.withDescription(
-      "session --session-id <id> --status|--logs|--test-def|--test-results|--test-run|--actions|--images|--debug-logs|--diagnosis|--all; or list",
+      "session --session-id <id> --status|--logs|--test-def|--test-results|--test-run|--actions|--images|--debug-logs|--diagnosis|--all; session --search --test-result-id <id>; or list",
     ),
     Command.provide(withDb),
     Command.withSubcommands([sessionListCommand]),

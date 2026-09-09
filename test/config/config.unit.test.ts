@@ -56,6 +56,7 @@ describe("requiredRedacted", () => {
       expect(Redacted.value(yield* Config.linearApiToken)).toBe("c");
       expect(Redacted.value(yield* Config.cursorApiToken)).toBe("d");
       expect(yield* Config.serverUrl).toBe("e");
+      expect(yield* Config.sessionId).toBe("f");
     }).pipe(
       Effect.provide(
         Support.withEnv({
@@ -64,6 +65,7 @@ describe("requiredRedacted", () => {
           LINEAR_API_TOKEN: "c",
           CURSOR_API_TOKEN: "d",
           SERVER_URL: "e",
+          SESSION_ID: "f",
         }),
       ),
     ),
@@ -75,6 +77,14 @@ describe("requiredRedacted", () => {
       expect(error._tag).toBe("ConfigError");
       expect(Config.DEFAULT_SERVER_URL).toBe("http://127.0.0.1:42069");
     }).pipe(Effect.provide(Support.withEnv({ SERVER_URL: "" }))),
+  );
+
+  // A flag fallback, like SERVER_URL: an empty SESSION_ID is unset, so the flag's own rule applies.
+  it.effect("sessionId treats an empty SESSION_ID as unset", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(Config.sessionId);
+      expect(error._tag).toBe("ConfigError");
+    }).pipe(Effect.provide(Support.withEnv({ SESSION_ID: "" }))),
   );
 });
 
