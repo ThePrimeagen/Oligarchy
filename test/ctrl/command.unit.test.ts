@@ -1897,20 +1897,43 @@ const DIAGNOSE_RUN = ["diagnose", "run", "--session-id", SESSION_ID];
 
 const DIAGNOSING_AGENT_PATH = /\/prompts\/diagnosing-agent\.html$/;
 
+// The driver ran the session under its Linear ticket as the agent id; the reviewer moves that
+// ticket, so diagnose run reads it back from the session's agent run.
+const drivenBy = (h: ReturnType<typeof harness>, ticket: string, sessionId = SESSION_ID) => {
+  h.stores.sessions.agentRuns.push({
+    agentId: ticket,
+    sessionId,
+    startedAt: ago(500),
+    endedAt: ago(400),
+  });
+};
+
 describe("diagnose run", () => {
   it.effect(
-    "kicks off the reviewer with the session and the diagnosis guide, and prints its link (happy)",
+    "kicks off the reviewer with the session, its ticket and the diagnosis guide, and prints its link (happy)",
     () =>
       Effect.gen(function* () {
         const h = harness({ cursor: FakeCursor.fakeCursor({ agentId: "bc-42" }) });
         h.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
+        drivenBy(h, "OLI-42");
         const exit = yield* h.run(DIAGNOSE_RUN, WITH_CURSOR);
         expect(Exit.isSuccess(exit)).toBe(true);
+        // Without --model the reviewer runs on the default, and the prompt names that default so
+        // the reviewer records it with diagnose.
         expect(h.cursor.calls).toEqual([
-          { text: yield* rendered("diagnosing-agent.html", { SESSION_ID }), model: undefined },
+          {
+            text: yield* rendered("diagnosing-agent.html", {
+              SESSION_ID,
+              LINEAR_TICKET: "OLI-42",
+              MODEL: "grok-4.6-xhigh-fast",
+            }),
+            model: undefined,
+          },
         ]);
         const text = h.cursor.calls[0]?.text ?? "";
         expect(text).toContain(`<session_id>${SESSION_ID}</session_id>`);
+        expect(text).toContain("<linear_ticket>OLI-42</linear_ticket>");
+        expect(text).toContain("<model>grok-4.6-xhigh-fast</model>");
         expect(text).toContain("## diagnose");
         expect(text.includes("{{")).toBe(false);
         // The reviewer reads the database alone: no proxy is named anywhere in its prompt.
@@ -1923,16 +1946,85 @@ describe("diagnose run", () => {
       }),
   );
 
+  it.effect("--model runs the reviewer on that model and names it in the prompt (happy)", () =>
+    Effect.gen(function* () {
+      const h = harness({ cursor: FakeCursor.fakeCursor({ agentId: "bc-43" }) });
+      h.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
+      drivenBy(h, "OLI-42");
+      const exit = yield* h.run([...DIAGNOSE_RUN, "--model", "composer-2.5"], WITH_CURSOR);
+      expect(Exit.isSuccess(exit)).toBe(true);
+      expect(h.cursor.calls).toEqual([
+        {
+          text: yield* rendered("diagnosing-agent.html", {
+            SESSION_ID,
+            LINEAR_TICKET: "OLI-42",
+            MODEL: "composer-2.5",
+          }),
+          model: { id: "composer-2.5" },
+        },
+      ]);
+      expect(h.cursor.calls[0]?.text).toContain("<model>composer-2.5</model>");
+      expect(h.cursor.calls[0]?.text).toContain("--model composer-2.5");
+    }),
+  );
+
+  it.effect("an empty --model is refused before any agent starts (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness({ cursor: FakeCursor.fakeCursor({ agentId: "bc-44" }) });
+      h.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
+      drivenBy(h, "OLI-42");
+      const exit = yield* h.run([...DIAGNOSE_RUN, "--model", ""], WITH_CURSOR);
+      expect(helpErrors(exit).join("\n")).toMatch(/--model.*length of at least 1/s);
+      expect(h.cursor.calls).toEqual([]);
+      expect(h.touched).toEqual([]);
+    }),
+  );
+
   it.effect("reviews a succeeded session too, and ignores SERVER_URL (happy)", () =>
     Effect.gen(function* () {
       const h = harness();
       h.stores.sessions.sessions.push(session(SESSION_ID, "succeeded", ago(500)));
+      drivenBy(h, "OLI-42");
       const exit = yield* h.run(DIAGNOSE_RUN, { ...WITH_CURSOR, SERVER_URL: SERVER });
       expect(Exit.isSuccess(exit)).toBe(true);
       expect(h.cursor.calls).toHaveLength(1);
       expect(h.cursor.calls[0]?.text).toContain(`--session-id ${SESSION_ID} --all`);
       expect(h.cursor.calls[0]?.text.includes(SERVER)).toBe(false);
     }),
+  );
+
+  it.effect("hands the reviewer the ticket of this session, not another's (happy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.sessions.sessions.push(
+        session(SESSION_ID, "failed", ago(500)),
+        session(OTHER_SESSION_ID, "succeeded", ago(500)),
+      );
+      drivenBy(h, "OLI-7", OTHER_SESSION_ID);
+      drivenBy(h, "OLI-42");
+      const exit = yield* h.run(DIAGNOSE_RUN, WITH_CURSOR);
+      expect(Exit.isSuccess(exit)).toBe(true);
+      const text = h.cursor.calls[0]?.text ?? "";
+      expect(text).toContain("<linear_ticket>OLI-42</linear_ticket>");
+      expect(text.includes("OLI-7")).toBe(false);
+    }),
+  );
+
+  it.effect(
+    "rejects a session no agent started before reading a template or spawning: there is no ticket to move (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const fs = promptFs(/never/);
+        const h = harness({ fs: fs.layer });
+        h.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
+        expect(yield* h.fail(DIAGNOSE_RUN, WITH_CURSOR)).toMatchObject({
+          _tag: "CommandError",
+          message: `diagnose run: session ${SESSION_ID} has no agent run, so no ticket to review`,
+        });
+        expect(fs.reads).toEqual([]);
+        expect(h.cursor.calls).toEqual([]);
+        expect(yield* stdout).toEqual([]);
+      }),
   );
 
   it.effect("rejects an unknown session before reading a template or spawning (unhappy)", () =>
@@ -1970,18 +2062,34 @@ describe("diagnose run", () => {
     }),
   );
 
-  it.effect("rejects a session that already has a diagnosis (unhappy)", () =>
-    Effect.gen(function* () {
-      const h = harness();
-      h.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
-      h.stores.diagnosis.errorTypes.push(bootHang);
-      h.stores.diagnosis.diagnoses.push(diagnosis);
-      expect(yield* h.fail(DIAGNOSE_RUN, WITH_CURSOR)).toMatchObject({
-        _tag: "CommandError",
-        message: `diagnose run: session ${SESSION_ID} already has a diagnosis`,
-      });
-      expect(h.cursor.calls).toEqual([]);
-    }),
+  it.effect(
+    "rejects a session that already has a diagnosis, whether or not an agent ran it (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const h = harness();
+        h.stores.sessions.sessions.push(
+          session(SESSION_ID, "failed", ago(500)),
+          session(OTHER_SESSION_ID, "failed", ago(500)),
+        );
+        drivenBy(h, "OLI-42");
+        h.stores.diagnosis.errorTypes.push(bootHang);
+        h.stores.diagnosis.diagnoses.push(diagnosis, {
+          ...diagnosis,
+          sessionId: OTHER_SESSION_ID,
+        });
+        expect(yield* h.fail(DIAGNOSE_RUN, WITH_CURSOR)).toMatchObject({
+          _tag: "CommandError",
+          message: `diagnose run: session ${SESSION_ID} already has a diagnosis`,
+        });
+        // Reviewed already is the answer even for a session without a ticket to hand over.
+        expect(
+          yield* h.fail(["diagnose", "run", "--session-id", OTHER_SESSION_ID], WITH_CURSOR),
+        ).toMatchObject({
+          _tag: "CommandError",
+          message: `diagnose run: session ${OTHER_SESSION_ID} already has a diagnosis`,
+        });
+        expect(h.cursor.calls).toEqual([]);
+      }),
   );
 
   it.effect(
@@ -1991,6 +2099,7 @@ describe("diagnose run", () => {
         const fs = promptFs(DIAGNOSING_AGENT_PATH);
         const h = harness({ fs: fs.layer });
         h.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
+        drivenBy(h, "OLI-42");
         expect(yield* h.fail(DIAGNOSE_RUN, WITH_CURSOR)).toMatchObject({
           _tag: "PromptError",
           message: expect.stringMatching(/^prompt: .*diagnosing-agent\.html/),
@@ -2034,6 +2143,7 @@ describe("diagnose run", () => {
       });
       const h = harness({ cursor: FakeCursor.fakeCursor({ failure: refused }) });
       h.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
+      drivenBy(h, "OLI-42");
       expect(yield* h.fail(DIAGNOSE_RUN, WITH_CURSOR)).toBe(refused);
       expect(yield* stdout).toEqual([]);
     }),

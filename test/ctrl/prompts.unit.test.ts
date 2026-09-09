@@ -162,16 +162,32 @@ describe("render happy path", () => {
   );
 
   it.effect(
-    "diagnosing-agent.html: the session and the diagnosis guide; no proxy, nothing of the drive",
+    "diagnosing-agent.html: the session, the ticket it moves, and the diagnosis guide; no proxy, nothing of the drive",
     () =>
       Effect.gen(function* () {
-        const text = yield* real(Prompts.render("diagnosing-agent.html", { SESSION_ID }));
+        const text = yield* real(
+          Prompts.render("diagnosing-agent.html", {
+            SESSION_ID,
+            LINEAR_TICKET: "OLI-42",
+            MODEL: "gpt-5.6-luna-none-fast",
+          }),
+        );
 
         expect(text.includes("{{")).toBe(false);
         expect(text).toContain(`<session_id>${SESSION_ID}</session_id>`);
+        // The reviewer moves the ticket the driver ran under: In Review on start, Done at the end.
+        expect(text).toContain("<linear_ticket>OLI-42</linear_ticket>");
+        expect(text).toMatch(/On starting OLI-42, move it to "In Review"/);
+        expect(text).toMatch(/On completing OLI-42, move it to "Done"/);
+        // The reviewer is told its model once and what to do with it: diagnose records it.
+        expect(text).toContain("<model>gpt-5.6-luna-none-fast</model>");
+        expect(text).toContain("--model gpt-5.6-luna-none-fast");
+        // Every ./ctrl command the example shows is one ./ctrl accepts: the session is a flag.
         expect(text).toContain(`./ctrl session --session-id ${SESSION_ID} --all`);
+        expect(text).toContain(`./ctrl session --session-id ${SESSION_ID} --images`);
         expect(text).toContain(`./ctrl diagnose --session-id ${SESSION_ID}`);
-        expect(text).toContain("--model <the Cursor model id you are running as>");
+        expect(text).not.toMatch(/^\$ \.\/ctrl (session|diagnose) (?!--session-id )/m);
+        expect(text).not.toContain("--search");
         // The reviewer reads the database alone: no server url, no token, reaches it.
         expect(text.includes("server_url")).toBe(false);
         expect(text.includes("--server-url")).toBe(false);
@@ -186,11 +202,11 @@ describe("render happy path", () => {
         expect(text).toContain("--images");
         // The screenshots are evidence the reviewer looks at, through the database.
         expect(text).toContain("./session image --image-id");
-        // The reviewer drives nothing: no client guide, no ticket, no result id.
+        // The reviewer drives nothing: no client guide, no result id; the result is in --all.
         expect(text).not.toContain("./client");
         expect(text).not.toContain("## test start");
-        expect(text).not.toContain("LINEAR_TICKET");
         expect(text).not.toContain("--test-result-id");
+        expect(text).not.toContain("RESULT_ID");
       }),
   );
 });
@@ -217,6 +233,20 @@ describe("render unhappy path", () => {
         );
         expect(withoutTicket.message).toBe(
           "prompt: prompts/linear-issue.html uses {{LINEAR_TICKET}}, which has no value",
+        );
+        // The reviewer moves the ticket too, so the session id alone no longer renders it.
+        const reviewerWithoutTicket = yield* Effect.flip(
+          real(Prompts.render("diagnosing-agent.html", { SESSION_ID })),
+        );
+        expect(reviewerWithoutTicket.message).toBe(
+          "prompt: prompts/diagnosing-agent.html uses {{LINEAR_TICKET}}, which has no value",
+        );
+        // A reviewer kicked off without a model would have nothing to record with diagnose.
+        const reviewerWithoutModel = yield* Effect.flip(
+          real(Prompts.render("diagnosing-agent.html", { SESSION_ID, LINEAR_TICKET: "OLI-42" })),
+        );
+        expect(reviewerWithoutModel.message).toBe(
+          "prompt: prompts/diagnosing-agent.html uses {{MODEL}}, which has no value",
         );
       }),
   );

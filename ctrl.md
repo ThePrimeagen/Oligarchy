@@ -43,7 +43,7 @@ If you are an agent driving a guest, you need two of these: [test start](#test-s
 ./ctrl error-type new  --key <key> --description <text>
 ./ctrl error-type list [--json]
 ./ctrl diagnose       --session-id <id> --verdict passed|failed [--type <key>] --summary <text> --model <id>
-./ctrl diagnose run   --session-id <id>
+./ctrl diagnose run   --session-id <id> [--model <id>]
 ```
 
 The action comes first. Every value is a flag; there are no positional arguments. Flags may sit in any order after the action.
@@ -258,13 +258,15 @@ Records the post-run diagnosis: a reviewer's verdict on one session that has end
 ## diagnose run
 
 ```
-./ctrl diagnose run --session-id <id>
+./ctrl diagnose run --session-id <id> [--model <id>]
 ```
 
-Spawns a Cursor cloud agent that reviews one ended session and records its verdict with [diagnose](#diagnose). The agent is handed the session id and the reviewer's guide (`ctrl-diagnose.md`), nothing else: it reads the rest back from the database with [session](#session). Prints a link to the agent as soon as it starts; does not wait for it. Not used while driving a guest. Reads `CURSOR_API_TOKEN`.
+Spawns a Cursor cloud agent that reviews one ended session and records its verdict with [diagnose](#diagnose). The agent is handed the session id, the Linear ticket the driver ran the session under (its agent id, which the reviewer moves to "In Review" and then "Done"), the model it runs as, and the reviewer's guide (`ctrl-diagnose.md`), nothing else: it reads the rest back from the database with [session](#session). Prints a link to the agent as soon as it starts; does not wait for it. Not used while driving a guest. Reads `CURSOR_API_TOKEN`.
 
-- `--session-id <id>` — the session. Unknown, still running or downloading, or already diagnosed is a failure (`diagnose run: session <id> already has a diagnosis`), before any agent is spawned.
+- `--session-id <id>` — the session. Unknown, still running or downloading, or already diagnosed is a failure (`diagnose run: session <id> already has a diagnosis`), before any agent is spawned. So is a session no agent started (`diagnose run: session <id> has no agent run, so no ticket to review`): there is no ticket to move.
+- `--model <id>` — the Cursor model id to run the reviewer on, which the prompt tells it to record with `diagnose --model`. Omitted, the agent runs on the default and the prompt names that default.
 
 ```bash
 ./ctrl diagnose run --session-id 6f1c...e2a9
+./ctrl diagnose run --session-id 6f1c...e2a9 --model composer-2.5
 ```

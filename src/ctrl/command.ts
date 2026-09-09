@@ -580,10 +580,12 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     });
   });
 
-  // diagnose run --session-id <id>
+  // diagnose run --session-id <id> [--model <id>]
   const diagnoseRun = Effect.fn("ctrl.diagnose.run")(function* (input: {
     readonly sessionId: string;
+    readonly model: Option.Option<string>;
   }) {
+    const sessions = yield* Sessions.SessionStore;
     const diagnosis = yield* Diagnosis.DiagnosisStore;
     const agents = yield* Cursor.CursorAgents;
     yield* endedSession("diagnose run", input.sessionId);
@@ -595,9 +597,24 @@ export const makeCtrlCommand = (deps: Deps = live) => {
           refuse(`diagnose run: session ${input.sessionId} already has a diagnosis`),
         ),
       );
-    // The reviewer reads everything back from the database: the session id is all it needs.
-    const text = yield* Prompts.render("diagnosing-agent.html", { SESSION_ID: input.sessionId });
-    const { agentId } = yield* agents.prompt(text);
+    // The driver ran the session under its Linear ticket as the agent id; the reviewer moves that
+    // ticket through review, so a session no agent started has nothing for it to move.
+    const ticket = yield* orRefuse(
+      sessions.agentForSession(input.sessionId),
+      `diagnose run: session ${input.sessionId} has no agent run, so no ticket to review`,
+    );
+    // The reviewer reads the evidence back from the database by session id, and is told the model
+    // it runs as so it can record it with diagnose: the id given, or the default's label.
+    const selection = Option.map(input.model, (id): Cursor.Model => ({ id }));
+    const text = yield* Prompts.render("diagnosing-agent.html", {
+      SESSION_ID: input.sessionId,
+      LINEAR_TICKET: ticket,
+      MODEL: Option.getOrElse(input.model, () => Cursor.modelLabel(Cursor.GROK_4_6_FAST_XHIGH)),
+    });
+    const { agentId } = yield* Option.match(selection, {
+      onNone: () => agents.prompt(text),
+      onSome: (model) => agents.prompt(text, model),
+    });
     yield* Console.log(Render.agentLink(Cursor.agentUrl(agentId)));
   });
 
@@ -919,7 +936,16 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     Command.withSubcommands([errorTypeNewCommand, errorTypeListCommand]),
   );
 
-  const diagnoseRunCommand = Command.make("run", { sessionId: sessionIdFlag }, diagnoseRun).pipe(
+  const diagnoseRunCommand = Command.make(
+    "run",
+    {
+      sessionId: sessionIdFlag,
+      model: modelFlag("Cursor model id to run the reviewer on; the default when omitted").pipe(
+        Flag.optional,
+      ),
+    },
+    diagnoseRun,
+  ).pipe(
     Command.withDescription("Kick off a Cursor cloud agent that reviews one ended session"),
     Command.provide(withDbAndCursor),
   );
