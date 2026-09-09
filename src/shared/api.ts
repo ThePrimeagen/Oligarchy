@@ -163,4 +163,18 @@ export class ReverseProxyApi extends HttpApi.make("OligarchyReverseProxy")
   .add(RoutedSessions)
   .add(Servers) {}
 
+// The automation service: one request names the Linear ticket to drive and the model to drive
+// it with; bearer required. It neither forwards nor places, so the proxy's own boundary suffices.
+export const automate = HttpApiEndpoint.post("automate", "/automate", {
+  payload: Contract.AutomateBody,
+  success: Contract.Ok,
+});
+
+export class Automations extends HttpApiGroup.make("Automations")
+  .add(automate)
+  .middleware(BearerAuth)
+  .middleware(ApiBoundary) {}
+
+export class AutomationApi extends HttpApi.make("OligarchyAutomation").add(Automations) {}
+
 export const VERSION = "0.0.0";

@@ -101,6 +101,15 @@ export class Servers extends Schema.Class<Servers>("@oligarchy/shared/contract/S
   servers: Schema.Array(Server),
 }) {}
 
+// POST /automate on the automation service: the Linear ticket to drive and the model to drive it
+// with, both as the caller spelled them.
+export class AutomateBody extends Schema.Class<AutomateBody>(
+  "@oligarchy/shared/contract/AutomateBody",
+)({
+  ticket: Schema.NonEmptyString,
+  model: Schema.NonEmptyString,
+}) {}
+
 const STORED_IMAGE_ORIGIN = "https://oligarchy.trm.sh";
 
 export const StoredImageUrl = (id: string): string => `${STORED_IMAGE_ORIGIN}/images/${id}`;
