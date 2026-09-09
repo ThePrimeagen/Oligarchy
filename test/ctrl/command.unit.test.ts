@@ -1,11 +1,10 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { NodeFileSystem, NodeServices } from "@effect/platform-node";
+import { NodeServices } from "@effect/platform-node";
 import { Cause, Effect, Exit, FileSystem, Layer } from "effect";
 import { TestClock, TestConsole } from "effect/testing";
 import { CliError, Command } from "effect/unstable/cli";
 import * as CtrlCommand from "../../src/ctrl/command.ts";
-import * as Prompts from "../../src/ctrl/prompts.ts";
 import * as DbSchema from "../../src/db/schema.ts";
 import * as Api from "../../src/shared/api.ts";
 import * as Contract from "../../src/shared/contract.ts";
@@ -99,13 +98,37 @@ const ago = (seconds: number): Date => new Date(NOW - seconds * 1000);
 // Harness
 // ---------------------------------------------------------------------------
 
+const DRIVING_AGENT_PATH = /\/prompts\/driving-agent\.html$/;
+const TEMPLATE = "Review Linear ticket {{LINEAR_TICKET}}\n";
+
+// A FileSystem that serves one template for every prompt file except the ones matched, which
+// fail as an unreadable file in the checkout would. The files under prompts/ are never read: what
+// they say is the prompt author's business. A test that asserts on the text an agent is handed
+// scripts a template naming the placeholders that command supplies.
+const promptFs = (
+  unreadable: RegExp,
+  template = TEMPLATE,
+): { readonly reads: Array<string>; readonly layer: Layer.Layer<FileSystem.FileSystem> } => {
+  const reads: Array<string> = [];
+  const layer = FileSystem.layerNoop({
+    readFileString: (path) =>
+      Effect.suspend(() => {
+        reads.push(path);
+        return unreadable.test(path)
+          ? Effect.fail(FakeFs.permissionDenied("open", path))
+          : Effect.succeed(template);
+      }),
+  });
+  return { reads, layer };
+};
+
 // ctrl reaches nothing over HTTP but Linear and Cursor, both faked here: a request to anything
 // else dies.
 const harness = (
   options: {
     readonly linear?: FakeLinear.FakeLinear;
     readonly cursor?: FakeCursor.FakeCursor;
-    // Replaces the real FileSystem the prompt templates are read from.
+    // The FileSystem the prompt templates are read from; a scripted template when not given.
     readonly fs?: Layer.Layer<FileSystem.FileSystem>;
   } = {},
 ) => {
@@ -129,8 +152,7 @@ const harness = (
     },
   });
   // A later layer's service wins the merge, so the fake FileSystem replaces Node's.
-  const services =
-    options.fs === undefined ? NodeServices.layer : Layer.merge(NodeServices.layer, options.fs);
+  const services = Layer.merge(NodeServices.layer, options.fs ?? promptFs(/never/).layer);
   const program = (args: ReadonlyArray<string>, env: Record<string, string>) =>
     Command.runWith(command, { version: Api.VERSION })(args).pipe(
       Effect.provide(Layer.mergeAll(services, Config.withEnv(env), FakeHttp.die)),
@@ -141,28 +163,6 @@ const harness = (
   const fail = (args: ReadonlyArray<string>, env: Record<string, string> = WITH_DB) =>
     Effect.flip(program(args, env));
   return { stores, log, linear, cursor, touched, run, fail };
-};
-
-const DRIVING_AGENT_PATH = /\/prompts\/driving-agent\.html$/;
-const TEMPLATE = "Review Linear ticket {{LINEAR_TICKET}}\n";
-
-// A FileSystem that serves one template for every prompt file except the ones matched, which
-// fail as an unreadable file in the checkout would.
-const promptFs = (
-  unreadable: RegExp,
-  template = TEMPLATE,
-): { readonly reads: Array<string>; readonly layer: Layer.Layer<FileSystem.FileSystem> } => {
-  const reads: Array<string> = [];
-  const layer = FileSystem.layerNoop({
-    readFileString: (path) =>
-      Effect.suspend(() => {
-        reads.push(path);
-        return unreadable.test(path)
-          ? Effect.fail(FakeFs.permissionDenied("open", path))
-          : Effect.succeed(template);
-      }),
-  });
-  return { reads, layer };
 };
 
 const failure = (exit: Exit.Exit<void, unknown>): unknown => {
@@ -183,10 +183,6 @@ const helpErrors = (exit: Exit.Exit<void, unknown>): ReadonlyArray<string> => {
 const stdout = Effect.map(TestConsole.logLines, (lines) => lines.map(String));
 
 const lastJson = Effect.map(stdout, (lines) => JSON.parse(lines.at(-1) ?? ""));
-
-// The text a command hands an agent, rendered from the checkout's own templates and guides.
-const rendered = (template: Prompts.Template, values: Prompts.Values) =>
-  Prompts.render(template, values).pipe(Effect.provide(NodeFileSystem.layer));
 
 // ---------------------------------------------------------------------------
 // test --list
@@ -448,12 +444,26 @@ describe("test define", () => {
 const NEW = ["test", "new", "--iso", "https://example.com/omarchy.iso", "--version", "1.2.3"];
 const WITH_LINEAR = { ...WITH_DB, LINEAR_API_TOKEN: "linear-token" };
 
+// Every value test new hands the ticket template, one per line.
+const TICKET_TEMPLATE = [
+  "{{LINEAR_TICKET}}",
+  "{{RUN_ID}}",
+  "{{RESULT_ID}}",
+  "{{VERSION}}",
+  "{{ISO_URL}}",
+  "{{SERVER_URL}}",
+  "{{TEST_NAME}}",
+  "{{TEST_DESCRIPTION}}",
+  "{{TEST_INSTRUCTION}}",
+  "{{TEST_PROOF}}",
+].join("\n");
+
 describe("test new", () => {
   it.effect(
     "creates the run and pending results, then one described Linear ticket per definition (happy)",
     () =>
       Effect.gen(function* () {
-        const h = harness();
+        const h = harness({ fs: promptFs(/never/, TICKET_TEMPLATE).layer });
         h.stores.tests.definitions.push(terminal, install);
         const exit = yield* h.run([...NEW, `--server-url=${SERVER}`], WITH_LINEAR);
         expect(Exit.isSuccess(exit)).toBe(true);
@@ -475,20 +485,20 @@ describe("test new", () => {
 
         // Each ticket is the one template filled with that definition's values and its own ids.
         const descriptionOf = (definition: TestDefinitionRow, index: number, identifier: string) =>
-          rendered("linear-issue.html", {
-            LINEAR_TICKET: identifier,
-            RUN_ID: run?.id ?? "",
-            RESULT_ID: results[index]?.id ?? "",
-            VERSION: "1.2.3",
-            ISO_URL: "https://example.com/omarchy.iso",
-            SERVER_URL: SERVER,
-            TEST_NAME: definition.name,
-            TEST_DESCRIPTION: definition.description,
-            TEST_INSTRUCTION: definition.instruction,
-            TEST_PROOF: definition.proof,
-          });
-        const installDescription = yield* descriptionOf(install, 0, "OLI-42");
-        const terminalDescription = yield* descriptionOf(terminal, 1, "OLI-43");
+          [
+            identifier,
+            run?.id,
+            results[index]?.id,
+            "1.2.3",
+            "https://example.com/omarchy.iso",
+            SERVER,
+            definition.name,
+            definition.description,
+            definition.instruction,
+            definition.proof,
+          ].join("\n");
+        const installDescription = descriptionOf(install, 0, "OLI-42");
+        const terminalDescription = descriptionOf(terminal, 1, "OLI-43");
         const labels = [FakeLinear.labelId("agent test"), FakeLinear.labelId("1.2.3")];
         expect(h.linear.calls).toEqual([
           { method: "teamId" },
@@ -564,7 +574,7 @@ describe("test new", () => {
 
   it.effect("pins the newest wording of a definition that has several, and its text (happy)", () =>
     Effect.gen(function* () {
-      const h = harness();
+      const h = harness({ fs: promptFs(/never/, "{{TEST_INSTRUCTION}}").layer });
       h.stores.tests.definitions.push(install, installRevised, terminal);
       const exit = yield* h.run([...NEW, "--server-url", SERVER], WITH_LINEAR);
       expect(Exit.isSuccess(exit)).toBe(true);
@@ -573,7 +583,7 @@ describe("test new", () => {
         terminal.id,
       ]);
       const described = h.linear.calls.find((call) => call.method === "describeIssue");
-      expect(described?.method === "describeIssue" ? described.description : "").toContain(
+      expect(described?.method === "describeIssue" ? described.description : "").toBe(
         installRevised.instruction,
       );
     }),
@@ -581,7 +591,7 @@ describe("test new", () => {
 
   it.effect("--name runs the newest wording of that definition, never an older one (happy)", () =>
     Effect.gen(function* () {
-      const h = harness();
+      const h = harness({ fs: promptFs(/never/, "{{TEST_INSTRUCTION}}").layer });
       // The older wording is listed last, so the newest wins by id, not by position.
       h.stores.tests.definitions.push(installRevised, terminal, install);
       const exit = yield* h.run(
@@ -593,8 +603,8 @@ describe("test new", () => {
       const described = h.linear.calls.filter((call) => call.method === "describeIssue");
       expect(described).toHaveLength(1);
       const description = described[0]?.method === "describeIssue" ? described[0].description : "";
-      expect(description).toContain(installRevised.instruction);
-      expect(description).not.toContain(`<instruction>${install.instruction}</instruction>`);
+      expect(description).toBe(installRevised.instruction);
+      expect(description).not.toBe(install.instruction);
       expect(h.log.lines.map((line) => line.text)).toEqual([
         `test ${h.stores.tests.runs[0]?.id} created; 1 tests; OLI-42`,
       ]);
@@ -850,26 +860,21 @@ describe("test list", () => {
 
 const WITH_CURSOR = { ...WITH_DB, CURSOR_API_TOKEN: "cursor-token" };
 
+// Every value test run hands the driver's template.
+const DRIVER_TEMPLATE = "{{LINEAR_TICKET}} {{MODEL}}";
+
 describe("test run", () => {
   it.effect("kicks off the driving agent with the ticket prompt and prints its link (happy)", () =>
     Effect.gen(function* () {
-      const h = harness({ cursor: FakeCursor.fakeCursor({ agentId: "bc-42" }) });
+      const h = harness({
+        cursor: FakeCursor.fakeCursor({ agentId: "bc-42" }),
+        fs: promptFs(/never/, DRIVER_TEMPLATE).layer,
+      });
       const exit = yield* h.run(["test", "run", "--ticket", "OLI-42"], WITH_CURSOR);
       expect(Exit.isSuccess(exit)).toBe(true);
       // Without --model the agent runs on the default, and the prompt names that default so the
       // driver records it at test start.
-      expect(h.cursor.calls).toEqual([
-        {
-          text: yield* rendered("driving-agent.html", {
-            LINEAR_TICKET: "OLI-42",
-            MODEL: "grok-4.6-xhigh-fast",
-          }),
-          model: undefined,
-        },
-      ]);
-      expect(h.cursor.calls[0]?.text).toMatch(/Review Linear ticket\s+OLI-42/);
-      expect(h.cursor.calls[0]?.text).toContain("<model> grok-4.6-xhigh-fast </model>");
-      expect(h.cursor.calls[0]?.text.includes(SERVER)).toBe(false);
+      expect(h.cursor.calls).toEqual([{ text: "OLI-42 grok-4.6-xhigh-fast", model: undefined }]);
       expect(yield* stdout).toEqual([
         "Agent here, go check it out for more information: https://cursor.com/agents/bc-42",
       ]);
@@ -879,22 +884,18 @@ describe("test run", () => {
 
   it.effect("--model runs the agent on that model and names it in the prompt (happy)", () =>
     Effect.gen(function* () {
-      const h = harness({ cursor: FakeCursor.fakeCursor({ agentId: "bc-43" }) });
+      const h = harness({
+        cursor: FakeCursor.fakeCursor({ agentId: "bc-43" }),
+        fs: promptFs(/never/, DRIVER_TEMPLATE).layer,
+      });
       const exit = yield* h.run(
         ["test", "run", "--ticket", "OLI-42", "--model", "composer-2.5"],
         WITH_CURSOR,
       );
       expect(Exit.isSuccess(exit)).toBe(true);
       expect(h.cursor.calls).toEqual([
-        {
-          text: yield* rendered("driving-agent.html", {
-            LINEAR_TICKET: "OLI-42",
-            MODEL: "composer-2.5",
-          }),
-          model: { id: "composer-2.5" },
-        },
+        { text: "OLI-42 composer-2.5", model: { id: "composer-2.5" } },
       ]);
-      expect(h.cursor.calls[0]?.text).toContain("--model composer-2.5");
     }),
   );
 
@@ -1897,6 +1898,9 @@ const DIAGNOSE_RUN = ["diagnose", "run", "--session-id", SESSION_ID];
 
 const DIAGNOSING_AGENT_PATH = /\/prompts\/diagnosing-agent\.html$/;
 
+// Every value diagnose run hands the reviewer's template.
+const REVIEWER_TEMPLATE = "{{SESSION_ID}} {{LINEAR_TICKET}} {{MODEL}}";
+
 // The driver ran the session under its Linear ticket as the agent id; the reviewer moves that
 // ticket, so diagnose run reads it back from the session's agent run.
 const drivenBy = (h: ReturnType<typeof harness>, ticket: string, sessionId = SESSION_ID) => {
@@ -1910,10 +1914,13 @@ const drivenBy = (h: ReturnType<typeof harness>, ticket: string, sessionId = SES
 
 describe("diagnose run", () => {
   it.effect(
-    "kicks off the reviewer with the session, its ticket and the diagnosis guide, and prints its link (happy)",
+    "kicks off the reviewer with the session, its ticket and its model, and prints its link (happy)",
     () =>
       Effect.gen(function* () {
-        const h = harness({ cursor: FakeCursor.fakeCursor({ agentId: "bc-42" }) });
+        const h = harness({
+          cursor: FakeCursor.fakeCursor({ agentId: "bc-42" }),
+          fs: promptFs(/never/, REVIEWER_TEMPLATE).layer,
+        });
         h.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
         drivenBy(h, "OLI-42");
         const exit = yield* h.run(DIAGNOSE_RUN, WITH_CURSOR);
@@ -1921,24 +1928,8 @@ describe("diagnose run", () => {
         // Without --model the reviewer runs on the default, and the prompt names that default so
         // the reviewer records it with diagnose.
         expect(h.cursor.calls).toEqual([
-          {
-            text: yield* rendered("diagnosing-agent.html", {
-              SESSION_ID,
-              LINEAR_TICKET: "OLI-42",
-              MODEL: "grok-4.6-xhigh-fast",
-            }),
-            model: undefined,
-          },
+          { text: `${SESSION_ID} OLI-42 grok-4.6-xhigh-fast`, model: undefined },
         ]);
-        const text = h.cursor.calls[0]?.text ?? "";
-        expect(text).toContain(`<session_id>${SESSION_ID}</session_id>`);
-        expect(text).toContain("<linear_ticket>OLI-42</linear_ticket>");
-        expect(text).toContain("<model>grok-4.6-xhigh-fast</model>");
-        expect(text).toContain("## diagnose");
-        expect(text.includes("{{")).toBe(false);
-        // The reviewer reads the database alone: no proxy is named anywhere in its prompt.
-        expect(text.includes("--server-url")).toBe(false);
-        expect(text.includes("SERVER_URL")).toBe(false);
         expect(yield* stdout).toEqual([
           "Agent here, go check it out for more information: https://cursor.com/agents/bc-42",
         ]);
@@ -1948,23 +1939,17 @@ describe("diagnose run", () => {
 
   it.effect("--model runs the reviewer on that model and names it in the prompt (happy)", () =>
     Effect.gen(function* () {
-      const h = harness({ cursor: FakeCursor.fakeCursor({ agentId: "bc-43" }) });
+      const h = harness({
+        cursor: FakeCursor.fakeCursor({ agentId: "bc-43" }),
+        fs: promptFs(/never/, REVIEWER_TEMPLATE).layer,
+      });
       h.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
       drivenBy(h, "OLI-42");
       const exit = yield* h.run([...DIAGNOSE_RUN, "--model", "composer-2.5"], WITH_CURSOR);
       expect(Exit.isSuccess(exit)).toBe(true);
       expect(h.cursor.calls).toEqual([
-        {
-          text: yield* rendered("diagnosing-agent.html", {
-            SESSION_ID,
-            LINEAR_TICKET: "OLI-42",
-            MODEL: "composer-2.5",
-          }),
-          model: { id: "composer-2.5" },
-        },
+        { text: `${SESSION_ID} OLI-42 composer-2.5`, model: { id: "composer-2.5" } },
       ]);
-      expect(h.cursor.calls[0]?.text).toContain("<model>composer-2.5</model>");
-      expect(h.cursor.calls[0]?.text).toContain("--model composer-2.5");
     }),
   );
 
@@ -1982,15 +1967,30 @@ describe("diagnose run", () => {
 
   it.effect("reviews a succeeded session too, and ignores SERVER_URL (happy)", () =>
     Effect.gen(function* () {
-      const h = harness();
+      const h = harness({ fs: promptFs(/never/, REVIEWER_TEMPLATE).layer });
       h.stores.sessions.sessions.push(session(SESSION_ID, "succeeded", ago(500)));
       drivenBy(h, "OLI-42");
       const exit = yield* h.run(DIAGNOSE_RUN, { ...WITH_CURSOR, SERVER_URL: SERVER });
       expect(Exit.isSuccess(exit)).toBe(true);
-      expect(h.cursor.calls).toHaveLength(1);
-      expect(h.cursor.calls[0]?.text).toContain(`--session-id ${SESSION_ID} --all`);
-      expect(h.cursor.calls[0]?.text.includes(SERVER)).toBe(false);
+      expect(h.cursor.calls.map((call) => call.text)).toEqual([
+        `${SESSION_ID} OLI-42 grok-4.6-xhigh-fast`,
+      ]);
     }),
+  );
+
+  it.effect(
+    "hands the reviewer no server url: a template asking for one is refused, SERVER_URL set or not (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const h = harness({ fs: promptFs(/never/, "{{SERVER_URL}}").layer });
+        h.stores.sessions.sessions.push(session(SESSION_ID, "succeeded", ago(500)));
+        drivenBy(h, "OLI-42");
+        expect(yield* h.fail(DIAGNOSE_RUN, { ...WITH_CURSOR, SERVER_URL: SERVER })).toMatchObject({
+          _tag: "PromptError",
+          message: "prompt: prompts/diagnosing-agent.html uses {{SERVER_URL}}, which has no value",
+        });
+        expect(h.cursor.calls).toEqual([]);
+      }),
   );
 
   it.effect("hands the reviewer the ticket of this session, not another's (happy)", () =>
@@ -2004,9 +2004,7 @@ describe("diagnose run", () => {
       drivenBy(h, "OLI-42");
       const exit = yield* h.run(DIAGNOSE_RUN, WITH_CURSOR);
       expect(Exit.isSuccess(exit)).toBe(true);
-      const text = h.cursor.calls[0]?.text ?? "";
-      expect(text).toContain("<linear_ticket>OLI-42</linear_ticket>");
-      expect(text.includes("OLI-7")).toBe(false);
+      expect(h.cursor.calls.map((call) => call.text)).toEqual(["Review Linear ticket OLI-42\n"]);
     }),
   );
 
