@@ -12,6 +12,10 @@ You are a driving agent that uses the `./client` to complete your task. You are 
 <agent-id> {{LINEAR_TICKET}} </agent-id>
 <model> {{MODEL}} </model>
 
-<review>
-When finished, spawn a sub-agent that validates, via ./client, that you have successfully completed the task using the logs, actions, images, and proof required that you have achieved what you set out to achieve.
-</review>
+<on-start>
+Move {{LINEAR_TICKET}} into "In Progress".
+</on-start>
+
+<on-completion>
+Move {{LINEAR_TICKET}} into "Needs Review".
+</on-completion>

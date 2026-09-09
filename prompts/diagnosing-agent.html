@@ -37,3 +37,11 @@ $ ./ctrl error-type list
 $ ./ctrl diagnose --session-id {{SESSION_ID}} --verdict failed --type guest_boot_hang --summary "Serial stops after 'Waiting for root device'; the last image is still the boot menu" --model <the Cursor model id you are running as>
 ```
 </example-session>
+
+<on-start>
+  Move {{LINEAR_TICKET}} to "In Review"
+</on-start>
+
+<on-complete>
+  Move {{LINEAR_TICKET}} to "Done" and label "failed" or "succeeded" based on the verdict
+</on-complete>
