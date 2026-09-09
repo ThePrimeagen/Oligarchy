@@ -5,7 +5,7 @@ import { HttpBody, HttpClient, HttpClientRequest, HttpRouter } from "effect/unst
 import { HttpApiClient, HttpApiMiddleware } from "effect/unstable/httpapi";
 import { NodeHttpServer } from "@effect/platform-node";
 import * as Handlers from "../../src/automation/handlers.ts";
-import * as Config from "../../src/config.ts";
+import * as Middleware from "../../src/proxy/middleware.ts";
 import * as Api from "../../src/shared/api.ts";
 import * as Contract from "../../src/shared/contract.ts";
 import * as FakeFs from "../support/fake-fs.ts";
@@ -18,10 +18,8 @@ const RECORD = "/home/operator/automation-test";
 const TICKET = "OLI-61";
 const MODEL = "grok-4.6";
 
-const ProxyConfigLive = Layer.succeed(Config.ProxyConfig)({
-  token: Redacted.make(TOKEN),
-  databaseUrl: Redacted.make("postgres://unused"),
-});
+// The service's bearer is the token alone: no ProxyConfig, no database url, as in its main.
+const BearerLive = Middleware.bearerAuth(Redacted.make(TOKEN));
 
 const bearer = (token: string) =>
   HttpApiMiddleware.layerClient(Api.BearerAuth, ({ next, request }) =>
@@ -67,7 +65,7 @@ const fixture = (file: RecordFile = recordFile()): Fixture => ({
 
 const serve = (fixed: Fixture) =>
   HttpRouter.serve(Handlers.routes(RECORD), { disableLogger: true, disableListenLog: true }).pipe(
-    Layer.provide(Layer.mergeAll(fixed.file.layer, fixed.log.layer, ProxyConfigLive)),
+    Layer.provide(Layer.mergeAll(fixed.file.layer, fixed.log.layer, BearerLive)),
     Layer.provideMerge(NodeHttpServer.layerTest),
     Layer.provideMerge(fixed.reporter.layer),
     Layer.provideMerge(bearer(TOKEN)),

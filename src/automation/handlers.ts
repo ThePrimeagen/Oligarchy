@@ -37,11 +37,12 @@ export const AutomationsLive = (record: string) =>
     ),
   );
 
+// The bearer is left to the graph: this service has no ProxyConfig to read the token from.
 export const routes = (record: string) =>
   Layer.mergeAll(
     HttpApiBuilder.layer(Api.AutomationApi).pipe(
       Layer.provide(AutomationsLive(record)),
-      Layer.provide(Layer.mergeAll(Middleware.BearerAuthLive, Middleware.ApiBoundaryLive)),
+      Layer.provide(Middleware.ApiBoundaryLive),
     ),
     ProxyHandlers.NotFoundRoute,
   );

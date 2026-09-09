@@ -206,7 +206,7 @@ export class Log extends Context.Service<Log>()("@oligarchy/observability/Log", 
   }),
 }) {
   static readonly layer: Layer.Layer<Log, never, Logs.LogStore> = Layer.effect(this)(this.make);
-  // stdout only, no rows: tests and the CLIs that have no database.
+  // stdout only, no rows: tests and the processes that have no database (the automation service).
   static readonly layerStdout: Layer.Layer<Log> = Layer.effect(this)(
     makeLog(() => Effect.succeed(stdoutOnly)),
   );

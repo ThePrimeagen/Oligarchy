@@ -9,7 +9,6 @@ import {
   FileSystem,
   Layer,
   Path,
-  Redacted,
   Stdio,
   Terminal,
 } from "effect";
@@ -18,9 +17,7 @@ import { Command } from "effect/unstable/cli";
 import { HttpServerError } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import * as AutomationCommand from "../../src/automation/command.ts";
-import * as Client from "../../src/db/client.ts";
 import * as Api from "../../src/shared/api.ts";
-import * as Errors from "../../src/shared/errors.ts";
 import * as FakeLog from "../support/log.ts";
 
 const CliTestLayer = Layer.mergeAll(
@@ -41,23 +38,6 @@ const CliTestLayer = Layer.mergeAll(
   ),
 );
 
-const UNREACHABLE = "postgres://user:pw@127.0.0.1:1/oligarchy";
-
-// A Database whose ping is scripted; the pool never connects, so nothing touches the network.
-const fakeDatabase = (ping: Effect.Effect<void, Errors.DatabaseError>) =>
-  Layer.effect(Client.Database)(
-    Effect.map(Client.Database.make(Redacted.make(UNREACHABLE)), (database) => ({
-      ...database,
-      ping,
-    })),
-  );
-
-const refused = Errors.DatabaseError.make({
-  operation: "ping",
-  message: "Failed query: select 1",
-  cause: new Error("connect ECONNREFUSED 127.0.0.1:1"),
-});
-
 // The server layer and the failure signal the command is built from.
 const fakeServer = () => {
   const served: Array<number> = [];
@@ -76,15 +56,15 @@ const fakeServer = () => {
   return { served, listening, serverFailed, server };
 };
 
+// No Database in the layer: the command has none to ping, and one it asked for would not compile.
 const run = (
   server: AutomationCommand.AutomationServer<never>,
   args: ReadonlyArray<string>,
   log: FakeLog.FakeLog,
-  ping: Effect.Effect<void, Errors.DatabaseError> = Effect.void,
 ) =>
   Command.runWith(AutomationCommand.makeAutomationCommand(server), { version: Api.VERSION })(
     args,
-  ).pipe(Effect.provide(Layer.mergeAll(CliTestLayer, log.layer, fakeDatabase(ping))));
+  ).pipe(Effect.provide(Layer.mergeAll(CliTestLayer, log.layer)));
 
 describe("automation command flags", () => {
   it.effect("--port must be an integer", () =>
@@ -102,7 +82,7 @@ describe("automation command flags", () => {
     Effect.gen(function* () {
       const fake = fakeServer();
       const log = FakeLog.fakeLog();
-      const exit = yield* Effect.exit(run(fake.server, ["--help"], log, Effect.fail(refused)));
+      const exit = yield* Effect.exit(run(fake.server, ["--help"], log));
       expect(Exit.isSuccess(exit)).toBe(true);
       expect(fake.served).toEqual([]);
       expect(log.lines).toEqual([]);
@@ -113,7 +93,7 @@ describe("automation command flags", () => {
     }),
   );
 
-  it.effect("defaults to port 54321 and pings the database first", () =>
+  it.effect("defaults to port 54321 and listens with nothing to ping first", () =>
     Effect.gen(function* () {
       const fake = fakeServer();
       const log = FakeLog.fakeLog();
@@ -140,47 +120,6 @@ describe("automation command flags", () => {
 });
 
 describe("automation command startup failures", () => {
-  it.effect("an unreachable database fails before listening as database unreachable", () =>
-    Effect.gen(function* () {
-      const fake = fakeServer();
-      const log = FakeLog.fakeLog();
-      const error = yield* Effect.flip(run(fake.server, [], log, Effect.fail(refused)));
-      expect(error).toMatchObject({
-        _tag: "DatabaseError",
-        operation: "ping",
-        message: "database unreachable: connect ECONNREFUSED 127.0.0.1:1",
-      });
-      expect(fake.served).toEqual([]);
-      expect(log.lines).toEqual([
-        {
-          level: "fatal",
-          text: "automation: database unreachable: connect ECONNREFUSED 127.0.0.1:1",
-          sessionId: undefined,
-          agentId: undefined,
-          skipSentry: false,
-          cause: error,
-        },
-      ]);
-    }),
-  );
-
-  it.effect("a ping failure without a nested cause reports the driver's own message", () =>
-    Effect.gen(function* () {
-      const fake = fakeServer();
-      const log = FakeLog.fakeLog();
-      const error = yield* Effect.flip(
-        run(
-          fake.server,
-          [],
-          log,
-          Effect.fail(Errors.DatabaseError.make({ operation: "ping", message: "pool ended" })),
-        ),
-      );
-      expect(error).toMatchObject({ message: "database unreachable: pool ended" });
-      expect(log.lines[0]?.text).toBe("automation: database unreachable: pool ended");
-    }),
-  );
-
   it.effect("a server error after listen fails the handler with the error's detail", () =>
     Effect.gen(function* () {
       const fake = fakeServer();

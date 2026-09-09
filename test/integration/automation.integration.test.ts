@@ -4,16 +4,13 @@ import { createServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, inject } from "vitest";
+import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { Effect } from "effect";
 
 const AUTOMATION = fileURLToPath(new URL("../../automation", import.meta.url));
 const TOKEN = "t";
-const UNREACHABLE = "postgres://user:sentinel-pw@127.0.0.1:1/oligarchy";
 const EXIT_WITHIN_MS = 60_000;
-
-const dbUrl = inject("dbUrl");
 
 type Process = {
   readonly child: ChildProcess;
@@ -26,19 +23,21 @@ type Process = {
 };
 
 // Sentry is initialised by the wrapper's --import; a proxy nobody listens on keeps the test
-// run's fatal lines out of the real project without touching the code under test.
+// run's fatal lines out of the real project without touching the code under test. The service
+// has no database, so a DATABASE_URL in the developer's environment is removed: it must not be
+// what makes these pass.
 const environment = (home: string, overrides: Record<string, string>): NodeJS.ProcessEnv => {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     HOME: home,
     OLIGARCHY_TOKEN: TOKEN,
-    DATABASE_URL: dbUrl === "" ? UNREACHABLE : dbUrl,
     https_proxy: "http://127.0.0.1:1",
     http_proxy: "http://127.0.0.1:1",
     no_proxy: "",
     ...overrides,
   };
   delete env.FORCE_COLOR;
+  delete env.DATABASE_URL;
   return env;
 };
 
@@ -172,27 +171,11 @@ describe("automation startup refusals", () => {
       const { code } = await process.exited;
       expect(code).toBe(1);
       expect(process.stderr()).toContain("OLIGARCHY_TOKEN is not set");
-      expect(process.stderr()).not.toContain("sentinel-pw");
-    }),
-  );
-
-  it.live("an unreachable database exits 1 with the fatal line and never the password", () =>
-    Effect.promise(async () => {
-      const process = spawnAutomation([], { DATABASE_URL: UNREACHABLE });
-      const { code } = await process.exited;
-      expect(code).toBe(1);
-      const fatal = lines(process.stdout()).find((line) =>
-        line.startsWith("[global] fatal: automation: database unreachable:"),
-      );
-      expect(fatal, process.stdout()).toBeDefined();
-      expect(fatal).toContain("ECONNREFUSED");
-      expect(process.stdout()).not.toContain("sentinel-pw");
-      expect(process.stderr()).not.toContain("sentinel-pw");
       expect(process.stdout()).not.toContain("listening");
     }),
   );
 
-  it.live.skipIf(dbUrl === "")("an occupied port exits 1 with EADDRINUSE", () =>
+  it.live("an occupied port exits 1 with EADDRINUSE", () =>
     Effect.promise(async () => {
       const { port, release } = await occupy();
       try {
@@ -290,12 +273,9 @@ describe("automation serving", () => {
     expect(code, process.stdout()).toBe(0);
     const output = lines(process.stdout());
     expect(output).toContain("[global] error: POST /automate failed: unauthorized");
-    expect(
-      output.some(
-        (line) =>
-          line.startsWith("[global] error: POST /automate failed: ") && line.includes('["model"]'),
-      ),
-    ).toBe(true);
+    // The schema's detail spans two lines: the missing key, then where.
+    expect(output).toContain("[global] error: POST /automate failed: Missing key");
+    expect(output).toContain('  at ["model"]');
     expect(output).toContain("[OLI-1] automation recorded; grok-4.6");
     expect(output).toContain("[OLI-2] automation recorded; claude-opus-5");
     expect(output.some((line) => line.includes("/start"))).toBe(false);
@@ -304,15 +284,11 @@ describe("automation serving", () => {
     await expect(request(port, "GET", "/automate")).rejects.toThrow();
   };
 
-  it.live.skipIf(dbUrl === "")(
-    "listens, records each request, answers 401, 400 and 404, and exits 0 on SIGINT",
+  it.live(
+    "listens without a database, records each request, answers 401, 400 and 404, and exits 0 on SIGINT",
     () => Effect.promise(() => served("SIGINT")),
     120_000,
   );
 
-  it.live.skipIf(dbUrl === "")(
-    "exits 0 on SIGTERM",
-    () => Effect.promise(() => served("SIGTERM")),
-    120_000,
-  );
+  it.live("exits 0 on SIGTERM", () => Effect.promise(() => served("SIGTERM")), 120_000);
 });
