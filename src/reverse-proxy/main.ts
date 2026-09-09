@@ -4,6 +4,7 @@ import { Cause, Deferred, Effect, Exit, Layer, type Runtime } from "effect";
 import { Command } from "effect/unstable/cli";
 import { HttpMiddleware, HttpRouter, HttpServer, HttpServerError } from "effect/unstable/http";
 import * as Config from "../config.ts";
+import * as Cursor from "../ctrl/cursor.ts";
 import * as Client from "../db/client.ts";
 import * as Logs from "../db/logs.ts";
 import * as Servers from "../db/servers.ts";
@@ -67,8 +68,14 @@ const DatabaseLive = Layer.unwrap(
   Effect.map(Config.ProxyConfig, (config) => Client.Database.layer(config.databaseUrl)),
 );
 
+// The reverse proxy spawns agents, so it needs the key at startup. Built above ProxyConfig, so a
+// missing CURSOR_API_TOKEN is reported after the proxy's two, never before.
+const CursorLive = Layer.unwrap(
+  Effect.map(Config.cursorApiToken, (apiKey) => Cursor.CursorAgents.layer(apiKey)),
+);
+
 // Sentry sits beneath Log so the log rows flush before Sentry does, and Log captures the reporter.
-const MainLive = Layer.mergeAll(Servers.ServerStore.layer, Log.Log.layer).pipe(
+const MainLive = Layer.mergeAll(Servers.ServerStore.layer, Log.Log.layer, CursorLive).pipe(
   Layer.provideMerge(Logs.LogStore.layer),
   Layer.provideMerge(DatabaseLive),
   Layer.provideMerge(Config.ProxyConfig.layer),

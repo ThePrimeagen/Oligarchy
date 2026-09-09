@@ -4,6 +4,7 @@ import * as ProxyHandlers from "../proxy/handlers.ts";
 import * as Middleware from "../proxy/middleware.ts";
 import * as Api from "../shared/api.ts";
 import * as Contract from "../shared/contract.ts";
+import * as Agents from "./agents.ts";
 import * as Router from "./router.ts";
 
 const ok = Contract.Ok.make({});
@@ -118,10 +119,22 @@ export const ServersLive = HttpApiBuilder.group(Api.ReverseProxyApi, "Servers", 
     ),
 );
 
+// Uninterruptible for the agent's sake: a client gone mid-create must not leave an agent created
+// and never prompted, or prompted and never answered to anyone.
+export const AgentsLive = HttpApiBuilder.group(Api.ReverseProxyApi, "Agents", (handlers) =>
+  handlers.handle("spawn", ({ payload }) => Agents.spawn(payload), uninterruptible),
+);
+
 export const routes = Layer.mergeAll(
   HttpApiBuilder.layer(Api.ReverseProxyApi).pipe(
-    Layer.provide(Layer.mergeAll(SessionsLive, ServersLive)),
-    Layer.provide(Layer.mergeAll(Middleware.BearerAuthLive, Middleware.RouteBoundaryLive)),
+    Layer.provide(Layer.mergeAll(SessionsLive, ServersLive, AgentsLive)),
+    Layer.provide(
+      Layer.mergeAll(
+        Middleware.BearerAuthLive,
+        Middleware.RouteBoundaryLive,
+        Middleware.ApiBoundaryLive,
+      ),
+    ),
   ),
   ProxyHandlers.NotFoundRoute,
 );

@@ -38,6 +38,8 @@ const isApiError: (value: unknown) => value is Errors.ApiError = Schema.is(
     Errors.Internal,
     Errors.ServerFailed,
     Errors.NoServer,
+    Errors.ModelUnavailable,
+    Errors.CursorAgentFailed,
   ]),
 );
 
@@ -58,6 +60,8 @@ const attribution = (error: Errors.ApiError): Log.Attribution => {
   switch (error._tag) {
     case "Unauthorized":
     case "NotFound":
+    case "ModelUnavailable":
+    case "CursorAgentFailed":
       return {};
     case "Forbidden":
       return { sessionId: error.sessionId, agentId: error.agentId };

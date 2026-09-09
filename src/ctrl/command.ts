@@ -411,24 +411,26 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     yield* printJson(yield* linear.listBacklog);
   });
 
-  // test run --ticket <linear-ticket>
+  // The model an agent is started on: the id given, alone, so the vendor's defaults decide the
+  // rest; or the default. The prompt names it as the label the agent must record.
+  const modelChoice = (model: Option.Option<string>): Domain.ModelChoice =>
+    Option.match(model, {
+      onNone: () => Domain.DEFAULT_MODEL,
+      onSome: (id) => ({ model: id }),
+    });
+
   // test run --ticket <linear-ticket> [--model <id>]
   const testRun = Effect.fn("ctrl.test.run")(function* (input: {
     readonly ticket: string;
     readonly model: Option.Option<string>;
   }) {
     const agents = yield* Cursor.CursorAgents;
-    // The prompt names the model the agent runs as, so the driver can record it at test start:
-    // the id given, or the label of the default the agent is started on.
-    const selection = Option.map(input.model, (id): Cursor.Model => ({ id }));
+    const choice = modelChoice(input.model);
     const text = yield* Prompts.render("driving-agent.html", {
       LINEAR_TICKET: input.ticket,
-      MODEL: Option.getOrElse(input.model, () => Cursor.modelLabel(Cursor.GROK_4_6_FAST_XHIGH)),
+      MODEL: Domain.modelLabel(choice),
     });
-    const { agentId } = yield* Option.match(selection, {
-      onNone: () => agents.prompt(text),
-      onSome: (model) => agents.prompt(text, model),
-    });
+    const { agentId } = yield* agents.prompt(text, choice);
     yield* Console.log(Render.agentLink(Cursor.agentUrl(agentId)));
   });
 
@@ -580,9 +582,10 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     });
   });
 
-  // diagnose run --session-id <id>
+  // diagnose run --session-id <id> [--model <id>]
   const diagnoseRun = Effect.fn("ctrl.diagnose.run")(function* (input: {
     readonly sessionId: string;
+    readonly model: Option.Option<string>;
   }) {
     const diagnosis = yield* Diagnosis.DiagnosisStore;
     const agents = yield* Cursor.CursorAgents;
@@ -595,9 +598,14 @@ export const makeCtrlCommand = (deps: Deps = live) => {
           refuse(`diagnose run: session ${input.sessionId} already has a diagnosis`),
         ),
       );
-    // The reviewer reads everything back from the database: the session id is all it needs.
-    const text = yield* Prompts.render("diagnosing-agent.html", { SESSION_ID: input.sessionId });
-    const { agentId } = yield* agents.prompt(text);
+    const choice = modelChoice(input.model);
+    // The reviewer reads everything back from the database: the session id and the model it
+    // records with diagnose are all it needs.
+    const text = yield* Prompts.render("diagnosing-agent.html", {
+      SESSION_ID: input.sessionId,
+      MODEL: Domain.modelLabel(choice),
+    });
+    const { agentId } = yield* agents.prompt(text, choice);
     yield* Console.log(Render.agentLink(Cursor.agentUrl(agentId)));
   });
 
@@ -919,7 +927,16 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     Command.withSubcommands([errorTypeNewCommand, errorTypeListCommand]),
   );
 
-  const diagnoseRunCommand = Command.make("run", { sessionId: sessionIdFlag }, diagnoseRun).pipe(
+  const diagnoseRunCommand = Command.make(
+    "run",
+    {
+      sessionId: sessionIdFlag,
+      model: modelFlag(
+        "Cursor model id to run the reviewing agent on; the default when omitted",
+      ).pipe(Flag.optional),
+    },
+    diagnoseRun,
+  ).pipe(
     Command.withDescription("Kick off a Cursor cloud agent that reviews one ended session"),
     Command.provide(withDbAndCursor),
   );
