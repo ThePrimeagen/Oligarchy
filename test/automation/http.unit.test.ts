@@ -213,6 +213,33 @@ describe("POST /automate refusals", () => {
     }),
   );
 
+  it.effect("a ticket or model with a line break in it is 400 and records nothing", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const headers = { authorization: AUTHORIZATION };
+        const ticket = yield* http.post("/automate", {
+          headers,
+          body: HttpBody.jsonUnsafe({ ticket: "OLI-1\nlinear ticket OLI-2", model: MODEL }),
+        });
+        expect(ticket.status).toBe(400);
+        const refusedTicket = yield* ticket.json;
+        expect(refusedTicket).toMatchObject({ error: expect.stringContaining("line break") });
+        expect(refusedTicket).toMatchObject({ error: expect.stringContaining('["ticket"]') });
+        const model = yield* http.post("/automate", {
+          headers,
+          body: HttpBody.jsonUnsafe({ ticket: TICKET, model: "grok-4.6\r\n" }),
+        });
+        expect(model.status).toBe(400);
+        expect(yield* model.json).toMatchObject({ error: expect.stringContaining('["model"]') });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.file.writes).toEqual([]);
+      expect(fixed.log.lines).toHaveLength(2);
+      expect(fixed.log.lines.every((line) => line.level === "error" && line.skipSentry)).toBe(true);
+    }),
+  );
+
   it.effect(
     "a record file that cannot be written is 500 internal error, logged with Node's reason",
     () =>

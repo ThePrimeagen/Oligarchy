@@ -9,31 +9,24 @@ import * as Errors from "../shared/errors.ts";
 
 const ok = Contract.Ok.make({});
 
-// A request the service accepted is recorded whole or not at all: a client gone mid-request
-// must not leave the line written and the log without it.
-const uninterruptible = { uninterruptible: true } as const;
-
 // POST /automate, for now: one line per request appended to `record`, naming the ticket and the
 // model as they came. Spawning the agent those two describe is the next step and lands here.
 export const AutomationsLive = (record: string) =>
   HttpApiBuilder.group(Api.AutomationApi, "Automations", (handlers) =>
-    handlers.handle(
-      "automate",
-      ({ payload }) =>
-        Effect.gen(function* () {
-          const fs = yield* FileSystem.FileSystem;
-          const log = yield* Log.Log;
-          yield* fs
-            .writeFileString(record, `linear ticket ${payload.ticket}; model ${payload.model}\n`, {
-              flag: "a",
-            })
-            .pipe(
-              Effect.mapError((cause) => Errors.Internal.make({ cause, agentId: payload.ticket })),
-            );
-          yield* log.info(`automation recorded; ${payload.model}`, { agentId: payload.ticket });
-          return ok;
-        }),
-      uninterruptible,
+    handlers.handle("automate", ({ payload }) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const log = yield* Log.Log;
+        yield* fs
+          .writeFileString(record, `linear ticket ${payload.ticket}; model ${payload.model}\n`, {
+            flag: "a",
+          })
+          .pipe(
+            Effect.mapError((cause) => Errors.Internal.make({ cause, agentId: payload.ticket })),
+          );
+        yield* log.info(`automation recorded; ${payload.model}`, { agentId: payload.ticket });
+        return ok;
+      }),
     ),
   );
 
