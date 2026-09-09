@@ -4,25 +4,26 @@ Consult this table of contents first. Read only the section you need.
 
 | Section | Line |
 |---------|-----:|
-| [Important](#important) | 21 |
-| [Synopsis](#synopsis) | 27 |
-| [start](#start) | 50 |
-| [get-image](#get-image) | 65 |
-| [get-serial](#get-serial) | 80 |
-| [send-keys](#send-keys) | 95 |
-| [send-mouse](#send-mouse) | 111 |
-| [intent start](#intent-start) | 128 |
-| [intent end](#intent-end) | 144 |
-| [stop](#stop) | 158 |
-| [Keys](#keys) | 174 |
-| [Mouse](#mouse) | 186 |
-| [The loop](#the-loop) | 194 |
+| [Important](#important) | 22 |
+| [Synopsis](#synopsis) | 28 |
+| [client-with-image](#client-with-image) | 51 |
+| [start](#start) | 68 |
+| [get-image](#get-image) | 83 |
+| [get-serial](#get-serial) | 98 |
+| [send-keys](#send-keys) | 113 |
+| [send-mouse](#send-mouse) | 129 |
+| [intent start](#intent-start) | 146 |
+| [intent end](#intent-end) | 162 |
+| [stop](#stop) | 176 |
+| [Keys](#keys) | 192 |
+| [Mouse](#mouse) | 204 |
+| [The loop](#the-loop) | 212 |
 
 ## Important
 
 If you are the client, or an agent driving the client: do not look at code. Only use the client. Never consider the code, never read the code, never have opinions about the code. Run the client and do the task that was given — specified in Linear, or given to you manually.
 
-`./client` drives the guest. Recording the test result is `./ctrl`, described in its own guide.
+`./client` drives the guest. `./client-with-image` is the same action plus a screenshot to `CLIENT_IMAGE`. Recording the test result is `./ctrl`, described in its own guide.
 
 ## Synopsis
 
@@ -46,6 +47,23 @@ The action comes first. Every value is a flag; there are no positional arguments
 - `OLIGARCHY_TOKEN` — read from the environment and sent on every request. It is already set; do not write a `.env`. Missing means exit 1.
 
 `start` prints a session id; every other action takes it as `--session-id`. A command that works exits 0. A command that fails exits 1 and prints the error: one headline, then the stack trace and the cause behind it. Read the headline first. `./client <action> --help` prints that action's flags. If no command arrives for ten minutes, the proxy kills the session.
+
+## client-with-image
+
+```
+./client-with-image <action> --agent-id <agent> [--server-url <url>] ...
+```
+
+The same arguments as `./client`, then a screenshot. Prefer this over calling `./client` and `./client get-image` as two steps.
+
+- `CLIENT_IMAGE` — the PNG path. Required. Missing means exit 1, `CLIENT_IMAGE is not set`.
+- After the action succeeds, waits 100 ms, then writes the guest display to `CLIENT_IMAGE`.
+- The action's stdout is unchanged (`start` still prints the session id). `--session-id` comes from the flags, or from that printed id.
+- A failed action does not take a screenshot. `stop` does not either: the session is already gone.
+
+```bash
+CLIENT_IMAGE=screen.png ./client-with-image send-keys --agent-id OLI-42 --server-url https://qemu.example.com --session-id 6f1c...e2a9 --keys "hello<ENTER>"
+```
 
 ## start
 
@@ -195,7 +213,7 @@ A greeter or installer button is a left click at that point. A double-click laun
 
 Every guest action — keys, mouse, images — runs inside an intent: start one that says what you are about to do, do the work, end it. Only `start`, `./ctrl`, and `stop` sit outside one.
 
-Send keys or mouse, wait about three seconds, take an image, read it, decide. That is the whole method. Never sleep more than ten seconds between actions. When something genuinely slow is running, keep taking images instead of trusting a long sleep.
+Send keys or mouse, wait about three seconds, take an image, read it, decide. That is the whole method. `./client-with-image` is the action plus the image, with 100 ms in between; set `CLIENT_IMAGE` to the PNG path you will open. Never sleep more than ten seconds between actions. When something genuinely slow is running, keep taking images instead of trusting a long sleep.
 
 Never type into a screen you have not seen. When the state is uncertain, the first action is always an image, never a key.
 

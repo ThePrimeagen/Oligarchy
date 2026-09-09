@@ -68,8 +68,8 @@ Durable preferences from the maintainer; when they conflict with generic best pr
 
 ## Layout
 
-- The root holds `AGENTS.md`, the executable wrappers (`./client`, `./ctrl`, `./server`,
-  `./reverse-proxy`, `./session`), the tooling files, `drizzle/` (migrations), `public/` and
+- The root holds `AGENTS.md`, the executable wrappers (`./client`, `./client-with-image`,
+  `./ctrl`, `./server`, `./reverse-proxy`, `./session`), the tooling files, `drizzle/` (migrations), `public/` and
   `prompts/`, the operator documents, this document, `src/` and `test/`.
 - `src/` is one directory per process plus the shared kernel (`src/shared/`, `src/config.ts`,
   `src/external-failure.ts`, `src/observability/`, `src/db/`); `main.ts` files are the entries.
