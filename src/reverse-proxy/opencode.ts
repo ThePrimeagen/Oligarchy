@@ -199,8 +199,7 @@ const make = Effect.gen(function* () {
         }),
         runs,
       );
-      const started: Agents.Started = { agentId: event.sessionID };
-      return started;
+      return { agentId: event.sessionID };
     }).pipe(
       Scope.provide(run),
       // A run refused before it had a session is stopped here; the spawner's release kills a
