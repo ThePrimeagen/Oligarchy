@@ -1,5 +1,6 @@
 import { Effect, Layer, Option } from "effect";
 import * as Actions from "../../src/db/actions.ts";
+import * as Automation from "../../src/db/automation.ts";
 import * as DebugLogs from "../../src/db/debug-logs.ts";
 import * as Diagnosis from "../../src/db/diagnosis.ts";
 import * as Logs from "../../src/db/logs.ts";
@@ -18,6 +19,7 @@ type TestDefinitionRow = typeof DbSchema.testDefinitions.$inferSelect;
 type TestBasePromptRow = typeof DbSchema.testBasePrompts.$inferSelect;
 type TestRunRow = typeof DbSchema.testRuns.$inferSelect;
 type TestResultRow = typeof DbSchema.testResults.$inferSelect;
+type AutomationJobRow = typeof DbSchema.automationJobs.$inferSelect;
 
 const sameId = (left: string, right: string): boolean => left.toLowerCase() === right.toLowerCase();
 
@@ -508,6 +510,49 @@ export const fakeTestStore = (
 };
 
 // ---------------------------------------------------------------------------
+// AutomationStore
+// ---------------------------------------------------------------------------
+
+export type FakeAutomationStore = {
+  readonly jobs: Array<AutomationJobRow>;
+  readonly layer: Layer.Layer<Automation.AutomationStore>;
+};
+
+// One pending job per (result, action), as the unique index: a second insert is DatabaseError.
+export const fakeAutomationStore = (
+  overrides: Partial<typeof Automation.AutomationStore.Service> = {},
+): FakeAutomationStore => {
+  const jobs: Array<AutomationJobRow> = [];
+  let nextId = 1;
+  const service = Automation.AutomationStore.of({
+    enqueue: (input) =>
+      Effect.gen(function* () {
+        if (
+          jobs.some((job) => sameId(job.resultId, input.resultId) && job.action === input.action)
+        ) {
+          return yield* Effect.fail(
+            conflict("enqueueAutomationJob", 'insert into "automation_jobs"'),
+          );
+        }
+        const row: AutomationJobRow = {
+          id: `00000000-0000-4000-8000-${String(nextId++).padStart(12, "0")}`,
+          resultId: input.resultId,
+          action: input.action,
+          status: "pending",
+          reason: null,
+          createdAt: new Date(),
+          startedAt: null,
+          finishedAt: null,
+        };
+        jobs.push(row);
+        return row;
+      }),
+    ...overrides,
+  });
+  return { jobs, layer: Layer.succeed(Automation.AutomationStore)(service) };
+};
+
+// ---------------------------------------------------------------------------
 // ServerStore
 // ---------------------------------------------------------------------------
 
@@ -575,6 +620,7 @@ export const fakeStores = () => {
   const actions = fakeActionStore();
   const logs = fakeLogStore();
   const tests = fakeTestStore();
+  const automation = fakeAutomationStore();
   const debugLogs = fakeDebugLogStore();
   const diagnosis = fakeDiagnosisStore();
   return {
@@ -582,6 +628,7 @@ export const fakeStores = () => {
     actions,
     logs,
     tests,
+    automation,
     debugLogs,
     diagnosis,
     layer: Layer.mergeAll(
@@ -589,6 +636,7 @@ export const fakeStores = () => {
       actions.layer,
       logs.layer,
       tests.layer,
+      automation.layer,
       debugLogs.layer,
       diagnosis.layer,
     ),

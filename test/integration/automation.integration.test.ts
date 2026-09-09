@@ -1,24 +1,31 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { createHmac } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { createHmac, randomUUID } from "node:crypto";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect } from "vitest";
+import { describe, expect, inject } from "vitest";
 import { it } from "@effect/vitest";
 import { Effect } from "effect";
+import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { Client } from "pg";
+import * as DbSchema from "../../src/db/schema.ts";
+import * as Postgres from "../support/postgres.ts";
 
 const AUTOMATION = fileURLToPath(new URL("../../automation", import.meta.url));
 const WEBHOOK_SECRET = "whsec_test";
+const UNREACHABLE = "postgres://user:sentinel-pw@127.0.0.1:1/oligarchy";
 const EXIT_WITHIN_MS = 60_000;
+
+const dbUrl = inject("dbUrl");
 
 const sign = (payload: string): string =>
   createHmac("sha256", WEBHOOK_SECRET).update(payload).digest("hex");
 
 type Process = {
   readonly child: ChildProcess;
-  // Distinct from cwd: a write to $HOME/automation-logs must not satisfy the record-file checks.
   readonly home: string;
   readonly cwd: string;
   readonly stdout: () => string;
@@ -28,14 +35,13 @@ type Process = {
 };
 
 // Sentry is initialised by the wrapper's --import; a proxy nobody listens on keeps the test
-// run's fatal lines out of the real project without touching the code under test. The service
-// has no database, so a DATABASE_URL in the developer's environment is removed: it must not be
-// what makes these pass.
+// run's fatal lines out of the real project without touching the code under test.
 const environment = (home: string, overrides: Record<string, string>): NodeJS.ProcessEnv => {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     HOME: home,
     LINEAR_WEBHOOK_SECRET: WEBHOOK_SECRET,
+    DATABASE_URL: dbUrl === "" ? UNREACHABLE : dbUrl,
     NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --disable-warning=ExperimentalWarning`.trim(),
     https_proxy: "http://127.0.0.1:1",
     http_proxy: "http://127.0.0.1:1",
@@ -43,13 +49,12 @@ const environment = (home: string, overrides: Record<string, string>): NodeJS.Pr
     ...overrides,
   };
   delete env.FORCE_COLOR;
-  delete env.DATABASE_URL;
   delete env.OLIGARCHY_TOKEN;
   return env;
 };
 
-// Each process gets an empty cwd (no `.env`) and a different empty HOME, so a write under
-// $HOME cannot pass as ./automation-logs. Both directories are removed once it has exited.
+// Each process gets an empty cwd (no `.env`) and a different empty HOME. Both directories are
+// removed once it has exited.
 const spawnAutomation = (
   args: ReadonlyArray<string>,
   overrides: Record<string, string> = {},
@@ -152,6 +157,51 @@ const request = (
     body === undefined ? { method, headers } : { method, headers, body },
   );
 
+const seedResult = async (linearId: string): Promise<string> => {
+  const client = new Client({ connectionString: Postgres.getDbUrl() });
+  await client.connect();
+  try {
+    const db = drizzle({ client, schema: DbSchema });
+    const [definition] = await db.select().from(DbSchema.testDefinitions).limit(1);
+    if (definition === undefined) {
+      throw new Error("no seeded test definition");
+    }
+    const runId = randomUUID();
+    const resultId = randomUUID();
+    await db.insert(DbSchema.testRuns).values({
+      id: runId,
+      name: `automation-${linearId}`,
+      iso: "https://example.com/omarchy.iso",
+      serverUrl: "http://127.0.0.1:42069",
+      status: "pending",
+    });
+    await db.insert(DbSchema.testResults).values({
+      id: resultId,
+      runId,
+      definitionId: definition.id,
+      linearId,
+      status: "pending",
+    });
+    return resultId;
+  } finally {
+    await client.end();
+  }
+};
+
+const jobsFor = async (resultId: string) => {
+  const client = new Client({ connectionString: Postgres.getDbUrl() });
+  await client.connect();
+  try {
+    const db = drizzle({ client, schema: DbSchema });
+    return await db
+      .select()
+      .from(DbSchema.automationJobs)
+      .where(eq(DbSchema.automationJobs.resultId, resultId));
+  } finally {
+    await client.end();
+  }
+};
+
 describe("automation startup refusals", () => {
   it.live("--help exits 0 and lists --port alone", () =>
     Effect.promise(async () => {
@@ -184,6 +234,34 @@ describe("automation startup refusals", () => {
     }),
   );
 
+  it.live("a missing DATABASE_URL exits 1 with DATABASE_URL is not set", () =>
+    Effect.promise(async () => {
+      const process = spawnAutomation([], { DATABASE_URL: "" });
+      const { code } = await process.exited;
+      expect(code).toBe(1);
+      expect(process.stderr()).toContain("DATABASE_URL is not set");
+      expect(process.stdout()).not.toContain("listening");
+    }),
+  );
+
+  it.live("an unreachable database exits 1 and never listens", () =>
+    Effect.promise(async () => {
+      const process = spawnAutomation([], { DATABASE_URL: UNREACHABLE });
+      const { code } = await process.exited;
+      expect(code).toBe(1);
+      const fatal = lines(process.stdout()).find((line) =>
+        line.startsWith("[global] fatal: automation: "),
+      );
+      expect(fatal, process.stdout()).toBeDefined();
+      expect(fatal).toContain("database unreachable");
+      expect(process.stdout()).not.toContain("listening");
+    }),
+  );
+});
+
+const describeWithDatabase = dbUrl === "" ? describe.skip : describe;
+
+describeWithDatabase("automation startup refusals with a database", () => {
   it.live("an occupied port exits 1 with EADDRINUSE", () =>
     Effect.promise(async () => {
       const { port, release } = await occupy();
@@ -205,19 +283,19 @@ describe("automation startup refusals", () => {
   );
 });
 
-describe("automation serving", () => {
+const describeServing = dbUrl === "" ? describe.skip : describe;
+
+describeServing("automation serving", () => {
   const served = async (signal: "SIGINT" | "SIGTERM") => {
     const port = await freePort();
     const process = spawnAutomation(["--port", String(port)]);
     const record = join(process.cwd, "automation-logs");
-    const homeRecord = join(process.home, "automation-logs");
     try {
       await process.waitFor(/oligarchy automation listening/);
       expect(lines(process.stdout())).toContain(
-        `[global] oligarchy automation listening on 127.0.0.1:${String(port)}; recording to ./automation-logs`,
+        `[global] oligarchy automation listening on 127.0.0.1:${String(port)}`,
       );
       expect(existsSync(record)).toBe(false);
-      expect(existsSync(homeRecord)).toBe(false);
 
       const automate = await request(
         port,
@@ -228,7 +306,6 @@ describe("automation serving", () => {
       );
       expect(automate.status).toBe(404);
       expect(await automate.json()).toEqual({ error: "not found" });
-      expect(existsSync(record)).toBe(false);
 
       const webhookBody = '{"action":"update","type":"Issue","data":{"identifier":"OLI-9"}}';
       const unsigned = await request(
@@ -252,8 +329,60 @@ describe("automation serving", () => {
       expect(signed.status).toBe(200);
       expect(signed.headers.get("content-type")).toContain("application/json");
       expect(await signed.json()).toEqual({ ok: "true" });
-      expect(readFileSync(record, "utf8")).toBe(`${webhookBody}\n`);
-      expect(existsSync(homeRecord)).toBe(false);
+      expect(existsSync(record)).toBe(false);
+
+      const linearId = `OLI-${randomUUID().slice(0, 8)}`;
+      const resultId = await seedResult(linearId);
+      const driveBody = JSON.stringify({
+        action: "update",
+        type: "Issue",
+        data: {
+          identifier: linearId,
+          state: {
+            id: "a9fe2d89-3cb3-47dd-8645-5d224f997134",
+            name: "Automation Needed",
+            type: "unstarted",
+          },
+        },
+        updatedFrom: { state: { name: "Backlog" } },
+      });
+      const drive = await request(
+        port,
+        "POST",
+        "/linear",
+        { "content-type": "application/json", "linear-signature": sign(driveBody) },
+        driveBody,
+      );
+      expect(drive.status).toBe(200);
+      expect(await drive.json()).toEqual({ ok: "true" });
+      expect(await jobsFor(resultId)).toEqual([
+        expect.objectContaining({ resultId, action: "drive", status: "pending" }),
+      ]);
+
+      const diagnoseBody = JSON.stringify({
+        action: "update",
+        type: "Issue",
+        data: {
+          identifier: linearId,
+          state: {
+            id: "cdf3eb61-bc4b-4b61-8e47-cc2c145a6b6a",
+            name: "Needs Review",
+            type: "started",
+          },
+        },
+        updatedFrom: { state: { name: "In Progress" } },
+      });
+      const diagnose = await request(
+        port,
+        "POST",
+        "/linear",
+        { "content-type": "application/json", "linear-signature": sign(diagnoseBody) },
+        diagnoseBody,
+      );
+      expect(diagnose.status).toBe(200);
+      const jobs = await jobsFor(resultId);
+      expect(jobs).toHaveLength(2);
+      expect(jobs.map((job) => job.action).sort()).toEqual(["diagnose", "drive"]);
 
       const start = await request(
         port,
@@ -277,6 +406,8 @@ describe("automation serving", () => {
     const output = lines(process.stdout());
     expect(output).toContain("[global] error: POST /linear failed: unauthorized");
     expect(output).toContain("[global] linear webhook recorded");
+    expect(output).toContain("[global] linear webhook queued drive; Automation Needed");
+    expect(output).toContain("[global] linear webhook queued diagnose; Needs Review");
     expect(output.some((line) => line.includes("/automate"))).toBe(false);
     expect(output.some((line) => line.includes("/start"))).toBe(false);
     expect(process.stderr()).toBe("");
@@ -285,7 +416,7 @@ describe("automation serving", () => {
   };
 
   it.live(
-    "listens without a database, records a signed /linear, answers 401 and 404, and exits 0 on SIGINT",
+    "listens with a database, queues drive and diagnose from signed /linear, answers 401 and 404, and exits 0 on SIGINT",
     () => Effect.promise(() => served("SIGINT")),
     120_000,
   );

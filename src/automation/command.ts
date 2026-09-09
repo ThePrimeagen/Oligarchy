@@ -1,8 +1,11 @@
 import { Deferred, Effect, Layer } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import type { HttpServerError } from "effect/unstable/http";
+import * as Client from "../db/client.ts";
+import * as ExternalFailure from "../external-failure.ts";
 import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
+import * as Errors from "../shared/errors.ts";
 
 // The port the operator's tunnel points at; nothing else of ours is near it.
 const DEFAULT_PORT = 54321;
@@ -14,7 +17,12 @@ export type AutomationServer<RServe> = {
   readonly serverFailed: Deferred.Deferred<never, HttpServerError.ServeError>;
 };
 
-// No database to ping and no host to check: the flags parsed, the service listens.
+type StartupError = Errors.DatabaseError | HttpServerError.ServeError;
+
+// A ServeError says nothing itself; the bind or accept error it wraps does.
+const detail = (error: StartupError): string =>
+  error._tag === "ServeError" ? Render.errorDetail(error.cause) : Render.errorDetail(error);
+
 export const makeAutomationCommand = <RServe>(server: AutomationServer<RServe>) =>
   Command.make(
     "automation",
@@ -27,18 +35,29 @@ export const makeAutomationCommand = <RServe>(server: AutomationServer<RServe>) 
     ({ port }) =>
       Effect.gen(function* () {
         const log = yield* Log.Log;
-        return yield* Effect.raceFirst(
-          Layer.launch(server.serve(port)),
-          Deferred.await(server.serverFailed),
-        ).pipe(
-          // A ServeError says nothing itself; the bind or accept error it wraps does.
-          Effect.tapError((error) =>
-            log.fatal(`automation: ${Render.errorDetail(error.cause)}`, { cause: error }),
-          ),
+        const database = yield* Client.Database;
+        const startup = Effect.gen(function* () {
+          // Queue rows live in Postgres: fail at startup, not on the first webhook.
+          yield* database.ping.pipe(
+            Effect.mapError((error) =>
+              Errors.DatabaseError.make({
+                operation: "ping",
+                message: `database unreachable: ${Render.errorDetail(ExternalFailure.causeOf(error))}`,
+                cause: error,
+              }),
+            ),
+          );
+          return yield* Effect.raceFirst(
+            Layer.launch(server.serve(port)),
+            Deferred.await(server.serverFailed),
+          );
+        });
+        return yield* startup.pipe(
+          Effect.tapError((error) => log.fatal(`automation: ${detail(error)}`, { cause: error })),
         );
       }),
   ).pipe(
     Command.withDescription(
-      "The oligarchy automation service: POST /linear records a signed Linear webhook as the exact body plus a trailing newline in ./automation-logs",
+      "The oligarchy automation service: POST /linear verifies a signed Linear webhook and enqueues drive or diagnose jobs from status changes",
     ),
   );
