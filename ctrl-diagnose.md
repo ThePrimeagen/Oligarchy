@@ -25,7 +25,7 @@ Prints everything stored for the session as one JSON object, keyed `session`, `l
 - `--test-results` — the test result the driver closed, or `null`: `status` (`passed` or `failed`), `reason`, `model` (the Cursor model that drove it).
 - `--test-def` — the mission: `name`, `description`, `instruction`, and `proof`, what had to be on screen for a pass. Judge against the proof.
 - `--test-run` — the run the result belongs to, or `null`: `iso`, `serverUrl`, `status`.
-- `--logs` — the proxy's log lines, oldest first: `starting`, `intent start; <message>` before every group of actions, `image; ... ; <url>` for every screenshot, `stopped; <status>; <reason>` at the end.
+- `--logs` — the qemu server's log lines, oldest first: `starting`, `intent start; <message>` before every group of actions, `image; ... ; <url>` for every screenshot, `stopped; <status>; <reason>` at the end.
 - `--actions` — every QMP exchange, oldest first: the keys and mouse events sent, and QEMU's reply.
 - `--images` — every screenshot, oldest first, as `{ id, actionId, url, createdAt }`. The last one is what the driver saw when it delivered its verdict. Look at it with [session image](#session-image), and at any image around a step you suspect.
 - `--debug-logs` — saved when the session ended any way but `succeeded`, else `null`: `sources.serial` is the guest's console, `sources.qemu` QEMU's stderr, `sources.proxy` and `sources.actions` the lines above as text.

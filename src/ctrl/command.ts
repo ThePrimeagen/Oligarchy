@@ -94,13 +94,13 @@ const Count = Schema.Number.check(
 
 const DEFAULT_COUNT = 10;
 
-// test new alone: the proxy its drivers will talk to, stored on the run and written into every
-// ticket for ./client. No other action has a proxy to name. No default: SERVER_URL or the flag, or
+// test new alone: the qemu server its drivers will talk to, stored on the run and written into every
+// ticket for ./client. No other action has a server to name. No default: SERVER_URL or the flag, or
 // a usage error.
 const serverUrlFlag = Flag.string("server-url").pipe(
   Flag.withFallbackConfig(Config.serverUrl),
   Flag.withSchema(HttpUrl),
-  Flag.withDescription("Proxy the driving agents talk to; SERVER_URL when omitted"),
+  Flag.withDescription("QEMU server the driving agents talk to; SERVER_URL when omitted"),
 );
 
 // Tickets written before --server-url left ctrl still name it on test start and test-results, and
@@ -923,7 +923,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
 
   return Command.make("ctrl").pipe(
     Command.withDescription(
-      "Record and inspect Oligarchy test runs. Every action reads DATABASE_URL; test new alone takes --server-url (or SERVER_URL), the proxy its drivers talk to; test start and test-results accept it unread.",
+      "Record and inspect Oligarchy test runs. Every action reads DATABASE_URL; test new alone takes --server-url (or SERVER_URL), the qemu server its drivers talk to; test start and test-results accept it unread.",
     ),
     Command.withSubcommands([
       testCommand,

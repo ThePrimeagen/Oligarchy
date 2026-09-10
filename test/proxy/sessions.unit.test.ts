@@ -1488,7 +1488,7 @@ describe("follow", () => {
       }),
   );
 
-  it.effect("refuses unknown ids and sessions this proxy does not hold", () =>
+  it.effect("refuses unknown ids and sessions this qemu server does not hold", () =>
     Effect.gen(function* () {
       const h = harness();
       yield* h.run(
@@ -1530,14 +1530,14 @@ describe("follow", () => {
           );
           expect(yield* Effect.flip(sessions.follow(UNKNOWN_ID))).toMatchObject({
             _tag: "Conflict",
-            message: `session "${UNKNOWN_ID}" is not running on this proxy`,
+            message: `session "${UNKNOWN_ID}" is not running on this qemu server`,
             sessionId: UNKNOWN_ID,
           });
           expect(
             yield* Effect.flip(sessions.follow("2baaad43-674b-4bdb-88d7-3f18fce50aba")),
           ).toMatchObject({
             _tag: "Conflict",
-            message: `session "2baaad43-674b-4bdb-88d7-3f18fce50aba" is not running on this proxy`,
+            message: `session "2baaad43-674b-4bdb-88d7-3f18fce50aba" is not running on this qemu server`,
           });
           expect(
             yield* Effect.flip(sessions.follow("3baaad43-674b-4bdb-88d7-3f18fce50aba")),

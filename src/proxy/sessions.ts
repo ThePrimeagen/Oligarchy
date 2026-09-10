@@ -780,12 +780,12 @@ const make = Effect.gen(function* () {
       if (Option.isNone(status)) {
         return yield* Errors.unknownSession(id);
       }
-      // A row still downloading or running that this proxy does not hold was booted by another
-      // proxy, or by one that died with it.
+      // A row still downloading or running that this qemu server does not hold was booted by
+      // another server, or by one that died with it.
       return yield* Errors.Conflict.make({
         message:
           status.value === "downloading" || status.value === "running"
-            ? `session "${id}" is not running on this proxy`
+            ? `session "${id}" is not running on this qemu server`
             : `session "${id}" has already completed (${status.value})`,
         sessionId: id,
       });

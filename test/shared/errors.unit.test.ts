@@ -52,7 +52,7 @@ const cases: ReadonlyArray<WireCase> = [
     name: "Conflict",
     wire: Errors.ConflictWire,
     error: Errors.Conflict.make({
-      message: `session "${SESSION_ID}" is not running on this proxy`,
+      message: `session "${SESSION_ID}" is not running on this qemu server`,
       sessionId: SESSION_ID,
     }),
     status: 409,

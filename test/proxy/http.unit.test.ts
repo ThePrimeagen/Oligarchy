@@ -633,7 +633,7 @@ describe("Sessions failures", () => {
   it.effect("a Conflict from follow is 409 with its message", () =>
     Effect.gen(function* () {
       const conflict = Errors.Conflict.make({
-        message: `session "${SESSION_ID}" is not running on this proxy`,
+        message: `session "${SESSION_ID}" is not running on this qemu server`,
         sessionId: SESSION_ID,
       });
       const fixed = fixture({
