@@ -43,18 +43,23 @@ Everything below follows `development.md`; where the two disagree, that one wins
 
 ## 0. What changed since the first draft
 
-- `key` is the Linear ticket, `OLI-45`. The automation client looks it up in the database
-  (`test_results.linear_id`) before it spends a run, attributes every line to it, and refuses a
-  ticket it cannot find. There is no `agent` field; the ticket is the agent id, as it is for
-  `./client --agent-id`.
+- `key` is the Linear ticket, `OLI-45`. The automation client uses it for one thing: attribution.
+  Its lines land under `location = "automation-OLI-45"` with the ticket as `agentId`, the same id
+  the driver uses as `./client --agent-id`. There is no `agent` field, and the client looks nothing
+  up: the automation server already found the ticket when it composed the job.
+- The automation client is a dumb client. It runs `opencode` and answers; its only database use is
+  its own heartbeat row and its log rows. It reads no test, result or job row and knows there is a
+  queue only in the sense that someone keeps calling it.
+- The automation server owns the job's lifecycle: `pending → running` when it claims the row,
+  `running → succeeded | failed | timed_out | aborted` from what the call answered (§3.6). It also
+  closes a failed drive's still-open `test_results` row `aborted`. The client owns the run, its log
+  lines and the Sentry report that carries the cause. Retrying is a new job row, which the unique
+  index is relaxed to allow.
+- Log locations: the automation server's lines carry `location = "automation-server"` (today's
+  `"automation"` bucket, renamed); the automation client's run lines carry `"automation-<key>"`.
 - How opencode authenticates to its model provider is not part of this plan. The automation client
   neither reads nor forwards a provider credential; that is solved separately, later.
 - The dispatch loop is in the plan, in `./automation-server`: claim, compose, place, run, close.
-- Who writes what on failure (§3.6): the automation server owns the `automation_jobs` row — it
-  claimed it, it closes it, `failed` or `timed_out` with the reason the client answered — and
-  closes a drive's still-open `test_results` row `aborted`; the automation client owns the run,
-  its log lines and the Sentry report that carries the cause. Retrying is a new job row, which the
-  unique index is relaxed to allow.
 - The processes were renamed on master: `qemu-server`, `qemu-reverse-proxy`, `automation-server`.
   Every path below uses those names. The dashboard's servers page is now two halves, the
   automation queue and the qemu fleet (#109); the automation clients get a table in the automation
@@ -87,13 +92,20 @@ named case inside one, and is its own todo.
       in the automation half renders an automation client's `agents`, memory, cpu means, generation
       and heartbeat age, `silent` after ninety seconds, and no delete form; the queue tables are as
       they are.
-- [ ] `test/shared/errors.unit.test.ts` — `UnknownTicket` decodes from `{ error }` with 404,
-      `RunFailed` with 502, `RunTimedOut` with 504; `apiStatus` answers all three; a decoded
-      `RunFailed` carries no cause and an empty `agentId`, as `StartFailed` does.
+- [ ] `test/shared/errors.unit.test.ts` — `RunFailed` decodes from `{ error }` with 502 and
+      `RunTimedOut` with 504; `apiStatus` answers both; a decoded `RunFailed` carries no cause and an
+      empty `agentId`, as `StartFailed` does.
 - [ ] `test/shared/api.unit.test.ts` — `AutomationClientApi` has one group, `Runs`, with `POST /run`
       behind `BearerAuth` then `ApiBoundary`; `run` declares `RunBody`, `RunResponse` and exactly the
-      three error codecs; `QemuServerApi`, `QemuReverseProxyApi` and `AutomationServerApi` are
+      two error codecs; `QemuServerApi`, `QemuReverseProxyApi` and `AutomationServerApi` are
       unchanged.
+- [ ] `test/automation-server/http.unit.test.ts`, `test/integration/automation-server.integration.
+      test.ts`, `test/integration/db.integration.test.ts` — every pin of the automation server's log
+      bucket moves from `"automation"` to `"automation-server"`: the `location` and `agentId` of its
+      lines, and the stdout prefix `[automation-server] automation-server: …`.
+- [ ] `test/observability/log.unit.test.ts` — `Locations.automationRun("OLI-45")` is
+      `"automation-OLI-45"`; a line attributed to it renders with that prefix and lands in a row with
+      that `location`.
 - [ ] `test/config/config.unit.test.ts` — `AutomationServerConfig` reports `LINEAR_WEBHOOK_SECRET`,
       `OLIGARCHY_TOKEN`, `LINEAR_API_TOKEN`, `DATABASE_URL` in that order, the first missing one
       alone. The automation client reuses `ProxyConfig`, whose test exists.
@@ -123,7 +135,7 @@ named case inside one, and is its own todo.
       concurrent claims never get the same row; `closeJob` closes a running job and answers false
       for one already closed; `abortRunning` closes every running job with the reason and answers the
       count; a second `drive` for a result is refused while one is open and accepted once the first
-      is `failed`; `findTicket` joins the result to its run.
+      is `failed`.
 - [ ] `test/integration/dashboard.integration.test.ts` — the automation half renders a client row
       beside the queue; the fleet renders qemu rows only.
 
@@ -134,7 +146,8 @@ named case inside one, and is its own todo.
       tick claims the job (`running`, `startedAt`), fetches the ticket's description from Linear,
       sends `POST /run` to the client's url with the bearer and `{ key: "OLI-45", prompt:
       <description> }`, and when the fake answers 200 closes the job `succeeded`; lines are `job
-      started; drive; http://client` and `job succeeded; drive in Tms`, attributed to the ticket;
+      started; drive; http://client` and `job succeeded; drive in Tms`, with `location:
+      "automation-server"` and the ticket as `agentId`;
       a second job goes to the client with fewer runs in flight as this dispatcher counts them, ties
       to registration order; a diagnose job whose session is open is not claimed and is claimed
       once the session ends, its prompt the rendered diagnosing template with the ticket and result
@@ -142,8 +155,8 @@ named case inside one, and is its own todo.
       and writes `no automation client available; N jobs waiting` once, not every tick, and again
       only after a client came and went; nothing is written while the queue is empty. Unhappy: a
       502 `{ error }` closes the job `failed` with that reason and writes `job failed; drive;
-      <reason>` with `skipSentry` (the client reported the cause); a 504 closes it `timed_out`; a 404
-      `unknown ticket` closes it `failed`; an unreachable client closes it `failed; automation client
+      <reason>` with `skipSentry` (the client reported the cause); a 504 closes it `timed_out`; a 400
+      or 401 closes it `failed` with the body's message; an unreachable client closes it `failed; automation client
       http://client unreachable: <reason>` and reports (the client could not); a failed drive whose
       result is still `pending` or `running` also closes the result `aborted` with `automation:
       <reason>`, a diagnose failure touches no result; a Linear failure while composing closes the
@@ -164,22 +177,21 @@ named case inside one, and is its own todo.
       Log, `ProxyConfig`) — happy: the argv is exactly `run --model <MODEL> --format json`; the
       child's cwd is a fresh directory holding executable `client`, `client-with-image`, `ctrl` and
       `session` shims that `exec` this repo's wrappers, and an `opencode.json`; the env carries
-      `OLIGARCHY_TOKEN`, `DATABASE_URL`, `SERVER_URL` (the run's) and `OLIGARCHY_MODEL` and the argv
-      carries none of them; the prompt arrives on stdin byte for byte; exit 0 after captured events answers `{ session, text }`; the directory is gone once the
-      scope closes. Unhappy: exit 1 with an `error` event is `RunFailed` `opencode: exited 1:
+      `OLIGARCHY_TOKEN`, `DATABASE_URL` and `OLIGARCHY_MODEL` and the argv carries none of them; the
+      prompt arrives on stdin byte for byte; exit 0 after captured events answers `{ session, text
+      }`; the directory is gone once the scope closes. Unhappy: exit 1 with an `error` event is `RunFailed` `opencode: exited 1:
       <message>`; exit 1 without one carries the stderr tail; exit 0 without a session is `RunFailed`
       `opencode: exited 0 without a session`; a spawn `ENOENT` is `RunFailed` `opencode: spawn opencode
       ENOENT` and the rendered error contains no key; a signal death nobody asked for is `RunFailed`
       with the platform's sentence; closing the scope mid-run records `SIGTERM` on the child and
       removes the directory; a stdout line that is not JSON is ignored.
-- [ ] `test/automation-client/runs.unit.test.ts` (fake runner, fake stats, fake test store, fake log,
-      `TestClock`) — happy: `stats.agents` is 0, 1 while a run is held open, 0 after; two runs held
-      open count 2; the runner receives the ticket, the prompt and the run's `serverUrl` from the
-      store; the response is `{ model, session, text, elapsedMs }` with `elapsedMs` from the clock;
-      the lines are `run started; opencode; N chars` then `run finished; M chars in Tms`, attributed to
-      the ticket; the ticket's colour is acquired then released. Unhappy: a key no result carries is
-      `UnknownTicket` `unknown ticket "OLI-45"` and nothing is spawned or counted; a store failure on
-      the lookup is `Internal`; a `RunFailed` from the runner propagates unchanged, the count is back
+- [ ] `test/automation-client/runs.unit.test.ts` (fake runner, fake stats, fake log, `TestClock`) —
+      happy: `stats.agents` is 0, 1 while a run is held open, 0 after; two runs held open count 2;
+      the runner receives the key and the prompt as sent; the response is `{ model, session, text,
+      elapsedMs }` with `elapsedMs` from the clock; the lines are `run started; opencode; N chars`
+      then `run finished; M chars in Tms`, with `location: "automation-OLI-45"` and `agentId:
+      "OLI-45"`; the ticket's colour is acquired then released; no store is touched (none is
+      provided). Unhappy: a `RunFailed` from the runner propagates unchanged, the count is back
       to 0, and `Runs` writes no error line (the boundary's is the one); the clock past `RUN_TIMEOUT`
       is `RunTimedOut` `opencode: no result within 2 hours` and the runner's scope was closed;
       interrupting the run fiber closes the scope and logs `run aborted; client disconnected after
@@ -189,11 +201,11 @@ named case inside one, and is its own todo.
       `HttpApiClient.make(AutomationClientApi)` and a raw `HttpClient` for refusals) — happy: 200
       with `{ model, session, text, elapsedMs }`. Unhappy: a missing or wrong bearer is 401 `{
       "error": "unauthorized" }`, one error line attributed `automation-client`, `skipSentry`; an
-      empty `prompt` or an empty `key` is 400 `{ error }`; an unknown key is 404 `{ "error": "unknown
-      ticket \"OLI-45\"" }` logged once with `skipSentry` and the ticket as `agentId`; a `RunFailed` is
-      502 `{ error }` and one line attributed to the ticket with the cause reported; a `RunTimedOut` is
-      504; `/linear`, `/stats`, `/start`, `/servers` and `GET /run` are 404 `{ "error": "not found" }` and
-      never logged; a runner defect is 500 `{ "error": "internal error" }` logged with its cause.
+      empty `prompt` or an empty `key` is 400 `{ error }`; a `RunFailed` is 502 `{ error }` and one
+      line under `location: "automation-OLI-45"`, `agentId: "OLI-45"`, with the cause reported; a
+      `RunTimedOut` is 504, attributed the same way; `/linear`, `/stats`, `/start`, `/servers` and
+      `GET /run` are 404 `{ "error": "not found" }` and never logged; a runner defect is 500 `{
+      "error": "internal error" }` logged with its cause.
 - [ ] `test/automation-client/command.unit.test.ts` (mirrors `test/automation-server/command.unit.
       test.ts`) — `--help` lists `--port` and `--url` and touches nothing; `--port forty` is `ShowHelp`;
       `--url not-a-url` is refused by the flag with `url must be an http or https url`; the default is
@@ -205,13 +217,15 @@ named case inside one, and is its own todo.
 - [ ] `test/integration/automation-client.integration.test.ts` (black-box: the wrapper spawned, a fake
       `opencode` shell script first on `PATH`, stdout and stderr captured) — refusals: `--help` exits
       0; `--port forty` exits 1; an empty `OLIGARCHY_TOKEN` exits 1 with `OLIGARCHY_TOKEN is not set`;
-      an empty `DATABASE_URL` likewise; no `opencode` on `PATH` exits 1 with the fatal line; an unreachable database exits 1 and never listens. With a
-      database: an occupied port is `EADDRINUSE`; it listens and logs the listening line; `POST /run`
-      without a bearer is 401; with the bearer and a key no result carries, 404; with a seeded
-      result's ticket and a fake `opencode` that reads its stdin, sleeps three seconds, prints
-      captured JSONL and exits 0, the call returns 200 after the sleep with the body, and in the
-      meantime the `servers` row has `type = 'automation'` and `agents = 1`, then `agents = 0` and a
-      higher generation; a fake that exits 1 is 502; `SIGTERM` mid-run leaves no child (the pid is
+      an empty `DATABASE_URL` likewise; no `opencode` on `PATH` exits 1 with the fatal line; an
+      unreachable database exits 1 and never listens. With a database: an occupied port is
+      `EADDRINUSE`; it listens and logs the listening line; `POST /run` without a bearer is 401; with
+      the bearer, `key: "OLI-45"` and a fake `opencode` that reads its stdin, sleeps three seconds,
+      prints captured JSONL and exits 0, the call returns 200 after the sleep with the body, its
+      lines land in `logs` under `location = 'automation-OLI-45'` and print as `[automation-OLI-45]
+      OLI-45: run started; …`, and in the meantime the `servers` row has `type = 'automation'` and
+      `agents = 1`, then `agents = 0` and a higher generation; the process wrote no other table; a
+      fake that exits 1 is 502; `SIGTERM` mid-run leaves no child (the pid is
       gone), exits 0 and deletes the row; `SIGINT` idle exits 0 and the port refuses afterwards;
       stdout and stderr opened on `/dev/full` do not take the process down.
 - [ ] `test/support/fake-runner.ts` — an `AgentRunner` whose outcomes are scripted per call, with a
@@ -220,8 +234,7 @@ named case inside one, and is its own todo.
 - [ ] `test/support/fake-stats.ts` — a `Stats` answering fixed host stats (today's `fakeStats` in
       `fake-qemu.ts`, moved and freed of the count).
 - [ ] `test/support/stores.ts` — `fakeAutomationStore` gains `claimNext` (readiness and order as the
-      real query), `closeJob`, `abortRunning`; `fakeServerStore` gains `listAutomationClients`;
-      `fakeTestStore` gains `findTicket`.
+      real query), `closeJob`, `abortRunning`; `fakeServerStore` gains `listAutomationClients`.
 - [ ] `test/support/fake-linear.ts` — gains a scripted `issueDescription`.
 
 ## 2. What this builds on
@@ -318,9 +331,9 @@ Drizzle (`.for("update", { of: automationJobs, skipLocked: true })` on the subqu
 `TerminalStatus` is the `automation_job_status` values minus `pending` and `running`.
 
 `ServerStore` grows `listAutomationClients: Effect<ReadonlyArray<{ url: string; agents: number }>>`
-— automation rows with stats and a heartbeat within ninety seconds, in registration order — and
-`TestStore` grows `findTicket(linearId): Effect<Option<{ resultId, sessionId, serverUrl }>>` (the
-result joined to its run; the automation client's lookup, §4.3).
+— automation rows with stats and a heartbeat within ninety seconds, in registration order. Every
+one of these methods is the automation server's; the automation client reads none of these tables
+(§4).
 
 ### 3.3 Startup and shutdown
 
@@ -348,8 +361,10 @@ result joined to its run; the automation client's lookup, §4.3).
   `issue` is expected to accept the identifier in place of the UUID — S7 confirms it), decoded in
   two phases like the rest; a null issue or a null description is a `LinearError` naming the
   ticket. The automation server therefore reads `LINEAR_API_TOKEN` (§11).
-- **`diagnose`**: `prompts/diagnosing-agent.html`, restored from the version #102 deleted and trimmed
-  to what the reviewer needs — the ticket, the result id, and `ctrl-diagnose.md` embedded as
+- **`diagnose`**: `prompts/diagnosing-agent.html`, restored from the version #102 deleted (with
+  `driving-agent.html`, `src/ctrl/cursor.ts` and `ctrl test run` / `ctrl diagnose run`, when the
+  Cursor cloud-agent kickoff left `ctrl`; `git show e885aae^:prompts/diagnosing-agent.html`) and
+  trimmed to what the reviewer needs — the ticket, the result id, and `ctrl-diagnose.md` embedded as
   `{{CTRL_DIAGNOSE_MD}}` — rendered by `Prompts.renderDiagnosingAgent({ LINEAR_TICKET, RESULT_ID })`
   in `src/ctrl/prompts.ts` (a second render function beside `renderLinearIssue`, sharing `read`,
   `fill` and `GUIDES`). The reviewer finds the session with `./ctrl session --search`, as the
@@ -380,7 +395,7 @@ same process moves it to its terminal status, from what the call answered:
 | The call | `closeJob` | `reason` | Log line | Sentry |
 |---|---|---|---|---|
 | 200 | `succeeded` | `null` | `job succeeded; <action> in Tms` | — |
-| 502 `RunFailed`, 404 `UnknownTicket`, 400, 401, 500 | `failed` | the `{ error }` message | `job failed; <action>; <reason>` | `skipSentry`: the client reported it with the cause |
+| 502 `RunFailed`, 400, 401, 500 | `failed` | the `{ error }` message | `job failed; <action>; <reason>` | `skipSentry`: the client reported it with the cause |
 | 504 `RunTimedOut` | `timed_out` | the message | `job timed out; <action>` | `skipSentry`, same |
 | unreachable, or a 200 that is not a `RunResponse` | `failed` | `automation client <url> unreachable: <reason>` | `job failed; <action>; <reason>` | reported with the cause: only the server saw it |
 | prompt composition failed | `failed` | `linear: <reason>` / `prompt: <reason>` | `job failed; …` | reported |
@@ -396,9 +411,12 @@ verdict that is not coming; a result the agent did close before failing is left 
 it. A failed diagnose touches no result: the verdict simply was not written, and the session's
 evidence is intact for the next reviewer.
 
-The **automation client** owns the run: its log lines (attributed to the ticket) and the one
+The **automation client** owns the run: its log lines (under `automation-<key>`) and the one
 Sentry report the boundary makes for a 5xx, with the cause — the stderr tail, the error event.
-It never touches `automation_jobs`; it does not know there is a queue.
+It is a dumb client: it runs `opencode` and answers. Its database use is its heartbeat row and its
+log rows, nothing else; it reads no `test_results`, no `test_runs`, no `automation_jobs`, and does
+not know there is a queue. Everything the run needs to know is in the prompt the dispatcher
+composed.
 
 **A new entry?** Yes, when someone asks for one: retrying is a new job row, not a reopened one, so
 the failed row stays as the history the dashboard's `completed` table shows. Today the unique
@@ -416,7 +434,7 @@ automation-client                       #!/bin/sh wrapper, --import src/observab
 src/automation-client/main.ts           the graph, createServer, teardown (boundary file by rule)
 src/automation-client/command.ts        Command "automation-client" { --port, --url }; startup order
 src/automation-client/handlers.ts       HttpApiBuilder.group(AutomationClientApi, "Runs") + routes
-src/automation-client/runs.ts           Runs: the lookup, the map of live runs, the count, the timeout, stats
+src/automation-client/runs.ts           Runs: the map of live runs, the count, the timeout, stats
 src/automation-client/runner.ts         AgentRunner: the seam (a plain-value Context.Service)
 src/automation-client/opencode.ts       the OpenCode implementation of AgentRunner
 src/automation-client/events.ts         pure: `opencode run --format json` line probes and the fold
@@ -430,15 +448,14 @@ src/ctrl/prompts.ts                     + renderDiagnosingAgent
 prompts/diagnosing-agent.html           restored and trimmed (§3.4)
 src/shared/api.ts                       + run, Runs group, AutomationClientApi
 src/shared/contract.ts                  + RunBody, RunResponse
-src/shared/errors.ts                    + UnknownTicket (404), RunFailed (502), RunTimedOut (504), their Wire codecs
-src/qemu-server/middleware.ts           + the three tags in isApiError and attribution; comment fix
+src/shared/errors.ts                    + RunFailed (502), RunTimedOut (504), their Wire codecs
+src/qemu-server/middleware.ts           + the two tags in isApiError and attribution; comment fix
 src/db/schema.ts                        server_type + 'automation'; ServerStats a union; the jobs index relaxed
 src/db/automation.ts                    + claimNext, closeJob, abortRunning
 src/db/servers.ts                       + listAutomationClients
-src/db/tests.ts                         + findTicket
 src/dashboard/query.ts, servers.tsx     the fleet is qemu rows; the automation half gains the clients table
 src/config.ts                           AutomationConfig → AutomationServerConfig (the client reuses ProxyConfig)
-src/observability/log.ts                Locations.automationClient and its ProcessAttribution
+src/observability/log.ts                Locations.automation → automationServer; + automationClient, automationRun(key)
 drizzle/0010_<name>.sql                 generated: the enum value and the index change, together
 package.json                            "automation-client" script
 automation-client.md                    operator document: flags, variables, the wire, the row
@@ -490,11 +507,8 @@ const DatabaseLive = Layer.unwrap(
 
 // Sentry beneath Log so the rows flush before Sentry does and Log captures the reporter; the
 // process attribution is this process's own bucket.
-const MainLive = Layer.mergeAll(
-  Servers.ServerStore.layer,
-  Tests.TestStore.layer,
-  Log.Log.layer,
-).pipe(
+// Two stores and no more: the servers row it announces itself in, and the logs rows Log writes.
+const MainLive = Layer.mergeAll(Servers.ServerStore.layer, Log.Log.layer).pipe(
   Layer.provideMerge(Logs.LogStore.layer),
   Layer.provideMerge(DatabaseLive),
   Layer.provideMerge(Config.ProxyConfig.layer),
@@ -507,7 +521,7 @@ const MainLive = Layer.mergeAll(
 );
 ```
 
-One reference per service. `Runs` depends on `AgentRunner`, `Stats`, `TestStore` and `Log`;
+One reference per service. `Runs` depends on `AgentRunner`, `Stats` and `Log`;
 `OpenCode.layer` on `ChildProcessSpawner`, `FileSystem`, `Path` (from `NodeServices`),
 `ProxyConfig` and `Log`; the handlers on `Runs`, `BearerAuthLive` (`ProxyConfig`, unchanged) and
 `ApiBoundaryLive` (`Log`, `ProcessAttribution`). The
@@ -524,23 +538,21 @@ refusal announces nothing, and the row is deleted when the listener goes.
    boundary, `skipSentry`.
 2. HttpApi decodes `RunBody`: `key` and `prompt` non-empty. A refusal is the boundary's 400.
 3. The handler yields `Runs` and calls `runs.run(payload)`. The handler is interruptible (D5).
-4. `Runs.run` looks the key up: `tests.findTicket(key)` → `{ resultId, sessionId, serverUrl }`, or
-   `UnknownTicket` (404) when no result carries that ticket — a typo never starts an agent. A store
-   failure is `Internal`.
-5. It mints a run id, acquires the ticket's colour, logs `run started; opencode; N chars`, makes a
-   `Scope`, puts `{ id, ticket, startedAt, scope }` in the map, and calls
-   `runner.run({ ticket, prompt, serverUrl })` under `Scope.provide(scope)` inside
-   `Effect.timeoutOrElse({ duration: RUN_TIMEOUT, orElse: RunTimedOut })`.
-6. `OpenCode.run` (§6): makes the scratch directory in that scope, writes the shims and
+4. `Runs.run` mints a run id, acquires the key's colour, logs `run started; opencode; N chars` under
+   `{ location: Locations.automationRun(key), agentId: key }`, makes a `Scope`, puts `{ id, key,
+   startedAt, scope }` in the map, and calls `runner.run({ key, prompt })` under
+   `Scope.provide(scope)` inside `Effect.timeoutOrElse({ duration: RUN_TIMEOUT, orElse: RunTimedOut
+   })`. Nothing is looked up: the key is attribution, and the prompt is everything the agent needs.
+5. `OpenCode.run` (§6): makes the scratch directory in that scope, writes the shims and
    `opencode.json`, spawns `opencode run --model <MODEL> --format json` with the prompt on stdin
    and the variables in its environment, drains stdout into the fold and stderr into a tail,
    awaits the exit, and answers `{ session, text }` or `RunFailed`.
-7. `Runs.run`'s `onExit` (uninterruptible bookkeeping, whichever way it ended): removes the run from
+6. `Runs.run`'s `onExit` (uninterruptible bookkeeping, whichever way it ended): removes the run from
    the map, closes the scope — which kills a child still alive (SIGTERM, SIGKILL after five
    seconds, the directory removed last) — releases the colour, and logs the verdict: `run finished;
    M chars in Tms`, or `run aborted; …` on an interrupt. A failure writes no line of its own here:
-   the boundary writes `POST /run failed: <message>` once.
-8. The handler answers `RunResponse` (200), or the boundary answers 404 / 502 / 504 / 500 with
+   the boundary writes `POST /run failed: <message>` once, under the same location.
+7. The handler answers `RunResponse` (200), or the boundary answers 502 / 504 / 500 with
    `{ error }`.
 
 ### 4.4 Disconnects and shutdown
@@ -548,7 +560,7 @@ refusal announces nothing, and the row is deleted when the listener goes.
 The platform interrupts a request's fiber when the client closes the response early
 (`NodeHttpServer.makeHandler`, annotated `ClientAbort`), and interrupts every request fiber when
 the listener's scope closes on shutdown. The handler for `run` is interruptible, so both reach
-step 7 as an interrupt: the child is killed, the directory removed, the count decremented, and one
+step 6 as an interrupt: the child is killed, the directory removed, the count decremented, and one
 line written — `run aborted; client disconnected after Tms` when the interrupt carries the
 `ClientAbort` annotation (`reason.annotations.has(HttpServerError.ClientAbort.key)`, as
 `HttpServerError` itself reads it), `run aborted; interrupted after Tms` otherwise (shutdown). The
@@ -571,7 +583,7 @@ runs, kill the children, flush the log, flush Sentry, close the pool — a handf
 export const run = HttpApiEndpoint.post("run", "/run", {
   payload: Contract.RunBody,
   success: Contract.RunResponse,
-  error: [Errors.UnknownTicketWire, Errors.RunFailedWire, Errors.RunTimedOutWire],
+  error: [Errors.RunFailedWire, Errors.RunTimedOutWire],
 });
 
 export class Runs extends HttpApiGroup.make("Runs")
@@ -611,15 +623,6 @@ export class RunResponse extends Schema.Class<RunResponse>(
 ### 5.3 `src/shared/errors.ts`
 
 ```ts
-// No test result carries this ticket: nothing to run for, and nothing to attribute a run to.
-export class UnknownTicket extends Schema.TaggedError<UnknownTicket>(
-  "@oligarchy/shared/errors/UnknownTicket",
-)("UnknownTicket", { key: Schema.String, message: Schema.String, agentId: Schema.String }, { httpApiStatus: 404 }) {
-  override readonly [ErrorReporter.ignore] = true;
-}
-export const unknownTicket = (key: string): UnknownTicket =>
-  UnknownTicket.make({ key, message: `unknown ticket "${key}"`, agentId: key });
-
 // The agent did not finish: opencode could not be spawned, exited non-zero, exited without a
 // session, or died from a signal nobody here sent. The message is `opencode: <what>`.
 export class RunFailed extends Schema.TaggedError<RunFailed>("@oligarchy/shared/errors/RunFailed")(
@@ -638,13 +641,14 @@ export class RunTimedOut extends Schema.TaggedError<RunTimedOut>(
 }
 ```
 
-Wire codecs as the others: `UnknownTicketWire` decodes to `{ _tag, key: "", message, agentId: "" }`,
-`RunFailedWire` and `RunTimedOutWire` to `{ _tag, message, agentId: "" }`. All three join `ApiError`
-and `apiErrorClasses` (the `satisfies Record<ApiError["_tag"], …>` refuses a missing arm), the
-`isApiError` union in `src/qemu-server/middleware.ts`, and its `attribution` switch: each carries
-`agentId` (the ticket), none a session, so `{ location: fallback.location, agentId }`. `report`
-already sends a 5xx's cause to Sentry and marks a 4xx `skipSentry`. The comment in `middleware.ts`
-saying "The automation server does not use this bearer" gains "; the automation client does".
+Wire codecs as the others: `RunFailedWire` and `RunTimedOutWire` decode to `{ _tag, message,
+agentId: "" }`. Both join `ApiError` and `apiErrorClasses` (the `satisfies Record<ApiError["_tag"],
+…>` refuses a missing arm), the `isApiError` union in `src/qemu-server/middleware.ts`, and its
+`attribution` switch: each carries `agentId` (the key), and its bucket is the run's, so the arm is
+`{ location: Log.Locations.automationRun(error.agentId), agentId: error.agentId }` — the boundary's
+`POST /run failed: …` line lands beside the run's own lines. `report` already sends a 5xx's cause to
+Sentry. The comment in `middleware.ts` saying "The automation server does not use this bearer"
+gains "; the automation client does".
 
 ### 5.4 The statuses, read from the dispatcher's side
 
@@ -653,7 +657,6 @@ saying "The automation server does not use this bearer" gains "; the automation 
 | 200 | the agent finished; `{ model, session, text, elapsedMs }` | `succeeded` |
 | 400 | the body was refused (an empty key or prompt); `{ error }` | `failed` |
 | 401 | the bearer is wrong; `{ "error": "unauthorized" }` | `failed` |
-| 404 | `{ "error": "unknown ticket \"OLI-45\"" }` | `failed` |
 | 502 | the agent failed; `{ "error": "opencode: exited 1: …" }` | `failed` |
 | 504 | the agent ran past two hours and was killed; `{ error }` | `timed_out` |
 | 500 | the automation client itself failed (a database error, a defect); `{ "error": "internal error" }`, the cause in Sentry | `failed` |
@@ -674,12 +677,11 @@ what launches an agent and waits for it must be swappable (OpenCode today; the C
 agents next) without the server, the bookkeeping, the heartbeat or the dispatcher noticing.
 
 ```ts
+// The key is for attribution — the run's directory name and its log bucket; the prompt is
+// everything the agent is told. The runner reads nothing else from anywhere.
 export type RunInput = {
-  readonly ticket: string;
+  readonly key: string;
   readonly prompt: string;
-  // The run's qemu server, from the ticket's row: what ./client falls back to when the prompt
-  // does not say --server-url.
-  readonly serverUrl: string;
 };
 
 export type RunOutcome = {
@@ -764,7 +766,6 @@ const FORCE_KILL_AFTER = "5 seconds";
      env: {
        OLIGARCHY_TOKEN: Redacted.value(config.token),
        DATABASE_URL: Redacted.value(config.databaseUrl),
-       SERVER_URL: input.serverUrl,
        OLIGARCHY_MODEL: MODEL,
      },
      extendEnv: true,
@@ -864,7 +865,7 @@ const RUN_TIMEOUT = "2 hours";
 
 type LiveRun = {
   readonly id: string;
-  readonly ticket: string;
+  readonly key: string;
   readonly startedAt: number;
   readonly scope: Scope.Closeable;
 };
@@ -878,27 +879,27 @@ export type AutomationStats = {
 export type RunsService = {
   readonly run: (
     body: Contract.RunBody,
-  ) => Effect.Effect<
-    Contract.RunResponse,
-    Errors.UnknownTicket | Errors.RunFailed | Errors.RunTimedOut | Errors.Internal
-  >;
+  ) => Effect.Effect<Contract.RunResponse, Errors.RunFailed | Errors.RunTimedOut>;
   readonly stats: Effect.Effect<AutomationStats>;
 };
 ```
 
-`run` is `Effect.fn("Runs.run")`, in the order of §4.3 steps 4 to 7. Points worth stating:
+`run` is `Effect.fn("Runs.run")`, in the order of §4.3 steps 4 to 6. Points worth stating:
 
-- The lookup comes first and costs one indexed query (`test_results_linear_id_idx`); a key nobody
-  carries is refused before a directory is made or a process spawned.
+- `Runs` yields no store. The key is not checked against anything: the dispatcher composed the job
+  from a row it had already found, and a stray caller with a made-up key gets an agent run and a
+  log bucket named after its typo, which is the caller's problem and nobody else's.
+- Every line of a run is written under `{ location: Locations.automationRun(key), agentId: key }`
+  — `automation-OLI-45` — so `./ctrl` or the dashboard can read one ticket's run back as a bucket.
 - The bookkeeping in `onExit` is uninterruptible by nature of `Effect.onExit`; it never fails: a
   `Scope.close` that fails is one `run cleanup failed: <detail>` error line with the cause.
 - The timeout is `RunTimedOut.make({ message: `${runner.name}: no result within ${RUN_TIMEOUT}`,
-  agentId: ticket })` — `opencode: no result within 2 hours`. The runner's `name`, not its model, is
+  agentId: key })` — `opencode: no result within 2 hours`. The runner's `name`, not its model, is
   the word in that message and in the `run started; opencode; …` line: the model is what the caller
   records, the runner is what an operator reading the log is looking at.
 - `stats` is `Effect.flatMap(Ref.get(runs), (map) => Effect.map(stats.collect, (host) => ({ agents:
   map.size, ...host })))`.
-- No capacity refusal (D4). No per-ticket uniqueness check either: two runs for one ticket are the
+- No capacity refusal (D4). No per-key uniqueness check either: two runs for one ticket are the
   dispatcher's decision, and the queue's index already makes it one open job per result and
   action.
 
@@ -1027,12 +1028,24 @@ The servers page is already two halves (#109). Changes, all in `src/dashboard/`:
 
 ## 12. Log lines
 
-Attribution: the automation client's lines carry `location = "automation-client"`, with `agentId`
-the ticket for lines about a run and `"automation-client"` for process-wide lines; the dispatcher's
-carry `location = "automation"` (the automation server's bucket, as today) with the ticket as
-`agentId`. New in `src/observability/log.ts`: `Locations.automationClient`,
-`AutomationClientAgentId`, `AutomationClientProcessAttribution`; the `logs.location` comment names
-the new bucket.
+`logs.location` is a text bucket; these are the buckets after this change:
+
+| Bucket | Whose lines | `agentId` |
+|---|---|---|
+| `automation-server` | every line of `./automation-server`: the webhook's, the dispatcher's, its fatal lines | the ticket for a line about one job or webhook; `automation-server` otherwise |
+| `automation-<key>` (`automation-OLI-45`) | every line of `./automation-client` about one run: `run started`, the verdict, the boundary's `POST /run failed` | the key |
+| `automation-client` | the client's process-wide lines: listening, heartbeat failures, fatal | `automation-client` |
+
+`automation-server` is today's `automation` bucket renamed: `Locations.automation` becomes
+`Locations.automationServer = "automation-server"` and `AutomationAgentId` and
+`AutomationProcessAttribution` follow it; every pin in the automation server's tests, the
+`development.md` Log paragraph and the `logs.location` comments in `schema.ts`, `logs.ts` and
+`log.ts` move with it. The generated `0010` migration may carry one `UPDATE "logs" SET "location" =
+'automation-server' WHERE "location" = 'automation'`, as `0009` carried its `CASE`, so the old rows
+join the new bucket rather than keep a name nothing writes any more. New in `log.ts`:
+`Locations.automationClient`, `Locations.automationRun = (key) => `automation-${key}``,
+`AutomationClientAgentId`, `AutomationClientProcessAttribution`. A run's bucket is named after the
+ticket so one ticket's automation-client lines read back as one bucket, the way one session's do.
 
 | Process | Level | Line | When |
 |---|---|---|---|
@@ -1051,7 +1064,6 @@ the new bucket.
 | client | info | `run aborted; client disconnected after 120034ms` | the dispatcher went away |
 | client | info | `run aborted; interrupted after 120034ms` | shutdown |
 | client | error | `run cleanup failed: <detail>` | `Scope.close` failed (cause reported) |
-| client | error | `POST /run failed: unknown ticket "OLI-45"` | the boundary, 404, `skipSentry` |
 | client | error | `POST /run failed: opencode: exited 1: <reason>` | the boundary, 502 (cause reported) |
 | client | error | `POST /run failed: opencode: no result within 2 hours` | the boundary, 504 |
 | client | error | `POST /run failed: unauthorized` | the boundary, 401, `skipSentry` |
@@ -1060,7 +1072,9 @@ the new bucket.
 | client | fatal | `automation-client: database unreachable: <reason>` | startup |
 | client | fatal | `automation-client: listen EADDRINUSE: …` / `automation-client: <accept error>` | listen / after |
 
-The stdout copy carries the ticket's colour between `run started` and the verdict. One failure,
+On stdout the prefix is `[<location>] <agentId>:`, so a run's lines read `[automation-OLI-45] OLI-45:
+run started; …` and the dispatcher's `[automation-server] OLI-45: job started; …`; the client's
+stdout carries the key's colour between `run started` and the verdict. One failure,
 one Sentry event: the client reports a 5xx with its cause through the boundary; the dispatcher's
 line for a refusal it received is `skipSentry`, and it reports only what the client could not —
 an unreachable client, a prompt it could not compose, a row it could not write.
@@ -1103,7 +1117,7 @@ type Scope = unknown;           // effect Scope.Scope
 type Effect<A, E, R> = unknown; // effect Effect.Effect
 type RunFailed = unknown;       // Errors.RunFailed
 
-export type RunInput = { readonly ticket: string; readonly prompt: string; readonly serverUrl: string };
+export type RunInput = { readonly key: string; readonly prompt: string };
 export type RunOutcome = { readonly session: string; readonly text: string };
 export type Shape = {
   readonly name: string;
@@ -1133,17 +1147,23 @@ type RunBody = unknown;         // Contract.RunBody
 type RunResponse = unknown;     // Contract.RunResponse
 type Memory = unknown;          // Contract.Memory
 type Cpu = unknown;             // Contract.Cpu
-type UnknownTicket = unknown;   // Errors.UnknownTicket
 type RunTimedOut = unknown;     // Errors.RunTimedOut
-type Internal = unknown;        // Errors.Internal
 export type AutomationStats = { readonly agents: number; readonly memory: Memory; readonly cpu: Cpu };
 export type RunsService = {
-  readonly run: (body: RunBody) => Effect<RunResponse, UnknownTicket | RunFailed | RunTimedOut | Internal, never>;
+  readonly run: (body: RunBody) => Effect<RunResponse, RunFailed | RunTimedOut, never>;
   readonly stats: Effect<AutomationStats, never, never>;
 };
 export declare class Runs /* Context.Service<Runs>()("@oligarchy/automation-client/Runs", { make }) */ {
-  static readonly layer: unknown; // Layer<Runs, never, AgentRunner | Stats | TestStore | Log>
+  static readonly layer: unknown; // Layer<Runs, never, AgentRunner | Stats | Log>
 }
+
+// src/observability/log.ts (additions and the rename)
+export declare const Locations: {
+  readonly automationServer: "automation-server"; // was `automation`
+  readonly automationClient: "automation-client";
+  readonly automationRun: (key: string) => string; // `automation-${key}`
+  readonly server: "server";
+};
 
 // src/automation-client/command.ts
 type Layer<A, E, R> = unknown;  // effect Layer.Layer
@@ -1196,11 +1216,6 @@ export declare const abortRunning: (reason: string) => Effect<number, DatabaseEr
 // src/db/servers.ts (addition)
 export declare const listAutomationClients: Effect<ReadonlyArray<{ readonly url: string; readonly agents: number }>, DatabaseError, never>;
 
-// src/db/tests.ts (addition)
-export declare const findTicket: (
-  linearId: string,
-) => Effect<Option<{ readonly resultId: string; readonly sessionId: string | null; readonly serverUrl: string }>, DatabaseError, never>;
-
 // src/host/stats.ts
 export declare const SAMPLE_INTERVAL_MS: 5000;
 export declare const MAX_SAMPLES: 60;
@@ -1234,8 +1249,7 @@ Identifiers: `@oligarchy/automation-client/AgentRunner`, `@oligarchy/automation-
 `@oligarchy/automation-client/events/Line`, `@oligarchy/host/Stats`,
 `@oligarchy/config/AutomationServerConfig`,
 `@oligarchy/shared/contract/RunBody`, `@oligarchy/shared/contract/RunResponse`,
-`@oligarchy/shared/errors/UnknownTicket`, `@oligarchy/shared/errors/RunFailed`,
-`@oligarchy/shared/errors/RunTimedOut`.
+`@oligarchy/shared/errors/RunFailed`, `@oligarchy/shared/errors/RunTimedOut`.
 
 ## 15. Delivery order
 
@@ -1248,11 +1262,13 @@ breaks the qemu server or the reverse proxy.
    `BOUNDARY_FILES`. Lane: `qemu-server.integration.test.ts`.
 2. **Schema, stores and dashboard** — `server_type` gains `automation`, `ServerStats` becomes the
    union, the jobs index is relaxed, one generated migration; `claimNext`, `closeJob`,
-   `abortRunning`, `listAutomationClients`, `findTicket` and their fakes; the fleet filter and the
+   `abortRunning`, `listAutomationClients` and their fakes; the fleet filter and the
    clients table. Lanes: `db.integration.test.ts`, `dashboard.integration.test.ts`. CI's
    `schema-in-sync` job confirms the migration matches.
-3. **The wire** — `RunBody`, `RunResponse`, `UnknownTicket`, `RunFailed`, `RunTimedOut`, their
-   codecs, `run`, `Runs`, `AutomationClientApi`; the middleware's three new arms. Unit lane only.
+3. **The wire and the log buckets** — `RunBody`, `RunResponse`, `RunFailed`, `RunTimedOut`, their
+   codecs, `run`, `Runs`, `AutomationClientApi`; the middleware's two new arms; the `automation` →
+   `automation-server` rename with `automationClient` and `automationRun`, and every pin of the old
+   name. Unit lane, plus `automation-server.integration.test.ts` for the renamed stdout prefix.
 4. **The runner** — `events.ts`, `runner.ts`, `opencode.ts`, `fake-runner.ts`; the captured fixtures
    from S2 checked in as test constants. Unit lane only; S1–S3 done before this slice starts.
 5. **The automation client** — `runs.ts`, `handlers.ts`, `command.ts`, `main.ts`, the wrapper and
@@ -1301,9 +1317,13 @@ shell, its findings written into the constants and fixtures, not into this docum
   host is many machines with `opencode` on the PATH, a bearer and a fleet row each; it is another
   process. Folding `/run` into the automation server would put a bearer on a service that
   deliberately has none for `/linear` and a fleet row on a process there is one of.
-- D2 — **`key` is the ticket.** It is what every row about the work carries (`test_results.linear_id`),
-  what the driver uses as `--agent-id`, and what the webhook that queued the job was keyed by. The
-  client looks it up; an unknown key is 404 before anything is spent.
+- D2 — **`key` is the ticket, and the client does nothing with it but attribute.** It is what every
+  row about the work carries (`test_results.linear_id`), what the driver uses as `--agent-id`, and
+  what the webhook that queued the job was keyed by. The dispatcher found the row before it composed
+  the job; the client names its run's log bucket after the key and looks nothing up. Alternative,
+  dropped: the client checking the key against `test_results` and answering 404 — a lookup with no
+  consumer but the refusal, a store the client has no other use for, and a typo the dispatcher
+  cannot make.
 - D3 — **`RUN_TIMEOUT = "2 hours"`**, with the reason in its comment. Alternative: no ceiling; a
   wedged agent then holds its slot and its `agents` count forever, and its job stays `running`.
 - D4 — **No capacity cap on the client.** The dispatcher places on the client with the fewest runs in
@@ -1333,14 +1353,16 @@ shell, its findings written into the constants and fixtures, not into this docum
   instead of a fact. The shims are two lines each because the wrappers resolve `$(dirname "$0")`.
 - D11 — **`agents` and `qemus` as separate row keys**, not one `running` key. A row reads as its
   server would say it, and existing rows and tests keep their `qemus`.
-- D12 — **The dispatcher owns the job row; a retry is a new row; the dispatcher never retries.** The
-  process that moved a row to `running` is the one that moves it out: the client does not know the
-  row exists, a client that dies cannot close it, and only the dispatcher sees an unreachable
-  client. A failed row is history, so the retry is a fresh row, which the relaxed index allows and
-  the webhook enqueues when a human moves the ticket again. Alternatives: the client closes the row
-  (it would need the job id on the wire and a store it has no other use for); one row with an
-  `attempts` column (loses the history the completed table shows); automatic retries with backoff
-  (a bad ticket would burn runs until someone noticed).
+- D12 — **The dispatcher owns the job's lifecycle; the client is dumb; a retry is a new row; the
+  dispatcher never retries.** The process that moved a row to `running` is the one that moves it
+  out: the client does not know the row exists, a client that dies cannot close it, and only the
+  dispatcher sees an unreachable client. The client's whole job is to run `opencode` and answer;
+  its database use is its heartbeat and its log rows. A failed row is history, so the retry is a
+  fresh row, which the relaxed index allows and the webhook enqueues when a human moves the ticket
+  again. Alternatives: the client closes the row (it would need the job id on the wire and a store
+  it has no other use for); one row with an `attempts` column (loses the history the completed
+  table shows); automatic retries with backoff (a bad ticket would burn runs until someone
+  noticed).
 - D13 — **The drive prompt is the Linear issue's description; the diagnose prompt is a template.**
   The issue is where the mission was rendered and where a human edits it; re-rendering it from the
   rows cannot reproduce it (the version is not stored), and storing the rendered text on the result
@@ -1352,6 +1374,13 @@ shell, its findings written into the constants and fixtures, not into this docum
   worse than one closed without a verdict; a result the agent did close is left alone; a diagnose
   failure touches nothing. Alternative: leave it to a human, who would find it `running` a week
   later.
+- D15 — **One log bucket per process, and one per run.** `automation-server` for the automation
+  server (renamed from `automation`, so the bucket says which process wrote it now that there are
+  two automation processes), `automation-<key>` for a run on the automation client, `automation-
+  client` for the client's process-wide lines. A run's bucket carries the ticket so one ticket's
+  lines read back as one bucket, as one session's do by its UUID. Alternative: one `automation-
+  client` bucket with the ticket only in `agentId`; readable, but a bucket is what `./ctrl session
+  --logs` and the dashboard fetch by.
 
 ## 18. Out of scope
 
