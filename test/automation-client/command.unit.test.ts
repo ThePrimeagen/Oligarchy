@@ -17,7 +17,9 @@ import { Command } from "effect/unstable/cli";
 import { HttpServerError } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import * as AutomationClientCommand from "../../src/automation-client/command.ts";
+import * as Client from "../../src/db/client.ts";
 import * as Api from "../../src/shared/api.ts";
+import * as Errors from "../../src/shared/errors.ts";
 import * as FakeLog from "../support/log.ts";
 
 const CliTestLayer = Layer.mergeAll(
@@ -55,14 +57,24 @@ const fakeServer = () => {
   return { served, listening, serverFailed, server };
 };
 
+const DatabaseLive = (ping: Effect.Effect<void, Errors.DatabaseError> = Effect.void) =>
+  Layer.succeed(Client.Database)(
+    Client.Database.of({
+      run: () => Effect.die("unused"),
+      transaction: () => Effect.die("unused"),
+      ping,
+    }),
+  );
+
 const run = (
   server: AutomationClientCommand.AutomationClient<never>,
   args: ReadonlyArray<string>,
   log: FakeLog.FakeLog,
+  database: Layer.Layer<Client.Database> = DatabaseLive(),
 ) =>
   Command.runWith(AutomationClientCommand.makeAutomationClientCommand(server), {
     version: Api.VERSION,
-  })(args).pipe(Effect.provide(Layer.mergeAll(CliTestLayer, log.layer)));
+  })(args).pipe(Effect.provide(Layer.mergeAll(CliTestLayer, log.layer, database)));
 
 describe("automation client command flags", () => {
   it.effect("--port must be an integer", () =>
@@ -80,7 +92,22 @@ describe("automation client command flags", () => {
     Effect.gen(function* () {
       const fake = fakeServer();
       const log = FakeLog.fakeLog();
-      const exit = yield* Effect.exit(run(fake.server, ["--help"], log));
+      const exit = yield* Effect.exit(
+        run(
+          fake.server,
+          ["--help"],
+          log,
+          DatabaseLive(
+            Effect.fail(
+              Errors.DatabaseError.make({
+                operation: "ping",
+                message: "database request failed",
+                cause: new Error("connect ECONNREFUSED"),
+              }),
+            ),
+          ),
+        ),
+      );
       expect(Exit.isSuccess(exit)).toBe(true);
       expect(fake.served).toEqual([]);
       expect(log.lines).toEqual([]);
@@ -91,7 +118,7 @@ describe("automation client command flags", () => {
     }),
   );
 
-  it.effect("defaults to port 54322 and listens", () =>
+  it.effect("defaults to port 54322, pings the database, and listens", () =>
     Effect.gen(function* () {
       const fake = fakeServer();
       const log = FakeLog.fakeLog();
@@ -118,6 +145,49 @@ describe("automation client command flags", () => {
 });
 
 describe("automation client command startup failures", () => {
+  it.effect("an unreachable database is fatal and never listens (unhappy)", () =>
+    Effect.gen(function* () {
+      const fake = fakeServer();
+      const log = FakeLog.fakeLog();
+      const unreachable = Errors.DatabaseError.make({
+        operation: "ping",
+        message: "database request failed",
+        cause: new Error("connect ECONNREFUSED"),
+      });
+      const error = yield* Effect.flip(
+        run(fake.server, [], log, DatabaseLive(Effect.fail(unreachable))),
+      );
+      expect(error).toMatchObject({
+        _tag: "DatabaseError",
+        operation: "ping",
+        message: "database unreachable: connect ECONNREFUSED",
+      });
+      expect(fake.served).toEqual([]);
+      expect(log.lines.map((line) => [line.level, line.text])).toEqual([
+        ["fatal", "automation client: database unreachable: connect ECONNREFUSED"],
+      ]);
+    }),
+  );
+
+  it.effect("a ping failure without a nested cause reports the driver's own message", () =>
+    Effect.gen(function* () {
+      const fake = fakeServer();
+      const log = FakeLog.fakeLog();
+      const error = yield* Effect.flip(
+        run(
+          fake.server,
+          [],
+          log,
+          DatabaseLive(
+            Effect.fail(Errors.DatabaseError.make({ operation: "ping", message: "pool ended" })),
+          ),
+        ),
+      );
+      expect(error).toMatchObject({ message: "database unreachable: pool ended" });
+      expect(log.lines[0]?.text).toBe("automation client: database unreachable: pool ended");
+    }),
+  );
+
   it.effect("a server error after listen fails the handler with the error's detail", () =>
     Effect.gen(function* () {
       const fake = fakeServer();
@@ -138,6 +208,7 @@ describe("automation client command startup failures", () => {
         text: "automation client: accept EMFILE: too many open files",
         skipSentry: false,
       });
+      expect(log.lines[0]?.cause).toMatchObject({ _tag: "ServeError", cause });
     }),
   );
 

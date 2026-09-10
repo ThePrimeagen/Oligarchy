@@ -1,17 +1,22 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { Effect, Fiber, Layer, Schema } from "effect";
+import { Cause, Effect, Exit, Fiber, Layer, Redacted, Schema } from "effect";
 import { HttpBody, HttpClient, HttpRouter } from "effect/unstable/http";
 import { NodeHttpServer } from "@effect/platform-node";
 import * as Handlers from "../../src/automation-client/handlers.ts";
 import * as OpenCode from "../../src/automation-client/opencode.ts";
+import * as Config from "../../src/config.ts";
 import * as Log from "../../src/observability/log.ts";
-import * as Support from "../support/config.ts";
 import * as FakeLog from "../support/log.ts";
 import * as FakeSpawner from "../support/fake-spawner.ts";
 import * as Reporter from "../support/reporter.ts";
 
 const TOKEN = "test-token";
+
+const ProxyConfigLive = Layer.succeed(Config.ProxyConfig)({
+  token: Redacted.make(TOKEN),
+  databaseUrl: Redacted.make("postgres://unused"),
+});
 
 type Fixture = {
   readonly spawner: FakeSpawner.FakeSpawner;
@@ -27,9 +32,8 @@ const fixture = (script: FakeSpawner.Script = () => ({ exitCode: 0 })): Fixture 
 
 const serve = (fixed: Fixture) =>
   HttpRouter.serve(Handlers.routes, { disableLogger: true, disableListenLog: true }).pipe(
-    Layer.provide(Layer.mergeAll(fixed.spawner.layer, fixed.log.layer, Handlers.BearerAuthLive)),
+    Layer.provide(Layer.mergeAll(fixed.spawner.layer, fixed.log.layer, ProxyConfigLive)),
     Layer.provide(Layer.succeed(Log.ProcessAttribution)(Log.AutomationClientProcessAttribution)),
-    Layer.provide(Support.withEnv({ OLIGARCHY_TOKEN: TOKEN })),
     Layer.provideMerge(NodeHttpServer.layerTest),
     Layer.provideMerge(fixed.reporter.layer),
   );
@@ -59,7 +63,7 @@ describe("POST /run happy path", () => {
         expect(yield* response.json).toEqual({ ok: "true" });
       }).pipe(Effect.provide(serve(fixed)));
       expect(fixed.spawner.spawned).toMatchObject([
-        { command: OpenCode.BIN, args: ["run", "fix the bug"] },
+        { command: OpenCode.BIN, args: ["run", "--", "fix the bug"] },
       ]);
       expect(fixed.log.lines).toEqual([]);
     }),
@@ -168,6 +172,33 @@ describe("POST /run unhappy path", () => {
         const response = yield* run(http);
         expect(response.status).toBe(500);
         expect(yield* response.json).toEqual({ error: "out of token credits" });
+      }).pipe(Effect.provide(serve(fixed)));
+    }),
+  );
+});
+
+describe("interruption", () => {
+  it.effect("POST /run finishes opencode even when the client disconnects mid-run", () =>
+    Effect.gen(function* () {
+      const fixed = fixture(() => ({}));
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const pending = yield* Effect.forkChild(run(http));
+        for (let i = 0; i < 100 && fixed.spawner.spawned[0] === undefined; i++) {
+          yield* Effect.yieldNow;
+        }
+        const spawned = fixed.spawner.spawned[0];
+        expect(spawned).toBeDefined();
+        yield* Fiber.interrupt(pending);
+        const exit = yield* Fiber.await(pending);
+        expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true);
+        expect(yield* (spawned?.isRunning ?? Effect.succeed(false))).toBe(true);
+        yield* spawned?.exit(0) ?? Effect.void;
+        for (let i = 0; i < 100 && (yield* (spawned?.isRunning ?? Effect.succeed(false))); i++) {
+          yield* Effect.yieldNow;
+        }
+        expect(yield* (spawned?.isRunning ?? Effect.succeed(true))).toBe(false);
+        expect(spawned?.kills).toEqual([]);
       }).pipe(Effect.provide(serve(fixed)));
     }),
   );

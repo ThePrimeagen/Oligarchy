@@ -1,6 +1,7 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { Effect, Fiber } from "effect";
+import { Effect, Fiber, Layer, Sink, Stream } from "effect";
+import { ChildProcessSpawner } from "effect/unstable/process";
 import * as Cli from "../src/cli.ts";
 import * as FakeSpawner from "./support/fake-spawner.ts";
 
@@ -23,6 +24,8 @@ describe("Cli.run happy path", () => {
           stderr: "pipe",
           extendEnv: true,
           detached: false,
+          killSignal: "SIGTERM",
+          forceKillAfter: Cli.FORCE_KILL_AFTER,
         },
       });
     }),
@@ -90,6 +93,34 @@ describe("Cli.run unhappy path", () => {
       const error = yield* Fiber.join(running);
       expect(error._tag).toBe("CliFailed");
       expect(error.message).toContain("SIGKILL");
+    }),
+  );
+
+  it.effect("forwards a stderr stream failure as CliFailed, not a defect", () =>
+    Effect.gen(function* () {
+      const cause = new Error("stderr pipe broken");
+      const layer = Layer.succeed(ChildProcessSpawner.ChildProcessSpawner)(
+        ChildProcessSpawner.make(() =>
+          Effect.succeed(
+            ChildProcessSpawner.makeHandle({
+              pid: ChildProcessSpawner.ProcessId(1),
+              exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
+              isRunning: Effect.succeed(false),
+              kill: () => Effect.void,
+              stdin: Sink.drain,
+              stdout: Stream.empty,
+              stderr: Stream.fail(cause),
+              all: Stream.fail(cause),
+              getInputFd: () => Sink.drain,
+              getOutputFd: () => Stream.empty,
+              unref: Effect.succeed(Effect.void),
+            }),
+          ),
+        ),
+      );
+      const error = yield* Effect.flip(Cli.run("tool", []).pipe(Effect.provide(layer)));
+      expect(error._tag).toBe("CliFailed");
+      expect(error.message).toBe("stderr pipe broken");
     }),
   );
 });
