@@ -317,9 +317,10 @@ export const testResults = pgTable(
 );
 
 // One automation step for a test result: drive the guest, or diagnose after. Inserted
-// pending; a worker claims the oldest pending row, runs it, and closes with a terminal
-// status. (result_id, action) is unique — one drive and one diagnose per result for now.
-// Queue order is created_at among pending rows; capacity limits stay out of this table.
+// pending; a worker claims the oldest ready pending row, runs it, and closes with a terminal
+// status. One open drive and one open diagnose per result: a failed row stays as history and
+// a new one can be enqueued after it. Queue order is created_at among pending rows; capacity
+// limits stay out of this table.
 export const automationJobs = pgTable(
   "automation_jobs",
   {
@@ -335,7 +336,9 @@ export const automationJobs = pgTable(
     finishedAt: timestamp("finished_at", { withTimezone: true }),
   },
   (table) => [
-    uniqueIndex("automation_jobs_result_action_idx").on(table.resultId, table.action),
+    uniqueIndex("automation_jobs_result_action_idx")
+      .on(table.resultId, table.action)
+      .where(sql`${table.status} in ('pending', 'running')`),
     index("automation_jobs_status_created_at_idx").on(table.status, table.createdAt),
   ],
 );

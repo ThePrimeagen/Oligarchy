@@ -769,6 +769,17 @@ describe.skipIf(dbUrl === "")("dashboard/servers page happy path", () => {
           heartbeatAt: sql`now() - interval '5 minutes'`,
         },
         { url: "http://10.1.0.3:42069" },
+        {
+          url: "http://10.1.0.4:42071",
+          type: "automation",
+          stats: {
+            agents: 1,
+            memory: { totalBytes: 8_000_000_000, usedBytes: 2_000_000_000 },
+            cpu: { mean1m: 4, mean2m: 3, mean3m: 2 },
+          },
+          generation: 3,
+          heartbeatAt: sql`now() - interval '8 seconds'`,
+        },
       ]);
     });
     const { status, html } = await getPage("/servers", dbUrl);
@@ -785,7 +796,13 @@ describe.skipIf(dbUrl === "")("dashboard/servers page happy path", () => {
     expect(html).toContain(
       '<tr><td>http://10.1.0.3:42069</td><td colspan="3">never heard from</td><td>0</td><td>never</td>',
     );
+    expect(html).toContain(
+      "<tr><td>http://10.1.0.4:42071</td><td>1</td><td>2.0 / 8.0 GB</td><td>4.0% / 3.0% / 2.0%</td><td>3</td><td>8 s ago</td></tr>",
+    );
+    expect(html).not.toContain('value="http://10.1.0.4:42071"');
     expect(html).not.toContain("dashboard.css");
+    const fleet = html.slice(html.indexOf('id="fleet"'), html.indexOf("<h2>add a server</h2>"));
+    expect(fleet).not.toContain("http://10.1.0.4:42071");
   });
 
   it("serves the fleet alone at /servers/fleet, what the page's poll swaps in", async () => {
@@ -966,7 +983,35 @@ const QUEUE_JOBS: ReadonlyArray<QueuedJob> = [
 // arranges its own last.
 describe.skipIf(dbUrl === "")("dashboard/servers page: the automation half happy path", () => {
   it("orders running and pending diagnoses ahead of drives and then in queue order, completed newest finished first, and ends the connection", async () => {
-    await seed(dbUrl, (db) => seedQueue(db, "queue-order", QUEUE_JOBS));
+    await seed(dbUrl, async (db) => {
+      await seedQueue(db, "queue-order", QUEUE_JOBS);
+      await db
+        .insert(servers)
+        .values({
+          url: "http://10.1.0.4:42071",
+          type: "automation",
+          stats: {
+            agents: 1,
+            memory: { totalBytes: 8_000_000_000, usedBytes: 2_000_000_000 },
+            cpu: { mean1m: 4, mean2m: 3, mean3m: 2 },
+          },
+          generation: 3,
+          heartbeatAt: sql`now() - interval '8 seconds'`,
+        })
+        .onConflictDoUpdate({
+          target: servers.url,
+          set: {
+            type: "automation",
+            stats: {
+              agents: 1,
+              memory: { totalBytes: 8_000_000_000, usedBytes: 2_000_000_000 },
+              cpu: { mean1m: 4, mean2m: 3, mean3m: 2 },
+            },
+            generation: 3,
+            heartbeatAt: sql`now() - interval '8 seconds'`,
+          },
+        });
+    });
     const result = await runQuery(
       `
 const queue = await query.listAutomationQueue(url);
@@ -1006,7 +1051,11 @@ console.log([failed.test, failed.action, failed.reason, failed.createdAt instanc
     expect(html).toMatch(
       /<h3>completed<\/h3><table>.*?<tr><td>QUE-107<\/td><td>queue-order<\/td><td>drive<\/td><td>failed<\/td><td>\d+ min ago<\/td><td>\d+ min ago<\/td><td>1 min ago<\/td><td>session timed out<\/td><\/tr><tr><td>QUE-108<\/td>.*?<tr><td>QUE-106<\/td>.*?<tr><td>QUE-109<\/td>/s,
     );
-    expect(html.indexOf("<h2>automation</h2>")).toBeLessThan(html.indexOf("<h2>qemu servers</h2>"));
+    expect(html.indexOf("<h2>automation</h2>")).toBeLessThan(html.indexOf("<h3>clients</h3>"));
+    expect(html.indexOf("<h3>clients</h3>")).toBeLessThan(html.indexOf("<h2>qemu servers</h2>"));
+    expect(html).toContain(
+      "<tr><td>http://10.1.0.4:42071</td><td>1</td><td>2.0 / 8.0 GB</td><td>4.0% / 3.0% / 2.0%</td><td>3</td><td>8 s ago</td></tr>",
+    );
     expect(html).toContain('<div id="fleet" hx-get="/servers/fleet" hx-trigger="every 30s">');
     expect(html).toContain("<h2>add a server</h2>");
   });
@@ -1017,6 +1066,8 @@ console.log([failed.test, failed.action, failed.reason, failed.createdAt instanc
     expect(html.startsWith("<h3>running</h3><table>")).toBe(true);
     expect(html).toContain("<td>QUE-102</td>");
     expect(html).toContain("<td>QUE-109</td>");
+    expect(html).toContain("<h3>clients</h3>");
+    expect(html).toContain("<td>http://10.1.0.4:42071</td>");
     expect(html).not.toContain("<html");
     expect(html).not.toContain("qemu servers");
     expect(html).not.toContain("add a server");

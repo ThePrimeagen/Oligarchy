@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, isNotNull, sql } from "drizzle-orm";
 import { Array as Arr, Context, Effect, Layer, Option } from "effect";
 import * as Client from "./client.ts";
 import * as DbSchema from "./schema.ts";
@@ -66,6 +66,35 @@ export class ServerStore extends Context.Service<ServerStore>()("@oligarchy/db/S
       return rows.map((row) => row.url);
     });
 
+    // Automation rows with stats and a heartbeat within ninety seconds, in registration order.
+    const listAutomationClients = database
+      .run("listAutomationClients", (db) =>
+        db
+          .select({
+            url: DbSchema.servers.url,
+            stats: DbSchema.servers.stats,
+          })
+          .from(DbSchema.servers)
+          .where(
+            and(
+              eq(DbSchema.servers.type, "automation"),
+              isNotNull(DbSchema.servers.stats),
+              sql`${DbSchema.servers.heartbeatAt} > now() - interval '90 seconds'`,
+            ),
+          )
+          .orderBy(DbSchema.servers.createdAt, DbSchema.servers.url),
+      )
+      .pipe(
+        Effect.map((rows) =>
+          rows.flatMap((row) =>
+            row.stats !== null && "agents" in row.stats
+              ? [{ url: row.url, agents: row.stats.agents }]
+              : [],
+          ),
+        ),
+        Effect.withSpan("db.listAutomationClients"),
+      );
+
     // A session is routed once; a second insert is the primary key's DatabaseError by design.
     const routeSession = Effect.fn("db.routeSession")(function* (sessionId: string, url: string) {
       yield* database.run("routeSession", (db) =>
@@ -83,7 +112,15 @@ export class ServerStore extends Context.Service<ServerStore>()("@oligarchy/db/S
       return Option.map(Arr.head(rows), (row) => row.serverUrl);
     });
 
-    return { addServer, heartbeat, removeServer, listServers, routeSession, serverForSession };
+    return {
+      addServer,
+      heartbeat,
+      removeServer,
+      listServers,
+      listAutomationClients,
+      routeSession,
+      serverForSession,
+    };
   }),
 }) {
   static readonly layer = Layer.effect(this)(this.make);

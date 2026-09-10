@@ -77,6 +77,69 @@ const Row: FC<{ server: Server }> = ({ server }) => {
   );
 };
 
+const ClientRow: FC<{ server: Server }> = ({ server }) => {
+  if (server.stats === null || server.heartbeatAt === null) {
+    return (
+      <tr>
+        <td>{server.url}</td>
+        <td colspan={3}>never heard from</td>
+        <td>{server.generation}</td>
+        <td>never</td>
+      </tr>
+    );
+  }
+  const sinceHeartbeat = server.queriedAt.getTime() - server.heartbeatAt.getTime();
+  return (
+    <tr>
+      <td>{server.url}</td>
+      {sinceHeartbeat > SILENT_AFTER_MS ? (
+        <td colspan={3}>
+          <strong>silent</strong>
+        </td>
+      ) : (
+        <>
+          <td>{"agents" in server.stats ? server.stats.agents : 0}</td>
+          <td>
+            {gigabytes(server.stats.memory.usedBytes)} / {gigabytes(server.stats.memory.totalBytes)}{" "}
+            GB
+          </td>
+          <td>
+            {percent(server.stats.cpu.mean1m)} / {percent(server.stats.cpu.mean2m)} /{" "}
+            {percent(server.stats.cpu.mean3m)}
+          </td>
+        </>
+      )}
+      <td>{server.generation}</td>
+      <td>{age(sinceHeartbeat)} ago</td>
+    </tr>
+  );
+};
+
+// Automation clients as a table under the queue, or none: they announce themselves and leave
+// by themselves, so there is no delete form.
+export const Clients: FC<{ clients: ReadonlyArray<Server> }> = ({ clients }) => (
+  <>
+    <h3>clients</h3>
+    {clients.length === 0 ? (
+      <p>none</p>
+    ) : (
+      <table>
+        <tr>
+          <th>url</th>
+          <th>agents</th>
+          <th>memory</th>
+          <th>cpu 1m / 2m / 3m</th>
+          <th>generation</th>
+          <th>heartbeat</th>
+        </tr>
+        {clients.map((server) => (
+          <ClientRow server={server} />
+        ))}
+      </table>
+    )}
+  </>
+);
+
 // The fleet as a table, or the sentence that there is none: what the page polls for.
 export const Fleet: FC<{ servers: ReadonlyArray<Server> }> = ({ servers }) =>
   servers.length === 0 ? (
@@ -150,6 +213,7 @@ export const Queue: FC<{ queue: AutomationQueue }> = ({ queue }) => (
 // Both halves of the page, read together: absent together when the database could not be read.
 export type Halves = {
   readonly queue: AutomationQueue;
+  readonly clients: ReadonlyArray<Server>;
   readonly servers: ReadonlyArray<Server>;
 };
 
@@ -181,6 +245,7 @@ export const ServersPage: FC<{
           {halves === undefined ? null : (
             <div id="queue" hx-get="/servers/queue" hx-trigger="every 30s">
               <Queue queue={halves.queue} />
+              <Clients clients={halves.clients} />
             </div>
           )}
         </section>

@@ -358,9 +358,13 @@ export function listTestBasePrompts(connectionString: string): Promise<TestBaseP
   );
 }
 
-// The fleet in registration order. The clock in the select is the one a heartbeat's age is read
-// against, and it keeps a poll out of Hyperdrive's query cache: every poll sees the newest write.
-export function listServers(connectionString: string): Promise<Server[]> {
+// The fleet of one kind in registration order. The clock in the select is the one a heartbeat's
+// age is read against, and it keeps a poll out of Hyperdrive's query cache: every poll sees the
+// newest write.
+export function listServers(
+  connectionString: string,
+  type: (typeof servers.$inferSelect)["type"],
+): Promise<Server[]> {
   return withDatabase(connectionString, (db) =>
     db
       .select({
@@ -371,8 +375,13 @@ export function listServers(connectionString: string): Promise<Server[]> {
         queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(servers.createdAt),
       })
       .from(servers)
+      .where(eq(servers.type, type))
       .orderBy(servers.createdAt, servers.url),
   );
+}
+
+export function listAutomationClients(connectionString: string): Promise<Server[]> {
+  return listServers(connectionString, "automation");
 }
 
 // Fifty of each list: an operator reads the front of the queue and what finished last.

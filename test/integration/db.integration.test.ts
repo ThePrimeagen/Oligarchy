@@ -1260,6 +1260,207 @@ Postgres.describeWithDatabase("database", () => {
       }),
     );
 
+    scoped.effect(
+      "a heartbeat with type automation round-trips and listServers qemu does not list it",
+      () =>
+        Effect.gen(function* () {
+          const store = yield* Servers.ServerStore;
+          const database = yield* Client.Database;
+          const url = `http://10.2.0.1:${uuid().slice(0, 8)}`;
+          const stats: DbSchema.AutomationServerStats = {
+            agents: 2,
+            memory: { totalBytes: 16_000, usedBytes: 4_000 },
+            cpu: { mean1m: 22.3, mean2m: 21.4, mean3m: 20.9 },
+          };
+          yield* store.heartbeat(url, "automation", stats);
+          const [row] = yield* database.run("select", (db) =>
+            db.select().from(DbSchema.servers).where(eq(DbSchema.servers.url, url)),
+          );
+          expect(row).toMatchObject({ url, type: "automation", stats, generation: 1 });
+          expect(yield* store.listServers("qemu")).not.toContain(url);
+          expect(yield* store.listAutomationClients).toEqual([{ url, agents: 2 }]);
+          expect(yield* store.removeServer(url)).toBe(true);
+        }),
+    );
+
+    scoped.effect(
+      "listAutomationClients answers fresh rows with their agents and leaves out a stale or empty row",
+      () =>
+        Effect.gen(function* () {
+          const store = yield* Servers.ServerStore;
+          const database = yield* Client.Database;
+          const fresh = `http://10.2.0.2:${uuid().slice(0, 8)}`;
+          const stale = `http://10.2.0.3:${uuid().slice(0, 8)}`;
+          const empty = `http://10.2.0.4:${uuid().slice(0, 8)}`;
+          const stats: DbSchema.AutomationServerStats = {
+            agents: 1,
+            memory: { totalBytes: 8_000, usedBytes: 2_000 },
+            cpu: { mean1m: 1, mean2m: 1, mean3m: 1 },
+          };
+          yield* store.heartbeat(fresh, "automation", stats);
+          yield* store.heartbeat(stale, "automation", { ...stats, agents: 9 });
+          yield* store.addServer(empty, "automation");
+          yield* database.run("age", (db) =>
+            db
+              .update(DbSchema.servers)
+              .set({ heartbeatAt: sql`now() - interval '91 seconds'` })
+              .where(eq(DbSchema.servers.url, stale)),
+          );
+          const listed = yield* store.listAutomationClients;
+          expect(listed).toEqual([{ url: fresh, agents: 1 }]);
+          expect(listed.some((row) => row.url === stale || row.url === empty)).toBe(false);
+          expect(yield* store.removeServer(fresh)).toBe(true);
+          expect(yield* store.removeServer(stale)).toBe(true);
+          expect(yield* store.removeServer(empty)).toBe(true);
+        }),
+    );
+
+    scoped.effect(
+      "claimNext claims the oldest ready pending job, diagnoses before drives, and skips a diagnose whose session has not ended",
+      () =>
+        Effect.gen(function* () {
+          const tests = yield* Tests.TestStore;
+          const sessions = yield* Sessions.SessionStore;
+          const automation = yield* Automation.AutomationStore;
+          const definition = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
+          const created = yield* tests.createRun({
+            iso: "https://example.com/omarchy.iso",
+            serverUrl: "http://127.0.0.1:42069",
+            definitions: [{ id: definition.id }],
+          });
+          const first = created.results[0];
+          const secondRun = yield* tests.createRun({
+            iso: "https://example.com/omarchy.iso",
+            serverUrl: "http://127.0.0.1:42069",
+            definitions: [{ id: definition.id }],
+          });
+          const second = secondRun.results[0];
+          const openSession = uuid();
+          const endedSession = uuid();
+          yield* sessions.insertSession(openSession, { iso: "x" }, "running");
+          yield* sessions.insertSession(endedSession, { iso: "x" }, "running");
+          yield* sessions.endSession(endedSession, "succeeded", "done");
+          yield* tests.startResult(first.id, endedSession, "test-model");
+          yield* tests.startResult(second.id, openSession, "test-model");
+          const olderDrive = yield* automation.enqueue({ resultId: first.id, action: "drive" });
+          const blocked = yield* automation.enqueue({ resultId: second.id, action: "diagnose" });
+          const diagnose = yield* automation.enqueue({ resultId: first.id, action: "diagnose" });
+          const firstClaim = Option.getOrThrow(yield* automation.claimNext);
+          expect(firstClaim.id).toBe(diagnose.id);
+          expect(firstClaim).toMatchObject({
+            action: "diagnose",
+            status: "running",
+          });
+          expect(firstClaim.startedAt).toBeInstanceOf(Date);
+          const secondClaim = Option.getOrThrow(yield* automation.claimNext);
+          expect(secondClaim.id).toBe(olderDrive.id);
+          expect(yield* automation.claimNext).toEqual(Option.none());
+          yield* sessions.endSession(openSession, "succeeded", "done");
+          const unblocked = Option.getOrThrow(yield* automation.claimNext);
+          expect(unblocked.id).toBe(blocked.id);
+        }),
+    );
+
+    scoped.effect("two concurrent claimNext calls never get the same row", () =>
+      Effect.gen(function* () {
+        const tests = yield* Tests.TestStore;
+        const automation = yield* Automation.AutomationStore;
+        const definition = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
+        const first = yield* tests.createRun({
+          iso: "https://example.com/omarchy.iso",
+          serverUrl: "http://127.0.0.1:42069",
+          definitions: [{ id: definition.id }],
+        });
+        const second = yield* tests.createRun({
+          iso: "https://example.com/omarchy.iso",
+          serverUrl: "http://127.0.0.1:42069",
+          definitions: [{ id: definition.id }],
+        });
+        yield* automation.enqueue({ resultId: first.results[0].id, action: "drive" });
+        yield* automation.enqueue({ resultId: second.results[0].id, action: "drive" });
+        const [left, right] = yield* Effect.all([automation.claimNext, automation.claimNext], {
+          concurrency: "unbounded",
+        });
+        expect(Option.isSome(left)).toBe(true);
+        expect(Option.isSome(right)).toBe(true);
+        expect(Option.getOrThrow(left).id).not.toBe(Option.getOrThrow(right).id);
+      }),
+    );
+
+    scoped.effect("closeJob closes a running job and answers false for one already closed", () =>
+      Effect.gen(function* () {
+        const tests = yield* Tests.TestStore;
+        const automation = yield* Automation.AutomationStore;
+        const definition = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
+        const created = yield* tests.createRun({
+          iso: "https://example.com/omarchy.iso",
+          serverUrl: "http://127.0.0.1:42069",
+          definitions: [{ id: definition.id }],
+        });
+        const enqueued = yield* automation.enqueue({
+          resultId: created.results[0].id,
+          action: "drive",
+        });
+        expect(yield* automation.closeJob(enqueued.id, "succeeded", null)).toBe(false);
+        const claimed = Option.getOrThrow(yield* automation.claimNext);
+        expect(yield* automation.closeJob(claimed.id, "succeeded", null)).toBe(true);
+        expect(yield* automation.closeJob(claimed.id, "failed", "already closed")).toBe(false);
+      }),
+    );
+
+    scoped.effect(
+      "abortRunning closes every running job with the reason and answers the count",
+      () =>
+        Effect.gen(function* () {
+          const tests = yield* Tests.TestStore;
+          const automation = yield* Automation.AutomationStore;
+          const definition = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
+          const first = yield* tests.createRun({
+            iso: "https://example.com/omarchy.iso",
+            serverUrl: "http://127.0.0.1:42069",
+            definitions: [{ id: definition.id }],
+          });
+          const second = yield* tests.createRun({
+            iso: "https://example.com/omarchy.iso",
+            serverUrl: "http://127.0.0.1:42069",
+            definitions: [{ id: definition.id }],
+          });
+          yield* automation.enqueue({ resultId: first.results[0].id, action: "drive" });
+          yield* automation.enqueue({ resultId: second.results[0].id, action: "drive" });
+          yield* automation.claimNext;
+          yield* automation.claimNext;
+          expect(yield* automation.abortRunning("automation-server restarted")).toBe(2);
+          expect(yield* automation.abortRunning("automation-server restarted")).toBe(0);
+          expect(yield* automation.claimNext).toEqual(Option.none());
+        }),
+    );
+
+    scoped.effect(
+      "a second drive for a result is refused while one is open and accepted once the first is failed",
+      () =>
+        Effect.gen(function* () {
+          const tests = yield* Tests.TestStore;
+          const automation = yield* Automation.AutomationStore;
+          const definition = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
+          const created = yield* tests.createRun({
+            iso: "https://example.com/omarchy.iso",
+            serverUrl: "http://127.0.0.1:42069",
+            definitions: [{ id: definition.id }],
+          });
+          const resultId = created.results[0].id;
+          const first = yield* automation.enqueue({ resultId, action: "drive" });
+          const error = yield* Effect.flip(automation.enqueue({ resultId, action: "drive" }));
+          expect(error).toMatchObject({ _tag: "DatabaseError", operation: "enqueueAutomationJob" });
+          expect(String(error.cause)).toContain("duplicate key");
+          const claimed = Option.getOrThrow(yield* automation.claimNext);
+          expect(claimed.id).toBe(first.id);
+          expect(yield* automation.closeJob(claimed.id, "failed", "opencode: exited 1")).toBe(true);
+          const retry = yield* automation.enqueue({ resultId, action: "drive" });
+          expect(retry.id).not.toBe(first.id);
+          expect(retry).toMatchObject({ resultId, action: "drive", status: "pending" });
+        }),
+    );
+
     scoped.effect("ping succeeds against the container", () =>
       Effect.gen(function* () {
         const database = yield* Client.Database;

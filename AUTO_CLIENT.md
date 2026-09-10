@@ -90,7 +90,7 @@ named case inside one, and is its own todo.
       the host sampler's answer: 0 before a start, 1 after, 0 after stop.
 - [x] `test/qemu-server/http.unit.test.ts` — `GET /stats` still answers `{ qemus, memory, cpu }`
       exactly as today; the wire the reverse proxy probes is pinned.
-- [ ] `test/dashboard/servers.unit.test.ts` — the fleet lists qemu rows only; a new `Clients` table
+- [x] `test/dashboard/servers.unit.test.ts` — the fleet lists qemu rows only; a new `Clients` table
       in the automation half renders an automation client's `agents`, memory, cpu means, generation
       and heartbeat age, `silent` after ninety seconds, and no delete form; the queue tables are as
       they are.
@@ -129,7 +129,7 @@ named case inside one, and is its own todo.
       `OLIGARCHY_TOKEN` exits 1 with `OLIGARCHY_TOKEN is not set`, an empty `LINEAR_API_TOKEN` likewise,
       each before listening; with a database, a stale `running` job is `aborted; automation-server
       restarted` after startup, and the process still queues from `/linear` and exits 0 on signals.
-- [ ] `test/integration/db.integration.test.ts` — against the migrated container: a heartbeat with
+- [x] `test/integration/db.integration.test.ts` — against the migrated container: a heartbeat with
       `type = 'automation'` round-trips and `listServers("qemu")` does not list it;
       `listAutomationClients` answers fresh rows with their `agents` and leaves out a row whose
       heartbeat is older than ninety seconds and a row with no stats; `claimNext` claims the oldest
@@ -138,7 +138,7 @@ named case inside one, and is its own todo.
       for one already closed; `abortRunning` closes every running job with the reason and answers the
       count; a second `drive` for a result is refused while one is open and accepted once the first
       is `failed`.
-- [ ] `test/integration/dashboard.integration.test.ts` — the automation half renders a client row
+- [x] `test/integration/dashboard.integration.test.ts` — the automation half renders a client row
       beside the queue; the fleet renders qemu rows only.
 
 ### 1.2 Tests to add
@@ -235,7 +235,7 @@ named case inside one, and is its own todo.
       ran.
 - [x] `test/support/fake-stats.ts` — a `Stats` answering fixed host stats (today's `fakeStats` in
       `fake-qemu.ts`, moved and freed of the count).
-- [ ] `test/support/stores.ts` — `fakeAutomationStore` gains `claimNext` (readiness and order as the
+- [x] `test/support/stores.ts` — `fakeAutomationStore` gains `claimNext` (readiness and order as the
       real query), `closeJob`, `abortRunning`; `fakeServerStore` gains `listAutomationClients`.
 - [ ] `test/support/fake-linear.ts` — gains a scripted `issueDescription`.
 
