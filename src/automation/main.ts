@@ -6,6 +6,7 @@ import { HttpMiddleware, HttpRouter, HttpServerError } from "effect/unstable/htt
 import * as Config from "../config.ts";
 import * as Automation from "../db/automation.ts";
 import * as Client from "../db/client.ts";
+import * as Logs from "../db/logs.ts";
 import * as Tests from "../db/tests.ts";
 import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
@@ -16,9 +17,14 @@ import * as Handlers from "./handlers.ts";
 
 const HOST = "127.0.0.1";
 
-// stdout is the convenience copy of the log; the automation_jobs rows and Sentry are the record.
-// A write refused by a full filesystem is dropped, never an uncaught exception per line
-// (see the proxy's main).
+const automationAttr = {
+  location: Log.Locations.automation,
+  agentId: Log.AutomationAgentId,
+} as const;
+
+// stdout is the convenience copy of the log; the logs rows, automation_jobs rows and Sentry are
+// the record. A write refused by a full filesystem is dropped, never an uncaught exception per
+// line (see the proxy's main).
 process.stdout.on("error", () => {});
 process.stderr.on("error", () => {});
 
@@ -34,7 +40,8 @@ const ServerLive = (port: number) =>
   Layer.effectDiscard(
     Effect.gen(function* () {
       const log = yield* Log.Log;
-      yield* log.info(`oligarchy automation listening on ${HOST}:${String(port)}`);
+      yield* log.acquireColor(Log.AutomationAgentId);
+      yield* log.info(`oligarchy automation listening on ${HOST}:${String(port)}`, automationAttr);
     }),
   ).pipe(
     Layer.provide(
@@ -49,16 +56,19 @@ const ServerLive = (port: number) =>
 
 const DatabaseLive = Layer.unwrap(Effect.map(Config.databaseUrl, Client.Database.layer));
 
-// LINEAR_WEBHOOK_SECRET signs POST /linear; DATABASE_URL holds the queue. Sentry sits beneath
-// Log so Log captures the reporter. Log is stdout: durable work is automation_jobs, not log rows.
+// LINEAR_WEBHOOK_SECRET signs POST /linear; DATABASE_URL holds the queue and the logs rows.
+// Sentry sits beneath Log so Log captures the reporter. Lines land in logs with
+// location/agentId "automation"; durable jobs remain automation_jobs.
 const MainLive = Layer.mergeAll(
-  Log.Log.layerStdout,
+  Log.Log.layer,
   Handlers.LinearWebhookSecret.layer,
   Tests.TestStore.layer,
   Automation.AutomationStore.layer,
 ).pipe(
+  Layer.provideMerge(Logs.LogStore.layer),
   Layer.provideMerge(DatabaseLive),
   Layer.provideMerge(Sentry.SentryLive),
+  Layer.provideMerge(Layer.succeed(Log.ProcessAttribution)(Log.AutomationProcessAttribution)),
   Layer.provideMerge(Config.providerLayer),
   Layer.provideMerge(NodeServices.layer),
 );

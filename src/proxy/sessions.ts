@@ -165,8 +165,8 @@ const mapWithout = <V>(
   return next;
 };
 
-const attribution = (sessionId: string, agentId: string | undefined): Log.Attribution =>
-  agentId === undefined ? { sessionId } : { sessionId, agentId };
+const attribution = (location: string, agentId: string | undefined): Log.Attribution =>
+  agentId === undefined ? { location } : { location, agentId };
 
 const internal = (cause: unknown, sessionId: string, agentId?: string): Errors.Internal =>
   agentId === undefined
@@ -215,7 +215,7 @@ const make = Effect.gen(function* () {
         yield* Ref.update(live.followers, (set) => without(set, follower));
         Queue.endUnsafe(follower);
         yield* log.warning(`follower dropped; ${String(FOLLOW_BACKLOG)} events behind`, {
-          sessionId: live.id,
+          location: live.id,
           agentId: live.agent,
         });
       }
@@ -241,7 +241,7 @@ const make = Effect.gen(function* () {
         set.has(follower) ? [true, without(set, follower)] : [false, set],
       );
       if (removed) {
-        yield* log.info("follower detached", { sessionId: live.id, agentId: live.agent });
+        yield* log.info("follower detached", { location: live.id, agentId: live.agent });
       }
     });
 
@@ -302,7 +302,7 @@ const make = Effect.gen(function* () {
               yield* actionStore.finishAction(id, outcome).pipe(
                 Effect.tapError((error) =>
                   log.error(`db: closing action ${String(id)} failed: ${detail(error)}`, {
-                    sessionId: live.id,
+                    location: live.id,
                     agentId: live.agent,
                     cause: error,
                   }),
@@ -409,7 +409,7 @@ const make = Effect.gen(function* () {
           yield* sessionStore.endSession(live.id, "failed", detail(error)).pipe(
             Effect.catch((failure) =>
               log.error(`db: recording a failed start failed too: ${failure.message}`, {
-                sessionId: live.id,
+                location: live.id,
                 agentId: live.agent,
                 cause: failure,
               }),
@@ -456,7 +456,7 @@ const make = Effect.gen(function* () {
         ),
       );
     yield* log.info(`starting; iso ${body.iso}${disk === undefined ? "" : `, disk ${disk}`}`, {
-      sessionId: id,
+      location: id,
       agentId: agent,
     });
     const handle = yield* launch(live, body, display, automation).pipe(
@@ -480,7 +480,7 @@ const make = Effect.gen(function* () {
     yield* Ref.update(sessions, (map) => mapWith(map, id, running));
     yield* emit(running, { type: "session", status: "running" });
     yield* log.info(`running; started in ${yield* elapsed(started)}ms`, {
-      sessionId: id,
+      location: id,
       agentId: agent,
     });
     return id;
@@ -544,7 +544,7 @@ const make = Effect.gen(function* () {
       yield* actionStore.finishAction(id.value, result.value).pipe(
         Effect.catch((failure) =>
           log.error(`db: recording a failed screendump failed too: ${failure.message}`, {
-            sessionId: live.id,
+            location: live.id,
             agentId: live.agent,
             cause: failure,
           }),
@@ -573,7 +573,7 @@ const make = Effect.gen(function* () {
       yield* emit(live, { type: "image", id: stored.id, png: stored.png });
       yield* log.info(
         `image; ${String(png.length)} bytes in ${yield* elapsed(started)}ms; ${url}`,
-        { sessionId: live.id, agentId: live.agent },
+        { location: live.id, agentId: live.agent },
       );
       return { png, imageId };
     });
@@ -590,7 +590,7 @@ const make = Effect.gen(function* () {
         .pipe(Effect.mapError((cause) => internal(cause, live.id, live.agent))),
     );
     yield* log.info(`serial; ${String(data.length)} bytes in ${yield* elapsed(started)}ms`, {
-      sessionId: live.id,
+      location: live.id,
       agentId: live.agent,
     });
     return data;
@@ -618,7 +618,7 @@ const make = Effect.gen(function* () {
         .pipe(Effect.mapError((error) => exchangeFailed(error, live))),
     );
     return yield* log.info(`sent ${String(chords.length)} chords in ${yield* elapsed(started)}ms`, {
-      sessionId: live.id,
+      location: live.id,
       agentId: live.agent,
     });
   });
@@ -653,7 +653,7 @@ const make = Effect.gen(function* () {
     const pulses = clicks === undefined || clicks === 1 ? "" : ` ×${String(clicks)}`;
     return yield* log.info(
       `mouse ${String(x)} ${String(y)}${button === undefined ? "" : ` ${button}${pulses}`} in ${yield* elapsed(started)}ms`,
-      { sessionId: live.id, agentId: live.agent },
+      { location: live.id, agentId: live.agent },
     );
   });
 
@@ -672,7 +672,7 @@ const make = Effect.gen(function* () {
     yield* Ref.set(live.intent, Option.some({ span, message }));
     yield* emit(live, { type: "intent", state: "started", message });
     return yield* log.info(`intent start; ${message}`, {
-      sessionId: live.id,
+      location: live.id,
       agentId: live.agent,
     });
   });
@@ -682,7 +682,7 @@ const make = Effect.gen(function* () {
       return yield* badRequest("no active intent", live);
     }
     yield* finishOpenIntent(live, "completed");
-    return yield* log.info("intent end", { sessionId: live.id, agentId: live.agent });
+    return yield* log.info("intent end", { location: live.id, agentId: live.agent });
   });
 
   const readSerialText = (live: LiveSession): Effect.Effect<string> =>
@@ -693,7 +693,7 @@ const make = Effect.gen(function* () {
           ? Effect.succeed("")
           : log
               .error(`debug log: serial read failed: ${detail(error)}`, {
-                sessionId: live.id,
+                location: live.id,
                 agentId: live.agent,
                 cause: error,
               })
@@ -714,7 +714,7 @@ const make = Effect.gen(function* () {
       yield* debugLogs.saveDebugLog(live.id, captured).pipe(
         Effect.catch((error) =>
           log.error(`debug log save failed: ${detail(error)}`, {
-            sessionId: live.id,
+            location: live.id,
             agentId: live.agent,
             cause: error,
           }),
@@ -755,7 +755,7 @@ const make = Effect.gen(function* () {
       );
     // Colour is released in finishLiveSession; log first so the stopped line keeps it.
     yield* log.info(`stopped; ${finalStatus}${reason === undefined ? "" : `; ${reason}`}`, {
-      sessionId: live.id,
+      location: live.id,
       agentId: live.agent,
     });
     if (captured !== undefined) {
@@ -799,7 +799,7 @@ const make = Effect.gen(function* () {
     if (!(yield* Ref.get(openSessions)).has(live.id)) {
       Queue.endUnsafe(queue);
     }
-    yield* log.info("follower attached", { sessionId: id, agentId: live.agent });
+    yield* log.info("follower attached", { location: id, agentId: live.agent });
     Queue.offerUnsafe(queue, {
       type: "session",
       status: running === undefined ? "pending" : "running",
@@ -827,7 +827,7 @@ const make = Effect.gen(function* () {
       yield* sessionStore
         .endSession(live.id, "timed_out", SESSION_TIMEOUT_REASON)
         .pipe(
-          Effect.andThen(log.info(`timed out; ${SESSION_TIMEOUT_REASON}`, { sessionId: live.id })),
+          Effect.andThen(log.info(`timed out; ${SESSION_TIMEOUT_REASON}`, { location: live.id })),
           Effect.andThen(saveDebugLog(live, captured)),
           Effect.ensuring(finishLiveSession(live, "timed_out")),
         );
@@ -859,7 +859,7 @@ const make = Effect.gen(function* () {
       if (Exit.isFailure(exit)) {
         const error = Cause.squash(exit.cause);
         yield* log.error(`recording timeout failed: ${detail(error)}`, {
-          sessionId: live.id,
+          location: live.id,
           cause: error,
         });
       }
@@ -871,7 +871,10 @@ const make = Effect.gen(function* () {
   const tick = sweep.pipe(
     Effect.catchCause((cause) => {
       const error = Cause.squash(cause);
-      return log.error(`session timeout cleanup failed: ${detail(error)}`, { cause: error });
+      return log.error(`session timeout cleanup failed: ${detail(error)}`, {
+        location: Log.Locations.server,
+        cause: error,
+      });
     }),
     Effect.uninterruptible,
     guard.withPermitsIfAvailable(1),
@@ -894,13 +897,13 @@ const make = Effect.gen(function* () {
         yield* kill(live);
         yield* Ref.set(status, "aborted");
         yield* sessionStore.endSession(live.id, "aborted", reason);
-        yield* log.info(`stopped; aborted; ${reason}`, { sessionId: live.id });
+        yield* log.info(`stopped; aborted; ${reason}`, { location: live.id });
         yield* saveDebugLog(live, captured);
       }).pipe(
         Effect.catchCause((cause) => {
           const error = Cause.squash(cause);
           return log
-            .error(`shutdown: ${Render.errorDetail(error)}`, { sessionId: live.id, cause: error })
+            .error(`shutdown: ${Render.errorDetail(error)}`, { location: live.id, cause: error })
             .pipe(Effect.andThen(Effect.failCause(cause)));
         }),
         Effect.ensuring(Effect.flatMap(Ref.get(status), (ended) => finishLiveSession(live, ended))),
@@ -912,7 +915,9 @@ const make = Effect.gen(function* () {
     yield* Fiber.interrupt(sweeper);
     const draining = [...(yield* Ref.getAndSet(sessions, new Map())).values()];
     const reason = MutableRef.get(shutdown.reason);
-    yield* log.info(`proxy: shutting down; stopping ${String(draining.length)} sessions`);
+    yield* log.info(`proxy: shutting down; stopping ${String(draining.length)} sessions`, {
+      location: Log.Locations.server,
+    });
     const exits = yield* Effect.forEach(draining, (live) => Effect.exit(drainOne(live, reason)), {
       concurrency: "unbounded",
     });

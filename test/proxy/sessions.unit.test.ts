@@ -251,7 +251,7 @@ describe("start", () => {
               `starting; iso ${URL_ISO}, disk ${DISK}`,
               "running; started in 0ms",
             ]);
-            expect(h.log.lines[0]).toMatchObject({ level: "info", sessionId: id, agentId: AGENT });
+            expect(h.log.lines[0]).toMatchObject({ level: "info", location: id, agentId: AGENT });
             const span = spanNamed(h, AGENT);
             expect(span?.attributes.get("session_id")).toBe(id);
             expect(span?.attributes.get("agent_id")).toBe(AGENT);
@@ -557,7 +557,7 @@ describe("image", () => {
           expect(line(h, "image;")).toMatchObject({
             level: "info",
             text: `image; ${String(FakeQemu.PNG.length)} bytes in 0ms; ${url}`,
-            sessionId: id,
+            location: id,
             agentId: AGENT,
           });
         }),
@@ -701,7 +701,7 @@ describe("serial", () => {
           expect(yield* sessions.serial(live)).toBe(SERIAL);
           expect(line(h, "serial;")).toMatchObject({
             text: `serial; ${String(SERIAL.length)} bytes in 0ms`,
-            sessionId: id,
+            location: id,
             agentId: AGENT,
           });
           expect(yield* collect(events, 3)).toEqual([
@@ -990,7 +990,7 @@ describe("intents", () => {
           );
           expect(line(h, "intent start")).toMatchObject({
             text: "intent start; open a terminal",
-            sessionId: id,
+            location: id,
             agentId: AGENT,
           });
           // Actions started under an intent hang off its span.
@@ -1030,7 +1030,7 @@ describe("intents", () => {
           expect(yield* Ref.get(live.intent)).toEqual(Option.none());
           expect(line(h, "intent end")).toMatchObject({
             text: "intent end",
-            sessionId: id,
+            location: id,
             agentId: AGENT,
           });
         }),
@@ -1121,7 +1121,7 @@ describe("stop", () => {
           });
           expect(line(h, "stopped")).toMatchObject({
             text: "stopped; succeeded; installed",
-            sessionId: id,
+            location: id,
             agentId: AGENT,
           });
           expect(endedWith(spanNamed(h, AGENT))).toBe("ok");
@@ -1142,7 +1142,7 @@ describe("stop", () => {
           expect(logged).toMatchObject({
             level: "error",
             text: "stop cleanup failed: EACCES: rm failed",
-            sessionId: id,
+            location: id,
             agentId: AGENT,
             skipSentry: false,
           });
@@ -1413,7 +1413,7 @@ describe("stop", () => {
           expect(h.debugLogs.saves).toEqual([{ sessionId: id, serial: "", qemu: "" }]);
           expect(line(h, "debug log: serial read failed:")).toMatchObject({
             level: "error",
-            sessionId: id,
+            location: id,
             agentId: AGENT,
             skipSentry: false,
           });
@@ -1439,7 +1439,7 @@ describe("stop", () => {
           expect(line(h, "debug log save failed:")).toMatchObject({
             level: "error",
             text: "debug log save failed: connect ECONNREFUSED",
-            sessionId: id,
+            location: id,
             agentId: AGENT,
             skipSentry: false,
           });
@@ -1471,7 +1471,7 @@ describe("follow", () => {
             expect(Domain.isSessionId(id)).toBe(true);
             const early = yield* sessions.follow(id);
             expect(yield* collect(early, 1)).toEqual([{ type: "session", status: "pending" }]);
-            expect(line(h, "follower attached")).toMatchObject({ sessionId: id, agentId: AGENT });
+            expect(line(h, "follower attached")).toMatchObject({ location: id, agentId: AGENT });
             yield* Deferred.succeed(gate, undefined);
             expect(yield* Fiber.join(booting)).toBe(id);
             const live = yield* sessions.lookup(id, AGENT);
@@ -1616,7 +1616,7 @@ describe("follow", () => {
           expect(line(h, "follower dropped")).toMatchObject({
             level: "warning",
             text: "follower dropped; 64 events behind",
-            sessionId: id,
+            location: id,
             agentId: AGENT,
           });
           expect(
@@ -1693,7 +1693,7 @@ describe("timeouts", () => {
           expect(line(h, "timed out")).toMatchObject({
             level: "info",
             text: "timed out; no command received for 10 minutes",
-            sessionId: id,
+            location: id,
             agentId: undefined,
           });
           expect(endedWith(spanNamed(h, AGENT))).toBe("deadline_exceeded");
@@ -1737,7 +1737,7 @@ describe("timeouts", () => {
           expect(line(h, "timeout cleanup failed")).toMatchObject({
             level: "error",
             text: "timeout cleanup failed: rm failed",
-            sessionId: id,
+            location: id,
             agentId: undefined,
           });
           expect(h.sessions.sessions[0]?.status).toBe("timed_out");
@@ -1766,7 +1766,7 @@ describe("timeouts", () => {
           expect(logged).toMatchObject({
             level: "error",
             text: "recording timeout failed: connect ECONNREFUSED 127.0.0.1:5432",
-            sessionId: id,
+            location: id,
           });
           expect(logged?.cause).toMatchObject({ _tag: "DatabaseError" });
           expect(line(h, "timed out")).toBeUndefined();
@@ -1859,14 +1859,14 @@ describe("drain", () => {
       expect(drainLines[0]).toMatchObject({
         level: "info",
         text: "proxy: shutting down; stopping 2 sessions",
-        sessionId: undefined,
+        location: "server",
         agentId: undefined,
       });
       expect(drainLines.slice(1).map((entry) => entry.text)).toEqual([
         "stopped; aborted; proxy shutdown",
         "stopped; aborted; proxy shutdown",
       ]);
-      expect(new Set(drainLines.slice(1).map((entry) => entry.sessionId))).toEqual(
+      expect(new Set(drainLines.slice(1).map((entry) => entry.location))).toEqual(
         new Set(drained.ids),
       );
       expect(drainLines.slice(1).every((entry) => entry.agentId === undefined)).toBe(true);
@@ -1947,8 +1947,8 @@ describe("drain", () => {
       expect(MutableRef.get(shutdown.failed)).toBe(true);
       const logged = h.log.lines.filter((entry) => entry.text.startsWith("shutdown:"));
       expect(logged).toMatchObject([
-        { level: "error", text: "shutdown: Failed query: endSession", sessionId: ids[0] },
-        { level: "error", text: "shutdown: rm failed", sessionId: ids[1] },
+        { level: "error", text: "shutdown: Failed query: endSession", location: ids[0] },
+        { level: "error", text: "shutdown: rm failed", location: ids[1] },
       ]);
       expect(logged[0]?.cause).toMatchObject({ _tag: "DatabaseError" });
       expect(logged[1]?.cause).toBeInstanceOf(Error);

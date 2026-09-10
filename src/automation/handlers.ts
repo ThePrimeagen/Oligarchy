@@ -45,13 +45,19 @@ export const LinearLive = HttpApiBuilder.group(Api.AutomationApi, "Linear", (han
       }
       const parsed = Option.map(Webhook.issue(bytes), Webhook.work);
       if (Option.isNone(parsed)) {
-        yield* log.info("linear webhook recorded");
+        yield* log.info("linear webhook recorded", {
+          location: Log.Locations.automation,
+          agentId: Log.AutomationAgentId,
+        });
         return ok;
       }
       const event = parsed.value;
       const job = Webhook.queuedAction(event);
       if (Option.isNone(job)) {
-        yield* log.info(`linear webhook recorded; ${event.state}`, { agentId: event.ticket });
+        yield* log.info(`linear webhook recorded; ${event.state}`, {
+          location: Log.Locations.automation,
+          agentId: event.ticket,
+        });
         return ok;
       }
       const result = yield* tests
@@ -61,6 +67,7 @@ export const LinearLive = HttpApiBuilder.group(Api.AutomationApi, "Linear", (han
         );
       if (Option.isNone(result)) {
         yield* log.info(`linear webhook ignored; no result for ${event.state}`, {
+          location: Log.Locations.automation,
           agentId: event.ticket,
         });
         return ok;
@@ -77,11 +84,13 @@ export const LinearLive = HttpApiBuilder.group(Api.AutomationApi, "Linear", (han
         );
       if (outcome === "duplicate") {
         yield* log.info(`linear webhook ignored; ${job.value} already queued`, {
+          location: Log.Locations.automation,
           agentId: event.ticket,
         });
         return ok;
       }
       yield* log.info(`linear webhook queued ${job.value}; ${event.state}`, {
+        location: Log.Locations.automation,
         agentId: event.ticket,
       });
       return ok;

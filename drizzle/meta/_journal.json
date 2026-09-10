@@ -57,6 +57,13 @@
       "when": 1788999629271,
       "tag": "0008_server_type",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1789001000000,
+      "tag": "0009_logs_location",
+      "breakpoints": true
     }
   ]
 }

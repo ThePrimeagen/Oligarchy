@@ -74,7 +74,7 @@ const style = (format: "gray" | "white", text: string, colors: boolean): string 
 export type LogLine = {
   readonly text: string;
   readonly level: Domain.LogLevel;
-  readonly sessionId?: string;
+  readonly location?: string;
   readonly agentId?: string;
   readonly color?: string;
 };
@@ -85,9 +85,9 @@ export const renderLogLine = (entry: LogLine, colors: boolean): string => {
   const ticket =
     entry.color === undefined ? style("gray", tag, colors) : paint(entry.color, tag, colors);
   const rest =
-    entry.sessionId === undefined
+    entry.location === undefined
       ? style("white", `] ${text}`, colors)
-      : `${style("white", "] ", colors)}${style("gray", entry.sessionId, colors)}${style("white", `: ${text}`, colors)}`;
+      : `${style("white", "] ", colors)}${style("gray", entry.location, colors)}${style("white", `: ${text}`, colors)}`;
   return `${style("white", "[", colors)}${ticket}${rest}`;
 };
 

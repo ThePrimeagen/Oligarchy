@@ -23,6 +23,11 @@ import * as Qemu from "./qemu.ts";
 
 export type Who = { readonly sessionId: string; readonly agentId: string };
 
+const logWho = (who: Who): Log.Attribution => ({
+  location: who.sessionId,
+  agentId: who.agentId,
+});
+
 // The cache lives under this home and partial files carry this pid; tests point both elsewhere.
 export type HostFacts = { readonly homeDir: string; readonly pid: number };
 export const Host = Context.Reference<HostFacts>("@oligarchy/qemu/iso/Host", {
@@ -148,7 +153,7 @@ const make: Effect.Effect<
 
   const download = (url: string, file: string, target: string, who: Who) =>
     Effect.gen(function* () {
-      yield* log.info(`iso: downloading ${url} -> ${target}`, who);
+      yield* log.info(`iso: downloading ${url} -> ${target}`, logWho(who));
       // Renamed into place on success, so a file under the cached name is always a complete
       // download; the pid keeps two proxies on one machine out of each other's partials.
       const partial = `${target}.partial-${String(host.pid)}`;
@@ -171,7 +176,9 @@ const make: Effect.Effect<
         beatAt = now;
         // A failed beat only risks a duplicate download elsewhere, never this one.
         yield* updateManifest(file, "downloading").pipe(
-          Effect.catch((error) => log.warning(`iso: heartbeat failed: ${detail(error)}`, who)),
+          Effect.catch((error) =>
+            log.warning(`iso: heartbeat failed: ${detail(error)}`, logWho(who)),
+          ),
         );
       });
       yield* Effect.gen(function* () {
@@ -188,7 +195,10 @@ const make: Effect.Effect<
         const published = yield* publishedSha256(url);
         yield* Option.match(published, {
           onNone: () =>
-            log.warning(`iso: no ${url}.sha256 published; skipping the checksum check`, who),
+            log.warning(
+              `iso: no ${url}.sha256 published; skipping the checksum check`,
+              logWho(who),
+            ),
           onSome: (expected) =>
             expected === digest
               ? Effect.void
@@ -197,7 +207,7 @@ const make: Effect.Effect<
                 }),
         });
         yield* fs.rename(partial, target);
-        yield* log.info(`iso: cached ${url} -> ${target}`, who);
+        yield* log.info(`iso: cached ${url} -> ${target}`, logWho(who));
       }).pipe(Effect.onError(() => Effect.ignore(fs.remove(partial, { force: true }))));
     });
 
@@ -217,7 +227,10 @@ const make: Effect.Effect<
           entry?.status === "downloading" && now - Date.parse(entry.heartbeatAt) < STALE_MS;
         if (live && !waitLogged) {
           waitLogged = true;
-          yield* log.info(`iso: another download of ${url} is running; waiting for it`, who);
+          yield* log.info(
+            `iso: another download of ${url} is running; waiting for it`,
+            logWho(who),
+          );
         }
         return live;
       });
@@ -225,7 +238,7 @@ const make: Effect.Effect<
       // The claim is checked before the file so a download that finishes between the two reads
       // is still seen here and not downloaded again.
       if (yield* fs.exists(target)) {
-        yield* log.info(`iso: cache hit ${url} -> ${target}`, who);
+        yield* log.info(`iso: cache hit ${url} -> ${target}`, logWho(who));
         yield* updateManifest(file, "cached");
         return target;
       }

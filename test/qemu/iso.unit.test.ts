@@ -239,7 +239,7 @@ describe("getIso with a url: cache", () => {
           {
             level: "info",
             text: `iso: cache hit ${URL_ISO} -> ${cached}`,
-            sessionId: WHO.sessionId,
+            location: WHO.sessionId,
             agentId: WHO.agentId,
             skipSentry: false,
             cause: undefined,

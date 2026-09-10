@@ -254,7 +254,7 @@ describe("proxy startup refusals", () => {
         expect(code).toBe(1);
         const output = lines(proxy.stdout());
         const fatal = output.findIndex(
-          (line) => line === "[global] fatal: proxy: missing host requirements:",
+          (line) => line === "[global] server: fatal: proxy: missing host requirements:",
         );
         expect(fatal, proxy.stdout()).toBeGreaterThanOrEqual(0);
         expect(output.slice(fatal + 1).length).toBeGreaterThan(0);
@@ -270,7 +270,7 @@ describe("proxy startup refusals", () => {
       const { code } = await proxy.exited;
       expect(code).toBe(1);
       const fatal = lines(proxy.stdout()).find((line) =>
-        line.startsWith("[global] fatal: proxy: database unreachable:"),
+        line.startsWith("[global] server: fatal: proxy: database unreachable:"),
       );
       expect(fatal, proxy.stdout()).toBeDefined();
       expect(fatal).toContain("ECONNREFUSED");
@@ -288,7 +288,7 @@ describe("proxy startup refusals", () => {
         const { code } = await proxy.exited;
         expect(code).toBe(1);
         const fatal = lines(proxy.stdout()).find((line) =>
-          line.startsWith("[global] fatal: proxy: "),
+          line.startsWith("[global] server: fatal: proxy: "),
         );
         expect(fatal, proxy.stdout()).toBeDefined();
         expect(fatal).toContain("EADDRINUSE");
@@ -355,9 +355,9 @@ describe("proxy serving", () => {
       const { code } = await proxy.exited;
       expect(code, proxy.stdout()).toBe(0);
       const output = lines(proxy.stdout());
-      expect(output).toContain("[global] proxy: shutting down; stopping 0 sessions");
-      expect(output).toContain("[global] error: POST /send-keys failed: unauthorized");
-      expect(output).toContain("[global] error: GET /stats failed: unauthorized");
+      expect(output).toContain("[global] server: proxy: shutting down; stopping 0 sessions");
+      expect(output).toContain("[global] server: error: POST /send-keys failed: unauthorized");
+      expect(output).toContain("[global] server: error: GET /stats failed: unauthorized");
       expect(output.some((line) => line.includes("GET /nope"))).toBe(false);
       expect(proxy.stderr()).toBe("");
 
@@ -419,7 +419,8 @@ describe("proxy serving", () => {
     () =>
       serving(
         [],
-        (port) => `[global] oligarchy proxy listening on 127.0.0.1:${String(port)}; display none`,
+        (port) =>
+          `[global] server: oligarchy proxy listening on 127.0.0.1:${String(port)}; display none`,
         "SIGINT",
       ),
     120_000,
@@ -431,7 +432,7 @@ describe("proxy serving", () => {
       serving(
         ["--automation"],
         (port) =>
-          `[global] oligarchy proxy listening on 127.0.0.1:${String(port)}; display none; automation`,
+          `[global] server: oligarchy proxy listening on 127.0.0.1:${String(port)}; display none; automation`,
         "SIGTERM",
       ),
     120_000,
@@ -458,7 +459,7 @@ describe("proxy serving", () => {
         const row = yield* Effect.gen(function* () {
           yield* Effect.promise(() => proxy.waitFor(/oligarchy proxy listening/));
           expect(lines(proxy.stdout())).toContain(
-            `[global] oligarchy proxy listening on 127.0.0.1:${String(port)}; display none; automation; announcing ${url}`,
+            `[global] server: oligarchy proxy listening on 127.0.0.1:${String(port)}; display none; automation; announcing ${url}`,
           );
           // The first heartbeat is written right after the listen line; the insert takes a moment.
           return yield* announced(url).pipe(

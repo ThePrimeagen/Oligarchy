@@ -529,7 +529,7 @@ describe("test new", () => {
           {
             level: "info",
             text: `test ${run?.id} created; 2 tests; OLI-42, OLI-43`,
-            sessionId: undefined,
+            location: undefined,
             agentId: undefined,
             skipSentry: false,
             cause: undefined,
@@ -890,7 +890,7 @@ describe("test start", () => {
         {
           level: "info",
           text: `test result ${RESULT_ID}: running`,
-          sessionId: SESSION_ID,
+          location: SESSION_ID,
           agentId: undefined,
           skipSentry: false,
           cause: undefined,
@@ -1040,7 +1040,7 @@ describe("test-results", () => {
         {
           level: "info",
           text: `test result ${RESULT_ID}: passed`,
-          sessionId: SESSION_ID,
+          location: SESSION_ID,
           agentId: "agent-1",
           skipSentry: false,
           cause: undefined,
@@ -1100,7 +1100,7 @@ describe("test-results", () => {
           sessionId: SESSION_ID,
           reason: "installer hung",
         });
-        expect(h.log.lines.map((line) => [line.text, line.sessionId, line.agentId])).toEqual([
+        expect(h.log.lines.map((line) => [line.text, line.location, line.agentId])).toEqual([
           [`test result ${RESULT_ID}: failed; installer hung`, undefined, "agent-1"],
         ]);
         expect(h.log.acquired).toEqual(["agent-1"]);
@@ -1294,7 +1294,7 @@ describe("error-type new", () => {
         {
           level: "info",
           text: `error type created; ${bootHang.key}`,
-          sessionId: undefined,
+          location: undefined,
           agentId: undefined,
           skipSentry: false,
           cause: undefined,
@@ -1432,7 +1432,7 @@ const DIAGNOSE_PASSED = [
 const diagnoseLine = (text: string) => ({
   level: "info",
   text,
-  sessionId: SESSION_ID,
+  location: SESSION_ID,
   agentId: undefined,
   skipSentry: false,
   cause: undefined,
@@ -1788,8 +1788,8 @@ const seedInspect = (h: ReturnType<typeof harness>) => {
   h.stores.tests.definitions.push(install);
   h.stores.tests.runs.push(testRun);
   h.stores.logs.rows.push(
-    { text: "starting; iso omarchy.iso", level: "info", sessionId: SESSION_ID, agentId: "OLI-42" },
-    { text: "unrelated", level: "info", sessionId: OTHER_SESSION_ID, agentId: null },
+    { text: "starting; iso omarchy.iso", level: "info", location: SESSION_ID, agentId: "OLI-42" },
+    { text: "unrelated", level: "info", location: OTHER_SESSION_ID, agentId: null },
   );
   h.stores.actions.actions.push({
     id: 1,
@@ -1816,7 +1816,7 @@ describe("session inspect", () => {
       expect(printed).toHaveLength(1);
       expect(printed[0]).toMatchObject({
         text: "starting; iso omarchy.iso",
-        sessionId: SESSION_ID,
+        location: SESSION_ID,
       });
       expect(h.touched).toEqual(["database"]);
     }),
@@ -2557,7 +2557,7 @@ describe("SESSION_ID", () => {
         sessionId: SESSION_ID,
         model: MODEL,
       });
-      expect(h.log.lines.map((line) => [line.text, line.sessionId])).toEqual([
+      expect(h.log.lines.map((line) => [line.text, line.location])).toEqual([
         [`test result ${RESULT_ID}: running`, SESSION_ID],
       ]);
     }),
@@ -2584,7 +2584,7 @@ describe("SESSION_ID", () => {
       );
       expect(Exit.isSuccess(written)).toBe(true);
       expect(h.stores.diagnosis.diagnoses.map((row) => row.sessionId)).toEqual([SESSION_ID]);
-      expect(h.log.lines.map((line) => line.sessionId)).toEqual([SESSION_ID]);
+      expect(h.log.lines.map((line) => line.location)).toEqual([SESSION_ID]);
     }),
   );
 

@@ -707,8 +707,12 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
 
 - Application code logs through the `Log` service (`src/observability/log.ts`): `info`, `warning`,
   `error`, `fatal`, `acquireColor`, `releaseColor`, `flush`. Messages are fixed sentences; every
-  variable is in the attribution (`sessionId`, `agentId`) or in the text after the `;`, as in
-  `log.info(\`running; started in ${String(ms)}ms\`, { sessionId, agentId })`.
+  variable is in the attribution (`location`, `agentId`) or in the text after the `;`, as in
+  `log.info(\`running; started in ${String(ms)}ms\`, { location: sessionId, agentId })`.
+  `location` is a text bucket: a session UUID, `Locations.server` (proxy-wide lines with no
+  session), or `Locations.automation` (the automation process; its `agentId` is also
+  `Locations.automation`). `ProcessAttribution` is the fallback the HTTP boundary uses when an
+  error carries no session; the proxy leaves the default (`server`), automation overrides it.
 - Each line is written twice: to stdout through `Console.log` when the method runs, and as a
   `logs` row `Queue.offerUnsafe`d to a `Queue.unbounded` drained by one `forkScoped` fiber that
   inserts in call order. The queue is unbounded by policy: a log call never blocks or drops a row
@@ -740,9 +744,10 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
   finalizer runs `flush` before the drain fiber is interrupted, and `Log.layer` (over `LogStore`)
   sits above `Database` so the flush completes before the pool closes. `Log.layer` reads
   `ErrorReporter.CurrentErrorReporters` once at build, so `SentryLive` is provided beneath it,
-  never only to callers. `Log.layerStdout` persists nothing: it is for tests and for a process
-  that does not persist log rows (the automation service writes queue jobs, not log lines), whose
-  console copy is stdout and Sentry. A fatal path flushes the log, then Sentry, then exits.
+  never only to callers. `Log.layerStdout` persists nothing: it is for tests. The automation
+  service persists through `Log.layer` once it has a database; its lines use
+  `location = 'automation'` (and process-wide lines also use `agentId = 'automation'`), while
+  durable work remains `automation_jobs`. A fatal path flushes the log, then Sentry, then exits.
 - `Log` installs no Effect `Logger`; `emit` formats, writes and offers synchronously. `console.*`
   appears only in `src/dashboard/**` and `vitest.global-setup.ts`. Test log output through the
   fake `Log` layer (`test/support/log.ts`) or `Log.layerStdout` with `TestConsole.logLines`.
@@ -759,7 +764,7 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
   `@sentry/cloudflare` only in `src/dashboard/`. All three are pinned to one version so
   `@sentry/core` is not duplicated (`SentryEffectTracer` relies on one `getActiveSpan()`).
 - Route exceptions through one `ErrorReporter.make` installed with `ErrorReporter.layer([reporter])`
-  (below); never call `captureException` elsewhere in Effect code. Tags are `session_id`/`agent_id`
+  (below); never call `captureException` elsewhere in Effect code. Tags are `location`/`agent_id`
   read from `fiber.getRef(References.CurrentLogAnnotations)` (the `Log` methods annotate them,
   with the text as `log`) merged with the reporter's `attributes`, which no error of ours sets;
   Effect's `Warn` maps to `warning`, `Fatal` to `fatal`, every other severity to `error`.
@@ -799,7 +804,7 @@ export const reporter: ErrorReporter.ErrorReporter = ErrorReporter.make(
       error.name === Errors.LogLine.identifier && error.cause !== undefined ? error.cause : error;
     Sentry.captureException(exception, {
       level: toSentryLevel(severity),
-      tags: Object.assign({}, tag(context, "session_id"), tag(context, "agent_id")),
+      tags: Object.assign({}, tag(context, "location"), tag(context, "agent_id")),
       extra: context,
     });
   },

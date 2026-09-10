@@ -28,7 +28,7 @@ describe("Log rows", () => {
         const worker = (agentId: string) =>
           Effect.gen(function* () {
             for (const n of [1, 2, 3]) {
-              yield* log.info(`${agentId} line ${n}`, { agentId, sessionId: SESSION_ID });
+              yield* log.info(`${agentId} line ${n}`, { agentId, location: SESSION_ID });
               yield* Effect.yieldNow;
             }
           });
@@ -45,7 +45,7 @@ describe("Log rows", () => {
       expect(store.rows[0]).toEqual({
         text: "A line 1",
         level: "info",
-        sessionId: SESSION_ID,
+        location: SESSION_ID,
         agentId: "A",
       });
       expect(reporter.reported).toHaveLength(0);
@@ -64,7 +64,7 @@ describe("Log rows", () => {
         {
           text: "follower dropped; 64 events behind",
           level: "warning",
-          sessionId: null,
+          location: null,
           agentId: null,
         },
       ]);
@@ -176,7 +176,7 @@ describe("Log Sentry policy", () => {
       yield* Effect.gen(function* () {
         const log = yield* Log.Log;
         yield* log.error("stop cleanup failed: connect ECONNREFUSED", {
-          sessionId: SESSION_ID,
+          location: SESSION_ID,
           agentId: AGENT_ID,
           cause,
         });
@@ -188,7 +188,7 @@ describe("Log Sentry policy", () => {
       expect(report?.error.cause).toMatchObject({ message: "connect ECONNREFUSED" });
       expect(report?.severity).toBe("Error");
       expect(report?.annotations).toEqual({
-        session_id: SESSION_ID,
+        location: SESSION_ID,
         agent_id: AGENT_ID,
         log: "stop cleanup failed: connect ECONNREFUSED",
       });
@@ -278,11 +278,11 @@ describe("Log Sentry policy", () => {
       const reporter = Reporter.collect();
       yield* Effect.gen(function* () {
         const log = yield* Log.Log;
-        yield* log.error("timeout cleanup failed: boom", { sessionId: SESSION_ID });
+        yield* log.error("timeout cleanup failed: boom", { location: SESSION_ID });
       }).pipe(Effect.provide(Log.Log.layerStdout.pipe(Layer.provide(reporter.layer))));
       expect(reporter.reported[0]?.severity).toBe("Error");
       expect(reporter.reported[0]?.annotations).toEqual({
-        session_id: SESSION_ID,
+        location: SESSION_ID,
         log: "timeout cleanup failed: boom",
       });
     }),

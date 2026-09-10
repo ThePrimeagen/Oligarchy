@@ -182,7 +182,7 @@ describe("reverse proxy startup refusals", () => {
       const { code } = await process.exited;
       expect(code).toBe(1);
       const fatal = lines(process.stdout()).find((line) =>
-        line.startsWith("[global] fatal: reverse proxy: database unreachable:"),
+        line.startsWith("[global] server: fatal: reverse proxy: database unreachable:"),
       );
       expect(fatal, process.stdout()).toBeDefined();
       expect(fatal).toContain("ECONNREFUSED");
@@ -200,7 +200,7 @@ describe("reverse proxy startup refusals", () => {
         const { code } = await process.exited;
         expect(code).toBe(1);
         const fatal = lines(process.stdout()).find((line) =>
-          line.startsWith("[global] fatal: reverse proxy: "),
+          line.startsWith("[global] server: fatal: reverse proxy: "),
         );
         expect(fatal, process.stdout()).toBeDefined();
         expect(fatal).toContain("EADDRINUSE");
@@ -230,7 +230,7 @@ describe("reverse proxy serving", () => {
     try {
       await process.waitFor(/oligarchy reverse proxy listening/);
       expect(lines(process.stdout())).toContain(
-        `[global] oligarchy reverse proxy listening on 127.0.0.1:${String(port)}`,
+        `[global] server: oligarchy reverse proxy listening on 127.0.0.1:${String(port)}`,
       );
 
       const servers = await request(port, "GET", "/servers", {
@@ -281,12 +281,12 @@ describe("reverse proxy serving", () => {
     const { code } = await process.exited;
     expect(code, process.stdout()).toBe(0);
     const output = lines(process.stdout());
-    expect(output).toContain("[global] error: POST /send-keys failed: unauthorized");
-    expect(output).toContain("[OLI-1] error: POST /start failed: no server registered");
+    expect(output).toContain("[global] server: error: POST /send-keys failed: unauthorized");
+    expect(output).toContain("[OLI-1] server: error: POST /start failed: no server registered");
     expect(
       output.some((line) =>
         line.startsWith(
-          "[global] error: POST /servers failed: server http://127.0.0.1:1 unreachable:",
+          "[global] server: error: POST /servers failed: server http://127.0.0.1:1 unreachable:",
         ),
       ),
     ).toBe(true);

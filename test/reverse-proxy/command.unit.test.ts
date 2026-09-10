@@ -167,7 +167,7 @@ describe("reverse proxy command startup failures", () => {
         {
           level: "fatal",
           text: "reverse proxy: database unreachable: connect ECONNREFUSED 127.0.0.1:1",
-          sessionId: undefined,
+          location: "server",
           agentId: undefined,
           skipSentry: false,
           cause: error,

@@ -53,7 +53,13 @@ export const makeAutomationCommand = <RServe>(server: AutomationServer<RServe>) 
           );
         });
         return yield* startup.pipe(
-          Effect.tapError((error) => log.fatal(`automation: ${detail(error)}`, { cause: error })),
+          Effect.tapError((error) =>
+            log.fatal(`automation: ${detail(error)}`, {
+              location: Log.Locations.automation,
+              agentId: Log.AutomationAgentId,
+              cause: error,
+            }),
+          ),
         );
       }),
   ).pipe(

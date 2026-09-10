@@ -332,14 +332,39 @@ Postgres.describeWithDatabase("database", () => {
       Effect.gen(function* () {
         const logs = yield* Logs.LogStore;
         const sessionId = uuid();
-        yield* logs.insertLog({ text: "first", level: "info", sessionId, agentId: "OLI-1" });
-        yield* logs.insertLog({ text: "second", level: "error", sessionId, agentId: null });
-        yield* logs.insertLog({ text: "global", level: "warning", sessionId: null, agentId: null });
+        yield* logs.insertLog({
+          text: "first",
+          level: "info",
+          location: sessionId,
+          agentId: "OLI-1",
+        });
+        yield* logs.insertLog({
+          text: "second",
+          level: "error",
+          location: sessionId,
+          agentId: null,
+        });
+        yield* logs.insertLog({
+          text: "global",
+          level: "warning",
+          location: "server",
+          agentId: null,
+        });
+        yield* logs.insertLog({
+          text: "queue claimed",
+          level: "info",
+          location: "automation",
+          agentId: "automation",
+        });
         const rows = yield* logs.listLogs(sessionId);
         expect(rows.map((row) => row.text)).toEqual(["first", "second"]);
-        expect(rows[0]).toMatchObject({ level: "info", sessionId, agentId: "OLI-1" });
+        expect(rows[0]).toMatchObject({ level: "info", location: sessionId, agentId: "OLI-1" });
         expect(rows[1]).toMatchObject({ level: "error", agentId: null });
         expect(yield* logs.listLogs(uuid())).toEqual([]);
+        expect((yield* logs.listLogs("server")).map((row) => row.text)).toEqual(["global"]);
+        expect((yield* logs.listLogs("automation")).map((row) => row.text)).toEqual([
+          "queue claimed",
+        ]);
       }),
     );
 
@@ -357,13 +382,13 @@ Postgres.describeWithDatabase("database", () => {
         yield* logs.insertLog({
           text: "running; started in 12ms",
           level: "info",
-          sessionId,
+          location: sessionId,
           agentId: "OLI-1",
         });
         yield* logs.insertLog({
           text: "GET /image failed: qemu: closed",
           level: "error",
-          sessionId,
+          location: sessionId,
           agentId: "OLI-1",
         });
         yield* actions.startAction({

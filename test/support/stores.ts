@@ -228,13 +228,13 @@ export const fakeLogStore = (
       ),
     listLogs:
       options.listLogs ??
-      ((sessionId) =>
+      ((location) =>
         Effect.sync(() =>
           rows
-            .filter((row) => row.sessionId !== null && sameId(row.sessionId, sessionId))
+            .filter((row) => row.location !== null && row.location === location)
             .map((row, index) => ({
               id: index + 1,
-              sessionId: row.sessionId,
+              location: row.location,
               agentId: row.agentId,
               level: row.level,
               text: row.text,

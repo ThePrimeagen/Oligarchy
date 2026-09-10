@@ -54,7 +54,10 @@ export const makeReverseProxyCommand = <RServe>(server: ReverseProxyServer<RServ
         });
         return yield* startup.pipe(
           Effect.tapError((error) =>
-            log.fatal(`reverse proxy: ${detail(error)}`, { cause: error }),
+            log.fatal(`reverse proxy: ${detail(error)}`, {
+              location: Log.Locations.server,
+              cause: error,
+            }),
           ),
         );
       }),

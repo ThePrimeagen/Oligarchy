@@ -5,6 +5,7 @@ import { Effect, Layer, Redacted } from "effect";
 import { HttpBody, HttpClient, HttpRouter } from "effect/unstable/http";
 import { NodeHttpServer } from "@effect/platform-node";
 import * as Handlers from "../../src/automation/handlers.ts";
+import * as Log from "../../src/observability/log.ts";
 import * as FakeLog from "../support/log.ts";
 import * as Reporter from "../support/reporter.ts";
 import * as Stores from "../support/stores.ts";
@@ -30,6 +31,7 @@ const fixture = (): Fixture => ({
 const serve = (fixed: Fixture) =>
   HttpRouter.serve(Handlers.routes, { disableLogger: true, disableListenLog: true }).pipe(
     Layer.provide(Layer.mergeAll(fixed.stores.layer, fixed.log.layer, SecretLive)),
+    Layer.provide(Layer.succeed(Log.ProcessAttribution)(Log.AutomationProcessAttribution)),
     Layer.provideMerge(NodeHttpServer.layerTest),
     Layer.provideMerge(fixed.reporter.layer),
   );
@@ -102,8 +104,8 @@ describe("POST /linear", () => {
         {
           level: "info",
           text: "linear webhook recorded",
-          sessionId: undefined,
-          agentId: undefined,
+          location: "automation",
+          agentId: "automation",
           skipSentry: false,
           cause: undefined,
         },
@@ -128,7 +130,7 @@ describe("POST /linear", () => {
         {
           level: "info",
           text: "linear webhook queued drive; Automation Needed",
-          sessionId: undefined,
+          location: "automation",
           agentId: "OLI-1063",
           skipSentry: false,
           cause: undefined,
@@ -224,16 +226,16 @@ describe("POST /linear refusals", () => {
           {
             level: "error",
             text: "POST /linear failed: unauthorized",
-            sessionId: undefined,
-            agentId: undefined,
+            location: "automation",
+            agentId: "automation",
             skipSentry: true,
             cause: undefined,
           },
           {
             level: "error",
             text: "POST /linear failed: unauthorized",
-            sessionId: undefined,
-            agentId: undefined,
+            location: "automation",
+            agentId: "automation",
             skipSentry: true,
             cause: undefined,
           },

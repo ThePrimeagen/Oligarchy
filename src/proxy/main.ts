@@ -59,6 +59,7 @@ const ServerLive = (
       const log = yield* Log.Log;
       yield* log.info(
         `oligarchy proxy listening on ${HOST}:${String(port)}; display ${display}${automation ? "; automation" : ""}${Option.match(url, { onNone: () => "", onSome: (announced) => `; announcing ${announced}` })}`,
+        { location: Log.Locations.server },
       );
       yield* Option.match(url, { onNone: () => Effect.void, onSome: Heartbeat.announce });
     }),
