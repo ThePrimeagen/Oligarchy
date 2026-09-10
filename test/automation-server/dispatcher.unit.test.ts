@@ -1,6 +1,6 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { Deferred, Effect, Exit, Fiber, FileSystem, Layer, Option, Redacted, Scope } from "effect";
+import { Deferred, Effect, Fiber, FileSystem, Layer, Option, Redacted } from "effect";
 import { TestClock } from "effect/testing";
 import { HttpClientError } from "effect/unstable/http";
 import * as Clients from "../../src/automation-server/clients.ts";
@@ -8,6 +8,7 @@ import * as Dispatcher from "../../src/automation-server/dispatcher.ts";
 import * as Config from "../../src/config.ts";
 import * as Automation from "../../src/db/automation.ts";
 import * as Servers from "../../src/db/servers.ts";
+import * as Tests from "../../src/db/tests.ts";
 import * as Errors from "../../src/shared/errors.ts";
 import * as FakeHttp from "../support/fake-http.ts";
 import * as FakeLinear from "../support/fake-linear.ts";
@@ -103,10 +104,11 @@ const world = (
     readonly linear?: FakeLinear.FakeLinear;
     readonly automation?: Partial<typeof Automation.AutomationStore.Service>;
     readonly servers?: Partial<typeof Servers.ServerStore.Service>;
+    readonly tests?: Partial<typeof Tests.TestStore.Service>;
   } = {},
 ) => {
   const sessions = Stores.fakeSessionStore();
-  const tests = Stores.fakeTestStore();
+  const tests = Stores.fakeTestStore({}, options.tests ?? {});
   const automation = Stores.fakeAutomationStore(options.automation ?? {}, {
     results: tests.results,
     sessions: sessions.sessions,
@@ -440,18 +442,140 @@ describe("dispatcher unhappy path", () => {
       yield* announce(CLIENT).pipe(Effect.provide(fixed.layer));
       yield* enqueue("drive").pipe(Effect.provide(fixed.layer));
       const fiber = yield* start(fixed);
-      expect(fixed.automation.jobs[0]?.status).toBe("failed");
-      expect(fixed.automation.jobs[0]?.reason).toMatch(
-        /^automation client http:\/\/client unreachable: /,
-      );
+      expect(fixed.automation.jobs[0]).toMatchObject({
+        status: "failed",
+        reason: "automation client http://client unreachable: connect ECONNREFUSED",
+      });
       expect(fixed.log.lines[1]).toMatchObject({
         level: "error",
-        text: expect.stringMatching(
-          /^job failed; drive; automation client http:\/\/client unreachable: /,
-        ),
+        text: "job failed; drive; automation client http://client unreachable: connect ECONNREFUSED",
         skipSentry: false,
       });
       expect(fixed.log.lines[1]?.cause).toBeDefined();
+      yield* Fiber.interrupt(fiber);
+    }),
+  );
+
+  it.effect("a failure after the claim closes the job failed; nothing stays running", () =>
+    Effect.gen(function* () {
+      const refused = Errors.DatabaseError.make({
+        operation: "findResult",
+        message: "Failed query: select from test_results",
+        cause: new Error("connection reset"),
+      });
+      let reads = 0;
+      // The second read answers from the store's own rows; the first is the failure under test.
+      const fixed: ReturnType<typeof world> = world({
+        tests: {
+          findResult: (resultId) =>
+            Effect.suspend(() => {
+              reads += 1;
+              return reads === 1
+                ? Effect.fail(refused)
+                : Effect.succeed(
+                    Option.fromUndefinedOr(fixed.tests.results.find((row) => row.id === resultId)),
+                  );
+            }),
+        },
+      });
+      seedResult(fixed.tests);
+      seedResult(fixed.tests, {
+        resultId: "cccccccc-dddd-4eee-8fff-000000000000",
+        linearId: "OLI-46",
+      });
+      yield* announce(CLIENT).pipe(Effect.provide(fixed.layer));
+      yield* enqueue("drive").pipe(Effect.provide(fixed.layer));
+      const fiber = yield* start(fixed);
+      expect(fixed.automation.jobs[0]).toMatchObject({
+        status: "failed",
+        reason: "Failed query: select from test_results",
+      });
+      expect(fixed.http.requests).toHaveLength(0);
+      expect(fixed.log.lines).toEqual([
+        {
+          level: "error",
+          text: "job failed; drive; Failed query: select from test_results",
+          location: PROCESS.location,
+          agentId: PROCESS.agentId,
+          skipSentry: false,
+          cause: refused,
+        },
+      ]);
+      yield* enqueue("drive", "cccccccc-dddd-4eee-8fff-000000000000").pipe(
+        Effect.provide(fixed.layer),
+      );
+      yield* TestClock.adjust(Dispatcher.DISPATCH_INTERVAL);
+      yield* pump();
+      expect(fixed.automation.jobs[1]?.status).toBe("succeeded");
+      yield* Fiber.interrupt(fiber);
+    }),
+  );
+
+  it.effect("a defect while a job runs closes it failed with the defect, not aborted", () =>
+    Effect.gen(function* () {
+      const http = FakeHttp.recordRequests(() => Effect.die(new Error("client exploded")));
+      const fixed = world({ http });
+      seedResult(fixed.tests);
+      yield* announce(CLIENT).pipe(Effect.provide(fixed.layer));
+      yield* enqueue("drive").pipe(Effect.provide(fixed.layer));
+      const fiber = yield* start(fixed);
+      yield* waitUntil(() => fixed.automation.jobs[0]?.status !== "running");
+      expect(fixed.automation.jobs[0]).toMatchObject({
+        status: "failed",
+        reason: "client exploded",
+      });
+      expect(fixed.log.lines.map((line) => [line.level, line.text])).toEqual([
+        ["info", `job started; drive; ${CLIENT}`],
+        ["error", "job failed; drive; client exploded"],
+      ]);
+      expect(fixed.log.lines[1]).toMatchObject({ ...ATTR, skipSentry: false });
+      expect(fixed.log.lines[1]?.cause).toBeInstanceOf(Error);
+      yield* Fiber.interrupt(fiber);
+    }),
+  );
+
+  it.effect("a result abort that fails is one error line, and the job is still closed", () =>
+    Effect.gen(function* () {
+      const refused = Errors.DatabaseError.make({
+        operation: "abortOpenResult",
+        message: "Failed query: update test_results",
+        cause: new Error("write failed"),
+      });
+      const http = FakeHttp.recordRequests(() =>
+        FakeHttp.json({ error: "opencode: exited 1: boom" }, 502),
+      );
+      const fixed = world({ http, tests: { abortOpenResult: () => Effect.fail(refused) } });
+      seedResult(fixed.tests);
+      yield* announce(CLIENT).pipe(Effect.provide(fixed.layer));
+      yield* enqueue("drive").pipe(Effect.provide(fixed.layer));
+      const fiber = yield* start(fixed);
+      expect(fixed.automation.jobs[0]).toMatchObject({
+        status: "failed",
+        reason: "opencode: exited 1: boom",
+      });
+      expect(fixed.tests.results[0]?.status).toBe("pending");
+      expect(fixed.log.lines.map((line) => [line.level, line.text])).toEqual([
+        ["info", `job started; drive; ${CLIENT}`],
+        ["error", `db: aborting result ${RESULT_ID} failed: Failed query: update test_results`],
+        ["error", "job failed; drive; opencode: exited 1: boom"],
+      ]);
+      expect(fixed.log.lines[1]).toMatchObject({ ...PROCESS, cause: refused });
+      yield* Fiber.interrupt(fiber);
+    }),
+  );
+
+  it.effect("a result the agent already closed is left as the agent left it", () =>
+    Effect.gen(function* () {
+      const http = FakeHttp.recordRequests(() =>
+        FakeHttp.json({ error: "opencode: exited 1: boom" }, 502),
+      );
+      const fixed = world({ http });
+      seedResult(fixed.tests, { status: "passed" });
+      yield* announce(CLIENT).pipe(Effect.provide(fixed.layer));
+      yield* enqueue("drive").pipe(Effect.provide(fixed.layer));
+      const fiber = yield* start(fixed);
+      expect(fixed.automation.jobs[0]?.status).toBe("failed");
+      expect(fixed.tests.results[0]).toMatchObject({ status: "passed", reason: null });
       yield* Fiber.interrupt(fiber);
     }),
   );
@@ -635,17 +759,10 @@ describe("dispatcher unhappy path", () => {
         seedResult(fixed.tests);
         yield* announce(CLIENT).pipe(Effect.provide(fixed.layer));
         yield* enqueue("drive").pipe(Effect.provide(fixed.layer));
-        const scope = yield* Scope.make();
-        yield* Dispatcher.loop.pipe(
-          Effect.provide(fixed.layer),
-          Scope.provide(scope),
-          Effect.forkChild,
-        );
-        yield* pump();
+        const fiber = yield* start(fixed);
         expect(fixed.automation.jobs[0]?.status).toBe("running");
         expect(fixed.http.requests).toHaveLength(1);
-        yield* Scope.close(scope, Exit.void);
-        yield* pump();
+        yield* Fiber.interrupt(fiber);
         expect(fixed.automation.jobs[0]).toMatchObject({
           status: "aborted",
           reason: "automation-server shutdown",

@@ -1,15 +1,14 @@
 import {
+  Array as Arr,
   Cause,
   Clock,
   Effect,
   Exit,
-  Fiber,
   FileSystem,
   Option,
   Ref,
   Schedule,
   Scope,
-  Semaphore,
 } from "effect";
 import { HttpClient } from "effect/unstable/http";
 import * as Config from "../config.ts";
@@ -22,8 +21,9 @@ import * as Render from "../observability/render.ts";
 import * as Clients from "./clients.ts";
 import * as Prompts from "./prompts.ts";
 
+// Ten seconds: a job waits at most that long past its readiness, and a tick that finds nothing
+// costs one indexed query.
 export const DISPATCH_INTERVAL = "10 seconds";
-export const FRESH_WITHIN_MS = 90_000;
 
 const processAttr = {
   location: Log.Locations.automationServer,
@@ -35,12 +35,6 @@ const jobAttr = (ticket: string) => ({
   agentId: ticket,
 });
 
-type Flight = {
-  readonly fiber: Fiber.Fiber<void>;
-  readonly url: string;
-  readonly ticket: string;
-};
-
 export const sweep = Effect.fn("Dispatcher.sweep")(function* (reason: string) {
   const automation = yield* Automation.AutomationStore;
   const log = yield* Log.Log;
@@ -51,6 +45,8 @@ export const sweep = Effect.fn("Dispatcher.sweep")(function* (reason: string) {
   return count;
 });
 
+// The loop owns every job it claims until the row is closed. Interrupting the loop closes the
+// scope its runs live in, which interrupts each run, whose own exit handler closes its row.
 export const loop: Effect.Effect<
   void,
   never,
@@ -62,111 +58,87 @@ export const loop: Effect.Effect<
   | Config.AutomationServerConfig
   | HttpClient.HttpClient
   | FileSystem.FileSystem
-  | Scope.Scope
 > = Effect.gen(function* () {
   const automation = yield* Automation.AutomationStore;
   const tests = yield* Tests.TestStore;
   const servers = yield* Servers.ServerStore;
   const log = yield* Log.Log;
   const jobs = yield* Scope.make();
-  const guard = yield* Semaphore.make(1);
-  const inFlight = yield* Ref.make<ReadonlyMap<string, Flight>>(new Map());
+  // Runs in flight per client url: this dispatcher is the only thing that starts runs, so its own
+  // count is exact where a client's heartbeat is up to thirty seconds stale.
   const counts = yield* Ref.make<ReadonlyMap<string, number>>(new Map());
   const warned = yield* Ref.make(false);
 
-  // Registered before the loop so shutdown interrupts in-flight runs after the loop fiber stops.
-  yield* Effect.addFinalizer(() =>
+  // Closes the row, and for a drive that did not succeed, the result the agent was going to close
+  // and now never will. Either write failing is one error line; the job is not what is failing.
+  const close = (
+    job: Automation.AutomationJobRow,
+    status: Automation.TerminalStatus,
+    reason: string | null,
+  ) =>
     Effect.gen(function* () {
-      const flights = yield* Ref.get(inFlight);
-      yield* Effect.forEach([...flights.values()], (flight) => Fiber.interrupt(flight.fiber), {
-        concurrency: "unbounded",
-      });
-      yield* Scope.close(jobs, Exit.void);
-    }),
-  );
+      const closed = yield* automation.closeJob(job.id, status, reason).pipe(
+        Effect.catch((error) =>
+          log
+            .error(`db: closing job ${job.id} failed: ${Render.errorDetail(error)}`, {
+              ...processAttr,
+              cause: error,
+            })
+            .pipe(Effect.as(false)),
+        ),
+      );
+      if (closed && status !== "succeeded" && job.action === "drive") {
+        yield* tests.abortOpenResult(job.resultId, `automation: ${reason ?? status}`).pipe(
+          Effect.catch((error) =>
+            log
+              .error(`db: aborting result ${job.resultId} failed: ${Render.errorDetail(error)}`, {
+                ...processAttr,
+                cause: error,
+              })
+              .pipe(Effect.as(false)),
+          ),
+        );
+      }
+      return closed;
+    });
 
-  const closeRow = (id: string, status: Automation.TerminalStatus, reason: string | null) =>
-    automation.closeJob(id, status, reason).pipe(
-      Effect.catch((error) =>
-        log
-          .error(`db: closing job ${id} failed: ${Render.errorDetail(error)}`, {
-            ...processAttr,
-            cause: error,
-          })
-          .pipe(Effect.as(false)),
+  const failed = (
+    job: Automation.AutomationJobRow,
+    who: Log.Attribution,
+    reason: string,
+    report: { readonly skipSentry?: true; readonly cause?: unknown },
+  ) =>
+    Effect.gen(function* () {
+      yield* close(job, "failed", reason);
+      yield* log.error(`job failed; ${job.action}; ${reason}`, { ...who, ...report });
+    });
+
+  const taken = (url: string) =>
+    Ref.update(counts, (map) => new Map(map).set(url, (map.get(url) ?? 0) + 1));
+
+  const released = (url: string) =>
+    Ref.modify(counts, (map) => {
+      const n = map.get(url);
+      if (n === undefined) {
+        return [false, map];
+      }
+      const next = new Map(map);
+      if (n === 1) {
+        next.delete(url);
+      } else {
+        next.set(url, n - 1);
+      }
+      return [true, next];
+    }).pipe(
+      Effect.flatMap((known) =>
+        known
+          ? Effect.void
+          : Effect.die(new Error(`released a run on ${url} that was never counted`)),
       ),
     );
 
-  const abortOpenResult = (job: Automation.AutomationJobRow, reason: string) => {
-    if (job.action !== "drive") {
-      return Effect.void;
-    }
-    return tests.findResult(job.resultId).pipe(
-      Effect.flatMap((result) => {
-        if (Option.isNone(result)) {
-          return Effect.void;
-        }
-        if (result.value.status !== "pending" && result.value.status !== "running") {
-          return Effect.void;
-        }
-        return tests
-          .closeResult(result.value.id, "aborted", `automation: ${reason}`, null)
-          .pipe(Effect.asVoid);
-      }),
-    );
-  };
-
-  const finish = (
-    job: Automation.AutomationJobRow,
-    ticket: string,
-    status: Automation.TerminalStatus,
-    reason: string | null,
-    line: {
-      readonly level: "info" | "error";
-      readonly text: string;
-      readonly skipSentry?: true;
-      readonly cause?: unknown;
-    },
-  ) =>
-    Effect.uninterruptible(
-      Effect.gen(function* () {
-        yield* closeRow(job.id, status, reason);
-        if (status === "failed" || status === "timed_out") {
-          // The job row is already closed; a result write that fails is the next reviewer's.
-          yield* abortOpenResult(job, reason ?? line.text).pipe(Effect.ignore);
-        }
-        const attribution = Object.assign(
-          jobAttr(ticket),
-          line.skipSentry === true ? { skipSentry: true as const } : {},
-          line.cause === undefined ? {} : { cause: line.cause },
-        );
-        if (line.level === "info") {
-          yield* log.info(line.text, attribution);
-        } else {
-          yield* log.error(line.text, attribution);
-        }
-      }),
-    );
-
-  const drop = (jobId: string, url: string) =>
-    Effect.gen(function* () {
-      yield* Ref.update(inFlight, (map) => {
-        const next = new Map(map);
-        next.delete(jobId);
-        return next;
-      });
-      yield* Ref.update(counts, (map) => {
-        const next = new Map(map);
-        const n = (next.get(url) ?? 1) - 1;
-        if (n <= 0) {
-          next.delete(url);
-        } else {
-          next.set(url, n);
-        }
-        return next;
-      });
-    });
-
+  // One run, from the call to the row's close. Shutdown reaches it as an interrupt; anything else
+  // that is not the client's answer is a defect of this process, and the row says so.
   const runJob = (job: Automation.AutomationJobRow, ticket: string, url: string, prompt: string) =>
     Effect.gen(function* () {
       const started = yield* Clock.currentTimeMillis;
@@ -174,62 +146,99 @@ export const loop: Effect.Effect<
         Effect.matchEffect({
           onSuccess: () =>
             Effect.gen(function* () {
+              yield* close(job, "succeeded", null);
               const elapsed = (yield* Clock.currentTimeMillis) - started;
-              yield* finish(job, ticket, "succeeded", null, {
-                level: "info",
-                text: `job succeeded; ${job.action} in ${String(elapsed)}ms`,
-              });
+              yield* log.info(
+                `job succeeded; ${job.action} in ${String(elapsed)}ms`,
+                jobAttr(ticket),
+              );
             }),
-          onFailure: (error) =>
-            error._tag === "ProxyRefusal"
-              ? error.status === 504
-                ? finish(job, ticket, "timed_out", error.message, {
-                    level: "error",
-                    text: `job timed out; ${job.action}`,
-                    skipSentry: true,
-                  })
-                : finish(job, ticket, "failed", error.message, {
-                    level: "error",
-                    text: `job failed; ${job.action}; ${error.message}`,
-                    skipSentry: true,
-                  })
-              : finish(
-                  job,
-                  ticket,
-                  "failed",
-                  `automation client ${url} unreachable: ${Render.errorDetail(error)}`,
-                  {
-                    level: "error",
-                    text: `job failed; ${job.action}; automation client ${url} unreachable: ${Render.errorDetail(error)}`,
-                    cause: error,
-                  },
-                ),
+          onFailure: (error) => {
+            if (error._tag === "ProxyUnreachable") {
+              // The client's answer never came: only this process saw why, so this one reports.
+              const reason = `automation client ${url} unreachable: ${Render.errorDetail(error.cause)}`;
+              return failed(job, jobAttr(ticket), reason, { cause: error });
+            }
+            if (error.status === 504) {
+              return Effect.gen(function* () {
+                yield* close(job, "timed_out", error.message);
+                yield* log.error(`job timed out; ${job.action}`, {
+                  ...jobAttr(ticket),
+                  skipSentry: true,
+                });
+              });
+            }
+            // The client logged and reported the failure with its cause; the row gets its message.
+            return failed(job, jobAttr(ticket), error.message, { skipSentry: true });
+          },
         }),
       );
     }).pipe(
-      Effect.onExit((exit) =>
-        Effect.uninterruptible(
-          Effect.gen(function* () {
-            yield* drop(job.id, url);
-            if (Exit.isFailure(exit)) {
-              const closed = yield* closeRow(job.id, "aborted", "automation-server shutdown");
-              if (closed) {
-                yield* abortOpenResult(job, "automation-server shutdown").pipe(Effect.ignore);
-                yield* log.info(
-                  `job aborted; ${job.action}; automation-server shutdown`,
-                  jobAttr(ticket),
-                );
-              }
+      Effect.onExit((exit) => {
+        if (Exit.isSuccess(exit)) {
+          return released(url);
+        }
+        if (Cause.hasInterruptsOnly(exit.cause)) {
+          return Effect.gen(function* () {
+            yield* released(url);
+            if (yield* close(job, "aborted", "automation-server shutdown")) {
+              yield* log.info(
+                `job aborted; ${job.action}; automation-server shutdown`,
+                jobAttr(ticket),
+              );
             }
-          }),
-        ),
-      ),
+          });
+        }
+        const error = Cause.squash(exit.cause);
+        return Effect.gen(function* () {
+          yield* released(url);
+          yield* failed(job, jobAttr(ticket), Render.errorDetail(error), { cause: error });
+        });
+      }),
+    );
+
+  // Claimed, and this tick's until a fiber owns it: a failure anywhere in here closes the row.
+  const dispatch = (
+    job: Automation.AutomationJobRow,
+    clients: Arr.NonEmptyReadonlyArray<{ readonly url: string; readonly agents: number }>,
+  ) =>
+    Effect.gen(function* () {
+      const result = yield* tests.findResult(job.resultId);
+      const ticket = yield* Option.match(
+        Option.flatMap(result, (row) => Option.fromNullOr(row.linearId)),
+        {
+          onNone: () => Effect.die(new Error(`claimed job ${job.id} has no ticket`)),
+          onSome: (id) => Effect.succeed(id),
+        },
+      );
+      yield* Prompts.compose(job, ticket, job.resultId).pipe(
+        Effect.matchEffect({
+          onFailure: (error) => failed(job, jobAttr(ticket), error.message, { cause: error }),
+          onSuccess: (prompt) =>
+            Effect.gen(function* () {
+              const load = yield* Ref.get(counts);
+              let chosen = Arr.headNonEmpty(clients);
+              for (const client of clients) {
+                if ((load.get(client.url) ?? 0) < (load.get(chosen.url) ?? 0)) {
+                  chosen = client;
+                }
+              }
+              yield* taken(chosen.url);
+              yield* runJob(job, ticket, chosen.url, prompt).pipe(Effect.forkIn(jobs));
+              yield* log.info(`job started; ${job.action}; ${chosen.url}`, jobAttr(ticket));
+            }),
+        }),
+      );
+    }).pipe(
+      Effect.catchCause((cause) => {
+        const error = Cause.squash(cause);
+        return failed(job, processAttr, Render.errorDetail(error), { cause: error });
+      }),
     );
 
   const tick = Effect.gen(function* () {
     const clients = yield* servers.listAutomationClients;
-    const first = clients[0];
-    if (first === undefined) {
+    if (!Arr.isReadonlyArrayNonEmpty(clients)) {
       const waiting = yield* automation.countReady;
       if (waiting > 0 && !(yield* Ref.get(warned))) {
         yield* Ref.set(warned, true);
@@ -242,56 +251,14 @@ export const loop: Effect.Effect<
     }
     yield* Ref.set(warned, false);
     const claimed = yield* automation.claimNext;
-    if (Option.isNone(claimed)) {
-      return;
+    if (Option.isSome(claimed)) {
+      yield* dispatch(claimed.value, clients);
     }
-    const job = claimed.value;
-    const result = yield* tests.findResult(job.resultId);
-    const ticket = yield* Option.match(
-      Option.flatMap(result, (row) => Option.fromNullOr(row.linearId)),
-      {
-        onNone: () => Effect.die(new Error(`claimed job ${job.id} has no ticket`)),
-        onSome: (id) => Effect.succeed(id),
-      },
-    );
-    yield* Prompts.compose(job, ticket, job.resultId).pipe(
-      Effect.matchEffect({
-        onFailure: (error) =>
-          finish(job, ticket, "failed", error.message, {
-            level: "error",
-            text: `job failed; ${job.action}; ${error.message}`,
-            cause: error,
-          }),
-        onSuccess: (prompt) =>
-          Effect.gen(function* () {
-            const load = yield* Ref.get(counts);
-            let chosen = first;
-            let best = load.get(chosen.url) ?? 0;
-            for (const client of clients) {
-              const n = load.get(client.url) ?? 0;
-              if (n < best) {
-                chosen = client;
-                best = n;
-              }
-            }
-            yield* Ref.update(counts, (map) => {
-              const next = new Map(map);
-              next.set(chosen.url, (next.get(chosen.url) ?? 0) + 1);
-              return next;
-            });
-            const fiber = yield* runJob(job, ticket, chosen.url, prompt).pipe(Effect.forkIn(jobs));
-            yield* Ref.update(inFlight, (map) => {
-              const next = new Map(map);
-              next.set(job.id, { fiber, url: chosen.url, ticket });
-              return next;
-            });
-            yield* log.info(`job started; ${job.action}; ${chosen.url}`, jobAttr(ticket));
-          }),
-      }),
-    );
   });
 
-  const guarded = Effect.uninterruptible(guard.withPermitsIfAvailable(1)(tick)).pipe(
+  // Uninterruptible so that shutdown's interrupt waits for a claim in flight to reach its fiber
+  // instead of tearing it; repeat runs the ticks one after another, so none overlaps.
+  yield* Effect.uninterruptible(tick).pipe(
     Effect.catchCause((cause) => {
       const error = Cause.squash(cause);
       return log.error(`dispatch failed: ${Render.errorDetail(error)}`, {
@@ -299,8 +266,7 @@ export const loop: Effect.Effect<
         cause: error,
       });
     }),
-    Effect.asVoid,
+    Effect.repeat(Schedule.spaced(DISPATCH_INTERVAL)),
+    Effect.ensuring(Scope.close(jobs, Exit.void)),
   );
-
-  yield* guarded.pipe(Effect.repeat(Schedule.spaced(DISPATCH_INTERVAL)));
 }).pipe(Effect.withSpan("Dispatcher.loop"));
