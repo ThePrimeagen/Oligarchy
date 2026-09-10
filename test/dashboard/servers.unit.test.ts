@@ -1,7 +1,7 @@
 import { html } from "hono/html";
 import { describe, expect, it } from "vitest";
 import type { AutomationJob, AutomationQueue, Server } from "../../src/dashboard/query.ts";
-import { Fleet, Queue, ServersPage } from "../../src/dashboard/servers.tsx";
+import { Clients, Fleet, Queue, ServersPage } from "../../src/dashboard/servers.tsx";
 
 const QUERIED_AT = new Date("2026-09-09T16:00:00Z");
 
@@ -33,6 +33,38 @@ const silent: Server = {
 
 const neverHeardFrom: Server = {
   url: "https://qemu-c.example.com",
+  stats: null,
+  generation: 0,
+  heartbeatAt: null,
+  queriedAt: QUERIED_AT,
+};
+
+const client: Server = {
+  url: "http://127.0.0.1:42071",
+  stats: {
+    agents: 3,
+    memory: { totalBytes: 66_900_000_000, usedBytes: 31_500_000_000 },
+    cpu: { mean1m: 12.3, mean2m: 11, mean3m: 9.8 },
+  },
+  generation: 9,
+  heartbeatAt: ago(12),
+  queriedAt: QUERIED_AT,
+};
+
+const silentClient: Server = {
+  url: "https://agent-b.example.com",
+  stats: {
+    agents: 1,
+    memory: { totalBytes: 16_000_000_000, usedBytes: 4_000_000_000 },
+    cpu: { mean1m: 50, mean2m: 40, mean3m: 30 },
+  },
+  generation: 4,
+  heartbeatAt: ago(5 * 60 + 12),
+  queriedAt: QUERIED_AT,
+};
+
+const neverHeardClient: Server = {
+  url: "https://agent-c.example.com",
   stats: null,
   generation: 0,
   heartbeatAt: null,
@@ -156,6 +188,62 @@ describe("Fleet unhappy path", () => {
   });
 });
 
+describe("Clients happy path", () => {
+  it("lists an automation client with its agents, memory, the three cpu means, its generation and the age of its heartbeat, and no delete form", async () => {
+    const page = await render(Clients({ clients: [client] }));
+    expect(page).toContain(
+      "<h3>clients</h3><table><tr><th>url</th><th>agents</th><th>memory</th><th>cpu 1m / 2m / 3m</th><th>generation</th><th>heartbeat</th></tr>",
+    );
+    expect(page).toContain(
+      "<tr><td>http://127.0.0.1:42071</td><td>3</td><td>31.5 / 66.9 GB</td><td>12.3% / 11.0% / 9.8%</td><td>9</td><td>12 s ago</td></tr>",
+    );
+    expect(page).not.toContain("/servers/delete");
+    expect(page).not.toContain("<button>delete</button>");
+  });
+
+  it("says none under clients when there are none, with no table", async () => {
+    const page = await render(Clients({ clients: [] }));
+    expect(page).toBe("<h3>clients</h3><p>none</p>");
+  });
+});
+
+describe("Clients unhappy path", () => {
+  it("marks a client silent, its stats withheld, once three heartbeats are overdue, and still has no delete form", async () => {
+    const page = await render(Clients({ clients: [silentClient] }));
+    expect(page).toContain(
+      '<tr><td>https://agent-b.example.com</td><td colspan="3"><strong>silent</strong></td><td>4</td><td>5 min ago</td></tr>',
+    );
+    expect(page).not.toContain("50.0%");
+    expect(page).not.toContain("/servers/delete");
+  });
+
+  it("is not silent at ninety seconds and is at ninety-one", async () => {
+    const onTime = await render(Clients({ clients: [{ ...client, heartbeatAt: ago(90) }] }));
+    expect(onTime).toContain("<td>3</td><td>31.5 / 66.9 GB</td>");
+    expect(onTime).not.toContain("silent");
+    const overdue = await render(Clients({ clients: [{ ...client, heartbeatAt: ago(91) }] }));
+    expect(overdue).toContain(
+      '<td colspan="3"><strong>silent</strong></td><td>9</td><td>1 min ago</td>',
+    );
+  });
+
+  it("says never heard from for a client that has not announced itself, with no delete form", async () => {
+    const page = await render(Clients({ clients: [neverHeardClient] }));
+    expect(page).toContain(
+      '<tr><td>https://agent-c.example.com</td><td colspan="3">never heard from</td><td>0</td><td>never</td></tr>',
+    );
+    expect(page).not.toContain("/servers/delete");
+  });
+
+  it("escapes a url in the row", async () => {
+    const hostile: Server = { ...neverHeardClient, url: 'http://a"b.example.com/<x>' };
+    const page = await render(Clients({ clients: [hostile] }));
+    expect(page).toContain("<td>http://a&quot;b.example.com/&lt;x&gt;</td>");
+    expect(page).not.toContain('a"b');
+    expect(page).not.toContain("<x>");
+  });
+});
+
 describe("Queue happy path", () => {
   it("lists what is running, then what is pending, then what completed, each under its heading as a table of the same columns", async () => {
     const page = await render(Queue({ queue: QUEUE }));
@@ -230,7 +318,10 @@ describe("Queue unhappy path", () => {
 describe("ServersPage happy path", () => {
   it("is split in two halves side by side: the automation queue first, the qemu fleet with its add box second, each polled every thirty seconds", async () => {
     const page = await render(
-      ServersPage({ halves: { queue: QUEUE, servers: [alive, neverHeardFrom] }, error: undefined }),
+      ServersPage({
+        halves: { queue: QUEUE, clients: [client], servers: [alive, neverHeardFrom] },
+        error: undefined,
+      }),
     );
     expect(page).toContain("<title>oligarchy servers</title>");
     expect(page).toContain('<script src="https://cdn.jsdelivr.net/npm/htmx.org@4.0.0"');
@@ -240,6 +331,8 @@ describe("ServersPage happy path", () => {
       '<div class="halves"><section><h2>automation</h2><div id="queue" hx-get="/servers/queue" hx-trigger="every 30s"><h3>running</h3>',
     );
     expect(page).toContain("<td>OLI-61</td>");
+    expect(page).toContain("<h3>clients</h3>");
+    expect(page).toContain("<td>http://127.0.0.1:42071</td><td>3</td>");
     expect(page).toContain(
       '<section><h2>qemu servers</h2><div id="fleet" hx-get="/servers/fleet" hx-trigger="every 30s"><table>',
     );
@@ -249,12 +342,17 @@ describe("ServersPage happy path", () => {
     expect(page).toContain(
       '<form method="post" action="/servers"><input name="url" size="60" placeholder="https://qemu.example.com"/><button>add</button></form>',
     );
-    expect(page.indexOf("<h2>automation</h2>")).toBeLessThan(page.indexOf("<h2>qemu servers</h2>"));
+    expect(page.indexOf("<h2>automation</h2>")).toBeLessThan(page.indexOf("<h3>clients</h3>"));
+    expect(page.indexOf("<h3>clients</h3>")).toBeLessThan(page.indexOf("<h2>qemu servers</h2>"));
     expect(page.indexOf("<h2>qemu servers</h2>")).toBeLessThan(
       page.indexOf("<h2>add a server</h2>"),
     );
+    expect(page.indexOf("<td>http://127.0.0.1:42071</td>")).toBeLessThan(
+      page.indexOf("<h2>qemu servers</h2>"),
+    );
     expect(page).not.toContain("<h2>servers</h2>");
     expect(page).not.toContain("error:");
+    expect(page).not.toContain('value="http://127.0.0.1:42071"');
   });
 });
 
@@ -262,7 +360,7 @@ describe("ServersPage unhappy path", () => {
   it("puts a refusal's reason on top and keeps both halves, so the operator can act where they are", async () => {
     const page = await render(
       ServersPage({
-        halves: { queue: QUEUE, servers: [alive] },
+        halves: { queue: QUEUE, clients: [], servers: [alive] },
         error: "url must be an http or https url",
       }),
     );
@@ -286,7 +384,7 @@ describe("ServersPage unhappy path", () => {
   it("escapes the reason", async () => {
     const page = await render(
       ServersPage({
-        halves: { queue: EMPTY_QUEUE, servers: [] },
+        halves: { queue: EMPTY_QUEUE, clients: [], servers: [] },
         error: "<script>alert(1)</script>",
       }),
     );

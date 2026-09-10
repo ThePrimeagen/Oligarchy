@@ -31,6 +31,7 @@ const besideModule = (relative: string): string =>
 const GUIDES: Readonly<Record<string, string>> = {
   CLIENT_MD: besideModule("../../client.md"),
   CTRL_MD: besideModule("../../ctrl-linear.md"),
+  CTRL_DIAGNOSE_MD: besideModule("../../ctrl-diagnose.md"),
 };
 
 const PLACEHOLDER = /\{\{([A-Z_]+)\}\}/g;
@@ -50,6 +51,7 @@ const read = Effect.fn("Prompts.read")(function* (path: string) {
 const fill = (
   text: string,
   values: Readonly<Record<string, string>>,
+  template: string,
 ): Result.Result<string, Errors.PromptError> => {
   const missing: Array<string> = [];
   const filled = text.replace(PLACEHOLDER, (match: string, name: string) => {
@@ -65,20 +67,43 @@ const fill = (
     onSome: (name) =>
       Result.fail(
         Errors.PromptError.make({
-          message: `prompt: prompts/${TEMPLATE} uses {{${name}}}, which has no value`,
+          message: `prompt: prompts/${template} uses {{${name}}}, which has no value`,
         }),
       ),
   });
 };
 
-export const renderLinearIssue = Effect.fn("Prompts.renderLinearIssue")(function* (values: Values) {
-  const text = yield* read(besideModule(`../../prompts/${TEMPLATE}`));
-  const known: Record<string, string> = { SUB_AGENT, ...values };
+const render = Effect.fn("Prompts.render")(function* (
+  template: string,
+  values: Readonly<Record<string, string>>,
+) {
+  const text = yield* read(besideModule(`../../prompts/${template}`));
+  const known: Record<string, string> = { ...values };
   for (const [name, path] of Object.entries(GUIDES)) {
     if (text.includes(`{{${name}}}`)) {
       // A guide ends in a newline the template's closing tag should sit under, not after.
       known[name] = (yield* read(path)).trimEnd();
     }
   }
-  return yield* Effect.fromResult(fill(text, known));
+  return yield* Effect.fromResult(fill(text, known, template));
+});
+
+export const renderLinearIssue = Effect.fn("Prompts.renderLinearIssue")(function* (values: Values) {
+  return yield* render(TEMPLATE, { SUB_AGENT, ...values });
+});
+
+export type DiagnoseValues = {
+  readonly LINEAR_TICKET: string;
+  readonly RESULT_ID: string;
+};
+
+export const renderDiagnosingAgent = Effect.fn("Prompts.renderDiagnosingAgent")(function* (
+  values: DiagnoseValues,
+) {
+  return yield* render("diagnosing-agent.html", {
+    LINEAR_TICKET: values.LINEAR_TICKET,
+    RESULT_ID: values.RESULT_ID,
+    TEST_RESULT_ID: values.RESULT_ID,
+    MODEL: "$OLIGARCHY_MODEL",
+  });
 });

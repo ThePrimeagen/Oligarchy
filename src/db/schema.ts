@@ -47,8 +47,9 @@ export const actionState = pgEnum("action_state", ["completed", "failed"]);
 // The reviewer's own answer to "did the proof land": the test's vocabulary, not the session's.
 export const diagnosisVerdict = pgEnum("diagnosis_verdict", ["passed", "failed"]);
 
-// What kind of machine a server boots, and so which reverse proxy fronts it. One kind so far.
-export const serverType = pgEnum("server_type", ["qemu"]);
+// What kind of machine a server boots, and so which reverse proxy fronts it or which dispatcher
+// places on it. qemu servers boot machines; automation servers run agents.
+export const serverType = pgEnum("server_type", ["qemu", "automation"]);
 
 export const automationAction = pgEnum("automation_action", ["drive", "diagnose"]);
 export const automationJobStatus = pgEnum("automation_job_status", [
@@ -121,7 +122,8 @@ export const images = pgTable(
 
 // location and agent_id are attribution, not relations: a log must never be refused
 // because the row it names is missing or already gone, so neither is a foreign key.
-// location is a text bucket: a session UUID, "server" (qemu-server-wide), or "automation".
+// location is a text bucket: a session UUID, "server" (qemu-server-wide), "automation-server",
+// "automation-client", or "automation-<ticket>" (one run on an automation client).
 export const logs = pgTable(
   "logs",
   {
@@ -187,13 +189,15 @@ export const postRunDiagnosis = pgTable(
   ],
 );
 
-// What a server last said of itself, as the fleet page shows it: machines running, memory in
-// use, and the cpu busy over its newest one, two and three minutes, in percent.
-export type ServerStats = {
-  readonly qemus: number;
+export type HostRowStats = {
   readonly memory: { readonly totalBytes: number; readonly usedBytes: number };
   readonly cpu: { readonly mean1m: number; readonly mean2m: number; readonly mean3m: number };
 };
+// The count a server's kind reports: machines running, or agents running. The key is the kind's
+// word, so a row reads as its server would say it.
+export type QemuServerStats = HostRowStats & { readonly qemus: number };
+export type AutomationServerStats = HostRowStats & { readonly agents: number };
+export type ServerStats = QemuServerStats | AutomationServerStats;
 
 // The fleet the reverse proxy places sessions on: one row per server, keyed by the url exactly
 // as given, written by an operator (the dashboard, POST /servers) or by the server itself. A
@@ -314,9 +318,10 @@ export const testResults = pgTable(
 );
 
 // One automation step for a test result: drive the guest, or diagnose after. Inserted
-// pending; a worker claims the oldest pending row, runs it, and closes with a terminal
-// status. (result_id, action) is unique — one drive and one diagnose per result for now.
-// Queue order is created_at among pending rows; capacity limits stay out of this table.
+// pending; a worker claims the oldest ready pending row, runs it, and closes with a terminal
+// status. One open drive and one open diagnose per result: a failed row stays as history and
+// a new one can be enqueued after it. Queue order is created_at among pending rows; capacity
+// limits stay out of this table.
 export const automationJobs = pgTable(
   "automation_jobs",
   {
@@ -332,7 +337,9 @@ export const automationJobs = pgTable(
     finishedAt: timestamp("finished_at", { withTimezone: true }),
   },
   (table) => [
-    uniqueIndex("automation_jobs_result_action_idx").on(table.resultId, table.action),
+    uniqueIndex("automation_jobs_result_action_idx")
+      .on(table.resultId, table.action)
+      .where(sql`${table.status} in ('pending', 'running')`),
     index("automation_jobs_status_created_at_idx").on(table.status, table.createdAt),
   ],
 );

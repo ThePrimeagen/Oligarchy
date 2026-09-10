@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -11,10 +11,7 @@ import * as DbSchema from "../../src/db/schema.ts";
 import * as Postgres from "../support/postgres.ts";
 import * as StubProxy from "../support/stub-proxy.ts";
 
-const ROOT = resolve(import.meta.dirname, "../../..");
-const SESSION = resolve(ROOT, "session");
-const CLIENT_MAIN = resolve(ROOT, "v2/src/client/main.ts");
-const CTRL_MAIN = resolve(ROOT, "v2/src/ctrl/main.ts");
+const SESSION = resolve(import.meta.dirname, "../../session");
 const { SESSION_ID, FOLLOWED_ID, ENDED_ID, DROPPED_ID, ENDLESS_ID } = StubProxy;
 const ESC = String.fromCharCode(27);
 const ALT_SCREEN_ON = `${ESC}[?1049h`;
@@ -154,10 +151,7 @@ const agentOf = (requests: ReadonlyArray<StubProxy.Received>): string => {
 
 const tinyPngBase64 = Buffer.from(StubProxy.tinyPng()).toString("base64");
 
-// The REPL spawns WP-5's client and WP-6's ctrl; until they exist there is nothing to drive.
-const ready = existsSync(CLIENT_MAIN) && existsSync(CTRL_MAIN);
-
-describe.skipIf(!ready)("./session happy path", () => {
+describe("./session happy path", () => {
   it("drives one session through every command with the client's flags and one agent id", () =>
     withProxy(async (proxy) => {
       const result = await runSession(
@@ -314,7 +308,7 @@ describe.skipIf(!ready)("./session happy path", () => {
     }));
 });
 
-describe.skipIf(!ready)("./session unhappy path", () => {
+describe("./session unhappy path", () => {
   it("enters follow completion when Tab and Enter arrive in one PTY write", async () => {
     const result = await runTtySession("follow \t\r", "\x15exit\r");
     expect(result.code).toBe(0);

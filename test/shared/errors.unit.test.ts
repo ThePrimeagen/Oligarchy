@@ -106,6 +106,25 @@ const cases: ReadonlyArray<WireCase> = [
     error: Errors.NoServer.make({ message: "no server registered", agentId: AGENT_ID }),
     status: 503,
   },
+  {
+    name: "RunFailed",
+    wire: Errors.RunFailedWire,
+    error: Errors.RunFailed.make({
+      message: "opencode: exited 1: boom",
+      cause: new Error("boom"),
+      agentId: AGENT_ID,
+    }),
+    status: 502,
+  },
+  {
+    name: "RunTimedOut",
+    wire: Errors.RunTimedOutWire,
+    error: Errors.RunTimedOut.make({
+      message: "opencode: no result within 2 hours",
+      agentId: AGENT_ID,
+    }),
+    status: 504,
+  },
 ];
 
 describe("API error wire codecs", () => {
@@ -136,6 +155,32 @@ describe("API error wire codecs", () => {
   it("refuses a wire body without an error string", () => {
     expect(() => Schema.decodeUnknownSync(Errors.BadRequestWire)({ message: "x" })).toThrow();
     expect(() => Schema.decodeUnknownSync(Errors.BadRequestWire)({ error: 1 })).toThrow();
+  });
+
+  it("a decoded RunFailed carries no cause and an empty agentId, as StartFailed does", () => {
+    const failed = Schema.decodeUnknownSync(Errors.RunFailedWire)({
+      error: "opencode: exited 1: boom",
+    });
+    expect(failed).toMatchObject({ _tag: "RunFailed", message: "opencode: exited 1: boom" });
+    expect(failed.agentId).toBe("");
+    expect(failed.cause).toBeUndefined();
+    const started = Schema.decodeUnknownSync(Errors.StartFailedWire)({
+      error: "qemu: handshake timeout",
+    });
+    expect(started.agentId).toBe("");
+    expect(started.cause).toBeUndefined();
+  });
+
+  it("a decoded RunTimedOut is 504 with an empty agentId", () => {
+    const timedOut = Schema.decodeUnknownSync(Errors.RunTimedOutWire)({
+      error: "opencode: no result within 2 hours",
+    });
+    expect(timedOut).toMatchObject({
+      _tag: "RunTimedOut",
+      message: "opencode: no result within 2 hours",
+    });
+    expect(timedOut.agentId).toBe("");
+    expect(Errors.apiStatus(timedOut)).toBe(504);
   });
 });
 

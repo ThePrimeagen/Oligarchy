@@ -20,10 +20,14 @@ export type Spawned = {
   readonly kills: Array<string>;
   readonly isReleased: () => boolean;
   readonly isRunning: Effect.Effect<boolean>;
+  // Everything written to the child's stdin so far, decoded.
+  readonly stdin: () => string;
   // Exits, then (as Node does) delivers the last stderr bytes and closes the pipes.
   readonly exit: (code: number, trailingStderr?: string) => Effect.Effect<void>;
   // Dies from a signal sent by someone else: no exit code, as Node reports it.
   readonly die: (signal: string) => Effect.Effect<void>;
+  // The stdout pipe fails while the child still runs, as a broken read does.
+  readonly failStdout: (error: PlatformError.PlatformError) => Effect.Effect<void>;
 };
 
 export type FakeSpawner = {
@@ -64,9 +68,13 @@ export const fakeSpawner = (script: Script = () => ({ exitCode: 0 })): FakeSpawn
         );
       }
       const exitSignal = yield* Deferred.make<number, PlatformError.PlatformError>();
-      const stdout = yield* Queue.unbounded<Uint8Array, Cause.Done>();
-      const stderr = yield* Queue.unbounded<Uint8Array, Cause.Done>();
-      const emit = (queue: Queue.Queue<Uint8Array, Cause.Done>, text: string | undefined) => {
+      const stdout = yield* Queue.unbounded<Uint8Array, PlatformError.PlatformError | Cause.Done>();
+      const stderr = yield* Queue.unbounded<Uint8Array, PlatformError.PlatformError | Cause.Done>();
+      const written: Array<Uint8Array> = [];
+      const emit = (
+        queue: Queue.Queue<Uint8Array, PlatformError.PlatformError | Cause.Done>,
+        text: string | undefined,
+      ) => {
         if (text !== undefined && text !== "") {
           Queue.offerUnsafe(queue, encoder.encode(text));
         }
@@ -105,6 +113,7 @@ export const fakeSpawner = (script: Script = () => ({ exitCode: 0 })): FakeSpawn
         kills,
         isReleased: () => released,
         isRunning: Effect.map(Deferred.isDone(exitSignal), (done) => !done),
+        stdin: () => new TextDecoder().decode(Buffer.concat(written)),
         exit: (code, trailingStderr) =>
           Effect.gen(function* () {
             yield* Deferred.succeed(exitSignal, code);
@@ -113,6 +122,10 @@ export const fakeSpawner = (script: Script = () => ({ exitCode: 0 })): FakeSpawn
             end();
           }),
         die,
+        failStdout: (error) =>
+          Effect.sync(() => {
+            Queue.failCauseUnsafe(stdout, Cause.fail(error));
+          }),
       });
       // The real spawner's release sends the kill signal when the process still runs.
       yield* Effect.addFinalizer(() =>
@@ -126,7 +139,11 @@ export const fakeSpawner = (script: Script = () => ({ exitCode: 0 })): FakeSpawn
         exitCode: Effect.map(Deferred.await(exitSignal), ChildProcessSpawner.ExitCode),
         isRunning: Effect.map(Deferred.isDone(exitSignal), (done) => !done),
         kill,
-        stdin: Sink.drain,
+        stdin: Sink.forEach((chunk: Uint8Array) =>
+          Effect.sync(() => {
+            written.push(chunk);
+          }),
+        ),
         stdout: Stream.fromQueue(stdout),
         stderr: Stream.fromQueue(stderr),
         all: Stream.merge(Stream.fromQueue(stdout), Stream.fromQueue(stderr)),

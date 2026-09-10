@@ -6,8 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import * as StubProxy from "../support/stub-proxy.ts";
 
-// The root wrapper, which execs v2/client.
-const CLIENT = fileURLToPath(new URL("../../../client", import.meta.url));
+const CLIENT = fileURLToPath(new URL("../../client", import.meta.url));
 const EXIT_WITHIN_MS = 30_000;
 const SESSION = "session-1";
 const AGENT = "agent-1";

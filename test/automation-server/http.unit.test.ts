@@ -104,8 +104,8 @@ describe("POST /linear", () => {
         {
           level: "info",
           text: "linear webhook recorded",
-          location: "automation",
-          agentId: "automation",
+          location: "automation-server",
+          agentId: "automation-server",
           skipSentry: false,
           cause: undefined,
         },
@@ -130,7 +130,7 @@ describe("POST /linear", () => {
         {
           level: "info",
           text: "linear webhook queued drive; Automation Needed",
-          location: "automation",
+          location: "automation-server",
           agentId: "OLI-1063",
           skipSentry: false,
           cause: undefined,
@@ -226,16 +226,16 @@ describe("POST /linear refusals", () => {
           {
             level: "error",
             text: "POST /linear failed: unauthorized",
-            location: "automation",
-            agentId: "automation",
+            location: "automation-server",
+            agentId: "automation-server",
             skipSentry: true,
             cause: undefined,
           },
           {
             level: "error",
             text: "POST /linear failed: unauthorized",
-            location: "automation",
-            agentId: "automation",
+            location: "automation-server",
+            agentId: "automation-server",
             skipSentry: true,
             cause: undefined,
           },
@@ -269,6 +269,11 @@ describe("POST /linear refusals", () => {
           });
           expect(automate.status).toBe(404);
           expect(yield* automate.json).toEqual({ error: "not found" });
+          const run = yield* http.post("/run", {
+            body: HttpBody.jsonUnsafe({ key: "OLI-45", prompt: "drive" }),
+          });
+          expect(run.status).toBe(404);
+          expect(yield* run.json).toEqual({ error: "not found" });
           for (const path of ["/automate", "/linear", "/start", "/servers", "/nope"]) {
             const response = yield* http.get(path);
             expect(response.status, path).toBe(404);

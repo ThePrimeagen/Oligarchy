@@ -1,4 +1,4 @@
-import { and, count, desc, eq, sql } from "drizzle-orm";
+import { and, count, desc, eq, inArray, sql } from "drizzle-orm";
 import { Array as Arr, Context, Effect, Layer, Option } from "effect";
 import * as Client from "./client.ts";
 import * as DbSchema from "./schema.ts";
@@ -189,6 +189,28 @@ export class TestStore extends Context.Service<TestStore>()("@oligarchy/db/TestS
       return rows.length > 0;
     });
 
+    // A result the agent that was driving it will never close, aborted in one statement: the
+    // status test rides the update, so a verdict the agent did land a moment earlier stands, and
+    // false says so.
+    const abortOpenResult = Effect.fn("db.abortOpenResult")(function* (
+      resultId: string,
+      reason: string,
+    ) {
+      const rows = yield* database.run("abortOpenResult", (db) =>
+        db
+          .update(DbSchema.testResults)
+          .set({ status: "aborted", reason, finishedAt: sql`now()` })
+          .where(
+            and(
+              eq(DbSchema.testResults.id, resultId),
+              inArray(DbSchema.testResults.status, ["pending", "running"]),
+            ),
+          )
+          .returning({ id: DbSchema.testResults.id }),
+      );
+      return rows.length > 0;
+    });
+
     // The result by its id, whether or not a session has run it yet.
     const findResult = Effect.fn("db.findResult")(function* (resultId: string) {
       const rows = yield* database.run("findResult", (db) =>
@@ -250,6 +272,7 @@ export class TestStore extends Context.Service<TestStore>()("@oligarchy/db/TestS
       failRun,
       startResult,
       closeResult,
+      abortOpenResult,
       findResult,
       setLinearId,
       findResultByLinearId,

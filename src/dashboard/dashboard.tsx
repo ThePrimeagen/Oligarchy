@@ -8,6 +8,7 @@ import {
   definitionStats,
   getImage,
   groupDefinitions,
+  listAutomationClients,
   listAutomationQueue,
   listServers,
   listSessions,
@@ -27,7 +28,7 @@ import {
 } from "./query.ts";
 import { clickerPage } from "./clicker.ts";
 import { HTMX_INTEGRITY, HTMX_URL } from "./htmx.ts";
-import { Fleet, type Halves, Queue, ServersPage } from "./servers.tsx";
+import { Clients, Fleet, type Halves, Queue, ServersPage } from "./servers.tsx";
 import { SENTRY_DSN } from "../observability/dsn.ts";
 
 const errorMessage = (cause: unknown): string =>
@@ -782,14 +783,15 @@ app.get("/images/:id", async (context) => {
 // The servers page, outside the dashboard's shell: text served whole, not through the renderer.
 // Its two halves are rows: the automation queue the webhook and the worker write
 // (automation_jobs), and the fleet the servers themselves write every thirty seconds
-// (src/qemu-server/heartbeat.ts), both read here as often. `halves` is absent only when the database
+// (src/host/heartbeat.ts), both read here as often. `halves` is absent only when the database
 // could not be read, so a 500 page claims neither an empty queue nor an empty fleet.
 const readHalves = async (connectionString: string): Promise<Halves> => {
-  const [queue, servers] = await Promise.all([
+  const [queue, clients, servers] = await Promise.all([
     listAutomationQueue(connectionString),
-    listServers(connectionString),
+    listAutomationClients(connectionString),
+    listServers(connectionString, "qemu"),
   ]);
-  return { queue, servers };
+  return { queue, clients, servers };
 };
 
 const serversPage = (
@@ -824,8 +826,17 @@ app.get("/servers", async (context) => {
 // What the automation half's poll swaps in.
 app.get("/servers/queue", async (context) => {
   try {
-    const queue = await listAutomationQueue(context.env.HYPERDRIVE.connectionString);
-    return context.html(<Queue queue={queue} />);
+    const connectionString = context.env.HYPERDRIVE.connectionString;
+    const [queue, clients] = await Promise.all([
+      listAutomationQueue(connectionString),
+      listAutomationClients(connectionString),
+    ]);
+    return context.html(
+      <>
+        <Queue queue={queue} />
+        <Clients clients={clients} />
+      </>,
+    );
   } catch (error) {
     Sentry.captureException(error);
     console.error("dashboard: listing the automation queue:", errorMessage(error));
@@ -836,7 +847,7 @@ app.get("/servers/queue", async (context) => {
 // What the fleet half's poll swaps in.
 app.get("/servers/fleet", async (context) => {
   try {
-    const servers = await listServers(context.env.HYPERDRIVE.connectionString);
+    const servers = await listServers(context.env.HYPERDRIVE.connectionString, "qemu");
     return context.html(<Fleet servers={servers} />);
   } catch (error) {
     Sentry.captureException(error);

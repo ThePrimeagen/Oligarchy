@@ -14,7 +14,7 @@ exist.
 ## Toolchain
 
 - Run on Node 26 with npm. Every executable is a `#!/bin/sh` wrapper running
-  `node --experimental-strip-types` (`./qemu-server`, `./qemu-reverse-proxy` and `./automation-server` add
+  `node --experimental-strip-types` (`./qemu-server`, `./qemu-reverse-proxy`, `./automation-server` and `./automation-client` add
   `--import ./src/observability/instrument.ts`); types are stripped, not transformed, so
   `erasableSyntaxOnly` stays on.
 - Install with `npm ci`; `prepare` runs `effect-tsgo patch --oxlint` so the `effecttsgo/*` rules
@@ -68,7 +68,7 @@ Durable preferences from the maintainer; when they conflict with generic best pr
 ## Layout
 
 - The root holds `AGENTS.md`, the executable wrappers (`./client`, `./client-with-image`,
-  `./ctrl`, `./qemu-server`, `./qemu-reverse-proxy`, `./automation-server`, `./session`), the tooling files,
+  `./ctrl`, `./qemu-server`, `./qemu-reverse-proxy`, `./automation-server`, `./automation-client`, `./session`), the tooling files,
   `drizzle/` (migrations), `public/` and `prompts/`, the operator documents, this document, `src/`
   and `test/`.
 - `src/` is one directory per process plus the shared kernel (`src/shared/`, `src/config.ts`,
@@ -710,8 +710,9 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
   variable is in the attribution (`location`, `agentId`) or in the text after the `;`, as in
   `log.info(\`running; started in ${String(ms)}ms\`, { location: sessionId, agentId })`.
   `location` is a text bucket: a session UUID, `Locations.server` (qemu-server-wide lines with no
-  session), or `Locations.automation` (the automation server; its `agentId` is also
-  `Locations.automation`). `ProcessAttribution` is the fallback the HTTP boundary uses when an
+  session), `Locations.automationServer` (the automation server; its `agentId` is also
+  `Locations.automationServer`), `Locations.automationClient`, or `Locations.automationRun(key)`
+  (`automation-<key>`). `ProcessAttribution` is the fallback the HTTP boundary uses when an
   error carries no session; the qemu server leaves the default (`server`), the automation server overrides it.
 - Each line is written twice: to stdout through `Console.log` when the method runs, and as a
   `logs` row `Queue.offerUnsafe`d to a `Queue.unbounded` drained by one `forkScoped` fiber that
@@ -746,8 +747,10 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
   `ErrorReporter.CurrentErrorReporters` once at build, so `SentryLive` is provided beneath it,
   never only to callers. `Log.layerStdout` persists nothing: it is for tests. The automation
   server persists through `Log.layer` once it has a database; its lines use
-  `location = 'automation'` (and process-wide lines also use `agentId = 'automation'`), while
-  durable work remains `automation_jobs`. A fatal path flushes the log, then Sentry, then exits.
+  `location = 'automation-server'` (and process-wide lines also use `agentId = 'automation-server'`), while
+  durable work remains `automation_jobs`. The automation client's process-wide lines use
+  `location = 'automation-client'`; a run's lines use `location = 'automation-<key>'` with that
+  ticket as `agentId`. A fatal path flushes the log, then Sentry, then exits.
 - `Log` installs no Effect `Logger`; `emit` formats, writes and offers synchronously. `console.*`
   appears only in `src/dashboard/**` and `vitest.global-setup.ts`. Test log output through the
   fake `Log` layer (`test/support/log.ts`) or `Log.layerStdout` with `TestConsole.logLines`.
@@ -755,7 +758,7 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
 ## Sentry
 
 - Initialise the SDK before any Effect code in `src/observability/instrument.ts`, loaded by the
-  `qemu-server`, `qemu-reverse-proxy` and `automation-server` wrappers' `--import`: `Sentry.init({ dsn: SENTRY_DSN,
+  `qemu-server`, `qemu-reverse-proxy`, `automation-server` and `automation-client` wrappers' `--import`: `Sentry.init({ dsn: SENTRY_DSN,
   tracesSampleRate: 1,
   traceLifecycle: "stream", integrations: [Sentry.httpIntegration({ spans: false }),
   Sentry.nativeNodeFetchIntegration({ spans: false })] })`. `SENTRY_DSN` in `dsn.ts` is the one
@@ -956,7 +959,7 @@ One `it.effect` over the real fakes with `Effect.flip`.
 const Fakes = Layer.mergeAll(
   FakeQemu.fakeQemu().layer,
   FakeQemu.fakeIso().layer,
-  FakeQemu.fakeStats,
+  FakeStats.fakeStats,
   Stores.fakeSessionStore().layer,
   Stores.fakeActionStore().layer,
   FakeLog.fakeLog().layer,

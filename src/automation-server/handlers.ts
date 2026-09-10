@@ -17,7 +17,7 @@ const ok = Contract.Ok.make({});
 
 export class LinearWebhookSecret extends Context.Service<LinearWebhookSecret>()(
   "@oligarchy/automation-server/LinearWebhookSecret",
-  { make: Config.linearWebhookSecret },
+  { make: Effect.map(Config.AutomationServerConfig, (config) => config.linearWebhookSecret) },
 ) {
   static readonly layer = Layer.effect(this)(this.make);
 }
@@ -46,7 +46,7 @@ export const LinearLive = HttpApiBuilder.group(Api.AutomationServerApi, "Linear"
       const parsed = Option.map(Webhook.issue(bytes), Webhook.work);
       if (Option.isNone(parsed)) {
         yield* log.info("linear webhook recorded", {
-          location: Log.Locations.automation,
+          location: Log.Locations.automationServer,
           agentId: Log.AutomationAgentId,
         });
         return ok;
@@ -55,7 +55,7 @@ export const LinearLive = HttpApiBuilder.group(Api.AutomationServerApi, "Linear"
       const job = Webhook.queuedAction(event);
       if (Option.isNone(job)) {
         yield* log.info(`linear webhook recorded; ${event.state}`, {
-          location: Log.Locations.automation,
+          location: Log.Locations.automationServer,
           agentId: event.ticket,
         });
         return ok;
@@ -67,7 +67,7 @@ export const LinearLive = HttpApiBuilder.group(Api.AutomationServerApi, "Linear"
         );
       if (Option.isNone(result)) {
         yield* log.info(`linear webhook ignored; no result for ${event.state}`, {
-          location: Log.Locations.automation,
+          location: Log.Locations.automationServer,
           agentId: event.ticket,
         });
         return ok;
@@ -84,13 +84,13 @@ export const LinearLive = HttpApiBuilder.group(Api.AutomationServerApi, "Linear"
         );
       if (outcome === "duplicate") {
         yield* log.info(`linear webhook ignored; ${job.value} already queued`, {
-          location: Log.Locations.automation,
+          location: Log.Locations.automationServer,
           agentId: event.ticket,
         });
         return ok;
       }
       yield* log.info(`linear webhook queued ${job.value}; ${event.state}`, {
-        location: Log.Locations.automation,
+        location: Log.Locations.automationServer,
         agentId: event.ticket,
       });
       return ok;

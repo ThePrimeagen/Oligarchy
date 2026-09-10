@@ -1,24 +1,27 @@
 import { createServer } from "node:http";
-import { NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node";
+import { NodeHttpClient, NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node";
 import { Cause, Deferred, Effect, Exit, Layer, type Runtime } from "effect";
 import { Command } from "effect/unstable/cli";
 import { HttpMiddleware, HttpRouter, HttpServerError } from "effect/unstable/http";
 import * as Config from "../config.ts";
+import * as Linear from "../ctrl/linear.ts";
 import * as Automation from "../db/automation.ts";
 import * as Client from "../db/client.ts";
 import * as Logs from "../db/logs.ts";
+import * as Servers from "../db/servers.ts";
 import * as Tests from "../db/tests.ts";
 import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
 import * as Sentry from "../observability/sentry.ts";
 import * as Api from "../shared/api.ts";
 import * as AutomationServerCommand from "./command.ts";
+import * as Dispatcher from "./dispatcher.ts";
 import * as Handlers from "./handlers.ts";
 
 const HOST = "127.0.0.1";
 
 const automationAttr = {
-  location: Log.Locations.automation,
+  location: Log.Locations.automationServer,
   agentId: Log.AutomationAgentId,
 } as const;
 
@@ -42,6 +45,7 @@ const ServerLive = (port: number) =>
       const log = yield* Log.Log;
       yield* log.acquireColor(Log.AutomationAgentId);
       yield* log.info(`automation server listening on ${HOST}:${String(port)}`, automationAttr);
+      yield* Dispatcher.loop.pipe(Effect.forkScoped({ startImmediately: true }));
     }),
   ).pipe(
     Layer.provide(
@@ -54,21 +58,34 @@ const ServerLive = (port: number) =>
     Layer.provide(Layer.succeed(HttpMiddleware.TracerDisabledWhen)(() => true)),
   );
 
-const DatabaseLive = Layer.unwrap(Effect.map(Config.databaseUrl, Client.Database.layer));
+const AutomationServerConfigLive = Config.AutomationServerConfig.layer;
 
-// LINEAR_WEBHOOK_SECRET signs POST /linear; DATABASE_URL holds the queue and the logs rows.
+const DatabaseLive = Layer.unwrap(
+  Effect.map(Config.AutomationServerConfig, (config) => Client.Database.layer(config.databaseUrl)),
+);
+
+const LinearLive = Layer.unwrap(
+  Effect.map(Config.AutomationServerConfig, (config) => Linear.Linear.layer(config.linearApiToken)),
+);
+
+// LINEAR_WEBHOOK_SECRET signs POST /linear; OLIGARCHY_TOKEN is the bearer on POST /run;
+// LINEAR_API_TOKEN fetches drive prompts; DATABASE_URL holds the queue and the logs rows.
 // Sentry sits beneath Log so Log captures the reporter. Lines land in logs with
-// location/agentId "automation"; durable jobs remain automation_jobs.
+// location/agentId "automation-server"; durable jobs remain automation_jobs.
 const MainLive = Layer.mergeAll(
   Log.Log.layer,
   Handlers.LinearWebhookSecret.layer,
   Tests.TestStore.layer,
   Automation.AutomationStore.layer,
+  Servers.ServerStore.layer,
 ).pipe(
   Layer.provideMerge(Logs.LogStore.layer),
   Layer.provideMerge(DatabaseLive),
+  Layer.provideMerge(LinearLive),
+  Layer.provideMerge(NodeHttpClient.layerNodeHttp),
   Layer.provideMerge(Sentry.SentryLive),
   Layer.provideMerge(Layer.succeed(Log.ProcessAttribution)(Log.AutomationProcessAttribution)),
+  Layer.provideMerge(AutomationServerConfigLive),
   Layer.provideMerge(Config.providerLayer),
   Layer.provideMerge(NodeServices.layer),
 );
@@ -78,9 +95,9 @@ const command = AutomationServerCommand.makeAutomationServerCommand({
   serverFailed,
 });
 
-// The graph is built before the command runs: a missing LINEAR_WEBHOOK_SECRET or DATABASE_URL is
-// the one failure no Log exists to record, so it is printed here. Every later failure logs its
-// own fatal line; a defect has nothing else to say for it.
+// The graph is built before the command runs: a missing LINEAR_WEBHOOK_SECRET, OLIGARCHY_TOKEN,
+// LINEAR_API_TOKEN or DATABASE_URL is the one failure no Log exists to record, so it is printed
+// here. Every later failure logs its own fatal line; a defect has nothing else to say for it.
 const program = Effect.gen(function* () {
   const services = yield* Layer.build(MainLive).pipe(Effect.tapCause(Render.reportFailure));
   yield* Command.run(command, { version: Api.VERSION }).pipe(

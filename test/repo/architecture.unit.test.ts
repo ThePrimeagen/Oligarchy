@@ -13,13 +13,13 @@ const sources = (): ReadonlyArray<string> =>
 
 const read = (path: string): string => readFileSync(join(root, path), "utf8");
 
-// V2-PLAN §1: the only files allowed to import `node:*`, read `process.*`, or use
+// The only files allowed to import `node:*`, read `process.*`, or use
 // `setTimeout`/`new Promise`/`async`.
 const BOUNDARY_FILES = new Set([
   "src/qmp/socket.ts",
   "src/qemu-server/main.ts",
   "src/session/readline.ts",
-  "src/qemu/stats.ts",
+  "src/host/stats.ts",
   "src/qemu/qemu.ts",
   "src/observability/instrument.ts",
   "src/observability/render.ts",

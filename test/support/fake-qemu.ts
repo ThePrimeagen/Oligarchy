@@ -2,9 +2,7 @@ import { Cause, Effect, Exit, Layer, Option, Ref } from "effect";
 import type { PlatformError } from "effect";
 import * as Iso from "../../src/qemu/iso.ts";
 import * as Qemu from "../../src/qemu/qemu.ts";
-import * as Stats from "../../src/qemu/stats.ts";
 import type * as Qmp from "../../src/qmp/client.ts";
-import * as Contract from "../../src/shared/contract.ts";
 import type * as Domain from "../../src/shared/domain.ts";
 import type * as Errors from "../../src/shared/errors.ts";
 
@@ -271,25 +269,3 @@ export const fakeIso = (resolve: Resolve = (call) => Effect.succeed(call.name)):
   });
   return { calls, layer: Layer.succeed(Iso.Iso)(service) };
 };
-
-export const ZERO_STATS = {
-  memory: Contract.Memory.make({ totalBytes: 0, usedBytes: 0, freeBytes: 0 }),
-  cpu: Contract.Cpu.make({
-    cores: 0,
-    mean: 0,
-    mean1m: 0,
-    mean2m: 0,
-    mean3m: 0,
-    p10: 0,
-    p25: 0,
-    p75: 0,
-    p90: 0,
-  }),
-};
-
-// Stats that report zeros and echo the qemu count they are given.
-export const fakeStats: Layer.Layer<Stats.Stats> = Layer.succeed(Stats.Stats)(
-  Stats.Stats.of({
-    collect: (qemus) => Effect.succeed(Contract.Stats.make({ qemus, ...ZERO_STATS })),
-  }),
-);

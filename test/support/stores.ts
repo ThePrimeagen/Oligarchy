@@ -1,4 +1,4 @@
-import { Effect, Layer, Option } from "effect";
+import { Clock, Effect, Layer, Option } from "effect";
 import * as Actions from "../../src/db/actions.ts";
 import * as Automation from "../../src/db/automation.ts";
 import * as DebugLogs from "../../src/db/debug-logs.ts";
@@ -459,6 +459,22 @@ export const fakeTestStore = (
         row.finishedAt = new Date();
         return true;
       }),
+    // Only a still-open result is aborted, as the real statement's status test decides.
+    abortOpenResult: (resultId, reason) =>
+      Effect.sync(() => {
+        const row = results.find(
+          (result) =>
+            sameId(result.id, resultId) &&
+            (result.status === "pending" || result.status === "running"),
+        );
+        if (row === undefined) {
+          return false;
+        }
+        row.status = "aborted";
+        row.reason = reason;
+        row.finishedAt = new Date();
+        return true;
+      }),
     setLinearId: (resultId, linearId) =>
       Effect.gen(function* () {
         const row = results.find((result) => sameId(result.id, resultId));
@@ -518,17 +534,43 @@ export type FakeAutomationStore = {
   readonly layer: Layer.Layer<Automation.AutomationStore>;
 };
 
-// One pending job per (result, action), as the unique index: a second insert is DatabaseError.
+// One open job per (result, action), as the partial unique index: a second insert while one
+// is pending or running is DatabaseError. claimNext uses the same readiness as the real query
+// when results and sessions are supplied.
 export const fakeAutomationStore = (
   overrides: Partial<typeof Automation.AutomationStore.Service> = {},
+  lookup: {
+    readonly results?: Array<TestResultRow>;
+    readonly sessions?: Array<SessionRow>;
+  } = {},
 ): FakeAutomationStore => {
   const jobs: Array<AutomationJobRow> = [];
   let nextId = 1;
+  const ready = (job: AutomationJobRow): boolean => {
+    if (job.status !== "pending") {
+      return false;
+    }
+    if (job.action === "drive") {
+      return true;
+    }
+    const result = lookup.results?.find((row) => sameId(row.id, job.resultId));
+    if (result === undefined || result.sessionId === null) {
+      return false;
+    }
+    const sessionId = result.sessionId;
+    const session = lookup.sessions?.find((row) => sameId(row.id, sessionId));
+    return session !== undefined && session.endedAt !== null;
+  };
   const service = Automation.AutomationStore.of({
     enqueue: (input) =>
       Effect.gen(function* () {
         if (
-          jobs.some((job) => sameId(job.resultId, input.resultId) && job.action === input.action)
+          jobs.some(
+            (job) =>
+              sameId(job.resultId, input.resultId) &&
+              job.action === input.action &&
+              (job.status === "pending" || job.status === "running"),
+          )
         ) {
           return yield* Effect.fail(
             conflict("enqueueAutomationJob", 'insert into "automation_jobs"'),
@@ -547,6 +589,48 @@ export const fakeAutomationStore = (
         jobs.push(row);
         return row;
       }),
+    claimNext: Effect.sync(() => {
+      const candidates = jobs.filter(ready).sort((left, right) => {
+        if (left.action !== right.action) {
+          return left.action === "diagnose" ? -1 : 1;
+        }
+        const byTime = left.createdAt.getTime() - right.createdAt.getTime();
+        return byTime !== 0 ? byTime : left.id.localeCompare(right.id);
+      });
+      const row = candidates[0];
+      if (row === undefined) {
+        return Option.none();
+      }
+      row.status = "running";
+      row.startedAt = new Date();
+      return Option.some(row);
+    }),
+    closeJob: (id, status, reason) =>
+      Effect.sync(() => {
+        const row = jobs.find((job) => sameId(job.id, id) && job.status === "running");
+        if (row === undefined) {
+          return false;
+        }
+        row.status = status;
+        row.reason = reason;
+        row.finishedAt = new Date();
+        return true;
+      }),
+    abortRunning: (reason) =>
+      Effect.sync(() => {
+        let count = 0;
+        const now = new Date();
+        for (const job of jobs) {
+          if (job.status === "running") {
+            job.status = "aborted";
+            job.reason = reason;
+            job.finishedAt = now;
+            count += 1;
+          }
+        }
+        return count;
+      }),
+    countReady: Effect.sync(() => jobs.filter(ready).length),
     ...overrides,
   });
   return { jobs, layer: Layer.succeed(Automation.AutomationStore)(service) };
@@ -583,6 +667,10 @@ export const fakeServerStore = (
   const routes = new Map<string, string>();
   const heartbeats: Array<Heartbeat> = [];
   const indexOf = (url: string) => servers.findIndex((server) => server.url === url);
+  const latest = new Map<
+    string,
+    { readonly type: Servers.ServerType; readonly stats: DbSchema.ServerStats; readonly at: number }
+  >();
   const service = Servers.ServerStore.of({
     addServer: (url, type) =>
       Effect.sync(() => {
@@ -591,7 +679,8 @@ export const fakeServerStore = (
         }
       }),
     heartbeat: (url, type, stats) =>
-      Effect.sync(() => {
+      Effect.gen(function* () {
+        const at = yield* Clock.currentTimeMillis;
         const index = indexOf(url);
         if (index === -1) {
           servers.push({ url, type });
@@ -599,6 +688,7 @@ export const fakeServerStore = (
           servers[index] = { url, type };
         }
         heartbeats.push({ url, type, stats });
+        latest.set(url, { type, stats, at });
       }),
     removeServer: (url) =>
       Effect.sync(() => {
@@ -613,6 +703,19 @@ export const fakeServerStore = (
       Effect.sync(() =>
         servers.filter((server) => server.type === type).map((server) => server.url),
       ),
+    listAutomationClients: Effect.gen(function* () {
+      const now = yield* Clock.currentTimeMillis;
+      return servers.flatMap((server) => {
+        if (server.type !== "automation") {
+          return [];
+        }
+        const beat = latest.get(server.url);
+        if (beat === undefined || now - beat.at >= 90_000 || !("agents" in beat.stats)) {
+          return [];
+        }
+        return [{ url: server.url, agents: beat.stats.agents }];
+      });
+    }),
     routeSession: (sessionId, url) =>
       routes.has(sessionId)
         ? Effect.fail(conflict("routeSession", "insert into session_servers"))
@@ -632,7 +735,10 @@ export const fakeStores = () => {
   const actions = fakeActionStore();
   const logs = fakeLogStore();
   const tests = fakeTestStore();
-  const automation = fakeAutomationStore();
+  const automation = fakeAutomationStore(
+    {},
+    { results: tests.results, sessions: sessions.sessions },
+  );
   const debugLogs = fakeDebugLogStore();
   const diagnosis = fakeDiagnosisStore();
   return {

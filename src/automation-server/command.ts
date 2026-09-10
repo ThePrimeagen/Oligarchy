@@ -6,6 +6,7 @@ import * as ExternalFailure from "../external-failure.ts";
 import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
 import * as Errors from "../shared/errors.ts";
+import * as Dispatcher from "./dispatcher.ts";
 
 // The port the operator's tunnel points at; nothing else of ours is near it.
 const DEFAULT_PORT = 54321;
@@ -47,6 +48,7 @@ export const makeAutomationServerCommand = <RServe>(server: AutomationServer<RSe
               }),
             ),
           );
+          yield* Dispatcher.sweep("automation-server restarted");
           return yield* Effect.raceFirst(
             Layer.launch(server.serve(port)),
             Deferred.await(server.serverFailed),
@@ -55,7 +57,7 @@ export const makeAutomationServerCommand = <RServe>(server: AutomationServer<RSe
         return yield* startup.pipe(
           Effect.tapError((error) =>
             log.fatal(`automation server: ${detail(error)}`, {
-              location: Log.Locations.automation,
+              location: Log.Locations.automationServer,
               agentId: Log.AutomationAgentId,
               cause: error,
             }),

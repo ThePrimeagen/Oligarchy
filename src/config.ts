@@ -57,3 +57,18 @@ export class ProxyConfig extends Context.Service<ProxyConfig>()("@oligarchy/conf
 }) {
   static readonly layer = Layer.effect(this)(this.make);
 }
+
+export class AutomationServerConfig extends Context.Service<AutomationServerConfig>()(
+  "@oligarchy/config/AutomationServerConfig",
+  {
+    // Sequential on purpose: LINEAR_WEBHOOK_SECRET, OLIGARCHY_TOKEN, LINEAR_API_TOKEN, DATABASE_URL.
+    make: Effect.all({
+      linearWebhookSecret,
+      token: oligarchyToken,
+      linearApiToken,
+      databaseUrl,
+    }),
+  },
+) {
+  static readonly layer = Layer.effect(this)(this.make);
+}

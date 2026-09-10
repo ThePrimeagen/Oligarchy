@@ -41,6 +41,8 @@ const environment = (home: string, overrides: Record<string, string>): NodeJS.Pr
     ...process.env,
     HOME: home,
     LINEAR_WEBHOOK_SECRET: WEBHOOK_SECRET,
+    OLIGARCHY_TOKEN: "test-oligarchy-token",
+    LINEAR_API_TOKEN: "test-linear-token",
     DATABASE_URL: dbUrl === "" ? UNREACHABLE : dbUrl,
     NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --disable-warning=ExperimentalWarning`.trim(),
     https_proxy: "http://127.0.0.1:1",
@@ -49,7 +51,6 @@ const environment = (home: string, overrides: Record<string, string>): NodeJS.Pr
     ...overrides,
   };
   delete env.FORCE_COLOR;
-  delete env.OLIGARCHY_TOKEN;
   return env;
 };
 
@@ -202,6 +203,23 @@ const jobsFor = async (resultId: string) => {
   }
 };
 
+const seedRunningJob = async (linearId: string): Promise<string> => {
+  const resultId = await seedResult(linearId);
+  const client = new Client({ connectionString: Postgres.getDbUrl() });
+  await client.connect();
+  try {
+    const db = drizzle({ client, schema: DbSchema });
+    await db.insert(DbSchema.automationJobs).values({
+      resultId,
+      action: "drive",
+      status: "running",
+    });
+    return resultId;
+  } finally {
+    await client.end();
+  }
+};
+
 describe("automation server startup refusals", () => {
   it.live("--help exits 0 and lists --port alone", () =>
     Effect.promise(async () => {
@@ -245,13 +263,33 @@ describe("automation server startup refusals", () => {
     }),
   );
 
+  it.live("an empty OLIGARCHY_TOKEN exits 1 with OLIGARCHY_TOKEN is not set", () =>
+    Effect.promise(async () => {
+      const process = spawnAutomationServer([], { OLIGARCHY_TOKEN: "" });
+      const { code } = await process.exited;
+      expect(code).toBe(1);
+      expect(process.stderr()).toContain("OLIGARCHY_TOKEN is not set");
+      expect(process.stdout()).not.toContain("listening");
+    }),
+  );
+
+  it.live("an empty LINEAR_API_TOKEN exits 1 with LINEAR_API_TOKEN is not set", () =>
+    Effect.promise(async () => {
+      const process = spawnAutomationServer([], { LINEAR_API_TOKEN: "" });
+      const { code } = await process.exited;
+      expect(code).toBe(1);
+      expect(process.stderr()).toContain("LINEAR_API_TOKEN is not set");
+      expect(process.stdout()).not.toContain("listening");
+    }),
+  );
+
   it.live("an unreachable database exits 1 and never listens", () =>
     Effect.promise(async () => {
       const process = spawnAutomationServer([], { DATABASE_URL: UNREACHABLE });
       const { code } = await process.exited;
       expect(code).toBe(1);
       const fatal = lines(process.stdout()).find((line) =>
-        line.startsWith("[automation] automation: fatal: automation server: "),
+        line.startsWith("[automation-server] automation-server: fatal: automation server: "),
       );
       expect(fatal, process.stdout()).toBeDefined();
       expect(fatal).toContain("database unreachable");
@@ -271,7 +309,7 @@ describeWithDatabase("automation server startup refusals with a database", () =>
         const { code } = await process.exited;
         expect(code).toBe(1);
         const fatal = lines(process.stdout()).find((line) =>
-          line.startsWith("[automation] automation: fatal: automation server: "),
+          line.startsWith("[automation-server] automation-server: fatal: automation server: "),
         );
         expect(fatal, process.stdout()).toBeDefined();
         expect(fatal).toContain("EADDRINUSE");
@@ -291,10 +329,11 @@ describeServing("automation server serving", () => {
     const port = await freePort();
     const process = spawnAutomationServer(["--port", String(port)]);
     const record = join(process.cwd, "automation-logs");
+    let linearId = "";
     try {
       await process.waitFor(/automation server listening/);
       expect(lines(process.stdout())).toContain(
-        `[automation] automation: automation server listening on 127.0.0.1:${String(port)}`,
+        `[automation-server] automation-server: automation server listening on 127.0.0.1:${String(port)}`,
       );
       expect(existsSync(record)).toBe(false);
 
@@ -332,7 +371,7 @@ describeServing("automation server serving", () => {
       expect(await signed.json()).toEqual({ ok: "true" });
       expect(existsSync(record)).toBe(false);
 
-      const linearId = `OLI-${randomUUID().slice(0, 8)}`;
+      linearId = `OLI-${randomUUID().slice(0, 8)}`;
       const resultId = await seedResult(linearId);
       const driveBody = JSON.stringify({
         action: "update",
@@ -405,12 +444,16 @@ describeServing("automation server serving", () => {
     const { code } = await process.exited;
     expect(code, process.stdout()).toBe(0);
     const output = lines(process.stdout());
-    expect(output).toContain("[automation] automation: error: POST /linear failed: unauthorized");
-    expect(output).toContain("[automation] automation: linear webhook recorded");
     expect(output).toContain(
-      "[OLI-1063] automation: linear webhook queued drive; Automation Needed",
+      "[automation-server] automation-server: error: POST /linear failed: unauthorized",
     );
-    expect(output).toContain("[OLI-1063] automation: linear webhook queued diagnose; Needs Review");
+    expect(output).toContain("[automation-server] automation-server: linear webhook recorded");
+    expect(output).toContain(
+      `[${linearId}] automation-server: linear webhook queued drive; Automation Needed`,
+    );
+    expect(output).toContain(
+      `[${linearId}] automation-server: linear webhook queued diagnose; Needs Review`,
+    );
     expect(output.some((line) => line.includes("/automate"))).toBe(false);
     expect(output.some((line) => line.includes("/start"))).toBe(false);
     expect(process.stderr()).toBe("");
@@ -425,4 +468,61 @@ describeServing("automation server serving", () => {
   );
 
   it.live("exits 0 on SIGTERM", () => Effect.promise(() => served("SIGTERM")), 120_000);
+
+  it.live(
+    "a stale running job is aborted after startup; the process still queues from /linear",
+    () =>
+      Effect.promise(async () => {
+        const staleId = `OLI-${randomUUID().slice(0, 8)}`;
+        const staleResult = await seedRunningJob(staleId);
+        const port = await freePort();
+        const process = spawnAutomationServer(["--port", String(port)]);
+        try {
+          await process.waitFor(/automation server listening/);
+          expect(await jobsFor(staleResult)).toEqual([
+            expect.objectContaining({
+              resultId: staleResult,
+              action: "drive",
+              status: "aborted",
+              reason: "automation-server restarted",
+            }),
+          ]);
+          expect(lines(process.stdout())).toContain(
+            "[automation-server] automation-server: 1 jobs aborted; automation-server restarted",
+          );
+
+          const queuedId = `OLI-${randomUUID().slice(0, 8)}`;
+          const resultId = await seedResult(queuedId);
+          const driveBody = JSON.stringify({
+            action: "update",
+            type: "Issue",
+            data: {
+              identifier: queuedId,
+              state: {
+                id: "a9fe2d89-3cb3-47dd-8645-5d224f997134",
+                name: "Automation Needed",
+                type: "unstarted",
+              },
+            },
+            updatedFrom: { state: { name: "Backlog" } },
+          });
+          const drive = await request(
+            port,
+            "POST",
+            "/linear",
+            { "content-type": "application/json", "linear-signature": sign(driveBody) },
+            driveBody,
+          );
+          expect(drive.status).toBe(200);
+          expect(await jobsFor(resultId)).toEqual([
+            expect.objectContaining({ resultId, action: "drive", status: "pending" }),
+          ]);
+        } finally {
+          process.child.kill("SIGINT");
+        }
+        const { code } = await process.exited;
+        expect(code, process.stdout()).toBe(0);
+      }),
+    120_000,
+  );
 });

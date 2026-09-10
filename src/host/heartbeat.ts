@@ -1,10 +1,11 @@
 import { Cause, Effect, Schedule, type Scope, Schema } from "effect";
 import * as Servers from "../db/servers.ts";
+import type * as DbSchema from "../db/schema.ts";
 import * as ExternalFailure from "../external-failure.ts";
 import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
 import * as Errors from "../shared/errors.ts";
-import * as Sessions from "./sessions.ts";
+import type * as Stats from "./stats.ts";
 
 // Every thirty seconds, and the dashboard polls as often: a server's row is never more than one
 // poll behind, and three missed writes are what the page calls silent.
@@ -18,34 +19,33 @@ const detail = (error: unknown): string =>
     ? Render.errorDetail(ExternalFailure.causeOf(error))
     : Render.errorDetail(error);
 
-// Announces this server under `url`: its `servers` row is written now and every thirty seconds
-// with what it knows of itself — a qemu server, this process boots nothing else — and the row's
-// generation counts the writes, so a number that stops moving is a server that stopped without a
-// chance to leave. A tick that fails is one error line; the next tick runs. The row is this
-// process's word on itself, so a shutdown deletes it: registered before the loop so the fiber is
-// interrupted first, a write in flight finishes (the write is uninterruptible), then the row
-// goes. A delete that fails is one `unannounce failed` line; the process still exits.
+export const hostRow = (host: Stats.HostStats): DbSchema.HostRowStats => ({
+  memory: { totalBytes: host.memory.totalBytes, usedBytes: host.memory.usedBytes },
+  cpu: { mean1m: host.cpu.mean1m, mean2m: host.cpu.mean2m, mean3m: host.cpu.mean3m },
+});
+
+// Announces this process under `url` and `type`: its `servers` row is written now and every
+// thirty seconds with the stats effect's answer, and the row's generation counts the writes, so
+// a number that stops moving is a process that stopped without a chance to leave. A tick that
+// fails is one error line; the next tick runs. The row is this process's word on itself, so a
+// shutdown deletes it: registered before the loop so the fiber is interrupted first, a write in
+// flight finishes (the write is uninterruptible), then the row goes. A delete that fails is one
+// `unannounce failed` line; the process still exits.
 export const announce = (
   url: string,
-): Effect.Effect<void, never, Scope.Scope | Sessions.Sessions | Servers.ServerStore | Log.Log> =>
+  type: Servers.ServerType,
+  stats: Effect.Effect<DbSchema.ServerStats>,
+): Effect.Effect<void, never, Scope.Scope | Servers.ServerStore | Log.Log> =>
   Effect.gen(function* () {
-    const sessions = yield* Sessions.Sessions;
     const store = yield* Servers.ServerStore;
     const log = yield* Log.Log;
-    const tick = sessions.stats.pipe(
-      Effect.flatMap((stats) =>
-        Effect.uninterruptible(
-          store.heartbeat(url, "qemu", {
-            qemus: stats.qemus,
-            memory: { totalBytes: stats.memory.totalBytes, usedBytes: stats.memory.usedBytes },
-            cpu: { mean1m: stats.cpu.mean1m, mean2m: stats.cpu.mean2m, mean3m: stats.cpu.mean3m },
-          }),
-        ),
-      ),
+    const attribution = yield* Log.ProcessAttribution;
+    const tick = stats.pipe(
+      Effect.flatMap((row) => Effect.uninterruptible(store.heartbeat(url, type, row))),
       Effect.catchCause((cause) => {
         const error = Cause.squash(cause);
         return log.error(`heartbeat failed: ${detail(error)}`, {
-          location: Log.Locations.server,
+          ...attribution,
           cause: error,
         });
       }),
@@ -56,7 +56,7 @@ export const announce = (
         Effect.catchCause((cause) => {
           const error = Cause.squash(cause);
           return log.error(`unannounce failed: ${detail(error)}`, {
-            location: Log.Locations.server,
+            ...attribution,
             cause: error,
           });
         }),

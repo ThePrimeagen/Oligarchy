@@ -17,10 +17,12 @@ import { Command } from "effect/unstable/cli";
 import { HttpServerError } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import * as AutomationServerCommand from "../../src/automation-server/command.ts";
+import * as Automation from "../../src/db/automation.ts";
 import * as Client from "../../src/db/client.ts";
 import * as Api from "../../src/shared/api.ts";
 import * as Errors from "../../src/shared/errors.ts";
 import * as FakeLog from "../support/log.ts";
+import * as Stores from "../support/stores.ts";
 
 const CliTestLayer = Layer.mergeAll(
   FileSystem.layerNoop({}),
@@ -67,15 +69,31 @@ const DatabaseLive = (ping: Effect.Effect<void, Errors.DatabaseError> = Effect.v
     }),
   );
 
+const trackingAutomation = (
+  abortRunning: (reason: string) => Effect.Effect<number, Errors.DatabaseError> = () =>
+    Effect.succeed(0),
+) => {
+  const abortCalls: Array<string> = [];
+  const store = Stores.fakeAutomationStore({
+    abortRunning: (reason) =>
+      Effect.gen(function* () {
+        abortCalls.push(reason);
+        return yield* abortRunning(reason);
+      }),
+  });
+  return { abortCalls, layer: store.layer };
+};
+
 const run = (
   server: AutomationServerCommand.AutomationServer<never>,
   args: ReadonlyArray<string>,
   log: FakeLog.FakeLog,
   database: Layer.Layer<Client.Database> = DatabaseLive(),
+  automation: Layer.Layer<Automation.AutomationStore> = trackingAutomation().layer,
 ) =>
   Command.runWith(AutomationServerCommand.makeAutomationServerCommand(server), {
     version: Api.VERSION,
-  })(args).pipe(Effect.provide(Layer.mergeAll(CliTestLayer, log.layer, database)));
+  })(args).pipe(Effect.provide(Layer.mergeAll(CliTestLayer, log.layer, database, automation)));
 
 describe("automation server command flags", () => {
   it.effect("--port must be an integer", () =>
@@ -105,16 +123,20 @@ describe("automation server command flags", () => {
     }),
   );
 
-  it.effect("defaults to port 54321, pings the database, and listens", () =>
+  it.effect("defaults to port 54321, pings the database, sweeps, and listens", () =>
     Effect.gen(function* () {
       const fake = fakeServer();
       const log = FakeLog.fakeLog();
-      const fiber = yield* Effect.forkChild(run(fake.server, [], log));
+      const automation = trackingAutomation();
+      const fiber = yield* Effect.forkChild(
+        run(fake.server, [], log, DatabaseLive(), automation.layer),
+      );
       yield* Deferred.await(fake.listening);
       yield* Fiber.interrupt(fiber);
       const exit = yield* Fiber.await(fiber);
       expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true);
       expect(fake.served).toEqual([54321]);
+      expect(automation.abortCalls).toEqual(["automation-server restarted"]);
       expect(log.lines).toEqual([]);
     }),
   );
@@ -136,13 +158,14 @@ describe("automation server command startup failures", () => {
     Effect.gen(function* () {
       const fake = fakeServer();
       const log = FakeLog.fakeLog();
+      const automation = trackingAutomation();
       const unreachable = Errors.DatabaseError.make({
         operation: "ping",
         message: "database request failed",
         cause: new Error("connect ECONNREFUSED"),
       });
       const error = yield* Effect.flip(
-        run(fake.server, [], log, DatabaseLive(Effect.fail(unreachable))),
+        run(fake.server, [], log, DatabaseLive(Effect.fail(unreachable)), automation.layer),
       );
       expect(error).toMatchObject({
         _tag: "DatabaseError",
@@ -150,8 +173,33 @@ describe("automation server command startup failures", () => {
         message: "database unreachable: connect ECONNREFUSED",
       });
       expect(fake.served).toEqual([]);
+      expect(automation.abortCalls).toEqual([]);
       expect(log.lines.map((line) => [line.level, line.text])).toEqual([
         ["fatal", "automation server: database unreachable: connect ECONNREFUSED"],
+      ]);
+    }),
+  );
+
+  it.effect("a sweep that fails is fatal and never listens (unhappy)", () =>
+    Effect.gen(function* () {
+      const fake = fakeServer();
+      const log = FakeLog.fakeLog();
+      const refused = Errors.DatabaseError.make({
+        operation: "abortRunning",
+        message: "Failed query: update automation_jobs",
+        cause: new Error("connect ECONNREFUSED"),
+      });
+      const automation = trackingAutomation(() => Effect.fail(refused));
+      const error = yield* Effect.flip(run(fake.server, [], log, DatabaseLive(), automation.layer));
+      expect(error).toMatchObject({
+        _tag: "DatabaseError",
+        operation: "abortRunning",
+        message: "Failed query: update automation_jobs",
+      });
+      expect(fake.served).toEqual([]);
+      expect(automation.abortCalls).toEqual(["automation-server restarted"]);
+      expect(log.lines.map((line) => [line.level, line.text])).toEqual([
+        ["fatal", "automation server: Failed query: update automation_jobs"],
       ]);
     }),
   );
