@@ -76,6 +76,28 @@ describe("Cli.run unhappy path", () => {
     }),
   );
 
+  it.effect(
+    "keeps the last 4 KiB of stderr, NUL bytes dropped, so the message is storable text",
+    () =>
+      Effect.gen(function* () {
+        const head = "x".repeat(5_000);
+        const spawner = FakeSpawner.fakeSpawner(() => ({
+          exitCode: 1,
+          stderr: `${head}\nbinary \u0000junk\u0000 then\nError: Invalid upload request.\n`,
+        }));
+        const error = yield* Effect.flip(
+          Cli.run("tool", ["run"]).pipe(Effect.provide(spawner.layer)),
+        );
+        expect(error._tag).toBe("CliFailed");
+        expect(error.message.includes("\u0000")).toBe(false);
+        expect(error.message.length).toBeLessThanOrEqual(Cli.STDERR_TAIL);
+        expect(error.message.endsWith("Error: Invalid upload request.")).toBe(true);
+        expect(error.message).toContain("binary junk then");
+        expect(error.message.startsWith("x")).toBe(true);
+        expect(error.message.length).toBe(Cli.STDERR_TAIL);
+      }),
+  );
+
   it.effect("names the exit when the command exits non-zero with empty stderr", () =>
     Effect.gen(function* () {
       const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 2 }));

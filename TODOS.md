@@ -16,3 +16,11 @@ Things noticed during the super run that need addressing but did not block it.
 - OLI-1064 (result `ae26db3c…`, the manual pipeline test from 2026-09-10 13:51Z) is left `running`
   in `test_results` with its ticket in `In Progress`; the session was aborted by a qemu server
   shutdown. Close or delete it.
+- `./client get-image` (and `./client-with-image get-image`) without `-o` prints the PNG to stdout.
+  A driving agent that does this puts raw PNG bytes into its own context; the next request is then
+  refused by the opencode provider (`400 invalid_request_error: Invalid upload request`) and the run
+  dies (OLI-1067). Consider refusing `get-image` without `-o` when stdout is not a tty, or having
+  `client-with-image` always pass `-o "$CLIENT_IMAGE"` for its wrapped action too.
+- A `finishAutomationJob` that fails (the database away, or a reason Postgres refuses) leaves the
+  job `running` for good: nothing re-finishes it and `claim` only takes `pending`. The reason text
+  is now sanitised in `Cli.run`; a sweep for `running` jobs whose client is gone is still missing.

@@ -6,6 +6,11 @@ import * as Errors from "./shared/errors.ts";
 
 export const FORCE_KILL_AFTER = "5 seconds";
 
+// The failure message is the end of stderr, as the qemu tail is: the last lines say why. It lands
+// in a job's reason and a logs row, and Postgres text refuses NUL, so a binary blob a tool dumped
+// on stderr must not cost the run its verdict.
+export const STDERR_TAIL = 4_096;
+
 const detail = (error: unknown): string =>
   ExternalFailure.describeThrowable(ExternalFailure.causeOf(error), Render.errorDetail(error));
 
@@ -42,7 +47,7 @@ export const run = Effect.fn("Cli.run")(function* (command: string, args: Readon
         ],
         { concurrency: "unbounded" },
       );
-      const trimmed = stderr.trim();
+      const trimmed = stderr.replaceAll("\u0000", "").trim().slice(-STDERR_TAIL);
       if (code !== 0) {
         return yield* failed(
           command,
