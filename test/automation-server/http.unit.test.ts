@@ -4,7 +4,7 @@ import { it } from "@effect/vitest";
 import { Effect, Layer, Redacted } from "effect";
 import { HttpBody, HttpClient, HttpRouter } from "effect/unstable/http";
 import { NodeHttpServer } from "@effect/platform-node";
-import * as Handlers from "../../src/automation/handlers.ts";
+import * as Handlers from "../../src/automation-server/handlers.ts";
 import * as Log from "../../src/observability/log.ts";
 import * as FakeLog from "../support/log.ts";
 import * as Reporter from "../support/reporter.ts";

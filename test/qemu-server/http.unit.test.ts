@@ -23,7 +23,7 @@ import { NodeHttpServer } from "@effect/platform-node";
 import * as Config from "../../src/config.ts";
 import * as Log from "../../src/observability/log.ts";
 import * as Render from "../../src/observability/render.ts";
-import * as Handlers from "../../src/proxy/handlers.ts";
+import * as Handlers from "../../src/qemu-server/handlers.ts";
 import * as Api from "../../src/shared/api.ts";
 import * as Contract from "../../src/shared/contract.ts";
 import * as Domain from "../../src/shared/domain.ts";

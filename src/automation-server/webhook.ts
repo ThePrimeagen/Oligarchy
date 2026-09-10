@@ -5,7 +5,7 @@ export const IssueState = Schema.Struct({
   id: Schema.String,
   name: Schema.NonEmptyString,
   type: Schema.NonEmptyString,
-}).annotate({ identifier: "@oligarchy/automation/webhook/IssueState" });
+}).annotate({ identifier: "@oligarchy/automation-server/webhook/IssueState" });
 export type IssueState = typeof IssueState.Type;
 
 export const IssueWebhook = Schema.Struct({
@@ -20,7 +20,7 @@ export const IssueWebhook = Schema.Struct({
       state: Schema.optionalKey(Schema.Unknown),
     }),
   ),
-}).annotate({ identifier: "@oligarchy/automation/webhook/IssueWebhook" });
+}).annotate({ identifier: "@oligarchy/automation-server/webhook/IssueWebhook" });
 export type IssueWebhook = typeof IssueWebhook.Type;
 
 export type Work = {

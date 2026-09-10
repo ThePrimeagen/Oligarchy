@@ -14,13 +14,12 @@ import {
   Terminal,
 } from "effect";
 import { TestConsole } from "effect/testing";
-import { CliError, Command } from "effect/unstable/cli";
+import { Command } from "effect/unstable/cli";
 import { HttpServerError } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import * as Client from "../../src/db/client.ts";
-import * as ProxyCommand from "../../src/proxy/command.ts";
+import * as ReverseProxyCommand from "../../src/qemu-reverse-proxy/command.ts";
 import * as Api from "../../src/shared/api.ts";
-import type * as Domain from "../../src/shared/domain.ts";
 import * as Errors from "../../src/shared/errors.ts";
 import * as FakeLog from "../support/log.ts";
 
@@ -59,93 +58,55 @@ const refused = Errors.DatabaseError.make({
   cause: new Error("connect ECONNREFUSED 127.0.0.1:1"),
 });
 
-type Served = readonly [Domain.QemuDisplay, boolean, number, string];
-
-// The host check, the server layer and the failure signal the command is built from.
-const fakeServer = (missing: ReadonlyArray<string> = []) => {
-  const checked: Array<Domain.QemuDisplay> = [];
-  const served: Array<Served> = [];
+// The server layer and the failure signal the command is built from.
+const fakeServer = () => {
+  const served: Array<number> = [];
   const listening = Deferred.makeUnsafe<void>();
   const serverFailed = Deferred.makeUnsafe<never, HttpServerError.ServeError>();
-  const server: ProxyCommand.ProxyServer<never, never> = {
-    missingHostRequirements: (display) =>
-      Effect.sync(() => {
-        checked.push(display);
-        return missing;
-      }),
-    serve: (display, automation, port, url) =>
+  const server: ReverseProxyCommand.ReverseProxyServer<never> = {
+    serve: (port) =>
       Layer.effectDiscard(
         Effect.gen(function* () {
-          served.push([display, automation, port, url]);
+          served.push(port);
           yield* Deferred.succeed(listening, undefined);
         }),
       ),
     serverFailed,
   };
-  return { checked, served, listening, serverFailed, server };
+  return { served, listening, serverFailed, server };
 };
 
 const run = (
-  server: ProxyCommand.ProxyServer<never, never>,
+  server: ReverseProxyCommand.ReverseProxyServer<never>,
   args: ReadonlyArray<string>,
   log: FakeLog.FakeLog,
   ping: Effect.Effect<void, Errors.DatabaseError> = Effect.void,
 ) =>
-  Command.runWith(ProxyCommand.makeProxyCommand(server), { version: Api.VERSION })(args).pipe(
-    Effect.provide(Layer.mergeAll(CliTestLayer, log.layer, fakeDatabase(ping))),
-  );
+  Command.runWith(ReverseProxyCommand.makeReverseProxyCommand(server), { version: Api.VERSION })(
+    args,
+  ).pipe(Effect.provide(Layer.mergeAll(CliTestLayer, log.layer, fakeDatabase(ping))));
 
-describe("qemu server command flags", () => {
-  it.effect("--automation with --display is a UserError that touches nothing", () =>
-    Effect.gen(function* () {
-      const fake = fakeServer();
-      const log = FakeLog.fakeLog();
-      const error = yield* Effect.flip(run(fake.server, ["--automation", "--display", "gtk"], log));
-      expect(CliError.isCliError(error)).toBe(true);
-      expect(error).toMatchObject({ _tag: "UserError", userMessage: "--automation is exclusive" });
-      expect(fake.checked).toEqual([]);
-      expect(fake.served).toEqual([]);
-      expect(log.lines).toEqual([]);
-      const stderr = yield* TestConsole.errorLines;
-      expect(stderr.join("\n")).toContain("--automation is exclusive");
-    }),
-  );
-
-  it.effect("--automation --display none is exclusive too", () =>
-    Effect.gen(function* () {
-      const fake = fakeServer();
-      const log = FakeLog.fakeLog();
-      const error = yield* Effect.flip(
-        run(fake.server, ["--display", "none", "--automation"], log),
-      );
-      expect(error).toMatchObject({ _tag: "UserError", userMessage: "--automation is exclusive" });
-      expect(fake.served).toEqual([]);
-    }),
-  );
-
-  it.effect("--display curses is a usage error", () =>
-    Effect.gen(function* () {
-      const fake = fakeServer();
-      const log = FakeLog.fakeLog();
-      const error = yield* Effect.flip(run(fake.server, ["--display", "curses"], log));
-      expect(error._tag).toBe("ShowHelp");
-      if (error._tag === "ShowHelp") {
-        expect(error.errors.length).toBeGreaterThan(0);
-        expect(error.errors[0]?._tag).toBe("InvalidValue");
-      }
-      expect(fake.checked).toEqual([]);
-      expect(fake.served).toEqual([]);
-      expect(log.lines).toEqual([]);
-    }),
-  );
-
+describe("qemu reverse proxy command flags", () => {
   it.effect("--port must be an integer", () =>
     Effect.gen(function* () {
       const fake = fakeServer();
       const log = FakeLog.fakeLog();
-      const error = yield* Effect.flip(run(fake.server, ["--port", "forty"], log));
+      const port = yield* Effect.flip(run(fake.server, ["--port", "forty"], log));
+      expect(port._tag).toBe("ShowHelp");
+      expect(fake.served).toEqual([]);
+      expect(log.lines).toEqual([]);
+    }),
+  );
+
+  // The page moved to the dashboard (oligarchy.trm.sh/servers); the flag that placed it went too.
+  it.effect("--diagnostics-port is no longer a flag: a usage error that touches nothing", () =>
+    Effect.gen(function* () {
+      const fake = fakeServer();
+      const log = FakeLog.fakeLog();
+      const error = yield* Effect.flip(run(fake.server, ["--diagnostics-port", "55445"], log));
       expect(error._tag).toBe("ShowHelp");
       expect(fake.served).toEqual([]);
+      expect(log.lines).toEqual([]);
     }),
   );
 
@@ -153,21 +114,19 @@ describe("qemu server command flags", () => {
     Effect.gen(function* () {
       const fake = fakeServer();
       const log = FakeLog.fakeLog();
-      const exit = yield* Effect.exit(run(fake.server, ["--help"], log));
+      const exit = yield* Effect.exit(run(fake.server, ["--help"], log, Effect.fail(refused)));
       expect(Exit.isSuccess(exit)).toBe(true);
-      expect(fake.checked).toEqual([]);
       expect(fake.served).toEqual([]);
       expect(log.lines).toEqual([]);
       const stdout = yield* TestConsole.logLines;
-      expect(stdout.join("\n")).toContain("qemu-server");
-      expect(stdout.join("\n")).toContain("--automation");
-      expect(stdout.join("\n")).toContain("--display");
+      expect(stdout.join("\n")).toContain("qemu-reverse-proxy");
       expect(stdout.join("\n")).toContain("--port");
-      expect(stdout.join("\n")).not.toContain("--url");
+      expect(stdout.join("\n")).not.toContain("--diagnostics-port");
+      expect(stdout.join("\n")).not.toContain("--display");
     }),
   );
 
-  it.effect("defaults to display none and port 42069 and announces http://127.0.0.1:42069", () =>
+  it.effect("defaults to port 42070 and pings the database first", () =>
     Effect.gen(function* () {
       const fake = fakeServer();
       const log = FakeLog.fakeLog();
@@ -176,71 +135,24 @@ describe("qemu server command flags", () => {
       yield* Fiber.interrupt(fiber);
       const exit = yield* Fiber.await(fiber);
       expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true);
-      expect(fake.checked).toEqual(["none"]);
-      expect(fake.served).toEqual([["none", false, 42069, "http://127.0.0.1:42069"]]);
+      expect(fake.served).toEqual([42070]);
       expect(log.lines).toEqual([]);
     }),
   );
 
-  it.effect("--display gtk --port 1234 and --automation reach the server as given", () =>
-    Effect.gen(function* () {
-      const gtk = fakeServer();
-      const log = FakeLog.fakeLog();
-      const first = yield* Effect.forkChild(
-        run(gtk.server, ["--display", "gtk", "--port", "1234"], log),
-      );
-      yield* Deferred.await(gtk.listening);
-      yield* Fiber.interrupt(first);
-      expect(gtk.checked).toEqual(["gtk"]);
-      expect(gtk.served).toEqual([["gtk", false, 1234, "http://127.0.0.1:1234"]]);
-
-      const automation = fakeServer();
-      const second = yield* Effect.forkChild(run(automation.server, ["--automation"], log));
-      yield* Deferred.await(automation.listening);
-      yield* Fiber.interrupt(second);
-      expect(automation.checked).toEqual(["none"]);
-      expect(automation.served).toEqual([["none", true, 42069, "http://127.0.0.1:42069"]]);
-    }),
-  );
-
-  it.effect("--url is no longer a flag: a usage error that touches nothing", () =>
+  it.effect("--port 1234 reaches the server as given", () =>
     Effect.gen(function* () {
       const fake = fakeServer();
       const log = FakeLog.fakeLog();
-      const error = yield* Effect.flip(run(fake.server, ["--url", "http://127.0.0.1:55332"], log));
-      expect(error._tag).toBe("ShowHelp");
-      expect(fake.checked).toEqual([]);
-      expect(fake.served).toEqual([]);
-      expect(log.lines).toEqual([]);
+      const fiber = yield* Effect.forkChild(run(fake.server, ["--port", "1234"], log));
+      yield* Deferred.await(fake.listening);
+      yield* Fiber.interrupt(fiber);
+      expect(fake.served).toEqual([1234]);
     }),
   );
 });
 
-describe("qemu server command startup failures", () => {
-  it.effect("missing host requirements fail before any ping or listen and log fatal", () =>
-    Effect.gen(function* () {
-      const missing = [
-        "qemu-system-x86_64 not on PATH",
-        "/dev/kvm is not readable and writable (needed for accel=kvm)",
-      ];
-      const fake = fakeServer(missing);
-      const log = FakeLog.fakeLog();
-      const error = yield* Effect.flip(run(fake.server, [], log, Effect.fail(refused)));
-      expect(error).toMatchObject({ _tag: "HostRequirementsMissing", missing });
-      expect(fake.served).toEqual([]);
-      expect(log.lines).toEqual([
-        {
-          level: "fatal",
-          text: `qemu server: missing host requirements:\n${missing.join("\n")}`,
-          location: "server",
-          agentId: undefined,
-          skipSentry: false,
-          cause: error,
-        },
-      ]);
-    }),
-  );
-
+describe("qemu reverse proxy command startup failures", () => {
   it.effect("an unreachable database fails before listening as database unreachable", () =>
     Effect.gen(function* () {
       const fake = fakeServer();
@@ -251,12 +163,11 @@ describe("qemu server command startup failures", () => {
         operation: "ping",
         message: "database unreachable: connect ECONNREFUSED 127.0.0.1:1",
       });
-      expect(fake.checked).toEqual(["none"]);
       expect(fake.served).toEqual([]);
       expect(log.lines).toEqual([
         {
           level: "fatal",
-          text: "qemu server: database unreachable: connect ECONNREFUSED 127.0.0.1:1",
+          text: "qemu reverse proxy: database unreachable: connect ECONNREFUSED 127.0.0.1:1",
           location: "server",
           agentId: undefined,
           skipSentry: false,
@@ -279,7 +190,7 @@ describe("qemu server command startup failures", () => {
         ),
       );
       expect(error).toMatchObject({ message: "database unreachable: pool ended" });
-      expect(log.lines[0]?.text).toBe("qemu server: database unreachable: pool ended");
+      expect(log.lines[0]?.text).toBe("qemu reverse proxy: database unreachable: pool ended");
     }),
   );
 
@@ -300,7 +211,7 @@ describe("qemu server command startup failures", () => {
       expect(log.lines).toHaveLength(1);
       expect(log.lines[0]).toMatchObject({
         level: "fatal",
-        text: "qemu server: accept EMFILE: too many open files",
+        text: "qemu reverse proxy: accept EMFILE: too many open files",
         skipSentry: false,
       });
       expect(log.lines[0]?.cause).toMatchObject({ _tag: "ServeError", cause });
@@ -309,17 +220,17 @@ describe("qemu server command startup failures", () => {
 
   it.effect("a listen failure is fatal with the bind error's message", () =>
     Effect.gen(function* () {
-      const cause = new Error("listen EADDRINUSE: address already in use 127.0.0.1:42069");
+      const cause = new Error("listen EADDRINUSE: address already in use 127.0.0.1:42070");
       const fake = fakeServer();
-      const failing: ProxyCommand.ProxyServer<never, never> = {
+      const failing: ReverseProxyCommand.ReverseProxyServer<never> = {
         ...fake.server,
         serve: () => Layer.effectDiscard(Effect.fail(new HttpServerError.ServeError({ cause }))),
       };
       const log = FakeLog.fakeLog();
-      const error = yield* Effect.flip(run(failing, ["--port", "42069"], log));
+      const error = yield* Effect.flip(run(failing, ["--port", "42070"], log));
       expect(error).toMatchObject({ _tag: "ServeError", cause });
       expect(log.lines.map((line) => [line.level, line.text])).toEqual([
-        ["fatal", "qemu server: listen EADDRINUSE: address already in use 127.0.0.1:42069"],
+        ["fatal", "qemu reverse proxy: listen EADDRINUSE: address already in use 127.0.0.1:42070"],
       ]);
     }),
   );

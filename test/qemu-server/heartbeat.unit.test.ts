@@ -2,7 +2,7 @@ import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { Deferred, Effect, Exit, Fiber, Layer, Scope } from "effect";
 import { TestClock } from "effect/testing";
-import * as Heartbeat from "../../src/proxy/heartbeat.ts";
+import * as Heartbeat from "../../src/qemu-server/heartbeat.ts";
 import * as Errors from "../../src/shared/errors.ts";
 import * as FakeSessions from "../support/fake-sessions.ts";
 import * as FakeLog from "../support/log.ts";

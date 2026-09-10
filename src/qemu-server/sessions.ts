@@ -128,7 +128,7 @@ export type Shutdown = {
   readonly failed: MutableRef.MutableRef<boolean>;
 };
 
-export const Shutdown = Context.Reference<Shutdown>("@oligarchy/proxy/sessions/Shutdown", {
+export const Shutdown = Context.Reference<Shutdown>("@oligarchy/qemu-server/sessions/Shutdown", {
   defaultValue: () => ({
     reason: MutableRef.make(SHUTDOWN_REASON),
     failed: MutableRef.make(false),
@@ -941,7 +941,9 @@ const make = Effect.gen(function* () {
   return service;
 });
 
-export class Sessions extends Context.Service<Sessions>()("@oligarchy/proxy/Sessions", { make }) {
+export class Sessions extends Context.Service<Sessions>()("@oligarchy/qemu-server/Sessions", {
+  make,
+}) {
   static readonly layer: Layer.Layer<
     Sessions,
     never,

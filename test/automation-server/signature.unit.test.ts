@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import * as Signature from "../../src/automation/signature.ts";
+import * as Signature from "../../src/automation-server/signature.ts";
 
 const SECRET = "whsec_test";
 const BODY = new TextEncoder().encode('{"action":"update","type":"Issue"}');

@@ -5,8 +5,8 @@ import * as Config from "../config.ts";
 import * as Automation from "../db/automation.ts";
 import * as Tests from "../db/tests.ts";
 import * as Log from "../observability/log.ts";
-import * as ProxyHandlers from "../proxy/handlers.ts";
-import * as Middleware from "../proxy/middleware.ts";
+import * as ProxyHandlers from "../qemu-server/handlers.ts";
+import * as Middleware from "../qemu-server/middleware.ts";
 import * as Api from "../shared/api.ts";
 import * as Contract from "../shared/contract.ts";
 import * as Errors from "../shared/errors.ts";
@@ -16,7 +16,7 @@ import * as Webhook from "./webhook.ts";
 const ok = Contract.Ok.make({});
 
 export class LinearWebhookSecret extends Context.Service<LinearWebhookSecret>()(
-  "@oligarchy/automation/LinearWebhookSecret",
+  "@oligarchy/automation-server/LinearWebhookSecret",
   { make: Config.linearWebhookSecret },
 ) {
   static readonly layer = Layer.effect(this)(this.make);

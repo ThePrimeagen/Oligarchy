@@ -90,8 +90,8 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   rest by deep path: `effect/unstable/cli`, `effect/unstable/http`, `effect/unstable/httpapi`,
   `effect/unstable/process`, `effect/testing`, `@effect/platform-node`, `@effect/vitest`.
 - Identifiers are `@oligarchy/<dir>/<file>/<Name>` for schemas, errors and `Context.Reference`s
-  (`@oligarchy/shared/errors/BadRequest`, `@oligarchy/proxy/sessions/Shutdown`) and
-  `@oligarchy/<dir>/<Service>` for services (`@oligarchy/db/Database`, `@oligarchy/proxy/Sessions`).
+  (`@oligarchy/shared/errors/BadRequest`, `@oligarchy/qemu-server/sessions/Shutdown`) and
+  `@oligarchy/<dir>/<Service>` for services (`@oligarchy/db/Database`, `@oligarchy/qemu-server/Sessions`).
 - Only the boundary files may import `node:*`, read `process.*`, or use `setTimeout`,
   `setInterval`, `new Promise` or `async`: every `src/**/main.ts` and the files named in
   `BOUNDARY_FILES` in `test/repo/architecture.unit.test.ts`, each the one place a Node API (a
@@ -162,7 +162,7 @@ The `Database` service in `src/db/client.ts` is the model: `makeDatabase(url)` n
 acquires the pool without connecting under `Effect.acquireRelease`, re-enters Effect from
 `pool.on("error")` with `Effect.runForkWith(context)`, and its release logs instead of failing.
 
-A graph, from `src/proxy/main.ts`: one reference per service, a layer that depends on a value
+A graph, from `src/qemu-server/main.ts`: one reference per service, a layer that depends on a value
 unwrapped, and the reporter beneath the log so the log rows flush before the reporter does.
 
 ```ts
@@ -522,7 +522,7 @@ NodeRuntime.runMain(main, { disableErrorReporting: true });
 
 `BearerAuth`, declared in `api.ts` as `HttpApiMiddleware.Service<BearerAuth>()(id, { error:
 Errors.UnauthorizedWire, security: { bearer: HttpApiSecurity.bearer }, requiredForClient: true })`
-and implemented as `BearerAuthLive` in `src/proxy/middleware.ts`: compare, then run the request.
+and implemented as `BearerAuthLive` in `src/qemu-server/middleware.ts`: compare, then run the request.
 
 ```ts
 export const BearerAuthLive: Layer.Layer<Api.BearerAuth, never, Config.ProxyConfig> = Layer.effect(

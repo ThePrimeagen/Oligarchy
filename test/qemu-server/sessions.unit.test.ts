@@ -18,7 +18,7 @@ import {
   Tracer,
 } from "effect";
 import { TestClock } from "effect/testing";
-import * as Sessions from "../../src/proxy/sessions.ts";
+import * as Sessions from "../../src/qemu-server/sessions.ts";
 import * as Log from "../../src/observability/log.ts";
 import * as Contract from "../../src/shared/contract.ts";
 import * as Domain from "../../src/shared/domain.ts";

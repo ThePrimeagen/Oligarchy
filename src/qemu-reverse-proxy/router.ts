@@ -315,7 +315,9 @@ const make = Effect.gen(function* () {
   return service;
 });
 
-export class Router extends Context.Service<Router>()("@oligarchy/reverse-proxy/Router", { make }) {
+export class Router extends Context.Service<Router>()("@oligarchy/qemu-reverse-proxy/Router", {
+  make,
+}) {
   static readonly layer: Layer.Layer<
     Router,
     never,

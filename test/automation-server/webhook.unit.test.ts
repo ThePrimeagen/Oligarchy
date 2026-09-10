@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Option } from "effect";
-import * as Webhook from "../../src/automation/webhook.ts";
+import * as Webhook from "../../src/automation-server/webhook.ts";
 
 const bytes = (json: unknown): Uint8Array => new TextEncoder().encode(JSON.stringify(json));
 

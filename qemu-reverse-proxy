@@ -1,2 +1,2 @@
 #!/bin/sh
-exec node --experimental-strip-types --import "$(dirname "$0")/src/observability/instrument.ts" "$(dirname "$0")/src/reverse-proxy/main.ts" "$@"
+exec node --experimental-strip-types --import "$(dirname "$0")/src/observability/instrument.ts" "$(dirname "$0")/src/qemu-reverse-proxy/main.ts" "$@"

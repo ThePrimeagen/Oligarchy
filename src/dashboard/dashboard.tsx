@@ -781,7 +781,7 @@ app.get("/images/:id", async (context) => {
 
 // The fleet page, outside the dashboard's shell: unstyled text served whole, not through the
 // renderer. Its rows are written by the servers themselves every thirty seconds
-// (src/proxy/heartbeat.ts) and read here as often. `servers` is absent only when the database
+// (src/qemu-server/heartbeat.ts) and read here as often. `servers` is absent only when the database
 // could not be read, so a 500 page does not claim an empty fleet.
 const serversPage = (
   context: Context<{ Bindings: Bindings }>,
