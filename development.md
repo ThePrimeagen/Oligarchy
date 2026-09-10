@@ -14,7 +14,8 @@ exist.
 ## Toolchain
 
 - Run on Node 26 with npm. Every executable is a `#!/bin/sh` wrapper running
-  `node --experimental-strip-types` (`./qemu-server`, `./qemu-reverse-proxy` and `./automation-server` add
+  `node --experimental-strip-types` (`./qemu-server`, `./qemu-reverse-proxy`, `./automation-server`
+  and `./automation-client` add
   `--import ./src/observability/instrument.ts`); types are stripped, not transformed, so
   `erasableSyntaxOnly` stays on.
 - Install with `npm ci`; `prepare` runs `effect-tsgo patch --oxlint` so the `effecttsgo/*` rules
@@ -68,11 +69,11 @@ Durable preferences from the maintainer; when they conflict with generic best pr
 ## Layout
 
 - The root holds `AGENTS.md`, the executable wrappers (`./client`, `./client-with-image`,
-  `./ctrl`, `./qemu-server`, `./qemu-reverse-proxy`, `./automation-server`, `./session`), the tooling files,
+  `./ctrl`, `./qemu-server`, `./qemu-reverse-proxy`, `./automation-server`, `./automation-client`, `./session`), the tooling files,
   `drizzle/` (migrations), `public/` and `prompts/`, the operator documents, this document, `src/`
   and `test/`.
 - `src/` is one directory per process plus the shared kernel (`src/shared/`, `src/config.ts`,
-  `src/external-failure.ts`, `src/observability/`, `src/db/`); `main.ts` files are the entries.
+  `src/cli.ts`, `src/external-failure.ts`, `src/observability/`, `src/db/`); `main.ts` files are the entries.
 - `src/dashboard/` is a Hono Worker, not Effect: it has no Effect runtime, reaches Postgres
   through Hyperdrive and drizzle with one `pg.Client` per request ended in `finally` (a client
   left open holds a Hyperdrive connection past the response), never calls the qemu server's API, and
@@ -755,7 +756,7 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
 ## Sentry
 
 - Initialise the SDK before any Effect code in `src/observability/instrument.ts`, loaded by the
-  `qemu-server`, `qemu-reverse-proxy` and `automation-server` wrappers' `--import`: `Sentry.init({ dsn: SENTRY_DSN,
+  `qemu-server`, `qemu-reverse-proxy`, `automation-server` and `automation-client` wrappers' `--import`: `Sentry.init({ dsn: SENTRY_DSN,
   tracesSampleRate: 1,
   traceLifecycle: "stream", integrations: [Sentry.httpIntegration({ spans: false }),
   Sentry.nativeNodeFetchIntegration({ spans: false })] })`. `SENTRY_DSN` in `dsn.ts` is the one

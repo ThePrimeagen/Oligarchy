@@ -148,6 +148,14 @@ export class NoServer extends Schema.TaggedError<NoServer>("@oligarchy/shared/er
   override readonly [ErrorReporter.ignore] = true;
 }
 
+export class RunFailed extends Schema.TaggedError<RunFailed>("@oligarchy/shared/errors/RunFailed")(
+  "RunFailed",
+  { message: Schema.String, cause: Schema.optionalKey(Schema.Defect()) },
+  { httpApiStatus: 500 },
+) {
+  override readonly [ErrorReporter.ignore] = true;
+}
+
 export type ApiError =
   | BadRequest
   | Unauthorized
@@ -159,7 +167,8 @@ export type ApiError =
   | ExchangeFailed
   | Internal
   | ServerFailed
-  | NoServer;
+  | NoServer
+  | RunFailed;
 
 const resolveHttpApiStatus = SchemaAST.resolveAt("httpApiStatus");
 
@@ -182,6 +191,7 @@ const apiErrorClasses = {
   Internal,
   ServerFailed,
   NoServer,
+  RunFailed,
 } satisfies Record<ApiError["_tag"], Schema.Top>;
 
 export const apiStatus = (error: ApiError): number => httpStatus(apiErrorClasses[error._tag]);
@@ -248,6 +258,10 @@ export const ServerFailedWire = wireError(
 export const NoServerWire = wireError(
   NoServer,
   (message) => ({ _tag: "NoServer", message }) as const,
+);
+export const RunFailedWire = wireError(
+  RunFailed,
+  (message) => ({ _tag: "RunFailed", message }) as const,
 );
 
 // ---------------------------------------------------------------------------
@@ -364,6 +378,15 @@ export class ChildExit extends Schema.TaggedError<ChildExit>("@oligarchy/shared/
     return this.stderr;
   }
 }
+
+export class CliFailed extends Schema.TaggedError<CliFailed>("@oligarchy/shared/errors/CliFailed")(
+  "CliFailed",
+  {
+    command: Schema.String,
+    message: Schema.String,
+    cause: Schema.optionalKey(Schema.Defect()),
+  },
+) {}
 
 export class PngDecodeError extends Schema.TaggedError<PngDecodeError>(
   "@oligarchy/shared/errors/PngDecodeError",

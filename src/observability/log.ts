@@ -15,17 +15,20 @@ import * as Errors from "../shared/errors.ts";
 import type * as Domain from "../shared/domain.ts";
 import * as Render from "./render.ts";
 
-// location is a text bucket: a session UUID, Locations.server, or Locations.automation.
+// location is a text bucket: a session UUID, Locations.server, Locations.automation, or
+// Locations.automationClient.
 export type Attribution = { readonly location?: string; readonly agentId?: string };
 export type Report = Attribution & { readonly cause?: unknown; readonly skipSentry?: true };
 
 export const Locations = {
   automation: "automation",
+  automationClient: "automation-client",
   server: "server",
 } as const;
 
 // The automation server logs with agentId === Locations.automation as well.
 export const AutomationAgentId = Locations.automation;
+export const AutomationClientAgentId = Locations.automationClient;
 
 // Fallback attribution when a log line has no session: qemu-server-wide "server", or automation's
 // own bucket. Processes override this Reference at the top of their layer graph.
@@ -42,6 +45,11 @@ export const ProcessAttribution = Context.Reference<ProcessAttribution>(
 export const AutomationProcessAttribution: ProcessAttribution = {
   location: Locations.automation,
   agentId: AutomationAgentId,
+};
+
+export const AutomationClientProcessAttribution: ProcessAttribution = {
+  location: Locations.automationClient,
+  agentId: AutomationClientAgentId,
 };
 
 export type LogService = {

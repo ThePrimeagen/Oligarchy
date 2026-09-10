@@ -256,3 +256,28 @@ describe("AutomationServerApi", () => {
     expect(routes(Api.QemuReverseProxyApi).map(({ path }) => path)).not.toContain("/linear");
   });
 });
+
+describe("AutomationClientApi", () => {
+  const client = Api.AutomationClientApi;
+
+  it("declares POST /run and nothing else", () => {
+    const table = routes(client).map(({ method, path }) => `${method} ${path}`);
+    expect(table).toEqual(["POST /run"]);
+    expect(HttpApiClient.urlBuilder(client).Runs.run()).toBe("/run");
+  });
+
+  it("requires the bearer and applies BearerAuth then ApiBoundary", () => {
+    const spec = OpenApi.fromApi(client);
+    const run = byIdentifier(client, "run");
+    expect(run.group).toBe("Runs");
+    expect(run.middleware).toEqual([Api.BearerAuth.key, Api.ApiBoundary.key]);
+    expect(spec.paths["/run"]?.post?.security).toEqual([{ bearer: [] }]);
+    expect(run.errors).toEqual([400, 401, 500]);
+  });
+
+  it("is its own api: no other process answers /run", () => {
+    expect(routes(Api.QemuServerApi).map(({ path }) => path)).not.toContain("/run");
+    expect(routes(Api.QemuReverseProxyApi).map(({ path }) => path)).not.toContain("/run");
+    expect(routes(Api.AutomationServerApi).map(({ path }) => path)).not.toContain("/run");
+  });
+});

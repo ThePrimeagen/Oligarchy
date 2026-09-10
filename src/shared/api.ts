@@ -175,4 +175,17 @@ export class Linear extends HttpApiGroup.make("Linear").add(linear).middleware(A
 
 export class AutomationServerApi extends HttpApi.make("OligarchyAutomationServer").add(Linear) {}
 
+export const run = HttpApiEndpoint.post("run", "/run", {
+  payload: Contract.RunBody,
+  success: Contract.Ok,
+  error: Errors.RunFailedWire,
+});
+
+export class Runs extends HttpApiGroup.make("Runs")
+  .add(run)
+  .middleware(BearerAuth)
+  .middleware(ApiBoundary) {}
+
+export class AutomationClientApi extends HttpApi.make("OligarchyAutomationClient").add(Runs) {}
+
 export const VERSION = "0.0.0";

@@ -106,6 +106,12 @@ const cases: ReadonlyArray<WireCase> = [
     error: Errors.NoServer.make({ message: "no server registered", agentId: AGENT_ID }),
     status: 503,
   },
+  {
+    name: "RunFailed",
+    wire: Errors.RunFailedWire,
+    error: Errors.RunFailed.make({ message: "out of token credits" }),
+    status: 500,
+  },
 ];
 
 describe("API error wire codecs", () => {
@@ -238,5 +244,7 @@ describe("domain error messages", () => {
     expect(Errors.LinearError.make({ operation: "team", message: "x" })._tag).toBe("LinearError");
     expect(Errors.PngDecodeError.make({ message: "x" })._tag).toBe("PngDecodeError");
     expect(Errors.LogLine.make({ text: "x", level: "error" })._tag).toBe("LogLine");
+    expect(Errors.CliFailed.make({ command: "tool", message: "x" })._tag).toBe("CliFailed");
+    expect(Errors.RunFailed.make({ message: "x" })._tag).toBe("RunFailed");
   });
 });
