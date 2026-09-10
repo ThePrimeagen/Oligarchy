@@ -6,10 +6,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { Client } from "pg";
 import { describe, expect, inject } from "vitest";
 import { it } from "@effect/vitest";
 import { Effect, Schedule } from "effect";
-import * as Client from "../../src/db/client.ts";
+import * as DbClient from "../../src/db/client.ts";
 import * as DbSchema from "../../src/db/schema.ts";
 import * as Postgres from "../support/postgres.ts";
 
@@ -38,6 +40,7 @@ const environment = (
     HOME: home,
     PATH: path,
     OLIGARCHY_TOKEN: TOKEN,
+    DATABASE_URL: dbUrl === "" ? UNREACHABLE : dbUrl,
     NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --disable-warning=ExperimentalWarning`.trim(),
     https_proxy: "http://127.0.0.1:1",
     http_proxy: "http://127.0.0.1:1",
@@ -143,8 +146,25 @@ const installOpencode = (script: string): string => {
   return bin;
 };
 
+const lines = (output: string): ReadonlyArray<string> =>
+  output.split("\n").filter((line) => line !== "");
+
 const request = (port: number, headers: Record<string, string>, body: string) =>
   fetch(`http://127.0.0.1:${String(port)}/run`, { method: "POST", headers, body });
+
+const logsForClient = async () => {
+  const client = new Client({ connectionString: Postgres.getDbUrl() });
+  await client.connect();
+  try {
+    const db = drizzle({ client, schema: DbSchema });
+    return await db
+      .select()
+      .from(DbSchema.logs)
+      .where(eq(DbSchema.logs.location, "automation-client"));
+  } finally {
+    await client.end();
+  }
+};
 
 describe("automation client startup refusals", () => {
   it.live("--help exits 0 and lists --port and --url", () =>
@@ -185,30 +205,31 @@ describe("automation client startup refusals", () => {
       const { code } = await process.exited;
       expect(code).toBe(1);
       expect(process.stderr()).toContain("OLIGARCHY_TOKEN is not set");
+      expect(process.stderr()).not.toContain("sentinel-pw");
       expect(process.stdout()).not.toContain("listening");
     }),
   );
 
-  it.live("--url with an empty DATABASE_URL exits 1 with DATABASE_URL is not set", () =>
+  it.live("a missing DATABASE_URL exits 1 with DATABASE_URL is not set", () =>
     Effect.promise(async () => {
-      const process = spawnAutomationClient(["--url", "http://127.0.0.1:55332"], {
-        DATABASE_URL: "",
-      });
+      const process = spawnAutomationClient([], { DATABASE_URL: "" });
       const { code } = await process.exited;
       expect(code).toBe(1);
-      expect(process.stdout()).toContain("DATABASE_URL is not set");
+      expect(process.stderr()).toContain("DATABASE_URL is not set");
       expect(process.stdout()).not.toContain("listening");
     }),
   );
 
-  it.live("--url with an unreachable database exits 1 with database unreachable", () =>
+  it.live("an unreachable database exits 1 and never listens", () =>
     Effect.promise(async () => {
-      const process = spawnAutomationClient(["--url", "http://127.0.0.1:55332"], {
-        DATABASE_URL: UNREACHABLE,
-      });
+      const process = spawnAutomationClient([], { DATABASE_URL: UNREACHABLE });
       const { code } = await process.exited;
       expect(code).toBe(1);
-      expect(process.stdout()).toContain("database unreachable");
+      const fatal = lines(process.stdout()).find((line) =>
+        line.startsWith("[automation-client] automation-client: fatal: automation client: "),
+      );
+      expect(fatal, process.stdout()).toBeDefined();
+      expect(fatal).toContain("database unreachable");
       expect(process.stdout()).not.toContain("sentinel-pw");
       expect(process.stderr()).not.toContain("sentinel-pw");
       expect(process.stdout()).not.toContain("listening");
@@ -216,7 +237,31 @@ describe("automation client startup refusals", () => {
   );
 });
 
-describe("automation client POST /run", () => {
+const describeWithDatabase = dbUrl === "" ? describe.skip : describe;
+
+describeWithDatabase("automation client startup refusals with a database", () => {
+  it.live("an occupied port exits 1 with EADDRINUSE", () =>
+    Effect.promise(async () => {
+      const { port, release } = await occupy();
+      try {
+        const process = spawnAutomationClient(["--port", String(port)]);
+        const { code } = await process.exited;
+        expect(code).toBe(1);
+        const fatal = lines(process.stdout()).find((line) =>
+          line.startsWith("[automation-client] automation-client: fatal: automation client: "),
+        );
+        expect(fatal, process.stdout()).toBeDefined();
+        expect(fatal).toContain("EADDRINUSE");
+        expect(fatal).toContain(`127.0.0.1:${String(port)}`);
+        expect(process.stdout()).not.toContain("listening");
+      } finally {
+        await release();
+      }
+    }),
+  );
+});
+
+describeWithDatabase("automation client POST /run", () => {
   it.live("answers 200 when opencode exits 0", () =>
     Effect.promise(async () => {
       const bin = installOpencode("exit 0");
@@ -273,7 +318,7 @@ describe("automation client POST /run", () => {
     }),
   );
 
-  it.live("answers 401 without the bearer", () =>
+  it.live("answers 401 without the bearer and persists the error in logs", () =>
     Effect.promise(async () => {
       const bin = installOpencode("exit 0");
       const port = await freePort();
@@ -293,6 +338,8 @@ describe("automation client POST /run", () => {
         );
         expect(response.status).toBe(401);
         expect(await response.json()).toEqual({ error: "unauthorized" });
+        const rows = await logsForClient();
+        expect(rows.some((row) => row.text.includes("POST /run failed: unauthorized"))).toBe(true);
       } finally {
         process.child.kill("SIGTERM");
         await process.exited;
@@ -306,7 +353,7 @@ describe("automation client POST /run", () => {
 // first heartbeat lands.
 const announced = (url: string) =>
   Effect.gen(function* () {
-    const database = yield* Client.Database;
+    const database = yield* DbClient.Database;
     const rows = yield* database.run("announced", (db) =>
       db.select().from(DbSchema.servers).where(eq(DbSchema.servers.url, url)),
     );

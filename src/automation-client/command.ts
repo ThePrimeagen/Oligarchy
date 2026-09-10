@@ -1,6 +1,8 @@
 import { Deferred, Effect, Layer, Option } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import type { HttpServerError } from "effect/unstable/http";
+import * as Client from "../db/client.ts";
+import * as ExternalFailure from "../external-failure.ts";
 import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
 import * as Domain from "../shared/domain.ts";
@@ -9,19 +11,19 @@ import * as Errors from "../shared/errors.ts";
 // One above the automation server's, so both run on one host in development.
 const DEFAULT_PORT = 54322;
 
-type StartupError = Errors.DatabaseError | Errors.MissingVariable | HttpServerError.ServeError;
-
-// A ServeError says nothing itself; the bind or accept error it wraps does.
-const detail = (error: StartupError): string =>
-  error._tag === "ServeError" ? Render.errorDetail(error.cause) : Render.errorDetail(error);
-
 export type AutomationClient<RServe> = {
   readonly serve: (
     port: number,
     url: Option.Option<string>,
-  ) => Layer.Layer<never, StartupError, RServe>;
+  ) => Layer.Layer<never, HttpServerError.ServeError, RServe>;
   readonly serverFailed: Deferred.Deferred<never, HttpServerError.ServeError>;
 };
+
+type StartupError = Errors.DatabaseError | HttpServerError.ServeError;
+
+// A ServeError says nothing itself; the bind or accept error it wraps does.
+const detail = (error: StartupError): string =>
+  error._tag === "ServeError" ? Render.errorDetail(error.cause) : Render.errorDetail(error);
 
 export const makeAutomationClientCommand = <RServe>(server: AutomationClient<RServe>) =>
   Command.make(
@@ -44,10 +46,23 @@ export const makeAutomationClientCommand = <RServe>(server: AutomationClient<RSe
     ({ port, url }) =>
       Effect.gen(function* () {
         const log = yield* Log.Log;
-        return yield* Effect.raceFirst(
-          Layer.launch(server.serve(port, url)),
-          Deferred.await(server.serverFailed),
-        ).pipe(
+        const database = yield* Client.Database;
+        const startup = Effect.gen(function* () {
+          yield* database.ping.pipe(
+            Effect.mapError((error) =>
+              Errors.DatabaseError.make({
+                operation: "ping",
+                message: `database unreachable: ${Render.errorDetail(ExternalFailure.causeOf(error))}`,
+                cause: error,
+              }),
+            ),
+          );
+          return yield* Effect.raceFirst(
+            Layer.launch(server.serve(port, url)),
+            Deferred.await(server.serverFailed),
+          );
+        });
+        return yield* startup.pipe(
           Effect.tapError((error) =>
             log.fatal(`automation client: ${detail(error)}`, {
               location: Log.Locations.automationClient,

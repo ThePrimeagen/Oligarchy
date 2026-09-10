@@ -4,6 +4,8 @@ import * as ExternalFailure from "./external-failure.ts";
 import * as Render from "./observability/render.ts";
 import * as Errors from "./shared/errors.ts";
 
+export const FORCE_KILL_AFTER = "5 seconds";
+
 const detail = (error: unknown): string =>
   ExternalFailure.describeThrowable(ExternalFailure.causeOf(error), Render.errorDetail(error));
 
@@ -24,23 +26,28 @@ export const run = Effect.fn("Cli.run")(function* (command: string, args: Readon
             stderr: "pipe",
             extendEnv: true,
             detached: false,
+            killSignal: "SIGTERM",
+            forceKillAfter: FORCE_KILL_AFTER,
           }),
         )
         .pipe(Effect.mapError((error) => failed(command, detail(error), error)));
       const [stderr, code] = yield* Effect.all(
         [
-          Stream.mkString(Stream.decodeText(handle.stderr)).pipe(Effect.orDie),
+          Stream.mkString(Stream.decodeText(handle.stderr)).pipe(
+            Effect.mapError((error) => failed(command, detail(error), error)),
+          ),
           handle.exitCode.pipe(Effect.mapError((error) => failed(command, detail(error), error))),
         ],
         { concurrency: "unbounded" },
       );
       const trimmed = stderr.trim();
-      yield* Effect.succeed(code).pipe(
-        Effect.filterOrFail(
-          (exit) => exit === 0,
-          (exit) => failed(command, trimmed === "" ? `${command} exited ${String(exit)}` : trimmed),
-        ),
-      );
+      if (code !== 0) {
+        return yield* failed(
+          command,
+          trimmed === "" ? `${command} exited ${String(code)}` : trimmed,
+        );
+      }
+      return yield* Effect.void;
     }),
   );
 });
