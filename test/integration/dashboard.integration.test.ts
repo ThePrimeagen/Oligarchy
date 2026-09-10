@@ -790,6 +790,8 @@ describe.skipIf(dbUrl === "")("dashboard/servers page happy path", () => {
 
   it("does not list an automation-client among the qemu fleet", async () => {
     await seed(dbUrl, async (db) => {
+      await db.insert(servers).values({ url: "http://10.1.0.1:42069" }).onConflictDoNothing();
+      await db.delete(servers).where(eq(servers.url, "http://10.1.0.4:54322"));
       await db.insert(servers).values({
         url: "http://10.1.0.4:54322",
         type: "automation-client",
