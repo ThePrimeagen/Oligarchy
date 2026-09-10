@@ -876,6 +876,36 @@ Postgres.describeWithDatabase("database", () => {
         expect(reasoned?.result.reason).toBe("installer hung");
         expect(yield* tests.closeResult(uuid(), "failed", null, null)).toBe(false);
         expect(yield* tests.resultForSession(uuid())).toEqual([]);
+        // A verdict already landed stands: the abort's status test refuses it in the statement.
+        expect(yield* tests.abortOpenResult(result.id, "automation: opencode: exited 1")).toBe(
+          false,
+        );
+        const [kept] = yield* tests.resultForSession(sessionId);
+        expect(kept?.result).toMatchObject({ status: "failed", reason: "installer hung" });
+      }),
+    );
+
+    scoped.effect("abortOpenResult closes a pending result the agent never will, once", () =>
+      Effect.gen(function* () {
+        const tests = yield* Tests.TestStore;
+        const definition = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
+        const created = yield* tests.createRun({
+          iso: "https://example.com/omarchy.iso",
+          serverUrl: "http://127.0.0.1:42069",
+          definitions: [{ id: definition.id }],
+        });
+        const result = Option.getOrThrow(Option.fromUndefinedOr(created.results[0]));
+        expect(yield* tests.abortOpenResult(result.id, "automation: opencode: exited 1")).toBe(
+          true,
+        );
+        const aborted = yield* tests.findResult(result.id);
+        expect(Option.getOrNull(aborted)).toMatchObject({
+          status: "aborted",
+          reason: "automation: opencode: exited 1",
+        });
+        expect(Option.getOrNull(aborted)?.finishedAt).toBeInstanceOf(Date);
+        expect(yield* tests.abortOpenResult(result.id, "again")).toBe(false);
+        expect(yield* tests.abortOpenResult(uuid(), "nobody")).toBe(false);
       }),
     );
 

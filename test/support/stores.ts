@@ -459,6 +459,22 @@ export const fakeTestStore = (
         row.finishedAt = new Date();
         return true;
       }),
+    // Only a still-open result is aborted, as the real statement's status test decides.
+    abortOpenResult: (resultId, reason) =>
+      Effect.sync(() => {
+        const row = results.find(
+          (result) =>
+            sameId(result.id, resultId) &&
+            (result.status === "pending" || result.status === "running"),
+        );
+        if (row === undefined) {
+          return false;
+        }
+        row.status = "aborted";
+        row.reason = reason;
+        row.finishedAt = new Date();
+        return true;
+      }),
     setLinearId: (resultId, linearId) =>
       Effect.gen(function* () {
         const row = results.find((result) => sameId(result.id, resultId));
