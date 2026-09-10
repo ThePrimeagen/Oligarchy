@@ -17,6 +17,12 @@ import * as AutomationClientCommand from "./command.ts";
 import * as Handlers from "./handlers.ts";
 import * as Heartbeat from "./heartbeat.ts";
 
+type ServeLive = Layer.Layer<
+  never,
+  Errors.DatabaseError | Errors.MissingVariable | HttpServerError.ServeError,
+  Log.Log | Api.BearerAuth
+>;
+
 const HOST = "127.0.0.1";
 
 const automationClientAttr = Log.AutomationClientProcessAttribution;
@@ -34,56 +40,74 @@ server.on("error", (cause) => {
   Deferred.doneUnsafe(serverFailed, Exit.fail(new HttpServerError.ServeError({ cause })));
 });
 
-const DatabaseLive = Layer.unwrap(Effect.map(Config.databaseUrl, Client.Database.layer));
+const DatabaseLive: Layer.Layer<Client.Database, Errors.DatabaseError | Errors.MissingVariable> =
+  Layer.unwrap(Effect.map(Config.databaseUrl, (url) => Client.Database.layer(url)));
 
 // Fail at startup, not on the first heartbeat, if the control-plane DB is unreachable.
-const ping = Effect.gen(function* () {
-  const database = yield* Client.Database;
-  yield* database.ping.pipe(
-    Effect.mapError((error) =>
-      Errors.DatabaseError.make({
-        operation: "ping",
-        message: `database unreachable: ${Render.errorDetail(ExternalFailure.causeOf(error))}`,
-        cause: error,
-      }),
-    ),
+const PingLive: Layer.Layer<never, Errors.DatabaseError, Client.Database> = Layer.effectDiscard(
+  Effect.gen(function* () {
+    const database = yield* Client.Database;
+    yield* database.ping.pipe(
+      Effect.mapError((error) =>
+        Errors.DatabaseError.make({
+          operation: "ping",
+          message: `database unreachable: ${Render.errorDetail(ExternalFailure.causeOf(error))}`,
+          cause: error,
+        }),
+      ),
+    );
+  }),
+);
+
+const listening = (port: number, url: Option.Option<string>) =>
+  Effect.gen(function* () {
+    const log = yield* Log.Log;
+    yield* log.acquireColor(Log.AutomationClientAgentId);
+    yield* log.info(
+      `automation client listening on ${HOST}:${String(port)}${Option.match(url, { onNone: () => "", onSome: (announced) => `; announcing ${announced}` })}`,
+      automationClientAttr,
+    );
+  });
+
+const http = (port: number) =>
+  HttpRouter.serve(Handlers.routes, {
+    disableLogger: true,
+    disableListenLog: true,
+  }).pipe(
+    Layer.provide(NodeHttpServer.layer(() => server, { host: HOST, port })),
+    Layer.provide(Layer.succeed(HttpMiddleware.TracerDisabledWhen)(() => true)),
   );
-});
+
+const withoutUrl = (port: number): ServeLive =>
+  Layer.effectDiscard(listening(port, Option.none())).pipe(Layer.provide(http(port)));
 
 // The heartbeat starts once the listener is up, in the same scope: a port refusal announces
 // nothing, and a shutdown deletes the row it wrote. Database, ping and stats are only on the
 // announcing path so --help and listen-without-url stay off the fleet and off the database.
-const ServerLive = (port: number, url: Option.Option<string>) => {
-  const running = Layer.effectDiscard(
+const withUrl = (port: number, url: string): ServeLive => {
+  const running: Layer.Layer<
+    never,
+    HttpServerError.ServeError,
+    Log.Log | Api.BearerAuth | Stats.Stats | Servers.ServerStore
+  > = Layer.effectDiscard(
     Effect.gen(function* () {
-      const log = yield* Log.Log;
-      yield* log.acquireColor(Log.AutomationClientAgentId);
-      yield* log.info(
-        `automation client listening on ${HOST}:${String(port)}${Option.match(url, { onNone: () => "", onSome: (announced) => `; announcing ${announced}` })}`,
-        automationClientAttr,
-      );
-      yield* Option.match(url, { onNone: () => Effect.void, onSome: Heartbeat.announce });
+      yield* listening(port, Option.some(url));
+      yield* Heartbeat.announce(url);
     }),
-  ).pipe(
-    Layer.provide(
-      HttpRouter.serve(Handlers.routes, {
-        disableLogger: true,
-        disableListenLog: true,
-      }).pipe(Layer.provide(NodeHttpServer.layer(() => server, { host: HOST, port }))),
-    ),
-    Layer.provide(Layer.succeed(HttpMiddleware.TracerDisabledWhen)(() => true)),
+  ).pipe(Layer.provide(http(port)));
+  return running.pipe(
+    Layer.provide(Stats.Stats.layer),
+    Layer.provide(Servers.ServerStore.layer),
+    Layer.provide(PingLive),
+    Layer.provide(DatabaseLive),
   );
-  return Option.match(url, {
-    onNone: () => running,
-    onSome: () =>
-      running.pipe(
-        Layer.provide(Stats.layer),
-        Layer.provide(Servers.ServerStore.layer),
-        Layer.provide(Layer.effectDiscard(ping)),
-        Layer.provide(DatabaseLive),
-      ),
-  });
 };
+
+const ServerLive = (port: number, url: Option.Option<string>): ServeLive =>
+  Option.match(url, {
+    onNone: () => withoutUrl(port),
+    onSome: (announced) => withUrl(port, announced),
+  });
 
 const MainLive = Layer.mergeAll(Log.Log.layerStdout, Handlers.BearerAuthLive).pipe(
   Layer.provideMerge(Sentry.SentryLive),
