@@ -98,7 +98,7 @@ describe("renderLinearIssue happy path", () => {
         expect(description).toContain(
           `start --agent-id OLI-42 --server-url ${SERVER} --iso ${ticket.ISO_URL}`,
         );
-        // ./ctrl reads the database; the proxy url is ./client's alone.
+        // ./ctrl reads the database; the qemu server url is ./client's alone.
         expect(description).toContain("./ctrl test start --session-id");
         expect(description).toContain("--model <the Cursor model id you are running as>");
         expect(description).not.toContain("--model grok-4.6");

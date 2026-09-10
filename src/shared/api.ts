@@ -118,10 +118,10 @@ export class Sessions extends HttpApiGroup.make("Sessions")
   .middleware(BearerAuth)
   .middleware(ApiBoundary) {}
 
-// A stored image has one address, the dashboard's (Contract.StoredImageUrl); no proxy serves it.
-export class ProxyApi extends HttpApi.make("OligarchyProxy").add(Sessions) {}
+// A stored image has one address, the dashboard's (Contract.StoredImageUrl); no qemu server serves it.
+export class QemuServerApi extends HttpApi.make("OligarchyQemuServer").add(Sessions) {}
 
-// The reverse proxy: the proxy's own endpoints, so the client that speaks to a server speaks to
+// The qemu reverse proxy: the qemu server's own endpoints, so the client that speaks to a server speaks to
 // it, minus /stats (a fleet has no one cpu), behind the routing boundary.
 export class RoutedSessions extends HttpApiGroup.make("Sessions")
   .add(start)
@@ -159,12 +159,12 @@ export class Servers extends HttpApiGroup.make("Servers")
   .middleware(BearerAuth)
   .middleware(RouteBoundary) {}
 
-export class ReverseProxyApi extends HttpApi.make("OligarchyReverseProxy")
+export class QemuReverseProxyApi extends HttpApi.make("OligarchyQemuReverseProxy")
   .add(RoutedSessions)
   .add(Servers) {}
 
-// The automation service: POST /linear is Linear's signed webhook. No oligarchy bearer —
-// Linear signs the body. The proxy's own boundary suffices: this process neither forwards
+// The automation server: POST /linear is Linear's signed webhook. No oligarchy bearer —
+// Linear signs the body. The qemu server's own boundary suffices: this process neither forwards
 // nor places.
 export const linear = HttpApiEndpoint.post("linear", "/linear", {
   success: Contract.Ok,
@@ -173,6 +173,6 @@ export const linear = HttpApiEndpoint.post("linear", "/linear", {
 
 export class Linear extends HttpApiGroup.make("Linear").add(linear).middleware(ApiBoundary) {}
 
-export class AutomationApi extends HttpApi.make("OligarchyAutomation").add(Linear) {}
+export class AutomationServerApi extends HttpApi.make("OligarchyAutomationServer").add(Linear) {}
 
 export const VERSION = "0.0.0";

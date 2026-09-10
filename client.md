@@ -43,10 +43,10 @@ If you are the client, or an agent driving the client: do not look at code. Only
 The action comes first. Every value is a flag; there are no positional arguments. Flags may sit in any order after the action.
 
 - `--agent-id <agent>` — your id, from the Linear ticket. Required on every action.
-- `--server-url <url>` — the proxy, a full URL used exactly as given. Falls back to `SERVER_URL` from the environment, then `http://127.0.0.1:42069`.
+- `--server-url <url>` — the qemu server, a full URL used exactly as given. Falls back to `SERVER_URL` from the environment, then `http://127.0.0.1:42069`.
 - `OLIGARCHY_TOKEN` — read from the environment and sent on every request. It is already set; do not write a `.env`. Missing means exit 1.
 
-`start` prints a session id; every other action takes it as `--session-id`. A command that works exits 0. A command that fails exits 1 and prints the error: one headline, then the stack trace and the cause behind it. Read the headline first. `./client <action> --help` prints that action's flags. If no command arrives for ten minutes, the proxy kills the session.
+`start` prints a session id; every other action takes it as `--session-id`. A command that works exits 0. A command that fails exits 1 and prints the error: one headline, then the stack trace and the cause behind it. Read the headline first. `./client <action> --help` prints that action's flags. If no command arrives for ten minutes, the qemu server kills the session.
 
 ## client-with-image
 

@@ -9,7 +9,7 @@ import {
   Stream,
   type Tracer,
 } from "effect";
-import * as Sessions from "../../src/proxy/sessions.ts";
+import * as Sessions from "../../src/qemu-server/sessions.ts";
 import * as Contract from "../../src/shared/contract.ts";
 import type * as Domain from "../../src/shared/domain.ts";
 import * as Errors from "../../src/shared/errors.ts";

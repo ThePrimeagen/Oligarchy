@@ -5,7 +5,14 @@ import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Client } from "pg";
 import { describe, expect, inject, it } from "vitest";
 import { app } from "../../src/dashboard/dashboard.tsx";
-import { servers, sessions, testDefinitions, testResults, testRuns } from "../../src/db/schema.ts";
+import {
+  automationJobs,
+  servers,
+  sessions,
+  testDefinitions,
+  testResults,
+  testRuns,
+} from "../../src/db/schema.ts";
 
 const QUERY = fileURLToPath(new URL("../../src/dashboard/query.ts", import.meta.url));
 const SCHEMA = fileURLToPath(new URL("../../src/db/schema.ts", import.meta.url));
@@ -837,12 +844,224 @@ describe.skipIf(dbUrl === "")("dashboard/servers page unhappy path", () => {
   });
 });
 
+type QueuedJob = {
+  // null for a result nobody has ticketed yet.
+  readonly ticket: string | null;
+  readonly action: (typeof automationJobs.$inferInsert)["action"];
+  readonly status: (typeof automationJobs.$inferInsert)["status"];
+  readonly reason?: string;
+  readonly queuedSecondsAgo: number;
+  readonly startedSecondsAgo?: number;
+  readonly finishedSecondsAgo?: number;
+};
+
+// A stamp some seconds before the database's clock, the clock the page reads ages against.
+const secondsAgo = (seconds: number) => sql`now() - make_interval(secs => ${seconds})`;
+
+// One definition, and per job its own run and result carrying the ticket. The jobs already in the
+// database go first: the integration files share one, and the queue this page expects is its own
+// to arrange.
+const seedQueue = async (
+  db: NodePgDatabase,
+  name: string,
+  jobs: ReadonlyArray<QueuedJob>,
+): Promise<void> => {
+  await db.delete(automationJobs);
+  const [definition] = await db
+    .insert(testDefinitions)
+    .values({ name, description: "d", instruction: "i", proof: "p" })
+    .returning({ id: testDefinitions.id });
+  const runs = await db
+    .insert(testRuns)
+    .values(
+      jobs.map((_, index) => ({
+        name: `${name} ${String(index)}`,
+        iso: "https://example.com/omarchy.iso",
+        serverUrl: "http://127.0.0.1:42069",
+      })),
+    )
+    .returning({ id: testRuns.id });
+  const results = await db
+    .insert(testResults)
+    .values(
+      jobs.map((job, index) => ({
+        runId: runs[index].id,
+        definitionId: definition.id,
+        linearId: job.ticket,
+      })),
+    )
+    .returning({ id: testResults.id });
+  await db.insert(automationJobs).values(
+    jobs.map((job, index) => ({
+      resultId: results[index].id,
+      action: job.action,
+      status: job.status,
+      reason: job.reason,
+      createdAt: secondsAgo(job.queuedSecondsAgo),
+      startedAt: job.startedSecondsAgo === undefined ? null : secondsAgo(job.startedSecondsAgo),
+      finishedAt: job.finishedSecondsAgo === undefined ? null : secondsAgo(job.finishedSecondsAgo),
+    })),
+  );
+};
+
+// Two running, the diagnose queued after the drive; four pending, a diagnose between two drives
+// and one nobody has ticketed; four completed, finishing in another order than they were queued.
+const QUEUE_JOBS: ReadonlyArray<QueuedJob> = [
+  {
+    ticket: "QUE-101",
+    action: "drive",
+    status: "running",
+    queuedSecondsAgo: 300,
+    startedSecondsAgo: 200,
+  },
+  {
+    ticket: "QUE-102",
+    action: "diagnose",
+    status: "running",
+    queuedSecondsAgo: 100,
+    startedSecondsAgo: 50,
+  },
+  { ticket: "QUE-103", action: "drive", status: "pending", queuedSecondsAgo: 90 },
+  { ticket: "QUE-104", action: "diagnose", status: "pending", queuedSecondsAgo: 30 },
+  { ticket: "QUE-105", action: "drive", status: "pending", queuedSecondsAgo: 10 },
+  { ticket: null, action: "drive", status: "pending", queuedSecondsAgo: 5 },
+  {
+    ticket: "QUE-106",
+    action: "drive",
+    status: "succeeded",
+    queuedSecondsAgo: 3_000,
+    startedSecondsAgo: 2_900,
+    finishedSecondsAgo: 600,
+  },
+  {
+    ticket: "QUE-107",
+    action: "drive",
+    status: "failed",
+    reason: "session timed out",
+    queuedSecondsAgo: 2_000,
+    startedSecondsAgo: 1_900,
+    finishedSecondsAgo: 60,
+  },
+  {
+    ticket: "QUE-108",
+    action: "diagnose",
+    status: "aborted",
+    reason: "run stopped",
+    queuedSecondsAgo: 1_000,
+    startedSecondsAgo: 900,
+    finishedSecondsAgo: 300,
+  },
+  {
+    ticket: "QUE-109",
+    action: "drive",
+    status: "timed_out",
+    reason: "no report",
+    queuedSecondsAgo: 4_000,
+    startedSecondsAgo: 3_900,
+    finishedSecondsAgo: 1_200,
+  },
+];
+
+// The first test arranges the queue; the page and fragment tests read it as it is; the cap test
+// arranges its own last.
+describe.skipIf(dbUrl === "")("dashboard/servers page: the automation half happy path", () => {
+  it("orders running and pending diagnoses ahead of drives and then in queue order, completed newest finished first, and ends the connection", async () => {
+    await seed(dbUrl, (db) => seedQueue(db, "queue-order", QUEUE_JOBS));
+    const result = await runQuery(
+      `
+const queue = await query.listAutomationQueue(url);
+console.log(queue.running.map((job) => job.ticket).join(" "));
+console.log(queue.pending.map((job) => String(job.ticket)).join(" "));
+console.log(queue.completed.map((job) => job.ticket + ":" + job.status).join(" "));
+const failed = queue.completed[0];
+const waiting = queue.pending[0];
+console.log([failed.test, failed.action, failed.reason, failed.createdAt instanceof Date, failed.startedAt instanceof Date, failed.finishedAt instanceof Date, failed.queriedAt instanceof Date, String(waiting.reason), String(waiting.startedAt), String(waiting.finishedAt), String(queue.running[0].finishedAt)].join(" "));
+`,
+      dbUrl,
+    );
+    expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    expect(lines(result.stdout)).toEqual([
+      "QUE-102 QUE-101",
+      "QUE-104 QUE-103 QUE-105 null",
+      "QUE-107:failed QUE-108:aborted QUE-106:succeeded QUE-109:timed_out",
+      "queue-order drive session timed out true true true true null null null null",
+    ]);
+  });
+
+  it("shows the queue in the automation half, running then pending then completed, beside the fleet", async () => {
+    const { status, html } = await getPage("/servers", dbUrl);
+    expect(status).toBe(200);
+    expect(html).toContain(
+      '<div class="halves"><section><h2>automation</h2><div id="queue" hx-get="/servers/queue" hx-trigger="every 30s"><h3>running</h3><table>',
+    );
+    // The ages are read against the database's clock: a minute has margin, seconds are counted.
+    expect(html).toMatch(
+      /<tr><td>QUE-102<\/td><td>queue-order<\/td><td>diagnose<\/td><td>running<\/td><td>1 min ago<\/td><td>\d+ s ago<\/td><td>—<\/td><td><\/td><\/tr><tr><td>QUE-101<\/td><td>queue-order<\/td><td>drive<\/td><td>running<\/td><td>5 min ago<\/td><td>3 min ago<\/td><td>—<\/td><td><\/td><\/tr><\/table><h3>pending<\/h3>/,
+    );
+    expect(html).toMatch(
+      /<h3>pending<\/h3><table>.*?<tr><td>QUE-104<\/td><td>queue-order<\/td><td>diagnose<\/td><td>pending<\/td><td>\d+ s ago<\/td><td>—<\/td><td>—<\/td><td><\/td><\/tr><tr><td>QUE-103<\/td>.*?<tr><td>QUE-105<\/td>.*?<tr><td>—<\/td><td>queue-order<\/td><td>drive<\/td><td>pending<\/td>.*?<h3>completed<\/h3>/s,
+    );
+    expect(html).toMatch(
+      /<h3>completed<\/h3><table>.*?<tr><td>QUE-107<\/td><td>queue-order<\/td><td>drive<\/td><td>failed<\/td><td>\d+ min ago<\/td><td>\d+ min ago<\/td><td>1 min ago<\/td><td>session timed out<\/td><\/tr><tr><td>QUE-108<\/td>.*?<tr><td>QUE-106<\/td>.*?<tr><td>QUE-109<\/td>/s,
+    );
+    expect(html.indexOf("<h2>automation</h2>")).toBeLessThan(html.indexOf("<h2>qemu servers</h2>"));
+    expect(html).toContain('<div id="fleet" hx-get="/servers/fleet" hx-trigger="every 30s">');
+    expect(html).toContain("<h2>add a server</h2>");
+  });
+
+  it("serves the queue alone at /servers/queue, what the automation half's poll swaps in", async () => {
+    const { status, html } = await getPage("/servers/queue", dbUrl);
+    expect(status).toBe(200);
+    expect(html.startsWith("<h3>running</h3><table>")).toBe(true);
+    expect(html).toContain("<td>QUE-102</td>");
+    expect(html).toContain("<td>QUE-109</td>");
+    expect(html).not.toContain("<html");
+    expect(html).not.toContain("qemu servers");
+    expect(html).not.toContain("add a server");
+  });
+
+  it("cuts each list at fifty: the fifty that finished last, the fifty at the front of the queue", async () => {
+    const completed: ReadonlyArray<QueuedJob> = Array.from({ length: 55 }, (_, index) => ({
+      ticket: `QUE-C-${String(index)}`,
+      action: "drive",
+      status: "succeeded",
+      queuedSecondsAgo: 10_000,
+      startedSecondsAgo: 9_000,
+      finishedSecondsAgo: index * 60,
+    }));
+    const pending: ReadonlyArray<QueuedJob> = Array.from({ length: 52 }, (_, index) => ({
+      ticket: `QUE-P-${String(index)}`,
+      action: "drive",
+      status: "pending",
+      queuedSecondsAgo: index,
+    }));
+    await seed(dbUrl, (db) => seedQueue(db, "queue-cap", [...completed, ...pending]));
+    const result = await runQuery(
+      `
+const queue = await query.listAutomationQueue(url);
+console.log([queue.completed.length, queue.completed[0].ticket, queue.completed[49].ticket].join(" "));
+console.log([queue.pending.length, queue.pending[0].ticket, queue.pending[49].ticket].join(" "));
+console.log(queue.running.length);
+`,
+      dbUrl,
+    );
+    expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    expect(lines(result.stdout)).toEqual(["50 QUE-C-0 QUE-C-49", "50 QUE-P-51 QUE-P-2", "0"]);
+  });
+});
+
 describe("dashboard/servers page unhappy path: unreachable database", () => {
-  it("answers 500 with internal error and no fleet, never echoing the password", async () => {
+  it("answers 500 with internal error and neither half's body, never echoing the password", async () => {
     const { status, html } = await getPage("/servers", REFUSED_URL);
     expect(status).toBe(500);
     expect(html).toContain("<p>error: internal error</p>");
+    expect(html).not.toContain('id="queue"');
     expect(html).not.toContain('id="fleet"');
+    expect(html).toContain("<h2>automation</h2>");
     expect(html).toContain("<h2>add a server</h2>");
     expect(html).not.toContain(SENTINEL_PASSWORD);
   });
@@ -852,6 +1071,24 @@ describe("dashboard/servers page unhappy path: unreachable database", () => {
     expect(status).toBe(500);
     expect(html).toBe("<p>error: internal error</p>");
     expect(html).not.toContain(SENTINEL_PASSWORD);
+  });
+
+  it("the queue fragment answers 500 with the reason, never echoing the password", async () => {
+    const { status, html } = await getPage("/servers/queue", REFUSED_URL);
+    expect(status).toBe(500);
+    expect(html).toBe("<p>error: internal error</p>");
+    expect(html).not.toContain(SENTINEL_PASSWORD);
+  });
+
+  it("listAutomationQueue surfaces a refused connection and exits without echoing the password", async () => {
+    const result = await runQuery(
+      "try {\n  await query.listAutomationQueue(url);\n} catch (err) {\n  console.error(err.message);\n  process.exitCode = 3;\n}",
+      REFUSED_URL,
+    );
+    expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
+    expect(result.code).toBe(3);
+    expect(result.stderr).toMatch(/ECONNREFUSED/);
+    expect(result.stderr).not.toContain(SENTINEL_PASSWORD);
   });
 
   it("adding and deleting answer 500 the same way", async () => {

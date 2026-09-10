@@ -17,7 +17,7 @@ const read = (path: string): string => readFileSync(join(root, path), "utf8");
 // `setTimeout`/`new Promise`/`async`.
 const BOUNDARY_FILES = new Set([
   "src/qmp/socket.ts",
-  "src/proxy/main.ts",
+  "src/qemu-server/main.ts",
   "src/session/readline.ts",
   "src/qemu/stats.ts",
   "src/qemu/qemu.ts",
@@ -36,7 +36,7 @@ const isBoundary = (path: string): boolean =>
 const NODE_IMPORT_EXCEPTIONS: ReadonlyMap<string, string> = new Map([
   ["src/qemu/iso.ts", "node:crypto"],
   ["src/session/image.ts", "node:zlib"],
-  ["src/automation/signature.ts", "node:crypto"],
+  ["src/automation-server/signature.ts", "node:crypto"],
 ]);
 
 // Files allowed to call `Effect.run*`, each with the calls it may make.

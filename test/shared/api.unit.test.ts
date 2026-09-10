@@ -45,9 +45,9 @@ const byIdentifier = <Id extends string, Groups extends HttpApiGroup.Constraint>
 const ascending = (statuses: ReadonlyArray<number>): ReadonlyArray<number> =>
   [...statuses].sort((a, b) => a - b);
 
-describe("ProxyApi", () => {
+describe("QemuServerApi", () => {
   it("declares every path with today's method", () => {
-    const table = routes(Api.ProxyApi).map(({ method, path }) => `${method} ${path}`);
+    const table = routes(Api.QemuServerApi).map(({ method, path }) => `${method} ${path}`);
     expect(table.sort()).toEqual(
       [
         "POST /start",
@@ -65,7 +65,7 @@ describe("ProxyApi", () => {
   });
 
   it("builds every url through the client url builder", () => {
-    const urls = HttpApiClient.urlBuilder(Api.ProxyApi);
+    const urls = HttpApiClient.urlBuilder(Api.QemuServerApi);
     expect(urls.Sessions.start()).toBe("/start");
     expect(urls.Sessions.image({ query: { id: "abc", agent: "OLI-61" } })).toBe(
       "/image?id=abc&agent=OLI-61",
@@ -83,21 +83,21 @@ describe("ProxyApi", () => {
   });
 
   it("does not declare endpoints the plan does not name", () => {
-    const table = routes(Api.ProxyApi).map(({ method, path }) => `${method} ${path}`);
+    const table = routes(Api.QemuServerApi).map(({ method, path }) => `${method} ${path}`);
     expect(table).not.toContain("DELETE /start");
     expect(table).not.toContain("GET /start");
     // ctrl reads an ended session's console from the database's debug logs; a running one is
     // its driver's, through /serial.
     expect(table).not.toContain("GET /dump");
-    expect(routes(Api.ProxyApi).map((route) => route.identifier)).not.toContain("notFound");
+    expect(routes(Api.QemuServerApi).map((route) => route.identifier)).not.toContain("notFound");
   });
 
   it("requires the bearer on every endpoint", () => {
-    const spec = OpenApi.fromApi(Api.ProxyApi);
+    const spec = OpenApi.fromApi(Api.QemuServerApi);
     expect(spec.components.securitySchemes).toEqual({
       bearer: { type: "http", scheme: "Bearer" },
     });
-    for (const route of routes(Api.ProxyApi)) {
+    for (const route of routes(Api.QemuServerApi)) {
       const item = spec.paths[route.path];
       expect(item).toBeDefined();
       const operation =
@@ -108,7 +108,7 @@ describe("ProxyApi", () => {
   });
 
   it("applies BearerAuth then ApiBoundary to every endpoint", () => {
-    for (const route of routes(Api.ProxyApi)) {
+    for (const route of routes(Api.QemuServerApi)) {
       expect(route.group).toBe("Sessions");
       expect(route.middleware).toEqual([Api.BearerAuth.key, Api.ApiBoundary.key]);
     }
@@ -116,30 +116,30 @@ describe("ProxyApi", () => {
 
   it("declares the error statuses of §2.4 plus the middleware's 400, 401 and 500", () => {
     const sessions = [400, 401, 500];
-    expect(byIdentifier(Api.ProxyApi, "start").errors).toEqual([...sessions, 502]);
-    expect(byIdentifier(Api.ProxyApi, "image").errors).toEqual(
+    expect(byIdentifier(Api.QemuServerApi, "start").errors).toEqual([...sessions, 502]);
+    expect(byIdentifier(Api.QemuServerApi, "image").errors).toEqual(
       [...sessions, 403, 404, 502].sort((a, b) => a - b),
     );
-    expect(byIdentifier(Api.ProxyApi, "serial").errors).toEqual(
+    expect(byIdentifier(Api.QemuServerApi, "serial").errors).toEqual(
       [...sessions, 403, 404].sort((a, b) => a - b),
     );
-    expect(byIdentifier(Api.ProxyApi, "follow").errors).toEqual(
+    expect(byIdentifier(Api.QemuServerApi, "follow").errors).toEqual(
       [...sessions, 404, 409].sort((a, b) => a - b),
     );
-    expect(byIdentifier(Api.ProxyApi, "stats").errors).toEqual(sessions);
-    expect(byIdentifier(Api.ProxyApi, "stop").errors).toEqual(
+    expect(byIdentifier(Api.QemuServerApi, "stats").errors).toEqual(sessions);
+    expect(byIdentifier(Api.QemuServerApi, "stop").errors).toEqual(
       [...sessions, 403, 404].sort((a, b) => a - b),
     );
-    expect(byIdentifier(Api.ProxyApi, "sendKeys").errors).toEqual(
+    expect(byIdentifier(Api.QemuServerApi, "sendKeys").errors).toEqual(
       [...sessions, 403, 404, 502].sort((a, b) => a - b),
     );
-    expect(byIdentifier(Api.ProxyApi, "sendMouse").errors).toEqual(
+    expect(byIdentifier(Api.QemuServerApi, "sendMouse").errors).toEqual(
       [...sessions, 403, 404, 502].sort((a, b) => a - b),
     );
-    expect(byIdentifier(Api.ProxyApi, "intentStart").errors).toEqual(
+    expect(byIdentifier(Api.QemuServerApi, "intentStart").errors).toEqual(
       [...sessions, 403, 404].sort((a, b) => a - b),
     );
-    expect(byIdentifier(Api.ProxyApi, "intentEnd").errors).toEqual(
+    expect(byIdentifier(Api.QemuServerApi, "intentEnd").errors).toEqual(
       [...sessions, 403, 404].sort((a, b) => a - b),
     );
   });
@@ -149,10 +149,10 @@ describe("ProxyApi", () => {
   });
 });
 
-describe("ReverseProxyApi", () => {
-  const reverse = Api.ReverseProxyApi;
+describe("QemuReverseProxyApi", () => {
+  const reverse = Api.QemuReverseProxyApi;
 
-  it("declares every routed path of ProxyApi but /stats, plus the three server routes", () => {
+  it("declares every routed path of QemuServerApi but /stats, plus the three server routes", () => {
     const table = routes(reverse).map(({ method, path }) => `${method} ${path}`);
     expect(table.sort()).toEqual(
       [
@@ -173,13 +173,13 @@ describe("ReverseProxyApi", () => {
     expect(table).not.toContain("GET /stats");
   });
 
-  it("keeps the routed endpoints' identifiers and inputs so the ProxyApi client reaches them", () => {
-    const proxy = routes(Api.ProxyApi);
+  it("keeps the routed endpoints' identifiers and inputs so the QemuServerApi client reaches them", () => {
+    const qemu = routes(Api.QemuServerApi);
     for (const route of routes(reverse)) {
       if (route.group !== "Sessions") {
         continue;
       }
-      const twin = proxy.find((candidate) => candidate.identifier === route.identifier);
+      const twin = qemu.find((candidate) => candidate.identifier === route.identifier);
       expect(twin, route.identifier).toMatchObject({ method: route.method, path: route.path });
     }
     const urls = HttpApiClient.urlBuilder(reverse);
@@ -222,18 +222,18 @@ describe("ReverseProxyApi", () => {
     expect(byIdentifier(reverse, "servers").errors).toEqual(boundary);
   });
 
-  it("leaves ProxyApi untouched: no server routes and no RouteBoundary", () => {
-    const table = routes(Api.ProxyApi).map(({ method, path }) => `${method} ${path}`);
+  it("leaves QemuServerApi untouched: no server routes and no RouteBoundary", () => {
+    const table = routes(Api.QemuServerApi).map(({ method, path }) => `${method} ${path}`);
     expect(table).not.toContain("POST /servers");
     expect(table).not.toContain("GET /servers");
-    for (const route of routes(Api.ProxyApi)) {
+    for (const route of routes(Api.QemuServerApi)) {
       expect(route.middleware).not.toContain(Api.RouteBoundary.key);
     }
   });
 });
 
-describe("AutomationApi", () => {
-  const automation = Api.AutomationApi;
+describe("AutomationServerApi", () => {
+  const automation = Api.AutomationServerApi;
 
   it("declares POST /linear and nothing else", () => {
     const table = routes(automation).map(({ method, path }) => `${method} ${path}`);
@@ -251,8 +251,8 @@ describe("AutomationApi", () => {
     expect(linear.errors).toEqual([400, 401, 500]);
   });
 
-  it("is its own api: neither the proxy nor the reverse proxy answers /linear", () => {
-    expect(routes(Api.ProxyApi).map(({ path }) => path)).not.toContain("/linear");
-    expect(routes(Api.ReverseProxyApi).map(({ path }) => path)).not.toContain("/linear");
+  it("is its own api: neither the qemu server nor the qemu reverse proxy answers /linear", () => {
+    expect(routes(Api.QemuServerApi).map(({ path }) => path)).not.toContain("/linear");
+    expect(routes(Api.QemuReverseProxyApi).map(({ path }) => path)).not.toContain("/linear");
   });
 });
