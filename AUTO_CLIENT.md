@@ -168,14 +168,14 @@ named case inside one, and is its own todo.
       its request fiber is interrupted; the startup sweep closes stale `running` rows `aborted;
       automation-server restarted` and logs `N jobs aborted; automation-server restarted` (nothing
       when there are none).
-- [ ] `test/automation-client/events.unit.test.ts` (pure) — happy: a captured `text` line yields the
+- [x] `test/automation-client/events.unit.test.ts` (pure) — happy: a captured `text` line yields the
       session id and its text; a captured `error` line yields `error.data.message`, or `error.name`
       when there is no data; `step_start` resets the text so the final answer is the last step's
       (S2 may revise what "final answer" means; the test follows the captured lines). Unhappy: a
       non-JSON line and a JSON line with an unknown `type` are ignored and counted; a line without
       `sessionID` is ignored. Fixtures are captured lines (S2); a synthetic one is labelled
       synthetic.
-- [ ] `test/automation-client/opencode.unit.test.ts` (FakeSpawner, fake FileSystem, `Path.layer`, fake
+- [x] `test/automation-client/opencode.unit.test.ts` (FakeSpawner, fake FileSystem, `Path.layer`, fake
       Log, `ProxyConfig`) — happy: the argv is exactly `run --model <MODEL> --format json`; the
       child's cwd is a fresh directory holding executable `client`, `client-with-image`, `ctrl` and
       `session` shims that `exec` this repo's wrappers, and an `opencode.json`; the env carries
