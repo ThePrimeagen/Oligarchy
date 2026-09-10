@@ -54,14 +54,19 @@ const execute = Effect.fn("execute")(function* (
     agentId: ticket,
   });
   yield* AutomationClient.run(url, prompt, model);
+  // A diagnose is judged by nothing here: the result was closed before it was queued.
+  if (job.action === "diagnose") {
+    return yield* Effect.void;
+  }
   // A driver's last act is ./ctrl test-results; opencode exiting 0 with the result still open is
-  // an agent that quit early, and the job says so rather than reading as a run. A diagnose is
-  // judged by nothing here: the result was closed before it was queued.
-  const after = job.action === "drive" ? yield* tests.findResult(job.resultId) : Option.none();
-  if (
-    Option.isSome(after) &&
-    (after.value.status === "pending" || after.value.status === "running")
-  ) {
+  // an agent that quit early, and the job says so rather than reading as a run.
+  const after = yield* tests.findResult(job.resultId);
+  if (Option.isNone(after)) {
+    return yield* Effect.die(
+      new Error(`execute: result ${job.resultId} vanished during the drive`),
+    );
+  }
+  if (after.value.status === "pending" || after.value.status === "running") {
     return yield* Errors.AutomationClientError.make({
       message: `driver exited; result ${job.resultId} is ${after.value.status}`,
     });

@@ -264,35 +264,40 @@ describeWithDatabase("automation client startup refusals with a database", () =>
 });
 
 describeWithDatabase("automation client POST /run", () => {
-  it.live("answers 200 when opencode exits 0, having run it with --model and the prompt", () =>
-    Effect.promise(async () => {
-      const bin = installOpencode('printf "%s\\n" "$@" > "$(dirname "$0")/argv"; exit 0');
-      const port = await freePort();
-      const process = spawnAutomationClient(
-        ["--port", String(port)],
-        {},
-        `${bin}:${processEnv.PATH ?? ""}`,
-      );
-      try {
-        await process.waitFor(
-          new RegExp(`automation client listening on 127.0.0.1:${String(port)}`),
+  it.live(
+    "answers 200 when opencode exits 0, having run it with --model and the prompt, its transcript on this stdout",
+    () =>
+      Effect.promise(async () => {
+        const bin = installOpencode(
+          'printf "%s\\n" "$@" > "$(dirname "$0")/argv"; echo "transcript-sentinel: the agent spoke"; exit 0',
         );
-        const response = await request(
-          port,
-          { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
-          JSON.stringify({ prompt: "do the work", model: MODEL }),
+        const port = await freePort();
+        const process = spawnAutomationClient(
+          ["--port", String(port)],
+          {},
+          `${bin}:${processEnv.PATH ?? ""}`,
         );
-        expect(response.status).toBe(200);
-        expect(await response.json()).toEqual({ ok: "true" });
-        expect(readFileSync(join(bin, "argv"), "utf8")).toBe(
-          ["run", "--model", MODEL, "--", "do the work", ""].join("\n"),
-        );
-      } finally {
-        process.child.kill("SIGTERM");
-        await process.exited;
-        rmSync(bin, { recursive: true, force: true });
-      }
-    }),
+        try {
+          await process.waitFor(
+            new RegExp(`automation client listening on 127.0.0.1:${String(port)}`),
+          );
+          const response = await request(
+            port,
+            { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+            JSON.stringify({ prompt: "do the work", model: MODEL }),
+          );
+          expect(response.status).toBe(200);
+          expect(await response.json()).toEqual({ ok: "true" });
+          expect(readFileSync(join(bin, "argv"), "utf8")).toBe(
+            ["run", "--model", MODEL, "--", "do the work", ""].join("\n"),
+          );
+          expect(process.stdout()).toContain("transcript-sentinel: the agent spoke");
+        } finally {
+          process.child.kill("SIGTERM");
+          await process.exited;
+          rmSync(bin, { recursive: true, force: true });
+        }
+      }),
   );
 
   it.live("answers 500 with opencode's error when it exits non-zero", () =>
