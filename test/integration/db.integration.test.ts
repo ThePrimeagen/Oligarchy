@@ -1103,6 +1103,81 @@ Postgres.describeWithDatabase("database", () => {
         }),
     );
 
+    scoped.effect("AutomationStore claims the oldest pending job, then none", () =>
+      Effect.gen(function* () {
+        const tests = yield* Tests.TestStore;
+        const automation = yield* Automation.AutomationStore;
+        const definition = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
+        const first = yield* tests.createRun({
+          iso: "https://example.com/omarchy.iso",
+          serverUrl: "http://127.0.0.1:42069",
+          definitions: [{ id: definition.id }],
+        });
+        const second = yield* tests.createRun({
+          iso: "https://example.com/omarchy.iso",
+          serverUrl: "http://127.0.0.1:42069",
+          definitions: [{ id: definition.id }],
+        });
+        const older = yield* automation.enqueue({ resultId: first.results[0].id, action: "drive" });
+        const newer = yield* automation.enqueue({
+          resultId: second.results[0].id,
+          action: "drive",
+        });
+        const claimed = yield* automation.claim();
+        expect(Option.isSome(claimed)).toBe(true);
+        if (Option.isSome(claimed)) {
+          expect(claimed.value).toMatchObject({
+            id: older.id,
+            status: "running",
+          });
+          expect(claimed.value.startedAt).toBeInstanceOf(Date);
+        }
+        const next = yield* automation.claim();
+        expect(Option.isSome(next)).toBe(true);
+        if (Option.isSome(next)) {
+          expect(next.value.id).toBe(newer.id);
+        }
+        expect(yield* automation.claim()).toEqual(Option.none());
+      }),
+    );
+
+    scoped.effect("AutomationStore finish closes a running job and refuses a second close", () =>
+      Effect.gen(function* () {
+        const tests = yield* Tests.TestStore;
+        const automation = yield* Automation.AutomationStore;
+        const database = yield* Client.Database;
+        const definition = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
+        const created = yield* tests.createRun({
+          iso: "https://example.com/omarchy.iso",
+          serverUrl: "http://127.0.0.1:42069",
+          definitions: [{ id: definition.id }],
+        });
+        const enqueued = yield* automation.enqueue({
+          resultId: created.results[0].id,
+          action: "drive",
+        });
+        const claimed = yield* automation.claim();
+        expect(Option.isSome(claimed)).toBe(true);
+        expect(yield* automation.finish(enqueued.id, "succeeded", null)).toBe(true);
+        const [row] = yield* database.run("select", (db) =>
+          db
+            .select()
+            .from(DbSchema.automationJobs)
+            .where(eq(DbSchema.automationJobs.id, enqueued.id)),
+        );
+        expect(row).toMatchObject({ status: "succeeded", reason: null });
+        expect(row?.finishedAt).toBeInstanceOf(Date);
+        expect(yield* automation.finish(enqueued.id, "failed", "nope")).toBe(false);
+        const [again] = yield* database.run("select", (db) =>
+          db
+            .select()
+            .from(DbSchema.automationJobs)
+            .where(eq(DbSchema.automationJobs.id, enqueued.id)),
+        );
+        expect(again).toMatchObject({ status: "succeeded", reason: null });
+      }),
+    );
+
     scoped.effect(
       "ServerStore registers a url once as a qemu server, lists the qemu servers in registration order, forgets it",
       () =>
@@ -1291,6 +1366,52 @@ Postgres.describeWithDatabase("database", () => {
         expect(yield* store.listServers("qemu")).not.toContain(url);
         expect(yield* store.removeServer(url)).toBe(true);
       }),
+    );
+
+    scoped.effect(
+      "ServerStore listLiveServers keeps a 44s heartbeat and drops a 46s one, the wrong type, and a null heartbeat",
+      () =>
+        Effect.gen(function* () {
+          const store = yield* Servers.ServerStore;
+          const database = yield* Client.Database;
+          const stats: DbSchema.ServerStats = {
+            qemus: 0,
+            memory: { totalBytes: 1, usedBytes: 0 },
+            cpu: { mean1m: 0, mean2m: 0, mean3m: 0 },
+          };
+          const fresh = `http://10.0.0.20:${uuid().slice(0, 8)}`;
+          const stale = `http://10.0.0.21:${uuid().slice(0, 8)}`;
+          const qemu = `http://10.0.0.22:${uuid().slice(0, 8)}`;
+          const silent = `http://10.0.0.23:${uuid().slice(0, 8)}`;
+          yield* store.heartbeat(fresh, "automation-client", stats);
+          yield* store.heartbeat(stale, "automation-client", stats);
+          yield* store.heartbeat(qemu, "qemu", stats);
+          yield* store.addServer(silent, "automation-client");
+          yield* database.run("stamp", (db) =>
+            db
+              .update(DbSchema.servers)
+              .set({ heartbeatAt: sql`now() - interval '44 seconds'` })
+              .where(eq(DbSchema.servers.url, fresh)),
+          );
+          yield* database.run("stamp", (db) =>
+            db
+              .update(DbSchema.servers)
+              .set({ heartbeatAt: sql`now() - interval '46 seconds'` })
+              .where(eq(DbSchema.servers.url, stale)),
+          );
+          const live = yield* store.listLiveServers("automation-client");
+          expect(live).toContain(fresh);
+          expect(live).not.toContain(stale);
+          expect(live).not.toContain(qemu);
+          expect(live).not.toContain(silent);
+          expect(yield* store.listServers("automation-client")).toEqual(
+            expect.arrayContaining([fresh, stale, silent]),
+          );
+          expect(yield* store.removeServer(fresh)).toBe(true);
+          expect(yield* store.removeServer(stale)).toBe(true);
+          expect(yield* store.removeServer(qemu)).toBe(true);
+          expect(yield* store.removeServer(silent)).toBe(true);
+        }),
     );
 
     scoped.effect("ServerStore routes a session once and answers where it went", () =>

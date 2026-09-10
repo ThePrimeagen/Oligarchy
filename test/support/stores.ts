@@ -547,6 +547,36 @@ export const fakeAutomationStore = (
         jobs.push(row);
         return row;
       }),
+    claim: () =>
+      Effect.sync(() => {
+        const pending = jobs
+          .filter((job) => job.status === "pending")
+          .sort(
+            (left, right) =>
+              left.createdAt.getTime() - right.createdAt.getTime() ||
+              left.id.localeCompare(right.id),
+          );
+        const job = pending[0];
+        if (job === undefined) {
+          return Option.none();
+        }
+        job.status = "running";
+        job.startedAt = new Date();
+        return Option.some(job);
+      }),
+    finish: (id, status, reason) =>
+      Effect.sync(() => {
+        const job = jobs.find((row) => row.id === id && row.status === "running");
+        if (job === undefined) {
+          return false;
+        }
+        job.status = status;
+        job.finishedAt = new Date();
+        if (reason !== null) {
+          job.reason = reason;
+        }
+        return true;
+      }),
     ...overrides,
   });
   return { jobs, layer: Layer.succeed(Automation.AutomationStore)(service) };
@@ -612,6 +642,15 @@ export const fakeServerStore = (
     listServers: (type) =>
       Effect.sync(() =>
         servers.filter((server) => server.type === type).map((server) => server.url),
+      ),
+    // Any heartbeat marks the url live: the 45s window is a real-database concern.
+    listLiveServers: (type) =>
+      Effect.sync(() =>
+        servers
+          .filter(
+            (server) => server.type === type && heartbeats.some((beat) => beat.url === server.url),
+          )
+          .map((server) => server.url),
       ),
     routeSession: (sessionId, url) =>
       routes.has(sessionId)

@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { Array as Arr, Context, Effect, Layer, Option } from "effect";
 import * as Client from "./client.ts";
 import * as DbSchema from "./schema.ts";
@@ -66,6 +66,24 @@ export class ServerStore extends Context.Service<ServerStore>()("@oligarchy/db/S
       return rows.map((row) => row.url);
     });
 
+    // Clients write every 30s; 45s is one missed beat plus a little. A null heartbeat is
+    // an operator-added row no process has claimed, so it is not live.
+    const listLiveServers = Effect.fn("db.listLiveServers")(function* (type: ServerType) {
+      const rows = yield* database.run("listLiveServers", (db) =>
+        db
+          .select({ url: DbSchema.servers.url })
+          .from(DbSchema.servers)
+          .where(
+            and(
+              eq(DbSchema.servers.type, type),
+              sql`${DbSchema.servers.heartbeatAt} > now() - interval '45 seconds'`,
+            ),
+          )
+          .orderBy(DbSchema.servers.createdAt, DbSchema.servers.url),
+      );
+      return rows.map((row) => row.url);
+    });
+
     // A session is routed once; a second insert is the primary key's DatabaseError by design.
     const routeSession = Effect.fn("db.routeSession")(function* (sessionId: string, url: string) {
       yield* database.run("routeSession", (db) =>
@@ -83,7 +101,15 @@ export class ServerStore extends Context.Service<ServerStore>()("@oligarchy/db/S
       return Option.map(Arr.head(rows), (row) => row.serverUrl);
     });
 
-    return { addServer, heartbeat, removeServer, listServers, routeSession, serverForSession };
+    return {
+      addServer,
+      heartbeat,
+      removeServer,
+      listServers,
+      listLiveServers,
+      routeSession,
+      serverForSession,
+    };
   }),
 }) {
   static readonly layer = Layer.effect(this)(this.make);
