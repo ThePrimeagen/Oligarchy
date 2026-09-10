@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { NodeHttpClient, NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node";
-import { Cause, Deferred, Effect, Exit, Layer, MutableRef, type Runtime } from "effect";
+import { Cause, Deferred, Effect, Exit, Layer, MutableRef, Option, type Runtime } from "effect";
 import { Command } from "effect/unstable/cli";
 import { HttpMiddleware, HttpRouter, HttpServerError } from "effect/unstable/http";
 import * as Config from "../config.ts";
@@ -24,6 +24,8 @@ import * as Handlers from "./handlers.ts";
 import * as Heartbeat from "./heartbeat.ts";
 import * as Sessions from "./sessions.ts";
 
+const HOST = "127.0.0.1";
+
 // Shared with the Sessions drain: the reason surviving rows close with, and whether one refused.
 const shutdown = Sessions.Shutdown.defaultValue();
 
@@ -46,15 +48,20 @@ server.on("error", (cause) => {
 
 // The heartbeat starts once the listener is up, in the same scope: a port refusal announces
 // nothing, and a shutdown deletes the row it wrote.
-const ServerLive = (display: Domain.QemuDisplay, automation: boolean, port: number, url: string) =>
+const ServerLive = (
+  display: Domain.QemuDisplay,
+  automation: boolean,
+  port: number,
+  url: Option.Option<string>,
+) =>
   Layer.effectDiscard(
     Effect.gen(function* () {
       const log = yield* Log.Log;
       yield* log.info(
-        `qemu server listening on ${QemuServerCommand.HOST}:${String(port)}; display ${display}${automation ? "; automation" : ""}; announcing ${url}`,
+        `qemu server listening on ${HOST}:${String(port)}; display ${display}${automation ? "; automation" : ""}${Option.match(url, { onNone: () => "", onSome: (announced) => `; announcing ${announced}` })}`,
         { location: Log.Locations.server },
       );
-      yield* Heartbeat.announce(url);
+      yield* Option.match(url, { onNone: () => Effect.void, onSome: Heartbeat.announce });
     }),
   ).pipe(
     Layer.provide(
@@ -67,7 +74,7 @@ const ServerLive = (display: Domain.QemuDisplay, automation: boolean, port: numb
     Layer.provide(Layer.succeed(Sessions.Shutdown)(shutdown)),
     Layer.provide(Layer.mergeAll(Qemu.Qemu.layer, Iso.Iso.layer, Stats.Stats.layer)),
     // Bound before Sessions exists: a port refusal is one fatal line, never a drain.
-    Layer.provide(NodeHttpServer.layer(() => server, { host: QemuServerCommand.HOST, port })),
+    Layer.provide(NodeHttpServer.layer(() => server, { host: HOST, port })),
     // Root session spans require no request span above them.
     Layer.provide(Layer.succeed(HttpMiddleware.TracerDisabledWhen)(() => true)),
   );

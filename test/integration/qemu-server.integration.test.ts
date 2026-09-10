@@ -213,7 +213,7 @@ describe("qemu server startup refusals", () => {
     }),
   );
 
-  it.live("--help exits 0 and lists the three flags", () =>
+  it.live("--help exits 0 and lists the four flags", () =>
     Effect.promise(async () => {
       const server = spawnQemuServer(["--help"]);
       const { code } = await server.exited;
@@ -222,7 +222,17 @@ describe("qemu server startup refusals", () => {
       expect(server.stdout()).toContain("--display");
       expect(server.stdout()).toContain("--automation");
       expect(server.stdout()).toContain("--port");
-      expect(server.stdout()).not.toContain("--url");
+      expect(server.stdout()).toContain("--url");
+    }),
+  );
+
+  it.live("a --url that is not an http or https url exits 1 with the rule", () =>
+    Effect.promise(async () => {
+      const server = spawnQemuServer(["--url", "ftp://qemu.example.com"]);
+      const { code } = await server.exited;
+      expect(code).toBe(1);
+      expect(server.stderr()).toContain("url must be an http or https url");
+      expect(server.stdout()).not.toContain("listening");
     }),
   );
 
@@ -411,7 +421,7 @@ describe("qemu server serving", () => {
       serving(
         [],
         (port) =>
-          `[global] server: qemu server listening on 127.0.0.1:${String(port)}; display none; announcing http://127.0.0.1:${String(port)}`,
+          `[global] server: qemu server listening on 127.0.0.1:${String(port)}; display none`,
         "SIGINT",
       ),
     120_000,
@@ -423,14 +433,14 @@ describe("qemu server serving", () => {
       serving(
         ["--automation"],
         (port) =>
-          `[global] server: qemu server listening on 127.0.0.1:${String(port)}; display none; automation; announcing http://127.0.0.1:${String(port)}`,
+          `[global] server: qemu server listening on 127.0.0.1:${String(port)}; display none; automation`,
         "SIGTERM",
       ),
     120_000,
   );
 
-  // The row a server writes from its listen port, read through the Database service; undefined
-  // until the first heartbeat lands.
+  // The row a server writes under --url, read through the Database service; undefined until the
+  // first heartbeat lands.
   const announced = (url: string) =>
     Effect.gen(function* () {
       const database = yield* Client.Database;
@@ -441,12 +451,12 @@ describe("qemu server serving", () => {
     }).pipe(Effect.provide(Postgres.DatabaseLive(dbUrl)));
 
   it.live.skipIf(!hasQemu || dbUrl === "")(
-    "--port constructs the fleet url, writes the server's row as its first heartbeat, and deletes it on SIGTERM",
+    "--url names the url on the listen line, writes the server's row as its first heartbeat, and deletes it on SIGTERM",
     () =>
       Effect.gen(function* () {
         const port = yield* Effect.promise(freePort);
-        const url = `http://127.0.0.1:${String(port)}`;
-        const server = spawnQemuServer(["--automation", "--port", String(port)]);
+        const url = `http://qemu-a.test:${String(port)}`;
+        const server = spawnQemuServer(["--automation", "--url", url, "--port", String(port)]);
         const row = yield* Effect.gen(function* () {
           yield* Effect.promise(() => server.waitFor(/qemu server listening/));
           expect(lines(server.stdout())).toContain(

@@ -8,6 +8,7 @@ import {
   Fiber,
   FileSystem,
   Layer,
+  Option,
   Path,
   Redacted,
   Stdio,
@@ -59,7 +60,7 @@ const refused = Errors.DatabaseError.make({
   cause: new Error("connect ECONNREFUSED 127.0.0.1:1"),
 });
 
-type Served = readonly [Domain.QemuDisplay, boolean, number, string];
+type Served = readonly [Domain.QemuDisplay, boolean, number, Option.Option<string>];
 
 // The host check, the server layer and the failure signal the command is built from.
 const fakeServer = (missing: ReadonlyArray<string> = []) => {
@@ -163,11 +164,11 @@ describe("qemu server command flags", () => {
       expect(stdout.join("\n")).toContain("--automation");
       expect(stdout.join("\n")).toContain("--display");
       expect(stdout.join("\n")).toContain("--port");
-      expect(stdout.join("\n")).not.toContain("--url");
+      expect(stdout.join("\n")).toContain("--url");
     }),
   );
 
-  it.effect("defaults to display none and port 42069 and announces http://127.0.0.1:42069", () =>
+  it.effect("defaults to display none and port 42069 and checks the host before listening", () =>
     Effect.gen(function* () {
       const fake = fakeServer();
       const log = FakeLog.fakeLog();
@@ -177,7 +178,7 @@ describe("qemu server command flags", () => {
       const exit = yield* Fiber.await(fiber);
       expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true);
       expect(fake.checked).toEqual(["none"]);
-      expect(fake.served).toEqual([["none", false, 42069, "http://127.0.0.1:42069"]]);
+      expect(fake.served).toEqual([["none", false, 42069, Option.none()]]);
       expect(log.lines).toEqual([]);
     }),
   );
@@ -192,23 +193,42 @@ describe("qemu server command flags", () => {
       yield* Deferred.await(gtk.listening);
       yield* Fiber.interrupt(first);
       expect(gtk.checked).toEqual(["gtk"]);
-      expect(gtk.served).toEqual([["gtk", false, 1234, "http://127.0.0.1:1234"]]);
+      expect(gtk.served).toEqual([["gtk", false, 1234, Option.none()]]);
 
       const automation = fakeServer();
       const second = yield* Effect.forkChild(run(automation.server, ["--automation"], log));
       yield* Deferred.await(automation.listening);
       yield* Fiber.interrupt(second);
       expect(automation.checked).toEqual(["none"]);
-      expect(automation.served).toEqual([["none", true, 42069, "http://127.0.0.1:42069"]]);
+      expect(automation.served).toEqual([["none", true, 42069, Option.none()]]);
     }),
   );
 
-  it.effect("--url is no longer a flag: a usage error that touches nothing", () =>
+  it.effect("--url reaches the server as given, so it announces itself under that url", () =>
     Effect.gen(function* () {
       const fake = fakeServer();
       const log = FakeLog.fakeLog();
-      const error = yield* Effect.flip(run(fake.server, ["--url", "http://127.0.0.1:55332"], log));
+      const fiber = yield* Effect.forkChild(
+        run(fake.server, ["--url", "http://127.0.0.1:55332", "--automation"], log),
+      );
+      yield* Deferred.await(fake.listening);
+      yield* Fiber.interrupt(fiber);
+      expect(fake.served).toEqual([["none", true, 42069, Option.some("http://127.0.0.1:55332")]]);
+    }),
+  );
+
+  it.effect("a --url that is not an http or https url is a usage error that touches nothing", () =>
+    Effect.gen(function* () {
+      const fake = fakeServer();
+      const log = FakeLog.fakeLog();
+      const error = yield* Effect.flip(run(fake.server, ["--url", "ftp://qemu.example.com"], log));
       expect(error._tag).toBe("ShowHelp");
+      if (error._tag === "ShowHelp") {
+        expect(error.errors.length).toBeGreaterThan(0);
+        expect(error.errors[0]?._tag).toBe("InvalidValue");
+      }
+      const stderr = yield* TestConsole.errorLines;
+      expect(stderr.join("\n")).toContain("url must be an http or https url");
       expect(fake.checked).toEqual([]);
       expect(fake.served).toEqual([]);
       expect(log.lines).toEqual([]);
