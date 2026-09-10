@@ -47,8 +47,8 @@ Everything below follows `development.md`; where the two disagree, that one wins
   (`test_results.linear_id`) before it spends a run, attributes every line to it, and refuses a
   ticket it cannot find. There is no `agent` field; the ticket is the agent id, as it is for
   `./client --agent-id`.
-- The model provider key is the automation client's own variable, `OPENCODE_API_KEY`, read at
-  startup with `OLIGARCHY_TOKEN` and `DATABASE_URL`. It does not travel on the wire.
+- How opencode authenticates to its model provider is not part of this plan. The automation client
+  neither reads nor forwards a provider credential; that is solved separately, later.
 - The dispatch loop is in the plan, in `./automation-server`: claim, compose, place, run, close.
 - Who writes what on failure (§3.6): the automation server owns the `automation_jobs` row — it
   claimed it, it closes it, `failed` or `timed_out` with the reason the client answered — and
@@ -94,10 +94,9 @@ named case inside one, and is its own todo.
       behind `BearerAuth` then `ApiBoundary`; `run` declares `RunBody`, `RunResponse` and exactly the
       three error codecs; `QemuServerApi`, `QemuReverseProxyApi` and `AutomationServerApi` are
       unchanged.
-- [ ] `test/config/config.unit.test.ts` — `AutomationClientConfig` reports `OLIGARCHY_TOKEN`, then
-      `DATABASE_URL`, then `OPENCODE_API_KEY`, the first missing one alone; `AutomationServerConfig`
-      reports `LINEAR_WEBHOOK_SECRET`, `OLIGARCHY_TOKEN`, `LINEAR_API_TOKEN`, `DATABASE_URL` in that
-      order.
+- [ ] `test/config/config.unit.test.ts` — `AutomationServerConfig` reports `LINEAR_WEBHOOK_SECRET`,
+      `OLIGARCHY_TOKEN`, `LINEAR_API_TOKEN`, `DATABASE_URL` in that order, the first missing one
+      alone. The automation client reuses `ProxyConfig`, whose test exists.
 - [ ] `test/automation-server/command.unit.test.ts` — the command still defaults to 54321 and pings;
       new: the dispatch loop's startup sweep is called once before listen (through the fake store);
       `--help` lists `--port` alone.
@@ -162,12 +161,11 @@ named case inside one, and is its own todo.
       `sessionID` is ignored. Fixtures are captured lines (S2); a synthetic one is labelled
       synthetic.
 - [ ] `test/automation-client/opencode.unit.test.ts` (FakeSpawner, fake FileSystem, `Path.layer`, fake
-      Log, `AutomationClientConfig`) — happy: the argv is exactly `run --model <MODEL> --format json`;
-      the child's cwd is a fresh directory holding executable `client`, `client-with-image`, `ctrl`
-      and `session` shims that `exec` this repo's wrappers, and an `opencode.json`; the env carries
-      `OPENCODE_API_KEY`, `OLIGARCHY_TOKEN`, `DATABASE_URL`, `SERVER_URL` (the run's) and
-      `OLIGARCHY_MODEL` and the argv carries none of them; the prompt arrives on stdin byte for
-      byte; exit 0 after captured events answers `{ session, text }`; the directory is gone once the
+      Log, `ProxyConfig`) — happy: the argv is exactly `run --model <MODEL> --format json`; the
+      child's cwd is a fresh directory holding executable `client`, `client-with-image`, `ctrl` and
+      `session` shims that `exec` this repo's wrappers, and an `opencode.json`; the env carries
+      `OLIGARCHY_TOKEN`, `DATABASE_URL`, `SERVER_URL` (the run's) and `OLIGARCHY_MODEL` and the argv
+      carries none of them; the prompt arrives on stdin byte for byte; exit 0 after captured events answers `{ session, text }`; the directory is gone once the
       scope closes. Unhappy: exit 1 with an `error` event is `RunFailed` `opencode: exited 1:
       <message>`; exit 1 without one carries the stderr tail; exit 0 without a session is `RunFailed`
       `opencode: exited 0 without a session`; a spawn `ENOENT` is `RunFailed` `opencode: spawn opencode
@@ -207,8 +205,7 @@ named case inside one, and is its own todo.
 - [ ] `test/integration/automation-client.integration.test.ts` (black-box: the wrapper spawned, a fake
       `opencode` shell script first on `PATH`, stdout and stderr captured) — refusals: `--help` exits
       0; `--port forty` exits 1; an empty `OLIGARCHY_TOKEN` exits 1 with `OLIGARCHY_TOKEN is not set`;
-      an empty `DATABASE_URL` likewise; an empty `OPENCODE_API_KEY` likewise; no `opencode` on `PATH`
-      exits 1 with the fatal line; an unreachable database exits 1 and never listens. With a
+      an empty `DATABASE_URL` likewise; no `opencode` on `PATH` exits 1 with the fatal line; an unreachable database exits 1 and never listens. With a
       database: an occupied port is `EADDRINUSE`; it listens and logs the listening line; `POST /run`
       without a bearer is 401; with the bearer and a key no result carries, 404; with a seeded
       result's ticket and a fake `opencode` that reads its stdin, sleeps three seconds, prints
@@ -440,7 +437,7 @@ src/db/automation.ts                    + claimNext, closeJob, abortRunning
 src/db/servers.ts                       + listAutomationClients
 src/db/tests.ts                         + findTicket
 src/dashboard/query.ts, servers.tsx     the fleet is qemu rows; the automation half gains the clients table
-src/config.ts                           AutomationClientConfig; AutomationConfig → AutomationServerConfig
+src/config.ts                           AutomationConfig → AutomationServerConfig (the client reuses ProxyConfig)
 src/observability/log.ts                Locations.automationClient and its ProcessAttribution
 drizzle/0010_<name>.sql                 generated: the enum value and the index change, together
 package.json                            "automation-client" script
@@ -488,7 +485,7 @@ const ServerLive = (port: number, url: Option.Option<string>) =>
   );
 
 const DatabaseLive = Layer.unwrap(
-  Effect.map(Config.AutomationClientConfig, (config) => Client.Database.layer(config.databaseUrl)),
+  Effect.map(Config.ProxyConfig, (config) => Client.Database.layer(config.databaseUrl)),
 );
 
 // Sentry beneath Log so the rows flush before Sentry does and Log captures the reporter; the
@@ -500,7 +497,7 @@ const MainLive = Layer.mergeAll(
 ).pipe(
   Layer.provideMerge(Logs.LogStore.layer),
   Layer.provideMerge(DatabaseLive),
-  Layer.provideMerge(Config.AutomationClientConfig.layer),
+  Layer.provideMerge(Config.ProxyConfig.layer),
   Layer.provideMerge(Sentry.SentryLive),
   Layer.provideMerge(
     Layer.succeed(Log.ProcessAttribution)(Log.AutomationClientProcessAttribution),
@@ -512,8 +509,8 @@ const MainLive = Layer.mergeAll(
 
 One reference per service. `Runs` depends on `AgentRunner`, `Stats`, `TestStore` and `Log`;
 `OpenCode.layer` on `ChildProcessSpawner`, `FileSystem`, `Path` (from `NodeServices`),
-`AutomationClientConfig` and `Log`; the handlers on `Runs`, the bearer (built from the config's
-token with `Middleware.bearerAuth(token)`) and `ApiBoundaryLive` (`Log`, `ProcessAttribution`). The
+`ProxyConfig` and `Log`; the handlers on `Runs`, `BearerAuthLive` (`ProxyConfig`, unchanged) and
+`ApiBoundaryLive` (`Log`, `ProcessAttribution`). The
 heartbeat starts after the listener is up, in the listener's scope, as on the qemu server: a port
 refusal announces nothing, and the row is deleted when the listener goes.
 
@@ -724,7 +721,8 @@ to be re-checked on the host in S1–S3:
 - It exits when the session goes idle: exit code 0, or 1 when a `session.error` event was seen or
   the prompt was refused. Permission requests are auto-rejected unless `--auto`; `question`,
   `plan_enter` and `plan_exit` are denied outright.
-- The OpenCode Zen provider is `opencode`; its key is read from `OPENCODE_API_KEY`.
+- The OpenCode Zen provider is `opencode`. How the host's opencode is authenticated to it is not
+  this plan's; the runner passes nothing for it and the child inherits whatever the host has.
 
 ```ts
 export const BIN = "opencode";
@@ -760,10 +758,10 @@ const FORCE_KILL_AFTER = "5 seconds";
    ```ts
    ChildProcess.make(BIN, ["run", "--model", MODEL, "--format", "json"], {
      cwd: dir,
-     // What the agent's tools read, unwrapped here and nowhere else. Nothing secret is on argv;
-     // the prompt is on stdin.
+     // What ./client and ./ctrl read inside the agent, unwrapped here and nowhere else. Nothing
+     // secret is on argv; the prompt is on stdin. opencode's own provider auth is the host's,
+     // inherited through extendEnv, and none of this plan's.
      env: {
-       OPENCODE_API_KEY: Redacted.value(config.opencodeApiKey),
        OLIGARCHY_TOKEN: Redacted.value(config.token),
        DATABASE_URL: Redacted.value(config.databaseUrl),
        SERVER_URL: input.serverUrl,
@@ -801,7 +799,7 @@ const FORCE_KILL_AFTER = "5 seconds";
    Every `RunFailed` carries `agentId: input.ticket`.
 
 `OpenCode.layer: Layer.Layer<AgentRunner, never, ChildProcessSpawner | FileSystem | Path |
-Config.AutomationClientConfig | Log.Log>` captures its dependencies once in the layer effect. No
+Config.ProxyConfig | Log.Log>` captures its dependencies once in the layer effect. No
 Sentry span in this cut (§18).
 
 ### 6.3 `src/automation-client/events.ts` — the fold
@@ -849,9 +847,9 @@ lines, and the test fixtures are those lines.
 `src/automation-client/cursor.ts` would implement the same `Shape` over `@cursor/sdk` (the package
 `ctrl` dropped in #102): `Agent.launch` with the prompt and a `ModelSelection`, then poll the agent
 until it is finished, then read its last message as `text`; `session` is the agent id; `model` is
-the selection's label as `modelLabel` spelled it. Its key is a `CURSOR_API_TOKEN` variable of the
-automation client's, as `OPENCODE_API_KEY` is. Nothing outside `cursor.ts` and `main.ts` (which
-picks the layer) changes. Not in this plan.
+the selection's label as `modelLabel` spelled it. How it authenticates is, like opencode's, a
+question for later. Nothing outside `cursor.ts` and `main.ts` (which picks the layer) changes. Not
+in this plan.
 
 ## 7. The Runs service
 
@@ -988,9 +986,9 @@ The servers page is already two halves (#109). Changes, all in `src/dashboard/`:
 
 ### 11.1 The automation client
 
-- Variables, in this order: `OLIGARCHY_TOKEN`, `DATABASE_URL`, `OPENCODE_API_KEY` — a new
-  `Config.AutomationClientConfig { token, databaseUrl, opencodeApiKey }` (`Effect.all` on an object,
-  sequential on purpose, as the others). `opencodeApiKey = requiredRedacted("OPENCODE_API_KEY")`.
+- Variables, in this order: `OLIGARCHY_TOKEN`, `DATABASE_URL` — exactly `Config.ProxyConfig`, which
+  the qemu reverse proxy already reuses; the automation client reuses it too (D8). Nothing for
+  opencode's own provider: that is not this plan's.
 - Wrapper: `./automation-client`, `#!/bin/sh exec node --experimental-strip-types --import
   "$(dirname "$0")/src/observability/instrument.ts" "$(dirname "$0")/src/automation-client/main.ts"
   "$@"`. Script: `"automation-client": "node --experimental-strip-types --import
@@ -1117,7 +1115,7 @@ export declare class AgentRunner /* Context.Service<AgentRunner, Shape> */ {}
 // src/automation-client/opencode.ts
 export declare const BIN: "opencode";
 export declare const MODEL: string;
-export declare const layer: unknown; // Layer<AgentRunner, never, ChildProcessSpawner | FileSystem | Path | AutomationClientConfig | Log>
+export declare const layer: unknown; // Layer<AgentRunner, never, ChildProcessSpawner | FileSystem | Path | ProxyConfig | Log>
 
 // src/automation-client/events.ts
 type Option<A> = unknown;       // effect Option.Option
@@ -1234,7 +1232,7 @@ export declare const hostRow: (host: HostStats) => HostRowStats;
 
 Identifiers: `@oligarchy/automation-client/AgentRunner`, `@oligarchy/automation-client/Runs`,
 `@oligarchy/automation-client/events/Line`, `@oligarchy/host/Stats`,
-`@oligarchy/config/AutomationClientConfig`, `@oligarchy/config/AutomationServerConfig`,
+`@oligarchy/config/AutomationServerConfig`,
 `@oligarchy/shared/contract/RunBody`, `@oligarchy/shared/contract/RunResponse`,
 `@oligarchy/shared/errors/UnknownTicket`, `@oligarchy/shared/errors/RunFailed`,
 `@oligarchy/shared/errors/RunTimedOut`.
@@ -1257,8 +1255,8 @@ breaks the qemu server or the reverse proxy.
    codecs, `run`, `Runs`, `AutomationClientApi`; the middleware's three new arms. Unit lane only.
 4. **The runner** — `events.ts`, `runner.ts`, `opencode.ts`, `fake-runner.ts`; the captured fixtures
    from S2 checked in as test constants. Unit lane only; S1–S3 done before this slice starts.
-5. **The automation client** — `runs.ts`, `handlers.ts`, `command.ts`, `main.ts`,
-   `AutomationClientConfig`, the wrapper and script, the log locations; `automation-client.md`; the
+5. **The automation client** — `runs.ts`, `handlers.ts`, `command.ts`, `main.ts`, the wrapper and
+   script, the log locations; `automation-client.md`; the
    `development.md` Layout and Log paragraphs name the new process. Lane:
    `automation-client.integration.test.ts`.
 6. **The dispatch loop** — `Linear.issueDescription`, `Prompts.renderDiagnosingAgent` and the
@@ -1271,9 +1269,9 @@ breaks the qemu server or the reverse proxy.
 Facts to establish before slice 4 (S1–S3, S5, S6) and slice 6 (S7); each is a short session at a
 shell, its findings written into the constants and fixtures, not into this document.
 
-- S1 — `opencode --version`; `opencode models | grep -i muse` → pin `MODEL`. With `HOME` set to an
-  empty directory (no `auth.json`), `echo "say ok" | OPENCODE_API_KEY=… opencode run --model <MODEL>
-  --format json` answers: the key is honoured from the environment and nothing else is needed.
+- S1 — `opencode --version`; `opencode models | grep -i muse` → pin `MODEL`. With the host's opencode
+  set up as it is today, `echo "say ok" | opencode run --model <MODEL> --format json` answers from a
+  scratch directory. How that setup is provisioned is not this plan's.
 - S2 — Capture full stdout of a real run (a `text`, a `step_start`, a `step_finish`, a `tool_use`)
   and of a failing one (a bad key → an `error` line and exit 1). Confirm `text` is a completed part
   and how the final answer is spelled across steps. These lines are the fixtures.
@@ -1323,11 +1321,13 @@ shell, its findings written into the constants and fixtures, not into this docum
 - D7 — **Generalise `stats` and `heartbeat` into `src/host/`** rather than copy them into the new
   process. Two callers is the point at which the abstraction is paid for; the copy would be forty
   lines that drift.
-- D8 — **Each process gets its own config class.** `AutomationClientConfig` (three variables) and
-  `AutomationServerConfig` (four) instead of stretching `ProxyConfig`: a process's variables and
-  their report order are its contract, and the integration tests pin the first missing name.
-- D9 — **The provider key is the client's environment**, not the wire. The dispatcher has no
-  business holding model credentials, and the client's host is where `opencode` is configured.
+- D8 — **The automation client reuses `ProxyConfig`; the automation server gets its own class.** The
+  client reads exactly the reverse proxy's two variables in the same order, so a second class would
+  be the same two lines under another name. The server reads four, in an order its tests pin, so
+  `AutomationServerConfig` is its own.
+- D9 — **No model credential in this plan.** The automation client neither reads nor forwards one
+  and the wire carries none; opencode authenticates however the host has it set up. Solved
+  separately, later.
 - D10 — **A scratch directory with shims per run**, not the repository root. Concurrent agents would
   otherwise share `screen.png`, and the prompt's "do not read this repository" would be a request
   instead of a fact. The shims are two lines each because the wrappers resolve `$(dirname "$0")`.
