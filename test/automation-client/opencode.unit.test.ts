@@ -1,6 +1,16 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { Effect, Exit, Fiber, FileSystem, Layer, Path, Redacted, Scope, Stream } from "effect";
+import {
+  Effect,
+  Exit,
+  Fiber,
+  FileSystem,
+  Layer,
+  Path,
+  PlatformError,
+  Redacted,
+  Scope,
+} from "effect";
 import * as OpenCode from "../../src/automation-client/opencode.ts";
 import * as Runner from "../../src/automation-client/runner.ts";
 import * as Config from "../../src/config.ts";
@@ -75,11 +85,6 @@ const ERROR_LINE = JSON.stringify({
   error: { name: "APIError", data: { message: "refused" } },
 });
 
-const stdinText = (spawned: FakeSpawner.Spawned) => {
-  const stdin = spawned.options.stdin;
-  return Stream.isStream(stdin) ? Stream.mkString(Stream.decodeText(stdin)) : Effect.succeed("");
-};
-
 describe("OpenCode happy path", () => {
   it.effect(
     "spawns opencode run with the model and json format, a scratch dir of shims, the env, and the prompt on stdin",
@@ -116,7 +121,8 @@ describe("OpenCode happy path", () => {
           DATABASE_URL,
           OLIGARCHY_MODEL: OpenCode.MODEL,
         });
-        expect(yield* stdinText(spawned)).toBe(PROMPT);
+        expect(spawned.options.stdin).toBe("pipe");
+        expect(spawned.stdin()).toBe(PROMPT);
         const dir = spawned.options.cwd;
         expect(dir).toMatch(/oligarchy-run-/);
         if (dir === undefined) {
@@ -254,6 +260,28 @@ describe("OpenCode unhappy path", () => {
       expect(error.message).toMatch(/^opencode: /);
       expect(error.message).toContain("Process interrupted due to receipt of signal");
       expect(error.agentId).toBe(KEY);
+    }),
+  );
+
+  it.effect("a stdout pipe that breaks is RunFailed with the platform's reason, at once", () =>
+    Effect.gen(function* () {
+      const spawner = FakeSpawner.fakeSpawner(() => ({}));
+      const runner = yield* Runner.AgentRunner.pipe(
+        Effect.provide(env(spawner, memoryFs(), FakeLog.fakeLog())),
+      );
+      const fiber = yield* Effect.forkChild(runner.run({ key: KEY, prompt: PROMPT }));
+      yield* Effect.yieldNow;
+      const broken = PlatformError.systemError({
+        _tag: "Unknown",
+        module: "ChildProcess",
+        method: "stdout",
+        description: "read EIO",
+      });
+      yield* spawner.spawned[0]?.failStdout(broken) ?? Effect.void;
+      const error = yield* Effect.flip(Fiber.join(fiber));
+      expect(error).toMatchObject({ _tag: "RunFailed", agentId: KEY });
+      expect(error.message).toMatch(/^opencode: /);
+      expect(error.message).toContain("read EIO");
     }),
   );
 

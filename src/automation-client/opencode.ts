@@ -1,15 +1,4 @@
-import {
-  Effect,
-  Fiber,
-  FileSystem,
-  Layer,
-  Option,
-  Path,
-  Redacted,
-  Ref,
-  Result,
-  Stream,
-} from "effect";
+import { Effect, FileSystem, Layer, Option, Path, Redacted, Ref, Result, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import * as Config from "../config.ts";
 import * as ExternalFailure from "../external-failure.ts";
@@ -92,7 +81,7 @@ export const layer: Layer.Layer<
                 OLIGARCHY_MODEL: MODEL,
               },
               extendEnv: true,
-              stdin: Stream.make(encoder.encode(input.prompt)),
+              stdin: "pipe",
               stdout: "pipe",
               stderr: "pipe",
               detached: false,
@@ -103,32 +92,31 @@ export const layer: Layer.Layer<
           .pipe(Effect.mapError((error) => failed(input, `opencode: ${detail(error)}`, error)));
         const events = yield* Ref.make(Events.empty);
         const tail = yield* Ref.make("");
-        const drainStdout = yield* Effect.forkScoped(
-          handle.stdout.pipe(
-            Stream.decodeText(),
-            Stream.splitLines,
-            Stream.runForEach((line) => Ref.update(events, (state) => Events.fold(state, line))),
-            // A closed pipe is the child exiting; the verdict uses the fold as it stands.
-            Effect.ignore,
-          ),
-          { startImmediately: true },
-        );
-        const drainStderr = yield* Effect.forkScoped(
-          handle.stderr.pipe(
-            Stream.decodeText(),
-            Stream.runForEach((text) =>
-              Ref.update(tail, (current) => `${current}${text}`.slice(-STDERR_TAIL_BYTES)),
+        // The prompt goes in, both pipes are drained to their end, and the exit is awaited, all at
+        // once: the pipes end when the child does, so everything it wrote is in the fold and the
+        // tail before the verdict is read. A pipe that breaks fails the run then and there; a
+        // signal death is an answer, not a failure, and is judged below.
+        const [exited] = yield* Effect.all(
+          [
+            handle.exitCode.pipe(
+              Effect.map(Result.succeed),
+              Effect.catch((error) => Effect.succeed(Result.fail(error))),
             ),
-            Effect.ignore,
-          ),
-          { startImmediately: true },
-        );
-        const exited = yield* handle.exitCode.pipe(
-          Effect.map(Result.succeed),
-          Effect.catch((error) => Effect.succeed(Result.fail(error))),
-        );
-        yield* Fiber.join(drainStdout);
-        yield* Fiber.join(drainStderr);
+            Stream.run(Stream.make(encoder.encode(input.prompt)), handle.stdin),
+            handle.stdout.pipe(
+              Stream.decodeText(),
+              Stream.splitLines,
+              Stream.runForEach((line) => Ref.update(events, (state) => Events.fold(state, line))),
+            ),
+            handle.stderr.pipe(
+              Stream.decodeText(),
+              Stream.runForEach((text) =>
+                Ref.update(tail, (current) => `${current}${text}`.slice(-STDERR_TAIL_BYTES)),
+              ),
+            ),
+          ],
+          { concurrency: "unbounded" },
+        ).pipe(Effect.mapError((error) => failed(input, `opencode: ${detail(error)}`, error)));
         if (Result.isFailure(exited)) {
           return yield* failed(input, `opencode: ${detail(exited.failure)}`, exited.failure);
         }

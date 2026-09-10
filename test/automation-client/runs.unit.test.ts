@@ -186,6 +186,44 @@ describe("Runs unhappy path", () => {
     }),
   );
 
+  it.effect("a cleanup that dies is the run cleanup failed line, and the run is still over", () =>
+    Effect.gen(function* () {
+      const boom = new Error("rm: directory not empty");
+      const runner = FakeRunner.fakeRunner({ name: "opencode", cleanupDies: boom });
+      const log = FakeLog.fakeLog();
+      const runs = yield* Runs.Runs.pipe(Effect.provide(env(runner, log)));
+      const response = yield* runs.run(BODY);
+      expect(response.session).toBe("ses_fake");
+      expect((yield* runs.stats).agents).toBe(0);
+      expect(log.lines.map((line) => [line.level, line.text])).toEqual([
+        ["info", `run started; opencode; ${String(PROMPT.length)} chars`],
+        ["error", "run cleanup failed: rm: directory not empty"],
+        ["info", "run finished; 2 chars in 0ms"],
+      ]);
+      expect(log.lines[1]).toMatchObject({ ...ATTR, skipSentry: false, cause: boom });
+      expect(log.released).toEqual([KEY]);
+    }),
+  );
+
+  it.effect("a key's colour stays while another run of the same key is live", () =>
+    Effect.gen(function* () {
+      const runner = FakeRunner.fakeRunner({ hold: true });
+      const log = FakeLog.fakeLog();
+      const runs = yield* Runs.Runs.pipe(Effect.provide(env(runner, log)));
+      const first = yield* Effect.forkChild(runs.run(BODY));
+      yield* Effect.yieldNow;
+      const second = yield* Effect.forkChild(runs.run(BODY));
+      yield* Effect.yieldNow;
+      yield* TestClock.adjust("1 second");
+      yield* Fiber.interrupt(first);
+      expect(log.released).toEqual([]);
+      yield* runner.release;
+      yield* Fiber.join(second);
+      expect(log.released).toEqual([KEY]);
+      expect((yield* runs.stats).agents).toBe(0);
+    }),
+  );
+
   it.effect("a runner defect propagates as a defect, the count is 0 and the scope closed", () =>
     Effect.gen(function* () {
       const defect = new Error("boom");

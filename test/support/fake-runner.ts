@@ -15,13 +15,15 @@ export type FakeRunner = {
 };
 
 // Outcomes are scripted per call. `hold` parks each run on a Deferred until `release`, so a
-// test can inspect the live count. Each run records whether its scope's finalizer ran.
+// test can inspect the live count. Each run records whether its scope's finalizer ran; with
+// `cleanupDies` that finalizer dies, as a scratch directory that will not go does.
 export const fakeRunner = (
   options: {
     readonly script?: (input: Runner.RunInput, index: number) => Scripted;
     readonly hold?: boolean;
     readonly name?: string;
     readonly model?: string;
+    readonly cleanupDies?: unknown;
   } = {},
 ): FakeRunner => {
   const inputs: Array<Runner.RunInput> = [];
@@ -39,8 +41,11 @@ export const fakeRunner = (
           inputs.push(input);
           finalized[at] = false;
           yield* Effect.addFinalizer(() =>
-            Effect.sync(() => {
+            Effect.suspend(() => {
               finalized[at] = true;
+              return options.cleanupDies === undefined
+                ? Effect.void
+                : Effect.die(options.cleanupDies);
             }),
           );
           if (options.hold === true) {
