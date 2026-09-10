@@ -1365,7 +1365,7 @@ describe("stop", () => {
   it.effect("the drain saves a debug log for every session it aborts", () =>
     Effect.gen(function* () {
       const shutdown: Sessions.Shutdown = {
-        reason: MutableRef.make("proxy shutdown"),
+        reason: MutableRef.make("qemu server shutdown"),
         failed: MutableRef.make(false),
       };
       const h = harness({ shutdown });
@@ -1824,7 +1824,7 @@ describe("drain", () => {
   it.effect("stops every session as aborted with the shutdown reason", () =>
     Effect.gen(function* () {
       const shutdown: Sessions.Shutdown = {
-        reason: MutableRef.make("proxy shutdown"),
+        reason: MutableRef.make("qemu server shutdown"),
         failed: MutableRef.make(false),
       };
       const h = harness({ shutdown });
@@ -1850,21 +1850,21 @@ describe("drain", () => {
         "stop",
       ]);
       expect(h.sessions.sessions.map((row) => [row.status, row.reason])).toEqual([
-        ["aborted", "proxy shutdown"],
-        ["aborted", "proxy shutdown"],
+        ["aborted", "qemu server shutdown"],
+        ["aborted", "qemu server shutdown"],
       ]);
       const drainLines = h.log.lines.filter(
-        (entry) => entry.text.startsWith("proxy:") || entry.text.startsWith("stopped"),
+        (entry) => entry.text.startsWith("qemu server:") || entry.text.startsWith("stopped"),
       );
       expect(drainLines[0]).toMatchObject({
         level: "info",
-        text: "proxy: shutting down; stopping 2 sessions",
+        text: "qemu server: shutting down; stopping 2 sessions",
         location: "server",
         agentId: undefined,
       });
       expect(drainLines.slice(1).map((entry) => entry.text)).toEqual([
-        "stopped; aborted; proxy shutdown",
-        "stopped; aborted; proxy shutdown",
+        "stopped; aborted; qemu server shutdown",
+        "stopped; aborted; qemu server shutdown",
       ]);
       expect(new Set(drainLines.slice(1).map((entry) => entry.location))).toEqual(
         new Set(drained.ids),
@@ -1890,23 +1890,23 @@ describe("drain", () => {
   it.effect("reads the reason the server error path sets", () =>
     Effect.gen(function* () {
       const shutdown: Sessions.Shutdown = {
-        reason: MutableRef.make("proxy shutdown"),
+        reason: MutableRef.make("qemu server shutdown"),
         failed: MutableRef.make(false),
       };
       const h = harness({ shutdown });
       yield* h.run(
         Effect.gen(function* () {
           yield* start();
-          MutableRef.set(shutdown.reason, "proxy error: listen EADDRINUSE");
+          MutableRef.set(shutdown.reason, "qemu server error: listen EADDRINUSE");
         }),
       );
       expect(h.sessions.sessions[0]).toMatchObject({
         status: "aborted",
-        reason: "proxy error: listen EADDRINUSE",
+        reason: "qemu server error: listen EADDRINUSE",
       });
       expect(texts(h).slice(-2)).toEqual([
-        "proxy: shutting down; stopping 1 sessions",
-        "stopped; aborted; proxy error: listen EADDRINUSE",
+        "qemu server: shutting down; stopping 1 sessions",
+        "stopped; aborted; qemu server error: listen EADDRINUSE",
       ]);
     }),
   );
@@ -1914,7 +1914,7 @@ describe("drain", () => {
   it.effect("sessions that cannot be closed mark the shutdown failed", () =>
     Effect.gen(function* () {
       const shutdown: Sessions.Shutdown = {
-        reason: MutableRef.make("proxy shutdown"),
+        reason: MutableRef.make("qemu server shutdown"),
         failed: MutableRef.make(false),
       };
       const unkillable: Array<string> = [];
@@ -1953,7 +1953,7 @@ describe("drain", () => {
       expect(logged[0]?.cause).toMatchObject({ _tag: "DatabaseError" });
       expect(logged[1]?.cause).toBeInstanceOf(Error);
       expect(texts(h).filter((text) => text.startsWith("stopped"))).toEqual([
-        "stopped; aborted; proxy shutdown",
+        "stopped; aborted; qemu server shutdown",
       ]);
       expect(h.qemu.calls.filter((call) => call._tag === "stop")).toHaveLength(3);
       // The machine that would not die never reaches the row close.
@@ -1978,7 +1978,7 @@ describe("drain", () => {
     Effect.gen(function* () {
       const h = harness();
       yield* h.run(Effect.asVoid(Sessions.Sessions));
-      expect(texts(h)).toEqual(["proxy: shutting down; stopping 0 sessions"]);
+      expect(texts(h)).toEqual(["qemu server: shutting down; stopping 0 sessions"]);
       expect(h.qemu.calls).toEqual([]);
     }),
   );

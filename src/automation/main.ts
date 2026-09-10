@@ -41,7 +41,7 @@ const ServerLive = (port: number) =>
     Effect.gen(function* () {
       const log = yield* Log.Log;
       yield* log.acquireColor(Log.AutomationAgentId);
-      yield* log.info(`oligarchy automation listening on ${HOST}:${String(port)}`, automationAttr);
+      yield* log.info(`automation server listening on ${HOST}:${String(port)}`, automationAttr);
     }),
   ).pipe(
     Layer.provide(

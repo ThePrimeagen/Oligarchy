@@ -38,7 +38,7 @@ import * as Errors from "../shared/errors.ts";
 const SESSION_TIMEOUT_MS = 10 * 60 * 1000;
 const SESSION_TIMEOUT_CHECK = "10 seconds";
 const SESSION_TIMEOUT_REASON = "no command received for 10 minutes";
-const SHUTDOWN_REASON = "proxy shutdown";
+const SHUTDOWN_REASON = "qemu server shutdown";
 // A click is two QMP exchanges and two action rows; cap the pulse count so one request cannot
 // enqueue an unbounded amount of work.
 const MAX_CLICKS = 100;
@@ -915,7 +915,7 @@ const make = Effect.gen(function* () {
     yield* Fiber.interrupt(sweeper);
     const draining = [...(yield* Ref.getAndSet(sessions, new Map())).values()];
     const reason = MutableRef.get(shutdown.reason);
-    yield* log.info(`proxy: shutting down; stopping ${String(draining.length)} sessions`, {
+    yield* log.info(`qemu server: shutting down; stopping ${String(draining.length)} sessions`, {
       location: Log.Locations.server,
     });
     const exits = yield* Effect.forEach(draining, (live) => Effect.exit(drainOne(live, reason)), {

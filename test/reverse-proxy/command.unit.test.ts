@@ -86,7 +86,7 @@ const run = (
     args,
   ).pipe(Effect.provide(Layer.mergeAll(CliTestLayer, log.layer, fakeDatabase(ping))));
 
-describe("reverse proxy command flags", () => {
+describe("qemu reverse proxy command flags", () => {
   it.effect("--port must be an integer", () =>
     Effect.gen(function* () {
       const fake = fakeServer();
@@ -119,6 +119,7 @@ describe("reverse proxy command flags", () => {
       expect(fake.served).toEqual([]);
       expect(log.lines).toEqual([]);
       const stdout = yield* TestConsole.logLines;
+      expect(stdout.join("\n")).toContain("qemu-reverse-proxy");
       expect(stdout.join("\n")).toContain("--port");
       expect(stdout.join("\n")).not.toContain("--diagnostics-port");
       expect(stdout.join("\n")).not.toContain("--display");
@@ -151,7 +152,7 @@ describe("reverse proxy command flags", () => {
   );
 });
 
-describe("reverse proxy command startup failures", () => {
+describe("qemu reverse proxy command startup failures", () => {
   it.effect("an unreachable database fails before listening as database unreachable", () =>
     Effect.gen(function* () {
       const fake = fakeServer();
@@ -166,7 +167,7 @@ describe("reverse proxy command startup failures", () => {
       expect(log.lines).toEqual([
         {
           level: "fatal",
-          text: "reverse proxy: database unreachable: connect ECONNREFUSED 127.0.0.1:1",
+          text: "qemu reverse proxy: database unreachable: connect ECONNREFUSED 127.0.0.1:1",
           location: "server",
           agentId: undefined,
           skipSentry: false,
@@ -189,7 +190,7 @@ describe("reverse proxy command startup failures", () => {
         ),
       );
       expect(error).toMatchObject({ message: "database unreachable: pool ended" });
-      expect(log.lines[0]?.text).toBe("reverse proxy: database unreachable: pool ended");
+      expect(log.lines[0]?.text).toBe("qemu reverse proxy: database unreachable: pool ended");
     }),
   );
 
@@ -210,7 +211,7 @@ describe("reverse proxy command startup failures", () => {
       expect(log.lines).toHaveLength(1);
       expect(log.lines[0]).toMatchObject({
         level: "fatal",
-        text: "reverse proxy: accept EMFILE: too many open files",
+        text: "qemu reverse proxy: accept EMFILE: too many open files",
         skipSentry: false,
       });
       expect(log.lines[0]?.cause).toMatchObject({ _tag: "ServeError", cause });
@@ -229,7 +230,7 @@ describe("reverse proxy command startup failures", () => {
       const error = yield* Effect.flip(run(failing, ["--port", "42070"], log));
       expect(error).toMatchObject({ _tag: "ServeError", cause });
       expect(log.lines.map((line) => [line.level, line.text])).toEqual([
-        ["fatal", "reverse proxy: listen EADDRINUSE: address already in use 127.0.0.1:42070"],
+        ["fatal", "qemu reverse proxy: listen EADDRINUSE: address already in use 127.0.0.1:42070"],
       ]);
     }),
   );

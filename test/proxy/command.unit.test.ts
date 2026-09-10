@@ -8,7 +8,6 @@ import {
   Fiber,
   FileSystem,
   Layer,
-  Option,
   Path,
   Redacted,
   Stdio,
@@ -60,7 +59,7 @@ const refused = Errors.DatabaseError.make({
   cause: new Error("connect ECONNREFUSED 127.0.0.1:1"),
 });
 
-type Served = readonly [Domain.QemuDisplay, boolean, number, Option.Option<string>];
+type Served = readonly [Domain.QemuDisplay, boolean, number, string];
 
 // The host check, the server layer and the failure signal the command is built from.
 const fakeServer = (missing: ReadonlyArray<string> = []) => {
@@ -96,7 +95,7 @@ const run = (
     Effect.provide(Layer.mergeAll(CliTestLayer, log.layer, fakeDatabase(ping))),
   );
 
-describe("proxy command flags", () => {
+describe("qemu server command flags", () => {
   it.effect("--automation with --display is a UserError that touches nothing", () =>
     Effect.gen(function* () {
       const fake = fakeServer();
@@ -160,14 +159,15 @@ describe("proxy command flags", () => {
       expect(fake.served).toEqual([]);
       expect(log.lines).toEqual([]);
       const stdout = yield* TestConsole.logLines;
+      expect(stdout.join("\n")).toContain("qemu-server");
       expect(stdout.join("\n")).toContain("--automation");
       expect(stdout.join("\n")).toContain("--display");
       expect(stdout.join("\n")).toContain("--port");
-      expect(stdout.join("\n")).toContain("--url");
+      expect(stdout.join("\n")).not.toContain("--url");
     }),
   );
 
-  it.effect("defaults to display none and port 42069 and checks the host before listening", () =>
+  it.effect("defaults to display none and port 42069 and announces http://127.0.0.1:42069", () =>
     Effect.gen(function* () {
       const fake = fakeServer();
       const log = FakeLog.fakeLog();
@@ -177,7 +177,7 @@ describe("proxy command flags", () => {
       const exit = yield* Fiber.await(fiber);
       expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true);
       expect(fake.checked).toEqual(["none"]);
-      expect(fake.served).toEqual([["none", false, 42069, Option.none()]]);
+      expect(fake.served).toEqual([["none", false, 42069, "http://127.0.0.1:42069"]]);
       expect(log.lines).toEqual([]);
     }),
   );
@@ -192,42 +192,23 @@ describe("proxy command flags", () => {
       yield* Deferred.await(gtk.listening);
       yield* Fiber.interrupt(first);
       expect(gtk.checked).toEqual(["gtk"]);
-      expect(gtk.served).toEqual([["gtk", false, 1234, Option.none()]]);
+      expect(gtk.served).toEqual([["gtk", false, 1234, "http://127.0.0.1:1234"]]);
 
       const automation = fakeServer();
       const second = yield* Effect.forkChild(run(automation.server, ["--automation"], log));
       yield* Deferred.await(automation.listening);
       yield* Fiber.interrupt(second);
       expect(automation.checked).toEqual(["none"]);
-      expect(automation.served).toEqual([["none", true, 42069, Option.none()]]);
+      expect(automation.served).toEqual([["none", true, 42069, "http://127.0.0.1:42069"]]);
     }),
   );
 
-  it.effect("--url reaches the server as given, so it announces itself under that url", () =>
+  it.effect("--url is no longer a flag: a usage error that touches nothing", () =>
     Effect.gen(function* () {
       const fake = fakeServer();
       const log = FakeLog.fakeLog();
-      const fiber = yield* Effect.forkChild(
-        run(fake.server, ["--url", "http://127.0.0.1:55332", "--automation"], log),
-      );
-      yield* Deferred.await(fake.listening);
-      yield* Fiber.interrupt(fiber);
-      expect(fake.served).toEqual([["none", true, 42069, Option.some("http://127.0.0.1:55332")]]);
-    }),
-  );
-
-  it.effect("a --url that is not an http or https url is a usage error that touches nothing", () =>
-    Effect.gen(function* () {
-      const fake = fakeServer();
-      const log = FakeLog.fakeLog();
-      const error = yield* Effect.flip(run(fake.server, ["--url", "ftp://qemu.example.com"], log));
+      const error = yield* Effect.flip(run(fake.server, ["--url", "http://127.0.0.1:55332"], log));
       expect(error._tag).toBe("ShowHelp");
-      if (error._tag === "ShowHelp") {
-        expect(error.errors.length).toBeGreaterThan(0);
-        expect(error.errors[0]?._tag).toBe("InvalidValue");
-      }
-      const stderr = yield* TestConsole.errorLines;
-      expect(stderr.join("\n")).toContain("url must be an http or https url");
       expect(fake.checked).toEqual([]);
       expect(fake.served).toEqual([]);
       expect(log.lines).toEqual([]);
@@ -235,7 +216,7 @@ describe("proxy command flags", () => {
   );
 });
 
-describe("proxy command startup failures", () => {
+describe("qemu server command startup failures", () => {
   it.effect("missing host requirements fail before any ping or listen and log fatal", () =>
     Effect.gen(function* () {
       const missing = [
@@ -250,7 +231,7 @@ describe("proxy command startup failures", () => {
       expect(log.lines).toEqual([
         {
           level: "fatal",
-          text: `proxy: missing host requirements:\n${missing.join("\n")}`,
+          text: `qemu server: missing host requirements:\n${missing.join("\n")}`,
           location: "server",
           agentId: undefined,
           skipSentry: false,
@@ -275,7 +256,7 @@ describe("proxy command startup failures", () => {
       expect(log.lines).toEqual([
         {
           level: "fatal",
-          text: "proxy: database unreachable: connect ECONNREFUSED 127.0.0.1:1",
+          text: "qemu server: database unreachable: connect ECONNREFUSED 127.0.0.1:1",
           location: "server",
           agentId: undefined,
           skipSentry: false,
@@ -298,7 +279,7 @@ describe("proxy command startup failures", () => {
         ),
       );
       expect(error).toMatchObject({ message: "database unreachable: pool ended" });
-      expect(log.lines[0]?.text).toBe("proxy: database unreachable: pool ended");
+      expect(log.lines[0]?.text).toBe("qemu server: database unreachable: pool ended");
     }),
   );
 
@@ -319,7 +300,7 @@ describe("proxy command startup failures", () => {
       expect(log.lines).toHaveLength(1);
       expect(log.lines[0]).toMatchObject({
         level: "fatal",
-        text: "proxy: accept EMFILE: too many open files",
+        text: "qemu server: accept EMFILE: too many open files",
         skipSentry: false,
       });
       expect(log.lines[0]?.cause).toMatchObject({ _tag: "ServeError", cause });
@@ -338,7 +319,7 @@ describe("proxy command startup failures", () => {
       const error = yield* Effect.flip(run(failing, ["--port", "42069"], log));
       expect(error).toMatchObject({ _tag: "ServeError", cause });
       expect(log.lines.map((line) => [line.level, line.text])).toEqual([
-        ["fatal", "proxy: listen EADDRINUSE: address already in use 127.0.0.1:42069"],
+        ["fatal", "qemu server: listen EADDRINUSE: address already in use 127.0.0.1:42069"],
       ]);
     }),
   );

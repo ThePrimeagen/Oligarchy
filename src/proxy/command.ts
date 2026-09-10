@@ -6,14 +6,15 @@ import * as ExternalFailure from "../external-failure.ts";
 import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
 import * as Args from "../qemu/args.ts";
-import * as Domain from "../shared/domain.ts";
+import type * as Domain from "../shared/domain.ts";
 import * as Errors from "../shared/errors.ts";
 
+export const HOST = "127.0.0.1";
 const DEFAULT_PORT = 42069;
 
 // What main.ts hands the command: the host check, the server as a layer for a display, an
-// automation flag, a port and the url it announces itself under (none: it stays out of the
-// fleet), and the signal a server error raises after listen.
+// automation flag, a port, the fleet url constructed from that port, and the signal a server
+// error raises after listen.
 export type ProxyServer<RHost, RServe> = {
   readonly missingHostRequirements: (
     display: Domain.QemuDisplay,
@@ -22,7 +23,7 @@ export type ProxyServer<RHost, RServe> = {
     display: Domain.QemuDisplay,
     automation: boolean,
     port: number,
-    url: Option.Option<string>,
+    url: string,
   ) => Layer.Layer<never, HttpServerError.ServeError, RServe>;
   readonly serverFailed: Deferred.Deferred<never, HttpServerError.ServeError>;
 };
@@ -38,7 +39,7 @@ const detail = (error: StartupError): string =>
 
 export const makeProxyCommand = <RHost, RServe>(server: ProxyServer<RHost, RServe>) =>
   Command.make(
-    "proxy",
+    "qemu-server",
     {
       display: Flag.choice("display", Args.QEMU_DISPLAYS).pipe(
         Flag.optional,
@@ -54,18 +55,8 @@ export const makeProxyCommand = <RHost, RServe>(server: ProxyServer<RHost, RServ
         Flag.withDefault(DEFAULT_PORT),
         Flag.withDescription("Listen port"),
       ),
-      // No default: the fleet knows a server by the address the reverse proxy reaches it at (a
-      // tunnel's local port, say), which is nothing this process can see. Without it the server
-      // announces nothing and is not on the dashboard: a development server stays out of the fleet.
-      url: Flag.string("url").pipe(
-        Flag.withSchema(Domain.ServerUrl),
-        Flag.optional,
-        Flag.withDescription(
-          "Announce this server to the fleet under this url, every 30 seconds, and delete the row on shutdown",
-        ),
-      ),
     },
-    ({ display, automation, port, url }) =>
+    ({ display, automation, port }) =>
       Effect.gen(function* () {
         if (automation && Option.isSome(display)) {
           return yield* new CliError.UserError({
@@ -91,6 +82,9 @@ export const makeProxyCommand = <RHost, RServe>(server: ProxyServer<RHost, RServ
               }),
             ),
           );
+          // The reverse proxy reaches this process at the address it listens on; the port is
+          // enough to name the fleet row.
+          const url = `http://${HOST}:${String(port)}`;
           return yield* Effect.raceFirst(
             Layer.launch(server.serve(resolved, automation, port, url)),
             Deferred.await(server.serverFailed),
@@ -98,10 +92,11 @@ export const makeProxyCommand = <RHost, RServe>(server: ProxyServer<RHost, RServ
         });
         return yield* startup.pipe(
           Effect.tapError((error) =>
-            log.fatal(`proxy: ${detail(error)}`, { location: Log.Locations.server, cause: error }),
+            log.fatal(`qemu server: ${detail(error)}`, {
+              location: Log.Locations.server,
+              cause: error,
+            }),
           ),
         );
       }),
-  ).pipe(
-    Command.withDescription("The oligarchy proxy: boots QEMU sessions and drives them over QMP"),
-  );
+  ).pipe(Command.withDescription("The qemu server: boots QEMU sessions and drives them over QMP"));

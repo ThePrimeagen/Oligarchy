@@ -25,7 +25,7 @@ const detail = (error: StartupError): string =>
 
 export const makeReverseProxyCommand = <RServe>(server: ReverseProxyServer<RServe>) =>
   Command.make(
-    "reverse-proxy",
+    "qemu-reverse-proxy",
     {
       port: Flag.integer("port").pipe(
         Flag.withDefault(DEFAULT_PORT),
@@ -54,7 +54,7 @@ export const makeReverseProxyCommand = <RServe>(server: ReverseProxyServer<RServ
         });
         return yield* startup.pipe(
           Effect.tapError((error) =>
-            log.fatal(`reverse proxy: ${detail(error)}`, {
+            log.fatal(`qemu reverse proxy: ${detail(error)}`, {
               location: Log.Locations.server,
               cause: error,
             }),
@@ -63,6 +63,6 @@ export const makeReverseProxyCommand = <RServe>(server: ReverseProxyServer<RServ
       }),
   ).pipe(
     Command.withDescription(
-      "The oligarchy reverse proxy: registers servers and routes each session's requests to the server that started it",
+      "The qemu reverse proxy: registers servers and routes each session's requests to the server that started it",
     ),
   );

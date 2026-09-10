@@ -4,8 +4,8 @@
   "start": "bash .cursor/start.sh",
   "terminals": [
     {
-      "name": "proxy",
-      "command": "./server --port 42069 --automation"
+      "name": "qemu-server",
+      "command": "./qemu-server --port 42069 --automation"
     }
   ]
 }

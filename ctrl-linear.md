@@ -7,7 +7,7 @@
 ./ctrl test-results --agent-id <agent> --id <id> --status success|failed [--reason <text>]
 ```
 
-Every value is a flag. `./ctrl` writes to the database, not to the proxy: `--server-url` is `./client`'s flag; these two commands accept it and ignore it, so an older ticket that names it still runs. `DATABASE_URL` is already in this process; do not write a `.env`. A command that works exits 0. A command that fails exits 1 and prints the error: one headline, then the stack trace and the cause behind it. Read the headline first. `./ctrl <action> --help` prints that action's flags.
+Every value is a flag. `./ctrl` writes to the database, not to the qemu server: `--server-url` is `./client`'s flag; these two commands accept it and ignore it, so an older ticket that names it still runs. `DATABASE_URL` is already in this process; do not write a `.env`. A command that works exits 0. A command that fails exits 1 and prints the error: one headline, then the stack trace and the cause behind it. Read the headline first. `./ctrl <action> --help` prints that action's flags.
 
 ## test start
 

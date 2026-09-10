@@ -21,7 +21,7 @@ import * as Client from "../../src/db/client.ts";
 import * as DbSchema from "../../src/db/schema.ts";
 import * as Postgres from "../support/postgres.ts";
 
-const SERVER = fileURLToPath(new URL("../../server", import.meta.url));
+const SERVER = fileURLToPath(new URL("../../qemu-server", import.meta.url));
 const TOKEN = "t";
 const UNREACHABLE = "postgres://user:sentinel-pw@127.0.0.1:1/oligarchy";
 const EXIT_WITHIN_MS = 60_000;
@@ -213,24 +213,25 @@ describe("proxy startup refusals", () => {
     }),
   );
 
-  it.live("--help exits 0 and lists the four flags", () =>
+  it.live("--help exits 0 and lists the three flags", () =>
     Effect.promise(async () => {
       const proxy = spawnProxy(["--help"]);
       const { code } = await proxy.exited;
       expect(code).toBe(0);
+      expect(proxy.stdout()).toContain("qemu-server");
       expect(proxy.stdout()).toContain("--display");
       expect(proxy.stdout()).toContain("--automation");
       expect(proxy.stdout()).toContain("--port");
-      expect(proxy.stdout()).toContain("--url");
+      expect(proxy.stdout()).not.toContain("--url");
     }),
   );
 
-  it.live("a --url that is not an http or https url exits 1 with the rule", () =>
+  it.live("--url is no longer a flag and exits 1 with a usage error", () =>
     Effect.promise(async () => {
-      const proxy = spawnProxy(["--url", "ftp://qemu.example.com"]);
+      const proxy = spawnProxy(["--url", "http://127.0.0.1:55332"]);
       const { code } = await proxy.exited;
       expect(code).toBe(1);
-      expect(proxy.stderr()).toContain("url must be an http or https url");
+      expect(proxy.stderr()).toMatch(/Unrecognized flag: --url/);
       expect(proxy.stdout()).not.toContain("listening");
     }),
   );
@@ -254,7 +255,7 @@ describe("proxy startup refusals", () => {
         expect(code).toBe(1);
         const output = lines(proxy.stdout());
         const fatal = output.findIndex(
-          (line) => line === "[global] server: fatal: proxy: missing host requirements:",
+          (line) => line === "[global] server: fatal: qemu server: missing host requirements:",
         );
         expect(fatal, proxy.stdout()).toBeGreaterThanOrEqual(0);
         expect(output.slice(fatal + 1).length).toBeGreaterThan(0);
@@ -270,7 +271,7 @@ describe("proxy startup refusals", () => {
       const { code } = await proxy.exited;
       expect(code).toBe(1);
       const fatal = lines(proxy.stdout()).find((line) =>
-        line.startsWith("[global] server: fatal: proxy: database unreachable:"),
+        line.startsWith("[global] server: fatal: qemu server: database unreachable:"),
       );
       expect(fatal, proxy.stdout()).toBeDefined();
       expect(fatal).toContain("ECONNREFUSED");
@@ -288,7 +289,7 @@ describe("proxy startup refusals", () => {
         const { code } = await proxy.exited;
         expect(code).toBe(1);
         const fatal = lines(proxy.stdout()).find((line) =>
-          line.startsWith("[global] server: fatal: proxy: "),
+          line.startsWith("[global] server: fatal: qemu server: "),
         );
         expect(fatal, proxy.stdout()).toBeDefined();
         expect(fatal).toContain("EADDRINUSE");
@@ -309,7 +310,7 @@ describe("proxy serving", () => {
     Effect.promise(async () => {
       const port = await freePort();
       const proxy = spawnProxy([...args, "--port", String(port)]);
-      await proxy.waitFor(/oligarchy proxy listening/);
+      await proxy.waitFor(/qemu server listening/);
       expect(lines(proxy.stdout())).toContain(listenLine(port));
 
       const stats = await request(port, "GET", "/stats", { authorization: `Bearer ${TOKEN}` });
@@ -355,7 +356,7 @@ describe("proxy serving", () => {
       const { code } = await proxy.exited;
       expect(code, proxy.stdout()).toBe(0);
       const output = lines(proxy.stdout());
-      expect(output).toContain("[global] server: proxy: shutting down; stopping 0 sessions");
+      expect(output).toContain("[global] server: qemu server: shutting down; stopping 0 sessions");
       expect(output).toContain("[global] server: error: POST /send-keys failed: unauthorized");
       expect(output).toContain("[global] server: error: GET /stats failed: unauthorized");
       expect(output.some((line) => line.includes("GET /nope"))).toBe(false);
@@ -420,7 +421,7 @@ describe("proxy serving", () => {
       serving(
         [],
         (port) =>
-          `[global] server: oligarchy proxy listening on 127.0.0.1:${String(port)}; display none`,
+          `[global] server: qemu server listening on 127.0.0.1:${String(port)}; display none; announcing http://127.0.0.1:${String(port)}`,
         "SIGINT",
       ),
     120_000,
@@ -432,14 +433,14 @@ describe("proxy serving", () => {
       serving(
         ["--automation"],
         (port) =>
-          `[global] server: oligarchy proxy listening on 127.0.0.1:${String(port)}; display none; automation`,
+          `[global] server: qemu server listening on 127.0.0.1:${String(port)}; display none; automation; announcing http://127.0.0.1:${String(port)}`,
         "SIGTERM",
       ),
     120_000,
   );
 
-  // The row a server writes under --url, read through the Database service; undefined until the
-  // first heartbeat lands.
+  // The row a server writes from its listen port, read through the Database service; undefined
+  // until the first heartbeat lands.
   const announced = (url: string) =>
     Effect.gen(function* () {
       const database = yield* Client.Database;
@@ -450,16 +451,16 @@ describe("proxy serving", () => {
     }).pipe(Effect.provide(Postgres.DatabaseLive(dbUrl)));
 
   it.live.skipIf(!hasQemu || dbUrl === "")(
-    "--url names the url on the listen line, writes the server's row as its first heartbeat, and deletes it on SIGTERM",
+    "--port constructs the fleet url, writes the server's row as its first heartbeat, and deletes it on SIGTERM",
     () =>
       Effect.gen(function* () {
         const port = yield* Effect.promise(freePort);
-        const url = `http://qemu-a.test:${String(port)}`;
-        const proxy = spawnProxy(["--automation", "--url", url, "--port", String(port)]);
+        const url = `http://127.0.0.1:${String(port)}`;
+        const proxy = spawnProxy(["--automation", "--port", String(port)]);
         const row = yield* Effect.gen(function* () {
-          yield* Effect.promise(() => proxy.waitFor(/oligarchy proxy listening/));
+          yield* Effect.promise(() => proxy.waitFor(/qemu server listening/));
           expect(lines(proxy.stdout())).toContain(
-            `[global] server: oligarchy proxy listening on 127.0.0.1:${String(port)}; display none; automation; announcing ${url}`,
+            `[global] server: qemu server listening on 127.0.0.1:${String(port)}; display none; automation; announcing ${url}`,
           );
           // The first heartbeat is written right after the listen line; the insert takes a moment.
           return yield* announced(url).pipe(

@@ -14,7 +14,7 @@ import { Client } from "pg";
 import * as DbSchema from "../../src/db/schema.ts";
 import * as Postgres from "../support/postgres.ts";
 
-const AUTOMATION = fileURLToPath(new URL("../../automation", import.meta.url));
+const AUTOMATION = fileURLToPath(new URL("../../automation-server", import.meta.url));
 const WEBHOOK_SECRET = "whsec_test";
 const UNREACHABLE = "postgres://user:sentinel-pw@127.0.0.1:1/oligarchy";
 const EXIT_WITHIN_MS = 60_000;
@@ -208,6 +208,7 @@ describe("automation startup refusals", () => {
       const process = spawnAutomation(["--help"]);
       const { code } = await process.exited;
       expect(code).toBe(0);
+      expect(process.stdout()).toContain("automation-server");
       expect(process.stdout()).toContain("--port");
       expect(process.stdout()).not.toContain("--diagnostics-port");
       expect(process.stdout()).not.toContain("--display");
@@ -250,7 +251,7 @@ describe("automation startup refusals", () => {
       const { code } = await process.exited;
       expect(code).toBe(1);
       const fatal = lines(process.stdout()).find((line) =>
-        line.startsWith("[automation] automation: fatal: automation: "),
+        line.startsWith("[automation] automation: fatal: automation server: "),
       );
       expect(fatal, process.stdout()).toBeDefined();
       expect(fatal).toContain("database unreachable");
@@ -270,7 +271,7 @@ describeWithDatabase("automation startup refusals with a database", () => {
         const { code } = await process.exited;
         expect(code).toBe(1);
         const fatal = lines(process.stdout()).find((line) =>
-          line.startsWith("[automation] automation: fatal: automation: "),
+          line.startsWith("[automation] automation: fatal: automation server: "),
         );
         expect(fatal, process.stdout()).toBeDefined();
         expect(fatal).toContain("EADDRINUSE");
@@ -291,9 +292,9 @@ describeServing("automation serving", () => {
     const process = spawnAutomation(["--port", String(port)]);
     const record = join(process.cwd, "automation-logs");
     try {
-      await process.waitFor(/oligarchy automation listening/);
+      await process.waitFor(/automation server listening/);
       expect(lines(process.stdout())).toContain(
-        `[automation] automation: oligarchy automation listening on 127.0.0.1:${String(port)}`,
+        `[automation] automation: automation server listening on 127.0.0.1:${String(port)}`,
       );
       expect(existsSync(record)).toBe(false);
 

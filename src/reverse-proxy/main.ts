@@ -35,7 +35,7 @@ const ServerLive = (port: number) =>
   Layer.effectDiscard(
     Effect.gen(function* () {
       const log = yield* Log.Log;
-      yield* log.info(`oligarchy reverse proxy listening on ${HOST}:${String(port)}`, {
+      yield* log.info(`qemu reverse proxy listening on ${HOST}:${String(port)}`, {
         location: Log.Locations.server,
       });
     }),

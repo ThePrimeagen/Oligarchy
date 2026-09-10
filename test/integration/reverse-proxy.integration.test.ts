@@ -11,7 +11,7 @@ import * as Client from "../../src/db/client.ts";
 import * as DbSchema from "../../src/db/schema.ts";
 import * as Postgres from "../support/postgres.ts";
 
-const REVERSE_PROXY = fileURLToPath(new URL("../../reverse-proxy", import.meta.url));
+const REVERSE_PROXY = fileURLToPath(new URL("../../qemu-reverse-proxy", import.meta.url));
 const TOKEN = "t";
 const UNREACHABLE = "postgres://user:sentinel-pw@127.0.0.1:1/oligarchy";
 const EXIT_WITHIN_MS = 60_000;
@@ -149,6 +149,7 @@ describe("reverse proxy startup refusals", () => {
       const process = spawnReverseProxy(["--help"]);
       const { code } = await process.exited;
       expect(code).toBe(0);
+      expect(process.stdout()).toContain("qemu-reverse-proxy");
       expect(process.stdout()).toContain("--port");
       expect(process.stdout()).not.toContain("--diagnostics-port");
       expect(process.stdout()).not.toContain("--display");
@@ -182,7 +183,7 @@ describe("reverse proxy startup refusals", () => {
       const { code } = await process.exited;
       expect(code).toBe(1);
       const fatal = lines(process.stdout()).find((line) =>
-        line.startsWith("[global] server: fatal: reverse proxy: database unreachable:"),
+        line.startsWith("[global] server: fatal: qemu reverse proxy: database unreachable:"),
       );
       expect(fatal, process.stdout()).toBeDefined();
       expect(fatal).toContain("ECONNREFUSED");
@@ -200,7 +201,7 @@ describe("reverse proxy startup refusals", () => {
         const { code } = await process.exited;
         expect(code).toBe(1);
         const fatal = lines(process.stdout()).find((line) =>
-          line.startsWith("[global] server: fatal: reverse proxy: "),
+          line.startsWith("[global] server: fatal: qemu reverse proxy: "),
         );
         expect(fatal, process.stdout()).toBeDefined();
         expect(fatal).toContain("EADDRINUSE");
@@ -228,9 +229,9 @@ describe("reverse proxy serving", () => {
     const port = await freePort();
     const process = spawnReverseProxy(["--port", String(port)]);
     try {
-      await process.waitFor(/oligarchy reverse proxy listening/);
+      await process.waitFor(/qemu reverse proxy listening/);
       expect(lines(process.stdout())).toContain(
-        `[global] server: oligarchy reverse proxy listening on 127.0.0.1:${String(port)}`,
+        `[global] server: qemu reverse proxy listening on 127.0.0.1:${String(port)}`,
       );
 
       const servers = await request(port, "GET", "/servers", {

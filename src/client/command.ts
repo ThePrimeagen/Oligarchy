@@ -227,7 +227,7 @@ const follow = Command.make(
 
 export const makeClientCommand = () =>
   Command.make("client").pipe(
-    Command.withDescription("Drive a guest machine through the oligarchy proxy"),
+    Command.withDescription("Drive a guest machine through the qemu server"),
     Command.withSubcommands([
       start,
       getImage,

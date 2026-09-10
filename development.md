@@ -3,9 +3,8 @@
 How code is written here: the Effect conventions every process follows, the tooling, the tests
 and the review. It owns the abstract decisions and nothing else. What any one process promises its
 callers — routes, flags, log lines, wire shapes, refusal texts — lives in its code and the tests
-that pin it, and for operators in `client.md`, `ctrl.md`, `ctrl-linear.md`, `ctrl-diagnose.md`,
-`SERVER_VS_REVERSE_PROXY.md` (the server and the reverse proxy side by side, and the reasons behind
-the reverse proxy's design) and `prompts/`; this document does not repeat them. It does not
+that pin it, and for operators in `client.md`, `ctrl.md`, `ctrl-linear.md`, `ctrl-diagnose.md`
+and `prompts/`; this document does not repeat them. It does not
 document the Effect API either; API truth is `node_modules/effect/src`,
 `node_modules/effect/AGENTS.md`, `node_modules/effect/ai-docs/src`,
 `node_modules/@effect/platform-node/src` and `node_modules/@effect/vitest/README.md`, all
@@ -15,7 +14,7 @@ exist.
 ## Toolchain
 
 - Run on Node 26 with npm. Every executable is a `#!/bin/sh` wrapper running
-  `node --experimental-strip-types` (`./server`, `./reverse-proxy` and `./automation` add
+  `node --experimental-strip-types` (`./qemu-server`, `./qemu-reverse-proxy` and `./automation-server` add
   `--import ./src/observability/instrument.ts`); types are stripped, not transformed, so
   `erasableSyntaxOnly` stays on.
 - Install with `npm ci`; `prepare` runs `effect-tsgo patch --oxlint` so the `effecttsgo/*` rules
@@ -69,7 +68,7 @@ Durable preferences from the maintainer; when they conflict with generic best pr
 ## Layout
 
 - The root holds `AGENTS.md`, the executable wrappers (`./client`, `./client-with-image`,
-  `./ctrl`, `./server`, `./reverse-proxy`, `./automation`, `./session`), the tooling files,
+  `./ctrl`, `./qemu-server`, `./qemu-reverse-proxy`, `./automation-server`, `./session`), the tooling files,
   `drizzle/` (migrations), `public/` and `prompts/`, the operator documents, this document, `src/`
   and `test/`.
 - `src/` is one directory per process plus the shared kernel (`src/shared/`, `src/config.ts`,
@@ -755,7 +754,7 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
 ## Sentry
 
 - Initialise the SDK before any Effect code in `src/observability/instrument.ts`, loaded by the
-  `server`, `reverse-proxy` and `automation` wrappers' `--import`: `Sentry.init({ dsn: SENTRY_DSN,
+  `qemu-server`, `qemu-reverse-proxy` and `automation-server` wrappers' `--import`: `Sentry.init({ dsn: SENTRY_DSN,
   tracesSampleRate: 1,
   traceLifecycle: "stream", integrations: [Sentry.httpIntegration({ spans: false }),
   Sentry.nativeNodeFetchIntegration({ spans: false })] })`. `SENTRY_DSN` in `dsn.ts` is the one

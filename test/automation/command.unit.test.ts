@@ -77,7 +77,7 @@ const run = (
     args,
   ).pipe(Effect.provide(Layer.mergeAll(CliTestLayer, log.layer, database)));
 
-describe("automation command flags", () => {
+describe("automation server command flags", () => {
   it.effect("--port must be an integer", () =>
     Effect.gen(function* () {
       const fake = fakeServer();
@@ -98,6 +98,7 @@ describe("automation command flags", () => {
       expect(fake.served).toEqual([]);
       expect(log.lines).toEqual([]);
       const stdout = yield* TestConsole.logLines;
+      expect(stdout.join("\n")).toContain("automation-server");
       expect(stdout.join("\n")).toContain("--port");
       expect(stdout.join("\n")).not.toContain("--diagnostics-port");
       expect(stdout.join("\n")).not.toContain("--display");
@@ -130,7 +131,7 @@ describe("automation command flags", () => {
   );
 });
 
-describe("automation command startup failures", () => {
+describe("automation server command startup failures", () => {
   it.effect("an unreachable database is fatal and never listens (unhappy)", () =>
     Effect.gen(function* () {
       const fake = fakeServer();
@@ -150,7 +151,7 @@ describe("automation command startup failures", () => {
       });
       expect(fake.served).toEqual([]);
       expect(log.lines.map((line) => [line.level, line.text])).toEqual([
-        ["fatal", "automation: database unreachable: connect ECONNREFUSED"],
+        ["fatal", "automation server: database unreachable: connect ECONNREFUSED"],
       ]);
     }),
   );
@@ -172,7 +173,7 @@ describe("automation command startup failures", () => {
       expect(log.lines).toHaveLength(1);
       expect(log.lines[0]).toMatchObject({
         level: "fatal",
-        text: "automation: accept EMFILE: too many open files",
+        text: "automation server: accept EMFILE: too many open files",
         skipSentry: false,
       });
       expect(log.lines[0]?.cause).toMatchObject({ _tag: "ServeError", cause });
@@ -191,7 +192,7 @@ describe("automation command startup failures", () => {
       const error = yield* Effect.flip(run(failing, ["--port", "54321"], log));
       expect(error).toMatchObject({ _tag: "ServeError", cause });
       expect(log.lines.map((line) => [line.level, line.text])).toEqual([
-        ["fatal", "automation: listen EADDRINUSE: address already in use 127.0.0.1:54321"],
+        ["fatal", "automation server: listen EADDRINUSE: address already in use 127.0.0.1:54321"],
       ]);
     }),
   );

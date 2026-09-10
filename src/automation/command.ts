@@ -25,7 +25,7 @@ const detail = (error: StartupError): string =>
 
 export const makeAutomationCommand = <RServe>(server: AutomationServer<RServe>) =>
   Command.make(
-    "automation",
+    "automation-server",
     {
       port: Flag.integer("port").pipe(
         Flag.withDefault(DEFAULT_PORT),
@@ -54,7 +54,7 @@ export const makeAutomationCommand = <RServe>(server: AutomationServer<RServe>) 
         });
         return yield* startup.pipe(
           Effect.tapError((error) =>
-            log.fatal(`automation: ${detail(error)}`, {
+            log.fatal(`automation server: ${detail(error)}`, {
               location: Log.Locations.automation,
               agentId: Log.AutomationAgentId,
               cause: error,
@@ -64,6 +64,6 @@ export const makeAutomationCommand = <RServe>(server: AutomationServer<RServe>) 
       }),
   ).pipe(
     Command.withDescription(
-      "The oligarchy automation service: POST /linear verifies a signed Linear webhook and enqueues drive or diagnose jobs from status changes",
+      "The automation server: POST /linear verifies a signed Linear webhook and enqueues drive or diagnose jobs from status changes",
     ),
   );
