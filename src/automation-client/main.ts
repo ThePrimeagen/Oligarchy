@@ -1,15 +1,21 @@
 import { createServer } from "node:http";
 import { NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node";
-import { Cause, Deferred, Effect, Exit, Layer, type Runtime } from "effect";
+import { Cause, Deferred, Effect, Exit, Layer, Option, type Runtime } from "effect";
 import { Command } from "effect/unstable/cli";
 import { HttpMiddleware, HttpRouter, HttpServerError } from "effect/unstable/http";
 import * as Config from "../config.ts";
+import * as Client from "../db/client.ts";
+import * as Servers from "../db/servers.ts";
+import * as ExternalFailure from "../external-failure.ts";
 import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
 import * as Sentry from "../observability/sentry.ts";
+import * as Stats from "../qemu/stats.ts";
 import * as Api from "../shared/api.ts";
+import * as Errors from "../shared/errors.ts";
 import * as AutomationClientCommand from "./command.ts";
 import * as Handlers from "./handlers.ts";
+import * as Heartbeat from "./heartbeat.ts";
 
 const HOST = "127.0.0.1";
 
@@ -28,15 +34,35 @@ server.on("error", (cause) => {
   Deferred.doneUnsafe(serverFailed, Exit.fail(new HttpServerError.ServeError({ cause })));
 });
 
-const ServerLive = (port: number) =>
-  Layer.effectDiscard(
+const DatabaseLive = Layer.unwrap(Effect.map(Config.databaseUrl, Client.Database.layer));
+
+// Fail at startup, not on the first heartbeat, if the control-plane DB is unreachable.
+const ping = Effect.gen(function* () {
+  const database = yield* Client.Database;
+  yield* database.ping.pipe(
+    Effect.mapError((error) =>
+      Errors.DatabaseError.make({
+        operation: "ping",
+        message: `database unreachable: ${Render.errorDetail(ExternalFailure.causeOf(error))}`,
+        cause: error,
+      }),
+    ),
+  );
+});
+
+// The heartbeat starts once the listener is up, in the same scope: a port refusal announces
+// nothing, and a shutdown deletes the row it wrote. Database, ping and stats are only on the
+// announcing path so --help and listen-without-url stay off the fleet and off the database.
+const ServerLive = (port: number, url: Option.Option<string>) => {
+  const running = Layer.effectDiscard(
     Effect.gen(function* () {
       const log = yield* Log.Log;
       yield* log.acquireColor(Log.AutomationClientAgentId);
       yield* log.info(
-        `automation client listening on ${HOST}:${String(port)}`,
+        `automation client listening on ${HOST}:${String(port)}${Option.match(url, { onNone: () => "", onSome: (announced) => `; announcing ${announced}` })}`,
         automationClientAttr,
       );
+      yield* Option.match(url, { onNone: () => Effect.void, onSome: Heartbeat.announce });
     }),
   ).pipe(
     Layer.provide(
@@ -47,6 +73,17 @@ const ServerLive = (port: number) =>
     ),
     Layer.provide(Layer.succeed(HttpMiddleware.TracerDisabledWhen)(() => true)),
   );
+  return Option.match(url, {
+    onNone: () => running,
+    onSome: () =>
+      running.pipe(
+        Layer.provide(Stats.layer),
+        Layer.provide(Servers.ServerStore.layer),
+        Layer.provide(Layer.effectDiscard(ping)),
+        Layer.provide(DatabaseLive),
+      ),
+  });
+};
 
 const MainLive = Layer.mergeAll(Log.Log.layerStdout, Handlers.BearerAuthLive).pipe(
   Layer.provideMerge(Sentry.SentryLive),

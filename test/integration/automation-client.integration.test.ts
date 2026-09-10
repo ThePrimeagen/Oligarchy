@@ -5,13 +5,20 @@ import { createServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect } from "vitest";
+import { eq } from "drizzle-orm";
+import { describe, expect, inject } from "vitest";
 import { it } from "@effect/vitest";
-import { Effect } from "effect";
+import { Effect, Schedule } from "effect";
+import * as Client from "../../src/db/client.ts";
+import * as DbSchema from "../../src/db/schema.ts";
+import * as Postgres from "../support/postgres.ts";
 
 const AUTOMATION_CLIENT = fileURLToPath(new URL("../../automation-client", import.meta.url));
 const TOKEN = "t";
+const UNREACHABLE = "postgres://user:sentinel-pw@127.0.0.1:1/oligarchy";
 const EXIT_WITHIN_MS = 60_000;
+
+const dbUrl = inject("dbUrl");
 
 type Process = {
   readonly child: ChildProcess;
@@ -140,13 +147,14 @@ const request = (port: number, headers: Record<string, string>, body: string) =>
   fetch(`http://127.0.0.1:${String(port)}/run`, { method: "POST", headers, body });
 
 describe("automation client startup refusals", () => {
-  it.live("--help exits 0 and lists --port alone", () =>
+  it.live("--help exits 0 and lists --port and --url", () =>
     Effect.promise(async () => {
       const process = spawnAutomationClient(["--help"]);
       const { code } = await process.exited;
       expect(code).toBe(0);
       expect(process.stdout()).toContain("automation-client");
       expect(process.stdout()).toContain("--port");
+      expect(process.stdout()).toContain("--url");
       expect(process.stdout()).not.toContain("--display");
     }),
   );
@@ -161,12 +169,48 @@ describe("automation client startup refusals", () => {
     }),
   );
 
+  it.live("a --url that is not an http or https url exits 1 with the rule", () =>
+    Effect.promise(async () => {
+      const process = spawnAutomationClient(["--url", "ftp://qemu.example.com"]);
+      const { code } = await process.exited;
+      expect(code).toBe(1);
+      expect(process.stderr()).toContain("url must be an http or https url");
+      expect(process.stdout()).not.toContain("listening");
+    }),
+  );
+
   it.live("a missing OLIGARCHY_TOKEN exits 1 with OLIGARCHY_TOKEN is not set", () =>
     Effect.promise(async () => {
       const process = spawnAutomationClient([], { OLIGARCHY_TOKEN: "" });
       const { code } = await process.exited;
       expect(code).toBe(1);
       expect(process.stderr()).toContain("OLIGARCHY_TOKEN is not set");
+      expect(process.stdout()).not.toContain("listening");
+    }),
+  );
+
+  it.live("--url with an empty DATABASE_URL exits 1 with DATABASE_URL is not set", () =>
+    Effect.promise(async () => {
+      const process = spawnAutomationClient(["--url", "http://127.0.0.1:55332"], {
+        DATABASE_URL: "",
+      });
+      const { code } = await process.exited;
+      expect(code).toBe(1);
+      expect(process.stdout()).toContain("DATABASE_URL is not set");
+      expect(process.stdout()).not.toContain("listening");
+    }),
+  );
+
+  it.live("--url with an unreachable database exits 1 with database unreachable", () =>
+    Effect.promise(async () => {
+      const process = spawnAutomationClient(["--url", "http://127.0.0.1:55332"], {
+        DATABASE_URL: UNREACHABLE,
+      });
+      const { code } = await process.exited;
+      expect(code).toBe(1);
+      expect(process.stdout()).toContain("database unreachable");
+      expect(process.stdout()).not.toContain("sentinel-pw");
+      expect(process.stderr()).not.toContain("sentinel-pw");
       expect(process.stdout()).not.toContain("listening");
     }),
   );
@@ -255,5 +299,62 @@ describe("automation client POST /run", () => {
         rmSync(bin, { recursive: true, force: true });
       }
     }),
+  );
+});
+
+// The row a client writes under --url, read through the Database service; undefined until the
+// first heartbeat lands.
+const announced = (url: string) =>
+  Effect.gen(function* () {
+    const database = yield* Client.Database;
+    const rows = yield* database.run("announced", (db) =>
+      db.select().from(DbSchema.servers).where(eq(DbSchema.servers.url, url)),
+    );
+    return rows[0];
+  }).pipe(Effect.provide(Postgres.DatabaseLive(dbUrl)));
+
+describe("automation client announce", () => {
+  it.live.skipIf(dbUrl === "")(
+    "--url names the url on the listen line, writes the automation-client row as its first heartbeat, and deletes it on SIGTERM",
+    () =>
+      Effect.gen(function* () {
+        const port = yield* Effect.promise(freePort);
+        const url = `http://automation-client.test:${String(port)}`;
+        const process = spawnAutomationClient(["--url", url, "--port", String(port)], {
+          DATABASE_URL: dbUrl,
+        });
+        const row = yield* Effect.gen(function* () {
+          yield* Effect.promise(() => process.waitFor(/automation client listening/));
+          expect(process.stdout()).toContain(
+            `automation client listening on 127.0.0.1:${String(port)}; announcing ${url}`,
+          );
+          return yield* announced(url).pipe(
+            Effect.repeat({
+              until: (found) => found !== undefined,
+              schedule: Schedule.spaced("200 millis"),
+            }),
+            Effect.timeoutOrElse({ duration: "10 seconds", orElse: () => announced(url) }),
+          );
+        }).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              process.child.kill("SIGTERM");
+            }),
+          ),
+        );
+        expect(row).toMatchObject({
+          url,
+          type: "automation-client",
+          generation: 1,
+          stats: { qemus: 0 },
+        });
+        expect(row?.heartbeatAt).toBeInstanceOf(Date);
+        const { code } = yield* Effect.promise(() => process.exited);
+        expect(code, process.stdout()).toBe(0);
+        expect(process.stdout()).not.toContain("heartbeat failed");
+        expect(process.stdout()).not.toContain("unannounce failed");
+        expect(yield* announced(url)).toBeUndefined();
+      }),
+    120_000,
   );
 });
