@@ -33,7 +33,11 @@ const outcomeFrom = (cause: Cause.Cause<unknown>): Outcome =>
     ? aborted
     : { status: "failed", reason: Render.errorDetail(Cause.squash(cause)) };
 
-const execute = Effect.fn("execute")(function* (job: Automation.AutomationJobRow, url: string) {
+const execute = Effect.fn("execute")(function* (
+  job: Automation.AutomationJobRow,
+  url: string,
+  model: string,
+) {
   const tests = yield* Tests.TestStore;
   const log = yield* Log.Log;
   const result = yield* tests.findResult(job.resultId);
@@ -43,13 +47,26 @@ const execute = Effect.fn("execute")(function* (job: Automation.AutomationJobRow
   const ticket = result.value.linearId;
   const prompt =
     job.action === "drive"
-      ? yield* Prompts.drive(ticket)
-      : yield* Prompts.diagnose(ticket, job.resultId);
-  yield* log.info(`dispatching ${job.action}; ${url}`, {
+      ? yield* Prompts.drive(ticket, model)
+      : yield* Prompts.diagnose(ticket, job.resultId, model);
+  yield* log.info(`dispatching ${job.action}; ${url}; ${model}`, {
     location: Log.Locations.automation,
     agentId: ticket,
   });
-  return yield* AutomationClient.run(url, prompt);
+  yield* AutomationClient.run(url, prompt, model);
+  // A driver's last act is ./ctrl test-results; opencode exiting 0 with the result still open is
+  // an agent that quit early, and the job says so rather than reading as a run. A diagnose is
+  // judged by nothing here: the result was closed before it was queued.
+  const after = job.action === "drive" ? yield* tests.findResult(job.resultId) : Option.none();
+  if (
+    Option.isSome(after) &&
+    (after.value.status === "pending" || after.value.status === "running")
+  ) {
+    return yield* Errors.AutomationClientError.make({
+      message: `driver exited; result ${job.resultId} is ${after.value.status}`,
+    });
+  }
+  return yield* Effect.void;
 });
 
 const logOutcome = Effect.fn("logOutcome")(function* (
@@ -69,11 +86,11 @@ const logOutcome = Effect.fn("logOutcome")(function* (
   yield* log.error(`${job.action} failed; ${outcome.reason}`, attr);
 });
 
-// One job at a time, to the first live automation-client. A tick with no live client does not
-// claim. Claim is uninterruptible so a shutdown cannot leave a pending row half-taken; the HTTP
-// wait is restored so SIGTERM aborts an in-flight job; finish is uninterruptible so the write
-// lands. A tick that fails is one error line; the next tick runs.
-export const dispatch = Effect.fn("dispatch")(function* () {
+// One job at a time, to the first live automation-client, every one run as `model`. A tick with
+// no live client does not claim. Claim is uninterruptible so a shutdown cannot leave a pending
+// row half-taken; the HTTP wait is restored so SIGTERM aborts an in-flight job; finish is
+// uninterruptible so the write lands. A tick that fails is one error line; the next tick runs.
+export const dispatch = Effect.fn("dispatch")(function* (model: string) {
   const servers = yield* Servers.ServerStore;
   const store = yield* Automation.AutomationStore;
   const log = yield* Log.Log;
@@ -91,7 +108,7 @@ export const dispatch = Effect.fn("dispatch")(function* () {
             return Effect.void;
           }
           const job = maybe.value;
-          return restore(execute(job, url)).pipe(
+          return restore(execute(job, url, model)).pipe(
             Effect.matchCause({
               onSuccess: (): Outcome => ({ status: "succeeded", reason: null }),
               onFailure: outcomeFrom,

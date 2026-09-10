@@ -6,29 +6,31 @@ import * as Cli from "../src/cli.ts";
 import * as FakeSpawner from "./support/fake-spawner.ts";
 
 describe("Cli.run happy path", () => {
-  it.effect("spawns the command with its args and succeeds when it exits 0", () =>
-    Effect.gen(function* () {
-      const spawner = FakeSpawner.fakeSpawner(() => ({
-        exitCode: 0,
-        stdout: "printed result",
-        stderr: "noise",
-      }));
-      yield* Cli.run("tool", ["--flag", "value"]).pipe(Effect.provide(spawner.layer));
-      expect(spawner.spawned).toHaveLength(1);
-      expect(spawner.spawned[0]).toMatchObject({
-        command: "tool",
-        args: ["--flag", "value"],
-        options: {
-          stdin: "ignore",
-          stdout: "ignore",
-          stderr: "pipe",
-          extendEnv: true,
-          detached: false,
-          killSignal: "SIGTERM",
-          forceKillAfter: Cli.FORCE_KILL_AFTER,
-        },
-      });
-    }),
+  it.effect(
+    "spawns the command with its args, its stdout inherited, and succeeds when it exits 0",
+    () =>
+      Effect.gen(function* () {
+        const spawner = FakeSpawner.fakeSpawner(() => ({
+          exitCode: 0,
+          stdout: "printed result",
+          stderr: "noise",
+        }));
+        yield* Cli.run("tool", ["--flag", "value"]).pipe(Effect.provide(spawner.layer));
+        expect(spawner.spawned).toHaveLength(1);
+        expect(spawner.spawned[0]).toMatchObject({
+          command: "tool",
+          args: ["--flag", "value"],
+          options: {
+            stdin: "ignore",
+            stdout: "inherit",
+            stderr: "pipe",
+            extendEnv: true,
+            detached: false,
+            killSignal: "SIGTERM",
+            forceKillAfter: Cli.FORCE_KILL_AFTER,
+          },
+        });
+      }),
   );
 
   it.effect("waits until the command exits before succeeding", () =>

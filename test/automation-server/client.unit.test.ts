@@ -9,16 +9,17 @@ import * as FakeHttp from "../support/fake-http.ts";
 const URL = "http://127.0.0.1:55333";
 const TOKEN = "test-token";
 const PROMPT = "drive OLI-42";
+const MODEL = "opencode/muse-spark-1.3-contributor-free";
 
 const token = Layer.succeed(AutomationClient.OligarchyToken)(
   AutomationClient.OligarchyToken.of(Redacted.make(TOKEN)),
 );
 
 const run = (http: Layer.Layer<HttpClient.HttpClient>) =>
-  AutomationClient.run(URL, PROMPT).pipe(Effect.provide(Layer.mergeAll(token, http)));
+  AutomationClient.run(URL, PROMPT, MODEL).pipe(Effect.provide(Layer.mergeAll(token, http)));
 
 describe("automation client POST /run happy path", () => {
-  it.effect("posts the prompt with the bearer token and succeeds on 200", () =>
+  it.effect("posts the prompt and the model with the bearer token and succeeds on 200", () =>
     Effect.gen(function* () {
       const recorder = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
       yield* run(recorder.layer);
@@ -26,7 +27,10 @@ describe("automation client POST /run happy path", () => {
       expect(recorder.requests[0]?.method).toBe("POST");
       expect(recorder.requests[0]?.url).toBe(`${URL}/run`);
       expect(recorder.requests[0]?.headers.authorization).toBe(`Bearer ${TOKEN}`);
-      expect(JSON.parse(recorder.requests[0]?.body ?? "")).toEqual({ prompt: PROMPT });
+      expect(JSON.parse(recorder.requests[0]?.body ?? "")).toEqual({
+        prompt: PROMPT,
+        model: MODEL,
+      });
     }),
   );
 });

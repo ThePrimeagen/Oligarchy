@@ -20,9 +20,11 @@ export const run = Effect.fn("Cli.run")(function* (command: string, args: Readon
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const handle = yield* spawner
         .spawn(
+          // stdout is the command's own story (an agent's transcript) and passes through to
+          // whoever is watching this process; stderr is the diagnostic this process keeps.
           ChildProcess.make(command, args, {
             stdin: "ignore",
-            stdout: "ignore",
+            stdout: "inherit",
             stderr: "pipe",
             extendEnv: true,
             detached: false,

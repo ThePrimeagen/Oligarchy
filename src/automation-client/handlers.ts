@@ -17,7 +17,7 @@ export const RunsLive = HttpApiBuilder.group(Api.AutomationClientApi, "Runs", (h
     "run",
     ({ payload }) =>
       Effect.gen(function* () {
-        yield* OpenCode.run(payload.prompt);
+        yield* OpenCode.run(payload.prompt, payload.model);
         return ok;
       }),
     uninterruptible,

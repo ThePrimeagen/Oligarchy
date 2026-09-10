@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { env as processEnv } from "node:process";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -146,6 +146,8 @@ const installOpencode = (script: string): string => {
   return bin;
 };
 
+const MODEL = "opencode/muse-spark-1.3-contributor-free";
+
 const lines = (output: string): ReadonlyArray<string> =>
   output.split("\n").filter((line) => line !== "");
 
@@ -262,9 +264,9 @@ describeWithDatabase("automation client startup refusals with a database", () =>
 });
 
 describeWithDatabase("automation client POST /run", () => {
-  it.live("answers 200 when opencode exits 0", () =>
+  it.live("answers 200 when opencode exits 0, having run it with --model and the prompt", () =>
     Effect.promise(async () => {
-      const bin = installOpencode("exit 0");
+      const bin = installOpencode('printf "%s\\n" "$@" > "$(dirname "$0")/argv"; exit 0');
       const port = await freePort();
       const process = spawnAutomationClient(
         ["--port", String(port)],
@@ -278,10 +280,13 @@ describeWithDatabase("automation client POST /run", () => {
         const response = await request(
           port,
           { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
-          JSON.stringify({ prompt: "do the work" }),
+          JSON.stringify({ prompt: "do the work", model: MODEL }),
         );
         expect(response.status).toBe(200);
         expect(await response.json()).toEqual({ ok: "true" });
+        expect(readFileSync(join(bin, "argv"), "utf8")).toBe(
+          ["run", "--model", MODEL, "--", "do the work", ""].join("\n"),
+        );
       } finally {
         process.child.kill("SIGTERM");
         await process.exited;
@@ -306,7 +311,7 @@ describeWithDatabase("automation client POST /run", () => {
         const response = await request(
           port,
           { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
-          JSON.stringify({ prompt: "do the work" }),
+          JSON.stringify({ prompt: "do the work", model: MODEL }),
         );
         expect(response.status).toBe(500);
         expect(await response.json()).toEqual({ error: "out of token credits" });
@@ -334,7 +339,7 @@ describeWithDatabase("automation client POST /run", () => {
         const response = await request(
           port,
           { "content-type": "application/json" },
-          JSON.stringify({ prompt: "do the work" }),
+          JSON.stringify({ prompt: "do the work", model: MODEL }),
         );
         expect(response.status).toBe(401);
         expect(await response.json()).toEqual({ error: "unauthorized" });

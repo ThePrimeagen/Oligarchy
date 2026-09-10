@@ -7,6 +7,7 @@ import * as FakeFs from "../support/fake-fs.ts";
 
 const TICKET = "OLI-42";
 const RESULT_ID = "22222222-2222-4222-8222-222222222222";
+const MODEL = "opencode/muse-spark-1.3-contributor-free";
 
 const real = <A, E>(self: Effect.Effect<A, E, FileSystem.FileSystem>) =>
   self.pipe(Effect.provide(NodeFileSystem.layer));
@@ -45,18 +46,18 @@ describe("drive happy path", () => {
           "driving-agent.html": "ticket {{LINEAR_TICKET}} as {{MODEL}}",
         },
       });
-      const text = yield* Prompts.drive(TICKET).pipe(Effect.provide(fs.layer));
-      expect(text).toBe(`ticket ${TICKET} as ${Prompts.MODEL}`);
+      const text = yield* Prompts.drive(TICKET, MODEL).pipe(Effect.provide(fs.layer));
+      expect(text).toBe(`ticket ${TICKET} as ${MODEL}`);
       expect(fileNames(fs.reads)).toEqual(["driving-agent.html"]);
     }),
   );
 
   it.effect("driving-agent.html: the ticket, the model, no leftover placeholders", () =>
     Effect.gen(function* () {
-      const text = yield* real(Prompts.drive(TICKET));
+      const text = yield* real(Prompts.drive(TICKET, MODEL));
       expect(text.includes("{{")).toBe(false);
       expect(text).toContain(TICKET);
-      expect(text).toContain(Prompts.MODEL);
+      expect(text).toContain(MODEL);
       expect(text).toContain("driving agent");
     }),
   );
@@ -72,9 +73,9 @@ describe("diagnose happy path", () => {
           "ctrl-diagnose.md": "# Control\n\nDiagnose the session.\n",
         },
       });
-      const text = yield* Prompts.diagnose(TICKET, RESULT_ID).pipe(Effect.provide(fs.layer));
+      const text = yield* Prompts.diagnose(TICKET, RESULT_ID, MODEL).pipe(Effect.provide(fs.layer));
       expect(text).toBe(
-        `${TICKET} ${RESULT_ID} ${Prompts.MODEL}\n<guide>\n# Control\n\nDiagnose the session.\n</guide>`,
+        `${TICKET} ${RESULT_ID} ${MODEL}\n<guide>\n# Control\n\nDiagnose the session.\n</guide>`,
       );
       expect(fileNames(fs.reads)).toEqual(["diagnosing-agent.html", "ctrl-diagnose.md"]);
     }),
@@ -84,11 +85,11 @@ describe("diagnose happy path", () => {
     "diagnosing-agent.html: the ticket, result, model, guide, no leftover placeholders",
     () =>
       Effect.gen(function* () {
-        const text = yield* real(Prompts.diagnose(TICKET, RESULT_ID));
+        const text = yield* real(Prompts.diagnose(TICKET, RESULT_ID, MODEL));
         expect(text.includes("{{")).toBe(false);
         expect(text).toContain(TICKET);
         expect(text).toContain(RESULT_ID);
-        expect(text).toContain(Prompts.MODEL);
+        expect(text).toContain(MODEL);
         expect(text).toContain("# Control");
         expect(text).toContain("## session");
         expect(text).toContain("Post-run reviewer");
@@ -102,7 +103,7 @@ describe("drive and diagnose unhappy path", () => {
       const fs = promptFs({
         contents: { "driving-agent.html": "{{LINEAR_TICKET}} {{NOPE}} {{ALSO}}" },
       });
-      const error = yield* Effect.flip(Prompts.drive(TICKET).pipe(Effect.provide(fs.layer)));
+      const error = yield* Effect.flip(Prompts.drive(TICKET, MODEL).pipe(Effect.provide(fs.layer)));
       expect(error).toMatchObject({
         _tag: "PromptError",
         message: "prompt: prompts/driving-agent.html uses {{NOPE}}, which has no value",
@@ -114,7 +115,7 @@ describe("drive and diagnose unhappy path", () => {
   it.effect("an unreadable template is a PromptError naming it, before any guide is read", () =>
     Effect.gen(function* () {
       const fs = promptFs({ unreadable: /driving-agent\.html$/ });
-      const error = yield* Effect.flip(Prompts.drive(TICKET).pipe(Effect.provide(fs.layer)));
+      const error = yield* Effect.flip(Prompts.drive(TICKET, MODEL).pipe(Effect.provide(fs.layer)));
       expect(error._tag).toBe("PromptError");
       expect(error.message).toMatch(/^prompt: .*driving-agent\.html/);
       expect(error.cause).toBeDefined();
@@ -129,7 +130,7 @@ describe("drive and diagnose unhappy path", () => {
         contents: { "diagnosing-agent.html": "{{CTRL_DIAGNOSE_MD}} {{LINEAR_TICKET}}" },
       });
       const error = yield* Effect.flip(
-        Prompts.diagnose(TICKET, RESULT_ID).pipe(Effect.provide(fs.layer)),
+        Prompts.diagnose(TICKET, RESULT_ID, MODEL).pipe(Effect.provide(fs.layer)),
       );
       expect(error._tag).toBe("PromptError");
       expect(error.message).toMatch(/^prompt: .*ctrl-diagnose\.md/);
@@ -144,7 +145,7 @@ describe("drive and diagnose unhappy path", () => {
         unreadable: /ctrl-diagnose\.md$/,
         contents: { "driving-agent.html": "ticket {{LINEAR_TICKET}}" },
       });
-      const text = yield* Prompts.drive(TICKET).pipe(Effect.provide(fs.layer));
+      const text = yield* Prompts.drive(TICKET, MODEL).pipe(Effect.provide(fs.layer));
       expect(text).toBe(`ticket ${TICKET}`);
       expect(fileNames(fs.reads)).toEqual(["driving-agent.html"]);
     }),
