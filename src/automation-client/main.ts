@@ -1,17 +1,20 @@
 import { createServer } from "node:http";
 import { NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node";
-import { Cause, Deferred, Effect, Exit, Layer, type Runtime } from "effect";
+import { Cause, Deferred, Effect, Exit, Layer, Option, type Runtime } from "effect";
 import { Command } from "effect/unstable/cli";
 import { HttpMiddleware, HttpRouter, HttpServerError } from "effect/unstable/http";
 import * as Config from "../config.ts";
 import * as Client from "../db/client.ts";
 import * as Logs from "../db/logs.ts";
+import * as Servers from "../db/servers.ts";
 import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
 import * as Sentry from "../observability/sentry.ts";
+import * as Stats from "../qemu/stats.ts";
 import * as Api from "../shared/api.ts";
 import * as AutomationClientCommand from "./command.ts";
 import * as Handlers from "./handlers.ts";
+import * as Heartbeat from "./heartbeat.ts";
 
 const HOST = "127.0.0.1";
 
@@ -30,15 +33,18 @@ server.on("error", (cause) => {
   Deferred.doneUnsafe(serverFailed, Exit.fail(new HttpServerError.ServeError({ cause })));
 });
 
-const ServerLive = (port: number) =>
+// The heartbeat starts once the listener is up, in the same scope: a port refusal announces
+// nothing, and a shutdown deletes the row it wrote.
+const ServerLive = (port: number, url: Option.Option<string>) =>
   Layer.effectDiscard(
     Effect.gen(function* () {
       const log = yield* Log.Log;
       yield* log.acquireColor(Log.AutomationClientAgentId);
       yield* log.info(
-        `automation client listening on ${HOST}:${String(port)}`,
+        `automation client listening on ${HOST}:${String(port)}${Option.match(url, { onNone: () => "", onSome: (announced) => `; announcing ${announced}` })}`,
         automationClientAttr,
       );
+      yield* Option.match(url, { onNone: () => Effect.void, onSome: Heartbeat.announce });
     }),
   ).pipe(
     Layer.provide(
@@ -47,6 +53,7 @@ const ServerLive = (port: number) =>
         disableListenLog: true,
       }).pipe(Layer.provide(NodeHttpServer.layer(() => server, { host: HOST, port }))),
     ),
+    Layer.provide(Stats.Stats.layer),
     Layer.provide(Layer.succeed(HttpMiddleware.TracerDisabledWhen)(() => true)),
   );
 
@@ -55,7 +62,7 @@ const DatabaseLive = Layer.unwrap(
 );
 
 // Sentry sits beneath Log so the log rows flush before Sentry does, and Log captures the reporter.
-const MainLive = Log.Log.layer.pipe(
+const MainLive = Layer.mergeAll(Servers.ServerStore.layer, Log.Log.layer).pipe(
   Layer.provideMerge(Logs.LogStore.layer),
   Layer.provideMerge(DatabaseLive),
   Layer.provideMerge(Config.ProxyConfig.layer),

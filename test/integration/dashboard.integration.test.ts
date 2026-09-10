@@ -788,6 +788,23 @@ describe.skipIf(dbUrl === "")("dashboard/servers page happy path", () => {
     expect(html).not.toContain("dashboard.css");
   });
 
+  it("does not list an automation-client among the qemu fleet", async () => {
+    await seed(dbUrl, async (db) => {
+      await db.insert(servers).values({ url: "http://10.1.0.1:42069" }).onConflictDoNothing();
+      await db.delete(servers).where(eq(servers.url, "http://10.1.0.4:54322"));
+      await db.insert(servers).values({
+        url: "http://10.1.0.4:54322",
+        type: "automation-client",
+      });
+    });
+    const page = await getPage("/servers", dbUrl);
+    expect(page.html).toContain("<td>http://10.1.0.1:42069</td>");
+    expect(page.html).not.toContain("http://10.1.0.4:54322");
+    const fleet = await getPage("/servers/fleet", dbUrl);
+    expect(fleet.html).toContain("<td>http://10.1.0.1:42069</td>");
+    expect(fleet.html).not.toContain("http://10.1.0.4:54322");
+  });
+
   it("serves the fleet alone at /servers/fleet, what the page's poll swaps in", async () => {
     const { status, html } = await getPage("/servers/fleet", dbUrl);
     expect(status).toBe(200);

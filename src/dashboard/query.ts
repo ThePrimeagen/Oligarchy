@@ -358,8 +358,9 @@ export function listTestBasePrompts(connectionString: string): Promise<TestBaseP
   );
 }
 
-// The fleet in registration order. The clock in the select is the one a heartbeat's age is read
-// against, and it keeps a poll out of Hyperdrive's query cache: every poll sees the newest write.
+// The qemu fleet in registration order. automation-client rows share the table and are listed
+// apart. The clock in the select is the one a heartbeat's age is read against, and it keeps a
+// poll out of Hyperdrive's query cache: every poll sees the newest write.
 export function listServers(connectionString: string): Promise<Server[]> {
   return withDatabase(connectionString, (db) =>
     db
@@ -371,6 +372,7 @@ export function listServers(connectionString: string): Promise<Server[]> {
         queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(servers.createdAt),
       })
       .from(servers)
+      .where(eq(servers.type, "qemu"))
       .orderBy(servers.createdAt, servers.url),
   );
 }

@@ -5,12 +5,13 @@ import { createServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, inject } from "vitest";
-import { it } from "@effect/vitest";
-import { Effect } from "effect";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Client } from "pg";
+import { describe, expect, inject } from "vitest";
+import { it } from "@effect/vitest";
+import { Effect, Schedule } from "effect";
+import * as DbClient from "../../src/db/client.ts";
 import * as DbSchema from "../../src/db/schema.ts";
 import * as Postgres from "../support/postgres.ts";
 
@@ -166,13 +167,14 @@ const logsForClient = async () => {
 };
 
 describe("automation client startup refusals", () => {
-  it.live("--help exits 0 and lists --port alone", () =>
+  it.live("--help exits 0 and lists --port and --url", () =>
     Effect.promise(async () => {
       const process = spawnAutomationClient(["--help"]);
       const { code } = await process.exited;
       expect(code).toBe(0);
       expect(process.stdout()).toContain("automation-client");
       expect(process.stdout()).toContain("--port");
+      expect(process.stdout()).toContain("--url");
       expect(process.stdout()).not.toContain("--display");
     }),
   );
@@ -183,6 +185,16 @@ describe("automation client startup refusals", () => {
       const { code } = await process.exited;
       expect(code).toBe(1);
       expect(process.stderr()).toContain("forty");
+      expect(process.stdout()).not.toContain("listening");
+    }),
+  );
+
+  it.live("a --url that is not an http or https url exits 1 with the rule", () =>
+    Effect.promise(async () => {
+      const process = spawnAutomationClient(["--url", "ftp://qemu.example.com"]);
+      const { code } = await process.exited;
+      expect(code).toBe(1);
+      expect(process.stderr()).toContain("url must be an http or https url");
       expect(process.stdout()).not.toContain("listening");
     }),
   );
@@ -334,5 +346,62 @@ describeWithDatabase("automation client POST /run", () => {
         rmSync(bin, { recursive: true, force: true });
       }
     }),
+  );
+});
+
+// The row a client writes under --url, read through the Database service; undefined until the
+// first heartbeat lands.
+const announced = (url: string) =>
+  Effect.gen(function* () {
+    const database = yield* DbClient.Database;
+    const rows = yield* database.run("announced", (db) =>
+      db.select().from(DbSchema.servers).where(eq(DbSchema.servers.url, url)),
+    );
+    return rows[0];
+  }).pipe(Effect.provide(Postgres.DatabaseLive(dbUrl)));
+
+describe("automation client announce", () => {
+  it.live.skipIf(dbUrl === "")(
+    "--url names the url on the listen line, writes the automation-client row as its first heartbeat, and deletes it on SIGTERM",
+    () =>
+      Effect.gen(function* () {
+        const port = yield* Effect.promise(freePort);
+        const url = `http://automation-client.test:${String(port)}`;
+        const process = spawnAutomationClient(["--url", url, "--port", String(port)], {
+          DATABASE_URL: dbUrl,
+        });
+        const row = yield* Effect.gen(function* () {
+          yield* Effect.promise(() => process.waitFor(/automation client listening/));
+          expect(process.stdout()).toContain(
+            `automation client listening on 127.0.0.1:${String(port)}; announcing ${url}`,
+          );
+          return yield* announced(url).pipe(
+            Effect.repeat({
+              until: (found) => found !== undefined,
+              schedule: Schedule.spaced("200 millis"),
+            }),
+            Effect.timeoutOrElse({ duration: "10 seconds", orElse: () => announced(url) }),
+          );
+        }).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              process.child.kill("SIGTERM");
+            }),
+          ),
+        );
+        expect(row).toMatchObject({
+          url,
+          type: "automation-client",
+          generation: 1,
+          stats: { qemus: 0 },
+        });
+        expect(row?.heartbeatAt).toBeInstanceOf(Date);
+        const { code } = yield* Effect.promise(() => process.exited);
+        expect(code, process.stdout()).toBe(0);
+        expect(process.stdout()).not.toContain("heartbeat failed");
+        expect(process.stdout()).not.toContain("unannounce failed");
+        expect(yield* announced(url)).toBeUndefined();
+      }),
+    120_000,
   );
 });

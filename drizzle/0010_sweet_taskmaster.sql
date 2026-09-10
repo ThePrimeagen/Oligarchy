@@ -1,0 +1,1 @@
+ALTER TYPE "public"."server_type" ADD VALUE 'automation-client';

@@ -47,8 +47,9 @@ export const actionState = pgEnum("action_state", ["completed", "failed"]);
 // The reviewer's own answer to "did the proof land": the test's vocabulary, not the session's.
 export const diagnosisVerdict = pgEnum("diagnosis_verdict", ["passed", "failed"]);
 
-// What kind of machine a server boots, and so which reverse proxy fronts it. One kind so far.
-export const serverType = pgEnum("server_type", ["qemu"]);
+// What kind of machine a server boots, and so which reverse proxy fronts it. qemu servers
+// boot guests; an automation-client is a host that announces itself the same way.
+export const serverType = pgEnum("server_type", ["qemu", "automation-client"]);
 
 export const automationAction = pgEnum("automation_action", ["drive", "diagnose"]);
 export const automationJobStatus = pgEnum("automation_job_status", [
@@ -203,7 +204,8 @@ export type ServerStats = {
 // stats and heartbeat_at are null together, for a row an operator added that no server has
 // claimed. type says what kind of server the row is, so a reverse proxy lists its own kind;
 // every writer names it, and the default is what the migration filled the rows that predate
-// the column with — qemu servers were the only kind there was.
+// the column with — qemu servers were the only kind there was. automation-client is the
+// other kind: same heartbeat, listed apart from the qemu fleet.
 export const servers = pgTable("servers", {
   url: text("url").primaryKey(),
   type: serverType("type").notNull().default("qemu"),
