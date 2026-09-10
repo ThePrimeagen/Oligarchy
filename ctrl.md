@@ -21,7 +21,7 @@ Consult this table of contents first. Read only the section you need.
 
 ## Important
 
-`./ctrl` is the control plane's record keeper: it creates test runs, opens their Linear tickets, ties a session to its result, closes the result, reads sessions back, and records a verdict on every ended session. Everything it reads and writes is in the database; it never touches a guest or a proxy — the guest is `./client`'s.
+`./ctrl` is the control plane's record keeper: it creates test runs, opens their Linear tickets, ties a session to its result, closes the result, reads sessions back, and records a verdict on every ended session. Everything it reads and writes is in the database; it never touches a guest or a qemu server — the guest is `./client`'s.
 
 If you are an agent driving a guest, you need two of these: [test start](#test-start) after `./client start`, and [test-results](#test-results) before `./client stop`. If you are an agent reviewing a session, you need [session](#session), [error-type list](#error-type-list), [error-type new](#error-type-new) and [diagnose](#diagnose). Do not look at code. Run the commands.
 

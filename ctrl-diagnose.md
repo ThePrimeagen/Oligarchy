@@ -11,7 +11,7 @@ Your goal is one post-run diagnosis for the session you were given: a verdict on
 ./ctrl diagnose        --session-id <id> --verdict passed|failed [--type <key>] --summary <text> --model <id>
 ```
 
-Every value is a flag. Everything is read from and written to the database: no proxy, no token, no server url. `DATABASE_URL` is already in this process; do not write a `.env`. A command that works exits 0. A command that fails exits 1 and prints the error: one headline, then the stack trace and the cause behind it. Read the headline first. `./ctrl <action> --help` prints that action's flags.
+Every value is a flag. Everything is read from and written to the database: no qemu server, no token, no server url. `DATABASE_URL` is already in this process; do not write a `.env`. A command that works exits 0. A command that fails exits 1 and prints the error: one headline, then the stack trace and the cause behind it. Read the headline first. `./ctrl <action> --help` prints that action's flags.
 
 ## session
 
@@ -42,7 +42,7 @@ Prints everything stored for the session as one JSON object, keyed `session`, `l
 ./session image --image-id <id> -o <file>
 ```
 
-Writes one screenshot as a PNG, straight from the database — no proxy, no token, only `DATABASE_URL`. `--image-id` is the `id` from `--images`. Always look at the final image before any verdict: a `passed` verdict means the proof is on it. When a log line, an action, or the serial console makes you suspect a step — a chord that changed nothing, a stall, a screen the driver described wrongly — fetch the images around that step too and look at them; they decide the cause of a `failed` verdict. An id no image has is a failure.
+Writes one screenshot as a PNG, straight from the database — no qemu server, no token, only `DATABASE_URL`. `--image-id` is the `id` from `--images`. Always look at the final image before any verdict: a `passed` verdict means the proof is on it. When a log line, an action, or the serial console makes you suspect a step — a chord that changed nothing, a stall, a screen the driver described wrongly — fetch the images around that step too and look at them; they decide the cause of a `failed` verdict. An id no image has is a failure.
 
 ```bash
 ./session image --image-id 9b2f...2c3d -o last.png
