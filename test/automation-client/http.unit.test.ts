@@ -66,7 +66,7 @@ describe("POST /run happy path", () => {
       expect(fixed.spawner.spawned).toMatchObject([
         {
           command: OpenCode.BIN,
-          args: ["run", "--model", MODEL, "--", "fix the bug"],
+          args: ["run", "--auto", "--model", MODEL, "--", "fix the bug"],
           // The transcript opencode prints is the operator's to watch; this process keeps none of it.
           options: { stdout: "inherit" },
         },

@@ -289,7 +289,7 @@ describeWithDatabase("automation client POST /run", () => {
           expect(response.status).toBe(200);
           expect(await response.json()).toEqual({ ok: "true" });
           expect(readFileSync(join(bin, "argv"), "utf8")).toBe(
-            ["run", "--model", MODEL, "--", "do the work", ""].join("\n"),
+            ["run", "--auto", "--model", MODEL, "--", "do the work", ""].join("\n"),
           );
           expect(process.stdout()).toContain("transcript-sentinel: the agent spoke");
         } finally {

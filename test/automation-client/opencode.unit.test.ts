@@ -8,7 +8,7 @@ const MODEL = "opencode/muse-spark-1.3-contributor-free";
 
 describe("OpenCode.run happy path", () => {
   it.effect(
-    "launches opencode run with the model and the prompt and succeeds when it exits 0",
+    "launches opencode run --auto with the model and the prompt and succeeds when it exits 0",
     () =>
       Effect.gen(function* () {
         const spawner = FakeSpawner.fakeSpawner(() => ({
@@ -17,7 +17,7 @@ describe("OpenCode.run happy path", () => {
         }));
         yield* OpenCode.run("do the work", MODEL).pipe(Effect.provide(spawner.layer));
         expect(spawner.spawned).toMatchObject([
-          { command: OpenCode.BIN, args: ["run", "--model", MODEL, "--", "do the work"] },
+          { command: OpenCode.BIN, args: ["run", "--auto", "--model", MODEL, "--", "do the work"] },
         ]);
       }),
   );
@@ -27,7 +27,7 @@ describe("OpenCode.run happy path", () => {
       const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
       yield* OpenCode.run("--help", MODEL).pipe(Effect.provide(spawner.layer));
       expect(spawner.spawned).toMatchObject([
-        { command: OpenCode.BIN, args: ["run", "--model", MODEL, "--", "--help"] },
+        { command: OpenCode.BIN, args: ["run", "--auto", "--model", MODEL, "--", "--help"] },
       ]);
     }),
   );
@@ -37,7 +37,14 @@ describe("OpenCode.run happy path", () => {
       const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
       const deepseek = "openrouter/deepseek/deepseek-v4.1-flash";
       yield* OpenCode.run("do the work", deepseek).pipe(Effect.provide(spawner.layer));
-      expect(spawner.spawned[0]?.args).toEqual(["run", "--model", deepseek, "--", "do the work"]);
+      expect(spawner.spawned[0]?.args).toEqual([
+        "run",
+        "--auto",
+        "--model",
+        deepseek,
+        "--",
+        "do the work",
+      ]);
     }),
   );
 });
