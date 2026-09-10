@@ -6,7 +6,4 @@
 /automation-logs
 /node_modules
 /.wrangler
-/v1/node_modules
-/v2/node_modules
-/v2/.wrangler
 /tmp/

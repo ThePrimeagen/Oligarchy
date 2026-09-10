@@ -13,7 +13,7 @@ const sources = (): ReadonlyArray<string> =>
 
 const read = (path: string): string => readFileSync(join(root, path), "utf8");
 
-// V2-PLAN §1: the only files allowed to import `node:*`, read `process.*`, or use
+// The only files allowed to import `node:*`, read `process.*`, or use
 // `setTimeout`/`new Promise`/`async`.
 const BOUNDARY_FILES = new Set([
   "src/qmp/socket.ts",

@@ -87,7 +87,6 @@ describe(".github/workflows/migrations.yml", () => {
     for (const path of scanned) {
       expect(existsSync(join(root, path)), path).toBe(true);
     }
-    expect(workflow.includes("v2")).toBe(false);
   });
 });
 

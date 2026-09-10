@@ -1,5 +1,5 @@
 {
-  "name": "oligarchy-v2",
+  "name": "oligarchy",
   "private": true,
   "bin": {
     "client": "src/client/main.ts",
