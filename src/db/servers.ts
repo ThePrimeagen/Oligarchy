@@ -3,31 +3,41 @@ import { Array as Arr, Context, Effect, Layer, Option } from "effect";
 import * as Client from "./client.ts";
 import * as DbSchema from "./schema.ts";
 
+type ServerRow = typeof DbSchema.servers.$inferSelect;
+export type ServerType = ServerRow["type"];
+
 export class ServerStore extends Context.Service<ServerStore>()("@oligarchy/db/ServerStore", {
   make: Effect.gen(function* () {
     const database = yield* Client.Database;
 
     // Registering a url twice is one row: the probe already said the server is there.
-    const addServer = Effect.fn("db.addServer")(function* (url: string) {
+    const addServer = Effect.fn("db.addServer")(function* (url: string, type: ServerType) {
       yield* database.run("addServer", (db) =>
-        db.insert(DbSchema.servers).values({ url }).onConflictDoNothing(),
+        db.insert(DbSchema.servers).values({ url, type }).onConflictDoNothing(),
       );
     });
 
-    // A server's own word on itself: its row comes into being on the first heartbeat or is
-    // rewritten, the generation counting every write, stamped by the database's clock.
+    // A server's own word on itself, its kind included: its row comes into being on the first
+    // heartbeat or is rewritten, the generation counting every write, stamped by the database's
+    // clock.
     const heartbeat = Effect.fn("db.heartbeat")(function* (
       url: string,
+      type: ServerType,
       stats: DbSchema.ServerStats,
     ) {
       const now = sql`now()`;
       yield* database.run("heartbeat", (db) =>
         db
           .insert(DbSchema.servers)
-          .values({ url, stats, generation: 1, heartbeatAt: now })
+          .values({ url, type, stats, generation: 1, heartbeatAt: now })
           .onConflictDoUpdate({
             target: DbSchema.servers.url,
-            set: { stats, generation: sql`${DbSchema.servers.generation} + 1`, heartbeatAt: now },
+            set: {
+              type,
+              stats,
+              generation: sql`${DbSchema.servers.generation} + 1`,
+              heartbeatAt: now,
+            },
           }),
       );
     });
@@ -43,12 +53,14 @@ export class ServerStore extends Context.Service<ServerStore>()("@oligarchy/db/S
       return rows.length > 0;
     });
 
-    // Registration order, so a placement tie goes to the server that was there first.
-    const listServers = Effect.fn("db.listServers")(function* () {
+    // The servers of one kind, in registration order, so a placement tie goes to the server that
+    // was there first.
+    const listServers = Effect.fn("db.listServers")(function* (type: ServerType) {
       const rows = yield* database.run("listServers", (db) =>
         db
           .select({ url: DbSchema.servers.url })
           .from(DbSchema.servers)
+          .where(eq(DbSchema.servers.type, type))
           .orderBy(DbSchema.servers.createdAt, DbSchema.servers.url),
       );
       return rows.map((row) => row.url);

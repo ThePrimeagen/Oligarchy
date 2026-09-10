@@ -19,12 +19,12 @@ const detail = (error: unknown): string =>
     : Render.errorDetail(error);
 
 // Announces this server under `url`: its `servers` row is written now and every thirty seconds
-// with what it knows of itself, and the row's generation counts the writes, so a number that
-// stops moving is a server that stopped without a chance to leave. A tick that fails is one
-// error line; the next tick runs. The row is this process's word on itself, so a shutdown
-// deletes it: registered before the loop so the fiber is interrupted first, a write in flight
-// finishes (the write is uninterruptible), then the row goes. A delete that fails is one
-// `unannounce failed` line; the process still exits.
+// with what it knows of itself — a qemu server, this process boots nothing else — and the row's
+// generation counts the writes, so a number that stops moving is a server that stopped without a
+// chance to leave. A tick that fails is one error line; the next tick runs. The row is this
+// process's word on itself, so a shutdown deletes it: registered before the loop so the fiber is
+// interrupted first, a write in flight finishes (the write is uninterruptible), then the row
+// goes. A delete that fails is one `unannounce failed` line; the process still exits.
 export const announce = (
   url: string,
 ): Effect.Effect<void, never, Scope.Scope | Sessions.Sessions | Servers.ServerStore | Log.Log> =>
@@ -35,7 +35,7 @@ export const announce = (
     const tick = sessions.stats.pipe(
       Effect.flatMap((stats) =>
         Effect.uninterruptible(
-          store.heartbeat(url, {
+          store.heartbeat(url, "qemu", {
             qemus: stats.qemus,
             memory: { totalBytes: stats.memory.totalBytes, usedBytes: stats.memory.usedBytes },
             cpu: { mean1m: stats.cpu.mean1m, mean2m: stats.cpu.mean2m, mean3m: stats.cpu.mean3m },

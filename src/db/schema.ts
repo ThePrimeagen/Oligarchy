@@ -47,6 +47,9 @@ export const actionState = pgEnum("action_state", ["completed", "failed"]);
 // The reviewer's own answer to "did the proof land": the test's vocabulary, not the session's.
 export const diagnosisVerdict = pgEnum("diagnosis_verdict", ["passed", "failed"]);
 
+// What kind of machine a server boots, and so which reverse proxy fronts it. One kind so far.
+export const serverType = pgEnum("server_type", ["qemu"]);
+
 export const automationAction = pgEnum("automation_action", ["drive", "diagnose"]);
 export const automationJobStatus = pgEnum("automation_job_status", [
   "pending",
@@ -197,9 +200,12 @@ export type ServerStats = {
 // and counts generation up, and a shutdown deletes the row. A generation that stops moving is
 // a server that stopped without a chance to leave — killed, or cut off from the database.
 // stats and heartbeat_at are null together, for a row an operator added that no server has
-// claimed.
+// claimed. type says what kind of server the row is, so a reverse proxy lists its own kind;
+// every writer names it, and the default is what the migration filled the rows that predate
+// the column with — qemu servers were the only kind there was.
 export const servers = pgTable("servers", {
   url: text("url").primaryKey(),
+  type: serverType("type").notNull().default("qemu"),
   stats: jsonb("stats").$type<ServerStats>(),
   generation: bigint("generation", { mode: "number" }).notNull().default(0),
   heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }),

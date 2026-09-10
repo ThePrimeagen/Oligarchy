@@ -476,7 +476,7 @@ describe("proxy serving", () => {
             }),
           ),
         );
-        expect(row).toMatchObject({ url, generation: 1, stats: { qemus: 0 } });
+        expect(row).toMatchObject({ url, type: "qemu", generation: 1, stats: { qemus: 0 } });
         expect(row?.heartbeatAt).toBeInstanceOf(Date);
         const { code } = yield* Effect.promise(() => proxy.exited);
         expect(code, proxy.stdout()).toBe(0);

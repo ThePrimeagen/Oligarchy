@@ -720,16 +720,20 @@ describe("dashboard/query unhappy path: unreachable database", () => {
   });
 });
 
-const registeredUrls = async (databaseUrl: string): Promise<ReadonlyArray<string>> => {
+const registered = async (
+  databaseUrl: string,
+): Promise<ReadonlyArray<{ readonly url: string; readonly type: string }>> => {
   const client = new Client({ connectionString: databaseUrl });
   await client.connect();
   try {
-    const rows = await drizzle(client).select({ url: servers.url }).from(servers);
-    return rows.map((row) => row.url);
+    return await drizzle(client).select({ url: servers.url, type: servers.type }).from(servers);
   } finally {
     await client.end();
   }
 };
+
+const registeredUrls = async (databaseUrl: string): Promise<ReadonlyArray<string>> =>
+  (await registered(databaseUrl)).map((row) => row.url);
 
 describe.skipIf(dbUrl === "")("dashboard/servers page happy path", () => {
   it("lists the fleet from its rows: one heard from just now, one silent, one never heard from", async () => {
@@ -786,14 +790,16 @@ describe.skipIf(dbUrl === "")("dashboard/servers page happy path", () => {
     expect(html).not.toContain("add a server");
   });
 
-  it("adds a server once, however often it is posted, and sends the browser back to the page", async () => {
+  it("adds a qemu server once, however often it is posted, and sends the browser back to the page", async () => {
     const first = await postForm({ url: "http://10.1.0.9:42069" }, dbUrl, "/servers");
     expect(first.status).toBe(303);
     expect(first.location).toBe("/servers");
     const again = await postForm({ url: "http://10.1.0.9:42069" }, dbUrl, "/servers");
     expect(again.status).toBe(303);
-    const urls = await registeredUrls(dbUrl);
-    expect(urls.filter((url) => url === "http://10.1.0.9:42069")).toHaveLength(1);
+    const rows = await registered(dbUrl);
+    expect(rows.filter((row) => row.url === "http://10.1.0.9:42069")).toEqual([
+      { url: "http://10.1.0.9:42069", type: "qemu" },
+    ]);
     const { html } = await getPage("/servers", dbUrl);
     expect(html).toContain(
       '<tr><td>http://10.1.0.9:42069</td><td colspan="3">never heard from</td><td>0</td><td>never</td>',

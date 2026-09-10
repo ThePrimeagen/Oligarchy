@@ -351,10 +351,12 @@ export function listServers(connectionString: string): Promise<Server[]> {
   );
 }
 
-// Registering a url twice is one row; the server fills the rest in when it announces itself.
+// Registering a url twice is one row; the server fills the rest in when it announces itself. The
+// add box names a qemu server, the one kind an operator can add; the server's heartbeat is the
+// word on what it is.
 export function addServer(connectionString: string, url: string): Promise<void> {
   return withDatabase(connectionString, async (db) => {
-    await db.insert(servers).values({ url }).onConflictDoNothing();
+    await db.insert(servers).values({ url, type: "qemu" }).onConflictDoNothing();
   });
 }
 

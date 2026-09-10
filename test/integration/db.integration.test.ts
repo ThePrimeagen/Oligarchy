@@ -1078,27 +1078,71 @@ Postgres.describeWithDatabase("database", () => {
         }),
     );
 
-    scoped.effect("ServerStore registers a url once, lists in registration order, forgets it", () =>
+    scoped.effect(
+      "ServerStore registers a url once as a qemu server, lists the qemu servers in registration order, forgets it",
+      () =>
+        Effect.gen(function* () {
+          const store = yield* Servers.ServerStore;
+          const database = yield* Client.Database;
+          const first = `http://10.0.0.5:${uuid().slice(0, 8)}`;
+          const second = `http://10.0.0.6:${uuid().slice(0, 8)}`;
+          yield* store.addServer(first, "qemu");
+          yield* store.addServer(second, "qemu");
+          yield* store.addServer(first, "qemu");
+          const [row] = yield* database.run("select", (db) =>
+            db.select().from(DbSchema.servers).where(eq(DbSchema.servers.url, first)),
+          );
+          expect(row).toMatchObject({ url: first, type: "qemu", stats: null, generation: 0 });
+          const listed = yield* store.listServers("qemu");
+          expect(listed.filter((url) => url === first || url === second)).toEqual([first, second]);
+          expect(yield* store.removeServer(first)).toBe(true);
+          expect(yield* store.removeServer(first)).toBe(false);
+          expect(yield* store.listServers("qemu")).not.toContain(first);
+          expect(yield* store.listServers("qemu")).toContain(second);
+          expect(yield* store.removeServer(second)).toBe(true);
+          expect(yield* store.listServers("qemu")).not.toContain(second);
+        }),
+    );
+
+    // The column's default is what the migration filled the rows that predate it with: a row
+    // written without a type is a qemu server, the only kind there was.
+    scoped.effect("a servers row written without a type is a qemu server", () =>
       Effect.gen(function* () {
         const store = yield* Servers.ServerStore;
-        const first = `http://10.0.0.5:${uuid().slice(0, 8)}`;
-        const second = `http://10.0.0.6:${uuid().slice(0, 8)}`;
-        yield* store.addServer(first);
-        yield* store.addServer(second);
-        yield* store.addServer(first);
-        const listed = yield* store.listServers();
-        expect(listed.filter((url) => url === first || url === second)).toEqual([first, second]);
-        expect(yield* store.removeServer(first)).toBe(true);
-        expect(yield* store.removeServer(first)).toBe(false);
-        expect(yield* store.listServers()).not.toContain(first);
-        expect(yield* store.listServers()).toContain(second);
-        expect(yield* store.removeServer(second)).toBe(true);
-        expect(yield* store.listServers()).not.toContain(second);
+        const database = yield* Client.Database;
+        const url = `http://10.0.0.9:${uuid().slice(0, 8)}`;
+        yield* database.run("insert", (db) => db.insert(DbSchema.servers).values({ url }));
+        const [row] = yield* database.run("select", (db) =>
+          db.select().from(DbSchema.servers).where(eq(DbSchema.servers.url, url)),
+        );
+        expect(row).toMatchObject({ url, type: "qemu" });
+        expect(yield* store.listServers("qemu")).toContain(url);
+        expect(yield* store.removeServer(url)).toBe(true);
+      }),
+    );
+
+    scoped.effect("the table refuses a server type outside the enum (unhappy)", () =>
+      Effect.gen(function* () {
+        const store = yield* Servers.ServerStore;
+        const database = yield* Client.Database;
+        const url = `http://10.0.0.10:${uuid().slice(0, 8)}`;
+        const error = yield* Effect.flip(
+          database.run("insert", (db) =>
+            db.insert(DbSchema.servers).values({ url, type: sql`'docker'` }),
+          ),
+        );
+        expect(error).toMatchObject({
+          _tag: "DatabaseError",
+          operation: "insert",
+          message: expect.stringContaining("Failed query"),
+        });
+        expect(String(error.cause)).toMatch(/invalid input value for enum server_type/);
+        expect(yield* store.listServers("qemu")).not.toContain(url);
       }),
     );
 
     scoped.effect(
-      "ServerStore heartbeat announces a server: generation 1 on the first write, then counting up with the stats rewritten",
+      "ServerStore heartbeat announces a qemu server: generation 1 on the first write, then counting up with the stats rewritten",
       () =>
         Effect.gen(function* () {
           const store = yield* Servers.ServerStore;
@@ -1112,16 +1156,16 @@ Postgres.describeWithDatabase("database", () => {
           const rowOf = database.run("select", (db) =>
             db.select().from(DbSchema.servers).where(eq(DbSchema.servers.url, url)),
           );
-          yield* store.heartbeat(url, first);
-          expect(yield* store.listServers()).toContain(url);
+          yield* store.heartbeat(url, "qemu", first);
+          expect(yield* store.listServers("qemu")).toContain(url);
           const [row] = yield* rowOf;
-          expect(row).toMatchObject({ url, stats: first, generation: 1 });
+          expect(row).toMatchObject({ url, type: "qemu", stats: first, generation: 1 });
           expect(row?.heartbeatAt).toBeInstanceOf(Date);
           const second: DbSchema.ServerStats = { ...first, qemus: 2 };
-          yield* store.heartbeat(url, second);
+          yield* store.heartbeat(url, "qemu", second);
           const rows = yield* rowOf;
           expect(rows).toHaveLength(1);
-          expect(rows[0]).toMatchObject({ url, stats: second, generation: 2 });
+          expect(rows[0]).toMatchObject({ url, type: "qemu", stats: second, generation: 2 });
           expect(rows[0]?.heartbeatAt?.getTime()).toBeGreaterThanOrEqual(
             row?.heartbeatAt?.getTime() ?? Number.POSITIVE_INFINITY,
           );
@@ -1139,18 +1183,24 @@ Postgres.describeWithDatabase("database", () => {
           const rowOf = database.run("select", (db) =>
             db.select().from(DbSchema.servers).where(eq(DbSchema.servers.url, url)),
           );
-          yield* store.addServer(url);
+          yield* store.addServer(url, "qemu");
           const [added] = yield* rowOf;
-          expect(added).toMatchObject({ url, stats: null, generation: 0, heartbeatAt: null });
+          expect(added).toMatchObject({
+            url,
+            type: "qemu",
+            stats: null,
+            generation: 0,
+            heartbeatAt: null,
+          });
           const stats: DbSchema.ServerStats = {
             qemus: 0,
             memory: { totalBytes: 66_900_000_000, usedBytes: 31_500_000_000 },
             cpu: { mean1m: 12.3, mean2m: 11, mean3m: 9.8 },
           };
-          yield* store.heartbeat(url, stats);
+          yield* store.heartbeat(url, "qemu", stats);
           const rows = yield* rowOf;
           expect(rows).toHaveLength(1);
-          expect(rows[0]).toMatchObject({ url, stats, generation: 1 });
+          expect(rows[0]).toMatchObject({ url, type: "qemu", stats, generation: 1 });
           expect(rows[0]?.heartbeatAt).toBeInstanceOf(Date);
           expect(yield* store.removeServer(url)).toBe(true);
         }),
