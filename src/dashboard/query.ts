@@ -1,8 +1,9 @@
-import { desc, eq, getTableColumns, sql } from "drizzle-orm";
+import { desc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Client } from "pg";
 import {
   actions,
+  automationJobs,
   images,
   servers,
   sessions,
@@ -32,6 +33,29 @@ export type Server = Pick<
   "url" | "stats" | "generation" | "heartbeatAt"
 > & {
   readonly queriedAt: Date;
+};
+
+// One automation job with the ticket and test it is for, its three stamps, and the database's
+// clock at the read, so the page measures their ages against the clock that wrote them. ticket
+// is null for a result nobody has ticketed; started_at and finished_at are null until the job
+// reaches that point.
+export type AutomationJob = {
+  readonly ticket: string | null;
+  readonly test: string;
+  readonly action: (typeof automationJobs.$inferSelect)["action"];
+  readonly status: (typeof automationJobs.$inferSelect)["status"];
+  readonly reason: string | null;
+  readonly createdAt: Date;
+  readonly startedAt: Date | null;
+  readonly finishedAt: Date | null;
+  readonly queriedAt: Date;
+};
+
+// The queue as the page shows it: what runs, what waits, what finished, each list cut at fifty.
+export type AutomationQueue = {
+  readonly running: ReadonlyArray<AutomationJob>;
+  readonly pending: ReadonlyArray<AutomationJob>;
+  readonly completed: ReadonlyArray<AutomationJob>;
 };
 
 // One name's wordings, oldest first: versions[i] is version i + 1, and the last is the newest.
@@ -349,6 +373,50 @@ export function listServers(connectionString: string): Promise<Server[]> {
       .from(servers)
       .orderBy(servers.createdAt, servers.url),
   );
+}
+
+// Fifty of each list: an operator reads the front of the queue and what finished last.
+const QUEUE_LIMIT = 50;
+
+// The queue in three lists, each ordered and cut by the database. Running and pending put the
+// diagnoses ahead of the drives and then follow queue order, created_at (a boolean sorts false
+// before true, so descending puts the diagnoses first). Completed is every terminal status,
+// newest finished first: finished_at is the stamp the close writes, the row's last change. The
+// clock in each select is the one the stamps' ages are read against, and it keeps a poll out of
+// Hyperdrive's query cache.
+export function listAutomationQueue(connectionString: string): Promise<AutomationQueue> {
+  return withDatabase(connectionString, async (db) => {
+    const jobs = () =>
+      db
+        .select({
+          ticket: testResults.linearId,
+          test: testDefinitions.name,
+          action: automationJobs.action,
+          status: automationJobs.status,
+          reason: automationJobs.reason,
+          createdAt: automationJobs.createdAt,
+          startedAt: automationJobs.startedAt,
+          finishedAt: automationJobs.finishedAt,
+          queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(automationJobs.createdAt),
+        })
+        .from(automationJobs)
+        .innerJoin(testResults, eq(testResults.id, automationJobs.resultId))
+        .innerJoin(testDefinitions, eq(testDefinitions.id, testResults.definitionId));
+    const diagnosesFirst = desc(sql`${automationJobs.action} = 'diagnose'`);
+    const running = await jobs()
+      .where(eq(automationJobs.status, "running"))
+      .orderBy(diagnosesFirst, automationJobs.createdAt)
+      .limit(QUEUE_LIMIT);
+    const pending = await jobs()
+      .where(eq(automationJobs.status, "pending"))
+      .orderBy(diagnosesFirst, automationJobs.createdAt)
+      .limit(QUEUE_LIMIT);
+    const completed = await jobs()
+      .where(inArray(automationJobs.status, ["succeeded", "failed", "aborted", "timed_out"]))
+      .orderBy(desc(automationJobs.finishedAt))
+      .limit(QUEUE_LIMIT);
+    return { running, pending, completed };
+  });
 }
 
 // Registering a url twice is one row; the server fills the rest in when it announces itself. The
