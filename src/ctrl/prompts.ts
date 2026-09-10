@@ -1,14 +1,12 @@
 import { Array as Arr, Effect, FileSystem, Option, Result } from "effect";
 import * as Errors from "../shared/errors.ts";
 
-// Every text handed to an agent is a template under `prompts/` with `{{NAME}}` placeholders: the
-// Linear ticket body, and the kickoff prompts of the driving and the diagnosing agent. Each is
-// filled from the values its caller has; the constants and the guides are the renderer's own,
-// read from beside the package when the template names them.
+// The Linear ticket body is `prompts/linear-issue.html` with `{{NAME}}` placeholders, filled
+// from the ticket's values. The constants and the guides are the renderer's own, read from
+// beside the package when the template names them.
 
 const SUB_AGENT = "Grok 4.6 high fast (cursor-grok-4.6-high-fast)";
-
-type Template = "linear-issue.html" | "driving-agent.html" | "diagnosing-agent.html";
+const TEMPLATE = "linear-issue.html";
 
 // What the ticket asks for, keyed as the template spells it.
 export type Values = {
@@ -24,21 +22,6 @@ export type Values = {
   readonly TEST_PROOF: string;
 };
 
-// What the driver is kicked off with: its ticket, which carries everything else, and the model it
-// runs as, which it records with `ctrl test start --model`.
-export type DrivingValues = {
-  readonly LINEAR_TICKET: string;
-  readonly MODEL: string;
-};
-
-// What the reviewer is kicked off with: the ticket, the result whose session it reads back, and
-// the model it runs as, which it records with `ctrl diagnose --model`.
-export type DiagnosingValues = {
-  readonly LINEAR_TICKET: string;
-  readonly RESULT_ID: string;
-  readonly MODEL: string;
-};
-
 // The files sit beside the package, not the working directory: resolve them from this module.
 const besideModule = (relative: string): string =>
   decodeURIComponent(new URL(relative, import.meta.url).pathname);
@@ -48,7 +31,6 @@ const besideModule = (relative: string): string =>
 const GUIDES: Readonly<Record<string, string>> = {
   CLIENT_MD: besideModule("../../client.md"),
   CTRL_MD: besideModule("../../ctrl-linear.md"),
-  CTRL_DIAGNOSE_MD: besideModule("../../ctrl-diagnose.md"),
 };
 
 const PLACEHOLDER = /\{\{([A-Z_]+)\}\}/g;
@@ -67,7 +49,6 @@ const read = Effect.fn("Prompts.read")(function* (path: string) {
 // Fills every `{{NAME}}`; the first name without a value fails the rendering, naming the template.
 const fill = (
   text: string,
-  template: Template,
   values: Readonly<Record<string, string>>,
 ): Result.Result<string, Errors.PromptError> => {
   const missing: Array<string> = [];
@@ -84,17 +65,14 @@ const fill = (
     onSome: (name) =>
       Result.fail(
         Errors.PromptError.make({
-          message: `prompt: prompts/${template} uses {{${name}}}, which has no value`,
+          message: `prompt: prompts/${TEMPLATE} uses {{${name}}}, which has no value`,
         }),
       ),
   });
 };
 
-const render = Effect.fn("Prompts.render")(function* (
-  template: Template,
-  values: Readonly<Record<string, string>>,
-) {
-  const text = yield* read(besideModule(`../../prompts/${template}`));
+export const renderLinearIssue = Effect.fn("Prompts.renderLinearIssue")(function* (values: Values) {
+  const text = yield* read(besideModule(`../../prompts/${TEMPLATE}`));
   const known: Record<string, string> = { SUB_AGENT, ...values };
   for (const [name, path] of Object.entries(GUIDES)) {
     if (text.includes(`{{${name}}}`)) {
@@ -102,12 +80,5 @@ const render = Effect.fn("Prompts.render")(function* (
       known[name] = (yield* read(path)).trimEnd();
     }
   }
-  return yield* Effect.fromResult(fill(text, template, known));
+  return yield* Effect.fromResult(fill(text, known));
 });
-
-export const renderLinearIssue = (values: Values) => render("linear-issue.html", values);
-
-export const renderDrivingAgent = (values: DrivingValues) => render("driving-agent.html", values);
-
-export const renderDiagnosingAgent = (values: DiagnosingValues) =>
-  render("diagnosing-agent.html", values);

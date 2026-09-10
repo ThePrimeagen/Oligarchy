@@ -7,8 +7,6 @@ import * as FakeFs from "../support/fake-fs.ts";
 
 const SERVER = "https://qemu.example.com";
 const SUB_AGENT = "Grok 4.6 high fast (cursor-grok-4.6-high-fast)";
-// The model an agent is kicked off on, which it records with `--model`.
-const MODEL = "gpt-5.6-luna-none-fast";
 
 // Every value a ticket asks for.
 const ticket = {
@@ -186,181 +184,12 @@ describe("renderLinearIssue unhappy path", () => {
   it.effect("an unreadable guide the template does not name cannot stop a rendering", () =>
     Effect.gen(function* () {
       const fs = promptFs({
-        unreadable: /\/(client\.md|ctrl-linear\.md|ctrl-diagnose\.md)$/,
+        unreadable: /\/(client\.md|ctrl-linear\.md)$/,
         contents: { "linear-issue.html": "ticket {{LINEAR_TICKET}}" },
       });
       const text = yield* Prompts.renderLinearIssue(ticket).pipe(Effect.provide(fs.layer));
       expect(text).toBe("ticket OLI-42");
       expect(fileNames(fs.reads)).toEqual(["linear-issue.html"]);
-    }),
-  );
-});
-
-describe("renderDrivingAgent happy path", () => {
-  it.effect("driving-agent.html: the ticket and the model; the server url is in the ticket", () =>
-    Effect.gen(function* () {
-      const text = yield* real(Prompts.renderDrivingAgent({ LINEAR_TICKET: "OLI-42", MODEL }));
-
-      expect(text.includes("{{")).toBe(false);
-      expect(text).toContain("Review Linear ticket OLI-42");
-      expect(text).toContain('On starting OLI-42, move it to "In Progress"');
-      expect(text).toContain('On completing OLI-42, move it to "Needs Review"');
-      expect(text).toContain("<agent-id> OLI-42 </agent-id>");
-      // The driver is told its model once and told what to do with it: test start records it.
-      expect(text).toContain(`<model> ${MODEL} </model>`);
-      expect(text).toContain(`--model ${MODEL}`);
-      expect(text).toContain("./client");
-      // The ticket carries the server url and the guides; the kickoff repeats neither.
-      expect(text.includes("--server-url")).toBe(false);
-      expect(text.includes("http")).toBe(false);
-      expect(text).not.toContain("# Client\n");
-      expect(text).not.toContain("# Control\n");
-    }),
-  );
-
-  it.effect("reads nothing but its template: the driver's guides are in the ticket", () =>
-    Effect.gen(function* () {
-      const fs = promptFs({
-        unreadable: /\.md$/,
-        contents: { "driving-agent.html": "ticket {{LINEAR_TICKET}} as {{MODEL}}" },
-      });
-      const text = yield* Prompts.renderDrivingAgent({ LINEAR_TICKET: "OLI-42", MODEL }).pipe(
-        Effect.provide(fs.layer),
-      );
-      expect(text).toBe(`ticket OLI-42 as ${MODEL}`);
-      expect(fileNames(fs.reads)).toEqual(["driving-agent.html"]);
-    }),
-  );
-});
-
-describe("renderDrivingAgent unhappy path", () => {
-  it.effect("a placeholder without a value is refused, naming this template and the name", () =>
-    Effect.gen(function* () {
-      const fs = promptFs({
-        contents: { "driving-agent.html": "{{LINEAR_TICKET}} {{SESSION_ID}} {{MODEL}}" },
-      });
-      const error = yield* Effect.flip(
-        Prompts.renderDrivingAgent({ LINEAR_TICKET: "OLI-42", MODEL }).pipe(
-          Effect.provide(fs.layer),
-        ),
-      );
-      expect(error).toMatchObject({
-        _tag: "PromptError",
-        message: "prompt: prompts/driving-agent.html uses {{SESSION_ID}}, which has no value",
-      });
-      expect(error.cause).toBeUndefined();
-    }),
-  );
-});
-
-describe("renderDiagnosingAgent happy path", () => {
-  it.effect(
-    "diagnosing-agent.html: the ticket, the result, the model, the diagnosis guide; nothing of the drive",
-    () =>
-      Effect.gen(function* () {
-        const text = yield* real(
-          Prompts.renderDiagnosingAgent({
-            LINEAR_TICKET: "OLI-42",
-            RESULT_ID: ticket.RESULT_ID,
-            MODEL,
-          }),
-        );
-
-        expect(text.includes("{{")).toBe(false);
-        expect(text).toContain('On starting OLI-42, move it to "In Review"');
-        expect(text).toContain('On completing OLI-42, move it to "Done"');
-        // The reviewer is handed the result id alone and finds the session from it.
-        expect(text).toContain(`--test-result-id=${ticket.RESULT_ID}`);
-        expect(text).toContain(`./ctrl session --search --test-result-id ${ticket.RESULT_ID}`);
-        expect(text).toContain(`<model>${MODEL}</model>`);
-        expect(text).toContain("--model <the Cursor model id you are running as>");
-        // The reviewer's guide, whole, with the closing tag under its last line.
-        expect(text).toContain("# Control\n");
-        expect(text).toContain("## session");
-        expect(text).toContain("## session image");
-        expect(text).toContain("## error-type list");
-        expect(text).toContain("## error-type new");
-        expect(text).toContain("## diagnose");
-        expect(text).toContain("--verdict passed|failed");
-        expect(text).toContain("./session image --image-id");
-        expect(text).toContain("```\n  </guide>");
-        // The reviewer drives nothing: no client, no server url, no token, no driver's guide.
-        expect(text).not.toContain("./client");
-        expect(text.includes("--server-url")).toBe(false);
-        expect(text.includes("SERVER_URL")).toBe(false);
-        expect(text.includes("OLIGARCHY_TOKEN")).toBe(false);
-        expect(text).not.toContain("## test start");
-        expect(text).not.toContain("## test-results");
-        expect(text).not.toContain(SUB_AGENT);
-      }),
-  );
-
-  it.effect(
-    "fills the values and the diagnosis guide it names; the driver's guides are never read",
-    () =>
-      Effect.gen(function* () {
-        const fs = promptFs({
-          contents: {
-            "diagnosing-agent.html":
-              "{{RESULT_ID}} of {{LINEAR_TICKET}} as {{MODEL}}\n<guide>\n{{CTRL_DIAGNOSE_MD}}\n</guide>",
-            "ctrl-diagnose.md": "# Control\n\nRead the session.\n",
-          },
-        });
-        const text = yield* Prompts.renderDiagnosingAgent({
-          LINEAR_TICKET: "OLI-42",
-          RESULT_ID: ticket.RESULT_ID,
-          MODEL,
-        }).pipe(Effect.provide(fs.layer));
-        expect(text).toBe(
-          `${ticket.RESULT_ID} of OLI-42 as ${MODEL}\n<guide>\n# Control\n\nRead the session.\n</guide>`,
-        );
-        expect(fileNames(fs.reads)).toEqual(["diagnosing-agent.html", "ctrl-diagnose.md"]);
-      }),
-  );
-});
-
-describe("renderDiagnosingAgent unhappy path", () => {
-  it.effect("a placeholder without a value is refused, naming this template and the name", () =>
-    Effect.gen(function* () {
-      const fs = promptFs({
-        contents: {
-          "diagnosing-agent.html": "{{LINEAR_TICKET}} {{CTRL_DIAGNOSE_MD}} {{SESSION_ID}}",
-        },
-      });
-      const error = yield* Effect.flip(
-        Prompts.renderDiagnosingAgent({
-          LINEAR_TICKET: "OLI-42",
-          RESULT_ID: ticket.RESULT_ID,
-          MODEL,
-        }).pipe(Effect.provide(fs.layer)),
-      );
-      expect(error).toMatchObject({
-        _tag: "PromptError",
-        message: "prompt: prompts/diagnosing-agent.html uses {{SESSION_ID}}, which has no value",
-      });
-      expect(error.cause).toBeUndefined();
-      // The guide was read before the fill was judged.
-      expect(fileNames(fs.reads)).toEqual(["diagnosing-agent.html", "ctrl-diagnose.md"]);
-    }),
-  );
-
-  it.effect("an unreadable diagnosis guide is a PromptError naming the guide", () =>
-    Effect.gen(function* () {
-      const fs = promptFs({
-        unreadable: /ctrl-diagnose\.md$/,
-        contents: { "diagnosing-agent.html": "{{LINEAR_TICKET}} {{CTRL_DIAGNOSE_MD}}" },
-      });
-      const error = yield* Effect.flip(
-        Prompts.renderDiagnosingAgent({
-          LINEAR_TICKET: "OLI-42",
-          RESULT_ID: ticket.RESULT_ID,
-          MODEL,
-        }).pipe(Effect.provide(fs.layer)),
-      );
-      expect(error._tag).toBe("PromptError");
-      expect(error.message).toMatch(/^prompt: .*ctrl-diagnose\.md/);
-      expect(error.cause).toBeDefined();
-      expect(fileNames(fs.reads)).toEqual(["diagnosing-agent.html", "ctrl-diagnose.md"]);
     }),
   );
 });
