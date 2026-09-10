@@ -53,7 +53,7 @@ export const reporter: ErrorReporter.ErrorReporter = ErrorReporter.make(
       error.name === Errors.LogLine.identifier && error.cause !== undefined ? error.cause : error;
     Sentry.captureException(exception, {
       level: toSentryLevel(severity),
-      tags: Object.assign({}, tag(context, "session_id"), tag(context, "agent_id")),
+      tags: Object.assign({}, tag(context, "location"), tag(context, "agent_id")),
       extra: context,
     });
   },

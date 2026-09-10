@@ -110,7 +110,7 @@ const make: Effect.Effect<
       fs.remove(dir, { recursive: true, force: true }).pipe(
         Effect.catch((error) =>
           log.error(`qemu: removing ${dir} failed: ${Process.detail(error)}`, {
-            sessionId: id,
+            location: id,
             cause: error,
           }),
         ),

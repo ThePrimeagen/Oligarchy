@@ -15,8 +15,34 @@ import * as Errors from "../shared/errors.ts";
 import type * as Domain from "../shared/domain.ts";
 import * as Render from "./render.ts";
 
-export type Attribution = { readonly sessionId?: string; readonly agentId?: string };
+// location is a text bucket: a session UUID, Locations.server, or Locations.automation.
+export type Attribution = { readonly location?: string; readonly agentId?: string };
 export type Report = Attribution & { readonly cause?: unknown; readonly skipSentry?: true };
+
+export const Locations = {
+  automation: "automation",
+  server: "server",
+} as const;
+
+// The automation process logs with agentId === Locations.automation as well.
+export const AutomationAgentId = Locations.automation;
+
+// Fallback attribution when a log line has no session: proxy-wide "server", or automation's
+// own bucket. Processes override this Reference at the top of their layer graph.
+export type ProcessAttribution = {
+  readonly location: string;
+  readonly agentId?: string;
+};
+
+export const ProcessAttribution = Context.Reference<ProcessAttribution>(
+  "@oligarchy/observability/log/ProcessAttribution",
+  { defaultValue: () => ({ location: Locations.server }) },
+);
+
+export const AutomationProcessAttribution: ProcessAttribution = {
+  location: Locations.automation,
+  agentId: AutomationAgentId,
+};
 
 export type LogService = {
   readonly info: (text: string, attribution?: Attribution) => Effect.Effect<void>;
@@ -48,7 +74,7 @@ type Sink = {
 const annotations = (text: string, attribution: Attribution): Record<string, unknown> =>
   Object.assign(
     {},
-    attribution.sessionId === undefined ? undefined : { session_id: attribution.sessionId },
+    attribution.location === undefined ? undefined : { location: attribution.location },
     attribution.agentId === undefined ? undefined : { agent_id: attribution.agentId },
     { log: text },
   );
@@ -153,7 +179,7 @@ const makeLog = (
         yield* write(
           Object.assign(
             { text, level },
-            attribution.sessionId === undefined ? undefined : { sessionId: attribution.sessionId },
+            attribution.location === undefined ? undefined : { location: attribution.location },
             attribution.agentId === undefined ? undefined : { agentId: attribution.agentId },
             color === undefined ? undefined : { color },
           ),
@@ -161,7 +187,7 @@ const makeLog = (
         offer({
           text,
           level,
-          sessionId: attribution.sessionId ?? null,
+          location: attribution.location ?? null,
           agentId: attribution.agentId ?? null,
         });
       });
@@ -206,7 +232,7 @@ export class Log extends Context.Service<Log>()("@oligarchy/observability/Log", 
   }),
 }) {
   static readonly layer: Layer.Layer<Log, never, Logs.LogStore> = Layer.effect(this)(this.make);
-  // stdout only, no rows: tests and the processes that have no database (the automation service).
+  // stdout only, no rows: tests. Automation persists through `layer` once it has a database.
   static readonly layerStdout: Layer.Layer<Log> = Layer.effect(this)(
     makeLog(() => Effect.succeed(stdoutOnly)),
   );

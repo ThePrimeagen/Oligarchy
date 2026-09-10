@@ -4,7 +4,7 @@ import * as Log from "../../src/observability/log.ts";
 export type Line = {
   readonly level: "info" | "warning" | "error" | "fatal";
   readonly text: string;
-  readonly sessionId: string | undefined;
+  readonly location: string | undefined;
   readonly agentId: string | undefined;
   readonly skipSentry: boolean;
   readonly cause: unknown;
@@ -29,7 +29,7 @@ export const fakeLog = (): FakeLog => {
         lines.push({
           level,
           text,
-          sessionId: report?.sessionId,
+          location: report?.location,
           agentId: report?.agentId,
           skipSentry: report?.skipSentry === true,
           cause: report?.cause,

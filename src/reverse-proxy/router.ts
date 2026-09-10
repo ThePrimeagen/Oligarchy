@@ -82,7 +82,7 @@ const serverFailed = (
     Object.assign(
       { message, url },
       cause === undefined ? undefined : { cause },
-      who.sessionId === undefined ? undefined : { sessionId: who.sessionId },
+      who.location === undefined ? undefined : { sessionId: who.location },
       who.agentId === undefined ? undefined : { agentId: who.agentId },
     ),
   );
@@ -201,7 +201,7 @@ const make = Effect.gen(function* () {
   const register = Effect.fn("Router.register")(function* (url: string) {
     yield* probe(url, {});
     yield* store.addServer(url, SERVER_TYPE).pipe(Effect.mapError((cause) => internal(cause)));
-    yield* log.info(`server registered; ${url}`);
+    yield* log.info(`server registered; ${url}`, { location: Log.Locations.server });
   });
 
   const unregister = Effect.fn("Router.unregister")(function* (url: string) {
@@ -211,7 +211,7 @@ const make = Effect.gen(function* () {
     if (!removed) {
       return yield* Errors.NotFound.make({});
     }
-    return yield* log.info(`server removed; ${url}`);
+    return yield* log.info(`server removed; ${url}`, { location: Log.Locations.server });
   });
 
   const servers: Effect.Effect<Contract.Servers, Errors.Internal> = Effect.gen(function* () {
@@ -247,7 +247,7 @@ const make = Effect.gen(function* () {
       let chosen: { readonly url: string; readonly qemus: number } | undefined;
       for (const { url, result } of probed) {
         if (Result.isFailure(result)) {
-          yield* log.warning(`server skipped; ${result.failure.message}`, { agentId: agent });
+          yield* log.warning(`server skipped; ${result.failure.message}`, { location: Log.Locations.server, agentId: agent });
           continue;
         }
         if (chosen === undefined || result.success.qemus < chosen.qemus) {
@@ -283,7 +283,7 @@ const make = Effect.gen(function* () {
       ),
     );
     yield* store.routeSession(id, url).pipe(Effect.mapError((cause) => internal(cause, id, agent)));
-    yield* log.info(`routed; ${url}`, { sessionId: id, agentId: agent });
+    yield* log.info(`routed; ${url}`, { location: id, agentId: agent });
     return HttpServerResponse.text(text, { status: 200, headers });
   });
 
@@ -301,7 +301,7 @@ const make = Effect.gen(function* () {
     if (Option.isNone(route)) {
       return yield* Errors.unknownSession(id, agent);
     }
-    const who = agent === undefined ? { sessionId: id } : { sessionId: id, agentId: agent };
+    const who = agent === undefined ? { location: id } : { location: id, agentId: agent };
     const response = yield* send(route.value, request).pipe(
       Effect.mapError((error) => unreachable(route.value, error, who)),
     );

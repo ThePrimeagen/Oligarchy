@@ -352,7 +352,7 @@ describe("authentication", () => {
         sessionsRoutes.map(([method, path]) => ({
           level: "error",
           text: `${method} ${path} failed: unauthorized`,
-          sessionId: undefined,
+          location: "server",
           agentId: undefined,
           skipSentry: true,
           cause: undefined,
@@ -452,7 +452,7 @@ describe("request decoding", () => {
         {
           level: "error",
           text: "POST /start failed: Expected a valid JSON body",
-          sessionId: undefined,
+          location: "server",
           agentId: undefined,
           skipSentry: true,
           cause: undefined,
@@ -527,7 +527,7 @@ describe("request decoding", () => {
         {
           level: "error",
           text: `GET /serial?id=&agent=${AGENT_ID} failed: session id is required`,
-          sessionId: undefined,
+          location: "server",
           agentId: AGENT_ID,
           skipSentry: true,
           cause: undefined,
@@ -571,7 +571,7 @@ describe("Sessions failures", () => {
         {
           level: "error",
           text: `GET /serial?id=${unknown}&agent=${AGENT_ID} failed: unknown session "${unknown}"`,
-          sessionId: unknown,
+          location: unknown,
           agentId: AGENT_ID,
           skipSentry: true,
           cause: undefined,
@@ -579,7 +579,7 @@ describe("Sessions failures", () => {
         {
           level: "error",
           text: 'POST /stop failed: unknown session "garbage"',
-          sessionId: undefined,
+          location: "server",
           agentId: AGENT_ID,
           skipSentry: true,
           cause: undefined,
@@ -587,7 +587,7 @@ describe("Sessions failures", () => {
         {
           level: "error",
           text: `GET /follow?id=${unknown} failed: unknown session "${unknown}"`,
-          sessionId: unknown,
+          location: unknown,
           agentId: undefined,
           skipSentry: true,
           cause: undefined,
@@ -620,7 +620,7 @@ describe("Sessions failures", () => {
         {
           level: "error",
           text: `POST /send-keys failed: agent "${OTHER_AGENT_ID}" does not own session "${SESSION_ID}"`,
-          sessionId: SESSION_ID,
+          location: SESSION_ID,
           agentId: OTHER_AGENT_ID,
           skipSentry: true,
           cause: undefined,
@@ -650,7 +650,7 @@ describe("Sessions failures", () => {
         expect(raw.status).toBe(409);
         expect(yield* raw.json).toEqual({ error: conflict.message });
       }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.log.lines.map((line) => [line.text, line.sessionId, line.skipSentry])).toEqual([
+      expect(fixed.log.lines.map((line) => [line.text, line.location, line.skipSentry])).toEqual([
         [`GET /follow?id=${SESSION_ID} failed: ${conflict.message}`, SESSION_ID, true],
         [`GET /follow?id=${SESSION_ID} failed: ${conflict.message}`, SESSION_ID, true],
       ]);
@@ -720,7 +720,7 @@ describe("Sessions failures", () => {
         {
           level: "error",
           text: "POST /send-mouse failed: mouse: x and y must be in 0..1",
-          sessionId: SESSION_ID,
+          location: SESSION_ID,
           agentId: AGENT_ID,
           skipSentry: true,
           cause: undefined,
@@ -728,7 +728,7 @@ describe("Sessions failures", () => {
         {
           level: "error",
           text: "POST /intent/end failed: no active intent",
-          sessionId: SESSION_ID,
+          location: SESSION_ID,
           agentId: AGENT_ID,
           skipSentry: true,
           cause: undefined,
@@ -774,7 +774,7 @@ describe("Sessions failures", () => {
         {
           level: "error",
           text: `GET /image?id=${SESSION_ID}&agent=${AGENT_ID} failed: qemu: screendump timed out`,
-          sessionId: SESSION_ID,
+          location: SESSION_ID,
           agentId: AGENT_ID,
           skipSentry: false,
           cause: timeout,
@@ -782,7 +782,7 @@ describe("Sessions failures", () => {
         {
           level: "error",
           text: `GET /image?id=${SESSION_ID}&agent=${AGENT_ID} failed: qemu: screendump timed out`,
-          sessionId: SESSION_ID,
+          location: SESSION_ID,
           agentId: AGENT_ID,
           skipSentry: false,
           cause: timeout,
@@ -828,7 +828,7 @@ describe("Sessions failures", () => {
         {
           level: "error",
           text: "POST /start failed: qemu: disk not found: /tmp/nope.qcow2",
-          sessionId: STARTED_ID,
+          location: STARTED_ID,
           agentId: AGENT_ID,
           skipSentry: false,
           cause: undefined,
@@ -875,7 +875,7 @@ describe("Sessions failures", () => {
         expect(fixed.log.lines[0]).toEqual({
           level: "error",
           text: "POST /stop failed: connect ECONNREFUSED 127.0.0.1:5432",
-          sessionId: SESSION_ID,
+          location: SESSION_ID,
           agentId: AGENT_ID,
           skipSentry: false,
           cause: failure,
@@ -963,7 +963,7 @@ describe("defects", () => {
       expect(fixed.log.lines[0]).toEqual({
         level: "error",
         text: `GET /stats failed: ${Cause.pretty(Cause.die(defect))}`,
-        sessionId: undefined,
+        location: "server",
         agentId: undefined,
         skipSentry: false,
         cause: defect,
@@ -1016,7 +1016,7 @@ describe("defects", () => {
       );
       expect(withSession?.severity).toBe("Error");
       expect(withSession?.annotations).toMatchObject({
-        session_id: SESSION_ID,
+        location: SESSION_ID,
         agent_id: AGENT_ID,
       });
     }),

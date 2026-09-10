@@ -147,7 +147,7 @@ describe("server registration", () => {
           {
             level: "info",
             text: `server registered; ${SERVER_A}`,
-            sessionId: undefined,
+            location: "server",
             agentId: undefined,
             skipSentry: false,
             cause: undefined,
@@ -200,7 +200,7 @@ describe("server registration", () => {
         {
           level: "info",
           text: `server removed; ${SERVER_A}`,
-          sessionId: undefined,
+          location: "server",
           agentId: undefined,
           skipSentry: false,
           cause: undefined,
@@ -228,7 +228,7 @@ describe("server registration", () => {
         {
           level: "error",
           text: "DELETE /servers failed: not found",
-          sessionId: undefined,
+          location: "server",
           agentId: undefined,
           skipSentry: true,
           cause: undefined,
@@ -236,7 +236,7 @@ describe("server registration", () => {
         {
           level: "error",
           text: "DELETE /servers failed: not found",
-          sessionId: undefined,
+          location: "server",
           agentId: undefined,
           skipSentry: true,
           cause: undefined,
@@ -342,7 +342,7 @@ describe("registration refusals", () => {
         expect(fixed.log.lines[0]).toMatchObject({
           level: "error",
           text: `POST /servers failed: server ${SERVER_A} unreachable: connect ECONNREFUSED 10.0.0.5:42069`,
-          sessionId: undefined,
+          location: "server",
           agentId: undefined,
           skipSentry: false,
         });
@@ -468,7 +468,7 @@ describe("registration refusals", () => {
         {
           level: "error",
           text: "POST /servers failed: connect ECONNREFUSED 127.0.0.1:5432",
-          sessionId: undefined,
+          location: "server",
           agentId: undefined,
           skipSentry: false,
           cause: failure,
@@ -523,7 +523,7 @@ describe("placement", () => {
           {
             level: "info",
             text: `routed; ${SERVER_B}`,
-            sessionId: STARTED_ID,
+            location: STARTED_ID,
             agentId: AGENT_ID,
             skipSentry: false,
             cause: undefined,
@@ -563,7 +563,7 @@ describe("placement", () => {
         {
           level: "warning",
           text: `server skipped; server ${SERVER_A} unreachable: connect ECONNREFUSED 10.0.0.5:42069`,
-          sessionId: undefined,
+          location: "server",
           agentId: AGENT_ID,
           skipSentry: false,
           cause: undefined,
@@ -571,7 +571,7 @@ describe("placement", () => {
         {
           level: "info",
           text: `routed; ${SERVER_B}`,
-          sessionId: STARTED_ID,
+          location: STARTED_ID,
           agentId: AGENT_ID,
           skipSentry: false,
           cause: undefined,
@@ -601,7 +601,7 @@ describe("placement", () => {
         {
           level: "error",
           text: "POST /start failed: no server registered",
-          sessionId: undefined,
+          location: "server",
           agentId: AGENT_ID,
           skipSentry: false,
           cause: undefined,
@@ -609,7 +609,7 @@ describe("placement", () => {
         {
           level: "error",
           text: "POST /start failed: no server registered",
-          sessionId: undefined,
+          location: "server",
           agentId: AGENT_ID,
           skipSentry: false,
           cause: undefined,
@@ -720,7 +720,7 @@ describe("placement", () => {
       expect(fixed.log.lines[0]).toMatchObject({
         level: "error",
         text: `POST /start failed: server ${SERVER_A} unreachable: connect ECONNREFUSED 10.0.0.5:42069`,
-        sessionId: undefined,
+        location: "server",
         agentId: AGENT_ID,
         skipSentry: false,
       });
@@ -751,7 +751,7 @@ describe("placement", () => {
           {
             level: "error",
             text: "POST /start failed: connect ECONNREFUSED 127.0.0.1:5432",
-            sessionId: STARTED_ID,
+            location: STARTED_ID,
             agentId: AGENT_ID,
             skipSentry: false,
             cause: failure,
@@ -1128,7 +1128,7 @@ describe("forwarding refusals", () => {
         {
           level: "error",
           text: `GET /serial?id=${SESSION_ID}&agent=${AGENT_ID} failed: unknown session "${SESSION_ID}"`,
-          sessionId: SESSION_ID,
+          location: SESSION_ID,
           agentId: AGENT_ID,
           skipSentry: true,
           cause: undefined,
@@ -1136,7 +1136,7 @@ describe("forwarding refusals", () => {
         {
           level: "error",
           text: `GET /follow?id=${SESSION_ID} failed: unknown session "${SESSION_ID}"`,
-          sessionId: SESSION_ID,
+          location: SESSION_ID,
           agentId: undefined,
           skipSentry: true,
           cause: undefined,
@@ -1167,9 +1167,9 @@ describe("forwarding refusals", () => {
         const empty = yield* Effect.flip(api.Sessions.follow({ query: { id: "" } }));
         expect(empty).toMatchObject({ _tag: "UnknownSession", message: 'unknown session ""' });
       }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.log.lines.map((line) => [line.text, line.sessionId, line.agentId])).toEqual([
-        ['POST /stop failed: unknown session "garbage"', undefined, AGENT_ID],
-        ['GET /follow?id= failed: unknown session ""', undefined, undefined],
+      expect(fixed.log.lines.map((line) => [line.text, line.location, line.agentId])).toEqual([
+        ['POST /stop failed: unknown session "garbage"', "server", AGENT_ID],
+        ['GET /follow?id= failed: unknown session ""', "server", undefined],
       ]);
     }),
   );
@@ -1204,14 +1204,14 @@ describe("forwarding refusals", () => {
         expect(fixed.log.lines[0]).toMatchObject({
           level: "error",
           text: `POST /send-keys failed: server ${SERVER_A} unreachable: connect ECONNREFUSED 10.0.0.5:42069`,
-          sessionId: SESSION_ID,
+          location: SESSION_ID,
           agentId: AGENT_ID,
           skipSentry: false,
         });
         expect(fixed.log.lines[0]?.cause).toBeInstanceOf(Error);
         expect(fixed.log.lines[1]).toMatchObject({
           text: `GET /follow?id=${SESSION_ID} failed: server ${SERVER_A} unreachable: connect ECONNREFUSED 10.0.0.5:42069`,
-          sessionId: SESSION_ID,
+          location: SESSION_ID,
           agentId: undefined,
           skipSentry: false,
         });
@@ -1250,7 +1250,7 @@ describe("forwarding refusals", () => {
         expect(fixed.log.lines[0]).toMatchObject({
           level: "error",
           text: `forward cut short; server ${SERVER_A} unreachable: read ECONNRESET`,
-          sessionId: SESSION_ID,
+          location: SESSION_ID,
           agentId: undefined,
           skipSentry: false,
         });
@@ -1280,7 +1280,7 @@ describe("forwarding refusals", () => {
         {
           level: "error",
           text: `GET /image?id=${SESSION_ID}&agent=${AGENT_ID} failed: connect ECONNREFUSED 127.0.0.1:5432`,
-          sessionId: SESSION_ID,
+          location: SESSION_ID,
           agentId: AGENT_ID,
           skipSentry: false,
           cause: failure,

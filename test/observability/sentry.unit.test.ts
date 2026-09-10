@@ -319,12 +319,12 @@ describe("reporter", () => {
       const captured = capture();
       yield* ErrorReporter.report(
         Cause.fail(Errors.QemuStartError.make({ message: "qemu: handshake timeout" })),
-      ).pipe(Effect.annotateLogs({ session_id: SESSION_ID, agent_id: AGENT_ID, log: "starting" }));
+      ).pipe(Effect.annotateLogs({ location: SESSION_ID, agent_id: AGENT_ID, log: "starting" }));
       const events = yield* captured.events;
       expect(events).toHaveLength(1);
-      expect(events[0]?.tags).toEqual({ session_id: SESSION_ID, agent_id: AGENT_ID });
+      expect(events[0]?.tags).toEqual({ location: SESSION_ID, agent_id: AGENT_ID });
       expect(events[0]?.extra).toEqual({
-        session_id: SESSION_ID,
+        location: SESSION_ID,
         agent_id: AGENT_ID,
         log: "starting",
       });

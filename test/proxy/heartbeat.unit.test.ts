@@ -144,7 +144,7 @@ describe("heartbeat unhappy path", () => {
           {
             level: "error",
             text: "heartbeat failed: connect ECONNREFUSED 127.0.0.1:5432",
-            sessionId: undefined,
+            location: "server",
             agentId: undefined,
             skipSentry: false,
             cause: refused,
@@ -200,7 +200,7 @@ describe("heartbeat unhappy path", () => {
           {
             level: "error",
             text: "unannounce failed: connect ECONNREFUSED 127.0.0.1:5432",
-            sessionId: undefined,
+            location: "server",
             agentId: undefined,
             skipSentry: false,
             cause: refusedDelete,

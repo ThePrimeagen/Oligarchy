@@ -53,34 +53,50 @@ const translate = (
       ? Effect.fail(error)
       : Effect.die(error);
 
-// logs.session_id is a uuid column: an unknown id is attributed only when this server could have
-// minted it.
-const attribution = (error: Errors.ApiError): Log.Attribution => {
+// logs.location is text: an unknown id is attributed only when this server could have minted it
+// (a session UUID). Otherwise the process fallback applies (proxy: "server"; automation: its own).
+const attribution = (
+  error: Errors.ApiError,
+  fallback: Log.ProcessAttribution,
+): Log.Attribution => {
   switch (error._tag) {
     case "Unauthorized":
     case "NotFound":
-      return {};
+      return fallback;
     case "Forbidden":
-      return { sessionId: error.sessionId, agentId: error.agentId };
+      return { location: error.sessionId, agentId: error.agentId };
     case "Conflict":
-      return { sessionId: error.sessionId };
+      return { location: error.sessionId };
     case "UnknownSession":
       return Object.assign(
-        {},
-        Domain.isSessionId(error.id) ? { sessionId: error.id } : undefined,
-        error.agentId === undefined ? undefined : { agentId: error.agentId },
+        { location: Domain.isSessionId(error.id) ? error.id : fallback.location },
+        error.agentId === undefined
+          ? fallback.agentId === undefined
+            ? undefined
+            : { agentId: fallback.agentId }
+          : { agentId: error.agentId },
       );
     case "NoServer":
-      return error.agentId === undefined ? {} : { agentId: error.agentId };
+      return Object.assign(
+        { location: fallback.location },
+        error.agentId === undefined
+          ? fallback.agentId === undefined
+            ? undefined
+            : { agentId: fallback.agentId }
+          : { agentId: error.agentId },
+      );
     case "BadRequest":
     case "StartFailed":
     case "ExchangeFailed":
     case "Internal":
     case "ServerFailed":
       return Object.assign(
-        {},
-        error.sessionId === undefined ? undefined : { sessionId: error.sessionId },
-        error.agentId === undefined ? undefined : { agentId: error.agentId },
+        { location: error.sessionId ?? fallback.location },
+        error.agentId === undefined
+          ? fallback.agentId === undefined
+            ? undefined
+            : { agentId: fallback.agentId }
+          : { agentId: error.agentId },
       );
   }
   return error satisfies never;
@@ -94,16 +110,20 @@ const detail = (error: Errors.ApiError): string =>
     : error.message;
 
 // A refusal (< 500) is the caller's problem and skips Sentry; a failure carries its cause there.
-const report = (error: Errors.ApiError): Log.Report =>
+const report = (error: Errors.ApiError, fallback: Log.ProcessAttribution): Log.Report =>
   Errors.apiStatus(error) < 500
-    ? { ...attribution(error), skipSentry: true }
-    : { ...attribution(error), cause: "cause" in error ? error.cause : undefined };
+    ? { ...attribution(error, fallback), skipSentry: true }
+    : {
+        ...attribution(error, fallback),
+        cause: "cause" in error ? error.cause : undefined,
+      };
 
 // The one boundary: schema errors to 400, defects to 500, one log line per failed request. The
 // proxy and the reverse proxy wrap it in their own middleware tags, which differ only in the error
 // codecs they declare.
 const boundary = Effect.gen(function* () {
   const log = yield* Log.Log;
+  const fallback = yield* Log.ProcessAttribution;
   return (httpEffect: Effect.Effect<HttpServerResponse.HttpServerResponse, Types.unhandled>) =>
     Effect.gen(function* () {
       const request = yield* HttpServerRequest.HttpServerRequest;
@@ -111,9 +131,9 @@ const boundary = Effect.gen(function* () {
         log.error(`${request.method} ${request.originalUrl} failed: ${text}`, how);
       return yield* httpEffect.pipe(
         Effect.catch(translate),
-        Effect.tapError((error) => failed(detail(error), report(error))),
+        Effect.tapError((error) => failed(detail(error), report(error, fallback))),
         Effect.catchDefect((defect) =>
-          failed(Cause.pretty(Cause.die(defect)), { cause: defect }).pipe(
+          failed(Cause.pretty(Cause.die(defect)), { ...fallback, cause: defect }).pipe(
             Effect.andThen(
               Effect.fail(Errors.Internal.make({ message: "internal error", cause: defect })),
             ),

@@ -7,7 +7,7 @@ import * as DbSchema from "./schema.ts";
 export type LogRow = {
   readonly text: string;
   readonly level: Domain.LogLevel;
-  readonly sessionId: string | null;
+  readonly location: string | null;
   readonly agentId: string | null;
 };
 
@@ -19,12 +19,13 @@ export class LogStore extends Context.Service<LogStore>()("@oligarchy/db/LogStor
       yield* database.run("insertLog", (db) => db.insert(DbSchema.logs).values(row));
     });
 
-    const listLogs = Effect.fn("db.listLogs")(function* (sessionId: string) {
+    // Rows for one location bucket: a session UUID, "server", or "automation".
+    const listLogs = Effect.fn("db.listLogs")(function* (location: string) {
       return yield* database.run("listLogs", (db) =>
         db
           .select()
           .from(DbSchema.logs)
-          .where(eq(DbSchema.logs.sessionId, sessionId))
+          .where(eq(DbSchema.logs.location, location))
           .orderBy(DbSchema.logs.createdAt, DbSchema.logs.id),
       );
     });

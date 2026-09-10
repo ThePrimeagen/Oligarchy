@@ -119,19 +119,20 @@ export const images = pgTable(
   (table) => [uniqueIndex("images_id_idx").on(table.id)],
 );
 
-// session_id and agent_id are attribution, not relations: a log must never be refused
+// location and agent_id are attribution, not relations: a log must never be refused
 // because the row it names is missing or already gone, so neither is a foreign key.
+// location is a text bucket: a session UUID, "server" (proxy-wide), or "automation".
 export const logs = pgTable(
   "logs",
   {
     id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
-    sessionId: uuid("session_id"),
+    location: text("location"),
     agentId: text("agent_id"),
     level: logLevel("level").notNull().default("info"),
     text: text("text").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index("logs_session_id_idx").on(table.sessionId)],
+  (table) => [index("logs_location_idx").on(table.location)],
 );
 
 // One snapshot per failed session, keyed by origin. journalctl / dmesg / compositor

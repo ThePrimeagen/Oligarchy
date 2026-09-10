@@ -44,7 +44,7 @@ export const announce = (
       ),
       Effect.catchCause((cause) => {
         const error = Cause.squash(cause);
-        return log.error(`heartbeat failed: ${detail(error)}`, { cause: error });
+        return log.error(`heartbeat failed: ${detail(error)}`, { location: Log.Locations.server, cause: error });
       }),
     );
     // Before the loop: close interrupts the fiber first, then this runs.
@@ -52,7 +52,7 @@ export const announce = (
       store.removeServer(url).pipe(
         Effect.catchCause((cause) => {
           const error = Cause.squash(cause);
-          return log.error(`unannounce failed: ${detail(error)}`, { cause: error });
+          return log.error(`unannounce failed: ${detail(error)}`, { location: Log.Locations.server, cause: error });
         }),
         Effect.asVoid,
       ),

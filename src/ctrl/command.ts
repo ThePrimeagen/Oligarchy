@@ -434,7 +434,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
       ),
     );
     yield* log.info(`test result ${input.testResultId}: running`, {
-      sessionId: input.sessionId,
+      location: input.sessionId,
     });
   });
 
@@ -474,7 +474,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
         { agentId: input.agentId },
         Option.match(agentSession, {
           onNone: () => undefined,
-          onSome: (session) => ({ sessionId: session }),
+          onSome: (session) => ({ location: session }),
         }),
       ),
     );
@@ -558,7 +558,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
       onSome: (key) => `${key}; `,
     });
     return yield* log.info(`diagnosed; ${input.verdict}; ${cause}${input.model}`, {
-      sessionId: input.sessionId,
+      location: input.sessionId,
     });
   });
 

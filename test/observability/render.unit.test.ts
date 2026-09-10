@@ -76,13 +76,13 @@ describe("renderFailure", () => {
 });
 
 describe("renderLogLine", () => {
-  it("colors only the ticket and renders the bare session id in gray", () => {
+  it("colors only the ticket and renders the bare location in gray", () => {
     expect(
       Render.renderLogLine(
         {
           text: "sent 9 chords in 1546ms",
           level: "info",
-          sessionId: SESSION_ID,
+          location: SESSION_ID,
           agentId: AGENT_ID,
           color: LOVE,
         },
@@ -121,7 +121,7 @@ describe("renderLogLine", () => {
         {
           text: "sent 9 chords in 1546ms",
           level: "info",
-          sessionId: SESSION_ID,
+          location: SESSION_ID,
           agentId: AGENT_ID,
           color: LOVE,
         },
