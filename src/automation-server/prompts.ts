@@ -1,8 +1,8 @@
 import { Array as Arr, Effect, FileSystem, Option, Result } from "effect";
 import * as Errors from "../shared/errors.ts";
 
-// The Cursor model id a driving or diagnosing agent is told it is running as.
-export const MODEL = "cursor-grok-4.6-high-fast";
+// The OpenCode model id a driving or diagnosing agent is told it is running as.
+export const MODEL = "opencode/muse-spark-1-3-contributor-free";
 
 const besideModule = (relative: string): string =>
   decodeURIComponent(new URL(relative, import.meta.url).pathname);
