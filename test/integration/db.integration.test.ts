@@ -1231,6 +1231,68 @@ Postgres.describeWithDatabase("database", () => {
         }),
     );
 
+    scoped.effect(
+      "ServerStore heartbeat as an automation-client writes its own kind and generation",
+      () =>
+        Effect.gen(function* () {
+          const store = yield* Servers.ServerStore;
+          const database = yield* Client.Database;
+          const url = `http://10.0.0.11:${uuid().slice(0, 8)}`;
+          const first: DbSchema.ServerStats = {
+            qemus: 0,
+            memory: { totalBytes: 8_000_000_000, usedBytes: 2_000_000_000 },
+            cpu: { mean1m: 4.1, mean2m: 3.8, mean3m: 3.2 },
+          };
+          const rowOf = database.run("select", (db) =>
+            db.select().from(DbSchema.servers).where(eq(DbSchema.servers.url, url)),
+          );
+          yield* store.heartbeat(url, "automation-client", first);
+          expect(yield* store.listServers("automation-client")).toContain(url);
+          expect(yield* store.listServers("qemu")).not.toContain(url);
+          const [row] = yield* rowOf;
+          expect(row).toMatchObject({
+            url,
+            type: "automation-client",
+            stats: first,
+            generation: 1,
+          });
+          expect(row?.heartbeatAt).toBeInstanceOf(Date);
+          const second: DbSchema.ServerStats = { ...first, cpu: { ...first.cpu, mean1m: 5 } };
+          yield* store.heartbeat(url, "automation-client", second);
+          const rows = yield* rowOf;
+          expect(rows).toHaveLength(1);
+          expect(rows[0]).toMatchObject({
+            url,
+            type: "automation-client",
+            stats: second,
+            generation: 2,
+          });
+          expect(yield* store.removeServer(url)).toBe(true);
+        }),
+    );
+
+    scoped.effect("ServerStore registers a url once as an automation-client", () =>
+      Effect.gen(function* () {
+        const store = yield* Servers.ServerStore;
+        const database = yield* Client.Database;
+        const url = `http://10.0.0.12:${uuid().slice(0, 8)}`;
+        yield* store.addServer(url, "automation-client");
+        yield* store.addServer(url, "automation-client");
+        const [row] = yield* database.run("select", (db) =>
+          db.select().from(DbSchema.servers).where(eq(DbSchema.servers.url, url)),
+        );
+        expect(row).toMatchObject({
+          url,
+          type: "automation-client",
+          stats: null,
+          generation: 0,
+        });
+        expect(yield* store.listServers("automation-client")).toContain(url);
+        expect(yield* store.listServers("qemu")).not.toContain(url);
+        expect(yield* store.removeServer(url)).toBe(true);
+      }),
+    );
+
     scoped.effect("ServerStore routes a session once and answers where it went", () =>
       Effect.gen(function* () {
         const store = yield* Servers.ServerStore;

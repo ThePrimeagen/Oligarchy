@@ -64,6 +64,13 @@
       "when": 1789001000000,
       "tag": "0009_logs_location",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1789074862043,
+      "tag": "0010_sweet_taskmaster",
+      "breakpoints": true
     }
   ]
 }
