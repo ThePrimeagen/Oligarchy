@@ -97,9 +97,15 @@ export const dispatch = Effect.fn("dispatch")(function* () {
               onFailure: outcomeFrom,
             }),
             Effect.flatMap((outcome) =>
-              logOutcome(job, outcome).pipe(
-                Effect.andThen(store.finish(job.id, outcome.status, outcome.reason)),
-              ),
+              Effect.gen(function* () {
+                const closed = yield* store.finish(job.id, outcome.status, outcome.reason);
+                if (!closed) {
+                  return yield* Effect.die(
+                    new Error(`finishAutomationJob: ${job.id} was not running`),
+                  );
+                }
+                return yield* logOutcome(job, outcome);
+              }),
             ),
           );
         }),
