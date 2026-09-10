@@ -75,7 +75,7 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   `src/external-failure.ts`, `src/observability/`, `src/db/`); `main.ts` files are the entries.
 - `src/dashboard/` is a Hono Worker, not Effect: it has no Effect runtime, reaches Postgres
   through Hyperdrive and drizzle with one `pg.Client` per request ended in `finally` (a client
-  left open holds a Hyperdrive connection past the response), never calls the proxy's API, and
+  left open holds a Hyperdrive connection past the response), never calls the qemu server's API, and
   reports route failures with `@sentry/cloudflare` — the one `captureException` outside
   `observability/`, and with the test setup the one place `console.*` is allowed. Nothing below
   that says Effect applies to it.
@@ -118,8 +118,8 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   view); a failure there is a `Result`, a thrown value from a library wrapped in one `try`.
 - Reach services with `yield*` inside the Effect that needs them, never as function parameters; a
   plain factory taking values is allowed only where a unit test constructs the seam directly
-  (`Database.make(url)`, `Stats.make(source)`, `makeProxyCommand(server)`,
-  `makeReverseProxyCommand(server)`, `makeCtrlCommand(deps)`).
+  (`Database.make(url)`, `Stats.make(source)`, `makeQemuServerCommand(server)`,
+  `makeQemuReverseProxyCommand(server)`, `makeAutomationServerCommand(server)`, `makeCtrlCommand(deps)`).
 - Effect-native end-to-end: `Scope`, `Schedule`, `Clock`, `FileSystem`/`Path`,
   `ChildProcessSpawner`, `HttpClient`. Raw callback and Promise APIs, `async`/`await` included,
   appear only in the boundary files and `vitest.global-setup.ts`.
@@ -474,8 +474,8 @@ NodeRuntime.runMain(main, { disableErrorReporting: true });
   the groups, the `HttpApi`s, `VERSION`), `contract.ts` (`Schema.Class` DTOs and shared query field
   objects), `errors.ts` (errors and wire codecs). No handler code lives there; `HttpApiEndpoint`,
   `HttpApiGroup.make`, `HttpApi.make` appear only in `api.ts` (the architecture test checks it).
-- A second `HttpApi` that must be reachable by the client generated from the first (the reverse
-  proxy in front of the proxy) is built from the first's `HttpApiEndpoint` values, never from
+- A second `HttpApi` that must be reachable by the client generated from the first (the qemu reverse
+  proxy in front of the qemu server) is built from the first's `HttpApiEndpoint` values, never from
   redeclared paths, so methods, paths, queries and bodies cannot drift. An error the second api
   raises and the first never does gets its codec on a second boundary middleware tag (rc.112 has
   no way to add an error to an endpoint value, and the first api must not advertise a status it
@@ -708,10 +708,10 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
   `error`, `fatal`, `acquireColor`, `releaseColor`, `flush`. Messages are fixed sentences; every
   variable is in the attribution (`location`, `agentId`) or in the text after the `;`, as in
   `log.info(\`running; started in ${String(ms)}ms\`, { location: sessionId, agentId })`.
-  `location` is a text bucket: a session UUID, `Locations.server` (proxy-wide lines with no
+  `location` is a text bucket: a session UUID, `Locations.server` (qemu-server-wide lines with no
   session), or `Locations.automation` (the automation process; its `agentId` is also
   `Locations.automation`). `ProcessAttribution` is the fallback the HTTP boundary uses when an
-  error carries no session; the proxy leaves the default (`server`), automation overrides it.
+  error carries no session; the qemu server leaves the default (`server`), the automation server overrides it.
 - Each line is written twice: to stdout through `Console.log` when the method runs, and as a
   `logs` row `Queue.offerUnsafe`d to a `Queue.unbounded` drained by one `forkScoped` fiber that
   inserts in call order. The queue is unbounded by policy: a log call never blocks or drops a row
@@ -744,7 +744,7 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
   sits above `Database` so the flush completes before the pool closes. `Log.layer` reads
   `ErrorReporter.CurrentErrorReporters` once at build, so `SentryLive` is provided beneath it,
   never only to callers. `Log.layerStdout` persists nothing: it is for tests. The automation
-  service persists through `Log.layer` once it has a database; its lines use
+  server persists through `Log.layer` once it has a database; its lines use
   `location = 'automation'` (and process-wide lines also use `agentId = 'automation'`), while
   durable work remains `automation_jobs`. A fatal path flushes the log, then Sentry, then exits.
 - `Log` installs no Effect `Logger`; `emit` formats, writes and offers synchronously. `console.*`

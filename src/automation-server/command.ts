@@ -23,7 +23,7 @@ type StartupError = Errors.DatabaseError | HttpServerError.ServeError;
 const detail = (error: StartupError): string =>
   error._tag === "ServeError" ? Render.errorDetail(error.cause) : Render.errorDetail(error);
 
-export const makeAutomationCommand = <RServe>(server: AutomationServer<RServe>) =>
+export const makeAutomationServerCommand = <RServe>(server: AutomationServer<RServe>) =>
   Command.make(
     "automation-server",
     {

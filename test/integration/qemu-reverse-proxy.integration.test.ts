@@ -43,11 +43,11 @@ const environment = (overrides: Record<string, string>): NodeJS.ProcessEnv => {
 };
 
 // Each process runs in its own empty directory (no `.env` to read), removed once it has exited.
-const spawnReverseProxy = (
+const spawnQemuReverseProxy = (
   args: ReadonlyArray<string>,
   overrides: Record<string, string> = {},
 ): Process => {
-  const dir = mkdtempSync(join(tmpdir(), "oligarchy-reverse-proxy-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "oligarchy-qemu-reverse-proxy-test-"));
   const child = spawn(REVERSE_PROXY, args, {
     cwd: dir,
     env: environment(overrides),
@@ -91,7 +91,7 @@ const spawnReverseProxy = (
           clearTimeout(timer);
           reject(
             new Error(
-              `reverse proxy exited ${String(child.exitCode)} before ${pattern.source}\nstdout:\n${stdout}\nstderr:\n${stderr}`,
+              `qemu reverse proxy exited ${String(child.exitCode)} before ${pattern.source}\nstdout:\n${stdout}\nstderr:\n${stderr}`,
             ),
           );
         }
@@ -143,10 +143,10 @@ const request = (
     body === undefined ? { method, headers } : { method, headers, body },
   );
 
-describe("reverse proxy startup refusals", () => {
+describe("qemu reverse proxy startup refusals", () => {
   it.live("--help exits 0 and lists --port alone", () =>
     Effect.promise(async () => {
-      const process = spawnReverseProxy(["--help"]);
+      const process = spawnQemuReverseProxy(["--help"]);
       const { code } = await process.exited;
       expect(code).toBe(0);
       expect(process.stdout()).toContain("qemu-reverse-proxy");
@@ -159,7 +159,7 @@ describe("reverse proxy startup refusals", () => {
 
   it.live("a --port that is not an integer exits 1 with a usage error", () =>
     Effect.promise(async () => {
-      const process = spawnReverseProxy(["--port", "forty"]);
+      const process = spawnQemuReverseProxy(["--port", "forty"]);
       const { code } = await process.exited;
       expect(code).toBe(1);
       expect(process.stderr()).toContain("forty");
@@ -169,7 +169,7 @@ describe("reverse proxy startup refusals", () => {
 
   it.live("a missing OLIGARCHY_TOKEN exits 1 with OLIGARCHY_TOKEN is not set", () =>
     Effect.promise(async () => {
-      const process = spawnReverseProxy([], { OLIGARCHY_TOKEN: "" });
+      const process = spawnQemuReverseProxy([], { OLIGARCHY_TOKEN: "" });
       const { code } = await process.exited;
       expect(code).toBe(1);
       expect(process.stderr()).toContain("OLIGARCHY_TOKEN is not set");
@@ -179,7 +179,7 @@ describe("reverse proxy startup refusals", () => {
 
   it.live("an unreachable database exits 1 with the fatal line and never the password", () =>
     Effect.promise(async () => {
-      const process = spawnReverseProxy([], { DATABASE_URL: UNREACHABLE });
+      const process = spawnQemuReverseProxy([], { DATABASE_URL: UNREACHABLE });
       const { code } = await process.exited;
       expect(code).toBe(1);
       const fatal = lines(process.stdout()).find((line) =>
@@ -197,7 +197,7 @@ describe("reverse proxy startup refusals", () => {
     Effect.promise(async () => {
       const { port, release } = await occupy();
       try {
-        const process = spawnReverseProxy(["--port", String(port)]);
+        const process = spawnQemuReverseProxy(["--port", String(port)]);
         const { code } = await process.exited;
         expect(code).toBe(1);
         const fatal = lines(process.stdout()).find((line) =>
@@ -221,13 +221,13 @@ const forgetEveryServer = Effect.gen(function* () {
   yield* database.run("forgetEveryServer", (db) => db.delete(DbSchema.servers));
 }).pipe(Effect.provide(Postgres.DatabaseLive(dbUrl)));
 
-describe("reverse proxy serving", () => {
+describe("qemu reverse proxy serving", () => {
   const serving = (signal: "SIGINT" | "SIGTERM") =>
     forgetEveryServer.pipe(Effect.andThen(Effect.promise(() => served(signal))));
 
   const served = async (signal: "SIGINT" | "SIGTERM") => {
     const port = await freePort();
-    const process = spawnReverseProxy(["--port", String(port)]);
+    const process = spawnQemuReverseProxy(["--port", String(port)]);
     try {
       await process.waitFor(/qemu reverse proxy listening/);
       expect(lines(process.stdout())).toContain(

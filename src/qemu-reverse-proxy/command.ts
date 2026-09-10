@@ -7,12 +7,12 @@ import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
 import * as Errors from "../shared/errors.ts";
 
-// One above the proxy's, so both run on one host in development.
+// One above the qemu server's, so both run on one host in development.
 const DEFAULT_PORT = 42070;
 
 // What main.ts hands the command: the listener as a layer for its port, and the signal a server
 // error raises after listen.
-export type ReverseProxyServer<RServe> = {
+export type QemuReverseProxyServer<RServe> = {
   readonly serve: (port: number) => Layer.Layer<never, HttpServerError.ServeError, RServe>;
   readonly serverFailed: Deferred.Deferred<never, HttpServerError.ServeError>;
 };
@@ -23,7 +23,7 @@ type StartupError = Errors.DatabaseError | HttpServerError.ServeError;
 const detail = (error: StartupError): string =>
   error._tag === "ServeError" ? Render.errorDetail(error.cause) : Render.errorDetail(error);
 
-export const makeReverseProxyCommand = <RServe>(server: ReverseProxyServer<RServe>) =>
+export const makeQemuReverseProxyCommand = <RServe>(server: QemuReverseProxyServer<RServe>) =>
   Command.make(
     "qemu-reverse-proxy",
     {

@@ -17,7 +17,7 @@ const ok = Contract.Ok.make({});
 const uninterruptible = { uninterruptible: true } as const;
 
 export const SessionsLive = (display: Domain.QemuDisplay, automation: boolean) =>
-  HttpApiBuilder.group(Api.ProxyApi, "Sessions", (handlers) =>
+  HttpApiBuilder.group(Api.QemuServerApi, "Sessions", (handlers) =>
     handlers
       .handle(
         "start",
@@ -132,7 +132,7 @@ export const NotFoundRoute = HttpRouter.add("*", "*", notFound);
 
 export const routes = (display: Domain.QemuDisplay, automation: boolean) =>
   Layer.mergeAll(
-    HttpApiBuilder.layer(Api.ProxyApi).pipe(
+    HttpApiBuilder.layer(Api.QemuServerApi).pipe(
       Layer.provide(SessionsLive(display, automation)),
       Layer.provide(Layer.mergeAll(Middleware.BearerAuthLive, Middleware.ApiBoundaryLive)),
     ),

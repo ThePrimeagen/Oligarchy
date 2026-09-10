@@ -1,6 +1,6 @@
 import { Effect, Layer } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
-import * as ProxyHandlers from "../qemu-server/handlers.ts";
+import * as QemuServerHandlers from "../qemu-server/handlers.ts";
 import * as Middleware from "../qemu-server/middleware.ts";
 import * as Api from "../shared/api.ts";
 import * as Contract from "../shared/contract.ts";
@@ -8,11 +8,11 @@ import * as Router from "./router.ts";
 
 const ok = Contract.Ok.make({});
 
-// As on the proxy: a client that disconnects mid-start must not tear the forward in half, or the
+// As on the qemu server: a client that disconnects mid-start must not tear the forward in half, or the
 // routing table never learns of the machine the server booted for it.
 const uninterruptible = { uninterruptible: true } as const;
 
-export const SessionsLive = HttpApiBuilder.group(Api.ReverseProxyApi, "Sessions", (handlers) =>
+export const SessionsLive = HttpApiBuilder.group(Api.QemuReverseProxyApi, "Sessions", (handlers) =>
   handlers
     .handle(
       "start",
@@ -94,7 +94,7 @@ export const SessionsLive = HttpApiBuilder.group(Api.ReverseProxyApi, "Sessions"
     ),
 );
 
-export const ServersLive = HttpApiBuilder.group(Api.ReverseProxyApi, "Servers", (handlers) =>
+export const ServersLive = HttpApiBuilder.group(Api.QemuReverseProxyApi, "Servers", (handlers) =>
   handlers
     .handle("register", ({ payload }) =>
       Effect.gen(function* () {
@@ -119,9 +119,9 @@ export const ServersLive = HttpApiBuilder.group(Api.ReverseProxyApi, "Servers", 
 );
 
 export const routes = Layer.mergeAll(
-  HttpApiBuilder.layer(Api.ReverseProxyApi).pipe(
+  HttpApiBuilder.layer(Api.QemuReverseProxyApi).pipe(
     Layer.provide(Layer.mergeAll(SessionsLive, ServersLive)),
     Layer.provide(Layer.mergeAll(Middleware.BearerAuthLive, Middleware.RouteBoundaryLive)),
   ),
-  ProxyHandlers.NotFoundRoute,
+  QemuServerHandlers.NotFoundRoute,
 );

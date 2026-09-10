@@ -58,7 +58,7 @@ const fixture = (overrides: Partial<Fixture> = {}): Fixture => ({
   ...overrides,
 });
 
-// The proxy's routes on a real loopback server; the HttpClient in scope points at it.
+// The qemu server's routes on a real loopback server; the HttpClient in scope points at it.
 const serve = (fixed: Fixture, log: Layer.Layer<Log.Log> = fixed.log.layer) =>
   HttpRouter.serve(Handlers.routes("none", false), {
     disableLogger: true,
@@ -70,7 +70,7 @@ const serve = (fixed: Fixture, log: Layer.Layer<Log.Log> = fixed.log.layer) =>
     Layer.provideMerge(bearer(TOKEN)),
   );
 
-const client = HttpApiClient.make(Api.ProxyApi);
+const client = HttpApiClient.make(Api.QemuServerApi);
 
 const decoder = new TextDecoder();
 
@@ -414,7 +414,7 @@ describe("catch-all", () => {
           const missing = yield* http.get("/nope", { headers });
           expect(missing.status).toBe(404);
           expect(yield* missing.json).toEqual({ error: "not found" });
-          // The stored image's one address is the dashboard's; no proxy serves it.
+          // The stored image's one address is the dashboard's; no qemu server serves it.
           for (const path of [`/images/${IMAGE_ID}`, "/images/nope"]) {
             const image = yield* http.get(path, { headers });
             expect(image.status).toBe(404);

@@ -5,7 +5,7 @@ import * as Config from "../config.ts";
 import * as Automation from "../db/automation.ts";
 import * as Tests from "../db/tests.ts";
 import * as Log from "../observability/log.ts";
-import * as ProxyHandlers from "../qemu-server/handlers.ts";
+import * as QemuServerHandlers from "../qemu-server/handlers.ts";
 import * as Middleware from "../qemu-server/middleware.ts";
 import * as Api from "../shared/api.ts";
 import * as Contract from "../shared/contract.ts";
@@ -27,7 +27,7 @@ const isDuplicateJob = (error: Errors.DatabaseError): boolean =>
 
 // HMAC is over the raw bytes. After verifying, parse identifier + state and enqueue drive or
 // diagnose when the Oligarchy board moves into Automation Needed or Needs Review.
-export const LinearLive = HttpApiBuilder.group(Api.AutomationApi, "Linear", (handlers) =>
+export const LinearLive = HttpApiBuilder.group(Api.AutomationServerApi, "Linear", (handlers) =>
   handlers.handle("linear", () =>
     Effect.gen(function* () {
       const secret = yield* LinearWebhookSecret;
@@ -100,9 +100,9 @@ export const LinearLive = HttpApiBuilder.group(Api.AutomationApi, "Linear", (han
 
 // The bearer is left off: Linear signs /linear.
 export const routes = Layer.mergeAll(
-  HttpApiBuilder.layer(Api.AutomationApi).pipe(
+  HttpApiBuilder.layer(Api.AutomationServerApi).pipe(
     Layer.provide(LinearLive),
     Layer.provide(Middleware.ApiBoundaryLive),
   ),
-  ProxyHandlers.NotFoundRoute,
+  QemuServerHandlers.NotFoundRoute,
 );

@@ -18,7 +18,7 @@ import { Command } from "effect/unstable/cli";
 import { HttpServerError } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import * as Client from "../../src/db/client.ts";
-import * as ReverseProxyCommand from "../../src/qemu-reverse-proxy/command.ts";
+import * as QemuReverseProxyCommand from "../../src/qemu-reverse-proxy/command.ts";
 import * as Api from "../../src/shared/api.ts";
 import * as Errors from "../../src/shared/errors.ts";
 import * as FakeLog from "../support/log.ts";
@@ -63,7 +63,7 @@ const fakeServer = () => {
   const served: Array<number> = [];
   const listening = Deferred.makeUnsafe<void>();
   const serverFailed = Deferred.makeUnsafe<never, HttpServerError.ServeError>();
-  const server: ReverseProxyCommand.ReverseProxyServer<never> = {
+  const server: QemuReverseProxyCommand.QemuReverseProxyServer<never> = {
     serve: (port) =>
       Layer.effectDiscard(
         Effect.gen(function* () {
@@ -77,14 +77,14 @@ const fakeServer = () => {
 };
 
 const run = (
-  server: ReverseProxyCommand.ReverseProxyServer<never>,
+  server: QemuReverseProxyCommand.QemuReverseProxyServer<never>,
   args: ReadonlyArray<string>,
   log: FakeLog.FakeLog,
   ping: Effect.Effect<void, Errors.DatabaseError> = Effect.void,
 ) =>
-  Command.runWith(ReverseProxyCommand.makeReverseProxyCommand(server), { version: Api.VERSION })(
-    args,
-  ).pipe(Effect.provide(Layer.mergeAll(CliTestLayer, log.layer, fakeDatabase(ping))));
+  Command.runWith(QemuReverseProxyCommand.makeQemuReverseProxyCommand(server), {
+    version: Api.VERSION,
+  })(args).pipe(Effect.provide(Layer.mergeAll(CliTestLayer, log.layer, fakeDatabase(ping))));
 
 describe("qemu reverse proxy command flags", () => {
   it.effect("--port must be an integer", () =>
@@ -222,7 +222,7 @@ describe("qemu reverse proxy command startup failures", () => {
     Effect.gen(function* () {
       const cause = new Error("listen EADDRINUSE: address already in use 127.0.0.1:42070");
       const fake = fakeServer();
-      const failing: ReverseProxyCommand.ReverseProxyServer<never> = {
+      const failing: QemuReverseProxyCommand.QemuReverseProxyServer<never> = {
         ...fake.server,
         serve: () => Layer.effectDiscard(Effect.fail(new HttpServerError.ServeError({ cause }))),
       };

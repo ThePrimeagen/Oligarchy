@@ -12,7 +12,7 @@ import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
 import * as Sentry from "../observability/sentry.ts";
 import * as Api from "../shared/api.ts";
-import * as AutomationCommand from "./command.ts";
+import * as AutomationServerCommand from "./command.ts";
 import * as Handlers from "./handlers.ts";
 
 const HOST = "127.0.0.1";
@@ -24,7 +24,7 @@ const automationAttr = {
 
 // stdout is the convenience copy of the log; the logs rows, automation_jobs rows and Sentry are
 // the record. A write refused by a full filesystem is dropped, never an uncaught exception per
-// line (see the proxy's main).
+// line (see the qemu server's main).
 process.stdout.on("error", () => {});
 process.stderr.on("error", () => {});
 
@@ -50,7 +50,7 @@ const ServerLive = (port: number) =>
         disableListenLog: true,
       }).pipe(Layer.provide(NodeHttpServer.layer(() => server, { host: HOST, port }))),
     ),
-    // As on the proxy: no http.server span reaches Sentry.
+    // As on the qemu server: no http.server span reaches Sentry.
     Layer.provide(Layer.succeed(HttpMiddleware.TracerDisabledWhen)(() => true)),
   );
 
@@ -73,7 +73,10 @@ const MainLive = Layer.mergeAll(
   Layer.provideMerge(NodeServices.layer),
 );
 
-const command = AutomationCommand.makeAutomationCommand({ serve: ServerLive, serverFailed });
+const command = AutomationServerCommand.makeAutomationServerCommand({
+  serve: ServerLive,
+  serverFailed,
+});
 
 // The graph is built before the command runs: a missing LINEAR_WEBHOOK_SECRET or DATABASE_URL is
 // the one failure no Log exists to record, so it is printed here. Every later failure logs its

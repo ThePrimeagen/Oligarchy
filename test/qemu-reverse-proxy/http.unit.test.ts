@@ -109,9 +109,9 @@ const serve = (fixed: Fixture) =>
   );
 
 // What ./client speaks: the server's own contract, unchanged.
-const proxyClient = HttpApiClient.make(Api.ProxyApi);
+const qemuServerClient = HttpApiClient.make(Api.QemuServerApi);
 // What an operator speaks to the reverse proxy alone.
-const reverseClient = HttpApiClient.make(Api.ReverseProxyApi);
+const qemuReverseProxyClient = HttpApiClient.make(Api.QemuReverseProxyApi);
 
 const decoder = new TextDecoder();
 
@@ -130,7 +130,7 @@ describe("server registration", () => {
       Effect.gen(function* () {
         const fixed = fixture();
         yield* Effect.gen(function* () {
-          const api = yield* reverseClient;
+          const api = yield* qemuReverseProxyClient;
           const ok = yield* api.Servers.register({ payload: serverBody(SERVER_A) });
           expect(ok).toEqual(Contract.Ok.make({}));
         }).pipe(Effect.provide(serve(fixed)));
@@ -160,7 +160,7 @@ describe("server registration", () => {
     Effect.gen(function* () {
       const fixed = fixture();
       yield* Effect.gen(function* () {
-        const api = yield* reverseClient;
+        const api = yield* qemuReverseProxyClient;
         yield* api.Servers.register({ payload: serverBody(`${SERVER_A}/`) });
       }).pipe(Effect.provide(serve(fixed)));
       expect(upstreamCalls(fixed)).toEqual([`GET ${SERVER_A}/stats`]);
@@ -172,7 +172,7 @@ describe("server registration", () => {
     Effect.gen(function* () {
       const fixed = fixture();
       yield* Effect.gen(function* () {
-        const api = yield* reverseClient;
+        const api = yield* qemuReverseProxyClient;
         yield* api.Servers.register({ payload: serverBody(SERVER_A) });
         yield* api.Servers.register({ payload: serverBody(SERVER_A) });
       }).pipe(Effect.provide(serve(fixed)));
@@ -190,7 +190,7 @@ describe("server registration", () => {
       const fixed = fixture();
       fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
       yield* Effect.gen(function* () {
-        const api = yield* reverseClient;
+        const api = yield* qemuReverseProxyClient;
         const ok = yield* api.Servers.unregister({ payload: serverBody(SERVER_A) });
         expect(ok.ok).toBe("true");
       }).pipe(Effect.provide(serve(fixed)));
@@ -213,7 +213,7 @@ describe("server registration", () => {
     Effect.gen(function* () {
       const fixed = fixture();
       yield* Effect.gen(function* () {
-        const api = yield* reverseClient;
+        const api = yield* qemuReverseProxyClient;
         const error = yield* Effect.flip(api.Servers.unregister({ payload: serverBody(SERVER_A) }));
         expect(error).toMatchObject({ _tag: "NotFound", message: "not found" });
         const http = yield* HttpClient.HttpClient;
@@ -255,7 +255,7 @@ describe("server registration", () => {
         );
         fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
         yield* Effect.gen(function* () {
-          const api = yield* reverseClient;
+          const api = yield* qemuReverseProxyClient;
           const [servers, response] = yield* api.Servers.servers({
             responseMode: "decoded-and-response",
           });
@@ -321,7 +321,7 @@ describe("registration refusals", () => {
       Effect.gen(function* () {
         const fixed = fixture(refused);
         yield* Effect.gen(function* () {
-          const api = yield* reverseClient;
+          const api = yield* qemuReverseProxyClient;
           const error = yield* Effect.flip(api.Servers.register({ payload: serverBody(SERVER_A) }));
           expect(error).toMatchObject({
             _tag: "ServerFailed",
@@ -354,7 +354,7 @@ describe("registration refusals", () => {
     Effect.gen(function* () {
       const fixed = fixture(() => FakeHttp.json({ error: "unauthorized" }, 401));
       yield* Effect.gen(function* () {
-        const api = yield* reverseClient;
+        const api = yield* qemuReverseProxyClient;
         const error = yield* Effect.flip(api.Servers.register({ payload: serverBody(SERVER_A) }));
         expect(error).toMatchObject({
           _tag: "ServerFailed",
@@ -373,7 +373,7 @@ describe("registration refusals", () => {
           : new Response(null, { status: 503 }),
       );
       yield* Effect.gen(function* () {
-        const api = yield* reverseClient;
+        const api = yield* qemuReverseProxyClient;
         const first = yield* Effect.flip(api.Servers.register({ payload: serverBody(SERVER_A) }));
         expect(first.message).toBe(`server ${SERVER_A} answered 404: <html>nope</html>`);
         const second = yield* Effect.flip(api.Servers.register({ payload: serverBody(SERVER_B) }));
@@ -396,7 +396,7 @@ describe("registration refusals", () => {
           ),
       );
       yield* Effect.gen(function* () {
-        const api = yield* reverseClient;
+        const api = yield* qemuReverseProxyClient;
         const error = yield* Effect.flip(api.Servers.register({ payload: serverBody(SERVER_A) }));
         expect(error).toMatchObject({
           _tag: "ServerFailed",
@@ -411,7 +411,7 @@ describe("registration refusals", () => {
     Effect.gen(function* () {
       const fixed = fixture(() => FakeHttp.json({ hello: "world" }));
       yield* Effect.gen(function* () {
-        const api = yield* reverseClient;
+        const api = yield* qemuReverseProxyClient;
         const error = yield* Effect.flip(api.Servers.register({ payload: serverBody(SERVER_A) }));
         expect(error).toMatchObject({
           _tag: "ServerFailed",
@@ -430,7 +430,7 @@ describe("registration refusals", () => {
         Deferred.succeed(probing, undefined).pipe(Effect.andThen(Effect.never)),
       );
       yield* Effect.gen(function* () {
-        const api = yield* reverseClient;
+        const api = yield* qemuReverseProxyClient;
         const request = yield* Effect.forkChild(
           Effect.flip(api.Servers.register({ payload: serverBody(SERVER_A) })),
         );
@@ -459,7 +459,7 @@ describe("registration refusals", () => {
         store: Stores.fakeServerStore({ addServer: () => Effect.fail(failure) }),
       });
       yield* Effect.gen(function* () {
-        const api = yield* reverseClient;
+        const api = yield* qemuReverseProxyClient;
         const error = yield* Effect.flip(api.Servers.register({ payload: serverBody(SERVER_A) }));
         expect(error).toMatchObject({ _tag: "Internal", message: "internal error" });
       }).pipe(Effect.provide(serve(fixed)));
@@ -496,7 +496,7 @@ describe("placement", () => {
         const fixed = fixture(placing());
         fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
         yield* Effect.gen(function* () {
-          const api = yield* proxyClient;
+          const api = yield* qemuServerClient;
           const [started, response] = yield* api.Sessions.start({
             payload: startBody,
             responseMode: "decoded-and-response",
@@ -539,7 +539,7 @@ describe("placement", () => {
       );
       fixed.store.servers.push(qemu(SERVER_B), qemu(SERVER_A));
       yield* Effect.gen(function* () {
-        const api = yield* proxyClient;
+        const api = yield* qemuServerClient;
         yield* api.Sessions.start({ payload: startBody });
       }).pipe(Effect.provide(serve(fixed)));
       expect(fixed.store.routes.get(STARTED_ID)).toBe(SERVER_B);
@@ -555,7 +555,7 @@ describe("placement", () => {
       );
       fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
       yield* Effect.gen(function* () {
-        const api = yield* proxyClient;
+        const api = yield* qemuServerClient;
         yield* api.Sessions.start({ payload: startBody });
       }).pipe(Effect.provide(serve(fixed)));
       expect(fixed.store.routes.get(STARTED_ID)).toBe(SERVER_B);
@@ -585,7 +585,7 @@ describe("placement", () => {
       const fixed = fixture();
       yield* Effect.gen(function* () {
         // The reverse proxy's own contract decodes the 503; ./client sees ProxyRefusal 503.
-        const api = yield* reverseClient;
+        const api = yield* qemuReverseProxyClient;
         const error = yield* Effect.flip(api.Sessions.start({ payload: startBody }));
         expect(error).toMatchObject({ _tag: "NoServer", message: "no server registered" });
         const http = yield* HttpClient.HttpClient;
@@ -623,7 +623,7 @@ describe("placement", () => {
       const fixed = fixture(refused);
       fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
       yield* Effect.gen(function* () {
-        const api = yield* reverseClient;
+        const api = yield* qemuReverseProxyClient;
         const error = yield* Effect.flip(api.Sessions.start({ payload: startBody }));
         expect(error).toMatchObject({ _tag: "NoServer", message: "no server available" });
       }).pipe(Effect.provide(serve(fixed)));
@@ -653,7 +653,7 @@ describe("placement", () => {
       );
       fixed.store.servers.push(qemu(SERVER_A));
       yield* Effect.gen(function* () {
-        const api = yield* proxyClient;
+        const api = yield* qemuServerClient;
         const error = yield* Effect.flip(api.Sessions.start({ payload: startBody }));
         expect(error).toMatchObject({
           _tag: "StartFailed",
@@ -707,9 +707,9 @@ describe("placement", () => {
       );
       fixed.store.servers.push(qemu(SERVER_A));
       yield* Effect.gen(function* () {
-        // The proxy's client reads a 502 on /start as the proxy's StartFailed: same status, same
-        // message, which is all ./client ever shows.
-        const api = yield* proxyClient;
+        // ./client reads a 502 on /start as StartFailed: same status, same message, which is all
+        // ./client ever shows.
+        const api = yield* qemuServerClient;
         const error = yield* Effect.flip(api.Sessions.start({ payload: startBody }));
         expect(error.message).toBe(
           `server ${SERVER_A} unreachable: connect ECONNREFUSED 10.0.0.5:42069`,
@@ -741,7 +741,7 @@ describe("placement", () => {
         });
         fixed.store.servers.push(qemu(SERVER_A));
         yield* Effect.gen(function* () {
-          const api = yield* proxyClient;
+          const api = yield* qemuServerClient;
           const error = yield* Effect.flip(api.Sessions.start({ payload: startBody }));
           expect(error).toMatchObject({ _tag: "Internal", message: "internal error" });
         }).pipe(Effect.provide(serve(fixed)));
@@ -782,7 +782,7 @@ describe("placement", () => {
       );
       fixed.store.servers.push(qemu(SERVER_A));
       yield* Effect.gen(function* () {
-        const api = yield* proxyClient;
+        const api = yield* qemuServerClient;
         const request = yield* Effect.forkChild(api.Sessions.start({ payload: startBody }));
         yield* Deferred.await(entered);
         // The interrupt lands on the client fiber: the connection is gone, the handler is not.
@@ -812,7 +812,7 @@ describe("forwarding", () => {
         );
         fixed.store.routes.set(SESSION_ID, SERVER_A);
         yield* Effect.gen(function* () {
-          const api = yield* proxyClient;
+          const api = yield* qemuServerClient;
           const [image, response] = yield* api.Sessions.image({
             query: { id: SESSION_ID, agent: AGENT_ID },
             responseMode: "decoded-and-response",
@@ -846,7 +846,7 @@ describe("forwarding", () => {
       );
       fixed.store.routes.set(SESSION_ID, `${SERVER_A}/`);
       yield* Effect.gen(function* () {
-        const api = yield* proxyClient;
+        const api = yield* qemuServerClient;
         const [serial, serialResponse] = yield* api.Sessions.serial({
           query: { id: SESSION_ID, agent: AGENT_ID },
           responseMode: "decoded-and-response",
@@ -883,7 +883,7 @@ describe("forwarding", () => {
       );
       fixed.store.routes.set(SESSION_ID, SERVER_A);
       yield* Effect.gen(function* () {
-        const api = yield* proxyClient;
+        const api = yield* qemuServerClient;
         const [stream, response] = yield* api.Sessions.follow({
           query: { id: SESSION_ID },
           responseMode: "decoded-and-response",
@@ -900,8 +900,8 @@ describe("forwarding", () => {
       const first = '{"type":"session","status":"running"}\n';
       const second = '{"type":"session","status":"succeeded"}\n';
       const encoder = new TextEncoder();
-      // The server writes the second line only once the test has read the first one: a proxy
-      // that buffered the body would hang here until the test timeout instead of streaming.
+      // The server writes the second line only once the test has read the first one: a reverse
+      // proxy that buffered the body would hang here until the test timeout instead of streaming.
       let releaseSecond: () => void = () => undefined;
       const secondReleased = new Promise<void>((resolve) => {
         releaseSecond = resolve;
@@ -924,7 +924,7 @@ describe("forwarding", () => {
       );
       fixed.store.routes.set(SESSION_ID, SERVER_A);
       yield* Effect.gen(function* () {
-        const api = yield* proxyClient;
+        const api = yield* qemuServerClient;
         const stream = yield* api.Sessions.follow({ query: { id: SESSION_ID } });
         const received: Array<string> = [];
         yield* Stream.runForEach(Stream.decodeText(stream), (chunk) =>
@@ -948,9 +948,9 @@ describe("forwarding", () => {
       fixed.store.servers.push(qemu(SERVER_A));
       fixed.store.routes.set(SESSION_ID, SERVER_A);
       yield* Effect.gen(function* () {
-        const operator = yield* reverseClient;
+        const operator = yield* qemuReverseProxyClient;
         yield* operator.Servers.unregister({ payload: serverBody(SERVER_A) });
-        const api = yield* proxyClient;
+        const api = yield* qemuServerClient;
         const serial = yield* api.Sessions.serial({ query: { id: SESSION_ID, agent: AGENT_ID } });
         expect(decoder.decode(serial)).toBe("serial\n");
       }).pipe(Effect.provide(serve(fixed)));
@@ -1009,7 +1009,7 @@ describe("forwarding", () => {
         reason: "done",
       });
       yield* Effect.gen(function* () {
-        const api = yield* proxyClient;
+        const api = yield* qemuServerClient;
         expect(yield* api.Sessions.sendKeys({ payload: sendKeys })).toEqual(Contract.Ok.make({}));
         expect((yield* api.Sessions.sendMouse({ payload: sendMouse })).ok).toBe("true");
         expect((yield* api.Sessions.intentStart({ payload: intentStart })).ok).toBe("true");
@@ -1083,7 +1083,7 @@ describe("forwarding", () => {
       const fixed = fixture(() => FakeHttp.json({ error: message }, 403));
       fixed.store.routes.set(SESSION_ID, SERVER_A);
       yield* Effect.gen(function* () {
-        const api = yield* proxyClient;
+        const api = yield* qemuServerClient;
         const error = yield* Effect.flip(
           api.Sessions.sendKeys({
             payload: Contract.SendKeysBody.make({ id: SESSION_ID, keys: "a", agent: "OLI-99" }),
@@ -1108,7 +1108,7 @@ describe("forwarding refusals", () => {
     Effect.gen(function* () {
       const fixed = fixture();
       yield* Effect.gen(function* () {
-        const api = yield* proxyClient;
+        const api = yield* qemuServerClient;
         const error = yield* Effect.flip(
           api.Sessions.serial({ query: { id: SESSION_ID, agent: AGENT_ID } }),
         );
@@ -1154,7 +1154,7 @@ describe("forwarding refusals", () => {
         }),
       });
       yield* Effect.gen(function* () {
-        const api = yield* proxyClient;
+        const api = yield* qemuServerClient;
         const named = yield* Effect.flip(
           api.Sessions.stop({
             payload: Contract.StopBody.make({ id: "garbage", agent: AGENT_ID }),
@@ -1181,7 +1181,7 @@ describe("forwarding refusals", () => {
         const fixed = fixture(refused);
         fixed.store.routes.set(SESSION_ID, SERVER_A);
         yield* Effect.gen(function* () {
-          const api = yield* proxyClient;
+          const api = yield* qemuServerClient;
           const error = yield* Effect.flip(
             api.Sessions.sendKeys({
               payload: Contract.SendKeysBody.make({ id: SESSION_ID, keys: "a", agent: AGENT_ID }),
@@ -1269,7 +1269,7 @@ describe("forwarding refusals", () => {
         store: Stores.fakeServerStore({ serverForSession: () => Effect.fail(failure) }),
       });
       yield* Effect.gen(function* () {
-        const api = yield* proxyClient;
+        const api = yield* qemuServerClient;
         const error = yield* Effect.flip(
           api.Sessions.image({ query: { id: SESSION_ID, agent: AGENT_ID } }),
         );

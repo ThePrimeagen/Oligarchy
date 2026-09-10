@@ -18,7 +18,7 @@ import { CliError, Command } from "effect/unstable/cli";
 import { HttpServerError } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import * as Client from "../../src/db/client.ts";
-import * as ProxyCommand from "../../src/qemu-server/command.ts";
+import * as QemuServerCommand from "../../src/qemu-server/command.ts";
 import * as Api from "../../src/shared/api.ts";
 import type * as Domain from "../../src/shared/domain.ts";
 import * as Errors from "../../src/shared/errors.ts";
@@ -67,7 +67,7 @@ const fakeServer = (missing: ReadonlyArray<string> = []) => {
   const served: Array<Served> = [];
   const listening = Deferred.makeUnsafe<void>();
   const serverFailed = Deferred.makeUnsafe<never, HttpServerError.ServeError>();
-  const server: ProxyCommand.ProxyServer<never, never> = {
+  const server: QemuServerCommand.QemuServer<never, never> = {
     missingHostRequirements: (display) =>
       Effect.sync(() => {
         checked.push(display);
@@ -86,14 +86,14 @@ const fakeServer = (missing: ReadonlyArray<string> = []) => {
 };
 
 const run = (
-  server: ProxyCommand.ProxyServer<never, never>,
+  server: QemuServerCommand.QemuServer<never, never>,
   args: ReadonlyArray<string>,
   log: FakeLog.FakeLog,
   ping: Effect.Effect<void, Errors.DatabaseError> = Effect.void,
 ) =>
-  Command.runWith(ProxyCommand.makeProxyCommand(server), { version: Api.VERSION })(args).pipe(
-    Effect.provide(Layer.mergeAll(CliTestLayer, log.layer, fakeDatabase(ping))),
-  );
+  Command.runWith(QemuServerCommand.makeQemuServerCommand(server), { version: Api.VERSION })(
+    args,
+  ).pipe(Effect.provide(Layer.mergeAll(CliTestLayer, log.layer, fakeDatabase(ping))));
 
 describe("qemu server command flags", () => {
   it.effect("--automation with --display is a UserError that touches nothing", () =>
@@ -311,7 +311,7 @@ describe("qemu server command startup failures", () => {
     Effect.gen(function* () {
       const cause = new Error("listen EADDRINUSE: address already in use 127.0.0.1:42069");
       const fake = fakeServer();
-      const failing: ProxyCommand.ProxyServer<never, never> = {
+      const failing: QemuServerCommand.QemuServer<never, never> = {
         ...fake.server,
         serve: () => Layer.effectDiscard(Effect.fail(new HttpServerError.ServeError({ cause }))),
       };

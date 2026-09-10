@@ -11,14 +11,14 @@ import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
 import * as Sentry from "../observability/sentry.ts";
 import * as Api from "../shared/api.ts";
-import * as ReverseProxyCommand from "./command.ts";
+import * as QemuReverseProxyCommand from "./command.ts";
 import * as Handlers from "./handlers.ts";
 import * as Router from "./router.ts";
 
 const HOST = "127.0.0.1";
 
 // stdout is the convenience copy of the log; the rows and Sentry are the record. A write refused
-// by a full filesystem is dropped, never an uncaught exception per line (see the proxy's main).
+// by a full filesystem is dropped, never an uncaught exception per line (see the qemu server's main).
 process.stdout.on("error", () => {});
 process.stderr.on("error", () => {});
 
@@ -46,7 +46,7 @@ const ServerLive = (port: number) =>
       ),
     ),
     Layer.provide(Router.Router.layer),
-    // As on the proxy: no http.server span reaches Sentry.
+    // As on the qemu server: no http.server span reaches Sentry.
     Layer.provide(Layer.succeed(HttpMiddleware.TracerDisabledWhen)(() => true)),
   );
 
@@ -65,7 +65,10 @@ const MainLive = Layer.mergeAll(Servers.ServerStore.layer, Log.Log.layer).pipe(
   Layer.provideMerge(NodeServices.layer),
 );
 
-const command = ReverseProxyCommand.makeReverseProxyCommand({ serve: ServerLive, serverFailed });
+const command = QemuReverseProxyCommand.makeQemuReverseProxyCommand({
+  serve: ServerLive,
+  serverFailed,
+});
 
 // The graph is built before the command runs: a missing variable or a bad DATABASE_URL is the one
 // failure no Log exists to record, so it is printed here. Every later failure logs its own fatal

@@ -108,7 +108,7 @@ export const connect = Effect.fn("ProxyClient.connect")(function* (options: Conn
   // Every non-2xx answer is refused here, before the generated client decodes it: a declared
   // error status with a body that is not `{ "error" }` would otherwise be combined with its
   // schema failure, and hashing that failure walks into node:http's response and throws.
-  const client = yield* HttpApiClient.make(Api.ProxyApi, {
+  const client = yield* HttpApiClient.make(Api.QemuServerApi, {
     baseUrl: serverUrl,
     transformClient: HttpClient.filterStatusOk,
   }).pipe(Effect.provide(middleware));

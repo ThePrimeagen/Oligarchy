@@ -55,7 +55,7 @@ const environment = (home: string, overrides: Record<string, string>): NodeJS.Pr
 
 // Each process gets an empty cwd (no `.env`) and a different empty HOME. Both directories are
 // removed once it has exited.
-const spawnAutomation = (
+const spawnAutomationServer = (
   args: ReadonlyArray<string>,
   overrides: Record<string, string> = {},
 ): Process => {
@@ -105,7 +105,7 @@ const spawnAutomation = (
           clearTimeout(timer);
           reject(
             new Error(
-              `automation exited ${String(child.exitCode)} before ${pattern.source}\nstdout:\n${stdout}\nstderr:\n${stderr}`,
+              `automation server exited ${String(child.exitCode)} before ${pattern.source}\nstdout:\n${stdout}\nstderr:\n${stderr}`,
             ),
           );
         }
@@ -202,10 +202,10 @@ const jobsFor = async (resultId: string) => {
   }
 };
 
-describe("automation startup refusals", () => {
+describe("automation server startup refusals", () => {
   it.live("--help exits 0 and lists --port alone", () =>
     Effect.promise(async () => {
-      const process = spawnAutomation(["--help"]);
+      const process = spawnAutomationServer(["--help"]);
       const { code } = await process.exited;
       expect(code).toBe(0);
       expect(process.stdout()).toContain("automation-server");
@@ -217,7 +217,7 @@ describe("automation startup refusals", () => {
 
   it.live("a --port that is not an integer exits 1 with a usage error", () =>
     Effect.promise(async () => {
-      const process = spawnAutomation(["--port", "forty"]);
+      const process = spawnAutomationServer(["--port", "forty"]);
       const { code } = await process.exited;
       expect(code).toBe(1);
       expect(process.stderr()).toContain("forty");
@@ -227,7 +227,7 @@ describe("automation startup refusals", () => {
 
   it.live("a missing LINEAR_WEBHOOK_SECRET exits 1 with LINEAR_WEBHOOK_SECRET is not set", () =>
     Effect.promise(async () => {
-      const process = spawnAutomation([], { LINEAR_WEBHOOK_SECRET: "" });
+      const process = spawnAutomationServer([], { LINEAR_WEBHOOK_SECRET: "" });
       const { code } = await process.exited;
       expect(code).toBe(1);
       expect(process.stderr()).toContain("LINEAR_WEBHOOK_SECRET is not set");
@@ -237,7 +237,7 @@ describe("automation startup refusals", () => {
 
   it.live("a missing DATABASE_URL exits 1 with DATABASE_URL is not set", () =>
     Effect.promise(async () => {
-      const process = spawnAutomation([], { DATABASE_URL: "" });
+      const process = spawnAutomationServer([], { DATABASE_URL: "" });
       const { code } = await process.exited;
       expect(code).toBe(1);
       expect(process.stderr()).toContain("DATABASE_URL is not set");
@@ -247,7 +247,7 @@ describe("automation startup refusals", () => {
 
   it.live("an unreachable database exits 1 and never listens", () =>
     Effect.promise(async () => {
-      const process = spawnAutomation([], { DATABASE_URL: UNREACHABLE });
+      const process = spawnAutomationServer([], { DATABASE_URL: UNREACHABLE });
       const { code } = await process.exited;
       expect(code).toBe(1);
       const fatal = lines(process.stdout()).find((line) =>
@@ -262,12 +262,12 @@ describe("automation startup refusals", () => {
 
 const describeWithDatabase = dbUrl === "" ? describe.skip : describe;
 
-describeWithDatabase("automation startup refusals with a database", () => {
+describeWithDatabase("automation server startup refusals with a database", () => {
   it.live("an occupied port exits 1 with EADDRINUSE", () =>
     Effect.promise(async () => {
       const { port, release } = await occupy();
       try {
-        const process = spawnAutomation(["--port", String(port)]);
+        const process = spawnAutomationServer(["--port", String(port)]);
         const { code } = await process.exited;
         expect(code).toBe(1);
         const fatal = lines(process.stdout()).find((line) =>
@@ -286,10 +286,10 @@ describeWithDatabase("automation startup refusals with a database", () => {
 
 const describeServing = dbUrl === "" ? describe.skip : describe;
 
-describeServing("automation serving", () => {
+describeServing("automation server serving", () => {
   const served = async (signal: "SIGINT" | "SIGTERM") => {
     const port = await freePort();
-    const process = spawnAutomation(["--port", String(port)]);
+    const process = spawnAutomationServer(["--port", String(port)]);
     const record = join(process.cwd, "automation-logs");
     try {
       await process.waitFor(/automation server listening/);

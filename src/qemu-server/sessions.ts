@@ -195,7 +195,7 @@ const make = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const shutdown = yield* Shutdown;
 
-  // Running machines, by id; and every session this proxy holds, booting ones included.
+  // Running machines, by id; and every session this qemu server holds, booting ones included.
   const sessions = yield* Ref.make<ReadonlyMap<string, LiveSession>>(new Map());
   const openSessions = yield* Ref.make<ReadonlyMap<string, OpenSession>>(new Map());
 

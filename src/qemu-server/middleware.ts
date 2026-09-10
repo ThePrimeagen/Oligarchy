@@ -9,7 +9,7 @@ import * as Api from "../shared/api.ts";
 import * as Domain from "../shared/domain.ts";
 import * as Errors from "../shared/errors.ts";
 
-// Every proxy and reverse-proxy route carries `Authorization: Bearer <OLIGARCHY_TOKEN>`; the
+// Every qemu server and qemu reverse proxy route carries `Authorization: Bearer <OLIGARCHY_TOKEN>`; the
 // compare is exact, as it always was. The token comes in as a value: those servers read it from
 // ProxyConfig beside their database url. The automation service does not use this bearer.
 export const bearerAuth = (token: Redacted.Redacted): Layer.Layer<Api.BearerAuth> =>
@@ -54,7 +54,7 @@ const translate = (
       : Effect.die(error);
 
 // logs.location is text: an unknown id is attributed only when this server could have minted it
-// (a session UUID). Otherwise the process fallback applies (proxy: "server"; automation: its own).
+// (a session UUID). Otherwise the process fallback applies (qemu server: "server"; automation: its own).
 const attribution = (error: Errors.ApiError, fallback: Log.ProcessAttribution): Log.Attribution => {
   switch (error._tag) {
     case "Unauthorized":
@@ -116,7 +116,7 @@ const report = (error: Errors.ApiError, fallback: Log.ProcessAttribution): Log.R
       };
 
 // The one boundary: schema errors to 400, defects to 500, one log line per failed request. The
-// proxy and the reverse proxy wrap it in their own middleware tags, which differ only in the error
+// qemu server and the qemu reverse proxy wrap it in their own middleware tags, which differ only in the error
 // codecs they declare.
 const boundary = Effect.gen(function* () {
   const log = yield* Log.Log;

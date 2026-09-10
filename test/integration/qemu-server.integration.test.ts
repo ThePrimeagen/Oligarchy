@@ -54,7 +54,7 @@ const hasQemu =
   readable("/usr/share/edk2/x64/OVMF_CODE.4m.fd") &&
   readable("/usr/share/edk2/x64/OVMF_VARS.4m.fd");
 
-type Proxy = {
+type QemuServer = {
   readonly child: ChildProcess;
   readonly stdout: () => string;
   readonly stderr: () => string;
@@ -78,12 +78,12 @@ const environment = (overrides: Record<string, string>): NodeJS.ProcessEnv => {
   return env;
 };
 
-// Each proxy runs in its own empty directory (no `.env` to read), removed once it has exited.
-const spawnProxy = (
+// Each qemu server runs in its own empty directory (no `.env` to read), removed once it has exited.
+const spawnQemuServer = (
   args: ReadonlyArray<string>,
   overrides: Record<string, string> | ((dir: string) => Record<string, string>) = {},
-): Proxy => {
-  const dir = mkdtempSync(join(tmpdir(), "oligarchy-proxy-test-"));
+): QemuServer => {
+  const dir = mkdtempSync(join(tmpdir(), "oligarchy-qemu-server-test-"));
   const child = spawn(SERVER, args, {
     cwd: dir,
     env: environment(typeof overrides === "function" ? overrides(dir) : overrides),
@@ -127,7 +127,7 @@ const spawnProxy = (
           clearTimeout(timer);
           reject(
             new Error(
-              `proxy exited ${String(child.exitCode)} before ${pattern.source}\nstdout:\n${stdout}\nstderr:\n${stderr}`,
+              `qemu server exited ${String(child.exitCode)} before ${pattern.source}\nstdout:\n${stdout}\nstderr:\n${stderr}`,
             ),
           );
         }
@@ -191,58 +191,48 @@ const request = (
   headers: Record<string, string> = {},
 ) => fetch(`http://127.0.0.1:${String(port)}${path}`, { method, headers });
 
-describe("proxy startup refusals", () => {
+describe("qemu server startup refusals", () => {
   it.live("--automation --display none exits 1 with --automation is exclusive", () =>
     Effect.promise(async () => {
-      const proxy = spawnProxy(["--automation", "--display", "none"]);
-      const { code } = await proxy.exited;
+      const server = spawnQemuServer(["--automation", "--display", "none"]);
+      const { code } = await server.exited;
       expect(code).toBe(1);
-      expect(proxy.stderr()).toContain("--automation is exclusive");
-      expect(proxy.stdout()).not.toContain("fatal");
-      expect(proxy.stdout()).not.toContain("listening");
+      expect(server.stderr()).toContain("--automation is exclusive");
+      expect(server.stdout()).not.toContain("fatal");
+      expect(server.stdout()).not.toContain("listening");
     }),
   );
 
   it.live("an unknown --display value exits 1 with a usage error", () =>
     Effect.promise(async () => {
-      const proxy = spawnProxy(["--display", "curses"]);
-      const { code } = await proxy.exited;
+      const server = spawnQemuServer(["--display", "curses"]);
+      const { code } = await server.exited;
       expect(code).toBe(1);
-      expect(proxy.stderr()).toContain("curses");
-      expect(proxy.stdout()).not.toContain("listening");
+      expect(server.stderr()).toContain("curses");
+      expect(server.stdout()).not.toContain("listening");
     }),
   );
 
   it.live("--help exits 0 and lists the three flags", () =>
     Effect.promise(async () => {
-      const proxy = spawnProxy(["--help"]);
-      const { code } = await proxy.exited;
+      const server = spawnQemuServer(["--help"]);
+      const { code } = await server.exited;
       expect(code).toBe(0);
-      expect(proxy.stdout()).toContain("qemu-server");
-      expect(proxy.stdout()).toContain("--display");
-      expect(proxy.stdout()).toContain("--automation");
-      expect(proxy.stdout()).toContain("--port");
-      expect(proxy.stdout()).not.toContain("--url");
-    }),
-  );
-
-  it.live("--url is no longer a flag and exits 1 with a usage error", () =>
-    Effect.promise(async () => {
-      const proxy = spawnProxy(["--url", "http://127.0.0.1:55332"]);
-      const { code } = await proxy.exited;
-      expect(code).toBe(1);
-      expect(proxy.stderr()).toMatch(/Unrecognized flag: --url/);
-      expect(proxy.stdout()).not.toContain("listening");
+      expect(server.stdout()).toContain("qemu-server");
+      expect(server.stdout()).toContain("--display");
+      expect(server.stdout()).toContain("--automation");
+      expect(server.stdout()).toContain("--port");
+      expect(server.stdout()).not.toContain("--url");
     }),
   );
 
   it.live("a missing OLIGARCHY_TOKEN exits 1 with OLIGARCHY_TOKEN is not set", () =>
     Effect.promise(async () => {
-      const proxy = spawnProxy([], { OLIGARCHY_TOKEN: "" });
-      const { code } = await proxy.exited;
+      const server = spawnQemuServer([], { OLIGARCHY_TOKEN: "" });
+      const { code } = await server.exited;
       expect(code).toBe(1);
-      expect(proxy.stderr()).toContain("OLIGARCHY_TOKEN is not set");
-      expect(proxy.stderr()).not.toContain("sentinel-pw");
+      expect(server.stderr()).toContain("OLIGARCHY_TOKEN is not set");
+      expect(server.stderr()).not.toContain("sentinel-pw");
     }),
   );
 
@@ -250,34 +240,34 @@ describe("proxy startup refusals", () => {
     "missing host requirements exit 1 with the fatal line last on stdout",
     () =>
       Effect.promise(async () => {
-        const proxy = spawnProxy([], (dir) => ({ PATH: pathWithoutQemu(dir) }));
-        const { code } = await proxy.exited;
+        const server = spawnQemuServer([], (dir) => ({ PATH: pathWithoutQemu(dir) }));
+        const { code } = await server.exited;
         expect(code).toBe(1);
-        const output = lines(proxy.stdout());
+        const output = lines(server.stdout());
         const fatal = output.findIndex(
           (line) => line === "[global] server: fatal: qemu server: missing host requirements:",
         );
-        expect(fatal, proxy.stdout()).toBeGreaterThanOrEqual(0);
+        expect(fatal, server.stdout()).toBeGreaterThanOrEqual(0);
         expect(output.slice(fatal + 1).length).toBeGreaterThan(0);
         expect(output.slice(fatal + 1)).toContain("qemu-system-x86_64 not on PATH");
         expect(output.slice(fatal + 1).every((line) => !line.startsWith("["))).toBe(true);
-        expect(proxy.stdout()).not.toContain("listening");
+        expect(server.stdout()).not.toContain("listening");
       }),
   );
 
   it.live.skipIf(!hasQemu)("an unreachable database exits 1 with database unreachable", () =>
     Effect.promise(async () => {
-      const proxy = spawnProxy([], { DATABASE_URL: UNREACHABLE });
-      const { code } = await proxy.exited;
+      const server = spawnQemuServer([], { DATABASE_URL: UNREACHABLE });
+      const { code } = await server.exited;
       expect(code).toBe(1);
-      const fatal = lines(proxy.stdout()).find((line) =>
+      const fatal = lines(server.stdout()).find((line) =>
         line.startsWith("[global] server: fatal: qemu server: database unreachable:"),
       );
-      expect(fatal, proxy.stdout()).toBeDefined();
+      expect(fatal, server.stdout()).toBeDefined();
       expect(fatal).toContain("ECONNREFUSED");
-      expect(proxy.stdout()).not.toContain("sentinel-pw");
-      expect(proxy.stderr()).not.toContain("sentinel-pw");
-      expect(proxy.stdout()).not.toContain("listening");
+      expect(server.stdout()).not.toContain("sentinel-pw");
+      expect(server.stderr()).not.toContain("sentinel-pw");
+      expect(server.stdout()).not.toContain("listening");
     }),
   );
 
@@ -285,13 +275,13 @@ describe("proxy startup refusals", () => {
     Effect.promise(async () => {
       const { port, release } = await occupy();
       try {
-        const proxy = spawnProxy(["--port", String(port)]);
-        const { code } = await proxy.exited;
+        const server = spawnQemuServer(["--port", String(port)]);
+        const { code } = await server.exited;
         expect(code).toBe(1);
-        const fatal = lines(proxy.stdout()).find((line) =>
+        const fatal = lines(server.stdout()).find((line) =>
           line.startsWith("[global] server: fatal: qemu server: "),
         );
-        expect(fatal, proxy.stdout()).toBeDefined();
+        expect(fatal, server.stdout()).toBeDefined();
         expect(fatal).toContain("EADDRINUSE");
         expect(fatal).toContain(`127.0.0.1:${String(port)}`);
       } finally {
@@ -301,7 +291,7 @@ describe("proxy startup refusals", () => {
   );
 });
 
-describe("proxy serving", () => {
+describe("qemu server serving", () => {
   const serving = (
     args: ReadonlyArray<string>,
     listenLine: (port: number) => string,
@@ -309,9 +299,9 @@ describe("proxy serving", () => {
   ) =>
     Effect.promise(async () => {
       const port = await freePort();
-      const proxy = spawnProxy([...args, "--port", String(port)]);
-      await proxy.waitFor(/qemu server listening/);
-      expect(lines(proxy.stdout())).toContain(listenLine(port));
+      const server = spawnQemuServer([...args, "--port", String(port)]);
+      await server.waitFor(/qemu server listening/);
+      expect(lines(server.stdout())).toContain(listenLine(port));
 
       const stats = await request(port, "GET", "/stats", { authorization: `Bearer ${TOKEN}` });
       expect(stats.status).toBe(200);
@@ -352,21 +342,21 @@ describe("proxy serving", () => {
       const wrong = await request(port, "GET", "/stats", { authorization: "Bearer nope" });
       expect(wrong.status).toBe(401);
 
-      proxy.child.kill(signal);
-      const { code } = await proxy.exited;
-      expect(code, proxy.stdout()).toBe(0);
-      const output = lines(proxy.stdout());
+      server.child.kill(signal);
+      const { code } = await server.exited;
+      expect(code, server.stdout()).toBe(0);
+      const output = lines(server.stdout());
       expect(output).toContain("[global] server: qemu server: shutting down; stopping 0 sessions");
       expect(output).toContain("[global] server: error: POST /send-keys failed: unauthorized");
       expect(output).toContain("[global] server: error: GET /stats failed: unauthorized");
       expect(output.some((line) => line.includes("GET /nope"))).toBe(false);
-      expect(proxy.stderr()).toBe("");
+      expect(server.stderr()).toBe("");
 
       await expect(request(port, "GET", "/stats")).rejects.toThrow();
     });
 
-  // A proxy whose stdout is a file on a full disk: Node reports each failed log write as a stream
-  // 'error' that, unhandled, is an uncaught exception per line and took a proxy down under six
+  // A qemu server whose stdout is a file on a full disk: Node reports each failed log write as a stream
+  // 'error' that, unhandled, is an uncaught exception per line and took a qemu server down under six
   // installs filling a tmpfs. The rows and Sentry are the record; the lines are dropped.
   it.live.skipIf(!hasQemu || dbUrl === "")(
     "keeps serving when stdout and stderr cannot be written",
@@ -374,7 +364,7 @@ describe("proxy serving", () => {
       Effect.promise(async () => {
         const port = await freePort();
         const full = openSync("/dev/full", "w");
-        const dir = mkdtempSync(join(tmpdir(), "oligarchy-proxy-test-"));
+        const dir = mkdtempSync(join(tmpdir(), "oligarchy-qemu-server-test-"));
         const child = spawn(SERVER, ["--port", String(port)], {
           cwd: dir,
           env: environment({}),
@@ -456,10 +446,10 @@ describe("proxy serving", () => {
       Effect.gen(function* () {
         const port = yield* Effect.promise(freePort);
         const url = `http://127.0.0.1:${String(port)}`;
-        const proxy = spawnProxy(["--automation", "--port", String(port)]);
+        const server = spawnQemuServer(["--automation", "--port", String(port)]);
         const row = yield* Effect.gen(function* () {
-          yield* Effect.promise(() => proxy.waitFor(/qemu server listening/));
-          expect(lines(proxy.stdout())).toContain(
+          yield* Effect.promise(() => server.waitFor(/qemu server listening/));
+          expect(lines(server.stdout())).toContain(
             `[global] server: qemu server listening on 127.0.0.1:${String(port)}; display none; automation; announcing ${url}`,
           );
           // The first heartbeat is written right after the listen line; the insert takes a moment.
@@ -474,16 +464,16 @@ describe("proxy serving", () => {
           // A failed expectation must not leave the process listening past the test.
           Effect.ensuring(
             Effect.sync(() => {
-              proxy.child.kill("SIGTERM");
+              server.child.kill("SIGTERM");
             }),
           ),
         );
         expect(row).toMatchObject({ url, type: "qemu", generation: 1, stats: { qemus: 0 } });
         expect(row?.heartbeatAt).toBeInstanceOf(Date);
-        const { code } = yield* Effect.promise(() => proxy.exited);
-        expect(code, proxy.stdout()).toBe(0);
-        expect(proxy.stdout()).not.toContain("heartbeat failed");
-        expect(proxy.stdout()).not.toContain("unannounce failed");
+        const { code } = yield* Effect.promise(() => server.exited);
+        expect(code, server.stdout()).toBe(0);
+        expect(server.stdout()).not.toContain("heartbeat failed");
+        expect(server.stdout()).not.toContain("unannounce failed");
         expect(yield* announced(url)).toBeUndefined();
       }),
     120_000,

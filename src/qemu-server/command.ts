@@ -15,7 +15,7 @@ const DEFAULT_PORT = 42069;
 // What main.ts hands the command: the host check, the server as a layer for a display, an
 // automation flag, a port, the fleet url constructed from that port, and the signal a server
 // error raises after listen.
-export type ProxyServer<RHost, RServe> = {
+export type QemuServer<RHost, RServe> = {
   readonly missingHostRequirements: (
     display: Domain.QemuDisplay,
   ) => Effect.Effect<ReadonlyArray<string>, never, RHost>;
@@ -37,7 +37,7 @@ type StartupError =
 const detail = (error: StartupError): string =>
   error._tag === "ServeError" ? Render.errorDetail(error.cause) : Render.errorDetail(error);
 
-export const makeProxyCommand = <RHost, RServe>(server: ProxyServer<RHost, RServe>) =>
+export const makeQemuServerCommand = <RHost, RServe>(server: QemuServer<RHost, RServe>) =>
   Command.make(
     "qemu-server",
     {
@@ -82,7 +82,7 @@ export const makeProxyCommand = <RHost, RServe>(server: ProxyServer<RHost, RServ
               }),
             ),
           );
-          // The reverse proxy reaches this process at the address it listens on; the port is
+          // The qemu reverse proxy reaches this process at the address it listens on; the port is
           // enough to name the fleet row.
           const url = `http://${HOST}:${String(port)}`;
           return yield* Effect.raceFirst(

@@ -19,7 +19,7 @@ import * as Qemu from "../qemu/qemu.ts";
 import * as Stats from "../qemu/stats.ts";
 import * as Api from "../shared/api.ts";
 import type * as Domain from "../shared/domain.ts";
-import * as ProxyCommand from "./command.ts";
+import * as QemuServerCommand from "./command.ts";
 import * as Handlers from "./handlers.ts";
 import * as Heartbeat from "./heartbeat.ts";
 import * as Sessions from "./sessions.ts";
@@ -29,7 +29,7 @@ const shutdown = Sessions.Shutdown.defaultValue();
 
 // stdout is the convenience copy of the log; the rows and Sentry are the record. When it is a file
 // on a full disk, Node reports the failed write as an 'error' event that, unhandled, is an uncaught
-// exception per line — which took a proxy down under six installs filling a tmpfs. Drop the line.
+// exception per line — which took a qemu server down under six installs filling a tmpfs. Drop the line.
 process.stdout.on("error", () => {});
 process.stderr.on("error", () => {});
 
@@ -51,7 +51,7 @@ const ServerLive = (display: Domain.QemuDisplay, automation: boolean, port: numb
     Effect.gen(function* () {
       const log = yield* Log.Log;
       yield* log.info(
-        `qemu server listening on ${ProxyCommand.HOST}:${String(port)}; display ${display}${automation ? "; automation" : ""}; announcing ${url}`,
+        `qemu server listening on ${QemuServerCommand.HOST}:${String(port)}; display ${display}${automation ? "; automation" : ""}; announcing ${url}`,
         { location: Log.Locations.server },
       );
       yield* Heartbeat.announce(url);
@@ -67,7 +67,7 @@ const ServerLive = (display: Domain.QemuDisplay, automation: boolean, port: numb
     Layer.provide(Layer.succeed(Sessions.Shutdown)(shutdown)),
     Layer.provide(Layer.mergeAll(Qemu.Qemu.layer, Iso.Iso.layer, Stats.Stats.layer)),
     // Bound before Sessions exists: a port refusal is one fatal line, never a drain.
-    Layer.provide(NodeHttpServer.layer(() => server, { host: ProxyCommand.HOST, port })),
+    Layer.provide(NodeHttpServer.layer(() => server, { host: QemuServerCommand.HOST, port })),
     // Root session spans require no request span above them.
     Layer.provide(Layer.succeed(HttpMiddleware.TracerDisabledWhen)(() => true)),
   );
@@ -93,7 +93,7 @@ const MainLive = Layer.mergeAll(
   Layer.provideMerge(NodeServices.layer),
 );
 
-const proxyCommand = ProxyCommand.makeProxyCommand({
+const qemuServerCommand = QemuServerCommand.makeQemuServerCommand({
   missingHostRequirements: Host.missingHostRequirements,
   serve: ServerLive,
   serverFailed,
@@ -104,7 +104,7 @@ const proxyCommand = ProxyCommand.makeProxyCommand({
 // line; a defect has nothing else to say for it.
 const program = Effect.gen(function* () {
   const services = yield* Layer.build(MainLive).pipe(Effect.tapCause(Render.reportFailure));
-  yield* Command.run(proxyCommand, { version: Api.VERSION }).pipe(
+  yield* Command.run(qemuServerCommand, { version: Api.VERSION }).pipe(
     Effect.provide(services),
     Effect.tapDefect((defect) => Render.reportFailure(Cause.die(defect))),
   );

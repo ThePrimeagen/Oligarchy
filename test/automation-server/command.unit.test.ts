@@ -16,7 +16,7 @@ import { TestConsole } from "effect/testing";
 import { Command } from "effect/unstable/cli";
 import { HttpServerError } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
-import * as AutomationCommand from "../../src/automation-server/command.ts";
+import * as AutomationServerCommand from "../../src/automation-server/command.ts";
 import * as Client from "../../src/db/client.ts";
 import * as Api from "../../src/shared/api.ts";
 import * as Errors from "../../src/shared/errors.ts";
@@ -45,7 +45,7 @@ const fakeServer = () => {
   const served: Array<number> = [];
   const listening = Deferred.makeUnsafe<void>();
   const serverFailed = Deferred.makeUnsafe<never, HttpServerError.ServeError>();
-  const server: AutomationCommand.AutomationServer<never> = {
+  const server: AutomationServerCommand.AutomationServer<never> = {
     serve: (port) =>
       Layer.effectDiscard(
         Effect.gen(function* () {
@@ -68,14 +68,14 @@ const DatabaseLive = (ping: Effect.Effect<void, Errors.DatabaseError> = Effect.v
   );
 
 const run = (
-  server: AutomationCommand.AutomationServer<never>,
+  server: AutomationServerCommand.AutomationServer<never>,
   args: ReadonlyArray<string>,
   log: FakeLog.FakeLog,
   database: Layer.Layer<Client.Database> = DatabaseLive(),
 ) =>
-  Command.runWith(AutomationCommand.makeAutomationCommand(server), { version: Api.VERSION })(
-    args,
-  ).pipe(Effect.provide(Layer.mergeAll(CliTestLayer, log.layer, database)));
+  Command.runWith(AutomationServerCommand.makeAutomationServerCommand(server), {
+    version: Api.VERSION,
+  })(args).pipe(Effect.provide(Layer.mergeAll(CliTestLayer, log.layer, database)));
 
 describe("automation server command flags", () => {
   it.effect("--port must be an integer", () =>
@@ -184,7 +184,7 @@ describe("automation server command startup failures", () => {
     Effect.gen(function* () {
       const cause = new Error("listen EADDRINUSE: address already in use 127.0.0.1:54321");
       const fake = fakeServer();
-      const failing: AutomationCommand.AutomationServer<never> = {
+      const failing: AutomationServerCommand.AutomationServer<never> = {
         ...fake.server,
         serve: () => Layer.effectDiscard(Effect.fail(new HttpServerError.ServeError({ cause }))),
       };
