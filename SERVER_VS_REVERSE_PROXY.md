@@ -39,10 +39,10 @@ running here". A client may still talk to a server directly; nothing in this cha
 reverse proxy.
 
 Started with `--url <url>`, the server also announces itself: once its listener is up and every
-thirty seconds after, it rewrites its own row in `servers` (keyed by that url) with what `/stats`
-would answer, cut to what the fleet page shows — its qemu count, memory in use and the cpu's one,
-two and three minute means — stamps `heartbeat_at` with the database's clock and counts
-`generation` up by one. A shutdown deletes that row, so a process that left is gone from the
+thirty seconds after, it rewrites its own row in `servers` (keyed by that url) as a `qemu` server
+with what `/stats` would answer, cut to what the fleet page shows — its qemu count, memory in use
+and the cpu's one, two and three minute means — stamps `heartbeat_at` with the database's clock
+and counts `generation` up by one. A shutdown deletes that row, so a process that left is gone from the
 fleet and from placement. Every write is a ping: a generation that stops moving is a server that
 stopped without deleting — killed, or it cannot reach the database (its own log then has the
 `heartbeat failed` lines, and a delete that fails is `unannounce failed: <reason>`) — and the
@@ -92,13 +92,15 @@ The reverse proxy holds no session state. It knows three things, all of them row
 
 - Which servers exist, because a server announced itself (`./server --url`) or an operator
   registered it — on the dashboard, or over `POST /servers { url }`, where the reverse proxy
-  checks the server answers `GET /stats` before remembering it. Registering the same url twice is
-  two probes and one row; `DELETE /servers` forgets a server without touching the sessions still
-  running on it; `GET /servers` probes every server at once and reports each one's stats, or
-  `null` for one that did not answer.
-- Where to put a new session: `POST /start` probes every registered server at once, skips the ones
-  that fail (a `server skipped; …` warning each), and places the start on the one with the fewest
-  `qemus`, ties to the earliest registered. With no server registered the answer is 503
+  checks the server answers `GET /stats` before remembering it as a `qemu` server. Every row has
+  a `type`, and this reverse proxy fronts the `qemu` ones: it registers a server as one, and
+  lists and places on those alone. Registering the same url twice is two probes and one row;
+  `DELETE /servers` forgets a server without touching the sessions still running on it;
+  `GET /servers` probes every `qemu` server at once and reports each one's stats, or `null` for
+  one that did not answer.
+- Where to put a new session: `POST /start` probes every registered `qemu` server at once, skips
+  the ones that fail (a `server skipped; …` warning each), and places the start on the one with
+  the fewest `qemus`, ties to the earliest registered. With no server registered the answer is 503
   `no server registered`; with every probe failing it is 503 `no server available`.
 - Which server started each session: the server's 200 to `/start` carries the id it minted, and the
   reverse proxy writes `session_servers (session_id, server_url)` before answering the client. Every
@@ -156,8 +158,8 @@ session and the agent.
 `./client start --server-url http://reverse:42070 --agent-id OLI-7 --iso …`
 
 1. The reverse proxy checks the bearer and decodes `StartBody` (it needs `agent` for its log
-   lines). It reads `servers`, probes each `GET /stats`, picks the fewest `qemus`, and POSTs the
-   client's body text to that server's `/start`.
+   lines). It reads the `qemu` rows of `servers`, probes each `GET /stats`, picks the fewest
+   `qemus`, and POSTs the client's body text to that server's `/start`.
 2. The server does everything it always did: inserts the `sessions` row, fetches the ISO,
    prepares the directory, registers the agent, boots QEMU, and answers `{"id":"<uuid>"}`.
 3. The reverse proxy decodes the id, inserts `session_servers (id, url)`, logs
@@ -244,14 +246,19 @@ errors; the switch ends in `satisfies never`, so a tag without an arm does not c
 
 ### `src/db/schema.ts`, `drizzle/0004_reverse_proxy.sql`, `src/db/servers.ts`
 
-- `servers (url text primary key, stats jsonb, generation bigint not null default 0,
-  heartbeat_at timestamptz, created_at)`: the fleet. The primary key makes registration
-  idempotent (`insert … on conflict do nothing`) and gives the heartbeat its upsert. The three
-  columns after the key came with the heartbeat (`drizzle/0006_server_heartbeat.sql`): `stats` is
-  what the server last said of itself (`ServerStats` in `schema.ts`: qemus, memory total and
-  used, the cpu's three means), `generation` counts its heartbeats, `heartbeat_at` is the
-  database's clock at the last one. `stats` and `heartbeat_at` are null together, for a row an
-  operator added that no server has claimed — the one absence the page must show as such.
+- `servers (url text primary key, type server_type not null default 'qemu', stats jsonb,
+  generation bigint not null default 0, heartbeat_at timestamptz, created_at)`: the fleet. The
+  primary key makes registration idempotent (`insert … on conflict do nothing`) and gives the
+  heartbeat its upsert. `type` (`drizzle/0008_server_type.sql`) says what kind of server the row
+  is, an enum with one value so far, `qemu`, so a reverse proxy can list its own kind and leave
+  the rest; every writer names it — the reverse proxy's `POST /servers`, the dashboard's add box
+  and the server's heartbeat all say `qemu` — and the default is what the migration filled the
+  rows that predate the column with. The three columns after it came with the heartbeat
+  (`drizzle/0006_server_heartbeat.sql`): `stats` is what the server last said of itself
+  (`ServerStats` in `schema.ts`: qemus, memory total and used, the cpu's three means),
+  `generation` counts its heartbeats, `heartbeat_at` is the database's clock at the last one.
+  `stats` and `heartbeat_at` are null together, for a row an operator added that no server has
+  claimed — the one absence the page must show as such.
 - `session_servers (session_id uuid primary key references sessions.id, server_url text not
   null, created_at)`: which server started a session. The primary key gives a session one route;
   the foreign key guarantees a route names a real session (the server has inserted the row by
@@ -270,17 +277,24 @@ errors; the switch ends in `satisfies never`, so a tag without an arm does not c
 - The migration was generated by `drizzle-kit generate --name reverse_proxy`; existing
   migrations are untouched and `drizzle-kit check` is clean.
 - `ServerStore` follows the repository pattern: a `Context.Service` whose methods are
-  `Effect.fn("db.<name>")` over `Database.run` — `addServer`, `heartbeat` (one upsert: the row
-  comes into being at generation 1 or is rewritten at `generation + 1`, `heartbeat_at = now()`
-  either way), `removeServer` (answers whether a row went, which `DELETE /servers` turns into its
-  404), `listServers` (registration order), `routeSession`, `serverForSession` (an `Option`).
-  The server's `main.ts` provides the store to its graph for the heartbeat alone.
+  `Effect.fn("db.<name>")` over `Database.run` — `addServer` (a url and its type), `heartbeat`
+  (a url, its type and its stats in one upsert: the row comes into being at generation 1 or is
+  rewritten at `generation + 1`, its type the server's word, `heartbeat_at = now()` either way),
+  `removeServer` (answers whether a row went, which `DELETE /servers` turns into its 404),
+  `listServers` (the servers of one type, registration order), `routeSession`,
+  `serverForSession` (an `Option`). The server's `main.ts` provides the store to its graph for
+  the heartbeat alone.
 
 ### `src/reverse-proxy/router.ts`: the one service
 
 `Router` is a `Context.Service` over `ServerStore`, `Log`, `HttpClient` and `ProxyConfig`, with
 `register`, `unregister`, `servers`, `start` and `forward`. Decisions inside it:
 
+- It fronts one kind of server, `qemu`: the probe is that server's `/stats` and the placement
+  its `qemus`. `register` stores a url as a `qemu` server, and `servers` and `start` read the
+  `qemu` rows alone, so a row of another kind is neither reported nor placed on. The kind is one
+  constant in `router.ts`, so a second reverse proxy for a second kind is that constant and its
+  own probe.
 - Urls are stored exactly as given, like `--server-url`, and joined to paths with
   `HttpClientRequest.prependUrl`, which inserts or trims one slash, as the generated client's
   `baseUrl` does. `https://host/` and `https://host` both reach `/stats`; they are two rows if
@@ -394,7 +408,9 @@ Every surface has a happy and an unhappy test:
 - `test/integration/db.integration.test.ts`: `ServerStore` against the migrated database,
   including the primary key and foreign key refusals, and the heartbeat: a first write at
   generation 1 with its stats and stamp, a second counting up and rewriting, and one filling the
-  row an operator added, still one row.
+  row an operator added, still one row. The `type` column: every write lands as `qemu` and is
+  listed as such, a row written without a type is a `qemu` server (the migration's default), and
+  a value outside the enum is the database's refusal.
 - `test/integration/reverse-proxy.integration.test.ts`: the black-box process — `--help`, a
   bad `--port`, a missing token, an unreachable database (this one needs neither QEMU nor Docker,
   so it always runs), an occupied port, and serving (`GET /servers` empty, a dead server refused
