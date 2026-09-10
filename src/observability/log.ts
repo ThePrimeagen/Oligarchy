@@ -15,20 +15,24 @@ import * as Errors from "../shared/errors.ts";
 import type * as Domain from "../shared/domain.ts";
 import * as Render from "./render.ts";
 
-// location is a text bucket: a session UUID, Locations.server, or Locations.automation.
+// location is a text bucket: a session UUID, Locations.server, Locations.automationServer,
+// Locations.automationClient, or Locations.automationRun(key).
 export type Attribution = { readonly location?: string; readonly agentId?: string };
 export type Report = Attribution & { readonly cause?: unknown; readonly skipSentry?: true };
 
 export const Locations = {
-  automation: "automation",
+  automationServer: "automation-server",
+  automationClient: "automation-client",
+  automationRun: (key: string) => `automation-${key}`,
   server: "server",
 } as const;
 
-// The automation server logs with agentId === Locations.automation as well.
-export const AutomationAgentId = Locations.automation;
+// The automation server logs with agentId === Locations.automationServer as well.
+export const AutomationAgentId = Locations.automationServer;
+export const AutomationClientAgentId = Locations.automationClient;
 
-// Fallback attribution when a log line has no session: qemu-server-wide "server", or automation's
-// own bucket. Processes override this Reference at the top of their layer graph.
+// Fallback attribution when a log line has no session: qemu-server-wide "server", or an
+// automation process's own bucket. Processes override this Reference at the top of their layer graph.
 export type ProcessAttribution = {
   readonly location: string;
   readonly agentId?: string;
@@ -40,8 +44,13 @@ export const ProcessAttribution = Context.Reference<ProcessAttribution>(
 );
 
 export const AutomationProcessAttribution: ProcessAttribution = {
-  location: Locations.automation,
+  location: Locations.automationServer,
   agentId: AutomationAgentId,
+};
+
+export const AutomationClientProcessAttribution: ProcessAttribution = {
+  location: Locations.automationClient,
+  agentId: AutomationClientAgentId,
 };
 
 export type LogService = {

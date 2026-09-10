@@ -19,7 +19,7 @@ export class LogStore extends Context.Service<LogStore>()("@oligarchy/db/LogStor
       yield* database.run("insertLog", (db) => db.insert(DbSchema.logs).values(row));
     });
 
-    // Rows for one location bucket: a session UUID, "server", or "automation".
+    // Rows for one location bucket: a session UUID, "server", or "automation-server".
     const listLogs = Effect.fn("db.listLogs")(function* (location: string) {
       return yield* database.run("listLogs", (db) =>
         db

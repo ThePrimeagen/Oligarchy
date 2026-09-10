@@ -148,6 +148,23 @@ export class NoServer extends Schema.TaggedError<NoServer>("@oligarchy/shared/er
   override readonly [ErrorReporter.ignore] = true;
 }
 
+// The agent did not finish: opencode could not be spawned, exited non-zero, exited without a
+// session, or died from a signal nobody here sent. The message is `opencode: <what>`.
+export class RunFailed extends Schema.TaggedError<RunFailed>("@oligarchy/shared/errors/RunFailed")(
+  "RunFailed",
+  { message: Schema.String, agentId: Schema.String, cause: Schema.optionalKey(Schema.Defect()) },
+  { httpApiStatus: 502 },
+) {
+  override readonly [ErrorReporter.ignore] = true;
+}
+
+// The agent was still going at RUN_TIMEOUT; it was killed.
+export class RunTimedOut extends Schema.TaggedError<RunTimedOut>(
+  "@oligarchy/shared/errors/RunTimedOut",
+)("RunTimedOut", { message: Schema.String, agentId: Schema.String }, { httpApiStatus: 504 }) {
+  override readonly [ErrorReporter.ignore] = true;
+}
+
 export type ApiError =
   | BadRequest
   | Unauthorized
@@ -159,7 +176,9 @@ export type ApiError =
   | ExchangeFailed
   | Internal
   | ServerFailed
-  | NoServer;
+  | NoServer
+  | RunFailed
+  | RunTimedOut;
 
 const resolveHttpApiStatus = SchemaAST.resolveAt("httpApiStatus");
 
@@ -182,6 +201,8 @@ const apiErrorClasses = {
   Internal,
   ServerFailed,
   NoServer,
+  RunFailed,
+  RunTimedOut,
 } satisfies Record<ApiError["_tag"], Schema.Top>;
 
 export const apiStatus = (error: ApiError): number => httpStatus(apiErrorClasses[error._tag]);
@@ -248,6 +269,14 @@ export const ServerFailedWire = wireError(
 export const NoServerWire = wireError(
   NoServer,
   (message) => ({ _tag: "NoServer", message }) as const,
+);
+export const RunFailedWire = wireError(
+  RunFailed,
+  (message) => ({ _tag: "RunFailed", message, agentId: "" }) as const,
+);
+export const RunTimedOutWire = wireError(
+  RunTimedOut,
+  (message) => ({ _tag: "RunTimedOut", message, agentId: "" }) as const,
 );
 
 // ---------------------------------------------------------------------------

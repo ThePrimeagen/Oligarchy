@@ -175,4 +175,18 @@ export class Linear extends HttpApiGroup.make("Linear").add(linear).middleware(A
 
 export class AutomationServerApi extends HttpApi.make("OligarchyAutomationServer").add(Linear) {}
 
+// The automation client: one route, behind the same bearer and boundary as the qemu server's.
+export const run = HttpApiEndpoint.post("run", "/run", {
+  payload: Contract.RunBody,
+  success: Contract.RunResponse,
+  error: [Errors.RunFailedWire, Errors.RunTimedOutWire],
+});
+
+export class Runs extends HttpApiGroup.make("Runs")
+  .add(run)
+  .middleware(BearerAuth)
+  .middleware(ApiBoundary) {}
+
+export class AutomationClientApi extends HttpApi.make("OligarchyAutomationClient").add(Runs) {}
+
 export const VERSION = "0.0.0";

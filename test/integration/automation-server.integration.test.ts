@@ -251,7 +251,7 @@ describe("automation server startup refusals", () => {
       const { code } = await process.exited;
       expect(code).toBe(1);
       const fatal = lines(process.stdout()).find((line) =>
-        line.startsWith("[automation] automation: fatal: automation server: "),
+        line.startsWith("[automation-server] automation-server: fatal: automation server: "),
       );
       expect(fatal, process.stdout()).toBeDefined();
       expect(fatal).toContain("database unreachable");
@@ -271,7 +271,7 @@ describeWithDatabase("automation server startup refusals with a database", () =>
         const { code } = await process.exited;
         expect(code).toBe(1);
         const fatal = lines(process.stdout()).find((line) =>
-          line.startsWith("[automation] automation: fatal: automation server: "),
+          line.startsWith("[automation-server] automation-server: fatal: automation server: "),
         );
         expect(fatal, process.stdout()).toBeDefined();
         expect(fatal).toContain("EADDRINUSE");
@@ -294,7 +294,7 @@ describeServing("automation server serving", () => {
     try {
       await process.waitFor(/automation server listening/);
       expect(lines(process.stdout())).toContain(
-        `[automation] automation: automation server listening on 127.0.0.1:${String(port)}`,
+        `[automation-server] automation-server: automation server listening on 127.0.0.1:${String(port)}`,
       );
       expect(existsSync(record)).toBe(false);
 
@@ -405,8 +405,10 @@ describeServing("automation server serving", () => {
     const { code } = await process.exited;
     expect(code, process.stdout()).toBe(0);
     const output = lines(process.stdout());
-    expect(output).toContain("[automation] automation: error: POST /linear failed: unauthorized");
-    expect(output).toContain("[automation] automation: linear webhook recorded");
+    expect(output).toContain(
+      "[automation-server] automation-server: error: POST /linear failed: unauthorized",
+    );
+    expect(output).toContain("[automation-server] automation-server: linear webhook recorded");
     expect(output).toContain(
       "[OLI-1063] automation: linear webhook queued drive; Automation Needed",
     );

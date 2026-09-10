@@ -18,7 +18,7 @@ import * as Handlers from "./handlers.ts";
 const HOST = "127.0.0.1";
 
 const automationAttr = {
-  location: Log.Locations.automation,
+  location: Log.Locations.automationServer,
   agentId: Log.AutomationAgentId,
 } as const;
 
@@ -58,7 +58,7 @@ const DatabaseLive = Layer.unwrap(Effect.map(Config.databaseUrl, Client.Database
 
 // LINEAR_WEBHOOK_SECRET signs POST /linear; DATABASE_URL holds the queue and the logs rows.
 // Sentry sits beneath Log so Log captures the reporter. Lines land in logs with
-// location/agentId "automation"; durable jobs remain automation_jobs.
+// location/agentId "automation-server"; durable jobs remain automation_jobs.
 const MainLive = Layer.mergeAll(
   Log.Log.layer,
   Handlers.LinearWebhookSecret.layer,

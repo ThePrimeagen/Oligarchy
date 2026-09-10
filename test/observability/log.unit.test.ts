@@ -166,6 +166,53 @@ describe("Log rows", () => {
       expect(yield* consoleLines).toEqual(["[OLI-61] hello"]);
     }).pipe(Effect.provide(Log.Log.layerStdout)),
   );
+
+  it.effect(
+    "Locations.automationRun names the ticket bucket and a line attributed there prints and lands",
+    () =>
+      Effect.gen(function* () {
+        expect(Log.Locations.automationRun("OLI-45")).toBe("automation-OLI-45");
+        const store = Stores.fakeLogStore();
+        yield* Effect.gen(function* () {
+          const log = yield* Log.Log;
+          yield* log.info("run started; opencode; 12 chars", {
+            location: Log.Locations.automationRun("OLI-45"),
+            agentId: "OLI-45",
+          });
+          yield* log.flush;
+        }).pipe(Effect.provide(Log.Log.layer.pipe(Layer.provide(store.layer))));
+        expect(yield* consoleLines).toEqual([
+          "[OLI-45] automation-OLI-45: run started; opencode; 12 chars",
+        ]);
+        expect(store.rows).toEqual([
+          {
+            text: "run started; opencode; 12 chars",
+            level: "info",
+            location: "automation-OLI-45",
+            agentId: "OLI-45",
+          },
+        ]);
+      }),
+  );
+
+  it.effect("a process-wide automation-server line does not land in a run bucket (unhappy)", () =>
+    Effect.gen(function* () {
+      const store = Stores.fakeLogStore();
+      yield* Effect.gen(function* () {
+        const log = yield* Log.Log;
+        yield* log.info("job started; drive; http://client", {
+          location: Log.Locations.automationServer,
+          agentId: "OLI-45",
+        });
+        yield* log.flush;
+      }).pipe(Effect.provide(Log.Log.layer.pipe(Layer.provide(store.layer))));
+      expect(yield* consoleLines).toEqual([
+        "[OLI-45] automation-server: job started; drive; http://client",
+      ]);
+      expect(store.rows[0]?.location).toBe("automation-server");
+      expect(store.rows[0]?.location).not.toBe(Log.Locations.automationRun("OLI-45"));
+    }),
+  );
 });
 
 describe("Log Sentry policy", () => {

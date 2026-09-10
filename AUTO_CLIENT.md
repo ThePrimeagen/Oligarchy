@@ -94,18 +94,18 @@ named case inside one, and is its own todo.
       in the automation half renders an automation client's `agents`, memory, cpu means, generation
       and heartbeat age, `silent` after ninety seconds, and no delete form; the queue tables are as
       they are.
-- [ ] `test/shared/errors.unit.test.ts` — `RunFailed` decodes from `{ error }` with 502 and
+- [x] `test/shared/errors.unit.test.ts` — `RunFailed` decodes from `{ error }` with 502 and
       `RunTimedOut` with 504; `apiStatus` answers both; a decoded `RunFailed` carries no cause and an
       empty `agentId`, as `StartFailed` does.
-- [ ] `test/shared/api.unit.test.ts` — `AutomationClientApi` has one group, `Runs`, with `POST /run`
+- [x] `test/shared/api.unit.test.ts` — `AutomationClientApi` has one group, `Runs`, with `POST /run`
       behind `BearerAuth` then `ApiBoundary`; `run` declares `RunBody`, `RunResponse` and exactly the
       two error codecs; `QemuServerApi`, `QemuReverseProxyApi` and `AutomationServerApi` are
       unchanged.
-- [ ] `test/automation-server/http.unit.test.ts`, `test/integration/automation-server.integration.
+- [x] `test/automation-server/http.unit.test.ts`, `test/integration/automation-server.integration.
       test.ts`, `test/integration/db.integration.test.ts` — every pin of the automation server's log
       bucket moves from `"automation"` to `"automation-server"`: the `location` and `agentId` of its
       lines, and the stdout prefix `[automation-server] automation-server: …`.
-- [ ] `test/observability/log.unit.test.ts` — `Locations.automationRun("OLI-45")` is
+- [x] `test/observability/log.unit.test.ts` — `Locations.automationRun("OLI-45")` is
       `"automation-OLI-45"`; a line attributed to it renders with that prefix and lands in a row with
       that `location`.
 - [ ] `test/config/config.unit.test.ts` — `AutomationServerConfig` reports `LINEAR_WEBHOOK_SECRET`,
@@ -114,7 +114,7 @@ named case inside one, and is its own todo.
 - [ ] `test/automation-server/command.unit.test.ts` — the command still defaults to 54321 and pings;
       new: the dispatch loop's startup sweep is called once before listen (through the fake store);
       `--help` lists `--port` alone.
-- [ ] `test/automation-server/http.unit.test.ts` — `POST /linear` is unchanged; `POST /run` here is
+- [x] `test/automation-server/http.unit.test.ts` — `POST /linear` is unchanged; `POST /run` here is
       404 (the automation server does not serve runs).
 - [ ] `test/ctrl/linear.unit.test.ts` — `issueDescription("OLI-45")` sends one GraphQL query with the
       identifier and decodes the description (happy); a `null` issue is `LinearError` `linear: no

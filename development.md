@@ -710,8 +710,9 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
   variable is in the attribution (`location`, `agentId`) or in the text after the `;`, as in
   `log.info(\`running; started in ${String(ms)}ms\`, { location: sessionId, agentId })`.
   `location` is a text bucket: a session UUID, `Locations.server` (qemu-server-wide lines with no
-  session), or `Locations.automation` (the automation server; its `agentId` is also
-  `Locations.automation`). `ProcessAttribution` is the fallback the HTTP boundary uses when an
+  session), `Locations.automationServer` (the automation server; its `agentId` is also
+  `Locations.automationServer`), `Locations.automationClient`, or `Locations.automationRun(key)`
+  (`automation-<key>`). `ProcessAttribution` is the fallback the HTTP boundary uses when an
   error carries no session; the qemu server leaves the default (`server`), the automation server overrides it.
 - Each line is written twice: to stdout through `Console.log` when the method runs, and as a
   `logs` row `Queue.offerUnsafe`d to a `Queue.unbounded` drained by one `forkScoped` fiber that
@@ -746,7 +747,7 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
   `ErrorReporter.CurrentErrorReporters` once at build, so `SentryLive` is provided beneath it,
   never only to callers. `Log.layerStdout` persists nothing: it is for tests. The automation
   server persists through `Log.layer` once it has a database; its lines use
-  `location = 'automation'` (and process-wide lines also use `agentId = 'automation'`), while
+  `location = 'automation-server'` (and process-wide lines also use `agentId = 'automation-server'`), while
   durable work remains `automation_jobs`. A fatal path flushes the log, then Sentry, then exits.
 - `Log` installs no Effect `Logger`; `emit` formats, writes and offers synchronously. `console.*`
   appears only in `src/dashboard/**` and `vitest.global-setup.ts`. Test log output through the

@@ -256,3 +256,39 @@ describe("AutomationServerApi", () => {
     expect(routes(Api.QemuReverseProxyApi).map(({ path }) => path)).not.toContain("/linear");
   });
 });
+
+describe("AutomationClientApi", () => {
+  const client = Api.AutomationClientApi;
+
+  it("has one group, Runs, with POST /run behind BearerAuth then ApiBoundary", () => {
+    const table = routes(client);
+    expect(table).toHaveLength(1);
+    expect(table[0]).toMatchObject({
+      group: "Runs",
+      identifier: "run",
+      method: "POST",
+      path: "/run",
+      middleware: [Api.BearerAuth.key, Api.ApiBoundary.key],
+    });
+    expect(HttpApiClient.urlBuilder(client).Runs.run()).toBe("/run");
+    const spec = OpenApi.fromApi(client);
+    expect(spec.components.securitySchemes).toEqual({
+      bearer: { type: "http", scheme: "Bearer" },
+    });
+    expect(spec.paths["/run"]?.post?.security).toEqual([{ bearer: [] }]);
+  });
+
+  it("declares RunBody, RunResponse and exactly the two error codecs", () => {
+    const run = byIdentifier(client, "run");
+    expect(run.errors).toEqual([400, 401, 500, 502, 504]);
+    expect(Api.run).toBeDefined();
+  });
+
+  it("leaves QemuServerApi, QemuReverseProxyApi and AutomationServerApi unchanged", () => {
+    expect(routes(Api.QemuServerApi).map(({ path }) => path)).not.toContain("/run");
+    expect(routes(Api.QemuReverseProxyApi).map(({ path }) => path)).not.toContain("/run");
+    expect(routes(Api.AutomationServerApi).map(({ method, path }) => `${method} ${path}`)).toEqual([
+      "POST /linear",
+    ]);
+  });
+});

@@ -11,7 +11,8 @@ import * as Errors from "../shared/errors.ts";
 
 // Every qemu server and qemu reverse proxy route carries `Authorization: Bearer <OLIGARCHY_TOKEN>`; the
 // compare is exact, as it always was. The token comes in as a value: those servers read it from
-// ProxyConfig beside their database url. The automation server does not use this bearer.
+// ProxyConfig beside their database url. The automation server does not use this bearer; the
+// automation client does.
 export const bearerAuth = (token: Redacted.Redacted): Layer.Layer<Api.BearerAuth> =>
   Layer.succeed(Api.BearerAuth)(
     Api.BearerAuth.of({
@@ -39,6 +40,8 @@ const isApiError: (value: unknown) => value is Errors.ApiError = Schema.is(
     Errors.Internal,
     Errors.ServerFailed,
     Errors.NoServer,
+    Errors.RunFailed,
+    Errors.RunTimedOut,
   ]),
 );
 
@@ -54,7 +57,8 @@ const translate = (
       : Effect.die(error);
 
 // logs.location is text: an unknown id is attributed only when this server could have minted it
-// (a session UUID). Otherwise the process fallback applies (qemu server: "server"; automation: its own).
+// (a session UUID). Otherwise the process fallback applies (qemu server: "server"; automation
+// server / client: their own).
 const attribution = (error: Errors.ApiError, fallback: Log.ProcessAttribution): Log.Attribution => {
   switch (error._tag) {
     case "Unauthorized":
@@ -95,6 +99,9 @@ const attribution = (error: Errors.ApiError, fallback: Log.ProcessAttribution): 
             : { agentId: fallback.agentId }
           : { agentId: error.agentId },
       );
+    case "RunFailed":
+    case "RunTimedOut":
+      return { location: Log.Locations.automationRun(error.agentId), agentId: error.agentId };
   }
   return error satisfies never;
 };

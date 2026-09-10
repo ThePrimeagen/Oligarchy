@@ -353,8 +353,8 @@ Postgres.describeWithDatabase("database", () => {
         yield* logs.insertLog({
           text: "queue claimed",
           level: "info",
-          location: "automation",
-          agentId: "automation",
+          location: "automation-server",
+          agentId: "automation-server",
         });
         const rows = yield* logs.listLogs(sessionId);
         expect(rows.map((row) => row.text)).toEqual(["first", "second"]);
@@ -362,7 +362,7 @@ Postgres.describeWithDatabase("database", () => {
         expect(rows[1]).toMatchObject({ level: "error", agentId: null });
         expect(yield* logs.listLogs(uuid())).toEqual([]);
         expect((yield* logs.listLogs("server")).map((row) => row.text)).toEqual(["global"]);
-        expect((yield* logs.listLogs("automation")).map((row) => row.text)).toEqual([
+        expect((yield* logs.listLogs("automation-server")).map((row) => row.text)).toEqual([
           "queue claimed",
         ]);
       }),

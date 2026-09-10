@@ -55,7 +55,7 @@ export const makeAutomationServerCommand = <RServe>(server: AutomationServer<RSe
         return yield* startup.pipe(
           Effect.tapError((error) =>
             log.fatal(`automation server: ${detail(error)}`, {
-              location: Log.Locations.automation,
+              location: Log.Locations.automationServer,
               agentId: Log.AutomationAgentId,
               cause: error,
             }),

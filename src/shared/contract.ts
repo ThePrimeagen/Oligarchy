@@ -106,6 +106,25 @@ export class Servers extends Schema.Class<Servers>("@oligarchy/shared/contract/S
   servers: Schema.Array(Server),
 }) {}
 
+// POST /run: the ticket the run is for — the key every row about it carries and the agent id
+// the driver uses — and the prompt, a string the client hands to the agent unread.
+export class RunBody extends Schema.Class<RunBody>("@oligarchy/shared/contract/RunBody")({
+  key: Schema.NonEmptyString,
+  prompt: Schema.NonEmptyString,
+}) {}
+
+// What a finished run says: the model it ran as, the runner's own id for the conversation (an
+// opencode `ses_…`; a Cursor agent id later), the agent's final text (empty when it wrote none,
+// never null), and how long it took.
+export class RunResponse extends Schema.Class<RunResponse>(
+  "@oligarchy/shared/contract/RunResponse",
+)({
+  model: Schema.String,
+  session: Schema.String,
+  text: Schema.String,
+  elapsedMs: Schema.Int,
+}) {}
+
 const STORED_IMAGE_ORIGIN = "https://oligarchy.trm.sh";
 
 export const StoredImageUrl = (id: string): string => `${STORED_IMAGE_ORIGIN}/images/${id}`;
