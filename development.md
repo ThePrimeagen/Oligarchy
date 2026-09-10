@@ -3,9 +3,8 @@
 How code is written here: the Effect conventions every process follows, the tooling, the tests
 and the review. It owns the abstract decisions and nothing else. What any one process promises its
 callers — routes, flags, log lines, wire shapes, refusal texts — lives in its code and the tests
-that pin it, and for operators in `client.md`, `ctrl.md`, `ctrl-linear.md`, `ctrl-diagnose.md`,
-`SERVER_VS_REVERSE_PROXY.md` (the server and the reverse proxy side by side, and the reasons behind
-the reverse proxy's design) and `prompts/`; this document does not repeat them. It does not
+that pin it, and for operators in `client.md`, `ctrl.md`, `ctrl-linear.md`, `ctrl-diagnose.md`
+and `prompts/`; this document does not repeat them. It does not
 document the Effect API either; API truth is `node_modules/effect/src`,
 `node_modules/effect/AGENTS.md`, `node_modules/effect/ai-docs/src`,
 `node_modules/@effect/platform-node/src` and `node_modules/@effect/vitest/README.md`, all
@@ -15,7 +14,7 @@ exist.
 ## Toolchain
 
 - Run on Node 26 with npm. Every executable is a `#!/bin/sh` wrapper running
-  `node --experimental-strip-types` (`./server`, `./reverse-proxy` and `./automation` add
+  `node --experimental-strip-types` (`./qemu-server`, `./qemu-reverse-proxy` and `./automation-server` add
   `--import ./src/observability/instrument.ts`); types are stripped, not transformed, so
   `erasableSyntaxOnly` stays on.
 - Install with `npm ci`; `prepare` runs `effect-tsgo patch --oxlint` so the `effecttsgo/*` rules
@@ -69,14 +68,14 @@ Durable preferences from the maintainer; when they conflict with generic best pr
 ## Layout
 
 - The root holds `AGENTS.md`, the executable wrappers (`./client`, `./client-with-image`,
-  `./ctrl`, `./server`, `./reverse-proxy`, `./automation`, `./session`), the tooling files,
+  `./ctrl`, `./qemu-server`, `./qemu-reverse-proxy`, `./automation-server`, `./session`), the tooling files,
   `drizzle/` (migrations), `public/` and `prompts/`, the operator documents, this document, `src/`
   and `test/`.
 - `src/` is one directory per process plus the shared kernel (`src/shared/`, `src/config.ts`,
   `src/external-failure.ts`, `src/observability/`, `src/db/`); `main.ts` files are the entries.
 - `src/dashboard/` is a Hono Worker, not Effect: it has no Effect runtime, reaches Postgres
   through Hyperdrive and drizzle with one `pg.Client` per request ended in `finally` (a client
-  left open holds a Hyperdrive connection past the response), never calls the proxy's API, and
+  left open holds a Hyperdrive connection past the response), never calls the qemu server's API, and
   reports route failures with `@sentry/cloudflare` — the one `captureException` outside
   `observability/`, and with the test setup the one place `console.*` is allowed. Nothing below
   that says Effect applies to it.
@@ -91,8 +90,8 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   rest by deep path: `effect/unstable/cli`, `effect/unstable/http`, `effect/unstable/httpapi`,
   `effect/unstable/process`, `effect/testing`, `@effect/platform-node`, `@effect/vitest`.
 - Identifiers are `@oligarchy/<dir>/<file>/<Name>` for schemas, errors and `Context.Reference`s
-  (`@oligarchy/shared/errors/BadRequest`, `@oligarchy/proxy/sessions/Shutdown`) and
-  `@oligarchy/<dir>/<Service>` for services (`@oligarchy/db/Database`, `@oligarchy/proxy/Sessions`).
+  (`@oligarchy/shared/errors/BadRequest`, `@oligarchy/qemu-server/sessions/Shutdown`) and
+  `@oligarchy/<dir>/<Service>` for services (`@oligarchy/db/Database`, `@oligarchy/qemu-server/Sessions`).
 - Only the boundary files may import `node:*`, read `process.*`, or use `setTimeout`,
   `setInterval`, `new Promise` or `async`: every `src/**/main.ts` and the files named in
   `BOUNDARY_FILES` in `test/repo/architecture.unit.test.ts`, each the one place a Node API (a
@@ -119,8 +118,8 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   view); a failure there is a `Result`, a thrown value from a library wrapped in one `try`.
 - Reach services with `yield*` inside the Effect that needs them, never as function parameters; a
   plain factory taking values is allowed only where a unit test constructs the seam directly
-  (`Database.make(url)`, `Stats.make(source)`, `makeProxyCommand(server)`,
-  `makeReverseProxyCommand(server)`, `makeCtrlCommand(deps)`).
+  (`Database.make(url)`, `Stats.make(source)`, `makeQemuServerCommand(server)`,
+  `makeQemuReverseProxyCommand(server)`, `makeAutomationServerCommand(server)`, `makeCtrlCommand(deps)`).
 - Effect-native end-to-end: `Scope`, `Schedule`, `Clock`, `FileSystem`/`Path`,
   `ChildProcessSpawner`, `HttpClient`. Raw callback and Promise APIs, `async`/`await` included,
   appear only in the boundary files and `vitest.global-setup.ts`.
@@ -163,7 +162,7 @@ The `Database` service in `src/db/client.ts` is the model: `makeDatabase(url)` n
 acquires the pool without connecting under `Effect.acquireRelease`, re-enters Effect from
 `pool.on("error")` with `Effect.runForkWith(context)`, and its release logs instead of failing.
 
-A graph, from `src/proxy/main.ts`: one reference per service, a layer that depends on a value
+A graph, from `src/qemu-server/main.ts`: one reference per service, a layer that depends on a value
 unwrapped, and the reporter beneath the log so the log rows flush before the reporter does.
 
 ```ts
@@ -475,8 +474,8 @@ NodeRuntime.runMain(main, { disableErrorReporting: true });
   the groups, the `HttpApi`s, `VERSION`), `contract.ts` (`Schema.Class` DTOs and shared query field
   objects), `errors.ts` (errors and wire codecs). No handler code lives there; `HttpApiEndpoint`,
   `HttpApiGroup.make`, `HttpApi.make` appear only in `api.ts` (the architecture test checks it).
-- A second `HttpApi` that must be reachable by the client generated from the first (the reverse
-  proxy in front of the proxy) is built from the first's `HttpApiEndpoint` values, never from
+- A second `HttpApi` that must be reachable by the client generated from the first (the qemu reverse
+  proxy in front of the qemu server) is built from the first's `HttpApiEndpoint` values, never from
   redeclared paths, so methods, paths, queries and bodies cannot drift. An error the second api
   raises and the first never does gets its codec on a second boundary middleware tag (rc.112 has
   no way to add an error to an endpoint value, and the first api must not advertise a status it
@@ -524,7 +523,7 @@ NodeRuntime.runMain(main, { disableErrorReporting: true });
 
 `BearerAuth`, declared in `api.ts` as `HttpApiMiddleware.Service<BearerAuth>()(id, { error:
 Errors.UnauthorizedWire, security: { bearer: HttpApiSecurity.bearer }, requiredForClient: true })`
-and implemented as `BearerAuthLive` in `src/proxy/middleware.ts`: compare, then run the request.
+and implemented as `BearerAuthLive` in `src/qemu-server/middleware.ts`: compare, then run the request.
 
 ```ts
 export const BearerAuthLive: Layer.Layer<Api.BearerAuth, never, Config.ProxyConfig> = Layer.effect(
@@ -710,10 +709,10 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
   `error`, `fatal`, `acquireColor`, `releaseColor`, `flush`. Messages are fixed sentences; every
   variable is in the attribution (`location`, `agentId`) or in the text after the `;`, as in
   `log.info(\`running; started in ${String(ms)}ms\`, { location: sessionId, agentId })`.
-  `location` is a text bucket: a session UUID, `Locations.server` (proxy-wide lines with no
-  session), or `Locations.automation` (the automation process; its `agentId` is also
+  `location` is a text bucket: a session UUID, `Locations.server` (qemu-server-wide lines with no
+  session), or `Locations.automation` (the automation server; its `agentId` is also
   `Locations.automation`). `ProcessAttribution` is the fallback the HTTP boundary uses when an
-  error carries no session; the proxy leaves the default (`server`), automation overrides it.
+  error carries no session; the qemu server leaves the default (`server`), the automation server overrides it.
 - Each line is written twice: to stdout through `Console.log` when the method runs, and as a
   `logs` row `Queue.offerUnsafe`d to a `Queue.unbounded` drained by one `forkScoped` fiber that
   inserts in call order. The queue is unbounded by policy: a log call never blocks or drops a row
@@ -746,7 +745,7 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
   sits above `Database` so the flush completes before the pool closes. `Log.layer` reads
   `ErrorReporter.CurrentErrorReporters` once at build, so `SentryLive` is provided beneath it,
   never only to callers. `Log.layerStdout` persists nothing: it is for tests. The automation
-  service persists through `Log.layer` once it has a database; its lines use
+  server persists through `Log.layer` once it has a database; its lines use
   `location = 'automation'` (and process-wide lines also use `agentId = 'automation'`), while
   durable work remains `automation_jobs`. A fatal path flushes the log, then Sentry, then exits.
 - `Log` installs no Effect `Logger`; `emit` formats, writes and offers synchronously. `console.*`
@@ -756,7 +755,7 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
 ## Sentry
 
 - Initialise the SDK before any Effect code in `src/observability/instrument.ts`, loaded by the
-  `server`, `reverse-proxy` and `automation` wrappers' `--import`: `Sentry.init({ dsn: SENTRY_DSN,
+  `qemu-server`, `qemu-reverse-proxy` and `automation-server` wrappers' `--import`: `Sentry.init({ dsn: SENTRY_DSN,
   tracesSampleRate: 1,
   traceLifecycle: "stream", integrations: [Sentry.httpIntegration({ spans: false }),
   Sentry.nativeNodeFetchIntegration({ spans: false })] })`. `SENTRY_DSN` in `dsn.ts` is the one

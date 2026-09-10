@@ -10,7 +10,7 @@ const SMP = 2;
 const MACHINE = "q35,accel=kvm";
 const CPU = "host";
 
-// `-display help` minus curses, which needs QEMU's stdio and the proxy detaches it.
+// `-display help` minus curses, which needs QEMU's stdio and the qemu server detaches it.
 export const QEMU_DISPLAYS: ReadonlyArray<Domain.QemuDisplay> = Domain.QemuDisplay.literals;
 
 export type ArgsInput = {

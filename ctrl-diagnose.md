@@ -11,7 +11,7 @@ Your goal is one post-run diagnosis for the session you were given: a verdict on
 ./ctrl diagnose        --session-id <id> --verdict passed|failed [--type <key>] --summary <text> --model <id>
 ```
 
-Every value is a flag. Everything is read from and written to the database: no proxy, no token, no server url. `DATABASE_URL` is already in this process; do not write a `.env`. A command that works exits 0. A command that fails exits 1 and prints the error: one headline, then the stack trace and the cause behind it. Read the headline first. `./ctrl <action> --help` prints that action's flags.
+Every value is a flag. Everything is read from and written to the database: no qemu server, no token, no server url. `DATABASE_URL` is already in this process; do not write a `.env`. A command that works exits 0. A command that fails exits 1 and prints the error: one headline, then the stack trace and the cause behind it. Read the headline first. `./ctrl <action> --help` prints that action's flags.
 
 ## session
 
@@ -25,7 +25,7 @@ Prints everything stored for the session as one JSON object, keyed `session`, `l
 - `--test-results` — the test result the driver closed, or `null`: `status` (`passed` or `failed`), `reason`, `model` (the Cursor model that drove it).
 - `--test-def` — the mission: `name`, `description`, `instruction`, and `proof`, what had to be on screen for a pass. Judge against the proof.
 - `--test-run` — the run the result belongs to, or `null`: `iso`, `serverUrl`, `status`.
-- `--logs` — the proxy's log lines, oldest first: `starting`, `intent start; <message>` before every group of actions, `image; ... ; <url>` for every screenshot, `stopped; <status>; <reason>` at the end.
+- `--logs` — the qemu server's log lines, oldest first: `starting`, `intent start; <message>` before every group of actions, `image; ... ; <url>` for every screenshot, `stopped; <status>; <reason>` at the end.
 - `--actions` — every QMP exchange, oldest first: the keys and mouse events sent, and QEMU's reply.
 - `--images` — every screenshot, oldest first, as `{ id, actionId, url, createdAt }`. The last one is what the driver saw when it delivered its verdict. Look at it with [session image](#session-image), and at any image around a step you suspect.
 - `--debug-logs` — saved when the session ended any way but `succeeded`, else `null`: `sources.serial` is the guest's console, `sources.qemu` QEMU's stderr, `sources.proxy` and `sources.actions` the lines above as text.
@@ -42,7 +42,7 @@ Prints everything stored for the session as one JSON object, keyed `session`, `l
 ./session image --image-id <id> -o <file>
 ```
 
-Writes one screenshot as a PNG, straight from the database — no proxy, no token, only `DATABASE_URL`. `--image-id` is the `id` from `--images`. Always look at the final image before any verdict: a `passed` verdict means the proof is on it. When a log line, an action, or the serial console makes you suspect a step — a chord that changed nothing, a stall, a screen the driver described wrongly — fetch the images around that step too and look at them; they decide the cause of a `failed` verdict. An id no image has is a failure.
+Writes one screenshot as a PNG, straight from the database — no qemu server, no token, only `DATABASE_URL`. `--image-id` is the `id` from `--images`. Always look at the final image before any verdict: a `passed` verdict means the proof is on it. When a log line, an action, or the serial console makes you suspect a step — a chord that changed nothing, a stall, a screen the driver described wrongly — fetch the images around that step too and look at them; they decide the cause of a `failed` verdict. An id no image has is a failure.
 
 ```bash
 ./session image --image-id 9b2f...2c3d -o last.png
