@@ -14,6 +14,7 @@
     "qemu-server": "node --experimental-strip-types --import ./src/observability/instrument.ts src/qemu-server/main.ts",
     "qemu-reverse-proxy": "node --experimental-strip-types --import ./src/observability/instrument.ts src/qemu-reverse-proxy/main.ts",
     "automation-server": "node --experimental-strip-types --import ./src/observability/instrument.ts src/automation-server/main.ts",
+    "automation-client": "node --experimental-strip-types --import ./src/observability/instrument.ts src/automation-client/main.ts",
     "dev": "wrangler dev --remote",
     "check:lint": "oxlint --deny-warnings .",
     "check:format": "oxfmt --check .",

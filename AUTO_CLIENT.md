@@ -187,7 +187,7 @@ named case inside one, and is its own todo.
       ENOENT` and the rendered error contains no key; a signal death nobody asked for is `RunFailed`
       with the platform's sentence; closing the scope mid-run records `SIGTERM` on the child and
       removes the directory; a stdout line that is not JSON is ignored.
-- [ ] `test/automation-client/runs.unit.test.ts` (fake runner, fake stats, fake log, `TestClock`) —
+- [x] `test/automation-client/runs.unit.test.ts` (fake runner, fake stats, fake log, `TestClock`) —
       happy: `stats.agents` is 0, 1 while a run is held open, 0 after; two runs held open count 2;
       the runner receives the key and the prompt as sent; the response is `{ model, session, text,
       elapsedMs }` with `elapsedMs` from the clock; the lines are `run started; opencode; N chars`
@@ -199,7 +199,7 @@ named case inside one, and is its own todo.
       interrupting the run fiber closes the scope and logs `run aborted; client disconnected after
       Tms` when the cause carries `ClientAbort`, `run aborted; interrupted after Tms` otherwise; a
       runner defect propagates as a defect, the count is 0 and the scope closed.
-- [ ] `test/automation-client/http.unit.test.ts` (in-process `HttpRouter.serve` over fakes,
+- [x] `test/automation-client/http.unit.test.ts` (in-process `HttpRouter.serve` over fakes,
       `HttpApiClient.make(AutomationClientApi)` and a raw `HttpClient` for refusals) — happy: 200
       with `{ model, session, text, elapsedMs }`. Unhappy: a missing or wrong bearer is 401 `{
       "error": "unauthorized" }`, one error line attributed `automation-client`, `skipSentry`; an
@@ -208,7 +208,7 @@ named case inside one, and is its own todo.
       `RunTimedOut` is 504, attributed the same way; `/linear`, `/stats`, `/start`, `/servers` and
       `GET /run` are 404 `{ "error": "not found" }` and never logged; a runner defect is 500 `{
       "error": "internal error" }` logged with its cause.
-- [ ] `test/automation-client/command.unit.test.ts` (mirrors `test/automation-server/command.unit.
+- [x] `test/automation-client/command.unit.test.ts` (mirrors `test/automation-server/command.unit.
       test.ts`) — `--help` lists `--port` and `--url` and touches nothing; `--port forty` is `ShowHelp`;
       `--url not-a-url` is refused by the flag with `url must be an http or https url`; the default is
       port 42071 and `Option.none()` for the url; `--url http://127.0.0.1:1` reaches `serve` as given;
@@ -216,7 +216,7 @@ named case inside one, and is its own todo.
       `automation-client: missing host requirements:\nopencode not on PATH`, no ping, no listen; an
       unreachable database is fatal `automation-client: database unreachable: <reason>`; a server
       error after listen and a bind failure are fatal with the error's own message.
-- [ ] `test/integration/automation-client.integration.test.ts` (black-box: the wrapper spawned, a fake
+- [x] `test/integration/automation-client.integration.test.ts` (black-box: the wrapper spawned, a fake
       `opencode` shell script first on `PATH`, stdout and stderr captured) — refusals: `--help` exits
       0; `--port forty` exits 1; an empty `OLIGARCHY_TOKEN` exits 1 with `OLIGARCHY_TOKEN is not set`;
       an empty `DATABASE_URL` likewise; no `opencode` on `PATH` exits 1 with the fatal line; an
@@ -230,7 +230,7 @@ named case inside one, and is its own todo.
       fake that exits 1 is 502; `SIGTERM` mid-run leaves no child (the pid is
       gone), exits 0 and deletes the row; `SIGINT` idle exits 0 and the port refuses afterwards;
       stdout and stderr opened on `/dev/full` do not take the process down.
-- [ ] `test/support/fake-runner.ts` — an `AgentRunner` whose outcomes are scripted per call, with a
+- [x] `test/support/fake-runner.ts` — an `AgentRunner` whose outcomes are scripted per call, with a
       `Deferred` gate to hold a run open, recording every input and whether its scope's finalizer
       ran.
 - [x] `test/support/fake-stats.ts` — a `Stats` answering fixed host stats (today's `fakeStats` in

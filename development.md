@@ -14,7 +14,7 @@ exist.
 ## Toolchain
 
 - Run on Node 26 with npm. Every executable is a `#!/bin/sh` wrapper running
-  `node --experimental-strip-types` (`./qemu-server`, `./qemu-reverse-proxy` and `./automation-server` add
+  `node --experimental-strip-types` (`./qemu-server`, `./qemu-reverse-proxy`, `./automation-server` and `./automation-client` add
   `--import ./src/observability/instrument.ts`); types are stripped, not transformed, so
   `erasableSyntaxOnly` stays on.
 - Install with `npm ci`; `prepare` runs `effect-tsgo patch --oxlint` so the `effecttsgo/*` rules
@@ -68,7 +68,7 @@ Durable preferences from the maintainer; when they conflict with generic best pr
 ## Layout
 
 - The root holds `AGENTS.md`, the executable wrappers (`./client`, `./client-with-image`,
-  `./ctrl`, `./qemu-server`, `./qemu-reverse-proxy`, `./automation-server`, `./session`), the tooling files,
+  `./ctrl`, `./qemu-server`, `./qemu-reverse-proxy`, `./automation-server`, `./automation-client`, `./session`), the tooling files,
   `drizzle/` (migrations), `public/` and `prompts/`, the operator documents, this document, `src/`
   and `test/`.
 - `src/` is one directory per process plus the shared kernel (`src/shared/`, `src/config.ts`,
@@ -748,7 +748,9 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
   never only to callers. `Log.layerStdout` persists nothing: it is for tests. The automation
   server persists through `Log.layer` once it has a database; its lines use
   `location = 'automation-server'` (and process-wide lines also use `agentId = 'automation-server'`), while
-  durable work remains `automation_jobs`. A fatal path flushes the log, then Sentry, then exits.
+  durable work remains `automation_jobs`. The automation client's process-wide lines use
+  `location = 'automation-client'`; a run's lines use `location = 'automation-<key>'` with that
+  ticket as `agentId`. A fatal path flushes the log, then Sentry, then exits.
 - `Log` installs no Effect `Logger`; `emit` formats, writes and offers synchronously. `console.*`
   appears only in `src/dashboard/**` and `vitest.global-setup.ts`. Test log output through the
   fake `Log` layer (`test/support/log.ts`) or `Log.layerStdout` with `TestConsole.logLines`.
@@ -756,7 +758,7 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
 ## Sentry
 
 - Initialise the SDK before any Effect code in `src/observability/instrument.ts`, loaded by the
-  `qemu-server`, `qemu-reverse-proxy` and `automation-server` wrappers' `--import`: `Sentry.init({ dsn: SENTRY_DSN,
+  `qemu-server`, `qemu-reverse-proxy`, `automation-server` and `automation-client` wrappers' `--import`: `Sentry.init({ dsn: SENTRY_DSN,
   tracesSampleRate: 1,
   traceLifecycle: "stream", integrations: [Sentry.httpIntegration({ spans: false }),
   Sentry.nativeNodeFetchIntegration({ spans: false })] })`. `SENTRY_DSN` in `dsn.ts` is the one
