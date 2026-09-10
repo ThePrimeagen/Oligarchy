@@ -11,10 +11,10 @@ import * as DbSchema from "../../src/db/schema.ts";
 import * as Postgres from "../support/postgres.ts";
 import * as StubProxy from "../support/stub-proxy.ts";
 
-const ROOT = resolve(import.meta.dirname, "../../..");
+const ROOT = resolve(import.meta.dirname, "../..");
 const SESSION = resolve(ROOT, "session");
-const CLIENT_MAIN = resolve(ROOT, "v2/src/client/main.ts");
-const CTRL_MAIN = resolve(ROOT, "v2/src/ctrl/main.ts");
+const CLIENT_MAIN = resolve(ROOT, "src/client/main.ts");
+const CTRL_MAIN = resolve(ROOT, "src/ctrl/main.ts");
 const { SESSION_ID, FOLLOWED_ID, ENDED_ID, DROPPED_ID, ENDLESS_ID } = StubProxy;
 const ESC = String.fromCharCode(27);
 const ALT_SCREEN_ON = `${ESC}[?1049h`;

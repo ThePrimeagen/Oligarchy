@@ -5,7 +5,7 @@ cd "$(dirname "$0")/.."
 # Nothing here needs DATABASE_URL, and environment builds run install without agent secrets,
 # so it must not be required; start.sh reports it missing at boot instead.
 
-# v2 runs on Node 26 (package.json engines, CI). The base image ships Node 22, whose npm 10
+# The project runs on Node 26 (package.json engines, CI). The base image ships Node 22, whose npm 10
 # resolves vite's optional esbuild peer differently and rejects package-lock.json under npm ci.
 export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
 if [ ! -s "$NVM_DIR/nvm.sh" ]; then

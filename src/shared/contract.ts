@@ -106,6 +106,10 @@ export class Servers extends Schema.Class<Servers>("@oligarchy/shared/contract/S
   servers: Schema.Array(Server),
 }) {}
 
+export class RunBody extends Schema.Class<RunBody>("@oligarchy/shared/contract/RunBody")({
+  prompt: Schema.String,
+}) {}
+
 const STORED_IMAGE_ORIGIN = "https://oligarchy.trm.sh";
 
 export const StoredImageUrl = (id: string): string => `${STORED_IMAGE_ORIGIN}/images/${id}`;
