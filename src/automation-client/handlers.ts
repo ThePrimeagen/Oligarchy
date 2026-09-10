@@ -9,7 +9,9 @@ import * as OpenCode from "./opencode.ts";
 
 const ok = Contract.Ok.make({});
 
-export const BearerAuthLive = Layer.unwrap(Effect.map(Config.oligarchyToken, Middleware.bearerAuth));
+export const BearerAuthLive = Layer.unwrap(
+  Effect.map(Config.oligarchyToken, Middleware.bearerAuth),
+);
 
 export const RunsLive = HttpApiBuilder.group(Api.AutomationClientApi, "Runs", (handlers) =>
   handlers.handle("run", ({ payload }) =>

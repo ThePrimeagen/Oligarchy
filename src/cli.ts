@@ -34,13 +34,13 @@ export const run = Effect.fn("Cli.run")(function* (command: string, args: Readon
         ],
         { concurrency: "unbounded" },
       );
-      if (code !== 0) {
-        const trimmed = stderr.trim();
-        return yield* failed(
-          command,
-          trimmed === "" ? `${command} exited ${String(code)}` : trimmed,
-        );
-      }
+      const trimmed = stderr.trim();
+      yield* Effect.succeed(code).pipe(
+        Effect.filterOrFail(
+          (exit) => exit === 0,
+          (exit) => failed(command, trimmed === "" ? `${command} exited ${String(exit)}` : trimmed),
+        ),
+      );
     }),
   );
 });

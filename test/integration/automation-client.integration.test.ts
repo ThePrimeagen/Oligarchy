@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { env as processEnv } from "node:process";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -179,10 +180,12 @@ describe("automation client POST /run", () => {
       const process = spawnAutomationClient(
         ["--port", String(port)],
         {},
-        `${bin}:${process.env.PATH ?? ""}`,
+        `${bin}:${processEnv.PATH ?? ""}`,
       );
       try {
-        await process.waitFor(new RegExp(`automation client listening on 127.0.0.1:${String(port)}`));
+        await process.waitFor(
+          new RegExp(`automation client listening on 127.0.0.1:${String(port)}`),
+        );
         const response = await request(
           port,
           { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
@@ -205,10 +208,12 @@ describe("automation client POST /run", () => {
       const process = spawnAutomationClient(
         ["--port", String(port)],
         {},
-        `${bin}:${process.env.PATH ?? ""}`,
+        `${bin}:${processEnv.PATH ?? ""}`,
       );
       try {
-        await process.waitFor(new RegExp(`automation client listening on 127.0.0.1:${String(port)}`));
+        await process.waitFor(
+          new RegExp(`automation client listening on 127.0.0.1:${String(port)}`),
+        );
         const response = await request(
           port,
           { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
@@ -231,10 +236,12 @@ describe("automation client POST /run", () => {
       const process = spawnAutomationClient(
         ["--port", String(port)],
         {},
-        `${bin}:${process.env.PATH ?? ""}`,
+        `${bin}:${processEnv.PATH ?? ""}`,
       );
       try {
-        await process.waitFor(new RegExp(`automation client listening on 127.0.0.1:${String(port)}`));
+        await process.waitFor(
+          new RegExp(`automation client listening on 127.0.0.1:${String(port)}`),
+        );
         const response = await request(
           port,
           { "content-type": "application/json" },

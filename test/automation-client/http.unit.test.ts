@@ -1,6 +1,6 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { Effect, Fiber, Layer } from "effect";
+import { Effect, Fiber, Layer, Schema } from "effect";
 import { HttpBody, HttpClient, HttpRouter } from "effect/unstable/http";
 import { NodeHttpServer } from "@effect/platform-node";
 import * as Handlers from "../../src/automation-client/handlers.ts";
@@ -36,7 +36,13 @@ const serve = (fixed: Fixture) =>
 
 const headers = { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" };
 
-const run = (http: HttpClient.HttpClient, prompt = "do the work", extraHeaders = headers) =>
+const decodeErrorBody = Schema.decodeUnknownSync(Schema.Struct({ error: Schema.String }));
+
+const run = (
+  http: HttpClient.HttpClient,
+  prompt = "do the work",
+  extraHeaders: Record<string, string> = headers,
+) =>
   http.post("/run", {
     headers: extraHeaders,
     body: HttpBody.text(JSON.stringify({ prompt }), "application/json"),
@@ -65,7 +71,10 @@ describe("POST /run happy path", () => {
       yield* Effect.gen(function* () {
         const http = yield* HttpClient.HttpClient;
         const pending = yield* Effect.forkChild(run(http));
-        yield* Effect.yieldNow;
+        for (let i = 0; i < 100 && fixed.spawner.spawned[0] === undefined; i++) {
+          yield* Effect.yieldNow;
+        }
+        expect(fixed.spawner.spawned[0]).toBeDefined();
         expect(pending.pollUnsafe()).toBeUndefined();
         yield* fixed.spawner.spawned[0]?.exit(0) ?? Effect.void;
         const response = yield* Fiber.join(pending);
@@ -127,9 +136,8 @@ describe("POST /run authentication and decoding", () => {
           body: HttpBody.text("{}", "application/json"),
         });
         expect(response.status).toBe(400);
-        expect((yield* response.json) as { error: string }).toMatchObject({
-          error: expect.stringContaining("prompt") as string,
-        });
+        const body = decodeErrorBody(yield* response.json);
+        expect(body.error).toContain("prompt");
       }).pipe(Effect.provide(serve(fixed)));
       expect(fixed.spawner.spawned).toEqual([]);
     }),
