@@ -18,7 +18,7 @@ describe("OpenCode.run happy path", () => {
     }),
   );
 
-  it.effect("passes a dashed prompt after -- so opencode does not treat it as a flag", () => {
+  it.effect("passes a dashed prompt after -- so opencode does not treat it as a flag", () =>
     Effect.gen(function* () {
       const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
       yield* OpenCode.run("--help").pipe(Effect.provide(spawner.layer));

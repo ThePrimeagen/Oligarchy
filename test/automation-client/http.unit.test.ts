@@ -192,12 +192,12 @@ describe("interruption", () => {
         yield* Fiber.interrupt(pending);
         const exit = yield* Fiber.await(pending);
         expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true);
-        expect(yield* (spawned?.isRunning ?? Effect.succeed(false))).toBe(true);
+        expect(yield* spawned?.isRunning ?? Effect.succeed(false)).toBe(true);
         yield* spawned?.exit(0) ?? Effect.void;
-        for (let i = 0; i < 100 && (yield* (spawned?.isRunning ?? Effect.succeed(false))); i++) {
+        for (let i = 0; i < 100 && (yield* spawned?.isRunning ?? Effect.succeed(false)); i++) {
           yield* Effect.yieldNow;
         }
-        expect(yield* (spawned?.isRunning ?? Effect.succeed(true))).toBe(false);
+        expect(yield* spawned?.isRunning ?? Effect.succeed(true)).toBe(false);
         expect(spawned?.kills).toEqual([]);
       }).pipe(Effect.provide(serve(fixed)));
     }),

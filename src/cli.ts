@@ -42,8 +42,12 @@ export const run = Effect.fn("Cli.run")(function* (command: string, args: Readon
       );
       const trimmed = stderr.trim();
       if (code !== 0) {
-        return yield* failed(command, trimmed === "" ? `${command} exited ${String(code)}` : trimmed);
+        return yield* failed(
+          command,
+          trimmed === "" ? `${command} exited ${String(code)}` : trimmed,
+        );
       }
+      return yield* Effect.void;
     }),
   );
 });

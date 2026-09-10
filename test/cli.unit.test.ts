@@ -1,6 +1,6 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { Effect, Fiber, Layer, Sink, Stream } from "effect";
+import { Effect, Fiber, Layer, PlatformError, Sink, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import * as Cli from "../src/cli.ts";
 import * as FakeSpawner from "./support/fake-spawner.ts";
@@ -98,7 +98,13 @@ describe("Cli.run unhappy path", () => {
 
   it.effect("forwards a stderr stream failure as CliFailed, not a defect", () =>
     Effect.gen(function* () {
-      const cause = new Error("stderr pipe broken");
+      const cause = PlatformError.systemError({
+        _tag: "Unknown",
+        module: "ChildProcess",
+        method: "stderr",
+        description: "stderr pipe broken",
+        cause: new Error("stderr pipe broken"),
+      });
       const layer = Layer.succeed(ChildProcessSpawner.ChildProcessSpawner)(
         ChildProcessSpawner.make(() =>
           Effect.succeed(
