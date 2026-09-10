@@ -361,14 +361,18 @@ one of these methods is the automation server's; the automation client reads non
   `issue` is expected to accept the identifier in place of the UUID — S7 confirms it), decoded in
   two phases like the rest; a null issue or a null description is a `LinearError` naming the
   ticket. The automation server therefore reads `LINEAR_API_TOKEN` (§11).
-- **`diagnose`**: `prompts/diagnosing-agent.html`, restored from the version #102 deleted (with
-  `driving-agent.html`, `src/ctrl/cursor.ts` and `ctrl test run` / `ctrl diagnose run`, when the
-  Cursor cloud-agent kickoff left `ctrl`; `git show e885aae^:prompts/diagnosing-agent.html`) and
-  trimmed to what the reviewer needs — the ticket, the result id, and `ctrl-diagnose.md` embedded as
-  `{{CTRL_DIAGNOSE_MD}}` — rendered by `Prompts.renderDiagnosingAgent({ LINEAR_TICKET, RESULT_ID })`
-  in `src/ctrl/prompts.ts` (a second render function beside `renderLinearIssue`, sharing `read`,
-  `fill` and `GUIDES`). The reviewer finds the session with `./ctrl session --search`, as the
-  template already told it to.
+- **`diagnose`**: `prompts/diagnosing-agent.html`. It and `driving-agent.html` were deleted by
+  [#102](https://github.com/ThePrimeagen/Oligarchy/pull/102) (`e885aae`, 2026-09-09) together with
+  `src/ctrl/cursor.ts` and `ctrl test run` / `ctrl diagnose run`, when the Cursor cloud-agent
+  kickoff left `ctrl`; both are restored on this branch exactly as they were the commit before
+  (`e885aae^`, the last of that day's hand edits). The dispatcher renders it with
+  `Prompts.renderDiagnosingAgent({ LINEAR_TICKET, RESULT_ID })` in `src/ctrl/prompts.ts` (a second
+  render function beside `renderLinearIssue`, sharing `read`, `fill` and `GUIDES`, with
+  `CTRL_DIAGNOSE_MD: ctrl-diagnose.md` added to `GUIDES`). As restored, the template also names
+  `{{TEST_RESULT_ID}}` and `{{MODEL}}`; the dispatcher slice settles those two — `TEST_RESULT_ID`
+  and `RESULT_ID` are one value spelled twice, and the model is the runner's, not the dispatcher's
+  (next bullet). The reviewer finds the session with `./ctrl session --search`, as the template
+  already tells it to.
 - Neither template names the model. The automation client puts the runner's model in the child's
   environment as `OLIGARCHY_MODEL` (§6.2), and a later edit of either template can tell the agent
   to pass `--model "$OLIGARCHY_MODEL"` where today's says "the model you are running as".
