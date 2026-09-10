@@ -83,7 +83,7 @@ const issueBody = (state: string, extras: Record<string, unknown> = {}) =>
         type: state === "Needs Review" ? "started" : "unstarted",
       },
     },
-    updatedFrom: { state: { name: "Todo" } },
+    updatedFrom: { stateId: "a4134e28-ad3b-4e3f-b7d2-4fb9132b95e0" },
     ...extras,
   });
 

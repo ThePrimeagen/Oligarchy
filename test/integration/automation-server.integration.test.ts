@@ -318,6 +318,7 @@ describeServing("automation server serving", () => {
     const port = await freePort();
     const process = spawnAutomationServer(["--port", String(port)]);
     const record = join(process.cwd, "automation-logs");
+    const linearId = `OLI-${randomUUID().slice(0, 8)}`;
     try {
       await process.waitFor(/automation server listening/);
       expect(lines(process.stdout())).toContain(
@@ -359,7 +360,6 @@ describeServing("automation server serving", () => {
       expect(await signed.json()).toEqual({ ok: "true" });
       expect(existsSync(record)).toBe(false);
 
-      const linearId = `OLI-${randomUUID().slice(0, 8)}`;
       const resultId = await seedResult(linearId);
       const driveBody = JSON.stringify({
         action: "update",
@@ -372,7 +372,7 @@ describeServing("automation server serving", () => {
             type: "unstarted",
           },
         },
-        updatedFrom: { state: { name: "Backlog" } },
+        updatedFrom: { stateId: "a4134e28-ad3b-4e3f-b7d2-4fb9132b95e0" },
       });
       const drive = await request(
         port,
@@ -398,7 +398,7 @@ describeServing("automation server serving", () => {
             type: "started",
           },
         },
-        updatedFrom: { state: { name: "In Progress" } },
+        updatedFrom: { stateId: "2a566723-82d0-40ef-ac2a-55b1811da198" },
       });
       const diagnose = await request(
         port,
@@ -435,9 +435,11 @@ describeServing("automation server serving", () => {
     expect(output).toContain("[automation] automation: error: POST /linear failed: unauthorized");
     expect(output).toContain("[automation] automation: linear webhook recorded");
     expect(output).toContain(
-      "[OLI-1063] automation: linear webhook queued drive; Automation Needed",
+      `[${linearId}] automation: linear webhook queued drive; Automation Needed`,
     );
-    expect(output).toContain("[OLI-1063] automation: linear webhook queued diagnose; Needs Review");
+    expect(output).toContain(
+      `[${linearId}] automation: linear webhook queued diagnose; Needs Review`,
+    );
     expect(output.some((line) => line.includes("/automate"))).toBe(false);
     expect(output.some((line) => line.includes("/start"))).toBe(false);
     expect(process.stderr()).toBe("");
