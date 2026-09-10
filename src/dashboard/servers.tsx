@@ -59,7 +59,7 @@ const Row: FC<{ server: Server }> = ({ server }) => {
         </td>
       ) : (
         <>
-          <td>{server.stats.qemus}</td>
+          <td>{"qemus" in server.stats ? server.stats.qemus : 0}</td>
           <td>
             {gigabytes(server.stats.memory.usedBytes)} / {gigabytes(server.stats.memory.totalBytes)}{" "}
             GB

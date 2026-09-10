@@ -47,8 +47,9 @@ export const actionState = pgEnum("action_state", ["completed", "failed"]);
 // The reviewer's own answer to "did the proof land": the test's vocabulary, not the session's.
 export const diagnosisVerdict = pgEnum("diagnosis_verdict", ["passed", "failed"]);
 
-// What kind of machine a server boots, and so which reverse proxy fronts it. One kind so far.
-export const serverType = pgEnum("server_type", ["qemu"]);
+// What kind of machine a server boots, and so which reverse proxy fronts it or which dispatcher
+// places on it. qemu servers boot machines; automation servers run agents.
+export const serverType = pgEnum("server_type", ["qemu", "automation"]);
 
 export const automationAction = pgEnum("automation_action", ["drive", "diagnose"]);
 export const automationJobStatus = pgEnum("automation_job_status", [
@@ -187,13 +188,15 @@ export const postRunDiagnosis = pgTable(
   ],
 );
 
-// What a server last said of itself, as the fleet page shows it: machines running, memory in
-// use, and the cpu busy over its newest one, two and three minutes, in percent.
-export type ServerStats = {
-  readonly qemus: number;
+export type HostRowStats = {
   readonly memory: { readonly totalBytes: number; readonly usedBytes: number };
   readonly cpu: { readonly mean1m: number; readonly mean2m: number; readonly mean3m: number };
 };
+// The count a server's kind reports: machines running, or agents running. The key is the kind's
+// word, so a row reads as its server would say it.
+export type QemuServerStats = HostRowStats & { readonly qemus: number };
+export type AutomationServerStats = HostRowStats & { readonly agents: number };
+export type ServerStats = QemuServerStats | AutomationServerStats;
 
 // The fleet the reverse proxy places sessions on: one row per server, keyed by the url exactly
 // as given, written by an operator (the dashboard, POST /servers) or by the server itself. A

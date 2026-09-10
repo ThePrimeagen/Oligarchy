@@ -2,7 +2,7 @@ import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { Context, Effect, Exit, Layer, Scope } from "effect";
 import { TestClock } from "effect/testing";
-import * as Stats from "../../src/qemu/stats.ts";
+import * as Stats from "../../src/host/stats.ts";
 import * as FakeLog from "../support/log.ts";
 
 type Scripted = {
@@ -13,7 +13,7 @@ type Scripted = {
 // Serves the snapshots in order; the first one is taken when the layer is built.
 const scripted = (
   snapshots: ReadonlyArray<Stats.CpuTimes | Error>,
-  memory: Stats.Memory = { totalBytes: 16_000, freeBytes: 6_000 },
+  memory: Stats.HostMemory = { totalBytes: 16_000, freeBytes: 6_000 },
 ): Scripted => {
   let index = 0;
   return {
@@ -52,8 +52,7 @@ describe("Stats happy path", () => {
   it.effect("reports zeros before the first sample and the memory split", () =>
     Effect.gen(function* () {
       const { stats } = yield* build(scripted([snapshot(4, 0, 0)]).source);
-      expect(yield* stats.collect(3)).toEqual({
-        qemus: 3,
+      expect(yield* stats.collect).toEqual({
         memory: { totalBytes: 16_000, usedBytes: 10_000, freeBytes: 6_000 },
         cpu: {
           cores: 4,
@@ -82,7 +81,7 @@ describe("Stats happy path", () => {
       expect(calls()).toBe(1);
       yield* TestClock.adjust(1);
       expect(calls()).toBe(2);
-      expect((yield* stats.collect(0)).cpu).toEqual({
+      expect((yield* stats.collect).cpu).toEqual({
         cores: 4,
         mean: 50,
         mean1m: 50,
@@ -94,7 +93,7 @@ describe("Stats happy path", () => {
         p90: 50,
       });
       yield* TestClock.adjust(Stats.SAMPLE_INTERVAL_MS);
-      expect((yield* stats.collect(0)).cpu).toEqual({
+      expect((yield* stats.collect).cpu).toEqual({
         cores: 4,
         mean: 70,
         mean1m: 70,
@@ -119,7 +118,7 @@ describe("Stats happy path", () => {
       }
       const { stats } = yield* build(scripted(snapshots).source);
       yield* TestClock.adjust(Stats.SAMPLE_INTERVAL_MS * (Stats.MAX_SAMPLES + 1));
-      const { cpu } = yield* stats.collect(0);
+      const { cpu } = yield* stats.collect;
       // Samples 1..61 were taken; the window holds 2..61.
       expect(cpu.mean).toBe(31.5);
       expect(cpu.p10).toBe(7.9);
@@ -139,7 +138,7 @@ describe("Stats happy path", () => {
       }
       const { stats } = yield* build(scripted(snapshots).source);
       yield* TestClock.adjust(Stats.SAMPLE_INTERVAL_MS * (Stats.MAX_SAMPLES + 1));
-      const { cpu } = yield* stats.collect(0);
+      const { cpu } = yield* stats.collect;
       expect(cpu.mean).toBe(31.5);
       expect(cpu.mean1m).toBe(55.5);
       expect(cpu.mean2m).toBe(49.5);
@@ -159,7 +158,7 @@ describe("Stats happy path", () => {
         ]).source,
       );
       yield* TestClock.adjust(Stats.SAMPLE_INTERVAL_MS * 3);
-      const { cpu } = yield* stats.collect(0);
+      const { cpu } = yield* stats.collect;
       expect(cpu.mean).toBe(30);
       expect(cpu.mean1m).toBe(30);
       expect(cpu.mean2m).toBe(30);
@@ -177,7 +176,7 @@ describe("Stats happy path", () => {
       ]);
       const { stats } = yield* build(source);
       yield* TestClock.adjust(Stats.SAMPLE_INTERVAL_MS * 3);
-      expect((yield* stats.collect(0)).cpu.mean).toBe(90);
+      expect((yield* stats.collect).cpu.mean).toBe(90);
     }),
   );
 
@@ -204,9 +203,9 @@ describe("Stats unhappy path", () => {
       expect(log.lines).toMatchObject([
         { level: "error", text: "failed to sample cpu usage: cpus unavailable", cause: boom },
       ]);
-      expect((yield* stats.collect(0)).cpu.mean).toBe(0);
+      expect((yield* stats.collect).cpu.mean).toBe(0);
       yield* TestClock.adjust(Stats.SAMPLE_INTERVAL_MS);
-      expect((yield* stats.collect(0)).cpu.mean).toBe(50);
+      expect((yield* stats.collect).cpu.mean).toBe(50);
       expect(log.lines).toHaveLength(1);
     }),
   );

@@ -29,7 +29,7 @@ import * as Sentry from "../observability/sentry.ts";
 import * as Iso from "../qemu/iso.ts";
 import * as Keys from "../qemu/keys.ts";
 import * as Qemu from "../qemu/qemu.ts";
-import * as Stats from "../qemu/stats.ts";
+import * as Stats from "../host/stats.ts";
 import type * as Qmp from "../qmp/client.ts";
 import * as Contract from "../shared/contract.ts";
 import * as Domain from "../shared/domain.ts";
@@ -936,7 +936,9 @@ const make = Effect.gen(function* () {
     intentEnd,
     stop,
     follow,
-    stats: Effect.flatMap(Ref.get(sessions), (map) => stats.collect(map.size)),
+    stats: Effect.flatMap(Ref.get(sessions), (map) =>
+      Effect.map(stats.collect, (host) => Contract.Stats.make({ qemus: map.size, ...host })),
+    ),
   };
   return service;
 });

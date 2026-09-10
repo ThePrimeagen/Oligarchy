@@ -25,6 +25,7 @@ import * as Domain from "../../src/shared/domain.ts";
 import * as Errors from "../../src/shared/errors.ts";
 import * as FakeLog from "../support/log.ts";
 import * as FakeQemu from "../support/fake-qemu.ts";
+import * as FakeStats from "../support/fake-stats.ts";
 import * as Stores from "../support/stores.ts";
 import * as Recording from "../support/tracer.ts";
 
@@ -118,7 +119,7 @@ const harness = (options: Options = {}) => {
       Layer.mergeAll(
         qemu.layer,
         iso.layer,
-        FakeQemu.fakeStats,
+        FakeStats.fakeStats,
         sessions.layer,
         actions.layer,
         debugLogs.layer,
@@ -1989,6 +1990,26 @@ describe("drain", () => {
 // ---------------------------------------------------------------------------
 
 describe("stats", () => {
+  it.effect(
+    "composes qemus from the map with the host sampler: 0 before a start, 1 after, 0 after stop",
+    () =>
+      Effect.gen(function* () {
+        const h = harness();
+        yield* h.run(
+          Effect.gen(function* () {
+            const sessions = yield* Sessions.Sessions;
+            expect((yield* sessions.stats).qemus).toBe(0);
+            const { live } = yield* start();
+            expect(yield* sessions.stats).toEqual(
+              Contract.Stats.make({ qemus: 1, ...FakeStats.ZERO_STATS }),
+            );
+            yield* sessions.stop(live, undefined, undefined);
+            expect((yield* sessions.stats).qemus).toBe(0);
+          }),
+        );
+      }),
+  );
+
   it.effect("reports the number of running machines", () =>
     Effect.gen(function* () {
       const h = harness();
@@ -2000,7 +2021,7 @@ describe("stats", () => {
           const { live } = yield* start();
           yield* start(OTHER_AGENT);
           expect(yield* sessions.stats).toEqual(
-            Contract.Stats.make({ qemus: 2, ...FakeQemu.ZERO_STATS }),
+            Contract.Stats.make({ qemus: 2, ...FakeStats.ZERO_STATS }),
           );
           expect(yield* qemus(sessions)).toBe(2);
           yield* sessions.stop(live, undefined, undefined);

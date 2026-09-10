@@ -19,7 +19,7 @@ const BOUNDARY_FILES = new Set([
   "src/qmp/socket.ts",
   "src/qemu-server/main.ts",
   "src/session/readline.ts",
-  "src/qemu/stats.ts",
+  "src/host/stats.ts",
   "src/qemu/qemu.ts",
   "src/observability/instrument.ts",
   "src/observability/render.ts",

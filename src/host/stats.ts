@@ -17,7 +17,7 @@ export type CpuTimes = {
   readonly totalMs: number;
 };
 
-export type Memory = {
+export type HostMemory = {
   readonly totalBytes: number;
   readonly freeBytes: number;
 };
@@ -26,7 +26,7 @@ export type Memory = {
 export type Source = {
   readonly cpuTimes: () => CpuTimes;
   readonly cores: () => number;
-  readonly memory: () => Memory;
+  readonly memory: () => HostMemory;
 };
 
 export const osSource: Source = {
@@ -45,8 +45,13 @@ export const osSource: Source = {
   memory: () => ({ totalBytes: totalmem(), freeBytes: freemem() }),
 };
 
+export type HostStats = {
+  readonly memory: Contract.Memory;
+  readonly cpu: Contract.Cpu;
+};
+
 export type StatsService = {
-  readonly collect: (qemus: number) => Effect.Effect<Contract.Stats>;
+  readonly collect: Effect.Effect<HostStats>;
 };
 
 const round1 = (value: number): number => Math.round(value * 10) / 10;
@@ -107,37 +112,34 @@ const make = (source: Source): Effect.Effect<StatsService, never, Scope.Scope | 
       { startImmediately: true },
     );
 
-    const collect = Effect.fn("Stats.collect")(function* (qemus: number) {
-      return yield* Effect.sync(() => {
-        const memory = source.memory();
-        const sorted = [...samples].sort((left, right) => left - right);
-        return Contract.Stats.make({
-          qemus,
-          memory: Contract.Memory.make({
-            totalBytes: memory.totalBytes,
-            usedBytes: memory.totalBytes - memory.freeBytes,
-            freeBytes: memory.freeBytes,
-          }),
-          cpu: Contract.Cpu.make({
-            cores: source.cores(),
-            mean: mean(sorted),
-            // samples is oldest first, so the tail is the newest minutes.
-            mean1m: mean(samples.slice(-SAMPLES_PER_MINUTE)),
-            mean2m: mean(samples.slice(-2 * SAMPLES_PER_MINUTE)),
-            mean3m: mean(samples.slice(-3 * SAMPLES_PER_MINUTE)),
-            p10: percentile(sorted, 10),
-            p25: percentile(sorted, 25),
-            p75: percentile(sorted, 75),
-            p90: percentile(sorted, 90),
-          }),
-        });
-      });
-    });
+    const collect = Effect.sync(() => {
+      const memory = source.memory();
+      const sorted = [...samples].sort((left, right) => left - right);
+      return {
+        memory: Contract.Memory.make({
+          totalBytes: memory.totalBytes,
+          usedBytes: memory.totalBytes - memory.freeBytes,
+          freeBytes: memory.freeBytes,
+        }),
+        cpu: Contract.Cpu.make({
+          cores: source.cores(),
+          mean: mean(sorted),
+          // samples is oldest first, so the tail is the newest minutes.
+          mean1m: mean(samples.slice(-SAMPLES_PER_MINUTE)),
+          mean2m: mean(samples.slice(-2 * SAMPLES_PER_MINUTE)),
+          mean3m: mean(samples.slice(-3 * SAMPLES_PER_MINUTE)),
+          p10: percentile(sorted, 10),
+          p25: percentile(sorted, 25),
+          p75: percentile(sorted, 75),
+          p90: percentile(sorted, 90),
+        }),
+      } satisfies HostStats;
+    }).pipe(Effect.withSpan("Stats.collect"));
 
     return { collect } satisfies StatsService;
   });
 
-export class Stats extends Context.Service<Stats>()("@oligarchy/qemu/Stats", { make }) {
+export class Stats extends Context.Service<Stats>()("@oligarchy/host/Stats", { make }) {
   // The sampler fiber belongs to this layer's scope: it never keeps the process alive on its own.
   static readonly layer: Layer.Layer<Stats, never, Log.Log> = Layer.effect(this)(
     this.make(osSource),

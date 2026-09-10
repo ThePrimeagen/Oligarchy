@@ -956,7 +956,7 @@ One `it.effect` over the real fakes with `Effect.flip`.
 const Fakes = Layer.mergeAll(
   FakeQemu.fakeQemu().layer,
   FakeQemu.fakeIso().layer,
-  FakeQemu.fakeStats,
+  FakeStats.fakeStats,
   Stores.fakeSessionStore().layer,
   Stores.fakeActionStore().layer,
   FakeLog.fakeLog().layer,

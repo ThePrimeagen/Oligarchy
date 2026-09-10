@@ -2,23 +2,27 @@ import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { Deferred, Effect, Exit, Fiber, Layer, Scope } from "effect";
 import { TestClock } from "effect/testing";
-import * as Heartbeat from "../../src/qemu-server/heartbeat.ts";
+import * as Heartbeat from "../../src/host/heartbeat.ts";
+import type * as DbSchema from "../../src/db/schema.ts";
 import * as Errors from "../../src/shared/errors.ts";
-import * as FakeSessions from "../support/fake-sessions.ts";
 import * as FakeLog from "../support/log.ts";
 import * as Stores from "../support/stores.ts";
 
 const URL = "http://127.0.0.1:55332";
 
-// What FakeSessions.STATS says, cut down to what the row keeps.
-const ROW_STATS = {
+const QEMU_STATS: DbSchema.QemuServerStats = {
   qemus: 1,
   memory: { totalBytes: 16_000, usedBytes: 4_000 },
   cpu: { mean1m: 22.3, mean2m: 21.4, mean3m: 20.9 },
 };
 
-// One heartbeat as the store records it: this server announces itself as a qemu server.
-const ANNOUNCED = { url: URL, type: "qemu", stats: ROW_STATS };
+const AUTOMATION_STATS: DbSchema.AutomationServerStats = {
+  agents: 2,
+  memory: { totalBytes: 16_000, usedBytes: 4_000 },
+  cpu: { mean1m: 22.3, mean2m: 21.4, mean3m: 20.9 },
+};
+
+const ANNOUNCED = { url: URL, type: "qemu", stats: QEMU_STATS };
 const REGISTERED = { url: URL, type: "qemu" };
 
 const refused = Errors.DatabaseError.make({
@@ -27,16 +31,16 @@ const refused = Errors.DatabaseError.make({
   cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
 });
 
-// The loop in a scope of its own, so a test can close it and prove the ticking stops.
 const start = (
   store: Stores.FakeServerStore,
-  sessions = FakeSessions.fakeSessions(),
+  stats: Effect.Effect<DbSchema.ServerStats> = Effect.succeed(QEMU_STATS),
   log = FakeLog.fakeLog(),
+  type: "qemu" | "automation" = "qemu",
 ) =>
   Effect.gen(function* () {
     const scope = yield* Scope.make();
-    yield* Heartbeat.announce(URL).pipe(
-      Effect.provide(Layer.mergeAll(sessions.layer, store.layer, log.layer)),
+    yield* Heartbeat.announce(URL, type, stats).pipe(
+      Effect.provide(Layer.mergeAll(store.layer, log.layer)),
       Scope.provide(scope),
     );
     return { scope, log };
@@ -62,6 +66,21 @@ describe("heartbeat happy path", () => {
         );
         expect(log.lines).toEqual([]);
       }),
+  );
+
+  it.effect("an automation announce writes agents under type automation", () =>
+    Effect.gen(function* () {
+      const store = Stores.fakeServerStore();
+      const { log } = yield* start(
+        store,
+        Effect.succeed(AUTOMATION_STATS),
+        FakeLog.fakeLog(),
+        "automation",
+      );
+      expect(store.heartbeats).toEqual([{ url: URL, type: "automation", stats: AUTOMATION_STATS }]);
+      expect(store.servers).toEqual([{ url: URL, type: "automation" }]);
+      expect(log.lines).toEqual([]);
+    }),
   );
 
   it.effect("stops when the scope it was started in closes", () =>
@@ -126,7 +145,11 @@ describe("heartbeat unhappy path", () => {
     () =>
       Effect.gen(function* () {
         let attempts = 0;
-        const written: Array<typeof ANNOUNCED> = [];
+        const written: Array<{
+          readonly url: string;
+          readonly type: "qemu" | "automation";
+          readonly stats: DbSchema.ServerStats;
+        }> = [];
         const store = Stores.fakeServerStore({
           heartbeat: (url, type, stats) =>
             Effect.suspend(() => {
@@ -156,28 +179,24 @@ describe("heartbeat unhappy path", () => {
       }),
   );
 
-  it.effect(
-    "a defect reading the stats is logged the same way, nothing written, and the loop goes on",
-    () =>
-      Effect.gen(function* () {
-        const boom = new Error("stats exploded");
-        let reads = 0;
-        const sessions = FakeSessions.fakeSessions({
-          stats: Effect.suspend(() => {
-            reads += 1;
-            return reads === 1 ? Effect.die(boom) : Effect.succeed(FakeSessions.STATS);
-          }),
-        });
-        const store = Stores.fakeServerStore();
-        const { log } = yield* start(store, sessions);
-        expect(store.heartbeats).toEqual([]);
-        expect(log.lines).toMatchObject([
-          { level: "error", text: "heartbeat failed: stats exploded", cause: boom },
-        ]);
-        yield* TestClock.adjust("30 seconds");
-        expect(store.heartbeats).toEqual([ANNOUNCED]);
-        expect(log.lines).toHaveLength(1);
-      }),
+  it.effect("the stats effect failing is one heartbeat failed line and the next tick writes", () =>
+    Effect.gen(function* () {
+      const boom = new Error("stats exploded");
+      let reads = 0;
+      const stats = Effect.suspend((): Effect.Effect<DbSchema.ServerStats> => {
+        reads += 1;
+        return reads === 1 ? Effect.die(boom) : Effect.succeed(QEMU_STATS);
+      });
+      const store = Stores.fakeServerStore();
+      const { log } = yield* start(store, stats);
+      expect(store.heartbeats).toEqual([]);
+      expect(log.lines).toMatchObject([
+        { level: "error", text: "heartbeat failed: stats exploded", cause: boom },
+      ]);
+      yield* TestClock.adjust("30 seconds");
+      expect(store.heartbeats).toEqual([ANNOUNCED]);
+      expect(log.lines).toHaveLength(1);
+    }),
   );
 
   it.effect(

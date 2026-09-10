@@ -60,6 +60,8 @@ Everything below follows `development.md`; where the two disagree, that one wins
 - How opencode authenticates to its model provider is not part of this plan. The automation client
   neither reads nor forwards a provider credential; that is solved separately, later.
 - The dispatch loop is in the plan, in `./automation-server`: claim, compose, place, run, close.
+- `prompts/driving-agent.html` and `prompts/diagnosing-agent.html`, deleted by #102, are restored on
+  this branch as they were (§3.4).
 - The processes were renamed on master: `qemu-server`, `qemu-reverse-proxy`, `automation-server`.
   Every path below uses those names. The dashboard's servers page is now two halves, the
   automation queue and the qemu fleet (#109); the automation clients get a table in the automation
@@ -74,19 +76,19 @@ named case inside one, and is its own todo.
 
 ### 1.1 Tests to alter
 
-- [ ] `test/repo/architecture.unit.test.ts` — `BOUNDARY_FILES` names `src/host/stats.ts` instead of
+- [x] `test/repo/architecture.unit.test.ts` — `BOUNDARY_FILES` names `src/host/stats.ts` instead of
       `src/qemu/stats.ts`. Nothing new joins the list: the runner spawns through
       `ChildProcessSpawner` and writes through `FileSystem`.
-- [ ] `test/qemu/stats.unit.test.ts` → `test/host/stats.unit.test.ts` — `collect` takes no count and
+- [x] `test/qemu/stats.unit.test.ts` → `test/host/stats.unit.test.ts` — `collect` takes no count and
       answers `{ memory, cpu }`; the sampler cases move as they are.
-- [ ] `test/qemu-server/heartbeat.unit.test.ts` → `test/host/heartbeat.unit.test.ts` — `announce(url,
+- [x] `test/qemu-server/heartbeat.unit.test.ts` → `test/host/heartbeat.unit.test.ts` — `announce(url,
       type, stats)`; every existing case passes `"qemu"` and a `{ qemus, … }` row. New happy case: an
       `"automation"` announce writes `{ agents, memory, cpu }` under `type: "automation"`. New
       unhappy case: the stats effect failing is one `heartbeat failed:` line and the next tick
       writes.
-- [ ] `test/qemu-server/sessions.unit.test.ts` — `sessions.stats` composes `qemus` from the map with
+- [x] `test/qemu-server/sessions.unit.test.ts` — `sessions.stats` composes `qemus` from the map with
       the host sampler's answer: 0 before a start, 1 after, 0 after stop.
-- [ ] `test/qemu-server/http.unit.test.ts` — `GET /stats` still answers `{ qemus, memory, cpu }`
+- [x] `test/qemu-server/http.unit.test.ts` — `GET /stats` still answers `{ qemus, memory, cpu }`
       exactly as today; the wire the reverse proxy probes is pinned.
 - [ ] `test/dashboard/servers.unit.test.ts` — the fleet lists qemu rows only; a new `Clients` table
       in the automation half renders an automation client's `agents`, memory, cpu means, generation
@@ -231,7 +233,7 @@ named case inside one, and is its own todo.
 - [ ] `test/support/fake-runner.ts` — an `AgentRunner` whose outcomes are scripted per call, with a
       `Deferred` gate to hold a run open, recording every input and whether its scope's finalizer
       ran.
-- [ ] `test/support/fake-stats.ts` — a `Stats` answering fixed host stats (today's `fakeStats` in
+- [x] `test/support/fake-stats.ts` — a `Stats` answering fixed host stats (today's `fakeStats` in
       `fake-qemu.ts`, moved and freed of the count).
 - [ ] `test/support/stores.ts` — `fakeAutomationStore` gains `claimNext` (readiness and order as the
       real query), `closeJob`, `abortRunning`; `fakeServerStore` gains `listAutomationClients`.
@@ -449,7 +451,8 @@ src/host/stats.ts                       moved from src/qemu/stats.ts; collect an
 src/host/heartbeat.ts                   moved from src/qemu-server/heartbeat.ts; announce(url, type, stats)
 src/ctrl/linear.ts                      + issueDescription
 src/ctrl/prompts.ts                     + renderDiagnosingAgent
-prompts/diagnosing-agent.html           restored and trimmed (§3.4)
+prompts/diagnosing-agent.html           restored on this branch (§3.4); its placeholders settled in slice 6
+prompts/driving-agent.html              restored on this branch; the kickoff alternative of D13
 src/shared/api.ts                       + run, Runs group, AutomationClientApi
 src/shared/contract.ts                  + RunBody, RunResponse
 src/shared/errors.ts                    + RunFailed (502), RunTimedOut (504), their Wire codecs
@@ -1279,8 +1282,8 @@ breaks the qemu server or the reverse proxy.
    script, the log locations; `automation-client.md`; the
    `development.md` Layout and Log paragraphs name the new process. Lane:
    `automation-client.integration.test.ts`.
-6. **The dispatch loop** — `Linear.issueDescription`, `Prompts.renderDiagnosingAgent` and the
-   restored template, `AutomationServerConfig`, `clients.ts`, `prompts.ts`, `dispatcher.ts`, the
+6. **The dispatch loop** — `Linear.issueDescription`, `Prompts.renderDiagnosingAgent` over the
+   restored template (its `TEST_RESULT_ID` / `MODEL` placeholders settled), `AutomationServerConfig`, `clients.ts`, `prompts.ts`, `dispatcher.ts`, the
    startup sweep, the automation server's graph. Lane: `automation-server.integration.test.ts`
    (with a stub automation client answering `/run`, as `stub-proxy.ts` stubs a qemu server).
 
@@ -1370,10 +1373,12 @@ shell, its findings written into the constants and fixtures, not into this docum
 - D13 — **The drive prompt is the Linear issue's description; the diagnose prompt is a template.**
   The issue is where the mission was rendered and where a human edits it; re-rendering it from the
   rows cannot reproduce it (the version is not stored), and storing the rendered text on the result
-  is a schema change for a copy. Alternatives: a short kickoff prompt naming the ticket, as the
-  deleted `driving-agent.html` did, which makes Linear MCP inside the agent a hard requirement for
-  the run to do anything (today it is only what the ticket's status moves need, §18); or the
-  rendered text stored at `test new`.
+  is a schema change for a copy. Alternatives: a short kickoff prompt naming the ticket, as
+  `driving-agent.html` (restored on this branch) does — "review Linear ticket OLI-45, use Linear MCP"
+  — which makes Linear MCP inside the agent a hard requirement for the run to do anything (today
+  it is only what the ticket's status moves need, §18); or the rendered text stored at `test new`.
+  If the kickoff prompt is preferred, `driving-agent.html` is rendered by a
+  `Prompts.renderDrivingAgent({ LINEAR_TICKET })` beside the other two and no Linear call is made.
 - D14 — **A failed drive closes a still-open result `aborted`.** A result nobody will ever close is
   worse than one closed without a verdict; a result the agent did close is left alone; a diagnose
   failure touches nothing. Alternative: leave it to a human, who would find it `running` a week

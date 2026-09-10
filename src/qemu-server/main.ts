@@ -16,12 +16,12 @@ import * as Sentry from "../observability/sentry.ts";
 import * as Host from "../qemu/host.ts";
 import * as Iso from "../qemu/iso.ts";
 import * as Qemu from "../qemu/qemu.ts";
-import * as Stats from "../qemu/stats.ts";
+import * as Heartbeat from "../host/heartbeat.ts";
+import * as Stats from "../host/stats.ts";
 import * as Api from "../shared/api.ts";
 import type * as Domain from "../shared/domain.ts";
 import * as QemuServerCommand from "./command.ts";
 import * as Handlers from "./handlers.ts";
-import * as Heartbeat from "./heartbeat.ts";
 import * as Sessions from "./sessions.ts";
 
 const HOST = "127.0.0.1";
@@ -61,7 +61,19 @@ const ServerLive = (
         `qemu server listening on ${HOST}:${String(port)}; display ${display}${automation ? "; automation" : ""}${Option.match(url, { onNone: () => "", onSome: (announced) => `; announcing ${announced}` })}`,
         { location: Log.Locations.server },
       );
-      yield* Option.match(url, { onNone: () => Effect.void, onSome: Heartbeat.announce });
+      const sessions = yield* Sessions.Sessions;
+      yield* Option.match(url, {
+        onNone: () => Effect.void,
+        onSome: (announced) =>
+          Heartbeat.announce(
+            announced,
+            "qemu",
+            Effect.map(sessions.stats, (s) => ({
+              qemus: s.qemus,
+              ...Heartbeat.hostRow(s),
+            })),
+          ),
+      });
     }),
   ).pipe(
     Layer.provide(
