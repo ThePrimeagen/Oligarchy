@@ -97,7 +97,9 @@ export const makeProxyCommand = <RHost, RServe>(server: ProxyServer<RHost, RServ
           );
         });
         return yield* startup.pipe(
-          Effect.tapError((error) => log.fatal(`proxy: ${detail(error)}`, { location: Log.Locations.server, cause: error })),
+          Effect.tapError((error) =>
+            log.fatal(`proxy: ${detail(error)}`, { location: Log.Locations.server, cause: error }),
+          ),
         );
       }),
   ).pipe(

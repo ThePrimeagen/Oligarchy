@@ -247,7 +247,10 @@ const make = Effect.gen(function* () {
       let chosen: { readonly url: string; readonly qemus: number } | undefined;
       for (const { url, result } of probed) {
         if (Result.isFailure(result)) {
-          yield* log.warning(`server skipped; ${result.failure.message}`, { location: Log.Locations.server, agentId: agent });
+          yield* log.warning(`server skipped; ${result.failure.message}`, {
+            location: Log.Locations.server,
+            agentId: agent,
+          });
           continue;
         }
         if (chosen === undefined || result.success.qemus < chosen.qemus) {

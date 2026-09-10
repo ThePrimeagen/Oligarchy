@@ -176,7 +176,9 @@ const make: Effect.Effect<
         beatAt = now;
         // A failed beat only risks a duplicate download elsewhere, never this one.
         yield* updateManifest(file, "downloading").pipe(
-          Effect.catch((error) => log.warning(`iso: heartbeat failed: ${detail(error)}`, logWho(who))),
+          Effect.catch((error) =>
+            log.warning(`iso: heartbeat failed: ${detail(error)}`, logWho(who)),
+          ),
         );
       });
       yield* Effect.gen(function* () {
@@ -193,7 +195,10 @@ const make: Effect.Effect<
         const published = yield* publishedSha256(url);
         yield* Option.match(published, {
           onNone: () =>
-            log.warning(`iso: no ${url}.sha256 published; skipping the checksum check`, logWho(who)),
+            log.warning(
+              `iso: no ${url}.sha256 published; skipping the checksum check`,
+              logWho(who),
+            ),
           onSome: (expected) =>
             expected === digest
               ? Effect.void
@@ -222,7 +227,10 @@ const make: Effect.Effect<
           entry?.status === "downloading" && now - Date.parse(entry.heartbeatAt) < STALE_MS;
         if (live && !waitLogged) {
           waitLogged = true;
-          yield* log.info(`iso: another download of ${url} is running; waiting for it`, logWho(who));
+          yield* log.info(
+            `iso: another download of ${url} is running; waiting for it`,
+            logWho(who),
+          );
         }
         return live;
       });

@@ -871,7 +871,10 @@ const make = Effect.gen(function* () {
   const tick = sweep.pipe(
     Effect.catchCause((cause) => {
       const error = Cause.squash(cause);
-      return log.error(`session timeout cleanup failed: ${detail(error)}`, { location: Log.Locations.server, cause: error });
+      return log.error(`session timeout cleanup failed: ${detail(error)}`, {
+        location: Log.Locations.server,
+        cause: error,
+      });
     }),
     Effect.uninterruptible,
     guard.withPermitsIfAvailable(1),
@@ -912,7 +915,9 @@ const make = Effect.gen(function* () {
     yield* Fiber.interrupt(sweeper);
     const draining = [...(yield* Ref.getAndSet(sessions, new Map())).values()];
     const reason = MutableRef.get(shutdown.reason);
-    yield* log.info(`proxy: shutting down; stopping ${String(draining.length)} sessions`, { location: Log.Locations.server });
+    yield* log.info(`proxy: shutting down; stopping ${String(draining.length)} sessions`, {
+      location: Log.Locations.server,
+    });
     const exits = yield* Effect.forEach(draining, (live) => Effect.exit(drainOne(live, reason)), {
       concurrency: "unbounded",
     });

@@ -332,8 +332,18 @@ Postgres.describeWithDatabase("database", () => {
       Effect.gen(function* () {
         const logs = yield* Logs.LogStore;
         const sessionId = uuid();
-        yield* logs.insertLog({ text: "first", level: "info", location: sessionId, agentId: "OLI-1" });
-        yield* logs.insertLog({ text: "second", level: "error", location: sessionId, agentId: null });
+        yield* logs.insertLog({
+          text: "first",
+          level: "info",
+          location: sessionId,
+          agentId: "OLI-1",
+        });
+        yield* logs.insertLog({
+          text: "second",
+          level: "error",
+          location: sessionId,
+          agentId: null,
+        });
         yield* logs.insertLog({
           text: "global",
           level: "warning",

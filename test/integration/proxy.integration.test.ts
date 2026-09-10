@@ -419,7 +419,8 @@ describe("proxy serving", () => {
     () =>
       serving(
         [],
-        (port) => `[global] server: oligarchy proxy listening on 127.0.0.1:${String(port)}; display none`,
+        (port) =>
+          `[global] server: oligarchy proxy listening on 127.0.0.1:${String(port)}; display none`,
         "SIGINT",
       ),
     120_000,

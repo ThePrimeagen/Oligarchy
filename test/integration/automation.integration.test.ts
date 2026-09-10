@@ -406,7 +406,9 @@ describeServing("automation serving", () => {
     const output = lines(process.stdout());
     expect(output).toContain("[automation] automation: error: POST /linear failed: unauthorized");
     expect(output).toContain("[automation] automation: linear webhook recorded");
-    expect(output).toContain("[OLI-1063] automation: linear webhook queued drive; Automation Needed");
+    expect(output).toContain(
+      "[OLI-1063] automation: linear webhook queued drive; Automation Needed",
+    );
     expect(output).toContain("[OLI-1063] automation: linear webhook queued diagnose; Needs Review");
     expect(output.some((line) => line.includes("/automate"))).toBe(false);
     expect(output.some((line) => line.includes("/start"))).toBe(false);

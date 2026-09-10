@@ -55,10 +55,7 @@ const translate = (
 
 // logs.location is text: an unknown id is attributed only when this server could have minted it
 // (a session UUID). Otherwise the process fallback applies (proxy: "server"; automation: its own).
-const attribution = (
-  error: Errors.ApiError,
-  fallback: Log.ProcessAttribution,
-): Log.Attribution => {
+const attribution = (error: Errors.ApiError, fallback: Log.ProcessAttribution): Log.Attribution => {
   switch (error._tag) {
     case "Unauthorized":
     case "NotFound":
