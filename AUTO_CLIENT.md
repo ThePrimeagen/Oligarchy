@@ -1079,9 +1079,10 @@ ticket so one ticket's automation-client lines read back as one bucket, the way 
 | client | fatal | `automation-client: database unreachable: <reason>` | startup |
 | client | fatal | `automation-client: listen EADDRINUSE: …` / `automation-client: <accept error>` | listen / after |
 
-On stdout the prefix is `[<location>] <agentId>:`, so a run's lines read `[automation-OLI-45] OLI-45:
-run started; …` and the dispatcher's `[automation-server] OLI-45: job started; …`; the client's
-stdout carries the key's colour between `run started` and the verdict. One failure,
+On stdout the prefix is `[<agentId>] <location>:`, as `renderLogLine` has always written it, so a
+run's lines read `[OLI-45] automation-OLI-45: run started; …` and the dispatcher's `[OLI-45]
+automation-server: job started; …`; the client's stdout carries the key's colour between `run
+started` and the verdict. One failure,
 one Sentry event: the client reports a 5xx with its cause through the boundary; the dispatcher's
 line for a refusal it received is `skipSentry`, and it reports only what the client could not —
 an unreachable client, a prompt it could not compose, a row it could not write.

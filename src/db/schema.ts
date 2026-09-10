@@ -122,7 +122,8 @@ export const images = pgTable(
 
 // location and agent_id are attribution, not relations: a log must never be refused
 // because the row it names is missing or already gone, so neither is a foreign key.
-// location is a text bucket: a session UUID, "server" (qemu-server-wide), or "automation-server".
+// location is a text bucket: a session UUID, "server" (qemu-server-wide), "automation-server",
+// "automation-client", or "automation-<ticket>" (one run on an automation client).
 export const logs = pgTable(
   "logs",
   {

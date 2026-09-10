@@ -397,7 +397,7 @@ describeWithDatabase("automation client serving", () => {
           expect(body.elapsedMs).toBeGreaterThanOrEqual(2_500);
         }
 
-        expect(process.stdout()).toContain(`[automation-OLI-45] OLI-45: run started;`);
+        expect(process.stdout()).toContain(`[OLI-45] automation-OLI-45: run started;`);
         const logRows = await logsFor("automation-OLI-45");
         expect(logRows.some((row) => row.text.startsWith("run started;"))).toBe(true);
 
