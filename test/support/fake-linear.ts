@@ -11,7 +11,8 @@ export type LinearCall =
       readonly ticket: Linear.LinearTicket;
       readonly description: string;
     }
-  | { readonly method: "listBacklog" };
+  | { readonly method: "listBacklog" }
+  | { readonly method: "issueDescription"; readonly identifier: string };
 
 export type FakeLinear = {
   readonly calls: Array<LinearCall>;
@@ -64,6 +65,11 @@ export const fakeLinear = (
     describeIssue: (ticket, description) =>
       record({ method: "describeIssue", ticket, description }, Effect.void),
     listBacklog: record({ method: "listBacklog" }, Effect.succeed(options.backlog ?? [])),
+    issueDescription: (identifier) =>
+      record(
+        { method: "issueDescription", identifier },
+        Effect.succeed(`description of ${identifier}`),
+      ),
   };
   const overrides = options.overrides ?? {};
   const service: Linear.LinearService = {
@@ -73,6 +79,7 @@ export const fakeLinear = (
     createIssue: overrides.createIssue ?? defaults.createIssue,
     describeIssue: overrides.describeIssue ?? defaults.describeIssue,
     listBacklog: overrides.listBacklog ?? defaults.listBacklog,
+    issueDescription: overrides.issueDescription ?? defaults.issueDescription,
   };
   return { calls, layer: Layer.succeed(Linear.Linear)(service) };
 };

@@ -17,7 +17,7 @@ const ok = Contract.Ok.make({});
 
 export class LinearWebhookSecret extends Context.Service<LinearWebhookSecret>()(
   "@oligarchy/automation-server/LinearWebhookSecret",
-  { make: Config.linearWebhookSecret },
+  { make: Effect.map(Config.AutomationServerConfig, (config) => config.linearWebhookSecret) },
 ) {
   static readonly layer = Layer.effect(this)(this.make);
 }

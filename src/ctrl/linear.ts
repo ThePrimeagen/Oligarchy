@@ -83,6 +83,9 @@ const BACKLOG_QUERY = `query ExperimentBacklog($filter: IssueFilter!, $after: St
   }
 }`;
 
+const ISSUE_DESCRIPTION_QUERY =
+  "query IssueDescription($id: String!) { issue(id: $id) { description } }";
+
 const BACKLOG_FILTER = {
   team: { name: { eq: LINEAR_TEAM } },
   state: { type: { eq: "backlog" } },
@@ -102,6 +105,9 @@ const IssueCreate = Schema.Struct({
   issueCreate: Schema.Struct({ success: Schema.Boolean, issue: Schema.NullOr(LinearTicket) }),
 });
 const IssueUpdate = Schema.Struct({ issueUpdate: Schema.Struct({ success: Schema.Boolean }) });
+const IssueDescription = Schema.Struct({
+  issue: Schema.NullOr(Schema.Struct({ description: Schema.NullOr(Schema.String) })),
+});
 const Backlog = Schema.Struct({
   issues: Schema.Struct({
     nodes: Schema.Array(LinearBacklogTicket),
@@ -140,6 +146,7 @@ export type LinearService = {
     description: string,
   ) => Effect.Effect<void, Errors.LinearError>;
   readonly listBacklog: Effect.Effect<ReadonlyArray<LinearBacklogTicket>, Errors.LinearError>;
+  readonly issueDescription: (identifier: string) => Effect.Effect<string, Errors.LinearError>;
 };
 
 const makeLinear = (
@@ -311,6 +318,28 @@ const makeLinear = (
       }
     });
 
+    const issueDescription = Effect.fn("Linear.issueDescription")(function* (identifier: string) {
+      const found = yield* request(
+        "issueDescription",
+        ISSUE_DESCRIPTION_QUERY,
+        { id: identifier },
+        IssueDescription,
+      );
+      if (found.issue === null) {
+        return yield* Errors.LinearError.make({
+          operation: "issueDescription",
+          message: `linear: no issue ${identifier}`,
+        });
+      }
+      if (found.issue.description === null) {
+        return yield* Errors.LinearError.make({
+          operation: "issueDescription",
+          message: `linear: ${identifier} has no description`,
+        });
+      }
+      return found.issue.description;
+    });
+
     return {
       teamId,
       labelIds,
@@ -318,6 +347,7 @@ const makeLinear = (
       createIssue,
       describeIssue,
       listBacklog,
+      issueDescription,
     } satisfies LinearService;
   });
 

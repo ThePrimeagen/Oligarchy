@@ -169,7 +169,7 @@ export class TestStore extends Context.Service<TestStore>()("@oligarchy/db/TestS
     // where a `null` value would be written as NULL.
     const closeResult = Effect.fn("db.closeResult")(function* (
       resultId: string,
-      status: "passed" | "failed",
+      status: "passed" | "failed" | "aborted",
       reason: string | null,
       sessionId: string | null,
     ) {

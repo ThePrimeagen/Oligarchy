@@ -614,6 +614,7 @@ export const fakeAutomationStore = (
         }
         return count;
       }),
+    countReady: Effect.sync(() => jobs.filter(ready).length),
     ...overrides,
   });
   return { jobs, layer: Layer.succeed(Automation.AutomationStore)(service) };

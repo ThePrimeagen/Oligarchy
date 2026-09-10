@@ -108,23 +108,23 @@ named case inside one, and is its own todo.
 - [x] `test/observability/log.unit.test.ts` — `Locations.automationRun("OLI-45")` is
       `"automation-OLI-45"`; a line attributed to it renders with that prefix and lands in a row with
       that `location`.
-- [ ] `test/config/config.unit.test.ts` — `AutomationServerConfig` reports `LINEAR_WEBHOOK_SECRET`,
+- [x] `test/config/config.unit.test.ts` — `AutomationServerConfig` reports `LINEAR_WEBHOOK_SECRET`,
       `OLIGARCHY_TOKEN`, `LINEAR_API_TOKEN`, `DATABASE_URL` in that order, the first missing one
       alone. The automation client reuses `ProxyConfig`, whose test exists.
-- [ ] `test/automation-server/command.unit.test.ts` — the command still defaults to 54321 and pings;
+- [x] `test/automation-server/command.unit.test.ts` — the command still defaults to 54321 and pings;
       new: the dispatch loop's startup sweep is called once before listen (through the fake store);
       `--help` lists `--port` alone.
 - [x] `test/automation-server/http.unit.test.ts` — `POST /linear` is unchanged; `POST /run` here is
       404 (the automation server does not serve runs).
-- [ ] `test/ctrl/linear.unit.test.ts` — `issueDescription("OLI-45")` sends one GraphQL query with the
+- [x] `test/ctrl/linear.unit.test.ts` — `issueDescription("OLI-45")` sends one GraphQL query with the
       identifier and decodes the description (happy); a `null` issue is `LinearError` `linear: no
       issue OLI-45`; a null description is `LinearError` `linear: OLI-45 has no description`; a non-2xx
       and a GraphQL `errors` envelope are `LinearError`s with the status and the message (unhappy).
-- [ ] `test/ctrl/prompts.unit.test.ts` — `renderDiagnosingAgent({ LINEAR_TICKET, RESULT_ID })` fills the
+- [x] `test/ctrl/prompts.unit.test.ts` — `renderDiagnosingAgent({ LINEAR_TICKET, RESULT_ID })` fills the
       restored `prompts/diagnosing-agent.html`, embedding `ctrl-diagnose.md` trimmed (happy); a
       template naming a placeholder with no value fails `PromptError` naming it (unhappy);
       `renderLinearIssue` unchanged.
-- [ ] `test/integration/automation-server.integration.test.ts` — the environment sets
+- [x] `test/integration/automation-server.integration.test.ts` — the environment sets
       `OLIGARCHY_TOKEN` and `LINEAR_API_TOKEN` (today it deletes the former); new refusals: an empty
       `OLIGARCHY_TOKEN` exits 1 with `OLIGARCHY_TOKEN is not set`, an empty `LINEAR_API_TOKEN` likewise,
       each before listening; with a database, a stale `running` job is `aborted; automation-server
@@ -143,7 +143,7 @@ named case inside one, and is its own todo.
 
 ### 1.2 Tests to add
 
-- [ ] `test/automation-server/dispatcher.unit.test.ts` (fake stores, fake Linear, `FakeHttp.
+- [x] `test/automation-server/dispatcher.unit.test.ts` (fake stores, fake Linear, `FakeHttp.
       recordRequests`, fake Log, `TestClock`) — happy: a pending drive and one fresh client: the first
       tick claims the job (`running`, `startedAt`), fetches the ticket's description from Linear,
       sends `POST /run` to the client's url with the bearer and `{ key: "OLI-45", prompt:
@@ -237,7 +237,7 @@ named case inside one, and is its own todo.
       `fake-qemu.ts`, moved and freed of the count).
 - [x] `test/support/stores.ts` — `fakeAutomationStore` gains `claimNext` (readiness and order as the
       real query), `closeJob`, `abortRunning`; `fakeServerStore` gains `listAutomationClients`.
-- [ ] `test/support/fake-linear.ts` — gains a scripted `issueDescription`.
+- [x] `test/support/fake-linear.ts` — gains a scripted `issueDescription`.
 
 ## 2. What this builds on
 

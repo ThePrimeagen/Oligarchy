@@ -457,3 +457,77 @@ describe("Linear unhappy path", () => {
     }),
   );
 });
+
+const issueDescription = (identifier: string) =>
+  Effect.flatMap(Linear.Linear, (client) => client.issueDescription(identifier));
+
+describe("Linear.issueDescription happy path", () => {
+  it.effect("sends one GraphQL query with the identifier and decodes the description", () =>
+    Effect.gen(function* () {
+      const http = withHttp(() =>
+        FakeHttp.json({ data: { issue: { description: "drive the guest to the lock screen" } } }),
+      );
+      const description = yield* issueDescription("OLI-45").pipe(
+        Effect.provide(linear().pipe(Layer.provide(http.layer))),
+      );
+      expect(description).toBe("drive the guest to the lock screen");
+      expect(http.requests).toHaveLength(1);
+      expect(http.requests[0]?.method).toBe("POST");
+      expect(http.requests[0]?.url).toBe(Linear.LINEAR_API_URL);
+      expect(http.requests[0]?.headers.authorization).toBe(TOKEN);
+      const body: GraphQl = JSON.parse(http.requests[0]?.body ?? "");
+      expect(body.query).toMatch(/issue\(id: \$id\)/);
+      expect(body.query).toMatch(/description/);
+      expect(body.variables).toEqual({ id: "OLI-45" });
+    }),
+  );
+});
+
+describe("Linear.issueDescription unhappy path", () => {
+  it.effect("a null issue is LinearError linear: no issue OLI-45", () =>
+    Effect.gen(function* () {
+      const http = withHttp(() => FakeHttp.json({ data: { issue: null } }));
+      const error = yield* failureOf(issueDescription("OLI-45")).pipe(Effect.provide(http.layer));
+      expect(error).toMatchObject({
+        _tag: "LinearError",
+        operation: "issueDescription",
+        message: "linear: no issue OLI-45",
+      });
+    }),
+  );
+
+  it.effect("a null description is LinearError linear: OLI-45 has no description", () =>
+    Effect.gen(function* () {
+      const http = withHttp(() => FakeHttp.json({ data: { issue: { description: null } } }));
+      const error = yield* failureOf(issueDescription("OLI-45")).pipe(Effect.provide(http.layer));
+      expect(error).toMatchObject({
+        _tag: "LinearError",
+        operation: "issueDescription",
+        message: "linear: OLI-45 has no description",
+      });
+    }),
+  );
+
+  it.effect("a non-2xx is LinearError with the status and the body", () =>
+    Effect.gen(function* () {
+      const http = FakeHttp.recordRequests(() => new Response("unauthorized", { status: 401 }));
+      const error = yield* failureOf(issueDescription("OLI-45")).pipe(Effect.provide(http.layer));
+      expect(error).toMatchObject({
+        _tag: "LinearError",
+        operation: "issueDescription",
+        status: 401,
+        message: "linear: request failed (401): unauthorized",
+      });
+    }),
+  );
+
+  it.effect("a GraphQL errors envelope is LinearError with the messages", () =>
+    Effect.gen(function* () {
+      const http = FakeHttp.recordRequests(() =>
+        FakeHttp.json({ errors: [{ message: "Entity not found: Issue" }] }),
+      );
+      const error = yield* failureOf(issueDescription("OLI-45")).pipe(Effect.provide(http.layer));
+      expect(error.message).toBe("linear: Entity not found: Issue");
+    }),
+  );
+});

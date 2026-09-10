@@ -185,3 +185,80 @@ describe("ProxyConfig", () => {
     }).pipe(Effect.provide(Support.withEnv({ OLIGARCHY_TOKEN: "t" }))),
   );
 });
+
+const automationEnv = {
+  LINEAR_WEBHOOK_SECRET: "whsec",
+  OLIGARCHY_TOKEN: "t",
+  LINEAR_API_TOKEN: "lin",
+  DATABASE_URL: "postgres://x",
+} as const;
+
+describe("AutomationServerConfig", () => {
+  it.effect("holds the four secrets in report order", () =>
+    Effect.gen(function* () {
+      const config = yield* Config.AutomationServerConfig;
+      expect(Redacted.value(config.linearWebhookSecret)).toBe("whsec");
+      expect(Redacted.value(config.token)).toBe("t");
+      expect(Redacted.value(config.linearApiToken)).toBe("lin");
+      expect(Redacted.value(config.databaseUrl)).toBe("postgres://x");
+    }).pipe(
+      Effect.provide(
+        Config.AutomationServerConfig.layer.pipe(Layer.provide(Support.withEnv(automationEnv))),
+      ),
+    ),
+  );
+
+  it.effect("reports LINEAR_WEBHOOK_SECRET first when every variable is missing", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(Config.AutomationServerConfig.make);
+      expect(error.message).toBe("LINEAR_WEBHOOK_SECRET is not set");
+    }).pipe(Effect.provide(Support.withEnv({}))),
+  );
+
+  it.effect("reports OLIGARCHY_TOKEN when the webhook secret is set", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(Config.AutomationServerConfig.make);
+      expect(error.message).toBe("OLIGARCHY_TOKEN is not set");
+    }).pipe(Effect.provide(Support.withEnv({ LINEAR_WEBHOOK_SECRET: "whsec" }))),
+  );
+
+  it.effect("reports LINEAR_API_TOKEN when the webhook secret and token are set", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(Config.AutomationServerConfig.make);
+      expect(error.message).toBe("LINEAR_API_TOKEN is not set");
+    }).pipe(
+      Effect.provide(Support.withEnv({ LINEAR_WEBHOOK_SECRET: "whsec", OLIGARCHY_TOKEN: "t" })),
+    ),
+  );
+
+  it.effect("reports DATABASE_URL when only it is missing", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(Config.AutomationServerConfig.make);
+      expect(error.message).toBe("DATABASE_URL is not set");
+    }).pipe(
+      Effect.provide(
+        Support.withEnv({
+          LINEAR_WEBHOOK_SECRET: "whsec",
+          OLIGARCHY_TOKEN: "t",
+          LINEAR_API_TOKEN: "lin",
+        }),
+      ),
+    ),
+  );
+
+  it.effect("treats an empty LINEAR_API_TOKEN as missing (unhappy)", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(Config.AutomationServerConfig.make);
+      expect(error).toMatchObject({ _tag: "MissingVariable", name: "LINEAR_API_TOKEN" });
+    }).pipe(
+      Effect.provide(
+        Support.withEnv({
+          LINEAR_WEBHOOK_SECRET: "whsec",
+          OLIGARCHY_TOKEN: "t",
+          LINEAR_API_TOKEN: "",
+          DATABASE_URL: "postgres://x",
+        }),
+      ),
+    ),
+  );
+});

@@ -193,3 +193,60 @@ describe("renderLinearIssue unhappy path", () => {
     }),
   );
 });
+
+const diagnose = {
+  LINEAR_TICKET: "OLI-45",
+  RESULT_ID: "22222222-2222-4222-8222-222222222222",
+} as const;
+
+describe("renderDiagnosingAgent happy path", () => {
+  it.effect("fills the restored template and embeds ctrl-diagnose.md trimmed", () =>
+    Effect.gen(function* () {
+      const fs = promptFs({
+        contents: {
+          "diagnosing-agent.html":
+            "{{LINEAR_TICKET}} {{RESULT_ID}} {{TEST_RESULT_ID}} {{MODEL}}\n<guide>\n{{CTRL_DIAGNOSE_MD}}\n</guide>",
+          "ctrl-diagnose.md": "# Control\n\nDiagnose the session.\n",
+        },
+      });
+      const text = yield* Prompts.renderDiagnosingAgent(diagnose).pipe(Effect.provide(fs.layer));
+      expect(text).toBe(
+        "OLI-45 22222222-2222-4222-8222-222222222222 22222222-2222-4222-8222-222222222222 $OLIGARCHY_MODEL\n<guide>\n# Control\n\nDiagnose the session.\n</guide>",
+      );
+      expect(fileNames(fs.reads)).toEqual(["diagnosing-agent.html", "ctrl-diagnose.md"]);
+    }),
+  );
+
+  it.effect(
+    "diagnosing-agent.html: the ticket, both result ids, the model variable, the guide",
+    () =>
+      Effect.gen(function* () {
+        const text = yield* real(Prompts.renderDiagnosingAgent(diagnose));
+        expect(text.includes("{{")).toBe(false);
+        expect(text).toContain("OLI-45");
+        expect(text).toContain(diagnose.RESULT_ID);
+        expect(text).toContain("$OLIGARCHY_MODEL");
+        expect(text).toContain("# Control\n");
+        expect(text).toContain("## session");
+        expect(text).toContain("./ctrl diagnose");
+      }),
+  );
+});
+
+describe("renderDiagnosingAgent unhappy path", () => {
+  it.effect("the first placeholder without a value is named as diagnosing-agent.html", () =>
+    Effect.gen(function* () {
+      const fs = promptFs({
+        contents: { "diagnosing-agent.html": "{{LINEAR_TICKET}} {{NOPE}} {{RESULT_ID}}" },
+      });
+      const error = yield* Effect.flip(
+        Prompts.renderDiagnosingAgent(diagnose).pipe(Effect.provide(fs.layer)),
+      );
+      expect(error).toMatchObject({
+        _tag: "PromptError",
+        message: "prompt: prompts/diagnosing-agent.html uses {{NOPE}}, which has no value",
+      });
+      expect(error.cause).toBeUndefined();
+    }),
+  );
+});

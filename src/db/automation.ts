@@ -1,4 +1,4 @@
-import { and, desc, eq, isNotNull, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, isNotNull, or, sql } from "drizzle-orm";
 import { Array as Arr, Context, Effect, Layer } from "effect";
 import * as Client from "./client.ts";
 import * as DbSchema from "./schema.ts";
@@ -86,6 +86,29 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
         return rows.length > 0;
       });
 
+      const countReady = Effect.gen(function* () {
+        const rows = yield* database.run("countReady", (db) =>
+          db
+            .select({ n: count() })
+            .from(DbSchema.automationJobs)
+            .innerJoin(
+              DbSchema.testResults,
+              eq(DbSchema.testResults.id, DbSchema.automationJobs.resultId),
+            )
+            .leftJoin(DbSchema.sessions, eq(DbSchema.sessions.id, DbSchema.testResults.sessionId))
+            .where(
+              and(
+                eq(DbSchema.automationJobs.status, "pending"),
+                or(
+                  eq(DbSchema.automationJobs.action, "drive"),
+                  isNotNull(DbSchema.sessions.endedAt),
+                ),
+              ),
+            ),
+        );
+        return rows[0]?.n ?? 0;
+      }).pipe(Effect.withSpan("db.countReady"));
+
       const abortRunning = Effect.fn("db.abortRunning")(function* (reason: string) {
         const rows = yield* database.run("abortRunning", (db) =>
           db
@@ -97,7 +120,7 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
         return rows.length;
       });
 
-      return { enqueue, claimNext, closeJob, abortRunning };
+      return { enqueue, claimNext, closeJob, abortRunning, countReady };
     }),
   },
 ) {
