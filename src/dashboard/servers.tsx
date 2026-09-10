@@ -1,6 +1,6 @@
 import type { FC } from "hono/jsx";
 import { HTMX_INTEGRITY, HTMX_URL } from "./htmx.ts";
-import type { Server } from "./query.ts";
+import type { AutomationJob, AutomationQueue, Server } from "./query.ts";
 
 // A server writes its row every thirty seconds. One heartbeat may be in flight and one lost to a
 // slow database; three overdue is a server that stopped.
@@ -98,33 +98,106 @@ export const Fleet: FC<{ servers: ReadonlyArray<Server> }> = ({ servers }) =>
     </table>
   );
 
-// Unstyled on purpose: text an operator reads at a glance, the fleet swapped in fresh every
-// thirty seconds. `servers` is absent only when the database could not be read, so a 500 page
-// does not claim an empty fleet; `error` is the reason a request was refused, on top.
+// A stamp's age against the clock the read was made at, or a dash for a stamp not written yet.
+const since = (stamp: Date | null, queriedAt: Date): string =>
+  stamp === null ? "—" : `${age(queriedAt.getTime() - stamp.getTime())} ago`;
+
+// One list of the queue as a table, or the one word that says it is empty. The columns are the
+// same in every list, so a pending job shows dashes where its start and finish will go.
+const Jobs: FC<{ jobs: ReadonlyArray<AutomationJob> }> = ({ jobs }) =>
+  jobs.length === 0 ? (
+    <p>none</p>
+  ) : (
+    <table>
+      <tr>
+        <th>ticket</th>
+        <th>test</th>
+        <th>action</th>
+        <th>status</th>
+        <th>queued</th>
+        <th>started</th>
+        <th>finished</th>
+        <th>reason</th>
+      </tr>
+      {jobs.map((job) => (
+        <tr>
+          <td>{job.ticket ?? "—"}</td>
+          <td>{job.test}</td>
+          <td>{job.action}</td>
+          <td>{job.status}</td>
+          <td>{since(job.createdAt, job.queriedAt)}</td>
+          <td>{since(job.startedAt, job.queriedAt)}</td>
+          <td>{since(job.finishedAt, job.queriedAt)}</td>
+          <td>{job.reason}</td>
+        </tr>
+      ))}
+    </table>
+  );
+
+// The automation queue in the order the database sorted it: what runs, what waits, what finished.
+// What the automation half polls for.
+export const Queue: FC<{ queue: AutomationQueue }> = ({ queue }) => (
+  <>
+    <h3>running</h3>
+    <Jobs jobs={queue.running} />
+    <h3>pending</h3>
+    <Jobs jobs={queue.pending} />
+    <h3>completed</h3>
+    <Jobs jobs={queue.completed} />
+  </>
+);
+
+// Both halves of the page, read together: absent together when the database could not be read.
+export type Halves = {
+  readonly queue: AutomationQueue;
+  readonly servers: ReadonlyArray<Server>;
+};
+
+// Text an operator reads at a glance, in two halves side by side: the automation queue, then the
+// qemu fleet with its add box, each swapped in fresh every thirty seconds. The one style rule is
+// the split. `halves` is absent only when the database could not be read, so a 500 page claims
+// neither an empty queue nor an empty fleet; `error` is the reason a request was refused, on top.
 export const ServersPage: FC<{
-  servers: ReadonlyArray<Server> | undefined;
+  halves: Halves | undefined;
   error: string | undefined;
-}> = ({ servers, error }) => (
+}> = ({ halves, error }) => (
   <html lang="en">
     <head>
       <meta charset="utf-8" />
       <title>oligarchy servers</title>
+      <style>
+        {
+          ".halves { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: start; }"
+        }
+      </style>
       <script src={HTMX_URL} integrity={HTMX_INTEGRITY} crossorigin="anonymous"></script>
     </head>
     <body>
       <h1>oligarchy servers</h1>
       {error === undefined ? null : <p>error: {error}</p>}
-      <h2>servers</h2>
-      {servers === undefined ? null : (
-        <div id="fleet" hx-get="/servers/fleet" hx-trigger="every 30s">
-          <Fleet servers={servers} />
-        </div>
-      )}
-      <h2>add a server</h2>
-      <form method="post" action="/servers">
-        <input name="url" size={60} placeholder="https://qemu.example.com" />
-        <button>add</button>
-      </form>
+      <div class="halves">
+        <section>
+          <h2>automation</h2>
+          {halves === undefined ? null : (
+            <div id="queue" hx-get="/servers/queue" hx-trigger="every 30s">
+              <Queue queue={halves.queue} />
+            </div>
+          )}
+        </section>
+        <section>
+          <h2>qemu servers</h2>
+          {halves === undefined ? null : (
+            <div id="fleet" hx-get="/servers/fleet" hx-trigger="every 30s">
+              <Fleet servers={halves.servers} />
+            </div>
+          )}
+          <h2>add a server</h2>
+          <form method="post" action="/servers">
+            <input name="url" size={60} placeholder="https://qemu.example.com" />
+            <button>add</button>
+          </form>
+        </section>
+      </div>
     </body>
   </html>
 );
