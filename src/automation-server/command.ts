@@ -64,6 +64,6 @@ export const makeAutomationServerCommand = <RServe>(server: AutomationServer<RSe
       }),
   ).pipe(
     Command.withDescription(
-      "The automation server: POST /linear verifies a signed Linear webhook and enqueues drive or diagnose jobs from status changes",
+      "The automation server: POST /linear verifies a signed Linear webhook and enqueues drive or diagnose jobs, then dispatches them to live automation clients",
     ),
   );

@@ -1,6 +1,11 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHmac, randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import {
+  createServer as createHttpServer,
+  type IncomingMessage,
+  type ServerResponse,
+} from "node:http";
 import { createServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,6 +21,7 @@ import * as Postgres from "../support/postgres.ts";
 
 const AUTOMATION_SERVER = fileURLToPath(new URL("../../automation-server", import.meta.url));
 const WEBHOOK_SECRET = "whsec_test";
+const TOKEN = "test-token";
 const UNREACHABLE = "postgres://user:sentinel-pw@127.0.0.1:1/oligarchy";
 const EXIT_WITHIN_MS = 60_000;
 
@@ -41,6 +47,7 @@ const environment = (home: string, overrides: Record<string, string>): NodeJS.Pr
     ...process.env,
     HOME: home,
     LINEAR_WEBHOOK_SECRET: WEBHOOK_SECRET,
+    OLIGARCHY_TOKEN: TOKEN,
     DATABASE_URL: dbUrl === "" ? UNREACHABLE : dbUrl,
     NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --disable-warning=ExperimentalWarning`.trim(),
     https_proxy: "http://127.0.0.1:1",
@@ -49,7 +56,6 @@ const environment = (home: string, overrides: Record<string, string>): NodeJS.Pr
     ...overrides,
   };
   delete env.FORCE_COLOR;
-  delete env.OLIGARCHY_TOKEN;
   return env;
 };
 
@@ -231,6 +237,16 @@ describe("automation server startup refusals", () => {
       const { code } = await process.exited;
       expect(code).toBe(1);
       expect(process.stderr()).toContain("LINEAR_WEBHOOK_SECRET is not set");
+      expect(process.stdout()).not.toContain("listening");
+    }),
+  );
+
+  it.live("a missing OLIGARCHY_TOKEN exits 1 with OLIGARCHY_TOKEN is not set", () =>
+    Effect.promise(async () => {
+      const process = spawnAutomationServer([], { OLIGARCHY_TOKEN: "" });
+      const { code } = await process.exited;
+      expect(code).toBe(1);
+      expect(process.stderr()).toContain("OLIGARCHY_TOKEN is not set");
       expect(process.stdout()).not.toContain("listening");
     }),
   );
@@ -425,4 +441,167 @@ describeServing("automation server serving", () => {
   );
 
   it.live("exits 0 on SIGTERM", () => Effect.promise(() => served("SIGTERM")), 120_000);
+});
+
+const STATS: DbSchema.ServerStats = {
+  qemus: 0,
+  memory: { totalBytes: 1, usedBytes: 0 },
+  cpu: { mean1m: 0, mean2m: 0, mean3m: 0 },
+};
+
+const seedLiveClient = async (url: string) => {
+  const client = new Client({ connectionString: Postgres.getDbUrl() });
+  await client.connect();
+  try {
+    const db = drizzle({ client, schema: DbSchema });
+    await db.insert(DbSchema.servers).values({
+      url,
+      type: "automation-client",
+      heartbeatAt: new Date(),
+      generation: 1,
+      stats: STATS,
+    });
+  } finally {
+    await client.end();
+  }
+};
+
+const removeServer = async (url: string) => {
+  const client = new Client({ connectionString: Postgres.getDbUrl() });
+  await client.connect();
+  try {
+    const db = drizzle({ client, schema: DbSchema });
+    await db.delete(DbSchema.servers).where(eq(DbSchema.servers.url, url));
+  } finally {
+    await client.end();
+  }
+};
+
+const seedJob = async (resultId: string, action: "drive" | "diagnose") => {
+  const client = new Client({ connectionString: Postgres.getDbUrl() });
+  await client.connect();
+  try {
+    const db = drizzle({ client, schema: DbSchema });
+    await db.insert(DbSchema.automationJobs).values({ resultId, action, status: "pending" });
+  } finally {
+    await client.end();
+  }
+};
+
+const waitForJob = async (
+  resultId: string,
+  status: string,
+  timeoutMs = 15_000,
+): Promise<(typeof DbSchema.automationJobs)["$inferSelect"]> => {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const jobs = await jobsFor(resultId);
+    const job = jobs[0];
+    if (job !== undefined && job.status === status) {
+      return job;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  const jobs = await jobsFor(resultId);
+  throw new Error(`job did not become ${status}: ${JSON.stringify(jobs)}`);
+};
+
+const serveClient = (
+  handler: (req: IncomingMessage, res: ServerResponse) => void,
+): Promise<{ readonly url: string; readonly close: () => Promise<void> }> =>
+  new Promise((resolve, reject) => {
+    const server = createHttpServer(handler);
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      resolve({
+        url: `http://127.0.0.1:${String(portOf(server.address()))}`,
+        close: () => new Promise((done) => server.close(() => done())),
+      });
+    });
+  });
+
+describeServing("automation server dispatch", () => {
+  it.live("a live client that answers 200 marks the job succeeded", () =>
+    Effect.promise(async () => {
+      const client = await serveClient((_req, res) => {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: "true" }));
+      });
+      const linearId = `OLI-${randomUUID().slice(0, 8)}`;
+      const resultId = await seedResult(linearId);
+      await seedJob(resultId, "drive");
+      await seedLiveClient(client.url);
+      const port = await freePort();
+      const process = spawnAutomationServer(["--port", String(port)]);
+      try {
+        await process.waitFor(/automation server listening/);
+        const job = await waitForJob(resultId, "succeeded");
+        expect(job).toMatchObject({ action: "drive", status: "succeeded", reason: null });
+      } finally {
+        process.child.kill("SIGTERM");
+        await process.exited;
+        await removeServer(client.url);
+        await client.close();
+      }
+    }),
+  );
+
+  it.live("a live client that answers 500 marks the job failed", () =>
+    Effect.promise(async () => {
+      const client = await serveClient((_req, res) => {
+        res.writeHead(500, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "opencode exited 1" }));
+      });
+      const linearId = `OLI-${randomUUID().slice(0, 8)}`;
+      const resultId = await seedResult(linearId);
+      await seedJob(resultId, "drive");
+      await seedLiveClient(client.url);
+      const port = await freePort();
+      const process = spawnAutomationServer(["--port", String(port)]);
+      try {
+        await process.waitFor(/automation server listening/);
+        const job = await waitForJob(resultId, "failed");
+        expect(job.status).toBe("failed");
+        expect(job.reason).toContain("opencode exited 1");
+      } finally {
+        process.child.kill("SIGTERM");
+        await process.exited;
+        await removeServer(client.url);
+        await client.close();
+      }
+    }),
+  );
+
+  it.live("SIGTERM while the client is still running aborts the job and exits 0", () =>
+    Effect.promise(async () => {
+      const client = await serveClient(() => {});
+      const linearId = `OLI-${randomUUID().slice(0, 8)}`;
+      const resultId = await seedResult(linearId);
+      await seedJob(resultId, "drive");
+      await seedLiveClient(client.url);
+      const port = await freePort();
+      const process = spawnAutomationServer(["--port", String(port)]);
+      try {
+        await process.waitFor(/automation server listening/);
+        await waitForJob(resultId, "running");
+        process.child.kill("SIGTERM");
+        const { code } = await process.exited;
+        expect(code).toBe(0);
+        const jobs = await jobsFor(resultId);
+        expect(jobs).toEqual([
+          expect.objectContaining({
+            status: "aborted",
+            reason: "automation server shutting down",
+          }),
+        ]);
+      } finally {
+        if (process.child.exitCode === null && process.child.signalCode === null) {
+          process.child.kill("SIGKILL");
+          await process.exited;
+        }
+        await removeServer(client.url);
+        await client.close();
+      }
+    }),
+  );
 });

@@ -361,6 +361,16 @@ export class LinearError extends Schema.TaggedError<LinearError>(
   cause: Schema.optionalKey(Schema.Defect()),
 }) {}
 
+// POST /run to an automation-client: unreachable, or a non-2xx. Not an API error — the
+// automation server turns it into a failed job.
+export class AutomationClientError extends Schema.TaggedError<AutomationClientError>(
+  "@oligarchy/shared/errors/AutomationClientError",
+)("AutomationClientError", {
+  message: Schema.String,
+  status: Schema.optionalKey(Schema.Int),
+  cause: Schema.optionalKey(Schema.Defect()),
+}) {}
+
 // A prompt template that cannot be read, or names a placeholder its renderer has no value for.
 export class PromptError extends Schema.TaggedError<PromptError>(
   "@oligarchy/shared/errors/PromptError",
