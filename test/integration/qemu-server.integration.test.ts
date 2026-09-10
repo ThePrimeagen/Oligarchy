@@ -21,7 +21,7 @@ import * as Client from "../../src/db/client.ts";
 import * as DbSchema from "../../src/db/schema.ts";
 import * as Postgres from "../support/postgres.ts";
 
-const SERVER = fileURLToPath(new URL("../../qemu-server", import.meta.url));
+const QEMU_SERVER = fileURLToPath(new URL("../../qemu-server", import.meta.url));
 const TOKEN = "t";
 const UNREACHABLE = "postgres://user:sentinel-pw@127.0.0.1:1/oligarchy";
 const EXIT_WITHIN_MS = 60_000;
@@ -84,7 +84,7 @@ const spawnQemuServer = (
   overrides: Record<string, string> | ((dir: string) => Record<string, string>) = {},
 ): QemuServer => {
   const dir = mkdtempSync(join(tmpdir(), "oligarchy-qemu-server-test-"));
-  const child = spawn(SERVER, args, {
+  const child = spawn(QEMU_SERVER, args, {
     cwd: dir,
     env: environment(typeof overrides === "function" ? overrides(dir) : overrides),
     stdio: ["ignore", "pipe", "pipe"],
@@ -365,7 +365,7 @@ describe("qemu server serving", () => {
         const port = await freePort();
         const full = openSync("/dev/full", "w");
         const dir = mkdtempSync(join(tmpdir(), "oligarchy-qemu-server-test-"));
-        const child = spawn(SERVER, ["--port", String(port)], {
+        const child = spawn(QEMU_SERVER, ["--port", String(port)], {
           cwd: dir,
           env: environment({}),
           stdio: ["ignore", full, full],

@@ -30,7 +30,7 @@ export type Stores =
   | Tests.TestStore
   | Log.Log;
 
-// ctrl is the record keeper: every read and write is a database call. It never talks to a proxy;
+// ctrl is the record keeper: every read and write is a database call. It never talks to a qemu server;
 // Linear is the only remote service it reaches.
 export type Deps = {
   readonly database: (url: Redacted.Redacted) => Layer.Layer<Stores, Errors.DatabaseError>;

@@ -11,7 +11,7 @@ import * as Errors from "../shared/errors.ts";
 
 // Every qemu server and qemu reverse proxy route carries `Authorization: Bearer <OLIGARCHY_TOKEN>`; the
 // compare is exact, as it always was. The token comes in as a value: those servers read it from
-// ProxyConfig beside their database url. The automation service does not use this bearer.
+// ProxyConfig beside their database url. The automation server does not use this bearer.
 export const bearerAuth = (token: Redacted.Redacted): Layer.Layer<Api.BearerAuth> =>
   Layer.succeed(Api.BearerAuth)(
     Api.BearerAuth.of({

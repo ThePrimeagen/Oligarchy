@@ -14,7 +14,7 @@ import { Client } from "pg";
 import * as DbSchema from "../../src/db/schema.ts";
 import * as Postgres from "../support/postgres.ts";
 
-const AUTOMATION = fileURLToPath(new URL("../../automation-server", import.meta.url));
+const AUTOMATION_SERVER = fileURLToPath(new URL("../../automation-server", import.meta.url));
 const WEBHOOK_SECRET = "whsec_test";
 const UNREACHABLE = "postgres://user:sentinel-pw@127.0.0.1:1/oligarchy";
 const EXIT_WITHIN_MS = 60_000;
@@ -61,7 +61,7 @@ const spawnAutomationServer = (
 ): Process => {
   const home = mkdtempSync(join(tmpdir(), "oligarchy-automation-home-"));
   const cwd = mkdtempSync(join(tmpdir(), "oligarchy-automation-cwd-"));
-  const child = spawn(AUTOMATION, args, {
+  const child = spawn(AUTOMATION_SERVER, args, {
     cwd,
     env: environment(home, overrides),
     stdio: ["ignore", "pipe", "pipe"],

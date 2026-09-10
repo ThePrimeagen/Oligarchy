@@ -121,7 +121,7 @@ export const images = pgTable(
 
 // location and agent_id are attribution, not relations: a log must never be refused
 // because the row it names is missing or already gone, so neither is a foreign key.
-// location is a text bucket: a session UUID, "server" (proxy-wide), or "automation".
+// location is a text bucket: a session UUID, "server" (qemu-server-wide), or "automation".
 export const logs = pgTable(
   "logs",
   {
@@ -214,7 +214,7 @@ export const servers = pgTable("servers", {
 });
 
 // Which server started a session, so every later request for it finds the machine. The row
-// outlives the reverse proxy process, which is why it is a row. server_url is attribution, not a
+// outlives the qemu reverse proxy process, which is why it is a row. server_url is attribution, not a
 // relation: forgetting a server must keep the sessions still running on it routable.
 export const sessionServers = pgTable("session_servers", {
   sessionId: uuid("session_id")

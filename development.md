@@ -709,7 +709,7 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
   variable is in the attribution (`location`, `agentId`) or in the text after the `;`, as in
   `log.info(\`running; started in ${String(ms)}ms\`, { location: sessionId, agentId })`.
   `location` is a text bucket: a session UUID, `Locations.server` (qemu-server-wide lines with no
-  session), or `Locations.automation` (the automation process; its `agentId` is also
+  session), or `Locations.automation` (the automation server; its `agentId` is also
   `Locations.automation`). `ProcessAttribution` is the fallback the HTTP boundary uses when an
   error carries no session; the qemu server leaves the default (`server`), the automation server overrides it.
 - Each line is written twice: to stdout through `Console.log` when the method runs, and as a

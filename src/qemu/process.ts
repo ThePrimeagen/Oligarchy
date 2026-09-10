@@ -36,7 +36,7 @@ export const spawn = Effect.fn("Process.spawn")(function* (
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const handle = yield* spawner
     .spawn(
-      // Not detached: the child shares the proxy's process group, as it always has.
+      // Not detached: the child shares the qemu server's process group, as it always has.
       ChildProcess.make(executable, args, {
         stdin: "ignore",
         stdout: "ignore",

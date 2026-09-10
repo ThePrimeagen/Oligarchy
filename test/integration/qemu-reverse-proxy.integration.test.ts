@@ -11,7 +11,7 @@ import * as Client from "../../src/db/client.ts";
 import * as DbSchema from "../../src/db/schema.ts";
 import * as Postgres from "../support/postgres.ts";
 
-const REVERSE_PROXY = fileURLToPath(new URL("../../qemu-reverse-proxy", import.meta.url));
+const QEMU_REVERSE_PROXY = fileURLToPath(new URL("../../qemu-reverse-proxy", import.meta.url));
 const TOKEN = "t";
 const UNREACHABLE = "postgres://user:sentinel-pw@127.0.0.1:1/oligarchy";
 const EXIT_WITHIN_MS = 60_000;
@@ -48,7 +48,7 @@ const spawnQemuReverseProxy = (
   overrides: Record<string, string> = {},
 ): Process => {
   const dir = mkdtempSync(join(tmpdir(), "oligarchy-qemu-reverse-proxy-test-"));
-  const child = spawn(REVERSE_PROXY, args, {
+  const child = spawn(QEMU_REVERSE_PROXY, args, {
     cwd: dir,
     env: environment(overrides),
     stdio: ["ignore", "pipe", "pipe"],

@@ -24,10 +24,10 @@ export const Locations = {
   server: "server",
 } as const;
 
-// The automation process logs with agentId === Locations.automation as well.
+// The automation server logs with agentId === Locations.automation as well.
 export const AutomationAgentId = Locations.automation;
 
-// Fallback attribution when a log line has no session: proxy-wide "server", or automation's
+// Fallback attribution when a log line has no session: qemu-server-wide "server", or automation's
 // own bucket. Processes override this Reference at the top of their layer graph.
 export type ProcessAttribution = {
   readonly location: string;
@@ -232,7 +232,7 @@ export class Log extends Context.Service<Log>()("@oligarchy/observability/Log", 
   }),
 }) {
   static readonly layer: Layer.Layer<Log, never, Logs.LogStore> = Layer.effect(this)(this.make);
-  // stdout only, no rows: tests. Automation persists through `layer` once it has a database.
+  // stdout only, no rows: tests. The automation server persists through `layer` once it has a database.
   static readonly layerStdout: Layer.Layer<Log> = Layer.effect(this)(
     makeLog(() => Effect.succeed(stdoutOnly)),
   );
