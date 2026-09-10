@@ -23,6 +23,11 @@ import * as Errors from "../shared/errors.ts";
 // is null in GET /servers; the request that probed it does not wait longer.
 export const PROBE_TIMEOUT = "10 seconds";
 
+// This reverse proxy fronts the servers that boot QEMU: the probe is their /stats, the placement
+// their qemus. It registers a server as one and reads only those rows, whatever else is in the
+// table.
+const SERVER_TYPE: Servers.ServerType = "qemu";
+
 // What a server's /start answers with a 200: the id it minted, a uuid as servers mint them and
 // as the session_servers column stores them.
 const StartAnswer = Schema.fromJsonString(
@@ -195,7 +200,7 @@ const make = Effect.gen(function* () {
 
   const register = Effect.fn("Router.register")(function* (url: string) {
     yield* probe(url, {});
-    yield* store.addServer(url).pipe(Effect.mapError((cause) => internal(cause)));
+    yield* store.addServer(url, SERVER_TYPE).pipe(Effect.mapError((cause) => internal(cause)));
     yield* log.info(`server registered; ${url}`);
   });
 
@@ -210,7 +215,9 @@ const make = Effect.gen(function* () {
   });
 
   const servers: Effect.Effect<Contract.Servers, Errors.Internal> = Effect.gen(function* () {
-    const urls = yield* store.listServers().pipe(Effect.mapError((cause) => internal(cause)));
+    const urls = yield* store
+      .listServers(SERVER_TYPE)
+      .pipe(Effect.mapError((cause) => internal(cause)));
     const probed = yield* Effect.forEach(
       urls,
       (url) =>
@@ -226,7 +233,7 @@ const make = Effect.gen(function* () {
   const place = (agent: string): Effect.Effect<string, Errors.NoServer | Errors.Internal> =>
     Effect.gen(function* () {
       const urls = yield* store
-        .listServers()
+        .listServers(SERVER_TYPE)
         .pipe(Effect.mapError((cause) => internal(cause, undefined, agent)));
       if (urls.length === 0) {
         return yield* Errors.NoServer.make({ message: "no server registered", agentId: agent });

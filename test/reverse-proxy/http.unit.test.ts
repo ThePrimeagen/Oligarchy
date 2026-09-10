@@ -117,38 +117,43 @@ const decoder = new TextDecoder();
 
 const serverBody = (url: string) => Contract.ServerBody.make({ url });
 
+// A registered qemu server, as the fake store's rows carry it: what this reverse proxy fronts.
+const qemu = (url: string) => ({ url, type: "qemu" as const });
+
 const upstreamCalls = (fixed: Fixture) =>
   fixed.upstream.requests.map((request) => `${request.method} ${request.url}`);
 
 describe("server registration", () => {
-  it.effect("POST /servers probes GET /stats with the bearer, stores the url and logs it", () =>
-    Effect.gen(function* () {
-      const fixed = fixture();
-      yield* Effect.gen(function* () {
-        const api = yield* reverseClient;
-        const ok = yield* api.Servers.register({ payload: serverBody(SERVER_A) });
-        expect(ok).toEqual(Contract.Ok.make({}));
-      }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.upstream.requests).toEqual([
-        {
-          method: "GET",
-          url: `${SERVER_A}/stats`,
-          headers: expect.objectContaining({ authorization: AUTHORIZATION }),
-          body: "",
-        },
-      ]);
-      expect(fixed.store.servers).toEqual([SERVER_A]);
-      expect(fixed.log.lines).toEqual([
-        {
-          level: "info",
-          text: `server registered; ${SERVER_A}`,
-          sessionId: undefined,
-          agentId: undefined,
-          skipSentry: false,
-          cause: undefined,
-        },
-      ]);
-    }),
+  it.effect(
+    "POST /servers probes GET /stats with the bearer, stores the url as a qemu server and logs it",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture();
+        yield* Effect.gen(function* () {
+          const api = yield* reverseClient;
+          const ok = yield* api.Servers.register({ payload: serverBody(SERVER_A) });
+          expect(ok).toEqual(Contract.Ok.make({}));
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.upstream.requests).toEqual([
+          {
+            method: "GET",
+            url: `${SERVER_A}/stats`,
+            headers: expect.objectContaining({ authorization: AUTHORIZATION }),
+            body: "",
+          },
+        ]);
+        expect(fixed.store.servers).toEqual([{ url: SERVER_A, type: "qemu" }]);
+        expect(fixed.log.lines).toEqual([
+          {
+            level: "info",
+            text: `server registered; ${SERVER_A}`,
+            sessionId: undefined,
+            agentId: undefined,
+            skipSentry: false,
+            cause: undefined,
+          },
+        ]);
+      }),
   );
 
   it.effect("a url with a trailing slash probes /stats with one slash and is stored as given", () =>
@@ -159,7 +164,7 @@ describe("server registration", () => {
         yield* api.Servers.register({ payload: serverBody(`${SERVER_A}/`) });
       }).pipe(Effect.provide(serve(fixed)));
       expect(upstreamCalls(fixed)).toEqual([`GET ${SERVER_A}/stats`]);
-      expect(fixed.store.servers).toEqual([`${SERVER_A}/`]);
+      expect(fixed.store.servers).toEqual([qemu(`${SERVER_A}/`)]);
     }),
   );
 
@@ -172,7 +177,7 @@ describe("server registration", () => {
         yield* api.Servers.register({ payload: serverBody(SERVER_A) });
       }).pipe(Effect.provide(serve(fixed)));
       expect(upstreamCalls(fixed)).toEqual([`GET ${SERVER_A}/stats`, `GET ${SERVER_A}/stats`]);
-      expect(fixed.store.servers).toEqual([SERVER_A]);
+      expect(fixed.store.servers).toEqual([qemu(SERVER_A)]);
       expect(FakeLog.texts(fixed.log)).toEqual([
         `server registered; ${SERVER_A}`,
         `server registered; ${SERVER_A}`,
@@ -183,13 +188,13 @@ describe("server registration", () => {
   it.effect("DELETE /servers removes the server, logs it, and never probes", () =>
     Effect.gen(function* () {
       const fixed = fixture();
-      fixed.store.servers.push(SERVER_A, SERVER_B);
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
       yield* Effect.gen(function* () {
         const api = yield* reverseClient;
         const ok = yield* api.Servers.unregister({ payload: serverBody(SERVER_A) });
         expect(ok.ok).toBe("true");
       }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.store.servers).toEqual([SERVER_B]);
+      expect(fixed.store.servers).toEqual([qemu(SERVER_B)]);
       expect(fixed.upstream.requests).toEqual([]);
       expect(fixed.log.lines).toEqual([
         {
@@ -242,13 +247,13 @@ describe("server registration", () => {
   );
 
   it.effect(
-    "GET /servers answers every server with its stats in registration order, null for one that does not answer, and logs nothing",
+    "GET /servers answers every qemu server with its stats in registration order, null for one that does not answer, and logs nothing",
     () =>
       Effect.gen(function* () {
         const fixed = fixture((request, url) =>
           url.origin === SERVER_B ? refused(request, url) : FakeHttp.json(stats(2)),
         );
-        fixed.store.servers.push(SERVER_A, SERVER_B);
+        fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
         yield* Effect.gen(function* () {
           const api = yield* reverseClient;
           const [servers, response] = yield* api.Servers.servers({
@@ -485,11 +490,11 @@ describe("placement", () => {
         : fleet(request, url);
 
   it.effect(
-    "POST /start probes every server, picks the fewest qemus, forwards the body with the bearer, records the route and logs it",
+    "POST /start probes every qemu server, picks the fewest qemus, forwards the body with the bearer, records the route and logs it",
     () =>
       Effect.gen(function* () {
         const fixed = fixture(placing());
-        fixed.store.servers.push(SERVER_A, SERVER_B);
+        fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
         yield* Effect.gen(function* () {
           const api = yield* proxyClient;
           const [started, response] = yield* api.Sessions.start({
@@ -532,7 +537,7 @@ describe("placement", () => {
       const fixed = fixture((request, url) =>
         url.pathname === "/stats" ? FakeHttp.json(stats(1)) : placing()(request, url),
       );
-      fixed.store.servers.push(SERVER_B, SERVER_A);
+      fixed.store.servers.push(qemu(SERVER_B), qemu(SERVER_A));
       yield* Effect.gen(function* () {
         const api = yield* proxyClient;
         yield* api.Sessions.start({ payload: startBody });
@@ -548,7 +553,7 @@ describe("placement", () => {
           ? refused(request, url)
           : placing()(request, url),
       );
-      fixed.store.servers.push(SERVER_A, SERVER_B);
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
       yield* Effect.gen(function* () {
         const api = yield* proxyClient;
         yield* api.Sessions.start({ payload: startBody });
@@ -616,7 +621,7 @@ describe("placement", () => {
   it.effect("every server failing its probe is 503 no server available after the warnings", () =>
     Effect.gen(function* () {
       const fixed = fixture(refused);
-      fixed.store.servers.push(SERVER_A, SERVER_B);
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
       yield* Effect.gen(function* () {
         const api = yield* reverseClient;
         const error = yield* Effect.flip(api.Sessions.start({ payload: startBody }));
@@ -646,7 +651,7 @@ describe("placement", () => {
           ? FakeHttp.json({ error: "qemu: disk not found: /tmp/nope.qcow2" }, 502)
           : fleet(request, url),
       );
-      fixed.store.servers.push(SERVER_A);
+      fixed.store.servers.push(qemu(SERVER_A));
       yield* Effect.gen(function* () {
         const api = yield* proxyClient;
         const error = yield* Effect.flip(api.Sessions.start({ payload: startBody }));
@@ -671,7 +676,7 @@ describe("placement", () => {
   it.effect("a 200 without an id is 502 server <url> answered 200 without an id", () =>
     Effect.gen(function* () {
       const fixed = fixture(placing(null));
-      fixed.store.servers.push(SERVER_A);
+      fixed.store.servers.push(qemu(SERVER_A));
       yield* Effect.gen(function* () {
         const http = yield* HttpClient.HttpClient;
         const raw = yield* http.post("/start", {
@@ -700,7 +705,7 @@ describe("placement", () => {
       const fixed = fixture((request, url) =>
         url.pathname === "/start" ? refused(request, url) : fleet(request, url),
       );
-      fixed.store.servers.push(SERVER_A);
+      fixed.store.servers.push(qemu(SERVER_A));
       yield* Effect.gen(function* () {
         // The proxy's client reads a 502 on /start as the proxy's StartFailed: same status, same
         // message, which is all ./client ever shows.
@@ -734,7 +739,7 @@ describe("placement", () => {
         const fixed = fixture(placing(), {
           store: Stores.fakeServerStore({ routeSession: () => Effect.fail(failure) }),
         });
-        fixed.store.servers.push(SERVER_A);
+        fixed.store.servers.push(qemu(SERVER_A));
         yield* Effect.gen(function* () {
           const api = yield* proxyClient;
           const error = yield* Effect.flip(api.Sessions.start({ payload: startBody }));
@@ -775,7 +780,7 @@ describe("placement", () => {
           }),
         },
       );
-      fixed.store.servers.push(SERVER_A);
+      fixed.store.servers.push(qemu(SERVER_A));
       yield* Effect.gen(function* () {
         const api = yield* proxyClient;
         const request = yield* Effect.forkChild(api.Sessions.start({ payload: startBody }));
@@ -940,7 +945,7 @@ describe("forwarding", () => {
       const fixed = fixture(
         () => new Response("serial\n", { status: 200, headers: { "content-type": "text/plain" } }),
       );
-      fixed.store.servers.push(SERVER_A);
+      fixed.store.servers.push(qemu(SERVER_A));
       fixed.store.routes.set(SESSION_ID, SERVER_A);
       yield* Effect.gen(function* () {
         const operator = yield* reverseClient;
@@ -1320,7 +1325,7 @@ describe("forwarding refusals", () => {
   it.effect("every route refuses a missing or wrong bearer with 401 and one error line", () =>
     Effect.gen(function* () {
       const fixed = fixture();
-      fixed.store.servers.push(SERVER_A);
+      fixed.store.servers.push(qemu(SERVER_A));
       fixed.store.routes.set(SESSION_ID, SERVER_A);
       yield* Effect.gen(function* () {
         const http = yield* HttpClient.HttpClient;
@@ -1353,7 +1358,7 @@ describe("forwarding refusals", () => {
     () =>
       Effect.gen(function* () {
         const fixed = fixture();
-        fixed.store.servers.push(SERVER_A);
+        fixed.store.servers.push(qemu(SERVER_A));
         yield* Effect.gen(function* () {
           const http = yield* HttpClient.HttpClient;
           const headers = { authorization: AUTHORIZATION };

@@ -17,6 +17,10 @@ const ROW_STATS = {
   cpu: { mean1m: 22.3, mean2m: 21.4, mean3m: 20.9 },
 };
 
+// One heartbeat as the store records it: this server announces itself as a qemu server.
+const ANNOUNCED = { url: URL, type: "qemu", stats: ROW_STATS };
+const REGISTERED = { url: URL, type: "qemu" };
+
 const refused = Errors.DatabaseError.make({
   operation: "heartbeat",
   message: "Failed query: insert into servers",
@@ -39,20 +43,25 @@ const start = (
   });
 
 describe("heartbeat happy path", () => {
-  it.effect("writes the row at once and then every thirty seconds with the server's stats", () =>
-    Effect.gen(function* () {
-      const store = Stores.fakeServerStore();
-      const { log } = yield* start(store);
-      expect(store.heartbeats).toEqual([{ url: URL, stats: ROW_STATS }]);
-      yield* TestClock.adjust("29 seconds");
-      expect(store.heartbeats).toHaveLength(1);
-      yield* TestClock.adjust("1 second");
-      expect(store.heartbeats).toHaveLength(2);
-      yield* TestClock.adjust("60 seconds");
-      expect(store.heartbeats).toHaveLength(4);
-      expect(store.heartbeats.every((beat) => beat.url === URL)).toBe(true);
-      expect(log.lines).toEqual([]);
-    }),
+  it.effect(
+    "writes the row at once and then every thirty seconds, a qemu server with the server's stats",
+    () =>
+      Effect.gen(function* () {
+        const store = Stores.fakeServerStore();
+        const { log } = yield* start(store);
+        expect(store.heartbeats).toEqual([ANNOUNCED]);
+        expect(store.servers).toEqual([REGISTERED]);
+        yield* TestClock.adjust("29 seconds");
+        expect(store.heartbeats).toHaveLength(1);
+        yield* TestClock.adjust("1 second");
+        expect(store.heartbeats).toHaveLength(2);
+        yield* TestClock.adjust("60 seconds");
+        expect(store.heartbeats).toHaveLength(4);
+        expect(store.heartbeats.every((beat) => beat.url === URL && beat.type === "qemu")).toBe(
+          true,
+        );
+        expect(log.lines).toEqual([]);
+      }),
   );
 
   it.effect("stops when the scope it was started in closes", () =>
@@ -70,10 +79,10 @@ describe("heartbeat happy path", () => {
   it.effect("deletes its own row when the scope closes, and leaves every other server", () =>
     Effect.gen(function* () {
       const store = Stores.fakeServerStore();
-      const other = "http://127.0.0.1:1";
+      const other = { url: "http://127.0.0.1:1", type: "qemu" as const };
       store.servers.push(other);
       const { scope, log } = yield* start(store);
-      expect(store.servers).toEqual([other, URL]);
+      expect(store.servers).toEqual([other, REGISTERED]);
       yield* Scope.close(scope, Exit.void);
       expect(store.servers).toEqual([other]);
       expect(log.lines).toEqual([]);
@@ -117,15 +126,15 @@ describe("heartbeat unhappy path", () => {
     () =>
       Effect.gen(function* () {
         let attempts = 0;
-        const written: Array<{ readonly url: string; readonly stats: typeof ROW_STATS }> = [];
+        const written: Array<typeof ANNOUNCED> = [];
         const store = Stores.fakeServerStore({
-          heartbeat: (url, stats) =>
+          heartbeat: (url, type, stats) =>
             Effect.suspend(() => {
               attempts += 1;
               if (attempts === 1) {
                 return Effect.fail(refused);
               }
-              written.push({ url, stats });
+              written.push({ url, type, stats });
               return Effect.void;
             }),
         });
@@ -142,7 +151,7 @@ describe("heartbeat unhappy path", () => {
           },
         ]);
         yield* TestClock.adjust("30 seconds");
-        expect(written).toEqual([{ url: URL, stats: ROW_STATS }]);
+        expect(written).toEqual([ANNOUNCED]);
         expect(log.lines).toHaveLength(1);
       }),
   );
@@ -166,7 +175,7 @@ describe("heartbeat unhappy path", () => {
           { level: "error", text: "heartbeat failed: stats exploded", cause: boom },
         ]);
         yield* TestClock.adjust("30 seconds");
-        expect(store.heartbeats).toEqual([{ url: URL, stats: ROW_STATS }]);
+        expect(store.heartbeats).toEqual([ANNOUNCED]);
         expect(log.lines).toHaveLength(1);
       }),
   );
@@ -184,9 +193,9 @@ describe("heartbeat unhappy path", () => {
           removeServer: () => Effect.fail(refusedDelete),
         });
         const { scope, log } = yield* start(store);
-        expect(store.servers).toEqual([URL]);
+        expect(store.servers).toEqual([REGISTERED]);
         yield* Scope.close(scope, Exit.void);
-        expect(store.servers).toEqual([URL]);
+        expect(store.servers).toEqual([REGISTERED]);
         expect(log.lines).toEqual([
           {
             level: "error",

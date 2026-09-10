@@ -556,11 +556,16 @@ export const fakeAutomationStore = (
 // ServerStore
 // ---------------------------------------------------------------------------
 
-type Heartbeat = { readonly url: string; readonly stats: DbSchema.ServerStats };
+type RegisteredServer = { readonly url: string; readonly type: Servers.ServerType };
+type Heartbeat = {
+  readonly url: string;
+  readonly type: Servers.ServerType;
+  readonly stats: DbSchema.ServerStats;
+};
 
 export type FakeServerStore = {
-  // Registered urls, in registration order.
-  readonly servers: Array<string>;
+  // Registered servers, in registration order.
+  readonly servers: Array<RegisteredServer>;
   // Session id to the url of the server that started it.
   readonly routes: Map<string, string>;
   // Every heartbeat written, in order.
@@ -570,37 +575,44 @@ export type FakeServerStore = {
 
 // A url registers once and a session is routed once, as the real keys promise: a second
 // registration is a no-op and a second route is the primary key's DatabaseError. A heartbeat
-// registers the url too, as the real upsert does.
+// registers the url too, as the real upsert does, and its type is the server's word.
 export const fakeServerStore = (
   overrides: Partial<typeof Servers.ServerStore.Service> = {},
 ): FakeServerStore => {
-  const servers: Array<string> = [];
+  const servers: Array<RegisteredServer> = [];
   const routes = new Map<string, string>();
   const heartbeats: Array<Heartbeat> = [];
+  const indexOf = (url: string) => servers.findIndex((server) => server.url === url);
   const service = Servers.ServerStore.of({
-    addServer: (url) =>
+    addServer: (url, type) =>
       Effect.sync(() => {
-        if (!servers.includes(url)) {
-          servers.push(url);
+        if (indexOf(url) === -1) {
+          servers.push({ url, type });
         }
       }),
-    heartbeat: (url, stats) =>
+    heartbeat: (url, type, stats) =>
       Effect.sync(() => {
-        if (!servers.includes(url)) {
-          servers.push(url);
+        const index = indexOf(url);
+        if (index === -1) {
+          servers.push({ url, type });
+        } else {
+          servers[index] = { url, type };
         }
-        heartbeats.push({ url, stats });
+        heartbeats.push({ url, type, stats });
       }),
     removeServer: (url) =>
       Effect.sync(() => {
-        const index = servers.indexOf(url);
+        const index = indexOf(url);
         if (index === -1) {
           return false;
         }
         servers.splice(index, 1);
         return true;
       }),
-    listServers: () => Effect.sync(() => [...servers]),
+    listServers: (type) =>
+      Effect.sync(() =>
+        servers.filter((server) => server.type === type).map((server) => server.url),
+      ),
     routeSession: (sessionId, url) =>
       routes.has(sessionId)
         ? Effect.fail(conflict("routeSession", "insert into session_servers"))
