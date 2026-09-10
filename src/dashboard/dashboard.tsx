@@ -8,6 +8,7 @@ import {
   definitionStats,
   getImage,
   groupDefinitions,
+  listAutomationQueue,
   listServers,
   listSessions,
   listTestBasePrompts,
@@ -20,14 +21,13 @@ import {
   versionStats,
   type DefinitionStat,
   type DefinitionVersions,
-  type Server,
   type Session,
   type TestBasePrompt,
   type TestResultOutcome,
 } from "./query.ts";
 import { clickerPage } from "./clicker.ts";
 import { HTMX_INTEGRITY, HTMX_URL } from "./htmx.ts";
-import { Fleet, ServersPage } from "./servers.tsx";
+import { Fleet, type Halves, Queue, ServersPage } from "./servers.tsx";
 import { SENTRY_DSN } from "../observability/dsn.ts";
 
 const errorMessage = (cause: unknown): string =>
@@ -779,16 +779,25 @@ app.get("/images/:id", async (context) => {
   }
 });
 
-// The fleet page, outside the dashboard's shell: unstyled text served whole, not through the
-// renderer. Its rows are written by the servers themselves every thirty seconds
-// (src/proxy/heartbeat.ts) and read here as often. `servers` is absent only when the database
-// could not be read, so a 500 page does not claim an empty fleet.
+// The servers page, outside the dashboard's shell: text served whole, not through the renderer.
+// Its two halves are rows: the automation queue the webhook and the worker write
+// (automation_jobs), and the fleet the servers themselves write every thirty seconds
+// (src/proxy/heartbeat.ts), both read here as often. `halves` is absent only when the database
+// could not be read, so a 500 page claims neither an empty queue nor an empty fleet.
+const readHalves = async (connectionString: string): Promise<Halves> => {
+  const [queue, servers] = await Promise.all([
+    listAutomationQueue(connectionString),
+    listServers(connectionString),
+  ]);
+  return { queue, servers };
+};
+
 const serversPage = (
   context: Context<{ Bindings: Bindings }>,
   status: 200 | 400 | 404 | 500,
-  servers: Server[] | undefined,
+  halves: Halves | undefined,
   error?: string,
-) => context.html(html`<!doctype html>${<ServersPage servers={servers} error={error} />}`, status);
+) => context.html(html`<!doctype html>${<ServersPage halves={halves} error={error} />}`, status);
 
 const SERVER_URL_RULE = "url must be an http or https url";
 
@@ -803,16 +812,28 @@ const isServerUrl = (url: string): boolean => {
 
 app.get("/servers", async (context) => {
   try {
-    const servers = await listServers(context.env.HYPERDRIVE.connectionString);
-    return await serversPage(context, 200, servers);
+    const halves = await readHalves(context.env.HYPERDRIVE.connectionString);
+    return await serversPage(context, 200, halves);
   } catch (error) {
     Sentry.captureException(error);
-    console.error("dashboard: listing servers:", errorMessage(error));
+    console.error("dashboard: reading the servers page:", errorMessage(error));
     return serversPage(context, 500, undefined, "internal error");
   }
 });
 
-// What the page's poll swaps in.
+// What the automation half's poll swaps in.
+app.get("/servers/queue", async (context) => {
+  try {
+    const queue = await listAutomationQueue(context.env.HYPERDRIVE.connectionString);
+    return context.html(<Queue queue={queue} />);
+  } catch (error) {
+    Sentry.captureException(error);
+    console.error("dashboard: listing the automation queue:", errorMessage(error));
+    return context.html(<p>error: internal error</p>, 500);
+  }
+});
+
+// What the fleet half's poll swaps in.
 app.get("/servers/fleet", async (context) => {
   try {
     const servers = await listServers(context.env.HYPERDRIVE.connectionString);
@@ -832,7 +853,7 @@ app.post("/servers", async (context) => {
   const connectionString = context.env.HYPERDRIVE.connectionString;
   try {
     if (typeof url !== "string" || !isServerUrl(url)) {
-      return await serversPage(context, 400, await listServers(connectionString), SERVER_URL_RULE);
+      return await serversPage(context, 400, await readHalves(connectionString), SERVER_URL_RULE);
     }
     await addServer(connectionString, url);
     return context.redirect("/servers", 303);
@@ -850,13 +871,13 @@ app.post("/servers/delete", async (context) => {
   const connectionString = context.env.HYPERDRIVE.connectionString;
   try {
     if (typeof url !== "string" || !isServerUrl(url)) {
-      return await serversPage(context, 400, await listServers(connectionString), SERVER_URL_RULE);
+      return await serversPage(context, 400, await readHalves(connectionString), SERVER_URL_RULE);
     }
     if (!(await removeServer(connectionString, url))) {
       return await serversPage(
         context,
         404,
-        await listServers(connectionString),
+        await readHalves(connectionString),
         `${url} is not registered`,
       );
     }
