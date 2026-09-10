@@ -6,7 +6,7 @@ one and why each decision went the way it did. `development.md` holds the conven
 process follows and names the reverse proxy only where it taught one; what the reverse proxy
 promises — its routes, texts, statuses and log lines — is pinned by its code and tests and
 written out for operators here. A third party is named where it matters: the dashboard Worker
-(`src/dashboard/`, Cloudflare, Hyperdrive), which is where stored screenshots and the fleet page
+(`src/dashboard/`, Cloudflare, Hyperdrive), which is where stored screenshots and the servers page
 are served from.
 
 | | The server (`./server`, `src/proxy/`) | The reverse proxy (`./reverse-proxy`, `src/reverse-proxy/`) |
@@ -67,24 +67,36 @@ neither the server nor the reverse proxy has an image route, and the path is the
 on both. One HTTP address; the only other reader of the bytes is `./session image`, straight
 from the database.
 
-### The dashboard serves the fleet page
+### The dashboard serves the servers page
 
-`https://oligarchy.trm.sh/servers` is the fleet: the `servers` rows read over Hyperdrive, one
-line per server with its url, `qemus`, memory as `used / total GB`, the cpu's `1m / 2m / 3m`
-means, its `generation` and how long ago its heartbeat was, and a `delete` button; an add box
-below. The table is swapped in fresh every thirty seconds (htmx, `GET /servers/fleet`), the
-interval the servers write at, so a row is never more than one poll behind. A server whose
-heartbeat is more than ninety seconds old — three missed — shows `silent` in place of its stats;
-one an operator added that no server has claimed shows `never heard from`. Nothing on the page
-probes a server: what it shows is what the servers said, and the reverse proxy is not involved.
+`https://oligarchy.trm.sh/servers` is two halves side by side, both rows read over Hyperdrive.
+
+The first half, `automation`, is the queue (`automation_jobs`, joined to the result's ticket and
+the test's name) in three lists: `running`, `pending` and `completed`. Each row is the ticket
+(`—` for a result nobody has ticketed), the test, the action, the status, how long ago the job
+was queued, started and finished (`—` for a stamp not written yet) and the reason it closed with.
+Running and pending list the diagnoses ahead of the drives and then in queue order, oldest
+first; completed lists every terminal status newest finished first, `finished_at` being the last
+stamp a job gets. Each list shows at most fifty rows, and an empty one says `none`. The half is
+swapped in fresh every thirty seconds (htmx, `GET /servers/queue`).
+
+The second half, `qemu servers`, is the fleet: the `servers` rows, one line per server with its
+url, `qemus`, memory as `used / total GB`, the cpu's `1m / 2m / 3m` means, its `generation` and
+how long ago its heartbeat was, and a `delete` button; an add box below. The table is swapped in
+fresh every thirty seconds (htmx, `GET /servers/fleet`), the interval the servers write at, so a
+row is never more than one poll behind. A server whose heartbeat is more than ninety seconds old
+— three missed — shows `silent` in place of its stats; one an operator added that no server has
+claimed shows `never heard from`. Nothing on the page probes a server: what it shows is what the
+servers said, and the reverse proxy is not involved.
 
 `POST /servers` (form field `url`) adds a row under the same rule as the API (`url must be an http
 or https url`, 400 otherwise, the reason on top of the page); `POST /servers/delete` removes one
 (404 `<url> is not registered` when there is none). A server still running announces itself back
 within thirty seconds of being deleted: the row is the server's word, the button is for the ones
-that stopped without deleting. A database failure is a 500 page with `error: internal error` and no fleet
-section, so it never claims an empty fleet. The page is unstyled text outside the dashboard's
-shell and is served whole; access control is the dashboard's, not the page's.
+that stopped without deleting. A database failure is a 500 page with `error: internal error` and
+neither half's body, so it never claims an empty queue or an empty fleet. The page is text
+outside the dashboard's shell, served whole, with one style rule — the split into two halves;
+access control is the dashboard's, not the page's.
 
 ### The reverse proxy knows where sessions live and nothing else
 
@@ -379,13 +391,18 @@ Every surface has a happy and an unhappy test:
 - `test/dashboard/servers.unit.test.ts` renders the page's components from fixed rows, no
   database: a server heard from just now with every column, the empty fleet, the heartbeat's age
   in seconds, minutes, hours and days, a server silent at ninety-one seconds and not at ninety, a
-  row never heard from, a url with `"` and `<` escaped in the cell and the delete form, the
-  reason on top of a refused page, the fleet omitted on a 500 page, the reason escaped.
-  `test/integration/dashboard.integration.test.ts` runs the routes against the container: the
-  page and the fragment from seeded rows (alive, silent, never heard from), adding once however
-  often posted, deleting, a url the rule refuses (400, nothing stored), a form without a url, a
-  url never registered (404), and an unreachable database (500 on every route, the fleet section
-  gone, never the password).
+  row never heard from, a url with `"` and `<` escaped in the cell and the delete form; the queue's
+  three lists in order with one set of columns, a running, a pending and a failed job's cells with
+  their ages and dashes, the rows in the order given, `none` for an empty list, a dash for a
+  result without a ticket, a ticket, test and reason escaped; the two halves side by side with the
+  automation first, the reason on top of a refused page, both halves' bodies omitted on a 500
+  page, the reason escaped. `test/integration/dashboard.integration.test.ts` runs the routes
+  against the container: the page and the fleet fragment from seeded rows (alive, silent, never
+  heard from), adding once however often posted, deleting, a url the rule refuses (400, nothing
+  stored), a form without a url, a url never registered (404); the queue's order from seeded jobs
+  (diagnoses ahead of drives then queue order, completed newest finished first, a result without
+  a ticket), the page and the queue fragment showing it, each list cut at fifty; and an
+  unreachable database (500 on every route, neither half's body, never the password).
 - `test/proxy/heartbeat.unit.test.ts` runs the loop under the `TestClock` over the fake
   `Sessions` and `ServerStore`: a write at once and every thirty seconds with the stats cut to
   the row's shape, the loop ending with its scope, the row deleted on that close (other servers
@@ -464,9 +481,9 @@ used":
 - `ctrl` awareness of servers and routes. `ctrl session --logs` already shows the
   `routed; <url>` line for a session because the reverse proxy writes to `logs`.
 - An in-memory route cache in front of the rows.
-- Any style or script on the fleet page beyond the poll, or a check of its own on who posts to
-  it: access is the dashboard's to control, and a forged add or delete is a row the next
-  heartbeat corrects.
+- Any style or script on the servers page beyond the polls and the one rule that puts its two
+  halves side by side, or a check of its own on who posts to it: access is the dashboard's to
+  control, and a forged add or delete is a row the next heartbeat corrects.
 
 ## Running it
 
@@ -478,8 +495,9 @@ OLIGARCHY_TOKEN=… DATABASE_URL=… ./server --port 42069 --automation --url ht
 # in front of them, on any host that reaches them and the database
 OLIGARCHY_TOKEN=… DATABASE_URL=… ./reverse-proxy --port 42070
 
-# the fleet: https://oligarchy.trm.sh/servers, polled every 30 s, with an add box and a delete
-# button each. A server may also be registered over the API, which probes its /stats first
+# the automation queue and the fleet: https://oligarchy.trm.sh/servers, each half polled every
+# 30 s, the fleet with an add box and a delete button each. A server may also be registered over
+# the API, which probes its /stats first
 curl -H "authorization: Bearer $OLIGARCHY_TOKEN" -H 'content-type: application/json' \
   -d '{"url":"https://qemu-a.example.com"}' http://127.0.0.1:42070/servers
 curl -H "authorization: Bearer $OLIGARCHY_TOKEN" http://127.0.0.1:42070/servers
