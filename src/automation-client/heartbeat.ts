@@ -28,6 +28,7 @@ const detail = (error: unknown): string =>
 // the process still exits.
 export const announce = (
   url: string,
+  maxJobs: number,
 ): Effect.Effect<void, never, Scope.Scope | Stats.Stats | Servers.ServerStore | Log.Log> =>
   Effect.gen(function* () {
     const stats = yield* Stats.Stats;
@@ -36,18 +37,24 @@ export const announce = (
     const tick = stats.collect(0).pipe(
       Effect.flatMap((collected) =>
         Effect.uninterruptible(
-          store.heartbeat(url, "automation-client", {
-            qemus: collected.qemus,
-            memory: {
-              totalBytes: collected.memory.totalBytes,
-              usedBytes: collected.memory.usedBytes,
+          store.heartbeat(
+            url,
+            "automation-client",
+            {
+              qemus: collected.qemus,
+              memory: {
+                totalBytes: collected.memory.totalBytes,
+                usedBytes: collected.memory.usedBytes,
+              },
+              cpu: {
+                mean1m: collected.cpu.mean1m,
+                mean2m: collected.cpu.mean2m,
+                mean3m: collected.cpu.mean3m,
+              },
             },
-            cpu: {
-              mean1m: collected.cpu.mean1m,
-              mean2m: collected.cpu.mean2m,
-              mean3m: collected.cpu.mean3m,
-            },
-          }),
+            collected.qemus,
+            maxJobs,
+          ),
         ),
       ),
       Effect.catchCause((cause) => {

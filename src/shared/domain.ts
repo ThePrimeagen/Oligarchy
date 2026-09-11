@@ -135,6 +135,11 @@ export const isIsoUrl = (iso: string): boolean =>
 
 // A server the reverse proxy forwards to, as an operator registers it: an http(s) url with a
 // host, used exactly as given, as --server-url is.
+export const Jobs = Schema.Number.check(
+  Schema.isGreaterThanOrEqualTo(1, { message: "jobs must be at least 1" }),
+).annotate({ identifier: "@oligarchy/shared/domain/Jobs" });
+export type Jobs = typeof Jobs.Type;
+
 export const ServerUrl = Schema.String.check(
   Schema.makeFilter(
     (value: string) => {

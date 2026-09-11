@@ -53,6 +53,7 @@ const ServerLive = (
   automation: boolean,
   port: number,
   url: Option.Option<string>,
+  jobs: number,
 ) =>
   Layer.effectDiscard(
     Effect.gen(function* () {
@@ -61,7 +62,10 @@ const ServerLive = (
         `qemu server listening on ${HOST}:${String(port)}; display ${display}${automation ? "; automation" : ""}${Option.match(url, { onNone: () => "", onSome: (announced) => `; announcing ${announced}` })}`,
         { location: Log.Locations.server },
       );
-      yield* Option.match(url, { onNone: () => Effect.void, onSome: Heartbeat.announce });
+      yield* Option.match(url, {
+        onNone: () => Effect.void,
+        onSome: (announced) => Heartbeat.announce(announced, jobs),
+      });
     }),
   ).pipe(
     Layer.provide(
