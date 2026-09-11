@@ -13,6 +13,7 @@ import {
   testResults,
   testRuns,
 } from "../../src/db/schema.ts";
+import * as StubProxy from "../support/stub-proxy.ts";
 
 const QUERY = fileURLToPath(new URL("../../src/dashboard/query.ts", import.meta.url));
 const SCHEMA = fileURLToPath(new URL("../../src/db/schema.ts", import.meta.url));
@@ -1121,5 +1122,314 @@ describe("dashboard/servers page unhappy path: unreachable database", () => {
     expect(deleted.status).toBe(500);
     expect(deleted.text).toContain("<p>error: internal error</p>");
     expect(deleted.text).not.toContain(SENTINEL_PASSWORD);
+  });
+});
+
+const TOKEN = "test-token";
+
+const postAbort = async (
+  ticket: string,
+  databaseUrl: string,
+  automationUrl: string,
+): Promise<{ readonly status: number; readonly body: unknown }> => {
+  const response = await app.request(
+    "/abort",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ticket }),
+    },
+    {
+      HYPERDRIVE: { connectionString: databaseUrl },
+      OLIGARCHY_TOKEN: TOKEN,
+      AUTOMATION_SERVER_URL: automationUrl,
+    },
+  );
+  return { status: response.status, body: await response.json() };
+};
+
+const jobByTicket = async (
+  databaseUrl: string,
+  ticket: string,
+): Promise<{
+  readonly status: string;
+  readonly reason: string | null;
+  readonly finishedAt: Date | null;
+}> => {
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    const [row] = await drizzle(client)
+      .select({
+        status: automationJobs.status,
+        reason: automationJobs.reason,
+        finishedAt: automationJobs.finishedAt,
+      })
+      .from(automationJobs)
+      .innerJoin(testResults, eq(testResults.id, automationJobs.resultId))
+      .where(eq(testResults.linearId, ticket));
+    if (row === undefined) {
+      throw new Error(`no job for ${ticket}`);
+    }
+    return row;
+  } finally {
+    await client.end();
+  }
+};
+
+describe.skipIf(dbUrl === "")("dashboard/query abortAutomationJob happy path", () => {
+  it("closes a running job for the ticket and ends the connection", async () => {
+    await seed(dbUrl, (db) =>
+      seedQueue(db, "abort-query-running", [
+        {
+          ticket: "ABT-Q-1",
+          action: "drive",
+          status: "running",
+          queuedSecondsAgo: 10,
+          startedSecondsAgo: 5,
+        },
+      ]),
+    );
+    const result = await runQuery(
+      'const closed = await query.abortAutomationJob(url, "ABT-Q-1");\nconsole.log(String(closed));',
+      dbUrl,
+    );
+    expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe("true\n");
+    const job = await jobByTicket(dbUrl, "ABT-Q-1");
+    expect(job.status).toBe("aborted");
+    expect(job.reason).toBe("aborted");
+    expect(job.finishedAt).toBeInstanceOf(Date);
+  });
+});
+
+describe.skipIf(dbUrl === "")("dashboard/query abortAutomationJob unhappy path", () => {
+  it("leaves a pending job pending and ends the connection", async () => {
+    await seed(dbUrl, (db) =>
+      seedQueue(db, "abort-query-pending", [
+        { ticket: "ABT-Q-2", action: "drive", status: "pending", queuedSecondsAgo: 10 },
+      ]),
+    );
+    const result = await runQuery(
+      'const closed = await query.abortAutomationJob(url, "ABT-Q-2");\nconsole.log(String(closed));',
+      dbUrl,
+    );
+    expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe("false\n");
+    expect(await jobByTicket(dbUrl, "ABT-Q-2")).toMatchObject({
+      status: "pending",
+      reason: null,
+      finishedAt: null,
+    });
+  });
+
+  it("leaves a finished job finished and ends the connection", async () => {
+    await seed(dbUrl, (db) =>
+      seedQueue(db, "abort-query-done", [
+        {
+          ticket: "ABT-Q-3",
+          action: "drive",
+          status: "succeeded",
+          queuedSecondsAgo: 30,
+          startedSecondsAgo: 20,
+          finishedSecondsAgo: 5,
+        },
+      ]),
+    );
+    const result = await runQuery(
+      'const closed = await query.abortAutomationJob(url, "ABT-Q-3");\nconsole.log(String(closed));',
+      dbUrl,
+    );
+    expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe("false\n");
+    expect((await jobByTicket(dbUrl, "ABT-Q-3")).status).toBe("succeeded");
+  });
+
+  it("returns false for an unknown ticket and ends the connection", async () => {
+    const result = await runQuery(
+      'const closed = await query.abortAutomationJob(url, "ABT-missing");\nconsole.log(String(closed));',
+      dbUrl,
+    );
+    expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe("false\n");
+  });
+});
+
+describe("dashboard POST /abort happy path: the outbound call", () => {
+  it("posts the ticket with the bearer and answers 200 when the automation server does", async () => {
+    const proxy = await StubProxy.startStubProxy(() => StubProxy.OK);
+    try {
+      const response = await postAbort("ABT-200", REFUSED_URL, proxy.url);
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ ok: "true" });
+      expect(proxy.requests).toEqual([
+        {
+          method: "POST",
+          url: "/abort",
+          authorization: `Bearer ${TOKEN}`,
+          body: { ticket: "ABT-200" },
+        },
+      ]);
+    } finally {
+      await proxy.close();
+    }
+  });
+});
+
+describe.skipIf(dbUrl === "")("dashboard POST /abort happy path", () => {
+  it("leaves a running job running when the automation server answers 200", async () => {
+    const proxy = await StubProxy.startStubProxy(() => StubProxy.OK);
+    try {
+      await seed(dbUrl, (db) =>
+        seedQueue(db, "abort-http-200", [
+          {
+            ticket: "ABT-200",
+            action: "drive",
+            status: "running",
+            queuedSecondsAgo: 10,
+            startedSecondsAgo: 5,
+          },
+        ]),
+      );
+      const response = await postAbort("ABT-200", dbUrl, proxy.url);
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ ok: "true" });
+      expect(proxy.requests).toEqual([
+        {
+          method: "POST",
+          url: "/abort",
+          authorization: `Bearer ${TOKEN}`,
+          body: { ticket: "ABT-200" },
+        },
+      ]);
+      expect((await jobByTicket(dbUrl, "ABT-200")).status).toBe("running");
+    } finally {
+      await proxy.close();
+    }
+  });
+});
+
+describe("dashboard POST /abort unhappy path: always 200", () => {
+  it("answers 200 when the automation server returns 400 and the database is unreachable", async () => {
+    const proxy = await StubProxy.startStubProxy(() =>
+      StubProxy.refusal(400, 'ticket "ABT-400" is not running'),
+    );
+    try {
+      const response = await postAbort("ABT-400", REFUSED_URL, proxy.url);
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ ok: "true" });
+    } finally {
+      await proxy.close();
+    }
+  });
+
+  it("answers 200 when the automation server is unreachable and the database is too", async () => {
+    const response = await postAbort("ABT-DOWN", REFUSED_URL, "http://127.0.0.1:1");
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ ok: "true" });
+  });
+});
+
+describe.skipIf(dbUrl === "")("dashboard POST /abort unhappy path", () => {
+  it("answers 200 and marks a running job aborted when the automation server returns 400", async () => {
+    const proxy = await StubProxy.startStubProxy(() =>
+      StubProxy.refusal(400, 'ticket "ABT-400" is not running'),
+    );
+    try {
+      await seed(dbUrl, (db) =>
+        seedQueue(db, "abort-http-400", [
+          {
+            ticket: "ABT-400",
+            action: "drive",
+            status: "running",
+            queuedSecondsAgo: 10,
+            startedSecondsAgo: 5,
+          },
+        ]),
+      );
+      const response = await postAbort("ABT-400", dbUrl, proxy.url);
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ ok: "true" });
+      const job = await jobByTicket(dbUrl, "ABT-400");
+      expect(job.status).toBe("aborted");
+      expect(job.reason).toBe("aborted");
+    } finally {
+      await proxy.close();
+    }
+  });
+
+  it("answers 200 and marks a running job aborted when the automation server returns 500", async () => {
+    const proxy = await StubProxy.startStubProxy(() => StubProxy.refusal(500, "opencode exited 1"));
+    try {
+      await seed(dbUrl, (db) =>
+        seedQueue(db, "abort-http-500", [
+          {
+            ticket: "ABT-500",
+            action: "drive",
+            status: "running",
+            queuedSecondsAgo: 10,
+            startedSecondsAgo: 5,
+          },
+        ]),
+      );
+      const response = await postAbort("ABT-500", dbUrl, proxy.url);
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ ok: "true" });
+      expect((await jobByTicket(dbUrl, "ABT-500")).status).toBe("aborted");
+    } finally {
+      await proxy.close();
+    }
+  });
+
+  it("answers 200 and marks a running job aborted when the automation server is unreachable", async () => {
+    await seed(dbUrl, (db) =>
+      seedQueue(db, "abort-http-down", [
+        {
+          ticket: "ABT-DOWN",
+          action: "drive",
+          status: "running",
+          queuedSecondsAgo: 10,
+          startedSecondsAgo: 5,
+        },
+      ]),
+    );
+    const response = await postAbort("ABT-DOWN", dbUrl, "http://127.0.0.1:1");
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ ok: "true" });
+    expect((await jobByTicket(dbUrl, "ABT-DOWN")).status).toBe("aborted");
+  });
+
+  it("answers 200 and leaves a finished job finished when the automation server returns 400", async () => {
+    const proxy = await StubProxy.startStubProxy(() =>
+      StubProxy.refusal(400, 'ticket "ABT-DONE" is not running'),
+    );
+    try {
+      await seed(dbUrl, (db) =>
+        seedQueue(db, "abort-http-done", [
+          {
+            ticket: "ABT-DONE",
+            action: "drive",
+            status: "succeeded",
+            queuedSecondsAgo: 30,
+            startedSecondsAgo: 20,
+            finishedSecondsAgo: 5,
+          },
+        ]),
+      );
+      const response = await postAbort("ABT-DONE", dbUrl, proxy.url);
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ ok: "true" });
+      expect((await jobByTicket(dbUrl, "ABT-DONE")).status).toBe("succeeded");
+    } finally {
+      await proxy.close();
+    }
   });
 });

@@ -1,4 +1,4 @@
-import { desc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Client } from "pg";
 import {
@@ -418,6 +418,31 @@ export function listAutomationQueue(connectionString: string): Promise<Automatio
       .orderBy(desc(automationJobs.finishedAt))
       .limit(QUEUE_LIMIT);
     return { running, pending, completed };
+  });
+}
+
+// Only a running row closes, the same rule as the automation server's finish: a pending or
+// finished ticket is left as it is. reason and finished_at are written with the status so the
+// queue shows the close.
+export function abortAutomationJob(connectionString: string, ticket: string): Promise<boolean> {
+  return withDatabase(connectionString, async (db) => {
+    const rows = await db
+      .update(automationJobs)
+      .set({ status: "aborted", reason: "aborted", finishedAt: sql`now()` })
+      .where(
+        and(
+          eq(automationJobs.status, "running"),
+          inArray(
+            automationJobs.resultId,
+            db
+              .select({ id: testResults.id })
+              .from(testResults)
+              .where(eq(testResults.linearId, ticket)),
+          ),
+        ),
+      )
+      .returning({ id: automationJobs.id });
+    return rows.length > 0;
   });
 }
 
