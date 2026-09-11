@@ -3,6 +3,7 @@ import { CliError, Command, Flag } from "effect/unstable/cli";
 import type { HttpClient } from "effect/unstable/http";
 import * as Config from "../config.ts";
 import * as Actions from "../db/actions.ts";
+import * as Automation from "../db/automation.ts";
 import * as DebugLogs from "../db/debug-logs.ts";
 import * as Client from "../db/client.ts";
 import * as Diagnosis from "../db/diagnosis.ts";
@@ -28,6 +29,7 @@ export type Stores =
   | DebugLogs.DebugLogStore
   | Diagnosis.DiagnosisStore
   | Tests.TestStore
+  | Automation.AutomationStore
   | Log.Log;
 
 // ctrl is the record keeper: every read and write is a database call. It never talks to a qemu server;
@@ -44,6 +46,7 @@ const databaseLayers = (url: Redacted.Redacted): Layer.Layer<Stores, Errors.Data
   Layer.mergeAll(
     Sessions.SessionStore.layer,
     Tests.TestStore.layer,
+    Automation.AutomationStore.layer,
     DebugLogs.DebugLogStore.layer,
     Diagnosis.DiagnosisStore.layer,
     Log.Log.layer,
@@ -562,6 +565,16 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     });
   });
 
+  // automation --list [--count <n>]
+  const automationList = Effect.fn("ctrl.automation.list")(function* (input: {
+    readonly count: number;
+  }) {
+    const automation = yield* Automation.AutomationStore;
+    const queue = yield* automation.listJobs(input.count);
+    const now = yield* Clock.currentTimeMillis;
+    yield* printLines(Render.renderAutomationJobs(queue, now));
+  });
+
   // session list [--count <n>] [--active] [--json]
   const sessionList = Effect.fn("ctrl.session.list")(function* (input: {
     readonly count: number;
@@ -896,6 +909,22 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     Command.withSubcommands([errorTypeNewCommand, errorTypeListCommand]),
   );
 
+  const automationCommand = Command.make(
+    "automation",
+    {
+      list: Flag.boolean("list").pipe(
+        Flag.withDefault(Effect.fail(new CliError.MissingOption({ option: "list" }))),
+        Flag.withDescription("List automation jobs from the database"),
+      ),
+      count: Flag.integer("count").pipe(
+        Flag.withSchema(Count),
+        Flag.withDefault(DEFAULT_COUNT),
+        Flag.withDescription("How many of the most recently completed jobs to print"),
+      ),
+    },
+    ({ count }) => automationList({ count }),
+  ).pipe(Command.withDescription("automation --list [--count <n>]"), Command.provide(withDb));
+
   const diagnoseCommand = Command.make(
     "diagnose",
     {
@@ -931,6 +960,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
       sessionCommand,
       errorTypeCommand,
       diagnoseCommand,
+      automationCommand,
     ]),
   );
 };

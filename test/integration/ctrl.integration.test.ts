@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Client } from "pg";
 import * as DbSchema from "../../src/db/schema.ts";
@@ -130,6 +130,85 @@ const seedResult = async (sessionId: string | null): Promise<string> => {
 const lines = (text: string): ReadonlyArray<string> =>
   text.split("\n").filter((line) => line !== "");
 
+type SeededJob = {
+  readonly ticket: string | null;
+  readonly action: (typeof DbSchema.automationJobs.$inferInsert)["action"];
+  readonly status: (typeof DbSchema.automationJobs.$inferInsert)["status"];
+  readonly queuedSecondsAgo: number;
+  readonly startedSecondsAgo?: number;
+  readonly finishedSecondsAgo?: number;
+};
+
+const secondsAgo = (seconds: number) => sql`now() - make_interval(secs => ${seconds})`;
+
+// One definition, and per job its own run and result. The jobs already in the container go
+// first: this listing is its own to arrange.
+const seedAutomationJobs = async (jobs: ReadonlyArray<SeededJob>): Promise<void> => {
+  const client = new Client({ connectionString: Postgres.getDbUrl() });
+  await client.connect();
+  try {
+    const db = drizzle({ client });
+    await db.delete(DbSchema.automationJobs);
+    const [definition] = await db
+      .insert(DbSchema.testDefinitions)
+      .values({
+        name: `automation-list-${randomUUID()}`,
+        description: "d",
+        instruction: "i",
+        proof: "p",
+      })
+      .returning({ id: DbSchema.testDefinitions.id });
+    if (definition === undefined) {
+      throw new Error("seed: no definition inserted");
+    }
+    const runs = await db
+      .insert(DbSchema.testRuns)
+      .values(
+        jobs.map((_, index) => ({
+          name: `automation-list ${String(index)}`,
+          iso: "https://example.com/omarchy.iso",
+          serverUrl: SERVER,
+        })),
+      )
+      .returning({ id: DbSchema.testRuns.id });
+    const results = await db
+      .insert(DbSchema.testResults)
+      .values(
+        jobs.map((job, index) => {
+          const run = runs[index];
+          if (run === undefined) {
+            throw new Error("seed: no run inserted");
+          }
+          return {
+            runId: run.id,
+            definitionId: definition.id,
+            linearId: job.ticket,
+          };
+        }),
+      )
+      .returning({ id: DbSchema.testResults.id });
+    await db.insert(DbSchema.automationJobs).values(
+      jobs.map((job, index) => {
+        const result = results[index];
+        if (result === undefined) {
+          throw new Error("seed: no result inserted");
+        }
+        return {
+          resultId: result.id,
+          action: job.action,
+          status: job.status,
+          createdAt: secondsAgo(job.queuedSecondsAgo),
+          startedAt: job.startedSecondsAgo === undefined ? null : secondsAgo(job.startedSecondsAgo),
+          finishedAt:
+            job.finishedSecondsAgo === undefined ? null : secondsAgo(job.finishedSecondsAgo),
+        };
+      }),
+    );
+  } finally {
+    await client.end();
+  }
+};
+
 // ---------------------------------------------------------------------------
 // Without a database: parsing, environment order
 // ---------------------------------------------------------------------------
@@ -140,6 +219,7 @@ describe("./ctrl without a database", () => {
     expect(bare.code).toBe(0);
     expect(bare.stdout).toMatch(/test-results/);
     expect(bare.stdout).toMatch(/session/);
+    expect(bare.stdout).toMatch(/automation/);
 
     const unknown = await runCtrl(["reboot"], { DATABASE_URL: "" });
     expect(unknown.code).toBe(1);
@@ -153,6 +233,7 @@ describe("./ctrl without a database", () => {
       ["session", "--help"],
       ["test", "start", "--help"],
       ["diagnose", "--help"],
+      ["automation", "--help"],
     ]) {
       const result = await runCtrl(args, { DATABASE_URL: "" });
       expect(result.code).toBe(0);
@@ -253,6 +334,7 @@ describe("./ctrl without a database", () => {
         "--model",
         "m",
       ],
+      ["automation", "--list"],
     ]) {
       const result = await runCtrl(args, {
         DATABASE_URL: "",
@@ -442,6 +524,13 @@ describe("./ctrl without a database", () => {
         env,
       ],
       [["session", "list", "--count", "ten"], /Invalid value for flag --count: "ten"/, env],
+      [["automation"], /Missing required flag: --list/, env],
+      [
+        ["automation", "--list", "--count", "0"],
+        /Invalid value for flag --count: "0"[\s\S]*count must be at least 1/,
+        env,
+      ],
+      [["automation", "--list", "--count", "ten"], /Invalid value for flag --count: "ten"/, env],
       [["session", "list", "--session-id", randomUUID()], /Unrecognized flag: --session-id/, env],
       [
         ["session", "--session-id", randomUUID(), "--logs", "--active"],
@@ -666,6 +755,91 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
         expect(pendingSeen).toBe(false);
       }
     }
+  });
+
+  it("automation --list prints running, then pending, then completed, from the database", async () => {
+    await seedAutomationJobs([
+      {
+        ticket: "CTL-101",
+        action: "drive",
+        status: "running",
+        queuedSecondsAgo: 300,
+        startedSecondsAgo: 5,
+      },
+      {
+        ticket: "CTL-102",
+        action: "diagnose",
+        status: "running",
+        queuedSecondsAgo: 100,
+        startedSecondsAgo: 2,
+      },
+      { ticket: "CTL-103", action: "drive", status: "pending", queuedSecondsAgo: 90 },
+      { ticket: "CTL-104", action: "diagnose", status: "pending", queuedSecondsAgo: 30 },
+      {
+        ticket: "CTL-105",
+        action: "drive",
+        status: "succeeded",
+        queuedSecondsAgo: 3_000,
+        startedSecondsAgo: 2_900,
+        finishedSecondsAgo: 600,
+      },
+      {
+        ticket: "CTL-106",
+        action: "drive",
+        status: "failed",
+        queuedSecondsAgo: 2_000,
+        startedSecondsAgo: 1_900,
+        finishedSecondsAgo: 60,
+      },
+    ]);
+    const result = await runCtrl(["automation", "--list"]);
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    const printed = lines(result.stdout);
+    expect(printed[0]).toBe("running");
+    expect(printed[1]).toContain("CTL-102");
+    expect(printed[1]).toContain("diagnose");
+    expect(printed[1]).toContain("running");
+    expect(printed[2]).toContain("CTL-101");
+    expect(printed[2]).toContain("drive");
+    const pendingAt = printed.indexOf("pending");
+    expect(printed[pendingAt + 1]).toContain("CTL-104");
+    expect(printed[pendingAt + 2]).toContain("CTL-103");
+    const completedAt = printed.indexOf("completed");
+    expect(printed[completedAt + 1]).toContain("CTL-106");
+    expect(printed[completedAt + 1]).toContain("failed");
+    expect(printed[completedAt + 2]).toContain("CTL-105");
+    expect(printed[completedAt + 2]).toContain("succeeded");
+  });
+
+  it("automation --list --count bounds only the completed jobs", async () => {
+    await seedAutomationJobs([
+      { ticket: "CTL-201", action: "drive", status: "pending", queuedSecondsAgo: 10 },
+      {
+        ticket: "CTL-202",
+        action: "drive",
+        status: "succeeded",
+        queuedSecondsAgo: 200,
+        startedSecondsAgo: 180,
+        finishedSecondsAgo: 90,
+      },
+      {
+        ticket: "CTL-203",
+        action: "diagnose",
+        status: "failed",
+        queuedSecondsAgo: 300,
+        startedSecondsAgo: 280,
+        finishedSecondsAgo: 20,
+      },
+    ]);
+    const result = await runCtrl(["automation", "--list", "--count=1"]);
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    const printed = lines(result.stdout);
+    expect(printed).toContain("pending");
+    expect(printed.some((line) => line.includes("CTL-201"))).toBe(true);
+    expect(printed.some((line) => line.includes("CTL-203"))).toBe(true);
+    expect(printed.some((line) => line.includes("CTL-202"))).toBe(false);
   });
 
   it("session --logs prints the bare JSON array and needs neither OLIGARCHY_TOKEN nor SERVER_URL", async () => {

@@ -227,3 +227,162 @@ describe("renderTestDefinitionHistory unhappy path", () => {
     expect(Render.renderTestDefinitionHistory([], true)).toEqual(["[]"]);
   });
 });
+
+const JOB_RESET = "\x1b[0m";
+
+const job = (
+  status: Render.AutomationJobRow["status"],
+  action: Render.AutomationJobRow["action"],
+  secondsAgo: number,
+  ticket: string | null,
+  test: string,
+): Render.AutomationJobRow => {
+  const stamp = ago(secondsAgo);
+  return {
+    ticket,
+    test,
+    action,
+    status,
+    createdAt: stamp,
+    startedAt: status === "pending" ? null : stamp,
+    finishedAt: status === "pending" || status === "running" ? null : stamp,
+  };
+};
+
+describe("renderAutomationJobs happy path", () => {
+  it("prints running, then pending, then completed, each under its header", () => {
+    const lines = Render.renderAutomationJobs(
+      {
+        running: [job("running", "drive", 5, "OLI-42", "lock-screen")],
+        pending: [job("pending", "diagnose", 90, "OLI-43", "lock-screen")],
+        completed: [job("succeeded", "drive", 90 * 60, "OLI-41", "Open a terminal")],
+      },
+      NOW,
+    );
+    expect(lines).toEqual([
+      "running",
+      `\x1b[33mrunning  ${JOB_RESET}  drive      5s ago       OLI-42  lock-screen`,
+      "pending",
+      `\x1b[90mpending  ${JOB_RESET}  diagnose  1m ago       OLI-43  lock-screen`,
+      "completed",
+      `\x1b[32msucceeded${JOB_RESET}  drive      1h ago       OLI-41  Open a terminal`,
+    ]);
+  });
+
+  it("colors every job status: gray pending, yellow running, green succeeded, red failed, bright red aborted, magenta timed_out", () => {
+    const statuses = ["pending", "running", "succeeded", "failed", "aborted", "timed_out"] as const;
+    const lines = Render.renderAutomationJobs(
+      {
+        running: [job("running", "drive", 1, "OLI-1", "t")],
+        pending: [job("pending", "drive", 1, "OLI-2", "t")],
+        completed: statuses
+          .filter((status) => status !== "pending" && status !== "running")
+          .map((status, index) => job(status, "drive", 1, `OLI-${String(index + 3)}`, "t")),
+      },
+      NOW,
+    );
+    const colored = lines.filter((line) => line.includes(JOB_RESET));
+    expect(colored.map((line) => line.slice(0, line.indexOf(JOB_RESET)))).toEqual([
+      "\x1b[33mrunning  ",
+      "\x1b[90mpending  ",
+      "\x1b[32msucceeded",
+      "\x1b[31mfailed   ",
+      "\x1b[91maborted  ",
+      "\x1b[35mtimed_out",
+    ]);
+    expect(Object.keys(Render.JOB_STATUS_COLOR).sort()).toEqual([...statuses].sort());
+  });
+
+  it("ages a running job from startedAt, a pending job from createdAt, and a completed job from finishedAt", () => {
+    const lines = Render.renderAutomationJobs(
+      {
+        running: [
+          {
+            ticket: "OLI-10",
+            test: "lock-screen",
+            action: "drive",
+            status: "running",
+            createdAt: ago(300),
+            startedAt: ago(5),
+            finishedAt: null,
+          },
+        ],
+        pending: [
+          {
+            ticket: "OLI-11",
+            test: "lock-screen",
+            action: "diagnose",
+            status: "pending",
+            createdAt: ago(90),
+            startedAt: null,
+            finishedAt: null,
+          },
+        ],
+        completed: [
+          {
+            ticket: "OLI-12",
+            test: "lock-screen",
+            action: "drive",
+            status: "failed",
+            createdAt: ago(3_600),
+            startedAt: ago(3_000),
+            finishedAt: ago(60),
+          },
+        ],
+      },
+      NOW,
+    );
+    expect(lines).toEqual([
+      "running",
+      `\x1b[33mrunning  ${JOB_RESET}  drive      5s ago       OLI-10  lock-screen`,
+      "pending",
+      `\x1b[90mpending  ${JOB_RESET}  diagnose  1m ago       OLI-11  lock-screen`,
+      "completed",
+      `\x1b[31mfailed   ${JOB_RESET}  drive      1m ago       OLI-12  lock-screen`,
+    ]);
+  });
+
+  it("prints — when a job has no ticket", () => {
+    const lines = Render.renderAutomationJobs(
+      {
+        running: [],
+        pending: [job("pending", "drive", 5, null, "lock-screen")],
+        completed: [],
+      },
+      NOW,
+    );
+    expect(lines).toEqual([
+      "running",
+      "pending",
+      `\x1b[90mpending  ${JOB_RESET}  drive      5s ago       —  lock-screen`,
+      "completed",
+    ]);
+  });
+});
+
+describe("renderAutomationJobs unhappy path", () => {
+  it("prints the three headers and no job lines when every list is empty", () => {
+    expect(Render.renderAutomationJobs({ running: [], pending: [], completed: [] }, NOW)).toEqual([
+      "running",
+      "pending",
+      "completed",
+    ]);
+  });
+
+  it("renders a stamp ahead of this clock as 0s ago, never a negative age", () => {
+    const lines = Render.renderAutomationJobs(
+      {
+        running: [job("running", "drive", -45, "OLI-9", "lock-screen")],
+        pending: [],
+        completed: [],
+      },
+      NOW,
+    );
+    expect(lines).toEqual([
+      "running",
+      `\x1b[33mrunning  ${JOB_RESET}  drive      0s ago       OLI-9  lock-screen`,
+      "pending",
+      "completed",
+    ]);
+  });
+});
