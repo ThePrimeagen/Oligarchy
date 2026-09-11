@@ -898,6 +898,10 @@ app.post("/servers/delete", async (context) => {
 // that server is the close. A 4xx or 5xx, or no answer at all, closes a running row here
 // so the queue does not stay stuck; Sentry records "Cloudflare aborted job" only when
 // that write lands. This route always answers 200: the operator's click is done either way.
+// OpenCode's force-kill is 5s; ten seconds is that wait plus the round trip. A hung
+// server must not hold the operator's 200.
+const ABORT_TIMEOUT_MS = 10_000;
+
 app.post("/abort", async (context) => {
   try {
     const body: unknown = await context.req.json();
@@ -920,6 +924,7 @@ app.post("/abort", async (context) => {
           "content-type": "application/json",
         },
         body: JSON.stringify({ ticket }),
+        signal: AbortSignal.timeout(ABORT_TIMEOUT_MS),
       });
       if (response.status === 200) {
         return context.json({ ok: "true" });

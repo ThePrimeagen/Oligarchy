@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createServer as createHttpServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { eq, sql } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
@@ -1335,6 +1336,29 @@ describe("dashboard POST /abort unhappy path: always 200", () => {
     const response = await postAbort("ABT-DOWN", REFUSED_URL, "http://127.0.0.1:1");
     expect(response.status).toBe(200);
     expect(response.body).toEqual({ ok: "true" });
+  });
+
+  it("answers 200 when the automation server accepts the request and never answers", async () => {
+    const server = createHttpServer(() => {});
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", () => resolve());
+    });
+    try {
+      const address = server.address();
+      if (address === null || typeof address === "string") {
+        throw new Error("hanging abort server: no tcp address");
+      }
+      const response = await postAbort(
+        "ABT-HANG",
+        REFUSED_URL,
+        `http://127.0.0.1:${String(address.port)}`,
+      );
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ ok: "true" });
+    } finally {
+      await new Promise<void>((done) => server.close(() => done()));
+    }
   });
 });
 
