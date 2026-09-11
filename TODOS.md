@@ -4,8 +4,16 @@ Things noticed during the super run that need addressing but did not block it.
 
 - `SUB_AGENT` in `src/ctrl/prompts.ts` is `Grok 4.6 high fast (cursor-grok-4.6-high-fast)`, a Cursor
   model name, so every Linear ticket tells the driver to "spawn a Grok 4.6 high fast subagent" to
-  verify the proof. An opencode agent cannot; the muse-1.3 driver on OLI-1065 noted it and verified
-  the proof itself. Either drop the rule for opencode drivers or name something they can run.
+  verify the proof. Most opencode drivers note it and verify the proof themselves (OLI-1065); one
+  (OLI-1094) obeyed with opencode's `task` tool, and its child session's permission asks were never
+  answered by `opencode run --auto` (anomalyco/opencode#36868) — a deadlock until the 30-minute
+  ceiling. The client now allows the ask-class permissions for every session, which removes the
+  deadlock; the rule itself is still a Cursor leftover. Drop it or name something they can run.
+- An idle watchdog in the automation client (no opencode log line, stdout or guest action for N
+  minutes) would reclaim a wedged slot in ~5 minutes instead of the 30-minute ceiling.
+- opencode's OpenRouter path has no default stream timeout in 1.18 (anomalyco/opencode#37580); a
+  silently stalled stream would also run to the ceiling. `provider.openrouter.options.chunkTimeout`
+  in the opencode config would turn that into a retryable error.
 - `test/integration/automation-client.integration.test.ts` "answers 401 without the bearer and
   persists the error in logs" fails when run in the full suite and passes alone: the test reads
   the `logs` table before the client's drain fiber has inserted the row. Wait for the row.
@@ -69,3 +77,7 @@ Genuine harness bugs found by the runs and fixed on branch `automation-model-fla
 - (done) The automation client kills an `opencode run` at 30 minutes (`OpenCode.CEILING`) and fails
   the job `opencode run exceeded 30 minutes`; before, a run sleeping out a provider retry-after held
   its slot for as long as the provider said (OLI-1078, OLI-1082, OLI-1083).
+- (done) The automation client hands opencode `OPENCODE_CONFIG_CONTENT` allowing
+  `external_directory` and `doom_loop` for every session: `--auto` answers only the root session's
+  asks, so a driver's `task` subagent reading `/tmp/*.png` deadlocked the run (OLI-1094,
+  anomalyco/opencode#36868).

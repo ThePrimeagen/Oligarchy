@@ -19,7 +19,12 @@ const failed = (command: string, message: string, cause?: unknown): Errors.CliFa
     ? Errors.CliFailed.make({ command, message })
     : Errors.CliFailed.make({ command, message, cause });
 
-export const run = Effect.fn("Cli.run")(function* (command: string, args: ReadonlyArray<string>) {
+// `env` joins the inherited environment for this one child; nothing secret goes on argv.
+export const run = Effect.fn("Cli.run")(function* (
+  command: string,
+  args: ReadonlyArray<string>,
+  env: Readonly<Record<string, string>> = {},
+) {
   return yield* Effect.scoped(
     Effect.gen(function* () {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -31,6 +36,7 @@ export const run = Effect.fn("Cli.run")(function* (command: string, args: Readon
             stdin: "ignore",
             stdout: "inherit",
             stderr: "pipe",
+            env,
             extendEnv: true,
             detached: false,
             killSignal: "SIGTERM",

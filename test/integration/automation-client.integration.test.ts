@@ -269,7 +269,7 @@ describeWithDatabase("automation client POST /run", () => {
     () =>
       Effect.promise(async () => {
         const bin = installOpencode(
-          'printf "%s\\n" "$@" > "$(dirname "$0")/argv"; echo "transcript-sentinel: the agent spoke"; exit 0',
+          'printf "%s\\n" "$@" > "$(dirname "$0")/argv"; printf "%s" "$OPENCODE_CONFIG_CONTENT" > "$(dirname "$0")/config"; echo "transcript-sentinel: the agent spoke"; exit 0',
         );
         const port = await freePort();
         const process = spawnAutomationClient(
@@ -292,6 +292,9 @@ describeWithDatabase("automation client POST /run", () => {
             ["run", "--auto", "--model", MODEL, "--", "do the work", ""].join("\n"),
           );
           expect(process.stdout()).toContain("transcript-sentinel: the agent spoke");
+          expect(JSON.parse(readFileSync(join(bin, "config"), "utf8"))).toEqual({
+            permission: { external_directory: "allow", doom_loop: "allow" },
+          });
         } finally {
           process.child.kill("SIGTERM");
           await process.exited;

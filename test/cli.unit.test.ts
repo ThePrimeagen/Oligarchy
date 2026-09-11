@@ -33,6 +33,14 @@ describe("Cli.run happy path", () => {
       }),
   );
 
+  it.effect("runs with no variables of its own when none are given", () =>
+    Effect.gen(function* () {
+      const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
+      yield* Cli.run("tool", []).pipe(Effect.provide(spawner.layer));
+      expect(spawner.spawned[0]?.options).toMatchObject({ env: {}, extendEnv: true });
+    }),
+  );
+
   it.effect("waits until the command exits before succeeding", () =>
     Effect.gen(function* () {
       const spawner = FakeSpawner.fakeSpawner(() => ({}));

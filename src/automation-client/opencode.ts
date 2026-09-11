@@ -10,11 +10,19 @@ export const BIN = "opencode";
 // diagnoses under four; past the ceiling the run is killed and the job says so.
 export const CEILING = "30 minutes";
 
-// --auto: a headless run has nobody to answer a permission prompt. Without it opencode rejects
-// the call that asked (a screenshot read outside the working directory, the same get-image
-// repeated while a guest boots) and exits 0 having said nothing. Explicit denies still hold.
+// A headless run has nobody to answer a permission prompt. --auto approves the root session's
+// asks, but a subagent the driver spawns asks into the void and the run deadlocks
+// (anomalyco/opencode#36868), so the two permissions that default to ask are allowed outright
+// for every session: a screenshot read outside the working directory, the same get-image
+// repeated while a guest boots. Explicit denies still hold.
+const CONFIG = JSON.stringify({
+  permission: { external_directory: "allow", doom_loop: "allow" },
+});
+
 export const run = (prompt: string, model: string) =>
-  Cli.run(BIN, ["run", "--auto", "--model", model, "--", prompt]).pipe(
+  Cli.run(BIN, ["run", "--auto", "--model", model, "--", prompt], {
+    OPENCODE_CONFIG_CONTENT: CONFIG,
+  }).pipe(
     Effect.mapError((error) => Errors.RunFailed.make({ message: error.message, cause: error })),
     Effect.timeoutOrElse({
       duration: CEILING,

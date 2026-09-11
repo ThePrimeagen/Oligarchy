@@ -23,6 +23,21 @@ describe("OpenCode.run happy path", () => {
       }),
   );
 
+  // --auto answers only the root session's asks; a subagent the driver spawns asks into the void
+  // (anomalyco/opencode#36868). The two permissions that default to ask are allowed outright.
+  it.effect("hands opencode a config that allows the ask-class permissions for every session", () =>
+    Effect.gen(function* () {
+      const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
+      yield* OpenCode.run("do the work", MODEL).pipe(Effect.provide(spawner.layer));
+      const content = spawner.spawned[0]?.options.env?.OPENCODE_CONFIG_CONTENT;
+      expect(content).toBeDefined();
+      expect(JSON.parse(content ?? "")).toEqual({
+        permission: { external_directory: "allow", doom_loop: "allow" },
+      });
+      expect(spawner.spawned[0]?.options.extendEnv).toBe(true);
+    }),
+  );
+
   it.effect("passes a dashed prompt after -- so opencode does not treat it as a flag", () =>
     Effect.gen(function* () {
       const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
