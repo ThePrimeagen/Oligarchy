@@ -61,7 +61,8 @@ const ServerLive = (port: number) =>
 const DatabaseLive = Layer.unwrap(Effect.map(Config.databaseUrl, Client.Database.layer));
 
 // LINEAR_WEBHOOK_SECRET signs POST /linear; OLIGARCHY_TOKEN authenticates POST /run to a
-// client; DATABASE_URL holds the queue, the live-server list and the logs rows. Sentry sits
+// client and POST /abort from Cloudflare; DATABASE_URL holds the queue, the live-server
+// list and the logs rows. Sentry sits
 // beneath Log so Log captures the reporter. Lines land in logs with location/agentId
 // "automation"; durable jobs remain automation_jobs.
 const MainLive = Layer.mergeAll(

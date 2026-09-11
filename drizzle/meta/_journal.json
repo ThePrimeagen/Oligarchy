@@ -71,6 +71,13 @@
       "when": 1789074862043,
       "tag": "0010_sweet_taskmaster",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1789147828158,
+      "tag": "0011_busy_spectrum",
+      "breakpoints": true
     }
   ]
 }

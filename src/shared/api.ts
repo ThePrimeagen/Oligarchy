@@ -164,16 +164,14 @@ export class QemuReverseProxyApi extends HttpApi.make("OligarchyQemuReverseProxy
   .add(Servers) {}
 
 // The automation server: POST /linear is Linear's signed webhook. No oligarchy bearer —
-// Linear signs the body. The qemu server's own boundary suffices: this process neither forwards
-// nor places.
+// Linear signs the body. POST /abort is ours and takes the bearer. The qemu server's own
+// boundary suffices: this process neither forwards nor places.
 export const linear = HttpApiEndpoint.post("linear", "/linear", {
   success: Contract.Ok,
   error: Errors.UnauthorizedWire,
 });
 
 export class Linear extends HttpApiGroup.make("Linear").add(linear).middleware(ApiBoundary) {}
-
-export class AutomationServerApi extends HttpApi.make("OligarchyAutomationServer").add(Linear) {}
 
 export const run = HttpApiEndpoint.post("run", "/run", {
   payload: Contract.RunBody,
@@ -186,6 +184,15 @@ export const abort = HttpApiEndpoint.post("abort", "/abort", {
   success: Contract.Ok,
   error: [Errors.UnknownSessionWire, Errors.RunFailedWire],
 });
+
+export class Abort extends HttpApiGroup.make("Abort")
+  .add(abort)
+  .middleware(BearerAuth)
+  .middleware(ApiBoundary) {}
+
+export class AutomationServerApi extends HttpApi.make("OligarchyAutomationServer")
+  .add(Linear)
+  .add(Abort) {}
 
 export class Runs extends HttpApiGroup.make("Runs")
   .add(run)

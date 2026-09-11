@@ -10,6 +10,7 @@ import * as Middleware from "../qemu-server/middleware.ts";
 import * as Api from "../shared/api.ts";
 import * as Contract from "../shared/contract.ts";
 import * as Errors from "../shared/errors.ts";
+import * as AutomationClient from "./client.ts";
 import * as Signature from "./signature.ts";
 import * as Webhook from "./webhook.ts";
 
@@ -98,11 +99,76 @@ export const LinearLive = HttpApiBuilder.group(Api.AutomationServerApi, "Linear"
   ),
 );
 
-// The bearer is left off: Linear signs /linear.
+export const AbortLive = HttpApiBuilder.group(Api.AutomationServerApi, "Abort", (handlers) =>
+  handlers.handle("abort", ({ payload }) =>
+    Effect.gen(function* () {
+      const tests = yield* Tests.TestStore;
+      const automation = yield* Automation.AutomationStore;
+      const log = yield* Log.Log;
+      const result = yield* tests.findResultByLinearId(payload.ticket).pipe(
+        Effect.mapError((error) =>
+          Errors.Internal.make({ cause: error, agentId: payload.ticket }),
+        ),
+      );
+      if (Option.isNone(result)) {
+        return yield* Errors.BadRequest.make({
+          message: `ticket "${payload.ticket}" is not running`,
+          agentId: payload.ticket,
+        });
+      }
+      const job = yield* automation.findRunning(result.value.id).pipe(
+        Effect.mapError((error) =>
+          Errors.Internal.make({ cause: error, agentId: payload.ticket }),
+        ),
+      );
+      if (Option.isNone(job)) {
+        return yield* Errors.BadRequest.make({
+          message: `ticket "${payload.ticket}" is not running`,
+          agentId: payload.ticket,
+        });
+      }
+      const url = job.value.clientUrl;
+      if (url === null) {
+        return yield* Effect.die(new Error(`running job ${job.value.id} has no clientUrl`));
+      }
+      yield* AutomationClient.abort(url, payload.ticket).pipe(
+        Effect.catchTag("AutomationClientError", (error) =>
+          error.status === 404
+            ? Effect.fail(Errors.unknownSession(payload.ticket, payload.ticket))
+            : Effect.fail(
+                Errors.RunFailed.make(
+                  Object.assign(
+                    { message: error.message },
+                    error.cause === undefined ? undefined : { cause: error.cause },
+                  ),
+                ),
+              ),
+        ),
+      );
+      yield* log.info(`aborted ${job.value.action}; ${url}`, {
+        location: Log.Locations.automation,
+        agentId: payload.ticket,
+      });
+      yield* automation.finish(job.value.id, "aborted", "aborted").pipe(
+        Effect.mapError((error) =>
+          Errors.Internal.make({ cause: error, agentId: payload.ticket }),
+        ),
+      );
+      return ok;
+    }),
+  ),
+);
+
+const BearerAuthLive = Layer.unwrap(
+  Effect.map(AutomationClient.OligarchyToken, Middleware.bearerAuth),
+);
+
+// Linear signs /linear. /abort takes the oligarchy bearer, from the same token POST /run uses.
 export const routes = Layer.mergeAll(
   HttpApiBuilder.layer(Api.AutomationServerApi).pipe(
     Layer.provide(LinearLive),
-    Layer.provide(Middleware.ApiBoundaryLive),
+    Layer.provide(AbortLive),
+    Layer.provide(Layer.mergeAll(BearerAuthLive, Middleware.ApiBoundaryLive)),
   ),
   QemuServerHandlers.NotFoundRoute,
 );

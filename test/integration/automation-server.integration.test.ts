@@ -605,3 +605,136 @@ describeServing("automation server dispatch", () => {
     }),
   );
 });
+
+describeServing("automation server abort", () => {
+  it.live("aborts a running job at the client that claimed it", () =>
+    Effect.promise(async () => {
+      const seen: Array<string> = [];
+      const client = await serveClient((req, res) => {
+        seen.push(`${req.method} ${req.url ?? ""}`);
+        if (req.url === "/abort") {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: "true" }));
+          return;
+        }
+      });
+      const linearId = `OLI-${randomUUID().slice(0, 8)}`;
+      const resultId = await seedResult(linearId);
+      await seedJob(resultId, "drive");
+      await seedLiveClient(client.url);
+      const port = await freePort();
+      const process = spawnAutomationServer(["--port", String(port)]);
+      try {
+        await process.waitFor(/automation server listening/);
+        await waitForJob(resultId, "running");
+        const response = await request(
+          port,
+          "POST",
+          "/abort",
+          { "content-type": "application/json", authorization: `Bearer ${TOKEN}` },
+          JSON.stringify({ ticket: linearId }),
+        );
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual({ ok: "true" });
+        const job = await waitForJob(resultId, "aborted");
+        expect(job).toMatchObject({
+          status: "aborted",
+          reason: "aborted",
+          clientUrl: client.url,
+        });
+        expect(seen).toContain("POST /abort");
+      } finally {
+        process.child.kill("SIGTERM");
+        await process.exited;
+        await removeServer(client.url);
+        await client.close();
+      }
+    }),
+  );
+
+  it.live("400 when the ticket is not running", () =>
+    Effect.promise(async () => {
+      const port = await freePort();
+      const process = spawnAutomationServer(["--port", String(port)]);
+      try {
+        await process.waitFor(/automation server listening/);
+        const response = await request(
+          port,
+          "POST",
+          "/abort",
+          { "content-type": "application/json", authorization: `Bearer ${TOKEN}` },
+          JSON.stringify({ ticket: "OLI-missing" }),
+        );
+        expect(response.status).toBe(400);
+        expect(await response.json()).toEqual({
+          error: 'ticket "OLI-missing" is not running',
+        });
+      } finally {
+        process.child.kill("SIGTERM");
+        await process.exited;
+      }
+    }),
+  );
+
+  it.live("404 when the client does not know the session, and the job stays running", () =>
+    Effect.promise(async () => {
+      const client = await serveClient((req, res) => {
+        if (req.url === "/abort") {
+          res.writeHead(404, { "content-type": "application/json" });
+          res.end(JSON.stringify({ error: 'unknown session "OLI-x"' }));
+          return;
+        }
+      });
+      const linearId = `OLI-${randomUUID().slice(0, 8)}`;
+      const resultId = await seedResult(linearId);
+      await seedJob(resultId, "drive");
+      await seedLiveClient(client.url);
+      const port = await freePort();
+      const process = spawnAutomationServer(["--port", String(port)]);
+      try {
+        await process.waitFor(/automation server listening/);
+        await waitForJob(resultId, "running");
+        const response = await request(
+          port,
+          "POST",
+          "/abort",
+          { "content-type": "application/json", authorization: `Bearer ${TOKEN}` },
+          JSON.stringify({ ticket: linearId }),
+        );
+        expect(response.status).toBe(404);
+        expect(await response.json()).toEqual({
+          error: `unknown session "${linearId}"`,
+        });
+        const jobs = await jobsFor(resultId);
+        expect(jobs).toEqual([expect.objectContaining({ status: "running" })]);
+      } finally {
+        process.child.kill("SIGTERM");
+        await process.exited;
+        await removeServer(client.url);
+        await client.close();
+      }
+    }),
+  );
+
+  it.live("401 without a bearer", () =>
+    Effect.promise(async () => {
+      const port = await freePort();
+      const process = spawnAutomationServer(["--port", String(port)]);
+      try {
+        await process.waitFor(/automation server listening/);
+        const response = await request(
+          port,
+          "POST",
+          "/abort",
+          { "content-type": "application/json" },
+          JSON.stringify({ ticket: "OLI-1" }),
+        );
+        expect(response.status).toBe(401);
+        expect(await response.json()).toEqual({ error: "unauthorized" });
+      } finally {
+        process.child.kill("SIGTERM");
+        await process.exited;
+      }
+    }),
+  );
+});

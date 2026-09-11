@@ -1123,21 +1123,26 @@ Postgres.describeWithDatabase("database", () => {
           resultId: second.results[0].id,
           action: "drive",
         });
-        const claimed = yield* automation.claim();
+        const firstUrl = "http://127.0.0.1:55333";
+        const secondUrl = "http://127.0.0.1:55334";
+        expect(yield* automation.findRunning(older.resultId)).toEqual(Option.none());
+        const claimed = yield* automation.claim(firstUrl);
         expect(Option.isSome(claimed)).toBe(true);
         if (Option.isSome(claimed)) {
           expect(claimed.value).toMatchObject({
             id: older.id,
             status: "running",
+            clientUrl: firstUrl,
           });
           expect(claimed.value.startedAt).toBeInstanceOf(Date);
         }
-        const next = yield* automation.claim();
+        expect(yield* automation.findRunning(older.resultId)).toEqual(claimed);
+        const next = yield* automation.claim(secondUrl);
         expect(Option.isSome(next)).toBe(true);
         if (Option.isSome(next)) {
-          expect(next.value.id).toBe(newer.id);
+          expect(next.value).toMatchObject({ id: newer.id, clientUrl: secondUrl });
         }
-        expect(yield* automation.claim()).toEqual(Option.none());
+        expect(yield* automation.claim("http://127.0.0.1:9")).toEqual(Option.none());
       }),
     );
 
@@ -1156,9 +1161,11 @@ Postgres.describeWithDatabase("database", () => {
           resultId: created.results[0].id,
           action: "drive",
         });
-        const claimed = yield* automation.claim();
+        const claimed = yield* automation.claim("http://127.0.0.1:55333");
         expect(Option.isSome(claimed)).toBe(true);
+        expect(yield* automation.findRunning(created.results[0].id)).toEqual(claimed);
         expect(yield* automation.finish(enqueued.id, "succeeded", null)).toBe(true);
+        expect(yield* automation.findRunning(created.results[0].id)).toEqual(Option.none());
         const [row] = yield* database.run("select", (db) =>
           db
             .select()

@@ -540,6 +540,7 @@ export const fakeAutomationStore = (
           action: input.action,
           status: "pending",
           reason: null,
+          clientUrl: null,
           createdAt: new Date(),
           startedAt: null,
           finishedAt: null,
@@ -547,7 +548,7 @@ export const fakeAutomationStore = (
         jobs.push(row);
         return row;
       }),
-    claim: () =>
+    claim: (url) =>
       Effect.sync(() => {
         const pending = jobs
           .filter((job) => job.status === "pending")
@@ -562,8 +563,15 @@ export const fakeAutomationStore = (
         }
         job.status = "running";
         job.startedAt = new Date();
+        job.clientUrl = url;
         return Option.some(job);
       }),
+    findRunning: (resultId) =>
+      Effect.sync(() =>
+        Option.fromUndefinedOr(
+          jobs.find((job) => sameId(job.resultId, resultId) && job.status === "running"),
+        ),
+      ),
     finish: (id, status, reason) =>
       Effect.sync(() => {
         const job = jobs.find((row) => row.id === id && row.status === "running");
