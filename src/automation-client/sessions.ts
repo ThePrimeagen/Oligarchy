@@ -65,7 +65,9 @@ const make = Effect.gen(function* () {
       );
   });
 
-  return { run, abort };
+  const jobs = Effect.map(Ref.get(running), (map) => map.size);
+
+  return { run, abort, jobs };
 });
 
 export class Sessions extends Context.Service<Sessions>()("@oligarchy/automation-client/Sessions", {

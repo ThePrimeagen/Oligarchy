@@ -13,6 +13,41 @@ const OTHER = "OLI-99";
 const layer = (spawner: FakeSpawner.FakeSpawner) =>
   Sessions.Sessions.layer.pipe(Layer.provide(spawner.layer));
 
+describe("Sessions.jobs happy path", () => {
+  it.effect(
+    "is 0 when nothing is running, 1 while a run is in flight, and 0 after it finishes",
+    () => {
+      const spawner = FakeSpawner.fakeSpawner(() => ({}));
+      return Effect.gen(function* () {
+        const sessions = yield* Sessions.Sessions;
+        expect(yield* sessions.jobs).toBe(0);
+        const running = yield* Effect.forkChild(sessions.run(TICKET, "do the work"));
+        for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
+          yield* Effect.yieldNow;
+        }
+        expect(yield* sessions.jobs).toBe(1);
+        yield* spawner.spawned[0]?.exit(0) ?? Effect.void;
+        yield* Fiber.join(running);
+        expect(yield* sessions.jobs).toBe(0);
+      }).pipe(Effect.provide(layer(spawner)));
+    },
+  );
+});
+
+describe("Sessions.jobs unhappy path", () => {
+  it.effect("is 0 after a run that fails", () => {
+    const spawner = FakeSpawner.fakeSpawner(() => ({
+      exitCode: 1,
+      stderr: "out of token credits\n",
+    }));
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions.Sessions;
+      yield* Effect.flip(sessions.run(TICKET, "do the work"));
+      expect(yield* sessions.jobs).toBe(0);
+    }).pipe(Effect.provide(layer(spawner)));
+  });
+});
+
 describe("Sessions.run happy path", () => {
   it.effect("launches opencode with the prompt and succeeds when it exits 0", () => {
     const spawner = FakeSpawner.fakeSpawner(() => ({

@@ -3,6 +3,7 @@ import { it } from "@effect/vitest";
 import { Deferred, Effect, Exit, Fiber, Layer, Scope } from "effect";
 import { TestClock } from "effect/testing";
 import * as Heartbeat from "../../src/automation-client/heartbeat.ts";
+import * as Sessions from "../../src/automation-client/sessions.ts";
 import * as Stats from "../../src/qemu/stats.ts";
 import * as Contract from "../../src/shared/contract.ts";
 import * as Errors from "../../src/shared/errors.ts";
@@ -34,12 +35,26 @@ const fakeStats = (
     Effect.succeed(Contract.Stats.make({ qemus, ...FakeQemu.ZERO_STATS })),
 ): Layer.Layer<Stats.Stats> => Layer.succeed(Stats.Stats)(Stats.Stats.of({ collect }));
 
+const fakeSessions = (jobs = 0): Layer.Layer<Sessions.Sessions> =>
+  Layer.succeed(Sessions.Sessions)(
+    Sessions.Sessions.of({
+      run: () => Effect.die("Unexpected Sessions.run"),
+      abort: () => Effect.die("Unexpected Sessions.abort"),
+      jobs: Effect.succeed(jobs),
+    }),
+  );
+
 // The loop in a scope of its own, so a test can close it and prove the ticking stops.
-const start = (store: Stores.FakeServerStore, stats = fakeStats(), log = FakeLog.fakeLog()) =>
+const start = (
+  store: Stores.FakeServerStore,
+  stats = fakeStats(),
+  log = FakeLog.fakeLog(),
+  sessions = fakeSessions(),
+) =>
   Effect.gen(function* () {
     const scope = yield* Scope.make();
     yield* Heartbeat.announce(URL, 1).pipe(
-      Effect.provide(Layer.mergeAll(stats, store.layer, log.layer)),
+      Effect.provide(Layer.mergeAll(stats, sessions, store.layer, log.layer)),
       Scope.provide(scope),
     );
     return { scope, log };
@@ -67,16 +82,18 @@ describe("automation-client heartbeat happy path", () => {
       }),
   );
 
-  it.effect("writes zero running jobs and --jobs as maxJobs", () =>
+  it.effect("writes the running map size as jobs and --jobs as maxJobs", () =>
     Effect.gen(function* () {
       const store = Stores.fakeServerStore();
       const scope = yield* Scope.make();
       yield* Heartbeat.announce(URL, 4).pipe(
-        Effect.provide(Layer.mergeAll(fakeStats(), store.layer, FakeLog.fakeLog().layer)),
+        Effect.provide(
+          Layer.mergeAll(fakeStats(), fakeSessions(2), store.layer, FakeLog.fakeLog().layer),
+        ),
         Scope.provide(scope),
       );
       expect(store.heartbeats).toEqual([
-        { url: URL, type: "automation-client", stats: ROW_STATS, jobs: 0, maxJobs: 4 },
+        { url: URL, type: "automation-client", stats: ROW_STATS, jobs: 2, maxJobs: 4 },
       ]);
     }),
   );
