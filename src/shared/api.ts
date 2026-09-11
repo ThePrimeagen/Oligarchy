@@ -181,8 +181,15 @@ export const run = HttpApiEndpoint.post("run", "/run", {
   error: Errors.RunFailedWire,
 });
 
+export const abort = HttpApiEndpoint.post("abort", "/abort", {
+  payload: Contract.AbortBody,
+  success: Contract.Ok,
+  error: Errors.UnknownSessionWire,
+});
+
 export class Runs extends HttpApiGroup.make("Runs")
   .add(run)
+  .add(abort)
   .middleware(BearerAuth)
   .middleware(ApiBoundary) {}
 

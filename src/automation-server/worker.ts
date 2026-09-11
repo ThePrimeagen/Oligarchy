@@ -49,7 +49,7 @@ const execute = Effect.fn("execute")(function* (job: Automation.AutomationJobRow
     location: Log.Locations.automation,
     agentId: ticket,
   });
-  return yield* AutomationClient.run(url, prompt);
+  return yield* AutomationClient.run(url, prompt, ticket);
 });
 
 const logOutcome = Effect.fn("logOutcome")(function* (

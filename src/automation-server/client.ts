@@ -45,7 +45,7 @@ const failed = (
 
 // POST /run and wait for the client to finish. node:http has no ceiling of its own; a drive or
 // diagnose runs until the client answers, or until this fiber is interrupted.
-export const run = Effect.fn("run")(function* (url: string, prompt: string) {
+export const run = Effect.fn("run")(function* (url: string, prompt: string, ticket: string) {
   const token = Redacted.value(yield* OligarchyToken);
   const bearer = HttpApiMiddleware.layerClient(Api.BearerAuth, ({ next, request }) =>
     next(HttpClientRequest.bearerToken(request, token)),
@@ -55,7 +55,7 @@ export const run = Effect.fn("run")(function* (url: string, prompt: string) {
     baseUrl: url,
     transformClient: HttpClient.filterStatusOk,
   }).pipe(Effect.provide(middleware));
-  return yield* client.Runs.run({ payload: Contract.RunBody.make({ prompt }) }).pipe(
+  return yield* client.Runs.run({ payload: Contract.RunBody.make({ prompt, ticket }) }).pipe(
     Effect.catch((error) => {
       if (error._tag === "HttpClientError") {
         const response = error.response;

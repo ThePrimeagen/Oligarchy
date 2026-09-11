@@ -108,6 +108,11 @@ export class Servers extends Schema.Class<Servers>("@oligarchy/shared/contract/S
 
 export class RunBody extends Schema.Class<RunBody>("@oligarchy/shared/contract/RunBody")({
   prompt: Schema.String,
+  ticket: Schema.NonEmptyString,
+}) {}
+
+export class AbortBody extends Schema.Class<AbortBody>("@oligarchy/shared/contract/AbortBody")({
+  ticket: Schema.NonEmptyString,
 }) {}
 
 const STORED_IMAGE_ORIGIN = "https://oligarchy.trm.sh";

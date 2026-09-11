@@ -5,6 +5,7 @@ import { HttpBody, HttpClient, HttpRouter } from "effect/unstable/http";
 import { NodeHttpServer } from "@effect/platform-node";
 import * as Handlers from "../../src/automation-client/handlers.ts";
 import * as OpenCode from "../../src/automation-client/opencode.ts";
+import * as Sessions from "../../src/automation-client/sessions.ts";
 import * as Config from "../../src/config.ts";
 import * as Log from "../../src/observability/log.ts";
 import * as FakeLog from "../support/log.ts";
@@ -12,6 +13,7 @@ import * as FakeSpawner from "../support/fake-spawner.ts";
 import * as Reporter from "../support/reporter.ts";
 
 const TOKEN = "test-token";
+const TICKET = "OLI-42";
 
 const ProxyConfigLive = Layer.succeed(Config.ProxyConfig)({
   token: Redacted.make(TOKEN),
@@ -32,6 +34,7 @@ const fixture = (script: FakeSpawner.Script = () => ({ exitCode: 0 })): Fixture 
 
 const serve = (fixed: Fixture) =>
   HttpRouter.serve(Handlers.routes, { disableLogger: true, disableListenLog: true }).pipe(
+    Layer.provide(Sessions.Sessions.layer),
     Layer.provide(Layer.mergeAll(fixed.spawner.layer, fixed.log.layer, ProxyConfigLive)),
     Layer.provide(Layer.succeed(Log.ProcessAttribution)(Log.AutomationClientProcessAttribution)),
     Layer.provideMerge(NodeHttpServer.layerTest),
@@ -46,10 +49,21 @@ const run = (
   http: HttpClient.HttpClient,
   prompt = "do the work",
   extraHeaders: Record<string, string> = headers,
+  ticket = TICKET,
 ) =>
   http.post("/run", {
     headers: extraHeaders,
-    body: HttpBody.text(JSON.stringify({ prompt }), "application/json"),
+    body: HttpBody.text(JSON.stringify({ prompt, ticket }), "application/json"),
+  });
+
+const abort = (
+  http: HttpClient.HttpClient,
+  ticket = TICKET,
+  extraHeaders: Record<string, string> = headers,
+) =>
+  http.post("/abort", {
+    headers: extraHeaders,
+    body: HttpBody.text(JSON.stringify({ ticket }), "application/json"),
   });
 
 describe("POST /run happy path", () => {
@@ -137,11 +151,28 @@ describe("POST /run authentication and decoding", () => {
         const http = yield* HttpClient.HttpClient;
         const response = yield* http.post("/run", {
           headers,
-          body: HttpBody.text("{}", "application/json"),
+          body: HttpBody.text(JSON.stringify({ ticket: TICKET }), "application/json"),
         });
         expect(response.status).toBe(400);
         const body = decodeErrorBody(yield* response.json);
         expect(body.error).toContain("prompt");
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.spawner.spawned).toEqual([]);
+    }),
+  );
+
+  it.effect("a body without ticket is 400", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const response = yield* http.post("/run", {
+          headers,
+          body: HttpBody.text(JSON.stringify({ prompt: "do the work" }), "application/json"),
+        });
+        expect(response.status).toBe(400);
+        const body = decodeErrorBody(yield* response.json);
+        expect(body.error).toContain("ticket");
       }).pipe(Effect.provide(serve(fixed)));
       expect(fixed.spawner.spawned).toEqual([]);
     }),
@@ -204,13 +235,116 @@ describe("interruption", () => {
   );
 });
 
-describe("catch-all", () => {
-  it.effect("GET /run and GET /nope are 404 not found and never logged", () =>
+describe("POST /abort happy path", () => {
+  it.effect("kills the matching opencode and answers ok", () =>
+    Effect.gen(function* () {
+      const fixed = fixture(() => ({}));
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const pending = yield* Effect.forkChild(run(http));
+        for (let i = 0; i < 100 && fixed.spawner.spawned[0] === undefined; i++) {
+          yield* Effect.yieldNow;
+        }
+        expect(fixed.spawner.spawned[0]).toBeDefined();
+        const response = yield* abort(http);
+        expect(response.status).toBe(200);
+        expect(yield* response.json).toEqual({ ok: "true" });
+        expect(fixed.spawner.spawned[0]?.kills).toEqual(["SIGTERM"]);
+        const runResponse = yield* Fiber.join(pending);
+        expect(runResponse.status).toBe(500);
+      }).pipe(Effect.provide(serve(fixed)));
+    }),
+  );
+});
+
+describe("POST /abort authentication and decoding", () => {
+  it.effect("refuses a missing bearer with 401 and one error line", () =>
     Effect.gen(function* () {
       const fixed = fixture();
       yield* Effect.gen(function* () {
         const http = yield* HttpClient.HttpClient;
-        for (const path of ["/run", "/nope"]) {
+        const response = yield* abort(http, TICKET, { "content-type": "application/json" });
+        expect(response.status).toBe(401);
+        expect(yield* response.json).toEqual({ error: "unauthorized" });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.spawner.spawned).toEqual([]);
+      expect(fixed.log.lines).toEqual([
+        {
+          level: "error",
+          text: "POST /abort failed: unauthorized",
+          location: "automation-client",
+          agentId: "automation-client",
+          skipSentry: true,
+          cause: undefined,
+        },
+      ]);
+      expect(fixed.reporter.reported).toEqual([]);
+    }),
+  );
+
+  it.effect("a wrong bearer is 401 too", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const response = yield* abort(http, TICKET, {
+          authorization: "Bearer wrong",
+          "content-type": "application/json",
+        });
+        expect(response.status).toBe(401);
+        expect(yield* response.json).toEqual({ error: "unauthorized" });
+      }).pipe(Effect.provide(serve(fixed)));
+    }),
+  );
+
+  it.effect("a body without ticket is 400", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const response = yield* http.post("/abort", {
+          headers,
+          body: HttpBody.text("{}", "application/json"),
+        });
+        expect(response.status).toBe(400);
+        const body = decodeErrorBody(yield* response.json);
+        expect(body.error).toContain("ticket");
+      }).pipe(Effect.provide(serve(fixed)));
+    }),
+  );
+});
+
+describe("POST /abort unhappy path", () => {
+  it.effect("an unknown ticket is 404 and one error line", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const response = yield* abort(http);
+        expect(response.status).toBe(404);
+        expect(yield* response.json).toEqual({ error: `unknown session "${TICKET}"` });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.log.lines).toEqual([
+        {
+          level: "error",
+          text: `POST /abort failed: unknown session "${TICKET}"`,
+          location: "automation-client",
+          agentId: TICKET,
+          skipSentry: true,
+          cause: undefined,
+        },
+      ]);
+    }),
+  );
+});
+
+describe("catch-all", () => {
+  it.effect("GET /run, GET /abort and GET /nope are 404 not found and never logged", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        for (const path of ["/run", "/abort", "/nope"]) {
           const response = yield* http.get(path, { headers: { authorization: `Bearer ${TOKEN}` } });
           expect(response.status).toBe(404);
           expect(yield* response.json).toEqual({ error: "not found" });
