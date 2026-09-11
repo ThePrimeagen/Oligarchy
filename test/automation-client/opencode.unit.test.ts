@@ -1,6 +1,7 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { Effect } from "effect";
+import { Effect, Fiber } from "effect";
+import { TestClock } from "effect/testing";
 import * as OpenCode from "../../src/automation-client/opencode.ts";
 import * as FakeSpawner from "../support/fake-spawner.ts";
 
@@ -45,6 +46,44 @@ describe("OpenCode.run happy path", () => {
         "--",
         "do the work",
       ]);
+    }),
+  );
+});
+
+describe("OpenCode.run ceiling", () => {
+  it.effect("a run that outlives the ceiling is killed and fails as RunFailed naming it", () =>
+    Effect.gen(function* () {
+      const spawner = FakeSpawner.fakeSpawner(() => ({}));
+      const running = yield* Effect.forkChild(
+        Effect.flip(OpenCode.run("do the work", MODEL).pipe(Effect.provide(spawner.layer))),
+      );
+      for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
+        yield* Effect.yieldNow;
+      }
+      yield* TestClock.adjust(OpenCode.CEILING);
+      const error = yield* Fiber.join(running);
+      expect(error).toMatchObject({
+        _tag: "RunFailed",
+        message: `opencode run exceeded ${OpenCode.CEILING}`,
+      });
+      expect(spawner.spawned[0]?.isReleased()).toBe(true);
+      expect(spawner.spawned[0]?.kills).toEqual(["SIGTERM"]);
+    }),
+  );
+
+  it.effect("a run that exits a second before the ceiling succeeds", () =>
+    Effect.gen(function* () {
+      const spawner = FakeSpawner.fakeSpawner(() => ({}));
+      const running = yield* Effect.forkChild(
+        OpenCode.run("do the work", MODEL).pipe(Effect.provide(spawner.layer)),
+      );
+      for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
+        yield* Effect.yieldNow;
+      }
+      yield* TestClock.adjust("1799 seconds");
+      yield* spawner.spawned[0]?.exit(0) ?? Effect.void;
+      yield* Fiber.join(running);
+      expect(spawner.spawned[0]?.kills).toEqual([]);
     }),
   );
 });

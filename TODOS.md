@@ -59,3 +59,13 @@ Genuine harness bugs found by the runs and fixed on branch `automation-model-fla
   agents run at once (two fresh drives plus two diagnosers, OLI-1080/OLI-1081 at 01:05Z). Both
   drivers died at 5 actions. External quota, not ours; the operator now staggers drive starts by
   ~90 s. If it recurs, run diagnoses one at a time (`--jobs 3`) or space them.
+- The OpenCode Zen free tier caps requests per IP per day; the cap answered our ~17th run with
+  `Rate limit exceeded` and a `retry-after` of the seconds to UTC midnight (~22.9 h). opencode
+  1.18.19 honours that in silence and `opencode run` exits only on idle (anomalyco/opencode#40747,
+  #39790; PRs #47641, #42340 open), so three runs slept holding their dispatch slots (OLI-1078's
+  diagnoser after writing its verdict, OLI-1082/OLI-1083 before their first call). The client now
+  kills a run at 30 minutes; the dispatcher still knows nothing of quotas: a quota-aware pause or
+  a model fallback would stop a whole day of runs from timing out one by one.
+- (done) The automation client kills an `opencode run` at 30 minutes (`OpenCode.CEILING`) and fails
+  the job `opencode run exceeded 30 minutes`; before, a run sleeping out a provider retry-after held
+  its slot for as long as the provider said (OLI-1078, OLI-1082, OLI-1083).
