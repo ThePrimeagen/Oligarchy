@@ -81,3 +81,8 @@ Genuine harness bugs found by the runs and fixed on branch `automation-model-fla
 - (done) The run config also sets `provider.openrouter.options.headerTimeout`/`chunkTimeout` to three
   minutes: opencode's OpenRouter path has no stream timeout of its own (anomalyco/opencode#37580),
   and OLI-1106's diagnoser sat on a first request that never answered until the 30-minute ceiling.
+- A failed job cannot be retried through the pipeline: `automation_jobs` is unique on
+  (result, action), so a second Needs Review move is "already queued" and ignored. Requeueing
+  OLI-1106's diagnose (stalled stream, ceiling) meant setting the row back to `pending` by hand.
+  A `./ctrl job requeue --id <job>` (or letting a terminal row be replaced) would make that an
+  operator command instead of SQL.
