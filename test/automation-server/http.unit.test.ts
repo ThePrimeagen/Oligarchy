@@ -4,13 +4,22 @@ import { it } from "@effect/vitest";
 import { Effect, Layer, Redacted } from "effect";
 import { HttpBody, HttpClient, HttpRouter } from "effect/unstable/http";
 import { NodeHttpServer } from "@effect/platform-node";
+import * as AutomationClient from "../../src/automation-server/client.ts";
 import * as Handlers from "../../src/automation-server/handlers.ts";
 import * as Log from "../../src/observability/log.ts";
+import * as FakeHttp from "../support/fake-http.ts";
 import * as FakeLog from "../support/log.ts";
 import * as Reporter from "../support/reporter.ts";
 import * as Stores from "../support/stores.ts";
 
 const WEBHOOK_SECRET = "whsec_test";
+const TOKEN = "test-token";
+const CLIENT_URL = "http://127.0.0.1:55333";
+const OTHER_URL = "http://127.0.0.1:55334";
+const TICKET = "OLI-42";
+const OTHER_TICKET = "OLI-99";
+const RESULT = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+const OTHER_RESULT = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff";
 
 const SecretLive = Layer.succeed(Handlers.LinearWebhookSecret)(
   Handlers.LinearWebhookSecret.of(Redacted.make(WEBHOOK_SECRET)),
@@ -28,13 +37,34 @@ const fixture = (): Fixture => ({
   reporter: Reporter.collect(),
 });
 
-const serve = (fixed: Fixture) =>
+const TokenLive = Layer.succeed(AutomationClient.OligarchyToken)(
+  AutomationClient.OligarchyToken.of(Redacted.make(TOKEN)),
+);
+
+const serve = (fixed: Fixture, outbound: Layer.Layer<HttpClient.HttpClient> = FakeHttp.die) =>
   HttpRouter.serve(Handlers.routes, { disableLogger: true, disableListenLog: true }).pipe(
-    Layer.provide(Layer.mergeAll(fixed.stores.layer, fixed.log.layer, SecretLive)),
+    Layer.provide(
+      Layer.mergeAll(fixed.stores.layer, fixed.log.layer, SecretLive, TokenLive, outbound),
+    ),
     Layer.provide(Layer.succeed(Log.ProcessAttribution)(Log.AutomationProcessAttribution)),
     Layer.provideMerge(NodeHttpServer.layerTest),
     Layer.provideMerge(fixed.reporter.layer),
   );
+
+const abortHeaders = {
+  authorization: `Bearer ${TOKEN}`,
+  "content-type": "application/json",
+};
+
+const abort = (
+  http: HttpClient.HttpClient,
+  ticket = TICKET,
+  headers: Record<string, string> = abortHeaders,
+) =>
+  http.post("/abort", {
+    headers,
+    body: HttpBody.text(JSON.stringify({ ticket }), "application/json"),
+  });
 
 const sign = (payload: string | Uint8Array): string =>
   createHmac("sha256", WEBHOOK_SECRET).update(payload).digest("hex");
@@ -69,6 +99,31 @@ const seedResult = (
     finishedAt: null,
   });
   return resultId;
+};
+
+const seedServer = (fixed: Fixture, url: string) => {
+  const id = crypto.randomUUID();
+  fixed.stores.servers.servers.push({ id, url, type: "automation-client" });
+  return id;
+};
+
+const seedJob = (
+  fixed: Fixture,
+  resultId: string,
+  status: "pending" | "running" | "succeeded" | "failed" | "aborted" = "pending",
+  serverId: string | null = null,
+) => {
+  fixed.stores.automation.jobs.push({
+    id: `00000000-0000-4000-8000-${String(fixed.stores.automation.jobs.length + 1).padStart(12, "0")}`,
+    resultId,
+    action: "drive",
+    status,
+    reason: null,
+    serverId,
+    createdAt: new Date(),
+    startedAt: status === "pending" ? null : new Date(),
+    finishedAt: status === "pending" || status === "running" ? null : new Date(),
+  });
 };
 
 const issueBody = (state: string, extras: Record<string, unknown> = {}) =>
@@ -282,5 +337,230 @@ describe("POST /linear refusals", () => {
         expect(fixed.stores.automation.jobs).toEqual([]);
         expect(fixed.log.lines).toEqual([]);
       }),
+  );
+});
+
+describe("POST /abort", () => {
+  it.effect("aborts a running job at the client that claimed it", () =>
+    Effect.gen(function* () {
+      const outbound = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+      const fixed = fixture();
+      seedResult(fixed, TICKET, RESULT);
+      seedJob(fixed, RESULT, "running", seedServer(fixed, CLIENT_URL));
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const response = yield* abort(http);
+        expect(response.status).toBe(200);
+        expect(yield* response.json).toEqual({ ok: "true" });
+      }).pipe(Effect.provide(serve(fixed, outbound.layer)));
+      expect(outbound.requests).toEqual([
+        expect.objectContaining({
+          method: "POST",
+          url: `${CLIENT_URL}/abort`,
+        }),
+      ]);
+      expect(JSON.parse(outbound.requests[0]?.body ?? "")).toEqual({ ticket: TICKET });
+      expect(fixed.stores.automation.jobs[0]).toMatchObject({
+        status: "aborted",
+        reason: "aborted",
+        finishedAt: expect.any(Date),
+      });
+      expect(FakeLog.texts(fixed.log)).toEqual([`aborted drive; ${CLIENT_URL}`]);
+      expect(fixed.log.lines[0]?.agentId).toBe(TICKET);
+    }),
+  );
+
+  it.effect("routes abort to the client that claimed that ticket", () =>
+    Effect.gen(function* () {
+      const outbound = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+      const fixed = fixture();
+      seedResult(fixed, TICKET, RESULT);
+      seedJob(fixed, RESULT, "running", seedServer(fixed, CLIENT_URL));
+      seedResult(fixed, OTHER_TICKET, OTHER_RESULT);
+      seedJob(fixed, OTHER_RESULT, "running", seedServer(fixed, OTHER_URL));
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const response = yield* abort(http, TICKET);
+        expect(response.status).toBe(200);
+      }).pipe(Effect.provide(serve(fixed, outbound.layer)));
+      expect(outbound.requests.map((request) => request.url)).toEqual([`${CLIENT_URL}/abort`]);
+      expect(fixed.stores.automation.jobs[0]?.status).toBe("aborted");
+      expect(fixed.stores.automation.jobs[1]?.status).toBe("running");
+    }),
+  );
+});
+
+describe("POST /abort refusals", () => {
+  it.effect("400 when the ticket already finished, and the client is not called", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      seedResult(fixed, TICKET, RESULT);
+      seedJob(fixed, RESULT, "succeeded", seedServer(fixed, CLIENT_URL));
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const response = yield* abort(http);
+        expect(response.status).toBe(400);
+        expect(yield* response.json).toEqual({
+          error: `ticket "${TICKET}" is not running`,
+        });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.stores.automation.jobs[0]?.status).toBe("succeeded");
+      expect(fixed.log.lines).toEqual([
+        {
+          level: "error",
+          text: `POST /abort failed: ticket "${TICKET}" is not running`,
+          location: "automation",
+          agentId: TICKET,
+          skipSentry: true,
+          cause: undefined,
+        },
+      ]);
+    }),
+  );
+
+  it.effect("400 when the ticket is still pending, and the client is not called", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      seedResult(fixed, TICKET, RESULT);
+      seedJob(fixed, RESULT, "pending", null);
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const response = yield* abort(http);
+        expect(response.status).toBe(400);
+        expect(yield* response.json).toEqual({
+          error: `ticket "${TICKET}" is not running`,
+        });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.stores.automation.jobs[0]?.status).toBe("pending");
+    }),
+  );
+
+  it.effect("400 when the ticket is unknown, and the client is not called", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const response = yield* abort(http);
+        expect(response.status).toBe(400);
+        expect(yield* response.json).toEqual({
+          error: `ticket "${TICKET}" is not running`,
+        });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.stores.automation.jobs).toEqual([]);
+    }),
+  );
+
+  it.effect("refuses a missing bearer with 401 and one error line", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const response = yield* abort(http, TICKET, { "content-type": "application/json" });
+        expect(response.status).toBe(401);
+        expect(yield* response.json).toEqual({ error: "unauthorized" });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.log.lines).toEqual([
+        {
+          level: "error",
+          text: "POST /abort failed: unauthorized",
+          location: "automation",
+          agentId: "automation",
+          skipSentry: true,
+          cause: undefined,
+        },
+      ]);
+      expect(fixed.reporter.reported).toEqual([]);
+    }),
+  );
+
+  it.effect("a wrong bearer is 401 too", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const response = yield* abort(http, TICKET, {
+          authorization: "Bearer wrong",
+          "content-type": "application/json",
+        });
+        expect(response.status).toBe(401);
+        expect(yield* response.json).toEqual({ error: "unauthorized" });
+      }).pipe(Effect.provide(serve(fixed)));
+    }),
+  );
+
+  it.effect("a body without ticket is 400", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const response = yield* http.post("/abort", {
+          headers: abortHeaders,
+          body: HttpBody.text("{}", "application/json"),
+        });
+        expect(response.status).toBe(400);
+        const body = yield* response.json;
+        expect(body).toEqual(expect.objectContaining({ error: expect.stringContaining("ticket") }));
+      }).pipe(Effect.provide(serve(fixed)));
+    }),
+  );
+
+  it.effect("404 when the client does not know the session, and the job stays running", () =>
+    Effect.gen(function* () {
+      const outbound = FakeHttp.recordRequests(() =>
+        FakeHttp.json({ error: `unknown session "${TICKET}"` }, 404),
+      );
+      const fixed = fixture();
+      seedResult(fixed, TICKET, RESULT);
+      seedJob(fixed, RESULT, "running", seedServer(fixed, CLIENT_URL));
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const response = yield* abort(http);
+        expect(response.status).toBe(404);
+        expect(yield* response.json).toEqual({
+          error: `unknown session "${TICKET}"`,
+        });
+      }).pipe(Effect.provide(serve(fixed, outbound.layer)));
+      expect(outbound.requests).toHaveLength(1);
+      expect(fixed.stores.automation.jobs[0]?.status).toBe("running");
+      expect(fixed.stores.automation.jobs[0]?.finishedAt).toBeNull();
+    }),
+  );
+
+  it.effect("500 when the server that claimed the job is gone", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      seedResult(fixed, TICKET, RESULT);
+      seedJob(fixed, RESULT, "running", crypto.randomUUID());
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const response = yield* abort(http);
+        expect(response.status).toBe(500);
+        const body = yield* response.json;
+        expect(body).toEqual(
+          expect.objectContaining({ error: expect.stringContaining("unknown server") }),
+        );
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.stores.automation.jobs[0]?.status).toBe("running");
+    }),
+  );
+
+  it.effect("500 when the client fails, and the job stays running", () =>
+    Effect.gen(function* () {
+      const outbound = FakeHttp.recordRequests(() =>
+        FakeHttp.json({ error: "opencode exited 1" }, 500),
+      );
+      const fixed = fixture();
+      seedResult(fixed, TICKET, RESULT);
+      seedJob(fixed, RESULT, "running", seedServer(fixed, CLIENT_URL));
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const response = yield* abort(http);
+        expect(response.status).toBe(500);
+        expect(yield* response.json).toEqual({
+          error: `automation client: POST ${CLIENT_URL}/abort failed: opencode exited 1`,
+        });
+      }).pipe(Effect.provide(serve(fixed, outbound.layer)));
+      expect(fixed.stores.automation.jobs[0]?.status).toBe("running");
+    }),
   );
 });

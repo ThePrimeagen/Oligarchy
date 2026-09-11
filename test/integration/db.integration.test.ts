@@ -1123,21 +1123,26 @@ Postgres.describeWithDatabase("database", () => {
           resultId: second.results[0].id,
           action: "drive",
         });
-        const claimed = yield* automation.claim();
+        const firstServer = crypto.randomUUID();
+        const secondServer = crypto.randomUUID();
+        expect(yield* automation.findRunning(older.resultId)).toEqual(Option.none());
+        const claimed = yield* automation.claim(firstServer);
         expect(Option.isSome(claimed)).toBe(true);
         if (Option.isSome(claimed)) {
           expect(claimed.value).toMatchObject({
             id: older.id,
             status: "running",
+            serverId: firstServer,
           });
           expect(claimed.value.startedAt).toBeInstanceOf(Date);
         }
-        const next = yield* automation.claim();
+        expect(yield* automation.findRunning(older.resultId)).toEqual(claimed);
+        const next = yield* automation.claim(secondServer);
         expect(Option.isSome(next)).toBe(true);
         if (Option.isSome(next)) {
-          expect(next.value.id).toBe(newer.id);
+          expect(next.value).toMatchObject({ id: newer.id, serverId: secondServer });
         }
-        expect(yield* automation.claim()).toEqual(Option.none());
+        expect(yield* automation.claim(crypto.randomUUID())).toEqual(Option.none());
       }),
     );
 
@@ -1156,9 +1161,11 @@ Postgres.describeWithDatabase("database", () => {
           resultId: created.results[0].id,
           action: "drive",
         });
-        const claimed = yield* automation.claim();
+        const claimed = yield* automation.claim(crypto.randomUUID());
         expect(Option.isSome(claimed)).toBe(true);
+        expect(yield* automation.findRunning(created.results[0].id)).toEqual(claimed);
         expect(yield* automation.finish(enqueued.id, "succeeded", null)).toBe(true);
+        expect(yield* automation.findRunning(created.results[0].id)).toEqual(Option.none());
         const [row] = yield* database.run("select", (db) =>
           db
             .select()
@@ -1212,8 +1219,8 @@ Postgres.describeWithDatabase("database", () => {
           yield* automation.enqueue({ resultId: resultIds[3], action: "diagnose" });
           yield* automation.enqueue({ resultId: resultIds[4], action: "drive" });
           yield* automation.enqueue({ resultId: resultIds[5], action: "diagnose" });
-          expect(Option.isSome(yield* automation.claim())).toBe(true);
-          expect(Option.isSome(yield* automation.claim())).toBe(true);
+          expect(Option.isSome(yield* automation.claim(crypto.randomUUID()))).toBe(true);
+          expect(Option.isSome(yield* automation.claim(crypto.randomUUID()))).toBe(true);
           yield* automation.finish(completedDrive.id, "succeeded", null);
           yield* automation.finish(completedDiagnose.id, "failed", "nope");
           yield* database.run("stamp", (db) =>
@@ -1221,8 +1228,8 @@ Postgres.describeWithDatabase("database", () => {
               sql`update automation_jobs set finished_at = now() - interval '2 minutes' where id = ${completedDrive.id}`,
             ),
           );
-          expect(Option.isSome(yield* automation.claim())).toBe(true);
-          expect(Option.isSome(yield* automation.claim())).toBe(true);
+          expect(Option.isSome(yield* automation.claim(crypto.randomUUID()))).toBe(true);
+          expect(Option.isSome(yield* automation.claim(crypto.randomUUID()))).toBe(true);
           const listed = yield* automation.listJobs(1);
           expect(listed.running.map((job) => [job.ticket, job.action, job.status])).toEqual([
             ["LST-104", "diagnose", "running"],
@@ -1464,10 +1471,10 @@ Postgres.describeWithDatabase("database", () => {
               .where(eq(DbSchema.servers.url, stale)),
           );
           const live = yield* store.listLiveServers("automation-client");
-          expect(live).toContain(fresh);
-          expect(live).not.toContain(stale);
-          expect(live).not.toContain(qemu);
-          expect(live).not.toContain(silent);
+          expect(live.map((server) => server.url)).toEqual([fresh]);
+          expect(live[0]?.id).toEqual(expect.any(String));
+          expect(yield* store.findServer(live[0]?.id ?? "")).toEqual(Option.some(live[0]));
+          expect(yield* store.findServer(crypto.randomUUID())).toEqual(Option.none());
           expect(yield* store.listServers("automation-client")).toEqual(
             expect.arrayContaining([fresh, stale, silent]),
           );

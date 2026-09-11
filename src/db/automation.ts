@@ -48,8 +48,9 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
       });
 
       // Oldest pending, locked for the transaction so a second claimer waits. Queue order is
-      // created_at; id breaks a tie.
-      const claim = Effect.fn("db.claimAutomationJob")(function* () {
+      // created_at; id breaks a tie. serverId is the client that took it: /abort looks that
+      // server up for its url.
+      const claim = Effect.fn("db.claimAutomationJob")(function* (serverId: string) {
         return yield* database.transaction("claimAutomationJob", (tx) =>
           Effect.gen(function* () {
             const pending = yield* Client.attempt("claimAutomationJob", () =>
@@ -68,13 +69,29 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
             const updated = yield* Client.attempt("claimAutomationJob", () =>
               tx
                 .update(DbSchema.automationJobs)
-                .set({ status: "running", startedAt: sql`now()` })
+                .set({ status: "running", startedAt: sql`now()`, serverId })
                 .where(eq(DbSchema.automationJobs.id, row.value.id))
                 .returning(),
             );
             return Arr.head(updated);
           }),
         );
+      });
+
+      const findRunning = Effect.fn("db.findRunningAutomationJob")(function* (resultId: string) {
+        const rows = yield* database.run("findRunningAutomationJob", (db) =>
+          db
+            .select()
+            .from(DbSchema.automationJobs)
+            .where(
+              and(
+                eq(DbSchema.automationJobs.resultId, resultId),
+                eq(DbSchema.automationJobs.status, "running"),
+              ),
+            )
+            .limit(1),
+        );
+        return Arr.head(rows);
       });
 
       // Only a running row closes. reason is omitted when null so a previous value stays.
@@ -153,7 +170,7 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
         return { running, pending, completed };
       });
 
-      return { enqueue, claim, finish, listJobs };
+      return { enqueue, claim, findRunning, finish, listJobs };
     }),
   },
 ) {

@@ -3,6 +3,7 @@ import { HttpServerRequest } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import * as Config from "../config.ts";
 import * as Automation from "../db/automation.ts";
+import * as Servers from "../db/servers.ts";
 import * as Tests from "../db/tests.ts";
 import * as Log from "../observability/log.ts";
 import * as QemuServerHandlers from "../qemu-server/handlers.ts";
@@ -10,6 +11,7 @@ import * as Middleware from "../qemu-server/middleware.ts";
 import * as Api from "../shared/api.ts";
 import * as Contract from "../shared/contract.ts";
 import * as Errors from "../shared/errors.ts";
+import * as AutomationClient from "./client.ts";
 import * as Signature from "./signature.ts";
 import * as Webhook from "./webhook.ts";
 
@@ -98,11 +100,104 @@ export const LinearLive = HttpApiBuilder.group(Api.AutomationServerApi, "Linear"
   ),
 );
 
-// The bearer is left off: Linear signs /linear.
+// A disconnect must not leave the client killed and the row still running.
+const uninterruptible = { uninterruptible: true } as const;
+
+export const AbortLive = HttpApiBuilder.group(Api.AutomationServerApi, "Abort", (handlers) =>
+  handlers.handle(
+    "abort",
+    ({ payload }) =>
+      Effect.gen(function* () {
+        const tests = yield* Tests.TestStore;
+        const automation = yield* Automation.AutomationStore;
+        const servers = yield* Servers.ServerStore;
+        const log = yield* Log.Log;
+        const result = yield* tests
+          .findResultByLinearId(payload.ticket)
+          .pipe(
+            Effect.mapError((error) =>
+              Errors.Internal.make({ cause: error, agentId: payload.ticket }),
+            ),
+          );
+        if (Option.isNone(result)) {
+          return yield* Errors.BadRequest.make({
+            message: `ticket "${payload.ticket}" is not running`,
+            agentId: payload.ticket,
+          });
+        }
+        const job = yield* automation
+          .findRunning(result.value.id)
+          .pipe(
+            Effect.mapError((error) =>
+              Errors.Internal.make({ cause: error, agentId: payload.ticket }),
+            ),
+          );
+        if (Option.isNone(job)) {
+          return yield* Errors.BadRequest.make({
+            message: `ticket "${payload.ticket}" is not running`,
+            agentId: payload.ticket,
+          });
+        }
+        if (job.value.serverId === null) {
+          return yield* Effect.die(new Error(`running job ${job.value.id} has no serverId`));
+        }
+        const server = yield* servers
+          .findServer(job.value.serverId)
+          .pipe(
+            Effect.mapError((error) =>
+              Errors.Internal.make({ cause: error, agentId: payload.ticket }),
+            ),
+          );
+        if (Option.isNone(server)) {
+          return yield* Errors.RunFailed.make({
+            message: `unknown server "${job.value.serverId}"`,
+          });
+        }
+        const url = server.value.url;
+        yield* AutomationClient.abort(url, payload.ticket).pipe(
+          Effect.catchTag("AutomationClientError", (error) =>
+            Effect.fail(
+              error.status === 404
+                ? Errors.unknownSession(payload.ticket, payload.ticket)
+                : Errors.RunFailed.make(
+                    Object.assign(
+                      { message: error.message },
+                      error.cause === undefined ? undefined : { cause: error.cause },
+                    ),
+                  ),
+            ),
+          ),
+        );
+        const closed = yield* automation
+          .finish(job.value.id, "aborted", "aborted")
+          .pipe(
+            Effect.mapError((error) =>
+              Errors.Internal.make({ cause: error, agentId: payload.ticket }),
+            ),
+          );
+        if (closed) {
+          yield* log.info(`aborted ${job.value.action}; ${url}`, {
+            location: Log.Locations.automation,
+            agentId: payload.ticket,
+          });
+        }
+        // The client already stopped; a lost finish race is another closer.
+        return ok;
+      }),
+    uninterruptible,
+  ),
+);
+
+const BearerAuthLive = Layer.unwrap(
+  Effect.map(AutomationClient.OligarchyToken, Middleware.bearerAuth),
+);
+
+// Linear signs /linear. /abort takes the oligarchy bearer, from the same token POST /run uses.
 export const routes = Layer.mergeAll(
   HttpApiBuilder.layer(Api.AutomationServerApi).pipe(
     Layer.provide(LinearLive),
-    Layer.provide(Middleware.ApiBoundaryLive),
+    Layer.provide(AbortLive),
+    Layer.provide(Layer.mergeAll(BearerAuthLive, Middleware.ApiBoundaryLive)),
   ),
   QemuServerHandlers.NotFoundRoute,
 );

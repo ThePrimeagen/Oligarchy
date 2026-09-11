@@ -205,8 +205,10 @@ export type ServerStats = {
 // claimed. type says what kind of server the row is, so a reverse proxy lists its own kind;
 // every writer names it, and the default is what the migration filled the rows that predate
 // the column with — qemu servers were the only kind there was. automation-client is the
-// other kind: same heartbeat, listed apart from the qemu fleet.
+// other kind: same heartbeat, listed apart from the qemu fleet. id is the stable handle a
+// job stores when it is claimed; url remains the key a heartbeat upserts on.
 export const servers = pgTable("servers", {
+  id: uuid("id").notNull().defaultRandom().unique(),
   url: text("url").primaryKey(),
   type: serverType("type").notNull().default("qemu"),
   stats: jsonb("stats").$type<ServerStats>(),
@@ -319,6 +321,9 @@ export const testResults = pgTable(
 // pending; a worker claims the oldest pending row, runs it, and closes with a terminal
 // status. (result_id, action) is unique — one drive and one diagnose per result for now.
 // Queue order is created_at among pending rows; capacity limits stay out of this table.
+// server_id is the servers.id that claimed the job, so /abort can find that client after
+// a restart; null while the row is pending. Attribution, not a relation: forgetting a
+// server must keep the job row.
 export const automationJobs = pgTable(
   "automation_jobs",
   {
@@ -329,6 +334,7 @@ export const automationJobs = pgTable(
     action: automationAction("action").notNull(),
     status: automationJobStatus("status").notNull().default("pending"),
     reason: text("reason"),
+    serverId: uuid("server_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     startedAt: timestamp("started_at", { withTimezone: true }),
     finishedAt: timestamp("finished_at", { withTimezone: true }),

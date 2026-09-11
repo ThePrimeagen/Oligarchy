@@ -80,18 +80,18 @@ export const dispatch = Effect.fn("dispatch")(function* () {
 
   const tick = Effect.fn("tick")(function* () {
     const live = yield* servers.listLiveServers("automation-client");
-    const url = live[0];
-    if (url === undefined) {
+    const chosen = live[0];
+    if (chosen === undefined) {
       return;
     }
     yield* Effect.uninterruptibleMask((restore) =>
-      store.claim().pipe(
+      store.claim(chosen.id).pipe(
         Effect.flatMap((maybe) => {
           if (Option.isNone(maybe)) {
             return Effect.void;
           }
           const job = maybe.value;
-          return restore(execute(job, url)).pipe(
+          return restore(execute(job, chosen.url)).pipe(
             Effect.matchCause({
               onSuccess: (): Outcome => ({ status: "succeeded", reason: null }),
               onFailure: outcomeFrom,
@@ -99,12 +99,10 @@ export const dispatch = Effect.fn("dispatch")(function* () {
             Effect.flatMap((outcome) =>
               Effect.gen(function* () {
                 const closed = yield* store.finish(job.id, outcome.status, outcome.reason);
-                if (!closed) {
-                  return yield* Effect.die(
-                    new Error(`finishAutomationJob: ${job.id} was not running`),
-                  );
+                // abort may have closed the row first
+                if (closed) {
+                  yield* logOutcome(job, outcome);
                 }
-                return yield* logOutcome(job, outcome);
               }),
             ),
           );

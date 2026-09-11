@@ -68,6 +68,7 @@ const seedJob = (
     action,
     status: "pending",
     reason: null,
+    serverId: null,
     createdAt: new Date(),
     startedAt: null,
     finishedAt: null,
@@ -75,8 +76,10 @@ const seedJob = (
 };
 
 const seedLiveClient = (servers: Stores.FakeServerStore, url = URL) => {
-  servers.servers.push({ url, type: "automation-client" });
+  const id = crypto.randomUUID();
+  servers.servers.push({ id, url, type: "automation-client" });
   servers.heartbeats.push({ url, type: "automation-client", stats: STATS });
+  return id;
 };
 
 type Harness = {
@@ -135,7 +138,7 @@ describe("dispatch happy path", () => {
       const fixed = harness();
       seedResult(fixed.tests);
       seedJob(fixed.automation);
-      seedLiveClient(fixed.servers);
+      const clientId = seedLiveClient(fixed.servers);
       const started = yield* Deferred.make<void>();
       const release = yield* Deferred.make<void>();
       const http = FakeHttp.recordRequests(() =>
@@ -148,6 +151,7 @@ describe("dispatch happy path", () => {
       yield* start(fixed, http.layer);
       yield* Deferred.await(started);
       expect(fixed.automation.jobs[0]?.status).toBe("running");
+      expect(fixed.automation.jobs[0]?.serverId).toBe(clientId);
       expect(http.requests).toHaveLength(1);
       yield* Deferred.succeed(release, undefined);
       yield* settle(fixed.automation.jobs, "succeeded");
@@ -309,7 +313,7 @@ describe("dispatch unhappy path", () => {
       const fixed = harness();
       seedResult(fixed.tests);
       seedJob(fixed.automation);
-      fixed.servers.servers.push({ url: URL, type: "qemu" });
+      fixed.servers.servers.push({ id: crypto.randomUUID(), url: URL, type: "qemu" });
       fixed.servers.heartbeats.push({ url: URL, type: "qemu", stats: STATS });
       yield* start(fixed, FakeHttp.die);
       yield* Effect.yieldNow;
@@ -382,6 +386,43 @@ describe("dispatch unhappy path", () => {
         reason: "no Linear ticket",
       });
       expect(FakeLog.texts(fixed.log)).toEqual(["drive failed; no Linear ticket"]);
+    }),
+  );
+
+  it.effect("a job already closed by abort does not die when dispatch finishes", () =>
+    Effect.gen(function* () {
+      const fixed = harness();
+      seedResult(fixed.tests);
+      seedJob(fixed.automation);
+      seedLiveClient(fixed.servers);
+      const started = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const http = FakeHttp.recordRequests(() =>
+        Effect.gen(function* () {
+          yield* Deferred.succeed(started, undefined);
+          yield* Deferred.await(release);
+          return FakeHttp.json({ ok: "true" });
+        }),
+      );
+      yield* start(fixed, http.layer);
+      yield* Deferred.await(started);
+      const job = fixed.automation.jobs[0];
+      expect(job?.status).toBe("running");
+      expect(job?.serverId).not.toBeNull();
+      if (job !== undefined) {
+        job.status = "aborted";
+        job.reason = "aborted";
+        job.finishedAt = new Date();
+      }
+      yield* Deferred.succeed(release, undefined);
+      for (let i = 0; i < 100; i++) {
+        yield* Effect.yieldNow;
+      }
+      expect(fixed.automation.jobs[0]?.status).toBe("aborted");
+      expect(fixed.automation.jobs[0]?.reason).toBe("aborted");
+      expect(FakeLog.texts(fixed.log).some((text) => text.includes("dispatch tick failed"))).toBe(
+        false,
+      );
     }),
   );
 });
