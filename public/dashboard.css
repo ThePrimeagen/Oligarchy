@@ -536,7 +536,55 @@ main {
   color: var(--terminal-blue);
 }
 
-/* A definition's wordings, newest first; each folds open on its text, its chart and its runs. */
+.duration-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.12rem;
+  height: 8rem;
+  padding: 0.4rem 0.2rem 0;
+  border-bottom: 1px solid rgb(122 162 247 / 22%);
+}
+
+.duration-chart__bar {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 2px;
+}
+
+.duration-chart__bar--ok {
+  background: var(--green);
+}
+
+.duration-chart__bar--failed {
+  background: var(--failed);
+}
+
+.duration-chart__percentiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  margin: 0.75rem 0 0;
+}
+
+.duration-chart__percentiles > div {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.duration-chart__percentiles dt {
+  color: var(--terminal-blue);
+  font-size: 0.7em;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.duration-chart__percentiles dd {
+  margin: 0;
+  color: var(--terminal-white);
+}
+
+/* A definition's wordings, newest first; each folds open on its text and its charts. */
 .definition__wordings {
   display: grid;
   gap: 1rem;
@@ -656,34 +704,6 @@ main {
   justify-self: start;
 }
 
-/* The runs that used the wording shown, newest first. */
-.runs {
-  width: 100%;
-  border-collapse: collapse;
-  color: var(--terminal-white);
-}
-
-.runs th,
-.runs td {
-  padding: 0.55rem 0.4rem;
-  border-bottom: 1px solid rgb(122 162 247 / 22%);
-  text-align: left;
-  vertical-align: top;
-}
-
-.runs thead th {
-  color: var(--terminal-blue);
-  font-size: 0.7em;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.runs code {
-  font-size: 0.85em;
-  overflow-wrap: anywhere;
-}
-
 /* Narrow screens keep the scrolling list of cards; the sidebar belongs to the wide layout below. */
 .definitions__nav {
   display: none;
@@ -703,8 +723,8 @@ main {
 }
 
 /* Wide screens: the definition names down the left; the current definition's results by version
-   beside its newest wording as a form, then its wordings newest first, each folding open on text,
-   chart and runs. */
+   beside its newest wording as a form, then the current wording and the one before it, newest
+   first, each folding open on text and charts. */
 @media (min-width: 64rem) {
   main[data-page="definitions"] {
     width: min(100% - 4rem, 96rem);
@@ -789,12 +809,10 @@ main {
     grid-area: wordings;
   }
 
-  /* Inside a wording: its text beside its chart, the runs beneath both. */
+  /* Inside a wording: its text beside its charts. */
   .definition__wording-body {
     grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
-    grid-template-areas:
-      "fields chart"
-      "runs runs";
+    grid-template-areas: "fields chart";
     column-gap: 4rem;
   }
 
@@ -804,10 +822,6 @@ main {
 
   .definition__wording-body > .definition__chart {
     grid-area: chart;
-  }
-
-  .definition__wording-body > .definition__runs {
-    grid-area: runs;
   }
 
   .definition__chart .result-chart {

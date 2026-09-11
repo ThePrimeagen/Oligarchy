@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   definitionStats,
+  durationChart,
   groupDefinitions,
   modelStats,
   selectDefinition,
@@ -76,17 +77,30 @@ describe("definitionStats unhappy path", () => {
   });
 });
 
+const at = (iso: string): Date => new Date(iso);
+
 const outcome = (
   status: TestResultOutcome["status"],
   model: string | null,
   definitionId = 1,
+  times: {
+    readonly startedAt?: Date;
+    readonly createdAt?: Date;
+    readonly finishedAt?: Date | null;
+    readonly sessionStartedAt?: Date | null;
+    readonly sessionEndedAt?: Date | null;
+  } = {},
 ): TestResultOutcome => ({
   definitionId,
   model,
   status,
   runId: "11111111-1111-4111-8111-111111111111",
   iso: "https://example.com/omarchy.iso",
-  startedAt: new Date("2026-09-01T00:00:00Z"),
+  startedAt: times.startedAt ?? at("2026-09-01T00:00:00Z"),
+  createdAt: times.createdAt ?? at("2026-09-01T00:00:00Z"),
+  finishedAt: times.finishedAt === undefined ? at("2026-09-01T00:01:00Z") : times.finishedAt,
+  sessionStartedAt: times.sessionStartedAt ?? null,
+  sessionEndedAt: times.sessionEndedAt ?? null,
 });
 
 describe("modelStats happy path", () => {
@@ -259,5 +273,112 @@ describe("versionStats unhappy path", () => {
   it("ignores results of other definitions and returns nothing for no versions", () => {
     expect(versionStats([lockV1], [outcome("passed", "grok-4.6", 3)])).toEqual([]);
     expect(versionStats([], [outcome("passed", "grok-4.6", 2)])).toEqual([]);
+  });
+});
+
+const timed = (
+  status: "passed" | "failed",
+  finishedAt: Date,
+  durationMs: number,
+  definitionId = 1,
+): TestResultOutcome =>
+  outcome(status, "grok-4.6", definitionId, {
+    createdAt: new Date(finishedAt.getTime() - durationMs),
+    finishedAt,
+  });
+
+describe("durationChart happy path", () => {
+  it("keeps the newest 50 passed or failed runs, then sorts them shortest duration first", () => {
+    const olderShort = timed("passed", at("2026-09-01T00:00:00Z"), 1_000);
+    const newerLong = timed("failed", at("2026-09-01T00:10:00Z"), 4_000);
+    const newestMid = timed("passed", at("2026-09-01T00:20:00Z"), 2_000);
+    expect(durationChart([newerLong, olderShort, newestMid])).toEqual({
+      bars: [
+        { ms: 1_000, succeeded: true },
+        { ms: 2_000, succeeded: true },
+        { ms: 4_000, succeeded: false },
+      ],
+      percentiles: { p10: 1_000, p25: 1_000, p50: 2_000, p75: 4_000, p90: 4_000, p99: 4_000 },
+    });
+  });
+
+  it("uses the session's duration when the session has both stamps", () => {
+    const row = outcome("passed", "grok-4.6", 1, {
+      createdAt: at("2026-09-01T00:00:00Z"),
+      finishedAt: at("2026-09-01T00:10:00Z"),
+      sessionStartedAt: at("2026-09-01T00:01:00Z"),
+      sessionEndedAt: at("2026-09-01T00:03:00Z"),
+    });
+    expect(durationChart([row])).toEqual({
+      bars: [{ ms: 120_000, succeeded: true }],
+      percentiles: {
+        p10: 120_000,
+        p25: 120_000,
+        p50: 120_000,
+        p75: 120_000,
+        p90: 120_000,
+        p99: 120_000,
+      },
+    });
+  });
+
+  it("drops the oldest run once more than 50 have a duration", () => {
+    const rows = Array.from({ length: 51 }, (_, index) =>
+      timed(
+        index % 2 === 0 ? "passed" : "failed",
+        at(`2026-09-01T00:${String(index).padStart(2, "0")}:00Z`),
+        (index + 1) * 1_000,
+      ),
+    );
+    const chart = durationChart(rows);
+    expect(chart.bars).toHaveLength(50);
+    // The oldest finished first and was 1s; the remaining 50 start at 2s and end at 51s.
+    expect(chart.bars[0]).toEqual({ ms: 2_000, succeeded: false });
+    expect(chart.bars[49]).toEqual({ ms: 51_000, succeeded: true });
+    expect(chart.percentiles).toEqual({
+      p10: 6_000,
+      p25: 14_000,
+      p50: 26_000,
+      p75: 39_000,
+      p90: 46_000,
+      p99: 51_000,
+    });
+  });
+});
+
+describe("durationChart unhappy path", () => {
+  it("returns no bars when nothing passed or failed with a duration", () => {
+    expect(durationChart([])).toEqual({ bars: [], percentiles: undefined });
+    expect(
+      durationChart([
+        outcome("pending", "grok-4.6", 1, { finishedAt: null }),
+        outcome("running", "grok-4.6", 1, { finishedAt: null }),
+        outcome("aborted", "grok-4.6", 1, {
+          createdAt: at("2026-09-01T00:00:00Z"),
+          finishedAt: at("2026-09-01T00:01:00Z"),
+        }),
+        outcome("timed_out", "grok-4.6", 1, {
+          createdAt: at("2026-09-01T00:00:00Z"),
+          finishedAt: at("2026-09-01T00:01:00Z"),
+        }),
+        outcome("passed", "grok-4.6", 1, { finishedAt: null }),
+      ]),
+    ).toEqual({ bars: [], percentiles: undefined });
+  });
+
+  it("omits a run whose finish is before its start", () => {
+    expect(
+      durationChart([
+        outcome("passed", "grok-4.6", 1, {
+          createdAt: at("2026-09-01T00:02:00Z"),
+          finishedAt: at("2026-09-01T00:01:00Z"),
+        }),
+        outcome("failed", "grok-4.6", 1, {
+          sessionStartedAt: at("2026-09-01T00:02:00Z"),
+          sessionEndedAt: at("2026-09-01T00:01:00Z"),
+          finishedAt: null,
+        }),
+      ]),
+    ).toEqual({ bars: [], percentiles: undefined });
   });
 });

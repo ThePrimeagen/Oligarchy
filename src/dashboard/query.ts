@@ -72,7 +72,8 @@ export type DefinitionStat = {
   readonly models: ReadonlyArray<string>;
 };
 
-// One result with the wording it pinned and the run it belongs to.
+// One result with the wording it pinned and the run it belongs to. createdAt and finishedAt
+// are the result's own stamps; the session stamps are null until a session ran it.
 export type TestResultOutcome = {
   readonly definitionId: number;
   readonly model: string | null;
@@ -80,6 +81,10 @@ export type TestResultOutcome = {
   readonly runId: string;
   readonly iso: string;
   readonly startedAt: Date;
+  readonly createdAt: Date;
+  readonly finishedAt: Date | null;
+  readonly sessionStartedAt: Date | null;
+  readonly sessionEndedAt: Date | null;
 };
 
 export type ModelStat = {
@@ -93,6 +98,28 @@ export type VersionStat = {
   readonly succeeded: number;
   readonly failed: number;
 };
+
+export type DurationBar = {
+  readonly ms: number;
+  readonly succeeded: boolean;
+};
+
+export type DurationPercentiles = {
+  readonly p10: number;
+  readonly p25: number;
+  readonly p50: number;
+  readonly p75: number;
+  readonly p90: number;
+  readonly p99: number;
+};
+
+export type DurationChart = {
+  readonly bars: ReadonlyArray<DurationBar>;
+  readonly percentiles: DurationPercentiles | undefined;
+};
+
+// 50 samples is what the sessions page already shows.
+const DURATION_RUNS = 50;
 
 // One connection per call, ended whether the query returned, threw, or never connected;
 // a client left open holds a Hyperdrive connection for the rest of the request.
@@ -214,6 +241,59 @@ export function modelStats(rows: ReadonlyArray<TestResultOutcome>): ModelStat[] 
       succeeded: current.succeeded,
       failed: current.failed,
     }));
+}
+
+const durationOf = (row: TestResultOutcome): number | undefined => {
+  if (row.sessionStartedAt !== null && row.sessionEndedAt !== null) {
+    const ms = row.sessionEndedAt.getTime() - row.sessionStartedAt.getTime();
+    return ms < 0 ? undefined : ms;
+  }
+  if (row.finishedAt === null) {
+    return undefined;
+  }
+  const ms = row.finishedAt.getTime() - row.createdAt.getTime();
+  return ms < 0 ? undefined : ms;
+};
+
+const finishedAt = (row: TestResultOutcome): number =>
+  (row.finishedAt ?? row.sessionEndedAt ?? row.startedAt).getTime();
+
+// Nearest rank: the value at ceil(p/100 * n), 1-indexed, for a non-empty sorted list.
+const percentileAt = (sorted: ReadonlyArray<number>, p: number): number =>
+  sorted[Math.ceil((p / 100) * sorted.length) - 1] ?? 0;
+
+// Passed and failed runs that have a duration, the newest 50, then shortest first. A wording
+// with neither is an empty chart.
+export function durationChart(rows: ReadonlyArray<TestResultOutcome>): DurationChart {
+  const timed = rows.flatMap((row) => {
+    if (row.status !== "passed" && row.status !== "failed") {
+      return [];
+    }
+    const ms = durationOf(row);
+    return ms === undefined ? [] : [{ row, ms }];
+  });
+  timed.sort((left, right) => finishedAt(right.row) - finishedAt(left.row));
+  const newest = timed.slice(0, DURATION_RUNS);
+  newest.sort((left, right) => left.ms - right.ms);
+  const bars = newest.map((item) => ({
+    ms: item.ms,
+    succeeded: item.row.status === "passed",
+  }));
+  if (bars.length === 0) {
+    return { bars, percentiles: undefined };
+  }
+  const sorted = bars.map((bar) => bar.ms);
+  return {
+    bars,
+    percentiles: {
+      p10: percentileAt(sorted, 10),
+      p25: percentileAt(sorted, 25),
+      p50: percentileAt(sorted, 50),
+      p75: percentileAt(sorted, 75),
+      p90: percentileAt(sorted, 90),
+      p99: percentileAt(sorted, 99),
+    },
+  };
 }
 
 export function listSessions(connectionString: string): Promise<Session[]> {
@@ -346,9 +426,14 @@ export function listTestResultOutcomes(connectionString: string): Promise<TestRe
         runId: testResults.runId,
         iso: testRuns.iso,
         startedAt: testRuns.startedAt,
+        createdAt: testResults.createdAt,
+        finishedAt: testResults.finishedAt,
+        sessionStartedAt: sessions.startedAt,
+        sessionEndedAt: sessions.endedAt,
       })
       .from(testResults)
-      .innerJoin(testRuns, eq(testRuns.id, testResults.runId)),
+      .innerJoin(testRuns, eq(testRuns.id, testResults.runId))
+      .leftJoin(sessions, eq(sessions.id, testResults.sessionId)),
   );
 }
 

@@ -6,6 +6,7 @@ import { jsxRenderer } from "hono/jsx-renderer";
 import {
   addServer,
   definitionStats,
+  durationChart,
   getImage,
   groupDefinitions,
   listAutomationQueue,
@@ -21,6 +22,7 @@ import {
   versionStats,
   type DefinitionStat,
   type DefinitionVersions,
+  type DurationChart as DurationChartData,
   type Session,
   type TestBasePrompt,
   type TestResultOutcome,
@@ -114,6 +116,74 @@ const ResultChart: FC<{ title: string; rows: ReadonlyArray<ChartRow> }> = ({ tit
     )}
   </div>
 );
+
+// The unit an operator reads at a glance: seconds under a minute, then whole minutes, hours, days.
+const formatDuration = (ms: number): string => {
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) {
+    return `${String(seconds)} s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) {
+    return `${String(minutes)} min`;
+  }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return `${String(hours)} h`;
+  }
+  return `${String(Math.floor(hours / 24))} d`;
+};
+
+const PERCENTILES = [
+  ["p10", "10%"],
+  ["p25", "25%"],
+  ["p50", "median"],
+  ["p75", "75%"],
+  ["p90", "90%"],
+  ["p99", "99%"],
+] as const;
+
+// One bar per run: green succeeded, red failed, height the duration, shortest on the left.
+const DurationChart: FC<{ chart: DurationChartData }> = ({ chart }) => {
+  const { bars, percentiles } = chart;
+  const longest = bars.reduce((max, bar) => (bar.ms > max ? bar.ms : max), 0);
+  return (
+    <div class="record__field">
+      <h3>Last 50 runs by duration</h3>
+      {bars.length === 0 || percentiles === undefined ? (
+        <p class="result-chart__empty">No timed passed or failed results yet.</p>
+      ) : (
+        <>
+          <div
+            class="duration-chart"
+            role="img"
+            aria-label="Last 50 runs by duration, shortest to longest"
+          >
+            {bars.map((bar) => (
+              <span
+                class={
+                  bar.succeeded
+                    ? "duration-chart__bar duration-chart__bar--ok"
+                    : "duration-chart__bar duration-chart__bar--failed"
+                }
+                style={{ height: longest === 0 ? "100%" : `${String((bar.ms / longest) * 100)}%` }}
+                aria-label={`${bar.succeeded ? "succeeded" : "failed"} in ${formatDuration(bar.ms)}`}
+              ></span>
+            ))}
+          </div>
+          <dl class="duration-chart__percentiles">
+            {PERCENTILES.map(([key, label]) => (
+              <div>
+                <dt>{label}</dt>
+                <dd>{formatDuration(percentiles[key])}</dd>
+              </div>
+            ))}
+          </dl>
+        </>
+      )}
+    </div>
+  );
+};
 
 const DefinitionScoreboard: FC<{ stats: ReadonlyArray<DefinitionStat> }> = ({ stats }) =>
   stats.length === 0 ? null : (
@@ -317,41 +387,9 @@ const definitionHref = (name: string): string => `/definitions?name=${encodeURIC
 const editHref = (name: string, notice: EditNotice): string =>
   `${definitionHref(name)}&edit=${notice}`;
 
-const RunsTable: FC<{ runs: ReadonlyArray<TestResultOutcome> }> = ({ runs }) =>
-  runs.length === 0 ? (
-    <p class="result-chart__empty">No runs yet.</p>
-  ) : (
-    <table class="runs">
-      <thead>
-        <tr>
-          <th>Run</th>
-          <th>Omarchy version</th>
-          <th>Started</th>
-          <th>Model</th>
-          <th>Status</th>
-        </tr>
-      </thead>
-      <tbody>
-        {runs.map((run) => (
-          <tr>
-            <td>
-              <code>{run.runId}</code>
-            </td>
-            <td>{run.iso.split("/").at(-1) ?? run.iso}</td>
-            <td>
-              <time dateTime={run.startedAt.toISOString()}>{dateTime.format(run.startedAt)}</time>
-            </td>
-            <td>{run.model ?? "—"}</td>
-            <td>{run.status === "timed_out" ? "timed out" : run.status}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-
 // One name's card: its results by version beside the newest wording as a form whose update writes
-// the next version, then every wording newest first, the newest open, each with its text, its
-// results by model and the runs that used it. The name is what the wordings collapse under, so it
+// the next version, then the current wording and the one before it, newest first, the newest
+// open, each with its text and its charts. The name is what the wordings collapse under, so it
 // is not a field.
 const DefinitionCard: FC<{
   group: DefinitionVersions;
@@ -360,18 +398,24 @@ const DefinitionCard: FC<{
 }> = ({ group, outcomes, notice }) => {
   const newest = group.versions[group.versions.length - 1];
   const next = group.versions.length + 1;
+  // Two: the current wording and the one before it. Older wordings stay in the database.
+  const shown = group.versions.slice(-2);
+  const firstShown = group.versions.length - shown.length + 1;
+  const shownIds = new Set(shown.map((wording) => wording.id));
+  const shownOutcomes = outcomes.filter((row) => shownIds.has(row.definitionId));
   return (
     <article class="record definition">
       <h2>{group.name}</h2>
       <div class="definition__chart">
         <ResultChart
           title="Results by version"
-          rows={versionStats(group.versions, outcomes).map((row) => ({
-            label: `v${String(row.version)}`,
+          rows={versionStats(shown, shownOutcomes).map((row) => ({
+            label: `v${String(row.version + firstShown - 1)}`,
             succeeded: row.succeeded,
             failed: row.failed,
           }))}
         />
+        <DurationChart chart={durationChart(shownOutcomes)} />
       </div>
       {/* The update button is handed over disabled; public/dashboard.js enables it once a field
           differs from the wording it was rendered with, so an unchanged wording is not offered. */}
@@ -408,11 +452,9 @@ const DefinitionCard: FC<{
         </button>
       </form>
       <ul class="definition__wordings">
-        {group.versions.toReversed().map((wording, index) => {
+        {shown.toReversed().map((wording, index) => {
           const version = group.versions.length - index;
-          const runs = outcomes
-            .filter((row) => row.definitionId === wording.id)
-            .sort((left, right) => right.startedAt.getTime() - left.startedAt.getTime());
+          const runs = outcomes.filter((row) => row.definitionId === wording.id);
           return (
             <li>
               <details class="definition__wording" open={version === group.versions.length}>
@@ -449,10 +491,7 @@ const DefinitionCard: FC<{
                         failed: row.failed,
                       }))}
                     />
-                  </div>
-                  <div class="record__field definition__runs">
-                    <h3>Runs</h3>
-                    <RunsTable runs={runs} />
+                    <DurationChart chart={durationChart(runs)} />
                   </div>
                 </div>
               </details>
