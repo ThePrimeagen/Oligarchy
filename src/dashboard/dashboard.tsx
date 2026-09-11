@@ -4,6 +4,7 @@ import { html } from "hono/html";
 import type { FC, PropsWithChildren } from "hono/jsx";
 import { jsxRenderer } from "hono/jsx-renderer";
 import {
+  abortAutomationJob,
   addServer,
   definitionStats,
   getImage,
@@ -37,6 +38,10 @@ type Bindings = {
   HYPERDRIVE: {
     connectionString: string;
   };
+  // wrangler secret; the same token POST /abort on the automation server checks.
+  OLIGARCHY_TOKEN: string;
+  // The automation server's base url, set as a Cloudflare var.
+  AUTOMATION_SERVER_URL: string;
 };
 
 type SessionListProps = {
@@ -887,6 +892,62 @@ app.post("/servers/delete", async (context) => {
     console.error("dashboard: removing a server:", errorMessage(error));
     return serversPage(context, 500, undefined, "internal error");
   }
+});
+
+// POST /abort asks the automation server to stop the running job for a ticket. A 200 from
+// that server is the close. A 4xx or 5xx, or no answer at all, closes a running row here
+// so the queue does not stay stuck; Sentry records "Cloudflare aborted job" only when
+// that write lands. This route always answers 200: the operator's click is done either way.
+// OpenCode's force-kill is 5s; ten seconds is that wait plus the round trip. A hung
+// server must not hold the operator's 200.
+const ABORT_TIMEOUT_MS = 10_000;
+
+app.post("/abort", async (context) => {
+  try {
+    const body: unknown = await context.req.json();
+    const ticket =
+      typeof body === "object" &&
+      body !== null &&
+      "ticket" in body &&
+      typeof body.ticket === "string" &&
+      body.ticket !== ""
+        ? body.ticket
+        : undefined;
+    if (ticket === undefined) {
+      return context.json({ ok: "true" });
+    }
+    try {
+      const response = await fetch(new URL("/abort", context.env.AUTOMATION_SERVER_URL), {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${context.env.OLIGARCHY_TOKEN}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ ticket }),
+        signal: AbortSignal.timeout(ABORT_TIMEOUT_MS),
+      });
+      if (response.status === 200) {
+        return context.json({ ok: "true" });
+      }
+      console.error(
+        `dashboard: aborting a job: automation server returned ${String(response.status)}`,
+      );
+    } catch (error) {
+      console.error("dashboard: aborting a job:", errorMessage(error));
+    }
+    try {
+      if (await abortAutomationJob(context.env.HYPERDRIVE.connectionString, ticket)) {
+        Sentry.captureException(new Error("Cloudflare aborted job"));
+      }
+    } catch (error) {
+      Sentry.captureException(error);
+      console.error("dashboard: aborting a job:", errorMessage(error));
+    }
+  } catch (error) {
+    Sentry.captureException(error);
+    console.error("dashboard: aborting a job:", errorMessage(error));
+  }
+  return context.json({ ok: "true" });
 });
 
 export default Sentry.withSentry(
