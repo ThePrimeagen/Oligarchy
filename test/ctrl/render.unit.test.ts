@@ -261,11 +261,11 @@ describe("renderAutomationJobs happy path", () => {
     );
     expect(lines).toEqual([
       "running",
-      `\x1b[33mrunning  ${JOB_RESET}  drive      5s ago       OLI-42  lock-screen`,
+      `\x1b[33mrunning  ${JOB_RESET}  drive     5s ago       OLI-42  lock-screen`,
       "pending",
       `\x1b[90mpending  ${JOB_RESET}  diagnose  1m ago       OLI-43  lock-screen`,
       "completed",
-      `\x1b[32msucceeded${JOB_RESET}  drive      1h ago       OLI-41  Open a terminal`,
+      `\x1b[32msucceeded${JOB_RESET}  drive     1h30m ago    OLI-41  Open a terminal`,
     ]);
   });
 
@@ -334,11 +334,11 @@ describe("renderAutomationJobs happy path", () => {
     );
     expect(lines).toEqual([
       "running",
-      `\x1b[33mrunning  ${JOB_RESET}  drive      5s ago       OLI-10  lock-screen`,
+      `\x1b[33mrunning  ${JOB_RESET}  drive     5s ago       OLI-10  lock-screen`,
       "pending",
       `\x1b[90mpending  ${JOB_RESET}  diagnose  1m ago       OLI-11  lock-screen`,
       "completed",
-      `\x1b[31mfailed   ${JOB_RESET}  drive      1m ago       OLI-12  lock-screen`,
+      `\x1b[31mfailed   ${JOB_RESET}  drive     1m ago       OLI-12  lock-screen`,
     ]);
   });
 
@@ -354,7 +354,7 @@ describe("renderAutomationJobs happy path", () => {
     expect(lines).toEqual([
       "running",
       "pending",
-      `\x1b[90mpending  ${JOB_RESET}  drive      5s ago       —  lock-screen`,
+      `\x1b[90mpending  ${JOB_RESET}  drive     5s ago       —  lock-screen`,
       "completed",
     ]);
   });
@@ -380,7 +380,7 @@ describe("renderAutomationJobs unhappy path", () => {
     );
     expect(lines).toEqual([
       "running",
-      `\x1b[33mrunning  ${JOB_RESET}  drive      0s ago       OLI-9  lock-screen`,
+      `\x1b[33mrunning  ${JOB_RESET}  drive     0s ago       OLI-9  lock-screen`,
       "pending",
       "completed",
     ]);

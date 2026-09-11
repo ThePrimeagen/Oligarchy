@@ -1301,11 +1301,11 @@ describe("automation --list", () => {
       expect(Exit.isSuccess(exit)).toBe(true);
       expect(yield* stdout).toEqual([
         "running",
-        `\x1b[33mrunning  ${JOB_RESET}  drive      5s ago       OLI-42  lock-screen`,
+        `\x1b[33mrunning  ${JOB_RESET}  drive     5s ago       OLI-42  lock-screen`,
         "pending",
         `\x1b[90mpending  ${JOB_RESET}  diagnose  1m ago       OLI-43  lock-screen`,
         "completed",
-        `\x1b[32msucceeded${JOB_RESET}  drive      1m ago       OLI-41  Open a terminal`,
+        `\x1b[32msucceeded${JOB_RESET}  drive     1m ago       OLI-41  Open a terminal`,
       ]);
       expect(h.touched).toEqual(["database"]);
     }),
@@ -1355,9 +1355,9 @@ describe("automation --list", () => {
         "running",
         `\x1b[33mrunning  ${JOB_RESET}  diagnose  2s ago       OLI-50  lock-screen`,
         "pending",
-        `\x1b[90mpending  ${JOB_RESET}  drive      10s ago      OLI-51  lock-screen`,
+        `\x1b[90mpending  ${JOB_RESET}  drive     10s ago      OLI-51  lock-screen`,
         "completed",
-        `\x1b[31mfailed   ${JOB_RESET}  drive      30s ago      OLI-52  lock-screen`,
+        `\x1b[31mfailed   ${JOB_RESET}  drive     30s ago      OLI-52  lock-screen`,
       ]);
     }),
   );
