@@ -79,7 +79,10 @@ const QUEUE: AutomationQueue = { running: [running], pending: [pending], complet
 const EMPTY_QUEUE: AutomationQueue = { running: [], pending: [], completed: [] };
 
 const JOB_COLUMNS =
-  "<tr><th>ticket</th><th>test</th><th>action</th><th>status</th><th>queued</th><th>started</th><th>finished</th><th>reason</th></tr>";
+  "<tr><th>ticket</th><th>test</th><th>action</th><th>status</th><th>queued</th><th>started</th><th>finished</th><th>reason</th><th></th></tr>";
+
+const abortForm = (ticket: string): string =>
+  `<form method="post" action="/abort" hx-post="/abort" hx-target="#queue" hx-swap="innerHTML"><input type="hidden" name="ticket" value="${ticket}"/><button>abort</button></form>`;
 
 // The components are functions of their props; the string they render, through the same html
 // helper the routes serve them with, is the page. The helper hands back a String object, hence
@@ -172,21 +175,26 @@ describe("Queue happy path", () => {
   it("shows a running job's ticket, test, action and status, how long ago it was queued and started, and no finish yet", async () => {
     const page = await render(Queue({ queue: { ...EMPTY_QUEUE, running: [running] } }));
     expect(page).toContain(
-      "<tr><td>OLI-61</td><td>lock-screen</td><td>diagnose</td><td>running</td><td>3 min ago</td><td>45 s ago</td><td>—</td><td></td></tr>",
+      `<tr><td>OLI-61</td><td>lock-screen</td><td>diagnose</td><td>running</td><td>3 min ago</td><td>45 s ago</td><td>—</td><td></td><td>${abortForm("OLI-61")}</td></tr>`,
     );
+  });
+
+  it("puts an abort form on a running job that has a ticket", async () => {
+    const page = await render(Queue({ queue: { ...EMPTY_QUEUE, running: [running] } }));
+    expect(page).toContain(abortForm("OLI-61"));
   });
 
   it("shows a pending job as queued and not yet started or finished", async () => {
     const page = await render(Queue({ queue: { ...EMPTY_QUEUE, pending: [pending] } }));
     expect(page).toContain(
-      "<tr><td>OLI-62</td><td>install</td><td>drive</td><td>pending</td><td>7 s ago</td><td>—</td><td>—</td><td></td></tr>",
+      "<tr><td>OLI-62</td><td>install</td><td>drive</td><td>pending</td><td>7 s ago</td><td>—</td><td>—</td><td></td><td></td></tr>",
     );
   });
 
   it("shows a completed job's terminal status, when it finished, and the reason it closed with", async () => {
     const page = await render(Queue({ queue: { ...EMPTY_QUEUE, completed: [failed] } }));
     expect(page).toContain(
-      "<tr><td>OLI-60</td><td>wifi</td><td>drive</td><td>failed</td><td>1 h ago</td><td>1 h ago</td><td>10 min ago</td><td>session timed out</td></tr>",
+      "<tr><td>OLI-60</td><td>wifi</td><td>drive</td><td>failed</td><td>1 h ago</td><td>1 h ago</td><td>10 min ago</td><td>session timed out</td><td></td></tr>",
     );
   });
 
@@ -212,6 +220,20 @@ describe("Queue unhappy path", () => {
     expect(page).toContain("<tr><td>—</td><td>install</td><td>drive</td><td>pending</td>");
   });
 
+  it("offers no abort on pending, completed, or a running job with no ticket", async () => {
+    const page = await render(
+      Queue({
+        queue: {
+          running: [{ ...running, ticket: null }],
+          pending: [pending],
+          completed: [failed],
+        },
+      }),
+    );
+    expect(page).not.toContain('action="/abort"');
+    expect(page).not.toContain(">abort</button>");
+  });
+
   it("escapes a ticket, a test name and a reason", async () => {
     const hostile: AutomationJob = {
       ...failed,
@@ -222,6 +244,11 @@ describe("Queue unhappy path", () => {
     const page = await render(Queue({ queue: { ...EMPTY_QUEUE, completed: [hostile] } }));
     expect(page).toContain("<td>OLI-&lt;1&quot;&gt;</td><td>&lt;b&gt;wifi&lt;/b&gt;</td>");
     expect(page).toContain("<td>&lt;script&gt;alert(1)&lt;/script&gt;</td>");
+    const runningHostile = await render(
+      Queue({ queue: { ...EMPTY_QUEUE, running: [{ ...running, ticket: 'OLI-<1">' }] } }),
+    );
+    expect(runningHostile).toContain('value="OLI-&lt;1&quot;&gt;"');
+    expect(runningHostile).not.toContain('value="OLI-<1">');
     expect(page).not.toContain("<script>alert");
     expect(page).not.toContain("<b>wifi");
   });

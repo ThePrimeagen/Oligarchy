@@ -118,6 +118,7 @@ const Jobs: FC<{ jobs: ReadonlyArray<AutomationJob> }> = ({ jobs }) =>
         <th>started</th>
         <th>finished</th>
         <th>reason</th>
+        <th></th>
       </tr>
       {jobs.map((job) => (
         <tr>
@@ -129,6 +130,20 @@ const Jobs: FC<{ jobs: ReadonlyArray<AutomationJob> }> = ({ jobs }) =>
           <td>{since(job.startedAt, job.queriedAt)}</td>
           <td>{since(job.finishedAt, job.queriedAt)}</td>
           <td>{job.reason}</td>
+          <td>
+            {job.status === "running" && job.ticket !== null ? (
+              <form
+                method="post"
+                action="/abort"
+                hx-post="/abort"
+                hx-target="#queue"
+                hx-swap="innerHTML"
+              >
+                <input type="hidden" name="ticket" value={job.ticket} />
+                <button>abort</button>
+              </form>
+            ) : null}
+          </td>
         </tr>
       ))}
     </table>
