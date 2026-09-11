@@ -25,12 +25,12 @@ const make = Effect.gen(function* () {
   const maxJobs = yield* MaxJobs;
 
   const run = Effect.fn("Sessions.run")(function* (ticket: string, prompt: string) {
-    return yield* Effect.scoped(
+    const current = yield* Ref.get(running);
+    if (!current.has(ticket) && current.size >= maxJobs) {
+      return yield* Errors.AtCapacity.make({});
+    }
+    const outcome = yield* Effect.scoped(
       Effect.gen(function* () {
-        const current = yield* Ref.get(running);
-        if (!current.has(ticket) && current.size >= maxJobs) {
-          return yield* Errors.AtCapacity.make({});
-        }
         const handle = yield* Cli.spawn(OpenCode.BIN, OpenCode.args(prompt));
         const claimed = yield* Ref.modify(running, (map) => {
           if (map.has(ticket)) {
@@ -51,24 +51,25 @@ const make = Effect.gen(function* () {
               killSignal: "SIGTERM",
               forceKillAfter: Cli.FORCE_KILL_AFTER,
             })
-            .pipe(Effect.catch(() => Effect.void));
-          return yield* Errors.AtCapacity.make({});
+            .pipe(Effect.orElseSucceed(() => undefined));
+          return "full" as const;
         }
         yield* Effect.addFinalizer(() =>
           Ref.update(running, (map) =>
             map.get(ticket) === handle ? mapWithout(map, ticket) : map,
           ),
         );
-        return yield* Cli.awaitExit(OpenCode.BIN, handle);
+        yield* Cli.awaitExit(OpenCode.BIN, handle);
+        return "ok" as const;
       }),
     ).pipe(
-      Effect.catch((error) =>
-        error._tag === "AtCapacity"
-          ? Effect.fail(error)
-          : Effect.fail(Errors.RunFailed.make({ message: error.message, cause: error })),
-      ),
+      Effect.mapError((error) => Errors.RunFailed.make({ message: error.message, cause: error })),
       Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
     );
+    if (outcome === "full") {
+      return yield* Errors.AtCapacity.make({});
+    }
+    return yield* Effect.void;
   });
 
   const abort = Effect.fn("Sessions.abort")(function* (ticket: string) {
