@@ -1017,13 +1017,13 @@ console.log([failed.test, failed.action, failed.reason, failed.createdAt instanc
     );
     // The ages are read against the database's clock: a minute has margin, seconds are counted.
     expect(html).toMatch(
-      /<tr><td>QUE-102<\/td><td>queue-order<\/td><td>diagnose<\/td><td>running<\/td><td>1 min ago<\/td><td>\d+ s ago<\/td><td>—<\/td><td><\/td><td><form method="post" action="\/abort" hx-post="\/abort" hx-target="#queue" hx-swap="innerHTML"><input type="hidden" name="ticket" value="QUE-102"\/><button>abort<\/button><\/form><\/td><\/tr><tr><td>QUE-101<\/td><td>queue-order<\/td><td>drive<\/td><td>running<\/td><td>5 min ago<\/td><td>3 min ago<\/td><td>—<\/td><td><\/td><td><form method="post" action="\/abort"/,
+      /<tr><td>QUE-102<\/td><td>queue-order<\/td><td>diagnose<\/td><td>running<\/td><td>1 min ago<\/td><td>\d+ s ago<\/td><td>—<\/td><td><\/td><td><form method="post" action="\/abort" hx-post="\/abort" hx-confirm="are you sure\?" hx-target="#queue" hx-swap="innerHTML"><input type="hidden" name="ticket" value="QUE-102"\/><button type="submit" class="abort" aria-label="abort"><svg/,
     );
     expect(html).toMatch(
-      /<h3>pending<\/h3><table>.*?<tr><td>QUE-104<\/td><td>queue-order<\/td><td>diagnose<\/td><td>pending<\/td><td>\d+ s ago<\/td><td>—<\/td><td>—<\/td><td><\/td><\/tr><tr><td>QUE-103<\/td>.*?<tr><td>QUE-105<\/td>.*?<tr><td>—<\/td><td>queue-order<\/td><td>drive<\/td><td>pending<\/td>.*?<h3>completed<\/h3>/s,
+      /<h3>pending<\/h3><table>.*?<tr><td>QUE-104<\/td><td>queue-order<\/td><td>diagnose<\/td><td>pending<\/td><td>\d+ s ago<\/td><td>—<\/td><td>—<\/td><td><\/td><td><\/td><\/tr><tr><td>QUE-103<\/td>.*?<tr><td>QUE-105<\/td>.*?<tr><td>—<\/td><td>queue-order<\/td><td>drive<\/td><td>pending<\/td>.*?<h3>completed<\/h3>/s,
     );
     expect(html).toMatch(
-      /<h3>completed<\/h3><table>.*?<tr><td>QUE-107<\/td><td>queue-order<\/td><td>drive<\/td><td>failed<\/td><td>\d+ min ago<\/td><td>\d+ min ago<\/td><td>1 min ago<\/td><td>session timed out<\/td><\/tr><tr><td>QUE-108<\/td>.*?<tr><td>QUE-106<\/td>.*?<tr><td>QUE-109<\/td>/s,
+      /<h3>completed<\/h3><table>.*?<tr><td>QUE-107<\/td><td>queue-order<\/td><td>drive<\/td><td>failed<\/td><td>\d+ min ago<\/td><td>\d+ min ago<\/td><td>1 min ago<\/td><td>session timed out<\/td><td><\/td><\/tr><tr><td>QUE-108<\/td>.*?<tr><td>QUE-106<\/td>.*?<tr><td>QUE-109<\/td>/s,
     );
     expect(html.indexOf("<h2>automation</h2>")).toBeLessThan(html.indexOf("<h2>qemu servers</h2>"));
     expect(html).toContain('<div id="fleet" hx-get="/servers/fleet" hx-trigger="every 30s">');

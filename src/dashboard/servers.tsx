@@ -136,11 +136,22 @@ const Jobs: FC<{ jobs: ReadonlyArray<AutomationJob> }> = ({ jobs }) =>
                 method="post"
                 action="/abort"
                 hx-post="/abort"
+                hx-confirm="are you sure?"
                 hx-target="#queue"
                 hx-swap="innerHTML"
               >
                 <input type="hidden" name="ticket" value={job.ticket} />
-                <button>abort</button>
+                <button type="submit" class="abort" aria-label="abort">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="12"
+                    height="12"
+                    viewBox="0 0 12 12"
+                    aria-hidden="true"
+                  >
+                    <path d="M2 2l8 8M10 2L2 10" stroke="red" stroke-width="2" fill="none" />
+                  </svg>
+                </button>
               </form>
             ) : null}
           </td>
@@ -182,7 +193,7 @@ export const ServersPage: FC<{
       <title>oligarchy servers</title>
       <style>
         {
-          ".halves { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: start; }"
+          ".halves { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: start; } .abort { background: none; border: none; padding: 0; cursor: pointer; line-height: 0; vertical-align: middle; }"
         }
       </style>
       <script src={HTMX_URL} integrity={HTMX_INTEGRITY} crossorigin="anonymous"></script>

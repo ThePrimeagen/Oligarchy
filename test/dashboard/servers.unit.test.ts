@@ -81,8 +81,11 @@ const EMPTY_QUEUE: AutomationQueue = { running: [], pending: [], completed: [] }
 const JOB_COLUMNS =
   "<tr><th>ticket</th><th>test</th><th>action</th><th>status</th><th>queued</th><th>started</th><th>finished</th><th>reason</th><th></th></tr>";
 
+const ABORT_X =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 2l8 8M10 2L2 10" stroke="red" stroke-width="2" fill="none"></path></svg>';
+
 const abortForm = (ticket: string): string =>
-  `<form method="post" action="/abort" hx-post="/abort" hx-target="#queue" hx-swap="innerHTML"><input type="hidden" name="ticket" value="${ticket}"/><button>abort</button></form>`;
+  `<form method="post" action="/abort" hx-post="/abort" hx-confirm="are you sure?" hx-target="#queue" hx-swap="innerHTML"><input type="hidden" name="ticket" value="${ticket}"/><button type="submit" class="abort" aria-label="abort">${ABORT_X}</button></form>`;
 
 // The components are functions of their props; the string they render, through the same html
 // helper the routes serve them with, is the page. The helper hands back a String object, hence
@@ -179,9 +182,12 @@ describe("Queue happy path", () => {
     );
   });
 
-  it("puts an abort form on a running job that has a ticket", async () => {
+  it("puts a red X on a running job that has a ticket, and asks are you sure before it posts", async () => {
     const page = await render(Queue({ queue: { ...EMPTY_QUEUE, running: [running] } }));
     expect(page).toContain(abortForm("OLI-61"));
+    expect(page).toContain('hx-confirm="are you sure?"');
+    expect(page).toContain('stroke="red"');
+    expect(page).not.toContain(">abort</button>");
   });
 
   it("shows a pending job as queued and not yet started or finished", async () => {
@@ -231,7 +237,9 @@ describe("Queue unhappy path", () => {
       }),
     );
     expect(page).not.toContain('action="/abort"');
-    expect(page).not.toContain(">abort</button>");
+    expect(page).not.toContain('hx-confirm="are you sure?"');
+    expect(page).not.toContain('aria-label="abort"');
+    expect(page).not.toContain("<svg");
   });
 
   it("escapes a ticket, a test name and a reason", async () => {
@@ -262,6 +270,7 @@ describe("ServersPage happy path", () => {
     expect(page).toContain("<title>oligarchy servers</title>");
     expect(page).toContain('<script src="https://cdn.jsdelivr.net/npm/htmx.org@4.0.0"');
     expect(page).toMatch(/<style>[^<]*\.halves\s*\{[^}]*grid-template-columns:\s*1fr 1fr/);
+    expect(page).toMatch(/<style>[^<]*\.abort\s*\{[^}]*background:\s*none/);
     expect(page).toContain("<h1>oligarchy servers</h1>");
     expect(page).toContain(
       '<div class="halves"><section><h2>automation</h2><div id="queue" hx-get="/servers/queue" hx-trigger="every 30s"><h3>running</h3>',
