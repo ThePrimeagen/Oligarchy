@@ -55,3 +55,7 @@ Genuine harness bugs found by the runs and fixed on branch `automation-model-fla
 - `opencode run` writes its formatted transcript to stderr as well, so a failed run's
   `automation_jobs.reason` (and the `POST /run failed` log row) is the last 4 KiB of transcript
   ending in the error line. Readable, but noisy; `--format json` or a stderr filter would tidy it.
+- The free Muse route rate-limits (`Error: Rate limit exceeded. Please try again later.`) when four
+  agents run at once (two fresh drives plus two diagnosers, OLI-1080/OLI-1081 at 01:05Z). Both
+  drivers died at 5 actions. External quota, not ours; the operator now staggers drive starts by
+  ~90 s. If it recurs, run diagnoses one at a time (`--jobs 3`) or space them.
