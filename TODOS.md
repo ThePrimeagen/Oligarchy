@@ -45,3 +45,13 @@ Genuine harness bugs found by the runs and fixed on branch `automation-model-fla
 - `a66b27f` `Cli.run` keeps the last 4 KiB of stderr with NUL bytes stripped: opencode's stderr
   carried 0x00, Postgres `text` refused it, and the job's finish and the client's log row both
   failed, orphaning the job as `running` (OLI-1067).
+- The free Muse route (`opencode/muse-spark-1.3-contributor-free`, provider "Console") answers
+  `400 invalid_request_error: Invalid upload request` once a drive has read many screenshots into
+  its context (OLI-1067 after a binary tool output; OLI-1069 after 16 clean `read`s of 1280x800
+  PNGs). The request is not retryable and `opencode run` exits, so the driver dies mid-install.
+  Looks like a payload ceiling on the provider; 001 and 004 survived with fewer/smaller images.
+  Model/provider behaviour, recorded as failed attempts; a mitigation would be opencode
+  compaction or smaller screenshots, not ours to decide here.
+- `opencode run` writes its formatted transcript to stderr as well, so a failed run's
+  `automation_jobs.reason` (and the `POST /run failed` log row) is the last 4 KiB of transcript
+  ending in the error line. Readable, but noisy; `--format json` or a stderr filter would tidy it.
