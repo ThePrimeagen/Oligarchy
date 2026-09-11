@@ -640,8 +640,8 @@ describeServing("automation server abort", () => {
         expect(job).toMatchObject({
           status: "aborted",
           reason: "aborted",
-          clientUrl: client.url,
         });
+        expect(job.serverId).toEqual(expect.any(String));
         expect(seen).toContain("POST /abort");
       } finally {
         process.child.kill("SIGTERM");

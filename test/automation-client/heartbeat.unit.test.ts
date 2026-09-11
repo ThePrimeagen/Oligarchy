@@ -53,7 +53,7 @@ describe("automation-client heartbeat happy path", () => {
         const store = Stores.fakeServerStore();
         const { log } = yield* start(store);
         expect(store.heartbeats).toEqual([ANNOUNCED]);
-        expect(store.servers).toEqual([REGISTERED]);
+        expect(store.servers).toEqual([expect.objectContaining(REGISTERED)]);
         yield* TestClock.adjust("29 seconds");
         expect(store.heartbeats).toHaveLength(1);
         yield* TestClock.adjust("1 second");
@@ -82,10 +82,14 @@ describe("automation-client heartbeat happy path", () => {
   it.effect("deletes its own row when the scope closes, and leaves every other server", () =>
     Effect.gen(function* () {
       const store = Stores.fakeServerStore();
-      const other = { url: "http://127.0.0.1:1", type: "qemu" as const };
+      const other = {
+        id: crypto.randomUUID(),
+        url: "http://127.0.0.1:1",
+        type: "qemu" as const,
+      };
       store.servers.push(other);
       const { scope, log } = yield* start(store);
-      expect(store.servers).toEqual([other, REGISTERED]);
+      expect(store.servers).toEqual([other, expect.objectContaining(REGISTERED)]);
       yield* Scope.close(scope, Exit.void);
       expect(store.servers).toEqual([other]);
       expect(log.lines).toEqual([]);
@@ -198,9 +202,9 @@ describe("automation-client heartbeat unhappy path", () => {
           removeServer: () => Effect.fail(refusedDelete),
         });
         const { scope, log } = yield* start(store);
-        expect(store.servers).toEqual([REGISTERED]);
+        expect(store.servers).toEqual([expect.objectContaining(REGISTERED)]);
         yield* Scope.close(scope, Exit.void);
-        expect(store.servers).toEqual([REGISTERED]);
+        expect(store.servers).toEqual([expect.objectContaining(REGISTERED)]);
         expect(log.lines).toEqual([
           {
             level: "error",

@@ -80,18 +80,18 @@ export const dispatch = Effect.fn("dispatch")(function* () {
 
   const tick = Effect.fn("tick")(function* () {
     const live = yield* servers.listLiveServers("automation-client");
-    const url = live[0];
-    if (url === undefined) {
+    const chosen = live[0];
+    if (chosen === undefined) {
       return;
     }
     yield* Effect.uninterruptibleMask((restore) =>
-      store.claim(url).pipe(
+      store.claim(chosen.id).pipe(
         Effect.flatMap((maybe) => {
           if (Option.isNone(maybe)) {
             return Effect.void;
           }
           const job = maybe.value;
-          return restore(execute(job, url)).pipe(
+          return restore(execute(job, chosen.url)).pipe(
             Effect.matchCause({
               onSuccess: (): Outcome => ({ status: "succeeded", reason: null }),
               onFailure: outcomeFrom,

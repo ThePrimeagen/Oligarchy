@@ -1,5 +1,5 @@
 {
-  "id": "9804ecb3-a9d2-4471-992b-ccdebde78ba1",
+  "id": "c08369c0-745e-43b2-8290-1dd24d29ece4",
   "prevId": "91b67423-9d71-414e-980c-33fe00b1af99",
   "version": "7",
   "dialect": "postgresql",
@@ -227,9 +227,9 @@
           "primaryKey": false,
           "notNull": false
         },
-        "client_url": {
-          "name": "client_url",
-          "type": "text",
+        "server_id": {
+          "name": "server_id",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": false
         },
@@ -640,6 +640,13 @@
       "name": "servers",
       "schema": "",
       "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
         "url": {
           "name": "url",
           "type": "text",
@@ -684,7 +691,15 @@
       "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "servers_id_unique": {
+          "name": "servers_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

@@ -118,7 +118,7 @@ const decoder = new TextDecoder();
 const serverBody = (url: string) => Contract.ServerBody.make({ url });
 
 // A registered qemu server, as the fake store's rows carry it: what this reverse proxy fronts.
-const qemu = (url: string) => ({ url, type: "qemu" as const });
+const qemu = (url: string) => ({ id: crypto.randomUUID(), url, type: "qemu" as const });
 
 const upstreamCalls = (fixed: Fixture) =>
   fixed.upstream.requests.map((request) => `${request.method} ${request.url}`);
@@ -142,7 +142,9 @@ describe("server registration", () => {
             body: "",
           },
         ]);
-        expect(fixed.store.servers).toEqual([{ url: SERVER_A, type: "qemu" }]);
+        expect(fixed.store.servers).toEqual([
+          expect.objectContaining({ url: SERVER_A, type: "qemu" }),
+        ]);
         expect(fixed.log.lines).toEqual([
           {
             level: "info",
@@ -164,7 +166,9 @@ describe("server registration", () => {
         yield* api.Servers.register({ payload: serverBody(`${SERVER_A}/`) });
       }).pipe(Effect.provide(serve(fixed)));
       expect(upstreamCalls(fixed)).toEqual([`GET ${SERVER_A}/stats`]);
-      expect(fixed.store.servers).toEqual([qemu(`${SERVER_A}/`)]);
+      expect(fixed.store.servers).toEqual([
+        expect.objectContaining({ url: `${SERVER_A}/`, type: "qemu" }),
+      ]);
     }),
   );
 
@@ -177,7 +181,9 @@ describe("server registration", () => {
         yield* api.Servers.register({ payload: serverBody(SERVER_A) });
       }).pipe(Effect.provide(serve(fixed)));
       expect(upstreamCalls(fixed)).toEqual([`GET ${SERVER_A}/stats`, `GET ${SERVER_A}/stats`]);
-      expect(fixed.store.servers).toEqual([qemu(SERVER_A)]);
+      expect(fixed.store.servers).toEqual([
+        expect.objectContaining({ url: SERVER_A, type: "qemu" }),
+      ]);
       expect(FakeLog.texts(fixed.log)).toEqual([
         `server registered; ${SERVER_A}`,
         `server registered; ${SERVER_A}`,
@@ -194,7 +200,9 @@ describe("server registration", () => {
         const ok = yield* api.Servers.unregister({ payload: serverBody(SERVER_A) });
         expect(ok.ok).toBe("true");
       }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.store.servers).toEqual([qemu(SERVER_B)]);
+      expect(fixed.store.servers).toEqual([
+        expect.objectContaining({ url: SERVER_B, type: "qemu" }),
+      ]);
       expect(fixed.upstream.requests).toEqual([]);
       expect(fixed.log.lines).toEqual([
         {

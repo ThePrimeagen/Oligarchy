@@ -3,6 +3,7 @@ import { HttpServerRequest } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import * as Config from "../config.ts";
 import * as Automation from "../db/automation.ts";
+import * as Servers from "../db/servers.ts";
 import * as Tests from "../db/tests.ts";
 import * as Log from "../observability/log.ts";
 import * as QemuServerHandlers from "../qemu-server/handlers.ts";
@@ -109,6 +110,7 @@ export const AbortLive = HttpApiBuilder.group(Api.AutomationServerApi, "Abort", 
       Effect.gen(function* () {
         const tests = yield* Tests.TestStore;
         const automation = yield* Automation.AutomationStore;
+        const servers = yield* Servers.ServerStore;
         const log = yield* Log.Log;
         const result = yield* tests
           .findResultByLinearId(payload.ticket)
@@ -136,10 +138,22 @@ export const AbortLive = HttpApiBuilder.group(Api.AutomationServerApi, "Abort", 
             agentId: payload.ticket,
           });
         }
-        const url = job.value.clientUrl;
-        if (url === null) {
-          return yield* Effect.die(new Error(`running job ${job.value.id} has no clientUrl`));
+        if (job.value.serverId === null) {
+          return yield* Effect.die(new Error(`running job ${job.value.id} has no serverId`));
         }
+        const server = yield* servers
+          .findServer(job.value.serverId)
+          .pipe(
+            Effect.mapError((error) =>
+              Errors.Internal.make({ cause: error, agentId: payload.ticket }),
+            ),
+          );
+        if (Option.isNone(server)) {
+          return yield* Errors.RunFailed.make({
+            message: `unknown server "${job.value.serverId}"`,
+          });
+        }
+        const url = server.value.url;
         yield* AutomationClient.abort(url, payload.ticket).pipe(
           Effect.catchTag("AutomationClientError", (error) =>
             Effect.fail(

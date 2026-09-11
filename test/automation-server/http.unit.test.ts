@@ -101,11 +101,17 @@ const seedResult = (
   return resultId;
 };
 
+const seedServer = (fixed: Fixture, url: string) => {
+  const id = crypto.randomUUID();
+  fixed.stores.servers.servers.push({ id, url, type: "automation-client" });
+  return id;
+};
+
 const seedJob = (
   fixed: Fixture,
   resultId: string,
   status: "pending" | "running" | "succeeded" | "failed" | "aborted" = "pending",
-  clientUrl: string | null = null,
+  serverId: string | null = null,
 ) => {
   fixed.stores.automation.jobs.push({
     id: `00000000-0000-4000-8000-${String(fixed.stores.automation.jobs.length + 1).padStart(12, "0")}`,
@@ -113,7 +119,7 @@ const seedJob = (
     action: "drive",
     status,
     reason: null,
-    clientUrl,
+    serverId,
     createdAt: new Date(),
     startedAt: status === "pending" ? null : new Date(),
     finishedAt: status === "pending" || status === "running" ? null : new Date(),
@@ -340,7 +346,7 @@ describe("POST /abort", () => {
       const outbound = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
       const fixed = fixture();
       seedResult(fixed, TICKET, RESULT);
-      seedJob(fixed, RESULT, "running", CLIENT_URL);
+      seedJob(fixed, RESULT, "running", seedServer(fixed, CLIENT_URL));
       yield* Effect.gen(function* () {
         const http = yield* HttpClient.HttpClient;
         const response = yield* abort(http);
@@ -369,9 +375,9 @@ describe("POST /abort", () => {
       const outbound = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
       const fixed = fixture();
       seedResult(fixed, TICKET, RESULT);
-      seedJob(fixed, RESULT, "running", CLIENT_URL);
+      seedJob(fixed, RESULT, "running", seedServer(fixed, CLIENT_URL));
       seedResult(fixed, OTHER_TICKET, OTHER_RESULT);
-      seedJob(fixed, OTHER_RESULT, "running", OTHER_URL);
+      seedJob(fixed, OTHER_RESULT, "running", seedServer(fixed, OTHER_URL));
       yield* Effect.gen(function* () {
         const http = yield* HttpClient.HttpClient;
         const response = yield* abort(http, TICKET);
@@ -389,7 +395,7 @@ describe("POST /abort refusals", () => {
     Effect.gen(function* () {
       const fixed = fixture();
       seedResult(fixed, TICKET, RESULT);
-      seedJob(fixed, RESULT, "succeeded", CLIENT_URL);
+      seedJob(fixed, RESULT, "succeeded", seedServer(fixed, CLIENT_URL));
       yield* Effect.gen(function* () {
         const http = yield* HttpClient.HttpClient;
         const response = yield* abort(http);
@@ -505,7 +511,7 @@ describe("POST /abort refusals", () => {
       );
       const fixed = fixture();
       seedResult(fixed, TICKET, RESULT);
-      seedJob(fixed, RESULT, "running", CLIENT_URL);
+      seedJob(fixed, RESULT, "running", seedServer(fixed, CLIENT_URL));
       yield* Effect.gen(function* () {
         const http = yield* HttpClient.HttpClient;
         const response = yield* abort(http);
@@ -520,6 +526,24 @@ describe("POST /abort refusals", () => {
     }),
   );
 
+  it.effect("500 when the server that claimed the job is gone", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      seedResult(fixed, TICKET, RESULT);
+      seedJob(fixed, RESULT, "running", crypto.randomUUID());
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const response = yield* abort(http);
+        expect(response.status).toBe(500);
+        const body = yield* response.json;
+        expect(body).toEqual(
+          expect.objectContaining({ error: expect.stringContaining("unknown server") }),
+        );
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.stores.automation.jobs[0]?.status).toBe("running");
+    }),
+  );
+
   it.effect("500 when the client fails, and the job stays running", () =>
     Effect.gen(function* () {
       const outbound = FakeHttp.recordRequests(() =>
@@ -527,7 +551,7 @@ describe("POST /abort refusals", () => {
       );
       const fixed = fixture();
       seedResult(fixed, TICKET, RESULT);
-      seedJob(fixed, RESULT, "running", CLIENT_URL);
+      seedJob(fixed, RESULT, "running", seedServer(fixed, CLIENT_URL));
       yield* Effect.gen(function* () {
         const http = yield* HttpClient.HttpClient;
         const response = yield* abort(http);

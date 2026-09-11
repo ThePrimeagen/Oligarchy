@@ -6,6 +6,11 @@ import * as DbSchema from "./schema.ts";
 type ServerRow = typeof DbSchema.servers.$inferSelect;
 export type ServerType = ServerRow["type"];
 
+export type LiveServer = {
+  readonly id: string;
+  readonly url: string;
+};
+
 export class ServerStore extends Context.Service<ServerStore>()("@oligarchy/db/ServerStore", {
   make: Effect.gen(function* () {
     const database = yield* Client.Database;
@@ -69,9 +74,9 @@ export class ServerStore extends Context.Service<ServerStore>()("@oligarchy/db/S
     // Clients write every 30s; 45s is one missed beat plus a little. A null heartbeat is
     // an operator-added row no process has claimed, so it is not live.
     const listLiveServers = Effect.fn("db.listLiveServers")(function* (type: ServerType) {
-      const rows = yield* database.run("listLiveServers", (db) =>
+      return yield* database.run("listLiveServers", (db) =>
         db
-          .select({ url: DbSchema.servers.url })
+          .select({ id: DbSchema.servers.id, url: DbSchema.servers.url })
           .from(DbSchema.servers)
           .where(
             and(
@@ -81,7 +86,17 @@ export class ServerStore extends Context.Service<ServerStore>()("@oligarchy/db/S
           )
           .orderBy(DbSchema.servers.createdAt, DbSchema.servers.url),
       );
-      return rows.map((row) => row.url);
+    });
+
+    const findServer = Effect.fn("db.findServer")(function* (id: string) {
+      const rows = yield* database.run("findServer", (db) =>
+        db
+          .select({ id: DbSchema.servers.id, url: DbSchema.servers.url })
+          .from(DbSchema.servers)
+          .where(eq(DbSchema.servers.id, id))
+          .limit(1),
+      );
+      return Arr.head(rows);
     });
 
     // A session is routed once; a second insert is the primary key's DatabaseError by design.
@@ -107,6 +122,7 @@ export class ServerStore extends Context.Service<ServerStore>()("@oligarchy/db/S
       removeServer,
       listServers,
       listLiveServers,
+      findServer,
       routeSession,
       serverForSession,
     };

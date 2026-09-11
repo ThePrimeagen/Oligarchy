@@ -1,1 +1,0 @@
-ALTER TABLE "automation_jobs" ADD COLUMN "client_url" text;

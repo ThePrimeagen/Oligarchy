@@ -1251,7 +1251,7 @@ const listedJob = (
   action: fields.action,
   status: fields.status,
   reason: fields.reason ?? null,
-  clientUrl: fields.clientUrl ?? null,
+  serverId: fields.serverId ?? null,
   createdAt: fields.createdAt ?? ago(90),
   startedAt: fields.startedAt ?? (fields.status === "pending" ? null : ago(5)),
   finishedAt:

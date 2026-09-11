@@ -48,8 +48,9 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
       });
 
       // Oldest pending, locked for the transaction so a second claimer waits. Queue order is
-      // created_at; id breaks a tie. url is the client that took it: /abort reads it back.
-      const claim = Effect.fn("db.claimAutomationJob")(function* (url: string) {
+      // created_at; id breaks a tie. serverId is the client that took it: /abort looks that
+      // server up for its url.
+      const claim = Effect.fn("db.claimAutomationJob")(function* (serverId: string) {
         return yield* database.transaction("claimAutomationJob", (tx) =>
           Effect.gen(function* () {
             const pending = yield* Client.attempt("claimAutomationJob", () =>
@@ -68,7 +69,7 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
             const updated = yield* Client.attempt("claimAutomationJob", () =>
               tx
                 .update(DbSchema.automationJobs)
-                .set({ status: "running", startedAt: sql`now()`, clientUrl: url })
+                .set({ status: "running", startedAt: sql`now()`, serverId })
                 .where(eq(DbSchema.automationJobs.id, row.value.id))
                 .returning(),
             );

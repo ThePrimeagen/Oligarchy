@@ -544,7 +544,7 @@ export const fakeAutomationStore = (
           action: input.action,
           status: "pending",
           reason: null,
-          clientUrl: null,
+          serverId: null,
           createdAt: new Date(),
           startedAt: null,
           finishedAt: null,
@@ -552,7 +552,7 @@ export const fakeAutomationStore = (
         jobs.push(row);
         return row;
       }),
-    claim: (url) =>
+    claim: (serverId) =>
       Effect.sync(() => {
         const pending = jobs
           .filter((job) => job.status === "pending")
@@ -567,7 +567,7 @@ export const fakeAutomationStore = (
         }
         job.status = "running";
         job.startedAt = new Date();
-        job.clientUrl = url;
+        job.serverId = serverId;
         return Option.some(job);
       }),
     findRunning: (resultId) =>
@@ -640,7 +640,11 @@ export const fakeAutomationStore = (
 // ServerStore
 // ---------------------------------------------------------------------------
 
-type RegisteredServer = { readonly url: string; readonly type: Servers.ServerType };
+type RegisteredServer = {
+  readonly id: string;
+  readonly url: string;
+  readonly type: Servers.ServerType;
+};
 type Heartbeat = {
   readonly url: string;
   readonly type: Servers.ServerType;
@@ -671,16 +675,19 @@ export const fakeServerStore = (
     addServer: (url, type) =>
       Effect.sync(() => {
         if (indexOf(url) === -1) {
-          servers.push({ url, type });
+          servers.push({ id: crypto.randomUUID(), url, type });
         }
       }),
     heartbeat: (url, type, stats) =>
       Effect.sync(() => {
         const index = indexOf(url);
         if (index === -1) {
-          servers.push({ url, type });
+          servers.push({ id: crypto.randomUUID(), url, type });
         } else {
-          servers[index] = { url, type };
+          const existing = servers[index];
+          if (existing !== undefined) {
+            servers[index] = { id: existing.id, url, type };
+          }
         }
         heartbeats.push({ url, type, stats });
       }),
@@ -704,7 +711,14 @@ export const fakeServerStore = (
           .filter(
             (server) => server.type === type && heartbeats.some((beat) => beat.url === server.url),
           )
-          .map((server) => server.url),
+          .map((server) => ({ id: server.id, url: server.url })),
+      ),
+    findServer: (id) =>
+      Effect.sync(() =>
+        Option.map(
+          Option.fromUndefinedOr(servers.find((server) => server.id === id)),
+          (server) => ({ id: server.id, url: server.url }),
+        ),
       ),
     routeSession: (sessionId, url) =>
       routes.has(sessionId)
@@ -728,6 +742,7 @@ export const fakeStores = () => {
   const automation = fakeAutomationStore();
   const debugLogs = fakeDebugLogStore();
   const diagnosis = fakeDiagnosisStore();
+  const servers = fakeServerStore();
   return {
     sessions,
     actions,
@@ -736,6 +751,7 @@ export const fakeStores = () => {
     automation,
     debugLogs,
     diagnosis,
+    servers,
     layer: Layer.mergeAll(
       sessions.layer,
       actions.layer,
@@ -744,6 +760,7 @@ export const fakeStores = () => {
       automation.layer,
       debugLogs.layer,
       diagnosis.layer,
+      servers.layer,
     ),
   };
 };
