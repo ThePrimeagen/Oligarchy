@@ -1094,13 +1094,13 @@ console.log([failed.test, failed.action, failed.reason, failed.createdAt instanc
     );
     // The ages are read against the database's clock: a minute has margin, seconds are counted.
     expect(html).toMatch(
-      /<tr><td>QUE-102<\/td><td>queue-order<\/td><td>diagnose<\/td><td>running<\/td><td>1 min ago<\/td><td>\d+ s ago<\/td><td>—<\/td><td><\/td><\/tr><tr><td>QUE-101<\/td><td>queue-order<\/td><td>drive<\/td><td>running<\/td><td>5 min ago<\/td><td>3 min ago<\/td><td>—<\/td><td><\/td><\/tr><\/table><h3>pending<\/h3>/,
+      /<tr><td>QUE-102<\/td><td>queue-order<\/td><td>diagnose<\/td><td>running<\/td><td>1 min ago<\/td><td>\d+ s ago<\/td><td>—<\/td><td><\/td><td><form method="post" action="\/abort" hx-post="\/abort" hx-confirm="are you sure\?" hx-target="#queue" hx-swap="innerHTML"><input type="hidden" name="ticket" value="QUE-102"\/><button type="submit" class="abort" aria-label="abort"><svg/,
     );
     expect(html).toMatch(
-      /<h3>pending<\/h3><table>.*?<tr><td>QUE-104<\/td><td>queue-order<\/td><td>diagnose<\/td><td>pending<\/td><td>\d+ s ago<\/td><td>—<\/td><td>—<\/td><td><\/td><\/tr><tr><td>QUE-103<\/td>.*?<tr><td>QUE-105<\/td>.*?<tr><td>—<\/td><td>queue-order<\/td><td>drive<\/td><td>pending<\/td>.*?<h3>completed<\/h3>/s,
+      /<h3>pending<\/h3><table>.*?<tr><td>QUE-104<\/td><td>queue-order<\/td><td>diagnose<\/td><td>pending<\/td><td>\d+ s ago<\/td><td>—<\/td><td>—<\/td><td><\/td><td><\/td><\/tr><tr><td>QUE-103<\/td>.*?<tr><td>QUE-105<\/td>.*?<tr><td>—<\/td><td>queue-order<\/td><td>drive<\/td><td>pending<\/td>.*?<h3>completed<\/h3>/s,
     );
     expect(html).toMatch(
-      /<h3>completed<\/h3><table>.*?<tr><td>QUE-107<\/td><td>queue-order<\/td><td>drive<\/td><td>failed<\/td><td>\d+ min ago<\/td><td>\d+ min ago<\/td><td>1 min ago<\/td><td>session timed out<\/td><\/tr><tr><td>QUE-108<\/td>.*?<tr><td>QUE-106<\/td>.*?<tr><td>QUE-109<\/td>/s,
+      /<h3>completed<\/h3><table>.*?<tr><td>QUE-107<\/td><td>queue-order<\/td><td>drive<\/td><td>failed<\/td><td>\d+ min ago<\/td><td>\d+ min ago<\/td><td>1 min ago<\/td><td>session timed out<\/td><td><\/td><\/tr><tr><td>QUE-108<\/td>.*?<tr><td>QUE-106<\/td>.*?<tr><td>QUE-109<\/td>/s,
     );
     expect(html.indexOf("<h2>automation</h2>")).toBeLessThan(html.indexOf("<h2>qemu servers</h2>"));
     expect(html).toContain('<div id="fleet" hx-get="/servers/fleet" hx-trigger="every 30s">');
@@ -1342,6 +1342,37 @@ describe.skipIf(dbUrl === "")("dashboard/query abortAutomationJob unhappy path",
 });
 
 describe("dashboard POST /abort happy path: the outbound call", () => {
+  it("posts a form ticket the same way the servers page abort button does", async () => {
+    const proxy = await StubProxy.startStubProxy(() => StubProxy.OK);
+    try {
+      const response = await app.request(
+        "/abort",
+        {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ ticket: "ABT-FORM" }).toString(),
+        },
+        {
+          HYPERDRIVE: { connectionString: REFUSED_URL },
+          OLIGARCHY_TOKEN: TOKEN,
+          AUTOMATION_SERVER_URL: proxy.url,
+        },
+      );
+      expect(response.status).toBe(303);
+      expect(response.headers.get("location")).toBe("/servers");
+      expect(proxy.requests).toEqual([
+        {
+          method: "POST",
+          url: "/abort",
+          authorization: `Bearer ${TOKEN}`,
+          body: { ticket: "ABT-FORM" },
+        },
+      ]);
+    } finally {
+      await proxy.close();
+    }
+  });
+
   it("posts the ticket with the bearer and answers 200 when the automation server does", async () => {
     const proxy = await StubProxy.startStubProxy(() => StubProxy.OK);
     try {
@@ -1407,6 +1438,27 @@ describe("dashboard POST /abort unhappy path: always 200", () => {
     } finally {
       await proxy.close();
     }
+  });
+
+  it("answers the queue error fragment when htmx asks and the database is unreachable", async () => {
+    const response = await app.request(
+      "/abort",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          "hx-request": "true",
+        },
+        body: "",
+      },
+      {
+        HYPERDRIVE: { connectionString: REFUSED_URL },
+        OLIGARCHY_TOKEN: TOKEN,
+        AUTOMATION_SERVER_URL: "http://127.0.0.1:1",
+      },
+    );
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("<p>error: internal error</p>");
   });
 
   it("answers 200 when the automation server is unreachable and the database is too", async () => {

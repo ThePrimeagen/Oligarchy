@@ -79,7 +79,13 @@ const QUEUE: AutomationQueue = { running: [running], pending: [pending], complet
 const EMPTY_QUEUE: AutomationQueue = { running: [], pending: [], completed: [] };
 
 const JOB_COLUMNS =
-  "<tr><th>ticket</th><th>test</th><th>action</th><th>status</th><th>queued</th><th>started</th><th>finished</th><th>reason</th></tr>";
+  "<tr><th>ticket</th><th>test</th><th>action</th><th>status</th><th>queued</th><th>started</th><th>finished</th><th>reason</th><th></th></tr>";
+
+const ABORT_X =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 2l8 8M10 2L2 10" stroke="red" stroke-width="2" fill="none"></path></svg>';
+
+const abortForm = (ticket: string): string =>
+  `<form method="post" action="/abort" hx-post="/abort" hx-confirm="are you sure?" hx-target="#queue" hx-swap="innerHTML"><input type="hidden" name="ticket" value="${ticket}"/><button type="submit" class="abort" aria-label="abort">${ABORT_X}</button></form>`;
 
 // The components are functions of their props; the string they render, through the same html
 // helper the routes serve them with, is the page. The helper hands back a String object, hence
@@ -172,21 +178,29 @@ describe("Queue happy path", () => {
   it("shows a running job's ticket, test, action and status, how long ago it was queued and started, and no finish yet", async () => {
     const page = await render(Queue({ queue: { ...EMPTY_QUEUE, running: [running] } }));
     expect(page).toContain(
-      "<tr><td>OLI-61</td><td>lock-screen</td><td>diagnose</td><td>running</td><td>3 min ago</td><td>45 s ago</td><td>—</td><td></td></tr>",
+      `<tr><td>OLI-61</td><td>lock-screen</td><td>diagnose</td><td>running</td><td>3 min ago</td><td>45 s ago</td><td>—</td><td></td><td>${abortForm("OLI-61")}</td></tr>`,
     );
+  });
+
+  it("puts a red X on a running job that has a ticket, and asks are you sure before it posts", async () => {
+    const page = await render(Queue({ queue: { ...EMPTY_QUEUE, running: [running] } }));
+    expect(page).toContain(abortForm("OLI-61"));
+    expect(page).toContain('hx-confirm="are you sure?"');
+    expect(page).toContain('stroke="red"');
+    expect(page).not.toContain(">abort</button>");
   });
 
   it("shows a pending job as queued and not yet started or finished", async () => {
     const page = await render(Queue({ queue: { ...EMPTY_QUEUE, pending: [pending] } }));
     expect(page).toContain(
-      "<tr><td>OLI-62</td><td>install</td><td>drive</td><td>pending</td><td>7 s ago</td><td>—</td><td>—</td><td></td></tr>",
+      "<tr><td>OLI-62</td><td>install</td><td>drive</td><td>pending</td><td>7 s ago</td><td>—</td><td>—</td><td></td><td></td></tr>",
     );
   });
 
   it("shows a completed job's terminal status, when it finished, and the reason it closed with", async () => {
     const page = await render(Queue({ queue: { ...EMPTY_QUEUE, completed: [failed] } }));
     expect(page).toContain(
-      "<tr><td>OLI-60</td><td>wifi</td><td>drive</td><td>failed</td><td>1 h ago</td><td>1 h ago</td><td>10 min ago</td><td>session timed out</td></tr>",
+      "<tr><td>OLI-60</td><td>wifi</td><td>drive</td><td>failed</td><td>1 h ago</td><td>1 h ago</td><td>10 min ago</td><td>session timed out</td><td></td></tr>",
     );
   });
 
@@ -212,6 +226,22 @@ describe("Queue unhappy path", () => {
     expect(page).toContain("<tr><td>—</td><td>install</td><td>drive</td><td>pending</td>");
   });
 
+  it("offers no abort on pending, completed, or a running job with no ticket", async () => {
+    const page = await render(
+      Queue({
+        queue: {
+          running: [{ ...running, ticket: null }],
+          pending: [pending],
+          completed: [failed],
+        },
+      }),
+    );
+    expect(page).not.toContain('action="/abort"');
+    expect(page).not.toContain('hx-confirm="are you sure?"');
+    expect(page).not.toContain('aria-label="abort"');
+    expect(page).not.toContain("<svg");
+  });
+
   it("escapes a ticket, a test name and a reason", async () => {
     const hostile: AutomationJob = {
       ...failed,
@@ -222,6 +252,11 @@ describe("Queue unhappy path", () => {
     const page = await render(Queue({ queue: { ...EMPTY_QUEUE, completed: [hostile] } }));
     expect(page).toContain("<td>OLI-&lt;1&quot;&gt;</td><td>&lt;b&gt;wifi&lt;/b&gt;</td>");
     expect(page).toContain("<td>&lt;script&gt;alert(1)&lt;/script&gt;</td>");
+    const runningHostile = await render(
+      Queue({ queue: { ...EMPTY_QUEUE, running: [{ ...running, ticket: 'OLI-<1">' }] } }),
+    );
+    expect(runningHostile).toContain('value="OLI-&lt;1&quot;&gt;"');
+    expect(runningHostile).not.toContain('value="OLI-<1">');
     expect(page).not.toContain("<script>alert");
     expect(page).not.toContain("<b>wifi");
   });
@@ -235,6 +270,7 @@ describe("ServersPage happy path", () => {
     expect(page).toContain("<title>oligarchy servers</title>");
     expect(page).toContain('<script src="https://cdn.jsdelivr.net/npm/htmx.org@4.0.0"');
     expect(page).toMatch(/<style>[^<]*\.halves\s*\{[^}]*grid-template-columns:\s*1fr 1fr/);
+    expect(page).toMatch(/<style>[^<]*\.abort\s*\{[^}]*background:\s*none/);
     expect(page).toContain("<h1>oligarchy servers</h1>");
     expect(page).toContain(
       '<div class="halves"><section><h2>automation</h2><div id="queue" hx-get="/servers/queue" hx-trigger="every 30s"><h3>running</h3>',

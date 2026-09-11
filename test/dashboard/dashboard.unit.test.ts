@@ -38,4 +38,18 @@ describe("POST /abort unhappy path", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: "true" });
   });
+
+  it("sends a form post without a ticket back to the servers page", async () => {
+    const response = await app.request(
+      "/abort",
+      {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: "",
+      },
+      env,
+    );
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe("/servers");
+  });
 });

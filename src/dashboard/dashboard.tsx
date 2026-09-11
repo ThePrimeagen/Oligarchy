@@ -943,51 +943,77 @@ app.post("/servers/delete", async (context) => {
 const ABORT_TIMEOUT_MS = 10_000;
 
 app.post("/abort", async (context) => {
-  try {
-    const body: unknown = await context.req.json();
-    const ticket =
-      typeof body === "object" &&
-      body !== null &&
-      "ticket" in body &&
-      typeof body.ticket === "string" &&
-      body.ticket !== ""
-        ? body.ticket
-        : undefined;
-    if (ticket === undefined) {
+  const wantsQueue = context.req.header("hx-request") === "true";
+  const isJson = (context.req.header("content-type") ?? "").includes("application/json");
+  const reply = async () => {
+    if (wantsQueue) {
+      try {
+        const queue = await listAutomationQueue(context.env.HYPERDRIVE.connectionString);
+        return context.html(<Queue queue={queue} />);
+      } catch (error) {
+        Sentry.captureException(error);
+        console.error("dashboard: aborting a job:", errorMessage(error));
+        return context.html(<p>error: internal error</p>);
+      }
+    }
+    if (isJson) {
       return context.json({ ok: "true" });
     }
-    try {
-      const response = await fetch(new URL("/abort", context.env.AUTOMATION_SERVER_URL), {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${context.env.OLIGARCHY_TOKEN}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({ ticket }),
-        signal: AbortSignal.timeout(ABORT_TIMEOUT_MS),
-      });
-      if (response.status === 200) {
-        return context.json({ ok: "true" });
-      }
-      console.error(
-        `dashboard: aborting a job: automation server returned ${String(response.status)}`,
-      );
-    } catch (error) {
-      console.error("dashboard: aborting a job:", errorMessage(error));
+    return context.redirect("/servers", 303);
+  };
+  try {
+    let ticket: string | undefined;
+    if (isJson) {
+      const body: unknown = await context.req.json();
+      ticket =
+        typeof body === "object" &&
+        body !== null &&
+        "ticket" in body &&
+        typeof body.ticket === "string" &&
+        body.ticket !== ""
+          ? body.ticket
+          : undefined;
+    } else {
+      const body = await context.req.parseBody();
+      ticket = typeof body.ticket === "string" && body.ticket !== "" ? body.ticket : undefined;
     }
-    try {
-      if (await abortAutomationJob(context.env.HYPERDRIVE.connectionString, ticket)) {
-        Sentry.captureException(new Error("Cloudflare aborted job"));
+    if (ticket !== undefined) {
+      let closedByServer = false;
+      try {
+        const response = await fetch(new URL("/abort", context.env.AUTOMATION_SERVER_URL), {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${context.env.OLIGARCHY_TOKEN}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ ticket }),
+          signal: AbortSignal.timeout(ABORT_TIMEOUT_MS),
+        });
+        closedByServer = response.status === 200;
+        if (!closedByServer) {
+          console.error(
+            `dashboard: aborting a job: automation server returned ${String(response.status)}`,
+          );
+        }
+      } catch (error) {
+        console.error("dashboard: aborting a job:", errorMessage(error));
       }
-    } catch (error) {
-      Sentry.captureException(error);
-      console.error("dashboard: aborting a job:", errorMessage(error));
+      if (!closedByServer) {
+        try {
+          if (await abortAutomationJob(context.env.HYPERDRIVE.connectionString, ticket)) {
+            Sentry.captureException(new Error("Cloudflare aborted job"));
+          }
+        } catch (error) {
+          Sentry.captureException(error);
+          console.error("dashboard: aborting a job:", errorMessage(error));
+        }
+      }
     }
   } catch (error) {
     Sentry.captureException(error);
     console.error("dashboard: aborting a job:", errorMessage(error));
   }
-  return context.json({ ok: "true" });
+  return reply();
 });
 
 export default Sentry.withSentry(

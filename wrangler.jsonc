@@ -21,5 +21,8 @@
   ],
   "placement": {
     "region": "aws:us-east-1"
+  },
+  "vars": {
+    "AUTOMATION_SERVER_URL": "https://oligarchy-automation.trm.sh"
   }
 }
