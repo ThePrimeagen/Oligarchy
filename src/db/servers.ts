@@ -29,21 +29,17 @@ export class ServerStore extends Context.Service<ServerStore>()("@oligarchy/db/S
       url: string,
       type: ServerType,
       stats: DbSchema.ServerStats,
-      jobs: number,
-      maxJobs: number,
     ) {
       const now = sql`now()`;
       yield* database.run("heartbeat", (db) =>
         db
           .insert(DbSchema.servers)
-          .values({ url, type, stats, jobs, maxJobs, generation: 1, heartbeatAt: now })
+          .values({ url, type, stats, generation: 1, heartbeatAt: now })
           .onConflictDoUpdate({
             target: DbSchema.servers.url,
             set: {
               type,
               stats,
-              jobs,
-              maxJobs,
               generation: sql`${DbSchema.servers.generation} + 1`,
               heartbeatAt: now,
             },

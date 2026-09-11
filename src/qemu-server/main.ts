@@ -64,7 +64,7 @@ const ServerLive = (
       );
       yield* Option.match(url, {
         onNone: () => Effect.void,
-        onSome: (announced) => Heartbeat.announce(announced, maxJobs),
+        onSome: (announced) => Heartbeat.announce(announced),
       });
     }),
   ).pipe(

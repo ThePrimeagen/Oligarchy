@@ -27,7 +27,6 @@ const detail = (error: unknown): string =>
 // goes. A delete that fails is one `unannounce failed` line; the process still exits.
 export const announce = (
   url: string,
-  maxJobs: number,
 ): Effect.Effect<void, never, Scope.Scope | Sessions.Sessions | Servers.ServerStore | Log.Log> =>
   Effect.gen(function* () {
     const sessions = yield* Sessions.Sessions;
@@ -36,17 +35,11 @@ export const announce = (
     const tick = sessions.stats.pipe(
       Effect.flatMap((stats) =>
         Effect.uninterruptible(
-          store.heartbeat(
-            url,
-            "qemu",
-            {
-              qemus: stats.qemus,
-              memory: { totalBytes: stats.memory.totalBytes, usedBytes: stats.memory.usedBytes },
-              cpu: { mean1m: stats.cpu.mean1m, mean2m: stats.cpu.mean2m, mean3m: stats.cpu.mean3m },
-            },
-            stats.qemus,
-            maxJobs,
-          ),
+          store.heartbeat(url, "qemu", {
+            qemus: stats.qemus,
+            memory: { totalBytes: stats.memory.totalBytes, usedBytes: stats.memory.usedBytes },
+            cpu: { mean1m: stats.cpu.mean1m, mean2m: stats.cpu.mean2m, mean3m: stats.cpu.mean3m },
+          }),
         ),
       ),
       Effect.catchCause((cause) => {
