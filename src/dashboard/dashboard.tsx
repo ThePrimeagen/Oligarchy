@@ -895,9 +895,9 @@ app.post("/servers/delete", async (context) => {
 });
 
 // POST /abort asks the automation server to stop the running job for a ticket. A 200 from
-// that server is the close; any other answer (or no answer) closes the running row here so
-// the queue does not stay stuck, and Sentry records "Cloudflare aborted job". This route
-// always answers 200: the operator's click is done either way.
+// that server is the close. A 4xx or 5xx, or no answer at all, closes a running row here
+// so the queue does not stay stuck; Sentry records "Cloudflare aborted job" only when
+// that write lands. This route always answers 200: the operator's click is done either way.
 app.post("/abort", async (context) => {
   try {
     const body: unknown = await context.req.json();
@@ -912,7 +912,6 @@ app.post("/abort", async (context) => {
     if (ticket === undefined) {
       return context.json({ ok: "true" });
     }
-    let closedByServer = false;
     try {
       const response = await fetch(new URL("/abort", context.env.AUTOMATION_SERVER_URL), {
         method: "POST",
@@ -922,23 +921,22 @@ app.post("/abort", async (context) => {
         },
         body: JSON.stringify({ ticket }),
       });
-      closedByServer = response.status === 200;
-      if (!closedByServer) {
-        console.error(
-          `dashboard: aborting a job: automation server returned ${String(response.status)}`,
-        );
+      if (response.status === 200) {
+        return context.json({ ok: "true" });
       }
+      console.error(
+        `dashboard: aborting a job: automation server returned ${String(response.status)}`,
+      );
     } catch (error) {
       console.error("dashboard: aborting a job:", errorMessage(error));
     }
-    if (!closedByServer) {
-      try {
-        await abortAutomationJob(context.env.HYPERDRIVE.connectionString, ticket);
-      } catch (error) {
-        Sentry.captureException(error);
-        console.error("dashboard: aborting a job:", errorMessage(error));
+    try {
+      if (await abortAutomationJob(context.env.HYPERDRIVE.connectionString, ticket)) {
+        Sentry.captureException(new Error("Cloudflare aborted job"));
       }
-      Sentry.captureException(new Error("Cloudflare aborted job"));
+    } catch (error) {
+      Sentry.captureException(error);
+      console.error("dashboard: aborting a job:", errorMessage(error));
     }
   } catch (error) {
     Sentry.captureException(error);
