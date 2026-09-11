@@ -16,6 +16,8 @@ const TICKET = "OLI-42";
 const RESULT_ID = "22222222-2222-4222-8222-222222222222";
 const RUN_ID = "11111111-1111-4111-8111-111111111111";
 const MODEL = "opencode/muse-spark-1.3-contributor-free";
+// One job at a time unless a test says otherwise.
+const JOBS = 1;
 const STATS = {
   qemus: 0,
   memory: { totalBytes: 1, usedBytes: 0 },
@@ -127,14 +129,30 @@ const start = (
   fixed: Harness,
   http: Layer.Layer<HttpClient.HttpClient>,
   fs?: Layer.Layer<FileSystem.FileSystem>,
+  jobs = JOBS,
 ) =>
   Effect.gen(function* () {
     const scope = yield* Scope.make();
-    yield* Worker.dispatch(MODEL).pipe(
+    yield* Worker.dispatch(MODEL, jobs).pipe(
       Effect.provide(layers(fixed, http, fs)),
       Scope.provide(scope),
     );
     return scope;
+  });
+
+// A client that holds every request until released, counting arrivals.
+const holding = (tests: Stores.FakeTestStore) =>
+  Effect.gen(function* () {
+    const release = yield* Deferred.make<void>();
+    const arrivals: Array<number> = [];
+    const http = FakeHttp.recordRequests(() =>
+      Effect.gen(function* () {
+        arrivals.push(arrivals.length + 1);
+        yield* Deferred.await(release);
+        return yield* closing(tests);
+      }),
+    );
+    return { release, arrivals, http };
   });
 
 const settle = (jobs: Array<{ status: string }>, status: string) =>
@@ -276,6 +294,110 @@ describe("dispatch happy path", () => {
       yield* Deferred.succeed(release, undefined);
       yield* settle(fixed.automation.jobs, "succeeded");
       expect(fixed.automation.jobs[0]?.status).toBe("succeeded");
+    }),
+  );
+});
+
+describe("dispatch capacity", () => {
+  it.effect("--jobs 2: two pending jobs are claimed and in flight at once", () =>
+    Effect.gen(function* () {
+      const fixed = harness();
+      seedResult(fixed.tests);
+      seedJob(fixed.automation, "drive");
+      seedJob(fixed.automation, "diagnose");
+      seedLiveClient(fixed.servers);
+      const held = yield* holding(fixed.tests);
+      yield* start(fixed, held.http.layer, undefined, 2);
+      yield* settle(fixed.automation.jobs, "running");
+      yield* TestClock.adjust("5 seconds");
+      for (let i = 0; i < 1_000 && held.arrivals.length < 2; i++) {
+        yield* Effect.yieldNow;
+      }
+      expect(fixed.automation.jobs.map((job) => job.status)).toEqual(["running", "running"]);
+      expect(held.arrivals).toHaveLength(2);
+      yield* Deferred.succeed(held.release, undefined);
+      for (
+        let i = 0;
+        i < 1_000 && !fixed.automation.jobs.every((job) => job.status === "succeeded");
+        i++
+      ) {
+        yield* Effect.yieldNow;
+      }
+      expect(fixed.automation.jobs.every((job) => job.status === "succeeded")).toBe(true);
+    }),
+  );
+
+  it.effect("--jobs 1: the second job stays pending while the first is in flight", () =>
+    Effect.gen(function* () {
+      const fixed = harness();
+      seedResult(fixed.tests);
+      seedJob(fixed.automation, "drive");
+      seedJob(fixed.automation, "diagnose");
+      seedLiveClient(fixed.servers);
+      const held = yield* holding(fixed.tests);
+      yield* start(fixed, held.http.layer, undefined, 1);
+      yield* settle(fixed.automation.jobs, "running");
+      yield* TestClock.adjust("5 seconds");
+      yield* TestClock.adjust("5 seconds");
+      expect(fixed.automation.jobs.map((job) => job.status)).toEqual(["running", "pending"]);
+      expect(held.arrivals).toHaveLength(1);
+      yield* Deferred.succeed(held.release, undefined);
+      yield* settle(fixed.automation.jobs, "succeeded");
+      yield* TestClock.adjust("5 seconds");
+      yield* settle(fixed.automation.jobs, "succeeded");
+      for (
+        let i = 0;
+        i < 1_000 && !fixed.automation.jobs.every((job) => job.status === "succeeded");
+        i++
+      ) {
+        yield* Effect.yieldNow;
+      }
+      expect(fixed.automation.jobs.every((job) => job.status === "succeeded")).toBe(true);
+      expect(held.arrivals).toHaveLength(2);
+    }),
+  );
+
+  it.effect("a failed job frees its slot for the next tick", () =>
+    Effect.gen(function* () {
+      const fixed = harness();
+      seedResult(fixed.tests);
+      seedJob(fixed.automation, "drive");
+      seedJob(fixed.automation, "diagnose");
+      seedLiveClient(fixed.servers);
+      let calls = 0;
+      const http = FakeHttp.recordRequests(() => {
+        calls += 1;
+        return calls === 1
+          ? FakeHttp.json({ error: "opencode exited 1" }, 500)
+          : FakeHttp.json({ ok: "true" });
+      });
+      yield* start(fixed, http.layer, undefined, 1);
+      yield* settle(fixed.automation.jobs, "failed");
+      yield* TestClock.adjust("5 seconds");
+      yield* settle(fixed.automation.jobs, "succeeded");
+      expect(fixed.automation.jobs.map((job) => job.status)).toEqual(["failed", "succeeded"]);
+    }),
+  );
+
+  it.effect("closing the scope aborts every job in flight, and each finish lands", () =>
+    Effect.gen(function* () {
+      const fixed = harness();
+      seedResult(fixed.tests);
+      seedJob(fixed.automation, "drive");
+      seedJob(fixed.automation, "diagnose");
+      seedLiveClient(fixed.servers);
+      const held = yield* holding(fixed.tests);
+      const scope = yield* start(fixed, held.http.layer, undefined, 2);
+      yield* TestClock.adjust("5 seconds");
+      for (let i = 0; i < 1_000 && held.arrivals.length < 2; i++) {
+        yield* Effect.yieldNow;
+      }
+      expect(held.arrivals).toHaveLength(2);
+      yield* Scope.close(scope, Exit.void);
+      expect(fixed.automation.jobs.map((job) => job.status)).toEqual(["aborted", "aborted"]);
+      expect(
+        fixed.automation.jobs.every((job) => job.reason === "automation server shutting down"),
+      ).toBe(true);
     }),
   );
 });

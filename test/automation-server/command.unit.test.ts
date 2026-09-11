@@ -45,14 +45,15 @@ const DEEPSEEK = "openrouter/deepseek/deepseek-v4.1-flash";
 
 // The server layer and the failure signal the command is built from.
 const fakeServer = () => {
-  const served: Array<{ readonly port: number; readonly model: string }> = [];
+  const served: Array<{ readonly port: number; readonly model: string; readonly jobs: number }> =
+    [];
   const listening = Deferred.makeUnsafe<void>();
   const serverFailed = Deferred.makeUnsafe<never, HttpServerError.ServeError>();
   const server: AutomationServerCommand.AutomationServer<never> = {
-    serve: (port, model) =>
+    serve: (port, model, jobs) =>
       Layer.effectDiscard(
         Effect.gen(function* () {
-          served.push({ port, model });
+          served.push({ port, model, jobs });
           yield* Deferred.succeed(listening, undefined);
         }),
       ),
@@ -104,23 +105,26 @@ describe("automation server command flags", () => {
       expect(stdout.join("\n")).toContain("automation-server");
       expect(stdout.join("\n")).toContain("--port");
       expect(stdout.join("\n")).toContain("--model");
+      expect(stdout.join("\n")).toContain("--jobs");
       expect(stdout.join("\n")).not.toContain("--diagnostics-port");
       expect(stdout.join("\n")).not.toContain("--display");
     }),
   );
 
-  it.effect("defaults to port 54321 and the free Muse model, pings the database, and listens", () =>
-    Effect.gen(function* () {
-      const fake = fakeServer();
-      const log = FakeLog.fakeLog();
-      const fiber = yield* Effect.forkChild(run(fake.server, [], log));
-      yield* Deferred.await(fake.listening);
-      yield* Fiber.interrupt(fiber);
-      const exit = yield* Fiber.await(fiber);
-      expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true);
-      expect(fake.served).toEqual([{ port: 54321, model: MUSE }]);
-      expect(log.lines).toEqual([]);
-    }),
+  it.effect(
+    "defaults to port 54321, the free Muse model and one job at a time, pings the database, and listens",
+    () =>
+      Effect.gen(function* () {
+        const fake = fakeServer();
+        const log = FakeLog.fakeLog();
+        const fiber = yield* Effect.forkChild(run(fake.server, [], log));
+        yield* Deferred.await(fake.listening);
+        yield* Fiber.interrupt(fiber);
+        const exit = yield* Fiber.await(fiber);
+        expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true);
+        expect(fake.served).toEqual([{ port: 54321, model: MUSE, jobs: 1 }]);
+        expect(log.lines).toEqual([]);
+      }),
   );
 
   it.effect("--port 1234 reaches the server as given", () =>
@@ -130,7 +134,7 @@ describe("automation server command flags", () => {
       const fiber = yield* Effect.forkChild(run(fake.server, ["--port", "1234"], log));
       yield* Deferred.await(fake.listening);
       yield* Fiber.interrupt(fiber);
-      expect(fake.served).toEqual([{ port: 1234, model: MUSE }]);
+      expect(fake.served).toEqual([{ port: 1234, model: MUSE, jobs: 1 }]);
     }),
   );
 
@@ -141,7 +145,30 @@ describe("automation server command flags", () => {
       const fiber = yield* Effect.forkChild(run(fake.server, ["--model", DEEPSEEK], log));
       yield* Deferred.await(fake.listening);
       yield* Fiber.interrupt(fiber);
-      expect(fake.served).toEqual([{ port: 54321, model: DEEPSEEK }]);
+      expect(fake.served).toEqual([{ port: 54321, model: DEEPSEEK, jobs: 1 }]);
+    }),
+  );
+
+  it.effect("--jobs 4 reaches the server as given", () =>
+    Effect.gen(function* () {
+      const fake = fakeServer();
+      const log = FakeLog.fakeLog();
+      const fiber = yield* Effect.forkChild(run(fake.server, ["--jobs", "4"], log));
+      yield* Deferred.await(fake.listening);
+      yield* Fiber.interrupt(fiber);
+      expect(fake.served).toEqual([{ port: 54321, model: MUSE, jobs: 4 }]);
+    }),
+  );
+
+  it.effect("--jobs 0 is a usage error naming the rule (unhappy)", () =>
+    Effect.gen(function* () {
+      const fake = fakeServer();
+      const log = FakeLog.fakeLog();
+      const error = yield* Effect.flip(run(fake.server, ["--jobs", "0"], log));
+      expect(error._tag).toBe("ShowHelp");
+      const stderr = yield* TestConsole.errorLines;
+      expect(stderr.join("\n")).toContain("jobs must be at least 1");
+      expect(fake.served).toEqual([]);
     }),
   );
 

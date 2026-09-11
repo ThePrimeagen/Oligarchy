@@ -1,4 +1,4 @@
-import { Cause, Effect, Option, Schedule, Schema } from "effect";
+import { Cause, Effect, Option, Ref, Schedule, Schema } from "effect";
 import * as Automation from "../db/automation.ts";
 import * as Servers from "../db/servers.ts";
 import * as Tests from "../db/tests.ts";
@@ -91,48 +91,53 @@ const logOutcome = Effect.fn("logOutcome")(function* (
   yield* log.error(`${job.action} failed; ${outcome.reason}`, attr);
 });
 
-// One job at a time, to the first live automation-client, every one run as `model`. A tick with
-// no live client does not claim. Claim is uninterruptible so a shutdown cannot leave a pending
-// row half-taken; the HTTP wait is restored so SIGTERM aborts an in-flight job; finish is
-// uninterruptible so the write lands. A tick that fails is one error line; the next tick runs.
-export const dispatch = Effect.fn("dispatch")(function* (model: string) {
+// Up to `jobs` at once, each to the first live automation-client, every one run as `model`. A
+// tick with no live client, or with every slot taken, does not claim. The claim is uninterruptible
+// so a shutdown cannot leave a pending row half-taken; the run is its own fiber in this scope, so
+// the next tick claims beside it; inside the run the HTTP wait is interruptible so SIGTERM aborts
+// a job in flight, and the finish is uninterruptible so the write lands. A tick that fails is one
+// error line; the next tick runs.
+export const dispatch = Effect.fn("dispatch")(function* (model: string, jobs: number) {
   const servers = yield* Servers.ServerStore;
   const store = yield* Automation.AutomationStore;
   const log = yield* Log.Log;
+  // The runs this loop has forked and not yet seen end.
+  const inFlight = yield* Ref.make(0);
+
+  const run = (job: Automation.AutomationJobRow, url: string) =>
+    Effect.uninterruptibleMask((restore) =>
+      restore(execute(job, url, model)).pipe(
+        Effect.matchCause({
+          onSuccess: (): Outcome => ({ status: "succeeded", reason: null }),
+          onFailure: outcomeFrom,
+        }),
+        Effect.flatMap((outcome) =>
+          Effect.gen(function* () {
+            const closed = yield* store.finish(job.id, outcome.status, outcome.reason);
+            if (!closed) {
+              return yield* Effect.die(new Error(`finishAutomationJob: ${job.id} was not running`));
+            }
+            return yield* logOutcome(job, outcome);
+          }),
+        ),
+      ),
+    ).pipe(Effect.ensuring(Ref.update(inFlight, (n) => n - 1)));
 
   const tick = Effect.fn("tick")(function* () {
+    if ((yield* Ref.get(inFlight)) >= jobs) {
+      return;
+    }
     const live = yield* servers.listLiveServers("automation-client");
     const url = live[0];
     if (url === undefined) {
       return;
     }
-    yield* Effect.uninterruptibleMask((restore) =>
-      store.claim().pipe(
-        Effect.flatMap((maybe) => {
-          if (Option.isNone(maybe)) {
-            return Effect.void;
-          }
-          const job = maybe.value;
-          return restore(execute(job, url, model)).pipe(
-            Effect.matchCause({
-              onSuccess: (): Outcome => ({ status: "succeeded", reason: null }),
-              onFailure: outcomeFrom,
-            }),
-            Effect.flatMap((outcome) =>
-              Effect.gen(function* () {
-                const closed = yield* store.finish(job.id, outcome.status, outcome.reason);
-                if (!closed) {
-                  return yield* Effect.die(
-                    new Error(`finishAutomationJob: ${job.id} was not running`),
-                  );
-                }
-                return yield* logOutcome(job, outcome);
-              }),
-            ),
-          );
-        }),
-      ),
-    );
+    const claimed = yield* Effect.uninterruptible(store.claim());
+    if (Option.isNone(claimed)) {
+      return;
+    }
+    yield* Ref.update(inFlight, (n) => n + 1);
+    yield* Effect.forkScoped(run(claimed.value, url));
   });
 
   yield* tick().pipe(

@@ -1,4 +1,4 @@
-import { Deferred, Effect, Layer } from "effect";
+import { Deferred, Effect, Layer, Schema } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import type { HttpServerError } from "effect/unstable/http";
 import * as Client from "../db/client.ts";
@@ -14,12 +14,19 @@ const DEFAULT_PORT = 54321;
 // The free contributor model: a server started without --model costs nothing to run.
 const DEFAULT_MODEL = "opencode/muse-spark-1.3-contributor-free";
 
-// What main.ts hands the command: the listener as a layer for its port and the model every job
-// runs as, and the signal a server error raises after listen.
+// One drive or diagnose at a time unless told otherwise.
+const DEFAULT_JOBS = 1;
+const Jobs = Schema.Number.check(
+  Schema.isGreaterThanOrEqualTo(1, { message: "jobs must be at least 1" }),
+);
+
+// What main.ts hands the command: the listener as a layer for its port, the model every job runs
+// as and how many run at once, and the signal a server error raises after listen.
 export type AutomationServer<RServe> = {
   readonly serve: (
     port: number,
     model: string,
+    jobs: number,
   ) => Layer.Layer<never, HttpServerError.ServeError, RServe>;
   readonly serverFailed: Deferred.Deferred<never, HttpServerError.ServeError>;
 };
@@ -45,8 +52,13 @@ export const makeAutomationServerCommand = <RServe>(server: AutomationServer<RSe
           "The OpenCode model every drive and diagnose runs as, provider/model; the agent records it on its result",
         ),
       ),
+      jobs: Flag.integer("jobs").pipe(
+        Flag.withSchema(Jobs),
+        Flag.withDefault(DEFAULT_JOBS),
+        Flag.withDescription("How many drives and diagnoses run at once"),
+      ),
     },
-    ({ port, model }) =>
+    ({ port, model, jobs }) =>
       Effect.gen(function* () {
         const log = yield* Log.Log;
         const database = yield* Client.Database;
@@ -62,7 +74,7 @@ export const makeAutomationServerCommand = <RServe>(server: AutomationServer<RSe
             ),
           );
           return yield* Effect.raceFirst(
-            Layer.launch(server.serve(port, model)),
+            Layer.launch(server.serve(port, model, jobs)),
             Deferred.await(server.serverFailed),
           );
         });

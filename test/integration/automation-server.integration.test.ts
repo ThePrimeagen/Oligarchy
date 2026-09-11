@@ -194,6 +194,17 @@ const seedResult = async (linearId: string): Promise<string> => {
   }
 };
 
+const removeJobs = async (resultId: string) => {
+  const client = new Client({ connectionString: Postgres.getDbUrl() });
+  await client.connect();
+  try {
+    const db = drizzle({ client, schema: DbSchema });
+    await db.delete(DbSchema.automationJobs).where(eq(DbSchema.automationJobs.resultId, resultId));
+  } finally {
+    await client.end();
+  }
+};
+
 const jobsFor = async (resultId: string) => {
   const client = new Client({ connectionString: Postgres.getDbUrl() });
   await client.connect();
@@ -217,6 +228,7 @@ describe("automation server startup refusals", () => {
       expect(process.stdout()).toContain("automation-server");
       expect(process.stdout()).toContain("--port");
       expect(process.stdout()).toContain("--model");
+      expect(process.stdout()).toContain("--jobs");
       expect(process.stdout()).not.toContain("--diagnostics-port");
       expect(process.stdout()).not.toContain("--display");
     }),
@@ -319,10 +331,11 @@ describeServing("automation server serving", () => {
     const process = spawnAutomationServer(["--port", String(port)]);
     const record = join(process.cwd, "automation-logs");
     const linearId = `OLI-${randomUUID().slice(0, 8)}`;
+    let resultId: string | undefined;
     try {
       await process.waitFor(/automation server listening/);
       expect(lines(process.stdout())).toContain(
-        `[automation] automation: automation server listening on 127.0.0.1:${String(port)}; running agents as opencode/muse-spark-1.3-contributor-free`,
+        `[automation] automation: automation server listening on 127.0.0.1:${String(port)}; running agents as opencode/muse-spark-1.3-contributor-free, 1 at a time`,
       );
       expect(existsSync(record)).toBe(false);
 
@@ -360,7 +373,7 @@ describeServing("automation server serving", () => {
       expect(await signed.json()).toEqual({ ok: "true" });
       expect(existsSync(record)).toBe(false);
 
-      const resultId = await seedResult(linearId);
+      resultId = await seedResult(linearId);
       const driveBody = JSON.stringify({
         action: "update",
         type: "Issue",
@@ -428,6 +441,11 @@ describeServing("automation server serving", () => {
     } finally {
       // A failed expectation must not leave the process listening past the test.
       process.child.kill(signal);
+      // The jobs this test queued stay pending in the shared database and would be the oldest rows
+      // the dispatch tests' servers claim first.
+      if (resultId !== undefined) {
+        await removeJobs(resultId);
+      }
     }
     const { code } = await process.exited;
     expect(code, process.stdout()).toBe(0);

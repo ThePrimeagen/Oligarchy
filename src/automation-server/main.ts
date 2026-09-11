@@ -39,16 +39,16 @@ server.on("error", (cause) => {
   Deferred.doneUnsafe(serverFailed, Exit.fail(new HttpServerError.ServeError({ cause })));
 });
 
-const ServerLive = (port: number, model: string) =>
+const ServerLive = (port: number, model: string, jobs: number) =>
   Layer.effectDiscard(
     Effect.gen(function* () {
       const log = yield* Log.Log;
       yield* log.acquireColor(Log.AutomationAgentId);
       yield* log.info(
-        `automation server listening on ${HOST}:${String(port)}; running agents as ${model}`,
+        `automation server listening on ${HOST}:${String(port)}; running agents as ${model}, ${String(jobs)} at a time`,
         automationAttr,
       );
-      yield* Worker.dispatch(model);
+      yield* Worker.dispatch(model, jobs);
     }),
   ).pipe(
     Layer.provide(
