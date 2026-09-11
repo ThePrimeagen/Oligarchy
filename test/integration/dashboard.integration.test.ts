@@ -347,6 +347,8 @@ const seedResults = async (
   outcomes: ReadonlyArray<{
     readonly status: (typeof testResults.$inferInsert)["status"];
     readonly model: string;
+    readonly createdAt?: Date;
+    readonly finishedAt?: Date;
   }>,
 ): Promise<ReadonlyArray<string>> => {
   const runs = await db
@@ -360,12 +362,18 @@ const seedResults = async (
     )
     .returning({ id: testRuns.id });
   await db.insert(testResults).values(
-    outcomes.map((outcome, index) => ({
-      runId: runs[index].id,
-      definitionId,
-      status: outcome.status,
-      model: outcome.model,
-    })),
+    outcomes.map((outcome, index) =>
+      Object.assign(
+        {
+          runId: runs[index].id,
+          definitionId,
+          status: outcome.status,
+          model: outcome.model,
+        },
+        outcome.createdAt === undefined ? undefined : { createdAt: outcome.createdAt },
+        outcome.finishedAt === undefined ? undefined : { finishedAt: outcome.finishedAt },
+      ),
+    ),
   );
   return runs.map((run) => run.id);
 };
@@ -406,21 +414,18 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
     expect(card).toContain('aria-label="v1: 2 succeeded, 1 failed"');
     expect(card).not.toContain("gemini-3.8:");
     expect(card).not.toContain("lock-screen");
-    // One wording so far, open. Every run that used it is listed under it, the pending one
-    // included, with its model and status.
+    // One wording so far, open. The pending run is not a passed or failed result, so it is
+    // not in either chart, and the page no longer lists individual runs.
     const [only, ...rest] = wordings(card);
     expect(rest).toEqual([]);
     expect(only).toMatchObject({ label: "v1", open: true });
+    expect(card).not.toContain('<table class="runs"');
     for (const runId of runIds) {
-      expect(only?.body).toContain(`<code>${runId}</code>`);
+      expect(card).not.toContain(`<code>${runId}</code>`);
     }
-    expect(only?.body).toContain("<td>gemini-3.8</td>");
-    expect(only?.body).toContain("<td>pending</td>");
   });
 
-  it("lines a name's wordings up newest first, the newest open, each with its own runs", async () => {
-    let olderRuns: ReadonlyArray<string> = [];
-    let newerRuns: ReadonlyArray<string> = [];
+  it("lines a name's wordings up newest first, the newest open, each with its own charts", async () => {
     await seed(dbUrl, async (db) => {
       const [older] = await db
         .insert(testDefinitions)
@@ -430,11 +435,11 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
         .insert(testDefinitions)
         .values({ name: "wide-versions", description: "d", instruction: "second", proof: "p" })
         .returning({ id: testDefinitions.id });
-      olderRuns = await seedResults(db, older.id, [
+      await seedResults(db, older.id, [
         { status: "passed", model: "grok-4.6" },
         { status: "failed", model: "grok-4.6" },
       ]);
-      newerRuns = await seedResults(db, newer.id, [{ status: "passed", model: "composer-2.5" }]);
+      await seedResults(db, newer.id, [{ status: "passed", model: "composer-2.5" }]);
     });
 
     const { status, html } = await getPage("/definitions?name=wide-versions", dbUrl);
@@ -444,7 +449,7 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
     expect(currentLinks(html)).toBe(1);
     const card = currentCard(html);
     expect(card).toContain("<h2>wide-versions</h2>");
-    // The version chart spans the name; each wording carries its own text, model chart and runs.
+    // The version chart spans the name; each wording carries its own text and charts.
     expect(card).toContain('aria-label="v1: 1 succeeded, 1 failed"');
     expect(card).toContain('aria-label="v2: 1 succeeded, 0 failed"');
     const [v2, v1, ...rest] = wordings(card);
@@ -455,22 +460,92 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
     expect(v2?.body).not.toContain("<p>first</p>");
     expect(v2?.body).toContain('aria-label="composer-2.5: 1 succeeded, 0 failed"');
     expect(v2?.body).not.toContain("grok-4.6:");
-    for (const runId of newerRuns) {
-      expect(v2?.body).toContain(`<code>${runId}</code>`);
-    }
-    for (const runId of olderRuns) {
-      expect(v2?.body).not.toContain(runId);
-    }
     expect(v1?.body).toContain("<p>first</p>");
     expect(v1?.body).not.toContain("<p>second</p>");
     expect(v1?.body).toContain('aria-label="grok-4.6: 1 succeeded, 1 failed"');
     expect(v1?.body).not.toContain("composer-2.5:");
-    for (const runId of olderRuns) {
-      expect(v1?.body).toContain(`<code>${runId}</code>`);
-    }
-    for (const runId of newerRuns) {
-      expect(v1?.body).not.toContain(runId);
-    }
+    expect(card).not.toContain('<table class="runs"');
+  });
+
+  it("keeps only the current wording and the one before it, even when a name has more", async () => {
+    await seed(dbUrl, async (db) => {
+      const [oldest] = await db
+        .insert(testDefinitions)
+        .values({ name: "wide-three", description: "d", instruction: "first", proof: "p" })
+        .returning({ id: testDefinitions.id });
+      const [middle] = await db
+        .insert(testDefinitions)
+        .values({ name: "wide-three", description: "d", instruction: "second", proof: "p" })
+        .returning({ id: testDefinitions.id });
+      const [newest] = await db
+        .insert(testDefinitions)
+        .values({ name: "wide-three", description: "d", instruction: "third", proof: "p" })
+        .returning({ id: testDefinitions.id });
+      await seedResults(db, oldest.id, [{ status: "passed", model: "grok-4.6" }]);
+      await seedResults(db, middle.id, [{ status: "failed", model: "grok-4.6" }]);
+      await seedResults(db, newest.id, [{ status: "passed", model: "composer-2.5" }]);
+    });
+    const { status, html } = await getPage("/definitions?name=wide-three", dbUrl);
+    expect(status).toBe(200);
+    const card = currentCard(html);
+    expect(wordings(card).map((wording) => wording.label)).toEqual(["v3", "v2"]);
+    expect(card).toContain("<p>third</p>");
+    expect(card).toContain("<p>second</p>");
+    expect(card).not.toContain("<p>first</p>");
+    expect(card).toContain('aria-label="v2: 0 succeeded, 1 failed"');
+    expect(card).toContain('aria-label="v3: 1 succeeded, 0 failed"');
+    expect(card).not.toContain('aria-label="v1:');
+  });
+
+  it("charts the last timed runs by duration, shortest first, with percentiles under each chart", async () => {
+    await seed(dbUrl, async (db) => {
+      const [definition] = await db
+        .insert(testDefinitions)
+        .values({ name: "wide-duration", description: "d", instruction: "i", proof: "p" })
+        .returning({ id: testDefinitions.id });
+      await seedResults(db, definition.id, [
+        {
+          status: "failed",
+          model: "grok-4.6",
+          createdAt: new Date("2026-09-01T00:00:00Z"),
+          finishedAt: new Date("2026-09-01T00:04:00Z"),
+        },
+        {
+          status: "passed",
+          model: "grok-4.6",
+          createdAt: new Date("2026-09-01T00:10:00Z"),
+          finishedAt: new Date("2026-09-01T00:11:00Z"),
+        },
+        {
+          status: "passed",
+          model: "composer-2.5",
+          createdAt: new Date("2026-09-01T00:20:00Z"),
+          finishedAt: new Date("2026-09-01T00:22:00Z"),
+        },
+      ]);
+    });
+    const { status, html } = await getPage("/definitions?name=wide-duration", dbUrl);
+    expect(status).toBe(200);
+    const card = currentCard(html);
+    expect(card).toContain("Last 50 runs by duration");
+    expect(card).toContain('aria-label="succeeded in 1 min"');
+    expect(card).toContain('aria-label="succeeded in 2 min"');
+    expect(card).toContain('aria-label="failed in 4 min"');
+    const firstBar = card.indexOf('aria-label="succeeded in 1 min"');
+    const secondBar = card.indexOf('aria-label="succeeded in 2 min"');
+    const thirdBar = card.indexOf('aria-label="failed in 4 min"');
+    expect(firstBar).toBeGreaterThan(-1);
+    expect(firstBar).toBeLessThan(secondBar);
+    expect(secondBar).toBeLessThan(thirdBar);
+    expect(card).toContain("10%");
+    expect(card).toContain("25%");
+    expect(card).toContain("median");
+    expect(card).toContain("75%");
+    expect(card).toContain("90%");
+    expect(card).toContain("99%");
+    expect(card).toContain("1 min");
+    expect(card).toContain("2 min");
+    expect(card).toContain("4 min");
   });
 
   it("shows the newest wording in a form, the name fixed, its update button handed over disabled", async () => {
@@ -512,8 +587,10 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
     const card = currentCard(html);
     expect(card).toContain("<h2>wide-unrun</h2>");
     expect(card).toContain("No passed or failed results yet.");
-    expect(card).toContain("No runs yet.");
+    expect(card).toContain("No timed passed or failed results yet.");
     expect(card).not.toContain('class="result-chart__bar"');
+    expect(card).not.toContain('<table class="runs"');
+    expect(card).not.toContain("No runs yet.");
   });
 });
 
@@ -551,7 +628,7 @@ describe.skipIf(dbUrl === "")("dashboard/definitions edit happy path", () => {
     const [newest] = wordings(card);
     expect(newest).toMatchObject({ label: "v3", open: true });
     expect(newest?.body).toContain("<p>third\nand more</p>");
-    expect(wordings(card).map((wording) => wording.label)).toEqual(["v3", "v2", "v1"]);
+    expect(wordings(card).map((wording) => wording.label)).toEqual(["v3", "v2"]);
     expect(editForm(card)).toMatchObject({
       fields: { instruction: "third\nand more" },
       button: "Update",
