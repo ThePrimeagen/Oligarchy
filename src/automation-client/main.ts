@@ -58,6 +58,7 @@ const ServerLive = (port: number, url: Option.Option<string>, maxJobs: number) =
       }).pipe(Layer.provide(NodeHttpServer.layer(() => server, { host: HOST, port }))),
     ),
     Layer.provide(Sessions.Sessions.layer),
+    Layer.provide(Layer.succeed(Sessions.MaxJobs)(maxJobs)),
     Layer.provide(Stats.Stats.layer),
     Layer.provide(Layer.succeed(HttpMiddleware.TracerDisabledWhen)(() => true)),
   );

@@ -41,6 +41,7 @@ const isApiError: (value: unknown) => value is Errors.ApiError = Schema.is(
     Errors.Internal,
     Errors.ServerFailed,
     Errors.NoServer,
+    Errors.AtCapacity,
     Errors.RunFailed,
   ]),
 );
@@ -63,6 +64,7 @@ const attribution = (error: Errors.ApiError, fallback: Log.ProcessAttribution): 
     case "Unauthorized":
     case "NotFound":
     case "RunFailed":
+    case "AtCapacity":
       return fallback;
     case "Forbidden":
       return { location: error.sessionId, agentId: error.agentId };
@@ -111,8 +113,9 @@ const detail = (error: Errors.ApiError): string =>
     : error.message;
 
 // A refusal (< 500) is the caller's problem and skips Sentry; a failure carries its cause there.
+// AtCapacity is 503 (try later) but is still a refusal of work, not a defect.
 const report = (error: Errors.ApiError, fallback: Log.ProcessAttribution): Log.Report =>
-  Errors.apiStatus(error) < 500
+  error._tag === "AtCapacity" || Errors.apiStatus(error) < 500
     ? { ...attribution(error, fallback), skipSentry: true }
     : {
         ...attribution(error, fallback),

@@ -77,7 +77,7 @@ export type SessionsService = {
     body: Contract.StartBody,
     display: Domain.QemuDisplay,
     automation: boolean,
-  ) => Effect.Effect<string, Errors.StartFailed | Errors.Internal>;
+  ) => Effect.Effect<string, Errors.StartFailed | Errors.AtCapacity | Errors.Internal>;
   // Resets lastCommandAt before returning: a valid request counts as activity.
   readonly lookup: (
     id: string,
@@ -133,6 +133,10 @@ export const Shutdown = Context.Reference<Shutdown>("@oligarchy/qemu-server/sess
     reason: MutableRef.make(SHUTDOWN_REASON),
     failed: MutableRef.make(false),
   }),
+});
+
+export const MaxJobs = Context.Reference<number>("@oligarchy/qemu-server/sessions/MaxJobs", {
+  defaultValue: () => 1,
 });
 
 const isDatabaseError = Schema.is(Errors.DatabaseError);
@@ -194,6 +198,7 @@ const make = Effect.gen(function* () {
   const log = yield* Log.Log;
   const fs = yield* FileSystem.FileSystem;
   const shutdown = yield* Shutdown;
+  const maxJobs = yield* MaxJobs;
 
   // Running machines, by id; and every session this qemu server holds, booting ones included.
   const sessions = yield* Ref.make<ReadonlyMap<string, LiveSession>>(new Map());
@@ -424,6 +429,9 @@ const make = Effect.gen(function* () {
     display: Domain.QemuDisplay,
     automation: boolean,
   ) {
+    if ((yield* Ref.get(openSessions)).size >= maxJobs) {
+      return yield* Errors.AtCapacity.make({});
+    }
     const started = yield* Clock.currentTimeMillis;
     const id: string = crypto.randomUUID();
     const agent = body.agent;
@@ -439,7 +447,15 @@ const make = Effect.gen(function* () {
       actionSeq: yield* Ref.make(0),
       actionSpans: yield* Ref.make<ReadonlySet<Tracer.Span>>(new Set()),
     };
-    yield* Ref.update(openSessions, (map) => mapWith(map, id, live));
+    const reserved = yield* Ref.modify(openSessions, (map) =>
+      map.size >= maxJobs ? ([false, map] as const) : ([true, mapWith(map, id, live)] as const),
+    );
+    if (!reserved) {
+      // Never entered the map: drop the unused scope and span rather than finish a session.
+      yield* Scope.close(live.scope, Exit.void);
+      yield* Sentry.endSessionSpan(live.span, "aborted");
+      return yield* Errors.AtCapacity.make({});
+    }
     yield* log.acquireColor(agent);
     const disk = body.disk;
     yield* sessionStore

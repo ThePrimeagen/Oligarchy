@@ -4,6 +4,10 @@ import * as Cli from "../cli.ts";
 import * as Errors from "../shared/errors.ts";
 import * as OpenCode from "./opencode.ts";
 
+export const MaxJobs = Context.Reference<number>("@oligarchy/automation-client/sessions/MaxJobs", {
+  defaultValue: () => 1,
+});
+
 const mapWith = <V>(map: ReadonlyMap<string, V>, key: string, value: V): ReadonlyMap<string, V> =>
   new Map([...map, [key, value]]);
 
@@ -18,18 +22,37 @@ const make = Effect.gen(function* () {
     new Map(),
   );
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const maxJobs = yield* MaxJobs;
 
   const run = Effect.fn("Sessions.run")(function* (ticket: string, prompt: string) {
     return yield* Effect.scoped(
       Effect.gen(function* () {
+        const current = yield* Ref.get(running);
+        if (!current.has(ticket) && current.size >= maxJobs) {
+          return yield* Errors.AtCapacity.make({});
+        }
         const handle = yield* Cli.spawn(OpenCode.BIN, OpenCode.args(prompt));
-        const claimed = yield* Ref.modify(running, (map) =>
-          map.has(ticket)
-            ? ([false, map] as const)
-            : ([true, mapWith(map, ticket, handle)] as const),
-        );
-        if (!claimed) {
+        const claimed = yield* Ref.modify(running, (map) => {
+          if (map.has(ticket)) {
+            return ["duplicate", map] as const;
+          }
+          if (map.size >= maxJobs) {
+            return ["full", map] as const;
+          }
+          return ["ok", mapWith(map, ticket, handle)] as const;
+        });
+        if (claimed === "duplicate") {
           return yield* Effect.die(`ticket "${ticket}" is already running`);
+        }
+        if (claimed === "full") {
+          // The slot was never taken; a child already gone is fine.
+          yield* handle
+            .kill({
+              killSignal: "SIGTERM",
+              forceKillAfter: Cli.FORCE_KILL_AFTER,
+            })
+            .pipe(Effect.catch(() => Effect.void));
+          return yield* Errors.AtCapacity.make({});
         }
         yield* Effect.addFinalizer(() =>
           Ref.update(running, (map) =>
@@ -39,7 +62,11 @@ const make = Effect.gen(function* () {
         return yield* Cli.awaitExit(OpenCode.BIN, handle);
       }),
     ).pipe(
-      Effect.mapError((error) => Errors.RunFailed.make({ message: error.message, cause: error })),
+      Effect.catch((error) =>
+        error._tag === "AtCapacity"
+          ? Effect.fail(error)
+          : Effect.fail(Errors.RunFailed.make({ message: error.message, cause: error })),
+      ),
       Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
     );
   });

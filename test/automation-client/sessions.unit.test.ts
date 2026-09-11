@@ -10,8 +10,11 @@ import * as FakeSpawner from "../support/fake-spawner.ts";
 const TICKET = "OLI-42";
 const OTHER = "OLI-99";
 
-const layer = (spawner: FakeSpawner.FakeSpawner) =>
-  Sessions.Sessions.layer.pipe(Layer.provide(spawner.layer));
+const layer = (spawner: FakeSpawner.FakeSpawner, maxJobs = 8) =>
+  Sessions.Sessions.layer.pipe(
+    Layer.provide(spawner.layer),
+    Layer.provide(Layer.succeed(Sessions.MaxJobs)(maxJobs)),
+  );
 
 describe("Sessions.jobs happy path", () => {
   it.effect(
@@ -62,6 +65,35 @@ describe("Sessions.run happy path", () => {
       ]);
     }).pipe(Effect.provide(layer(spawner)));
   });
+
+  it.effect("runs as many tickets as max-jobs allows", () => {
+    const spawner = FakeSpawner.fakeSpawner(() => ({}));
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions.Sessions;
+      const first = yield* Effect.forkChild(sessions.run(TICKET, "first"));
+      const second = yield* Effect.forkChild(sessions.run(OTHER, "second"));
+      for (let i = 0; i < 100 && spawner.spawned.length < 2; i++) {
+        yield* Effect.yieldNow;
+      }
+      expect(spawner.spawned).toHaveLength(2);
+      expect(yield* sessions.jobs).toBe(2);
+      yield* spawner.spawned[0]?.exit(0) ?? Effect.void;
+      yield* spawner.spawned[1]?.exit(0) ?? Effect.void;
+      yield* Fiber.join(first);
+      yield* Fiber.join(second);
+      expect(yield* sessions.jobs).toBe(0);
+    }).pipe(Effect.provide(layer(spawner, 2)));
+  });
+
+  it.effect("a finished run frees the slot for the next ticket", () => {
+    const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions.Sessions;
+      yield* sessions.run(TICKET, "first");
+      yield* sessions.run(OTHER, "second");
+      expect(spawner.spawned).toHaveLength(2);
+    }).pipe(Effect.provide(layer(spawner, 1)));
+  });
 });
 
 describe("Sessions.run unhappy path", () => {
@@ -88,6 +120,27 @@ describe("Sessions.run unhappy path", () => {
       expect(error._tag).toBe("RunFailed");
       expect(error.message).toBe("out of token credits");
     }).pipe(Effect.provide(layer(spawner)));
+  });
+
+  it.effect("a run at capacity is AtCapacity and never spawns another opencode", () => {
+    const spawner = FakeSpawner.fakeSpawner(() => ({}));
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions.Sessions;
+      const running = yield* Effect.forkChild(sessions.run(TICKET, "first"));
+      for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
+        yield* Effect.yieldNow;
+      }
+      expect(spawner.spawned).toHaveLength(1);
+      const error = yield* Effect.flip(sessions.run(OTHER, "second"));
+      expect(error).toMatchObject({
+        _tag: "AtCapacity",
+        message: "at capacity; try later",
+      });
+      expect(spawner.spawned).toHaveLength(1);
+      expect(yield* sessions.jobs).toBe(1);
+      yield* spawner.spawned[0]?.exit(0) ?? Effect.void;
+      yield* Fiber.join(running);
+    }).pipe(Effect.provide(layer(spawner, 1)));
   });
 });
 
