@@ -391,7 +391,7 @@ const editHref = (name: string, notice: EditNotice): string =>
 // the next version, then the current wording and the one before it, newest first, the newest
 // open, each with its text and its charts. The name is what the wordings collapse under, so it
 // is not a field.
-const DefinitionCard: FC<{
+export const DefinitionCard: FC<{
   group: DefinitionVersions;
   outcomes: ReadonlyArray<TestResultOutcome>;
   notice: EditNotice | undefined;
