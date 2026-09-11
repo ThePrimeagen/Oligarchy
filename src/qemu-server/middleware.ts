@@ -9,9 +9,11 @@ import * as Api from "../shared/api.ts";
 import * as Domain from "../shared/domain.ts";
 import * as Errors from "../shared/errors.ts";
 
-// Every qemu server and qemu reverse proxy route carries `Authorization: Bearer <OLIGARCHY_TOKEN>`; the
-// compare is exact, as it always was. The token comes in as a value: those servers read it from
-// ProxyConfig beside their database url. The automation server does not use this bearer.
+// Every qemu server, qemu reverse proxy, automation-client, and automation-server /abort
+// route carries `Authorization: Bearer <OLIGARCHY_TOKEN>`; the compare is exact, as it
+// always was. The token comes in as a value: qemu servers read it from ProxyConfig; the
+// automation server reads it from OligarchyToken. /linear does not use this bearer —
+// Linear signs the body.
 export const bearerAuth = (token: Redacted.Redacted): Layer.Layer<Api.BearerAuth> =>
   Layer.succeed(Api.BearerAuth)(
     Api.BearerAuth.of({

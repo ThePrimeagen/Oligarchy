@@ -235,20 +235,25 @@ describe("QemuReverseProxyApi", () => {
 describe("AutomationServerApi", () => {
   const automation = Api.AutomationServerApi;
 
-  it("declares POST /linear and nothing else", () => {
+  it("declares POST /linear and POST /abort", () => {
     const table = routes(automation).map(({ method, path }) => `${method} ${path}`);
-    expect(table).toEqual(["POST /linear"]);
+    expect(table.sort()).toEqual(["POST /abort", "POST /linear"]);
     expect(HttpApiClient.urlBuilder(automation).Linear.linear()).toBe("/linear");
+    expect(HttpApiClient.urlBuilder(automation).Abort.abort()).toBe("/abort");
   });
 
-  it("applies ApiBoundary and no bearer", () => {
+  it("keeps /linear unsigned and requires the bearer on /abort", () => {
     const spec = OpenApi.fromApi(automation);
-    expect(spec.components.securitySchemes).toEqual({});
     const linear = byIdentifier(automation, "linear");
     expect(linear.group).toBe("Linear");
     expect(linear.middleware).toEqual([Api.ApiBoundary.key]);
     expect(spec.paths["/linear"]?.post?.security).toEqual([]);
     expect(linear.errors).toEqual([400, 401, 500]);
+    const abort = byIdentifier(automation, "abort");
+    expect(abort.group).toBe("Abort");
+    expect(abort.middleware).toEqual([Api.BearerAuth.key, Api.ApiBoundary.key]);
+    expect(spec.paths["/abort"]?.post?.security).toEqual([{ bearer: [] }]);
+    expect(abort.errors).toEqual([400, 401, 404, 500]);
   });
 
   it("is its own api: neither the qemu server nor the qemu reverse proxy answers /linear", () => {
@@ -281,11 +286,12 @@ describe("AutomationClientApi", () => {
     expect(abort.errors).toEqual([400, 401, 404, 500]);
   });
 
-  it("is its own api: no other process answers /run or /abort", () => {
-    for (const path of ["/run", "/abort"]) {
-      expect(routes(Api.QemuServerApi).map(({ path: route }) => route)).not.toContain(path);
-      expect(routes(Api.QemuReverseProxyApi).map(({ path: route }) => route)).not.toContain(path);
-      expect(routes(Api.AutomationServerApi).map(({ path: route }) => route)).not.toContain(path);
-    }
+  it("is its own api: no other process answers /run; /abort is the client and the automation server", () => {
+    expect(routes(Api.QemuServerApi).map(({ path }) => path)).not.toContain("/run");
+    expect(routes(Api.QemuReverseProxyApi).map(({ path }) => path)).not.toContain("/run");
+    expect(routes(Api.AutomationServerApi).map(({ path }) => path)).not.toContain("/run");
+    expect(routes(Api.QemuServerApi).map(({ path }) => path)).not.toContain("/abort");
+    expect(routes(Api.QemuReverseProxyApi).map(({ path }) => path)).not.toContain("/abort");
+    expect(routes(Api.AutomationServerApi).map(({ path }) => path)).toContain("/abort");
   });
 });

@@ -85,7 +85,7 @@ export const dispatch = Effect.fn("dispatch")(function* () {
       return;
     }
     yield* Effect.uninterruptibleMask((restore) =>
-      store.claim().pipe(
+      store.claim(url).pipe(
         Effect.flatMap((maybe) => {
           if (Option.isNone(maybe)) {
             return Effect.void;
@@ -100,9 +100,8 @@ export const dispatch = Effect.fn("dispatch")(function* () {
               Effect.gen(function* () {
                 const closed = yield* store.finish(job.id, outcome.status, outcome.reason);
                 if (!closed) {
-                  return yield* Effect.die(
-                    new Error(`finishAutomationJob: ${job.id} was not running`),
-                  );
+                  // abort may have closed the row first
+                  return;
                 }
                 return yield* logOutcome(job, outcome);
               }),

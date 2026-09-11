@@ -319,6 +319,8 @@ export const testResults = pgTable(
 // pending; a worker claims the oldest pending row, runs it, and closes with a terminal
 // status. (result_id, action) is unique — one drive and one diagnose per result for now.
 // Queue order is created_at among pending rows; capacity limits stay out of this table.
+// client_url is the automation-client that claimed the job, so /abort can find it after
+// a restart; null while the row is pending.
 export const automationJobs = pgTable(
   "automation_jobs",
   {
@@ -329,6 +331,7 @@ export const automationJobs = pgTable(
     action: automationAction("action").notNull(),
     status: automationJobStatus("status").notNull().default("pending"),
     reason: text("reason"),
+    clientUrl: text("client_url"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     startedAt: timestamp("started_at", { withTimezone: true }),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
