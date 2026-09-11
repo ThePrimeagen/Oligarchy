@@ -1219,8 +1219,8 @@ Postgres.describeWithDatabase("database", () => {
           yield* automation.enqueue({ resultId: resultIds[3], action: "diagnose" });
           yield* automation.enqueue({ resultId: resultIds[4], action: "drive" });
           yield* automation.enqueue({ resultId: resultIds[5], action: "diagnose" });
-          expect(Option.isSome(yield* automation.claim())).toBe(true);
-          expect(Option.isSome(yield* automation.claim())).toBe(true);
+          expect(Option.isSome(yield* automation.claim("http://127.0.0.1:55333"))).toBe(true);
+          expect(Option.isSome(yield* automation.claim("http://127.0.0.1:55334"))).toBe(true);
           yield* automation.finish(completedDrive.id, "succeeded", null);
           yield* automation.finish(completedDiagnose.id, "failed", "nope");
           yield* database.run("stamp", (db) =>
@@ -1228,8 +1228,8 @@ Postgres.describeWithDatabase("database", () => {
               sql`update automation_jobs set finished_at = now() - interval '2 minutes' where id = ${completedDrive.id}`,
             ),
           );
-          expect(Option.isSome(yield* automation.claim())).toBe(true);
-          expect(Option.isSome(yield* automation.claim())).toBe(true);
+          expect(Option.isSome(yield* automation.claim("http://127.0.0.1:55335"))).toBe(true);
+          expect(Option.isSome(yield* automation.claim("http://127.0.0.1:55336"))).toBe(true);
           const listed = yield* automation.listJobs(1);
           expect(listed.running.map((job) => [job.ticket, job.action, job.status])).toEqual([
             ["LST-104", "diagnose", "running"],
