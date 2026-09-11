@@ -20,6 +20,10 @@ type TestBasePromptRow = typeof DbSchema.testBasePrompts.$inferSelect;
 type TestRunRow = typeof DbSchema.testRuns.$inferSelect;
 type TestResultRow = typeof DbSchema.testResults.$inferSelect;
 type AutomationJobRow = typeof DbSchema.automationJobs.$inferSelect;
+type FakeAutomationJob = AutomationJobRow & {
+  readonly ticket?: string | null;
+  readonly test?: string;
+};
 
 const sameId = (left: string, right: string): boolean => left.toLowerCase() === right.toLowerCase();
 
@@ -514,7 +518,7 @@ export const fakeTestStore = (
 // ---------------------------------------------------------------------------
 
 export type FakeAutomationStore = {
-  readonly jobs: Array<AutomationJobRow>;
+  readonly jobs: Array<FakeAutomationJob>;
   readonly layer: Layer.Layer<Automation.AutomationStore>;
 };
 
@@ -522,7 +526,7 @@ export type FakeAutomationStore = {
 export const fakeAutomationStore = (
   overrides: Partial<typeof Automation.AutomationStore.Service> = {},
 ): FakeAutomationStore => {
-  const jobs: Array<AutomationJobRow> = [];
+  const jobs: Array<FakeAutomationJob> = [];
   let nextId = 1;
   const service = Automation.AutomationStore.of({
     enqueue: (input) =>
@@ -534,7 +538,7 @@ export const fakeAutomationStore = (
             conflict("enqueueAutomationJob", 'insert into "automation_jobs"'),
           );
         }
-        const row: AutomationJobRow = {
+        const row: FakeAutomationJob = {
           id: `00000000-0000-4000-8000-${String(nextId++).padStart(12, "0")}`,
           resultId: input.resultId,
           action: input.action,
@@ -576,6 +580,48 @@ export const fakeAutomationStore = (
           job.reason = reason;
         }
         return true;
+      }),
+    listJobs: (count) =>
+      Effect.sync(() => {
+        const listed = (job: FakeAutomationJob): Automation.AutomationJobListRow => ({
+          ticket: job.ticket ?? null,
+          test: job.test ?? "",
+          action: job.action,
+          status: job.status,
+          createdAt: job.createdAt,
+          startedAt: job.startedAt,
+          finishedAt: job.finishedAt,
+        });
+        const diagnoseFirst = (left: FakeAutomationJob, right: FakeAutomationJob) => {
+          if (left.action !== right.action) {
+            return left.action === "diagnose" ? -1 : 1;
+          }
+          const byTime = left.createdAt.getTime() - right.createdAt.getTime();
+          return byTime !== 0 ? byTime : left.id.localeCompare(right.id);
+        };
+        const running = jobs
+          .filter((job) => job.status === "running")
+          .sort(diagnoseFirst)
+          .map(listed);
+        const pending = jobs
+          .filter((job) => job.status === "pending")
+          .sort(diagnoseFirst)
+          .map(listed);
+        const completed = jobs
+          .filter(
+            (job) =>
+              job.status === "succeeded" ||
+              job.status === "failed" ||
+              job.status === "aborted" ||
+              job.status === "timed_out",
+          )
+          .sort((left, right) => {
+            const byTime = (right.finishedAt?.getTime() ?? 0) - (left.finishedAt?.getTime() ?? 0);
+            return byTime !== 0 ? byTime : right.id.localeCompare(left.id);
+          })
+          .slice(0, count)
+          .map(listed);
+        return { running, pending, completed };
       }),
     ...overrides,
   });

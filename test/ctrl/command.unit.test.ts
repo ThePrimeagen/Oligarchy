@@ -1232,6 +1232,164 @@ describe("session list", () => {
 });
 
 // ---------------------------------------------------------------------------
+// automation --list
+// ---------------------------------------------------------------------------
+
+type AutomationJobRow = typeof DbSchema.automationJobs.$inferSelect;
+
+const JOB_RESET = "\x1b[0m";
+
+const listedJob = (
+  fields: Pick<AutomationJobRow, "status" | "action"> &
+    Partial<AutomationJobRow> & {
+      readonly ticket?: string | null;
+      readonly test?: string;
+    },
+): AutomationJobRow & { readonly ticket: string | null; readonly test: string } => ({
+  id: fields.id ?? "00000000-0000-4000-8000-000000000001",
+  resultId: fields.resultId ?? RESULT_ID,
+  action: fields.action,
+  status: fields.status,
+  reason: fields.reason ?? null,
+  createdAt: fields.createdAt ?? ago(90),
+  startedAt: fields.startedAt ?? (fields.status === "pending" ? null : ago(5)),
+  finishedAt:
+    fields.finishedAt ??
+    (fields.status === "pending" || fields.status === "running" ? null : ago(60)),
+  ticket: fields.ticket ?? "OLI-42",
+  test: fields.test ?? "lock-screen",
+});
+
+describe("automation --list", () => {
+  it.effect("prints running, then pending, then completed, from the database (happy)", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(NOW);
+      const h = harness();
+      h.stores.automation.jobs.push(
+        listedJob({
+          id: "00000000-0000-4000-8000-000000000001",
+          status: "running",
+          action: "drive",
+          createdAt: ago(300),
+          startedAt: ago(5),
+          ticket: "OLI-42",
+          test: "lock-screen",
+        }),
+        listedJob({
+          id: "00000000-0000-4000-8000-000000000002",
+          resultId: OTHER_RESULT_ID,
+          status: "pending",
+          action: "diagnose",
+          createdAt: ago(90),
+          startedAt: null,
+          ticket: "OLI-43",
+          test: "lock-screen",
+        }),
+        listedJob({
+          id: "00000000-0000-4000-8000-000000000003",
+          resultId: "44444444-4444-4444-8444-444444444444",
+          status: "succeeded",
+          action: "drive",
+          createdAt: ago(3_600),
+          startedAt: ago(3_000),
+          finishedAt: ago(60),
+          ticket: "OLI-41",
+          test: "Open a terminal",
+        }),
+      );
+      const exit = yield* h.run(["automation", "--list"]);
+      expect(Exit.isSuccess(exit)).toBe(true);
+      expect(yield* stdout).toEqual([
+        "running",
+        `\x1b[33mrunning  ${JOB_RESET}  drive     5s ago       OLI-42  lock-screen`,
+        "pending",
+        `\x1b[90mpending  ${JOB_RESET}  diagnose  1m ago       OLI-43  lock-screen`,
+        "completed",
+        `\x1b[32msucceeded${JOB_RESET}  drive     1m ago       OLI-41  Open a terminal`,
+      ]);
+      expect(h.touched).toEqual(["database"]);
+    }),
+  );
+
+  it.effect("lists every running and pending job, and --count bounds only completed (happy)", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(NOW);
+      const h = harness();
+      h.stores.automation.jobs.push(
+        listedJob({
+          id: "00000000-0000-4000-8000-000000000011",
+          status: "running",
+          action: "diagnose",
+          startedAt: ago(2),
+          ticket: "OLI-50",
+        }),
+        listedJob({
+          id: "00000000-0000-4000-8000-000000000012",
+          resultId: OTHER_RESULT_ID,
+          status: "pending",
+          action: "drive",
+          createdAt: ago(10),
+          startedAt: null,
+          ticket: "OLI-51",
+        }),
+        listedJob({
+          id: "00000000-0000-4000-8000-000000000013",
+          resultId: "44444444-4444-4444-8444-444444444444",
+          status: "failed",
+          action: "drive",
+          finishedAt: ago(30),
+          ticket: "OLI-52",
+        }),
+        listedJob({
+          id: "00000000-0000-4000-8000-000000000014",
+          resultId: "55555555-5555-4555-8555-555555555555",
+          status: "succeeded",
+          action: "diagnose",
+          finishedAt: ago(90),
+          ticket: "OLI-53",
+        }),
+      );
+      const exit = yield* h.run(["automation", "--list", "--count=1"]);
+      expect(Exit.isSuccess(exit)).toBe(true);
+      expect(yield* stdout).toEqual([
+        "running",
+        `\x1b[33mrunning  ${JOB_RESET}  diagnose  2s ago       OLI-50  lock-screen`,
+        "pending",
+        `\x1b[90mpending  ${JOB_RESET}  drive     10s ago      OLI-51  lock-screen`,
+        "completed",
+        `\x1b[31mfailed   ${JOB_RESET}  drive     30s ago      OLI-52  lock-screen`,
+      ]);
+    }),
+  );
+
+  it.effect("prints the three headers when there are no jobs (happy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      const exit = yield* h.run(["automation", "--list"]);
+      expect(Exit.isSuccess(exit)).toBe(true);
+      expect(yield* stdout).toEqual(["running", "pending", "completed"]);
+    }),
+  );
+
+  it.effect(
+    "rejects automation without --list, a count below one, and a non-integer count (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const h = harness();
+        const bare = yield* h.run(["automation"]);
+        expect(helpErrors(bare).join("\n")).toMatch(/Missing required flag: --list/);
+        const zero = yield* h.run(["automation", "--list", "--count", "0"]);
+        expect(helpErrors(zero).join("\n")).toMatch(
+          /Invalid value for flag --count: "0".*count must be at least 1/s,
+        );
+        const word = yield* h.run(["automation", "--list", "--count", "ten"]);
+        expect(helpErrors(word).join("\n")).toMatch(/Invalid value for flag --count: "ten"/);
+        expect(h.touched).toEqual([]);
+      }),
+  );
+});
+
+// ---------------------------------------------------------------------------
 // error-type new / list
 // ---------------------------------------------------------------------------
 
@@ -2353,6 +2511,7 @@ describe("environment order", () => {
           NEW_TYPE,
           ["error-type", "list"],
           DIAGNOSE,
+          ["automation", "--list"],
         ]) {
           const exit = yield* h.run(args, {
             DATABASE_URL: "",
@@ -2404,6 +2563,7 @@ describe("--server-url", () => {
     NEW_TYPE,
     ["error-type", "list"],
     DIAGNOSE,
+    ["automation", "--list"],
   ].map((args) => [...args, "--server-url", SERVER]);
 
   it.effect("is required on test new (unhappy)", () =>
@@ -2485,6 +2645,7 @@ describe("--server-url", () => {
         NEW_TYPE,
         ["error-type", "list"],
         DIAGNOSE,
+        ["automation", "--list"],
       ]) {
         expect(Exit.isSuccess(yield* h.run(args, env)), args.join(" ")).toBe(true);
       }
@@ -2664,6 +2825,7 @@ describe("--help", () => {
           ["error-type", "new", "--help"],
           ["error-type", "list", "--help"],
           ["diagnose", "--help"],
+          ["automation", "--help"],
         ]) {
           // The built-in --help renders and succeeds; runMain exits 0.
           const exit = yield* h.run(args, {});
@@ -2675,6 +2837,7 @@ describe("--help", () => {
         expect(printed).toMatch(/session/);
         expect(printed).toMatch(/error-type/);
         expect(printed).toMatch(/diagnose/);
+        expect(printed).toMatch(/automation/);
         expect(printed.includes("--dump")).toBe(false);
       }),
   );

@@ -18,6 +18,7 @@ Consult this table of contents first. Read only the section you need.
 | [error-type new](#error-type-new) | 211 |
 | [error-type list](#error-type-list) | 226 |
 | [diagnose](#diagnose) | 240 |
+| [automation --list](#automation---list) | 261 |
 
 ## Important
 
@@ -42,6 +43,7 @@ If you are an agent driving a guest, you need two of these: [test start](#test-s
 ./ctrl error-type new  --key <key> --description <text>
 ./ctrl error-type list [--json]
 ./ctrl diagnose       --session-id <id> --verdict passed|failed [--type <key>] --summary <text> --model <id>
+./ctrl automation --list [--count <n>]
 ```
 
 The action comes first. Every value is a flag; there are no positional arguments. Flags may sit in any order after the action.
@@ -254,4 +256,20 @@ Records the post-run diagnosis: a reviewer's verdict on one session that has end
 ```bash
 ./ctrl diagnose --session-id 6f1c...e2a9 --verdict failed --type guest_boot_hang --summary "Serial stops after 'Waiting for root device'; the ISO never mounted" --model <the Cursor model id you are running as>
 ./ctrl diagnose --session-id 6f1c...e2a9 --verdict passed --summary "The last image shows the lock screen with the clock; matches the proof" --model <the Cursor model id you are running as>
+```
+
+## automation --list
+
+```
+./ctrl automation --list [--count <n>]
+```
+
+Prints the automation queue from the database, never an endpoint: every running job, then every pending job, then the most recently completed jobs. Each job is one line: the status, colored (yellow `running`, gray `pending`, green `succeeded`, red `failed`, bright red `aborted`, magenta `timed_out`); the action (`drive` or `diagnose`); how long ago (`5s ago`, `12m ago`, `1h30m ago`, `3d5h ago`) — running from when it started, pending from when it was queued, completed from when it finished; the Linear ticket, or `—` when none; then the test name. Empty groups still print their header. Not used while driving a guest.
+
+- `--list` — required.
+- `--count <n>` — how many completed jobs to print, at least 1. Default 10. Running and pending are always printed in full.
+
+```bash
+./ctrl automation --list
+./ctrl automation --list --count 25
 ```

@@ -19,8 +19,35 @@ export const STATUS_COLOR: Readonly<Record<Domain.SessionStatus, string>> = {
   timed_out: "\x1b[35m",
 };
 
+export type AutomationJobRow = {
+  readonly ticket: string | null;
+  readonly test: string;
+  readonly action: "drive" | "diagnose";
+  readonly status: "pending" | "running" | "succeeded" | "failed" | "aborted" | "timed_out";
+  readonly createdAt: Date;
+  readonly startedAt: Date | null;
+  readonly finishedAt: Date | null;
+};
+
+export type AutomationQueue = {
+  readonly running: ReadonlyArray<AutomationJobRow>;
+  readonly pending: ReadonlyArray<AutomationJobRow>;
+  readonly completed: ReadonlyArray<AutomationJobRow>;
+};
+
+export const JOB_STATUS_COLOR: Readonly<Record<AutomationJobRow["status"], string>> = {
+  pending: "\x1b[90m",
+  running: "\x1b[33m",
+  succeeded: "\x1b[32m",
+  failed: "\x1b[31m",
+  aborted: "\x1b[91m",
+  timed_out: "\x1b[35m",
+};
+
 const RESET = "\x1b[0m";
 const STATUS_WIDTH = "downloading".length;
+const JOB_STATUS_WIDTH = "succeeded".length;
+const ACTION_WIDTH = "diagnose".length;
 const AGE_WIDTH = "23h59m ago".length + 1;
 
 export const json = (value: unknown): string => JSON.stringify(value);
@@ -56,6 +83,33 @@ export const renderSessions = (
   asJson: boolean,
   now: number,
 ): ReadonlyArray<string> => (asJson ? [json(rows)] : rows.map((row) => sessionLine(row, now)));
+
+const jobStamp = (row: AutomationJobRow): Date => {
+  if (row.status === "pending") {
+    return row.createdAt;
+  }
+  if (row.status === "running") {
+    return row.startedAt ?? row.createdAt;
+  }
+  return row.finishedAt ?? row.startedAt ?? row.createdAt;
+};
+
+const jobLine = (row: AutomationJobRow, now: number): string => {
+  const status = `${JOB_STATUS_COLOR[row.status]}${row.status.padEnd(JOB_STATUS_WIDTH)}${RESET}`;
+  return `${status}  ${row.action.padEnd(ACTION_WIDTH)}  ${age(now, jobStamp(row)).padEnd(AGE_WIDTH)}  ${row.ticket ?? "—"}  ${row.test}`;
+};
+
+export const renderAutomationJobs = (
+  queue: AutomationQueue,
+  now: number,
+): ReadonlyArray<string> => [
+  "running",
+  ...queue.running.map((row) => jobLine(row, now)),
+  "pending",
+  ...queue.pending.map((row) => jobLine(row, now)),
+  "completed",
+  ...queue.completed.map((row) => jobLine(row, now)),
+];
 
 export const renderTestDefinitions = (
   rows: ReadonlyArray<TestDefinitionRow>,

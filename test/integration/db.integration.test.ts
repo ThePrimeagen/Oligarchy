@@ -1179,6 +1179,70 @@ Postgres.describeWithDatabase("database", () => {
     );
 
     scoped.effect(
+      "AutomationStore listJobs returns every running and pending job, diagnoses first, and the newest completed up to count",
+      () =>
+        Effect.gen(function* () {
+          const tests = yield* Tests.TestStore;
+          const automation = yield* Automation.AutomationStore;
+          const database = yield* Client.Database;
+          const definition = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
+          const created = yield* Effect.forEach([0, 1, 2, 3, 4, 5], () =>
+            tests.createRun({
+              iso: "https://example.com/omarchy.iso",
+              serverUrl: "http://127.0.0.1:42069",
+              definitions: [{ id: definition.id }],
+            }),
+          );
+          const resultIds = created.map((run) => run.results[0].id);
+          yield* tests.setLinearId(resultIds[0], "LST-101");
+          yield* tests.setLinearId(resultIds[1], "LST-102");
+          yield* tests.setLinearId(resultIds[2], "LST-103");
+          yield* tests.setLinearId(resultIds[3], "LST-104");
+          yield* tests.setLinearId(resultIds[4], "LST-105");
+          yield* tests.setLinearId(resultIds[5], "LST-106");
+          const completedDrive = yield* automation.enqueue({
+            resultId: resultIds[0],
+            action: "drive",
+          });
+          const completedDiagnose = yield* automation.enqueue({
+            resultId: resultIds[1],
+            action: "diagnose",
+          });
+          yield* automation.enqueue({ resultId: resultIds[2], action: "drive" });
+          yield* automation.enqueue({ resultId: resultIds[3], action: "diagnose" });
+          yield* automation.enqueue({ resultId: resultIds[4], action: "drive" });
+          yield* automation.enqueue({ resultId: resultIds[5], action: "diagnose" });
+          expect(Option.isSome(yield* automation.claim())).toBe(true);
+          expect(Option.isSome(yield* automation.claim())).toBe(true);
+          yield* automation.finish(completedDrive.id, "succeeded", null);
+          yield* automation.finish(completedDiagnose.id, "failed", "nope");
+          yield* database.run("stamp", (db) =>
+            db.execute(
+              sql`update automation_jobs set finished_at = now() - interval '2 minutes' where id = ${completedDrive.id}`,
+            ),
+          );
+          expect(Option.isSome(yield* automation.claim())).toBe(true);
+          expect(Option.isSome(yield* automation.claim())).toBe(true);
+          const listed = yield* automation.listJobs(1);
+          expect(listed.running.map((job) => [job.ticket, job.action, job.status])).toEqual([
+            ["LST-104", "diagnose", "running"],
+            ["LST-103", "drive", "running"],
+          ]);
+          expect(listed.pending.map((job) => [job.ticket, job.action, job.test])).toEqual([
+            ["LST-106", "diagnose", "lock-screen"],
+            ["LST-105", "drive", "lock-screen"],
+          ]);
+          expect(listed.completed.map((job) => [job.ticket, job.status])).toEqual([
+            ["LST-102", "failed"],
+          ]);
+          const more = yield* automation.listJobs(10);
+          expect(more.completed.map((job) => job.ticket)).toEqual(["LST-102", "LST-101"]);
+          expect(more.running).toHaveLength(2);
+          expect(more.pending).toHaveLength(2);
+        }),
+    );
+
+    scoped.effect(
       "ServerStore registers a url once as a qemu server, lists the qemu servers in registration order, forgets it",
       () =>
         Effect.gen(function* () {
