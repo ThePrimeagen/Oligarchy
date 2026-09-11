@@ -156,7 +156,7 @@ const DurationChart: FC<{ chart: DurationChartData }> = ({ chart }) => {
         <>
           <div
             class="duration-chart"
-            role="img"
+            role="group"
             aria-label="Last 50 runs by duration, shortest to longest"
           >
             {bars.map((bar) => (
@@ -167,6 +167,7 @@ const DurationChart: FC<{ chart: DurationChartData }> = ({ chart }) => {
                     : "duration-chart__bar duration-chart__bar--failed"
                 }
                 style={{ height: longest === 0 ? "100%" : `${String((bar.ms / longest) * 100)}%` }}
+                role="img"
                 aria-label={`${bar.succeeded ? "succeeded" : "failed"} in ${formatDuration(bar.ms)}`}
               ></span>
             ))}
@@ -391,7 +392,7 @@ const editHref = (name: string, notice: EditNotice): string =>
 // the next version, then the current wording and the one before it, newest first, the newest
 // open, each with its text and its charts. The name is what the wordings collapse under, so it
 // is not a field.
-export const DefinitionCard: FC<{
+const DefinitionCard: FC<{
   group: DefinitionVersions;
   outcomes: ReadonlyArray<TestResultOutcome>;
   notice: EditNotice | undefined;
