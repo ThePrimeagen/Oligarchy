@@ -14,9 +14,12 @@ export const CEILING = "30 minutes";
 // asks, but a subagent the driver spawns asks into the void and the run deadlocks
 // (anomalyco/opencode#36868), so the two permissions that default to ask are allowed outright
 // for every session: a screenshot read outside the working directory, the same get-image
-// repeated while a guest boots. Explicit denies still hold.
+// repeated while a guest boots. Explicit denies still hold. OpenRouter streams have no timeout
+// of their own (anomalyco/opencode#37580): three minutes without a first byte or a next chunk
+// aborts the request, which opencode retries, rather than holding the run to its ceiling.
 const CONFIG = JSON.stringify({
   permission: { external_directory: "allow", doom_loop: "allow" },
+  provider: { openrouter: { options: { headerTimeout: 180_000, chunkTimeout: 180_000 } } },
 });
 
 export const run = (prompt: string, model: string) =>

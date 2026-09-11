@@ -33,6 +33,8 @@ describe("OpenCode.run happy path", () => {
       expect(content).toBeDefined();
       expect(JSON.parse(content ?? "")).toEqual({
         permission: { external_directory: "allow", doom_loop: "allow" },
+        // A model stream that goes silent aborts instead of holding the run to its ceiling.
+        provider: { openrouter: { options: { headerTimeout: 180_000, chunkTimeout: 180_000 } } },
       });
       expect(spawner.spawned[0]?.options.extendEnv).toBe(true);
     }),

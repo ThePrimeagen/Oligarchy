@@ -294,6 +294,9 @@ describeWithDatabase("automation client POST /run", () => {
           expect(process.stdout()).toContain("transcript-sentinel: the agent spoke");
           expect(JSON.parse(readFileSync(join(bin, "config"), "utf8"))).toEqual({
             permission: { external_directory: "allow", doom_loop: "allow" },
+            provider: {
+              openrouter: { options: { headerTimeout: 180_000, chunkTimeout: 180_000 } },
+            },
           });
         } finally {
           process.child.kill("SIGTERM");
