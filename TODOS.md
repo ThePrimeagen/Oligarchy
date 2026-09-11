@@ -86,3 +86,13 @@ Genuine harness bugs found by the runs and fixed on branch `automation-model-fla
   OLI-1106's diagnose (stalled stream, ceiling) meant setting the row back to `pending` by hand.
   A `./ctrl job requeue --id <job>` (or letting a terminal row be replaced) would make that an
   operator command instead of SQL.
+- (done, operational) The qemu server now runs with `TMPDIR=~/personal/oligarchy-tmp`, so session
+  dirs (the 40G qcow2, the screendump PNGs) live on the NVMe instead of the 32G RAM-backed `/tmp`.
+  With four guests installing at once, tmpfs (~24G) plus 16G of guest RAM starved the box, a
+  screendump write failed, and libpng's error handler aborted both QEMU processes at 13:52:13Z
+  (`qmp_screendump → png_write_row → png_error → abort`; coredumps in `coredumpctl`), killing
+  OLI-1174 and OLI-1175 mid-run. Still to decide in code: a `--sessions-dir` flag on the qemu
+  server so the location is explicit rather than an environment variable.
+- QEMU treats a screendump write error as fatal (libpng `png_error` → `abort()`), so a full or
+  memory-starved filesystem takes the whole guest down, not just the screenshot. Upstream QEMU
+  behaviour; worth knowing when sizing the sessions filesystem.
