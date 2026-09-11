@@ -17,46 +17,32 @@ const mapWithout = <V>(map: ReadonlyMap<string, V>, key: string): ReadonlyMap<st
   return next;
 };
 
-type Entry = ChildProcessSpawner.ChildProcessHandle | "starting";
-
 const make = Effect.gen(function* () {
-  const running = yield* Ref.make<ReadonlyMap<string, Entry>>(new Map());
+  const running = yield* Ref.make<ReadonlyMap<string, ChildProcessSpawner.ChildProcessHandle>>(
+    new Map(),
+  );
+  const jobs = yield* Ref.make(0);
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const maxJobs = yield* MaxJobs;
 
   const run = Effect.fn("Sessions.run")(function* (ticket: string, prompt: string) {
-    const reserved = yield* Ref.modify(running, (map) => {
-      if (map.has(ticket)) {
-        return ["duplicate", map] as const;
-      }
-      if (map.size >= maxJobs) {
-        return ["full", map] as const;
-      }
-      return ["ok", mapWith(map, ticket, "starting")] as const;
-    });
-    if (reserved === "full") {
+    const reserved = yield* Ref.modify(jobs, (n) =>
+      n >= maxJobs ? ([false, n] as const) : ([true, n + 1] as const),
+    );
+    if (!reserved) {
       return yield* Errors.AtCapacity.make({});
-    }
-    if (reserved === "duplicate") {
-      return yield* Effect.die(`ticket "${ticket}" is already running`);
     }
     return yield* Effect.scoped(
       Effect.gen(function* () {
+        yield* Effect.addFinalizer(() => Ref.update(jobs, (n) => n - 1));
         const handle = yield* Cli.spawn(OpenCode.BIN, OpenCode.args(prompt));
         const claimed = yield* Ref.modify(running, (map) =>
-          map.get(ticket) === "starting"
-            ? ([true, mapWith(map, ticket, handle)] as const)
-            : ([false, map] as const),
+          map.has(ticket)
+            ? ([false, map] as const)
+            : ([true, mapWith(map, ticket, handle)] as const),
         );
         if (!claimed) {
-          // Aborted while starting; the slot is already gone.
-          yield* handle
-            .kill({
-              killSignal: "SIGTERM",
-              forceKillAfter: Cli.FORCE_KILL_AFTER,
-            })
-            .pipe(Effect.orElseSucceed(() => undefined));
-          return yield* Effect.void;
+          return yield* Effect.die(`ticket "${ticket}" is already running`);
         }
         yield* Effect.addFinalizer(() =>
           Ref.update(running, (map) =>
@@ -67,28 +53,15 @@ const make = Effect.gen(function* () {
       }),
     ).pipe(
       Effect.mapError((error) => Errors.RunFailed.make({ message: error.message, cause: error })),
-      // A spawn that failed still holds "starting"; drop it so the slot can be reused.
-      Effect.ensuring(
-        Ref.update(running, (map) =>
-          map.get(ticket) === "starting" ? mapWithout(map, ticket) : map,
-        ),
-      ),
       Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
     );
   });
 
   const abort = Effect.fn("Sessions.abort")(function* (ticket: string) {
-    const entry = (yield* Ref.get(running)).get(ticket);
-    if (entry === undefined) {
+    const handle = (yield* Ref.get(running)).get(ticket);
+    if (handle === undefined) {
       return yield* Errors.unknownSession(ticket, ticket);
     }
-    if (entry === "starting") {
-      yield* Ref.update(running, (map) =>
-        map.get(ticket) === "starting" ? mapWithout(map, ticket) : map,
-      );
-      return yield* Effect.void;
-    }
-    const handle = entry;
     return yield* handle
       .kill({
         killSignal: "SIGTERM",
@@ -105,9 +78,7 @@ const make = Effect.gen(function* () {
       );
   });
 
-  const jobs = Effect.map(Ref.get(running), (map) => map.size);
-
-  return { run, abort, jobs };
+  return { run, abort, jobs: Ref.get(jobs) };
 });
 
 export class Sessions extends Context.Service<Sessions>()("@oligarchy/automation-client/Sessions", {

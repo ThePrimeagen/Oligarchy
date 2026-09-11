@@ -203,6 +203,7 @@ const make = Effect.gen(function* () {
   // Running machines, by id; and every session this qemu server holds, booting ones included.
   const sessions = yield* Ref.make<ReadonlyMap<string, LiveSession>>(new Map());
   const openSessions = yield* Ref.make<ReadonlyMap<string, OpenSession>>(new Map());
+  const jobs = yield* Ref.make(0);
 
   const elapsed = (started: number) =>
     Effect.map(Clock.currentTimeMillis, (now) => String(now - started));
@@ -339,6 +340,7 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<void> =>
     Effect.gen(function* () {
       yield* Ref.update(openSessions, (map) => mapWithout(map, [live.id]));
+      yield* Ref.update(jobs, (n) => n - 1);
       yield* log.releaseColor(live.agent);
       for (const span of yield* Ref.get(live.actionSpans)) {
         yield* settleActionSpan(live, span, "failed");
@@ -429,7 +431,10 @@ const make = Effect.gen(function* () {
     display: Domain.QemuDisplay,
     automation: boolean,
   ) {
-    if ((yield* Ref.get(openSessions)).size >= maxJobs) {
+    const reserved = yield* Ref.modify(jobs, (n) =>
+      n >= maxJobs ? ([false, n] as const) : ([true, n + 1] as const),
+    );
+    if (!reserved) {
       return yield* Errors.AtCapacity.make({});
     }
     const started = yield* Clock.currentTimeMillis;
@@ -447,15 +452,7 @@ const make = Effect.gen(function* () {
       actionSeq: yield* Ref.make(0),
       actionSpans: yield* Ref.make<ReadonlySet<Tracer.Span>>(new Set()),
     };
-    const reserved = yield* Ref.modify(openSessions, (map) =>
-      map.size >= maxJobs ? ([false, map] as const) : ([true, mapWith(map, id, live)] as const),
-    );
-    if (!reserved) {
-      // Never entered the map: drop the unused scope and span rather than finish a session.
-      yield* Scope.close(live.scope, Exit.void);
-      yield* Sentry.endSessionSpan(live.span, "aborted");
-      return yield* Errors.AtCapacity.make({});
-    }
+    yield* Ref.update(openSessions, (map) => mapWith(map, id, live));
     yield* log.acquireColor(agent);
     const disk = body.disk;
     yield* sessionStore
