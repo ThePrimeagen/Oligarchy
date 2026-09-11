@@ -41,19 +41,10 @@ const TokenLive = Layer.succeed(AutomationClient.OligarchyToken)(
   AutomationClient.OligarchyToken.of(Redacted.make(TOKEN)),
 );
 
-const serve = (
-  fixed: Fixture,
-  outbound: Layer.Layer<HttpClient.HttpClient> = FakeHttp.die,
-) =>
+const serve = (fixed: Fixture, outbound: Layer.Layer<HttpClient.HttpClient> = FakeHttp.die) =>
   HttpRouter.serve(Handlers.routes, { disableLogger: true, disableListenLog: true }).pipe(
     Layer.provide(
-      Layer.mergeAll(
-        fixed.stores.layer,
-        fixed.log.layer,
-        SecretLive,
-        TokenLive,
-        outbound,
-      ),
+      Layer.mergeAll(fixed.stores.layer, fixed.log.layer, SecretLive, TokenLive, outbound),
     ),
     Layer.provide(Layer.succeed(Log.ProcessAttribution)(Log.AutomationProcessAttribution)),
     Layer.provideMerge(NodeHttpServer.layerTest),
