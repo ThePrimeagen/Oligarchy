@@ -89,7 +89,9 @@ export const abort = Effect.fn("abort")(function* (url: string, ticket: string) 
         }
         return response.text.pipe(
           Effect.orElseSucceed(() => ""),
-          Effect.flatMap((text) => Effect.fail(failed(url, "/abort", response.status, text, error))),
+          Effect.flatMap((text) =>
+            Effect.fail(failed(url, "/abort", response.status, text, error)),
+          ),
         );
       }
       return Effect.fail(failed(url, "/abort", undefined, "", error));

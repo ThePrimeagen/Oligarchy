@@ -99,11 +99,10 @@ export const dispatch = Effect.fn("dispatch")(function* () {
             Effect.flatMap((outcome) =>
               Effect.gen(function* () {
                 const closed = yield* store.finish(job.id, outcome.status, outcome.reason);
-                if (!closed) {
-                  // abort may have closed the row first
-                  return;
+                // abort may have closed the row first
+                if (closed) {
+                  yield* logOutcome(job, outcome);
                 }
-                return yield* logOutcome(job, outcome);
               }),
             ),
           );

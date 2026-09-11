@@ -105,22 +105,26 @@ export const AbortLive = HttpApiBuilder.group(Api.AutomationServerApi, "Abort", 
       const tests = yield* Tests.TestStore;
       const automation = yield* Automation.AutomationStore;
       const log = yield* Log.Log;
-      const result = yield* tests.findResultByLinearId(payload.ticket).pipe(
-        Effect.mapError((error) =>
-          Errors.Internal.make({ cause: error, agentId: payload.ticket }),
-        ),
-      );
+      const result = yield* tests
+        .findResultByLinearId(payload.ticket)
+        .pipe(
+          Effect.mapError((error) =>
+            Errors.Internal.make({ cause: error, agentId: payload.ticket }),
+          ),
+        );
       if (Option.isNone(result)) {
         return yield* Errors.BadRequest.make({
           message: `ticket "${payload.ticket}" is not running`,
           agentId: payload.ticket,
         });
       }
-      const job = yield* automation.findRunning(result.value.id).pipe(
-        Effect.mapError((error) =>
-          Errors.Internal.make({ cause: error, agentId: payload.ticket }),
-        ),
-      );
+      const job = yield* automation
+        .findRunning(result.value.id)
+        .pipe(
+          Effect.mapError((error) =>
+            Errors.Internal.make({ cause: error, agentId: payload.ticket }),
+          ),
+        );
       if (Option.isNone(job)) {
         return yield* Errors.BadRequest.make({
           message: `ticket "${payload.ticket}" is not running`,
@@ -133,27 +137,29 @@ export const AbortLive = HttpApiBuilder.group(Api.AutomationServerApi, "Abort", 
       }
       yield* AutomationClient.abort(url, payload.ticket).pipe(
         Effect.catchTag("AutomationClientError", (error) =>
-          error.status === 404
-            ? Effect.fail(Errors.unknownSession(payload.ticket, payload.ticket))
-            : Effect.fail(
-                Errors.RunFailed.make(
+          Effect.fail(
+            error.status === 404
+              ? Errors.unknownSession(payload.ticket, payload.ticket)
+              : Errors.RunFailed.make(
                   Object.assign(
                     { message: error.message },
                     error.cause === undefined ? undefined : { cause: error.cause },
                   ),
                 ),
-              ),
+          ),
         ),
       );
       yield* log.info(`aborted ${job.value.action}; ${url}`, {
         location: Log.Locations.automation,
         agentId: payload.ticket,
       });
-      yield* automation.finish(job.value.id, "aborted", "aborted").pipe(
-        Effect.mapError((error) =>
-          Errors.Internal.make({ cause: error, agentId: payload.ticket }),
-        ),
-      );
+      yield* automation
+        .finish(job.value.id, "aborted", "aborted")
+        .pipe(
+          Effect.mapError((error) =>
+            Errors.Internal.make({ cause: error, agentId: payload.ticket }),
+          ),
+        );
       return ok;
     }),
   ),
