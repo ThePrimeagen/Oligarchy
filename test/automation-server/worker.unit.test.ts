@@ -169,7 +169,10 @@ describe("dispatch happy path", () => {
         reason: null,
         finishedAt: expect.any(Date),
       });
-      expect(JSON.parse(http.requests[0]?.body ?? "")).toEqual({ prompt: DRIVE_PROMPT });
+      expect(JSON.parse(http.requests[0]?.body ?? "")).toEqual({
+        prompt: DRIVE_PROMPT,
+        ticket: TICKET,
+      });
       expect(FakeLog.texts(fixed.log)).toEqual([`dispatching drive; ${URL}`, "drive succeeded"]);
       expect(fixed.log.lines[0]?.agentId).toBe(TICKET);
     }),
@@ -185,7 +188,10 @@ describe("dispatch happy path", () => {
       yield* start(fixed, http.layer);
       yield* settle(fixed.automation.jobs, "succeeded");
       expect(fixed.automation.jobs[0]?.status).toBe("succeeded");
-      expect(JSON.parse(http.requests[0]?.body ?? "")).toEqual({ prompt: DIAGNOSE_PROMPT });
+      expect(JSON.parse(http.requests[0]?.body ?? "")).toEqual({
+        prompt: DIAGNOSE_PROMPT,
+        ticket: TICKET,
+      });
       expect(FakeLog.texts(fixed.log)).toEqual([
         `dispatching diagnose; ${URL}`,
         "diagnose succeeded",

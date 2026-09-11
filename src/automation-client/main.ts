@@ -15,6 +15,7 @@ import * as Api from "../shared/api.ts";
 import * as AutomationClientCommand from "./command.ts";
 import * as Handlers from "./handlers.ts";
 import * as Heartbeat from "./heartbeat.ts";
+import * as Sessions from "./sessions.ts";
 
 const HOST = "127.0.0.1";
 
@@ -53,6 +54,7 @@ const ServerLive = (port: number, url: Option.Option<string>) =>
         disableListenLog: true,
       }).pipe(Layer.provide(NodeHttpServer.layer(() => server, { host: HOST, port }))),
     ),
+    Layer.provide(Sessions.Sessions.layer),
     Layer.provide(Stats.Stats.layer),
     Layer.provide(Layer.succeed(HttpMiddleware.TracerDisabledWhen)(() => true)),
   );

@@ -8,6 +8,11 @@ export type Scripted = {
   readonly stderr?: string;
   // The spawn itself fails (an ENOENT binary, say) with this message.
   readonly spawnError?: string;
+  // SIGTERM does not exit; a kill with forceKillAfter then escalates to SIGKILL.
+  readonly ignoreTerm?: boolean;
+  // kill() fails with this description; the process stays running unless alreadyDeadOnKill.
+  readonly killError?: string;
+  readonly alreadyDeadOnKill?: boolean;
 };
 
 export type Script = (command: string, args: ReadonlyArray<string>) => Scripted;
@@ -18,6 +23,7 @@ export type Spawned = {
   readonly args: ReadonlyArray<string>;
   readonly options: ChildProcess.CommandOptions;
   readonly kills: Array<string>;
+  readonly killOptions: Array<ChildProcess.KillOptions | undefined>;
   readonly isReleased: () => boolean;
   readonly isRunning: Effect.Effect<boolean>;
   // Exits, then (as Node does) delivers the last stderr bytes and closes the pipes.
@@ -82,6 +88,7 @@ export const fakeSpawner = (script: Script = () => ({ exitCode: 0 })): FakeSpawn
         end();
       }
       const kills: Array<string> = [];
+      const killOptions: Array<ChildProcess.KillOptions | undefined> = [];
       let released = false;
       const die = (signal: string) =>
         Effect.sync(() => {
@@ -90,11 +97,38 @@ export const fakeSpawner = (script: Script = () => ({ exitCode: 0 })): FakeSpawn
             end();
           }
         });
+      const failKill = (description: string) =>
+        Effect.fail(
+          PlatformError.systemError({
+            _tag: "Unknown",
+            module: "ChildProcess",
+            method: "kill",
+            description,
+          }),
+        );
       const kill = (options?: ChildProcess.KillOptions) =>
-        Effect.suspend(() => {
+        Effect.gen(function* () {
+          killOptions.push(options);
+          if (scripted.killError !== undefined) {
+            if (scripted.alreadyDeadOnKill === true) {
+              yield* die("SIGTERM");
+            }
+            return yield* failKill(scripted.killError);
+          }
           const signal = options?.killSignal ?? "SIGTERM";
           kills.push(signal);
-          return die(signal);
+          if (Deferred.isDoneUnsafe(exitSignal)) {
+            return yield* failKill("Failed to kill child process");
+          }
+          if (scripted.ignoreTerm === true && signal === "SIGTERM") {
+            if (options?.forceKillAfter === undefined) {
+              return yield* Effect.never;
+            }
+            yield* Effect.sleep(options.forceKillAfter);
+            kills.push("SIGKILL");
+            return yield* die("SIGKILL");
+          }
+          return yield* die(signal);
         });
       const pid = nextPid++;
       spawned.push({
@@ -103,6 +137,7 @@ export const fakeSpawner = (script: Script = () => ({ exitCode: 0 })): FakeSpawn
         args: command.args,
         options: command.options,
         kills,
+        killOptions,
         isReleased: () => released,
         isRunning: Effect.map(Deferred.isDone(exitSignal), (done) => !done),
         exit: (code, trailingStderr) =>
@@ -118,7 +153,10 @@ export const fakeSpawner = (script: Script = () => ({ exitCode: 0 })): FakeSpawn
       yield* Effect.addFinalizer(() =>
         Effect.suspend(() => {
           released = true;
-          return Deferred.isDoneUnsafe(exitSignal) ? Effect.void : kill();
+          // A child already gone cannot be killed.
+          return Deferred.isDoneUnsafe(exitSignal)
+            ? Effect.void
+            : kill().pipe(Effect.catch(() => Effect.void));
         }),
       );
       return ChildProcessSpawner.makeHandle({

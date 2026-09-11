@@ -260,10 +260,11 @@ describe("AutomationServerApi", () => {
 describe("AutomationClientApi", () => {
   const client = Api.AutomationClientApi;
 
-  it("declares POST /run and nothing else", () => {
+  it("declares POST /run and POST /abort", () => {
     const table = routes(client).map(({ method, path }) => `${method} ${path}`);
-    expect(table).toEqual(["POST /run"]);
+    expect(table.sort()).toEqual(["POST /abort", "POST /run"]);
     expect(HttpApiClient.urlBuilder(client).Runs.run()).toBe("/run");
+    expect(HttpApiClient.urlBuilder(client).Runs.abort()).toBe("/abort");
   });
 
   it("requires the bearer and applies BearerAuth then ApiBoundary", () => {
@@ -273,11 +274,18 @@ describe("AutomationClientApi", () => {
     expect(run.middleware).toEqual([Api.BearerAuth.key, Api.ApiBoundary.key]);
     expect(spec.paths["/run"]?.post?.security).toEqual([{ bearer: [] }]);
     expect(run.errors).toEqual([400, 401, 500]);
+    const abort = byIdentifier(client, "abort");
+    expect(abort.group).toBe("Runs");
+    expect(abort.middleware).toEqual([Api.BearerAuth.key, Api.ApiBoundary.key]);
+    expect(spec.paths["/abort"]?.post?.security).toEqual([{ bearer: [] }]);
+    expect(abort.errors).toEqual([400, 401, 404, 500]);
   });
 
-  it("is its own api: no other process answers /run", () => {
-    expect(routes(Api.QemuServerApi).map(({ path }) => path)).not.toContain("/run");
-    expect(routes(Api.QemuReverseProxyApi).map(({ path }) => path)).not.toContain("/run");
-    expect(routes(Api.AutomationServerApi).map(({ path }) => path)).not.toContain("/run");
+  it("is its own api: no other process answers /run or /abort", () => {
+    for (const path of ["/run", "/abort"]) {
+      expect(routes(Api.QemuServerApi).map(({ path: route }) => route)).not.toContain(path);
+      expect(routes(Api.QemuReverseProxyApi).map(({ path: route }) => route)).not.toContain(path);
+      expect(routes(Api.AutomationServerApi).map(({ path: route }) => route)).not.toContain(path);
+    }
   });
 });

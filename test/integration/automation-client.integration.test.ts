@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { env as processEnv } from "node:process";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -149,8 +149,8 @@ const installOpencode = (script: string): string => {
 const lines = (output: string): ReadonlyArray<string> =>
   output.split("\n").filter((line) => line !== "");
 
-const request = (port: number, headers: Record<string, string>, body: string) =>
-  fetch(`http://127.0.0.1:${String(port)}/run`, { method: "POST", headers, body });
+const request = (port: number, path: string, headers: Record<string, string>, body: string) =>
+  fetch(`http://127.0.0.1:${String(port)}${path}`, { method: "POST", headers, body });
 
 const logsForClient = async () => {
   const client = new Client({ connectionString: Postgres.getDbUrl() });
@@ -277,8 +277,9 @@ describeWithDatabase("automation client POST /run", () => {
         );
         const response = await request(
           port,
+          "/run",
           { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
-          JSON.stringify({ prompt: "do the work" }),
+          JSON.stringify({ prompt: "do the work", ticket: "OLI-42" }),
         );
         expect(response.status).toBe(200);
         expect(await response.json()).toEqual({ ok: "true" });
@@ -305,8 +306,9 @@ describeWithDatabase("automation client POST /run", () => {
         );
         const response = await request(
           port,
+          "/run",
           { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
-          JSON.stringify({ prompt: "do the work" }),
+          JSON.stringify({ prompt: "do the work", ticket: "OLI-42" }),
         );
         expect(response.status).toBe(500);
         expect(await response.json()).toEqual({ error: "out of token credits" });
@@ -333,13 +335,139 @@ describeWithDatabase("automation client POST /run", () => {
         );
         const response = await request(
           port,
+          "/run",
           { "content-type": "application/json" },
-          JSON.stringify({ prompt: "do the work" }),
+          JSON.stringify({ prompt: "do the work", ticket: "OLI-42" }),
         );
         expect(response.status).toBe(401);
         expect(await response.json()).toEqual({ error: "unauthorized" });
         const rows = await logsForClient();
         expect(rows.some((row) => row.text.includes("POST /run failed: unauthorized"))).toBe(true);
+      } finally {
+        process.child.kill("SIGTERM");
+        await process.exited;
+        rmSync(bin, { recursive: true, force: true });
+      }
+    }),
+  );
+});
+
+describeWithDatabase("automation client POST /abort", () => {
+  it.live("kills a running opencode and answers 200", () =>
+    Effect.promise(async () => {
+      const startedDir = mkdtempSync(join(tmpdir(), "oligarchy-opencode-started-"));
+      const started = join(startedDir, "ready");
+      const bin = installOpencode(`touch "${started}"; sleep 60`);
+      const port = await freePort();
+      const process = spawnAutomationClient(
+        ["--port", String(port)],
+        {},
+        `${bin}:${processEnv.PATH ?? ""}`,
+      );
+      try {
+        await process.waitFor(
+          new RegExp(`automation client listening on 127.0.0.1:${String(port)}`),
+        );
+        const running = request(
+          port,
+          "/run",
+          { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+          JSON.stringify({ prompt: "do the work", ticket: "OLI-42" }),
+        );
+        const began = Date.now();
+        while (!existsSync(started)) {
+          if (Date.now() - began > 10_000) {
+            throw new Error("opencode did not start");
+          }
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        const aborted = await request(
+          port,
+          "/abort",
+          { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+          JSON.stringify({ ticket: "OLI-42" }),
+        );
+        expect(aborted.status).toBe(200);
+        expect(await aborted.json()).toEqual({ ok: "true" });
+        const runResponse = await running;
+        expect(runResponse.status).toBe(500);
+      } finally {
+        process.child.kill("SIGTERM");
+        await process.exited;
+        rmSync(bin, { recursive: true, force: true });
+        rmSync(startedDir, { recursive: true, force: true });
+      }
+    }),
+  );
+
+  it.live("kills a SIGTERM-resistant opencode after the force-kill deadline", () =>
+    Effect.promise(async () => {
+      const startedDir = mkdtempSync(join(tmpdir(), "oligarchy-opencode-started-"));
+      const started = join(startedDir, "ready");
+      const bin = installOpencode(`trap "" TERM; touch "${started}"; sleep 60`);
+      const port = await freePort();
+      const process = spawnAutomationClient(
+        ["--port", String(port)],
+        {},
+        `${bin}:${processEnv.PATH ?? ""}`,
+      );
+      try {
+        await process.waitFor(
+          new RegExp(`automation client listening on 127.0.0.1:${String(port)}`),
+        );
+        const running = request(
+          port,
+          "/run",
+          { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+          JSON.stringify({ prompt: "do the work", ticket: "OLI-42" }),
+        );
+        const began = Date.now();
+        while (!existsSync(started)) {
+          if (Date.now() - began > 10_000) {
+            throw new Error("opencode did not start");
+          }
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        const aborted = await request(
+          port,
+          "/abort",
+          { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+          JSON.stringify({ ticket: "OLI-42" }),
+        );
+        expect(aborted.status).toBe(200);
+        expect(await aborted.json()).toEqual({ ok: "true" });
+        const runResponse = await running;
+        expect(runResponse.status).toBe(500);
+      } finally {
+        process.child.kill("SIGTERM");
+        await process.exited;
+        rmSync(bin, { recursive: true, force: true });
+        rmSync(startedDir, { recursive: true, force: true });
+      }
+    }),
+  );
+
+  it.live("an unknown ticket is 404", () =>
+    Effect.promise(async () => {
+      const bin = installOpencode("exit 0");
+      const port = await freePort();
+      const process = spawnAutomationClient(
+        ["--port", String(port)],
+        {},
+        `${bin}:${processEnv.PATH ?? ""}`,
+      );
+      try {
+        await process.waitFor(
+          new RegExp(`automation client listening on 127.0.0.1:${String(port)}`),
+        );
+        const response = await request(
+          port,
+          "/abort",
+          { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+          JSON.stringify({ ticket: "OLI-42" }),
+        );
+        expect(response.status).toBe(404);
+        expect(await response.json()).toEqual({ error: 'unknown session "OLI-42"' });
       } finally {
         process.child.kill("SIGTERM");
         await process.exited;
