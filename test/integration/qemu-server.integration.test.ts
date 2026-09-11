@@ -478,7 +478,14 @@ describe("qemu server serving", () => {
             }),
           ),
         );
-        expect(row).toMatchObject({ url, type: "qemu", generation: 1, stats: { qemus: 0 } });
+        expect(row).toMatchObject({
+          url,
+          type: "qemu",
+          generation: 1,
+          stats: { qemus: 0 },
+          jobs: 0,
+          maxJobs: 1,
+        });
         expect(row?.heartbeatAt).toBeInstanceOf(Date);
         const { code } = yield* Effect.promise(() => server.exited);
         expect(code, server.stdout()).toBe(0);

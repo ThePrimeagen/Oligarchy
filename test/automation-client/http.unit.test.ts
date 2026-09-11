@@ -206,6 +206,37 @@ describe("POST /run unhappy path", () => {
       }).pipe(Effect.provide(serve(fixed)));
     }),
   );
+
+  it.effect("a second run while one is in flight is 429 and does not spawn another opencode", () =>
+    Effect.gen(function* () {
+      const fixed = fixture(() => ({}));
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const pending = yield* Effect.forkChild(run(http, "first", headers, TICKET));
+        for (let i = 0; i < 100 && fixed.spawner.spawned[0] === undefined; i++) {
+          yield* Effect.yieldNow;
+        }
+        expect(fixed.spawner.spawned).toHaveLength(1);
+        const response = yield* run(http, "second", headers, "OLI-99");
+        expect(response.status).toBe(429);
+        expect(yield* response.json).toEqual({ error: "at capacity; try later" });
+        expect(fixed.spawner.spawned).toHaveLength(1);
+        yield* fixed.spawner.spawned[0]?.exit(0) ?? Effect.void;
+        expect((yield* Fiber.join(pending)).status).toBe(200);
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.log.lines).toEqual([
+        {
+          level: "error",
+          text: "POST /run failed: at capacity; try later",
+          location: "automation-client",
+          agentId: "automation-client",
+          skipSentry: true,
+          cause: undefined,
+        },
+      ]);
+      expect(fixed.reporter.reported).toEqual([]);
+    }),
+  );
 });
 
 describe("interruption", () => {

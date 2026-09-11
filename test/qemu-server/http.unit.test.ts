@@ -838,6 +838,57 @@ describe("Sessions failures", () => {
     }),
   );
 
+  it.effect("an AtCapacity start is 429 and skipped for Sentry", () =>
+    Effect.gen(function* () {
+      const fixed = fixture({
+        sessions: FakeSessions.fakeSessions({
+          start: () => Effect.fail(Errors.AtCapacity.make({})),
+        }),
+      });
+      yield* Effect.gen(function* () {
+        const api = yield* client;
+        const error = yield* Effect.flip(
+          api.Sessions.start({
+            payload: Contract.StartBody.make({ iso: "omarchy.iso", agent: AGENT_ID }),
+          }),
+        );
+        expect(error).toMatchObject({
+          _tag: "AtCapacity",
+          message: "at capacity; try later",
+        });
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.post("/start", {
+          headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+          body: HttpBody.text(
+            JSON.stringify({ iso: "omarchy.iso", agent: AGENT_ID }),
+            "application/json",
+          ),
+        });
+        expect(raw.status).toBe(429);
+        expect(yield* raw.json).toEqual({ error: "at capacity; try later" });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.log.lines).toEqual([
+        {
+          level: "error",
+          text: "POST /start failed: at capacity; try later",
+          location: "server",
+          agentId: undefined,
+          skipSentry: true,
+          cause: undefined,
+        },
+        {
+          level: "error",
+          text: "POST /start failed: at capacity; try later",
+          location: "server",
+          agentId: undefined,
+          skipSentry: true,
+          cause: undefined,
+        },
+      ]);
+      expect(fixed.reporter.reported).toEqual([]);
+    }),
+  );
+
   it.effect(
     "an Internal raised by Sessions is 500 internal error, logged with the driver's reason",
     () =>

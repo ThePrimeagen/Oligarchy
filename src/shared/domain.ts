@@ -133,6 +133,11 @@ export type DiagnosisVerdict = typeof DiagnosisVerdict.Type;
 export const isIsoUrl = (iso: string): boolean =>
   iso.startsWith("http://") || iso.startsWith("https://");
 
+export const MaxJobs = Schema.Number.check(
+  Schema.isGreaterThanOrEqualTo(1, { message: "max-jobs must be at least 1" }),
+).annotate({ identifier: "@oligarchy/shared/domain/MaxJobs" });
+export type MaxJobs = typeof MaxJobs.Type;
+
 // A server the reverse proxy forwards to, as an operator registers it: an http(s) url with a
 // host, used exactly as given, as --server-url is.
 export const ServerUrl = Schema.String.check(
