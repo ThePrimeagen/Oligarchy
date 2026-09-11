@@ -207,7 +207,7 @@ describe("POST /run unhappy path", () => {
     }),
   );
 
-  it.effect("a second run while one is in flight is 503 and does not spawn another opencode", () =>
+  it.effect("a second run while one is in flight is 429 and does not spawn another opencode", () =>
     Effect.gen(function* () {
       const fixed = fixture(() => ({}));
       yield* Effect.gen(function* () {
@@ -218,7 +218,7 @@ describe("POST /run unhappy path", () => {
         }
         expect(fixed.spawner.spawned).toHaveLength(1);
         const response = yield* run(http, "second", headers, "OLI-99");
-        expect(response.status).toBe(503);
+        expect(response.status).toBe(429);
         expect(yield* response.json).toEqual({ error: "at capacity; try later" });
         expect(fixed.spawner.spawned).toHaveLength(1);
         yield* fixed.spawner.spawned[0]?.exit(0) ?? Effect.void;

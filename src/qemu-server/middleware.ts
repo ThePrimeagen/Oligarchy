@@ -113,9 +113,8 @@ const detail = (error: Errors.ApiError): string =>
     : error.message;
 
 // A refusal (< 500) is the caller's problem and skips Sentry; a failure carries its cause there.
-// AtCapacity is 503 (try later) but is still a refusal of work, not a defect.
 const report = (error: Errors.ApiError, fallback: Log.ProcessAttribution): Log.Report =>
-  error._tag === "AtCapacity" || Errors.apiStatus(error) < 500
+  Errors.apiStatus(error) < 500
     ? { ...attribution(error, fallback), skipSentry: true }
     : {
         ...attribution(error, fallback),

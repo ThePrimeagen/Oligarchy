@@ -838,7 +838,7 @@ describe("Sessions failures", () => {
     }),
   );
 
-  it.effect("an AtCapacity start is 503 and skipped for Sentry", () =>
+  it.effect("an AtCapacity start is 429 and skipped for Sentry", () =>
     Effect.gen(function* () {
       const fixed = fixture({
         sessions: FakeSessions.fakeSessions({
@@ -864,7 +864,7 @@ describe("Sessions failures", () => {
             "application/json",
           ),
         });
-        expect(raw.status).toBe(503);
+        expect(raw.status).toBe(429);
         expect(yield* raw.json).toEqual({ error: "at capacity; try later" });
       }).pipe(Effect.provide(serve(fixed)));
       expect(fixed.log.lines).toEqual([

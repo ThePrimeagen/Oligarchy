@@ -149,9 +149,10 @@ export class NoServer extends Schema.TaggedError<NoServer>("@oligarchy/shared/er
 }
 
 // This process is already running as many jobs as --max-jobs allows; the caller should try later.
+// 429, not 503: /start already uses 503 for NoServer, and the wire codec keys on status.
 export class AtCapacity extends Schema.TaggedError<AtCapacity>(
   "@oligarchy/shared/errors/AtCapacity",
-)("AtCapacity", { message: fixedMessage("at capacity; try later") }, { httpApiStatus: 503 }) {
+)("AtCapacity", { message: fixedMessage("at capacity; try later") }, { httpApiStatus: 429 }) {
   override readonly [ErrorReporter.ignore] = true;
 }
 

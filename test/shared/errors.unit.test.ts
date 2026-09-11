@@ -110,7 +110,7 @@ const cases: ReadonlyArray<WireCase> = [
     name: "AtCapacity",
     wire: Errors.AtCapacityWire,
     error: Errors.AtCapacity.make({}),
-    status: 503,
+    status: 429,
   },
   {
     name: "RunFailed",
