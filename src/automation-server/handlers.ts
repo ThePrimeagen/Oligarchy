@@ -99,69 +99,78 @@ export const LinearLive = HttpApiBuilder.group(Api.AutomationServerApi, "Linear"
   ),
 );
 
+// A disconnect must not leave the client killed and the row still running.
+const uninterruptible = { uninterruptible: true } as const;
+
 export const AbortLive = HttpApiBuilder.group(Api.AutomationServerApi, "Abort", (handlers) =>
-  handlers.handle("abort", ({ payload }) =>
-    Effect.gen(function* () {
-      const tests = yield* Tests.TestStore;
-      const automation = yield* Automation.AutomationStore;
-      const log = yield* Log.Log;
-      const result = yield* tests
-        .findResultByLinearId(payload.ticket)
-        .pipe(
-          Effect.mapError((error) =>
-            Errors.Internal.make({ cause: error, agentId: payload.ticket }),
-          ),
-        );
-      if (Option.isNone(result)) {
-        return yield* Errors.BadRequest.make({
-          message: `ticket "${payload.ticket}" is not running`,
-          agentId: payload.ticket,
-        });
-      }
-      const job = yield* automation
-        .findRunning(result.value.id)
-        .pipe(
-          Effect.mapError((error) =>
-            Errors.Internal.make({ cause: error, agentId: payload.ticket }),
-          ),
-        );
-      if (Option.isNone(job)) {
-        return yield* Errors.BadRequest.make({
-          message: `ticket "${payload.ticket}" is not running`,
-          agentId: payload.ticket,
-        });
-      }
-      const url = job.value.clientUrl;
-      if (url === null) {
-        return yield* Effect.die(new Error(`running job ${job.value.id} has no clientUrl`));
-      }
-      yield* AutomationClient.abort(url, payload.ticket).pipe(
-        Effect.catchTag("AutomationClientError", (error) =>
-          Effect.fail(
-            error.status === 404
-              ? Errors.unknownSession(payload.ticket, payload.ticket)
-              : Errors.RunFailed.make(
-                  Object.assign(
-                    { message: error.message },
-                    error.cause === undefined ? undefined : { cause: error.cause },
+  handlers.handle(
+    "abort",
+    ({ payload }) =>
+      Effect.gen(function* () {
+        const tests = yield* Tests.TestStore;
+        const automation = yield* Automation.AutomationStore;
+        const log = yield* Log.Log;
+        const result = yield* tests
+          .findResultByLinearId(payload.ticket)
+          .pipe(
+            Effect.mapError((error) =>
+              Errors.Internal.make({ cause: error, agentId: payload.ticket }),
+            ),
+          );
+        if (Option.isNone(result)) {
+          return yield* Errors.BadRequest.make({
+            message: `ticket "${payload.ticket}" is not running`,
+            agentId: payload.ticket,
+          });
+        }
+        const job = yield* automation
+          .findRunning(result.value.id)
+          .pipe(
+            Effect.mapError((error) =>
+              Errors.Internal.make({ cause: error, agentId: payload.ticket }),
+            ),
+          );
+        if (Option.isNone(job)) {
+          return yield* Errors.BadRequest.make({
+            message: `ticket "${payload.ticket}" is not running`,
+            agentId: payload.ticket,
+          });
+        }
+        const url = job.value.clientUrl;
+        if (url === null) {
+          return yield* Effect.die(new Error(`running job ${job.value.id} has no clientUrl`));
+        }
+        yield* AutomationClient.abort(url, payload.ticket).pipe(
+          Effect.catchTag("AutomationClientError", (error) =>
+            Effect.fail(
+              error.status === 404
+                ? Errors.unknownSession(payload.ticket, payload.ticket)
+                : Errors.RunFailed.make(
+                    Object.assign(
+                      { message: error.message },
+                      error.cause === undefined ? undefined : { cause: error.cause },
+                    ),
                   ),
-                ),
-          ),
-        ),
-      );
-      yield* log.info(`aborted ${job.value.action}; ${url}`, {
-        location: Log.Locations.automation,
-        agentId: payload.ticket,
-      });
-      yield* automation
-        .finish(job.value.id, "aborted", "aborted")
-        .pipe(
-          Effect.mapError((error) =>
-            Errors.Internal.make({ cause: error, agentId: payload.ticket }),
+            ),
           ),
         );
-      return ok;
-    }),
+        const closed = yield* automation
+          .finish(job.value.id, "aborted", "aborted")
+          .pipe(
+            Effect.mapError((error) =>
+              Errors.Internal.make({ cause: error, agentId: payload.ticket }),
+            ),
+          );
+        if (closed) {
+          yield* log.info(`aborted ${job.value.action}; ${url}`, {
+            location: Log.Locations.automation,
+            agentId: payload.ticket,
+          });
+        }
+        // The client already stopped; a lost finish race is another closer.
+        return ok;
+      }),
+    uninterruptible,
   ),
 );
 
