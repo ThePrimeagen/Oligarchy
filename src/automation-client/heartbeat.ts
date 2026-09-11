@@ -21,7 +21,7 @@ const detail = (error: unknown): string =>
 
 // Announces this process under `url`: its `servers` row is written now and every thirty seconds
 // as an automation-client, with the host's stats and qemus 0 — this process boots no guests —
-// jobs the size of the running map, and max_jobs the --jobs it was started with. The row's
+// jobs the size of the running map, and max_jobs the --max-jobs it was started with. The row's
 // generation counts the writes, so a number that stops moving is a client that stopped without
 // a chance to leave. A tick that fails is one error line; the next tick runs. The row is this
 // process's word on itself, so a shutdown deletes it: registered before the loop so the fiber

@@ -10,13 +10,13 @@ import * as Errors from "../shared/errors.ts";
 
 // One above the automation server's, so both run on one host in development.
 const DEFAULT_PORT = 54322;
-const DEFAULT_JOBS = 1;
+const DEFAULT_MAX_JOBS = 1;
 
 export type AutomationClient<RServe> = {
   readonly serve: (
     port: number,
     url: Option.Option<string>,
-    jobs: number,
+    maxJobs: number,
   ) => Layer.Layer<never, HttpServerError.ServeError, RServe>;
   readonly serverFailed: Deferred.Deferred<never, HttpServerError.ServeError>;
 };
@@ -44,13 +44,13 @@ export const makeAutomationClientCommand = <RServe>(server: AutomationClient<RSe
           "Announce this client to the fleet under this url, every 30 seconds, and delete the row on shutdown",
         ),
       ),
-      jobs: Flag.integer("jobs").pipe(
-        Flag.withSchema(Domain.Jobs),
-        Flag.withDefault(DEFAULT_JOBS),
+      maxJobs: Flag.integer("max-jobs").pipe(
+        Flag.withSchema(Domain.MaxJobs),
+        Flag.withDefault(DEFAULT_MAX_JOBS),
         Flag.withDescription("How many jobs this process can run at once"),
       ),
     },
-    ({ port, url, jobs }) =>
+    ({ port, url, maxJobs }) =>
       Effect.gen(function* () {
         const log = yield* Log.Log;
         const database = yield* Client.Database;
@@ -65,7 +65,7 @@ export const makeAutomationClientCommand = <RServe>(server: AutomationClient<RSe
             ),
           );
           return yield* Effect.raceFirst(
-            Layer.launch(server.serve(port, url, jobs)),
+            Layer.launch(server.serve(port, url, maxJobs)),
             Deferred.await(server.serverFailed),
           );
         });

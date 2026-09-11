@@ -53,7 +53,7 @@ const ServerLive = (
   automation: boolean,
   port: number,
   url: Option.Option<string>,
-  jobs: number,
+  maxJobs: number,
 ) =>
   Layer.effectDiscard(
     Effect.gen(function* () {
@@ -64,7 +64,7 @@ const ServerLive = (
       );
       yield* Option.match(url, {
         onNone: () => Effect.void,
-        onSome: (announced) => Heartbeat.announce(announced, jobs),
+        onSome: (announced) => Heartbeat.announce(announced, maxJobs),
       });
     }),
   ).pipe(

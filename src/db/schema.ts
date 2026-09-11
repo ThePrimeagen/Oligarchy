@@ -209,7 +209,7 @@ export type ServerStats = {
 // other kind: same heartbeat, listed apart from the qemu fleet. id is the stable handle a
 // job stores when it is claimed; url remains the key a heartbeat upserts on. jobs is how many
 // are running now (a qemu server's live sessions, an automation-client's in-flight runs);
-// max_jobs is the --jobs the process was started with. Both are 0 and 1 until a heartbeat
+// max_jobs is the --max-jobs the process was started with. Both are 0 and 1 until a heartbeat
 // writes them, including a row an operator added.
 export const servers = pgTable("servers", {
   id: uuid("id").notNull().defaultRandom().unique(),

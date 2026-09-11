@@ -74,10 +74,10 @@ const fakeServer = (missing: ReadonlyArray<string> = []) => {
         checked.push(display);
         return missing;
       }),
-    serve: (display, automation, port, url, jobs) =>
+    serve: (display, automation, port, url, maxJobs) =>
       Layer.effectDiscard(
         Effect.gen(function* () {
-          served.push([display, automation, port, url, jobs]);
+          served.push([display, automation, port, url, maxJobs]);
           yield* Deferred.succeed(listening, undefined);
         }),
       ),
@@ -165,7 +165,7 @@ describe("qemu server command flags", () => {
       expect(stdout.join("\n")).toContain("--display");
       expect(stdout.join("\n")).toContain("--port");
       expect(stdout.join("\n")).toContain("--url");
-      expect(stdout.join("\n")).toContain("--jobs");
+      expect(stdout.join("\n")).toContain("--max-jobs");
     }),
   );
 
@@ -205,29 +205,29 @@ describe("qemu server command flags", () => {
     }),
   );
 
-  it.effect("--jobs 4 reaches the server as given", () =>
+  it.effect("--max-jobs 4 reaches the server as given", () =>
     Effect.gen(function* () {
       const fake = fakeServer();
       const log = FakeLog.fakeLog();
-      const fiber = yield* Effect.forkChild(run(fake.server, ["--jobs", "4"], log));
+      const fiber = yield* Effect.forkChild(run(fake.server, ["--max-jobs", "4"], log));
       yield* Deferred.await(fake.listening);
       yield* Fiber.interrupt(fiber);
       expect(fake.served).toEqual([["none", false, 42069, Option.none(), 4]]);
     }),
   );
 
-  it.effect("--jobs 0 is a usage error that touches nothing (unhappy)", () =>
+  it.effect("--max-jobs 0 is a usage error that touches nothing (unhappy)", () =>
     Effect.gen(function* () {
       const fake = fakeServer();
       const log = FakeLog.fakeLog();
-      const error = yield* Effect.flip(run(fake.server, ["--jobs", "0"], log));
+      const error = yield* Effect.flip(run(fake.server, ["--max-jobs", "0"], log));
       expect(error._tag).toBe("ShowHelp");
       if (error._tag === "ShowHelp") {
         expect(error.errors.length).toBeGreaterThan(0);
         expect(error.errors[0]?._tag).toBe("InvalidValue");
       }
       const stderr = yield* TestConsole.errorLines;
-      expect(stderr.join("\n")).toContain("jobs must be at least 1");
+      expect(stderr.join("\n")).toContain("max-jobs must be at least 1");
       expect(fake.checked).toEqual([]);
       expect(fake.served).toEqual([]);
       expect(log.lines).toEqual([]);

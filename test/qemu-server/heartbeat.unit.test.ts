@@ -64,7 +64,7 @@ describe("heartbeat happy path", () => {
       }),
   );
 
-  it.effect("writes the running qemus as jobs and --jobs as maxJobs", () =>
+  it.effect("writes the running qemus as jobs and --max-jobs as maxJobs", () =>
     Effect.gen(function* () {
       const store = Stores.fakeServerStore();
       const scope = yield* Scope.make();
