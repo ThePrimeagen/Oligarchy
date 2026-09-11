@@ -400,6 +400,53 @@ describeWithDatabase("automation client POST /abort", () => {
     }),
   );
 
+  it.live("kills a SIGTERM-resistant opencode after the force-kill deadline", () =>
+    Effect.promise(async () => {
+      const startedDir = mkdtempSync(join(tmpdir(), "oligarchy-opencode-started-"));
+      const started = join(startedDir, "ready");
+      const bin = installOpencode(`trap "" TERM; touch "${started}"; sleep 60`);
+      const port = await freePort();
+      const process = spawnAutomationClient(
+        ["--port", String(port)],
+        {},
+        `${bin}:${processEnv.PATH ?? ""}`,
+      );
+      try {
+        await process.waitFor(
+          new RegExp(`automation client listening on 127.0.0.1:${String(port)}`),
+        );
+        const running = request(
+          port,
+          "/run",
+          { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+          JSON.stringify({ prompt: "do the work", ticket: "OLI-42" }),
+        );
+        const began = Date.now();
+        while (!existsSync(started)) {
+          if (Date.now() - began > 10_000) {
+            throw new Error("opencode did not start");
+          }
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        const aborted = await request(
+          port,
+          "/abort",
+          { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+          JSON.stringify({ ticket: "OLI-42" }),
+        );
+        expect(aborted.status).toBe(200);
+        expect(await aborted.json()).toEqual({ ok: "true" });
+        const runResponse = await running;
+        expect(runResponse.status).toBe(500);
+      } finally {
+        process.child.kill("SIGTERM");
+        await process.exited;
+        rmSync(bin, { recursive: true, force: true });
+        rmSync(startedDir, { recursive: true, force: true });
+      }
+    }),
+  );
+
   it.live("an unknown ticket is 404", () =>
     Effect.promise(async () => {
       const bin = installOpencode("exit 0");

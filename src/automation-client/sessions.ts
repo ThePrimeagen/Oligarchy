@@ -23,8 +23,19 @@ const make = Effect.gen(function* () {
     return yield* Effect.scoped(
       Effect.gen(function* () {
         const handle = yield* Cli.spawn(OpenCode.BIN, OpenCode.args(prompt));
-        yield* Ref.update(running, (map) => mapWith(map, ticket, handle));
-        yield* Effect.addFinalizer(() => Ref.update(running, (map) => mapWithout(map, ticket)));
+        const claimed = yield* Ref.modify(running, (map) =>
+          map.has(ticket)
+            ? ([false, map] as const)
+            : ([true, mapWith(map, ticket, handle)] as const),
+        );
+        if (!claimed) {
+          return yield* Effect.die(`ticket "${ticket}" is already running`);
+        }
+        yield* Effect.addFinalizer(() =>
+          Ref.update(running, (map) =>
+            map.get(ticket) === handle ? mapWithout(map, ticket) : map,
+          ),
+        );
         return yield* Cli.awaitExit(OpenCode.BIN, handle);
       }),
     ).pipe(
@@ -34,15 +45,24 @@ const make = Effect.gen(function* () {
   });
 
   const abort = Effect.fn("Sessions.abort")(function* (ticket: string) {
-    const handle = yield* Ref.modify(running, (map) => {
-      const found = map.get(ticket);
-      return found === undefined ? [undefined, map] : [found, mapWithout(map, ticket)];
-    });
+    const handle = (yield* Ref.get(running)).get(ticket);
     if (handle === undefined) {
       return yield* Errors.unknownSession(ticket, ticket);
     }
-    // A child already gone cannot be killed.
-    return yield* handle.kill().pipe(Effect.catch(() => Effect.void));
+    return yield* handle
+      .kill({
+        killSignal: "SIGTERM",
+        forceKillAfter: Cli.FORCE_KILL_AFTER,
+      })
+      .pipe(
+        Effect.catch((error) =>
+          // A child already gone cannot be killed. isRunning can itself fail; treat that as still
+          // running so a probe failure does not look like a successful abort.
+          Effect.flatMap(handle.isRunning.pipe(Effect.orElseSucceed(() => true)), (alive) =>
+            alive ? Errors.RunFailed.make({ message: error.message, cause: error }) : Effect.void,
+          ),
+        ),
+      );
   });
 
   return { run, abort };

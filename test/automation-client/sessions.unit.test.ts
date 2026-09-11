@@ -1,8 +1,10 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { Effect, Fiber, Layer } from "effect";
+import { Cause, Effect, Exit, Fiber, Layer } from "effect";
+import { TestClock } from "effect/testing";
 import * as OpenCode from "../../src/automation-client/opencode.ts";
 import * as Sessions from "../../src/automation-client/sessions.ts";
+import * as Cli from "../../src/cli.ts";
 import * as FakeSpawner from "../support/fake-spawner.ts";
 
 const TICKET = "OLI-42";
@@ -66,6 +68,9 @@ describe("Sessions.abort happy path", () => {
       expect(spawner.spawned[0]).toBeDefined();
       yield* sessions.abort(TICKET);
       expect(spawner.spawned[0]?.kills).toEqual(["SIGTERM"]);
+      expect(spawner.spawned[0]?.killOptions).toEqual([
+        { killSignal: "SIGTERM", forceKillAfter: Cli.FORCE_KILL_AFTER },
+      ]);
       const error = yield* Effect.flip(Fiber.join(running));
       expect(error._tag).toBe("RunFailed");
       expect(error.message).toContain("SIGTERM");
@@ -89,6 +94,45 @@ describe("Sessions.abort happy path", () => {
       yield* Effect.flip(Fiber.join(first));
       yield* spawner.spawned[1]?.exit(0) ?? Effect.void;
       yield* Fiber.join(second);
+    }).pipe(Effect.provide(layer(spawner)));
+  });
+
+  it.effect("escalates to SIGKILL when the CLI ignores SIGTERM", () => {
+    const spawner = FakeSpawner.fakeSpawner(() => ({ ignoreTerm: true }));
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions.Sessions;
+      const running = yield* Effect.forkChild(sessions.run(TICKET, "do the work"));
+      for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
+        yield* Effect.yieldNow;
+      }
+      const aborting = yield* Effect.forkChild(sessions.abort(TICKET));
+      for (let i = 0; i < 100 && (spawner.spawned[0]?.kills.length ?? 0) === 0; i++) {
+        yield* Effect.yieldNow;
+      }
+      expect(spawner.spawned[0]?.kills).toEqual(["SIGTERM"]);
+      expect(aborting.pollUnsafe()).toBeUndefined();
+      yield* TestClock.adjust(Cli.FORCE_KILL_AFTER);
+      yield* Fiber.join(aborting);
+      expect(spawner.spawned[0]?.kills).toEqual(["SIGTERM", "SIGKILL"]);
+      const error = yield* Effect.flip(Fiber.join(running));
+      expect(error._tag).toBe("RunFailed");
+    }).pipe(Effect.provide(layer(spawner)));
+  });
+
+  it.effect("succeeds when kill fails because the child has already exited", () => {
+    const spawner = FakeSpawner.fakeSpawner(() => ({
+      killError: "Failed to kill child process",
+      alreadyDeadOnKill: true,
+    }));
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions.Sessions;
+      const running = yield* Effect.forkChild(sessions.run(TICKET, "do the work"));
+      for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
+        yield* Effect.yieldNow;
+      }
+      yield* sessions.abort(TICKET);
+      const error = yield* Effect.flip(Fiber.join(running));
+      expect(error._tag).toBe("RunFailed");
     }).pipe(Effect.provide(layer(spawner)));
   });
 });
@@ -117,6 +161,49 @@ describe("Sessions.abort unhappy path", () => {
         _tag: "UnknownSession",
         message: `unknown session "${TICKET}"`,
       });
+    }).pipe(Effect.provide(layer(spawner)));
+  });
+
+  it.effect("a kill that fails while the child still runs is RunFailed and stays abortable", () => {
+    const spawner = FakeSpawner.fakeSpawner(() => ({
+      killError: "Failed to kill child process",
+    }));
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions.Sessions;
+      const running = yield* Effect.forkChild(sessions.run(TICKET, "do the work"));
+      for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
+        yield* Effect.yieldNow;
+      }
+      const error = yield* Effect.flip(sessions.abort(TICKET));
+      expect(error).toMatchObject({
+        _tag: "RunFailed",
+        message: "Unknown: ChildProcess.kill: Failed to kill child process",
+      });
+      expect(yield* spawner.spawned[0]?.isRunning ?? Effect.succeed(false)).toBe(true);
+      const again = yield* Effect.flip(sessions.abort(TICKET));
+      expect(again._tag).toBe("RunFailed");
+      yield* spawner.spawned[0]?.exit(0) ?? Effect.void;
+      yield* Fiber.join(running);
+    }).pipe(Effect.provide(layer(spawner)));
+  });
+
+  it.effect("a second run of the same ticket is a defect and leaves the first abortable", () => {
+    const spawner = FakeSpawner.fakeSpawner(() => ({}));
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions.Sessions;
+      const first = yield* Effect.forkChild(sessions.run(TICKET, "first"));
+      for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
+        yield* Effect.yieldNow;
+      }
+      const second = yield* Effect.forkChild(sessions.run(TICKET, "second"));
+      for (let i = 0; i < 100 && spawner.spawned.length < 2; i++) {
+        yield* Effect.yieldNow;
+      }
+      const exit = yield* Fiber.await(second);
+      expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true);
+      yield* sessions.abort(TICKET);
+      expect(spawner.spawned[0]?.kills).toEqual(["SIGTERM"]);
+      yield* Effect.flip(Fiber.join(first));
     }).pipe(Effect.provide(layer(spawner)));
   });
 });

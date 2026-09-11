@@ -184,7 +184,7 @@ export const run = HttpApiEndpoint.post("run", "/run", {
 export const abort = HttpApiEndpoint.post("abort", "/abort", {
   payload: Contract.AbortBody,
   success: Contract.Ok,
-  error: Errors.UnknownSessionWire,
+  error: [Errors.UnknownSessionWire, Errors.RunFailedWire],
 });
 
 export class Runs extends HttpApiGroup.make("Runs")

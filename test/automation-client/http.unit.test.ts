@@ -315,6 +315,30 @@ describe("POST /abort authentication and decoding", () => {
 });
 
 describe("POST /abort unhappy path", () => {
+  it.effect(
+    "a kill that fails while the child still runs is 500 and the ticket stays abortable",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture(() => ({ killError: "Failed to kill child process" }));
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          const pending = yield* Effect.forkChild(run(http));
+          for (let i = 0; i < 100 && fixed.spawner.spawned[0] === undefined; i++) {
+            yield* Effect.yieldNow;
+          }
+          const response = yield* abort(http);
+          expect(response.status).toBe(500);
+          expect(yield* response.json).toEqual({
+            error: "Unknown: ChildProcess.kill: Failed to kill child process",
+          });
+          const again = yield* abort(http);
+          expect(again.status).toBe(500);
+          yield* fixed.spawner.spawned[0]?.exit(0) ?? Effect.void;
+          expect((yield* Fiber.join(pending)).status).toBe(200);
+        }).pipe(Effect.provide(serve(fixed)));
+      }),
+  );
+
   it.effect("an unknown ticket is 404 and one error line", () =>
     Effect.gen(function* () {
       const fixed = fixture();
