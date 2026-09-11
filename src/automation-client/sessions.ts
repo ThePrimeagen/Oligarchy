@@ -17,66 +17,78 @@ const mapWithout = <V>(map: ReadonlyMap<string, V>, key: string): ReadonlyMap<st
   return next;
 };
 
+type Entry = ChildProcessSpawner.ChildProcessHandle | "starting";
+
 const make = Effect.gen(function* () {
-  const running = yield* Ref.make<ReadonlyMap<string, ChildProcessSpawner.ChildProcessHandle>>(
-    new Map(),
-  );
+  const running = yield* Ref.make<ReadonlyMap<string, Entry>>(new Map());
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const maxJobs = yield* MaxJobs;
 
   const run = Effect.fn("Sessions.run")(function* (ticket: string, prompt: string) {
-    const current = yield* Ref.get(running);
-    if (!current.has(ticket) && current.size >= maxJobs) {
+    const reserved = yield* Ref.modify(running, (map) => {
+      if (map.has(ticket)) {
+        return ["duplicate", map] as const;
+      }
+      if (map.size >= maxJobs) {
+        return ["full", map] as const;
+      }
+      return ["ok", mapWith(map, ticket, "starting")] as const;
+    });
+    if (reserved === "full") {
       return yield* Errors.AtCapacity.make({});
     }
-    const outcome = yield* Effect.scoped(
+    if (reserved === "duplicate") {
+      return yield* Effect.die(`ticket "${ticket}" is already running`);
+    }
+    return yield* Effect.scoped(
       Effect.gen(function* () {
         const handle = yield* Cli.spawn(OpenCode.BIN, OpenCode.args(prompt));
-        const claimed = yield* Ref.modify(running, (map) => {
-          if (map.has(ticket)) {
-            return ["duplicate", map] as const;
-          }
-          if (map.size >= maxJobs) {
-            return ["full", map] as const;
-          }
-          return ["ok", mapWith(map, ticket, handle)] as const;
-        });
-        if (claimed === "duplicate") {
-          return yield* Effect.die(`ticket "${ticket}" is already running`);
-        }
-        if (claimed === "full") {
-          // The slot was never taken; a child already gone is fine.
+        const claimed = yield* Ref.modify(running, (map) =>
+          map.get(ticket) === "starting"
+            ? ([true, mapWith(map, ticket, handle)] as const)
+            : ([false, map] as const),
+        );
+        if (!claimed) {
+          // Aborted while starting; the slot is already gone.
           yield* handle
             .kill({
               killSignal: "SIGTERM",
               forceKillAfter: Cli.FORCE_KILL_AFTER,
             })
             .pipe(Effect.orElseSucceed(() => undefined));
-          return "full" as const;
+          return yield* Effect.void;
         }
         yield* Effect.addFinalizer(() =>
           Ref.update(running, (map) =>
             map.get(ticket) === handle ? mapWithout(map, ticket) : map,
           ),
         );
-        yield* Cli.awaitExit(OpenCode.BIN, handle);
-        return "ok" as const;
+        return yield* Cli.awaitExit(OpenCode.BIN, handle);
       }),
     ).pipe(
       Effect.mapError((error) => Errors.RunFailed.make({ message: error.message, cause: error })),
+      // A spawn that failed still holds "starting"; drop it so the slot can be reused.
+      Effect.ensuring(
+        Ref.update(running, (map) =>
+          map.get(ticket) === "starting" ? mapWithout(map, ticket) : map,
+        ),
+      ),
       Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
     );
-    if (outcome === "full") {
-      return yield* Errors.AtCapacity.make({});
-    }
-    return yield* Effect.void;
   });
 
   const abort = Effect.fn("Sessions.abort")(function* (ticket: string) {
-    const handle = (yield* Ref.get(running)).get(ticket);
-    if (handle === undefined) {
+    const entry = (yield* Ref.get(running)).get(ticket);
+    if (entry === undefined) {
       return yield* Errors.unknownSession(ticket, ticket);
     }
+    if (entry === "starting") {
+      yield* Ref.update(running, (map) =>
+        map.get(ticket) === "starting" ? mapWithout(map, ticket) : map,
+      );
+      return yield* Effect.void;
+    }
+    const handle = entry;
     return yield* handle
       .kill({
         killSignal: "SIGTERM",

@@ -142,6 +142,49 @@ describe("Sessions.run unhappy path", () => {
       yield* Fiber.join(running);
     }).pipe(Effect.provide(layer(spawner, 1)));
   });
+
+  it.effect("two concurrent runs at max-jobs 1: one AtCapacity and only one spawn", () => {
+    const spawner = FakeSpawner.fakeSpawner(() => ({}));
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions.Sessions;
+      const first = yield* Effect.forkChild(sessions.run(TICKET, "first"));
+      const second = yield* Effect.forkChild(sessions.run(OTHER, "second"));
+      for (let i = 0; i < 100 && spawner.spawned.length === 0; i++) {
+        yield* Effect.yieldNow;
+      }
+      expect(spawner.spawned).toHaveLength(1);
+      yield* spawner.spawned[0]?.exit(0) ?? Effect.void;
+      const exits = [yield* Fiber.await(first), yield* Fiber.await(second)];
+      const tags = exits.map((exit) => {
+        if (Exit.isSuccess(exit)) {
+          return "ok";
+        }
+        const error = Cause.squash(exit.cause);
+        return typeof error === "object" && error !== null && "_tag" in error
+          ? String(error._tag)
+          : "other";
+      });
+      expect(tags.sort()).toEqual(["AtCapacity", "ok"]);
+      expect(yield* sessions.jobs).toBe(0);
+    }).pipe(Effect.provide(layer(spawner, 1)));
+  });
+
+  it.effect("a spawn failure frees the reserved slot for the next ticket", () => {
+    let attempts = 0;
+    const spawner = FakeSpawner.fakeSpawner(() =>
+      ++attempts === 1 ? { spawnError: "spawn opencode ENOENT" } : { exitCode: 0 },
+    );
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions.Sessions;
+      expect(yield* Effect.flip(sessions.run(TICKET, "first"))).toMatchObject({
+        _tag: "RunFailed",
+        message: "spawn opencode ENOENT",
+      });
+      expect(yield* sessions.jobs).toBe(0);
+      yield* sessions.run(OTHER, "second");
+      expect(yield* sessions.jobs).toBe(0);
+    }).pipe(Effect.provide(layer(spawner, 1)));
+  });
 });
 
 describe("Sessions.abort happy path", () => {
