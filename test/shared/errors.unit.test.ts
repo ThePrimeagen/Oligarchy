@@ -107,6 +107,12 @@ const cases: ReadonlyArray<WireCase> = [
     status: 503,
   },
   {
+    name: "AtCapacity",
+    wire: Errors.AtCapacityWire,
+    error: Errors.AtCapacity.make({}),
+    status: 429,
+  },
+  {
     name: "RunFailed",
     wire: Errors.RunFailedWire,
     error: Errors.RunFailed.make({ message: "out of token credits" }),

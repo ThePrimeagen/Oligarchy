@@ -36,7 +36,7 @@ server.on("error", (cause) => {
 
 // The heartbeat starts once the listener is up, in the same scope: a port refusal announces
 // nothing, and a shutdown deletes the row it wrote.
-const ServerLive = (port: number, url: Option.Option<string>) =>
+const ServerLive = (port: number, url: Option.Option<string>, maxJobs: number) =>
   Layer.effectDiscard(
     Effect.gen(function* () {
       const log = yield* Log.Log;
@@ -47,7 +47,7 @@ const ServerLive = (port: number, url: Option.Option<string>) =>
       );
       yield* Option.match(url, {
         onNone: () => Effect.void,
-        onSome: (announced) => Heartbeat.announce(announced),
+        onSome: (announced) => Heartbeat.announce(announced, maxJobs),
       });
     }),
   ).pipe(
@@ -58,6 +58,7 @@ const ServerLive = (port: number, url: Option.Option<string>) =>
       }).pipe(Layer.provide(NodeHttpServer.layer(() => server, { host: HOST, port }))),
     ),
     Layer.provide(Sessions.Sessions.layer),
+    Layer.provide(Layer.succeed(Sessions.MaxJobs)(maxJobs)),
     Layer.provide(Stats.Stats.layer),
     Layer.provide(Layer.succeed(HttpMiddleware.TracerDisabledWhen)(() => true)),
   );

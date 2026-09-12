@@ -3,6 +3,7 @@ import { it } from "@effect/vitest";
 import { Deferred, Effect, Exit, Fiber, Layer, Scope } from "effect";
 import { TestClock } from "effect/testing";
 import * as Heartbeat from "../../src/automation-client/heartbeat.ts";
+import * as Sessions from "../../src/automation-client/sessions.ts";
 import * as Stats from "../../src/qemu/stats.ts";
 import * as Contract from "../../src/shared/contract.ts";
 import * as Errors from "../../src/shared/errors.ts";
@@ -20,7 +21,7 @@ const ROW_STATS = {
 };
 
 // One heartbeat as the store records it: this process announces itself as an automation-client.
-const ANNOUNCED = { url: URL, type: "automation-client", stats: ROW_STATS };
+const ANNOUNCED = { url: URL, type: "automation-client", stats: ROW_STATS, jobs: 0, maxJobs: 1 };
 const REGISTERED = { url: URL, type: "automation-client" };
 
 const refused = Errors.DatabaseError.make({
@@ -34,12 +35,26 @@ const fakeStats = (
     Effect.succeed(Contract.Stats.make({ qemus, ...FakeQemu.ZERO_STATS })),
 ): Layer.Layer<Stats.Stats> => Layer.succeed(Stats.Stats)(Stats.Stats.of({ collect }));
 
+const fakeSessions = (jobs = 0): Layer.Layer<Sessions.Sessions> =>
+  Layer.succeed(Sessions.Sessions)(
+    Sessions.Sessions.of({
+      run: () => Effect.die("Unexpected Sessions.run"),
+      abort: () => Effect.die("Unexpected Sessions.abort"),
+      jobs: Effect.succeed(jobs),
+    }),
+  );
+
 // The loop in a scope of its own, so a test can close it and prove the ticking stops.
-const start = (store: Stores.FakeServerStore, stats = fakeStats(), log = FakeLog.fakeLog()) =>
+const start = (
+  store: Stores.FakeServerStore,
+  stats = fakeStats(),
+  log = FakeLog.fakeLog(),
+  sessions = fakeSessions(),
+) =>
   Effect.gen(function* () {
     const scope = yield* Scope.make();
-    yield* Heartbeat.announce(URL).pipe(
-      Effect.provide(Layer.mergeAll(stats, store.layer, log.layer)),
+    yield* Heartbeat.announce(URL, 1).pipe(
+      Effect.provide(Layer.mergeAll(stats, sessions, store.layer, log.layer)),
       Scope.provide(scope),
     );
     return { scope, log };
@@ -65,6 +80,22 @@ describe("automation-client heartbeat happy path", () => {
         ).toBe(true);
         expect(log.lines).toEqual([]);
       }),
+  );
+
+  it.effect("writes the running map size as jobs and --max-jobs as maxJobs", () =>
+    Effect.gen(function* () {
+      const store = Stores.fakeServerStore();
+      const scope = yield* Scope.make();
+      yield* Heartbeat.announce(URL, 4).pipe(
+        Effect.provide(
+          Layer.mergeAll(fakeStats(), fakeSessions(2), store.layer, FakeLog.fakeLog().layer),
+        ),
+        Scope.provide(scope),
+      );
+      expect(store.heartbeats).toEqual([
+        { url: URL, type: "automation-client", stats: ROW_STATS, jobs: 2, maxJobs: 4 },
+      ]);
+    }),
   );
 
   it.effect("stops when the scope it was started in closes", () =>
@@ -135,13 +166,13 @@ describe("automation-client heartbeat unhappy path", () => {
         let attempts = 0;
         const written: Array<typeof ANNOUNCED> = [];
         const store = Stores.fakeServerStore({
-          heartbeat: (url, type, stats) =>
+          heartbeat: (url, type, stats, jobs, maxJobs) =>
             Effect.suspend(() => {
               attempts += 1;
               if (attempts === 1) {
                 return Effect.fail(refused);
               }
-              written.push({ url, type, stats });
+              written.push({ url, type, stats, jobs, maxJobs });
               return Effect.void;
             }),
         });
