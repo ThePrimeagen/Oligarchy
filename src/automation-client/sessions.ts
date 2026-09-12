@@ -25,7 +25,9 @@ export type ReserveQemu = (
   agent: string,
 ) => Effect.Effect<void, Errors.AtCapacity | Errors.Internal>;
 
-const make = (maxJobs: number, reserveQemu: ReserveQemu) =>
+export type RelinquishQemu = (agent: string) => Effect.Effect<void, Errors.Internal>;
+
+const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: RelinquishQemu) =>
   Effect.gen(function* () {
     const running = yield* Ref.make<ReadonlyMap<string, ChildProcessSpawner.ChildProcessHandle>>(
       new Map(),
@@ -45,8 +47,8 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu) =>
         agentId: ticket,
       });
 
-    // One reserve at a time: two tickets must not both pass the local check and reserve QEMU
-    // when only one slot remains.
+    // One reserve at a time: two tickets must not both reserve QEMU when only one local
+    // slot remains.
     const reserveGate = yield* Semaphore.make(1);
 
     const reserve = Effect.fn("Sessions.reserve")(function* (ticket: string) {
@@ -56,15 +58,22 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu) =>
           if (held.reserved.has(ticket)) {
             return yield* Effect.void;
           }
-          if (held.count >= maxJobs) {
+          // QEMU first: this client cannot hold a slot until the guest host has one.
+          // A full client still asks, then gives that slot back rather than leak it.
+          yield* reserveQemu(ticket);
+          const admitted = yield* Ref.modify(slots, (current) => {
+            if (current.count >= maxJobs) {
+              return [false, current] as const;
+            }
+            return [
+              true,
+              { count: current.count + 1, reserved: withItem(current.reserved, ticket) },
+            ] as const;
+          });
+          if (!admitted) {
+            yield* relinquishQemu(ticket);
             return yield* atCapacity(ticket);
           }
-          // QEMU first: this client cannot hold a slot until the guest host has one.
-          yield* reserveQemu(ticket);
-          return yield* Ref.update(slots, (current) => ({
-            count: current.count + 1,
-            reserved: withItem(current.reserved, ticket),
-          }));
         }),
       );
     });
@@ -145,6 +154,7 @@ export class Sessions extends Context.Service<Sessions>()("@oligarchy/automation
   static readonly layer = (
     maxJobs: number,
     reserveQemu: ReserveQemu,
+    relinquishQemu: RelinquishQemu,
   ): Layer.Layer<Sessions, never, ChildProcessSpawner.ChildProcessSpawner> =>
-    Layer.effect(this)(this.make(maxJobs, reserveQemu));
+    Layer.effect(this)(this.make(maxJobs, reserveQemu, relinquishQemu));
 }

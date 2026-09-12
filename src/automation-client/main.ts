@@ -89,11 +89,23 @@ const ServerLive = (maxJobs: number, port: number, url: Option.Option<string>) =
               agentId: agent,
             });
           };
+          const asInternal = (
+            agent: string,
+            error: ProxyClient.Failure,
+          ): Effect.Effect<never, Errors.Internal> =>
+            Errors.Internal.make({
+              cause: new Error(error.message),
+              agentId: agent,
+            });
           const reserveQemu: Sessions.ReserveQemu = (agent) =>
             proxy
               .reserve(Contract.ReserveAgentBody.make({ agent }))
               .pipe(Effect.catch((error) => asQemuError(agent, error)));
-          return Sessions.Sessions.layer(maxJobs, reserveQemu);
+          const relinquishQemu: Sessions.RelinquishQemu = (agent) =>
+            proxy
+              .relinquish(Contract.ReserveAgentBody.make({ agent }))
+              .pipe(Effect.catch((error) => asInternal(agent, error)));
+          return Sessions.Sessions.layer(maxJobs, reserveQemu, relinquishQemu);
         }),
       ),
     ),

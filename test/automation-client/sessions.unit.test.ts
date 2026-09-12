@@ -15,11 +15,15 @@ const MAX_JOBS = 2;
 
 const qemuOk = (): Sessions.ReserveQemu => () => Effect.void;
 
+const qemuRelinquishOk = (): Sessions.RelinquishQemu => () => Effect.void;
+
 const layer = (
   spawner: FakeSpawner.FakeSpawner,
   maxJobs = MAX_JOBS,
   reserveQemu: Sessions.ReserveQemu = qemuOk(),
-) => Sessions.Sessions.layer(maxJobs, reserveQemu).pipe(Layer.provide(spawner.layer));
+  relinquishQemu: Sessions.RelinquishQemu = qemuRelinquishOk(),
+) =>
+  Sessions.Sessions.layer(maxJobs, reserveQemu, relinquishQemu).pipe(Layer.provide(spawner.layer));
 
 const reservedRun = (ticket: string, prompt: string) =>
   Effect.gen(function* () {
@@ -404,19 +408,75 @@ describe("QEMU-first reserve", () => {
     }).pipe(Effect.provide(layer(spawner, 1, reserveQemu)));
   });
 
-  it.effect("a full client does not ask QEMU", () => {
-    let qemu = 0;
-    const reserveQemu: Sessions.ReserveQemu = () =>
+  it.effect("a QEMU reservation the client cannot take is relinquished and is AtCapacity", () => {
+    const qemu: Array<string> = [];
+    const givenBack: Array<string> = [];
+    const reserveQemu: Sessions.ReserveQemu = (agent) =>
       Effect.sync(() => {
-        qemu += 1;
+        qemu.push(`reserve ${agent}`);
+      });
+    const relinquishQemu: Sessions.RelinquishQemu = (agent) =>
+      Effect.sync(() => {
+        givenBack.push(agent);
       });
     const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
       yield* sessions.reserve(TICKET);
-      expect((yield* Effect.flip(sessions.reserve(OTHER)))._tag).toBe("AtCapacity");
-      expect(qemu).toBe(1);
-    }).pipe(Effect.provide(layer(spawner, 1, reserveQemu)));
+      const error = yield* Effect.flip(sessions.reserve(OTHER));
+      expect(error).toMatchObject({
+        _tag: "AtCapacity",
+        message: "at capacity: max-jobs is 1",
+        agentId: OTHER,
+      });
+      expect(qemu).toEqual([`reserve ${TICKET}`, `reserve ${OTHER}`]);
+      expect(givenBack).toEqual([OTHER]);
+      expect((yield* Effect.flip(sessions.run(OTHER, "second")))._tag).toBe("BadRequest");
+      expect(spawner.spawned).toHaveLength(0);
+      // The first ticket still holds the only slot.
+      expect((yield* Effect.flip(sessions.reserve("OLI-7")))._tag).toBe("AtCapacity");
+      expect(givenBack).toEqual([OTHER, "OLI-7"]);
+    }).pipe(Effect.provide(layer(spawner, 1, reserveQemu, relinquishQemu)));
+  });
+
+  it.effect("a successful reserve does not relinquish", () => {
+    let givenBack = 0;
+    const relinquishQemu: Sessions.RelinquishQemu = () =>
+      Effect.sync(() => {
+        givenBack += 1;
+      });
+    const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions.Sessions;
+      yield* sessions.reserve(TICKET);
+      expect(givenBack).toBe(0);
+    }).pipe(Effect.provide(layer(spawner, 1, qemuOk(), relinquishQemu)));
+  });
+
+  it.effect("a relinquish that fails after a full local reserve is Internal", () => {
+    const givenBack: Array<string> = [];
+    const relinquishQemu: Sessions.RelinquishQemu = (agent) =>
+      Effect.gen(function* () {
+        givenBack.push(agent);
+        return yield* Errors.Internal.make({
+          cause: new Error("qemu unreachable"),
+          agentId: agent,
+        });
+      });
+    const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions.Sessions;
+      yield* sessions.reserve(TICKET);
+      const error = yield* Effect.flip(sessions.reserve(OTHER));
+      expect(error).toMatchObject({
+        _tag: "Internal",
+        message: "internal error",
+        agentId: OTHER,
+      });
+      expect(givenBack).toEqual([OTHER]);
+      expect((yield* Effect.flip(sessions.run(OTHER, "second")))._tag).toBe("BadRequest");
+      expect(spawner.spawned).toHaveLength(0);
+    }).pipe(Effect.provide(layer(spawner, 1, qemuOk(), relinquishQemu)));
   });
 
   it.effect("a QEMU failure that is not 503 takes no local slot and is Internal", () => {

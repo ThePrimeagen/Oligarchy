@@ -52,6 +52,15 @@ export type RouterService = {
     HttpServerResponse.HttpServerResponse,
     Errors.NoServer | Errors.ServerFailed | Errors.Internal
   >;
+  // Forwards relinquish to the server that reserved this agent and forgets the agent
+  // when that server accepts it. There is no placement here: /reserve already chose.
+  readonly relinquish: (
+    request: HttpServerRequest.HttpServerRequest,
+    agent: string,
+  ) => Effect.Effect<
+    HttpServerResponse.HttpServerResponse,
+    Errors.BadRequest | Errors.ServerFailed | Errors.Internal
+  >;
   // Forwards start to the server that reserved this agent. There is no placement here:
   // /reserve already chose.
   readonly start: (
@@ -366,6 +375,32 @@ const make = Effect.gen(function* () {
     return yield* Errors.NoServer.make({ message: "no server available", agentId: agent });
   });
 
+  const relinquish = Effect.fn("Router.relinquish")(function* (
+    request: HttpServerRequest.HttpServerRequest,
+    agent: string,
+  ) {
+    const reserved = yield* store
+      .serverForAgent(agent)
+      .pipe(Effect.mapError((cause) => internal(cause, undefined, agent)));
+    if (Option.isNone(reserved)) {
+      return yield* Errors.BadRequest.make({ message: "no reservation", agentId: agent });
+    }
+    const who = { agentId: agent };
+    const url = reserved.value;
+    const response = yield* send(url, request).pipe(
+      Effect.mapError((error) => unreachable(url, error, who)),
+    );
+    const text = yield* response.text.pipe(
+      Effect.mapError((error) => unreachable(url, error, who)),
+    );
+    const headers = forwardedHeaders(response.headers);
+    if (response.status === 200) {
+      yield* store.clearAgent(agent).pipe(Effect.mapError((cause) => internal(cause, undefined, agent)));
+      yield* log.info(`relinquished; ${url}`, { location: Log.Locations.server, agentId: agent });
+    }
+    return HttpServerResponse.text(text, { status: response.status, headers });
+  });
+
   const forward = Effect.fn("Router.forward")(function* (
     request: HttpServerRequest.HttpServerRequest,
     id: string,
@@ -387,7 +422,15 @@ const make = Effect.gen(function* () {
     return passthrough(route.value, response, who);
   });
 
-  const service: RouterService = { register, unregister, servers, reserve, start, forward };
+  const service: RouterService = {
+    register,
+    unregister,
+    servers,
+    reserve,
+    relinquish,
+    start,
+    forward,
+  };
   return service;
 });
 

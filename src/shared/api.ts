@@ -49,6 +49,11 @@ export const reserve = HttpApiEndpoint.post("reserve", "/reserve", {
   error: [Errors.AtCapacityWire],
 });
 
+export const relinquish = HttpApiEndpoint.post("relinquish", "/relinquish", {
+  payload: Contract.ReserveAgentBody,
+  success: Contract.Ok,
+});
+
 export const start = HttpApiEndpoint.post("start", "/start", {
   payload: Contract.StartBody,
   success: Contract.StartResponse,
@@ -112,6 +117,7 @@ export const intentEnd = HttpApiEndpoint.post("intentEnd", "/intent/end", {
 // outermost and sees an Unauthorized on its way out.
 export class Sessions extends HttpApiGroup.make("Sessions")
   .add(reserve)
+  .add(relinquish)
   .add(start)
   .add(image)
   .add(serial)
@@ -132,6 +138,7 @@ export class QemuServerApi extends HttpApi.make("OligarchyQemuServer").add(Sessi
 // it, minus /stats (a fleet has no one cpu), behind the routing boundary.
 export class RoutedSessions extends HttpApiGroup.make("Sessions")
   .add(reserve)
+  .add(relinquish)
   .add(start)
   .add(image)
   .add(serial)

@@ -2202,4 +2202,62 @@ describe("capacity", () => {
       );
     }),
   );
+
+  it.effect("relinquish gives back an unused reservation so another agent can take it", () =>
+    Effect.gen(function* () {
+      const h = harness({ maxJobs: 1 });
+      yield* h.run(
+        Effect.gen(function* () {
+          const sessions = yield* Sessions.Sessions;
+          yield* sessions.reserve(AGENT);
+          expect((yield* Effect.flip(sessions.reserve(OTHER_AGENT)))._tag).toBe("AtCapacity");
+          yield* sessions.relinquish(AGENT);
+          yield* sessions.reserve(OTHER_AGENT);
+          expect((yield* Effect.flip(sessions.reserve(AGENT)))._tag).toBe("AtCapacity");
+          expect(h.sessions.sessions).toEqual([]);
+          expect(yield* qemus(sessions)).toBe(0);
+        }),
+      );
+    }),
+  );
+
+  it.effect("relinquish without a reservation is BadRequest", () =>
+    Effect.gen(function* () {
+      const h = harness({ maxJobs: 1 });
+      yield* h.run(
+        Effect.gen(function* () {
+          const sessions = yield* Sessions.Sessions;
+          const error = yield* Effect.flip(sessions.relinquish(AGENT));
+          expect(error).toMatchObject({
+            _tag: "BadRequest",
+            message: "no reservation",
+            agentId: AGENT,
+          });
+          yield* sessions.reserve(AGENT);
+          expect((yield* Effect.flip(sessions.relinquish(OTHER_AGENT)))._tag).toBe("BadRequest");
+          expect((yield* Effect.flip(sessions.reserve(OTHER_AGENT)))._tag).toBe("AtCapacity");
+        }),
+      );
+    }),
+  );
+
+  it.effect("relinquish after start is BadRequest and the running session keeps its slot", () =>
+    Effect.gen(function* () {
+      const h = harness({ maxJobs: 1 });
+      yield* h.run(
+        Effect.gen(function* () {
+          const { sessions, id } = yield* start();
+          const error = yield* Effect.flip(sessions.relinquish(AGENT));
+          expect(error).toMatchObject({
+            _tag: "BadRequest",
+            message: "no reservation",
+            agentId: AGENT,
+          });
+          expect((yield* Effect.flip(sessions.reserve(OTHER_AGENT)))._tag).toBe("AtCapacity");
+          expect(h.sessions.sessions.map((row) => row.id)).toEqual([id]);
+          expect(yield* qemus(sessions)).toBe(1);
+        }),
+      );
+    }),
+  );
 });

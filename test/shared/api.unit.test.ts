@@ -51,6 +51,7 @@ describe("QemuServerApi", () => {
     expect(table.sort()).toEqual(
       [
         "POST /reserve",
+        "POST /relinquish",
         "POST /start",
         "GET /image",
         "GET /serial",
@@ -68,6 +69,7 @@ describe("QemuServerApi", () => {
   it("builds every url through the client url builder", () => {
     const urls = HttpApiClient.urlBuilder(Api.QemuServerApi);
     expect(urls.Sessions.reserve()).toBe("/reserve");
+    expect(urls.Sessions.relinquish()).toBe("/relinquish");
     expect(urls.Sessions.start()).toBe("/start");
     expect(urls.Sessions.image({ query: { id: "abc", agent: "OLI-61" } })).toBe(
       "/image?id=abc&agent=OLI-61",
@@ -120,6 +122,7 @@ describe("QemuServerApi", () => {
     const sessions = [400, 401, 500];
     // 502: the machine failed to boot; 503: only /reserve, when the server is at --max-jobs.
     expect(byIdentifier(Api.QemuServerApi, "reserve").errors).toEqual([...sessions, 503]);
+    expect(byIdentifier(Api.QemuServerApi, "relinquish").errors).toEqual(sessions);
     expect(byIdentifier(Api.QemuServerApi, "start").errors).toEqual([...sessions, 502]);
     expect(byIdentifier(Api.QemuServerApi, "image").errors).toEqual(
       [...sessions, 403, 404, 502].sort((a, b) => a - b),
@@ -161,6 +164,7 @@ describe("QemuReverseProxyApi", () => {
     expect(table.sort()).toEqual(
       [
         "POST /reserve",
+        "POST /relinquish",
         "POST /start",
         "GET /image",
         "GET /serial",
@@ -214,6 +218,7 @@ describe("QemuReverseProxyApi", () => {
   it("declares the boundary's 400, 401, 500, 502 and 503 on every endpoint plus each endpoint's own", () => {
     const boundary = [400, 401, 500, 502, 503];
     expect(byIdentifier(reverse, "reserve").errors).toEqual(boundary);
+    expect(byIdentifier(reverse, "relinquish").errors).toEqual(boundary);
     expect(byIdentifier(reverse, "start").errors).toEqual(boundary);
     expect(byIdentifier(reverse, "image").errors).toEqual(ascending([...boundary, 403, 404]));
     expect(byIdentifier(reverse, "serial").errors).toEqual(ascending([...boundary, 403, 404]));

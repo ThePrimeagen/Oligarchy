@@ -722,6 +722,59 @@ describe("placement", () => {
     }),
   );
 
+  it.effect("POST /relinquish after reserve forwards to the reserved server and forgets the agent", () =>
+    Effect.gen(function* () {
+      const fixed = fixture((request, url) =>
+        url.pathname === "/relinquish" || url.pathname === "/reserve"
+          ? FakeHttp.json({ ok: "true" })
+          : fleet(request, url),
+      );
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      yield* Effect.gen(function* () {
+        const api = yield* qemuServerClient;
+        yield* api.Sessions.reserve({ payload: reserveBody });
+        const ok = yield* api.Sessions.relinquish({ payload: reserveBody });
+        expect(ok).toEqual(Contract.Ok.make({}));
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.store.agents.has(AGENT_ID)).toBe(false);
+      expect(
+        fixed.upstream.requests
+          .filter((request) => request.url.endsWith("/relinquish"))
+          .map((request) => request.url),
+      ).toEqual([`${SERVER_B}/relinquish`]);
+      expect(fixed.log.lines.filter((line) => line.text.startsWith("relinquished"))).toEqual([
+        {
+          level: "info",
+          text: `relinquished; ${SERVER_B}`,
+          location: "server",
+          agentId: AGENT_ID,
+          skipSentry: false,
+          cause: undefined,
+        },
+      ]);
+    }),
+  );
+
+  it.effect("POST /relinquish without a reservation is 400 no reservation", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      fixed.store.servers.push(qemu(SERVER_A));
+      yield* Effect.gen(function* () {
+        const api = yield* qemuServerClient;
+        const error = yield* Effect.flip(api.Sessions.relinquish({ payload: reserveBody }));
+        expect(error).toMatchObject({ _tag: "BadRequest", message: "no reservation" });
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.post("/relinquish", {
+          headers: { authorization: AUTHORIZATION },
+          body: HttpBody.jsonUnsafe(reserveBody),
+        });
+        expect(raw.status).toBe(400);
+        expect(yield* raw.json).toEqual({ error: "no reservation" });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.upstream.requests).toEqual([]);
+    }),
+  );
+
   it.effect("POST /start after reserve forwards to the reserved server", () =>
     Effect.gen(function* () {
       const fixed = fixture((request, url) =>
@@ -1399,6 +1452,7 @@ describe("forwarding refusals", () => {
 
   const everyRoute: ReadonlyArray<readonly [string, string, boolean]> = [
     ["POST", "/reserve", true],
+    ["POST", "/relinquish", true],
     ["POST", "/start", true],
     ["GET", `/image?id=${SESSION_ID}&agent=${AGENT_ID}`, false],
     ["GET", `/serial?id=${SESSION_ID}&agent=${AGENT_ID}`, false],

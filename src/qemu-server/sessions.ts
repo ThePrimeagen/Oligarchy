@@ -76,6 +76,9 @@ export type SessionsService = {
   // Takes a --max-jobs slot for this agent, before anything is minted or written. A second
   // reserve for the same agent is the same slot. Start consumes it and does not increment again.
   readonly reserve: (agent: string) => Effect.Effect<void, Errors.AtCapacity>;
+  // Gives back an unused reservation. Fails BadRequest when there is none, including after
+  // start has already consumed it: a running session keeps its slot.
+  readonly relinquish: (agent: string) => Effect.Effect<void, Errors.BadRequest>;
   // Consumes this agent's reservation. Fails BadRequest, before anything is minted or written,
   // when there is none.
   readonly start: (
@@ -453,6 +456,26 @@ const make = (maxJobs: number) =>
             ? Effect.void
             : Errors.AtCapacity.make({
                 message: `at capacity: max-jobs is ${String(maxJobs)}`,
+                agentId: agent,
+              }),
+      );
+    });
+
+    const relinquish = Effect.fn("Sessions.relinquish")(function* (agent: string) {
+      return yield* Effect.flatMap(
+        Ref.modify(slots, (held) =>
+          held.reserved.has(agent)
+            ? ([
+                true,
+                { count: held.count - 1, reserved: without(held.reserved, agent) },
+              ] as const)
+            : ([false, held] as const),
+        ),
+        (released) =>
+          released
+            ? Effect.void
+            : Errors.BadRequest.make({
+                message: "no reservation",
                 agentId: agent,
               }),
       );
@@ -992,6 +1015,7 @@ const make = (maxJobs: number) =>
 
     const service: SessionsService = {
       reserve,
+      relinquish,
       start,
       lookup,
       image,

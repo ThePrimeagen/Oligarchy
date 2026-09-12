@@ -44,7 +44,7 @@ const qemuOk = (): Sessions.ReserveQemu => () => Effect.void;
 
 const serve = (fixed: Fixture) =>
   HttpRouter.serve(Handlers.routes, { disableLogger: true, disableListenLog: true }).pipe(
-    Layer.provide(Sessions.Sessions.layer(fixed.maxJobs, qemuOk())),
+    Layer.provide(Sessions.Sessions.layer(fixed.maxJobs, qemuOk(), () => Effect.void)),
     Layer.provide(Layer.mergeAll(fixed.spawner.layer, fixed.log.layer, ProxyConfigLive)),
     Layer.provide(Layer.succeed(Log.ProcessAttribution)(Log.AutomationClientProcessAttribution)),
     Layer.provideMerge(NodeHttpServer.layerTest),

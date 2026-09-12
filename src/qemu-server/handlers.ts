@@ -30,6 +30,16 @@ export const SessionsLive = (display: Domain.QemuDisplay, automation: boolean) =
         uninterruptible,
       )
       .handle(
+        "relinquish",
+        ({ payload }) =>
+          Effect.gen(function* () {
+            const sessions = yield* Sessions.Sessions;
+            yield* sessions.relinquish(payload.agent);
+            return ok;
+          }),
+        uninterruptible,
+      )
+      .handle(
         "start",
         ({ payload }) =>
           Effect.gen(function* () {

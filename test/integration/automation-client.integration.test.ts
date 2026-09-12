@@ -163,7 +163,7 @@ const stubQemuReserve = async (): Promise<{
   readonly close: () => Promise<void>;
 }> => {
   const server = createHttpServer((req, res) => {
-    if (req.method === "POST" && req.url === "/reserve") {
+    if (req.method === "POST" && (req.url === "/reserve" || req.url === "/relinquish")) {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ ok: "true" }));
       return;

@@ -122,6 +122,26 @@ describe("Sessions endpoints happy path", () => {
     }),
   );
 
+  it.effect("POST /relinquish answers ok and hands the agent to Sessions", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const api = yield* client;
+        const ok = yield* api.Sessions.relinquish({
+          payload: Contract.ReserveAgentBody.make({ agent: AGENT_ID }),
+        });
+        expect(ok).toEqual(Contract.Ok.make({}));
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.sessions.calls).toEqual([
+        {
+          method: "relinquish",
+          args: [AGENT_ID],
+        },
+      ]);
+      expect(fixed.log.lines).toEqual([]);
+    }),
+  );
+
   it.effect("GET /image returns image/png bytes with x-image-url after a lookup", () =>
     Effect.gen(function* () {
       const fixed = fixture();
@@ -332,6 +352,7 @@ describe("Sessions endpoints happy path", () => {
 describe("authentication", () => {
   const sessionsRoutes: ReadonlyArray<readonly [string, string, boolean]> = [
     ["POST", "/reserve", true],
+    ["POST", "/relinquish", true],
     ["POST", "/start", true],
     ["GET", "/image?id=x&agent=y", false],
     ["GET", "/serial?id=x&agent=y", false],
@@ -903,6 +924,57 @@ describe("Sessions failures", () => {
           location: "server",
           agentId: AGENT_ID,
           skipSentry: false,
+          cause: undefined,
+        },
+      ]);
+      expect(fixed.reporter.reported).toEqual([]);
+    }),
+  );
+
+  it.effect("a relinquish without a reservation is 400 no reservation, attributed to the agent", () =>
+    Effect.gen(function* () {
+      const fixed = fixture({
+        sessions: FakeSessions.fakeSessions({
+          relinquish: (agent) =>
+            Effect.fail(
+              Errors.BadRequest.make({
+                message: "no reservation",
+                agentId: agent,
+              }),
+            ),
+        }),
+      });
+      yield* Effect.gen(function* () {
+        const api = yield* client;
+        const error = yield* Effect.flip(
+          api.Sessions.relinquish({
+            payload: Contract.ReserveAgentBody.make({ agent: AGENT_ID }),
+          }),
+        );
+        expect(error).toMatchObject({ _tag: "BadRequest", message: "no reservation" });
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.post("/relinquish", {
+          headers: { authorization: `Bearer ${TOKEN}` },
+          body: HttpBody.jsonUnsafe({ agent: AGENT_ID }),
+        });
+        expect(raw.status).toBe(400);
+        expect(yield* raw.json).toEqual({ error: "no reservation" });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.log.lines).toEqual([
+        {
+          level: "error",
+          text: "POST /relinquish failed: no reservation",
+          location: "server",
+          agentId: AGENT_ID,
+          skipSentry: true,
+          cause: undefined,
+        },
+        {
+          level: "error",
+          text: "POST /relinquish failed: no reservation",
+          location: "server",
+          agentId: AGENT_ID,
+          skipSentry: true,
           cause: undefined,
         },
       ]);
