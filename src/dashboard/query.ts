@@ -621,7 +621,6 @@ export function listProcessSeries(connectionString: string): Promise<ProcessSeri
         memoryBytes: processStats.memoryBytes,
         cpuPercent: processStats.cpuPercent,
         reportedAt: processStats.reportedAt,
-        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(processStats.reportedAt),
         rank: sql<number>`row_number() over (partition by ${processStats.type}, ${processStats.name} order by ${processStats.reportedAt} desc)`
           .mapWith(Number)
           .as("rn"),
@@ -636,7 +635,7 @@ export function listProcessSeries(connectionString: string): Promise<ProcessSeri
         memoryBytes: ranked.memoryBytes,
         cpuPercent: ranked.cpuPercent,
         reportedAt: ranked.reportedAt,
-        queriedAt: ranked.queriedAt,
+        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(processStats.reportedAt),
       })
       .from(ranked)
       .where(sql`${ranked.rank} <= ${PROCESS_SERIES_LIMIT}`)

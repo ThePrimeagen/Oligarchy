@@ -270,8 +270,8 @@ console.log(rows.map((row) => [row.name, row.type, row.jobs, row.samples.length,
     expect(result.stderr).toBe("");
     expect(result.code).toBe(0);
     expect(lines(result.stdout)).toEqual([
-      "series-auto automation-client 1 1 1 1",
       "series-qemu qemu 60 60 1 60",
+      "series-auto automation-client 1 1 1 1",
     ]);
   });
 
