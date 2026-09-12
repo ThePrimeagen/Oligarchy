@@ -592,10 +592,13 @@ describe("placement", () => {
     Effect.gen(function* () {
       const fixed = fixture();
       yield* Effect.gen(function* () {
-        // The reverse proxy's own contract decodes the 503; ./client sees ProxyRefusal 503.
+        // /start answers 503 twice over — the reverse proxy's own NoServer and a server's
+        // AtCapacity passed through — on one `{ error }` body, so the generated client cannot
+        // tell them apart by tag; the status and the message are the contract, as ./client's
+        // ProxyRefusal 503 reads them.
         const api = yield* qemuReverseProxyClient;
         const error = yield* Effect.flip(api.Sessions.start({ payload: startBody }));
-        expect(error).toMatchObject({ _tag: "NoServer", message: "no server registered" });
+        expect(error.message).toBe("no server registered");
         const http = yield* HttpClient.HttpClient;
         const raw = yield* http.post("/start", {
           headers: { authorization: AUTHORIZATION },
@@ -633,7 +636,7 @@ describe("placement", () => {
       yield* Effect.gen(function* () {
         const api = yield* qemuReverseProxyClient;
         const error = yield* Effect.flip(api.Sessions.start({ payload: startBody }));
-        expect(error).toMatchObject({ _tag: "NoServer", message: "no server available" });
+        expect(error.message).toBe("no server available");
       }).pipe(Effect.provide(serve(fixed)));
       expect(fixed.store.routes.size).toBe(0);
       expect(fixed.log.lines.map((line) => [line.level, line.text, line.agentId])).toEqual([

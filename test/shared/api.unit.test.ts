@@ -116,7 +116,8 @@ describe("QemuServerApi", () => {
 
   it("declares the error statuses of §2.4 plus the middleware's 400, 401 and 500", () => {
     const sessions = [400, 401, 500];
-    expect(byIdentifier(Api.QemuServerApi, "start").errors).toEqual([...sessions, 502]);
+    // 502: the machine failed to boot; 503: the server is at --max-jobs.
+    expect(byIdentifier(Api.QemuServerApi, "start").errors).toEqual([...sessions, 502, 503]);
     expect(byIdentifier(Api.QemuServerApi, "image").errors).toEqual(
       [...sessions, 403, 404, 502].sort((a, b) => a - b),
     );
@@ -278,7 +279,8 @@ describe("AutomationClientApi", () => {
     expect(run.group).toBe("Runs");
     expect(run.middleware).toEqual([Api.BearerAuth.key, Api.ApiBoundary.key]);
     expect(spec.paths["/run"]?.post?.security).toEqual([{ bearer: [] }]);
-    expect(run.errors).toEqual([400, 401, 500]);
+    // 500: opencode failed; 503: the client is at --max-jobs.
+    expect(run.errors).toEqual([400, 401, 500, 503]);
     const abort = byIdentifier(client, "abort");
     expect(abort.group).toBe("Runs");
     expect(abort.middleware).toEqual([Api.BearerAuth.key, Api.ApiBoundary.key]);
