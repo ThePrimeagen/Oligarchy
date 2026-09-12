@@ -59,11 +59,14 @@ const start = Command.make(
       onSome: (disk) =>
         Contract.StartBody.make({ iso, disk: path.resolve(disk), agent: input.agentId }),
     });
-    yield* proxy.reserve(Contract.ReserveAgentBody.make({ agent: input.agentId }));
     const started = yield* proxy.start(body);
     yield* Console.log(started.id);
   }),
-).pipe(Command.withDescription("Boot a machine from an ISO; prints the session id"));
+).pipe(
+  Command.withDescription(
+    "Boot a machine from an ISO; consumes a reservation held for --agent-id; prints the session id",
+  ),
+);
 
 const getImageFlags = { ...Flags.shared, sessionId: Flags.sessionId, output: Flags.output("PNG") };
 

@@ -59,8 +59,7 @@ const run = (args: ReadonlyArray<string>, options: Options = {}) =>
 
 const ok = () => FakeHttp.json({ ok: "true" });
 
-const startRespond: FakeHttp.Respond = (_request, url) =>
-  url.pathname === "/reserve" ? FakeHttp.json({ ok: "true" }) : FakeHttp.json({ id: ID });
+const startRespond: FakeHttp.Respond = () => FakeHttp.json({ id: ID });
 
 const parsed = (body: string): unknown => JSON.parse(body);
 
@@ -122,15 +121,35 @@ describe("client requests", () => {
         http: recorder.layer,
       });
       expect(recorder.requests.map((request) => `${request.method} ${request.url}`)).toEqual([
-        `POST ${SERVER}/reserve`,
         `POST ${SERVER}/start`,
       ]);
-      expect(parsed(recorder.requests[0]?.body ?? "")).toEqual({ agent: AGENT });
-      expect(parsed(recorder.requests[1]?.body ?? "")).toEqual({
+      expect(parsed(recorder.requests[0]?.body ?? "")).toEqual({
         iso: "https://example.com/omarchy.iso",
         agent: AGENT,
       });
       expect(yield* TestConsole.logLines).toEqual([ID]);
+    }),
+  );
+
+  it.effect("start without a reservation is a ProxyRefusal and does not print an id", () =>
+    Effect.gen(function* () {
+      const recorder = FakeHttp.recordRequests(() =>
+        FakeHttp.json({ error: "no reservation" }, 400),
+      );
+      const error = yield* Effect.flip(
+        run(["start", ...shared, "--iso", "https://example.com/omarchy.iso"], {
+          http: recorder.layer,
+        }),
+      );
+      expect(error).toMatchObject({
+        _tag: "ProxyRefusal",
+        status: 400,
+        message: "no reservation",
+      });
+      expect(recorder.requests.map((request) => `${request.method} ${request.url}`)).toEqual([
+        `POST ${SERVER}/start`,
+      ]);
+      expect(yield* TestConsole.logLines).toEqual([]);
     }),
   );
 
@@ -145,8 +164,10 @@ describe("client requests", () => {
       yield* run(["start", ...shared, "--iso", iso, "--disk", "relative/disk.qcow2"], {
         http: recorder.layer,
       });
-      expect(parsed(recorder.requests[0]?.body ?? "")).toEqual({ agent: AGENT });
-      expect(parsed(recorder.requests[1]?.body ?? "")).toEqual({
+      expect(recorder.requests.map((request) => `${request.method} ${request.url}`)).toEqual([
+        `POST ${SERVER}/start`,
+      ]);
+      expect(parsed(recorder.requests[0]?.body ?? "")).toEqual({
         iso,
         disk: path.resolve("relative/disk.qcow2"),
         agent: AGENT,
