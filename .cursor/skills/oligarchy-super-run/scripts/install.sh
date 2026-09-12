@@ -14,7 +14,7 @@ export SUPER_RUN_VERSION='${SUPER_RUN_VERSION:-4.0.2}'
 export SUPER_RUN_TEST='${SUPER_RUN_TEST:-lock-screen}'
 export OLIGARCHY_SESSIONS_DIR='${OLIGARCHY_SESSIONS_DIR:-$HOME/personal/oligarchy-tmp}'
 EOF
-for f in board.sh new.sh retire.sh record.sh cleanup.sh linear-state.sh status.sh tick.sh; do
+for f in board.sh new.sh retire.sh record.sh cleanup.sh linear-state.sh status.sh tick.sh reset.sh; do
   cp "$HERE/$f" "$DEST/$f"
   chmod +x "$DEST/$f"
 done

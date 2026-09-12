@@ -1,5 +1,5 @@
 #!/bin/sh
-# record.sh <n> <dir: muse|deepseek> <result_id> <COUNTED|INFRA> [note]
+# record.sh <n> <dir: muse> <result_id> <COUNTED|INFRA> [note]
 set -eu
 DEST="${SUPER_RUN_DIR:-/tmp/superrun}"
 [ -f "$DEST/env" ] && . "$DEST/env"

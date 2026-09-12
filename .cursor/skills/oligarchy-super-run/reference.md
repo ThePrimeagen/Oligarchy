@@ -26,6 +26,12 @@ replaced. `tick.sh` prints `LEDGER counted=… remaining=… refill=…`.
 `retire.sh <n> COUNTED|INFRA [note]` records then deletes that N from
 `active`. Look N up from `active` by ticket; never guess.
 
+`reset.sh [--force]` — start of a new batch only. Removes `index.tsv`,
+every `automation-super-run-logs/*/` dir (run files, process logs),
+`SCRATCH.md`, `TODOS.md`, and the ledger files; recreates them empty with
+`next=1`. Guards: refuses while `active` is non-empty or a fleet port is
+bound. Never touches the DB, Linear, or session dirs.
+
 ## Recorded run file
 
 `automation-super-run-logs/<dir>/<NNN>-<TICKET>.md` produced by `record.sh`.
@@ -49,8 +55,7 @@ sqlite3 ~/.local/share/opencode/opencode.db \
    group by model;"
 ```
 
-A finished DeepSeek drive was ~$0.03 (cache-read dominates). OpenRouter's
-usage page is billed truth.
+OpenRouter's usage page is billed truth.
 
 ## Incidents (do not repeat)
 

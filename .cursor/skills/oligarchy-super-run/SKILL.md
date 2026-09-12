@@ -26,6 +26,8 @@ pending job a live client will reserve; qemu 4/3 and client 5/3 are the caps).
 | `automation-super-run-logs/index.tsv` | One TSV row per retire; column 2 is `COUNTED` or `INFRA`. |
 | `automation-super-run-logs/processes/` | Server logs and `pids`. |
 | repo source | **Only** for a confirmed blocking harness defect (see YourRole). |
+
+`reset.sh` wipes all of the first five for a fresh batch. Nothing else deletes them.
 </WriteableFiles>
 <Runs>
 <model>openrouter/meta/muse-spark-1.3-contributor</model>
@@ -76,6 +78,18 @@ mkdir -p automation-super-run-logs/{muse,processes} /home/theprimeagen/personal/
 sh .cursor/skills/oligarchy-super-run/scripts/install.sh
 . /tmp/superrun/env
 ```
+
+**Fresh batch:** a previous super-run leaves `index.tsv`, per-run files,
+process logs, `SCRATCH.md`, `TODOS.md`, and the `/tmp/superrun` ledger
+behind. Stop any old fleet (the six ports must be free), then:
+
+```bash
+/tmp/superrun/reset.sh          # refuses if active is non-empty or a fleet port is bound
+# /tmp/superrun/reset.sh --force  # skip both guards (you have confirmed nothing is in flight)
+```
+
+It never touches the database, Linear, or session dirs. Do not append a
+new batch onto an old `index.tsv`; `tick.sh` counts `COUNTED` rows in it.
 
 Start **six** processes. `./qemu-server` and `./automation-client` require `--name` and `--max-jobs`. Announce with `--url` on `http://127.0.0.1:…` (these binaries bind `127.0.0.1`; `localhost` can be `::1`). `--name` is unique on `servers`. Clients reserve guests through the proxy: `SERVER_URL=http://127.0.0.1:55555`. Omit it and they call `:42069`. `./automation-server` has no `--jobs` (it fills from client reserve) and defaults to **free** Muse — always pass the paid model.
 
