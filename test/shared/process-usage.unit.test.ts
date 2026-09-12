@@ -142,13 +142,40 @@ const collectThrough = (statText: string | undefined, statusText: string | undef
     ),
   );
 
+const treeFs = (spec: {
+  readonly files: Readonly<Record<string, string>>;
+  readonly directories?: ReadonlyArray<string>;
+}) => {
+  const entries: Record<string, "File" | "Directory"> = {};
+  const contents: Record<string, Uint8Array> = {};
+  for (const dir of spec.directories ?? []) {
+    entries[dir] = "Directory";
+  }
+  for (const [path, text] of Object.entries(spec.files)) {
+    entries[path] = "File";
+    contents[path] = new TextEncoder().encode(text);
+  }
+  return FakeFs.recordingFs(entries, { contents });
+};
+
+const collectTree = (spec: {
+  readonly files: Readonly<Record<string, string>>;
+  readonly directories?: ReadonlyArray<string>;
+}) =>
+  Effect.gen(function* () {
+    const usage = yield* ProcessUsage.ProcessUsage;
+    return yield* usage.collect;
+  }).pipe(
+    Effect.provide(ProcessUsage.ProcessUsage.layer.pipe(Layer.provide(treeFs(spec).layer))),
+  );
+
 describe("ProcessUsage.layer happy path", () => {
   it.effect("reads /proc/self/stat and /proc/self/status without sudo", () => {
     const fs = procFs(stat("node", 0, 0), status(4));
     return Effect.gen(function* () {
       const usage = yield* ProcessUsage.ProcessUsage;
       expect(yield* usage.collect).toEqual({ memoryBytes: 4 * 1024, cpuPercent: 0 });
-      expect(FakeFs.methods(fs)).toEqual(["readFileString", "readFileString"]);
+      expect(FakeFs.methods(fs)).toEqual(["readFileString", "readFileString", "readDirectory"]);
     }).pipe(Effect.provide(ProcessUsage.ProcessUsage.layer.pipe(Layer.provide(fs.layer))));
   });
 
@@ -167,6 +194,59 @@ describe("ProcessUsage.layer happy path", () => {
         memoryBytes: 12_345 * 1024,
         cpuPercent: 0,
       });
+    }),
+  );
+
+  it.effect("sums VmRSS of every child that still answers, not only this pid", () =>
+    Effect.gen(function* () {
+      expect(
+        yield* collectTree({
+          directories: ["/proc/self/task", "/proc/self/task/1", "/proc/10/task", "/proc/10/task/10"],
+          files: {
+            "/proc/self/stat": stat("node", 10, 5),
+            "/proc/self/status": status(4),
+            "/proc/self/task/1/children": "10\n",
+            "/proc/10/stat": stat("qemu-system x86_64", 900, 100),
+            "/proc/10/status": status(8),
+            "/proc/10/task/10/children": "",
+          },
+        }),
+      ).toEqual({ memoryBytes: 12 * 1024, cpuPercent: 0 });
+    }),
+  );
+
+  it.effect("adds children listed by every thread and walks grandchildren", () =>
+    Effect.gen(function* () {
+      expect(
+        yield* collectTree({
+          directories: [
+            "/proc/self/task",
+            "/proc/self/task/1",
+            "/proc/self/task/2",
+            "/proc/10/task",
+            "/proc/10/task/10",
+            "/proc/11/task",
+            "/proc/11/task/11",
+            "/proc/20/task",
+            "/proc/20/task/20",
+          ],
+          files: {
+            "/proc/self/stat": stat("node", 0, 0),
+            "/proc/self/status": status(1),
+            "/proc/self/task/1/children": "10",
+            "/proc/self/task/2/children": "11",
+            "/proc/10/stat": stat("qemu", 0, 0),
+            "/proc/10/status": status(2),
+            "/proc/10/task/10/children": "20",
+            "/proc/11/stat": stat("opencode", 0, 0),
+            "/proc/11/status": status(3),
+            "/proc/11/task/11/children": "",
+            "/proc/20/stat": stat("vhost", 0, 0),
+            "/proc/20/status": status(4),
+            "/proc/20/task/20/children": "",
+          },
+        }),
+      ).toEqual({ memoryBytes: 10 * 1024, cpuPercent: 0 });
     }),
   );
 });
@@ -199,6 +279,68 @@ describe("ProcessUsage.layer unhappy path", () => {
         const exit = yield* Effect.exit(collectThrough(stat("node", 0, 0), text));
         expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause), text).toBe(true);
       }
+    }),
+  );
+
+  it.effect("skips a child whose /proc files are gone", () =>
+    Effect.gen(function* () {
+      expect(
+        yield* collectTree({
+          directories: ["/proc/self/task", "/proc/self/task/1"],
+          files: {
+            "/proc/self/stat": stat("node", 0, 0),
+            "/proc/self/status": status(4),
+            "/proc/self/task/1/children": "10 11\n",
+          },
+        }),
+      ).toEqual({ memoryBytes: 4 * 1024, cpuPercent: 0 });
+    }),
+  );
+
+  it.effect("skips a child whose stat or status cannot be read as a reading", () =>
+    Effect.gen(function* () {
+      expect(
+        yield* collectTree({
+          directories: [
+            "/proc/self/task",
+            "/proc/self/task/1",
+            "/proc/10/task",
+            "/proc/10/task/10",
+            "/proc/11/task",
+            "/proc/11/task/11",
+            "/proc/12/task",
+            "/proc/12/task/12",
+          ],
+          files: {
+            "/proc/self/stat": stat("node", 0, 0),
+            "/proc/self/status": status(4),
+            "/proc/self/task/1/children": "10 11 12",
+            "/proc/10/stat": "1 (qemu R 0 0",
+            "/proc/10/status": status(8),
+            "/proc/10/task/10/children": "",
+            "/proc/11/stat": stat("qemu", 0, 0),
+            "/proc/11/status": "Name:\tqemu\n",
+            "/proc/11/task/11/children": "",
+            "/proc/12/stat": stat("qemu", 0, 0),
+            "/proc/12/status": status(16),
+            "/proc/12/task/12/children": "",
+          },
+        }),
+      ).toEqual({ memoryBytes: 20 * 1024, cpuPercent: 0 });
+    }),
+  );
+
+  it.effect("a missing children file on a thread still reports this pid", () =>
+    Effect.gen(function* () {
+      expect(
+        yield* collectTree({
+          directories: ["/proc/self/task", "/proc/self/task/1"],
+          files: {
+            "/proc/self/stat": stat("node", 0, 0),
+            "/proc/self/status": status(4),
+          },
+        }),
+      ).toEqual({ memoryBytes: 4 * 1024, cpuPercent: 0 });
     }),
   );
 });

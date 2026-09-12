@@ -23,12 +23,12 @@ const detail = (error: unknown): string =>
 // Announces this server under `url`: its `servers` row is written now and every thirty seconds
 // with what it knows of itself — a qemu server, this process boots nothing else — and the row's
 // generation counts the writes, so a number that stops moving is a server that stopped without a
-// chance to leave. The same tick inserts a `process_stats` row: current jobs, current
-// VmRSS, and the cpu busy over the last thirty seconds. A write that fails is one error
-// line; the other write and the next tick still run. A shutdown deletes the servers row
-// only: the readings stay so they can be graphed later. Registered before the loop so the
-// fiber is interrupted first; a write in flight finishes (the write is uninterruptible).
-// A delete that fails is one `unannounce failed` line; the process still exits.
+// chance to leave. The same tick inserts a `process_stats` row: current jobs, VmRSS of this
+// process and every child that still answers, and the cpu busy over the last thirty seconds. A
+// write that fails is one error line; the other write and the next tick still run. A shutdown
+// deletes the servers row only: the readings stay so they can be graphed later. Registered
+// before the loop so the fiber is interrupted first; a write in flight finishes (the write is
+// uninterruptible). A delete that fails is one `unannounce failed` line; the process still exits.
 export const announce = (
   url: string,
   name: string,

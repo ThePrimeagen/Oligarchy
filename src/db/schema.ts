@@ -226,9 +226,10 @@ export const servers = pgTable(
 );
 
 // What a qemu server or automation-client said of this process at one heartbeat: current
-// jobs, current VmRSS, and the cpu busy over the last thirty seconds. One insert per tick,
-// so a later graph can read the series. name is the machine (--name), not a relation: the
-// row outlives the servers row, and a shutdown or an operator's delete must not erase it.
+// jobs, VmRSS of this process and every child that still answers, and the cpu busy over
+// the last thirty seconds. One insert per tick, so a later graph can read the series.
+// name is the machine (--name), not a relation: the row outlives the servers row, and a
+// shutdown or an operator's delete must not erase it.
 export type ProcessStats = {
   readonly jobs: number;
   readonly memoryBytes: number;
