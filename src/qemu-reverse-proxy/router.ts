@@ -264,6 +264,7 @@ const make = Effect.gen(function* () {
       yield* store
         .routeSession(id, url)
         .pipe(Effect.mapError((cause) => internal(cause, id, agent)));
+      yield* store.clearAgent(agent).pipe(Effect.mapError((cause) => internal(cause, id, agent)));
       yield* log.info(`routed; ${url}`, { location: id, agentId: agent });
       return HttpServerResponse.text(text, { status: 200, headers });
     });

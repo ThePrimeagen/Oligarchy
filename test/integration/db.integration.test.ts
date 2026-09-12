@@ -1550,6 +1550,8 @@ Postgres.describeWithDatabase("database", () => {
         expect(yield* store.serverForAgent("OLI-61")).toEqual(Option.some("http://10.0.0.5:42069"));
         yield* store.routeAgent("OLI-61", "http://10.0.0.6:42069");
         expect(yield* store.serverForAgent("OLI-61")).toEqual(Option.some("http://10.0.0.5:42069"));
+        yield* store.clearAgent("OLI-61");
+        expect(yield* store.serverForAgent("OLI-61")).toEqual(Option.none());
       }),
     );
 

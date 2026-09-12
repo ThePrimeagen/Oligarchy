@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Ref } from "effect";
+import { Context, Effect, Layer, Ref, Semaphore } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import * as Cli from "../cli.ts";
 import * as Errors from "../shared/errors.ts";
@@ -21,7 +21,9 @@ const without = <T>(set: ReadonlySet<T>, item: T): ReadonlySet<T> => {
   return next;
 };
 
-export type ReserveQemu = (agent: string) => Effect.Effect<void, Errors.AtCapacity>;
+export type ReserveQemu = (
+  agent: string,
+) => Effect.Effect<void, Errors.AtCapacity | Errors.Internal>;
 
 const make = (maxJobs: number, reserveQemu: ReserveQemu) =>
   Effect.gen(function* () {
@@ -43,30 +45,27 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu) =>
         agentId: ticket,
       });
 
+    // One reserve at a time: two tickets must not both pass the local check and reserve QEMU
+    // when only one slot remains.
+    const reserveGate = yield* Semaphore.make(1);
+
     const reserve = Effect.fn("Sessions.reserve")(function* (ticket: string) {
-      const held = yield* Ref.get(slots);
-      if (held.reserved.has(ticket)) {
-        return yield* Effect.void;
-      }
-      if (held.count >= maxJobs) {
-        return yield* atCapacity(ticket);
-      }
-      // QEMU first: this client cannot hold a slot until the guest host has one.
-      yield* reserveQemu(ticket);
-      return yield* Effect.flatMap(
-        Ref.modify(slots, (current) => {
-          if (current.reserved.has(ticket)) {
-            return [true, current] as const;
+      return yield* reserveGate.withPermits(1)(
+        Effect.gen(function* () {
+          const held = yield* Ref.get(slots);
+          if (held.reserved.has(ticket)) {
+            return yield* Effect.void;
           }
-          if (current.count >= maxJobs) {
-            return [false, current] as const;
+          if (held.count >= maxJobs) {
+            return yield* atCapacity(ticket);
           }
-          return [
-            true,
-            { count: current.count + 1, reserved: withItem(current.reserved, ticket) },
-          ] as const;
+          // QEMU first: this client cannot hold a slot until the guest host has one.
+          yield* reserveQemu(ticket);
+          return yield* Ref.update(slots, (current) => ({
+            count: current.count + 1,
+            reserved: withItem(current.reserved, ticket),
+          }));
         }),
-        (admitted) => (admitted ? Effect.void : atCapacity(ticket)),
       );
     });
 

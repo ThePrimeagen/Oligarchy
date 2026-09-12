@@ -756,6 +756,10 @@ export const fakeServerStore = (
         }
       }),
     serverForAgent: (agentId) => Effect.sync(() => Option.fromUndefinedOr(agents.get(agentId))),
+    clearAgent: (agentId) =>
+      Effect.sync(() => {
+        agents.delete(agentId);
+      }),
     ...overrides,
   });
   return {

@@ -737,7 +737,7 @@ describe("placement", () => {
         yield* api.Sessions.reserve({ payload: reserveBody });
         yield* api.Sessions.start({ payload: startBody });
       }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.store.agents.get(AGENT_ID)).toBe(SERVER_B);
+      expect(fixed.store.agents.has(AGENT_ID)).toBe(false);
       expect(fixed.store.routes.get(STARTED_ID)).toBe(SERVER_B);
       expect(
         fixed.upstream.requests

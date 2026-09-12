@@ -419,6 +419,31 @@ describe("QEMU-first reserve", () => {
     }).pipe(Effect.provide(layer(spawner, 1, reserveQemu)));
   });
 
+  it.effect("a QEMU failure that is not 503 takes no local slot and is Internal", () => {
+    const qemu: Array<string> = [];
+    const reserveQemu: Sessions.ReserveQemu = (agent) =>
+      Effect.gen(function* () {
+        qemu.push(agent);
+        return yield* Errors.Internal.make({
+          cause: new Error("qemu unreachable"),
+          agentId: agent,
+        });
+      });
+    const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions.Sessions;
+      const error = yield* Effect.flip(sessions.reserve(TICKET));
+      expect(error).toMatchObject({
+        _tag: "Internal",
+        message: "internal error",
+        agentId: TICKET,
+      });
+      expect(qemu).toEqual([TICKET]);
+      expect((yield* Effect.flip(sessions.run(TICKET, "first")))._tag).toBe("BadRequest");
+      expect(spawner.spawned).toHaveLength(0);
+    }).pipe(Effect.provide(layer(spawner, 1, reserveQemu)));
+  });
+
   it.effect("a second reserve for the same ticket does not ask QEMU again", () => {
     let qemu = 0;
     const reserveQemu: Sessions.ReserveQemu = () =>

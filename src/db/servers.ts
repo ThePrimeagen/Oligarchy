@@ -133,6 +133,13 @@ export class ServerStore extends Context.Service<ServerStore>()("@oligarchy/db/S
       return Option.map(Arr.head(rows), (row) => row.serverUrl);
     });
 
+    // Start consumed the reservation; the next reserve may place again.
+    const clearAgent = Effect.fn("db.clearAgent")(function* (agentId: string) {
+      yield* database.run("clearAgent", (db) =>
+        db.delete(DbSchema.agentServers).where(eq(DbSchema.agentServers.agentId, agentId)),
+      );
+    });
+
     return {
       addServer,
       heartbeat,
@@ -144,6 +151,7 @@ export class ServerStore extends Context.Service<ServerStore>()("@oligarchy/db/S
       serverForSession,
       routeAgent,
       serverForAgent,
+      clearAgent,
     };
   }),
 }) {

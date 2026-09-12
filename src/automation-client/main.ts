@@ -73,16 +73,27 @@ const ServerLive = (maxJobs: number, port: number, url: Option.Option<string>) =
           const serverUrl = yield* EffectConfig.string("SERVER_URL").pipe(
             Effect.orElseSucceed(() => Config.DEFAULT_SERVER_URL),
           );
-          const proxy = yield* ProxyClient.connect({ serverUrl, token });
-          return Sessions.Sessions.layer(maxJobs, (agent) =>
+          const proxy: ProxyClient.ProxyClientService = yield* ProxyClient.connect({
+            serverUrl,
+            token,
+          });
+          const asQemuError = (
+            agent: string,
+            error: ProxyClient.Failure,
+          ): Effect.Effect<never, Errors.AtCapacity | Errors.Internal> => {
+            if (error._tag === "ProxyRefusal" && error.status === 503) {
+              return Errors.AtCapacity.make({ message: error.message, agentId: agent });
+            }
+            return Errors.Internal.make({
+              cause: new Error(error.message),
+              agentId: agent,
+            });
+          };
+          const reserveQemu: Sessions.ReserveQemu = (agent) =>
             proxy
               .reserve(Contract.ReserveAgentBody.make({ agent }))
-              .pipe(
-                Effect.catch((error) =>
-                  Errors.AtCapacity.make({ message: error.message, agentId: agent }),
-                ),
-              ),
-          );
+              .pipe(Effect.catch((error) => asQemuError(agent, error)));
+          return Sessions.Sessions.layer(maxJobs, reserveQemu);
         }),
       ),
     ),
