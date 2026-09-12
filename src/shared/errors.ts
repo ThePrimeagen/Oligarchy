@@ -156,6 +156,19 @@ export class RunFailed extends Schema.TaggedError<RunFailed>("@oligarchy/shared/
   override readonly [ErrorReporter.ignore] = true;
 }
 
+// A start or run refused because the process already runs --max-jobs jobs. 503: the server is
+// temporarily unable to take the work (RFC 9110 §15.6.4), not the caller's mistake; the caller
+// places it elsewhere or retries later.
+export class AtCapacity extends Schema.TaggedError<AtCapacity>(
+  "@oligarchy/shared/errors/AtCapacity",
+)(
+  "AtCapacity",
+  { message: Schema.String, agentId: Schema.optionalKey(Schema.String) },
+  { httpApiStatus: 503 },
+) {
+  override readonly [ErrorReporter.ignore] = true;
+}
+
 export type ApiError =
   | BadRequest
   | Unauthorized
@@ -168,7 +181,8 @@ export type ApiError =
   | Internal
   | ServerFailed
   | NoServer
-  | RunFailed;
+  | RunFailed
+  | AtCapacity;
 
 const resolveHttpApiStatus = SchemaAST.resolveAt("httpApiStatus");
 
@@ -192,6 +206,7 @@ const apiErrorClasses = {
   ServerFailed,
   NoServer,
   RunFailed,
+  AtCapacity,
 } satisfies Record<ApiError["_tag"], Schema.Top>;
 
 export const apiStatus = (error: ApiError): number => httpStatus(apiErrorClasses[error._tag]);
@@ -262,6 +277,10 @@ export const NoServerWire = wireError(
 export const RunFailedWire = wireError(
   RunFailed,
   (message) => ({ _tag: "RunFailed", message }) as const,
+);
+export const AtCapacityWire = wireError(
+  AtCapacity,
+  (message) => ({ _tag: "AtCapacity", message }) as const,
 );
 
 // ---------------------------------------------------------------------------

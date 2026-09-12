@@ -12,8 +12,8 @@ import * as Errors from "../shared/errors.ts";
 const DEFAULT_PORT = 42069;
 
 // What main.ts hands the command: the host check, the server as a layer for a display, an
-// automation flag, a port and the url it announces itself under (none: it stays out of the
-// fleet), and the signal a server error raises after listen.
+// automation flag, how many sessions it runs at once, a port and the url it announces itself
+// under (none: it stays out of the fleet), and the signal a server error raises after listen.
 export type QemuServer<RHost, RServe> = {
   readonly missingHostRequirements: (
     display: Domain.QemuDisplay,
@@ -21,6 +21,7 @@ export type QemuServer<RHost, RServe> = {
   readonly serve: (
     display: Domain.QemuDisplay,
     automation: boolean,
+    maxJobs: number,
     port: number,
     url: Option.Option<string>,
   ) => Layer.Layer<never, HttpServerError.ServeError, RServe>;
@@ -50,6 +51,14 @@ export const makeQemuServerCommand = <RHost, RServe>(server: QemuServer<RHost, R
         Flag.withDefault(false),
         Flag.withDescription("Force the automation QEMU profile for every session"),
       ),
+      // No default: how many machines a host runs at once is the operator's knowledge of that
+      // host, and a guess would under-use a large one or overload a small one.
+      maxJobs: Flag.integer("max-jobs").pipe(
+        Flag.withSchema(Domain.MaxJobs),
+        Flag.withDescription(
+          "How many sessions this server runs at once; a start past it is refused with 503",
+        ),
+      ),
       port: Flag.integer("port").pipe(
         Flag.withDefault(DEFAULT_PORT),
         Flag.withDescription("Listen port"),
@@ -65,7 +74,7 @@ export const makeQemuServerCommand = <RHost, RServe>(server: QemuServer<RHost, R
         ),
       ),
     },
-    ({ display, automation, port, url }) =>
+    ({ display, automation, maxJobs, port, url }) =>
       Effect.gen(function* () {
         if (automation && Option.isSome(display)) {
           return yield* new CliError.UserError({
@@ -92,7 +101,7 @@ export const makeQemuServerCommand = <RHost, RServe>(server: QemuServer<RHost, R
             ),
           );
           return yield* Effect.raceFirst(
-            Layer.launch(server.serve(resolved, automation, port, url)),
+            Layer.launch(server.serve(resolved, automation, maxJobs, port, url)),
             Deferred.await(server.serverFailed),
           );
         });

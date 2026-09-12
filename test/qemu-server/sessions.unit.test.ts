@@ -35,6 +35,8 @@ const URL_ISO = "https://example.com/omarchy.iso";
 const DISK = "/disks/omarchy.qcow2";
 const UNKNOWN_ID = "1baaad43-674b-4bdb-88d7-3f18fce50aba";
 const SERIAL = new TextEncoder().encode("boot log\n");
+// Room for every session a test below starts; the capacity tests pass their own.
+const MAX_JOBS = 4;
 
 // ---------------------------------------------------------------------------
 // Harness
@@ -85,6 +87,7 @@ type Options = {
   readonly debugLogStore?: Parameters<typeof Stores.fakeDebugLogStore>[0];
   readonly log?: Layer.Layer<Log.Log>;
   readonly shutdown?: Sessions.Shutdown;
+  readonly maxJobs?: number;
 };
 
 const harness = (options: Options = {}) => {
@@ -113,7 +116,7 @@ const harness = (options: Options = {}) => {
     options.shutdown === undefined
       ? Layer.empty
       : Layer.succeed(Sessions.Shutdown)(options.shutdown);
-  const layer = Sessions.Sessions.layer.pipe(
+  const layer = Sessions.Sessions.layer(options.maxJobs ?? MAX_JOBS).pipe(
     Layer.provide(
       Layer.mergeAll(
         qemu.layer,
@@ -2005,6 +2008,147 @@ describe("stats", () => {
           expect(yield* qemus(sessions)).toBe(2);
           yield* sessions.stop(live, undefined, undefined);
           expect((yield* sessions.stats).qemus).toBe(1);
+        }),
+      );
+    }),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// capacity
+// ---------------------------------------------------------------------------
+
+describe("capacity", () => {
+  it.effect("a start past --max-jobs is AtCapacity before anything is minted or written", () =>
+    Effect.gen(function* () {
+      const h = harness({ maxJobs: 1 });
+      yield* h.run(
+        Effect.gen(function* () {
+          const { sessions, id } = yield* start();
+          const error = yield* Effect.flip(
+            sessions.start(startBody(ISO, OTHER_AGENT), "none", false),
+          );
+          expect(error).toMatchObject({
+            _tag: "AtCapacity",
+            message: "at capacity: max-jobs is 1",
+            agentId: OTHER_AGENT,
+          });
+          // Nothing of the refused start exists: no row, no iso lookup, no machine, no span, no
+          // colour, no log line; the running session is untouched.
+          expect(h.sessions.sessions.map((row) => row.id)).toEqual([id]);
+          expect(h.sessions.agentRuns.map((row) => row.agentId)).toEqual([AGENT]);
+          expect(h.iso.calls).toHaveLength(1);
+          expect(h.qemu.calls.map((call) => call._tag)).toEqual(["prepare", "start"]);
+          expect(spanNamed(h, OTHER_AGENT)).toBeUndefined();
+          expect(h.log.acquired).toEqual([AGENT]);
+          expect(texts(h)).toEqual([`starting; iso ${ISO}`, "running; started in 0ms"]);
+          expect(yield* qemus(sessions)).toBe(1);
+          expect(yield* sessions.lookup(id, AGENT)).toBeDefined();
+        }),
+      );
+    }),
+  );
+
+  it.effect("a booting session holds its slot until it is running", () =>
+    Effect.gen(function* () {
+      const gate = yield* Deferred.make<void>();
+      const h = harness({ maxJobs: 1, script: { boot: () => Deferred.await(gate) } });
+      yield* h.run(
+        Effect.gen(function* () {
+          const sessions = yield* Sessions.Sessions;
+          const booting = yield* Effect.forkChild(sessions.start(startBody(), "none", false), {
+            startImmediately: true,
+          });
+          expect(yield* qemus(sessions)).toBe(0);
+          const error = yield* Effect.flip(
+            sessions.start(startBody(ISO, OTHER_AGENT), "none", false),
+          );
+          expect(error).toMatchObject({ _tag: "AtCapacity", agentId: OTHER_AGENT });
+          yield* Deferred.succeed(gate, undefined);
+          const id = yield* Fiber.join(booting);
+          expect(h.sessions.sessions.map((row) => row.id)).toEqual([id]);
+          expect(yield* qemus(sessions)).toBe(1);
+        }),
+      );
+    }),
+  );
+
+  it.effect("a stopped session frees its slot", () =>
+    Effect.gen(function* () {
+      const h = harness({ maxJobs: 1 });
+      yield* h.run(
+        Effect.gen(function* () {
+          const { sessions, live } = yield* start();
+          expect(
+            (yield* Effect.flip(sessions.start(startBody(ISO, OTHER_AGENT), "none", false)))._tag,
+          ).toBe("AtCapacity");
+          yield* sessions.stop(live, "succeeded", "done");
+          const next = yield* sessions.start(startBody(ISO, OTHER_AGENT), "none", false);
+          expect(h.sessions.sessions.map((row) => [row.id, row.status])).toEqual([
+            [live.id, "succeeded"],
+            [next, "running"],
+          ]);
+          expect(yield* qemus(sessions)).toBe(1);
+        }),
+      );
+    }),
+  );
+
+  it.effect("a start that fails to boot or to insert its row frees its slot", () =>
+    Effect.gen(function* () {
+      let boots = 0;
+      let inserts = 0;
+      const h = harness({
+        maxJobs: 1,
+        script: {
+          boot: () =>
+            Effect.suspend(() =>
+              ++boots === 1
+                ? Effect.fail(Errors.QemuStartError.make({ message: "qemu: exited 1" }))
+                : Effect.void,
+            ),
+        },
+        sessionStore: {
+          insertSession: () =>
+            Effect.suspend(() =>
+              ++inserts === 2
+                ? Effect.fail(failure("insertSession", "connect ECONNREFUSED"))
+                : Effect.void,
+            ),
+        },
+      });
+      // A boot failure spends the agent's one registration, so every start names a new agent.
+      yield* h.run(
+        Effect.gen(function* () {
+          const sessions = yield* Sessions.Sessions;
+          const booted = yield* Effect.flip(sessions.start(startBody(ISO, AGENT), "none", false));
+          expect(booted._tag).toBe("StartFailed");
+          const inserted = yield* Effect.flip(
+            sessions.start(startBody(ISO, OTHER_AGENT), "none", false),
+          );
+          expect(inserted._tag).toBe("Internal");
+          const id = yield* sessions.start(startBody(ISO, "OLI-63"), "none", false);
+          expect(Domain.isSessionId(id)).toBe(true);
+          expect(yield* qemus(sessions)).toBe(1);
+          expect(
+            (yield* Effect.flip(sessions.start(startBody(ISO, "OLI-64"), "none", false)))._tag,
+          ).toBe("AtCapacity");
+        }),
+      );
+    }),
+  );
+
+  it.effect("a timed-out session frees its slot", () =>
+    Effect.gen(function* () {
+      const h = harness({ maxJobs: 1 });
+      yield* h.run(
+        Effect.gen(function* () {
+          const { sessions, id } = yield* start();
+          yield* TestClock.adjust("10 minutes");
+          expect(h.sessions.sessions[0]).toMatchObject({ id, status: "timed_out" });
+          const next = yield* sessions.start(startBody(ISO, OTHER_AGENT), "none", false);
+          expect(next).not.toBe(id);
+          expect(yield* qemus(sessions)).toBe(1);
         }),
       );
     }),

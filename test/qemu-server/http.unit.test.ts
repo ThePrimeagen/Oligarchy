@@ -838,6 +838,59 @@ describe("Sessions failures", () => {
     }),
   );
 
+  it.effect("an AtCapacity from start is 503 with its message, attributed to the agent", () =>
+    Effect.gen(function* () {
+      const fixed = fixture({
+        sessions: FakeSessions.fakeSessions({
+          start: (body) =>
+            Effect.fail(
+              Errors.AtCapacity.make({
+                message: "at capacity: max-jobs is 2",
+                agentId: body.agent,
+              }),
+            ),
+        }),
+      });
+      yield* Effect.gen(function* () {
+        const api = yield* client;
+        const error = yield* Effect.flip(
+          api.Sessions.start({
+            payload: Contract.StartBody.make({ iso: "omarchy.iso", agent: AGENT_ID }),
+          }),
+        );
+        expect(error).toMatchObject({ _tag: "AtCapacity", message: "at capacity: max-jobs is 2" });
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.post("/start", {
+          headers: { authorization: `Bearer ${TOKEN}` },
+          body: HttpBody.jsonUnsafe({ iso: "omarchy.iso", agent: AGENT_ID }),
+        });
+        expect(raw.status).toBe(503);
+        expect(yield* raw.json).toEqual({ error: "at capacity: max-jobs is 2" });
+      }).pipe(Effect.provide(serve(fixed)));
+      // No session was minted, so the line sits in the server bucket under the refused agent;
+      // a 503 is the fleet's problem to place elsewhere, so unlike a 4xx it reaches Sentry.
+      expect(fixed.log.lines).toEqual([
+        {
+          level: "error",
+          text: "POST /start failed: at capacity: max-jobs is 2",
+          location: "server",
+          agentId: AGENT_ID,
+          skipSentry: false,
+          cause: undefined,
+        },
+        {
+          level: "error",
+          text: "POST /start failed: at capacity: max-jobs is 2",
+          location: "server",
+          agentId: AGENT_ID,
+          skipSentry: false,
+          cause: undefined,
+        },
+      ]);
+      expect(fixed.reporter.reported).toEqual([]);
+    }),
+  );
+
   it.effect(
     "an Internal raised by Sessions is 500 internal error, logged with the driver's reason",
     () =>

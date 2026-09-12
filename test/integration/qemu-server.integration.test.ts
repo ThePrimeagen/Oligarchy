@@ -25,6 +25,8 @@ const QEMU_SERVER = fileURLToPath(new URL("../../qemu-server", import.meta.url))
 const TOKEN = "t";
 const UNREACHABLE = "postgres://user:sentinel-pw@127.0.0.1:1/oligarchy";
 const EXIT_WITHIN_MS = 60_000;
+// --max-jobs has no default, so every server that should get past parsing carries one.
+const MAX_JOBS: ReadonlyArray<string> = ["--max-jobs", "1"];
 
 const dbUrl = inject("dbUrl");
 
@@ -194,7 +196,7 @@ const request = (
 describe("qemu server startup refusals", () => {
   it.live("--automation --display none exits 1 with --automation is exclusive", () =>
     Effect.promise(async () => {
-      const server = spawnQemuServer(["--automation", "--display", "none"]);
+      const server = spawnQemuServer([...MAX_JOBS, "--automation", "--display", "none"]);
       const { code } = await server.exited;
       expect(code).toBe(1);
       expect(server.stderr()).toContain("--automation is exclusive");
@@ -205,7 +207,7 @@ describe("qemu server startup refusals", () => {
 
   it.live("an unknown --display value exits 1 with a usage error", () =>
     Effect.promise(async () => {
-      const server = spawnQemuServer(["--display", "curses"]);
+      const server = spawnQemuServer([...MAX_JOBS, "--display", "curses"]);
       const { code } = await server.exited;
       expect(code).toBe(1);
       expect(server.stderr()).toContain("curses");
@@ -213,7 +215,27 @@ describe("qemu server startup refusals", () => {
     }),
   );
 
-  it.live("--help exits 0 and lists the four flags", () =>
+  it.live("a missing --max-jobs exits 1 with the usage error and never listens", () =>
+    Effect.promise(async () => {
+      const server = spawnQemuServer(["--automation"]);
+      const { code } = await server.exited;
+      expect(code).toBe(1);
+      expect(server.stderr()).toContain("Missing required flag: --max-jobs");
+      expect(server.stdout()).not.toContain("listening");
+    }),
+  );
+
+  it.live("--max-jobs 0 exits 1 with the rule", () =>
+    Effect.promise(async () => {
+      const server = spawnQemuServer(["--max-jobs", "0"]);
+      const { code } = await server.exited;
+      expect(code).toBe(1);
+      expect(server.stderr()).toContain("max-jobs must be at least 1");
+      expect(server.stdout()).not.toContain("listening");
+    }),
+  );
+
+  it.live("--help exits 0 and lists the five flags", () =>
     Effect.promise(async () => {
       const server = spawnQemuServer(["--help"]);
       const { code } = await server.exited;
@@ -221,6 +243,7 @@ describe("qemu server startup refusals", () => {
       expect(server.stdout()).toContain("qemu-server");
       expect(server.stdout()).toContain("--display");
       expect(server.stdout()).toContain("--automation");
+      expect(server.stdout()).toContain("--max-jobs");
       expect(server.stdout()).toContain("--port");
       expect(server.stdout()).toContain("--url");
     }),
@@ -228,7 +251,7 @@ describe("qemu server startup refusals", () => {
 
   it.live("a --url that is not an http or https url exits 1 with the rule", () =>
     Effect.promise(async () => {
-      const server = spawnQemuServer(["--url", "ftp://qemu.example.com"]);
+      const server = spawnQemuServer([...MAX_JOBS, "--url", "ftp://qemu.example.com"]);
       const { code } = await server.exited;
       expect(code).toBe(1);
       expect(server.stderr()).toContain("url must be an http or https url");
@@ -238,7 +261,7 @@ describe("qemu server startup refusals", () => {
 
   it.live("a missing OLIGARCHY_TOKEN exits 1 with OLIGARCHY_TOKEN is not set", () =>
     Effect.promise(async () => {
-      const server = spawnQemuServer([], { OLIGARCHY_TOKEN: "" });
+      const server = spawnQemuServer([...MAX_JOBS], { OLIGARCHY_TOKEN: "" });
       const { code } = await server.exited;
       expect(code).toBe(1);
       expect(server.stderr()).toContain("OLIGARCHY_TOKEN is not set");
@@ -250,7 +273,7 @@ describe("qemu server startup refusals", () => {
     "missing host requirements exit 1 with the fatal line last on stdout",
     () =>
       Effect.promise(async () => {
-        const server = spawnQemuServer([], (dir) => ({ PATH: pathWithoutQemu(dir) }));
+        const server = spawnQemuServer([...MAX_JOBS], (dir) => ({ PATH: pathWithoutQemu(dir) }));
         const { code } = await server.exited;
         expect(code).toBe(1);
         const output = lines(server.stdout());
@@ -267,7 +290,7 @@ describe("qemu server startup refusals", () => {
 
   it.live.skipIf(!hasQemu)("an unreachable database exits 1 with database unreachable", () =>
     Effect.promise(async () => {
-      const server = spawnQemuServer([], { DATABASE_URL: UNREACHABLE });
+      const server = spawnQemuServer([...MAX_JOBS], { DATABASE_URL: UNREACHABLE });
       const { code } = await server.exited;
       expect(code).toBe(1);
       const fatal = lines(server.stdout()).find((line) =>
@@ -285,7 +308,7 @@ describe("qemu server startup refusals", () => {
     Effect.promise(async () => {
       const { port, release } = await occupy();
       try {
-        const server = spawnQemuServer(["--port", String(port)]);
+        const server = spawnQemuServer([...MAX_JOBS, "--port", String(port)]);
         const { code } = await server.exited;
         expect(code).toBe(1);
         const fatal = lines(server.stdout()).find((line) =>
@@ -309,7 +332,7 @@ describe("qemu server serving", () => {
   ) =>
     Effect.promise(async () => {
       const port = await freePort();
-      const server = spawnQemuServer([...args, "--port", String(port)]);
+      const server = spawnQemuServer([...MAX_JOBS, ...args, "--port", String(port)]);
       await server.waitFor(/qemu server listening/);
       expect(lines(server.stdout())).toContain(listenLine(port));
 
@@ -375,7 +398,7 @@ describe("qemu server serving", () => {
         const port = await freePort();
         const full = openSync("/dev/full", "w");
         const dir = mkdtempSync(join(tmpdir(), "oligarchy-qemu-server-test-"));
-        const child = spawn(QEMU_SERVER, ["--port", String(port)], {
+        const child = spawn(QEMU_SERVER, [...MAX_JOBS, "--port", String(port)], {
           cwd: dir,
           env: environment({}),
           stdio: ["ignore", full, full],
@@ -421,7 +444,7 @@ describe("qemu server serving", () => {
       serving(
         [],
         (port) =>
-          `[global] server: qemu server listening on 127.0.0.1:${String(port)}; display none`,
+          `[global] server: qemu server listening on 127.0.0.1:${String(port)}; display none; max jobs 1`,
         "SIGINT",
       ),
     120_000,
@@ -433,7 +456,7 @@ describe("qemu server serving", () => {
       serving(
         ["--automation"],
         (port) =>
-          `[global] server: qemu server listening on 127.0.0.1:${String(port)}; display none; automation`,
+          `[global] server: qemu server listening on 127.0.0.1:${String(port)}; display none; automation; max jobs 1`,
         "SIGTERM",
       ),
     120_000,
@@ -456,11 +479,18 @@ describe("qemu server serving", () => {
       Effect.gen(function* () {
         const port = yield* Effect.promise(freePort);
         const url = `http://qemu-a.test:${String(port)}`;
-        const server = spawnQemuServer(["--automation", "--url", url, "--port", String(port)]);
+        const server = spawnQemuServer([
+          ...MAX_JOBS,
+          "--automation",
+          "--url",
+          url,
+          "--port",
+          String(port),
+        ]);
         const row = yield* Effect.gen(function* () {
           yield* Effect.promise(() => server.waitFor(/qemu server listening/));
           expect(lines(server.stdout())).toContain(
-            `[global] server: qemu server listening on 127.0.0.1:${String(port)}; display none; automation; announcing ${url}`,
+            `[global] server: qemu server listening on 127.0.0.1:${String(port)}; display none; automation; max jobs 1; announcing ${url}`,
           );
           // The first heartbeat is written right after the listen line; the insert takes a moment.
           return yield* announced(url).pipe(

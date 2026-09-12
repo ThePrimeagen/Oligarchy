@@ -19,6 +19,8 @@ const AUTOMATION_CLIENT = fileURLToPath(new URL("../../automation-client", impor
 const TOKEN = "t";
 const UNREACHABLE = "postgres://user:sentinel-pw@127.0.0.1:1/oligarchy";
 const EXIT_WITHIN_MS = 60_000;
+// --max-jobs has no default, so every client that should get past parsing carries one.
+const MAX_JOBS: ReadonlyArray<string> = ["--max-jobs", "1"];
 
 const dbUrl = inject("dbUrl");
 
@@ -167,12 +169,13 @@ const logsForClient = async () => {
 };
 
 describe("automation client startup refusals", () => {
-  it.live("--help exits 0 and lists --port and --url", () =>
+  it.live("--help exits 0 and lists --max-jobs, --port and --url", () =>
     Effect.promise(async () => {
       const process = spawnAutomationClient(["--help"]);
       const { code } = await process.exited;
       expect(code).toBe(0);
       expect(process.stdout()).toContain("automation-client");
+      expect(process.stdout()).toContain("--max-jobs");
       expect(process.stdout()).toContain("--port");
       expect(process.stdout()).toContain("--url");
       expect(process.stdout()).not.toContain("--display");
@@ -181,7 +184,7 @@ describe("automation client startup refusals", () => {
 
   it.live("a --port that is not an integer exits 1 with a usage error", () =>
     Effect.promise(async () => {
-      const process = spawnAutomationClient(["--port", "forty"]);
+      const process = spawnAutomationClient([...MAX_JOBS, "--port", "forty"]);
       const { code } = await process.exited;
       expect(code).toBe(1);
       expect(process.stderr()).toContain("forty");
@@ -189,9 +192,29 @@ describe("automation client startup refusals", () => {
     }),
   );
 
+  it.live("a missing --max-jobs exits 1 with the usage error and never listens", () =>
+    Effect.promise(async () => {
+      const process = spawnAutomationClient(["--port", "54322"]);
+      const { code } = await process.exited;
+      expect(code).toBe(1);
+      expect(process.stderr()).toContain("Missing required flag: --max-jobs");
+      expect(process.stdout()).not.toContain("listening");
+    }),
+  );
+
+  it.live("--max-jobs 0 exits 1 with the rule", () =>
+    Effect.promise(async () => {
+      const process = spawnAutomationClient(["--max-jobs", "0"]);
+      const { code } = await process.exited;
+      expect(code).toBe(1);
+      expect(process.stderr()).toContain("max-jobs must be at least 1");
+      expect(process.stdout()).not.toContain("listening");
+    }),
+  );
+
   it.live("a --url that is not an http or https url exits 1 with the rule", () =>
     Effect.promise(async () => {
-      const process = spawnAutomationClient(["--url", "ftp://qemu.example.com"]);
+      const process = spawnAutomationClient([...MAX_JOBS, "--url", "ftp://qemu.example.com"]);
       const { code } = await process.exited;
       expect(code).toBe(1);
       expect(process.stderr()).toContain("url must be an http or https url");
@@ -201,7 +224,7 @@ describe("automation client startup refusals", () => {
 
   it.live("a missing OLIGARCHY_TOKEN exits 1 with OLIGARCHY_TOKEN is not set", () =>
     Effect.promise(async () => {
-      const process = spawnAutomationClient([], { OLIGARCHY_TOKEN: "" });
+      const process = spawnAutomationClient([...MAX_JOBS], { OLIGARCHY_TOKEN: "" });
       const { code } = await process.exited;
       expect(code).toBe(1);
       expect(process.stderr()).toContain("OLIGARCHY_TOKEN is not set");
@@ -212,7 +235,7 @@ describe("automation client startup refusals", () => {
 
   it.live("a missing DATABASE_URL exits 1 with DATABASE_URL is not set", () =>
     Effect.promise(async () => {
-      const process = spawnAutomationClient([], { DATABASE_URL: "" });
+      const process = spawnAutomationClient([...MAX_JOBS], { DATABASE_URL: "" });
       const { code } = await process.exited;
       expect(code).toBe(1);
       expect(process.stderr()).toContain("DATABASE_URL is not set");
@@ -222,7 +245,7 @@ describe("automation client startup refusals", () => {
 
   it.live("an unreachable database exits 1 and never listens", () =>
     Effect.promise(async () => {
-      const process = spawnAutomationClient([], { DATABASE_URL: UNREACHABLE });
+      const process = spawnAutomationClient([...MAX_JOBS], { DATABASE_URL: UNREACHABLE });
       const { code } = await process.exited;
       expect(code).toBe(1);
       const fatal = lines(process.stdout()).find((line) =>
@@ -244,7 +267,7 @@ describeWithDatabase("automation client startup refusals with a database", () =>
     Effect.promise(async () => {
       const { port, release } = await occupy();
       try {
-        const process = spawnAutomationClient(["--port", String(port)]);
+        const process = spawnAutomationClient([...MAX_JOBS, "--port", String(port)]);
         const { code } = await process.exited;
         expect(code).toBe(1);
         const fatal = lines(process.stdout()).find((line) =>
@@ -267,7 +290,7 @@ describeWithDatabase("automation client POST /run", () => {
       const bin = installOpencode("exit 0");
       const port = await freePort();
       const process = spawnAutomationClient(
-        ["--port", String(port)],
+        [...MAX_JOBS, "--port", String(port)],
         {},
         `${bin}:${processEnv.PATH ?? ""}`,
       );
@@ -296,7 +319,7 @@ describeWithDatabase("automation client POST /run", () => {
       const bin = installOpencode("echo out of token credits >&2; exit 1");
       const port = await freePort();
       const process = spawnAutomationClient(
-        ["--port", String(port)],
+        [...MAX_JOBS, "--port", String(port)],
         {},
         `${bin}:${processEnv.PATH ?? ""}`,
       );
@@ -325,7 +348,7 @@ describeWithDatabase("automation client POST /run", () => {
       const bin = installOpencode("exit 0");
       const port = await freePort();
       const process = spawnAutomationClient(
-        ["--port", String(port)],
+        [...MAX_JOBS, "--port", String(port)],
         {},
         `${bin}:${processEnv.PATH ?? ""}`,
       );
@@ -350,6 +373,64 @@ describeWithDatabase("automation client POST /run", () => {
       }
     }),
   );
+
+  it.live("answers 503 at capacity while --max-jobs runs are in flight", () =>
+    Effect.promise(async () => {
+      const startedDir = mkdtempSync(join(tmpdir(), "oligarchy-opencode-started-"));
+      const started = join(startedDir, "ready");
+      const bin = installOpencode(`touch "${started}"; sleep 60`);
+      const port = await freePort();
+      const process = spawnAutomationClient(
+        [...MAX_JOBS, "--port", String(port)],
+        {},
+        `${bin}:${processEnv.PATH ?? ""}`,
+      );
+      try {
+        await process.waitFor(
+          new RegExp(`automation client listening on 127.0.0.1:${String(port)}; max jobs 1`),
+        );
+        const running = request(
+          port,
+          "/run",
+          { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+          JSON.stringify({ prompt: "do the work", ticket: "OLI-42" }),
+        );
+        const began = Date.now();
+        while (!existsSync(started)) {
+          if (Date.now() - began > 10_000) {
+            throw new Error("opencode did not start");
+          }
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        const refused = await request(
+          port,
+          "/run",
+          { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+          JSON.stringify({ prompt: "more work", ticket: "OLI-99" }),
+        );
+        expect(refused.status).toBe(503);
+        expect(await refused.json()).toEqual({ error: "at capacity: max-jobs is 1" });
+        const aborted = await request(
+          port,
+          "/abort",
+          { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+          JSON.stringify({ ticket: "OLI-42" }),
+        );
+        expect(aborted.status).toBe(200);
+        expect((await running).status).toBe(500);
+        expect(
+          lines(process.stdout()).some((line) =>
+            line.includes("POST /run failed: at capacity: max-jobs is 1"),
+          ),
+        ).toBe(true);
+      } finally {
+        process.child.kill("SIGTERM");
+        await process.exited;
+        rmSync(bin, { recursive: true, force: true });
+        rmSync(startedDir, { recursive: true, force: true });
+      }
+    }),
+  );
 });
 
 describeWithDatabase("automation client POST /abort", () => {
@@ -360,7 +441,7 @@ describeWithDatabase("automation client POST /abort", () => {
       const bin = installOpencode(`touch "${started}"; sleep 60`);
       const port = await freePort();
       const process = spawnAutomationClient(
-        ["--port", String(port)],
+        [...MAX_JOBS, "--port", String(port)],
         {},
         `${bin}:${processEnv.PATH ?? ""}`,
       );
@@ -407,7 +488,7 @@ describeWithDatabase("automation client POST /abort", () => {
       const bin = installOpencode(`trap "" TERM; touch "${started}"; sleep 60`);
       const port = await freePort();
       const process = spawnAutomationClient(
-        ["--port", String(port)],
+        [...MAX_JOBS, "--port", String(port)],
         {},
         `${bin}:${processEnv.PATH ?? ""}`,
       );
@@ -452,7 +533,7 @@ describeWithDatabase("automation client POST /abort", () => {
       const bin = installOpencode("exit 0");
       const port = await freePort();
       const process = spawnAutomationClient(
-        ["--port", String(port)],
+        [...MAX_JOBS, "--port", String(port)],
         {},
         `${bin}:${processEnv.PATH ?? ""}`,
       );
@@ -495,13 +576,13 @@ describe("automation client announce", () => {
       Effect.gen(function* () {
         const port = yield* Effect.promise(freePort);
         const url = `http://automation-client.test:${String(port)}`;
-        const process = spawnAutomationClient(["--url", url, "--port", String(port)], {
+        const process = spawnAutomationClient([...MAX_JOBS, "--url", url, "--port", String(port)], {
           DATABASE_URL: dbUrl,
         });
         const row = yield* Effect.gen(function* () {
           yield* Effect.promise(() => process.waitFor(/automation client listening/));
           expect(process.stdout()).toContain(
-            `automation client listening on 127.0.0.1:${String(port)}; announcing ${url}`,
+            `automation client listening on 127.0.0.1:${String(port)}; max jobs 1; announcing ${url}`,
           );
           return yield* announced(url).pipe(
             Effect.repeat({
