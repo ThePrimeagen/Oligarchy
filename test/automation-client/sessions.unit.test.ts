@@ -211,6 +211,47 @@ describe("Sessions.abort unhappy path", () => {
 });
 
 describe("capacity", () => {
+  it.effect("a reserve past --max-jobs is AtCapacity and spawns nothing", () => {
+    const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions.Sessions;
+      yield* sessions.reserve(TICKET);
+      const error = yield* Effect.flip(sessions.reserve(OTHER));
+      expect(error).toMatchObject({
+        _tag: "AtCapacity",
+        message: "at capacity: max-jobs is 1",
+        agentId: OTHER,
+      });
+      expect(spawner.spawned).toHaveLength(0);
+    }).pipe(Effect.provide(layer(spawner, 1)));
+  });
+
+  it.effect("a second reserve for the same ticket is the same slot", () => {
+    const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions.Sessions;
+      yield* sessions.reserve(TICKET);
+      yield* sessions.reserve(TICKET);
+      expect((yield* Effect.flip(sessions.reserve(OTHER)))._tag).toBe("AtCapacity");
+    }).pipe(Effect.provide(layer(spawner, 1)));
+  });
+
+  it.effect("run after reserve does not take a second slot", () => {
+    const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions.Sessions;
+      yield* sessions.reserve(TICKET);
+      const running = yield* Effect.forkChild(sessions.run(TICKET, "first"));
+      for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
+        yield* Effect.yieldNow;
+      }
+      expect(spawner.spawned).toHaveLength(1);
+      expect((yield* Effect.flip(sessions.run(OTHER, "second")))._tag).toBe("AtCapacity");
+      yield* spawner.spawned[0]?.exit(0) ?? Effect.void;
+      yield* Fiber.join(running);
+    }).pipe(Effect.provide(layer(spawner, 1)));
+  });
+
   it.effect("a run past --max-jobs is AtCapacity and spawns nothing", () => {
     const spawner = FakeSpawner.fakeSpawner(() => ({}));
     return Effect.gen(function* () {

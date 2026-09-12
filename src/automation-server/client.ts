@@ -24,7 +24,7 @@ const bodyDetail = (text: string): string | undefined =>
 
 const failed = (
   url: string,
-  path: "/run" | "/abort",
+  path: "/reserve" | "/run" | "/abort",
   status: number | undefined,
   text: string,
   cause: unknown,
@@ -54,6 +54,28 @@ const makeClient = Effect.fn("makeClient")(function* (url: string) {
     baseUrl: url,
     transformClient: HttpClient.filterStatusOk,
   }).pipe(Effect.provide(middleware));
+});
+
+export const reserve = Effect.fn("reserve")(function* (url: string, ticket: string) {
+  const client = yield* makeClient(url);
+  return yield* client.Runs.reserve({ payload: Contract.ReserveBody.make({ ticket }) }).pipe(
+    Effect.catch((error) => {
+      if (error._tag === "HttpClientError") {
+        const response = error.response;
+        if (response === undefined) {
+          return Effect.fail(failed(url, "/reserve", undefined, "", error));
+        }
+        return response.text.pipe(
+          Effect.orElseSucceed(() => ""),
+          Effect.flatMap((text) =>
+            Effect.fail(failed(url, "/reserve", response.status, text, error)),
+          ),
+        );
+      }
+      return Effect.fail(failed(url, "/reserve", undefined, "", error));
+    }),
+    Effect.asVoid,
+  );
 });
 
 // POST /run and wait for the client to finish. node:http has no ceiling of its own; a drive or

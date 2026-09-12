@@ -15,6 +15,16 @@ const uninterruptible = { uninterruptible: true } as const;
 export const RunsLive = HttpApiBuilder.group(Api.AutomationClientApi, "Runs", (handlers) =>
   handlers
     .handle(
+      "reserve",
+      ({ payload }) =>
+        Effect.gen(function* () {
+          const sessions = yield* Sessions.Sessions;
+          yield* sessions.reserve(payload.ticket);
+          return ok;
+        }),
+      uninterruptible,
+    )
+    .handle(
       "run",
       ({ payload }) =>
         Effect.gen(function* () {

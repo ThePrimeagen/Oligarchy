@@ -95,6 +95,38 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
       });
 
       // Only a running row closes. reason is omitted when null so a previous value stays.
+      // A running row the fleet could not take: back to pending, as it was, so the queue
+      // order (created_at) is unchanged and the next tick can try again.
+      const unclaim = Effect.fn("db.unclaimAutomationJob")(function* (id: string) {
+        const rows = yield* database.run("unclaimAutomationJob", (db) =>
+          db
+            .update(DbSchema.automationJobs)
+            .set({ status: "pending", startedAt: null, serverId: null })
+            .where(
+              and(
+                eq(DbSchema.automationJobs.id, id),
+                eq(DbSchema.automationJobs.status, "running"),
+              ),
+            )
+            .returning({ id: DbSchema.automationJobs.id }),
+        );
+        return rows.length > 0;
+      });
+
+      const assign = Effect.fn("db.assignAutomationJob")(function* (id: string, serverId: string) {
+        yield* database.run("assignAutomationJob", (db) =>
+          db
+            .update(DbSchema.automationJobs)
+            .set({ serverId })
+            .where(
+              and(
+                eq(DbSchema.automationJobs.id, id),
+                eq(DbSchema.automationJobs.status, "running"),
+              ),
+            ),
+        );
+      });
+
       const finish = Effect.fn("db.finishAutomationJob")(function* (
         id: string,
         status: FinishStatus,
@@ -170,7 +202,7 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
         return { running, pending, completed };
       });
 
-      return { enqueue, claim, findRunning, finish, listJobs };
+      return { enqueue, claim, findRunning, unclaim, assign, finish, listJobs };
     }),
   },
 ) {

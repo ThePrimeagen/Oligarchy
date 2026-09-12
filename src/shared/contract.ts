@@ -111,6 +111,12 @@ export class RunBody extends Schema.Class<RunBody>("@oligarchy/shared/contract/R
   ticket: Schema.NonEmptyString,
 }) {}
 
+export class ReserveBody extends Schema.Class<ReserveBody>(
+  "@oligarchy/shared/contract/ReserveBody",
+)({
+  ticket: Schema.NonEmptyString,
+}) {}
+
 export class AbortBody extends Schema.Class<AbortBody>("@oligarchy/shared/contract/AbortBody")({
   ticket: Schema.NonEmptyString,
 }) {}

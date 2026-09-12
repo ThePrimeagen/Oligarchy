@@ -83,6 +83,6 @@ export const makeAutomationClientCommand = <RServe>(server: AutomationClient<RSe
       }),
   ).pipe(
     Command.withDescription(
-      "The automation client: POST /run launches OpenCode with a prompt and waits until it finishes; POST /abort kills the matching run by ticket",
+      "The automation client: POST /reserve takes a --max-jobs slot for a ticket; POST /run launches OpenCode with a prompt and waits until it finishes; POST /abort kills the matching run by ticket",
     ),
   );

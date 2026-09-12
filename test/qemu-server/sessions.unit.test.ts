@@ -2019,6 +2019,65 @@ describe("stats", () => {
 // ---------------------------------------------------------------------------
 
 describe("capacity", () => {
+  it.effect("a reserve past --max-jobs is AtCapacity before anything is minted or written", () =>
+    Effect.gen(function* () {
+      const h = harness({ maxJobs: 1 });
+      yield* h.run(
+        Effect.gen(function* () {
+          const sessions = yield* Sessions.Sessions;
+          yield* sessions.reserve(startBody());
+          const error = yield* Effect.flip(sessions.reserve(startBody(ISO, OTHER_AGENT)));
+          expect(error).toMatchObject({
+            _tag: "AtCapacity",
+            message: "at capacity: max-jobs is 1",
+            agentId: OTHER_AGENT,
+          });
+          expect(h.sessions.sessions).toEqual([]);
+          expect(h.sessions.agentRuns).toEqual([]);
+          expect(h.iso.calls).toHaveLength(0);
+          expect(h.qemu.calls).toEqual([]);
+          expect(spanNamed(h, OTHER_AGENT)).toBeUndefined();
+          expect(h.log.acquired).toEqual([]);
+          expect(texts(h)).toEqual([]);
+          expect(yield* qemus(sessions)).toBe(0);
+        }),
+      );
+    }),
+  );
+
+  it.effect("a second reserve for the same agent is the same slot", () =>
+    Effect.gen(function* () {
+      const h = harness({ maxJobs: 1 });
+      yield* h.run(
+        Effect.gen(function* () {
+          const sessions = yield* Sessions.Sessions;
+          yield* sessions.reserve(startBody());
+          yield* sessions.reserve(startBody());
+          const error = yield* Effect.flip(sessions.reserve(startBody(ISO, OTHER_AGENT)));
+          expect(error._tag).toBe("AtCapacity");
+        }),
+      );
+    }),
+  );
+
+  it.effect("start after reserve does not take a second slot and still boots", () =>
+    Effect.gen(function* () {
+      const h = harness({ maxJobs: 1 });
+      yield* h.run(
+        Effect.gen(function* () {
+          const sessions = yield* Sessions.Sessions;
+          yield* sessions.reserve(startBody());
+          const { id } = yield* start();
+          expect(
+            (yield* Effect.flip(sessions.start(startBody(ISO, OTHER_AGENT), "none", false)))._tag,
+          ).toBe("AtCapacity");
+          expect(h.sessions.sessions.map((row) => row.id)).toEqual([id]);
+          expect(yield* qemus(sessions)).toBe(1);
+        }),
+      );
+    }),
+  );
+
   it.effect("a start past --max-jobs is AtCapacity before anything is minted or written", () =>
     Effect.gen(function* () {
       const h = harness({ maxJobs: 1 });

@@ -13,36 +13,75 @@ const mapWithout = <V>(map: ReadonlyMap<string, V>, key: string): ReadonlyMap<st
   return next;
 };
 
+const withItem = <T>(set: ReadonlySet<T>, item: T): ReadonlySet<T> => new Set([...set, item]);
+
+const without = <T>(set: ReadonlySet<T>, item: T): ReadonlySet<T> => {
+  const next = new Set(set);
+  next.delete(item);
+  return next;
+};
+
 const make = (maxJobs: number) =>
   Effect.gen(function* () {
     const running = yield* Ref.make<ReadonlyMap<string, ChildProcessSpawner.ChildProcessHandle>>(
       new Map(),
     );
-    // How many runs are admitted against --max-jobs. `running` cannot count them: a run is only
-    // in it once OpenCode has spawned, and the slot must be taken before that, so a refused run
-    // spawns nothing.
-    const jobs = yield* Ref.make(0);
+    // How many runs are admitted against --max-jobs, and which tickets already hold a slot
+    // that run will consume. `running` cannot count them: a run is only in it once OpenCode
+    // has spawned, and the slot must be taken before that, so a refused run spawns nothing.
+    const slots = yield* Ref.make<{
+      readonly count: number;
+      readonly reserved: ReadonlySet<string>;
+    }>({ count: 0, reserved: new Set() });
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+
+    const atCapacity = (ticket: string): Errors.AtCapacity =>
+      Errors.AtCapacity.make({
+        message: `at capacity: max-jobs is ${String(maxJobs)}`,
+        agentId: ticket,
+      });
+
+    const reserve = Effect.fn("Sessions.reserve")(function* (ticket: string) {
+      const admitted = yield* Ref.modify(slots, (held) => {
+        if (held.reserved.has(ticket)) {
+          return [true, held] as const;
+        }
+        if (held.count >= maxJobs) {
+          return [false, held] as const;
+        }
+        return [
+          true,
+          { count: held.count + 1, reserved: withItem(held.reserved, ticket) },
+        ] as const;
+      });
+      if (!admitted) {
+        return yield* atCapacity(ticket);
+      }
+    });
 
     const admit = (ticket: string): Effect.Effect<void, Errors.AtCapacity> =>
       Effect.flatMap(
-        Ref.modify(jobs, (n) => (n < maxJobs ? [true, n + 1] : [false, n])),
-        (admitted) =>
-          admitted
-            ? Effect.void
-            : Errors.AtCapacity.make({
-                message: `at capacity: max-jobs is ${String(maxJobs)}`,
-                agentId: ticket,
-              }),
+        Ref.modify(slots, (held) => {
+          if (held.reserved.has(ticket)) {
+            return [true, { count: held.count, reserved: without(held.reserved, ticket) }] as const;
+          }
+          if (held.count >= maxJobs) {
+            return [false, held] as const;
+          }
+          return [true, { count: held.count + 1, reserved: held.reserved }] as const;
+        }),
+        (admitted) => (admitted ? Effect.void : atCapacity(ticket)),
       );
 
     const run = Effect.fn("Sessions.run")(function* (ticket: string, prompt: string) {
       return yield* Effect.scoped(
         Effect.gen(function* () {
-          // The slot is the run's first resource: taken and its release registered in one
-          // uninterruptible step, so it is given back however the run ends, and last, after the
-          // child is reaped and the ticket forgotten.
-          yield* Effect.acquireRelease(admit(ticket), () => Ref.update(jobs, (n) => n - 1));
+          // The slot is the run's first resource: taken (or consumed from reserve) and its
+          // release registered in one uninterruptible step, so it is given back however the
+          // run ends, and last, after the child is reaped and the ticket forgotten.
+          yield* Effect.acquireRelease(admit(ticket), () =>
+            Ref.update(slots, (held) => ({ ...held, count: held.count - 1 })),
+          );
           const handle = yield* Cli.spawn(OpenCode.BIN, OpenCode.args(prompt));
           const claimed = yield* Ref.modify(running, (map) =>
             map.has(ticket)
@@ -88,7 +127,7 @@ const make = (maxJobs: number) =>
         );
     });
 
-    return { run, abort };
+    return { reserve, run, abort };
   });
 
 export class Sessions extends Context.Service<Sessions>()("@oligarchy/automation-client/Sessions", {

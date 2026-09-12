@@ -116,6 +116,23 @@ export class ServerStore extends Context.Service<ServerStore>()("@oligarchy/db/S
       return Option.map(Arr.head(rows), (row) => row.serverUrl);
     });
 
+    // One row per agent: a second reserve keeps the first server.
+    const routeAgent = Effect.fn("db.routeAgent")(function* (agentId: string, url: string) {
+      yield* database.run("routeAgent", (db) =>
+        db.insert(DbSchema.agentServers).values({ agentId, serverUrl: url }).onConflictDoNothing(),
+      );
+    });
+
+    const serverForAgent = Effect.fn("db.serverForAgent")(function* (agentId: string) {
+      const rows = yield* database.run("serverForAgent", (db) =>
+        db
+          .select({ serverUrl: DbSchema.agentServers.serverUrl })
+          .from(DbSchema.agentServers)
+          .where(eq(DbSchema.agentServers.agentId, agentId)),
+      );
+      return Option.map(Arr.head(rows), (row) => row.serverUrl);
+    });
+
     return {
       addServer,
       heartbeat,
@@ -125,6 +142,8 @@ export class ServerStore extends Context.Service<ServerStore>()("@oligarchy/db/S
       findServer,
       routeSession,
       serverForSession,
+      routeAgent,
+      serverForAgent,
     };
   }),
 }) {

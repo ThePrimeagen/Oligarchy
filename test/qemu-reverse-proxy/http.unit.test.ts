@@ -655,6 +655,113 @@ describe("placement", () => {
     }),
   );
 
+  it.effect(
+    "POST /reserve probes every qemu server, tries the fewest qemus, records the agent and logs it",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture((request, url) =>
+          url.pathname === "/reserve" ? FakeHttp.json({ ok: "true" }) : fleet(request, url),
+        );
+        fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+        yield* Effect.gen(function* () {
+          const api = yield* qemuServerClient;
+          const ok = yield* api.Sessions.reserve({ payload: startBody });
+          expect(ok).toEqual(Contract.Ok.make({}));
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.upstream.requests[2]).toEqual({
+          method: "POST",
+          url: `${SERVER_B}/reserve`,
+          headers: expect.objectContaining({
+            authorization: AUTHORIZATION,
+            "content-type": "application/json",
+          }),
+          body: '{"iso":"omarchy.iso","agent":"OLI-61"}',
+        });
+        expect(fixed.store.agents.get(AGENT_ID)).toBe(SERVER_B);
+        expect(fixed.log.lines).toEqual([
+          {
+            level: "info",
+            text: `reserved; ${SERVER_B}`,
+            location: "server",
+            agentId: AGENT_ID,
+            skipSentry: false,
+            cause: undefined,
+          },
+        ]);
+      }),
+  );
+
+  it.effect("a reserve the first server refuses with 503 is placed on the next", () =>
+    Effect.gen(function* () {
+      const fixed = fixture((request, url) => {
+        if (url.pathname === "/reserve") {
+          return url.origin === SERVER_B
+            ? FakeHttp.json({ error: "at capacity: max-jobs is 1" }, 503)
+            : FakeHttp.json({ ok: "true" });
+        }
+        return fleet(request, url);
+      });
+      // B has fewer qemus, so place tries B first; it is full, A takes the slot.
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      yield* Effect.gen(function* () {
+        const api = yield* qemuServerClient;
+        yield* api.Sessions.reserve({ payload: startBody });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.store.agents.get(AGENT_ID)).toBe(SERVER_A);
+      expect(
+        fixed.upstream.requests
+          .filter((request) => request.url.endsWith("/reserve"))
+          .map((request) => request.url),
+      ).toEqual([`${SERVER_B}/reserve`, `${SERVER_A}/reserve`]);
+    }),
+  );
+
+  it.effect("every server at capacity is 503 at capacity, without an agent route", () =>
+    Effect.gen(function* () {
+      const fixed = fixture((request, url) =>
+        url.pathname === "/reserve"
+          ? FakeHttp.json({ error: "at capacity: max-jobs is 1" }, 503)
+          : fleet(request, url),
+      );
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.post("/reserve", {
+          headers: { authorization: AUTHORIZATION },
+          body: HttpBody.jsonUnsafe(startBody),
+        });
+        expect(raw.status).toBe(503);
+        expect(yield* raw.json).toEqual({ error: "at capacity: max-jobs is 1" });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.store.agents.size).toBe(0);
+    }),
+  );
+
+  it.effect("POST /start after reserve forwards to the reserved server", () =>
+    Effect.gen(function* () {
+      const fixed = fixture((request, url) =>
+        url.pathname === "/start"
+          ? FakeHttp.json({ id: STARTED_ID })
+          : url.pathname === "/reserve"
+            ? FakeHttp.json({ ok: "true" })
+            : fleet(request, url),
+      );
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      yield* Effect.gen(function* () {
+        const api = yield* qemuServerClient;
+        yield* api.Sessions.reserve({ payload: startBody });
+        yield* api.Sessions.start({ payload: startBody });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.store.agents.get(AGENT_ID)).toBe(SERVER_B);
+      expect(fixed.store.routes.get(STARTED_ID)).toBe(SERVER_B);
+      expect(
+        fixed.upstream.requests
+          .filter((request) => request.url.endsWith("/start"))
+          .map((request) => request.url),
+      ).toEqual([`${SERVER_B}/start`]);
+    }),
+  );
+
   it.effect("a start the server refuses passes through as it came, without a route or a line", () =>
     Effect.gen(function* () {
       const fixed = fixture((request, url) =>
@@ -1301,6 +1408,7 @@ describe("forwarding refusals", () => {
   );
 
   const everyRoute: ReadonlyArray<readonly [string, string, boolean]> = [
+    ["POST", "/reserve", true],
     ["POST", "/start", true],
     ["GET", `/image?id=${SESSION_ID}&agent=${AGENT_ID}`, false],
     ["GET", `/serial?id=${SESSION_ID}&agent=${AGENT_ID}`, false],

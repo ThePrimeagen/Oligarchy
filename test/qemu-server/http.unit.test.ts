@@ -102,6 +102,26 @@ describe("Sessions endpoints happy path", () => {
     }),
   );
 
+  it.effect("POST /reserve answers ok and hands the start body to Sessions", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const api = yield* client;
+        const ok = yield* api.Sessions.reserve({
+          payload: Contract.StartBody.make({ iso: "omarchy.iso", agent: AGENT_ID }),
+        });
+        expect(ok).toEqual(Contract.Ok.make({}));
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.sessions.calls).toEqual([
+        {
+          method: "reserve",
+          args: [Contract.StartBody.make({ iso: "omarchy.iso", agent: AGENT_ID })],
+        },
+      ]);
+      expect(fixed.log.lines).toEqual([]);
+    }),
+  );
+
   it.effect("GET /image returns image/png bytes with x-image-url after a lookup", () =>
     Effect.gen(function* () {
       const fixed = fixture();
@@ -311,6 +331,7 @@ describe("Sessions endpoints happy path", () => {
 
 describe("authentication", () => {
   const sessionsRoutes: ReadonlyArray<readonly [string, string, boolean]> = [
+    ["POST", "/reserve", true],
     ["POST", "/start", true],
     ["GET", "/image?id=x&agent=y", false],
     ["GET", "/serial?id=x&agent=y", false],
@@ -829,6 +850,57 @@ describe("Sessions failures", () => {
           level: "error",
           text: "POST /start failed: qemu: disk not found: /tmp/nope.qcow2",
           location: STARTED_ID,
+          agentId: AGENT_ID,
+          skipSentry: false,
+          cause: undefined,
+        },
+      ]);
+      expect(fixed.reporter.reported).toEqual([]);
+    }),
+  );
+
+  it.effect("an AtCapacity from reserve is 503 with its message, attributed to the agent", () =>
+    Effect.gen(function* () {
+      const fixed = fixture({
+        sessions: FakeSessions.fakeSessions({
+          reserve: (body) =>
+            Effect.fail(
+              Errors.AtCapacity.make({
+                message: "at capacity: max-jobs is 2",
+                agentId: body.agent,
+              }),
+            ),
+        }),
+      });
+      yield* Effect.gen(function* () {
+        const api = yield* client;
+        const error = yield* Effect.flip(
+          api.Sessions.reserve({
+            payload: Contract.StartBody.make({ iso: "omarchy.iso", agent: AGENT_ID }),
+          }),
+        );
+        expect(error).toMatchObject({ _tag: "AtCapacity", message: "at capacity: max-jobs is 2" });
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.post("/reserve", {
+          headers: { authorization: `Bearer ${TOKEN}` },
+          body: HttpBody.jsonUnsafe({ iso: "omarchy.iso", agent: AGENT_ID }),
+        });
+        expect(raw.status).toBe(503);
+        expect(yield* raw.json).toEqual({ error: "at capacity: max-jobs is 2" });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.log.lines).toEqual([
+        {
+          level: "error",
+          text: "POST /reserve failed: at capacity: max-jobs is 2",
+          location: "server",
+          agentId: AGENT_ID,
+          skipSentry: false,
+          cause: undefined,
+        },
+        {
+          level: "error",
+          text: "POST /reserve failed: at capacity: max-jobs is 2",
+          location: "server",
           agentId: AGENT_ID,
           skipSentry: false,
           cause: undefined,

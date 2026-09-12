@@ -53,6 +53,16 @@ const headers = { authorization: `Bearer ${TOKEN}`, "content-type": "application
 
 const decodeErrorBody = Schema.decodeUnknownSync(Schema.Struct({ error: Schema.String }));
 
+const reserve = (
+  http: HttpClient.HttpClient,
+  ticket = TICKET,
+  extraHeaders: Record<string, string> = headers,
+) =>
+  http.post("/reserve", {
+    headers: extraHeaders,
+    body: HttpBody.text(JSON.stringify({ ticket }), "application/json"),
+  });
+
 const run = (
   http: HttpClient.HttpClient,
   prompt = "do the work",
@@ -73,6 +83,22 @@ const abort = (
     headers: extraHeaders,
     body: HttpBody.text(JSON.stringify({ ticket }), "application/json"),
   });
+
+describe("POST /reserve happy path", () => {
+  it.effect("answers ok and does not spawn opencode", () =>
+    Effect.gen(function* () {
+      const fixed = fixture(() => ({ exitCode: 0 }));
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const response = yield* reserve(http);
+        expect(response.status).toBe(200);
+        expect(yield* response.json).toEqual({ ok: "true" });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.spawner.spawned).toEqual([]);
+      expect(fixed.log.lines).toEqual([]);
+    }),
+  );
+});
 
 describe("POST /run happy path", () => {
   it.effect("answers ok after opencode exits 0 and ignores its printout", () =>
@@ -212,6 +238,31 @@ describe("POST /run unhappy path", () => {
         expect(response.status).toBe(500);
         expect(yield* response.json).toEqual({ error: "out of token credits" });
       }).pipe(Effect.provide(serve(fixed)));
+    }),
+  );
+
+  it.effect("a reserve past --max-jobs is 503 at capacity and spawns nothing", () =>
+    Effect.gen(function* () {
+      const fixed = fixture(() => ({}), 1);
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        expect((yield* reserve(http)).status).toBe(200);
+        const refused = yield* reserve(http, "OLI-99");
+        expect(refused.status).toBe(503);
+        expect(yield* refused.json).toEqual({ error: "at capacity: max-jobs is 1" });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.spawner.spawned).toEqual([]);
+      expect(fixed.log.lines).toEqual([
+        {
+          level: "error",
+          text: "POST /reserve failed: at capacity: max-jobs is 1",
+          location: "automation-client",
+          agentId: "OLI-99",
+          skipSentry: false,
+          cause: undefined,
+        },
+      ]);
+      expect(fixed.reporter.reported).toEqual([]);
     }),
   );
 
