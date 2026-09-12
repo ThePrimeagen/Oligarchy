@@ -34,10 +34,10 @@ muse-spark runs, 1.3, contributor. should be
 100
 </count>
 <max-jobs>
-<qemu-server-a>4</qemu-server-a>
-<qemu-server-b>3</qemu-server-b>
-<automation-client-a>5</automation-client-a>
-<automation-client-b>3</automation-client-b>
+<qemu-server-4>4</qemu-server-4>
+<qemu-server-3>3</qemu-server-3>
+<automation-client-5>5</automation-client-5>
+<automation-client-3>3</automation-client-3>
 </max-jobs>
 </Runs>
 <YourRole>
@@ -64,15 +64,17 @@ sh .cursor/skills/oligarchy-super-run/scripts/install.sh
 . /tmp/superrun/env
 ```
 
-Start **six** processes. One proxy, one automation-server, **two** QEMU servers, **two** automation clients. Do not skip one. Each QEMU/client pair has its own port, `--url`, log, and `--max-jobs`.
+Start **six** processes. One proxy, one automation-server, **two** QEMU servers, **two** automation clients. Do not skip one.
 
-| process | port | `--url` | `--max-jobs` | log |
-|---------|------|---------|--------------|-----|
+Neither `./qemu-server` nor `./automation-client` has a `--name` flag. The fleet row is keyed by `--url`. We name them in pids and logs by max-jobs: `qemu-server-4`, `qemu-server-3`, `automation-client-5`, `automation-client-3`.
+
+| name | port | `--url` | `--max-jobs` | log |
+|------|------|---------|--------------|-----|
 | qemu-reverse-proxy | 55555 | — | — | `qemu-reverse-proxy.log` |
-| qemu-server-a | 55332 | `http://localhost:55332` | **4** | `qemu-server-a.log` |
-| qemu-server-b | 55333 | `http://localhost:55333` | **3** | `qemu-server-b.log` |
-| automation-client-a | 52222 | `http://localhost:52222` | **5** | `automation-client-a.log` |
-| automation-client-b | 52223 | `http://localhost:52223` | **3** | `automation-client-b.log` |
+| qemu-server-4 | 55332 | `http://localhost:55332` | **4** | `qemu-server-4.log` |
+| qemu-server-3 | 55333 | `http://localhost:55333` | **3** | `qemu-server-3.log` |
+| automation-client-5 | 52222 | `http://localhost:52222` | **5** | `automation-client-5.log` |
+| automation-client-3 | 52223 | `http://localhost:52223` | **3** | `automation-client-3.log` |
 | automation-server | 54321 | — | — | `automation-server.log` |
 
 Guest cap is 4+3=**7**. Client cap is 5+3=8. Do not keep more than 7 drive jobs in `running`+`pending`.
@@ -85,16 +87,16 @@ SESS=/home/theprimeagen/personal/oligarchy-tmp
   >"$P/qemu-reverse-proxy.log" 2>&1 & echo "qemu-reverse-proxy $!" | tee -a "$P/pids"
 
 TMPDIR="$SESS" ./qemu-server --port 55332 --url http://localhost:55332 --max-jobs 4 \
-  >"$P/qemu-server-a.log" 2>&1 & echo "qemu-server-a $!" | tee -a "$P/pids"
+  >"$P/qemu-server-4.log" 2>&1 & echo "qemu-server-4 $!" | tee -a "$P/pids"
 
 TMPDIR="$SESS" ./qemu-server --port 55333 --url http://localhost:55333 --max-jobs 3 \
-  >"$P/qemu-server-b.log" 2>&1 & echo "qemu-server-b $!" | tee -a "$P/pids"
+  >"$P/qemu-server-3.log" 2>&1 & echo "qemu-server-3 $!" | tee -a "$P/pids"
 
 ./automation-client --port 52222 --url http://localhost:52222 --max-jobs 5 \
-  >"$P/automation-client-a.log" 2>&1 & echo "automation-client-a $!" | tee -a "$P/pids"
+  >"$P/automation-client-5.log" 2>&1 & echo "automation-client-5 $!" | tee -a "$P/pids"
 
 ./automation-client --port 52223 --url http://localhost:52223 --max-jobs 3 \
-  >"$P/automation-client-b.log" 2>&1 & echo "automation-client-b $!" | tee -a "$P/pids"
+  >"$P/automation-client-3.log" 2>&1 & echo "automation-client-3 $!" | tee -a "$P/pids"
 
 ./automation-server --port 54321 \
   --model openrouter/meta/muse-spark-1.3-contributor \
