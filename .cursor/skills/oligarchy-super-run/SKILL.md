@@ -2,55 +2,69 @@
 name: oligarchy-super-run
 description: >-
   Operate an Oligarchy lock-screen super-run: start two QEMU servers and two
-  automation clients plus proxy and automation-server, set
-  model/jobs/ISO/TMPDIR, create Linear tickets, tick the board, retire
-  diagnoses, and write findings to SCRATCH.md and TODOS.md. Use when the user
-  asks to run 100 Muse Spark (or DeepSeek) jobs, start qemu/automation
-  servers, drain a batch, or operate the automation pipeline without changing
-  code.
+  automation clients plus proxy and automation-server, run 100 counted Muse
+  Spark 1.3 contributor jobs, tick the board, analyze failures, and fix a
+  confirmed harness defect. Use when the user asks to run 100 Muse Spark
+  jobs, start qemu/automation servers, drain a batch, or operate the
+  automation pipeline.
 ---
 
 <OligarchySuperRun>
 <Goal>
-Run the entire automation pipeline locally and verify that everything works.
-1. that max-jobs is respected
-2. that we are driving and diagnosing agent runs.
-3. that the pipeline is stable and there are no regressions.
+Process **100 COUNTED** lock-screen runs through drive + diagnose. INFRA
+attempts are recorded and replaced; they do not count. After the batch:
+report stability, whether the paid model landed on every result/diagnosis,
+and whether `--max-jobs` was actually exercised (current automation-server
+claims **one** job at a time, so 4/3 qemu and 5/3 client caps will not be).
 </Goal>
 <WriteableFiles>
 | File | What goes here |
 |------|----------------|
-| `SCRATCH.md` | Live pad for taking notes and preparing analysis.
-| `TODOS.md` | Findings that are not blocking the ability to run that should be fixed.
-| `automation-super-run-logs/<model>/NNN-OLI-xxxx.md` | One file per run, written by `retire.sh` / `record.sh`. |
-| `automation-super-run-logs/index.tsv` | One TSV row per retired run. |
+| `SCRATCH.md` | Live pad. Never paste secrets (`DATABASE_URL`, tokens). |
+| `TODOS.md` | Non-blocking findings. |
+| `automation-super-run-logs/muse/NNN-OLI-xxxx.md` | One file per retired run (`retire.sh`). |
+| `automation-super-run-logs/index.tsv` | One TSV row per retire; column 2 is `COUNTED` or `INFRA`. |
 | `automation-super-run-logs/processes/` | Server logs and `pids`. |
+| repo source | **Only** for a confirmed blocking harness defect (see YourRole). |
 </WriteableFiles>
 <Runs>
-<model>
-muse-spark runs, 1.3, contributor. should be
-</model>
-<count>
-100
-</count>
-<max-jobs>
-<qemu-server-4>4</qemu-server-4>
-<qemu-server-3>3</qemu-server-3>
-<automation-client-5>5</automation-client-5>
-<automation-client-3>3</automation-client-3>
-</max-jobs>
+<model>openrouter/meta/muse-spark-1.3-contributor</model>
+<count>100 COUNTED</count>
+<test>lock-screen</test>
+<fleet>
+<qemu-reverse-proxy port="55555"/>
+<qemu-server-4 port="55332" max-jobs="4"/>
+<qemu-server-3 port="55333" max-jobs="3"/>
+<automation-client-5 port="52222" max-jobs="5"/>
+<automation-client-3 port="52223" max-jobs="3"/>
+<automation-server port="54321"/>
+</fleet>
 </Runs>
 <YourRole>
-- **Operator (you):** start/restart servers, create tickets (`new.sh` /
-  `./ctrl test new`), retire completed diagnoses, abort INFRA, keep the pad
-  honest, spawn a 1-minute tick loop.
-- **Analysis:** any "why did this die / does the verdict hold" question is a
-  `Task` `generalPurpose` subagent. Hand it ticket, result id, session id,
-  `DATABASE_URL`, `~/.local/share/opencode/opencode.db`,
-  `~/.local/share/opencode/log/opencode.log`,
-  `automation-super-run-logs/processes/automation-client.log`, and
-  `./ctrl session --all`. Ask for: cause, harness-or-model, exact fix if
-  harness. You act on the report.
+- **Operator:** start/restart the six processes, create tickets (`new.sh`),
+  run `/tmp/superrun/tick.sh` every minute, retire, abort INFRA, refill
+  until 100 COUNTED, drain, write the pad.
+- **Analyze every `ANALYZE` line from `tick.sh`**, plus any stalled run.
+  Spawn a `Task` `generalPurpose` subagent. Hand it ticket, result id,
+  session id, `/tmp/superrun/status.sh "$RID"`,
+  `SESSION_ID="$SID" ./ctrl session --all`, both client logs and the
+  qemu/proxy/server logs around the timestamps, and
+  `~/.local/share/opencode/{opencode.db,log/opencode.log}`. Tell it to
+  read `DATABASE_URL` from repo `.env` — do not paste secrets. Ask:
+  cause, harness-or-model, exact fix if harness.
+- **COUNTED:** model passed/failed, `driver_loop_ceiling`, agent quit
+  early. Linear → Needs Review (or Done if the diagnosis is a clean pass
+  you accept).
+- **INFRA:** no qemu, webhook never made a drive job, cleanup/disk, proxy
+  down, dispatch `ETIMEDOUT`, operator/harness fault. Linear → Canceled.
+  Record with `retire.sh N INFRA`, then replace (another `new.sh`).
+- **Confirmed blocking harness defect:** pause refill, mark affected
+  attempts INFRA, switch to developing-agent rules (`development.md`):
+  failing happy+unhappy tests first, smallest fix, `check:fast`, restart
+  the touched processes, resume. Non-blocking → `TODOS.md` only.
+- `(result_id, action)` is unique. A failed diagnose job **cannot** be
+  re-enqueued. Write the row with `./ctrl diagnose` or retire INFRA.
+  Do not leave it on `active` forever.
 </YourRole>
 <HowToRun>
 From the repo root. Cloudflare tunnel to `:55555` must already be up (`https://oligarchy-server.trm.sh`).
@@ -59,103 +73,102 @@ From the repo root. Cloudflare tunnel to `:55555` must already be up (`https://o
 export OLIGARCHY_ROOT="$PWD"
 export DBURL=$(grep -E '^DATABASE_URL=' .env | cut -d= -f2- | tr -d '"' | tr -d "'")
 mkdir -p automation-super-run-logs/{muse,processes} /home/theprimeagen/personal/oligarchy-tmp
-: > automation-super-run-logs/processes/pids
 sh .cursor/skills/oligarchy-super-run/scripts/install.sh
 . /tmp/superrun/env
 ```
 
-Start **six** processes. One proxy, one automation-server, **two** QEMU servers, **two** automation clients. Do not skip one.
-
-Neither `./qemu-server` nor `./automation-client` has a `--name` flag. The fleet row is keyed by `--url`. We name them in pids and logs by max-jobs: `qemu-server-4`, `qemu-server-3`, `automation-client-5`, `automation-client-3`.
-
-| name | port | `--url` | `--max-jobs` | log |
-|------|------|---------|--------------|-----|
-| qemu-reverse-proxy | 55555 | — | — | `qemu-reverse-proxy.log` |
-| qemu-server-4 | 55332 | `http://localhost:55332` | **4** | `qemu-server-4.log` |
-| qemu-server-3 | 55333 | `http://localhost:55333` | **3** | `qemu-server-3.log` |
-| automation-client-5 | 52222 | `http://localhost:52222` | **5** | `automation-client-5.log` |
-| automation-client-3 | 52223 | `http://localhost:52223` | **3** | `automation-client-3.log` |
-| automation-server | 54321 | — | — | `automation-server.log` |
-
-Guest cap is 4+3=**7**. Client cap is 5+3=8. Do not keep more than 7 drive jobs in `running`+`pending`.
+Start **six** processes. `./qemu-server` and `./automation-client` require `--name` and `--max-jobs`. Announce with `--url` on `http://127.0.0.1:…` (these binaries bind `127.0.0.1`; `localhost` can be `::1`). `--name` is unique on `servers`. Clients reserve guests through the proxy: `SERVER_URL=http://127.0.0.1:55555`. Omit it and they call `:42069`. `./automation-server` has no `--jobs` (one claim at a time) and defaults to **free** Muse — always pass the paid model.
 
 ```bash
 P=automation-super-run-logs/processes
 SESS=/home/theprimeagen/personal/oligarchy-tmp
+export OLIGARCHY_SESSIONS_DIR="$SESS"
 
-./qemu-reverse-proxy --port 55555 \
-  >"$P/qemu-reverse-proxy.log" 2>&1 & echo "qemu-reverse-proxy $!" | tee -a "$P/pids"
+start_fleet() {
+  if ss -ltn | grep -qE ':55332|:55333|:55555|:52222|:52223|:54321'; then
+    echo "a listed port is already bound; stop that process first"
+    return 1
+  fi
+  psql "$DBURL" -X -c "select name, type, url, heartbeat_at from servers where name in ('qemu-server-4','qemu-server-3','automation-client-5','automation-client-3');"
+  # live row, different url: stop that process. stale row: delete only that name's dead row, keep these four names.
+  : > "$P/pids"
 
-TMPDIR="$SESS" ./qemu-server --port 55332 --url http://localhost:55332 --max-jobs 4 \
-  >"$P/qemu-server-4.log" 2>&1 & echo "qemu-server-4 $!" | tee -a "$P/pids"
+  ./qemu-reverse-proxy --port 55555 \
+    >"$P/qemu-reverse-proxy.log" 2>&1 & echo "qemu-reverse-proxy $!" | tee -a "$P/pids"
 
-TMPDIR="$SESS" ./qemu-server --port 55333 --url http://localhost:55333 --max-jobs 3 \
-  >"$P/qemu-server-3.log" 2>&1 & echo "qemu-server-3 $!" | tee -a "$P/pids"
+  TMPDIR="$SESS" ./qemu-server \
+    --name qemu-server-4 --max-jobs 4 --port 55332 --url http://127.0.0.1:55332 \
+    >"$P/qemu-server-4.log" 2>&1 & echo "qemu-server-4 $!" | tee -a "$P/pids"
 
-./automation-client --port 52222 --url http://localhost:52222 --max-jobs 5 \
-  >"$P/automation-client-5.log" 2>&1 & echo "automation-client-5 $!" | tee -a "$P/pids"
+  TMPDIR="$SESS" ./qemu-server \
+    --name qemu-server-3 --max-jobs 3 --port 55333 --url http://127.0.0.1:55333 \
+    >"$P/qemu-server-3.log" 2>&1 & echo "qemu-server-3 $!" | tee -a "$P/pids"
 
-./automation-client --port 52223 --url http://localhost:52223 --max-jobs 3 \
-  >"$P/automation-client-3.log" 2>&1 & echo "automation-client-3 $!" | tee -a "$P/pids"
+  SERVER_URL=http://127.0.0.1:55555 ./automation-client \
+    --name automation-client-5 --max-jobs 5 --port 52222 --url http://127.0.0.1:52222 \
+    >"$P/automation-client-5.log" 2>&1 & echo "automation-client-5 $!" | tee -a "$P/pids"
 
-./automation-server --port 54321 \
-  --model openrouter/meta/muse-spark-1.3-contributor \
-  >"$P/automation-server.log" 2>&1 & echo "automation-server $!" | tee -a "$P/pids"
+  SERVER_URL=http://127.0.0.1:55555 ./automation-client \
+    --name automation-client-3 --max-jobs 3 --port 52223 --url http://127.0.0.1:52223 \
+    >"$P/automation-client-3.log" 2>&1 & echo "automation-client-3 $!" | tee -a "$P/pids"
+
+  ./automation-server --port 54321 \
+    --model openrouter/meta/muse-spark-1.3-contributor \
+    >"$P/automation-server.log" 2>&1 & echo "automation-server $!" | tee -a "$P/pids"
+}
+start_fleet
 ```
 
-Confirm six pids and both QEMU + both clients are listening:
+Confirm six pids, six ports, listen lines, no `heartbeat failed`, four live fleet rows. `./ctrl automation --list` is the job queue, not the fleet.
 
 ```bash
+sleep 2
 cat "$P/pids"
 ss -ltnp | grep -E '55332|55333|55555|52222|52223|54321'
-./ctrl automation --list
+grep -E 'listening on|heartbeat failed' "$P"/qemu-server-*.log "$P"/automation-client-*.log "$P"/automation-server.log
+psql "$DBURL" -X -c "select name, type, url, heartbeat_at from servers where heartbeat_at > now() - interval '45 seconds' order by type, name;"
 ```
 
-Create a ticket (ISO/url are already in `/tmp/superrun/env`):
+Expect `qemu-server-4` / `qemu-server-3` (`qemu`) and `automation-client-5` / `automation-client-3` (`automation-client`).
+
+`N` is monotonic (`/tmp/superrun/next`). Never take N from `active`. Target: `counted + active == 100` after replacing every INFRA. Dispatch is 1-wide: keep at most **2** drive jobs in `running`+`pending` (backlog, not a capacity test). `new.sh` exit 2 = no drive webhook — pause refill.
 
 ```bash
-/tmp/superrun/new.sh 1 muse
+/tmp/superrun/new.sh muse
 ```
 
-Keep at most 7 drive jobs (`running`+`pending`) — that is the QEMU cap (4+3). Sleep 15s between `new.sh` when starting several. Hold new starts if `MemAvailable` is under 4G.
-
-Each minute, **erase finished guest disks**. A done session is ~6G under `$SESS` (`oligarchy-<session-id>`). Leaving them fills the disk and the next wave of guests will OOM or fail screendumps. `/tmp/superrun/cleanup.sh` deletes every session dir whose row is not `running`/`downloading`. If that query fails, it must keep every dir (do not `rm` on "unknown").
+Each `AGENT_LOOP_TICK_superrun` you **do this work** (the sleep loop does not):
 
 ```bash
-/tmp/superrun/board.sh
-/tmp/superrun/cleanup.sh   # required every tick; not optional
-
-# retire only when post_run_diagnosis exists; N comes from active, not the ticket number
-IN=$(awk -F'|' '{printf "%s'\''%s'\''", sep, $4; sep=","}' /tmp/superrun/active)
-psql "$DBURL" -X -A -t -c "select r.linear_id from test_results r join post_run_diagnosis d on d.session_id=r.session_id where r.linear_id in ($IN);"
-# for each ticket printed:
-N=$(awk -F'|' -v t="$TICKET" '$4==t{print $1}' /tmp/superrun/active)
-/tmp/superrun/retire.sh "$N"
-
-N_DRIVE=$(psql "$DBURL" -X -A -t -c "select count(*) from automation_jobs where action='drive' and status in ('running','pending')")
-if [ "$N_DRIVE" -lt 7 ]; then
-  LAST=$(awk -F'|' 'NF{n=$1} END{print n+0}' /tmp/superrun/active)
-  /tmp/superrun/new.sh $((LAST+1)) muse
-fi
+/tmp/superrun/tick.sh
+# RETIRE n|…  → if ANALYZE is also printed, wait for the subagent, then:
+/tmp/superrun/retire.sh "$N" COUNTED   # or INFRA
+# STUCK no-drive-job → pause refill; fix webhook / automation-server
+# STUCK diagnose=* no-diagnosis-row → ./ctrl diagnose … --model openrouter/meta/muse-spark-1.3-contributor
+#        or retire INFRA. cannot re-enqueue diagnose
+# LEDGER refill=yes → /tmp/superrun/new.sh muse
+# LEDGER remaining=0 → no new.sh; drain until active is empty
 ```
 
-Arm the tick:
-
-```bash
-while true; do sleep 60; echo AGENT_LOOP_TICK_superrun; done
-```
-
-Drive died with the result still open (30m ceiling or opencode exit):
+Drive died, result still open:
 
 ```bash
 SID=$(./ctrl session --search --test-result-id "$RID")
 ./ctrl test-results --agent-id "$TICKET" --id "$RID" --status failed --reason "operator: …"
 ./client stop --agent-id "$TICKET" --server-url http://127.0.0.1:55555 --session-id "$SID" --status aborted --reason "operator: …"
-/tmp/superrun/linear-state.sh "$TICKET" "Needs Review"   # model: counted
-# /tmp/superrun/linear-state.sh "$TICKET" Canceled       # INFRA: not counted, extra new.sh later
+/tmp/superrun/linear-state.sh "$TICKET" "Needs Review"   # model: COUNTED
+# /tmp/superrun/linear-state.sh "$TICKET" Canceled       # INFRA
 ```
 
-Drain (no more tickets): skip `new.sh`. Still board, retire, and **cleanup disks** every minute until `/tmp/superrun/active` is empty, then kill the loop.
+Arm the wake-up only after the first ticket exists:
+
+```bash
+while true; do sleep 60; echo AGENT_LOOP_TICK_superrun; done
+```
+
+Drain: `tick.sh` + retire + cleanup, no `new.sh`, until `active` is empty.
+
+**Done when** `index.tsv` has exactly 100 `COUNTED` rows, `active` is empty, no running sessions/jobs, session dirs gone, every COUNTED result+diagnosis model is the paid Muse, and `SCRATCH.md` names failures + whether the harness needed a fix.
 
 One run’s DB dump: `/tmp/superrun/status.sh "$RID"`
 </HowToRun>

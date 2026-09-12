@@ -13,8 +13,10 @@ case "$STATE" in
   *) echo "unknown state $STATE" >&2; exit 1 ;;
 esac
 TOKEN="$(grep '^LINEAR_API_TOKEN=' "$ROOT/.env" | cut -d= -f2- | tr -d '"'"'")"
-ID=$(curl -s https://api.linear.app/graphql -H "Authorization: $TOKEN" -H 'Content-Type: application/json' \
-  --data "{\"query\":\"query(\$id:String!){issue(id:\$id){id}}\",\"variables\":{\"id\":\"$TICKET\"}}" | jq -r '.data.issue.id')
-curl -s https://api.linear.app/graphql -H "Authorization: $TOKEN" -H 'Content-Type: application/json' \
-  --data "{\"query\":\"mutation(\$id:String!,\$s:String!){issueUpdate(id:\$id,input:{stateId:\$s}){success issue{identifier state{name}}}}\",\"variables\":{\"id\":\"$ID\",\"s\":\"$SID\"}}" \
-  | jq -c '.data.issueUpdate | {success, ticket: .issue.identifier, state: .issue.state.name}'
+ISSUE=$(curl -fsS https://api.linear.app/graphql -H "Authorization: $TOKEN" -H 'Content-Type: application/json' \
+  --data "{\"query\":\"query(\$id:String!){issue(id:\$id){id}}\",\"variables\":{\"id\":\"$TICKET\"}}")
+ID=$(printf '%s\n' "$ISSUE" | jq -e -r '.data.issue.id')
+UPDATED=$(curl -fsS https://api.linear.app/graphql -H "Authorization: $TOKEN" -H 'Content-Type: application/json' \
+  --data "{\"query\":\"mutation(\$id:String!,\$s:String!){issueUpdate(id:\$id,input:{stateId:\$s}){success issue{identifier state{name}}}}\",\"variables\":{\"id\":\"$ID\",\"s\":\"$SID\"}}")
+printf '%s\n' "$UPDATED" | jq -e '.data.issueUpdate.success == true' >/dev/null
+printf '%s\n' "$UPDATED" | jq -c '.data.issueUpdate | {success, ticket: .issue.identifier, state: .issue.state.name}'

@@ -12,11 +12,13 @@ export SUPER_RUN_SERVER_URL='${SUPER_RUN_SERVER_URL:-https://oligarchy-server.tr
 export SUPER_RUN_ISO='${SUPER_RUN_ISO:-https://iso.omarchy.org/omarchy-4.0.2.iso}'
 export SUPER_RUN_VERSION='${SUPER_RUN_VERSION:-4.0.2}'
 export SUPER_RUN_TEST='${SUPER_RUN_TEST:-lock-screen}'
+export OLIGARCHY_SESSIONS_DIR='${OLIGARCHY_SESSIONS_DIR:-$HOME/personal/oligarchy-tmp}'
 EOF
-for f in board.sh new.sh retire.sh record.sh cleanup.sh linear-state.sh status.sh; do
+for f in board.sh new.sh retire.sh record.sh cleanup.sh linear-state.sh status.sh tick.sh; do
   cp "$HERE/$f" "$DEST/$f"
   chmod +x "$DEST/$f"
 done
 touch "$DEST/active"
+[ -f "$DEST/next" ] || echo 1 > "$DEST/next"
 echo "installed helpers in $DEST (OLIGARCHY_ROOT=$ROOT)"
 echo "source $DEST/env and set DBURL from $ROOT/.env before ticks"

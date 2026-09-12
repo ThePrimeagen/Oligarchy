@@ -1,11 +1,15 @@
 #!/bin/sh
-# record.sh <n> <dir: muse|deepseek> <result_id> [note]
+# record.sh <n> <dir: muse|deepseek> <result_id> <COUNTED|INFRA> [note]
 set -eu
 DEST="${SUPER_RUN_DIR:-/tmp/superrun}"
 [ -f "$DEST/env" ] && . "$DEST/env"
 ROOT="${OLIGARCHY_ROOT:?set OLIGARCHY_ROOT or run install.sh}"
 [ -n "${DBURL:-}" ] || { echo "DBURL is required" >&2; exit 1; }
-N="$1"; DIR="$2"; RID="$3"; NOTE="${4:-}"
+N="$1"; DIR="$2"; RID="$3"; KIND="$4"; NOTE="${5:-}"
+case "$KIND" in
+  COUNTED|INFRA) ;;
+  *) echo "record.sh: kind must be COUNTED or INFRA" >&2; exit 1 ;;
+esac
 cd "$ROOT"
 Q() { psql "$DBURL" -X -A -t -F '|' -c "$1"; }
 IFS='|' read -r TICKET RSTATUS MODEL SID RREASON RCREATED RFINISHED <<EOT
@@ -23,6 +27,7 @@ NNN=$(printf '%03d' "$N"); FILE="automation-super-run-logs/$DIR/$NNN-$TICKET.md"
 mkdir -p "automation-super-run-logs/$DIR"
 {
 echo "# $DIR run $NNN — $TICKET"; echo
+echo "- kind: $KIND"
 echo "- model (on result): ${MODEL:-<none>}"
 echo "- created: $RCREATED"
 echo "- result id: $RID"
@@ -40,5 +45,5 @@ echo; echo "Webhook/automation log:"; echo '```'
 psql "$DBURL" -X -A -t -F' ' -c "select to_char(l.created_at at time zone 'UTC','HH24:MI:SS'), l.level, l.text from logs l where l.location='automation' and l.agent_id='$TICKET' order by l.id"
 echo '```'
 } > "$FILE"
-printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$DIR-$NNN" "$MODEL" "$TICKET" "$RID" "$SID" "$RSTATUS" "$DSTATUS" "${JSTATUS:-none}" "${VERDICT:-none}" "${ETYPE:-}" "$PIPE${NOTE:+; $NOTE}" >> automation-super-run-logs/index.tsv
-echo "$FILE ($PIPE)"
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$DIR-$NNN" "$KIND" "$MODEL" "$TICKET" "$RID" "$SID" "$RSTATUS" "$DSTATUS" "${JSTATUS:-none}" "${VERDICT:-none}" "${ETYPE:-}" "$PIPE${NOTE:+; $NOTE}" >> automation-super-run-logs/index.tsv
+echo "$FILE ($KIND $PIPE)"
