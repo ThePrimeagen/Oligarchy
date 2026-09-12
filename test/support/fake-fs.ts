@@ -103,6 +103,15 @@ export const recordingFs = (
           return bytes === undefined ? Effect.fail(notFound("open", path)) : Effect.succeed(bytes);
         }),
       ),
+    readFileString: (path) =>
+      record("readFileString", path).pipe(
+        Effect.andThen(() => {
+          const bytes = options.contents?.[path];
+          return bytes === undefined
+            ? Effect.fail(notFound("readFileString", path))
+            : Effect.succeed(new TextDecoder().decode(bytes));
+        }),
+      ),
     remove: (path, removeOptions) => record("remove", path, removeOptions),
     ...options.overrides,
   });

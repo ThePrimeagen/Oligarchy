@@ -118,7 +118,12 @@ const decoder = new TextDecoder();
 const serverBody = (url: string) => Contract.ServerBody.make({ url });
 
 // A registered qemu server, as the fake store's rows carry it: what this reverse proxy fronts.
-const qemu = (url: string) => ({ id: crypto.randomUUID(), url, type: "qemu" as const });
+const qemu = (url: string) => ({
+  id: crypto.randomUUID(),
+  url,
+  name: null,
+  type: "qemu" as const,
+});
 
 const upstreamCalls = (fixed: Fixture) =>
   fixed.upstream.requests.map((request) => `${request.method} ${request.url}`);

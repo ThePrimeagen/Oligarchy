@@ -5,6 +5,7 @@ import {
   actions,
   automationJobs,
   images,
+  processStats,
   servers,
   sessions,
   testBasePrompts,
@@ -30,7 +31,7 @@ export type TestBasePrompt = typeof testBasePrompts.$inferSelect;
 // read, so the page measures a heartbeat's age against the clock that stamped it.
 export type Server = Pick<
   typeof servers.$inferSelect,
-  "url" | "stats" | "generation" | "heartbeatAt"
+  "url" | "name" | "stats" | "generation" | "heartbeatAt"
 > & {
   readonly queriedAt: Date;
 };
@@ -56,6 +57,19 @@ export type AutomationQueue = {
   readonly running: ReadonlyArray<AutomationJob>;
   readonly pending: ReadonlyArray<AutomationJob>;
   readonly completed: ReadonlyArray<AutomationJob>;
+};
+
+// One process's word on itself: current jobs, current VmRSS, cpu over the last thirty seconds,
+// and the database's clock at the read so the page measures the report's age against the clock
+// that stamped it.
+export type ProcessStat = {
+  readonly name: string;
+  readonly type: (typeof processStats.$inferSelect)["type"];
+  readonly jobs: number;
+  readonly memoryBytes: number;
+  readonly cpuPercent: number;
+  readonly reportedAt: Date;
+  readonly queriedAt: Date;
 };
 
 // One name's wordings, oldest first: versions[i] is version i + 1, and the last is the newest.
@@ -451,6 +465,7 @@ export function listServers(connectionString: string): Promise<Server[]> {
     db
       .select({
         url: servers.url,
+        name: servers.name,
         stats: servers.stats,
         generation: servers.generation,
         heartbeatAt: servers.heartbeatAt,
@@ -529,6 +544,26 @@ export function abortAutomationJob(connectionString: string, ticket: string): Pr
       .returning({ id: automationJobs.id });
     return rows.length > 0;
   });
+}
+
+// The newest reading per name, qemu and automation-client together, by kind then name. The
+// clock in the select is the one a report's age is read against, and it keeps a poll out of
+// Hyperdrive's query cache. Older rows stay in the table for a later graph.
+export function listProcessStats(connectionString: string): Promise<ProcessStat[]> {
+  return withDatabase(connectionString, (db) =>
+    db
+      .selectDistinctOn([processStats.type, processStats.name], {
+        name: processStats.name,
+        type: processStats.type,
+        jobs: processStats.jobs,
+        memoryBytes: processStats.memoryBytes,
+        cpuPercent: processStats.cpuPercent,
+        reportedAt: processStats.reportedAt,
+        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(processStats.reportedAt),
+      })
+      .from(processStats)
+      .orderBy(processStats.type, processStats.name, desc(processStats.reportedAt)),
+  );
 }
 
 // Registering a url twice is one row; the server fills the rest in when it announces itself. The

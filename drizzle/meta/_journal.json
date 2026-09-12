@@ -85,6 +85,13 @@
       "when": 1789187186485,
       "tag": "0012_mute_patriot",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1789229340524,
+      "tag": "0013_light_pyro",
+      "breakpoints": true
     }
   ]
 }

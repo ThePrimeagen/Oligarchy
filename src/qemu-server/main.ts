@@ -8,6 +8,7 @@ import * as Actions from "../db/actions.ts";
 import * as Client from "../db/client.ts";
 import * as DebugLogs from "../db/debug-logs.ts";
 import * as Logs from "../db/logs.ts";
+import * as ProcessStats from "../db/process-stats.ts";
 import * as Servers from "../db/servers.ts";
 import * as SessionStore from "../db/sessions.ts";
 import * as Log from "../observability/log.ts";
@@ -19,6 +20,7 @@ import * as Qemu from "../qemu/qemu.ts";
 import * as Stats from "../qemu/stats.ts";
 import * as Api from "../shared/api.ts";
 import type * as Domain from "../shared/domain.ts";
+import * as ProcessUsage from "../shared/process-usage.ts";
 import * as QemuServerCommand from "./command.ts";
 import * as Handlers from "./handlers.ts";
 import * as Heartbeat from "./heartbeat.ts";
@@ -52,6 +54,7 @@ const ServerLive = (
   display: Domain.QemuDisplay,
   automation: boolean,
   maxJobs: number,
+  name: string,
   port: number,
   url: Option.Option<string>,
 ) =>
@@ -59,10 +62,13 @@ const ServerLive = (
     Effect.gen(function* () {
       const log = yield* Log.Log;
       yield* log.info(
-        `qemu server listening on ${HOST}:${String(port)}; display ${display}${automation ? "; automation" : ""}; max jobs ${String(maxJobs)}${Option.match(url, { onNone: () => "", onSome: (announced) => `; announcing ${announced}` })}`,
+        `qemu server listening on ${HOST}:${String(port)}; name ${name}; display ${display}${automation ? "; automation" : ""}; max jobs ${String(maxJobs)}${Option.match(url, { onNone: () => "", onSome: (announced) => `; announcing ${announced}` })}`,
         { location: Log.Locations.server },
       );
-      yield* Option.match(url, { onNone: () => Effect.void, onSome: Heartbeat.announce });
+      yield* Option.match(url, {
+        onNone: () => Effect.void,
+        onSome: (announced) => Heartbeat.announce(announced, name),
+      });
     }),
   ).pipe(
     Layer.provide(
@@ -73,7 +79,14 @@ const ServerLive = (
     ),
     Layer.provide(Sessions.Sessions.layer(maxJobs)),
     Layer.provide(Layer.succeed(Sessions.Shutdown)(shutdown)),
-    Layer.provide(Layer.mergeAll(Qemu.Qemu.layer, Iso.Iso.layer, Stats.Stats.layer)),
+    Layer.provide(
+      Layer.mergeAll(
+        Qemu.Qemu.layer,
+        Iso.Iso.layer,
+        Stats.Stats.layer,
+        ProcessUsage.ProcessUsage.layer,
+      ),
+    ),
     // Bound before Sessions exists: a port refusal is one fatal line, never a drain.
     Layer.provide(NodeHttpServer.layer(() => server, { host: HOST, port })),
     // Root session spans require no request span above them.
@@ -89,6 +102,7 @@ const MainLive = Layer.mergeAll(
   SessionStore.SessionStore.layer,
   DebugLogs.DebugLogStore.layer,
   Servers.ServerStore.layer,
+  ProcessStats.ProcessStatsStore.layer,
   Log.Log.layer,
 ).pipe(
   Layer.provideMerge(Actions.ActionStore.layer),

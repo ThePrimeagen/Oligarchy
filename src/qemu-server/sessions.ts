@@ -127,6 +127,8 @@ export type SessionsService = {
     Errors.UnknownSession | Errors.Conflict | Errors.Internal
   >;
   readonly stats: Effect.Effect<Contract.Stats>;
+  // How many jobs this process currently holds against --max-jobs: reserved plus running.
+  readonly jobs: Effect.Effect<number>;
 };
 
 // What the drain finalizer reads and reports: the reason every surviving session's row is closed
@@ -1038,6 +1040,7 @@ const make = (maxJobs: number) =>
       stop,
       follow,
       stats: Effect.flatMap(Ref.get(sessions), (map) => stats.collect(map.size)),
+      jobs: Effect.map(Ref.get(slots), (held) => held.count),
     };
     return service;
   });

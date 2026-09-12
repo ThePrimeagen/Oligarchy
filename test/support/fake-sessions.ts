@@ -161,6 +161,7 @@ export const fakeSessions = (
         stop: (session, status, reason) => record("stop", session.id, status, reason),
         follow: (id) => known("follow", id).pipe(Effect.as(Stream.fromIterable(FOLLOW_EVENTS))),
         stats: record("stats").pipe(Effect.as(STATS)),
+        jobs: record("jobs").pipe(Effect.as(STATS.qemus)),
         ...overrides,
       });
     }),

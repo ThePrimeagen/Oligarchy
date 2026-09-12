@@ -619,3 +619,28 @@ describe("QEMU-first reserve", () => {
     }).pipe(Effect.provide(layer(spawner, 1, reserveQemu)));
   });
 });
+
+describe("jobs", () => {
+  it.effect("reports the current admitted count, including a reservation that has not run", () => {
+    const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions.Sessions;
+      expect(yield* sessions.jobs).toBe(0);
+      yield* sessions.reserve(TICKET);
+      expect(yield* sessions.jobs).toBe(1);
+      yield* sessions.run(TICKET, "do the work", MODEL);
+      expect(yield* sessions.jobs).toBe(0);
+    }).pipe(Effect.provide(layer(spawner)));
+  });
+
+  it.effect("a refused reserve does not count (unhappy)", () => {
+    const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions.Sessions;
+      yield* sessions.reserve(TICKET);
+      expect(yield* sessions.jobs).toBe(1);
+      expect((yield* Effect.flip(sessions.reserve(OTHER)))._tag).toBe("AtCapacity");
+      expect(yield* sessions.jobs).toBe(1);
+    }).pipe(Effect.provide(layer(spawner, 1)));
+  });
+});

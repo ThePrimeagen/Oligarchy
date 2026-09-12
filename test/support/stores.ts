@@ -5,6 +5,7 @@ import * as DebugLogs from "../../src/db/debug-logs.ts";
 import * as Diagnosis from "../../src/db/diagnosis.ts";
 import * as Logs from "../../src/db/logs.ts";
 import * as DbSchema from "../../src/db/schema.ts";
+import * as Process from "../../src/db/process-stats.ts";
 import * as Servers from "../../src/db/servers.ts";
 import * as Sessions from "../../src/db/sessions.ts";
 import * as Tests from "../../src/db/tests.ts";
@@ -661,11 +662,13 @@ export const fakeAutomationStore = (
 type RegisteredServer = {
   readonly id: string;
   readonly url: string;
+  readonly name: string | null;
   readonly type: Servers.ServerType;
 };
 type Heartbeat = {
   readonly url: string;
   readonly type: Servers.ServerType;
+  readonly name: string;
   readonly stats: DbSchema.ServerStats;
 };
 
@@ -696,21 +699,21 @@ export const fakeServerStore = (
     addServer: (url, type) =>
       Effect.sync(() => {
         if (indexOf(url) === -1) {
-          servers.push({ id: crypto.randomUUID(), url, type });
+          servers.push({ id: crypto.randomUUID(), url, name: null, type });
         }
       }),
-    heartbeat: (url, type, stats) =>
+    heartbeat: (url, type, name, stats) =>
       Effect.sync(() => {
         const index = indexOf(url);
         if (index === -1) {
-          servers.push({ id: crypto.randomUUID(), url, type });
+          servers.push({ id: crypto.randomUUID(), url, name, type });
         } else {
           const existing = servers[index];
           if (existing !== undefined) {
-            servers[index] = { id: existing.id, url, type };
+            servers[index] = { id: existing.id, url, name, type };
           }
         }
-        heartbeats.push({ url, type, stats });
+        heartbeats.push({ url, type, name, stats });
       }),
     removeServer: (url) =>
       Effect.sync(() => {
@@ -771,6 +774,38 @@ export const fakeServerStore = (
   };
 };
 
+// ---------------------------------------------------------------------------
+// ProcessStatsStore
+// ---------------------------------------------------------------------------
+
+type ProcessReport = {
+  readonly name: string;
+  readonly type: Servers.ServerType;
+  readonly stats: Process.ProcessStats;
+};
+
+export type FakeProcessStatsStore = {
+  readonly reports: Array<ProcessReport>;
+  readonly layer: Layer.Layer<Process.ProcessStatsStore>;
+};
+
+export const fakeProcessStatsStore = (
+  overrides: Partial<typeof Process.ProcessStatsStore.Service> = {},
+): FakeProcessStatsStore => {
+  const reports: Array<ProcessReport> = [];
+  const service = Process.ProcessStatsStore.of({
+    report: (name, type, stats) =>
+      Effect.sync(() => {
+        reports.push({ name, type, stats });
+      }),
+    ...overrides,
+  });
+  return {
+    reports,
+    layer: Layer.succeed(Process.ProcessStatsStore)(service),
+  };
+};
+
 // Every store at once, sharing nothing: the common fixture for handler and command tests.
 export const fakeStores = () => {
   const sessions = fakeSessionStore();
@@ -781,6 +816,7 @@ export const fakeStores = () => {
   const debugLogs = fakeDebugLogStore();
   const diagnosis = fakeDiagnosisStore();
   const servers = fakeServerStore();
+  const process = fakeProcessStatsStore();
   return {
     sessions,
     actions,
@@ -790,6 +826,7 @@ export const fakeStores = () => {
     debugLogs,
     diagnosis,
     servers,
+    process,
     layer: Layer.mergeAll(
       sessions.layer,
       actions.layer,
@@ -799,6 +836,7 @@ export const fakeStores = () => {
       debugLogs.layer,
       diagnosis.layer,
       servers.layer,
+      process.layer,
     ),
   };
 };

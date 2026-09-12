@@ -100,6 +100,13 @@ describe("brands", () => {
     }
   });
 
+  it("accepts a non-empty ServerName and refuses an empty one", () => {
+    const is = Schema.is(Domain.ServerName);
+    expect(is("garage")).toBe(true);
+    expect(is("qemu-a")).toBe(true);
+    expect(is("")).toBe(false);
+  });
+
   it("accepts a provider/model id as a ModelId and refuses anything else", () => {
     const is = Schema.is(Domain.ModelId);
     expect(is("opencode/muse-spark-1.3-contributor-free")).toBe(true);

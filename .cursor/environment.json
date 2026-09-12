@@ -5,7 +5,7 @@
   "terminals": [
     {
       "name": "qemu-server",
-      "command": "./qemu-server --port 42069 --automation --max-jobs 2"
+      "command": "./qemu-server --port 42069 --automation --max-jobs 2 --name qemu-dev"
     }
   ]
 }

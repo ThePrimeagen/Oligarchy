@@ -14,6 +14,7 @@ const DEFAULT_PORT = 54322;
 export type AutomationClient<RServe> = {
   readonly serve: (
     maxJobs: number,
+    name: string,
     port: number,
     url: Option.Option<string>,
   ) => Layer.Layer<never, HttpServerError.ServeError, RServe>;
@@ -38,6 +39,12 @@ export const makeAutomationClientCommand = <RServe>(server: AutomationClient<RSe
           "How many runs this client carries at once; a reserve past it is refused with 503",
         ),
       ),
+      // No default: the fleet and the process series know this machine by the name the
+      // operator gave it, which is nothing this process can invent.
+      name: Flag.string("name").pipe(
+        Flag.withSchema(Domain.ServerName),
+        Flag.withDescription("Name this machine on the fleet and on each process reading"),
+      ),
       port: Flag.integer("port").pipe(
         Flag.withDefault(DEFAULT_PORT),
         Flag.withDescription("Listen port"),
@@ -52,7 +59,7 @@ export const makeAutomationClientCommand = <RServe>(server: AutomationClient<RSe
         ),
       ),
     },
-    ({ maxJobs, port, url }) =>
+    ({ maxJobs, name, port, url }) =>
       Effect.gen(function* () {
         const log = yield* Log.Log;
         const database = yield* Client.Database;
@@ -67,7 +74,7 @@ export const makeAutomationClientCommand = <RServe>(server: AutomationClient<RSe
             ),
           );
           return yield* Effect.raceFirst(
-            Layer.launch(server.serve(maxJobs, port, url)),
+            Layer.launch(server.serve(maxJobs, name, port, url)),
             Deferred.await(server.serverFailed),
           );
         });

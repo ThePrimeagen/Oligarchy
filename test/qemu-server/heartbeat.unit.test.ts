@@ -4,11 +4,13 @@ import { Deferred, Effect, Exit, Fiber, Layer, Scope } from "effect";
 import { TestClock } from "effect/testing";
 import * as Heartbeat from "../../src/qemu-server/heartbeat.ts";
 import * as Errors from "../../src/shared/errors.ts";
+import * as ProcessUsage from "../../src/shared/process-usage.ts";
 import * as FakeSessions from "../support/fake-sessions.ts";
 import * as FakeLog from "../support/log.ts";
 import * as Stores from "../support/stores.ts";
 
 const URL = "http://127.0.0.1:55332";
+const NAME = "garage";
 
 // What FakeSessions.STATS says, cut down to what the row keeps.
 const ROW_STATS = {
@@ -18,8 +20,16 @@ const ROW_STATS = {
 };
 
 // One heartbeat as the store records it: this server announces itself as a qemu server.
-const ANNOUNCED = { url: URL, type: "qemu", stats: ROW_STATS };
-const REGISTERED = { url: URL, type: "qemu" };
+const ANNOUNCED = { url: URL, type: "qemu", name: NAME, stats: ROW_STATS };
+const REGISTERED = { url: URL, type: "qemu", name: NAME };
+
+const SAMPLE = { memoryBytes: 4_096_000, cpuPercent: 12.5 };
+const PROCESS = { name: NAME, type: "qemu" as const, stats: { jobs: 1, ...SAMPLE } };
+
+const fakeUsage = (sample = SAMPLE) =>
+  Layer.succeed(ProcessUsage.ProcessUsage)(
+    ProcessUsage.ProcessUsage.of({ collect: Effect.succeed(sample) }),
+  );
 
 const refused = Errors.DatabaseError.make({
   operation: "heartbeat",
@@ -32,14 +42,16 @@ const start = (
   store: Stores.FakeServerStore,
   sessions = FakeSessions.fakeSessions(),
   log = FakeLog.fakeLog(),
+  process = Stores.fakeProcessStatsStore(),
+  usage = fakeUsage(),
 ) =>
   Effect.gen(function* () {
     const scope = yield* Scope.make();
-    yield* Heartbeat.announce(URL).pipe(
-      Effect.provide(Layer.mergeAll(sessions.layer, store.layer, log.layer)),
+    yield* Heartbeat.announce(URL, NAME).pipe(
+      Effect.provide(Layer.mergeAll(sessions.layer, store.layer, process.layer, usage, log.layer)),
       Scope.provide(scope),
     );
-    return { scope, log };
+    return { scope, log, process };
   });
 
 describe("heartbeat happy path", () => {
@@ -76,10 +88,43 @@ describe("heartbeat happy path", () => {
     }),
   );
 
+  it.effect("writes process stats at once and then every thirty seconds", () =>
+    Effect.gen(function* () {
+      const store = Stores.fakeServerStore();
+      const { process, log } = yield* start(store);
+      expect(process.reports).toEqual([PROCESS]);
+      yield* TestClock.adjust("30 seconds");
+      expect(process.reports).toHaveLength(2);
+      expect(process.reports.every((row) => row.name === NAME && row.type === "qemu")).toBe(true);
+      expect(log.lines).toEqual([]);
+    }),
+  );
+
+  it.effect("reports the current job count, not an average", () =>
+    Effect.gen(function* () {
+      let jobs = 0;
+      const sessions = FakeSessions.fakeSessions({
+        jobs: Effect.sync(() => jobs),
+      });
+      const store = Stores.fakeServerStore();
+      const process = Stores.fakeProcessStatsStore();
+      yield* start(store, sessions, FakeLog.fakeLog(), process);
+      expect(process.reports[0]?.stats.jobs).toBe(0);
+      jobs = 3;
+      yield* TestClock.adjust("30 seconds");
+      expect(process.reports[1]?.stats.jobs).toBe(3);
+    }),
+  );
+
   it.effect("deletes its own row when the scope closes, and leaves every other server", () =>
     Effect.gen(function* () {
       const store = Stores.fakeServerStore();
-      const other = { id: crypto.randomUUID(), url: "http://127.0.0.1:1", type: "qemu" as const };
+      const other = {
+        id: crypto.randomUUID(),
+        url: "http://127.0.0.1:1",
+        name: null,
+        type: "qemu" as const,
+      };
       store.servers.push(other);
       const { scope, log } = yield* start(store);
       expect(store.servers).toEqual([other, expect.objectContaining(REGISTERED)]);
@@ -128,13 +173,13 @@ describe("heartbeat unhappy path", () => {
         let attempts = 0;
         const written: Array<typeof ANNOUNCED> = [];
         const store = Stores.fakeServerStore({
-          heartbeat: (url, type, stats) =>
+          heartbeat: (url, type, name, stats) =>
             Effect.suspend(() => {
               attempts += 1;
               if (attempts === 1) {
                 return Effect.fail(refused);
               }
-              written.push({ url, type, stats });
+              written.push({ url, type, name, stats });
               return Effect.void;
             }),
         });
@@ -204,6 +249,39 @@ describe("heartbeat unhappy path", () => {
             agentId: undefined,
             skipSentry: false,
             cause: refusedDelete,
+          },
+        ]);
+      }),
+  );
+
+  it.effect(
+    "a refused process write is its own error line, and the servers heartbeat still writes",
+    () =>
+      Effect.gen(function* () {
+        const refusedProcess = Errors.DatabaseError.make({
+          operation: "reportProcess",
+          message: "Failed query: insert into process_stats",
+          cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
+        });
+        const process = Stores.fakeProcessStatsStore({
+          report: () => Effect.fail(refusedProcess),
+        });
+        const store = Stores.fakeServerStore();
+        const { log } = yield* start(
+          store,
+          FakeSessions.fakeSessions(),
+          FakeLog.fakeLog(),
+          process,
+        );
+        expect(store.heartbeats).toEqual([ANNOUNCED]);
+        expect(log.lines).toEqual([
+          {
+            level: "error",
+            text: "process stats failed: connect ECONNREFUSED 127.0.0.1:5432",
+            location: "server",
+            agentId: undefined,
+            skipSentry: false,
+            cause: refusedProcess,
           },
         ]);
       }),

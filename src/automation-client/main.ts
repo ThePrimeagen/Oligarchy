@@ -16,6 +16,7 @@ import * as Config from "../config.ts";
 import * as ProxyClient from "../client/proxy-client.ts";
 import * as Client from "../db/client.ts";
 import * as Logs from "../db/logs.ts";
+import * as ProcessStats from "../db/process-stats.ts";
 import * as Servers from "../db/servers.ts";
 import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
@@ -24,6 +25,7 @@ import * as Stats from "../qemu/stats.ts";
 import * as Api from "../shared/api.ts";
 import * as Contract from "../shared/contract.ts";
 import * as Errors from "../shared/errors.ts";
+import * as ProcessUsage from "../shared/process-usage.ts";
 import * as AutomationClientCommand from "./command.ts";
 import * as Handlers from "./handlers.ts";
 import * as Heartbeat from "./heartbeat.ts";
@@ -48,16 +50,19 @@ server.on("error", (cause) => {
 
 // The heartbeat starts once the listener is up, in the same scope: a port refusal announces
 // nothing, and a shutdown deletes the row it wrote.
-const ServerLive = (maxJobs: number, port: number, url: Option.Option<string>) =>
+const ServerLive = (maxJobs: number, name: string, port: number, url: Option.Option<string>) =>
   Layer.effectDiscard(
     Effect.gen(function* () {
       const log = yield* Log.Log;
       yield* log.acquireColor(Log.AutomationClientAgentId);
       yield* log.info(
-        `automation client listening on ${HOST}:${String(port)}; max jobs ${String(maxJobs)}${Option.match(url, { onNone: () => "", onSome: (announced) => `; announcing ${announced}` })}`,
+        `automation client listening on ${HOST}:${String(port)}; name ${name}; max jobs ${String(maxJobs)}${Option.match(url, { onNone: () => "", onSome: (announced) => `; announcing ${announced}` })}`,
         automationClientAttr,
       );
-      yield* Option.match(url, { onNone: () => Effect.void, onSome: Heartbeat.announce });
+      yield* Option.match(url, {
+        onNone: () => Effect.void,
+        onSome: (announced) => Heartbeat.announce(announced, name),
+      });
     }),
   ).pipe(
     Layer.provide(
@@ -106,7 +111,7 @@ const ServerLive = (maxJobs: number, port: number, url: Option.Option<string>) =
         }),
       ),
     ),
-    Layer.provide(Stats.Stats.layer),
+    Layer.provide(Layer.mergeAll(Stats.Stats.layer, ProcessUsage.ProcessUsage.layer)),
     Layer.provide(Layer.succeed(HttpMiddleware.TracerDisabledWhen)(() => true)),
   );
 
@@ -115,7 +120,11 @@ const DatabaseLive = Layer.unwrap(
 );
 
 // Sentry sits beneath Log so the log rows flush before Sentry does, and Log captures the reporter.
-const MainLive = Layer.mergeAll(Servers.ServerStore.layer, Log.Log.layer).pipe(
+const MainLive = Layer.mergeAll(
+  Servers.ServerStore.layer,
+  ProcessStats.ProcessStatsStore.layer,
+  Log.Log.layer,
+).pipe(
   Layer.provideMerge(Logs.LogStore.layer),
   Layer.provideMerge(DatabaseLive),
   Layer.provideMerge(Config.ProxyConfig.layer),

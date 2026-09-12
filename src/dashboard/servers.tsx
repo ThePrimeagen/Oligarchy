@@ -1,6 +1,6 @@
 import type { FC } from "hono/jsx";
 import { HTMX_INTEGRITY, HTMX_URL } from "./htmx.ts";
-import type { AutomationJob, AutomationQueue, Server } from "./query.ts";
+import type { AutomationJob, AutomationQueue, ProcessStat, Server } from "./query.ts";
 
 // A server writes its row every thirty seconds. One heartbeat may be in flight and one lost to a
 // slow database; three overdue is a server that stopped.
@@ -41,6 +41,7 @@ const Row: FC<{ server: Server }> = ({ server }) => {
   if (server.stats === null || server.heartbeatAt === null) {
     return (
       <tr>
+        <td>{server.name ?? "—"}</td>
         <td>{server.url}</td>
         <td colspan={3}>never heard from</td>
         <td>{server.generation}</td>
@@ -52,6 +53,7 @@ const Row: FC<{ server: Server }> = ({ server }) => {
   const sinceHeartbeat = server.queriedAt.getTime() - server.heartbeatAt.getTime();
   return (
     <tr>
+      <td>{server.name ?? "—"}</td>
       <td>{server.url}</td>
       {sinceHeartbeat > SILENT_AFTER_MS ? (
         <td colspan={3}>
@@ -77,6 +79,50 @@ const Row: FC<{ server: Server }> = ({ server }) => {
   );
 };
 
+const megabytes = (bytes: number): string => (bytes / 1_000_000).toFixed(1);
+
+const ProcessRow: FC<{ row: ProcessStat }> = ({ row }) => {
+  const sinceReport = row.queriedAt.getTime() - row.reportedAt.getTime();
+  return (
+    <tr>
+      <td>{row.name}</td>
+      <td>{row.type}</td>
+      {sinceReport > SILENT_AFTER_MS ? (
+        <td colspan={3}>
+          <strong>silent</strong>
+        </td>
+      ) : (
+        <>
+          <td>{row.jobs}</td>
+          <td>{megabytes(row.memoryBytes)} MB</td>
+          <td>{percent(row.cpuPercent)}</td>
+        </>
+      )}
+      <td>{age(sinceReport)} ago</td>
+    </tr>
+  );
+};
+
+// Current process readings as a table, or the sentence that there are none: what the page polls for.
+export const Process: FC<{ rows: ReadonlyArray<ProcessStat> }> = ({ rows }) =>
+  rows.length === 0 ? (
+    <p>no process stats</p>
+  ) : (
+    <table>
+      <tr>
+        <th>name</th>
+        <th>type</th>
+        <th>jobs</th>
+        <th>memory</th>
+        <th>cpu 30s</th>
+        <th>reported</th>
+      </tr>
+      {rows.map((row) => (
+        <ProcessRow row={row} />
+      ))}
+    </table>
+  );
+
 // The fleet as a table, or the sentence that there is none: what the page polls for.
 export const Fleet: FC<{ servers: ReadonlyArray<Server> }> = ({ servers }) =>
   servers.length === 0 ? (
@@ -84,6 +130,7 @@ export const Fleet: FC<{ servers: ReadonlyArray<Server> }> = ({ servers }) =>
   ) : (
     <table>
       <tr>
+        <th>name</th>
         <th>url</th>
         <th>qemus</th>
         <th>memory</th>
@@ -177,12 +224,14 @@ export const Queue: FC<{ queue: AutomationQueue }> = ({ queue }) => (
 export type Halves = {
   readonly queue: AutomationQueue;
   readonly servers: ReadonlyArray<Server>;
+  readonly process: ReadonlyArray<ProcessStat>;
 };
 
 // Text an operator reads at a glance, in two halves side by side: the automation queue, then the
-// qemu fleet with its add box, each swapped in fresh every thirty seconds. The one style rule is
-// the split. `halves` is absent only when the database could not be read, so a 500 page claims
-// neither an empty queue nor an empty fleet; `error` is the reason a request was refused, on top.
+// qemu fleet with its add box, each swapped in fresh every thirty seconds, and below them the
+// process readings. The one style rule is the split. `halves` is absent only when the database
+// could not be read, so a 500 page claims neither an empty queue nor an empty fleet; `error` is
+// the reason a request was refused, on top.
 export const ServersPage: FC<{
   halves: Halves | undefined;
   error: string | undefined;
@@ -224,6 +273,14 @@ export const ServersPage: FC<{
           </form>
         </section>
       </div>
+      <section>
+        <h2>process</h2>
+        {halves === undefined ? null : (
+          <div id="process" hx-get="/servers/process" hx-trigger="every 30s">
+            <Process rows={halves.process} />
+          </div>
+        )}
+      </section>
     </body>
   </html>
 );
