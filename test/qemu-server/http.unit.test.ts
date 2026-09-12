@@ -1220,53 +1220,69 @@ describe("defects", () => {
     }),
   );
 
-  it.effect("the real Log reports a 5xx cause and a defect to the reporter, never a 4xx", () =>
-    Effect.gen(function* () {
-      const defect = new Error("kaboom");
-      const failure = new Error("connect ECONNREFUSED 127.0.0.1:5432");
-      const fixed = fixture({
-        sessions: FakeSessions.fakeSessions({
-          stats: Effect.die(defect),
-          serial: (live) =>
-            Effect.fail(
-              Errors.Internal.make({
-                message: "internal error",
-                cause: failure,
-                sessionId: live.id,
-                agentId: live.agent,
-              }),
-            ),
-        }),
-      });
-      const stdout = Log.Log.layerStdout.pipe(Layer.provide(fixed.reporter.layer));
-      yield* Effect.gen(function* () {
-        const api = yield* client;
-        yield* Effect.flip(api.Sessions.stats());
-        yield* Effect.flip(api.Sessions.serial({ query: { id: SESSION_ID, agent: AGENT_ID } }));
-        yield* Effect.flip(api.Sessions.serial({ query: { id: "nope", agent: AGENT_ID } }));
-        const wrong = yield* client.pipe(Effect.provide(bearer("wrong")));
-        yield* Effect.flip(wrong.Sessions.serial({ query: { id: SESSION_ID, agent: AGENT_ID } }));
-      }).pipe(Effect.provide(serve(fixed, stdout)));
-      // The log line is what reports; the cause it carries is what Sentry is handed.
-      expect(fixed.reporter.reported).toHaveLength(2);
-      const causes = fixed.reporter.reported.map((report) =>
-        Render.errorDetail(report.error.cause),
-      );
-      expect(causes).toContain("kaboom");
-      expect(causes).toContain("connect ECONNREFUSED 127.0.0.1:5432");
-      const withSession = fixed.reporter.reported.find(
-        (report) =>
-          Render.errorDetail(report.error.cause) === "connect ECONNREFUSED 127.0.0.1:5432",
-      );
-      expect(withSession?.error.message).toBe(
-        `GET /serial?id=${SESSION_ID}&agent=${AGENT_ID} failed: connect ECONNREFUSED 127.0.0.1:5432`,
-      );
-      expect(withSession?.severity).toBe("Error");
-      expect(withSession?.annotations).toMatchObject({
-        location: SESSION_ID,
-        agent_id: AGENT_ID,
-      });
-    }),
+  it.effect(
+    "the real Log reports a 5xx cause, a defect and already reserved, never another 4xx",
+    () =>
+      Effect.gen(function* () {
+        const defect = new Error("kaboom");
+        const failure = new Error("connect ECONNREFUSED 127.0.0.1:5432");
+        const fixed = fixture({
+          sessions: FakeSessions.fakeSessions({
+            stats: Effect.die(defect),
+            reserve: (agent) =>
+              Effect.fail(
+                Errors.BadRequest.make({
+                  message: "already reserved",
+                  agentId: agent,
+                }),
+              ),
+            serial: (live) =>
+              Effect.fail(
+                Errors.Internal.make({
+                  message: "internal error",
+                  cause: failure,
+                  sessionId: live.id,
+                  agentId: live.agent,
+                }),
+              ),
+          }),
+        });
+        const stdout = Log.Log.layerStdout.pipe(Layer.provide(fixed.reporter.layer));
+        yield* Effect.gen(function* () {
+          const api = yield* client;
+          yield* Effect.flip(api.Sessions.stats());
+          yield* Effect.flip(api.Sessions.serial({ query: { id: SESSION_ID, agent: AGENT_ID } }));
+          yield* Effect.flip(api.Sessions.serial({ query: { id: "nope", agent: AGENT_ID } }));
+          yield* Effect.flip(
+            api.Sessions.reserve({
+              payload: Contract.ReserveAgentBody.make({ agent: AGENT_ID }),
+            }),
+          );
+          const wrong = yield* client.pipe(Effect.provide(bearer("wrong")));
+          yield* Effect.flip(wrong.Sessions.serial({ query: { id: SESSION_ID, agent: AGENT_ID } }));
+        }).pipe(Effect.provide(serve(fixed, stdout)));
+        // The log line is what reports; the cause it carries is what Sentry is handed.
+        expect(fixed.reporter.reported).toHaveLength(3);
+        const messages = fixed.reporter.reported.map((report) => report.error.message);
+        expect(messages).toContain("POST /reserve failed: already reserved");
+        const causes = fixed.reporter.reported.map((report) =>
+          Render.errorDetail(report.error.cause),
+        );
+        expect(causes).toContain("kaboom");
+        expect(causes).toContain("connect ECONNREFUSED 127.0.0.1:5432");
+        const withSession = fixed.reporter.reported.find(
+          (report) =>
+            Render.errorDetail(report.error.cause) === "connect ECONNREFUSED 127.0.0.1:5432",
+        );
+        expect(withSession?.error.message).toBe(
+          `GET /serial?id=${SESSION_ID}&agent=${AGENT_ID} failed: connect ECONNREFUSED 127.0.0.1:5432`,
+        );
+        expect(withSession?.severity).toBe("Error");
+        expect(withSession?.annotations).toMatchObject({
+          location: SESSION_ID,
+          agent_id: AGENT_ID,
+        });
+      }),
   );
 });
 

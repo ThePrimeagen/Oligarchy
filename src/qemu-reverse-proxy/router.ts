@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Option, Result, Schema, Stream } from "effect";
+import { Context, Effect, Layer, Option, Result, Schema, Semaphore, Stream } from "effect";
 import {
   type Headers,
   HttpBody,
@@ -127,6 +127,8 @@ const make = Effect.gen(function* () {
   const log = yield* Log.Log;
   const http = yield* HttpClient.HttpClient;
   const { token } = yield* Config.ProxyConfig;
+  // One reserve at a time: two requests for the same agent must not both place.
+  const reserveGate = yield* Semaphore.make(1);
 
   // prependUrl joins with exactly one slash, so `http://host/` and `http://host` reach the same
   // /stats, as the generated client's baseUrl does.
@@ -295,68 +297,75 @@ const make = Effect.gen(function* () {
     request: HttpServerRequest.HttpServerRequest,
     agent: string,
   ) {
-    const existing = yield* store
-      .serverForAgent(agent)
-      .pipe(Effect.mapError((cause) => internal(cause, undefined, agent)));
-    const who = { agentId: agent };
-    if (Option.isSome(existing)) {
-      return yield* Errors.BadRequest.make({ message: "already reserved", agentId: agent });
-    }
-    const urls = yield* store
-      .listServers(SERVER_TYPE)
-      .pipe(Effect.mapError((cause) => internal(cause, undefined, agent)));
-    if (urls.length === 0) {
-      return yield* Errors.NoServer.make({ message: "no server registered", agentId: agent });
-    }
-    const probed = yield* Effect.forEach(
-      urls,
-      (url) =>
-        Effect.map(Effect.result(probe(url, { agentId: agent })), (result) => ({ url, result })),
-      { concurrency: "unbounded" },
-    );
-    const ranked: Array<{ readonly url: string; readonly qemus: number }> = [];
-    for (const { url, result } of probed) {
-      if (Result.isFailure(result)) {
-        yield* log.warning(`server skipped; ${result.failure.message}`, {
-          location: Log.Locations.server,
-          agentId: agent,
-        });
-        continue;
-      }
-      ranked.push({ url, qemus: result.success.qemus });
-    }
-    ranked.sort((left, right) => left.qemus - right.qemus);
-    let lastCapacity:
-      | { readonly status: number; readonly text: string; readonly headers: Headers.Input }
-      | undefined;
-    for (const { url } of ranked) {
-      const response = yield* send(url, request).pipe(
-        Effect.mapError((error) => unreachable(url, error, who)),
-      );
-      const text = yield* response.text.pipe(
-        Effect.mapError((error) => unreachable(url, error, who)),
-      );
-      const headers = forwardedHeaders(response.headers);
-      if (response.status === 200) {
-        yield* store
-          .routeAgent(agent, url)
+    return yield* reserveGate.withPermits(1)(
+      Effect.gen(function* () {
+        const existing = yield* store
+          .serverForAgent(agent)
           .pipe(Effect.mapError((cause) => internal(cause, undefined, agent)));
-        yield* log.info(`reserved; ${url}`, { location: Log.Locations.server, agentId: agent });
-        return HttpServerResponse.text(text, { status: 200, headers });
-      }
-      if (response.status === 503) {
-        lastCapacity = { status: response.status, text, headers };
-        continue;
-      }
-      return HttpServerResponse.text(text, { status: response.status, headers });
-    }
-    if (lastCapacity !== undefined) {
-      return HttpServerResponse.text(lastCapacity.text, {
-        status: lastCapacity.status,
-        headers: lastCapacity.headers,
-      });
-    }
-    return yield* Errors.NoServer.make({ message: "no server available", agentId: agent });
+        const who = { agentId: agent };
+        if (Option.isSome(existing)) {
+          return yield* Errors.BadRequest.make({ message: "already reserved", agentId: agent });
+        }
+        const urls = yield* store
+          .listServers(SERVER_TYPE)
+          .pipe(Effect.mapError((cause) => internal(cause, undefined, agent)));
+        if (urls.length === 0) {
+          return yield* Errors.NoServer.make({ message: "no server registered", agentId: agent });
+        }
+        const probed = yield* Effect.forEach(
+          urls,
+          (url) =>
+            Effect.map(Effect.result(probe(url, { agentId: agent })), (result) => ({
+              url,
+              result,
+            })),
+          { concurrency: "unbounded" },
+        );
+        const ranked: Array<{ readonly url: string; readonly qemus: number }> = [];
+        for (const { url, result } of probed) {
+          if (Result.isFailure(result)) {
+            yield* log.warning(`server skipped; ${result.failure.message}`, {
+              location: Log.Locations.server,
+              agentId: agent,
+            });
+            continue;
+          }
+          ranked.push({ url, qemus: result.success.qemus });
+        }
+        ranked.sort((left, right) => left.qemus - right.qemus);
+        let lastCapacity:
+          | { readonly status: number; readonly text: string; readonly headers: Headers.Input }
+          | undefined;
+        for (const { url } of ranked) {
+          const response = yield* send(url, request).pipe(
+            Effect.mapError((error) => unreachable(url, error, who)),
+          );
+          const text = yield* response.text.pipe(
+            Effect.mapError((error) => unreachable(url, error, who)),
+          );
+          const headers = forwardedHeaders(response.headers);
+          if (response.status === 200) {
+            yield* store
+              .routeAgent(agent, url)
+              .pipe(Effect.mapError((cause) => internal(cause, undefined, agent)));
+            yield* log.info(`reserved; ${url}`, { location: Log.Locations.server, agentId: agent });
+            return HttpServerResponse.text(text, { status: 200, headers });
+          }
+          if (response.status === 503) {
+            lastCapacity = { status: response.status, text, headers };
+            continue;
+          }
+          return HttpServerResponse.text(text, { status: response.status, headers });
+        }
+        if (lastCapacity !== undefined) {
+          return HttpServerResponse.text(lastCapacity.text, {
+            status: lastCapacity.status,
+            headers: lastCapacity.headers,
+          });
+        }
+        return yield* Errors.NoServer.make({ message: "no server available", agentId: agent });
+      }),
+    );
   });
 
   const relinquish = Effect.fn("Router.relinquish")(function* (

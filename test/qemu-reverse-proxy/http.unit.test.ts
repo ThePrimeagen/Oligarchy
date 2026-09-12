@@ -676,6 +676,35 @@ describe("placement", () => {
       }),
   );
 
+  it.effect("overlapping reserves for the same agent are one 200 and one already reserved", () =>
+    Effect.gen(function* () {
+      const fixed = fixture((request, url) =>
+        url.pathname === "/reserve" ? FakeHttp.json({ ok: "true" }) : fleet(request, url),
+      );
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      yield* Effect.gen(function* () {
+        const api = yield* qemuServerClient;
+        const results = yield* Effect.all(
+          [
+            Effect.exit(api.Sessions.reserve({ payload: reserveBody })),
+            Effect.exit(api.Sessions.reserve({ payload: reserveBody })),
+          ],
+          { concurrency: "unbounded" },
+        );
+        expect(results.filter(Exit.isSuccess)).toHaveLength(1);
+        const failed = results.find(Exit.isFailure);
+        expect(failed !== undefined && Cause.squash(failed.cause)).toMatchObject({
+          _tag: "BadRequest",
+          message: "already reserved",
+        });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.store.agents.get(AGENT_ID)).toBe(SERVER_B);
+      expect(
+        fixed.upstream.requests.filter((request) => request.url.endsWith("/reserve")),
+      ).toHaveLength(1);
+    }),
+  );
+
   it.effect("a second reserve for the same agent is 400 already reserved and reaches Sentry", () =>
     Effect.gen(function* () {
       const fixed = fixture((request, url) =>
