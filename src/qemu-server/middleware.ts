@@ -41,6 +41,7 @@ const isApiError: (value: unknown) => value is Errors.ApiError = Schema.is(
     Errors.Internal,
     Errors.ServerFailed,
     Errors.NoServer,
+    Errors.AtCapacity,
     Errors.RunFailed,
   ]),
 );
@@ -63,6 +64,7 @@ const attribution = (error: Errors.ApiError, fallback: Log.ProcessAttribution): 
     case "Unauthorized":
     case "NotFound":
     case "RunFailed":
+    case "AtCapacity":
       return fallback;
     case "Forbidden":
       return { location: error.sessionId, agentId: error.agentId };

@@ -30,7 +30,7 @@ export type TestBasePrompt = typeof testBasePrompts.$inferSelect;
 // read, so the page measures a heartbeat's age against the clock that stamped it.
 export type Server = Pick<
   typeof servers.$inferSelect,
-  "url" | "stats" | "generation" | "heartbeatAt"
+  "url" | "stats" | "jobs" | "maxJobs" | "generation" | "heartbeatAt"
 > & {
   readonly queriedAt: Date;
 };
@@ -452,6 +452,8 @@ export function listServers(connectionString: string): Promise<Server[]> {
       .select({
         url: servers.url,
         stats: servers.stats,
+        jobs: servers.jobs,
+        maxJobs: servers.maxJobs,
         generation: servers.generation,
         heartbeatAt: servers.heartbeatAt,
         queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(servers.createdAt),
@@ -536,7 +538,7 @@ export function abortAutomationJob(connectionString: string, ticket: string): Pr
 // word on what it is.
 export function addServer(connectionString: string, url: string): Promise<void> {
   return withDatabase(connectionString, async (db) => {
-    await db.insert(servers).values({ url, type: "qemu" }).onConflictDoNothing();
+    await db.insert(servers).values({ url, type: "qemu", maxJobs: 1 }).onConflictDoNothing();
   });
 }
 

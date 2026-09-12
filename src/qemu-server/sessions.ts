@@ -77,7 +77,7 @@ export type SessionsService = {
     body: Contract.StartBody,
     display: Domain.QemuDisplay,
     automation: boolean,
-  ) => Effect.Effect<string, Errors.StartFailed | Errors.Internal>;
+  ) => Effect.Effect<string, Errors.StartFailed | Errors.AtCapacity | Errors.Internal>;
   // Resets lastCommandAt before returning: a valid request counts as activity.
   readonly lookup: (
     id: string,
@@ -118,6 +118,7 @@ export type SessionsService = {
     Errors.UnknownSession | Errors.Conflict | Errors.Internal
   >;
   readonly stats: Effect.Effect<Contract.Stats>;
+  readonly jobs: Effect.Effect<number>;
 };
 
 // What the drain finalizer reads and reports: the reason every surviving session's row is closed
@@ -133,6 +134,10 @@ export const Shutdown = Context.Reference<Shutdown>("@oligarchy/qemu-server/sess
     reason: MutableRef.make(SHUTDOWN_REASON),
     failed: MutableRef.make(false),
   }),
+});
+
+export const MaxJobs = Context.Reference<number>("@oligarchy/qemu-server/sessions/MaxJobs", {
+  defaultValue: () => 1,
 });
 
 const isDatabaseError = Schema.is(Errors.DatabaseError);
@@ -194,10 +199,12 @@ const make = Effect.gen(function* () {
   const log = yield* Log.Log;
   const fs = yield* FileSystem.FileSystem;
   const shutdown = yield* Shutdown;
+  const maxJobs = yield* MaxJobs;
 
   // Running machines, by id; and every session this qemu server holds, booting ones included.
   const sessions = yield* Ref.make<ReadonlyMap<string, LiveSession>>(new Map());
   const openSessions = yield* Ref.make<ReadonlyMap<string, OpenSession>>(new Map());
+  const jobCount = yield* Ref.make(0);
 
   const elapsed = (started: number) =>
     Effect.map(Clock.currentTimeMillis, (now) => String(now - started));
@@ -334,6 +341,7 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<void> =>
     Effect.gen(function* () {
       yield* Ref.update(openSessions, (map) => mapWithout(map, [live.id]));
+      yield* Ref.update(jobCount, (n) => n - 1);
       yield* log.releaseColor(live.agent);
       for (const span of yield* Ref.get(live.actionSpans)) {
         yield* settleActionSpan(live, span, "failed");
@@ -424,6 +432,12 @@ const make = Effect.gen(function* () {
     display: Domain.QemuDisplay,
     automation: boolean,
   ) {
+    const reserved = yield* Ref.modify(jobCount, (n) =>
+      n >= maxJobs ? ([false, n] as const) : ([true, n + 1] as const),
+    );
+    if (!reserved) {
+      return yield* Errors.AtCapacity.make({});
+    }
     const started = yield* Clock.currentTimeMillis;
     const id: string = crypto.randomUUID();
     const agent = body.agent;
@@ -937,6 +951,7 @@ const make = Effect.gen(function* () {
     stop,
     follow,
     stats: Effect.flatMap(Ref.get(sessions), (map) => stats.collect(map.size)),
+    jobs: Ref.get(jobCount),
   };
   return service;
 });
