@@ -390,17 +390,15 @@ const make = Effect.gen(function* () {
     const response = yield* send(url, request).pipe(
       Effect.mapError((error) => unreachable(url, error, who)),
     );
-    const text = yield* response.text.pipe(
-      Effect.mapError((error) => unreachable(url, error, who)),
-    );
-    const headers = forwardedHeaders(response.headers);
+    // Status is on the wire before the body: a 200 means the slot is already free, even if
+    // the stream then dies. Forget the agent before passing the answer through.
     if (response.status === 200) {
       yield* store
         .clearAgent(agent)
         .pipe(Effect.mapError((cause) => internal(cause, undefined, agent)));
       yield* log.info(`relinquished; ${url}`, { location: Log.Locations.server, agentId: agent });
     }
-    return HttpServerResponse.text(text, { status: response.status, headers });
+    return passthrough(url, response, who);
   });
 
   const forward = Effect.fn("Router.forward")(function* (

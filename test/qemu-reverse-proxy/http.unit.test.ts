@@ -757,6 +757,42 @@ describe("placement", () => {
       }),
   );
 
+  it.effect("a 200 whose body dies still forgets the agent", () =>
+    Effect.gen(function* () {
+      const encoder = new TextEncoder();
+      const fixed = fixture((request, url) => {
+        if (url.pathname === "/reserve") {
+          return FakeHttp.json({ ok: "true" });
+        }
+        if (url.pathname === "/relinquish") {
+          return new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.enqueue(encoder.encode('{"ok":"true"}'));
+                controller.error(new Error("read ECONNRESET"));
+              },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        return fleet(request, url);
+      });
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      yield* Effect.gen(function* () {
+        const api = yield* qemuServerClient;
+        yield* api.Sessions.reserve({ payload: reserveBody });
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.post("/relinquish", {
+          headers: { authorization: AUTHORIZATION },
+          body: HttpBody.jsonUnsafe(reserveBody),
+        });
+        expect(raw.status).toBe(200);
+        yield* Effect.exit(raw.text);
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.store.agents.has(AGENT_ID)).toBe(false);
+    }),
+  );
+
   it.effect("POST /relinquish without a reservation is 400 no reservation", () =>
     Effect.gen(function* () {
       const fixed = fixture();
