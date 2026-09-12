@@ -24,17 +24,25 @@ type Fixture = {
   readonly spawner: FakeSpawner.FakeSpawner;
   readonly log: FakeLog.FakeLog;
   readonly reporter: Reporter.Collector;
+  readonly maxJobs: number;
 };
 
-const fixture = (script: FakeSpawner.Script = () => ({ exitCode: 0 })): Fixture => ({
+// Room for the two runs some tests hold at once; the capacity test passes 1.
+const MAX_JOBS = 2;
+
+const fixture = (
+  script: FakeSpawner.Script = () => ({ exitCode: 0 }),
+  maxJobs = MAX_JOBS,
+): Fixture => ({
   spawner: FakeSpawner.fakeSpawner(script),
   log: FakeLog.fakeLog(),
   reporter: Reporter.collect(),
+  maxJobs,
 });
 
 const serve = (fixed: Fixture) =>
   HttpRouter.serve(Handlers.routes, { disableLogger: true, disableListenLog: true }).pipe(
-    Layer.provide(Sessions.Sessions.layer),
+    Layer.provide(Sessions.Sessions.layer(fixed.maxJobs)),
     Layer.provide(Layer.mergeAll(fixed.spawner.layer, fixed.log.layer, ProxyConfigLive)),
     Layer.provide(Layer.succeed(Log.ProcessAttribution)(Log.AutomationClientProcessAttribution)),
     Layer.provideMerge(NodeHttpServer.layerTest),
@@ -205,6 +213,50 @@ describe("POST /run unhappy path", () => {
         expect(yield* response.json).toEqual({ error: "out of token credits" });
       }).pipe(Effect.provide(serve(fixed)));
     }),
+  );
+
+  it.effect(
+    "a run past --max-jobs is 503 at capacity, spawns nothing, and is taken once a run ends",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture(() => ({}), 1);
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          const pending = yield* Effect.forkChild(run(http, "first"));
+          for (let i = 0; i < 100 && fixed.spawner.spawned[0] === undefined; i++) {
+            yield* Effect.yieldNow;
+          }
+          const refused = yield* run(http, "second", headers, "OLI-99");
+          expect(refused.status).toBe(503);
+          expect(yield* refused.json).toEqual({ error: "at capacity: max-jobs is 1" });
+          expect(fixed.spawner.spawned).toHaveLength(1);
+          yield* fixed.spawner.spawned[0]?.exit(0) ?? Effect.void;
+          expect((yield* Fiber.join(pending)).status).toBe(200);
+          const accepted = yield* Effect.forkChild(run(http, "second", headers, "OLI-99"));
+          for (let i = 0; i < 100 && fixed.spawner.spawned.length < 2; i++) {
+            yield* Effect.yieldNow;
+          }
+          expect(fixed.spawner.spawned.map((spawned) => spawned.args[2])).toEqual([
+            "first",
+            "second",
+          ]);
+          yield* fixed.spawner.spawned[1]?.exit(0) ?? Effect.void;
+          expect((yield* Fiber.join(accepted)).status).toBe(200);
+        }).pipe(Effect.provide(serve(fixed)));
+        // The refusal names the ticket it turned away; a 503 is the dispatcher's problem to place
+        // elsewhere, so unlike a 4xx it reaches Sentry.
+        expect(fixed.log.lines).toEqual([
+          {
+            level: "error",
+            text: "POST /run failed: at capacity: max-jobs is 1",
+            location: "automation-client",
+            agentId: "OLI-99",
+            skipSentry: false,
+            cause: undefined,
+          },
+        ]);
+        expect(fixed.reporter.reported).toEqual([]);
+      }),
   );
 });
 

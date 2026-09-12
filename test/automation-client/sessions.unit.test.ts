@@ -9,9 +9,11 @@ import * as FakeSpawner from "../support/fake-spawner.ts";
 
 const TICKET = "OLI-42";
 const OTHER = "OLI-99";
+// Room for the two runs the tests above capacity start at once; the capacity tests pass 1.
+const MAX_JOBS = 2;
 
-const layer = (spawner: FakeSpawner.FakeSpawner) =>
-  Sessions.Sessions.layer.pipe(Layer.provide(spawner.layer));
+const layer = (spawner: FakeSpawner.FakeSpawner, maxJobs = MAX_JOBS) =>
+  Sessions.Sessions.layer(maxJobs).pipe(Layer.provide(spawner.layer));
 
 describe("Sessions.run happy path", () => {
   it.effect("launches opencode with the prompt and succeeds when it exits 0", () => {
@@ -205,5 +207,104 @@ describe("Sessions.abort unhappy path", () => {
       expect(spawner.spawned[0]?.kills).toEqual(["SIGTERM"]);
       yield* Effect.flip(Fiber.join(first));
     }).pipe(Effect.provide(layer(spawner)));
+  });
+});
+
+describe("capacity", () => {
+  it.effect("a run past --max-jobs is AtCapacity and spawns nothing", () => {
+    const spawner = FakeSpawner.fakeSpawner(() => ({}));
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions.Sessions;
+      const running = yield* Effect.forkChild(sessions.run(TICKET, "first"));
+      for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
+        yield* Effect.yieldNow;
+      }
+      expect(spawner.spawned).toHaveLength(1);
+      const error = yield* Effect.flip(sessions.run(OTHER, "second"));
+      expect(error).toMatchObject({
+        _tag: "AtCapacity",
+        message: "at capacity: max-jobs is 1",
+        agentId: OTHER,
+      });
+      expect(spawner.spawned).toHaveLength(1);
+      // The refused ticket was never registered: nothing to abort.
+      expect((yield* Effect.flip(sessions.abort(OTHER)))._tag).toBe("UnknownSession");
+      yield* spawner.spawned[0]?.exit(0) ?? Effect.void;
+      yield* Fiber.join(running);
+    }).pipe(Effect.provide(layer(spawner, 1)));
+  });
+
+  it.effect("a run that exited, zero or not, frees its slot", () => {
+    const exits = [0, 1];
+    const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: exits.shift() ?? 0 }));
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions.Sessions;
+      yield* sessions.run(TICKET, "first");
+      expect((yield* Effect.flip(sessions.run(OTHER, "second")))._tag).toBe("RunFailed");
+      yield* sessions.run("OLI-7", "third");
+      expect(spawner.spawned.map((spawned) => spawned.args[2])).toEqual([
+        "first",
+        "second",
+        "third",
+      ]);
+    }).pipe(Effect.provide(layer(spawner, 1)));
+  });
+
+  it.effect("an aborted run frees its slot", () => {
+    const spawner = FakeSpawner.fakeSpawner(() => ({}));
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions.Sessions;
+      const running = yield* Effect.forkChild(sessions.run(TICKET, "first"));
+      for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
+        yield* Effect.yieldNow;
+      }
+      expect((yield* Effect.flip(sessions.run(OTHER, "second")))._tag).toBe("AtCapacity");
+      yield* sessions.abort(TICKET);
+      expect((yield* Effect.flip(Fiber.join(running)))._tag).toBe("RunFailed");
+      const next = yield* Effect.forkChild(sessions.run(OTHER, "second"));
+      for (let i = 0; i < 100 && spawner.spawned.length < 2; i++) {
+        yield* Effect.yieldNow;
+      }
+      expect(spawner.spawned).toHaveLength(2);
+      yield* spawner.spawned[1]?.exit(0) ?? Effect.void;
+      yield* Fiber.join(next);
+    }).pipe(Effect.provide(layer(spawner, 1)));
+  });
+
+  it.effect("an interrupted run frees its slot once its child is gone", () => {
+    // The first child runs until killed; the one admitted afterwards exits at once.
+    let spawns = 0;
+    const spawner = FakeSpawner.fakeSpawner(() => (++spawns === 1 ? {} : { exitCode: 0 }));
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions.Sessions;
+      const running = yield* Effect.forkChild(sessions.run(TICKET, "first"));
+      for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
+        yield* Effect.yieldNow;
+      }
+      expect((yield* Effect.flip(sessions.run(OTHER, "second")))._tag).toBe("AtCapacity");
+      yield* Fiber.interrupt(running);
+      const exit = yield* Fiber.await(running);
+      expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true);
+      // Leaving the scope killed the child before the slot came back.
+      expect(spawner.spawned[0]?.kills).toEqual(["SIGTERM"]);
+      expect(yield* spawner.spawned[0]?.isRunning ?? Effect.succeed(true)).toBe(false);
+      yield* sessions.run(OTHER, "second");
+      expect(spawner.spawned.map((spawned) => spawned.args[2])).toEqual(["first", "second"]);
+    }).pipe(Effect.provide(layer(spawner, 1)));
+  });
+
+  it.effect("a run whose spawn failed frees its slot", () => {
+    let spawns = 0;
+    const spawner = FakeSpawner.fakeSpawner(() =>
+      ++spawns === 1 ? { spawnError: "spawn opencode ENOENT" } : { exitCode: 0 },
+    );
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions.Sessions;
+      const error = yield* Effect.flip(sessions.run(TICKET, "first"));
+      expect(error).toMatchObject({ _tag: "RunFailed", message: "spawn opencode ENOENT" });
+      yield* sessions.run(OTHER, "second");
+      // A spawn that failed is no process; only the second run's is recorded.
+      expect(spawner.spawned.map((spawned) => spawned.args[2])).toEqual(["second"]);
+    }).pipe(Effect.provide(layer(spawner, 1)));
   });
 });

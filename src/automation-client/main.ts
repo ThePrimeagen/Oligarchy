@@ -36,13 +36,13 @@ server.on("error", (cause) => {
 
 // The heartbeat starts once the listener is up, in the same scope: a port refusal announces
 // nothing, and a shutdown deletes the row it wrote.
-const ServerLive = (port: number, url: Option.Option<string>) =>
+const ServerLive = (maxJobs: number, port: number, url: Option.Option<string>) =>
   Layer.effectDiscard(
     Effect.gen(function* () {
       const log = yield* Log.Log;
       yield* log.acquireColor(Log.AutomationClientAgentId);
       yield* log.info(
-        `automation client listening on ${HOST}:${String(port)}${Option.match(url, { onNone: () => "", onSome: (announced) => `; announcing ${announced}` })}`,
+        `automation client listening on ${HOST}:${String(port)}; max jobs ${String(maxJobs)}${Option.match(url, { onNone: () => "", onSome: (announced) => `; announcing ${announced}` })}`,
         automationClientAttr,
       );
       yield* Option.match(url, { onNone: () => Effect.void, onSome: Heartbeat.announce });
@@ -54,7 +54,7 @@ const ServerLive = (port: number, url: Option.Option<string>) =>
         disableListenLog: true,
       }).pipe(Layer.provide(NodeHttpServer.layer(() => server, { host: HOST, port }))),
     ),
-    Layer.provide(Sessions.Sessions.layer),
+    Layer.provide(Sessions.Sessions.layer(maxJobs)),
     Layer.provide(Stats.Stats.layer),
     Layer.provide(Layer.succeed(HttpMiddleware.TracerDisabledWhen)(() => true)),
   );

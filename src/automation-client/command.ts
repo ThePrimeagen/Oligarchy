@@ -13,6 +13,7 @@ const DEFAULT_PORT = 54322;
 
 export type AutomationClient<RServe> = {
   readonly serve: (
+    maxJobs: number,
     port: number,
     url: Option.Option<string>,
   ) => Layer.Layer<never, HttpServerError.ServeError, RServe>;
@@ -29,6 +30,14 @@ export const makeAutomationClientCommand = <RServe>(server: AutomationClient<RSe
   Command.make(
     "automation-client",
     {
+      // No default: how many OpenCode runs a host carries at once is the operator's knowledge of
+      // that host, and a guess would under-use a large one or overload a small one.
+      maxJobs: Flag.integer("max-jobs").pipe(
+        Flag.withSchema(Domain.MaxJobs),
+        Flag.withDescription(
+          "How many runs this client carries at once; a run past it is refused with 503",
+        ),
+      ),
       port: Flag.integer("port").pipe(
         Flag.withDefault(DEFAULT_PORT),
         Flag.withDescription("Listen port"),
@@ -43,7 +52,7 @@ export const makeAutomationClientCommand = <RServe>(server: AutomationClient<RSe
         ),
       ),
     },
-    ({ port, url }) =>
+    ({ maxJobs, port, url }) =>
       Effect.gen(function* () {
         const log = yield* Log.Log;
         const database = yield* Client.Database;
@@ -58,7 +67,7 @@ export const makeAutomationClientCommand = <RServe>(server: AutomationClient<RSe
             ),
           );
           return yield* Effect.raceFirst(
-            Layer.launch(server.serve(port, url)),
+            Layer.launch(server.serve(maxJobs, port, url)),
             Deferred.await(server.serverFailed),
           );
         });
