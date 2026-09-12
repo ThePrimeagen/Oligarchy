@@ -53,7 +53,6 @@ const ServerLive = (
   automation: boolean,
   port: number,
   url: Option.Option<string>,
-  maxJobs: number,
 ) =>
   Layer.effectDiscard(
     Effect.gen(function* () {
@@ -64,7 +63,7 @@ const ServerLive = (
       );
       yield* Option.match(url, {
         onNone: () => Effect.void,
-        onSome: (announced) => Heartbeat.announce(announced, maxJobs),
+        onSome: (announced) => Heartbeat.announce(announced),
       });
     }),
   ).pipe(
@@ -74,7 +73,7 @@ const ServerLive = (
         disableListenLog: true,
       }),
     ),
-    Layer.provide(Sessions.Sessions.layer(maxJobs)),
+    Layer.provide(Sessions.Sessions.layer),
     Layer.provide(Layer.succeed(Sessions.Shutdown)(shutdown)),
     Layer.provide(Layer.mergeAll(Qemu.Qemu.layer, Iso.Iso.layer, Stats.Stats.layer)),
     // Bound before Sessions exists: a port refusal is one fatal line, never a drain.

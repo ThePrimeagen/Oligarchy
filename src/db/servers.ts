@@ -16,11 +16,9 @@ export class ServerStore extends Context.Service<ServerStore>()("@oligarchy/db/S
     const database = yield* Client.Database;
 
     // Registering a url twice is one row: the probe already said the server is there.
-    // max_jobs has no column default, so an operator-added row starts at 1 until a heartbeat
-    // overwrites it with the process's --max-jobs.
     const addServer = Effect.fn("db.addServer")(function* (url: string, type: ServerType) {
       yield* database.run("addServer", (db) =>
-        db.insert(DbSchema.servers).values({ url, type, maxJobs: 1 }).onConflictDoNothing(),
+        db.insert(DbSchema.servers).values({ url, type }).onConflictDoNothing(),
       );
     });
 
@@ -31,21 +29,17 @@ export class ServerStore extends Context.Service<ServerStore>()("@oligarchy/db/S
       url: string,
       type: ServerType,
       stats: DbSchema.ServerStats,
-      jobs: number,
-      maxJobs: number,
     ) {
       const now = sql`now()`;
       yield* database.run("heartbeat", (db) =>
         db
           .insert(DbSchema.servers)
-          .values({ url, type, stats, jobs, maxJobs, generation: 1, heartbeatAt: now })
+          .values({ url, type, stats, generation: 1, heartbeatAt: now })
           .onConflictDoUpdate({
             target: DbSchema.servers.url,
             set: {
               type,
               stats,
-              jobs,
-              maxJobs,
               generation: sql`${DbSchema.servers.generation} + 1`,
               heartbeatAt: now,
             },

@@ -43,8 +43,6 @@ const Row: FC<{ server: Server }> = ({ server }) => {
       <tr>
         <td>{server.url}</td>
         <td colspan={3}>never heard from</td>
-        <td>{server.jobs}</td>
-        <td>{server.maxJobs}</td>
         <td>{server.generation}</td>
         <td>never</td>
         {remove}
@@ -72,8 +70,6 @@ const Row: FC<{ server: Server }> = ({ server }) => {
           </td>
         </>
       )}
-      <td>{server.jobs}</td>
-      <td>{server.maxJobs}</td>
       <td>{server.generation}</td>
       <td>{age(sinceHeartbeat)} ago</td>
       {remove}
@@ -92,8 +88,6 @@ export const Fleet: FC<{ servers: ReadonlyArray<Server> }> = ({ servers }) =>
         <th>qemus</th>
         <th>memory</th>
         <th>cpu 1m / 2m / 3m</th>
-        <th>jobs</th>
-        <th>max jobs</th>
         <th>generation</th>
         <th>heartbeat</th>
         <th></th>

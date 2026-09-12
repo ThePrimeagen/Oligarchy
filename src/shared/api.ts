@@ -46,7 +46,7 @@ const png = Schema.Uint8Array.pipe(HttpApiSchema.asUint8Array({ contentType: "im
 export const start = HttpApiEndpoint.post("start", "/start", {
   payload: Contract.StartBody,
   success: Contract.StartResponse,
-  error: [Errors.StartFailedWire, Errors.AtCapacityWire],
+  error: Errors.StartFailedWire,
 });
 
 export const image = HttpApiEndpoint.get("image", "/image", {
