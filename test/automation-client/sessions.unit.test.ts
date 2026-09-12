@@ -6,6 +6,7 @@ import * as OpenCode from "../../src/automation-client/opencode.ts";
 import * as Sessions from "../../src/automation-client/sessions.ts";
 import * as Cli from "../../src/cli.ts";
 import * as Errors from "../../src/shared/errors.ts";
+import * as FakeLog from "../support/log.ts";
 import * as FakeSpawner from "../support/fake-spawner.ts";
 
 const TICKET = "OLI-42";
@@ -25,8 +26,15 @@ const layer = (
   maxJobs = MAX_JOBS,
   reserveQemu: Sessions.ReserveQemu = qemuOk(),
   relinquishQemu: Sessions.RelinquishQemu = qemuRelinquishOk(),
+  log: FakeLog.FakeLog = FakeLog.fakeLog(),
 ) =>
-  Sessions.Sessions.layer(maxJobs, reserveQemu, relinquishQemu).pipe(Layer.provide(spawner.layer));
+  Sessions.Sessions.layer(maxJobs, reserveQemu, relinquishQemu).pipe(
+    Layer.provide(Layer.mergeAll(spawner.layer, log.layer)),
+  );
+
+// A reservation nobody runs is gone after this long; the sweep that notices runs every ten
+// seconds from the start, so advancing by exactly this much lands on a sweep.
+const RESERVATION_TIMEOUT = "10 minutes";
 
 const reservedRun = (ticket: string, prompt: string, model = MODEL) =>
   Effect.gen(function* () {
@@ -755,6 +763,140 @@ describe("Sessions.run when a process opencode started still holds stderr", () =
       }).pipe(Effect.provide(layer(spawner, 1)));
     },
   );
+});
+
+// A reservation is a promise that a run follows at once; one nobody runs (the dispatcher died
+// between /reserve and /run) is given back after ten minutes, in memory only, so the slot and
+// any guest slot taken for it are free again and a restarted dispatcher can place the job anew.
+describe("reservation expiry", () => {
+  it.effect(
+    "a drive reservation unused for ten minutes expires: its slot is free, jobs drops, the guest slot is relinquished, one warning line",
+    () => {
+      const givenBack: Array<string> = [];
+      const relinquishQemu: Sessions.RelinquishQemu = (agent) =>
+        Effect.sync(() => {
+          givenBack.push(agent);
+        });
+      const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
+      const log = FakeLog.fakeLog();
+      return Effect.gen(function* () {
+        const sessions = yield* Sessions.Sessions;
+        yield* sessions.reserve(TICKET, "drive");
+        expect(yield* sessions.jobs).toBe(1);
+        yield* TestClock.adjust(RESERVATION_TIMEOUT);
+        expect(yield* sessions.jobs).toBe(0);
+        expect(givenBack).toEqual([TICKET]);
+        // Gone from the reserved set: a late run is refused, the slot goes to the next ticket.
+        expect(yield* Effect.flip(sessions.run(TICKET, "late", MODEL))).toMatchObject({
+          _tag: "BadRequest",
+          message: "no reservation",
+        });
+        yield* sessions.reserve(OTHER, "drive");
+        expect(spawner.spawned).toEqual([]);
+        expect(log.lines).toEqual([
+          {
+            level: "warning",
+            text: "reservation expired; unused for 10 minutes",
+            location: "automation-client",
+            agentId: TICKET,
+            skipSentry: false,
+            cause: undefined,
+          },
+        ]);
+      }).pipe(Effect.provide(layer(spawner, 1, qemuOk(), relinquishQemu, log)));
+    },
+  );
+
+  it.effect("a diagnose reservation unused for ten minutes expires without asking QEMU", () => {
+    const qemu: Array<string> = [];
+    const reserveQemu: Sessions.ReserveQemu = (agent) =>
+      Effect.sync(() => {
+        qemu.push(`reserve ${agent}`);
+      });
+    const relinquishQemu: Sessions.RelinquishQemu = (agent) =>
+      Effect.sync(() => {
+        qemu.push(`relinquish ${agent}`);
+      });
+    const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
+    const log = FakeLog.fakeLog();
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions.Sessions;
+      yield* sessions.reserve(TICKET, "diagnose");
+      yield* TestClock.adjust(RESERVATION_TIMEOUT);
+      expect(yield* sessions.jobs).toBe(0);
+      expect(qemu).toEqual([]);
+      expect(FakeLog.texts(log)).toEqual(["reservation expired; unused for 10 minutes"]);
+    }).pipe(Effect.provide(layer(spawner, 1, reserveQemu, relinquishQemu, log)));
+  });
+
+  it.effect("a reservation consumed by a run in time never expires", () => {
+    const givenBack: Array<string> = [];
+    const relinquishQemu: Sessions.RelinquishQemu = (agent) =>
+      Effect.sync(() => {
+        givenBack.push(agent);
+      });
+    const spawner = FakeSpawner.fakeSpawner(() => ({}));
+    const log = FakeLog.fakeLog();
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions.Sessions;
+      yield* sessions.reserve(TICKET, "drive");
+      const running = yield* Effect.forkChild(sessions.run(TICKET, "do the work", MODEL));
+      for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
+        yield* Effect.yieldNow;
+      }
+      // Ten minutes into the run: the slot is the run's now, not a reservation's.
+      yield* TestClock.adjust(RESERVATION_TIMEOUT);
+      expect(yield* sessions.jobs).toBe(1);
+      expect(givenBack).toEqual([]);
+      expect(log.lines).toEqual([]);
+      expect((yield* Effect.flip(sessions.reserve(OTHER, "drive")))._tag).toBe("AtCapacity");
+      yield* spawner.spawned[0]?.exit(0) ?? Effect.void;
+      yield* Fiber.join(running);
+      expect(yield* sessions.jobs).toBe(0);
+    }).pipe(Effect.provide(layer(spawner, 1, qemuOk(), relinquishQemu, log)));
+  });
+
+  it.effect(
+    "a relinquish that fails at expiry is one error line and the slot is freed all the same",
+    () => {
+      const relinquishQemu: Sessions.RelinquishQemu = (agent) =>
+        Errors.Internal.make({ cause: new Error("proxy unreachable"), agentId: agent });
+      const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
+      const log = FakeLog.fakeLog();
+      return Effect.gen(function* () {
+        const sessions = yield* Sessions.Sessions;
+        yield* sessions.reserve(TICKET, "drive");
+        yield* TestClock.adjust(RESERVATION_TIMEOUT);
+        expect(yield* sessions.jobs).toBe(0);
+        yield* sessions.reserve(OTHER, "drive");
+        expect(log.lines.map((line) => [line.level, line.text, line.agentId])).toEqual([
+          ["warning", "reservation expired; unused for 10 minutes", TICKET],
+          ["error", "relinquish failed: internal error: proxy unreachable", TICKET],
+        ]);
+        expect(log.lines[1]?.cause).toBeDefined();
+      }).pipe(Effect.provide(layer(spawner, 1, qemuOk(), relinquishQemu, log)));
+    },
+  );
+
+  it.effect("expiry is per reservation: a younger one stays when an older one goes", () => {
+    const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
+    const log = FakeLog.fakeLog();
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions.Sessions;
+      yield* sessions.reserve(TICKET, "drive");
+      yield* TestClock.adjust("5 minutes");
+      yield* sessions.reserve(OTHER, "diagnose");
+      yield* TestClock.adjust("5 minutes");
+      expect(yield* sessions.jobs).toBe(1);
+      expect(log.lines.map((line) => line.agentId)).toEqual([TICKET]);
+      // The younger one still runs.
+      yield* sessions.run(OTHER, "still mine", MODEL);
+      expect(spawner.spawned.map((spawned) => spawned.args[5])).toEqual(["still mine"]);
+      // The ticket that expired may reserve again.
+      yield* sessions.reserve(TICKET, "drive");
+      expect(yield* sessions.jobs).toBe(1);
+    }).pipe(Effect.provide(layer(spawner, 2, qemuOk(), qemuRelinquishOk(), log)));
+  });
 });
 
 describe("jobs", () => {

@@ -52,8 +52,9 @@ export type RouterService = {
     HttpServerResponse.HttpServerResponse,
     Errors.BadRequest | Errors.NoServer | Errors.ServerFailed | Errors.Internal
   >;
-  // Forwards relinquish to the server that reserved this agent and forgets the agent
-  // when that server accepts it. There is no placement here: /reserve already chose.
+  // Forwards relinquish to the server that reserved this agent and forgets the agent when
+  // that server accepts it or already holds nothing for it. There is no placement here:
+  // /reserve already chose.
   readonly relinquish: (
     request: HttpServerRequest.HttpServerRequest,
     agent: string,
@@ -384,12 +385,17 @@ const make = Effect.gen(function* () {
       Effect.mapError((error) => unreachable(url, error, who)),
     );
     // Status is on the wire before the body: a 200 means the slot is already free, even if
-    // the stream then dies. Forget the agent before passing the answer through.
-    if (response.status === 200) {
+    // the stream then dies. A 400 means the server holds nothing for this agent: it let the
+    // reservation go on its own (ten minutes unused) or restarted, so the route is stale too.
+    // Either way forget the agent before passing the answer through, so a fresh reserve places.
+    if (response.status === 200 || response.status === 400) {
       yield* store
         .clearAgent(agent)
         .pipe(Effect.mapError((cause) => internal(cause, undefined, agent)));
-      yield* log.info(`relinquished; ${url}`, { location: Log.Locations.server, agentId: agent });
+      yield* log.info(
+        response.status === 200 ? `relinquished; ${url}` : `reservation gone; ${url}`,
+        { location: Log.Locations.server, agentId: agent },
+      );
     }
     return passthrough(url, response, who);
   });

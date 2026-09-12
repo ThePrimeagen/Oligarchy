@@ -1,9 +1,20 @@
-import { Context, Effect, Layer, Ref, Semaphore } from "effect";
+import { Cause, Clock, Context, Effect, Layer, Ref, Schedule, Semaphore } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import * as Cli from "../cli.ts";
+import * as Log from "../observability/log.ts";
+import * as Render from "../observability/render.ts";
 import type * as Domain from "../shared/domain.ts";
 import * as Errors from "../shared/errors.ts";
 import * as OpenCode from "./opencode.ts";
+
+// A reservation is a promise that a run follows at once; the dispatcher POSTs /run right after
+// /reserve answers. One nobody runs (the dispatcher died in between) would hold a slot, and a
+// drive's guest slot with it, until this process restarted. Ten minutes unused and it is given
+// back, as a guest with no command is. In memory only: nothing durable records a reservation,
+// so a restart starts clean and a restarted dispatcher can place the job anew.
+const RESERVATION_TIMEOUT = "10 minutes";
+const RESERVATION_TIMEOUT_MS = 10 * 60 * 1000;
+const RESERVATION_SWEEP = "10 seconds";
 
 const mapWith = <V>(map: ReadonlyMap<string, V>, key: string, value: V): ReadonlyMap<string, V> =>
   new Map([...map, [key, value]]);
@@ -14,19 +25,18 @@ const mapWithout = <V>(map: ReadonlyMap<string, V>, key: string): ReadonlyMap<st
   return next;
 };
 
-const withItem = <T>(set: ReadonlySet<T>, item: T): ReadonlySet<T> => new Set([...set, item]);
-
-const without = <T>(set: ReadonlySet<T>, item: T): ReadonlySet<T> => {
-  const next = new Set(set);
-  next.delete(item);
-  return next;
-};
-
 export type ReserveQemu = (
   agent: string,
 ) => Effect.Effect<void, Errors.AtCapacity | Errors.Internal>;
 
 export type RelinquishQemu = (agent: string) => Effect.Effect<void, Errors.Internal>;
+
+// What a ticket holds before its run: which kind, so an expired drive gives its guest slot back,
+// and since when.
+type Reservation = {
+  readonly action: Domain.AutomationAction;
+  readonly since: number;
+};
 
 const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: RelinquishQemu) =>
   Effect.gen(function* () {
@@ -38,9 +48,10 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
     // has spawned, and the slot must be taken before that, so a refused run spawns nothing.
     const slots = yield* Ref.make<{
       readonly count: number;
-      readonly reserved: ReadonlySet<string>;
-    }>({ count: 0, reserved: new Set() });
+      readonly reserved: ReadonlyMap<string, Reservation>;
+    }>({ count: 0, reserved: new Map() });
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const log = yield* Log.Log;
 
     const atCapacity = (ticket: string): Errors.AtCapacity =>
       Errors.AtCapacity.make({
@@ -73,13 +84,17 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
           if (action === "drive") {
             yield* reserveQemu(ticket);
           }
+          const since = yield* Clock.currentTimeMillis;
           const admitted = yield* Ref.modify(slots, (current) => {
             if (current.count >= maxJobs) {
               return [false, current] as const;
             }
             return [
               true,
-              { count: current.count + 1, reserved: withItem(current.reserved, ticket) },
+              {
+                count: current.count + 1,
+                reserved: mapWith(current.reserved, ticket, { action, since }),
+              },
             ] as const;
           });
           if (!admitted) {
@@ -97,7 +112,7 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
       Effect.flatMap(
         Ref.modify(slots, (held) =>
           held.reserved.has(ticket)
-            ? ([true, { count: held.count, reserved: without(held.reserved, ticket) }] as const)
+            ? ([true, { count: held.count, reserved: mapWithout(held.reserved, ticket) }] as const)
             : ([false, held] as const),
         ),
         (held) =>
@@ -105,6 +120,53 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
             ? Effect.void
             : Errors.BadRequest.make({ message: "no reservation", agentId: ticket }),
       );
+
+    // Every reservation past the deadline leaves the reserved set and gives its slot back in one
+    // step, so a run arriving late is refused rather than admitted twice; then a drive's guest
+    // slot is given back, each failure its own line so the others still go.
+    const expire = Effect.gen(function* () {
+      const now = yield* Clock.currentTimeMillis;
+      const expired = yield* Ref.modify(slots, (held) => {
+        const gone: Array<[string, Reservation]> = [];
+        const kept = new Map<string, Reservation>();
+        for (const [ticket, reservation] of held.reserved) {
+          if (now - reservation.since >= RESERVATION_TIMEOUT_MS) {
+            gone.push([ticket, reservation]);
+          } else {
+            kept.set(ticket, reservation);
+          }
+        }
+        return [gone, { count: held.count - gone.length, reserved: kept }] as const;
+      });
+      for (const [ticket, reservation] of expired) {
+        yield* log.warning(`reservation expired; unused for ${RESERVATION_TIMEOUT}`, {
+          location: Log.Locations.automationClient,
+          agentId: ticket,
+        });
+        if (reservation.action === "drive") {
+          yield* relinquishQemu(ticket).pipe(
+            Effect.catch((error) =>
+              log.error(`relinquish failed: ${Render.headline(error)}`, {
+                location: Log.Locations.automationClient,
+                agentId: ticket,
+                cause: error,
+              }),
+            ),
+          );
+        }
+      }
+    });
+    yield* expire.pipe(
+      Effect.catchCause((cause) => {
+        const error = Cause.squash(cause);
+        return log.error(`reservation sweep failed: ${Render.errorDetail(error)}`, {
+          location: Log.Locations.automationClient,
+          cause: error,
+        });
+      }),
+      Effect.repeat(Schedule.spaced(RESERVATION_SWEEP)),
+      Effect.forkScoped,
+    );
 
     const run = Effect.fn("Sessions.run")(function* (
       ticket: string,
@@ -186,6 +248,6 @@ export class Sessions extends Context.Service<Sessions>()("@oligarchy/automation
     maxJobs: number,
     reserveQemu: ReserveQemu,
     relinquishQemu: RelinquishQemu,
-  ): Layer.Layer<Sessions, never, ChildProcessSpawner.ChildProcessSpawner> =>
+  ): Layer.Layer<Sessions, never, ChildProcessSpawner.ChildProcessSpawner | Log.Log> =>
     Layer.effect(this)(this.make(maxJobs, reserveQemu, relinquishQemu));
 }

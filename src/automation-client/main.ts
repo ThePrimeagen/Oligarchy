@@ -23,12 +23,11 @@ import * as Render from "../observability/render.ts";
 import * as Sentry from "../observability/sentry.ts";
 import * as Stats from "../qemu/stats.ts";
 import * as Api from "../shared/api.ts";
-import * as Contract from "../shared/contract.ts";
-import * as Errors from "../shared/errors.ts";
 import * as ProcessUsage from "../shared/process-usage.ts";
 import * as AutomationClientCommand from "./command.ts";
 import * as Handlers from "./handlers.ts";
 import * as Heartbeat from "./heartbeat.ts";
+import * as Qemu from "./qemu.ts";
 import * as Sessions from "./sessions.ts";
 
 const HOST = "127.0.0.1";
@@ -78,36 +77,8 @@ const ServerLive = (maxJobs: number, name: string, port: number, url: Option.Opt
           const serverUrl = yield* EffectConfig.string("SERVER_URL").pipe(
             Effect.orElseSucceed(() => Config.DEFAULT_SERVER_URL),
           );
-          const proxy: ProxyClient.ProxyClientService = yield* ProxyClient.connect({
-            serverUrl,
-            token,
-          });
-          const asQemuError = (
-            agent: string,
-            error: ProxyClient.Failure,
-          ): Effect.Effect<never, Errors.AtCapacity | Errors.Internal> => {
-            if (error._tag === "ProxyRefusal" && error.status === 503) {
-              return Errors.AtCapacity.make({ message: error.message, agentId: agent });
-            }
-            return Errors.Internal.make({
-              cause: new Error(error.message),
-              agentId: agent,
-            });
-          };
-          const reserveQemu: Sessions.ReserveQemu = (agent) =>
-            proxy
-              .reserve(Contract.ReserveAgentBody.make({ agent }))
-              .pipe(Effect.catch((error) => asQemuError(agent, error)));
-          const relinquishQemu: Sessions.RelinquishQemu = (agent) =>
-            proxy.relinquish(Contract.ReserveAgentBody.make({ agent })).pipe(
-              Effect.catch((error: ProxyClient.Failure) =>
-                Errors.Internal.make({
-                  cause: new Error(error.message),
-                  agentId: agent,
-                }),
-              ),
-            );
-          return Sessions.Sessions.layer(maxJobs, reserveQemu, relinquishQemu);
+          const proxy = yield* ProxyClient.connect({ serverUrl, token });
+          return Sessions.Sessions.layer(maxJobs, Qemu.reserve(proxy), Qemu.relinquish(proxy));
         }),
       ),
     ),
