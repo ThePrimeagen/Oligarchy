@@ -23,6 +23,7 @@ export type QemuServer<RHost, RServe> = {
     automation: boolean,
     port: number,
     url: Option.Option<string>,
+    maxJobs: number,
   ) => Layer.Layer<never, HttpServerError.ServeError, RServe>;
   readonly serverFailed: Deferred.Deferred<never, HttpServerError.ServeError>;
 };
@@ -64,8 +65,14 @@ export const makeQemuServerCommand = <RHost, RServe>(server: QemuServer<RHost, R
           "Announce this server to the fleet under this url, every 30 seconds, and delete the row on shutdown",
         ),
       ),
+      // No default: every qemu server names how many jobs it will admit. An integer below 1
+      // is a usage error and never reaches serve.
+      maxJobs: Flag.integer("max-jobs").pipe(
+        Flag.withSchema(Domain.MaxJobs),
+        Flag.withDescription("How many jobs this process can run at once"),
+      ),
     },
-    ({ display, automation, port, url }) =>
+    ({ display, automation, port, url, maxJobs }) =>
       Effect.gen(function* () {
         if (automation && Option.isSome(display)) {
           return yield* new CliError.UserError({
@@ -92,7 +99,7 @@ export const makeQemuServerCommand = <RHost, RServe>(server: QemuServer<RHost, R
             ),
           );
           return yield* Effect.raceFirst(
-            Layer.launch(server.serve(resolved, automation, port, url)),
+            Layer.launch(server.serve(resolved, automation, port, url, maxJobs)),
             Deferred.await(server.serverFailed),
           );
         });

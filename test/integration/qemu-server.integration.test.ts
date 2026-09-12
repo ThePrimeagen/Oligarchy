@@ -82,9 +82,14 @@ const environment = (overrides: Record<string, string>): NodeJS.ProcessEnv => {
 const spawnQemuServer = (
   args: ReadonlyArray<string>,
   overrides: Record<string, string> | ((dir: string) => Record<string, string>) = {},
+  injectMaxJobs = true,
 ): QemuServer => {
+  const argv =
+    !injectMaxJobs || args.includes("--help") || args.includes("--max-jobs")
+      ? args
+      : ["--max-jobs", "1", ...args];
   const dir = mkdtempSync(join(tmpdir(), "oligarchy-qemu-server-test-"));
-  const child = spawn(QEMU_SERVER, args, {
+  const child = spawn(QEMU_SERVER, argv, {
     cwd: dir,
     env: environment(typeof overrides === "function" ? overrides(dir) : overrides),
     stdio: ["ignore", "pipe", "pipe"],
@@ -213,7 +218,7 @@ describe("qemu server startup refusals", () => {
     }),
   );
 
-  it.live("--help exits 0 and lists the four flags", () =>
+  it.live("--help exits 0 and lists the five flags", () =>
     Effect.promise(async () => {
       const server = spawnQemuServer(["--help"]);
       const { code } = await server.exited;
@@ -223,6 +228,17 @@ describe("qemu server startup refusals", () => {
       expect(server.stdout()).toContain("--automation");
       expect(server.stdout()).toContain("--port");
       expect(server.stdout()).toContain("--url");
+      expect(server.stdout()).toContain("--max-jobs");
+    }),
+  );
+
+  it.live("missing --max-jobs exits 1 with a usage error", () =>
+    Effect.promise(async () => {
+      const server = spawnQemuServer([], {}, false);
+      const { code } = await server.exited;
+      expect(code).toBe(1);
+      expect(server.stderr()).toContain("max-jobs");
+      expect(server.stdout()).not.toContain("listening");
     }),
   );
 
@@ -375,7 +391,7 @@ describe("qemu server serving", () => {
         const port = await freePort();
         const full = openSync("/dev/full", "w");
         const dir = mkdtempSync(join(tmpdir(), "oligarchy-qemu-server-test-"));
-        const child = spawn(QEMU_SERVER, ["--port", String(port)], {
+        const child = spawn(QEMU_SERVER, ["--max-jobs", "1", "--port", String(port)], {
           cwd: dir,
           env: environment({}),
           stdio: ["ignore", full, full],
@@ -478,7 +494,14 @@ describe("qemu server serving", () => {
             }),
           ),
         );
-        expect(row).toMatchObject({ url, type: "qemu", generation: 1, stats: { qemus: 0 } });
+        expect(row).toMatchObject({
+          url,
+          type: "qemu",
+          generation: 1,
+          stats: { qemus: 0 },
+          jobs: 0,
+          maxJobs: 1,
+        });
         expect(row?.heartbeatAt).toBeInstanceOf(Date);
         const { code } = yield* Effect.promise(() => server.exited);
         expect(code, server.stdout()).toBe(0);

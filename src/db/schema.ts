@@ -4,6 +4,7 @@ import {
   check,
   customType,
   index,
+  integer,
   jsonb,
   pgEnum,
   pgTable,
@@ -206,12 +207,16 @@ export type ServerStats = {
 // every writer names it, and the default is what the migration filled the rows that predate
 // the column with — qemu servers were the only kind there was. automation-client is the
 // other kind: same heartbeat, listed apart from the qemu fleet. id is the stable handle a
-// job stores when it is claimed; url remains the key a heartbeat upserts on.
+// job stores when it is claimed; url remains the key a heartbeat upserts on. jobs is how
+// many this process has admitted; max_jobs is the --max-jobs it was started with. jobs
+// starts at 0; max_jobs has no default — every writer names it.
 export const servers = pgTable("servers", {
   id: uuid("id").notNull().defaultRandom().unique(),
   url: text("url").primaryKey(),
   type: serverType("type").notNull().default("qemu"),
   stats: jsonb("stats").$type<ServerStats>(),
+  jobs: integer("jobs").notNull().default(0),
+  maxJobs: integer("max_jobs").notNull(),
   generation: bigint("generation", { mode: "number" }).notNull().default(0),
   heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

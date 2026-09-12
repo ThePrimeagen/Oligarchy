@@ -20,7 +20,7 @@ const ROW_STATS = {
 };
 
 // One heartbeat as the store records it: this process announces itself as an automation-client.
-const ANNOUNCED = { url: URL, type: "automation-client", stats: ROW_STATS };
+const ANNOUNCED = { url: URL, type: "automation-client", stats: ROW_STATS, jobs: 0, maxJobs: 1 };
 const REGISTERED = { url: URL, type: "automation-client" };
 
 const refused = Errors.DatabaseError.make({
@@ -135,13 +135,13 @@ describe("automation-client heartbeat unhappy path", () => {
         let attempts = 0;
         const written: Array<typeof ANNOUNCED> = [];
         const store = Stores.fakeServerStore({
-          heartbeat: (url, type, stats) =>
+          heartbeat: (url, type, stats, jobs, maxJobs) =>
             Effect.suspend(() => {
               attempts += 1;
               if (attempts === 1) {
                 return Effect.fail(refused);
               }
-              written.push({ url, type, stats });
+              written.push({ url, type, stats, jobs, maxJobs });
               return Effect.void;
             }),
         });

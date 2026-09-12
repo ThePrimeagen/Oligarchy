@@ -18,7 +18,7 @@ const ROW_STATS = {
 };
 
 // One heartbeat as the store records it: this server announces itself as a qemu server.
-const ANNOUNCED = { url: URL, type: "qemu", stats: ROW_STATS };
+const ANNOUNCED = { url: URL, type: "qemu", stats: ROW_STATS, jobs: 1, maxJobs: 1 };
 const REGISTERED = { url: URL, type: "qemu" };
 
 const refused = Errors.DatabaseError.make({
@@ -35,7 +35,7 @@ const start = (
 ) =>
   Effect.gen(function* () {
     const scope = yield* Scope.make();
-    yield* Heartbeat.announce(URL).pipe(
+    yield* Heartbeat.announce(URL, 1).pipe(
       Effect.provide(Layer.mergeAll(sessions.layer, store.layer, log.layer)),
       Scope.provide(scope),
     );
@@ -62,6 +62,26 @@ describe("heartbeat happy path", () => {
         );
         expect(log.lines).toEqual([]);
       }),
+  );
+
+  it.effect("writes the integer job count and --max-jobs, not the running qemu count", () =>
+    Effect.gen(function* () {
+      const store = Stores.fakeServerStore();
+      const scope = yield* Scope.make();
+      yield* Heartbeat.announce(URL, 4).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            FakeSessions.fakeSessions({ jobs: Effect.succeed(3) }).layer,
+            store.layer,
+            FakeLog.fakeLog().layer,
+          ),
+        ),
+        Scope.provide(scope),
+      );
+      expect(store.heartbeats).toEqual([
+        { url: URL, type: "qemu", stats: ROW_STATS, jobs: 3, maxJobs: 4 },
+      ]);
+    }),
   );
 
   it.effect("stops when the scope it was started in closes", () =>
@@ -128,13 +148,13 @@ describe("heartbeat unhappy path", () => {
         let attempts = 0;
         const written: Array<typeof ANNOUNCED> = [];
         const store = Stores.fakeServerStore({
-          heartbeat: (url, type, stats) =>
+          heartbeat: (url, type, stats, jobs, maxJobs) =>
             Effect.suspend(() => {
               attempts += 1;
               if (attempts === 1) {
                 return Effect.fail(refused);
               }
-              written.push({ url, type, stats });
+              written.push({ url, type, stats, jobs, maxJobs });
               return Effect.void;
             }),
         });
