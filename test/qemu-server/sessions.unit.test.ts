@@ -114,7 +114,7 @@ const harness = (options: Options = {}) => {
     options.shutdown === undefined
       ? Layer.empty
       : Layer.succeed(Sessions.Shutdown)(options.shutdown);
-  const layer = Sessions.Sessions.layer.pipe(
+  const layer = Sessions.Sessions.layer(options.maxJobs ?? 8).pipe(
     Layer.provide(
       Layer.mergeAll(
         qemu.layer,
@@ -127,7 +127,6 @@ const harness = (options: Options = {}) => {
         fs,
         Path.layer,
         shutdown,
-        Layer.succeed(Sessions.MaxJobs)(options.maxJobs ?? 8),
       ),
     ),
   );

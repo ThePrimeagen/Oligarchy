@@ -74,8 +74,7 @@ const ServerLive = (
         disableListenLog: true,
       }),
     ),
-    Layer.provide(Sessions.Sessions.layer),
-    Layer.provide(Layer.succeed(Sessions.MaxJobs)(maxJobs)),
+    Layer.provide(Sessions.Sessions.layer(maxJobs)),
     Layer.provide(Layer.succeed(Sessions.Shutdown)(shutdown)),
     Layer.provide(Layer.mergeAll(Qemu.Qemu.layer, Iso.Iso.layer, Stats.Stats.layer)),
     // Bound before Sessions exists: a port refusal is one fatal line, never a drain.
