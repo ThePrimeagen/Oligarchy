@@ -112,10 +112,13 @@ export class RunBody extends Schema.Class<RunBody>("@oligarchy/shared/contract/R
   model: Domain.ModelId,
 }) {}
 
+// What an automation client is asked to hold for a ticket: a drive takes a guest slot and a
+// client slot, a diagnose a client slot alone.
 export class ReserveBody extends Schema.Class<ReserveBody>(
   "@oligarchy/shared/contract/ReserveBody",
 )({
   ticket: Schema.NonEmptyString,
+  action: Domain.AutomationAction,
 }) {}
 
 export class ReserveAgentBody extends Schema.Class<ReserveAgentBody>(

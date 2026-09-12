@@ -1,9 +1,20 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { Effect, Fiber, Layer, PlatformError, Sink, Stream } from "effect";
+import { TestClock } from "effect/testing";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import * as Cli from "../src/cli.ts";
 import * as FakeSpawner from "./support/fake-spawner.ts";
+
+// How long a run waits for stderr to end after the command exited; then the tail so far is the tail.
+const STDERR_GRACE = "2 seconds";
+
+// Enough turns for a forked run to spawn, see the exit and register its grace timer.
+const settle = Effect.gen(function* () {
+  for (let i = 0; i < 100; i++) {
+    yield* Effect.yieldNow;
+  }
+});
 
 describe("Cli.run happy path", () => {
   it.effect(
@@ -50,6 +61,44 @@ describe("Cli.run happy path", () => {
       yield* Effect.yieldNow;
       expect(running.pollUnsafe()).toBeUndefined();
       yield* spawner.spawned[0]?.exit(0) ?? Effect.void;
+      yield* Fiber.join(running);
+    }),
+  );
+
+  // The stderr pipe is shared with every process the command started; one that outlives it
+  // keeps the pipe open, and Node's `exit` fires long before its `close`. The exit is the end
+  // of the run: the wait for stderr is bounded after it.
+  it.effect(
+    "succeeds once the command exits 0 while a process it started still holds stderr, after the grace",
+    () =>
+      Effect.gen(function* () {
+        const spawner = FakeSpawner.fakeSpawner(() => ({
+          exitCode: 0,
+          stderr: "noise\n",
+          stderrStaysOpen: true,
+        }));
+        const running = yield* Effect.forkChild(
+          Cli.run("tool", ["run"]).pipe(Effect.provide(spawner.layer)),
+        );
+        yield* settle;
+        expect(running.pollUnsafe()).toBeUndefined();
+        yield* TestClock.adjust(STDERR_GRACE);
+        yield* Fiber.join(running);
+        // Leaving the scope released the process; nothing was killed, it had already exited.
+        expect(spawner.spawned[0]?.isReleased()).toBe(true);
+        expect(spawner.spawned[0]?.kills).toEqual([]);
+      }),
+  );
+
+  it.effect("does not wait out the grace when stderr ends with the exit", () =>
+    Effect.gen(function* () {
+      const spawner = FakeSpawner.fakeSpawner(() => ({}));
+      const running = yield* Effect.forkChild(
+        Cli.run("tool", ["run"]).pipe(Effect.provide(spawner.layer)),
+      );
+      yield* Effect.yieldNow;
+      yield* spawner.spawned[0]?.exit(0, "last words\n") ?? Effect.void;
+      // No clock adjustment: the exit and the pipe's end are all the run waits for.
       yield* Fiber.join(running);
     }),
   );
@@ -106,12 +155,48 @@ describe("Cli.run unhappy path", () => {
       }),
   );
 
+  // The drain keeps a bounded buffer; NUL bytes are dropped as they arrive, so a binary blob after
+  // the message cannot push it out of the buffer.
+  it.effect("keeps the message when a NUL blob larger than the buffer follows it", () =>
+    Effect.gen(function* () {
+      const spawner = FakeSpawner.fakeSpawner(() => ({
+        exitCode: 1,
+        stderr: `Error: Invalid upload request.\n${"\u0000".repeat(20_000)}`,
+      }));
+      const error = yield* Effect.flip(
+        Cli.run("tool", ["run"]).pipe(Effect.provide(spawner.layer)),
+      );
+      expect(error.message).toBe("Error: Invalid upload request.");
+    }),
+  );
+
   it.effect("names the exit when the command exits non-zero with empty stderr", () =>
     Effect.gen(function* () {
       const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 2 }));
       const error = yield* Effect.flip(Cli.run("tool", []).pipe(Effect.provide(spawner.layer)));
       expect(error.message).toBe("tool exited 2");
     }),
+  );
+
+  it.effect(
+    "fails with what the command wrote when it exits non-zero while a process it started still holds stderr",
+    () =>
+      Effect.gen(function* () {
+        const spawner = FakeSpawner.fakeSpawner(() => ({
+          exitCode: 1,
+          stderr: "out of token credits\n",
+          stderrStaysOpen: true,
+        }));
+        const running = yield* Effect.forkChild(
+          Effect.flip(Cli.run("tool", ["run"]).pipe(Effect.provide(spawner.layer))),
+        );
+        yield* settle;
+        expect(running.pollUnsafe()).toBeUndefined();
+        yield* TestClock.adjust(STDERR_GRACE);
+        const error = yield* Fiber.join(running);
+        expect(error._tag).toBe("CliFailed");
+        expect(error.message).toBe("out of token credits");
+      }),
   );
 
   it.effect("fails with the signal when the command dies before exiting", () =>

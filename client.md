@@ -73,7 +73,8 @@ CLIENT_IMAGE=screen.png ./client-with-image send-keys --agent-id OLI-42 --server
 
 Boots a QEMU session and prints its session id. Consumes a reservation already held
 for `--agent-id`. Without one the host answers 400 `no reservation` and the command
-fails. `./client start` does not reserve.
+fails. `./client start` does not reserve. A reservation nobody starts within ten
+minutes is given back, and a start after that is refused the same way.
 
 - `--iso <path|url>` — the ISO. A local path must exist; an http(s) URL is downloaded and cached by the server. Default `omarchy.iso` in the current directory.
 - `--disk <path>` — an existing qcow2 disk. Omit it and the server creates a fresh one.

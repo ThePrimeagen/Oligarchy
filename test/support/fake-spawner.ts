@@ -13,6 +13,9 @@ export type Scripted = {
   // kill() fails with this description; the process stays running unless alreadyDeadOnKill.
   readonly killError?: string;
   readonly alreadyDeadOnKill?: boolean;
+  // A process the command started outlives it holding the stderr pipe: the exit delivers its
+  // code and the last bytes, but stderr never ends, as Node's `exit` fires before `close`.
+  readonly stderrStaysOpen?: boolean;
 };
 
 export type Script = (command: string, args: ReadonlyArray<string>) => Scripted;
@@ -79,7 +82,9 @@ export const fakeSpawner = (script: Script = () => ({ exitCode: 0 })): FakeSpawn
       };
       const end = () => {
         Queue.endUnsafe(stdout);
-        Queue.endUnsafe(stderr);
+        if (scripted.stderrStaysOpen !== true) {
+          Queue.endUnsafe(stderr);
+        }
       };
       emit(stdout, scripted.stdout);
       emit(stderr, scripted.stderr);

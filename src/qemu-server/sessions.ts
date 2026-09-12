@@ -38,6 +38,12 @@ import * as Errors from "../shared/errors.ts";
 const SESSION_TIMEOUT_MS = 10 * 60 * 1000;
 const SESSION_TIMEOUT_CHECK = "10 seconds";
 const SESSION_TIMEOUT_REASON = "no command received for 10 minutes";
+// A reservation is a promise that a start follows soon. One nobody starts (the client that took
+// it died, or the dispatcher behind it did) would hold a --max-jobs slot until this process
+// restarted; ten minutes unused and it is given back, as a session with no command is. The
+// sweep that times sessions out notices. In memory only: no row records a reservation.
+const RESERVATION_TIMEOUT_MS = 10 * 60 * 1000;
+const RESERVATION_TIMEOUT_REASON = "unused for 10 minutes";
 const SHUTDOWN_REASON = "qemu server shutdown";
 // A click is two QMP exchanges and two action rows; cap the pulse count so one request cannot
 // enqueue an unbounded amount of work.
@@ -211,13 +217,13 @@ const make = (maxJobs: number) =>
     const sessions = yield* Ref.make<ReadonlyMap<string, LiveSession>>(new Map());
     const openSessions = yield* Ref.make<ReadonlyMap<string, OpenSession>>(new Map());
     // How many sessions are admitted against --max-jobs, and which agents already hold a slot
-    // that start will consume. Taken at reserve, before the span, scope or row exist, so a
-    // refusal allocates nothing; given back in finishLiveSession, the one place every admitted
-    // session ends.
+    // that start will consume, each with when it was taken. Taken at reserve, before the span,
+    // scope or row exist, so a refusal allocates nothing; given back in finishLiveSession, the
+    // one place every admitted session ends, or by the sweep when no start ever came.
     const slots = yield* Ref.make<{
       readonly count: number;
-      readonly reserved: ReadonlySet<string>;
-    }>({ count: 0, reserved: new Set() });
+      readonly reserved: ReadonlyMap<string, number>;
+    }>({ count: 0, reserved: new Map() });
 
     const elapsed = (started: number) =>
       Effect.map(Clock.currentTimeMillis, (now) => String(now - started));
@@ -460,6 +466,7 @@ const make = (maxJobs: number) =>
     };
 
     const reserve = Effect.fn("Sessions.reserve")(function* (agent: string) {
+      const now = yield* Clock.currentTimeMillis;
       return yield* Effect.flatMap(
         Ref.modify(slots, (held) => {
           if (held.reserved.has(agent)) {
@@ -470,7 +477,7 @@ const make = (maxJobs: number) =>
           }
           return [
             "ok",
-            { count: held.count + 1, reserved: withItem(held.reserved, agent) },
+            { count: held.count + 1, reserved: mapWith(held.reserved, agent, now) },
           ] as const;
         }),
         (outcome) => admit(outcome, agent),
@@ -481,7 +488,10 @@ const make = (maxJobs: number) =>
       return yield* Effect.flatMap(
         Ref.modify(slots, (held) =>
           held.reserved.has(agent)
-            ? ([true, { count: held.count - 1, reserved: without(held.reserved, agent) }] as const)
+            ? ([
+                true,
+                { count: held.count - 1, reserved: mapWithout(held.reserved, [agent]) },
+              ] as const)
             : ([false, held] as const),
         ),
         (released) =>
@@ -502,7 +512,7 @@ const make = (maxJobs: number) =>
       const agent = body.agent;
       const reserved = yield* Ref.modify(slots, (held) =>
         held.reserved.has(agent)
-          ? ([true, { count: held.count, reserved: without(held.reserved, agent) }] as const)
+          ? ([true, { count: held.count, reserved: mapWithout(held.reserved, [agent]) }] as const)
           : ([false, held] as const),
       );
       if (!reserved) {
@@ -929,7 +939,32 @@ const make = (maxJobs: number) =>
           );
       });
 
+    // Every reservation past the deadline leaves the reserved set and gives its slot back in one
+    // step, so a start arriving late is refused rather than admitted twice.
+    const expireReservations = Effect.gen(function* () {
+      const now = yield* Clock.currentTimeMillis;
+      const expired = yield* Ref.modify(slots, (held) => {
+        const gone: Array<string> = [];
+        for (const [agent, since] of held.reserved) {
+          if (now - since >= RESERVATION_TIMEOUT_MS) {
+            gone.push(agent);
+          }
+        }
+        return [
+          gone,
+          { count: held.count - gone.length, reserved: mapWithout(held.reserved, gone) },
+        ] as const;
+      });
+      for (const agent of expired) {
+        yield* log.warning(`reservation expired; ${RESERVATION_TIMEOUT_REASON}`, {
+          location: Log.Locations.server,
+          agentId: agent,
+        });
+      }
+    });
+
     const sweep = Effect.gen(function* () {
+      yield* expireReservations;
       const now = yield* Clock.currentTimeMillis;
       const timedOut: Array<LiveSession> = [];
       for (const live of (yield* Ref.get(sessions)).values()) {

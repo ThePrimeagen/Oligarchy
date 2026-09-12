@@ -2304,3 +2304,113 @@ describe("capacity", () => {
     }),
   );
 });
+
+// ---------------------------------------------------------------------------
+// reservation expiry
+// ---------------------------------------------------------------------------
+
+// A reservation is a promise that a start follows soon; one nobody starts (the client that took
+// it died, or its dispatcher did) is given back after ten minutes, in memory only: no row records
+// a reservation, so a restart starts clean.
+describe("reservation expiry", () => {
+  it.effect(
+    "a reservation unused for ten minutes expires: the slot is free, jobs drops, a late start is refused, one warning line",
+    () =>
+      Effect.gen(function* () {
+        const h = harness({ maxJobs: 1 });
+        yield* h.run(
+          Effect.gen(function* () {
+            const sessions = yield* Sessions.Sessions;
+            yield* sessions.reserve(AGENT);
+            expect(yield* sessions.jobs).toBe(1);
+            yield* TestClock.adjust("10 minutes");
+            expect(yield* sessions.jobs).toBe(0);
+            expect(yield* Effect.flip(sessions.start(startBody(), "none", false))).toMatchObject({
+              _tag: "BadRequest",
+              message: "no reservation",
+              agentId: AGENT,
+            });
+            yield* sessions.reserve(OTHER_AGENT);
+            expect(yield* qemus(sessions)).toBe(0);
+            // Nothing durable: no row, no registration, no span.
+            expect(h.sessions.sessions).toEqual([]);
+            expect(h.sessions.agentRuns).toEqual([]);
+            expect(spanNamed(h, AGENT)).toBeUndefined();
+            expect(h.log.lines).toEqual([
+              {
+                level: "warning",
+                text: "reservation expired; unused for 10 minutes",
+                location: "server",
+                agentId: AGENT,
+                skipSentry: false,
+                cause: undefined,
+              },
+            ]);
+          }),
+        );
+      }),
+  );
+
+  it.effect("a reservation consumed by a start in time never expires", () =>
+    Effect.gen(function* () {
+      const h = harness({ maxJobs: 1 });
+      yield* h.run(
+        Effect.gen(function* () {
+          const sessions = yield* Sessions.Sessions;
+          yield* sessions.reserve(AGENT);
+          yield* TestClock.adjust("5 minutes");
+          const id = yield* sessions.start(startBody(), "none", false);
+          // Eleven minutes after the reserve, six into the session: the slot is the session's.
+          yield* TestClock.adjust("6 minutes");
+          expect(yield* sessions.jobs).toBe(1);
+          expect(yield* qemus(sessions)).toBe(1);
+          expect(h.sessions.sessions.map((row) => [row.id, row.status])).toEqual([[id, "running"]]);
+          expect((yield* Effect.flip(sessions.reserve(OTHER_AGENT)))._tag).toBe("AtCapacity");
+        }),
+      );
+      expect(line(h, "reservation expired")).toBeUndefined();
+    }),
+  );
+
+  it.effect("an expired reservation cannot be relinquished, and its agent may reserve again", () =>
+    Effect.gen(function* () {
+      const h = harness({ maxJobs: 1 });
+      yield* h.run(
+        Effect.gen(function* () {
+          const sessions = yield* Sessions.Sessions;
+          yield* sessions.reserve(AGENT);
+          yield* TestClock.adjust("10 minutes");
+          expect(yield* Effect.flip(sessions.relinquish(AGENT))).toMatchObject({
+            _tag: "BadRequest",
+            message: "no reservation",
+            agentId: AGENT,
+          });
+          yield* sessions.reserve(AGENT);
+          expect(yield* sessions.jobs).toBe(1);
+          expect(texts(h)).toEqual(["reservation expired; unused for 10 minutes"]);
+        }),
+      );
+    }),
+  );
+
+  it.effect("a younger reservation stays when an older one expires", () =>
+    Effect.gen(function* () {
+      const h = harness({ maxJobs: 2 });
+      yield* h.run(
+        Effect.gen(function* () {
+          const sessions = yield* Sessions.Sessions;
+          yield* sessions.reserve(AGENT);
+          yield* TestClock.adjust("5 minutes");
+          yield* sessions.reserve(OTHER_AGENT);
+          yield* TestClock.adjust("5 minutes");
+          expect(yield* sessions.jobs).toBe(1);
+          expect(h.log.lines.map((entry) => entry.agentId)).toEqual([AGENT]);
+          // The younger one still starts.
+          const id = yield* sessions.start(startBody(ISO, OTHER_AGENT), "none", false);
+          expect(h.sessions.sessions.map((row) => row.id)).toEqual([id]);
+          expect(yield* sessions.jobs).toBe(1);
+        }),
+      );
+    }),
+  );
+});

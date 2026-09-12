@@ -26,6 +26,8 @@ type Fixture = {
   readonly log: FakeLog.FakeLog;
   readonly reporter: Reporter.Collector;
   readonly maxJobs: number;
+  // Every ticket the client asked QEMU a slot for, in order.
+  readonly qemu: Array<string>;
 };
 
 // Room for the two runs some tests hold at once; the capacity test passes 1.
@@ -39,13 +41,19 @@ const fixture = (
   log: FakeLog.fakeLog(),
   reporter: Reporter.collect(),
   maxJobs,
+  qemu: [],
 });
 
-const qemuOk = (): Sessions.ReserveQemu => () => Effect.void;
+const qemuRecording =
+  (fixed: Fixture): Sessions.ReserveQemu =>
+  (agent) =>
+    Effect.sync(() => {
+      fixed.qemu.push(agent);
+    });
 
 const serve = (fixed: Fixture) =>
   HttpRouter.serve(Handlers.routes, { disableLogger: true, disableListenLog: true }).pipe(
-    Layer.provide(Sessions.Sessions.layer(fixed.maxJobs, qemuOk(), () => Effect.void)),
+    Layer.provide(Sessions.Sessions.layer(fixed.maxJobs, qemuRecording(fixed), () => Effect.void)),
     Layer.provide(Layer.mergeAll(fixed.spawner.layer, fixed.log.layer, ProxyConfigLive)),
     Layer.provide(Layer.succeed(Log.ProcessAttribution)(Log.AutomationClientProcessAttribution)),
     Layer.provideMerge(NodeHttpServer.layerTest),
@@ -60,10 +68,11 @@ const reserve = (
   http: HttpClient.HttpClient,
   ticket = TICKET,
   extraHeaders: Record<string, string> = headers,
+  action: "drive" | "diagnose" = "drive",
 ) =>
   http.post("/reserve", {
     headers: extraHeaders,
-    body: HttpBody.text(JSON.stringify({ ticket }), "application/json"),
+    body: HttpBody.text(JSON.stringify({ ticket, action }), "application/json"),
   });
 
 const run = (
@@ -100,7 +109,7 @@ const reservedRun = (
   });
 
 describe("POST /reserve happy path", () => {
-  it.effect("answers ok and does not spawn opencode", () =>
+  it.effect("a drive answers ok, asks QEMU for the ticket, and does not spawn opencode", () =>
     Effect.gen(function* () {
       const fixed = fixture(() => ({ exitCode: 0 }));
       yield* Effect.gen(function* () {
@@ -109,8 +118,73 @@ describe("POST /reserve happy path", () => {
         expect(response.status).toBe(200);
         expect(yield* response.json).toEqual({ ok: "true" });
       }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.qemu).toEqual([TICKET]);
       expect(fixed.spawner.spawned).toEqual([]);
       expect(fixed.log.lines).toEqual([]);
+    }),
+  );
+
+  it.effect("a diagnose answers ok and never asks QEMU: it boots no guest", () =>
+    Effect.gen(function* () {
+      const fixed = fixture(() => ({ exitCode: 0 }));
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const response = yield* reserve(http, TICKET, headers, "diagnose");
+        expect(response.status).toBe(200);
+        expect(yield* response.json).toEqual({ ok: "true" });
+        // The slot is this client's: the run it reserved proceeds.
+        expect((yield* run(http, "diagnose the session")).status).toBe(200);
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.qemu).toEqual([]);
+      expect(fixed.spawner.spawned.map((spawned) => spawned.args[5])).toEqual([
+        "diagnose the session",
+      ]);
+      expect(fixed.log.lines).toEqual([]);
+    }),
+  );
+});
+
+describe("POST /reserve decoding", () => {
+  it.effect("a body without action is 400 and asks QEMU nothing", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const response = yield* http.post("/reserve", {
+          headers,
+          body: HttpBody.text(JSON.stringify({ ticket: TICKET }), "application/json"),
+        });
+        expect(response.status).toBe(400);
+        const body = decodeErrorBody(yield* response.json);
+        expect(body.error).toContain("action");
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.qemu).toEqual([]);
+      expect(fixed.spawner.spawned).toEqual([]);
+    }),
+  );
+
+  it.effect("an action that is neither drive nor diagnose is 400 and asks QEMU nothing", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const response = yield* http.post("/reserve", {
+          headers,
+          body: HttpBody.text(
+            JSON.stringify({ ticket: TICKET, action: "review" }),
+            "application/json",
+          ),
+        });
+        expect(response.status).toBe(400);
+        const body = decodeErrorBody(yield* response.json);
+        expect(body.error).toContain("action");
+        // Nothing was reserved: a run for the ticket is refused.
+        const refused = yield* run(http);
+        expect(refused.status).toBe(400);
+        expect(yield* refused.json).toEqual({ error: "no reservation" });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.qemu).toEqual([]);
+      expect(fixed.spawner.spawned).toEqual([]);
     }),
   );
 });

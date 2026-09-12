@@ -871,6 +871,73 @@ describe("placement", () => {
     }),
   );
 
+  // The server let the reservation go on its own (ten minutes unused) or restarted: it holds
+  // nothing for the agent, so the route is stale too, and a fresh reserve must be able to place.
+  it.effect(
+    "POST /relinquish answered 400 no reservation by the server forgets the agent and passes the 400 through",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture((request, url) =>
+          url.pathname === "/relinquish"
+            ? FakeHttp.json({ error: "no reservation" }, 400)
+            : url.pathname === "/reserve"
+              ? FakeHttp.json({ ok: "true" })
+              : fleet(request, url),
+        );
+        fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+        yield* Effect.gen(function* () {
+          const api = yield* qemuServerClient;
+          yield* api.Sessions.reserve({ payload: reserveBody });
+          expect(fixed.store.agents.has(AGENT_ID)).toBe(true);
+          const error = yield* Effect.flip(api.Sessions.relinquish({ payload: reserveBody }));
+          expect(error).toMatchObject({ _tag: "BadRequest", message: "no reservation" });
+          // Forgotten: the agent can reserve again, and the placement runs afresh.
+          yield* api.Sessions.reserve({ payload: reserveBody });
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.store.agents.has(AGENT_ID)).toBe(true);
+        expect(
+          fixed.upstream.requests
+            .filter((request) => request.url.endsWith("/reserve"))
+            .map((request) => request.url),
+        ).toEqual([`${SERVER_B}/reserve`, `${SERVER_B}/reserve`]);
+        expect(fixed.log.lines.filter((line) => line.text.startsWith("reservation gone"))).toEqual([
+          {
+            level: "info",
+            text: `reservation gone; ${SERVER_B}`,
+            location: "server",
+            agentId: AGENT_ID,
+            skipSentry: false,
+            cause: undefined,
+          },
+        ]);
+      }),
+  );
+
+  it.effect("POST /relinquish answered 500 by the server keeps the agent routed", () =>
+    Effect.gen(function* () {
+      const fixed = fixture((request, url) =>
+        url.pathname === "/relinquish"
+          ? FakeHttp.json({ error: "internal error" }, 500)
+          : url.pathname === "/reserve"
+            ? FakeHttp.json({ ok: "true" })
+            : fleet(request, url),
+      );
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      yield* Effect.gen(function* () {
+        const api = yield* qemuServerClient;
+        yield* api.Sessions.reserve({ payload: reserveBody });
+        const error = yield* Effect.flip(api.Sessions.relinquish({ payload: reserveBody }));
+        expect(error).toMatchObject({ _tag: "Internal" });
+        // Still routed: the server may well hold the slot, so a second reserve is refused.
+        const again = yield* Effect.flip(api.Sessions.reserve({ payload: reserveBody }));
+        expect(again).toMatchObject({ _tag: "BadRequest", message: "already reserved" });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.store.agents.has(AGENT_ID)).toBe(true);
+      expect(fixed.log.lines.some((line) => line.text.startsWith("reservation gone"))).toBe(false);
+      expect(fixed.log.lines.some((line) => line.text.startsWith("relinquished"))).toBe(false);
+    }),
+  );
+
   it.effect("POST /relinquish without a reservation is 400 no reservation", () =>
     Effect.gen(function* () {
       const fixed = fixture();

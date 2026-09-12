@@ -161,13 +161,20 @@ const request = (port: number, path: string, headers: Record<string, string>, bo
 
 const AUTH_JSON = { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" };
 
-// The client reserves QEMU first; these process tests stub that host so /reserve can succeed.
+const DRIVE_RESERVE = JSON.stringify({ ticket: "OLI-42", action: "drive" });
+const DIAGNOSE_RESERVE = JSON.stringify({ ticket: "OLI-42", action: "diagnose" });
+
+// A drive reserves QEMU first; these process tests stub that host so /reserve can succeed, and
+// count what reached it so a diagnose can be shown to ask nothing.
 const stubQemuReserve = async (): Promise<{
   readonly url: string;
+  readonly hits: () => ReadonlyArray<string>;
   readonly close: () => Promise<void>;
 }> => {
+  const hits: Array<string> = [];
   const server = createHttpServer((req, res) => {
     if (req.method === "POST" && (req.url === "/reserve" || req.url === "/relinquish")) {
+      hits.push(req.url);
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ ok: "true" }));
       return;
@@ -181,6 +188,7 @@ const stubQemuReserve = async (): Promise<{
   });
   return {
     url: `http://127.0.0.1:${String(portOf(server.address()))}`,
+    hits: () => hits,
     close: () => new Promise((done) => server.close(() => done())),
   };
 };
@@ -345,10 +353,7 @@ describeWithDatabase("automation client POST /run", () => {
           await process.waitFor(
             new RegExp(`automation client listening on 127.0.0.1:${String(port)}`),
           );
-          expect(
-            (await request(port, "/reserve", AUTH_JSON, JSON.stringify({ ticket: "OLI-42" })))
-              .status,
-          ).toBe(200);
+          expect((await request(port, "/reserve", AUTH_JSON, DRIVE_RESERVE)).status).toBe(200);
           const response = await request(
             port,
             "/run",
@@ -367,9 +372,91 @@ describeWithDatabase("automation client POST /run", () => {
               openrouter: { options: { headerTimeout: 180_000, chunkTimeout: 180_000 } },
             },
           });
+          expect(qemu.hits()).toEqual(["/reserve"]);
         } finally {
           process.child.kill("SIGTERM");
           await process.exited;
+          rmSync(bin, { recursive: true, force: true });
+          await qemu.close();
+        }
+      }),
+  );
+
+  it.live("a diagnose reserve asks the qemu host nothing, and its run still answers 200", () =>
+    Effect.promise(async () => {
+      const qemu = await stubQemuReserve();
+      const bin = installOpencode("exit 0");
+      const port = await freePort();
+      const process = spawnAutomationClient(
+        [...REQUIRED, "--port", String(port)],
+        { SERVER_URL: qemu.url },
+        `${bin}:${processEnv.PATH ?? ""}`,
+      );
+      try {
+        await process.waitFor(
+          new RegExp(`automation client listening on 127.0.0.1:${String(port)}`),
+        );
+        expect((await request(port, "/reserve", AUTH_JSON, DIAGNOSE_RESERVE)).status).toBe(200);
+        const response = await request(
+          port,
+          "/run",
+          AUTH_JSON,
+          JSON.stringify({ prompt: "diagnose the session", ticket: "OLI-42", model: MODEL }),
+        );
+        expect(response.status).toBe(200);
+        expect(qemu.hits()).toEqual([]);
+      } finally {
+        process.child.kill("SIGTERM");
+        await process.exited;
+        rmSync(bin, { recursive: true, force: true });
+        await qemu.close();
+      }
+    }),
+  );
+
+  // opencode's stderr is shared with everything it starts; a straggler holding it must not hold
+  // the answer. The exit ends the run.
+  it.live(
+    "answers 200 once opencode exits 0 even while a process it started still holds stderr",
+    () =>
+      Effect.promise(async () => {
+        const qemu = await stubQemuReserve();
+        // The straggler keeps opencode's stderr and outlives it by a minute; it gives up stdout,
+        // which is this test's pipe to the client, so the client's own close is not held too.
+        const bin = installOpencode(
+          '(exec sleep 60 >/dev/null) & echo $! > "$(dirname "$0")/straggler"; echo agent-said-done >&2; exit 0',
+        );
+        const port = await freePort();
+        const process = spawnAutomationClient(
+          [...REQUIRED, "--port", String(port)],
+          { SERVER_URL: qemu.url },
+          `${bin}:${processEnv.PATH ?? ""}`,
+        );
+        try {
+          await process.waitFor(
+            new RegExp(`automation client listening on 127.0.0.1:${String(port)}`),
+          );
+          expect((await request(port, "/reserve", AUTH_JSON, DRIVE_RESERVE)).status).toBe(200);
+          const began = Date.now();
+          const response = await request(
+            port,
+            "/run",
+            AUTH_JSON,
+            JSON.stringify({ prompt: "do the work", ticket: "OLI-42", model: MODEL }),
+          );
+          expect(response.status).toBe(200);
+          // Well under the straggler's minute: the grace, not the pipe, bounded the wait.
+          expect(Date.now() - began).toBeLessThan(30_000);
+        } finally {
+          process.child.kill("SIGTERM");
+          await process.exited;
+          const straggler = Number(readFileSync(join(bin, "straggler"), "utf8").trim());
+          // Best effort: a straggler already gone cannot be killed.
+          try {
+            globalThis.process.kill(straggler, "SIGKILL");
+          } catch {
+            // ESRCH: it exited on its own.
+          }
           rmSync(bin, { recursive: true, force: true });
           await qemu.close();
         }
@@ -390,9 +477,7 @@ describeWithDatabase("automation client POST /run", () => {
         await process.waitFor(
           new RegExp(`automation client listening on 127.0.0.1:${String(port)}`),
         );
-        expect(
-          (await request(port, "/reserve", AUTH_JSON, JSON.stringify({ ticket: "OLI-42" }))).status,
-        ).toBe(200);
+        expect((await request(port, "/reserve", AUTH_JSON, DRIVE_RESERVE)).status).toBe(200);
         const response = await request(
           port,
           "/run",
@@ -459,9 +544,7 @@ describeWithDatabase("automation client POST /run", () => {
             `automation client listening on 127.0.0.1:${String(port)}; name garage; max jobs 1`,
           ),
         );
-        expect(
-          (await request(port, "/reserve", AUTH_JSON, JSON.stringify({ ticket: "OLI-42" }))).status,
-        ).toBe(200);
+        expect((await request(port, "/reserve", AUTH_JSON, DRIVE_RESERVE)).status).toBe(200);
         const running = request(
           port,
           "/run",
@@ -479,7 +562,7 @@ describeWithDatabase("automation client POST /run", () => {
           port,
           "/reserve",
           AUTH_JSON,
-          JSON.stringify({ ticket: "OLI-99" }),
+          JSON.stringify({ ticket: "OLI-99", action: "drive" }),
         );
         expect(refused.status).toBe(503);
         expect(await refused.json()).toEqual({ error: "at capacity: max-jobs is 1" });
@@ -524,9 +607,7 @@ describeWithDatabase("automation client POST /abort", () => {
         await process.waitFor(
           new RegExp(`automation client listening on 127.0.0.1:${String(port)}`),
         );
-        expect(
-          (await request(port, "/reserve", AUTH_JSON, JSON.stringify({ ticket: "OLI-42" }))).status,
-        ).toBe(200);
+        expect((await request(port, "/reserve", AUTH_JSON, DRIVE_RESERVE)).status).toBe(200);
         const running = request(
           port,
           "/run",
@@ -576,9 +657,7 @@ describeWithDatabase("automation client POST /abort", () => {
         await process.waitFor(
           new RegExp(`automation client listening on 127.0.0.1:${String(port)}`),
         );
-        expect(
-          (await request(port, "/reserve", AUTH_JSON, JSON.stringify({ ticket: "OLI-42" }))).status,
-        ).toBe(200);
+        expect((await request(port, "/reserve", AUTH_JSON, DRIVE_RESERVE)).status).toBe(200);
         const running = request(
           port,
           "/run",
