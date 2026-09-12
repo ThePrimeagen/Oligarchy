@@ -460,7 +460,6 @@ const seedLiveClient = async (url: string) => {
       heartbeatAt: new Date(),
       generation: 1,
       stats: STATS,
-      maxJobs: 1,
     });
   } finally {
     await client.end();

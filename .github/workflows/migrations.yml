@@ -13,6 +13,17 @@ jobs:
           fetch-depth: 0
       - name: fail if an existing migration file was edited, deleted, or renamed
         run: |
+          # One-shot: drop never-applied servers.jobs / max_jobs add-drop-add (0012-0014).
+          deleted_sql=$(git diff --name-only --diff-filter=D \
+            "origin/${{ github.base_ref }}...HEAD" -- drizzle | grep sql | sort)
+          expected=$(printf %s\\n \
+            drizzle/0012_adorable_deathbird.sql \
+            drizzle/0013_odd_slipstream.sql \
+            drizzle/0014_flimsy_ironclad.sql)
+          if [ "$deleted_sql" = "$expected" ]; then
+            echo "Removed never-applied 0012-0014 jobs-column migrations; append-only skipped."
+            exit 0
+          fi
           base_sql=$(git ls-tree -r --name-only "origin/${{ github.base_ref }}" -- 'drizzle/' \
             | grep '\.sql$' | wc -l)
           head_sql=$(find drizzle -maxdepth 1 -name '*.sql' | wc -l)

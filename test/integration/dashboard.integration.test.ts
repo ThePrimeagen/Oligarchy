@@ -834,8 +834,6 @@ describe.skipIf(dbUrl === "")("dashboard/servers page happy path", () => {
             memory: { totalBytes: 66_900_000_000, usedBytes: 31_500_000_000 },
             cpu: { mean1m: 12.3, mean2m: 11, mean3m: 9.8 },
           },
-          jobs: 1,
-          maxJobs: 4,
           generation: 42,
           heartbeatAt: sql`now() - interval '12 seconds'`,
         },
@@ -846,12 +844,10 @@ describe.skipIf(dbUrl === "")("dashboard/servers page happy path", () => {
             memory: { totalBytes: 16_000_000_000, usedBytes: 4_000_000_000 },
             cpu: { mean1m: 50, mean2m: 40, mean3m: 30 },
           },
-          jobs: 0,
-          maxJobs: 4,
           generation: 7,
           heartbeatAt: sql`now() - interval '5 minutes'`,
         },
-        { url: "http://10.1.0.3:42069", maxJobs: 1 },
+        { url: "http://10.1.0.3:42069" },
       ]);
     });
     const { status, html } = await getPage("/servers", dbUrl);
@@ -860,28 +856,24 @@ describe.skipIf(dbUrl === "")("dashboard/servers page happy path", () => {
     expect(html).toContain("<h1>oligarchy servers</h1>");
     expect(html).toContain('<div id="fleet" hx-get="/servers/fleet" hx-trigger="every 30s">');
     expect(html).toContain(
-      "<tr><td>http://10.1.0.1:42069</td><td>2</td><td>31.5 / 66.9 GB</td><td>12.3% / 11.0% / 9.8%</td><td>1</td><td>4</td><td>42</td><td>12 s ago</td>",
+      "<tr><td>http://10.1.0.1:42069</td><td>2</td><td>31.5 / 66.9 GB</td><td>12.3% / 11.0% / 9.8%</td><td>42</td><td>12 s ago</td>",
     );
     expect(html).toContain(
-      '<tr><td>http://10.1.0.2:42069</td><td colspan="3"><strong>silent</strong></td><td>0</td><td>4</td><td>7</td><td>5 min ago</td>',
+      '<tr><td>http://10.1.0.2:42069</td><td colspan="3"><strong>silent</strong></td><td>7</td><td>5 min ago</td>',
     );
     expect(html).toContain(
-      '<tr><td>http://10.1.0.3:42069</td><td colspan="3">never heard from</td><td>0</td><td>1</td><td>0</td><td>never</td>',
+      '<tr><td>http://10.1.0.3:42069</td><td colspan="3">never heard from</td><td>0</td><td>never</td>',
     );
     expect(html).not.toContain("dashboard.css");
   });
 
   it("does not list an automation-client among the qemu fleet", async () => {
     await seed(dbUrl, async (db) => {
-      await db
-        .insert(servers)
-        .values({ url: "http://10.1.0.1:42069", maxJobs: 1 })
-        .onConflictDoNothing();
+      await db.insert(servers).values({ url: "http://10.1.0.1:42069" }).onConflictDoNothing();
       await db.delete(servers).where(eq(servers.url, "http://10.1.0.4:54322"));
       await db.insert(servers).values({
         url: "http://10.1.0.4:54322",
         type: "automation-client",
-        maxJobs: 1,
       });
     });
     const page = await getPage("/servers", dbUrl);

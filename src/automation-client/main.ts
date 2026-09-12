@@ -45,10 +45,7 @@ const ServerLive = (port: number, url: Option.Option<string>) =>
         `automation client listening on ${HOST}:${String(port)}${Option.match(url, { onNone: () => "", onSome: (announced) => `; announcing ${announced}` })}`,
         automationClientAttr,
       );
-      yield* Option.match(url, {
-        onNone: () => Effect.void,
-        onSome: (announced) => Heartbeat.announce(announced),
-      });
+      yield* Option.match(url, { onNone: () => Effect.void, onSome: Heartbeat.announce });
     }),
   ).pipe(
     Layer.provide(

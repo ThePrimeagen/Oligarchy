@@ -14,8 +14,6 @@ const alive: Server = {
     memory: { totalBytes: 66_900_000_000, usedBytes: 31_500_000_000 },
     cpu: { mean1m: 12.3, mean2m: 11, mean3m: 9.8 },
   },
-  jobs: 1,
-  maxJobs: 4,
   generation: 42,
   heartbeatAt: ago(12),
   queriedAt: QUERIED_AT,
@@ -28,8 +26,6 @@ const silent: Server = {
     memory: { totalBytes: 16_000_000_000, usedBytes: 4_000_000_000 },
     cpu: { mean1m: 50, mean2m: 40, mean3m: 30 },
   },
-  jobs: 0,
-  maxJobs: 4,
   generation: 7,
   heartbeatAt: ago(5 * 60 + 12),
   queriedAt: QUERIED_AT,
@@ -38,8 +34,6 @@ const silent: Server = {
 const neverHeardFrom: Server = {
   url: "https://qemu-c.example.com",
   stats: null,
-  jobs: 0,
-  maxJobs: 1,
   generation: 0,
   heartbeatAt: null,
   queriedAt: QUERIED_AT,
@@ -103,10 +97,10 @@ describe("Fleet happy path", () => {
   it("lists a server heard from just now with its machines, memory, the three cpu means, its generation and the age of its heartbeat", async () => {
     const page = await render(Fleet({ servers: [alive] }));
     expect(page).toContain(
-      "<tr><th>url</th><th>qemus</th><th>memory</th><th>cpu 1m / 2m / 3m</th><th>jobs</th><th>max jobs</th><th>generation</th><th>heartbeat</th><th></th></tr>",
+      "<tr><th>url</th><th>qemus</th><th>memory</th><th>cpu 1m / 2m / 3m</th><th>generation</th><th>heartbeat</th><th></th></tr>",
     );
     expect(page).toContain(
-      "<tr><td>http://127.0.0.1:55332</td><td>2</td><td>31.5 / 66.9 GB</td><td>12.3% / 11.0% / 9.8%</td><td>1</td><td>4</td><td>42</td><td>12 s ago</td>",
+      "<tr><td>http://127.0.0.1:55332</td><td>2</td><td>31.5 / 66.9 GB</td><td>12.3% / 11.0% / 9.8%</td><td>42</td><td>12 s ago</td>",
     );
     expect(page).toContain(
       '<form method="post" action="/servers/delete"><input type="hidden" name="url" value="http://127.0.0.1:55332"/><button>delete</button></form>',
@@ -136,7 +130,7 @@ describe("Fleet unhappy path", () => {
   it("marks a server silent, its stats withheld, once three heartbeats are overdue", async () => {
     const page = await render(Fleet({ servers: [silent] }));
     expect(page).toContain(
-      '<tr><td>https://qemu-b.example.com</td><td colspan="3"><strong>silent</strong></td><td>0</td><td>4</td><td>7</td><td>5 min ago</td>',
+      '<tr><td>https://qemu-b.example.com</td><td colspan="3"><strong>silent</strong></td><td>7</td><td>5 min ago</td>',
     );
     expect(page).not.toContain("50.0%");
   });
@@ -147,14 +141,14 @@ describe("Fleet unhappy path", () => {
     expect(onTime).not.toContain("silent");
     const overdue = await render(Fleet({ servers: [{ ...alive, heartbeatAt: ago(91) }] }));
     expect(overdue).toContain(
-      '<td colspan="3"><strong>silent</strong></td><td>1</td><td>4</td><td>42</td><td>1 min ago</td>',
+      '<td colspan="3"><strong>silent</strong></td><td>42</td><td>1 min ago</td>',
     );
   });
 
   it("says never heard from for a server an operator added that has not announced itself", async () => {
     const page = await render(Fleet({ servers: [neverHeardFrom] }));
     expect(page).toContain(
-      '<tr><td>https://qemu-c.example.com</td><td colspan="3">never heard from</td><td>0</td><td>1</td><td>0</td><td>never</td>',
+      '<tr><td>https://qemu-c.example.com</td><td colspan="3">never heard from</td><td>0</td><td>never</td>',
     );
   });
 

@@ -27,23 +27,6 @@ describe("Sessions.run happy path", () => {
       ]);
     }).pipe(Effect.provide(layer(spawner)));
   });
-
-  it.effect("runs two tickets at once", () => {
-    const spawner = FakeSpawner.fakeSpawner(() => ({}));
-    return Effect.gen(function* () {
-      const sessions = yield* Sessions.Sessions;
-      const first = yield* Effect.forkChild(sessions.run(TICKET, "first"));
-      const second = yield* Effect.forkChild(sessions.run(OTHER, "second"));
-      for (let i = 0; i < 100 && spawner.spawned.length < 2; i++) {
-        yield* Effect.yieldNow;
-      }
-      expect(spawner.spawned).toHaveLength(2);
-      yield* spawner.spawned[0]?.exit(0) ?? Effect.void;
-      yield* spawner.spawned[1]?.exit(0) ?? Effect.void;
-      yield* Fiber.join(first);
-      yield* Fiber.join(second);
-    }).pipe(Effect.provide(layer(spawner)));
-  });
 });
 
 describe("Sessions.run unhappy path", () => {
@@ -69,21 +52,6 @@ describe("Sessions.run unhappy path", () => {
       const error = yield* Effect.flip(sessions.run(TICKET, "do the work"));
       expect(error._tag).toBe("RunFailed");
       expect(error.message).toBe("out of token credits");
-    }).pipe(Effect.provide(layer(spawner)));
-  });
-
-  it.effect("a spawn failure does not block the next ticket", () => {
-    let attempts = 0;
-    const spawner = FakeSpawner.fakeSpawner(() =>
-      ++attempts === 1 ? { spawnError: "spawn opencode ENOENT" } : { exitCode: 0 },
-    );
-    return Effect.gen(function* () {
-      const sessions = yield* Sessions.Sessions;
-      expect(yield* Effect.flip(sessions.run(TICKET, "first"))).toMatchObject({
-        _tag: "RunFailed",
-        message: "spawn opencode ENOENT",
-      });
-      yield* sessions.run(OTHER, "second");
     }).pipe(Effect.provide(layer(spawner)));
   });
 });

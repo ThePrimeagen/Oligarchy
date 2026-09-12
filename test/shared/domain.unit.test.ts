@@ -99,23 +99,6 @@ describe("brands", () => {
       expect(String(Cause.squash(exit.cause))).toMatch(/url must be an http or https url/);
     }
   });
-
-  it("accepts a MaxJobs of 1 or more and refuses anything else", () => {
-    const is = Schema.is(Domain.MaxJobs);
-    expect(is(1)).toBe(true);
-    expect(is(4)).toBe(true);
-    expect(is(0)).toBe(false);
-    expect(is(-1)).toBe(false);
-    expect(is(1.5)).toBe(false);
-  });
-
-  it("names the MaxJobs rule in the decode failure", () => {
-    const exit = Schema.decodeUnknownExit(Domain.MaxJobs)(0);
-    expect(Exit.isFailure(exit)).toBe(true);
-    if (Exit.isFailure(exit)) {
-      expect(String(Cause.squash(exit.cause))).toMatch(/max-jobs must be at least 1/);
-    }
-  });
 });
 
 describe("QmpInbound", () => {

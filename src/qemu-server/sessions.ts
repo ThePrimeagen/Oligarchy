@@ -77,7 +77,7 @@ export type SessionsService = {
     body: Contract.StartBody,
     display: Domain.QemuDisplay,
     automation: boolean,
-  ) => Effect.Effect<string, Errors.StartFailed | Errors.AtCapacity | Errors.Internal>;
+  ) => Effect.Effect<string, Errors.StartFailed | Errors.Internal>;
   // Resets lastCommandAt before returning: a valid request counts as activity.
   readonly lookup: (
     id: string,
@@ -118,7 +118,6 @@ export type SessionsService = {
     Errors.UnknownSession | Errors.Conflict | Errors.Internal
   >;
   readonly stats: Effect.Effect<Contract.Stats>;
-  readonly jobs: Effect.Effect<number>;
 };
 
 // What the drain finalizer reads and reports: the reason every surviving session's row is closed
@@ -185,794 +184,767 @@ const exchangeFailed = (error: unknown, live: OpenSession): Errors.ExchangeFaile
 const badRequest = (message: string, live: OpenSession): Errors.BadRequest =>
   Errors.BadRequest.make({ message, sessionId: live.id, agentId: live.agent });
 
-const make = (maxJobs: number) =>
-  Effect.gen(function* () {
-    const qemu = yield* Qemu.Qemu;
-    const iso = yield* Iso.Iso;
-    const stats = yield* Stats.Stats;
-    const sessionStore = yield* SessionStore.SessionStore;
-    const actionStore = yield* Actions.ActionStore;
-    const debugLogs = yield* DebugLogs.DebugLogStore;
-    const log = yield* Log.Log;
-    const fs = yield* FileSystem.FileSystem;
-    const shutdown = yield* Shutdown;
+const make = Effect.gen(function* () {
+  const qemu = yield* Qemu.Qemu;
+  const iso = yield* Iso.Iso;
+  const stats = yield* Stats.Stats;
+  const sessionStore = yield* SessionStore.SessionStore;
+  const actionStore = yield* Actions.ActionStore;
+  const debugLogs = yield* DebugLogs.DebugLogStore;
+  const log = yield* Log.Log;
+  const fs = yield* FileSystem.FileSystem;
+  const shutdown = yield* Shutdown;
 
-    // Running machines, by id; and every session this qemu server holds, booting ones included.
-    const sessions = yield* Ref.make<ReadonlyMap<string, LiveSession>>(new Map());
-    const openSessions = yield* Ref.make<ReadonlyMap<string, OpenSession>>(new Map());
-    const jobCount = yield* Ref.make(0);
+  // Running machines, by id; and every session this qemu server holds, booting ones included.
+  const sessions = yield* Ref.make<ReadonlyMap<string, LiveSession>>(new Map());
+  const openSessions = yield* Ref.make<ReadonlyMap<string, OpenSession>>(new Map());
 
-    const elapsed = (started: number) =>
-      Effect.map(Clock.currentTimeMillis, (now) => String(now - started));
+  const elapsed = (started: number) =>
+    Effect.map(Clock.currentTimeMillis, (now) => String(now - started));
 
-    // -------------------------------------------------------------------------
-    // followers
-    // -------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // followers
+  // -------------------------------------------------------------------------
 
-    const emit = (live: OpenSession, event: Domain.FollowEvent): Effect.Effect<void> =>
-      Effect.gen(function* () {
-        for (const follower of yield* Ref.get(live.followers)) {
-          if (Queue.offerUnsafe(follower, event)) {
-            continue;
-          }
-          yield* Ref.update(live.followers, (set) => without(set, follower));
-          Queue.endUnsafe(follower);
-          yield* log.warning(`follower dropped; ${String(FOLLOW_BACKLOG)} events behind`, {
-            location: live.id,
-            agentId: live.agent,
-          });
+  const emit = (live: OpenSession, event: Domain.FollowEvent): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      for (const follower of yield* Ref.get(live.followers)) {
+        if (Queue.offerUnsafe(follower, event)) {
+          continue;
         }
-      });
-
-    // Brackets one request's work for the followers: a running line when it starts, then its verdict.
-    const followed = <A, E>(
-      live: OpenSession,
-      name: Domain.ActionName,
-      work: Effect.Effect<A, E>,
-    ): Effect.Effect<A, E> =>
-      Effect.gen(function* () {
-        const id = yield* Ref.updateAndGet(live.actionSeq, (n) => n + 1);
-        yield* emit(live, { type: "action", id, name, state: "running" });
-        return yield* Effect.onExit(work, (exit) =>
-          emit(live, { type: "action", id, state: Exit.isSuccess(exit) ? "completed" : "failed" }),
-        );
-      });
-
-    const detach = (live: OpenSession, follower: Follower): Effect.Effect<void> =>
-      Effect.gen(function* () {
-        const removed = yield* Ref.modify(live.followers, (set) =>
-          set.has(follower) ? [true, without(set, follower)] : [false, set],
-        );
-        if (removed) {
-          yield* log.info("follower detached", { location: live.id, agentId: live.agent });
-        }
-      });
-
-    // -------------------------------------------------------------------------
-    // action spans and the recorder
-    // -------------------------------------------------------------------------
-
-    // Open from the recorder's open to its close, under the open intent or the session.
-    const openActionSpan = (
-      live: OpenSession,
-      command: Domain.QmpCommand,
-    ): Effect.Effect<Tracer.Span> =>
-      Effect.gen(function* () {
-        const parent = Option.match(yield* Ref.get(live.intent), {
-          onNone: () => live.span,
-          onSome: (intent) => intent.span,
-        });
-        const span = yield* Sentry.actionSpan(parent, command.execute, live.id, live.agent);
-        yield* Ref.update(live.actionSpans, (spans) => withItem(spans, span));
-        return span;
-      });
-
-    // Ends the span once: a session ending with actions in flight fails what is still open.
-    const settleActionSpan = (
-      live: OpenSession,
-      span: Tracer.Span,
-      state: Domain.ActionState,
-      imageUrl?: string,
-    ): Effect.Effect<void> =>
-      Effect.gen(function* () {
-        const open = yield* Ref.modify(live.actionSpans, (spans) =>
-          spans.has(span) ? [true, without(spans, span)] : [false, spans],
-        );
-        if (open) {
-          yield* Sentry.endActionSpan(span, state, imageUrl);
-        }
-      });
-
-    // Opens the span and the action row; a refused insert fails the exchange up front.
-    const beginAction = (live: OpenSession, command: Domain.QmpCommand) =>
-      Effect.gen(function* () {
-        const span = yield* openActionSpan(live, command);
-        const id = yield* actionStore
-          .startAction({ sessionId: live.id, agentId: live.agent, request: command })
-          .pipe(Effect.tapError(() => settleActionSpan(live, span, "failed")));
-        return { span, id };
-      });
-
-    const recorder =
-      (live: OpenSession): Qmp.Recorder =>
-      (command) =>
-        Effect.map(
-          beginAction(live, command),
-          ({ span, id }) =>
-            (outcome) =>
-              Effect.gen(function* () {
-                yield* settleActionSpan(live, span, outcome.state);
-                yield* actionStore.finishAction(id, outcome).pipe(
-                  Effect.tapError((error) =>
-                    log.error(`db: closing action ${String(id)} failed: ${detail(error)}`, {
-                      location: live.id,
-                      agentId: live.agent,
-                      cause: error,
-                    }),
-                  ),
-                );
-              }),
-        );
-
-    // -------------------------------------------------------------------------
-    // ending a session
-    // -------------------------------------------------------------------------
-
-    const finishOpenIntent = (
-      live: OpenSession,
-      state: "completed" | "cancelled",
-    ): Effect.Effect<void> =>
-      Effect.gen(function* () {
-        const intent = yield* Ref.getAndSet(live.intent, Option.none());
-        if (Option.isNone(intent)) {
-          return;
-        }
-        yield* Sentry.endIntentSpan(intent.value.span, state);
-        yield* emit(live, { type: "intent", state });
-      });
-
-    const finishLiveSession = (
-      live: OpenSession,
-      status: Domain.SessionEndStatus,
-    ): Effect.Effect<void> =>
-      Effect.gen(function* () {
-        yield* Ref.update(openSessions, (map) => mapWithout(map, [live.id]));
-        yield* Ref.update(jobCount, (n) => n - 1);
-        yield* log.releaseColor(live.agent);
-        for (const span of yield* Ref.get(live.actionSpans)) {
-          yield* settleActionSpan(live, span, "failed");
-        }
-        yield* finishOpenIntent(live, "cancelled");
-        yield* Sentry.endSessionSpan(live.span, status);
-        yield* emit(live, { type: "session", status });
-        for (const follower of yield* Ref.getAndSet(live.followers, new Set())) {
-          Queue.endUnsafe(follower);
-        }
-      });
-
-    // Leaving the session scope kills QEMU and removes its directory.
-    const kill = (live: OpenSession): Effect.Effect<void> => Scope.close(live.scope, Exit.void);
-
-    const killLogged = (live: OpenSession, prefix: string, agentId: string | undefined) =>
-      kill(live).pipe(
-        Effect.catchCause((cause) => {
-          if (Cause.hasInterruptsOnly(cause)) {
-            return Effect.interrupt;
-          }
-          const error = Cause.squash(cause);
-          return log.error(`${prefix}: ${detail(error)}`, {
-            ...attribution(live.id, agentId),
-            cause: error,
-          });
-        }),
-      );
-
-    // -------------------------------------------------------------------------
-    // start
-    // -------------------------------------------------------------------------
-
-    const launch = (
-      live: OpenSession,
-      body: Contract.StartBody,
-      display: Domain.QemuDisplay,
-      automation: boolean,
-    ): Effect.Effect<
-      Qemu.QemuHandle,
-      Errors.QemuStartError | Errors.IsoError | Errors.DatabaseError
-    > =>
-      Effect.gen(function* () {
-        // Checked before anything else: a wrong disk path must not cost an iso download, and it
-        // must fail ahead of registerAgent, or the agent's one registration is spent on a machine
-        // that never booted.
-        const disk = body.disk;
-        if (disk !== undefined) {
-          yield* fs
-            .stat(disk)
-            .pipe(
-              Effect.mapError(() =>
-                Errors.QemuStartError.make({ message: `qemu: disk not found: ${disk}` }),
-              ),
-            );
-        }
-        const isoPath = yield* iso.getIso(body.iso, { sessionId: live.id, agentId: live.agent });
-        const prepared = yield* qemu.prepare(live.id, disk).pipe(Scope.provide(live.scope));
-        // Register right before boot: the handshake records an action that references agent_runs,
-        // so this must precede start(), but a failed download or disk create before here must not
-        // burn the agent id on its one-registration key.
-        yield* sessionStore.registerAgent(live.agent, live.id);
-        const handle = yield* qemu
-          .start(prepared, { iso: isoPath, display, automation, record: recorder(live) })
-          .pipe(Scope.provide(live.scope));
-        yield* sessionStore.sessionRunning(live.id);
-        return handle;
-      }).pipe(
-        Effect.tapError((error) =>
-          Effect.gen(function* () {
-            // Best effort: the row and the caller's error are what matter once boot has failed.
-            yield* Effect.ignore(kill(live));
-            yield* sessionStore.endSession(live.id, "failed", detail(error)).pipe(
-              Effect.catch((failure) =>
-                log.error(`db: recording a failed start failed too: ${failure.message}`, {
-                  location: live.id,
-                  agentId: live.agent,
-                  cause: failure,
-                }),
-              ),
-            );
-          }),
-        ),
-      );
-
-    const start = Effect.fn("Sessions.start")(function* (
-      body: Contract.StartBody,
-      display: Domain.QemuDisplay,
-      automation: boolean,
-    ) {
-      const reserved = yield* Ref.modify(jobCount, (n) =>
-        n >= maxJobs ? ([false, n] as const) : ([true, n + 1] as const),
-      );
-      if (!reserved) {
-        return yield* Errors.AtCapacity.make({});
-      }
-      const started = yield* Clock.currentTimeMillis;
-      const id: string = crypto.randomUUID();
-      const agent = body.agent;
-      const live: OpenSession = {
-        id,
-        agent,
-        span: yield* Sentry.sessionSpan(id, agent),
-        scope: yield* Scope.make(),
-        lastCommandAt: yield* Ref.make(started),
-        intent: yield* Ref.make(Option.none<Intent>()),
-        image: yield* Ref.make(Option.none<Image>()),
-        followers: yield* Ref.make<ReadonlySet<Follower>>(new Set()),
-        actionSeq: yield* Ref.make(0),
-        actionSpans: yield* Ref.make<ReadonlySet<Tracer.Span>>(new Set()),
-      };
-      yield* Ref.update(openSessions, (map) => mapWith(map, id, live));
-      yield* log.acquireColor(agent);
-      const disk = body.disk;
-      yield* sessionStore
-        .insertSession(
-          id,
-          disk === undefined ? { iso: body.iso } : { iso: body.iso, disk },
-          Domain.isIsoUrl(body.iso) ? "downloading" : "running",
-        )
-        .pipe(
-          Effect.catch((cause) =>
-            finishLiveSession(live, "failed").pipe(
-              Effect.andThen(Effect.fail(internal(cause, id, agent))),
-            ),
-          ),
-        );
-      yield* log.info(`starting; iso ${body.iso}${disk === undefined ? "" : `, disk ${disk}`}`, {
-        location: id,
-        agentId: agent,
-      });
-      const handle = yield* launch(live, body, display, automation).pipe(
-        Effect.catch((error) =>
-          finishLiveSession(live, "failed").pipe(
-            Effect.andThen(
-              Effect.fail(
-                Errors.StartFailed.make({
-                  message: detail(error),
-                  cause: error,
-                  sessionId: id,
-                  agentId: agent,
-                }),
-              ),
-            ),
-          ),
-        ),
-      );
-      const running: LiveSession = { ...live, qemu: handle };
-      yield* Ref.set(running.lastCommandAt, yield* Clock.currentTimeMillis);
-      yield* Ref.update(sessions, (map) => mapWith(map, id, running));
-      yield* emit(running, { type: "session", status: "running" });
-      yield* log.info(`running; started in ${yield* elapsed(started)}ms`, {
-        location: id,
-        agentId: agent,
-      });
-      return id;
-    });
-
-    // -------------------------------------------------------------------------
-    // driving a running session
-    // -------------------------------------------------------------------------
-
-    const lookup = Effect.fn("Sessions.lookup")(function* (id: string, agent: string) {
-      if (id === "") {
-        return yield* Errors.BadRequest.make({ message: "session id is required", agentId: agent });
-      }
-      const live = (yield* Ref.get(sessions)).get(id);
-      if (live === undefined) {
-        return yield* Errors.unknownSession(id, agent);
-      }
-      if (live.agent !== agent) {
-        return yield* Errors.Forbidden.make({
-          message: `agent "${agent}" does not own session "${id}"`,
-          sessionId: id,
-          agentId: agent,
-        });
-      }
-      // A valid request counts as activity even when the exchange it starts later fails.
-      yield* Ref.set(live.lastCommandAt, yield* Clock.currentTimeMillis);
-      return live;
-    });
-
-    const image = Effect.fn("Sessions.image")(function* (live: LiveSession) {
-      const started = yield* Clock.currentTimeMillis;
-      const imageId: string = crypto.randomUUID();
-      const url = Contract.StoredImageUrl(imageId);
-      // The images row must ride the same transaction that closes the action (they are 1:1), so
-      // this recorder only stashes and the method closes.
-      const opened = yield* Ref.make(Option.none<number>());
-      const outcome = yield* Ref.make(Option.none<Domain.QmpExchangeOutcome>());
-      const record: Qmp.Recorder = (command) =>
-        Effect.gen(function* () {
-          const { span, id } = yield* beginAction(live, command);
-          yield* Ref.set(opened, Option.some(id));
-          return (result) =>
-            Effect.gen(function* () {
-              yield* Ref.set(outcome, Option.some(result));
-              yield* settleActionSpan(
-                live,
-                span,
-                result.state,
-                result.state === "completed" ? url : undefined,
-              );
-            });
-        });
-      // Only a failed exchange is closed without an image; a completed one whose image write failed
-      // stays open rather than break the 1:1 promise.
-      const closeFailedExchange = Effect.gen(function* () {
-        const id = yield* Ref.get(opened);
-        const result = yield* Ref.get(outcome);
-        if (Option.isNone(id) || Option.isNone(result) || result.value.state !== "failed") {
-          return;
-        }
-        yield* actionStore.finishAction(id.value, result.value).pipe(
-          Effect.catch((failure) =>
-            log.error(`db: recording a failed screendump failed too: ${failure.message}`, {
-              location: live.id,
-              agentId: live.agent,
-              cause: failure,
-            }),
-          ),
-        );
-      });
-      const work = Effect.gen(function* () {
-        const png = yield* live.qemu.screendump(record).pipe(
-          Effect.mapError((error) =>
-            error._tag === "PlatformError"
-              ? internal(error, live.id, live.agent)
-              : exchangeFailed(error, live),
-          ),
-          Effect.tapError(() => closeFailedExchange),
-        );
-        const id = yield* Ref.get(opened);
-        const result = yield* Ref.get(outcome);
-        if (Option.isNone(id) || Option.isNone(result)) {
-          return yield* Effect.die("screendump completed without recording its exchange");
-        }
-        yield* actionStore
-          .finishAction(id.value, result.value, { id: imageId, data: png })
-          .pipe(Effect.mapError((cause) => internal(cause, live.id, live.agent)));
-        const stored: Image = { id: imageId, png: Buffer.from(png).toString("base64") };
-        yield* Ref.set(live.image, Option.some(stored));
-        yield* emit(live, { type: "image", id: stored.id, png: stored.png });
-        yield* log.info(
-          `image; ${String(png.length)} bytes in ${yield* elapsed(started)}ms; ${url}`,
-          { location: live.id, agentId: live.agent },
-        );
-        return { png, imageId };
-      });
-      return yield* followed(live, "get-image", work);
-    });
-
-    const serial = Effect.fn("Sessions.serial")(function* (live: LiveSession) {
-      const started = yield* Clock.currentTimeMillis;
-      const data = yield* followed(
-        live,
-        "get-serial",
-        fs
-          .readFile(live.qemu.serialPath)
-          .pipe(Effect.mapError((cause) => internal(cause, live.id, live.agent))),
-      );
-      yield* log.info(`serial; ${String(data.length)} bytes in ${yield* elapsed(started)}ms`, {
-        location: live.id,
-        agentId: live.agent,
-      });
-      return data;
-    });
-
-    const sendKeys = Effect.fn("Sessions.sendKeys")(function* (
-      live: LiveSession,
-      keys: string,
-      encoding: string | undefined,
-    ) {
-      const started = yield* Clock.currentTimeMillis;
-      const parsed = Keys.parseKeys(keys, encoding ?? "oligarchy");
-      if (Result.isFailure(parsed)) {
-        return yield* badRequest(parsed.failure.message, live);
-      }
-      const chords = parsed.success;
-      if (chords.length > MAX_KEYS) {
-        return yield* badRequest(`send-keys: at most ${String(MAX_KEYS)} keys per request`, live);
-      }
-      yield* followed(
-        live,
-        "send-keys",
-        live.qemu
-          .sendKeys(chords, recorder(live))
-          .pipe(Effect.mapError((error) => exchangeFailed(error, live))),
-      );
-      return yield* log.info(
-        `sent ${String(chords.length)} chords in ${yield* elapsed(started)}ms`,
-        {
+        yield* Ref.update(live.followers, (set) => without(set, follower));
+        Queue.endUnsafe(follower);
+        yield* log.warning(`follower dropped; ${String(FOLLOW_BACKLOG)} events behind`, {
           location: live.id,
           agentId: live.agent,
-        },
+        });
+      }
+    });
+
+  // Brackets one request's work for the followers: a running line when it starts, then its verdict.
+  const followed = <A, E>(
+    live: OpenSession,
+    name: Domain.ActionName,
+    work: Effect.Effect<A, E>,
+  ): Effect.Effect<A, E> =>
+    Effect.gen(function* () {
+      const id = yield* Ref.updateAndGet(live.actionSeq, (n) => n + 1);
+      yield* emit(live, { type: "action", id, name, state: "running" });
+      return yield* Effect.onExit(work, (exit) =>
+        emit(live, { type: "action", id, state: Exit.isSuccess(exit) ? "completed" : "failed" }),
       );
     });
 
-    const sendMouse = Effect.fn("Sessions.sendMouse")(function* (
-      live: LiveSession,
-      input: Contract.SendMouseBody,
-    ) {
-      const started = yield* Clock.currentTimeMillis;
-      const { x, y, button, clicks } = input;
-      if (!(x >= 0 && x <= 1 && y >= 0 && y <= 1)) {
-        return yield* badRequest("mouse: x and y must be in 0..1", live);
+  const detach = (live: OpenSession, follower: Follower): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      const removed = yield* Ref.modify(live.followers, (set) =>
+        set.has(follower) ? [true, without(set, follower)] : [false, set],
+      );
+      if (removed) {
+        yield* log.info("follower detached", { location: live.id, agentId: live.agent });
       }
-      if (
-        clicks !== undefined &&
-        (!Number.isInteger(clicks) || clicks < 1 || clicks > MAX_CLICKS)
-      ) {
-        return yield* badRequest(
-          `mouse: clicks must be an integer in 1..${String(MAX_CLICKS)}`,
-          live,
-        );
-      }
-      const gesture = Object.assign(
-        { x, y },
-        button === undefined ? undefined : { button },
-        clicks === undefined ? undefined : { clicks },
-      );
-      yield* followed(
-        live,
-        "send-mouse",
-        live.qemu
-          .sendMouse(gesture, recorder(live))
-          .pipe(Effect.mapError((error) => exchangeFailed(error, live))),
-      );
-      const pulses = clicks === undefined || clicks === 1 ? "" : ` ×${String(clicks)}`;
-      return yield* log.info(
-        `mouse ${String(x)} ${String(y)}${button === undefined ? "" : ` ${button}${pulses}`} in ${yield* elapsed(started)}ms`,
-        { location: live.id, agentId: live.agent },
-      );
     });
 
-    const intentStart = Effect.fn("Sessions.intentStart")(function* (
-      live: LiveSession,
-      testResultId: string,
-      message: string,
-    ) {
-      if (Option.isSome(yield* Ref.get(live.intent))) {
-        return yield* badRequest(
-          "Cannot start one intent when one's already running. Please end your previous intent.",
-          live,
-        );
-      }
-      const span = yield* Sentry.intentSpan(live.span, live.id, live.agent, testResultId, message);
-      yield* Ref.set(live.intent, Option.some({ span, message }));
-      yield* emit(live, { type: "intent", state: "started", message });
-      return yield* log.info(`intent start; ${message}`, {
-        location: live.id,
-        agentId: live.agent,
+  // -------------------------------------------------------------------------
+  // action spans and the recorder
+  // -------------------------------------------------------------------------
+
+  // Open from the recorder's open to its close, under the open intent or the session.
+  const openActionSpan = (
+    live: OpenSession,
+    command: Domain.QmpCommand,
+  ): Effect.Effect<Tracer.Span> =>
+    Effect.gen(function* () {
+      const parent = Option.match(yield* Ref.get(live.intent), {
+        onNone: () => live.span,
+        onSome: (intent) => intent.span,
       });
+      const span = yield* Sentry.actionSpan(parent, command.execute, live.id, live.agent);
+      yield* Ref.update(live.actionSpans, (spans) => withItem(spans, span));
+      return span;
     });
 
-    const intentEnd = Effect.fn("Sessions.intentEnd")(function* (live: LiveSession) {
-      if (Option.isNone(yield* Ref.get(live.intent))) {
-        return yield* badRequest("no active intent", live);
-      }
-      yield* finishOpenIntent(live, "completed");
-      return yield* log.info("intent end", { location: live.id, agentId: live.agent });
-    });
-
-    const readSerialText = (live: LiveSession): Effect.Effect<string> =>
-      fs.readFile(live.qemu.serialPath).pipe(
-        Effect.map((bytes) => new TextDecoder().decode(bytes)),
-        Effect.catch((error) =>
-          error.reason._tag === "NotFound"
-            ? Effect.succeed("")
-            : log
-                .error(`debug log: serial read failed: ${detail(error)}`, {
-                  location: live.id,
-                  agentId: live.agent,
-                  cause: error,
-                })
-                .pipe(Effect.as("")),
-        ),
+  // Ends the span once: a session ending with actions in flight fails what is still open.
+  const settleActionSpan = (
+    live: OpenSession,
+    span: Tracer.Span,
+    state: Domain.ActionState,
+    imageUrl?: string,
+  ): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      const open = yield* Ref.modify(live.actionSpans, (spans) =>
+        spans.has(span) ? [true, without(spans, span)] : [false, spans],
       );
+      if (open) {
+        yield* Sentry.endActionSpan(span, state, imageUrl);
+      }
+    });
 
-    type Captured = { readonly serial: string; readonly qemu: string };
+  // Opens the span and the action row; a refused insert fails the exchange up front.
+  const beginAction = (live: OpenSession, command: Domain.QmpCommand) =>
+    Effect.gen(function* () {
+      const span = yield* openActionSpan(live, command);
+      const id = yield* actionStore
+        .startAction({ sessionId: live.id, agentId: live.agent, request: command })
+        .pipe(Effect.tapError(() => settleActionSpan(live, span, "failed")));
+      return { span, id };
+    });
 
-    // What vanishes with the machine, read before the kill: the console file and QEMU's stderr.
-    const captureDebugLog = (live: LiveSession): Effect.Effect<Captured> =>
-      Effect.all({ serial: readSerialText(live), qemu: live.qemu.stderrTail });
-
-    const saveDebugLog = (live: LiveSession, captured: Captured): Effect.Effect<void> =>
-      Effect.gen(function* () {
-        // Drain the log queue so the snapshot includes the stopped line just offered.
-        yield* log.flush;
-        yield* debugLogs.saveDebugLog(live.id, captured).pipe(
-          Effect.catch((error) =>
-            log.error(`debug log save failed: ${detail(error)}`, {
-              location: live.id,
-              agentId: live.agent,
-              cause: error,
+  const recorder =
+    (live: OpenSession): Qmp.Recorder =>
+    (command) =>
+      Effect.map(
+        beginAction(live, command),
+        ({ span, id }) =>
+          (outcome) =>
+            Effect.gen(function* () {
+              yield* settleActionSpan(live, span, outcome.state);
+              yield* actionStore.finishAction(id, outcome).pipe(
+                Effect.tapError((error) =>
+                  log.error(`db: closing action ${String(id)} failed: ${detail(error)}`, {
+                    location: live.id,
+                    agentId: live.agent,
+                    cause: error,
+                  }),
+                ),
+              );
             }),
-          ),
-        );
-      });
-
-    const stop = Effect.fn("Sessions.stop")(function* (
-      live: LiveSession,
-      status: Domain.StopStatus | undefined,
-      reason: string | undefined,
-    ) {
-      const finalStatus = status ?? "aborted";
-      // The sweep may have taken the session between the lookup and here; whoever removes the id
-      // owns its one verdict, and the other caller sees the session as already gone.
-      const owned = yield* Ref.modify(sessions, (map) =>
-        map.has(live.id) ? [true, mapWithout(map, [live.id])] : [false, map],
       );
-      if (!owned) {
-        return yield* Errors.unknownSession(live.id, live.agent);
-      }
-      // Every end but a succeeded stop is a session to explain. The session dir dies with kill; the
-      // serial has to be read while the file still exists. QEMU stderr is the in-memory tail
-      // drained so far. Reading it after kill is racy: closing the scope interrupts the drain
-      // fiber, so a death line written on SIGTERM can be lost.
-      const captured = finalStatus === "succeeded" ? undefined : yield* captureDebugLog(live);
-      // The kill destroys the socket and signals QEMU before it removes the dir, so a cleanup
-      // failure still leaves a dead machine: log it, but close the record.
-      yield* killLogged(live, "stop cleanup failed", live.agent);
-      yield* sessionStore
-        .endSession(live.id, finalStatus, reason ?? null)
-        .pipe(
-          Effect.catch((cause) =>
-            finishLiveSession(live, finalStatus).pipe(
-              Effect.andThen(Effect.fail(internal(cause, live.id, live.agent))),
-            ),
-          ),
-        );
-      // Colour is released in finishLiveSession; log first so the stopped line keeps it.
-      yield* log.info(`stopped; ${finalStatus}${reason === undefined ? "" : `; ${reason}`}`, {
-        location: live.id,
-        agentId: live.agent,
-      });
-      if (captured !== undefined) {
-        yield* saveDebugLog(live, captured);
-      }
-      return yield* finishLiveSession(live, finalStatus);
-    });
 
-    // -------------------------------------------------------------------------
-    // follow
-    // -------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // ending a session
+  // -------------------------------------------------------------------------
 
-    const follow = Effect.fn("Sessions.follow")(function* (id: string) {
-      const running = (yield* Ref.get(sessions)).get(id);
-      const live = running ?? (yield* Ref.get(openSessions)).get(id);
-      if (live === undefined) {
-        const status = Domain.isSessionId(id)
-          ? yield* sessionStore
-              .getSessionStatus(id)
-              .pipe(Effect.mapError((cause) => internal(cause, id)))
-          : Option.none<Domain.SessionStatus>();
-        if (Option.isNone(status)) {
-          return yield* Errors.unknownSession(id);
-        }
-        // A row still downloading or running that this qemu server does not hold was booted by
-        // another server, or by one that died with it.
-        return yield* Errors.Conflict.make({
-          message:
-            status.value === "downloading" || status.value === "running"
-              ? `session "${id}" is not running on this qemu server`
-              : `session "${id}" has already completed (${status.value})`,
-          sessionId: id,
-        });
-      }
-      // Registered here, synchronously after the lookup, so a session that ends before the body
-      // starts streaming still ends this queue rather than leaving it hanging.
-      const queue = yield* Queue.dropping<Domain.FollowEvent, Cause.Done>(FOLLOW_BACKLOG);
-      yield* Ref.update(live.followers, (set) => withItem(set, queue));
-      // finishLiveSession leaves openSessions first and ends the followers last; a registration
-      // that lands between those two steps would otherwise never be ended.
-      if (!(yield* Ref.get(openSessions)).has(live.id)) {
-        Queue.endUnsafe(queue);
-      }
-      yield* log.info("follower attached", { location: id, agentId: live.agent });
-      Queue.offerUnsafe(queue, {
-        type: "session",
-        status: running === undefined ? "pending" : "running",
-      });
-      const intent = yield* Ref.get(live.intent);
-      if (Option.isSome(intent)) {
-        Queue.offerUnsafe(queue, {
-          type: "intent",
-          state: "started",
-          message: intent.value.message,
-        });
-      }
-      const latest = yield* Ref.get(live.image);
-      if (Option.isSome(latest)) {
-        Queue.offerUnsafe(queue, { type: "image", id: latest.value.id, png: latest.value.png });
-      }
-      return Stream.fromQueue(queue).pipe(Stream.ensuring(detach(live, queue)));
-    });
-
-    // -------------------------------------------------------------------------
-    // the sweep
-    // -------------------------------------------------------------------------
-
-    const timeOut = (live: LiveSession): Effect.Effect<void, Errors.DatabaseError> =>
-      Effect.gen(function* () {
-        const captured = yield* captureDebugLog(live);
-        // The kill already destroyed the socket and signalled QEMU, so still close the record.
-        yield* killLogged(live, "timeout cleanup failed", undefined);
-        yield* sessionStore
-          .endSession(live.id, "timed_out", SESSION_TIMEOUT_REASON)
-          .pipe(
-            Effect.andThen(log.info(`timed out; ${SESSION_TIMEOUT_REASON}`, { location: live.id })),
-            Effect.andThen(saveDebugLog(live, captured)),
-            Effect.ensuring(finishLiveSession(live, "timed_out")),
-          );
-      });
-
-    const sweep = Effect.gen(function* () {
-      const now = yield* Clock.currentTimeMillis;
-      const timedOut: Array<LiveSession> = [];
-      for (const live of (yield* Ref.get(sessions)).values()) {
-        if (now - (yield* Ref.get(live.lastCommandAt)) >= SESSION_TIMEOUT_MS) {
-          timedOut.push(live);
-        }
-      }
-      if (timedOut.length === 0) {
+  const finishOpenIntent = (
+    live: OpenSession,
+    state: "completed" | "cancelled",
+  ): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      const intent = yield* Ref.getAndSet(live.intent, Option.none());
+      if (Option.isNone(intent)) {
         return;
       }
-      yield* Ref.update(sessions, (map) =>
-        mapWithout(
-          map,
-          timedOut.map((live) => live.id),
-        ),
-      );
-      const settled = yield* Effect.forEach(
-        timedOut,
-        (live) => Effect.map(Effect.exit(timeOut(live)), (exit) => ({ live, exit })),
-        { concurrency: "unbounded" },
-      );
-      for (const { live, exit } of settled) {
-        if (Exit.isFailure(exit)) {
-          const error = Cause.squash(exit.cause);
-          yield* log.error(`recording timeout failed: ${detail(error)}`, {
-            location: live.id,
-            cause: error,
-          });
-        }
+      yield* Sentry.endIntentSpan(intent.value.span, state);
+      yield* emit(live, { type: "intent", state });
+    });
+
+  const finishLiveSession = (
+    live: OpenSession,
+    status: Domain.SessionEndStatus,
+  ): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      yield* Ref.update(openSessions, (map) => mapWithout(map, [live.id]));
+      yield* log.releaseColor(live.agent);
+      for (const span of yield* Ref.get(live.actionSpans)) {
+        yield* settleActionSpan(live, span, "failed");
+      }
+      yield* finishOpenIntent(live, "cancelled");
+      yield* Sentry.endSessionSpan(live.span, status);
+      yield* emit(live, { type: "session", status });
+      for (const follower of yield* Ref.getAndSet(live.followers, new Set())) {
+        Queue.endUnsafe(follower);
       }
     });
 
-    const guard = yield* Semaphore.make(1);
-    // Uninterruptible so that shutdown's interrupt waits for a tick in flight instead of tearing it.
-    const tick = sweep.pipe(
+  // Leaving the session scope kills QEMU and removes its directory.
+  const kill = (live: OpenSession): Effect.Effect<void> => Scope.close(live.scope, Exit.void);
+
+  const killLogged = (live: OpenSession, prefix: string, agentId: string | undefined) =>
+    kill(live).pipe(
       Effect.catchCause((cause) => {
+        if (Cause.hasInterruptsOnly(cause)) {
+          return Effect.interrupt;
+        }
         const error = Cause.squash(cause);
-        return log.error(`session timeout cleanup failed: ${detail(error)}`, {
-          location: Log.Locations.server,
+        return log.error(`${prefix}: ${detail(error)}`, {
+          ...attribution(live.id, agentId),
           cause: error,
         });
       }),
-      Effect.uninterruptible,
-      guard.withPermitsIfAvailable(1),
-      Effect.asVoid,
-    );
-    const sweeper = yield* tick.pipe(
-      Effect.repeat(Schedule.spaced(SESSION_TIMEOUT_CHECK)),
-      Effect.forkScoped({ startImmediately: true }),
     );
 
-    // -------------------------------------------------------------------------
-    // the drain
-    // -------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // start
+  // -------------------------------------------------------------------------
 
-    const drainOne = (
-      live: LiveSession,
-      reason: string,
-    ): Effect.Effect<void, Errors.DatabaseError> =>
-      Effect.gen(function* () {
-        const status = yield* Ref.make<Domain.SessionEndStatus>("failed");
-        yield* Effect.gen(function* () {
-          const captured = yield* captureDebugLog(live);
-          yield* kill(live);
-          yield* Ref.set(status, "aborted");
-          yield* sessionStore.endSession(live.id, "aborted", reason);
-          yield* log.info(`stopped; aborted; ${reason}`, { location: live.id });
-          yield* saveDebugLog(live, captured);
-        }).pipe(
-          Effect.catchCause((cause) => {
-            const error = Cause.squash(cause);
-            return log
-              .error(`shutdown: ${Render.errorDetail(error)}`, { location: live.id, cause: error })
-              .pipe(Effect.andThen(Effect.failCause(cause)));
-          }),
-          Effect.ensuring(
-            Effect.flatMap(Ref.get(status), (ended) => finishLiveSession(live, ended)),
-          ),
-        );
-      });
+  const launch = (
+    live: OpenSession,
+    body: Contract.StartBody,
+    display: Domain.QemuDisplay,
+    automation: boolean,
+  ): Effect.Effect<
+    Qemu.QemuHandle,
+    Errors.QemuStartError | Errors.IsoError | Errors.DatabaseError
+  > =>
+    Effect.gen(function* () {
+      // Checked before anything else: a wrong disk path must not cost an iso download, and it
+      // must fail ahead of registerAgent, or the agent's one registration is spent on a machine
+      // that never booted.
+      const disk = body.disk;
+      if (disk !== undefined) {
+        yield* fs
+          .stat(disk)
+          .pipe(
+            Effect.mapError(() =>
+              Errors.QemuStartError.make({ message: `qemu: disk not found: ${disk}` }),
+            ),
+          );
+      }
+      const isoPath = yield* iso.getIso(body.iso, { sessionId: live.id, agentId: live.agent });
+      const prepared = yield* qemu.prepare(live.id, disk).pipe(Scope.provide(live.scope));
+      // Register right before boot: the handshake records an action that references agent_runs,
+      // so this must precede start(), but a failed download or disk create before here must not
+      // burn the agent id on its one-registration key.
+      yield* sessionStore.registerAgent(live.agent, live.id);
+      const handle = yield* qemu
+        .start(prepared, { iso: isoPath, display, automation, record: recorder(live) })
+        .pipe(Scope.provide(live.scope));
+      yield* sessionStore.sessionRunning(live.id);
+      return handle;
+    }).pipe(
+      Effect.tapError((error) =>
+        Effect.gen(function* () {
+          // Best effort: the row and the caller's error are what matter once boot has failed.
+          yield* Effect.ignore(kill(live));
+          yield* sessionStore.endSession(live.id, "failed", detail(error)).pipe(
+            Effect.catch((failure) =>
+              log.error(`db: recording a failed start failed too: ${failure.message}`, {
+                location: live.id,
+                agentId: live.agent,
+                cause: failure,
+              }),
+            ),
+          );
+        }),
+      ),
+    );
 
-    const drain = Effect.gen(function* () {
-      // Clear the sweep, then await one in flight: the tick is uninterruptible, so this waits.
-      yield* Fiber.interrupt(sweeper);
-      const draining = [...(yield* Ref.getAndSet(sessions, new Map())).values()];
-      const reason = MutableRef.get(shutdown.reason);
-      yield* log.info(`qemu server: shutting down; stopping ${String(draining.length)} sessions`, {
-        location: Log.Locations.server,
-      });
-      const exits = yield* Effect.forEach(draining, (live) => Effect.exit(drainOne(live, reason)), {
-        concurrency: "unbounded",
-      });
-      MutableRef.set(shutdown.failed, exits.some(Exit.isFailure));
-    });
-    yield* Effect.addFinalizer(() => drain);
-
-    const service: SessionsService = {
-      start,
-      lookup,
-      image,
-      serial,
-      sendKeys,
-      sendMouse,
-      intentStart,
-      intentEnd,
-      stop,
-      follow,
-      stats: Effect.flatMap(Ref.get(sessions), (map) => stats.collect(map.size)),
-      jobs: Ref.get(jobCount),
+  const start = Effect.fn("Sessions.start")(function* (
+    body: Contract.StartBody,
+    display: Domain.QemuDisplay,
+    automation: boolean,
+  ) {
+    const started = yield* Clock.currentTimeMillis;
+    const id: string = crypto.randomUUID();
+    const agent = body.agent;
+    const live: OpenSession = {
+      id,
+      agent,
+      span: yield* Sentry.sessionSpan(id, agent),
+      scope: yield* Scope.make(),
+      lastCommandAt: yield* Ref.make(started),
+      intent: yield* Ref.make(Option.none<Intent>()),
+      image: yield* Ref.make(Option.none<Image>()),
+      followers: yield* Ref.make<ReadonlySet<Follower>>(new Set()),
+      actionSeq: yield* Ref.make(0),
+      actionSpans: yield* Ref.make<ReadonlySet<Tracer.Span>>(new Set()),
     };
-    return service;
+    yield* Ref.update(openSessions, (map) => mapWith(map, id, live));
+    yield* log.acquireColor(agent);
+    const disk = body.disk;
+    yield* sessionStore
+      .insertSession(
+        id,
+        disk === undefined ? { iso: body.iso } : { iso: body.iso, disk },
+        Domain.isIsoUrl(body.iso) ? "downloading" : "running",
+      )
+      .pipe(
+        Effect.catch((cause) =>
+          finishLiveSession(live, "failed").pipe(
+            Effect.andThen(Effect.fail(internal(cause, id, agent))),
+          ),
+        ),
+      );
+    yield* log.info(`starting; iso ${body.iso}${disk === undefined ? "" : `, disk ${disk}`}`, {
+      location: id,
+      agentId: agent,
+    });
+    const handle = yield* launch(live, body, display, automation).pipe(
+      Effect.catch((error) =>
+        finishLiveSession(live, "failed").pipe(
+          Effect.andThen(
+            Effect.fail(
+              Errors.StartFailed.make({
+                message: detail(error),
+                cause: error,
+                sessionId: id,
+                agentId: agent,
+              }),
+            ),
+          ),
+        ),
+      ),
+    );
+    const running: LiveSession = { ...live, qemu: handle };
+    yield* Ref.set(running.lastCommandAt, yield* Clock.currentTimeMillis);
+    yield* Ref.update(sessions, (map) => mapWith(map, id, running));
+    yield* emit(running, { type: "session", status: "running" });
+    yield* log.info(`running; started in ${yield* elapsed(started)}ms`, {
+      location: id,
+      agentId: agent,
+    });
+    return id;
   });
+
+  // -------------------------------------------------------------------------
+  // driving a running session
+  // -------------------------------------------------------------------------
+
+  const lookup = Effect.fn("Sessions.lookup")(function* (id: string, agent: string) {
+    if (id === "") {
+      return yield* Errors.BadRequest.make({ message: "session id is required", agentId: agent });
+    }
+    const live = (yield* Ref.get(sessions)).get(id);
+    if (live === undefined) {
+      return yield* Errors.unknownSession(id, agent);
+    }
+    if (live.agent !== agent) {
+      return yield* Errors.Forbidden.make({
+        message: `agent "${agent}" does not own session "${id}"`,
+        sessionId: id,
+        agentId: agent,
+      });
+    }
+    // A valid request counts as activity even when the exchange it starts later fails.
+    yield* Ref.set(live.lastCommandAt, yield* Clock.currentTimeMillis);
+    return live;
+  });
+
+  const image = Effect.fn("Sessions.image")(function* (live: LiveSession) {
+    const started = yield* Clock.currentTimeMillis;
+    const imageId: string = crypto.randomUUID();
+    const url = Contract.StoredImageUrl(imageId);
+    // The images row must ride the same transaction that closes the action (they are 1:1), so
+    // this recorder only stashes and the method closes.
+    const opened = yield* Ref.make(Option.none<number>());
+    const outcome = yield* Ref.make(Option.none<Domain.QmpExchangeOutcome>());
+    const record: Qmp.Recorder = (command) =>
+      Effect.gen(function* () {
+        const { span, id } = yield* beginAction(live, command);
+        yield* Ref.set(opened, Option.some(id));
+        return (result) =>
+          Effect.gen(function* () {
+            yield* Ref.set(outcome, Option.some(result));
+            yield* settleActionSpan(
+              live,
+              span,
+              result.state,
+              result.state === "completed" ? url : undefined,
+            );
+          });
+      });
+    // Only a failed exchange is closed without an image; a completed one whose image write failed
+    // stays open rather than break the 1:1 promise.
+    const closeFailedExchange = Effect.gen(function* () {
+      const id = yield* Ref.get(opened);
+      const result = yield* Ref.get(outcome);
+      if (Option.isNone(id) || Option.isNone(result) || result.value.state !== "failed") {
+        return;
+      }
+      yield* actionStore.finishAction(id.value, result.value).pipe(
+        Effect.catch((failure) =>
+          log.error(`db: recording a failed screendump failed too: ${failure.message}`, {
+            location: live.id,
+            agentId: live.agent,
+            cause: failure,
+          }),
+        ),
+      );
+    });
+    const work = Effect.gen(function* () {
+      const png = yield* live.qemu.screendump(record).pipe(
+        Effect.mapError((error) =>
+          error._tag === "PlatformError"
+            ? internal(error, live.id, live.agent)
+            : exchangeFailed(error, live),
+        ),
+        Effect.tapError(() => closeFailedExchange),
+      );
+      const id = yield* Ref.get(opened);
+      const result = yield* Ref.get(outcome);
+      if (Option.isNone(id) || Option.isNone(result)) {
+        return yield* Effect.die("screendump completed without recording its exchange");
+      }
+      yield* actionStore
+        .finishAction(id.value, result.value, { id: imageId, data: png })
+        .pipe(Effect.mapError((cause) => internal(cause, live.id, live.agent)));
+      const stored: Image = { id: imageId, png: Buffer.from(png).toString("base64") };
+      yield* Ref.set(live.image, Option.some(stored));
+      yield* emit(live, { type: "image", id: stored.id, png: stored.png });
+      yield* log.info(
+        `image; ${String(png.length)} bytes in ${yield* elapsed(started)}ms; ${url}`,
+        { location: live.id, agentId: live.agent },
+      );
+      return { png, imageId };
+    });
+    return yield* followed(live, "get-image", work);
+  });
+
+  const serial = Effect.fn("Sessions.serial")(function* (live: LiveSession) {
+    const started = yield* Clock.currentTimeMillis;
+    const data = yield* followed(
+      live,
+      "get-serial",
+      fs
+        .readFile(live.qemu.serialPath)
+        .pipe(Effect.mapError((cause) => internal(cause, live.id, live.agent))),
+    );
+    yield* log.info(`serial; ${String(data.length)} bytes in ${yield* elapsed(started)}ms`, {
+      location: live.id,
+      agentId: live.agent,
+    });
+    return data;
+  });
+
+  const sendKeys = Effect.fn("Sessions.sendKeys")(function* (
+    live: LiveSession,
+    keys: string,
+    encoding: string | undefined,
+  ) {
+    const started = yield* Clock.currentTimeMillis;
+    const parsed = Keys.parseKeys(keys, encoding ?? "oligarchy");
+    if (Result.isFailure(parsed)) {
+      return yield* badRequest(parsed.failure.message, live);
+    }
+    const chords = parsed.success;
+    if (chords.length > MAX_KEYS) {
+      return yield* badRequest(`send-keys: at most ${String(MAX_KEYS)} keys per request`, live);
+    }
+    yield* followed(
+      live,
+      "send-keys",
+      live.qemu
+        .sendKeys(chords, recorder(live))
+        .pipe(Effect.mapError((error) => exchangeFailed(error, live))),
+    );
+    return yield* log.info(`sent ${String(chords.length)} chords in ${yield* elapsed(started)}ms`, {
+      location: live.id,
+      agentId: live.agent,
+    });
+  });
+
+  const sendMouse = Effect.fn("Sessions.sendMouse")(function* (
+    live: LiveSession,
+    input: Contract.SendMouseBody,
+  ) {
+    const started = yield* Clock.currentTimeMillis;
+    const { x, y, button, clicks } = input;
+    if (!(x >= 0 && x <= 1 && y >= 0 && y <= 1)) {
+      return yield* badRequest("mouse: x and y must be in 0..1", live);
+    }
+    if (clicks !== undefined && (!Number.isInteger(clicks) || clicks < 1 || clicks > MAX_CLICKS)) {
+      return yield* badRequest(
+        `mouse: clicks must be an integer in 1..${String(MAX_CLICKS)}`,
+        live,
+      );
+    }
+    const gesture = Object.assign(
+      { x, y },
+      button === undefined ? undefined : { button },
+      clicks === undefined ? undefined : { clicks },
+    );
+    yield* followed(
+      live,
+      "send-mouse",
+      live.qemu
+        .sendMouse(gesture, recorder(live))
+        .pipe(Effect.mapError((error) => exchangeFailed(error, live))),
+    );
+    const pulses = clicks === undefined || clicks === 1 ? "" : ` ×${String(clicks)}`;
+    return yield* log.info(
+      `mouse ${String(x)} ${String(y)}${button === undefined ? "" : ` ${button}${pulses}`} in ${yield* elapsed(started)}ms`,
+      { location: live.id, agentId: live.agent },
+    );
+  });
+
+  const intentStart = Effect.fn("Sessions.intentStart")(function* (
+    live: LiveSession,
+    testResultId: string,
+    message: string,
+  ) {
+    if (Option.isSome(yield* Ref.get(live.intent))) {
+      return yield* badRequest(
+        "Cannot start one intent when one's already running. Please end your previous intent.",
+        live,
+      );
+    }
+    const span = yield* Sentry.intentSpan(live.span, live.id, live.agent, testResultId, message);
+    yield* Ref.set(live.intent, Option.some({ span, message }));
+    yield* emit(live, { type: "intent", state: "started", message });
+    return yield* log.info(`intent start; ${message}`, {
+      location: live.id,
+      agentId: live.agent,
+    });
+  });
+
+  const intentEnd = Effect.fn("Sessions.intentEnd")(function* (live: LiveSession) {
+    if (Option.isNone(yield* Ref.get(live.intent))) {
+      return yield* badRequest("no active intent", live);
+    }
+    yield* finishOpenIntent(live, "completed");
+    return yield* log.info("intent end", { location: live.id, agentId: live.agent });
+  });
+
+  const readSerialText = (live: LiveSession): Effect.Effect<string> =>
+    fs.readFile(live.qemu.serialPath).pipe(
+      Effect.map((bytes) => new TextDecoder().decode(bytes)),
+      Effect.catch((error) =>
+        error.reason._tag === "NotFound"
+          ? Effect.succeed("")
+          : log
+              .error(`debug log: serial read failed: ${detail(error)}`, {
+                location: live.id,
+                agentId: live.agent,
+                cause: error,
+              })
+              .pipe(Effect.as("")),
+      ),
+    );
+
+  type Captured = { readonly serial: string; readonly qemu: string };
+
+  // What vanishes with the machine, read before the kill: the console file and QEMU's stderr.
+  const captureDebugLog = (live: LiveSession): Effect.Effect<Captured> =>
+    Effect.all({ serial: readSerialText(live), qemu: live.qemu.stderrTail });
+
+  const saveDebugLog = (live: LiveSession, captured: Captured): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      // Drain the log queue so the snapshot includes the stopped line just offered.
+      yield* log.flush;
+      yield* debugLogs.saveDebugLog(live.id, captured).pipe(
+        Effect.catch((error) =>
+          log.error(`debug log save failed: ${detail(error)}`, {
+            location: live.id,
+            agentId: live.agent,
+            cause: error,
+          }),
+        ),
+      );
+    });
+
+  const stop = Effect.fn("Sessions.stop")(function* (
+    live: LiveSession,
+    status: Domain.StopStatus | undefined,
+    reason: string | undefined,
+  ) {
+    const finalStatus = status ?? "aborted";
+    // The sweep may have taken the session between the lookup and here; whoever removes the id
+    // owns its one verdict, and the other caller sees the session as already gone.
+    const owned = yield* Ref.modify(sessions, (map) =>
+      map.has(live.id) ? [true, mapWithout(map, [live.id])] : [false, map],
+    );
+    if (!owned) {
+      return yield* Errors.unknownSession(live.id, live.agent);
+    }
+    // Every end but a succeeded stop is a session to explain. The session dir dies with kill; the
+    // serial has to be read while the file still exists. QEMU stderr is the in-memory tail
+    // drained so far. Reading it after kill is racy: closing the scope interrupts the drain
+    // fiber, so a death line written on SIGTERM can be lost.
+    const captured = finalStatus === "succeeded" ? undefined : yield* captureDebugLog(live);
+    // The kill destroys the socket and signals QEMU before it removes the dir, so a cleanup
+    // failure still leaves a dead machine: log it, but close the record.
+    yield* killLogged(live, "stop cleanup failed", live.agent);
+    yield* sessionStore
+      .endSession(live.id, finalStatus, reason ?? null)
+      .pipe(
+        Effect.catch((cause) =>
+          finishLiveSession(live, finalStatus).pipe(
+            Effect.andThen(Effect.fail(internal(cause, live.id, live.agent))),
+          ),
+        ),
+      );
+    // Colour is released in finishLiveSession; log first so the stopped line keeps it.
+    yield* log.info(`stopped; ${finalStatus}${reason === undefined ? "" : `; ${reason}`}`, {
+      location: live.id,
+      agentId: live.agent,
+    });
+    if (captured !== undefined) {
+      yield* saveDebugLog(live, captured);
+    }
+    return yield* finishLiveSession(live, finalStatus);
+  });
+
+  // -------------------------------------------------------------------------
+  // follow
+  // -------------------------------------------------------------------------
+
+  const follow = Effect.fn("Sessions.follow")(function* (id: string) {
+    const running = (yield* Ref.get(sessions)).get(id);
+    const live = running ?? (yield* Ref.get(openSessions)).get(id);
+    if (live === undefined) {
+      const status = Domain.isSessionId(id)
+        ? yield* sessionStore
+            .getSessionStatus(id)
+            .pipe(Effect.mapError((cause) => internal(cause, id)))
+        : Option.none<Domain.SessionStatus>();
+      if (Option.isNone(status)) {
+        return yield* Errors.unknownSession(id);
+      }
+      // A row still downloading or running that this qemu server does not hold was booted by
+      // another server, or by one that died with it.
+      return yield* Errors.Conflict.make({
+        message:
+          status.value === "downloading" || status.value === "running"
+            ? `session "${id}" is not running on this qemu server`
+            : `session "${id}" has already completed (${status.value})`,
+        sessionId: id,
+      });
+    }
+    // Registered here, synchronously after the lookup, so a session that ends before the body
+    // starts streaming still ends this queue rather than leaving it hanging.
+    const queue = yield* Queue.dropping<Domain.FollowEvent, Cause.Done>(FOLLOW_BACKLOG);
+    yield* Ref.update(live.followers, (set) => withItem(set, queue));
+    // finishLiveSession leaves openSessions first and ends the followers last; a registration
+    // that lands between those two steps would otherwise never be ended.
+    if (!(yield* Ref.get(openSessions)).has(live.id)) {
+      Queue.endUnsafe(queue);
+    }
+    yield* log.info("follower attached", { location: id, agentId: live.agent });
+    Queue.offerUnsafe(queue, {
+      type: "session",
+      status: running === undefined ? "pending" : "running",
+    });
+    const intent = yield* Ref.get(live.intent);
+    if (Option.isSome(intent)) {
+      Queue.offerUnsafe(queue, { type: "intent", state: "started", message: intent.value.message });
+    }
+    const latest = yield* Ref.get(live.image);
+    if (Option.isSome(latest)) {
+      Queue.offerUnsafe(queue, { type: "image", id: latest.value.id, png: latest.value.png });
+    }
+    return Stream.fromQueue(queue).pipe(Stream.ensuring(detach(live, queue)));
+  });
+
+  // -------------------------------------------------------------------------
+  // the sweep
+  // -------------------------------------------------------------------------
+
+  const timeOut = (live: LiveSession): Effect.Effect<void, Errors.DatabaseError> =>
+    Effect.gen(function* () {
+      const captured = yield* captureDebugLog(live);
+      // The kill already destroyed the socket and signalled QEMU, so still close the record.
+      yield* killLogged(live, "timeout cleanup failed", undefined);
+      yield* sessionStore
+        .endSession(live.id, "timed_out", SESSION_TIMEOUT_REASON)
+        .pipe(
+          Effect.andThen(log.info(`timed out; ${SESSION_TIMEOUT_REASON}`, { location: live.id })),
+          Effect.andThen(saveDebugLog(live, captured)),
+          Effect.ensuring(finishLiveSession(live, "timed_out")),
+        );
+    });
+
+  const sweep = Effect.gen(function* () {
+    const now = yield* Clock.currentTimeMillis;
+    const timedOut: Array<LiveSession> = [];
+    for (const live of (yield* Ref.get(sessions)).values()) {
+      if (now - (yield* Ref.get(live.lastCommandAt)) >= SESSION_TIMEOUT_MS) {
+        timedOut.push(live);
+      }
+    }
+    if (timedOut.length === 0) {
+      return;
+    }
+    yield* Ref.update(sessions, (map) =>
+      mapWithout(
+        map,
+        timedOut.map((live) => live.id),
+      ),
+    );
+    const settled = yield* Effect.forEach(
+      timedOut,
+      (live) => Effect.map(Effect.exit(timeOut(live)), (exit) => ({ live, exit })),
+      { concurrency: "unbounded" },
+    );
+    for (const { live, exit } of settled) {
+      if (Exit.isFailure(exit)) {
+        const error = Cause.squash(exit.cause);
+        yield* log.error(`recording timeout failed: ${detail(error)}`, {
+          location: live.id,
+          cause: error,
+        });
+      }
+    }
+  });
+
+  const guard = yield* Semaphore.make(1);
+  // Uninterruptible so that shutdown's interrupt waits for a tick in flight instead of tearing it.
+  const tick = sweep.pipe(
+    Effect.catchCause((cause) => {
+      const error = Cause.squash(cause);
+      return log.error(`session timeout cleanup failed: ${detail(error)}`, {
+        location: Log.Locations.server,
+        cause: error,
+      });
+    }),
+    Effect.uninterruptible,
+    guard.withPermitsIfAvailable(1),
+    Effect.asVoid,
+  );
+  const sweeper = yield* tick.pipe(
+    Effect.repeat(Schedule.spaced(SESSION_TIMEOUT_CHECK)),
+    Effect.forkScoped({ startImmediately: true }),
+  );
+
+  // -------------------------------------------------------------------------
+  // the drain
+  // -------------------------------------------------------------------------
+
+  const drainOne = (live: LiveSession, reason: string): Effect.Effect<void, Errors.DatabaseError> =>
+    Effect.gen(function* () {
+      const status = yield* Ref.make<Domain.SessionEndStatus>("failed");
+      yield* Effect.gen(function* () {
+        const captured = yield* captureDebugLog(live);
+        yield* kill(live);
+        yield* Ref.set(status, "aborted");
+        yield* sessionStore.endSession(live.id, "aborted", reason);
+        yield* log.info(`stopped; aborted; ${reason}`, { location: live.id });
+        yield* saveDebugLog(live, captured);
+      }).pipe(
+        Effect.catchCause((cause) => {
+          const error = Cause.squash(cause);
+          return log
+            .error(`shutdown: ${Render.errorDetail(error)}`, { location: live.id, cause: error })
+            .pipe(Effect.andThen(Effect.failCause(cause)));
+        }),
+        Effect.ensuring(Effect.flatMap(Ref.get(status), (ended) => finishLiveSession(live, ended))),
+      );
+    });
+
+  const drain = Effect.gen(function* () {
+    // Clear the sweep, then await one in flight: the tick is uninterruptible, so this waits.
+    yield* Fiber.interrupt(sweeper);
+    const draining = [...(yield* Ref.getAndSet(sessions, new Map())).values()];
+    const reason = MutableRef.get(shutdown.reason);
+    yield* log.info(`qemu server: shutting down; stopping ${String(draining.length)} sessions`, {
+      location: Log.Locations.server,
+    });
+    const exits = yield* Effect.forEach(draining, (live) => Effect.exit(drainOne(live, reason)), {
+      concurrency: "unbounded",
+    });
+    MutableRef.set(shutdown.failed, exits.some(Exit.isFailure));
+  });
+  yield* Effect.addFinalizer(() => drain);
+
+  const service: SessionsService = {
+    start,
+    lookup,
+    image,
+    serial,
+    sendKeys,
+    sendMouse,
+    intentStart,
+    intentEnd,
+    stop,
+    follow,
+    stats: Effect.flatMap(Ref.get(sessions), (map) => stats.collect(map.size)),
+  };
+  return service;
+});
 
 export class Sessions extends Context.Service<Sessions>()("@oligarchy/qemu-server/Sessions", {
   make,
 }) {
-  static readonly layer = (
-    maxJobs: number,
-  ): Layer.Layer<
+  static readonly layer: Layer.Layer<
     Sessions,
     never,
     | Qemu.Qemu
@@ -983,5 +955,5 @@ export class Sessions extends Context.Service<Sessions>()("@oligarchy/qemu-serve
     | DebugLogs.DebugLogStore
     | Log.Log
     | FileSystem.FileSystem
-  > => Layer.effect(this)(this.make(maxJobs));
+  > = Layer.effect(this)(this.make);
 }
