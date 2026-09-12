@@ -10,6 +10,7 @@ const URL = "http://127.0.0.1:55333";
 const TOKEN = "test-token";
 const PROMPT = "drive OLI-42";
 const TICKET = "OLI-42";
+const MODEL = "opencode/muse-spark-1.3-contributor-free";
 
 const token = Layer.succeed(AutomationClient.OligarchyToken)(
   AutomationClient.OligarchyToken.of(Redacted.make(TOKEN)),
@@ -19,7 +20,9 @@ const reserve = (http: Layer.Layer<HttpClient.HttpClient>) =>
   AutomationClient.reserve(URL, TICKET).pipe(Effect.provide(Layer.mergeAll(token, http)));
 
 const run = (http: Layer.Layer<HttpClient.HttpClient>) =>
-  AutomationClient.run(URL, PROMPT, TICKET).pipe(Effect.provide(Layer.mergeAll(token, http)));
+  AutomationClient.run(URL, PROMPT, TICKET, MODEL).pipe(
+    Effect.provide(Layer.mergeAll(token, http)),
+  );
 
 const abort = (http: Layer.Layer<HttpClient.HttpClient>) =>
   AutomationClient.abort(URL, TICKET).pipe(Effect.provide(Layer.mergeAll(token, http)));
@@ -55,19 +58,22 @@ describe("automation client POST /reserve unhappy path", () => {
 });
 
 describe("automation client POST /run happy path", () => {
-  it.effect("posts the prompt with the bearer token and succeeds on 200", () =>
-    Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
-      yield* run(recorder.layer);
-      expect(recorder.requests).toHaveLength(1);
-      expect(recorder.requests[0]?.method).toBe("POST");
-      expect(recorder.requests[0]?.url).toBe(`${URL}/run`);
-      expect(recorder.requests[0]?.headers.authorization).toBe(`Bearer ${TOKEN}`);
-      expect(JSON.parse(recorder.requests[0]?.body ?? "")).toEqual({
-        prompt: PROMPT,
-        ticket: TICKET,
-      });
-    }),
+  it.effect(
+    "posts the prompt, the ticket and the model with the bearer token and succeeds on 200",
+    () =>
+      Effect.gen(function* () {
+        const recorder = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+        yield* run(recorder.layer);
+        expect(recorder.requests).toHaveLength(1);
+        expect(recorder.requests[0]?.method).toBe("POST");
+        expect(recorder.requests[0]?.url).toBe(`${URL}/run`);
+        expect(recorder.requests[0]?.headers.authorization).toBe(`Bearer ${TOKEN}`);
+        expect(JSON.parse(recorder.requests[0]?.body ?? "")).toEqual({
+          prompt: PROMPT,
+          ticket: TICKET,
+          model: MODEL,
+        });
+      }),
   );
 });
 

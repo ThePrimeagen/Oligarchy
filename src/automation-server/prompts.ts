@@ -1,9 +1,6 @@
 import { Array as Arr, Effect, FileSystem, Option, Result } from "effect";
 import * as Errors from "../shared/errors.ts";
 
-// The OpenCode model id a driving or diagnosing agent is told it is running as.
-export const MODEL = "opencode/muse-spark-1-3-contributor-free";
-
 const besideModule = (relative: string): string =>
   decodeURIComponent(new URL(relative, import.meta.url).pathname);
 
@@ -65,14 +62,19 @@ const render = Effect.fn("Prompts.render")(function* (
   return yield* Effect.fromResult(fill(template, text, known));
 });
 
-export const drive = Effect.fn("Prompts.drive")(function* (ticket: string) {
-  return yield* render("driving-agent.html", { LINEAR_TICKET: ticket, MODEL });
+// `model` is the OpenCode model the agent runs as, and so the one it is told to record.
+export const drive = Effect.fn("Prompts.drive")(function* (ticket: string, model: string) {
+  return yield* render("driving-agent.html", { LINEAR_TICKET: ticket, MODEL: model });
 });
 
-export const diagnose = Effect.fn("Prompts.diagnose")(function* (ticket: string, resultId: string) {
+export const diagnose = Effect.fn("Prompts.diagnose")(function* (
+  ticket: string,
+  resultId: string,
+  model: string,
+) {
   return yield* render("diagnosing-agent.html", {
     LINEAR_TICKET: ticket,
     RESULT_ID: resultId,
-    MODEL,
+    MODEL: model,
   });
 });

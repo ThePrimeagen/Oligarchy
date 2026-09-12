@@ -8,3 +8,5 @@
 /.wrangler
 /v1/node_modules
 /tmp/
+/automation-super-run-logs
+/SCRATCH.md

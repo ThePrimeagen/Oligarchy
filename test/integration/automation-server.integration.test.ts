@@ -194,6 +194,17 @@ const seedResult = async (linearId: string): Promise<string> => {
   }
 };
 
+const removeJobs = async (resultId: string) => {
+  const client = new Client({ connectionString: Postgres.getDbUrl() });
+  await client.connect();
+  try {
+    const db = drizzle({ client, schema: DbSchema });
+    await db.delete(DbSchema.automationJobs).where(eq(DbSchema.automationJobs.resultId, resultId));
+  } finally {
+    await client.end();
+  }
+};
+
 const jobsFor = async (resultId: string) => {
   const client = new Client({ connectionString: Postgres.getDbUrl() });
   await client.connect();
@@ -209,13 +220,15 @@ const jobsFor = async (resultId: string) => {
 };
 
 describe("automation server startup refusals", () => {
-  it.live("--help exits 0 and lists --port alone", () =>
+  it.live("--help exits 0 and lists --port and --model", () =>
     Effect.promise(async () => {
       const process = spawnAutomationServer(["--help"]);
       const { code } = await process.exited;
       expect(code).toBe(0);
       expect(process.stdout()).toContain("automation-server");
       expect(process.stdout()).toContain("--port");
+      expect(process.stdout()).toContain("--model");
+      expect(process.stdout()).not.toContain("--jobs");
       expect(process.stdout()).not.toContain("--diagnostics-port");
       expect(process.stdout()).not.toContain("--display");
     }),
@@ -227,6 +240,16 @@ describe("automation server startup refusals", () => {
       const { code } = await process.exited;
       expect(code).toBe(1);
       expect(process.stderr()).toContain("forty");
+      expect(process.stdout()).not.toContain("listening");
+    }),
+  );
+
+  it.live("a --model without a provider exits 1 with the rule", () =>
+    Effect.promise(async () => {
+      const process = spawnAutomationServer(["--model", "muse-spark-1.3"]);
+      const { code } = await process.exited;
+      expect(code).toBe(1);
+      expect(process.stderr()).toContain("model must be provider/model");
       expect(process.stdout()).not.toContain("listening");
     }),
   );
@@ -307,10 +330,12 @@ describeServing("automation server serving", () => {
     const port = await freePort();
     const process = spawnAutomationServer(["--port", String(port)]);
     const record = join(process.cwd, "automation-logs");
+    const linearId = `OLI-${randomUUID().slice(0, 8)}`;
+    let resultId: string | undefined;
     try {
       await process.waitFor(/automation server listening/);
       expect(lines(process.stdout())).toContain(
-        `[automation] automation: automation server listening on 127.0.0.1:${String(port)}`,
+        `[automation] automation: automation server listening on 127.0.0.1:${String(port)}; running agents as opencode/muse-spark-1.3-contributor-free`,
       );
       expect(existsSync(record)).toBe(false);
 
@@ -348,8 +373,7 @@ describeServing("automation server serving", () => {
       expect(await signed.json()).toEqual({ ok: "true" });
       expect(existsSync(record)).toBe(false);
 
-      const linearId = `OLI-${randomUUID().slice(0, 8)}`;
-      const resultId = await seedResult(linearId);
+      resultId = await seedResult(linearId);
       const driveBody = JSON.stringify({
         action: "update",
         type: "Issue",
@@ -361,7 +385,7 @@ describeServing("automation server serving", () => {
             type: "unstarted",
           },
         },
-        updatedFrom: { state: { name: "Backlog" } },
+        updatedFrom: { stateId: "a4134e28-ad3b-4e3f-b7d2-4fb9132b95e0" },
       });
       const drive = await request(
         port,
@@ -387,7 +411,7 @@ describeServing("automation server serving", () => {
             type: "started",
           },
         },
-        updatedFrom: { state: { name: "In Progress" } },
+        updatedFrom: { stateId: "2a566723-82d0-40ef-ac2a-55b1811da198" },
       });
       const diagnose = await request(
         port,
@@ -417,6 +441,11 @@ describeServing("automation server serving", () => {
     } finally {
       // A failed expectation must not leave the process listening past the test.
       process.child.kill(signal);
+      // The jobs this test queued stay pending in the shared database and would be the oldest rows
+      // the dispatch tests' servers claim first.
+      if (resultId !== undefined) {
+        await removeJobs(resultId);
+      }
     }
     const { code } = await process.exited;
     expect(code, process.stdout()).toBe(0);
@@ -424,9 +453,11 @@ describeServing("automation server serving", () => {
     expect(output).toContain("[automation] automation: error: POST /linear failed: unauthorized");
     expect(output).toContain("[automation] automation: linear webhook recorded");
     expect(output).toContain(
-      "[OLI-1063] automation: linear webhook queued drive; Automation Needed",
+      `[${linearId}] automation: linear webhook queued drive; Automation Needed`,
     );
-    expect(output).toContain("[OLI-1063] automation: linear webhook queued diagnose; Needs Review");
+    expect(output).toContain(
+      `[${linearId}] automation: linear webhook queued diagnose; Needs Review`,
+    );
     expect(output.some((line) => line.includes("/automate"))).toBe(false);
     expect(output.some((line) => line.includes("/start"))).toBe(false);
     expect(process.stderr()).toBe("");
@@ -477,6 +508,21 @@ const removeServer = async (url: string) => {
   }
 };
 
+// What the driver does before opencode exits: ./ctrl test-results closes the result.
+const closeResult = async (resultId: string) => {
+  const client = new Client({ connectionString: Postgres.getDbUrl() });
+  await client.connect();
+  try {
+    const db = drizzle({ client, schema: DbSchema });
+    await db
+      .update(DbSchema.testResults)
+      .set({ status: "passed", finishedAt: new Date() })
+      .where(eq(DbSchema.testResults.id, resultId));
+  } finally {
+    await client.end();
+  }
+};
+
 const seedJob = async (resultId: string, action: "drive" | "diagnose") => {
   const client = new Client({ connectionString: Postgres.getDbUrl() });
   await client.connect();
@@ -520,30 +566,89 @@ const serveClient = (
     });
   });
 
+const MODEL = "openrouter/deepseek/deepseek-v4.1-flash";
+
+const readBody = (req: IncomingMessage): Promise<string> =>
+  new Promise((resolve) => {
+    let text = "";
+    req.setEncoding("utf8");
+    req.on("data", (chunk: string) => {
+      text += chunk;
+    });
+    req.on("end", () => resolve(text));
+  });
+
 describeServing("automation server dispatch", () => {
-  it.live("a live client that answers 200 marks the job succeeded", () =>
-    Effect.promise(async () => {
-      const client = await serveClient((_req, res) => {
-        res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ok: "true" }));
-      });
-      const linearId = `OLI-${randomUUID().slice(0, 8)}`;
-      const resultId = await seedResult(linearId);
-      await seedJob(resultId, "drive");
-      await seedLiveClient(client.url);
-      const port = await freePort();
-      const process = spawnAutomationServer(["--port", String(port)]);
-      try {
-        await process.waitFor(/automation server listening/);
-        const job = await waitForJob(resultId, "succeeded");
-        expect(job).toMatchObject({ action: "drive", status: "succeeded", reason: null });
-      } finally {
-        process.child.kill("SIGTERM");
-        await process.exited;
-        await removeServer(client.url);
-        await client.close();
-      }
-    }),
+  it.live(
+    "a live client that closes the result and answers 200 marks the drive succeeded; the body carries --model",
+    () =>
+      Effect.promise(async () => {
+        const linearId = `OLI-${randomUUID().slice(0, 8)}`;
+        const resultId = await seedResult(linearId);
+        const bodies: Array<string> = [];
+        const client = await serveClient((req, res) => {
+          void readBody(req).then(async (body) => {
+            // /reserve is answered ok and forgotten; the run's body is what the test reads.
+            if (req.url === "/run") {
+              bodies.push(body);
+              await closeResult(resultId);
+            }
+            res.writeHead(200, { "content-type": "application/json" });
+            res.end(JSON.stringify({ ok: "true" }));
+          });
+        });
+        await seedJob(resultId, "drive");
+        await seedLiveClient(client.url);
+        const port = await freePort();
+        const process = spawnAutomationServer(["--port", String(port), "--model", MODEL]);
+        try {
+          await process.waitFor(/automation server listening/);
+          const job = await waitForJob(resultId, "succeeded");
+          expect(job).toMatchObject({ action: "drive", status: "succeeded", reason: null });
+          expect(bodies).toHaveLength(1);
+          const body: { prompt: string; model: string } = JSON.parse(bodies[0] ?? "{}");
+          expect(body.model).toBe(MODEL);
+          expect(body.prompt).toContain(linearId);
+          expect(body.prompt).toContain(MODEL);
+          expect(process.stdout()).toContain(`dispatching drive; ${client.url}; ${MODEL}`);
+        } finally {
+          process.child.kill("SIGTERM");
+          await process.exited;
+          await removeServer(client.url);
+          await client.close();
+        }
+      }),
+  );
+
+  it.live(
+    "a live client that answers 200 with the result still pending marks the drive failed",
+    () =>
+      Effect.promise(async () => {
+        const client = await serveClient((_req, res) => {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: "true" }));
+        });
+        const linearId = `OLI-${randomUUID().slice(0, 8)}`;
+        const resultId = await seedResult(linearId);
+        await seedJob(resultId, "drive");
+        await seedLiveClient(client.url);
+        const port = await freePort();
+        const process = spawnAutomationServer(["--port", String(port)]);
+        try {
+          await process.waitFor(/automation server listening/);
+          const job = await waitForJob(resultId, "failed");
+          expect(job).toMatchObject({
+            action: "drive",
+            status: "failed",
+            reason: `driver exited; result ${resultId} is pending`,
+          });
+        } finally {
+          process.child.kill("SIGTERM");
+          await process.exited;
+          await removeServer(client.url);
+          await client.close();
+        }
+      }),
   );
 
   it.live("a live client that answers 500 marks the job failed", () =>

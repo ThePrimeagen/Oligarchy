@@ -10,6 +10,7 @@ import * as FakeSpawner from "../support/fake-spawner.ts";
 
 const TICKET = "OLI-42";
 const OTHER = "OLI-99";
+const MODEL = "opencode/muse-spark-1.3-contributor-free";
 // Room for the two runs the tests above capacity start at once; the capacity tests pass 1.
 const MAX_JOBS = 2;
 
@@ -25,24 +26,118 @@ const layer = (
 ) =>
   Sessions.Sessions.layer(maxJobs, reserveQemu, relinquishQemu).pipe(Layer.provide(spawner.layer));
 
-const reservedRun = (ticket: string, prompt: string) =>
+const reservedRun = (ticket: string, prompt: string, model = MODEL) =>
   Effect.gen(function* () {
     const sessions = yield* Sessions.Sessions;
     yield* sessions.reserve(ticket);
-    return yield* sessions.run(ticket, prompt);
+    return yield* sessions.run(ticket, prompt, model);
   });
 
 describe("Sessions.run happy path", () => {
-  it.effect("launches opencode with the prompt and succeeds when it exits 0", () => {
-    const spawner = FakeSpawner.fakeSpawner(() => ({
-      exitCode: 0,
-      stdout: "the written result",
-    }));
+  it.effect(
+    "launches opencode run --auto with the model and the prompt and succeeds when it exits 0",
+    () => {
+      const spawner = FakeSpawner.fakeSpawner(() => ({
+        exitCode: 0,
+        stdout: "the written result",
+      }));
+      return Effect.gen(function* () {
+        yield* reservedRun(TICKET, "do the work");
+        expect(spawner.spawned).toMatchObject([
+          { command: OpenCode.BIN, args: ["run", "--auto", "--model", MODEL, "--", "do the work"] },
+        ]);
+      }).pipe(Effect.provide(layer(spawner)));
+    },
+  );
+
+  // --auto answers only the root session's asks; a subagent the driver spawns asks into the void
+  // (anomalyco/opencode#36868). The two permissions that default to ask are allowed outright.
+  it.effect(
+    "hands opencode a config that allows the ask-class permissions for every session",
+    () => {
+      const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
+      return Effect.gen(function* () {
+        yield* reservedRun(TICKET, "do the work");
+        const content = spawner.spawned[0]?.options.env?.OPENCODE_CONFIG_CONTENT;
+        expect(content).toBeDefined();
+        expect(JSON.parse(content ?? "")).toEqual({
+          permission: { external_directory: "allow", doom_loop: "allow" },
+          // A model stream that goes silent aborts instead of holding the run to its ceiling.
+          provider: { openrouter: { options: { headerTimeout: 180_000, chunkTimeout: 180_000 } } },
+        });
+        expect(spawner.spawned[0]?.options.extendEnv).toBe(true);
+      }).pipe(Effect.provide(layer(spawner)));
+    },
+  );
+
+  it.effect("passes a dashed prompt after -- so opencode does not treat it as a flag", () => {
+    const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
     return Effect.gen(function* () {
-      yield* reservedRun(TICKET, "do the work");
+      yield* reservedRun(TICKET, "--help");
       expect(spawner.spawned).toMatchObject([
-        { command: OpenCode.BIN, args: ["run", "--", "do the work"] },
+        { command: OpenCode.BIN, args: ["run", "--auto", "--model", MODEL, "--", "--help"] },
       ]);
+    }).pipe(Effect.provide(layer(spawner)));
+  });
+
+  it.effect("the model given is the model passed, whichever provider it names", () => {
+    const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
+    const deepseek = "openrouter/deepseek/deepseek-v4.1-flash";
+    return Effect.gen(function* () {
+      yield* reservedRun(TICKET, "do the work", deepseek);
+      expect(spawner.spawned[0]?.args).toEqual([
+        "run",
+        "--auto",
+        "--model",
+        deepseek,
+        "--",
+        "do the work",
+      ]);
+    }).pipe(Effect.provide(layer(spawner)));
+  });
+});
+
+describe("Sessions.run ceiling", () => {
+  it.effect(
+    "a run that outlives the ceiling is killed, fails as RunFailed naming it, and frees its slot",
+    () => {
+      const spawner = FakeSpawner.fakeSpawner(() => ({}));
+      return Effect.gen(function* () {
+        const sessions = yield* Sessions.Sessions;
+        yield* sessions.reserve(TICKET);
+        const running = yield* Effect.forkChild(
+          Effect.flip(sessions.run(TICKET, "do the work", MODEL)),
+        );
+        for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
+          yield* Effect.yieldNow;
+        }
+        yield* TestClock.adjust(OpenCode.CEILING);
+        const error = yield* Fiber.join(running);
+        expect(error).toMatchObject({
+          _tag: "RunFailed",
+          message: `opencode run exceeded ${OpenCode.CEILING}`,
+        });
+        expect(spawner.spawned[0]?.isReleased()).toBe(true);
+        expect(spawner.spawned[0]?.kills).toEqual(["SIGTERM"]);
+        expect((yield* Effect.flip(sessions.abort(TICKET)))._tag).toBe("UnknownSession");
+        yield* sessions.reserve(OTHER);
+      }).pipe(Effect.provide(layer(spawner, 1)));
+    },
+  );
+
+  it.effect("a run that exits a second before the ceiling succeeds", () => {
+    const spawner = FakeSpawner.fakeSpawner(() => ({}));
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions.Sessions;
+      yield* sessions.reserve(TICKET);
+      const running = yield* Effect.forkChild(sessions.run(TICKET, "do the work", MODEL));
+      for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
+        yield* Effect.yieldNow;
+      }
+      yield* TestClock.adjust("1799 seconds");
+      yield* spawner.spawned[0]?.exit(0) ?? Effect.void;
+      yield* Fiber.join(running);
+      expect(spawner.spawned[0]?.kills).toEqual([]);
     }).pipe(Effect.provide(layer(spawner)));
   });
 });
@@ -55,7 +150,7 @@ describe("Sessions.run unhappy path", () => {
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
       yield* sessions.reserve(TICKET);
-      const error = yield* Effect.flip(sessions.run(TICKET, "do the work"));
+      const error = yield* Effect.flip(sessions.run(TICKET, "do the work", MODEL));
       expect(error._tag).toBe("RunFailed");
       expect(error.message).toBe("spawn opencode ENOENT");
     }).pipe(Effect.provide(layer(spawner)));
@@ -69,7 +164,7 @@ describe("Sessions.run unhappy path", () => {
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
       yield* sessions.reserve(TICKET);
-      const error = yield* Effect.flip(sessions.run(TICKET, "do the work"));
+      const error = yield* Effect.flip(sessions.run(TICKET, "do the work", MODEL));
       expect(error._tag).toBe("RunFailed");
       expect(error.message).toBe("out of token credits");
     }).pipe(Effect.provide(layer(spawner)));
@@ -82,7 +177,7 @@ describe("Sessions.abort happy path", () => {
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
       yield* sessions.reserve(TICKET);
-      const running = yield* Effect.forkChild(sessions.run(TICKET, "do the work"));
+      const running = yield* Effect.forkChild(sessions.run(TICKET, "do the work", MODEL));
       for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
         yield* Effect.yieldNow;
       }
@@ -104,8 +199,8 @@ describe("Sessions.abort happy path", () => {
       const sessions = yield* Sessions.Sessions;
       yield* sessions.reserve(TICKET);
       yield* sessions.reserve(OTHER);
-      const first = yield* Effect.forkChild(sessions.run(TICKET, "first"));
-      const second = yield* Effect.forkChild(sessions.run(OTHER, "second"));
+      const first = yield* Effect.forkChild(sessions.run(TICKET, "first", MODEL));
+      const second = yield* Effect.forkChild(sessions.run(OTHER, "second", MODEL));
       for (let i = 0; i < 100 && spawner.spawned.length < 2; i++) {
         yield* Effect.yieldNow;
       }
@@ -125,7 +220,7 @@ describe("Sessions.abort happy path", () => {
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
       yield* sessions.reserve(TICKET);
-      const running = yield* Effect.forkChild(sessions.run(TICKET, "do the work"));
+      const running = yield* Effect.forkChild(sessions.run(TICKET, "do the work", MODEL));
       for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
         yield* Effect.yieldNow;
       }
@@ -151,7 +246,7 @@ describe("Sessions.abort happy path", () => {
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
       yield* sessions.reserve(TICKET);
-      const running = yield* Effect.forkChild(sessions.run(TICKET, "do the work"));
+      const running = yield* Effect.forkChild(sessions.run(TICKET, "do the work", MODEL));
       for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
         yield* Effect.yieldNow;
       }
@@ -196,7 +291,7 @@ describe("Sessions.abort unhappy path", () => {
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
       yield* sessions.reserve(TICKET);
-      const running = yield* Effect.forkChild(sessions.run(TICKET, "do the work"));
+      const running = yield* Effect.forkChild(sessions.run(TICKET, "do the work", MODEL));
       for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
         yield* Effect.yieldNow;
       }
@@ -218,12 +313,12 @@ describe("Sessions.abort unhappy path", () => {
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
       yield* sessions.reserve(TICKET);
-      const first = yield* Effect.forkChild(sessions.run(TICKET, "first"));
+      const first = yield* Effect.forkChild(sessions.run(TICKET, "first", MODEL));
       for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
         yield* Effect.yieldNow;
       }
       yield* sessions.reserve(TICKET);
-      const second = yield* Effect.forkChild(sessions.run(TICKET, "second"));
+      const second = yield* Effect.forkChild(sessions.run(TICKET, "second", MODEL));
       for (let i = 0; i < 100 && spawner.spawned.length < 2; i++) {
         yield* Effect.yieldNow;
       }
@@ -272,13 +367,13 @@ describe("capacity", () => {
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
       yield* sessions.reserve(TICKET);
-      const running = yield* Effect.forkChild(sessions.run(TICKET, "first"));
+      const running = yield* Effect.forkChild(sessions.run(TICKET, "first", MODEL));
       for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
         yield* Effect.yieldNow;
       }
       expect(spawner.spawned).toHaveLength(1);
       expect((yield* Effect.flip(sessions.reserve(OTHER)))._tag).toBe("AtCapacity");
-      expect((yield* Effect.flip(sessions.run(OTHER, "second")))._tag).toBe("BadRequest");
+      expect((yield* Effect.flip(sessions.run(OTHER, "second", MODEL)))._tag).toBe("BadRequest");
       yield* spawner.spawned[0]?.exit(0) ?? Effect.void;
       yield* Fiber.join(running);
     }).pipe(Effect.provide(layer(spawner, 1)));
@@ -288,7 +383,7 @@ describe("capacity", () => {
     const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
-      const error = yield* Effect.flip(sessions.run(TICKET, "first"));
+      const error = yield* Effect.flip(sessions.run(TICKET, "first", MODEL));
       expect(error).toMatchObject({
         _tag: "BadRequest",
         message: "no reservation",
@@ -306,7 +401,7 @@ describe("capacity", () => {
       yield* reservedRun(TICKET, "first");
       expect((yield* Effect.flip(reservedRun(OTHER, "second")))._tag).toBe("RunFailed");
       yield* reservedRun("OLI-7", "third");
-      expect(spawner.spawned.map((spawned) => spawned.args[2])).toEqual([
+      expect(spawner.spawned.map((spawned) => spawned.args[5])).toEqual([
         "first",
         "second",
         "third",
@@ -319,7 +414,7 @@ describe("capacity", () => {
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
       yield* sessions.reserve(TICKET);
-      const running = yield* Effect.forkChild(sessions.run(TICKET, "first"));
+      const running = yield* Effect.forkChild(sessions.run(TICKET, "first", MODEL));
       for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
         yield* Effect.yieldNow;
       }
@@ -327,7 +422,7 @@ describe("capacity", () => {
       yield* sessions.abort(TICKET);
       expect((yield* Effect.flip(Fiber.join(running)))._tag).toBe("RunFailed");
       yield* sessions.reserve(OTHER);
-      const next = yield* Effect.forkChild(sessions.run(OTHER, "second"));
+      const next = yield* Effect.forkChild(sessions.run(OTHER, "second", MODEL));
       for (let i = 0; i < 100 && spawner.spawned.length < 2; i++) {
         yield* Effect.yieldNow;
       }
@@ -344,7 +439,7 @@ describe("capacity", () => {
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
       yield* sessions.reserve(TICKET);
-      const running = yield* Effect.forkChild(sessions.run(TICKET, "first"));
+      const running = yield* Effect.forkChild(sessions.run(TICKET, "first", MODEL));
       for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
         yield* Effect.yieldNow;
       }
@@ -356,7 +451,7 @@ describe("capacity", () => {
       expect(spawner.spawned[0]?.kills).toEqual(["SIGTERM"]);
       expect(yield* spawner.spawned[0]?.isRunning ?? Effect.succeed(true)).toBe(false);
       yield* reservedRun(OTHER, "second");
-      expect(spawner.spawned.map((spawned) => spawned.args[2])).toEqual(["first", "second"]);
+      expect(spawner.spawned.map((spawned) => spawned.args[5])).toEqual(["first", "second"]);
     }).pipe(Effect.provide(layer(spawner, 1)));
   });
 
@@ -370,7 +465,7 @@ describe("capacity", () => {
       expect(error).toMatchObject({ _tag: "RunFailed", message: "spawn opencode ENOENT" });
       yield* reservedRun(OTHER, "second");
       // A spawn that failed is no process; only the second run's is recorded.
-      expect(spawner.spawned.map((spawned) => spawned.args[2])).toEqual(["second"]);
+      expect(spawner.spawned.map((spawned) => spawned.args[5])).toEqual(["second"]);
     }).pipe(Effect.provide(layer(spawner, 1)));
   });
 });
@@ -408,7 +503,7 @@ describe("QEMU-first reserve", () => {
         agentId: TICKET,
       });
       expect(qemu).toEqual([TICKET]);
-      expect((yield* Effect.flip(sessions.run(TICKET, "first")))._tag).toBe("BadRequest");
+      expect((yield* Effect.flip(sessions.run(TICKET, "first", MODEL)))._tag).toBe("BadRequest");
       expect(spawner.spawned).toHaveLength(0);
     }).pipe(Effect.provide(layer(spawner, 1, reserveQemu)));
   });
@@ -436,7 +531,7 @@ describe("QEMU-first reserve", () => {
       });
       expect(qemu).toEqual([`reserve ${TICKET}`, `reserve ${OTHER}`]);
       expect(givenBack).toEqual([OTHER]);
-      expect((yield* Effect.flip(sessions.run(OTHER, "second")))._tag).toBe("BadRequest");
+      expect((yield* Effect.flip(sessions.run(OTHER, "second", MODEL)))._tag).toBe("BadRequest");
       expect(spawner.spawned).toHaveLength(0);
       // The first ticket still holds the only slot.
       expect((yield* Effect.flip(sessions.reserve("OLI-7")))._tag).toBe("AtCapacity");
@@ -479,7 +574,7 @@ describe("QEMU-first reserve", () => {
         agentId: OTHER,
       });
       expect(givenBack).toEqual([OTHER]);
-      expect((yield* Effect.flip(sessions.run(OTHER, "second")))._tag).toBe("BadRequest");
+      expect((yield* Effect.flip(sessions.run(OTHER, "second", MODEL)))._tag).toBe("BadRequest");
       expect(spawner.spawned).toHaveLength(0);
     }).pipe(Effect.provide(layer(spawner, 1, qemuOk(), relinquishQemu)));
   });
@@ -504,7 +599,7 @@ describe("QEMU-first reserve", () => {
         agentId: TICKET,
       });
       expect(qemu).toEqual([TICKET]);
-      expect((yield* Effect.flip(sessions.run(TICKET, "first")))._tag).toBe("BadRequest");
+      expect((yield* Effect.flip(sessions.run(TICKET, "first", MODEL)))._tag).toBe("BadRequest");
       expect(spawner.spawned).toHaveLength(0);
     }).pipe(Effect.provide(layer(spawner, 1, reserveQemu)));
   });

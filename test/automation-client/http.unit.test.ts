@@ -14,6 +14,7 @@ import * as Reporter from "../support/reporter.ts";
 
 const TOKEN = "test-token";
 const TICKET = "OLI-42";
+const MODEL = "opencode/muse-spark-1.3-contributor-free";
 
 const ProxyConfigLive = Layer.succeed(Config.ProxyConfig)({
   token: Redacted.make(TOKEN),
@@ -73,7 +74,7 @@ const run = (
 ) =>
   http.post("/run", {
     headers: extraHeaders,
-    body: HttpBody.text(JSON.stringify({ prompt, ticket }), "application/json"),
+    body: HttpBody.text(JSON.stringify({ prompt, ticket, model: MODEL }), "application/json"),
   });
 
 const abort = (
@@ -115,7 +116,7 @@ describe("POST /reserve happy path", () => {
 });
 
 describe("POST /run happy path", () => {
-  it.effect("answers ok after opencode exits 0 and ignores its printout", () =>
+  it.effect("answers ok after opencode exits 0, run as the model the body names", () =>
     Effect.gen(function* () {
       const fixed = fixture(() => ({ exitCode: 0, stdout: "the written result" }));
       yield* Effect.gen(function* () {
@@ -125,7 +126,12 @@ describe("POST /run happy path", () => {
         expect(yield* response.json).toEqual({ ok: "true" });
       }).pipe(Effect.provide(serve(fixed)));
       expect(fixed.spawner.spawned).toMatchObject([
-        { command: OpenCode.BIN, args: ["run", "--", "fix the bug"] },
+        {
+          command: OpenCode.BIN,
+          args: ["run", "--auto", "--model", MODEL, "--", "fix the bug"],
+          // The transcript opencode prints is the operator's to watch; this process keeps none of it.
+          options: { stdout: "inherit" },
+        },
       ]);
       expect(fixed.log.lines).toEqual([]);
     }),
@@ -200,7 +206,7 @@ describe("POST /run authentication and decoding", () => {
         const http = yield* HttpClient.HttpClient;
         const response = yield* http.post("/run", {
           headers,
-          body: HttpBody.text(JSON.stringify({ ticket: TICKET }), "application/json"),
+          body: HttpBody.text(JSON.stringify({ ticket: TICKET, model: MODEL }), "application/json"),
         });
         expect(response.status).toBe(400);
         const body = decodeErrorBody(yield* response.json);
@@ -217,11 +223,54 @@ describe("POST /run authentication and decoding", () => {
         const http = yield* HttpClient.HttpClient;
         const response = yield* http.post("/run", {
           headers,
-          body: HttpBody.text(JSON.stringify({ prompt: "do the work" }), "application/json"),
+          body: HttpBody.text(
+            JSON.stringify({ prompt: "do the work", model: MODEL }),
+            "application/json",
+          ),
         });
         expect(response.status).toBe(400);
         const body = decodeErrorBody(yield* response.json);
         expect(body.error).toContain("ticket");
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.spawner.spawned).toEqual([]);
+    }),
+  );
+
+  it.effect("a body without model is 400 and spawns nothing", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const response = yield* http.post("/run", {
+          headers,
+          body: HttpBody.text(
+            JSON.stringify({ prompt: "do the work", ticket: TICKET }),
+            "application/json",
+          ),
+        });
+        expect(response.status).toBe(400);
+        const body = decodeErrorBody(yield* response.json);
+        expect(body.error).toContain("model");
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.spawner.spawned).toEqual([]);
+    }),
+  );
+
+  it.effect("a model that is not provider/model is 400 with the rule and spawns nothing", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const response = yield* http.post("/run", {
+          headers,
+          body: HttpBody.text(
+            JSON.stringify({ prompt: "do the work", ticket: TICKET, model: "muse-spark-1.3" }),
+            "application/json",
+          ),
+        });
+        expect(response.status).toBe(400);
+        const body = decodeErrorBody(yield* response.json);
+        expect(body.error).toContain("model must be provider/model");
       }).pipe(Effect.provide(serve(fixed)));
       expect(fixed.spawner.spawned).toEqual([]);
     }),
@@ -352,7 +401,7 @@ describe("POST /run unhappy path", () => {
           for (let i = 0; i < 100 && fixed.spawner.spawned.length < 2; i++) {
             yield* Effect.yieldNow;
           }
-          expect(fixed.spawner.spawned.map((spawned) => spawned.args[2])).toEqual([
+          expect(fixed.spawner.spawned.map((spawned) => spawned.args[5])).toEqual([
             "first",
             "second",
           ]);

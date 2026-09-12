@@ -99,6 +99,25 @@ describe("brands", () => {
       expect(String(Cause.squash(exit.cause))).toMatch(/url must be an http or https url/);
     }
   });
+
+  it("accepts a provider/model id as a ModelId and refuses anything else", () => {
+    const is = Schema.is(Domain.ModelId);
+    expect(is("opencode/muse-spark-1.3-contributor-free")).toBe(true);
+    expect(is("openrouter/deepseek/deepseek-v4.1-flash")).toBe(true);
+    expect(is("")).toBe(false);
+    expect(is("muse-spark-1.3")).toBe(false);
+    expect(is("opencode/")).toBe(false);
+    expect(is("/muse-spark-1.3")).toBe(false);
+    expect(is("opencode/muse spark")).toBe(false);
+  });
+
+  it("names the model rule in the ModelId decode failure", () => {
+    const exit = Schema.decodeUnknownExit(Domain.ModelId)("muse-spark-1.3");
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      expect(String(Cause.squash(exit.cause))).toMatch(/model must be provider\/model/);
+    }
+  });
 });
 
 describe("QmpInbound", () => {

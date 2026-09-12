@@ -95,7 +95,11 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
             : Errors.BadRequest.make({ message: "no reservation", agentId: ticket }),
       );
 
-    const run = Effect.fn("Sessions.run")(function* (ticket: string, prompt: string) {
+    const run = Effect.fn("Sessions.run")(function* (
+      ticket: string,
+      prompt: string,
+      model: string,
+    ) {
       return yield* Effect.scoped(
         Effect.gen(function* () {
           // The reservation is the run's first resource: consumed and its release registered
@@ -104,7 +108,7 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
           yield* Effect.acquireRelease(consume(ticket), () =>
             Ref.update(slots, (held) => ({ ...held, count: held.count - 1 })),
           );
-          const handle = yield* Cli.spawn(OpenCode.BIN, OpenCode.args(prompt));
+          const handle = yield* Cli.spawn(OpenCode.BIN, OpenCode.args(prompt, model), OpenCode.ENV);
           const claimed = yield* Ref.modify(running, (map) =>
             map.has(ticket)
               ? ([false, map] as const)
@@ -124,6 +128,12 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
         Effect.catchTag("CliFailed", (error) =>
           Errors.RunFailed.make({ message: error.message, cause: error }),
         ),
+        // Leaving the scope kills the child and gives the slot back before the failure is raised.
+        Effect.timeoutOrElse({
+          duration: OpenCode.CEILING,
+          orElse: () =>
+            Errors.RunFailed.make({ message: `opencode run exceeded ${OpenCode.CEILING}` }),
+        }),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
       );
     });

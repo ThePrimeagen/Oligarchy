@@ -80,9 +80,16 @@ export const reserve = Effect.fn("reserve")(function* (url: string, ticket: stri
 
 // POST /run and wait for the client to finish. node:http has no ceiling of its own; a drive or
 // diagnose runs until the client answers, or until this fiber is interrupted.
-export const run = Effect.fn("run")(function* (url: string, prompt: string, ticket: string) {
+export const run = Effect.fn("run")(function* (
+  url: string,
+  prompt: string,
+  ticket: string,
+  model: string,
+) {
   const client = yield* makeClient(url);
-  return yield* client.Runs.run({ payload: Contract.RunBody.make({ prompt, ticket }) }).pipe(
+  return yield* client.Runs.run({
+    payload: Contract.RunBody.make({ prompt, ticket, model }),
+  }).pipe(
     Effect.catch((error) => {
       if (error._tag === "HttpClientError") {
         const response = error.response;

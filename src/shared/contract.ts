@@ -109,6 +109,7 @@ export class Servers extends Schema.Class<Servers>("@oligarchy/shared/contract/S
 export class RunBody extends Schema.Class<RunBody>("@oligarchy/shared/contract/RunBody")({
   prompt: Schema.String,
   ticket: Schema.NonEmptyString,
+  model: Domain.ModelId,
 }) {}
 
 export class ReserveBody extends Schema.Class<ReserveBody>(

@@ -15,9 +15,11 @@ export const IssueWebhook = Schema.Struct({
     identifier: Schema.NonEmptyString,
     state: IssueState,
   }),
+  // Linear names a changed relation by its scalar column: a state move carries the previous
+  // stateId, never a nested state object. Null when the issue had no state before.
   updatedFrom: Schema.optionalKey(
     Schema.Struct({
-      state: Schema.optionalKey(Schema.Unknown),
+      stateId: Schema.optionalKey(Schema.NullOr(Schema.String)),
     }),
   ),
 }).annotate({ identifier: "@oligarchy/automation-server/webhook/IssueWebhook" });
@@ -35,7 +37,7 @@ export type Work = {
 const decodeIssue = Schema.decodeUnknownOption(Schema.fromJsonString(IssueWebhook));
 
 // Linear's body has many keys we do not store yet; the decoder keeps identifier and state
-// and whether updatedFrom named state, which is the queue key once rows exist.
+// and whether updatedFrom named stateId, which is the queue key once rows exist.
 export const issue = (body: Uint8Array): Option.Option<IssueWebhook> =>
   decodeIssue(new TextDecoder().decode(body));
 
@@ -45,7 +47,7 @@ export const work = (event: IssueWebhook): Work => ({
   stateId: event.data.state.id,
   stateType: event.data.state.type,
   action: event.action,
-  stateChanged: event.action === "create" || event.updatedFrom?.state !== undefined,
+  stateChanged: event.action === "create" || event.updatedFrom?.stateId !== undefined,
 });
 
 // Status names on the Oligarchy board: Automation Needed starts a drive, Needs Review a diagnose.
