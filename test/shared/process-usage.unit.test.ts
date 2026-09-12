@@ -137,7 +137,9 @@ const collectThrough = (statText: string | undefined, statusText: string | undef
     const usage = yield* ProcessUsage.ProcessUsage;
     return yield* usage.collect;
   }).pipe(
-    Effect.provide(ProcessUsage.ProcessUsage.layer.pipe(Layer.provide(procFs(statText, statusText).layer))),
+    Effect.provide(
+      ProcessUsage.ProcessUsage.layer.pipe(Layer.provide(procFs(statText, statusText).layer)),
+    ),
   );
 
 describe("ProcessUsage.layer happy path", () => {
@@ -179,7 +181,12 @@ describe("ProcessUsage.layer unhappy path", () => {
 
   it.effect("dies when the stat line is empty, unclosed, too short, or not numbers", () =>
     Effect.gen(function* () {
-      for (const line of ["", "1 (node R 0 0", "1 (node) R 0", "1 (node) R 0 0 0 0 -1 0 0 0 0 0 xx 0"]) {
+      for (const line of [
+        "",
+        "1 (node R 0 0",
+        "1 (node) R 0",
+        "1 (node) R 0 0 0 0 -1 0 0 0 0 0 xx 0",
+      ]) {
         const exit = yield* Effect.exit(collectThrough(line, status(1)));
         expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause), line).toBe(true);
       }

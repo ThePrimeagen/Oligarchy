@@ -60,14 +60,7 @@ const refused = Errors.DatabaseError.make({
   cause: new Error("connect ECONNREFUSED 127.0.0.1:1"),
 });
 
-type Served = readonly [
-  Domain.QemuDisplay,
-  boolean,
-  number,
-  string,
-  number,
-  Option.Option<string>,
-];
+type Served = readonly [Domain.QemuDisplay, boolean, number, string, number, Option.Option<string>];
 
 // --max-jobs and --name have no default, so every run that should reach the handler carries both.
 const MAX_JOBS: ReadonlyArray<string> = ["--max-jobs", "2"];
@@ -321,13 +314,17 @@ describe("qemu server command flags", () => {
     Effect.gen(function* () {
       const log = FakeLog.fakeLog();
       const spaced = fakeServer();
-      const first = yield* Effect.forkChild(run(spaced.server, [...MAX_JOBS, "--name", "attic"], log));
+      const first = yield* Effect.forkChild(
+        run(spaced.server, [...MAX_JOBS, "--name", "attic"], log),
+      );
       yield* Deferred.await(spaced.listening);
       yield* Fiber.interrupt(first);
       expect(spaced.served).toEqual([["none", false, 2, "attic", 42069, Option.none()]]);
 
       const joined = fakeServer();
-      const second = yield* Effect.forkChild(run(joined.server, [...MAX_JOBS, "--name=rack-2"], log));
+      const second = yield* Effect.forkChild(
+        run(joined.server, [...MAX_JOBS, "--name=rack-2"], log),
+      );
       yield* Deferred.await(joined.listening);
       yield* Fiber.interrupt(second);
       expect(joined.served).toEqual([["none", false, 2, "rack-2", 42069, Option.none()]]);

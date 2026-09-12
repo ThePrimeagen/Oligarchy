@@ -688,7 +688,10 @@ describe("automation client announce", () => {
                 until: (found) => found !== undefined,
                 schedule: Schedule.spaced("200 millis"),
               }),
-              Effect.timeoutOrElse({ duration: "10 seconds", orElse: () => announcedProcess(name) }),
+              Effect.timeoutOrElse({
+                duration: "10 seconds",
+                orElse: () => announcedProcess(name),
+              }),
             ),
             row: yield* announced(url),
           };

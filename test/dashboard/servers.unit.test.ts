@@ -190,7 +190,9 @@ describe("Fleet unhappy path", () => {
       name: 'rack<"1>',
     };
     const page = await render(Fleet({ servers: [hostile] }));
-    expect(page).toContain("<td>rack&lt;&quot;1&gt;</td><td>http://a&quot;b.example.com/&lt;x&gt;</td>");
+    expect(page).toContain(
+      "<td>rack&lt;&quot;1&gt;</td><td>http://a&quot;b.example.com/&lt;x&gt;</td>",
+    );
     expect(page).toContain('value="http://a&quot;b.example.com/&lt;x&gt;"');
     expect(page).not.toContain('a"b');
     expect(page).not.toContain("<x>");

@@ -1536,33 +1536,39 @@ Postgres.describeWithDatabase("database", () => {
         }),
     );
 
-    scoped.effect("ProcessStatsStore inserts a qemu reading each report, and keeps the earlier ones", () =>
-      Effect.gen(function* () {
-        const store = yield* ProcessStats.ProcessStatsStore;
-        const database = yield* Client.Database;
-        const name = `qemu-proc-${uuid().slice(0, 8)}`;
-        const first: DbSchema.ProcessStats = { jobs: 1, memoryBytes: 4_096_000, cpuPercent: 12.5 };
-        const second: DbSchema.ProcessStats = { jobs: 3, memoryBytes: 8_192_000, cpuPercent: 40 };
-        const rowOf = database.run("select", (db) =>
-          db
-            .select()
-            .from(DbSchema.processStats)
-            .where(eq(DbSchema.processStats.name, name))
-            .orderBy(DbSchema.processStats.id),
-        );
-        yield* store.report(name, "qemu", first);
-        const [row] = yield* rowOf;
-        expect(row).toMatchObject({ name, type: "qemu", ...first });
-        expect(row?.reportedAt).toBeInstanceOf(Date);
-        yield* store.report(name, "qemu", second);
-        const rows = yield* rowOf;
-        expect(rows).toHaveLength(2);
-        expect(rows[0]).toMatchObject({ name, type: "qemu", ...first });
-        expect(rows[1]).toMatchObject({ name, type: "qemu", ...second });
-        expect(rows[1]?.reportedAt.getTime()).toBeGreaterThanOrEqual(
-          row?.reportedAt.getTime() ?? Number.POSITIVE_INFINITY,
-        );
-      }),
+    scoped.effect(
+      "ProcessStatsStore inserts a qemu reading each report, and keeps the earlier ones",
+      () =>
+        Effect.gen(function* () {
+          const store = yield* ProcessStats.ProcessStatsStore;
+          const database = yield* Client.Database;
+          const name = `qemu-proc-${uuid().slice(0, 8)}`;
+          const first: DbSchema.ProcessStats = {
+            jobs: 1,
+            memoryBytes: 4_096_000,
+            cpuPercent: 12.5,
+          };
+          const second: DbSchema.ProcessStats = { jobs: 3, memoryBytes: 8_192_000, cpuPercent: 40 };
+          const rowOf = database.run("select", (db) =>
+            db
+              .select()
+              .from(DbSchema.processStats)
+              .where(eq(DbSchema.processStats.name, name))
+              .orderBy(DbSchema.processStats.id),
+          );
+          yield* store.report(name, "qemu", first);
+          const [row] = yield* rowOf;
+          expect(row).toMatchObject({ name, type: "qemu", ...first });
+          expect(row?.reportedAt).toBeInstanceOf(Date);
+          yield* store.report(name, "qemu", second);
+          const rows = yield* rowOf;
+          expect(rows).toHaveLength(2);
+          expect(rows[0]).toMatchObject({ name, type: "qemu", ...first });
+          expect(rows[1]).toMatchObject({ name, type: "qemu", ...second });
+          expect(rows[1]?.reportedAt.getTime()).toBeGreaterThanOrEqual(
+            row?.reportedAt.getTime() ?? Number.POSITIVE_INFINITY,
+          );
+        }),
     );
 
     scoped.effect(
@@ -1599,17 +1605,21 @@ Postgres.describeWithDatabase("database", () => {
         }),
     );
 
-    scoped.effect("ProcessStatsStore inserts without a servers row, so a forgotten host still leaves a reading", () =>
-      Effect.gen(function* () {
-        const store = yield* ProcessStats.ProcessStatsStore;
-        const database = yield* Client.Database;
-        const name = `orphan-${uuid().slice(0, 8)}`;
-        yield* store.report(name, "qemu", { jobs: 0, memoryBytes: 1, cpuPercent: 0 });
-        const rows = yield* database.run("select", (db) =>
-          db.select().from(DbSchema.processStats).where(eq(DbSchema.processStats.name, name)),
-        );
-        expect(rows).toMatchObject([{ name, type: "qemu", jobs: 0, memoryBytes: 1, cpuPercent: 0 }]);
-      }),
+    scoped.effect(
+      "ProcessStatsStore inserts without a servers row, so a forgotten host still leaves a reading",
+      () =>
+        Effect.gen(function* () {
+          const store = yield* ProcessStats.ProcessStatsStore;
+          const database = yield* Client.Database;
+          const name = `orphan-${uuid().slice(0, 8)}`;
+          yield* store.report(name, "qemu", { jobs: 0, memoryBytes: 1, cpuPercent: 0 });
+          const rows = yield* database.run("select", (db) =>
+            db.select().from(DbSchema.processStats).where(eq(DbSchema.processStats.name, name)),
+          );
+          expect(rows).toMatchObject([
+            { name, type: "qemu", jobs: 0, memoryBytes: 1, cpuPercent: 0 },
+          ]);
+        }),
     );
 
     scoped.effect("ServerStore heartbeat refuses a second url under the same name (unhappy)", () =>

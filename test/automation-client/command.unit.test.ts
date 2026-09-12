@@ -249,13 +249,17 @@ describe("automation client command flags", () => {
     Effect.gen(function* () {
       const log = FakeLog.fakeLog();
       const spaced = fakeServer();
-      const first = yield* Effect.forkChild(run(spaced.server, [...MAX_JOBS, "--name", "attic"], log));
+      const first = yield* Effect.forkChild(
+        run(spaced.server, [...MAX_JOBS, "--name", "attic"], log),
+      );
       yield* Deferred.await(spaced.listening);
       yield* Fiber.interrupt(first);
       expect(spaced.served).toEqual([[2, "attic", 54322, Option.none()]]);
 
       const joined = fakeServer();
-      const second = yield* Effect.forkChild(run(joined.server, [...MAX_JOBS, "--name=rack-2"], log));
+      const second = yield* Effect.forkChild(
+        run(joined.server, [...MAX_JOBS, "--name=rack-2"], log),
+      );
       yield* Deferred.await(joined.listening);
       yield* Fiber.interrupt(second);
       expect(joined.served).toEqual([[2, "rack-2", 54322, Option.none()]]);
