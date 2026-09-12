@@ -96,3 +96,32 @@ Genuine harness bugs found by the runs and fixed on branch `automation-model-fla
 - QEMU treats a screendump write error as fatal (libpng `png_error` → `abort()`), so a full or
   memory-starved filesystem takes the whole guest down, not just the screenshot. Upstream QEMU
   behaviour; worth knowing when sizing the sessions filesystem.
+- The dispatcher's in-memory `inFlight` counter can leak: after a long-lived `--jobs 8` server
+  (pid 607684, ~2h), eight pending DeepSeek drives sat unclaimed (`jobs in flight: 0` in the DB,
+  zero dispatches) until the process was restarted and the `Ref` reset. `claim` only runs when
+  `inFlight < jobs`, so a stuck high count starves the queue. Derive in-flight from
+  `automation_jobs.status='running'` (or a sweep) instead of a process-local counter.
+  After ~2h idle the same process also logged `dispatch tick failed: read ETIMEDOUT` and was
+  restarted before the next DeepSeek wave (18:48Z).
+- OLI-1187 (deepseek-012): last guest action 14:32:43Z, then ~90m with opencode still alive, qemu
+  already gone, session dir gone, session row still `running`. The 30-minute opencode ceiling did
+  not fire (the process was not making API calls?). An idle watchdog (no action / no log line)
+  would have reclaimed the slot. Operator aborted; not counted.
+- DeepSeek OLI-1197 (deepseek-022): after a real lock it abandoned the desktop for TTY diagnostics
+  and `systemctl restart sddm`. Action count exploded because each long `send-keys` is 80–147 QMP
+  chords, not a get-image doom loop. OpenCode `doom_loop` would not have fired: every bash had a
+  new `--keys` string. Operator marked the result **timeout** after the 30-minute `opencode run`
+  ceiling (same class as OLI-1108 `driver_loop_ceiling`). Model, not harness.
+- Drive tickets need a much faster timeout than `OpenCode.CEILING` (30 minutes). A lock-screen
+  run that is still going at ~12–15 minutes is already a loop (OLI-1197 was obviously off-script
+  by ~16 minutes and burned another 15 minutes plus a slot). The ceiling should be an operator-
+  chosen wall clock on the ticket/drive job (far under 30m), not only “opencode is still
+  talking.” Pair with an idle/action watchdog so a quiet hang dies in minutes, and a hot loop
+  of send-keys/get-image cannot hold `--jobs` until the half-hour mark.
+- `/tmp/superrun/cleanup.sh` deleted five live guest disks (OLI-1217–1221 / deepseek-042–046)
+  at 19:04Z: each dir was a separate `psql` to PlanetScale; when the query failed (`No route
+  to host` / empty status) the script treated the session as `unknown` and `rm -rf`'d it.
+  QEMU kept running on unlinked inodes; QMP sockets were gone so the drivers could not act.
+  Operator aborted those five as INFRA (Canceled, not counted). Cleanup now does one status
+  query and keeps every dir when that query fails. Same class of PlanetScale slot exhaustion
+  as the earlier per-ticket diagnosis checks — batch the reads.
