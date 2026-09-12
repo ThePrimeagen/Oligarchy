@@ -1,1 +1,0 @@
-ALTER TABLE "servers" ALTER COLUMN "max_jobs" DROP DEFAULT;

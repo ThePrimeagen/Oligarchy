@@ -99,13 +99,6 @@
       "when": 1789175385657,
       "tag": "0014_flimsy_ironclad",
       "breakpoints": true
-    },
-    {
-      "idx": 15,
-      "version": "7",
-      "when": 1789175388845,
-      "tag": "0015_cynical_true_believers",
-      "breakpoints": true
     }
   ]
 }

@@ -1,5 +1,5 @@
 {
-  "id": "bacacfe5-c600-4610-9e7c-9a630f41104a",
+  "id": "397f4cae-c719-45a2-a328-2381161521f1",
   "prevId": "82d83f71-51ea-497d-b46f-829d87469750",
   "version": "7",
   "dialect": "postgresql",
@@ -678,8 +678,7 @@
           "name": "max_jobs",
           "type": "integer",
           "primaryKey": false,
-          "notNull": true,
-          "default": 1
+          "notNull": true
         },
         "generation": {
           "name": "generation",
