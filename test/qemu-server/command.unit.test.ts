@@ -148,7 +148,9 @@ describe("qemu server command flags", () => {
     Effect.gen(function* () {
       const fake = fakeServer();
       const log = FakeLog.fakeLog();
-      const error = yield* Effect.flip(run(fake.server, ["--max-jobs", "1", "--port", "forty"], log));
+      const error = yield* Effect.flip(
+        run(fake.server, ["--max-jobs", "1", "--port", "forty"], log),
+      );
       expect(error._tag).toBe("ShowHelp");
       expect(fake.served).toEqual([]);
     }),
@@ -263,7 +265,11 @@ describe("qemu server command flags", () => {
       const fake = fakeServer();
       const log = FakeLog.fakeLog();
       const fiber = yield* Effect.forkChild(
-        run(fake.server, ["--max-jobs", "1", "--url", "http://127.0.0.1:55332", "--automation"], log),
+        run(
+          fake.server,
+          ["--max-jobs", "1", "--url", "http://127.0.0.1:55332", "--automation"],
+          log,
+        ),
       );
       yield* Deferred.await(fake.listening);
       yield* Fiber.interrupt(fiber);
