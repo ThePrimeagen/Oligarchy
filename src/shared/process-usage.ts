@@ -66,29 +66,10 @@ type Sample = {
 
 const missing = (path: string): Error => new Error(`unreadable process usage: ${path}`);
 
-const readChild = (
-  fs: FileSystem.FileSystem,
-  pid: string,
-): Effect.Effect<Option.Option<Reading>> =>
-  Effect.gen(function* () {
-    const stat = yield* Effect.option(fs.readFileString(`/proc/${pid}/stat`));
-    const status = yield* Effect.option(fs.readFileString(`/proc/${pid}/status`));
-    if (Option.isNone(stat) || Option.isNone(status)) {
-      return Option.none();
-    }
-    const cpuTicks = parseCpuTicks(stat.value);
-    const memoryBytes = parseVmRssBytes(status.value);
-    return Option.isNone(cpuTicks) || Option.isNone(memoryBytes)
-      ? Option.none()
-      : Option.some({ cpuTicks: cpuTicks.value, memoryBytes: memoryBytes.value });
-  });
-
 // QEMU and OpenCode hold the RAM this Node process does not. Walk every task's children
-// file; a pid that is gone or whose /proc cannot be read is skipped, not a defect of us.
-const descendantsMemory = (
-  fs: FileSystem.FileSystem,
-  root: string,
-): Effect.Effect<number> =>
+// file; a pid with no VmRSS is skipped for the sum, but we still walk its children so a
+// grandchild that answers is counted. A missing /proc is not a defect of us.
+const descendantsMemory = (fs: FileSystem.FileSystem, root: string): Effect.Effect<number> =>
   Effect.gen(function* () {
     const seen = new Set<string>([root]);
     let total = 0;
@@ -107,11 +88,13 @@ const descendantsMemory = (
               continue;
             }
             seen.add(child);
-            const reading = yield* readChild(fs, child);
-            if (Option.isNone(reading)) {
-              continue;
+            const status = yield* Effect.option(fs.readFileString(`/proc/${child}/status`));
+            if (Option.isSome(status)) {
+              const bytes = Option.getOrUndefined(parseVmRssBytes(status.value));
+              if (bytes !== undefined) {
+                total += bytes;
+              }
             }
-            total += reading.value.memoryBytes;
             yield* visit(child);
           }
         }

@@ -165,9 +165,7 @@ const collectTree = (spec: {
   Effect.gen(function* () {
     const usage = yield* ProcessUsage.ProcessUsage;
     return yield* usage.collect;
-  }).pipe(
-    Effect.provide(ProcessUsage.ProcessUsage.layer.pipe(Layer.provide(treeFs(spec).layer))),
-  );
+  }).pipe(Effect.provide(ProcessUsage.ProcessUsage.layer.pipe(Layer.provide(treeFs(spec).layer))));
 
 describe("ProcessUsage.layer happy path", () => {
   it.effect("reads /proc/self/stat and /proc/self/status without sudo", () => {
@@ -201,7 +199,12 @@ describe("ProcessUsage.layer happy path", () => {
     Effect.gen(function* () {
       expect(
         yield* collectTree({
-          directories: ["/proc/self/task", "/proc/self/task/1", "/proc/10/task", "/proc/10/task/10"],
+          directories: [
+            "/proc/self/task",
+            "/proc/self/task/1",
+            "/proc/10/task",
+            "/proc/10/task/10",
+          ],
           files: {
             "/proc/self/stat": stat("node", 10, 5),
             "/proc/self/status": status(4),
@@ -297,7 +300,7 @@ describe("ProcessUsage.layer unhappy path", () => {
     }),
   );
 
-  it.effect("skips a child whose stat or status cannot be read as a reading", () =>
+  it.effect("skips a child whose status cannot be read as VmRSS", () =>
     Effect.gen(function* () {
       expect(
         yield* collectTree({
@@ -308,25 +311,44 @@ describe("ProcessUsage.layer unhappy path", () => {
             "/proc/10/task/10",
             "/proc/11/task",
             "/proc/11/task/11",
-            "/proc/12/task",
-            "/proc/12/task/12",
           ],
           files: {
             "/proc/self/stat": stat("node", 0, 0),
             "/proc/self/status": status(4),
-            "/proc/self/task/1/children": "10 11 12",
-            "/proc/10/stat": "1 (qemu R 0 0",
-            "/proc/10/status": status(8),
+            "/proc/self/task/1/children": "10 11",
+            "/proc/10/status": "Name:\tqemu\n",
             "/proc/10/task/10/children": "",
-            "/proc/11/stat": stat("qemu", 0, 0),
-            "/proc/11/status": "Name:\tqemu\n",
+            "/proc/11/status": status(16),
             "/proc/11/task/11/children": "",
-            "/proc/12/stat": stat("qemu", 0, 0),
-            "/proc/12/status": status(16),
-            "/proc/12/task/12/children": "",
           },
         }),
       ).toEqual({ memoryBytes: 20 * 1024, cpuPercent: 0 });
+    }),
+  );
+
+  it.effect("still counts a grandchild when the child in between has no VmRSS", () =>
+    Effect.gen(function* () {
+      expect(
+        yield* collectTree({
+          directories: [
+            "/proc/self/task",
+            "/proc/self/task/1",
+            "/proc/10/task",
+            "/proc/10/task/10",
+            "/proc/20/task",
+            "/proc/20/task/20",
+          ],
+          files: {
+            "/proc/self/stat": stat("node", 0, 0),
+            "/proc/self/status": status(1),
+            "/proc/self/task/1/children": "10",
+            "/proc/10/status": "Name:\tqemu\n",
+            "/proc/10/task/10/children": "20",
+            "/proc/20/status": status(4),
+            "/proc/20/task/20/children": "",
+          },
+        }),
+      ).toEqual({ memoryBytes: 5 * 1024, cpuPercent: 0 });
     }),
   );
 
