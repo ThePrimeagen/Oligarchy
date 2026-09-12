@@ -6,28 +6,38 @@ import * as Cli from "../src/cli.ts";
 import * as FakeSpawner from "./support/fake-spawner.ts";
 
 describe("Cli.run happy path", () => {
-  it.effect("spawns the command with its args and succeeds when it exits 0", () =>
+  it.effect(
+    "spawns the command with its args, its stdout inherited, and succeeds when it exits 0",
+    () =>
+      Effect.gen(function* () {
+        const spawner = FakeSpawner.fakeSpawner(() => ({
+          exitCode: 0,
+          stdout: "printed result",
+          stderr: "noise",
+        }));
+        yield* Cli.run("tool", ["--flag", "value"]).pipe(Effect.provide(spawner.layer));
+        expect(spawner.spawned).toHaveLength(1);
+        expect(spawner.spawned[0]).toMatchObject({
+          command: "tool",
+          args: ["--flag", "value"],
+          options: {
+            stdin: "ignore",
+            stdout: "inherit",
+            stderr: "pipe",
+            extendEnv: true,
+            detached: false,
+            killSignal: "SIGTERM",
+            forceKillAfter: Cli.FORCE_KILL_AFTER,
+          },
+        });
+      }),
+  );
+
+  it.effect("runs with no variables of its own when none are given", () =>
     Effect.gen(function* () {
-      const spawner = FakeSpawner.fakeSpawner(() => ({
-        exitCode: 0,
-        stdout: "printed result",
-        stderr: "noise",
-      }));
-      yield* Cli.run("tool", ["--flag", "value"]).pipe(Effect.provide(spawner.layer));
-      expect(spawner.spawned).toHaveLength(1);
-      expect(spawner.spawned[0]).toMatchObject({
-        command: "tool",
-        args: ["--flag", "value"],
-        options: {
-          stdin: "ignore",
-          stdout: "ignore",
-          stderr: "pipe",
-          extendEnv: true,
-          detached: false,
-          killSignal: "SIGTERM",
-          forceKillAfter: Cli.FORCE_KILL_AFTER,
-        },
-      });
+      const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
+      yield* Cli.run("tool", []).pipe(Effect.provide(spawner.layer));
+      expect(spawner.spawned[0]?.options).toMatchObject({ env: {}, extendEnv: true });
     }),
   );
 
@@ -72,6 +82,28 @@ describe("Cli.run unhappy path", () => {
       expect(error._tag).toBe("CliFailed");
       expect(error.message).toBe("out of token credits");
     }),
+  );
+
+  it.effect(
+    "keeps the last 4 KiB of stderr, NUL bytes dropped, so the message is storable text",
+    () =>
+      Effect.gen(function* () {
+        const head = "x".repeat(5_000);
+        const spawner = FakeSpawner.fakeSpawner(() => ({
+          exitCode: 1,
+          stderr: `${head}\nbinary \u0000junk\u0000 then\nError: Invalid upload request.\n`,
+        }));
+        const error = yield* Effect.flip(
+          Cli.run("tool", ["run"]).pipe(Effect.provide(spawner.layer)),
+        );
+        expect(error._tag).toBe("CliFailed");
+        expect(error.message.includes("\u0000")).toBe(false);
+        expect(error.message.length).toBeLessThanOrEqual(Cli.STDERR_TAIL);
+        expect(error.message.endsWith("Error: Invalid upload request.")).toBe(true);
+        expect(error.message).toContain("binary junk then");
+        expect(error.message.startsWith("x")).toBe(true);
+        expect(error.message.length).toBe(Cli.STDERR_TAIL);
+      }),
   );
 
   it.effect("names the exit when the command exits non-zero with empty stderr", () =>

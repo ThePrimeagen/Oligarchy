@@ -157,6 +157,14 @@ export const MaxJobs = Schema.Int.check(
 ).annotate({ identifier: "@oligarchy/shared/domain/MaxJobs" });
 export type MaxJobs = typeof MaxJobs.Type;
 
+// An OpenCode model as `opencode run --model` takes it: the provider, a slash, the model's own
+// id (which may hold slashes of its own: openrouter/deepseek/deepseek-v4.1-flash). Refused at
+// the flag so a run is never dispatched as a model no client can launch.
+export const ModelId = Schema.String.check(
+  Schema.isPattern(/^[^\s/]+\/\S+$/, { message: "model must be provider/model" }),
+).annotate({ identifier: "@oligarchy/shared/domain/ModelId" });
+export type ModelId = typeof ModelId.Type;
+
 export const SessionConfig = Schema.Struct({
   iso: Schema.String,
   disk: Schema.optionalKey(Schema.String),

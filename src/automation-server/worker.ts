@@ -37,6 +37,7 @@ const outcomeFrom = (cause: Cause.Cause<unknown>): Outcome =>
 const execute = Effect.fn("execute")(function* (
   job: Automation.AutomationJobRow,
   clients: ReadonlyArray<Servers.LiveServer>,
+  model: string,
 ) {
   const tests = yield* Tests.TestStore;
   const store = yield* Automation.AutomationStore;
@@ -48,8 +49,8 @@ const execute = Effect.fn("execute")(function* (
   const ticket = result.value.linearId;
   const prompt =
     job.action === "drive"
-      ? yield* Prompts.drive(ticket)
-      : yield* Prompts.diagnose(ticket, job.resultId);
+      ? yield* Prompts.drive(ticket, model)
+      : yield* Prompts.diagnose(ticket, job.resultId, model);
   let lastCapacity: string | undefined;
   for (const client of clients) {
     const reserved = yield* Effect.result(AutomationClient.reserve(client.url, ticket));
@@ -57,11 +58,29 @@ const execute = Effect.fn("execute")(function* (
       if (client.id !== job.serverId) {
         yield* store.assign(job.id, client.id);
       }
-      yield* log.info(`dispatching ${job.action}; ${client.url}`, {
+      yield* log.info(`dispatching ${job.action}; ${client.url}; ${model}`, {
         location: Log.Locations.automation,
         agentId: ticket,
       });
-      return yield* AutomationClient.run(client.url, prompt, ticket);
+      yield* AutomationClient.run(client.url, prompt, ticket, model);
+      // A diagnose is judged by nothing here: the result was closed before it was queued.
+      if (job.action === "diagnose") {
+        return yield* Effect.void;
+      }
+      // A driver's last act is ./ctrl test-results; opencode exiting 0 with the result still open
+      // is an agent that quit early, and the job says so rather than reading as a run.
+      const after = yield* tests.findResult(job.resultId);
+      if (Option.isNone(after)) {
+        return yield* Effect.die(
+          new Error(`execute: result ${job.resultId} vanished during the drive`),
+        );
+      }
+      if (after.value.status === "pending" || after.value.status === "running") {
+        return yield* Errors.AutomationClientError.make({
+          message: `driver exited; result ${job.resultId} is ${after.value.status}`,
+        });
+      }
+      return yield* Effect.void;
     }
     if (reserved.failure.status === 503) {
       lastCapacity = reserved.failure.message;
@@ -92,12 +111,12 @@ const logOutcome = Effect.fn("logOutcome")(function* (
   yield* log.error(`${job.action} failed; ${outcome.reason}`, attr);
 });
 
-// One job at a time. A tick with no live client does not claim. Reserve runs against every
-// live client; a 503 from all of them puts the row back to pending so the queue is unchanged.
-// Claim is uninterruptible so a shutdown cannot leave a pending row half-taken; the HTTP wait
-// is restored so SIGTERM aborts an in-flight job; finish and unclaim are uninterruptible so
-// the write lands. A tick that fails is one error line; the next tick runs.
-export const dispatch = Effect.fn("dispatch")(function* () {
+// One job at a time, every one run as `model`. A tick with no live client does not claim.
+// Reserve runs against every live client; a 503 from all of them puts the row back to pending so
+// the queue is unchanged. Claim is uninterruptible so a shutdown cannot leave a pending row
+// half-taken; the HTTP wait is restored so SIGTERM aborts an in-flight job; finish and unclaim
+// are uninterruptible so the write lands. A tick that fails is one error line; the next tick runs.
+export const dispatch = Effect.fn("dispatch")(function* (model: string) {
   const servers = yield* Servers.ServerStore;
   const store = yield* Automation.AutomationStore;
   const log = yield* Log.Log;
@@ -115,7 +134,7 @@ export const dispatch = Effect.fn("dispatch")(function* () {
             return Effect.void;
           }
           const job = maybe.value;
-          return restore(execute(job, live)).pipe(
+          return restore(execute(job, live, model)).pipe(
             Effect.matchCause({
               onSuccess: (): Outcome | { readonly deferred: true; readonly agentId?: string } => ({
                 status: "succeeded",

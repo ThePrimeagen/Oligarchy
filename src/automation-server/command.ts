@@ -5,15 +5,22 @@ import * as Client from "../db/client.ts";
 import * as ExternalFailure from "../external-failure.ts";
 import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
+import * as Domain from "../shared/domain.ts";
 import * as Errors from "../shared/errors.ts";
 
 // The port the operator's tunnel points at; nothing else of ours is near it.
 const DEFAULT_PORT = 54321;
 
-// What main.ts hands the command: the listener as a layer for its port, and the signal a server
-// error raises after listen.
+// The free contributor model: a server started without --model costs nothing to run.
+const DEFAULT_MODEL = "opencode/muse-spark-1.3-contributor-free";
+
+// What main.ts hands the command: the listener as a layer for its port, the model every job runs
+// as, and the signal a server error raises after listen.
 export type AutomationServer<RServe> = {
-  readonly serve: (port: number) => Layer.Layer<never, HttpServerError.ServeError, RServe>;
+  readonly serve: (
+    port: number,
+    model: string,
+  ) => Layer.Layer<never, HttpServerError.ServeError, RServe>;
   readonly serverFailed: Deferred.Deferred<never, HttpServerError.ServeError>;
 };
 
@@ -31,8 +38,15 @@ export const makeAutomationServerCommand = <RServe>(server: AutomationServer<RSe
         Flag.withDefault(DEFAULT_PORT),
         Flag.withDescription("Listen port"),
       ),
+      model: Flag.string("model").pipe(
+        Flag.withSchema(Domain.ModelId),
+        Flag.withDefault(DEFAULT_MODEL),
+        Flag.withDescription(
+          "The OpenCode model every drive and diagnose runs as, provider/model; the agent records it on its result",
+        ),
+      ),
     },
-    ({ port }) =>
+    ({ port, model }) =>
       Effect.gen(function* () {
         const log = yield* Log.Log;
         const database = yield* Client.Database;
@@ -48,7 +62,7 @@ export const makeAutomationServerCommand = <RServe>(server: AutomationServer<RSe
             ),
           );
           return yield* Effect.raceFirst(
-            Layer.launch(server.serve(port)),
+            Layer.launch(server.serve(port, model)),
             Deferred.await(server.serverFailed),
           );
         });

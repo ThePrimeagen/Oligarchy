@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer as createHttpServer } from "node:http";
 import { env as processEnv } from "node:process";
-import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -148,6 +148,8 @@ const installOpencode = (script: string): string => {
   chmodSync(file, 0o755);
   return bin;
 };
+
+const MODEL = "opencode/muse-spark-1.3-contributor-free";
 
 const lines = (output: string): ReadonlyArray<string> =>
   output.split("\n").filter((line) => line !== "");
@@ -312,38 +314,53 @@ describeWithDatabase("automation client startup refusals with a database", () =>
 });
 
 describeWithDatabase("automation client POST /run", () => {
-  it.live("answers 200 when opencode exits 0", () =>
-    Effect.promise(async () => {
-      const qemu = await stubQemuReserve();
-      const bin = installOpencode("exit 0");
-      const port = await freePort();
-      const process = spawnAutomationClient(
-        [...MAX_JOBS, "--port", String(port)],
-        { SERVER_URL: qemu.url },
-        `${bin}:${processEnv.PATH ?? ""}`,
-      );
-      try {
-        await process.waitFor(
-          new RegExp(`automation client listening on 127.0.0.1:${String(port)}`),
+  it.live(
+    "answers 200 when opencode exits 0, having run it with --model and the prompt, its transcript on this stdout",
+    () =>
+      Effect.promise(async () => {
+        const qemu = await stubQemuReserve();
+        const bin = installOpencode(
+          'printf "%s\\n" "$@" > "$(dirname "$0")/argv"; printf "%s" "$OPENCODE_CONFIG_CONTENT" > "$(dirname "$0")/config"; echo "transcript-sentinel: the agent spoke"; exit 0',
         );
-        expect(
-          (await request(port, "/reserve", AUTH_JSON, JSON.stringify({ ticket: "OLI-42" }))).status,
-        ).toBe(200);
-        const response = await request(
-          port,
-          "/run",
-          AUTH_JSON,
-          JSON.stringify({ prompt: "do the work", ticket: "OLI-42" }),
+        const port = await freePort();
+        const process = spawnAutomationClient(
+          [...MAX_JOBS, "--port", String(port)],
+          { SERVER_URL: qemu.url },
+          `${bin}:${processEnv.PATH ?? ""}`,
         );
-        expect(response.status).toBe(200);
-        expect(await response.json()).toEqual({ ok: "true" });
-      } finally {
-        process.child.kill("SIGTERM");
-        await process.exited;
-        rmSync(bin, { recursive: true, force: true });
-        await qemu.close();
-      }
-    }),
+        try {
+          await process.waitFor(
+            new RegExp(`automation client listening on 127.0.0.1:${String(port)}`),
+          );
+          expect(
+            (await request(port, "/reserve", AUTH_JSON, JSON.stringify({ ticket: "OLI-42" })))
+              .status,
+          ).toBe(200);
+          const response = await request(
+            port,
+            "/run",
+            AUTH_JSON,
+            JSON.stringify({ prompt: "do the work", ticket: "OLI-42", model: MODEL }),
+          );
+          expect(response.status).toBe(200);
+          expect(await response.json()).toEqual({ ok: "true" });
+          expect(readFileSync(join(bin, "argv"), "utf8")).toBe(
+            ["run", "--auto", "--model", MODEL, "--", "do the work", ""].join("\n"),
+          );
+          expect(process.stdout()).toContain("transcript-sentinel: the agent spoke");
+          expect(JSON.parse(readFileSync(join(bin, "config"), "utf8"))).toEqual({
+            permission: { external_directory: "allow", doom_loop: "allow" },
+            provider: {
+              openrouter: { options: { headerTimeout: 180_000, chunkTimeout: 180_000 } },
+            },
+          });
+        } finally {
+          process.child.kill("SIGTERM");
+          await process.exited;
+          rmSync(bin, { recursive: true, force: true });
+          await qemu.close();
+        }
+      }),
   );
 
   it.live("answers 500 with opencode's error when it exits non-zero", () =>
@@ -367,7 +384,7 @@ describeWithDatabase("automation client POST /run", () => {
           port,
           "/run",
           AUTH_JSON,
-          JSON.stringify({ prompt: "do the work", ticket: "OLI-42" }),
+          JSON.stringify({ prompt: "do the work", ticket: "OLI-42", model: MODEL }),
         );
         expect(response.status).toBe(500);
         expect(await response.json()).toEqual({ error: "out of token credits" });
@@ -397,7 +414,7 @@ describeWithDatabase("automation client POST /run", () => {
           port,
           "/run",
           { "content-type": "application/json" },
-          JSON.stringify({ prompt: "do the work", ticket: "OLI-42" }),
+          JSON.stringify({ prompt: "do the work", ticket: "OLI-42", model: MODEL }),
         );
         expect(response.status).toBe(401);
         expect(await response.json()).toEqual({ error: "unauthorized" });
@@ -434,7 +451,7 @@ describeWithDatabase("automation client POST /run", () => {
           port,
           "/run",
           AUTH_JSON,
-          JSON.stringify({ prompt: "do the work", ticket: "OLI-42" }),
+          JSON.stringify({ prompt: "do the work", ticket: "OLI-42", model: MODEL }),
         );
         const began = Date.now();
         while (!existsSync(started)) {
@@ -499,7 +516,7 @@ describeWithDatabase("automation client POST /abort", () => {
           port,
           "/run",
           AUTH_JSON,
-          JSON.stringify({ prompt: "do the work", ticket: "OLI-42" }),
+          JSON.stringify({ prompt: "do the work", ticket: "OLI-42", model: MODEL }),
         );
         const began = Date.now();
         while (!existsSync(started)) {
@@ -551,7 +568,7 @@ describeWithDatabase("automation client POST /abort", () => {
           port,
           "/run",
           AUTH_JSON,
-          JSON.stringify({ prompt: "do the work", ticket: "OLI-42" }),
+          JSON.stringify({ prompt: "do the work", ticket: "OLI-42", model: MODEL }),
         );
         const began = Date.now();
         while (!existsSync(started)) {

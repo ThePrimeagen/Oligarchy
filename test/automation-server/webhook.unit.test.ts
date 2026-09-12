@@ -37,21 +37,42 @@ describe("Webhook.issue", () => {
     });
   });
 
-  it("marks a create, or an update whose updatedFrom names state, as a state change", () => {
+  it("marks a create, or an update whose updatedFrom carries the previous stateId, as a state change", () => {
     const created = Webhook.issue(bytes({ ...issue, action: "create", updatedFrom: undefined }));
     expect(Option.isSome(created)).toBe(true);
     if (Option.isSome(created)) {
       expect(Webhook.work(created.value).stateChanged).toBe(true);
     }
+    // Linear names a changed relation by its scalar column: stateId, never a nested state object.
     const moved = Webhook.issue(
       bytes({
         ...issue,
-        updatedFrom: { state: { id: "old", name: "Todo", type: "unstarted" } },
+        updatedFrom: {
+          updatedAt: "2026-09-10T23:31:42.000Z",
+          stateId: "2a566723-82d0-40ef-ac2a-55b1811da198",
+        },
       }),
     );
     expect(Option.isSome(moved)).toBe(true);
     if (Option.isSome(moved)) {
       expect(Webhook.work(moved.value).stateChanged).toBe(true);
+    }
+  });
+
+  it("does not take a nested updatedFrom.state, or any other changed field, as a state change (unhappy)", () => {
+    const nested = Webhook.issue(
+      bytes({ ...issue, updatedFrom: { state: { id: "old", name: "Todo", type: "unstarted" } } }),
+    );
+    expect(Option.isSome(nested)).toBe(true);
+    if (Option.isSome(nested)) {
+      expect(Webhook.work(nested.value).stateChanged).toBe(false);
+    }
+    const retitled = Webhook.issue(
+      bytes({ ...issue, updatedFrom: { updatedAt: "2026-09-10T23:31:42.000Z", title: "old" } }),
+    );
+    expect(Option.isSome(retitled)).toBe(true);
+    if (Option.isSome(retitled)) {
+      expect(Webhook.work(retitled.value).stateChanged).toBe(false);
     }
   });
 

@@ -40,16 +40,19 @@ const CliTestLayer = Layer.mergeAll(
   ),
 );
 
+const MUSE = "opencode/muse-spark-1.3-contributor-free";
+const DEEPSEEK = "openrouter/deepseek/deepseek-v4.1-flash";
+
 // The server layer and the failure signal the command is built from.
 const fakeServer = () => {
-  const served: Array<number> = [];
+  const served: Array<{ readonly port: number; readonly model: string }> = [];
   const listening = Deferred.makeUnsafe<void>();
   const serverFailed = Deferred.makeUnsafe<never, HttpServerError.ServeError>();
   const server: AutomationServerCommand.AutomationServer<never> = {
-    serve: (port) =>
+    serve: (port, model) =>
       Layer.effectDiscard(
         Effect.gen(function* () {
-          served.push(port);
+          served.push({ port, model });
           yield* Deferred.succeed(listening, undefined);
         }),
       ),
@@ -100,12 +103,14 @@ describe("automation server command flags", () => {
       const stdout = yield* TestConsole.logLines;
       expect(stdout.join("\n")).toContain("automation-server");
       expect(stdout.join("\n")).toContain("--port");
+      expect(stdout.join("\n")).toContain("--model");
+      expect(stdout.join("\n")).not.toContain("--jobs");
       expect(stdout.join("\n")).not.toContain("--diagnostics-port");
       expect(stdout.join("\n")).not.toContain("--display");
     }),
   );
 
-  it.effect("defaults to port 54321, pings the database, and listens", () =>
+  it.effect("defaults to port 54321 and the free Muse model, pings the database, and listens", () =>
     Effect.gen(function* () {
       const fake = fakeServer();
       const log = FakeLog.fakeLog();
@@ -114,7 +119,7 @@ describe("automation server command flags", () => {
       yield* Fiber.interrupt(fiber);
       const exit = yield* Fiber.await(fiber);
       expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true);
-      expect(fake.served).toEqual([54321]);
+      expect(fake.served).toEqual([{ port: 54321, model: MUSE }]);
       expect(log.lines).toEqual([]);
     }),
   );
@@ -126,7 +131,34 @@ describe("automation server command flags", () => {
       const fiber = yield* Effect.forkChild(run(fake.server, ["--port", "1234"], log));
       yield* Deferred.await(fake.listening);
       yield* Fiber.interrupt(fiber);
-      expect(fake.served).toEqual([1234]);
+      expect(fake.served).toEqual([{ port: 1234, model: MUSE }]);
+    }),
+  );
+
+  it.effect("--model reaches the server as given, whichever provider it names", () =>
+    Effect.gen(function* () {
+      const fake = fakeServer();
+      const log = FakeLog.fakeLog();
+      const fiber = yield* Effect.forkChild(run(fake.server, ["--model", DEEPSEEK], log));
+      yield* Deferred.await(fake.listening);
+      yield* Fiber.interrupt(fiber);
+      expect(fake.served).toEqual([{ port: 54321, model: DEEPSEEK }]);
+    }),
+  );
+
+  it.effect("--model without a provider is a usage error naming the rule (unhappy)", () =>
+    Effect.gen(function* () {
+      const fake = fakeServer();
+      const log = FakeLog.fakeLog();
+      const error = yield* Effect.flip(run(fake.server, ["--model", "muse-spark-1.3"], log));
+      expect(error._tag).toBe("ShowHelp");
+      if (error._tag === "ShowHelp") {
+        expect(error.errors[0]?._tag).toBe("InvalidValue");
+      }
+      const stderr = yield* TestConsole.errorLines;
+      expect(stderr.join("\n")).toContain("model must be provider/model");
+      expect(fake.served).toEqual([]);
+      expect(log.lines).toEqual([]);
     }),
   );
 });
