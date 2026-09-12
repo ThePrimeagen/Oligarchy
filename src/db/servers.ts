@@ -116,7 +116,7 @@ export class ServerStore extends Context.Service<ServerStore>()("@oligarchy/db/S
       return Option.map(Arr.head(rows), (row) => row.serverUrl);
     });
 
-    // One row per agent: a second reserve keeps the first server.
+    // One row per agent: a racing second insert keeps the first server.
     const routeAgent = Effect.fn("db.routeAgent")(function* (agentId: string, url: string) {
       yield* database.run("routeAgent", (db) =>
         db.insert(DbSchema.agentServers).values({ agentId, serverUrl: url }).onConflictDoNothing(),

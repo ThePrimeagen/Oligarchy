@@ -229,7 +229,7 @@ export const sessionServers = pgTable("session_servers", {
 });
 
 // Which server reserved a slot for an agent, so start finds that machine before a session id
-// exists. agent_id is the ticket. A second reserve for the same agent is one row.
+// exists. agent_id is the ticket. A racing second insert is one row.
 export const agentServers = pgTable("agent_servers", {
   agentId: text("agent_id").primaryKey(),
   serverUrl: text("server_url").notNull(),

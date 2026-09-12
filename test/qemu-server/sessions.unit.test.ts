@@ -2051,16 +2051,20 @@ describe("capacity", () => {
     }),
   );
 
-  it.effect("a second reserve for the same agent is the same slot", () =>
+  it.effect("a second reserve for the same agent is already reserved", () =>
     Effect.gen(function* () {
       const h = harness({ maxJobs: 1 });
       yield* h.run(
         Effect.gen(function* () {
           const sessions = yield* Sessions.Sessions;
           yield* sessions.reserve(AGENT);
-          yield* sessions.reserve(AGENT);
-          const error = yield* Effect.flip(sessions.reserve(OTHER_AGENT));
-          expect(error._tag).toBe("AtCapacity");
+          const error = yield* Effect.flip(sessions.reserve(AGENT));
+          expect(error).toMatchObject({
+            _tag: "BadRequest",
+            message: "already reserved",
+            agentId: AGENT,
+          });
+          expect((yield* Effect.flip(sessions.reserve(OTHER_AGENT)))._tag).toBe("AtCapacity");
         }),
       );
     }),

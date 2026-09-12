@@ -256,6 +256,30 @@ describe("POST /run unhappy path", () => {
     }),
   );
 
+  it.effect("a second reserve for the same ticket is 400 already reserved and reaches Sentry", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        expect((yield* reserve(http)).status).toBe(200);
+        const refused = yield* reserve(http);
+        expect(refused.status).toBe(400);
+        expect(yield* refused.json).toEqual({ error: "already reserved" });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.spawner.spawned).toEqual([]);
+      expect(fixed.log.lines).toEqual([
+        {
+          level: "error",
+          text: "POST /reserve failed: already reserved",
+          location: "automation-client",
+          agentId: TICKET,
+          skipSentry: false,
+          cause: undefined,
+        },
+      ]);
+    }),
+  );
+
   it.effect("a reserve past --max-jobs is 503 at capacity and spawns nothing", () =>
     Effect.gen(function* () {
       const fixed = fixture(() => ({}), 1);

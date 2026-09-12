@@ -50,7 +50,7 @@ export type RouterService = {
     agent: string,
   ) => Effect.Effect<
     HttpServerResponse.HttpServerResponse,
-    Errors.NoServer | Errors.ServerFailed | Errors.Internal
+    Errors.BadRequest | Errors.NoServer | Errors.ServerFailed | Errors.Internal
   >;
   // Forwards relinquish to the server that reserved this agent and forgets the agent
   // when that server accepts it. There is no placement here: /reserve already chose.
@@ -299,24 +299,8 @@ const make = Effect.gen(function* () {
       .serverForAgent(agent)
       .pipe(Effect.mapError((cause) => internal(cause, undefined, agent)));
     const who = { agentId: agent };
-    const attempt = (
-      url: string,
-    ): Effect.Effect<
-      HttpServerResponse.HttpServerResponse,
-      Errors.ServerFailed | Errors.Internal
-    > =>
-      Effect.gen(function* () {
-        const response = yield* send(url, request).pipe(
-          Effect.mapError((error) => unreachable(url, error, who)),
-        );
-        const text = yield* response.text.pipe(
-          Effect.mapError((error) => unreachable(url, error, who)),
-        );
-        const headers = forwardedHeaders(response.headers);
-        return HttpServerResponse.text(text, { status: response.status, headers });
-      });
     if (Option.isSome(existing)) {
-      return yield* attempt(existing.value);
+      return yield* Errors.BadRequest.make({ message: "already reserved", agentId: agent });
     }
     const urls = yield* store
       .listServers(SERVER_TYPE)

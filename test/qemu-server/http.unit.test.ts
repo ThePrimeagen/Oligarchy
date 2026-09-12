@@ -880,6 +880,56 @@ describe("Sessions failures", () => {
     }),
   );
 
+  it.effect("a second reserve for the same agent is 400 already reserved and reaches Sentry", () =>
+    Effect.gen(function* () {
+      const fixed = fixture({
+        sessions: FakeSessions.fakeSessions({
+          reserve: (agent) =>
+            Effect.fail(
+              Errors.BadRequest.make({
+                message: "already reserved",
+                agentId: agent,
+              }),
+            ),
+        }),
+      });
+      yield* Effect.gen(function* () {
+        const api = yield* client;
+        const error = yield* Effect.flip(
+          api.Sessions.reserve({
+            payload: Contract.ReserveAgentBody.make({ agent: AGENT_ID }),
+          }),
+        );
+        expect(error).toMatchObject({ _tag: "BadRequest", message: "already reserved" });
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.post("/reserve", {
+          headers: { authorization: `Bearer ${TOKEN}` },
+          body: HttpBody.jsonUnsafe({ agent: AGENT_ID }),
+        });
+        expect(raw.status).toBe(400);
+        expect(yield* raw.json).toEqual({ error: "already reserved" });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.log.lines).toEqual([
+        {
+          level: "error",
+          text: "POST /reserve failed: already reserved",
+          location: "server",
+          agentId: AGENT_ID,
+          skipSentry: false,
+          cause: undefined,
+        },
+        {
+          level: "error",
+          text: "POST /reserve failed: already reserved",
+          location: "server",
+          agentId: AGENT_ID,
+          skipSentry: false,
+          cause: undefined,
+        },
+      ]);
+    }),
+  );
+
   it.effect("an AtCapacity from reserve is 503 with its message, attributed to the agent", () =>
     Effect.gen(function* () {
       const fixed = fixture({

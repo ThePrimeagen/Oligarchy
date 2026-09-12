@@ -56,7 +56,10 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
         Effect.gen(function* () {
           const held = yield* Ref.get(slots);
           if (held.reserved.has(ticket)) {
-            return yield* Effect.void;
+            return yield* Errors.BadRequest.make({
+              message: "already reserved",
+              agentId: ticket,
+            });
           }
           // QEMU first: this client cannot hold a slot until the guest host has one.
           // A full client still asks, then gives that slot back rather than leak it.

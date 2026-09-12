@@ -114,13 +114,17 @@ const detail = (error: Errors.ApiError): string =>
     : error.message;
 
 // A refusal (< 500) is the caller's problem and skips Sentry; a failure carries its cause there.
-const report = (error: Errors.ApiError, fallback: Log.ProcessAttribution): Log.Report =>
-  Errors.apiStatus(error) < 500
-    ? { ...attribution(error, fallback), skipSentry: true }
-    : {
-        ...attribution(error, fallback),
-        cause: "cause" in error ? error.cause : undefined,
-      };
+// A second reserve for an id that already holds one is this process breaking its own contract,
+// so that 400 is reported.
+const report = (error: Errors.ApiError, fallback: Log.ProcessAttribution): Log.Report => {
+  const who = attribution(error, fallback);
+  if (error._tag === "BadRequest" && error.message === "already reserved") {
+    return who;
+  }
+  return Errors.apiStatus(error) < 500
+    ? { ...who, skipSentry: true }
+    : { ...who, cause: "cause" in error ? error.cause : undefined };
+};
 
 // The one boundary: schema errors to 400, defects to 500, one log line per failed request. The
 // qemu server and the qemu reverse proxy wrap it in their own middleware tags, which differ only in the error

@@ -252,12 +252,17 @@ describe("capacity", () => {
     }).pipe(Effect.provide(layer(spawner, 1)));
   });
 
-  it.effect("a second reserve for the same ticket is the same slot", () => {
+  it.effect("a second reserve for the same ticket is already reserved", () => {
     const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
       yield* sessions.reserve(TICKET);
-      yield* sessions.reserve(TICKET);
+      const error = yield* Effect.flip(sessions.reserve(TICKET));
+      expect(error).toMatchObject({
+        _tag: "BadRequest",
+        message: "already reserved",
+        agentId: TICKET,
+      });
       expect((yield* Effect.flip(sessions.reserve(OTHER)))._tag).toBe("AtCapacity");
     }).pipe(Effect.provide(layer(spawner, 1)));
   });
@@ -514,7 +519,7 @@ describe("QEMU-first reserve", () => {
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
       yield* sessions.reserve(TICKET);
-      yield* sessions.reserve(TICKET);
+      expect((yield* Effect.flip(sessions.reserve(TICKET)))._tag).toBe("BadRequest");
       expect(qemu).toBe(1);
     }).pipe(Effect.provide(layer(spawner, 1, reserveQemu)));
   });

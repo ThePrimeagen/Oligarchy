@@ -676,6 +676,50 @@ describe("placement", () => {
       }),
   );
 
+  it.effect("a second reserve for the same agent is 400 already reserved and reaches Sentry", () =>
+    Effect.gen(function* () {
+      const fixed = fixture((request, url) =>
+        url.pathname === "/reserve" ? FakeHttp.json({ ok: "true" }) : fleet(request, url),
+      );
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      yield* Effect.gen(function* () {
+        const api = yield* qemuServerClient;
+        yield* api.Sessions.reserve({ payload: reserveBody });
+        const error = yield* Effect.flip(api.Sessions.reserve({ payload: reserveBody }));
+        expect(error).toMatchObject({ _tag: "BadRequest", message: "already reserved" });
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.post("/reserve", {
+          headers: { authorization: AUTHORIZATION },
+          body: HttpBody.jsonUnsafe(reserveBody),
+        });
+        expect(raw.status).toBe(400);
+        expect(yield* raw.json).toEqual({ error: "already reserved" });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.store.agents.get(AGENT_ID)).toBe(SERVER_B);
+      expect(
+        fixed.upstream.requests.filter((request) => request.url.endsWith("/reserve")),
+      ).toHaveLength(1);
+      expect(fixed.log.lines.filter((line) => line.text.includes("already reserved"))).toEqual([
+        {
+          level: "error",
+          text: "POST /reserve failed: already reserved",
+          location: "server",
+          agentId: AGENT_ID,
+          skipSentry: false,
+          cause: undefined,
+        },
+        {
+          level: "error",
+          text: "POST /reserve failed: already reserved",
+          location: "server",
+          agentId: AGENT_ID,
+          skipSentry: false,
+          cause: undefined,
+        },
+      ]);
+    }),
+  );
+
   it.effect("a reserve the first server refuses with 503 is placed on the next", () =>
     Effect.gen(function* () {
       const fixed = fixture((request, url) => {

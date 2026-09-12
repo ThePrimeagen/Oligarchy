@@ -74,8 +74,9 @@ type OpenSession = Omit<LiveSession, "qemu">;
 
 export type SessionsService = {
   // Takes a --max-jobs slot for this agent, before anything is minted or written. A second
-  // reserve for the same agent is the same slot. Start consumes it and does not increment again.
-  readonly reserve: (agent: string) => Effect.Effect<void, Errors.AtCapacity>;
+  // reserve for the same agent is BadRequest: one id, one unused reservation. Start consumes
+  // it and does not increment again.
+  readonly reserve: (agent: string) => Effect.Effect<void, Errors.AtCapacity | Errors.BadRequest>;
   // Gives back an unused reservation. Fails BadRequest when there is none, including after
   // start has already consumed it: a running session keeps its slot.
   readonly relinquish: (agent: string) => Effect.Effect<void, Errors.BadRequest>;
@@ -437,27 +438,40 @@ const make = (maxJobs: number) =>
         ),
       );
 
+    const admit = (
+      outcome: "ok" | "held" | "full",
+      agent: string,
+    ): Effect.Effect<void, Errors.AtCapacity | Errors.BadRequest> => {
+      if (outcome === "ok") {
+        return Effect.void;
+      }
+      if (outcome === "held") {
+        return Errors.BadRequest.make({
+          message: "already reserved",
+          agentId: agent,
+        });
+      }
+      return Errors.AtCapacity.make({
+        message: `at capacity: max-jobs is ${String(maxJobs)}`,
+        agentId: agent,
+      });
+    };
+
     const reserve = Effect.fn("Sessions.reserve")(function* (agent: string) {
       return yield* Effect.flatMap(
         Ref.modify(slots, (held) => {
           if (held.reserved.has(agent)) {
-            return [true, held] as const;
+            return ["held", held] as const;
           }
           if (held.count >= maxJobs) {
-            return [false, held] as const;
+            return ["full", held] as const;
           }
           return [
-            true,
+            "ok",
             { count: held.count + 1, reserved: withItem(held.reserved, agent) },
           ] as const;
         }),
-        (admitted) =>
-          admitted
-            ? Effect.void
-            : Errors.AtCapacity.make({
-                message: `at capacity: max-jobs is ${String(maxJobs)}`,
-                agentId: agent,
-              }),
+        (outcome) => admit(outcome, agent),
       );
     });
 
