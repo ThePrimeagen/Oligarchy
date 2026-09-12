@@ -1018,9 +1018,11 @@ describe.skipIf(dbUrl === "")("dashboard/servers page happy path", () => {
     expect(html).toContain('<div id="process" hx-get="/servers/process" hx-trigger="every 30s">');
     expect(html).toContain("<h3>garage</h3>");
     expect(html).toContain('aria-label="jobs 2 · cpu 37.5% · memory 512.0 MB"');
-    expect(html).toContain('<span class="process-graph__jobs">jobs 2</span>');
-    expect(html).toContain('<span class="process-graph__cpu">cpu 37.5%</span>');
-    expect(html).toContain('<span class="process-graph__memory">memory 512.0 MB</span>');
+    expect(html).toContain('<li class="process-graph__memory">memory 512.0 MB</li>');
+    expect(html).toContain('<li class="process-graph__jobs">jobs 2</li>');
+    expect(html).toContain('<li class="process-graph__cpu">cpu 37.5%</li>');
+    expect(html).toContain('class="process-cards"');
+    expect(html).toMatch(/body\s*\{[^}]*background:\s*#161616/);
     expect(html).toContain('class="process-graph__jobs"');
     expect(html).toContain('class="process-graph__cpu"');
     expect(html).toContain("process-graph__bar");
