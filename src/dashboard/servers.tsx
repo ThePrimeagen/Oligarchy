@@ -81,83 +81,120 @@ const Row: FC<{ server: Server }> = ({ server }) => {
 
 const megabytes = (bytes: number): string => (bytes / 1_000_000).toFixed(1);
 
-// One named metric: the current reading in the heading, one bar per sample, oldest on the left.
-const BarGraph: FC<{
-  label: string;
-  current: string;
+const yOf = (value: number, max: number): number => (max === 0 ? 100 : 100 - (value / max) * 100);
+
+// One series as SVG line segments, oldest on the left. A single sample spans the plot so it
+// stays visible; a zero max sits on the baseline rather than inventing a height.
+const SeriesLine: FC<{
+  kind: "jobs" | "cpu";
   values: ReadonlyArray<number>;
   max: number;
-}> = ({ label, current, values, max }) => (
-  <div class="process-graph">
-    <h4>
-      {label} {current}
-    </h4>
-    <div class="process-graph__bars" role="img" aria-label={`${label} ${current}`}>
-      {values.map((value) => (
-        <span
-          class="process-graph__bar"
-          style={{ height: max === 0 ? "0%" : `${String((value / max) * 100)}%` }}
-        ></span>
+}> = ({ kind, values, max }) => {
+  if (values.length === 0) {
+    return null;
+  }
+  if (values.length === 1) {
+    const y = yOf(values[0] ?? 0, max);
+    return (
+      <line
+        class={`process-graph__${kind}`}
+        x1="0"
+        y1={y}
+        x2="100"
+        y2={y}
+        vector-effect="non-scaling-stroke"
+      ></line>
+    );
+  }
+  const last = values.length - 1;
+  return (
+    <>
+      {values.slice(1).map((value, index) => (
+        <line
+          class={`process-graph__${kind}`}
+          x1={(index / last) * 100}
+          y1={yOf(values[index] ?? 0, max)}
+          x2={((index + 1) / last) * 100}
+          y2={yOf(value, max)}
+          vector-effect="non-scaling-stroke"
+        ></line>
       ))}
+    </>
+  );
+};
+
+// Memory as bars, jobs and cpu as lines on the same plot. Each metric scales on its own
+// (cpu against 100 percent, or higher when a sample is), oldest on the left.
+const CombinedGraph: FC<{ series: ProcessSeries }> = ({ series }) => {
+  const jobs = series.samples.map((sample) => sample.jobs);
+  const cpu = series.samples.map((sample) => sample.cpuPercent);
+  const memory = series.samples.map((sample) => sample.memoryBytes);
+  const jobsMax = jobs.reduce((max, value) => (value > max ? value : max), 0);
+  const cpuMax = cpu.reduce((max, value) => (value > max ? value : max), 100);
+  const memoryMax = memory.reduce((max, value) => (value > max ? value : max), 0);
+  const current = `jobs ${String(series.jobs)} · cpu ${percent(series.cpuPercent)} · memory ${megabytes(series.memoryBytes)} MB`;
+  return (
+    <div class="process-graph" role="img" aria-label={current}>
+      <div class="process-graph__plot">
+        <div class="process-graph__bars">
+          {memory.map((value) => (
+            <span
+              class="process-graph__bar"
+              style={{ height: memoryMax === 0 ? "0%" : `${String((value / memoryMax) * 100)}%` }}
+            ></span>
+          ))}
+        </div>
+        <svg
+          class="process-graph__lines"
+          viewBox="0 0 100 100"
+          preserveAspectRatio="none"
+          aria-hidden="true"
+        >
+          <SeriesLine kind="jobs" values={jobs} max={jobsMax} />
+          <SeriesLine kind="cpu" values={cpu} max={cpuMax} />
+        </svg>
+      </div>
+      <ul class="process-graph__legend">
+        <li class="process-graph__memory">memory {megabytes(series.memoryBytes)} MB</li>
+        <li class="process-graph__jobs">jobs {series.jobs}</li>
+        <li class="process-graph__cpu">cpu {percent(series.cpuPercent)}</li>
+      </ul>
     </div>
-  </div>
-);
+  );
+};
 
 const ProcessCard: FC<{ series: ProcessSeries }> = ({ series }) => {
   const sinceReport = series.queriedAt.getTime() - series.reportedAt.getTime();
   return (
     <article class="process-card">
-      <h3>{series.name}</h3>
-      <p>
-        {series.type} · {age(sinceReport)} ago
-      </p>
+      <header>
+        <h3>{series.name}</h3>
+        <p>
+          {series.type} · {age(sinceReport)} ago
+        </p>
+      </header>
       {sinceReport > SILENT_AFTER_MS ? (
         <p>
           <strong>silent</strong>
         </p>
       ) : (
-        <div class="process-graphs">
-          <BarGraph
-            label="jobs"
-            current={String(series.jobs)}
-            values={series.samples.map((sample) => sample.jobs)}
-            max={series.samples.reduce((max, sample) => (sample.jobs > max ? sample.jobs : max), 0)}
-          />
-          <BarGraph
-            label="cpu"
-            current={percent(series.cpuPercent)}
-            values={series.samples.map((sample) => sample.cpuPercent)}
-            max={series.samples.reduce(
-              (max, sample) => (sample.cpuPercent > max ? sample.cpuPercent : max),
-              100,
-            )}
-          />
-          <BarGraph
-            label="memory"
-            current={`${megabytes(series.memoryBytes)} MB`}
-            values={series.samples.map((sample) => sample.memoryBytes)}
-            max={series.samples.reduce(
-              (max, sample) => (sample.memoryBytes > max ? sample.memoryBytes : max),
-              0,
-            )}
-          />
-        </div>
+        <CombinedGraph series={series} />
       )}
     </article>
   );
 };
 
-// Current process readings as one card per name: jobs, cpu and memory as bar graphs of the
-// series, or the sentence that there are none. What the page polls for.
+// Current process readings as one card per name: one graph of jobs, cpu and memory, or the
+// sentence that there are none. What the page polls for.
 export const Process: FC<{ series: ReadonlyArray<ProcessSeries> }> = ({ series }) =>
   series.length === 0 ? (
     <p>no process stats</p>
   ) : (
-    <>
+    <div class="process-cards">
       {series.map((row) => (
         <ProcessCard series={row} />
       ))}
-    </>
+    </div>
   );
 
 // The fleet as a table, or the sentence that there is none: what the page polls for.
@@ -264,11 +301,12 @@ export type Halves = {
   readonly process: ReadonlyArray<ProcessSeries>;
 };
 
-// Text an operator reads at a glance, in two halves side by side: the automation queue, then the
-// qemu fleet with its add box, each swapped in fresh every thirty seconds, and below them the
-// process graphs, one card per named server. The style is the split and the bars. `halves` is
-// absent only when the database could not be read, so a 500 page claims neither an empty queue
-// nor an empty fleet; `error` is the reason a request was refused, on top.
+// Text an operator reads at a glance on a dark page: the process graphs first, one card per
+// named server, then two halves side by side — the automation queue and the qemu fleet with its
+// add box — each swapped in fresh every thirty seconds. The style is the dark split and the
+// combined graph. `halves` is absent only when the database could not be read, so a 500 page
+// claims neither an empty queue nor an empty fleet; `error` is the reason a request was refused,
+// on top.
 export const ServersPage: FC<{
   halves: Halves | undefined;
   error: string | undefined;
@@ -279,7 +317,7 @@ export const ServersPage: FC<{
       <title>oligarchy servers</title>
       <style>
         {
-          ".halves { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: start; } .abort { background: none; border: none; padding: 0; cursor: pointer; line-height: 0; vertical-align: middle; } .process-card { display: grid; gap: 0.5rem; margin: 0 0 1.5rem; } .process-card > h3, .process-card > p, .process-graph > h4 { margin: 0; } .process-graphs { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; } .process-graph { display: grid; gap: 0.35rem; } .process-graph__bars { display: flex; align-items: flex-end; gap: 1px; height: 4rem; border-bottom: 1px solid #888; } .process-graph__bar { flex: 1 1 0; min-width: 0; min-height: 0; background: #444; }"
+          ':root { color-scheme: dark; } body { margin: 24px 32px 40px; font: 16px/1.4 system-ui, sans-serif; color: #e8e6e3; background: #161616; } h1, h2, h3 { color: #fff; } h1 { margin: 0 0 20px; } h2 { margin: 1.25rem 0 12px; } table { border-collapse: collapse; width: 100%; } th, td { text-align: left; padding: 4px 10px 4px 0; vertical-align: top; } th { color: #9a9691; font-weight: 600; } input, button { color: #e8e6e3; background: #1f1f1f; border: 1px solid #2c2c2c; border-radius: 6px; padding: 4px 8px; } button { cursor: pointer; } .halves { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: start; } .abort { background: none; border: none; padding: 0; cursor: pointer; line-height: 0; vertical-align: middle; } .process-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; } .process-card { display: grid; gap: 10px; background: #1f1f1f; border: 1px solid #2c2c2c; border-radius: 12px; padding: 14px 16px 12px; } .process-card > header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; } .process-card > header h3, .process-card > header p, .process-card > p { margin: 0; } .process-card > header p { color: #9a9691; font-size: 13px; } .process-graph { display: grid; gap: 10px; } .process-graph__plot { position: relative; height: 10rem; background: #111; border-radius: 8px; overflow: hidden; } .process-graph__plot::before { content: ""; position: absolute; inset: 0; background-image: linear-gradient(to top, #2a2a2a 1px, transparent 1px); background-size: 100% 25%; opacity: 0.7; } .process-graph__bars { position: absolute; inset: 10px 10px 8px; display: flex; align-items: flex-end; gap: 2px; } .process-graph__bar { flex: 1 1 0; min-width: 0; min-height: 0; background: #3f3f46; border-radius: 3px 3px 0 0; } .process-graph__lines { position: absolute; inset: 10px 10px 8px; width: calc(100% - 20px); height: calc(100% - 18px); overflow: visible; } .process-graph__lines .process-graph__jobs, .process-graph__lines .process-graph__cpu { fill: none; stroke-width: 2.25; } .process-graph__lines .process-graph__jobs { stroke: #fbbf24; } .process-graph__lines .process-graph__cpu { stroke: #38bdf8; } .process-graph__legend { display: flex; gap: 16px; list-style: none; margin: 0; padding: 0; font-size: 13px; color: #c4c0ba; } .process-graph__legend li::before { content: ""; display: inline-block; width: 12px; height: 8px; margin-right: 6px; vertical-align: middle; border-radius: 1px; } .process-graph__legend .process-graph__memory::before { background: #3f3f46; } .process-graph__legend .process-graph__jobs::before { background: #fbbf24; height: 3px; } .process-graph__legend .process-graph__cpu::before { background: #38bdf8; height: 3px; }'
         }
       </style>
       <script src={HTMX_URL} integrity={HTMX_INTEGRITY} crossorigin="anonymous"></script>
@@ -287,6 +325,14 @@ export const ServersPage: FC<{
     <body>
       <h1>oligarchy servers</h1>
       {error === undefined ? null : <p>error: {error}</p>}
+      <section>
+        <h2>process</h2>
+        {halves === undefined ? null : (
+          <div id="process" hx-get="/servers/process" hx-trigger="every 30s">
+            <Process series={halves.process} />
+          </div>
+        )}
+      </section>
       <div class="halves">
         <section>
           <h2>automation</h2>
@@ -310,14 +356,6 @@ export const ServersPage: FC<{
           </form>
         </section>
       </div>
-      <section>
-        <h2>process</h2>
-        {halves === undefined ? null : (
-          <div id="process" hx-get="/servers/process" hx-trigger="every 30s">
-            <Process series={halves.process} />
-          </div>
-        )}
-      </section>
     </body>
   </html>
 );

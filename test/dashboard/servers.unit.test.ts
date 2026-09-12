@@ -111,14 +111,10 @@ const processSilent: ProcessSeries = {
   samples: [{ jobs: 1, memoryBytes: 256_000_000, cpuPercent: 8, reportedAt: ago(5 * 60 + 12) }],
 };
 
-const jobsBars =
-  '<div class="process-graph__bars" role="img" aria-label="jobs 2"><span class="process-graph__bar" style="height:50%"></span><span class="process-graph__bar" style="height:100%"></span></div>';
+const garageGraph =
+  '<div class="process-graph" role="img" aria-label="jobs 2 · cpu 37.5% · memory 512.0 MB"><div class="process-graph__plot"><div class="process-graph__bars"><span class="process-graph__bar" style="height:50%"></span><span class="process-graph__bar" style="height:100%"></span></div><svg class="process-graph__lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><line class="process-graph__jobs" x1="0" y1="50" x2="100" y2="0" vector-effect="non-scaling-stroke"></line><line class="process-graph__cpu" x1="0" y1="90" x2="100" y2="62.5" vector-effect="non-scaling-stroke"></line></svg></div><ul class="process-graph__legend"><li class="process-graph__memory">memory 512.0 MB</li><li class="process-graph__jobs">jobs 2</li><li class="process-graph__cpu">cpu 37.5%</li></ul></div>';
 
-const cpuBars =
-  '<div class="process-graph__bars" role="img" aria-label="cpu 37.5%"><span class="process-graph__bar" style="height:10%"></span><span class="process-graph__bar" style="height:37.5%"></span></div>';
-
-const memoryBars =
-  '<div class="process-graph__bars" role="img" aria-label="memory 512.0 MB"><span class="process-graph__bar" style="height:50%"></span><span class="process-graph__bar" style="height:100%"></span></div>';
+const garageCard = `<div class="process-cards"><article class="process-card"><header><h3>garage</h3><p>qemu · 12 s ago</p></header>${garageGraph}</article></div>`;
 
 const JOB_COLUMNS =
   "<tr><th>ticket</th><th>test</th><th>action</th><th>status</th><th>queued</th><th>started</th><th>finished</th><th>reason</th><th></th></tr>";
@@ -312,13 +308,11 @@ describe("Queue unhappy path", () => {
 });
 
 describe("Process happy path", () => {
-  it("names a server and draws jobs, cpu and memory bar graphs of its series, newest reading on the labels", async () => {
+  it("names a server and draws one dark-well graph: memory as bars, jobs and cpu as lines, newest reading on the legend", async () => {
     const page = await render(Process({ series: [processAlive] }));
-    expect(page).toContain("<h3>garage</h3>");
-    expect(page).toContain("<p>qemu · 12 s ago</p>");
-    expect(page).toContain(`<h4>jobs 2</h4>${jobsBars}`);
-    expect(page).toContain(`<h4>cpu 37.5%</h4>${cpuBars}`);
-    expect(page).toContain(`<h4>memory 512.0 MB</h4>${memoryBars}`);
+    expect(page).toBe(garageCard);
+    expect(page.match(/class="process-graph"/g)?.length).toBe(1);
+    expect(page).not.toContain("<h4>");
     expect(page).not.toContain("<table>");
   });
 
@@ -327,7 +321,7 @@ describe("Process happy path", () => {
     expect(page).toBe("<p>no process stats</p>");
   });
 
-  it("scales cpu against 100 percent so a quiet host is a short bar, and above 100 when a sample is", async () => {
+  it("scales cpu against 100 percent so a quiet host is a low line, and above 100 when a sample is", async () => {
     const over: ProcessSeries = {
       ...processAlive,
       cpuPercent: 150,
@@ -337,17 +331,33 @@ describe("Process happy path", () => {
       ],
     };
     const page = await render(Process({ series: [over] }));
-    expect(page).toContain('aria-label="cpu 150.0%"');
-    expect(page).toContain('style="height:50%"');
-    expect(page).toContain('style="height:100%"');
+    expect(page).toContain('aria-label="jobs 2 · cpu 150.0% · memory 512.0 MB"');
+    expect(page).toContain(
+      '<line class="process-graph__cpu" x1="0" y1="50" x2="100" y2="0" vector-effect="non-scaling-stroke">',
+    );
+  });
+
+  it("draws a single sample as a horizontal line across the plot so the reading is still visible", async () => {
+    const one: ProcessSeries = {
+      ...processAlive,
+      samples: [{ jobs: 2, memoryBytes: 512_000_000, cpuPercent: 37.5, reportedAt: ago(12) }],
+    };
+    const page = await render(Process({ series: [one] }));
+    expect(page).toContain(
+      '<line class="process-graph__jobs" x1="0" y1="0" x2="100" y2="0" vector-effect="non-scaling-stroke">',
+    );
+    expect(page).toContain(
+      '<line class="process-graph__cpu" x1="0" y1="62.5" x2="100" y2="62.5" vector-effect="non-scaling-stroke">',
+    );
+    expect(page).toContain('<span class="process-graph__bar" style="height:100%"></span>');
+    expect(page.match(/class="process-graph__bar"/g)?.length).toBe(1);
   });
 });
 
 describe("Process unhappy path", () => {
   it("collapses a silent process's graphs into one word", async () => {
     const page = await render(Process({ series: [processSilent] }));
-    expect(page).toContain("<h3>attic</h3>");
-    expect(page).toContain("<p>automation-client · 5 min ago</p>");
+    expect(page).toContain("<header><h3>attic</h3><p>automation-client · 5 min ago</p></header>");
     expect(page).toContain("<p><strong>silent</strong></p>");
     expect(page).not.toContain("process-graph__bar");
     expect(page).not.toContain("256.0 MB");
@@ -372,17 +382,23 @@ describe("Process unhappy path", () => {
       ],
     };
     const page = await render(Process({ series: [idle] }));
-    expect(page).toContain("<h4>jobs 0</h4>");
-    expect(page).toContain("<h4>cpu 0.0%</h4>");
-    expect(page).toContain("<h4>memory 0.0 MB</h4>");
-    expect(page).toContain('aria-label="jobs 0"');
-    expect(page.match(/style="height:0%"/g)?.length).toBe(6);
+    expect(page).toContain('aria-label="jobs 0 · cpu 0.0% · memory 0.0 MB"');
+    expect(page).toContain('<li class="process-graph__memory">memory 0.0 MB</li>');
+    expect(page).toContain('<li class="process-graph__jobs">jobs 0</li>');
+    expect(page).toContain('<li class="process-graph__cpu">cpu 0.0%</li>');
+    expect(page.match(/style="height:0%"/g)?.length).toBe(2);
+    expect(page).toContain(
+      '<line class="process-graph__jobs" x1="0" y1="100" x2="100" y2="100" vector-effect="non-scaling-stroke">',
+    );
+    expect(page).toContain(
+      '<line class="process-graph__cpu" x1="0" y1="100" x2="100" y2="100" vector-effect="non-scaling-stroke">',
+    );
     expect(page).not.toContain('style="height:100%"');
   });
 });
 
 describe("ServersPage happy path", () => {
-  it("is split in two halves side by side: the automation queue first, the qemu fleet with its add box second, each polled every thirty seconds", async () => {
+  it("puts the process graphs first, then two halves side by side: the automation queue, the qemu fleet with its add box, each polled every thirty seconds", async () => {
     const page = await render(
       ServersPage({
         halves: { queue: QUEUE, servers: [alive, neverHeardFrom], process: [processAlive] },
@@ -391,9 +407,15 @@ describe("ServersPage happy path", () => {
     );
     expect(page).toContain("<title>oligarchy servers</title>");
     expect(page).toContain('<script src="https://cdn.jsdelivr.net/npm/htmx.org@4.0.0"');
+    expect(page).toMatch(/<style>[^<]*body\s*\{[^}]*background:\s*#161616/);
+    expect(page).toMatch(/<style>[^<]*\.process-cards\s*\{[^}]*grid-template-columns:\s*1fr 1fr/);
     expect(page).toMatch(/<style>[^<]*\.halves\s*\{[^}]*grid-template-columns:\s*1fr 1fr/);
     expect(page).toMatch(/<style>[^<]*\.abort\s*\{[^}]*background:\s*none/);
     expect(page).toContain("<h1>oligarchy servers</h1>");
+    expect(page).toContain(
+      `<section><h2>process</h2><div id="process" hx-get="/servers/process" hx-trigger="every 30s">${garageCard}`,
+    );
+    expect(page).toContain(garageGraph);
     expect(page).toContain(
       '<div class="halves"><section><h2>automation</h2><div id="queue" hx-get="/servers/queue" hx-trigger="every 30s"><h3>running</h3>',
     );
@@ -407,17 +429,14 @@ describe("ServersPage happy path", () => {
     expect(page).toContain(
       '<form method="post" action="/servers"><input name="url" size="60" placeholder="https://qemu.example.com"/><button>add</button></form>',
     );
+    expect(page.indexOf("<h2>process</h2>")).toBeLessThan(page.indexOf("<h2>automation</h2>"));
     expect(page.indexOf("<h2>automation</h2>")).toBeLessThan(page.indexOf("<h2>qemu servers</h2>"));
     expect(page.indexOf("<h2>qemu servers</h2>")).toBeLessThan(
       page.indexOf("<h2>add a server</h2>"),
     );
-    expect(page).toContain(
-      '<section><h2>process</h2><div id="process" hx-get="/servers/process" hx-trigger="every 30s"><article class="process-card"><h3>garage</h3>',
-    );
-    expect(page).toContain("<h4>cpu 37.5%</h4>");
     expect(page).toMatch(/<style>[^<]*\.process-card/);
+    expect(page).toMatch(/<style>[^<]*\.process-graph__plot/);
     expect(page).toMatch(/<style>[^<]*\.process-graph__bar/);
-    expect(page.indexOf("<h2>add a server</h2>")).toBeLessThan(page.indexOf("<h2>process</h2>"));
     expect(page).not.toContain("<h2>servers</h2>");
     expect(page).not.toContain("error:");
   });

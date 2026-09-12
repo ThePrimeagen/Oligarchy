@@ -72,7 +72,7 @@ export type ProcessStat = {
   readonly queriedAt: Date;
 };
 
-// One heartbeat in a name's series. The page draws a bar per sample, oldest on the left.
+// One heartbeat in a name's series. The page draws one sample on the combined graph, oldest on the left.
 export type ProcessSample = {
   readonly jobs: number;
   readonly memoryBytes: number;
