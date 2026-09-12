@@ -121,6 +121,8 @@ describe("qemu reverse proxy command flags", () => {
       const stdout = yield* TestConsole.logLines;
       expect(stdout.join("\n")).toContain("qemu-reverse-proxy");
       expect(stdout.join("\n")).toContain("--port");
+      expect(stdout.join("\n")).not.toContain("--jobs");
+      expect(stdout.join("\n")).not.toContain("--max-jobs");
       expect(stdout.join("\n")).not.toContain("--diagnostics-port");
       expect(stdout.join("\n")).not.toContain("--display");
     }),

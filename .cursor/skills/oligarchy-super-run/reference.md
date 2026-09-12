@@ -96,8 +96,7 @@ Cloudflare tunnel in front of `:55555` is not started by this skill.
 `--name` is unique on `servers`. `--url` is the upsert key and how they
 announce. Proxy and `./automation-server` have neither flag.
 
-`./automation-server --help` has `--port` and `--model` only. Dispatch is
-**one job at a time**. `--max-jobs` on qemu/client is the reserve cap, not
-how many the server claims. This skill cannot verify 4/3 or 5/3 under
-load. Default `--model` is the free Muse; this skill passes paid
-`openrouter/meta/muse-spark-1.3-contributor`.
+`./automation-server --help` has `--port` and `--model` only. Dispatch
+claims every pending job a live client will reserve. `--max-jobs` on
+qemu/client is the reserve cap. Default `--model` is the free Muse; this
+skill passes paid `openrouter/meta/muse-spark-1.3-contributor`.

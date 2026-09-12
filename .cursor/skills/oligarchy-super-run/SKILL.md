@@ -14,8 +14,8 @@ description: >-
 Process **100 COUNTED** lock-screen runs through drive + diagnose. INFRA
 attempts are recorded and replaced; they do not count. After the batch:
 report stability, whether the paid model landed on every result/diagnosis,
-and whether `--max-jobs` was actually exercised (current automation-server
-claims **one** job at a time, so 4/3 qemu and 5/3 client caps will not be).
+and whether `--max-jobs` was actually exercised (dispatch claims every
+pending job a live client will reserve; qemu 4/3 and client 5/3 are the caps).
 </Goal>
 <WriteableFiles>
 | File | What goes here |
@@ -77,7 +77,7 @@ sh .cursor/skills/oligarchy-super-run/scripts/install.sh
 . /tmp/superrun/env
 ```
 
-Start **six** processes. `./qemu-server` and `./automation-client` require `--name` and `--max-jobs`. Announce with `--url` on `http://127.0.0.1:…` (these binaries bind `127.0.0.1`; `localhost` can be `::1`). `--name` is unique on `servers`. Clients reserve guests through the proxy: `SERVER_URL=http://127.0.0.1:55555`. Omit it and they call `:42069`. `./automation-server` has no `--jobs` (one claim at a time) and defaults to **free** Muse — always pass the paid model.
+Start **six** processes. `./qemu-server` and `./automation-client` require `--name` and `--max-jobs`. Announce with `--url` on `http://127.0.0.1:…` (these binaries bind `127.0.0.1`; `localhost` can be `::1`). `--name` is unique on `servers`. Clients reserve guests through the proxy: `SERVER_URL=http://127.0.0.1:55555`. Omit it and they call `:42069`. `./automation-server` has no `--jobs` (it fills from client reserve) and defaults to **free** Muse — always pass the paid model.
 
 ```bash
 P=automation-super-run-logs/processes
