@@ -59,9 +59,9 @@ export type AutomationQueue = {
   readonly completed: ReadonlyArray<AutomationJob>;
 };
 
-// One process's word on itself: current jobs, current VmRSS, cpu over the last thirty seconds,
-// and the database's clock at the read so the page measures the report's age against the clock
-// that stamped it.
+// One process's word on itself: current jobs, VmRSS of this process and every child that
+// still answers, cpu over the last thirty seconds, and the database's clock at the read so
+// the page measures the report's age against the clock that stamped it.
 export type ProcessStat = {
   readonly name: string;
   readonly type: (typeof processStats.$inferSelect)["type"];

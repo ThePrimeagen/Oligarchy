@@ -2,8 +2,6 @@ import { Clock, Context, Effect, FileSystem, Layer, Option, Ref } from "effect";
 
 // USER_HZ on Linux, and this process only runs there. /proc/self/stat counts in these ticks.
 const CLK_TCK = 100;
-const STAT_PATH = "/proc/self/stat";
-const STATUS_PATH = "/proc/self/status";
 
 export type Reading = {
   readonly cpuTicks: number;
@@ -49,6 +47,16 @@ const parseVmRssBytes = (status: string): Option.Option<number> => {
   return Number.isFinite(kb) ? Option.some(kb * 1024) : Option.none();
 };
 
+const parseChildren = (text: string): ReadonlyArray<string> => {
+  const pids: Array<string> = [];
+  for (const token of text.trim().split(/\s+/)) {
+    if (/^\d+$/.test(token)) {
+      pids.push(token);
+    }
+  }
+  return pids;
+};
+
 const round1 = (value: number): number => Math.round(value * 10) / 10;
 
 type Sample = {
@@ -58,21 +66,63 @@ type Sample = {
 
 const missing = (path: string): Error => new Error(`unreadable process usage: ${path}`);
 
+// QEMU and OpenCode hold the RAM this Node process does not. Walk every task's children
+// file; a pid with no VmRSS is skipped for the sum, but we still walk its children so a
+// grandchild that answers is counted. A missing /proc is not a defect of us.
+const descendantsMemory = (fs: FileSystem.FileSystem, root: string): Effect.Effect<number> =>
+  Effect.gen(function* () {
+    const seen = new Set<string>([root]);
+    let total = 0;
+    const visit = (pid: string): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        const tasks = yield* Effect.option(fs.readDirectory(`/proc/${pid}/task`));
+        if (Option.isNone(tasks)) {
+          return;
+        }
+        for (const tid of tasks.value) {
+          const text = yield* fs
+            .readFileString(`/proc/${pid}/task/${tid}/children`)
+            .pipe(Effect.orElseSucceed(() => ""));
+          for (const child of parseChildren(text)) {
+            if (seen.has(child)) {
+              continue;
+            }
+            seen.add(child);
+            const status = yield* Effect.option(fs.readFileString(`/proc/${child}/status`));
+            if (Option.isSome(status)) {
+              const bytes = Option.getOrUndefined(parseVmRssBytes(status.value));
+              if (bytes !== undefined) {
+                total += bytes;
+              }
+            }
+            yield* visit(child);
+          }
+        }
+      });
+    yield* visit(root);
+    return total;
+  });
+
 const procSource =
   (fs: FileSystem.FileSystem): Source =>
   () =>
     Effect.gen(function* () {
-      const stat = yield* fs.readFileString(STAT_PATH).pipe(Effect.orDie);
-      const status = yield* fs.readFileString(STATUS_PATH).pipe(Effect.orDie);
+      const statPath = "/proc/self/stat";
+      const statusPath = "/proc/self/status";
+      const stat = yield* fs.readFileString(statPath).pipe(Effect.orDie);
+      const status = yield* fs.readFileString(statusPath).pipe(Effect.orDie);
       const cpuTicks = Option.getOrUndefined(parseCpuTicks(stat));
       const memoryBytes = Option.getOrUndefined(parseVmRssBytes(status));
       if (cpuTicks === undefined) {
-        return yield* Effect.die(missing(STAT_PATH));
+        return yield* Effect.die(missing(statPath));
       }
       if (memoryBytes === undefined) {
-        return yield* Effect.die(missing(STATUS_PATH));
+        return yield* Effect.die(missing(statusPath));
       }
-      return { cpuTicks, memoryBytes };
+      // cpu stays this pid: children appear and vanish with each job, and lost ticks would
+      // report 0. Memory is the tree, so a qemu or opencode the dashboard cannot see is counted.
+      const childrenBytes = yield* descendantsMemory(fs, "self");
+      return { cpuTicks, memoryBytes: memoryBytes + childrenBytes };
     });
 
 const make = (source: Source): Effect.Effect<ProcessUsageService> =>
