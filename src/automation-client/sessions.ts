@@ -21,7 +21,9 @@ const without = <T>(set: ReadonlySet<T>, item: T): ReadonlySet<T> => {
   return next;
 };
 
-const make = (maxJobs: number) =>
+export type ReserveQemu = (agent: string) => Effect.Effect<void, Errors.AtCapacity>;
+
+const make = (maxJobs: number, reserveQemu: ReserveQemu) =>
   Effect.gen(function* () {
     const running = yield* Ref.make<ReadonlyMap<string, ChildProcessSpawner.ChildProcessHandle>>(
       new Map(),
@@ -42,44 +44,52 @@ const make = (maxJobs: number) =>
       });
 
     const reserve = Effect.fn("Sessions.reserve")(function* (ticket: string) {
+      const held = yield* Ref.get(slots);
+      if (held.reserved.has(ticket)) {
+        return yield* Effect.void;
+      }
+      if (held.count >= maxJobs) {
+        return yield* atCapacity(ticket);
+      }
+      // QEMU first: this client cannot hold a slot until the guest host has one.
+      yield* reserveQemu(ticket);
       return yield* Effect.flatMap(
-        Ref.modify(slots, (held) => {
-          if (held.reserved.has(ticket)) {
-            return [true, held] as const;
+        Ref.modify(slots, (current) => {
+          if (current.reserved.has(ticket)) {
+            return [true, current] as const;
           }
-          if (held.count >= maxJobs) {
-            return [false, held] as const;
+          if (current.count >= maxJobs) {
+            return [false, current] as const;
           }
           return [
             true,
-            { count: held.count + 1, reserved: withItem(held.reserved, ticket) },
+            { count: current.count + 1, reserved: withItem(current.reserved, ticket) },
           ] as const;
         }),
         (admitted) => (admitted ? Effect.void : atCapacity(ticket)),
       );
     });
 
-    const admit = (ticket: string): Effect.Effect<void, Errors.AtCapacity> =>
+    const consume = (ticket: string): Effect.Effect<void, Errors.BadRequest> =>
       Effect.flatMap(
-        Ref.modify(slots, (held) => {
-          if (held.reserved.has(ticket)) {
-            return [true, { count: held.count, reserved: without(held.reserved, ticket) }] as const;
-          }
-          if (held.count >= maxJobs) {
-            return [false, held] as const;
-          }
-          return [true, { count: held.count + 1, reserved: held.reserved }] as const;
-        }),
-        (admitted) => (admitted ? Effect.void : atCapacity(ticket)),
+        Ref.modify(slots, (held) =>
+          held.reserved.has(ticket)
+            ? ([true, { count: held.count, reserved: without(held.reserved, ticket) }] as const)
+            : ([false, held] as const),
+        ),
+        (held) =>
+          held
+            ? Effect.void
+            : Errors.BadRequest.make({ message: "no reservation", agentId: ticket }),
       );
 
     const run = Effect.fn("Sessions.run")(function* (ticket: string, prompt: string) {
       return yield* Effect.scoped(
         Effect.gen(function* () {
-          // The slot is the run's first resource: taken (or consumed from reserve) and its
-          // release registered in one uninterruptible step, so it is given back however the
-          // run ends, and last, after the child is reaped and the ticket forgotten.
-          yield* Effect.acquireRelease(admit(ticket), () =>
+          // The reservation is the run's first resource: consumed and its release registered
+          // in one uninterruptible step, so the slot is given back however the run ends, and
+          // last, after the child is reaped and the ticket forgotten.
+          yield* Effect.acquireRelease(consume(ticket), () =>
             Ref.update(slots, (held) => ({ ...held, count: held.count - 1 })),
           );
           const handle = yield* Cli.spawn(OpenCode.BIN, OpenCode.args(prompt));
@@ -135,6 +145,7 @@ export class Sessions extends Context.Service<Sessions>()("@oligarchy/automation
 }) {
   static readonly layer = (
     maxJobs: number,
+    reserveQemu: ReserveQemu,
   ): Layer.Layer<Sessions, never, ChildProcessSpawner.ChildProcessSpawner> =>
-    Layer.effect(this)(this.make(maxJobs));
+    Layer.effect(this)(this.make(maxJobs, reserveQemu));
 }

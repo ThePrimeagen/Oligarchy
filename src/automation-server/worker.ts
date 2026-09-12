@@ -61,17 +61,7 @@ const execute = Effect.fn("execute")(function* (
         location: Log.Locations.automation,
         agentId: ticket,
       });
-      const ran = yield* Effect.result(AutomationClient.run(client.url, prompt, ticket));
-      if (Result.isFailure(ran)) {
-        if (ran.failure.status === 503) {
-          return yield* Errors.AtCapacity.make({
-            message: ran.failure.message,
-            agentId: ticket,
-          });
-        }
-        return yield* Effect.fail(ran.failure);
-      }
-      return yield* Effect.void;
+      return yield* AutomationClient.run(client.url, prompt, ticket);
     }
     if (reserved.failure.status === 503) {
       lastCapacity = reserved.failure.message;
@@ -103,8 +93,7 @@ const logOutcome = Effect.fn("logOutcome")(function* (
 });
 
 // One job at a time. A tick with no live client does not claim. Reserve runs against every
-// live client; a 503 from all of them, or from /run after a reserve, puts the row back to
-// pending so the queue is unchanged.
+// live client; a 503 from all of them puts the row back to pending so the queue is unchanged.
 // Claim is uninterruptible so a shutdown cannot leave a pending row half-taken; the HTTP wait
 // is restored so SIGTERM aborts an in-flight job; finish and unclaim are uninterruptible so
 // the write lands. A tick that fails is one error line; the next tick runs.

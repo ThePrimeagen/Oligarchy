@@ -75,14 +75,14 @@ type OpenSession = Omit<LiveSession, "qemu">;
 export type SessionsService = {
   // Takes a --max-jobs slot for this agent, before anything is minted or written. A second
   // reserve for the same agent is the same slot. Start consumes it and does not increment again.
-  readonly reserve: (body: Contract.StartBody) => Effect.Effect<void, Errors.AtCapacity>;
-  // Fails AtCapacity, before anything is minted or written, once --max-jobs sessions are held,
-  // unless this agent already reserved.
+  readonly reserve: (agent: string) => Effect.Effect<void, Errors.AtCapacity>;
+  // Consumes this agent's reservation. Fails BadRequest, before anything is minted or written,
+  // when there is none.
   readonly start: (
     body: Contract.StartBody,
     display: Domain.QemuDisplay,
     automation: boolean,
-  ) => Effect.Effect<string, Errors.AtCapacity | Errors.StartFailed | Errors.Internal>;
+  ) => Effect.Effect<string, Errors.BadRequest | Errors.StartFailed | Errors.Internal>;
   // Resets lastCommandAt before returning: a valid request counts as activity.
   readonly lookup: (
     id: string,
@@ -205,9 +205,9 @@ const make = (maxJobs: number) =>
     const sessions = yield* Ref.make<ReadonlyMap<string, LiveSession>>(new Map());
     const openSessions = yield* Ref.make<ReadonlyMap<string, OpenSession>>(new Map());
     // How many sessions are admitted against --max-jobs, and which agents already hold a slot
-    // that start will consume. Taken at reserve (or at start when there is no reservation),
-    // before the span, scope or row exist, so a refusal allocates nothing; given back in
-    // finishLiveSession, the one place every admitted session ends.
+    // that start will consume. Taken at reserve, before the span, scope or row exist, so a
+    // refusal allocates nothing; given back in finishLiveSession, the one place every admitted
+    // session ends.
     const slots = yield* Ref.make<{
       readonly count: number;
       readonly reserved: ReadonlySet<string>;
@@ -434,8 +434,7 @@ const make = (maxJobs: number) =>
         ),
       );
 
-    const reserve = Effect.fn("Sessions.reserve")(function* (body: Contract.StartBody) {
-      const agent = body.agent;
+    const reserve = Effect.fn("Sessions.reserve")(function* (agent: string) {
       return yield* Effect.flatMap(
         Ref.modify(slots, (held) => {
           if (held.reserved.has(agent)) {
@@ -465,18 +464,14 @@ const make = (maxJobs: number) =>
       automation: boolean,
     ) {
       const agent = body.agent;
-      const admitted = yield* Ref.modify(slots, (held) => {
-        if (held.reserved.has(agent)) {
-          return [true, { count: held.count, reserved: without(held.reserved, agent) }] as const;
-        }
-        if (held.count >= maxJobs) {
-          return [false, held] as const;
-        }
-        return [true, { count: held.count + 1, reserved: held.reserved }] as const;
-      });
-      if (!admitted) {
-        return yield* Errors.AtCapacity.make({
-          message: `at capacity: max-jobs is ${String(maxJobs)}`,
+      const reserved = yield* Ref.modify(slots, (held) =>
+        held.reserved.has(agent)
+          ? ([true, { count: held.count, reserved: without(held.reserved, agent) }] as const)
+          : ([false, held] as const),
+      );
+      if (!reserved) {
+        return yield* Errors.BadRequest.make({
+          message: "no reservation",
           agentId: agent,
         });
       }

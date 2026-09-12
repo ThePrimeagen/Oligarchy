@@ -44,7 +44,7 @@ const png = Schema.Uint8Array.pipe(HttpApiSchema.asUint8Array({ contentType: "im
 
 // Sessions group: bearer required
 export const reserve = HttpApiEndpoint.post("reserve", "/reserve", {
-  payload: Contract.StartBody,
+  payload: Contract.ReserveAgentBody,
   success: Contract.Ok,
   error: [Errors.AtCapacityWire],
 });
@@ -52,7 +52,7 @@ export const reserve = HttpApiEndpoint.post("reserve", "/reserve", {
 export const start = HttpApiEndpoint.post("start", "/start", {
   payload: Contract.StartBody,
   success: Contract.StartResponse,
-  error: [Errors.StartFailedWire, Errors.AtCapacityWire],
+  error: [Errors.StartFailedWire],
 });
 
 export const image = HttpApiEndpoint.get("image", "/image", {
@@ -190,7 +190,7 @@ export const reserveRun = HttpApiEndpoint.post("reserve", "/reserve", {
 export const run = HttpApiEndpoint.post("run", "/run", {
   payload: Contract.RunBody,
   success: Contract.Ok,
-  error: [Errors.RunFailedWire, Errors.AtCapacityWire],
+  error: [Errors.RunFailedWire],
 });
 
 export const abort = HttpApiEndpoint.post("abort", "/abort", {

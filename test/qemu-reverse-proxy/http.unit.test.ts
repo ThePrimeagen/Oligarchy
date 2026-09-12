@@ -488,6 +488,7 @@ describe("registration refusals", () => {
 
 describe("placement", () => {
   const startBody = Contract.StartBody.make({ iso: "omarchy.iso", agent: AGENT_ID });
+  const reserveBody = Contract.ReserveAgentBody.make({ agent: AGENT_ID });
 
   // Servers answer a start with the id they minted; `null` scripts one that answers without it.
   const placing =
@@ -497,76 +498,38 @@ describe("placement", () => {
         ? FakeHttp.json(started === null ? { ok: "true" } : { id: started })
         : fleet(request, url);
 
-  it.effect(
-    "POST /start probes every qemu server, picks the fewest qemus, forwards the body with the bearer, records the route and logs it",
-    () =>
-      Effect.gen(function* () {
-        const fixed = fixture(placing());
-        fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
-        yield* Effect.gen(function* () {
-          const api = yield* qemuServerClient;
-          const [started, response] = yield* api.Sessions.start({
-            payload: startBody,
-            responseMode: "decoded-and-response",
-          });
-          expect(started.id).toBe(STARTED_ID);
-          expect(response.headers["content-type"]).toContain("application/json");
-          expect(yield* response.text).toBe(`{"id":"${STARTED_ID}"}`);
-        }).pipe(Effect.provide(serve(fixed)));
-        expect(upstreamCalls(fixed).slice(0, 2).sort()).toEqual([
-          `GET ${SERVER_A}/stats`,
-          `GET ${SERVER_B}/stats`,
-        ]);
-        expect(fixed.upstream.requests[2]).toEqual({
-          method: "POST",
-          url: `${SERVER_B}/start`,
-          headers: expect.objectContaining({
-            authorization: AUTHORIZATION,
-            "content-type": "application/json",
-          }),
-          body: '{"iso":"omarchy.iso","agent":"OLI-61"}',
-        });
-        expect(fixed.store.routes.get(STARTED_ID)).toBe(SERVER_B);
-        expect(fixed.log.lines).toEqual([
-          {
-            level: "info",
-            text: `routed; ${SERVER_B}`,
-            location: STARTED_ID,
-            agentId: AGENT_ID,
-            skipSentry: false,
-            cause: undefined,
-          },
-        ]);
-      }),
-  );
-
   it.effect("ties go to the first registered server", () =>
     Effect.gen(function* () {
       const fixed = fixture((request, url) =>
-        url.pathname === "/stats" ? FakeHttp.json(stats(1)) : placing()(request, url),
+        url.pathname === "/stats"
+          ? FakeHttp.json(stats(1))
+          : url.pathname === "/reserve"
+            ? FakeHttp.json({ ok: "true" })
+            : placing()(request, url),
       );
       fixed.store.servers.push(qemu(SERVER_B), qemu(SERVER_A));
       yield* Effect.gen(function* () {
         const api = yield* qemuServerClient;
-        yield* api.Sessions.start({ payload: startBody });
+        yield* api.Sessions.reserve({ payload: reserveBody });
       }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.store.routes.get(STARTED_ID)).toBe(SERVER_B);
+      expect(fixed.store.agents.get(AGENT_ID)).toBe(SERVER_B);
     }),
   );
 
   it.effect("a server whose probe fails is skipped with a warning and the rest are placed on", () =>
     Effect.gen(function* () {
-      const fixed = fixture((request, url) =>
-        url.origin === SERVER_A && url.pathname === "/stats"
-          ? refused(request, url)
-          : placing()(request, url),
-      );
+      const fixed = fixture((request, url) => {
+        if (url.origin === SERVER_A && url.pathname === "/stats") {
+          return refused(request, url);
+        }
+        return url.pathname === "/reserve" ? FakeHttp.json({ ok: "true" }) : placing()(request, url);
+      });
       fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
       yield* Effect.gen(function* () {
         const api = yield* qemuServerClient;
-        yield* api.Sessions.start({ payload: startBody });
+        yield* api.Sessions.reserve({ payload: reserveBody });
       }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.store.routes.get(STARTED_ID)).toBe(SERVER_B);
+      expect(fixed.store.agents.get(AGENT_ID)).toBe(SERVER_B);
       expect(fixed.log.lines).toEqual([
         {
           level: "warning",
@@ -578,8 +541,8 @@ describe("placement", () => {
         },
         {
           level: "info",
-          text: `routed; ${SERVER_B}`,
-          location: STARTED_ID,
+          text: `reserved; ${SERVER_B}`,
+          location: "server",
           agentId: AGENT_ID,
           skipSentry: false,
           cause: undefined,
@@ -592,17 +555,17 @@ describe("placement", () => {
     Effect.gen(function* () {
       const fixed = fixture();
       yield* Effect.gen(function* () {
-        // /start answers 503 twice over — the reverse proxy's own NoServer and a server's
+        // /reserve answers 503 twice over — the reverse proxy's own NoServer and a server's
         // AtCapacity passed through — on one `{ error }` body, so the generated client cannot
         // tell them apart by tag; the status and the message are the contract, as ./client's
         // ProxyRefusal 503 reads them.
         const api = yield* qemuReverseProxyClient;
-        const error = yield* Effect.flip(api.Sessions.start({ payload: startBody }));
+        const error = yield* Effect.flip(api.Sessions.reserve({ payload: reserveBody }));
         expect(error.message).toBe("no server registered");
         const http = yield* HttpClient.HttpClient;
-        const raw = yield* http.post("/start", {
+        const raw = yield* http.post("/reserve", {
           headers: { authorization: AUTHORIZATION },
-          body: HttpBody.jsonUnsafe(startBody),
+          body: HttpBody.jsonUnsafe(reserveBody),
         });
         expect(raw.status).toBe(503);
         expect(yield* raw.json).toEqual({ error: "no server registered" });
@@ -611,7 +574,7 @@ describe("placement", () => {
       expect(fixed.log.lines).toEqual([
         {
           level: "error",
-          text: "POST /start failed: no server registered",
+          text: "POST /reserve failed: no server registered",
           location: "server",
           agentId: AGENT_ID,
           skipSentry: false,
@@ -619,7 +582,7 @@ describe("placement", () => {
         },
         {
           level: "error",
-          text: "POST /start failed: no server registered",
+          text: "POST /reserve failed: no server registered",
           location: "server",
           agentId: AGENT_ID,
           skipSentry: false,
@@ -635,10 +598,10 @@ describe("placement", () => {
       fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
       yield* Effect.gen(function* () {
         const api = yield* qemuReverseProxyClient;
-        const error = yield* Effect.flip(api.Sessions.start({ payload: startBody }));
+        const error = yield* Effect.flip(api.Sessions.reserve({ payload: reserveBody }));
         expect(error.message).toBe("no server available");
       }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.store.routes.size).toBe(0);
+      expect(fixed.store.agents.size).toBe(0);
       expect(fixed.log.lines.map((line) => [line.level, line.text, line.agentId])).toEqual([
         [
           "warning",
@@ -650,8 +613,28 @@ describe("placement", () => {
           `server skipped; server ${SERVER_B} unreachable: connect ECONNREFUSED 10.0.0.6:42069`,
           AGENT_ID,
         ],
-        ["error", "POST /start failed: no server available", AGENT_ID],
+        ["error", "POST /reserve failed: no server available", AGENT_ID],
       ]);
+    }),
+  );
+
+  it.effect("POST /start without a reservation is 400 no reservation", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      fixed.store.servers.push(qemu(SERVER_A));
+      yield* Effect.gen(function* () {
+        const api = yield* qemuServerClient;
+        const error = yield* Effect.flip(api.Sessions.start({ payload: startBody }));
+        expect(error).toMatchObject({ _tag: "BadRequest", message: "no reservation" });
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.post("/start", {
+          headers: { authorization: AUTHORIZATION },
+          body: HttpBody.jsonUnsafe(startBody),
+        });
+        expect(raw.status).toBe(400);
+        expect(yield* raw.json).toEqual({ error: "no reservation" });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.upstream.requests).toEqual([]);
     }),
   );
 
@@ -665,7 +648,7 @@ describe("placement", () => {
         fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
         yield* Effect.gen(function* () {
           const api = yield* qemuServerClient;
-          const ok = yield* api.Sessions.reserve({ payload: startBody });
+          const ok = yield* api.Sessions.reserve({ payload: reserveBody });
           expect(ok).toEqual(Contract.Ok.make({}));
         }).pipe(Effect.provide(serve(fixed)));
         expect(fixed.upstream.requests[2]).toEqual({
@@ -675,7 +658,7 @@ describe("placement", () => {
             authorization: AUTHORIZATION,
             "content-type": "application/json",
           }),
-          body: '{"iso":"omarchy.iso","agent":"OLI-61"}',
+          body: '{"agent":"OLI-61"}',
         });
         expect(fixed.store.agents.get(AGENT_ID)).toBe(SERVER_B);
         expect(fixed.log.lines).toEqual([
@@ -705,7 +688,7 @@ describe("placement", () => {
       fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
       yield* Effect.gen(function* () {
         const api = yield* qemuServerClient;
-        yield* api.Sessions.reserve({ payload: startBody });
+        yield* api.Sessions.reserve({ payload: reserveBody });
       }).pipe(Effect.provide(serve(fixed)));
       expect(fixed.store.agents.get(AGENT_ID)).toBe(SERVER_A);
       expect(
@@ -728,7 +711,7 @@ describe("placement", () => {
         const http = yield* HttpClient.HttpClient;
         const raw = yield* http.post("/reserve", {
           headers: { authorization: AUTHORIZATION },
-          body: HttpBody.jsonUnsafe(startBody),
+          body: HttpBody.jsonUnsafe(reserveBody),
         });
         expect(raw.status).toBe(503);
         expect(yield* raw.json).toEqual({ error: "at capacity: max-jobs is 1" });
@@ -749,7 +732,7 @@ describe("placement", () => {
       fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
       yield* Effect.gen(function* () {
         const api = yield* qemuServerClient;
-        yield* api.Sessions.reserve({ payload: startBody });
+        yield* api.Sessions.reserve({ payload: reserveBody });
         yield* api.Sessions.start({ payload: startBody });
       }).pipe(Effect.provide(serve(fixed)));
       expect(fixed.store.agents.get(AGENT_ID)).toBe(SERVER_B);
@@ -770,6 +753,7 @@ describe("placement", () => {
           : fleet(request, url),
       );
       fixed.store.servers.push(qemu(SERVER_A));
+      fixed.store.agents.set(AGENT_ID, SERVER_A);
       yield* Effect.gen(function* () {
         const api = yield* qemuServerClient;
         const error = yield* Effect.flip(api.Sessions.start({ payload: startBody }));
@@ -795,6 +779,7 @@ describe("placement", () => {
     Effect.gen(function* () {
       const fixed = fixture(placing(null));
       fixed.store.servers.push(qemu(SERVER_A));
+      fixed.store.agents.set(AGENT_ID, SERVER_A);
       yield* Effect.gen(function* () {
         const http = yield* HttpClient.HttpClient;
         const raw = yield* http.post("/start", {
@@ -824,6 +809,7 @@ describe("placement", () => {
         url.pathname === "/start" ? refused(request, url) : fleet(request, url),
       );
       fixed.store.servers.push(qemu(SERVER_A));
+      fixed.store.agents.set(AGENT_ID, SERVER_A);
       yield* Effect.gen(function* () {
         // ./client reads a 502 on /start as StartFailed: same status, same message, which is all
         // ./client ever shows.
@@ -858,13 +844,14 @@ describe("placement", () => {
           store: Stores.fakeServerStore({ routeSession: () => Effect.fail(failure) }),
         });
         fixed.store.servers.push(qemu(SERVER_A));
+        fixed.store.agents.set(AGENT_ID, SERVER_A);
         yield* Effect.gen(function* () {
           const api = yield* qemuServerClient;
           const error = yield* Effect.flip(api.Sessions.start({ payload: startBody }));
           expect(error).toMatchObject({ _tag: "Internal", message: "internal error" });
         }).pipe(Effect.provide(serve(fixed)));
         // No compensating stop: the machine times out on its server, as the doc says.
-        expect(upstreamCalls(fixed)).toEqual([`GET ${SERVER_A}/stats`, `POST ${SERVER_A}/start`]);
+        expect(upstreamCalls(fixed)).toEqual([`POST ${SERVER_A}/start`]);
         expect(fixed.log.lines).toEqual([
           {
             level: "error",
@@ -899,6 +886,7 @@ describe("placement", () => {
         },
       );
       fixed.store.servers.push(qemu(SERVER_A));
+      fixed.store.agents.set(AGENT_ID, SERVER_A);
       yield* Effect.gen(function* () {
         const api = yield* qemuServerClient;
         const request = yield* Effect.forkChild(api.Sessions.start({ payload: startBody }));

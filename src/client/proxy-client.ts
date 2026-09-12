@@ -14,6 +14,7 @@ import * as Errors from "../shared/errors.ts";
 export type Failure = Errors.ProxyRefusal | Errors.ProxyUnreachable;
 
 export type ProxyClientService = {
+  readonly reserve: (body: Contract.ReserveAgentBody) => Effect.Effect<void, Failure>;
   readonly start: (body: Contract.StartBody) => Effect.Effect<Contract.StartResponse, Failure>;
   readonly image: (id: string, agent: string) => Effect.Effect<Uint8Array, Failure>;
   readonly serial: (id: string, agent: string) => Effect.Effect<Uint8Array, Failure>;
@@ -114,6 +115,9 @@ export const connect = Effect.fn("ProxyClient.connect")(function* (options: Conn
   }).pipe(Effect.provide(middleware));
   const label = (method: string, path: string) => `${method} ${serverUrl}${path} failed`;
 
+  const reserve = (body: Contract.ReserveAgentBody) =>
+    run(label("POST", "/reserve"), client.Sessions.reserve({ payload: body })).pipe(Effect.asVoid);
+
   const start = (body: Contract.StartBody) =>
     run(label("POST", "/start"), client.Sessions.start({ payload: body })).pipe(
       Effect.timeoutOrElse({
@@ -174,6 +178,7 @@ export const connect = Effect.fn("ProxyClient.connect")(function* (options: Conn
   });
 
   const service: ProxyClientService = {
+    reserve,
     start,
     image,
     serial,

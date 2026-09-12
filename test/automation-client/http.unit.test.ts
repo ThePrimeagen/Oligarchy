@@ -40,9 +40,11 @@ const fixture = (
   maxJobs,
 });
 
+const qemuOk = (): Sessions.ReserveQemu => () => Effect.void;
+
 const serve = (fixed: Fixture) =>
   HttpRouter.serve(Handlers.routes, { disableLogger: true, disableListenLog: true }).pipe(
-    Layer.provide(Sessions.Sessions.layer(fixed.maxJobs)),
+    Layer.provide(Sessions.Sessions.layer(fixed.maxJobs, qemuOk())),
     Layer.provide(Layer.mergeAll(fixed.spawner.layer, fixed.log.layer, ProxyConfigLive)),
     Layer.provide(Layer.succeed(Log.ProcessAttribution)(Log.AutomationClientProcessAttribution)),
     Layer.provideMerge(NodeHttpServer.layerTest),
@@ -84,6 +86,18 @@ const abort = (
     body: HttpBody.text(JSON.stringify({ ticket }), "application/json"),
   });
 
+const reservedRun = (
+  http: HttpClient.HttpClient,
+  prompt = "do the work",
+  extraHeaders: Record<string, string> = headers,
+  ticket = TICKET,
+) =>
+  Effect.gen(function* () {
+    const reserved = yield* reserve(http, ticket, extraHeaders);
+    expect(reserved.status).toBe(200);
+    return yield* run(http, prompt, extraHeaders, ticket);
+  });
+
 describe("POST /reserve happy path", () => {
   it.effect("answers ok and does not spawn opencode", () =>
     Effect.gen(function* () {
@@ -106,7 +120,7 @@ describe("POST /run happy path", () => {
       const fixed = fixture(() => ({ exitCode: 0, stdout: "the written result" }));
       yield* Effect.gen(function* () {
         const http = yield* HttpClient.HttpClient;
-        const response = yield* run(http, "fix the bug");
+        const response = yield* reservedRun(http, "fix the bug");
         expect(response.status).toBe(200);
         expect(yield* response.json).toEqual({ ok: "true" });
       }).pipe(Effect.provide(serve(fixed)));
@@ -122,6 +136,7 @@ describe("POST /run happy path", () => {
       const fixed = fixture(() => ({}));
       yield* Effect.gen(function* () {
         const http = yield* HttpClient.HttpClient;
+        expect((yield* reserve(http)).status).toBe(200);
         const pending = yield* Effect.forkChild(run(http));
         for (let i = 0; i < 100 && fixed.spawner.spawned[0] === undefined; i++) {
           yield* Effect.yieldNow;
@@ -219,7 +234,7 @@ describe("POST /run unhappy path", () => {
       const fixed = fixture(() => ({ spawnError: "spawn opencode ENOENT" }));
       yield* Effect.gen(function* () {
         const http = yield* HttpClient.HttpClient;
-        const response = yield* run(http);
+        const response = yield* reservedRun(http);
         expect(response.status).toBe(500);
         expect(yield* response.json).toEqual({ error: "spawn opencode ENOENT" });
       }).pipe(Effect.provide(serve(fixed)));
@@ -234,7 +249,7 @@ describe("POST /run unhappy path", () => {
       const fixed = fixture(() => ({ exitCode: 1, stderr: "out of token credits\n" }));
       yield* Effect.gen(function* () {
         const http = yield* HttpClient.HttpClient;
-        const response = yield* run(http);
+        const response = yield* reservedRun(http);
         expect(response.status).toBe(500);
         expect(yield* response.json).toEqual({ error: "out of token credits" });
       }).pipe(Effect.provide(serve(fixed)));
@@ -266,23 +281,49 @@ describe("POST /run unhappy path", () => {
     }),
   );
 
+  it.effect("a run without a reservation is 400 no reservation and spawns nothing", () =>
+    Effect.gen(function* () {
+      const fixed = fixture(() => ({}), 1);
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const refused = yield* run(http, "first");
+        expect(refused.status).toBe(400);
+        expect(yield* refused.json).toEqual({ error: "no reservation" });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.spawner.spawned).toEqual([]);
+      expect(fixed.log.lines).toEqual([
+        {
+          level: "error",
+          text: "POST /run failed: no reservation",
+          location: "automation-client",
+          agentId: TICKET,
+          skipSentry: true,
+          cause: undefined,
+        },
+      ]);
+    }),
+  );
+
   it.effect(
-    "a run past --max-jobs is 503 at capacity, spawns nothing, and is taken once a run ends",
+    "a reserve past --max-jobs is 503 at capacity while a reserved run is in flight, and is taken once it ends",
     () =>
       Effect.gen(function* () {
         const fixed = fixture(() => ({}), 1);
         yield* Effect.gen(function* () {
           const http = yield* HttpClient.HttpClient;
+          expect((yield* reserve(http)).status).toBe(200);
           const pending = yield* Effect.forkChild(run(http, "first"));
           for (let i = 0; i < 100 && fixed.spawner.spawned[0] === undefined; i++) {
             yield* Effect.yieldNow;
           }
-          const refused = yield* run(http, "second", headers, "OLI-99");
+          const refused = yield* reserve(http, "OLI-99");
           expect(refused.status).toBe(503);
           expect(yield* refused.json).toEqual({ error: "at capacity: max-jobs is 1" });
+          expect((yield* run(http, "second", headers, "OLI-99")).status).toBe(400);
           expect(fixed.spawner.spawned).toHaveLength(1);
           yield* fixed.spawner.spawned[0]?.exit(0) ?? Effect.void;
           expect((yield* Fiber.join(pending)).status).toBe(200);
+          expect((yield* reserve(http, "OLI-99")).status).toBe(200);
           const accepted = yield* Effect.forkChild(run(http, "second", headers, "OLI-99"));
           for (let i = 0; i < 100 && fixed.spawner.spawned.length < 2; i++) {
             yield* Effect.yieldNow;
@@ -299,10 +340,18 @@ describe("POST /run unhappy path", () => {
         expect(fixed.log.lines).toEqual([
           {
             level: "error",
-            text: "POST /run failed: at capacity: max-jobs is 1",
+            text: "POST /reserve failed: at capacity: max-jobs is 1",
             location: "automation-client",
             agentId: "OLI-99",
             skipSentry: false,
+            cause: undefined,
+          },
+          {
+            level: "error",
+            text: "POST /run failed: no reservation",
+            location: "automation-client",
+            agentId: "OLI-99",
+            skipSentry: true,
             cause: undefined,
           },
         ]);
@@ -317,6 +366,7 @@ describe("interruption", () => {
       const fixed = fixture(() => ({}));
       yield* Effect.gen(function* () {
         const http = yield* HttpClient.HttpClient;
+        expect((yield* reserve(http)).status).toBe(200);
         const pending = yield* Effect.forkChild(run(http));
         for (let i = 0; i < 100 && fixed.spawner.spawned[0] === undefined; i++) {
           yield* Effect.yieldNow;
@@ -344,6 +394,7 @@ describe("POST /abort happy path", () => {
       const fixed = fixture(() => ({}));
       yield* Effect.gen(function* () {
         const http = yield* HttpClient.HttpClient;
+        expect((yield* reserve(http)).status).toBe(200);
         const pending = yield* Effect.forkChild(run(http));
         for (let i = 0; i < 100 && fixed.spawner.spawned[0] === undefined; i++) {
           yield* Effect.yieldNow;
@@ -425,6 +476,7 @@ describe("POST /abort unhappy path", () => {
         const fixed = fixture(() => ({ killError: "Failed to kill child process" }));
         yield* Effect.gen(function* () {
           const http = yield* HttpClient.HttpClient;
+          expect((yield* reserve(http)).status).toBe(200);
           const pending = yield* Effect.forkChild(run(http));
           for (let i = 0; i < 100 && fixed.spawner.spawned[0] === undefined; i++) {
             yield* Effect.yieldNow;

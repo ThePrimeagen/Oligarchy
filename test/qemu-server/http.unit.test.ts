@@ -102,20 +102,20 @@ describe("Sessions endpoints happy path", () => {
     }),
   );
 
-  it.effect("POST /reserve answers ok and hands the start body to Sessions", () =>
+  it.effect("POST /reserve answers ok and hands the agent to Sessions", () =>
     Effect.gen(function* () {
       const fixed = fixture();
       yield* Effect.gen(function* () {
         const api = yield* client;
         const ok = yield* api.Sessions.reserve({
-          payload: Contract.StartBody.make({ iso: "omarchy.iso", agent: AGENT_ID }),
+          payload: Contract.ReserveAgentBody.make({ agent: AGENT_ID }),
         });
         expect(ok).toEqual(Contract.Ok.make({}));
       }).pipe(Effect.provide(serve(fixed)));
       expect(fixed.sessions.calls).toEqual([
         {
           method: "reserve",
-          args: [Contract.StartBody.make({ iso: "omarchy.iso", agent: AGENT_ID })],
+          args: [AGENT_ID],
         },
       ]);
       expect(fixed.log.lines).toEqual([]);
@@ -863,11 +863,11 @@ describe("Sessions failures", () => {
     Effect.gen(function* () {
       const fixed = fixture({
         sessions: FakeSessions.fakeSessions({
-          reserve: (body) =>
+          reserve: (agent) =>
             Effect.fail(
               Errors.AtCapacity.make({
                 message: "at capacity: max-jobs is 2",
-                agentId: body.agent,
+                agentId: agent,
               }),
             ),
         }),
@@ -876,14 +876,14 @@ describe("Sessions failures", () => {
         const api = yield* client;
         const error = yield* Effect.flip(
           api.Sessions.reserve({
-            payload: Contract.StartBody.make({ iso: "omarchy.iso", agent: AGENT_ID }),
+            payload: Contract.ReserveAgentBody.make({ agent: AGENT_ID }),
           }),
         );
         expect(error).toMatchObject({ _tag: "AtCapacity", message: "at capacity: max-jobs is 2" });
         const http = yield* HttpClient.HttpClient;
         const raw = yield* http.post("/reserve", {
           headers: { authorization: `Bearer ${TOKEN}` },
-          body: HttpBody.jsonUnsafe({ iso: "omarchy.iso", agent: AGENT_ID }),
+          body: HttpBody.jsonUnsafe({ agent: AGENT_ID }),
         });
         expect(raw.status).toBe(503);
         expect(yield* raw.json).toEqual({ error: "at capacity: max-jobs is 2" });
@@ -910,14 +910,14 @@ describe("Sessions failures", () => {
     }),
   );
 
-  it.effect("an AtCapacity from start is 503 with its message, attributed to the agent", () =>
+  it.effect("a start without a reservation is 400 no reservation, attributed to the agent", () =>
     Effect.gen(function* () {
       const fixed = fixture({
         sessions: FakeSessions.fakeSessions({
           start: (body) =>
             Effect.fail(
-              Errors.AtCapacity.make({
-                message: "at capacity: max-jobs is 2",
+              Errors.BadRequest.make({
+                message: "no reservation",
                 agentId: body.agent,
               }),
             ),
@@ -930,32 +930,30 @@ describe("Sessions failures", () => {
             payload: Contract.StartBody.make({ iso: "omarchy.iso", agent: AGENT_ID }),
           }),
         );
-        expect(error).toMatchObject({ _tag: "AtCapacity", message: "at capacity: max-jobs is 2" });
+        expect(error).toMatchObject({ _tag: "BadRequest", message: "no reservation" });
         const http = yield* HttpClient.HttpClient;
         const raw = yield* http.post("/start", {
           headers: { authorization: `Bearer ${TOKEN}` },
           body: HttpBody.jsonUnsafe({ iso: "omarchy.iso", agent: AGENT_ID }),
         });
-        expect(raw.status).toBe(503);
-        expect(yield* raw.json).toEqual({ error: "at capacity: max-jobs is 2" });
+        expect(raw.status).toBe(400);
+        expect(yield* raw.json).toEqual({ error: "no reservation" });
       }).pipe(Effect.provide(serve(fixed)));
-      // No session was minted, so the line sits in the server bucket under the refused agent;
-      // a 503 is the fleet's problem to place elsewhere, so unlike a 4xx it reaches Sentry.
       expect(fixed.log.lines).toEqual([
         {
           level: "error",
-          text: "POST /start failed: at capacity: max-jobs is 2",
+          text: "POST /start failed: no reservation",
           location: "server",
           agentId: AGENT_ID,
-          skipSentry: false,
+          skipSentry: true,
           cause: undefined,
         },
         {
           level: "error",
-          text: "POST /start failed: at capacity: max-jobs is 2",
+          text: "POST /start failed: no reservation",
           location: "server",
           agentId: AGENT_ID,
-          skipSentry: false,
+          skipSentry: true,
           cause: undefined,
         },
       ]);

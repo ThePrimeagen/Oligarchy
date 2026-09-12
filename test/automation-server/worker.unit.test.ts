@@ -494,41 +494,6 @@ describe("dispatch unhappy path", () => {
     }),
   );
 
-  it.effect("a 503 from /run after reserve leaves the job pending", () =>
-    Effect.gen(function* () {
-      const fixed = harness();
-      seedResult(fixed.tests);
-      seedJob(fixed.automation);
-      seedLiveClient(fixed.servers);
-      const createdAt = fixed.automation.jobs[0]?.createdAt;
-      const http = FakeHttp.recordRequests((_request, url) =>
-        url.pathname === "/reserve"
-          ? FakeHttp.json({ ok: "true" })
-          : FakeHttp.json({ error: "at capacity: max-jobs is 1" }, 503),
-      );
-      yield* start(fixed, http.layer);
-      for (let i = 0; i < 200; i++) {
-        if (FakeLog.texts(fixed.log).includes("deferred; at capacity")) {
-          break;
-        }
-        yield* Effect.yieldNow;
-      }
-      expect(fixed.automation.jobs[0]).toMatchObject({
-        status: "pending",
-        serverId: null,
-        startedAt: null,
-        finishedAt: null,
-        reason: null,
-      });
-      expect(fixed.automation.jobs[0]?.createdAt).toBe(createdAt);
-      expect(http.requests.map((request) => request.url)).toEqual([`${URL}/reserve`, `${URL}/run`]);
-      expect(FakeLog.texts(fixed.log)).toEqual([
-        `dispatching drive; ${URL}`,
-        "deferred; at capacity",
-      ]);
-    }),
-  );
-
   it.effect("a 503 from the first client places the job on the next", () =>
     Effect.gen(function* () {
       const fixed = harness();

@@ -1,9 +1,10 @@
 import { createServer } from "node:http";
 import { NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node";
-import { Cause, Deferred, Effect, Exit, Layer, Option, type Runtime } from "effect";
+import { Cause, Config as EffectConfig, Deferred, Effect, Exit, Layer, Option, type Runtime } from "effect";
 import { Command } from "effect/unstable/cli";
 import { HttpMiddleware, HttpRouter, HttpServerError } from "effect/unstable/http";
 import * as Config from "../config.ts";
+import * as ProxyClient from "../client/proxy-client.ts";
 import * as Client from "../db/client.ts";
 import * as Logs from "../db/logs.ts";
 import * as Servers from "../db/servers.ts";
@@ -12,6 +13,8 @@ import * as Render from "../observability/render.ts";
 import * as Sentry from "../observability/sentry.ts";
 import * as Stats from "../qemu/stats.ts";
 import * as Api from "../shared/api.ts";
+import * as Contract from "../shared/contract.ts";
+import * as Errors from "../shared/errors.ts";
 import * as AutomationClientCommand from "./command.ts";
 import * as Handlers from "./handlers.ts";
 import * as Heartbeat from "./heartbeat.ts";
@@ -54,7 +57,24 @@ const ServerLive = (maxJobs: number, port: number, url: Option.Option<string>) =
         disableListenLog: true,
       }).pipe(Layer.provide(NodeHttpServer.layer(() => server, { host: HOST, port }))),
     ),
-    Layer.provide(Sessions.Sessions.layer(maxJobs)),
+    Layer.provide(
+      Layer.unwrap(
+        Effect.gen(function* () {
+          const { token } = yield* Config.ProxyConfig;
+          const serverUrl = yield* EffectConfig.string("SERVER_URL").pipe(
+            EffectConfig.withDefault(Config.DEFAULT_SERVER_URL),
+          );
+          const proxy = yield* ProxyClient.connect({ serverUrl, token });
+          return Sessions.Sessions.layer(maxJobs, (agent) =>
+            proxy.reserve(Contract.ReserveAgentBody.make({ agent })).pipe(
+              Effect.catch((error) =>
+                Errors.AtCapacity.make({ message: error.message, agentId: agent }),
+              ),
+            ),
+          );
+        }),
+      ),
+    ),
     Layer.provide(Stats.Stats.layer),
     Layer.provide(Layer.succeed(HttpMiddleware.TracerDisabledWhen)(() => true)),
   );

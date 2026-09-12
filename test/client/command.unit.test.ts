@@ -59,6 +59,9 @@ const run = (args: ReadonlyArray<string>, options: Options = {}) =>
 
 const ok = () => FakeHttp.json({ ok: "true" });
 
+const startRespond: FakeHttp.Respond = (_request, url) =>
+  url.pathname === "/reserve" ? FakeHttp.json({ ok: "true" }) : FakeHttp.json({ id: ID });
+
 const parsed = (body: string): unknown => JSON.parse(body);
 
 const showHelp = (error: unknown): CliError.ShowHelp => {
@@ -114,13 +117,16 @@ describe("client requests", () => {
 
   it.effect("start posts a url iso and the agent, omits the disk, and prints only the id", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(() => FakeHttp.json({ id: ID }));
+      const recorder = FakeHttp.recordRequests(startRespond);
       yield* run(["start", ...shared, "--iso", "https://example.com/omarchy.iso"], {
         http: recorder.layer,
       });
-      expect(recorder.requests[0]?.method).toBe("POST");
-      expect(recorder.requests[0]?.url).toBe(`${SERVER}/start`);
-      expect(parsed(recorder.requests[0]?.body ?? "")).toEqual({
+      expect(recorder.requests.map((request) => `${request.method} ${request.url}`)).toEqual([
+        `POST ${SERVER}/reserve`,
+        `POST ${SERVER}/start`,
+      ]);
+      expect(parsed(recorder.requests[0]?.body ?? "")).toEqual({ agent: AGENT });
+      expect(parsed(recorder.requests[1]?.body ?? "")).toEqual({
         iso: "https://example.com/omarchy.iso",
         agent: AGENT,
       });
@@ -135,11 +141,12 @@ describe("client requests", () => {
       const dir = yield* fs.makeTempDirectoryScoped();
       const iso = path.join(dir, "omarchy.iso");
       yield* fs.writeFileString(iso, "iso");
-      const recorder = FakeHttp.recordRequests(() => FakeHttp.json({ id: ID }));
+      const recorder = FakeHttp.recordRequests(startRespond);
       yield* run(["start", ...shared, "--iso", iso, "--disk", "relative/disk.qcow2"], {
         http: recorder.layer,
       });
-      expect(parsed(recorder.requests[0]?.body ?? "")).toEqual({
+      expect(parsed(recorder.requests[0]?.body ?? "")).toEqual({ agent: AGENT });
+      expect(parsed(recorder.requests[1]?.body ?? "")).toEqual({
         iso,
         disk: path.resolve("relative/disk.qcow2"),
         agent: AGENT,

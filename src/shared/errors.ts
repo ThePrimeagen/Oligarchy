@@ -156,9 +156,10 @@ export class RunFailed extends Schema.TaggedError<RunFailed>("@oligarchy/shared/
   override readonly [ErrorReporter.ignore] = true;
 }
 
-// A reserve, start or run refused because the process already runs --max-jobs jobs. 503: the
-// server is temporarily unable to take the work (RFC 9110 §15.6.4), not the caller's mistake;
-// the caller places it elsewhere or retries later.
+// A reserve refused because the process already holds --max-jobs jobs. 503: the server is
+// temporarily unable to take the work (RFC 9110 §15.6.4), not the caller's mistake; the caller
+// places it elsewhere or retries later. Start and run do not answer this: they consume a
+// reservation.
 export class AtCapacity extends Schema.TaggedError<AtCapacity>(
   "@oligarchy/shared/errors/AtCapacity",
 )(

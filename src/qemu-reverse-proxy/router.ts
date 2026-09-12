@@ -19,7 +19,7 @@ import * as Contract from "../shared/contract.ts";
 import * as Domain from "../shared/domain.ts";
 import * as Errors from "../shared/errors.ts";
 
-// A server that has not answered its /stats in this long is skipped for the start that asked and
+// A server that has not answered its /stats in this long is skipped for the reserve that asked and
 // is null in GET /servers; the request that probed it does not wait longer.
 export const PROBE_TIMEOUT = "10 seconds";
 
@@ -52,14 +52,14 @@ export type RouterService = {
     HttpServerResponse.HttpServerResponse,
     Errors.NoServer | Errors.ServerFailed | Errors.Internal
   >;
-  // Places the start on the answering server with the fewest qemus — or the one that reserved
-  // this agent — and routes the id it mints.
+  // Forwards start to the server that reserved this agent. There is no placement here:
+  // /reserve already chose.
   readonly start: (
     request: HttpServerRequest.HttpServerRequest,
     agent: string,
   ) => Effect.Effect<
     HttpServerResponse.HttpServerResponse,
-    Errors.NoServer | Errors.ServerFailed | Errors.Internal
+    Errors.BadRequest | Errors.ServerFailed | Errors.Internal
   >;
   // Sends the request as it came to the server that started the session; the answer as it came.
   readonly forward: (
@@ -238,40 +238,6 @@ const make = Effect.gen(function* () {
     return Contract.Servers.make({ servers: probed });
   });
 
-  // The answering server with the fewest machines, ties to the earliest registered.
-  const place = (agent: string): Effect.Effect<string, Errors.NoServer | Errors.Internal> =>
-    Effect.gen(function* () {
-      const urls = yield* store
-        .listServers(SERVER_TYPE)
-        .pipe(Effect.mapError((cause) => internal(cause, undefined, agent)));
-      if (urls.length === 0) {
-        return yield* Errors.NoServer.make({ message: "no server registered", agentId: agent });
-      }
-      const probed = yield* Effect.forEach(
-        urls,
-        (url) =>
-          Effect.map(Effect.result(probe(url, { agentId: agent })), (result) => ({ url, result })),
-        { concurrency: "unbounded" },
-      );
-      let chosen: { readonly url: string; readonly qemus: number } | undefined;
-      for (const { url, result } of probed) {
-        if (Result.isFailure(result)) {
-          yield* log.warning(`server skipped; ${result.failure.message}`, {
-            location: Log.Locations.server,
-            agentId: agent,
-          });
-          continue;
-        }
-        if (chosen === undefined || result.success.qemus < chosen.qemus) {
-          chosen = { url, qemus: result.success.qemus };
-        }
-      }
-      if (chosen === undefined) {
-        return yield* Errors.NoServer.make({ message: "no server available", agentId: agent });
-      }
-      return chosen.url;
-    });
-
   const commitStart = (
     url: string,
     request: HttpServerRequest.HttpServerRequest,
@@ -309,8 +275,10 @@ const make = Effect.gen(function* () {
     const reserved = yield* store
       .serverForAgent(agent)
       .pipe(Effect.mapError((cause) => internal(cause, undefined, agent)));
-    const url = Option.isSome(reserved) ? reserved.value : yield* place(agent);
-    return yield* commitStart(url, request, agent);
+    if (Option.isNone(reserved)) {
+      return yield* Errors.BadRequest.make({ message: "no reservation", agentId: agent });
+    }
+    return yield* commitStart(reserved.value, request, agent);
   });
 
   const reserve = Effect.fn("Router.reserve")(function* (
