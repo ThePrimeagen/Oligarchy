@@ -628,7 +628,7 @@ describe("jobs", () => {
       expect(yield* sessions.jobs).toBe(0);
       yield* sessions.reserve(TICKET);
       expect(yield* sessions.jobs).toBe(1);
-      yield* sessions.run(TICKET, "do the work");
+      yield* sessions.run(TICKET, "do the work", MODEL);
       expect(yield* sessions.jobs).toBe(0);
     }).pipe(Effect.provide(layer(spawner)));
   });
