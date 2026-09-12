@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Ref } from "effect";
+import { Context, Effect, Layer, Ref, Semaphore } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import * as Cli from "../cli.ts";
 import * as Errors from "../shared/errors.ts";
@@ -13,36 +13,97 @@ const mapWithout = <V>(map: ReadonlyMap<string, V>, key: string): ReadonlyMap<st
   return next;
 };
 
-const make = (maxJobs: number) =>
+const withItem = <T>(set: ReadonlySet<T>, item: T): ReadonlySet<T> => new Set([...set, item]);
+
+const without = <T>(set: ReadonlySet<T>, item: T): ReadonlySet<T> => {
+  const next = new Set(set);
+  next.delete(item);
+  return next;
+};
+
+export type ReserveQemu = (
+  agent: string,
+) => Effect.Effect<void, Errors.AtCapacity | Errors.Internal>;
+
+export type RelinquishQemu = (agent: string) => Effect.Effect<void, Errors.Internal>;
+
+const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: RelinquishQemu) =>
   Effect.gen(function* () {
     const running = yield* Ref.make<ReadonlyMap<string, ChildProcessSpawner.ChildProcessHandle>>(
       new Map(),
     );
-    // How many runs are admitted against --max-jobs. `running` cannot count them: a run is only
-    // in it once OpenCode has spawned, and the slot must be taken before that, so a refused run
-    // spawns nothing.
-    const jobs = yield* Ref.make(0);
+    // How many runs are admitted against --max-jobs, and which tickets already hold a slot
+    // that run will consume. `running` cannot count them: a run is only in it once OpenCode
+    // has spawned, and the slot must be taken before that, so a refused run spawns nothing.
+    const slots = yield* Ref.make<{
+      readonly count: number;
+      readonly reserved: ReadonlySet<string>;
+    }>({ count: 0, reserved: new Set() });
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
 
-    const admit = (ticket: string): Effect.Effect<void, Errors.AtCapacity> =>
+    const atCapacity = (ticket: string): Errors.AtCapacity =>
+      Errors.AtCapacity.make({
+        message: `at capacity: max-jobs is ${String(maxJobs)}`,
+        agentId: ticket,
+      });
+
+    // One reserve at a time: two tickets must not both reserve QEMU when only one local
+    // slot remains.
+    const reserveGate = yield* Semaphore.make(1);
+
+    const reserve = Effect.fn("Sessions.reserve")(function* (ticket: string) {
+      return yield* reserveGate.withPermits(1)(
+        Effect.gen(function* () {
+          const held = yield* Ref.get(slots);
+          if (held.reserved.has(ticket)) {
+            return yield* Errors.BadRequest.make({
+              message: "already reserved",
+              agentId: ticket,
+            });
+          }
+          // QEMU first: this client cannot hold a slot until the guest host has one.
+          // A full client still asks, then gives that slot back rather than leak it.
+          yield* reserveQemu(ticket);
+          const admitted = yield* Ref.modify(slots, (current) => {
+            if (current.count >= maxJobs) {
+              return [false, current] as const;
+            }
+            return [
+              true,
+              { count: current.count + 1, reserved: withItem(current.reserved, ticket) },
+            ] as const;
+          });
+          if (!admitted) {
+            yield* relinquishQemu(ticket);
+            return yield* atCapacity(ticket);
+          }
+          return yield* Effect.void;
+        }),
+      );
+    });
+
+    const consume = (ticket: string): Effect.Effect<void, Errors.BadRequest> =>
       Effect.flatMap(
-        Ref.modify(jobs, (n) => (n < maxJobs ? [true, n + 1] : [false, n])),
-        (admitted) =>
-          admitted
+        Ref.modify(slots, (held) =>
+          held.reserved.has(ticket)
+            ? ([true, { count: held.count, reserved: without(held.reserved, ticket) }] as const)
+            : ([false, held] as const),
+        ),
+        (held) =>
+          held
             ? Effect.void
-            : Errors.AtCapacity.make({
-                message: `at capacity: max-jobs is ${String(maxJobs)}`,
-                agentId: ticket,
-              }),
+            : Errors.BadRequest.make({ message: "no reservation", agentId: ticket }),
       );
 
     const run = Effect.fn("Sessions.run")(function* (ticket: string, prompt: string) {
       return yield* Effect.scoped(
         Effect.gen(function* () {
-          // The slot is the run's first resource: taken and its release registered in one
-          // uninterruptible step, so it is given back however the run ends, and last, after the
-          // child is reaped and the ticket forgotten.
-          yield* Effect.acquireRelease(admit(ticket), () => Ref.update(jobs, (n) => n - 1));
+          // The reservation is the run's first resource: consumed and its release registered
+          // in one uninterruptible step, so the slot is given back however the run ends, and
+          // last, after the child is reaped and the ticket forgotten.
+          yield* Effect.acquireRelease(consume(ticket), () =>
+            Ref.update(slots, (held) => ({ ...held, count: held.count - 1 })),
+          );
           const handle = yield* Cli.spawn(OpenCode.BIN, OpenCode.args(prompt));
           const claimed = yield* Ref.modify(running, (map) =>
             map.has(ticket)
@@ -88,7 +149,7 @@ const make = (maxJobs: number) =>
         );
     });
 
-    return { run, abort };
+    return { reserve, run, abort };
   });
 
 export class Sessions extends Context.Service<Sessions>()("@oligarchy/automation-client/Sessions", {
@@ -96,6 +157,8 @@ export class Sessions extends Context.Service<Sessions>()("@oligarchy/automation
 }) {
   static readonly layer = (
     maxJobs: number,
+    reserveQemu: ReserveQemu,
+    relinquishQemu: RelinquishQemu,
   ): Layer.Layer<Sessions, never, ChildProcessSpawner.ChildProcessSpawner> =>
-    Layer.effect(this)(this.make(maxJobs));
+    Layer.effect(this)(this.make(maxJobs, reserveQemu, relinquishQemu));
 }

@@ -1146,6 +1146,43 @@ Postgres.describeWithDatabase("database", () => {
       }),
     );
 
+    scoped.effect("AutomationStore unclaim returns a running job to pending as it was", () =>
+      Effect.gen(function* () {
+        const tests = yield* Tests.TestStore;
+        const automation = yield* Automation.AutomationStore;
+        const database = yield* Client.Database;
+        const definition = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
+        const created = yield* tests.createRun({
+          iso: "https://example.com/omarchy.iso",
+          serverUrl: "http://127.0.0.1:42069",
+          definitions: [{ id: definition.id }],
+        });
+        const enqueued = yield* automation.enqueue({
+          resultId: created.results[0].id,
+          action: "drive",
+        });
+        const createdAt = enqueued.createdAt;
+        const serverId = crypto.randomUUID();
+        yield* automation.claim(serverId);
+        expect(yield* automation.unclaim(enqueued.id)).toBe(true);
+        const [row] = yield* database.run("select", (db) =>
+          db
+            .select()
+            .from(DbSchema.automationJobs)
+            .where(eq(DbSchema.automationJobs.id, enqueued.id)),
+        );
+        expect(row).toMatchObject({
+          status: "pending",
+          serverId: null,
+          startedAt: null,
+          finishedAt: null,
+          reason: null,
+        });
+        expect(row?.createdAt).toEqual(createdAt);
+        expect(yield* automation.unclaim(enqueued.id)).toBe(false);
+      }),
+    );
+
     scoped.effect("AutomationStore finish closes a running job and refuses a second close", () =>
       Effect.gen(function* () {
         const tests = yield* Tests.TestStore;
@@ -1502,6 +1539,19 @@ Postgres.describeWithDatabase("database", () => {
         expect(twice).toMatchObject({ _tag: "DatabaseError", operation: "routeSession" });
         expect(String(twice.cause)).toContain("duplicate key");
         expect(yield* store.serverForSession(id)).toEqual(Option.some("http://10.0.0.5:42069"));
+      }),
+    );
+
+    scoped.effect("ServerStore routes an agent once and answers where it went", () =>
+      Effect.gen(function* () {
+        const store = yield* Servers.ServerStore;
+        expect(yield* store.serverForAgent("OLI-61")).toEqual(Option.none());
+        yield* store.routeAgent("OLI-61", "http://10.0.0.5:42069");
+        expect(yield* store.serverForAgent("OLI-61")).toEqual(Option.some("http://10.0.0.5:42069"));
+        yield* store.routeAgent("OLI-61", "http://10.0.0.6:42069");
+        expect(yield* store.serverForAgent("OLI-61")).toEqual(Option.some("http://10.0.0.5:42069"));
+        yield* store.clearAgent("OLI-61");
+        expect(yield* store.serverForAgent("OLI-61")).toEqual(Option.none());
       }),
     );
 

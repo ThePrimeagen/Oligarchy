@@ -58,6 +58,26 @@ describe("ProxyClient requests", () => {
     }),
   );
 
+  it.effect("reserve posts the agent", () =>
+    Effect.gen(function* () {
+      const recorder = FakeHttp.recordRequests(ok);
+      const proxy = yield* connect.pipe(Effect.provide(recorder.layer));
+      yield* proxy.reserve(Contract.ReserveAgentBody.make({ agent: AGENT }));
+      expectJsonPost(recorder.requests[0], "/reserve", { agent: AGENT });
+      expect(recorder.requests).toHaveLength(1);
+    }),
+  );
+
+  it.effect("relinquish posts the agent", () =>
+    Effect.gen(function* () {
+      const recorder = FakeHttp.recordRequests(ok);
+      const proxy = yield* connect.pipe(Effect.provide(recorder.layer));
+      yield* proxy.relinquish(Contract.ReserveAgentBody.make({ agent: AGENT }));
+      expectJsonPost(recorder.requests[0], "/relinquish", { agent: AGENT });
+      expect(recorder.requests).toHaveLength(1);
+    }),
+  );
+
   it.effect("start posts iso and agent and leaves an absent disk out of the body", () =>
     Effect.gen(function* () {
       const recorder = FakeHttp.recordRequests(() =>

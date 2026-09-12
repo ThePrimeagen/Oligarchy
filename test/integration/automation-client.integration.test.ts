@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { createServer as createHttpServer } from "node:http";
 import { env as processEnv } from "node:process";
 import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type AddressInfo } from "node:net";
@@ -154,6 +155,32 @@ const lines = (output: string): ReadonlyArray<string> =>
 const request = (port: number, path: string, headers: Record<string, string>, body: string) =>
   fetch(`http://127.0.0.1:${String(port)}${path}`, { method: "POST", headers, body });
 
+const AUTH_JSON = { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" };
+
+// The client reserves QEMU first; these process tests stub that host so /reserve can succeed.
+const stubQemuReserve = async (): Promise<{
+  readonly url: string;
+  readonly close: () => Promise<void>;
+}> => {
+  const server = createHttpServer((req, res) => {
+    if (req.method === "POST" && (req.url === "/reserve" || req.url === "/relinquish")) {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: "true" }));
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => resolve());
+  });
+  return {
+    url: `http://127.0.0.1:${String(portOf(server.address()))}`,
+    close: () => new Promise((done) => server.close(() => done())),
+  };
+};
+
 const logsForClient = async () => {
   const client = new Client({ connectionString: Postgres.getDbUrl() });
   await client.connect();
@@ -287,21 +314,25 @@ describeWithDatabase("automation client startup refusals with a database", () =>
 describeWithDatabase("automation client POST /run", () => {
   it.live("answers 200 when opencode exits 0", () =>
     Effect.promise(async () => {
+      const qemu = await stubQemuReserve();
       const bin = installOpencode("exit 0");
       const port = await freePort();
       const process = spawnAutomationClient(
         [...MAX_JOBS, "--port", String(port)],
-        {},
+        { SERVER_URL: qemu.url },
         `${bin}:${processEnv.PATH ?? ""}`,
       );
       try {
         await process.waitFor(
           new RegExp(`automation client listening on 127.0.0.1:${String(port)}`),
         );
+        expect(
+          (await request(port, "/reserve", AUTH_JSON, JSON.stringify({ ticket: "OLI-42" }))).status,
+        ).toBe(200);
         const response = await request(
           port,
           "/run",
-          { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+          AUTH_JSON,
           JSON.stringify({ prompt: "do the work", ticket: "OLI-42" }),
         );
         expect(response.status).toBe(200);
@@ -310,27 +341,32 @@ describeWithDatabase("automation client POST /run", () => {
         process.child.kill("SIGTERM");
         await process.exited;
         rmSync(bin, { recursive: true, force: true });
+        await qemu.close();
       }
     }),
   );
 
   it.live("answers 500 with opencode's error when it exits non-zero", () =>
     Effect.promise(async () => {
+      const qemu = await stubQemuReserve();
       const bin = installOpencode("echo out of token credits >&2; exit 1");
       const port = await freePort();
       const process = spawnAutomationClient(
         [...MAX_JOBS, "--port", String(port)],
-        {},
+        { SERVER_URL: qemu.url },
         `${bin}:${processEnv.PATH ?? ""}`,
       );
       try {
         await process.waitFor(
           new RegExp(`automation client listening on 127.0.0.1:${String(port)}`),
         );
+        expect(
+          (await request(port, "/reserve", AUTH_JSON, JSON.stringify({ ticket: "OLI-42" }))).status,
+        ).toBe(200);
         const response = await request(
           port,
           "/run",
-          { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+          AUTH_JSON,
           JSON.stringify({ prompt: "do the work", ticket: "OLI-42" }),
         );
         expect(response.status).toBe(500);
@@ -339,6 +375,7 @@ describeWithDatabase("automation client POST /run", () => {
         process.child.kill("SIGTERM");
         await process.exited;
         rmSync(bin, { recursive: true, force: true });
+        await qemu.close();
       }
     }),
   );
@@ -374,25 +411,29 @@ describeWithDatabase("automation client POST /run", () => {
     }),
   );
 
-  it.live("answers 503 at capacity while --max-jobs runs are in flight", () =>
+  it.live("answers 503 at capacity on a second reserve while --max-jobs runs are in flight", () =>
     Effect.promise(async () => {
+      const qemu = await stubQemuReserve();
       const startedDir = mkdtempSync(join(tmpdir(), "oligarchy-opencode-started-"));
       const started = join(startedDir, "ready");
       const bin = installOpencode(`touch "${started}"; sleep 60`);
       const port = await freePort();
       const process = spawnAutomationClient(
         [...MAX_JOBS, "--port", String(port)],
-        {},
+        { SERVER_URL: qemu.url },
         `${bin}:${processEnv.PATH ?? ""}`,
       );
       try {
         await process.waitFor(
           new RegExp(`automation client listening on 127.0.0.1:${String(port)}; max jobs 1`),
         );
+        expect(
+          (await request(port, "/reserve", AUTH_JSON, JSON.stringify({ ticket: "OLI-42" }))).status,
+        ).toBe(200);
         const running = request(
           port,
           "/run",
-          { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+          AUTH_JSON,
           JSON.stringify({ prompt: "do the work", ticket: "OLI-42" }),
         );
         const began = Date.now();
@@ -404,23 +445,23 @@ describeWithDatabase("automation client POST /run", () => {
         }
         const refused = await request(
           port,
-          "/run",
-          { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
-          JSON.stringify({ prompt: "more work", ticket: "OLI-99" }),
+          "/reserve",
+          AUTH_JSON,
+          JSON.stringify({ ticket: "OLI-99" }),
         );
         expect(refused.status).toBe(503);
         expect(await refused.json()).toEqual({ error: "at capacity: max-jobs is 1" });
         const aborted = await request(
           port,
           "/abort",
-          { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+          AUTH_JSON,
           JSON.stringify({ ticket: "OLI-42" }),
         );
         expect(aborted.status).toBe(200);
         expect((await running).status).toBe(500);
         expect(
           lines(process.stdout()).some((line) =>
-            line.includes("POST /run failed: at capacity: max-jobs is 1"),
+            line.includes("POST /reserve failed: at capacity: max-jobs is 1"),
           ),
         ).toBe(true);
       } finally {
@@ -428,6 +469,7 @@ describeWithDatabase("automation client POST /run", () => {
         await process.exited;
         rmSync(bin, { recursive: true, force: true });
         rmSync(startedDir, { recursive: true, force: true });
+        await qemu.close();
       }
     }),
   );
@@ -436,23 +478,27 @@ describeWithDatabase("automation client POST /run", () => {
 describeWithDatabase("automation client POST /abort", () => {
   it.live("kills a running opencode and answers 200", () =>
     Effect.promise(async () => {
+      const qemu = await stubQemuReserve();
       const startedDir = mkdtempSync(join(tmpdir(), "oligarchy-opencode-started-"));
       const started = join(startedDir, "ready");
       const bin = installOpencode(`touch "${started}"; sleep 60`);
       const port = await freePort();
       const process = spawnAutomationClient(
         [...MAX_JOBS, "--port", String(port)],
-        {},
+        { SERVER_URL: qemu.url },
         `${bin}:${processEnv.PATH ?? ""}`,
       );
       try {
         await process.waitFor(
           new RegExp(`automation client listening on 127.0.0.1:${String(port)}`),
         );
+        expect(
+          (await request(port, "/reserve", AUTH_JSON, JSON.stringify({ ticket: "OLI-42" }))).status,
+        ).toBe(200);
         const running = request(
           port,
           "/run",
-          { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+          AUTH_JSON,
           JSON.stringify({ prompt: "do the work", ticket: "OLI-42" }),
         );
         const began = Date.now();
@@ -477,29 +523,34 @@ describeWithDatabase("automation client POST /abort", () => {
         await process.exited;
         rmSync(bin, { recursive: true, force: true });
         rmSync(startedDir, { recursive: true, force: true });
+        await qemu.close();
       }
     }),
   );
 
   it.live("kills a SIGTERM-resistant opencode after the force-kill deadline", () =>
     Effect.promise(async () => {
+      const qemu = await stubQemuReserve();
       const startedDir = mkdtempSync(join(tmpdir(), "oligarchy-opencode-started-"));
       const started = join(startedDir, "ready");
       const bin = installOpencode(`trap "" TERM; touch "${started}"; sleep 60`);
       const port = await freePort();
       const process = spawnAutomationClient(
         [...MAX_JOBS, "--port", String(port)],
-        {},
+        { SERVER_URL: qemu.url },
         `${bin}:${processEnv.PATH ?? ""}`,
       );
       try {
         await process.waitFor(
           new RegExp(`automation client listening on 127.0.0.1:${String(port)}`),
         );
+        expect(
+          (await request(port, "/reserve", AUTH_JSON, JSON.stringify({ ticket: "OLI-42" }))).status,
+        ).toBe(200);
         const running = request(
           port,
           "/run",
-          { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+          AUTH_JSON,
           JSON.stringify({ prompt: "do the work", ticket: "OLI-42" }),
         );
         const began = Date.now();
@@ -524,6 +575,7 @@ describeWithDatabase("automation client POST /abort", () => {
         await process.exited;
         rmSync(bin, { recursive: true, force: true });
         rmSync(startedDir, { recursive: true, force: true });
+        await qemu.close();
       }
     }),
   );

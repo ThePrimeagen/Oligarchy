@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Option, Result, Schema, Stream } from "effect";
+import { Context, Effect, Layer, Option, Result, Schema, Semaphore, Stream } from "effect";
 import {
   type Headers,
   HttpBody,
@@ -19,7 +19,7 @@ import * as Contract from "../shared/contract.ts";
 import * as Domain from "../shared/domain.ts";
 import * as Errors from "../shared/errors.ts";
 
-// A server that has not answered its /stats in this long is skipped for the start that asked and
+// A server that has not answered its /stats in this long is skipped for the reserve that asked and
 // is null in GET /servers; the request that probed it does not wait longer.
 export const PROBE_TIMEOUT = "10 seconds";
 
@@ -44,13 +44,31 @@ export type RouterService = {
   readonly unregister: (url: string) => Effect.Effect<void, Errors.NotFound | Errors.Internal>;
   // Every registered server with its stats, null for one whose probe failed.
   readonly servers: Effect.Effect<Contract.Servers, Errors.Internal>;
-  // Places the start on the answering server with the fewest qemus and routes the id it mints.
+  // Places a reserve on an answering server with a free slot and remembers the agent.
+  readonly reserve: (
+    request: HttpServerRequest.HttpServerRequest,
+    agent: string,
+  ) => Effect.Effect<
+    HttpServerResponse.HttpServerResponse,
+    Errors.BadRequest | Errors.NoServer | Errors.ServerFailed | Errors.Internal
+  >;
+  // Forwards relinquish to the server that reserved this agent and forgets the agent
+  // when that server accepts it. There is no placement here: /reserve already chose.
+  readonly relinquish: (
+    request: HttpServerRequest.HttpServerRequest,
+    agent: string,
+  ) => Effect.Effect<
+    HttpServerResponse.HttpServerResponse,
+    Errors.BadRequest | Errors.ServerFailed | Errors.Internal
+  >;
+  // Forwards start to the server that reserved this agent. There is no placement here:
+  // /reserve already chose.
   readonly start: (
     request: HttpServerRequest.HttpServerRequest,
     agent: string,
   ) => Effect.Effect<
     HttpServerResponse.HttpServerResponse,
-    Errors.NoServer | Errors.ServerFailed | Errors.Internal
+    Errors.BadRequest | Errors.ServerFailed | Errors.Internal
   >;
   // Sends the request as it came to the server that started the session; the answer as it came.
   readonly forward: (
@@ -109,6 +127,8 @@ const make = Effect.gen(function* () {
   const log = yield* Log.Log;
   const http = yield* HttpClient.HttpClient;
   const { token } = yield* Config.ProxyConfig;
+  // One reserve at a time: two requests for the same agent must not both place.
+  const reserveGate = yield* Semaphore.make(1);
 
   // prependUrl joins with exactly one slash, so `http://host/` and `http://host` reach the same
   // /stats, as the generated client's baseUrl does.
@@ -229,65 +249,149 @@ const make = Effect.gen(function* () {
     return Contract.Servers.make({ servers: probed });
   });
 
-  // The answering server with the fewest machines, ties to the earliest registered.
-  const place = (agent: string): Effect.Effect<string, Errors.NoServer | Errors.Internal> =>
+  const commitStart = (
+    url: string,
+    request: HttpServerRequest.HttpServerRequest,
+    agent: string,
+  ): Effect.Effect<HttpServerResponse.HttpServerResponse, Errors.ServerFailed | Errors.Internal> =>
     Effect.gen(function* () {
-      const urls = yield* store
-        .listServers(SERVER_TYPE)
-        .pipe(Effect.mapError((cause) => internal(cause, undefined, agent)));
-      if (urls.length === 0) {
-        return yield* Errors.NoServer.make({ message: "no server registered", agentId: agent });
-      }
-      const probed = yield* Effect.forEach(
-        urls,
-        (url) =>
-          Effect.map(Effect.result(probe(url, { agentId: agent })), (result) => ({ url, result })),
-        { concurrency: "unbounded" },
+      const who = { agentId: agent };
+      const response = yield* send(url, request).pipe(
+        Effect.mapError((error) => unreachable(url, error, who)),
       );
-      let chosen: { readonly url: string; readonly qemus: number } | undefined;
-      for (const { url, result } of probed) {
-        if (Result.isFailure(result)) {
-          yield* log.warning(`server skipped; ${result.failure.message}`, {
-            location: Log.Locations.server,
-            agentId: agent,
-          });
-          continue;
-        }
-        if (chosen === undefined || result.success.qemus < chosen.qemus) {
-          chosen = { url, qemus: result.success.qemus };
-        }
+      const text = yield* response.text.pipe(
+        Effect.mapError((error) => unreachable(url, error, who)),
+      );
+      const headers = forwardedHeaders(response.headers);
+      if (response.status !== 200) {
+        // The server refused the start and has logged why; its answer is the client's.
+        return HttpServerResponse.text(text, { status: response.status, headers });
       }
-      if (chosen === undefined) {
-        return yield* Errors.NoServer.make({ message: "no server available", agentId: agent });
-      }
-      return chosen.url;
+      const { id } = yield* decodeStartAnswer(text).pipe(
+        Effect.mapError((cause) =>
+          serverFailed(url, `server ${url} answered 200 without an id`, cause, who),
+        ),
+      );
+      yield* store
+        .routeSession(id, url)
+        .pipe(Effect.mapError((cause) => internal(cause, id, agent)));
+      yield* store.clearAgent(agent).pipe(Effect.mapError((cause) => internal(cause, id, agent)));
+      yield* log.info(`routed; ${url}`, { location: id, agentId: agent });
+      return HttpServerResponse.text(text, { status: 200, headers });
     });
 
   const start = Effect.fn("Router.start")(function* (
     request: HttpServerRequest.HttpServerRequest,
     agent: string,
   ) {
-    const url = yield* place(agent);
+    const reserved = yield* store
+      .serverForAgent(agent)
+      .pipe(Effect.mapError((cause) => internal(cause, undefined, agent)));
+    if (Option.isNone(reserved)) {
+      return yield* Errors.BadRequest.make({ message: "no reservation", agentId: agent });
+    }
+    return yield* commitStart(reserved.value, request, agent);
+  });
+
+  const reserve = Effect.fn("Router.reserve")(function* (
+    request: HttpServerRequest.HttpServerRequest,
+    agent: string,
+  ) {
+    return yield* reserveGate.withPermits(1)(
+      Effect.gen(function* () {
+        const existing = yield* store
+          .serverForAgent(agent)
+          .pipe(Effect.mapError((cause) => internal(cause, undefined, agent)));
+        const who = { agentId: agent };
+        if (Option.isSome(existing)) {
+          return yield* Errors.BadRequest.make({ message: "already reserved", agentId: agent });
+        }
+        const urls = yield* store
+          .listServers(SERVER_TYPE)
+          .pipe(Effect.mapError((cause) => internal(cause, undefined, agent)));
+        if (urls.length === 0) {
+          return yield* Errors.NoServer.make({ message: "no server registered", agentId: agent });
+        }
+        const probed = yield* Effect.forEach(
+          urls,
+          (url) =>
+            Effect.map(Effect.result(probe(url, { agentId: agent })), (result) => ({
+              url,
+              result,
+            })),
+          { concurrency: "unbounded" },
+        );
+        const ranked: Array<{ readonly url: string; readonly qemus: number }> = [];
+        for (const { url, result } of probed) {
+          if (Result.isFailure(result)) {
+            yield* log.warning(`server skipped; ${result.failure.message}`, {
+              location: Log.Locations.server,
+              agentId: agent,
+            });
+            continue;
+          }
+          ranked.push({ url, qemus: result.success.qemus });
+        }
+        ranked.sort((left, right) => left.qemus - right.qemus);
+        let lastCapacity:
+          | { readonly status: number; readonly text: string; readonly headers: Headers.Input }
+          | undefined;
+        for (const { url } of ranked) {
+          const response = yield* send(url, request).pipe(
+            Effect.mapError((error) => unreachable(url, error, who)),
+          );
+          const text = yield* response.text.pipe(
+            Effect.mapError((error) => unreachable(url, error, who)),
+          );
+          const headers = forwardedHeaders(response.headers);
+          if (response.status === 200) {
+            yield* store
+              .routeAgent(agent, url)
+              .pipe(Effect.mapError((cause) => internal(cause, undefined, agent)));
+            yield* log.info(`reserved; ${url}`, { location: Log.Locations.server, agentId: agent });
+            return HttpServerResponse.text(text, { status: 200, headers });
+          }
+          if (response.status === 503) {
+            lastCapacity = { status: response.status, text, headers };
+            continue;
+          }
+          return HttpServerResponse.text(text, { status: response.status, headers });
+        }
+        if (lastCapacity !== undefined) {
+          return HttpServerResponse.text(lastCapacity.text, {
+            status: lastCapacity.status,
+            headers: lastCapacity.headers,
+          });
+        }
+        return yield* Errors.NoServer.make({ message: "no server available", agentId: agent });
+      }),
+    );
+  });
+
+  const relinquish = Effect.fn("Router.relinquish")(function* (
+    request: HttpServerRequest.HttpServerRequest,
+    agent: string,
+  ) {
+    const reserved = yield* store
+      .serverForAgent(agent)
+      .pipe(Effect.mapError((cause) => internal(cause, undefined, agent)));
+    if (Option.isNone(reserved)) {
+      return yield* Errors.BadRequest.make({ message: "no reservation", agentId: agent });
+    }
     const who = { agentId: agent };
+    const url = reserved.value;
     const response = yield* send(url, request).pipe(
       Effect.mapError((error) => unreachable(url, error, who)),
     );
-    const text = yield* response.text.pipe(
-      Effect.mapError((error) => unreachable(url, error, who)),
-    );
-    const headers = forwardedHeaders(response.headers);
-    if (response.status !== 200) {
-      // The server refused the start and has logged why; its answer is the client's.
-      return HttpServerResponse.text(text, { status: response.status, headers });
+    // Status is on the wire before the body: a 200 means the slot is already free, even if
+    // the stream then dies. Forget the agent before passing the answer through.
+    if (response.status === 200) {
+      yield* store
+        .clearAgent(agent)
+        .pipe(Effect.mapError((cause) => internal(cause, undefined, agent)));
+      yield* log.info(`relinquished; ${url}`, { location: Log.Locations.server, agentId: agent });
     }
-    const { id } = yield* decodeStartAnswer(text).pipe(
-      Effect.mapError((cause) =>
-        serverFailed(url, `server ${url} answered 200 without an id`, cause, who),
-      ),
-    );
-    yield* store.routeSession(id, url).pipe(Effect.mapError((cause) => internal(cause, id, agent)));
-    yield* log.info(`routed; ${url}`, { location: id, agentId: agent });
-    return HttpServerResponse.text(text, { status: 200, headers });
+    return passthrough(url, response, who);
   });
 
   const forward = Effect.fn("Router.forward")(function* (
@@ -311,7 +415,15 @@ const make = Effect.gen(function* () {
     return passthrough(route.value, response, who);
   });
 
-  const service: RouterService = { register, unregister, servers, start, forward };
+  const service: RouterService = {
+    register,
+    unregister,
+    servers,
+    reserve,
+    relinquish,
+    start,
+    forward,
+  };
   return service;
 });
 

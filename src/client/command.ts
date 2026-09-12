@@ -59,6 +59,7 @@ const start = Command.make(
       onSome: (disk) =>
         Contract.StartBody.make({ iso, disk: path.resolve(disk), agent: input.agentId }),
     });
+    yield* proxy.reserve(Contract.ReserveAgentBody.make({ agent: input.agentId }));
     const started = yield* proxy.start(body);
     yield* Console.log(started.id);
   }),

@@ -145,6 +145,8 @@ export const fakeSessions = (
           return found === undefined ? yield* Errors.unknownSession(id) : found;
         });
       return Sessions.Sessions.of({
+        reserve: (agent) => record("reserve", agent),
+        relinquish: (agent) => record("relinquish", agent),
         start: (body, display, automation) =>
           record("start", body, display, automation).pipe(Effect.as(STARTED_ID)),
         lookup,

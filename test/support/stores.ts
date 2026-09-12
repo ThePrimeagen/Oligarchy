@@ -576,6 +576,24 @@ export const fakeAutomationStore = (
           jobs.find((job) => sameId(job.resultId, resultId) && job.status === "running"),
         ),
       ),
+    unclaim: (id) =>
+      Effect.sync(() => {
+        const job = jobs.find((row) => row.id === id && row.status === "running");
+        if (job === undefined) {
+          return false;
+        }
+        job.status = "pending";
+        job.startedAt = null;
+        job.serverId = null;
+        return true;
+      }),
+    assign: (id, serverId) =>
+      Effect.sync(() => {
+        const job = jobs.find((row) => row.id === id && row.status === "running");
+        if (job !== undefined) {
+          job.serverId = serverId;
+        }
+      }),
     finish: (id, status, reason) =>
       Effect.sync(() => {
         const job = jobs.find((row) => row.id === id && row.status === "running");
@@ -656,6 +674,8 @@ export type FakeServerStore = {
   readonly servers: Array<RegisteredServer>;
   // Session id to the url of the server that started it.
   readonly routes: Map<string, string>;
+  // Agent id to the url that reserved a slot for it.
+  readonly agents: Map<string, string>;
   // Every heartbeat written, in order.
   readonly heartbeats: Array<Heartbeat>;
   readonly layer: Layer.Layer<Servers.ServerStore>;
@@ -669,6 +689,7 @@ export const fakeServerStore = (
 ): FakeServerStore => {
   const servers: Array<RegisteredServer> = [];
   const routes = new Map<string, string>();
+  const agents = new Map<string, string>();
   const heartbeats: Array<Heartbeat> = [];
   const indexOf = (url: string) => servers.findIndex((server) => server.url === url);
   const service = Servers.ServerStore.of({
@@ -728,9 +749,26 @@ export const fakeServerStore = (
           }),
     serverForSession: (sessionId) =>
       Effect.sync(() => Option.fromUndefinedOr(routes.get(sessionId))),
+    routeAgent: (agentId, url) =>
+      Effect.sync(() => {
+        if (!agents.has(agentId)) {
+          agents.set(agentId, url);
+        }
+      }),
+    serverForAgent: (agentId) => Effect.sync(() => Option.fromUndefinedOr(agents.get(agentId))),
+    clearAgent: (agentId) =>
+      Effect.sync(() => {
+        agents.delete(agentId);
+      }),
     ...overrides,
   });
-  return { servers, routes, heartbeats, layer: Layer.succeed(Servers.ServerStore)(service) };
+  return {
+    servers,
+    routes,
+    agents,
+    heartbeats,
+    layer: Layer.succeed(Servers.ServerStore)(service),
+  };
 };
 
 // Every store at once, sharing nothing: the common fixture for handler and command tests.

@@ -20,6 +20,26 @@ export const SessionsLive = (display: Domain.QemuDisplay, automation: boolean) =
   HttpApiBuilder.group(Api.QemuServerApi, "Sessions", (handlers) =>
     handlers
       .handle(
+        "reserve",
+        ({ payload }) =>
+          Effect.gen(function* () {
+            const sessions = yield* Sessions.Sessions;
+            yield* sessions.reserve(payload.agent);
+            return ok;
+          }),
+        uninterruptible,
+      )
+      .handle(
+        "relinquish",
+        ({ payload }) =>
+          Effect.gen(function* () {
+            const sessions = yield* Sessions.Sessions;
+            yield* sessions.relinquish(payload.agent);
+            return ok;
+          }),
+        uninterruptible,
+      )
+      .handle(
         "start",
         ({ payload }) =>
           Effect.gen(function* () {

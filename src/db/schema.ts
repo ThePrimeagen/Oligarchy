@@ -228,6 +228,14 @@ export const sessionServers = pgTable("session_servers", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// Which server reserved a slot for an agent, so start finds that machine before a session id
+// exists. agent_id is the ticket. A racing second insert is one row.
+export const agentServers = pgTable("agent_servers", {
+  agentId: text("agent_id").primaryKey(),
+  serverUrl: text("server_url").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // A definition is the stored mission an agent is handed — what it is about, what to
 // do, and the proof that closes it. A row is never updated: an edit is a new row with
 // the same name and a higher id, so a result's definition_id names the exact wording

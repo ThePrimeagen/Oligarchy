@@ -146,10 +146,21 @@ const startBody = (iso = ISO, agent = AGENT, disk?: string) =>
     ? Contract.StartBody.make({ iso, agent })
     : Contract.StartBody.make({ iso, agent, disk });
 
+const reservedStart = (
+  body: Contract.StartBody,
+  display: Domain.QemuDisplay = "none",
+  automation = false,
+) =>
+  Effect.gen(function* () {
+    const sessions = yield* Sessions.Sessions;
+    yield* sessions.reserve(body.agent);
+    return yield* sessions.start(body, display, automation);
+  });
+
 const start = (agent = AGENT, iso = ISO) =>
   Effect.gen(function* () {
     const sessions = yield* Sessions.Sessions;
-    const id = yield* sessions.start(startBody(iso, agent), "none", false);
+    const id = yield* reservedStart(startBody(iso, agent));
     const live = yield* sessions.lookup(id, agent);
     return { sessions, id, live };
   });
@@ -225,7 +236,7 @@ describe("start", () => {
         yield* h.run(
           Effect.gen(function* () {
             const sessions = yield* Sessions.Sessions;
-            const id = yield* sessions.start(startBody(URL_ISO, AGENT, DISK), "gtk", true);
+            const id = yield* reservedStart(startBody(URL_ISO, AGENT, DISK), "gtk", true);
             expect(Domain.isSessionId(id)).toBe(true);
             expect(h.fsCalls).toEqual([`stat ${DISK}`]);
             expect(order).toEqual([
@@ -304,10 +315,7 @@ describe("start", () => {
       const h = harness();
       yield* h.run(
         Effect.gen(function* () {
-          const sessions = yield* Sessions.Sessions;
-          const error = yield* Effect.flip(
-            sessions.start(startBody(URL_ISO, AGENT, DISK), "none", false),
-          );
+          const error = yield* Effect.flip(reservedStart(startBody(URL_ISO, AGENT, DISK)));
           expect(error).toMatchObject({
             _tag: "StartFailed",
             message: `qemu: disk not found: ${DISK}`,
@@ -340,7 +348,7 @@ describe("start", () => {
       yield* h.run(
         Effect.gen(function* () {
           const sessions = yield* Sessions.Sessions;
-          const error = yield* Effect.flip(sessions.start(startBody(URL_ISO), "none", false));
+          const error = yield* Effect.flip(reservedStart(startBody(URL_ISO)));
           expect(error).toMatchObject({
             _tag: "StartFailed",
             message: "qemu-img create exited 1",
@@ -354,7 +362,7 @@ describe("start", () => {
           ]);
           expect(h.log.released).toEqual([AGENT]);
           // The registration was never spent: the same agent boots on its next try.
-          const id = yield* sessions.start(startBody(), "none", false);
+          const id = yield* reservedStart(startBody());
           expect(h.sessions.agentRuns).toMatchObject([{ agentId: AGENT, sessionId: id }]);
           expect(yield* qemus(sessions)).toBe(1);
         }),
@@ -377,7 +385,7 @@ describe("start", () => {
         yield* h.run(
           Effect.gen(function* () {
             const sessions = yield* Sessions.Sessions;
-            const error = yield* Effect.flip(sessions.start(startBody(), "none", false));
+            const error = yield* Effect.flip(reservedStart(startBody()));
             expect(error._tag).toBe("StartFailed");
             if (error._tag !== "StartFailed") {
               return;
@@ -427,8 +435,7 @@ describe("start", () => {
         });
         yield* h.run(
           Effect.gen(function* () {
-            const sessions = yield* Sessions.Sessions;
-            const error = yield* Effect.flip(sessions.start(startBody(), "none", false));
+            const error = yield* Effect.flip(reservedStart(startBody()));
             expect(error).toMatchObject({ _tag: "StartFailed", message: "qemu: exited 1" });
             const logged = line(h, "db: recording a failed start failed too:");
             expect(logged).toMatchObject({
@@ -451,8 +458,7 @@ describe("start", () => {
       });
       yield* h.run(
         Effect.gen(function* () {
-          const sessions = yield* Sessions.Sessions;
-          const error = yield* Effect.flip(sessions.start(startBody(), "none", false));
+          const error = yield* Effect.flip(reservedStart(startBody()));
           expect(error).toMatchObject({
             _tag: "Internal",
             message: "internal error",
@@ -1467,7 +1473,7 @@ describe("follow", () => {
         yield* h.run(
           Effect.gen(function* () {
             const sessions = yield* Sessions.Sessions;
-            const booting = yield* Effect.forkChild(sessions.start(startBody(), "none", false), {
+            const booting = yield* Effect.forkChild(reservedStart(startBody()), {
               startImmediately: true,
             });
             const id = h.sessions.sessions[0]?.id ?? "";
@@ -2019,34 +2025,91 @@ describe("stats", () => {
 // ---------------------------------------------------------------------------
 
 describe("capacity", () => {
-  it.effect("a start past --max-jobs is AtCapacity before anything is minted or written", () =>
+  it.effect("a reserve past --max-jobs is AtCapacity before anything is minted or written", () =>
     Effect.gen(function* () {
       const h = harness({ maxJobs: 1 });
       yield* h.run(
         Effect.gen(function* () {
-          const { sessions, id } = yield* start();
-          const error = yield* Effect.flip(
-            sessions.start(startBody(ISO, OTHER_AGENT), "none", false),
-          );
+          const sessions = yield* Sessions.Sessions;
+          yield* sessions.reserve(AGENT);
+          const error = yield* Effect.flip(sessions.reserve(OTHER_AGENT));
           expect(error).toMatchObject({
             _tag: "AtCapacity",
             message: "at capacity: max-jobs is 1",
             agentId: OTHER_AGENT,
           });
-          // Nothing of the refused start exists: no row, no iso lookup, no machine, no span, no
-          // colour, no log line; the running session is untouched.
-          expect(h.sessions.sessions.map((row) => row.id)).toEqual([id]);
-          expect(h.sessions.agentRuns.map((row) => row.agentId)).toEqual([AGENT]);
-          expect(h.iso.calls).toHaveLength(1);
-          expect(h.qemu.calls.map((call) => call._tag)).toEqual(["prepare", "start"]);
+          expect(h.sessions.sessions).toEqual([]);
+          expect(h.sessions.agentRuns).toEqual([]);
+          expect(h.iso.calls).toHaveLength(0);
+          expect(h.qemu.calls).toEqual([]);
           expect(spanNamed(h, OTHER_AGENT)).toBeUndefined();
-          expect(h.log.acquired).toEqual([AGENT]);
-          expect(texts(h)).toEqual([`starting; iso ${ISO}`, "running; started in 0ms"]);
-          expect(yield* qemus(sessions)).toBe(1);
-          expect(yield* sessions.lookup(id, AGENT)).toBeDefined();
+          expect(h.log.acquired).toEqual([]);
+          expect(texts(h)).toEqual([]);
+          expect(yield* qemus(sessions)).toBe(0);
         }),
       );
     }),
+  );
+
+  it.effect("a second reserve for the same agent is already reserved", () =>
+    Effect.gen(function* () {
+      const h = harness({ maxJobs: 1 });
+      yield* h.run(
+        Effect.gen(function* () {
+          const sessions = yield* Sessions.Sessions;
+          yield* sessions.reserve(AGENT);
+          const error = yield* Effect.flip(sessions.reserve(AGENT));
+          expect(error).toMatchObject({
+            _tag: "BadRequest",
+            message: "already reserved",
+            agentId: AGENT,
+          });
+          expect((yield* Effect.flip(sessions.reserve(OTHER_AGENT)))._tag).toBe("AtCapacity");
+        }),
+      );
+    }),
+  );
+
+  it.effect("start after reserve does not take a second slot and still boots", () =>
+    Effect.gen(function* () {
+      const h = harness({ maxJobs: 1 });
+      yield* h.run(
+        Effect.gen(function* () {
+          const sessions = yield* Sessions.Sessions;
+          const { id } = yield* start();
+          expect((yield* Effect.flip(sessions.reserve(OTHER_AGENT)))._tag).toBe("AtCapacity");
+          expect(h.sessions.sessions.map((row) => row.id)).toEqual([id]);
+          expect(yield* qemus(sessions)).toBe(1);
+        }),
+      );
+    }),
+  );
+
+  it.effect(
+    "a start without a reservation is BadRequest before anything is minted or written",
+    () =>
+      Effect.gen(function* () {
+        const h = harness({ maxJobs: 1 });
+        yield* h.run(
+          Effect.gen(function* () {
+            const sessions = yield* Sessions.Sessions;
+            const error = yield* Effect.flip(sessions.start(startBody(), "none", false));
+            expect(error).toMatchObject({
+              _tag: "BadRequest",
+              message: "no reservation",
+              agentId: AGENT,
+            });
+            expect(h.sessions.sessions).toEqual([]);
+            expect(h.sessions.agentRuns).toEqual([]);
+            expect(h.iso.calls).toHaveLength(0);
+            expect(h.qemu.calls).toEqual([]);
+            expect(spanNamed(h, AGENT)).toBeUndefined();
+            expect(h.log.acquired).toEqual([]);
+            expect(texts(h)).toEqual([]);
+            expect(yield* qemus(sessions)).toBe(0);
+          }),
+        );
+      }),
   );
 
   it.effect("a booting session holds its slot until it is running", () =>
@@ -2056,14 +2119,10 @@ describe("capacity", () => {
       yield* h.run(
         Effect.gen(function* () {
           const sessions = yield* Sessions.Sessions;
-          const booting = yield* Effect.forkChild(sessions.start(startBody(), "none", false), {
+          const booting = yield* Effect.forkChild(reservedStart(startBody()), {
             startImmediately: true,
           });
-          expect(yield* qemus(sessions)).toBe(0);
-          const error = yield* Effect.flip(
-            sessions.start(startBody(ISO, OTHER_AGENT), "none", false),
-          );
-          expect(error).toMatchObject({ _tag: "AtCapacity", agentId: OTHER_AGENT });
+          expect((yield* Effect.flip(sessions.reserve(OTHER_AGENT)))._tag).toBe("AtCapacity");
           yield* Deferred.succeed(gate, undefined);
           const id = yield* Fiber.join(booting);
           expect(h.sessions.sessions.map((row) => row.id)).toEqual([id]);
@@ -2079,11 +2138,9 @@ describe("capacity", () => {
       yield* h.run(
         Effect.gen(function* () {
           const { sessions, live } = yield* start();
-          expect(
-            (yield* Effect.flip(sessions.start(startBody(ISO, OTHER_AGENT), "none", false)))._tag,
-          ).toBe("AtCapacity");
+          expect((yield* Effect.flip(sessions.reserve(OTHER_AGENT)))._tag).toBe("AtCapacity");
           yield* sessions.stop(live, "succeeded", "done");
-          const next = yield* sessions.start(startBody(ISO, OTHER_AGENT), "none", false);
+          const next = yield* reservedStart(startBody(ISO, OTHER_AGENT));
           expect(h.sessions.sessions.map((row) => [row.id, row.status])).toEqual([
             [live.id, "succeeded"],
             [next, "running"],
@@ -2121,18 +2178,14 @@ describe("capacity", () => {
       yield* h.run(
         Effect.gen(function* () {
           const sessions = yield* Sessions.Sessions;
-          const booted = yield* Effect.flip(sessions.start(startBody(ISO, AGENT), "none", false));
+          const booted = yield* Effect.flip(reservedStart(startBody(ISO, AGENT)));
           expect(booted._tag).toBe("StartFailed");
-          const inserted = yield* Effect.flip(
-            sessions.start(startBody(ISO, OTHER_AGENT), "none", false),
-          );
+          const inserted = yield* Effect.flip(reservedStart(startBody(ISO, OTHER_AGENT)));
           expect(inserted._tag).toBe("Internal");
-          const id = yield* sessions.start(startBody(ISO, "OLI-63"), "none", false);
+          const id = yield* reservedStart(startBody(ISO, "OLI-63"));
           expect(Domain.isSessionId(id)).toBe(true);
           expect(yield* qemus(sessions)).toBe(1);
-          expect(
-            (yield* Effect.flip(sessions.start(startBody(ISO, "OLI-64"), "none", false)))._tag,
-          ).toBe("AtCapacity");
+          expect((yield* Effect.flip(sessions.reserve("OLI-64")))._tag).toBe("AtCapacity");
         }),
       );
     }),
@@ -2146,8 +2199,66 @@ describe("capacity", () => {
           const { sessions, id } = yield* start();
           yield* TestClock.adjust("10 minutes");
           expect(h.sessions.sessions[0]).toMatchObject({ id, status: "timed_out" });
-          const next = yield* sessions.start(startBody(ISO, OTHER_AGENT), "none", false);
+          const next = yield* reservedStart(startBody(ISO, OTHER_AGENT));
           expect(next).not.toBe(id);
+          expect(yield* qemus(sessions)).toBe(1);
+        }),
+      );
+    }),
+  );
+
+  it.effect("relinquish gives back an unused reservation so another agent can take it", () =>
+    Effect.gen(function* () {
+      const h = harness({ maxJobs: 1 });
+      yield* h.run(
+        Effect.gen(function* () {
+          const sessions = yield* Sessions.Sessions;
+          yield* sessions.reserve(AGENT);
+          expect((yield* Effect.flip(sessions.reserve(OTHER_AGENT)))._tag).toBe("AtCapacity");
+          yield* sessions.relinquish(AGENT);
+          yield* sessions.reserve(OTHER_AGENT);
+          expect((yield* Effect.flip(sessions.reserve(AGENT)))._tag).toBe("AtCapacity");
+          expect(h.sessions.sessions).toEqual([]);
+          expect(yield* qemus(sessions)).toBe(0);
+        }),
+      );
+    }),
+  );
+
+  it.effect("relinquish without a reservation is BadRequest", () =>
+    Effect.gen(function* () {
+      const h = harness({ maxJobs: 1 });
+      yield* h.run(
+        Effect.gen(function* () {
+          const sessions = yield* Sessions.Sessions;
+          const error = yield* Effect.flip(sessions.relinquish(AGENT));
+          expect(error).toMatchObject({
+            _tag: "BadRequest",
+            message: "no reservation",
+            agentId: AGENT,
+          });
+          yield* sessions.reserve(AGENT);
+          expect((yield* Effect.flip(sessions.relinquish(OTHER_AGENT)))._tag).toBe("BadRequest");
+          expect((yield* Effect.flip(sessions.reserve(OTHER_AGENT)))._tag).toBe("AtCapacity");
+        }),
+      );
+    }),
+  );
+
+  it.effect("relinquish after start is BadRequest and the running session keeps its slot", () =>
+    Effect.gen(function* () {
+      const h = harness({ maxJobs: 1 });
+      yield* h.run(
+        Effect.gen(function* () {
+          const { sessions, id } = yield* start();
+          const error = yield* Effect.flip(sessions.relinquish(AGENT));
+          expect(error).toMatchObject({
+            _tag: "BadRequest",
+            message: "no reservation",
+            agentId: AGENT,
+          });
+          expect((yield* Effect.flip(sessions.reserve(OTHER_AGENT)))._tag).toBe("AtCapacity");
+          expect(h.sessions.sessions.map((row) => row.id)).toEqual([id]);
           expect(yield* qemus(sessions)).toBe(1);
         }),
       );

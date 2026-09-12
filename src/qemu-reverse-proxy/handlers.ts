@@ -15,6 +15,24 @@ const uninterruptible = { uninterruptible: true } as const;
 export const SessionsLive = HttpApiBuilder.group(Api.QemuReverseProxyApi, "Sessions", (handlers) =>
   handlers
     .handle(
+      "reserve",
+      ({ payload, request }) =>
+        Effect.gen(function* () {
+          const router = yield* Router.Router;
+          return yield* router.reserve(request, payload.agent);
+        }),
+      uninterruptible,
+    )
+    .handle(
+      "relinquish",
+      ({ payload, request }) =>
+        Effect.gen(function* () {
+          const router = yield* Router.Router;
+          return yield* router.relinquish(request, payload.agent);
+        }),
+      uninterruptible,
+    )
+    .handle(
       "start",
       ({ payload, request }) =>
         Effect.gen(function* () {

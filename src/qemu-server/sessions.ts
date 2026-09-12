@@ -73,12 +73,20 @@ export type LiveSession = {
 type OpenSession = Omit<LiveSession, "qemu">;
 
 export type SessionsService = {
-  // Fails AtCapacity, before anything is minted or written, once --max-jobs sessions are held.
+  // Takes a --max-jobs slot for this agent, before anything is minted or written. A second
+  // reserve for the same agent is BadRequest: one id, one unused reservation. Start consumes
+  // it and does not increment again.
+  readonly reserve: (agent: string) => Effect.Effect<void, Errors.AtCapacity | Errors.BadRequest>;
+  // Gives back an unused reservation. Fails BadRequest when there is none, including after
+  // start has already consumed it: a running session keeps its slot.
+  readonly relinquish: (agent: string) => Effect.Effect<void, Errors.BadRequest>;
+  // Consumes this agent's reservation. Fails BadRequest, before anything is minted or written,
+  // when there is none.
   readonly start: (
     body: Contract.StartBody,
     display: Domain.QemuDisplay,
     automation: boolean,
-  ) => Effect.Effect<string, Errors.AtCapacity | Errors.StartFailed | Errors.Internal>;
+  ) => Effect.Effect<string, Errors.BadRequest | Errors.StartFailed | Errors.Internal>;
   // Resets lastCommandAt before returning: a valid request counts as activity.
   readonly lookup: (
     id: string,
@@ -200,10 +208,14 @@ const make = (maxJobs: number) =>
     // Running machines, by id; and every session this qemu server holds, booting ones included.
     const sessions = yield* Ref.make<ReadonlyMap<string, LiveSession>>(new Map());
     const openSessions = yield* Ref.make<ReadonlyMap<string, OpenSession>>(new Map());
-    // How many sessions are admitted against --max-jobs. Taken at the top of start, before the
-    // span, scope or row exist, so a refusal allocates nothing; given back in finishLiveSession,
-    // the one place every admitted session ends.
-    const jobs = yield* Ref.make(0);
+    // How many sessions are admitted against --max-jobs, and which agents already hold a slot
+    // that start will consume. Taken at reserve, before the span, scope or row exist, so a
+    // refusal allocates nothing; given back in finishLiveSession, the one place every admitted
+    // session ends.
+    const slots = yield* Ref.make<{
+      readonly count: number;
+      readonly reserved: ReadonlySet<string>;
+    }>({ count: 0, reserved: new Set() });
 
     const elapsed = (started: number) =>
       Effect.map(Clock.currentTimeMillis, (now) => String(now - started));
@@ -340,7 +352,7 @@ const make = (maxJobs: number) =>
     ): Effect.Effect<void> =>
       Effect.gen(function* () {
         yield* Ref.update(openSessions, (map) => mapWithout(map, [live.id]));
-        yield* Ref.update(jobs, (n) => n - 1);
+        yield* Ref.update(slots, (held) => ({ ...held, count: held.count - 1 }));
         yield* log.releaseColor(live.agent);
         for (const span of yield* Ref.get(live.actionSpans)) {
           yield* settleActionSpan(live, span, "failed");
@@ -426,16 +438,74 @@ const make = (maxJobs: number) =>
         ),
       );
 
+    const admit = (
+      outcome: "ok" | "held" | "full",
+      agent: string,
+    ): Effect.Effect<void, Errors.AtCapacity | Errors.BadRequest> => {
+      if (outcome === "ok") {
+        return Effect.void;
+      }
+      if (outcome === "held") {
+        return Errors.BadRequest.make({
+          message: "already reserved",
+          agentId: agent,
+        });
+      }
+      return Errors.AtCapacity.make({
+        message: `at capacity: max-jobs is ${String(maxJobs)}`,
+        agentId: agent,
+      });
+    };
+
+    const reserve = Effect.fn("Sessions.reserve")(function* (agent: string) {
+      return yield* Effect.flatMap(
+        Ref.modify(slots, (held) => {
+          if (held.reserved.has(agent)) {
+            return ["held", held] as const;
+          }
+          if (held.count >= maxJobs) {
+            return ["full", held] as const;
+          }
+          return [
+            "ok",
+            { count: held.count + 1, reserved: withItem(held.reserved, agent) },
+          ] as const;
+        }),
+        (outcome) => admit(outcome, agent),
+      );
+    });
+
+    const relinquish = Effect.fn("Sessions.relinquish")(function* (agent: string) {
+      return yield* Effect.flatMap(
+        Ref.modify(slots, (held) =>
+          held.reserved.has(agent)
+            ? ([true, { count: held.count - 1, reserved: without(held.reserved, agent) }] as const)
+            : ([false, held] as const),
+        ),
+        (released) =>
+          released
+            ? Effect.void
+            : Errors.BadRequest.make({
+                message: "no reservation",
+                agentId: agent,
+              }),
+      );
+    });
+
     const start = Effect.fn("Sessions.start")(function* (
       body: Contract.StartBody,
       display: Domain.QemuDisplay,
       automation: boolean,
     ) {
       const agent = body.agent;
-      const admitted = yield* Ref.modify(jobs, (n) => (n < maxJobs ? [true, n + 1] : [false, n]));
-      if (!admitted) {
-        return yield* Errors.AtCapacity.make({
-          message: `at capacity: max-jobs is ${String(maxJobs)}`,
+      const reserved = yield* Ref.modify(slots, (held) =>
+        held.reserved.has(agent)
+          ? ([true, { count: held.count, reserved: without(held.reserved, agent) }] as const)
+          : ([false, held] as const),
+      );
+      if (!reserved) {
+        return yield* Errors.BadRequest.make({
+          message: "no reservation",
           agentId: agent,
         });
       }
@@ -955,6 +1025,8 @@ const make = (maxJobs: number) =>
     yield* Effect.addFinalizer(() => drain);
 
     const service: SessionsService = {
+      reserve,
+      relinquish,
       start,
       lookup,
       image,

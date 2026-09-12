@@ -71,7 +71,8 @@ CLIENT_IMAGE=screen.png ./client-with-image send-keys --agent-id OLI-42 --server
 ./client start --agent-id <agent> --server-url <url> [--iso <path|url>] [--disk <path>]
 ```
 
-Boots a QEMU session and prints its session id.
+Boots a QEMU session and prints its session id. Reserves a `--max-jobs` slot first; a full host
+answers 503 and the command fails. You cannot start without that reservation.
 
 - `--iso <path|url>` — the ISO. A local path must exist; an http(s) URL is downloaded and cached by the server. Default `omarchy.iso` in the current directory.
 - `--disk <path>` — an existing qcow2 disk. Omit it and the server creates a fresh one.

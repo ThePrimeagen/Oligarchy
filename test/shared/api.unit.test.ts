@@ -50,6 +50,8 @@ describe("QemuServerApi", () => {
     const table = routes(Api.QemuServerApi).map(({ method, path }) => `${method} ${path}`);
     expect(table.sort()).toEqual(
       [
+        "POST /reserve",
+        "POST /relinquish",
         "POST /start",
         "GET /image",
         "GET /serial",
@@ -66,6 +68,8 @@ describe("QemuServerApi", () => {
 
   it("builds every url through the client url builder", () => {
     const urls = HttpApiClient.urlBuilder(Api.QemuServerApi);
+    expect(urls.Sessions.reserve()).toBe("/reserve");
+    expect(urls.Sessions.relinquish()).toBe("/relinquish");
     expect(urls.Sessions.start()).toBe("/start");
     expect(urls.Sessions.image({ query: { id: "abc", agent: "OLI-61" } })).toBe(
       "/image?id=abc&agent=OLI-61",
@@ -116,8 +120,10 @@ describe("QemuServerApi", () => {
 
   it("declares the error statuses of §2.4 plus the middleware's 400, 401 and 500", () => {
     const sessions = [400, 401, 500];
-    // 502: the machine failed to boot; 503: the server is at --max-jobs.
-    expect(byIdentifier(Api.QemuServerApi, "start").errors).toEqual([...sessions, 502, 503]);
+    // 502: the machine failed to boot; 503: only /reserve, when the server is at --max-jobs.
+    expect(byIdentifier(Api.QemuServerApi, "reserve").errors).toEqual([...sessions, 503]);
+    expect(byIdentifier(Api.QemuServerApi, "relinquish").errors).toEqual(sessions);
+    expect(byIdentifier(Api.QemuServerApi, "start").errors).toEqual([...sessions, 502]);
     expect(byIdentifier(Api.QemuServerApi, "image").errors).toEqual(
       [...sessions, 403, 404, 502].sort((a, b) => a - b),
     );
@@ -157,6 +163,8 @@ describe("QemuReverseProxyApi", () => {
     const table = routes(reverse).map(({ method, path }) => `${method} ${path}`);
     expect(table.sort()).toEqual(
       [
+        "POST /reserve",
+        "POST /relinquish",
         "POST /start",
         "GET /image",
         "GET /serial",
@@ -209,6 +217,8 @@ describe("QemuReverseProxyApi", () => {
 
   it("declares the boundary's 400, 401, 500, 502 and 503 on every endpoint plus each endpoint's own", () => {
     const boundary = [400, 401, 500, 502, 503];
+    expect(byIdentifier(reverse, "reserve").errors).toEqual(boundary);
+    expect(byIdentifier(reverse, "relinquish").errors).toEqual(boundary);
     expect(byIdentifier(reverse, "start").errors).toEqual(boundary);
     expect(byIdentifier(reverse, "image").errors).toEqual(ascending([...boundary, 403, 404]));
     expect(byIdentifier(reverse, "serial").errors).toEqual(ascending([...boundary, 403, 404]));
@@ -266,21 +276,27 @@ describe("AutomationServerApi", () => {
 describe("AutomationClientApi", () => {
   const client = Api.AutomationClientApi;
 
-  it("declares POST /run and POST /abort", () => {
+  it("declares POST /reserve, POST /run and POST /abort", () => {
     const table = routes(client).map(({ method, path }) => `${method} ${path}`);
-    expect(table.sort()).toEqual(["POST /abort", "POST /run"]);
+    expect(table.sort()).toEqual(["POST /abort", "POST /reserve", "POST /run"]);
+    expect(HttpApiClient.urlBuilder(client).Runs.reserve()).toBe("/reserve");
     expect(HttpApiClient.urlBuilder(client).Runs.run()).toBe("/run");
     expect(HttpApiClient.urlBuilder(client).Runs.abort()).toBe("/abort");
   });
 
   it("requires the bearer and applies BearerAuth then ApiBoundary", () => {
     const spec = OpenApi.fromApi(client);
+    const reserve = byIdentifier(client, "reserve");
+    expect(reserve.group).toBe("Runs");
+    expect(reserve.middleware).toEqual([Api.BearerAuth.key, Api.ApiBoundary.key]);
+    expect(spec.paths["/reserve"]?.post?.security).toEqual([{ bearer: [] }]);
+    expect(reserve.errors).toEqual([400, 401, 500, 503]);
     const run = byIdentifier(client, "run");
     expect(run.group).toBe("Runs");
     expect(run.middleware).toEqual([Api.BearerAuth.key, Api.ApiBoundary.key]);
     expect(spec.paths["/run"]?.post?.security).toEqual([{ bearer: [] }]);
-    // 500: opencode failed; 503: the client is at --max-jobs.
-    expect(run.errors).toEqual([400, 401, 500, 503]);
+    // 500: opencode failed. Capacity is /reserve's 503.
+    expect(run.errors).toEqual([400, 401, 500]);
     const abort = byIdentifier(client, "abort");
     expect(abort.group).toBe("Runs");
     expect(abort.middleware).toEqual([Api.BearerAuth.key, Api.ApiBoundary.key]);

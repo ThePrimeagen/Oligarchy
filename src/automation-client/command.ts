@@ -35,7 +35,7 @@ export const makeAutomationClientCommand = <RServe>(server: AutomationClient<RSe
       maxJobs: Flag.integer("max-jobs").pipe(
         Flag.withSchema(Domain.MaxJobs),
         Flag.withDescription(
-          "How many runs this client carries at once; a run past it is refused with 503",
+          "How many runs this client carries at once; a reserve past it is refused with 503",
         ),
       ),
       port: Flag.integer("port").pipe(
@@ -83,6 +83,6 @@ export const makeAutomationClientCommand = <RServe>(server: AutomationClient<RSe
       }),
   ).pipe(
     Command.withDescription(
-      "The automation client: POST /run launches OpenCode with a prompt and waits until it finishes; POST /abort kills the matching run by ticket",
+      "The automation client: POST /reserve reserves QEMU first, then takes a --max-jobs slot for a ticket; POST /run consumes that reservation and launches OpenCode with a prompt and waits until it finishes; POST /abort kills the matching run by ticket",
     ),
   );

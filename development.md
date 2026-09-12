@@ -964,12 +964,13 @@ const Fakes = Layer.mergeAll(
   FileSystem.layerNoop({}),
   Path.layer,
 );
-const SessionsLive = Sessions.Sessions.layer.pipe(Layer.provide(Fakes));
+const SessionsLive = Sessions.Sessions.layer(4).pipe(Layer.provide(Fakes));
 
 it.effect("refuses a foreign agent", () =>
   Effect.gen(function* () {
     const sessions = yield* Sessions.Sessions;
     const body = Contract.StartBody.make({ iso: "/isos/omarchy.iso", agent: "OLI-61" });
+    yield* sessions.reserve(body.agent);
     const id = yield* sessions.start(body, "none", false);
     const error = yield* Effect.flip(sessions.lookup(id, "OLI-62"));
     expect(error).toMatchObject({

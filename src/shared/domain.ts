@@ -150,7 +150,8 @@ export const ServerUrl = Schema.String.check(
 export type ServerUrl = typeof ServerUrl.Type;
 
 // How many jobs a qemu server or automation client runs at once, as --max-jobs names it: a
-// start or run past it is refused. A host that takes no jobs is not a server.
+// reserve past it is refused. Start and run consume a reservation. A host that takes no jobs
+// is not a server.
 export const MaxJobs = Schema.Int.check(
   Schema.isGreaterThanOrEqualTo(1, { message: "max-jobs must be at least 1" }),
 ).annotate({ identifier: "@oligarchy/shared/domain/MaxJobs" });

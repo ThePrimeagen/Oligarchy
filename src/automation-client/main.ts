@@ -1,9 +1,19 @@
 import { createServer } from "node:http";
-import { NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node";
-import { Cause, Deferred, Effect, Exit, Layer, Option, type Runtime } from "effect";
+import { NodeHttpClient, NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node";
+import {
+  Cause,
+  Config as EffectConfig,
+  Deferred,
+  Effect,
+  Exit,
+  Layer,
+  Option,
+  type Runtime,
+} from "effect";
 import { Command } from "effect/unstable/cli";
 import { HttpMiddleware, HttpRouter, HttpServerError } from "effect/unstable/http";
 import * as Config from "../config.ts";
+import * as ProxyClient from "../client/proxy-client.ts";
 import * as Client from "../db/client.ts";
 import * as Logs from "../db/logs.ts";
 import * as Servers from "../db/servers.ts";
@@ -12,6 +22,8 @@ import * as Render from "../observability/render.ts";
 import * as Sentry from "../observability/sentry.ts";
 import * as Stats from "../qemu/stats.ts";
 import * as Api from "../shared/api.ts";
+import * as Contract from "../shared/contract.ts";
+import * as Errors from "../shared/errors.ts";
 import * as AutomationClientCommand from "./command.ts";
 import * as Handlers from "./handlers.ts";
 import * as Heartbeat from "./heartbeat.ts";
@@ -54,7 +66,46 @@ const ServerLive = (maxJobs: number, port: number, url: Option.Option<string>) =
         disableListenLog: true,
       }).pipe(Layer.provide(NodeHttpServer.layer(() => server, { host: HOST, port }))),
     ),
-    Layer.provide(Sessions.Sessions.layer(maxJobs)),
+    Layer.provide(
+      Layer.unwrap(
+        Effect.gen(function* () {
+          const { token } = yield* Config.ProxyConfig;
+          const serverUrl = yield* EffectConfig.string("SERVER_URL").pipe(
+            Effect.orElseSucceed(() => Config.DEFAULT_SERVER_URL),
+          );
+          const proxy: ProxyClient.ProxyClientService = yield* ProxyClient.connect({
+            serverUrl,
+            token,
+          });
+          const asQemuError = (
+            agent: string,
+            error: ProxyClient.Failure,
+          ): Effect.Effect<never, Errors.AtCapacity | Errors.Internal> => {
+            if (error._tag === "ProxyRefusal" && error.status === 503) {
+              return Errors.AtCapacity.make({ message: error.message, agentId: agent });
+            }
+            return Errors.Internal.make({
+              cause: new Error(error.message),
+              agentId: agent,
+            });
+          };
+          const reserveQemu: Sessions.ReserveQemu = (agent) =>
+            proxy
+              .reserve(Contract.ReserveAgentBody.make({ agent }))
+              .pipe(Effect.catch((error) => asQemuError(agent, error)));
+          const relinquishQemu: Sessions.RelinquishQemu = (agent) =>
+            proxy.relinquish(Contract.ReserveAgentBody.make({ agent })).pipe(
+              Effect.catch((error: ProxyClient.Failure) =>
+                Errors.Internal.make({
+                  cause: new Error(error.message),
+                  agentId: agent,
+                }),
+              ),
+            );
+          return Sessions.Sessions.layer(maxJobs, reserveQemu, relinquishQemu);
+        }),
+      ),
+    ),
     Layer.provide(Stats.Stats.layer),
     Layer.provide(Layer.succeed(HttpMiddleware.TracerDisabledWhen)(() => true)),
   );
@@ -71,6 +122,7 @@ const MainLive = Layer.mergeAll(Servers.ServerStore.layer, Log.Log.layer).pipe(
   Layer.provideMerge(Sentry.SentryLive),
   Layer.provideMerge(Layer.succeed(Log.ProcessAttribution)(Log.AutomationClientProcessAttribution)),
   Layer.provideMerge(Config.providerLayer),
+  Layer.provideMerge(NodeHttpClient.layerNodeHttp),
   Layer.provideMerge(NodeServices.layer),
 );
 

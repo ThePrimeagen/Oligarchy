@@ -15,11 +15,44 @@ const token = Layer.succeed(AutomationClient.OligarchyToken)(
   AutomationClient.OligarchyToken.of(Redacted.make(TOKEN)),
 );
 
+const reserve = (http: Layer.Layer<HttpClient.HttpClient>) =>
+  AutomationClient.reserve(URL, TICKET).pipe(Effect.provide(Layer.mergeAll(token, http)));
+
 const run = (http: Layer.Layer<HttpClient.HttpClient>) =>
   AutomationClient.run(URL, PROMPT, TICKET).pipe(Effect.provide(Layer.mergeAll(token, http)));
 
 const abort = (http: Layer.Layer<HttpClient.HttpClient>) =>
   AutomationClient.abort(URL, TICKET).pipe(Effect.provide(Layer.mergeAll(token, http)));
+
+describe("automation client POST /reserve happy path", () => {
+  it.effect("posts the ticket with the bearer token and succeeds on 200", () =>
+    Effect.gen(function* () {
+      const recorder = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+      yield* reserve(recorder.layer);
+      expect(recorder.requests).toHaveLength(1);
+      expect(recorder.requests[0]?.method).toBe("POST");
+      expect(recorder.requests[0]?.url).toBe(`${URL}/reserve`);
+      expect(recorder.requests[0]?.headers.authorization).toBe(`Bearer ${TOKEN}`);
+      expect(JSON.parse(recorder.requests[0]?.body ?? "")).toEqual({ ticket: TICKET });
+    }),
+  );
+});
+
+describe("automation client POST /reserve unhappy path", () => {
+  it.effect("a 503 is AutomationClientError with the body's error and status 503", () =>
+    Effect.gen(function* () {
+      const recorder = FakeHttp.recordRequests(() =>
+        FakeHttp.json({ error: "at capacity: max-jobs is 1" }, 503),
+      );
+      const error = yield* Effect.flip(reserve(recorder.layer));
+      expect(error).toMatchObject({
+        _tag: "AutomationClientError",
+        status: 503,
+        message: `automation client: POST ${URL}/reserve failed: at capacity: max-jobs is 1`,
+      });
+    }),
+  );
+});
 
 describe("automation client POST /run happy path", () => {
   it.effect("posts the prompt with the bearer token and succeeds on 200", () =>

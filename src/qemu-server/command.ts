@@ -56,7 +56,7 @@ export const makeQemuServerCommand = <RHost, RServe>(server: QemuServer<RHost, R
       maxJobs: Flag.integer("max-jobs").pipe(
         Flag.withSchema(Domain.MaxJobs),
         Flag.withDescription(
-          "How many sessions this server runs at once; a start past it is refused with 503",
+          "How many sessions this server runs at once; a reserve past it is refused with 503",
         ),
       ),
       port: Flag.integer("port").pipe(

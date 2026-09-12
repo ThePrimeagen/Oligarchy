@@ -43,10 +43,21 @@ export class RouteBoundary extends HttpApiMiddleware.Service<RouteBoundary>()(
 const png = Schema.Uint8Array.pipe(HttpApiSchema.asUint8Array({ contentType: "image/png" }));
 
 // Sessions group: bearer required
+export const reserve = HttpApiEndpoint.post("reserve", "/reserve", {
+  payload: Contract.ReserveAgentBody,
+  success: Contract.Ok,
+  error: [Errors.AtCapacityWire],
+});
+
+export const relinquish = HttpApiEndpoint.post("relinquish", "/relinquish", {
+  payload: Contract.ReserveAgentBody,
+  success: Contract.Ok,
+});
+
 export const start = HttpApiEndpoint.post("start", "/start", {
   payload: Contract.StartBody,
   success: Contract.StartResponse,
-  error: [Errors.StartFailedWire, Errors.AtCapacityWire],
+  error: [Errors.StartFailedWire],
 });
 
 export const image = HttpApiEndpoint.get("image", "/image", {
@@ -105,6 +116,8 @@ export const intentEnd = HttpApiEndpoint.post("intentEnd", "/intent/end", {
 // BearerAuth first, ApiBoundary second: middlewares wrap successively, so ApiBoundary is
 // outermost and sees an Unauthorized on its way out.
 export class Sessions extends HttpApiGroup.make("Sessions")
+  .add(reserve)
+  .add(relinquish)
   .add(start)
   .add(image)
   .add(serial)
@@ -124,6 +137,8 @@ export class QemuServerApi extends HttpApi.make("OligarchyQemuServer").add(Sessi
 // The qemu reverse proxy: the qemu server's own endpoints, so the client that speaks to a server speaks to
 // it, minus /stats (a fleet has no one cpu), behind the routing boundary.
 export class RoutedSessions extends HttpApiGroup.make("Sessions")
+  .add(reserve)
+  .add(relinquish)
   .add(start)
   .add(image)
   .add(serial)
@@ -173,10 +188,16 @@ export const linear = HttpApiEndpoint.post("linear", "/linear", {
 
 export class Linear extends HttpApiGroup.make("Linear").add(linear).middleware(ApiBoundary) {}
 
+export const reserveRun = HttpApiEndpoint.post("reserve", "/reserve", {
+  payload: Contract.ReserveBody,
+  success: Contract.Ok,
+  error: [Errors.AtCapacityWire],
+});
+
 export const run = HttpApiEndpoint.post("run", "/run", {
   payload: Contract.RunBody,
   success: Contract.Ok,
-  error: [Errors.RunFailedWire, Errors.AtCapacityWire],
+  error: [Errors.RunFailedWire],
 });
 
 export const abort = HttpApiEndpoint.post("abort", "/abort", {
@@ -195,6 +216,7 @@ export class AutomationServerApi extends HttpApi.make("OligarchyAutomationServer
   .add(Abort) {}
 
 export class Runs extends HttpApiGroup.make("Runs")
+  .add(reserveRun)
   .add(run)
   .add(abort)
   .middleware(BearerAuth)
