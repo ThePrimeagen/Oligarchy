@@ -208,7 +208,8 @@ export type ServerStats = {
 // the column with — qemu servers were the only kind there was. automation-client is the
 // other kind: same heartbeat, listed apart from the qemu fleet. id is the stable handle a
 // job stores when it is claimed; url remains the key a heartbeat upserts on. jobs and
-// max_jobs stay at their defaults (0 and 1); a heartbeat does not write them.
+// max_jobs are leftover columns: a first insert uses their defaults, and a later
+// heartbeat does not touch them.
 export const servers = pgTable("servers", {
   id: uuid("id").notNull().defaultRandom().unique(),
   url: text("url").primaryKey(),
