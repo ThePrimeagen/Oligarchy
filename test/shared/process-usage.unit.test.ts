@@ -81,9 +81,7 @@ const build = (source: ProcessUsage.Source) =>
 describe("ProcessUsage.collect happy path", () => {
   it.effect("reports current memory and cpu 0 before a second sample", () =>
     Effect.gen(function* () {
-      const { usage } = yield* build(
-        scripted([{ cpuTicks: 10, memoryBytes: 4_096_000 }]).source,
-      );
+      const { usage } = yield* build(scripted([{ cpuTicks: 10, memoryBytes: 4_096_000 }]).source);
       expect(yield* usage.collect).toEqual({ memoryBytes: 4_096_000, cpuPercent: 0 });
     }),
   );

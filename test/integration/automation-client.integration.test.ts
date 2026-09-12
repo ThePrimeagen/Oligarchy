@@ -646,14 +646,16 @@ describe("automation client announce", () => {
             `automation client listening on 127.0.0.1:${String(port)}; max jobs 1; announcing ${url}`,
           );
           // process_stats is the second write, so waiting for it means the servers row is there.
-          const reading = yield* announcedProcess(url).pipe(
-            Effect.repeat({
-              until: (found) => found !== undefined,
-              schedule: Schedule.spaced("200 millis"),
-            }),
-            Effect.timeoutOrElse({ duration: "10 seconds", orElse: () => announcedProcess(url) }),
-          );
-          return { row: yield* announced(url), reading };
+          return {
+            reading: yield* announcedProcess(url).pipe(
+              Effect.repeat({
+                until: (found) => found !== undefined,
+                schedule: Schedule.spaced("200 millis"),
+              }),
+              Effect.timeoutOrElse({ duration: "10 seconds", orElse: () => announcedProcess(url) }),
+            ),
+            row: yield* announced(url),
+          };
         }).pipe(
           Effect.ensuring(
             Effect.sync(() => {

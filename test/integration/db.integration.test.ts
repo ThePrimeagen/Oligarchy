@@ -1523,39 +1523,37 @@ Postgres.describeWithDatabase("database", () => {
         }),
     );
 
-    scoped.effect(
-      "ProcessStatsStore reports a qemu process once, then rewrites the reading",
-      () =>
-        Effect.gen(function* () {
-          const servers = yield* Servers.ServerStore;
-          const store = yield* ProcessStats.ProcessStatsStore;
-          const database = yield* Client.Database;
-          const url = `http://10.0.0.30:${uuid().slice(0, 8)}`;
-          const first: DbSchema.ProcessStats = { jobs: 1, memoryBytes: 4_096_000, cpuPercent: 12.5 };
-          const second: DbSchema.ProcessStats = { jobs: 3, memoryBytes: 8_192_000, cpuPercent: 40 };
-          yield* servers.heartbeat(url, "qemu", {
-            qemus: 1,
-            memory: { totalBytes: 1, usedBytes: 0 },
-            cpu: { mean1m: 0, mean2m: 0, mean3m: 0 },
-          });
-          const rowOf = database.run("select", (db) =>
-            db.select().from(DbSchema.processStats).where(eq(DbSchema.processStats.url, url)),
-          );
-          yield* store.report(url, "qemu", first);
-          const [row] = yield* rowOf;
-          expect(row).toMatchObject({ url, type: "qemu", ...first });
-          expect(row?.reportedAt).toBeInstanceOf(Date);
-          yield* store.report(url, "qemu", second);
-          const rows = yield* rowOf;
-          expect(rows).toHaveLength(1);
-          expect(rows[0]).toMatchObject({ url, type: "qemu", ...second });
-          expect(rows[0]?.reportedAt.getTime()).toBeGreaterThanOrEqual(
-            row?.reportedAt.getTime() ?? Number.POSITIVE_INFINITY,
-          );
-          expect(yield* store.remove(url)).toBe(true);
-          expect(yield* rowOf).toEqual([]);
-          expect(yield* servers.removeServer(url)).toBe(true);
-        }),
+    scoped.effect("ProcessStatsStore reports a qemu process once, then rewrites the reading", () =>
+      Effect.gen(function* () {
+        const servers = yield* Servers.ServerStore;
+        const store = yield* ProcessStats.ProcessStatsStore;
+        const database = yield* Client.Database;
+        const url = `http://10.0.0.30:${uuid().slice(0, 8)}`;
+        const first: DbSchema.ProcessStats = { jobs: 1, memoryBytes: 4_096_000, cpuPercent: 12.5 };
+        const second: DbSchema.ProcessStats = { jobs: 3, memoryBytes: 8_192_000, cpuPercent: 40 };
+        yield* servers.heartbeat(url, "qemu", {
+          qemus: 1,
+          memory: { totalBytes: 1, usedBytes: 0 },
+          cpu: { mean1m: 0, mean2m: 0, mean3m: 0 },
+        });
+        const rowOf = database.run("select", (db) =>
+          db.select().from(DbSchema.processStats).where(eq(DbSchema.processStats.url, url)),
+        );
+        yield* store.report(url, "qemu", first);
+        const [row] = yield* rowOf;
+        expect(row).toMatchObject({ url, type: "qemu", ...first });
+        expect(row?.reportedAt).toBeInstanceOf(Date);
+        yield* store.report(url, "qemu", second);
+        const rows = yield* rowOf;
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({ url, type: "qemu", ...second });
+        expect(rows[0]?.reportedAt.getTime()).toBeGreaterThanOrEqual(
+          row?.reportedAt.getTime() ?? Number.POSITIVE_INFINITY,
+        );
+        expect(yield* store.remove(url)).toBe(true);
+        expect(yield* rowOf).toEqual([]);
+        expect(yield* servers.removeServer(url)).toBe(true);
+      }),
     );
 
     scoped.effect(
@@ -1585,16 +1583,18 @@ Postgres.describeWithDatabase("database", () => {
         }),
     );
 
-    scoped.effect("ProcessStatsStore refuses a report before the servers row exists (unhappy)", () =>
-      Effect.gen(function* () {
-        const store = yield* ProcessStats.ProcessStatsStore;
-        const url = `http://10.0.0.32:${uuid().slice(0, 8)}`;
-        const error = yield* Effect.flip(
-          store.report(url, "qemu", { jobs: 0, memoryBytes: 1, cpuPercent: 0 }),
-        );
-        expect(error).toMatchObject({ _tag: "DatabaseError", operation: "reportProcess" });
-        expect(String(error.cause)).toContain("foreign key");
-      }),
+    scoped.effect(
+      "ProcessStatsStore refuses a report before the servers row exists (unhappy)",
+      () =>
+        Effect.gen(function* () {
+          const store = yield* ProcessStats.ProcessStatsStore;
+          const url = `http://10.0.0.32:${uuid().slice(0, 8)}`;
+          const error = yield* Effect.flip(
+            store.report(url, "qemu", { jobs: 0, memoryBytes: 1, cpuPercent: 0 }),
+          );
+          expect(error).toMatchObject({ _tag: "DatabaseError", operation: "reportProcess" });
+          expect(String(error.cause)).toContain("foreign key");
+        }),
     );
 
     scoped.effect("ServerStore routes a session once and answers where it went", () =>

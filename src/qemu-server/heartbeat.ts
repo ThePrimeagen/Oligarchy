@@ -80,13 +80,15 @@ export const announce = (
     const tick = writeHeartbeat.pipe(Effect.andThen(writeProcess));
     // Before the loop: close interrupts the fiber first, then this runs.
     yield* Effect.addFinalizer(() =>
-      processStore.remove(url).pipe(
-        Effect.catchCause(failed("unannounce process stats failed")),
-        Effect.andThen(
-          store.removeServer(url).pipe(Effect.catchCause(failed("unannounce failed"))),
+      processStore
+        .remove(url)
+        .pipe(
+          Effect.catchCause(failed("unannounce process stats failed")),
+          Effect.andThen(
+            store.removeServer(url).pipe(Effect.catchCause(failed("unannounce failed"))),
+          ),
+          Effect.asVoid,
         ),
-        Effect.asVoid,
-      ),
     );
     yield* tick.pipe(
       Effect.repeat(Schedule.spaced(HEARTBEAT_INTERVAL)),

@@ -496,21 +496,23 @@ describe("qemu server serving", () => {
           "--port",
           String(port),
         ]);
-        const { row, process } = yield* Effect.gen(function* () {
+        const { row, reading } = yield* Effect.gen(function* () {
           yield* Effect.promise(() => server.waitFor(/qemu server listening/));
           expect(lines(server.stdout())).toContain(
             `[global] server: qemu server listening on 127.0.0.1:${String(port)}; display none; automation; max jobs 1; announcing ${url}`,
           );
           // The first heartbeat is written right after the listen line; the insert takes a moment.
           // process_stats is the second write, so waiting for it means the servers row is there.
-          const process = yield* announcedProcess(url).pipe(
-            Effect.repeat({
-              until: (found) => found !== undefined,
-              schedule: Schedule.spaced("200 millis"),
-            }),
-            Effect.timeoutOrElse({ duration: "10 seconds", orElse: () => announcedProcess(url) }),
-          );
-          return { row: yield* announced(url), process };
+          return {
+            reading: yield* announcedProcess(url).pipe(
+              Effect.repeat({
+                until: (found) => found !== undefined,
+                schedule: Schedule.spaced("200 millis"),
+              }),
+              Effect.timeoutOrElse({ duration: "10 seconds", orElse: () => announcedProcess(url) }),
+            ),
+            row: yield* announced(url),
+          };
         }).pipe(
           // A failed expectation must not leave the process listening past the test.
           Effect.ensuring(
@@ -521,9 +523,9 @@ describe("qemu server serving", () => {
         );
         expect(row).toMatchObject({ url, type: "qemu", generation: 1, stats: { qemus: 0 } });
         expect(row?.heartbeatAt).toBeInstanceOf(Date);
-        expect(process).toMatchObject({ url, type: "qemu", jobs: 0, cpuPercent: 0 });
-        expect(process?.memoryBytes).toBeGreaterThan(0);
-        expect(process?.reportedAt).toBeInstanceOf(Date);
+        expect(reading).toMatchObject({ url, type: "qemu", jobs: 0, cpuPercent: 0 });
+        expect(reading?.memoryBytes).toBeGreaterThan(0);
+        expect(reading?.reportedAt).toBeInstanceOf(Date);
         const { code } = yield* Effect.promise(() => server.exited);
         expect(code, server.stdout()).toBe(0);
         expect(server.stdout()).not.toContain("heartbeat failed");

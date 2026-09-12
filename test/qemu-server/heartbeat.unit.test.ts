@@ -262,7 +262,12 @@ describe("heartbeat unhappy path", () => {
           report: () => Effect.fail(refusedProcess),
         });
         const store = Stores.fakeServerStore();
-        const { log } = yield* start(store, FakeSessions.fakeSessions(), FakeLog.fakeLog(), process);
+        const { log } = yield* start(
+          store,
+          FakeSessions.fakeSessions(),
+          FakeLog.fakeLog(),
+          process,
+        );
         expect(store.heartbeats).toEqual([ANNOUNCED]);
         expect(log.lines).toEqual([
           {

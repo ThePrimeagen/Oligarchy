@@ -29,7 +29,10 @@ export const parseCpuTicks = (stat: string): Option.Option<number> => {
   if (close < 0) {
     return Option.none();
   }
-  const fields = stat.slice(close + 1).trim().split(/\s+/);
+  const fields = stat
+    .slice(close + 1)
+    .trim()
+    .split(/\s+/);
   const utime = Number(fields[TICK_OFFSET]);
   const stime = Number(fields[TICK_OFFSET + 1]);
   return Number.isFinite(utime) && Number.isFinite(stime)
@@ -55,26 +58,28 @@ type Sample = {
 
 const missing = (path: string): Error => new Error(`unreadable process usage: ${path}`);
 
-export const procSource = (fs: FileSystem.FileSystem): Source => () =>
-  Effect.gen(function* () {
-    const stat = yield* fs.readFileString(STAT_PATH).pipe(Effect.orDie);
-    const status = yield* fs.readFileString(STATUS_PATH).pipe(Effect.orDie);
-    const cpuTicks = Option.getOrUndefined(parseCpuTicks(stat));
-    const memoryBytes = Option.getOrUndefined(parseVmRssBytes(status));
-    if (cpuTicks === undefined) {
-      return yield* Effect.die(missing(STAT_PATH));
-    }
-    if (memoryBytes === undefined) {
-      return yield* Effect.die(missing(STATUS_PATH));
-    }
-    return { cpuTicks, memoryBytes };
-  });
+export const procSource =
+  (fs: FileSystem.FileSystem): Source =>
+  () =>
+    Effect.gen(function* () {
+      const stat = yield* fs.readFileString(STAT_PATH).pipe(Effect.orDie);
+      const status = yield* fs.readFileString(STATUS_PATH).pipe(Effect.orDie);
+      const cpuTicks = Option.getOrUndefined(parseCpuTicks(stat));
+      const memoryBytes = Option.getOrUndefined(parseVmRssBytes(status));
+      if (cpuTicks === undefined) {
+        return yield* Effect.die(missing(STAT_PATH));
+      }
+      if (memoryBytes === undefined) {
+        return yield* Effect.die(missing(STATUS_PATH));
+      }
+      return { cpuTicks, memoryBytes };
+    });
 
 const make = (source: Source): Effect.Effect<ProcessUsageService> =>
   Effect.gen(function* () {
     const last = yield* Ref.make<Option.Option<Sample>>(Option.none());
 
-    const collect = Effect.fn("ProcessUsage.collect")(function* () {
+    const collect = Effect.gen(function* () {
       const reading = yield* source();
       const at = yield* Clock.currentTimeMillis;
       const previous = yield* Ref.get(last);
@@ -95,7 +100,7 @@ const make = (source: Source): Effect.Effect<ProcessUsageService> =>
           };
         },
       });
-    });
+    }).pipe(Effect.withSpan("ProcessUsage.collect"));
 
     return { collect } satisfies ProcessUsageService;
   });
@@ -109,7 +114,7 @@ export class ProcessUsage extends Context.Service<ProcessUsage>()(
   )(
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      return yield* this.make(procSource(fs));
+      return yield* make(procSource(fs));
     }),
   );
 }

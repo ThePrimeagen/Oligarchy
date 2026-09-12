@@ -315,9 +315,7 @@ describe("Process unhappy path", () => {
   });
 
   it("escapes a url", async () => {
-    const page = await render(
-      Process({ rows: [{ ...processAlive, url: 'http://x.test/<">' }] }),
-    );
+    const page = await render(Process({ rows: [{ ...processAlive, url: 'http://x.test/<">' }] }));
     expect(page).toContain("<td>http://x.test/&lt;&quot;&gt;</td>");
     expect(page).not.toContain('http://x.test/<">');
   });

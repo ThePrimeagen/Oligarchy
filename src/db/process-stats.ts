@@ -4,7 +4,7 @@ import * as Client from "./client.ts";
 import * as DbSchema from "./schema.ts";
 
 export type ProcessStats = DbSchema.ProcessStats;
-type ServerType = typeof DbSchema.servers.$inferSelect["type"];
+type ServerType = (typeof DbSchema.servers.$inferSelect)["type"];
 
 export class ProcessStatsStore extends Context.Service<ProcessStatsStore>()(
   "@oligarchy/db/ProcessStatsStore",
