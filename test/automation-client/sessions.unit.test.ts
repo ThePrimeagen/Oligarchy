@@ -29,7 +29,7 @@ const layer = (
 const reservedRun = (ticket: string, prompt: string, model = MODEL) =>
   Effect.gen(function* () {
     const sessions = yield* Sessions.Sessions;
-    yield* sessions.reserve(ticket);
+    yield* sessions.reserve(ticket, "drive");
     return yield* sessions.run(ticket, prompt, model);
   });
 
@@ -104,7 +104,7 @@ describe("Sessions.run ceiling", () => {
       const spawner = FakeSpawner.fakeSpawner(() => ({}));
       return Effect.gen(function* () {
         const sessions = yield* Sessions.Sessions;
-        yield* sessions.reserve(TICKET);
+        yield* sessions.reserve(TICKET, "drive");
         const running = yield* Effect.forkChild(
           Effect.flip(sessions.run(TICKET, "do the work", MODEL)),
         );
@@ -120,7 +120,7 @@ describe("Sessions.run ceiling", () => {
         expect(spawner.spawned[0]?.isReleased()).toBe(true);
         expect(spawner.spawned[0]?.kills).toEqual(["SIGTERM"]);
         expect((yield* Effect.flip(sessions.abort(TICKET)))._tag).toBe("UnknownSession");
-        yield* sessions.reserve(OTHER);
+        yield* sessions.reserve(OTHER, "drive");
       }).pipe(Effect.provide(layer(spawner, 1)));
     },
   );
@@ -129,7 +129,7 @@ describe("Sessions.run ceiling", () => {
     const spawner = FakeSpawner.fakeSpawner(() => ({}));
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
-      yield* sessions.reserve(TICKET);
+      yield* sessions.reserve(TICKET, "drive");
       const running = yield* Effect.forkChild(sessions.run(TICKET, "do the work", MODEL));
       for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
         yield* Effect.yieldNow;
@@ -149,7 +149,7 @@ describe("Sessions.run unhappy path", () => {
     }));
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
-      yield* sessions.reserve(TICKET);
+      yield* sessions.reserve(TICKET, "drive");
       const error = yield* Effect.flip(sessions.run(TICKET, "do the work", MODEL));
       expect(error._tag).toBe("RunFailed");
       expect(error.message).toBe("spawn opencode ENOENT");
@@ -163,7 +163,7 @@ describe("Sessions.run unhappy path", () => {
     }));
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
-      yield* sessions.reserve(TICKET);
+      yield* sessions.reserve(TICKET, "drive");
       const error = yield* Effect.flip(sessions.run(TICKET, "do the work", MODEL));
       expect(error._tag).toBe("RunFailed");
       expect(error.message).toBe("out of token credits");
@@ -176,7 +176,7 @@ describe("Sessions.abort happy path", () => {
     const spawner = FakeSpawner.fakeSpawner(() => ({}));
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
-      yield* sessions.reserve(TICKET);
+      yield* sessions.reserve(TICKET, "drive");
       const running = yield* Effect.forkChild(sessions.run(TICKET, "do the work", MODEL));
       for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
         yield* Effect.yieldNow;
@@ -197,8 +197,8 @@ describe("Sessions.abort happy path", () => {
     const spawner = FakeSpawner.fakeSpawner(() => ({}));
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
-      yield* sessions.reserve(TICKET);
-      yield* sessions.reserve(OTHER);
+      yield* sessions.reserve(TICKET, "drive");
+      yield* sessions.reserve(OTHER, "drive");
       const first = yield* Effect.forkChild(sessions.run(TICKET, "first", MODEL));
       const second = yield* Effect.forkChild(sessions.run(OTHER, "second", MODEL));
       for (let i = 0; i < 100 && spawner.spawned.length < 2; i++) {
@@ -219,7 +219,7 @@ describe("Sessions.abort happy path", () => {
     const spawner = FakeSpawner.fakeSpawner(() => ({ ignoreTerm: true }));
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
-      yield* sessions.reserve(TICKET);
+      yield* sessions.reserve(TICKET, "drive");
       const running = yield* Effect.forkChild(sessions.run(TICKET, "do the work", MODEL));
       for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
         yield* Effect.yieldNow;
@@ -245,7 +245,7 @@ describe("Sessions.abort happy path", () => {
     }));
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
-      yield* sessions.reserve(TICKET);
+      yield* sessions.reserve(TICKET, "drive");
       const running = yield* Effect.forkChild(sessions.run(TICKET, "do the work", MODEL));
       for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
         yield* Effect.yieldNow;
@@ -290,7 +290,7 @@ describe("Sessions.abort unhappy path", () => {
     }));
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
-      yield* sessions.reserve(TICKET);
+      yield* sessions.reserve(TICKET, "drive");
       const running = yield* Effect.forkChild(sessions.run(TICKET, "do the work", MODEL));
       for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
         yield* Effect.yieldNow;
@@ -312,12 +312,12 @@ describe("Sessions.abort unhappy path", () => {
     const spawner = FakeSpawner.fakeSpawner(() => ({}));
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
-      yield* sessions.reserve(TICKET);
+      yield* sessions.reserve(TICKET, "drive");
       const first = yield* Effect.forkChild(sessions.run(TICKET, "first", MODEL));
       for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
         yield* Effect.yieldNow;
       }
-      yield* sessions.reserve(TICKET);
+      yield* sessions.reserve(TICKET, "drive");
       const second = yield* Effect.forkChild(sessions.run(TICKET, "second", MODEL));
       for (let i = 0; i < 100 && spawner.spawned.length < 2; i++) {
         yield* Effect.yieldNow;
@@ -336,8 +336,8 @@ describe("capacity", () => {
     const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
-      yield* sessions.reserve(TICKET);
-      const error = yield* Effect.flip(sessions.reserve(OTHER));
+      yield* sessions.reserve(TICKET, "drive");
+      const error = yield* Effect.flip(sessions.reserve(OTHER, "drive"));
       expect(error).toMatchObject({
         _tag: "AtCapacity",
         message: "at capacity: max-jobs is 1",
@@ -351,14 +351,14 @@ describe("capacity", () => {
     const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
-      yield* sessions.reserve(TICKET);
-      const error = yield* Effect.flip(sessions.reserve(TICKET));
+      yield* sessions.reserve(TICKET, "drive");
+      const error = yield* Effect.flip(sessions.reserve(TICKET, "drive"));
       expect(error).toMatchObject({
         _tag: "BadRequest",
         message: "already reserved",
         agentId: TICKET,
       });
-      expect((yield* Effect.flip(sessions.reserve(OTHER)))._tag).toBe("AtCapacity");
+      expect((yield* Effect.flip(sessions.reserve(OTHER, "drive")))._tag).toBe("AtCapacity");
     }).pipe(Effect.provide(layer(spawner, 1)));
   });
 
@@ -366,13 +366,13 @@ describe("capacity", () => {
     const spawner = FakeSpawner.fakeSpawner(() => ({}));
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
-      yield* sessions.reserve(TICKET);
+      yield* sessions.reserve(TICKET, "drive");
       const running = yield* Effect.forkChild(sessions.run(TICKET, "first", MODEL));
       for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
         yield* Effect.yieldNow;
       }
       expect(spawner.spawned).toHaveLength(1);
-      expect((yield* Effect.flip(sessions.reserve(OTHER)))._tag).toBe("AtCapacity");
+      expect((yield* Effect.flip(sessions.reserve(OTHER, "drive")))._tag).toBe("AtCapacity");
       expect((yield* Effect.flip(sessions.run(OTHER, "second", MODEL)))._tag).toBe("BadRequest");
       yield* spawner.spawned[0]?.exit(0) ?? Effect.void;
       yield* Fiber.join(running);
@@ -413,15 +413,15 @@ describe("capacity", () => {
     const spawner = FakeSpawner.fakeSpawner(() => ({}));
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
-      yield* sessions.reserve(TICKET);
+      yield* sessions.reserve(TICKET, "drive");
       const running = yield* Effect.forkChild(sessions.run(TICKET, "first", MODEL));
       for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
         yield* Effect.yieldNow;
       }
-      expect((yield* Effect.flip(sessions.reserve(OTHER)))._tag).toBe("AtCapacity");
+      expect((yield* Effect.flip(sessions.reserve(OTHER, "drive")))._tag).toBe("AtCapacity");
       yield* sessions.abort(TICKET);
       expect((yield* Effect.flip(Fiber.join(running)))._tag).toBe("RunFailed");
-      yield* sessions.reserve(OTHER);
+      yield* sessions.reserve(OTHER, "drive");
       const next = yield* Effect.forkChild(sessions.run(OTHER, "second", MODEL));
       for (let i = 0; i < 100 && spawner.spawned.length < 2; i++) {
         yield* Effect.yieldNow;
@@ -438,12 +438,12 @@ describe("capacity", () => {
     const spawner = FakeSpawner.fakeSpawner(() => (++spawns === 1 ? {} : { exitCode: 0 }));
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
-      yield* sessions.reserve(TICKET);
+      yield* sessions.reserve(TICKET, "drive");
       const running = yield* Effect.forkChild(sessions.run(TICKET, "first", MODEL));
       for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
         yield* Effect.yieldNow;
       }
-      expect((yield* Effect.flip(sessions.reserve(OTHER)))._tag).toBe("AtCapacity");
+      expect((yield* Effect.flip(sessions.reserve(OTHER, "drive")))._tag).toBe("AtCapacity");
       yield* Fiber.interrupt(running);
       const exit = yield* Fiber.await(running);
       expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true);
@@ -480,7 +480,7 @@ describe("QEMU-first reserve", () => {
     const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
-      yield* sessions.reserve(TICKET);
+      yield* sessions.reserve(TICKET, "drive");
       order.push("returned");
       expect(order).toEqual([`qemu ${TICKET}`, "returned"]);
     }).pipe(Effect.provide(layer(spawner, 1, reserveQemu)));
@@ -496,7 +496,7 @@ describe("QEMU-first reserve", () => {
     const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
-      const error = yield* Effect.flip(sessions.reserve(TICKET));
+      const error = yield* Effect.flip(sessions.reserve(TICKET, "drive"));
       expect(error).toMatchObject({
         _tag: "AtCapacity",
         message: "qemu full",
@@ -522,8 +522,8 @@ describe("QEMU-first reserve", () => {
     const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
-      yield* sessions.reserve(TICKET);
-      const error = yield* Effect.flip(sessions.reserve(OTHER));
+      yield* sessions.reserve(TICKET, "drive");
+      const error = yield* Effect.flip(sessions.reserve(OTHER, "drive"));
       expect(error).toMatchObject({
         _tag: "AtCapacity",
         message: "at capacity: max-jobs is 1",
@@ -534,7 +534,7 @@ describe("QEMU-first reserve", () => {
       expect((yield* Effect.flip(sessions.run(OTHER, "second", MODEL)))._tag).toBe("BadRequest");
       expect(spawner.spawned).toHaveLength(0);
       // The first ticket still holds the only slot.
-      expect((yield* Effect.flip(sessions.reserve("OLI-7")))._tag).toBe("AtCapacity");
+      expect((yield* Effect.flip(sessions.reserve("OLI-7", "drive")))._tag).toBe("AtCapacity");
       expect(givenBack).toEqual([OTHER, "OLI-7"]);
     }).pipe(Effect.provide(layer(spawner, 1, reserveQemu, relinquishQemu)));
   });
@@ -548,7 +548,7 @@ describe("QEMU-first reserve", () => {
     const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
-      yield* sessions.reserve(TICKET);
+      yield* sessions.reserve(TICKET, "drive");
       expect(givenBack).toBe(0);
     }).pipe(Effect.provide(layer(spawner, 1, qemuOk(), relinquishQemu)));
   });
@@ -566,8 +566,8 @@ describe("QEMU-first reserve", () => {
     const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
-      yield* sessions.reserve(TICKET);
-      const error = yield* Effect.flip(sessions.reserve(OTHER));
+      yield* sessions.reserve(TICKET, "drive");
+      const error = yield* Effect.flip(sessions.reserve(OTHER, "drive"));
       expect(error).toMatchObject({
         _tag: "Internal",
         message: "internal error",
@@ -592,7 +592,7 @@ describe("QEMU-first reserve", () => {
     const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
-      const error = yield* Effect.flip(sessions.reserve(TICKET));
+      const error = yield* Effect.flip(sessions.reserve(TICKET, "drive"));
       expect(error).toMatchObject({
         _tag: "Internal",
         message: "internal error",
@@ -613,11 +613,90 @@ describe("QEMU-first reserve", () => {
     const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
-      yield* sessions.reserve(TICKET);
-      expect((yield* Effect.flip(sessions.reserve(TICKET)))._tag).toBe("BadRequest");
+      yield* sessions.reserve(TICKET, "drive");
+      expect((yield* Effect.flip(sessions.reserve(TICKET, "drive")))._tag).toBe("BadRequest");
       expect(qemu).toBe(1);
     }).pipe(Effect.provide(layer(spawner, 1, reserveQemu)));
   });
+});
+
+// A diagnose reads the database and boots nothing: it takes a slot on this client only. A
+// drive takes QEMU first, as above.
+describe("reserve by action", () => {
+  it.effect("a diagnose reserve takes a slot without asking QEMU, and its run spawns", () => {
+    const qemu: Array<string> = [];
+    const reserveQemu: Sessions.ReserveQemu = (agent) =>
+      Effect.sync(() => {
+        qemu.push(agent);
+      });
+    const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions.Sessions;
+      yield* sessions.reserve(TICKET, "diagnose");
+      expect(qemu).toEqual([]);
+      expect(yield* sessions.jobs).toBe(1);
+      yield* sessions.run(TICKET, "diagnose the session", MODEL);
+      expect(spawner.spawned.map((spawned) => spawned.args[5])).toEqual(["diagnose the session"]);
+      expect(yield* sessions.jobs).toBe(0);
+    }).pipe(Effect.provide(layer(spawner, 1, reserveQemu)));
+  });
+
+  it.effect(
+    "a diagnose reserve past --max-jobs is AtCapacity and neither asks nor relinquishes QEMU",
+    () => {
+      const qemu: Array<string> = [];
+      const givenBack: Array<string> = [];
+      const reserveQemu: Sessions.ReserveQemu = (agent) =>
+        Effect.sync(() => {
+          qemu.push(agent);
+        });
+      const relinquishQemu: Sessions.RelinquishQemu = (agent) =>
+        Effect.sync(() => {
+          givenBack.push(agent);
+        });
+      const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
+      return Effect.gen(function* () {
+        const sessions = yield* Sessions.Sessions;
+        yield* sessions.reserve(TICKET, "drive");
+        const error = yield* Effect.flip(sessions.reserve(OTHER, "diagnose"));
+        expect(error).toMatchObject({
+          _tag: "AtCapacity",
+          message: "at capacity: max-jobs is 1",
+          agentId: OTHER,
+        });
+        // The drive asked once; the diagnose never did, so there was nothing to give back.
+        expect(qemu).toEqual([TICKET]);
+        expect(givenBack).toEqual([]);
+        expect((yield* Effect.flip(sessions.run(OTHER, "second", MODEL)))._tag).toBe("BadRequest");
+        expect(spawner.spawned).toHaveLength(0);
+      }).pipe(Effect.provide(layer(spawner, 1, reserveQemu, relinquishQemu)));
+    },
+  );
+
+  it.effect(
+    "a second reserve of the same ticket under the other action is already reserved",
+    () => {
+      const qemu: Array<string> = [];
+      const reserveQemu: Sessions.ReserveQemu = (agent) =>
+        Effect.sync(() => {
+          qemu.push(agent);
+        });
+      const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
+      return Effect.gen(function* () {
+        const sessions = yield* Sessions.Sessions;
+        yield* sessions.reserve(TICKET, "diagnose");
+        const error = yield* Effect.flip(sessions.reserve(TICKET, "drive"));
+        expect(error).toMatchObject({
+          _tag: "BadRequest",
+          message: "already reserved",
+          agentId: TICKET,
+        });
+        // Refused before QEMU was asked: a held ticket costs the guest host nothing.
+        expect(qemu).toEqual([]);
+        expect(yield* sessions.jobs).toBe(1);
+      }).pipe(Effect.provide(layer(spawner, 2, reserveQemu)));
+    },
+  );
 });
 
 describe("jobs", () => {
@@ -626,7 +705,7 @@ describe("jobs", () => {
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
       expect(yield* sessions.jobs).toBe(0);
-      yield* sessions.reserve(TICKET);
+      yield* sessions.reserve(TICKET, "drive");
       expect(yield* sessions.jobs).toBe(1);
       yield* sessions.run(TICKET, "do the work", MODEL);
       expect(yield* sessions.jobs).toBe(0);
@@ -637,9 +716,9 @@ describe("jobs", () => {
     const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
-      yield* sessions.reserve(TICKET);
+      yield* sessions.reserve(TICKET, "drive");
       expect(yield* sessions.jobs).toBe(1);
-      expect((yield* Effect.flip(sessions.reserve(OTHER)))._tag).toBe("AtCapacity");
+      expect((yield* Effect.flip(sessions.reserve(OTHER, "drive")))._tag).toBe("AtCapacity");
       expect(yield* sessions.jobs).toBe(1);
     }).pipe(Effect.provide(layer(spawner, 1)));
   });

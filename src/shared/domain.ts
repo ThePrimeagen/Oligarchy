@@ -164,6 +164,14 @@ export const MaxJobs = Schema.Int.check(
 ).annotate({ identifier: "@oligarchy/shared/domain/MaxJobs" });
 export type MaxJobs = typeof MaxJobs.Type;
 
+// The two automation steps for a test result, the twin of the automation_action pgEnum in
+// src/db/schema.ts, maintained by hand together. A drive boots a guest and so reserves one; a
+// diagnose reads the session back and reserves a client only.
+export const AutomationAction = Schema.Literals(["drive", "diagnose"]).annotate({
+  identifier: "@oligarchy/shared/domain/AutomationAction",
+});
+export type AutomationAction = typeof AutomationAction.Type;
+
 // An OpenCode model as `opencode run --model` takes it: the provider, a slash, the model's own
 // id (which may hold slashes of its own: openrouter/deepseek/deepseek-v4.1-flash). Refused at
 // the flag so a run is never dispatched as a model no client can launch.

@@ -1,6 +1,7 @@
 import { Context, Effect, Layer, Ref, Semaphore } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import * as Cli from "../cli.ts";
+import type * as Domain from "../shared/domain.ts";
 import * as Errors from "../shared/errors.ts";
 import * as OpenCode from "./opencode.ts";
 
@@ -51,7 +52,10 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
     // slot remains.
     const reserveGate = yield* Semaphore.make(1);
 
-    const reserve = Effect.fn("Sessions.reserve")(function* (ticket: string) {
+    const reserve = Effect.fn("Sessions.reserve")(function* (
+      ticket: string,
+      action: Domain.AutomationAction,
+    ) {
       return yield* reserveGate.withPermits(1)(
         Effect.gen(function* () {
           const held = yield* Ref.get(slots);
@@ -61,9 +65,14 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
               agentId: ticket,
             });
           }
-          // QEMU first: this client cannot hold a slot until the guest host has one.
-          // A full client still asks, then gives that slot back rather than leak it.
-          yield* reserveQemu(ticket);
+          // A drive boots a guest, so QEMU first: this client cannot hold a slot until the
+          // guest host has one, and a full client still asks, then gives that slot back rather
+          // than leak it. A diagnose reads the session back and boots nothing: a guest slot it
+          // took would never be consumed by a start, nor given back, and would be gone for as
+          // long as that qemu server lived.
+          if (action === "drive") {
+            yield* reserveQemu(ticket);
+          }
           const admitted = yield* Ref.modify(slots, (current) => {
             if (current.count >= maxJobs) {
               return [false, current] as const;
@@ -74,7 +83,9 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
             ] as const;
           });
           if (!admitted) {
-            yield* relinquishQemu(ticket);
+            if (action === "drive") {
+              yield* relinquishQemu(ticket);
+            }
             return yield* atCapacity(ticket);
           }
           return yield* Effect.void;

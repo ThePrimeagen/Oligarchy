@@ -224,7 +224,11 @@ describe("dispatch happy path", () => {
           reason: null,
           finishedAt: expect.any(Date),
         });
-        expect(JSON.parse(http.requests[0]?.body ?? "")).toEqual({ ticket: TICKET });
+        // A drive reserves as one: the client takes a guest slot before its own.
+        expect(JSON.parse(http.requests[0]?.body ?? "")).toEqual({
+          ticket: TICKET,
+          action: "drive",
+        });
         expect(JSON.parse(http.requests[1]?.body ?? "")).toEqual({
           prompt: DRIVE_PROMPT,
           ticket: TICKET,
@@ -261,6 +265,11 @@ describe("dispatch happy path", () => {
       yield* start(fixed, http.layer);
       yield* settle(fixed.automation.jobs, "succeeded");
       expect(fixed.automation.jobs[0]?.status).toBe("succeeded");
+      // A diagnose reserves as one: the client takes a slot of its own and no guest.
+      expect(JSON.parse(http.requests[0]?.body ?? "")).toEqual({
+        ticket: TICKET,
+        action: "diagnose",
+      });
       expect(JSON.parse(http.requests[1]?.body ?? "")).toEqual({
         prompt: DIAGNOSE_PROMPT,
         ticket: TICKET,

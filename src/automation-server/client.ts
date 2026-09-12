@@ -4,6 +4,7 @@ import { HttpApiClient, HttpApiMiddleware } from "effect/unstable/httpapi";
 import * as Config from "../config.ts";
 import * as Api from "../shared/api.ts";
 import * as Contract from "../shared/contract.ts";
+import type * as Domain from "../shared/domain.ts";
 import * as Errors from "../shared/errors.ts";
 
 export class OligarchyToken extends Context.Service<OligarchyToken>()(
@@ -56,9 +57,15 @@ const makeClient = Effect.fn("makeClient")(function* (url: string) {
   }).pipe(Effect.provide(middleware));
 });
 
-export const reserve = Effect.fn("reserve")(function* (url: string, ticket: string) {
+export const reserve = Effect.fn("reserve")(function* (
+  url: string,
+  ticket: string,
+  action: Domain.AutomationAction,
+) {
   const client = yield* makeClient(url);
-  return yield* client.Runs.reserve({ payload: Contract.ReserveBody.make({ ticket }) }).pipe(
+  return yield* client.Runs.reserve({
+    payload: Contract.ReserveBody.make({ ticket, action }),
+  }).pipe(
     Effect.catch((error) => {
       if (error._tag === "HttpClientError") {
         const response = error.response;

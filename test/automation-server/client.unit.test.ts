@@ -16,8 +16,11 @@ const token = Layer.succeed(AutomationClient.OligarchyToken)(
   AutomationClient.OligarchyToken.of(Redacted.make(TOKEN)),
 );
 
-const reserve = (http: Layer.Layer<HttpClient.HttpClient>) =>
-  AutomationClient.reserve(URL, TICKET).pipe(Effect.provide(Layer.mergeAll(token, http)));
+const reserve = (
+  http: Layer.Layer<HttpClient.HttpClient>,
+  action: "drive" | "diagnose" = "drive",
+) =>
+  AutomationClient.reserve(URL, TICKET, action).pipe(Effect.provide(Layer.mergeAll(token, http)));
 
 const run = (http: Layer.Layer<HttpClient.HttpClient>) =>
   AutomationClient.run(URL, PROMPT, TICKET, MODEL).pipe(
@@ -28,7 +31,7 @@ const abort = (http: Layer.Layer<HttpClient.HttpClient>) =>
   AutomationClient.abort(URL, TICKET).pipe(Effect.provide(Layer.mergeAll(token, http)));
 
 describe("automation client POST /reserve happy path", () => {
-  it.effect("posts the ticket with the bearer token and succeeds on 200", () =>
+  it.effect("posts the ticket and the action with the bearer token and succeeds on 200", () =>
     Effect.gen(function* () {
       const recorder = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
       yield* reserve(recorder.layer);
@@ -36,7 +39,21 @@ describe("automation client POST /reserve happy path", () => {
       expect(recorder.requests[0]?.method).toBe("POST");
       expect(recorder.requests[0]?.url).toBe(`${URL}/reserve`);
       expect(recorder.requests[0]?.headers.authorization).toBe(`Bearer ${TOKEN}`);
-      expect(JSON.parse(recorder.requests[0]?.body ?? "")).toEqual({ ticket: TICKET });
+      expect(JSON.parse(recorder.requests[0]?.body ?? "")).toEqual({
+        ticket: TICKET,
+        action: "drive",
+      });
+    }),
+  );
+
+  it.effect("a diagnose is posted as such, so the client takes no guest slot for it", () =>
+    Effect.gen(function* () {
+      const recorder = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+      yield* reserve(recorder.layer, "diagnose");
+      expect(JSON.parse(recorder.requests[0]?.body ?? "")).toEqual({
+        ticket: TICKET,
+        action: "diagnose",
+      });
     }),
   );
 });

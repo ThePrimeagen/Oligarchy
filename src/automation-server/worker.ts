@@ -40,8 +40,9 @@ type Placement = {
   readonly ticket: string;
 };
 
-// Build the prompt and take a client slot. /run is not waited here: a reserved job
-// starts in its own fiber so the next pending row can reserve on this tick.
+// Build the prompt and take a client slot, the client reserving a guest too when the job is a
+// drive. /run is not waited here: a reserved job starts in its own fiber so the next pending
+// row can reserve on this tick.
 const place = Effect.fn("place")(function* (
   job: Automation.AutomationJobRow,
   clients: ReadonlyArray<Servers.LiveServer>,
@@ -61,7 +62,7 @@ const place = Effect.fn("place")(function* (
       : yield* Prompts.diagnose(ticket, job.resultId, model);
   let lastCapacity: string | undefined;
   for (const client of clients) {
-    const reserved = yield* Effect.result(AutomationClient.reserve(client.url, ticket));
+    const reserved = yield* Effect.result(AutomationClient.reserve(client.url, ticket, job.action));
     if (Result.isSuccess(reserved)) {
       if (client.id !== job.serverId) {
         yield* store.assign(job.id, client.id);
