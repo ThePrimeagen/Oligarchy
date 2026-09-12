@@ -284,9 +284,9 @@ describe("dispatch happy path", () => {
       expect(fixed.automation.jobs.every((job) => job.status === "succeeded")).toBe(true);
       expect(http.requests.filter((request) => request.url.endsWith("/reserve"))).toHaveLength(2);
       expect(http.requests.filter((request) => request.url.endsWith("/run"))).toHaveLength(2);
-      expect(FakeLog.texts(fixed.log).filter((text) => text.startsWith("dispatching drive"))).toEqual(
-        [`dispatching drive; ${URL}; ${MODEL}`, `dispatching drive; ${URL}; ${MODEL}`],
-      );
+      expect(
+        FakeLog.texts(fixed.log).filter((text) => text.startsWith("dispatching drive")),
+      ).toEqual([`dispatching drive; ${URL}; ${MODEL}`, `dispatching drive; ${URL}; ${MODEL}`]);
     }),
   );
 
@@ -327,6 +327,59 @@ describe("dispatch happy path", () => {
       yield* Deferred.succeed(secondRelease, undefined);
       yield* settleAll(fixed.automation.jobs, "succeeded");
       expect(fixed.automation.jobs.every((job) => job.status === "succeeded")).toBe(true);
+    }),
+  );
+
+  it.effect("a diagnose behind a running drive is skipped so another result can start", () =>
+    Effect.gen(function* () {
+      const fixed = harness();
+      seedResult(fixed.tests);
+      seedJob(fixed.automation, "drive", RESULT_ID);
+      seedJob(fixed.automation, "diagnose", RESULT_ID);
+      seedResult(fixed.tests, TICKET_B, "pending", RESULT_B);
+      seedJob(fixed.automation, "drive", RESULT_B);
+      seedLiveClient(fixed.servers);
+      const firstStarted = yield* Deferred.make<void>();
+      const secondStarted = yield* Deferred.make<void>();
+      const firstRelease = yield* Deferred.make<void>();
+      const secondRelease = yield* Deferred.make<void>();
+      let runs = 0;
+      const http = FakeHttp.recordRequests(
+        reserving(() =>
+          Effect.gen(function* () {
+            const index = runs;
+            runs += 1;
+            if (index === 0) {
+              yield* Deferred.succeed(firstStarted, undefined);
+              yield* Deferred.await(firstRelease);
+            } else if (index === 1) {
+              yield* Deferred.succeed(secondStarted, undefined);
+              yield* Deferred.await(secondRelease);
+            } else {
+              return yield* Effect.die(`unexpected /run ${String(index)}`);
+            }
+            return yield* closing(fixed.tests);
+          }),
+        ),
+      );
+      yield* start(fixed, http.layer);
+      yield* Deferred.await(firstStarted);
+      yield* Deferred.await(secondStarted);
+      expect(fixed.automation.jobs.map((job) => [job.action, job.status])).toEqual([
+        ["drive", "running"],
+        ["diagnose", "pending"],
+        ["drive", "running"],
+      ]);
+      expect(http.requests.filter((request) => request.url.endsWith("/reserve"))).toHaveLength(2);
+      expect(http.requests.filter((request) => request.url.endsWith("/run"))).toHaveLength(2);
+      yield* Deferred.succeed(firstRelease, undefined);
+      yield* Deferred.succeed(secondRelease, undefined);
+      yield* settle(fixed.automation.jobs, "succeeded");
+      expect(fixed.automation.jobs.map((job) => [job.action, job.status])).toEqual([
+        ["drive", "succeeded"],
+        ["diagnose", "pending"],
+        ["drive", "succeeded"],
+      ]);
     }),
   );
 

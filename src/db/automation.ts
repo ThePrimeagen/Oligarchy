@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, notInArray, sql } from "drizzle-orm";
 import { Array as Arr, Context, Effect, Layer, Option } from "effect";
 import * as Client from "./client.ts";
 import * as DbSchema from "./schema.ts";
@@ -47,17 +47,33 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
         return row;
       });
 
-      // Oldest pending, locked for the transaction so a second claimer waits. Queue order is
-      // created_at; id breaks a tie. serverId is the client that took it: /abort looks that
-      // server up for its url.
+      // Oldest pending whose result is not already running, locked for the
+      // transaction so a second claimer waits. Queue order is created_at; id
+      // breaks a tie. One running job per result: drive and diagnose share a
+      // ticket, and the client will not reserve it twice. serverId is the
+      // client that took it: /abort looks that server up for its url.
       const claim = Effect.fn("db.claimAutomationJob")(function* (serverId: string) {
         return yield* database.transaction("claimAutomationJob", (tx) =>
           Effect.gen(function* () {
+            const running = yield* Client.attempt("claimAutomationJob", () =>
+              tx
+                .select({ resultId: DbSchema.automationJobs.resultId })
+                .from(DbSchema.automationJobs)
+                .where(eq(DbSchema.automationJobs.status, "running")),
+            );
+            const busy = running.map((row) => row.resultId);
             const pending = yield* Client.attempt("claimAutomationJob", () =>
               tx
                 .select()
                 .from(DbSchema.automationJobs)
-                .where(eq(DbSchema.automationJobs.status, "pending"))
+                .where(
+                  busy.length === 0
+                    ? eq(DbSchema.automationJobs.status, "pending")
+                    : and(
+                        eq(DbSchema.automationJobs.status, "pending"),
+                        notInArray(DbSchema.automationJobs.resultId, busy),
+                      ),
+                )
                 .orderBy(DbSchema.automationJobs.createdAt, DbSchema.automationJobs.id)
                 .limit(1)
                 .for("update"),

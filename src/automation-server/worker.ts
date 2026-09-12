@@ -1,4 +1,4 @@
-import { Cause, Effect, Option, Result, Schedule, Schema } from "effect";
+import { Cause, Effect, Option, Result, Schedule, Schema, Scope } from "effect";
 import * as Automation from "../db/automation.ts";
 import * as Servers from "../db/servers.ts";
 import * as Tests from "../db/tests.ts";
@@ -153,6 +153,7 @@ export const dispatch = Effect.fn("dispatch")(function* (model: string) {
   const servers = yield* Servers.ServerStore;
   const store = yield* Automation.AutomationStore;
   const log = yield* Log.Log;
+  const work = yield* Scope.Scope;
 
   const tick = Effect.fn("tick")(function* () {
     const live = yield* servers.listLiveServers("automation-client");
@@ -202,15 +203,32 @@ export const dispatch = Effect.fn("dispatch")(function* (model: string) {
             }
             continue;
           }
-          yield* restore(
-            perform(job, placed.placement, model).pipe(
-              Effect.matchCause({
-                onSuccess: (): Outcome => ({ status: "succeeded", reason: null }),
-                onFailure: outcomeFrom,
-              }),
-              Effect.flatMap((outcome) => Effect.uninterruptible(closeJob(job, outcome))),
+          // /run lives on the dispatch scope so a shutdown interrupts every in-flight
+          // job, and this tick can reserve the next pending row without waiting.
+          // Do not startImmediately: forkIn adds the interrupt finalizer only after
+          // that evaluate returns, and /run parks on the HTTP wait.
+          yield* Effect.forkIn(
+            Effect.uninterruptibleMask((release) =>
+              release(perform(job, placed.placement, model)).pipe(
+                Effect.matchCause({
+                  onSuccess: (): Outcome => ({ status: "succeeded", reason: null }),
+                  onFailure: outcomeFrom,
+                }),
+                Effect.flatMap((outcome) => closeJob(job, outcome)),
+                Effect.catchCause((cause) => {
+                  if (Cause.hasInterruptsOnly(cause)) {
+                    return Effect.void;
+                  }
+                  const error = Cause.squash(cause);
+                  return log.error(`dispatch job failed: ${detail(error)}`, {
+                    location: Log.Locations.automation,
+                    cause: error,
+                  });
+                }),
+              ),
             ),
-          ).pipe(Effect.forkScoped({ startImmediately: true }));
+            work,
+          );
         }
       }),
     );

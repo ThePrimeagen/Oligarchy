@@ -131,7 +131,7 @@ psql "$DBURL" -X -c "select name, type, url, heartbeat_at from servers where hea
 
 Expect `qemu-server-4` / `qemu-server-3` (`qemu`) and `automation-client-5` / `automation-client-3` (`automation-client`).
 
-`N` is monotonic (`/tmp/superrun/next`). Never take N from `active`. Target: `counted + active == 100` after replacing every INFRA. Dispatch is 1-wide: keep at most **2** drive jobs in `running`+`pending` (backlog, not a capacity test). `new.sh` exit 2 = no drive webhook — pause refill.
+`N` is monotonic (`/tmp/superrun/next`). Never take N from `active`. Target: `counted + active == 100` after replacing every INFRA. Dispatch fills every slot a live client will reserve; keep enough pending drives that `--max-jobs` is exercised. `new.sh` exit 2 = no drive webhook — pause refill.
 
 ```bash
 /tmp/superrun/new.sh muse
