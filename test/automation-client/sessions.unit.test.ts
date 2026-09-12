@@ -13,6 +13,8 @@ const OTHER = "OLI-99";
 const MODEL = "opencode/muse-spark-1.3-contributor-free";
 // Room for the two runs the tests above capacity start at once; the capacity tests pass 1.
 const MAX_JOBS = 2;
+// How long a run waits for stderr to end after opencode exited; then the tail so far is the tail.
+const STDERR_GRACE = "2 seconds";
 
 const qemuOk = (): Sessions.ReserveQemu => () => Effect.void;
 
@@ -695,6 +697,62 @@ describe("reserve by action", () => {
         expect(qemu).toEqual([]);
         expect(yield* sessions.jobs).toBe(1);
       }).pipe(Effect.provide(layer(spawner, 2, reserveQemu)));
+    },
+  );
+});
+
+// The stderr pipe is shared with every process opencode starts (an MCP server, a tool the agent
+// ran); one that outlives opencode keeps the pipe open. The exit is the end of the run.
+describe("Sessions.run when a process opencode started still holds stderr", () => {
+  it.effect(
+    "a run whose opencode exited 0 succeeds after the grace, not at the ceiling, and frees its slot",
+    () => {
+      const spawner = FakeSpawner.fakeSpawner(() => ({
+        exitCode: 0,
+        stderr: "noise\n",
+        stderrStaysOpen: true,
+      }));
+      return Effect.gen(function* () {
+        const sessions = yield* Sessions.Sessions;
+        yield* sessions.reserve(TICKET, "drive");
+        const running = yield* Effect.forkChild(sessions.run(TICKET, "do the work", MODEL));
+        for (let i = 0; i < 100; i++) {
+          yield* Effect.yieldNow;
+        }
+        expect(spawner.spawned[0]).toBeDefined();
+        expect(running.pollUnsafe()).toBeUndefined();
+        yield* TestClock.adjust(STDERR_GRACE);
+        yield* Fiber.join(running);
+        expect(spawner.spawned[0]?.kills).toEqual([]);
+        expect(yield* sessions.jobs).toBe(0);
+        yield* sessions.reserve(OTHER, "drive");
+      }).pipe(Effect.provide(layer(spawner, 1)));
+    },
+  );
+
+  it.effect(
+    "a run whose opencode exited 1 is RunFailed with what it wrote, after the grace",
+    () => {
+      const spawner = FakeSpawner.fakeSpawner(() => ({
+        exitCode: 1,
+        stderr: "out of token credits\n",
+        stderrStaysOpen: true,
+      }));
+      return Effect.gen(function* () {
+        const sessions = yield* Sessions.Sessions;
+        yield* sessions.reserve(TICKET, "drive");
+        const running = yield* Effect.forkChild(
+          Effect.flip(sessions.run(TICKET, "do the work", MODEL)),
+        );
+        for (let i = 0; i < 100; i++) {
+          yield* Effect.yieldNow;
+        }
+        expect(running.pollUnsafe()).toBeUndefined();
+        yield* TestClock.adjust(STDERR_GRACE);
+        const error = yield* Fiber.join(running);
+        expect(error).toMatchObject({ _tag: "RunFailed", message: "out of token credits" });
+        expect(yield* sessions.jobs).toBe(0);
+      }).pipe(Effect.provide(layer(spawner, 1)));
     },
   );
 });

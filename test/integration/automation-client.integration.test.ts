@@ -414,6 +414,55 @@ describeWithDatabase("automation client POST /run", () => {
     }),
   );
 
+  // opencode's stderr is shared with everything it starts; a straggler holding it must not hold
+  // the answer. The exit ends the run.
+  it.live(
+    "answers 200 once opencode exits 0 even while a process it started still holds stderr",
+    () =>
+      Effect.promise(async () => {
+        const qemu = await stubQemuReserve();
+        // The straggler keeps opencode's stderr and outlives it by a minute; it gives up stdout,
+        // which is this test's pipe to the client, so the client's own close is not held too.
+        const bin = installOpencode(
+          '(exec sleep 60 >/dev/null) & echo $! > "$(dirname "$0")/straggler"; echo agent-said-done >&2; exit 0',
+        );
+        const port = await freePort();
+        const process = spawnAutomationClient(
+          [...REQUIRED, "--port", String(port)],
+          { SERVER_URL: qemu.url },
+          `${bin}:${processEnv.PATH ?? ""}`,
+        );
+        try {
+          await process.waitFor(
+            new RegExp(`automation client listening on 127.0.0.1:${String(port)}`),
+          );
+          expect((await request(port, "/reserve", AUTH_JSON, DRIVE_RESERVE)).status).toBe(200);
+          const began = Date.now();
+          const response = await request(
+            port,
+            "/run",
+            AUTH_JSON,
+            JSON.stringify({ prompt: "do the work", ticket: "OLI-42", model: MODEL }),
+          );
+          expect(response.status).toBe(200);
+          // Well under the straggler's minute: the grace, not the pipe, bounded the wait.
+          expect(Date.now() - began).toBeLessThan(30_000);
+        } finally {
+          process.child.kill("SIGTERM");
+          await process.exited;
+          const straggler = Number(readFileSync(join(bin, "straggler"), "utf8").trim());
+          // Best effort: a straggler already gone cannot be killed.
+          try {
+            globalThis.process.kill(straggler, "SIGKILL");
+          } catch {
+            // ESRCH: it exited on its own.
+          }
+          rmSync(bin, { recursive: true, force: true });
+          await qemu.close();
+        }
+      }),
+  );
+
   it.live("answers 500 with opencode's error when it exits non-zero", () =>
     Effect.promise(async () => {
       const qemu = await stubQemuReserve();
