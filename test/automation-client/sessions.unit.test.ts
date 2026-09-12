@@ -16,41 +16,6 @@ const layer = (spawner: FakeSpawner.FakeSpawner, maxJobs = 8) =>
     Layer.provide(Layer.succeed(Sessions.MaxJobs)(maxJobs)),
   );
 
-describe("Sessions.jobs happy path", () => {
-  it.effect(
-    "is 0 when nothing is running, 1 while a run is in flight, and 0 after it finishes",
-    () => {
-      const spawner = FakeSpawner.fakeSpawner(() => ({}));
-      return Effect.gen(function* () {
-        const sessions = yield* Sessions.Sessions;
-        expect(yield* sessions.jobs).toBe(0);
-        const running = yield* Effect.forkChild(sessions.run(TICKET, "do the work"));
-        for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
-          yield* Effect.yieldNow;
-        }
-        expect(yield* sessions.jobs).toBe(1);
-        yield* spawner.spawned[0]?.exit(0) ?? Effect.void;
-        yield* Fiber.join(running);
-        expect(yield* sessions.jobs).toBe(0);
-      }).pipe(Effect.provide(layer(spawner)));
-    },
-  );
-});
-
-describe("Sessions.jobs unhappy path", () => {
-  it.effect("is 0 after a run that fails", () => {
-    const spawner = FakeSpawner.fakeSpawner(() => ({
-      exitCode: 1,
-      stderr: "out of token credits\n",
-    }));
-    return Effect.gen(function* () {
-      const sessions = yield* Sessions.Sessions;
-      yield* Effect.flip(sessions.run(TICKET, "do the work"));
-      expect(yield* sessions.jobs).toBe(0);
-    }).pipe(Effect.provide(layer(spawner)));
-  });
-});
-
 describe("Sessions.run happy path", () => {
   it.effect("launches opencode with the prompt and succeeds when it exits 0", () => {
     const spawner = FakeSpawner.fakeSpawner(() => ({
@@ -76,12 +41,10 @@ describe("Sessions.run happy path", () => {
         yield* Effect.yieldNow;
       }
       expect(spawner.spawned).toHaveLength(2);
-      expect(yield* sessions.jobs).toBe(2);
       yield* spawner.spawned[0]?.exit(0) ?? Effect.void;
       yield* spawner.spawned[1]?.exit(0) ?? Effect.void;
       yield* Fiber.join(first);
       yield* Fiber.join(second);
-      expect(yield* sessions.jobs).toBe(0);
     }).pipe(Effect.provide(layer(spawner, 2)));
   });
 
@@ -137,7 +100,6 @@ describe("Sessions.run unhappy path", () => {
         message: "at capacity; try later",
       });
       expect(spawner.spawned).toHaveLength(1);
-      expect(yield* sessions.jobs).toBe(1);
       yield* spawner.spawned[0]?.exit(0) ?? Effect.void;
       yield* Fiber.join(running);
     }).pipe(Effect.provide(layer(spawner, 1)));
@@ -165,7 +127,6 @@ describe("Sessions.run unhappy path", () => {
           : "other";
       });
       expect(tags.sort()).toEqual(["AtCapacity", "ok"]);
-      expect(yield* sessions.jobs).toBe(0);
     }).pipe(Effect.provide(layer(spawner, 1)));
   });
 
@@ -180,9 +141,7 @@ describe("Sessions.run unhappy path", () => {
         _tag: "RunFailed",
         message: "spawn opencode ENOENT",
       });
-      expect(yield* sessions.jobs).toBe(0);
       yield* sessions.run(OTHER, "second");
-      expect(yield* sessions.jobs).toBe(0);
     }).pipe(Effect.provide(layer(spawner, 1)));
   });
 });
