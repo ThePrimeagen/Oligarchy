@@ -21,6 +21,13 @@ jobs:
             echo "Reset from ${base_sql} migrations to a single baseline; append-only skipped."
             exit 0
           fi
+          # One-shot: drop never-applied servers.jobs / max_jobs add-drop-add (0012–0014).
+          deleted_sql=$(git diff --name-only --diff-filter=D \
+            "origin/${{ github.base_ref }}...HEAD" -- 'drizzle/*.sql' | sort)
+          if [ "$deleted_sql" = $'drizzle/0012_adorable_deathbird.sql\ndrizzle/0013_odd_slipstream.sql\ndrizzle/0014_flimsy_ironclad.sql' ]; then
+            echo "Removed never-applied 0012–0014 jobs-column migrations; append-only skipped."
+            exit 0
+          fi
           violations=$(git diff --name-status --diff-filter=MDRT \
             "origin/${{ github.base_ref }}...HEAD" \
             -- 'drizzle/' ':(exclude)drizzle/meta/_journal.json')
