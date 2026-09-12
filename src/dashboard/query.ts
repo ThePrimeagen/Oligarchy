@@ -72,6 +72,23 @@ export type ProcessStat = {
   readonly queriedAt: Date;
 };
 
+// One heartbeat in a name's series. The page draws a bar per sample, oldest on the left.
+export type ProcessSample = {
+  readonly jobs: number;
+  readonly memoryBytes: number;
+  readonly cpuPercent: number;
+  readonly reportedAt: Date;
+};
+
+// The newest reading plus the window the graphs use. samples is oldest first and always has
+// the newest as its last element, the same values as the current fields.
+export type ProcessSeries = ProcessStat & {
+  readonly samples: ReadonlyArray<ProcessSample>;
+};
+
+// 60 samples of 30 s is a thirty-minute window.
+const PROCESS_SERIES_LIMIT = 60;
+
 // One name's wordings, oldest first: versions[i] is version i + 1, and the last is the newest.
 export type DefinitionVersions = {
   readonly name: string;
@@ -546,9 +563,33 @@ export function abortAutomationJob(connectionString: string, ticket: string): Pr
   });
 }
 
+// Readings already ordered by type, name, then reported_at: consecutive rows of the same
+// name and kind become one series, the last row the current reading.
+export function groupProcessSeries(rows: ReadonlyArray<ProcessStat>): ProcessSeries[] {
+  const series: ProcessSeries[] = [];
+  for (const row of rows) {
+    const sample = {
+      jobs: row.jobs,
+      memoryBytes: row.memoryBytes,
+      cpuPercent: row.cpuPercent,
+      reportedAt: row.reportedAt,
+    };
+    const last = series.at(-1);
+    if (last !== undefined && last.name === row.name && last.type === row.type) {
+      series[series.length - 1] = {
+        ...row,
+        samples: [...last.samples, sample],
+      };
+    } else {
+      series.push({ ...row, samples: [sample] });
+    }
+  }
+  return series;
+}
+
 // The newest reading per name, qemu and automation-client together, by kind then name. The
 // clock in the select is the one a report's age is read against, and it keeps a poll out of
-// Hyperdrive's query cache. Older rows stay in the table for a later graph.
+// Hyperdrive's query cache. Older rows stay in the table for the series the graphs read.
 export function listProcessStats(connectionString: string): Promise<ProcessStat[]> {
   return withDatabase(connectionString, (db) =>
     db
@@ -564,6 +605,44 @@ export function listProcessStats(connectionString: string): Promise<ProcessStat[
       .from(processStats)
       .orderBy(processStats.type, processStats.name, desc(processStats.reportedAt)),
   );
+}
+
+// The last thirty minutes per name, oldest first inside each series, names in the same
+// order as listProcessStats. The time filter keeps the rank off the whole table; the
+// rank then caps a chatty host at sixty samples. The clock in the select keeps a poll
+// out of Hyperdrive's query cache.
+export function listProcessSeries(connectionString: string): Promise<ProcessSeries[]> {
+  return withDatabase(connectionString, async (db) => {
+    const ranked = db
+      .select({
+        name: processStats.name,
+        type: processStats.type,
+        jobs: processStats.jobs,
+        memoryBytes: processStats.memoryBytes,
+        cpuPercent: processStats.cpuPercent,
+        reportedAt: processStats.reportedAt,
+        rank: sql<number>`row_number() over (partition by ${processStats.type}, ${processStats.name} order by ${processStats.reportedAt} desc)`
+          .mapWith(Number)
+          .as("rn"),
+      })
+      .from(processStats)
+      .where(sql`${processStats.reportedAt} > now() - interval '30 minutes'`)
+      .as("process_series");
+    const rows = await db
+      .select({
+        name: ranked.name,
+        type: ranked.type,
+        jobs: ranked.jobs,
+        memoryBytes: ranked.memoryBytes,
+        cpuPercent: ranked.cpuPercent,
+        reportedAt: ranked.reportedAt,
+        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(processStats.reportedAt),
+      })
+      .from(ranked)
+      .where(sql`${ranked.rank} <= ${PROCESS_SERIES_LIMIT}`)
+      .orderBy(ranked.type, ranked.name, ranked.reportedAt);
+    return groupProcessSeries(rows);
+  });
 }
 
 // Registering a url twice is one row; the server fills the rest in when it announces itself. The

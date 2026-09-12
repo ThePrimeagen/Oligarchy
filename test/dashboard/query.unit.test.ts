@@ -3,9 +3,11 @@ import {
   definitionStats,
   durationChart,
   groupDefinitions,
+  groupProcessSeries,
   modelStats,
   selectDefinition,
   versionStats,
+  type ProcessStat,
   type Session,
   type TestDefinition,
   type TestResultOutcome,
@@ -380,5 +382,73 @@ describe("durationChart unhappy path", () => {
         }),
       ]),
     ).toEqual({ bars: [], percentiles: undefined });
+  });
+});
+
+const QUERIED = at("2026-09-12T16:00:00Z");
+
+const reading = (
+  name: string,
+  type: ProcessStat["type"],
+  jobs: number,
+  memoryBytes: number,
+  cpuPercent: number,
+  reportedAt: Date,
+): ProcessStat => ({
+  name,
+  type,
+  jobs,
+  memoryBytes,
+  cpuPercent,
+  reportedAt,
+  queriedAt: QUERIED,
+});
+
+describe("groupProcessSeries happy path", () => {
+  it("groups readings of one name oldest first and takes the newest as the current reading", () => {
+    const older = reading("garage", "qemu", 1, 256_000_000, 10, at("2026-09-12T15:59:00Z"));
+    const newer = reading("garage", "qemu", 2, 512_000_000, 37.5, at("2026-09-12T15:59:30Z"));
+    expect(groupProcessSeries([older, newer])).toEqual([
+      {
+        name: "garage",
+        type: "qemu",
+        jobs: 2,
+        memoryBytes: 512_000_000,
+        cpuPercent: 37.5,
+        reportedAt: newer.reportedAt,
+        queriedAt: QUERIED,
+        samples: [
+          { jobs: 1, memoryBytes: 256_000_000, cpuPercent: 10, reportedAt: older.reportedAt },
+          { jobs: 2, memoryBytes: 512_000_000, cpuPercent: 37.5, reportedAt: newer.reportedAt },
+        ],
+      },
+    ]);
+  });
+
+  it("keeps a series per type and name in the order the rows arrived, automation-client before qemu when listed that way", () => {
+    const auto = reading("workshop", "automation-client", 1, 1, 4, at("2026-09-12T15:59:00Z"));
+    const qemu = reading("garage", "qemu", 2, 2, 12, at("2026-09-12T15:59:00Z"));
+    const qemuNext = reading("garage", "qemu", 3, 3, 20, at("2026-09-12T15:59:30Z"));
+    const series = groupProcessSeries([auto, qemu, qemuNext]);
+    expect(series.map((row) => `${row.type} ${row.name} ${String(row.jobs)}`)).toEqual([
+      "automation-client workshop 1",
+      "qemu garage 3",
+    ]);
+    expect(series[1]?.samples).toHaveLength(2);
+  });
+});
+
+describe("groupProcessSeries unhappy path", () => {
+  it("returns no series when there are no readings", () => {
+    expect(groupProcessSeries([])).toEqual([]);
+  });
+
+  it("does not merge the same name across types", () => {
+    const qemu = reading("garage", "qemu", 2, 1, 10, at("2026-09-12T15:59:00Z"));
+    const auto = reading("garage", "automation-client", 1, 2, 4, at("2026-09-12T15:59:00Z"));
+    const series = groupProcessSeries([qemu, auto]);
+    expect(series).toHaveLength(2);
+    expect(series.map((row) => row.type)).toEqual(["qemu", "automation-client"]);
+    expect(series.every((row) => row.samples.length === 1)).toBe(true);
   });
 });

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type {
   AutomationJob,
   AutomationQueue,
-  ProcessStat,
+  ProcessSeries,
   Server,
 } from "../../src/dashboard/query.ts";
 import { Fleet, Process, Queue, ServersPage } from "../../src/dashboard/servers.tsx";
@@ -86,7 +86,7 @@ const failed: AutomationJob = {
 const QUEUE: AutomationQueue = { running: [running], pending: [pending], completed: [failed] };
 const EMPTY_QUEUE: AutomationQueue = { running: [], pending: [], completed: [] };
 
-const processAlive: ProcessStat = {
+const processAlive: ProcessSeries = {
   name: "garage",
   type: "qemu",
   jobs: 2,
@@ -94,9 +94,13 @@ const processAlive: ProcessStat = {
   cpuPercent: 37.5,
   reportedAt: ago(12),
   queriedAt: QUERIED_AT,
+  samples: [
+    { jobs: 1, memoryBytes: 256_000_000, cpuPercent: 10, reportedAt: ago(42) },
+    { jobs: 2, memoryBytes: 512_000_000, cpuPercent: 37.5, reportedAt: ago(12) },
+  ],
 };
 
-const processSilent: ProcessStat = {
+const processSilent: ProcessSeries = {
   name: "attic",
   type: "automation-client",
   jobs: 1,
@@ -104,10 +108,17 @@ const processSilent: ProcessStat = {
   cpuPercent: 8,
   reportedAt: ago(5 * 60 + 12),
   queriedAt: QUERIED_AT,
+  samples: [{ jobs: 1, memoryBytes: 256_000_000, cpuPercent: 8, reportedAt: ago(5 * 60 + 12) }],
 };
 
-const PROCESS_COLUMNS =
-  "<tr><th>name</th><th>type</th><th>jobs</th><th>memory</th><th>cpu 30s</th><th>reported</th></tr>";
+const jobsBars =
+  '<div class="process-graph__bars" role="img" aria-label="jobs 2"><span class="process-graph__bar" style="height:50%"></span><span class="process-graph__bar" style="height:100%"></span></div>';
+
+const cpuBars =
+  '<div class="process-graph__bars" role="img" aria-label="cpu 37.5%"><span class="process-graph__bar" style="height:10%"></span><span class="process-graph__bar" style="height:37.5%"></span></div>';
+
+const memoryBars =
+  '<div class="process-graph__bars" role="img" aria-label="memory 512.0 MB"><span class="process-graph__bar" style="height:50%"></span><span class="process-graph__bar" style="height:100%"></span></div>';
 
 const JOB_COLUMNS =
   "<tr><th>ticket</th><th>test</th><th>action</th><th>status</th><th>queued</th><th>started</th><th>finished</th><th>reason</th><th></th></tr>";
@@ -301,33 +312,72 @@ describe("Queue unhappy path", () => {
 });
 
 describe("Process happy path", () => {
-  it("lists a process heard from just now with its jobs, memory, 30s cpu and the age of its report", async () => {
-    const page = await render(Process({ rows: [processAlive] }));
-    expect(page).toContain(PROCESS_COLUMNS);
-    expect(page).toContain(
-      "<tr><td>garage</td><td>qemu</td><td>2</td><td>512.0 MB</td><td>37.5%</td><td>12 s ago</td></tr>",
-    );
+  it("names a server and draws jobs, cpu and memory bar graphs of its series, newest reading on the labels", async () => {
+    const page = await render(Process({ series: [processAlive] }));
+    expect(page).toContain("<h3>garage</h3>");
+    expect(page).toContain("<p>qemu · 12 s ago</p>");
+    expect(page).toContain(`<h4>jobs 2</h4>${jobsBars}`);
+    expect(page).toContain(`<h4>cpu 37.5%</h4>${cpuBars}`);
+    expect(page).toContain(`<h4>memory 512.0 MB</h4>${memoryBars}`);
+    expect(page).not.toContain("<table>");
   });
 
-  it("says no process stats for an empty list, with no table", async () => {
-    const page = await render(Process({ rows: [] }));
+  it("says no process stats for an empty list, with no cards", async () => {
+    const page = await render(Process({ series: [] }));
     expect(page).toBe("<p>no process stats</p>");
+  });
+
+  it("scales cpu against 100 percent so a quiet host is a short bar, and above 100 when a sample is", async () => {
+    const over: ProcessSeries = {
+      ...processAlive,
+      cpuPercent: 150,
+      samples: [
+        { jobs: 1, memoryBytes: 1, cpuPercent: 75, reportedAt: ago(42) },
+        { jobs: 1, memoryBytes: 1, cpuPercent: 150, reportedAt: ago(12) },
+      ],
+    };
+    const page = await render(Process({ series: [over] }));
+    expect(page).toContain('aria-label="cpu 150.0%"');
+    expect(page).toContain('style="height:50%"');
+    expect(page).toContain('style="height:100%"');
   });
 });
 
 describe("Process unhappy path", () => {
-  it("collapses a silent process's readings into one word", async () => {
-    const page = await render(Process({ rows: [processSilent] }));
-    expect(page).toContain(
-      '<tr><td>attic</td><td>automation-client</td><td colspan="3"><strong>silent</strong></td><td>5 min ago</td></tr>',
-    );
+  it("collapses a silent process's graphs into one word", async () => {
+    const page = await render(Process({ series: [processSilent] }));
+    expect(page).toContain("<h3>attic</h3>");
+    expect(page).toContain("<p>automation-client · 5 min ago</p>");
+    expect(page).toContain("<p><strong>silent</strong></p>");
+    expect(page).not.toContain("process-graph__bar");
     expect(page).not.toContain("256.0 MB");
+    expect(page).not.toContain("8.0%");
   });
 
   it("escapes a name", async () => {
-    const page = await render(Process({ rows: [{ ...processAlive, name: 'x<">' }] }));
-    expect(page).toContain("<td>x&lt;&quot;&gt;</td>");
+    const page = await render(Process({ series: [{ ...processAlive, name: 'x<">' }] }));
+    expect(page).toContain("<h3>x&lt;&quot;&gt;</h3>");
     expect(page).not.toContain('x<">');
+  });
+
+  it("draws empty bars when every sample is zero rather than inventing a height", async () => {
+    const idle: ProcessSeries = {
+      ...processAlive,
+      jobs: 0,
+      memoryBytes: 0,
+      cpuPercent: 0,
+      samples: [
+        { jobs: 0, memoryBytes: 0, cpuPercent: 0, reportedAt: ago(42) },
+        { jobs: 0, memoryBytes: 0, cpuPercent: 0, reportedAt: ago(12) },
+      ],
+    };
+    const page = await render(Process({ series: [idle] }));
+    expect(page).toContain("<h4>jobs 0</h4>");
+    expect(page).toContain("<h4>cpu 0.0%</h4>");
+    expect(page).toContain("<h4>memory 0.0 MB</h4>");
+    expect(page).toContain('aria-label="jobs 0"');
+    expect(page.match(/style="height:0%"/g)?.length).toBe(6);
+    expect(page).not.toContain('style="height:100%"');
   });
 });
 
@@ -362,9 +412,11 @@ describe("ServersPage happy path", () => {
       page.indexOf("<h2>add a server</h2>"),
     );
     expect(page).toContain(
-      '<section><h2>process</h2><div id="process" hx-get="/servers/process" hx-trigger="every 30s"><table>',
+      '<section><h2>process</h2><div id="process" hx-get="/servers/process" hx-trigger="every 30s"><article class="process-card"><h3>garage</h3>',
     );
-    expect(page).toContain("<td>37.5%</td>");
+    expect(page).toContain("<h4>cpu 37.5%</h4>");
+    expect(page).toMatch(/<style>[^<]*\.process-card/);
+    expect(page).toMatch(/<style>[^<]*\.process-graph__bar/);
     expect(page.indexOf("<h2>add a server</h2>")).toBeLessThan(page.indexOf("<h2>process</h2>"));
     expect(page).not.toContain("<h2>servers</h2>");
     expect(page).not.toContain("error:");

@@ -1,6 +1,6 @@
 import type { FC } from "hono/jsx";
 import { HTMX_INTEGRITY, HTMX_URL } from "./htmx.ts";
-import type { AutomationJob, AutomationQueue, ProcessStat, Server } from "./query.ts";
+import type { AutomationJob, AutomationQueue, ProcessSeries, Server } from "./query.ts";
 
 // A server writes its row every thirty seconds. One heartbeat may be in flight and one lost to a
 // slow database; three overdue is a server that stopped.
@@ -81,46 +81,83 @@ const Row: FC<{ server: Server }> = ({ server }) => {
 
 const megabytes = (bytes: number): string => (bytes / 1_000_000).toFixed(1);
 
-const ProcessRow: FC<{ row: ProcessStat }> = ({ row }) => {
-  const sinceReport = row.queriedAt.getTime() - row.reportedAt.getTime();
+// One named metric: the current reading in the heading, one bar per sample, oldest on the left.
+const BarGraph: FC<{
+  label: string;
+  current: string;
+  values: ReadonlyArray<number>;
+  max: number;
+}> = ({ label, current, values, max }) => (
+  <div class="process-graph">
+    <h4>
+      {label} {current}
+    </h4>
+    <div class="process-graph__bars" role="img" aria-label={`${label} ${current}`}>
+      {values.map((value) => (
+        <span
+          class="process-graph__bar"
+          style={{ height: max === 0 ? "0%" : `${String((value / max) * 100)}%` }}
+        ></span>
+      ))}
+    </div>
+  </div>
+);
+
+const ProcessCard: FC<{ series: ProcessSeries }> = ({ series }) => {
+  const sinceReport = series.queriedAt.getTime() - series.reportedAt.getTime();
   return (
-    <tr>
-      <td>{row.name}</td>
-      <td>{row.type}</td>
+    <article class="process-card">
+      <h3>{series.name}</h3>
+      <p>
+        {series.type} · {age(sinceReport)} ago
+      </p>
       {sinceReport > SILENT_AFTER_MS ? (
-        <td colspan={3}>
+        <p>
           <strong>silent</strong>
-        </td>
+        </p>
       ) : (
-        <>
-          <td>{row.jobs}</td>
-          <td>{megabytes(row.memoryBytes)} MB</td>
-          <td>{percent(row.cpuPercent)}</td>
-        </>
+        <div class="process-graphs">
+          <BarGraph
+            label="jobs"
+            current={String(series.jobs)}
+            values={series.samples.map((sample) => sample.jobs)}
+            max={series.samples.reduce((max, sample) => (sample.jobs > max ? sample.jobs : max), 0)}
+          />
+          <BarGraph
+            label="cpu"
+            current={percent(series.cpuPercent)}
+            values={series.samples.map((sample) => sample.cpuPercent)}
+            max={series.samples.reduce(
+              (max, sample) => (sample.cpuPercent > max ? sample.cpuPercent : max),
+              100,
+            )}
+          />
+          <BarGraph
+            label="memory"
+            current={`${megabytes(series.memoryBytes)} MB`}
+            values={series.samples.map((sample) => sample.memoryBytes)}
+            max={series.samples.reduce(
+              (max, sample) => (sample.memoryBytes > max ? sample.memoryBytes : max),
+              0,
+            )}
+          />
+        </div>
       )}
-      <td>{age(sinceReport)} ago</td>
-    </tr>
+    </article>
   );
 };
 
-// Current process readings as a table, or the sentence that there are none: what the page polls for.
-export const Process: FC<{ rows: ReadonlyArray<ProcessStat> }> = ({ rows }) =>
-  rows.length === 0 ? (
+// Current process readings as one card per name: jobs, cpu and memory as bar graphs of the
+// series, or the sentence that there are none. What the page polls for.
+export const Process: FC<{ series: ReadonlyArray<ProcessSeries> }> = ({ series }) =>
+  series.length === 0 ? (
     <p>no process stats</p>
   ) : (
-    <table>
-      <tr>
-        <th>name</th>
-        <th>type</th>
-        <th>jobs</th>
-        <th>memory</th>
-        <th>cpu 30s</th>
-        <th>reported</th>
-      </tr>
-      {rows.map((row) => (
-        <ProcessRow row={row} />
+    <>
+      {series.map((row) => (
+        <ProcessCard series={row} />
       ))}
-    </table>
+    </>
   );
 
 // The fleet as a table, or the sentence that there is none: what the page polls for.
@@ -224,14 +261,14 @@ export const Queue: FC<{ queue: AutomationQueue }> = ({ queue }) => (
 export type Halves = {
   readonly queue: AutomationQueue;
   readonly servers: ReadonlyArray<Server>;
-  readonly process: ReadonlyArray<ProcessStat>;
+  readonly process: ReadonlyArray<ProcessSeries>;
 };
 
 // Text an operator reads at a glance, in two halves side by side: the automation queue, then the
 // qemu fleet with its add box, each swapped in fresh every thirty seconds, and below them the
-// process readings. The one style rule is the split. `halves` is absent only when the database
-// could not be read, so a 500 page claims neither an empty queue nor an empty fleet; `error` is
-// the reason a request was refused, on top.
+// process graphs, one card per named server. The style is the split and the bars. `halves` is
+// absent only when the database could not be read, so a 500 page claims neither an empty queue
+// nor an empty fleet; `error` is the reason a request was refused, on top.
 export const ServersPage: FC<{
   halves: Halves | undefined;
   error: string | undefined;
@@ -242,7 +279,7 @@ export const ServersPage: FC<{
       <title>oligarchy servers</title>
       <style>
         {
-          ".halves { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: start; } .abort { background: none; border: none; padding: 0; cursor: pointer; line-height: 0; vertical-align: middle; }"
+          ".halves { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: start; } .abort { background: none; border: none; padding: 0; cursor: pointer; line-height: 0; vertical-align: middle; } .process-card { display: grid; gap: 0.5rem; margin: 0 0 1.5rem; } .process-card > h3, .process-card > p, .process-graph > h4 { margin: 0; } .process-graphs { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; } .process-graph { display: grid; gap: 0.35rem; } .process-graph__bars { display: flex; align-items: flex-end; gap: 1px; height: 4rem; border-bottom: 1px solid #888; } .process-graph__bar { flex: 1 1 0; min-width: 0; min-height: 0; background: #444; }"
         }
       </style>
       <script src={HTMX_URL} integrity={HTMX_INTEGRITY} crossorigin="anonymous"></script>
@@ -277,7 +314,7 @@ export const ServersPage: FC<{
         <h2>process</h2>
         {halves === undefined ? null : (
           <div id="process" hx-get="/servers/process" hx-trigger="every 30s">
-            <Process rows={halves.process} />
+            <Process series={halves.process} />
           </div>
         )}
       </section>

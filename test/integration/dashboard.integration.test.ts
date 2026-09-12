@@ -239,6 +239,50 @@ console.log(rows.map((row) => [row.name, row.type, row.jobs, row.memoryBytes, ro
     ]);
   });
 
+  it("lists the last 60 process readings per name as a series, oldest first, drops a reading older than 30 minutes, and ends the connection", async () => {
+    await seed(dbUrl, async (db) => {
+      await db.insert(processStats).values([
+        ...Array.from({ length: 61 }, (_, index) => ({
+          name: "series-qemu",
+          type: "qemu" as const,
+          jobs: index,
+          memoryBytes: index,
+          cpuPercent: index,
+          reportedAt: new Date(Date.now() - (60 - index) * 1_000),
+        })),
+        {
+          name: "series-auto",
+          type: "automation-client" as const,
+          jobs: 1,
+          memoryBytes: 2,
+          cpuPercent: 3,
+        },
+        {
+          name: "series-qemu",
+          type: "qemu" as const,
+          jobs: 99,
+          memoryBytes: 99,
+          cpuPercent: 99,
+          reportedAt: new Date(Date.now() - 31 * 60_000),
+        },
+      ]);
+    });
+    const result = await runQuery(
+      `
+const rows = (await query.listProcessSeries(url)).filter((row) => row.name.startsWith("series-"));
+console.log(rows.map((row) => [row.name, row.type, row.jobs, row.samples.length, row.samples[0].jobs, row.samples.at(-1).jobs].join(" ")).join("\\n"));
+`,
+      dbUrl,
+    );
+    expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    expect(lines(result.stdout)).toEqual([
+      "series-qemu qemu 60 60 1 60",
+      "series-auto automation-client 1 1 1 1",
+    ]);
+  });
+
   it("returns undefined for an unknown image id and still exits", async () => {
     const result = await runQuery(
       'const image = await query.getImage(url, "00000000-0000-4000-8000-000000000000");\nconsole.log(String(image));',
@@ -859,6 +903,17 @@ describe("dashboard/query unhappy path: unreachable database", () => {
     expect(result.stderr).toMatch(/ECONNREFUSED/);
     expect(result.stderr).not.toContain(SENTINEL_PASSWORD);
   });
+
+  it("listProcessSeries surfaces a refused connection and exits without echoing the password", async () => {
+    const result = await runQuery(
+      "try {\n  await query.listProcessSeries(url);\n} catch (err) {\n  console.error(err.message);\n  process.exitCode = 3;\n}",
+      REFUSED_URL,
+    );
+    expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
+    expect(result.code).toBe(3);
+    expect(result.stderr).toMatch(/ECONNREFUSED/);
+    expect(result.stderr).not.toContain(SENTINEL_PASSWORD);
+  });
 });
 
 const registered = async (
@@ -961,15 +1016,17 @@ describe.skipIf(dbUrl === "")("dashboard/servers page happy path", () => {
       '<tr><td>—</td><td>http://10.1.0.3:42069</td><td colspan="3">never heard from</td><td>0</td><td>never</td>',
     );
     expect(html).toContain('<div id="process" hx-get="/servers/process" hx-trigger="every 30s">');
-    expect(html).toContain(
-      "<tr><td>garage</td><td>qemu</td><td>2</td><td>512.0 MB</td><td>37.5%</td><td>12 s ago</td>",
-    );
-    expect(html).toContain(
-      '<tr><td>attic</td><td>qemu</td><td colspan="3"><strong>silent</strong></td><td>5 min ago</td>',
-    );
-    expect(html).toContain(
-      "<tr><td>workshop</td><td>automation-client</td><td>1</td><td>128.0 MB</td><td>8.0%</td><td>8 s ago</td>",
-    );
+    expect(html).toContain("<h3>garage</h3>");
+    expect(html).toContain("<h4>jobs 2</h4>");
+    expect(html).toContain("<h4>cpu 37.5%</h4>");
+    expect(html).toContain("<h4>memory 512.0 MB</h4>");
+    expect(html).toContain('aria-label="jobs 2"');
+    expect(html).toContain("<h3>attic</h3>");
+    expect(html).toContain("<p><strong>silent</strong></p>");
+    expect(html).toContain("<h3>workshop</h3>");
+    expect(html).toContain("<h4>jobs 1</h4>");
+    expect(html).toContain("<h4>cpu 8.0%</h4>");
+    expect(html).toContain("<h4>memory 128.0 MB</h4>");
     expect(html).not.toContain("dashboard.css");
   });
 
@@ -989,12 +1046,14 @@ describe.skipIf(dbUrl === "")("dashboard/servers page happy path", () => {
     expect(fleet.html).not.toContain("http://10.1.0.4:54322");
   });
 
-  it("serves the process table alone at /servers/process, what the page's poll swaps in", async () => {
+  it("serves the process graphs alone at /servers/process, what the page's poll swaps in", async () => {
     const { status, html } = await getPage("/servers/process", dbUrl);
     expect(status).toBe(200);
-    expect(html).toContain("<table>");
-    expect(html).toContain("<td>garage</td>");
-    expect(html).toContain("<td>37.5%</td>");
+    expect(html).toContain('<article class="process-card">');
+    expect(html).toContain("<h3>garage</h3>");
+    expect(html).toContain("<h4>cpu 37.5%</h4>");
+    expect(html).toContain("process-graph__bar");
+    expect(html).not.toContain("<table>");
     expect(html).not.toContain("<html");
     expect(html).not.toContain("add a server");
   });
