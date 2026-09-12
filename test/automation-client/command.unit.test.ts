@@ -41,17 +41,17 @@ const CliTestLayer = Layer.mergeAll(
   ),
 );
 
-type Served = readonly [number, Option.Option<string>, number];
+type Served = readonly [number, Option.Option<string>];
 
 const fakeServer = () => {
   const served: Array<Served> = [];
   const listening = Deferred.makeUnsafe<void>();
   const serverFailed = Deferred.makeUnsafe<never, HttpServerError.ServeError>();
   const server: AutomationClientCommand.AutomationClient<never> = {
-    serve: (port, url, maxJobs) =>
+    serve: (port, url) =>
       Layer.effectDiscard(
         Effect.gen(function* () {
-          served.push([port, url, maxJobs]);
+          served.push([port, url]);
           yield* Deferred.succeed(listening, undefined);
         }),
       ),
@@ -118,7 +118,6 @@ describe("automation client command flags", () => {
       expect(stdout.join("\n")).toContain("automation-client");
       expect(stdout.join("\n")).toContain("--port");
       expect(stdout.join("\n")).toContain("--url");
-      expect(stdout.join("\n")).toContain("--max-jobs");
       expect(stdout.join("\n")).not.toContain("--display");
     }),
   );
@@ -132,7 +131,7 @@ describe("automation client command flags", () => {
       yield* Fiber.interrupt(fiber);
       const exit = yield* Fiber.await(fiber);
       expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true);
-      expect(fake.served).toEqual([[54322, Option.none(), 1]]);
+      expect(fake.served).toEqual([[54322, Option.none()]]);
       expect(log.lines).toEqual([]);
     }),
   );
@@ -144,35 +143,7 @@ describe("automation client command flags", () => {
       const fiber = yield* Effect.forkChild(run(fake.server, ["--port", "1234"], log));
       yield* Deferred.await(fake.listening);
       yield* Fiber.interrupt(fiber);
-      expect(fake.served).toEqual([[1234, Option.none(), 1]]);
-    }),
-  );
-
-  it.effect("--max-jobs 4 reaches the server as given", () =>
-    Effect.gen(function* () {
-      const fake = fakeServer();
-      const log = FakeLog.fakeLog();
-      const fiber = yield* Effect.forkChild(run(fake.server, ["--max-jobs", "4"], log));
-      yield* Deferred.await(fake.listening);
-      yield* Fiber.interrupt(fiber);
-      expect(fake.served).toEqual([[54322, Option.none(), 4]]);
-    }),
-  );
-
-  it.effect("--max-jobs 0 is a usage error that touches nothing (unhappy)", () =>
-    Effect.gen(function* () {
-      const fake = fakeServer();
-      const log = FakeLog.fakeLog();
-      const error = yield* Effect.flip(run(fake.server, ["--max-jobs", "0"], log));
-      expect(error._tag).toBe("ShowHelp");
-      if (error._tag === "ShowHelp") {
-        expect(error.errors.length).toBeGreaterThan(0);
-        expect(error.errors[0]?._tag).toBe("InvalidValue");
-      }
-      const stderr = yield* TestConsole.errorLines;
-      expect(stderr.join("\n")).toContain("max-jobs must be at least 1");
-      expect(fake.served).toEqual([]);
-      expect(log.lines).toEqual([]);
+      expect(fake.served).toEqual([[1234, Option.none()]]);
     }),
   );
 
@@ -185,7 +156,7 @@ describe("automation client command flags", () => {
       );
       yield* Deferred.await(fake.listening);
       yield* Fiber.interrupt(fiber);
-      expect(fake.served).toEqual([[54322, Option.some("http://127.0.0.1:55332"), 1]]);
+      expect(fake.served).toEqual([[54322, Option.some("http://127.0.0.1:55332")]]);
     }),
   );
 
