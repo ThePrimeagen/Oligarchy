@@ -608,9 +608,9 @@ export function listProcessStats(connectionString: string): Promise<ProcessStat[
 }
 
 // The last thirty minutes per name, oldest first inside each series, names in the same
-// order as listProcessStats. The rank cut is in SQL so a long-lived host does not ship
-// the whole table to the Worker. The clock in the select keeps a poll out of Hyperdrive's
-// query cache.
+// order as listProcessStats. The time filter keeps the rank off the whole table; the
+// rank then caps a chatty host at sixty samples. The clock in the select keeps a poll
+// out of Hyperdrive's query cache.
 export function listProcessSeries(connectionString: string): Promise<ProcessSeries[]> {
   return withDatabase(connectionString, async (db) => {
     const ranked = db
@@ -626,6 +626,7 @@ export function listProcessSeries(connectionString: string): Promise<ProcessSeri
           .as("rn"),
       })
       .from(processStats)
+      .where(sql`${processStats.reportedAt} > now() - interval '30 minutes'`)
       .as("process_series");
     const rows = await db
       .select({

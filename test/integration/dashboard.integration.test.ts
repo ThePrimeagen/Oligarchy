@@ -239,7 +239,7 @@ console.log(rows.map((row) => [row.name, row.type, row.jobs, row.memoryBytes, ro
     ]);
   });
 
-  it("lists the last 60 process readings per name as a series, oldest first, and ends the connection", async () => {
+  it("lists the last 60 process readings per name as a series, oldest first, drops a reading older than 30 minutes, and ends the connection", async () => {
     await seed(dbUrl, async (db) => {
       await db.insert(processStats).values([
         ...Array.from({ length: 61 }, (_, index) => ({
@@ -256,6 +256,14 @@ console.log(rows.map((row) => [row.name, row.type, row.jobs, row.memoryBytes, ro
           jobs: 1,
           memoryBytes: 2,
           cpuPercent: 3,
+        },
+        {
+          name: "series-qemu",
+          type: "qemu" as const,
+          jobs: 99,
+          memoryBytes: 99,
+          cpuPercent: 99,
+          reportedAt: new Date(Date.now() - 31 * 60_000),
         },
       ]);
     });
