@@ -1330,14 +1330,7 @@ Postgres.describeWithDatabase("database", () => {
           yield* store.heartbeat(url, "qemu", first);
           expect(yield* store.listServers("qemu")).toContain(url);
           const [row] = yield* rowOf;
-          expect(row).toMatchObject({
-            url,
-            type: "qemu",
-            stats: first,
-            generation: 1,
-            jobs: 0,
-            maxJobs: 1,
-          });
+          expect(row).toMatchObject({ url, type: "qemu", stats: first, generation: 1 });
           expect(row?.heartbeatAt).toBeInstanceOf(Date);
           const second: DbSchema.ServerStats = { ...first, qemus: 2 };
           yield* store.heartbeat(url, "qemu", second);
@@ -1349,40 +1342,6 @@ Postgres.describeWithDatabase("database", () => {
           );
           expect(yield* store.removeServer(url)).toBe(true);
         }),
-    );
-
-    scoped.effect("ServerStore heartbeat leaves jobs and max_jobs on the row", () =>
-      Effect.gen(function* () {
-        const store = yield* Servers.ServerStore;
-        const database = yield* Client.Database;
-        const url = `http://10.0.0.24:${uuid().slice(0, 8)}`;
-        const stats: DbSchema.ServerStats = {
-          qemus: 1,
-          memory: { totalBytes: 16_000, usedBytes: 4_000 },
-          cpu: { mean1m: 1, mean2m: 1, mean3m: 1 },
-        };
-        yield* database.run("insert", (db) =>
-          db.insert(DbSchema.servers).values({
-            url,
-            type: "qemu",
-            jobs: 3,
-            maxJobs: 8,
-          }),
-        );
-        yield* store.heartbeat(url, "qemu", stats);
-        const [row] = yield* database.run("select", (db) =>
-          db.select().from(DbSchema.servers).where(eq(DbSchema.servers.url, url)),
-        );
-        expect(row).toMatchObject({
-          url,
-          type: "qemu",
-          stats,
-          generation: 1,
-          jobs: 3,
-          maxJobs: 8,
-        });
-        expect(yield* store.removeServer(url)).toBe(true);
-      }),
     );
 
     scoped.effect(

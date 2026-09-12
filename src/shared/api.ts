@@ -46,7 +46,7 @@ const png = Schema.Uint8Array.pipe(HttpApiSchema.asUint8Array({ contentType: "im
 export const start = HttpApiEndpoint.post("start", "/start", {
   payload: Contract.StartBody,
   success: Contract.StartResponse,
-  error: [Errors.StartFailedWire, Errors.AtCapacityWire],
+  error: Errors.StartFailedWire,
 });
 
 export const image = HttpApiEndpoint.get("image", "/image", {
@@ -176,7 +176,7 @@ export class Linear extends HttpApiGroup.make("Linear").add(linear).middleware(A
 export const run = HttpApiEndpoint.post("run", "/run", {
   payload: Contract.RunBody,
   success: Contract.Ok,
-  error: [Errors.RunFailedWire, Errors.AtCapacityWire],
+  error: Errors.RunFailedWire,
 });
 
 export const abort = HttpApiEndpoint.post("abort", "/abort", {

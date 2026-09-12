@@ -10,11 +10,8 @@ import * as FakeSpawner from "../support/fake-spawner.ts";
 const TICKET = "OLI-42";
 const OTHER = "OLI-99";
 
-const layer = (spawner: FakeSpawner.FakeSpawner, maxJobs = 8) =>
-  Sessions.Sessions.layer.pipe(
-    Layer.provide(spawner.layer),
-    Layer.provide(Layer.succeed(Sessions.MaxJobs)(maxJobs)),
-  );
+const layer = (spawner: FakeSpawner.FakeSpawner) =>
+  Sessions.Sessions.layer.pipe(Layer.provide(spawner.layer));
 
 describe("Sessions.run happy path", () => {
   it.effect("launches opencode with the prompt and succeeds when it exits 0", () => {
@@ -31,7 +28,7 @@ describe("Sessions.run happy path", () => {
     }).pipe(Effect.provide(layer(spawner)));
   });
 
-  it.effect("runs as many tickets as max-jobs allows", () => {
+  it.effect("runs two tickets at once", () => {
     const spawner = FakeSpawner.fakeSpawner(() => ({}));
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
@@ -45,17 +42,7 @@ describe("Sessions.run happy path", () => {
       yield* spawner.spawned[1]?.exit(0) ?? Effect.void;
       yield* Fiber.join(first);
       yield* Fiber.join(second);
-    }).pipe(Effect.provide(layer(spawner, 2)));
-  });
-
-  it.effect("a finished run frees the slot for the next ticket", () => {
-    const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
-    return Effect.gen(function* () {
-      const sessions = yield* Sessions.Sessions;
-      yield* sessions.run(TICKET, "first");
-      yield* sessions.run(OTHER, "second");
-      expect(spawner.spawned).toHaveLength(2);
-    }).pipe(Effect.provide(layer(spawner, 1)));
+    }).pipe(Effect.provide(layer(spawner)));
   });
 });
 
@@ -85,52 +72,7 @@ describe("Sessions.run unhappy path", () => {
     }).pipe(Effect.provide(layer(spawner)));
   });
 
-  it.effect("a run at capacity is AtCapacity and never spawns another opencode", () => {
-    const spawner = FakeSpawner.fakeSpawner(() => ({}));
-    return Effect.gen(function* () {
-      const sessions = yield* Sessions.Sessions;
-      const running = yield* Effect.forkChild(sessions.run(TICKET, "first"));
-      for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
-        yield* Effect.yieldNow;
-      }
-      expect(spawner.spawned).toHaveLength(1);
-      const error = yield* Effect.flip(sessions.run(OTHER, "second"));
-      expect(error).toMatchObject({
-        _tag: "AtCapacity",
-        message: "at capacity; try later",
-      });
-      expect(spawner.spawned).toHaveLength(1);
-      yield* spawner.spawned[0]?.exit(0) ?? Effect.void;
-      yield* Fiber.join(running);
-    }).pipe(Effect.provide(layer(spawner, 1)));
-  });
-
-  it.effect("two concurrent runs at max-jobs 1: one AtCapacity and only one spawn", () => {
-    const spawner = FakeSpawner.fakeSpawner(() => ({}));
-    return Effect.gen(function* () {
-      const sessions = yield* Sessions.Sessions;
-      const first = yield* Effect.forkChild(sessions.run(TICKET, "first"));
-      const second = yield* Effect.forkChild(sessions.run(OTHER, "second"));
-      for (let i = 0; i < 100 && spawner.spawned.length === 0; i++) {
-        yield* Effect.yieldNow;
-      }
-      expect(spawner.spawned).toHaveLength(1);
-      yield* spawner.spawned[0]?.exit(0) ?? Effect.void;
-      const exits = [yield* Fiber.await(first), yield* Fiber.await(second)];
-      const tags = exits.map((exit) => {
-        if (Exit.isSuccess(exit)) {
-          return "ok";
-        }
-        const error = Cause.squash(exit.cause);
-        return typeof error === "object" && error !== null && "_tag" in error
-          ? String(error._tag)
-          : "other";
-      });
-      expect(tags.sort()).toEqual(["AtCapacity", "ok"]);
-    }).pipe(Effect.provide(layer(spawner, 1)));
-  });
-
-  it.effect("a spawn failure frees the reserved slot for the next ticket", () => {
+  it.effect("a spawn failure does not block the next ticket", () => {
     let attempts = 0;
     const spawner = FakeSpawner.fakeSpawner(() =>
       ++attempts === 1 ? { spawnError: "spawn opencode ENOENT" } : { exitCode: 0 },
@@ -142,7 +84,7 @@ describe("Sessions.run unhappy path", () => {
         message: "spawn opencode ENOENT",
       });
       yield* sessions.run(OTHER, "second");
-    }).pipe(Effect.provide(layer(spawner, 1)));
+    }).pipe(Effect.provide(layer(spawner)));
   });
 });
 
