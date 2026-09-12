@@ -436,21 +436,27 @@ const make = (maxJobs: number) =>
 
     const reserve = Effect.fn("Sessions.reserve")(function* (body: Contract.StartBody) {
       const agent = body.agent;
-      const admitted = yield* Ref.modify(slots, (held) => {
-        if (held.reserved.has(agent)) {
-          return [true, held] as const;
-        }
-        if (held.count >= maxJobs) {
-          return [false, held] as const;
-        }
-        return [true, { count: held.count + 1, reserved: withItem(held.reserved, agent) }] as const;
-      });
-      if (!admitted) {
-        return yield* Errors.AtCapacity.make({
-          message: `at capacity: max-jobs is ${String(maxJobs)}`,
-          agentId: agent,
-        });
-      }
+      return yield* Effect.flatMap(
+        Ref.modify(slots, (held) => {
+          if (held.reserved.has(agent)) {
+            return [true, held] as const;
+          }
+          if (held.count >= maxJobs) {
+            return [false, held] as const;
+          }
+          return [
+            true,
+            { count: held.count + 1, reserved: withItem(held.reserved, agent) },
+          ] as const;
+        }),
+        (admitted) =>
+          admitted
+            ? Effect.void
+            : Errors.AtCapacity.make({
+                message: `at capacity: max-jobs is ${String(maxJobs)}`,
+                agentId: agent,
+              }),
+      );
     });
 
     const start = Effect.fn("Sessions.start")(function* (

@@ -237,7 +237,7 @@ describe("capacity", () => {
   });
 
   it.effect("run after reserve does not take a second slot", () => {
-    const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
+    const spawner = FakeSpawner.fakeSpawner(() => ({}));
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
       yield* sessions.reserve(TICKET);

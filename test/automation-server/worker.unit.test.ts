@@ -156,10 +156,7 @@ describe("dispatch happy path", () => {
       yield* Deferred.await(started);
       expect(fixed.automation.jobs[0]?.status).toBe("running");
       expect(fixed.automation.jobs[0]?.serverId).toBe(clientId);
-      expect(http.requests.map((request) => new URL(request.url).pathname)).toEqual([
-        "/reserve",
-        "/run",
-      ]);
+      expect(http.requests.map((request) => request.url)).toEqual([`${URL}/reserve`, `${URL}/run`]);
       yield* Deferred.succeed(release, undefined);
       yield* settle(fixed.automation.jobs, "succeeded");
       expect(fixed.automation.jobs[0]?.status).toBe("succeeded");
@@ -486,9 +483,9 @@ describe("dispatch unhappy path", () => {
       });
       expect(fixed.automation.jobs[0]?.createdAt).toBe(queued[0]?.createdAt);
       expect(fixed.automation.jobs[1]?.createdAt).toBe(queued[1]?.createdAt);
-      expect(http.requests.map((request) => new URL(request.url).pathname)).toEqual([
-        "/reserve",
-        "/reserve",
+      expect(http.requests.map((request) => request.url)).toEqual([
+        `${URL}/reserve`,
+        `${OTHER_URL}/reserve`,
       ]);
       expect(FakeLog.texts(fixed.log)).toEqual(["deferred; at capacity"]);
       expect(fixed.log.lines[0]?.agentId).toBe(TICKET);
@@ -505,7 +502,7 @@ describe("dispatch unhappy path", () => {
       const first = seedLiveClient(fixed.servers);
       const second = seedLiveClient(fixed.servers, OTHER_URL);
       const http = FakeHttp.recordRequests((request, url) => {
-        if (url.pathname === "/reserve" && url.origin === new URL(URL).origin) {
+        if (url.pathname === "/reserve" && url.href.startsWith(URL)) {
           return FakeHttp.json({ error: "at capacity: max-jobs is 1" }, 503);
         }
         return FakeHttp.json({ ok: "true" });
@@ -517,10 +514,11 @@ describe("dispatch unhappy path", () => {
         serverId: second,
       });
       expect(fixed.automation.jobs[0]?.serverId).not.toBe(first);
-      expect(
-        http.requests.map((request) => `${request.method} ${new URL(request.url).pathname}`),
-      ).toEqual(["POST /reserve", "POST /reserve", "POST /run"]);
-      expect(http.requests[2]?.url).toBe(`${OTHER_URL}/run`);
+      expect(http.requests.map((request) => `${request.method} ${request.url}`)).toEqual([
+        `POST ${URL}/reserve`,
+        `POST ${OTHER_URL}/reserve`,
+        `POST ${OTHER_URL}/run`,
+      ]);
     }),
   );
 });

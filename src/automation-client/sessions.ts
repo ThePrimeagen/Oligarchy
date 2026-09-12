@@ -42,21 +42,21 @@ const make = (maxJobs: number) =>
       });
 
     const reserve = Effect.fn("Sessions.reserve")(function* (ticket: string) {
-      const admitted = yield* Ref.modify(slots, (held) => {
-        if (held.reserved.has(ticket)) {
-          return [true, held] as const;
-        }
-        if (held.count >= maxJobs) {
-          return [false, held] as const;
-        }
-        return [
-          true,
-          { count: held.count + 1, reserved: withItem(held.reserved, ticket) },
-        ] as const;
-      });
-      if (!admitted) {
-        return yield* atCapacity(ticket);
-      }
+      return yield* Effect.flatMap(
+        Ref.modify(slots, (held) => {
+          if (held.reserved.has(ticket)) {
+            return [true, held] as const;
+          }
+          if (held.count >= maxJobs) {
+            return [false, held] as const;
+          }
+          return [
+            true,
+            { count: held.count + 1, reserved: withItem(held.reserved, ticket) },
+          ] as const;
+        }),
+        (admitted) => (admitted ? Effect.void : atCapacity(ticket)),
+      );
     });
 
     const admit = (ticket: string): Effect.Effect<void, Errors.AtCapacity> =>

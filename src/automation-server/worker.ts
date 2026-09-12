@@ -126,7 +126,10 @@ export const dispatch = Effect.fn("dispatch")(function* () {
               ): Outcome | { readonly deferred: true; readonly agentId?: string } => {
                 const error = Cause.squash(cause);
                 return isAtCapacity(error)
-                  ? { deferred: true, agentId: error.agentId }
+                  ? Object.assign(
+                      { deferred: true as const },
+                      error.agentId === undefined ? undefined : { agentId: error.agentId },
+                    )
                   : outcomeFrom(cause);
               },
             }),
