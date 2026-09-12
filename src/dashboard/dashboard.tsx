@@ -11,7 +11,7 @@ import {
   getImage,
   groupDefinitions,
   listAutomationQueue,
-  listProcessStats,
+  listProcessSeries,
   listServers,
   listSessions,
   listTestBasePrompts,
@@ -828,14 +828,14 @@ app.get("/images/:id", async (context) => {
 // The servers page, outside the dashboard's shell: text served whole, not through the renderer.
 // Its two halves are rows: the automation queue the webhook and the worker write
 // (automation_jobs), and the fleet the servers themselves write every thirty seconds
-// (src/qemu-server/heartbeat.ts). Below them, process_stats is what each announcing process
-// last said of itself. `halves` is absent only when the database could not be read, so a 500
-// page claims neither an empty queue nor an empty fleet.
+// (src/qemu-server/heartbeat.ts). Below them, process_stats is the series each announcing
+// process wrote of itself, drawn as graphs. `halves` is absent only when the database
+// could not be read, so a 500 page claims neither an empty queue nor an empty fleet.
 const readHalves = async (connectionString: string): Promise<Halves> => {
   const [queue, servers, process] = await Promise.all([
     listAutomationQueue(connectionString),
     listServers(connectionString),
-    listProcessStats(connectionString),
+    listProcessSeries(connectionString),
   ]);
   return { queue, servers, process };
 };
@@ -881,11 +881,11 @@ app.get("/servers/queue", async (context) => {
   }
 });
 
-// What the process table's poll swaps in.
+// What the process graphs' poll swaps in.
 app.get("/servers/process", async (context) => {
   try {
-    const rows = await listProcessStats(context.env.HYPERDRIVE.connectionString);
-    return context.html(<Process rows={rows} />);
+    const series = await listProcessSeries(context.env.HYPERDRIVE.connectionString);
+    return context.html(<Process series={series} />);
   } catch (error) {
     Sentry.captureException(error);
     console.error("dashboard: listing process stats:", errorMessage(error));
