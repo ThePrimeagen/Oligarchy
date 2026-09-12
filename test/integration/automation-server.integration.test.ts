@@ -229,6 +229,7 @@ describe("automation server startup refusals", () => {
       expect(process.stdout()).toContain("--port");
       expect(process.stdout()).toContain("--model");
       expect(process.stdout()).not.toContain("--jobs");
+      expect(process.stdout()).not.toContain("--max-jobs");
       expect(process.stdout()).not.toContain("--diagnostics-port");
       expect(process.stdout()).not.toContain("--display");
     }),

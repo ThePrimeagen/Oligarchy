@@ -555,8 +555,11 @@ export const fakeAutomationStore = (
       }),
     claim: (serverId) =>
       Effect.sync(() => {
+        const busy = new Set(
+          jobs.filter((job) => job.status === "running").map((job) => job.resultId),
+        );
         const pending = jobs
-          .filter((job) => job.status === "pending")
+          .filter((job) => job.status === "pending" && !busy.has(job.resultId))
           .sort(
             (left, right) =>
               left.createdAt.getTime() - right.createdAt.getTime() ||

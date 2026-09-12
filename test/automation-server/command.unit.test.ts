@@ -105,6 +105,7 @@ describe("automation server command flags", () => {
       expect(stdout.join("\n")).toContain("--port");
       expect(stdout.join("\n")).toContain("--model");
       expect(stdout.join("\n")).not.toContain("--jobs");
+      expect(stdout.join("\n")).not.toContain("--max-jobs");
       expect(stdout.join("\n")).not.toContain("--diagnostics-port");
       expect(stdout.join("\n")).not.toContain("--display");
     }),

@@ -13,7 +13,9 @@ import * as Stores from "../support/stores.ts";
 const URL = "http://127.0.0.1:55333";
 const TOKEN = "test-token";
 const TICKET = "OLI-42";
+const TICKET_B = "OLI-43";
 const RESULT_ID = "22222222-2222-4222-8222-222222222222";
+const RESULT_B = "33333333-3333-4333-8333-333333333333";
 const RUN_ID = "11111111-1111-4111-8111-111111111111";
 const MODEL = "opencode/muse-spark-1.3-contributor-free";
 const STATS = {
@@ -49,9 +51,10 @@ const seedResult = (
   tests: Stores.FakeTestStore,
   linearId: string | null = TICKET,
   status: ResultStatus = "pending",
+  resultId = RESULT_ID,
 ) => {
   tests.results.push({
-    id: RESULT_ID,
+    id: resultId,
     runId: RUN_ID,
     definitionId: 1,
     sessionId: null,
@@ -158,6 +161,24 @@ const settle = (jobs: Array<{ status: string }>, status: string) =>
     return yield* Effect.die(`job did not become ${status}: ${JSON.stringify(jobs)}`);
   });
 
+const settleAll = (jobs: Array<{ status: string }>, status: string) =>
+  Effect.gen(function* () {
+    for (let i = 0; i < 1_000; i++) {
+      if (jobs.length > 0 && jobs.every((job) => job.status === status)) {
+        return yield* Effect.void;
+      }
+      yield* Effect.yieldNow;
+    }
+    return yield* Effect.die(`jobs did not all become ${status}: ${JSON.stringify(jobs)}`);
+  });
+
+const seedPair = (fixed: Harness) => {
+  seedResult(fixed.tests);
+  seedResult(fixed.tests, TICKET_B, "pending", RESULT_B);
+  seedJob(fixed.automation, "drive", RESULT_ID);
+  seedJob(fixed.automation, "drive", RESULT_B);
+};
+
 describe("dispatch happy path", () => {
   it.effect("claims the job before POST /run", () =>
     Effect.gen(function* () {
@@ -252,21 +273,113 @@ describe("dispatch happy path", () => {
     }),
   );
 
-  it.effect("the next pending job runs after five seconds", () =>
+  it.effect("pending jobs whose reserve succeeds start together on the same tick", () =>
     Effect.gen(function* () {
       const fixed = harness();
-      seedResult(fixed.tests);
-      seedJob(fixed.automation, "drive");
-      seedJob(fixed.automation, "diagnose");
+      seedPair(fixed);
       seedLiveClient(fixed.servers);
       const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests)));
       yield* start(fixed, http.layer);
-      yield* settle(fixed.automation.jobs, "succeeded");
-      expect(fixed.automation.jobs.map((job) => job.status)).toEqual(["succeeded", "pending"]);
-      yield* TestClock.adjust("5 seconds");
-      yield* settle(fixed.automation.jobs, "succeeded");
+      yield* settleAll(fixed.automation.jobs, "succeeded");
       expect(fixed.automation.jobs.every((job) => job.status === "succeeded")).toBe(true);
+      expect(http.requests.filter((request) => request.url.endsWith("/reserve"))).toHaveLength(2);
       expect(http.requests.filter((request) => request.url.endsWith("/run"))).toHaveLength(2);
+      expect(
+        FakeLog.texts(fixed.log).filter((text) => text.startsWith("dispatching drive")),
+      ).toEqual([`dispatching drive; ${URL}; ${MODEL}`, `dispatching drive; ${URL}; ${MODEL}`]);
+    }),
+  );
+
+  it.effect("a /run still in flight does not hold the next pending job", () =>
+    Effect.gen(function* () {
+      const fixed = harness();
+      seedPair(fixed);
+      seedLiveClient(fixed.servers);
+      const firstStarted = yield* Deferred.make<void>();
+      const secondStarted = yield* Deferred.make<void>();
+      const firstRelease = yield* Deferred.make<void>();
+      const secondRelease = yield* Deferred.make<void>();
+      let runs = 0;
+      const http = FakeHttp.recordRequests(
+        reserving(() =>
+          Effect.gen(function* () {
+            const index = runs;
+            runs += 1;
+            if (index === 0) {
+              yield* Deferred.succeed(firstStarted, undefined);
+              yield* Deferred.await(firstRelease);
+            } else if (index === 1) {
+              yield* Deferred.succeed(secondStarted, undefined);
+              yield* Deferred.await(secondRelease);
+            } else {
+              return yield* Effect.die(`unexpected /run ${String(index)}`);
+            }
+            return yield* closing(fixed.tests);
+          }),
+        ),
+      );
+      yield* start(fixed, http.layer);
+      yield* Deferred.await(firstStarted);
+      yield* Deferred.await(secondStarted);
+      expect(fixed.automation.jobs.map((job) => job.status)).toEqual(["running", "running"]);
+      expect(http.requests.filter((request) => request.url.endsWith("/run"))).toHaveLength(2);
+      yield* Deferred.succeed(firstRelease, undefined);
+      yield* Deferred.succeed(secondRelease, undefined);
+      yield* settleAll(fixed.automation.jobs, "succeeded");
+      expect(fixed.automation.jobs.every((job) => job.status === "succeeded")).toBe(true);
+    }),
+  );
+
+  it.effect("a diagnose behind a running drive is skipped so another result can start", () =>
+    Effect.gen(function* () {
+      const fixed = harness();
+      seedResult(fixed.tests);
+      seedJob(fixed.automation, "drive", RESULT_ID);
+      seedJob(fixed.automation, "diagnose", RESULT_ID);
+      seedResult(fixed.tests, TICKET_B, "pending", RESULT_B);
+      seedJob(fixed.automation, "drive", RESULT_B);
+      seedLiveClient(fixed.servers);
+      const firstStarted = yield* Deferred.make<void>();
+      const secondStarted = yield* Deferred.make<void>();
+      const firstRelease = yield* Deferred.make<void>();
+      const secondRelease = yield* Deferred.make<void>();
+      let runs = 0;
+      const http = FakeHttp.recordRequests(
+        reserving(() =>
+          Effect.gen(function* () {
+            const index = runs;
+            runs += 1;
+            if (index === 0) {
+              yield* Deferred.succeed(firstStarted, undefined);
+              yield* Deferred.await(firstRelease);
+            } else if (index === 1) {
+              yield* Deferred.succeed(secondStarted, undefined);
+              yield* Deferred.await(secondRelease);
+            } else {
+              return yield* Effect.die(`unexpected /run ${String(index)}`);
+            }
+            return yield* closing(fixed.tests);
+          }),
+        ),
+      );
+      yield* start(fixed, http.layer);
+      yield* Deferred.await(firstStarted);
+      yield* Deferred.await(secondStarted);
+      expect(fixed.automation.jobs.map((job) => [job.action, job.status])).toEqual([
+        ["drive", "running"],
+        ["diagnose", "pending"],
+        ["drive", "running"],
+      ]);
+      expect(http.requests.filter((request) => request.url.endsWith("/reserve"))).toHaveLength(2);
+      expect(http.requests.filter((request) => request.url.endsWith("/run"))).toHaveLength(2);
+      yield* Deferred.succeed(firstRelease, undefined);
+      yield* Deferred.succeed(secondRelease, undefined);
+      yield* settle(fixed.automation.jobs, "succeeded");
+      expect(fixed.automation.jobs.map((job) => [job.action, job.status])).toEqual([
+        ["drive", "succeeded"],
+        ["diagnose", "pending"],
+        ["drive", "succeeded"],
+      ]);
     }),
   );
 
@@ -583,6 +696,56 @@ describe("dispatch unhappy path", () => {
       expect(fixed.log.lines[0]?.agentId).toBe(TICKET);
       expect(first).toBeDefined();
       expect(second).toBeDefined();
+    }),
+  );
+
+  it.effect("a 503 after a successful reserve leaves the next job pending", () =>
+    Effect.gen(function* () {
+      const fixed = harness();
+      seedPair(fixed);
+      seedLiveClient(fixed.servers);
+      const started = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      let reserves = 0;
+      const http = FakeHttp.recordRequests((request, url) => {
+        if (url.pathname === "/reserve") {
+          reserves += 1;
+          return reserves === 1
+            ? FakeHttp.json({ ok: "true" })
+            : FakeHttp.json({ error: "at capacity: max-jobs is 1" }, 503);
+        }
+        return Effect.gen(function* () {
+          yield* Deferred.succeed(started, undefined);
+          yield* Deferred.await(release);
+          return yield* closing(fixed.tests);
+        });
+      });
+      yield* start(fixed, http.layer);
+      yield* Deferred.await(started);
+      for (let i = 0; i < 200; i++) {
+        if (FakeLog.texts(fixed.log).includes("deferred; at capacity")) {
+          break;
+        }
+        yield* Effect.yieldNow;
+      }
+      expect(fixed.automation.jobs.map((job) => job.status)).toEqual(["running", "pending"]);
+      expect(fixed.automation.jobs[1]).toMatchObject({
+        status: "pending",
+        serverId: null,
+        startedAt: null,
+        finishedAt: null,
+        reason: null,
+      });
+      expect(http.requests.filter((request) => request.url.endsWith("/reserve"))).toHaveLength(2);
+      expect(http.requests.filter((request) => request.url.endsWith("/run"))).toHaveLength(1);
+      expect(FakeLog.texts(fixed.log)).toContain("deferred; at capacity");
+      expect(fixed.log.lines.some((line) => line.text === "deferred; at capacity")).toBe(true);
+      expect(fixed.log.lines.find((line) => line.text === "deferred; at capacity")?.agentId).toBe(
+        TICKET_B,
+      );
+      yield* Deferred.succeed(release, undefined);
+      yield* settle(fixed.automation.jobs, "succeeded");
+      expect(fixed.automation.jobs.map((job) => job.status)).toEqual(["succeeded", "pending"]);
     }),
   );
 

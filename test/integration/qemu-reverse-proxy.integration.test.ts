@@ -151,6 +151,8 @@ describe("qemu reverse proxy startup refusals", () => {
       expect(code).toBe(0);
       expect(process.stdout()).toContain("qemu-reverse-proxy");
       expect(process.stdout()).toContain("--port");
+      expect(process.stdout()).not.toContain("--jobs");
+      expect(process.stdout()).not.toContain("--max-jobs");
       expect(process.stdout()).not.toContain("--diagnostics-port");
       expect(process.stdout()).not.toContain("--display");
       expect(process.stdout()).not.toContain("--automation");
