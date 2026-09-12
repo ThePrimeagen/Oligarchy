@@ -522,7 +522,9 @@ describe("placement", () => {
         if (url.origin === SERVER_A && url.pathname === "/stats") {
           return refused(request, url);
         }
-        return url.pathname === "/reserve" ? FakeHttp.json({ ok: "true" }) : placing()(request, url);
+        return url.pathname === "/reserve"
+          ? FakeHttp.json({ ok: "true" })
+          : placing()(request, url);
       });
       fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
       yield* Effect.gen(function* () {

@@ -1,6 +1,15 @@
 import { createServer } from "node:http";
-import { NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node";
-import { Cause, Config as EffectConfig, Deferred, Effect, Exit, Layer, Option, type Runtime } from "effect";
+import { NodeHttpClient, NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node";
+import {
+  Cause,
+  Config as EffectConfig,
+  Deferred,
+  Effect,
+  Exit,
+  Layer,
+  Option,
+  type Runtime,
+} from "effect";
 import { Command } from "effect/unstable/cli";
 import { HttpMiddleware, HttpRouter, HttpServerError } from "effect/unstable/http";
 import * as Config from "../config.ts";
@@ -62,15 +71,17 @@ const ServerLive = (maxJobs: number, port: number, url: Option.Option<string>) =
         Effect.gen(function* () {
           const { token } = yield* Config.ProxyConfig;
           const serverUrl = yield* EffectConfig.string("SERVER_URL").pipe(
-            EffectConfig.withDefault(Config.DEFAULT_SERVER_URL),
+            Effect.orElseSucceed(() => Config.DEFAULT_SERVER_URL),
           );
           const proxy = yield* ProxyClient.connect({ serverUrl, token });
           return Sessions.Sessions.layer(maxJobs, (agent) =>
-            proxy.reserve(Contract.ReserveAgentBody.make({ agent })).pipe(
-              Effect.catch((error) =>
-                Errors.AtCapacity.make({ message: error.message, agentId: agent }),
+            proxy
+              .reserve(Contract.ReserveAgentBody.make({ agent }))
+              .pipe(
+                Effect.catch((error) =>
+                  Errors.AtCapacity.make({ message: error.message, agentId: agent }),
+                ),
               ),
-            ),
           );
         }),
       ),
@@ -91,6 +102,7 @@ const MainLive = Layer.mergeAll(Servers.ServerStore.layer, Log.Log.layer).pipe(
   Layer.provideMerge(Sentry.SentryLive),
   Layer.provideMerge(Layer.succeed(Log.ProcessAttribution)(Log.AutomationClientProcessAttribution)),
   Layer.provideMerge(Config.providerLayer),
+  Layer.provideMerge(NodeHttpClient.layerNodeHttp),
   Layer.provideMerge(NodeServices.layer),
 );
 

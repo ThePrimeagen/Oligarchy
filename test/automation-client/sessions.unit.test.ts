@@ -21,8 +21,9 @@ const layer = (
   reserveQemu: Sessions.ReserveQemu = qemuOk(),
 ) => Sessions.Sessions.layer(maxJobs, reserveQemu).pipe(Layer.provide(spawner.layer));
 
-const reservedRun = (sessions: Sessions.Sessions, ticket: string, prompt: string) =>
+const reservedRun = (ticket: string, prompt: string) =>
   Effect.gen(function* () {
+    const sessions = yield* Sessions.Sessions;
     yield* sessions.reserve(ticket);
     return yield* sessions.run(ticket, prompt);
   });
@@ -34,8 +35,7 @@ describe("Sessions.run happy path", () => {
       stdout: "the written result",
     }));
     return Effect.gen(function* () {
-      const sessions = yield* Sessions.Sessions;
-      yield* reservedRun(sessions, TICKET, "do the work");
+      yield* reservedRun(TICKET, "do the work");
       expect(spawner.spawned).toMatchObject([
         { command: OpenCode.BIN, args: ["run", "--", "do the work"] },
       ]);
@@ -176,7 +176,7 @@ describe("Sessions.abort unhappy path", () => {
     const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
-      yield* reservedRun(sessions, TICKET, "do the work");
+      yield* reservedRun(TICKET, "do the work");
       const error = yield* Effect.flip(sessions.abort(TICKET));
       expect(error).toMatchObject({
         _tag: "UnknownSession",
@@ -294,10 +294,9 @@ describe("capacity", () => {
     const exits = [0, 1];
     const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: exits.shift() ?? 0 }));
     return Effect.gen(function* () {
-      const sessions = yield* Sessions.Sessions;
-      yield* reservedRun(sessions, TICKET, "first");
-      expect((yield* Effect.flip(reservedRun(sessions, OTHER, "second")))._tag).toBe("RunFailed");
-      yield* reservedRun(sessions, "OLI-7", "third");
+      yield* reservedRun(TICKET, "first");
+      expect((yield* Effect.flip(reservedRun(OTHER, "second")))._tag).toBe("RunFailed");
+      yield* reservedRun("OLI-7", "third");
       expect(spawner.spawned.map((spawned) => spawned.args[2])).toEqual([
         "first",
         "second",
@@ -347,7 +346,7 @@ describe("capacity", () => {
       // Leaving the scope killed the child before the slot came back.
       expect(spawner.spawned[0]?.kills).toEqual(["SIGTERM"]);
       expect(yield* spawner.spawned[0]?.isRunning ?? Effect.succeed(true)).toBe(false);
-      yield* reservedRun(sessions, OTHER, "second");
+      yield* reservedRun(OTHER, "second");
       expect(spawner.spawned.map((spawned) => spawned.args[2])).toEqual(["first", "second"]);
     }).pipe(Effect.provide(layer(spawner, 1)));
   });
@@ -358,10 +357,9 @@ describe("capacity", () => {
       ++spawns === 1 ? { spawnError: "spawn opencode ENOENT" } : { exitCode: 0 },
     );
     return Effect.gen(function* () {
-      const sessions = yield* Sessions.Sessions;
-      const error = yield* Effect.flip(reservedRun(sessions, TICKET, "first"));
+      const error = yield* Effect.flip(reservedRun(TICKET, "first"));
       expect(error).toMatchObject({ _tag: "RunFailed", message: "spawn opencode ENOENT" });
-      yield* reservedRun(sessions, OTHER, "second");
+      yield* reservedRun(OTHER, "second");
       // A spawn that failed is no process; only the second run's is recorded.
       expect(spawner.spawned.map((spawned) => spawned.args[2])).toEqual(["second"]);
     }).pipe(Effect.provide(layer(spawner, 1)));

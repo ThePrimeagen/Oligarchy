@@ -327,14 +327,7 @@ describeWithDatabase("automation client POST /run", () => {
           new RegExp(`automation client listening on 127.0.0.1:${String(port)}`),
         );
         expect(
-          (
-            await request(
-              port,
-              "/reserve",
-              AUTH_JSON,
-              JSON.stringify({ ticket: "OLI-42" }),
-            )
-          ).status,
+          (await request(port, "/reserve", AUTH_JSON, JSON.stringify({ ticket: "OLI-42" }))).status,
         ).toBe(200);
         const response = await request(
           port,
@@ -368,14 +361,7 @@ describeWithDatabase("automation client POST /run", () => {
           new RegExp(`automation client listening on 127.0.0.1:${String(port)}`),
         );
         expect(
-          (
-            await request(
-              port,
-              "/reserve",
-              AUTH_JSON,
-              JSON.stringify({ ticket: "OLI-42" }),
-            )
-          ).status,
+          (await request(port, "/reserve", AUTH_JSON, JSON.stringify({ ticket: "OLI-42" }))).status,
         ).toBe(200);
         const response = await request(
           port,

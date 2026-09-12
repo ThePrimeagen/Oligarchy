@@ -315,7 +315,6 @@ describe("start", () => {
       const h = harness();
       yield* h.run(
         Effect.gen(function* () {
-          const sessions = yield* Sessions.Sessions;
           const error = yield* Effect.flip(reservedStart(startBody(URL_ISO, AGENT, DISK)));
           expect(error).toMatchObject({
             _tag: "StartFailed",
@@ -436,7 +435,6 @@ describe("start", () => {
         });
         yield* h.run(
           Effect.gen(function* () {
-            const sessions = yield* Sessions.Sessions;
             const error = yield* Effect.flip(reservedStart(startBody()));
             expect(error).toMatchObject({ _tag: "StartFailed", message: "qemu: exited 1" });
             const logged = line(h, "db: recording a failed start failed too:");
@@ -460,7 +458,6 @@ describe("start", () => {
       });
       yield* h.run(
         Effect.gen(function* () {
-          const sessions = yield* Sessions.Sessions;
           const error = yield* Effect.flip(reservedStart(startBody()));
           expect(error).toMatchObject({
             _tag: "Internal",
@@ -2084,29 +2081,31 @@ describe("capacity", () => {
     }),
   );
 
-  it.effect("a start without a reservation is BadRequest before anything is minted or written", () =>
-    Effect.gen(function* () {
-      const h = harness({ maxJobs: 1 });
-      yield* h.run(
-        Effect.gen(function* () {
-          const sessions = yield* Sessions.Sessions;
-          const error = yield* Effect.flip(sessions.start(startBody(), "none", false));
-          expect(error).toMatchObject({
-            _tag: "BadRequest",
-            message: "no reservation",
-            agentId: AGENT,
-          });
-          expect(h.sessions.sessions).toEqual([]);
-          expect(h.sessions.agentRuns).toEqual([]);
-          expect(h.iso.calls).toHaveLength(0);
-          expect(h.qemu.calls).toEqual([]);
-          expect(spanNamed(h, AGENT)).toBeUndefined();
-          expect(h.log.acquired).toEqual([]);
-          expect(texts(h)).toEqual([]);
-          expect(yield* qemus(sessions)).toBe(0);
-        }),
-      );
-    }),
+  it.effect(
+    "a start without a reservation is BadRequest before anything is minted or written",
+    () =>
+      Effect.gen(function* () {
+        const h = harness({ maxJobs: 1 });
+        yield* h.run(
+          Effect.gen(function* () {
+            const sessions = yield* Sessions.Sessions;
+            const error = yield* Effect.flip(sessions.start(startBody(), "none", false));
+            expect(error).toMatchObject({
+              _tag: "BadRequest",
+              message: "no reservation",
+              agentId: AGENT,
+            });
+            expect(h.sessions.sessions).toEqual([]);
+            expect(h.sessions.agentRuns).toEqual([]);
+            expect(h.iso.calls).toHaveLength(0);
+            expect(h.qemu.calls).toEqual([]);
+            expect(spanNamed(h, AGENT)).toBeUndefined();
+            expect(h.log.acquired).toEqual([]);
+            expect(texts(h)).toEqual([]);
+            expect(yield* qemus(sessions)).toBe(0);
+          }),
+        );
+      }),
   );
 
   it.effect("a booting session holds its slot until it is running", () =>
