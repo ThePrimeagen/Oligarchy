@@ -395,7 +395,9 @@ const make = Effect.gen(function* () {
     );
     const headers = forwardedHeaders(response.headers);
     if (response.status === 200) {
-      yield* store.clearAgent(agent).pipe(Effect.mapError((cause) => internal(cause, undefined, agent)));
+      yield* store
+        .clearAgent(agent)
+        .pipe(Effect.mapError((cause) => internal(cause, undefined, agent)));
       yield* log.info(`relinquished; ${url}`, { location: Log.Locations.server, agentId: agent });
     }
     return HttpServerResponse.text(text, { status: response.status, headers });

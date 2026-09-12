@@ -465,10 +465,7 @@ const make = (maxJobs: number) =>
       return yield* Effect.flatMap(
         Ref.modify(slots, (held) =>
           held.reserved.has(agent)
-            ? ([
-                true,
-                { count: held.count - 1, reserved: without(held.reserved, agent) },
-              ] as const)
+            ? ([true, { count: held.count - 1, reserved: without(held.reserved, agent) }] as const)
             : ([false, held] as const),
         ),
         (released) =>

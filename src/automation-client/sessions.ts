@@ -74,6 +74,7 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
             yield* relinquishQemu(ticket);
             return yield* atCapacity(ticket);
           }
+          return yield* Effect.void;
         }),
       );
     });

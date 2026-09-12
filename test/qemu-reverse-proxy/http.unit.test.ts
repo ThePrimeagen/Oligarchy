@@ -722,37 +722,39 @@ describe("placement", () => {
     }),
   );
 
-  it.effect("POST /relinquish after reserve forwards to the reserved server and forgets the agent", () =>
-    Effect.gen(function* () {
-      const fixed = fixture((request, url) =>
-        url.pathname === "/relinquish" || url.pathname === "/reserve"
-          ? FakeHttp.json({ ok: "true" })
-          : fleet(request, url),
-      );
-      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
-      yield* Effect.gen(function* () {
-        const api = yield* qemuServerClient;
-        yield* api.Sessions.reserve({ payload: reserveBody });
-        const ok = yield* api.Sessions.relinquish({ payload: reserveBody });
-        expect(ok).toEqual(Contract.Ok.make({}));
-      }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.store.agents.has(AGENT_ID)).toBe(false);
-      expect(
-        fixed.upstream.requests
-          .filter((request) => request.url.endsWith("/relinquish"))
-          .map((request) => request.url),
-      ).toEqual([`${SERVER_B}/relinquish`]);
-      expect(fixed.log.lines.filter((line) => line.text.startsWith("relinquished"))).toEqual([
-        {
-          level: "info",
-          text: `relinquished; ${SERVER_B}`,
-          location: "server",
-          agentId: AGENT_ID,
-          skipSentry: false,
-          cause: undefined,
-        },
-      ]);
-    }),
+  it.effect(
+    "POST /relinquish after reserve forwards to the reserved server and forgets the agent",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture((request, url) =>
+          url.pathname === "/relinquish" || url.pathname === "/reserve"
+            ? FakeHttp.json({ ok: "true" })
+            : fleet(request, url),
+        );
+        fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+        yield* Effect.gen(function* () {
+          const api = yield* qemuServerClient;
+          yield* api.Sessions.reserve({ payload: reserveBody });
+          const ok = yield* api.Sessions.relinquish({ payload: reserveBody });
+          expect(ok).toEqual(Contract.Ok.make({}));
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.store.agents.has(AGENT_ID)).toBe(false);
+        expect(
+          fixed.upstream.requests
+            .filter((request) => request.url.endsWith("/relinquish"))
+            .map((request) => request.url),
+        ).toEqual([`${SERVER_B}/relinquish`]);
+        expect(fixed.log.lines.filter((line) => line.text.startsWith("relinquished"))).toEqual([
+          {
+            level: "info",
+            text: `relinquished; ${SERVER_B}`,
+            location: "server",
+            agentId: AGENT_ID,
+            skipSentry: false,
+            cause: undefined,
+          },
+        ]);
+      }),
   );
 
   it.effect("POST /relinquish without a reservation is 400 no reservation", () =>
