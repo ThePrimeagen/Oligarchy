@@ -4,10 +4,6 @@ import * as Cli from "../cli.ts";
 import * as Errors from "../shared/errors.ts";
 import * as OpenCode from "./opencode.ts";
 
-export const MaxJobs = Context.Reference<number>("@oligarchy/automation-client/sessions/MaxJobs", {
-  defaultValue: () => 1,
-});
-
 const mapWith = <V>(map: ReadonlyMap<string, V>, key: string, value: V): ReadonlyMap<string, V> =>
   new Map([...map, [key, value]]);
 
@@ -21,20 +17,11 @@ const make = Effect.gen(function* () {
   const running = yield* Ref.make<ReadonlyMap<string, ChildProcessSpawner.ChildProcessHandle>>(
     new Map(),
   );
-  const jobs = yield* Ref.make(0);
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const maxJobs = yield* MaxJobs;
 
   const run = Effect.fn("Sessions.run")(function* (ticket: string, prompt: string) {
-    const reserved = yield* Ref.modify(jobs, (n) =>
-      n >= maxJobs ? ([false, n] as const) : ([true, n + 1] as const),
-    );
-    if (!reserved) {
-      return yield* Errors.AtCapacity.make({});
-    }
     return yield* Effect.scoped(
       Effect.gen(function* () {
-        yield* Effect.addFinalizer(() => Ref.update(jobs, (n) => n - 1));
         const handle = yield* Cli.spawn(OpenCode.BIN, OpenCode.args(prompt));
         const claimed = yield* Ref.modify(running, (map) =>
           map.has(ticket)
@@ -78,7 +65,7 @@ const make = Effect.gen(function* () {
       );
   });
 
-  return { run, abort, jobs: Ref.get(jobs) };
+  return { run, abort };
 });
 
 export class Sessions extends Context.Service<Sessions>()("@oligarchy/automation-client/Sessions", {

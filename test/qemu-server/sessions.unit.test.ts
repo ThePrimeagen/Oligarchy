@@ -85,7 +85,6 @@ type Options = {
   readonly debugLogStore?: Parameters<typeof Stores.fakeDebugLogStore>[0];
   readonly log?: Layer.Layer<Log.Log>;
   readonly shutdown?: Sessions.Shutdown;
-  readonly maxJobs?: number;
 };
 
 const harness = (options: Options = {}) => {
@@ -127,7 +126,6 @@ const harness = (options: Options = {}) => {
         fs,
         Path.layer,
         shutdown,
-        Layer.succeed(Sessions.MaxJobs)(options.maxJobs ?? 8),
       ),
     ),
   );
@@ -460,131 +458,6 @@ describe("start", () => {
           expect(h.iso.calls).toEqual([]);
           expect(endedWith(spanNamed(h, AGENT))).toBe("internal_error");
           expect(texts(h)).toEqual([]);
-        }),
-      );
-    }),
-  );
-});
-
-// ---------------------------------------------------------------------------
-// capacity
-// ---------------------------------------------------------------------------
-
-describe("capacity", () => {
-  it.effect("starts as many sessions as max-jobs allows", () =>
-    Effect.gen(function* () {
-      const h = harness({ maxJobs: 2 });
-      yield* h.run(
-        Effect.gen(function* () {
-          const first = yield* start();
-          const second = yield* start(OTHER_AGENT);
-          expect(yield* qemus(first.sessions)).toBe(2);
-          expect(h.qemu.calls.filter((call) => call._tag === "start")).toHaveLength(2);
-          expect(h.sessions.sessions.map((row) => row.status)).toEqual(["running", "running"]);
-          expect(Domain.isSessionId(second.id)).toBe(true);
-        }),
-      );
-    }),
-  );
-
-  it.effect("a start at capacity is AtCapacity and never launches QEMU or writes a row", () =>
-    Effect.gen(function* () {
-      const h = harness({ maxJobs: 1 });
-      yield* h.run(
-        Effect.gen(function* () {
-          const { sessions } = yield* start();
-          const error = yield* Effect.flip(
-            sessions.start(startBody(ISO, OTHER_AGENT), "none", false),
-          );
-          expect(error).toMatchObject({
-            _tag: "AtCapacity",
-            message: "at capacity; try later",
-          });
-          expect(h.qemu.calls.filter((call) => call._tag === "start")).toHaveLength(1);
-          expect(h.qemu.calls.filter((call) => call._tag === "prepare")).toHaveLength(1);
-          expect(h.iso.calls).toHaveLength(1);
-          expect(h.sessions.sessions).toHaveLength(1);
-          expect(h.sessions.sessions[0]?.status).toBe("running");
-          expect(yield* qemus(sessions)).toBe(1);
-          expect(texts(h)).toEqual([`starting; iso ${ISO}`, "running; started in 0ms"]);
-          expect(h.log.released).toEqual([]);
-        }),
-      );
-    }),
-  );
-
-  it.effect("a session still booting counts toward capacity", () =>
-    Effect.gen(function* () {
-      const gate = yield* Deferred.make<void>();
-      const h = harness({ maxJobs: 1, script: { boot: () => Deferred.await(gate) } });
-      yield* h.run(
-        Effect.gen(function* () {
-          const sessions = yield* Sessions.Sessions;
-          const booting = yield* Effect.forkChild(sessions.start(startBody(), "none", false), {
-            startImmediately: true,
-          });
-          const id = h.sessions.sessions[0]?.id ?? "";
-          expect(Domain.isSessionId(id)).toBe(true);
-          const error = yield* Effect.flip(
-            sessions.start(startBody(ISO, OTHER_AGENT), "none", false),
-          );
-          expect(error).toMatchObject({
-            _tag: "AtCapacity",
-            message: "at capacity; try later",
-          });
-          expect(h.qemu.calls.filter((call) => call._tag === "prepare")).toHaveLength(1);
-          expect(h.sessions.sessions).toHaveLength(1);
-          yield* Deferred.succeed(gate, undefined);
-          expect(yield* Fiber.join(booting)).toBe(id);
-          expect(yield* qemus(sessions)).toBe(1);
-        }),
-      );
-    }),
-  );
-
-  it.effect("stopping a session frees the slot for the next start", () =>
-    Effect.gen(function* () {
-      const h = harness({ maxJobs: 1 });
-      yield* h.run(
-        Effect.gen(function* () {
-          const { sessions, live } = yield* start();
-          expect(
-            yield* Effect.flip(sessions.start(startBody(ISO, OTHER_AGENT), "none", false)),
-          ).toMatchObject({ _tag: "AtCapacity" });
-          yield* sessions.stop(live, "succeeded", "installed");
-          const again = yield* sessions.start(startBody(ISO, OTHER_AGENT), "none", false);
-          expect(Domain.isSessionId(again)).toBe(true);
-          expect(yield* qemus(sessions)).toBe(1);
-          expect(h.sessions.sessions.map((row) => row.status)).toEqual(["succeeded", "running"]);
-        }),
-      );
-    }),
-  );
-
-  it.effect("a failed start frees the slot for the next start", () =>
-    Effect.gen(function* () {
-      let boots = 0;
-      const h = harness({
-        maxJobs: 1,
-        script: {
-          boot: () =>
-            Effect.suspend(() =>
-              ++boots === 1
-                ? Effect.fail(Errors.QemuStartError.make({ message: "qemu: exited 1" }))
-                : Effect.void,
-            ),
-        },
-      });
-      yield* h.run(
-        Effect.gen(function* () {
-          const sessions = yield* Sessions.Sessions;
-          expect(yield* Effect.flip(sessions.start(startBody(), "none", false))).toMatchObject({
-            _tag: "StartFailed",
-            message: "qemu: exited 1",
-          });
-          const id = yield* sessions.start(startBody(ISO, OTHER_AGENT), "none", false);
-          expect(Domain.isSessionId(id)).toBe(true);
-          expect(yield* qemus(sessions)).toBe(1);
         }),
       );
     }),

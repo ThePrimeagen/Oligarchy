@@ -116,9 +116,7 @@ describe("QemuServerApi", () => {
 
   it("declares the error statuses of §2.4 plus the middleware's 400, 401 and 500", () => {
     const sessions = [400, 401, 500];
-    expect(byIdentifier(Api.QemuServerApi, "start").errors).toEqual(
-      ascending([...sessions, 429, 502]),
-    );
+    expect(byIdentifier(Api.QemuServerApi, "start").errors).toEqual([...sessions, 502]);
     expect(byIdentifier(Api.QemuServerApi, "image").errors).toEqual(
       [...sessions, 403, 404, 502].sort((a, b) => a - b),
     );
@@ -210,7 +208,7 @@ describe("QemuReverseProxyApi", () => {
 
   it("declares the boundary's 400, 401, 500, 502 and 503 on every endpoint plus each endpoint's own", () => {
     const boundary = [400, 401, 500, 502, 503];
-    expect(byIdentifier(reverse, "start").errors).toEqual(ascending([...boundary, 429]));
+    expect(byIdentifier(reverse, "start").errors).toEqual(boundary);
     expect(byIdentifier(reverse, "image").errors).toEqual(ascending([...boundary, 403, 404]));
     expect(byIdentifier(reverse, "serial").errors).toEqual(ascending([...boundary, 403, 404]));
     expect(byIdentifier(reverse, "follow").errors).toEqual(ascending([...boundary, 404, 409]));
@@ -280,7 +278,7 @@ describe("AutomationClientApi", () => {
     expect(run.group).toBe("Runs");
     expect(run.middleware).toEqual([Api.BearerAuth.key, Api.ApiBoundary.key]);
     expect(spec.paths["/run"]?.post?.security).toEqual([{ bearer: [] }]);
-    expect(run.errors).toEqual([400, 401, 429, 500]);
+    expect(run.errors).toEqual([400, 401, 500]);
     const abort = byIdentifier(client, "abort");
     expect(abort.group).toBe("Runs");
     expect(abort.middleware).toEqual([Api.BearerAuth.key, Api.ApiBoundary.key]);

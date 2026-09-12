@@ -649,8 +649,6 @@ type Heartbeat = {
   readonly url: string;
   readonly type: Servers.ServerType;
   readonly stats: DbSchema.ServerStats;
-  readonly jobs: number;
-  readonly maxJobs: number;
 };
 
 export type FakeServerStore = {
@@ -680,7 +678,7 @@ export const fakeServerStore = (
           servers.push({ id: crypto.randomUUID(), url, type });
         }
       }),
-    heartbeat: (url, type, stats, jobs, maxJobs) =>
+    heartbeat: (url, type, stats) =>
       Effect.sync(() => {
         const index = indexOf(url);
         if (index === -1) {
@@ -691,7 +689,7 @@ export const fakeServerStore = (
             servers[index] = { id: existing.id, url, type };
           }
         }
-        heartbeats.push({ url, type, stats, jobs, maxJobs });
+        heartbeats.push({ url, type, stats });
       }),
     removeServer: (url) =>
       Effect.sync(() => {

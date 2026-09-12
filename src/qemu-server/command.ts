@@ -10,7 +10,6 @@ import * as Domain from "../shared/domain.ts";
 import * as Errors from "../shared/errors.ts";
 
 const DEFAULT_PORT = 42069;
-const DEFAULT_MAX_JOBS = 1;
 
 // What main.ts hands the command: the host check, the server as a layer for a display, an
 // automation flag, a port and the url it announces itself under (none: it stays out of the
@@ -24,7 +23,6 @@ export type QemuServer<RHost, RServe> = {
     automation: boolean,
     port: number,
     url: Option.Option<string>,
-    maxJobs: number,
   ) => Layer.Layer<never, HttpServerError.ServeError, RServe>;
   readonly serverFailed: Deferred.Deferred<never, HttpServerError.ServeError>;
 };
@@ -66,13 +64,8 @@ export const makeQemuServerCommand = <RHost, RServe>(server: QemuServer<RHost, R
           "Announce this server to the fleet under this url, every 30 seconds, and delete the row on shutdown",
         ),
       ),
-      maxJobs: Flag.integer("max-jobs").pipe(
-        Flag.withSchema(Domain.MaxJobs),
-        Flag.withDefault(DEFAULT_MAX_JOBS),
-        Flag.withDescription("How many jobs this process can run at once"),
-      ),
     },
-    ({ display, automation, port, url, maxJobs }) =>
+    ({ display, automation, port, url }) =>
       Effect.gen(function* () {
         if (automation && Option.isSome(display)) {
           return yield* new CliError.UserError({
@@ -99,7 +92,7 @@ export const makeQemuServerCommand = <RHost, RServe>(server: QemuServer<RHost, R
             ),
           );
           return yield* Effect.raceFirst(
-            Layer.launch(server.serve(resolved, automation, port, url, maxJobs)),
+            Layer.launch(server.serve(resolved, automation, port, url)),
             Deferred.await(server.serverFailed),
           );
         });

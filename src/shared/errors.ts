@@ -148,14 +148,6 @@ export class NoServer extends Schema.TaggedError<NoServer>("@oligarchy/shared/er
   override readonly [ErrorReporter.ignore] = true;
 }
 
-// This process is already running as many jobs as --max-jobs allows; the caller should try later.
-// 429, not 503: /start already uses 503 for NoServer, and the wire codec keys on status.
-export class AtCapacity extends Schema.TaggedError<AtCapacity>(
-  "@oligarchy/shared/errors/AtCapacity",
-)("AtCapacity", { message: fixedMessage("at capacity; try later") }, { httpApiStatus: 429 }) {
-  override readonly [ErrorReporter.ignore] = true;
-}
-
 export class RunFailed extends Schema.TaggedError<RunFailed>("@oligarchy/shared/errors/RunFailed")(
   "RunFailed",
   { message: Schema.String, cause: Schema.optionalKey(Schema.Defect()) },
@@ -176,7 +168,6 @@ export type ApiError =
   | Internal
   | ServerFailed
   | NoServer
-  | AtCapacity
   | RunFailed;
 
 const resolveHttpApiStatus = SchemaAST.resolveAt("httpApiStatus");
@@ -200,7 +191,6 @@ const apiErrorClasses = {
   Internal,
   ServerFailed,
   NoServer,
-  AtCapacity,
   RunFailed,
 } satisfies Record<ApiError["_tag"], Schema.Top>;
 
@@ -268,10 +258,6 @@ export const ServerFailedWire = wireError(
 export const NoServerWire = wireError(
   NoServer,
   (message) => ({ _tag: "NoServer", message }) as const,
-);
-export const AtCapacityWire = wireError(
-  AtCapacity,
-  () => ({ _tag: "AtCapacity", message: "at capacity; try later" }) as const,
 );
 export const RunFailedWire = wireError(
   RunFailed,
