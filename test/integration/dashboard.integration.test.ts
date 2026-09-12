@@ -1017,16 +1017,18 @@ describe.skipIf(dbUrl === "")("dashboard/servers page happy path", () => {
     );
     expect(html).toContain('<div id="process" hx-get="/servers/process" hx-trigger="every 30s">');
     expect(html).toContain("<h3>garage</h3>");
-    expect(html).toContain("<h4>jobs 2</h4>");
-    expect(html).toContain("<h4>cpu 37.5%</h4>");
-    expect(html).toContain("<h4>memory 512.0 MB</h4>");
-    expect(html).toContain('aria-label="jobs 2"');
+    expect(html).toContain('aria-label="jobs 2 · cpu 37.5% · memory 512.0 MB"');
+    expect(html).toContain('<span class="process-graph__jobs">jobs 2</span>');
+    expect(html).toContain('<span class="process-graph__cpu">cpu 37.5%</span>');
+    expect(html).toContain('<span class="process-graph__memory">memory 512.0 MB</span>');
+    expect(html).toContain('class="process-graph__jobs"');
+    expect(html).toContain('class="process-graph__cpu"');
+    expect(html).toContain("process-graph__bar");
+    expect(html.indexOf("<h2>process</h2>")).toBeLessThan(html.indexOf("<h2>automation</h2>"));
     expect(html).toContain("<h3>attic</h3>");
     expect(html).toContain("<p><strong>silent</strong></p>");
     expect(html).toContain("<h3>workshop</h3>");
-    expect(html).toContain("<h4>jobs 1</h4>");
-    expect(html).toContain("<h4>cpu 8.0%</h4>");
-    expect(html).toContain("<h4>memory 128.0 MB</h4>");
+    expect(html).toContain('aria-label="jobs 1 · cpu 8.0% · memory 128.0 MB"');
     expect(html).not.toContain("dashboard.css");
   });
 
@@ -1051,8 +1053,10 @@ describe.skipIf(dbUrl === "")("dashboard/servers page happy path", () => {
     expect(status).toBe(200);
     expect(html).toContain('<article class="process-card">');
     expect(html).toContain("<h3>garage</h3>");
-    expect(html).toContain("<h4>cpu 37.5%</h4>");
+    expect(html).toContain('aria-label="jobs 2 · cpu 37.5% · memory 512.0 MB"');
     expect(html).toContain("process-graph__bar");
+    expect(html).toContain('class="process-graph__jobs"');
+    expect(html).toContain('class="process-graph__cpu"');
     expect(html).not.toContain("<table>");
     expect(html).not.toContain("<html");
     expect(html).not.toContain("add a server");
