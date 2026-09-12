@@ -22,6 +22,7 @@ export type QemuServer<RHost, RServe> = {
     display: Domain.QemuDisplay,
     automation: boolean,
     maxJobs: number,
+    name: string,
     port: number,
     url: Option.Option<string>,
   ) => Layer.Layer<never, HttpServerError.ServeError, RServe>;
@@ -59,6 +60,12 @@ export const makeQemuServerCommand = <RHost, RServe>(server: QemuServer<RHost, R
           "How many sessions this server runs at once; a reserve past it is refused with 503",
         ),
       ),
+      // No default: the fleet and the process series know this machine by the name the
+      // operator gave it, which is nothing this process can invent.
+      name: Flag.string("name").pipe(
+        Flag.withSchema(Domain.ServerName),
+        Flag.withDescription("Name this machine on the fleet and on each process reading"),
+      ),
       port: Flag.integer("port").pipe(
         Flag.withDefault(DEFAULT_PORT),
         Flag.withDescription("Listen port"),
@@ -74,7 +81,7 @@ export const makeQemuServerCommand = <RHost, RServe>(server: QemuServer<RHost, R
         ),
       ),
     },
-    ({ display, automation, maxJobs, port, url }) =>
+    ({ display, automation, maxJobs, name, port, url }) =>
       Effect.gen(function* () {
         if (automation && Option.isSome(display)) {
           return yield* new CliError.UserError({
@@ -101,7 +108,7 @@ export const makeQemuServerCommand = <RHost, RServe>(server: QemuServer<RHost, R
             ),
           );
           return yield* Effect.raceFirst(
-            Layer.launch(server.serve(resolved, automation, maxJobs, port, url)),
+            Layer.launch(server.serve(resolved, automation, maxJobs, name, port, url)),
             Deferred.await(server.serverFailed),
           );
         });

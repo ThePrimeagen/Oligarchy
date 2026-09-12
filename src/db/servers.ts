@@ -28,16 +28,18 @@ export class ServerStore extends Context.Service<ServerStore>()("@oligarchy/db/S
     const heartbeat = Effect.fn("db.heartbeat")(function* (
       url: string,
       type: ServerType,
+      name: string,
       stats: DbSchema.ServerStats,
     ) {
       const now = sql`now()`;
       yield* database.run("heartbeat", (db) =>
         db
           .insert(DbSchema.servers)
-          .values({ url, type, stats, generation: 1, heartbeatAt: now })
+          .values({ url, name, type, stats, generation: 1, heartbeatAt: now })
           .onConflictDoUpdate({
             target: DbSchema.servers.url,
             set: {
+              name,
               type,
               stats,
               generation: sql`${DbSchema.servers.generation} + 1`,

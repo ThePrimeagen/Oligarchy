@@ -662,11 +662,13 @@ export const fakeAutomationStore = (
 type RegisteredServer = {
   readonly id: string;
   readonly url: string;
+  readonly name: string | null;
   readonly type: Servers.ServerType;
 };
 type Heartbeat = {
   readonly url: string;
   readonly type: Servers.ServerType;
+  readonly name: string;
   readonly stats: DbSchema.ServerStats;
 };
 
@@ -697,21 +699,21 @@ export const fakeServerStore = (
     addServer: (url, type) =>
       Effect.sync(() => {
         if (indexOf(url) === -1) {
-          servers.push({ id: crypto.randomUUID(), url, type });
+          servers.push({ id: crypto.randomUUID(), url, name: null, type });
         }
       }),
-    heartbeat: (url, type, stats) =>
+    heartbeat: (url, type, name, stats) =>
       Effect.sync(() => {
         const index = indexOf(url);
         if (index === -1) {
-          servers.push({ id: crypto.randomUUID(), url, type });
+          servers.push({ id: crypto.randomUUID(), url, name, type });
         } else {
           const existing = servers[index];
           if (existing !== undefined) {
-            servers[index] = { id: existing.id, url, type };
+            servers[index] = { id: existing.id, url, name, type };
           }
         }
-        heartbeats.push({ url, type, stats });
+        heartbeats.push({ url, type, name, stats });
       }),
     removeServer: (url) =>
       Effect.sync(() => {
@@ -777,14 +779,13 @@ export const fakeServerStore = (
 // ---------------------------------------------------------------------------
 
 type ProcessReport = {
-  readonly url: string;
+  readonly name: string;
   readonly type: Servers.ServerType;
   readonly stats: Process.ProcessStats;
 };
 
 export type FakeProcessStatsStore = {
   readonly reports: Array<ProcessReport>;
-  readonly removed: Array<string>;
   readonly layer: Layer.Layer<Process.ProcessStatsStore>;
 };
 
@@ -792,22 +793,15 @@ export const fakeProcessStatsStore = (
   overrides: Partial<typeof Process.ProcessStatsStore.Service> = {},
 ): FakeProcessStatsStore => {
   const reports: Array<ProcessReport> = [];
-  const removed: Array<string> = [];
   const service = Process.ProcessStatsStore.of({
-    report: (url, type, stats) =>
+    report: (name, type, stats) =>
       Effect.sync(() => {
-        reports.push({ url, type, stats });
-      }),
-    remove: (url) =>
-      Effect.sync(() => {
-        removed.push(url);
-        return reports.some((row) => row.url === url);
+        reports.push({ name, type, stats });
       }),
     ...overrides,
   });
   return {
     reports,
-    removed,
     layer: Layer.succeed(Process.ProcessStatsStore)(service),
   };
 };

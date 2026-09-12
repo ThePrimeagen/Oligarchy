@@ -31,7 +31,7 @@ export type TestBasePrompt = typeof testBasePrompts.$inferSelect;
 // read, so the page measures a heartbeat's age against the clock that stamped it.
 export type Server = Pick<
   typeof servers.$inferSelect,
-  "url" | "stats" | "generation" | "heartbeatAt"
+  "url" | "name" | "stats" | "generation" | "heartbeatAt"
 > & {
   readonly queriedAt: Date;
 };
@@ -63,7 +63,7 @@ export type AutomationQueue = {
 // and the database's clock at the read so the page measures the report's age against the clock
 // that stamped it.
 export type ProcessStat = {
-  readonly url: string;
+  readonly name: string;
   readonly type: (typeof processStats.$inferSelect)["type"];
   readonly jobs: number;
   readonly memoryBytes: number;
@@ -465,6 +465,7 @@ export function listServers(connectionString: string): Promise<Server[]> {
     db
       .select({
         url: servers.url,
+        name: servers.name,
         stats: servers.stats,
         generation: servers.generation,
         heartbeatAt: servers.heartbeatAt,
@@ -545,14 +546,14 @@ export function abortAutomationJob(connectionString: string, ticket: string): Pr
   });
 }
 
-// Every announcing process, qemu and automation-client together, by kind then url. The clock
-// in the select is the one a report's age is read against, and it keeps a poll out of
-// Hyperdrive's query cache.
+// The newest reading per name, qemu and automation-client together, by kind then name. The
+// clock in the select is the one a report's age is read against, and it keeps a poll out of
+// Hyperdrive's query cache. Older rows stay in the table for a later graph.
 export function listProcessStats(connectionString: string): Promise<ProcessStat[]> {
   return withDatabase(connectionString, (db) =>
     db
-      .select({
-        url: processStats.url,
+      .selectDistinctOn([processStats.type, processStats.name], {
+        name: processStats.name,
         type: processStats.type,
         jobs: processStats.jobs,
         memoryBytes: processStats.memoryBytes,
@@ -561,7 +562,7 @@ export function listProcessStats(connectionString: string): Promise<ProcessStat[
         queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(processStats.reportedAt),
       })
       .from(processStats)
-      .orderBy(processStats.type, processStats.url),
+      .orderBy(processStats.type, processStats.name, desc(processStats.reportedAt)),
   );
 }
 

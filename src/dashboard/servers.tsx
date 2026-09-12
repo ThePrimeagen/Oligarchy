@@ -41,6 +41,7 @@ const Row: FC<{ server: Server }> = ({ server }) => {
   if (server.stats === null || server.heartbeatAt === null) {
     return (
       <tr>
+        <td>{server.name ?? "—"}</td>
         <td>{server.url}</td>
         <td colspan={3}>never heard from</td>
         <td>{server.generation}</td>
@@ -52,6 +53,7 @@ const Row: FC<{ server: Server }> = ({ server }) => {
   const sinceHeartbeat = server.queriedAt.getTime() - server.heartbeatAt.getTime();
   return (
     <tr>
+      <td>{server.name ?? "—"}</td>
       <td>{server.url}</td>
       {sinceHeartbeat > SILENT_AFTER_MS ? (
         <td colspan={3}>
@@ -83,7 +85,7 @@ const ProcessRow: FC<{ row: ProcessStat }> = ({ row }) => {
   const sinceReport = row.queriedAt.getTime() - row.reportedAt.getTime();
   return (
     <tr>
-      <td>{row.url}</td>
+      <td>{row.name}</td>
       <td>{row.type}</td>
       {sinceReport > SILENT_AFTER_MS ? (
         <td colspan={3}>
@@ -108,7 +110,7 @@ export const Process: FC<{ rows: ReadonlyArray<ProcessStat> }> = ({ rows }) =>
   ) : (
     <table>
       <tr>
-        <th>url</th>
+        <th>name</th>
         <th>type</th>
         <th>jobs</th>
         <th>memory</th>
@@ -128,6 +130,7 @@ export const Fleet: FC<{ servers: ReadonlyArray<Server> }> = ({ servers }) =>
   ) : (
     <table>
       <tr>
+        <th>name</th>
         <th>url</th>
         <th>qemus</th>
         <th>memory</th>

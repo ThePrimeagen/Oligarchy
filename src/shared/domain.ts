@@ -149,6 +149,13 @@ export const ServerUrl = Schema.String.check(
 ).annotate({ identifier: "@oligarchy/shared/domain/ServerUrl" });
 export type ServerUrl = typeof ServerUrl.Type;
 
+// What an operator calls a qemu server or automation-client: the name on the servers row
+// and on each process_stats insert. No default — a host names itself.
+export const ServerName = Schema.NonEmptyString.pipe(Schema.brand("ServerName")).annotate({
+  identifier: "@oligarchy/shared/domain/ServerName",
+});
+export type ServerName = typeof ServerName.Type;
+
 // How many jobs a qemu server or automation client runs at once, as --max-jobs names it: a
 // reserve past it is refused. Start and run consume a reservation. A host that takes no jobs
 // is not a server.

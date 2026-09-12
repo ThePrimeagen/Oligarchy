@@ -24,14 +24,16 @@ const detail = (error: unknown): string =>
 // Announces this process under `url`: its `servers` row is written now and every thirty seconds
 // as an automation-client, with the host's stats and qemus 0 — this process boots no guests —
 // and the row's generation counts the writes, so a number that stops moving is a client that
-// stopped without a chance to leave. The same tick writes `process_stats`: current jobs,
-// current VmRSS, and the cpu busy over the last thirty seconds. A write that fails is one
-// error line; the other write and the next tick still run. The rows are this process's word
-// on itself, so a shutdown deletes them: registered before the loop so the fiber is
-// interrupted first, a write in flight finishes (the write is uninterruptible), then the
-// rows go. A delete that fails is one `unannounce failed` line; the process still exits.
+// stopped without a chance to leave. The same tick inserts a `process_stats` row: current
+// jobs, current VmRSS, and the cpu busy over the last thirty seconds. A write that fails
+// is one error line; the other write and the next tick still run. A shutdown deletes the
+// servers row only: the readings stay so they can be graphed later. Registered before the
+// loop so the fiber is interrupted first; a write in flight finishes (the write is
+// uninterruptible). A delete that fails is one `unannounce failed` line; the process still
+// exits.
 export const announce = (
   url: string,
+  name: string,
 ): Effect.Effect<
   void,
   never,
@@ -60,7 +62,7 @@ export const announce = (
     const writeHeartbeat = stats.collect(0).pipe(
       Effect.flatMap((collected) =>
         Effect.uninterruptible(
-          store.heartbeat(url, "automation-client", {
+          store.heartbeat(url, "automation-client", name, {
             qemus: collected.qemus,
             memory: {
               totalBytes: collected.memory.totalBytes,
@@ -80,7 +82,7 @@ export const announce = (
       const jobs = yield* sessions.jobs;
       const sample = yield* usage.collect;
       yield* Effect.uninterruptible(
-        processStore.report(url, "automation-client", {
+        processStore.report(name, "automation-client", {
           jobs,
           memoryBytes: sample.memoryBytes,
           cpuPercent: sample.cpuPercent,
@@ -90,15 +92,7 @@ export const announce = (
     const tick = writeHeartbeat.pipe(Effect.andThen(writeProcess));
     // Before the loop: close interrupts the fiber first, then this runs.
     yield* Effect.addFinalizer(() =>
-      processStore
-        .remove(url)
-        .pipe(
-          Effect.catchCause(failed("unannounce process stats failed")),
-          Effect.andThen(
-            store.removeServer(url).pipe(Effect.catchCause(failed("unannounce failed"))),
-          ),
-          Effect.asVoid,
-        ),
+      store.removeServer(url).pipe(Effect.catchCause(failed("unannounce failed")), Effect.asVoid),
     );
     yield* tick.pipe(
       Effect.repeat(Schedule.spaced(HEARTBEAT_INTERVAL)),

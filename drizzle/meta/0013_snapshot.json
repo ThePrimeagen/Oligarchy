@@ -1,5 +1,5 @@
 {
-  "id": "0e723bcb-ad3c-4725-b2b3-7954a874384e",
+  "id": "01b1e941-151e-4dcb-9d7e-126679b2f3aa",
   "prevId": "91bd71c4-6729-446b-b5e4-94a676ee0bc7",
   "version": "7",
   "dialect": "postgresql",
@@ -672,10 +672,27 @@
       "name": "process_stats",
       "schema": "",
       "columns": {
-        "url": {
-          "name": "url",
-          "type": "text",
+        "id": {
+          "name": "id",
+          "type": "bigint",
           "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "process_stats_id_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "9223372036854775807",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
           "notNull": true
         },
         "type": {
@@ -711,22 +728,30 @@
           "default": "now()"
         }
       },
-      "indexes": {},
-      "foreignKeys": {
-        "process_stats_url_servers_url_fk": {
-          "name": "process_stats_url_servers_url_fk",
-          "tableFrom": "process_stats",
-          "tableTo": "servers",
-          "columnsFrom": [
-            "url"
+      "indexes": {
+        "process_stats_name_reported_at_idx": {
+          "name": "process_stats_name_reported_at_idx",
+          "columns": [
+            {
+              "expression": "name",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "reported_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
           ],
-          "columnsTo": [
-            "url"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
+      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
@@ -749,6 +774,12 @@
           "type": "text",
           "primaryKey": true,
           "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "type": {
           "name": "type",
@@ -785,7 +816,23 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "servers_name_idx": {
+          "name": "servers_name_idx",
+          "columns": [
+            {
+              "expression": "name",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {

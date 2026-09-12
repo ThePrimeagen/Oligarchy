@@ -13,6 +13,7 @@ import * as FakeLog from "../support/log.ts";
 import * as Stores from "../support/stores.ts";
 
 const URL = "http://127.0.0.1:55332";
+const NAME = "garage";
 
 // What FakeQemu.fakeStats says for collect(0), cut down to what the row keeps.
 const ROW_STATS = {
@@ -22,12 +23,12 @@ const ROW_STATS = {
 };
 
 // One heartbeat as the store records it: this process announces itself as an automation-client.
-const ANNOUNCED = { url: URL, type: "automation-client", stats: ROW_STATS };
-const REGISTERED = { url: URL, type: "automation-client" };
+const ANNOUNCED = { url: URL, type: "automation-client", name: NAME, stats: ROW_STATS };
+const REGISTERED = { url: URL, type: "automation-client", name: NAME };
 
 const SAMPLE = { memoryBytes: 8_192_000, cpuPercent: 4.5 };
 const PROCESS = {
-  url: URL,
+  name: NAME,
   type: "automation-client" as const,
   stats: { jobs: 0, ...SAMPLE },
 };
@@ -69,7 +70,7 @@ const start = (
 ) =>
   Effect.gen(function* () {
     const scope = yield* Scope.make();
-    yield* Heartbeat.announce(URL).pipe(
+    yield* Heartbeat.announce(URL, NAME).pipe(
       Effect.provide(Layer.mergeAll(sessions, stats, store.layer, process.layer, usage, log.layer)),
       Scope.provide(scope),
     );
@@ -106,7 +107,7 @@ describe("automation-client heartbeat happy path", () => {
       yield* TestClock.adjust("30 seconds");
       expect(process.reports).toHaveLength(2);
       expect(
-        process.reports.every((row) => row.url === URL && row.type === "automation-client"),
+        process.reports.every((row) => row.name === NAME && row.type === "automation-client"),
       ).toBe(true);
       expect(log.lines).toEqual([]);
     }),
@@ -150,14 +151,14 @@ describe("automation-client heartbeat happy path", () => {
       const other = {
         id: crypto.randomUUID(),
         url: "http://127.0.0.1:1",
+        name: null,
         type: "qemu" as const,
       };
       store.servers.push(other);
-      const { scope, log, process } = yield* start(store);
+      const { scope, log } = yield* start(store);
       expect(store.servers).toEqual([other, expect.objectContaining(REGISTERED)]);
       yield* Scope.close(scope, Exit.void);
       expect(store.servers).toEqual([other]);
-      expect(process.removed).toEqual([URL]);
       expect(log.lines).toEqual([]);
     }),
   );
@@ -201,13 +202,13 @@ describe("automation-client heartbeat unhappy path", () => {
         let attempts = 0;
         const written: Array<typeof ANNOUNCED> = [];
         const store = Stores.fakeServerStore({
-          heartbeat: (url, type, stats) =>
+          heartbeat: (url, type, name, stats) =>
             Effect.suspend(() => {
               attempts += 1;
               if (attempts === 1) {
                 return Effect.fail(refused);
               }
-              written.push({ url, type, stats });
+              written.push({ url, type, name, stats });
               return Effect.void;
             }),
         });

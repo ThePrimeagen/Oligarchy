@@ -54,6 +54,7 @@ const ServerLive = (
   display: Domain.QemuDisplay,
   automation: boolean,
   maxJobs: number,
+  name: string,
   port: number,
   url: Option.Option<string>,
 ) =>
@@ -61,10 +62,13 @@ const ServerLive = (
     Effect.gen(function* () {
       const log = yield* Log.Log;
       yield* log.info(
-        `qemu server listening on ${HOST}:${String(port)}; display ${display}${automation ? "; automation" : ""}; max jobs ${String(maxJobs)}${Option.match(url, { onNone: () => "", onSome: (announced) => `; announcing ${announced}` })}`,
+        `qemu server listening on ${HOST}:${String(port)}; name ${name}; display ${display}${automation ? "; automation" : ""}; max jobs ${String(maxJobs)}${Option.match(url, { onNone: () => "", onSome: (announced) => `; announcing ${announced}` })}`,
         { location: Log.Locations.server },
       );
-      yield* Option.match(url, { onNone: () => Effect.void, onSome: Heartbeat.announce });
+      yield* Option.match(url, {
+        onNone: () => Effect.void,
+        onSome: (announced) => Heartbeat.announce(announced, name),
+      });
     }),
   ).pipe(
     Layer.provide(

@@ -14,6 +14,7 @@ const ago = (seconds: number): Date => new Date(QUERIED_AT.getTime() - seconds *
 
 const alive: Server = {
   url: "http://127.0.0.1:55332",
+  name: "garage",
   stats: {
     qemus: 2,
     memory: { totalBytes: 66_900_000_000, usedBytes: 31_500_000_000 },
@@ -26,6 +27,7 @@ const alive: Server = {
 
 const silent: Server = {
   url: "https://qemu-b.example.com",
+  name: "attic",
   stats: {
     qemus: 3,
     memory: { totalBytes: 16_000_000_000, usedBytes: 4_000_000_000 },
@@ -38,6 +40,7 @@ const silent: Server = {
 
 const neverHeardFrom: Server = {
   url: "https://qemu-c.example.com",
+  name: null,
   stats: null,
   generation: 0,
   heartbeatAt: null,
@@ -84,7 +87,7 @@ const QUEUE: AutomationQueue = { running: [running], pending: [pending], complet
 const EMPTY_QUEUE: AutomationQueue = { running: [], pending: [], completed: [] };
 
 const processAlive: ProcessStat = {
-  url: "http://127.0.0.1:55332",
+  name: "garage",
   type: "qemu",
   jobs: 2,
   memoryBytes: 512_000_000,
@@ -94,7 +97,7 @@ const processAlive: ProcessStat = {
 };
 
 const processSilent: ProcessStat = {
-  url: "http://automation.test:54322",
+  name: "attic",
   type: "automation-client",
   jobs: 1,
   memoryBytes: 256_000_000,
@@ -104,7 +107,7 @@ const processSilent: ProcessStat = {
 };
 
 const PROCESS_COLUMNS =
-  "<tr><th>url</th><th>type</th><th>jobs</th><th>memory</th><th>cpu 30s</th><th>reported</th></tr>";
+  "<tr><th>name</th><th>type</th><th>jobs</th><th>memory</th><th>cpu 30s</th><th>reported</th></tr>";
 
 const JOB_COLUMNS =
   "<tr><th>ticket</th><th>test</th><th>action</th><th>status</th><th>queued</th><th>started</th><th>finished</th><th>reason</th><th></th></tr>";
@@ -125,10 +128,10 @@ describe("Fleet happy path", () => {
   it("lists a server heard from just now with its machines, memory, the three cpu means, its generation and the age of its heartbeat", async () => {
     const page = await render(Fleet({ servers: [alive] }));
     expect(page).toContain(
-      "<tr><th>url</th><th>qemus</th><th>memory</th><th>cpu 1m / 2m / 3m</th><th>generation</th><th>heartbeat</th><th></th></tr>",
+      "<tr><th>name</th><th>url</th><th>qemus</th><th>memory</th><th>cpu 1m / 2m / 3m</th><th>generation</th><th>heartbeat</th><th></th></tr>",
     );
     expect(page).toContain(
-      "<tr><td>http://127.0.0.1:55332</td><td>2</td><td>31.5 / 66.9 GB</td><td>12.3% / 11.0% / 9.8%</td><td>42</td><td>12 s ago</td>",
+      "<tr><td>garage</td><td>http://127.0.0.1:55332</td><td>2</td><td>31.5 / 66.9 GB</td><td>12.3% / 11.0% / 9.8%</td><td>42</td><td>12 s ago</td>",
     );
     expect(page).toContain(
       '<form method="post" action="/servers/delete"><input type="hidden" name="url" value="http://127.0.0.1:55332"/><button>delete</button></form>',
@@ -158,7 +161,7 @@ describe("Fleet unhappy path", () => {
   it("marks a server silent, its stats withheld, once three heartbeats are overdue", async () => {
     const page = await render(Fleet({ servers: [silent] }));
     expect(page).toContain(
-      '<tr><td>https://qemu-b.example.com</td><td colspan="3"><strong>silent</strong></td><td>7</td><td>5 min ago</td>',
+      '<tr><td>attic</td><td>https://qemu-b.example.com</td><td colspan="3"><strong>silent</strong></td><td>7</td><td>5 min ago</td>',
     );
     expect(page).not.toContain("50.0%");
   });
@@ -176,17 +179,22 @@ describe("Fleet unhappy path", () => {
   it("says never heard from for a server an operator added that has not announced itself", async () => {
     const page = await render(Fleet({ servers: [neverHeardFrom] }));
     expect(page).toContain(
-      '<tr><td>https://qemu-c.example.com</td><td colspan="3">never heard from</td><td>0</td><td>never</td>',
+      '<tr><td>—</td><td>https://qemu-c.example.com</td><td colspan="3">never heard from</td><td>0</td><td>never</td>',
     );
   });
 
-  it("escapes a url in the row and in its delete form", async () => {
-    const hostile: Server = { ...neverHeardFrom, url: 'http://a"b.example.com/<x>' };
+  it("escapes a url and a name in the row and in its delete form", async () => {
+    const hostile: Server = {
+      ...neverHeardFrom,
+      url: 'http://a"b.example.com/<x>',
+      name: 'rack<"1>',
+    };
     const page = await render(Fleet({ servers: [hostile] }));
-    expect(page).toContain("<td>http://a&quot;b.example.com/&lt;x&gt;</td>");
+    expect(page).toContain("<td>rack&lt;&quot;1&gt;</td><td>http://a&quot;b.example.com/&lt;x&gt;</td>");
     expect(page).toContain('value="http://a&quot;b.example.com/&lt;x&gt;"');
     expect(page).not.toContain('a"b');
     expect(page).not.toContain("<x>");
+    expect(page).not.toContain('rack<"1>');
   });
 });
 
@@ -295,7 +303,7 @@ describe("Process happy path", () => {
     const page = await render(Process({ rows: [processAlive] }));
     expect(page).toContain(PROCESS_COLUMNS);
     expect(page).toContain(
-      "<tr><td>http://127.0.0.1:55332</td><td>qemu</td><td>2</td><td>512.0 MB</td><td>37.5%</td><td>12 s ago</td></tr>",
+      "<tr><td>garage</td><td>qemu</td><td>2</td><td>512.0 MB</td><td>37.5%</td><td>12 s ago</td></tr>",
     );
   });
 
@@ -309,15 +317,15 @@ describe("Process unhappy path", () => {
   it("collapses a silent process's readings into one word", async () => {
     const page = await render(Process({ rows: [processSilent] }));
     expect(page).toContain(
-      '<tr><td>http://automation.test:54322</td><td>automation-client</td><td colspan="3"><strong>silent</strong></td><td>5 min ago</td></tr>',
+      '<tr><td>attic</td><td>automation-client</td><td colspan="3"><strong>silent</strong></td><td>5 min ago</td></tr>',
     );
     expect(page).not.toContain("256.0 MB");
   });
 
-  it("escapes a url", async () => {
-    const page = await render(Process({ rows: [{ ...processAlive, url: 'http://x.test/<">' }] }));
-    expect(page).toContain("<td>http://x.test/&lt;&quot;&gt;</td>");
-    expect(page).not.toContain('http://x.test/<">');
+  it("escapes a name", async () => {
+    const page = await render(Process({ rows: [{ ...processAlive, name: 'x<">' }] }));
+    expect(page).toContain("<td>x&lt;&quot;&gt;</td>");
+    expect(page).not.toContain('x<">');
   });
 });
 

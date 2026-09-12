@@ -196,39 +196,37 @@ console.log(JSON.stringify(counted));
     }
   });
 
-  it("lists process stats by type then url and ends the connection", async () => {
+  it("lists the newest process reading per name, by type then name, and ends the connection", async () => {
     await seed(dbUrl, async (db) => {
-      await db
-        .insert(servers)
-        .values([
-          { url: "http://proc-qemu.test:1", type: "qemu" },
-          { url: "http://proc-auto.test:1", type: "automation-client" },
-        ])
-        .onConflictDoNothing();
-      await db
-        .insert(processStats)
-        .values([
-          {
-            url: "http://proc-qemu.test:1",
-            type: "qemu",
-            jobs: 2,
-            memoryBytes: 1000,
-            cpuPercent: 12.5,
-          },
-          {
-            url: "http://proc-auto.test:1",
-            type: "automation-client",
-            jobs: 1,
-            memoryBytes: 2000,
-            cpuPercent: 4,
-          },
-        ])
-        .onConflictDoNothing();
+      await db.insert(processStats).values([
+        {
+          name: "proc-qemu",
+          type: "qemu",
+          jobs: 9,
+          memoryBytes: 9,
+          cpuPercent: 99,
+          reportedAt: sql`now() - interval '1 minute'`,
+        },
+        {
+          name: "proc-qemu",
+          type: "qemu",
+          jobs: 2,
+          memoryBytes: 1000,
+          cpuPercent: 12.5,
+        },
+        {
+          name: "proc-auto",
+          type: "automation-client",
+          jobs: 1,
+          memoryBytes: 2000,
+          cpuPercent: 4,
+        },
+      ]);
     });
     const result = await runQuery(
       `
-const rows = (await query.listProcessStats(url)).filter((row) => row.url.startsWith("http://proc-"));
-console.log(rows.map((row) => [row.url, row.type, row.jobs, row.memoryBytes, row.cpuPercent, row.reportedAt instanceof Date, row.queriedAt instanceof Date].join(" ")).join("\\n"));
+const rows = (await query.listProcessStats(url)).filter((row) => row.name.startsWith("proc-"));
+console.log(rows.map((row) => [row.name, row.type, row.jobs, row.memoryBytes, row.cpuPercent, row.reportedAt instanceof Date, row.queriedAt instanceof Date].join(" ")).join("\\n"));
 `,
       dbUrl,
     );
@@ -236,8 +234,8 @@ console.log(rows.map((row) => [row.url, row.type, row.jobs, row.memoryBytes, row
     expect(result.stderr).toBe("");
     expect(result.code).toBe(0);
     expect(lines(result.stdout)).toEqual([
-      "http://proc-auto.test:1 automation-client 1 2000 4 true true",
-      "http://proc-qemu.test:1 qemu 2 1000 12.5 true true",
+      "proc-auto automation-client 1 2000 4 true true",
+      "proc-qemu qemu 2 1000 12.5 true true",
     ]);
   });
 
@@ -882,10 +880,12 @@ describe.skipIf(dbUrl === "")("dashboard/servers page happy path", () => {
   it("lists the fleet from its rows: one heard from just now, one silent, one never heard from", async () => {
     // The integration files share one database; the fleet this page expects is its own to arrange.
     await seed(dbUrl, async (db) => {
+      await db.delete(processStats);
       await db.delete(servers);
       await db.insert(servers).values([
         {
           url: "http://10.1.0.1:42069",
+          name: "garage",
           stats: {
             qemus: 2,
             memory: { totalBytes: 66_900_000_000, usedBytes: 31_500_000_000 },
@@ -896,6 +896,7 @@ describe.skipIf(dbUrl === "")("dashboard/servers page happy path", () => {
         },
         {
           url: "http://10.1.0.2:42069",
+          name: "attic",
           stats: {
             qemus: 3,
             memory: { totalBytes: 16_000_000_000, usedBytes: 4_000_000_000 },
@@ -907,6 +908,7 @@ describe.skipIf(dbUrl === "")("dashboard/servers page happy path", () => {
         { url: "http://10.1.0.3:42069" },
         {
           url: "http://10.1.0.4:54322",
+          name: "workshop",
           type: "automation-client",
           stats: {
             qemus: 0,
@@ -919,7 +921,7 @@ describe.skipIf(dbUrl === "")("dashboard/servers page happy path", () => {
       ]);
       await db.insert(processStats).values([
         {
-          url: "http://10.1.0.1:42069",
+          name: "garage",
           type: "qemu",
           jobs: 2,
           memoryBytes: 512_000_000,
@@ -927,7 +929,7 @@ describe.skipIf(dbUrl === "")("dashboard/servers page happy path", () => {
           reportedAt: sql`now() - interval '12 seconds'`,
         },
         {
-          url: "http://10.1.0.2:42069",
+          name: "attic",
           type: "qemu",
           jobs: 3,
           memoryBytes: 256_000_000,
@@ -935,7 +937,7 @@ describe.skipIf(dbUrl === "")("dashboard/servers page happy path", () => {
           reportedAt: sql`now() - interval '5 minutes'`,
         },
         {
-          url: "http://10.1.0.4:54322",
+          name: "workshop",
           type: "automation-client",
           jobs: 1,
           memoryBytes: 128_000_000,
@@ -950,23 +952,23 @@ describe.skipIf(dbUrl === "")("dashboard/servers page happy path", () => {
     expect(html).toContain("<h1>oligarchy servers</h1>");
     expect(html).toContain('<div id="fleet" hx-get="/servers/fleet" hx-trigger="every 30s">');
     expect(html).toContain(
-      "<tr><td>http://10.1.0.1:42069</td><td>2</td><td>31.5 / 66.9 GB</td><td>12.3% / 11.0% / 9.8%</td><td>42</td><td>12 s ago</td>",
+      "<tr><td>garage</td><td>http://10.1.0.1:42069</td><td>2</td><td>31.5 / 66.9 GB</td><td>12.3% / 11.0% / 9.8%</td><td>42</td><td>12 s ago</td>",
     );
     expect(html).toContain(
-      '<tr><td>http://10.1.0.2:42069</td><td colspan="3"><strong>silent</strong></td><td>7</td><td>5 min ago</td>',
+      '<tr><td>attic</td><td>http://10.1.0.2:42069</td><td colspan="3"><strong>silent</strong></td><td>7</td><td>5 min ago</td>',
     );
     expect(html).toContain(
-      '<tr><td>http://10.1.0.3:42069</td><td colspan="3">never heard from</td><td>0</td><td>never</td>',
+      '<tr><td>—</td><td>http://10.1.0.3:42069</td><td colspan="3">never heard from</td><td>0</td><td>never</td>',
     );
     expect(html).toContain('<div id="process" hx-get="/servers/process" hx-trigger="every 30s">');
     expect(html).toContain(
-      "<tr><td>http://10.1.0.1:42069</td><td>qemu</td><td>2</td><td>512.0 MB</td><td>37.5%</td><td>12 s ago</td>",
+      "<tr><td>garage</td><td>qemu</td><td>2</td><td>512.0 MB</td><td>37.5%</td><td>12 s ago</td>",
     );
     expect(html).toContain(
-      '<tr><td>http://10.1.0.2:42069</td><td>qemu</td><td colspan="3"><strong>silent</strong></td><td>5 min ago</td>',
+      '<tr><td>attic</td><td>qemu</td><td colspan="3"><strong>silent</strong></td><td>5 min ago</td>',
     );
     expect(html).toContain(
-      "<tr><td>http://10.1.0.4:54322</td><td>automation-client</td><td>1</td><td>128.0 MB</td><td>8.0%</td><td>8 s ago</td>",
+      "<tr><td>workshop</td><td>automation-client</td><td>1</td><td>128.0 MB</td><td>8.0%</td><td>8 s ago</td>",
     );
     expect(html).not.toContain("dashboard.css");
   });
@@ -991,7 +993,7 @@ describe.skipIf(dbUrl === "")("dashboard/servers page happy path", () => {
     const { status, html } = await getPage("/servers/process", dbUrl);
     expect(status).toBe(200);
     expect(html).toContain("<table>");
-    expect(html).toContain("<td>http://10.1.0.1:42069</td>");
+    expect(html).toContain("<td>garage</td>");
     expect(html).toContain("<td>37.5%</td>");
     expect(html).not.toContain("<html");
     expect(html).not.toContain("add a server");
@@ -1018,7 +1020,7 @@ describe.skipIf(dbUrl === "")("dashboard/servers page happy path", () => {
     ]);
     const { html } = await getPage("/servers", dbUrl);
     expect(html).toContain(
-      '<tr><td>http://10.1.0.9:42069</td><td colspan="3">never heard from</td><td>0</td><td>never</td>',
+      '<tr><td>—</td><td>http://10.1.0.9:42069</td><td colspan="3">never heard from</td><td>0</td><td>never</td>',
     );
   });
 

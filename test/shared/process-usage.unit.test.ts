@@ -1,6 +1,6 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { Cause, Context, Effect, Exit, Layer, Option } from "effect";
+import { Cause, Context, Effect, Exit, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import * as ProcessUsage from "../../src/shared/process-usage.ts";
 import * as FakeFs from "../support/fake-fs.ts";
@@ -11,43 +11,6 @@ const stat = (comm: string, utime: number, stime: number): string =>
 
 const status = (kb: number): string =>
   `Name:\tnode\nState:\tS\nVmRSS:\t    ${String(kb)} kB\nVmData:\t1 kB\n`;
-
-describe("parseCpuTicks happy path", () => {
-  it("reads utime plus stime from a /proc/self/stat line", () => {
-    expect(ProcessUsage.parseCpuTicks(stat("node", 120, 30))).toEqual(Option.some(150));
-  });
-
-  it("finds the ticks after a comm that contains spaces and parentheses", () => {
-    expect(ProcessUsage.parseCpuTicks(stat("qemu-system x86_64", 10, 5))).toEqual(Option.some(15));
-  });
-});
-
-describe("parseCpuTicks unhappy path", () => {
-  it("is none for an empty string, a line with no closing paren, or too few fields", () => {
-    expect(ProcessUsage.parseCpuTicks("")).toEqual(Option.none());
-    expect(ProcessUsage.parseCpuTicks("1 (node R 0 0")).toEqual(Option.none());
-    expect(ProcessUsage.parseCpuTicks("1 (node) R 0")).toEqual(Option.none());
-  });
-
-  it("is none when the tick fields are not numbers", () => {
-    expect(ProcessUsage.parseCpuTicks("1 (node) R 0 0 0 0 -1 0 0 0 0 0 xx 0")).toEqual(
-      Option.none(),
-    );
-  });
-});
-
-describe("parseVmRssBytes happy path", () => {
-  it("reads VmRSS kilobytes as bytes", () => {
-    expect(ProcessUsage.parseVmRssBytes(status(12345))).toEqual(Option.some(12_345 * 1024));
-  });
-});
-
-describe("parseVmRssBytes unhappy path", () => {
-  it("is none when VmRSS is missing or not a number", () => {
-    expect(ProcessUsage.parseVmRssBytes("Name:\tnode\n")).toEqual(Option.none());
-    expect(ProcessUsage.parseVmRssBytes("VmRSS:\t    xx kB\n")).toEqual(Option.none());
-  });
-});
 
 type Scripted = {
   readonly source: ProcessUsage.Source;
@@ -169,6 +132,14 @@ const procFs = (statText: string | undefined, statusText: string | undefined) =>
     },
   );
 
+const collectThrough = (statText: string | undefined, statusText: string | undefined) =>
+  Effect.gen(function* () {
+    const usage = yield* ProcessUsage.ProcessUsage;
+    return yield* usage.collect;
+  }).pipe(
+    Effect.provide(ProcessUsage.ProcessUsage.layer.pipe(Layer.provide(procFs(statText, statusText).layer))),
+  );
+
 describe("ProcessUsage.layer happy path", () => {
   it.effect("reads /proc/self/stat and /proc/self/status without sudo", () => {
     const fs = procFs(stat("node", 0, 0), status(4));
@@ -178,32 +149,49 @@ describe("ProcessUsage.layer happy path", () => {
       expect(FakeFs.methods(fs)).toEqual(["readFileString", "readFileString"]);
     }).pipe(Effect.provide(ProcessUsage.ProcessUsage.layer.pipe(Layer.provide(fs.layer))));
   });
+
+  it.effect("reads ticks after a comm that contains spaces and parentheses", () =>
+    Effect.gen(function* () {
+      expect(yield* collectThrough(stat("qemu-system x86_64", 10, 5), status(1))).toEqual({
+        memoryBytes: 1024,
+        cpuPercent: 0,
+      });
+    }),
+  );
+
+  it.effect("reads VmRSS kilobytes as bytes", () =>
+    Effect.gen(function* () {
+      expect(yield* collectThrough(stat("node", 0, 0), status(12345))).toEqual({
+        memoryBytes: 12_345 * 1024,
+        cpuPercent: 0,
+      });
+    }),
+  );
 });
 
 describe("ProcessUsage.layer unhappy path", () => {
   it.effect("dies when /proc/self/stat is missing", () =>
     Effect.gen(function* () {
-      const usage = yield* ProcessUsage.ProcessUsage;
-      const exit = yield* Effect.exit(usage.collect);
+      const exit = yield* Effect.exit(collectThrough(undefined, status(1)));
       expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true);
-    }).pipe(
-      Effect.provide(
-        ProcessUsage.ProcessUsage.layer.pipe(Layer.provide(procFs(undefined, status(1)).layer)),
-      ),
-    ),
+    }),
   );
 
-  it.effect("dies when the status text has no VmRSS", () =>
+  it.effect("dies when the stat line is empty, unclosed, too short, or not numbers", () =>
     Effect.gen(function* () {
-      const usage = yield* ProcessUsage.ProcessUsage;
-      const exit = yield* Effect.exit(usage.collect);
-      expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true);
-    }).pipe(
-      Effect.provide(
-        ProcessUsage.ProcessUsage.layer.pipe(
-          Layer.provide(procFs(stat("node", 0, 0), "Name:\tnode\n").layer),
-        ),
-      ),
-    ),
+      for (const line of ["", "1 (node R 0 0", "1 (node) R 0", "1 (node) R 0 0 0 0 -1 0 0 0 0 0 xx 0"]) {
+        const exit = yield* Effect.exit(collectThrough(line, status(1)));
+        expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause), line).toBe(true);
+      }
+    }),
+  );
+
+  it.effect("dies when the status text has no VmRSS or it is not a number", () =>
+    Effect.gen(function* () {
+      for (const text of ["Name:\tnode\n", "VmRSS:\t    xx kB\n"]) {
+        const exit = yield* Effect.exit(collectThrough(stat("node", 0, 0), text));
+        expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause), text).toBe(true);
+      }
+    }),
   );
 });

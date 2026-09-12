@@ -10,6 +10,7 @@ import * as FakeLog from "../support/log.ts";
 import * as Stores from "../support/stores.ts";
 
 const URL = "http://127.0.0.1:55332";
+const NAME = "garage";
 
 // What FakeSessions.STATS says, cut down to what the row keeps.
 const ROW_STATS = {
@@ -19,11 +20,11 @@ const ROW_STATS = {
 };
 
 // One heartbeat as the store records it: this server announces itself as a qemu server.
-const ANNOUNCED = { url: URL, type: "qemu", stats: ROW_STATS };
-const REGISTERED = { url: URL, type: "qemu" };
+const ANNOUNCED = { url: URL, type: "qemu", name: NAME, stats: ROW_STATS };
+const REGISTERED = { url: URL, type: "qemu", name: NAME };
 
 const SAMPLE = { memoryBytes: 4_096_000, cpuPercent: 12.5 };
-const PROCESS = { url: URL, type: "qemu" as const, stats: { jobs: 1, ...SAMPLE } };
+const PROCESS = { name: NAME, type: "qemu" as const, stats: { jobs: 1, ...SAMPLE } };
 
 const fakeUsage = (sample = SAMPLE) =>
   Layer.succeed(ProcessUsage.ProcessUsage)(
@@ -46,7 +47,7 @@ const start = (
 ) =>
   Effect.gen(function* () {
     const scope = yield* Scope.make();
-    yield* Heartbeat.announce(URL).pipe(
+    yield* Heartbeat.announce(URL, NAME).pipe(
       Effect.provide(Layer.mergeAll(sessions.layer, store.layer, process.layer, usage, log.layer)),
       Scope.provide(scope),
     );
@@ -94,7 +95,7 @@ describe("heartbeat happy path", () => {
       expect(process.reports).toEqual([PROCESS]);
       yield* TestClock.adjust("30 seconds");
       expect(process.reports).toHaveLength(2);
-      expect(process.reports.every((row) => row.url === URL && row.type === "qemu")).toBe(true);
+      expect(process.reports.every((row) => row.name === NAME && row.type === "qemu")).toBe(true);
       expect(log.lines).toEqual([]);
     }),
   );
@@ -118,13 +119,17 @@ describe("heartbeat happy path", () => {
   it.effect("deletes its own row when the scope closes, and leaves every other server", () =>
     Effect.gen(function* () {
       const store = Stores.fakeServerStore();
-      const other = { id: crypto.randomUUID(), url: "http://127.0.0.1:1", type: "qemu" as const };
+      const other = {
+        id: crypto.randomUUID(),
+        url: "http://127.0.0.1:1",
+        name: null,
+        type: "qemu" as const,
+      };
       store.servers.push(other);
-      const { scope, log, process } = yield* start(store);
+      const { scope, log } = yield* start(store);
       expect(store.servers).toEqual([other, expect.objectContaining(REGISTERED)]);
       yield* Scope.close(scope, Exit.void);
       expect(store.servers).toEqual([other]);
-      expect(process.removed).toEqual([URL]);
       expect(log.lines).toEqual([]);
     }),
   );
@@ -168,13 +173,13 @@ describe("heartbeat unhappy path", () => {
         let attempts = 0;
         const written: Array<typeof ANNOUNCED> = [];
         const store = Stores.fakeServerStore({
-          heartbeat: (url, type, stats) =>
+          heartbeat: (url, type, name, stats) =>
             Effect.suspend(() => {
               attempts += 1;
               if (attempts === 1) {
                 return Effect.fail(refused);
               }
-              written.push({ url, type, stats });
+              written.push({ url, type, name, stats });
               return Effect.void;
             }),
         });

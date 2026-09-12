@@ -23,14 +23,15 @@ const detail = (error: unknown): string =>
 // Announces this server under `url`: its `servers` row is written now and every thirty seconds
 // with what it knows of itself — a qemu server, this process boots nothing else — and the row's
 // generation counts the writes, so a number that stops moving is a server that stopped without a
-// chance to leave. The same tick writes `process_stats`: current jobs, current VmRSS, and the
-// cpu busy over the last thirty seconds. A write that fails is one error line; the other write
-// and the next tick still run. The rows are this process's word on itself, so a shutdown
-// deletes them: registered before the loop so the fiber is interrupted first, a write in
-// flight finishes (the write is uninterruptible), then the rows go. A delete that fails is one
-// `unannounce failed` line; the process still exits.
+// chance to leave. The same tick inserts a `process_stats` row: current jobs, current
+// VmRSS, and the cpu busy over the last thirty seconds. A write that fails is one error
+// line; the other write and the next tick still run. A shutdown deletes the servers row
+// only: the readings stay so they can be graphed later. Registered before the loop so the
+// fiber is interrupted first; a write in flight finishes (the write is uninterruptible).
+// A delete that fails is one `unannounce failed` line; the process still exits.
 export const announce = (
   url: string,
+  name: string,
 ): Effect.Effect<
   void,
   never,
@@ -57,7 +58,7 @@ export const announce = (
     const writeHeartbeat = sessions.stats.pipe(
       Effect.flatMap((stats) =>
         Effect.uninterruptible(
-          store.heartbeat(url, "qemu", {
+          store.heartbeat(url, "qemu", name, {
             qemus: stats.qemus,
             memory: { totalBytes: stats.memory.totalBytes, usedBytes: stats.memory.usedBytes },
             cpu: { mean1m: stats.cpu.mean1m, mean2m: stats.cpu.mean2m, mean3m: stats.cpu.mean3m },
@@ -70,7 +71,7 @@ export const announce = (
       const jobs = yield* sessions.jobs;
       const sample = yield* usage.collect;
       yield* Effect.uninterruptible(
-        processStore.report(url, "qemu", {
+        processStore.report(name, "qemu", {
           jobs,
           memoryBytes: sample.memoryBytes,
           cpuPercent: sample.cpuPercent,
@@ -80,15 +81,7 @@ export const announce = (
     const tick = writeHeartbeat.pipe(Effect.andThen(writeProcess));
     // Before the loop: close interrupts the fiber first, then this runs.
     yield* Effect.addFinalizer(() =>
-      processStore
-        .remove(url)
-        .pipe(
-          Effect.catchCause(failed("unannounce process stats failed")),
-          Effect.andThen(
-            store.removeServer(url).pipe(Effect.catchCause(failed("unannounce failed"))),
-          ),
-          Effect.asVoid,
-        ),
+      store.removeServer(url).pipe(Effect.catchCause(failed("unannounce failed")), Effect.asVoid),
     );
     yield* tick.pipe(
       Effect.repeat(Schedule.spaced(HEARTBEAT_INTERVAL)),

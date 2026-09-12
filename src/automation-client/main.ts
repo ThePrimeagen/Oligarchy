@@ -50,16 +50,19 @@ server.on("error", (cause) => {
 
 // The heartbeat starts once the listener is up, in the same scope: a port refusal announces
 // nothing, and a shutdown deletes the row it wrote.
-const ServerLive = (maxJobs: number, port: number, url: Option.Option<string>) =>
+const ServerLive = (maxJobs: number, name: string, port: number, url: Option.Option<string>) =>
   Layer.effectDiscard(
     Effect.gen(function* () {
       const log = yield* Log.Log;
       yield* log.acquireColor(Log.AutomationClientAgentId);
       yield* log.info(
-        `automation client listening on ${HOST}:${String(port)}; max jobs ${String(maxJobs)}${Option.match(url, { onNone: () => "", onSome: (announced) => `; announcing ${announced}` })}`,
+        `automation client listening on ${HOST}:${String(port)}; name ${name}; max jobs ${String(maxJobs)}${Option.match(url, { onNone: () => "", onSome: (announced) => `; announcing ${announced}` })}`,
         automationClientAttr,
       );
-      yield* Option.match(url, { onNone: () => Effect.void, onSome: Heartbeat.announce });
+      yield* Option.match(url, {
+        onNone: () => Effect.void,
+        onSome: (announced) => Heartbeat.announce(announced, name),
+      });
     }),
   ).pipe(
     Layer.provide(

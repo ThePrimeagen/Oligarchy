@@ -208,37 +208,46 @@ export type ServerStats = {
 // every writer names it, and the default is what the migration filled the rows that predate
 // the column with — qemu servers were the only kind there was. automation-client is the
 // other kind: same heartbeat, listed apart from the qemu fleet. id is the stable handle a
-// job stores when it is claimed; url remains the key a heartbeat upserts on.
-export const servers = pgTable("servers", {
-  id: uuid("id").notNull().defaultRandom().unique(),
-  url: text("url").primaryKey(),
-  type: serverType("type").notNull().default("qemu"),
-  stats: jsonb("stats").$type<ServerStats>(),
-  generation: bigint("generation", { mode: "number" }).notNull().default(0),
-  heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+// job stores when it is claimed; url remains the key a heartbeat upserts on. name is what
+// the operator called the machine (--name); null on a row nobody has claimed yet.
+export const servers = pgTable(
+  "servers",
+  {
+    id: uuid("id").notNull().defaultRandom().unique(),
+    url: text("url").primaryKey(),
+    name: text("name"),
+    type: serverType("type").notNull().default("qemu"),
+    stats: jsonb("stats").$type<ServerStats>(),
+    generation: bigint("generation", { mode: "number" }).notNull().default(0),
+    heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("servers_name_idx").on(table.name)],
+);
 
-// What a qemu server or automation-client last said of this process: current jobs, current
-// VmRSS, and the cpu busy over the last thirty seconds. One row per announcing url, rewritten
-// on each heartbeat. The servers row is written first; a shutdown deletes this row, and
-// deleting the servers row cascades so an operator's delete does not leave a stale reading.
+// What a qemu server or automation-client said of this process at one heartbeat: current
+// jobs, current VmRSS, and the cpu busy over the last thirty seconds. One insert per tick,
+// so a later graph can read the series. name is the machine (--name), not a relation: the
+// row outlives the servers row, and a shutdown or an operator's delete must not erase it.
 export type ProcessStats = {
   readonly jobs: number;
   readonly memoryBytes: number;
   readonly cpuPercent: number;
 };
 
-export const processStats = pgTable("process_stats", {
-  url: text("url")
-    .primaryKey()
-    .references(() => servers.url, { onDelete: "cascade" }),
-  type: serverType("type").notNull(),
-  jobs: integer("jobs").notNull(),
-  memoryBytes: bigint("memory_bytes", { mode: "number" }).notNull(),
-  cpuPercent: doublePrecision("cpu_percent").notNull(),
-  reportedAt: timestamp("reported_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const processStats = pgTable(
+  "process_stats",
+  {
+    id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+    name: text("name").notNull(),
+    type: serverType("type").notNull(),
+    jobs: integer("jobs").notNull(),
+    memoryBytes: bigint("memory_bytes", { mode: "number" }).notNull(),
+    cpuPercent: doublePrecision("cpu_percent").notNull(),
+    reportedAt: timestamp("reported_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("process_stats_name_reported_at_idx").on(table.name, table.reportedAt)],
+);
 
 // Which server started a session, so every later request for it finds the machine. The row
 // outlives the qemu reverse proxy process, which is why it is a row. server_url is attribution, not a

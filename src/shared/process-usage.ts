@@ -1,9 +1,9 @@
 import { Clock, Context, Effect, FileSystem, Layer, Option, Ref } from "effect";
 
 // USER_HZ on Linux, and this process only runs there. /proc/self/stat counts in these ticks.
-export const CLK_TCK = 100;
-export const STAT_PATH = "/proc/self/stat";
-export const STATUS_PATH = "/proc/self/status";
+const CLK_TCK = 100;
+const STAT_PATH = "/proc/self/stat";
+const STATUS_PATH = "/proc/self/status";
 
 export type Reading = {
   readonly cpuTicks: number;
@@ -24,7 +24,7 @@ export type ProcessUsageService = {
 // After the last `)` of comm, fields are 3-indexed from state. utime is 14, stime is 15.
 const TICK_OFFSET = 11;
 
-export const parseCpuTicks = (stat: string): Option.Option<number> => {
+const parseCpuTicks = (stat: string): Option.Option<number> => {
   const close = stat.lastIndexOf(")");
   if (close < 0) {
     return Option.none();
@@ -40,7 +40,7 @@ export const parseCpuTicks = (stat: string): Option.Option<number> => {
     : Option.none();
 };
 
-export const parseVmRssBytes = (status: string): Option.Option<number> => {
+const parseVmRssBytes = (status: string): Option.Option<number> => {
   const match = /^VmRSS:\s+(\d+)\s+kB$/m.exec(status);
   if (match === null) {
     return Option.none();
@@ -53,12 +53,12 @@ const round1 = (value: number): number => Math.round(value * 10) / 10;
 
 type Sample = {
   readonly reading: Reading;
-  readonly at: number;
+  readonly at: bigint;
 };
 
 const missing = (path: string): Error => new Error(`unreadable process usage: ${path}`);
 
-export const procSource =
+const procSource =
   (fs: FileSystem.FileSystem): Source =>
   () =>
     Effect.gen(function* () {
@@ -81,22 +81,22 @@ const make = (source: Source): Effect.Effect<ProcessUsageService> =>
 
     const collect = Effect.gen(function* () {
       const reading = yield* source();
-      const at = yield* Clock.currentTimeMillis;
+      const at = yield* Clock.monotonicTimeNanos;
       const previous = yield* Ref.get(last);
       yield* Ref.set(last, Option.some({ reading, at }));
       return Option.match(previous, {
         onNone: (): ProcessSample => ({ memoryBytes: reading.memoryBytes, cpuPercent: 0 }),
         onSome: (sample): ProcessSample => {
-          const elapsedMs = at - sample.at;
+          const elapsedNs = at - sample.at;
           const deltaTicks = reading.cpuTicks - sample.reading.cpuTicks;
           // No time, or ticks went backwards (a wrap the contract does not name): report 0.
-          if (elapsedMs <= 0 || deltaTicks < 0) {
+          if (elapsedNs <= 0n || deltaTicks < 0) {
             return { memoryBytes: reading.memoryBytes, cpuPercent: 0 };
           }
-          // ticks / CLK_TCK / seconds * 100 = ticks * 1000 / elapsedMs at USER_HZ 100.
+          // ticks / CLK_TCK / seconds * 100.
           return {
             memoryBytes: reading.memoryBytes,
-            cpuPercent: round1((deltaTicks * 1_000) / elapsedMs),
+            cpuPercent: round1((deltaTicks * 1e9 * 100) / (CLK_TCK * Number(elapsedNs))),
           };
         },
       });
