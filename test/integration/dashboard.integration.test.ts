@@ -8,6 +8,7 @@ import { describe, expect, inject, it } from "vitest";
 import { app } from "../../src/dashboard/dashboard.tsx";
 import {
   automationJobs,
+  processStats,
   servers,
   sessions,
   testDefinitions,
@@ -193,6 +194,51 @@ console.log(JSON.stringify(counted));
     for (const row of rows) {
       expect(row).toMatch(/^\S+ string$/);
     }
+  });
+
+  it("lists process stats by type then url and ends the connection", async () => {
+    await seed(dbUrl, async (db) => {
+      await db
+        .insert(servers)
+        .values([
+          { url: "http://proc-qemu.test:1", type: "qemu" },
+          { url: "http://proc-auto.test:1", type: "automation-client" },
+        ])
+        .onConflictDoNothing();
+      await db
+        .insert(processStats)
+        .values([
+          {
+            url: "http://proc-qemu.test:1",
+            type: "qemu",
+            jobs: 2,
+            memoryBytes: 1000,
+            cpuPercent: 12.5,
+          },
+          {
+            url: "http://proc-auto.test:1",
+            type: "automation-client",
+            jobs: 1,
+            memoryBytes: 2000,
+            cpuPercent: 4,
+          },
+        ])
+        .onConflictDoNothing();
+    });
+    const result = await runQuery(
+      `
+const rows = (await query.listProcessStats(url)).filter((row) => row.url.startsWith("http://proc-"));
+console.log(rows.map((row) => [row.url, row.type, row.jobs, row.memoryBytes, row.cpuPercent, row.reportedAt instanceof Date, row.queriedAt instanceof Date].join(" ")).join("\\n"));
+`,
+      dbUrl,
+    );
+    expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    expect(lines(result.stdout)).toEqual([
+      "http://proc-auto.test:1 automation-client 1 2000 4 true true",
+      "http://proc-qemu.test:1 qemu 2 1000 12.5 true true",
+    ]);
   });
 
   it("returns undefined for an unknown image id and still exits", async () => {
@@ -804,6 +850,17 @@ describe("dashboard/query unhappy path: unreachable database", () => {
     expect(result.stderr).toMatch(/ECONNREFUSED/);
     expect(result.stderr).not.toContain(SENTINEL_PASSWORD);
   });
+
+  it("listProcessStats surfaces a refused connection and exits without echoing the password", async () => {
+    const result = await runQuery(
+      "try {\n  await query.listProcessStats(url);\n} catch (err) {\n  console.error(err.message);\n  process.exitCode = 3;\n}",
+      REFUSED_URL,
+    );
+    expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
+    expect(result.code).toBe(3);
+    expect(result.stderr).toMatch(/ECONNREFUSED/);
+    expect(result.stderr).not.toContain(SENTINEL_PASSWORD);
+  });
 });
 
 const registered = async (
@@ -848,6 +905,43 @@ describe.skipIf(dbUrl === "")("dashboard/servers page happy path", () => {
           heartbeatAt: sql`now() - interval '5 minutes'`,
         },
         { url: "http://10.1.0.3:42069" },
+        {
+          url: "http://10.1.0.4:54322",
+          type: "automation-client",
+          stats: {
+            qemus: 0,
+            memory: { totalBytes: 16_000_000_000, usedBytes: 2_000_000_000 },
+            cpu: { mean1m: 4, mean2m: 3, mean3m: 2 },
+          },
+          generation: 3,
+          heartbeatAt: sql`now() - interval '8 seconds'`,
+        },
+      ]);
+      await db.insert(processStats).values([
+        {
+          url: "http://10.1.0.1:42069",
+          type: "qemu",
+          jobs: 2,
+          memoryBytes: 512_000_000,
+          cpuPercent: 37.5,
+          reportedAt: sql`now() - interval '12 seconds'`,
+        },
+        {
+          url: "http://10.1.0.2:42069",
+          type: "qemu",
+          jobs: 3,
+          memoryBytes: 256_000_000,
+          cpuPercent: 80,
+          reportedAt: sql`now() - interval '5 minutes'`,
+        },
+        {
+          url: "http://10.1.0.4:54322",
+          type: "automation-client",
+          jobs: 1,
+          memoryBytes: 128_000_000,
+          cpuPercent: 8,
+          reportedAt: sql`now() - interval '8 seconds'`,
+        },
       ]);
     });
     const { status, html } = await getPage("/servers", dbUrl);
@@ -864,6 +958,16 @@ describe.skipIf(dbUrl === "")("dashboard/servers page happy path", () => {
     expect(html).toContain(
       '<tr><td>http://10.1.0.3:42069</td><td colspan="3">never heard from</td><td>0</td><td>never</td>',
     );
+    expect(html).toContain('<div id="process" hx-get="/servers/process" hx-trigger="every 30s">');
+    expect(html).toContain(
+      "<tr><td>http://10.1.0.1:42069</td><td>qemu</td><td>2</td><td>512.0 MB</td><td>37.5%</td><td>12 s ago</td>",
+    );
+    expect(html).toContain(
+      '<tr><td>http://10.1.0.2:42069</td><td>qemu</td><td colspan="3"><strong>silent</strong></td><td>5 min ago</td>',
+    );
+    expect(html).toContain(
+      "<tr><td>http://10.1.0.4:54322</td><td>automation-client</td><td>1</td><td>128.0 MB</td><td>8.0%</td><td>8 s ago</td>",
+    );
     expect(html).not.toContain("dashboard.css");
   });
 
@@ -878,10 +982,19 @@ describe.skipIf(dbUrl === "")("dashboard/servers page happy path", () => {
     });
     const page = await getPage("/servers", dbUrl);
     expect(page.html).toContain("<td>http://10.1.0.1:42069</td>");
-    expect(page.html).not.toContain("http://10.1.0.4:54322");
     const fleet = await getPage("/servers/fleet", dbUrl);
     expect(fleet.html).toContain("<td>http://10.1.0.1:42069</td>");
     expect(fleet.html).not.toContain("http://10.1.0.4:54322");
+  });
+
+  it("serves the process table alone at /servers/process, what the page's poll swaps in", async () => {
+    const { status, html } = await getPage("/servers/process", dbUrl);
+    expect(status).toBe(200);
+    expect(html).toContain("<table>");
+    expect(html).toContain("<td>http://10.1.0.1:42069</td>");
+    expect(html).toContain("<td>37.5%</td>");
+    expect(html).not.toContain("<html");
+    expect(html).not.toContain("add a server");
   });
 
   it("serves the fleet alone at /servers/fleet, what the page's poll swaps in", async () => {
@@ -1157,8 +1270,17 @@ describe("dashboard/servers page unhappy path: unreachable database", () => {
     expect(html).toContain("<p>error: internal error</p>");
     expect(html).not.toContain('id="queue"');
     expect(html).not.toContain('id="fleet"');
+    expect(html).not.toContain('id="process"');
     expect(html).toContain("<h2>automation</h2>");
     expect(html).toContain("<h2>add a server</h2>");
+    expect(html).toContain("<h2>process</h2>");
+    expect(html).not.toContain(SENTINEL_PASSWORD);
+  });
+
+  it("the process fragment answers 500 with the reason, never echoing the password", async () => {
+    const { status, html } = await getPage("/servers/process", REFUSED_URL);
+    expect(status).toBe(500);
+    expect(html).toBe("<p>error: internal error</p>");
     expect(html).not.toContain(SENTINEL_PASSWORD);
   });
 

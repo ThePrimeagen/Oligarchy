@@ -2020,6 +2020,43 @@ describe("stats", () => {
   );
 });
 
+describe("jobs", () => {
+  it.effect("reports the current admitted count, including a reservation that has not started", () =>
+    Effect.gen(function* () {
+      const h = harness({ maxJobs: 2 });
+      yield* h.run(
+        Effect.gen(function* () {
+          const sessions = yield* Sessions.Sessions;
+          expect(yield* sessions.jobs).toBe(0);
+          yield* sessions.reserve(AGENT);
+          expect(yield* sessions.jobs).toBe(1);
+          const { live } = yield* start(OTHER_AGENT);
+          expect(yield* sessions.jobs).toBe(2);
+          yield* sessions.stop(live, "succeeded", "done");
+          expect(yield* sessions.jobs).toBe(1);
+          yield* sessions.relinquish(AGENT);
+          expect(yield* sessions.jobs).toBe(0);
+        }),
+      );
+    }),
+  );
+
+  it.effect("a refused reserve does not count (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness({ maxJobs: 1 });
+      yield* h.run(
+        Effect.gen(function* () {
+          const sessions = yield* Sessions.Sessions;
+          yield* sessions.reserve(AGENT);
+          expect(yield* sessions.jobs).toBe(1);
+          expect((yield* Effect.flip(sessions.reserve(OTHER_AGENT)))._tag).toBe("AtCapacity");
+          expect(yield* sessions.jobs).toBe(1);
+        }),
+      );
+    }),
+  );
+});
+
 // ---------------------------------------------------------------------------
 // capacity
 // ---------------------------------------------------------------------------

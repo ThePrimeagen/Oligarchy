@@ -621,6 +621,15 @@ const announced = (url: string) =>
     return rows[0];
   }).pipe(Effect.provide(Postgres.DatabaseLive(dbUrl)));
 
+const announcedProcess = (url: string) =>
+  Effect.gen(function* () {
+    const database = yield* DbClient.Database;
+    const rows = yield* database.run("announcedProcess", (db) =>
+      db.select().from(DbSchema.processStats).where(eq(DbSchema.processStats.url, url)),
+    );
+    return rows[0];
+  }).pipe(Effect.provide(Postgres.DatabaseLive(dbUrl)));
+
 describe("automation client announce", () => {
   it.live.skipIf(dbUrl === "")(
     "--url names the url on the listen line, writes the automation-client row as its first heartbeat, and deletes it on SIGTERM",
@@ -631,18 +640,20 @@ describe("automation client announce", () => {
         const process = spawnAutomationClient([...MAX_JOBS, "--url", url, "--port", String(port)], {
           DATABASE_URL: dbUrl,
         });
-        const row = yield* Effect.gen(function* () {
+        const { row, reading } = yield* Effect.gen(function* () {
           yield* Effect.promise(() => process.waitFor(/automation client listening/));
           expect(process.stdout()).toContain(
             `automation client listening on 127.0.0.1:${String(port)}; max jobs 1; announcing ${url}`,
           );
-          return yield* announced(url).pipe(
+          // process_stats is the second write, so waiting for it means the servers row is there.
+          const reading = yield* announcedProcess(url).pipe(
             Effect.repeat({
               until: (found) => found !== undefined,
               schedule: Schedule.spaced("200 millis"),
             }),
-            Effect.timeoutOrElse({ duration: "10 seconds", orElse: () => announced(url) }),
+            Effect.timeoutOrElse({ duration: "10 seconds", orElse: () => announcedProcess(url) }),
           );
+          return { row: yield* announced(url), reading };
         }).pipe(
           Effect.ensuring(
             Effect.sync(() => {
@@ -657,11 +668,22 @@ describe("automation client announce", () => {
           stats: { qemus: 0 },
         });
         expect(row?.heartbeatAt).toBeInstanceOf(Date);
+        expect(reading).toMatchObject({
+          url,
+          type: "automation-client",
+          jobs: 0,
+          cpuPercent: 0,
+        });
+        expect(reading?.memoryBytes).toBeGreaterThan(0);
+        expect(reading?.reportedAt).toBeInstanceOf(Date);
         const { code } = yield* Effect.promise(() => process.exited);
         expect(code, process.stdout()).toBe(0);
         expect(process.stdout()).not.toContain("heartbeat failed");
+        expect(process.stdout()).not.toContain("process stats failed");
         expect(process.stdout()).not.toContain("unannounce failed");
+        expect(process.stdout()).not.toContain("unannounce process stats failed");
         expect(yield* announced(url)).toBeUndefined();
+        expect(yield* announcedProcess(url)).toBeUndefined();
       }),
     120_000,
   );

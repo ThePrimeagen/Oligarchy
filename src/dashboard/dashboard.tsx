@@ -11,6 +11,7 @@ import {
   getImage,
   groupDefinitions,
   listAutomationQueue,
+  listProcessStats,
   listServers,
   listSessions,
   listTestBasePrompts,
@@ -30,7 +31,7 @@ import {
 } from "./query.ts";
 import { clickerPage } from "./clicker.ts";
 import { HTMX_INTEGRITY, HTMX_URL } from "./htmx.ts";
-import { Fleet, type Halves, Queue, ServersPage } from "./servers.tsx";
+import { Fleet, type Halves, Process, Queue, ServersPage } from "./servers.tsx";
 import { SENTRY_DSN } from "../observability/dsn.ts";
 
 const errorMessage = (cause: unknown): string =>
@@ -827,14 +828,16 @@ app.get("/images/:id", async (context) => {
 // The servers page, outside the dashboard's shell: text served whole, not through the renderer.
 // Its two halves are rows: the automation queue the webhook and the worker write
 // (automation_jobs), and the fleet the servers themselves write every thirty seconds
-// (src/qemu-server/heartbeat.ts), both read here as often. `halves` is absent only when the database
-// could not be read, so a 500 page claims neither an empty queue nor an empty fleet.
+// (src/qemu-server/heartbeat.ts). Below them, process_stats is what each announcing process
+// last said of itself. `halves` is absent only when the database could not be read, so a 500
+// page claims neither an empty queue nor an empty fleet.
 const readHalves = async (connectionString: string): Promise<Halves> => {
-  const [queue, servers] = await Promise.all([
+  const [queue, servers, process] = await Promise.all([
     listAutomationQueue(connectionString),
     listServers(connectionString),
+    listProcessStats(connectionString),
   ]);
-  return { queue, servers };
+  return { queue, servers, process };
 };
 
 const serversPage = (
@@ -874,6 +877,18 @@ app.get("/servers/queue", async (context) => {
   } catch (error) {
     Sentry.captureException(error);
     console.error("dashboard: listing the automation queue:", errorMessage(error));
+    return context.html(<p>error: internal error</p>, 500);
+  }
+});
+
+// What the process table's poll swaps in.
+app.get("/servers/process", async (context) => {
+  try {
+    const rows = await listProcessStats(context.env.HYPERDRIVE.connectionString);
+    return context.html(<Process rows={rows} />);
+  } catch (error) {
+    Sentry.captureException(error);
+    console.error("dashboard: listing process stats:", errorMessage(error));
     return context.html(<p>error: internal error</p>, 500);
   }
 });

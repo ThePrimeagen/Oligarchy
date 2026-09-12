@@ -149,7 +149,13 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
         );
     });
 
-    return { reserve, run, abort };
+    return {
+      reserve,
+      run,
+      abort,
+      // How many runs this process currently holds against --max-jobs: reserved plus running.
+      jobs: Effect.map(Ref.get(slots), (held) => held.count),
+    };
   });
 
 export class Sessions extends Context.Service<Sessions>()("@oligarchy/automation-client/Sessions", {

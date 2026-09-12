@@ -473,6 +473,15 @@ describe("qemu server serving", () => {
       return rows[0];
     }).pipe(Effect.provide(Postgres.DatabaseLive(dbUrl)));
 
+  const announcedProcess = (url: string) =>
+    Effect.gen(function* () {
+      const database = yield* Client.Database;
+      const rows = yield* database.run("announcedProcess", (db) =>
+        db.select().from(DbSchema.processStats).where(eq(DbSchema.processStats.url, url)),
+      );
+      return rows[0];
+    }).pipe(Effect.provide(Postgres.DatabaseLive(dbUrl)));
+
   it.live.skipIf(!hasQemu || dbUrl === "")(
     "--url names the url on the listen line, writes the server's row as its first heartbeat, and deletes it on SIGTERM",
     () =>
@@ -487,19 +496,21 @@ describe("qemu server serving", () => {
           "--port",
           String(port),
         ]);
-        const row = yield* Effect.gen(function* () {
+        const { row, process } = yield* Effect.gen(function* () {
           yield* Effect.promise(() => server.waitFor(/qemu server listening/));
           expect(lines(server.stdout())).toContain(
             `[global] server: qemu server listening on 127.0.0.1:${String(port)}; display none; automation; max jobs 1; announcing ${url}`,
           );
           // The first heartbeat is written right after the listen line; the insert takes a moment.
-          return yield* announced(url).pipe(
+          // process_stats is the second write, so waiting for it means the servers row is there.
+          const process = yield* announcedProcess(url).pipe(
             Effect.repeat({
               until: (found) => found !== undefined,
               schedule: Schedule.spaced("200 millis"),
             }),
-            Effect.timeoutOrElse({ duration: "10 seconds", orElse: () => announced(url) }),
+            Effect.timeoutOrElse({ duration: "10 seconds", orElse: () => announcedProcess(url) }),
           );
+          return { row: yield* announced(url), process };
         }).pipe(
           // A failed expectation must not leave the process listening past the test.
           Effect.ensuring(
@@ -510,11 +521,17 @@ describe("qemu server serving", () => {
         );
         expect(row).toMatchObject({ url, type: "qemu", generation: 1, stats: { qemus: 0 } });
         expect(row?.heartbeatAt).toBeInstanceOf(Date);
+        expect(process).toMatchObject({ url, type: "qemu", jobs: 0, cpuPercent: 0 });
+        expect(process?.memoryBytes).toBeGreaterThan(0);
+        expect(process?.reportedAt).toBeInstanceOf(Date);
         const { code } = yield* Effect.promise(() => server.exited);
         expect(code, server.stdout()).toBe(0);
         expect(server.stdout()).not.toContain("heartbeat failed");
+        expect(server.stdout()).not.toContain("process stats failed");
         expect(server.stdout()).not.toContain("unannounce failed");
+        expect(server.stdout()).not.toContain("unannounce process stats failed");
         expect(yield* announced(url)).toBeUndefined();
+        expect(yield* announcedProcess(url)).toBeUndefined();
       }),
     120_000,
   );

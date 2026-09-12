@@ -5,6 +5,7 @@ import {
   actions,
   automationJobs,
   images,
+  processStats,
   servers,
   sessions,
   testBasePrompts,
@@ -56,6 +57,19 @@ export type AutomationQueue = {
   readonly running: ReadonlyArray<AutomationJob>;
   readonly pending: ReadonlyArray<AutomationJob>;
   readonly completed: ReadonlyArray<AutomationJob>;
+};
+
+// One process's word on itself: current jobs, current VmRSS, cpu over the last thirty seconds,
+// and the database's clock at the read so the page measures the report's age against the clock
+// that stamped it.
+export type ProcessStat = {
+  readonly url: string;
+  readonly type: (typeof processStats.$inferSelect)["type"];
+  readonly jobs: number;
+  readonly memoryBytes: number;
+  readonly cpuPercent: number;
+  readonly reportedAt: Date;
+  readonly queriedAt: Date;
 };
 
 // One name's wordings, oldest first: versions[i] is version i + 1, and the last is the newest.
@@ -529,6 +543,26 @@ export function abortAutomationJob(connectionString: string, ticket: string): Pr
       .returning({ id: automationJobs.id });
     return rows.length > 0;
   });
+}
+
+// Every announcing process, qemu and automation-client together, by kind then url. The clock
+// in the select is the one a report's age is read against, and it keeps a poll out of
+// Hyperdrive's query cache.
+export function listProcessStats(connectionString: string): Promise<ProcessStat[]> {
+  return withDatabase(connectionString, (db) =>
+    db
+      .select({
+        url: processStats.url,
+        type: processStats.type,
+        jobs: processStats.jobs,
+        memoryBytes: processStats.memoryBytes,
+        cpuPercent: processStats.cpuPercent,
+        reportedAt: processStats.reportedAt,
+        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(processStats.reportedAt),
+      })
+      .from(processStats)
+      .orderBy(processStats.type, processStats.url),
+  );
 }
 
 // Registering a url twice is one row; the server fills the rest in when it announces itself. The

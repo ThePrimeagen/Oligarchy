@@ -3,7 +3,9 @@ import {
   bigint,
   check,
   customType,
+  doublePrecision,
   index,
+  integer,
   jsonb,
   pgEnum,
   pgTable,
@@ -215,6 +217,27 @@ export const servers = pgTable("servers", {
   generation: bigint("generation", { mode: "number" }).notNull().default(0),
   heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// What a qemu server or automation-client last said of this process: current jobs, current
+// VmRSS, and the cpu busy over the last thirty seconds. One row per announcing url, rewritten
+// on each heartbeat. The servers row is written first; a shutdown deletes this row, and
+// deleting the servers row cascades so an operator's delete does not leave a stale reading.
+export type ProcessStats = {
+  readonly jobs: number;
+  readonly memoryBytes: number;
+  readonly cpuPercent: number;
+};
+
+export const processStats = pgTable("process_stats", {
+  url: text("url")
+    .primaryKey()
+    .references(() => servers.url, { onDelete: "cascade" }),
+  type: serverType("type").notNull(),
+  jobs: integer("jobs").notNull(),
+  memoryBytes: bigint("memory_bytes", { mode: "number" }).notNull(),
+  cpuPercent: doublePrecision("cpu_percent").notNull(),
+  reportedAt: timestamp("reported_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 // Which server started a session, so every later request for it finds the machine. The row

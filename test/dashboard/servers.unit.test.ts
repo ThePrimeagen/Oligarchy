@@ -1,7 +1,12 @@
 import { html } from "hono/html";
 import { describe, expect, it } from "vitest";
-import type { AutomationJob, AutomationQueue, Server } from "../../src/dashboard/query.ts";
-import { Fleet, Queue, ServersPage } from "../../src/dashboard/servers.tsx";
+import type {
+  AutomationJob,
+  AutomationQueue,
+  ProcessStat,
+  Server,
+} from "../../src/dashboard/query.ts";
+import { Fleet, Process, Queue, ServersPage } from "../../src/dashboard/servers.tsx";
 
 const QUERIED_AT = new Date("2026-09-09T16:00:00Z");
 
@@ -77,6 +82,29 @@ const failed: AutomationJob = {
 
 const QUEUE: AutomationQueue = { running: [running], pending: [pending], completed: [failed] };
 const EMPTY_QUEUE: AutomationQueue = { running: [], pending: [], completed: [] };
+
+const processAlive: ProcessStat = {
+  url: "http://127.0.0.1:55332",
+  type: "qemu",
+  jobs: 2,
+  memoryBytes: 512_000_000,
+  cpuPercent: 37.5,
+  reportedAt: ago(12),
+  queriedAt: QUERIED_AT,
+};
+
+const processSilent: ProcessStat = {
+  url: "http://automation.test:54322",
+  type: "automation-client",
+  jobs: 1,
+  memoryBytes: 256_000_000,
+  cpuPercent: 8,
+  reportedAt: ago(5 * 60 + 12),
+  queriedAt: QUERIED_AT,
+};
+
+const PROCESS_COLUMNS =
+  "<tr><th>url</th><th>type</th><th>jobs</th><th>memory</th><th>cpu 30s</th><th>reported</th></tr>";
 
 const JOB_COLUMNS =
   "<tr><th>ticket</th><th>test</th><th>action</th><th>status</th><th>queued</th><th>started</th><th>finished</th><th>reason</th><th></th></tr>";
@@ -262,10 +290,46 @@ describe("Queue unhappy path", () => {
   });
 });
 
+describe("Process happy path", () => {
+  it("lists a process heard from just now with its jobs, memory, 30s cpu and the age of its report", async () => {
+    const page = await render(Process({ rows: [processAlive] }));
+    expect(page).toContain(PROCESS_COLUMNS);
+    expect(page).toContain(
+      "<tr><td>http://127.0.0.1:55332</td><td>qemu</td><td>2</td><td>512.0 MB</td><td>37.5%</td><td>12 s ago</td></tr>",
+    );
+  });
+
+  it("says no process stats for an empty list, with no table", async () => {
+    const page = await render(Process({ rows: [] }));
+    expect(page).toBe("<p>no process stats</p>");
+  });
+});
+
+describe("Process unhappy path", () => {
+  it("collapses a silent process's readings into one word", async () => {
+    const page = await render(Process({ rows: [processSilent] }));
+    expect(page).toContain(
+      '<tr><td>http://automation.test:54322</td><td>automation-client</td><td colspan="3"><strong>silent</strong></td><td>5 min ago</td></tr>',
+    );
+    expect(page).not.toContain("256.0 MB");
+  });
+
+  it("escapes a url", async () => {
+    const page = await render(
+      Process({ rows: [{ ...processAlive, url: 'http://x.test/<">' }] }),
+    );
+    expect(page).toContain("<td>http://x.test/&lt;&quot;&gt;</td>");
+    expect(page).not.toContain('http://x.test/<">');
+  });
+});
+
 describe("ServersPage happy path", () => {
   it("is split in two halves side by side: the automation queue first, the qemu fleet with its add box second, each polled every thirty seconds", async () => {
     const page = await render(
-      ServersPage({ halves: { queue: QUEUE, servers: [alive, neverHeardFrom] }, error: undefined }),
+      ServersPage({
+        halves: { queue: QUEUE, servers: [alive, neverHeardFrom], process: [processAlive] },
+        error: undefined,
+      }),
     );
     expect(page).toContain("<title>oligarchy servers</title>");
     expect(page).toContain('<script src="https://cdn.jsdelivr.net/npm/htmx.org@4.0.0"');
@@ -289,6 +353,11 @@ describe("ServersPage happy path", () => {
     expect(page.indexOf("<h2>qemu servers</h2>")).toBeLessThan(
       page.indexOf("<h2>add a server</h2>"),
     );
+    expect(page).toContain(
+      '<section><h2>process</h2><div id="process" hx-get="/servers/process" hx-trigger="every 30s"><table>',
+    );
+    expect(page).toContain("<td>37.5%</td>");
+    expect(page.indexOf("<h2>add a server</h2>")).toBeLessThan(page.indexOf("<h2>process</h2>"));
     expect(page).not.toContain("<h2>servers</h2>");
     expect(page).not.toContain("error:");
   });
@@ -298,7 +367,7 @@ describe("ServersPage unhappy path", () => {
   it("puts a refusal's reason on top and keeps both halves, so the operator can act where they are", async () => {
     const page = await render(
       ServersPage({
-        halves: { queue: QUEUE, servers: [alive] },
+        halves: { queue: QUEUE, servers: [alive], process: [] },
         error: "url must be an http or https url",
       }),
     );
@@ -314,15 +383,18 @@ describe("ServersPage unhappy path", () => {
     expect(page).not.toContain("<p>none</p>");
     expect(page).not.toContain('id="fleet"');
     expect(page).not.toContain("no servers registered");
+    expect(page).not.toContain('id="process"');
+    expect(page).not.toContain("no process stats");
     expect(page).toContain("<h2>automation</h2>");
     expect(page).toContain("<h2>qemu servers</h2>");
     expect(page).toContain("<h2>add a server</h2>");
+    expect(page).toContain("<h2>process</h2>");
   });
 
   it("escapes the reason", async () => {
     const page = await render(
       ServersPage({
-        halves: { queue: EMPTY_QUEUE, servers: [] },
+        halves: { queue: EMPTY_QUEUE, servers: [], process: [] },
         error: "<script>alert(1)</script>",
       }),
     );

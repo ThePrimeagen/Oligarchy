@@ -5,6 +5,7 @@ import * as DebugLogs from "../../src/db/debug-logs.ts";
 import * as Diagnosis from "../../src/db/diagnosis.ts";
 import * as Logs from "../../src/db/logs.ts";
 import * as DbSchema from "../../src/db/schema.ts";
+import * as Process from "../../src/db/process-stats.ts";
 import * as Servers from "../../src/db/servers.ts";
 import * as Sessions from "../../src/db/sessions.ts";
 import * as Tests from "../../src/db/tests.ts";
@@ -771,6 +772,46 @@ export const fakeServerStore = (
   };
 };
 
+// ---------------------------------------------------------------------------
+// ProcessStatsStore
+// ---------------------------------------------------------------------------
+
+type ProcessReport = {
+  readonly url: string;
+  readonly type: Servers.ServerType;
+  readonly stats: Process.ProcessStats;
+};
+
+export type FakeProcessStatsStore = {
+  readonly reports: Array<ProcessReport>;
+  readonly removed: Array<string>;
+  readonly layer: Layer.Layer<Process.ProcessStatsStore>;
+};
+
+export const fakeProcessStatsStore = (
+  overrides: Partial<typeof Process.ProcessStatsStore.Service> = {},
+): FakeProcessStatsStore => {
+  const reports: Array<ProcessReport> = [];
+  const removed: Array<string> = [];
+  const service = Process.ProcessStatsStore.of({
+    report: (url, type, stats) =>
+      Effect.sync(() => {
+        reports.push({ url, type, stats });
+      }),
+    remove: (url) =>
+      Effect.sync(() => {
+        removed.push(url);
+        return reports.some((row) => row.url === url);
+      }),
+    ...overrides,
+  });
+  return {
+    reports,
+    removed,
+    layer: Layer.succeed(Process.ProcessStatsStore)(service),
+  };
+};
+
 // Every store at once, sharing nothing: the common fixture for handler and command tests.
 export const fakeStores = () => {
   const sessions = fakeSessionStore();
@@ -781,6 +822,7 @@ export const fakeStores = () => {
   const debugLogs = fakeDebugLogStore();
   const diagnosis = fakeDiagnosisStore();
   const servers = fakeServerStore();
+  const process = fakeProcessStatsStore();
   return {
     sessions,
     actions,
@@ -790,6 +832,7 @@ export const fakeStores = () => {
     debugLogs,
     diagnosis,
     servers,
+    process,
     layer: Layer.mergeAll(
       sessions.layer,
       actions.layer,
@@ -799,6 +842,7 @@ export const fakeStores = () => {
       debugLogs.layer,
       diagnosis.layer,
       servers.layer,
+      process.layer,
     ),
   };
 };
