@@ -143,8 +143,7 @@ export class Sessions extends HttpApiGroup.make("Sessions")
 export class QemuServerApi extends HttpApi.make("OligarchyQemuServer").add(Sessions) {}
 
 // The qemu reverse proxy: the qemu server's own endpoints, so the client that speaks to a server speaks to
-// it, minus /stats (a fleet has no one cpu) and, for now, /save (it lands on the qemu server
-// first; routing it is its own step), behind the routing boundary.
+// it, minus /stats (a fleet has no one cpu), behind the routing boundary.
 export class RoutedSessions extends HttpApiGroup.make("Sessions")
   .add(reserve)
   .add(relinquish)
@@ -153,6 +152,7 @@ export class RoutedSessions extends HttpApiGroup.make("Sessions")
   .add(serial)
   .add(follow)
   .add(stop)
+  .add(save)
   .add(sendKeys)
   .add(sendMouse)
   .add(intentStart)

@@ -165,7 +165,7 @@ describe("QemuServerApi", () => {
 describe("QemuReverseProxyApi", () => {
   const reverse = Api.QemuReverseProxyApi;
 
-  it("declares every routed path of QemuServerApi but /stats and /save, plus the three server routes", () => {
+  it("declares every routed path of QemuServerApi but /stats, plus the three server routes", () => {
     const table = routes(reverse).map(({ method, path }) => `${method} ${path}`);
     expect(table.sort()).toEqual(
       [
@@ -176,6 +176,7 @@ describe("QemuReverseProxyApi", () => {
         "GET /serial",
         "GET /follow",
         "POST /stop",
+        "POST /save",
         "POST /send-keys",
         "POST /send-mouse",
         "POST /intent/start",
@@ -186,8 +187,6 @@ describe("QemuReverseProxyApi", () => {
       ].sort(),
     );
     expect(table).not.toContain("GET /stats");
-    // Not routed yet: save lands on the qemu server first, the proxy learns it in its own step.
-    expect(table).not.toContain("POST /save");
   });
 
   it("keeps the routed endpoints' identifiers and inputs so the QemuServerApi client reaches them", () => {
@@ -232,6 +231,8 @@ describe("QemuReverseProxyApi", () => {
     expect(byIdentifier(reverse, "serial").errors).toEqual(ascending([...boundary, 403, 404]));
     expect(byIdentifier(reverse, "follow").errors).toEqual(ascending([...boundary, 404, 409]));
     expect(byIdentifier(reverse, "stop").errors).toEqual(ascending([...boundary, 403, 404]));
+    // save's own 502 is the boundary's 502 too: one status, declared once.
+    expect(byIdentifier(reverse, "save").errors).toEqual(ascending([...boundary, 403, 404]));
     expect(byIdentifier(reverse, "sendKeys").errors).toEqual(ascending([...boundary, 403, 404]));
     expect(byIdentifier(reverse, "sendMouse").errors).toEqual(ascending([...boundary, 403, 404]));
     expect(byIdentifier(reverse, "intentStart").errors).toEqual(ascending([...boundary, 403, 404]));
