@@ -1,7 +1,7 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { NodePath } from "@effect/platform-node";
-import { Effect, Layer } from "effect";
+import { Effect, Fiber, Layer } from "effect";
 import * as Args from "../../src/qemu/args.ts";
 import * as Iso from "../../src/qemu/iso.ts";
 import * as Minted from "../../src/qemu/minted.ts";
@@ -60,6 +60,13 @@ const fixture = (options: Fixture = {}) =>
     return { spawner, fs, log, minted };
   });
 
+// Lets forked saves run through their file calls without advancing the clock.
+const settle = Effect.gen(function* () {
+  for (let i = 0; i < 20; i++) {
+    yield* Effect.yieldNow;
+  }
+});
+
 describe("filesFor", () => {
   it.effect("names the two files beside the iso's own path", () => {
     expect(Minted.filesFor(CACHED)).toEqual({
@@ -113,6 +120,24 @@ describe("save happy path", () => {
     }),
   );
 
+  it.effect("two saves in one process run one after the other, never sharing a partial", () =>
+    Effect.gen(function* () {
+      // Runs until told: the convert of the first save holds the second behind it.
+      const { spawner, minted } = yield* fixture({ qemuImg: {} });
+      const first = yield* Effect.forkChild(minted.save(URL_ISO, FROM, WHO));
+      yield* settle;
+      const second = yield* Effect.forkChild(minted.save(URL_ISO, FROM, WHO));
+      yield* settle;
+      expect(spawner.spawned).toHaveLength(1);
+      yield* spawner.spawned[0]?.exit(0) ?? Effect.void;
+      yield* Fiber.join(first);
+      yield* settle;
+      expect(spawner.spawned).toHaveLength(2);
+      yield* spawner.spawned[1]?.exit(0) ?? Effect.void;
+      yield* Fiber.join(second);
+    }),
+  );
+
   it.effect("overwrites a minted disk already there without looking first", () =>
     Effect.gen(function* () {
       const { fs, minted } = yield* fixture({
@@ -130,7 +155,7 @@ describe("save happy path", () => {
 });
 
 describe("save unhappy path", () => {
-  it.effect("a failing convert removes its partial, leaves the firmware in place and fails", () =>
+  it.effect("a failing convert removes its partial and never renames over the disk in place", () =>
     Effect.gen(function* () {
       const { spawner, fs, minted } = yield* fixture({ qemuImg: { exitCode: 1 } });
       const error = yield* Effect.flip(minted.save(URL_ISO, FROM, WHO));

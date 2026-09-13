@@ -1,4 +1,4 @@
-import { Context, Effect, FileSystem, Layer } from "effect";
+import { Context, Effect, FileSystem, Layer, Semaphore } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import * as Errors from "../shared/errors.ts";
 import * as Iso from "./iso.ts";
@@ -33,6 +33,9 @@ const make: Effect.Effect<
   const host = yield* Iso.Host;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const withSpawner = Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner);
+  // Two sessions of one iso saving at once would write the same partial; one save at a time
+  // keeps each disk whole and beside its own firmware.
+  const oneAtATime = yield* Semaphore.make(1);
 
   // Written beside the target with this process's pid, as the iso cache writes its downloads,
   // then renamed over the target: a file under the minted name is always a whole one.
@@ -48,19 +51,24 @@ const make: Effect.Effect<
   const save = Effect.fn("Minted.save")(function* (iso: string, from: MintedDisk, who: Iso.Who) {
     const target = filesFor(yield* isos.pathOf(iso));
     // Firmware first, disk last: a disk in place always has its firmware beside it.
-    yield* into(target.vars, (partial) => fs.copyFile(from.vars, partial)).pipe(
-      Effect.andThen(
-        into(target.disk, (partial) => withSpawner(Process.convert(from.disk, partial))),
-      ),
-      Effect.mapError((error) =>
-        Errors.SaveFailed.make({
-          message: Process.detail(error),
-          cause: error,
-          sessionId: who.sessionId,
-          agentId: who.agentId,
-        }),
-      ),
-    );
+    yield* oneAtATime
+      .withPermits(1)(
+        into(target.vars, (partial) => fs.copyFile(from.vars, partial)).pipe(
+          Effect.andThen(
+            into(target.disk, (partial) => withSpawner(Process.convert(from.disk, partial))),
+          ),
+        ),
+      )
+      .pipe(
+        Effect.mapError((error) =>
+          Errors.SaveFailed.make({
+            message: Process.detail(error),
+            cause: error,
+            sessionId: who.sessionId,
+            agentId: who.agentId,
+          }),
+        ),
+      );
   });
 
   return { save } satisfies MintedService;
