@@ -4,8 +4,8 @@ A plan, written to be worked on. Check items off as they land. Tests come first 
 no code lands until its failing tests describe it (`development.md`, Tests).
 
 Landed so far: `save` end to end (`POST /save` on the qemu server, routed by the proxy, `./client
-save`) and `qemu-server --data-dir` / `OLIGARCHY_DATA_DIR`. `mode` with `resume`, `/stats`, pins
-and `ctrl mint` follow.
+save`), `qemu-server --data-dir` / `OLIGARCHY_DATA_DIR`, and `./client start --resume` (mode on the
+start only; the reserve is untouched). `/stats`, pins and `ctrl mint` follow.
 
 ## What this is
 
@@ -32,7 +32,7 @@ every later session boot a throwaway copy of that disk in seconds.
 
 - `mode`: what a session boots. `fresh` boots the ISO on a blank disk (today, and the default).
   `resume` boots the machine's minted disk with no ISO attached, and so needs one to exist. There
-  is no third state: any session may `save`.
+  is no third state: any fresh session may `save`; a resumed one cannot (below).
 - minted disk: `<iso>.qcow2` and `<iso>.OVMF_VARS.fd` beside the ISO's path. Present means minted.
 - `save`: the call that ends a session and writes its disk and firmware file into place as the
   minted disk of the ISO it named.
@@ -42,8 +42,9 @@ every later session boot a throwaway copy of that disk in seconds.
 
 - `save` ends the session: QMP `system_powerdown` (skipped when the guest already exited), wait for
   QEMU to exit with a bound of two minutes, then copy the firmware file and `qemu-img convert` the
-  disk, each written as `<target>.partial-<pid>` and renamed over whatever is there, firmware first
-  and disk last so the disk's presence means both are in place. Row closed `succeeded` with
+  disk, both staged as `<target>.partial-<pid>` and only then renamed over whatever is there,
+  firmware first and disk last, so the disk's presence means both are in place and a failed convert
+  replaces nothing. Row closed `succeeded` with
   `saved; minted <iso>`. A clean shutdown makes a clean image; a copy taken from a running guest is
   only crash-consistent.
 - Overwrite, never refuse. A guest still running on the old disk holds the old file open and keeps
@@ -52,9 +53,10 @@ every later session boot a throwaway copy of that disk in seconds.
   `resume`, and an optional `server` pin; the start repeats `mode` and must match the reservation.
   The proxy honors a pin exactly and never falls back to another server. An unpinned `resume` is
   placed only on a server whose stats list the ISO as minted; `fresh` is ranked as today.
-- `save` asks nothing of the mode. A `fresh` session saves the install it just did; a `resume`
-  session saves the resumed state, since `qemu-img convert` flattens the overlay into a standalone
-  disk, which then replaces the minted one. The mint definition is therefore an ordinary `fresh`
+- `save` is for fresh sessions. A resumed session's disk is an overlay naming the minted disk by
+  path; another save can replace that file under it, and flattening the overlay would then keep
+  the wrong machine. So a resumed session's `save` is 400 `a resumed session cannot save; its disk
+  is a view of the minted one` and the session runs on. The mint definition is an ordinary `fresh`
   definition whose instruction ends with `./client save`.
 - `/stats` lists what is minted as ISO cache names (`Domain.isoCacheName(iso)`), read from the cache
   directory: every `<name>.qcow2` with its `<name>.OVMF_VARS.fd` beside it. The proxy and `ctrl`
@@ -85,6 +87,7 @@ every later session boot a throwaway copy of that disk in seconds.
 | qemu server `/reserve` | `resume` without `iso` | 400 `mode "resume" needs an iso` |
 | qemu server `/reserve`, `/start` | `resume`, not minted here | 400 `no minted disk for <iso> on this machine` |
 | qemu server `/start` | mode or iso differs from the reservation | 400, reservation stands |
+| qemu server `/save` | session was started with `--resume` | 400 `a resumed session cannot save; its disk is a view of the minted one`, session runs on |
 | qemu server `/save` | guest did not power off, copy or convert failed | 502 `SaveFailed`, row `failed`, debug log |
 | qemu server `/save` | racing the sweep | 404 `UnknownSession` |
 | proxy `/reserve` | pinned url not registered | 404 `no server <url>` |
@@ -99,7 +102,7 @@ job with the message.
 
 `test/shared/domain.unit.test.ts`
 
-- [ ] `SessionMode` accepts `fresh|resume`, refuses anything else; `SessionConfig` round-trips
+- [x] `SessionMode` accepts `fresh|resume`, refuses anything else; `SessionConfig` round-trips
       `mode`; a `save` follow action and a `system_powerdown` QMP command encode and decode.
 - [ ] `isoCacheName` maps a url and a path as the ISO cache names its files (moved from `iso.ts`,
       test moves with it).
@@ -111,12 +114,12 @@ job with the message.
 
 `test/qemu/args.unit.test.ts`
 
-- [ ] with a cdrom the args carry `-cdrom <iso> -boot order=d` as today; without one neither flag
+- [x] with a cdrom the args carry `-cdrom <iso> -boot order=d` as today; without one neither flag
       appears and the rest is identical.
 
 `test/qemu/process.unit.test.ts`
 
-- [ ] `createOverlay` spawns `qemu-img create -f qcow2 -b <backing> -F qcow2 <path>`; a non-zero
+- [x] `createOverlay` spawns `qemu-img create -f qcow2 -b <backing> -F qcow2 <path>`; a non-zero
       exit is `QemuStartError` naming the code.
 - [x] `convert` spawns `qemu-img convert -O qcow2 <from> <to>`; a non-zero exit fails with the code.
 
@@ -127,14 +130,14 @@ job with the message.
 
 `test/qemu/qemu.unit.test.ts`
 
-- [ ] `prepare` with a `minted` source creates the overlay and copies the minted firmware file, not
+- [x] `prepare` with a `minted` source creates the overlay and copies the minted firmware file, not
       the pristine one; a failing `qemu-img` fails `QemuStartError` and the dir finalizer still runs.
 - [ ] `start` without a cdrom boots; the handle exposes `diskPath`, `varsPath`, `powerdown` (a
       recorded `system_powerdown` exchange) and `exited`.
 
 `test/qemu/minted.unit.test.ts` (new)
 
-- [ ] `find` answers the two paths when both files exist beside the ISO's path; none when either is
+- [x] `find` answers the two paths when both files exist beside the ISO's path; none when either is
       missing.
 - [ ] `list` names every `<name>.qcow2` in the cache directory with its firmware file beside it,
       ignores `.partial-*` files and a `.qcow2` without its firmware file, and answers `[]` for a
@@ -149,7 +152,7 @@ job with the message.
 - [ ] reserve: `resume` holds mode and ISO on the reservation; `resume` when not minted here is
       `BadRequest` `no minted disk for <iso> on this machine` and the slot is given back; `resume`
       without an ISO is `BadRequest`; `fresh` is unchanged.
-- [ ] start: mode or ISO differing from the reservation is `BadRequest` and the reservation stands;
+- [x] start: mode or ISO differing from the reservation is `BadRequest` and the reservation stands;
       `resume` never calls `getIso`, prepares from the minted files, inserts the row `running` with
       `mode: resume` in its config; `fresh` inserts `mode: fresh`.
 - [x] save: the happy path records the powerdown action, awaits exit, saves, closes the row
@@ -157,8 +160,7 @@ job with the message.
       exited is saved without a powerdown exchange; a guest that never powers off within the bound
       is killed, row `failed`, debug log saved, `SaveFailed`; a failing convert ends the row
       `failed`; racing the sweep is `UnknownSession`.
-- [ ] save on a `resume` session: the overlay is converted (flattened) and replaces the minted disk;
-      the same path as `fresh`, pinned once.
+- [x] save on a `resume` session is `BadRequest` and the session runs on.
 - [ ] stats: `minted` lists the cache names; `host` is the host name.
 
 `test/qemu-server/http.unit.test.ts`, `test/qemu-server/heartbeat.unit.test.ts`

@@ -610,6 +610,61 @@ describe("start resume", () => {
     }),
   );
 
+  it.effect("a resumed session cannot save: its disk is a view of the minted one", () =>
+    Effect.gen(function* () {
+      const h = harness({ minted: { find: () => Option.some(MINTED) } });
+      yield* h.run(
+        Effect.gen(function* () {
+          const sessions = yield* Sessions.Sessions;
+          yield* sessions.reserve(AGENT);
+          const id = yield* sessions.start(resume(), "none", false);
+          const live = yield* sessions.lookup(id, AGENT);
+          const error = yield* Effect.flip(sessions.save(live));
+          expect(error).toMatchObject({
+            _tag: "BadRequest",
+            message: "a resumed session cannot save; its disk is a view of the minted one",
+            sessionId: id,
+            agentId: AGENT,
+          });
+          // Refused before anything happened: the machine runs on, and stop still works.
+          expect(h.qemu.calls.map((call) => call._tag)).toEqual(["prepare", "start"]);
+          expect(h.minted.saves).toEqual([]);
+          expect(yield* qemus(sessions)).toBe(1);
+          yield* sessions.stop(live, "succeeded", "done");
+          expect(h.sessions.sessions[0]).toMatchObject({ id, status: "succeeded" });
+        }),
+      );
+    }),
+  );
+
+  it.effect(
+    "a reservation the sweep takes while the minted disk is looked up is no reservation",
+    () =>
+      Effect.gen(function* () {
+        const gate = yield* Deferred.make<void>();
+        const h = harness({
+          minted: { find: () => Effect.as(Deferred.await(gate), Option.some(MINTED)) },
+        });
+        yield* h.run(
+          Effect.gen(function* () {
+            const sessions = yield* Sessions.Sessions;
+            yield* sessions.reserve(AGENT);
+            const starting = yield* Effect.forkChild(
+              Effect.flip(sessions.start(resume(), "none", false)),
+            );
+            // Ten unused minutes: the sweep gives the reservation back under the lookup.
+            yield* TestClock.adjust("10 minutes");
+            expect(yield* sessions.jobs).toBe(0);
+            yield* Deferred.succeed(gate, undefined);
+            const error = yield* Fiber.join(starting);
+            expect(error).toMatchObject({ _tag: "BadRequest", message: "no reservation" });
+            expect(h.sessions.sessions).toEqual([]);
+            expect(h.qemu.calls).toEqual([]);
+          }),
+        );
+      }),
+  );
+
   it.effect("a minted overlay that fails to prepare ends the row failed as any boot failure", () =>
     Effect.gen(function* () {
       const h = harness({

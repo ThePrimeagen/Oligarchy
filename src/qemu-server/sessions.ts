@@ -69,8 +69,10 @@ type Image = { readonly id: string; readonly png: string };
 export type LiveSession = {
   readonly id: string;
   readonly agent: string;
-  // The iso as the start named it: a save keeps the disk beside it.
+  // The iso as the start named it: a save keeps the disk beside it. A resumed session's disk is
+  // an overlay on the minted one and is never kept.
   readonly iso: string;
+  readonly mode: Domain.SessionMode;
   readonly qemu: Qemu.QemuHandle;
   readonly span: Tracer.Span;
   readonly scope: Scope.Closeable;
@@ -135,10 +137,15 @@ export type SessionsService = {
   ) => Effect.Effect<void, Errors.Internal | Errors.UnknownSession>;
   // Ends the session keeping its disk as the machine's minted disk for its iso: the guest is
   // powered down, its disk and firmware copy are kept, the row closes succeeded. A guest that
-  // will not power off, or a disk that cannot be kept, ends the session failed instead.
+  // will not power off, or a disk that cannot be kept, ends the session failed instead. A
+  // resumed session is refused BadRequest and runs on: its disk is an overlay whose base another
+  // save may replace, so flattening it could keep the wrong machine.
   readonly save: (
     live: LiveSession,
-  ) => Effect.Effect<void, Errors.SaveFailed | Errors.Internal | Errors.UnknownSession>;
+  ) => Effect.Effect<
+    void,
+    Errors.BadRequest | Errors.SaveFailed | Errors.Internal | Errors.UnknownSession
+  >;
   readonly follow: (
     id: string,
   ) => Effect.Effect<
@@ -572,6 +579,7 @@ const make = (maxJobs: number) =>
         id,
         agent,
         iso: body.iso,
+        mode,
         span: yield* Sentry.sessionSpan(id, agent),
         scope: yield* Scope.make(),
         lastCommandAt: yield* Ref.make(started),
@@ -948,6 +956,12 @@ const make = (maxJobs: number) =>
       });
 
     const save = Effect.fn("Sessions.save")(function* (live: LiveSession) {
+      if (live.mode === "resume") {
+        return yield* badRequest(
+          "a resumed session cannot save; its disk is a view of the minted one",
+          live,
+        );
+      }
       // Whoever removes the id owns its one verdict, as in stop.
       const owned = yield* Ref.modify(sessions, (map) =>
         map.has(live.id) ? [true, mapWithout(map, [live.id])] : [false, map],

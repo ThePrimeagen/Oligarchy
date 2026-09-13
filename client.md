@@ -78,7 +78,7 @@ for `--agent-id`. Without one the host answers 400 `no reservation` and the comm
 fails. `./client start` does not reserve. A reservation nobody starts within ten
 minutes is given back, and a start after that is refused the same way.
 
-- `--iso <path|url>` — the ISO. A local path must exist; an http(s) URL is downloaded and cached by the server. Default `omarchy.iso` in the current directory.
+- `--iso <path|url>` — the ISO. A local path must exist unless `--resume` is given; an http(s) URL is downloaded and cached by the server. Default `omarchy.iso` in the current directory.
 - `--disk <path>` — an existing qcow2 disk. Omit it and the server creates a fresh one.
 - `--resume` — boot the machine's minted disk of this ISO, the one a `save` kept, instead of the ISO: the installed system comes up in seconds and you log in. Nothing is downloaded and no ISO is attached, so a local `--iso` need not exist. Without a minted disk on that machine the host answers 400 `no minted disk for <iso> on this machine` and your reservation stands: `start` again without `--resume`, or ask to be placed elsewhere. Cannot be combined with `--disk`.
 
@@ -206,7 +206,7 @@ Ends the session keeping its disk: the guest is powered off, its disk and firmwa
 
 - `--session-id <id>` — the session.
 
-A guest that does not power off within two minutes, or a disk that cannot be kept, fails with the reason as the headline and exits 1; the session is then over, ended `failed`, and nothing was kept.
+A guest that does not power off within two minutes, or a disk that cannot be kept, fails with the reason as the headline and exits 1; the session is then over, ended `failed`, and nothing was kept. A session started with `--resume` cannot save (400 `a resumed session cannot save; its disk is a view of the minted one`); it keeps running, and `stop` ends it as usual.
 
 ```bash
 ./client save --agent-id OLI-42 --server-url https://qemu.example.com --session-id 6f1c...e2a9

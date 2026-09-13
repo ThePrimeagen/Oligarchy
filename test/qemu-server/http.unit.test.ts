@@ -934,6 +934,35 @@ describe("Sessions failures", () => {
     }),
   );
 
+  it.effect("POST /save on a resumed session is 400 with the refusal, and skips Sentry", () =>
+    Effect.gen(function* () {
+      const message = "a resumed session cannot save; its disk is a view of the minted one";
+      const fixed = fixture({
+        sessions: FakeSessions.fakeSessions({
+          save: (live) =>
+            Effect.fail(
+              Errors.BadRequest.make({ message, sessionId: live.id, agentId: live.agent }),
+            ),
+        }),
+      });
+      yield* Effect.gen(function* () {
+        const api = yield* client;
+        const error = yield* Effect.flip(api.Sessions.save({ payload: saveBody }));
+        expect(error).toMatchObject({ _tag: "BadRequest", message });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.log.lines).toEqual([
+        {
+          level: "error",
+          text: `POST /save failed: ${message}`,
+          location: SESSION_ID,
+          agentId: AGENT_ID,
+          skipSentry: true,
+          cause: undefined,
+        },
+      ]);
+    }),
+  );
+
   it.effect("POST /save for another agent's session is 403 and reaches Sessions.save never", () =>
     Effect.gen(function* () {
       const fixed = fixture();

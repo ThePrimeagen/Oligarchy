@@ -12,8 +12,11 @@ export type Save = {
 export type Script = {
   // Scripts the save's failure; a save that is not scripted succeeds.
   readonly save?: (save: Save) => Effect.Effect<void, Errors.SaveFailed>;
-  // What this machine holds for an iso; nothing is minted unless scripted.
-  readonly find?: (iso: string) => Option.Option<Minted.MintedDisk>;
+  // What this machine holds for an iso; nothing is minted unless scripted. An Effect lets a test
+  // hold the lookup open.
+  readonly find?: (
+    iso: string,
+  ) => Option.Option<Minted.MintedDisk> | Effect.Effect<Option.Option<Minted.MintedDisk>>;
 };
 
 export type FakeMinted = {
@@ -28,9 +31,10 @@ export const fakeMinted = (script: Script = {}): FakeMinted => {
   const finds: Array<string> = [];
   const service = Minted.Minted.of({
     find: (iso) =>
-      Effect.sync(() => {
+      Effect.suspend(() => {
         finds.push(iso);
-        return script.find?.(iso) ?? Option.none();
+        const found = script.find?.(iso) ?? Option.none();
+        return Effect.isEffect(found) ? found : Effect.succeed(found);
       }),
     save: (iso, from, who) =>
       Effect.suspend(() => {

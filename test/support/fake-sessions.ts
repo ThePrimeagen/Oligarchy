@@ -63,6 +63,7 @@ const liveSession = (id: string, agent: string): Effect.Effect<Sessions.LiveSess
       id,
       agent,
       iso: "omarchy.iso",
+      mode: "fresh",
       qemu: {
         id,
         dir,

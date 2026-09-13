@@ -119,11 +119,17 @@ describe("find", () => {
 
 describe("save happy path", () => {
   it.effect(
-    "copies the firmware, then converts the disk, each as a partial renamed into place",
+    "stages the firmware copy and the converted disk as partials, then publishes both, firmware first",
     () =>
       Effect.gen(function* () {
-        const { spawner, fs, minted } = yield* fixture();
-        yield* minted.save(URL_ISO, FROM, WHO);
+        // The convert runs until told: while it runs, only the copy has happened, no rename.
+        const { spawner, fs, minted } = yield* fixture({ qemuImg: {} });
+        const saving = yield* Effect.forkChild(minted.save(URL_ISO, FROM, WHO));
+        yield* settle;
+        expect(fs.calls.map((call) => call.method)).toEqual(["copyFile"]);
+        expect(spawner.spawned).toHaveLength(1);
+        yield* spawner.spawned[0]?.exit(0) ?? Effect.void;
+        yield* Fiber.join(saving);
         expect(fs.calls).toEqual([
           {
             method: "copyFile",
@@ -191,21 +197,33 @@ describe("save happy path", () => {
 });
 
 describe("save unhappy path", () => {
-  it.effect("a failing convert removes its partial and never renames over the disk in place", () =>
-    Effect.gen(function* () {
-      const { spawner, fs, minted } = yield* fixture({ qemuImg: { exitCode: 1 } });
-      const error = yield* Effect.flip(minted.save(URL_ISO, FROM, WHO));
-      expect(error).toMatchObject({
-        _tag: "SaveFailed",
-        message: "qemu-img convert exited 1",
-        sessionId: WHO.sessionId,
-        agentId: WHO.agentId,
-      });
-      expect(spawner.spawned).toHaveLength(1);
-      expect(fs.calls.slice(2)).toEqual([
-        { method: "remove", args: [`${CACHED}.qcow2.partial-${String(PID)}`, { force: true }] },
-      ]);
-    }),
+  it.effect(
+    "a failing convert removes both partials and renames nothing: the pair in place is untouched",
+    () =>
+      Effect.gen(function* () {
+        const { spawner, fs, minted } = yield* fixture({
+          qemuImg: { exitCode: 1 },
+          entries: {
+            [FROM.disk]: "File",
+            [FROM.vars]: "File",
+            [`${CACHED}.qcow2`]: "File",
+            [`${CACHED}.OVMF_VARS.fd`]: "File",
+          },
+        });
+        const error = yield* Effect.flip(minted.save(URL_ISO, FROM, WHO));
+        expect(error).toMatchObject({
+          _tag: "SaveFailed",
+          message: "qemu-img convert exited 1",
+          sessionId: WHO.sessionId,
+          agentId: WHO.agentId,
+        });
+        expect(spawner.spawned).toHaveLength(1);
+        expect(fs.calls.map((call) => call.method)).toEqual(["copyFile", "remove", "remove"]);
+        expect(fs.calls.slice(1).map((call) => call.args[0])).toEqual([
+          `${CACHED}.qcow2.partial-${String(PID)}`,
+          `${CACHED}.OVMF_VARS.fd.partial-${String(PID)}`,
+        ]);
+      }),
   );
 
   it.effect("a firmware copy that fails stops before the convert and removes its partial", () =>
@@ -228,7 +246,7 @@ describe("save unhappy path", () => {
   );
 
   it.effect(
-    "a rename the file system refuses fails with Node's message and removes the partial",
+    "a rename the file system refuses fails with Node's message and removes the partials",
     () =>
       Effect.gen(function* () {
         const { fs, minted } = yield* fixture({ renameFails: [`${CACHED}.qcow2`] });
@@ -241,6 +259,13 @@ describe("save unhappy path", () => {
           method: "remove",
           args: [`${CACHED}.qcow2.partial-${String(PID)}`, { force: true }],
         });
+        // The firmware was published first: a refused disk rename leaves it in place.
+        const firmware = yield* fixture({ renameFails: [`${CACHED}.OVMF_VARS.fd`] });
+        yield* Effect.flip(firmware.minted.save(URL_ISO, FROM, WHO));
+        expect(firmware.fs.calls.slice(-2).map((call) => call.args[0])).toEqual([
+          `${CACHED}.OVMF_VARS.fd.partial-${String(PID)}`,
+          `${CACHED}.qcow2.partial-${String(PID)}`,
+        ]);
       }),
   );
 });
