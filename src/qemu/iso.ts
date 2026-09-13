@@ -80,6 +80,9 @@ export type IsoService = {
   // A local path resolved absolute, or a url downloaded once into the cache; either way the
   // path QEMU boots from.
   readonly getIso: (name: string, who: Who) => Effect.Effect<string, Errors.IsoError>;
+  // That same path, downloaded or not: where the iso lives on this machine, and so where what
+  // belongs beside it (its minted disk) lives too.
+  readonly pathOf: (name: string) => Effect.Effect<string>;
 };
 
 const make: Effect.Effect<
@@ -252,9 +255,14 @@ const make: Effect.Effect<
       return target;
     });
 
+  const pathOf = (name: string): Effect.Effect<string> =>
+    Effect.succeed(
+      Domain.isIsoUrl(name) ? path.join(isoDir, cacheFileName(name)) : path.resolve(name),
+    );
+
   const getIso = Effect.fn("Iso.getIso")(function* (name: string, who: Who) {
     if (!Domain.isIsoUrl(name)) {
-      const resolved = path.resolve(name);
+      const resolved = yield* pathOf(name);
       const info = yield* fs
         .stat(resolved)
         .pipe(
@@ -286,7 +294,7 @@ const make: Effect.Effect<
     );
   });
 
-  return { getIso } satisfies IsoService;
+  return { getIso, pathOf } satisfies IsoService;
 });
 
 export class Iso extends Context.Service<Iso>()("@oligarchy/qemu/Iso", { make }) {

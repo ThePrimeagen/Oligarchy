@@ -12,6 +12,8 @@ export const FORCE_KILL_AFTER = "5 seconds";
 export type QemuProcess = {
   // The exit code, or null for a signal death; resolves only once stderr is drained.
   readonly exited: Effect.Effect<number | null>;
+  // False once `exited` has its answer.
+  readonly running: Effect.Effect<boolean>;
   readonly exitedBeforeConnect: Effect.Effect<never, Errors.QemuStartError>;
   // `message`, then `: <stderr tail>` when QEMU wrote one.
   readonly withStderr: (message: string) => Effect.Effect<string>;
@@ -80,27 +82,38 @@ export const spawn = Effect.fn("Process.spawn")(function* (
   const withStderr = (message: string): Effect.Effect<string> =>
     Effect.map(stderrTail, (stderr) => (stderr === "" ? message : `${message}: ${stderr.trim()}`));
   const exited = Deferred.await(exit);
+  const running = Effect.map(Deferred.isDone(exit), (done) => !done);
   const exitedBeforeConnect: Effect.Effect<never, Errors.QemuStartError> = Effect.gen(function* () {
     const code = yield* exited;
     const message = yield* withStderr(`qemu: exited ${String(code)} before QMP connect`);
     return yield* Errors.QemuStartError.make({ message });
   });
-  return { exited, exitedBeforeConnect, withStderr, stderrTail } satisfies QemuProcess;
+  return { exited, running, exitedBeforeConnect, withStderr, stderrTail } satisfies QemuProcess;
 });
 
 export const spawnQemu = (args: ReadonlyArray<string>) => spawn(Args.QEMU_BIN, args);
 
-export const createDisk = Effect.fn("Process.createDisk")(function* (path: string, size: string) {
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  yield* spawner
-    .exitCode(ChildProcess.make(Args.QEMU_IMG, ["create", "-f", "qcow2", path, size], quiet))
-    .pipe(
+// One qemu-img invocation whose exit code is the answer: 0, or `qemu-img <verb> exited <code>`.
+const qemuImg = (verb: string, args: ReadonlyArray<string>) =>
+  Effect.gen(function* () {
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    yield* spawner.exitCode(ChildProcess.make(Args.QEMU_IMG, [verb, ...args], quiet)).pipe(
       Effect.mapError((error) => startError("qemu-img", error)),
       Effect.filterOrFail(
         (code) => code === 0,
-        (code) => Errors.QemuStartError.make({ message: `qemu-img create exited ${String(code)}` }),
+        (code) =>
+          Errors.QemuStartError.make({ message: `qemu-img ${verb} exited ${String(code)}` }),
       ),
     );
+  });
+
+export const createDisk = Effect.fn("Process.createDisk")(function* (path: string, size: string) {
+  yield* qemuImg("create", ["-f", "qcow2", path, size]);
+});
+
+// A standalone qcow2 copy of `from` at `to`: what a session's disk becomes when it is kept.
+export const convert = Effect.fn("Process.convert")(function* (from: string, to: string) {
+  yield* qemuImg("convert", ["-O", "qcow2", from, to]);
 });
 
 export const commandExists = Effect.fn("Process.commandExists")(function* (bin: string) {

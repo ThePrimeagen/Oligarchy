@@ -81,6 +81,7 @@ export const ActionName = Schema.Literals([
   "send-mouse",
   "get-image",
   "get-serial",
+  "save",
 ]).annotate({
   identifier: "@oligarchy/shared/domain/ActionName",
 });
@@ -265,6 +266,12 @@ export const QmpCommand = Schema.Union([
   Schema.Struct({
     execute: Schema.Literal("input-send-event"),
     arguments: Schema.Struct({ events: Schema.Array(QmpInputEvent) }),
+    id: Schema.Int,
+  }),
+  // The ACPI power button: the guest shuts itself down and QEMU exits.
+  Schema.Struct({
+    execute: Schema.Literal("system_powerdown"),
+    arguments: Schema.Struct({}),
     id: Schema.Int,
   }),
 ]).annotate({ identifier: "@oligarchy/shared/domain/QmpCommand" });
