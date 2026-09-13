@@ -60,6 +60,9 @@ const hasQemu =
 
 type QemuServer = {
   readonly child: ChildProcess;
+  // Where this server keeps its iso cache and minted disks: inside its own temp dir, through
+  // OLIGARCHY_DATA_DIR, so a test run never writes into the real ~/.oligarchy.
+  readonly dataDir: string;
   readonly stdout: () => string;
   readonly stderr: () => string;
   readonly exited: Promise<{ readonly code: number | null; readonly signal: string | null }>;
@@ -88,9 +91,13 @@ const spawnQemuServer = (
   overrides: Record<string, string> | ((dir: string) => Record<string, string>) = {},
 ): QemuServer => {
   const dir = mkdtempSync(join(tmpdir(), "oligarchy-qemu-server-test-"));
+  const dataDir = join(dir, "data");
   const child = spawn(QEMU_SERVER, args, {
     cwd: dir,
-    env: environment(typeof overrides === "function" ? overrides(dir) : overrides),
+    env: environment({
+      OLIGARCHY_DATA_DIR: dataDir,
+      ...(typeof overrides === "function" ? overrides(dir) : overrides),
+    }),
     stdio: ["ignore", "pipe", "pipe"],
   });
   let stdout = "";
@@ -143,7 +150,7 @@ const spawnQemuServer = (
       listeners.add(check);
       check();
     });
-  return { child, stdout: () => stdout, stderr: () => stderr, exited, waitFor };
+  return { child, dataDir, stdout: () => stdout, stderr: () => stderr, exited, waitFor };
 };
 
 const portOf = (address: string | AddressInfo | null): number =>
@@ -340,14 +347,14 @@ describe("qemu server startup refusals", () => {
 describe("qemu server serving", () => {
   const serving = (
     args: ReadonlyArray<string>,
-    listenLine: (port: number) => string,
+    listenLine: (port: number, dataDir: string) => string,
     signal: "SIGINT" | "SIGTERM",
   ) =>
     Effect.promise(async () => {
       const port = await freePort();
       const server = spawnQemuServer([...REQUIRED, ...args, "--port", String(port)]);
       await server.waitFor(/qemu server listening/);
-      expect(lines(server.stdout())).toContain(listenLine(port));
+      expect(lines(server.stdout())).toContain(listenLine(port, server.dataDir));
 
       const stats = await request(port, "GET", "/stats", { authorization: `Bearer ${TOKEN}` });
       expect(stats.status).toBe(200);
@@ -452,24 +459,24 @@ describe("qemu server serving", () => {
   );
 
   it.live.skipIf(!hasQemu || dbUrl === "")(
-    "listens, answers /stats, 401 and 404, and exits 0 on SIGINT",
+    "listens, answers /stats, 401 and 404, names OLIGARCHY_DATA_DIR on the listen line, and exits 0 on SIGINT",
     () =>
       serving(
         [],
-        (port) =>
-          `[global] server: qemu server listening on 127.0.0.1:${String(port)}; name garage; display none; max jobs 1`,
+        (port, dataDir) =>
+          `[global] server: qemu server listening on 127.0.0.1:${String(port)}; name garage; display none; max jobs 1; data ${dataDir}`,
         "SIGINT",
       ),
     120_000,
   );
 
   it.live.skipIf(!hasQemu || dbUrl === "")(
-    "--automation announces itself on the listen line and exits 0 on SIGTERM",
+    "--automation and --data-dir announce themselves on the listen line and it exits 0 on SIGTERM",
     () =>
       serving(
-        ["--automation"],
+        ["--automation", "--data-dir", "/tmp/oligarchy-data-flag-test"],
         (port) =>
-          `[global] server: qemu server listening on 127.0.0.1:${String(port)}; name garage; display none; automation; max jobs 1`,
+          `[global] server: qemu server listening on 127.0.0.1:${String(port)}; name garage; display none; automation; max jobs 1; data /tmp/oligarchy-data-flag-test`,
         "SIGTERM",
       ),
     120_000,
@@ -515,7 +522,7 @@ describe("qemu server serving", () => {
         const { row, reading } = yield* Effect.gen(function* () {
           yield* Effect.promise(() => server.waitFor(/qemu server listening/));
           expect(lines(server.stdout())).toContain(
-            `[global] server: qemu server listening on 127.0.0.1:${String(port)}; name ${name}; display none; automation; max jobs 1; announcing ${url}`,
+            `[global] server: qemu server listening on 127.0.0.1:${String(port)}; name ${name}; display none; automation; max jobs 1; announcing ${url}; data ${server.dataDir}`,
           );
           // The first heartbeat is written right after the listen line; the insert takes a moment.
           // process_stats is the second write, so waiting for it means the servers row is there.
