@@ -9,84 +9,79 @@ A test today boots the Omarchy ISO on a blank 40G disk and installs before it ca
 This plan mints, once per machine, a disk with Omarchy installed and a known user on it, and lets
 every later session boot a throwaway copy of that disk in seconds.
 
-- One qemu server process per session slot, one or more processes per machine, and the machines
-  share nothing. A minted disk is therefore a per-machine artifact, and one minting session per
-  machine produces it. Two processes on one machine share the same home directory and so the same
-  minted disk, as they share the ISO cache today.
-- Copies are qcow2 overlays: `qemu-img create -f qcow2 -b <minted> -F qcow2 <session>/disk.qcow2`.
+- The minted disk is two files beside the ISO, in the place the ISO cache already keeps it:
+  `<iso>.qcow2` and `<iso>.OVMF_VARS.fd`, where `<iso>` is the path QEMU boots the ISO from
+  (`~/.oligarchy/isos/<name>` for a url, the resolved path for a local file). Whether an ISO is
+  minted on a machine is whether those two files exist. No folder, no metadata, nothing to go
+  stale.
+- Copies are qcow2 overlays: `qemu-img create -f qcow2 -b <iso>.qcow2 -F qcow2 <session>/disk.qcow2`.
   The minted disk is never written; the overlay lives and dies with the session directory, exactly
   as the blank disk does now. Twenty-eight sessions on one machine are twenty-eight overlays of one
   file.
 - The firmware NVRAM travels with the disk. `Qemu.prepare` copies a pristine `OVMF_VARS.4m.fd`
-  into every session directory and the installer writes its boot entry into that copy; the minted
-  disk keeps that file beside `disk.qcow2` and a resume copies it instead of the pristine one.
+  into every session directory and the installer writes its boot entry into that copy; `save` keeps
+  that file as `<iso>.OVMF_VARS.fd` and a resume copies it instead of the pristine one.
+- One minted disk per ISO per machine. A save overwrites what was there. Two qemu servers on one
+  machine share the same home directory and so the same minted disk, as they share the ISO cache.
 
 ## Vocabulary
 
 - `mode`: what a session is. `fresh` boots the ISO on a blank disk (today). `mint` boots the ISO on a
   blank disk and may `save`. `resume` boots the machine's minted disk with no ISO attached.
-- minted disk: `~/.oligarchy/isos/<key>.minted/`, beside the cached ISO, `<key>` being
-  `Iso.cacheFileName(iso)`. The folder holds `disk.qcow2`, `OVMF_VARS.fd` and `metadata.json`
-  (`{ iso, sessionId, agentId, savedAt }`); the folder existing is the fact that the ISO is minted
-  on this machine. One per ISO per machine. A local-path ISO is used in place and never enters the
-  cache directory; its minted disk still goes under `~/.oligarchy/isos/` by the same key.
-- `save`: the call that ends a `mint` session and keeps its disk as the machine's minted disk for
-  that ISO.
+- minted disk: `<iso>.qcow2` and `<iso>.OVMF_VARS.fd` beside the ISO's path. Present means minted.
+- `save`: the call that ends a `mint` session and writes its disk and firmware file into place.
 - pin: `test_runs.pinned_server`, a qemu server url the reserve must land on. Null means unpinned.
 
 ## Decisions
 
-- `save` ends the session: refuse first when `<key>.minted/` already exists (409, the guest keeps
-  running); then QMP `system_powerdown` (skipped when the guest already exited), wait for QEMU to
-  exit with a bound of two minutes, `qemu-img convert` into `<key>.minted.partial-<pid>/disk.qcow2`
-  with the vars copy and `metadata.json` beside it, one rename to `<key>.minted/`, row closed
-  `succeeded` with `saved; disk for <iso>`. A clean shutdown makes a clean image; a copy taken
-  from a running guest is only crash-consistent.
-- One minted disk per ISO per machine, minted once. Overriding is rare and manual: the operator
-  removes `<key>.minted/` on that machine and mints again. No version folders, no pointer, no
-  replacement while guests run: an overlay's backing file is never rewritten.
-- A resume derives the folder from the request's `iso` exactly as the ISO cache does and requires
-  `metadata.iso === iso`; a folder with an unreadable or mismatching `metadata.json` counts as no
-  minted disk and is logged at warning.
-- The `minting` claim, which heartbeats, gets its own `<key>.minting.json` when the reserve step
-  lands; `save` never touches it.
-- The reserve carries `mode`, `iso` and an optional `server` pin. The proxy honors a pin exactly and
-  never falls back to another server. An unpinned `resume` is placed only on a server whose stats
-  show the disk `saved`. `fresh` and `mint` are ranked as today.
-- The qemu server refuses a `mint` reserve while a live `minting` claim for that ISO exists on its
-  machine, whoever placed it; the claim is written before the reserve answers, so the next probe and
-  the sibling process on the same machine both see it.
+- `save` ends the session: QMP `system_powerdown` (skipped when the guest already exited), wait for
+  QEMU to exit with a bound of two minutes, then copy the firmware file and `qemu-img convert` the
+  disk, each written as `<target>.partial-<pid>` and renamed over whatever is there, firmware first
+  and disk last so the disk's presence means both are in place. Row closed `succeeded` with
+  `saved; minted <iso>`. A clean shutdown makes a clean image; a copy taken from a running guest is
+  only crash-consistent.
+- Overwrite, never refuse. A guest still running on the old disk holds the old file open and keeps
+  it until it exits; the rename does not touch it. Redoing a machine is minting it again.
+- `mode` rides on the reserve and the start. The reserve carries `mode`, `iso` and an optional
+  `server` pin; the start repeats `mode` and must match the reservation. The proxy honors a pin
+  exactly and never falls back to another server. An unpinned `resume` is placed only on a server
+  whose stats list the ISO as minted. `fresh` and `mint` are ranked as today.
+- `/stats` lists what is minted as ISO cache names (`Domain.isoCacheName(iso)`), read from the cache
+  directory: every `<name>.qcow2` with its `<name>.OVMF_VARS.fd` beside it. The proxy and `ctrl`
+  compare `isoCacheName(iso)` against that list; no url is stored anywhere. The heartbeat writes the
+  list into `servers.stats` so the dashboard and `ctrl mint` read it from the row.
 - One ticket per machine. `./ctrl mint` creates one pinned run, result and Linear ticket per live
-  qemu host lacking the disk. Everything downstream is the existing pipeline: the ticket enters
-  Automation Needed, the drive is dispatched with the run's mode, ISO and pin, the driver installs
-  and saves, moves the ticket to Needs Review, the diagnoser closes it. Each machine's verdict is a
-  ticket on the board. `./ctrl mint --verify` does the same with the `mint-verify` definition on the
-  hosts that hold the disk.
+  qemu host not yet minted for the ISO. Everything downstream is the existing pipeline: the ticket
+  enters Automation Needed, the drive is dispatched with the run's mode, ISO and pin, the driver
+  installs and saves, moves the ticket to Needs Review, the diagnoser closes it. Each machine's
+  verdict is a ticket on the board. `./ctrl mint --verify` does the same with the `mint-verify`
+  definition on the hosts that are minted; `./ctrl mint --server <url>` mints one machine again.
 - Sequencing (mint, then verify, then redo failures) is the operator's or the super-run script's.
-  Nothing in the automation server coordinates a campaign.
+  Nothing in the automation server coordinates a campaign, and nothing guards against two mints of
+  one ISO on one machine beyond `ctrl mint` creating one ticket per host: the second would simply
+  overwrite the first.
 - The credentials the minted user has (name, password, disk passphrase) are a fixed convention
   written into the `mint` definition's instruction and into every `resume` definition's
   instruction. They are data, stored and versioned with `./ctrl test define`.
 - Pins are urls, the `servers` primary key and what the proxy routes with. A url the proxy does not
   know is a 404.
+- A local-path ISO is minted beside the operator's file, since that is where QEMU boots it from;
+  it is a development case and does not appear in `/stats`, which reads the cache directory only.
 
 ## HTTP answers
 
 | Where | Case | Answer |
 |---|---|---|
 | qemu server `/reserve` | `mint` or `resume` without `iso` | 400 `mode "<m>" needs an iso` |
-| qemu server `/reserve` | `mint`, live claim on this machine | 400 `already minting <iso> on this machine` |
-| qemu server `/reserve` | `mint`, minted disk already on this machine | 400 `already minted <iso> on this machine` |
-| qemu server `/save` | minted disk already on this machine | 409 `already minted <iso> on this machine`, session keeps running |
-| qemu server `/reserve`, `/start` | `resume`, no minted disk here | 400 `no saved disk for <iso> on this machine` |
+| qemu server `/reserve`, `/start` | `resume`, not minted here | 400 `no minted disk for <iso> on this machine` |
 | qemu server `/start` | mode or iso differs from the reservation | 400, reservation stands |
 | qemu server `/save` | session is not `mint` | 400 `only a mint session can save` |
-| qemu server `/save` | guest did not power off, convert failed | 502 `SaveFailed`, row `failed`, debug log, claim released |
+| qemu server `/save` | guest did not power off, copy or convert failed | 502 `SaveFailed`, row `failed`, debug log |
 | qemu server `/save` | racing the sweep | 404 `UnknownSession` |
 | proxy `/reserve` | pinned url not registered | 404 `no server <url>` |
 | proxy `/reserve` | pinned server unreachable | 502 `ServerFailed` |
 | proxy `/reserve` | pinned server full | 503 passed through; the job defers with its pin |
-| proxy `/reserve` | `resume`, no server holds the disk | 503 `NoServer` `no server has a saved disk for <iso>`; the job defers until a save lands |
+| proxy `/reserve` | `resume`, no server minted | 503 `NoServer` `no server has minted <iso>`; the job defers until a save lands |
 
 The automation client keeps its mapping: 503 is `AtCapacity` (deferred), anything else closes the
 job with the message.
@@ -96,7 +91,9 @@ job with the message.
 `test/shared/domain.unit.test.ts`
 
 - [ ] `SessionMode` accepts `fresh|mint|resume`, refuses anything else; `SessionConfig` round-trips
-      `mode`; a `save` follow action encodes and decodes.
+      `mode`; a `save` follow action and a `system_powerdown` QMP command encode and decode.
+- [ ] `isoCacheName` maps a url and a path as the ISO cache names its files (moved from `iso.ts`,
+      test moves with it).
 
 `test/shared/errors.unit.test.ts`, `test/shared/api.unit.test.ts`
 
@@ -114,66 +111,58 @@ job with the message.
       exit is `QemuStartError` naming the code.
 - [ ] `convert` spawns `qemu-img convert -O qcow2 <from> <to>`; a non-zero exit fails with the code.
 
+`test/qemu/iso.unit.test.ts`
+
+- [ ] `pathOf` answers the cache path for a url and the resolved path for a file without touching
+      the network or the disk; `getIso` boots from exactly that path.
+
 `test/qemu/qemu.unit.test.ts`
 
-- [ ] `prepare` with a `saved` source creates the overlay and copies the saved vars, not the pristine
-      ones; a failing `qemu-img` fails `QemuStartError` and the dir finalizer still runs.
-- [ ] `start` without a cdrom boots; the handle exposes `varsPath`, `powerdown` (a recorded
-      `system_powerdown` exchange) and `exited`.
+- [ ] `prepare` with a `minted` source creates the overlay and copies the minted firmware file, not
+      the pristine one; a failing `qemu-img` fails `QemuStartError` and the dir finalizer still runs.
+- [ ] `start` without a cdrom boots; the handle exposes `diskPath`, `varsPath`, `powerdown` (a
+      recorded `system_powerdown` exchange) and `exited`.
 
-`test/qemu/disks.unit.test.ts` (new)
+`test/qemu/minted.unit.test.ts` (new)
 
-- [ ] `find` answers `disk.qcow2` and `OVMF_VARS.fd` of `<key>.minted/` when the folder exists and
-      its `metadata.iso` is the ISO asked for; none when the folder is absent; none and a warning
-      when `metadata.json` is unreadable or names another ISO.
-- [ ] `list` reports every folder `find` would accept as `saved` and every live `minting.json` as
-      `minting`; a stale claim and a `.partial-*` folder are ignored.
-- [ ] `save` converts into `<key>.minted.partial-<pid>/`, copies the vars, writes `metadata.json`
-      beside them, and renames the folder once; a failing convert removes the partial and leaves no
-      folder; a folder already present is `Conflict` before anything is written; a rename that
-      finds the folder present (a sibling service saved first) is `SaveFailed` and the partial is
-      removed.
-- [ ] `claim` writes `<key>.minting.json` with agent and heartbeat; a second claim for the same ISO
-      is `BadRequest` while live and succeeds once stale; `release` removes only that agent's claim;
-      `refresh` bumps the heartbeat of the given agents' claims only; `save` leaves the claim
-      untouched.
-- [ ] two services on one cache directory see each other's minted folders and claims.
+- [ ] `find` answers the two paths when both files exist beside the ISO's path; none when either is
+      missing.
+- [ ] `list` names every `<name>.qcow2` in the cache directory with its firmware file beside it,
+      ignores `.partial-*` files and a `.qcow2` without its firmware file, and answers `[]` for a
+      missing directory.
+- [ ] `save` writes the firmware file then the disk, each through `.partial-<pid>` and a rename,
+      overwriting existing files; a failing convert removes its partial and leaves the previous
+      disk in place; a failing firmware copy stops before the convert.
+- [ ] two services on one cache directory see the same minted files.
 
 `test/qemu-server/sessions.unit.test.ts`
 
-- [ ] reserve: `mint` claims and holds mode and ISO on the reservation; `mint` with a live claim is
-      `BadRequest` `already minting <iso> on this machine`, `mint` with the disk already minted is
-      `BadRequest` `already minted <iso> on this machine`, both giving the slot back; `resume`
-      without a saved disk is `BadRequest` `no saved disk for <iso> on this machine`; `mint` or
-      `resume` without an ISO is `BadRequest`; `fresh` is unchanged.
+- [ ] reserve: `mint` and `resume` hold mode and ISO on the reservation; `resume` when not minted
+      here is `BadRequest` `no minted disk for <iso> on this machine` and the slot is given back;
+      `mint` or `resume` without an ISO is `BadRequest`; `fresh` is unchanged.
 - [ ] start: mode or ISO differing from the reservation is `BadRequest` and the reservation stands;
-      `resume` never calls `getIso`, prepares from the saved disk, inserts the row `running` with
+      `resume` never calls `getIso`, prepares from the minted files, inserts the row `running` with
       `mode` in its config; `mint` inserts `mode: mint`.
-- [ ] save: on a `fresh` or `resume` session is `BadRequest`; with the disk already minted on this
-      machine is `Conflict` and the session keeps running, no exchange sent; the happy path records
-      the powerdown action, awaits exit, saves, closes the row `succeeded` with
-      `saved; disk for <iso>`, frees the slot, tells followers last; a guest already exited is saved
-      without a powerdown exchange; a
-      guest that never powers off within the bound is killed, row `failed`, debug log saved, claim
-      released, `SaveFailed`; a failing convert ends the row `failed` and releases the claim; racing
-      the sweep is `UnknownSession`.
-- [ ] claims: the sweep refreshes this process's claims; an expired mint reservation releases its
-      claim; a mint session stopped, timed out or drained releases its claim.
-- [ ] stats: `disks` lists saved and minting entries; `host` is the host name.
+- [ ] save: on a `fresh` or `resume` session is `BadRequest`; the happy path records the powerdown
+      action, awaits exit, saves, closes the row `succeeded` with `saved; minted <iso>`, frees the
+      slot, tells followers last; a guest already exited is saved without a powerdown exchange; a
+      guest that never powers off within the bound is killed, row `failed`, debug log saved,
+      `SaveFailed`; a failing convert ends the row `failed`; racing the sweep is `UnknownSession`.
+- [ ] stats: `minted` lists the cache names; `host` is the host name.
 
 `test/qemu-server/http.unit.test.ts`, `test/qemu-server/heartbeat.unit.test.ts`
 
-- [ ] `POST /save` 200; 400, 404, 502 with `{ error }`; `/stats` carries `host` and `disks`; the
-      servers row's stats carry both.
+- [ ] `POST /save` 200; 400, 403, 404, 502 with `{ error }`; `/stats` carries `host` and `minted`;
+      the servers row's stats carry both.
 
 `test/qemu-reverse-proxy/http.unit.test.ts`
 
 - [ ] a pinned reserve goes to that url only, probed first, its 200 and its 503 passed through; an
       unregistered url is 404 `no server <url>`; an unreachable pinned server is `ServerFailed`.
-- [ ] an unpinned `resume` lands only on a server whose stats show the ISO `saved`, ranked by qemus
-      among those; none is `NoServer` `no server has a saved disk for <iso>`; `fresh` and `mint`
-      rank as today.
-- [ ] `/save` forwards to the session's server.
+- [ ] an unpinned `resume` lands only on a server whose stats list `isoCacheName(iso)` as minted,
+      ranked by qemus among those; none is `NoServer` `no server has minted <iso>`; `fresh` and
+      `mint` rank as today.
+- [ ] `/save` forwards to the session's server; an unknown id is 404.
 
 `test/client/command.unit.test.ts`, `test/client/proxy-client.unit.test.ts`
 
@@ -199,18 +188,18 @@ job with the message.
 - [ ] `test define --mode mint` is stored and listed; omitted on a new name is `fresh`; on a known
       name it is carried forward; a bad mode is refused.
 - [ ] `test new` writes `--mode <m>` from the definition into every ticket's start line.
-- [ ] `mint` creates one pinned run, result and ticket per live host lacking the disk, dedupes two
-      servers on one host, prints the JSON; every host covered prints `[]`; no live qemu server
-      fails `mint: no live qemu server`; no `mint` definition fails naming `test define`; `--iso`
-      refuses http; `--server-url` falls back to `SERVER_URL`.
-- [ ] `mint --verify` picks holding hosts and uses `mint-verify` with `--mode resume`;
-      `mint --server <url>` creates exactly one ticket and refuses a url that is not a live qemu
-      server.
+- [ ] `mint` creates one pinned run, result and ticket per live host whose stats do not list the
+      ISO as minted, dedupes two servers on one host, prints the JSON; every host minted prints
+      `[]`; no live qemu server fails `mint: no live qemu server`; no `mint` definition fails naming
+      `test define`; `--iso` refuses http; `--server-url` falls back to `SERVER_URL`.
+- [ ] `mint --verify` picks minted hosts and uses `mint-verify` with `--mode resume`;
+      `mint --server <url>` creates exactly one ticket whether or not that host is minted, and
+      refuses a url that is not a live qemu server.
 - [ ] the mint ticket title names the machine and the ISO; `SERVER_URL` is the proxy.
 
 `test/dashboard/servers.unit.test.ts`
 
-- [ ] the servers page shows host and disks per server.
+- [ ] the servers page shows host and the minted names per server.
 
 `test/integration/*`
 
@@ -223,7 +212,7 @@ job with the message.
       first stderr lines.
 
 Fakes: `test/support/fake-qemu.ts` gains the prepare source, `powerdown`/`exited` hooks and
-`varsPath`; `test/support/fake-disks.ts` (new) records calls per method.
+`varsPath`; `fakeIso` gains `pathOf`; `test/support/fake-minted.ts` (new) records calls per method.
 
 ## 1. Domain, contract, errors, api
 
@@ -240,6 +229,10 @@ export const SessionConfig = Schema.Struct({
   disk: Schema.optionalKey(Schema.String),
   mode: SessionMode,
 });
+
+// The ISO cache's file name for an iso, moved here from qemu/iso.ts: the proxy and ctrl compare
+// it against a server's minted list, so all three must agree on it.
+export const isoCacheName = (iso: string): string => ...; // the body of Iso.cacheFileName
 ```
 
 - [ ] `ActionName` gains `"save"`.
@@ -270,12 +263,7 @@ export class SaveBody extends Schema.Class<SaveBody>("@oligarchy/shared/contract
   id: Schema.String,
   agent: Schema.NonEmptyString,
 }) {}
-
-export class Disk extends Schema.Class<Disk>("@oligarchy/shared/contract/Disk")({
-  iso: Schema.String,
-  status: Schema.Literals(["minting", "saved"]),
-}) {}
-// Stats gains: host: Schema.String, disks: Schema.Array(Disk)
+// Stats gains: host: Schema.String, minted: Schema.Array(Schema.String)
 ```
 
 - [ ] `ReserveBody` (automation) gains the same `mode`, `iso?`, `server?`.
@@ -307,76 +295,66 @@ export const convert = Effect.fn("Process.convert")(function* (from: string, to:
 });
 ```
 
+`src/qemu/iso.ts`
+
+```ts
+// The path QEMU boots this iso from, downloaded or not: the cache file for a url, the resolved
+// path for a file. getIso resolves through it; the minted disk sits beside it.
+readonly pathOf: (name: string) => Effect.Effect<string>;
+```
+
 `src/qemu/qemu.ts`
 
 ```ts
 export type DiskSource =
   | { readonly _tag: "fresh" }
   | { readonly _tag: "existing"; readonly path: string }
-  | { readonly _tag: "saved"; readonly disk: string; readonly vars: string };
-// prepare(id, source): fresh creates the blank disk; existing uses the path; saved runs
+  | { readonly _tag: "minted"; readonly disk: string; readonly vars: string };
+// prepare(id, source): fresh creates the blank disk; existing uses the path; minted runs
 // createOverlay(dir/disk.qcow2, source.disk) and copies source.vars instead of Args.OVMF_VARS.
 // StartInput.iso becomes cdrom: string | undefined.
-// QemuHandle gains varsPath, powerdown(record) (QMP system_powerdown) and exited (the process's Deferred).
+// QemuHandle gains diskPath, varsPath, powerdown(record) (QMP system_powerdown) and exited.
 export const hostName: string = hostname(); // node:os, already this file's exception
 ```
 
-- [ ] `args.ts`, `process.ts`, `qemu.ts` as above.
+- [ ] `args.ts`, `process.ts`, `iso.ts`, `qemu.ts` as above; `cacheFileName` becomes an import of
+      `Domain.isoCacheName`.
 
-## 3. `src/qemu/disks.ts` (new)
+## 3. `src/qemu/minted.ts` (new)
 
 The exported surface, as bare declarations:
 
 ```ts
-export const HEARTBEAT_MS = 10_000;
-export const STALE_MS = 30_000;
-// <key>.minted/metadata.json: which ISO this is and the session that made it.
-export const Metadata: Schema.Struct<{
-  iso: string;
-  sessionId: Domain.SessionId;
-  agentId: string;
-  savedAt: string; // ISO-8601 from Clock
-}>;
-export const MetadataJson: Schema.Codec<Metadata, string>; // Schema.fromJsonString(Schema.toCodecJson(Metadata))
-// <key>.minting.json, the live claim; later step.
-export const Claim: Schema.Struct<{ agentId: string; heartbeatAt: string }>;
-export type SavedDisk = { readonly disk: string; readonly vars: string };
-export type DisksService = {
-  readonly list: Effect.Effect<ReadonlyArray<Contract.Disk>>;
-  readonly find: (iso: string) => Effect.Effect<Option.Option<SavedDisk>>;
-  readonly claim: (iso: string, agent: string) => Effect.Effect<void, Errors.BadRequest>;
-  readonly refresh: (agents: ReadonlySet<string>) => Effect.Effect<void>;
-  readonly release: (iso: string, agent: string) => Effect.Effect<void>;
+export type MintedDisk = { readonly disk: string; readonly vars: string };
+// Pure: the two file names beside an iso path.
+export const filesFor: (isoPath: string) => MintedDisk; // `${isoPath}.qcow2`, `${isoPath}.OVMF_VARS.fd`
+export type MintedService = {
+  // Both files present beside iso.pathOf(name), or none.
+  readonly find: (iso: string) => Effect.Effect<Option.Option<MintedDisk>>;
+  // Cache names minted on this machine: every <name>.qcow2 in the cache directory with its
+  // <name>.OVMF_VARS.fd beside it.
+  readonly list: Effect.Effect<ReadonlyArray<string>>;
+  // Firmware file then disk, each <target>.partial-<pid> then rename, over whatever is there.
   readonly save: (
     iso: string,
-    agent: string,
-    from: { readonly disk: string; readonly vars: string; readonly sessionId: string },
-  ) => Effect.Effect<void, Errors.Conflict | Errors.SaveFailed>;
+    from: { readonly disk: string; readonly vars: string },
+  ) => Effect.Effect<void, Errors.SaveFailed>;
 };
-export class Disks extends Context.Service<Disks>()("@oligarchy/qemu/Disks", { make }) {}
+export class Minted extends Context.Service<Minted>()("@oligarchy/qemu/Minted", { make }) {}
 ```
 
 Rules:
 
-- Directory `path.join(host.homeDir, ".oligarchy", "isos", `${Iso.cacheFileName(iso)}.minted`)`;
-  `Iso.Host` reused for home and pid. `iso.ts` is untouched: it addresses the ISO file and its
-  partials by exact name and keys its manifest by file name, so the sibling directory is invisible
+- Depends on `Iso.Iso` (for `pathOf`), `Iso.Host` (pid, home), `FileSystem`, `Path`,
+  `ChildProcessSpawner`, `Log`. `iso.ts` is otherwise untouched: it addresses the ISO file and its
+  partials by exact name and keys its manifest by file name, so the two new siblings are invisible
   to it.
-- `find` is "the folder exists and its `metadata.iso` is the ISO asked for", answering the
-  folder's `disk.qcow2` and `OVMF_VARS.fd`; a folder whose `metadata.json` is unreadable or names
-  another ISO is `Option.none()` and one warning.
-- `list` is every folder `find` would accept, as `saved`, plus every `<key>.minting.json` whose
-  heartbeat is within `STALE_MS`, as `minting`.
-- `save` refuses with `Conflict` when the folder exists. Otherwise it converts into
-  `<key>.minted.partial-<pid>/disk.qcow2`, copies the vars and writes `metadata.json` beside it,
-  and renames the folder once. A failed convert removes the partial. A rename refused because the
-  folder appeared meanwhile (the sibling service saved first) is `SaveFailed` and the partial is
-  removed; the disk that landed is equally a mint of this ISO.
-- `claim`, `refresh` and `release` own `<key>.minting.json` alone (a later step); `save` never
-  touches it.
-- Directory-name and key helpers are pure and stay outside Effect.
+- `save` copies the firmware file first and converts the disk last, so a `.qcow2` in place always
+  has its firmware beside it. A failure at either step removes that step's partial and leaves what
+  was there before.
+- No file is ever read for content. Presence is the whole record.
 
-- [ ] `disks.ts` as above.
+- [ ] `minted.ts` as above.
 
 ## 4. Sessions (`src/qemu-server/sessions.ts`)
 
@@ -388,32 +366,27 @@ readonly reserve: (body: Contract.ReserveAgentBody) => Effect<void, AtCapacity |
 readonly save: (live: LiveSession) => Effect<void, BadRequest | SaveFailed | Internal | UnknownSession>;
 ```
 
-- [ ] `reserve`: `mint`/`resume` without `iso` is `BadRequest`; take the slot; `mint` then
-      `disks.claim(iso, agent)`, a refusal gives the slot back; `resume` then `disks.find(iso)`, none
-      is `BadRequest` `no saved disk for <iso> on this machine` and the slot goes back.
+- [ ] `reserve`: `mint`/`resume` without `iso` is `BadRequest`; take the slot; `resume` then
+      `minted.find(iso)`, none is `BadRequest` `no minted disk for <iso> on this machine` and the
+      slot goes back.
 - [ ] `start`: peek the reservation; a differing mode, or a differing ISO when the mode is not
-      `fresh`, is `BadRequest` with the reservation kept; `resume` re-checks `disks.find`; then
+      `fresh`, is `BadRequest` with the reservation kept; `resume` re-checks `minted.find`; then
       consume as today. In `launch`, `resume` skips `iso.getIso`, calls
-      `qemu.prepare(id, { _tag: "saved", ...found })` and `qemu.start(prepared, { cdrom: undefined, ... })`;
+      `qemu.prepare(id, { _tag: "minted", ...found })` and `qemu.start(prepared, { cdrom: undefined, ... })`;
       the row is inserted `running`. The config carries `mode`.
-- [ ] `save`: mode not `mint` is `BadRequest` `only a mint session can save`; the disk already
-      minted on this machine (`disks.find`) is `Conflict` `already minted <iso> on this machine`,
-      before ownership is taken, so the session keeps running; then take ownership from
+- [ ] `save`: mode not `mint` is `BadRequest` `only a mint session can save`; take ownership from
       the map as `stop` does; if `live.qemu.exited` is not done, `live.qemu.powerdown(recorder(live))`
       under `followed(live, "save", ...)`; `Effect.timeoutOrElse({ duration: "2 minutes", orElse: ... })`
       on `exited` failing `SaveFailed` `guest did not power off within 2 minutes`;
-      `disks.save(iso, agent, { disk: live.qemu.diskPath, vars: live.qemu.varsPath, sessionId })`;
-      kill; `endSession(id, "succeeded", "saved; disk for <iso>")`; log; `finishLiveSession`. Any
-      failure after ownership: capture the debug log, kill, `endSession failed` with the message,
+      `minted.save(iso, { disk: live.qemu.diskPath, vars: live.qemu.varsPath })`; kill;
+      `endSession(id, "succeeded", "saved; minted <iso>")`; log; `finishLiveSession`. Any failure
+      after ownership: capture the debug log, kill, `endSession failed` with the message,
       `finishLiveSession`, fail `SaveFailed`.
-- [ ] `finishLiveSession`: for a `mint` session, `disks.release(iso, agent)`, a no-op when the
-      claim is already gone. `expireReservations`: release expired mint claims. The sweep tick:
-      `disks.refresh(agents holding mint reservations or sessions)`.
-- [ ] `stats`: build `Contract.Stats` with `host: Qemu.hostName` and `disks: yield* disks.list`.
+- [ ] `stats`: build `Contract.Stats` with `host: Qemu.hostName` and `minted: yield* minted.list`.
 - [ ] `src/qemu-server/handlers.ts`: a `save` handler (`lookup` then `save`, uninterruptible);
       `reserve` passes the whole payload.
-- [ ] `Sessions.layer` requires `Disks.Disks`; `src/qemu-server/main.ts` provides
-      `Disks.Disks.layer` beside `Iso.Iso.layer`.
+- [ ] `Sessions.layer` requires `Minted.Minted`; `src/qemu-server/main.ts` provides
+      `Minted.Minted.layer` beside `Iso.Iso.layer`.
 
 ## 5. Proxy (`src/qemu-reverse-proxy/router.ts`)
 
@@ -439,15 +412,15 @@ if (body.server !== undefined) {
 }
 ```
 
-- [ ] Unpinned: after probing, when `body.mode === "resume"` keep only servers whose `stats.disks`
-      has `{ iso: body.iso, status: "saved" }`; an empty set is `NoServer`
-      `no server has a saved disk for <iso>`; then rank and try as today.
+- [ ] Unpinned: after probing, when `body.mode === "resume"` keep only servers whose
+      `stats.minted` includes `Domain.isoCacheName(body.iso)`; an empty set is `NoServer`
+      `no server has minted <iso>`; then rank and try as today.
 - [ ] `/save` joins the `forward` routes.
 
 ## 6. Client
 
 - [ ] `src/client/command.ts`: `start` gains
-      `mode: Flag.choice("mode", Domain.SessionMode.literals).pipe(Flag.withDefault("fresh"), Flag.withDescription("fresh boots the iso on a blank disk, mint may save it, resume boots the machine's saved disk"))`.
+      `mode: Flag.choice("mode", Domain.SessionMode.literals).pipe(Flag.withDefault("fresh"), Flag.withDescription("fresh boots the iso on a blank disk, mint may save it, resume boots the machine's minted disk"))`.
 - [ ] a `save` command with the shared agent, server and session flags, printing `saved` on
       success.
 - [ ] `src/client/proxy-client.ts`: `save(body: SaveBody)`.
@@ -461,7 +434,7 @@ if (body.server !== undefined) {
 export const sessionMode = pgEnum("session_mode", ["fresh", "mint", "resume"]);
 // test_definitions: mode: sessionMode("mode").notNull().default("fresh"),
 // test_runs: pinnedServer: text("pinned_server"),
-// ServerStats gains host: string and disks: ReadonlyArray<{ iso: string; status: "minting" | "saved" }>
+// ServerStats gains host: string and minted: ReadonlyArray<string>
 ```
 
 - [ ] `npm run db:generate` for the one migration. `Domain.SessionMode` is the enum's twin,
@@ -471,7 +444,7 @@ export const sessionMode = pgEnum("session_mode", ["fresh", "mint", "resume"]);
 - [ ] `src/db/tests.ts`: `createRun` takes `pinnedServer?`; `defineTest` takes `mode`;
       `findPlacement(resultId)` returning `{ mode, iso, pinnedServer }` from result → run and
       definition.
-- [ ] `src/qemu-server/heartbeat.ts`: write `host` and `disks` into the row.
+- [ ] `src/qemu-server/heartbeat.ts`: write `host` and `minted` into the row.
       `src/dashboard/servers.tsx`: show them.
 - [ ] `src/automation-server/worker.ts` `place`:
       `const placement = yield* tests.findPlacement(job.resultId)`;
@@ -500,12 +473,12 @@ const mintCommand = Command.make(
     iso: isoFlag, // https only, as test new
     verify: Flag.boolean("verify").pipe(
       Flag.withDefault(false),
-      Flag.withDescription("Verify the saved disk on every host that holds it instead of minting"),
+      Flag.withDescription("Verify the minted disk on every host that has it instead of minting"),
     ),
     server: Flag.string("server").pipe(
       Flag.withSchema(Domain.ServerUrl),
       Flag.optional,
-      Flag.withDescription("This qemu server only"),
+      Flag.withDescription("This qemu server only, minted or not"),
     ),
   },
   ({ serverUrl, iso, verify, server }) => Effect.gen(function* () { /* below */ }),
@@ -517,8 +490,9 @@ Body, in order:
 1. Load the newest `mint` (or `mint-verify`) definition; none is
    `mint: no definition named <name>; define it with ./ctrl test define --name <name> --mode <mint|resume> ...`.
 2. `listLiveServerStats("qemu")`; empty is `mint: no live qemu server`.
-3. One server per `stats.host`, first registered wins. Keep hosts lacking the disk (mint) or
-   holding it (verify), or exactly `--server`, refusing a url not in the live list.
+3. One server per `stats.host`, first registered wins. Keep hosts whose `stats.minted` lacks
+   `isoCacheName(iso)` (mint) or has it (verify), or exactly `--server`, refusing a url not in the
+   live list.
 4. Per host: the run with `pinnedServer`, the result, the Linear issue titled
    `mint <name>: <iso>` (or `verify <name>: <iso>`) with `SERVER_URL` = `--server-url`.
 5. Print the JSON array of `{ runId, resultId, linearId, server, host }`; `[]` when nothing to do.
@@ -539,8 +513,8 @@ Body, in order:
 - [ ] `npm run check:fast`; `npm run test:integration` for `qemu-process`, `client`, `ctrl`, `db`,
       `qemu-server`, `qemu-reverse-proxy`.
 - [ ] On the QEMU host, by hand through the proxy: reserve and start one `mint` session with
-      `./client`, install, `save`; then `start --mode resume` and confirm the guest boots from the
-      disk without the ISO.
+      `./client`, install, `save`; confirm `<iso>.qcow2` and `<iso>.OVMF_VARS.fd` beside the cached
+      ISO; then `start --mode resume` and confirm the guest boots from the disk without the ISO.
 - [ ] Confirm on the host that the installer's reboot lands on the disk with the ISO still
       attached (OVMF follows its NVRAM entry; `-boot order=d` is a SeaBIOS knob it ignores), and that
       `system_powerdown` shuts the installed system down from where the driver leaves it.
@@ -551,9 +525,9 @@ Body, in order:
 1. `./ctrl test define --name mint --mode mint ...` and `./ctrl test define --name mint-verify --mode resume ...` once.
 2. `./ctrl mint --server-url <proxy> --iso <url>`: one ticket per machine; move them to Automation
    Needed; wait for Done.
-3. `./ctrl mint --verify --server-url <proxy> --iso <url>`: one ticket per machine holding the disk;
-   a failed verdict is, on that machine, `rm -rf ~/.oligarchy/isos/<key>.minted`, then
-   `./ctrl mint --server <url> ...`. Rare by design: a second save on a minted machine is refused.
-4. `GET /servers` on the proxy, or the servers page, shows every machine's `disks`. When every host
-   shows the ISO `saved`, queue the `resume` batch; the dispatcher fills the fleet up to the sum of
-   `--max-jobs`, and each session boots in seconds.
+3. `./ctrl mint --verify --server-url <proxy> --iso <url>`: one ticket per minted machine; a failed
+   verdict is `./ctrl mint --server <url> --server-url <proxy> --iso <url>` for that machine, whose
+   save overwrites the disk.
+4. `GET /servers` on the proxy, or the servers page, shows every machine's `minted` names. When
+   every host lists the ISO, queue the `resume` batch; the dispatcher fills the fleet up to the sum
+   of `--max-jobs`, and each session boots in seconds.
