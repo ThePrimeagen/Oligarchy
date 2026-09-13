@@ -59,19 +59,22 @@ const start = Command.make(
         userMessage: "start: --resume boots the minted disk; --disk cannot be given",
       });
     }
-    // A resume boots what lies beside the iso, not the iso: the file itself need not be there.
-    const iso = Domain.isIsoUrl(input.iso)
-      ? input.iso
-      : input.resume
-        ? path.resolve(input.iso)
-        : yield* localIso(input.iso);
-    const body = input.resume
-      ? Contract.StartBody.make({ iso, agent: input.agentId, mode: "resume" })
-      : Option.match(input.disk, {
-          onNone: () => Contract.StartBody.make({ iso, agent: input.agentId }),
-          onSome: (disk) =>
-            Contract.StartBody.make({ iso, disk: path.resolve(disk), agent: input.agentId }),
-        });
+    if (input.resume) {
+      // --iso names which minted disk to boot; the iso itself is neither attached nor read, so
+      // a local path is sent as given (made absolute) without checking that the file exists.
+      const iso = Domain.isIsoUrl(input.iso) ? input.iso : path.resolve(input.iso);
+      const started = yield* proxy.start(
+        Contract.StartBody.make({ iso, agent: input.agentId, mode: "resume" }),
+      );
+      return yield* Console.log(started.id);
+    }
+    // Fresh boots the iso itself: a local file must exist, and is named to the server absolute.
+    const iso = Domain.isIsoUrl(input.iso) ? input.iso : yield* localIso(input.iso);
+    const body = Option.match(input.disk, {
+      onNone: () => Contract.StartBody.make({ iso, agent: input.agentId }),
+      onSome: (disk) =>
+        Contract.StartBody.make({ iso, disk: path.resolve(disk), agent: input.agentId }),
+    });
     const started = yield* proxy.start(body);
     return yield* Console.log(started.id);
   }),
