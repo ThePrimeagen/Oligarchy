@@ -75,6 +75,15 @@ export const SessionsLive = HttpApiBuilder.group(Api.QemuReverseProxyApi, "Sessi
       uninterruptible,
     )
     .handle(
+      "save",
+      ({ payload, request }) =>
+        Effect.gen(function* () {
+          const router = yield* Router.Router;
+          return yield* router.forward(request, payload.id, payload.agent);
+        }),
+      uninterruptible,
+    )
+    .handle(
       "sendKeys",
       ({ payload, request }) =>
         Effect.gen(function* () {
