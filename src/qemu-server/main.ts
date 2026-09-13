@@ -16,6 +16,7 @@ import * as Render from "../observability/render.ts";
 import * as Sentry from "../observability/sentry.ts";
 import * as Host from "../qemu/host.ts";
 import * as Iso from "../qemu/iso.ts";
+import * as Minted from "../qemu/minted.ts";
 import * as Qemu from "../qemu/qemu.ts";
 import * as Stats from "../qemu/stats.ts";
 import * as Api from "../shared/api.ts";
@@ -79,6 +80,8 @@ const ServerLive = (
     ),
     Layer.provide(Sessions.Sessions.layer(maxJobs)),
     Layer.provide(Layer.succeed(Sessions.Shutdown)(shutdown)),
+    // Minted sits above the iso cache it writes beside; both read one Iso.
+    Layer.provide(Minted.Minted.layer),
     Layer.provide(
       Layer.mergeAll(
         Qemu.Qemu.layer,

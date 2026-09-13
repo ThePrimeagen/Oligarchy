@@ -178,6 +178,56 @@ describe("createDisk", () => {
   );
 });
 
+describe("convert", () => {
+  it.effect("runs qemu-img convert to qcow2 from the session disk into the target", () =>
+    Effect.gen(function* () {
+      const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
+      yield* Process.convert(
+        "/tmp/oligarchy-1/disk.qcow2",
+        "/home/u/.oligarchy/isos/omarchy.iso.qcow2.partial-4242",
+      ).pipe(Effect.provide(spawner.layer));
+      expect(spawner.spawned).toMatchObject([
+        {
+          command: Args.QEMU_IMG,
+          args: [
+            "convert",
+            "-O",
+            "qcow2",
+            "/tmp/oligarchy-1/disk.qcow2",
+            "/home/u/.oligarchy/isos/omarchy.iso.qcow2.partial-4242",
+          ],
+          options: { stdin: "ignore", stdout: "ignore", stderr: "ignore" },
+        },
+      ]);
+    }),
+  );
+
+  it.effect("fails `qemu-img convert exited <code>` on a non-zero exit", () =>
+    Effect.gen(function* () {
+      const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 1 }));
+      const error = yield* Effect.flip(
+        Process.convert("/tmp/oligarchy-1/disk.qcow2", "/isos/omarchy.iso.qcow2.partial-1").pipe(
+          Effect.provide(spawner.layer),
+        ),
+      );
+      expect(error._tag).toBe("QemuStartError");
+      expect(error.message).toBe("qemu-img convert exited 1");
+    }),
+  );
+
+  it.effect("fails with the spawn error when qemu-img cannot run", () =>
+    Effect.gen(function* () {
+      const spawner = FakeSpawner.fakeSpawner(() => ({ spawnError: "spawn qemu-img ENOENT" }));
+      const error = yield* Effect.flip(
+        Process.convert("/tmp/disk.qcow2", "/isos/omarchy.iso.qcow2.partial-1").pipe(
+          Effect.provide(spawner.layer),
+        ),
+      );
+      expect(error.message).toBe("qemu-img: spawn qemu-img ENOENT");
+    }),
+  );
+});
+
 describe("commandExists and displayHelp", () => {
   it.effect("is true when `command -v` exits 0 and false otherwise", () =>
     Effect.gen(function* () {

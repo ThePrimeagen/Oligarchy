@@ -3,6 +3,10 @@
 A plan, written to be worked on. Check items off as they land. Tests come first in every step;
 no code lands until its failing tests describe it (`development.md`, Tests).
 
+Landed so far: `save` on the qemu server alone (`POST /save`, `Sessions.save`, `Minted.save`,
+`Process.convert`, `Iso.pathOf`, the handle's `powerdown`/`running`/`exited`), not yet routed by
+the proxy nor exposed by `./client`. `mode`, `resume`, `/stats`, pins and `ctrl mint` follow.
+
 ## What this is
 
 A test today boots the Omarchy ISO on a blank 40G disk and installs before it can do anything.
@@ -109,11 +113,11 @@ job with the message.
 
 - [ ] `createOverlay` spawns `qemu-img create -f qcow2 -b <backing> -F qcow2 <path>`; a non-zero
       exit is `QemuStartError` naming the code.
-- [ ] `convert` spawns `qemu-img convert -O qcow2 <from> <to>`; a non-zero exit fails with the code.
+- [x] `convert` spawns `qemu-img convert -O qcow2 <from> <to>`; a non-zero exit fails with the code.
 
 `test/qemu/iso.unit.test.ts`
 
-- [ ] `pathOf` answers the cache path for a url and the resolved path for a file without touching
+- [x] `pathOf` answers the cache path for a url and the resolved path for a file without touching
       the network or the disk; `getIso` boots from exactly that path.
 
 `test/qemu/qemu.unit.test.ts`
@@ -130,7 +134,7 @@ job with the message.
 - [ ] `list` names every `<name>.qcow2` in the cache directory with its firmware file beside it,
       ignores `.partial-*` files and a `.qcow2` without its firmware file, and answers `[]` for a
       missing directory.
-- [ ] `save` writes the firmware file then the disk, each through `.partial-<pid>` and a rename,
+- [x] `save` writes the firmware file then the disk, each through `.partial-<pid>` and a rename,
       overwriting existing files; a failing convert removes its partial and leaves the previous
       disk in place; a failing firmware copy stops before the convert.
 - [ ] two services on one cache directory see the same minted files.

@@ -89,6 +89,13 @@ export const stop = HttpApiEndpoint.post("stop", "/stop", {
   error: [Errors.ForbiddenWire, Errors.UnknownSessionWire],
 });
 
+// Ends the session keeping its disk as the machine's minted disk for the iso it booted.
+export const save = HttpApiEndpoint.post("save", "/save", {
+  payload: Contract.SaveBody,
+  success: Contract.Ok,
+  error: [Errors.ForbiddenWire, Errors.UnknownSessionWire, Errors.SaveFailedWire],
+});
+
 export const sendKeys = HttpApiEndpoint.post("sendKeys", "/send-keys", {
   payload: Contract.SendKeysBody,
   success: Contract.Ok,
@@ -124,6 +131,7 @@ export class Sessions extends HttpApiGroup.make("Sessions")
   .add(follow)
   .add(stats)
   .add(stop)
+  .add(save)
   .add(sendKeys)
   .add(sendMouse)
   .add(intentStart)
@@ -135,7 +143,8 @@ export class Sessions extends HttpApiGroup.make("Sessions")
 export class QemuServerApi extends HttpApi.make("OligarchyQemuServer").add(Sessions) {}
 
 // The qemu reverse proxy: the qemu server's own endpoints, so the client that speaks to a server speaks to
-// it, minus /stats (a fleet has no one cpu), behind the routing boundary.
+// it, minus /stats (a fleet has no one cpu) and, for now, /save (it lands on the qemu server
+// first; routing it is its own step), behind the routing boundary.
 export class RoutedSessions extends HttpApiGroup.make("Sessions")
   .add(reserve)
   .add(relinquish)
