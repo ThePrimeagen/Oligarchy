@@ -26,8 +26,9 @@ export class ApiBoundary extends HttpApiMiddleware.Service<ApiBoundary>()(
   },
 ) {}
 
-// The reverse proxy's boundary: the same code as ApiBoundary, declaring as well the two answers
-// only a router gives — a server that failed it and no server to place on.
+// The reverse proxy's boundary: the same code as ApiBoundary, declaring as well the three answers
+// only a router gives — a server that failed it, no server to place on, and a pinned server the
+// fleet does not know.
 export class RouteBoundary extends HttpApiMiddleware.Service<RouteBoundary>()(
   "@oligarchy/shared/api/RouteBoundary",
   {
@@ -36,6 +37,7 @@ export class RouteBoundary extends HttpApiMiddleware.Service<RouteBoundary>()(
       Errors.InternalWire,
       Errors.ServerFailedWire,
       Errors.NoServerWire,
+      Errors.NotFoundWire,
     ],
   },
 ) {}

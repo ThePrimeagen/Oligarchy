@@ -821,6 +821,100 @@ describe("placement", () => {
     }),
   );
 
+  // A reserve pinned to a server url goes there and nowhere else: what ./ctrl mint relies on to
+  // put one install on every server.
+  it.effect("a pinned reserve is probed, asked and routed on that server alone", () =>
+    Effect.gen(function* () {
+      const fixed = fixture((request, url) =>
+        url.pathname === "/reserve" ? FakeHttp.json({ ok: "true" }) : fleet(request, url),
+      );
+      // B has fewer machines and would win the ranking; the pin says A.
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      const pinned = Contract.ReserveAgentBody.make({ agent: AGENT_ID, server: SERVER_A });
+      yield* Effect.gen(function* () {
+        const api = yield* qemuServerClient;
+        expect(yield* api.Sessions.reserve({ payload: pinned })).toEqual(Contract.Ok.make({}));
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(upstreamCalls(fixed)).toEqual([`GET ${SERVER_A}/stats`, `POST ${SERVER_A}/reserve`]);
+      // The body reaches the server as it came, pin included; the server ignores the pin.
+      expect(fixed.upstream.requests[1]?.body).toBe(JSON.stringify(pinned));
+      expect(fixed.store.agents.get(AGENT_ID)).toBe(SERVER_A);
+      expect(fixed.log.lines.map((line) => [line.level, line.text, line.agentId])).toEqual([
+        ["info", `reserved; ${SERVER_A}`, AGENT_ID],
+      ]);
+    }),
+  );
+
+  it.effect("a pinned server's 503 passes through as it came and routes nothing", () =>
+    Effect.gen(function* () {
+      const fixed = fixture((request, url) =>
+        url.pathname === "/reserve"
+          ? FakeHttp.json({ error: "at capacity: max-jobs is 1" }, 503)
+          : fleet(request, url),
+      );
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      const pinned = Contract.ReserveAgentBody.make({ agent: AGENT_ID, server: SERVER_A });
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.post("/reserve", {
+          headers: { authorization: AUTHORIZATION },
+          body: HttpBody.jsonUnsafe(pinned),
+        });
+        expect(raw.status).toBe(503);
+        expect(yield* raw.json).toEqual({ error: "at capacity: max-jobs is 1" });
+      }).pipe(Effect.provide(serve(fixed)));
+      // No falling back to B: a pin is a pin.
+      expect(upstreamCalls(fixed)).toEqual([`GET ${SERVER_A}/stats`, `POST ${SERVER_A}/reserve`]);
+      expect(fixed.store.agents.size).toBe(0);
+    }),
+  );
+
+  it.effect("a pin to a url the fleet does not know is 404 no server <url>, asking nobody", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      fixed.store.servers.push(qemu(SERVER_A));
+      const pinned = Contract.ReserveAgentBody.make({ agent: AGENT_ID, server: SERVER_B });
+      yield* Effect.gen(function* () {
+        const api = yield* qemuReverseProxyClient;
+        const error = yield* Effect.flip(api.Sessions.reserve({ payload: pinned }));
+        expect(error).toMatchObject({ _tag: "NotFound", message: `no server ${SERVER_B}` });
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.post("/reserve", {
+          headers: { authorization: AUTHORIZATION },
+          body: HttpBody.jsonUnsafe(pinned),
+        });
+        expect(raw.status).toBe(404);
+        expect(yield* raw.json).toEqual({ error: `no server ${SERVER_B}` });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.upstream.requests).toEqual([]);
+      expect(fixed.store.agents.size).toBe(0);
+      expect(fixed.log.lines.map((line) => [line.text, line.agentId, line.skipSentry])).toEqual([
+        [`POST /reserve failed: no server ${SERVER_B}`, AGENT_ID, true],
+        [`POST /reserve failed: no server ${SERVER_B}`, AGENT_ID, true],
+      ]);
+    }),
+  );
+
+  it.effect("a pinned server whose probe fails is 502 server unreachable, never skipped", () =>
+    Effect.gen(function* () {
+      const fixed = fixture((request, url) =>
+        url.origin === SERVER_A ? refused(request, url) : fleet(request, url),
+      );
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      const pinned = Contract.ReserveAgentBody.make({ agent: AGENT_ID, server: SERVER_A });
+      yield* Effect.gen(function* () {
+        const api = yield* qemuReverseProxyClient;
+        const error = yield* Effect.flip(api.Sessions.reserve({ payload: pinned }));
+        expect(error).toMatchObject({
+          _tag: "ServerFailed",
+          message: `server ${SERVER_A} unreachable: connect ECONNREFUSED 10.0.0.5:42069`,
+        });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(upstreamCalls(fixed)).toEqual([`GET ${SERVER_A}/stats`]);
+      expect(fixed.store.agents.size).toBe(0);
+    }),
+  );
+
   it.effect(
     "POST /relinquish after reserve forwards to the reserved server and forgets the agent",
     () =>
