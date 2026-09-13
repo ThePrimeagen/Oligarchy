@@ -46,6 +46,10 @@ export const linearWebhookSecret = requiredRedacted("LINEAR_WEBHOOK_SECRET");
 // For Flag.withFallbackConfig: SERVER_URL="" is unset and the flag's default applies.
 export const serverUrl: EffectConfig.Config<string> = EffectConfig.string("SERVER_URL");
 
+// For Flag.withFallbackConfig on qemu-server's --data-dir: where the iso cache and the minted
+// disks live. OLIGARCHY_DATA_DIR="" is unset and the flag's default, ~/.oligarchy, applies.
+export const dataDir: EffectConfig.Config<string> = EffectConfig.string("OLIGARCHY_DATA_DIR");
+
 // For Flag.withFallbackConfig on ctrl's --session-id: SESSION_ID="" is unset and the flag's own
 // rule applies, so a shell can `SESSION_ID=$(./ctrl session --search ...) && export SESSION_ID`
 // once.
