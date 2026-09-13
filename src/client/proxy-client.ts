@@ -24,6 +24,7 @@ export type ProxyClientService = {
   readonly intentStart: (body: Contract.IntentStartBody) => Effect.Effect<void, Failure>;
   readonly intentEnd: (body: Contract.IntentEndBody) => Effect.Effect<void, Failure>;
   readonly stop: (body: Contract.StopBody) => Effect.Effect<void, Failure>;
+  readonly save: (body: Contract.SaveBody) => Effect.Effect<void, Failure>;
   readonly follow: (
     id: string,
   ) => Effect.Effect<Stream.Stream<Uint8Array, Errors.ProxyUnreachable>, Failure>;
@@ -167,6 +168,11 @@ export const connect = Effect.fn("ProxyClient.connect")(function* (options: Conn
   const stop = (body: Contract.StopBody) =>
     run(label("POST", "/stop"), client.Sessions.stop({ payload: body })).pipe(Effect.asVoid);
 
+  // A save waits for the guest to power off and the disk to be copied; node:http has no ceiling
+  // of its own, and the server bounds the power-off itself.
+  const save = (body: Contract.SaveBody) =>
+    run(label("POST", "/save"), client.Sessions.save({ payload: body })).pipe(Effect.asVoid);
+
   // A follow stays open for as long as the session lives; the raw client hands back the
   // response's byte stream without a ceiling and without buffering.
   const follow = Effect.fn("ProxyClient.follow")(function* (id: string) {
@@ -194,6 +200,7 @@ export const connect = Effect.fn("ProxyClient.connect")(function* (options: Conn
     intentStart,
     intentEnd,
     stop,
+    save,
     follow,
   };
   return service;

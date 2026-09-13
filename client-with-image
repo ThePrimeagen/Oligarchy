@@ -46,7 +46,7 @@ else
   "$client" "$@"
 fi
 
-if [ -z "$session_id" ] || [ "${1:-}" = "stop" ]; then
+if [ -z "$session_id" ] || [ "${1:-}" = "stop" ] || [ "${1:-}" = "save" ]; then
   exit 0
 fi
 

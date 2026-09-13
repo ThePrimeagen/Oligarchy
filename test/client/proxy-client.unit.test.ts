@@ -191,6 +191,15 @@ describe("ProxyClient requests", () => {
     }),
   );
 
+  it.effect("save posts the session and the agent", () =>
+    Effect.gen(function* () {
+      const recorder = FakeHttp.recordRequests(ok);
+      const proxy = yield* connect.pipe(Effect.provide(recorder.layer));
+      yield* proxy.save(Contract.SaveBody.make({ id: SESSION, agent: AGENT }));
+      expectJsonPost(recorder.requests[0], "/save", { id: SESSION, agent: AGENT });
+    }),
+  );
+
   it.effect("image gets /image?id&agent url-encoded with the token and returns the bytes", () =>
     Effect.gen(function* () {
       const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);

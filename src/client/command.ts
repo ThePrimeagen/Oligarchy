@@ -216,6 +216,22 @@ const stop = Command.make(
   }),
 ).pipe(Command.withDescription("Stop the machine, with a verdict when the test is over"));
 
+const saveFlags = { ...Flags.shared, sessionId: Flags.sessionId };
+
+const save = Command.make(
+  "save",
+  saveFlags,
+  Effect.fn("client.save")(function* (input: Input<typeof saveFlags>) {
+    const proxy = yield* connect(input.serverUrl);
+    yield* proxy.save(Contract.SaveBody.make({ id: input.sessionId, agent: input.agentId }));
+    yield* Console.log("saved");
+  }),
+).pipe(
+  Command.withDescription(
+    "Power the machine off and keep its disk as the minted disk of the iso it booted; ends the session",
+  ),
+);
+
 const followFlags = { ...Flags.shared, sessionId: Flags.sessionId };
 
 const follow = Command.make(
@@ -240,6 +256,7 @@ export const makeClientCommand = () =>
       sendMouse,
       intent,
       stop,
+      save,
       follow,
     ]),
   );
