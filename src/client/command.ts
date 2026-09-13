@@ -68,8 +68,8 @@ const start = Command.make(
   ),
 );
 
-// The way out of a start that keeps failing: the reservation the dispatcher took for this agent
-// is given back at once instead of holding a --max-jobs slot until it expires unused.
+// The way out of a start that keeps failing: whatever the dispatcher's reservation for this agent
+// became is given back at once, instead of holding a --max-jobs slot until it expires unused.
 const relinquish = Command.make(
   "relinquish",
   Flags.shared,
@@ -79,7 +79,7 @@ const relinquish = Command.make(
   }),
 ).pipe(
   Command.withDescription(
-    "Give back the reservation held for --agent-id when no machine will be started from it",
+    "Give back what --agent-id holds: an unused reservation, or its running machine, stopped as aborted",
   ),
 );
 

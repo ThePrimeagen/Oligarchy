@@ -381,21 +381,23 @@ const make = Effect.gen(function* () {
     const reserved = yield* store
       .serverForAgent(agent)
       .pipe(Effect.mapError((cause) => internal(cause, undefined, agent)));
-    const held = Option.isSome(reserved)
-      ? reserved
-      : yield* sessionStore.sessionForAgent(agent).pipe(
-          Effect.flatMap(
-            Option.match({
-              onNone: () => Effect.succeedNone,
-              onSome: (id) => store.serverForSession(id),
-            }),
-          ),
-          Effect.mapError((cause) => internal(cause, undefined, agent)),
-        );
+    const session = Option.isSome(reserved)
+      ? Option.none<string>()
+      : yield* sessionStore
+          .sessionForAgent(agent)
+          .pipe(Effect.mapError((cause) => internal(cause, undefined, agent)));
+    const routed = Option.isNone(session)
+      ? Option.none<string>()
+      : yield* store
+          .serverForSession(session.value)
+          .pipe(Effect.mapError((cause) => internal(cause, session.value, agent)));
+    const held = Option.orElse(reserved, () => routed);
     if (Option.isNone(held)) {
       return yield* Errors.BadRequest.make({ message: "no reservation", agentId: agent });
     }
-    const who = { agentId: agent };
+    const who: Log.Attribution = Option.isSome(session)
+      ? { location: session.value, agentId: agent }
+      : { agentId: agent };
     const url = held.value;
     const response = yield* send(url, request).pipe(
       Effect.mapError((error) => unreachable(url, error, who)),

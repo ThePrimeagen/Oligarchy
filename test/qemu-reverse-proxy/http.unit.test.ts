@@ -974,6 +974,44 @@ describe("placement", () => {
   );
 
   it.effect(
+    "POST /relinquish whose session route cannot be read is 500 internal error attributed to that session (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const failure = Errors.DatabaseError.make({
+          operation: "serverForSession",
+          message: "Failed query: select from session_servers",
+          cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
+        });
+        const fixed = fixture(fleet, {
+          store: Stores.fakeServerStore({ serverForSession: () => Effect.fail(failure) }),
+        });
+        fixed.store.servers.push(qemu(SERVER_A));
+        fixed.sessions.agentRuns.push({
+          agentId: AGENT_ID,
+          sessionId: SESSION_ID,
+          startedAt: new Date(),
+          endedAt: null,
+        });
+        yield* Effect.gen(function* () {
+          const api = yield* qemuServerClient;
+          const error = yield* Effect.flip(api.Sessions.relinquish({ payload: reserveBody }));
+          expect(error).toMatchObject({ _tag: "Internal", message: "internal error" });
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.upstream.requests).toEqual([]);
+        expect(fixed.log.lines).toEqual([
+          {
+            level: "error",
+            text: "POST /relinquish failed: connect ECONNREFUSED 127.0.0.1:5432",
+            location: SESSION_ID,
+            agentId: AGENT_ID,
+            skipSentry: false,
+            cause: failure,
+          },
+        ]);
+      }),
+  );
+
+  it.effect(
     "POST /relinquish for an agent whose session was never routed here is 400 no reservation (unhappy)",
     () =>
       Effect.gen(function* () {

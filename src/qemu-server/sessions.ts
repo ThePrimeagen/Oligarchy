@@ -1114,14 +1114,20 @@ const make = (maxJobs: number) =>
       if (timedOut.length === 0) {
         return;
       }
-      yield* Ref.update(sessions, (map) =>
-        mapWithout(
-          map,
-          timedOut.map((live) => live.id),
-        ),
-      );
+      // Only the candidates still in the map are this sweep's to end: a stop or relinquish that
+      // took one since the look above owns its verdict, as whoever removes the id always does.
+      const taken = yield* Ref.modify(sessions, (map) => {
+        const owned = timedOut.filter((live) => map.has(live.id));
+        return [
+          owned,
+          mapWithout(
+            map,
+            owned.map((live) => live.id),
+          ),
+        ] as const;
+      });
       const settled = yield* Effect.forEach(
-        timedOut,
+        taken,
         (live) => Effect.map(Effect.exit(timeOut(live)), (exit) => ({ live, exit })),
         { concurrency: "unbounded" },
       );

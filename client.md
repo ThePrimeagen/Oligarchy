@@ -48,7 +48,7 @@ The action comes first. Every value is a flag; there are no positional arguments
 - `--server-url <url>` — the qemu server, a full URL used exactly as given. Falls back to `SERVER_URL` from the environment, then `http://127.0.0.1:42069`.
 - `OLIGARCHY_TOKEN` — read from the environment and sent on every request. It is already set; do not write a `.env`. Missing means exit 1.
 
-`start` prints a session id; every action on the machine takes it as `--session-id`, and `relinquish`, which has no machine, takes none. A command that works exits 0. A command that fails exits 1 and prints the error: one headline, then the stack trace and the cause behind it. Read the headline first. `./client <action> --help` prints that action's flags. If no command arrives for ten minutes, the qemu server kills the session.
+`start` prints a session id; every action on the machine takes it as `--session-id`, and `relinquish`, which finds the agent's machine itself, takes none. A command that works exits 0. A command that fails exits 1 and prints the error: one headline, then the stack trace and the cause behind it. Read the headline first. `./client <action> --help` prints that action's flags. If no command arrives for ten minutes, the qemu server kills the session.
 
 ## client-with-image
 
@@ -61,7 +61,7 @@ The same arguments as `./client`, then a screenshot. Prefer this over calling `.
 - `CLIENT_IMAGE` — the PNG path. Required. Missing means exit 1, `CLIENT_IMAGE is not set`.
 - After the action succeeds, waits 100 ms, then writes the guest display to `CLIENT_IMAGE`.
 - The action's stdout is unchanged (`start` still prints the session id). `--session-id` comes from the flags, or from that printed id.
-- A failed action does not take a screenshot. `stop` does not either: the session is already gone. Nor does `relinquish`: there is no session.
+- A failed action does not take a screenshot. `stop` does not either: the session is already gone. Nor does `relinquish`: whatever it held is gone.
 
 ```bash
 CLIENT_IMAGE=screen.png ./client-with-image send-keys --agent-id OLI-42 --server-url https://qemu.example.com --session-id 6f1c...e2a9 --keys "hello<ENTER>"
