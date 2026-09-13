@@ -89,6 +89,7 @@ const answering =
 
 type Fixture = {
   readonly store: Stores.FakeServerStore;
+  readonly sessions: Stores.FakeSessionStore;
   readonly upstream: FakeHttp.Recorder;
   readonly log: FakeLog.FakeLog;
   readonly reporter: Reporter.Collector;
@@ -96,6 +97,7 @@ type Fixture = {
 
 const fixture = (respond: FakeHttp.Respond = fleet, overrides: Partial<Fixture> = {}): Fixture => ({
   store: Stores.fakeServerStore(),
+  sessions: Stores.fakeSessionStore(),
   upstream: FakeHttp.recordRequests(respond),
   log: FakeLog.fakeLog(),
   reporter: Reporter.collect(),
@@ -109,7 +111,13 @@ const serve = (fixed: Fixture) =>
     Layer.provide(
       Router.Router.layer.pipe(
         Layer.provide(
-          Layer.mergeAll(fixed.store.layer, fixed.log.layer, fixed.upstream.layer, ProxyConfigLive),
+          Layer.mergeAll(
+            fixed.store.layer,
+            fixed.sessions.layer,
+            fixed.log.layer,
+            fixed.upstream.layer,
+            ProxyConfigLive,
+          ),
         ),
       ),
     ),
@@ -947,6 +955,92 @@ describe("placement", () => {
       expect(fixed.log.lines.some((line) => line.text.startsWith("reservation gone"))).toBe(false);
       expect(fixed.log.lines.some((line) => line.text.startsWith("relinquished"))).toBe(false);
     }),
+  );
+
+  it.effect(
+    "POST /relinquish for an agent whose session is routed forwards to that session's server",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture((request, url) =>
+          url.pathname === "/relinquish" ? FakeHttp.json({ ok: "true" }) : fleet(request, url),
+        );
+        fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+        // As after a start: the agent's reservation route is gone, the session's route stands.
+        fixed.sessions.agentRuns.push({
+          agentId: AGENT_ID,
+          sessionId: SESSION_ID,
+          startedAt: new Date(),
+          endedAt: null,
+        });
+        fixed.store.routes.set(SESSION_ID, SERVER_A);
+        yield* Effect.gen(function* () {
+          const api = yield* qemuServerClient;
+          const ok = yield* api.Sessions.relinquish({ payload: reserveBody });
+          expect(ok).toEqual(Contract.Ok.make({}));
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(upstreamCalls(fixed)).toEqual([`POST ${SERVER_A}/relinquish`]);
+        expect(fixed.store.routes.get(SESSION_ID)).toBe(SERVER_A);
+        expect(fixed.log.lines.map((line) => line.text)).toEqual([`relinquished; ${SERVER_A}`]);
+      }),
+  );
+
+  it.effect(
+    "POST /relinquish whose session route cannot be read is 500 internal error attributed to that session (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const failure = Errors.DatabaseError.make({
+          operation: "serverForSession",
+          message: "Failed query: select from session_servers",
+          cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
+        });
+        const fixed = fixture(fleet, {
+          store: Stores.fakeServerStore({ serverForSession: () => Effect.fail(failure) }),
+        });
+        fixed.store.servers.push(qemu(SERVER_A));
+        fixed.sessions.agentRuns.push({
+          agentId: AGENT_ID,
+          sessionId: SESSION_ID,
+          startedAt: new Date(),
+          endedAt: null,
+        });
+        yield* Effect.gen(function* () {
+          const api = yield* qemuServerClient;
+          const error = yield* Effect.flip(api.Sessions.relinquish({ payload: reserveBody }));
+          expect(error).toMatchObject({ _tag: "Internal", message: "internal error" });
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.upstream.requests).toEqual([]);
+        expect(fixed.log.lines).toEqual([
+          {
+            level: "error",
+            text: "POST /relinquish failed: connect ECONNREFUSED 127.0.0.1:5432",
+            location: SESSION_ID,
+            agentId: AGENT_ID,
+            skipSentry: false,
+            cause: failure,
+          },
+        ]);
+      }),
+  );
+
+  it.effect(
+    "POST /relinquish for an agent whose session was never routed here is 400 no reservation (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture();
+        fixed.store.servers.push(qemu(SERVER_A));
+        fixed.sessions.agentRuns.push({
+          agentId: AGENT_ID,
+          sessionId: SESSION_ID,
+          startedAt: new Date(),
+          endedAt: null,
+        });
+        yield* Effect.gen(function* () {
+          const api = yield* qemuServerClient;
+          const error = yield* Effect.flip(api.Sessions.relinquish({ payload: reserveBody }));
+          expect(error).toMatchObject({ _tag: "BadRequest", message: "no reservation" });
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.upstream.requests).toEqual([]);
+      }),
   );
 
   it.effect("POST /relinquish without a reservation is 400 no reservation", () =>

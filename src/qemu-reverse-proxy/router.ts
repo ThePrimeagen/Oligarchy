@@ -13,6 +13,7 @@ import {
 import * as ProxyClient from "../client/proxy-client.ts";
 import * as Config from "../config.ts";
 import * as Servers from "../db/servers.ts";
+import * as SessionStore from "../db/sessions.ts";
 import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
 import * as Contract from "../shared/contract.ts";
@@ -125,6 +126,7 @@ const forwardedHeaders = (headers: Headers.Headers): Headers.Input => ({
 
 const make = Effect.gen(function* () {
   const store = yield* Servers.ServerStore;
+  const sessionStore = yield* SessionStore.SessionStore;
   const log = yield* Log.Log;
   const http = yield* HttpClient.HttpClient;
   const { token } = yield* Config.ProxyConfig;
@@ -373,14 +375,30 @@ const make = Effect.gen(function* () {
     request: HttpServerRequest.HttpServerRequest,
     agent: string,
   ) {
+    // The agent holds a reservation on the server /reserve chose, or the session it started on
+    // the server /start routed it to: start forgets the agent's route in favour of the session's.
+    // Whichever it is, that server answers the relinquish (a running session is stopped there).
     const reserved = yield* store
       .serverForAgent(agent)
       .pipe(Effect.mapError((cause) => internal(cause, undefined, agent)));
-    if (Option.isNone(reserved)) {
+    const session = Option.isSome(reserved)
+      ? Option.none<string>()
+      : yield* sessionStore
+          .sessionForAgent(agent)
+          .pipe(Effect.mapError((cause) => internal(cause, undefined, agent)));
+    const routed = Option.isNone(session)
+      ? Option.none<string>()
+      : yield* store
+          .serverForSession(session.value)
+          .pipe(Effect.mapError((cause) => internal(cause, session.value, agent)));
+    const held = Option.orElse(reserved, () => routed);
+    if (Option.isNone(held)) {
       return yield* Errors.BadRequest.make({ message: "no reservation", agentId: agent });
     }
-    const who = { agentId: agent };
-    const url = reserved.value;
+    const who: Log.Attribution = Option.isSome(session)
+      ? { location: session.value, agentId: agent }
+      : { agentId: agent };
+    const url = held.value;
     const response = yield* send(url, request).pipe(
       Effect.mapError((error) => unreachable(url, error, who)),
     );
@@ -439,6 +457,10 @@ export class Router extends Context.Service<Router>()("@oligarchy/qemu-reverse-p
   static readonly layer: Layer.Layer<
     Router,
     never,
-    Servers.ServerStore | Log.Log | HttpClient.HttpClient | Config.ProxyConfig
+    | Servers.ServerStore
+    | SessionStore.SessionStore
+    | Log.Log
+    | HttpClient.HttpClient
+    | Config.ProxyConfig
   > = Layer.effect(this)(this.make);
 }

@@ -4,21 +4,22 @@ Consult this table of contents first. Read only the section you need.
 
 | Section | Line |
 |---------|-----:|
-| [Important](#important) | 23 |
-| [Synopsis](#synopsis) | 29 |
-| [client-with-image](#client-with-image) | 53 |
-| [start](#start) | 70 |
-| [get-image](#get-image) | 90 |
-| [get-serial](#get-serial) | 105 |
-| [send-keys](#send-keys) | 120 |
-| [send-mouse](#send-mouse) | 136 |
-| [intent start](#intent-start) | 153 |
-| [intent end](#intent-end) | 169 |
-| [stop](#stop) | 183 |
-| [save](#save) | 199 |
-| [Keys](#keys) | 215 |
-| [Mouse](#mouse) | 227 |
-| [The loop](#the-loop) | 235 |
+| [Important](#important) | 24 |
+| [Synopsis](#synopsis) | 30 |
+| [client-with-image](#client-with-image) | 55 |
+| [start](#start) | 72 |
+| [relinquish](#relinquish) | 94 |
+| [get-image](#get-image) | 106 |
+| [get-serial](#get-serial) | 121 |
+| [send-keys](#send-keys) | 136 |
+| [send-mouse](#send-mouse) | 152 |
+| [intent start](#intent-start) | 169 |
+| [intent end](#intent-end) | 185 |
+| [stop](#stop) | 199 |
+| [save](#save) | 215 |
+| [Keys](#keys) | 231 |
+| [Mouse](#mouse) | 243 |
+| [The loop](#the-loop) | 251 |
 
 ## Important
 
@@ -32,6 +33,7 @@ If you are the client, or an agent driving the client: do not look at code. Only
 ./client <action> --agent-id <agent> [--server-url <url>] ...
 
 ./client start      [--iso <path|url>] [--disk <path>] [--resume]
+./client relinquish
 ./client get-image  --session-id <id> [-o <file>]
 ./client get-serial --session-id <id> [-o <file>]
 ./client send-keys  --session-id <id> --keys <keys> [--encoding <encoding>]
@@ -48,7 +50,7 @@ The action comes first. Every value is a flag; there are no positional arguments
 - `--server-url <url>` — the qemu server, a full URL used exactly as given. Falls back to `SERVER_URL` from the environment, then `http://127.0.0.1:42069`.
 - `OLIGARCHY_TOKEN` — read from the environment and sent on every request. It is already set; do not write a `.env`. Missing means exit 1.
 
-`start` prints a session id; every other action takes it as `--session-id`. A command that works exits 0. A command that fails exits 1 and prints the error: one headline, then the stack trace and the cause behind it. Read the headline first. `./client <action> --help` prints that action's flags. If no command arrives for ten minutes, the qemu server kills the session.
+`start` prints a session id; every action on the machine takes it as `--session-id`, and `relinquish`, which finds the agent's machine itself, takes none. A command that works exits 0. A command that fails exits 1 and prints the error: one headline, then the stack trace and the cause behind it. Read the headline first. `./client <action> --help` prints that action's flags. If no command arrives for ten minutes, the qemu server kills the session.
 
 ## client-with-image
 
@@ -61,7 +63,7 @@ The same arguments as `./client`, then a screenshot. Prefer this over calling `.
 - `CLIENT_IMAGE` — the PNG path. Required. Missing means exit 1, `CLIENT_IMAGE is not set`.
 - After the action succeeds, waits 100 ms, then writes the guest display to `CLIENT_IMAGE`.
 - The action's stdout is unchanged (`start` still prints the session id). `--session-id` comes from the flags, or from that printed id.
-- A failed action does not take a screenshot. `stop` and `save` do not either: the session is already gone.
+- A failed action does not take a screenshot. `stop` and `save` do not either: the session is already gone. Nor does `relinquish`: whatever it held is gone.
 
 ```bash
 CLIENT_IMAGE=screen.png ./client-with-image send-keys --agent-id OLI-42 --server-url https://qemu.example.com --session-id 6f1c...e2a9 --keys "hello<ENTER>"
@@ -75,16 +77,30 @@ CLIENT_IMAGE=screen.png ./client-with-image send-keys --agent-id OLI-42 --server
 
 Boots a QEMU session and prints its session id. Consumes a reservation already held
 for `--agent-id`. Without one the host answers 400 `no reservation` and the command
-fails. `./client start` does not reserve. A reservation nobody starts within ten
-minutes is given back, and a start after that is refused the same way.
+fails. `./client start` does not reserve. A start that fails keeps the reservation, so
+the same command can be retried without reserving again; after three failures give it
+back with [relinquish](#relinquish). A reservation nobody starts within ten minutes is
+given back, and a start after that is refused the same way.
 
 - `--iso <path|url>` — the ISO. A local path must exist unless `--resume` is given; an http(s) URL is downloaded and cached by the server. Default `omarchy.iso` in the current directory.
 - `--disk <path>` — an existing qcow2 disk. Omit it and the server creates a fresh one.
-- `--resume` — boot the machine's minted disk of this ISO, the one a `save` kept, instead of the ISO: the installed system comes up in seconds and you log in. Nothing is downloaded and no ISO is attached, so a local `--iso` need not exist. Without a minted disk on that machine the host answers 400 `no minted disk for <iso> on this machine` and your reservation stands: `start` again without `--resume`, or ask to be placed elsewhere. Cannot be combined with `--disk`.
+- `--resume` — boot the machine's minted disk of this ISO, the one a `save` kept, instead of the ISO: the installed system comes up in seconds and you log in. Nothing is downloaded and no ISO is attached, so a local `--iso` need not exist. Without a minted disk on that machine the host answers 400 `no minted disk for <iso> on this machine` and your reservation stands: `start` again without `--resume`, or give it back with [relinquish](#relinquish). Cannot be combined with `--disk`.
 
 ```bash
 ./client start --agent-id OLI-42 --server-url https://qemu.example.com --iso https://example.com/omarchy.iso
 ./client start --agent-id OLI-42 --server-url https://qemu.example.com --iso https://example.com/omarchy.iso --resume
+```
+
+## relinquish
+
+```
+./client relinquish --agent-id <agent> --server-url <url>
+```
+
+Gives back everything `--agent-id` holds: an unused reservation, and a running session, which is stopped as `aborted` with the reason `relinquished` (machine killed, record closed, debug log saved), so the slot goes to the next agent now, never with a guest still on it. Run it when three `start`s have failed to return a session id, then close your result as failed with `./ctrl test-results` and finish. Holding nothing, the host answers 400 `no reservation`. When the test is over, end the session with `stop` and its verdict instead.
+
+```bash
+./client relinquish --agent-id OLI-42 --server-url https://qemu.example.com
 ```
 
 ## get-image
@@ -234,7 +250,7 @@ A greeter or installer button is a left click at that point. A double-click laun
 
 ## The loop
 
-Every guest action — keys, mouse, images — runs inside an intent: start one that says what you are about to do, do the work, end it. Only `start`, `./ctrl`, `stop`, and `save` sit outside one.
+Every guest action — keys, mouse, images — runs inside an intent: start one that says what you are about to do, do the work, end it. Only `start`, `relinquish`, `./ctrl`, `stop`, and `save` sit outside one.
 
 Send keys or mouse, wait about three seconds, take an image, read it, decide. That is the whole method. `./client-with-image` is the action plus the image, with 100 ms in between; set `CLIENT_IMAGE` to the PNG path you will open. Never sleep more than ten seconds between actions. When something genuinely slow is running, keep taking images instead of trusting a long sleep.
 
