@@ -4,20 +4,21 @@ Consult this table of contents first. Read only the section you need.
 
 | Section | Line |
 |---------|-----:|
-| [Important](#important) | 22 |
-| [Synopsis](#synopsis) | 28 |
-| [client-with-image](#client-with-image) | 51 |
-| [start](#start) | 68 |
-| [get-image](#get-image) | 83 |
-| [get-serial](#get-serial) | 98 |
-| [send-keys](#send-keys) | 113 |
-| [send-mouse](#send-mouse) | 129 |
-| [intent start](#intent-start) | 146 |
-| [intent end](#intent-end) | 162 |
-| [stop](#stop) | 176 |
-| [Keys](#keys) | 192 |
-| [Mouse](#mouse) | 204 |
-| [The loop](#the-loop) | 212 |
+| [Important](#important) | 23 |
+| [Synopsis](#synopsis) | 29 |
+| [client-with-image](#client-with-image) | 53 |
+| [start](#start) | 70 |
+| [relinquish](#relinquish) | 90 |
+| [get-image](#get-image) | 102 |
+| [get-serial](#get-serial) | 117 |
+| [send-keys](#send-keys) | 132 |
+| [send-mouse](#send-mouse) | 148 |
+| [intent start](#intent-start) | 165 |
+| [intent end](#intent-end) | 181 |
+| [stop](#stop) | 195 |
+| [Keys](#keys) | 211 |
+| [Mouse](#mouse) | 223 |
+| [The loop](#the-loop) | 231 |
 
 ## Important
 
@@ -31,6 +32,7 @@ If you are the client, or an agent driving the client: do not look at code. Only
 ./client <action> --agent-id <agent> [--server-url <url>] ...
 
 ./client start      [--iso <path|url>] [--disk <path>]
+./client relinquish
 ./client get-image  --session-id <id> [-o <file>]
 ./client get-serial --session-id <id> [-o <file>]
 ./client send-keys  --session-id <id> --keys <keys> [--encoding <encoding>]
@@ -74,14 +76,27 @@ CLIENT_IMAGE=screen.png ./client-with-image send-keys --agent-id OLI-42 --server
 Boots a QEMU session and prints its session id. Consumes a reservation already held
 for `--agent-id`. Without one the host answers 400 `no reservation` and the command
 fails. `./client start` does not reserve. A start that fails keeps the reservation, so
-the same command can be retried without reserving again. A reservation nobody starts
-within ten minutes is given back, and a start after that is refused the same way.
+the same command can be retried without reserving again; after three failures give it
+back with [relinquish](#relinquish). A reservation nobody starts within ten minutes is
+given back, and a start after that is refused the same way.
 
 - `--iso <path|url>` — the ISO. A local path must exist; an http(s) URL is downloaded and cached by the server. Default `omarchy.iso` in the current directory.
 - `--disk <path>` — an existing qcow2 disk. Omit it and the server creates a fresh one.
 
 ```bash
 ./client start --agent-id OLI-42 --server-url https://qemu.example.com --iso https://example.com/omarchy.iso
+```
+
+## relinquish
+
+```
+./client relinquish --agent-id <agent> --server-url <url>
+```
+
+Gives back the reservation held for `--agent-id` without starting a machine, so the slot goes to the next agent now rather than when the reservation expires. Run it when `start` has failed three times, then close your result as failed and stop. Without a reservation the host answers 400 `no reservation`. A running session is not a reservation: end it with `stop`.
+
+```bash
+./client relinquish --agent-id OLI-42 --server-url https://qemu.example.com
 ```
 
 ## get-image

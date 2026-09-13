@@ -259,6 +259,22 @@ describe("./client happy path", () => {
     ]);
   });
 
+  it("relinquish posts the agent, prints nothing and exits 0", async () => {
+    const stub = await proxy();
+    const result = await runClient(["relinquish", "--agent-id", AGENT, "--server-url", stub.url]);
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe("");
+    expect(stub.requests).toEqual([
+      {
+        method: "POST",
+        url: "/relinquish",
+        authorization: `Bearer ${TOKEN}`,
+        body: { agent: AGENT },
+      },
+    ]);
+  });
+
   it("stop posts the verdict and reason, and a bare stop posts neither", async () => {
     const stub = await proxy();
     const base = ["stop", "--agent-id", AGENT, "--server-url", stub.url, "--session-id", SESSION];
@@ -399,6 +415,15 @@ describe("./client unhappy path", () => {
     expect(firstLine(result.stderr)).toBe("nope");
     expect(result.stderr.split("\n").length).toBeGreaterThan(1);
     expect(result.stderr).not.toMatch(/at file:\/\/.*http\.ts/);
+  });
+
+  it("relinquish without a reservation prints `no reservation` as the headline and exits 1", async () => {
+    const stub = await proxy(() => StubProxy.refusal(400, "no reservation"));
+    const result = await runClient(["relinquish", "--agent-id", AGENT, "--server-url", stub.url]);
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(firstLine(result.stderr)).toBe("no reservation");
+    expect(stub.requests.map((request) => request.url)).toEqual(["/relinquish"]);
   });
 
   it("prints a non-JSON error body raw and an empty one as `request failed`", async () => {
