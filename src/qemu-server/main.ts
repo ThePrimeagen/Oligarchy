@@ -16,6 +16,7 @@ import * as Render from "../observability/render.ts";
 import * as Sentry from "../observability/sentry.ts";
 import * as Host from "../qemu/host.ts";
 import * as Iso from "../qemu/iso.ts";
+import * as Minted from "../qemu/minted.ts";
 import * as Qemu from "../qemu/qemu.ts";
 import * as Stats from "../qemu/stats.ts";
 import * as Api from "../shared/api.ts";
@@ -57,12 +58,13 @@ const ServerLive = (
   name: string,
   port: number,
   url: Option.Option<string>,
+  dataDir: string,
 ) =>
   Layer.effectDiscard(
     Effect.gen(function* () {
       const log = yield* Log.Log;
       yield* log.info(
-        `qemu server listening on ${HOST}:${String(port)}; name ${name}; display ${display}${automation ? "; automation" : ""}; max jobs ${String(maxJobs)}${Option.match(url, { onNone: () => "", onSome: (announced) => `; announcing ${announced}` })}`,
+        `qemu server listening on ${HOST}:${String(port)}; name ${name}; display ${display}${automation ? "; automation" : ""}; max jobs ${String(maxJobs)}${Option.match(url, { onNone: () => "", onSome: (announced) => `; announcing ${announced}` })}; data ${dataDir}`,
         { location: Log.Locations.server },
       );
       yield* Option.match(url, {
@@ -79,6 +81,8 @@ const ServerLive = (
     ),
     Layer.provide(Sessions.Sessions.layer(maxJobs)),
     Layer.provide(Layer.succeed(Sessions.Shutdown)(shutdown)),
+    // Minted sits above the iso cache it writes beside; both read one Iso.
+    Layer.provide(Minted.Minted.layer),
     Layer.provide(
       Layer.mergeAll(
         Qemu.Qemu.layer,
@@ -87,6 +91,8 @@ const ServerLive = (
         ProcessUsage.ProcessUsage.layer,
       ),
     ),
+    // Beneath the cache and the minted disks: both live under the directory the flag named.
+    Layer.provide(Layer.succeed(Iso.Host)({ dataDir, pid: Qemu.pid })),
     // Bound before Sessions exists: a port refusal is one fatal line, never a drain.
     Layer.provide(NodeHttpServer.layer(() => server, { host: HOST, port })),
     // Root session spans require no request span above them.

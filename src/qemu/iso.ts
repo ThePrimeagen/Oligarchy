@@ -28,10 +28,11 @@ const logWho = (who: Who): Log.Attribution => ({
   agentId: who.agentId,
 });
 
-// The cache lives under this home and partial files carry this pid; tests point both elsewhere.
-export type HostFacts = { readonly homeDir: string; readonly pid: number };
+// The cache lives under this data directory and partial files carry this pid; the qemu server
+// points the directory where --data-dir says, tests point both elsewhere.
+export type HostFacts = { readonly dataDir: string; readonly pid: number };
 export const Host = Context.Reference<HostFacts>("@oligarchy/qemu/iso/Host", {
-  defaultValue: () => ({ homeDir: Qemu.homeDir, pid: Qemu.pid }),
+  defaultValue: () => ({ dataDir: Qemu.dataDir, pid: Qemu.pid }),
 });
 
 // A downloader refreshes its claim's heartbeat while bytes flow; waiters poll on the same
@@ -80,6 +81,9 @@ export type IsoService = {
   // A local path resolved absolute, or a url downloaded once into the cache; either way the
   // path QEMU boots from.
   readonly getIso: (name: string, who: Who) => Effect.Effect<string, Errors.IsoError>;
+  // That same path, downloaded or not: where the iso lives on this machine, and so where what
+  // belongs beside it (its minted disk) lives too.
+  readonly pathOf: (name: string) => Effect.Effect<string>;
 };
 
 const make: Effect.Effect<
@@ -93,7 +97,7 @@ const make: Effect.Effect<
   const http = (yield* HttpClient.HttpClient).pipe(HttpClient.followRedirects(20));
   const log = yield* Log.Log;
   const host = yield* Host;
-  const isoDir = path.join(host.homeDir, ".oligarchy", "isos");
+  const isoDir = path.join(host.dataDir, "isos");
   const manifestPath = path.join(isoDir, "manifest.json");
   const manifestPartial = `${manifestPath}.partial-${String(host.pid)}`;
   // Manifest writes are read-modify-write of the whole file; the permit keeps concurrent writers
@@ -252,9 +256,14 @@ const make: Effect.Effect<
       return target;
     });
 
+  const pathOf = (name: string): Effect.Effect<string> =>
+    Effect.succeed(
+      Domain.isIsoUrl(name) ? path.join(isoDir, cacheFileName(name)) : path.resolve(name),
+    );
+
   const getIso = Effect.fn("Iso.getIso")(function* (name: string, who: Who) {
     if (!Domain.isIsoUrl(name)) {
-      const resolved = path.resolve(name);
+      const resolved = yield* pathOf(name);
       const info = yield* fs
         .stat(resolved)
         .pipe(
@@ -286,7 +295,7 @@ const make: Effect.Effect<
     );
   });
 
-  return { getIso } satisfies IsoService;
+  return { getIso, pathOf } satisfies IsoService;
 });
 
 export class Iso extends Context.Service<Iso>()("@oligarchy/qemu/Iso", { make }) {

@@ -1,19 +1,22 @@
-import { Deferred, Effect, Layer, Option } from "effect";
+import { Deferred, Effect, Layer, Option, Schema } from "effect";
 import { CliError, Command, Flag } from "effect/unstable/cli";
 import type { HttpServerError } from "effect/unstable/http";
+import * as Config from "../config.ts";
 import * as Client from "../db/client.ts";
 import * as ExternalFailure from "../external-failure.ts";
 import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
 import * as Args from "../qemu/args.ts";
+import * as Qemu from "../qemu/qemu.ts";
 import * as Domain from "../shared/domain.ts";
 import * as Errors from "../shared/errors.ts";
 
 const DEFAULT_PORT = 42069;
 
 // What main.ts hands the command: the host check, the server as a layer for a display, an
-// automation flag, how many sessions it runs at once, a port and the url it announces itself
-// under (none: it stays out of the fleet), and the signal a server error raises after listen.
+// automation flag, how many sessions it runs at once, a port, the url it announces itself
+// under (none: it stays out of the fleet), the directory its iso cache and minted disks live in,
+// and the signal a server error raises after listen.
 export type QemuServer<RHost, RServe> = {
   readonly missingHostRequirements: (
     display: Domain.QemuDisplay,
@@ -25,6 +28,7 @@ export type QemuServer<RHost, RServe> = {
     name: string,
     port: number,
     url: Option.Option<string>,
+    dataDir: string,
   ) => Layer.Layer<never, HttpServerError.ServeError, RServe>;
   readonly serverFailed: Deferred.Deferred<never, HttpServerError.ServeError>;
 };
@@ -80,8 +84,18 @@ export const makeQemuServerCommand = <RHost, RServe>(server: QemuServer<RHost, R
           "Announce this server to the fleet under this url, every 30 seconds, and delete the row on shutdown",
         ),
       ),
+      // Flag, then OLIGARCHY_DATA_DIR, then ~/.oligarchy: several servers on one machine each
+      // get a cache and minted disks of their own by pointing this elsewhere.
+      dataDir: Flag.string("data-dir").pipe(
+        Flag.withSchema(Schema.NonEmptyString),
+        Flag.withFallbackConfig(Config.dataDir),
+        Flag.withDefault(Qemu.dataDir),
+        Flag.withDescription(
+          "Where this server keeps its iso cache and minted disks; OLIGARCHY_DATA_DIR when omitted, else ~/.oligarchy",
+        ),
+      ),
     },
-    ({ display, automation, maxJobs, name, port, url }) =>
+    ({ display, automation, maxJobs, name, port, url, dataDir }) =>
       Effect.gen(function* () {
         if (automation && Option.isSome(display)) {
           return yield* new CliError.UserError({
@@ -108,7 +122,7 @@ export const makeQemuServerCommand = <RHost, RServe>(server: QemuServer<RHost, R
             ),
           );
           return yield* Effect.raceFirst(
-            Layer.launch(server.serve(resolved, automation, maxJobs, name, port, url)),
+            Layer.launch(server.serve(resolved, automation, maxJobs, name, port, url, dataDir)),
             Deferred.await(server.serverFailed),
           );
         });

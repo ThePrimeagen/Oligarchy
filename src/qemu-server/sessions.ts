@@ -28,6 +28,7 @@ import * as Render from "../observability/render.ts";
 import * as Sentry from "../observability/sentry.ts";
 import * as Iso from "../qemu/iso.ts";
 import * as Keys from "../qemu/keys.ts";
+import * as Minted from "../qemu/minted.ts";
 import * as Qemu from "../qemu/qemu.ts";
 import * as Stats from "../qemu/stats.ts";
 import type * as Qmp from "../qmp/client.ts";
@@ -45,6 +46,10 @@ const SESSION_TIMEOUT_REASON = "no command received for 10 minutes";
 const RESERVATION_TIMEOUT_MS = 10 * 60 * 1000;
 const RESERVATION_TIMEOUT_REASON = "unused for 10 minutes";
 const SHUTDOWN_REASON = "qemu server shutdown";
+// An installed Omarchy shuts down in seconds; a guest still up two minutes after the power button
+// is not going to, and its disk is not one to keep.
+const SAVE_POWEROFF = "2 minutes";
+const SAVE_POWEROFF_REASON = "guest did not power off within 2 minutes";
 // A click is two QMP exchanges and two action rows; cap the pulse count so one request cannot
 // enqueue an unbounded amount of work.
 const MAX_CLICKS = 100;
@@ -64,6 +69,8 @@ type Image = { readonly id: string; readonly png: string };
 export type LiveSession = {
   readonly id: string;
   readonly agent: string;
+  // The iso as the start named it: a save keeps the disk beside it.
+  readonly iso: string;
   readonly qemu: Qemu.QemuHandle;
   readonly span: Tracer.Span;
   readonly scope: Scope.Closeable;
@@ -127,6 +134,12 @@ export type SessionsService = {
     status: Domain.StopStatus | undefined,
     reason: string | undefined,
   ) => Effect.Effect<void, Errors.Internal | Errors.UnknownSession>;
+  // Ends the session keeping its disk as the machine's minted disk for its iso: the guest is
+  // powered down, its disk and firmware copy are kept, the row closes succeeded. A guest that
+  // will not power off, or a disk that cannot be kept, ends the session failed instead.
+  readonly save: (
+    live: LiveSession,
+  ) => Effect.Effect<void, Errors.SaveFailed | Errors.Internal | Errors.UnknownSession>;
   readonly follow: (
     id: string,
   ) => Effect.Effect<
@@ -206,6 +219,7 @@ const make = (maxJobs: number) =>
   Effect.gen(function* () {
     const qemu = yield* Qemu.Qemu;
     const iso = yield* Iso.Iso;
+    const minted = yield* Minted.Minted;
     const stats = yield* Stats.Stats;
     const sessionStore = yield* SessionStore.SessionStore;
     const actionStore = yield* Actions.ActionStore;
@@ -547,6 +561,7 @@ const make = (maxJobs: number) =>
       const live: OpenSession = {
         id,
         agent,
+        iso: body.iso,
         span: yield* Sentry.sessionSpan(id, agent),
         scope: yield* Scope.make(),
         lastCommandAt: yield* Ref.make(started),
@@ -880,6 +895,93 @@ const make = (maxJobs: number) =>
     });
 
     // -------------------------------------------------------------------------
+    // save
+    // -------------------------------------------------------------------------
+
+    const saveFailed = (message: string, live: LiveSession, cause?: unknown): Errors.SaveFailed =>
+      Errors.SaveFailed.make(
+        Object.assign(
+          { message, sessionId: live.id, agentId: live.agent },
+          cause === undefined ? undefined : { cause },
+        ),
+      );
+
+    // A clean shutdown makes a clean disk: the power button, then QEMU's exit, then the copy. A
+    // guest the driver already shut down needs no button, and a socket closing under the button
+    // is a guest already on its way out.
+    const powerOff = (live: LiveSession): Effect.Effect<void, Errors.SaveFailed> =>
+      Effect.gen(function* () {
+        if (yield* live.qemu.running) {
+          yield* live.qemu.powerdown(recorder(live)).pipe(
+            Effect.catchTag("QmpClosed", () => Effect.void),
+            Effect.mapError((error) => saveFailed(detail(error), live, error)),
+          );
+        }
+        yield* live.qemu.exited.pipe(
+          Effect.timeoutOrElse({
+            duration: SAVE_POWEROFF,
+            orElse: () => Effect.fail(saveFailed(SAVE_POWEROFF_REASON, live)),
+          }),
+        );
+      });
+
+    const save = Effect.fn("Sessions.save")(function* (live: LiveSession) {
+      // Whoever removes the id owns its one verdict, as in stop.
+      const owned = yield* Ref.modify(sessions, (map) =>
+        map.has(live.id) ? [true, mapWithout(map, [live.id])] : [false, map],
+      );
+      if (!owned) {
+        return yield* Errors.unknownSession(live.id, live.agent);
+      }
+      const who = { sessionId: live.id, agentId: live.agent };
+      // The disk is read while the session dir still exists; the kill comes after.
+      const kept = yield* Effect.result(
+        followed(
+          live,
+          "save",
+          powerOff(live).pipe(
+            Effect.andThen(
+              minted.save(live.iso, { disk: live.qemu.diskPath, vars: live.qemu.varsPath }, who),
+            ),
+          ),
+        ),
+      );
+      if (Result.isFailure(kept)) {
+        const error = kept.failure;
+        const captured = yield* captureDebugLog(live);
+        yield* killLogged(live, "save cleanup failed", live.agent);
+        // Best effort: the caller's error is what matters once the save has failed.
+        yield* sessionStore.endSession(live.id, "failed", error.message).pipe(
+          Effect.catch((failure) =>
+            log.error(`db: recording a failed save failed too: ${failure.message}`, {
+              location: live.id,
+              agentId: live.agent,
+              cause: failure,
+            }),
+          ),
+        );
+        yield* log.info(`stopped; failed; ${error.message}`, attribution(live.id, live.agent));
+        yield* saveDebugLog(live, captured);
+        yield* finishLiveSession(live, "failed");
+        return yield* Effect.fail(error);
+      }
+      yield* killLogged(live, "save cleanup failed", live.agent);
+      const reason = `saved; minted ${live.iso}`;
+      yield* sessionStore
+        .endSession(live.id, "succeeded", reason)
+        .pipe(
+          Effect.catch((cause) =>
+            finishLiveSession(live, "succeeded").pipe(
+              Effect.andThen(Effect.fail(internal(cause, live.id, live.agent))),
+            ),
+          ),
+        );
+      // Colour is released in finishLiveSession; log first so the saved line keeps it.
+      yield* log.info(reason, attribution(live.id, live.agent));
+      return yield* finishLiveSession(live, "succeeded");
+    });
+
+    // -------------------------------------------------------------------------
     // follow
     // -------------------------------------------------------------------------
 
@@ -1086,6 +1188,7 @@ const make = (maxJobs: number) =>
       intentStart,
       intentEnd,
       stop,
+      save,
       follow,
       stats: Effect.flatMap(Ref.get(sessions), (map) => stats.collect(map.size)),
       jobs: Effect.map(Ref.get(slots), (held) => held.count),
@@ -1103,6 +1206,7 @@ export class Sessions extends Context.Service<Sessions>()("@oligarchy/qemu-serve
     never,
     | Qemu.Qemu
     | Iso.Iso
+    | Minted.Minted
     | Stats.Stats
     | SessionStore.SessionStore
     | Actions.ActionStore

@@ -108,6 +108,23 @@ export class ExchangeFailed extends Schema.TaggedError<ExchangeFailed>(
   override readonly [ErrorReporter.ignore] = true;
 }
 
+// A save the machine did not carry through: the guest would not power off, or its disk could not
+// be kept. 502 as StartFailed: the machine, not the caller, failed the request.
+export class SaveFailed extends Schema.TaggedError<SaveFailed>(
+  "@oligarchy/shared/errors/SaveFailed",
+)(
+  "SaveFailed",
+  {
+    message: Schema.String,
+    cause: Schema.optionalKey(Schema.Defect()),
+    sessionId: Schema.String,
+    agentId: Schema.String,
+  },
+  { httpApiStatus: 502 },
+) {
+  override readonly [ErrorReporter.ignore] = true;
+}
+
 export class Internal extends Schema.TaggedError<Internal>("@oligarchy/shared/errors/Internal")(
   "Internal",
   {
@@ -179,6 +196,7 @@ export type ApiError =
   | Conflict
   | StartFailed
   | ExchangeFailed
+  | SaveFailed
   | Internal
   | ServerFailed
   | NoServer
@@ -203,6 +221,7 @@ const apiErrorClasses = {
   Conflict,
   StartFailed,
   ExchangeFailed,
+  SaveFailed,
   Internal,
   ServerFailed,
   NoServer,
@@ -261,6 +280,10 @@ export const StartFailedWire = wireError(
 export const ExchangeFailedWire = wireError(
   ExchangeFailed,
   (message) => ({ _tag: "ExchangeFailed", message, sessionId: "", agentId: "" }) as const,
+);
+export const SaveFailedWire = wireError(
+  SaveFailed,
+  (message) => ({ _tag: "SaveFailed", message, sessionId: "", agentId: "" }) as const,
 );
 // A decoded Internal has no defect to carry: the wire only says "internal error".
 export const InternalWire = wireError(

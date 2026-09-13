@@ -114,7 +114,9 @@ const fixture = (respond: FakeHttp.Respond = routes()) =>
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const home = yield* fs.makeTempDirectoryScoped({ prefix: "oligarchy-iso-test-" });
-    const isos = path.join(home, ".oligarchy", "isos");
+    // Not `.oligarchy`: the cache follows the data directory it is given, wherever that is.
+    const dataDir = path.join(home, "data");
+    const isos = path.join(dataDir, "isos");
     const manifestPath = path.join(isos, "manifest.json");
     const intercepted = FakeFs.intercepting();
     const log = FakeLog.fakeLog();
@@ -125,7 +127,7 @@ const fixture = (respond: FakeHttp.Respond = routes()) =>
           intercepted.layer,
           http.layer,
           log.layer,
-          Layer.succeed(Iso.Host)({ homeDir: home, pid: PID }),
+          Layer.succeed(Iso.Host)({ dataDir, pid: PID }),
         ),
       ),
       Layer.provide(NodeServices.layer),
@@ -209,6 +211,40 @@ describe("getIso with a local path", () => {
         const { home, iso } = yield* fixture();
         const error = yield* Effect.flip(iso.getIso(home, WHO));
         expect(error.message).toBe(`iso: is a directory: ${home}`);
+      }),
+    ),
+  );
+});
+
+describe("pathOf", () => {
+  it.effect("answers the cache file for a url without touching the network or the disk", () =>
+    withServices(
+      Effect.gen(function* () {
+        const { iso, cached, http, intercepted } = yield* fixture(refuseHttp);
+        expect(yield* iso.pathOf(URL_ISO)).toBe(cached);
+        expect(http.requests).toEqual([]);
+        expect(intercepted.calls).toEqual([]);
+      }),
+    ),
+  );
+
+  it.effect("answers the resolved path for a file, whether or not it exists", () =>
+    withServices(
+      Effect.gen(function* () {
+        const { iso, path, home } = yield* fixture(refuseHttp);
+        expect(yield* iso.pathOf(path.join(home, "local.iso"))).toBe(path.join(home, "local.iso"));
+        expect(yield* iso.pathOf("no-such-file.iso")).toBe(path.resolve("no-such-file.iso"));
+      }),
+    ),
+  );
+
+  it.effect("is the path getIso boots from", () =>
+    withServices(
+      Effect.gen(function* () {
+        const { iso, http } = yield* fixture();
+        const booted = yield* iso.getIso(URL_ISO, WHO);
+        expect(booted).toBe(yield* iso.pathOf(URL_ISO));
+        expect(http.requests.length).toBeGreaterThan(0);
       }),
     ),
   );

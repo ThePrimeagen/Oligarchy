@@ -77,6 +77,7 @@ const decoder = new TextDecoder();
 const bodyOf = (response: HttpClientResponse.HttpClientResponse) => response.json;
 
 const stopBody = Contract.StopBody.make({ id: SESSION_ID, agent: AGENT_ID });
+const saveBody = Contract.SaveBody.make({ id: SESSION_ID, agent: AGENT_ID });
 
 describe("Sessions endpoints happy path", () => {
   it.effect("POST /start answers the new id and hands display and automation to Sessions", () =>
@@ -267,6 +268,26 @@ describe("Sessions endpoints happy path", () => {
     }),
   );
 
+  it.effect("POST /save looks the session up for its agent and hands it to Sessions", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const api = yield* client;
+        const [ok, response] = yield* api.Sessions.save({
+          payload: saveBody,
+          responseMode: "decoded-and-response",
+        });
+        expect(ok.ok).toBe("true");
+        expect(yield* response.text).toBe('{"ok":"true"}');
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.sessions.calls).toEqual([
+        { method: "lookup", args: [SESSION_ID, AGENT_ID] },
+        { method: "save", args: [SESSION_ID] },
+      ]);
+      expect(fixed.log.lines).toEqual([]);
+    }),
+  );
+
   it.effect("POST /send-keys hands the keys and the encoding, present or absent, to Sessions", () =>
     Effect.gen(function* () {
       const fixed = fixture();
@@ -359,6 +380,7 @@ describe("authentication", () => {
     ["GET", "/follow?id=x", false],
     ["GET", "/stats", false],
     ["POST", "/stop", true],
+    ["POST", "/save", true],
     ["POST", "/send-keys", true],
     ["POST", "/send-mouse", true],
     ["POST", "/intent/start", true],
@@ -833,6 +855,78 @@ describe("Sessions failures", () => {
       // Every API error is ErrorReporter.ignore'd; the Log line above is the one report (see the
       // real-Log test below), so a faked Log leaves the reporter untouched.
       expect(fixed.reporter.reported).toEqual([]);
+    }),
+  );
+
+  it.effect("a SaveFailed is 502 with its message, logged with its cause", () =>
+    Effect.gen(function* () {
+      const convert = Errors.QemuStartError.make({ message: "qemu-img convert exited 1" });
+      const fixed = fixture({
+        sessions: FakeSessions.fakeSessions({
+          save: (live) =>
+            Effect.fail(
+              Errors.SaveFailed.make({
+                message: convert.message,
+                cause: convert,
+                sessionId: live.id,
+                agentId: live.agent,
+              }),
+            ),
+        }),
+      });
+      yield* Effect.gen(function* () {
+        const api = yield* client;
+        const error = yield* Effect.flip(api.Sessions.save({ payload: saveBody }));
+        expect(error).toMatchObject({ _tag: "SaveFailed", message: "qemu-img convert exited 1" });
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.post("/save", {
+          headers: { authorization: `Bearer ${TOKEN}` },
+          body: HttpBody.jsonUnsafe(saveBody),
+        });
+        expect(raw.status).toBe(502);
+        expect(yield* raw.json).toEqual({ error: "qemu-img convert exited 1" });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.log.lines[0]).toEqual({
+        level: "error",
+        text: "POST /save failed: qemu-img convert exited 1",
+        location: SESSION_ID,
+        agentId: AGENT_ID,
+        skipSentry: false,
+        cause: convert,
+      });
+      expect(fixed.reporter.reported).toEqual([]);
+    }),
+  );
+
+  it.effect("POST /save for another agent's session is 403 and reaches Sessions.save never", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const api = yield* client;
+        const error = yield* Effect.flip(
+          api.Sessions.save({
+            payload: Contract.SaveBody.make({ id: SESSION_ID, agent: OTHER_AGENT_ID }),
+          }),
+        );
+        expect(error).toMatchObject({
+          _tag: "Forbidden",
+          message: `agent "${OTHER_AGENT_ID}" does not own session "${SESSION_ID}"`,
+        });
+        const unknown = yield* Effect.flip(
+          api.Sessions.save({
+            payload: Contract.SaveBody.make({ id: "garbage", agent: AGENT_ID }),
+          }),
+        );
+        expect(unknown).toMatchObject({
+          _tag: "UnknownSession",
+          message: 'unknown session "garbage"',
+        });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(FakeSessions.methods(fixed.sessions)).toEqual(["lookup", "lookup"]);
+      expect(fixed.log.lines.map((line) => [line.text, line.skipSentry])).toEqual([
+        [`POST /save failed: agent "${OTHER_AGENT_ID}" does not own session "${SESSION_ID}"`, true],
+        ['POST /save failed: unknown session "garbage"', true],
+      ]);
     }),
   );
 

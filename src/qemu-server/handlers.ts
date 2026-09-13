@@ -101,6 +101,17 @@ export const SessionsLive = (display: Domain.QemuDisplay, automation: boolean) =
         uninterruptible,
       )
       .handle(
+        "save",
+        ({ payload }) =>
+          Effect.gen(function* () {
+            const sessions = yield* Sessions.Sessions;
+            const live = yield* sessions.lookup(payload.id, payload.agent);
+            yield* sessions.save(live);
+            return ok;
+          }),
+        uninterruptible,
+      )
+      .handle(
         "sendKeys",
         ({ payload }) =>
           Effect.gen(function* () {

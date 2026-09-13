@@ -58,6 +58,7 @@ describe("QemuServerApi", () => {
         "GET /follow",
         "GET /stats",
         "POST /stop",
+        "POST /save",
         "POST /send-keys",
         "POST /send-mouse",
         "POST /intent/start",
@@ -80,6 +81,7 @@ describe("QemuServerApi", () => {
     expect(urls.Sessions.follow({ query: { id: "abc" } })).toBe("/follow?id=abc");
     expect(urls.Sessions.stats()).toBe("/stats");
     expect(urls.Sessions.stop()).toBe("/stop");
+    expect(urls.Sessions.save()).toBe("/save");
     expect(urls.Sessions.sendKeys()).toBe("/send-keys");
     expect(urls.Sessions.sendMouse()).toBe("/send-mouse");
     expect(urls.Sessions.intentStart()).toBe("/intent/start");
@@ -137,6 +139,10 @@ describe("QemuServerApi", () => {
     expect(byIdentifier(Api.QemuServerApi, "stop").errors).toEqual(
       [...sessions, 403, 404].sort((a, b) => a - b),
     );
+    // 502: the guest did not power off, or its disk could not be kept.
+    expect(byIdentifier(Api.QemuServerApi, "save").errors).toEqual(
+      [...sessions, 403, 404, 502].sort((a, b) => a - b),
+    );
     expect(byIdentifier(Api.QemuServerApi, "sendKeys").errors).toEqual(
       [...sessions, 403, 404, 502].sort((a, b) => a - b),
     );
@@ -170,6 +176,7 @@ describe("QemuReverseProxyApi", () => {
         "GET /serial",
         "GET /follow",
         "POST /stop",
+        "POST /save",
         "POST /send-keys",
         "POST /send-mouse",
         "POST /intent/start",
@@ -224,6 +231,8 @@ describe("QemuReverseProxyApi", () => {
     expect(byIdentifier(reverse, "serial").errors).toEqual(ascending([...boundary, 403, 404]));
     expect(byIdentifier(reverse, "follow").errors).toEqual(ascending([...boundary, 404, 409]));
     expect(byIdentifier(reverse, "stop").errors).toEqual(ascending([...boundary, 403, 404]));
+    // save's own 502 is the boundary's 502 too: one status, declared once.
+    expect(byIdentifier(reverse, "save").errors).toEqual(ascending([...boundary, 403, 404]));
     expect(byIdentifier(reverse, "sendKeys").errors).toEqual(ascending([...boundary, 403, 404]));
     expect(byIdentifier(reverse, "sendMouse").errors).toEqual(ascending([...boundary, 403, 404]));
     expect(byIdentifier(reverse, "intentStart").errors).toEqual(ascending([...boundary, 403, 404]));

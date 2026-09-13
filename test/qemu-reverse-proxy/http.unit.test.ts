@@ -1352,6 +1352,7 @@ describe("forwarding", () => {
         status: "succeeded",
         reason: "done",
       });
+      const save = Contract.SaveBody.make({ id: SESSION_ID, agent: AGENT_ID });
       yield* Effect.gen(function* () {
         const api = yield* qemuServerClient;
         expect(yield* api.Sessions.sendKeys({ payload: sendKeys })).toEqual(Contract.Ok.make({}));
@@ -1364,6 +1365,7 @@ describe("forwarding", () => {
         });
         expect(ok.ok).toBe("true");
         expect(yield* response.text).toBe('{"ok":"true"}');
+        expect((yield* api.Sessions.save({ payload: save })).ok).toBe("true");
       }).pipe(Effect.provide(serve(fixed)));
       expect(fixed.upstream.requests).toEqual([
         {
@@ -1416,7 +1418,39 @@ describe("forwarding", () => {
             reason: "done",
           }),
         },
+        {
+          method: "POST",
+          url: `${SERVER_A}/save`,
+          headers: expect.objectContaining({ authorization: AUTHORIZATION }),
+          body: JSON.stringify({ id: SESSION_ID, agent: AGENT_ID }),
+        },
       ]);
+      expect(fixed.log.lines).toEqual([]);
+    }),
+  );
+
+  it.effect("a save the server fails passes through as its 502 and is not logged here", () =>
+    Effect.gen(function* () {
+      const message = "guest did not power off within 2 minutes";
+      const fixed = fixture(() => FakeHttp.json({ error: message }, 502));
+      fixed.store.routes.set(SESSION_ID, SERVER_A);
+      yield* Effect.gen(function* () {
+        const api = yield* qemuServerClient;
+        const error = yield* Effect.flip(
+          api.Sessions.save({
+            payload: Contract.SaveBody.make({ id: SESSION_ID, agent: AGENT_ID }),
+          }),
+        );
+        expect(error).toMatchObject({ _tag: "SaveFailed", message });
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.post("/save", {
+          headers: { authorization: AUTHORIZATION },
+          body: HttpBody.jsonUnsafe({ id: SESSION_ID, agent: AGENT_ID }),
+        });
+        expect(raw.status).toBe(502);
+        expect(yield* raw.json).toEqual({ error: message });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(upstreamCalls(fixed)).toEqual([`POST ${SERVER_A}/save`, `POST ${SERVER_A}/save`]);
       expect(fixed.log.lines).toEqual([]);
     }),
   );
@@ -1510,10 +1544,20 @@ describe("forwarding refusals", () => {
         });
         const empty = yield* Effect.flip(api.Sessions.follow({ query: { id: "" } }));
         expect(empty).toMatchObject({ _tag: "UnknownSession", message: 'unknown session ""' });
+        const save = yield* Effect.flip(
+          api.Sessions.save({
+            payload: Contract.SaveBody.make({ id: "garbage", agent: AGENT_ID }),
+          }),
+        );
+        expect(save).toMatchObject({
+          _tag: "UnknownSession",
+          message: 'unknown session "garbage"',
+        });
       }).pipe(Effect.provide(serve(fixed)));
       expect(fixed.log.lines.map((line) => [line.text, line.location, line.agentId])).toEqual([
         ['POST /stop failed: unknown session "garbage"', "server", AGENT_ID],
         ['GET /follow?id= failed: unknown session ""', "server", undefined],
+        ['POST /save failed: unknown session "garbage"', "server", AGENT_ID],
       ]);
     }),
   );
@@ -1641,6 +1685,7 @@ describe("forwarding refusals", () => {
     ["GET", `/serial?id=${SESSION_ID}&agent=${AGENT_ID}`, false],
     ["GET", `/follow?id=${SESSION_ID}`, false],
     ["POST", "/stop", true],
+    ["POST", "/save", true],
     ["POST", "/send-keys", true],
     ["POST", "/send-mouse", true],
     ["POST", "/intent/start", true],

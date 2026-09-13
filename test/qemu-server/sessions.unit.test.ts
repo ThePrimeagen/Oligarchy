@@ -24,6 +24,7 @@ import * as Contract from "../../src/shared/contract.ts";
 import * as Domain from "../../src/shared/domain.ts";
 import * as Errors from "../../src/shared/errors.ts";
 import * as FakeLog from "../support/log.ts";
+import * as FakeMinted from "../support/fake-minted.ts";
 import * as FakeQemu from "../support/fake-qemu.ts";
 import * as Stores from "../support/stores.ts";
 import * as Recording from "../support/tracer.ts";
@@ -85,6 +86,7 @@ type Files = Map<string, Effect.Effect<Uint8Array, PlatformError.PlatformError>>
 type Options = {
   readonly script?: FakeQemu.Script;
   readonly resolveIso?: FakeQemu.Resolve;
+  readonly minted?: FakeMinted.Script;
   readonly sessionStore?: Parameters<typeof Stores.fakeSessionStore>[0];
   readonly actionStore?: Parameters<typeof Stores.fakeActionStore>[0];
   readonly debugLogStore?: Parameters<typeof Stores.fakeDebugLogStore>[0];
@@ -101,6 +103,7 @@ const harness = (options: Options = {}) => {
   const tracer = Recording.recording();
   const qemu = FakeQemu.fakeQemu(options.script);
   const iso = FakeQemu.fakeIso(options.resolveIso);
+  const minted = FakeMinted.fakeMinted(options.minted);
   const files: Files = new Map();
   const fsCalls: Array<string> = [];
   const fs = FileSystem.layerNoop({
@@ -124,6 +127,7 @@ const harness = (options: Options = {}) => {
       Layer.mergeAll(
         qemu.layer,
         iso.layer,
+        minted.layer,
         FakeQemu.fakeStats,
         sessions.layer,
         actions.layer,
@@ -139,7 +143,7 @@ const harness = (options: Options = {}) => {
   // whichever fiber calls a method.
   const run = <A, E>(body: Effect.Effect<A, E, Sessions.Sessions>): Effect.Effect<A, E> =>
     body.pipe(Effect.provide(layer.pipe(Layer.provideMerge(tracer.layer))));
-  return { sessions, actions, debugLogs, log, tracer, qemu, iso, files, fsCalls, run };
+  return { sessions, actions, debugLogs, log, tracer, qemu, iso, minted, files, fsCalls, run };
 };
 
 type Harness = ReturnType<typeof harness>;
@@ -1056,26 +1060,27 @@ describe("intents", () => {
 // stop
 // ---------------------------------------------------------------------------
 
-describe("stop", () => {
-  // One Log fake whose lines and colour releases share a single ordered record.
-  const orderedLog = () => {
-    const order: Array<string> = [];
-    const record = (text: string) =>
-      Effect.sync(() => {
-        order.push(text);
-      });
-    const service: Log.LogService = {
-      info: record,
-      warning: record,
-      error: record,
-      fatal: record,
-      acquireColor: (agentId) => record(`acquireColor ${agentId}`),
-      releaseColor: (agentId) => record(`releaseColor ${agentId}`),
-      flush: Effect.void,
-    };
-    return { order, layer: Layer.succeed(Log.Log)(service) };
+// One Log fake whose lines and colour releases share a single ordered record; `record` lets a
+// test's own scripts write into the same order.
+const orderedLog = () => {
+  const order: Array<string> = [];
+  const record = (text: string) =>
+    Effect.sync(() => {
+      order.push(text);
+    });
+  const service: Log.LogService = {
+    info: record,
+    warning: record,
+    error: record,
+    fatal: record,
+    acquireColor: (agentId) => record(`acquireColor ${agentId}`),
+    releaseColor: (agentId) => record(`releaseColor ${agentId}`),
+    flush: Effect.void,
   };
+  return { order, record, layer: Layer.succeed(Log.Log)(service) };
+};
 
+describe("stop", () => {
   it.effect("forgets the session, kills it, closes the row and tells followers last", () =>
     Effect.gen(function* () {
       const ordered = orderedLog();
@@ -1457,6 +1462,280 @@ describe("stop", () => {
             skipSentry: false,
           });
           expect(line(h, "stopped")).toMatchObject({ text: "stopped; failed; gave up" });
+        }),
+      );
+    }),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// save
+// ---------------------------------------------------------------------------
+
+describe("save", () => {
+  const tags = (h: Harness): ReadonlyArray<string> => h.qemu.calls.map((call) => call._tag);
+
+  it.effect(
+    "powers the guest down, keeps its disk before the kill, closes the row succeeded and tells followers last",
+    () =>
+      Effect.gen(function* () {
+        const ordered = orderedLog();
+        const h = harness({
+          log: ordered.layer,
+          script: { stop: () => ordered.record("kill") },
+          minted: { save: () => ordered.record("minted") },
+        });
+        yield* h.run(
+          Effect.gen(function* () {
+            const { sessions, id, live } = yield* start();
+            const events = yield* sessions.follow(id);
+            yield* sessions.save(live);
+            expect(yield* Effect.flip(sessions.lookup(id, AGENT))).toMatchObject({
+              _tag: "UnknownSession",
+            });
+            expect(yield* qemus(sessions)).toBe(0);
+            expect(yield* sessions.jobs).toBe(0);
+            expect(tags(h)).toEqual(["prepare", "start", "powerdown", "stop"]);
+            expect(h.minted.saves).toEqual([
+              {
+                iso: ISO,
+                from: {
+                  disk: `${h.qemu.sessionDir(id)}/disk.qcow2`,
+                  vars: `${h.qemu.sessionDir(id)}/OVMF_VARS.fd`,
+                },
+                who: { sessionId: id, agentId: AGENT },
+              },
+            ]);
+            expect(h.actions.actions[1]).toMatchObject({
+              request: { execute: "system_powerdown", arguments: {} },
+              state: "completed",
+            });
+            expect(h.sessions.sessions[0]).toMatchObject({
+              id,
+              status: "succeeded",
+              reason: `saved; minted ${ISO}`,
+            });
+            expect(h.sessions.sessions[0]?.endedAt).not.toBeNull();
+            expect(h.sessions.agentRuns[0]?.endedAt).not.toBeNull();
+            // The disk is read while the session dir still exists; the kill comes after.
+            expect(ordered.order.slice(ordered.order.indexOf("minted"))).toEqual([
+              "minted",
+              "kill",
+              `saved; minted ${ISO}`,
+              `releaseColor ${AGENT}`,
+            ]);
+            expect(yield* Stream.runCollect(events)).toEqual([
+              { type: "session", status: "running" },
+              { type: "action", id: 1, name: "save", state: "running" },
+              { type: "action", id: 1, state: "completed" },
+              { type: "session", status: "succeeded" },
+            ]);
+            expect(endedWith(spanNamed(h, AGENT))).toBe("ok");
+            expect(h.debugLogs.saves).toEqual([]);
+          }),
+        );
+      }),
+  );
+
+  it.effect("a guest that already left is kept without a powerdown exchange", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      yield* h.run(
+        Effect.gen(function* () {
+          const { sessions, id, live } = yield* start();
+          yield* h.qemu.exit(id, 0);
+          yield* sessions.save(live);
+          expect(tags(h)).toEqual(["prepare", "start", "stop"]);
+          expect(h.actions.actions).toHaveLength(1);
+          expect(h.minted.saves).toHaveLength(1);
+          expect(h.sessions.sessions[0]).toMatchObject({ id, status: "succeeded" });
+        }),
+      );
+    }),
+  );
+
+  it.effect("a socket that closes under the powerdown is a guest already leaving", () =>
+    Effect.gen(function* () {
+      const h = harness({
+        script: {
+          powerdown: () => Effect.fail(Errors.QmpClosed.make({ message: "qemu: closed" })),
+          powersOff: false,
+        },
+      });
+      yield* h.run(
+        Effect.gen(function* () {
+          const { sessions, id, live } = yield* start();
+          const saving = yield* Effect.forkChild(sessions.save(live));
+          yield* Effect.yieldNow;
+          expect(h.minted.saves).toEqual([]);
+          yield* h.qemu.exit(id, 0);
+          yield* Fiber.join(saving);
+          expect(h.minted.saves).toHaveLength(1);
+          expect(h.sessions.sessions[0]).toMatchObject({ id, status: "succeeded" });
+        }),
+      );
+    }),
+  );
+
+  it.effect(
+    "a guest that does not power off within two minutes is killed, the row fails and nothing is kept",
+    () =>
+      Effect.gen(function* () {
+        const h = harness({ script: { powersOff: false } });
+        yield* h.run(
+          Effect.gen(function* () {
+            const { sessions, id, live } = yield* start();
+            const events = yield* sessions.follow(id);
+            const saving = yield* Effect.forkChild(Effect.flip(sessions.save(live)));
+            yield* TestClock.adjust("2 minutes");
+            const error = yield* Fiber.join(saving);
+            expect(error).toMatchObject({
+              _tag: "SaveFailed",
+              message: "guest did not power off within 2 minutes",
+              sessionId: id,
+              agentId: AGENT,
+            });
+            expect(h.minted.saves).toEqual([]);
+            expect(tags(h)).toEqual(["prepare", "start", "powerdown", "stderrTail", "stop"]);
+            expect(h.sessions.sessions[0]).toMatchObject({
+              id,
+              status: "failed",
+              reason: "guest did not power off within 2 minutes",
+            });
+            expect(h.debugLogs.saves).toEqual([{ sessionId: id, serial: "", qemu: "" }]);
+            expect(yield* qemus(sessions)).toBe(0);
+            expect(yield* sessions.jobs).toBe(0);
+            expect(yield* Stream.runCollect(events)).toEqual([
+              { type: "session", status: "running" },
+              { type: "action", id: 1, name: "save", state: "running" },
+              { type: "action", id: 1, state: "failed" },
+              { type: "session", status: "failed" },
+            ]);
+            expect(endedWith(spanNamed(h, AGENT))).toBe("internal_error");
+            expect(line(h, "stopped")).toMatchObject({
+              text: "stopped; failed; guest did not power off within 2 minutes",
+              location: id,
+              agentId: AGENT,
+            });
+          }),
+        );
+      }),
+  );
+
+  it.effect("a powerdown QEMU refuses fails the save with QEMU's reason", () =>
+    Effect.gen(function* () {
+      const raw = { error: { class: "GenericError", desc: "no ACPI" }, id: 2 };
+      const h = harness({
+        script: {
+          powerdown: () =>
+            Effect.fail(
+              Errors.QmpError.make({
+                command: "system_powerdown",
+                class: "GenericError",
+                desc: "no ACPI",
+                raw,
+              }),
+            ),
+        },
+      });
+      yield* h.run(
+        Effect.gen(function* () {
+          const { sessions, id, live } = yield* start();
+          const error = yield* Effect.flip(sessions.save(live));
+          expect(error).toMatchObject({
+            _tag: "SaveFailed",
+            message: "GenericError: no ACPI",
+            sessionId: id,
+            agentId: AGENT,
+          });
+          expect(h.actions.actions[1]).toMatchObject({ state: "failed", response: raw });
+          expect(h.minted.saves).toEqual([]);
+          expect(h.sessions.sessions[0]).toMatchObject({
+            id,
+            status: "failed",
+            reason: "GenericError: no ACPI",
+          });
+          expect(h.debugLogs.saves).toHaveLength(1);
+        }),
+      );
+    }),
+  );
+
+  it.effect("a disk that cannot be kept fails the save and the row says why", () =>
+    Effect.gen(function* () {
+      const h = harness({
+        minted: {
+          save: ({ who }) =>
+            Effect.fail(
+              Errors.SaveFailed.make({
+                message: "qemu-img convert exited 1",
+                sessionId: who.sessionId,
+                agentId: who.agentId,
+              }),
+            ),
+        },
+      });
+      yield* h.run(
+        Effect.gen(function* () {
+          const { sessions, id, live } = yield* start();
+          const error = yield* Effect.flip(sessions.save(live));
+          expect(error).toMatchObject({
+            _tag: "SaveFailed",
+            message: "qemu-img convert exited 1",
+            sessionId: id,
+            agentId: AGENT,
+          });
+          expect(tags(h)).toEqual(["prepare", "start", "powerdown", "stderrTail", "stop"]);
+          expect(h.sessions.sessions[0]).toMatchObject({
+            id,
+            status: "failed",
+            reason: "qemu-img convert exited 1",
+          });
+          expect(h.debugLogs.saves).toHaveLength(1);
+          expect(yield* sessions.jobs).toBe(0);
+        }),
+      );
+    }),
+  );
+
+  it.effect("a save racing the sweep is unknown session: the session gets one verdict", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      yield* h.run(
+        Effect.gen(function* () {
+          const { sessions, id, live } = yield* start();
+          yield* TestClock.adjust("10 minutes");
+          const error = yield* Effect.flip(sessions.save(live));
+          expect(error).toMatchObject({ _tag: "UnknownSession", id, agentId: AGENT });
+          expect(h.minted.saves).toEqual([]);
+          expect(h.sessions.sessions[0]).toMatchObject({ id, status: "timed_out" });
+        }),
+      );
+    }),
+  );
+
+  it.effect("a record that cannot be closed fails Internal after the disk is kept", () =>
+    Effect.gen(function* () {
+      const h = harness({
+        sessionStore: {
+          endSession: () => Effect.fail(failure("endSession", "connect ECONNREFUSED")),
+        },
+      });
+      yield* h.run(
+        Effect.gen(function* () {
+          const { sessions, id, live } = yield* start();
+          const events = yield* sessions.follow(id);
+          const error = yield* Effect.flip(sessions.save(live));
+          expect(error).toMatchObject({ _tag: "Internal", sessionId: id, agentId: AGENT });
+          expect(h.minted.saves).toHaveLength(1);
+          expect(tags(h)).toEqual(["prepare", "start", "powerdown", "stop"]);
+          expect(yield* Stream.runCollect(events)).toEqual([
+            { type: "session", status: "running" },
+            { type: "action", id: 1, name: "save", state: "running" },
+            { type: "action", id: 1, state: "completed" },
+            { type: "session", status: "succeeded" },
+          ]);
+          expect(line(h, "saved")).toBeUndefined();
         }),
       );
     }),

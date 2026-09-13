@@ -89,6 +89,13 @@ export const stop = HttpApiEndpoint.post("stop", "/stop", {
   error: [Errors.ForbiddenWire, Errors.UnknownSessionWire],
 });
 
+// Ends the session keeping its disk as the machine's minted disk for the iso it booted.
+export const save = HttpApiEndpoint.post("save", "/save", {
+  payload: Contract.SaveBody,
+  success: Contract.Ok,
+  error: [Errors.ForbiddenWire, Errors.UnknownSessionWire, Errors.SaveFailedWire],
+});
+
 export const sendKeys = HttpApiEndpoint.post("sendKeys", "/send-keys", {
   payload: Contract.SendKeysBody,
   success: Contract.Ok,
@@ -124,6 +131,7 @@ export class Sessions extends HttpApiGroup.make("Sessions")
   .add(follow)
   .add(stats)
   .add(stop)
+  .add(save)
   .add(sendKeys)
   .add(sendMouse)
   .add(intentStart)
@@ -144,6 +152,7 @@ export class RoutedSessions extends HttpApiGroup.make("Sessions")
   .add(serial)
   .add(follow)
   .add(stop)
+  .add(save)
   .add(sendKeys)
   .add(sendMouse)
   .add(intentStart)
