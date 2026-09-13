@@ -58,12 +58,13 @@ const ServerLive = (
   name: string,
   port: number,
   url: Option.Option<string>,
+  dataDir: string,
 ) =>
   Layer.effectDiscard(
     Effect.gen(function* () {
       const log = yield* Log.Log;
       yield* log.info(
-        `qemu server listening on ${HOST}:${String(port)}; name ${name}; display ${display}${automation ? "; automation" : ""}; max jobs ${String(maxJobs)}${Option.match(url, { onNone: () => "", onSome: (announced) => `; announcing ${announced}` })}`,
+        `qemu server listening on ${HOST}:${String(port)}; name ${name}; display ${display}${automation ? "; automation" : ""}; max jobs ${String(maxJobs)}${Option.match(url, { onNone: () => "", onSome: (announced) => `; announcing ${announced}` })}; data ${dataDir}`,
         { location: Log.Locations.server },
       );
       yield* Option.match(url, {
@@ -90,6 +91,8 @@ const ServerLive = (
         ProcessUsage.ProcessUsage.layer,
       ),
     ),
+    // Beneath the cache and the minted disks: both live under the directory the flag named.
+    Layer.provide(Layer.succeed(Iso.Host)({ dataDir, pid: Qemu.pid })),
     // Bound before Sessions exists: a port refusal is one fatal line, never a drain.
     Layer.provide(NodeHttpServer.layer(() => server, { host: HOST, port })),
     // Root session spans require no request span above them.

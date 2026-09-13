@@ -28,10 +28,11 @@ const logWho = (who: Who): Log.Attribution => ({
   agentId: who.agentId,
 });
 
-// The cache lives under this home and partial files carry this pid; tests point both elsewhere.
-export type HostFacts = { readonly homeDir: string; readonly pid: number };
+// The cache lives under this data directory and partial files carry this pid; the qemu server
+// points the directory where --data-dir says, tests point both elsewhere.
+export type HostFacts = { readonly dataDir: string; readonly pid: number };
 export const Host = Context.Reference<HostFacts>("@oligarchy/qemu/iso/Host", {
-  defaultValue: () => ({ homeDir: Qemu.homeDir, pid: Qemu.pid }),
+  defaultValue: () => ({ dataDir: Qemu.dataDir, pid: Qemu.pid }),
 });
 
 // A downloader refreshes its claim's heartbeat while bytes flow; waiters poll on the same
@@ -96,7 +97,7 @@ const make: Effect.Effect<
   const http = (yield* HttpClient.HttpClient).pipe(HttpClient.followRedirects(20));
   const log = yield* Log.Log;
   const host = yield* Host;
-  const isoDir = path.join(host.homeDir, ".oligarchy", "isos");
+  const isoDir = path.join(host.dataDir, "isos");
   const manifestPath = path.join(isoDir, "manifest.json");
   const manifestPartial = `${manifestPath}.partial-${String(host.pid)}`;
   // Manifest writes are read-modify-write of the whole file; the permit keeps concurrent writers

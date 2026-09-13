@@ -10,8 +10,10 @@ import * as Errors from "../shared/errors.ts";
 import * as Args from "./args.ts";
 import * as Process from "./process.ts";
 
-// Host facts, read once: iso.ts keys its cache and partial files off them.
-export const homeDir: string = homedir();
+// Host facts, read once: iso.ts keys its cache and partial files off them. The data directory is
+// where the iso cache and the minted disks live unless --data-dir or OLIGARCHY_DATA_DIR says
+// otherwise, which is how one machine runs several servers with a cache each.
+export const dataDir: string = `${homedir()}/.oligarchy`;
 export const pid: number = process.pid;
 
 export const sessionDir = (id: string): string => `${tmpdir()}/oligarchy-${id}`;

@@ -114,7 +114,9 @@ const fixture = (respond: FakeHttp.Respond = routes()) =>
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const home = yield* fs.makeTempDirectoryScoped({ prefix: "oligarchy-iso-test-" });
-    const isos = path.join(home, ".oligarchy", "isos");
+    // Not `.oligarchy`: the cache follows the data directory it is given, wherever that is.
+    const dataDir = path.join(home, "data");
+    const isos = path.join(dataDir, "isos");
     const manifestPath = path.join(isos, "manifest.json");
     const intercepted = FakeFs.intercepting();
     const log = FakeLog.fakeLog();
@@ -125,7 +127,7 @@ const fixture = (respond: FakeHttp.Respond = routes()) =>
           intercepted.layer,
           http.layer,
           log.layer,
-          Layer.succeed(Iso.Host)({ homeDir: home, pid: PID }),
+          Layer.succeed(Iso.Host)({ dataDir, pid: PID }),
         ),
       ),
       Layer.provide(NodeServices.layer),

@@ -52,7 +52,7 @@ const fixture = (options: Fixture = {}) =>
           spawner.layer,
           iso.layer,
           log.layer,
-          Layer.succeed(Iso.Host)({ homeDir: "/home/u", pid: PID }),
+          Layer.succeed(Iso.Host)({ dataDir: "/home/u/.oligarchy", pid: PID }),
         ),
       ),
     );
