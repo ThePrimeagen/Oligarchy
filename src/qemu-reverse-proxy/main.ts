@@ -7,6 +7,7 @@ import * as Config from "../config.ts";
 import * as Client from "../db/client.ts";
 import * as Logs from "../db/logs.ts";
 import * as Servers from "../db/servers.ts";
+import * as SessionStore from "../db/sessions.ts";
 import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
 import * as Sentry from "../observability/sentry.ts";
@@ -55,7 +56,11 @@ const DatabaseLive = Layer.unwrap(
 );
 
 // Sentry sits beneath Log so the log rows flush before Sentry does, and Log captures the reporter.
-const MainLive = Layer.mergeAll(Servers.ServerStore.layer, Log.Log.layer).pipe(
+const MainLive = Layer.mergeAll(
+  Servers.ServerStore.layer,
+  SessionStore.SessionStore.layer,
+  Log.Log.layer,
+).pipe(
   Layer.provideMerge(Logs.LogStore.layer),
   Layer.provideMerge(DatabaseLive),
   Layer.provideMerge(Config.ProxyConfig.layer),

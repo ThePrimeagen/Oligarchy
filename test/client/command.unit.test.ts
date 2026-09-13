@@ -153,6 +153,37 @@ describe("client requests", () => {
     }),
   );
 
+  it.effect("relinquish posts the agent and prints nothing", () =>
+    Effect.gen(function* () {
+      const recorder = FakeHttp.recordRequests(ok);
+      yield* run(["relinquish", ...shared], { http: recorder.layer });
+      expect(recorder.requests.map((request) => `${request.method} ${request.url}`)).toEqual([
+        `POST ${SERVER}/relinquish`,
+      ]);
+      expect(recorder.requests[0]?.headers.authorization).toBe(`Bearer ${TOKEN}`);
+      expect(parsed(recorder.requests[0]?.body ?? "")).toEqual({ agent: AGENT });
+      expect(yield* TestConsole.logLines).toEqual([]);
+    }),
+  );
+
+  it.effect("relinquish without a reservation is a ProxyRefusal (unhappy)", () =>
+    Effect.gen(function* () {
+      const recorder = FakeHttp.recordRequests(() =>
+        FakeHttp.json({ error: "no reservation" }, 400),
+      );
+      const error = yield* Effect.flip(run(["relinquish", ...shared], { http: recorder.layer }));
+      expect(error).toMatchObject({
+        _tag: "ProxyRefusal",
+        status: 400,
+        message: "no reservation",
+      });
+      expect(recorder.requests.map((request) => `${request.method} ${request.url}`)).toEqual([
+        `POST ${SERVER}/relinquish`,
+      ]);
+      expect(yield* TestConsole.logLines).toEqual([]);
+    }),
+  );
+
   it.effect("start absolutises a local iso and disk before posting", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -458,6 +489,7 @@ describe("client output", () => {
 describe("client help", () => {
   const actions: ReadonlyArray<ReadonlyArray<string>> = [
     ["start"],
+    ["relinquish"],
     ["get-image"],
     ["get-serial"],
     ["send-keys"],

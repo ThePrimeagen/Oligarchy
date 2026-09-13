@@ -68,6 +68,21 @@ const start = Command.make(
   ),
 );
 
+// The way out of a start that keeps failing: whatever the dispatcher's reservation for this agent
+// became is given back at once, instead of holding a --max-jobs slot until it expires unused.
+const relinquish = Command.make(
+  "relinquish",
+  Flags.shared,
+  Effect.fn("client.relinquish")(function* (input: Input<typeof Flags.shared>) {
+    const proxy = yield* connect(input.serverUrl);
+    yield* proxy.relinquish(Contract.ReserveAgentBody.make({ agent: input.agentId }));
+  }),
+).pipe(
+  Command.withDescription(
+    "Give back what --agent-id holds: an unused reservation, or its running machine, stopped as aborted",
+  ),
+);
+
 const getImageFlags = { ...Flags.shared, sessionId: Flags.sessionId, output: Flags.output("PNG") };
 
 const getImage = Command.make(
@@ -250,6 +265,7 @@ export const makeClientCommand = () =>
     Command.withDescription("Drive a guest machine through the qemu server"),
     Command.withSubcommands([
       start,
+      relinquish,
       getImage,
       getSerial,
       sendKeys,
