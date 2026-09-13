@@ -8,18 +8,18 @@ Consult this table of contents first. Read only the section you need.
 | [Synopsis](#synopsis) | 30 |
 | [client-with-image](#client-with-image) | 55 |
 | [start](#start) | 72 |
-| [relinquish](#relinquish) | 92 |
-| [get-image](#get-image) | 104 |
-| [get-serial](#get-serial) | 119 |
-| [send-keys](#send-keys) | 134 |
-| [send-mouse](#send-mouse) | 150 |
-| [intent start](#intent-start) | 167 |
-| [intent end](#intent-end) | 183 |
-| [stop](#stop) | 197 |
-| [save](#save) | 213 |
-| [Keys](#keys) | 229 |
-| [Mouse](#mouse) | 241 |
-| [The loop](#the-loop) | 249 |
+| [relinquish](#relinquish) | 94 |
+| [get-image](#get-image) | 106 |
+| [get-serial](#get-serial) | 121 |
+| [send-keys](#send-keys) | 136 |
+| [send-mouse](#send-mouse) | 152 |
+| [intent start](#intent-start) | 169 |
+| [intent end](#intent-end) | 185 |
+| [stop](#stop) | 199 |
+| [save](#save) | 215 |
+| [Keys](#keys) | 231 |
+| [Mouse](#mouse) | 243 |
+| [The loop](#the-loop) | 251 |
 
 ## Important
 
@@ -32,7 +32,7 @@ If you are the client, or an agent driving the client: do not look at code. Only
 ```
 ./client <action> --agent-id <agent> [--server-url <url>] ...
 
-./client start      [--iso <path|url>] [--disk <path>]
+./client start      [--iso <path|url>] [--disk <path>] [--resume]
 ./client relinquish
 ./client get-image  --session-id <id> [-o <file>]
 ./client get-serial --session-id <id> [-o <file>]
@@ -72,7 +72,7 @@ CLIENT_IMAGE=screen.png ./client-with-image send-keys --agent-id OLI-42 --server
 ## start
 
 ```
-./client start --agent-id <agent> --server-url <url> [--iso <path|url>] [--disk <path>]
+./client start --agent-id <agent> --server-url <url> [--iso <path|url>] [--disk <path>] [--resume]
 ```
 
 Boots a QEMU session and prints its session id. Consumes a reservation already held
@@ -82,11 +82,13 @@ the same command can be retried without reserving again; after three failures gi
 back with [relinquish](#relinquish). A reservation nobody starts within ten minutes is
 given back, and a start after that is refused the same way.
 
-- `--iso <path|url>` — the ISO. A local path must exist; an http(s) URL is downloaded and cached by the server. Default `omarchy.iso` in the current directory.
+- `--iso <path|url>` — the ISO. A local path must exist unless `--resume` is given; an http(s) URL is downloaded and cached by the server. Default `omarchy.iso` in the current directory.
 - `--disk <path>` — an existing qcow2 disk. Omit it and the server creates a fresh one.
+- `--resume` — boot the machine's minted disk of this ISO, the one a `save` kept, instead of the ISO: the installed system comes up in seconds and you log in. Nothing is downloaded and no ISO is attached, so a local `--iso` need not exist. Without a minted disk on that machine the host answers 400 `no minted disk for <iso> on this machine` and your reservation stands: `start` again without `--resume`, or give it back with [relinquish](#relinquish). Cannot be combined with `--disk`.
 
 ```bash
 ./client start --agent-id OLI-42 --server-url https://qemu.example.com --iso https://example.com/omarchy.iso
+./client start --agent-id OLI-42 --server-url https://qemu.example.com --iso https://example.com/omarchy.iso --resume
 ```
 
 ## relinquish
@@ -220,7 +222,7 @@ Ends the session keeping its disk: the guest is powered off, its disk and firmwa
 
 - `--session-id <id>` — the session.
 
-A guest that does not power off within two minutes, or a disk that cannot be kept, fails with the reason as the headline and exits 1; the session is then over, ended `failed`, and nothing was kept.
+A guest that does not power off within two minutes, or a disk that cannot be kept, fails with the reason as the headline and exits 1; the session is then over, ended `failed`, and nothing was kept. A session started with `--resume` cannot save (400 `a resumed session cannot save; its disk is a view of the minted one`); it keeps running, and `stop` ends it as usual.
 
 ```bash
 ./client save --agent-id OLI-42 --server-url https://qemu.example.com --session-id 6f1c...e2a9

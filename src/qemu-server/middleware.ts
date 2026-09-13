@@ -51,12 +51,31 @@ const isApiError: (value: unknown) => value is Errors.ApiError = Schema.is(
 // thrown one and takes the defect path.
 const translate = (
   error: Types.unhandled,
-): Effect.Effect<never, Errors.BadRequest | (Types.unhandled & Errors.ApiError)> =>
-  HttpApiError.HttpApiSchemaError.is(error)
-    ? Effect.fail(Errors.BadRequest.make({ message: error.cause.message }))
-    : isApiError(error)
-      ? Effect.fail(error)
-      : Effect.die(error);
+): Effect.Effect<never, Errors.BadRequest | (Types.unhandled & Errors.ApiError)> => {
+  if (HttpApiError.HttpApiSchemaError.is(error)) {
+    return Effect.fail(Errors.BadRequest.make({ message: error.cause.message }));
+  }
+  if (isApiError(error)) {
+    return Effect.fail(error);
+  }
+  return Effect.die(error);
+};
+
+// The agent the line is filed under: the error's when it names one, else the process's when it
+// has one, else none.
+const under = (
+  location: string,
+  agentId: string | undefined,
+  fallback: Log.ProcessAttribution,
+): Log.Attribution => {
+  if (agentId !== undefined) {
+    return { location, agentId };
+  }
+  if (fallback.agentId !== undefined) {
+    return { location, agentId: fallback.agentId };
+  }
+  return { location };
+};
 
 // logs.location is text: an unknown id is attributed only when this server could have minted it
 // (a session UUID). Otherwise the process fallback applies (qemu server: "server"; automation: its own).
@@ -71,39 +90,22 @@ const attribution = (error: Errors.ApiError, fallback: Log.ProcessAttribution): 
     case "Conflict":
       return { location: error.sessionId };
     case "UnknownSession":
-      return Object.assign(
-        { location: Domain.isSessionId(error.id) ? error.id : fallback.location },
-        error.agentId === undefined
-          ? fallback.agentId === undefined
-            ? undefined
-            : { agentId: fallback.agentId }
-          : { agentId: error.agentId },
+      return under(
+        Domain.isSessionId(error.id) ? error.id : fallback.location,
+        error.agentId,
+        fallback,
       );
     // Refused before a session existed: the process bucket, under the agent that asked.
     case "NoServer":
     case "AtCapacity":
-      return Object.assign(
-        { location: fallback.location },
-        error.agentId === undefined
-          ? fallback.agentId === undefined
-            ? undefined
-            : { agentId: fallback.agentId }
-          : { agentId: error.agentId },
-      );
+      return under(fallback.location, error.agentId, fallback);
     case "BadRequest":
     case "StartFailed":
     case "ExchangeFailed":
     case "SaveFailed":
     case "Internal":
     case "ServerFailed":
-      return Object.assign(
-        { location: error.sessionId ?? fallback.location },
-        error.agentId === undefined
-          ? fallback.agentId === undefined
-            ? undefined
-            : { agentId: fallback.agentId }
-          : { agentId: error.agentId },
-      );
+      return under(error.sessionId ?? fallback.location, error.agentId, fallback);
   }
   return error satisfies never;
 };

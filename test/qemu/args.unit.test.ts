@@ -6,7 +6,7 @@ const paths = {
   serialPath: "/tmp/oligarchy-1/serial.log",
   varsPath: "/tmp/oligarchy-1/OVMF_VARS.fd",
   diskPath: "/tmp/oligarchy-1/disk.qcow2",
-  iso: "/isos/omarchy.iso",
+  cdrom: "/isos/omarchy.iso",
 };
 
 const expected = (display: string, vga: ReadonlyArray<string>): ReadonlyArray<string> => [
@@ -68,11 +68,21 @@ describe("qemuArgs happy path", () => {
     const args = Args.qemuArgs({
       ...paths,
       diskPath: "/mnt/custom.qcow2",
-      iso: "https-cache/omarchy.iso",
+      cdrom: "https-cache/omarchy.iso",
       display: "none",
       automation: false,
     });
     expect(args.at(-1)).toBe("file=/mnt/custom.qcow2,if=virtio,format=qcow2");
     expect(args[args.indexOf("-cdrom") + 1]).toBe("https-cache/omarchy.iso");
+  });
+
+  it("boots without a cdrom and without a boot order when there is no iso to attach", () => {
+    const args = Args.qemuArgs({ ...paths, cdrom: undefined, display: "none", automation: false });
+    expect(args).not.toContain("-cdrom");
+    expect(args).not.toContain("-boot");
+    const withIso = expected("none", []);
+    expect(args).toEqual(
+      withIso.filter((_, i) => i < withIso.indexOf("-cdrom") || i > withIso.indexOf("order=d")),
+    );
   });
 });

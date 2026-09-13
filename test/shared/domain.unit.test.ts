@@ -255,6 +255,26 @@ describe("encodeQmpCommand", () => {
   });
 });
 
+describe("SessionMode", () => {
+  it("is fresh or resume and nothing else", () => {
+    const is = Schema.is(Domain.SessionMode);
+    expect(is("fresh")).toBe(true);
+    expect(is("resume")).toBe(true);
+    expect(is("mint")).toBe(false);
+    expect(is("")).toBe(false);
+  });
+
+  it("a session config carries the mode when it was resumed and nothing when it was fresh", () => {
+    const decode = Schema.decodeUnknownSync(Domain.SessionConfig);
+    expect(decode({ iso: "omarchy.iso" })).toEqual({ iso: "omarchy.iso" });
+    expect(decode({ iso: "omarchy.iso", mode: "resume" })).toEqual({
+      iso: "omarchy.iso",
+      mode: "resume",
+    });
+    expect(() => decode({ iso: "omarchy.iso", mode: "mint" })).toThrow();
+  });
+});
+
 describe("QmpExchangeOutcome", () => {
   it("accepts a completed outcome with a greeting and a failed outcome with a string", () => {
     const is = Schema.is(Domain.QmpExchangeOutcome);

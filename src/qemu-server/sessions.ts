@@ -70,8 +70,10 @@ type Image = { readonly id: string; readonly png: string };
 export type LiveSession = {
   readonly id: string;
   readonly agent: string;
-  // The iso as the start named it: a save keeps the disk beside it.
+  // The iso as the start named it: a save keeps the disk beside it. A resumed session's disk is
+  // an overlay on the minted one and is never kept.
   readonly iso: string;
+  readonly mode: Domain.SessionMode;
   readonly qemu: Qemu.QemuHandle;
   readonly span: Tracer.Span;
   readonly scope: Scope.Closeable;
@@ -138,10 +140,15 @@ export type SessionsService = {
   ) => Effect.Effect<void, Errors.Internal | Errors.UnknownSession>;
   // Ends the session keeping its disk as the machine's minted disk for its iso: the guest is
   // powered down, its disk and firmware copy are kept, the row closes succeeded. A guest that
-  // will not power off, or a disk that cannot be kept, ends the session failed instead.
+  // will not power off, or a disk that cannot be kept, ends the session failed instead. A
+  // resumed session is refused BadRequest and runs on: its disk is an overlay whose base another
+  // save may replace, so flattening it could keep the wrong machine.
   readonly save: (
     live: LiveSession,
-  ) => Effect.Effect<void, Errors.SaveFailed | Errors.Internal | Errors.UnknownSession>;
+  ) => Effect.Effect<
+    void,
+    Errors.BadRequest | Errors.SaveFailed | Errors.Internal | Errors.UnknownSession
+  >;
   readonly follow: (
     id: string,
   ) => Effect.Effect<
@@ -415,6 +422,7 @@ const make = (maxJobs: number) =>
     const launch = (
       live: OpenSession,
       body: Contract.StartBody,
+      source: Qemu.DiskSource,
       display: Domain.QemuDisplay,
       automation: boolean,
     ): Effect.Effect<
@@ -425,24 +433,27 @@ const make = (maxJobs: number) =>
         // Checked before anything else: a wrong disk path must not cost an iso download, and it
         // must fail ahead of registerAgent, or the agent's one registration is spent on a machine
         // that never booted.
-        const disk = body.disk;
-        if (disk !== undefined) {
+        if (source._tag === "existing") {
           yield* fs
-            .stat(disk)
+            .stat(source.path)
             .pipe(
               Effect.mapError(() =>
-                Errors.QemuStartError.make({ message: `qemu: disk not found: ${disk}` }),
+                Errors.QemuStartError.make({ message: `qemu: disk not found: ${source.path}` }),
               ),
             );
         }
-        const isoPath = yield* iso.getIso(body.iso, { sessionId: live.id, agentId: live.agent });
-        const prepared = yield* qemu.prepare(live.id, disk).pipe(Scope.provide(live.scope));
+        // A minted disk boots itself: no iso to fetch, none to attach.
+        const cdrom =
+          source._tag === "minted"
+            ? undefined
+            : yield* iso.getIso(body.iso, { sessionId: live.id, agentId: live.agent });
+        const prepared = yield* qemu.prepare(live.id, source).pipe(Scope.provide(live.scope));
         // Register right before boot: the handshake records an action that references agent_runs,
         // so this must precede start(), but a failed download or disk create before here must not
         // burn the agent id on its one-registration key.
         yield* sessionStore.registerAgent(live.agent, live.id);
         const handle = yield* qemu
-          .start(prepared, { iso: isoPath, display, automation, record: recorder(live) })
+          .start(prepared, { cdrom, display, automation, record: recorder(live) })
           .pipe(Scope.provide(live.scope));
         yield* sessionStore.sessionRunning(live.id);
         return handle;
@@ -522,6 +533,37 @@ const make = (maxJobs: number) =>
       automation: boolean,
     ) {
       const agent = body.agent;
+      const noReservation = Errors.BadRequest.make({ message: "no reservation", agentId: agent });
+      // Refused before the reservation is consumed, so a caller told no can relinquish it, or
+      // start fresh instead.
+      if (!(yield* Ref.get(slots)).reserved.has(agent)) {
+        return yield* noReservation;
+      }
+      const disk = body.disk;
+      const mode = body.mode ?? "fresh";
+      const source: Qemu.DiskSource = yield* Effect.gen(function* () {
+        if (mode === "fresh") {
+          return disk === undefined
+            ? { _tag: "fresh" as const }
+            : { _tag: "existing" as const, path: disk };
+        }
+        if (disk !== undefined) {
+          return yield* Errors.BadRequest.make({
+            message: "a resume boots the minted disk; --disk cannot be given",
+            agentId: agent,
+          });
+        }
+        const found = yield* minted.find(body.iso);
+        if (Option.isNone(found)) {
+          return yield* Errors.BadRequest.make({
+            message: `no minted disk for ${body.iso} on this machine`,
+            agentId: agent,
+          });
+        }
+        return { _tag: "minted" as const, ...found.value };
+      });
+      // Consumed with its deadline, so a failed start can hand it back as it was. The sweep can
+      // take it between the look above and here.
       const reservation = yield* Ref.modify(slots, (held) => {
         const since = Option.fromUndefinedOr(held.reserved.get(agent));
         return [
@@ -532,10 +574,7 @@ const make = (maxJobs: number) =>
         ] as const;
       });
       if (Option.isNone(reservation)) {
-        return yield* Errors.BadRequest.make({
-          message: "no reservation",
-          agentId: agent,
-        });
+        return yield* noReservation;
       }
       const since = reservation.value;
       const started = yield* Clock.currentTimeMillis;
@@ -544,6 +583,7 @@ const make = (maxJobs: number) =>
         id,
         agent,
         iso: body.iso,
+        mode,
         span: yield* Sentry.sessionSpan(id, agent),
         scope: yield* Scope.make(),
         lastCommandAt: yield* Ref.make(started),
@@ -555,19 +595,23 @@ const make = (maxJobs: number) =>
       };
       yield* Ref.update(openSessions, (map) => mapWith(map, id, live));
       yield* log.acquireColor(agent);
-      const disk = body.disk;
+      // A minted disk boots itself: nothing to download, so the row is running from the start.
       yield* sessionStore
         .insertSession(
           id,
-          disk === undefined ? { iso: body.iso } : { iso: body.iso, disk },
-          Domain.isIsoUrl(body.iso) ? "downloading" : "running",
+          Object.assign(
+            { iso: body.iso },
+            disk === undefined ? undefined : { disk },
+            mode === "resume" ? { mode } : undefined,
+          ),
+          Domain.isIsoUrl(body.iso) && mode === "fresh" ? "downloading" : "running",
         )
         .pipe(Effect.catch((cause) => failStart(live, since, internal(cause, id, agent))));
-      yield* log.info(`starting; iso ${body.iso}${disk === undefined ? "" : `, disk ${disk}`}`, {
-        location: id,
-        agentId: agent,
-      });
-      const handle = yield* launch(live, body, display, automation).pipe(
+      yield* log.info(
+        `starting; iso ${body.iso}${disk === undefined ? "" : `, disk ${disk}`}${mode === "resume" ? "; resume" : ""}`,
+        { location: id, agentId: agent },
+      );
+      const handle = yield* launch(live, body, source, display, automation).pipe(
         Effect.catch((error) =>
           failStart(
             live,
@@ -950,6 +994,12 @@ const make = (maxJobs: number) =>
       });
 
     const save = Effect.fn("Sessions.save")(function* (live: LiveSession) {
+      if (live.mode === "resume") {
+        return yield* badRequest(
+          "a resumed session cannot save; its disk is a view of the minted one",
+          live,
+        );
+      }
       // Whoever removes the id owns its one verdict, as in stop.
       const owned = yield* Ref.modify(sessions, (map) =>
         map.has(live.id) ? [true, mapWithout(map, [live.id])] : [false, map],
