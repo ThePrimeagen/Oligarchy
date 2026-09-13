@@ -48,7 +48,7 @@ The action comes first. Every value is a flag; there are no positional arguments
 - `--server-url <url>` — the qemu server, a full URL used exactly as given. Falls back to `SERVER_URL` from the environment, then `http://127.0.0.1:42069`.
 - `OLIGARCHY_TOKEN` — read from the environment and sent on every request. It is already set; do not write a `.env`. Missing means exit 1.
 
-`start` prints a session id; every other action takes it as `--session-id`. A command that works exits 0. A command that fails exits 1 and prints the error: one headline, then the stack trace and the cause behind it. Read the headline first. `./client <action> --help` prints that action's flags. If no command arrives for ten minutes, the qemu server kills the session.
+`start` prints a session id; every action on the machine takes it as `--session-id`, and `relinquish`, which has no machine, takes none. A command that works exits 0. A command that fails exits 1 and prints the error: one headline, then the stack trace and the cause behind it. Read the headline first. `./client <action> --help` prints that action's flags. If no command arrives for ten minutes, the qemu server kills the session.
 
 ## client-with-image
 
@@ -61,7 +61,7 @@ The same arguments as `./client`, then a screenshot. Prefer this over calling `.
 - `CLIENT_IMAGE` — the PNG path. Required. Missing means exit 1, `CLIENT_IMAGE is not set`.
 - After the action succeeds, waits 100 ms, then writes the guest display to `CLIENT_IMAGE`.
 - The action's stdout is unchanged (`start` still prints the session id). `--session-id` comes from the flags, or from that printed id.
-- A failed action does not take a screenshot. `stop` does not either: the session is already gone.
+- A failed action does not take a screenshot. `stop` does not either: the session is already gone. Nor does `relinquish`: there is no session.
 
 ```bash
 CLIENT_IMAGE=screen.png ./client-with-image send-keys --agent-id OLI-42 --server-url https://qemu.example.com --session-id 6f1c...e2a9 --keys "hello<ENTER>"
@@ -93,7 +93,7 @@ given back, and a start after that is refused the same way.
 ./client relinquish --agent-id <agent> --server-url <url>
 ```
 
-Gives back the reservation held for `--agent-id` without starting a machine, so the slot goes to the next agent now rather than when the reservation expires. Run it when `start` has failed three times, then close your result as failed and stop. Without a reservation the host answers 400 `no reservation`. A running session is not a reservation: end it with `stop`.
+Gives back the reservation held for `--agent-id` without starting a machine, so the slot goes to the next agent now rather than when the reservation expires. Run it when three `start`s have failed to return a session id, then close your result as failed with `./ctrl test-results` and finish; there is no session to stop. Without a reservation the host answers 400 `no reservation`. A running session is not a reservation: end it with `stop`.
 
 ```bash
 ./client relinquish --agent-id OLI-42 --server-url https://qemu.example.com
@@ -230,7 +230,7 @@ A greeter or installer button is a left click at that point. A double-click laun
 
 ## The loop
 
-Every guest action — keys, mouse, images — runs inside an intent: start one that says what you are about to do, do the work, end it. Only `start`, `./ctrl`, and `stop` sit outside one.
+Every guest action — keys, mouse, images — runs inside an intent: start one that says what you are about to do, do the work, end it. Only `start`, `relinquish`, `./ctrl`, and `stop` sit outside one.
 
 Send keys or mouse, wait about three seconds, take an image, read it, decide. That is the whole method. `./client-with-image` is the action plus the image, with 100 ms in between; set `CLIENT_IMAGE` to the PNG path you will open. Never sleep more than ten seconds between actions. When something genuinely slow is running, keep taking images instead of trusting a long sleep.
 
