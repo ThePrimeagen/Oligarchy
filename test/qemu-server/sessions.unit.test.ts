@@ -2455,6 +2455,47 @@ describe("failed start", () => {
   );
 
   it.effect(
+    "a reserve for the same agent that lands mid-start stands: the failed start gives only its own slot up (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const gate = yield* Deferred.make<void>();
+        const h = harness({
+          maxJobs: 2,
+          script: {
+            boot: () =>
+              Deferred.await(gate).pipe(
+                Effect.andThen(
+                  Effect.fail(Errors.QemuStartError.make({ message: "qemu: exited 1" })),
+                ),
+              ),
+          },
+        });
+        yield* h.run(
+          Effect.gen(function* () {
+            const sessions = yield* Sessions.Sessions;
+            const booting = yield* Effect.forkChild(reservedStart(startBody()), {
+              startImmediately: true,
+            });
+            // The start consumed the reservation, so a second reserve for the agent is admitted
+            // and takes the other slot.
+            yield* sessions.reserve(AGENT);
+            expect(yield* sessions.jobs).toBe(2);
+            yield* Deferred.succeed(gate, undefined);
+            expect((yield* Effect.flip(Fiber.join(booting)))._tag).toBe("StartFailed");
+            // One slot held: the reservation that landed mid-start, not a second one for the
+            // same agent.
+            expect(yield* sessions.jobs).toBe(1);
+            yield* sessions.relinquish(AGENT);
+            expect(yield* sessions.jobs).toBe(0);
+            yield* sessions.reserve(OTHER_AGENT);
+            yield* sessions.reserve("OLI-63");
+            expect((yield* Effect.flip(sessions.reserve("OLI-64")))._tag).toBe("AtCapacity");
+          }),
+        );
+      }),
+  );
+
+  it.effect(
     "a retry after a boot failure fails on the spent registration, and the kept reservation can still be relinquished (unhappy)",
     () =>
       Effect.gen(function* () {

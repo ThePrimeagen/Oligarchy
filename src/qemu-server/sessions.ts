@@ -510,15 +510,15 @@ const make = (maxJobs: number) =>
     // this agent's before the start and stays so, so the retry is admitted rather than refused
     // as "no reservation" (OLI-1309: one refused database connection cost a driver its counted
     // slot). Taken back before finishLiveSession gives the session's slot up, so the count never
-    // dips below what is held and a racing reserve is refused rather than admitted twice.
+    // dips below what is held and a racing reserve is refused rather than admitted twice. A
+    // reserve for this agent that landed while the start was in flight already holds a slot of
+    // its own; that one stands, and the failed session's slot is simply given up.
     const failStart = <E>(live: OpenSession, since: number, error: E): Effect.Effect<never, E> =>
-      Ref.update(slots, (held) => ({
-        count: held.count + 1,
-        reserved: mapWith(held.reserved, live.agent, since),
-      })).pipe(
-        Effect.andThen(finishLiveSession(live, "failed")),
-        Effect.andThen(Effect.fail(error)),
-      );
+      Ref.update(slots, (held) =>
+        held.reserved.has(live.agent)
+          ? held
+          : { count: held.count + 1, reserved: mapWith(held.reserved, live.agent, since) },
+      ).pipe(Effect.andThen(finishLiveSession(live, "failed")), Effect.andThen(Effect.fail(error)));
 
     const start = Effect.fn("Sessions.start")(function* (
       body: Contract.StartBody,
