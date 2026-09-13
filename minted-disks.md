@@ -25,9 +25,11 @@ every later session boot a throwaway copy of that disk in seconds.
 
 - `mode`: what a session is. `fresh` boots the ISO on a blank disk (today). `mint` boots the ISO on a
   blank disk and may `save`. `resume` boots the machine's minted disk with no ISO attached.
-- minted disk: `~/.oligarchy/disks/<key>/disk.qcow2` and `OVMF_VARS.fd`, `<key>` being
-  `Iso.cacheFileName(iso)`. One shared `~/.oligarchy/disks/manifest.json` carries `minting` claims
-  and `saved` entries, the ISO cache's pattern one directory over.
+- minted disk: `~/.oligarchy/isos/<key>.minted/`, beside the cached ISO, `<key>` being
+  `Iso.cacheFileName(iso)`. Its `metadata.json` points at the current version, a folder named by the
+  session that saved it, holding `disk.qcow2` and `OVMF_VARS.fd`. A local-path ISO is used in
+  place and never enters the cache directory; its minted disk still goes under
+  `~/.oligarchy/isos/` by the same key.
 - `save`: the call that ends a `mint` session and keeps its disk as the machine's minted disk for
   that ISO.
 - pin: `test_runs.pinned_server`, a qemu server url the reserve must land on. Null means unpinned.
@@ -35,10 +37,19 @@ every later session boot a throwaway copy of that disk in seconds.
 ## Decisions
 
 - `save` ends the session: QMP `system_powerdown` (skipped when the guest already exited), wait for
-  QEMU to exit with a bound of two minutes, `qemu-img convert` into a partial directory beside the
-  vars copy, one rename into place, row closed `succeeded` with `saved; disk for <iso>`. A clean
-  shutdown makes a clean image; a copy taken from a running guest is only crash-consistent.
-- A `save` replaces an existing minted disk on that machine. Redoing a machine is minting it again.
+  QEMU to exit with a bound of two minutes, `qemu-img convert` into `<key>.minted/<sessionId>.partial-<pid>/`
+  beside the vars copy, one rename to `<key>.minted/<sessionId>/`, then `metadata.json` written whole
+  (`.partial-<pid>` then rename) pointing at it, row closed `succeeded` with `saved; disk for <iso>`.
+  A clean shutdown makes a clean image; a copy taken from a running guest is only crash-consistent.
+- A `save` moves the pointer; it never touches files a running guest holds. An overlay names its
+  version's `disk.qcow2` in its header and QEMU keeps it open, so versions other than `current` are
+  removed after the pointer moves and a guest still on one keeps it until it exits. Redoing a
+  machine is minting it again.
+- A resume derives the folder from the request's `iso` exactly as the ISO cache does and requires
+  `metadata.iso === iso`; a pointer whose version folder is gone counts as no minted disk.
+- `metadata.json` is never read-modify-written, so two qemu servers on one machine cannot lose each
+  other's pointer; the later save wins and the other's version is removed. The `minting` claim,
+  which heartbeats, gets its own `minting.json` when the reserve step lands.
 - The reserve carries `mode`, `iso` and an optional `server` pin. The proxy honors a pin exactly and
   never falls back to another server. An unpinned `resume` is placed only on a server whose stats
   show the disk `saved`. `fresh` and `mint` are ranked as today.
@@ -110,15 +121,20 @@ job with the message.
 
 `test/qemu/disks.unit.test.ts` (new)
 
-- [ ] `list` reports saved dirs and live `minting` claims, ignores `.partial-*` dirs and stale
-      claims, warns on an unreadable manifest and still answers.
-- [ ] `claim` writes `minting` with agent and heartbeat; a second claim for the same ISO is
-      `BadRequest` while live and succeeds once stale.
-- [ ] `release` removes only that agent's `minting` entry; `refresh` bumps the heartbeat of the
-      given agents' entries only.
-- [ ] `save` converts into the partial dir, copies vars, renames into place, replaces an existing
-      dir, writes `saved`; a failing convert removes the partial and leaves the claim.
-- [ ] two services on one directory see each other's claims and saves.
+- [ ] `find` answers the current version's `disk.qcow2` and `OVMF_VARS.fd` from `metadata.json`;
+      none without a pointer, when `metadata.iso` names another ISO (logged at warning), or when the
+      version folder is gone; an unreadable `metadata.json` is a warning and none.
+- [ ] `list` reports every ISO `find` would accept as `saved` and every live `minting.json` as
+      `minting`; a stale claim and a `.partial-*` folder are ignored.
+- [ ] `save` converts into `<sessionId>.partial-<pid>/`, copies the vars, renames to `<sessionId>/`,
+      writes `metadata.json` whole and removes every other version folder; a failing convert removes
+      the partial and leaves the pointer; two saves of one ISO from two services: the later pointer
+      wins and the other version is removed.
+- [ ] `claim` writes `minting.json` with agent and heartbeat; a second claim for the same ISO is
+      `BadRequest` while live and succeeds once stale; `release` removes only that agent's claim;
+      `refresh` bumps the heartbeat of the given agents' claims only; `save` leaves `minting.json`
+      untouched.
+- [ ] two services on one cache directory see each other's pointers and claims.
 
 `test/qemu-server/sessions.unit.test.ts`
 
@@ -308,10 +324,14 @@ The exported surface, as bare declarations:
 ```ts
 export const HEARTBEAT_MS = 10_000;
 export const STALE_MS = 30_000;
-export const ManifestEntry: Schema.Union<[
-  { status: "minting"; agentId: string; heartbeatAt: string },
-  { status: "saved"; sessionId: string; savedAt: string },
-]>;
+// <key>.minted/metadata.json, written whole: the pointer and the provenance in one.
+export const Metadata: Schema.Struct<{
+  iso: string;
+  current: { version: Domain.SessionId; agentId: string; savedAt: string };
+}>;
+export const MetadataJson: Schema.Codec<Metadata, string>; // Schema.fromJsonString(Schema.toCodecJson(Metadata))
+// <key>.minted/minting.json, the live claim; later step.
+export const Claim: Schema.Struct<{ agentId: string; heartbeatAt: string }>;
 export type SavedDisk = { readonly disk: string; readonly vars: string };
 export type DisksService = {
   readonly list: Effect.Effect<ReadonlyArray<Contract.Disk>>;
@@ -330,14 +350,21 @@ export class Disks extends Context.Service<Disks>()("@oligarchy/qemu/Disks", { m
 
 Rules:
 
-- Directory `path.join(host.homeDir, ".oligarchy", "disks")`; `Iso.Host` reused for home and pid.
-- Manifest writes under one `Semaphore.make(1)`, written to `manifest.json.partial-<pid>` then
-  renamed, as `iso.ts` does.
-- `find` is "the `<key>` directory exists". `list` is those directories plus `minting` entries
-  whose heartbeat is within `STALE_MS`.
-- `save` converts into `<key>.partial-<pid>/`, copies the vars beside it, renames any existing
-  `<key>` to `<key>.old-<pid>`, renames the partial into place, removes the old directory, then
-  writes the `saved` entry. A failed convert removes the partial and leaves the claim.
+- Directory `path.join(host.homeDir, ".oligarchy", "isos", `${Iso.cacheFileName(iso)}.minted`)`;
+  `Iso.Host` reused for home and pid. `iso.ts` is untouched: it addresses the ISO file and its
+  partials by exact name and keys its manifest by file name, so the sibling directory is invisible
+  to it.
+- `find` reads `metadata.json`, requires `metadata.iso === iso` and the version folder to exist, and
+  answers its `disk.qcow2` and `OVMF_VARS.fd` paths; anything else is `Option.none()`, a mismatch
+  logged at warning.
+- `list` is every `*.minted/metadata.json` that `find` would accept, as `saved`, plus every
+  `minting.json` whose heartbeat is within `STALE_MS`, as `minting`.
+- `save` converts into `<sessionId>.partial-<pid>/disk.qcow2`, copies the vars beside it, renames
+  the folder to `<sessionId>/`, writes `metadata.json` whole through `metadata.json.partial-<pid>`
+  and a rename, then removes every version folder but `current`. A failed convert removes the
+  partial and leaves the pointer and the claim as they were.
+- `claim`, `refresh` and `release` own `minting.json` alone (a later step); `save` and the pointer
+  never touch it.
 - Directory-name and key helpers are pure and stay outside Effect.
 
 - [ ] `disks.ts` as above.
