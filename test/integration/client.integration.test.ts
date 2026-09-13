@@ -293,6 +293,45 @@ describe("./client happy path", () => {
     expect(stub.requests[1]?.body).toEqual({ id: SESSION, agent: AGENT });
   });
 
+  it("start --resume posts mode resume and prints the id; with --disk it exits 1 before any request", async () => {
+    const stub = await proxy();
+    const iso = "https://example.com/omarchy.iso";
+    const resumed = await runClient([
+      "start",
+      "--agent-id",
+      AGENT,
+      "--server-url",
+      stub.url,
+      "--iso",
+      iso,
+      "--resume",
+    ]);
+    expect(resumed.stderr).toBe("");
+    expect(resumed.code).toBe(0);
+    expect(resumed.stdout).toBe(`${StubProxy.SESSION_ID}\n`);
+    expect(stub.requests[0]).toMatchObject({
+      method: "POST",
+      url: "/start",
+      body: { iso, agent: AGENT, mode: "resume" },
+    });
+    const both = await runClient([
+      "start",
+      "--agent-id",
+      AGENT,
+      "--server-url",
+      stub.url,
+      "--iso",
+      iso,
+      "--resume",
+      "--disk",
+      "/mnt/custom.qcow2",
+    ]);
+    expect(both.code).toBe(1);
+    // Effect's CLI renders a UserError as a blank line, ERROR, then the message.
+    expect(both.stderr).toContain("start: --resume boots the minted disk; --disk cannot be given");
+    expect(stub.requests).toHaveLength(1);
+  });
+
   it("save posts the session and the agent, prints saved and exits 0", async () => {
     const stub = await proxy();
     const result = await runClient([

@@ -63,9 +63,11 @@ export const automationJobStatus = pgEnum("automation_job_status", [
   "timed_out",
 ]);
 
+// mode is the twin of Domain.SessionMode, maintained by hand with it; absent means fresh.
 export type SessionConfig = {
   iso: string;
   disk?: string;
+  mode?: "fresh" | "resume";
 };
 
 export const sessions = pgTable("sessions", {

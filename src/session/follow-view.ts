@@ -117,6 +117,17 @@ export const apply = (view: View, event: Domain.FollowEvent): View => {
 
 export const tick = (view: View): View => ({ ...view, frame: view.frame + 1 });
 
+// The coloured mark before an entry: the spinner while it runs, then its verdict.
+const markOf = (state: Entry["state"], glyph: string): string => {
+  if (state === "running") {
+    return `${GRAY}${glyph}`;
+  }
+  if (state === "completed") {
+    return `${GREEN}✓`;
+  }
+  return `${RED}✗`;
+};
+
 // Every line is written over in full at a fixed width and nothing ever wraps or writes a
 // newline, so the screen never scrolls and the image placement to the right stays put.
 export const draw = (view: View, rows: number): string => {
@@ -135,12 +146,7 @@ export const draw = (view: View, rows: number): string => {
     }
     const width = LEFT_COLS - 3 - entry.indent;
     const label = entry.name.length > width ? `${entry.name.slice(0, width - 1)}…` : entry.name;
-    const mark =
-      entry.state === "running"
-        ? `${GRAY}${glyph}`
-        : entry.state === "completed"
-          ? `${GREEN}✓`
-          : `${RED}✗`;
+    const mark = markOf(entry.state, glyph);
     out += `${" ".repeat(entry.indent)}${mark} ${label}${RESET}${" ".repeat(width - label.length)}`;
   }
   return `${out}\x1b[${String(rows)};2H${GRAY}ctrl-c detaches${RESET}`;

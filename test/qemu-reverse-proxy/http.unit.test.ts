@@ -76,6 +76,17 @@ const fleet: FakeHttp.Respond = (_, url) =>
     ? FakeHttp.json(stats(url.origin === SERVER_A ? 2 : 1))
     : FakeHttp.json({ ok: "true" });
 
+// A fleet whose servers answer the named paths as scripted and everything else through `rest`.
+const answering =
+  (
+    table: Readonly<Record<string, () => Response>>,
+    rest: FakeHttp.Respond = fleet,
+  ): FakeHttp.Respond =>
+  (request, url) => {
+    const scripted = table[url.pathname];
+    return scripted === undefined ? rest(request, url) : scripted();
+  };
+
 type Fixture = {
   readonly store: Stores.FakeServerStore;
   readonly sessions: Stores.FakeSessionStore;
@@ -513,12 +524,14 @@ describe("placement", () => {
 
   it.effect("ties go to the first registered server", () =>
     Effect.gen(function* () {
-      const fixed = fixture((request, url) =>
-        url.pathname === "/stats"
-          ? FakeHttp.json(stats(1))
-          : url.pathname === "/reserve"
-            ? FakeHttp.json({ ok: "true" })
-            : placing()(request, url),
+      const fixed = fixture(
+        answering(
+          {
+            "/stats": () => FakeHttp.json(stats(1)),
+            "/reserve": () => FakeHttp.json({ ok: "true" }),
+          },
+          placing(),
+        ),
       );
       fixed.store.servers.push(qemu(SERVER_B), qemu(SERVER_A));
       yield* Effect.gen(function* () {
@@ -885,12 +898,11 @@ describe("placement", () => {
     "POST /relinquish answered 400 no reservation by the server forgets the agent and passes the 400 through",
     () =>
       Effect.gen(function* () {
-        const fixed = fixture((request, url) =>
-          url.pathname === "/relinquish"
-            ? FakeHttp.json({ error: "no reservation" }, 400)
-            : url.pathname === "/reserve"
-              ? FakeHttp.json({ ok: "true" })
-              : fleet(request, url),
+        const fixed = fixture(
+          answering({
+            "/relinquish": () => FakeHttp.json({ error: "no reservation" }, 400),
+            "/reserve": () => FakeHttp.json({ ok: "true" }),
+          }),
         );
         fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
         yield* Effect.gen(function* () {
@@ -923,12 +935,11 @@ describe("placement", () => {
 
   it.effect("POST /relinquish answered 500 by the server keeps the agent routed", () =>
     Effect.gen(function* () {
-      const fixed = fixture((request, url) =>
-        url.pathname === "/relinquish"
-          ? FakeHttp.json({ error: "internal error" }, 500)
-          : url.pathname === "/reserve"
-            ? FakeHttp.json({ ok: "true" })
-            : fleet(request, url),
+      const fixed = fixture(
+        answering({
+          "/relinquish": () => FakeHttp.json({ error: "internal error" }, 500),
+          "/reserve": () => FakeHttp.json({ ok: "true" }),
+        }),
       );
       fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
       yield* Effect.gen(function* () {
@@ -1054,12 +1065,11 @@ describe("placement", () => {
 
   it.effect("POST /start after reserve forwards to the reserved server", () =>
     Effect.gen(function* () {
-      const fixed = fixture((request, url) =>
-        url.pathname === "/start"
-          ? FakeHttp.json({ id: STARTED_ID })
-          : url.pathname === "/reserve"
-            ? FakeHttp.json({ ok: "true" })
-            : fleet(request, url),
+      const fixed = fixture(
+        answering({
+          "/start": () => FakeHttp.json({ id: STARTED_ID }),
+          "/reserve": () => FakeHttp.json({ ok: "true" }),
+        }),
       );
       fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
       yield* Effect.gen(function* () {
@@ -1800,11 +1810,13 @@ describe("forwarding refusals", () => {
       headers,
       body: hasBody ? HttpBody.text("{}", "application/json") : undefined,
     };
-    return method === "POST"
-      ? http.post(path, options)
-      : method === "DELETE"
-        ? http.del(path, options)
-        : http.get(path, options);
+    if (method === "POST") {
+      return http.post(path, options);
+    }
+    if (method === "DELETE") {
+      return http.del(path, options);
+    }
+    return http.get(path, options);
   };
 
   it.effect("every route refuses a missing or wrong bearer with 401 and one error line", () =>

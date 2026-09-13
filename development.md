@@ -992,7 +992,9 @@ change ships.
 - oxlint with `typeAware: true`, plugins `effecttsgo` and `typescript`; categories `correctness`,
   `suspicious`, `perf` as `error`, `nursery`, `pedantic`, `restriction`, `style` off;
   `typescript/no-unnecessary-type-parameters: error`; `id-denylist: isRecord`;
-  `no-underscore-dangle` allowing only `_tag`, `__dirname`, `__filename`; `no-await-in-loop` off;
+  `no-underscore-dangle` allowing only `_tag`, `__dirname`, `__filename`; `no-nested-ternary:
+  error` (a choice with more than two outcomes is `if` statements or a `switch`, never a ternary
+  inside a ternary); `no-await-in-loop` off;
   the sixteen `effecttsgo/*` rules as `error` (`floating-effect`, `floating-effect-in-vitest`,
   `missing-effect-context`, `missing-effect-error`, `missing-layer-context`,
   `missing-star-in-yield-effect-gen`, `missing-return-yield-star`, `effect-fn-implicit-any`,

@@ -66,20 +66,26 @@ const dateTime = new Intl.DateTimeFormat("en-US", {
   timeZoneName: "short",
 });
 
+const sessionStatusText = (sessions: Session[] | null) => {
+  if (sessions === null) {
+    return "Sessions unavailable";
+  }
+  if (sessions.length === 0) {
+    return "No sessions recorded";
+  }
+  return (
+    <>
+      Updated{" "}
+      <time dateTime={sessions[0].queriedAt.toISOString()}>
+        {dateTime.format(sessions[0].queriedAt)}
+      </time>
+    </>
+  );
+};
+
 const SessionStatus: FC<SessionStatusProps> = ({ sessions, outOfBand = false }) => (
   <span id="session-status" hx-swap-oob={outOfBand ? "innerHTML" : undefined}>
-    {sessions === null ? (
-      "Sessions unavailable"
-    ) : sessions.length === 0 ? (
-      "No sessions recorded"
-    ) : (
-      <>
-        Updated{" "}
-        <time dateTime={sessions[0].queriedAt.toISOString()}>
-          {dateTime.format(sessions[0].queriedAt)}
-        </time>
-      </>
-    )}
+    {sessionStatusText(sessions)}
   </span>
 );
 
@@ -514,80 +520,91 @@ const DefinitionCard: FC<{
 // the sidebar and only the current card. A sidebar click fetches the page for that name and swaps
 // this section in place (htmx 4 inherits an attribute only when told to), pushing the URL so a
 // reload or a shared link opens on the same definition.
-const Definitions: FC<DefinitionsProps> = ({ groups, outcomes, name, selected, notice }) => (
+// The section's body: the fleet of definitions, or why there is none to show.
+const definitionsBody = ({ groups, outcomes, name, selected, notice }: DefinitionsProps) => {
+  if (groups === null) {
+    return (
+      <div class="empty-state empty-state--error">
+        <p>Test definitions are unavailable.</p>
+        <span>Try refreshing in a moment.</span>
+      </div>
+    );
+  }
+  if (groups.length === 0) {
+    return (
+      <div class="empty-state">
+        <p>No test definitions yet.</p>
+      </div>
+    );
+  }
+  return (
+    <div class="definitions__layout">
+      <nav
+        class="definitions__nav"
+        aria-label="Test definitions"
+        hx-target:inherited="#definitions"
+        hx-select:inherited="#definitions"
+        hx-swap:inherited="outerHTML"
+        hx-push-url:inherited="true"
+      >
+        {groups.map((group) => {
+          const isCurrent = group.name === selected?.name;
+          // The swap replaces the focused link; htmx puts focus back only on an element with
+          // the same id, so a keyboard user does not fall back to the top of the page. The
+          // first wording's id is the name's for good.
+          return (
+            <a
+              id={`definition-${String(group.versions[0].id)}`}
+              href={definitionHref(group.name)}
+              hx-get={definitionHref(group.name)}
+              class={
+                isCurrent ? "definitions__link definitions__link--current" : "definitions__link"
+              }
+              aria-current={isCurrent ? "true" : undefined}
+            >
+              {group.name}
+            </a>
+          );
+        })}
+      </nav>
+      <div class="definitions__detail">
+        {selected === undefined ? (
+          <div class="empty-state definitions__missing">
+            <p>
+              No test definition named <code>{name}</code>.
+            </p>
+            <span>Pick one from the list.</span>
+          </div>
+        ) : null}
+        <ol class="definitions__list">
+          {groups.map((group) => (
+            <li
+              class={
+                group.name === selected?.name
+                  ? "definitions__item definitions__item--current"
+                  : "definitions__item"
+              }
+            >
+              <DefinitionCard
+                group={group}
+                outcomes={outcomes}
+                notice={group.name === selected?.name ? notice : undefined}
+              />
+            </li>
+          ))}
+        </ol>
+      </div>
+    </div>
+  );
+};
+
+const Definitions: FC<DefinitionsProps> = (props) => (
   <Shell page="definitions">
     <section id="definitions" class="records definitions" aria-labelledby="definitions-heading">
       <div class="sessions__heading">
         <h1 id="definitions-heading">Test definitions</h1>
       </div>
-      {groups === null ? (
-        <div class="empty-state empty-state--error">
-          <p>Test definitions are unavailable.</p>
-          <span>Try refreshing in a moment.</span>
-        </div>
-      ) : groups.length === 0 ? (
-        <div class="empty-state">
-          <p>No test definitions yet.</p>
-        </div>
-      ) : (
-        <div class="definitions__layout">
-          <nav
-            class="definitions__nav"
-            aria-label="Test definitions"
-            hx-target:inherited="#definitions"
-            hx-select:inherited="#definitions"
-            hx-swap:inherited="outerHTML"
-            hx-push-url:inherited="true"
-          >
-            {groups.map((group) => {
-              const isCurrent = group.name === selected?.name;
-              // The swap replaces the focused link; htmx puts focus back only on an element with
-              // the same id, so a keyboard user does not fall back to the top of the page. The
-              // first wording's id is the name's for good.
-              return (
-                <a
-                  id={`definition-${String(group.versions[0].id)}`}
-                  href={definitionHref(group.name)}
-                  hx-get={definitionHref(group.name)}
-                  class={
-                    isCurrent ? "definitions__link definitions__link--current" : "definitions__link"
-                  }
-                  aria-current={isCurrent ? "true" : undefined}
-                >
-                  {group.name}
-                </a>
-              );
-            })}
-          </nav>
-          <div class="definitions__detail">
-            {selected === undefined ? (
-              <div class="empty-state definitions__missing">
-                <p>
-                  No test definition named <code>{name}</code>.
-                </p>
-                <span>Pick one from the list.</span>
-              </div>
-            ) : null}
-            <ol class="definitions__list">
-              {groups.map((group) => (
-                <li
-                  class={
-                    group.name === selected?.name
-                      ? "definitions__item definitions__item--current"
-                      : "definitions__item"
-                  }
-                >
-                  <DefinitionCard
-                    group={group}
-                    outcomes={outcomes}
-                    notice={group.name === selected?.name ? notice : undefined}
-                  />
-                </li>
-              ))}
-            </ol>
-          </div>
-        </div>
-      )}
+      {definitionsBody(props)}
     </section>
   </Shell>
 );
@@ -596,41 +613,49 @@ type PromptsProps = {
   prompts: TestBasePrompt[] | null;
 };
 
+const promptsList = (prompts: TestBasePrompt[] | null) => {
+  if (prompts === null) {
+    return (
+      <div class="empty-state empty-state--error">
+        <p>Base prompts are unavailable.</p>
+        <span>Try refreshing in a moment.</span>
+      </div>
+    );
+  }
+  if (prompts.length === 0) {
+    return (
+      <div class="empty-state">
+        <p>No base prompts yet.</p>
+      </div>
+    );
+  }
+  return (
+    <ol>
+      {prompts.map((prompt) => (
+        <li>
+          <article class="record">
+            <h2>{prompt.name}</h2>
+            <time dateTime={prompt.createdAt.toISOString()}>
+              {dateTime.format(prompt.createdAt)}
+            </time>
+            <div class="record__field">
+              <h3>Prompt</h3>
+              <p>{prompt.prompt}</p>
+            </div>
+          </article>
+        </li>
+      ))}
+    </ol>
+  );
+};
+
 const Prompts: FC<PromptsProps> = ({ prompts }) => (
   <Shell page="prompts">
     <section class="records" aria-labelledby="prompts-heading">
       <div class="sessions__heading">
         <h1 id="prompts-heading">Base prompts</h1>
       </div>
-      <div class="record-list">
-        {prompts === null ? (
-          <div class="empty-state empty-state--error">
-            <p>Base prompts are unavailable.</p>
-            <span>Try refreshing in a moment.</span>
-          </div>
-        ) : prompts.length === 0 ? (
-          <div class="empty-state">
-            <p>No base prompts yet.</p>
-          </div>
-        ) : (
-          <ol>
-            {prompts.map((prompt) => (
-              <li>
-                <article class="record">
-                  <h2>{prompt.name}</h2>
-                  <time dateTime={prompt.createdAt.toISOString()}>
-                    {dateTime.format(prompt.createdAt)}
-                  </time>
-                  <div class="record__field">
-                    <h3>Prompt</h3>
-                    <p>{prompt.prompt}</p>
-                  </div>
-                </article>
-              </li>
-            ))}
-          </ol>
-        )}
-      </div>
+      <div class="record-list">{promptsList(prompts)}</div>
     </section>
   </Shell>
 );

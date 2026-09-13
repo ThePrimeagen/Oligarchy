@@ -103,6 +103,42 @@ describe("Sessions endpoints happy path", () => {
     }),
   );
 
+  it.effect(
+    "POST /start carries mode resume to Sessions and nothing when the field is absent",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture();
+        yield* Effect.gen(function* () {
+          const api = yield* client;
+          yield* api.Sessions.start({
+            payload: Contract.StartBody.make({
+              iso: "omarchy.iso",
+              agent: AGENT_ID,
+              mode: "resume",
+            }),
+          });
+          const http = yield* HttpClient.HttpClient;
+          const bare = yield* http.post("/start", {
+            headers: { authorization: `Bearer ${TOKEN}` },
+            body: HttpBody.jsonUnsafe({ iso: "omarchy.iso", agent: AGENT_ID }),
+          });
+          expect(bare.status).toBe(200);
+          const refused = yield* http.post("/start", {
+            headers: { authorization: `Bearer ${TOKEN}` },
+            body: HttpBody.jsonUnsafe({ iso: "omarchy.iso", agent: AGENT_ID, mode: "mint" }),
+          });
+          expect(refused.status).toBe(400);
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.sessions.calls.map((call) => call.args[0])).toEqual([
+          Contract.StartBody.make({ iso: "omarchy.iso", agent: AGENT_ID, mode: "resume" }),
+          Contract.StartBody.make({ iso: "omarchy.iso", agent: AGENT_ID }),
+        ]);
+        expect("mode" in Contract.StartBody.make({ iso: "omarchy.iso", agent: AGENT_ID })).toBe(
+          false,
+        );
+      }),
+  );
+
   it.effect("POST /reserve answers ok and hands the agent to Sessions", () =>
     Effect.gen(function* () {
       const fixed = fixture();
@@ -895,6 +931,35 @@ describe("Sessions failures", () => {
         cause: convert,
       });
       expect(fixed.reporter.reported).toEqual([]);
+    }),
+  );
+
+  it.effect("POST /save on a resumed session is 400 with the refusal, and skips Sentry", () =>
+    Effect.gen(function* () {
+      const message = "a resumed session cannot save; its disk is a view of the minted one";
+      const fixed = fixture({
+        sessions: FakeSessions.fakeSessions({
+          save: (live) =>
+            Effect.fail(
+              Errors.BadRequest.make({ message, sessionId: live.id, agentId: live.agent }),
+            ),
+        }),
+      });
+      yield* Effect.gen(function* () {
+        const api = yield* client;
+        const error = yield* Effect.flip(api.Sessions.save({ payload: saveBody }));
+        expect(error).toMatchObject({ _tag: "BadRequest", message });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.log.lines).toEqual([
+        {
+          level: "error",
+          text: `POST /save failed: ${message}`,
+          location: SESSION_ID,
+          agentId: AGENT_ID,
+          skipSentry: true,
+          cause: undefined,
+        },
+      ]);
     }),
   );
 

@@ -20,6 +20,23 @@ const paeth = (a: number, b: number, c: number): number => {
   return pb <= pc ? b : c;
 };
 
+// The PNG filter's prediction for one byte: none, sub, up, average or paeth.
+const predict = (filter: number, left: number, up: number, upLeft: number): number => {
+  if (filter === 1) {
+    return left;
+  }
+  if (filter === 2) {
+    return up;
+  }
+  if (filter === 3) {
+    return (left + up) >> 1;
+  }
+  if (filter === 4) {
+    return paeth(left, up, upLeft);
+  }
+  return 0;
+};
+
 type PngOptions = {
   readonly bitDepth?: number;
   readonly colorType?: number;
@@ -46,16 +63,7 @@ const makePng = (
       const left = x >= 3 ? (pixels[y * stride + x - 3] ?? 0) : 0;
       const up = y > 0 ? (pixels[(y - 1) * stride + x] ?? 0) : 0;
       const upLeft = y > 0 && x >= 3 ? (pixels[(y - 1) * stride + x - 3] ?? 0) : 0;
-      const predictor =
-        filter === 1
-          ? left
-          : filter === 2
-            ? up
-            : filter === 3
-              ? (left + up) >> 1
-              : filter === 4
-                ? paeth(left, up, upLeft)
-                : 0;
+      const predictor = predict(filter, left, up, upLeft);
       raw[y * (stride + 1) + 1 + x] = (here - predictor) & 0xff;
     }
   }

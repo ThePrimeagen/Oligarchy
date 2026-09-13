@@ -17,11 +17,11 @@ export type ExchangeError =
   | Errors.DatabaseError;
 
 export type Call =
-  | { readonly _tag: "prepare"; readonly id: string; readonly disk: string | undefined }
+  | { readonly _tag: "prepare"; readonly id: string; readonly source: Qemu.DiskSource }
   | {
       readonly _tag: "start";
       readonly id: string;
-      readonly iso: string;
+      readonly cdrom: string | undefined;
       readonly diskPath: string;
       readonly display: Domain.QemuDisplay;
       readonly automation: boolean;
@@ -45,7 +45,7 @@ export type Script = {
   // The session dir, disk and firmware: a failing qemu-img create fails here.
   readonly prepare?: (
     id: string,
-    disk: string | undefined,
+    source: Qemu.DiskSource,
   ) => Effect.Effect<void, Errors.QemuStartError>;
   // Runs once the handle's release is registered and before the handshake is recorded.
   readonly boot?: (
@@ -239,19 +239,23 @@ export const fakeQemu = (script: Script = {}): FakeQemu => {
   };
 
   const service = Qemu.Qemu.of({
-    prepare: (id, disk) =>
+    prepare: (id, source) =>
       Effect.gen(function* () {
-        calls.push({ _tag: "prepare", id, disk });
-        yield* script.prepare?.(id, disk) ?? Effect.void;
+        calls.push({ _tag: "prepare", id, source });
+        yield* script.prepare?.(id, source) ?? Effect.void;
         const dir = sessionDir(id);
-        return { id, dir, diskPath: disk ?? `${dir}/disk.qcow2` };
+        return {
+          id,
+          dir,
+          diskPath: source._tag === "existing" ? source.path : `${dir}/disk.qcow2`,
+        };
       }),
     start: (prepared, input) =>
       Effect.gen(function* () {
         calls.push({
           _tag: "start",
           id: prepared.id,
-          iso: input.iso,
+          cdrom: input.cdrom,
           diskPath: prepared.diskPath,
           display: input.display,
           automation: input.automation,

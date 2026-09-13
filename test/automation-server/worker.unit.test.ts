@@ -28,17 +28,22 @@ const token = Layer.succeed(AutomationClient.OligarchyToken)(
   AutomationClient.OligarchyToken.of(Redacted.make(TOKEN)),
 );
 
+// The prompt templates the worker renders, by file name.
+const template = (path: string): string => {
+  if (path.endsWith("driving-agent.html")) {
+    return "drive {{LINEAR_TICKET}} as {{MODEL}}";
+  }
+  if (path.endsWith("diagnosing-agent.html")) {
+    return "diagnose {{LINEAR_TICKET}} {{RESULT_ID}} {{MODEL}}\n{{CTRL_DIAGNOSE_MD}}";
+  }
+  if (path.endsWith("ctrl-diagnose.md")) {
+    return "# Control";
+  }
+  return `contents of ${path}`;
+};
+
 const scriptsFs = FileSystem.layerNoop({
-  readFileString: (path) =>
-    Effect.succeed(
-      path.endsWith("driving-agent.html")
-        ? "drive {{LINEAR_TICKET}} as {{MODEL}}"
-        : path.endsWith("diagnosing-agent.html")
-          ? "diagnose {{LINEAR_TICKET}} {{RESULT_ID}} {{MODEL}}\n{{CTRL_DIAGNOSE_MD}}"
-          : path.endsWith("ctrl-diagnose.md")
-            ? "# Control"
-            : `contents of ${path}`,
-    ),
+  readFileString: (path) => Effect.succeed(template(path)),
 });
 
 const DRIVE_PROMPT = `drive ${TICKET} as ${MODEL}`;

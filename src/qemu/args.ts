@@ -18,7 +18,8 @@ export type ArgsInput = {
   readonly serialPath: string;
   readonly varsPath: string;
   readonly diskPath: string;
-  readonly iso: string;
+  // The iso to attach and boot first; none for a machine booting its own installed disk.
+  readonly cdrom: string | undefined;
   readonly display: Domain.QemuDisplay;
   readonly automation: boolean;
 };
@@ -26,6 +27,7 @@ export type ArgsInput = {
 export const qemuArgs = (input: ArgsInput): ReadonlyArray<string> => {
   // -vga none without a replacement device removes the console screendump reads.
   const vga = input.automation ? ["-vga", "none", "-device", "virtio-vga"] : [];
+  const cdrom = input.cdrom === undefined ? [] : ["-cdrom", input.cdrom, "-boot", "order=d"];
   return [
     "-machine",
     MACHINE,
@@ -55,10 +57,7 @@ export const qemuArgs = (input: ArgsInput): ReadonlyArray<string> => {
     `file,id=serial,path=${input.serialPath}`,
     "-serial",
     "chardev:serial",
-    "-cdrom",
-    input.iso,
-    "-boot",
-    "order=d",
+    ...cdrom,
     "-drive",
     `file=${input.diskPath},if=virtio,format=qcow2`,
   ];

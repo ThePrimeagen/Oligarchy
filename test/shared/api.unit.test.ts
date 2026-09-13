@@ -45,6 +45,23 @@ const byIdentifier = <Id extends string, Groups extends HttpApiGroup.Constraint>
 const ascending = (statuses: ReadonlyArray<number>): ReadonlyArray<number> =>
   [...statuses].sort((a, b) => a - b);
 
+// The OpenAPI operation of a path item for a method the apis use; none for any other method.
+const operationOf = (
+  item: OpenApi.OpenAPISpec["paths"][string] | undefined,
+  method: string,
+): OpenApi.OpenAPISpec["paths"][string]["get"] => {
+  if (method === "GET") {
+    return item?.get;
+  }
+  if (method === "POST") {
+    return item?.post;
+  }
+  if (method === "DELETE") {
+    return item?.delete;
+  }
+  return undefined;
+};
+
 describe("QemuServerApi", () => {
   it("declares every path with today's method", () => {
     const table = routes(Api.QemuServerApi).map(({ method, path }) => `${method} ${path}`);
@@ -106,8 +123,7 @@ describe("QemuServerApi", () => {
     for (const route of routes(Api.QemuServerApi)) {
       const item = spec.paths[route.path];
       expect(item).toBeDefined();
-      const operation =
-        route.method === "GET" ? item?.get : route.method === "POST" ? item?.post : undefined;
+      const operation = operationOf(item, route.method);
       expect(operation).toBeDefined();
       expect(operation?.security).toEqual([{ bearer: [] }]);
     }
@@ -209,14 +225,7 @@ describe("QemuReverseProxyApi", () => {
     for (const route of routes(reverse)) {
       expect(route.middleware).toEqual([Api.BearerAuth.key, Api.RouteBoundary.key]);
       const item = spec.paths[route.path];
-      const operation =
-        route.method === "GET"
-          ? item?.get
-          : route.method === "POST"
-            ? item?.post
-            : route.method === "DELETE"
-              ? item?.delete
-              : undefined;
+      const operation = operationOf(item, route.method);
       expect(operation, `${route.method} ${route.path}`).toBeDefined();
       expect(operation?.security).toEqual([{ bearer: [] }]);
     }
