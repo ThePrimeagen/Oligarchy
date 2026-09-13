@@ -63,7 +63,6 @@ const translate = (
 const attribution = (error: Errors.ApiError, fallback: Log.ProcessAttribution): Log.Attribution => {
   switch (error._tag) {
     case "Unauthorized":
-    case "NotFound":
     case "RunFailed":
       return fallback;
     case "Forbidden":
@@ -82,6 +81,7 @@ const attribution = (error: Errors.ApiError, fallback: Log.ProcessAttribution): 
     // Refused before a session existed: the process bucket, under the agent that asked.
     case "NoServer":
     case "AtCapacity":
+    case "NotFound":
       return Object.assign(
         { location: fallback.location },
         error.agentId === undefined

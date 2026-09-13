@@ -130,6 +130,9 @@ export class ReserveAgentBody extends Schema.Class<ReserveAgentBody>(
   "@oligarchy/shared/contract/ReserveAgentBody",
 )({
   agent: Schema.NonEmptyString,
+  // The reverse proxy's: the one server this reserve may land on, by the url the fleet knows it
+  // under. A qemu server ignores it.
+  server: Schema.optionalKey(Domain.ServerUrl),
 }) {}
 
 export class AbortBody extends Schema.Class<AbortBody>("@oligarchy/shared/contract/AbortBody")({

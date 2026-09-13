@@ -222,23 +222,25 @@ describe("QemuReverseProxyApi", () => {
     }
   });
 
-  it("declares the boundary's 400, 401, 500, 502 and 503 on every endpoint plus each endpoint's own", () => {
-    const boundary = [400, 401, 500, 502, 503];
+  it("declares the boundary's 400, 401, 404, 500, 502 and 503 on every endpoint plus each endpoint's own", () => {
+    // 404: a pinned reserve naming a server the fleet does not know; declared once, on the boundary,
+    // so the endpoints that answer 404 themselves list it once.
+    const boundary = [400, 401, 404, 500, 502, 503];
     expect(byIdentifier(reverse, "reserve").errors).toEqual(boundary);
     expect(byIdentifier(reverse, "relinquish").errors).toEqual(boundary);
     expect(byIdentifier(reverse, "start").errors).toEqual(boundary);
-    expect(byIdentifier(reverse, "image").errors).toEqual(ascending([...boundary, 403, 404]));
-    expect(byIdentifier(reverse, "serial").errors).toEqual(ascending([...boundary, 403, 404]));
-    expect(byIdentifier(reverse, "follow").errors).toEqual(ascending([...boundary, 404, 409]));
-    expect(byIdentifier(reverse, "stop").errors).toEqual(ascending([...boundary, 403, 404]));
+    expect(byIdentifier(reverse, "image").errors).toEqual(ascending([...boundary, 403]));
+    expect(byIdentifier(reverse, "serial").errors).toEqual(ascending([...boundary, 403]));
+    expect(byIdentifier(reverse, "follow").errors).toEqual(ascending([...boundary, 409]));
+    expect(byIdentifier(reverse, "stop").errors).toEqual(ascending([...boundary, 403]));
     // save's own 502 is the boundary's 502 too: one status, declared once.
-    expect(byIdentifier(reverse, "save").errors).toEqual(ascending([...boundary, 403, 404]));
-    expect(byIdentifier(reverse, "sendKeys").errors).toEqual(ascending([...boundary, 403, 404]));
-    expect(byIdentifier(reverse, "sendMouse").errors).toEqual(ascending([...boundary, 403, 404]));
-    expect(byIdentifier(reverse, "intentStart").errors).toEqual(ascending([...boundary, 403, 404]));
-    expect(byIdentifier(reverse, "intentEnd").errors).toEqual(ascending([...boundary, 403, 404]));
+    expect(byIdentifier(reverse, "save").errors).toEqual(ascending([...boundary, 403]));
+    expect(byIdentifier(reverse, "sendKeys").errors).toEqual(ascending([...boundary, 403]));
+    expect(byIdentifier(reverse, "sendMouse").errors).toEqual(ascending([...boundary, 403]));
+    expect(byIdentifier(reverse, "intentStart").errors).toEqual(ascending([...boundary, 403]));
+    expect(byIdentifier(reverse, "intentEnd").errors).toEqual(ascending([...boundary, 403]));
     expect(byIdentifier(reverse, "register").errors).toEqual(boundary);
-    expect(byIdentifier(reverse, "unregister").errors).toEqual(ascending([...boundary, 404]));
+    expect(byIdentifier(reverse, "unregister").errors).toEqual(boundary);
     expect(byIdentifier(reverse, "servers").errors).toEqual(boundary);
   });
 

@@ -123,6 +123,25 @@ describe("Sessions endpoints happy path", () => {
     }),
   );
 
+  it.effect(
+    "POST /reserve carrying a server pin is the proxy's business: Sessions sees the agent",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture();
+        yield* Effect.gen(function* () {
+          const api = yield* client;
+          const ok = yield* api.Sessions.reserve({
+            payload: Contract.ReserveAgentBody.make({
+              agent: AGENT_ID,
+              server: "http://10.0.0.5:42069",
+            }),
+          });
+          expect(ok).toEqual(Contract.Ok.make({}));
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.sessions.calls).toEqual([{ method: "reserve", args: [AGENT_ID] }]);
+      }),
+  );
+
   it.effect("POST /relinquish answers ok and hands the agent to Sessions", () =>
     Effect.gen(function* () {
       const fixed = fixture();

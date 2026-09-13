@@ -45,13 +45,14 @@ export type RouterService = {
   readonly unregister: (url: string) => Effect.Effect<void, Errors.NotFound | Errors.Internal>;
   // Every registered server with its stats, null for one whose probe failed.
   readonly servers: Effect.Effect<Contract.Servers, Errors.Internal>;
-  // Places a reserve on an answering server with a free slot and remembers the agent.
+  // Places a reserve on an answering server with a free slot and remembers the agent. A body
+  // naming a server goes to that server and nowhere else.
   readonly reserve: (
     request: HttpServerRequest.HttpServerRequest,
-    agent: string,
+    body: Contract.ReserveAgentBody,
   ) => Effect.Effect<
     HttpServerResponse.HttpServerResponse,
-    Errors.BadRequest | Errors.NoServer | Errors.ServerFailed | Errors.Internal
+    Errors.BadRequest | Errors.NotFound | Errors.NoServer | Errors.ServerFailed | Errors.Internal
   >;
   // Forwards relinquish to the server that reserved this agent and forgets the agent when
   // that server accepts it or already holds nothing for it. There is no placement here:
@@ -296,22 +297,64 @@ const make = Effect.gen(function* () {
     return yield* commitStart(reserved.value, request, agent);
   });
 
-  const reserve = Effect.fn("Router.reserve")(function* (
+  // One server's answer to the reserve, sent as it came and passed back as it came; a 200 routes
+  // the agent there.
+  const askToReserve = (
+    url: string,
     request: HttpServerRequest.HttpServerRequest,
     agent: string,
+  ): Effect.Effect<
+    { readonly status: number; readonly text: string; readonly headers: Headers.Input },
+    Errors.ServerFailed | Errors.Internal
+  > =>
+    Effect.gen(function* () {
+      const who = { agentId: agent };
+      const response = yield* send(url, request).pipe(
+        Effect.mapError((error) => unreachable(url, error, who)),
+      );
+      const text = yield* response.text.pipe(
+        Effect.mapError((error) => unreachable(url, error, who)),
+      );
+      const headers = forwardedHeaders(response.headers);
+      if (response.status === 200) {
+        yield* store
+          .routeAgent(agent, url)
+          .pipe(Effect.mapError((cause) => internal(cause, undefined, agent)));
+        yield* log.info(`reserved; ${url}`, { location: Log.Locations.server, agentId: agent });
+      }
+      return { status: response.status, text, headers };
+    });
+
+  const reserve = Effect.fn("Router.reserve")(function* (
+    request: HttpServerRequest.HttpServerRequest,
+    body: Contract.ReserveAgentBody,
   ) {
+    const agent = body.agent;
     return yield* reserveGate.withPermits(1)(
       Effect.gen(function* () {
         const existing = yield* store
           .serverForAgent(agent)
           .pipe(Effect.mapError((cause) => internal(cause, undefined, agent)));
-        const who = { agentId: agent };
         if (Option.isSome(existing)) {
           return yield* Errors.BadRequest.make({ message: "already reserved", agentId: agent });
         }
         const urls = yield* store
           .listServers(SERVER_TYPE)
           .pipe(Effect.mapError((cause) => internal(cause, undefined, agent)));
+        // A pin is a pin: that server is probed and asked, and its answer, a 503 included, is the
+        // client's. Nothing falls back to another server.
+        if (body.server !== undefined) {
+          const pinned = body.server;
+          if (!urls.includes(pinned)) {
+            return yield* Errors.NotFound.make({ message: `no server ${pinned}`, agentId: agent });
+          }
+          yield* probe(pinned, { agentId: agent });
+          const answer = yield* askToReserve(pinned, request, agent);
+          return HttpServerResponse.text(answer.text, {
+            status: answer.status,
+            headers: answer.headers,
+          });
+        }
         if (urls.length === 0) {
           return yield* Errors.NoServer.make({ message: "no server registered", agentId: agent });
         }
@@ -340,25 +383,15 @@ const make = Effect.gen(function* () {
           | { readonly status: number; readonly text: string; readonly headers: Headers.Input }
           | undefined;
         for (const { url } of ranked) {
-          const response = yield* send(url, request).pipe(
-            Effect.mapError((error) => unreachable(url, error, who)),
-          );
-          const text = yield* response.text.pipe(
-            Effect.mapError((error) => unreachable(url, error, who)),
-          );
-          const headers = forwardedHeaders(response.headers);
-          if (response.status === 200) {
-            yield* store
-              .routeAgent(agent, url)
-              .pipe(Effect.mapError((cause) => internal(cause, undefined, agent)));
-            yield* log.info(`reserved; ${url}`, { location: Log.Locations.server, agentId: agent });
-            return HttpServerResponse.text(text, { status: 200, headers });
-          }
-          if (response.status === 503) {
-            lastCapacity = { status: response.status, text, headers };
+          const answer = yield* askToReserve(url, request, agent);
+          if (answer.status === 503) {
+            lastCapacity = answer;
             continue;
           }
-          return HttpServerResponse.text(text, { status: response.status, headers });
+          return HttpServerResponse.text(answer.text, {
+            status: answer.status,
+            headers: answer.headers,
+          });
         }
         if (lastCapacity !== undefined) {
           return HttpServerResponse.text(lastCapacity.text, {

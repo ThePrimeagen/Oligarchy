@@ -49,6 +49,12 @@ const cases: ReadonlyArray<WireCase> = [
     status: 404,
   },
   {
+    name: "NotFound naming a server",
+    wire: Errors.NotFoundWire,
+    error: Errors.NotFound.make({ message: "no server http://10.0.0.7:42069" }),
+    status: 404,
+  },
+  {
     name: "Conflict",
     wire: Errors.ConflictWire,
     error: Errors.Conflict.make({
@@ -153,6 +159,13 @@ describe("API error wire codecs", () => {
   it("httpStatus reads the annotation HttpApiSchema.status sets and defaults to 500", () => {
     expect(Errors.httpStatus(Schema.String.pipe(HttpApiSchema.status(418)))).toBe(418);
     expect(Errors.httpStatus(Schema.String)).toBe(500);
+  });
+
+  it("NotFound says `not found` unless told what was not found", () => {
+    expect(Errors.NotFound.make({}).message).toBe("not found");
+    expect(Errors.NotFound.make({ message: "no server http://x:1" }).message).toBe(
+      "no server http://x:1",
+    );
   });
 
   it("refuses a wire body without an error string", () => {

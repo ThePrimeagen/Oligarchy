@@ -62,9 +62,14 @@ export const unknownSession = (id: string, agentId?: string): UnknownSession =>
     ? UnknownSession.make({ id, message: `unknown session "${id}"` })
     : UnknownSession.make({ id, message: `unknown session "${id}"`, agentId });
 
+// `not found` unless the caller names what was not found (a server url nobody registered), under
+// the agent that asked when one did.
 export class NotFound extends Schema.TaggedError<NotFound>("@oligarchy/shared/errors/NotFound")(
   "NotFound",
-  { message: fixedMessage("not found") },
+  {
+    message: Schema.String.pipe(Schema.withConstructorDefault(Effect.succeed("not found"))),
+    agentId: Schema.optionalKey(Schema.String),
+  },
   { httpApiStatus: 404 },
 ) {
   override readonly [ErrorReporter.ignore] = true;
@@ -267,7 +272,7 @@ export const UnknownSessionWire = wireError(
 );
 export const NotFoundWire = wireError(
   NotFound,
-  () => ({ _tag: "NotFound", message: "not found" }) as const,
+  (message) => ({ _tag: "NotFound", message }) as const,
 );
 export const ConflictWire = wireError(
   Conflict,
