@@ -87,7 +87,8 @@ export type SessionsService = {
   // start has already consumed it: a running session keeps its slot.
   readonly relinquish: (agent: string) => Effect.Effect<void, Errors.BadRequest>;
   // Consumes this agent's reservation. Fails BadRequest, before anything is minted or written,
-  // when there is none.
+  // when there is none. A start that fails hands the reservation back, so the same agent may
+  // retry without reserving again.
   readonly start: (
     body: Contract.StartBody,
     display: Domain.QemuDisplay,
@@ -219,7 +220,8 @@ const make = (maxJobs: number) =>
     // How many sessions are admitted against --max-jobs, and which agents already hold a slot
     // that start will consume, each with when it was taken. Taken at reserve, before the span,
     // scope or row exist, so a refusal allocates nothing; given back in finishLiveSession, the
-    // one place every admitted session ends, or by the sweep when no start ever came.
+    // one place every admitted session ends, or by the sweep when no start ever came. A start
+    // that fails puts the reservation back as it was (failStart).
     const slots = yield* Ref.make<{
       readonly count: number;
       readonly reserved: ReadonlyMap<string, number>;
@@ -504,23 +506,42 @@ const make = (maxJobs: number) =>
       );
     });
 
+    // A start that fails hands the reservation back as it was, deadline included: the slot was
+    // this agent's before the start and stays so, so the retry is admitted rather than refused
+    // as "no reservation" (OLI-1309: one refused database connection cost a driver its counted
+    // slot). Taken back before finishLiveSession gives the session's slot up, so the count never
+    // dips below what is held and a racing reserve is refused rather than admitted twice.
+    const failStart = <E>(live: OpenSession, since: number, error: E): Effect.Effect<never, E> =>
+      Ref.update(slots, (held) => ({
+        count: held.count + 1,
+        reserved: mapWith(held.reserved, live.agent, since),
+      })).pipe(
+        Effect.andThen(finishLiveSession(live, "failed")),
+        Effect.andThen(Effect.fail(error)),
+      );
+
     const start = Effect.fn("Sessions.start")(function* (
       body: Contract.StartBody,
       display: Domain.QemuDisplay,
       automation: boolean,
     ) {
       const agent = body.agent;
-      const reserved = yield* Ref.modify(slots, (held) =>
-        held.reserved.has(agent)
-          ? ([true, { count: held.count, reserved: mapWithout(held.reserved, [agent]) }] as const)
-          : ([false, held] as const),
-      );
-      if (!reserved) {
+      const reservation = yield* Ref.modify(slots, (held) => {
+        const since = Option.fromUndefinedOr(held.reserved.get(agent));
+        return [
+          since,
+          Option.isNone(since)
+            ? held
+            : { count: held.count, reserved: mapWithout(held.reserved, [agent]) },
+        ] as const;
+      });
+      if (Option.isNone(reservation)) {
         return yield* Errors.BadRequest.make({
           message: "no reservation",
           agentId: agent,
         });
       }
+      const since = reservation.value;
       const started = yield* Clock.currentTimeMillis;
       const id: string = crypto.randomUUID();
       const live: OpenSession = {
@@ -544,30 +565,22 @@ const make = (maxJobs: number) =>
           disk === undefined ? { iso: body.iso } : { iso: body.iso, disk },
           Domain.isIsoUrl(body.iso) ? "downloading" : "running",
         )
-        .pipe(
-          Effect.catch((cause) =>
-            finishLiveSession(live, "failed").pipe(
-              Effect.andThen(Effect.fail(internal(cause, id, agent))),
-            ),
-          ),
-        );
+        .pipe(Effect.catch((cause) => failStart(live, since, internal(cause, id, agent))));
       yield* log.info(`starting; iso ${body.iso}${disk === undefined ? "" : `, disk ${disk}`}`, {
         location: id,
         agentId: agent,
       });
       const handle = yield* launch(live, body, display, automation).pipe(
         Effect.catch((error) =>
-          finishLiveSession(live, "failed").pipe(
-            Effect.andThen(
-              Effect.fail(
-                Errors.StartFailed.make({
-                  message: detail(error),
-                  cause: error,
-                  sessionId: id,
-                  agentId: agent,
-                }),
-              ),
-            ),
+          failStart(
+            live,
+            since,
+            Errors.StartFailed.make({
+              message: detail(error),
+              cause: error,
+              sessionId: id,
+              agentId: agent,
+            }),
           ),
         ),
       );

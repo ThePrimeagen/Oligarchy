@@ -35,6 +35,9 @@ const URL_ISO = "https://example.com/omarchy.iso";
 const DISK = "/disks/omarchy.qcow2";
 const UNKNOWN_ID = "1baaad43-674b-4bdb-88d7-3f18fce50aba";
 const SERIAL = new TextEncoder().encode("boot log\n");
+// Postgres refusing a new connection at its ceiling, as PlanetScale answered it in OLI-1309.
+const SLOTS_REFUSED =
+  "remaining connection slots are reserved for roles with the SUPERUSER attribute";
 // Room for every session a test below starts; the capacity tests pass their own.
 const MAX_JOBS = 4;
 
@@ -361,8 +364,9 @@ describe("start", () => {
             { status: "failed", reason: "qemu-img create exited 1" },
           ]);
           expect(h.log.released).toEqual([AGENT]);
-          // The registration was never spent: the same agent boots on its next try.
-          const id = yield* reservedStart(startBody());
+          // The registration was never spent and the failed start kept the reservation: the
+          // same agent boots on its next try without reserving again.
+          const id = yield* sessions.start(startBody(), "none", false);
           expect(h.sessions.agentRuns).toMatchObject([{ agentId: AGENT, sessionId: id }]);
           expect(yield* qemus(sessions)).toBe(1);
         }),
@@ -2190,44 +2194,54 @@ describe("capacity", () => {
     }),
   );
 
-  it.effect("a start that fails to boot or to insert its row frees its slot", () =>
-    Effect.gen(function* () {
-      let boots = 0;
-      let inserts = 0;
-      const h = harness({
-        maxJobs: 1,
-        script: {
-          boot: () =>
-            Effect.suspend(() =>
-              ++boots === 1
-                ? Effect.fail(Errors.QemuStartError.make({ message: "qemu: exited 1" }))
-                : Effect.void,
-            ),
-        },
-        sessionStore: {
-          insertSession: () =>
-            Effect.suspend(() =>
-              ++inserts === 2
-                ? Effect.fail(failure("insertSession", "connect ECONNREFUSED"))
-                : Effect.void,
-            ),
-        },
-      });
-      // A boot failure spends the agent's one registration, so every start names a new agent.
-      yield* h.run(
-        Effect.gen(function* () {
-          const sessions = yield* Sessions.Sessions;
-          const booted = yield* Effect.flip(reservedStart(startBody(ISO, AGENT)));
-          expect(booted._tag).toBe("StartFailed");
-          const inserted = yield* Effect.flip(reservedStart(startBody(ISO, OTHER_AGENT)));
-          expect(inserted._tag).toBe("Internal");
-          const id = yield* reservedStart(startBody(ISO, "OLI-63"));
-          expect(Domain.isSessionId(id)).toBe(true);
-          expect(yield* qemus(sessions)).toBe(1);
-          expect((yield* Effect.flip(sessions.reserve("OLI-64")))._tag).toBe("AtCapacity");
-        }),
-      );
-    }),
+  it.effect(
+    "a start that fails to boot or to insert its row hands the slot back to its agent as the reservation it was",
+    () =>
+      Effect.gen(function* () {
+        let boots = 0;
+        let inserts = 0;
+        const h = harness({
+          maxJobs: 1,
+          script: {
+            boot: () =>
+              Effect.suspend(() =>
+                ++boots === 1
+                  ? Effect.fail(Errors.QemuStartError.make({ message: "qemu: exited 1" }))
+                  : Effect.void,
+              ),
+          },
+          sessionStore: {
+            insertSession: () =>
+              Effect.suspend(() =>
+                ++inserts === 2
+                  ? Effect.fail(failure("insertSession", "connect ECONNREFUSED"))
+                  : Effect.void,
+              ),
+          },
+        });
+        // A boot failure spends the agent's one registration, so every start names a new agent;
+        // the slot stays with the agent whose start failed until that agent gives it back.
+        yield* h.run(
+          Effect.gen(function* () {
+            const sessions = yield* Sessions.Sessions;
+            const booted = yield* Effect.flip(reservedStart(startBody(ISO, AGENT)));
+            expect(booted._tag).toBe("StartFailed");
+            expect(yield* sessions.jobs).toBe(1);
+            expect((yield* Effect.flip(sessions.reserve(OTHER_AGENT)))._tag).toBe("AtCapacity");
+            yield* sessions.relinquish(AGENT);
+            expect(yield* sessions.jobs).toBe(0);
+            const inserted = yield* Effect.flip(reservedStart(startBody(ISO, OTHER_AGENT)));
+            expect(inserted._tag).toBe("Internal");
+            expect(yield* sessions.jobs).toBe(1);
+            expect((yield* Effect.flip(sessions.reserve("OLI-63")))._tag).toBe("AtCapacity");
+            yield* sessions.relinquish(OTHER_AGENT);
+            const id = yield* reservedStart(startBody(ISO, "OLI-63"));
+            expect(Domain.isSessionId(id)).toBe(true);
+            expect(yield* qemus(sessions)).toBe(1);
+            expect((yield* Effect.flip(sessions.reserve("OLI-64")))._tag).toBe("AtCapacity");
+          }),
+        );
+      }),
   );
 
   it.effect("a timed-out session frees its slot", () =>
@@ -2302,6 +2316,181 @@ describe("capacity", () => {
         }),
       );
     }),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// failed start
+// ---------------------------------------------------------------------------
+
+// A start that fails hands the reservation back as it was: the slot was the agent's before the
+// start and stays so, so the retry is admitted rather than refused as "no reservation" (OLI-1309:
+// one refused database connection cost a driver its counted slot).
+describe("failed start", () => {
+  it.effect(
+    "a start refused at the session insert keeps its reservation: the retry is admitted with no new reserve",
+    () =>
+      Effect.gen(function* () {
+        let inserts = 0;
+        const h = harness({
+          maxJobs: 1,
+          sessionStore: {
+            insertSession: () =>
+              Effect.suspend(() =>
+                ++inserts === 1
+                  ? Effect.fail(failure("insertSession", SLOTS_REFUSED))
+                  : Effect.void,
+              ),
+          },
+        });
+        yield* h.run(
+          Effect.gen(function* () {
+            const sessions = yield* Sessions.Sessions;
+            const refused = yield* Effect.flip(reservedStart(startBody()));
+            expect(refused).toMatchObject({
+              _tag: "Internal",
+              message: "internal error",
+              agentId: AGENT,
+            });
+            // Still this agent's reservation, not merely a free slot.
+            expect(yield* sessions.jobs).toBe(1);
+            expect(yield* Effect.flip(sessions.reserve(AGENT))).toMatchObject({
+              _tag: "BadRequest",
+              message: "already reserved",
+              agentId: AGENT,
+            });
+            expect((yield* Effect.flip(sessions.reserve(OTHER_AGENT)))._tag).toBe("AtCapacity");
+            const id = yield* sessions.start(startBody(), "none", false);
+            expect(Domain.isSessionId(id)).toBe(true);
+            expect(yield* sessions.jobs).toBe(1);
+            expect(yield* qemus(sessions)).toBe(1);
+            expect(h.sessions.agentRuns).toMatchObject([{ agentId: AGENT, sessionId: id }]);
+            expect(h.log.acquired).toEqual([AGENT, AGENT]);
+            expect(h.log.released).toEqual([AGENT]);
+            expect(texts(h)).toEqual([`starting; iso ${ISO}`, "running; started in 0ms"]);
+          }),
+        );
+      }),
+  );
+
+  it.effect(
+    "a start refused at the agent's registration ends its row failed with the detail and the retry boots",
+    () =>
+      Effect.gen(function* () {
+        let registrations = 0;
+        const runs: Array<{ readonly agentId: string; readonly sessionId: string }> = [];
+        const h = harness({
+          maxJobs: 1,
+          sessionStore: {
+            registerAgent: (agentId, sessionId) =>
+              Effect.suspend(() =>
+                ++registrations === 1
+                  ? Effect.fail(failure("registerAgent", SLOTS_REFUSED))
+                  : Effect.sync(() => {
+                      runs.push({ agentId, sessionId });
+                    }),
+              ),
+          },
+        });
+        yield* h.run(
+          Effect.gen(function* () {
+            const sessions = yield* Sessions.Sessions;
+            const refused = yield* Effect.flip(reservedStart(startBody()));
+            expect(refused).toMatchObject({
+              _tag: "StartFailed",
+              message: SLOTS_REFUSED,
+              agentId: AGENT,
+            });
+            expect(yield* sessions.jobs).toBe(1);
+            expect(yield* qemus(sessions)).toBe(0);
+            const id = yield* sessions.start(startBody(), "none", false);
+            expect(h.sessions.sessions.map((row) => [row.status, row.reason])).toEqual([
+              ["failed", SLOTS_REFUSED],
+              ["running", null],
+            ]);
+            expect(runs).toEqual([{ agentId: AGENT, sessionId: id }]);
+            expect(yield* sessions.jobs).toBe(1);
+            expect(yield* qemus(sessions)).toBe(1);
+            expect((yield* Effect.flip(sessions.reserve(OTHER_AGENT)))._tag).toBe("AtCapacity");
+          }),
+        );
+      }),
+  );
+
+  it.effect(
+    "a kept reservation still counts against max-jobs and expires on its original deadline (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const h = harness({
+          maxJobs: 1,
+          sessionStore: {
+            insertSession: () => Effect.fail(failure("insertSession", SLOTS_REFUSED)),
+          },
+        });
+        yield* h.run(
+          Effect.gen(function* () {
+            const sessions = yield* Sessions.Sessions;
+            yield* sessions.reserve(AGENT);
+            yield* TestClock.adjust("5 minutes");
+            expect((yield* Effect.flip(sessions.start(startBody(), "none", false)))._tag).toBe(
+              "Internal",
+            );
+            expect(yield* sessions.jobs).toBe(1);
+            expect((yield* Effect.flip(sessions.reserve(OTHER_AGENT)))._tag).toBe("AtCapacity");
+            // Ten minutes after the reserve, five after the failure: the deadline is the
+            // reservation's own, not the failed start's.
+            yield* TestClock.adjust("5 minutes");
+            expect(yield* sessions.jobs).toBe(0);
+            expect(yield* Effect.flip(sessions.start(startBody(), "none", false))).toMatchObject({
+              _tag: "BadRequest",
+              message: "no reservation",
+              agentId: AGENT,
+            });
+            yield* sessions.reserve(OTHER_AGENT);
+            expect(yield* qemus(sessions)).toBe(0);
+            expect(texts(h)).toEqual(["reservation expired; unused for 10 minutes"]);
+          }),
+        );
+      }),
+  );
+
+  it.effect(
+    "a retry after a boot failure fails on the spent registration, and the kept reservation can still be relinquished (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const h = harness({
+          maxJobs: 1,
+          script: {
+            boot: () => Effect.fail(Errors.QemuStartError.make({ message: "qemu: exited 1" })),
+          },
+        });
+        yield* h.run(
+          Effect.gen(function* () {
+            const sessions = yield* Sessions.Sessions;
+            const booted = yield* Effect.flip(reservedStart(startBody()));
+            expect(booted).toMatchObject({
+              _tag: "StartFailed",
+              message: "qemu: exited 1",
+              agentId: AGENT,
+            });
+            // The boot spent the agent's one registration: the retry is refused by that key and
+            // hands the reservation back once more.
+            const retried = yield* Effect.flip(sessions.start(startBody(), "none", false));
+            expect(retried).toMatchObject({
+              _tag: "StartFailed",
+              message: "duplicate key value violates unique constraint",
+              agentId: AGENT,
+            });
+            expect(h.sessions.sessions.map((row) => row.status)).toEqual(["failed", "failed"]);
+            expect(yield* sessions.jobs).toBe(1);
+            expect((yield* Effect.flip(sessions.reserve(OTHER_AGENT)))._tag).toBe("AtCapacity");
+            yield* sessions.relinquish(AGENT);
+            expect(yield* sessions.jobs).toBe(0);
+            yield* sessions.reserve(OTHER_AGENT);
+            expect(yield* qemus(sessions)).toBe(0);
+          }),
+        );
+      }),
   );
 });
 
