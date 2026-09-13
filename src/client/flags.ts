@@ -41,6 +41,13 @@ export const disk = Flag.string("disk").pipe(
   Flag.withDescription("Existing qcow2 path; omit for a fresh disk"),
 );
 
+export const resume = Flag.boolean("resume").pipe(
+  Flag.withDefault(false),
+  Flag.withDescription(
+    "Boot the machine's minted disk of this iso instead of the iso; refused when there is none",
+  ),
+);
+
 export const keys = Flag.string("keys").pipe(
   Flag.withDescription('Key string to type, e.g. "hello<ENTER>"'),
 );

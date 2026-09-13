@@ -5,6 +5,8 @@ export class StartBody extends Schema.Class<StartBody>("@oligarchy/shared/contra
   iso: Schema.NonEmptyString,
   disk: Schema.optionalKey(Schema.String),
   agent: Schema.NonEmptyString,
+  // Absent means fresh: only a resume says so.
+  mode: Schema.optionalKey(Domain.SessionMode),
 }) {}
 
 export class StartResponse extends Schema.Class<StartResponse>(

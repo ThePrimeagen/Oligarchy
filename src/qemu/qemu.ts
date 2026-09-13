@@ -36,8 +36,16 @@ export type Prepared = {
   readonly diskPath: string;
 };
 
+// What the machine's disk is: a blank qcow2 made here, a disk the caller names and boots as is,
+// or an overlay on a minted disk booting with that disk's own firmware copy.
+export type DiskSource =
+  | { readonly _tag: "fresh" }
+  | { readonly _tag: "existing"; readonly path: string }
+  | { readonly _tag: "minted"; readonly disk: string; readonly vars: string };
+
 export type StartInput = {
-  readonly iso: string;
+  // The iso to attach and boot first; none when the disk itself boots.
+  readonly cdrom: string | undefined;
   readonly display: Domain.QemuDisplay;
   readonly automation: boolean;
   readonly record: Client.Recorder;
@@ -77,11 +85,11 @@ export type QemuHandle = {
 };
 
 export type QemuService = {
-  // The session dir, the OVMF vars copy and, without a caller's disk, the default qcow2. Its
-  // finalizer removes the dir; registered first, so it runs after `start`'s kill.
+  // The session dir, the firmware copy and the disk the source names. Its finalizer removes the
+  // dir; registered first, so it runs after `start`'s kill.
   readonly prepare: (
     id: string,
-    disk: string | undefined,
+    source: DiskSource,
   ) => Effect.Effect<Prepared, Errors.QemuStartError, Scope.Scope>;
   // Leaving the scope kills QEMU and closes its socket.
   readonly start: (
@@ -109,7 +117,7 @@ const make: Effect.Effect<
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const withSpawner = Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner);
 
-  const prepare = Effect.fn("Qemu.prepare")(function* (id: string, disk: string | undefined) {
+  const prepare = Effect.fn("Qemu.prepare")(function* (id: string, source: DiskSource) {
     const dir = sessionDir(id);
     yield* fs
       .makeDirectory(dir, { recursive: true, mode: 0o700 })
@@ -126,14 +134,24 @@ const make: Effect.Effect<
         ),
       ),
     );
-    const diskPath = path.join(dir, "disk.qcow2");
-    if (disk === undefined) {
-      yield* withSpawner(Process.createDisk(diskPath, Args.DEFAULT_DISK_SIZE));
-    }
-    yield* fs
-      .copyFile(Args.OVMF_VARS, path.join(dir, "OVMF_VARS.fd"))
-      .pipe(Effect.mapError(startError));
-    return { id, dir, diskPath: disk ?? diskPath } satisfies Prepared;
+    const own = path.join(dir, "disk.qcow2");
+    // The disk the machine runs on, and the firmware it boots with: pristine, except for a
+    // minted disk, whose firmware copy carries the installed system's boot entry.
+    const { diskPath, vars } = yield* Effect.gen(function* () {
+      switch (source._tag) {
+        case "fresh":
+          yield* withSpawner(Process.createDisk(own, Args.DEFAULT_DISK_SIZE));
+          return { diskPath: own, vars: Args.OVMF_VARS };
+        case "existing":
+          return { diskPath: source.path, vars: Args.OVMF_VARS };
+        case "minted":
+          yield* withSpawner(Process.createOverlay(own, source.disk));
+          return { diskPath: own, vars: source.vars };
+      }
+      return source satisfies never;
+    });
+    yield* fs.copyFile(vars, path.join(dir, "OVMF_VARS.fd")).pipe(Effect.mapError(startError));
+    return { id, dir, diskPath } satisfies Prepared;
   });
 
   const start = Effect.fn("Qemu.start")(function* (prepared: Prepared, input: StartInput) {
@@ -145,7 +163,7 @@ const make: Effect.Effect<
       serialPath,
       varsPath: path.join(dir, "OVMF_VARS.fd"),
       diskPath: prepared.diskPath,
-      iso: input.iso,
+      cdrom: input.cdrom,
       display: input.display,
       automation: input.automation,
     });
