@@ -45,6 +45,7 @@ const SESSION_TIMEOUT_REASON = "no command received for 10 minutes";
 // sweep that times sessions out notices. In memory only: no row records a reservation.
 const RESERVATION_TIMEOUT_MS = 10 * 60 * 1000;
 const RESERVATION_TIMEOUT_REASON = "unused for 10 minutes";
+const RELINQUISH_REASON = "relinquished";
 const SHUTDOWN_REASON = "qemu server shutdown";
 // An installed Omarchy shuts down in seconds; a guest still up two minutes after the power button
 // is not going to, and its disk is not one to keep.
@@ -90,9 +91,10 @@ export type SessionsService = {
   // reserve for the same agent is BadRequest: one id, one unused reservation. Start consumes
   // it and does not increment again.
   readonly reserve: (agent: string) => Effect.Effect<void, Errors.AtCapacity | Errors.BadRequest>;
-  // Gives back an unused reservation. Fails BadRequest when there is none, including after
-  // start has already consumed it: a running session keeps its slot.
-  readonly relinquish: (agent: string) => Effect.Effect<void, Errors.BadRequest>;
+  // Gives back everything the agent holds: an unused reservation, and its running session,
+  // which is stopped as aborted. Fails BadRequest when it holds nothing, a start in flight
+  // included.
+  readonly relinquish: (agent: string) => Effect.Effect<void, Errors.BadRequest | Errors.Internal>;
   // Consumes this agent's reservation. Fails BadRequest, before anything is minted or written,
   // when there is none. A start that fails hands the reservation back, so the same agent may
   // retry without reserving again.
@@ -500,26 +502,6 @@ const make = (maxJobs: number) =>
       );
     });
 
-    const relinquish = Effect.fn("Sessions.relinquish")(function* (agent: string) {
-      return yield* Effect.flatMap(
-        Ref.modify(slots, (held) =>
-          held.reserved.has(agent)
-            ? ([
-                true,
-                { count: held.count - 1, reserved: mapWithout(held.reserved, [agent]) },
-              ] as const)
-            : ([false, held] as const),
-        ),
-        (released) =>
-          released
-            ? Effect.void
-            : Errors.BadRequest.make({
-                message: "no reservation",
-                agentId: agent,
-              }),
-      );
-    });
-
     // A start that fails hands the reservation back as it was, deadline included: the slot was
     // this agent's before the start and stays so, so the retry is admitted rather than refused
     // as "no reservation" (OLI-1309: one refused database connection cost a driver its counted
@@ -857,7 +839,6 @@ const make = (maxJobs: number) =>
       status: Domain.StopStatus | undefined,
       reason: string | undefined,
     ) {
-      const finalStatus = status ?? "aborted";
       // The sweep may have taken the session between the lookup and here; whoever removes the id
       // owns its one verdict, and the other caller sees the session as already gone.
       const owned = yield* Ref.modify(sessions, (map) =>
@@ -866,32 +847,75 @@ const make = (maxJobs: number) =>
       if (!owned) {
         return yield* Errors.unknownSession(live.id, live.agent);
       }
-      // Every end but a succeeded stop is a session to explain. The session dir dies with kill; the
-      // serial has to be read while the file still exists. QEMU stderr is the in-memory tail
-      // drained so far. Reading it after kill is racy: closing the scope interrupts the drain
-      // fiber, so a death line written on SIGTERM can be lost.
-      const captured = finalStatus === "succeeded" ? undefined : yield* captureDebugLog(live);
-      // The kill destroys the socket and signals QEMU before it removes the dir, so a cleanup
-      // failure still leaves a dead machine: log it, but close the record.
-      yield* killLogged(live, "stop cleanup failed", live.agent);
-      yield* sessionStore
-        .endSession(live.id, finalStatus, reason ?? null)
-        .pipe(
-          Effect.catch((cause) =>
-            finishLiveSession(live, finalStatus).pipe(
-              Effect.andThen(Effect.fail(internal(cause, live.id, live.agent))),
+      return yield* close(live, status ?? "aborted", reason);
+    });
+
+    // Ends a session its caller has just taken out of the map, so the verdict is this one. Every
+    // end but a succeeded stop is a session to explain. The session dir dies with kill; the
+    // serial has to be read while the file still exists. QEMU stderr is the in-memory tail
+    // drained so far. Reading it after kill is racy: closing the scope interrupts the drain
+    // fiber, so a death line written on SIGTERM can be lost.
+    const close = (
+      live: LiveSession,
+      finalStatus: Domain.StopStatus,
+      reason: string | undefined,
+    ): Effect.Effect<void, Errors.Internal> =>
+      Effect.gen(function* () {
+        const captured = finalStatus === "succeeded" ? undefined : yield* captureDebugLog(live);
+        // The kill destroys the socket and signals QEMU before it removes the dir, so a cleanup
+        // failure still leaves a dead machine: log it, but close the record.
+        yield* killLogged(live, "stop cleanup failed", live.agent);
+        yield* sessionStore
+          .endSession(live.id, finalStatus, reason ?? null)
+          .pipe(
+            Effect.catch((cause) =>
+              finishLiveSession(live, finalStatus).pipe(
+                Effect.andThen(Effect.fail(internal(cause, live.id, live.agent))),
+              ),
             ),
-          ),
-        );
-      // Colour is released in finishLiveSession; log first so the stopped line keeps it.
-      yield* log.info(`stopped; ${finalStatus}${reason === undefined ? "" : `; ${reason}`}`, {
-        location: live.id,
-        agentId: live.agent,
+          );
+        // Colour is released in finishLiveSession; log first so the stopped line keeps it.
+        yield* log.info(`stopped; ${finalStatus}${reason === undefined ? "" : `; ${reason}`}`, {
+          location: live.id,
+          agentId: live.agent,
+        });
+        if (captured !== undefined) {
+          yield* saveDebugLog(live, captured);
+        }
+        return yield* finishLiveSession(live, finalStatus);
       });
-      if (captured !== undefined) {
-        yield* saveDebugLog(live, captured);
+
+    // -------------------------------------------------------------------------
+    // relinquish
+    // -------------------------------------------------------------------------
+
+    // Gives back everything this agent holds here: an unused reservation, and the session it is
+    // running, which is stopped as aborted so the machine, the record and the slot close together
+    // rather than the slot going back with a guest still on it. The session is taken out of the
+    // map here, as stop does, so this is its one verdict. Holding nothing is BadRequest; a start
+    // in flight holds neither yet and keeps its slot.
+    const relinquish = Effect.fn("Sessions.relinquish")(function* (agent: string) {
+      const released = yield* Ref.modify(slots, (held) =>
+        held.reserved.has(agent)
+          ? ([
+              true,
+              { count: held.count - 1, reserved: mapWithout(held.reserved, [agent]) },
+            ] as const)
+          : ([false, held] as const),
+      );
+      const running = yield* Ref.modify(sessions, (map) => {
+        const live = Option.fromUndefinedOr(
+          [...map.values()].find((candidate) => candidate.agent === agent),
+        );
+        return [live, Option.isNone(live) ? map : mapWithout(map, [live.value.id])] as const;
+      });
+      if (!released && Option.isNone(running)) {
+        return yield* Errors.BadRequest.make({ message: "no reservation", agentId: agent });
       }
-      return yield* finishLiveSession(live, finalStatus);
+      return yield* Option.match(running, {
+        onNone: () => Effect.void,
+        onSome: (live) => close(live, "aborted", RELINQUISH_REASON),
+      });
     });
 
     // -------------------------------------------------------------------------

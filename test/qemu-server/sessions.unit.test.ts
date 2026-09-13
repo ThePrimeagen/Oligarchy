@@ -2577,24 +2577,147 @@ describe("capacity", () => {
     }),
   );
 
-  it.effect("relinquish after start is BadRequest and the running session keeps its slot", () =>
-    Effect.gen(function* () {
-      const h = harness({ maxJobs: 1 });
-      yield* h.run(
-        Effect.gen(function* () {
-          const { sessions, id } = yield* start();
-          const error = yield* Effect.flip(sessions.relinquish(AGENT));
-          expect(error).toMatchObject({
-            _tag: "BadRequest",
-            message: "no reservation",
-            agentId: AGENT,
-          });
-          expect((yield* Effect.flip(sessions.reserve(OTHER_AGENT)))._tag).toBe("AtCapacity");
-          expect(h.sessions.sessions.map((row) => row.id)).toEqual([id]);
-          expect(yield* qemus(sessions)).toBe(1);
-        }),
-      );
-    }),
+  it.effect(
+    "relinquish after start stops the running session as aborted; relinquished, closing the machine, the record and the slot",
+    () =>
+      Effect.gen(function* () {
+        const h = harness({ maxJobs: 1 });
+        yield* h.run(
+          Effect.gen(function* () {
+            const { sessions, id } = yield* start();
+            const events = yield* sessions.follow(id);
+            yield* sessions.relinquish(AGENT);
+            expect(yield* Effect.flip(sessions.lookup(id, AGENT))).toMatchObject({
+              _tag: "UnknownSession",
+            });
+            expect(yield* qemus(sessions)).toBe(0);
+            expect(yield* sessions.jobs).toBe(0);
+            expect(h.qemu.calls.map((call) => call._tag)).toEqual([
+              "prepare",
+              "start",
+              "stderrTail",
+              "stop",
+            ]);
+            expect(h.sessions.sessions[0]).toMatchObject({
+              id,
+              status: "aborted",
+              reason: "relinquished",
+            });
+            expect(h.sessions.sessions[0]?.endedAt).not.toBeNull();
+            expect(h.debugLogs.saves.map((save) => save.sessionId)).toEqual([id]);
+            expect(texts(h).at(-1)).toBe("stopped; aborted; relinquished");
+            expect(h.log.released).toEqual([AGENT]);
+            expect(yield* Stream.runCollect(events)).toEqual([
+              { type: "session", status: "running" },
+              { type: "session", status: "aborted" },
+            ]);
+            expect(endedWith(spanNamed(h, AGENT))).toBe("aborted");
+            // Nothing left to give back: the slot is the next agent's.
+            expect(yield* Effect.flip(sessions.relinquish(AGENT))).toMatchObject({
+              _tag: "BadRequest",
+              message: "no reservation",
+              agentId: AGENT,
+            });
+            yield* sessions.reserve(OTHER_AGENT);
+          }),
+        );
+      }),
+  );
+
+  it.effect(
+    "relinquish gives back a reservation and stops a running session held together, in one call",
+    () =>
+      Effect.gen(function* () {
+        const gate = yield* Deferred.make<void>();
+        const h = harness({ maxJobs: 2, script: { boot: () => Deferred.await(gate) } });
+        yield* h.run(
+          Effect.gen(function* () {
+            const sessions = yield* Sessions.Sessions;
+            const booting = yield* Effect.forkChild(reservedStart(startBody()), {
+              startImmediately: true,
+            });
+            // A reserve landing mid-start is admitted beside the session (see failed start).
+            yield* sessions.reserve(AGENT);
+            yield* Deferred.succeed(gate, undefined);
+            const id = yield* Fiber.join(booting);
+            expect(yield* sessions.jobs).toBe(2);
+            yield* sessions.relinquish(AGENT);
+            expect(yield* sessions.jobs).toBe(0);
+            expect(yield* qemus(sessions)).toBe(0);
+            expect(h.sessions.sessions.map((row) => [row.id, row.status, row.reason])).toEqual([
+              [id, "aborted", "relinquished"],
+            ]);
+            yield* sessions.reserve(OTHER_AGENT);
+            yield* sessions.reserve("OLI-63");
+          }),
+        );
+      }),
+  );
+
+  it.effect(
+    "a relinquish whose record cannot be closed fails Internal after the session is finished (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const h = harness({
+          maxJobs: 1,
+          sessionStore: {
+            endSession: () =>
+              Effect.fail(
+                Errors.DatabaseError.make({
+                  operation: "endSession",
+                  message: "Failed query: update sessions",
+                }),
+              ),
+          },
+        });
+        yield* h.run(
+          Effect.gen(function* () {
+            const { sessions, id } = yield* start();
+            const error = yield* Effect.flip(sessions.relinquish(AGENT));
+            expect(error).toMatchObject({
+              _tag: "Internal",
+              message: "internal error",
+              sessionId: id,
+              agentId: AGENT,
+            });
+            // The machine is gone and the slot is free; only the row stayed open.
+            expect(h.qemu.calls.map((call) => call._tag)).toContain("stop");
+            expect(yield* qemus(sessions)).toBe(0);
+            expect(yield* sessions.jobs).toBe(0);
+            expect(h.sessions.sessions[0]).toMatchObject({ id, status: "running" });
+            yield* sessions.reserve(OTHER_AGENT);
+          }),
+        );
+      }),
+  );
+
+  it.effect(
+    "relinquish while the agent's start is in flight is BadRequest and the boot keeps its slot (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const gate = yield* Deferred.make<void>();
+        const h = harness({ maxJobs: 1, script: { boot: () => Deferred.await(gate) } });
+        yield* h.run(
+          Effect.gen(function* () {
+            const sessions = yield* Sessions.Sessions;
+            const booting = yield* Effect.forkChild(reservedStart(startBody()), {
+              startImmediately: true,
+            });
+            expect(yield* Effect.flip(sessions.relinquish(AGENT))).toMatchObject({
+              _tag: "BadRequest",
+              message: "no reservation",
+              agentId: AGENT,
+            });
+            expect((yield* Effect.flip(sessions.reserve(OTHER_AGENT)))._tag).toBe("AtCapacity");
+            yield* Deferred.succeed(gate, undefined);
+            const id = yield* Fiber.join(booting);
+            expect(h.sessions.sessions.map((row) => [row.id, row.status])).toEqual([
+              [id, "running"],
+            ]);
+            expect(yield* qemus(sessions)).toBe(1);
+          }),
+        );
+      }),
   );
 });
 

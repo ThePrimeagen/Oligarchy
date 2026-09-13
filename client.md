@@ -93,7 +93,7 @@ given back, and a start after that is refused the same way.
 ./client relinquish --agent-id <agent> --server-url <url>
 ```
 
-Gives back the reservation held for `--agent-id` without starting a machine, so the slot goes to the next agent now rather than when the reservation expires. Run it when three `start`s have failed to return a session id, then close your result as failed with `./ctrl test-results` and finish; there is no session to stop. Without a reservation the host answers 400 `no reservation`. A running session is not a reservation: end it with `stop`.
+Gives back everything `--agent-id` holds: an unused reservation, and a running session, which is stopped as `aborted` with the reason `relinquished` (machine killed, record closed, debug log saved), so the slot goes to the next agent now, never with a guest still on it. Run it when three `start`s have failed to return a session id, then close your result as failed with `./ctrl test-results` and finish. Holding nothing, the host answers 400 `no reservation`. When the test is over, end the session with `stop` and its verdict instead.
 
 ```bash
 ./client relinquish --agent-id OLI-42 --server-url https://qemu.example.com
