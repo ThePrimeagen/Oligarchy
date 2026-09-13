@@ -26,30 +26,30 @@ every later session boot a throwaway copy of that disk in seconds.
 - `mode`: what a session is. `fresh` boots the ISO on a blank disk (today). `mint` boots the ISO on a
   blank disk and may `save`. `resume` boots the machine's minted disk with no ISO attached.
 - minted disk: `~/.oligarchy/isos/<key>.minted/`, beside the cached ISO, `<key>` being
-  `Iso.cacheFileName(iso)`. Its `metadata.json` points at the current version, a folder named by the
-  session that saved it, holding `disk.qcow2` and `OVMF_VARS.fd`. A local-path ISO is used in
-  place and never enters the cache directory; its minted disk still goes under
-  `~/.oligarchy/isos/` by the same key.
+  `Iso.cacheFileName(iso)`. The folder holds `disk.qcow2`, `OVMF_VARS.fd` and `metadata.json`
+  (`{ iso, sessionId, agentId, savedAt }`); the folder existing is the fact that the ISO is minted
+  on this machine. One per ISO per machine. A local-path ISO is used in place and never enters the
+  cache directory; its minted disk still goes under `~/.oligarchy/isos/` by the same key.
 - `save`: the call that ends a `mint` session and keeps its disk as the machine's minted disk for
   that ISO.
 - pin: `test_runs.pinned_server`, a qemu server url the reserve must land on. Null means unpinned.
 
 ## Decisions
 
-- `save` ends the session: QMP `system_powerdown` (skipped when the guest already exited), wait for
-  QEMU to exit with a bound of two minutes, `qemu-img convert` into `<key>.minted/<sessionId>.partial-<pid>/`
-  beside the vars copy, one rename to `<key>.minted/<sessionId>/`, then `metadata.json` written whole
-  (`.partial-<pid>` then rename) pointing at it, row closed `succeeded` with `saved; disk for <iso>`.
-  A clean shutdown makes a clean image; a copy taken from a running guest is only crash-consistent.
-- A `save` moves the pointer; it never touches files a running guest holds. An overlay names its
-  version's `disk.qcow2` in its header and QEMU keeps it open, so versions other than `current` are
-  removed after the pointer moves and a guest still on one keeps it until it exits. Redoing a
-  machine is minting it again.
+- `save` ends the session: refuse first when `<key>.minted/` already exists (409, the guest keeps
+  running); then QMP `system_powerdown` (skipped when the guest already exited), wait for QEMU to
+  exit with a bound of two minutes, `qemu-img convert` into `<key>.minted.partial-<pid>/disk.qcow2`
+  with the vars copy and `metadata.json` beside it, one rename to `<key>.minted/`, row closed
+  `succeeded` with `saved; disk for <iso>`. A clean shutdown makes a clean image; a copy taken
+  from a running guest is only crash-consistent.
+- One minted disk per ISO per machine, minted once. Overriding is rare and manual: the operator
+  removes `<key>.minted/` on that machine and mints again. No version folders, no pointer, no
+  replacement while guests run: an overlay's backing file is never rewritten.
 - A resume derives the folder from the request's `iso` exactly as the ISO cache does and requires
-  `metadata.iso === iso`; a pointer whose version folder is gone counts as no minted disk.
-- `metadata.json` is never read-modify-written, so two qemu servers on one machine cannot lose each
-  other's pointer; the later save wins and the other's version is removed. The `minting` claim,
-  which heartbeats, gets its own `minting.json` when the reserve step lands.
+  `metadata.iso === iso`; a folder with an unreadable or mismatching `metadata.json` counts as no
+  minted disk and is logged at warning.
+- The `minting` claim, which heartbeats, gets its own `<key>.minting.json` when the reserve step
+  lands; `save` never touches it.
 - The reserve carries `mode`, `iso` and an optional `server` pin. The proxy honors a pin exactly and
   never falls back to another server. An unpinned `resume` is placed only on a server whose stats
   show the disk `saved`. `fresh` and `mint` are ranked as today.
@@ -76,6 +76,8 @@ every later session boot a throwaway copy of that disk in seconds.
 |---|---|---|
 | qemu server `/reserve` | `mint` or `resume` without `iso` | 400 `mode "<m>" needs an iso` |
 | qemu server `/reserve` | `mint`, live claim on this machine | 400 `already minting <iso> on this machine` |
+| qemu server `/reserve` | `mint`, minted disk already on this machine | 400 `already minted <iso> on this machine` |
+| qemu server `/save` | minted disk already on this machine | 409 `already minted <iso> on this machine`, session keeps running |
 | qemu server `/reserve`, `/start` | `resume`, no minted disk here | 400 `no saved disk for <iso> on this machine` |
 | qemu server `/start` | mode or iso differs from the reservation | 400, reservation stands |
 | qemu server `/save` | session is not `mint` | 400 `only a mint session can save` |
@@ -121,33 +123,37 @@ job with the message.
 
 `test/qemu/disks.unit.test.ts` (new)
 
-- [ ] `find` answers the current version's `disk.qcow2` and `OVMF_VARS.fd` from `metadata.json`;
-      none without a pointer, when `metadata.iso` names another ISO (logged at warning), or when the
-      version folder is gone; an unreadable `metadata.json` is a warning and none.
-- [ ] `list` reports every ISO `find` would accept as `saved` and every live `minting.json` as
+- [ ] `find` answers `disk.qcow2` and `OVMF_VARS.fd` of `<key>.minted/` when the folder exists and
+      its `metadata.iso` is the ISO asked for; none when the folder is absent; none and a warning
+      when `metadata.json` is unreadable or names another ISO.
+- [ ] `list` reports every folder `find` would accept as `saved` and every live `minting.json` as
       `minting`; a stale claim and a `.partial-*` folder are ignored.
-- [ ] `save` converts into `<sessionId>.partial-<pid>/`, copies the vars, renames to `<sessionId>/`,
-      writes `metadata.json` whole and removes every other version folder; a failing convert removes
-      the partial and leaves the pointer; two saves of one ISO from two services: the later pointer
-      wins and the other version is removed.
-- [ ] `claim` writes `minting.json` with agent and heartbeat; a second claim for the same ISO is
-      `BadRequest` while live and succeeds once stale; `release` removes only that agent's claim;
-      `refresh` bumps the heartbeat of the given agents' claims only; `save` leaves `minting.json`
+- [ ] `save` converts into `<key>.minted.partial-<pid>/`, copies the vars, writes `metadata.json`
+      beside them, and renames the folder once; a failing convert removes the partial and leaves no
+      folder; a folder already present is `Conflict` before anything is written; a rename that
+      finds the folder present (a sibling service saved first) is `SaveFailed` and the partial is
+      removed.
+- [ ] `claim` writes `<key>.minting.json` with agent and heartbeat; a second claim for the same ISO
+      is `BadRequest` while live and succeeds once stale; `release` removes only that agent's claim;
+      `refresh` bumps the heartbeat of the given agents' claims only; `save` leaves the claim
       untouched.
-- [ ] two services on one cache directory see each other's pointers and claims.
+- [ ] two services on one cache directory see each other's minted folders and claims.
 
 `test/qemu-server/sessions.unit.test.ts`
 
 - [ ] reserve: `mint` claims and holds mode and ISO on the reservation; `mint` with a live claim is
-      `BadRequest` `already minting <iso> on this machine` and the slot is given back; `resume`
+      `BadRequest` `already minting <iso> on this machine`, `mint` with the disk already minted is
+      `BadRequest` `already minted <iso> on this machine`, both giving the slot back; `resume`
       without a saved disk is `BadRequest` `no saved disk for <iso> on this machine`; `mint` or
       `resume` without an ISO is `BadRequest`; `fresh` is unchanged.
 - [ ] start: mode or ISO differing from the reservation is `BadRequest` and the reservation stands;
       `resume` never calls `getIso`, prepares from the saved disk, inserts the row `running` with
       `mode` in its config; `mint` inserts `mode: mint`.
-- [ ] save: on a `fresh` or `resume` session is `BadRequest`; the happy path records the powerdown
-      action, awaits exit, saves, closes the row `succeeded` with `saved; disk for <iso>`, frees the
-      slot, tells followers last; a guest already exited is saved without a powerdown exchange; a
+- [ ] save: on a `fresh` or `resume` session is `BadRequest`; with the disk already minted on this
+      machine is `Conflict` and the session keeps running, no exchange sent; the happy path records
+      the powerdown action, awaits exit, saves, closes the row `succeeded` with
+      `saved; disk for <iso>`, frees the slot, tells followers last; a guest already exited is saved
+      without a powerdown exchange; a
       guest that never powers off within the bound is killed, row `failed`, debug log saved, claim
       released, `SaveFailed`; a failing convert ends the row `failed` and releases the claim; racing
       the sweep is `UnknownSession`.
@@ -324,13 +330,15 @@ The exported surface, as bare declarations:
 ```ts
 export const HEARTBEAT_MS = 10_000;
 export const STALE_MS = 30_000;
-// <key>.minted/metadata.json, written whole: the pointer and the provenance in one.
+// <key>.minted/metadata.json: which ISO this is and the session that made it.
 export const Metadata: Schema.Struct<{
   iso: string;
-  current: { version: Domain.SessionId; agentId: string; savedAt: string };
+  sessionId: Domain.SessionId;
+  agentId: string;
+  savedAt: string; // ISO-8601 from Clock
 }>;
 export const MetadataJson: Schema.Codec<Metadata, string>; // Schema.fromJsonString(Schema.toCodecJson(Metadata))
-// <key>.minted/minting.json, the live claim; later step.
+// <key>.minting.json, the live claim; later step.
 export const Claim: Schema.Struct<{ agentId: string; heartbeatAt: string }>;
 export type SavedDisk = { readonly disk: string; readonly vars: string };
 export type DisksService = {
@@ -343,7 +351,7 @@ export type DisksService = {
     iso: string,
     agent: string,
     from: { readonly disk: string; readonly vars: string; readonly sessionId: string },
-  ) => Effect.Effect<void, Errors.SaveFailed>;
+  ) => Effect.Effect<void, Errors.Conflict | Errors.SaveFailed>;
 };
 export class Disks extends Context.Service<Disks>()("@oligarchy/qemu/Disks", { make }) {}
 ```
@@ -354,17 +362,18 @@ Rules:
   `Iso.Host` reused for home and pid. `iso.ts` is untouched: it addresses the ISO file and its
   partials by exact name and keys its manifest by file name, so the sibling directory is invisible
   to it.
-- `find` reads `metadata.json`, requires `metadata.iso === iso` and the version folder to exist, and
-  answers its `disk.qcow2` and `OVMF_VARS.fd` paths; anything else is `Option.none()`, a mismatch
-  logged at warning.
-- `list` is every `*.minted/metadata.json` that `find` would accept, as `saved`, plus every
-  `minting.json` whose heartbeat is within `STALE_MS`, as `minting`.
-- `save` converts into `<sessionId>.partial-<pid>/disk.qcow2`, copies the vars beside it, renames
-  the folder to `<sessionId>/`, writes `metadata.json` whole through `metadata.json.partial-<pid>`
-  and a rename, then removes every version folder but `current`. A failed convert removes the
-  partial and leaves the pointer and the claim as they were.
-- `claim`, `refresh` and `release` own `minting.json` alone (a later step); `save` and the pointer
-  never touch it.
+- `find` is "the folder exists and its `metadata.iso` is the ISO asked for", answering the
+  folder's `disk.qcow2` and `OVMF_VARS.fd`; a folder whose `metadata.json` is unreadable or names
+  another ISO is `Option.none()` and one warning.
+- `list` is every folder `find` would accept, as `saved`, plus every `<key>.minting.json` whose
+  heartbeat is within `STALE_MS`, as `minting`.
+- `save` refuses with `Conflict` when the folder exists. Otherwise it converts into
+  `<key>.minted.partial-<pid>/disk.qcow2`, copies the vars and writes `metadata.json` beside it,
+  and renames the folder once. A failed convert removes the partial. A rename refused because the
+  folder appeared meanwhile (the sibling service saved first) is `SaveFailed` and the partial is
+  removed; the disk that landed is equally a mint of this ISO.
+- `claim`, `refresh` and `release` own `<key>.minting.json` alone (a later step); `save` never
+  touches it.
 - Directory-name and key helpers are pure and stay outside Effect.
 
 - [ ] `disks.ts` as above.
@@ -387,7 +396,9 @@ readonly save: (live: LiveSession) => Effect<void, BadRequest | SaveFailed | Int
       consume as today. In `launch`, `resume` skips `iso.getIso`, calls
       `qemu.prepare(id, { _tag: "saved", ...found })` and `qemu.start(prepared, { cdrom: undefined, ... })`;
       the row is inserted `running`. The config carries `mode`.
-- [ ] `save`: mode not `mint` is `BadRequest` `only a mint session can save`; take ownership from
+- [ ] `save`: mode not `mint` is `BadRequest` `only a mint session can save`; the disk already
+      minted on this machine (`disks.find`) is `Conflict` `already minted <iso> on this machine`,
+      before ownership is taken, so the session keeps running; then take ownership from
       the map as `stop` does; if `live.qemu.exited` is not done, `live.qemu.powerdown(recorder(live))`
       under `followed(live, "save", ...)`; `Effect.timeoutOrElse({ duration: "2 minutes", orElse: ... })`
       on `exited` failing `SaveFailed` `guest did not power off within 2 minutes`;
@@ -395,8 +406,8 @@ readonly save: (live: LiveSession) => Effect<void, BadRequest | SaveFailed | Int
       kill; `endSession(id, "succeeded", "saved; disk for <iso>")`; log; `finishLiveSession`. Any
       failure after ownership: capture the debug log, kill, `endSession failed` with the message,
       `finishLiveSession`, fail `SaveFailed`.
-- [ ] `finishLiveSession`: for a `mint` session, `disks.release(iso, agent)`, a no-op once `save`
-      flipped the entry. `expireReservations`: release expired mint claims. The sweep tick:
+- [ ] `finishLiveSession`: for a `mint` session, `disks.release(iso, agent)`, a no-op when the
+      claim is already gone. `expireReservations`: release expired mint claims. The sweep tick:
       `disks.refresh(agents holding mint reservations or sessions)`.
 - [ ] `stats`: build `Contract.Stats` with `host: Qemu.hostName` and `disks: yield* disks.list`.
 - [ ] `src/qemu-server/handlers.ts`: a `save` handler (`lookup` then `save`, uninterruptible);
@@ -541,7 +552,8 @@ Body, in order:
 2. `./ctrl mint --server-url <proxy> --iso <url>`: one ticket per machine; move them to Automation
    Needed; wait for Done.
 3. `./ctrl mint --verify --server-url <proxy> --iso <url>`: one ticket per machine holding the disk;
-   a failed verdict is `./ctrl mint --server <url> ...` for that machine.
+   a failed verdict is, on that machine, `rm -rf ~/.oligarchy/isos/<key>.minted`, then
+   `./ctrl mint --server <url> ...`. Rare by design: a second save on a minted machine is refused.
 4. `GET /servers` on the proxy, or the servers page, shows every machine's `disks`. When every host
    shows the ISO `saved`, queue the `resume` batch; the dispatcher fills the fleet up to the sum of
    `--max-jobs`, and each session boots in seconds.
