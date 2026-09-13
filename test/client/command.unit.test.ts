@@ -286,6 +286,41 @@ describe("client requests", () => {
     }),
   );
 
+  it.effect("save posts the session and the agent and prints saved", () =>
+    Effect.gen(function* () {
+      const recorder = FakeHttp.recordRequests(ok);
+      yield* run(["save", ...shared, "--session-id", SESSION], { http: recorder.layer });
+      expect(recorder.requests[0]?.url).toBe(`${SERVER}/save`);
+      expect(parsed(recorder.requests[0]?.body ?? "")).toEqual({ id: SESSION, agent: AGENT });
+      expect(yield* TestConsole.logLines).toEqual(["saved"]);
+    }),
+  );
+
+  it.effect("save without --session-id is a usage error that sends nothing", () =>
+    Effect.gen(function* () {
+      const recorder = FakeHttp.recordRequests(ok);
+      const error = yield* Effect.flip(run(["save", ...shared], { http: recorder.layer }));
+      expect(showHelp(error).errors).toMatchObject([
+        { _tag: "MissingOption", option: "session-id" },
+      ]);
+      expect(recorder.requests).toEqual([]);
+      // The usage error prints the help; the one thing that must not print is the verdict.
+      expect(yield* TestConsole.logLines).not.toContain("saved");
+    }),
+  );
+
+  it.effect("a save the server fails is its refusal, and nothing prints saved", () =>
+    Effect.gen(function* () {
+      const message = "guest did not power off within 2 minutes";
+      const recorder = FakeHttp.recordRequests(() => FakeHttp.json({ error: message }, 502));
+      const error = yield* Effect.flip(
+        run(["save", ...shared, "--session-id", SESSION], { http: recorder.layer }),
+      );
+      expect(error).toMatchObject({ _tag: "ProxyRefusal", status: 502, message });
+      expect(yield* TestConsole.logLines).toEqual([]);
+    }),
+  );
+
   it.effect("stop rejects a verdict outside succeeded|failed|aborted", () =>
     Effect.gen(function* () {
       const recorder = FakeHttp.recordRequests(ok);
@@ -462,6 +497,7 @@ describe("client help", () => {
     ["intent", "start"],
     ["intent", "end"],
     ["stop"],
+    ["save"],
     ["follow"],
   ];
 

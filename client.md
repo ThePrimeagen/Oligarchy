@@ -4,21 +4,22 @@ Consult this table of contents first. Read only the section you need.
 
 | Section | Line |
 |---------|-----:|
-| [Important](#important) | 23 |
-| [Synopsis](#synopsis) | 29 |
-| [client-with-image](#client-with-image) | 53 |
-| [start](#start) | 70 |
-| [relinquish](#relinquish) | 90 |
-| [get-image](#get-image) | 102 |
-| [get-serial](#get-serial) | 117 |
-| [send-keys](#send-keys) | 132 |
-| [send-mouse](#send-mouse) | 148 |
-| [intent start](#intent-start) | 165 |
-| [intent end](#intent-end) | 181 |
-| [stop](#stop) | 195 |
-| [Keys](#keys) | 211 |
-| [Mouse](#mouse) | 223 |
-| [The loop](#the-loop) | 231 |
+| [Important](#important) | 24 |
+| [Synopsis](#synopsis) | 30 |
+| [client-with-image](#client-with-image) | 55 |
+| [start](#start) | 72 |
+| [relinquish](#relinquish) | 92 |
+| [get-image](#get-image) | 104 |
+| [get-serial](#get-serial) | 119 |
+| [send-keys](#send-keys) | 134 |
+| [send-mouse](#send-mouse) | 150 |
+| [intent start](#intent-start) | 167 |
+| [intent end](#intent-end) | 183 |
+| [stop](#stop) | 197 |
+| [save](#save) | 213 |
+| [Keys](#keys) | 229 |
+| [Mouse](#mouse) | 241 |
+| [The loop](#the-loop) | 249 |
 
 ## Important
 
@@ -40,6 +41,7 @@ If you are the client, or an agent driving the client: do not look at code. Only
 ./client intent start --session-id <id> --test-result-id <id> --message <text>
 ./client intent end   --session-id <id>
 ./client stop       --session-id <id> [--status succeeded|failed|aborted] [--reason <text>]
+./client save       --session-id <id>
 ```
 
 The action comes first. Every value is a flag; there are no positional arguments. Flags may sit in any order after the action.
@@ -61,7 +63,7 @@ The same arguments as `./client`, then a screenshot. Prefer this over calling `.
 - `CLIENT_IMAGE` — the PNG path. Required. Missing means exit 1, `CLIENT_IMAGE is not set`.
 - After the action succeeds, waits 100 ms, then writes the guest display to `CLIENT_IMAGE`.
 - The action's stdout is unchanged (`start` still prints the session id). `--session-id` comes from the flags, or from that printed id.
-- A failed action does not take a screenshot. `stop` does not either: the session is already gone. Nor does `relinquish`: whatever it held is gone.
+- A failed action does not take a screenshot. `stop` and `save` do not either: the session is already gone. Nor does `relinquish`: whatever it held is gone.
 
 ```bash
 CLIENT_IMAGE=screen.png ./client-with-image send-keys --agent-id OLI-42 --server-url https://qemu.example.com --session-id 6f1c...e2a9 --keys "hello<ENTER>"
@@ -208,6 +210,22 @@ Kills the session. `--agent-id` must be the agent that started it.
 ./client stop --agent-id OLI-42 --server-url https://qemu.example.com --session-id 6f1c...e2a9 --status failed --reason "installer hung"
 ```
 
+## save
+
+```
+./client save --agent-id <agent> --server-url <url> --session-id <id>
+```
+
+Ends the session keeping its disk: the guest is powered off, its disk and firmware are kept as the minted disk of the ISO it booted, and the session closes `succeeded`. Only call it when the install is complete and the desktop has been seen; the disk is kept exactly as it is. Prints `saved` and exits 0. `--agent-id` must be the agent that started the session. Run `./ctrl test-results` first: after `save` there is no session to come back to.
+
+- `--session-id <id>` — the session.
+
+A guest that does not power off within two minutes, or a disk that cannot be kept, fails with the reason as the headline and exits 1; the session is then over, ended `failed`, and nothing was kept.
+
+```bash
+./client save --agent-id OLI-42 --server-url https://qemu.example.com --session-id 6f1c...e2a9
+```
+
 ## Keys
 
 Type letters as written. `A` sends shift+a. You do not add a shift key yourself.
@@ -230,7 +248,7 @@ A greeter or installer button is a left click at that point. A double-click laun
 
 ## The loop
 
-Every guest action — keys, mouse, images — runs inside an intent: start one that says what you are about to do, do the work, end it. Only `start`, `relinquish`, `./ctrl`, and `stop` sit outside one.
+Every guest action — keys, mouse, images — runs inside an intent: start one that says what you are about to do, do the work, end it. Only `start`, `relinquish`, `./ctrl`, `stop`, and `save` sit outside one.
 
 Send keys or mouse, wait about three seconds, take an image, read it, decide. That is the whole method. `./client-with-image` is the action plus the image, with 100 ms in between; set `CLIENT_IMAGE` to the PNG path you will open. Never sleep more than ten seconds between actions. When something genuinely slow is running, keep taking images instead of trusting a long sleep.
 

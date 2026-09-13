@@ -293,6 +293,30 @@ describe("./client happy path", () => {
     expect(stub.requests[1]?.body).toEqual({ id: SESSION, agent: AGENT });
   });
 
+  it("save posts the session and the agent, prints saved and exits 0", async () => {
+    const stub = await proxy();
+    const result = await runClient([
+      "save",
+      "--agent-id",
+      AGENT,
+      "--server-url",
+      stub.url,
+      "--session-id",
+      SESSION,
+    ]);
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe("saved\n");
+    expect(stub.requests[0]).toMatchObject({
+      method: "POST",
+      url: "/save",
+      body: { id: SESSION, agent: AGENT },
+    });
+    const help = await runClient(["save", "--help"]);
+    expect(help.code).toBe(0);
+    expect(help.stdout).toMatch(/--session-id/);
+  });
+
   it("follow streams the proxy's event lines to stdout as they arrive and exits 0 when the stream ends", async () => {
     const stub = await proxy();
     const result = await runClient([
