@@ -18,6 +18,10 @@ describe("FollowEvent", () => {
     ],
     [{ type: "action", id: 3, state: "completed" }, `{"type":"action","id":3,"state":"completed"}`],
     [
+      { type: "action", id: 4, name: "save", state: "running" },
+      `{"type":"action","id":4,"name":"save","state":"running"}`,
+    ],
+    [
       { type: "image", id: SESSION_ID, png: "iVBORw0KGgo=" },
       `{"type":"image","id":"${SESSION_ID}","png":"iVBORw0KGgo="}`,
     ],
@@ -236,6 +240,18 @@ describe("encodeQmpCommand", () => {
     ).toBe(
       `{"execute":"input-send-event","arguments":{"events":[{"type":"abs","data":{"axis":"x","value":16383}},{"type":"btn","data":{"button":"left","down":true}}]},"id":4}\n`,
     );
+  });
+
+  it("encodes system_powerdown with empty arguments, as QMP takes it", () => {
+    expect(Domain.encodeQmpCommand({ execute: "system_powerdown", arguments: {}, id: 5 })).toBe(
+      `{"execute":"system_powerdown","arguments":{},"id":5}\n`,
+    );
+  });
+
+  it("refuses an action name outside the vocabulary", () => {
+    const is = Schema.is(Domain.ActionName);
+    expect(is("save")).toBe(true);
+    expect(is("restore")).toBe(false);
   });
 });
 

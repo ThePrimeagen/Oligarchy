@@ -38,6 +38,7 @@ const isApiError: (value: unknown) => value is Errors.ApiError = Schema.is(
     Errors.Conflict,
     Errors.StartFailed,
     Errors.ExchangeFailed,
+    Errors.SaveFailed,
     Errors.Internal,
     Errors.ServerFailed,
     Errors.NoServer,
@@ -92,6 +93,7 @@ const attribution = (error: Errors.ApiError, fallback: Log.ProcessAttribution): 
     case "BadRequest":
     case "StartFailed":
     case "ExchangeFailed":
+    case "SaveFailed":
     case "Internal":
     case "ServerFailed":
       return Object.assign(

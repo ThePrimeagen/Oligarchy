@@ -1,4 +1,4 @@
-import { Cause, Effect, Exit, Layer, Option, Ref } from "effect";
+import { Cause, Deferred, Effect, Exit, Layer, Option, Ref } from "effect";
 import type { PlatformError } from "effect";
 import * as Iso from "../../src/qemu/iso.ts";
 import * as Qemu from "../../src/qemu/qemu.ts";
@@ -34,10 +34,14 @@ export type Call =
     }
   | { readonly _tag: "sendMouse"; readonly id: string; readonly input: MouseInput }
   | { readonly _tag: "screendump"; readonly id: string }
+  | { readonly _tag: "powerdown"; readonly id: string }
   | { readonly _tag: "stderrTail"; readonly id: string };
 
 // Every hook defaults to success; a hook that fails scripts that step's failure.
 export type Script = {
+  // The system_powerdown exchange; the guest then exits 0 unless `powersOff` is false.
+  readonly powerdown?: (id: string) => Effect.Effect<void, ExchangeError>;
+  readonly powersOff?: boolean;
   // The session dir, disk and firmware: a failing qemu-img create fails here.
   readonly prepare?: (
     id: string,
@@ -69,6 +73,8 @@ export type Script = {
 export type FakeQemu = {
   readonly calls: Array<Call>;
   readonly sessionDir: (id: string) => string;
+  // The guest of this session leaves on its own: QEMU exits with the code.
+  readonly exit: (id: string, code: number | null) => Effect.Effect<void>;
   readonly layer: Layer.Layer<Qemu.Qemu>;
 };
 
@@ -124,8 +130,14 @@ export const fakeQemu = (script: Script = {}): FakeQemu => {
   const calls: Array<Call> = [];
   const tmp = script.tmp ?? "/tmp";
   const sessionDir = (id: string): string => `${tmp}/oligarchy-${id}`;
+  // One exit per booted session, completed by a powerdown the guest honours or by `exit`.
+  const exits = new Map<string, Deferred.Deferred<number | null>>();
 
-  const makeHandle = (prepared: Qemu.Prepared, seq: Ref.Ref<number>): Qemu.QemuHandle => {
+  const makeHandle = (
+    prepared: Qemu.Prepared,
+    seq: Ref.Ref<number>,
+    exit: Deferred.Deferred<number | null>,
+  ): Qemu.QemuHandle => {
     const id = prepared.id;
     const dir = prepared.dir;
     const next = Ref.updateAndGet(seq, (n) => n + 1);
@@ -145,6 +157,23 @@ export const fakeQemu = (script: Script = {}): FakeQemu => {
       id,
       dir,
       serialPath: `${dir}/serial.log`,
+      diskPath: prepared.diskPath,
+      varsPath: `${dir}/OVMF_VARS.fd`,
+      powerdown: (record) =>
+        Effect.gen(function* () {
+          calls.push({ _tag: "powerdown", id });
+          const commandId = yield* next;
+          yield* exchange(
+            record,
+            { execute: "system_powerdown", arguments: {}, id: commandId },
+            script.powerdown?.(id) ?? Effect.void,
+          );
+          if (script.powersOff !== false) {
+            yield* Deferred.succeed(exit, 0);
+          }
+        }),
+      running: Effect.map(Deferred.isDone(exit), (done) => !done),
+      exited: Deferred.await(exit),
       sendKeys: (chords, record) =>
         Effect.gen(function* () {
           calls.push({ _tag: "sendKeys", id, chords });
@@ -237,12 +266,22 @@ export const fakeQemu = (script: Script = {}): FakeQemu => {
         // The greeting is the recorded reply to the boot's qmp_capabilities.
         const close = yield* input.record({ execute: "qmp_capabilities", arguments: {}, id: 1 });
         yield* close({ state: "completed", response: GREETING });
-        return makeHandle(prepared, yield* Ref.make(1));
+        const exit = yield* Deferred.make<number | null>();
+        exits.set(prepared.id, exit);
+        return makeHandle(prepared, yield* Ref.make(1), exit);
       }),
   });
 
+  const exit = (id: string, code: number | null): Effect.Effect<void> =>
+    Effect.suspend(() => {
+      const pending = exits.get(id);
+      return pending === undefined
+        ? Effect.die(`fake qemu: no machine ${id} to exit`)
+        : Effect.asVoid(Deferred.succeed(pending, code));
+    });
+
   // `sessionDir` is the harness's: where a test finds the files the fake writes for a session.
-  return { calls, sessionDir, layer: Layer.succeed(Qemu.Qemu)(service) };
+  return { calls, sessionDir, exit, layer: Layer.succeed(Qemu.Qemu)(service) };
 };
 
 export type IsoCall = {
@@ -258,8 +297,12 @@ export type FakeIso = {
   readonly layer: Layer.Layer<Iso.Iso>;
 };
 
-// An Iso that answers with the name it was given, or whatever `resolve` scripts.
-export const fakeIso = (resolve: Resolve = (call) => Effect.succeed(call.name)): FakeIso => {
+// An Iso that answers with the name it was given, or whatever `resolve` scripts; `pathOf` answers
+// the name too unless scripted, as a local iso path is its own boot path.
+export const fakeIso = (
+  resolve: Resolve = (call) => Effect.succeed(call.name),
+  pathOf: (name: string) => string = (name) => name,
+): FakeIso => {
   const calls: Array<IsoCall> = [];
   const service = Iso.Iso.of({
     getIso: (name, who) =>
@@ -268,6 +311,7 @@ export const fakeIso = (resolve: Resolve = (call) => Effect.succeed(call.name)):
         calls.push(call);
         return resolve(call);
       }),
+    pathOf: (name) => Effect.sync(() => pathOf(name)),
   });
   return { calls, layer: Layer.succeed(Iso.Iso)(service) };
 };

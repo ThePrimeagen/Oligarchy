@@ -58,6 +58,7 @@ describe("QemuServerApi", () => {
         "GET /follow",
         "GET /stats",
         "POST /stop",
+        "POST /save",
         "POST /send-keys",
         "POST /send-mouse",
         "POST /intent/start",
@@ -80,6 +81,7 @@ describe("QemuServerApi", () => {
     expect(urls.Sessions.follow({ query: { id: "abc" } })).toBe("/follow?id=abc");
     expect(urls.Sessions.stats()).toBe("/stats");
     expect(urls.Sessions.stop()).toBe("/stop");
+    expect(urls.Sessions.save()).toBe("/save");
     expect(urls.Sessions.sendKeys()).toBe("/send-keys");
     expect(urls.Sessions.sendMouse()).toBe("/send-mouse");
     expect(urls.Sessions.intentStart()).toBe("/intent/start");
@@ -137,6 +139,10 @@ describe("QemuServerApi", () => {
     expect(byIdentifier(Api.QemuServerApi, "stop").errors).toEqual(
       [...sessions, 403, 404].sort((a, b) => a - b),
     );
+    // 502: the guest did not power off, or its disk could not be kept.
+    expect(byIdentifier(Api.QemuServerApi, "save").errors).toEqual(
+      [...sessions, 403, 404, 502].sort((a, b) => a - b),
+    );
     expect(byIdentifier(Api.QemuServerApi, "sendKeys").errors).toEqual(
       [...sessions, 403, 404, 502].sort((a, b) => a - b),
     );
@@ -159,7 +165,7 @@ describe("QemuServerApi", () => {
 describe("QemuReverseProxyApi", () => {
   const reverse = Api.QemuReverseProxyApi;
 
-  it("declares every routed path of QemuServerApi but /stats, plus the three server routes", () => {
+  it("declares every routed path of QemuServerApi but /stats and /save, plus the three server routes", () => {
     const table = routes(reverse).map(({ method, path }) => `${method} ${path}`);
     expect(table.sort()).toEqual(
       [
@@ -180,6 +186,8 @@ describe("QemuReverseProxyApi", () => {
       ].sort(),
     );
     expect(table).not.toContain("GET /stats");
+    // Not routed yet: save lands on the qemu server first, the proxy learns it in its own step.
+    expect(table).not.toContain("POST /save");
   });
 
   it("keeps the routed endpoints' identifiers and inputs so the QemuServerApi client reaches them", () => {

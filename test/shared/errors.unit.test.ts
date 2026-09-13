@@ -79,6 +79,16 @@ const cases: ReadonlyArray<WireCase> = [
     status: 502,
   },
   {
+    name: "SaveFailed",
+    wire: Errors.SaveFailedWire,
+    error: Errors.SaveFailed.make({
+      message: "guest did not power off within 2 minutes",
+      sessionId: SESSION_ID,
+      agentId: AGENT_ID,
+    }),
+    status: 502,
+  },
+  {
     name: "Internal",
     wire: Errors.InternalWire,
     error: Errors.Internal.make({

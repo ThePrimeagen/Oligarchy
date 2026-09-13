@@ -214,6 +214,40 @@ describe("getIso with a local path", () => {
   );
 });
 
+describe("pathOf", () => {
+  it.effect("answers the cache file for a url without touching the network or the disk", () =>
+    withServices(
+      Effect.gen(function* () {
+        const { iso, cached, http, intercepted } = yield* fixture(refuseHttp);
+        expect(yield* iso.pathOf(URL_ISO)).toBe(cached);
+        expect(http.requests).toEqual([]);
+        expect(intercepted.calls).toEqual([]);
+      }),
+    ),
+  );
+
+  it.effect("answers the resolved path for a file, whether or not it exists", () =>
+    withServices(
+      Effect.gen(function* () {
+        const { iso, path, home } = yield* fixture(refuseHttp);
+        expect(yield* iso.pathOf(path.join(home, "local.iso"))).toBe(path.join(home, "local.iso"));
+        expect(yield* iso.pathOf("no-such-file.iso")).toBe(path.resolve("no-such-file.iso"));
+      }),
+    ),
+  );
+
+  it.effect("is the path getIso boots from", () =>
+    withServices(
+      Effect.gen(function* () {
+        const { iso, http } = yield* fixture();
+        const booted = yield* iso.getIso(URL_ISO, WHO);
+        expect(booted).toBe(yield* iso.pathOf(URL_ISO));
+        expect(http.requests.length).toBeGreaterThan(0);
+      }),
+    ),
+  );
+});
+
 describe("getIso with a url: cache", () => {
   it.effect("sanitises the url into a file name", () => {
     expect(Iso.cacheFileName(URL_ISO)).toBe(FILE);

@@ -209,6 +209,19 @@ describe("Qemu.start happy path", () => {
     }),
   );
 
+  it.effect("names the disk and the firmware copy the machine runs on", () =>
+    Effect.gen(function* () {
+      const fresh = yield* fixture();
+      const handle = yield* boot(fresh.qemu, FakeSocket.recorder().record);
+      expect(handle.diskPath).toBe(`${DIR}/disk.qcow2`);
+      expect(handle.varsPath).toBe(`${DIR}/OVMF_VARS.fd`);
+      // One fake socket answers one handshake; a second boot needs its own fixture.
+      const provided = yield* fixture();
+      const custom = yield* boot(provided.qemu, FakeSocket.recorder().record, "/mnt/custom.qcow2");
+      expect(custom.diskPath).toBe("/mnt/custom.qcow2");
+    }),
+  );
+
   it.effect("passes the display through and adds the automation devices", () =>
     Effect.gen(function* () {
       const qemuArgs = (display: Domain.QemuDisplay, automation: boolean) =>
@@ -503,6 +516,49 @@ describe("QemuHandle.screendump", () => {
         // The exchange itself completed; only the read failed.
         expect(recording.outcomes.map((outcome) => outcome.state)).toEqual(["completed"]);
       }),
+  );
+});
+
+describe("QemuHandle.powerdown and exit", () => {
+  it.effect("sends system_powerdown as one recorded exchange", () =>
+    Effect.gen(function* () {
+      const { socket, qemu } = yield* fixture();
+      const handle = yield* boot(qemu, FakeSocket.recorder().record);
+      const recording = FakeSocket.recorder();
+      yield* handle.powerdown(recording.record);
+      expect(commands(socket)[1]).toEqual({ execute: "system_powerdown", arguments: {}, id: 2 });
+      expect(recording.outcomes).toEqual([{ state: "completed", response: { return: {}, id: 2 } }]);
+    }),
+  );
+
+  it.effect("fails with QEMU's refusal and records the exchange failed", () =>
+    Effect.gen(function* () {
+      const { qemu } = yield* fixture({
+        respond: (command) =>
+          command.execute === "system_powerdown"
+            ? [FakeSocket.errorLine(command.id, "GenericError", "no ACPI")]
+            : FakeSocket.acceptAll(command),
+      });
+      const handle = yield* boot(qemu, FakeSocket.recorder().record);
+      const recording = FakeSocket.recorder();
+      const error = yield* Effect.flip(handle.powerdown(recording.record));
+      expect(error).toMatchObject({ _tag: "QmpError", desc: "no ACPI" });
+      expect(recording.outcomes.map((outcome) => outcome.state)).toEqual(["failed"]);
+    }),
+  );
+
+  it.effect("reports the machine running until QEMU exits, then its exit code", () =>
+    Effect.gen(function* () {
+      const { spawner, qemu } = yield* fixture();
+      const handle = yield* boot(qemu, FakeSocket.recorder().record);
+      expect(yield* handle.running).toBe(true);
+      const exited = yield* Effect.forkChild(handle.exited);
+      yield* Effect.yieldNow;
+      expect(exited.pollUnsafe()).toBeUndefined();
+      yield* spawner.spawned[1]?.exit(0) ?? Effect.void;
+      expect(yield* Fiber.join(exited)).toBe(0);
+      expect(yield* handle.running).toBe(false);
+    }),
   );
 });
 

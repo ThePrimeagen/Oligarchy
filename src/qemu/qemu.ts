@@ -52,6 +52,9 @@ export type QemuHandle = {
   readonly id: string;
   readonly dir: string;
   readonly serialPath: string;
+  // The disk the machine runs on and the firmware copy it boots with: what a save keeps.
+  readonly diskPath: string;
+  readonly varsPath: string;
   readonly sendKeys: (
     chords: ReadonlyArray<ReadonlyArray<string>>,
     record: Client.Recorder,
@@ -63,6 +66,11 @@ export type QemuHandle = {
   readonly screendump: (
     record: Client.Recorder,
   ) => Effect.Effect<Uint8Array, Client.ExecuteError | PlatformError.PlatformError>;
+  // The ACPI power button; the guest decides what to do with it.
+  readonly powerdown: (record: Client.Recorder) => Effect.Effect<void, Client.ExecuteError>;
+  // Whether QEMU is still running, and its exit code once it is not (null for a signal death).
+  readonly running: Effect.Effect<boolean>;
+  readonly exited: Effect.Effect<number | null>;
   readonly stderrTail: Effect.Effect<string>;
 };
 
@@ -232,13 +240,22 @@ const make: Effect.Effect<
       }).pipe(Effect.ensuring(Effect.ignore(fs.remove(file, { force: true }))));
     });
 
+    const powerdown = Effect.fn("Qemu.powerdown")(function* (record: Client.Recorder) {
+      yield* client.execute({ execute: "system_powerdown", arguments: {} }, record);
+    });
+
     return {
       id,
       dir,
       serialPath,
+      diskPath: prepared.diskPath,
+      varsPath: path.join(dir, "OVMF_VARS.fd"),
       sendKeys,
       sendMouse,
       screendump,
+      powerdown,
+      running: qemu.running,
+      exited: qemu.exited,
       stderrTail: qemu.stderrTail,
     } satisfies QemuHandle;
   });

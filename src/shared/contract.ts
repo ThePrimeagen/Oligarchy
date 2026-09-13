@@ -49,6 +49,11 @@ export class StopBody extends Schema.Class<StopBody>("@oligarchy/shared/contract
   reason: Schema.optionalKey(Schema.String),
 }) {}
 
+export class SaveBody extends Schema.Class<SaveBody>("@oligarchy/shared/contract/SaveBody")({
+  id: Schema.String,
+  agent: Schema.NonEmptyString,
+}) {}
+
 export class IntentStartBody extends Schema.Class<IntentStartBody>(
   "@oligarchy/shared/contract/IntentStartBody",
 )({
