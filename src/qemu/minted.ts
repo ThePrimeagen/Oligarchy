@@ -1,4 +1,4 @@
-import { Context, Effect, FileSystem, Layer, Semaphore } from "effect";
+import { Context, Effect, FileSystem, Layer, Option, Semaphore } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import * as Errors from "../shared/errors.ts";
 import * as Iso from "./iso.ts";
@@ -15,6 +15,8 @@ export const filesFor = (isoPath: string): MintedDisk => ({
 });
 
 export type MintedService = {
+  // The iso's minted disk on this machine: both files beside the iso's path, or none.
+  readonly find: (iso: string) => Effect.Effect<Option.Option<MintedDisk>>;
   // Keeps a session's disk and firmware copy as the iso's minted disk, over whatever is there.
   readonly save: (
     iso: string,
@@ -48,6 +50,20 @@ const make: Effect.Effect<
     );
   };
 
+  // Presence is the whole record; a stat that fails for any reason is a file that is not there.
+  const present = (file: string): Effect.Effect<boolean> =>
+    fs.stat(file).pipe(
+      Effect.as(true),
+      Effect.orElseSucceed(() => false),
+    );
+
+  const find = Effect.fn("Minted.find")(function* (iso: string) {
+    const files = filesFor(yield* isos.pathOf(iso));
+    return (yield* present(files.disk)) && (yield* present(files.vars))
+      ? Option.some(files)
+      : Option.none<MintedDisk>();
+  });
+
   const save = Effect.fn("Minted.save")(function* (iso: string, from: MintedDisk, who: Iso.Who) {
     const target = filesFor(yield* isos.pathOf(iso));
     // Firmware first, disk last: a disk in place always has its firmware beside it.
@@ -71,7 +87,7 @@ const make: Effect.Effect<
       );
   });
 
-  return { save } satisfies MintedService;
+  return { find, save } satisfies MintedService;
 });
 
 export class Minted extends Context.Service<Minted>()("@oligarchy/qemu/Minted", { make }) {

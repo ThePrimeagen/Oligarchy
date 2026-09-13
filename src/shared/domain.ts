@@ -181,9 +181,17 @@ export const ModelId = Schema.String.check(
 ).annotate({ identifier: "@oligarchy/shared/domain/ModelId" });
 export type ModelId = typeof ModelId.Type;
 
+// What a session boots: `fresh` is the iso on a blank disk, `resume` the machine's minted disk of
+// that iso with no iso attached. Absent on the wire and in a row means fresh.
+export const SessionMode = Schema.Literals(["fresh", "resume"]).annotate({
+  identifier: "@oligarchy/shared/domain/SessionMode",
+});
+export type SessionMode = typeof SessionMode.Type;
+
 export const SessionConfig = Schema.Struct({
   iso: Schema.String,
   disk: Schema.optionalKey(Schema.String),
+  mode: Schema.optionalKey(SessionMode),
 }).annotate({ identifier: "@oligarchy/shared/domain/SessionConfig" });
 export type SessionConfig = typeof SessionConfig.Type;
 

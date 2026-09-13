@@ -232,7 +232,7 @@ describe("start", () => {
               }),
             boot: (input) =>
               Effect.sync(() => {
-                order.push(`start ${input.iso}`);
+                order.push(`start ${String(input.cdrom)}`);
               }),
           },
         });
@@ -255,11 +255,11 @@ describe("start", () => {
               { id, status: "running", config: { iso: URL_ISO, disk: DISK }, reason: null },
             ]);
             expect(h.qemu.calls).toEqual([
-              { _tag: "prepare", id, disk: DISK },
+              { _tag: "prepare", id, source: { _tag: "existing", path: DISK } },
               {
                 _tag: "start",
                 id,
-                iso: "/cache/omarchy.iso",
+                cdrom: "/cache/omarchy.iso",
                 diskPath: DISK,
                 display: "gtk",
                 automation: true,
@@ -471,6 +471,171 @@ describe("start", () => {
           expect(h.iso.calls).toEqual([]);
           expect(endedWith(spanNamed(h, AGENT))).toBe("internal_error");
           expect(texts(h)).toEqual([]);
+        }),
+      );
+    }),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// start --resume
+// ---------------------------------------------------------------------------
+
+describe("start resume", () => {
+  const MINTED = { disk: `${URL_ISO}.qcow2`, vars: `${URL_ISO}.OVMF_VARS.fd` };
+  const resume = (iso = URL_ISO, agent = AGENT) =>
+    Contract.StartBody.make({ iso, agent, mode: "resume" });
+
+  it.effect(
+    "boots an overlay of the minted disk with its firmware, no download, no cdrom, and records the mode",
+    () =>
+      Effect.gen(function* () {
+        const h = harness({ minted: { find: () => Option.some(MINTED) } });
+        yield* h.run(
+          Effect.gen(function* () {
+            const sessions = yield* Sessions.Sessions;
+            yield* sessions.reserve(AGENT);
+            const id = yield* sessions.start(resume(), "none", true);
+            expect(h.minted.finds).toEqual([URL_ISO]);
+            expect(h.iso.calls).toEqual([]);
+            expect(h.qemu.calls).toEqual([
+              { _tag: "prepare", id, source: { _tag: "minted", ...MINTED } },
+              {
+                _tag: "start",
+                id,
+                cdrom: undefined,
+                diskPath: `${h.qemu.sessionDir(id)}/disk.qcow2`,
+                display: "none",
+                automation: true,
+              },
+            ]);
+            // Nothing to download: the row is running from the start.
+            expect(h.sessions.sessions).toMatchObject([
+              { id, status: "running", config: { iso: URL_ISO, mode: "resume" } },
+            ]);
+            expect(h.sessions.agentRuns).toMatchObject([{ agentId: AGENT, sessionId: id }]);
+            expect(line(h, "starting")).toMatchObject({
+              text: `starting; iso ${URL_ISO}; resume`,
+              location: id,
+              agentId: AGENT,
+            });
+            expect(yield* qemus(sessions)).toBe(1);
+          }),
+        );
+      }),
+  );
+
+  it.effect("a fresh start records no mode and boots as before", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      yield* h.run(
+        Effect.gen(function* () {
+          const id = yield* reservedStart(startBody());
+          expect(h.minted.finds).toEqual([]);
+          expect(h.sessions.sessions[0]?.config).toEqual({ iso: ISO });
+          expect(h.qemu.calls[0]).toEqual({ _tag: "prepare", id, source: { _tag: "fresh" } });
+        }),
+      );
+    }),
+  );
+
+  it.effect(
+    "without a minted disk on this machine it is refused before anything is minted, and the reservation stands",
+    () =>
+      Effect.gen(function* () {
+        const h = harness();
+        yield* h.run(
+          Effect.gen(function* () {
+            const sessions = yield* Sessions.Sessions;
+            yield* sessions.reserve(AGENT);
+            const error = yield* Effect.flip(sessions.start(resume(), "none", false));
+            expect(error).toMatchObject({
+              _tag: "BadRequest",
+              message: `no minted disk for ${URL_ISO} on this machine`,
+              agentId: AGENT,
+            });
+            expect(h.sessions.sessions).toEqual([]);
+            expect(h.qemu.calls).toEqual([]);
+            expect(h.iso.calls).toEqual([]);
+            expect(texts(h)).toEqual([]);
+            // The reservation is still the agent's: a fresh start consumes it, and relinquish
+            // would have given it back.
+            expect(yield* sessions.jobs).toBe(1);
+            const id = yield* sessions.start(startBody(URL_ISO), "none", false);
+            expect(Domain.isSessionId(id)).toBe(true);
+            expect(yield* sessions.jobs).toBe(1);
+          }),
+        );
+      }),
+  );
+
+  it.effect("a resume with a caller-provided disk is refused: the minted disk is the disk", () =>
+    Effect.gen(function* () {
+      const h = harness({ minted: { find: () => Option.some(MINTED) } });
+      yield* h.run(
+        Effect.gen(function* () {
+          const sessions = yield* Sessions.Sessions;
+          yield* sessions.reserve(AGENT);
+          const error = yield* Effect.flip(
+            sessions.start(
+              Contract.StartBody.make({ iso: URL_ISO, agent: AGENT, disk: DISK, mode: "resume" }),
+              "none",
+              false,
+            ),
+          );
+          expect(error).toMatchObject({
+            _tag: "BadRequest",
+            message: "a resume boots the minted disk; --disk cannot be given",
+            agentId: AGENT,
+          });
+          expect(h.minted.finds).toEqual([]);
+          expect(h.sessions.sessions).toEqual([]);
+          expect(yield* sessions.jobs).toBe(1);
+        }),
+      );
+    }),
+  );
+
+  it.effect("a resume without a reservation is refused before the minted disk is looked up", () =>
+    Effect.gen(function* () {
+      const h = harness({ minted: { find: () => Option.some(MINTED) } });
+      yield* h.run(
+        Effect.gen(function* () {
+          const sessions = yield* Sessions.Sessions;
+          const error = yield* Effect.flip(sessions.start(resume(), "none", false));
+          expect(error).toMatchObject({ _tag: "BadRequest", message: "no reservation" });
+          expect(h.minted.finds).toEqual([]);
+        }),
+      );
+    }),
+  );
+
+  it.effect("a minted overlay that fails to prepare ends the row failed as any boot failure", () =>
+    Effect.gen(function* () {
+      const h = harness({
+        minted: { find: () => Option.some(MINTED) },
+        script: {
+          prepare: () =>
+            Effect.fail(Errors.QemuStartError.make({ message: "qemu-img create exited 1" })),
+        },
+      });
+      yield* h.run(
+        Effect.gen(function* () {
+          const sessions = yield* Sessions.Sessions;
+          yield* sessions.reserve(AGENT);
+          const error = yield* Effect.flip(sessions.start(resume(), "none", false));
+          expect(error).toMatchObject({
+            _tag: "StartFailed",
+            message: "qemu-img create exited 1",
+            agentId: AGENT,
+          });
+          expect(h.sessions.sessions[0]).toMatchObject({
+            status: "failed",
+            reason: "qemu-img create exited 1",
+            config: { iso: URL_ISO, mode: "resume" },
+          });
+          expect(h.sessions.agentRuns).toEqual([]);
+          expect(yield* sessions.jobs).toBe(0);
         }),
       );
     }),

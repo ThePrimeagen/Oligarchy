@@ -1,7 +1,7 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { NodePath } from "@effect/platform-node";
-import { Effect, Fiber, Layer } from "effect";
+import { Effect, Fiber, Layer, Option } from "effect";
 import * as Args from "../../src/qemu/args.ts";
 import * as Iso from "../../src/qemu/iso.ts";
 import * as Minted from "../../src/qemu/minted.ts";
@@ -79,6 +79,42 @@ describe("filesFor", () => {
     });
     return Effect.void;
   });
+});
+
+describe("find", () => {
+  it.effect("answers the two files beside the iso's path when both exist", () =>
+    Effect.gen(function* () {
+      const { fs, minted } = yield* fixture({
+        entries: { [`${CACHED}.qcow2`]: "File", [`${CACHED}.OVMF_VARS.fd`]: "File" },
+      });
+      expect(yield* minted.find(URL_ISO)).toEqual(
+        Option.some({ disk: `${CACHED}.qcow2`, vars: `${CACHED}.OVMF_VARS.fd` }),
+      );
+      expect(FakeFs.methods(fs)).toEqual(["stat", "stat"]);
+    }),
+  );
+
+  it.effect("answers none when either file is missing, or both", () =>
+    Effect.gen(function* () {
+      const diskOnly = yield* fixture({ entries: { [`${CACHED}.qcow2`]: "File" } });
+      expect(yield* diskOnly.minted.find(URL_ISO)).toEqual(Option.none());
+      const varsOnly = yield* fixture({ entries: { [`${CACHED}.OVMF_VARS.fd`]: "File" } });
+      expect(yield* varsOnly.minted.find(URL_ISO)).toEqual(Option.none());
+      const neither = yield* fixture({ entries: {} });
+      expect(yield* neither.minted.find(URL_ISO)).toEqual(Option.none());
+    }),
+  );
+
+  it.effect("looks beside a local iso's own path, whether or not the iso itself is there", () =>
+    Effect.gen(function* () {
+      const { minted } = yield* fixture({
+        entries: { "/isos/omarchy.iso.qcow2": "File", "/isos/omarchy.iso.OVMF_VARS.fd": "File" },
+      });
+      expect(yield* minted.find(LOCAL_ISO)).toEqual(
+        Option.some({ disk: "/isos/omarchy.iso.qcow2", vars: "/isos/omarchy.iso.OVMF_VARS.fd" }),
+      );
+    }),
+  );
 });
 
 describe("save happy path", () => {

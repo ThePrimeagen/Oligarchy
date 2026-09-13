@@ -178,6 +178,47 @@ describe("createDisk", () => {
   );
 });
 
+describe("createOverlay", () => {
+  it.effect("runs qemu-img create with the minted disk as the qcow2 backing file", () =>
+    Effect.gen(function* () {
+      const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
+      yield* Process.createOverlay(
+        "/tmp/oligarchy-1/disk.qcow2",
+        "/home/u/.oligarchy/isos/omarchy.iso.qcow2",
+      ).pipe(Effect.provide(spawner.layer));
+      expect(spawner.spawned).toMatchObject([
+        {
+          command: Args.QEMU_IMG,
+          args: [
+            "create",
+            "-f",
+            "qcow2",
+            "-b",
+            "/home/u/.oligarchy/isos/omarchy.iso.qcow2",
+            "-F",
+            "qcow2",
+            "/tmp/oligarchy-1/disk.qcow2",
+          ],
+          options: { stdin: "ignore", stdout: "ignore", stderr: "ignore" },
+        },
+      ]);
+    }),
+  );
+
+  it.effect("fails `qemu-img create exited <code>` on a non-zero exit", () =>
+    Effect.gen(function* () {
+      const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 1 }));
+      const error = yield* Effect.flip(
+        Process.createOverlay("/tmp/oligarchy-1/disk.qcow2", "/isos/omarchy.iso.qcow2").pipe(
+          Effect.provide(spawner.layer),
+        ),
+      );
+      expect(error._tag).toBe("QemuStartError");
+      expect(error.message).toBe("qemu-img create exited 1");
+    }),
+  );
+});
+
 describe("convert", () => {
   it.effect("runs qemu-img convert to qcow2 from the session disk into the target", () =>
     Effect.gen(function* () {

@@ -111,6 +111,15 @@ export const createDisk = Effect.fn("Process.createDisk")(function* (path: strin
   yield* qemuImg("create", ["-f", "qcow2", path, size]);
 });
 
+// A copy-on-write qcow2 over `backing`, which is never written: a session's own view of a
+// minted disk, gone with the session dir.
+export const createOverlay = Effect.fn("Process.createOverlay")(function* (
+  path: string,
+  backing: string,
+) {
+  yield* qemuImg("create", ["-f", "qcow2", "-b", backing, "-F", "qcow2", path]);
+});
+
 // A standalone qcow2 copy of `from` at `to`: what a session's disk becomes when it is kept.
 export const convert = Effect.fn("Process.convert")(function* (from: string, to: string) {
   yield* qemuImg("convert", ["-O", "qcow2", from, to]);

@@ -77,12 +77,22 @@ const fixture = (options: Fixture = {}) =>
   });
 
 const startInput = (record: Client.Recorder) =>
-  ({ iso: ISO, display: "none", automation: false, record }) as const;
+  ({ cdrom: ISO, display: "none", automation: false, record }) as const;
+
+const FRESH: Qemu.DiskSource = { _tag: "fresh" };
+const MINTED: Qemu.DiskSource = {
+  _tag: "minted",
+  disk: "/home/u/.oligarchy/isos/omarchy.iso.qcow2",
+  vars: "/home/u/.oligarchy/isos/omarchy.iso.OVMF_VARS.fd",
+};
 
 // prepare then start under the caller's scope, as Sessions does.
 const boot = (qemu: Qemu.QemuService, record: Client.Recorder, disk?: string) =>
   Effect.gen(function* () {
-    const prepared = yield* qemu.prepare(ID, disk);
+    const prepared = yield* qemu.prepare(
+      ID,
+      disk === undefined ? FRESH : { _tag: "existing", path: disk },
+    );
     return yield* qemu.start(prepared, startInput(record));
   });
 
@@ -100,7 +110,7 @@ describe("Qemu.prepare happy path", () => {
   it.effect("makes the dir, creates the disk, copies the firmware and spawns nothing else", () =>
     Effect.gen(function* () {
       const { events, spawner, fs, qemu } = yield* fixture();
-      const prepared = yield* qemu.prepare(ID, undefined);
+      const prepared = yield* qemu.prepare(ID, FRESH);
       expect(prepared).toEqual({ id: ID, dir: DIR, diskPath: `${DIR}/disk.qcow2` });
       expect(fs.calls).toEqual([
         { method: "makeDirectory", args: [DIR, { recursive: true, mode: 0o700 }] },
@@ -120,10 +130,37 @@ describe("Qemu.prepare happy path", () => {
   it.effect("keeps a caller-provided disk and creates none", () =>
     Effect.gen(function* () {
       const { events, qemu } = yield* fixture();
-      const prepared = yield* qemu.prepare(ID, "/mnt/custom.qcow2");
+      const prepared = yield* qemu.prepare(ID, { _tag: "existing", path: "/mnt/custom.qcow2" });
       expect(prepared.diskPath).toBe("/mnt/custom.qcow2");
       expect(events).toEqual([]);
     }),
+  );
+
+  it.effect(
+    "a minted source is an overlay on the minted disk with the minted firmware copied",
+    () =>
+      Effect.gen(function* () {
+        const { events, spawner, fs, qemu } = yield* fixture({
+          entries: { [MINTED.disk]: "File", [MINTED.vars]: "File" },
+        });
+        const prepared = yield* qemu.prepare(ID, MINTED);
+        expect(prepared).toEqual({ id: ID, dir: DIR, diskPath: `${DIR}/disk.qcow2` });
+        expect(fs.calls).toEqual([
+          { method: "makeDirectory", args: [DIR, { recursive: true, mode: 0o700 }] },
+          { method: "copyFile", args: [MINTED.vars, `${DIR}/OVMF_VARS.fd`] },
+        ]);
+        expect(events).toEqual([`spawn ${Args.QEMU_IMG}`]);
+        expect(spawner.spawned[0]?.args).toEqual([
+          "create",
+          "-f",
+          "qcow2",
+          "-b",
+          MINTED.disk,
+          "-F",
+          "qcow2",
+          `${DIR}/disk.qcow2`,
+        ]);
+      }),
   );
 });
 
@@ -131,16 +168,27 @@ describe("Qemu.prepare unhappy path", () => {
   it.effect("fails `qemu-img create exited <code>` when the disk cannot be created", () =>
     Effect.gen(function* () {
       const { events, qemu } = yield* fixture({ qemuImg: { exitCode: 1 } });
-      const error = yield* Effect.flip(qemu.prepare(ID, undefined));
+      const error = yield* Effect.flip(qemu.prepare(ID, FRESH));
       expect(error).toMatchObject({ _tag: "QemuStartError", message: "qemu-img create exited 1" });
       expect(events).toEqual([`spawn ${Args.QEMU_IMG}`]);
+    }),
+  );
+
+  it.effect("a minted source whose firmware copy is gone fails with the copy error", () =>
+    Effect.gen(function* () {
+      const { qemu } = yield* fixture({ entries: { [MINTED.disk]: "File" } });
+      const error = yield* Effect.flip(qemu.prepare(ID, MINTED));
+      expect(error).toMatchObject({
+        _tag: "QemuStartError",
+        message: `qemu: ENOENT: no such file or directory, copyfile '${MINTED.vars}'`,
+      });
     }),
   );
 
   it.effect("fails with the copy error when the OVMF vars cannot be copied", () =>
     Effect.gen(function* () {
       const { qemu } = yield* fixture({ entries: { [ISO]: "File" } });
-      const error = yield* Effect.flip(qemu.prepare(ID, undefined));
+      const error = yield* Effect.flip(qemu.prepare(ID, FRESH));
       expect(error._tag).toBe("QemuStartError");
       expect(error.message).toBe(
         `qemu: ENOENT: no such file or directory, copyfile '${Args.OVMF_VARS}'`,
@@ -152,7 +200,7 @@ describe("Qemu.prepare unhappy path", () => {
     Effect.gen(function* () {
       const { fs, qemu } = yield* fixture({ qemuImg: { exitCode: 1 } });
       const scope = yield* Scope.make();
-      yield* Effect.flip(qemu.prepare(ID, undefined).pipe(Scope.provide(scope)));
+      yield* Effect.flip(qemu.prepare(ID, FRESH).pipe(Scope.provide(scope)));
       expect(fs.calls.some((call) => call.method === "remove")).toBe(false);
       yield* Scope.close(scope, Exit.void);
       expect(fs.calls.filter((call) => call.method === "remove")).toEqual([
@@ -180,7 +228,7 @@ describe("Qemu.start happy path", () => {
           serialPath: `${DIR}/serial.log`,
           varsPath: `${DIR}/OVMF_VARS.fd`,
           diskPath: `${DIR}/disk.qcow2`,
-          iso: ISO,
+          cdrom: ISO,
           display: "none",
           automation: false,
         }),
@@ -209,6 +257,27 @@ describe("Qemu.start happy path", () => {
     }),
   );
 
+  it.effect("boots a minted overlay without a cdrom", () =>
+    Effect.gen(function* () {
+      const { spawner, qemu } = yield* fixture({
+        entries: { [MINTED.disk]: "File", [MINTED.vars]: "File" },
+      });
+      const prepared = yield* qemu.prepare(ID, MINTED);
+      // Spelled out: a default parameter would turn an explicit undefined back into the iso.
+      const handle = yield* qemu.start(prepared, {
+        cdrom: undefined,
+        display: "none",
+        automation: false,
+        record: FakeSocket.recorder().record,
+      });
+      expect(handle.diskPath).toBe(`${DIR}/disk.qcow2`);
+      const args = spawner.spawned[1]?.args ?? [];
+      expect(args).not.toContain("-cdrom");
+      expect(args).not.toContain("-boot");
+      expect(args.at(-1)).toBe(`file=${DIR}/disk.qcow2,if=virtio,format=qcow2`);
+    }),
+  );
+
   it.effect("names the disk and the firmware copy the machine runs on", () =>
     Effect.gen(function* () {
       const fresh = yield* fixture();
@@ -227,9 +296,9 @@ describe("Qemu.start happy path", () => {
       const qemuArgs = (display: Domain.QemuDisplay, automation: boolean) =>
         Effect.gen(function* () {
           const { spawner, qemu } = yield* fixture();
-          const prepared = yield* qemu.prepare(ID, undefined);
+          const prepared = yield* qemu.prepare(ID, FRESH);
           yield* qemu.start(prepared, {
-            iso: ISO,
+            cdrom: ISO,
             display,
             automation,
             record: FakeSocket.recorder().record,

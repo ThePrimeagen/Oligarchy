@@ -8,17 +8,17 @@ Consult this table of contents first. Read only the section you need.
 | [Synopsis](#synopsis) | 29 |
 | [client-with-image](#client-with-image) | 53 |
 | [start](#start) | 70 |
-| [get-image](#get-image) | 88 |
-| [get-serial](#get-serial) | 103 |
-| [send-keys](#send-keys) | 118 |
-| [send-mouse](#send-mouse) | 134 |
-| [intent start](#intent-start) | 151 |
-| [intent end](#intent-end) | 167 |
-| [stop](#stop) | 181 |
-| [save](#save) | 197 |
-| [Keys](#keys) | 213 |
-| [Mouse](#mouse) | 225 |
-| [The loop](#the-loop) | 233 |
+| [get-image](#get-image) | 90 |
+| [get-serial](#get-serial) | 105 |
+| [send-keys](#send-keys) | 120 |
+| [send-mouse](#send-mouse) | 136 |
+| [intent start](#intent-start) | 153 |
+| [intent end](#intent-end) | 169 |
+| [stop](#stop) | 183 |
+| [save](#save) | 199 |
+| [Keys](#keys) | 215 |
+| [Mouse](#mouse) | 227 |
+| [The loop](#the-loop) | 235 |
 
 ## Important
 
@@ -31,7 +31,7 @@ If you are the client, or an agent driving the client: do not look at code. Only
 ```
 ./client <action> --agent-id <agent> [--server-url <url>] ...
 
-./client start      [--iso <path|url>] [--disk <path>]
+./client start      [--iso <path|url>] [--disk <path>] [--resume]
 ./client get-image  --session-id <id> [-o <file>]
 ./client get-serial --session-id <id> [-o <file>]
 ./client send-keys  --session-id <id> --keys <keys> [--encoding <encoding>]
@@ -70,7 +70,7 @@ CLIENT_IMAGE=screen.png ./client-with-image send-keys --agent-id OLI-42 --server
 ## start
 
 ```
-./client start --agent-id <agent> --server-url <url> [--iso <path|url>] [--disk <path>]
+./client start --agent-id <agent> --server-url <url> [--iso <path|url>] [--disk <path>] [--resume]
 ```
 
 Boots a QEMU session and prints its session id. Consumes a reservation already held
@@ -80,9 +80,11 @@ minutes is given back, and a start after that is refused the same way.
 
 - `--iso <path|url>` — the ISO. A local path must exist; an http(s) URL is downloaded and cached by the server. Default `omarchy.iso` in the current directory.
 - `--disk <path>` — an existing qcow2 disk. Omit it and the server creates a fresh one.
+- `--resume` — boot the machine's minted disk of this ISO, the one a `save` kept, instead of the ISO: the installed system comes up in seconds and you log in. Nothing is downloaded and no ISO is attached, so a local `--iso` need not exist. Without a minted disk on that machine the host answers 400 `no minted disk for <iso> on this machine` and your reservation stands: `start` again without `--resume`, or ask to be placed elsewhere. Cannot be combined with `--disk`.
 
 ```bash
 ./client start --agent-id OLI-42 --server-url https://qemu.example.com --iso https://example.com/omarchy.iso
+./client start --agent-id OLI-42 --server-url https://qemu.example.com --iso https://example.com/omarchy.iso --resume
 ```
 
 ## get-image

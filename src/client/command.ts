@@ -1,5 +1,5 @@
 import { Console, Effect, FileSystem, Option, Path, Stdio, Stream } from "effect";
-import { Command } from "effect/unstable/cli";
+import { CliError, Command } from "effect/unstable/cli";
 import * as Config from "../config.ts";
 import * as ExternalFailure from "../external-failure.ts";
 import * as Contract from "../shared/contract.ts";
@@ -45,7 +45,7 @@ const emit = Effect.fn("client.emit")(function* (output: Option.Option<string>, 
   yield* Stream.run(Stream.make(bytes), stdio.stdout());
 });
 
-const startFlags = { ...Flags.shared, iso: Flags.iso, disk: Flags.disk };
+const startFlags = { ...Flags.shared, iso: Flags.iso, disk: Flags.disk, resume: Flags.resume };
 
 const start = Command.make(
   "start",
@@ -53,18 +53,31 @@ const start = Command.make(
   Effect.fn("client.start")(function* (input: Input<typeof startFlags>) {
     const proxy = yield* connect(input.serverUrl);
     const path = yield* Path.Path;
-    const iso = Domain.isIsoUrl(input.iso) ? input.iso : yield* localIso(input.iso);
-    const body = Option.match(input.disk, {
-      onNone: () => Contract.StartBody.make({ iso, agent: input.agentId }),
-      onSome: (disk) =>
-        Contract.StartBody.make({ iso, disk: path.resolve(disk), agent: input.agentId }),
-    });
+    if (input.resume && Option.isSome(input.disk)) {
+      return yield* new CliError.UserError({
+        cause: new Error("--resume with --disk"),
+        userMessage: "start: --resume boots the minted disk; --disk cannot be given",
+      });
+    }
+    // A resume boots what lies beside the iso, not the iso: the file itself need not be there.
+    const iso = Domain.isIsoUrl(input.iso)
+      ? input.iso
+      : input.resume
+        ? path.resolve(input.iso)
+        : yield* localIso(input.iso);
+    const body = input.resume
+      ? Contract.StartBody.make({ iso, agent: input.agentId, mode: "resume" })
+      : Option.match(input.disk, {
+          onNone: () => Contract.StartBody.make({ iso, agent: input.agentId }),
+          onSome: (disk) =>
+            Contract.StartBody.make({ iso, disk: path.resolve(disk), agent: input.agentId }),
+        });
     const started = yield* proxy.start(body);
-    yield* Console.log(started.id);
+    return yield* Console.log(started.id);
   }),
 ).pipe(
   Command.withDescription(
-    "Boot a machine from an ISO; consumes a reservation held for --agent-id; prints the session id",
+    "Boot a machine from an ISO, or with --resume from its minted disk; consumes a reservation held for --agent-id; prints the session id",
   ),
 );
 

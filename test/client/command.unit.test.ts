@@ -175,6 +175,65 @@ describe("client requests", () => {
     }).pipe(Effect.provide(Layer.mergeAll(NodeFileSystem.layer, NodePath.layer))),
   );
 
+  it.effect("start --resume posts mode resume; without it the body carries no mode", () =>
+    Effect.gen(function* () {
+      const recorder = FakeHttp.recordRequests(startRespond);
+      const iso = "https://example.com/omarchy.iso";
+      yield* run(["start", ...shared, "--iso", iso, "--resume"], { http: recorder.layer });
+      yield* run(["start", ...shared, "--iso", iso], { http: recorder.layer });
+      expect(parsed(recorder.requests[0]?.body ?? "")).toEqual({
+        iso,
+        agent: AGENT,
+        mode: "resume",
+      });
+      expect(parsed(recorder.requests[1]?.body ?? "")).toEqual({ iso, agent: AGENT });
+      expect(yield* TestConsole.logLines).toEqual([ID, ID]);
+    }),
+  );
+
+  it.effect(
+    "start --resume with a local iso path posts the absolute path without requiring the file",
+    () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const recorder = FakeHttp.recordRequests(startRespond);
+        yield* run(["start", ...shared, "--iso", "gone/omarchy.iso", "--resume"], {
+          http: recorder.layer,
+        });
+        expect(parsed(recorder.requests[0]?.body ?? "")).toEqual({
+          iso: path.resolve("gone/omarchy.iso"),
+          agent: AGENT,
+          mode: "resume",
+        });
+      }).pipe(Effect.provide(Layer.mergeAll(NodeFileSystem.layer, NodePath.layer))),
+  );
+
+  it.effect("start --resume with --disk is a UserError that sends nothing", () =>
+    Effect.gen(function* () {
+      const recorder = FakeHttp.recordRequests(startRespond);
+      const error = yield* Effect.flip(
+        run(
+          [
+            "start",
+            ...shared,
+            "--iso",
+            "https://example.com/omarchy.iso",
+            "--resume",
+            "--disk",
+            "/mnt/custom.qcow2",
+          ],
+          { http: recorder.layer },
+        ),
+      );
+      expect(error).toMatchObject({
+        _tag: "UserError",
+        userMessage: "start: --resume boots the minted disk; --disk cannot be given",
+      });
+      expect(recorder.requests).toEqual([]);
+      expect(yield* TestConsole.logLines).toEqual([]);
+    }),
+  );
+
   it.effect(
     "send-mouse posts point, button and clicks, and omits button and clicks when absent",
     () =>
