@@ -233,7 +233,7 @@ Kills the session. `--agent-id` must be the agent that started it.
 ./client save --agent-id <agent> --server-url <url> --session-id <id>
 ```
 
-Ends the session keeping its disk: the guest is powered off, its disk and firmware are kept as the minted disk of the ISO it booted, and the session closes `succeeded`. Only call it when the install is complete and the desktop has been seen; the disk is kept exactly as it is. Prints `saved` and exits 0. `--agent-id` must be the agent that started the session. Run `./ctrl test-results` first: after `save` there is no session to come back to.
+Ends the session keeping its disk: the guest is powered off, its disk and firmware are kept as the minted disk of the ISO it booted, and the session closes `succeeded`. Only call it when the install is complete and the desktop has been seen; the disk is kept exactly as it is. Prints `saved` and exits 0. `--agent-id` must be the agent that started the session. Close your result with `./ctrl test-results` after it answers: `saved` is a success; a failure's headline is the reason, and there is no session left to stop.
 
 - `--session-id <id>` — the session.
 

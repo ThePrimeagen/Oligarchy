@@ -25,7 +25,7 @@ Consult this table of contents first. Read only the section you need.
 
 `./ctrl` is the control plane's record keeper: it creates test runs, opens their Linear tickets, ties a session to its result, closes the result, reads sessions back, and records a verdict on every ended session. Everything it reads and writes is in the database; it never touches a guest or a qemu server — the guest is `./client`'s.
 
-If you are an agent driving a guest, you need two of these: [test start](#test-start) after `./client start`, and [test-results](#test-results) before `./client stop` — or before `./client save`, on a mint ticket. If you are an agent reviewing a session, you need [session](#session), [error-type list](#error-type-list), [error-type new](#error-type-new) and [diagnose](#diagnose). Do not look at code. Run the commands.
+If you are an agent driving a guest, you need two of these: [test start](#test-start) after `./client start`, and [test-results](#test-results) before `./client stop` — or after `./client save`, on a mint ticket, with what it answered. If you are an agent reviewing a session, you need [session](#session), [error-type list](#error-type-list), [error-type new](#error-type-new) and [diagnose](#diagnose). Do not look at code. Run the commands.
 
 ## Synopsis
 
@@ -112,7 +112,7 @@ Creates one pending test run and one Linear issue per stored test definition, ea
 ./ctrl mint --server-url <url> --iso <https-url>
 ```
 
-Not a test: it gets the ISO installed once on every qemu server, so that server holds the ISO's minted disk and every later test on it can `start --resume` into a finished install instead of installing. For each live qemu server the reverse proxy at `--server-url` knows, it creates one pending run with one result under the definition named `mint`, and one Linear issue pinned to that server: the ticket tells its driver to `relinquish`, `reserve --server <that server>`, `start` fresh, install as the `mint` definition instructs, and end with `./client save` instead of `stop`. The `mint` label sits beside the agent test label on every issue. Prints the runs as JSON, one per server: run id, result id, server url, ticket. Reads `LINEAR_API_TOKEN`.
+Not a test: it gets the ISO installed once on every qemu server, so that server holds the ISO's minted disk and every later test on it can `start --resume` into a finished install instead of installing. For each live qemu server the reverse proxy at `--server-url` knows, it creates one pending run with one result under the definition named `mint`, and one Linear issue pinned to that server: the ticket tells its driver to `relinquish`, `reserve --server <that server>`, `start` fresh, install as the `mint` definition instructs, end with `./client save` instead of `stop`, and close the result with what `save` answered. The `mint` label sits beside the agent test label on every issue. Prints the runs as JSON, one per server: run id, result id, server url, ticket. Reads `LINEAR_API_TOKEN`.
 
 - `--iso <https-url>` — the ISO to install. Must be HTTPS. Every server minted from it answers `start --resume` for that url afterwards.
 - `--server-url <url>` — the reverse proxy the drivers talk to; the live qemu servers behind it are the ones minted.

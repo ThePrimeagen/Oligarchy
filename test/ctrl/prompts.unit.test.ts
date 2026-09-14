@@ -230,16 +230,30 @@ describe("renderMintIssue", () => {
       const saveAt = example.indexOf(
         `./client save --agent-id OLI-42 --server-url ${SERVER} --session-id`,
       );
+      // The verdict follows save, so a save that failed can never sit under a success.
+      const verdictAt = example.indexOf(
+        `./ctrl test-results --agent-id OLI-42 --id ${mint.RESULT_ID} --status success`,
+      );
       expect(relinquishAt).toBeGreaterThan(-1);
       expect(reserveAt).toBeGreaterThan(relinquishAt);
       expect(startAt).toBeGreaterThan(reserveAt);
       expect(saveAt).toBeGreaterThan(startAt);
+      expect(verdictAt).toBeGreaterThan(saveAt);
+      expect(example).toContain(
+        `./ctrl test-results --agent-id OLI-42 --id ${mint.RESULT_ID} --status failed --reason`,
+      );
       expect(example).not.toContain("--resume");
       expect(example).not.toContain("--disk");
       expect(example).not.toMatch(/\.\/client stop/);
+      expect(example).toContain('"In Progress"');
+      expect(description).not.toContain("In Review");
+      // Every way out closes the result: the start that never returns, the failed install, the
+      // failed save.
       expect(description).toContain(
-        `./ctrl test-results --agent-id OLI-42 --id ${mint.RESULT_ID} --status success`,
+        `./client relinquish --agent-id OLI-42 --server-url ${SERVER} to give back your reservation, then close the result as failed`,
       );
+      expect(description).toContain("Never save a failed install.");
+      expect(description).toContain("If ./client save fails");
       expect(description).toContain(`<instruction>${mint.TEST_INSTRUCTION}</instruction>`);
       expect(description).toContain(`<proof>${mint.TEST_PROOF}</proof>`);
       expect(description).toContain("# Client\n");

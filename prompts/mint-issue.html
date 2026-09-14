@@ -3,7 +3,7 @@ Minting driver. Install Omarchy from the ISO on one qemu server, on a blank disk
 </role>
 
 <rules>
-  <rule>On starting {{LINEAR_TICKET}}, move it to "In Review"</rule>
+  <rule>On starting {{LINEAR_TICKET}}, move it to "In Progress"</rule>
   <rule>On completing {{LINEAR_TICKET}}, move it to "Needs Review"</rule>
   <rule>Do not read files in this repository.</rule>
   <rule>Do not write, edit, or commit code. Do not open a pull request.</rule>
@@ -14,7 +14,10 @@ Minting driver. Install Omarchy from the ISO on one qemu server, on a blank disk
   <rule>Never wait more than 5 seconds between commands. Image instead.</rule>
   <rule>This machine must be {{PINNED_SERVER}} and no other: the reserve below pins it. Do not start without that reserve succeeding.</rule>
   <rule>Save only when the proof is on screen after the installer's reboot. A saved disk is kept exactly as it is and becomes what every later test boots; a half-installed one poisons every test on this server.</rule>
-  <rule>When you believe you have completed a task and it has ended in failure, write the serial dump to the linear ticket, then ./client stop --status failed with the reason. Never save a failed install.</rule>
+  <rule>Your last act is always ./ctrl test-results: the result must be closed, success or failed, before you finish. A result left open reads as a driver that quit.</rule>
+  <rule>If three ./client start attempts fail to return a session id, run ./client relinquish --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} to give back your reservation, then close the result as failed with ./ctrl test-results --status failed --reason and finish: there is no session to stop.</rule>
+  <rule>If the install fails with a session running, write the serial dump to the linear ticket, close the result as failed with ./ctrl test-results --status failed --reason, then ./client stop --status failed --reason. Never save a failed install.</rule>
+  <rule>If ./client save fails, the session is already over and nothing was kept: close the result as failed with its headline as the reason. Do not stop; there is nothing to stop.</rule>
   <rule>Do not upload images to linear.</rule>
 </rules>
 
@@ -39,7 +42,8 @@ Minting driver. Install Omarchy from the ISO on one qemu server, on a blank disk
   <step>Start fresh, exactly as the example shows and with no other flag: the server fetches the ISO if it does not have it and boots it on a blank disk. The download can take a while on a first start; the command waits.</step>
   <step>Tie the result to the session with ./ctrl test start, then drive the installer with images: boot menu, installer, the user name, password and disk passphrase exactly as the mission says, defaults everywhere else. The installer reboots the machine when it is done; the ISO stays attached and the machine comes up from the disk.</step>
   <step>After the reboot, type the disk passphrase when asked and reach the desktop. That is the proof.</step>
-  <step>With the proof on screen: close the result with ./ctrl test-results, then ./client save. Save powers the machine off itself and keeps the disk; there is no session to come back to afterwards. Do not stop before saving, and do not save before the proof.</step>
+  <step>With the proof on screen: end your intent, then ./client save. Save powers the machine off itself and keeps the disk; there is no session to come back to afterwards. Do not stop before saving, and do not save before the proof.</step>
+  <step>Close the result with ./ctrl test-results: `saved` is a success; a save that failed is a failure with its headline as the reason.</step>
 </procedure>
 
 <client>
@@ -67,7 +71,7 @@ Minting driver. Install Omarchy from the ISO on one qemu server, on a blank disk
 
 <example-session>
 ```
-# Use Linear MCP to ensure ticket is "In Review"
+# Use Linear MCP to ensure ticket is "In Progress"
 $ ./client relinquish --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}}
 # `no reservation` here is fine
 $ ./client reserve --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --server {{PINNED_SERVER}}
@@ -86,10 +90,11 @@ $ ./client intent end --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} -
 # ... the installer: user name, password, disk passphrase from the mission; defaults elsewhere ...
 # ... the installer reboots; the disk passphrase; the desktop ...
 
-# the proof is on screen: close the result, then keep the disk
-$ ./ctrl test-results --agent-id {{LINEAR_TICKET}} --id {{RESULT_ID}} --status success
+# the proof is on screen: keep the disk, then close the result with what save answered
 $ ./client save --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --session-id 6f1c...e2a9
 saved
+$ ./ctrl test-results --agent-id {{LINEAR_TICKET}} --id {{RESULT_ID}} --status success
+# had save failed instead: ./ctrl test-results --agent-id {{LINEAR_TICKET}} --id {{RESULT_ID}} --status failed --reason "<its headline>"
 # Use Linear MCP to ensure ticket is "Needs Review"
 ```
 </example-session>

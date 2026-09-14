@@ -464,7 +464,9 @@ export const makeCtrlCommand = (deps: Deps = live) => {
       readonly server: string;
       readonly linear: Linear.LinearTicket;
     }> = [];
-    const identifiers = () => minted.map((entry) => entry.linear.identifier).join(", ");
+    // Every ticket Linear created, the one being described included, so a failure names it.
+    const tickets: Array<Linear.LinearTicket> = [];
+    const identifiers = () => tickets.map((ticket) => ticket.identifier).join(", ");
     // A failure fails the run it was creating and names the tickets that stand, as `test new`
     // does; the runs already whole for earlier servers are left standing, they are complete.
     const failRunWith = <E extends { readonly message: string }>(
@@ -499,6 +501,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
           labelIds,
           assigneeId,
         });
+        tickets.push(issued);
         yield* tests.setLinearId(result.id, issued.identifier);
         const description = yield* Prompts.renderMintIssue({
           LINEAR_TICKET: issued.identifier,
