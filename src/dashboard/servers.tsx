@@ -224,7 +224,10 @@ const since = (stamp: Date | null, queriedAt: Date): string =>
   stamp === null ? "—" : `${age(queriedAt.getTime() - stamp.getTime())} ago`;
 
 // One list of the queue as a table, or the one word that says it is empty. The columns are the
-// same in every list, so a pending job shows dashes where its start and finish will go.
+// same in every list, so a pending job shows dashes where its start and finish will go. A running
+// or pending job with a ticket carries the abort, posting the ticket and its own action: a ticket
+// has one drive and one diagnose, and its drive may still be running while its diagnose waits.
+// A completed one is over, and a job with no ticket has nothing to name in the post.
 const Jobs: FC<{ jobs: ReadonlyArray<AutomationJob> }> = ({ jobs }) =>
   jobs.length === 0 ? (
     <p>none</p>
@@ -252,7 +255,7 @@ const Jobs: FC<{ jobs: ReadonlyArray<AutomationJob> }> = ({ jobs }) =>
           <td>{since(job.finishedAt, job.queriedAt)}</td>
           <td>{job.reason}</td>
           <td>
-            {job.status === "running" && job.ticket !== null ? (
+            {(job.status === "running" || job.status === "pending") && job.ticket !== null ? (
               <form
                 method="post"
                 action="/abort"
@@ -262,6 +265,7 @@ const Jobs: FC<{ jobs: ReadonlyArray<AutomationJob> }> = ({ jobs }) =>
                 hx-swap="innerHTML"
               >
                 <input type="hidden" name="ticket" value={job.ticket} />
+                <input type="hidden" name="action" value={job.action} />
                 <button type="submit" class="abort" aria-label="abort">
                   <svg
                     xmlns="http://www.w3.org/2000/svg"

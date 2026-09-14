@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { app } from "../../src/dashboard/dashboard.tsx";
 
+// Nothing here names a ticket, so no server, database or Linear is reached: every url refuses.
 const env = {
   HYPERDRIVE: { connectionString: "postgres://user:x@127.0.0.1:1/oligarchy" },
   OLIGARCHY_TOKEN: "t",
-  AUTOMATION_SERVER_URL: "http://automation.test",
+  AUTOMATION_SERVER_URL: "http://127.0.0.1:1",
+  LINEAR_API_URL: "http://127.0.0.1:1",
+  LINEAR_API_TOKEN: "lin_api_x",
 };
 
 const abort = (body: string | Record<string, unknown>) =>
@@ -28,9 +31,18 @@ describe("POST /abort happy path", () => {
 
 describe("POST /abort unhappy path", () => {
   it("answers 200 with ok when the ticket is empty", async () => {
-    const response = await abort({ ticket: "" });
+    const response = await abort({ ticket: "", action: "drive" });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: "true" });
+  });
+
+  it("answers 200 with ok when the action is missing or not one a job has", async () => {
+    const missing = await abort({ ticket: "OLI-61" });
+    expect(missing.status).toBe(200);
+    expect(await missing.json()).toEqual({ ok: "true" });
+    const unknown = await abort({ ticket: "OLI-61", action: "reboot" });
+    expect(unknown.status).toBe(200);
+    expect(await unknown.json()).toEqual({ ok: "true" });
   });
 
   it("answers 200 with ok when the body is not JSON", async () => {

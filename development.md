@@ -82,7 +82,11 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   that says Effect applies to it. Its `scheduled` handler is the retention policy: on the cron in
   `wrangler.jsonc` it deletes every row older than thirty days in one transaction, a row before
   the row it references, and leaves configuration (definitions, base prompts, error types, the
-  fleet) alone; a row is history for a month and then gone.
+  fleet) alone; a row is history for a month and then gone. What it calls beyond Postgres is the
+  automation server's `/abort` and, in `linear.ts`, Linear's GraphQL to move an aborted job's
+  ticket to the board's `Aborted` status; both urls are Cloudflare vars so the integration lane
+  points them at stubs, and the tokens (`OLIGARCHY_TOKEN`, `LINEAR_API_TOKEN`) are wrangler
+  secrets.
 - Files are kebab-case, one concept per file: `api.ts`, `contract.ts`, `errors.ts`, `config.ts`,
   `main.ts`, `<domain>.ts`. Tests mirror source names under `test/<dir>/<file>.unit.test.ts`;
   anything that spawns a process, opens a socket or needs Docker or QEMU lives under

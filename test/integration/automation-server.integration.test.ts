@@ -817,7 +817,7 @@ describeServing("automation server abort", () => {
           "POST",
           "/abort",
           { "content-type": "application/json", authorization: `Bearer ${TOKEN}` },
-          JSON.stringify({ ticket: linearId }),
+          JSON.stringify({ ticket: linearId, action: "drive" }),
         );
         expect(response.status).toBe(200);
         expect(await response.json()).toEqual({ ok: "true" });
@@ -848,7 +848,7 @@ describeServing("automation server abort", () => {
           "POST",
           "/abort",
           { "content-type": "application/json", authorization: `Bearer ${TOKEN}` },
-          JSON.stringify({ ticket: "OLI-missing" }),
+          JSON.stringify({ ticket: "OLI-missing", action: "drive" }),
         );
         expect(response.status).toBe(400);
         expect(await response.json()).toEqual({
@@ -884,7 +884,7 @@ describeServing("automation server abort", () => {
           "POST",
           "/abort",
           { "content-type": "application/json", authorization: `Bearer ${TOKEN}` },
-          JSON.stringify({ ticket: linearId }),
+          JSON.stringify({ ticket: linearId, action: "drive" }),
         );
         expect(response.status).toBe(404);
         expect(await response.json()).toEqual({
@@ -912,7 +912,7 @@ describeServing("automation server abort", () => {
           "POST",
           "/abort",
           { "content-type": "application/json" },
-          JSON.stringify({ ticket: "OLI-1" }),
+          JSON.stringify({ ticket: "OLI-1", action: "drive" }),
         );
         expect(response.status).toBe(401);
         expect(await response.json()).toEqual({ error: "unauthorized" });

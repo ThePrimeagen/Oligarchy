@@ -234,8 +234,15 @@ export const abort = HttpApiEndpoint.post("abort", "/abort", {
   error: [Errors.UnknownSessionWire, Errors.RunFailedWire],
 });
 
+// The same path on the automation server takes the job's action too (Contract.AbortJobBody).
+export const abortJob = HttpApiEndpoint.post("abort", "/abort", {
+  payload: Contract.AbortJobBody,
+  success: Contract.Ok,
+  error: [Errors.UnknownSessionWire, Errors.RunFailedWire],
+});
+
 export class Abort extends HttpApiGroup.make("Abort")
-  .add(abort)
+  .add(abortJob)
   .middleware(BearerAuth)
   .middleware(ApiBoundary) {}
 

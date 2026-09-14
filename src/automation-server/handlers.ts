@@ -138,6 +138,14 @@ export const AbortLive = HttpApiBuilder.group(Api.AutomationServerApi, "Abort", 
             agentId: payload.ticket,
           });
         }
+        // One job of a ticket runs at a time; the one running may not be the one clicked, when
+        // the click was on a pending diagnose that closed since and the drive is still on.
+        if (job.value.action !== payload.action) {
+          return yield* Errors.BadRequest.make({
+            message: `ticket "${payload.ticket}" is running a ${job.value.action}, not a ${payload.action}`,
+            agentId: payload.ticket,
+          });
+        }
         if (job.value.serverId === null) {
           return yield* Effect.die(new Error(`running job ${job.value.id} has no serverId`));
         }

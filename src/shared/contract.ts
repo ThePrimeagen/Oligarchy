@@ -167,8 +167,18 @@ export class ReserveAgentBody extends Schema.Class<ReserveAgentBody>(
   server: Schema.optionalKey(Domain.ServerUrl),
 }) {}
 
+// The automation client's abort: what it runs for the ticket, one job at a time.
 export class AbortBody extends Schema.Class<AbortBody>("@oligarchy/shared/contract/AbortBody")({
   ticket: Schema.NonEmptyString,
+}) {}
+
+// The automation server's abort names the job: a ticket has one drive and one diagnose, and the
+// dashboard's click is on one of them, so a stale click cannot stop the other.
+export class AbortJobBody extends Schema.Class<AbortJobBody>(
+  "@oligarchy/shared/contract/AbortJobBody",
+)({
+  ticket: Schema.NonEmptyString,
+  action: Domain.AutomationAction,
 }) {}
 
 const STORED_IMAGE_ORIGIN = "https://oligarchy.trm.sh";

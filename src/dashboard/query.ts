@@ -544,17 +544,27 @@ export function listAutomationQueue(connectionString: string): Promise<Automatio
   });
 }
 
-// Only a running row closes, the same rule as the automation server's finish: a pending or
-// finished ticket is left as it is. reason and finished_at are written with the status so the
-// queue shows the close.
-export function abortAutomationJob(connectionString: string, ticket: string): Promise<boolean> {
+// Closes the one job a ticket has for the action ((result_id, action) is unique), and only from
+// the status named, so the two closes stay apart: a pending row has no client to stop and this
+// write is its whole abort; a running row is the automation server's to stop and this write is
+// the fallback when it could not. A finished job is left as it is. The status condition is what
+// keeps a claim in flight honest: the dispatcher locks the pending row it takes, so this update
+// waits and then finds it running, or lands first and the claim never sees it. reason and
+// finished_at are written with the status so the queue shows the close.
+export function abortAutomationJob(
+  connectionString: string,
+  ticket: string,
+  action: (typeof automationJobs.$inferSelect)["action"],
+  from: "pending" | "running",
+): Promise<boolean> {
   return withDatabase(connectionString, async (db) => {
     const rows = await db
       .update(automationJobs)
       .set({ status: "aborted", reason: "aborted", finishedAt: sql`now()` })
       .where(
         and(
-          eq(automationJobs.status, "running"),
+          eq(automationJobs.action, action),
+          eq(automationJobs.status, from),
           inArray(
             automationJobs.resultId,
             db

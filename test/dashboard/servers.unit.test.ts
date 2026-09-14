@@ -122,8 +122,10 @@ const JOB_COLUMNS =
 const ABORT_X =
   '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 2l8 8M10 2L2 10" stroke="red" stroke-width="2" fill="none"></path></svg>';
 
-const abortForm = (ticket: string): string =>
-  `<form method="post" action="/abort" hx-post="/abort" hx-confirm="are you sure?" hx-target="#queue" hx-swap="innerHTML"><input type="hidden" name="ticket" value="${ticket}"/><button type="submit" class="abort" aria-label="abort">${ABORT_X}</button></form>`;
+// The form names the row: a ticket has one drive and one diagnose, so the action is the rest of
+// its key.
+const abortForm = (ticket: string, action: AutomationJob["action"]): string =>
+  `<form method="post" action="/abort" hx-post="/abort" hx-confirm="are you sure?" hx-target="#queue" hx-swap="innerHTML"><input type="hidden" name="ticket" value="${ticket}"/><input type="hidden" name="action" value="${action}"/><button type="submit" class="abort" aria-label="abort">${ABORT_X}</button></form>`;
 
 // The components are functions of their props; the string they render, through the same html
 // helper the routes serve them with, is the page. The helper hands back a String object, hence
@@ -223,23 +225,42 @@ describe("Queue happy path", () => {
   it("shows a running job's ticket, test, action and status, how long ago it was queued and started, and no finish yet", async () => {
     const page = await render(Queue({ queue: { ...EMPTY_QUEUE, running: [running] } }));
     expect(page).toContain(
-      `<tr><td>OLI-61</td><td>lock-screen</td><td>diagnose</td><td>running</td><td>3 min ago</td><td>45 s ago</td><td>—</td><td></td><td>${abortForm("OLI-61")}</td></tr>`,
+      `<tr><td>OLI-61</td><td>lock-screen</td><td>diagnose</td><td>running</td><td>3 min ago</td><td>45 s ago</td><td>—</td><td></td><td>${abortForm("OLI-61", "diagnose")}</td></tr>`,
     );
   });
 
   it("puts a red X on a running job that has a ticket, and asks are you sure before it posts", async () => {
     const page = await render(Queue({ queue: { ...EMPTY_QUEUE, running: [running] } }));
-    expect(page).toContain(abortForm("OLI-61"));
+    expect(page).toContain(abortForm("OLI-61", "diagnose"));
     expect(page).toContain('hx-confirm="are you sure?"');
     expect(page).toContain('stroke="red"');
     expect(page).not.toContain(">abort</button>");
   });
 
-  it("shows a pending job as queued and not yet started or finished", async () => {
+  it("shows a pending job as queued and not yet started or finished, with the same abort", async () => {
     const page = await render(Queue({ queue: { ...EMPTY_QUEUE, pending: [pending] } }));
     expect(page).toContain(
-      "<tr><td>OLI-62</td><td>install</td><td>drive</td><td>pending</td><td>7 s ago</td><td>—</td><td>—</td><td></td><td></td></tr>",
+      `<tr><td>OLI-62</td><td>install</td><td>drive</td><td>pending</td><td>7 s ago</td><td>—</td><td>—</td><td></td><td>${abortForm("OLI-62", "drive")}</td></tr>`,
     );
+  });
+
+  it("puts the red X on a pending job that has a ticket, posting to the same route as a running one", async () => {
+    const page = await render(
+      Queue({ queue: { running: [running], pending: [pending], completed: [] } }),
+    );
+    expect(page).toContain(abortForm("OLI-62", "drive"));
+    expect(page.match(/action="\/abort"/g)?.length).toBe(2);
+    expect(page.match(/hx-confirm="are you sure\?"/g)?.length).toBe(2);
+  });
+
+  it("names each row's own action when one ticket has a running drive and a pending diagnose", async () => {
+    const drive: AutomationJob = { ...running, ticket: "OLI-63", action: "drive" };
+    const diagnose: AutomationJob = { ...pending, ticket: "OLI-63", action: "diagnose" };
+    const page = await render(
+      Queue({ queue: { running: [drive], pending: [diagnose], completed: [] } }),
+    );
+    expect(page).toContain(abortForm("OLI-63", "drive"));
+    expect(page).toContain(abortForm("OLI-63", "diagnose"));
   });
 
   it("shows a completed job's terminal status, when it finished, and the reason it closed with", async () => {
@@ -271,13 +292,16 @@ describe("Queue unhappy path", () => {
     expect(page).toContain("<tr><td>—</td><td>install</td><td>drive</td><td>pending</td>");
   });
 
-  it("offers no abort on pending, completed, or a running job with no ticket", async () => {
+  it("offers no abort on completed, or on a running or pending job with no ticket", async () => {
     const page = await render(
       Queue({
         queue: {
           running: [{ ...running, ticket: null }],
-          pending: [pending],
-          completed: [failed],
+          pending: [{ ...pending, ticket: null }],
+          completed: [
+            failed,
+            { ...failed, ticket: "OLI-59", status: "aborted", reason: "aborted" },
+          ],
         },
       }),
     );
@@ -300,7 +324,9 @@ describe("Queue unhappy path", () => {
     const runningHostile = await render(
       Queue({ queue: { ...EMPTY_QUEUE, running: [{ ...running, ticket: 'OLI-<1">' }] } }),
     );
-    expect(runningHostile).toContain('value="OLI-&lt;1&quot;&gt;"');
+    expect(runningHostile).toContain(
+      '<input type="hidden" name="ticket" value="OLI-&lt;1&quot;&gt;"/><input type="hidden" name="action" value="diagnose"/>',
+    );
     expect(runningHostile).not.toContain('value="OLI-<1">');
     expect(page).not.toContain("<script>alert");
     expect(page).not.toContain("<b>wifi");

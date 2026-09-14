@@ -56,14 +56,16 @@ const abortHeaders = {
   "content-type": "application/json",
 };
 
+// The job named as the dashboard names it: the ticket and the action, a ticket having one of each.
 const abort = (
   http: HttpClient.HttpClient,
   ticket = TICKET,
   headers: Record<string, string> = abortHeaders,
+  action: "drive" | "diagnose" = "drive",
 ) =>
   http.post("/abort", {
     headers,
-    body: HttpBody.text(JSON.stringify({ ticket }), "application/json"),
+    body: HttpBody.text(JSON.stringify({ ticket, action }), "application/json"),
   });
 
 const sign = (payload: string | Uint8Array): string =>
@@ -435,6 +437,35 @@ describe("POST /abort refusals", () => {
     }),
   );
 
+  it.effect(
+    "400 when the ticket's running job is the other action, and the client is not called",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture();
+        seedResult(fixed, TICKET, RESULT);
+        seedJob(fixed, RESULT, "running", seedServer(fixed, CLIENT_URL));
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          const response = yield* abort(http, TICKET, abortHeaders, "diagnose");
+          expect(response.status).toBe(400);
+          expect(yield* response.json).toEqual({
+            error: `ticket "${TICKET}" is running a drive, not a diagnose`,
+          });
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.stores.automation.jobs[0]?.status).toBe("running");
+        expect(fixed.log.lines).toEqual([
+          {
+            level: "error",
+            text: `POST /abort failed: ticket "${TICKET}" is running a drive, not a diagnose`,
+            location: "automation",
+            agentId: TICKET,
+            skipSentry: true,
+            cause: undefined,
+          },
+        ]);
+      }),
+  );
+
   it.effect("400 when the ticket is unknown, and the client is not called", () =>
     Effect.gen(function* () {
       const fixed = fixture();
@@ -495,13 +526,37 @@ describe("POST /abort refusals", () => {
         const http = yield* HttpClient.HttpClient;
         const response = yield* http.post("/abort", {
           headers: abortHeaders,
-          body: HttpBody.text("{}", "application/json"),
+          body: HttpBody.text(JSON.stringify({ action: "drive" }), "application/json"),
         });
         expect(response.status).toBe(400);
         const body = yield* response.json;
         expect(body).toEqual(expect.objectContaining({ error: expect.stringContaining("ticket") }));
       }).pipe(Effect.provide(serve(fixed)));
     }),
+  );
+
+  it.effect(
+    "a body without an action, or with one no job has, is 400 and the client is not called",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture();
+        seedResult(fixed, TICKET, RESULT);
+        seedJob(fixed, RESULT, "running", seedServer(fixed, CLIENT_URL));
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          for (const body of [{ ticket: TICKET }, { ticket: TICKET, action: "reboot" }]) {
+            const response = yield* http.post("/abort", {
+              headers: abortHeaders,
+              body: HttpBody.text(JSON.stringify(body), "application/json"),
+            });
+            expect(response.status).toBe(400);
+            expect(yield* response.json).toEqual(
+              expect.objectContaining({ error: expect.stringContaining("action") }),
+            );
+          }
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.stores.automation.jobs[0]?.status).toBe("running");
+      }),
   );
 
   it.effect("404 when the client does not know the session, and the job stays running", () =>
