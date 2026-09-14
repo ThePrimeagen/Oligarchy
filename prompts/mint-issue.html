@@ -5,7 +5,7 @@ Minting driver. This is not a test: nothing is being judged, a disk is being mad
 <how-this-differs-from-a-test>
   <difference>The machine must be on {{PINNED_SERVER}} and no other. The dispatcher reserved a slot for you by rank; give it back with relinquish and take one pinned to this server with reserve --server. A test driver never reserves.</difference>
   <difference>Start fresh, with exactly the flags in the example. Never pass --resume or --disk: --resume boots the very disk you are here to make, --disk attaches another.</difference>
-  <difference>The ISO stays attached and boots first. After the installer's reboot, the ISO's boot menu comes back: choose the entry that boots the installed system from the disk, never the installer again — a second install wipes the first.</difference>
+  <difference>The ISO stays attached through the installer's reboot. The firmware normally follows the boot entry the installer wrote and the machine comes up from the disk; if the ISO's boot menu shows instead, choose the entry that boots the installed system from the disk, never the installer again — a second install wipes the first.</difference>
   <difference>Before the disk is kept for good, a second pair of eyes: spawn a {{SUB_AGENT}} subagent, give it a fresh image, and have it confirm the proof — the desktop on screen, the install complete. A no means do not save.</difference>
   <difference>End with ./client save, never stop. Save powers the machine off and keeps its disk; there is no session afterwards. After save, close the result with ./ctrl test-results: `saved` is a success, a failed save is a failure with its headline as the reason.</difference>
   <difference>A half-installed disk poisons every test on this server. When in doubt, fail: a failed mint costs one more ticket; a bad disk costs every test that boots it.</difference>
@@ -42,7 +42,7 @@ Minting driver. This is not a test: nothing is being judged, a disk is being mad
   <step>Move the ticket to "In Progress". Give back the placed reservation with ./client relinquish — `no reservation` is fine, you held nothing — then take the pinned one: ./client reserve --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --server {{PINNED_SERVER}}.</step>
   <step>Start fresh. The server fetches the ISO if it does not have it; a first start can take a while, and the command waits. Comment the session id on the ticket, then tie the result to the session with ./ctrl test start.</step>
   <step>Inside intents, drive the installer with images: the boot menu, then the installer, with the user name, password and disk passphrase exactly as the install's instruction says and the defaults everywhere else.</step>
-  <step>The installer reboots the machine when it is done. The ISO boots first: at its boot menu choose the entry that boots the installed disk, not the installer. Type the disk passphrase when asked and reach the desktop; if a login screen stands in the way, log in with the instruction's user and password.</step>
+  <step>The installer reboots the machine when it is done. Image through the reboot: the disk normally comes up on its own; should the ISO's boot menu show, choose the entry that boots the installed disk, not the installer. Type the disk passphrase when asked and reach the desktop; if a login screen stands in the way, log in with the instruction's user and password.</step>
   <step>With the desktop on screen: end your intent, take a fresh image, and have the {{SUB_AGENT}} subagent confirm the proof. Only then ./client save.</step>
   <step>Close the result with ./ctrl test-results from what save answered, and move the ticket to "Needs Review".</step>
 </procedure>
@@ -96,7 +96,7 @@ $ ./client get-image --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --
 $ ./client-with-image send-keys --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --session-id 6f1c...e2a9 --keys "<ENTER>"
 $ ./client intent end --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --session-id 6f1c...e2a9
 # ... the installer: user name, password, disk passphrase from the install; defaults elsewhere ...
-# ... the installer reboots; the ISO's boot menu again: the entry that boots the installed disk ...
+# ... the installer reboots; the disk comes up (or, at the ISO's boot menu, the entry that boots the installed disk) ...
 # ... the disk passphrase; the desktop; a fresh image; the subagent confirms the proof ...
 
 # keep the disk, then close the result with what save answered

@@ -264,7 +264,8 @@ describe("renderMintIssue happy path", () => {
         // Fresh only: the flags that boot or attach a disk are named as forbidden.
         expect(own).toMatch(/never[^.\n]*--resume/i);
         expect(own).toMatch(/never[^.\n]*--disk/i);
-        // The iso stays attached and boots first after the installer's reboot.
+        // The iso stays attached through the installer's reboot; the driver is told what to do if
+        // its boot menu shows rather than the disk.
         expect(own).toMatch(/reboot/i);
         expect(own).toMatch(/boots first|boot menu/i);
         // A second look before the disk is kept for good.
