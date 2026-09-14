@@ -205,15 +205,17 @@ export type ServerStats = {
 // server announces itself every thirty seconds: the write rewrites stats, stamps heartbeat_at
 // and counts generation up, and a shutdown deletes the row. A generation that stops moving is
 // a server that stopped without a chance to leave — killed, or cut off from the database; ten
-// minutes of that and the reverse proxy deletes the row, a row nobody ever claimed counting
-// from created_at. stats and heartbeat_at are null together, for a row an operator added that
-// no server has claimed. type says what kind of server the row is, so a reverse proxy lists and
-// sweeps its own kind; every writer names it, and the default is what the migration filled the
-// rows that predate the column with — qemu servers were the only kind there was.
-// automation-client is the other kind: same heartbeat, listed apart from the qemu fleet and
-// never swept, since a job's abort finds its client by id through this row. id is the stable
-// handle a job stores when it is claimed; url remains the key a heartbeat upserts on. name is
-// what the operator called the machine (--name); null on a row nobody has claimed yet.
+// minutes of that and the process that reads the row's kind deletes it, a row nobody ever
+// claimed counting from created_at. stats and heartbeat_at are null together, for a row an
+// operator added that no server has claimed. type says what kind of server the row is, so a
+// reader lists and sweeps its own kind: the qemu reverse proxy the qemu fleet, the automation
+// server the automation-clients. Every writer names it, and the default is what the migration
+// filled the rows that predate the column with — qemu servers were the only kind there was.
+// automation-client is the other kind: same heartbeat, listed apart from the qemu fleet. id is
+// the stable handle a job stores when it is claimed, and what its abort looks the client up by;
+// a client silent for ten minutes is gone, its jobs with it. url remains the key a heartbeat
+// upserts on. name is what the operator called the machine (--name); null on a row nobody has
+// claimed yet.
 export const servers = pgTable(
   "servers",
   {

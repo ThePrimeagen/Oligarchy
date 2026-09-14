@@ -13,6 +13,7 @@ import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
 import * as Sentry from "../observability/sentry.ts";
 import * as Api from "../shared/api.ts";
+import * as StaleServers from "../shared/stale-servers.ts";
 import * as AutomationClient from "./client.ts";
 import * as AutomationServerCommand from "./command.ts";
 import * as Handlers from "./handlers.ts";
@@ -39,6 +40,8 @@ server.on("error", (cause) => {
   Deferred.doneUnsafe(serverFailed, Exit.fail(new HttpServerError.ServeError({ cause })));
 });
 
+// Dispatch and the sweep start once the listener is up, in the same scope: a port refusal starts
+// neither, and a shutdown stops both before the pool closes.
 const ServerLive = (port: number, model: string) =>
   Layer.effectDiscard(
     Effect.gen(function* () {
@@ -49,6 +52,7 @@ const ServerLive = (port: number, model: string) =>
         automationAttr,
       );
       yield* Worker.dispatch(model);
+      yield* StaleServers.forget("automation-client");
     }),
   ).pipe(
     Layer.provide(
