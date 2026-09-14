@@ -491,11 +491,11 @@ NodeRuntime.runMain(main, { disableErrorReporting: true });
   page is the dashboard's (`src/dashboard/`), behind its access control, and reads rows. What it
   shows of a process is what that process wrote on a schedule (the server's `servers` row every
   thirty seconds, its `generation` counting the writes, so a number that stops moving is a process
-  that stopped without deleting its row, and ten minutes of that is a row its peers delete), never
-  a call into the process from the Worker. The page is text: tables, a form, and htmx polling one
-  fragment per table at the interval the rows are written at, styled only where the layout asks
-  for it (the servers page's two halves); a value from a row goes into it through JSX, never a
-  string template.
+  that stopped without deleting its row, and ten minutes of that is a row the qemu reverse proxy
+  deletes), never a call into the process from the Worker. The page is text: tables, a form, and
+  htmx polling one fragment per table at the interval the rows are written at, styled only where
+  the layout asks for it (the servers page's two halves); a value from a row goes into it through
+  JSX, never a string template.
 - Declare endpoints as `HttpApiEndpoint.get/post(name, path, { params, query, payload, success,
   error })`; binary via `Schema.Uint8Array.pipe(HttpApiSchema.asUint8Array({ contentType }))`,
   headers via `HttpApiSchema.WithHeaders`, byte streams via `HttpApiSchema.StreamUint8Array`.

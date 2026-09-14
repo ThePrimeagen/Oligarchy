@@ -15,6 +15,7 @@ import * as Api from "../shared/api.ts";
 import * as QemuReverseProxyCommand from "./command.ts";
 import * as Handlers from "./handlers.ts";
 import * as Router from "./router.ts";
+import * as StaleServers from "./stale-servers.ts";
 
 const HOST = "127.0.0.1";
 
@@ -32,6 +33,7 @@ server.on("error", (cause) => {
 });
 
 // The API behind the bearer on `port`; the fleet page is the dashboard's (oligarchy.trm.sh/servers).
+// The sweep starts once the listener is up, in the same scope: a port refusal sweeps nothing.
 const ServerLive = (port: number) =>
   Layer.effectDiscard(
     Effect.gen(function* () {
@@ -39,6 +41,7 @@ const ServerLive = (port: number) =>
       yield* log.info(`qemu reverse proxy listening on ${HOST}:${String(port)}`, {
         location: Log.Locations.server,
       });
+      yield* StaleServers.forget;
     }),
   ).pipe(
     Layer.provide(

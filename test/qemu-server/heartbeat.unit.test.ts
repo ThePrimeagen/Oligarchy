@@ -163,50 +163,6 @@ describe("heartbeat happy path", () => {
       expect(order).toEqual(["write", "delete"]);
     }),
   );
-
-  it.effect(
-    "each tick forgets the servers silent for ten minutes, one info line per row, after its own write",
-    () =>
-      Effect.gen(function* () {
-        const order: Array<string> = [];
-        let sweeps = 0;
-        const store = Stores.fakeServerStore({
-          heartbeat: () =>
-            Effect.sync(() => {
-              order.push("write");
-            }),
-          removeStaleServers: () =>
-            Effect.sync(() => {
-              order.push("sweep");
-              sweeps += 1;
-              return sweeps === 1 ? ["http://127.0.0.1:1", "http://127.0.0.1:2"] : [];
-            }),
-        });
-        const { log } = yield* start(store);
-        expect(order).toEqual(["write", "sweep"]);
-        expect(log.lines).toEqual([
-          {
-            level: "info",
-            text: "server forgotten; http://127.0.0.1:1 silent for 10 minutes",
-            location: "server",
-            agentId: undefined,
-            skipSentry: false,
-            cause: undefined,
-          },
-          {
-            level: "info",
-            text: "server forgotten; http://127.0.0.1:2 silent for 10 minutes",
-            location: "server",
-            agentId: undefined,
-            skipSentry: false,
-            cause: undefined,
-          },
-        ]);
-        yield* TestClock.adjust("30 seconds");
-        expect(sweeps).toBe(2);
-        expect(log.lines).toHaveLength(2);
-      }),
-  );
 });
 
 describe("heartbeat unhappy path", () => {
@@ -346,42 +302,5 @@ describe("heartbeat unhappy path", () => {
       expect(removals).toEqual([URL]);
       expect(log.lines).toEqual([]);
     }),
-  );
-
-  it.effect(
-    "a refused cleanup is its own error line, both writes still land, and the next tick sweeps again",
-    () =>
-      Effect.gen(function* () {
-        const refusedSweep = Errors.DatabaseError.make({
-          operation: "removeStaleServers",
-          message: "Failed query: delete from servers",
-          cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
-        });
-        let sweeps = 0;
-        const store = Stores.fakeServerStore({
-          removeStaleServers: () =>
-            Effect.suspend(() => {
-              sweeps += 1;
-              return sweeps === 1 ? Effect.fail(refusedSweep) : Effect.succeed([]);
-            }),
-        });
-        const { log, process } = yield* start(store);
-        expect(store.heartbeats).toEqual([ANNOUNCED]);
-        expect(process.reports).toEqual([PROCESS]);
-        expect(log.lines).toEqual([
-          {
-            level: "error",
-            text: "stale server cleanup failed: connect ECONNREFUSED 127.0.0.1:5432",
-            location: "server",
-            agentId: undefined,
-            skipSentry: false,
-            cause: refusedSweep,
-          },
-        ]);
-        yield* TestClock.adjust("30 seconds");
-        expect(sweeps).toBe(2);
-        expect(store.heartbeats).toHaveLength(2);
-        expect(log.lines).toHaveLength(1);
-      }),
   );
 });

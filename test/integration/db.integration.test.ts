@@ -1537,7 +1537,7 @@ Postgres.describeWithDatabase("database", () => {
     );
 
     scoped.effect(
-      "ServerStore removeStaleServers deletes a heartbeat ten minutes and a second old and a row nobody claimed in ten minutes, of either kind, keeps a heartbeat a second younger and a row just added, and returns what it deleted",
+      "ServerStore removeStaleServers deletes a qemu heartbeat ten minutes and a second old and a qemu row nobody claimed in ten minutes, keeps a heartbeat a second younger, a row just added and the other kind however silent, and returns what it deleted",
       () =>
         Effect.gen(function* () {
           const store = yield* Servers.ServerStore;
@@ -1547,12 +1547,12 @@ Postgres.describeWithDatabase("database", () => {
             memory: { totalBytes: 1, usedBytes: 0 },
             cpu: { mean1m: 0, mean2m: 0, mean3m: 0 },
           };
-          const deadQemu = `http://10.0.0.30:${uuid().slice(0, 8)}`;
+          const dead = `http://10.0.0.30:${uuid().slice(0, 8)}`;
           const deadClient = `http://10.0.0.31:${uuid().slice(0, 8)}`;
           const unclaimed = `http://10.0.0.32:${uuid().slice(0, 8)}`;
           const alive = `http://10.0.0.33:${uuid().slice(0, 8)}`;
           const justAdded = `http://10.0.0.34:${uuid().slice(0, 8)}`;
-          yield* store.heartbeat(deadQemu, "qemu", `dead-${deadQemu.slice(-8)}`, stats);
+          yield* store.heartbeat(dead, "qemu", `dead-${dead.slice(-8)}`, stats);
           yield* store.heartbeat(
             deadClient,
             "automation-client",
@@ -1569,7 +1569,7 @@ Postgres.describeWithDatabase("database", () => {
                 .set({ heartbeatAt: sql`now() - ${ago}::interval` })
                 .where(eq(DbSchema.servers.url, url)),
             );
-          yield* stamp(deadQemu, "10 minutes 1 second");
+          yield* stamp(dead, "10 minutes 1 second");
           yield* stamp(deadClient, "10 minutes 1 second");
           yield* stamp(alive, "9 minutes 59 seconds");
           yield* database.run("age", (db) =>
@@ -1578,19 +1578,19 @@ Postgres.describeWithDatabase("database", () => {
               .set({ createdAt: sql`now() - interval '10 minutes 1 second'` })
               .where(eq(DbSchema.servers.url, unclaimed)),
           );
-          const forgotten = yield* store.removeStaleServers();
-          expect(forgotten).toEqual(expect.arrayContaining([deadQemu, deadClient, unclaimed]));
-          expect(forgotten).not.toContain(alive);
-          expect(forgotten).not.toContain(justAdded);
+          const forgotten = yield* store.removeStaleServers("qemu");
+          expect(forgotten).toEqual(expect.arrayContaining([dead, unclaimed]));
+          expect(forgotten).toHaveLength(2);
           const left = yield* store.listServers("qemu");
           expect(left).toEqual(expect.arrayContaining([alive, justAdded]));
-          expect(left).not.toContain(deadQemu);
+          expect(left).not.toContain(dead);
           expect(left).not.toContain(unclaimed);
-          expect(yield* store.listServers("automation-client")).not.toContain(deadClient);
+          expect(yield* store.listServers("automation-client")).toContain(deadClient);
           // A deleted row is gone for good: the sweep after finds nothing of it.
-          expect(yield* store.removeStaleServers()).toEqual([]);
+          expect(yield* store.removeStaleServers("qemu")).toEqual([]);
           expect(yield* store.removeServer(alive)).toBe(true);
           expect(yield* store.removeServer(justAdded)).toBe(true);
+          expect(yield* store.removeServer(deadClient)).toBe(true);
         }),
     );
 

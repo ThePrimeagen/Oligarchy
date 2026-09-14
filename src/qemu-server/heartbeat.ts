@@ -24,14 +24,11 @@ const detail = (error: unknown): string =>
 // with what it knows of itself — a qemu server, this process boots nothing else — and the row's
 // generation counts the writes, so a number that stops moving is a server that stopped without a
 // chance to leave. The same tick inserts a `process_stats` row: current jobs, VmRSS of this
-// process and every child that still answers, and the cpu busy over the last thirty seconds,
-// then forgets every server silent for ten minutes, one info line per row, so a killed server
-// leaves the fleet on its peers' word. Its own row is written first, so a server back from a
-// long outage keeps its generation rather than deleting itself. A write or the cleanup that fails
-// is one error line; the rest of the tick and the next tick still run. A shutdown deletes the
-// servers row only: the readings stay so they can be graphed later. Registered before the loop
-// so the fiber is interrupted first; a write in flight finishes (the write is uninterruptible).
-// A delete that fails is one `unannounce failed` line; the process still exits.
+// process and every child that still answers, and the cpu busy over the last thirty seconds. A
+// write that fails is one error line; the other write and the next tick still run. A shutdown
+// deletes the servers row only: the readings stay so they can be graphed later. Registered
+// before the loop so the fiber is interrupted first; a write in flight finishes (the write is
+// uninterruptible). A delete that fails is one `unannounce failed` line; the process still exits.
 export const announce = (
   url: string,
   name: string,
@@ -81,15 +78,7 @@ export const announce = (
         }),
       );
     }).pipe(Effect.catchCause(failed("process stats failed")));
-    const forgetStale = Effect.gen(function* () {
-      const forgotten = yield* Effect.uninterruptible(store.removeStaleServers());
-      for (const stale of forgotten) {
-        yield* log.info(`server forgotten; ${stale} silent for 10 minutes`, {
-          location: Log.Locations.server,
-        });
-      }
-    }).pipe(Effect.catchCause(failed("stale server cleanup failed")));
-    const tick = writeHeartbeat.pipe(Effect.andThen(writeProcess), Effect.andThen(forgetStale));
+    const tick = writeHeartbeat.pipe(Effect.andThen(writeProcess));
     // Before the loop: close interrupts the fiber first, then this runs.
     yield* Effect.addFinalizer(() =>
       store.removeServer(url).pipe(Effect.catchCause(failed("unannounce failed")), Effect.asVoid),
