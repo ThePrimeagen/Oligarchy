@@ -1,15 +1,25 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { createServer as createHttpServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { eq, sql } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Client } from "pg";
 import { describe, expect, inject, it } from "vitest";
-import { app } from "../../src/dashboard/dashboard.tsx";
+import { app, scheduled } from "../../src/dashboard/dashboard.tsx";
 import {
+  actions,
+  agentRuns,
+  agentServers,
   automationJobs,
+  debugLogs,
+  images,
+  logs,
+  postRunDiagnosis,
+  postRunErrorTypes,
   processStats,
   servers,
+  sessionServers,
   sessions,
   testDefinitions,
   testResults,
@@ -327,11 +337,14 @@ const getPage = async (path: string, databaseUrl: string): Promise<Page> => {
   return { status: response.status, html: await response.text() };
 };
 
-const seed = async (databaseUrl: string, run: (db: NodePgDatabase) => Promise<void>) => {
+const seed = async <T>(
+  databaseUrl: string,
+  run: (db: NodePgDatabase) => Promise<T>,
+): Promise<T> => {
   const client = new Client({ connectionString: databaseUrl });
   await client.connect();
   try {
-    await run(drizzle(client));
+    return await run(drizzle(client));
   } finally {
     await client.end();
   }
@@ -1775,5 +1788,392 @@ describe.skipIf(dbUrl === "")("dashboard POST /abort unhappy path", () => {
     } finally {
       await proxy.close();
     }
+  });
+});
+
+// A stamp some days before the database's clock, the clock the sweep's cutoff is read from.
+const daysAgo = (days: number) => sql`now() - make_interval(days => ${days})`;
+
+const CRON = { cron: "0 4 * * *" };
+const SWEEP =
+  "const deleted = await query.deleteOldRows(url);\nconsole.log(JSON.stringify(deleted));";
+
+// The ids the sweep is measured by afterwards: one session's tree, the run whose result it ran,
+// and the tag naming the rows keyed by text.
+type Aged = {
+  readonly tag: string;
+  readonly sessionId: string;
+  readonly agentId: string;
+  readonly imageActionId: number;
+  readonly runId: string;
+  readonly resultId: string;
+};
+
+// Everything the sweep reads an age off, `days` old: a session with its agent, two actions, the
+// image of the last, its debug log, its diagnosis and its route; a run whose one result the
+// session ran, with the job that drove it; a log line, a process reading and the agent's
+// reservation. Beside them, of the same age, the configuration the sweep must leave: the
+// definition the result pinned, the error type the diagnosis names, and a server.
+const seedAged = async (db: NodePgDatabase, tag: string, days: number): Promise<Aged> => {
+  const at = daysAgo(days);
+  const sessionId = randomUUID();
+  const agentId = `PRUNE-${tag}`;
+  const url = `http://prune-${tag}:42069`;
+  await db.insert(sessions).values({
+    id: sessionId,
+    config: { iso: "x" },
+    status: "succeeded",
+    startedAt: at,
+    endedAt: at,
+  });
+  await db.insert(agentRuns).values({ agentId, sessionId, startedAt: at, endedAt: at });
+  const [, last] = await db
+    .insert(actions)
+    .values([
+      { sessionId, agentId, request: { name: "click" }, state: "completed", createdAt: at },
+      { sessionId, agentId, request: { name: "screenshot" }, state: "completed", createdAt: at },
+    ])
+    .returning({ id: actions.id });
+  await db.insert(images).values({ actionId: last.id, data: Buffer.from("png") });
+  await db.insert(debugLogs).values({
+    sessionId,
+    sources: { serial: "", proxy: "", qemu: "", actions: "" },
+    createdAt: at,
+  });
+  await db
+    .insert(postRunErrorTypes)
+    .values({ key: `prune-${tag}`, description: "d", createdAt: at });
+  await db.insert(postRunDiagnosis).values({
+    sessionId,
+    verdict: "failed",
+    errorType: `prune-${tag}`,
+    summary: "s",
+    model: "m",
+    createdAt: at,
+  });
+  await db.insert(sessionServers).values({ sessionId, serverUrl: url, createdAt: at });
+  const [definition] = await db
+    .insert(testDefinitions)
+    .values({ name: `prune-${tag}`, description: "d", instruction: "i", proof: "p", createdAt: at })
+    .returning({ id: testDefinitions.id });
+  const [run] = await db
+    .insert(testRuns)
+    .values({
+      name: `prune ${tag}`,
+      iso: "https://example.com/omarchy.iso",
+      serverUrl: url,
+      status: "passed",
+      startedAt: at,
+      endedAt: at,
+    })
+    .returning({ id: testRuns.id });
+  const [result] = await db
+    .insert(testResults)
+    .values({
+      runId: run.id,
+      definitionId: definition.id,
+      sessionId,
+      model: "m",
+      linearId: agentId,
+      status: "passed",
+      createdAt: at,
+      finishedAt: at,
+    })
+    .returning({ id: testResults.id });
+  await db.insert(automationJobs).values({
+    resultId: result.id,
+    action: "drive",
+    status: "succeeded",
+    createdAt: at,
+    startedAt: at,
+    finishedAt: at,
+  });
+  await db.insert(logs).values({ location: sessionId, agentId, text: "line", createdAt: at });
+  await db.insert(processStats).values({
+    name: `prune-${tag}`,
+    type: "qemu",
+    jobs: 0,
+    memoryBytes: 0,
+    cpuPercent: 0,
+    reportedAt: at,
+  });
+  await db.insert(agentServers).values({ agentId, serverUrl: url, createdAt: at });
+  await db.insert(servers).values({ url, createdAt: at });
+  return { tag, sessionId, agentId, imageActionId: last.id, runId: run.id, resultId: result.id };
+};
+
+type AgedRows = {
+  readonly sessions: number;
+  readonly agentRuns: number;
+  readonly actions: number;
+  readonly images: number;
+  readonly debugLogs: number;
+  readonly postRunDiagnosis: number;
+  readonly sessionServers: number;
+  readonly testRuns: number;
+  readonly testResults: number;
+  readonly automationJobs: number;
+  readonly logs: number;
+  readonly processStats: number;
+  readonly agentServers: number;
+  readonly testDefinitions: number;
+  readonly postRunErrorTypes: number;
+  readonly servers: number;
+};
+
+// What is left of one seedAged, table by table.
+const remaining = async (db: NodePgDatabase, aged: Aged): Promise<AgedRows> => ({
+  sessions: await db.$count(sessions, eq(sessions.id, aged.sessionId)),
+  agentRuns: await db.$count(agentRuns, eq(agentRuns.agentId, aged.agentId)),
+  actions: await db.$count(actions, eq(actions.sessionId, aged.sessionId)),
+  images: await db.$count(images, eq(images.actionId, aged.imageActionId)),
+  debugLogs: await db.$count(debugLogs, eq(debugLogs.sessionId, aged.sessionId)),
+  postRunDiagnosis: await db.$count(
+    postRunDiagnosis,
+    eq(postRunDiagnosis.sessionId, aged.sessionId),
+  ),
+  sessionServers: await db.$count(sessionServers, eq(sessionServers.sessionId, aged.sessionId)),
+  testRuns: await db.$count(testRuns, eq(testRuns.id, aged.runId)),
+  testResults: await db.$count(testResults, eq(testResults.runId, aged.runId)),
+  automationJobs: await db.$count(automationJobs, eq(automationJobs.resultId, aged.resultId)),
+  logs: await db.$count(logs, eq(logs.agentId, aged.agentId)),
+  processStats: await db.$count(processStats, eq(processStats.name, `prune-${aged.tag}`)),
+  agentServers: await db.$count(agentServers, eq(agentServers.agentId, aged.agentId)),
+  testDefinitions: await db.$count(testDefinitions, eq(testDefinitions.name, `prune-${aged.tag}`)),
+  postRunErrorTypes: await db.$count(
+    postRunErrorTypes,
+    eq(postRunErrorTypes.key, `prune-${aged.tag}`),
+  ),
+  servers: await db.$count(servers, eq(servers.url, `http://prune-${aged.tag}:42069`)),
+});
+
+const SEEDED: AgedRows = {
+  sessions: 1,
+  agentRuns: 1,
+  actions: 2,
+  images: 1,
+  debugLogs: 1,
+  postRunDiagnosis: 1,
+  sessionServers: 1,
+  testRuns: 1,
+  testResults: 1,
+  automationJobs: 1,
+  logs: 1,
+  processStats: 1,
+  agentServers: 1,
+  testDefinitions: 1,
+  postRunErrorTypes: 1,
+  servers: 1,
+};
+
+// Swept: every row with an age gone, the configuration as it was.
+const SWEPT: AgedRows = {
+  ...SEEDED,
+  sessions: 0,
+  agentRuns: 0,
+  actions: 0,
+  images: 0,
+  debugLogs: 0,
+  postRunDiagnosis: 0,
+  sessionServers: 0,
+  testRuns: 0,
+  testResults: 0,
+  automationJobs: 0,
+  logs: 0,
+  processStats: 0,
+  agentServers: 0,
+};
+
+// A run that started `runDays` ago with one result attributed to a plain session started
+// `sessionDays` ago; the ids the sweep is measured by afterwards.
+const seedLinked = async (
+  db: NodePgDatabase,
+  tag: string,
+  runDays: number,
+  sessionDays: number,
+): Promise<{ readonly sessionId: string; readonly runId: string; readonly resultId: string }> => {
+  const sessionId = randomUUID();
+  await db.insert(sessions).values({
+    id: sessionId,
+    config: { iso: "x" },
+    status: "succeeded",
+    startedAt: daysAgo(sessionDays),
+  });
+  const [definition] = await db
+    .insert(testDefinitions)
+    .values({ name: `prune-${tag}`, description: "d", instruction: "i", proof: "p" })
+    .returning({ id: testDefinitions.id });
+  const [run] = await db
+    .insert(testRuns)
+    .values({
+      name: `prune ${tag}`,
+      iso: "https://example.com/omarchy.iso",
+      serverUrl: "http://127.0.0.1:42069",
+      startedAt: daysAgo(runDays),
+    })
+    .returning({ id: testRuns.id });
+  const [result] = await db
+    .insert(testResults)
+    .values({
+      runId: run.id,
+      definitionId: definition.id,
+      sessionId,
+      status: "passed",
+      model: "m",
+      linearId: `PRUNE-${tag}`,
+    })
+    .returning({ id: testResults.id });
+  await db
+    .insert(automationJobs)
+    .values({ resultId: result.id, action: "drive", status: "succeeded" });
+  return { sessionId, runId: run.id, resultId: result.id };
+};
+
+// The first test sweeps a database with no other row past the cutoff, so its counts are exact;
+// the ones after it match on the rows they seeded.
+describe.skipIf(dbUrl === "")("dashboard/query deleteOldRows happy path", () => {
+  it("deletes every row older than thirty days with what hangs off it, keeps younger rows and the configuration, counts what went, and ends the connection", async () => {
+    const { old, kept } = await seed(dbUrl, async (db) => ({
+      old: await seedAged(db, "old", 31),
+      kept: await seedAged(db, "kept", 29),
+    }));
+    const result = await runQuery(SWEEP, dbUrl);
+    expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({
+      automationJobs: 1,
+      testResults: 1,
+      testRuns: 1,
+      images: 1,
+      actions: 2,
+      agentRuns: 1,
+      debugLogs: 1,
+      postRunDiagnosis: 1,
+      sessionServers: 1,
+      sessions: 1,
+      logs: 1,
+      processStats: 1,
+      agentServers: 1,
+    });
+    const rows = await seed(dbUrl, async (db) => ({
+      old: await remaining(db, old),
+      kept: await remaining(db, kept),
+    }));
+    expect(rows.old).toEqual(SWEPT);
+    expect(rows.kept).toEqual(SEEDED);
+  });
+
+  it("takes an old run's results and jobs with it and leaves the younger session one of them ran", async () => {
+    const linked = await seed(dbUrl, (db) => seedLinked(db, "late", 31, 1));
+    const result = await runQuery(SWEEP, dbUrl);
+    expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      automationJobs: 1,
+      testResults: 1,
+      testRuns: 1,
+      sessions: 0,
+    });
+    const left = await seed(dbUrl, async (db) => ({
+      testRuns: await db.$count(testRuns, eq(testRuns.id, linked.runId)),
+      testResults: await db.$count(testResults, eq(testResults.id, linked.resultId)),
+      sessions: await db.$count(sessions, eq(sessions.id, linked.sessionId)),
+    }));
+    expect(left).toEqual({ testRuns: 0, testResults: 0, sessions: 1 });
+  });
+
+  it("runs as the Worker's scheduled handler: the old rows go and the cron resolves", async () => {
+    await seed(dbUrl, async (db) => {
+      await db.insert(logs).values([
+        { location: "server", agentId: "PRUNE-cron", text: "old", createdAt: daysAgo(31) },
+        { location: "server", agentId: "PRUNE-cron", text: "kept", createdAt: daysAgo(29) },
+      ]);
+    });
+    await expect(
+      scheduled(CRON, {
+        HYPERDRIVE: { connectionString: dbUrl },
+        OLIGARCHY_TOKEN: TOKEN,
+        AUTOMATION_SERVER_URL: "http://127.0.0.1:1",
+      }),
+    ).resolves.toBeUndefined();
+    const texts = await seed(dbUrl, (db) =>
+      db.select({ text: logs.text }).from(logs).where(eq(logs.agentId, "PRUNE-cron")),
+    );
+    expect(texts).toEqual([{ text: "kept" }]);
+  });
+});
+
+describe.skipIf(dbUrl === "")("dashboard/query deleteOldRows unhappy path", () => {
+  it("deletes nothing when one delete is refused, and the next sweep takes the rows once the refusal is gone", async () => {
+    // A young run's result on an old session: nothing writes this, and the session's own delete
+    // is refused by the foreign key. The whole sweep rolls back, the session's actions included.
+    const held = await seed(dbUrl, async (db) => {
+      const linked = await seedLinked(db, "held", 1, 31);
+      await db.insert(actions).values({
+        sessionId: linked.sessionId,
+        request: { name: "click" },
+        createdAt: daysAgo(31),
+      });
+      return linked;
+    });
+    const refused = await runQuery(
+      "try {\n  await query.deleteOldRows(url);\n} catch (err) {\n  console.error(`${err.message}: ${err.cause.message}`);\n  process.exitCode = 3;\n}",
+      dbUrl,
+    );
+    expect(refused.hung, "process did not exit: the pg client was not ended").toBe(false);
+    expect(refused.code).toBe(3);
+    expect(refused.stderr).toMatch(/Failed query: delete from "sessions"/);
+    expect(refused.stderr).toMatch(/violates foreign key constraint/);
+    const untouched = await seed(dbUrl, async (db) => ({
+      actions: await db.$count(actions, eq(actions.sessionId, held.sessionId)),
+      sessions: await db.$count(sessions, eq(sessions.id, held.sessionId)),
+    }));
+    expect(untouched).toEqual({ actions: 1, sessions: 1 });
+
+    await seed(dbUrl, async (db) => {
+      await db.delete(automationJobs).where(eq(automationJobs.resultId, held.resultId));
+      await db.delete(testResults).where(eq(testResults.id, held.resultId));
+      await db.delete(testRuns).where(eq(testRuns.id, held.runId));
+    });
+    const swept = await runQuery(SWEEP, dbUrl);
+    expect(swept.hung, "process did not exit: the pg client was not ended").toBe(false);
+    expect(swept.stderr).toBe("");
+    expect(swept.code).toBe(0);
+    expect(JSON.parse(swept.stdout)).toMatchObject({ sessions: 1, actions: 1 });
+    const gone = await seed(dbUrl, async (db) => ({
+      actions: await db.$count(actions, eq(actions.sessionId, held.sessionId)),
+      sessions: await db.$count(sessions, eq(sessions.id, held.sessionId)),
+    }));
+    expect(gone).toEqual({ actions: 0, sessions: 0 });
+  });
+});
+
+describe("dashboard/query deleteOldRows unhappy path: unreachable database", () => {
+  it("surfaces a refused connection and exits without echoing the password", async () => {
+    const result = await runQuery(
+      "try {\n  await query.deleteOldRows(url);\n} catch (err) {\n  console.error(err.message);\n  process.exitCode = 3;\n}",
+      REFUSED_URL,
+    );
+    expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
+    expect(result.code).toBe(3);
+    expect(result.stderr).toMatch(/ECONNREFUSED/);
+    expect(result.stderr).not.toContain(SENTINEL_PASSWORD);
+  });
+
+  // The cron's failure is thrown, so Cloudflare records the event as failed and Sentry's wrapper
+  // reports it; the connection string never reaches the message.
+  it("the scheduled handler rejects with the refused connection, without echoing the password", async () => {
+    const outcome = await scheduled(CRON, {
+      HYPERDRIVE: { connectionString: REFUSED_URL },
+      OLIGARCHY_TOKEN: TOKEN,
+      AUTOMATION_SERVER_URL: "http://127.0.0.1:1",
+    }).then(
+      () => "resolved",
+      (error: unknown) => (error instanceof Error ? error.message : String(error)),
+    );
+    expect(outcome).toMatch(/ECONNREFUSED/);
+    expect(outcome).not.toContain(SENTINEL_PASSWORD);
   });
 });

@@ -1,12 +1,18 @@
-import { and, desc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, inArray, lt, sql } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Client } from "pg";
 import {
   actions,
+  agentRuns,
+  agentServers,
   automationJobs,
+  debugLogs,
   images,
+  logs,
+  postRunDiagnosis,
   processStats,
   servers,
+  sessionServers,
   sessions,
   testBasePrompts,
   testDefinitions,
@@ -663,4 +669,90 @@ export function removeServer(connectionString: string, url: string): Promise<boo
       .returning({ url: servers.url });
     return rows.length > 0;
   });
+}
+
+// Thirty days: the pages read the last fifty of anything and the last thirty minutes of process
+// stats, so a month back is history nobody opens, and the images are the bytes that grow.
+export const RETENTION_DAYS = 30;
+
+// How many rows each table lost, in the order they were deleted.
+export type DeletedRows = {
+  readonly automationJobs: number;
+  readonly testResults: number;
+  readonly testRuns: number;
+  readonly images: number;
+  readonly actions: number;
+  readonly agentRuns: number;
+  readonly debugLogs: number;
+  readonly postRunDiagnosis: number;
+  readonly sessionServers: number;
+  readonly sessions: number;
+  readonly logs: number;
+  readonly processStats: number;
+  readonly agentServers: number;
+};
+
+// pg counts a DELETE's rows; the null in its type is for statements that have none.
+const rowCount = (result: { readonly rowCount: number | null }): number => result.rowCount ?? 0;
+
+// The retention sweep the cron runs: every row older than RETENTION_DAYS, in one transaction, so
+// one now() is the cutoff and a refused delete leaves everything in place. A session and a run
+// are old by their start and take what hangs off them whatever its own stamp; nothing cascades,
+// so a row goes before the row it references — the literal below runs top to bottom. A result's
+// session starts after the result, so an old session's result belongs to an older run and is gone
+// before the session. Definitions, base prompts, error types and the fleet are configuration and
+// stay.
+export function deleteOldRows(connectionString: string): Promise<DeletedRows> {
+  return withDatabase(connectionString, (db) =>
+    db.transaction(async (tx) => {
+      const cutoff = sql`now() - make_interval(days => ${RETENTION_DAYS})`;
+      const oldRuns = tx
+        .select({ id: testRuns.id })
+        .from(testRuns)
+        .where(lt(testRuns.startedAt, cutoff));
+      const oldResults = tx
+        .select({ id: testResults.id })
+        .from(testResults)
+        .where(inArray(testResults.runId, oldRuns));
+      const oldSessions = tx
+        .select({ id: sessions.id })
+        .from(sessions)
+        .where(lt(sessions.startedAt, cutoff));
+      const oldActions = tx
+        .select({ id: actions.id })
+        .from(actions)
+        .where(inArray(actions.sessionId, oldSessions));
+      return {
+        automationJobs: rowCount(
+          await tx.delete(automationJobs).where(inArray(automationJobs.resultId, oldResults)),
+        ),
+        testResults: rowCount(
+          await tx.delete(testResults).where(inArray(testResults.runId, oldRuns)),
+        ),
+        testRuns: rowCount(await tx.delete(testRuns).where(lt(testRuns.startedAt, cutoff))),
+        images: rowCount(await tx.delete(images).where(inArray(images.actionId, oldActions))),
+        actions: rowCount(await tx.delete(actions).where(inArray(actions.sessionId, oldSessions))),
+        agentRuns: rowCount(
+          await tx.delete(agentRuns).where(inArray(agentRuns.sessionId, oldSessions)),
+        ),
+        debugLogs: rowCount(
+          await tx.delete(debugLogs).where(inArray(debugLogs.sessionId, oldSessions)),
+        ),
+        postRunDiagnosis: rowCount(
+          await tx.delete(postRunDiagnosis).where(inArray(postRunDiagnosis.sessionId, oldSessions)),
+        ),
+        sessionServers: rowCount(
+          await tx.delete(sessionServers).where(inArray(sessionServers.sessionId, oldSessions)),
+        ),
+        sessions: rowCount(await tx.delete(sessions).where(lt(sessions.startedAt, cutoff))),
+        logs: rowCount(await tx.delete(logs).where(lt(logs.createdAt, cutoff))),
+        processStats: rowCount(
+          await tx.delete(processStats).where(lt(processStats.reportedAt, cutoff)),
+        ),
+        agentServers: rowCount(
+          await tx.delete(agentServers).where(lt(agentServers.createdAt, cutoff)),
+        ),
+      };
+    }),
+  );
 }

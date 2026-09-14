@@ -7,6 +7,7 @@ import {
   abortAutomationJob,
   addServer,
   definitionStats,
+  deleteOldRows,
   durationChart,
   getImage,
   groupDefinitions,
@@ -19,6 +20,7 @@ import {
   listTestResultOutcomes,
   modelStats,
   removeServer,
+  RETENTION_DAYS,
   reviseTestDefinition,
   selectDefinition,
   versionStats,
@@ -1056,10 +1058,27 @@ app.post("/abort", async (context) => {
   return reply();
 });
 
+// The retention sweep, run by Cloudflare on the cron in wrangler.jsonc. One line says what went;
+// a failure is thrown, so the cron event is recorded as failed and Sentry's wrapper reports it.
+export const scheduled = async (
+  controller: { readonly cron: string },
+  env: Bindings,
+): Promise<void> => {
+  const deleted = await deleteOldRows(env.HYPERDRIVE.connectionString);
+  const counts = Object.entries(deleted)
+    .map(([table, rows]) => `${table} ${String(rows)}`)
+    .join(", ");
+  console.log(
+    `dashboard: cron ${controller.cron} deleted rows older than ${String(RETENTION_DAYS)} days: ${counts}`,
+  );
+};
+
+// Cloudflare reads fetch and scheduled off the default export. The Hono app stays the handler,
+// so Sentry keeps hooking its error handler for a route that throws; the cron is added to it.
 export default Sentry.withSentry(
   () => ({
     dsn: SENTRY_DSN,
     dataCollection: {},
   }),
-  app,
+  Object.assign(app, { scheduled }),
 );
