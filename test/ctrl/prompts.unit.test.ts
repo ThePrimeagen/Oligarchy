@@ -193,3 +193,88 @@ describe("renderLinearIssue unhappy path", () => {
     }),
   );
 });
+
+// Every value a mint ticket asks for: the run's, plus the server it is pinned to.
+const mint = {
+  LINEAR_TICKET: "OLI-42",
+  RUN_ID: "11111111-1111-4111-8111-111111111111",
+  RESULT_ID: "22222222-2222-4222-8222-222222222222",
+  ISO_URL: "https://example.com/omarchy.iso",
+  SERVER_URL: SERVER,
+  PINNED_SERVER: "http://127.0.0.1:55331",
+  TEST_NAME: "mint",
+  TEST_DESCRIPTION: "Install Omarchy and keep the disk",
+  TEST_INSTRUCTION: "User oligarchy, password oligarchy, disk passphrase oligarchy",
+  TEST_PROOF: "The desktop is on screen after the reboot",
+} satisfies Prompts.MintValues;
+
+describe("renderMintIssue", () => {
+  it.effect("mint-issue.html: relinquish, the pinned reserve, a fresh start, then save", () =>
+    Effect.gen(function* () {
+      const description = yield* real(Prompts.renderMintIssue(mint));
+      expect(description.includes("{{")).toBe(false);
+      expect(description).toContain(`<pinned_server>\`${mint.PINNED_SERVER}\`</pinned_server>`);
+      // The example session, in order: give the placed reservation back, take the pinned one,
+      // start fresh, and end with save, never stop. (The guides use the same example ids, so
+      // only the example session is searched.)
+      const example = description.slice(description.indexOf("<example-session>"));
+      const relinquishAt = example.indexOf(
+        `./client relinquish --agent-id OLI-42 --server-url ${SERVER}`,
+      );
+      const reserveAt = example.indexOf(
+        `./client reserve --agent-id OLI-42 --server-url ${SERVER} --server ${mint.PINNED_SERVER}`,
+      );
+      const startAt = example.indexOf(
+        `./client start --agent-id OLI-42 --server-url ${SERVER} --iso ${mint.ISO_URL}\n`,
+      );
+      const saveAt = example.indexOf(
+        `./client save --agent-id OLI-42 --server-url ${SERVER} --session-id`,
+      );
+      // The verdict follows save, so a save that failed can never sit under a success.
+      const verdictAt = example.indexOf(
+        `./ctrl test-results --agent-id OLI-42 --id ${mint.RESULT_ID} --status success`,
+      );
+      expect(relinquishAt).toBeGreaterThan(-1);
+      expect(reserveAt).toBeGreaterThan(relinquishAt);
+      expect(startAt).toBeGreaterThan(reserveAt);
+      expect(saveAt).toBeGreaterThan(startAt);
+      expect(verdictAt).toBeGreaterThan(saveAt);
+      expect(example).toContain(
+        `./ctrl test-results --agent-id OLI-42 --id ${mint.RESULT_ID} --status failed --reason`,
+      );
+      expect(example).not.toContain("--resume");
+      expect(example).not.toContain("--disk");
+      expect(example).not.toMatch(/\.\/client stop/);
+      expect(example).toContain('"In Progress"');
+      expect(description).not.toContain("In Review");
+      // Every way out closes the result: the start that never returns, the failed install, the
+      // failed save.
+      expect(description).toContain(
+        `./client relinquish --agent-id OLI-42 --server-url ${SERVER} to give back your reservation, then close the result as failed`,
+      );
+      expect(description).toContain("Never save a failed install.");
+      expect(description).toContain("If ./client save fails");
+      expect(description).toContain(`<instruction>${mint.TEST_INSTRUCTION}</instruction>`);
+      expect(description).toContain(`<proof>${mint.TEST_PROOF}</proof>`);
+      expect(description).toContain("# Client\n");
+      expect(description).toContain("## save");
+      expect(description).toContain("## reserve");
+      expect(description).toContain("# Control\n");
+      expect(description).toContain("## test-results");
+      expect(description).not.toContain("<version>");
+    }),
+  );
+
+  it.effect("a missing value names the mint template", () =>
+    Effect.gen(function* () {
+      const fs = promptFs({ contents: { "mint-issue.html": "{{RUN_ID}} {{NOPE}}" } });
+      const error = yield* Effect.flip(
+        Prompts.renderMintIssue(mint).pipe(Effect.provide(fs.layer)),
+      );
+      expect(error).toMatchObject({
+        _tag: "PromptError",
+        message: "prompt: prompts/mint-issue.html uses {{NOPE}}, which has no value",
+      });
+    }),
+  );
+});

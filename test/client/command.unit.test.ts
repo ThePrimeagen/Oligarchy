@@ -345,6 +345,53 @@ describe("client requests", () => {
     }),
   );
 
+  it.effect("reserve posts the agent, and the server pin when given, printing nothing", () =>
+    Effect.gen(function* () {
+      const recorder = FakeHttp.recordRequests(ok);
+      yield* run(["reserve", ...shared], { http: recorder.layer });
+      yield* run(["reserve", ...shared, "--server", "http://127.0.0.1:55331"], {
+        http: recorder.layer,
+      });
+      expect(recorder.requests.map((request) => request.url)).toEqual([
+        `${SERVER}/reserve`,
+        `${SERVER}/reserve`,
+      ]);
+      expect(parsed(recorder.requests[0]?.body ?? "")).toEqual({ agent: AGENT });
+      expect(parsed(recorder.requests[1]?.body ?? "")).toEqual({
+        agent: AGENT,
+        server: "http://127.0.0.1:55331",
+      });
+      expect(yield* TestConsole.logLines).toEqual([]);
+    }),
+  );
+
+  it.effect("reserve refuses a --server that is not an http(s) url before any request", () =>
+    Effect.gen(function* () {
+      const recorder = FakeHttp.recordRequests(ok);
+      const error = yield* Effect.flip(
+        run(["reserve", ...shared, "--server", "qemu-a:55331"], { http: recorder.layer }),
+      );
+      expect(showHelp(error).errors.length).toBeGreaterThan(0);
+      expect(recorder.requests).toEqual([]);
+    }),
+  );
+
+  it.effect("a reserve the proxy refuses is its refusal", () =>
+    Effect.gen(function* () {
+      const recorder = FakeHttp.recordRequests(() =>
+        FakeHttp.json({ error: "no server http://127.0.0.1:1" }, 404),
+      );
+      const error = yield* Effect.flip(
+        run(["reserve", ...shared, "--server", "http://127.0.0.1:1"], { http: recorder.layer }),
+      );
+      expect(error).toMatchObject({
+        _tag: "ProxyRefusal",
+        status: 404,
+        message: "no server http://127.0.0.1:1",
+      });
+    }),
+  );
+
   it.effect("save posts the session and the agent and prints saved", () =>
     Effect.gen(function* () {
       const recorder = FakeHttp.recordRequests(ok);
@@ -549,6 +596,7 @@ describe("client help", () => {
   const actions: ReadonlyArray<ReadonlyArray<string>> = [
     ["start"],
     ["relinquish"],
+    ["reserve"],
     ["get-image"],
     ["get-serial"],
     ["send-keys"],

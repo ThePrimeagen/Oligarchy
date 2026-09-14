@@ -8,6 +8,7 @@ import * as DebugLogs from "../db/debug-logs.ts";
 import * as Client from "../db/client.ts";
 import * as Diagnosis from "../db/diagnosis.ts";
 import * as Logs from "../db/logs.ts";
+import * as Servers from "../db/servers.ts";
 import * as Sessions from "../db/sessions.ts";
 import * as Tests from "../db/tests.ts";
 import * as Log from "../observability/log.ts";
@@ -30,6 +31,7 @@ export type Stores =
   | Diagnosis.DiagnosisStore
   | Tests.TestStore
   | Automation.AutomationStore
+  | Servers.ServerStore
   | Log.Log;
 
 // ctrl is the record keeper: every read and write is a database call. It never talks to a qemu server;
@@ -49,6 +51,7 @@ const databaseLayers = (url: Redacted.Redacted): Layer.Layer<Stores, Errors.Data
     Automation.AutomationStore.layer,
     DebugLogs.DebugLogStore.layer,
     Diagnosis.DiagnosisStore.layer,
+    Servers.ServerStore.layer,
     Log.Log.layer,
   ).pipe(
     Layer.provideMerge(Actions.ActionStore.layer),
@@ -150,6 +153,11 @@ const list = Flag.boolean("list").pipe(
 // ---------------------------------------------------------------------------
 
 const refuse = (message: string) => Errors.CommandError.make({ message });
+
+// The one definition `mint` installs from, and the label its tickets carry beside the agent
+// test label the automation server watches.
+const MINT_DEFINITION = "mint";
+const MINT_LABEL = "mint";
 
 // The value of an Option, or the refusal the operator reads when it is absent.
 const orRefuse = <A, E, R>(
@@ -409,6 +417,138 @@ export const makeCtrlCommand = (deps: Deps = live) => {
       id: experiment.id,
       tests: experiment.tests.map((test, index) => ({ id: test.id, linear: tickets[index] })),
     });
+  });
+
+  // mint --iso <https-url>
+  //
+  // Not a test: one install per live qemu server, each a ticket pinned to its server, so that
+  // server ends up holding the iso's minted disk for every later test to boot. The install is
+  // still a run with one result, because that is what a driver ties its session to and what the
+  // automation queue dispatches; the `mint` definition holds the install's wording once.
+  const mint = Effect.fn("ctrl.mint")(function* (input: {
+    readonly serverUrl: string;
+    readonly iso: string;
+  }) {
+    const tests = yield* Tests.TestStore;
+    const servers = yield* Servers.ServerStore;
+    const linear = yield* Linear.Linear;
+    const log = yield* Log.Log;
+
+    const definition = yield* tests.findTestDefinition(MINT_DEFINITION).pipe(
+      Effect.flatMap(
+        Option.match({
+          onNone: () =>
+            Effect.fail(
+              refuse(
+                `mint: no test definition named ${MINT_DEFINITION}; define the install once with ./ctrl test define --name ${MINT_DEFINITION}`,
+              ),
+            ),
+          onSome: Effect.succeed,
+        }),
+      ),
+    );
+    const targets = yield* servers.listLiveServers("qemu").pipe(
+      Effect.filterOrFail(
+        (rows) => rows.length > 0,
+        () => refuse("mint: no live qemu server"),
+      ),
+    );
+
+    const teamId = yield* linear.teamId;
+    const labelIds = yield* linear.labelIds(teamId, MINT_LABEL);
+    const assigneeId = yield* linear.assigneeId;
+
+    const minted: Array<{
+      readonly id: string;
+      readonly result: string;
+      readonly server: string;
+      readonly linear: Linear.LinearTicket;
+    }> = [];
+    // Every ticket Linear created, the one being described included, so a failure names it.
+    const tickets: Array<Linear.LinearTicket> = [];
+    const identifiers = () => tickets.map((ticket) => ticket.identifier).join(", ");
+    // A failure fails the run it was creating and names the tickets that stand, as `test new`
+    // does; the runs already whole for earlier servers are left standing, they are complete.
+    const failRunWith = <E extends { readonly message: string }>(
+      runId: string,
+      error: E,
+      namingTickets: (reason: string) => E,
+    ) =>
+      Effect.gen(function* () {
+        const created = identifiers();
+        const reason = created === "" ? error.message : `${error.message}; created ${created}`;
+        yield* tests.failRun(runId, reason);
+        return yield* Effect.fail(created === "" ? error : namingTickets(reason));
+      });
+    for (const target of targets) {
+      const created = yield* tests.createRun({
+        iso: input.iso,
+        serverUrl: input.serverUrl,
+        definitions: [definition],
+      });
+      // createRun inserts the result in the same transaction; a missing one is a broken invariant.
+      const result = yield* Effect.fromOption(Arr.head(created.results)).pipe(
+        Effect.mapError(
+          () =>
+            new Error(`mint: run ${created.runId} has no result for definition ${definition.name}`),
+        ),
+        Effect.orDie,
+      );
+      const ticket = Effect.gen(function* () {
+        const issued = yield* linear.createIssue({
+          teamId,
+          title: `Omarchy mint: ${target.url}`,
+          labelIds,
+          assigneeId,
+        });
+        tickets.push(issued);
+        yield* tests.setLinearId(result.id, issued.identifier);
+        const description = yield* Prompts.renderMintIssue({
+          LINEAR_TICKET: issued.identifier,
+          RUN_ID: created.runId,
+          RESULT_ID: result.id,
+          ISO_URL: input.iso,
+          SERVER_URL: input.serverUrl,
+          PINNED_SERVER: target.url,
+          TEST_NAME: definition.name,
+          TEST_DESCRIPTION: definition.description,
+          TEST_INSTRUCTION: definition.instruction,
+          TEST_PROOF: definition.proof,
+        });
+        yield* linear.describeIssue(issued, description);
+        return issued;
+      });
+      const issued = yield* ticket.pipe(
+        Effect.catchTags({
+          LinearError: (error) =>
+            failRunWith(created.runId, error, (reason) => withReason(error, reason)),
+          PromptError: (error) =>
+            failRunWith(created.runId, error, (reason) =>
+              Errors.PromptError.make(
+                Object.assign(
+                  { message: reason },
+                  error.cause === undefined ? undefined : { cause: error.cause },
+                ),
+              ),
+            ),
+          DatabaseError: (error) =>
+            failRunWith(created.runId, error, (reason) =>
+              Errors.DatabaseError.make(
+                Object.assign(
+                  { operation: error.operation, message: reason },
+                  error.cause === undefined ? undefined : { cause: error.cause },
+                ),
+              ),
+            ),
+        }),
+      );
+      minted.push({ id: created.runId, result: result.id, server: target.url, linear: issued });
+    }
+
+    yield* log.info(
+      `mint ${input.iso} created; ${String(minted.length)} servers; ${identifiers()}`,
+    );
+    yield* printJson(minted);
   });
 
   // test list
@@ -771,6 +911,25 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     Command.provide(withDbAndLinear),
   );
 
+  const mintCommand = Command.make(
+    "mint",
+    {
+      serverUrl: serverUrlFlag,
+      iso: Flag.string("iso").pipe(
+        Flag.withSchema(HttpsUrl),
+        Flag.withDescription(
+          "HTTPS URL of the ISO to install and keep as each server's minted disk",
+        ),
+      ),
+    },
+    mint,
+  ).pipe(
+    Command.withDescription(
+      "Mint the ISO on every live qemu server: one install ticket pinned to each, ending in save",
+    ),
+    Command.provide(withDbAndLinear),
+  );
+
   const testStartCommand = Command.make(
     "start",
     {
@@ -956,6 +1115,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     ),
     Command.withSubcommands([
       testCommand,
+      mintCommand,
       testResultsCommand,
       sessionCommand,
       errorTypeCommand,

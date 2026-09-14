@@ -276,6 +276,20 @@ describe("./ctrl without a database", () => {
     expect(firstLine(fromEnv.stderr)).toBe("LINEAR_API_TOKEN is not set");
   });
 
+  it("mint --help exits 0 without a database; without LINEAR_API_TOKEN it wants it first", async () => {
+    const help = await runCtrl(["mint", "--help"], { DATABASE_URL: "" });
+    expect(help.code).toBe(0);
+    expect(help.stderr).toBe("");
+    expect(help.stdout).toMatch(/--iso/);
+    expect(help.stdout).toMatch(/--server-url/);
+    const token = await runCtrl(
+      ["mint", "--iso", "https://example.com/omarchy.iso", `--server-url=${SERVER}`],
+      { DATABASE_URL: UNUSED_DB },
+    );
+    expect(token.code).toBe(1);
+    expect(firstLine(token.stderr)).toBe("LINEAR_API_TOKEN is not set");
+  });
+
   it("test run and diagnose run are unknown actions that spawn no agent", async () => {
     for (const args of [
       ["test", "run", "--ticket", "OLI-42"],
