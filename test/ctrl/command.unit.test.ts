@@ -874,10 +874,10 @@ describe("mint", () => {
           ISO_URL: "https://example.com/omarchy.iso",
           SERVER_URL: SERVER,
           PINNED_SERVER: pinned,
-          TEST_NAME: mintDefinition.name,
-          TEST_DESCRIPTION: mintDefinition.description,
-          TEST_INSTRUCTION: mintDefinition.instruction,
-          TEST_PROOF: mintDefinition.proof,
+          INSTALL_NAME: mintDefinition.name,
+          INSTALL_DESCRIPTION: mintDefinition.description,
+          INSTALL_INSTRUCTION: mintDefinition.instruction,
+          INSTALL_PROOF: mintDefinition.proof,
         });
       const first = yield* descriptionOf(0, "OLI-42", QEMU_A);
       const second = yield* descriptionOf(1, "OLI-43", QEMU_B);
