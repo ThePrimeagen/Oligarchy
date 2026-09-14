@@ -4,27 +4,28 @@ Consult this table of contents first. Read only the section you need.
 
 | Section | Line |
 |---------|-----:|
-| [Important](#important) | 22 |
-| [Synopsis](#synopsis) | 28 |
-| [test --list](#test---list) | 55 |
-| [test define](#test-define) | 73 |
-| [test new](#test-new) | 89 |
-| [test list](#test-list) | 105 |
-| [test start](#test-start) | 117 |
-| [test-results](#test-results) | 134 |
-| [session list](#session-list) | 152 |
-| [session](#session) | 168 |
-| [session --search](#session---search) | 193 |
-| [error-type new](#error-type-new) | 211 |
-| [error-type list](#error-type-list) | 226 |
-| [diagnose](#diagnose) | 240 |
-| [automation --list](#automation---list) | 261 |
+| [Important](#important) | 24 |
+| [Synopsis](#synopsis) | 30 |
+| [test --list](#test---list) | 59 |
+| [test define](#test-define) | 77 |
+| [test new](#test-new) | 93 |
+| [mint](#mint) | 109 |
+| [test list](#test-list) | 126 |
+| [test start](#test-start) | 138 |
+| [test-results](#test-results) | 155 |
+| [session list](#session-list) | 173 |
+| [session](#session) | 189 |
+| [session --search](#session---search) | 214 |
+| [error-type new](#error-type-new) | 232 |
+| [error-type list](#error-type-list) | 247 |
+| [diagnose](#diagnose) | 261 |
+| [automation --list](#automation---list) | 280 |
 
 ## Important
 
 `./ctrl` is the control plane's record keeper: it creates test runs, opens their Linear tickets, ties a session to its result, closes the result, reads sessions back, and records a verdict on every ended session. Everything it reads and writes is in the database; it never touches a guest or a qemu server — the guest is `./client`'s.
 
-If you are an agent driving a guest, you need two of these: [test start](#test-start) after `./client start`, and [test-results](#test-results) before `./client stop`. If you are an agent reviewing a session, you need [session](#session), [error-type list](#error-type-list), [error-type new](#error-type-new) and [diagnose](#diagnose). Do not look at code. Run the commands.
+If you are an agent driving a guest, you need two of these: [test start](#test-start) after `./client start`, and [test-results](#test-results) before `./client stop` — or before `./client save`, on a mint ticket. If you are an agent reviewing a session, you need [session](#session), [error-type list](#error-type-list), [error-type new](#error-type-new) and [diagnose](#diagnose). Do not look at code. Run the commands.
 
 ## Synopsis
 
@@ -35,6 +36,7 @@ If you are an agent driving a guest, you need two of these: [test start](#test-s
 ./ctrl test define    --name <definition> [--description <text>] [--instruction <text>] [--proof <text>]
 ./ctrl test new       --server-url <url> --iso <https-url> --version <version> [--name <definition>]
 ./ctrl test list
+./ctrl mint           --server-url <url> --iso <https-url>
 ./ctrl test start     --session-id <id> --test-result-id <id> --model <id>
 ./ctrl test-results   --agent-id <agent> --id <id> --status success|failed [--reason <text>]
 ./ctrl session list   [--count <n>] [--active] [--json]
@@ -48,9 +50,9 @@ If you are an agent driving a guest, you need two of these: [test start](#test-s
 
 The action comes first. Every value is a flag; there are no positional arguments. Flags may sit in any order after the action.
 
-- `DATABASE_URL` — read from the environment by every action; it is the only variable most of them need. `test new` and `test list` also read `LINEAR_API_TOKEN`. No action reads `OLIGARCHY_TOKEN`. A `.env` in the current directory fills in missing variables only. A missing variable means exit 1.
+- `DATABASE_URL` — read from the environment by every action; it is the only variable most of them need. `test new`, `mint` and `test list` also read `LINEAR_API_TOKEN`. No action reads `OLIGARCHY_TOKEN`. A `.env` in the current directory fills in missing variables only. A missing variable means exit 1.
 - `--session-id <id>` — taken by `test start`, `session` and `diagnose`. Omitted, it is read from `SESSION_ID` in the environment; the flag wins when both are given, and an empty `SESSION_ID` counts as unset. Set it once — `SESSION_ID=$(./ctrl session --search --test-result-id <id>) && export SESSION_ID`, so a failed search stops there instead of exporting nothing — and every command that follows is about that session. Neither given is a usage error; on `session` without `--search` it is the refusal `session: --session-id or SESSION_ID is required`.
-- `--server-url <url>` — taken by `test new` alone: the qemu server the driving agents will talk to, a full http or https URL, stored on the run and written into every ticket. Falls back to `SERVER_URL` from the environment; there is no default. `test start` and `test-results` accept it and ignore it, so a ticket written before it went still runs; every other action refuses it as an unrecognized flag.
+- `--server-url <url>` — taken by `test new` and `mint`: the qemu server the driving agents will talk to, a full http or https URL, stored on the run and written into every ticket. Falls back to `SERVER_URL` from the environment; there is no default. `test start` and `test-results` accept it and ignore it, so a ticket written before it went still runs; every other action refuses it as an unrecognized flag.
 
 A command that works exits 0. A command that fails exits 1 and prints the error: one headline, then the stack trace and the cause behind it. Read the headline first. `./ctrl <action> --help` prints that action's flags.
 
@@ -102,6 +104,23 @@ Creates one pending test run and one Linear issue per stored test definition, ea
 
 ```bash
 ./ctrl test new --server-url https://qemu.example.com --iso https://example.com/omarchy.iso --version 1.2.3
+```
+
+## mint
+
+```
+./ctrl mint --server-url <url> --iso <https-url>
+```
+
+Not a test: it gets the ISO installed once on every qemu server, so that server holds the ISO's minted disk and every later test on it can `start --resume` into a finished install instead of installing. For each live qemu server the reverse proxy at `--server-url` knows, it creates one pending run with one result under the definition named `mint`, and one Linear issue pinned to that server: the ticket tells its driver to `relinquish`, `reserve --server <that server>`, `start` fresh, install as the `mint` definition instructs, and end with `./client save` instead of `stop`. The `mint` label sits beside the agent test label on every issue. Prints the runs as JSON, one per server: run id, result id, server url, ticket. Reads `LINEAR_API_TOKEN`.
+
+- `--iso <https-url>` — the ISO to install. Must be HTTPS. Every server minted from it answers `start --resume` for that url afterwards.
+- `--server-url <url>` — the reverse proxy the drivers talk to; the live qemu servers behind it are the ones minted.
+
+Refused before anything is created when there is no definition named `mint` — define the install once with `test define --name mint`, its instruction holding the user name, password and disk passphrase, its proof the desktop after the reboot — or when no qemu server is live. A Linear failure part-way fails the run it was creating and names the tickets that stand; the servers already ticketed keep theirs.
+
+```bash
+./ctrl mint --server-url https://qemu.example.com --iso https://example.com/omarchy.iso
 ```
 
 ## test list

@@ -797,6 +797,228 @@ describe("test new", () => {
 // test list
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// mint
+// ---------------------------------------------------------------------------
+
+describe("mint", () => {
+  const MINT = ["mint", "--iso", "https://example.com/omarchy.iso", "--server-url", SERVER];
+  const QEMU_A = "http://127.0.0.1:55331";
+  const QEMU_B = "http://127.0.0.1:55332";
+  const QEMU_DEAD = "http://127.0.0.1:55333";
+  const mintDefinition: TestDefinitionRow = {
+    id: 7,
+    name: "mint",
+    description: "Install Omarchy and keep the disk",
+    instruction: "User oligarchy, password oligarchy, disk passphrase oligarchy",
+    proof: "The desktop is on screen after the reboot",
+    createdAt: new Date("2026-09-01T00:00:00Z"),
+  };
+  const stats = {
+    qemus: 0,
+    memory: { totalBytes: 1, usedBytes: 0 },
+    cpu: { mean1m: 0, mean2m: 0, mean3m: 0 },
+  };
+  // A qemu server the fleet knows and hears from; `alive` false registers it without a heartbeat.
+  const qemu = (h: ReturnType<typeof harness>, url: string, name: string, alive = true) => {
+    h.stores.servers.servers.push({ id: `id-${name}`, url, name, type: "qemu" });
+    if (alive) {
+      h.stores.servers.heartbeats.push({ url, type: "qemu", name, stats });
+    }
+  };
+  const minted = (values: Prompts.MintValues) =>
+    Prompts.renderMintIssue(values).pipe(Effect.provide(NodeFileSystem.layer));
+
+  it.effect("creates one pinned run, result and ticket per live qemu server (happy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.tests.definitions.push(install, mintDefinition);
+      qemu(h, QEMU_A, "qemu-a");
+      qemu(h, QEMU_B, "qemu-b");
+      qemu(h, QEMU_DEAD, "qemu-dead", false);
+      h.stores.servers.servers.push({
+        id: "id-client",
+        url: "http://127.0.0.1:52222",
+        name: "automation-client-5",
+        type: "automation-client",
+      });
+      h.stores.servers.heartbeats.push({
+        url: "http://127.0.0.1:52222",
+        type: "automation-client",
+        name: "automation-client-5",
+        stats,
+      });
+      const exit = yield* h.run(MINT, WITH_LINEAR);
+      expect(Exit.isSuccess(exit)).toBe(true);
+
+      // One run per live qemu server, each with the one mint result; the dead one and the
+      // automation client get none.
+      const runs = h.stores.tests.runs;
+      expect(runs.map((run) => [run.iso, run.serverUrl, run.status])).toEqual([
+        ["https://example.com/omarchy.iso", SERVER, "pending"],
+        ["https://example.com/omarchy.iso", SERVER, "pending"],
+      ]);
+      const results = h.stores.tests.results;
+      expect(results.map((row) => [row.runId, row.definitionId, row.status, row.linearId])).toEqual(
+        [
+          [runs[0]?.id, 7, "pending", "OLI-42"],
+          [runs[1]?.id, 7, "pending", "OLI-43"],
+        ],
+      );
+
+      const descriptionOf = (index: number, identifier: string, pinned: string) =>
+        minted({
+          LINEAR_TICKET: identifier,
+          RUN_ID: runs[index]?.id ?? "",
+          RESULT_ID: results[index]?.id ?? "",
+          ISO_URL: "https://example.com/omarchy.iso",
+          SERVER_URL: SERVER,
+          PINNED_SERVER: pinned,
+          TEST_NAME: mintDefinition.name,
+          TEST_DESCRIPTION: mintDefinition.description,
+          TEST_INSTRUCTION: mintDefinition.instruction,
+          TEST_PROOF: mintDefinition.proof,
+        });
+      const first = yield* descriptionOf(0, "OLI-42", QEMU_A);
+      const second = yield* descriptionOf(1, "OLI-43", QEMU_B);
+      expect(first).toContain(`--server ${QEMU_A}`);
+      expect(second).toContain(`--server ${QEMU_B}`);
+      const labels = [FakeLinear.labelId("agent test"), FakeLinear.labelId("mint")];
+      expect(h.linear.calls).toEqual([
+        { method: "teamId" },
+        { method: "labelIds", teamId: "team-id", version: "mint" },
+        { method: "assigneeId" },
+        {
+          method: "createIssue",
+          input: {
+            teamId: "team-id",
+            title: `Omarchy mint: ${QEMU_A}`,
+            labelIds: labels,
+            assigneeId: "user-id",
+          },
+        },
+        { method: "describeIssue", ticket: FakeLinear.ticketFor("OLI-42"), description: first },
+        {
+          method: "createIssue",
+          input: {
+            teamId: "team-id",
+            title: `Omarchy mint: ${QEMU_B}`,
+            labelIds: labels,
+            assigneeId: "user-id",
+          },
+        },
+        { method: "describeIssue", ticket: FakeLinear.ticketFor("OLI-43"), description: second },
+      ]);
+      expect(yield* lastJson).toEqual([
+        {
+          id: runs[0]?.id,
+          result: results[0]?.id,
+          server: QEMU_A,
+          linear: FakeLinear.ticketFor("OLI-42"),
+        },
+        {
+          id: runs[1]?.id,
+          result: results[1]?.id,
+          server: QEMU_B,
+          linear: FakeLinear.ticketFor("OLI-43"),
+        },
+      ]);
+      expect(h.log.lines.map((line) => line.text)).toEqual([
+        "mint https://example.com/omarchy.iso created; 2 servers; OLI-42, OLI-43",
+      ]);
+      expect(h.touched).toEqual(["database", "linear"]);
+    }),
+  );
+
+  it.effect("no mint definition is refused before any run or ticket exists (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.tests.definitions.push(install);
+      qemu(h, QEMU_A, "qemu-a");
+      expect(failure(yield* h.run(MINT, WITH_LINEAR))).toMatchObject({
+        _tag: "CommandError",
+        message:
+          "mint: no test definition named mint; define the install once with ./ctrl test define --name mint",
+      });
+      expect(h.stores.tests.runs).toEqual([]);
+      expect(h.linear.calls).toEqual([]);
+    }),
+  );
+
+  it.effect("no live qemu server is refused before any run or ticket exists (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.tests.definitions.push(mintDefinition);
+      qemu(h, QEMU_DEAD, "qemu-dead", false);
+      expect(failure(yield* h.run(MINT, WITH_LINEAR))).toMatchObject({
+        _tag: "CommandError",
+        message: "mint: no live qemu server",
+      });
+      expect(h.stores.tests.runs).toEqual([]);
+      expect(h.linear.calls).toEqual([]);
+    }),
+  );
+
+  it.effect(
+    "a Linear failure on the second server fails that run, names the ticket already created, and leaves the first run standing (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const refused = Errors.LinearError.make({
+          operation: "createIssue",
+          status: 401,
+          message: "linear: request failed (401): unauthorized",
+        });
+        let issues = 0;
+        const h = harness({
+          linear: FakeLinear.fakeLinear({
+            overrides: {
+              createIssue: () =>
+                Effect.suspend(() => {
+                  issues += 1;
+                  return issues === 2
+                    ? Effect.fail(refused)
+                    : Effect.succeed(FakeLinear.ticketFor("OLI-42"));
+                }),
+            },
+          }),
+        });
+        h.stores.tests.definitions.push(mintDefinition);
+        qemu(h, QEMU_A, "qemu-a");
+        qemu(h, QEMU_B, "qemu-b");
+        const exit = yield* h.run(MINT, WITH_LINEAR);
+        expect(failure(exit)).toMatchObject({
+          _tag: "LinearError",
+          message: "linear: request failed (401): unauthorized; created OLI-42",
+        });
+        expect(h.stores.tests.runs.map((run) => run.status)).toEqual(["pending", "failed"]);
+        expect(h.stores.tests.runs[1]?.reason).toBe(
+          "linear: request failed (401): unauthorized; created OLI-42",
+        );
+        expect(h.stores.tests.results.map((row) => [row.status, row.linearId])).toEqual([
+          ["pending", "OLI-42"],
+          ["failed", null],
+        ]);
+        expect(yield* stdout).toEqual([]);
+      }),
+  );
+
+  it.effect("--iso must be https and --help touches nothing", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      const exit = yield* h.run(
+        ["mint", "--iso", "http://example.com/omarchy.iso", "--server-url", SERVER],
+        WITH_LINEAR,
+      );
+      expect(Exit.isFailure(exit)).toBe(true);
+      expect(h.touched).toEqual([]);
+      const help = yield* h.run(["mint", "--help"], {});
+      expect(Exit.isSuccess(help)).toBe(true);
+      expect((yield* stdout).join("\n")).toContain("--iso");
+      expect(h.touched).toEqual([]);
+    }),
+  );
+});
+
 describe("test list", () => {
   it.effect("prints the backlog as a JSON array (happy)", () =>
     Effect.gen(function* () {
