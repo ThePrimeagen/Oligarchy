@@ -2,15 +2,17 @@ import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { Deferred, Effect, Exit, Fiber, Layer, Scope } from "effect";
 import { TestClock } from "effect/testing";
-import * as StaleServers from "../../src/qemu-reverse-proxy/stale-servers.ts";
 import type * as Servers from "../../src/db/servers.ts";
+import * as Log from "../../src/observability/log.ts";
 import * as Errors from "../../src/shared/errors.ts";
+import * as StaleServers from "../../src/shared/stale-servers.ts";
 import * as FakeLog from "../support/log.ts";
 import * as Stores from "../support/stores.ts";
 
 const DEAD = "http://127.0.0.1:1";
 const TYPO = "http://127.0.0.1:2";
 
+// The line as the qemu reverse proxy writes it: its process attribution is the default.
 const forgotten = (url: string) => ({
   level: "info",
   text: `server forgotten; ${url} silent for 10 minutes`,
@@ -26,12 +28,20 @@ const refused = Errors.DatabaseError.make({
   cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
 });
 
-// The loop in a scope of its own, so a test can close it and prove the ticking stops.
-const start = (store: Stores.FakeServerStore, log = FakeLog.fakeLog()) =>
+// The loop in a scope of its own, so a test can close it and prove the ticking stops. The
+// reverse proxy's kind and attribution unless a test says otherwise.
+const start = (
+  store: Stores.FakeServerStore,
+  log = FakeLog.fakeLog(),
+  type: Servers.ServerType = "qemu",
+  attribution: Log.ProcessAttribution = Log.ProcessAttribution.defaultValue(),
+) =>
   Effect.gen(function* () {
     const scope = yield* Scope.make();
-    yield* StaleServers.forget.pipe(
-      Effect.provide(Layer.mergeAll(store.layer, log.layer)),
+    yield* StaleServers.forget(type).pipe(
+      Effect.provide(
+        Layer.mergeAll(store.layer, log.layer, Layer.succeed(Log.ProcessAttribution)(attribution)),
+      ),
       Scope.provide(scope),
     );
     return { scope, log };
@@ -70,6 +80,32 @@ describe("stale servers happy path", () => {
           forgotten(DEAD),
           forgotten(TYPO),
           forgotten("http://127.0.0.1:3"),
+        ]);
+      }),
+  );
+
+  it.effect(
+    "the automation server forgets automation-clients, its lines under its own attribution",
+    () =>
+      Effect.gen(function* () {
+        const { store, asked } = sweeping([[DEAD]]);
+        const { log } = yield* start(
+          store,
+          FakeLog.fakeLog(),
+          "automation-client",
+          Log.AutomationProcessAttribution,
+        );
+        yield* TestClock.adjust("30 seconds");
+        expect(asked).toEqual(["automation-client", "automation-client"]);
+        expect(log.lines).toEqual([
+          {
+            level: "info",
+            text: `server forgotten; ${DEAD} silent for 10 minutes`,
+            location: "automation",
+            agentId: "automation",
+            skipSentry: false,
+            cause: undefined,
+          },
         ]);
       }),
   );
@@ -143,6 +179,30 @@ describe("stale servers unhappy path", () => {
         expect(log.lines).toHaveLength(2);
         expect(log.lines[1]).toEqual(forgotten(DEAD));
       }),
+  );
+
+  it.effect("the automation server's failure line carries its attribution too", () =>
+    Effect.gen(function* () {
+      const store = Stores.fakeServerStore({
+        removeStaleServers: () => Effect.fail(refused),
+      });
+      const { log } = yield* start(
+        store,
+        FakeLog.fakeLog(),
+        "automation-client",
+        Log.AutomationProcessAttribution,
+      );
+      expect(log.lines).toEqual([
+        {
+          level: "error",
+          text: "stale server cleanup failed: connect ECONNREFUSED 127.0.0.1:5432",
+          location: "automation",
+          agentId: "automation",
+          skipSentry: false,
+          cause: refused,
+        },
+      ]);
+    }),
   );
 
   it.effect("a close during a sweep that then fails still records the failure", () =>

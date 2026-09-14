@@ -12,10 +12,10 @@ import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
 import * as Sentry from "../observability/sentry.ts";
 import * as Api from "../shared/api.ts";
+import * as StaleServers from "../shared/stale-servers.ts";
 import * as QemuReverseProxyCommand from "./command.ts";
 import * as Handlers from "./handlers.ts";
 import * as Router from "./router.ts";
-import * as StaleServers from "./stale-servers.ts";
 
 const HOST = "127.0.0.1";
 
@@ -41,7 +41,7 @@ const ServerLive = (port: number) =>
       yield* log.info(`qemu reverse proxy listening on ${HOST}:${String(port)}`, {
         location: Log.Locations.server,
       });
-      yield* StaleServers.forget;
+      yield* StaleServers.forget("qemu");
     }),
   ).pipe(
     Layer.provide(

@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, inject } from "vitest";
 import { it } from "@effect/vitest";
 import { Effect } from "effect";
-import { eq } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Client } from "pg";
 import * as DbSchema from "../../src/db/schema.ts";
@@ -473,7 +473,82 @@ describeServing("automation server serving", () => {
   );
 
   it.live("exits 0 on SIGTERM", () => Effect.promise(() => served("SIGTERM")), 120_000);
+
+  // A client killed eleven minutes ago, one two minutes quiet (past dispatch's window, so no job
+  // is placed on it, and short of the sweep's), and a qemu server killed as long ago.
+  const DEAD_CLIENT = "http://10.0.0.50:1";
+  const QUIET_CLIENT = "http://10.0.0.51:1";
+  const DEAD_QEMU = "http://10.0.0.52:1";
+
+  it.live(
+    "forgets an automation-client silent for ten minutes on its first tick, and leaves a quieter one and the qemu server",
+    () =>
+      Effect.promise(async () => {
+        await seedServer(DEAD_CLIENT, "automation-client", "11 minutes");
+        await seedServer(QUIET_CLIENT, "automation-client", "2 minutes");
+        await seedServer(DEAD_QEMU, "qemu", "11 minutes");
+        const port = await freePort();
+        const process = spawnAutomationServer(["--port", String(port)]);
+        try {
+          await process.waitFor(/server forgotten; http:\/\/10\.0\.0\.50:1 silent for 10 minutes/);
+          process.child.kill("SIGTERM");
+          const { code } = await process.exited;
+          expect(code, process.stdout()).toBe(0);
+          const left = await serverUrls([DEAD_CLIENT, QUIET_CLIENT, DEAD_QEMU]);
+          expect(left).toEqual([QUIET_CLIENT, DEAD_QEMU].sort());
+          const output = lines(process.stdout());
+          expect(output.filter((line) => line.includes("server forgotten"))).toEqual([
+            `[automation] automation: server forgotten; ${DEAD_CLIENT} silent for 10 minutes`,
+          ]);
+          expect(process.stderr()).toBe("");
+        } finally {
+          // A failed expectation must not leave the process listening, nor the rows for the
+          // dispatch tests to find.
+          process.child.kill("SIGTERM");
+          await process.exited;
+          for (const url of [DEAD_CLIENT, QUIET_CLIENT, DEAD_QEMU]) {
+            await removeServer(url);
+          }
+        }
+      }),
+    120_000,
+  );
 });
+
+// A row whose last heartbeat is `silentFor` (a Postgres interval) ago on the database's clock, the
+// one the sweep measures against.
+const seedServer = async (url: string, type: "qemu" | "automation-client", silentFor: string) => {
+  const client = new Client({ connectionString: Postgres.getDbUrl() });
+  await client.connect();
+  try {
+    const db = drizzle({ client, schema: DbSchema });
+    await db.insert(DbSchema.servers).values({
+      url,
+      type,
+      heartbeatAt: sql`now() - ${silentFor}::interval`,
+      generation: 1,
+      stats: STATS,
+    });
+  } finally {
+    await client.end();
+  }
+};
+
+// Which of `urls` still have a row, sorted.
+const serverUrls = async (urls: ReadonlyArray<string>): Promise<ReadonlyArray<string>> => {
+  const client = new Client({ connectionString: Postgres.getDbUrl() });
+  await client.connect();
+  try {
+    const db = drizzle({ client, schema: DbSchema });
+    const rows = await db
+      .select({ url: DbSchema.servers.url })
+      .from(DbSchema.servers)
+      .where(inArray(DbSchema.servers.url, [...urls]));
+    return rows.map((row) => row.url).sort();
+  } finally {
+    await client.end();
+  }
+};
 
 const STATS: DbSchema.ServerStats = {
   qemus: 0,
