@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, inject } from "vitest";
 import { it } from "@effect/vitest";
+import { sql } from "drizzle-orm";
 import { Effect } from "effect";
 import * as Client from "../../src/db/client.ts";
 import * as DbSchema from "../../src/db/schema.ts";
@@ -307,4 +308,59 @@ describe("qemu reverse proxy serving", () => {
   );
 
   it.live.skipIf(dbUrl === "")("exits 0 on SIGTERM", () => serving("SIGTERM"), 120_000);
+
+  // Rows as a killed qemu server, a live one and a killed automation-client leave them.
+  const DEAD = "http://10.0.0.40:1";
+  const LIVE = "http://10.0.0.41:1";
+  const DEAD_CLIENT = "http://10.0.0.42:1";
+  const seedFleet = Effect.gen(function* () {
+    const database = yield* Client.Database;
+    yield* database.run("seedFleet", (db) =>
+      db.insert(DbSchema.servers).values([
+        { url: DEAD, type: "qemu", heartbeatAt: sql`now() - interval '11 minutes'` },
+        { url: LIVE, type: "qemu", heartbeatAt: sql`now()` },
+        {
+          url: DEAD_CLIENT,
+          type: "automation-client",
+          heartbeatAt: sql`now() - interval '11 minutes'`,
+        },
+      ]),
+    );
+  });
+  const fleet = Effect.gen(function* () {
+    const database = yield* Client.Database;
+    const rows = yield* database.run("fleet", (db) =>
+      db.select({ url: DbSchema.servers.url }).from(DbSchema.servers),
+    );
+    return rows.map((row) => row.url).sort();
+  });
+
+  it.live.skipIf(dbUrl === "")(
+    "forgets a qemu server silent for ten minutes on its first tick, and leaves the live one and the automation-client",
+    () =>
+      Effect.gen(function* () {
+        yield* forgetEveryServer;
+        yield* seedFleet;
+        const port = yield* Effect.promise(freePort);
+        const process = spawnQemuReverseProxy(["--port", String(port)]);
+        yield* Effect.promise(async () => {
+          try {
+            await process.waitFor(
+              /server forgotten; http:\/\/10\.0\.0\.40:1 silent for 10 minutes/,
+            );
+          } finally {
+            process.child.kill("SIGTERM");
+          }
+          const { code } = await process.exited;
+          expect(code, process.stdout()).toBe(0);
+        });
+        expect(yield* fleet).toEqual([LIVE, DEAD_CLIENT].sort());
+        const output = lines(process.stdout());
+        expect(output.filter((line) => line.includes("server forgotten"))).toEqual([
+          "[global] server: server forgotten; http://10.0.0.40:1 silent for 10 minutes",
+        ]);
+        expect(process.stderr()).toBe("");
+      }).pipe(Effect.provide(Postgres.DatabaseLive(dbUrl))),
+    120_000,
+  );
 });

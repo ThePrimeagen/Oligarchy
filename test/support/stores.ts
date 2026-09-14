@@ -740,6 +740,9 @@ export const fakeServerStore = (
           )
           .map((server) => ({ id: server.id, url: server.url })),
       ),
+    // Nothing is ever stale here, for the same reason: a test that wants a server forgotten
+    // says which through an override.
+    removeStaleServers: () => Effect.succeed([]),
     findServer: (id) =>
       Effect.sync(() =>
         Option.map(
