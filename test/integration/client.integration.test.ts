@@ -332,6 +332,30 @@ describe("./client happy path", () => {
     expect(stub.requests).toHaveLength(1);
   });
 
+  it("reserve posts the agent with the server pin, prints nothing and exits 0", async () => {
+    const stub = await proxy();
+    const result = await runClient([
+      "reserve",
+      "--agent-id",
+      AGENT,
+      "--server-url",
+      stub.url,
+      "--server",
+      "http://127.0.0.1:55331",
+    ]);
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe("");
+    expect(stub.requests[0]).toMatchObject({
+      method: "POST",
+      url: "/reserve",
+      body: { agent: AGENT, server: "http://127.0.0.1:55331" },
+    });
+    const help = await runClient(["reserve", "--help"]);
+    expect(help.code).toBe(0);
+    expect(help.stdout).toMatch(/--server\b/);
+  });
+
   it("save posts the session and the agent, prints saved and exits 0", async () => {
     const stub = await proxy();
     const result = await runClient([

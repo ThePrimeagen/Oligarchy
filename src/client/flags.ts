@@ -41,6 +41,14 @@ export const disk = Flag.string("disk").pipe(
   Flag.withDescription("Existing qcow2 path; omit for a fresh disk"),
 );
 
+export const server = Flag.string("server").pipe(
+  Flag.withSchema(Domain.ServerUrl),
+  Flag.optional,
+  Flag.withDescription(
+    "Reserve on this qemu server (its registered url) instead of the best-ranked one",
+  ),
+);
+
 export const resume = Flag.boolean("resume").pipe(
   Flag.withDefault(false),
   Flag.withDescription(

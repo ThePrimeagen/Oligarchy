@@ -4,22 +4,23 @@ Consult this table of contents first. Read only the section you need.
 
 | Section | Line |
 |---------|-----:|
-| [Important](#important) | 24 |
-| [Synopsis](#synopsis) | 30 |
-| [client-with-image](#client-with-image) | 55 |
-| [start](#start) | 72 |
-| [relinquish](#relinquish) | 94 |
-| [get-image](#get-image) | 106 |
-| [get-serial](#get-serial) | 121 |
-| [send-keys](#send-keys) | 136 |
-| [send-mouse](#send-mouse) | 152 |
-| [intent start](#intent-start) | 169 |
-| [intent end](#intent-end) | 185 |
-| [stop](#stop) | 199 |
-| [save](#save) | 215 |
-| [Keys](#keys) | 231 |
-| [Mouse](#mouse) | 243 |
-| [The loop](#the-loop) | 251 |
+| [Important](#important) | 25 |
+| [Synopsis](#synopsis) | 31 |
+| [client-with-image](#client-with-image) | 57 |
+| [start](#start) | 74 |
+| [reserve](#reserve) | 96 |
+| [relinquish](#relinquish) | 109 |
+| [get-image](#get-image) | 121 |
+| [get-serial](#get-serial) | 136 |
+| [send-keys](#send-keys) | 151 |
+| [send-mouse](#send-mouse) | 167 |
+| [intent start](#intent-start) | 184 |
+| [intent end](#intent-end) | 200 |
+| [stop](#stop) | 214 |
+| [save](#save) | 230 |
+| [Keys](#keys) | 246 |
+| [Mouse](#mouse) | 258 |
+| [The loop](#the-loop) | 266 |
 
 ## Important
 
@@ -33,6 +34,7 @@ If you are the client, or an agent driving the client: do not look at code. Only
 ./client <action> --agent-id <agent> [--server-url <url>] ...
 
 ./client start      [--iso <path|url>] [--disk <path>] [--resume]
+./client reserve    [--server <url>]
 ./client relinquish
 ./client get-image  --session-id <id> [-o <file>]
 ./client get-serial --session-id <id> [-o <file>]
@@ -50,7 +52,7 @@ The action comes first. Every value is a flag; there are no positional arguments
 - `--server-url <url>` — the qemu server, a full URL used exactly as given. Falls back to `SERVER_URL` from the environment, then `http://127.0.0.1:42069`.
 - `OLIGARCHY_TOKEN` — read from the environment and sent on every request. It is already set; do not write a `.env`. Missing means exit 1.
 
-`start` prints a session id; every action on the machine takes it as `--session-id`, and `relinquish`, which finds the agent's machine itself, takes none. A command that works exits 0. A command that fails exits 1 and prints the error: one headline, then the stack trace and the cause behind it. Read the headline first. `./client <action> --help` prints that action's flags. If no command arrives for ten minutes, the qemu server kills the session.
+`start` prints a session id; every action on the machine takes it as `--session-id`, and `reserve` and `relinquish`, which are about the agent and not a machine, take none. A command that works exits 0. A command that fails exits 1 and prints the error: one headline, then the stack trace and the cause behind it. Read the headline first. `./client <action> --help` prints that action's flags. If no command arrives for ten minutes, the qemu server kills the session.
 
 ## client-with-image
 
@@ -89,6 +91,19 @@ given back, and a start after that is refused the same way.
 ```bash
 ./client start --agent-id OLI-42 --server-url https://qemu.example.com --iso https://example.com/omarchy.iso
 ./client start --agent-id OLI-42 --server-url https://qemu.example.com --iso https://example.com/omarchy.iso --resume
+```
+
+## reserve
+
+```
+./client reserve --agent-id <agent> --server-url <url> [--server <url>]
+```
+
+Holds a slot for `--agent-id` that its next `start` consumes. Normally the dispatcher reserves for you before it hands you the ticket and you never run this. Run it when a ticket says to: a mint ticket names the one qemu server its install must land on, and `--server <url>` pins the reservation to that server, its registered url used exactly as given, instead of the best-ranked one. Prints nothing. Holding one already, the host answers 400 `already reserved`: `relinquish` first, then reserve again. A url the host does not know is 404 `no server <url>`; a server with no room is 503.
+
+```bash
+./client relinquish --agent-id OLI-42 --server-url https://qemu.example.com
+./client reserve --agent-id OLI-42 --server-url https://qemu.example.com --server http://127.0.0.1:55331
 ```
 
 ## relinquish

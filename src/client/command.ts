@@ -84,6 +84,27 @@ const start = Command.make(
   ),
 );
 
+const reserveFlags = { ...Flags.shared, server: Flags.server };
+
+// A driver's own reservation, for the agent the dispatcher did not reserve for, or one pinned to
+// a server the dispatcher's ranking would not pick: minting installs on every server in turn.
+const reserve = Command.make(
+  "reserve",
+  reserveFlags,
+  Effect.fn("client.reserve")(function* (input: Input<typeof reserveFlags>) {
+    const proxy = yield* connect(input.serverUrl);
+    const body = Option.match(input.server, {
+      onNone: () => Contract.ReserveAgentBody.make({ agent: input.agentId }),
+      onSome: (server) => Contract.ReserveAgentBody.make({ agent: input.agentId, server }),
+    });
+    yield* proxy.reserve(body);
+  }),
+).pipe(
+  Command.withDescription(
+    "Hold a slot for --agent-id that its next start consumes, on the best-ranked server or the one --server names",
+  ),
+);
+
 // The way out of a start that keeps failing: whatever the dispatcher's reservation for this agent
 // became is given back at once, instead of holding a --max-jobs slot until it expires unused.
 const relinquish = Command.make(
@@ -281,6 +302,7 @@ export const makeClientCommand = () =>
     Command.withDescription("Drive a guest machine through the qemu server"),
     Command.withSubcommands([
       start,
+      reserve,
       relinquish,
       getImage,
       getSerial,
