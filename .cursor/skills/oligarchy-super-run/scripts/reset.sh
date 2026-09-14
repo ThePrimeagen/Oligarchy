@@ -38,7 +38,9 @@ if [ "$FORCE" = no ]; then
     printf '%s\n' "$SOCKETS" >&2
     exit 1
   fi
-  BOUND=$(printf '%s\n' "$SOCKETS" | grep -E ':(55555|55332|55333|52222|52223|54321) ' || true)
+  # The fleet's ports, `|`-separated; the super-run's six unless the installing skill says otherwise.
+  PORTS="${SUPER_RUN_PORTS:-55555|55332|55333|52222|52223|54321}"
+  BOUND=$(printf '%s\n' "$SOCKETS" | grep -E ":($PORTS) " || true)
   if [ -n "$BOUND" ]; then
     echo "reset.sh: fleet ports still bound; stop those processes first (or --force):" >&2
     echo "$BOUND" >&2

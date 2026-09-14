@@ -98,7 +98,7 @@ Stores a test definition, or a new wording of one, and prints it as JSON: `{ id,
 
 Creates one pending test run and one Linear issue per stored test definition, each in its newest wording, and prints them as JSON. Each issue is assigned to `prime@terminal.shop`. `--server-url` is stored on the run and written into every issue as the qemu server the driving agent's `./client` talks to; `./ctrl` itself never calls it. Not used while driving a guest. Reads `LINEAR_API_TOKEN`.
 
-- `--iso <https-url>` — the ISO the agents boot. Must be HTTPS.
+- `--iso <https-url>` — the ISO whose minted disk the agents resume; every ticket's start line carries `--resume`. Must be HTTPS.
 - `--version <version>` — the version label attached to every issue.
 - `--name <definition>` — create a run for this one definition instead of every definition, in its newest wording like the rest. A name that matches none is a failure.
 

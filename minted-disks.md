@@ -85,21 +85,21 @@ In the order to do it. Each item's tests are listed under its section below.
    NVRAM entry; `-boot order=d` is a SeaBIOS knob it ignores), and whether `system_powerdown` shuts
    the installed system down from where the driver leaves it. Tighten the template's reboot step
    to what is seen. Also whether 45 minutes of opencode ceiling fits an install; the plan said 60.
-3. **`resume` definitions** (section 5): `test_definitions.mode`, `test define --mode resume`, and
-   `--resume` on the start line of a `resume` definition's ticket. Without this nothing boots the
-   minted disks; this is the payoff.
+3. ~~`resume` definitions~~ Done more simply: every test ticket's start line carries `--resume`
+   (`prompts/linear-issue.html`), the mint ticket is the only fresh start, and the ticket states the
+   minted account (`prime`). No `mode` column, no flag, no placeholder.
 4. **`mint --server <url>`** (section 6): redo one server whose mint failed, without ticketing the
    fleet. Small: narrow the live list to that url, refuse one not in it.
-5. **`mint --verify`** (section 6): a `mint-verify` `resume` definition and a ticket per server that
-   logs in and confirms the desktop, so a poisoned disk is found before a batch boots it. Wanted
-   but not blocking: a failed resume batch on one server says the same thing, later.
-6. **Loose ends**: `prompts/linear-issue.html` says "In Review" in its rules and "In Progress" in
-   its example; the mint template and `driving-agent.html` say "In Progress" — make the test ticket
-   agree. Re-run the `db`, `qemu-server` and `qemu-reverse-proxy` integration suites where Docker
-   exists (the cloud agent could not).
+5. **Loose ends**: re-run the `db`, `qemu-server` and `qemu-reverse-proxy` integration suites where
+   Docker exists (the cloud agent could not).
+
+Dropped: `mint --verify`, a second ticket per server that would resume the disk and confirm the
+desktop. The mint ticket confirms the desktop before it saves and records its verdict from what
+`save` answered, the diagnoser closes it, and every test resumes — so the first test on a bad disk
+says the same thing, with a session to look at. The redo for a failed mint is item 4.
 
 Not planned, on purpose: a `minted` list in `/stats`, a resume filter in the proxy, a pin in the
-database, retries or Sentry reports for a failed mint. A failed mint is a failed ticket on the
+database, a verify pass, retries or Sentry reports for a failed mint. A failed mint is a failed ticket on the
 board, and the redo is item 4.
 
 ## Decisions still to build against
@@ -122,11 +122,12 @@ board, and the redo is item 4.
   second look before the disk is kept, `save` instead of `stop`, and the verdict recorded from what
   `save` answered so a failed save can never sit under a success. Every way out closes the result.
   The `mint` definition holds only the install's wording (credentials, proof).
-- The `mint-verify` definition is a `resume` definition that logs in and confirms the desktop. Every
-  test that assumes an installed system is `--mode resume`, and its ticket's start line carries
-  `--resume`.
-- Sequencing (mint, then verify, then redo a failed server with `./ctrl mint --server <url>`) is the
-  operator's or the super-run script's. Nothing coordinates a campaign.
+- Every test resumes. The test ticket's start line carries `--resume` for every definition, and the
+  ticket states the account the mint created (user, password and disk passphrase `prime`); the mint
+  ticket is the only fresh start. There is no per-definition mode: a test that needs a blank machine
+  is not a thing this fleet runs.
+- Sequencing (mint, then redo a failed server with `./ctrl mint --server <url>`) is the operator's
+  or the super-run script's. Nothing coordinates a campaign.
 
 ## HTTP answers
 
@@ -146,46 +147,19 @@ The mint driver sees these through `./client reserve`; the ticket tells it what 
 
 ## 5. Resume definitions
 
-Tests first:
+Superseded: every test ticket starts `--resume` (see What's left, 3). Nothing to build.
 
-- [ ] `test/integration/db.integration.test.ts`: `test_definitions.mode` defaults `fresh` and
-      round-trips `resume`.
-- [ ] `test/ctrl/command.unit.test.ts`: `test define --mode resume` is stored and listed; omitted on
-      a new name is `fresh`; on a known name it is carried forward; a bad mode is refused.
-- [ ] `test/ctrl/prompts.unit.test.ts`, `linear.unit.test.ts`: a `resume` definition's ticket has
-      `--resume` on its start line, a `fresh` one does not.
-
-Code:
-
-```ts
-export const sessionMode = pgEnum("session_mode", ["fresh", "resume"]);
-// test_definitions: mode: sessionMode("mode").notNull().default("fresh"),
-```
-
-- [ ] `npm run db:generate` for the one migration. `Domain.SessionMode` is the enum's twin,
-      maintained by hand together.
-- [ ] `TestStore.defineTest` takes `mode`; the definition rows carry it.
-- [ ] `prompts/linear-issue.html`: the start line ends with `{{RESUME}}`, ` --resume` for a `resume`
-      definition and nothing otherwise; `Prompts.Values` gains `RESUME`.
-- [ ] `ctrl.md`: `--mode` on `test define`, synopsis and table of contents.
-
-## 6. ctrl: one server, and verify
+## 6. ctrl: one server
 
 Tests first:
 
 - [ ] `test/ctrl/command.unit.test.ts`: `mint --server <url>` creates exactly one ticket, for that
       server; a url that is not a live qemu server is refused before anything is created.
-- [ ] `test/ctrl/command.unit.test.ts`: `mint --verify` uses the `mint-verify` definition and titles
-      its tickets `Omarchy mint-verify: <server url>`; no `mint-verify` definition is refused naming
-      `test define`.
-- [ ] `test/ctrl/prompts.unit.test.ts`: the verify ticket (its own template or the test ticket with
-      `--resume`, to decide) starts with `--resume`, never saves, ends with `stop`.
 
 Code:
 
-- [ ] `--server` (optional, `Domain.ServerUrl`) narrows the live list; `--verify` swaps the
-      definition and the template.
-- [ ] `ctrl.md`: the two flags in the `mint` section.
+- [ ] `--server` (optional, `Domain.ServerUrl`) narrows the live list.
+- [ ] `ctrl.md`: the flag in the `mint` section.
 
 ## Verify
 
@@ -204,12 +178,9 @@ Code:
 
 ## Operating recipe, once shipped
 
-1. `./ctrl test define --name mint …` (the install's wording) and, once item 5 lands,
-   `./ctrl test define --name mint-verify --mode resume …`.
+1. `./ctrl test define --name mint …` (the install's wording; done, v1).
 2. `./ctrl mint --server-url <proxy> --iso <url>`: one ticket per server; move them to Automation
-   Needed; wait for Done.
-3. `./ctrl mint --verify --server-url <proxy> --iso <url>`: one ticket per server; a failed verdict
-   is `./ctrl mint --server <url> --server-url <proxy> --iso <url>` for that server, whose save
-   overwrites the disk.
-4. Queue the `resume` batch; the dispatcher fills the fleet up to the sum of `--max-jobs`, and each
-   session boots in seconds.
+   Needed; wait for Done. A failed one is `./ctrl mint --server <url> --server-url <proxy> --iso <url>`
+   for that server, whose save overwrites the disk.
+3. Queue the batch; every ticket resumes, the dispatcher fills the fleet up to the sum of
+   `--max-jobs`, and each session boots in seconds.
