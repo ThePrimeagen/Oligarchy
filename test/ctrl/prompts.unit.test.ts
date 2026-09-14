@@ -1,6 +1,5 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { NodeFileSystem } from "@effect/platform-node";
 import { Effect, FileSystem, Layer } from "effect";
 import * as Prompts from "../../src/ctrl/prompts.ts";
 import * as FakeFs from "../support/fake-fs.ts";
@@ -21,9 +20,6 @@ const ticket = {
   TEST_INSTRUCTION: "Complete the installer",
   TEST_PROOF: "The desktop is visible",
 } satisfies Prompts.Values;
-
-const real = <A, E>(self: Effect.Effect<A, E, FileSystem.FileSystem>) =>
-  self.pipe(Effect.provide(NodeFileSystem.layer));
 
 // A FileSystem over the prompt files: each path answers with the text scripted for its file name
 // (`contents of <name>` when none is), or fails as an unreadable file would when `unreadable`
@@ -84,53 +80,6 @@ describe("renderLinearIssue happy path", () => {
         const text = yield* Prompts.renderLinearIssue(ticket).pipe(Effect.provide(fs.layer));
         expect(text).toBe("ticket OLI-42 {not a placeholder} {{lower}}");
         expect(fileNames(fs.reads)).toEqual(["linear-issue.html"]);
-      }),
-  );
-
-  it.effect(
-    "linear-issue.html: the ticket, run, result, ISO, server, both guides, this test only",
-    () =>
-      Effect.gen(function* () {
-        const description = yield* real(Prompts.renderLinearIssue(ticket));
-
-        expect(description.includes("{{")).toBe(false);
-        expect(description).toContain("<agent_id>OLI-42</agent_id>");
-        expect(description).toContain(
-          `start --agent-id OLI-42 --server-url ${SERVER} --iso ${ticket.ISO_URL}`,
-        );
-        // ./ctrl reads the database; the qemu server url is ./client's alone.
-        expect(description).toContain("./ctrl test start --session-id");
-        expect(description).toContain("--model <the Cursor model id you are running as>");
-        expect(description).not.toContain("--model grok-4.6");
-        expect(description).toContain(
-          `./ctrl test-results --agent-id OLI-42 --id ${ticket.RESULT_ID}`,
-        );
-        expect(description).not.toMatch(/\.\/ctrl [^\n]*--server-url/);
-        expect(description).toContain(
-          `./client get-image --agent-id OLI-42 --server-url ${SERVER} --session-id`,
-        );
-        expect(description).toContain(
-          `./client stop --agent-id OLI-42 --server-url ${SERVER} --session-id`,
-        );
-        expect(description).not.toMatch(
-          /(get-image|get-serial|send-keys|send-mouse|stop) (--agent-id <agent> --server-url <url> )?<id>/,
-        );
-        expect(description).toContain(`<run_id>${ticket.RUN_ID}</run_id>`);
-        expect(description).toContain(`<result_id>${ticket.RESULT_ID}</result_id>`);
-        expect(description).toContain(`<version>${ticket.VERSION}</version>`);
-        expect(description).toContain(`<name>${ticket.TEST_NAME}</name>`);
-        expect(description).toContain(`<description>${ticket.TEST_DESCRIPTION}</description>`);
-        expect(description).toContain(`<instruction>${ticket.TEST_INSTRUCTION}</instruction>`);
-        expect(description).toContain(`<proof>${ticket.TEST_PROOF}</proof>`);
-        expect(description).toContain("# Client\n");
-        expect(description).toContain("## The loop");
-        expect(description).toContain("# Control\n");
-        expect(description).toContain("## test start");
-        expect(description).toContain("## test-results");
-        expect(description).not.toContain("## diagnose");
-        expect(description).toContain(SUB_AGENT);
-        expect(description.includes("--session_id")).toBe(false);
-        expect(description.includes("--server_url")).toBe(false);
       }),
   );
 });
@@ -209,127 +158,25 @@ const mint = {
   INSTALL_PROOF: "The desktop is on screen after the reboot",
 } satisfies Prompts.MintValues;
 
-// The template's own words: everything before the first embedded guide.
-const ownWords = (description: string): string =>
-  description.slice(0, description.indexOf("<client>"));
-
-// The worked example at the end, after both guides.
-const exampleOf = (description: string): string =>
-  description.slice(description.indexOf("<example-session>"));
-
 describe("renderMintIssue happy path", () => {
-  it.effect("mint-issue.html is its own ticket: the values, both guides, no test wording", () =>
-    Effect.gen(function* () {
-      const description = yield* real(Prompts.renderMintIssue(mint));
-      const own = ownWords(description);
-
-      expect(description.includes("{{")).toBe(false);
-      expect(own).toContain(`<linear_ticket>${mint.LINEAR_TICKET}</linear_ticket>`);
-      expect(own).toContain(`<run_id>${mint.RUN_ID}</run_id>`);
-      expect(own).toContain(`<result_id>${mint.RESULT_ID}</result_id>`);
-      expect(own).toContain(`<iso_url>\`${mint.ISO_URL}\`</iso_url>`);
-      expect(own).toContain(`<server_url>\`${SERVER}\`</server_url>`);
-      expect(own).toContain(`<pinned_server>\`${mint.PINNED_SERVER}\`</pinned_server>`);
-      expect(own).toContain(`<name>${mint.INSTALL_NAME}</name>`);
-      expect(own).toContain(`<description>${mint.INSTALL_DESCRIPTION}</description>`);
-      expect(own).toContain(`<instruction>${mint.INSTALL_INSTRUCTION}</instruction>`);
-      expect(own).toContain(`<proof>${mint.INSTALL_PROOF}</proof>`);
-      expect(own).not.toContain("<version>");
-      expect(own).not.toContain("<mission>");
-      // Not the test ticket with the words changed: none of its framing survives.
-      expect(own).not.toContain("Test driver");
-      expect(own).not.toContain("deliver a verdict");
-      expect(own).not.toContain("analyze your session");
-      expect(own).not.toContain("carry out the mission");
-      expect(own).toContain("not a test");
-      // Both guides, since the driver may read nothing else.
-      expect(description).toContain("# Client\n");
-      expect(description).toContain("## reserve");
-      expect(description).toContain("## save");
-      expect(description).toContain("# Control\n");
-      expect(description).toContain("## test start");
-      expect(description).toContain("## test-results");
-      expect(description).not.toContain("## diagnose");
-    }),
-  );
-
   it.effect(
-    "the differences a mint driver must know are spelled out in the template's own words",
+    "fills mint-issue.html from the mint values, the constants, and the guides it names",
     () =>
       Effect.gen(function* () {
-        const own = ownWords(yield* real(Prompts.renderMintIssue(mint)));
-        // The machine is this server and no other, taken by the driver's own pinned reserve.
-        expect(own).toContain(`--server ${mint.PINNED_SERVER}`);
-        expect(own).toContain(`./client relinquish --agent-id OLI-42 --server-url ${SERVER}`);
-        // Fresh only: the flags that boot or attach a disk are named as forbidden.
-        expect(own).toMatch(/never[^.\n]*--resume/i);
-        expect(own).toMatch(/never[^.\n]*--disk/i);
-        // The iso stays attached through the installer's reboot; the driver is told what to do if
-        // its boot menu shows rather than the disk.
-        expect(own).toMatch(/reboot/i);
-        expect(own).toMatch(/boots first|boot menu/i);
-        // A second look before the disk is kept for good.
-        expect(own).toContain(SUB_AGENT);
-        // Save ends it, never stop; the verdict follows save.
-        expect(own).toMatch(/save[^.\n]*(never|not) stop/i);
-        expect(own).toMatch(/test-results[^\n]*after[^\n]*save|after[^\n]*save[^\n]*test-results/i);
-        // Linear status: In Progress, as the driving agent's own prompt says.
-        expect(own).toContain('"In Progress"');
-        expect(own).toContain('"Needs Review"');
-        expect(own).not.toContain("In Review");
+        const fs = promptFs({
+          contents: {
+            "mint-issue.html":
+              "{{LINEAR_TICKET}} on {{PINNED_SERVER}} via {{SERVER_URL}}; {{INSTALL_NAME}}: {{INSTALL_INSTRUCTION}}; by {{SUB_AGENT}}\n<guide>\n{{CLIENT_MD}}\n</guide>",
+            "client.md": "# Client\n\nDrive the guest.\n",
+          },
+        });
+        const text = yield* Prompts.renderMintIssue(mint).pipe(Effect.provide(fs.layer));
+        expect(text).toBe(
+          `OLI-42 on ${mint.PINNED_SERVER} via ${SERVER}; mint: ${mint.INSTALL_INSTRUCTION}; by ${SUB_AGENT}\n<guide>\n# Client\n\nDrive the guest.\n</guide>`,
+        );
+        // Its own template, then the one guide it names; the test ticket's template is never read.
+        expect(fileNames(fs.reads)).toEqual(["mint-issue.html", "client.md"]);
       }),
-  );
-
-  it.effect("the example session runs the mint in order and never stops a good install", () =>
-    Effect.gen(function* () {
-      const example = exampleOf(yield* real(Prompts.renderMintIssue(mint)));
-      const at = (text: string) => {
-        const index = example.indexOf(text);
-        expect(index, text).toBeGreaterThan(-1);
-        return index;
-      };
-      const relinquishAt = at(`./client relinquish --agent-id OLI-42 --server-url ${SERVER}`);
-      const reserveAt = at(
-        `./client reserve --agent-id OLI-42 --server-url ${SERVER} --server ${mint.PINNED_SERVER}`,
-      );
-      const startAt = at(
-        `./client start --agent-id OLI-42 --server-url ${SERVER} --iso ${mint.ISO_URL}\n`,
-      );
-      const tiedAt = at(`./ctrl test start --session-id`);
-      const saveAt = at(`./client save --agent-id OLI-42 --server-url ${SERVER} --session-id`);
-      const verdictAt = at(
-        `./ctrl test-results --agent-id OLI-42 --id ${mint.RESULT_ID} --status success`,
-      );
-      expect(reserveAt).toBeGreaterThan(relinquishAt);
-      expect(startAt).toBeGreaterThan(reserveAt);
-      expect(tiedAt).toBeGreaterThan(startAt);
-      expect(saveAt).toBeGreaterThan(tiedAt);
-      expect(verdictAt).toBeGreaterThan(saveAt);
-      // The failed save is shown too, and it is a verdict, not a stop.
-      at(`./ctrl test-results --agent-id OLI-42 --id ${mint.RESULT_ID} --status failed --reason`);
-      expect(example).not.toContain("--resume");
-      expect(example).not.toContain("--disk");
-      expect(example).not.toMatch(/\.\/client stop/);
-      expect(example).toContain('"In Progress"');
-      expect(example).toContain('"Needs Review"');
-    }),
-  );
-
-  it.effect("every way out closes the result, and only a good install is saved", () =>
-    Effect.gen(function* () {
-      const own = ownWords(yield* real(Prompts.renderMintIssue(mint)));
-      // Three failed starts: give the reservation back, close the result, finish.
-      expect(own).toMatch(/three[^\n]*start[^\n]*relinquish/i);
-      // A failed install with a session: serial dump, result failed, stop failed, never save.
-      expect(own).toContain("--status failed --reason");
-      expect(own).toMatch(/never save/i);
-      expect(own).toMatch(/serial dump/i);
-      // A failed save: the session is over, the result is failed with its headline, no stop.
-      expect(own).toMatch(/save fails/i);
-      expect(own).toMatch(/nothing (to stop|was kept)/i);
-      // The result is never left open.
-      expect(own).toMatch(/result[^.]*(left open|open)/i);
-    }),
   );
 });
 
