@@ -142,6 +142,12 @@ export const ServersLive = HttpApiBuilder.group(Api.QemuReverseProxyApi, "Server
         const router = yield* Router.Router;
         return yield* router.servers;
       }),
+    )
+    .handle("minted", ({ query }) =>
+      Effect.gen(function* () {
+        const router = yield* Router.Router;
+        return yield* router.minted(query.iso);
+      }),
     ),
 );
 

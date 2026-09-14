@@ -85,6 +85,13 @@ export const stats = HttpApiEndpoint.get("stats", "/stats", {
   success: Contract.Stats,
 });
 
+// Whether this machine holds the iso's minted disk: two files beside the iso, recorded nowhere
+// else, so the machine is the one to ask.
+export const minted = HttpApiEndpoint.get("minted", "/minted", {
+  query: Contract.MintedQuery,
+  success: Contract.Minted,
+});
+
 export const stop = HttpApiEndpoint.post("stop", "/stop", {
   payload: Contract.StopBody,
   success: Contract.Ok,
@@ -132,6 +139,7 @@ export class Sessions extends HttpApiGroup.make("Sessions")
   .add(serial)
   .add(follow)
   .add(stats)
+  .add(minted)
   .add(stop)
   .add(save)
   .add(sendKeys)
@@ -145,7 +153,8 @@ export class Sessions extends HttpApiGroup.make("Sessions")
 export class QemuServerApi extends HttpApi.make("OligarchyQemuServer").add(Sessions) {}
 
 // The qemu reverse proxy: the qemu server's own endpoints, so the client that speaks to a server speaks to
-// it, minus /stats (a fleet has no one cpu), behind the routing boundary.
+// it, minus /stats (a fleet has no one cpu) and /minted (the fleet's answer is the Servers
+// group's, one row per server), behind the routing boundary.
 export class RoutedSessions extends HttpApiGroup.make("Sessions")
   .add(reserve)
   .add(relinquish)
@@ -178,10 +187,18 @@ export const servers = HttpApiEndpoint.get("servers", "/servers", {
   success: Contract.Servers,
 });
 
+// Every registered qemu server asked /minted for the iso: the proxy is the fleet's one door, so
+// whoever wants to know what is minted where asks it once and it asks them all.
+export const mintedServers = HttpApiEndpoint.get("minted", "/minted", {
+  query: Contract.MintedQuery,
+  success: Contract.MintedServers,
+});
+
 export class Servers extends HttpApiGroup.make("Servers")
   .add(register)
   .add(unregister)
   .add(servers)
+  .add(mintedServers)
   .middleware(BearerAuth)
   .middleware(RouteBoundary) {}
 

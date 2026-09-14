@@ -268,16 +268,26 @@ describe("qemu reverse proxy serving", () => {
       expect(unauthorized.status).toBe(401);
       expect(await unauthorized.json()).toEqual({ error: "unauthorized" });
 
-      // Nothing is registered in the fresh database: a start has nowhere to go.
+      // Nothing is registered in the fresh database: a reserve has nowhere to land, and a start
+      // without a reservation is refused before placement is even a question.
       const noServer = await request(
+        port,
+        "POST",
+        "/reserve",
+        { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+        '{"agent":"OLI-1"}',
+      );
+      expect(noServer.status).toBe(503);
+      expect(await noServer.json()).toEqual({ error: "no server registered" });
+      const unreserved = await request(
         port,
         "POST",
         "/start",
         { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
         '{"iso":"omarchy.iso","agent":"OLI-1"}',
       );
-      expect(noServer.status).toBe(503);
-      expect(await noServer.json()).toEqual({ error: "no server registered" });
+      expect(unreserved.status).toBe(400);
+      expect(await unreserved.json()).toEqual({ error: "no reservation" });
     } finally {
       // A failed expectation must not leave the process listening past the test.
       process.child.kill(signal);
@@ -286,7 +296,8 @@ describe("qemu reverse proxy serving", () => {
     expect(code, process.stdout()).toBe(0);
     const output = lines(process.stdout());
     expect(output).toContain("[global] server: error: POST /send-keys failed: unauthorized");
-    expect(output).toContain("[OLI-1] server: error: POST /start failed: no server registered");
+    expect(output).toContain("[OLI-1] server: error: POST /reserve failed: no server registered");
+    expect(output).toContain("[OLI-1] server: error: POST /start failed: no reservation");
     expect(
       output.some((line) =>
         line.startsWith(

@@ -76,22 +76,28 @@ In the order to do it. Each item's tests are listed under its section below.
 1. **Merge #146**, then define the operator data once (not code):
    `./ctrl test define --name mint --description … --instruction "<user name, password and disk
    passphrase; defaults elsewhere>" --proof "<the desktop, after the reboot>"`. The ticket's
-   procedure (relinquish, pinned reserve, fresh start, install, a second look, save, verdict) is the
-   template's; the definition holds only the install's wording.
-2. **First real mint, by hand** (Verify below): on the QEMU host through the proxy, one `fresh`
-   session installed and saved, the two files beside the ISO, then a `start --resume` that boots
-   from the disk without the ISO. Two facts to confirm there that the template can only hedge on:
-   whether the installer's reboot lands on the disk with the ISO still attached (OVMF follows its
-   NVRAM entry; `-boot order=d` is a SeaBIOS knob it ignores), and whether `system_powerdown` shuts
-   the installed system down from where the driver leaves it. Tighten the template's reboot step
-   to what is seen. Also whether 45 minutes of opencode ceiling fits an install; the plan said 60.
+   procedure (relinquish, pinned reserve, fresh start, install, a second look, shutdown from
+   inside, save, verdict) is the template's; the definition holds the guest-specific wording:
+   the install's credentials, the proof, and how that guest is shut down from inside.
+2. ~~**First real mint, by hand**~~ Done on the fleet, 2026-09-14 (`./ctrl mint`, four servers,
+   twice). Both facts confirmed: the installer's reboot lands on the disk with the ISO still
+   attached (Limine boots the installed system; the boot menu does not show), and
+   `system_powerdown` does **not** shut an installed Omarchy desktop down — Omarchy sets
+   `HandlePowerKey=ignore` and binds the power key to its own menu, so the first four mints all
+   failed `save` with `guest did not power off within 2 minutes`. The template now has the driver
+   shut the machine down from inside (the `mint` definition, v2, says how: a terminal and
+   `systemctl poweroff`), image until an image fails, then `save`; `save` needs no button for a
+   guest that has exited. An install fits the 45-minute ceiling with room: ~8.5 minutes to a
+   saved disk, four at once.
 3. ~~`resume` definitions~~ Done more simply: every test ticket's start line carries `--resume`
    (`prompts/linear-issue.html`), the mint ticket is the only fresh start, and the ticket states the
    minted account (`prime`). No `mode` column, no flag, no placeholder.
-4. **`mint --server <url>`** (section 6): redo one server whose mint failed, without ticketing the
-   fleet. Small: narrow the live list to that url, refuse one not in it.
-5. **Loose ends**: re-run the `db`, `qemu-server` and `qemu-reverse-proxy` integration suites where
-   Docker exists (the cloud agent could not).
+4. ~~**`mint --server <url>`**~~ Done as **`mint --unminted`** (section 6): the operator does not
+   name the server; the fleet is asked which servers lack the disk, and only those are ticketed.
+5. ~~**Loose ends**~~ Done 2026-09-14 on the QEMU host: the whole integration lane, twice, green
+   (11 files, 277 tests). It caught what it was meant to — the proxy serving test still asserted
+   the pre-#136 503 on an unreserved `/start` — and a class of order-dependent assertions on the
+   shared container database; all fixed in the tests (see `TODOS.md`, Tests).
 
 Dropped: `mint --verify`, a second ticket per server that would resume the disk and confirm the
 desktop. The mint ticket confirms the desktop before it saves and records its verdict from what
@@ -119,15 +125,24 @@ board, and the redo is item 4.
   ticket on the board.
 - The mint ticket is its own template, `prompts/mint-issue.html`, not the test ticket with the
   words changed: the pinned machine, fresh only, the ISO attached through the reboot, a subagent's
-  second look before the disk is kept, `save` instead of `stop`, and the verdict recorded from what
-  `save` answered so a failed save can never sit under a success. Every way out closes the result.
-  The `mint` definition holds only the install's wording (credentials, proof).
+  second look before the disk is kept, a shutdown from inside the guest (the qemu server's power
+  button is ignored by an Omarchy desktop), `save` instead of `stop`, and the verdict recorded from
+  what `save` answered so a failed save can never sit under a success. Every way out closes the
+  result. The `mint` definition holds the guest-specific wording: the install's credentials, the
+  proof, and how that guest is shut down from inside.
 - Every test resumes. The test ticket's start line carries `--resume` for every definition, and the
   ticket states the account the mint created (user, password and disk passphrase `prime`); the mint
   ticket is the only fresh start. There is no per-definition mode: a test that needs a blank machine
   is not a thing this fleet runs.
-- Sequencing (mint, then redo a failed server with `./ctrl mint --server <url>`) is the operator's
+- Sequencing (mint, then redo the failed servers with `./ctrl mint --unminted`) is the operator's
   or the super-run script's. Nothing coordinates a campaign.
+- What is minted where is asked, never recorded. `GET /minted?iso=` on a qemu server is the two
+  files beside its ISO; on the reverse proxy it is every registered server's answer, one row each
+  (`minted`, `unminted`, or `unreachable` for a server that gave none). The proxy is the fleet's
+  one door, so whoever needs the fleet's answer asks it once and it asks them all; ctrl's
+  `--unminted` is the one such caller. ctrl otherwise reads the database alone: it avoids calling
+  a server for any data that is in the database, and asks a server only for data that is
+  ephemeral and machine-specific, stored nowhere but in the state of the machine itself.
 
 ## HTTP answers
 
@@ -149,38 +164,68 @@ The mint driver sees these through `./client reserve`; the ticket tells it what 
 
 Superseded: every test ticket starts `--resume` (see What's left, 3). Nothing to build.
 
-## 6. ctrl: one server
+## 6. ctrl: the unminted servers
 
-Tests first:
+Done 2026-09-14, as `--unminted` rather than `--server <url>`: any string is a fair question to
+`/minted` (a name nothing was saved under is `minted: false`, 200; only a missing `iso` is 400).
 
-- [ ] `test/ctrl/command.unit.test.ts`: `mint --server <url>` creates exactly one ticket, for that
-      server; a url that is not a live qemu server is refused before anything is created.
+Tests:
+
+- [x] `test/qemu-server/sessions.unit.test.ts`, `http.unit.test.ts`: `Sessions.minted(iso)` asks
+      `Minted.find` by the name given; `GET /minted?iso=` is `{ iso, minted }`, 400 without an
+      iso, 401 without the bearer.
+- [x] `test/qemu-reverse-proxy/http.unit.test.ts`: `GET /minted?iso=` asks every registered server
+      with the bearer, `minted`/`unminted`/`unreachable` per server in registration order; a 200
+      without the shape, an error status, or no answer within the probe timeout is `unreachable`;
+      nothing registered is an empty list; no iso is 400 and asks no server.
+- [x] `test/client/proxy-client.unit.test.ts`: `ProxyClient.minted` gets `/minted?iso` url-encoded
+      with the token and decodes the states; 401 is `ProxyRefusal`, a bad body or a refused
+      connection `ProxyUnreachable`.
+- [x] `test/ctrl/command.unit.test.ts`: `--unminted` tickets only the unminted live servers and
+      names the minted ones skipped; every server minted creates nothing and prints `[]`; a live
+      server the proxy could not reach or did not list is refused before any run or ticket; the
+      proxy refusing the bearer is its answer; a missing `OLIGARCHY_TOKEN` is refused before the
+      proxy, the database or Linear is asked; without the flag the proxy is never asked.
+- [x] `test/shared/api.unit.test.ts`: `GET /minted` on both apis, the proxy's in the Servers group.
 
 Code:
 
-- [ ] `--server` (optional, `Domain.ServerUrl`) narrows the live list.
-- [ ] `ctrl.md`: the flag in the `mint` section.
+- [x] `Contract.MintedQuery`, `Minted`, `MintedState`, `MintedServer`, `MintedServers`; `GET
+      /minted` on `Sessions` (qemu server) and `Servers` (proxy).
+- [x] `Sessions.minted(iso)` over `Minted.find`; the qemu server handler.
+- [x] Router `minted(iso)`: every registered server asked, bounded by `PROBE_TIMEOUT`, nothing
+      logged (the row is the report, as `stats: null` is for `/servers`).
+- [x] `ProxyClient.minted(options, iso)` beside `connect`; ctrl's `--unminted` reads
+      `OLIGARCHY_TOKEN` first, asks once, skips `minted`, tickets `unminted`, refuses on anything
+      else.
+- [x] `ctrl.md`: the flag, and the rule on when ctrl may call a server.
 
 ## Verify
 
 - [x] `npm run check:fast`; `npm run test:integration` for `client` and `ctrl` (#146).
-- [ ] `npm run test:integration` for `qemu-process`, `db`, `qemu-server`, `qemu-reverse-proxy`
-      where Docker exists.
-- [ ] On the QEMU host, by hand through the proxy: reserve and start one `fresh` session with
-      `./client`, install, `save`; confirm `<iso>.qcow2` and `<iso>.OVMF_VARS.fd` beside the cached
-      ISO; then `start --resume` and confirm the guest boots from the disk without the ISO.
-- [ ] Confirm on the host that the installer's reboot lands on the disk with the ISO still
-      attached (OVMF follows its NVRAM entry; `-boot order=d` is a SeaBIOS knob it ignores), and that
-      `system_powerdown` shuts the installed system down from where the driver leaves it. Then
-      tighten the template's reboot step.
-- [ ] One real `./ctrl mint` against the fleet; read the tickets and the saved disks.
-- [x] GPT-5.6 Sol review with the prompt from `development.md` (#146).
+- [x] `npm run test:integration` for `qemu-process`, `db`, `qemu-server`, `qemu-reverse-proxy`
+      where Docker exists (2026-09-14, the whole lane, twice).
+- [x] On the QEMU host through the proxy: `fresh` sessions installed and saved on four servers
+      (2026-09-14, by the mint drivers); `<iso>.qcow2` and `<iso>.OVMF_VARS.fd` beside the cached
+      ISO in every data dir; ten `start --resume` lock-screen sessions booted from the disks
+      without the ISO (2.5–5.5 minutes each, overlays of 9–38 MB), all passed.
+- [x] The installer's reboot lands on the disk with the ISO still attached (Limine boots the
+      installed system; OVMF follows its NVRAM entry). `system_powerdown` does not shut an
+      installed Omarchy desktop down (`HandlePowerKey=ignore`; the power key opens Omarchy's menu):
+      the template's last step is now a shutdown from inside, then `save`.
+- [x] One real `./ctrl mint` against the fleet (twice: the first four failed at `save` for the
+      reason above, the second four minted); tickets and saved disks read.
+- [x] GPT-5.6 Sol review with the prompt from `development.md` (#146; the template's shutdown step,
+      2026-09-14).
 
 ## Operating recipe, once shipped
 
-1. `./ctrl test define --name mint …` (the install's wording; done, v1).
-2. `./ctrl mint --server-url <proxy> --iso <url>`: one ticket per server; move them to Automation
-   Needed; wait for Done. A failed one is `./ctrl mint --server <url> --server-url <proxy> --iso <url>`
-   for that server, whose save overwrites the disk.
+1. `./ctrl test define --name mint …` (the install's wording and the guest's shutdown from inside;
+   done, v2).
+2. `./ctrl mint --server-url <proxy> --iso <url>`: one ticket per server; the webhook queues each
+   drive; wait for Done. Failed ones are `./ctrl mint --server-url <proxy> --iso <url> --unminted`,
+   which asks the proxy which servers still lack the disk and tickets those alone (needs
+   `OLIGARCHY_TOKEN`); a server whose disk is bad rather than missing is redone by removing its two
+   files and running the same command.
 3. Queue the batch; every ticket resumes, the dispatcher fills the fleet up to the sum of
    `--max-jobs`, and each session boots in seconds.

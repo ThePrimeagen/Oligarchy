@@ -233,9 +233,11 @@ console.log(rows.map((row) => [row.name, row.type, row.jobs, row.memoryBytes, ro
     expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
     expect(result.stderr).toBe("");
     expect(result.code).toBe(0);
+    // `type` is the server_type enum, declared qemu then automation-client, and an enum column
+    // orders by declaration: the qemu servers come first, as the servers page lays them out.
     expect(lines(result.stdout)).toEqual([
-      "proc-auto automation-client 1 2000 4 true true",
       "proc-qemu qemu 2 1000 12.5 true true",
+      "proc-auto automation-client 1 2000 4 true true",
     ]);
   });
 

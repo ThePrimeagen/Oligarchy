@@ -323,6 +323,180 @@ describe("server registration", () => {
   );
 });
 
+describe("minted", () => {
+  const ISO = "https://iso.omarchy.org/omarchy-4.0.2.iso";
+  const SERVER_C = "http://10.0.0.7:42069";
+  const MINTED_PATH = `/minted?iso=${encodeURIComponent(ISO)}`;
+  // Each server's own GET /minted answer, by origin; anything else is the fleet as usual.
+  const holding =
+    (answers: Readonly<Record<string, (iso: string) => Response>>): FakeHttp.Respond =>
+    (request, url) => {
+      const answer = answers[url.origin];
+      return url.pathname === "/minted" && answer !== undefined
+        ? answer(url.searchParams.get("iso") ?? "")
+        : fleet(request, url);
+    };
+  const has = (minted: boolean) => (iso: string) => FakeHttp.json({ iso, minted });
+
+  it.effect(
+    "GET /minted asks every qemu server /minted with the bearer and answers minted, unminted or unreachable per server in registration order, logging nothing (happy)",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture((request, url) =>
+          url.origin === SERVER_C
+            ? refused(request, url)
+            : holding({ [SERVER_A]: has(true), [SERVER_B]: has(false) })(request, url),
+        );
+        fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B), qemu(SERVER_C));
+        yield* Effect.gen(function* () {
+          const api = yield* qemuReverseProxyClient;
+          const [minted, response] = yield* api.Servers.minted({
+            query: { iso: ISO },
+            responseMode: "decoded-and-response",
+          });
+          expect(minted).toEqual(
+            Contract.MintedServers.make({
+              iso: ISO,
+              servers: [
+                Contract.MintedServer.make({ url: SERVER_A, state: "minted" }),
+                Contract.MintedServer.make({ url: SERVER_B, state: "unminted" }),
+                Contract.MintedServer.make({ url: SERVER_C, state: "unreachable" }),
+              ],
+            }),
+          );
+          expect(yield* response.json).toEqual({
+            iso: ISO,
+            servers: [
+              { url: SERVER_A, state: "minted" },
+              { url: SERVER_B, state: "unminted" },
+              { url: SERVER_C, state: "unreachable" },
+            ],
+          });
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(upstreamCalls(fixed).sort()).toEqual([
+          `GET ${SERVER_A}${MINTED_PATH}`,
+          `GET ${SERVER_B}${MINTED_PATH}`,
+          `GET ${SERVER_C}${MINTED_PATH}`,
+        ]);
+        expect(
+          fixed.upstream.requests.every(
+            (request) => request.headers.authorization === AUTHORIZATION,
+          ),
+        ).toBe(true);
+        expect(fixed.log.lines).toEqual([]);
+      }),
+  );
+
+  it.effect("a name nothing was saved under is 200 with every server unminted", () =>
+    Effect.gen(function* () {
+      const fixed = fixture(holding({ [SERVER_A]: has(false), [SERVER_B]: has(false) }));
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.get("/minted?iso=poophead.iso", {
+          headers: { authorization: AUTHORIZATION },
+        });
+        expect(raw.status).toBe(200);
+        expect(yield* raw.json).toEqual({
+          iso: "poophead.iso",
+          servers: [
+            { url: SERVER_A, state: "unminted" },
+            { url: SERVER_B, state: "unminted" },
+          ],
+        });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(upstreamCalls(fixed).sort()).toEqual([
+        `GET ${SERVER_A}/minted?iso=poophead.iso`,
+        `GET ${SERVER_B}/minted?iso=poophead.iso`,
+      ]);
+    }),
+  );
+
+  it.effect(
+    "a server answering 200 without the Minted shape, or with an error status, is unreachable (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture(
+          holding({
+            [SERVER_A]: () => FakeHttp.json({ ok: "true" }),
+            [SERVER_B]: () => FakeHttp.json({ error: "internal error" }, 500),
+          }),
+        );
+        fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+        yield* Effect.gen(function* () {
+          const api = yield* qemuReverseProxyClient;
+          const minted = yield* api.Servers.minted({ query: { iso: ISO } });
+          expect(minted.servers.map((server) => server.state)).toEqual([
+            "unreachable",
+            "unreachable",
+          ]);
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.log.lines).toEqual([]);
+      }),
+  );
+
+  it.effect("a server that never answers is unreachable after the probe timeout (unhappy)", () =>
+    Effect.gen(function* () {
+      const probing = yield* Deferred.make<void>();
+      const fixed = fixture((request, url) =>
+        url.origin === SERVER_B
+          ? Deferred.succeed(probing, undefined).pipe(Effect.andThen(Effect.never))
+          : holding({ [SERVER_A]: has(true) })(request, url),
+      );
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      yield* Effect.gen(function* () {
+        const api = yield* qemuReverseProxyClient;
+        const request = yield* Effect.forkChild(api.Servers.minted({ query: { iso: ISO } }));
+        yield* Deferred.await(probing);
+        yield* TestClock.adjust("9 seconds");
+        expect(request.pollUnsafe()).toBeUndefined();
+        yield* TestClock.adjust("1 second");
+        const minted = yield* Fiber.join(request);
+        expect(minted.servers).toEqual([
+          Contract.MintedServer.make({ url: SERVER_A, state: "minted" }),
+          Contract.MintedServer.make({ url: SERVER_B, state: "unreachable" }),
+        ]);
+      }).pipe(Effect.provide(serve(fixed)));
+    }),
+  );
+
+  it.effect("GET /minted with nothing registered is an empty list and asks no server", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.get(MINTED_PATH, { headers: { authorization: AUTHORIZATION } });
+        expect(raw.status).toBe(200);
+        expect(yield* raw.json).toEqual({ iso: ISO, servers: [] });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.upstream.requests).toEqual([]);
+    }),
+  );
+
+  it.effect("GET /minted without an iso is 400 and asks no server (unhappy)", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      fixed.store.servers.push(qemu(SERVER_A));
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        for (const path of ["/minted", "/minted?iso="]) {
+          const raw = yield* http.get(path, { headers: { authorization: AUTHORIZATION } });
+          expect(raw.status).toBe(400);
+          expect(yield* raw.json).toMatchObject({ error: expect.stringContaining('["iso"]') });
+        }
+        const unauthorized = yield* http.get(MINTED_PATH);
+        expect(unauthorized.status).toBe(401);
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.upstream.requests).toEqual([]);
+      expect(fixed.log.lines.map((line) => line.text)).toEqual([
+        expect.stringContaining("GET /minted failed: "),
+        expect.stringContaining("GET /minted?iso= failed: "),
+        `GET ${MINTED_PATH} failed: unauthorized`,
+      ]);
+    }),
+  );
+});
+
 describe("registration refusals", () => {
   it.effect("a url that is not http or https is 400 with the url rule and is never probed", () =>
     Effect.gen(function* () {

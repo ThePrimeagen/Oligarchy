@@ -99,12 +99,14 @@ const ago = (seconds: number): Date => new Date(NOW - seconds * 1000);
 // Harness
 // ---------------------------------------------------------------------------
 
-// ctrl reaches nothing over HTTP but Linear, faked here: a request to anything else dies.
+// ctrl reaches nothing over HTTP but Linear, faked here, and the reverse proxy's /minted for
+// `mint --unminted`, answered by `proxy` when a test gives one: any other request dies.
 const harness = (
   options: {
     readonly linear?: FakeLinear.FakeLinear;
     // Replaces the real FileSystem the prompt templates are read from.
     readonly fs?: Layer.Layer<FileSystem.FileSystem>;
+    readonly proxy?: FakeHttp.Recorder;
   } = {},
 ) => {
   const stores = Stores.fakeStores();
@@ -126,7 +128,9 @@ const harness = (
     options.fs === undefined ? NodeServices.layer : Layer.merge(NodeServices.layer, options.fs);
   const program = (args: ReadonlyArray<string>, env: Record<string, string>) =>
     Command.runWith(command, { version: Api.VERSION })(args).pipe(
-      Effect.provide(Layer.mergeAll(services, Config.withEnv(env), FakeHttp.die)),
+      Effect.provide(
+        Layer.mergeAll(services, Config.withEnv(env), options.proxy?.layer ?? FakeHttp.die),
+      ),
     );
   const run = (args: ReadonlyArray<string>, env: Record<string, string> = WITH_DB) =>
     Effect.exit(program(args, env));
@@ -1048,9 +1052,187 @@ describe("mint", () => {
       const help = yield* h.run(["mint", "--help"], {});
       expect(Exit.isSuccess(help)).toBe(true);
       expect((yield* stdout).join("\n")).toContain("--iso");
+      expect((yield* stdout).join("\n")).toContain("--unminted");
       expect(h.touched).toEqual([]);
     }),
   );
+
+  // ---------------------------------------------------------------------------
+  // mint --unminted: the one call ctrl makes to a server. Where an iso is minted is two files
+  // on one machine, recorded nowhere but in that machine's state, so the reverse proxy is asked.
+  // ---------------------------------------------------------------------------
+
+  describe("--unminted", () => {
+    const ISO = "https://example.com/omarchy.iso";
+    const UNMINTED = [...MINT, "--unminted"];
+    const WITH_MINT = { ...WITH_LINEAR, OLIGARCHY_TOKEN: "oligarchy-token" };
+    const MINTED_URL = `${SERVER}/minted?iso=${encodeURIComponent(ISO)}`;
+    // The reverse proxy's GET /minted answer for the fleet, as the fake HttpClient gives it.
+    const proxyAnswering = (servers: ReadonlyArray<{ url: string; state: string }>) =>
+      FakeHttp.recordRequests(() => FakeHttp.json({ iso: ISO, servers }));
+
+    it.effect(
+      "tickets only the servers the proxy reports unminted and names the minted ones it skipped (happy)",
+      () =>
+        Effect.gen(function* () {
+          const proxy = proxyAnswering([
+            { url: QEMU_A, state: "minted" },
+            { url: QEMU_B, state: "unminted" },
+            { url: QEMU_DEAD, state: "unreachable" },
+          ]);
+          const h = harness({ proxy });
+          h.stores.tests.definitions.push(mintDefinition);
+          qemu(h, QEMU_A, "qemu-a");
+          qemu(h, QEMU_B, "qemu-b");
+          // Dead by heartbeat: never a target, so its unreachable answer is not held against it.
+          qemu(h, QEMU_DEAD, "qemu-dead", false);
+          const exit = yield* h.run(UNMINTED, WITH_MINT);
+          expect(Exit.isSuccess(exit)).toBe(true);
+
+          expect(proxy.requests).toEqual([
+            {
+              method: "GET",
+              url: MINTED_URL,
+              headers: expect.objectContaining({ authorization: "Bearer oligarchy-token" }),
+              body: "",
+            },
+          ]);
+          const runs = h.stores.tests.runs;
+          expect(runs.map((run) => [run.iso, run.serverUrl, run.status])).toEqual([
+            [ISO, SERVER, "pending"],
+          ]);
+          expect(h.stores.tests.results.map((row) => [row.status, row.linearId])).toEqual([
+            ["pending", "OLI-42"],
+          ]);
+          expect(h.linear.calls.filter((call) => call.method === "createIssue")).toEqual([
+            {
+              method: "createIssue",
+              input: {
+                teamId: "team-id",
+                title: `Omarchy mint: ${QEMU_B}`,
+                labelIds: [FakeLinear.labelId("agent test"), FakeLinear.labelId("mint")],
+                assigneeId: "user-id",
+              },
+            },
+          ]);
+          expect(yield* lastJson).toEqual([
+            {
+              id: runs[0]?.id,
+              result: h.stores.tests.results[0]?.id,
+              server: QEMU_B,
+              linear: FakeLinear.ticketFor("OLI-42"),
+            },
+          ]);
+          expect(h.log.lines.map((line) => line.text)).toEqual([
+            `mint ${ISO} already minted; 1 servers skipped; ${QEMU_A}`,
+            `mint ${ISO} created; 1 servers; OLI-42`,
+          ]);
+        }),
+    );
+
+    it.effect("every live server minted creates nothing, says so, and exits 0 (happy)", () =>
+      Effect.gen(function* () {
+        const proxy = proxyAnswering([
+          { url: QEMU_A, state: "minted" },
+          { url: QEMU_B, state: "minted" },
+        ]);
+        const h = harness({ proxy });
+        h.stores.tests.definitions.push(mintDefinition);
+        qemu(h, QEMU_A, "qemu-a");
+        qemu(h, QEMU_B, "qemu-b");
+        const exit = yield* h.run(UNMINTED, WITH_MINT);
+        expect(Exit.isSuccess(exit)).toBe(true);
+        expect(h.stores.tests.runs).toEqual([]);
+        expect(h.linear.calls).toEqual([]);
+        expect(yield* lastJson).toEqual([]);
+        expect(h.log.lines.map((line) => line.text)).toEqual([
+          `mint ${ISO} already minted; 2 servers skipped; ${QEMU_A}, ${QEMU_B}`,
+        ]);
+      }),
+    );
+
+    it.effect(
+      "a live server the proxy could not reach, or did not list, is refused before any run or ticket exists (unhappy)",
+      () =>
+        Effect.gen(function* () {
+          const proxy = proxyAnswering([
+            { url: QEMU_A, state: "unminted" },
+            { url: QEMU_B, state: "unreachable" },
+          ]);
+          const h = harness({ proxy });
+          h.stores.tests.definitions.push(mintDefinition);
+          qemu(h, QEMU_A, "qemu-a");
+          qemu(h, QEMU_B, "qemu-b");
+          expect(failure(yield* h.run(UNMINTED, WITH_MINT))).toMatchObject({
+            _tag: "CommandError",
+            message: `mint: ${QEMU_B} did not answer /minted; --unminted needs every live qemu server to answer`,
+          });
+          expect(h.stores.tests.runs).toEqual([]);
+          expect(h.linear.calls).toEqual([]);
+
+          const unlisted = harness({ proxy: proxyAnswering([{ url: QEMU_A, state: "unminted" }]) });
+          unlisted.stores.tests.definitions.push(mintDefinition);
+          qemu(unlisted, QEMU_A, "qemu-a");
+          qemu(unlisted, QEMU_B, "qemu-b");
+          expect(failure(yield* unlisted.run(UNMINTED, WITH_MINT))).toMatchObject({
+            _tag: "CommandError",
+            message: `mint: ${QEMU_B} did not answer /minted; --unminted needs every live qemu server to answer`,
+          });
+          expect(unlisted.stores.tests.runs).toEqual([]);
+        }),
+    );
+
+    it.effect(
+      "the proxy refusing the bearer is the proxy's answer, and nothing is created (unhappy)",
+      () =>
+        Effect.gen(function* () {
+          const proxy = FakeHttp.recordRequests(() =>
+            FakeHttp.json({ error: "unauthorized" }, 401),
+          );
+          const h = harness({ proxy });
+          h.stores.tests.definitions.push(mintDefinition);
+          qemu(h, QEMU_A, "qemu-a");
+          expect(failure(yield* h.run(UNMINTED, WITH_MINT))).toMatchObject({
+            _tag: "ProxyRefusal",
+            status: 401,
+            message: "unauthorized",
+          });
+          expect(h.stores.tests.runs).toEqual([]);
+          expect(h.linear.calls).toEqual([]);
+        }),
+    );
+
+    it.effect(
+      "a missing OLIGARCHY_TOKEN is refused as `OLIGARCHY_TOKEN is not set` before the proxy, the database or Linear is asked (unhappy)",
+      () =>
+        Effect.gen(function* () {
+          const proxy = proxyAnswering([{ url: QEMU_A, state: "unminted" }]);
+          const h = harness({ proxy });
+          h.stores.tests.definitions.push(mintDefinition);
+          qemu(h, QEMU_A, "qemu-a");
+          expect(failure(yield* h.run(UNMINTED, WITH_LINEAR))).toMatchObject({
+            _tag: "MissingVariable",
+            message: "OLIGARCHY_TOKEN is not set",
+          });
+          expect(proxy.requests).toEqual([]);
+          expect(h.stores.tests.runs).toEqual([]);
+          expect(h.linear.calls).toEqual([]);
+        }),
+    );
+
+    it.effect("without the flag the proxy is never asked and OLIGARCHY_TOKEN is not needed", () =>
+      Effect.gen(function* () {
+        const proxy = proxyAnswering([{ url: QEMU_A, state: "minted" }]);
+        const h = harness({ proxy });
+        h.stores.tests.definitions.push(mintDefinition);
+        qemu(h, QEMU_A, "qemu-a");
+        const exit = yield* h.run(MINT, WITH_LINEAR);
+        expect(Exit.isSuccess(exit)).toBe(true);
+        expect(proxy.requests).toEqual([]);
+        expect(h.stores.tests.runs).toHaveLength(1);
+      }),
+    );
+  });
 });
 
 describe("test list", () => {

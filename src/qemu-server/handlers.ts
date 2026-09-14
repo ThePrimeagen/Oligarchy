@@ -89,6 +89,15 @@ export const SessionsLive = (display: Domain.QemuDisplay, automation: boolean) =
           return yield* sessions.stats;
         }),
       )
+      .handle("minted", ({ query }) =>
+        Effect.gen(function* () {
+          const sessions = yield* Sessions.Sessions;
+          return Contract.Minted.make({
+            iso: query.iso,
+            minted: yield* sessions.minted(query.iso),
+          });
+        }),
+      )
       .handle(
         "stop",
         ({ payload }) =>

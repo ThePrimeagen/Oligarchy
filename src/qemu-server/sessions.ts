@@ -156,6 +156,8 @@ export type SessionsService = {
     Errors.UnknownSession | Errors.Conflict | Errors.Internal
   >;
   readonly stats: Effect.Effect<Contract.Stats>;
+  // Whether this machine holds the iso's minted disk, by the name a start would give.
+  readonly minted: (iso: string) => Effect.Effect<boolean>;
   // How many jobs this process currently holds against --max-jobs: reserved plus running.
   readonly jobs: Effect.Effect<number>;
 };
@@ -1271,6 +1273,7 @@ const make = (maxJobs: number) =>
       save,
       follow,
       stats: Effect.flatMap(Ref.get(sessions), (map) => stats.collect(map.size)),
+      minted: (name) => Effect.map(minted.find(name), Option.isSome),
       jobs: Effect.map(Ref.get(slots), (held) => held.count),
     };
     return service;

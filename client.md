@@ -233,11 +233,11 @@ Kills the session. `--agent-id` must be the agent that started it.
 ./client save --agent-id <agent> --server-url <url> --session-id <id>
 ```
 
-Ends the session keeping its disk: the guest is powered off, its disk and firmware are kept as the minted disk of the ISO it booted, and the session closes `succeeded`. Only call it when the install is complete and the desktop has been seen; the disk is kept exactly as it is. Prints `saved` and exits 0. `--agent-id` must be the agent that started the session. Close your result with `./ctrl test-results` after it answers: `saved` is a success; a failure's headline is the reason, and there is no session left to stop.
+Ends the session keeping its disk: the machine's power button is pressed and, once it is off, its disk and firmware are kept as the minted disk of the ISO it booted, and the session closes `succeeded`. A desktop that ignores the power button — Omarchy does — must be shut down from inside first (a terminal and `systemctl poweroff`), as the mint ticket's instruction says; a machine already off needs no button, and an image of it fails, which is how you know it is off. Only call it when the install is complete and the desktop has been seen; the disk is kept exactly as it is. Prints `saved` and exits 0. `--agent-id` must be the agent that started the session. Close your result with `./ctrl test-results` after it answers: `saved` is a success; a failure's headline is the reason, and there is no session left to stop.
 
 - `--session-id <id>` — the session.
 
-A guest that does not power off within two minutes, or a disk that cannot be kept, fails with the reason as the headline and exits 1; the session is then over, ended `failed`, and nothing was kept. A session started with `--resume` cannot save (400 `a resumed session cannot save; its disk is a view of the minted one`); it keeps running, and `stop` ends it as usual.
+A guest that does not power off within two minutes (`guest did not power off within 2 minutes`: the desktop ignored the button and was not shut down from inside), or a disk that cannot be kept, fails with the reason as the headline and exits 1; the session is then over, ended `failed`, and nothing was kept. A session started with `--resume` cannot save (400 `a resumed session cannot save; its disk is a view of the minted one`); it keeps running, and `stop` ends it as usual.
 
 ```bash
 ./client save --agent-id OLI-42 --server-url https://qemu.example.com --session-id 6f1c...e2a9

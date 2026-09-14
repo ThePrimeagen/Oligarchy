@@ -37,6 +37,9 @@ export type Spawned = {
 
 export type FakeSpawner = {
   readonly spawned: Array<Spawned>;
+  // The next spawn not yet handed out this way, when it happens. A test that forked a request
+  // waits on the spawn itself, not on a count of scheduler turns the request may not fit in.
+  readonly nextSpawn: Effect.Effect<Spawned>;
   readonly layer: Layer.Layer<ChildProcessSpawner.ChildProcessSpawner>;
 };
 
@@ -54,6 +57,19 @@ const signalDeath = (signal: string): PlatformError.PlatformError =>
 export const fakeSpawner = (script: Script = () => ({ exitCode: 0 })): FakeSpawner => {
   const spawned: Array<Spawned> = [];
   let nextPid = 4000;
+  // Spawns handed out through nextSpawn so far, and the waiters for ones that have not happened.
+  let handedOut = 0;
+  const waiting: Array<Deferred.Deferred<Spawned>> = [];
+  const nextSpawn: Effect.Effect<Spawned> = Effect.suspend(() => {
+    const ready = spawned[handedOut];
+    handedOut += 1;
+    if (ready !== undefined) {
+      return Effect.succeed(ready);
+    }
+    const waiter = Deferred.makeUnsafe<Spawned>();
+    waiting.push(waiter);
+    return Deferred.await(waiter);
+  });
 
   const spawn: ChildProcessSpawner.ChildProcessSpawner["Service"]["spawn"] = (command) =>
     Effect.gen(function* () {
@@ -136,7 +152,7 @@ export const fakeSpawner = (script: Script = () => ({ exitCode: 0 })): FakeSpawn
           return yield* die(signal);
         });
       const pid = nextPid++;
-      spawned.push({
+      const handle: Spawned = {
         pid,
         command: command.command,
         args: command.args,
@@ -153,7 +169,12 @@ export const fakeSpawner = (script: Script = () => ({ exitCode: 0 })): FakeSpawn
             end();
           }),
         die,
-      });
+      };
+      spawned.push(handle);
+      const waiter = waiting.shift();
+      if (waiter !== undefined) {
+        Deferred.doneUnsafe(waiter, Exit.succeed(handle));
+      }
       // The real spawner's release sends the kill signal when the process still runs.
       yield* Effect.addFinalizer(() =>
         Effect.suspend(() => {
@@ -181,6 +202,7 @@ export const fakeSpawner = (script: Script = () => ({ exitCode: 0 })): FakeSpawn
 
   return {
     spawned,
+    nextSpawn,
     layer: Layer.succeed(ChildProcessSpawner.ChildProcessSpawner)(ChildProcessSpawner.make(spawn)),
   };
 };

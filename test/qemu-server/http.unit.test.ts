@@ -285,6 +285,38 @@ describe("Sessions endpoints happy path", () => {
     }),
   );
 
+  it.effect("GET /minted answers whether this machine holds the iso's minted disk (happy)", () =>
+    Effect.gen(function* () {
+      const iso = "https://iso.omarchy.org/omarchy-4.0.2.iso";
+      const fixed = fixture({
+        sessions: FakeSessions.fakeSessions({ minted: () => Effect.succeed(true) }),
+      });
+      yield* Effect.gen(function* () {
+        const api = yield* client;
+        const [minted, response] = yield* api.Sessions.minted({
+          query: { iso },
+          responseMode: "decoded-and-response",
+        });
+        expect(minted).toEqual(Contract.Minted.make({ iso, minted: true }));
+        expect(yield* response.text).toBe(`{"iso":"${iso}","minted":true}`);
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.log.lines).toEqual([]);
+    }),
+  );
+
+  it.effect("GET /minted for a name nothing was saved under is 200 and not minted (unhappy)", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const api = yield* client;
+        const minted = yield* api.Sessions.minted({ query: { iso: "poophead.iso" } });
+        expect(minted).toEqual(Contract.Minted.make({ iso: "poophead.iso", minted: false }));
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.sessions.calls).toEqual([{ method: "minted", args: ["poophead.iso"] }]);
+      expect(fixed.log.lines).toEqual([]);
+    }),
+  );
+
   it.effect("POST /stop answers the string ok and forwards status and reason", () =>
     Effect.gen(function* () {
       const fixed = fixture();
@@ -434,6 +466,7 @@ describe("authentication", () => {
     ["GET", "/serial?id=x&agent=y", false],
     ["GET", "/follow?id=x", false],
     ["GET", "/stats", false],
+    ["GET", "/minted?iso=x", false],
     ["POST", "/stop", true],
     ["POST", "/save", true],
     ["POST", "/send-keys", true],
@@ -630,6 +663,27 @@ describe("request decoding", () => {
         true,
       );
     }),
+  );
+
+  it.effect(
+    "GET /minted without an iso, or with an empty one, is 400 before Sessions is asked",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture();
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          for (const path of ["/minted", "/minted?iso="]) {
+            const response = yield* http.get(path, { headers });
+            expect(response.status).toBe(400);
+            expect(yield* response.json).toMatchObject({
+              error: expect.stringContaining('["iso"]'),
+            });
+          }
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.sessions.calls).toEqual([]);
+        expect(fixed.log.lines).toHaveLength(2);
+        expect(fixed.log.lines.every((line) => line.skipSentry)).toBe(true);
+      }),
   );
 
   it.effect("an empty id reaches Sessions.lookup and is 400 session id is required", () =>

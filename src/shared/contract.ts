@@ -113,6 +113,36 @@ export class Servers extends Schema.Class<Servers>("@oligarchy/shared/contract/S
   servers: Schema.Array(Server),
 }) {}
 
+// GET /minted?iso=: any name is a fair question; a name nothing was saved under is not minted.
+export const MintedQuery = { iso: Schema.NonEmptyString };
+
+// A qemu server's answer: whether this machine holds the iso's minted disk.
+export class Minted extends Schema.Class<Minted>("@oligarchy/shared/contract/Minted")({
+  iso: Schema.String,
+  minted: Schema.Boolean,
+}) {}
+
+// The reverse proxy's answer, one row per registered qemu server; unreachable is a server that
+// gave no answer of its own.
+export const MintedState = Schema.Literals(["minted", "unminted", "unreachable"]).annotate({
+  identifier: "@oligarchy/shared/contract/MintedState",
+});
+export type MintedState = typeof MintedState.Type;
+
+export class MintedServer extends Schema.Class<MintedServer>(
+  "@oligarchy/shared/contract/MintedServer",
+)({
+  url: Schema.String,
+  state: MintedState,
+}) {}
+
+export class MintedServers extends Schema.Class<MintedServers>(
+  "@oligarchy/shared/contract/MintedServers",
+)({
+  iso: Schema.String,
+  servers: Schema.Array(MintedServer),
+}) {}
+
 export class RunBody extends Schema.Class<RunBody>("@oligarchy/shared/contract/RunBody")({
   prompt: Schema.String,
   ticket: Schema.NonEmptyString,

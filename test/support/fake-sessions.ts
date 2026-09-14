@@ -169,6 +169,8 @@ export const fakeSessions = (
         save: (session) => record("save", session.id),
         follow: (id) => known("follow", id).pipe(Effect.as(Stream.fromIterable(FOLLOW_EVENTS))),
         stats: record("stats").pipe(Effect.as(STATS)),
+        // Nothing is minted on the fake machine unless a test overrides it.
+        minted: (iso) => record("minted", iso).pipe(Effect.as(false)),
         jobs: record("jobs").pipe(Effect.as(STATS.qemus)),
         ...overrides,
       });

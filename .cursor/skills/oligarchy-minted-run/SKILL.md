@@ -68,10 +68,14 @@ the database knows what a mint is.
   ledger; track them in `SCRATCH.md`. Done when all four results are passed
   and each data dir holds the ISO, its `.qcow2` and its `.OVMF_VARS.fd`. A
   failed mint is a failed ticket: read its session, fix what is the
-  harness's (developing-agent rules), then mint that server again. Until
-  `./ctrl mint --server <url>` lands, "again" is another `./ctrl mint` for
-  the fleet — every save overwrites, so the three good servers are simply
-  re-minted — or a hand-driven session through `./client` on that server.
+  harness's (developing-agent rules), then mint the failed servers again
+  with `./ctrl mint --server-url "$SUPER_RUN_SERVER_URL" --iso "$SUPER_RUN_ISO" --unminted`
+  (needs `OLIGARCHY_TOKEN` in the environment; `.env` supplies it). It asks
+  the proxy which servers still lack the disk and tickets those alone; a
+  live server the proxy cannot reach refuses the whole command — fix the
+  fleet first. A server whose disk is present but bad: remove its
+  `<iso>.qcow2` and `<iso>.OVMF_VARS.fd`, then the same command. Without
+  the flag every server is minted again (every save overwrites).
   Do not start the batch with an unminted server: every batch start there
   is refused with `no minted disk for <iso> on this machine`.
 - **Analyze every `ANALYZE` line from `tick.sh`**, plus any stalled run.
@@ -106,7 +110,9 @@ refuses without it.
 export OLIGARCHY_ROOT="$PWD"
 export DBURL=$(grep -E '^DATABASE_URL=' .env | cut -d= -f2- | tr -d '"' | tr -d "'")
 mkdir -p automation-super-run-logs/{muse,processes} /home/theprimeagen/personal/oligarchy-tmp
-sh .cursor/skills/oligarchy-minted-run/scripts/install.sh   # also creates the four data dirs
+sh .cursor/skills/oligarchy-minted-run/scripts/install.sh   # also creates the four data dirs and seeds the ISO
+# into each from ~/.oligarchy/isos (SUPER_RUN_ISO_CACHE) when it is there, so no server downloads
+# 6 GB; prints `qemu-x: seeded` / `has the ISO` / `no … in …`. Minted disks are never touched.
 . /tmp/mintedrun/env
 ```
 
@@ -198,6 +204,10 @@ is passed **and** the files exist:
 ```bash
 for s in a b c d; do echo "== qemu-$s"; ls -la "$OLIGARCHY_DATA_ROOT/qemu-$s/isos/"; done
 # expect, in every dir: the ISO, <iso>.qcow2, <iso>.OVMF_VARS.fd
+# the same question to the fleet, as ./ctrl mint --unminted asks it:
+curl -sS -H "Authorization: Bearer $(grep '^OLIGARCHY_TOKEN=' .env | cut -d= -f2- | tr -d '"'"'")" \
+  "http://127.0.0.1:55555/minted?iso=$SUPER_RUN_ISO" | jq .
+# expect every server "minted"; "unminted" is a server to mint again, "unreachable" one to fix
 ```
 
 A result passed with no files, or files with a failed result, is a harness defect: stop and analyze.

@@ -19,10 +19,12 @@ type Run = {
   readonly stderr: string;
 };
 
+// Spawned from a scratch directory so no repo `.env` reaches the child and fills a variable a test
+// blanked; every variable is explicit. A test about `.env` itself passes its own directory.
 const runClient = (
   args: ReadonlyArray<string>,
   env: Record<string, string> = {},
-  cwd: string = process.cwd(),
+  cwd: string = tmpdir(),
 ): Promise<Run> =>
   new Promise((resolve, reject) => {
     const child = spawn(CLIENT, args, {

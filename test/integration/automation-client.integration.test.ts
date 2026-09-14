@@ -516,13 +516,15 @@ describeWithDatabase("automation client POST /run", () => {
         );
         expect(response.status).toBe(401);
         expect(await response.json()).toEqual({ error: "unauthorized" });
-        const rows = await logsForClient();
-        expect(rows.some((row) => row.text.includes("POST /run failed: unauthorized"))).toBe(true);
       } finally {
         process.child.kill("SIGTERM");
         await process.exited;
         rmSync(bin, { recursive: true, force: true });
       }
+      // The row is written by the log drain fiber and flushed before the process exits; only
+      // after the exit is it certainly there.
+      const rows = await logsForClient();
+      expect(rows.some((row) => row.text.includes("POST /run failed: unauthorized"))).toBe(true);
     }),
   );
 

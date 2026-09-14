@@ -218,12 +218,9 @@ describe("POST /run happy path", () => {
         const http = yield* HttpClient.HttpClient;
         expect((yield* reserve(http)).status).toBe(200);
         const pending = yield* Effect.forkChild(run(http));
-        for (let i = 0; i < 100 && fixed.spawner.spawned[0] === undefined; i++) {
-          yield* Effect.yieldNow;
-        }
-        expect(fixed.spawner.spawned[0]).toBeDefined();
+        const spawned = yield* fixed.spawner.nextSpawn;
         expect(pending.pollUnsafe()).toBeUndefined();
-        yield* fixed.spawner.spawned[0]?.exit(0) ?? Effect.void;
+        yield* spawned.exit(0);
         const response = yield* Fiber.join(pending);
         expect(response.status).toBe(200);
       }).pipe(Effect.provide(serve(fixed)));
@@ -460,26 +457,22 @@ describe("POST /run unhappy path", () => {
           const http = yield* HttpClient.HttpClient;
           expect((yield* reserve(http)).status).toBe(200);
           const pending = yield* Effect.forkChild(run(http, "first"));
-          for (let i = 0; i < 100 && fixed.spawner.spawned[0] === undefined; i++) {
-            yield* Effect.yieldNow;
-          }
+          const first = yield* fixed.spawner.nextSpawn;
           const refused = yield* reserve(http, "OLI-99");
           expect(refused.status).toBe(503);
           expect(yield* refused.json).toEqual({ error: "at capacity: max-jobs is 1" });
           expect((yield* run(http, "second", headers, "OLI-99")).status).toBe(400);
           expect(fixed.spawner.spawned).toHaveLength(1);
-          yield* fixed.spawner.spawned[0]?.exit(0) ?? Effect.void;
+          yield* first.exit(0);
           expect((yield* Fiber.join(pending)).status).toBe(200);
           expect((yield* reserve(http, "OLI-99")).status).toBe(200);
           const accepted = yield* Effect.forkChild(run(http, "second", headers, "OLI-99"));
-          for (let i = 0; i < 100 && fixed.spawner.spawned.length < 2; i++) {
-            yield* Effect.yieldNow;
-          }
+          const second = yield* fixed.spawner.nextSpawn;
           expect(fixed.spawner.spawned.map((spawned) => spawned.args[5])).toEqual([
             "first",
             "second",
           ]);
-          yield* fixed.spawner.spawned[1]?.exit(0) ?? Effect.void;
+          yield* second.exit(0);
           expect((yield* Fiber.join(accepted)).status).toBe(200);
         }).pipe(Effect.provide(serve(fixed)));
         // The refusal names the ticket it turned away; a 503 is the dispatcher's problem to place
@@ -515,21 +508,14 @@ describe("interruption", () => {
         const http = yield* HttpClient.HttpClient;
         expect((yield* reserve(http)).status).toBe(200);
         const pending = yield* Effect.forkChild(run(http));
-        for (let i = 0; i < 100 && fixed.spawner.spawned[0] === undefined; i++) {
-          yield* Effect.yieldNow;
-        }
-        const spawned = fixed.spawner.spawned[0];
-        expect(spawned).toBeDefined();
+        const spawned = yield* fixed.spawner.nextSpawn;
         yield* Fiber.interrupt(pending);
         const exit = yield* Fiber.await(pending);
         expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true);
-        expect(yield* spawned?.isRunning ?? Effect.succeed(false)).toBe(true);
-        yield* spawned?.exit(0) ?? Effect.void;
-        for (let i = 0; i < 100 && (yield* spawned?.isRunning ?? Effect.succeed(false)); i++) {
-          yield* Effect.yieldNow;
-        }
-        expect(yield* spawned?.isRunning ?? Effect.succeed(true)).toBe(false);
-        expect(spawned?.kills).toEqual([]);
+        expect(yield* spawned.isRunning).toBe(true);
+        yield* spawned.exit(0);
+        expect(yield* spawned.isRunning).toBe(false);
+        expect(spawned.kills).toEqual([]);
       }).pipe(Effect.provide(serve(fixed)));
     }),
   );
@@ -543,14 +529,11 @@ describe("POST /abort happy path", () => {
         const http = yield* HttpClient.HttpClient;
         expect((yield* reserve(http)).status).toBe(200);
         const pending = yield* Effect.forkChild(run(http));
-        for (let i = 0; i < 100 && fixed.spawner.spawned[0] === undefined; i++) {
-          yield* Effect.yieldNow;
-        }
-        expect(fixed.spawner.spawned[0]).toBeDefined();
+        const spawned = yield* fixed.spawner.nextSpawn;
         const response = yield* abort(http);
         expect(response.status).toBe(200);
         expect(yield* response.json).toEqual({ ok: "true" });
-        expect(fixed.spawner.spawned[0]?.kills).toEqual(["SIGTERM"]);
+        expect(spawned.kills).toEqual(["SIGTERM"]);
         const runResponse = yield* Fiber.join(pending);
         expect(runResponse.status).toBe(500);
       }).pipe(Effect.provide(serve(fixed)));
@@ -625,9 +608,7 @@ describe("POST /abort unhappy path", () => {
           const http = yield* HttpClient.HttpClient;
           expect((yield* reserve(http)).status).toBe(200);
           const pending = yield* Effect.forkChild(run(http));
-          for (let i = 0; i < 100 && fixed.spawner.spawned[0] === undefined; i++) {
-            yield* Effect.yieldNow;
-          }
+          const spawned = yield* fixed.spawner.nextSpawn;
           const response = yield* abort(http);
           expect(response.status).toBe(500);
           expect(yield* response.json).toEqual({
@@ -635,7 +616,7 @@ describe("POST /abort unhappy path", () => {
           });
           const again = yield* abort(http);
           expect(again.status).toBe(500);
-          yield* fixed.spawner.spawned[0]?.exit(0) ?? Effect.void;
+          yield* spawned.exit(0);
           expect((yield* Fiber.join(pending)).status).toBe(200);
         }).pipe(Effect.provide(serve(fixed)));
       }),

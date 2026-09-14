@@ -863,8 +863,11 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
     expect(Array.isArray(JSON.parse(result.stdout))).toBe(true);
   });
 
-  it("session --all prints { session, logs, results, test_definition, test_run, actions, images, debug_log, diagnosis } for a seeded session", async () => {
-    const result = await runCtrl(["session", "--session-id", RUNNING_ID, "--all"]);
+  it("session --all prints { session, logs, results, test_definition, test_run, actions, images, debug_log, diagnosis } for a bare session", async () => {
+    // A session of this test's own: the shared seeded ones pick up results and diagnoses from
+    // whichever integration file ran before this one.
+    const bareId = await seedEndedSession("succeeded", "done");
+    const result = await runCtrl(["session", "--session-id", bareId, "--all"]);
     expect(result.stderr).toBe("");
     expect(result.code).toBe(0);
     const printed: Record<string, unknown> = JSON.parse(result.stdout);
@@ -880,12 +883,13 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
       "diagnosis",
     ]);
     expect(printed.session).toMatchObject({
-      id: RUNNING_ID,
-      status: "running",
-      config: { iso: "y" },
+      id: bareId,
+      status: "succeeded",
+      reason: "done",
+      config: { iso: "x" },
     });
-    expect(Array.isArray(printed.logs)).toBe(true);
-    expect(Array.isArray(printed.actions)).toBe(true);
+    expect(printed.logs).toEqual([]);
+    expect(printed.actions).toEqual([]);
     expect(printed.images).toEqual([]);
     expect(printed.results).toBeNull();
     expect(printed.test_definition).toBeNull();

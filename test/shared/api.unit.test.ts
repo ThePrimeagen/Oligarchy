@@ -74,6 +74,7 @@ describe("QemuServerApi", () => {
         "GET /serial",
         "GET /follow",
         "GET /stats",
+        "GET /minted",
         "POST /stop",
         "POST /save",
         "POST /send-keys",
@@ -97,6 +98,9 @@ describe("QemuServerApi", () => {
     );
     expect(urls.Sessions.follow({ query: { id: "abc" } })).toBe("/follow?id=abc");
     expect(urls.Sessions.stats()).toBe("/stats");
+    expect(urls.Sessions.minted({ query: { iso: "https://x/y.iso" } })).toBe(
+      "/minted?iso=https%3A%2F%2Fx%2Fy.iso",
+    );
     expect(urls.Sessions.stop()).toBe("/stop");
     expect(urls.Sessions.save()).toBe("/save");
     expect(urls.Sessions.sendKeys()).toBe("/send-keys");
@@ -181,7 +185,7 @@ describe("QemuServerApi", () => {
 describe("QemuReverseProxyApi", () => {
   const reverse = Api.QemuReverseProxyApi;
 
-  it("declares every routed path of QemuServerApi but /stats, plus the three server routes", () => {
+  it("declares every routed path of QemuServerApi but /stats, plus the four server routes", () => {
     const table = routes(reverse).map(({ method, path }) => `${method} ${path}`);
     expect(table.sort()).toEqual(
       [
@@ -200,9 +204,13 @@ describe("QemuReverseProxyApi", () => {
         "POST /servers",
         "DELETE /servers",
         "GET /servers",
+        "GET /minted",
       ].sort(),
     );
     expect(table).not.toContain("GET /stats");
+    // The fleet's /minted is the Servers group's own answer, one row per server, not a route to
+    // one server.
+    expect(routes(reverse).find((route) => route.path === "/minted")?.group).toBe("Servers");
   });
 
   it("keeps the routed endpoints' identifiers and inputs so the QemuServerApi client reaches them", () => {

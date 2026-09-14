@@ -7,7 +7,7 @@ Minting driver. This is not a test: nothing is being judged, a disk is being mad
   <difference>Start fresh, with exactly the flags in the example. Never pass --resume or --disk: --resume boots the very disk you are here to make, --disk attaches another.</difference>
   <difference>The ISO stays attached through the installer's reboot. The firmware normally follows the boot entry the installer wrote and the machine comes up from the disk; if the ISO's boot menu shows instead, choose the entry that boots the installed system from the disk, never the installer again — a second install wipes the first.</difference>
   <difference>Before the disk is kept for good, a second pair of eyes: spawn a {{SUB_AGENT}} subagent, give it a fresh image, and have it confirm the proof — the desktop on screen, the install complete. A no means do not save.</difference>
-  <difference>End with ./client save, never stop. Save powers the machine off and keeps its disk; there is no session afterwards. After save, close the result with ./ctrl test-results: `saved` is a success, a failed save is a failure with its headline as the reason.</difference>
+  <difference>End with ./client save, never stop. Save keeps the disk of a machine that is off: it presses the power button and waits two minutes for the machine to go down, and a desktop that ignores the power button — Omarchy does — fails it with `guest did not power off within 2 minutes` and nothing is kept. So shut the machine down from inside first, the way the install's instruction says, and only then save; a machine already off needs no button. There is no session after save. Close the result with ./ctrl test-results from what it answered: `saved` is a success, a failed save is a failure with its headline as the reason.</difference>
   <difference>A half-installed disk poisons every test on this server. When in doubt, fail: a failed mint costs one more ticket; a bad disk costs every test that boots it.</difference>
 </how-this-differs-from-a-test>
 
@@ -43,14 +43,15 @@ Minting driver. This is not a test: nothing is being judged, a disk is being mad
   <step>Start fresh. The server fetches the ISO if it does not have it; a first start can take a while, and the command waits. Comment the session id on the ticket, then tie the result to the session with ./ctrl test start.</step>
   <step>Inside intents, drive the installer with images: the boot menu, then the installer, with the user name, password and disk passphrase exactly as the install's instruction says and the defaults everywhere else.</step>
   <step>The installer reboots the machine when it is done. Image through the reboot: the disk normally comes up on its own; should the ISO's boot menu show, choose the entry that boots the installed disk, not the installer. Type the disk passphrase when asked and reach the desktop; if a login screen stands in the way, log in with the instruction's user and password.</step>
-  <step>With the desktop on screen: end your intent, take a fresh image, and have the {{SUB_AGENT}} subagent confirm the proof. Only then ./client save.</step>
+  <step>With the desktop on screen: end your intent, take a fresh image, and have the {{SUB_AGENT}} subagent confirm the proof.</step>
+  <step>Confirmed: in one last intent, shut the machine down from inside as the install's instruction says, then keep imaging every few seconds until an image fails — an image of a machine that is off fails, and that failure is the machine off. End the intent. Only then ./client save.</step>
   <step>Close the result with ./ctrl test-results from what save answered, and move the ticket to "Needs Review".</step>
 </procedure>
 
 <when-it-goes-wrong>
   <case>Three ./client start attempts fail to return a session id: run ./client relinquish --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} to give back the reservation, close the result with ./ctrl test-results --status failed --reason, and finish. There is no session to stop. Do not keep retrying start.</case>
   <case>The install fails with a session running: write the serial dump to the ticket, close the result with ./ctrl test-results --status failed --reason, then ./client stop --status failed --reason. Never save a failed or unfinished install.</case>
-  <case>./client save fails: the session is already over and nothing was kept. Close the result with ./ctrl test-results --status failed and its headline as the reason. Do not stop; there is nothing to stop.</case>
+  <case>./client save fails: the session is already over and nothing was kept. Close the result with ./ctrl test-results --status failed and its headline as the reason. Do not stop; there is nothing to stop. Do not reserve or start again; a reservation you leave holds this server's one slot for ten minutes.</case>
   <case>Whatever happens, the result is never left open: ./ctrl test-results is always your last ./ctrl command. An open result reads as a driver that quit.</case>
 </when-it-goes-wrong>
 
@@ -98,6 +99,13 @@ $ ./client intent end --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} -
 # ... the installer: user name, password, disk passphrase from the install; defaults elsewhere ...
 # ... the installer reboots; the disk comes up (or, at the ISO's boot menu, the entry that boots the installed disk) ...
 # ... the disk passphrase; the desktop; a fresh image; the subagent confirms the proof ...
+
+# shut the machine down from inside, as the install's instruction says, and image until the machine is off
+$ ./client intent start --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --session-id 6f1c...e2a9 --test-result-id {{RESULT_ID}} --message "shut the machine down from inside"
+# ... the instruction's shutdown, with an image after each step ...
+$ ./client get-image --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --session-id 6f1c...e2a9 -o screen.png
+    (fails: the machine is off)
+$ ./client intent end --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --session-id 6f1c...e2a9
 
 # keep the disk, then close the result with what save answered
 $ ./client save --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --session-id 6f1c...e2a9

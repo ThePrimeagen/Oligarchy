@@ -37,6 +37,8 @@ const StartAnswer = Schema.fromJsonString(
 const decodeStartAnswer = Schema.decodeUnknownEffect(StartAnswer);
 const StatsAnswer = Schema.fromJsonString(Schema.toCodecJson(Contract.Stats));
 const decodeStatsAnswer = Schema.decodeUnknownEffect(StatsAnswer);
+const MintedAnswer = Schema.fromJsonString(Schema.toCodecJson(Contract.Minted));
+const decodeMintedAnswer = Schema.decodeUnknownEffect(MintedAnswer);
 
 export type RouterService = {
   // Probes GET /stats on the url, then remembers it; a url already registered is probed again.
@@ -45,6 +47,9 @@ export type RouterService = {
   readonly unregister: (url: string) => Effect.Effect<void, Errors.NotFound | Errors.Internal>;
   // Every registered server with its stats, null for one whose probe failed.
   readonly servers: Effect.Effect<Contract.Servers, Errors.Internal>;
+  // Every registered server asked whether it holds the iso's minted disk; unreachable for one
+  // that gave no answer of its own.
+  readonly minted: (iso: string) => Effect.Effect<Contract.MintedServers, Errors.Internal>;
   // Places a reserve on an answering server with a free slot and remembers the agent. A body
   // naming a server goes to that server and nowhere else.
   readonly reserve: (
@@ -252,6 +257,45 @@ const make = Effect.gen(function* () {
     );
     return Contract.Servers.make({ servers: probed });
   });
+
+  // A server's own GET /minted answer as a state. Everything short of a decodable 200 — no
+  // connection, a refusal, a body that is not a Minted, nothing within the probe timeout — is
+  // `unreachable`: the row is the report, as `stats: null` is for /servers, so nothing is logged.
+  const askMinted = (url: string, iso: string): Effect.Effect<Contract.MintedState> =>
+    Effect.gen(function* () {
+      const response = yield* http.execute(
+        HttpClientRequest.get("/minted").pipe(
+          HttpClientRequest.prependUrl(url),
+          HttpClientRequest.setUrlParam("iso", iso),
+          HttpClientRequest.bearerToken(token),
+        ),
+      );
+      if (response.status !== 200) {
+        return "unreachable" as const;
+      }
+      const answer = yield* decodeMintedAnswer(yield* response.text);
+      return answer.minted ? ("minted" as const) : ("unminted" as const);
+    }).pipe(
+      Effect.timeoutOrElse({
+        duration: PROBE_TIMEOUT,
+        orElse: () => Effect.succeed("unreachable" as const),
+      }),
+      Effect.orElseSucceed((): Contract.MintedState => "unreachable"),
+    );
+
+  const minted = (iso: string): Effect.Effect<Contract.MintedServers, Errors.Internal> =>
+    Effect.gen(function* () {
+      const urls = yield* store
+        .listServers(SERVER_TYPE)
+        .pipe(Effect.mapError((cause) => internal(cause)));
+      const asked = yield* Effect.forEach(
+        urls,
+        (url) =>
+          Effect.map(askMinted(url, iso), (state) => Contract.MintedServer.make({ url, state })),
+        { concurrency: "unbounded" },
+      );
+      return Contract.MintedServers.make({ iso, servers: asked });
+    });
 
   const commitStart = (
     url: string,
@@ -476,6 +520,7 @@ const make = Effect.gen(function* () {
     register,
     unregister,
     servers,
+    minted,
     reserve,
     relinquish,
     start,

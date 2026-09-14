@@ -239,6 +239,89 @@ describe("ProxyClient requests", () => {
   );
 });
 
+describe("ProxyClient minted", () => {
+  const ISO = "https://iso.omarchy.org/omarchy-4.0.2.iso";
+  const options = { serverUrl: SERVER, token: Redacted.make(TOKEN) };
+
+  it.effect("gets /minted?iso url-encoded with the token and decodes every server's state", () =>
+    Effect.gen(function* () {
+      const recorder = FakeHttp.recordRequests(() =>
+        FakeHttp.json({
+          iso: ISO,
+          servers: [
+            { url: "http://10.0.0.5:42069", state: "minted" },
+            { url: "http://10.0.0.6:42069", state: "unminted" },
+            { url: "http://10.0.0.7:42069", state: "unreachable" },
+          ],
+        }),
+      );
+      const minted = yield* ProxyClient.minted(options, ISO).pipe(Effect.provide(recorder.layer));
+      expect(minted).toEqual(
+        Contract.MintedServers.make({
+          iso: ISO,
+          servers: [
+            Contract.MintedServer.make({ url: "http://10.0.0.5:42069", state: "minted" }),
+            Contract.MintedServer.make({ url: "http://10.0.0.6:42069", state: "unminted" }),
+            Contract.MintedServer.make({ url: "http://10.0.0.7:42069", state: "unreachable" }),
+          ],
+        }),
+      );
+      expect(recorder.requests).toHaveLength(1);
+      expect(recorder.requests[0]?.method).toBe("GET");
+      expect(recorder.requests[0]?.url).toBe(`${SERVER}/minted?iso=${encodeURIComponent(ISO)}`);
+      expect(recorder.requests[0]?.headers.authorization).toBe(`Bearer ${TOKEN}`);
+      expect(recorder.requests[0]?.body).toBe("");
+    }),
+  );
+
+  it.effect("a refused bearer is ProxyRefusal 401 with the body's error (unhappy)", () =>
+    Effect.gen(function* () {
+      const recorder = FakeHttp.recordRequests(() => FakeHttp.json({ error: "unauthorized" }, 401));
+      const error = yield* Effect.flip(
+        ProxyClient.minted(options, ISO).pipe(Effect.provide(recorder.layer)),
+      );
+      expect(error).toMatchObject({ _tag: "ProxyRefusal", status: 401, message: "unauthorized" });
+    }),
+  );
+
+  it.effect(
+    "a 200 without the MintedServers shape is ProxyUnreachable naming the request (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const recorder = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+        const error = yield* Effect.flip(
+          ProxyClient.minted(options, ISO).pipe(Effect.provide(recorder.layer)),
+        );
+        expect(error).toMatchObject({
+          _tag: "ProxyUnreachable",
+          message: `GET ${SERVER}/minted failed`,
+        });
+      }),
+  );
+
+  it.effect("a refused connection is ProxyUnreachable with the url and its query (unhappy)", () =>
+    Effect.gen(function* () {
+      const layer = FakeHttp.respondWith((request) =>
+        Effect.fail(
+          new HttpClientError.HttpClientError({
+            reason: new HttpClientError.TransportError({
+              request,
+              cause: new Error("connect ECONNREFUSED 127.0.0.1:42069"),
+            }),
+          }),
+        ),
+      );
+      const error = yield* Effect.flip(
+        ProxyClient.minted(options, ISO).pipe(Effect.provide(layer)),
+      );
+      expect(error._tag).toBe("ProxyUnreachable");
+      expect(Render.headline(error)).toBe(
+        `GET ${SERVER}/minted?iso=${encodeURIComponent(ISO)} failed: connect ECONNREFUSED 127.0.0.1:42069`,
+      );
+    }),
+  );
+});
+
 describe("ProxyClient refusals", () => {
   it.effect("a declared error status decodes the body's error as the message", () =>
     Effect.gen(function* () {

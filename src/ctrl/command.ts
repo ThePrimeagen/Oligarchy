@@ -1,6 +1,7 @@
 import { Array as Arr, Clock, Console, Effect, Layer, Option, Redacted, Schema } from "effect";
 import { CliError, Command, Flag } from "effect/unstable/cli";
 import type { HttpClient } from "effect/unstable/http";
+import * as ProxyClient from "../client/proxy-client.ts";
 import * as Config from "../config.ts";
 import * as Actions from "../db/actions.ts";
 import * as Automation from "../db/automation.ts";
@@ -34,8 +35,10 @@ export type Stores =
   | Servers.ServerStore
   | Log.Log;
 
-// ctrl is the record keeper: every read and write is a database call. It never talks to a qemu server;
-// Linear is the only remote service it reaches.
+// ctrl is the record keeper: every read and write is a database call, and Linear is the remote
+// service it reaches. It avoids calling a server for any data that is in the database; only data
+// that is ephemeral and machine-specific, stored nowhere but in the state of the machine itself,
+// is asked of the reverse proxy — today that is one call, `mint --unminted`'s GET /minted.
 export type Deps = {
   readonly database: (url: Redacted.Redacted) => Layer.Layer<Stores, Errors.DatabaseError>;
   readonly linear: (
@@ -419,16 +422,23 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     });
   });
 
-  // mint --iso <https-url>
+  // mint --iso <https-url> [--unminted]
   //
   // Not a test: one install per live qemu server, each a ticket pinned to its server, so that
   // server ends up holding the iso's minted disk for every later test to boot. The install is
   // still a run with one result, because that is what a driver ties its session to and what the
   // automation queue dispatches; the `mint` definition holds the install's wording once.
+  // `--unminted` tickets only the servers that lack the disk, by the reverse proxy's GET /minted:
+  // the one server call ctrl makes, for the one fact that lives nowhere but on the machines.
   const mint = Effect.fn("ctrl.mint")(function* (input: {
     readonly serverUrl: string;
     readonly iso: string;
+    readonly unminted: boolean;
   }) {
+    // Configuration before work: after DATABASE_URL and LINEAR_API_TOKEN (the command's layers,
+    // the same order as every ctrl command), the bearer is the third variable reported, and it is
+    // refused before any query or Linear call.
+    const token = input.unminted ? Option.some(yield* Config.oligarchyToken) : Option.none();
     const tests = yield* Tests.TestStore;
     const servers = yield* Servers.ServerStore;
     const linear = yield* Linear.Linear;
@@ -447,12 +457,45 @@ export const makeCtrlCommand = (deps: Deps = live) => {
         }),
       ),
     );
-    const targets = yield* servers.listLiveServers("qemu").pipe(
+    const fleet = yield* servers.listLiveServers("qemu").pipe(
       Effect.filterOrFail(
         (rows) => rows.length > 0,
         () => refuse("mint: no live qemu server"),
       ),
     );
+    // With --unminted, every live server must have answered the proxy: a minted one is skipped,
+    // an unminted one ticketed, and one with no answer of its own stops the command before
+    // anything is created — a mint it silently missed would be the failure this flag exists to
+    // redo.
+    const targets = yield* Option.match(token, {
+      onNone: () => Effect.succeed(fleet),
+      onSome: (bearer) =>
+        Effect.gen(function* () {
+          const answer = yield* ProxyClient.minted(
+            { serverUrl: input.serverUrl, token: bearer },
+            input.iso,
+          );
+          const state = (url: string) => answer.servers.find((row) => row.url === url)?.state;
+          for (const target of fleet) {
+            const known = state(target.url);
+            if (known !== "minted" && known !== "unminted") {
+              return yield* refuse(
+                `mint: ${target.url} did not answer /minted; --unminted needs every live qemu server to answer`,
+              );
+            }
+          }
+          const skipped = fleet.filter((target) => state(target.url) === "minted");
+          if (skipped.length > 0) {
+            yield* log.info(
+              `mint ${input.iso} already minted; ${String(skipped.length)} servers skipped; ${skipped.map((target) => target.url).join(", ")}`,
+            );
+          }
+          return fleet.filter((target) => state(target.url) === "unminted");
+        }),
+    });
+    if (targets.length === 0) {
+      return yield* printJson([]);
+    }
 
     const teamId = yield* linear.teamId;
     const labelIds = yield* linear.labelIds(teamId, MINT_LABEL);
@@ -548,7 +591,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     yield* log.info(
       `mint ${input.iso} created; ${String(minted.length)} servers; ${identifiers()}`,
     );
-    yield* printJson(minted);
+    return yield* printJson(minted);
   });
 
   // test list
@@ -920,6 +963,10 @@ export const makeCtrlCommand = (deps: Deps = live) => {
         Flag.withDescription(
           "HTTPS URL of the ISO to install and keep as each server's minted disk",
         ),
+      ),
+      unminted: toggle(
+        "unminted",
+        "Ticket only the live qemu servers that do not hold the ISO's minted disk, asking the reverse proxy at --server-url; needs OLIGARCHY_TOKEN",
       ),
     },
     mint,

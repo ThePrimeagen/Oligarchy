@@ -606,11 +606,15 @@ describeServing("automation server dispatch", () => {
           await process.waitFor(/automation server listening/);
           const job = await waitForJob(resultId, "succeeded");
           expect(job).toMatchObject({ action: "drive", status: "succeeded", reason: null });
-          expect(bodies).toHaveLength(1);
-          const body: { prompt: string; model: string } = JSON.parse(bodies[0] ?? "{}");
-          expect(body.model).toBe(MODEL);
-          expect(body.prompt).toContain(linearId);
-          expect(body.prompt).toContain(MODEL);
+          // The queue is shared with every integration file that ran before: a pending job one of
+          // them left is dispatched here too, so this ticket's body is found by its ticket.
+          const parsed: Array<{ prompt: string; model: string }> = bodies.map((text) =>
+            JSON.parse(text),
+          );
+          const body = parsed.find((candidate) => candidate.prompt.includes(linearId));
+          expect(body, bodies.join("\n")).toBeDefined();
+          expect(body?.model).toBe(MODEL);
+          expect(body?.prompt).toContain(MODEL);
           expect(process.stdout()).toContain(`dispatching drive; ${client.url}; ${MODEL}`);
         } finally {
           process.child.kill("SIGTERM");

@@ -18,9 +18,12 @@ are the same files, installed under `/tmp/mintedrun` with this fleet's ports in 
 | automation-server | 54321 | `--model openrouter/meta/muse-spark-1.3-contributor` | |
 
 `OLIGARCHY_DATA_ROOT` defaults to `$HOME/personal/oligarchy-data` (`install.sh` creates the four
-dirs). Sessions still live under `OLIGARCHY_SESSIONS_DIR` (`TMPDIR` on each qemu server); a data
-dir holds only `isos/` — the ISO download and, once minted, `<iso>.qcow2` and `<iso>.OVMF_VARS.fd`
-beside it. Present means minted. `reset.sh` never touches data dirs.
+dirs and seeds each `isos/` with the ISO and its `manifest.json` entry from `SUPER_RUN_ISO_CACHE`,
+default `~/.oligarchy/isos`, when that cache has it — a reflink on btrfs, a copy elsewhere; a dir
+that has the ISO is left alone). Sessions still live under `OLIGARCHY_SESSIONS_DIR` (`TMPDIR` on
+each qemu server); a data dir holds only `isos/` — the ISO and, once minted, `<iso>.qcow2` and
+`<iso>.OVMF_VARS.fd` beside it. Present means minted. Neither `install.sh` nor `reset.sh` touches
+a minted disk.
 
 ## Mint phase queries
 

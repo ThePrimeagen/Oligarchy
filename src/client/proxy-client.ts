@@ -99,15 +99,36 @@ const run = <A>(
     }),
   );
 
+// The bearer the qemu servers share, set once on every request the generated client sends.
+const bearerLayer = (token: Redacted.Redacted) =>
+  HttpApiMiddleware.layerClient(Api.BearerAuth, ({ next, request }) =>
+    next(HttpClientRequest.bearerToken(request, Redacted.value(token))),
+  );
+
+// Where the iso is minted, as the reverse proxy answers for the whole fleet: one row per
+// registered qemu server. Not a session call, so it lives outside `connect`.
+export const minted = Effect.fn("ProxyClient.minted")(function* (
+  options: ConnectOptions,
+  iso: string,
+) {
+  // The middleware layer holds no resources: its scope can close as soon as it is built.
+  const middleware = yield* Effect.scoped(Layer.build(bearerLayer(options.token)));
+  const client = yield* HttpApiClient.make(Api.QemuReverseProxyApi, {
+    baseUrl: options.serverUrl,
+    transformClient: HttpClient.filterStatusOk,
+  }).pipe(Effect.provide(middleware));
+  return yield* run(
+    `GET ${options.serverUrl}/minted failed`,
+    client.Servers.minted({ query: { iso } }),
+  );
+});
+
 export const connect = Effect.fn("ProxyClient.connect")(function* (options: ConnectOptions) {
   const { serverUrl } = options;
   const token = Redacted.value(options.token);
   const httpClient = yield* HttpClient.HttpClient;
-  const bearer = HttpApiMiddleware.layerClient(Api.BearerAuth, ({ next, request }) =>
-    next(HttpClientRequest.bearerToken(request, token)),
-  );
   // The middleware layer holds no resources: its scope can close as soon as it is built.
-  const middleware = yield* Effect.scoped(Layer.build(bearer));
+  const middleware = yield* Effect.scoped(Layer.build(bearerLayer(options.token)));
   // Every non-2xx answer is refused here, before the generated client decodes it: a declared
   // error status with a body that is not `{ "error" }` would otherwise be combined with its
   // schema failure, and hashing that failure walks into node:http's response and throws.

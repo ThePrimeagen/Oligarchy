@@ -2527,6 +2527,33 @@ describe("stats", () => {
   );
 });
 
+// ---------------------------------------------------------------------------
+// minted
+// ---------------------------------------------------------------------------
+
+describe("minted", () => {
+  const FILES = { disk: `${ISO}.qcow2`, vars: `${ISO}.OVMF_VARS.fd` };
+
+  it.effect(
+    "answers whether this machine holds the iso's minted disk, asking Minted by the iso as given (happy and unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const h = harness({
+          minted: { find: (iso) => (iso === ISO ? Option.some(FILES) : Option.none()) },
+        });
+        yield* h.run(
+          Effect.gen(function* () {
+            const sessions = yield* Sessions.Sessions;
+            expect(yield* sessions.minted(ISO)).toBe(true);
+            // Any name is a fair question; one nothing was ever saved under is simply not minted.
+            expect(yield* sessions.minted("poophead.iso")).toBe(false);
+          }),
+        );
+        expect(h.minted.finds).toEqual([ISO, "poophead.iso"]);
+      }),
+  );
+});
+
 describe("jobs", () => {
   it.effect(
     "reports the current admitted count, including a reservation that has not started",
