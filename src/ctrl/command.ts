@@ -510,10 +510,10 @@ export const makeCtrlCommand = (deps: Deps = live) => {
           ISO_URL: input.iso,
           SERVER_URL: input.serverUrl,
           PINNED_SERVER: target.url,
-          TEST_NAME: definition.name,
-          TEST_DESCRIPTION: definition.description,
-          TEST_INSTRUCTION: definition.instruction,
-          TEST_PROOF: definition.proof,
+          INSTALL_NAME: definition.name,
+          INSTALL_DESCRIPTION: definition.description,
+          INSTALL_INSTRUCTION: definition.instruction,
+          INSTALL_PROOF: definition.proof,
         });
         yield* linear.describeIssue(issued, description);
         return issued;
