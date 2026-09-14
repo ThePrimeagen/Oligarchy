@@ -194,7 +194,8 @@ describe("renderLinearIssue unhappy path", () => {
   );
 });
 
-// Every value a mint ticket asks for: the run's, plus the server it is pinned to.
+// Every value a mint ticket asks for: the run's ids, the install's wording, and the one qemu
+// server it is pinned to. No version: a mint is not a test of one.
 const mint = {
   LINEAR_TICKET: "OLI-42",
   RUN_ID: "11111111-1111-4111-8111-111111111111",
@@ -202,69 +203,137 @@ const mint = {
   ISO_URL: "https://example.com/omarchy.iso",
   SERVER_URL: SERVER,
   PINNED_SERVER: "http://127.0.0.1:55331",
-  TEST_NAME: "mint",
-  TEST_DESCRIPTION: "Install Omarchy and keep the disk",
-  TEST_INSTRUCTION: "User oligarchy, password oligarchy, disk passphrase oligarchy",
-  TEST_PROOF: "The desktop is on screen after the reboot",
+  INSTALL_NAME: "mint",
+  INSTALL_DESCRIPTION: "Install Omarchy and keep the disk",
+  INSTALL_INSTRUCTION: "User oligarchy, password oligarchy, disk passphrase oligarchy",
+  INSTALL_PROOF: "The desktop is on screen after the reboot",
 } satisfies Prompts.MintValues;
 
-describe("renderMintIssue", () => {
-  it.effect("mint-issue.html: relinquish, the pinned reserve, a fresh start, then save", () =>
+// The template's own words: everything before the first embedded guide.
+const ownWords = (description: string): string =>
+  description.slice(0, description.indexOf("<client>"));
+
+// The worked example at the end, after both guides.
+const exampleOf = (description: string): string =>
+  description.slice(description.indexOf("<example-session>"));
+
+describe("renderMintIssue happy path", () => {
+  it.effect("mint-issue.html is its own ticket: the values, both guides, no test wording", () =>
     Effect.gen(function* () {
       const description = yield* real(Prompts.renderMintIssue(mint));
+      const own = ownWords(description);
+
       expect(description.includes("{{")).toBe(false);
-      expect(description).toContain(`<pinned_server>\`${mint.PINNED_SERVER}\`</pinned_server>`);
-      // The example session, in order: give the placed reservation back, take the pinned one,
-      // start fresh, and end with save, never stop. (The guides use the same example ids, so
-      // only the example session is searched.)
-      const example = description.slice(description.indexOf("<example-session>"));
-      const relinquishAt = example.indexOf(
-        `./client relinquish --agent-id OLI-42 --server-url ${SERVER}`,
-      );
-      const reserveAt = example.indexOf(
+      expect(own).toContain(`<linear_ticket>${mint.LINEAR_TICKET}</linear_ticket>`);
+      expect(own).toContain(`<run_id>${mint.RUN_ID}</run_id>`);
+      expect(own).toContain(`<result_id>${mint.RESULT_ID}</result_id>`);
+      expect(own).toContain(`<iso_url>\`${mint.ISO_URL}\`</iso_url>`);
+      expect(own).toContain(`<server_url>\`${SERVER}\`</server_url>`);
+      expect(own).toContain(`<pinned_server>\`${mint.PINNED_SERVER}\`</pinned_server>`);
+      expect(own).toContain(`<name>${mint.INSTALL_NAME}</name>`);
+      expect(own).toContain(`<description>${mint.INSTALL_DESCRIPTION}</description>`);
+      expect(own).toContain(`<instruction>${mint.INSTALL_INSTRUCTION}</instruction>`);
+      expect(own).toContain(`<proof>${mint.INSTALL_PROOF}</proof>`);
+      expect(own).not.toContain("<version>");
+      expect(own).not.toContain("<mission>");
+      // Not the test ticket with the words changed: none of its framing survives.
+      expect(own).not.toContain("Test driver");
+      expect(own).not.toContain("deliver a verdict");
+      expect(own).not.toContain("analyze your session");
+      expect(own).not.toContain("carry out the mission");
+      expect(own).toContain("not a test");
+      // Both guides, since the driver may read nothing else.
+      expect(description).toContain("# Client\n");
+      expect(description).toContain("## reserve");
+      expect(description).toContain("## save");
+      expect(description).toContain("# Control\n");
+      expect(description).toContain("## test start");
+      expect(description).toContain("## test-results");
+      expect(description).not.toContain("## diagnose");
+    }),
+  );
+
+  it.effect(
+    "the differences a mint driver must know are spelled out in the template's own words",
+    () =>
+      Effect.gen(function* () {
+        const own = ownWords(yield* real(Prompts.renderMintIssue(mint)));
+        // The machine is this server and no other, taken by the driver's own pinned reserve.
+        expect(own).toContain(`--server ${mint.PINNED_SERVER}`);
+        expect(own).toContain(`./client relinquish --agent-id OLI-42 --server-url ${SERVER}`);
+        // Fresh only: the flags that boot or attach a disk are named as forbidden.
+        expect(own).toMatch(/never[^.\n]*--resume/i);
+        expect(own).toMatch(/never[^.\n]*--disk/i);
+        // The iso stays attached through the installer's reboot; the driver is told what to do if
+        // its boot menu shows rather than the disk.
+        expect(own).toMatch(/reboot/i);
+        expect(own).toMatch(/boots first|boot menu/i);
+        // A second look before the disk is kept for good.
+        expect(own).toContain(SUB_AGENT);
+        // Save ends it, never stop; the verdict follows save.
+        expect(own).toMatch(/save[^.\n]*(never|not) stop/i);
+        expect(own).toMatch(/test-results[^\n]*after[^\n]*save|after[^\n]*save[^\n]*test-results/i);
+        // Linear status: In Progress, as the driving agent's own prompt says.
+        expect(own).toContain('"In Progress"');
+        expect(own).toContain('"Needs Review"');
+        expect(own).not.toContain("In Review");
+      }),
+  );
+
+  it.effect("the example session runs the mint in order and never stops a good install", () =>
+    Effect.gen(function* () {
+      const example = exampleOf(yield* real(Prompts.renderMintIssue(mint)));
+      const at = (text: string) => {
+        const index = example.indexOf(text);
+        expect(index, text).toBeGreaterThan(-1);
+        return index;
+      };
+      const relinquishAt = at(`./client relinquish --agent-id OLI-42 --server-url ${SERVER}`);
+      const reserveAt = at(
         `./client reserve --agent-id OLI-42 --server-url ${SERVER} --server ${mint.PINNED_SERVER}`,
       );
-      const startAt = example.indexOf(
+      const startAt = at(
         `./client start --agent-id OLI-42 --server-url ${SERVER} --iso ${mint.ISO_URL}\n`,
       );
-      const saveAt = example.indexOf(
-        `./client save --agent-id OLI-42 --server-url ${SERVER} --session-id`,
-      );
-      // The verdict follows save, so a save that failed can never sit under a success.
-      const verdictAt = example.indexOf(
+      const tiedAt = at(`./ctrl test start --session-id`);
+      const saveAt = at(`./client save --agent-id OLI-42 --server-url ${SERVER} --session-id`);
+      const verdictAt = at(
         `./ctrl test-results --agent-id OLI-42 --id ${mint.RESULT_ID} --status success`,
       );
-      expect(relinquishAt).toBeGreaterThan(-1);
       expect(reserveAt).toBeGreaterThan(relinquishAt);
       expect(startAt).toBeGreaterThan(reserveAt);
-      expect(saveAt).toBeGreaterThan(startAt);
+      expect(tiedAt).toBeGreaterThan(startAt);
+      expect(saveAt).toBeGreaterThan(tiedAt);
       expect(verdictAt).toBeGreaterThan(saveAt);
-      expect(example).toContain(
-        `./ctrl test-results --agent-id OLI-42 --id ${mint.RESULT_ID} --status failed --reason`,
-      );
+      // The failed save is shown too, and it is a verdict, not a stop.
+      at(`./ctrl test-results --agent-id OLI-42 --id ${mint.RESULT_ID} --status failed --reason`);
       expect(example).not.toContain("--resume");
       expect(example).not.toContain("--disk");
       expect(example).not.toMatch(/\.\/client stop/);
       expect(example).toContain('"In Progress"');
-      expect(description).not.toContain("In Review");
-      // Every way out closes the result: the start that never returns, the failed install, the
-      // failed save.
-      expect(description).toContain(
-        `./client relinquish --agent-id OLI-42 --server-url ${SERVER} to give back your reservation, then close the result as failed`,
-      );
-      expect(description).toContain("Never save a failed install.");
-      expect(description).toContain("If ./client save fails");
-      expect(description).toContain(`<instruction>${mint.TEST_INSTRUCTION}</instruction>`);
-      expect(description).toContain(`<proof>${mint.TEST_PROOF}</proof>`);
-      expect(description).toContain("# Client\n");
-      expect(description).toContain("## save");
-      expect(description).toContain("## reserve");
-      expect(description).toContain("# Control\n");
-      expect(description).toContain("## test-results");
-      expect(description).not.toContain("<version>");
+      expect(example).toContain('"Needs Review"');
     }),
   );
 
+  it.effect("every way out closes the result, and only a good install is saved", () =>
+    Effect.gen(function* () {
+      const own = ownWords(yield* real(Prompts.renderMintIssue(mint)));
+      // Three failed starts: give the reservation back, close the result, finish.
+      expect(own).toMatch(/three[^\n]*start[^\n]*relinquish/i);
+      // A failed install with a session: serial dump, result failed, stop failed, never save.
+      expect(own).toContain("--status failed --reason");
+      expect(own).toMatch(/never save/i);
+      expect(own).toMatch(/serial dump/i);
+      // A failed save: the session is over, the result is failed with its headline, no stop.
+      expect(own).toMatch(/save fails/i);
+      expect(own).toMatch(/nothing (to stop|was kept)/i);
+      // The result is never left open.
+      expect(own).toMatch(/result[^.]*(left open|open)/i);
+    }),
+  );
+});
+
+describe("renderMintIssue unhappy path", () => {
   it.effect("a missing value names the mint template", () =>
     Effect.gen(function* () {
       const fs = promptFs({ contents: { "mint-issue.html": "{{RUN_ID}} {{NOPE}}" } });
@@ -276,5 +345,21 @@ describe("renderMintIssue", () => {
         message: "prompt: prompts/mint-issue.html uses {{NOPE}}, which has no value",
       });
     }),
+  );
+
+  it.effect(
+    "an unreadable mint template is a PromptError naming it, before any guide is read",
+    () =>
+      Effect.gen(function* () {
+        const fs = promptFs({ unreadable: /mint-issue\.html$/ });
+        const error = yield* Effect.flip(
+          Prompts.renderMintIssue(mint).pipe(Effect.provide(fs.layer)),
+        );
+        expect(error).toMatchObject({
+          _tag: "PromptError",
+          message: expect.stringContaining("mint-issue.html"),
+        });
+        expect(fileNames(fs.reads)).toEqual(["mint-issue.html"]);
+      }),
   );
 });

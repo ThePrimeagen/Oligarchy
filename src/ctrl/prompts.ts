@@ -24,7 +24,8 @@ export type Values = {
   readonly TEST_PROOF: string;
 };
 
-// What a mint ticket asks for: no version, and the one qemu server the install is pinned to.
+// What a mint ticket asks for: the run's ids, the install's wording from the `mint` definition,
+// and the one qemu server the install is pinned to. No version: a mint is not a test of one.
 export type MintValues = {
   readonly LINEAR_TICKET: string;
   readonly RUN_ID: string;
@@ -32,10 +33,10 @@ export type MintValues = {
   readonly ISO_URL: string;
   readonly SERVER_URL: string;
   readonly PINNED_SERVER: string;
-  readonly TEST_NAME: string;
-  readonly TEST_DESCRIPTION: string;
-  readonly TEST_INSTRUCTION: string;
-  readonly TEST_PROOF: string;
+  readonly INSTALL_NAME: string;
+  readonly INSTALL_DESCRIPTION: string;
+  readonly INSTALL_INSTRUCTION: string;
+  readonly INSTALL_PROOF: string;
 };
 
 // The files sit beside the package, not the working directory: resolve them from this module.

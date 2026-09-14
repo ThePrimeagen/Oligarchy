@@ -34,7 +34,9 @@ lets every later session boot a throwaway copy of that disk in seconds.
 - minted disk: `<iso>.qcow2` and `<iso>.OVMF_VARS.fd` beside the ISO's path. Present means minted.
 - `save`: the call that ends a session and writes its disk and firmware file into place as the
   minted disk of the ISO it named.
-- pin: `test_runs.pinned_server`, a qemu server url the reserve must land on. Null means unpinned.
+- pin: the qemu server url a mint ticket names. The proxy's `/reserve` takes it as `server` and
+  sends that reserve there and nowhere else; the mint driver is the one who sends it. Nothing in
+  the database knows about pins.
 
 ## Landed
 
@@ -54,23 +56,73 @@ lets every later session boot a throwaway copy of that disk in seconds.
   resumed session cannot save (400, it runs on), since its overlay names the minted disk by path
   and another save may replace that file under it. `--disk` with `--resume` is refused.
 - Lint: `no-nested-ternary` (#143).
+- The reserve pin (#145): `ReserveAgentBody.server`, the proxy's alone. A pinned reserve is
+  probed and sent to that url only; its 200 routes the agent, its 503 passes through; an
+  unregistered url is 404 `no server <url>` (`NotFound` carries a message now); an unreachable
+  one is `ServerFailed`. A qemu server ignores the field.
+- `./ctrl mint` and `./client reserve` (#146, in review): `mint --server-url <proxy> --iso <url>`
+  creates, for every live qemu server, one run and one result under the `mint` definition and one
+  Linear issue `Omarchy mint: <server url>` labelled `agent test` + `mint`, from its own template
+  `prompts/mint-issue.html`, whose values include `PINNED_SERVER`; a failure part-way fails the run
+  being created, names every ticket Linear did create, and leaves earlier servers' runs standing.
+  `./client reserve --agent-id … [--server <url>]` is the driver's own reservation, pinned when
+  `--server` is given. ctrl's database layer provides `ServerStore`. opencode's ceiling is 45
+  minutes. `client.md` has `reserve`, `ctrl.md` has `mint`.
+
+## What's left
+
+In the order to do it. Each item's tests are listed under its section below.
+
+1. **Merge #146**, then define the operator data once (not code):
+   `./ctrl test define --name mint --description … --instruction "<user name, password and disk
+   passphrase; defaults elsewhere>" --proof "<the desktop, after the reboot>"`. The ticket's
+   procedure (relinquish, pinned reserve, fresh start, install, a second look, save, verdict) is the
+   template's; the definition holds only the install's wording.
+2. **First real mint, by hand** (Verify below): on the QEMU host through the proxy, one `fresh`
+   session installed and saved, the two files beside the ISO, then a `start --resume` that boots
+   from the disk without the ISO. Two facts to confirm there that the template can only hedge on:
+   whether the installer's reboot lands on the disk with the ISO still attached (OVMF follows its
+   NVRAM entry; `-boot order=d` is a SeaBIOS knob it ignores), and whether `system_powerdown` shuts
+   the installed system down from where the driver leaves it. Tighten the template's reboot step
+   to what is seen. Also whether 45 minutes of opencode ceiling fits an install; the plan said 60.
+3. **`resume` definitions** (section 5): `test_definitions.mode`, `test define --mode resume`, and
+   `--resume` on the start line of a `resume` definition's ticket. Without this nothing boots the
+   minted disks; this is the payoff.
+4. **`mint --server <url>`** (section 6): redo one server whose mint failed, without ticketing the
+   fleet. Small: narrow the live list to that url, refuse one not in it.
+5. **`mint --verify`** (section 6): a `mint-verify` `resume` definition and a ticket per server that
+   logs in and confirms the desktop, so a poisoned disk is found before a batch boots it. Wanted
+   but not blocking: a failed resume batch on one server says the same thing, later.
+6. **Loose ends**: `prompts/linear-issue.html` says "In Review" in its rules and "In Progress" in
+   its example; the mint template and `driving-agent.html` say "In Progress" — make the test ticket
+   agree. Re-run the `db`, `qemu-server` and `qemu-reverse-proxy` integration suites where Docker
+   exists (the cloud agent could not).
+
+Not planned, on purpose: a `minted` list in `/stats`, a resume filter in the proxy, a pin in the
+database, retries or Sentry reports for a failed mint. A failed mint is a failed ticket on the
+board, and the redo is item 4.
 
 ## Decisions still to build against
 
 - A resume is placed like any session. Every server is minted by procedure, so there is nothing to
   place around; a server that lacks the disk answers the start with 400 and the driver gives the
   reservation back with `relinquish`. No `minted` list in `/stats`, no resume filter in the proxy.
-- The reserve gains one optional field, `server`: a url the proxy sends that reserve to and nowhere
-  else. Unknown url is 404 `no server <url>`; unreachable is 502 `ServerFailed`; a 503 passes
-  through and the job defers with its pin. Nothing else on the reserve changes.
+- The pin lives in the ticket, not the database. The dispatcher reserves for a mint ticket as for
+  any other, by rank; the mint driver gives that reservation back and reserves pinned to the server
+  its ticket names, then starts fresh. The automation server, the automation client and the
+  database do not know what a mint is. (Considered and set aside: `test_runs.pinned_server` read
+  by the dispatcher into its reserve. Cleaner placement, three more components in the know.)
 - One ticket per server. `./ctrl mint` reads the live qemu servers from the `servers` table and
-  creates, for each, one run pinned to it, one result on the `mint` definition, one Linear ticket.
-  Everything downstream is the existing pipeline: Automation Needed, a drive dispatched with the
-  pin, the driver installs and saves, Needs Review, the diagnoser closes it. Each server's mint is
-  a ticket on the board.
-- The `mint` definition is an ordinary `fresh` definition whose instruction installs with the fixed
-  credentials, confirms the desktop, records the result and ends with `./client save`. The
-  `mint-verify` definition is a `resume` definition that logs in and confirms the desktop. Every
+  creates, for each, one run, one result on the `mint` definition, one Linear ticket naming that
+  server. Everything downstream is the existing pipeline: Automation Needed, a drive dispatched,
+  the driver installs and saves, Needs Review, the diagnoser closes it. Each server's mint is a
+  ticket on the board.
+- The mint ticket is its own template, `prompts/mint-issue.html`, not the test ticket with the
+  words changed: the pinned machine, fresh only, the ISO attached through the reboot, a subagent's
+  second look before the disk is kept, `save` instead of `stop`, and the verdict recorded from what
+  `save` answered so a failed save can never sit under a success. Every way out closes the result.
+  The `mint` definition holds only the install's wording (credentials, proof).
+- The `mint-verify` definition is a `resume` definition that logs in and confirms the desktop. Every
   test that assumes an installed system is `--mode resume`, and its ticket's start line carries
   `--resume`.
 - Sequencing (mint, then verify, then redo a failed server with `./ctrl mint --server <url>`) is the
@@ -87,53 +139,19 @@ lets every later session boot a throwaway copy of that disk in seconds.
 | qemu server `/save` | racing the sweep | 404 `UnknownSession` |
 | proxy `/reserve` | pinned url not registered | 404 `no server <url>` |
 | proxy `/reserve` | pinned server unreachable | 502 `ServerFailed` |
-| proxy `/reserve` | pinned server full | 503 passed through; the job defers with its pin |
+| proxy `/reserve` | pinned server full | 503 passed through |
+| proxy `/reserve` | agent already holds one | 400 `already reserved`; `relinquish` first |
 
-The automation client keeps its mapping: 503 is `AtCapacity` (deferred), anything else closes the
-job with the message.
+The mint driver sees these through `./client reserve`; the ticket tells it what each one means.
 
-## 4. Reserve pin
-
-Tests first:
-
-- [ ] `test/shared/api.unit.test.ts`, `test/shared/errors.unit.test.ts`: `NotFoundWire` declared on
-      the proxy's reserve path; `NotFound` carries a message (`not found` by default so `unregister`
-      is unchanged).
-- [ ] `test/qemu-reverse-proxy/http.unit.test.ts`: a pinned reserve goes to that url only, probed
-      first, its 200 routes the agent and its 503 passes through, no other server is asked; an
-      unregistered url is 404 `no server <url>`; an unreachable pinned server is `ServerFailed`; an
-      unpinned reserve ranks as today; the body reaches the server as it came.
-- [ ] `test/qemu-server/http.unit.test.ts`: a reserve carrying `server` is accepted by the qemu
-      server and ignored (the field is the proxy's).
-
-Code:
-
-```ts
-export class ReserveAgentBody extends Schema.Class<ReserveAgentBody>(
-  "@oligarchy/shared/contract/ReserveAgentBody",
-)({
-  agent: Schema.NonEmptyString,
-  // The proxy's: the one server this reserve may land on. A qemu server ignores it.
-  server: Schema.optionalKey(Domain.ServerUrl),
-}) {}
-```
-
-- [ ] `NotFound` gains `message` (default `not found`); `RouteBoundary` errors gain `NotFoundWire`.
-- [ ] `Router.reserve`: when `body.server` is set, check it is registered, probe it, send the
-      reserve to it, route the agent on 200, pass the answer through as it came.
-
-## 5. Database and automation
+## 5. Resume definitions
 
 Tests first:
 
 - [ ] `test/integration/db.integration.test.ts`: `test_definitions.mode` defaults `fresh` and
-      round-trips `resume`; `test_runs.pinned_server` defaults null and round-trips a url; the
-      live-qemu-servers query returns url and name for live rows only.
-- [ ] `test/automation-server/worker.unit.test.ts`, `client.unit.test.ts`: a drive of a pinned run
-      reserves with `server`; an unpinned run sends none; a diagnose sends none; a deferred pinned
-      job is re-sent with its pin next tick.
-- [ ] `test/automation-client/http.unit.test.ts`, `qemu.unit.test.ts`: `server` reaches the proxy's
-      reserve; a 404 from the proxy closes the job with the message, a 503 defers it.
+      round-trips `resume`.
+- [ ] `test/ctrl/command.unit.test.ts`: `test define --mode resume` is stored and listed; omitted on
+      a new name is `fresh`; on a known name it is carried forward; a bad mode is refused.
 - [ ] `test/ctrl/prompts.unit.test.ts`, `linear.unit.test.ts`: a `resume` definition's ticket has
       `--resume` on its start line, a `fresh` one does not.
 
@@ -142,97 +160,52 @@ Code:
 ```ts
 export const sessionMode = pgEnum("session_mode", ["fresh", "resume"]);
 // test_definitions: mode: sessionMode("mode").notNull().default("fresh"),
-// test_runs: pinnedServer: text("pinned_server"),
 ```
 
 - [ ] `npm run db:generate` for the one migration. `Domain.SessionMode` is the enum's twin,
       maintained by hand together.
-- [ ] `ReserveBody.server?` (automation). `ServerStore.listLiveServers("qemu")` already answers url
-      and id; the mint command needs `name` too.
-- [ ] `TestStore`: `createRun` takes `pinnedServer?`; `defineTest` takes `mode`; `findPlacement(resultId)`
-      answers `{ mode, pinnedServer }` from result → run and definition.
-- [ ] `worker.ts` `place`: reads the placement and puts the pin in the `ReserveBody`; the automation
-      client passes it into `ReserveAgentBody.make`.
+- [ ] `TestStore.defineTest` takes `mode`; the definition rows carry it.
 - [ ] `prompts/linear-issue.html`: the start line ends with `{{RESUME}}`, ` --resume` for a `resume`
-      definition and nothing otherwise.
-- [ ] `src/automation-client/opencode.ts`: `CEILING` to `"60 minutes"`; an install-to-desktop drive
-      does not fit thirty.
+      definition and nothing otherwise; `Prompts.Values` gains `RESUME`.
+- [ ] `ctrl.md`: `--mode` on `test define`, synopsis and table of contents.
 
-## 6. ctrl
+## 6. ctrl: one server, and verify
 
 Tests first:
 
-- [ ] `test/ctrl/command.unit.test.ts`: `test define --mode resume` is stored and listed; omitted on
-      a new name is `fresh`; on a known name it is carried forward; a bad mode is refused.
-- [ ] `test/ctrl/command.unit.test.ts`: `mint` creates one pinned run, result and ticket per live
-      qemu server, all of them, and prints the JSON; no live qemu server fails
-      `mint: no live qemu server`; no `mint` definition fails naming `test define`; `--iso` refuses
-      http; `--server-url` falls back to `SERVER_URL`; `--help` touches no service.
-- [ ] `test/ctrl/command.unit.test.ts`: `mint --verify` uses `mint-verify`; `mint --server <url>`
-      creates exactly one ticket and refuses a url that is not a live qemu server.
-- [ ] `test/ctrl/prompts.unit.test.ts`, `linear.unit.test.ts`: the mint ticket names the server and
-      the ISO; `SERVER_URL` is the proxy.
-- [ ] `test/integration/ctrl.integration.test.ts`: `./ctrl mint --help` exits 0; missing
-      `DATABASE_URL` and `LINEAR_API_TOKEN` pin their first stderr lines.
+- [ ] `test/ctrl/command.unit.test.ts`: `mint --server <url>` creates exactly one ticket, for that
+      server; a url that is not a live qemu server is refused before anything is created.
+- [ ] `test/ctrl/command.unit.test.ts`: `mint --verify` uses the `mint-verify` definition and titles
+      its tickets `Omarchy mint-verify: <server url>`; no `mint-verify` definition is refused naming
+      `test define`.
+- [ ] `test/ctrl/prompts.unit.test.ts`: the verify ticket (its own template or the test ticket with
+      `--resume`, to decide) starts with `--resume`, never saves, ends with `stop`.
 
 Code:
 
-```ts
-const mintCommand = Command.make(
-  "mint",
-  {
-    serverUrl: serverUrlFlag,
-    iso: isoFlag, // https only, as test new
-    verify: Flag.boolean("verify").pipe(
-      Flag.withDefault(false),
-      Flag.withDescription("Verify the minted disk on every server instead of minting"),
-    ),
-    server: Flag.string("server").pipe(
-      Flag.withSchema(Domain.ServerUrl),
-      Flag.optional,
-      Flag.withDescription("This qemu server only"),
-    ),
-  },
-  ({ serverUrl, iso, verify, server }) => Effect.gen(function* () { /* below */ }),
-).pipe(Command.withDescription("One pinned mint (or verify) run and ticket per live qemu server"));
-```
-
-Body, in order:
-
-1. Load the newest `mint` (or `mint-verify`) definition; none is
-   `mint: no definition named <name>; define it with ./ctrl test define --name <name> ...`.
-2. The live qemu servers; empty is `mint: no live qemu server`. `--server` narrows to that one,
-   refusing a url not in the list.
-3. Per server: the run with `pinnedServer`, the result, the Linear issue titled
-   `mint <name>: <iso>` (or `verify <name>: <iso>`) with `SERVER_URL` = `--server-url`.
-4. Print the JSON array of `{ runId, resultId, linearId, server }`.
-
-- [ ] `test define --mode`; `mint` as above.
-
-## 7. Docs and data
-
-- [ ] `ctrl.md`: `--mode` on `test define`, a `mint` section, synopsis and table of contents.
-- [ ] Operator data, not code:
-      `./ctrl test define --name mint --description ... --instruction "<install with the fixed user, password and passphrase, reboot, confirm the desktop, ./ctrl test-results success, ./client save>" --proof ...`
-      (a `fresh` definition, the default) and `./ctrl test define --name mint-verify --mode resume ...`;
-      `--mode resume` on every definition that assumes an installed system.
+- [ ] `--server` (optional, `Domain.ServerUrl`) narrows the live list; `--verify` swaps the
+      definition and the template.
+- [ ] `ctrl.md`: the two flags in the `mint` section.
 
 ## Verify
 
-- [ ] `npm run check:fast`; `npm run test:integration` for `qemu-process`, `client`, `ctrl`, `db`,
-      `qemu-server`, `qemu-reverse-proxy`.
+- [x] `npm run check:fast`; `npm run test:integration` for `client` and `ctrl` (#146).
+- [ ] `npm run test:integration` for `qemu-process`, `db`, `qemu-server`, `qemu-reverse-proxy`
+      where Docker exists.
 - [ ] On the QEMU host, by hand through the proxy: reserve and start one `fresh` session with
       `./client`, install, `save`; confirm `<iso>.qcow2` and `<iso>.OVMF_VARS.fd` beside the cached
       ISO; then `start --resume` and confirm the guest boots from the disk without the ISO.
 - [ ] Confirm on the host that the installer's reboot lands on the disk with the ISO still
       attached (OVMF follows its NVRAM entry; `-boot order=d` is a SeaBIOS knob it ignores), and that
-      `system_powerdown` shuts the installed system down from where the driver leaves it.
-- [ ] GPT-5.6 Sol review with the prompt from `development.md`, then ship.
+      `system_powerdown` shuts the installed system down from where the driver leaves it. Then
+      tighten the template's reboot step.
+- [ ] One real `./ctrl mint` against the fleet; read the tickets and the saved disks.
+- [x] GPT-5.6 Sol review with the prompt from `development.md` (#146).
 
 ## Operating recipe, once shipped
 
-1. `./ctrl test define --name mint ...` (a `fresh` definition ending in `./client save`) and
-   `./ctrl test define --name mint-verify --mode resume ...` once.
+1. `./ctrl test define --name mint …` (the install's wording) and, once item 5 lands,
+   `./ctrl test define --name mint-verify --mode resume …`.
 2. `./ctrl mint --server-url <proxy> --iso <url>`: one ticket per server; move them to Automation
    Needed; wait for Done.
 3. `./ctrl mint --verify --server-url <proxy> --iso <url>`: one ticket per server; a failed verdict
