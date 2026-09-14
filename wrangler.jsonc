@@ -19,6 +19,10 @@
     { "pattern": "oligarchy.trm.sh", "custom_domain": true },
     { "pattern": "clicker.oligarchy.trm.sh", "custom_domain": true }
   ],
+  // Daily at 04:00 UTC: the Worker's `scheduled` deletes every row older than thirty days.
+  "triggers": {
+    "crons": ["0 4 * * *"]
+  },
   "placement": {
     "region": "aws:us-east-1"
   },

@@ -79,7 +79,10 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   left open holds a Hyperdrive connection past the response), never calls the qemu server's API, and
   reports route failures with `@sentry/cloudflare` — the one `captureException` outside
   `observability/`, and with the test setup the one place `console.*` is allowed. Nothing below
-  that says Effect applies to it.
+  that says Effect applies to it. Its `scheduled` handler is the retention policy: on the cron in
+  `wrangler.jsonc` it deletes every row older than thirty days in one transaction, a row before
+  the row it references, and leaves configuration (definitions, base prompts, error types, the
+  fleet) alone; a row is history for a month and then gone.
 - Files are kebab-case, one concept per file: `api.ts`, `contract.ts`, `errors.ts`, `config.ts`,
   `main.ts`, `<domain>.ts`. Tests mirror source names under `test/<dir>/<file>.unit.test.ts`;
   anything that spawns a process, opens a socket or needs Docker or QEMU lives under

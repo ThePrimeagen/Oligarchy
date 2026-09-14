@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { app } from "../../src/dashboard/dashboard.tsx";
+import { app, scheduled } from "../../src/dashboard/dashboard.tsx";
+
+const SENTINEL_PASSWORD = "sentinel-secret-pw";
 
 const env = {
-  HYPERDRIVE: { connectionString: "postgres://user:x@127.0.0.1:1/oligarchy" },
+  HYPERDRIVE: { connectionString: `postgres://user:${SENTINEL_PASSWORD}@127.0.0.1:1/oligarchy` },
   OLIGARCHY_TOKEN: "t",
   AUTOMATION_SERVER_URL: "http://automation.test",
 };
@@ -51,5 +53,18 @@ describe("POST /abort unhappy path", () => {
     );
     expect(response.status).toBe(303);
     expect(response.headers.get("location")).toBe("/servers");
+  });
+});
+
+// The cron's failure is thrown, so Cloudflare records the event as failed and Sentry's wrapper
+// reports it; the connection string never reaches the message.
+describe("scheduled unhappy path", () => {
+  it("rejects with the refused connection when the database is unreachable, without the password", async () => {
+    const outcome = await scheduled({ cron: "0 4 * * *" }, env).then(
+      () => "resolved",
+      (error: unknown) => (error instanceof Error ? error.message : String(error)),
+    );
+    expect(outcome).toMatch(/ECONNREFUSED/);
+    expect(outcome).not.toContain(SENTINEL_PASSWORD);
   });
 });
