@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, inject } from "vitest";
 import { it } from "@effect/vitest";
 import { Effect } from "effect";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Client } from "pg";
 import * as DbSchema from "../../src/db/schema.ts";
@@ -479,15 +479,14 @@ describeServing("automation server serving", () => {
   const DEAD_CLIENT = "http://10.0.0.50:1";
   const QUIET_CLIENT = "http://10.0.0.51:1";
   const DEAD_QEMU = "http://10.0.0.52:1";
-  const minutesAgo = (minutes: number): Date => new Date(Date.now() - minutes * 60_000);
 
   it.live(
     "forgets an automation-client silent for ten minutes on its first tick, and leaves a quieter one and the qemu server",
     () =>
       Effect.promise(async () => {
-        await seedServer(DEAD_CLIENT, "automation-client", minutesAgo(11));
-        await seedServer(QUIET_CLIENT, "automation-client", minutesAgo(2));
-        await seedServer(DEAD_QEMU, "qemu", minutesAgo(11));
+        await seedServer(DEAD_CLIENT, "automation-client", "11 minutes");
+        await seedServer(QUIET_CLIENT, "automation-client", "2 minutes");
+        await seedServer(DEAD_QEMU, "qemu", "11 minutes");
         const port = await freePort();
         const process = spawnAutomationServer(["--port", String(port)]);
         try {
@@ -516,14 +515,20 @@ describeServing("automation server serving", () => {
   );
 });
 
-const seedServer = async (url: string, type: "qemu" | "automation-client", heartbeatAt: Date) => {
+// A row whose last heartbeat is `silentFor` (a Postgres interval) ago on the database's clock, the
+// one the sweep measures against.
+const seedServer = async (url: string, type: "qemu" | "automation-client", silentFor: string) => {
   const client = new Client({ connectionString: Postgres.getDbUrl() });
   await client.connect();
   try {
     const db = drizzle({ client, schema: DbSchema });
-    await db
-      .insert(DbSchema.servers)
-      .values({ url, type, heartbeatAt, generation: 1, stats: STATS });
+    await db.insert(DbSchema.servers).values({
+      url,
+      type,
+      heartbeatAt: sql`now() - ${silentFor}::interval`,
+      generation: 1,
+      stats: STATS,
+    });
   } finally {
     await client.end();
   }
