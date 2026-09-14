@@ -977,30 +977,19 @@ app.post("/servers/delete", async (context) => {
   }
 });
 
-// POST /abort stops one job, named by its ticket and action as the page's form posts them, and
-// moves the ticket to Aborted on the board. A pending job has no client to stop: closing its
-// row here is the whole abort, and the dispatcher's next claim no longer finds it. A running
-// job is the automation server's to stop (one job of a ticket runs at a time, so the ticket
-// names it there), and a 200 from that server is the close. A 4xx or 5xx, or no answer at
-// all, closes the running row here so the queue does not stay stuck; Sentry records
+// POST /abort stops one job, named by its ticket and action as the page's form posts them (a
+// ticket has one drive and one diagnose), and moves the ticket to Aborted on the board. A
+// pending job has no client to stop: closing its row here is the whole abort, and the
+// dispatcher's next claim no longer finds it. A running job is the automation server's to
+// stop, and a 200 from that server is the close; it refuses a job that is not the one
+// running for the ticket, so a stale click cannot stop the other. A 4xx or 5xx, or no answer
+// at all, closes the running row here so the queue does not stay stuck; Sentry records
 // "Cloudflare aborted job" only when that write lands. Once a row closed either way the
 // ticket moves; a Linear failure is logged and the row stays closed. This route always
 // answers 200: the operator's click is done either way.
 // OpenCode's force-kill is 5s; ten seconds is that wait plus the round trip. A hung
 // server must not hold the operator's 200.
 const ABORT_TIMEOUT_MS = 10_000;
-
-type AbortTarget = {
-  readonly ticket: string;
-  readonly action: "drive" | "diagnose";
-};
-
-// The row a post names, or nothing when it names less than that: a text ticket and one of the
-// two actions a job has.
-const abortTarget = (ticket: unknown, action: unknown): AbortTarget | undefined =>
-  typeof ticket === "string" && ticket !== "" && (action === "drive" || action === "diagnose")
-    ? { ticket, action }
-    : undefined;
 
 app.post("/abort", async (context) => {
   const wantsQueue = context.req.header("hx-request") === "true";
@@ -1022,19 +1011,25 @@ app.post("/abort", async (context) => {
     return context.redirect("/servers", 303);
   };
   try {
-    let target: AbortTarget | undefined;
+    let ticket: unknown;
+    let action: unknown;
     if (isJson) {
       const body: unknown = await context.req.json();
-      target =
-        typeof body === "object" && body !== null && "ticket" in body && "action" in body
-          ? abortTarget(body.ticket, body.action)
-          : undefined;
+      if (typeof body === "object" && body !== null && "ticket" in body && "action" in body) {
+        ticket = body.ticket;
+        action = body.action;
+      }
     } else {
       const body = await context.req.parseBody();
-      target = abortTarget(body.ticket, body.action);
+      ticket = body.ticket;
+      action = body.action;
     }
-    if (target !== undefined) {
-      const { ticket, action } = target;
+    // A post naming less than a job (a text ticket and one of the two actions) does nothing.
+    if (
+      typeof ticket === "string" &&
+      ticket !== "" &&
+      (action === "drive" || action === "diagnose")
+    ) {
       let closed = false;
       try {
         closed = await abortAutomationJob(
@@ -1055,7 +1050,7 @@ app.post("/abort", async (context) => {
               authorization: `Bearer ${context.env.OLIGARCHY_TOKEN}`,
               "content-type": "application/json",
             },
-            body: JSON.stringify({ ticket }),
+            body: JSON.stringify({ ticket, action }),
             signal: AbortSignal.timeout(ABORT_TIMEOUT_MS),
           });
           closed = response.status === 200;

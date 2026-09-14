@@ -45,6 +45,20 @@ const byIdentifier = <Id extends string, Groups extends HttpApiGroup.Constraint>
 const ascending = (statuses: ReadonlyArray<number>): ReadonlyArray<number> =>
   [...statuses].sort((a, b) => a - b);
 
+// The required fields of an api's POST /abort body, read off the schema its request body refers to.
+const abortBodyFields = (spec: OpenApi.OpenAPISpec): ReadonlyArray<string> => {
+  const schema = spec.paths["/abort"]?.post?.requestBody?.content["application/json"]?.schema;
+  const ref = schema !== undefined && "$ref" in schema ? schema.$ref : undefined;
+  if (typeof ref !== "string") {
+    throw new Error("POST /abort has no body schema");
+  }
+  const body = spec.components?.schemas[ref.replace("#/components/schemas/", "")];
+  const required = body !== undefined && "required" in body ? body.required : undefined;
+  return Array.isArray(required)
+    ? required.map(String).sort((left, right) => left.localeCompare(right))
+    : [];
+};
+
 // The OpenAPI operation of a path item for a method the apis use; none for any other method.
 const operationOf = (
   item: OpenApi.OpenAPISpec["paths"][string] | undefined,
@@ -293,6 +307,11 @@ describe("AutomationServerApi", () => {
     expect(abort.middleware).toEqual([Api.BearerAuth.key, Api.ApiBoundary.key]);
     expect(spec.paths["/abort"]?.post?.security).toEqual([{ bearer: [] }]);
     expect(abort.errors).toEqual([400, 401, 404, 500]);
+  });
+
+  it("names the job to abort by ticket and action, where the client's abort takes the ticket alone", () => {
+    expect(abortBodyFields(OpenApi.fromApi(automation))).toEqual(["action", "ticket"]);
+    expect(abortBodyFields(OpenApi.fromApi(Api.AutomationClientApi))).toEqual(["ticket"]);
   });
 
   it("is its own api: neither the qemu server nor the qemu reverse proxy answers /linear", () => {

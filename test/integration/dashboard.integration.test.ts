@@ -1718,7 +1718,7 @@ describe("dashboard POST /abort happy path: the outbound calls", () => {
           method: "POST",
           url: "/abort",
           authorization: `Bearer ${TOKEN}`,
-          body: { ticket: "ABT-FORM" },
+          body: { ticket: "ABT-FORM", action: "drive" },
         },
       ]);
       expect(linear.requests).toEqual(linearMove("ABT-FORM"));
@@ -1744,7 +1744,7 @@ describe("dashboard POST /abort happy path: the outbound calls", () => {
           method: "POST",
           url: "/abort",
           authorization: `Bearer ${TOKEN}`,
-          body: { ticket: "ABT-200" },
+          body: { ticket: "ABT-200", action: "drive" },
         },
       ]);
       expect(linear.requests).toEqual(linearMove("ABT-200"));
@@ -1773,7 +1773,7 @@ describe.skipIf(dbUrl === "")("dashboard POST /abort happy path", () => {
           method: "POST",
           url: "/abort",
           authorization: `Bearer ${TOKEN}`,
-          body: { ticket: "ABT-200" },
+          body: { ticket: "ABT-200", action: "drive" },
         },
       ]);
       expect((await jobByTicket(dbUrl, "ABT-200")).status).toBe("running");
@@ -1845,12 +1845,41 @@ describe.skipIf(dbUrl === "")("dashboard POST /abort happy path", () => {
           method: "POST",
           url: "/abort",
           authorization: `Bearer ${TOKEN}`,
-          body: { ticket: "ABT-SIB-2" },
+          body: { ticket: "ABT-SIB-2", action: "drive" },
         },
       ]);
       expect((await jobByTicket(dbUrl, "ABT-SIB-2", "diagnose")).status).toBe("pending");
       expect((await jobByTicket(dbUrl, "ABT-SIB-2", "drive")).status).toBe("running");
       expect(linear.requests).toEqual(linearMove("ABT-SIB-2"));
+    } finally {
+      await proxy.close();
+      await linear.close();
+    }
+  });
+
+  it("leaves the running drive alone when the pending diagnose it already closed is aborted again", async () => {
+    // The automation server refuses the second post as the real one does: the ticket's running
+    // job is its drive, not the diagnose named.
+    const proxy = await StubProxy.startStubProxy(() =>
+      StubProxy.refusal(400, 'ticket "ABT-SIB-3" is running a drive, not a diagnose'),
+    );
+    const linear = await StubProxy.startStubProxy(linearAnswering());
+    try {
+      await seed(dbUrl, (db) => seedSiblings(db, "abort-sibling-again", "ABT-SIB-3"));
+      const env = { databaseUrl: dbUrl, automationUrl: proxy.url, linearUrl: linear.url };
+      expect((await postAbort("ABT-SIB-3", env, "diagnose")).status).toBe(200);
+      expect((await postAbort("ABT-SIB-3", env, "diagnose")).status).toBe(200);
+      expect((await jobByTicket(dbUrl, "ABT-SIB-3", "diagnose")).status).toBe("aborted");
+      expect((await jobByTicket(dbUrl, "ABT-SIB-3", "drive")).status).toBe("running");
+      expect(proxy.requests).toEqual([
+        {
+          method: "POST",
+          url: "/abort",
+          authorization: `Bearer ${TOKEN}`,
+          body: { ticket: "ABT-SIB-3", action: "diagnose" },
+        },
+      ]);
+      expect(linear.requests).toEqual(linearMove("ABT-SIB-3"));
     } finally {
       await proxy.close();
       await linear.close();
