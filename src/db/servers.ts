@@ -90,6 +90,22 @@ export class ServerStore extends Context.Service<ServerStore>()("@oligarchy/db/S
       );
     });
 
+    // The rows of servers that stopped announcing themselves, of every kind: ten minutes without
+    // a heartbeat is twenty missed writes, a server that is not coming back on its own. A row
+    // nobody claimed counts from its creation, so an operator's typo goes the same way. Every
+    // announcing server runs this each tick; a row is deleted once, and named to whoever did.
+    const removeStaleServers = Effect.fn("db.removeStaleServers")(function* () {
+      const rows = yield* database.run("removeStaleServers", (db) =>
+        db
+          .delete(DbSchema.servers)
+          .where(
+            sql`coalesce(${DbSchema.servers.heartbeatAt}, ${DbSchema.servers.createdAt}) < now() - interval '10 minutes'`,
+          )
+          .returning({ url: DbSchema.servers.url }),
+      );
+      return rows.map((row) => row.url);
+    });
+
     const findServer = Effect.fn("db.findServer")(function* (id: string) {
       const rows = yield* database.run("findServer", (db) =>
         db
@@ -148,6 +164,7 @@ export class ServerStore extends Context.Service<ServerStore>()("@oligarchy/db/S
       removeServer,
       listServers,
       listLiveServers,
+      removeStaleServers,
       findServer,
       routeSession,
       serverForSession,
