@@ -91,9 +91,9 @@ export class ServerStore extends Context.Service<ServerStore>()("@oligarchy/db/S
     });
 
     // The rows of one kind whose servers stopped announcing themselves: ten minutes without a
-    // heartbeat is twenty missed writes, a server that is not coming back on its own. A row
-    // nobody claimed counts from its creation, so an operator's typo goes the same way. The urls
-    // deleted come back, one line each for whoever swept.
+    // heartbeat is twenty missed writes. The row goes; a server that does come back writes a new
+    // one on its next heartbeat. A row nobody claimed counts from its creation, so an operator's
+    // typo goes the same way. The urls deleted come back, one line each for whoever swept.
     const removeStaleServers = Effect.fn("db.removeStaleServers")(function* (type: ServerType) {
       const rows = yield* database.run("removeStaleServers", (db) =>
         db

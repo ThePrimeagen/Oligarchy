@@ -145,6 +145,35 @@ describe("stale servers unhappy path", () => {
       }),
   );
 
+  it.effect("a close during a sweep that then fails still records the failure", () =>
+    Effect.gen(function* () {
+      const deleting = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const store = Stores.fakeServerStore({
+        removeStaleServers: () =>
+          Effect.gen(function* () {
+            yield* Deferred.succeed(deleting, undefined);
+            yield* Deferred.await(release);
+            return yield* Effect.fail(refused);
+          }),
+      });
+      const { scope, log } = yield* start(store);
+      yield* Deferred.await(deleting);
+      const closed = yield* Effect.forkChild(Scope.close(scope, Exit.void));
+      yield* Effect.yieldNow;
+      expect(closed.pollUnsafe()).toBeUndefined();
+      yield* Deferred.succeed(release, undefined);
+      yield* Fiber.join(closed);
+      expect(log.lines).toMatchObject([
+        {
+          level: "error",
+          text: "stale server cleanup failed: connect ECONNREFUSED 127.0.0.1:5432",
+          cause: refused,
+        },
+      ]);
+    }),
+  );
+
   it.effect("a defect in the sweep is logged the same way, and the loop goes on", () =>
     Effect.gen(function* () {
       const boom = new Error("store exploded");
