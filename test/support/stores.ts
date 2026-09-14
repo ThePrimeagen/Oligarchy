@@ -613,14 +613,17 @@ export const fakeAutomationStore = (
       }),
     listJobs: (count) =>
       Effect.sync(() => {
+        const queriedAt = new Date();
         const listed = (job: FakeAutomationJob): Automation.AutomationJobListRow => ({
           ticket: job.ticket ?? null,
           test: job.test ?? "",
           action: job.action,
           status: job.status,
+          reason: job.reason,
           createdAt: job.createdAt,
           startedAt: job.startedAt,
           finishedAt: job.finishedAt,
+          queriedAt,
         });
         const diagnoseFirst = (left: FakeAutomationJob, right: FakeAutomationJob) => {
           if (left.action !== right.action) {
@@ -731,6 +734,26 @@ export const fakeServerStore = (
       Effect.sync(() =>
         servers.filter((server) => server.type === type).map((server) => server.url),
       ),
+    // What the real row would hold after the heartbeats written here: the generation counts
+    // them, the stats are the last one's, and a url nobody announced has neither.
+    listFleet: () =>
+      Effect.sync(() => {
+        const queriedAt = new Date();
+        return servers
+          .filter((server) => server.type === "qemu")
+          .map((server) => {
+            const beats = heartbeats.filter((beat) => beat.url === server.url);
+            const last = beats.at(-1);
+            return {
+              url: server.url,
+              name: server.name,
+              stats: last === undefined ? null : last.stats,
+              generation: beats.length,
+              heartbeatAt: last === undefined ? null : queriedAt,
+              queriedAt,
+            };
+          });
+      }),
     // Any heartbeat marks the url live: the 45s window is a real-database concern.
     listLiveServers: (type) =>
       Effect.sync(() =>
@@ -795,6 +818,12 @@ export type FakeProcessStatsStore = {
   readonly layer: Layer.Layer<Process.ProcessStatsStore>;
 };
 
+// qemu before automation-client, as the enum declares them and the real order by reads them.
+const KIND_ORDER: Readonly<Record<Servers.ServerType, number>> = {
+  qemu: 0,
+  "automation-client": 1,
+};
+
 export const fakeProcessStatsStore = (
   overrides: Partial<typeof Process.ProcessStatsStore.Service> = {},
 ): FakeProcessStatsStore => {
@@ -803,6 +832,29 @@ export const fakeProcessStatsStore = (
     report: (name, type, stats) =>
       Effect.sync(() => {
         reports.push({ name, type, stats });
+      }),
+    // The last report per name and kind, by kind then name, stamped now: the fake keeps no clock.
+    listNewest: () =>
+      Effect.sync(() => {
+        const queriedAt = new Date();
+        const newest = new Map<string, ProcessReport>();
+        for (const report of reports) {
+          newest.set(`${report.type} ${report.name}`, report);
+        }
+        return [...newest.values()]
+          .sort(
+            (left, right) =>
+              KIND_ORDER[left.type] - KIND_ORDER[right.type] || left.name.localeCompare(right.name),
+          )
+          .map((report) => ({
+            name: report.name,
+            type: report.type,
+            jobs: report.stats.jobs,
+            memoryBytes: report.stats.memoryBytes,
+            cpuPercent: report.stats.cpuPercent,
+            reportedAt: queriedAt,
+            queriedAt,
+          }));
       }),
     ...overrides,
   });

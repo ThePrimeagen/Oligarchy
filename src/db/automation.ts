@@ -7,14 +7,20 @@ export type AutomationJobRow = typeof DbSchema.automationJobs.$inferSelect;
 export type AutomationAction = AutomationJobRow["action"];
 export type FinishStatus = "succeeded" | "failed" | "aborted";
 
+// One job with the ticket and test it is for, its three stamps, the reason it closed with, and
+// the database's clock at the read, so an age is measured against the clock that wrote the
+// stamp. ticket is null for a result nobody has ticketed; started_at and finished_at are null
+// until the job reaches that point; reason is null until a close writes one.
 export type AutomationJobListRow = {
   readonly ticket: string | null;
   readonly test: string;
   readonly action: AutomationJobRow["action"];
   readonly status: AutomationJobRow["status"];
+  readonly reason: string | null;
   readonly createdAt: Date;
   readonly startedAt: Date | null;
   readonly finishedAt: Date | null;
+  readonly queriedAt: Date;
 };
 
 export type AutomationQueue = {
@@ -176,9 +182,11 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
           test: DbSchema.testDefinitions.name,
           action: DbSchema.automationJobs.action,
           status: DbSchema.automationJobs.status,
+          reason: DbSchema.automationJobs.reason,
           createdAt: DbSchema.automationJobs.createdAt,
           startedAt: DbSchema.automationJobs.startedAt,
           finishedAt: DbSchema.automationJobs.finishedAt,
+          queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(DbSchema.automationJobs.createdAt),
         };
         const diagnosesFirst = desc(sql`${DbSchema.automationJobs.action} = ${"diagnose"}`);
         const jobs = (db: Client.Db) =>

@@ -1277,9 +1277,17 @@ Postgres.describeWithDatabase("database", () => {
             ["LST-106", "diagnose", "lock-screen"],
             ["LST-105", "drive", "lock-screen"],
           ]);
-          expect(listed.completed.map((job) => [job.ticket, job.status])).toEqual([
-            ["LST-102", "failed"],
+          expect(listed.completed.map((job) => [job.ticket, job.status, job.reason])).toEqual([
+            ["LST-102", "failed", "nope"],
           ]);
+          // Every row carries the clock its stamps are read against, and no reason until a close
+          // wrote one.
+          for (const job of [...listed.running, ...listed.pending, ...listed.completed]) {
+            expect(job.queriedAt).toBeInstanceOf(Date);
+            expect(job.queriedAt.getTime() - job.createdAt.getTime()).toBeGreaterThanOrEqual(0);
+            expect(job.queriedAt.getTime() - job.createdAt.getTime()).toBeLessThan(10_000);
+          }
+          expect(listed.running.map((job) => job.reason)).toEqual([null, null]);
           const more = yield* automation.listJobs(10);
           expect(more.completed.map((job) => job.ticket)).toEqual(["LST-102", "LST-101"]);
           expect(more.running).toHaveLength(2);
@@ -1664,6 +1672,45 @@ Postgres.describeWithDatabase("database", () => {
     );
 
     scoped.effect(
+      "ProcessStatsStore listNewest answers the newest reading per name and kind, qemu before automation-client then by name, with the database clock",
+      () =>
+        Effect.gen(function* () {
+          const store = yield* ProcessStats.ProcessStatsStore;
+          const database = yield* Client.Database;
+          const suffix = uuid().slice(0, 8);
+          const qemuName = `newest-qemu-${suffix}`;
+          const clientName = `newest-client-${suffix}`;
+          yield* store.report(qemuName, "qemu", { jobs: 1, memoryBytes: 100, cpuPercent: 10 });
+          // The first reading a minute back, so the order cannot hinge on two now() in one tick.
+          yield* database.run("stamp", (db) =>
+            db.execute(
+              sql`update process_stats set reported_at = now() - interval '1 minute' where name = ${qemuName}`,
+            ),
+          );
+          yield* store.report(qemuName, "qemu", { jobs: 2, memoryBytes: 200, cpuPercent: 20 });
+          yield* store.report(clientName, "automation-client", {
+            jobs: 3,
+            memoryBytes: 300,
+            cpuPercent: 30,
+          });
+          const newest = yield* store.listNewest();
+          const mine = newest.filter((row) => row.name === qemuName || row.name === clientName);
+          expect(
+            mine.map((row) => [row.name, row.type, row.jobs, row.memoryBytes, row.cpuPercent]),
+          ).toEqual([
+            [qemuName, "qemu", 2, 200, 20],
+            [clientName, "automation-client", 3, 300, 30],
+          ]);
+          for (const row of mine) {
+            expect(row.reportedAt).toBeInstanceOf(Date);
+            expect(row.queriedAt).toBeInstanceOf(Date);
+            expect(row.queriedAt.getTime() - row.reportedAt.getTime()).toBeGreaterThanOrEqual(0);
+            expect(row.queriedAt.getTime() - row.reportedAt.getTime()).toBeLessThan(10_000);
+          }
+        }),
+    );
+
+    scoped.effect(
       "ProcessStatsStore inserts without a servers row, so a forgotten host still leaves a reading",
       () =>
         Effect.gen(function* () {
@@ -1677,6 +1724,55 @@ Postgres.describeWithDatabase("database", () => {
           expect(rows).toMatchObject([
             { name, type: "qemu", jobs: 0, memoryBytes: 1, cpuPercent: 0 },
           ]);
+        }),
+    );
+
+    scoped.effect(
+      "ServerStore listFleet lists the qemu servers in registration order with what each last said, its generation, its heartbeat and the database clock, and never an automation-client",
+      () =>
+        Effect.gen(function* () {
+          const store = yield* Servers.ServerStore;
+          const claimed = `http://10.0.0.50:${uuid().slice(0, 8)}`;
+          const quiet = `http://10.0.0.51:${uuid().slice(0, 8)}`;
+          const client = `http://10.0.0.52:${uuid().slice(0, 8)}`;
+          const first: DbSchema.ServerStats = {
+            qemus: 1,
+            memory: { totalBytes: 16_000, usedBytes: 4_000 },
+            cpu: { mean1m: 22.3, mean2m: 21.4, mean3m: 20.9 },
+          };
+          const second: DbSchema.ServerStats = { ...first, qemus: 2 };
+          const name = `fleet-${claimed.slice(-8)}`;
+          yield* store.heartbeat(claimed, "qemu", name, first);
+          yield* store.heartbeat(claimed, "qemu", name, second);
+          yield* store.addServer(quiet, "qemu");
+          yield* store.heartbeat(
+            client,
+            "automation-client",
+            `fleet-client-${client.slice(-8)}`,
+            first,
+          );
+          const fleet = yield* store.listFleet();
+          const mine = fleet.filter((row) => [claimed, quiet, client].includes(row.url));
+          expect(mine.map((row) => row.url)).toEqual([claimed, quiet]);
+          const [announced, added] = mine;
+          expect(announced).toMatchObject({ url: claimed, name, stats: second, generation: 2 });
+          expect(announced?.heartbeatAt).toBeInstanceOf(Date);
+          expect(announced?.queriedAt).toBeInstanceOf(Date);
+          const sinceHeartbeat =
+            (announced?.queriedAt.getTime() ?? 0) - (announced?.heartbeatAt?.getTime() ?? 0);
+          expect(sinceHeartbeat).toBeGreaterThanOrEqual(0);
+          expect(sinceHeartbeat).toBeLessThan(10_000);
+          expect(added).toMatchObject({
+            url: quiet,
+            name: null,
+            stats: null,
+            generation: 0,
+            heartbeatAt: null,
+          });
+          expect(added?.queriedAt).toBeInstanceOf(Date);
+          expect(yield* store.removeServer(claimed)).toBe(true);
+          expect(yield* store.removeServer(quiet)).toBe(true);
+          expect(yield* store.removeServer(client)).toBe(true);
         }),
     );
 
