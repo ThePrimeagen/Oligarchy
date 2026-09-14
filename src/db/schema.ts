@@ -213,9 +213,10 @@ export type ServerStats = {
 // filled the rows that predate the column with — qemu servers were the only kind there was.
 // automation-client is the other kind: same heartbeat, listed apart from the qemu fleet. id is
 // the stable handle a job stores when it is claimed, and what its abort looks the client up by;
-// a client silent for ten minutes is gone, its jobs with it. url remains the key a heartbeat
-// upserts on. name is what the operator called the machine (--name); null on a row nobody has
-// claimed yet.
+// a job still running on a client silent for ten minutes keeps that id and can no longer be
+// aborted this way — the client is gone, or as good as. url remains the key a heartbeat upserts
+// on. name is what the operator called the machine (--name); null on a row nobody has claimed
+// yet.
 export const servers = pgTable(
   "servers",
   {
