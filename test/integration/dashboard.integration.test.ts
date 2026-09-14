@@ -2159,4 +2159,19 @@ describe("dashboard/query deleteOldRows unhappy path: unreachable database", () 
     expect(result.stderr).toMatch(/ECONNREFUSED/);
     expect(result.stderr).not.toContain(SENTINEL_PASSWORD);
   });
+
+  // The cron's failure is thrown, so Cloudflare records the event as failed and Sentry's wrapper
+  // reports it; the connection string never reaches the message.
+  it("the scheduled handler rejects with the refused connection, without echoing the password", async () => {
+    const outcome = await scheduled(CRON, {
+      HYPERDRIVE: { connectionString: REFUSED_URL },
+      OLIGARCHY_TOKEN: TOKEN,
+      AUTOMATION_SERVER_URL: "http://127.0.0.1:1",
+    }).then(
+      () => "resolved",
+      (error: unknown) => (error instanceof Error ? error.message : String(error)),
+    );
+    expect(outcome).toMatch(/ECONNREFUSED/);
+    expect(outcome).not.toContain(SENTINEL_PASSWORD);
+  });
 });
