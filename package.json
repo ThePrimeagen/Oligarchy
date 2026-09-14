@@ -4,13 +4,15 @@
   "bin": {
     "client": "src/client/main.ts",
     "ctrl": "src/ctrl/main.ts",
-    "session": "src/session/main.ts"
+    "session": "src/session/main.ts",
+    "viz": "src/viz/main.ts"
   },
   "type": "module",
   "scripts": {
     "client": "node --experimental-strip-types src/client/main.ts",
     "ctrl": "node --experimental-strip-types src/ctrl/main.ts",
     "session": "node --experimental-strip-types src/session/main.ts",
+    "viz": "node --experimental-strip-types src/viz/main.ts",
     "qemu-server": "node --experimental-strip-types --import ./src/observability/instrument.ts src/qemu-server/main.ts",
     "qemu-reverse-proxy": "node --experimental-strip-types --import ./src/observability/instrument.ts src/qemu-reverse-proxy/main.ts",
     "automation-server": "node --experimental-strip-types --import ./src/observability/instrument.ts src/automation-server/main.ts",

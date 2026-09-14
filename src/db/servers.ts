@@ -11,6 +11,18 @@ export type LiveServer = {
   readonly url: string;
 };
 
+// One server of the qemu fleet with what it last said of itself, and the database's clock at
+// the read, so a heartbeat's age is measured against the clock that stamped it. stats and
+// heartbeat_at are null together, for a row an operator added that no server has claimed.
+export type FleetServer = {
+  readonly url: string;
+  readonly name: string | null;
+  readonly stats: DbSchema.ServerStats | null;
+  readonly generation: number;
+  readonly heartbeatAt: Date | null;
+  readonly queriedAt: Date;
+};
+
 export class ServerStore extends Context.Service<ServerStore>()("@oligarchy/db/ServerStore", {
   make: Effect.gen(function* () {
     const database = yield* Client.Database;
@@ -71,6 +83,26 @@ export class ServerStore extends Context.Service<ServerStore>()("@oligarchy/db/S
           .orderBy(DbSchema.servers.createdAt, DbSchema.servers.url),
       );
       return rows.map((row) => row.url);
+    });
+
+    // The qemu fleet as the servers page lists it, in registration order. Automation clients
+    // share the table and are read through their process stats instead.
+    const listFleet = Effect.fn("db.listFleet")(function* () {
+      const rows: ReadonlyArray<FleetServer> = yield* database.run("listFleet", (db) =>
+        db
+          .select({
+            url: DbSchema.servers.url,
+            name: DbSchema.servers.name,
+            stats: DbSchema.servers.stats,
+            generation: DbSchema.servers.generation,
+            heartbeatAt: DbSchema.servers.heartbeatAt,
+            queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(DbSchema.servers.createdAt),
+          })
+          .from(DbSchema.servers)
+          .where(eq(DbSchema.servers.type, "qemu"))
+          .orderBy(DbSchema.servers.createdAt, DbSchema.servers.url),
+      );
+      return rows;
     });
 
     // Clients write every 30s; 45s is one missed beat plus a little. A null heartbeat is
@@ -166,6 +198,7 @@ export class ServerStore extends Context.Service<ServerStore>()("@oligarchy/db/S
       heartbeat,
       removeServer,
       listServers,
+      listFleet,
       listLiveServers,
       removeStaleServers,
       findServer,
