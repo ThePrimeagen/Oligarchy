@@ -85,9 +85,9 @@ In the order to do it. Each item's tests are listed under its section below.
    NVRAM entry; `-boot order=d` is a SeaBIOS knob it ignores), and whether `system_powerdown` shuts
    the installed system down from where the driver leaves it. Tighten the template's reboot step
    to what is seen. Also whether 45 minutes of opencode ceiling fits an install; the plan said 60.
-3. **`resume` definitions** (section 5): `test_definitions.mode`, `test define --mode resume`, and
-   `--resume` on the start line of a `resume` definition's ticket. Without this nothing boots the
-   minted disks; this is the payoff.
+3. ~~`resume` definitions~~ Done more simply: every test ticket's start line carries `--resume`
+   (`prompts/linear-issue.html`), the mint ticket is the only fresh start, and the ticket states the
+   minted account (`prime`). No `mode` column, no flag, no placeholder.
 4. **`mint --server <url>`** (section 6): redo one server whose mint failed, without ticketing the
    fleet. Small: narrow the live list to that url, refuse one not in it.
 5. **`mint --verify`** (section 6): a `mint-verify` `resume` definition and a ticket per server that
@@ -122,9 +122,10 @@ board, and the redo is item 4.
   second look before the disk is kept, `save` instead of `stop`, and the verdict recorded from what
   `save` answered so a failed save can never sit under a success. Every way out closes the result.
   The `mint` definition holds only the install's wording (credentials, proof).
-- The `mint-verify` definition is a `resume` definition that logs in and confirms the desktop. Every
-  test that assumes an installed system is `--mode resume`, and its ticket's start line carries
-  `--resume`.
+- Every test resumes. The test ticket's start line carries `--resume` for every definition, and the
+  ticket states the account the mint created (user, password and disk passphrase `prime`); the mint
+  ticket is the only fresh start. There is no per-definition mode: a test that needs a blank machine
+  is not a thing this fleet runs. `mint-verify` is a test like any other: log in, confirm the desktop.
 - Sequencing (mint, then verify, then redo a failed server with `./ctrl mint --server <url>`) is the
   operator's or the super-run script's. Nothing coordinates a campaign.
 
@@ -146,28 +147,7 @@ The mint driver sees these through `./client reserve`; the ticket tells it what 
 
 ## 5. Resume definitions
 
-Tests first:
-
-- [ ] `test/integration/db.integration.test.ts`: `test_definitions.mode` defaults `fresh` and
-      round-trips `resume`.
-- [ ] `test/ctrl/command.unit.test.ts`: `test define --mode resume` is stored and listed; omitted on
-      a new name is `fresh`; on a known name it is carried forward; a bad mode is refused.
-- [ ] `test/ctrl/prompts.unit.test.ts`, `linear.unit.test.ts`: a `resume` definition's ticket has
-      `--resume` on its start line, a `fresh` one does not.
-
-Code:
-
-```ts
-export const sessionMode = pgEnum("session_mode", ["fresh", "resume"]);
-// test_definitions: mode: sessionMode("mode").notNull().default("fresh"),
-```
-
-- [ ] `npm run db:generate` for the one migration. `Domain.SessionMode` is the enum's twin,
-      maintained by hand together.
-- [ ] `TestStore.defineTest` takes `mode`; the definition rows carry it.
-- [ ] `prompts/linear-issue.html`: the start line ends with `{{RESUME}}`, ` --resume` for a `resume`
-      definition and nothing otherwise; `Prompts.Values` gains `RESUME`.
-- [ ] `ctrl.md`: `--mode` on `test define`, synopsis and table of contents.
+Superseded: every test ticket starts `--resume` (see What's left, 3). Nothing to build.
 
 ## 6. ctrl: one server, and verify
 
@@ -178,8 +158,8 @@ Tests first:
 - [ ] `test/ctrl/command.unit.test.ts`: `mint --verify` uses the `mint-verify` definition and titles
       its tickets `Omarchy mint-verify: <server url>`; no `mint-verify` definition is refused naming
       `test define`.
-- [ ] `test/ctrl/prompts.unit.test.ts`: the verify ticket (its own template or the test ticket with
-      `--resume`, to decide) starts with `--resume`, never saves, ends with `stop`.
+- [ ] `mint --verify` tickets are test tickets (`linear-issue.html`): they start with `--resume`,
+      never save, end with `stop`.
 
 Code:
 
@@ -204,8 +184,8 @@ Code:
 
 ## Operating recipe, once shipped
 
-1. `./ctrl test define --name mint …` (the install's wording) and, once item 5 lands,
-   `./ctrl test define --name mint-verify --mode resume …`.
+1. `./ctrl test define --name mint …` (the install's wording; done, v1) and, once `--verify` lands,
+   `./ctrl test define --name mint-verify …` (log in, confirm the desktop).
 2. `./ctrl mint --server-url <proxy> --iso <url>`: one ticket per server; move them to Automation
    Needed; wait for Done.
 3. `./ctrl mint --verify --server-url <proxy> --iso <url>`: one ticket per server; a failed verdict
