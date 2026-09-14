@@ -235,11 +235,20 @@ describe("Queue happy path", () => {
     expect(page).not.toContain(">abort</button>");
   });
 
-  it("shows a pending job as queued and not yet started or finished", async () => {
+  it("shows a pending job as queued and not yet started or finished, with the same abort", async () => {
     const page = await render(Queue({ queue: { ...EMPTY_QUEUE, pending: [pending] } }));
     expect(page).toContain(
-      "<tr><td>OLI-62</td><td>install</td><td>drive</td><td>pending</td><td>7 s ago</td><td>—</td><td>—</td><td></td><td></td></tr>",
+      `<tr><td>OLI-62</td><td>install</td><td>drive</td><td>pending</td><td>7 s ago</td><td>—</td><td>—</td><td></td><td>${abortForm("OLI-62")}</td></tr>`,
     );
+  });
+
+  it("puts the red X on a pending job that has a ticket, posting to the same route as a running one", async () => {
+    const page = await render(
+      Queue({ queue: { running: [running], pending: [pending], completed: [] } }),
+    );
+    expect(page).toContain(abortForm("OLI-62"));
+    expect(page.match(/action="\/abort"/g)?.length).toBe(2);
+    expect(page.match(/hx-confirm="are you sure\?"/g)?.length).toBe(2);
   });
 
   it("shows a completed job's terminal status, when it finished, and the reason it closed with", async () => {
@@ -271,13 +280,16 @@ describe("Queue unhappy path", () => {
     expect(page).toContain("<tr><td>—</td><td>install</td><td>drive</td><td>pending</td>");
   });
 
-  it("offers no abort on pending, completed, or a running job with no ticket", async () => {
+  it("offers no abort on completed, or on a running or pending job with no ticket", async () => {
     const page = await render(
       Queue({
         queue: {
           running: [{ ...running, ticket: null }],
-          pending: [pending],
-          completed: [failed],
+          pending: [{ ...pending, ticket: null }],
+          completed: [
+            failed,
+            { ...failed, ticket: "OLI-59", status: "aborted", reason: "aborted" },
+          ],
         },
       }),
     );

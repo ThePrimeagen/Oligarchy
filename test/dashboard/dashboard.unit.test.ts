@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { app } from "../../src/dashboard/dashboard.tsx";
 
+// Nothing here names a ticket, so no server, database or Linear is reached: every url refuses.
 const env = {
   HYPERDRIVE: { connectionString: "postgres://user:x@127.0.0.1:1/oligarchy" },
   OLIGARCHY_TOKEN: "t",
-  AUTOMATION_SERVER_URL: "http://automation.test",
+  AUTOMATION_SERVER_URL: "http://127.0.0.1:1",
+  LINEAR_API_URL: "http://127.0.0.1:1",
+  LINEAR_API_TOKEN: "lin_api_x",
 };
 
 const abort = (body: string | Record<string, unknown>) =>

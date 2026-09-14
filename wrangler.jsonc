@@ -26,7 +26,9 @@
   "placement": {
     "region": "aws:us-east-1"
   },
+  // LINEAR_API_TOKEN, the key POST /abort moves a ticket with, is a wrangler secret beside these.
   "vars": {
-    "AUTOMATION_SERVER_URL": "https://oligarchy-automation.trm.sh"
+    "AUTOMATION_SERVER_URL": "https://oligarchy-automation.trm.sh",
+    "LINEAR_API_URL": "https://api.linear.app/graphql"
   }
 }

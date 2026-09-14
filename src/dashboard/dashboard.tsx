@@ -33,13 +33,14 @@ import {
 } from "./query.ts";
 import { clickerPage } from "./clicker.ts";
 import { HTMX_INTEGRITY, HTMX_URL } from "./htmx.ts";
+import { abortLinearIssue, type LinearEnv } from "./linear.ts";
 import { Fleet, type Halves, Process, Queue, ServersPage } from "./servers.tsx";
 import { SENTRY_DSN } from "../observability/dsn.ts";
 
 const errorMessage = (cause: unknown): string =>
   cause instanceof Error ? cause.message : String(cause);
 
-type Bindings = {
+type Bindings = LinearEnv & {
   HYPERDRIVE: {
     connectionString: string;
   };
@@ -976,10 +977,14 @@ app.post("/servers/delete", async (context) => {
   }
 });
 
-// POST /abort asks the automation server to stop the running job for a ticket. A 200 from
-// that server is the close. A 4xx or 5xx, or no answer at all, closes a running row here
-// so the queue does not stay stuck; Sentry records "Cloudflare aborted job" only when
-// that write lands. This route always answers 200: the operator's click is done either way.
+// POST /abort stops the job for a ticket and moves the ticket to Aborted on the board. A
+// pending job has no client to stop: closing its row here is the whole abort, and the
+// dispatcher's next claim no longer finds it. A running job is the automation server's to
+// stop, and a 200 from that server is the close. A 4xx or 5xx, or no answer at all, closes
+// the running row here so the queue does not stay stuck; Sentry records "Cloudflare aborted
+// job" only when that write lands. Once a row closed either way the ticket moves; a Linear
+// failure is logged and the row stays closed. This route always answers 200: the operator's
+// click is done either way.
 // OpenCode's force-kill is 5s; ten seconds is that wait plus the round trip. A hung
 // server must not hold the operator's 200.
 const ABORT_TIMEOUT_MS = 10_000;
@@ -1020,34 +1025,62 @@ app.post("/abort", async (context) => {
       ticket = typeof body.ticket === "string" && body.ticket !== "" ? body.ticket : undefined;
     }
     if (ticket !== undefined) {
-      let closedByServer = false;
+      let closed = false;
       try {
-        const response = await fetch(new URL("/abort", context.env.AUTOMATION_SERVER_URL), {
-          method: "POST",
-          headers: {
-            authorization: `Bearer ${context.env.OLIGARCHY_TOKEN}`,
-            "content-type": "application/json",
-          },
-          body: JSON.stringify({ ticket }),
-          signal: AbortSignal.timeout(ABORT_TIMEOUT_MS),
-        });
-        closedByServer = response.status === 200;
-        if (!closedByServer) {
-          console.error(
-            `dashboard: aborting a job: automation server returned ${String(response.status)}`,
-          );
-        }
+        closed = await abortAutomationJob(
+          context.env.HYPERDRIVE.connectionString,
+          ticket,
+          "pending",
+        );
       } catch (error) {
+        Sentry.captureException(error);
         console.error("dashboard: aborting a job:", errorMessage(error));
       }
-      if (!closedByServer) {
+      if (!closed) {
         try {
-          if (await abortAutomationJob(context.env.HYPERDRIVE.connectionString, ticket)) {
+          const response = await fetch(new URL("/abort", context.env.AUTOMATION_SERVER_URL), {
+            method: "POST",
+            headers: {
+              authorization: `Bearer ${context.env.OLIGARCHY_TOKEN}`,
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({ ticket }),
+            signal: AbortSignal.timeout(ABORT_TIMEOUT_MS),
+          });
+          closed = response.status === 200;
+          if (!closed) {
+            console.error(
+              `dashboard: aborting a job: automation server returned ${String(response.status)}`,
+            );
+          }
+        } catch (error) {
+          console.error("dashboard: aborting a job:", errorMessage(error));
+        }
+      }
+      if (!closed) {
+        try {
+          closed = await abortAutomationJob(
+            context.env.HYPERDRIVE.connectionString,
+            ticket,
+            "running",
+          );
+          if (closed) {
             Sentry.captureException(new Error("Cloudflare aborted job"));
           }
         } catch (error) {
           Sentry.captureException(error);
           console.error("dashboard: aborting a job:", errorMessage(error));
+        }
+      }
+      if (closed) {
+        try {
+          await abortLinearIssue(context.env, ticket);
+        } catch (error) {
+          Sentry.captureException(error);
+          console.error(
+            `dashboard: aborting a job: ${ticket} stays on the board:`,
+            errorMessage(error),
+          );
         }
       }
     }

@@ -224,7 +224,9 @@ const since = (stamp: Date | null, queriedAt: Date): string =>
   stamp === null ? "—" : `${age(queriedAt.getTime() - stamp.getTime())} ago`;
 
 // One list of the queue as a table, or the one word that says it is empty. The columns are the
-// same in every list, so a pending job shows dashes where its start and finish will go.
+// same in every list, so a pending job shows dashes where its start and finish will go. A running
+// or pending job with a ticket carries the abort; a completed one is over, and a job with no
+// ticket has nothing to name in the post.
 const Jobs: FC<{ jobs: ReadonlyArray<AutomationJob> }> = ({ jobs }) =>
   jobs.length === 0 ? (
     <p>none</p>
@@ -252,7 +254,7 @@ const Jobs: FC<{ jobs: ReadonlyArray<AutomationJob> }> = ({ jobs }) =>
           <td>{since(job.finishedAt, job.queriedAt)}</td>
           <td>{job.reason}</td>
           <td>
-            {job.status === "running" && job.ticket !== null ? (
+            {(job.status === "running" || job.status === "pending") && job.ticket !== null ? (
               <form
                 method="post"
                 action="/abort"
