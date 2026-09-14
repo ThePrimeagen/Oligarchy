@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createServer as createHttpServer } from "node:http";
 import { fileURLToPath } from "node:url";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Client } from "pg";
 import { describe, expect, inject, it } from "vitest";
@@ -1289,10 +1289,10 @@ console.log([failed.test, failed.action, failed.reason, failed.createdAt instanc
     );
     // The ages are read against the database's clock: a minute has margin, seconds are counted.
     expect(html).toMatch(
-      /<tr><td>QUE-102<\/td><td>queue-order<\/td><td>diagnose<\/td><td>running<\/td><td>1 min ago<\/td><td>\d+ s ago<\/td><td>—<\/td><td><\/td><td><form method="post" action="\/abort" hx-post="\/abort" hx-confirm="are you sure\?" hx-target="#queue" hx-swap="innerHTML"><input type="hidden" name="ticket" value="QUE-102"\/><button type="submit" class="abort" aria-label="abort"><svg/,
+      /<tr><td>QUE-102<\/td><td>queue-order<\/td><td>diagnose<\/td><td>running<\/td><td>1 min ago<\/td><td>\d+ s ago<\/td><td>—<\/td><td><\/td><td><form method="post" action="\/abort" hx-post="\/abort" hx-confirm="are you sure\?" hx-target="#queue" hx-swap="innerHTML"><input type="hidden" name="ticket" value="QUE-102"\/><input type="hidden" name="action" value="diagnose"\/><button type="submit" class="abort" aria-label="abort"><svg/,
     );
     expect(html).toMatch(
-      /<h3>pending<\/h3><table>.*?<tr><td>QUE-104<\/td><td>queue-order<\/td><td>diagnose<\/td><td>pending<\/td><td>\d+ s ago<\/td><td>—<\/td><td>—<\/td><td><\/td><td><form method="post" action="\/abort" hx-post="\/abort" hx-confirm="are you sure\?" hx-target="#queue" hx-swap="innerHTML"><input type="hidden" name="ticket" value="QUE-104"\/><button type="submit" class="abort" aria-label="abort"><svg.*?<\/form><\/td><\/tr><tr><td>QUE-103<\/td>.*?<tr><td>QUE-105<\/td>.*?<tr><td>—<\/td><td>queue-order<\/td><td>drive<\/td><td>pending<\/td><td>\d+ s ago<\/td><td>—<\/td><td>—<\/td><td><\/td><td><\/td><\/tr>.*?<h3>completed<\/h3>/s,
+      /<h3>pending<\/h3><table>.*?<tr><td>QUE-104<\/td><td>queue-order<\/td><td>diagnose<\/td><td>pending<\/td><td>\d+ s ago<\/td><td>—<\/td><td>—<\/td><td><\/td><td><form method="post" action="\/abort" hx-post="\/abort" hx-confirm="are you sure\?" hx-target="#queue" hx-swap="innerHTML"><input type="hidden" name="ticket" value="QUE-104"\/><input type="hidden" name="action" value="diagnose"\/><button type="submit" class="abort" aria-label="abort"><svg.*?<\/form><\/td><\/tr><tr><td>QUE-103<\/td>.*?<tr><td>QUE-105<\/td>.*?<tr><td>—<\/td><td>queue-order<\/td><td>drive<\/td><td>pending<\/td><td>\d+ s ago<\/td><td>—<\/td><td>—<\/td><td><\/td><td><\/td><\/tr>.*?<h3>completed<\/h3>/s,
     );
     expect(html).toMatch(
       /<h3>completed<\/h3><table>.*?<tr><td>QUE-107<\/td><td>queue-order<\/td><td>drive<\/td><td>failed<\/td><td>\d+ min ago<\/td><td>\d+ min ago<\/td><td>1 min ago<\/td><td>session timed out<\/td><td><\/td><\/tr><tr><td>QUE-108<\/td>.*?<tr><td>QUE-106<\/td>.*?<tr><td>QUE-109<\/td>/s,
@@ -1480,16 +1480,18 @@ const abortBindings = (env: AbortEnv) => ({
   LINEAR_API_TOKEN: LINEAR_TOKEN,
 });
 
+// The body names the row the way the page's form does: the ticket and the row's action.
 const postAbort = async (
   ticket: string,
   env: AbortEnv,
+  action: QueuedJob["action"] = "drive",
 ): Promise<{ readonly status: number; readonly body: unknown }> => {
   const response = await app.request(
     "/abort",
     {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ticket }),
+      body: JSON.stringify({ ticket, action }),
     },
     abortBindings(env),
   );
@@ -1499,6 +1501,7 @@ const postAbort = async (
 const jobByTicket = async (
   databaseUrl: string,
   ticket: string,
+  action: QueuedJob["action"] = "drive",
 ): Promise<{
   readonly status: string;
   readonly reason: string | null;
@@ -1515,14 +1518,43 @@ const jobByTicket = async (
       })
       .from(automationJobs)
       .innerJoin(testResults, eq(testResults.id, automationJobs.resultId))
-      .where(eq(testResults.linearId, ticket));
+      .where(and(eq(testResults.linearId, ticket), eq(automationJobs.action, action)));
     if (row === undefined) {
-      throw new Error(`no job for ${ticket}`);
+      throw new Error(`no ${action} job for ${ticket}`);
     }
     return row;
   } finally {
     await client.end();
   }
+};
+
+// One ticket with both of its jobs: the drive running, the diagnose queued behind it, the state a
+// ticket is in between the driver moving it to Needs Review and the drive closing. seedQueue gives
+// every job its own result, so this pair is seeded onto one.
+const seedSiblings = async (db: NodePgDatabase, name: string, ticket: string): Promise<void> => {
+  await db.delete(automationJobs);
+  const [definition] = await db
+    .insert(testDefinitions)
+    .values({ name, description: "d", instruction: "i", proof: "p" })
+    .returning({ id: testDefinitions.id });
+  const [run] = await db
+    .insert(testRuns)
+    .values({ name, iso: "https://example.com/omarchy.iso", serverUrl: "http://127.0.0.1:42069" })
+    .returning({ id: testRuns.id });
+  const [result] = await db
+    .insert(testResults)
+    .values({ runId: run.id, definitionId: definition.id, linearId: ticket })
+    .returning({ id: testResults.id });
+  await db.insert(automationJobs).values([
+    {
+      resultId: result.id,
+      action: "drive",
+      status: "running",
+      createdAt: secondsAgo(300),
+      startedAt: secondsAgo(200),
+    },
+    { resultId: result.id, action: "diagnose", status: "pending", createdAt: secondsAgo(20) },
+  ]);
 };
 
 const runningJob = (ticket: string): QueuedJob => ({
@@ -1553,7 +1585,7 @@ describe.skipIf(dbUrl === "")("dashboard/query abortAutomationJob happy path", (
   it("closes a running job for the ticket from running and ends the connection", async () => {
     await seed(dbUrl, (db) => seedQueue(db, "abort-query-running", [runningJob("ABT-Q-1")]));
     const result = await runQuery(
-      'const closed = await query.abortAutomationJob(url, "ABT-Q-1", "running");\nconsole.log(String(closed));',
+      'const closed = await query.abortAutomationJob(url, "ABT-Q-1", "drive", "running");\nconsole.log(String(closed));',
       dbUrl,
     );
     expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
@@ -1566,10 +1598,24 @@ describe.skipIf(dbUrl === "")("dashboard/query abortAutomationJob happy path", (
     expect(job.finishedAt).toBeInstanceOf(Date);
   });
 
+  it("closes the one row named by ticket and action when the ticket has a running drive and a pending diagnose", async () => {
+    await seed(dbUrl, (db) => seedSiblings(db, "abort-query-siblings", "ABT-Q-SIB"));
+    const result = await runQuery(
+      'console.log(String(await query.abortAutomationJob(url, "ABT-Q-SIB", "drive", "pending")));\nconsole.log(String(await query.abortAutomationJob(url, "ABT-Q-SIB", "diagnose", "pending")));',
+      dbUrl,
+    );
+    expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe("false\ntrue\n");
+    expect((await jobByTicket(dbUrl, "ABT-Q-SIB", "drive")).status).toBe("running");
+    expect((await jobByTicket(dbUrl, "ABT-Q-SIB", "diagnose")).status).toBe("aborted");
+  });
+
   it("closes a pending job for the ticket from pending, its finish stamped, and ends the connection", async () => {
     await seed(dbUrl, (db) => seedQueue(db, "abort-query-pending", [pendingJob("ABT-Q-P")]));
     const result = await runQuery(
-      'const closed = await query.abortAutomationJob(url, "ABT-Q-P", "pending");\nconsole.log(String(closed));',
+      'const closed = await query.abortAutomationJob(url, "ABT-Q-P", "drive", "pending");\nconsole.log(String(closed));',
       dbUrl,
     );
     expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
@@ -1589,7 +1635,7 @@ describe.skipIf(dbUrl === "")("dashboard/query abortAutomationJob unhappy path",
       seedQueue(db, "abort-query-pending-as-running", [pendingJob("ABT-Q-2")]),
     );
     const result = await runQuery(
-      'const closed = await query.abortAutomationJob(url, "ABT-Q-2", "running");\nconsole.log(String(closed));',
+      'const closed = await query.abortAutomationJob(url, "ABT-Q-2", "drive", "running");\nconsole.log(String(closed));',
       dbUrl,
     );
     expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
@@ -1608,7 +1654,7 @@ describe.skipIf(dbUrl === "")("dashboard/query abortAutomationJob unhappy path",
       seedQueue(db, "abort-query-running-as-pending", [runningJob("ABT-Q-4")]),
     );
     const result = await runQuery(
-      'const closed = await query.abortAutomationJob(url, "ABT-Q-4", "pending");\nconsole.log(String(closed));',
+      'const closed = await query.abortAutomationJob(url, "ABT-Q-4", "drive", "pending");\nconsole.log(String(closed));',
       dbUrl,
     );
     expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
@@ -1625,7 +1671,7 @@ describe.skipIf(dbUrl === "")("dashboard/query abortAutomationJob unhappy path",
   it("leaves a finished job finished from either, and ends the connection", async () => {
     await seed(dbUrl, (db) => seedQueue(db, "abort-query-done", [finishedJob("ABT-Q-3")]));
     const result = await runQuery(
-      'console.log(String(await query.abortAutomationJob(url, "ABT-Q-3", "running")));\nconsole.log(String(await query.abortAutomationJob(url, "ABT-Q-3", "pending")));',
+      'console.log(String(await query.abortAutomationJob(url, "ABT-Q-3", "drive", "running")));\nconsole.log(String(await query.abortAutomationJob(url, "ABT-Q-3", "drive", "pending")));',
       dbUrl,
     );
     expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
@@ -1637,7 +1683,7 @@ describe.skipIf(dbUrl === "")("dashboard/query abortAutomationJob unhappy path",
 
   it("returns false for an unknown ticket and ends the connection", async () => {
     const result = await runQuery(
-      'console.log(String(await query.abortAutomationJob(url, "ABT-missing", "running")));\nconsole.log(String(await query.abortAutomationJob(url, "ABT-missing", "pending")));',
+      'console.log(String(await query.abortAutomationJob(url, "ABT-missing", "drive", "running")));\nconsole.log(String(await query.abortAutomationJob(url, "ABT-missing", "drive", "pending")));',
       dbUrl,
     );
     expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
@@ -1657,7 +1703,7 @@ describe("dashboard POST /abort happy path: the outbound calls", () => {
         {
           method: "POST",
           headers: { "content-type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({ ticket: "ABT-FORM" }).toString(),
+          body: new URLSearchParams({ ticket: "ABT-FORM", action: "drive" }).toString(),
         },
         abortBindings({
           databaseUrl: REFUSED_URL,
@@ -1762,6 +1808,55 @@ describe.skipIf(dbUrl === "")("dashboard POST /abort happy path", () => {
     }
   });
 
+  it("aborts only the pending diagnose of a ticket whose drive is running, asking the automation server nothing", async () => {
+    const proxy = await StubProxy.startStubProxy(() => StubProxy.OK);
+    const linear = await StubProxy.startStubProxy(linearAnswering());
+    try {
+      await seed(dbUrl, (db) => seedSiblings(db, "abort-sibling-diagnose", "ABT-SIB-1"));
+      const response = await postAbort(
+        "ABT-SIB-1",
+        { databaseUrl: dbUrl, automationUrl: proxy.url, linearUrl: linear.url },
+        "diagnose",
+      );
+      expect(response.status).toBe(200);
+      expect((await jobByTicket(dbUrl, "ABT-SIB-1", "diagnose")).status).toBe("aborted");
+      expect((await jobByTicket(dbUrl, "ABT-SIB-1", "drive")).status).toBe("running");
+      expect(proxy.requests).toEqual([]);
+      expect(linear.requests).toEqual(linearMove("ABT-SIB-1"));
+    } finally {
+      await proxy.close();
+      await linear.close();
+    }
+  });
+
+  it("aborts only the running drive of a ticket whose diagnose is pending, through the automation server", async () => {
+    const proxy = await StubProxy.startStubProxy(() => StubProxy.OK);
+    const linear = await StubProxy.startStubProxy(linearAnswering());
+    try {
+      await seed(dbUrl, (db) => seedSiblings(db, "abort-sibling-drive", "ABT-SIB-2"));
+      const response = await postAbort(
+        "ABT-SIB-2",
+        { databaseUrl: dbUrl, automationUrl: proxy.url, linearUrl: linear.url },
+        "drive",
+      );
+      expect(response.status).toBe(200);
+      expect(proxy.requests).toEqual([
+        {
+          method: "POST",
+          url: "/abort",
+          authorization: `Bearer ${TOKEN}`,
+          body: { ticket: "ABT-SIB-2" },
+        },
+      ]);
+      expect((await jobByTicket(dbUrl, "ABT-SIB-2", "diagnose")).status).toBe("pending");
+      expect((await jobByTicket(dbUrl, "ABT-SIB-2", "drive")).status).toBe("running");
+      expect(linear.requests).toEqual(linearMove("ABT-SIB-2"));
+    } finally {
+      await proxy.close();
+      await linear.close();
+    }
+  });
+
   it("answers the queue fragment with the pending job under completed as aborted when htmx asks", async () => {
     const linear = await StubProxy.startStubProxy(linearAnswering());
     try {
@@ -1776,7 +1871,7 @@ describe.skipIf(dbUrl === "")("dashboard POST /abort happy path", () => {
             "content-type": "application/x-www-form-urlencoded",
             "hx-request": "true",
           },
-          body: new URLSearchParams({ ticket: "ABT-HX-1" }).toString(),
+          body: new URLSearchParams({ ticket: "ABT-HX-1", action: "drive" }).toString(),
         },
         abortBindings({ databaseUrl: dbUrl, automationUrl: REFUSED_HTTP, linearUrl: linear.url }),
       );
@@ -1794,6 +1889,35 @@ describe.skipIf(dbUrl === "")("dashboard POST /abort happy path", () => {
 });
 
 describe("dashboard POST /abort unhappy path: always 200", () => {
+  it("does nothing for a body whose action is missing or not one a job has", async () => {
+    const proxy = await StubProxy.startStubProxy(() => StubProxy.OK);
+    const linear = await StubProxy.startStubProxy(linearAnswering());
+    try {
+      for (const body of [{ ticket: "ABT-NOACT" }, { ticket: "ABT-NOACT", action: "reboot" }]) {
+        const response = await app.request(
+          "/abort",
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(body),
+          },
+          abortBindings({
+            databaseUrl: REFUSED_URL,
+            automationUrl: proxy.url,
+            linearUrl: linear.url,
+          }),
+        );
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual({ ok: "true" });
+      }
+      expect(proxy.requests).toEqual([]);
+      expect(linear.requests).toEqual([]);
+    } finally {
+      await proxy.close();
+      await linear.close();
+    }
+  });
+
   it("answers 200 when the automation server returns 400 and the database is unreachable, asking Linear nothing", async () => {
     const proxy = await StubProxy.startStubProxy(() =>
       StubProxy.refusal(400, 'ticket "ABT-400" is not running'),
