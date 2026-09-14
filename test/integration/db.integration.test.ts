@@ -1537,7 +1537,7 @@ Postgres.describeWithDatabase("database", () => {
     );
 
     scoped.effect(
-      "ServerStore removeStaleServers deletes a qemu heartbeat ten minutes and a second old and a qemu row nobody claimed in ten minutes, keeps a heartbeat a second younger, a row just added and the other kind however silent, and returns what it deleted",
+      "ServerStore removeStaleServers deletes a qemu heartbeat ten minutes and a second old and a qemu row nobody claimed in ten minutes, keeps a heartbeat a second younger, a row just added and the other kind however silent, and returns what it deleted; asked for the other kind it deletes that one",
       () =>
         Effect.gen(function* () {
           const store = yield* Servers.ServerStore;
@@ -1588,9 +1588,10 @@ Postgres.describeWithDatabase("database", () => {
           expect(yield* store.listServers("automation-client")).toContain(deadClient);
           // A deleted row is gone for good: the sweep after finds nothing of it.
           expect(yield* store.removeStaleServers("qemu")).toEqual([]);
+          expect(yield* store.removeStaleServers("automation-client")).toEqual([deadClient]);
+          expect(yield* store.listServers("automation-client")).not.toContain(deadClient);
           expect(yield* store.removeServer(alive)).toBe(true);
           expect(yield* store.removeServer(justAdded)).toBe(true);
-          expect(yield* store.removeServer(deadClient)).toBe(true);
         }),
     );
 

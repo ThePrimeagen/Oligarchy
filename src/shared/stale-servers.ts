@@ -3,7 +3,7 @@ import * as Servers from "../db/servers.ts";
 import * as ExternalFailure from "../external-failure.ts";
 import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
-import * as Errors from "../shared/errors.ts";
+import * as Errors from "./errors.ts";
 
 // As often as a server writes its row, so a row is gone within one heartbeat of its tenth
 // silent minute.
@@ -17,26 +17,28 @@ const detail = (error: unknown): string =>
     ? Render.errorDetail(ExternalFailure.causeOf(error))
     : Render.errorDetail(error);
 
-// Forgets, now and every thirty seconds, the qemu servers silent for ten minutes, one info line
-// per row. This proxy and not the servers themselves: the fleet is what this proxy reads and
-// probes, so it is swept while the proxy runs even when no server does. A sweep that fails is
-// one error line; the next tick runs.
-export const forget: Effect.Effect<void, never, Scope.Scope | Servers.ServerStore | Log.Log> =
+// Forgets, now and every thirty seconds, the servers of one kind silent for ten minutes, one info
+// line per row under the process's own attribution. The process that reads a kind sweeps it — the
+// qemu reverse proxy its fleet, the automation server its clients — and not the servers
+// themselves, so a kind is swept while its reader runs even when no server does. A sweep that
+// fails is one error line; the next tick runs.
+export const forget = (
+  type: Servers.ServerType,
+): Effect.Effect<void, never, Scope.Scope | Servers.ServerStore | Log.Log> =>
   Effect.gen(function* () {
     const store = yield* Servers.ServerStore;
     const log = yield* Log.Log;
+    const attribution = yield* Log.ProcessAttribution;
     const tick = Effect.gen(function* () {
-      const forgotten = yield* store.removeStaleServers("qemu");
+      const forgotten = yield* store.removeStaleServers(type);
       for (const url of forgotten) {
-        yield* log.info(`server forgotten; ${url} silent for 10 minutes`, {
-          location: Log.Locations.server,
-        });
+        yield* log.info(`server forgotten; ${url} silent for 10 minutes`, attribution);
       }
     }).pipe(
       Effect.catchCause((cause) => {
         const error = Cause.squash(cause);
         return log.error(`stale server cleanup failed: ${detail(error)}`, {
-          location: Log.Locations.server,
+          ...attribution,
           cause: error,
         });
       }),
