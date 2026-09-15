@@ -13,18 +13,27 @@ exist.
 
 ## Toolchain
 
-- Run on Node 26 with npm. Every executable is a `#!/bin/sh` wrapper running
-  `node --experimental-strip-types` (`./qemu-server`, `./qemu-reverse-proxy`, `./automation-server`,
-  `./automation-client` and `./ctrl` add
-  `--import ./src/observability/instrument.ts`); types are stripped, not transformed, so
-  `erasableSyntaxOnly` stays on.
-- Install with `npm ci`; `prepare` runs `effect-tsgo patch --oxlint` so the `effecttsgo/*` rules
-  are active for lint. The commands: `npm run check:lint`, `npm run check:format`,
-  `npm run check:types`, `npm run test:unit`, `npm run test:integration`, `npm run check:fast`
-  (lint, format, types, unit in that order), `npm run db:generate`, `npm run db:migrate`,
-  `npm run format`, `npm run dev` (the dashboard under wrangler). There is no bare `check`, `test`
-  or `lint` script; `test/repo/scripts.unit.test.ts` keeps it that way. Local runs use a local
-  Postgres migrated with `npm run db:migrate`, never the production `DATABASE_URL`.
+- Run on Bun 1.4 (CI installs 1.4.2), runtime and package manager both; there is no Node and no
+  npm. Every executable is a `#!/bin/sh` wrapper running `bun` on the process's `main.ts` as
+  written (`./qemu-server`, `./qemu-reverse-proxy`, `./automation-server`, `./automation-client`
+  and `./ctrl` add `--preload ./src/observability/instrument.ts`); Bun transpiles the sources on
+  load, and `erasableSyntaxOnly` stays on so they remain plain JavaScript once the annotations
+  go: no enums, namespaces or parameter properties. The Node-compatible platform is what the
+  code targets (`@effect/platform-node`, `node:*` in the boundary files, `pg`); Bun implements
+  it. Where its wording differs from libuv's (a missing executable, a socket that cannot bind)
+  the tests pin Bun's.
+- Install with `bun install --frozen-lockfile` (`bun.lock` is the lockfile); `prepare` runs
+  `effect-tsgo patch --oxlint` so the `effecttsgo/*` rules are active for lint. The commands:
+  `bun run check:lint`, `bun run check:format`, `bun run check:types`, `bun run test:unit`,
+  `bun run test:integration`, `bun run check:fast` (lint, format, types, unit in that order),
+  `bun run db:generate`, `bun run db:migrate`, `bun run format`, `bun run dev` (the dashboard
+  under wrangler). `bun run` hands a tool's `node_modules/.bin` entry to Node when one is
+  installed and to Bun otherwise; the two test scripts pass `--bun` so vitest and its forked
+  workers run on Bun either way, and the tests run on the runtime the wrappers run. The other
+  tools (oxlint, oxfmt, tsc, drizzle-kit, wrangler) do the same work on either. There is no bare
+  `check`, `test` or `lint` script; `test/repo/scripts.unit.test.ts` keeps it that way, and pins
+  the wrappers, the scripts and the workflow to Bun. Local runs use a local Postgres migrated with
+  `bun run db:migrate`, never the production `DATABASE_URL`.
 - A `.env` in the working directory fills missing variables only; an already-set variable always
   wins, and an empty value counts as unset.
 
@@ -765,14 +774,15 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
 ## Sentry
 
 - Initialise the SDK before any Effect code in `src/observability/instrument.ts`, loaded by the
-  `qemu-server`, `qemu-reverse-proxy`, `automation-server`, `automation-client` and `ctrl` wrappers' `--import`: `Sentry.init({ dsn: SENTRY_DSN,
+  `qemu-server`, `qemu-reverse-proxy`, `automation-server`, `automation-client` and `ctrl` wrappers' `--preload`: `Sentry.init({ dsn: SENTRY_DSN,
   tracesSampleRate: 1,
   traceLifecycle: "stream", integrations: [Sentry.httpIntegration({ spans: false }),
   Sentry.nativeNodeFetchIntegration({ spans: false })] })`. `SENTRY_DSN` in `dsn.ts` is the one
   hard-coded constant (public by design) and is shared with the dashboard.
-- `@sentry/node` and `@sentry/effect` are imported only in `src/observability/`;
-  `@sentry/cloudflare` only in `src/dashboard/`. All three are pinned to one version so
-  `@sentry/core` is not duplicated (`SentryEffectTracer` relies on one `getActiveSpan()`).
+- `@sentry/bun` (Sentry's SDK for the runtime, `@sentry/node` underneath) and `@sentry/effect`
+  are imported only in `src/observability/`; `@sentry/cloudflare` only in `src/dashboard/`. All
+  three are pinned to one version so `@sentry/core` is not duplicated (`SentryEffectTracer`
+  relies on one `getActiveSpan()`).
 - Route exceptions through one `ErrorReporter.make` installed with `ErrorReporter.layer([reporter])`
   (below); never call `captureException` elsewhere in Effect code. Tags are `location`/`agent_id`
   read from `fiber.getRef(References.CurrentLogAnnotations)` (the `Log` methods annotate them,
@@ -910,8 +920,8 @@ export const SentryLive: Layer.Layer<never> = Layer.mergeAll(
 - Tests are written first. No code lands until a set of failing unit tests describes it, and every
   surface has both a happy and an unhappy test. Plan for failures and how they are handled.
 - Vitest only, two lanes: `test/**/*.unit.test.ts` (no I/O beyond local fakes;
-  `npm run test:unit`, part of `check:fast`) and `test/integration/*.integration.test.ts` (spawned
-  executables, sockets, containers, processes; `npm run test:integration`). `passWithNoTests` is
+  `bun run test:unit`, part of `check:fast`) and `test/integration/*.integration.test.ts` (spawned
+  executables, sockets, containers, processes; `bun run test:integration`). `passWithNoTests` is
   false. Anything that needs `qemu-system-x86_64` is integration and gated on the binary.
 - Two `it`s: a pure test (`test/repo/*`, pure modules, the black-box CLI process tests) imports
   `describe`, `expect` and `it` from `vitest`; an Effect test imports `it` from `@effect/vitest`
@@ -994,7 +1004,7 @@ it.effect("refuses a foreign agent", () =>
 
 Every enabled diagnostic is an error. Fix findings at their source; do not downgrade rules, add
 disable comments, or create broad file exclusions. Exceptions are narrow, centralised as root
-overrides in `.oxlintrc.json`, and covered by a focused test each. `npm run check:fast` runs lint,
+overrides in `.oxlintrc.json`, and covered by a focused test each. `bun run check:fast` runs lint,
 format, types and unit tests in that order; run it plus the affected integration tests before a
 change ships.
 
@@ -1044,7 +1054,7 @@ Schema and module rules above already cover most of them; the rest:
 ## Migrations
 
 - The database schema lives in `src/db/schema.ts`. Migrations under `drizzle/` are generated from
-  it with `npm run db:generate`, never written or edited by hand, and never applied with
+  it with `bun run db:generate`, never written or edited by hand, and never applied with
   `drizzle-kit push`.
 - Migrations are append-only. Never edit, delete, or rename anything under `drizzle/`, not the
   `.sql` files, not the `meta/` snapshots. To change the schema, edit `src/db/schema.ts` and
@@ -1052,8 +1062,8 @@ Schema and module rules above already cover most of them; the rest:
   generator itself appends to.
 - CI enforces both rules: an edited migration fails the build, and so does a schema that does not
   match the committed migrations (`.github/workflows/migrations.yml`, `append-only` and
-  `schema-in-sync`). A third job, `checks`, runs `npm run check:fast`.
-- Applying migrations is deployment-owned: `npm run db:migrate` runs `src/db/migrate.ts`, whose
+  `schema-in-sync`). A third job, `checks`, runs `bun run check:fast`.
+- Applying migrations is deployment-owned: `bun run db:migrate` runs `src/db/migrate.ts`, whose
   `program` reads `Config.databaseUrl`, builds `Database.make(url)` in a scope, and runs
   `migrateDatabase` (`database.run("migrate", (db) => migrate(db, { migrationsFolder: "drizzle"
   }))`); it prints `database migrations applied` and fails with `DATABASE_URL is not set` (a `.env`
@@ -1092,4 +1102,4 @@ impossible failures, or strips the comments that carry design intent, gets that 
    document pins is unchanged, or the test and the document changed with it.
 7. Tests were written first, both paths are covered, fakes sit at the layer seam, and no test
    touches a third party, QEMU or a remote database.
-8. `npm run check:fast` and the affected integration tests are green.
+8. `bun run check:fast` and the affected integration tests are green.

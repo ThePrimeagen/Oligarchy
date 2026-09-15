@@ -202,8 +202,8 @@ Code:
 
 ## Verify
 
-- [x] `npm run check:fast`; `npm run test:integration` for `client` and `ctrl` (#146).
-- [x] `npm run test:integration` for `qemu-process`, `db`, `qemu-server`, `qemu-reverse-proxy`
+- [x] `bun run check:fast`; `bun run test:integration` for `client` and `ctrl` (#146).
+- [x] `bun run test:integration` for `qemu-process`, `db`, `qemu-server`, `qemu-reverse-proxy`
       where Docker exists (2026-09-14, the whole lane, twice).
 - [x] On the QEMU host through the proxy: `fresh` sessions installed and saved on four servers
       (2026-09-14, by the mint drivers); `<iso>.qcow2` and `<iso>.OVMF_VARS.fd` beside the cached
