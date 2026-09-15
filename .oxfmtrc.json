@@ -14,7 +14,7 @@
     "public/**",
     "prompts/**",
     "**/*.md",
-    "package-lock.json",
+    "bun.lock",
     "wrangler.jsonc"
   ]
 }

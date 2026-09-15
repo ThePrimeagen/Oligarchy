@@ -5,17 +5,12 @@ cd "$(dirname "$0")/.."
 # Nothing here needs DATABASE_URL, and environment builds run install without agent secrets,
 # so it must not be required; start.sh reports it missing at boot instead.
 
-# The project runs on Node 26 (package.json engines, CI). The base image ships Node 22, whose npm 10
-# resolves vite's optional esbuild peer differently and rejects package-lock.json under npm ci.
-export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
-if [ ! -s "$NVM_DIR/nvm.sh" ]; then
-  echo "install: nvm not found at $NVM_DIR; Node 26 is required" >&2
-  exit 1
+# The project runs on Bun (package.json engines, CI); the base image ships none. The installer
+# puts it under ~/.bun and adds that to the shell profile for the terminals that follow.
+export BUN_INSTALL="${BUN_INSTALL:-$HOME/.bun}"
+if [ ! -x "$BUN_INSTALL/bin/bun" ]; then
+  curl -fsSL https://bun.sh/install | bash -s "bun-v1.4.2"
 fi
-. "$NVM_DIR/nvm.sh"
-nvm install 26
-nvm alias default 26
-# nvm use only swaps the nvm entry already in PATH; put Node 26 first so nothing shadows it.
-PATH="$(dirname "$(nvm which 26)"):$PATH"
+PATH="$BUN_INSTALL/bin:$PATH"
 export PATH
-echo "install: node $(node --version), npm $(npm --version)"
+echo "install: bun $(bun --version)"

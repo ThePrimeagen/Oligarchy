@@ -18,6 +18,21 @@ const TsConfig = Schema.Struct({
 const decodePackageJson = Schema.decodeUnknownSync(Schema.fromJsonString(PackageJson));
 const decodeTsConfig = Schema.decodeUnknownSync(Schema.fromJsonString(TsConfig));
 
+// Every process, and whether its wrapper and script preload Sentry before any Effect code runs.
+const PROCESSES = {
+  client: false,
+  session: false,
+  viz: false,
+  ctrl: true,
+  "qemu-server": true,
+  "qemu-reverse-proxy": true,
+  "automation-server": true,
+  "automation-client": true,
+};
+const INSTRUMENT = "src/observability/instrument.ts";
+// Bun runs the sources as they are: no Node, no npm, none of Node's loader flags.
+const NOT_BUN = /\bnode\b|\bnpm\b|\bnpx\b|--experimental-strip-types|--import\b/;
+
 describe("package.json scripts", () => {
   const { scripts } = decodePackageJson(read("package.json"));
 
@@ -40,11 +55,50 @@ describe("package.json scripts", () => {
     expect(scripts.lint).toBeUndefined();
   });
 
+  it("runs every process on bun from its entry, Sentry preloaded on the instrumented ones", () => {
+    for (const [name, instrumented] of Object.entries(PROCESSES)) {
+      const script = scripts[name] ?? "";
+      expect(script.startsWith("bun "), name).toBe(true);
+      expect(script.endsWith(` src/${name}/main.ts`), name).toBe(true);
+      expect(script.includes(`--preload ./${INSTRUMENT}`), name).toBe(instrumented);
+    }
+  });
+
+  // `bun run` hands a node-shebang bin to Node when one is installed; vitest and its forked
+  // workers must run on the runtime the wrappers run.
+  it("forces vitest onto bun in both lanes", () => {
+    expect(scripts["test:unit"]).toMatch(/^bun --bun vitest run /);
+    expect(scripts["test:integration"]).toMatch(/^bun --bun vitest run /);
+  });
+
+  it("names no other runtime, package manager or Node flag anywhere", () => {
+    for (const [name, script] of Object.entries(scripts)) {
+      expect(script, name).not.toMatch(NOT_BUN);
+    }
+  });
+
   it("db:migrate runs the migration program and never a drizzle push", () => {
-    expect(scripts["db:migrate"]).toBe("node --experimental-strip-types src/db/migrate.ts");
+    expect(scripts["db:migrate"]).toBe("bun src/db/migrate.ts");
     expect(Object.values(scripts).some((script) => script.includes("drizzle-kit push"))).toBe(
       false,
     );
+  });
+});
+
+// The root executables are the operators' entry points: each is a sh wrapper handing its
+// arguments to bun on the process's entry, the instrumented ones loading Sentry first.
+describe("root executables", () => {
+  it("each execs bun on its entry, preloading Sentry on the instrumented ones, never node", () => {
+    for (const [name, instrumented] of Object.entries(PROCESSES)) {
+      const wrapper = read(name);
+      expect(wrapper.startsWith("#!/bin/sh\n"), name).toBe(true);
+      expect(wrapper, name).toContain("exec bun ");
+      expect(wrapper, name).toContain(`"$(dirname "$0")/src/${name}/main.ts" "$@"`);
+      expect(wrapper.includes(`--preload "$(dirname "$0")/${INSTRUMENT}"`), name).toBe(
+        instrumented,
+      );
+      expect(wrapper, name).not.toMatch(NOT_BUN);
+    }
   });
 });
 
@@ -87,14 +141,24 @@ describe(".github/workflows/migrations.yml", () => {
     for (const path of scanned) {
       expect(existsSync(join(root, path)), path).toBe(true);
     }
-    expect(workflow.includes("v2")).toBe(false);
+    expect(workflow.includes("v2/")).toBe(false);
+  });
+
+  // A job that installs with anything but bun from the committed lockfile runs a different
+  // dependency tree from the one the wrappers run.
+  it("installs with bun from the committed lockfile and runs nothing through node or npm", () => {
+    expect(workflow).toContain("uses: oven-sh/setup-bun@v2");
+    expect(workflow).toContain("bun install --frozen-lockfile");
+    expect(workflow).not.toMatch(NOT_BUN);
+    expect(existsSync(join(root, "bun.lock"))).toBe(true);
+    expect(existsSync(join(root, "package-lock.json"))).toBe(false);
   });
 });
 
 describe("tsconfig.json", () => {
   const { compilerOptions } = decodeTsConfig(read("tsconfig.json"));
 
-  it("forbids syntax Node cannot strip", () => {
+  it("keeps the sources to syntax a type stripper can erase", () => {
     expect(compilerOptions.erasableSyntaxOnly).toBe(true);
   });
 });

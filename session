@@ -1,2 +1,2 @@
 #!/bin/sh
-exec node --experimental-strip-types "$(dirname "$0")/src/session/main.ts" "$@"
+exec bun "$(dirname "$0")/src/session/main.ts" "$@"

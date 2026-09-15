@@ -1,4 +1,4 @@
-import * as SentryNode from "@sentry/node";
+import * as SentryBun from "@sentry/bun";
 import { afterEach, describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { Cause, Effect, ErrorReporter, Exit, Layer, Schema } from "effect";
@@ -58,13 +58,13 @@ type Captured = {
 
 const capture = (): Captured => {
   const bodies: Array<string> = [];
-  SentryNode.init({
+  SentryBun.init({
     dsn: "https://public@example.com/1",
     tracesSampleRate: 1,
     traceLifecycle: "stream",
     defaultIntegrations: false,
     transport: (options) =>
-      SentryNode.createTransport(options, (request) => {
+      SentryBun.createTransport(options, (request) => {
         bodies.push(
           typeof request.body === "string" ? request.body : new TextDecoder().decode(request.body),
         );
@@ -82,14 +82,14 @@ const capture = (): Captured => {
       }
       return out;
     });
-  const flush = Effect.promise(() => SentryNode.flush(1_000));
+  const flush = Effect.promise(() => SentryBun.flush(1_000));
   return {
     spans: Effect.map(flush, () => items("span").flatMap((item) => decodeSpanItem(item).items)),
     events: Effect.map(flush, () => items("event").map((item) => decodeEventItem(item))),
   };
 };
 
-afterEach(() => SentryNode.close(1_000));
+afterEach(() => SentryBun.close(1_000));
 
 const attribute = (span: StreamedSpan | undefined, key: string): unknown =>
   span?.attributes[key]?.value;

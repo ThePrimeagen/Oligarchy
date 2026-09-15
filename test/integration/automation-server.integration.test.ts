@@ -40,7 +40,7 @@ type Process = {
   readonly waitFor: (pattern: RegExp, timeoutMs?: number) => Promise<void>;
 };
 
-// Sentry is initialised by the wrapper's --import; a proxy nobody listens on keeps the test
+// Sentry is initialised by the wrapper's --preload; a proxy nobody listens on keeps the test
 // run's fatal lines out of the real project without touching the code under test.
 const environment = (home: string, overrides: Record<string, string>): NodeJS.ProcessEnv => {
   const env: NodeJS.ProcessEnv = {

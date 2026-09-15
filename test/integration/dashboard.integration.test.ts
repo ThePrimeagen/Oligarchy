@@ -51,9 +51,6 @@ const runQuery = (script: string, databaseUrl: string): Promise<QueryRun> =>
     const child = spawn(
       process.execPath,
       [
-        "--experimental-strip-types",
-        "--disable-warning=ExperimentalWarning",
-        "--input-type=module",
         "-e",
         `import * as query from ${JSON.stringify(QUERY)};\nconst url = process.env.DATABASE_URL;\n${script}`,
       ],

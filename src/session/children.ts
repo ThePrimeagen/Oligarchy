@@ -20,8 +20,6 @@ export type FollowChild = {
   readonly exit: Effect.Effect<FollowExit>;
 };
 
-const NODE_FLAGS = ["--experimental-strip-types", "--disable-warning=ExperimentalWarning"];
-
 const entry = (name: "client" | "ctrl"): Effect.Effect<string, never, Path.Path> =>
   Effect.map(Path.Path, (path) => path.resolve(import.meta.dirname, "..", name, "main.ts"));
 
@@ -56,7 +54,7 @@ const clientCommand = (
     const main = yield* entry("client");
     return ChildProcess.make(
       host.execPath,
-      [...NODE_FLAGS, main, ...args, "--agent-id", agentId, "--server-url", session.serverUrl],
+      [main, ...args, "--agent-id", agentId, "--server-url", session.serverUrl],
       { stdin: "ignore", stdout: "pipe", stderr: "pipe", detached: true, extendEnv: true },
     );
   });
@@ -119,7 +117,7 @@ export const runCtrl = Effect.fn("Children.runCtrl")(function* (args: ReadonlyAr
   const host = yield* State.Host;
   const main = yield* entry("ctrl");
   return yield* collect(
-    ChildProcess.make(host.execPath, [...NODE_FLAGS, main, ...args], {
+    ChildProcess.make(host.execPath, [main, ...args], {
       stdin: "ignore",
       stdout: "pipe",
       stderr: "pipe",
