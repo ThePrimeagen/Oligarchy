@@ -7,7 +7,8 @@ import type * as ProcessStats from "../../src/db/process-stats.ts";
 import type * as Servers from "../../src/db/servers.ts";
 import * as Errors from "../../src/shared/errors.ts";
 import * as View from "../../src/viz/view.ts";
-import { fakeTerminal } from "../support/fake-terminal.ts";
+import { byCommand, type FakeSpawner, fakeSpawner } from "../support/fake-spawner.ts";
+import { fakeTerminal, type FakeTerminal } from "../support/fake-terminal.ts";
 import { stripAnsi } from "../support/fake-tty.ts";
 import * as Stores from "../support/stores.ts";
 
@@ -19,6 +20,8 @@ const ROWS = 37;
 // What a box row holds between its border and padding, and each of the three graphs' width.
 const USABLE = COLUMNS - 4;
 const GRAPH = Math.floor((USABLE - 31) / 3);
+// A job row's columns: the marker, six columns and their gaps; the rest of the row is blank.
+const JOB_WIDTH = 82;
 
 const ago = (seconds: number): Date => new Date(QUERIED_AT.getTime() - seconds * 1000);
 
@@ -101,16 +104,28 @@ const atticSeries: ProcessStats.Series = {
   samples: [{ jobs: 3, memoryBytes: 1_000_000_000, cpuPercent: 50 }],
 };
 
+// A drive runner took, its guest on garage: on both cards.
 const running: Automation.AutomationJobListRow = {
   ticket: "OLI-61",
   test: "lock-screen",
-  action: "diagnose",
+  action: "drive",
   status: "running",
   reason: null,
+  clientUrl: runner.url,
+  serverUrl: garage.url,
   createdAt: ago(180),
   startedAt: ago(45),
   finishedAt: null,
   queriedAt: QUERIED_AT,
+};
+
+// A diagnose runner took: no guest, so on runner's card alone.
+const diagnosing: Automation.AutomationJobListRow = {
+  ...running,
+  ticket: "OLI-65",
+  test: "wifi",
+  action: "diagnose",
+  serverUrl: null,
 };
 
 const pending: Automation.AutomationJobListRow = {
@@ -119,18 +134,24 @@ const pending: Automation.AutomationJobListRow = {
   action: "drive",
   status: "pending",
   reason: null,
+  clientUrl: null,
+  serverUrl: null,
   createdAt: ago(7),
   startedAt: null,
   finishedAt: null,
   queriedAt: QUERIED_AT,
 };
 
+// Over, and so never drawn: the store lists none when asked for zero, and one it did list would
+// not be shown either.
 const failed: Automation.AutomationJobListRow = {
   ticket: "OLI-60",
   test: "wifi",
   action: "drive",
   status: "failed",
   reason: "session timed out",
+  clientUrl: runner.url,
+  serverUrl: garage.url,
   createdAt: ago(3_900),
   startedAt: ago(3_800),
   finishedAt: ago(600),
@@ -151,16 +172,13 @@ const SNAPSHOT: View.Snapshot = {
   readAt: READ_AT,
 };
 
-const shown = (
-  snapshot: View.Snapshot,
-  tab: View.Tab = "servers",
-  cursor: Readonly<Record<View.Tab, number>> = { servers: 0, clients: 0 },
-): View.View => ({
+const shown = (snapshot: View.Snapshot, view: Partial<View.View> = {}): View.View => ({
+  ...View.initialView,
   snapshot: Option.some(snapshot),
-  failure: Option.none(),
-  tab,
-  cursor,
+  ...view,
 });
+const at = (snapshot: View.Snapshot, cursor: Partial<View.View["cursor"]>): View.View =>
+  shown(snapshot, { cursor: { ...View.initialView.cursor, ...cursor } });
 
 // The Rosé Pine colours the screen is painted in, as 24-bit foreground sequences.
 const fg = (hex: string): string => {
@@ -172,9 +190,7 @@ const SUBTLE = fg("#908caa");
 const MUTED = fg("#6e6a86");
 const LOVE = fg("#eb6f92");
 const GOLD = fg("#f6c177");
-const ROSE = fg("#ebbcba");
 const PINE = fg("#31748f");
-const FOAM = fg("#9ccfd8");
 const IRIS = fg("#c4a7e7");
 const FG_RESET = "\x1b[39m";
 const BOLD = "\x1b[1m";
@@ -230,25 +246,14 @@ const MEM_BOTTOM = `${space(GRAPH - 3)}⣼⣿⣿`;
 const JOBS_TOP = `${space(GRAPH - 2)}⣿⣿`;
 const JOBS_BOTTOM = `${space(GRAPH - 3)}⢸⣿⣿`;
 
-const JOB_HEADER = cells(
-  pad("ticket", 9),
-  pad("test", 18),
-  pad("action", 9),
-  pad("status", 12),
-  pad("queued", 11),
-  pad("started", 11),
-  pad("finished", 11),
-  pad("reason", USABLE - 95),
-);
-const job = (
+// A job row: the marker column, then the columns, then blank to the row's width.
+const jobCells = (
   ticket: string,
   test: string,
   action: string,
   status: string,
   queued: string,
   started: string,
-  finished: string,
-  reason: string,
 ): string =>
   cells(
     pad(ticket, 9),
@@ -257,11 +262,24 @@ const job = (
     pad(status, 12),
     pad(queued, 11),
     pad(started, 11),
-    pad(finished, 11),
-    pad(reason, USABLE - 95),
   );
-const HINTS = "j/k select   tab servers/clients   g/G first/last   q quit";
+const jobHeader = (usable = USABLE): string =>
+  `  ${jobCells("ticket", "test", "action", "status", "queued", "started")}${space(usable - JOB_WIDTH)}`;
+const JOB_HEADER = jobHeader();
+const job = (
+  marker: "▸" | " ",
+  columns: Readonly<Parameters<typeof jobCells>>,
+  usable = USABLE,
+): string => `${marker} ${jobCells(...columns)}${space(usable - JOB_WIDTH)}`;
+const RUNNING = ["OLI-61", "lock-screen", "drive", "● running", "3 min ago", "45 s ago"] as const;
+const DIAGNOSING = ["OLI-65", "wifi", "diagnose", "● running", "3 min ago", "45 s ago"] as const;
+const PENDING = ["OLI-62", "install", "drive", "◌ pending", "7 s ago", "—"] as const;
+// The ticket of a job row: the nine columns after the border, its padding and the marker column.
+const ticketOf = (row: string): string => row.slice(4, 13).trimEnd();
+const HINTS =
+  "j/k select   tab machines/queue   h/l servers/clients   g/G first/last   L open ticket   q quit";
 const FOOTER = ` ${HINTS}${space(COLUMNS - HINTS.length - 11)}oligarchy `;
+const OPENED = pad(" opened https://linear.app/issue/OLI-61", COLUMNS);
 
 // The frame as rows: the text after each absolute move, in row order.
 const MOVE = new RegExp(`${String.fromCharCode(27)}\\[(\\d+);1H`, "g");
@@ -273,6 +291,7 @@ const rowsOf = (frame: string): ReadonlyArray<string> =>
 const plainRows = (frame: string): ReadonlyArray<string> => rowsOf(frame).map(stripAnsi);
 const moves = (frame: string): ReadonlyArray<number> =>
   [...frame.matchAll(MOVE)].map((match) => Number(match[1]));
+const lastRows = (tty: FakeTerminal): ReadonlyArray<string> => plainRows(tty.frames.at(-1) ?? "");
 
 const key = (name: string, shift = false): Terminal.UserInput => ({
   input: Option.some(name),
@@ -303,7 +322,7 @@ describe("draw happy path", () => {
   );
 
   it.effect(
-    "boxes the qemu servers as cards with their graphs, then the automation queue, and ends with the key hints",
+    "boxes the qemu servers as cards with their graphs and the jobs running on them, then the live queue, and ends with the key hints",
     () =>
       Effect.sync(() => {
         const rows = plainRows(View.draw(shown(SNAPSHOT), READ_AT, COLUMNS, ROWS));
@@ -313,35 +332,16 @@ describe("draw happy path", () => {
         expect(rows[3]).toBe(
           box(values("37.5%", CPU_BOTTOM, "512 MB", MEM_BOTTOM, "2", JOBS_BOTTOM)),
         );
-        expect(rows[4]).toBe(divider);
-        expect(rows[5]).toBe(box(header("  — · https://qemu-c.example.com", "never heard from")));
-        expect(rows[6]).toBe(box(labels(BLANK_GRAPH, BLANK_GRAPH, BLANK_GRAPH)));
-        expect(rows[7]).toBe(box(values("—", BLANK_GRAPH, "—", BLANK_GRAPH, "—", BLANK_GRAPH)));
-        expect(rows[8]).toBe(bottom());
-        expect(rows[9]).toBe(queueTop("automation · running 1 · pending 1"));
-        expect(rows[10]).toBe(box(JOB_HEADER));
-        expect(rows[11]).toBe(
-          box(
-            job("OLI-61", "lock-screen", "diagnose", "● running", "3 min ago", "45 s ago", "—", ""),
-          ),
-        );
-        expect(rows[12]).toBe(
-          box(job("OLI-62", "install", "drive", "◌ pending", "7 s ago", "—", "—", "")),
-        );
-        expect(rows[13]).toBe(
-          box(
-            job(
-              "OLI-60",
-              "wifi",
-              "drive",
-              "✗ failed",
-              "1 h ago",
-              "1 h ago",
-              "10 min ago",
-              "session timed out",
-            ),
-          ),
-        );
+        expect(rows[4]).toBe(box(job(" ", RUNNING)));
+        expect(rows[5]).toBe(divider);
+        expect(rows[6]).toBe(box(header("  — · https://qemu-c.example.com", "never heard from")));
+        expect(rows[7]).toBe(box(labels(BLANK_GRAPH, BLANK_GRAPH, BLANK_GRAPH)));
+        expect(rows[8]).toBe(box(values("—", BLANK_GRAPH, "—", BLANK_GRAPH, "—", BLANK_GRAPH)));
+        expect(rows[9]).toBe(bottom());
+        expect(rows[10]).toBe(queueTop("automation · running 1 · pending 1"));
+        expect(rows[11]).toBe(box(JOB_HEADER));
+        expect(rows[12]).toBe(box(job("▸", RUNNING)));
+        expect(rows[13]).toBe(box(job(" ", PENDING)));
         for (const row of rows.slice(14, ROWS - 2)) {
           expect(row).toBe(blankBox);
         }
@@ -350,36 +350,78 @@ describe("draw happy path", () => {
       }),
   );
 
-  it.effect("shows the automation clients on the other tab, with the same card", () =>
-    Effect.sync(() => {
-      const rows = plainRows(View.draw(shown(SNAPSHOT, "clients"), READ_AT, COLUMNS, ROWS));
-      expect(rows[0]).toBe(machinesTop(TABS, "read 0 s ago"));
-      expect(rows[1]).toBe(box(header("▸ runner · http://10.0.0.9:7000", RUNNER_RIGHT)));
-      // One reading: the left half of the one column is empty; 8% is one dot of the bottom row.
-      expect(rows[2]).toBe(
-        box(labels(BLANK_GRAPH, `${space(GRAPH - 1)}⢸`, `${space(GRAPH - 1)}⢸`)),
-      );
-      expect(rows[3]).toBe(
-        box(
-          values(
-            "8.0%",
-            `${space(GRAPH - 1)}⢀`,
-            "256 MB",
-            `${space(GRAPH - 1)}⢸`,
-            "1",
-            `${space(GRAPH - 1)}⢸`,
+  it.effect(
+    "shows the automation clients on the other tab, with the same card and the jobs the client runs",
+    () =>
+      Effect.sync(() => {
+        const rows = plainRows(
+          View.draw(shown(SNAPSHOT, { tab: "clients" }), READ_AT, COLUMNS, ROWS),
+        );
+        expect(rows[0]).toBe(machinesTop(TABS, "read 0 s ago"));
+        expect(rows[1]).toBe(box(header("▸ runner · http://10.0.0.9:7000", RUNNER_RIGHT)));
+        // One reading: the left half of the one column is empty; 8% is one dot of the bottom row.
+        expect(rows[2]).toBe(
+          box(labels(BLANK_GRAPH, `${space(GRAPH - 1)}⢸`, `${space(GRAPH - 1)}⢸`)),
+        );
+        expect(rows[3]).toBe(
+          box(
+            values(
+              "8.0%",
+              `${space(GRAPH - 1)}⢀`,
+              "256 MB",
+              `${space(GRAPH - 1)}⢸`,
+              "1",
+              `${space(GRAPH - 1)}⢸`,
+            ),
           ),
-        ),
-      );
-      expect(rows[4]).toBe(bottom());
-      expect(rows[5]).toBe(queueTop("automation · running 1 · pending 1"));
-      expect(rows[7]?.startsWith("│ OLI-61")).toBe(true);
-      expect(rows[ROWS - 1]).toBe(FOOTER);
-    }),
+        );
+        expect(rows[4]).toBe(box(job(" ", RUNNING)));
+        expect(rows[5]).toBe(bottom());
+        expect(rows[6]).toBe(queueTop("automation · running 1 · pending 1"));
+        expect(rows[8]).toBe(box(job("▸", RUNNING)));
+        expect(rows[ROWS - 1]).toBe(FOOTER);
+      }),
   );
 
   it.effect(
-    "paints the borders muted, the active tab bold, the selected card's marker gold, the cpu graph by heat, memory pine, jobs iris, and each job by its status",
+    "lists on a card the running jobs placed on it by url: a drive on its qemu server and its client, a diagnose on its client alone, a pending job and a job on an unknown url on none",
+    () =>
+      Effect.sync(() => {
+        const elsewhere = {
+          ...running,
+          ticket: "OLI-66",
+          clientUrl: "http://10.9.9.9:2",
+          serverUrl: "http://10.9.9.9:1",
+        };
+        const snapshot: View.Snapshot = {
+          ...SNAPSHOT,
+          machines: [garage, runner],
+          queue: { ...QUEUE, running: [running, diagnosing, elsewhere] },
+        };
+        const servers = plainRows(View.draw(shown(snapshot), READ_AT, COLUMNS, ROWS));
+        expect(servers[4]).toBe(box(job(" ", RUNNING)));
+        expect(servers[5]).toBe(bottom());
+        expect(servers[6]).toBe(queueTop("automation · running 3 · pending 1"));
+        const clients = plainRows(
+          View.draw(shown(snapshot, { tab: "clients" }), READ_AT, COLUMNS, ROWS),
+        );
+        expect(clients[4]).toBe(box(job(" ", RUNNING)));
+        expect(clients[5]).toBe(box(job(" ", DIAGNOSING)));
+        expect(clients[6]).toBe(bottom());
+        // The queue lists all three; the cards list only what is theirs.
+        expect(clients.slice(9, 13).map(ticketOf)).toEqual([
+          "OLI-61",
+          "OLI-65",
+          "OLI-66",
+          "OLI-62",
+        ]);
+        expect(servers.filter((row) => row.includes("OLI-66"))).toHaveLength(1);
+        expect(servers.filter((row) => row.includes("OLI-62"))).toHaveLength(1);
+      }),
+  );
+
+  it.effect(
+    "paints the borders muted, the active tab bold, the focused list's marker gold and the other's muted, the cpu graph by heat, memory pine, jobs iris, and each job by its status",
     () =>
       Effect.sync(() => {
         const frame = View.draw(shown(SNAPSHOT), READ_AT, COLUMNS, ROWS);
@@ -400,35 +442,37 @@ describe("draw happy path", () => {
         expect(rows[2]).toContain(`${PINE}⢀⣿⣿${FG_RESET}`);
         expect(rows[2]).toContain(`${IRIS}⣿⣿${FG_RESET}`);
         expect(rows[3]).toContain(`${BOLD}${TEXT}   37.5%${FG_RESET}${UNBOLD}`);
-        expect(rows[4]).toBe(`${MUTED}${divider}${FG_RESET}`);
-        expect(rows[5]).not.toContain(`${GOLD}▸`);
-        expect(rows[5]).toContain(`${MUTED}never heard from${FG_RESET}`);
-        expect(rows[10]).toContain(`${SUBTLE}${JOB_HEADER}${FG_RESET}`);
-        expect(rows[11]).toContain(`${GOLD}${pad("● running", 12)}${FG_RESET}`);
-        expect(rows[12]).toContain(`${MUTED}${pad("◌ pending", 12)}${FG_RESET}`);
-        expect(rows[13]).toContain(`${LOVE}${pad("✗ failed", 12)}${FG_RESET}`);
+        // The card's job, in the queue's look, with no marker of its own while the card is selected.
+        expect(rows[4]?.startsWith(`${MUTED}│${FG_RESET}   ${TEXT}OLI-61`)).toBe(true);
+        expect(rows[4]).toContain(`${GOLD}${pad("● running", 12)}${FG_RESET}`);
+        expect(rows[5]).toBe(`${MUTED}${divider}${FG_RESET}`);
+        expect(rows[6]).not.toContain(`${GOLD}▸`);
+        expect(rows[6]).toContain(`${MUTED}never heard from${FG_RESET}`);
+        expect(rows[11]).toContain(`${SUBTLE}${JOB_HEADER}${FG_RESET}`);
+        // The machines have the focus: the queue's marker is muted, its ticket text.
+        expect(
+          rows[12]?.startsWith(`${MUTED}│${FG_RESET} ${MUTED}▸${FG_RESET} ${TEXT}OLI-61`),
+        ).toBe(true);
+        expect(rows[12]).toContain(`${GOLD}${pad("● running", 12)}${FG_RESET}`);
+        expect(rows[13]).toContain(`${MUTED}${pad("◌ pending", 12)}${FG_RESET}`);
         expect(rows[ROWS - 1]).toContain(`${TEXT}j/k${FG_RESET}${MUTED} select`);
+        expect(rows[ROWS - 1]).toContain(`${TEXT}L${FG_RESET}${MUTED} open ticket`);
         expect(rows[ROWS - 1]).toContain(`${TEXT}q${FG_RESET}${MUTED} quit`);
-        const statuses = View.draw(
-          shown({
-            ...SNAPSHOT,
-            queue: {
-              ...EMPTY_QUEUE,
-              completed: [
-                { ...failed, status: "succeeded" },
-                { ...failed, status: "aborted" },
-                { ...failed, status: "timed_out" },
-              ],
-            },
-          }),
-          READ_AT,
-          COLUMNS,
-          ROWS,
+        const queue = rowsOf(
+          View.draw(shown(SNAPSHOT, { focus: "queue" }), READ_AT, COLUMNS, ROWS),
         );
-        expect(statuses).toContain(`${FOAM}${pad("✓ succeeded", 12)}${FG_RESET}`);
-        expect(statuses).toContain(`${ROSE}${pad("⊘ aborted", 12)}${FG_RESET}`);
-        expect(statuses).toContain(`${IRIS}${pad("◔ timed_out", 12)}${FG_RESET}`);
-        const clients = rowsOf(View.draw(shown(SNAPSHOT, "clients"), READ_AT, COLUMNS, ROWS));
+        expect(queue[1]).toContain(`${MUTED}▸${FG_RESET}`);
+        expect(queue[1]).not.toContain(`${GOLD}▸`);
+        expect(queue[12]).toContain(`${GOLD}▸${FG_RESET}`);
+        // The card's job selected: its marker gold, the card's header without one.
+        const onJob = rowsOf(View.draw(at(SNAPSHOT, { servers: 1 }), READ_AT, COLUMNS, ROWS));
+        expect(onJob[1]).not.toContain("▸");
+        expect(onJob[4]?.startsWith(`${MUTED}│${FG_RESET} ${GOLD}▸${FG_RESET} ${TEXT}OLI-61`)).toBe(
+          true,
+        );
+        const clients = rowsOf(
+          View.draw(shown(SNAPSHOT, { tab: "clients" }), READ_AT, COLUMNS, ROWS),
+        );
         expect(clients[0]).toContain(`${MUTED}qemu servers · 2`);
         expect(clients[0]).toContain(`${BOLD}${TEXT}automation clients · 1${FG_RESET}${UNBOLD}`);
       }),
@@ -438,7 +482,7 @@ describe("draw happy path", () => {
     "colours the cpu graph from foam through gold to love as the reading climbs, one colour per column",
     () =>
       Effect.sync(() => {
-        const at = (readings: ReadonlyArray<number>): string =>
+        const cpuRow = (readings: ReadonlyArray<number>): string =>
           rowsOf(
             View.draw(
               shown({
@@ -461,16 +505,16 @@ describe("draw happy path", () => {
             ),
           )[3] ?? "";
         // One percent is one dot, a shade off foam; fifty is gold itself; a hundred is love.
-        expect(at([0, 1])).toContain(`${fg("#9ecfd6")}⢀${FG_RESET}`);
-        expect(at([50, 50])).toContain(`${GOLD}⣿${FG_RESET}`);
-        expect(at([100, 100])).toContain(`${LOVE}⣿${FG_RESET}`);
+        expect(cpuRow([0, 1])).toContain(`${fg("#9ecfd6")}⢀${FG_RESET}`);
+        expect(cpuRow([50, 50])).toContain(`${GOLD}⣿${FG_RESET}`);
+        expect(cpuRow([100, 100])).toContain(`${LOVE}⣿${FG_RESET}`);
         // The first column at 25 sits between foam and gold; the second between gold and love.
-        expect(at([25, 25, 75, 75])).toContain(`${fg("#c9c8a8")}⣤${fg("#f19885")}⣿${FG_RESET}`);
+        expect(cpuRow([25, 25, 75, 75])).toContain(`${fg("#c9c8a8")}⣤${fg("#f19885")}⣿${FG_RESET}`);
       }),
   );
 
   it.effect(
-    "shows the newest readings that fit, and gives a wider terminal wider graphs and the reason column the rest",
+    "shows the newest readings that fit, and gives a wider terminal wider graphs and job rows as wide",
     () =>
       Effect.sync(() => {
         const wide = 160;
@@ -485,7 +529,9 @@ describe("draw happy path", () => {
             `${pad("cpu", 8)} ${space(graph - 2)}⢠⡇  ${pad("mem", 8)} ${space(graph - 3)}⢀⣿⣿  ${pad("jobs", 8)} ${space(graph - 2)}⣿⣿${space(usable - 31 - 3 * graph)}`,
           ),
         );
-        expect(rows[13]).toContain(pad("session timed out", usable - 95));
+        expect(rows[4]).toBe(`│ ${job(" ", RUNNING, usable)} │`);
+        expect(rows[11]).toBe(`│ ${jobHeader(usable)} │`);
+        expect(rows[12]).toBe(`│ ${job("▸", RUNNING, usable)} │`);
         // Ninety readings in a graph of thirty-three columns: the oldest twenty-four fall off.
         const long = Array.from({ length: 90 }, (_, index) => ({
           jobs: 0,
@@ -536,26 +582,32 @@ describe("draw happy path", () => {
       }),
   );
 
-  it.effect("lists the jobs in the order given, running then pending then completed", () =>
+  it.effect("lists the jobs in the order given, running then pending, and nothing completed", () =>
     Effect.sync(() => {
       const other = { ...pending, ticket: "OLI-70" };
-      const rows = plainRows(
-        View.draw(
-          shown({
-            ...SNAPSHOT,
-            queue: { running: [running], pending: [other, pending], completed: [failed] },
-          }),
-          READ_AT,
-          COLUMNS,
-          ROWS,
-        ),
+      const frame = View.draw(
+        shown({
+          ...SNAPSHOT,
+          queue: {
+            running: [running],
+            pending: [other, pending],
+            completed: [failed, { ...failed, ticket: "OLI-59", status: "succeeded" }],
+          },
+        }),
+        READ_AT,
+        COLUMNS,
+        ROWS,
       );
-      expect(rows.slice(11, 15).map((row) => row.slice(2, 8))).toEqual([
-        "OLI-61",
-        "OLI-70",
-        "OLI-62",
-        "OLI-60",
-      ]);
+      const rows = plainRows(frame);
+      expect(rows.slice(12, 15).map(ticketOf)).toEqual(["OLI-61", "OLI-70", "OLI-62"]);
+      expect(rows[15]).toBe(blankBox);
+      expect(rows[10]).toBe(queueTop("automation · running 1 · pending 2"));
+      // A completed job placed on garage is not on its card either.
+      expect(rows[5]).toBe(divider);
+      expect(frame).not.toContain("OLI-60");
+      expect(frame).not.toContain("OLI-59");
+      expect(frame).not.toContain("failed");
+      expect(frame).not.toContain("session timed out");
     }),
   );
 });
@@ -569,6 +621,20 @@ describe("draw selection", () => {
   const many: View.Snapshot = { ...SNAPSHOT, machines: [...fleet, runner], series: [] };
   const names = (rows: ReadonlyArray<string>): ReadonlyArray<string> =>
     rows.filter((row) => /^│ [▸ ] s\d/.test(row)).map((row) => row.slice(2, 6));
+  // `count` running drives on every server of the fleet.
+  const busy = (count: number): View.Snapshot => ({
+    ...many,
+    queue: {
+      ...EMPTY_QUEUE,
+      running: fleet.flatMap((machine, server) =>
+        Array.from({ length: count }, (_, index) => ({
+          ...running,
+          ticket: `OLI-${String(server)}${String(index)}`,
+          serverUrl: machine.url,
+        })),
+      ),
+    },
+  });
 
   it.effect(
     "shows four cards at most, the selected one marked, and scrolls the window to keep it in view",
@@ -578,48 +644,151 @@ describe("draw selection", () => {
         expect(names(top)).toEqual(["▸ s0", "  s1", "  s2", "  s3"]);
         expect(top[16]).toBe(bottom("1-4 of 6"));
         expect(top[17]).toBe(queueTop("automation · running 1 · pending 1"));
-        const third = plainRows(
-          View.draw(shown(many, "servers", { servers: 3, clients: 0 }), READ_AT, COLUMNS, ROWS),
-        );
+        const third = plainRows(View.draw(at(many, { servers: 3 }), READ_AT, COLUMNS, ROWS));
         expect(names(third)).toEqual(["  s0", "  s1", "  s2", "▸ s3"]);
-        const fifth = plainRows(
-          View.draw(shown(many, "servers", { servers: 4, clients: 0 }), READ_AT, COLUMNS, ROWS),
-        );
+        const fifth = plainRows(View.draw(at(many, { servers: 4 }), READ_AT, COLUMNS, ROWS));
         expect(names(fifth)).toEqual(["  s1", "  s2", "  s3", "▸ s4"]);
         expect(fifth[16]).toBe(bottom("2-5 of 6"));
-        const last = plainRows(
-          View.draw(shown(many, "servers", { servers: 5, clients: 0 }), READ_AT, COLUMNS, ROWS),
-        );
+        const last = plainRows(View.draw(at(many, { servers: 5 }), READ_AT, COLUMNS, ROWS));
         expect(names(last)).toEqual(["  s2", "  s3", "  s4", "▸ s5"]);
         expect(last[16]).toBe(bottom("3-6 of 6"));
         // Four or fewer: no window to speak of.
         const few = plainRows(View.draw(shown(SNAPSHOT), READ_AT, COLUMNS, ROWS));
-        expect(few[8]).toBe(bottom());
+        expect(few[9]).toBe(bottom());
       }),
   );
 
-  it.effect("clamps a cursor past the end to the last card, and one below zero to the first", () =>
+  it.effect(
+    "shows only the cards that fit with their jobs, the queue keeping four rows, and cuts a card's jobs to the box",
+    () =>
+      Effect.sync(() => {
+        // Cards of seven rows: three fit in the twenty-seven rows the box may take at 37 rows.
+        const four = plainRows(View.draw(shown(busy(4)), READ_AT, COLUMNS, ROWS));
+        expect(names(four)).toEqual(["▸ s0", "  s1", "  s2"]);
+        expect(four[24]).toBe(bottom("1-3 of 6"));
+        expect(four[25]).toBe(queueTop("automation · running 24 · pending 0"));
+        expect(four[26]).toBe(box(JOB_HEADER));
+        // Three cards of four jobs, then the eight queue rows.
+        expect(four.filter((row) => /^│ [▸ ] OLI-/.test(row))).toHaveLength(12 + 8);
+        expect(four[35]).toBe(bottom("1-8 of 24"));
+        expect(four[36]).toBe(FOOTER);
+        // Cards of eleven rows: two fit.
+        const eight = plainRows(View.draw(shown(busy(8)), READ_AT, COLUMNS, ROWS));
+        expect(names(eight)).toEqual(["▸ s0", "  s1"]);
+        expect(eight[24]).toBe(bottom("1-2 of 6"));
+        // The window ends at the selected card and grows upward first: the last card's last
+        // job selected shows the three cards above it that fit.
+        const end = plainRows(View.draw(at(busy(4), { servers: 29 }), READ_AT, COLUMNS, ROWS));
+        expect(names(end)).toEqual(["  s3", "  s4", "  s5"]);
+        expect(
+          end
+            .slice(0, 24)
+            .filter((row) => row.startsWith("│ ▸ OLI-"))
+            .map(ticketOf),
+        ).toEqual(["OLI-53"]);
+        expect(end[24]).toBe(bottom("4-6 of 6"));
+        // A taller terminal fits all four.
+        const tall = plainRows(View.draw(shown(busy(4)), READ_AT, COLUMNS, 50));
+        expect(names(tall)).toEqual(["▸ s0", "  s1", "  s2", "  s3"]);
+        expect(tall[32]).toBe(bottom("1-4 of 6"));
+        // A server running more guests than the box has rows shows what fits and the queue keeps
+        // its four rows; the frame is still the terminal's height.
+        const crowded = plainRows(View.draw(shown(busy(30)), READ_AT, COLUMNS, ROWS));
+        expect(crowded).toHaveLength(ROWS);
+        for (const row of crowded) {
+          expect(row).toHaveLength(COLUMNS);
+        }
+        expect(names(crowded)).toEqual(["▸ s0"]);
+        expect(crowded.slice(4, 28).every((row) => row.startsWith("│   OLI-0"))).toBe(true);
+        expect(crowded[28]).toBe(bottom("1-1 of 6"));
+        expect(crowded[29]).toBe(queueTop("automation · running 180 · pending 0"));
+        expect(crowded[35]).toBe(bottom("1-4 of 180"));
+        expect(crowded[36]).toBe(FOOTER);
+        // The twenty-sixth job of that server selected (the card's header is the first entry):
+        // the card's window ends on it, so the job L opens is on screen and marked.
+        const deep = plainRows(View.draw(at(busy(30), { servers: 26 }), READ_AT, COLUMNS, ROWS));
+        expect(deep.slice(4, 28).map(ticketOf)).toEqual(
+          Array.from({ length: 24 }, (_, index) => `OLI-0${String(index + 2)}`),
+        );
+        expect(
+          deep
+            .slice(4, 28)
+            .filter((row) => row.startsWith("│ ▸ "))
+            .map(ticketOf),
+        ).toEqual(["OLI-025"]);
+        expect(deep[1]?.startsWith("│   s0")).toBe(true);
+        expect(deep[28]).toBe(bottom("1-1 of 6"));
+      }),
+  );
+
+  it.effect("clamps a cursor past the end to the last row, and one below zero to the first", () =>
     Effect.sync(() => {
-      const past = plainRows(
-        View.draw(shown(many, "servers", { servers: 40, clients: 0 }), READ_AT, COLUMNS, ROWS),
-      );
+      const past = plainRows(View.draw(at(many, { servers: 40 }), READ_AT, COLUMNS, ROWS));
       expect(names(past)).toEqual(["  s2", "  s3", "  s4", "▸ s5"]);
-      const below = plainRows(
-        View.draw(shown(many, "servers", { servers: -3, clients: 0 }), READ_AT, COLUMNS, ROWS),
-      );
+      const below = plainRows(View.draw(at(many, { servers: -3 }), READ_AT, COLUMNS, ROWS));
       expect(names(below)).toEqual(["▸ s0", "  s1", "  s2", "  s3"]);
       // A fleet that shrank under the cursor: the first k moves off the last card, not to it.
-      const shrunk = shown(many, "servers", { servers: 40, clients: 0 });
+      const shrunk = at(many, { servers: 40 });
       expect(View.press(shrunk, key("k")).cursor.servers).toBe(4);
       expect(View.press(shrunk, key("j")).cursor.servers).toBe(5);
     }),
+  );
+
+  it.effect(
+    "marks the selected job, scrolls the job window to keep it in view, and counts the window on the border",
+    () =>
+      Effect.sync(() => {
+        const jobs = Array.from({ length: 40 }, (_, index) => ({
+          ...pending,
+          ticket: `OLI-${String(100 + index)}`,
+        }));
+        const snapshot = { ...SNAPSHOT, queue: { ...EMPTY_QUEUE, pending: jobs } };
+        const marked = (rows: ReadonlyArray<string>): ReadonlyArray<string> =>
+          rows.filter((row) => row.startsWith("│ ▸ OLI-")).map(ticketOf);
+        const listed = (rows: ReadonlyArray<string>): ReadonlyArray<string> =>
+          rows.filter((row) => /^│ [▸ ] OLI-/.test(row)).map(ticketOf);
+        // 37 rows: nine are the cards' box, three the queue's frame, one the footer.
+        const first = plainRows(View.draw(shown(snapshot), READ_AT, COLUMNS, ROWS));
+        expect(listed(first)).toHaveLength(24);
+        expect(listed(first)[0]).toBe("OLI-100");
+        expect(marked(first)).toEqual(["OLI-100"]);
+        expect(first[35]).toBe(bottom("1-24 of 40"));
+        const within = plainRows(View.draw(at(snapshot, { queue: 10 }), READ_AT, COLUMNS, ROWS));
+        expect(listed(within)[0]).toBe("OLI-100");
+        expect(marked(within)).toEqual(["OLI-110"]);
+        const scrolled = plainRows(View.draw(at(snapshot, { queue: 30 }), READ_AT, COLUMNS, ROWS));
+        expect(listed(scrolled)[0]).toBe("OLI-107");
+        expect(listed(scrolled).at(-1)).toBe("OLI-130");
+        expect(marked(scrolled)).toEqual(["OLI-130"]);
+        expect(scrolled[35]).toBe(bottom("8-31 of 40"));
+        const end = plainRows(View.draw(at(snapshot, { queue: 39 }), READ_AT, COLUMNS, ROWS));
+        expect(listed(end)).toHaveLength(24);
+        expect(marked(end)).toEqual(["OLI-139"]);
+        expect(end[35]).toBe(bottom("17-40 of 40"));
+        // A cursor past the end marks the last job; a taller terminal lists more.
+        const past = plainRows(View.draw(at(snapshot, { queue: 90 }), READ_AT, COLUMNS, 50));
+        expect(past).toHaveLength(50);
+        expect(listed(past)).toHaveLength(37);
+        expect(marked(past)).toEqual(["OLI-139"]);
+        expect(past[48]).toBe(bottom("4-40 of 40"));
+        expect(past[49]).toBe(FOOTER);
+        const exact = plainRows(
+          View.draw(
+            shown({ ...SNAPSHOT, queue: { ...EMPTY_QUEUE, pending: jobs.slice(0, 24) } }),
+            READ_AT,
+            COLUMNS,
+            ROWS,
+          ),
+        );
+        expect(exact[35]).toBe(bottom());
+      }),
   );
 
   it.effect("j, k, down, up, g and G move the selection within the tab's machines", () =>
     Effect.sync(() => {
       const start = shown(many);
       const one = View.press(start, key("j"));
-      expect(one.cursor).toEqual({ servers: 1, clients: 0 });
+      expect(one.cursor).toEqual({ servers: 1, clients: 0, queue: 0 });
       const two = View.press(one, key("down"));
       expect(two.cursor.servers).toBe(2);
       expect(View.press(two, key("k")).cursor.servers).toBe(1);
@@ -631,39 +800,152 @@ describe("draw selection", () => {
       expect(View.press(start, key("k")).cursor.servers).toBe(0);
       expect(View.press(start, key("x"))).toEqual(start);
       expect(View.press(start, key("j")).tab).toBe("servers");
+      expect(View.press(start, key("j")).focus).toBe("machines");
     }),
   );
 
   it.effect(
-    "tab, h, l, left and right switch between servers and clients, each keeping its own cursor",
+    "j and k walk a tab's cards and the jobs on them as one list, so a card's job can be selected",
+    () =>
+      Effect.sync(() => {
+        const snapshot: View.Snapshot = {
+          ...SNAPSHOT,
+          queue: { ...QUEUE, running: [running, diagnosing] },
+        };
+        // Servers: garage, its drive, the unnamed server. Clients: runner, its drive, its diagnose.
+        const start = shown(snapshot);
+        const onJob = View.press(start, key("j"));
+        expect(onJob.cursor.servers).toBe(1);
+        const onNext = View.press(onJob, key("j"));
+        expect(onNext.cursor.servers).toBe(2);
+        expect(View.press(onNext, key("j")).cursor.servers).toBe(2);
+        expect(View.press(start, key("g", true)).cursor.servers).toBe(2);
+        expect(View.press(onNext, key("g")).cursor.servers).toBe(0);
+        const rows = plainRows(View.draw(onJob, READ_AT, COLUMNS, ROWS));
+        expect(rows[1]?.startsWith("│   garage")).toBe(true);
+        expect(rows[4]).toBe(box(job("▸", RUNNING)));
+        expect(rows[6]?.startsWith("│   — ·")).toBe(true);
+        const next = plainRows(View.draw(onNext, READ_AT, COLUMNS, ROWS));
+        expect(next[4]).toBe(box(job(" ", RUNNING)));
+        expect(next[6]?.startsWith("│ ▸ — ·")).toBe(true);
+        const clients = View.press(
+          View.press(shown(snapshot, { tab: "clients" }), key("j")),
+          key("j"),
+        );
+        expect(clients.cursor.clients).toBe(2);
+        expect(View.press(clients, key("j")).cursor.clients).toBe(2);
+        const runnerRows = plainRows(View.draw(clients, READ_AT, COLUMNS, ROWS));
+        expect(runnerRows[1]?.startsWith("│   runner")).toBe(true);
+        expect(runnerRows[4]).toBe(box(job(" ", RUNNING)));
+        expect(runnerRows[5]).toBe(box(job("▸", DIAGNOSING)));
+        // A job that finished under the cursor: the rows above take the selection.
+        const gone = shown(SNAPSHOT, {
+          tab: "clients",
+          cursor: { servers: 0, clients: 2, queue: 0 },
+        });
+        expect(View.press(gone, key("k")).cursor.clients).toBe(0);
+        expect(plainRows(View.draw(gone, READ_AT, COLUMNS, ROWS))[4]).toBe(box(job("▸", RUNNING)));
+      }),
+  );
+
+  it.effect(
+    "tab moves the focus between the machines and the queue; j, k, g and G then move the job selection, clamped to the jobs listed",
+    () =>
+      Effect.sync(() => {
+        const three = {
+          ...SNAPSHOT,
+          queue: { ...QUEUE, pending: [{ ...pending, ticket: "OLI-70" }, pending] },
+        };
+        const start = View.press(View.press(shown(three), key("j")), key("j"));
+        const queue = View.press(start, key("tab"));
+        expect(queue.focus).toBe("queue");
+        expect(queue.tab).toBe("servers");
+        expect(queue.cursor).toEqual({ servers: 2, clients: 0, queue: 0 });
+        const one = View.press(queue, key("j"));
+        expect(one.cursor).toEqual({ servers: 2, clients: 0, queue: 1 });
+        expect(View.press(one, key("down")).cursor.queue).toBe(2);
+        expect(View.press(View.press(one, key("j")), key("j")).cursor.queue).toBe(2);
+        expect(View.press(one, key("k")).cursor.queue).toBe(0);
+        expect(View.press(one, key("up")).cursor.queue).toBe(0);
+        expect(View.press(queue, key("k")).cursor.queue).toBe(0);
+        expect(View.press(queue, key("g", true)).cursor.queue).toBe(2);
+        expect(View.press(one, key("g")).cursor.queue).toBe(0);
+        // Back to the machines, each list keeping its place; shift-tab goes the same way.
+        const back = View.press(one, key("tab"));
+        expect(back.focus).toBe("machines");
+        expect(back.cursor).toEqual({ servers: 2, clients: 0, queue: 1 });
+        expect(View.press(back, key("j")).cursor).toEqual({ servers: 2, clients: 0, queue: 1 });
+        expect(View.press(one, key("tab", true)).focus).toBe("machines");
+        // A queue that shrank under the cursor: the first k moves off the last job, not to it.
+        const shrunk = shown(three, {
+          focus: "queue",
+          cursor: { servers: 0, clients: 0, queue: 40 },
+        });
+        expect(View.press(shrunk, key("k")).cursor.queue).toBe(1);
+        expect(View.press(shrunk, key("j")).cursor.queue).toBe(2);
+        const rows = plainRows(View.draw(one, READ_AT, COLUMNS, ROWS));
+        expect(rows[1]?.startsWith("│   garage")).toBe(true);
+        expect(rows[6]?.startsWith("│ ▸ — ·")).toBe(true);
+        expect(rows.slice(12, 15).map((row) => row.slice(2, 3))).toEqual([" ", "▸", " "]);
+      }),
+  );
+
+  it.effect(
+    "h, l, left and right switch between servers and clients whichever list has the focus, each keeping its own cursor",
     () =>
       Effect.sync(() => {
         const start = View.press(shown(many), key("j"));
-        const clients = View.press(start, key("tab"));
+        const clients = View.press(start, key("l"));
         expect(clients.tab).toBe("clients");
-        expect(clients.cursor).toEqual({ servers: 1, clients: 0 });
-        // One client: j has nowhere to go.
-        expect(View.press(clients, key("j")).cursor).toEqual({ servers: 1, clients: 0 });
+        expect(clients.focus).toBe("machines");
+        expect(clients.cursor).toEqual({ servers: 1, clients: 0, queue: 0 });
+        // One client with one job: j reaches the job, and no further.
+        expect(View.press(clients, key("j")).cursor).toEqual({ servers: 1, clients: 1, queue: 0 });
+        expect(View.press(View.press(clients, key("j")), key("j")).cursor.clients).toBe(1);
         expect(View.press(clients, key("h")).tab).toBe("servers");
         expect(View.press(clients, key("left")).tab).toBe("servers");
-        expect(View.press(start, key("l")).tab).toBe("clients");
         expect(View.press(start, key("right")).tab).toBe("clients");
-        expect(View.press(clients, key("tab", true)).tab).toBe("servers");
-        expect(View.press(View.press(clients, key("tab")), key("tab")).tab).toBe("clients");
+        expect(View.press(View.press(clients, key("l")), key("l")).tab).toBe("clients");
+        const queue = View.press(start, key("tab"));
+        expect(View.press(queue, key("l")).tab).toBe("clients");
+        expect(View.press(queue, key("l")).focus).toBe("queue");
         const rows = plainRows(View.draw(clients, READ_AT, COLUMNS, ROWS));
         expect(rows[1]?.startsWith("│ ▸ runner")).toBe(true);
       }),
   );
 
-  it.effect("a key before the first read changes the tab and leaves the cursor at the first", () =>
-    Effect.sync(() => {
-      expect(View.press(View.initialView, key("j")).cursor).toEqual({ servers: 0, clients: 0 });
-      expect(View.press(View.initialView, key("g", true)).cursor).toEqual({
-        servers: 0,
-        clients: 0,
-      });
-      expect(View.press(View.initialView, key("tab")).tab).toBe("clients");
-    }),
+  it.effect(
+    "L moves nothing: opening the ticket is the runner's, and any key retires the last notice",
+    () =>
+      Effect.sync(() => {
+        const start = shown(many);
+        const noticed = { ...start, notice: Option.some("opened https://linear.app/issue/OLI-61") };
+        expect(View.press(noticed, key("l", true))).toEqual(start);
+        expect(View.press(noticed, key("j"))).toEqual(View.press(start, key("j")));
+        expect(View.press(noticed, key("j")).notice).toEqual(Option.none());
+        expect(View.press(noticed, key("x"))).toEqual(start);
+        expect(View.press(noticed, key("tab")).notice).toEqual(Option.none());
+      }),
+  );
+
+  it.effect(
+    "a key before the first read changes the tab or the focus and leaves the cursors at the first",
+    () =>
+      Effect.sync(() => {
+        expect(View.press(View.initialView, key("j")).cursor).toEqual({
+          servers: 0,
+          clients: 0,
+          queue: 0,
+        });
+        expect(View.press(View.initialView, key("g", true)).cursor).toEqual({
+          servers: 0,
+          clients: 0,
+          queue: 0,
+        });
+        expect(View.press(View.initialView, key("l")).tab).toBe("clients");
+        expect(View.press(View.initialView, key("tab")).focus).toBe("queue");
+        expect(View.press(View.press(View.initialView, key("tab")), key("j")).cursor.queue).toBe(0);
+      }),
   );
 });
 
@@ -672,7 +954,7 @@ describe("draw ages", () => {
     "reads a stamp's age in the unit an operator would: seconds, minutes, hours, days",
     () =>
       Effect.sync(() => {
-        const at = (secondsAgo: number): Servers.Machine => ({
+        const heard = (secondsAgo: number): Servers.Machine => ({
           ...garage,
           url: `http://s${String(secondsAgo)}`,
           heartbeatAt: ago(secondsAgo),
@@ -684,7 +966,7 @@ describe("draw ages", () => {
         expect(
           seen(
             View.draw(
-              shown({ ...SNAPSHOT, machines: [at(0), at(59), at(60), at(3_599)] }),
+              shown({ ...SNAPSHOT, machines: [heard(0), heard(59), heard(60), heard(3_599)] }),
               READ_AT,
               COLUMNS,
               ROWS,
@@ -694,7 +976,7 @@ describe("draw ages", () => {
         // An hour and a day are silent, so the age follows the word.
         const old = plainRows(
           View.draw(
-            shown({ ...SNAPSHOT, machines: [at(3_600), at(90_000)] }),
+            shown({ ...SNAPSHOT, machines: [heard(3_600), heard(90_000)] }),
             READ_AT,
             COLUMNS,
             ROWS,
@@ -710,7 +992,8 @@ describe("draw ages", () => {
       const rows = plainRows(View.draw(shown(SNAPSHOT), READ_AT + 3_000, COLUMNS, ROWS));
       expect(rows[0]).toBe(machinesTop(TABS, "read 3 s ago"));
       expect(rows[1]).toContain("seen 15 s ago");
-      expect(rows[11]).toContain(`${pad("3 min ago", 11)}  ${pad("48 s ago", 11)}`);
+      expect(rows[4]).toContain(`${pad("3 min ago", 11)}  ${pad("48 s ago", 11)}`);
+      expect(rows[12]).toContain(`${pad("3 min ago", 11)}  ${pad("48 s ago", 11)}`);
       const later = plainRows(View.draw(shown(SNAPSHOT), READ_AT + 125_000, COLUMNS, ROWS));
       expect(later[0]).toBe(machinesTop(TABS, "read 2 min ago"));
     }),
@@ -772,17 +1055,17 @@ describe("draw unhappy path", () => {
     "is not silent at ninety seconds and is at ninety-one, the read's own age included",
     () =>
       Effect.sync(() => {
-        const at = (secondsAgo: number) => ({
+        const heard = (secondsAgo: number) => ({
           ...SNAPSHOT,
           machines: [{ ...garage, heartbeatAt: ago(secondsAgo) }],
         });
-        expect(plainRows(View.draw(shown(at(90)), READ_AT, COLUMNS, ROWS))[1]).toContain(
+        expect(plainRows(View.draw(shown(heard(90)), READ_AT, COLUMNS, ROWS))[1]).toContain(
           "31.5 / 66.9 GB",
         );
-        expect(plainRows(View.draw(shown(at(91)), READ_AT, COLUMNS, ROWS))[1]).toContain(
+        expect(plainRows(View.draw(shown(heard(91)), READ_AT, COLUMNS, ROWS))[1]).toContain(
           "silent · seen 1 min ago",
         );
-        expect(plainRows(View.draw(shown(at(88)), READ_AT + 3_000, COLUMNS, ROWS))[1]).toContain(
+        expect(plainRows(View.draw(shown(heard(88)), READ_AT + 3_000, COLUMNS, ROWS))[1]).toContain(
           "silent · seen 1 min ago",
         );
       }),
@@ -824,9 +1107,14 @@ describe("draw unhappy path", () => {
       expect(servers[1]).toBe(box(pad("no qemu servers registered", USABLE)));
       expect(servers[2]).toBe(bottom());
       expect(servers[3]).toBe(queueTop("automation · running 1 · pending 1"));
-      expect(servers[5]?.startsWith("│ OLI-61")).toBe(true);
+      expect(servers[5]).toBe(box(job("▸", RUNNING)));
       const clients = plainRows(
-        View.draw(shown({ ...SNAPSHOT, machines: [garage] }, "clients"), READ_AT, COLUMNS, ROWS),
+        View.draw(
+          shown({ ...SNAPSHOT, machines: [garage] }, { tab: "clients" }),
+          READ_AT,
+          COLUMNS,
+          ROWS,
+        ),
       );
       expect(clients[1]).toBe(box(pad("no automation clients registered", USABLE)));
       const styled = rowsOf(
@@ -838,46 +1126,23 @@ describe("draw unhappy path", () => {
     }),
   );
 
-  it.effect("says so under the queue's header with nothing to list, and counts zero", () =>
-    Effect.sync(() => {
-      const frame = View.draw(shown({ ...SNAPSHOT, queue: EMPTY_QUEUE }), READ_AT, COLUMNS, ROWS);
-      const rows = plainRows(frame);
-      expect(rows[9]).toBe(queueTop("automation · running 0 · pending 0"));
-      expect(rows[10]).toBe(box(JOB_HEADER));
-      expect(rows[11]).toBe(box(pad("no jobs", USABLE)));
-      expect(rows[12]).toBe(blankBox);
-      expect(rowsOf(frame)[11]).toContain(`${MUTED}${pad("no jobs", USABLE)}${FG_RESET}`);
-    }),
-  );
-
   it.effect(
-    "gives every row past the cards to the job list and counts what it cut in the border",
+    "says so under the queue's header with nothing to list, marks nothing, and counts zero",
     () =>
       Effect.sync(() => {
-        const jobs = Array.from({ length: 40 }, (_, index) => ({
-          ...pending,
-          ticket: `OLI-${String(100 + index)}`,
-        }));
-        const snapshot = { ...SNAPSHOT, queue: { ...EMPTY_QUEUE, pending: jobs } };
-        // 37 rows: nine are the cards' box, three the queue's frame, one the footer.
-        const short = plainRows(View.draw(shown(snapshot), READ_AT, COLUMNS, ROWS));
-        expect(short.filter((row) => row.startsWith("│ OLI-"))).toHaveLength(24);
-        expect(short[35]).toBe(bottom("24 of 40"));
-        expect(short[36]).toBe(FOOTER);
-        const tall = plainRows(View.draw(shown(snapshot), READ_AT, COLUMNS, 50));
-        expect(tall).toHaveLength(50);
-        expect(tall.filter((row) => row.startsWith("│ OLI-"))).toHaveLength(37);
-        expect(tall[48]).toBe(bottom("37 of 40"));
-        expect(tall[49]).toBe(FOOTER);
-        const exact = plainRows(
-          View.draw(
-            shown({ ...SNAPSHOT, queue: { ...EMPTY_QUEUE, pending: jobs.slice(0, 24) } }),
-            READ_AT,
-            COLUMNS,
-            ROWS,
-          ),
+        const frame = View.draw(
+          shown({ ...SNAPSHOT, queue: EMPTY_QUEUE }, { focus: "queue" }),
+          READ_AT,
+          COLUMNS,
+          ROWS,
         );
-        expect(exact[35]).toBe(bottom());
+        const rows = plainRows(frame);
+        expect(rows[9]).toBe(queueTop("automation · running 0 · pending 0"));
+        expect(rows[10]).toBe(box(JOB_HEADER));
+        expect(rows[11]).toBe(box(pad("no jobs", USABLE)));
+        expect(rows[12]).toBe(blankBox);
+        expect(frame).not.toContain(`${GOLD}▸`);
+        expect(rowsOf(frame)[11]).toContain(`${MUTED}${pad("no jobs", USABLE)}${FG_RESET}`);
       }),
   );
 
@@ -894,11 +1159,11 @@ describe("draw unhappy path", () => {
           ROWS,
         ),
       );
-      expect(rows[11]?.startsWith(`│ ${cells(pad("—", 9), pad("install", 18))}`)).toBe(true);
+      expect(rows[11]?.startsWith(`│ ▸ ${cells(pad("—", 9), pad("install", 18))}`)).toBe(true);
     }),
   );
 
-  it.effect("truncates a name, a url and a reason to their columns with an ellipsis", () =>
+  it.effect("truncates a name, a url and a test to their columns with an ellipsis", () =>
     Effect.sync(() => {
       const long = "a".repeat(80);
       const rows = plainRows(
@@ -907,7 +1172,10 @@ describe("draw unhappy path", () => {
             ...SNAPSHOT,
             machines: [{ ...garage, name: long, url: `http://${long}.example.com` }],
             series: [],
-            queue: { ...EMPTY_QUEUE, completed: [{ ...failed, reason: long }] },
+            queue: {
+              ...EMPTY_QUEUE,
+              running: [{ ...running, test: long, serverUrl: `http://${long}.example.com` }],
+            },
           }),
           READ_AT,
           COLUMNS,
@@ -916,20 +1184,16 @@ describe("draw unhappy path", () => {
       );
       const left = USABLE - GARAGE_RIGHT.length - 2;
       expect(rows[1]).toBe(box(header(`▸ ${long.slice(0, left - 3)}…`, GARAGE_RIGHT)));
-      expect(rows[7]).toBe(
-        box(
-          job(
-            "OLI-60",
-            "wifi",
-            "drive",
-            "✗ failed",
-            "1 h ago",
-            "1 h ago",
-            "10 min ago",
-            `${"a".repeat(USABLE - 96)}…`,
-          ),
-        ),
-      );
+      const truncated = [
+        "OLI-61",
+        `${"a".repeat(17)}…`,
+        "drive",
+        "● running",
+        "3 min ago",
+        "45 s ago",
+      ] as const;
+      expect(rows[4]).toBe(box(job(" ", truncated)));
+      expect(rows[8]).toBe(box(job("▸", truncated)));
       for (const row of rows) {
         expect(row).toHaveLength(COLUMNS);
       }
@@ -937,7 +1201,7 @@ describe("draw unhappy path", () => {
   );
 
   it.effect(
-    "draws a reason that spans lines or carries an escape, and a failure that does, as one row each",
+    "draws a test name that spans lines or carries an escape, and a failure that does, as one row each",
     () =>
       Effect.sync(() => {
         const frame = View.draw(
@@ -946,9 +1210,7 @@ describe("draw unhappy path", () => {
               ...SNAPSHOT,
               queue: {
                 ...EMPTY_QUEUE,
-                completed: [
-                  { ...failed, reason: "line one\nline two\x1b[31m\ttab\u007f\u009b31mcsi" },
-                ],
+                running: [{ ...running, test: "one\ntwo\x1b[31m\tt\u007f\u009bc" }],
               },
             }),
             failure: Option.some("Failed query: select 1\nparams: []"),
@@ -959,14 +1221,23 @@ describe("draw unhappy path", () => {
         );
         expect(frame).not.toMatch(/\n/);
         expect(frame).not.toContain("\t");
-        expect(frame).not.toContain("\x1b[31m\ttab");
+        expect(frame).not.toContain("\x1b[31m\tt");
         // The 8-bit CSI a UTF-8 terminal would obey as one, drawn as a space like the 7-bit one.
         expect(frame).not.toContain("\u009b");
         const rows = plainRows(frame);
         for (const row of rows) {
           expect(row).toHaveLength(COLUMNS);
         }
-        expect(rows[11]).toContain("line one line two [31m tab  31mcsi");
+        const cleaned = [
+          "OLI-61",
+          "one two [31m t  c",
+          "drive",
+          "● running",
+          "3 min ago",
+          "45 s ago",
+        ] as const;
+        expect(rows[4]).toBe(box(job(" ", cleaned)));
+        expect(rows[12]).toBe(box(job("▸", cleaned)));
         expect(rows[ROWS - 1]).toBe(pad(" error: Failed query: select 1 params: []", COLUMNS));
       }),
   );
@@ -1015,6 +1286,36 @@ describe("draw unhappy path", () => {
     }),
   );
 
+  it.effect("puts the last key's notice on the footer in gold, under a read's failure", () =>
+    Effect.sync(() => {
+      const notice = "opened https://linear.app/issue/OLI-61";
+      const frame = View.draw(
+        { ...shown(SNAPSHOT), notice: Option.some(notice) },
+        READ_AT,
+        COLUMNS,
+        ROWS,
+      );
+      expect(plainRows(frame)[ROWS - 1]).toBe(OPENED);
+      expect(rowsOf(frame)[ROWS - 1]).toBe(`${GOLD}${OPENED}${FG_RESET}`);
+      expect(frame).not.toContain("q quit");
+      const reason = "Failed query: select 1";
+      const both = View.draw(
+        { ...shown(SNAPSHOT), notice: Option.some(notice), failure: Option.some(reason) },
+        READ_AT,
+        COLUMNS,
+        ROWS,
+      );
+      expect(plainRows(both)[ROWS - 1]).toBe(pad(` error: ${reason}`, COLUMNS));
+      const cut = View.draw(
+        { ...shown(SNAPSHOT), notice: Option.some(`xdg-open: ${"x".repeat(200)}`) },
+        READ_AT,
+        COLUMNS,
+        ROWS,
+      );
+      expect(plainRows(cut)[ROWS - 1]).toBe(` xdg-open: ${"x".repeat(COLUMNS - 12)}…`);
+    }),
+  );
+
   it.effect("clears the screen and names the size it needs when the terminal is too small", () =>
     Effect.sync(() => {
       expect(View.tooSmall(100, 24)).toBe(
@@ -1036,7 +1337,9 @@ describe("draw unhappy path", () => {
 type Scripted = {
   readonly machines?: () => Effect.Effect<ReadonlyArray<Servers.Machine>, Errors.DatabaseError>;
   readonly series?: () => Effect.Effect<ReadonlyArray<ProcessStats.Series>, Errors.DatabaseError>;
-  readonly jobs?: () => Effect.Effect<Automation.AutomationQueue, Errors.DatabaseError>;
+  readonly jobs?: (
+    count: number,
+  ) => Effect.Effect<Automation.AutomationQueue, Errors.DatabaseError>;
 };
 
 const storesLayer = (scripted: Scripted = {}) =>
@@ -1050,6 +1353,14 @@ const storesLayer = (scripted: Scripted = {}) =>
     Stores.fakeAutomationStore({ listJobs: scripted.jobs ?? (() => Effect.succeed(QUEUE)) }).layer,
   );
 
+// The view over the scripted stores, the terminal, and a spawner that opens nothing unless told.
+const live = (
+  tty: FakeTerminal,
+  scripted: Scripted = {},
+  spawner: FakeSpawner = fakeSpawner(),
+): Effect.Effect<void, PlatformError.PlatformError> =>
+  View.run.pipe(Effect.provide(Layer.mergeAll(storesLayer(scripted), tty.layer, spawner.layer)));
+
 const refused = Errors.DatabaseError.make({
   operation: "listMachines",
   message: "Failed query: select 1",
@@ -1058,7 +1369,7 @@ const refused = Errors.DatabaseError.make({
 
 describe("run happy path", () => {
   it.effect(
-    "takes the alternate screen, reads and paints at once, repaints every second, re-reads every five, and q gives the screen back",
+    "takes the alternate screen, reads and paints at once asking for no completed jobs, repaints every second, re-reads every five, and q gives the screen back",
     () =>
       Effect.gen(function* () {
         const tty = yield* fakeTerminal({ columns: 135, rows: 37 });
@@ -1068,23 +1379,30 @@ describe("run happy path", () => {
             reads.count += 1;
             return [garage, runner];
           });
-        const fiber = yield* Effect.forkChild(
-          View.run.pipe(Effect.provide(Layer.mergeAll(storesLayer({ machines }), tty.layer))),
-          { startImmediately: true },
-        );
+        const asked: Array<number> = [];
+        const jobs = (count: number) =>
+          Effect.sync(() => {
+            asked.push(count);
+            return QUEUE;
+          });
+        const fiber = yield* Effect.forkChild(live(tty, { machines, jobs }), {
+          startImmediately: true,
+        });
         yield* settle;
         expect(tty.frames[0]).toBe(View.ENTER_SCREEN);
         expect(tty.frames).toHaveLength(2);
         expect(reads.count).toBe(1);
+        expect(asked).toEqual([0]);
         const first = plainRows(tty.frames[1] ?? "");
         expect(first[0]).toBe(
           machinesTop("qemu servers · 1 ├─┤ automation clients · 1", "read 0 s ago"),
         );
         expect(first[1]).toBe(box(header("▸ garage · http://127.0.0.1:55332", GARAGE_RIGHT)));
         expect(first[2]).toBe(box(labels(CPU_TOP, MEM_TOP, JOBS_TOP)));
+        expect(first[4]).toBe(box(job(" ", RUNNING)));
         // One server in this fleet, so the queue sits right under its card.
-        expect(first[4]).toBe(bottom());
-        expect(first[7]?.startsWith("│ OLI-61")).toBe(true);
+        expect(first[5]).toBe(bottom());
+        expect(first[8]).toBe(box(job("▸", RUNNING)));
 
         yield* TestClock.adjust("1 second");
         yield* settle;
@@ -1099,7 +1417,8 @@ describe("run happy path", () => {
         yield* TestClock.adjust("4 seconds");
         yield* settle;
         expect(reads.count).toBe(2);
-        expect(plainRows(tty.frames.at(-1) ?? "")[0]).toBe(
+        expect(asked).toEqual([0, 0]);
+        expect(lastRows(tty)[0]).toBe(
           machinesTop("qemu servers · 1 ├─┤ automation clients · 1", "read 0 s ago"),
         );
 
@@ -1115,44 +1434,126 @@ describe("run happy path", () => {
       }),
   );
 
-  it.effect("a key repaints at once: tab shows the clients, j and k move the selection", () =>
+  it.effect("a key repaints at once: l shows the clients, j and k move the selection", () =>
     Effect.gen(function* () {
       const tty = yield* fakeTerminal();
-      const fiber = yield* Effect.forkChild(
-        View.run.pipe(Effect.provide(Layer.mergeAll(storesLayer(), tty.layer))),
-        { startImmediately: true },
-      );
+      const fiber = yield* Effect.forkChild(live(tty), { startImmediately: true });
       yield* settle;
       expect(tty.frames).toHaveLength(2);
-      yield* tty.key("tab");
+      yield* tty.press("l");
       yield* settle;
       expect(tty.frames).toHaveLength(3);
       const clients = plainRows(tty.frames[2] ?? "");
       expect(clients[1]).toBe(box(header("▸ runner · http://10.0.0.9:7000", RUNNER_RIGHT)));
-      yield* tty.key("tab");
+      yield* tty.press("h");
       yield* tty.press("j");
       yield* settle;
       expect(tty.frames).toHaveLength(5);
-      // One server: j paints the same picture again.
-      expect(plainRows(tty.frames[4] ?? "")[1]).toBe(
-        box(header("▸ garage · http://127.0.0.1:55332", GARAGE_RIGHT)),
-      );
+      // One server with one job: j selects the job.
+      const onJob = plainRows(tty.frames[4] ?? "");
+      expect(onJob[1]).toBe(box(header("  garage · http://127.0.0.1:55332", GARAGE_RIGHT)));
+      expect(onJob[4]).toBe(box(job("▸", RUNNING)));
       yield* tty.press("k");
       yield* settle;
       expect(tty.frames).toHaveLength(6);
+      expect(lastRows(tty)[1]).toBe(box(header("▸ garage · http://127.0.0.1:55332", GARAGE_RIGHT)));
       yield* tty.press("q");
       yield* Fiber.join(fiber);
       expect(tty.frames.at(-1)).toBe(View.LEAVE_SCREEN);
     }),
   );
 
+  it.effect(
+    "L opens the focused list's selected job with xdg-open, detached and left to itself, and the footer says so until the next key",
+    () =>
+      Effect.gen(function* () {
+        const tty = yield* fakeTerminal();
+        const spawner = fakeSpawner(byCommand({ "xdg-open": { exitCode: 0 } }));
+        const fiber = yield* Effect.forkChild(live(tty, {}, spawner), { startImmediately: true });
+        yield* settle;
+        // The card is selected, not a job on it.
+        yield* tty.press("L");
+        yield* settle;
+        expect(spawner.spawned).toEqual([]);
+        expect(lastRows(tty)[36]).toBe(pad(" no job selected", COLUMNS));
+        yield* tty.press("j");
+        yield* tty.press("L");
+        yield* settle;
+        expect(spawner.spawned).toHaveLength(1);
+        const [opened] = spawner.spawned;
+        expect(opened).toMatchObject({
+          command: "xdg-open",
+          args: ["https://linear.app/issue/OLI-61"],
+        });
+        // The browser is the desktop's, so it gets the desktop's environment, none of our stdio,
+        // and its own process group, and the scope closing does not kill it.
+        expect(opened.options).toMatchObject({
+          stdin: "ignore",
+          stdout: "ignore",
+          stderr: "ignore",
+          extendEnv: true,
+          detached: true,
+        });
+        expect(opened.isReferenced()).toBe(false);
+        expect(opened.isReleased()).toBe(true);
+        expect(opened.kills).toEqual([]);
+        expect(lastRows(tty)[36]).toBe(OPENED);
+        expect(rowsOf(tty.frames.at(-1) ?? "")[36]).toBe(`${GOLD}${OPENED}${FG_RESET}`);
+        // The notice outlives the age ticks and the reads, and goes with the next key.
+        yield* TestClock.adjust("5 seconds");
+        yield* settle;
+        expect(lastRows(tty)[36]).toBe(OPENED);
+        yield* tty.press("k");
+        yield* settle;
+        expect(lastRows(tty)[36]).toBe(FOOTER);
+        // The queue focused: its selection is what L opens.
+        yield* tty.key("tab");
+        yield* tty.press("j");
+        yield* tty.press("L");
+        yield* settle;
+        expect(spawner.spawned).toHaveLength(2);
+        expect(spawner.spawned[1]?.args).toEqual(["https://linear.app/issue/OLI-62"]);
+        expect(lastRows(tty)[36]).toBe(pad(" opened https://linear.app/issue/OLI-62", COLUMNS));
+        yield* tty.press("q");
+        yield* Fiber.join(fiber);
+        expect(tty.frames.at(-1)).toBe(View.LEAVE_SCREEN);
+      }),
+  );
+
+  it.effect(
+    "an xdg-open still running two seconds on has handed the url to a browser in its foreground: opened, and left running",
+    () =>
+      Effect.gen(function* () {
+        const tty = yield* fakeTerminal();
+        const spawner = fakeSpawner(byCommand({ "xdg-open": {} }));
+        const fiber = yield* Effect.forkChild(live(tty, {}, spawner), { startImmediately: true });
+        yield* settle;
+        yield* tty.key("tab");
+        yield* tty.press("L");
+        yield* settle;
+        expect(spawner.spawned).toHaveLength(1);
+        expect(lastRows(tty)[36]).toBe(FOOTER);
+        yield* TestClock.adjust("1 second");
+        yield* settle;
+        expect(lastRows(tty)[36]).toBe(FOOTER);
+        yield* TestClock.adjust("1 second");
+        yield* settle;
+        expect(lastRows(tty)[36]).toBe(OPENED);
+        const [opened] = spawner.spawned;
+        expect(yield* opened.isRunning).toBe(true);
+        expect(opened.isReferenced()).toBe(false);
+        expect(opened.isReleased()).toBe(true);
+        expect(opened.kills).toEqual([]);
+        yield* tty.press("q");
+        yield* Fiber.join(fiber);
+        expect(opened.kills).toEqual([]);
+      }),
+  );
+
   it.effect("Q quits too, and so does the input ending, as ctrl-c ends it", () =>
     Effect.gen(function* () {
       const upper = yield* fakeTerminal();
-      const byUpper = yield* Effect.forkChild(
-        View.run.pipe(Effect.provide(Layer.mergeAll(storesLayer(), upper.layer))),
-        { startImmediately: true },
-      );
+      const byUpper = yield* Effect.forkChild(live(upper), { startImmediately: true });
       yield* settle;
       yield* upper.press("x");
       yield* settle;
@@ -1162,10 +1563,7 @@ describe("run happy path", () => {
       expect(upper.frames.at(-1)).toBe(View.LEAVE_SCREEN);
 
       const ended = yield* fakeTerminal();
-      const byEnd = yield* Effect.forkChild(
-        View.run.pipe(Effect.provide(Layer.mergeAll(storesLayer(), ended.layer))),
-        { startImmediately: true },
-      );
+      const byEnd = yield* Effect.forkChild(live(ended), { startImmediately: true });
       yield* settle;
       yield* Queue.end(ended.keys);
       yield* Fiber.join(byEnd);
@@ -1186,17 +1584,14 @@ describe("run unhappy path", () => {
             calls.count += 1;
             return calls.count === 2 ? Effect.fail(refused) : Effect.succeed([garage, runner]);
           });
-        const fiber = yield* Effect.forkChild(
-          View.run.pipe(Effect.provide(Layer.mergeAll(storesLayer({ machines }), tty.layer))),
-          { startImmediately: true },
-        );
+        const fiber = yield* Effect.forkChild(live(tty, { machines }), { startImmediately: true });
         yield* settle;
         expect(plainRows(tty.frames[1] ?? "")[36]).toBe(FOOTER);
 
         yield* TestClock.adjust("5 seconds");
         yield* settle;
         expect(calls.count).toBe(2);
-        const failedFrame = plainRows(tty.frames.at(-1) ?? "");
+        const failedFrame = lastRows(tty);
         expect(failedFrame[0]).toBe(
           machinesTop("qemu servers · 1 ├─┤ automation clients · 1", "read 5 s ago"),
         );
@@ -1208,7 +1603,7 @@ describe("run unhappy path", () => {
         yield* TestClock.adjust("5 seconds");
         yield* settle;
         expect(calls.count).toBe(3);
-        const recovered = plainRows(tty.frames.at(-1) ?? "");
+        const recovered = lastRows(tty);
         expect(recovered[0]).toBe(
           machinesTop("qemu servers · 1 ├─┤ automation clients · 1", "read 0 s ago"),
         );
@@ -1232,10 +1627,7 @@ describe("run unhappy path", () => {
               )
             : Effect.succeed(QUEUE);
         });
-      const fiber = yield* Effect.forkChild(
-        View.run.pipe(Effect.provide(Layer.mergeAll(storesLayer({ jobs }), tty.layer))),
-        { startImmediately: true },
-      );
+      const fiber = yield* Effect.forkChild(live(tty, { jobs }), { startImmediately: true });
       yield* settle;
       const bare = plainRows(tty.frames[1] ?? "");
       expect(bare[0]).toBe(machinesTop("qemu servers ├─┤ automation clients", "reading…"));
@@ -1245,8 +1637,8 @@ describe("run unhappy path", () => {
       yield* TestClock.adjust("5 seconds");
       yield* settle;
       expect(calls.count).toBe(2);
-      const shownNow = plainRows(tty.frames.at(-1) ?? "");
-      expect(shownNow[7]?.startsWith("│ OLI-61")).toBe(true);
+      const shownNow = lastRows(tty);
+      expect(shownNow[8]).toBe(box(job("▸", RUNNING)));
       expect(shownNow[36]).toBe(FOOTER);
 
       yield* tty.press("q");
@@ -1254,13 +1646,115 @@ describe("run unhappy path", () => {
     }),
   );
 
+  it.effect("L with no job selected, or a job without a ticket, says so and opens nothing", () =>
+    Effect.gen(function* () {
+      const empty = yield* fakeTerminal();
+      const emptySpawner = fakeSpawner();
+      const byEmpty = yield* Effect.forkChild(
+        live(empty, { jobs: () => Effect.succeed(EMPTY_QUEUE) }, emptySpawner),
+        { startImmediately: true },
+      );
+      yield* settle;
+      yield* empty.key("tab");
+      yield* empty.press("L");
+      yield* settle;
+      expect(emptySpawner.spawned).toEqual([]);
+      expect(lastRows(empty)[36]).toBe(pad(" no job selected", COLUMNS));
+      yield* empty.press("q");
+      yield* Fiber.join(byEmpty);
+
+      const unticketed = yield* fakeTerminal();
+      const unticketedSpawner = fakeSpawner();
+      const byUnticketed = yield* Effect.forkChild(
+        live(
+          unticketed,
+          {
+            jobs: () => Effect.succeed({ ...EMPTY_QUEUE, running: [{ ...running, ticket: null }] }),
+          },
+          unticketedSpawner,
+        ),
+        { startImmediately: true },
+      );
+      yield* settle;
+      // The unticketed job on garage's card, then the same job in the queue.
+      yield* unticketed.press("j");
+      yield* unticketed.press("L");
+      yield* settle;
+      expect(unticketedSpawner.spawned).toEqual([]);
+      expect(lastRows(unticketed)[36]).toBe(pad(" the selected job has no ticket", COLUMNS));
+      yield* unticketed.key("tab");
+      yield* unticketed.press("L");
+      yield* settle;
+      expect(unticketedSpawner.spawned).toEqual([]);
+      expect(lastRows(unticketed)[36]).toBe(pad(" the selected job has no ticket", COLUMNS));
+      yield* unticketed.press("q");
+      yield* Fiber.join(byUnticketed);
+
+      // Before the first read there is nothing to open either.
+      const unread = yield* fakeTerminal();
+      const unreadSpawner = fakeSpawner();
+      const byUnread = yield* Effect.forkChild(
+        live(unread, { jobs: () => Effect.never }, unreadSpawner),
+        { startImmediately: true },
+      );
+      yield* settle;
+      yield* unread.press("L");
+      yield* settle;
+      expect(unreadSpawner.spawned).toEqual([]);
+      expect(lastRows(unread)[36]).toBe(pad(" no job selected", COLUMNS));
+      yield* unread.press("q");
+      yield* Fiber.join(byUnread);
+    }),
+  );
+
+  it.effect(
+    "L puts xdg-open's refusal on the footer: the binary missing, or an exit that says nothing handles the url",
+    () =>
+      Effect.gen(function* () {
+        const missing = yield* fakeTerminal();
+        const missingSpawner = fakeSpawner(
+          byCommand({ "xdg-open": { spawnError: "spawn xdg-open ENOENT" } }),
+        );
+        const byMissing = yield* Effect.forkChild(live(missing, {}, missingSpawner), {
+          startImmediately: true,
+        });
+        yield* settle;
+        yield* missing.key("tab");
+        yield* missing.press("L");
+        yield* settle;
+        expect(missingSpawner.spawned).toEqual([]);
+        expect(lastRows(missing)[36]).toBe(pad(" xdg-open: spawn xdg-open ENOENT", COLUMNS));
+        expect(rowsOf(missing.frames.at(-1) ?? "")[36]).toBe(
+          `${GOLD}${pad(" xdg-open: spawn xdg-open ENOENT", COLUMNS)}${FG_RESET}`,
+        );
+        // The view goes on: the next key retires the notice and the screen still works.
+        yield* missing.press("j");
+        yield* settle;
+        expect(lastRows(missing)[36]).toBe(FOOTER);
+        yield* missing.press("q");
+        yield* Fiber.join(byMissing);
+        expect(missing.frames.at(-1)).toBe(View.LEAVE_SCREEN);
+
+        const refusing = yield* fakeTerminal();
+        const refusingSpawner = fakeSpawner(byCommand({ "xdg-open": { exitCode: 3 } }));
+        const byRefusing = yield* Effect.forkChild(live(refusing, {}, refusingSpawner), {
+          startImmediately: true,
+        });
+        yield* settle;
+        yield* refusing.key("tab");
+        yield* refusing.press("L");
+        yield* settle;
+        expect(refusingSpawner.spawned).toHaveLength(1);
+        expect(lastRows(refusing)[36]).toBe(pad(" xdg-open exited 3", COLUMNS));
+        yield* refusing.press("q");
+        yield* Fiber.join(byRefusing);
+      }),
+  );
+
   it.effect("a terminal shrunk below the minimum shows the size it needs until it grows back", () =>
     Effect.gen(function* () {
       const tty = yield* fakeTerminal();
-      const fiber = yield* Effect.forkChild(
-        View.run.pipe(Effect.provide(Layer.mergeAll(storesLayer(), tty.layer))),
-        { startImmediately: true },
-      );
+      const fiber = yield* Effect.forkChild(live(tty), { startImmediately: true });
       yield* settle;
       tty.resize(100, 24);
       yield* TestClock.adjust("1 second");
@@ -1269,7 +1763,7 @@ describe("run unhappy path", () => {
       tty.resize(140, 40);
       yield* TestClock.adjust("1 second");
       yield* settle;
-      const regrown = plainRows(tty.frames.at(-1) ?? "");
+      const regrown = lastRows(tty);
       expect(regrown).toHaveLength(40);
       expect(regrown[1]).toContain("http://127.0.0.1:55332");
       yield* tty.press("q");
@@ -1294,9 +1788,7 @@ describe("run unhappy path", () => {
                   }),
                 ),
         });
-        const error = yield* Effect.flip(
-          View.run.pipe(Effect.provide(Layer.mergeAll(storesLayer(), tty.layer))),
-        );
+        const error = yield* Effect.flip(live(tty));
         expect(error._tag).toBe("PlatformError");
         expect(tty.frames[0]).toBe(View.ENTER_SCREEN);
         expect(tty.frames.at(-1)).toBe(View.LEAVE_SCREEN);

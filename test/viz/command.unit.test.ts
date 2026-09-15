@@ -84,7 +84,12 @@ describe("viz happy path", () => {
       expect(h.tty.frames).toEqual([]);
       const printed = (yield* TestConsole.logLines).join("\n");
       expect(printed).toMatch(/automation queue/);
+      expect(printed).toMatch(/running and pending/);
+      expect(printed).toMatch(/jobs running on it/);
       expect(printed).toMatch(/j\/k/);
+      expect(printed).toMatch(/tab moves between the machines and the queue/);
+      expect(printed).toMatch(/h\/l switch servers and clients/);
+      expect(printed).toMatch(/L opens the selected job's Linear ticket/);
       expect(printed).toMatch(/q quits/);
     }),
   );

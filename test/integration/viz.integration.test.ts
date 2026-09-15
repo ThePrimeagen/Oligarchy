@@ -149,8 +149,11 @@ Postgres.describeWithDatabase("./viz against the seeded database", () => {
     expect(drawn).toMatch(/╭─┤ qemu servers · \d+ ├─┤ automation clients · \d+ ├/);
     expect(drawn).toMatch(/┤ read \d+ s ago ├─╮/);
     expect(drawn).toMatch(/╭─┤ automation · running \d+ · pending \d+ ├/);
-    expect(drawn).toContain("ticket");
-    expect(drawn).toContain("j/k select   tab servers/clients   g/G first/last   q quit");
+    expect(drawn).toMatch(/ticket\s+test\s+action\s+status\s+queued\s+started\s+│/);
+    expect(drawn).not.toContain("finished");
+    expect(drawn).toContain(
+      "j/k select   tab machines/queue   h/l servers/clients   g/G first/last   L open ticket   q quit",
+    );
     expect(drawn).not.toContain("error:");
     expect(drawn).not.toContain("\n");
   });
