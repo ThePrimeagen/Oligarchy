@@ -89,19 +89,9 @@ const heat = (percent: number): string => {
     : blend(PALETTE.gold, PALETTE.love, (value - 50) / 50);
 };
 
-const STATUS: Readonly<
-  Record<
-    Automation.AutomationJobListRow["status"],
-    { readonly glyph: string; readonly color: string }
-  >
-> = {
-  pending: { glyph: "◌", color: PALETTE.muted },
-  running: { glyph: "●", color: PALETTE.gold },
-  succeeded: { glyph: "✓", color: PALETTE.foam },
-  failed: { glyph: "✗", color: PALETTE.love },
-  aborted: { glyph: "⊘", color: PALETTE.rose },
-  timed_out: { glyph: "◔", color: PALETTE.iris },
-};
+// The queue lists what runs and what waits, so a job's status is one or the other.
+const RUNNING = { glyph: "●", color: PALETTE.gold };
+const PENDING = { glyph: "◌", color: PALETTE.muted };
 
 // ---------------------------------------------------------------------------
 // View: pure
@@ -117,10 +107,8 @@ export type Snapshot = {
 };
 
 export type Tab = "servers" | "clients";
-// The two boxes; the one with the focus is what j and k move through.
-export type Focus = "machines" | "queue";
-// The three lists a cursor can be in: each tab's cards, and the queue's jobs.
-export type List = Tab | "queue";
+type Focus = "machines" | "queue";
+type List = Tab | "queue";
 
 // snapshot is absent until the first read lands; failure is the last read's reason, cleared by
 // the next good read, so a database outage leaves the last picture up with the reason under it.
@@ -154,7 +142,7 @@ const KIND: Readonly<Record<Tab, Servers.ServerType>> = {
 const ofTab = (snapshot: Snapshot, tab: Tab): ReadonlyArray<Servers.Machine> =>
   snapshot.machines.filter((machine) => machine.type === KIND[tab]);
 
-// What runs and what waits, as one list; what is over is not shown.
+// What runs, then what waits; nothing that is over.
 const jobsOf = (snapshot: Snapshot): ReadonlyArray<Automation.AutomationJobListRow> => [
   ...snapshot.queue.running,
   ...snapshot.queue.pending,
@@ -163,11 +151,9 @@ const jobsOf = (snapshot: Snapshot): ReadonlyArray<Automation.AutomationJobListR
 const clamp = (value: number, min: number, max: number): number =>
   Math.min(max, Math.max(min, value));
 
-// The list the focus is in: the tab's cards, or the jobs.
 const focused = (view: View): List => (view.focus === "machines" ? view.tab : "queue");
 
-// The job L opens: the queue's selected row, whichever box has the focus; none before the first
-// read or with nothing queued.
+// L opens the queue's selection whichever box has the focus.
 const selectedJob = (view: View): Option.Option<Automation.AutomationJobListRow> =>
   Option.flatMap(view.snapshot, (snapshot) => {
     const jobs = jobsOf(snapshot);
@@ -208,9 +194,9 @@ const age = (ms: number): string => {
 const ago = (stamp: Date | null, queriedAt: Date, drift: number): string =>
   stamp === null ? "—" : `${age(queriedAt.getTime() - stamp.getTime() + drift)} ago`;
 
-// A job's reason is a stderr tail and a driver's message can span lines: a control character,
-// C1 included (a UTF-8 terminal obeys U+009B as it does ESC [), would break the row or steer
-// the terminal, so each is drawn as a space.
+// Text from the database (a test's name, a failure's message) can span lines: a control
+// character, C1 included (a UTF-8 terminal obeys U+009B as it does ESC [), would break the row
+// or steer the terminal, so each is drawn as a space.
 const clean = (text: string): string =>
   Array.from(text, (character) =>
     character < " " || (character >= "\u007f" && character <= "\u009f") ? " " : character,
@@ -583,7 +569,7 @@ const jobRow = (
   drift: number,
   usable: number,
 ): string => {
-  const status = STATUS[job.status];
+  const status = job.status === "running" ? RUNNING : PENDING;
   const columns = [
     paint(PALETTE.text, fit(job.ticket ?? "—", JOB_WIDTHS.ticket)),
     paint(PALETTE.text, fit(job.test, JOB_WIDTHS.test)),
@@ -696,10 +682,7 @@ export const draw = (view: View, now: number, columns: number, rows: number): st
 // readline reports a capital L as l with shift.
 const isOpen = (input: Terminal.UserInput): boolean => input.key.shift && input.key.name === "l";
 
-// What a key does to the view: j, k, g and G and the arrows move the selection within the
-// focused list; tab moves the focus between the machines and the queue; h, l and the arrows
-// sideways switch tabs. Every key retires the last notice. L moves nothing here: opening the
-// ticket is the runner's. Anything else is nothing.
+// Every key retires the last notice. L moves nothing here: opening the ticket is the runner's.
 export const press = (view: View, input: Terminal.UserInput): View => {
   const retired: View = { ...view, notice: Option.none() };
   const list = focused(view);
@@ -747,11 +730,6 @@ export const press = (view: View, input: Terminal.UserInput): View => {
 const isQuit = (input: Terminal.UserInput): boolean =>
   input.key.name === "q" && !input.key.ctrl && !input.key.meta;
 
-// The thrown value's own message behind a platform failure (Node's `spawn x ENOENT`), else the
-// platform message.
-const detail = (error: unknown): string =>
-  ExternalFailure.describeThrowable(ExternalFailure.causeOf(error), Render.errorDetail(error));
-
 // Hands the ticket's url to the opener and says what came of it. The browser is the desktop's:
 // it gets the desktop's environment, none of this screen's stdio, its own process group, and
 // the handle is unreferenced, so neither the bound nor q closing the scope kills it.
@@ -778,7 +756,12 @@ const openTicket = (
     return code === 0 ? `opened ${url}` : `${OPENER} exited ${String(code)}`;
   }).pipe(
     Effect.scoped,
-    Effect.catchTag("PlatformError", (error) => Effect.succeed(`${OPENER}: ${detail(error)}`)),
+    // Node's own message (`spawn xdg-open ENOENT`) behind the platform wrapper, else the wrapper's.
+    Effect.catchTag("PlatformError", (error) =>
+      Effect.succeed(
+        `${OPENER}: ${ExternalFailure.describeThrowable(ExternalFailure.causeOf(error), Render.errorDetail(error))}`,
+      ),
+    ),
   );
 
 // Owns the alternate screen while it runs: the tables are read at once and every REFRESH, the
