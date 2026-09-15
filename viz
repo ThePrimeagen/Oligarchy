@@ -1,2 +1,2 @@
 #!/bin/sh
-exec bun "$(dirname "$0")/src/viz/main.ts" "$@"
+exec bun --no-env-file "$(dirname "$0")/src/viz/main.ts" "$@"

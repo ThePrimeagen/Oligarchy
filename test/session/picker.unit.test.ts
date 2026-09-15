@@ -455,9 +455,10 @@ describe("listSessions and completeFollow", () => {
       expect(items).toEqual([downloading(PENDING_ID)]);
       const [ctrl] = spawner.spawned;
       expect(ctrl?.command.command).toBe("/usr/bin/bun");
-      expect(ctrl?.command.args[0]?.endsWith("/src/ctrl/main.ts")).toBe(true);
+      expect(ctrl?.command.args[0]).toBe("--no-env-file");
+      expect(ctrl?.command.args[1]?.endsWith("/src/ctrl/main.ts")).toBe(true);
       // ctrl reads the database the REPL's environment names; the proxy url is the client's.
-      expect(ctrl?.command.args.slice(1)).toEqual([
+      expect(ctrl?.command.args.slice(2)).toEqual([
         "session",
         "list",
         "--count",

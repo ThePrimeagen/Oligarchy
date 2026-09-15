@@ -75,9 +75,9 @@ const settle: Effect.Effect<void> = Effect.gen(function* () {
   }
 });
 
-// The client's argv after the entry: action first.
+// The client's argv after bun's flag and the entry: action first.
 const clientArgs = (command: ChildProcess.StandardCommand): ReadonlyArray<string> =>
-  command.args.slice(1);
+  command.args.slice(2);
 
 const spawnedArgs = (h: Harness, index: number): ReadonlyArray<string> => {
   const child = h.spawner.spawned[index];

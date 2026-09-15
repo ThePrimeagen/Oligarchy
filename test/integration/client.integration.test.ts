@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,25 +19,10 @@ type Run = {
   readonly stderr: string;
 };
 
-// Spawned from a scratch directory so no repo `.env` reaches the child and fills a variable a test
-// blanked; every variable is explicit. A test about `.env` itself passes its own directory.
-const runClient = (
-  args: ReadonlyArray<string>,
-  env: Record<string, string> = {},
-  cwd: string = tmpdir(),
-): Promise<Run> =>
+// The wrapper as a process, with exactly the environment given.
+const run = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv, cwd: string): Promise<Run> =>
   new Promise((resolve, reject) => {
-    const child = spawn(CLIENT, args, {
-      cwd,
-      env: {
-        ...process.env,
-        NODE_OPTIONS:
-          `${process.env.NODE_OPTIONS ?? ""} --disable-warning=ExperimentalWarning`.trim(),
-        OLIGARCHY_TOKEN: TOKEN,
-        SERVER_URL: "",
-        ...env,
-      },
-    });
+    const child = spawn(CLIENT, args, { cwd, env });
     let stdout = "";
     let stderr = "";
     child.stdout.setEncoding("utf8");
@@ -58,6 +43,15 @@ const runClient = (
       resolve({ code, stdout, stderr });
     });
   });
+
+// Spawned from a scratch directory so no repo `.env` reaches the child and fills a variable a test
+// blanked; every variable is explicit. A test about `.env` itself passes its own directory.
+const runClient = (
+  args: ReadonlyArray<string>,
+  env: Record<string, string> = {},
+  cwd: string = tmpdir(),
+): Promise<Run> =>
+  run(args, { ...process.env, OLIGARCHY_TOKEN: TOKEN, SERVER_URL: "", ...env }, cwd);
 
 const open: Array<StubProxy.StubProxy> = [];
 
@@ -438,6 +432,35 @@ describe("./client unhappy path", () => {
     const result = await runClient(["intent", "end", "--agent-id", AGENT, "--session_id", SESSION]);
     expect(result.code).toBe(1);
     expect(result.stderr).toMatch(/--session_id/);
+  });
+
+  // The wrapper passes --no-env-file: Bun's own loader would read `.env.local` as well and expand
+  // `$` inside values before the provider ran, and the environment would win with the wrong value.
+  it("reads .env through the provider alone: a $ stays literal and .env.local is not read", async () => {
+    const stub = await proxy();
+    const dir = await mkdtemp(join(tmpdir(), "oligarchy-client-env-"));
+    await writeFile(join(dir, ".env"), `OLIGARCHY_TOKEN=to$ken\nSERVER_URL=${stub.url}\n`);
+    await writeFile(join(dir, ".env.local"), "OLIGARCHY_TOKEN=from-local\n");
+    try {
+      // PATH and HOME only: a variable the runtime's loader could fill must be absent, not blank.
+      const result = await run(
+        ["relinquish", "--agent-id", AGENT],
+        { PATH: process.env.PATH, HOME: process.env.HOME },
+        dir,
+      );
+      expect(result.stderr).toBe("");
+      expect(result.code).toBe(0);
+      expect(stub.requests).toEqual([
+        {
+          method: "POST",
+          url: "/relinquish",
+          authorization: "Bearer to$ken",
+          body: { agent: AGENT },
+        },
+      ]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it("prints the cause when the layers themselves fail: an unreadable .env", async () => {

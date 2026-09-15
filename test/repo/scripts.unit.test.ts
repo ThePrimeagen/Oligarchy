@@ -55,13 +55,17 @@ describe("package.json scripts", () => {
     expect(scripts.lint).toBeUndefined();
   });
 
+  // --no-env-file on every process: Bun's own loader would read `.env.local` as well and expand
+  // `$` inside values, where the config provider reads `.env` alone, as written, for what the
+  // environment lacks.
   it("runs every process on bun from its entry, Sentry preloaded on the instrumented ones", () => {
     for (const [name, instrumented] of Object.entries(PROCESSES)) {
       const script = scripts[name] ?? "";
-      expect(script.startsWith("bun "), name).toBe(true);
+      expect(script.startsWith("bun --no-env-file "), name).toBe(true);
       expect(script.endsWith(` src/${name}/main.ts`), name).toBe(true);
       expect(script.includes(`--preload ./${INSTRUMENT}`), name).toBe(instrumented);
     }
+    expect(scripts["db:migrate"]).toBe("bun --no-env-file src/db/migrate.ts");
   });
 
   // `bun run` hands a node-shebang bin to Node when one is installed; vitest and its forked
@@ -78,7 +82,7 @@ describe("package.json scripts", () => {
   });
 
   it("db:migrate runs the migration program and never a drizzle push", () => {
-    expect(scripts["db:migrate"]).toBe("bun src/db/migrate.ts");
+    expect(scripts["db:migrate"]).toContain(" src/db/migrate.ts");
     expect(Object.values(scripts).some((script) => script.includes("drizzle-kit push"))).toBe(
       false,
     );
@@ -92,7 +96,7 @@ describe("root executables", () => {
     for (const [name, instrumented] of Object.entries(PROCESSES)) {
       const wrapper = read(name);
       expect(wrapper.startsWith("#!/bin/sh\n"), name).toBe(true);
-      expect(wrapper, name).toContain("exec bun ");
+      expect(wrapper, name).toContain("exec bun --no-env-file ");
       expect(wrapper, name).toContain(`"$(dirname "$0")/src/${name}/main.ts" "$@"`);
       expect(wrapper.includes(`--preload "$(dirname "$0")/${INSTRUMENT}"`), name).toBe(
         instrumented,

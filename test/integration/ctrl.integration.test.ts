@@ -34,8 +34,6 @@ const runCtrl = (args: ReadonlyArray<string>, env: Record<string, string> = {}):
       cwd: tmpdir(),
       env: {
         ...process.env,
-        NODE_OPTIONS:
-          `${process.env.NODE_OPTIONS ?? ""} --disable-warning=ExperimentalWarning`.trim(),
         DATABASE_URL: Postgres.getDbUrl(),
         // ctrl never talks to the proxy, so no action gets its token.
         OLIGARCHY_TOKEN: "",

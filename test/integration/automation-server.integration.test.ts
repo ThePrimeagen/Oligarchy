@@ -49,7 +49,6 @@ const environment = (home: string, overrides: Record<string, string>): NodeJS.Pr
     LINEAR_WEBHOOK_SECRET: WEBHOOK_SECRET,
     OLIGARCHY_TOKEN: TOKEN,
     DATABASE_URL: dbUrl === "" ? UNREACHABLE : dbUrl,
-    NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --disable-warning=ExperimentalWarning`.trim(),
     https_proxy: "http://127.0.0.1:1",
     http_proxy: "http://127.0.0.1:1",
     no_proxy: "",

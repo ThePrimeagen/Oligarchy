@@ -14,14 +14,17 @@ exist.
 ## Toolchain
 
 - Run on Bun 1.4 (CI installs 1.4.2), runtime and package manager both; there is no Node and no
-  npm. Every executable is a `#!/bin/sh` wrapper running `bun` on the process's `main.ts` as
-  written (`./qemu-server`, `./qemu-reverse-proxy`, `./automation-server`, `./automation-client`
-  and `./ctrl` add `--preload ./src/observability/instrument.ts`); Bun transpiles the sources on
-  load, and `erasableSyntaxOnly` stays on so they remain plain JavaScript once the annotations
-  go: no enums, namespaces or parameter properties. The Node-compatible platform is what the
-  code targets (`@effect/platform-node`, `node:*` in the boundary files, `pg`); Bun implements
-  it. Where its wording differs from libuv's (a missing executable, a socket that cannot bind)
-  the tests pin Bun's.
+  npm. Every executable is a `#!/bin/sh` wrapper running `bun --no-env-file` on the process's
+  `main.ts` as written (`./qemu-server`, `./qemu-reverse-proxy`, `./automation-server`,
+  `./automation-client` and `./ctrl` add `--preload ./src/observability/instrument.ts`), and the
+  session REPL spawns its children the same way. `--no-env-file` because Bun's own loader would
+  read `.env.local` and `.env.<NODE_ENV>` as well and expand `$` inside values, ahead of
+  `Config.providerLayer`, which reads `.env` alone, as written, for what the environment lacks
+  (Config, below). Bun transpiles the sources on load, and `erasableSyntaxOnly` stays on so they
+  remain plain JavaScript once the annotations go: no enums, namespaces or parameter properties.
+  The Node-compatible platform is what the code targets (`@effect/platform-node`, `node:*` in
+  the boundary files, `pg`); Bun implements it. Where its wording differs from libuv's (a missing
+  executable, a socket that cannot bind) the tests pin Bun's.
 - Install with `bun install --frozen-lockfile` (`bun.lock` is the lockfile); `prepare` runs
   `effect-tsgo patch --oxlint` so the `effecttsgo/*` rules are active for lint. The commands:
   `bun run check:lint`, `bun run check:format`, `bun run check:types`, `bun run test:unit`,
@@ -1023,7 +1026,7 @@ change ships.
   `src/observability/instrument.ts`, `test/**` and `vitest.global-setup.ts`);
   `typescript/no-floating-promises` off for `test/**` and the global setup. No `warn` tier.
 - oxfmt: `printWidth` 100, `tabWidth` 2, spaces, semicolons, double quotes, `trailingComma: "all"`,
-  final newline; `drizzle/**`, `public/**`, `prompts/**`, `**/*.md`, `package-lock.json` and
+  final newline; `drizzle/**`, `public/**`, `prompts/**`, `**/*.md`, `bun.lock` and
   `wrangler.jsonc` ignored. `.editorconfig` matches.
 - tsconfig: `strict`, `exactOptionalPropertyTypes`, `noUnusedLocals`, `noFallthroughCasesInSwitch`,
   `verbatimModuleSyntax`, `isolatedModules`, `allowImportingTsExtensions`, `erasableSyntaxOnly`,
