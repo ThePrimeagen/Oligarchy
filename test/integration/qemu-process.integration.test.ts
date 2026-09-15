@@ -96,7 +96,8 @@ describe("spawn", () => {
         const error = yield* Effect.flip(Process.spawn("no-such-bin-xyz", ["--version"]));
         expect(error._tag).toBe("QemuStartError");
         expect(error.message).toContain("no-such-bin-xyz");
-        expect(error.message).toContain("ENOENT");
+        // Bun's spawn names the lookup that failed where libuv said ENOENT.
+        expect(error.message).toContain("Executable not found in $PATH");
       }),
     ).pipe(Effect.provide(NodeServices.layer)),
   );
