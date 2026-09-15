@@ -19,10 +19,14 @@ import * as Render from "../observability/render.ts";
 
 // The terminal this view is laid out for: a card's header fits its host numbers beside a name
 // and a url across 135 columns, with 33 columns left to each of its three graphs, and 37 rows
-// hold four cards and sixteen jobs. Anything smaller is refused; anything wider goes to the
-// graphs, anything taller to the job list.
+// hold four cards and sixteen queued jobs. Anything smaller is refused; anything wider goes to
+// the graphs, anything taller to the job list.
 export const MIN_COLUMNS = 135;
 export const MIN_ROWS = 37;
+
+// A card grows a row per job running on it and takes those rows from the queue, which keeps at
+// least this many: what runs is on the cards, so the queue mostly shows what waits.
+export const QUEUE_MIN_ROWS = 4;
 
 // A server writes its row every thirty seconds and a job changes on its own clock; five seconds
 // keeps the queue fresh at a handful of small queries a minute.
@@ -39,7 +43,8 @@ export const SILENT_AFTER_MS = 90_000;
 // terminal would have to be 400 columns wide before its graphs ran out of history.
 export const SERIES_SAMPLES = 240;
 
-// Four cards fill the box; j and k bring the rest into view one at a time.
+// Four cards fill the box, fewer when their jobs take the room; j and k bring the rest into
+// view one at a time.
 export const MAX_CARDS = 4;
 
 // Linear resolves a ticket by its identifier alone and redirects into the workspace.
@@ -114,8 +119,9 @@ type List = Tab | "queue";
 // the next good read, so a database outage leaves the last picture up with the reason under it.
 // notice is what the last key had to say (the ticket L opened, or why it could not), retired by
 // the next key. tab is the kind of machine the cards show; focus is the box j and k move in;
-// cursor is each list's selected row, kept when the tab or the focus changes and clamped to
-// what the newest read lists.
+// cursor is each list's selected row (a tab's cards and the jobs on them as one list, the
+// queue's jobs as another), kept when the tab or the focus changes and clamped to what the
+// newest read lists.
 export type View = {
   readonly snapshot: Option.Option<Snapshot>;
   readonly failure: Option.Option<string>;
@@ -142,24 +148,50 @@ const KIND: Readonly<Record<Tab, Servers.ServerType>> = {
 const ofTab = (snapshot: Snapshot, tab: Tab): ReadonlyArray<Servers.Machine> =>
   snapshot.machines.filter((machine) => machine.type === KIND[tab]);
 
+type Job = Automation.AutomationJobListRow;
+
 // What runs, then what waits; nothing that is over.
-const jobsOf = (snapshot: Snapshot): ReadonlyArray<Automation.AutomationJobListRow> => [
+const jobsOf = (snapshot: Snapshot): ReadonlyArray<Job> => [
   ...snapshot.queue.running,
   ...snapshot.queue.pending,
 ];
+
+// The running jobs a machine is part of: a qemu server hosts a drive's guest, an automation
+// client runs the driver of a drive or a diagnose. Placement is by url, the servers table's key.
+const jobsOn = (snapshot: Snapshot, machine: Servers.Machine): ReadonlyArray<Job> =>
+  snapshot.queue.running.filter(
+    (job) => (machine.type === "qemu" ? job.serverUrl : job.clientUrl) === machine.url,
+  );
+
+// A row of the machines box the cursor rests on: a card, or the nth job on it.
+type Entry = { readonly machine: Servers.Machine; readonly job: Option.Option<number> };
+
+const entriesOf = (snapshot: Snapshot, tab: Tab): ReadonlyArray<Entry> =>
+  ofTab(snapshot, tab).flatMap((machine) => [
+    { machine, job: Option.none() },
+    ...jobsOn(snapshot, machine).map((_, index) => ({ machine, job: Option.some(index) })),
+  ]);
 
 const clamp = (value: number, min: number, max: number): number =>
   Math.min(max, Math.max(min, value));
 
 const focused = (view: View): List => (view.focus === "machines" ? view.tab : "queue");
 
-// L opens the queue's selection whichever box has the focus.
-const selectedJob = (view: View): Option.Option<Automation.AutomationJobListRow> =>
+// The gold marker's job: a job on a card, or the queue's; none on a card's header.
+const selectedJob = (view: View): Option.Option<Job> =>
   Option.flatMap(view.snapshot, (snapshot) => {
-    const jobs = jobsOf(snapshot);
-    return jobs.length === 0
-      ? Option.none()
-      : Option.some(jobs[clamp(view.cursor.queue, 0, jobs.length - 1)]);
+    if (view.focus === "queue") {
+      const jobs = jobsOf(snapshot);
+      return jobs.length === 0
+        ? Option.none()
+        : Option.some(jobs[clamp(view.cursor.queue, 0, jobs.length - 1)]);
+    }
+    const entries = entriesOf(snapshot, view.tab);
+    if (entries.length === 0) {
+      return Option.none();
+    }
+    const entry = entries[clamp(view.cursor[view.tab], 0, entries.length - 1)];
+    return Option.map(entry.job, (index) => jobsOn(snapshot, entry.machine)[index]);
   });
 
 export const tooSmall = (columns: number, rows: number): string =>
@@ -399,6 +431,63 @@ const tabsRow = (view: View, now: number, columns: number): string => {
 const marker = (selected: boolean, hasFocus: boolean): Piece =>
   selected ? { text: "▸", color: hasFocus ? PALETTE.gold : PALETTE.muted } : SPACE;
 
+// ---------------------------------------------------------------------------
+// Job list: the one way a job is drawn, on a card and in the queue
+// ---------------------------------------------------------------------------
+
+// A job row: the marker column and a space, six columns with a gap between each, and the rest
+// of the row blank. A live job has no finish and no reason yet, so neither has a column.
+const MARKER_WIDTH = 2;
+const JOB_WIDTHS = { ticket: 9, test: 18, action: 9, status: 12, queued: 11, started: 11 };
+const JOB_WIDTH =
+  MARKER_WIDTH +
+  Object.values(JOB_WIDTHS).reduce((total, width) => total + width, 0) +
+  (Object.keys(JOB_WIDTHS).length - 1) * GAP.text.length;
+
+const jobHeader = (usable: number): string =>
+  paint(
+    PALETTE.subtle,
+    `${" ".repeat(MARKER_WIDTH)}${[
+      fit("ticket", JOB_WIDTHS.ticket),
+      fit("test", JOB_WIDTHS.test),
+      fit("action", JOB_WIDTHS.action),
+      fit("status", JOB_WIDTHS.status),
+      fit("queued", JOB_WIDTHS.queued),
+      fit("started", JOB_WIDTHS.started),
+    ].join(GAP.text)}${" ".repeat(usable - JOB_WIDTH)}`,
+  );
+
+// The columns are the same for every job, so a pending one shows a dash where its start will
+// go; the status carries its glyph and colour.
+const jobRow = (job: Job, selected: Piece, drift: number, usable: number): string => {
+  const status = job.status === "running" ? RUNNING : PENDING;
+  const columns = [
+    paint(PALETTE.text, fit(job.ticket ?? "—", JOB_WIDTHS.ticket)),
+    paint(PALETTE.text, fit(job.test, JOB_WIDTHS.test)),
+    paint(PALETTE.subtle, fit(job.action, JOB_WIDTHS.action)),
+    paint(status.color, fit(`${status.glyph} ${job.status}`, JOB_WIDTHS.status)),
+    paint(PALETTE.subtle, fit(ago(job.createdAt, job.queriedAt, drift), JOB_WIDTHS.queued)),
+    paint(PALETTE.subtle, fit(ago(job.startedAt, job.queriedAt, drift), JOB_WIDTHS.started)),
+  ];
+  return `${render([selected, SPACE])}${columns.join(GAP.text)}${" ".repeat(usable - JOB_WIDTH)}`;
+};
+
+// One box row per job, the row at `selected` marked in the focus's colour.
+const jobList = (
+  jobs: ReadonlyArray<Job>,
+  selected: Option.Option<number>,
+  hasFocus: boolean,
+  drift: number,
+  usable: number,
+): ReadonlyArray<string> =>
+  jobs.map((job, index) =>
+    boxed(jobRow(job, marker(Option.contains(selected, index), hasFocus), drift, usable)),
+  );
+
+// ---------------------------------------------------------------------------
+// Cards
+// ---------------------------------------------------------------------------
+
 // A card's first row: the marker and the machine's name and url on the left, cut to what the
 // right leaves; on the right what its heartbeat says, or the one phrase that says it stopped.
 // stats and heartbeat_at are written together, so either being null is a row no server claimed.
@@ -478,10 +567,14 @@ const cardGraphs = (
   };
 };
 
+// A card: the header, the two graph rows, then the jobs running on the machine, the header or
+// one of the jobs marked when it is the selection.
 const card = (
   machine: Servers.Machine,
   series: Option.Option<ProcessStats.Series>,
-  selected: Piece,
+  jobs: ReadonlyArray<Job>,
+  selected: Option.Option<Entry>,
+  hasFocus: boolean,
   drift: number,
   usable: number,
 ): ReadonlyArray<string> => {
@@ -489,97 +582,94 @@ const card = (
     machine.heartbeatAt !== null &&
     machine.queriedAt.getTime() - machine.heartbeatAt.getTime() + drift > SILENT_AFTER_MS;
   const graphs = cardGraphs(series, silent, usable);
+  const header = marker(
+    Option.exists(selected, (entry) => Option.isNone(entry.job)),
+    hasFocus,
+  );
+  const job = Option.flatMap(selected, (entry) => entry.job);
   return [
-    boxed(cardHeader(machine, selected, silent, drift, usable)),
+    boxed(cardHeader(machine, header, silent, drift, usable)),
     boxed(graphs.upper),
     boxed(graphs.lower),
+    ...jobList(jobs, job, hasFocus, drift, usable),
   ];
 };
 
-// The machines box: the tabs, then at most MAX_CARDS cards of the active tab with the selected
-// one in view, dividers between them, and the window's place in the list on the bottom border
-// when there is more than fits. A tab with nothing says so in one row.
-const machinesBox = (view: View, now: number, columns: number): ReadonlyArray<string> => {
+// The machines box: the tabs, then the cards of the active tab around the selected one, at most
+// MAX_CARDS and as many as fit with the queue keeping its rows, dividers between them, and the
+// window's place in the list on the bottom border when there is more than fits. The window ends
+// at the selected card and grows upward first, so a step down scrolls one card. A tab with
+// nothing says so in one row.
+const machinesBox = (
+  view: View,
+  now: number,
+  columns: number,
+  rows: number,
+): ReadonlyArray<string> => {
   const usable = columns - 4;
-  const rows: Array<string> = [tabsRow(view, now, columns)];
+  const lines: Array<string> = [tabsRow(view, now, columns)];
   if (Option.isNone(view.snapshot)) {
-    return [...rows, boxed(" ".repeat(usable)), bottom(columns, Option.none())];
+    return [...lines, boxed(" ".repeat(usable)), bottom(columns, Option.none())];
   }
   const snapshot = view.snapshot.value;
   const listed = ofTab(snapshot, view.tab);
   if (listed.length === 0) {
     const kind = view.tab === "servers" ? "qemu servers" : "automation clients";
     return [
-      ...rows,
+      ...lines,
       boxed(muted(fit(`no ${kind} registered`, usable))),
       bottom(columns, Option.none()),
     ];
   }
   const drift = now - snapshot.readAt;
-  const cursor = clamp(view.cursor[view.tab], 0, listed.length - 1);
-  // The selection is never below the window: the window starts MAX_CARDS - 1 above it at most.
-  const first = Math.max(0, cursor - (MAX_CARDS - 1));
-  const shown = listed.slice(first, first + MAX_CARDS);
-  shown.forEach((machine, index) => {
-    if (index > 0) {
-      rows.push(divider(columns));
+  const entries = entriesOf(snapshot, view.tab);
+  const selected = entries[clamp(view.cursor[view.tab], 0, entries.length - 1)];
+  const chosen = listed.indexOf(selected.machine);
+  // The rows the cards and their dividers may take: the footer, the queue's frame with its
+  // minimum of rows, and this box's own borders come off the terminal's height.
+  const available = rows - 1 - (QUEUE_MIN_ROWS + 3) - 2;
+  // A machine running more jobs than the box has rows shows the ones that fit.
+  const jobsShown = (index: number): ReadonlyArray<Job> =>
+    jobsOn(snapshot, listed[index]).slice(0, available - 3);
+  const height = (index: number): number => 3 + jobsShown(index).length;
+  let first = chosen;
+  let last = chosen;
+  let used = height(chosen);
+  while (first > 0 && last - first + 1 < MAX_CARDS && used + 1 + height(first - 1) <= available) {
+    first -= 1;
+    used += 1 + height(first);
+  }
+  while (
+    last + 1 < listed.length &&
+    last - first + 1 < MAX_CARDS &&
+    used + 1 + height(last + 1) <= available
+  ) {
+    last += 1;
+    used += 1 + height(last);
+  }
+  for (let index = first; index <= last; index += 1) {
+    if (index > first) {
+      lines.push(divider(columns));
     }
+    const machine = listed[index];
     const series = Option.fromUndefinedOr(
       snapshot.series.find((found) => found.type === machine.type && found.name === machine.name),
     );
-    const selected = marker(first + index === cursor, view.focus === "machines");
-    rows.push(...card(machine, series, selected, drift, usable));
-  });
+    const own = index === chosen ? Option.some(selected) : Option.none<Entry>();
+    lines.push(
+      ...card(machine, series, jobsShown(index), own, view.focus === "machines", drift, usable),
+    );
+  }
   const place =
-    listed.length > MAX_CARDS
-      ? Option.some(
-          `${String(first + 1)}-${String(first + shown.length)} of ${String(listed.length)}`,
-        )
+    last - first + 1 < listed.length
+      ? Option.some(`${String(first + 1)}-${String(last + 1)} of ${String(listed.length)}`)
       : Option.none();
-  return [...rows, bottom(columns, place)];
+  return [...lines, bottom(columns, place)];
 };
 
-// A job row: the marker column and a space, six columns with a gap between each, and the rest
-// of the row blank. A live job has no finish and no reason yet, so neither has a column.
-const MARKER_WIDTH = 2;
-const JOB_WIDTHS = { ticket: 9, test: 18, action: 9, status: 12, queued: 11, started: 11 };
-const JOB_WIDTH =
-  MARKER_WIDTH +
-  Object.values(JOB_WIDTHS).reduce((total, width) => total + width, 0) +
-  (Object.keys(JOB_WIDTHS).length - 1) * GAP.text.length;
-
-const jobHeader = (usable: number): string =>
-  paint(
-    PALETTE.subtle,
-    `${" ".repeat(MARKER_WIDTH)}${[
-      fit("ticket", JOB_WIDTHS.ticket),
-      fit("test", JOB_WIDTHS.test),
-      fit("action", JOB_WIDTHS.action),
-      fit("status", JOB_WIDTHS.status),
-      fit("queued", JOB_WIDTHS.queued),
-      fit("started", JOB_WIDTHS.started),
-    ].join(GAP.text)}${" ".repeat(usable - JOB_WIDTH)}`,
-  );
-
-// The columns are the same for every job, so a pending one shows a dash where its start will
-// go; the status carries its glyph and colour.
-const jobRow = (
-  job: Automation.AutomationJobListRow,
-  selected: Piece,
-  drift: number,
-  usable: number,
-): string => {
-  const status = job.status === "running" ? RUNNING : PENDING;
-  const columns = [
-    paint(PALETTE.text, fit(job.ticket ?? "—", JOB_WIDTHS.ticket)),
-    paint(PALETTE.text, fit(job.test, JOB_WIDTHS.test)),
-    paint(PALETTE.subtle, fit(job.action, JOB_WIDTHS.action)),
-    paint(status.color, fit(`${status.glyph} ${job.status}`, JOB_WIDTHS.status)),
-    paint(PALETTE.subtle, fit(ago(job.createdAt, job.queriedAt, drift), JOB_WIDTHS.queued)),
-    paint(PALETTE.subtle, fit(ago(job.startedAt, job.queriedAt, drift), JOB_WIDTHS.started)),
-  ];
-  return `${render([selected, SPACE])}${columns.join(GAP.text)}${" ".repeat(usable - JOB_WIDTH)}`;
-};
+// ---------------------------------------------------------------------------
+// Queue
+// ---------------------------------------------------------------------------
 
 // The queue box fills every row the cards leave above the footer: its title counts what runs and
 // waits, the jobs come running then pending with the selected one in view, and the bottom border
@@ -615,11 +705,7 @@ const queueBox = (
   const listed =
     jobs.length === 0
       ? [boxed(muted(fit("no jobs", usable)))]
-      : shown.map((job, index) =>
-          boxed(
-            jobRow(job, marker(first + index === cursor, view.focus === "queue"), drift, usable),
-          ),
-        );
+      : jobList(shown, Option.some(cursor - first), view.focus === "queue", drift, usable);
   const place =
     jobs.length > room
       ? Option.some(
@@ -670,7 +756,7 @@ export const draw = (view: View, now: number, columns: number, rows: number): st
   if (columns < MIN_COLUMNS || rows < MIN_ROWS) {
     return `\x1b[2J\x1b[1;1H${paint(PALETTE.love, tooSmall(columns, rows))}`;
   }
-  const machines = machinesBox(view, now, columns);
+  const machines = machinesBox(view, now, columns, rows);
   const lines = [
     ...machines,
     ...queueBox(view, now, columns, rows - 1 - machines.length),
@@ -689,7 +775,7 @@ export const press = (view: View, input: Terminal.UserInput): View => {
   const count = Option.match(view.snapshot, {
     onNone: () => 0,
     onSome: (snapshot) =>
-      list === "queue" ? jobsOf(snapshot).length : ofTab(snapshot, list).length,
+      list === "queue" ? jobsOf(snapshot).length : entriesOf(snapshot, list).length,
   });
   const last = Math.max(0, count - 1);
   // The row on screen, not the number stored: a list that shrank since leaves the number past

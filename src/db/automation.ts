@@ -1,4 +1,5 @@
 import { and, desc, eq, inArray, notInArray, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { Array as Arr, Context, Effect, Layer, Option } from "effect";
 import * as Client from "./client.ts";
 import * as DbSchema from "./schema.ts";
@@ -7,16 +8,22 @@ export type AutomationJobRow = typeof DbSchema.automationJobs.$inferSelect;
 export type AutomationAction = AutomationJobRow["action"];
 export type FinishStatus = "succeeded" | "failed" | "aborted";
 
-// One job with the ticket and test it is for, its three stamps, the reason it closed with, and
-// the database's clock at the read, so an age is measured against the clock that wrote the
-// stamp. ticket is null for a result nobody has ticketed; started_at and finished_at are null
-// until the job reaches that point; reason is null until a close writes one.
+// One job with the ticket and test it is for, its three stamps, the reason it closed with, where
+// it runs, and the database's clock at the read, so an age is measured against the clock that
+// wrote the stamp. ticket is null for a result nobody has ticketed; started_at and finished_at
+// are null until the job reaches that point; reason is null until a close writes one. clientUrl
+// is the automation client that took the job, null while it waits or once that client's row is
+// gone. serverUrl is the qemu server a drive's guest is on: the one its ticket is reserved on,
+// then the one its session was routed to; null while a drive is placed nowhere, and always for
+// a diagnose, which runs no guest.
 export type AutomationJobListRow = {
   readonly ticket: string | null;
   readonly test: string;
   readonly action: AutomationJobRow["action"];
   readonly status: AutomationJobRow["status"];
   readonly reason: string | null;
+  readonly clientUrl: string | null;
+  readonly serverUrl: string | null;
   readonly createdAt: Date;
   readonly startedAt: Date | null;
   readonly finishedAt: Date | null;
@@ -184,13 +191,21 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
 
       // Running and pending are the whole live queue in queue order (diagnoses first, then
       // created_at). Completed is every terminal status, newest finished first, cut at count.
+      // The ticket is the driver's agent id, so agent_servers holds the server reserved for it
+      // until start, and agent_runs the session start opened, routed by session_servers; the
+      // reservation wins while both exist, being the newer placement.
       const listJobs = Effect.fn("db.listAutomationJobs")(function* (count: number) {
+        const client = alias(DbSchema.servers, "client");
         const columns = {
           ticket: DbSchema.testResults.linearId,
           test: DbSchema.testDefinitions.name,
           action: DbSchema.automationJobs.action,
           status: DbSchema.automationJobs.status,
           reason: DbSchema.automationJobs.reason,
+          clientUrl: client.url,
+          serverUrl: sql<
+            string | null
+          >`case when ${DbSchema.automationJobs.action} = ${"drive"} then coalesce(${DbSchema.agentServers.serverUrl}, ${DbSchema.sessionServers.serverUrl}) end`,
           createdAt: DbSchema.automationJobs.createdAt,
           startedAt: DbSchema.automationJobs.startedAt,
           finishedAt: DbSchema.automationJobs.finishedAt,
@@ -207,6 +222,19 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
             .innerJoin(
               DbSchema.testDefinitions,
               eq(DbSchema.testDefinitions.id, DbSchema.testResults.definitionId),
+            )
+            .leftJoin(client, eq(client.id, DbSchema.automationJobs.serverId))
+            .leftJoin(
+              DbSchema.agentServers,
+              eq(DbSchema.agentServers.agentId, DbSchema.testResults.linearId),
+            )
+            .leftJoin(
+              DbSchema.agentRuns,
+              eq(DbSchema.agentRuns.agentId, DbSchema.testResults.linearId),
+            )
+            .leftJoin(
+              DbSchema.sessionServers,
+              eq(DbSchema.sessionServers.sessionId, DbSchema.agentRuns.sessionId),
             );
         const running: ReadonlyArray<AutomationJobListRow> = yield* database.run(
           "listAutomationJobs",

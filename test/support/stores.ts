@@ -24,6 +24,8 @@ type AutomationJobRow = typeof DbSchema.automationJobs.$inferSelect;
 type FakeAutomationJob = AutomationJobRow & {
   readonly ticket?: string | null;
   readonly test?: string;
+  readonly clientUrl?: string | null;
+  readonly serverUrl?: string | null;
 };
 
 const sameId = (left: string, right: string): boolean => left.toLowerCase() === right.toLowerCase();
@@ -623,6 +625,8 @@ export const fakeAutomationStore = (
           action: job.action,
           status: job.status,
           reason: job.reason,
+          clientUrl: job.clientUrl ?? null,
+          serverUrl: job.serverUrl ?? null,
           createdAt: job.createdAt,
           startedAt: job.startedAt,
           finishedAt: job.finishedAt,

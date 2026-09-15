@@ -1435,10 +1435,145 @@ Postgres.describeWithDatabase("database", () => {
             expect(job.queriedAt.getTime() - job.createdAt.getTime()).toBeLessThan(10_000);
           }
           expect(listed.running.map((job) => job.reason)).toEqual([null, null]);
+          // Claimed by ids no servers row carries, and placed nowhere: no client, no server.
+          for (const job of [...listed.running, ...listed.pending, ...listed.completed]) {
+            expect(job.clientUrl).toBeNull();
+            expect(job.serverUrl).toBeNull();
+          }
           const more = yield* automation.listJobs(10);
           expect(more.completed.map((job) => job.ticket)).toEqual(["LST-102", "LST-101"]);
           expect(more.running).toHaveLength(2);
           expect(more.pending).toHaveLength(2);
+        }),
+    );
+
+    scoped.effect(
+      "AutomationStore listJobs names the client that took a drive by url, and the qemu server its ticket is reserved on, then the one its session runs on",
+      () =>
+        Effect.gen(function* () {
+          yield* emptyQueue;
+          const tests = yield* Tests.TestStore;
+          const automation = yield* Automation.AutomationStore;
+          const servers = yield* Servers.ServerStore;
+          const sessions = yield* Sessions.SessionStore;
+          const stats: DbSchema.ServerStats = {
+            qemus: 1,
+            memory: { totalBytes: 16_000, usedBytes: 4_000 },
+            cpu: { mean1m: 1, mean2m: 1, mean3m: 1 },
+          };
+          const clientUrl = `http://10.0.0.21:${uuid().slice(0, 8)}`;
+          const qemuUrl = `http://10.0.0.22:${uuid().slice(0, 8)}`;
+          yield* servers.heartbeat(
+            clientUrl,
+            "automation-client",
+            `runner-${clientUrl.slice(-8)}`,
+            stats,
+          );
+          yield* servers.heartbeat(qemuUrl, "qemu", `garage-${qemuUrl.slice(-8)}`, stats);
+          const client = (yield* servers.listLiveServers("automation-client")).find(
+            (live) => live.url === clientUrl,
+          );
+          expect(client).toBeDefined();
+          const definition = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
+          const created = yield* tests.createRun({
+            iso: "https://example.com/omarchy.iso",
+            serverUrl: "http://127.0.0.1:42069",
+            definitions: [{ id: definition.id }],
+          });
+          const resultId = created.results[0].id;
+          const ticket = `PLC-${uuid().slice(0, 8)}`;
+          yield* tests.setLinearId(resultId, ticket);
+          yield* automation.enqueue({ resultId, action: "drive" });
+          // The client took the job and reserved a guest for the ticket: the reservation names
+          // the qemu server before any session exists.
+          expect(Option.isSome(yield* automation.claim(client?.id ?? uuid()))).toBe(true);
+          yield* servers.routeAgent(ticket, qemuUrl);
+          const reserved = yield* automation.listJobs(0);
+          expect(
+            reserved.running.map((job) => [job.ticket, job.status, job.clientUrl, job.serverUrl]),
+          ).toEqual([[ticket, "running", clientUrl, qemuUrl]]);
+          expect(reserved.pending).toEqual([]);
+          // Start consumed the reservation: the session is routed and the qemu server registered
+          // the ticket as the agent driving it, so the server is known before ctrl test start
+          // ties the result to the session.
+          const sessionId = uuid();
+          yield* sessions.insertSession(sessionId, { iso: "x" }, "running");
+          yield* sessions.registerAgent(ticket, sessionId);
+          yield* servers.routeSession(sessionId, qemuUrl);
+          yield* servers.clearAgent(ticket);
+          const started = yield* automation.listJobs(0);
+          expect(started.running.map((job) => [job.clientUrl, job.serverUrl])).toEqual([
+            [clientUrl, qemuUrl],
+          ]);
+          yield* servers.removeServer(clientUrl);
+          yield* servers.removeServer(qemuUrl);
+        }),
+    );
+
+    scoped.effect(
+      "AutomationStore listJobs leaves a pending job unplaced, a diagnose without a server, a drive whose client row is gone with only its server, and a result without a ticket unplaced",
+      () =>
+        Effect.gen(function* () {
+          yield* emptyQueue;
+          const tests = yield* Tests.TestStore;
+          const automation = yield* Automation.AutomationStore;
+          const servers = yield* Servers.ServerStore;
+          const sessions = yield* Sessions.SessionStore;
+          const definition = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
+          const created = yield* Effect.forEach([0, 1, 2, 3], () =>
+            tests.createRun({
+              iso: "https://example.com/omarchy.iso",
+              serverUrl: "http://127.0.0.1:42069",
+              definitions: [{ id: definition.id }],
+            }),
+          );
+          const resultIds = created.map((run) => run.results[0].id);
+          const driven = `PLC-${uuid().slice(0, 8)}`;
+          const diagnosed = `PLC-${uuid().slice(0, 8)}`;
+          const waiting = `PLC-${uuid().slice(0, 8)}`;
+          yield* tests.setLinearId(resultIds[0], driven);
+          yield* tests.setLinearId(resultIds[1], diagnosed);
+          yield* tests.setLinearId(resultIds[2], waiting);
+          // The drive's guest runs on a routed session; its client's row is gone (claimed by an
+          // id no servers row carries), so only the server is known.
+          const qemuUrl = `http://10.0.0.23:${uuid().slice(0, 8)}`;
+          const sessionId = uuid();
+          yield* sessions.insertSession(sessionId, { iso: "x" }, "running");
+          yield* sessions.registerAgent(driven, sessionId);
+          yield* servers.routeSession(sessionId, qemuUrl);
+          // The diagnose's ticket drove a guest once; a diagnose runs no guest, so no server.
+          const diagnosedSession = uuid();
+          yield* sessions.insertSession(diagnosedSession, { iso: "x" }, "running");
+          yield* sessions.endSession(diagnosedSession, "succeeded", null);
+          yield* sessions.registerAgent(diagnosed, diagnosedSession);
+          yield* servers.routeSession(diagnosedSession, qemuUrl);
+          const drive = yield* automation.enqueue({ resultId: resultIds[0], action: "drive" });
+          yield* automation.enqueue({ resultId: resultIds[1], action: "diagnose" });
+          // Claim takes the diagnose first, then the drive.
+          expect(Option.isSome(yield* automation.claim(uuid()))).toBe(true);
+          expect(Option.isSome(yield* automation.claim(uuid()))).toBe(true);
+          yield* automation.enqueue({ resultId: resultIds[2], action: "drive" });
+          yield* automation.enqueue({ resultId: resultIds[3], action: "drive" });
+          const listed = yield* automation.listJobs(0);
+          expect(
+            listed.running.map((job) => [job.ticket, job.action, job.clientUrl, job.serverUrl]),
+          ).toEqual([
+            [diagnosed, "diagnose", null, null],
+            [driven, "drive", null, qemuUrl],
+          ]);
+          expect(
+            listed.pending.map((job) => [job.ticket, job.status, job.clientUrl, job.serverUrl]),
+          ).toEqual([
+            [waiting, "pending", null, null],
+            [null, "pending", null, null],
+          ]);
+          expect(listed.completed).toEqual([]);
+          expect(yield* automation.finish(drive.id, "succeeded", null)).toBe(true);
+          const after = yield* automation.listJobs(1);
+          expect(after.running.map((job) => job.ticket)).toEqual([diagnosed]);
+          expect(after.completed.map((job) => [job.ticket, job.serverUrl])).toEqual([
+            [driven, qemuUrl],
+          ]);
         }),
     );
 
