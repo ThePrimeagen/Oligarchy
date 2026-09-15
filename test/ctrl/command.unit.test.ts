@@ -1,12 +1,13 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { NodeFileSystem, NodeServices } from "@effect/platform-node";
-import { Cause, Effect, Exit, FileSystem, Layer } from "effect";
+import { Cause, Deferred, Effect, Exit, Fiber, FileSystem, Layer } from "effect";
 import { TestClock, TestConsole } from "effect/testing";
 import { CliError, Command } from "effect/unstable/cli";
 import * as CtrlCommand from "../../src/ctrl/command.ts";
 import * as Prompts from "../../src/ctrl/prompts.ts";
 import * as DbSchema from "../../src/db/schema.ts";
+import * as Log from "../../src/observability/log.ts";
 import * as Api from "../../src/shared/api.ts";
 import * as Contract from "../../src/shared/contract.ts";
 import * as Errors from "../../src/shared/errors.ts";
@@ -15,6 +16,7 @@ import * as FakeFs from "../support/fake-fs.ts";
 import * as FakeHttp from "../support/fake-http.ts";
 import * as FakeLinear from "../support/fake-linear.ts";
 import * as FakeLog from "../support/log.ts";
+import * as Reporter from "../support/reporter.ts";
 import * as Stores from "../support/stores.ts";
 
 const SERVER = "https://qemu.example.com";
@@ -107,6 +109,9 @@ const harness = (
     // Replaces the real FileSystem the prompt templates are read from.
     readonly fs?: Layer.Layer<FileSystem.FileSystem>;
     readonly proxy?: FakeHttp.Recorder;
+    // With a collector the command builds the real Log over stdout, as main.ts does, with the
+    // collector installed at the root where main.ts installs Sentry's reporter.
+    readonly reporter?: Reporter.Collector;
   } = {},
 ) => {
   const stores = Stores.fakeStores();
@@ -116,7 +121,10 @@ const harness = (
   const command = CtrlCommand.makeCtrlCommand({
     database: () => {
       touched.push("database");
-      return Layer.mergeAll(stores.layer, log.layer);
+      return Layer.mergeAll(
+        stores.layer,
+        options.reporter === undefined ? log.layer : Log.Log.layerStdout,
+      );
     },
     linear: () => {
       touched.push("linear");
@@ -129,7 +137,12 @@ const harness = (
   const program = (args: ReadonlyArray<string>, env: Record<string, string>) =>
     Command.runWith(command, { version: Api.VERSION })(args).pipe(
       Effect.provide(
-        Layer.mergeAll(services, Config.withEnv(env), options.proxy?.layer ?? FakeHttp.die),
+        Layer.mergeAll(
+          services,
+          Config.withEnv(env),
+          options.proxy?.layer ?? FakeHttp.die,
+          options.reporter?.layer ?? Layer.empty,
+        ),
       ),
     );
   const run = (args: ReadonlyArray<string>, env: Record<string, string> = WITH_DB) =>
@@ -137,7 +150,7 @@ const harness = (
   // The failure itself, for a command refused after parsing.
   const fail = (args: ReadonlyArray<string>, env: Record<string, string> = WITH_DB) =>
     Effect.flip(program(args, env));
-  return { stores, log, linear, touched, run, fail };
+  return { stores, log, linear, touched, program, run, fail };
 };
 
 const TEMPLATE = "Review Linear ticket {{LINEAR_TICKET}}\n";
@@ -742,6 +755,90 @@ describe("test new", () => {
           cause: expect.objectContaining({ _tag: "DatabaseError", operation: "setLinearId" }),
         });
         expect(h.log.lines[0]?.text).not.toMatch(/created OLI-42/);
+      }),
+  );
+
+  it.effect(
+    "an interrupt while the ticket is being handed off reports it trapped in Backlog (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const reached = yield* Deferred.make<void>();
+        const h = harness({
+          linear: FakeLinear.fakeLinear({
+            overrides: {
+              // The update never answers; the operator's SIGINT lands while it is in flight.
+              describeIssue: () =>
+                Deferred.succeed(reached, undefined).pipe(Effect.andThen(Effect.never)),
+            },
+          }),
+        });
+        h.stores.tests.definitions.push(install);
+        const fiber = yield* Effect.forkChild(
+          h.program([...NEW, "--server-url", SERVER], WITH_LINEAR),
+        );
+        yield* Deferred.await(reached);
+        yield* Fiber.interrupt(fiber);
+        // An overridden method is not recorded; `reached` is the proof the update was in flight.
+        expect(h.linear.calls.map((call) => call.method)).toEqual([
+          "teamId",
+          "labelIds",
+          "assigneeId",
+          "stateIds",
+          "createIssue",
+        ]);
+        // No failure to carry: the line itself is what reaches Sentry.
+        expect(h.log.lines).toEqual([
+          {
+            level: "error",
+            text: "ticket trapped in Backlog; interrupted",
+            location: undefined,
+            agentId: "OLI-42",
+            skipSentry: false,
+            cause: undefined,
+          },
+        ]);
+      }),
+  );
+
+  it.effect(
+    "the trapped line reaches the reporter installed at the root, through the real Log, with the failure as its cause (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const refused = Errors.LinearError.make({
+          operation: "describeIssue",
+          status: 401,
+          message: "linear: request failed (401): unauthorized",
+        });
+        const reporter = Reporter.collect();
+        const h = harness({
+          linear: FakeLinear.fakeLinear({
+            overrides: { describeIssue: () => Effect.fail(refused) },
+          }),
+          reporter,
+        });
+        h.stores.tests.definitions.push(install);
+        const exit = yield* h.run([...NEW, "--server-url", SERVER], WITH_LINEAR);
+        expect(Exit.isFailure(exit)).toBe(true);
+        expect(reporter.reported).toHaveLength(1);
+        const [report] = reporter.reported;
+        expect(report).toMatchObject({
+          severity: "Error",
+          annotations: {
+            agent_id: "OLI-42",
+            log: "ticket trapped in Backlog; linear: request failed (401): unauthorized",
+          },
+        });
+        // The line carries the refusal as its cause: what Sentry groups on.
+        expect(report?.error).toMatchObject({ _tag: "LogLine", level: "error" });
+        expect(report?.error.cause).toMatchObject({
+          _tag: "LinearError",
+          operation: "describeIssue",
+          status: 401,
+          message: "linear: request failed (401): unauthorized",
+        });
+        expect((yield* stdout).some((line) => line.includes("ticket trapped in Backlog"))).toBe(
+          true,
+        );
       }),
   );
 

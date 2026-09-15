@@ -98,7 +98,7 @@ Stores a test definition, or a new wording of one, and prints it as JSON: `{ id,
 
 Creates one pending test run and one Linear issue per stored test definition, each in its newest wording, and prints them as JSON. Each issue is assigned to `prime@terminal.shop`. `--server-url` is stored on the run and written into every issue as the qemu server the driving agent's `./client` talks to; `./ctrl` itself never calls it. Not used while driving a guest. Reads `LINEAR_API_TOKEN`.
 
-Each issue is created in `Backlog`, its identifier is written on the result, and the one update that writes its body moves it to `Automation Needed`, the state the automation server queues a drive from, so the webhook that queues it always finds the result. A failure between leaves the issue in `Backlog`, where nothing drives it: the command fails naming it (`…; created OLI-n`), and the line `ticket trapped in Backlog; <reason>` is logged and reported to Sentry.
+Each issue is created in `Backlog`, its identifier is written on the result, and the one update that writes its body moves it to `Automation Needed`, the state the automation server queues a drive from, so the webhook that queues it always finds the result. A failure between, or a Ctrl-C, leaves the issue in `Backlog`, where nothing drives it: the line `ticket trapped in Backlog; <reason>` (`interrupted` for a Ctrl-C) is logged and reported to Sentry, and a failure also fails the run naming the ticket (`…; created OLI-n`).
 
 - `--iso <https-url>` — the ISO whose minted disk the agents resume; every ticket's start line carries `--resume`. Must be HTTPS.
 - `--version <version>` — the version label attached to every issue.

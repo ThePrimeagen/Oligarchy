@@ -1,7 +1,7 @@
 import * as Sentry from "@sentry/node";
 import * as Dsn from "./dsn.ts";
 
-// Loaded by the `server` wrapper's `--import` before any Effect code runs.
+// Loaded by the instrumented executables' wrappers (`--import`) before any Effect code runs.
 Sentry.init({
   dsn: Dsn.SENTRY_DSN,
   tracesSampleRate: 1,
