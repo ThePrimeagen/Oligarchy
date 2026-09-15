@@ -72,12 +72,12 @@ const blend = (from: string, to: string, t: number): string =>
     )
     .join("")}`;
 
-// How hot a percentage is: pine at rest, gold halfway, love flat out. What btop does with its
+// How hot a percentage is: foam at rest, gold halfway, love flat out. What btop does with its
 // cpu gradient, in our palette.
 const heat = (percent: number): string => {
   const value = Math.min(100, Math.max(0, percent));
   return value < 50
-    ? blend(PALETTE.pine, PALETTE.gold, value / 50)
+    ? blend(PALETTE.foam, PALETTE.gold, value / 50)
     : blend(PALETTE.gold, PALETTE.love, (value - 50) / 50);
 };
 
@@ -296,8 +296,9 @@ const meter = (fraction: number): ReadonlyArray<Piece> => {
     : [...blocks, { text: "■".repeat(METER_WIDTH - lit), color: PALETTE.muted }];
 };
 
-// The three graphs of a card: cpu on its own scale, memory and jobs against the highest reading
-// in view, as btop scales its network graph.
+// The three graphs of a card: cpu on its own scale and by heat, memory and jobs against the
+// highest reading in view, as btop scales its network graph; memory is mostly a flat block, so
+// it takes the calm colour and jobs the accent.
 type Metric = {
   readonly label: string;
   readonly current: (sample: ProcessStats.Sample) => string;
@@ -323,13 +324,13 @@ const METRICS: ReadonlyArray<Metric> = [
     label: "mem",
     current: (sample) => size(sample.memoryBytes),
     scaled: relative((sample) => sample.memoryBytes),
-    color: () => PALETTE.iris,
+    color: () => PALETTE.pine,
   },
   {
     label: "jobs",
     current: (sample) => String(sample.jobs),
     scaled: relative((sample) => sample.jobs),
-    color: () => PALETTE.foam,
+    color: () => PALETTE.iris,
   },
 ];
 

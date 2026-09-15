@@ -173,6 +173,7 @@ const MUTED = fg("#6e6a86");
 const LOVE = fg("#eb6f92");
 const GOLD = fg("#f6c177");
 const ROSE = fg("#ebbcba");
+const PINE = fg("#31748f");
 const FOAM = fg("#9ccfd8");
 const IRIS = fg("#c4a7e7");
 const FG_RESET = "\x1b[39m";
@@ -378,7 +379,7 @@ describe("draw happy path", () => {
   );
 
   it.effect(
-    "paints the borders muted, the active tab bold, the selected card's marker gold, the cpu graph by heat, memory iris, jobs foam, and each job by its status",
+    "paints the borders muted, the active tab bold, the selected card's marker gold, the cpu graph by heat, memory pine, jobs iris, and each job by its status",
     () =>
       Effect.sync(() => {
         const frame = View.draw(shown(SNAPSHOT), READ_AT, COLUMNS, ROWS);
@@ -396,8 +397,8 @@ describe("draw happy path", () => {
         expect(rows[1]).toContain(`${fg("#f6c177")}■${FG_RESET}${MUTED}`);
         expect(rows[2]).toContain(`${SUBTLE}cpu     ${FG_RESET}`);
         expect(rows[2]).toContain(`${LOVE}⡇${FG_RESET}`);
-        expect(rows[2]).toContain(`${IRIS}⢀⣿⣿${FG_RESET}`);
-        expect(rows[2]).toContain(`${FOAM}⣿⣿${FG_RESET}`);
+        expect(rows[2]).toContain(`${PINE}⢀⣿⣿${FG_RESET}`);
+        expect(rows[2]).toContain(`${IRIS}⣿⣿${FG_RESET}`);
         expect(rows[3]).toContain(`${BOLD}${TEXT}   37.5%${FG_RESET}${UNBOLD}`);
         expect(rows[4]).toBe(`${MUTED}${divider}${FG_RESET}`);
         expect(rows[5]).not.toContain(`${GOLD}▸`);
@@ -434,7 +435,7 @@ describe("draw happy path", () => {
   );
 
   it.effect(
-    "colours the cpu graph from pine through gold to love as the reading climbs, one colour per column",
+    "colours the cpu graph from foam through gold to love as the reading climbs, one colour per column",
     () =>
       Effect.sync(() => {
         const at = (readings: ReadonlyArray<number>): string =>
@@ -459,12 +460,12 @@ describe("draw happy path", () => {
               ROWS,
             ),
           )[3] ?? "";
-        // One percent is one dot, a shade off pine; fifty is gold itself; a hundred is love.
-        expect(at([0, 1])).toContain(`${fg("#35768f")}⢀${FG_RESET}`);
+        // One percent is one dot, a shade off foam; fifty is gold itself; a hundred is love.
+        expect(at([0, 1])).toContain(`${fg("#9ecfd6")}⢀${FG_RESET}`);
         expect(at([50, 50])).toContain(`${GOLD}⣿${FG_RESET}`);
         expect(at([100, 100])).toContain(`${LOVE}⣿${FG_RESET}`);
-        // The first column at 25 sits between pine and gold; the second between gold and love.
-        expect(at([25, 25, 75, 75])).toContain(`${fg("#949b83")}⣤${fg("#f19885")}⣿${FG_RESET}`);
+        // The first column at 25 sits between foam and gold; the second between gold and love.
+        expect(at([25, 25, 75, 75])).toContain(`${fg("#c9c8a8")}⣤${fg("#f19885")}⣿${FG_RESET}`);
       }),
   );
 
@@ -731,8 +732,8 @@ describe("draw unhappy path", () => {
         const styled = rowsOf(frame);
         expect(styled[1]).toContain(`${LOVE}silent · seen 5 min ago${FG_RESET}`);
         expect(styled[2]).toContain(`${MUTED}⢸${FG_RESET}`);
-        expect(styled[2]).not.toContain(IRIS);
-        expect(styled[3]).not.toContain(FOAM);
+        expect(styled[2]).not.toContain(PINE);
+        expect(styled[3]).not.toContain(IRIS);
         expect(styled[3]).toContain(`${MUTED}   50.0%${FG_RESET}`);
       }),
   );
