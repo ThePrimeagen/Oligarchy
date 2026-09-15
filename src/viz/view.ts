@@ -171,11 +171,12 @@ const age = (ms: number): string => {
 const ago = (stamp: Date | null, queriedAt: Date, drift: number): string =>
   stamp === null ? "—" : `${age(queriedAt.getTime() - stamp.getTime() + drift)} ago`;
 
-// A job's reason is a stderr tail and a driver's message can span lines: a control character
-// would break the row or steer the terminal, so each is drawn as a space.
+// A job's reason is a stderr tail and a driver's message can span lines: a control character,
+// C1 included (a UTF-8 terminal obeys U+009B as it does ESC [), would break the row or steer
+// the terminal, so each is drawn as a space.
 const clean = (text: string): string =>
   Array.from(text, (character) =>
-    character < " " || character === "\u007f" ? " " : character,
+    character < " " || (character >= "\u007f" && character <= "\u009f") ? " " : character,
   ).join("");
 
 // Exactly `width` columns: cut with an ellipsis or padded, so a row is as wide as its cells.
@@ -258,16 +259,15 @@ const dots = (reading: number, low: number, high: number): number => {
   return Math.max(1, Math.round(((reading - low) * 4) / (high - low)));
 };
 
-// Two rows of braille, `width` columns wide, of readings on a 0–100 scale, the newest in the
-// right half of the last column and the history running left; the upper row is the half above
-// fifty. Each column takes the colour of its higher reading.
+// Two rows of braille, `width` columns wide, of at most `2 * width` readings on a 0–100 scale,
+// the newest in the right half of the last column and the history running left; the upper row
+// is the half above fifty. Each column takes the colour of its higher reading.
 const graph = (
   readings: ReadonlyArray<number>,
   width: number,
   color: (reading: number) => string,
 ): { readonly upper: string; readonly lower: string } => {
-  const shown = readings.slice(-2 * width);
-  const padded = [...Array.from({ length: 2 * width - shown.length }, () => 0), ...shown];
+  const padded = [...Array.from({ length: 2 * width - readings.length }, () => 0), ...readings];
   const row = (low: number, high: number): string =>
     stroke(
       Array.from({ length: width }, (_, column) => {
@@ -420,8 +420,9 @@ const cardHeader = (
   return `${render(clip(left, usable - saidWidth - GAP.text.length))}${GAP.text}${render(said)}`;
 };
 
-// A card's two graph rows: labels above, the newest readings below, a graph beside each. A
-// silent machine's history is drawn in muted, its numbers too.
+// A card's two graph rows: labels above, the newest readings below, a graph beside each of the
+// readings that fit, scaled among themselves. A silent machine's history is drawn in muted, its
+// numbers too.
 const cardGraphs = (
   series: Option.Option<ProcessStats.Series>,
   silent: boolean,
@@ -431,7 +432,7 @@ const cardGraphs = (
   const rest = " ".repeat(usable - GRAPHS_FIXED - 3 * width);
   const samples = Option.match(series, {
     onNone: (): ReadonlyArray<ProcessStats.Sample> => [],
-    onSome: (found) => found.samples,
+    onSome: (found) => found.samples.slice(-2 * width),
   });
   const newest = samples.at(-1);
   const sections = METRICS.map((metric) => {
@@ -643,6 +644,9 @@ export const press = (view: View, input: Terminal.UserInput): View => {
     onSome: (snapshot) => ofTab(snapshot, view.tab).length,
   });
   const last = Math.max(0, count - 1);
+  // The card on screen, not the number stored: a fleet that shrank since leaves the number past
+  // the end, and a step must start from what is selected.
+  const current = clamp(view.cursor[view.tab], 0, last);
   const select = (cursor: number): View => ({
     ...view,
     cursor: { ...view.cursor, [view.tab]: clamp(cursor, 0, last) },
@@ -650,10 +654,10 @@ export const press = (view: View, input: Terminal.UserInput): View => {
   switch (input.key.name) {
     case "j":
     case "down":
-      return select(view.cursor[view.tab] + 1);
+      return select(current + 1);
     case "k":
     case "up":
-      return select(view.cursor[view.tab] - 1);
+      return select(current - 1);
     case "g":
       return select(input.key.shift ? last : 0);
     case "tab":

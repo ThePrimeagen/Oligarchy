@@ -507,6 +507,32 @@ describe("draw happy path", () => {
         const full = "⣿".repeat(GRAPH);
         expect(cut[2]).toBe(box(labels(BLANK_GRAPH, full, BLANK_GRAPH)));
         expect(cut[3]).toBe(box(values("0.0%", BLANK_GRAPH, "0 MB", full, "0", BLANK_GRAPH)));
+        // Memory and jobs scale to the highest reading in view, not to one that fell off.
+        const spiked = [
+          { jobs: 8, memoryBytes: 1, cpuPercent: 0 },
+          ...Array.from({ length: 2 * GRAPH - 1 }, () => ({
+            jobs: 0,
+            memoryBytes: 1,
+            cpuPercent: 0,
+          })),
+          { jobs: 1, memoryBytes: 1, cpuPercent: 0 },
+        ];
+        const scaled = plainRows(
+          View.draw(
+            shown({
+              ...SNAPSHOT,
+              machines: [garage],
+              series: [{ ...garageSeries, samples: spiked }],
+            }),
+            READ_AT,
+            COLUMNS,
+            ROWS,
+          ),
+        );
+        expect(scaled[2]).toBe(box(labels(BLANK_GRAPH, full, `${space(GRAPH - 1)}⢸`)));
+        expect(scaled[3]).toBe(
+          box(values("0.0%", BLANK_GRAPH, "0 MB", full, "1", `${space(GRAPH - 1)}⢸`)),
+        );
       }),
   );
 
@@ -582,6 +608,10 @@ describe("draw selection", () => {
         View.draw(shown(many, "servers", { servers: -3, clients: 0 }), READ_AT, COLUMNS, ROWS),
       );
       expect(names(below)).toEqual(["▸ s0", "  s1", "  s2", "  s3"]);
+      // A fleet that shrank under the cursor: the first k moves off the last card, not to it.
+      const shrunk = shown(many, "servers", { servers: 40, clients: 0 });
+      expect(View.press(shrunk, key("k")).cursor.servers).toBe(4);
+      expect(View.press(shrunk, key("j")).cursor.servers).toBe(5);
     }),
   );
 
@@ -916,7 +946,9 @@ describe("draw unhappy path", () => {
               ...SNAPSHOT,
               queue: {
                 ...EMPTY_QUEUE,
-                completed: [{ ...failed, reason: "line one\nline two\x1b[31m\ttabbed\u007f" }],
+                completed: [
+                  { ...failed, reason: "line one\nline two\x1b[31m\ttab\u007f\u009b31mcsi" },
+                ],
               },
             }),
             failure: Option.some("Failed query: select 1\nparams: []"),
@@ -927,12 +959,14 @@ describe("draw unhappy path", () => {
         );
         expect(frame).not.toMatch(/\n/);
         expect(frame).not.toContain("\t");
-        expect(frame).not.toContain("\x1b[31m\ttabbed");
+        expect(frame).not.toContain("\x1b[31m\ttab");
+        // The 8-bit CSI a UTF-8 terminal would obey as one, drawn as a space like the 7-bit one.
+        expect(frame).not.toContain("\u009b");
         const rows = plainRows(frame);
         for (const row of rows) {
           expect(row).toHaveLength(COLUMNS);
         }
-        expect(rows[11]).toContain("line one line two [31m tabbed ");
+        expect(rows[11]).toContain("line one line two [31m tab  31mcsi");
         expect(rows[ROWS - 1]).toBe(pad(" error: Failed query: select 1 params: []", COLUMNS));
       }),
   );
