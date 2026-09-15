@@ -182,19 +182,16 @@ psql "$DBURL" -X -c "select name, type, url, heartbeat_at from servers where hea
 
 Expect `qemu-a` … `qemu-d` (`qemu`) and `automation-client-4` (`automation-client`).
 
-**Mint the fleet.** One command, one ticket per live qemu server, each pinned to its server. The
-tickets are created in Automation Needed and the webhook queues a drive for each; the driver
-relinquishes, reserves pinned, starts fresh, installs, has a subagent confirm the desktop, saves,
-records the verdict. An install runs long (the opencode ceiling is 45 minutes); four run at once,
-one per server.
+**Mint the fleet.** Start the mint by creating the Linear tickets, one per live qemu server.
+Installs take up to 45 minutes; four run at once.
 
 ```bash
 ./ctrl mint --server-url "$SUPER_RUN_SERVER_URL" --iso "$SUPER_RUN_ISO"
 # → JSON: [{ id, result, server, linear }, …] × 4. Note ticket ↔ server in SCRATCH.md.
 sleep 20
 psql "$DBURL" -X -c "select r.linear_id, j.action, j.status from test_results r join automation_jobs j on j.result_id = r.result_id where r.linear_id in ('OLI-…','OLI-…','OLI-…','OLI-…');"
-# a ticket with no drive job after 20s: the webhook lost the race; move it to In Progress and back
-# to Automation Needed with the Linear MCP, then check again.
+# every ticket must show a drive job. One without: stop, diagnose (automation-server log), fix,
+# cancel that ticket, then ./ctrl mint … --unminted
 ```
 
 Watch each mint like a batch run (`./ctrl session --search --test-result-id "$RID"`, then
@@ -215,11 +212,14 @@ Do not start the batch until all four dirs hold the disk.
 
 **Batch.** `N` is monotonic (`/tmp/mintedrun/next`). Never take N from `active`. Target:
 `counted + active == 100` after replacing every INFRA. Four slots; keep enough pending drives that
-all four are busy. `new.sh` exit 2 = no drive webhook — pause refill. Every batch ticket's start
-line carries `--resume`; a session that installs instead is a defect in the ticket, not a run.
+all four are busy. Every batch ticket's start line carries `--resume`; a session that installs
+instead is a defect in the ticket, not a run.
+
+Start a run by creating its Linear ticket:
 
 ```bash
 /tmp/mintedrun/new.sh muse
+# exit 2 = no drive job: stop refill, diagnose (automation-server log), fix, retire.sh N INFRA
 ```
 
 Each `AGENT_LOOP_TICK_mintedrun` you **do this work** (the sleep loop does not):
@@ -228,7 +228,7 @@ Each `AGENT_LOOP_TICK_mintedrun` you **do this work** (the sleep loop does not):
 /tmp/mintedrun/tick.sh
 # RETIRE n|…  → if ANALYZE is also printed, wait for the subagent, then:
 /tmp/mintedrun/retire.sh "$N" COUNTED   # or INFRA
-# STUCK no-drive-job → pause refill; fix webhook / automation-server
+# STUCK no-drive-job → stop refill; diagnose (automation-server log); fix; retire.sh N INFRA
 # STUCK diagnose=* no-diagnosis-row → ./ctrl diagnose … --model openrouter/meta/muse-spark-1.3-contributor
 #        or retire INFRA. cannot re-enqueue diagnose
 # LEDGER refill=yes → /tmp/mintedrun/new.sh muse

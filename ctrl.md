@@ -98,6 +98,8 @@ Stores a test definition, or a new wording of one, and prints it as JSON: `{ id,
 
 Creates one pending test run and one Linear issue per stored test definition, each in its newest wording, and prints them as JSON. Each issue is assigned to `prime@terminal.shop`. `--server-url` is stored on the run and written into every issue as the qemu server the driving agent's `./client` talks to; `./ctrl` itself never calls it. Not used while driving a guest. Reads `LINEAR_API_TOKEN`.
 
+Each issue is created in `Backlog` and moved to `Automation Needed` once its result carries its identifier. One left in `Backlog` by a failure or a Ctrl-C is logged as `ticket trapped in Backlog; <reason>` and reported to Sentry; a failure also fails the run naming the ticket (`…; created OLI-n`).
+
 - `--iso <https-url>` — the ISO whose minted disk the agents resume; every ticket's start line carries `--resume`. Must be HTTPS.
 - `--version <version>` — the version label attached to every issue.
 - `--name <definition>` — create a run for this one definition instead of every definition, in its newest wording like the rest. A name that matches none is a failure.
@@ -118,7 +120,7 @@ Not a test: it gets the ISO installed once on every qemu server, so that server 
 - `--server-url <url>` — the reverse proxy the drivers talk to; the live qemu servers behind it are the ones minted.
 - `--unminted` — ticket only the live qemu servers that do not hold this ISO's minted disk: the redo after a mint that failed, or after the operator removed one server's disk. Asks the reverse proxy at `--server-url` once (`GET /minted?iso=`, the one server call `./ctrl` makes; reads `OLIGARCHY_TOKEN`), which asks every server whether the two files are beside its ISO. A minted server is skipped and named in the log line; every live server minted prints `[]` and exits 0. Refused before anything is created when a live server gave the proxy no answer of its own (`<url> did not answer /minted`): fix that server, or mint without the flag. A second mint overwrites, so without the flag every server is minted again.
 
-Refused before anything is created when there is no definition named `mint` — define the install once with `test define --name mint`, its instruction holding the user name, password and disk passphrase and how the desktop is shut down from inside, its proof the desktop after the reboot — or when no qemu server is live. A Linear failure part-way fails the run it was creating and names the tickets that stand; the servers already ticketed keep theirs.
+Refused before anything is created when there is no definition named `mint` — define the install once with `test define --name mint`, its instruction holding the user name, password and disk passphrase and how the desktop is shut down from inside, its proof the desktop after the reboot — or when no qemu server is live. A Linear failure part-way fails the run it was creating and names the tickets that stand; the servers already ticketed keep theirs. Issues move from `Backlog` to `Automation Needed` as in `test new`, and one left behind is reported the same way.
 
 ```bash
 ./ctrl mint --server-url https://qemu.example.com --iso https://example.com/omarchy.iso

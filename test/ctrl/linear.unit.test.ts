@@ -52,6 +52,13 @@ const graphql = (request: HttpClientRequest.HttpClientRequest): GraphQl => {
 
 const labelId = (name: string): string => `label-${name}`;
 
+const stateId = (name: string): string => `state-${name}`;
+
+const stateResponse = (body: GraphQl): Response =>
+  FakeHttp.json({
+    data: { workflowStates: { nodes: [{ id: stateId(String(body.variables?.name)) }] } },
+  });
+
 const issueResponse = (identifier: string): Response =>
   FakeHttp.json({
     data: {
@@ -91,6 +98,9 @@ const happyLinear = (body: GraphQl): Response => {
   if (body.query.includes("users(filter")) {
     return userResponse();
   }
+  if (body.query.includes("workflowStates")) {
+    return stateResponse(body);
+  }
   if (body.query.includes("issueUpdate")) {
     return describeResponse();
   }
@@ -117,19 +127,26 @@ const describedAs = (ticket: string) =>
     TEST_PROOF: firstTest.proof,
   }).pipe(Effect.provide(NodeFileSystem.layer), Effect.orDie);
 
-// The whole ticket flow as `test new` runs it for one definition.
+// The whole ticket flow as `test new` runs it for one definition: the ticket is born in Backlog
+// and moves to Automation Needed with its body, in the one update.
 const createTicket = Effect.gen(function* () {
   const client = yield* Linear.Linear;
   const teamId = yield* client.teamId;
   const labelIds = yield* client.labelIds(teamId, experiment.version);
   const assigneeId = yield* client.assigneeId;
+  const states = yield* client.stateIds(teamId);
   const ticket = yield* client.createIssue({
     teamId,
     title: `Omarchy: ${firstTest.name}`,
     labelIds,
     assigneeId,
+    stateId: states.backlog,
   });
-  yield* client.describeIssue(ticket, yield* describedAs(ticket.identifier));
+  yield* client.describeIssue(
+    ticket,
+    yield* describedAs(ticket.identifier),
+    states.automationNeeded,
+  );
   return ticket;
 });
 
@@ -151,7 +168,7 @@ describe("Linear happy path", () => {
           identifier: "OLI-42",
           url: "https://linear.app/issue/OLI-42",
         });
-        expect(http.requests).toHaveLength(6);
+        expect(http.requests).toHaveLength(8);
         const bodies: ReadonlyArray<GraphQl> = http.requests.map((request) =>
           JSON.parse(request.body),
         );
@@ -167,19 +184,30 @@ describe("Linear happy path", () => {
         expect(bodies[1]?.variables).toEqual({ name: "agent test", teamId: "team-id" });
         expect(bodies[2]?.variables).toEqual({ name: experiment.version, teamId: "team-id" });
         expect(bodies[3]?.variables).toEqual({ email: "prime@terminal.shop" });
-        expect(bodies[4]?.variables).toEqual({
+        // The two board states of the hand-off, looked up by name on the team.
+        expect(bodies[4]?.query).toMatch(
+          /workflowStates\(filter: \{ name: \{ eq: \$name \}, team: \{ id: \{ eq: \$teamId \} \} \}, first: 1\)/,
+        );
+        expect(bodies[4]?.variables).toEqual({ name: "Backlog", teamId: "team-id" });
+        expect(bodies[5]?.variables).toEqual({ name: "Automation Needed", teamId: "team-id" });
+        // Born in Backlog, where the automation server queues nothing.
+        expect(bodies[6]?.variables).toEqual({
           input: {
             teamId: "team-id",
             title: `Omarchy: ${firstTest.name}`,
             labelIds: [labelId("agent test"), labelId(experiment.version)],
             assigneeId: "user-id",
+            stateId: stateId("Backlog"),
           },
         });
-        expect(bodies[5]?.query).toMatch(/issueUpdate\(id: \$id/);
-        expect(bodies[5]?.variables).toEqual({
+        // The body and the move into Automation Needed land in one update, so the ticket is never
+        // in that state without its body.
+        expect(bodies[7]?.query).toMatch(/issueUpdate\(id: \$id/);
+        expect(bodies[7]?.variables).toEqual({
           id: "issue-OLI-42",
           input: {
             description: yield* describedAs("OLI-42"),
+            stateId: stateId("Automation Needed"),
           },
         });
       }),
@@ -208,6 +236,9 @@ describe("Linear happy path", () => {
         }
         if (body.query.includes("users(filter")) {
           return userResponse();
+        }
+        if (body.query.includes("workflowStates")) {
+          return stateResponse(body);
         }
         if (body.query.includes("issueUpdate")) {
           return describeResponse();
@@ -351,6 +382,36 @@ describe("Linear unhappy path", () => {
     }),
   );
 
+  it.effect("rejects a board without a Backlog state before any issue exists", () =>
+    Effect.gen(function* () {
+      const http = withHttp((body) =>
+        body.query.includes("workflowStates") && body.variables?.name === "Backlog"
+          ? FakeHttp.json({ data: { workflowStates: { nodes: [] } } })
+          : happyLinear(body),
+      );
+      const error = yield* failureOf(createTicket).pipe(Effect.provide(http.layer));
+      expect(error).toMatchObject({
+        _tag: "LinearError",
+        operation: "stateIds",
+        message: "linear: no state named Backlog",
+      });
+      const queries = http.requests.map((request) => JSON.parse(request.body).query);
+      expect(queries.some((query: string) => query.includes("issueCreate"))).toBe(false);
+    }),
+  );
+
+  it.effect("rejects a board without an Automation Needed state, naming it", () =>
+    Effect.gen(function* () {
+      const http = withHttp((body) =>
+        body.query.includes("workflowStates") && body.variables?.name === "Automation Needed"
+          ? FakeHttp.json({ data: { workflowStates: { nodes: [] } } })
+          : happyLinear(body),
+      );
+      const error = yield* failureOf(createTicket).pipe(Effect.provide(http.layer));
+      expect(error.message).toBe("linear: no state named Automation Needed");
+    }),
+  );
+
   it.effect("reports an issue creation failure", () =>
     Effect.gen(function* () {
       const http = withHttp((body) => {
@@ -362,6 +423,9 @@ describe("Linear unhappy path", () => {
         }
         if (body.query.includes("users(filter")) {
           return userResponse();
+        }
+        if (body.query.includes("workflowStates")) {
+          return stateResponse(body);
         }
         return FakeHttp.json({ data: { issueCreate: { success: false, issue: null } } });
       });

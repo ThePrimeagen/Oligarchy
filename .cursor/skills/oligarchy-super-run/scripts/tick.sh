@@ -49,7 +49,7 @@ psql "$DBURL" -X -A -t -F'|' -c "
     continue
   fi
   if [ -z "$DRIVE" ] && [ "${AGE:-0}" -ge 60 ]; then
-    echo "STUCK $N|$DIR|$RID|$TICKET no-drive-job age=${AGE}s — pause refill"
+    echo "STUCK $N|$DIR|$RID|$TICKET no-drive-job age=${AGE}s — stop refill; diagnose; retire INFRA"
     continue
   fi
   case "$DIAG" in

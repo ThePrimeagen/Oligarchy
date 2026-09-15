@@ -40,8 +40,8 @@ The saved session's row ends `succeeded` with reason `saved; minted <iso>`; a sa
 
 ## Mint-specific incidents to watch for
 
-- A ticket created with no drive job: the webhook can beat `setLinearId`. Move the ticket to In
-  Progress and back to Automation Needed; a state change queues the drive.
+- A ticket with no drive job: stop. Do not touch the ticket's state. Diagnose (automation-server
+  log), fix, cancel the ticket, `./ctrl mint … --unminted`.
 - `no minted disk for <iso> on this machine` on a batch start: that server was not minted (or its
   data dir was wiped). INFRA; mint it before refilling.
 - Two servers sharing a data dir: two mints overwrite one disk. Check the four `data` values in the

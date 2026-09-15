@@ -6,6 +6,11 @@ export const LINEAR_API_URL = "https://api.linear.app/graphql";
 export const LINEAR_TEAM = "Oligarchy";
 export const AGENT_TEST_LABEL = "agent test";
 export const ASSIGNEE_EMAIL = "prime@terminal.shop";
+// The two board states a ticket is handed through: born in Backlog, where the automation server
+// queues nothing, and moved to Automation Needed once its body and its result's Linear id are
+// written, so the webhook that queues the drive can never arrive before that write.
+export const BACKLOG_STATE = "Backlog";
+export const AUTOMATION_NEEDED_STATE = "Automation Needed";
 
 export const LinearTicket = Schema.Struct({
   id: Schema.String,
@@ -27,6 +32,12 @@ export type CreateIssueInput = {
   readonly title: string;
   readonly labelIds: ReadonlyArray<string>;
   readonly assigneeId: string;
+  readonly stateId: string;
+};
+
+export type WorkflowStateIds = {
+  readonly backlog: string;
+  readonly automationNeeded: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -50,6 +61,9 @@ const LABEL_CREATE_MUTATION = `mutation ExperimentLabelCreate($input: IssueLabel
 
 const ASSIGNEE_QUERY =
   "query ExperimentAssignee($email: String!) { users(filter: { email: { eq: $email } }, first: 1) { nodes { id } } }";
+
+const STATE_QUERY =
+  "query ExperimentState($name: String!, $teamId: ID!) { workflowStates(filter: { name: { eq: $name }, team: { id: { eq: $teamId } } }, first: 1) { nodes { id } } }";
 
 const ISSUE_CREATE_MUTATION = `mutation ExperimentIssueCreate($input: IssueCreateInput!) {
   issueCreate(input: $input) {
@@ -92,6 +106,7 @@ const Nodes = Schema.Struct({ nodes: Schema.Array(Schema.Struct({ id: Schema.Str
 const Teams = Schema.Struct({ teams: Nodes });
 const Labels = Schema.Struct({ issueLabels: Nodes });
 const Users = Schema.Struct({ users: Nodes });
+const States = Schema.Struct({ workflowStates: Nodes });
 const LabelCreate = Schema.Struct({
   issueLabelCreate: Schema.Struct({
     success: Schema.Boolean,
@@ -132,12 +147,14 @@ export type LinearService = {
     version: string,
   ) => Effect.Effect<ReadonlyArray<string>, Errors.LinearError>;
   readonly assigneeId: Effect.Effect<string, Errors.LinearError>;
+  readonly stateIds: (teamId: string) => Effect.Effect<WorkflowStateIds, Errors.LinearError>;
   readonly createIssue: (
     input: CreateIssueInput,
   ) => Effect.Effect<LinearTicket, Errors.LinearError>;
   readonly describeIssue: (
     ticket: LinearTicket,
     description: string,
+    stateId: string,
   ) => Effect.Effect<void, Errors.LinearError>;
   readonly listBacklog: Effect.Effect<ReadonlyArray<LinearBacklogTicket>, Errors.LinearError>;
 };
@@ -251,6 +268,26 @@ const makeLinear = (
       });
     });
 
+    const stateNamed = Effect.fn("Linear.stateNamed")(function* (team: string, name: string) {
+      const found = yield* request("stateIds", STATE_QUERY, { name, teamId: team }, States);
+      return yield* Option.match(Arr.head(found.workflowStates.nodes), {
+        onNone: () =>
+          Errors.LinearError.make({
+            operation: "stateIds",
+            message: `linear: no state named ${name}`,
+          }),
+        onSome: (state) => Effect.succeed(state.id),
+      });
+    });
+
+    const stateIds = Effect.fn("Linear.stateIds")(function* (team: string) {
+      const [backlog, automationNeeded] = yield* Effect.all([
+        stateNamed(team, BACKLOG_STATE),
+        stateNamed(team, AUTOMATION_NEEDED_STATE),
+      ]);
+      return { backlog, automationNeeded } satisfies WorkflowStateIds;
+    });
+
     const createIssue = Effect.fn("Linear.createIssue")(function* (input: CreateIssueInput) {
       const created = yield* request(
         "createIssue",
@@ -268,15 +305,17 @@ const makeLinear = (
     });
 
     // Linear assigns the identifier on create, and the description names it as the driver's agent
-    // id, so the body can only land in a second call.
+    // id, so the body can only land in a second call. The move to `stateId` rides in that same
+    // update: the ticket is never in Automation Needed without its body.
     const describeIssue = Effect.fn("Linear.describeIssue")(function* (
       ticket: LinearTicket,
       description: string,
+      stateId: string,
     ) {
       yield* request(
         "describeIssue",
         ISSUE_DESCRIBE_MUTATION,
-        { id: ticket.id, input: { description } },
+        { id: ticket.id, input: { description, stateId } },
         IssueUpdate,
       ).pipe(
         Effect.filterOrFail(
@@ -315,6 +354,7 @@ const makeLinear = (
       teamId,
       labelIds,
       assigneeId,
+      stateIds,
       createIssue,
       describeIssue,
       listBacklog,

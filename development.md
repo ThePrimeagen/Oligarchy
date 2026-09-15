@@ -14,8 +14,8 @@ exist.
 ## Toolchain
 
 - Run on Node 26 with npm. Every executable is a `#!/bin/sh` wrapper running
-  `node --experimental-strip-types` (`./qemu-server`, `./qemu-reverse-proxy`, `./automation-server`
-  and `./automation-client` add
+  `node --experimental-strip-types` (`./qemu-server`, `./qemu-reverse-proxy`, `./automation-server`,
+  `./automation-client` and `./ctrl` add
   `--import ./src/observability/instrument.ts`); types are stripped, not transformed, so
   `erasableSyntaxOnly` stays on.
 - Install with `npm ci`; `prepare` runs `effect-tsgo patch --oxlint` so the `effecttsgo/*` rules
@@ -765,7 +765,7 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
 ## Sentry
 
 - Initialise the SDK before any Effect code in `src/observability/instrument.ts`, loaded by the
-  `qemu-server`, `qemu-reverse-proxy`, `automation-server` and `automation-client` wrappers' `--import`: `Sentry.init({ dsn: SENTRY_DSN,
+  `qemu-server`, `qemu-reverse-proxy`, `automation-server`, `automation-client` and `ctrl` wrappers' `--import`: `Sentry.init({ dsn: SENTRY_DSN,
   tracesSampleRate: 1,
   traceLifecycle: "stream", integrations: [Sentry.httpIntegration({ spans: false }),
   Sentry.nativeNodeFetchIntegration({ spans: false })] })`. `SENTRY_DSN` in `dsn.ts` is the one

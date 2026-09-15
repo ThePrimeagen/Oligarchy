@@ -5,11 +5,13 @@ export type LinearCall =
   | { readonly method: "teamId" }
   | { readonly method: "labelIds"; readonly teamId: string; readonly version: string }
   | { readonly method: "assigneeId" }
+  | { readonly method: "stateIds"; readonly teamId: string }
   | { readonly method: "createIssue"; readonly input: Linear.CreateIssueInput }
   | {
       readonly method: "describeIssue";
       readonly ticket: Linear.LinearTicket;
       readonly description: string;
+      readonly stateId: string;
     }
   | { readonly method: "listBacklog" };
 
@@ -22,6 +24,14 @@ export const TEAM_ID = "team-id";
 export const USER_ID = "user-id";
 
 export const labelId = (name: string): string => `label-${name}`;
+
+export const stateId = (name: string): string => `state-${name}`;
+
+// The two board states `test new` and `mint` hand a ticket through, as the fake answers them.
+export const STATES: Linear.WorkflowStateIds = {
+  backlog: stateId(Linear.BACKLOG_STATE),
+  automationNeeded: stateId(Linear.AUTOMATION_NEEDED_STATE),
+};
 
 export const ticketFor = (identifier: string): Linear.LinearTicket => ({
   id: `issue-${identifier}`,
@@ -53,6 +63,7 @@ export const fakeLinear = (
         Effect.succeed([labelId(Linear.AGENT_TEST_LABEL), labelId(version)]),
       ),
     assigneeId: record({ method: "assigneeId" }, Effect.succeed(USER_ID)),
+    stateIds: (teamId) => record({ method: "stateIds", teamId }, Effect.succeed(STATES)),
     createIssue: (input) =>
       record(
         { method: "createIssue", input },
@@ -61,8 +72,8 @@ export const fakeLinear = (
           return ticketFor(`OLI-${String(41 + created)}`);
         }),
       ),
-    describeIssue: (ticket, description) =>
-      record({ method: "describeIssue", ticket, description }, Effect.void),
+    describeIssue: (ticket, description, state) =>
+      record({ method: "describeIssue", ticket, description, stateId: state }, Effect.void),
     listBacklog: record({ method: "listBacklog" }, Effect.succeed(options.backlog ?? [])),
   };
   const overrides = options.overrides ?? {};
@@ -70,6 +81,7 @@ export const fakeLinear = (
     teamId: overrides.teamId ?? defaults.teamId,
     labelIds: overrides.labelIds ?? defaults.labelIds,
     assigneeId: overrides.assigneeId ?? defaults.assigneeId,
+    stateIds: overrides.stateIds ?? defaults.stateIds,
     createIssue: overrides.createIssue ?? defaults.createIssue,
     describeIssue: overrides.describeIssue ?? defaults.describeIssue,
     listBacklog: overrides.listBacklog ?? defaults.listBacklog,
