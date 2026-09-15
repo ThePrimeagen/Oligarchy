@@ -222,6 +222,17 @@ const withReason = (error: Errors.LinearError, message: string): Errors.LinearEr
 export const makeCtrlCommand = (deps: Deps = live) => {
   const withDb = Layer.unwrap(Effect.map(Config.databaseUrl, (url) => deps.database(url)));
 
+  // From its creation until the update that moves it lands, a ticket sits in Backlog, where
+  // nothing drives it. A failure in between leaves it there for good, so the line reaches Sentry
+  // with the failure as its cause rather than only the terminal the command was run from.
+  const trapped =
+    (log: typeof Log.Log.Service, ticket: Linear.LinearTicket) =>
+    (error: { readonly message: string }) =>
+      log.error(`ticket trapped in Backlog; ${error.message}`, {
+        agentId: ticket.identifier,
+        cause: error,
+      });
+
   // DATABASE_URL is read first so it is the one reported first.
   const withDbAndLinear = Layer.unwrap(
     Effect.gen(function* () {
@@ -348,32 +359,39 @@ export const makeCtrlCommand = (deps: Deps = live) => {
       const teamId = yield* linear.teamId;
       const labelIds = yield* linear.labelIds(teamId, experiment.version);
       const assigneeId = yield* linear.assigneeId;
+      const states = yield* linear.stateIds(teamId);
       for (const test of experiment.tests) {
+        // Born in Backlog: the automation server queues nothing there, so the create webhook
+        // cannot beat the linear_id write below to the row.
         const ticket = yield* linear.createIssue({
           teamId,
           title: `Omarchy: ${test.name}`,
           labelIds,
           assigneeId,
+          stateId: states.backlog,
         });
         tickets.push(ticket);
-        // Webhooks name the ticket by its human-readable id; store it on the result so the
-        // automation queue can find the row without parsing the ticket body.
-        yield* tests.setLinearId(test.id, ticket.identifier);
-        // Linear assigns the identifier on create, and the body names it as the driver's agent
-        // id, so the description can only be rendered once the ticket exists.
-        const description = yield* Prompts.renderLinearIssue({
-          LINEAR_TICKET: ticket.identifier,
-          RUN_ID: experiment.id,
-          RESULT_ID: test.id,
-          VERSION: experiment.version,
-          ISO_URL: experiment.iso,
-          SERVER_URL: experiment.serverUrl,
-          TEST_NAME: test.name,
-          TEST_DESCRIPTION: test.description,
-          TEST_INSTRUCTION: test.instruction,
-          TEST_PROOF: test.proof,
-        });
-        yield* linear.describeIssue(ticket, description);
+        yield* Effect.gen(function* () {
+          // Webhooks name the ticket by its human-readable id; store it on the result so the
+          // automation queue can find the row without parsing the ticket body.
+          yield* tests.setLinearId(test.id, ticket.identifier);
+          // Linear assigns the identifier on create, and the body names it as the driver's agent
+          // id, so the description can only be rendered once the ticket exists.
+          const description = yield* Prompts.renderLinearIssue({
+            LINEAR_TICKET: ticket.identifier,
+            RUN_ID: experiment.id,
+            RESULT_ID: test.id,
+            VERSION: experiment.version,
+            ISO_URL: experiment.iso,
+            SERVER_URL: experiment.serverUrl,
+            TEST_NAME: test.name,
+            TEST_DESCRIPTION: test.description,
+            TEST_INSTRUCTION: test.instruction,
+            TEST_PROOF: test.proof,
+          });
+          // The move into Automation Needed is what queues the drive, and it goes last.
+          yield* linear.describeIssue(ticket, description, states.automationNeeded);
+        }).pipe(Effect.tapError(trapped(log, ticket)));
       }
     });
     // A failure fails the run and every result with the reason, naming the tickets that did get
@@ -500,6 +518,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     const teamId = yield* linear.teamId;
     const labelIds = yield* linear.labelIds(teamId, MINT_LABEL);
     const assigneeId = yield* linear.assigneeId;
+    const states = yield* linear.stateIds(teamId);
 
     const minted: Array<{
       readonly id: string;
@@ -537,28 +556,32 @@ export const makeCtrlCommand = (deps: Deps = live) => {
         ),
         Effect.orDie,
       );
+      // Born in Backlog and moved to Automation Needed with its body, as `test new` does.
       const ticket = Effect.gen(function* () {
         const issued = yield* linear.createIssue({
           teamId,
           title: `Omarchy mint: ${target.url}`,
           labelIds,
           assigneeId,
+          stateId: states.backlog,
         });
         tickets.push(issued);
-        yield* tests.setLinearId(result.id, issued.identifier);
-        const description = yield* Prompts.renderMintIssue({
-          LINEAR_TICKET: issued.identifier,
-          RUN_ID: created.runId,
-          RESULT_ID: result.id,
-          ISO_URL: input.iso,
-          SERVER_URL: input.serverUrl,
-          PINNED_SERVER: target.url,
-          INSTALL_NAME: definition.name,
-          INSTALL_DESCRIPTION: definition.description,
-          INSTALL_INSTRUCTION: definition.instruction,
-          INSTALL_PROOF: definition.proof,
-        });
-        yield* linear.describeIssue(issued, description);
+        yield* Effect.gen(function* () {
+          yield* tests.setLinearId(result.id, issued.identifier);
+          const description = yield* Prompts.renderMintIssue({
+            LINEAR_TICKET: issued.identifier,
+            RUN_ID: created.runId,
+            RESULT_ID: result.id,
+            ISO_URL: input.iso,
+            SERVER_URL: input.serverUrl,
+            PINNED_SERVER: target.url,
+            INSTALL_NAME: definition.name,
+            INSTALL_DESCRIPTION: definition.description,
+            INSTALL_INSTRUCTION: definition.instruction,
+            INSTALL_PROOF: definition.proof,
+          });
+          yield* linear.describeIssue(issued, description, states.automationNeeded);
+        }).pipe(Effect.tapError(trapped(log, issued)));
         return issued;
       });
       const issued = yield* ticket.pipe(

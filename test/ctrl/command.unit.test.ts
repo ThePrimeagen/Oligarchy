@@ -488,10 +488,13 @@ describe("test new", () => {
         const installDescription = yield* descriptionOf(install, 0, "OLI-42");
         const terminalDescription = yield* descriptionOf(terminal, 1, "OLI-43");
         const labels = [FakeLinear.labelId("agent test"), FakeLinear.labelId("1.2.3")];
+        // Each ticket is born in Backlog and moves to Automation Needed with its body, in one
+        // update, so the automation server's webhook finds the result's Linear id already written.
         expect(h.linear.calls).toEqual([
           { method: "teamId" },
           { method: "labelIds", teamId: "team-id", version: "1.2.3" },
           { method: "assigneeId" },
+          { method: "stateIds", teamId: "team-id" },
           {
             method: "createIssue",
             input: {
@@ -499,12 +502,14 @@ describe("test new", () => {
               title: "Omarchy: Install Omarchy",
               labelIds: labels,
               assigneeId: "user-id",
+              stateId: FakeLinear.STATES.backlog,
             },
           },
           {
             method: "describeIssue",
             ticket: FakeLinear.ticketFor("OLI-42"),
             description: installDescription,
+            stateId: FakeLinear.STATES.automationNeeded,
           },
           {
             method: "createIssue",
@@ -513,12 +518,14 @@ describe("test new", () => {
               title: "Omarchy: Open a terminal",
               labelIds: labels,
               assigneeId: "user-id",
+              stateId: FakeLinear.STATES.backlog,
             },
           },
           {
             method: "describeIssue",
             ticket: FakeLinear.ticketFor("OLI-43"),
             description: terminalDescription,
+            stateId: FakeLinear.STATES.automationNeeded,
           },
         ]);
 
@@ -685,7 +692,57 @@ describe("test new", () => {
       );
       expect(h.stores.tests.results.map((row) => row.status)).toEqual(["failed", "failed"]);
       expect(h.stores.tests.results.map((row) => row.linearId)).toEqual(["OLI-42", "OLI-43"]);
+      // OLI-42 was handed to automation; OLI-43 never left Backlog, and nobody would drive it, so
+      // that one is reported: the line reaches Sentry with the failure as its cause.
+      expect(h.log.lines).toEqual([
+        {
+          level: "error",
+          text: "ticket trapped in Backlog; linear: request failed (401): unauthorized",
+          location: undefined,
+          agentId: "OLI-43",
+          skipSentry: false,
+          cause: refused,
+        },
+      ]);
     }),
+  );
+
+  it.effect(
+    "a result already carrying the new ticket's identifier traps the ticket in Backlog and reports it (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const h = harness();
+        h.stores.tests.definitions.push(install);
+        // The fake refuses a second result with the same linear_id, as the unique index does.
+        h.stores.tests.results.push({
+          ...result(OTHER_RESULT_ID, "passed", null),
+          linearId: "OLI-42",
+        });
+        const exit = yield* h.run([...NEW, "--server-url", SERVER], WITH_LINEAR);
+        const error = failure(exit);
+        expect(error).toMatchObject({
+          _tag: "DatabaseError",
+          operation: "setLinearId",
+          message: expect.stringMatching(/; created OLI-42$/),
+        });
+        expect(h.linear.calls.map((call) => call.method)).toEqual([
+          "teamId",
+          "labelIds",
+          "assigneeId",
+          "stateIds",
+          "createIssue",
+        ]);
+        expect(h.stores.tests.runs[0]?.status).toBe("failed");
+        expect(h.log.lines).toHaveLength(1);
+        expect(h.log.lines[0]).toMatchObject({
+          level: "error",
+          text: expect.stringMatching(/^ticket trapped in Backlog; /),
+          agentId: "OLI-42",
+          skipSentry: false,
+          cause: expect.objectContaining({ _tag: "DatabaseError", operation: "setLinearId" }),
+        });
+        expect(h.log.lines[0]?.text).not.toMatch(/created OLI-42/);
+      }),
   );
 
   it.effect(
@@ -707,6 +764,7 @@ describe("test new", () => {
           "teamId",
           "labelIds",
           "assigneeId",
+          "stateIds",
           "createIssue",
         ]);
         expect(h.stores.tests.runs[0]).toMatchObject({
@@ -714,6 +772,15 @@ describe("test new", () => {
           reason: expect.stringMatching(/^prompt: .*client\.md.*; created OLI-42$/),
         });
         expect(h.stores.tests.results.map((row) => row.status)).toEqual(["failed", "failed"]);
+        // The ticket exists in Backlog without a body and without the move: reported.
+        expect(h.log.lines).toHaveLength(1);
+        expect(h.log.lines[0]).toMatchObject({
+          level: "error",
+          text: expect.stringMatching(/^ticket trapped in Backlog; prompt: .*client\.md/),
+          agentId: "OLI-42",
+          skipSentry: false,
+          cause: expect.objectContaining({ _tag: "PromptError" }),
+        });
       }),
   );
 
@@ -733,11 +800,20 @@ describe("test new", () => {
           "teamId",
           "labelIds",
           "assigneeId",
+          "stateIds",
           "createIssue",
         ]);
         expect(h.stores.tests.runs[0]).toMatchObject({ status: "failed", reason: message });
         expect(h.stores.tests.results.map((row) => row.status)).toEqual(["failed"]);
         expect(yield* stdout).toEqual([]);
+        // The trapped line carries the failure itself, not the run's reason with the ticket list.
+        expect(h.log.lines.map((line) => [line.level, line.text, line.agentId])).toEqual([
+          [
+            "error",
+            "ticket trapped in Backlog; prompt: prompts/linear-issue.html uses {{NOPE}}, which has no value",
+            "OLI-42",
+          ],
+        ]);
       }),
   );
 
@@ -892,6 +968,7 @@ describe("mint", () => {
         { method: "teamId" },
         { method: "labelIds", teamId: "team-id", version: "mint" },
         { method: "assigneeId" },
+        { method: "stateIds", teamId: "team-id" },
         {
           method: "createIssue",
           input: {
@@ -899,9 +976,15 @@ describe("mint", () => {
             title: `Omarchy mint: ${QEMU_A}`,
             labelIds: labels,
             assigneeId: "user-id",
+            stateId: FakeLinear.STATES.backlog,
           },
         },
-        { method: "describeIssue", ticket: FakeLinear.ticketFor("OLI-42"), description: first },
+        {
+          method: "describeIssue",
+          ticket: FakeLinear.ticketFor("OLI-42"),
+          description: first,
+          stateId: FakeLinear.STATES.automationNeeded,
+        },
         {
           method: "createIssue",
           input: {
@@ -909,9 +992,15 @@ describe("mint", () => {
             title: `Omarchy mint: ${QEMU_B}`,
             labelIds: labels,
             assigneeId: "user-id",
+            stateId: FakeLinear.STATES.backlog,
           },
         },
-        { method: "describeIssue", ticket: FakeLinear.ticketFor("OLI-43"), description: second },
+        {
+          method: "describeIssue",
+          ticket: FakeLinear.ticketFor("OLI-43"),
+          description: second,
+          stateId: FakeLinear.STATES.automationNeeded,
+        },
       ]);
       expect(yield* lastJson).toEqual([
         {
@@ -1003,6 +1092,8 @@ describe("mint", () => {
           ["failed", null],
         ]);
         expect(yield* stdout).toEqual([]);
+        // OLI-42 was handed off and the second ticket never existed: nothing is trapped.
+        expect(h.log.lines).toEqual([]);
       }),
   );
 
@@ -1037,6 +1128,17 @@ describe("mint", () => {
           ["failed", "OLI-42"],
         ]);
         expect(h.linear.calls.filter((call) => call.method === "createIssue")).toHaveLength(1);
+        // The ticket stands in Backlog with no body and no move, so it is reported.
+        expect(h.log.lines).toEqual([
+          {
+            level: "error",
+            text: "ticket trapped in Backlog; linear: request failed (401): unauthorized",
+            location: undefined,
+            agentId: "OLI-42",
+            skipSentry: false,
+            cause: refused,
+          },
+        ]);
       }),
   );
 
@@ -1112,6 +1214,7 @@ describe("mint", () => {
                 title: `Omarchy mint: ${QEMU_B}`,
                 labelIds: [FakeLinear.labelId("agent test"), FakeLinear.labelId("mint")],
                 assigneeId: "user-id",
+                stateId: FakeLinear.STATES.backlog,
               },
             },
           ]);
