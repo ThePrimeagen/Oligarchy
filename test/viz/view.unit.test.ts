@@ -704,6 +704,20 @@ describe("draw selection", () => {
         expect(crowded[29]).toBe(queueTop("automation · running 180 · pending 0"));
         expect(crowded[35]).toBe(bottom("1-4 of 180"));
         expect(crowded[36]).toBe(FOOTER);
+        // The twenty-sixth job of that server selected (the card's header is the first entry):
+        // the card's window ends on it, so the job L opens is on screen and marked.
+        const deep = plainRows(View.draw(at(busy(30), { servers: 26 }), READ_AT, COLUMNS, ROWS));
+        expect(deep.slice(4, 28).map(ticketOf)).toEqual(
+          Array.from({ length: 24 }, (_, index) => `OLI-0${String(index + 2)}`),
+        );
+        expect(
+          deep
+            .slice(4, 28)
+            .filter((row) => row.startsWith("│ ▸ "))
+            .map(ticketOf),
+        ).toEqual(["OLI-025"]);
+        expect(deep[1]?.startsWith("│   s0")).toBe(true);
+        expect(deep[28]).toBe(bottom("1-1 of 6"));
       }),
   );
 

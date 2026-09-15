@@ -26,7 +26,7 @@ export const MIN_ROWS = 37;
 
 // A card grows a row per job running on it and takes those rows from the queue, which keeps at
 // least this many: what runs is on the cards, so the queue mostly shows what waits.
-export const QUEUE_MIN_ROWS = 4;
+const QUEUE_MIN_ROWS = 4;
 
 // A server writes its row every thirty seconds and a job changes on its own clock; five seconds
 // keeps the queue fresh at a handful of small queries a minute.
@@ -472,7 +472,6 @@ const jobRow = (job: Job, selected: Piece, drift: number, usable: number): strin
   return `${render([selected, SPACE])}${columns.join(GAP.text)}${" ".repeat(usable - JOB_WIDTH)}`;
 };
 
-// One box row per job, the row at `selected` marked in the focus's colour.
 const jobList = (
   jobs: ReadonlyArray<Job>,
   selected: Option.Option<number>,
@@ -567,13 +566,12 @@ const cardGraphs = (
   };
 };
 
-// A card: the header, the two graph rows, then the jobs running on the machine, the header or
-// one of the jobs marked when it is the selection.
 const card = (
   machine: Servers.Machine,
   series: Option.Option<ProcessStats.Series>,
   jobs: ReadonlyArray<Job>,
-  selected: Option.Option<Entry>,
+  header: Piece,
+  job: Option.Option<number>,
   hasFocus: boolean,
   drift: number,
   usable: number,
@@ -582,11 +580,6 @@ const card = (
     machine.heartbeatAt !== null &&
     machine.queriedAt.getTime() - machine.heartbeatAt.getTime() + drift > SILENT_AFTER_MS;
   const graphs = cardGraphs(series, silent, usable);
-  const header = marker(
-    Option.exists(selected, (entry) => Option.isNone(entry.job)),
-    hasFocus,
-  );
-  const job = Option.flatMap(selected, (entry) => entry.job);
   return [
     boxed(cardHeader(machine, header, silent, drift, usable)),
     boxed(graphs.upper),
@@ -597,9 +590,9 @@ const card = (
 
 // The machines box: the tabs, then the cards of the active tab around the selected one, at most
 // MAX_CARDS and as many as fit with the queue keeping its rows, dividers between them, and the
-// window's place in the list on the bottom border when there is more than fits. The window ends
-// at the selected card and grows upward first, so a step down scrolls one card. A tab with
-// nothing says so in one row.
+// window's place in the list on the bottom border when there is more than fits. The window
+// grows upward from the selected card first, so a step down scrolls one card, and downward with
+// what room is left. A tab with nothing says so in one row.
 const machinesBox = (
   view: View,
   now: number,
@@ -628,10 +621,17 @@ const machinesBox = (
   // The rows the cards and their dividers may take: the footer, the queue's frame with its
   // minimum of rows, and this box's own borders come off the terminal's height.
   const available = rows - 1 - (QUEUE_MIN_ROWS + 3) - 2;
-  // A machine running more jobs than the box has rows shows the ones that fit.
-  const jobsShown = (index: number): ReadonlyArray<Job> =>
-    jobsOn(snapshot, listed[index]).slice(0, available - 3);
-  const height = (index: number): number => 3 + jobsShown(index).length;
+  // A machine running more jobs than the box has rows shows the ones that fit; on the selected
+  // card the window ends at the selected job, so what L opens is on screen.
+  const room = available - 3;
+  const windowOf = (
+    index: number,
+  ): { readonly jobs: ReadonlyArray<Job>; readonly from: number } => {
+    const from =
+      index === chosen ? Math.max(0, Option.getOrElse(selected.job, () => 0) - (room - 1)) : 0;
+    return { jobs: jobsOn(snapshot, listed[index]).slice(from, from + room), from };
+  };
+  const height = (index: number): number => 3 + windowOf(index).jobs.length;
   let first = chosen;
   let last = chosen;
   let used = height(chosen);
@@ -647,6 +647,7 @@ const machinesBox = (
     last += 1;
     used += 1 + height(last);
   }
+  const hasFocus = view.focus === "machines";
   for (let index = first; index <= last; index += 1) {
     if (index > first) {
       lines.push(divider(columns));
@@ -655,10 +656,11 @@ const machinesBox = (
     const series = Option.fromUndefinedOr(
       snapshot.series.find((found) => found.type === machine.type && found.name === machine.name),
     );
-    const own = index === chosen ? Option.some(selected) : Option.none<Entry>();
-    lines.push(
-      ...card(machine, series, jobsShown(index), own, view.focus === "machines", drift, usable),
-    );
+    const { jobs, from } = windowOf(index);
+    const own = index === chosen;
+    const header = marker(own && Option.isNone(selected.job), hasFocus);
+    const job = own ? Option.map(selected.job, (at) => at - from) : Option.none<number>();
+    lines.push(...card(machine, series, jobs, header, job, hasFocus, drift, usable));
   }
   const place =
     last - first + 1 < listed.length
