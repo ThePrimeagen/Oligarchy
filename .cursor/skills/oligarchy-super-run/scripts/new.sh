@@ -40,6 +40,6 @@ while [ "$waited" -lt 20 ]; do
   waited=$((waited + 2))
 done
 if [ -z "${JOB:-}" ]; then
-  echo "new.sh: no drive job after ${waited}s; pause refill (webhook?)" >&2
+  echo "new.sh: $TICKET has no drive job after ${waited}s; this must not happen. Pause refill, retire $N INFRA, find out what happened (automation-server log: the ticket's 'linear webhook' lines), then start a fresh run." >&2
   exit 2
 fi

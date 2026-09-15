@@ -145,7 +145,7 @@ psql "$DBURL" -X -c "select name, type, url, heartbeat_at from servers where hea
 
 Expect `qemu-server-4` / `qemu-server-3` (`qemu`) and `automation-client-5` / `automation-client-3` (`automation-client`).
 
-`N` is monotonic (`/tmp/superrun/next`). Never take N from `active`. Target: `counted + active == 100` after replacing every INFRA. Dispatch fills every slot a live client will reserve; keep enough pending drives that `--max-jobs` is exercised. `new.sh` exit 2 = no drive webhook — pause refill.
+`N` is monotonic (`/tmp/superrun/next`). Never take N from `active`. Target: `counted + active == 100` after replacing every INFRA. Dispatch fills every slot a live client will reserve; keep enough pending drives that `--max-jobs` is exercised. `new.sh` exit 2 = the new ticket got no drive job, which must not happen: pause refill, retire that attempt INFRA, find out what happened (the automation server's `linear webhook` lines for the ticket, then the server itself), and only then start a fresh run. Never nudge a ticket's state to make it go.
 
 ```bash
 /tmp/superrun/new.sh muse
@@ -157,7 +157,8 @@ Each `AGENT_LOOP_TICK_superrun` you **do this work** (the sleep loop does not):
 /tmp/superrun/tick.sh
 # RETIRE n|…  → if ANALYZE is also printed, wait for the subagent, then:
 /tmp/superrun/retire.sh "$N" COUNTED   # or INFRA
-# STUCK no-drive-job → pause refill; fix webhook / automation-server
+# STUCK no-drive-job → must not happen: pause refill, retire INFRA, find out what happened
+#        (automation-server log, the ticket's `linear webhook` lines) before the next new.sh
 # STUCK diagnose=* no-diagnosis-row → ./ctrl diagnose … --model openrouter/meta/muse-spark-1.3-contributor
 #        or retire INFRA. cannot re-enqueue diagnose
 # LEDGER refill=yes → /tmp/superrun/new.sh muse

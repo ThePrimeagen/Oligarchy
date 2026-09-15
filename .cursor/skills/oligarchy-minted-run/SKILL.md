@@ -183,18 +183,19 @@ psql "$DBURL" -X -c "select name, type, url, heartbeat_at from servers where hea
 Expect `qemu-a` … `qemu-d` (`qemu`) and `automation-client-4` (`automation-client`).
 
 **Mint the fleet.** One command, one ticket per live qemu server, each pinned to its server. The
-tickets are created in Automation Needed and the webhook queues a drive for each; the driver
-relinquishes, reserves pinned, starts fresh, installs, has a subagent confirm the desktop, saves,
-records the verdict. An install runs long (the opencode ceiling is 45 minutes); four run at once,
-one per server.
+tickets are created in Backlog and moved to Automation Needed once their result is written; that
+move queues a drive for each. The driver relinquishes, reserves pinned, starts fresh, installs, has
+a subagent confirm the desktop, saves, records the verdict. An install runs long (the opencode
+ceiling is 45 minutes); four run at once, one per server.
 
 ```bash
 ./ctrl mint --server-url "$SUPER_RUN_SERVER_URL" --iso "$SUPER_RUN_ISO"
 # → JSON: [{ id, result, server, linear }, …] × 4. Note ticket ↔ server in SCRATCH.md.
 sleep 20
 psql "$DBURL" -X -c "select r.linear_id, j.action, j.status from test_results r join automation_jobs j on j.result_id = r.result_id where r.linear_id in ('OLI-…','OLI-…','OLI-…','OLI-…');"
-# a ticket with no drive job after 20s: the webhook lost the race; move it to In Progress and back
-# to Automation Needed with the Linear MCP, then check again.
+# a ticket with no drive job after 20s must not happen. Do not nudge its state. Cancel it, find out
+# what happened (the automation server's `linear webhook` lines for that ticket, then the server
+# itself), fix that, then mint the server again with --unminted.
 ```
 
 Watch each mint like a batch run (`./ctrl session --search --test-result-id "$RID"`, then
@@ -215,8 +216,10 @@ Do not start the batch until all four dirs hold the disk.
 
 **Batch.** `N` is monotonic (`/tmp/mintedrun/next`). Never take N from `active`. Target:
 `counted + active == 100` after replacing every INFRA. Four slots; keep enough pending drives that
-all four are busy. `new.sh` exit 2 = no drive webhook — pause refill. Every batch ticket's start
-line carries `--resume`; a session that installs instead is a defect in the ticket, not a run.
+all four are busy. `new.sh` exit 2 = the new ticket got no drive job, which must not happen: pause
+refill, retire that attempt INFRA, find out what happened, and only then start a fresh run. Every
+batch ticket's start line carries `--resume`; a session that installs instead is a defect in the
+ticket, not a run.
 
 ```bash
 /tmp/mintedrun/new.sh muse
@@ -228,7 +231,8 @@ Each `AGENT_LOOP_TICK_mintedrun` you **do this work** (the sleep loop does not):
 /tmp/mintedrun/tick.sh
 # RETIRE n|…  → if ANALYZE is also printed, wait for the subagent, then:
 /tmp/mintedrun/retire.sh "$N" COUNTED   # or INFRA
-# STUCK no-drive-job → pause refill; fix webhook / automation-server
+# STUCK no-drive-job → must not happen: pause refill, retire INFRA, find out what happened
+#        (automation-server log, the ticket's `linear webhook` lines) before the next new.sh
 # STUCK diagnose=* no-diagnosis-row → ./ctrl diagnose … --model openrouter/meta/muse-spark-1.3-contributor
 #        or retire INFRA. cannot re-enqueue diagnose
 # LEDGER refill=yes → /tmp/mintedrun/new.sh muse
