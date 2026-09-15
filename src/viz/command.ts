@@ -13,7 +13,7 @@ export type Stores =
   | ProcessStats.ProcessStatsStore
   | Automation.AutomationStore;
 
-// viz only reads: the three tables the servers page shows, straight from the database.
+// viz only reads: the machines, their readings and the queue, straight from the database.
 export type Deps = {
   readonly database: (url: Redacted.Redacted) => Layer.Layer<Stores, Errors.DatabaseError>;
 };
@@ -49,7 +49,7 @@ export const makeVizCommand = (deps: Deps = live) => {
     }),
   ).pipe(
     Command.withDescription(
-      "Watch the qemu fleet, the process stats and the automation queue in the terminal; q quits",
+      "Watch the qemu servers, the automation clients and the automation queue in the terminal, each machine a card with its cpu, memory and jobs graphed; j/k select a card, tab switches servers and clients, q quits",
     ),
     Command.provide(withDb),
   );

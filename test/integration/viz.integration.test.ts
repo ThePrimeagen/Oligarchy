@@ -146,11 +146,11 @@ Postgres.describeWithDatabase("./viz against the seeded database", () => {
     const off = result.output.lastIndexOf(ALT_SCREEN_OFF);
     expect(on !== -1 && off !== -1 && on < off, "takes the screen and gives it back").toBe(true);
     const drawn = stripAnsi(result.output.slice(on, off));
-    expect(drawn).toContain("oligarchy servers");
-    expect(drawn).toMatch(/process · \d+/);
-    expect(drawn).toMatch(/qemu servers · \d+/);
-    expect(drawn).toMatch(/automation · running \d+ · pending \d+/);
-    expect(drawn).toContain("q quits · refreshes every 5 s");
+    expect(drawn).toMatch(/╭─┤ qemu servers · \d+ ├─┤ automation clients · \d+ ├/);
+    expect(drawn).toMatch(/┤ read \d+ s ago ├─╮/);
+    expect(drawn).toMatch(/╭─┤ automation · running \d+ · pending \d+ ├/);
+    expect(drawn).toContain("ticket");
+    expect(drawn).toContain("j/k select   tab servers/clients   g/G first/last   q quit");
     expect(drawn).not.toContain("error:");
     expect(drawn).not.toContain("\n");
   });

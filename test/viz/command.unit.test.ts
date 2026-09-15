@@ -10,6 +10,7 @@ import * as VizCommand from "../../src/viz/command.ts";
 import * as View from "../../src/viz/view.ts";
 import * as Config from "../support/config.ts";
 import { fakeTerminal } from "../support/fake-terminal.ts";
+import { stripAnsi } from "../support/fake-tty.ts";
 import * as StdioSupport from "../support/stdio.ts";
 import * as Stores from "../support/stores.ts";
 
@@ -35,8 +36,8 @@ const harness = (size: { readonly columns: number; readonly rows: number }) =>
         reads.count += 1;
         return rows;
       });
-    const servers = Stores.fakeServerStore({ listFleet: () => counted([]) });
-    const process = Stores.fakeProcessStatsStore({ listNewest: () => counted([]) });
+    const servers = Stores.fakeServerStore({ listMachines: () => counted([]) });
+    const process = Stores.fakeProcessStatsStore({ listSeries: () => counted([]) });
     const automation = Stores.fakeAutomationStore({
       listJobs: () => counted({ running: [], pending: [], completed: [] }),
     });
@@ -83,6 +84,7 @@ describe("viz happy path", () => {
       expect(h.tty.frames).toEqual([]);
       const printed = (yield* TestConsole.logLines).join("\n");
       expect(printed).toMatch(/automation queue/);
+      expect(printed).toMatch(/j\/k/);
       expect(printed).toMatch(/q quits/);
     }),
   );
@@ -97,8 +99,10 @@ describe("viz happy path", () => {
         expect(h.touched).toEqual(["database"]);
         expect(h.reads.count).toBe(3);
         expect(h.tty.frames[0]).toBe(View.ENTER_SCREEN);
-        expect(h.tty.frames[1]).toContain("oligarchy servers");
-        expect(h.tty.frames[1]).toContain("no servers registered");
+        const drawn = stripAnsi(h.tty.frames[1] ?? "");
+        expect(drawn).toContain("qemu servers · 0");
+        expect(drawn).toContain("no qemu servers registered");
+        expect(drawn).toContain("automation · running 0 · pending 0");
         yield* h.tty.press("q");
         const exit = yield* Fiber.join(fiber);
         expect(Exit.isSuccess(exit)).toBe(true);

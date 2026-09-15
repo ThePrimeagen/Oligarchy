@@ -10,6 +10,8 @@ export type FakeTerminal = {
   readonly resize: (columns: number, rows: number) => void;
   // One keypress, as readline parses a typed character.
   readonly press: (character: string) => Effect.Effect<void>;
+  // One named key without a character, as readline reports tab and the arrows.
+  readonly key: (name: string, shift?: boolean) => Effect.Effect<void>;
 };
 
 // A Terminal whose size the test sets, whose keys the test types and whose frames it reads back.
@@ -55,6 +57,13 @@ export const fakeTerminal = (
               meta: false,
               shift: character !== character.toLowerCase(),
             },
+          }),
+        ),
+      key: (name, shift = false) =>
+        Effect.asVoid(
+          Queue.offer(keys, {
+            input: Option.none(),
+            key: { name, ctrl: false, meta: false, shift },
           }),
         ),
     };

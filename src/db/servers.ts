@@ -11,12 +11,13 @@ export type LiveServer = {
   readonly url: string;
 };
 
-// One server of the qemu fleet with what it last said of itself, and the database's clock at
-// the read, so a heartbeat's age is measured against the clock that stamped it. stats and
+// One machine of either kind with what it last said of itself, and the database's clock at the
+// read, so a heartbeat's age is measured against the clock that stamped it. stats and
 // heartbeat_at are null together, for a row an operator added that no server has claimed.
-export type FleetServer = {
+export type Machine = {
   readonly url: string;
   readonly name: string | null;
+  readonly type: ServerType;
   readonly stats: DbSchema.ServerStats | null;
   readonly generation: number;
   readonly heartbeatAt: Date | null;
@@ -85,22 +86,22 @@ export class ServerStore extends Context.Service<ServerStore>()("@oligarchy/db/S
       return rows.map((row) => row.url);
     });
 
-    // The qemu fleet as the servers page lists it, in registration order. Automation clients
-    // share the table and are read through their process stats instead.
-    const listFleet = Effect.fn("db.listFleet")(function* () {
-      const rows: ReadonlyArray<FleetServer> = yield* database.run("listFleet", (db) =>
+    // Every machine as the viz lists it: the qemu servers before the automation clients, as the
+    // enum declares the kinds, each kind in registration order.
+    const listMachines = Effect.fn("db.listMachines")(function* () {
+      const rows: ReadonlyArray<Machine> = yield* database.run("listMachines", (db) =>
         db
           .select({
             url: DbSchema.servers.url,
             name: DbSchema.servers.name,
+            type: DbSchema.servers.type,
             stats: DbSchema.servers.stats,
             generation: DbSchema.servers.generation,
             heartbeatAt: DbSchema.servers.heartbeatAt,
             queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(DbSchema.servers.createdAt),
           })
           .from(DbSchema.servers)
-          .where(eq(DbSchema.servers.type, "qemu"))
-          .orderBy(DbSchema.servers.createdAt, DbSchema.servers.url),
+          .orderBy(DbSchema.servers.type, DbSchema.servers.createdAt, DbSchema.servers.url),
       );
       return rows;
     });
@@ -198,7 +199,7 @@ export class ServerStore extends Context.Service<ServerStore>()("@oligarchy/db/S
       heartbeat,
       removeServer,
       listServers,
-      listFleet,
+      listMachines,
       listLiveServers,
       removeStaleServers,
       findServer,

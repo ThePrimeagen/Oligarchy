@@ -668,6 +668,12 @@ export const fakeAutomationStore = (
 // ServerStore
 // ---------------------------------------------------------------------------
 
+// qemu before automation-client, as the enum declares them and the real order by reads them.
+const KIND_ORDER: Readonly<Record<Servers.ServerType, number>> = {
+  qemu: 0,
+  "automation-client": 1,
+};
+
 type RegisteredServer = {
   readonly id: string;
   readonly url: string;
@@ -737,19 +743,21 @@ export const fakeServerStore = (
       Effect.sync(() =>
         servers.filter((server) => server.type === type).map((server) => server.url),
       ),
-    // What the real row would hold after the heartbeats written here: the generation counts
-    // them, the stats are the last one's, and a url nobody announced has neither.
-    listFleet: () =>
+    // What the real rows would hold after the heartbeats written here, qemu servers before
+    // automation clients: the generation counts a url's heartbeats, the stats are the last
+    // one's, and a url nobody announced has neither.
+    listMachines: () =>
       Effect.sync(() => {
         const queriedAt = new Date();
-        return servers
-          .filter((server) => server.type === "qemu")
+        return [...servers]
+          .sort((left, right) => KIND_ORDER[left.type] - KIND_ORDER[right.type])
           .map((server) => {
             const beats = heartbeats.filter((beat) => beat.url === server.url);
             const last = beats.at(-1);
             return {
               url: server.url,
               name: server.name,
+              type: server.type,
               stats: last === undefined ? null : last.stats,
               generation: beats.length,
               heartbeatAt: last === undefined ? null : queriedAt,
@@ -821,12 +829,6 @@ export type FakeProcessStatsStore = {
   readonly layer: Layer.Layer<Process.ProcessStatsStore>;
 };
 
-// qemu before automation-client, as the enum declares them and the real order by reads them.
-const KIND_ORDER: Readonly<Record<Servers.ServerType, number>> = {
-  qemu: 0,
-  "automation-client": 1,
-};
-
 export const fakeProcessStatsStore = (
   overrides: Partial<typeof Process.ProcessStatsStore.Service> = {},
 ): FakeProcessStatsStore => {
@@ -836,28 +838,37 @@ export const fakeProcessStatsStore = (
       Effect.sync(() => {
         reports.push({ name, type, stats });
       }),
-    // The last report per name and kind, by kind then name, stamped now: the fake keeps no clock.
-    listNewest: () =>
+    // The newest `count` reports per name and kind in the order written, by kind then name: the
+    // fake keeps no clock, so every report is within the window.
+    listSeries: (count) =>
       Effect.sync(() => {
-        const queriedAt = new Date();
-        const newest = new Map<string, ProcessReport>();
+        const byName = new Map<string, Array<ProcessReport>>();
         for (const report of reports) {
-          newest.set(`${report.type} ${report.name}`, report);
+          const key = `${report.type} ${report.name}`;
+          byName.set(key, [...(byName.get(key) ?? []), report]);
         }
-        return [...newest.values()]
+        return [...byName.values()]
           .sort(
             (left, right) =>
-              KIND_ORDER[left.type] - KIND_ORDER[right.type] || left.name.localeCompare(right.name),
+              KIND_ORDER[left[0]?.type ?? "qemu"] - KIND_ORDER[right[0]?.type ?? "qemu"] ||
+              (left[0]?.name ?? "").localeCompare(right[0]?.name ?? ""),
           )
-          .map((report) => ({
-            name: report.name,
-            type: report.type,
-            jobs: report.stats.jobs,
-            memoryBytes: report.stats.memoryBytes,
-            cpuPercent: report.stats.cpuPercent,
-            reportedAt: queriedAt,
-            queriedAt,
-          }));
+          .flatMap((series) => {
+            const first = series[0];
+            return first === undefined
+              ? []
+              : [
+                  {
+                    name: first.name,
+                    type: first.type,
+                    samples: series.slice(-count).map((report) => ({
+                      jobs: report.stats.jobs,
+                      memoryBytes: report.stats.memoryBytes,
+                      cpuPercent: report.stats.cpuPercent,
+                    })),
+                  },
+                ];
+          });
       }),
     ...overrides,
   });

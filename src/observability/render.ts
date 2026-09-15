@@ -42,7 +42,8 @@ export const reportFailure = <E>(cause: Cause.Cause<E>): Effect.Effect<void> => 
 
 // ---------------------------------------------------------------------------
 
-const ROSE_PINE_MAIN = {
+// The one palette every terminal of ours is painted in: the log's agent colours and the viz.
+export const ROSE_PINE_MAIN = {
   love: "#eb6f92",
   gold: "#f6c177",
   rose: "#ebbcba",
@@ -57,16 +58,17 @@ const ROSE_PINE_MAIN = {
 
 export const AGENT_COLORS: ReadonlyArray<string> = Object.values(ROSE_PINE_MAIN);
 
-export const paint = (hex: string, text: string, colors: boolean): string => {
-  if (!colors) {
-    return text;
-  }
+// The 24-bit foreground sequence for a `#rrggbb` colour; `\x1b[39m` puts the default back.
+export const foreground = (hex: string): string => {
   const n = Number.parseInt(hex.slice(1), 16);
   const r = (n >> 16) & 255;
   const g = (n >> 8) & 255;
   const b = n & 255;
-  return `\x1b[38;2;${String(r)};${String(g)};${String(b)}m${text}\x1b[39m`;
+  return `\x1b[38;2;${String(r)};${String(g)};${String(b)}m`;
 };
+
+export const paint = (hex: string, text: string, colors: boolean): string =>
+  colors ? `${foreground(hex)}${text}\x1b[39m` : text;
 
 const style = (format: "gray" | "white", text: string, colors: boolean): string =>
   colors ? styleText(format, text, { validateStream: false }) : text;
