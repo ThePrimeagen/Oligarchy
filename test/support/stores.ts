@@ -558,10 +558,13 @@ export const fakeAutomationStore = (
         const busy = new Set(
           jobs.filter((job) => job.status === "running").map((job) => job.resultId),
         );
+        // Queue order as the real store claims: diagnoses first, then created_at, then id.
+        const rank = (job: FakeAutomationJob): number => (job.action === "diagnose" ? 0 : 1);
         const pending = jobs
           .filter((job) => job.status === "pending" && !busy.has(job.resultId))
           .sort(
             (left, right) =>
+              rank(left) - rank(right) ||
               left.createdAt.getTime() - right.createdAt.getTime() ||
               left.id.localeCompare(right.id),
           );

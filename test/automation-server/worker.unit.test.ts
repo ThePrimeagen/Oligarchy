@@ -344,14 +344,13 @@ describe("dispatch happy path", () => {
     }),
   );
 
+  // A diagnose is queued once its ticket reaches Needs Review, while the drive that got it there
+  // is still running; it goes before every pending drive, but not before its own result is free.
   it.effect("a diagnose behind a running drive is skipped so another result can start", () =>
     Effect.gen(function* () {
       const fixed = harness();
       seedResult(fixed.tests);
       seedJob(fixed.automation, "drive", RESULT_ID);
-      seedJob(fixed.automation, "diagnose", RESULT_ID);
-      seedResult(fixed.tests, TICKET_B, "pending", RESULT_B);
-      seedJob(fixed.automation, "drive", RESULT_B);
       seedLiveClient(fixed.servers);
       const firstStarted = yield* Deferred.make<void>();
       const secondStarted = yield* Deferred.make<void>();
@@ -378,6 +377,10 @@ describe("dispatch happy path", () => {
       );
       yield* start(fixed, http.layer);
       yield* Deferred.await(firstStarted);
+      seedJob(fixed.automation, "diagnose", RESULT_ID);
+      seedResult(fixed.tests, TICKET_B, "pending", RESULT_B);
+      seedJob(fixed.automation, "drive", RESULT_B);
+      yield* TestClock.adjust("5 seconds");
       yield* Deferred.await(secondStarted);
       expect(fixed.automation.jobs.map((job) => [job.action, job.status])).toEqual([
         ["drive", "running"],

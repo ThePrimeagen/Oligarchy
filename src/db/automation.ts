@@ -53,11 +53,15 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
         return row;
       });
 
-      // Oldest pending whose result is not already running, locked for the
-      // transaction so a second claimer waits. Queue order is created_at; id
-      // breaks a tie. One running job per result: drive and diagnose share a
-      // ticket, and the client will not reserve it twice. serverId is the
-      // client that took it: /abort looks that server up for its url.
+      // Queue order: every pending diagnose oldest first, then every pending drive oldest
+      // first; id breaks a tie. A diagnose closes a result whose drive is done, so it never
+      // waits behind the drives queued before it. The dashboard lists the queue the same way.
+      const diagnosesFirst = desc(sql`${DbSchema.automationJobs.action} = ${"diagnose"}`);
+
+      // First in queue order whose result is not already running, locked for the
+      // transaction so a second claimer waits. One running job per result: drive
+      // and diagnose share a ticket, and the client will not reserve it twice.
+      // serverId is the client that took it: /abort looks that server up for its url.
       const claim = Effect.fn("db.claimAutomationJob")(function* (serverId: string) {
         return yield* database.transaction("claimAutomationJob", (tx) =>
           Effect.gen(function* () {
@@ -80,7 +84,11 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
                         notInArray(DbSchema.automationJobs.resultId, busy),
                       ),
                 )
-                .orderBy(DbSchema.automationJobs.createdAt, DbSchema.automationJobs.id)
+                .orderBy(
+                  diagnosesFirst,
+                  DbSchema.automationJobs.createdAt,
+                  DbSchema.automationJobs.id,
+                )
                 .limit(1)
                 .for("update"),
             );
@@ -117,8 +125,8 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
       });
 
       // Only a running row closes. reason is omitted when null so a previous value stays.
-      // A running row the fleet could not take: back to pending, as it was, so the queue
-      // order (created_at) is unchanged and the next tick can try again.
+      // A running row the fleet could not take: back to pending, as it was, so its place in
+      // the queue (created_at) is unchanged and the next tick can try again.
       const unclaim = Effect.fn("db.unclaimAutomationJob")(function* (id: string) {
         const rows = yield* database.run("unclaimAutomationJob", (db) =>
           db
@@ -174,8 +182,8 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
         return rows.length > 0;
       });
 
-      // Running and pending are the whole live queue, diagnoses first then created_at.
-      // Completed is every terminal status, newest finished first, cut at count.
+      // Running and pending are the whole live queue in queue order (diagnoses first, then
+      // created_at). Completed is every terminal status, newest finished first, cut at count.
       const listJobs = Effect.fn("db.listAutomationJobs")(function* (count: number) {
         const columns = {
           ticket: DbSchema.testResults.linearId,
@@ -188,7 +196,6 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
           finishedAt: DbSchema.automationJobs.finishedAt,
           queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(DbSchema.automationJobs.createdAt),
         };
-        const diagnosesFirst = desc(sql`${DbSchema.automationJobs.action} = ${"diagnose"}`);
         const jobs = (db: Client.Db) =>
           db
             .select(columns)

@@ -1158,6 +1158,137 @@ Postgres.describeWithDatabase("database", () => {
       }),
     );
 
+    // Queue order is every pending diagnose oldest first, then every pending drive oldest first:
+    // a diagnose closes a result whose drive is done, so it never waits behind the drives queued
+    // before it, however many.
+    scoped.effect(
+      "AutomationStore claims the oldest pending diagnose before any pending drive, then the drives oldest first",
+      () =>
+        Effect.gen(function* () {
+          yield* emptyQueue;
+          const tests = yield* Tests.TestStore;
+          const automation = yield* Automation.AutomationStore;
+          const database = yield* Client.Database;
+          const definition = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
+          const created = yield* Effect.forEach([0, 1, 2, 3], () =>
+            tests.createRun({
+              iso: "https://example.com/omarchy.iso",
+              serverUrl: "http://127.0.0.1:42069",
+              definitions: [{ id: definition.id }],
+            }),
+          );
+          const resultIds = created.map((run) => run.results[0].id);
+          const oldDrive = yield* automation.enqueue({ resultId: resultIds[0], action: "drive" });
+          const olderDiagnose = yield* automation.enqueue({
+            resultId: resultIds[1],
+            action: "diagnose",
+          });
+          const newDrive = yield* automation.enqueue({ resultId: resultIds[2], action: "drive" });
+          const newerDiagnose = yield* automation.enqueue({
+            resultId: resultIds[3],
+            action: "diagnose",
+          });
+          // The drives are the oldest rows; both diagnoses were queued after them.
+          yield* database.run("stamp", (db) =>
+            db.execute(
+              sql`update automation_jobs set created_at = now() - interval '4 minutes' where id = ${oldDrive.id}`,
+            ),
+          );
+          yield* database.run("stamp", (db) =>
+            db.execute(
+              sql`update automation_jobs set created_at = now() - interval '3 minutes' where id = ${newDrive.id}`,
+            ),
+          );
+          yield* database.run("stamp", (db) =>
+            db.execute(
+              sql`update automation_jobs set created_at = now() - interval '2 minutes' where id = ${olderDiagnose.id}`,
+            ),
+          );
+          yield* database.run("stamp", (db) =>
+            db.execute(
+              sql`update automation_jobs set created_at = now() - interval '1 minute' where id = ${newerDiagnose.id}`,
+            ),
+          );
+          const order: Array<string> = [];
+          for (const _ of [0, 1, 2, 3]) {
+            const claimed = yield* automation.claim(crypto.randomUUID());
+            expect(Option.isSome(claimed)).toBe(true);
+            if (Option.isSome(claimed)) {
+              order.push(claimed.value.id);
+            }
+          }
+          expect(order).toEqual([olderDiagnose.id, newerDiagnose.id, oldDrive.id, newDrive.id]);
+          expect(yield* automation.claim(crypto.randomUUID())).toEqual(Option.none());
+        }),
+    );
+
+    // The driver moves its ticket to Needs Review before its drive job closes, so a diagnose is
+    // pending while the same result's drive still runs. One running job per result outranks the
+    // diagnose's place at the front: that diagnose waits, the next drive does not, and the
+    // diagnose is the first claim once its drive is closed.
+    scoped.effect(
+      "AutomationStore skips a pending diagnose whose result's drive still runs, takes the oldest other drive, and claims the diagnose first once that drive is closed",
+      () =>
+        Effect.gen(function* () {
+          yield* emptyQueue;
+          const tests = yield* Tests.TestStore;
+          const automation = yield* Automation.AutomationStore;
+          const database = yield* Client.Database;
+          const definition = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
+          const created = yield* Effect.forEach([0, 1, 2], () =>
+            tests.createRun({
+              iso: "https://example.com/omarchy.iso",
+              serverUrl: "http://127.0.0.1:42069",
+              definitions: [{ id: definition.id }],
+            }),
+          );
+          const resultIds = created.map((run) => run.results[0].id);
+          const firstDrive = yield* automation.enqueue({
+            resultId: resultIds[0],
+            action: "drive",
+          });
+          const secondDrive = yield* automation.enqueue({
+            resultId: resultIds[1],
+            action: "drive",
+          });
+          const thirdDrive = yield* automation.enqueue({
+            resultId: resultIds[2],
+            action: "drive",
+          });
+          yield* database.run("stamp", (db) =>
+            db.execute(
+              sql`update automation_jobs set created_at = now() - interval '3 minutes' where id = ${firstDrive.id}`,
+            ),
+          );
+          yield* database.run("stamp", (db) =>
+            db.execute(
+              sql`update automation_jobs set created_at = now() - interval '2 minutes' where id = ${secondDrive.id}`,
+            ),
+          );
+          yield* database.run("stamp", (db) =>
+            db.execute(
+              sql`update automation_jobs set created_at = now() - interval '1 minute' where id = ${thirdDrive.id}`,
+            ),
+          );
+          const running = yield* automation.claim(crypto.randomUUID());
+          expect(Option.map(running, (job) => job.id)).toEqual(Option.some(firstDrive.id));
+          const diagnose = yield* automation.enqueue({
+            resultId: resultIds[0],
+            action: "diagnose",
+          });
+          // The first result is busy: its diagnose waits, and the second drive is taken instead.
+          const next = yield* automation.claim(crypto.randomUUID());
+          expect(Option.map(next, (job) => job.id)).toEqual(Option.some(secondDrive.id));
+          expect(yield* automation.finish(firstDrive.id, "succeeded", null)).toBe(true);
+          // Its drive closed, the diagnose goes before the drive that has waited longer.
+          const afterClose = yield* automation.claim(crypto.randomUUID());
+          expect(Option.map(afterClose, (job) => job.id)).toEqual(Option.some(diagnose.id));
+          const last = yield* automation.claim(crypto.randomUUID());
+          expect(Option.map(last, (job) => job.id)).toEqual(Option.some(thirdDrive.id));
+          expect(yield* automation.claim(crypto.randomUUID())).toEqual(Option.none());
+        }),
+    );
+
     scoped.effect("AutomationStore unclaim returns a running job to pending as it was", () =>
       Effect.gen(function* () {
         yield* emptyQueue;
@@ -1259,6 +1390,8 @@ Postgres.describeWithDatabase("database", () => {
           yield* tests.setLinearId(resultIds[3], "LST-104");
           yield* tests.setLinearId(resultIds[4], "LST-105");
           yield* tests.setLinearId(resultIds[5], "LST-106");
+          // Claim takes diagnoses first, so each pair is queued and claimed before the next is
+          // queued: two closed, then a running diagnose and drive, then a pending diagnose and drive.
           const completedDrive = yield* automation.enqueue({
             resultId: resultIds[0],
             action: "drive",
@@ -1267,10 +1400,6 @@ Postgres.describeWithDatabase("database", () => {
             resultId: resultIds[1],
             action: "diagnose",
           });
-          yield* automation.enqueue({ resultId: resultIds[2], action: "drive" });
-          yield* automation.enqueue({ resultId: resultIds[3], action: "diagnose" });
-          yield* automation.enqueue({ resultId: resultIds[4], action: "drive" });
-          yield* automation.enqueue({ resultId: resultIds[5], action: "diagnose" });
           expect(Option.isSome(yield* automation.claim(crypto.randomUUID()))).toBe(true);
           expect(Option.isSome(yield* automation.claim(crypto.randomUUID()))).toBe(true);
           yield* automation.finish(completedDrive.id, "succeeded", null);
@@ -1280,8 +1409,12 @@ Postgres.describeWithDatabase("database", () => {
               sql`update automation_jobs set finished_at = now() - interval '2 minutes' where id = ${completedDrive.id}`,
             ),
           );
+          yield* automation.enqueue({ resultId: resultIds[2], action: "drive" });
+          yield* automation.enqueue({ resultId: resultIds[3], action: "diagnose" });
           expect(Option.isSome(yield* automation.claim(crypto.randomUUID()))).toBe(true);
           expect(Option.isSome(yield* automation.claim(crypto.randomUUID()))).toBe(true);
+          yield* automation.enqueue({ resultId: resultIds[4], action: "drive" });
+          yield* automation.enqueue({ resultId: resultIds[5], action: "diagnose" });
           const listed = yield* automation.listJobs(1);
           expect(listed.running.map((job) => [job.ticket, job.action, job.status])).toEqual([
             ["LST-104", "diagnose", "running"],
