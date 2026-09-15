@@ -10,15 +10,17 @@ import {
   Stream,
   Terminal,
 } from "effect";
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import * as Automation from "../db/automation.ts";
 import * as ProcessStats from "../db/process-stats.ts";
 import * as Servers from "../db/servers.ts";
+import * as ExternalFailure from "../external-failure.ts";
 import * as Render from "../observability/render.ts";
 
 // The terminal this view is laid out for: a card's header fits its host numbers beside a name
 // and a url across 135 columns, with 33 columns left to each of its three graphs, and 37 rows
 // hold four cards and sixteen jobs. Anything smaller is refused; anything wider goes to the
-// graphs and the reason column, anything taller to the job list.
+// graphs, anything taller to the job list.
 export const MIN_COLUMNS = 135;
 export const MIN_ROWS = 37;
 
@@ -33,15 +35,21 @@ export const AGE_TICK = Duration.seconds(1);
 // slow database; three overdue is a server that stopped.
 export const SILENT_AFTER_MS = 90_000;
 
-// More completed jobs than any terminal shows below the cards.
-export const COMPLETED_LIMIT = 100;
-
 // 240 readings of thirty seconds is two hours. A graph holds two readings a column, so a
 // terminal would have to be 400 columns wide before its graphs ran out of history.
 export const SERIES_SAMPLES = 240;
 
 // Four cards fill the box; j and k bring the rest into view one at a time.
 export const MAX_CARDS = 4;
+
+// Linear resolves a ticket by its identifier alone and redirects into the workspace.
+const LINEAR_ISSUES = "https://linear.app/issue/";
+
+// The desktop's opener, on the Linux boxes viz is watched from. It hands the url to the browser
+// and exits 0 at once, exits non-zero when nothing handles it, or, in a bare session, runs the
+// browser in its foreground and exits with it: two seconds without an exit is the browser up.
+const OPENER = "xdg-open";
+const OPEN_WAIT = Duration.seconds(2);
 
 export const ENTER_SCREEN = "\x1b[?1049h\x1b[?25l\x1b[2J";
 export const LEAVE_SCREEN = "\x1b[?25h\x1b[?1049l";
@@ -109,23 +117,33 @@ export type Snapshot = {
 };
 
 export type Tab = "servers" | "clients";
+// The two boxes; the one with the focus is what j and k move through.
+export type Focus = "machines" | "queue";
+// The three lists a cursor can be in: each tab's cards, and the queue's jobs.
+export type List = Tab | "queue";
 
 // snapshot is absent until the first read lands; failure is the last read's reason, cleared by
 // the next good read, so a database outage leaves the last picture up with the reason under it.
-// tab is the kind of machine the cards show; cursor is each tab's selected card, kept when the
-// tab changes and clamped to what the newest read lists.
+// notice is what the last key had to say (the ticket L opened, or why it could not), retired by
+// the next key. tab is the kind of machine the cards show; focus is the box j and k move in;
+// cursor is each list's selected row, kept when the tab or the focus changes and clamped to
+// what the newest read lists.
 export type View = {
   readonly snapshot: Option.Option<Snapshot>;
   readonly failure: Option.Option<string>;
+  readonly notice: Option.Option<string>;
   readonly tab: Tab;
-  readonly cursor: Readonly<Record<Tab, number>>;
+  readonly focus: Focus;
+  readonly cursor: Readonly<Record<List, number>>;
 };
 
 export const initialView: View = {
   snapshot: Option.none(),
   failure: Option.none(),
+  notice: Option.none(),
   tab: "servers",
-  cursor: { servers: 0, clients: 0 },
+  focus: "machines",
+  cursor: { servers: 0, clients: 0, queue: 0 },
 };
 
 const KIND: Readonly<Record<Tab, Servers.ServerType>> = {
@@ -136,8 +154,27 @@ const KIND: Readonly<Record<Tab, Servers.ServerType>> = {
 const ofTab = (snapshot: Snapshot, tab: Tab): ReadonlyArray<Servers.Machine> =>
   snapshot.machines.filter((machine) => machine.type === KIND[tab]);
 
+// What runs and what waits, as one list; what is over is not shown.
+const jobsOf = (snapshot: Snapshot): ReadonlyArray<Automation.AutomationJobListRow> => [
+  ...snapshot.queue.running,
+  ...snapshot.queue.pending,
+];
+
 const clamp = (value: number, min: number, max: number): number =>
   Math.min(max, Math.max(min, value));
+
+// The list the focus is in: the tab's cards, or the jobs.
+const focused = (view: View): List => (view.focus === "machines" ? view.tab : "queue");
+
+// The job L opens: the queue's selected row, whichever box has the focus; none before the first
+// read or with nothing queued.
+const selectedJob = (view: View): Option.Option<Automation.AutomationJobListRow> =>
+  Option.flatMap(view.snapshot, (snapshot) => {
+    const jobs = jobsOf(snapshot);
+    return jobs.length === 0
+      ? Option.none()
+      : Option.some(jobs[clamp(view.cursor.queue, 0, jobs.length - 1)]);
+  });
 
 export const tooSmall = (columns: number, rows: number): string =>
   `viz needs a terminal of at least ${String(MIN_COLUMNS)}×${String(MIN_ROWS)} (columns×rows); this one is ${String(columns)}×${String(rows)}`;
@@ -370,18 +407,24 @@ const tabsRow = (view: View, now: number, columns: number): string => {
   return `${muted("╭─┤ ")}${tab("servers", servers)}${muted(" ├─┤ ")}${tab("clients", clients)}${muted(` ├${fill}┤ `)}${muted(status)}${muted(" ├─╮")}`;
 };
 
+// The selected row's marker: gold in the box that has the focus, muted in the other, so both
+// selections stay in view and the one j and k move is told apart. A space where nothing is
+// selected keeps the columns.
+const marker = (selected: boolean, hasFocus: boolean): Piece =>
+  selected ? { text: "▸", color: hasFocus ? PALETTE.gold : PALETTE.muted } : SPACE;
+
 // A card's first row: the marker and the machine's name and url on the left, cut to what the
 // right leaves; on the right what its heartbeat says, or the one phrase that says it stopped.
 // stats and heartbeat_at are written together, so either being null is a row no server claimed.
 const cardHeader = (
   machine: Servers.Machine,
-  selected: boolean,
+  selected: Piece,
   silent: boolean,
   drift: number,
   usable: number,
 ): string => {
   const left: ReadonlyArray<Piece> = [
-    selected ? { text: "▸", color: PALETTE.gold } : SPACE,
+    selected,
     SPACE,
     { text: machine.name ?? "—", color: PALETTE.text, bold: true },
     { text: " · ", color: PALETTE.muted },
@@ -452,7 +495,7 @@ const cardGraphs = (
 const card = (
   machine: Servers.Machine,
   series: Option.Option<ProcessStats.Series>,
-  selected: boolean,
+  selected: Piece,
   drift: number,
   usable: number,
 ): ReadonlyArray<string> => {
@@ -498,7 +541,8 @@ const machinesBox = (view: View, now: number, columns: number): ReadonlyArray<st
     const series = Option.fromUndefinedOr(
       snapshot.series.find((found) => found.type === machine.type && found.name === machine.name),
     );
-    rows.push(...card(machine, series, first + index === cursor, drift, usable));
+    const selected = marker(first + index === cursor, view.focus === "machines");
+    rows.push(...card(machine, series, selected, drift, usable));
   });
   const place =
     listed.length > MAX_CARDS
@@ -509,54 +553,51 @@ const machinesBox = (view: View, now: number, columns: number): ReadonlyArray<st
   return [...rows, bottom(columns, place)];
 };
 
-const jobWidths = (usable: number) => ({
-  ticket: 9,
-  test: 18,
-  action: 9,
-  status: 12,
-  queued: 11,
-  started: 11,
-  finished: 11,
-  reason: usable - 9 - 18 - 9 - 12 - 11 - 11 - 11 - 7 * 2,
-});
+// A job row: the marker column and a space, six columns with a gap between each, and the rest
+// of the row blank. A live job has no finish and no reason yet, so neither has a column.
+const MARKER_WIDTH = 2;
+const JOB_WIDTHS = { ticket: 9, test: 18, action: 9, status: 12, queued: 11, started: 11 };
+const JOB_WIDTH =
+  MARKER_WIDTH +
+  Object.values(JOB_WIDTHS).reduce((total, width) => total + width, 0) +
+  (Object.keys(JOB_WIDTHS).length - 1) * GAP.text.length;
 
-const jobHeader = (usable: number): string => {
-  const w = jobWidths(usable);
-  return paint(
+const jobHeader = (usable: number): string =>
+  paint(
     PALETTE.subtle,
-    [
-      fit("ticket", w.ticket),
-      fit("test", w.test),
-      fit("action", w.action),
-      fit("status", w.status),
-      fit("queued", w.queued),
-      fit("started", w.started),
-      fit("finished", w.finished),
-      fit("reason", w.reason),
-    ].join(GAP.text),
+    `${" ".repeat(MARKER_WIDTH)}${[
+      fit("ticket", JOB_WIDTHS.ticket),
+      fit("test", JOB_WIDTHS.test),
+      fit("action", JOB_WIDTHS.action),
+      fit("status", JOB_WIDTHS.status),
+      fit("queued", JOB_WIDTHS.queued),
+      fit("started", JOB_WIDTHS.started),
+    ].join(GAP.text)}${" ".repeat(usable - JOB_WIDTH)}`,
   );
-};
 
-// The columns are the same for every job, so a pending one shows dashes where its start and
-// finish will go; the status carries its glyph and colour.
-const jobRow = (job: Automation.AutomationJobListRow, drift: number, usable: number): string => {
-  const w = jobWidths(usable);
+// The columns are the same for every job, so a pending one shows a dash where its start will
+// go; the status carries its glyph and colour.
+const jobRow = (
+  job: Automation.AutomationJobListRow,
+  selected: Piece,
+  drift: number,
+  usable: number,
+): string => {
   const status = STATUS[job.status];
-  return [
-    paint(PALETTE.text, fit(job.ticket ?? "—", w.ticket)),
-    paint(PALETTE.text, fit(job.test, w.test)),
-    paint(PALETTE.subtle, fit(job.action, w.action)),
-    paint(status.color, fit(`${status.glyph} ${job.status}`, w.status)),
-    paint(PALETTE.subtle, fit(ago(job.createdAt, job.queriedAt, drift), w.queued)),
-    paint(PALETTE.subtle, fit(ago(job.startedAt, job.queriedAt, drift), w.started)),
-    paint(PALETTE.subtle, fit(ago(job.finishedAt, job.queriedAt, drift), w.finished)),
-    paint(PALETTE.text, fit(job.reason ?? "", w.reason)),
-  ].join(GAP.text);
+  const columns = [
+    paint(PALETTE.text, fit(job.ticket ?? "—", JOB_WIDTHS.ticket)),
+    paint(PALETTE.text, fit(job.test, JOB_WIDTHS.test)),
+    paint(PALETTE.subtle, fit(job.action, JOB_WIDTHS.action)),
+    paint(status.color, fit(`${status.glyph} ${job.status}`, JOB_WIDTHS.status)),
+    paint(PALETTE.subtle, fit(ago(job.createdAt, job.queriedAt, drift), JOB_WIDTHS.queued)),
+    paint(PALETTE.subtle, fit(ago(job.startedAt, job.queriedAt, drift), JOB_WIDTHS.started)),
+  ];
+  return `${render([selected, SPACE])}${columns.join(GAP.text)}${" ".repeat(usable - JOB_WIDTH)}`;
 };
 
 // The queue box fills every row the cards leave above the footer: its title counts what runs and
-// waits, the jobs come running, pending, then completed, and the bottom border counts what was
-// cut when they do not all fit.
+// waits, the jobs come running then pending with the selected one in view, and the bottom border
+// says where the window sits in the list when they do not all fit.
 const queueBox = (
   view: View,
   now: number,
@@ -577,46 +618,62 @@ const queueBox = (
       bottom(columns, Option.none()),
     ];
   }
-  const { queue, readAt } = view.snapshot.value;
-  const drift = now - readAt;
-  const jobs = [...queue.running, ...queue.pending, ...queue.completed];
+  const snapshot = view.snapshot.value;
+  const { queue } = snapshot;
+  const drift = now - snapshot.readAt;
+  const jobs = jobsOf(snapshot);
+  const cursor = clamp(view.cursor.queue, 0, Math.max(0, jobs.length - 1));
+  // The selection is never below the window: the window starts room - 1 above it at most.
+  const first = Math.max(0, cursor - (room - 1));
+  const shown = jobs.slice(first, first + room);
   const listed =
     jobs.length === 0
       ? [boxed(muted(fit("no jobs", usable)))]
-      : jobs.slice(0, room).map((job) => boxed(jobRow(job, drift, usable)));
-  const cut =
+      : shown.map((job, index) =>
+          boxed(
+            jobRow(job, marker(first + index === cursor, view.focus === "queue"), drift, usable),
+          ),
+        );
+  const place =
     jobs.length > room
-      ? Option.some(`${String(room)} of ${String(jobs.length)}`)
+      ? Option.some(
+          `${String(first + 1)}-${String(first + shown.length)} of ${String(jobs.length)}`,
+        )
       : Option.none<string>();
   return [
     top(` · running ${String(queue.running.length)} · pending ${String(queue.pending.length)}`),
     boxed(jobHeader(usable)),
     ...listed,
     ...Array.from({ length: room - listed.length }, () => blank),
-    bottom(columns, cut),
+    bottom(columns, place),
   ];
 };
 
 const HINTS: ReadonlyArray<readonly [key: string, does: string]> = [
   ["j/k", "select"],
-  ["tab", "servers/clients"],
+  ["tab", "machines/queue"],
+  ["h/l", "servers/clients"],
   ["g/G", "first/last"],
+  ["L", "open ticket"],
   ["q", "quit"],
 ];
 
-// The last row: the keys, or the reason the last read failed.
-const footer = (view: View, columns: number): string =>
-  Option.match(view.failure, {
-    onNone: () => {
-      const plain = HINTS.map(([key, does]) => `${key} ${does}`).join("   ");
-      const keys = HINTS.map(
-        ([key, does]) => `${paint(PALETTE.text, key)}${muted(` ${does}`)}`,
-      ).join(muted("   "));
-      const name = "oligarchy";
-      return ` ${keys}${" ".repeat(columns - plain.length - name.length - 2)}${muted(name)} `;
-    },
-    onSome: (reason) => paint(PALETTE.love, fit(` error: ${reason}`, columns)),
-  });
+// The last row: the reason the last read failed, else what the last key had to say, else the
+// keys.
+const footer = (view: View, columns: number): string => {
+  if (Option.isSome(view.failure)) {
+    return paint(PALETTE.love, fit(` error: ${view.failure.value}`, columns));
+  }
+  if (Option.isSome(view.notice)) {
+    return paint(PALETTE.gold, fit(` ${view.notice.value}`, columns));
+  }
+  const plain = HINTS.map(([key, does]) => `${key} ${does}`).join("   ");
+  const keys = HINTS.map(([key, does]) => `${paint(PALETTE.text, key)}${muted(` ${does}`)}`).join(
+    muted("   "),
+  );
+  const name = "oligarchy";
+  return ` ${keys}${" ".repeat(columns - plain.length - name.length - 2)}${muted(name)} `;
+};
 
 // Every row is written over in full at the terminal's width with an absolute move and never a
 // newline, so the screen never scrolls and a frame needs no clear. The cards' box is as tall as
@@ -636,21 +693,32 @@ export const draw = (view: View, now: number, columns: number, rows: number): st
   return lines.map((line, index) => `\x1b[${String(index + 1)};1H${line}`).join("");
 };
 
-// What a key does to the view: j, k, g and G and the arrows move the selection within the tab's
-// machines; tab, h, l and the arrows sideways switch tabs. Anything else is nothing.
+// readline reports a capital L as l with shift.
+const isOpen = (input: Terminal.UserInput): boolean => input.key.shift && input.key.name === "l";
+
+// What a key does to the view: j, k, g and G and the arrows move the selection within the
+// focused list; tab moves the focus between the machines and the queue; h, l and the arrows
+// sideways switch tabs. Every key retires the last notice. L moves nothing here: opening the
+// ticket is the runner's. Anything else is nothing.
 export const press = (view: View, input: Terminal.UserInput): View => {
+  const retired: View = { ...view, notice: Option.none() };
+  const list = focused(view);
   const count = Option.match(view.snapshot, {
     onNone: () => 0,
-    onSome: (snapshot) => ofTab(snapshot, view.tab).length,
+    onSome: (snapshot) =>
+      list === "queue" ? jobsOf(snapshot).length : ofTab(snapshot, list).length,
   });
   const last = Math.max(0, count - 1);
-  // The card on screen, not the number stored: a fleet that shrank since leaves the number past
+  // The row on screen, not the number stored: a list that shrank since leaves the number past
   // the end, and a step must start from what is selected.
-  const current = clamp(view.cursor[view.tab], 0, last);
+  const current = clamp(view.cursor[list], 0, last);
   const select = (cursor: number): View => ({
-    ...view,
-    cursor: { ...view.cursor, [view.tab]: clamp(cursor, 0, last) },
+    ...retired,
+    cursor: { ...view.cursor, [list]: clamp(cursor, 0, last) },
   });
+  if (isOpen(input)) {
+    return retired;
+  }
   switch (input.key.name) {
     case "j":
     case "down":
@@ -661,13 +729,14 @@ export const press = (view: View, input: Terminal.UserInput): View => {
     case "g":
       return select(input.key.shift ? last : 0);
     case "tab":
+      return { ...retired, focus: view.focus === "machines" ? "queue" : "machines" };
     case "h":
     case "l":
     case "left":
     case "right":
-      return { ...view, tab: view.tab === "servers" ? "clients" : "servers" };
+      return { ...retired, tab: view.tab === "servers" ? "clients" : "servers" };
     default:
-      return view;
+      return retired;
   }
 };
 
@@ -678,15 +747,50 @@ export const press = (view: View, input: Terminal.UserInput): View => {
 const isQuit = (input: Terminal.UserInput): boolean =>
   input.key.name === "q" && !input.key.ctrl && !input.key.meta;
 
+// The thrown value's own message behind a platform failure (Node's `spawn x ENOENT`), else the
+// platform message.
+const detail = (error: unknown): string =>
+  ExternalFailure.describeThrowable(ExternalFailure.causeOf(error), Render.errorDetail(error));
+
+// Hands the ticket's url to the opener and says what came of it. The browser is the desktop's:
+// it gets the desktop's environment, none of this screen's stdio, its own process group, and
+// the handle is unreferenced, so neither the bound nor q closing the scope kills it.
+const openTicket = (
+  ticket: string,
+): Effect.Effect<string, never, ChildProcessSpawner.ChildProcessSpawner> =>
+  Effect.gen(function* () {
+    const url = `${LINEAR_ISSUES}${ticket}`;
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const handle = yield* spawner.spawn(
+      ChildProcess.make(OPENER, [url], {
+        stdin: "ignore",
+        stdout: "ignore",
+        stderr: "ignore",
+        extendEnv: true,
+        detached: true,
+      }),
+    );
+    // The re-ref it hands back is never wanted: the browser is not ours to wait for.
+    yield* Effect.asVoid(handle.unref);
+    const code = yield* handle.exitCode.pipe(
+      Effect.timeoutOrElse({ duration: OPEN_WAIT, orElse: () => Effect.succeed(0) }),
+    );
+    return code === 0 ? `opened ${url}` : `${OPENER} exited ${String(code)}`;
+  }).pipe(
+    Effect.scoped,
+    Effect.catchTag("PlatformError", (error) => Effect.succeed(`${OPENER}: ${detail(error)}`)),
+  );
+
 // Owns the alternate screen while it runs: the tables are read at once and every REFRESH, the
 // ages repainted every AGE_TICK at whatever size the terminal has by then, every other key
-// repainted as it lands, and q or the input ending (ctrl-c, in raw mode) hands the screen back.
-// A read that fails leaves the last picture up with its reason on the footer; a frame stdout
-// refuses ends the run with that failure.
+// repainted as it lands, L opening the selected job's ticket first, and q or the input ending
+// (ctrl-c, in raw mode) hands the screen back. A read that fails leaves the last picture up with
+// its reason on the footer; a frame stdout refuses ends the run with that failure.
 export const run: Effect.Effect<
   void,
   PlatformError.PlatformError,
   | Terminal.Terminal
+  | ChildProcessSpawner.ChildProcessSpawner
   | Servers.ServerStore
   | ProcessStats.ProcessStatsStore
   | Automation.AutomationStore
@@ -709,7 +813,8 @@ export const run: Effect.Effect<
     const readAt = yield* Clock.currentTimeMillis;
     const machines = yield* servers.listMachines();
     const series = yield* processStats.listSeries(SERIES_SAMPLES);
-    const queue = yield* automation.listJobs(COMPLETED_LIMIT);
+    // No completed jobs: the screen shows what runs and what waits.
+    const queue = yield* automation.listJobs(0);
     yield* Ref.update(view, (current) => ({
       ...current,
       snapshot: Option.some({ machines, series, queue, readAt }),
@@ -725,12 +830,30 @@ export const run: Effect.Effect<
           })),
     ),
   );
+  // L's notice lands after press retired the last one, so it is what the frame shows.
+  const open = Effect.gen(function* () {
+    const current = yield* Ref.get(view);
+    const notice = yield* Option.match(selectedJob(current), {
+      onNone: () => Effect.succeed("no job selected"),
+      onSome: (job) =>
+        job.ticket === null
+          ? Effect.succeed("the selected job has no ticket")
+          : openTicket(job.ticket),
+    });
+    yield* Ref.update(view, (latest) => ({ ...latest, notice: Option.some(notice) }));
+  });
   const keys = Effect.gen(function* () {
     const input = yield* terminal.readInput;
     yield* Stream.fromQueue(input).pipe(
       Stream.takeWhile((key) => !isQuit(key)),
       Stream.runForEach((key) =>
-        Ref.update(view, (current) => press(current, key)).pipe(Effect.andThen(paintScreen)),
+        Effect.gen(function* () {
+          yield* Ref.update(view, (current) => press(current, key));
+          if (isOpen(key)) {
+            yield* open;
+          }
+          yield* paintScreen;
+        }),
       ),
     );
   });

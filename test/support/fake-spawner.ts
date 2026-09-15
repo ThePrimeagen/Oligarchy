@@ -28,6 +28,8 @@ export type Spawned = {
   readonly kills: Array<string>;
   readonly killOptions: Array<ChildProcess.KillOptions | undefined>;
   readonly isReleased: () => boolean;
+  // False once the handle was unref'd: the release then leaves the process alone, as Node's does.
+  readonly isReferenced: () => boolean;
   readonly isRunning: Effect.Effect<boolean>;
   // Exits, then (as Node does) delivers the last stderr bytes and closes the pipes.
   readonly exit: (code: number, trailingStderr?: string) => Effect.Effect<void>;
@@ -111,6 +113,7 @@ export const fakeSpawner = (script: Script = () => ({ exitCode: 0 })): FakeSpawn
       const kills: Array<string> = [];
       const killOptions: Array<ChildProcess.KillOptions | undefined> = [];
       let released = false;
+      let referenced = true;
       const die = (signal: string) =>
         Effect.sync(() => {
           if (!Deferred.isDoneUnsafe(exitSignal)) {
@@ -160,6 +163,7 @@ export const fakeSpawner = (script: Script = () => ({ exitCode: 0 })): FakeSpawn
         kills,
         killOptions,
         isReleased: () => released,
+        isReferenced: () => referenced,
         isRunning: Effect.map(Deferred.isDone(exitSignal), (done) => !done),
         exit: (code, trailingStderr) =>
           Effect.gen(function* () {
@@ -175,12 +179,13 @@ export const fakeSpawner = (script: Script = () => ({ exitCode: 0 })): FakeSpawn
       if (waiter !== undefined) {
         Deferred.doneUnsafe(waiter, Exit.succeed(handle));
       }
-      // The real spawner's release sends the kill signal when the process still runs.
+      // The real spawner's release sends the kill signal when the process still runs and the
+      // handle is still referenced; an unref'd child outlives the scope.
       yield* Effect.addFinalizer(() =>
         Effect.suspend(() => {
           released = true;
           // A child already gone cannot be killed.
-          return Deferred.isDoneUnsafe(exitSignal)
+          return Deferred.isDoneUnsafe(exitSignal) || !referenced
             ? Effect.void
             : kill().pipe(Effect.catch(() => Effect.void));
         }),
@@ -196,7 +201,12 @@ export const fakeSpawner = (script: Script = () => ({ exitCode: 0 })): FakeSpawn
         all: Stream.merge(Stream.fromQueue(stdout), Stream.fromQueue(stderr)),
         getInputFd: () => Sink.drain,
         getOutputFd: () => Stream.empty,
-        unref: Effect.succeed(Effect.void),
+        unref: Effect.sync(() => {
+          referenced = false;
+          return Effect.sync(() => {
+            referenced = true;
+          });
+        }),
       });
     });
 
