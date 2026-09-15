@@ -31,7 +31,6 @@ const CWD = tmpdir();
 
 const baseEnv = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv => ({
   ...process.env,
-  NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --disable-warning=ExperimentalWarning`.trim(),
   OLIGARCHY_TOKEN: "test-token",
   SERVER_URL: "",
   TERM: "dumb",

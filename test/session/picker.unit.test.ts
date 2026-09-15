@@ -433,7 +433,7 @@ describe("listSessions and completeFollow", () => {
     Layer.mergeAll(
       Layer.succeed(State.Host)(
         State.Host.of({
-          execPath: "/usr/bin/node",
+          execPath: "/usr/bin/bun",
           imageProtocol: "kitty",
           input: tty.input,
           output: tty.output,
@@ -454,14 +454,11 @@ describe("listSessions and completeFollow", () => {
       const items = yield* Picker.listSessions("ff").pipe(Effect.provide(env(tty, spawner)));
       expect(items).toEqual([downloading(PENDING_ID)]);
       const [ctrl] = spawner.spawned;
-      expect(ctrl?.command.command).toBe("/usr/bin/node");
-      expect(ctrl?.command.args.slice(0, 2)).toEqual([
-        "--experimental-strip-types",
-        "--disable-warning=ExperimentalWarning",
-      ]);
-      expect(ctrl?.command.args[2]?.endsWith("/src/ctrl/main.ts")).toBe(true);
+      expect(ctrl?.command.command).toBe("/usr/bin/bun");
+      expect(ctrl?.command.args[0]).toBe("--no-env-file");
+      expect(ctrl?.command.args[1]?.endsWith("/src/ctrl/main.ts")).toBe(true);
       // ctrl reads the database the REPL's environment names; the proxy url is the client's.
-      expect(ctrl?.command.args.slice(3)).toEqual([
+      expect(ctrl?.command.args.slice(2)).toEqual([
         "session",
         "list",
         "--count",

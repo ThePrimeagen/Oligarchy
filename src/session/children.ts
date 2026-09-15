@@ -20,7 +20,9 @@ export type FollowChild = {
   readonly exit: Effect.Effect<FollowExit>;
 };
 
-const NODE_FLAGS = ["--experimental-strip-types", "--disable-warning=ExperimentalWarning"];
+// As the wrappers pass it: Bun's own loader would read `.env.local` too and expand `$` in values,
+// where the config provider reads `.env` alone, as written, for what the environment lacks.
+const BUN_FLAGS = ["--no-env-file"];
 
 const entry = (name: "client" | "ctrl"): Effect.Effect<string, never, Path.Path> =>
   Effect.map(Path.Path, (path) => path.resolve(import.meta.dirname, "..", name, "main.ts"));
@@ -56,7 +58,7 @@ const clientCommand = (
     const main = yield* entry("client");
     return ChildProcess.make(
       host.execPath,
-      [...NODE_FLAGS, main, ...args, "--agent-id", agentId, "--server-url", session.serverUrl],
+      [...BUN_FLAGS, main, ...args, "--agent-id", agentId, "--server-url", session.serverUrl],
       { stdin: "ignore", stdout: "pipe", stderr: "pipe", detached: true, extendEnv: true },
     );
   });
@@ -119,7 +121,7 @@ export const runCtrl = Effect.fn("Children.runCtrl")(function* (args: ReadonlyAr
   const host = yield* State.Host;
   const main = yield* entry("ctrl");
   return yield* collect(
-    ChildProcess.make(host.execPath, [...NODE_FLAGS, main, ...args], {
+    ChildProcess.make(host.execPath, [...BUN_FLAGS, main, ...args], {
       stdin: "ignore",
       stdout: "pipe",
       stderr: "pipe",

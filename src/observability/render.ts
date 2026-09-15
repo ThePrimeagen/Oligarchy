@@ -105,9 +105,11 @@ export const wantsColor = (
   if (stream.isTTY !== true && env.FORCE_COLOR === undefined) {
     return false;
   }
-  // 16, not 24-bit: tmux and FORCE_COLOR=1 report 256/16 and still render 38;2.
+  // 16 colours, not 24-bit: tmux and FORCE_COLOR=1 report 256/16 and still render 38;2. A piped
+  // stdout has no hasColors, so the runtime's depth is asked directly (16 colours is 4 bits);
+  // Bun's hasColors would reach for this.getColorDepth on whatever it is called on.
   return stream.hasColors === undefined
-    ? WriteStream.prototype.hasColors.call(stream, 16, env)
+    ? WriteStream.prototype.getColorDepth.call(stream, env) >= 4
     : stream.hasColors(16, env);
 };
 

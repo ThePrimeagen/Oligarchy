@@ -1,5 +1,5 @@
 import { SentryEffectTracer } from "@sentry/effect";
-import * as Sentry from "@sentry/node";
+import * as Sentry from "@sentry/bun";
 import {
   Clock,
   Context,

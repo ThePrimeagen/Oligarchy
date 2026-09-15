@@ -9,31 +9,31 @@
   },
   "type": "module",
   "scripts": {
-    "client": "node --experimental-strip-types src/client/main.ts",
-    "ctrl": "node --experimental-strip-types --import ./src/observability/instrument.ts src/ctrl/main.ts",
-    "session": "node --experimental-strip-types src/session/main.ts",
-    "viz": "node --experimental-strip-types src/viz/main.ts",
-    "qemu-server": "node --experimental-strip-types --import ./src/observability/instrument.ts src/qemu-server/main.ts",
-    "qemu-reverse-proxy": "node --experimental-strip-types --import ./src/observability/instrument.ts src/qemu-reverse-proxy/main.ts",
-    "automation-server": "node --experimental-strip-types --import ./src/observability/instrument.ts src/automation-server/main.ts",
-    "automation-client": "node --experimental-strip-types --import ./src/observability/instrument.ts src/automation-client/main.ts",
+    "client": "bun --no-env-file src/client/main.ts",
+    "ctrl": "bun --no-env-file --preload ./src/observability/instrument.ts src/ctrl/main.ts",
+    "session": "bun --no-env-file src/session/main.ts",
+    "viz": "bun --no-env-file src/viz/main.ts",
+    "qemu-server": "bun --no-env-file --preload ./src/observability/instrument.ts src/qemu-server/main.ts",
+    "qemu-reverse-proxy": "bun --no-env-file --preload ./src/observability/instrument.ts src/qemu-reverse-proxy/main.ts",
+    "automation-server": "bun --no-env-file --preload ./src/observability/instrument.ts src/automation-server/main.ts",
+    "automation-client": "bun --no-env-file --preload ./src/observability/instrument.ts src/automation-client/main.ts",
     "dev": "wrangler dev --remote",
     "check:lint": "oxlint --deny-warnings .",
     "check:format": "oxfmt --check .",
     "format": "oxfmt .",
     "check:types": "tsc --noEmit -p tsconfig.json",
-    "test:unit": "vitest run --project unit",
-    "test:integration": "vitest run --project integration --maxWorkers 1",
-    "check:fast": "npm run check:lint && npm run check:format && npm run check:types && npm run test:unit",
+    "test:unit": "bun --bun vitest run --project unit",
+    "test:integration": "bun --bun vitest run --project integration --maxWorkers 1",
+    "check:fast": "bun run check:lint && bun run check:format && bun run check:types && bun run test:unit",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "node --experimental-strip-types src/db/migrate.ts",
+    "db:migrate": "bun --no-env-file src/db/migrate.ts",
     "prepare": "effect-tsgo patch --oxlint"
   },
   "dependencies": {
     "@effect/platform-node": "4.0.0-rc.112",
+    "@sentry/bun": "10.73.0",
     "@sentry/cloudflare": "10.73.0",
     "@sentry/effect": "10.73.0",
-    "@sentry/node": "10.73.0",
     "drizzle-orm": "^0.45.2",
     "effect": "4.0.0-rc.112",
     "hono": "^4.13.5",
@@ -60,6 +60,6 @@
     "effect": "4.0.0-rc.112"
   },
   "engines": {
-    "node": ">=26"
+    "bun": ">=1.4"
   }
 }

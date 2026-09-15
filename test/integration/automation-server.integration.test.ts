@@ -40,7 +40,7 @@ type Process = {
   readonly waitFor: (pattern: RegExp, timeoutMs?: number) => Promise<void>;
 };
 
-// Sentry is initialised by the wrapper's --import; a proxy nobody listens on keeps the test
+// Sentry is initialised by the wrapper's --preload; a proxy nobody listens on keeps the test
 // run's fatal lines out of the real project without touching the code under test.
 const environment = (home: string, overrides: Record<string, string>): NodeJS.ProcessEnv => {
   const env: NodeJS.ProcessEnv = {
@@ -49,7 +49,6 @@ const environment = (home: string, overrides: Record<string, string>): NodeJS.Pr
     LINEAR_WEBHOOK_SECRET: WEBHOOK_SECRET,
     OLIGARCHY_TOKEN: TOKEN,
     DATABASE_URL: dbUrl === "" ? UNREACHABLE : dbUrl,
-    NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --disable-warning=ExperimentalWarning`.trim(),
     https_proxy: "http://127.0.0.1:1",
     http_proxy: "http://127.0.0.1:1",
     no_proxy: "",

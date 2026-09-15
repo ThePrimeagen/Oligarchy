@@ -50,7 +50,7 @@ const harness = () => {
     Effect.gen(function* () {
       const tty = FakeTty.fakeTty();
       const host = State.Host.of({
-        execPath: "/opt/node/bin/node",
+        execPath: "/opt/bun/bin/bun",
         imageProtocol: "ansi",
         input: tty.input,
         output: tty.output,

@@ -18,7 +18,7 @@ const settle: Effect.Effect<void> = Effect.gen(function* () {
 
 const hostLayer = Layer.succeed(State.Host)(
   State.Host.of({
-    execPath: "/opt/node/bin/node",
+    execPath: "/opt/bun/bin/bun",
     imageProtocol: "ansi",
     input: fakeTty().input,
     output: fakeTty().output,
@@ -37,7 +37,7 @@ const session = Effect.gen(function* () {
 
 describe("runClient", () => {
   it.effect(
-    "spawns node with strip-types, the client entry, the args, the agent id and the server url",
+    "spawns this bun without its .env loader on the client entry with the args, the agent id and the server url",
     () =>
       Effect.gen(function* () {
         const spawner = FakeChildren.fakeSpawner(() => ({ code: 0, stdout: `${SESSION_ID}\n` }));
@@ -50,15 +50,12 @@ describe("runClient", () => {
         expect(new TextDecoder().decode(result.stdout)).toBe(`${SESSION_ID}\n`);
         expect(result.stderr).toBe("");
         const [child] = spawner.spawned;
-        expect(child?.command.command).toBe("/opt/node/bin/node");
+        expect(child?.command.command).toBe("/opt/bun/bin/bun");
         const args = child?.command.args ?? [];
-        expect(args.slice(0, 2)).toEqual([
-          "--experimental-strip-types",
-          "--disable-warning=ExperimentalWarning",
-        ]);
-        expect(args[2]).toMatch(/^\/.*\/src\/client\/main\.ts$/);
-        expect(args[2]).not.toContain("..");
-        expect(args.slice(3)).toEqual([
+        expect(args[0]).toBe("--no-env-file");
+        expect(args[1]).toMatch(/^\/.*\/src\/client\/main\.ts$/);
+        expect(args[1]).not.toContain("..");
+        expect(args.slice(2)).toEqual([
           "start",
           "--iso",
           "omarchy.iso",
@@ -133,8 +130,9 @@ describe("runCtrl", () => {
         expect(result.code).toBe(0);
         expect(new TextDecoder().decode(result.stdout)).toBe("[]");
         const [child] = spawner.spawned;
-        expect(child?.command.args[2]).toMatch(/^\/.*\/src\/ctrl\/main\.ts$/);
-        expect(child?.command.args.slice(3)).toEqual(["session", "list", "--json"]);
+        expect(child?.command.args[0]).toBe("--no-env-file");
+        expect(child?.command.args[1]).toMatch(/^\/.*\/src\/ctrl\/main\.ts$/);
+        expect(child?.command.args.slice(2)).toEqual(["session", "list", "--json"]);
         expect(child?.command.options.detached).toBe(false);
         expect(child?.command.options.extendEnv).toBe(true);
       }),
@@ -181,7 +179,7 @@ describe("spawnFollow", () => {
       ]);
       expect(result.exit).toEqual({ code: 0, killed: false, stderr: "" });
       const [child] = spawner.spawned;
-      expect(child?.command.args.slice(3)).toEqual([
+      expect(child?.command.args.slice(2)).toEqual([
         "follow",
         "--session-id",
         SESSION_ID,

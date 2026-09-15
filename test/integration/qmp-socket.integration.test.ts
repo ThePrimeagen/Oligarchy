@@ -139,8 +139,8 @@ describe("listen and accept", () => {
         const target = join(dir, "missing", "qmp.sock");
         const error = yield* Effect.flip(Socket.listen(target));
         expect(error._tag).toBe("QmpClosed");
-        // libuv reports a missing parent dir as EACCES on some kernels, ENOENT on others.
-        expect(error.message).toMatch(/^listen E[A-Z]+/);
+        // Bun's net.Server names the path it could not bind, not libuv's errno.
+        expect(error.message).toMatch(/^Failed to listen at /);
         expect(error.message).toContain(target);
       }),
     ),

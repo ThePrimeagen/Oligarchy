@@ -22,7 +22,6 @@ const UNREACHABLE = "postgres://oligarchy:secretpw@127.0.0.1:1/oligarchy";
 
 const baseEnv = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv => ({
   ...process.env,
-  NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --disable-warning=ExperimentalWarning`.trim(),
   DATABASE_URL: UNREACHABLE,
   TERM: "xterm-256color",
   ...env,

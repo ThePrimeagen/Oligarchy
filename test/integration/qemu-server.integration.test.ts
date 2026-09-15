@@ -69,7 +69,7 @@ type QemuServer = {
   readonly waitFor: (pattern: RegExp, timeoutMs?: number) => Promise<void>;
 };
 
-// Sentry is initialised by the wrapper's --import; a proxy nobody listens on keeps the test
+// Sentry is initialised by the wrapper's --preload; a proxy nobody listens on keeps the test
 // run's fatal lines out of the real project without touching the code under test.
 const environment = (overrides: Record<string, string>): NodeJS.ProcessEnv => {
   const env: NodeJS.ProcessEnv = {
@@ -182,7 +182,7 @@ const lines = (output: string): ReadonlyArray<string> =>
 const pathWithoutQemu = (parent: string): string => {
   const dir = join(parent, "bin");
   mkdirSync(dir);
-  symlinkSync(process.execPath, join(dir, "node"));
+  symlinkSync(process.execPath, join(dir, "bun"));
   for (const binary of ["dirname", "sh", "which", "env"]) {
     const found = (process.env.PATH ?? "")
       .split(delimiter)
