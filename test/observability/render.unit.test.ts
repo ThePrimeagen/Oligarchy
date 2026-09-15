@@ -172,7 +172,8 @@ describe("wantsColor", () => {
     );
   });
 
-  it("falls back to Node's colour detection when the stream has no hasColors", () => {
+  // A piped stdout is a plain stream with no hasColors of its own, on Bun as on Node.
+  it("falls back to the runtime's colour depth when the stream has no hasColors", () => {
     expect(Render.wantsColor({ isTTY: false }, { FORCE_COLOR: "1" })).toBe(true);
     expect(Render.wantsColor({ isTTY: false }, { FORCE_COLOR: "0" })).toBe(false);
   });
