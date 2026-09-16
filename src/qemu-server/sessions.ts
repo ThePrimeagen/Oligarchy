@@ -228,6 +228,27 @@ const exchangeFailed = (error: unknown, live: OpenSession): Errors.ExchangeFaile
 const badRequest = (message: string, live: OpenSession): Errors.BadRequest =>
   Errors.BadRequest.make({ message, sessionId: live.id, agentId: live.agent });
 
+// The gesture as the log line reads it: its point or points, its button, the keys held.
+const describeGesture = (gesture: Qemu.MouseGesture): string => {
+  const held = (modifiers: ReadonlyArray<Domain.MouseModifier> | undefined) =>
+    modifiers === undefined ? "" : modifiers.map((key) => ` +${key}`).join("");
+  switch (gesture._tag) {
+    case "move":
+      return `${String(gesture.x)} ${String(gesture.y)}`;
+    case "click":
+    case "double-click":
+      return `${String(gesture.x)} ${String(gesture.y)} ${gesture.button}${held(gesture.modifiers)}`;
+    case "scroll":
+      return `${String(gesture.x)} ${String(gesture.y)} ${gesture.direction} ×${String(gesture.ticks)}`;
+    case "drag":
+      return `${String(gesture.from.x)} ${String(gesture.from.y)} to ${String(gesture.to.x)} ${String(gesture.to.y)} ${gesture.button}${held(gesture.modifiers)}`;
+    case "hold":
+    case "release":
+      return `${String(gesture.x)} ${String(gesture.y)} ${gesture.button}`;
+  }
+  return gesture satisfies never;
+};
+
 const make = (maxJobs: number) =>
   Effect.gen(function* () {
     const qemu = yield* Qemu.Qemu;
@@ -810,32 +831,10 @@ const make = (maxJobs: number) =>
           .mouse(gesture, recorder(live))
           .pipe(Effect.mapError((error) => exchangeFailed(error, live))),
       );
-      const held = (modifiers: ReadonlyArray<Domain.MouseModifier> | undefined) =>
-        modifiers === undefined ? "" : modifiers.map((key) => ` +${key}`).join("");
-      let what: string;
-      switch (gesture._tag) {
-        case "move":
-          what = `${String(gesture.x)} ${String(gesture.y)}`;
-          break;
-        case "click":
-        case "double-click":
-          what = `${String(gesture.x)} ${String(gesture.y)} ${gesture.button}${held(gesture.modifiers)}`;
-          break;
-        case "scroll":
-          what = `${String(gesture.x)} ${String(gesture.y)} ${gesture.direction} ×${String(gesture.ticks)}`;
-          break;
-        case "drag":
-          what = `${String(gesture.from.x)} ${String(gesture.from.y)} to ${String(gesture.to.x)} ${String(gesture.to.y)} ${gesture.button}${held(gesture.modifiers)}`;
-          break;
-        case "hold":
-        case "release":
-          what = `${String(gesture.x)} ${String(gesture.y)} ${gesture.button}`;
-          break;
-      }
-      return yield* log.info(`mouse ${gesture._tag} ${what} in ${yield* elapsed(started)}ms`, {
-        location: live.id,
-        agentId: live.agent,
-      });
+      return yield* log.info(
+        `mouse ${gesture._tag} ${describeGesture(gesture)} in ${yield* elapsed(started)}ms`,
+        { location: live.id, agentId: live.agent },
+      );
     });
 
     const intentStart = Effect.fn("Sessions.intentStart")(function* (

@@ -555,6 +555,36 @@ describe("QemuHandle.mouse", () => {
     }),
   );
 
+  it.effect("a release that fails surfaces its own error, the machine's state now", () =>
+    Effect.gen(function* () {
+      // The press failed and so did the release: the guest's last word is what the caller hears.
+      const { socket, qemu } = yield* fixture({
+        respond: (command) => {
+          if (command.execute !== "input-send-event") {
+            return FakeSocket.acceptAll(command);
+          }
+          const button = command.arguments.events.find((event) => event.type === "btn");
+          if (button === undefined || button.type !== "btn") {
+            return FakeSocket.acceptAll(command);
+          }
+          return [
+            FakeSocket.errorLine(
+              command.id,
+              "GenericError",
+              button.data.down ? "no tablet" : "gone",
+            ),
+          ];
+        },
+      });
+      const handle = yield* boot(qemu, record());
+      const error = yield* Effect.flip(
+        handle.mouse({ _tag: "click", x: 0, y: 0, button: "left" }, record()),
+      );
+      expect(error).toMatchObject({ _tag: "QmpError", desc: "gone" });
+      expect(events(socket)).toEqual([[...at(0, 0), down("left")], [up("left")]]);
+    }),
+  );
+
   it.effect("scroll pulses the wheel button of its direction, one click per tick", () =>
     Effect.gen(function* () {
       const { socket, qemu } = yield* fixture();
