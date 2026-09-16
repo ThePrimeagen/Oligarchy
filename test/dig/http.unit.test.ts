@@ -105,6 +105,11 @@ describe("dig page happy path", () => {
       expect(js).toContain("serverNowMs");
       expect(js).toContain("resume");
       expect(js).toContain(String(Domain.MUSIC_LEAD_MS));
+      expect(js).toContain("isoCube");
+      expect(js).toContain("grass");
+      expect(js).toContain("shatter");
+      expect(js).toContain("voxelMiner");
+      expect(js).toContain(String(Domain.DIRT_HP));
     }).pipe(Effect.provide(serve)),
   );
 

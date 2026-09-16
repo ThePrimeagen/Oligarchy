@@ -22,6 +22,17 @@ describe("dig damage happy path", () => {
     expect(afterPerfect).toBe(1.25);
     expect(Combat.depth(afterPerfect)).toBe(1.25 / Domain.DIRT_HP);
   });
+
+  it("counts whole cubes broken and the crack on the cube being mined", () => {
+    expect(Combat.cubesBroken(0)).toBe(0);
+    expect(Combat.cubeCrack(0)).toBe(0);
+    expect(Combat.cubesBroken(Domain.PLAYER_DAMAGE)).toBe(0);
+    expect(Combat.cubeCrack(Domain.PLAYER_DAMAGE)).toBe(0.5);
+    expect(Combat.cubesBroken(Domain.DIRT_HP)).toBe(1);
+    expect(Combat.cubeCrack(Domain.DIRT_HP)).toBe(0);
+    expect(Combat.cubesBroken(2.5)).toBe(1);
+    expect(Combat.cubeCrack(2.5)).toBe(0.25);
+  });
 });
 
 describe("dig damage unhappy path", () => {
@@ -29,5 +40,12 @@ describe("dig damage unhappy path", () => {
     const afterMiss = Combat.applyDamage(0, "miss");
     expect(afterMiss).toBe(Domain.PLAYER_DAMAGE);
     expect(Combat.depth(afterMiss)).toBe(0.5);
+  });
+
+  it("does not count a cube as broken until its 2 hp are gone", () => {
+    expect(Combat.cubesBroken(Domain.DIRT_HP - 0.01)).toBe(0);
+    expect(Combat.cubeCrack(Domain.DIRT_HP - 0.01)).toBeGreaterThan(0.9);
+    expect(Combat.cubesBroken(-1)).toBe(0);
+    expect(Combat.cubeCrack(-1)).toBe(0);
   });
 });
