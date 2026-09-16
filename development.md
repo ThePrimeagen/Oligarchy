@@ -17,7 +17,13 @@ exist.
   npm. Every executable is a `#!/bin/sh` wrapper running `bun --no-env-file` on the process's
   `main.ts` as written (`./qemu-server`, `./qemu-reverse-proxy`, `./automation-server`,
   `./automation-client` and `./ctrl` add `--preload ./src/observability/instrument.ts`), and the
-  session REPL spawns its children the same way. `--no-env-file` because Bun's own loader would
+  session REPL spawns its children the same way. The one exception is `./client`: a driving agent
+  calls it many times per task, so it runs `bun build --target=bun --bytecode` of its entry from
+  `node_modules/.cache/oligarchy/client/`, rebuilt when a source, `bun.lock` or the wrapper is
+  newer than the cache, and runs the sources with one stderr line saying so when the build fails
+  (`test/integration/client.integration.test.ts` pins all three). A stack trace from the bundle
+  names the bundle; `bun run client` runs the sources for one that names them. `--no-env-file`
+  because Bun's own loader would
   read `.env.local` and `.env.<NODE_ENV>` as well and expand `$` inside values, ahead of
   `Config.providerLayer`, which reads `.env` alone, as written, for what the environment lacks
   (Config, below). Bun transpiles the sources on load, and `erasableSyntaxOnly` stays on so they
