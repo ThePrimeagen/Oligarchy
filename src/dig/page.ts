@@ -1,3 +1,5 @@
+import * as Domain from "./domain.ts";
+
 export const html = `<!doctype html>
 <html lang="en">
   <head>
@@ -371,7 +373,7 @@ function paintGame() {
   ctx.beginPath();
   ctx.rect(40, 180, 160, 280);
   ctx.clip();
-  if (now >= 3000) {
+  if (now >= ${String(Domain.MUSIC_LEAD_MS)}) {
     snapshot.notes.forEach(function (note) {
       if (judged[note.id]) {
         return;
@@ -411,7 +413,7 @@ function frame() {
     canvas.hidden = false;
     var now = songTimeMs();
     var due = snapshot.notes.find(function (note) {
-      return !judged[note.id] && now > note.hitMs + 100;
+      return !judged[note.id] && now > note.hitMs + ${String(Domain.OKAY_WINDOW_MS)};
     });
     if (due) {
       send({ _tag: "Tick", songTimeMs: now });
