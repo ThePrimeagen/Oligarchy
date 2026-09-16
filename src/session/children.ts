@@ -1,4 +1,4 @@
-import { Effect, Fiber, Path, type PlatformError, Ref, Stream } from "effect";
+import { Effect, Path, type PlatformError, Ref, Stream } from "effect";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import * as State from "./state.ts";
@@ -9,24 +9,13 @@ export type ChildResult = {
   readonly stderr: string;
 };
 
-export type FollowExit = {
-  readonly code: number;
-  readonly killed: boolean;
-  readonly stderr: string;
-};
-
-export type FollowChild = {
-  readonly lines: Stream.Stream<string>;
-  readonly kill: Effect.Effect<void>;
-  readonly exit: Effect.Effect<FollowExit>;
-};
-
 // As the wrappers pass it: Bun's own loader would read `.env.local` too and expand `$` in values,
 // where the config provider reads `.env` alone, as written, for what the environment lacks.
 const BUN_FLAGS = ["--no-env-file"];
 
-const entry = (name: "client" | "ctrl"): Effect.Effect<string, never, Path.Path> =>
-  Effect.map(Path.Path, (path) => path.resolve(import.meta.dirname, "..", name, "main.ts"));
+const clientEntry: Effect.Effect<string, never, Path.Path> = Effect.map(Path.Path, (path) =>
+  path.resolve(import.meta.dirname, "..", "client", "main.ts"),
+);
 
 const concat = (chunks: ReadonlyArray<Uint8Array>): Uint8Array => {
   const out = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.length, 0));
@@ -56,7 +45,7 @@ const clientCommand = (
   Effect.gen(function* () {
     const host = yield* State.Host;
     const agentId = yield* Ref.get(session.agentId);
-    const main = yield* entry("client");
+    const main = yield* clientEntry;
     return ChildProcess.make(
       host.execPath,
       [...BUN_FLAGS, main, ...args, "--agent-id", agentId, "--server-url", session.serverUrl],
@@ -88,46 +77,4 @@ export const runClient = Effect.fn("Children.runClient")(function* (
   args: ReadonlyArray<string>,
 ) {
   return yield* collect(yield* clientCommand(session, args));
-});
-
-export const spawnFollow = Effect.fn("Children.spawnFollow")(function* (
-  session: State.Session,
-  id: string,
-) {
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const command = yield* clientCommand(session, ["follow", "--session-id", id]);
-  const handle = yield* spawner.spawn(command).pipe(Effect.orDie);
-  const killed = yield* Ref.make(false);
-  const stderr = yield* Effect.forkScoped(text(handle.stderr));
-  const child: FollowChild = {
-    lines: Stream.splitLines(Stream.decodeText(handle.stdout)).pipe(Stream.orDie),
-    // Marked before the signal goes, as Node marks `child.killed`: the exit it causes can be
-    // observed before this fiber resumes. A child already gone cannot be killed, so it is not.
-    kill: Ref.set(killed, true).pipe(
-      Effect.andThen(handle.kill()),
-      Effect.catch(() => Ref.set(killed, false)),
-    ),
-    exit: Effect.all({
-      code: exitCode(handle),
-      killed: Ref.get(killed),
-      stderr: Effect.map(Fiber.join(stderr), (collected) => collected.trim()),
-    }),
-  };
-  return child;
-});
-
-// Attached to this process group, unlike the client: interrupting the fiber kills it. ctrl reads
-// the database named by the inherited environment; the proxy url is the client's alone.
-export const runCtrl = Effect.fn("Children.runCtrl")(function* (args: ReadonlyArray<string>) {
-  const host = yield* State.Host;
-  const main = yield* entry("ctrl");
-  return yield* collect(
-    ChildProcess.make(host.execPath, [...BUN_FLAGS, main, ...args], {
-      stdin: "ignore",
-      stdout: "pipe",
-      stderr: "pipe",
-      detached: false,
-      extendEnv: true,
-    }),
-  );
 });

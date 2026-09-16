@@ -14,17 +14,7 @@ import * as StubProxy from "../support/stub-proxy.ts";
 const ROOT = resolve(import.meta.dirname, "../..");
 const SESSION = resolve(ROOT, "session");
 const CLIENT_MAIN = resolve(ROOT, "src/client/main.ts");
-const CTRL_MAIN = resolve(ROOT, "src/ctrl/main.ts");
-const { SESSION_ID, FOLLOWED_ID, ENDED_ID, DROPPED_ID, ENDLESS_ID } = StubProxy;
-const ESC = String.fromCharCode(27);
-const ALT_SCREEN_ON = `${ESC}[?1049h`;
-const ALT_SCREEN_OFF = `${ESC}[?1049l`;
-const RESTORE = `${ESC}[?25h${ESC}[?1049l`;
-const KITTY_PLACE = new RegExp(
-  `${ESC}_Ga=T,f=100,i=1,q=2,C=1,c=\\d+,r=\\d+,m=0;([A-Za-z0-9+/=]+)${ESC}\\\\`,
-);
-const SPINNER = "[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]";
-const view = (source: string): RegExp => new RegExp(source.replaceAll("ESC", ESC));
+const { SESSION_ID } = StubProxy;
 
 // Never from the repository root: a `.env` there would fill the variables these tests unset.
 const CWD = tmpdir();
@@ -81,45 +71,6 @@ const runImage = async (
   return { code: typeof code === "number" ? code : null, stdout: Buffer.concat(chunks), stderr };
 };
 
-// A real terminal through `script`: readline runs in terminal mode, so Tab reaches the completer.
-const runTtySession = async (
-  input: string,
-  afterInput: string,
-  env: NodeJS.ProcessEnv = {},
-): Promise<{ readonly code: number | null; readonly output: string }> => {
-  const child = spawn(
-    "script",
-    ["-qfec", `${SESSION} --server-url http://127.0.0.1:1`, "/dev/null"],
-    { cwd: CWD, env: baseEnv({ DATABASE_URL: "", TERM: "xterm-256color", ...env }) },
-  );
-  let output = "";
-  let inputSent = false;
-  let afterInputSent = false;
-  let failSafe: NodeJS.Timeout | undefined;
-  child.stdout.setEncoding("utf8");
-  child.stdout.on("data", (data: string) => {
-    output += data;
-    if (!inputSent && output.includes("session> ")) {
-      inputSent = true;
-      child.stdin.write(input);
-      failSafe = setTimeout(() => {
-        if (!afterInputSent) {
-          afterInputSent = true;
-          child.stdin.end(afterInput);
-        }
-      }, 5_000);
-    }
-    if (inputSent && !afterInputSent && output.includes("DATABASE_URL is not set")) {
-      afterInputSent = true;
-      clearTimeout(failSafe);
-      setImmediate(() => child.stdin.end(afterInput));
-    }
-  });
-  const [code] = await once(child, "close");
-  clearTimeout(failSafe);
-  return { code: typeof code === "number" ? code : null, output };
-};
-
 // The stub's default answers, plus the refusal of a second intent the REPL test needs.
 const script: StubProxy.Script = (received) =>
   received.url === "/intent/start" && JSON.stringify(received.body).includes("second")
@@ -151,10 +102,8 @@ const agentOf = (requests: ReadonlyArray<StubProxy.Received>): string => {
   throw new Error("the first request carried no agent");
 };
 
-const tinyPngBase64 = Buffer.from(StubProxy.tinyPng()).toString("base64");
-
-// The REPL spawns WP-5's client and WP-6's ctrl; until they exist there is nothing to drive.
-const ready = existsSync(CLIENT_MAIN) && existsSync(CTRL_MAIN);
+// The REPL spawns the client; until it exists there is nothing to drive.
+const ready = existsSync(CLIENT_MAIN);
 
 describe.skipIf(!ready)("./session happy path", () => {
   it("drives one session through every command with the client's flags and one agent id", () =>
@@ -230,71 +179,6 @@ describe.skipIf(!ready)("./session happy path", () => {
       });
     }));
 
-  it("follow draws intents and actions down the left, places each image on the right, and hands the REPL back when the session ends", () =>
-    withProxy(async (proxy) => {
-      const result = await runSession(
-        ["--server-url", proxy.url],
-        [`follow ${FOLLOWED_ID}`, "status", "exit"],
-        { TERM_PROGRAM: "ghostty" },
-      );
-      expect(result.stderr).toBe("");
-      expect(result.code).toBe(0);
-      expect(
-        proxy.requests.map((request) => [request.method, request.url, request.authorization]),
-      ).toEqual([["GET", `/follow?id=${FOLLOWED_ID}`, "Bearer test-token"]]);
-
-      const out = result.stdout;
-      const on = out.indexOf(ALT_SCREEN_ON);
-      const off = out.indexOf(ALT_SCREEN_OFF);
-      expect(
-        on !== -1 && off !== -1 && on < off,
-        "follow takes the alternate screen and gives it back",
-      ).toBe(true);
-      const drawn = out.slice(on, off);
-
-      expect(drawn).toContain("following 7a2d0000");
-      expect(drawn, "a running intent is gray with a spinner").toMatch(
-        view(`ESC\\[90m${SPINNER} wait for the boot menu`),
-      );
-      expect(drawn, "a completed intent turns green").toContain(
-        `${ESC}[32m✓ wait for the boot menu`,
-      );
-      expect(drawn, "a running action is gray with a spinner").toMatch(
-        view(`ESC\\[90m${SPINNER} send-keys`),
-      );
-      expect(drawn, "a completed action turns green").toContain(`${ESC}[32m✓ send-keys`);
-      expect(drawn).toContain(`${ESC}[32m✓ get-image`);
-      expect(drawn, "a failed action turns red").toContain(`${ESC}[31m✗ mouse-click`);
-      expect(drawn.indexOf("wait for the boot menu")).toBeLessThan(drawn.indexOf("send-keys"));
-      expect(drawn, "intents start at the margin").toMatch(
-        view("ESC\\[\\d+;2HESC\\[32m✓ wait for the boot menu"),
-      );
-      expect(drawn, "actions are indented under the intent").toMatch(
-        view("ESC\\[\\d+;2H  ESC\\[32m✓ send-keys"),
-      );
-      expect(drawn, "an action outside any intent sits at the margin").toMatch(
-        view("ESC\\[\\d+;2HESC\\[32m✓ get-serial"),
-      );
-
-      const placed = KITTY_PLACE.exec(drawn);
-      expect(placed, "the image is placed with the kitty graphics protocol").not.toBeNull();
-      expect(placed?.[1]).toBe(tinyPngBase64);
-      expect(drawn, "the image sits to the right of the action column").toContain(
-        `${ESC}[2;42H${ESC}_Ga=T`,
-      );
-      expect(drawn, "the previous image is deleted first").toContain(
-        `${ESC}_Ga=d,d=I,i=1,q=2${ESC}\\`,
-      );
-      expect(out.slice(off - 40, off), "images are cleared on leave").toContain(
-        `${ESC}_Ga=d,d=A,q=2${ESC}\\`,
-      );
-      expect(drawn, "the view never scrolls the screen").not.toContain("\n");
-
-      const after = out.slice(off);
-      expect(after).toContain(`session ${FOLLOWED_ID} succeeded`);
-      expect(after, "the REPL is back and has no session of its own").toContain("session none");
-    }));
-
   it("takes the server from SERVER_URL when --server-url is omitted", () =>
     withProxy(async (proxy) => {
       const result = await runSession(
@@ -310,20 +194,6 @@ describe.skipIf(!ready)("./session happy path", () => {
 });
 
 describe.skipIf(!ready)("./session unhappy path", () => {
-  it("enters follow completion when Tab and Enter arrive in one PTY write", async () => {
-    const result = await runTtySession("follow \t\r", "\x15exit\r");
-    expect(result.code).toBe(0);
-    expect(result.output).toContain("DATABASE_URL is not set");
-    expect(result.output).not.toContain("usage: follow <session-id>");
-  });
-
-  it("reports a failed ctrl session list and keeps the prompt usable", async () => {
-    const result = await runTtySession("follow \t", "\x15exit\r");
-    expect(result.code).toBe(0);
-    expect(result.output).toContain("DATABASE_URL is not set");
-    expect((result.output.match(/session> /g) ?? []).length).toBeGreaterThanOrEqual(2);
-  });
-
   it("refuses commands before start, unknown commands, and a malformed mouse command without calling the proxy", () =>
     withProxy(async (proxy) => {
       const result = await runSession(
@@ -331,6 +201,7 @@ describe.skipIf(!ready)("./session unhappy path", () => {
         [
           "send-keys hello",
           "reboot",
+          "follow",
           "start https://example.com/omarchy.iso",
           "mouse click 0.5",
           "stop",
@@ -341,6 +212,7 @@ describe.skipIf(!ready)("./session unhappy path", () => {
       expect(result.code).toBe(0);
       expect(result.stdout).toContain("no session. run start first.");
       expect(result.stdout).toContain("unknown command: reboot");
+      expect(result.stdout).toContain("unknown command: follow");
       expect(result.stdout).toContain("usage: mouse click <x> <y> [button]");
       expect(proxy.requests.map((request) => request.url)).toEqual(["/start", "/stop"]);
     }));
@@ -367,74 +239,6 @@ describe.skipIf(!ready)("./session unhappy path", () => {
         result.stdout.lastIndexOf(`session ${SESSION_ID}`),
       );
       expect(proxy.requests.filter((request) => request.url === "/intent/start")).toHaveLength(2);
-    }));
-
-  it("follow refuses a missing or extra id, and a terminal without the kitty graphics protocol, without calling the proxy", () =>
-    withProxy(async (proxy) => {
-      const result = await runSession(
-        ["--server-url", proxy.url],
-        ["follow", `follow ${FOLLOWED_ID} extra`, `follow ${FOLLOWED_ID}`, "exit"],
-      );
-      expect(result.stderr).toBe("");
-      expect(result.code).toBe(0);
-      expect(result.stdout.match(/usage: follow <session-id>/g)).toHaveLength(2);
-      expect(result.stdout).toContain(
-        "follow needs the kitty graphics protocol (ghostty or kitty)",
-      );
-      expect(result.stdout.includes(ALT_SCREEN_ON)).toBe(false);
-      expect(proxy.requests).toEqual([]);
-    }));
-
-  it("follow says so when the proxy ends the stream before the session did, and restores the screen on a signal", () =>
-    withProxy(async (proxy) => {
-      const dropped = await runSession(
-        ["--server-url", proxy.url],
-        [`follow ${DROPPED_ID}`, "status", "exit"],
-        { TERM_PROGRAM: "ghostty" },
-      );
-      expect(dropped.stderr).toBe("");
-      expect(dropped.code).toBe(0);
-      expect(dropped.stdout).toContain(ALT_SCREEN_OFF);
-      expect(dropped.stdout).toContain(`dropped from ${DROPPED_ID}: this follower fell behind`);
-      expect(dropped.stdout).toContain("session none");
-
-      const child = spawn(SESSION, ["--server-url", proxy.url], {
-        cwd: CWD,
-        env: baseEnv({ TERM_PROGRAM: "ghostty" }),
-      });
-      let stdout = "";
-      child.stdout.setEncoding("utf8");
-      child.stdout.on("data", (data: string) => {
-        stdout += data;
-        if (stdout.includes("still going") && !child.killed) {
-          child.kill("SIGTERM");
-        }
-      });
-      child.stdin.write(`follow ${ENDLESS_ID}\n`);
-      const [code] = await once(child, "close");
-      expect(code).toBe(0);
-      expect(stdout).toContain(ALT_SCREEN_ON);
-      expect(stdout, "the cursor and main screen come back before the REPL exits").toContain(
-        RESTORE,
-      );
-      expect(stdout.indexOf(ALT_SCREEN_ON)).toBeLessThan(stdout.indexOf(ALT_SCREEN_OFF));
-    }));
-
-  it("follow prints the proxy's refusal for a finished session and keeps the REPL", () =>
-    withProxy(async (proxy) => {
-      const result = await runSession(
-        ["--server-url", proxy.url],
-        [`follow ${ENDED_ID}`, "status", "exit"],
-        { TERM_PROGRAM: "ghostty" },
-      );
-      expect(result.stderr).toBe("");
-      expect(result.code).toBe(0);
-      expect(result.stdout).toContain(`session "${ENDED_ID}" has already completed (succeeded)`);
-      expect(result.stdout.includes(ALT_SCREEN_ON), "a refused follow never takes the screen").toBe(
-        false,
-      );
-      expect(result.stdout).toContain("session none");
-      expect(proxy.requests.map((request) => request.url)).toEqual([`/follow?id=${ENDED_ID}`]);
     }));
 });
 

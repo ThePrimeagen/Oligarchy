@@ -1,24 +1,19 @@
 import { deflateSync } from "node:zlib";
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { type Cause, Deferred, Effect, Exit, Fiber, Layer, Path, Queue, Stream } from "effect";
+import { Deferred, Effect, Fiber, Layer, Path, Stream } from "effect";
 import { TestConsole } from "effect/testing";
 import type { ChildProcess } from "effect/unstable/process";
-import * as FollowView from "../../src/session/follow-view.ts";
 import * as Grammar from "../../src/session/grammar.ts";
 import * as Image from "../../src/session/image.ts";
 import * as Repl from "../../src/session/repl.ts";
 import * as State from "../../src/session/state.ts";
-import * as Domain from "../../src/shared/domain.ts";
 import * as FakeChildren from "../support/fake-children.ts";
 import { fakeTty, type FakeTty } from "../support/fake-tty.ts";
 
 const SERVER_URL = "http://127.0.0.1:42069";
 const SESSION_ID = "6f1c0000-0000-4000-8000-00000000e2a9";
-const FOLLOWED_ID = "7a2d0000-0000-4000-8000-00000000f011";
-const IMAGE_ID = "9c4f0000-0000-4000-8000-00000000b2d3";
 const encoder = new TextEncoder();
-const ESC = String.fromCharCode(27);
 
 // A 2x2 8-bit RGB PNG: red, green / blue, white, each row behind an unfiltered filter byte.
 const TINY_PNG = ((): Buffer => {
@@ -147,9 +142,6 @@ const harness = (
         }),
     };
   });
-
-const encodeLine = (event: Domain.FollowEvent): Uint8Array =>
-  encoder.encode(Domain.encodeFollowLine(event));
 
 describe("the command tour", () => {
   it.effect("drives one session through every command, printing today's lines in order", () =>
@@ -411,7 +403,7 @@ describe("refusals and failures", () => {
         yield* h.type("reboot");
         yield* h.type("intent pause");
         yield* h.type("follow");
-        yield* untilLogged("usage: follow <session-id>");
+        yield* untilLogged("unknown command: follow");
         expect((yield* consoleLines).slice(2)).toEqual([
           "no session. run start first.",
           "no session. run start first.",
@@ -422,7 +414,7 @@ describe("refusals and failures", () => {
           "no session. run start first.",
           "unknown command: reboot. tab lists commands; help explains them.",
           "usage: intent start <message> | intent end",
-          "usage: follow <session-id>",
+          "unknown command: follow. tab lists commands; help explains them.",
         ]);
         yield* h.type("start https://example.com/omarchy.iso");
         yield* untilLogged(`session ${SESSION_ID}`);
@@ -470,7 +462,7 @@ describe("refusals and failures", () => {
         "no session. run start first.",
         "no session. run start first.",
         "usage: intent start <message> | intent end",
-        "usage: follow <session-id>",
+        "unknown command: follow. tab lists commands; help explains them.",
         "usage: start [iso] [disk]",
       ]);
       yield* h.type("exit");
@@ -640,61 +632,6 @@ describe("leaving", () => {
     }),
   );
 
-  it.effect("SIGTERM with the follow picker open closes the picker before it prints", () =>
-    Effect.gen(function* () {
-      // What the terminal showed when the stop child was spawned, i.e. after `stopping session`.
-      let atStop = "";
-      let pickerKilledAtStop = false;
-      let h: Harness | undefined;
-      const script: Script = (args) => {
-        if (args[0] === "session") {
-          return { code: 0, stdout: Stream.never };
-        }
-        if (args[0] === "stop") {
-          atStop = h?.tty.written() ?? "";
-          pickerKilledAtStop = h?.spawner.spawned[1]?.killed() ?? false;
-        }
-        return happyClient(args, 0);
-      };
-      // Readline completes on Tab only for a terminal that is not `dumb`.
-      const term = process.env.TERM;
-      process.env.TERM = "xterm-256color";
-      h = yield* harness(script, { isTTY: true, protocol: "kitty" }).pipe(
-        Effect.ensuring(
-          Effect.sync(() => {
-            if (term === undefined) {
-              delete process.env.TERM;
-            } else {
-              process.env.TERM = term;
-            }
-          }),
-        ),
-      );
-      yield* h.type("start");
-      yield* untilLogged(`session ${SESSION_ID}`);
-      h.tty.type("follow \t");
-      yield* untilWritten(h.tty, "loading sessions...");
-      // The list is asked for a few steps after the picker takes the screen.
-      for (let i = 0; i < 2_000 && h.spawner.spawned.length < 2; i++) {
-        yield* Effect.yieldNow;
-      }
-      expect(spawnedArgs(h, 1).slice(0, 2)).toEqual(["session", "list"]);
-      yield* h.terminate;
-      yield* Fiber.join(h.fiber);
-      expect((yield* consoleLines).slice(-2)).toEqual([
-        `stopping session ${SESSION_ID}`,
-        `stopped ${SESSION_ID}`,
-      ]);
-      expect(spawnedArgs(h, 2).slice(0, 3)).toEqual(["stop", "--session-id", SESSION_ID]);
-      // The picker's leave clears the lines under the prompt and shows the cursor again; that
-      // had happened before the REPL said anything.
-      const loading = atStop.indexOf("loading sessions...");
-      expect(loading).toBeGreaterThan(-1);
-      expect(atStop.slice(loading)).toContain(`${ESC}[?25h`);
-      expect(pickerKilledAtStop).toBe(true);
-    }),
-  );
-
   it.effect("SIGTERM without a session returns at once", () =>
     Effect.gen(function* () {
       const h = yield* harness(happyClient);
@@ -704,7 +641,7 @@ describe("leaving", () => {
     }),
   );
 
-  it.effect("Ctrl-C without a follow shuts down like exit", () =>
+  it.effect("Ctrl-C shuts down like exit", () =>
     Effect.gen(function* () {
       const h = yield* harness(happyClient, { isTTY: true });
       yield* h.type("start");
@@ -715,196 +652,6 @@ describe("leaving", () => {
         `stopping session ${SESSION_ID}`,
         `stopped ${SESSION_ID}`,
       ]);
-    }),
-  );
-});
-
-describe("follow", () => {
-  const followScript =
-    (stdout: Stream.Stream<Uint8Array>, stderr = "", code = 0): Script =>
-    (args) =>
-      args[0] === "follow" ? { code, stdout, stderr } : happyClient(args, 0);
-
-  it.effect("refuses without the kitty protocol and spawns nothing", () =>
-    Effect.gen(function* () {
-      const h = yield* harness(happyClient, { protocol: "iterm" });
-      yield* h.type(`follow ${FOLLOWED_ID}`);
-      yield* untilLogged("follow needs the kitty graphics protocol (ghostty or kitty)");
-      expect(h.spawner.spawned).toEqual([]);
-      expect(h.tty.written()).not.toContain(FollowView.ENTER_SCREEN);
-      yield* h.type("exit");
-      yield* Fiber.join(h.fiber);
-    }),
-  );
-
-  it.effect("refuses a missing or extra id before the protocol check", () =>
-    Effect.gen(function* () {
-      const h = yield* harness(happyClient, { protocol: "ansi" });
-      yield* h.type("follow");
-      yield* h.type(`follow ${FOLLOWED_ID} extra`);
-      yield* untilLogged("usage: follow <session-id>");
-      yield* settle;
-      expect(
-        (yield* consoleLines).filter((line) => line === "usage: follow <session-id>"),
-      ).toHaveLength(2);
-      expect((yield* consoleLines).some((line) => line.includes("kitty"))).toBe(false);
-      yield* h.type("exit");
-      yield* Fiber.join(h.fiber);
-    }),
-  );
-
-  it.effect("draws the view, places the image and hands the REPL back when the session ends", () =>
-    Effect.gen(function* () {
-      const events: ReadonlyArray<Domain.FollowEvent> = [
-        { type: "session", status: "pending" },
-        { type: "session", status: "running" },
-        { type: "intent", state: "started", message: "wait for the boot menu" },
-        { type: "action", id: 1, name: "send-keys", state: "running" },
-        { type: "action", id: 1, state: "completed" },
-        { type: "action", id: 2, name: "get-image", state: "running" },
-        { type: "image", id: IMAGE_ID, png: TINY_PNG.toString("base64") },
-        { type: "action", id: 2, state: "completed" },
-        { type: "action", id: 3, name: "mouse-click", state: "running" },
-        { type: "action", id: 3, state: "failed" },
-        { type: "intent", state: "completed" },
-        { type: "action", id: 4, name: "get-serial", state: "running" },
-        { type: "action", id: 4, state: "completed" },
-        { type: "session", status: "succeeded" },
-      ];
-      const h = yield* harness(followScript(Stream.fromIterable(events.map(encodeLine))), {
-        protocol: "kitty",
-      });
-      yield* h.type(`follow ${FOLLOWED_ID}`);
-      yield* untilLogged(`session ${FOLLOWED_ID} succeeded`);
-      yield* h.type("status");
-      yield* untilLogged("session none");
-      const out = h.tty.written();
-      const on = out.indexOf(FollowView.ENTER_SCREEN);
-      const off = out.indexOf(FollowView.LEAVE_SCREEN);
-      expect(on !== -1 && off !== -1 && on < off).toBe(true);
-      const view = out.slice(on, off);
-      expect(view).toContain("following 7a2d0000");
-      expect(view).toContain(`${ESC}[32m✓ wait for the boot menu`);
-      expect(view).toContain(`${ESC}[32m✓ send-keys`);
-      expect(view).toContain(`${ESC}[31m✗ mouse-click`);
-      expect(view).toMatch(new RegExp(`${ESC}\\[\\d+;2H  ${ESC}\\[32m✓ send-keys`));
-      expect(view).toMatch(new RegExp(`${ESC}\\[\\d+;2H${ESC}\\[32m✓ get-serial`));
-      expect(view).toContain(`${ESC}[2;42H${ESC}_Ga=T`);
-      expect(view).toContain("\x1b_Ga=d,d=I,i=1,q=2\x1b\\");
-      expect(view).toContain(TINY_PNG.toString("base64"));
-      expect(out.slice(off - 40, off)).toContain(Image.clearImages);
-      expect(view).not.toMatch(/\n/);
-      expect(spawnedArgs(h, 0).slice(0, 3)).toEqual(["follow", "--session-id", FOLLOWED_ID]);
-      yield* h.type("exit");
-      yield* Fiber.join(h.fiber);
-      expect(h.spawner.spawned).toHaveLength(1);
-    }),
-  );
-
-  it.effect("a stream that ends while running was dropped by the proxy", () =>
-    Effect.gen(function* () {
-      const h = yield* harness(
-        followScript(Stream.make(encodeLine({ type: "session", status: "running" }))),
-        { protocol: "kitty" },
-      );
-      yield* h.type(`follow ${FOLLOWED_ID}`);
-      yield* untilLogged(`dropped from ${FOLLOWED_ID}: this follower fell behind`);
-      expect(h.tty.written()).toContain(FollowView.LEAVE_SCREEN);
-      yield* h.type("exit");
-      yield* Fiber.join(h.fiber);
-    }),
-  );
-
-  it.effect(
-    "a follow line that is not an event is reported like a failed command and the REPL goes on",
-    () =>
-      Effect.gen(function* () {
-        const h = yield* harness(
-          followScript(
-            Stream.make(
-              encodeLine({ type: "session", status: "running" }),
-              encoder.encode("not json\n"),
-              encodeLine({ type: "session", status: "succeeded" }),
-            ),
-          ),
-          { protocol: "kitty" },
-        );
-        yield* h.type(`follow ${FOLLOWED_ID}`);
-        yield* h.type("status");
-        yield* untilLogged("session none");
-        const errors = (yield* TestConsole.errorLines).map(String);
-        expect(errors).toHaveLength(1);
-        expect(errors[0]).toMatch(/not json|JSON/i);
-        expect((yield* consoleLines).some((line) => line.includes(`session ${FOLLOWED_ID}`))).toBe(
-          false,
-        );
-        expect(h.tty.written()).toContain(FollowView.LEAVE_SCREEN);
-        expect(h.spawner.spawned[0]?.killed()).toBe(true);
-        yield* h.type("exit");
-        yield* Fiber.join(h.fiber);
-      }),
-  );
-
-  it.effect("a refused follow prints the client's stderr and never takes the screen", () =>
-    Effect.gen(function* () {
-      const h = yield* harness(
-        followScript(
-          Stream.empty,
-          `session "${FOLLOWED_ID}" has already completed (succeeded)\n`,
-          1,
-        ),
-        { protocol: "kitty" },
-      );
-      yield* h.type(`follow ${FOLLOWED_ID}`);
-      yield* untilLogged(`session "${FOLLOWED_ID}" has already completed (succeeded)`);
-      expect(h.tty.written()).not.toContain(FollowView.ENTER_SCREEN);
-      yield* h.type("status");
-      yield* untilLogged("session none");
-      yield* h.type("exit");
-      yield* Fiber.join(h.fiber);
-    }),
-  );
-
-  it.effect("Ctrl-C while following kills the child, restores the screen and prints detached", () =>
-    Effect.gen(function* () {
-      const queue = yield* Queue.unbounded<Uint8Array, Cause.Done>();
-      const h = yield* harness(followScript(Stream.fromQueue(queue)), {
-        protocol: "kitty",
-        isTTY: true,
-      });
-      yield* h.type(`follow ${FOLLOWED_ID}`);
-      yield* Queue.offer(queue, encodeLine({ type: "session", status: "running" }));
-      yield* Queue.offer(
-        queue,
-        encodeLine({ type: "intent", state: "started", message: "still going" }),
-      );
-      yield* untilWritten(h.tty, "still going");
-      h.tty.type("\x03");
-      yield* untilLogged(`detached from ${FOLLOWED_ID}`);
-      expect(h.spawner.spawned[0]?.killed()).toBe(true);
-      expect(h.tty.written()).toContain("\x1b[?25h\x1b[?1049l");
-      expect(h.fiber.pollUnsafe()).toBeUndefined();
-      yield* h.type("exit");
-      yield* Fiber.join(h.fiber);
-    }),
-  );
-
-  it.effect("SIGTERM while following restores the screen before leaving", () =>
-    Effect.gen(function* () {
-      const queue = yield* Queue.unbounded<Uint8Array, Cause.Done>();
-      const h = yield* harness(followScript(Stream.fromQueue(queue)), { protocol: "kitty" });
-      yield* h.type(`follow ${FOLLOWED_ID}`);
-      yield* Queue.offer(queue, encodeLine({ type: "session", status: "running" }));
-      yield* untilWritten(h.tty, FollowView.ENTER_SCREEN);
-      yield* h.terminate;
-      const exit = yield* Fiber.await(h.fiber);
-      expect(Exit.isSuccess(exit)).toBe(true);
-      const out = h.tty.written();
-      expect(out).toContain("\x1b[?25h\x1b[?1049l");
-      expect(out.indexOf(FollowView.ENTER_SCREEN)).toBeLessThan(
-        out.indexOf(FollowView.LEAVE_SCREEN),
-      );
-      expect(h.spawner.spawned[0]?.killed()).toBe(true);
     }),
   );
 });
