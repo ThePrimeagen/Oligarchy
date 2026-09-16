@@ -129,38 +129,47 @@ const optional = (flag: string, value: Option.Option<string>): ReadonlyArray<str
 // count outside the verb's arity is that verb's usage, an unknown verb the list of verbs.
 const parseMouse = (rest: string): Command => {
   const [verb, ...args] = words(rest);
-  const point = (
-    known: string,
-    usage: string,
-    tail: ReadonlyArray<readonly [string, boolean]>,
-  ): Command => {
-    const [x, y, ...more] = args;
-    const required = tail.filter(([, mayBeOmitted]) => !mayBeOmitted).length;
-    if (x === undefined || y === undefined || more.length < required || more.length > tail.length) {
-      return malformed("mouse", usage);
-    }
-    const flags = ["--x", x, "--y", y];
-    for (const [index, [flag]] of tail.entries()) {
-      const word = more[index];
-      if (word !== undefined) {
-        flags.push(flag, word);
-      }
-    }
-    return { _tag: "mouse", verb: known, flags };
-  };
   switch (verb) {
-    case "move":
-      return point(verb, "usage: mouse move <x> <y>", []);
+    case "move": {
+      const [x, y, ...extra] = args;
+      if (x === undefined || y === undefined || extra.length > 0) {
+        return malformed("mouse", "usage: mouse move <x> <y>");
+      }
+      return { _tag: "mouse", verb, flags: ["--x", x, "--y", y] };
+    }
     case "click":
     case "double-click":
     case "hold":
-    case "release":
-      return point(verb, `usage: mouse ${verb} <x> <y> [button]`, [["--button", true]]);
-    case "scroll":
-      return point(verb, "usage: mouse scroll <x> <y> <up|down|left|right> [ticks]", [
-        ["--direction", false],
-        ["--ticks", true],
-      ]);
+    case "release": {
+      const [x, y, button, ...extra] = args;
+      if (x === undefined || y === undefined || extra.length > 0) {
+        return malformed("mouse", `usage: mouse ${verb} <x> <y> [button]`);
+      }
+      return {
+        _tag: "mouse",
+        verb,
+        flags: ["--x", x, "--y", y, ...optional("--button", Option.fromNullishOr(button))],
+      };
+    }
+    case "scroll": {
+      const [x, y, direction, ticks, ...extra] = args;
+      if (x === undefined || y === undefined || direction === undefined || extra.length > 0) {
+        return malformed("mouse", "usage: mouse scroll <x> <y> <up|down|left|right> [ticks]");
+      }
+      return {
+        _tag: "mouse",
+        verb,
+        flags: [
+          "--x",
+          x,
+          "--y",
+          y,
+          "--direction",
+          direction,
+          ...optional("--ticks", Option.fromNullishOr(ticks)),
+        ],
+      };
+    }
     case "drag": {
       const [x, y, toX, toY, button, ...extra] = args;
       if (

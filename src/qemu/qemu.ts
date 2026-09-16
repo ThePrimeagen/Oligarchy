@@ -288,28 +288,6 @@ const make: Effect.Effect<
           }
         });
 
-      // Each step is its own exchange: abs events in one list collapse to the last position.
-      // The release lands at `to` after a failed move too, so the guest is never left mid-drag
-      // with the button down.
-      const drag = (from: Domain.ScreenPoint, to: Domain.ScreenPoint, button: Domain.ClickButton) =>
-        Effect.gen(function* () {
-          const moved = yield* Effect.exit(
-            Effect.gen(function* () {
-              yield* send([...at(from), btn(button, true)]);
-              for (let step = 1; step <= DRAG_STEPS; step++) {
-                yield* Effect.sleep(DRAG_STEP_GAP_MS);
-                const along = step / DRAG_STEPS;
-                yield* send(
-                  at({ x: from.x + (to.x - from.x) * along, y: from.y + (to.y - from.y) * along }),
-                );
-              }
-              yield* Effect.sleep(DRAG_STEP_GAP_MS);
-            }),
-          );
-          yield* send([...at(to), btn(button, false)]);
-          yield* moved;
-        });
-
       // Modifiers are pressed as their own exchange first and let go as their own exchange
       // last: after a failed gesture, and after a failed press too, since the row can be refused
       // once QEMU has taken the keys. The guest is never left with a modifier held down.
@@ -348,11 +326,33 @@ const make: Effect.Effect<
           return yield* withModifiers(gesture.modifiers, pulses(gesture, gesture.button, 2));
         case "scroll":
           return yield* pulses(gesture, `wheel-${gesture.direction}`, gesture.ticks);
-        case "drag":
-          return yield* withModifiers(
-            gesture.modifiers,
-            drag(gesture.from, gesture.to, gesture.button),
-          );
+        case "drag": {
+          const { from, to, button } = gesture;
+          // Each step is its own exchange: abs events in one list collapse to the last position.
+          // The release lands at `to` after a failed move too, so the guest is never left
+          // mid-drag with the button down.
+          const drag = Effect.gen(function* () {
+            const moved = yield* Effect.exit(
+              Effect.gen(function* () {
+                yield* send([...at(from), btn(button, true)]);
+                for (let step = 1; step <= DRAG_STEPS; step++) {
+                  yield* Effect.sleep(DRAG_STEP_GAP_MS);
+                  const along = step / DRAG_STEPS;
+                  yield* send(
+                    at({
+                      x: from.x + (to.x - from.x) * along,
+                      y: from.y + (to.y - from.y) * along,
+                    }),
+                  );
+                }
+                yield* Effect.sleep(DRAG_STEP_GAP_MS);
+              }),
+            );
+            yield* send([...at(to), btn(button, false)]);
+            yield* moved;
+          });
+          return yield* withModifiers(gesture.modifiers, drag);
+        }
         case "hold":
           return yield* send([...at(gesture), btn(gesture.button, true)]);
         case "release":

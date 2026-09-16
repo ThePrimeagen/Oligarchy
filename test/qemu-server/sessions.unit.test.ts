@@ -1203,16 +1203,14 @@ describe("mouse", () => {
             { type: "action", id: 2, name: "mouse-click", state: "running" },
             { type: "action", id: 2, state: "completed" },
           ]);
-          // A move is one exchange, a click two, a double-click four, a modified click four
-          // with its key down and up, three ticks six, a drag a press, a move and a release,
-          // a hold one and a release one.
+          // The fake plays one exchange per gesture; the real sequences are the qemu tests'.
           expect(
             h.actions.actions.filter(
               (row) =>
                 Schema.is(Domain.QmpCommand)(row.request) &&
                 row.request.execute === "input-send-event",
             ),
-          ).toHaveLength(22);
+          ).toHaveLength(gestures.length);
         }),
       );
     }),

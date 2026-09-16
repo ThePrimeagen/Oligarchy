@@ -55,7 +55,7 @@ export type Script = {
   readonly stop?: (id: string) => Effect.Effect<void>;
   // One send-key exchange per chord; the first failure stops the run.
   readonly sendKey?: (chord: ReadonlyArray<string>) => Effect.Effect<void, ExchangeError>;
-  // Applied to the first input-send-event exchange of a mouse gesture.
+  // Applied to the one input-send-event exchange a mouse gesture is.
   readonly mouse?: (gesture: MouseGesture) => Effect.Effect<void, ExchangeError>;
   // The bytes a screendump yields. A Qmp* or DatabaseError failure is a failed exchange; a
   // PlatformError is a completed exchange whose file could not be read.
@@ -190,78 +190,20 @@ export const fakeQemu = (script: Script = {}): FakeQemu => {
             { discard: true },
           );
         }),
-      // The real handle's shapes without their pacing, interpolation or cleanup: a move is one
-      // exchange, a click two, a double-click four, a tick two, a drag a press, a move and a
-      // release, a hold or a release one, and held modifiers a key down and a key up exchange
-      // around the gesture. `first` scripts the first exchange.
+      // One exchange per gesture, its pointer at the gesture's point: the real sequences are the
+      // qemu tests' to pin; a sessions test counts rows and reads the gesture back.
       mouse: (gesture, record) =>
         Effect.gen(function* () {
           calls.push({ _tag: "mouse", id, gesture });
-          const first = script.mouse?.(gesture) ?? Effect.void;
-          const at = (point: Domain.ScreenPoint): ReadonlyArray<Domain.QmpInputEvent> => [
-            { type: "abs", data: { axis: "x", value: Math.round(point.x * TABLET_AXIS_MAX) } },
-            { type: "abs", data: { axis: "y", value: Math.round(point.y * TABLET_AXIS_MAX) } },
-          ];
-          const btn = (button: Domain.InputButton, down: boolean): Domain.QmpInputEvent => ({
-            type: "btn",
-            data: { button, down },
-          });
-          const modifiers =
-            gesture._tag === "click" || gesture._tag === "double-click" || gesture._tag === "drag"
-              ? gesture.modifiers
-              : undefined;
-          const held = (pressed: boolean): ReadonlyArray<Domain.QmpInputEvent> =>
-            (modifiers ?? []).map((modifier) => ({
-              type: "key",
-              data: { down: pressed, key: { type: "qcode", data: modifier } },
-            }));
-          if (modifiers !== undefined) {
-            yield* inputEvents(held(true), record, first);
-          }
-          const opening = modifiers === undefined ? first : Effect.void;
-          const pulses = (point: Domain.ScreenPoint, button: Domain.InputButton, count: number) =>
-            Effect.gen(function* () {
-              for (let pulse = 0; pulse < count; pulse++) {
-                yield* inputEvents(
-                  [...at(point), btn(button, true)],
-                  record,
-                  pulse === 0 ? opening : Effect.void,
-                );
-                yield* inputEvents([btn(button, false)], record, Effect.void);
-              }
-            });
-          switch (gesture._tag) {
-            case "move":
-              yield* inputEvents(at(gesture), record, opening);
-              break;
-            case "click":
-              yield* pulses(gesture, gesture.button, 1);
-              break;
-            case "double-click":
-              yield* pulses(gesture, gesture.button, 2);
-              break;
-            case "scroll":
-              yield* pulses(gesture, `wheel-${gesture.direction}`, gesture.ticks);
-              break;
-            case "drag":
-              yield* inputEvents([...at(gesture.from), btn(gesture.button, true)], record, opening);
-              yield* inputEvents(at(gesture.to), record, Effect.void);
-              yield* inputEvents(
-                [...at(gesture.to), btn(gesture.button, false)],
-                record,
-                Effect.void,
-              );
-              break;
-            case "hold":
-              yield* inputEvents([...at(gesture), btn(gesture.button, true)], record, opening);
-              break;
-            case "release":
-              yield* inputEvents([...at(gesture), btn(gesture.button, false)], record, opening);
-              break;
-          }
-          if (modifiers !== undefined) {
-            yield* inputEvents(held(false), record, Effect.void);
-          }
+          const point = gesture._tag === "drag" ? gesture.to : gesture;
+          yield* inputEvents(
+            [
+              { type: "abs", data: { axis: "x", value: Math.round(point.x * TABLET_AXIS_MAX) } },
+              { type: "abs", data: { axis: "y", value: Math.round(point.y * TABLET_AXIS_MAX) } },
+            ],
+            record,
+            script.mouse?.(gesture) ?? Effect.void,
+          );
         }),
       screendump: (record) =>
         Effect.gen(function* () {
