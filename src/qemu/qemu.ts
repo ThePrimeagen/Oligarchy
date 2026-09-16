@@ -313,10 +313,10 @@ const make: Effect.Effect<
       // Modifiers are pressed as their own exchange first and let go as their own exchange
       // last: after a failed gesture, and after a failed press too, since the row can be refused
       // once QEMU has taken the keys. The guest is never left with a modifier held down.
-      const withModifiers = <E>(
+      const withModifiers = (
         modifiers: Arr.NonEmptyReadonlyArray<Domain.MouseModifier> | undefined,
-        work: Effect.Effect<void, E>,
-      ): Effect.Effect<void, E | Client.ExecuteError> =>
+        work: Effect.Effect<void, Client.ExecuteError>,
+      ) =>
         Effect.gen(function* () {
           if (modifiers === undefined) {
             return yield* work;

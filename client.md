@@ -263,7 +263,7 @@ Presses `--button` at the first point, moves the pointer to the second in steps 
 ./client mouse hold --agent-id <agent> --server-url <url> --session-id <id> --x <0..1> --y <0..1> [--button left|middle|right]
 ```
 
-Moves the pointer to the point, presses `--button` and leaves it held for the commands that follow: keys you type, `mouse move`s you make. Low-level: use it only when no click, double-click, scroll, or drag can do the job. A held button stays down until [mouse release](#mouse-release) or the end of the session.
+Moves the pointer to the point, presses `--button` and leaves it held for the commands that follow: keys you type, `mouse move`s you make. A held button stays down until [mouse release](#mouse-release) or the end of the session. See [Mouse](#mouse) for when to reach for it.
 
 - `--session-id <id>` — the session.
 - `--x <0..1>`, `--y <0..1>` — where the button goes down.
@@ -369,7 +369,7 @@ Coordinates are fractions of the last screenshot: `0` is the top or left edge, `
 
 Hyprland as Omarchy ships it focuses the window under the pointer. `mouse move` onto the window you mean to type into, then send keys. Window-manager chords (`<M-Enter>`, `<M-2>`, `<M-w>`) land no matter what has focus; plain text lands wherever the pointer says.
 
-The verbs, in the order to reach for them: `mouse click` (a greeter or installer button), `mouse double-click` (launch), `mouse click --button right` (a menu), `mouse scroll`, `mouse drag`, and a `--modifier` on a click or a drag (`shift` extends a selection; on Omarchy, `super` with a left drag moves a window and with a right drag resizes one). Each verb presses and releases within one command.
+The verbs, in the order to reach for them: `mouse click` (a greeter or installer button), `mouse double-click` (launch), `mouse click --button right` (a menu), `mouse scroll`, `mouse drag`, and a `--modifier` on a click or a drag (`shift` extends a selection; on Omarchy, `super` with a left drag moves a window and with a right drag resizes one). Each of those presses and releases within one command.
 
 `mouse hold` and `mouse release` are the halves those verbs are made of. Use them only when none of the verbs can do the job: a button that must stay held while you type, or a path one drag cannot describe. A held button stays down until you release it or the session ends, so send the release.
 
