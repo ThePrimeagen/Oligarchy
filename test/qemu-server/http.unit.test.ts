@@ -428,6 +428,71 @@ describe("Sessions endpoints happy path", () => {
     }),
   );
 
+  it.effect("POST /send-mouse carries a drag path, held modifiers and a press as written", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      const drag = Contract.SendMouseBody.make({
+        id: SESSION_ID,
+        x: 0.1,
+        y: 0.2,
+        button: "left",
+        path: [
+          { x: 0.5, y: 0.2 },
+          { x: 0.9, y: 0.9 },
+        ],
+        modifiers: ["super"],
+        agent: AGENT_ID,
+      });
+      const held = Contract.SendMouseBody.make({
+        id: SESSION_ID,
+        x: 0.5,
+        y: 0.5,
+        button: "wheel-right",
+        press: "down",
+        agent: AGENT_ID,
+      });
+      yield* Effect.gen(function* () {
+        const api = yield* client;
+        yield* api.Sessions.sendMouse({ payload: drag });
+        yield* api.Sessions.sendMouse({ payload: held });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.sessions.calls.filter((call) => call.method === "sendMouse")).toEqual([
+        { method: "sendMouse", args: [SESSION_ID, drag] },
+        { method: "sendMouse", args: [SESSION_ID, held] },
+      ]);
+    }),
+  );
+
+  it.effect(
+    "POST /send-mouse with an unknown modifier, an empty modifier list or a bad press is 400",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture();
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          const headers = { authorization: `Bearer ${TOKEN}` };
+          const base = { id: SESSION_ID, x: 0.5, y: 0.5, button: "left", agent: AGENT_ID };
+          const bodies: ReadonlyArray<readonly [object, string]> = [
+            [{ ...base, modifiers: ["meta"] }, '["modifiers"'],
+            [{ ...base, modifiers: [] }, '["modifiers"]'],
+            [{ ...base, press: "click" }, '["press"]'],
+            [{ ...base, path: [{ x: 0.5 }] }, '["path"'],
+          ];
+          for (const [body, where] of bodies) {
+            const response = yield* http.post("/send-mouse", {
+              headers,
+              body: HttpBody.jsonUnsafe(body),
+            });
+            expect(response.status).toBe(400);
+            expect(yield* response.json).toMatchObject({ error: expect.stringContaining(where) });
+          }
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.sessions.calls).toEqual([]);
+        expect(fixed.log.lines).toHaveLength(4);
+        expect(fixed.log.lines.every((line) => line.skipSentry)).toBe(true);
+      }),
+  );
+
   it.effect("POST /intent/start and /intent/end forward their fields", () =>
     Effect.gen(function* () {
       const fixed = fixture();

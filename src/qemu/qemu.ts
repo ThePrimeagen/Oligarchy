@@ -1,5 +1,5 @@
 import { homedir, tmpdir } from "node:os";
-import { Context, Effect, FileSystem, Layer, Path } from "effect";
+import { Array as Arr, Context, Effect, Exit, FileSystem, Layer, Path } from "effect";
 import type { PlatformError, Scope } from "effect";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import * as Log from "../observability/log.ts";
@@ -27,6 +27,20 @@ const KEY_CHORD_GAP_MS = 60;
 const TABLET_AXIS_MAX = 0x7fff;
 // Guest double-click detection needs a gap between successive press/release pairs.
 const MULTI_CLICK_GAP_MS = 50;
+// A toolkit starts a drag only once the pointer has moved past a threshold while pressed, and
+// follows the motion events it then receives: one jump from A to B is a click at B to GTK and
+// Qt. Eight steps per segment cross the threshold on the first and keep a path of a few points
+// under a second; 20 ms lets the guest take each report before the next.
+const DRAG_STEPS = 8;
+const DRAG_STEP_GAP_MS = 20;
+
+// The qcode QEMU knows each held modifier by; super is the left meta key, as send-keys' <M-...>.
+const MODIFIER_QCODE: Readonly<Record<Domain.MouseModifier, string>> = {
+  shift: "shift",
+  ctrl: "ctrl",
+  alt: "alt",
+  super: "meta_l",
+};
 
 // A session dir with its firmware copy and the disk QEMU boots from: the caller's, or the fresh
 // qcow2 `prepare` created in the dir.
@@ -51,11 +65,19 @@ export type StartInput = {
   readonly record: Client.Recorder;
 };
 
+// The handler has already checked the combinations: a path or a press comes with a pressable
+// button and without clicks, modifiers with a button.
 export type MouseInput = {
   readonly x: number;
   readonly y: number;
   readonly button?: Domain.MouseButton;
   readonly clicks?: number;
+  // A drag from (x, y) through these points, released at the last.
+  readonly path?: Arr.NonEmptyReadonlyArray<Domain.ScreenPoint>;
+  // Held around the pointer events of this request.
+  readonly modifiers?: Arr.NonEmptyReadonlyArray<Domain.MouseModifier>;
+  // Half a click, held across requests.
+  readonly press?: Domain.MousePress;
 };
 
 export type QemuHandle = {
@@ -222,31 +244,96 @@ const make: Effect.Effect<
       mouse: MouseInput,
       record: Client.Recorder,
     ) {
-      const abs: ReadonlyArray<Domain.QmpInputEvent> = [
-        { type: "abs", data: { axis: "x", value: Math.round(mouse.x * TABLET_AXIS_MAX) } },
-        { type: "abs", data: { axis: "y", value: Math.round(mouse.y * TABLET_AXIS_MAX) } },
+      const at = (point: Domain.ScreenPoint): ReadonlyArray<Domain.QmpInputEvent> => [
+        { type: "abs", data: { axis: "x", value: Math.round(point.x * TABLET_AXIS_MAX) } },
+        { type: "abs", data: { axis: "y", value: Math.round(point.y * TABLET_AXIS_MAX) } },
       ];
       const send = (events: ReadonlyArray<Domain.QmpInputEvent>) =>
         client.execute({ execute: "input-send-event", arguments: { events } }, record);
-      if (mouse.button === undefined) {
-        yield* send(abs);
+      const button = mouse.button;
+      if (button === undefined) {
+        yield* send(at(mouse));
         return;
       }
-      const button = mouse.button;
-      const clicks = mouse.clicks ?? 1;
+      const down: Domain.QmpInputEvent = { type: "btn", data: { button, down: true } };
+      const up: Domain.QmpInputEvent = { type: "btn", data: { button, down: false } };
+
       // usb-tablet applies the event list then syncs once: down and up in the same list leave
       // the button unchanged, so the guest never sees a click. The release always goes out, even
       // after a failed press, so the guest is never left with a button held down.
-      for (let click = 0; click < clicks; click++) {
-        const pressed = yield* Effect.exit(
-          send([...abs, { type: "btn", data: { button, down: true } }]),
-        );
-        yield* send([{ type: "btn", data: { button, down: false } }]);
-        yield* pressed;
-        if (click + 1 < clicks) {
-          yield* Effect.sleep(MULTI_CLICK_GAP_MS);
+      const click = Effect.gen(function* () {
+        const clicks = mouse.clicks ?? 1;
+        for (let pulse = 0; pulse < clicks; pulse++) {
+          const pressed = yield* Effect.exit(send([...at(mouse), down]));
+          yield* send([up]);
+          yield* pressed;
+          if (pulse + 1 < clicks) {
+            yield* Effect.sleep(MULTI_CLICK_GAP_MS);
+          }
         }
+      });
+
+      // Each step is its own exchange: abs events in one list collapse to the last position.
+      // The release lands at the path's end after a failed move too, so the guest is never left
+      // mid-drag with the button down.
+      const drag = (points: Arr.NonEmptyReadonlyArray<Domain.ScreenPoint>) =>
+        Effect.gen(function* () {
+          const moved = yield* Effect.exit(
+            Effect.gen(function* () {
+              yield* send([...at(mouse), down]);
+              let from: Domain.ScreenPoint = mouse;
+              for (const point of points) {
+                for (let step = 1; step <= DRAG_STEPS; step++) {
+                  yield* Effect.sleep(DRAG_STEP_GAP_MS);
+                  const along = step / DRAG_STEPS;
+                  yield* send(
+                    at({
+                      x: from.x + (point.x - from.x) * along,
+                      y: from.y + (point.y - from.y) * along,
+                    }),
+                  );
+                }
+                from = point;
+              }
+              yield* Effect.sleep(DRAG_STEP_GAP_MS);
+            }),
+          );
+          yield* send([...at(Arr.lastNonEmpty(points)), up]);
+          yield* moved;
+        });
+
+      const gesture = Effect.gen(function* () {
+        if (mouse.press !== undefined) {
+          yield* send([...at(mouse), mouse.press === "down" ? down : up]);
+          return;
+        }
+        if (mouse.path !== undefined) {
+          yield* drag(mouse.path);
+          return;
+        }
+        yield* click;
+      });
+
+      const modifiers = mouse.modifiers;
+      if (modifiers === undefined) {
+        yield* gesture;
+        return;
       }
+      const held = (
+        pressed: boolean,
+        order: ReadonlyArray<Domain.MouseModifier>,
+      ): ReadonlyArray<Domain.QmpInputEvent> =>
+        order.map((modifier) => ({
+          type: "key",
+          data: { down: pressed, key: { type: "qcode", data: MODIFIER_QCODE[modifier] } },
+        }));
+      // Pressed as their own exchange first and let go as their own exchange last: after a
+      // failed gesture, and after a failed press too, since the row can be refused once QEMU has
+      // taken the keys. The guest is never left with a modifier held down.
+      const pressed = yield* Effect.exit(send(held(true, modifiers)));
+      const done = Exit.isSuccess(pressed) ? yield* Effect.exit(gesture) : pressed;
+      yield* send(held(false, Arr.reverse(modifiers)));
+      yield* done;
     });
 
     const screendump = Effect.fn("Qemu.screendump")(function* (record: Client.Recorder) {

@@ -54,6 +54,11 @@ const SAVE_POWEROFF_REASON = "guest did not power off within 2 minutes";
 // A click is two QMP exchanges and two action rows; cap the pulse count so one request cannot
 // enqueue an unbounded amount of work.
 const MAX_CLICKS = 100;
+// A drag is an exchange per interpolated step of every point plus the press and the release;
+// sixteen points is a generous freehand path and stays within what MAX_CLICKS allows.
+const MAX_DRAG_POINTS = 16;
+// Four modifier names exist; a longer list is a caller repeating itself.
+const MAX_MODIFIERS = Domain.MouseModifier.literals.length;
 // Each chord is a QMP exchange and an action row, paced ~60ms apart; cap the count so one request
 // cannot run for many minutes or write thousands of rows.
 const MAX_KEYS = 1000;
@@ -783,8 +788,10 @@ const make = (maxJobs: number) =>
       input: Contract.SendMouseBody,
     ) {
       const started = yield* Clock.currentTimeMillis;
-      const { x, y, button, clicks } = input;
-      if (!(x >= 0 && x <= 1 && y >= 0 && y <= 1)) {
+      const { x, y, button, clicks, path, modifiers, press } = input;
+      const onScreen = (point: Domain.ScreenPoint) =>
+        point.x >= 0 && point.x <= 1 && point.y >= 0 && point.y <= 1;
+      if (!onScreen(input)) {
         return yield* badRequest("mouse: x and y must be in 0..1", live);
       }
       if (
@@ -796,10 +803,51 @@ const make = (maxJobs: number) =>
           live,
         );
       }
+      // A drag or a press holds the button; a wheel pulse cannot be held.
+      const pressable = button === "left" || button === "middle" || button === "right";
+      if (path !== undefined) {
+        if (!pressable) {
+          return yield* badRequest("mouse: a drag needs button left, middle or right", live);
+        }
+        if (clicks !== undefined) {
+          return yield* badRequest("mouse: clicks cannot combine with a drag", live);
+        }
+        if (press !== undefined) {
+          return yield* badRequest("mouse: press cannot combine with a drag", live);
+        }
+        if (path.length > MAX_DRAG_POINTS) {
+          return yield* badRequest(
+            `mouse: a drag has at most ${String(MAX_DRAG_POINTS)} points`,
+            live,
+          );
+        }
+        if (!path.every(onScreen)) {
+          return yield* badRequest("mouse: drag points must be in 0..1", live);
+        }
+      }
+      if (press !== undefined) {
+        if (!pressable) {
+          return yield* badRequest("mouse: press needs button left, middle or right", live);
+        }
+        if (clicks !== undefined) {
+          return yield* badRequest("mouse: clicks cannot combine with press", live);
+        }
+      }
+      if (modifiers !== undefined) {
+        if (button === undefined) {
+          return yield* badRequest("mouse: modifiers need a button", live);
+        }
+        if (modifiers.length > MAX_MODIFIERS) {
+          return yield* badRequest(`mouse: at most ${String(MAX_MODIFIERS)} modifiers`, live);
+        }
+      }
       const gesture = Object.assign(
         { x, y },
         button === undefined ? undefined : { button },
         clicks === undefined ? undefined : { clicks },
+        path === undefined ? undefined : { path },
+        modifiers === undefined ? undefined : { modifiers },
+        press === undefined ? undefined : { press },
       );
       yield* followed(
         live,
@@ -808,9 +856,15 @@ const make = (maxJobs: number) =>
           .sendMouse(gesture, recorder(live))
           .pipe(Effect.mapError((error) => exchangeFailed(error, live))),
       );
-      const pulses = clicks === undefined || clicks === 1 ? "" : ` ×${String(clicks)}`;
+      let suffix = clicks === undefined || clicks === 1 ? "" : ` ×${String(clicks)}`;
+      if (press !== undefined) {
+        suffix = ` ${press}`;
+      } else if (path !== undefined) {
+        suffix = ` drag to ${path.map((point) => `${String(point.x)} ${String(point.y)}`).join(", ")}`;
+      }
+      const held = modifiers === undefined ? "" : modifiers.map((key) => ` +${key}`).join("");
       return yield* log.info(
-        `mouse ${String(x)} ${String(y)}${button === undefined ? "" : ` ${button}${pulses}`} in ${yield* elapsed(started)}ms`,
+        `mouse ${String(x)} ${String(y)}${button === undefined ? "" : ` ${button}${suffix}${held}`} in ${yield* elapsed(started)}ms`,
         { location: live.id, agentId: live.agent },
       );
     });

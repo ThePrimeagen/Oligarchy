@@ -530,6 +530,235 @@ describe("QemuHandle.sendMouse", () => {
       });
     }),
   );
+
+  const AXIS_MAX = 0x7fff;
+  const at = (x: number, y: number): ReadonlyArray<Domain.QmpInputEvent> => [
+    { type: "abs", data: { axis: "x", value: Math.round(x * AXIS_MAX) } },
+    { type: "abs", data: { axis: "y", value: Math.round(y * AXIS_MAX) } },
+  ];
+  const down = (button: Domain.MouseButton): Domain.QmpInputEvent => ({
+    type: "btn",
+    data: { button, down: true },
+  });
+  const up = (button: Domain.MouseButton): Domain.QmpInputEvent => ({
+    type: "btn",
+    data: { button, down: false },
+  });
+  const key = (code: string, pressed: boolean): Domain.QmpInputEvent => ({
+    type: "key",
+    data: { down: pressed, key: { type: "qcode", data: code } },
+  });
+  const events = (
+    socket: FakeSocket.FakeQmpSocket,
+  ): ReadonlyArray<ReadonlyArray<Domain.QmpInputEvent>> =>
+    commands(socket)
+      .slice(1)
+      .map((command) => (command.execute === "input-send-event" ? command.arguments.events : []));
+
+  // One drag step at a time: the clock passes one 20 ms gap, then the exchange it released
+  // round-trips before the next sleep is registered.
+  const steps = (count: number) =>
+    Effect.gen(function* () {
+      for (let i = 0; i < count; i++) {
+        yield* TestClock.adjust(20);
+        yield* settle;
+      }
+    });
+
+  it.effect(
+    "drags: presses at the start, moves in eight steps 20 ms apart, releases at the end",
+    () =>
+      Effect.gen(function* () {
+        const { socket, qemu } = yield* fixture();
+        const handle = yield* boot(qemu, FakeSocket.recorder().record);
+        const fiber = yield* Effect.forkChild(
+          handle.sendMouse(
+            { x: 0, y: 0, button: "left", path: [{ x: 1, y: 0 }] },
+            FakeSocket.recorder().record,
+          ),
+        );
+        yield* settle;
+        expect(commands(socket)).toHaveLength(2);
+        yield* TestClock.adjust(19);
+        yield* settle;
+        expect(commands(socket)).toHaveLength(2);
+        yield* TestClock.adjust(1);
+        yield* settle;
+        expect(commands(socket)).toHaveLength(3);
+        yield* steps(7);
+        expect(commands(socket)).toHaveLength(10);
+        yield* steps(1);
+        yield* Fiber.join(fiber);
+        const moves = [1, 2, 3, 4, 5, 6, 7, 8].map((step) => at(step / 8, 0));
+        expect(events(socket)).toEqual([
+          [...at(0, 0), down("left")],
+          ...moves,
+          [...at(1, 0), up("left")],
+        ]);
+      }),
+  );
+
+  it.effect(
+    "a drag through several points interpolates every segment and releases at the last",
+    () =>
+      Effect.gen(function* () {
+        const { socket, qemu } = yield* fixture();
+        const handle = yield* boot(qemu, FakeSocket.recorder().record);
+        const fiber = yield* Effect.forkChild(
+          handle.sendMouse(
+            {
+              x: 0.5,
+              y: 0.5,
+              button: "right",
+              path: [
+                { x: 0.5, y: 1 },
+                { x: 0, y: 1 },
+              ],
+            },
+            FakeSocket.recorder().record,
+          ),
+        );
+        yield* settle;
+        yield* steps(17);
+        yield* Fiber.join(fiber);
+        const sent = events(socket);
+        expect(sent).toHaveLength(18);
+        expect(sent[0]).toEqual([...at(0.5, 0.5), down("right")]);
+        expect(sent[8]).toEqual(at(0.5, 1));
+        expect(sent[16]).toEqual(at(0, 1));
+        expect(sent[17]).toEqual([...at(0, 1), up("right")]);
+      }),
+  );
+
+  it.effect(
+    "releases at the end of the drag even when a move fails, and fails with the move's error",
+    () =>
+      Effect.gen(function* () {
+        const { socket, qemu } = yield* fixture({
+          respond: (command) =>
+            command.execute === "input-send-event" &&
+            command.arguments.events.every((event) => event.type === "abs")
+              ? [FakeSocket.errorLine(command.id, "GenericError", "no tablet")]
+              : FakeSocket.acceptAll(command),
+        });
+        const handle = yield* boot(qemu, FakeSocket.recorder().record);
+        const fiber = yield* Effect.forkChild(
+          Effect.flip(
+            handle.sendMouse(
+              { x: 0, y: 0, button: "left", path: [{ x: 1, y: 1 }] },
+              FakeSocket.recorder().record,
+            ),
+          ),
+        );
+        yield* settle;
+        yield* steps(2);
+        const error = yield* Fiber.join(fiber);
+        expect(error).toMatchObject({ _tag: "QmpError", desc: "no tablet" });
+        expect(events(socket)).toEqual([
+          [...at(0, 0), down("left")],
+          at(1 / 8, 1 / 8),
+          [...at(1, 1), up("left")],
+        ]);
+      }),
+  );
+
+  it.effect("holds the modifiers before the click and lets them go after, in reverse order", () =>
+    Effect.gen(function* () {
+      const { socket, qemu } = yield* fixture();
+      const handle = yield* boot(qemu, FakeSocket.recorder().record);
+      yield* handle.sendMouse(
+        { x: 0.5, y: 0.5, button: "left", modifiers: ["shift", "super"] },
+        FakeSocket.recorder().record,
+      );
+      expect(events(socket)).toEqual([
+        [key("shift", true), key("meta_l", true)],
+        [...at(0.5, 0.5), down("left")],
+        [up("left")],
+        [key("meta_l", false), key("shift", false)],
+      ]);
+    }),
+  );
+
+  it.effect(
+    "lets the modifiers go even when the click fails, and fails with the click's error",
+    () =>
+      Effect.gen(function* () {
+        const { socket, qemu } = yield* fixture({
+          respond: (command) =>
+            command.execute === "input-send-event" &&
+            command.arguments.events.some((event) => event.type === "btn" && event.data.down)
+              ? [FakeSocket.errorLine(command.id, "GenericError", "no tablet")]
+              : FakeSocket.acceptAll(command),
+        });
+        const handle = yield* boot(qemu, FakeSocket.recorder().record);
+        const error = yield* Effect.flip(
+          handle.sendMouse(
+            { x: 0.5, y: 0.5, button: "left", modifiers: ["ctrl"] },
+            FakeSocket.recorder().record,
+          ),
+        );
+        expect(error).toMatchObject({ _tag: "QmpError", desc: "no tablet" });
+        expect(events(socket)).toEqual([
+          [key("ctrl", true)],
+          [...at(0.5, 0.5), down("left")],
+          [up("left")],
+          [key("ctrl", false)],
+        ]);
+      }),
+  );
+
+  it.effect("skips the gesture but still lets the modifiers go when pressing them failed", () =>
+    Effect.gen(function* () {
+      // The row can be refused after QEMU took the keys, so a failed press is still released.
+      const { socket, qemu } = yield* fixture({
+        respond: (command) =>
+          command.execute === "input-send-event" &&
+          command.arguments.events.some((event) => event.type === "key" && event.data.down)
+            ? [FakeSocket.errorLine(command.id, "GenericError", "no keyboard")]
+            : FakeSocket.acceptAll(command),
+      });
+      const handle = yield* boot(qemu, FakeSocket.recorder().record);
+      const error = yield* Effect.flip(
+        handle.sendMouse(
+          { x: 0.5, y: 0.5, button: "left", modifiers: ["alt"] },
+          FakeSocket.recorder().record,
+        ),
+      );
+      expect(error).toMatchObject({ _tag: "QmpError", desc: "no keyboard" });
+      expect(events(socket)).toEqual([[key("alt", true)], [key("alt", false)]]);
+    }),
+  );
+
+  it.effect("press down leaves the button held and press up lets it go, one exchange each", () =>
+    Effect.gen(function* () {
+      const { socket, qemu } = yield* fixture();
+      const handle = yield* boot(qemu, FakeSocket.recorder().record);
+      yield* handle.sendMouse(
+        { x: 0.25, y: 0.25, button: "left", press: "down" },
+        FakeSocket.recorder().record,
+      );
+      yield* handle.sendMouse(
+        { x: 0.75, y: 0.75, button: "left", press: "up" },
+        FakeSocket.recorder().record,
+      );
+      expect(events(socket)).toEqual([
+        [...at(0.25, 0.25), down("left")],
+        [...at(0.75, 0.75), up("left")],
+      ]);
+    }),
+  );
+
+  it.effect("a horizontal wheel button clicks like any other", () =>
+    Effect.gen(function* () {
+      const { socket, qemu } = yield* fixture();
+      const handle = yield* boot(qemu, FakeSocket.recorder().record);
+      yield* handle.sendMouse(
+        { x: 0.5, y: 0.5, button: "wheel-left" },
+        FakeSocket.recorder().record,
+      );
+      expect(events(socket)).toEqual([[...at(0.5, 0.5), down("wheel-left")], [up("wheel-left")]]);
+    }),
+  );
 });
 
 describe("QemuHandle.screendump", () => {
