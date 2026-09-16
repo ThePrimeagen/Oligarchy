@@ -76,11 +76,13 @@ export const html = `<!doctype html>
         cursor: pointer;
       }
       button:disabled {
-        opacity: 0.45;
+        background: #c4b48a;
+        color: #6a5430;
         cursor: default;
       }
-      #start {
+      #start:not(:disabled) {
         background: #2e7d32;
+        color: #fff8e7;
       }
       #kick {
         margin-top: 16px;
@@ -97,14 +99,17 @@ export const html = `<!doctype html>
         max-width: calc(100vw - 24px);
         height: auto;
       }
+      canvas[hidden] {
+        display: none;
+      }
       #fx {
         position: fixed;
         left: 36px;
         top: 24px;
-        font-size: 56px;
+        font-size: 72px;
         font-weight: 900;
         pointer-events: none;
-        text-shadow: 3px 3px 0 #3b2414;
+        text-shadow: 4px 4px 0 #3b2414;
       }
     </style>
   </head>
@@ -201,7 +206,7 @@ function showFx(judgment) {
     fxFrom = "#f95738";
     fxTo = "#9b1d20";
   }
-  fxUntil = performance.now() + 420;
+  fxUntil = performance.now() + 900;
 }
 
 function paintLobby() {
@@ -287,27 +292,36 @@ function paintGame() {
   var originX = 280;
   snapshot.players.forEach(function (player) {
     var x = originX + player.slot * colW;
-    var depthPx = player.depth * 36;
+    var depthPx = Math.min(player.depth * 36, canvas.height - ground - 40);
     hole(x, ground, depthPx, player.ghost, opacity);
     miner(x, ground + depthPx + 20, player.ghost, opacity);
   });
   var next = snapshot.notes.find(function (note) {
     return !judged[note.id];
   });
+  ctx.fillStyle = "#fff8e7";
+  ctx.font = "800 22px Trebuchet MS";
+  ctx.fillText("arrows", 70, 170);
   ctx.fillStyle = "#3b2414";
   ctx.fillRect(40, 180, 160, 280);
   ctx.strokeStyle = "#f4d35e";
   ctx.lineWidth = 4;
   ctx.strokeRect(40, 180, 160, 280);
-  ctx.fillStyle = "#fff8e7";
-  ctx.font = "800 28px Trebuchet MS";
-  ctx.fillText("arrows", 64, 220);
+  ctx.strokeStyle = "#7fff6a";
+  ctx.beginPath();
+  ctx.moveTo(48, 400);
+  ctx.lineTo(192, 400);
+  ctx.stroke();
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(40, 180, 160, 280);
+  ctx.clip();
   snapshot.notes.forEach(function (note) {
     if (judged[note.id]) {
       return;
     }
     var dt = note.hitMs - now;
-    if (dt < -160 || dt > 2200) {
+    if (dt < -160 || dt > 1800) {
       return;
     }
     var y = 400 - dt * 0.12;
@@ -316,11 +330,15 @@ function paintGame() {
     ctx.fillStyle = next && next.id === note.id ? "#7fff6a" : "#ffe066";
     ctx.fillText(arrows[note.direction] || "?", 90, y);
   });
+  ctx.restore();
   if (performance.now() < fxUntil) {
-    var t = 1 - (fxUntil - performance.now()) / 420;
+    var t = 1 - (fxUntil - performance.now()) / 900;
     fxEl.textContent = fxText;
     fxEl.style.color = t < 0.5 ? fxFrom : fxTo;
-    fxEl.style.opacity = String(1 - t * 0.15);
+    fxEl.style.opacity = String(1 - t * 0.2);
+    ctx.font = "900 64px Trebuchet MS";
+    ctx.fillStyle = t < 0.5 ? fxFrom : fxTo;
+    ctx.fillText(fxText, 240, 80);
   } else {
     fxEl.textContent = "";
   }
@@ -374,6 +392,7 @@ window.addEventListener("keydown", function (event) {
   if (key !== "w" && key !== "a" && key !== "s" && key !== "d") {
     return;
   }
+  event.preventDefault();
   if (snapshot === null || snapshot.phase !== "playing") {
     return;
   }
