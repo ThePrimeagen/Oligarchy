@@ -199,17 +199,26 @@ describe("module conventions", () => {
   // An unstable barrel loads every module of its group: `effect/unstable/httpapi` brings the
   // Scalar docs page, `@effect/platform-node` brings the redis client, msgpackr and the mime
   // table, and a CLI paid for all of it on every call. The module path loads the module alone.
-  it("imports Effect core from the barrel and unstable and platform modules by module path", () => {
+  it("imports Effect core from the barrel and unstable and platform modules as namespaces by module path", () => {
     expect(
       violations((_, source) =>
-        [...source.matchAll(/from\s+"((?:effect|@effect\/platform-node)(?:\/[^"]+)?)"/g)]
-          .map((m) => m[1] ?? "")
-          .filter(
-            (specifier) =>
-              !/^(?:effect|effect\/unstable\/[a-z]+\/[A-Z]\w+|@effect\/platform-node\/[A-Z]\w+)$/.test(
-                specifier,
-              ),
+        [
+          ...source.matchAll(
+            /import\s+(?:type\s+)?([^;]*?)\s+from\s+"((?:effect|@effect\/platform-node)(?:\/[^"]+)?)"/g,
           ),
+        ].flatMap((m) => {
+          const clause = m[1] ?? "";
+          const specifier = m[2] ?? "";
+          if (specifier === "effect") {
+            return [];
+          }
+          if (!/^(?:effect\/unstable\/[a-z]+|@effect\/platform-node)\/[A-Z]\w+$/.test(specifier)) {
+            return [specifier];
+          }
+          return /^\*\s+as\s+[A-Za-z_$][\w$]*$/.test(clause)
+            ? []
+            : [`import ${clause} from "${specifier}"`];
+        }),
       ),
     ).toEqual([]);
   });

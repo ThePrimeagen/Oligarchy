@@ -1,16 +1,18 @@
 #!/bin/sh
 # A driving agent calls this many times per task, so it runs one bundle with a bytecode cache
 # instead of loading three hundred modules on every call. The bundle is rebuilt when a source, the
-# lockfile or this wrapper is newer than it; a failed build says so and runs the sources as they
-# are. Bun ignores a bytecode cache that does not match its .js, so a torn refresh only costs
-# speed. The outputs carry the time the build started, so a source edited while it ran still
-# counts as newer. `import.meta` is defined away because the bytecode format is CommonJS, where
-# the graph's one use (ConfigProvider.fromEnv's `import.meta?.env`) would not parse. Stack traces
-# name the bundle; `bun run client` runs the sources for one that names them.
+# lockfile or this wrapper is newer than either of its two files, or one is missing; a failed
+# build prints the build's output and one line saying so, then runs the sources as they are. Bun
+# ignores a bytecode cache that does not match its .js, and two builds landing at once leave
+# one file older than the edit that separated them, so a torn refresh runs the sources' truth at
+# the latest one call later. The outputs carry the time the build started, so a source edited
+# while it ran still counts as newer. `import.meta` is defined away because the bytecode format is
+# CommonJS, where the graph's one use (ConfigProvider.fromEnv's `import.meta?.env`) would not
+# parse. Stack traces name the bundle; `bun run client` runs the sources for one that names them.
 root=$(dirname "$0")
 cache="$root/node_modules/.cache/oligarchy/client"
-if [ ! -f "$cache/main.js.jsc" ] ||
-  [ -n "$(find "$root/src" "$root/bun.lock" "$root/client" -newer "$cache/main.js.jsc" -print -quit)" ]; then
+if [ ! -f "$cache/main.js" ] || [ ! -f "$cache/main.js.jsc" ] ||
+  [ -n "$(find "$root/src" "$root/bun.lock" "$root/client" \( -newer "$cache/main.js" -o -newer "$cache/main.js.jsc" \) -print)" ]; then
   tmp="$cache.$$"
   mkdir -p "$tmp" && touch "$tmp/stamp" &&
     output=$(bun build --target=bun --bytecode --define 'import.meta={}' --outdir "$tmp" "$root/src/client/main.ts" 2>&1) &&

@@ -20,7 +20,8 @@ exist.
   session REPL spawns its children the same way. The one exception is `./client`: a driving agent
   calls it many times per task, so it runs `bun build --target=bun --bytecode` of its entry from
   `node_modules/.cache/oligarchy/client/`, rebuilt when a source, `bun.lock` or the wrapper is
-  newer than the cache, and runs the sources with one stderr line saying so when the build fails
+  newer than either cached file or one is missing, and when the build fails prints its output and
+  one line saying so on stderr, then runs the sources
   (`test/integration/client.integration.test.ts` pins all three). A stack trace from the bundle
   names the bundle; `bun run client` runs the sources for one that names them. `--no-env-file`
   because Bun's own loader would

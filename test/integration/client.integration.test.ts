@@ -740,6 +740,24 @@ describe("./client bundle cache", () => {
     expect((await stat(BUNDLE)).mtimeMs).toBeGreaterThan(0);
   });
 
+  // Two builds landing at once can leave one file from each; either file older than a source, or
+  // missing, is a rebuild, so the next call repairs it instead of running the stale half.
+  it("rebuilds when only the bundle is older than the sources, or missing", async () => {
+    await runClient(["--help"]);
+    await utimes(BUNDLE, EPOCH, EPOCH);
+    const aged = await runClient(["--help"]);
+    expect(aged.stderr).toBe("");
+    expect(aged.code).toBe(0);
+    expect((await stat(BUNDLE)).mtimeMs).toBeGreaterThan(0);
+
+    await rm(BUNDLE);
+    const missing = await runClient(["--help"]);
+    expect(missing.stderr).toBe("");
+    expect(missing.code).toBe(0);
+    expect(missing.stdout).toBe(aged.stdout);
+    expect((await stat(BUNDLE)).size).toBeGreaterThan(0);
+  });
+
   it("runs the sources, and says so, when the build fails", async () => {
     const fresh = await runClient(["--help"]);
     await age();
