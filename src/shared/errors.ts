@@ -6,7 +6,7 @@ import {
   SchemaAST,
   SchemaTransformation,
 } from "effect";
-import { HttpApiSchema } from "effect/unstable/httpapi";
+import * as HttpApiSchema from "effect/unstable/httpapi/HttpApiSchema";
 import * as Domain from "./domain.ts";
 
 // ---------------------------------------------------------------------------

@@ -196,12 +196,20 @@ describe("module conventions", () => {
     ).toEqual([]);
   });
 
-  it("imports Effect core from the barrel and unstable modules by deep path", () => {
+  // An unstable barrel loads every module of its group: `effect/unstable/httpapi` brings the
+  // Scalar docs page, `@effect/platform-node` brings the redis client, msgpackr and the mime
+  // table, and a CLI paid for all of it on every call. The module path loads the module alone.
+  it("imports Effect core from the barrel and unstable and platform modules by module path", () => {
     expect(
       violations((_, source) =>
-        [...source.matchAll(/from\s+"(effect\/[^"]+)"/g)]
+        [...source.matchAll(/from\s+"((?:effect|@effect\/platform-node)(?:\/[^"]+)?)"/g)]
           .map((m) => m[1] ?? "")
-          .filter((specifier) => !/^effect\/(unstable\/[a-z]+|testing)$/.test(specifier)),
+          .filter(
+            (specifier) =>
+              !/^(?:effect|effect\/unstable\/[a-z]+\/[A-Z]\w+|@effect\/platform-node\/[A-Z]\w+)$/.test(
+                specifier,
+              ),
+          ),
       ),
     ).toEqual([]);
   });

@@ -1,5 +1,5 @@
 import { Cause, Clock, Context, Effect, Layer, Ref, Schedule, Semaphore } from "effect";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import * as Cli from "../cli.ts";
 import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";

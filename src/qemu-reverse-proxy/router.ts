@@ -1,15 +1,13 @@
 import { Context, Effect, Layer, Option, Result, Schema, Semaphore, Stream } from "effect";
-import {
-  type Headers,
-  HttpBody,
-  HttpClient,
-  type HttpClientError,
-  HttpClientRequest,
-  type HttpClientResponse,
-  HttpMethod,
-  type HttpServerRequest,
-  HttpServerResponse,
-} from "effect/unstable/http";
+import type * as Headers from "effect/unstable/http/Headers";
+import * as HttpBody from "effect/unstable/http/HttpBody";
+import * as HttpClient from "effect/unstable/http/HttpClient";
+import type * as HttpClientError from "effect/unstable/http/HttpClientError";
+import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
+import type * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
+import * as HttpMethod from "effect/unstable/http/HttpMethod";
+import type * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
+import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 import * as ProxyClient from "../client/proxy-client.ts";
 import * as Config from "../config.ts";
 import * as Servers from "../db/servers.ts";

@@ -106,9 +106,15 @@ Durable preferences from the maintainer; when they conflict with generic best pr
 - Import relative modules as namespaces with the `.ts` extension
   (`import * as Sessions from "./sessions.ts"`, `import type * as Domain from "./domain.ts"`);
   side-effect and asset imports are exempt. No barrels, no re-exports, no `export ... from`.
-- Import Effect core from the barrel (`import { Effect, Layer, Schema } from "effect"`) and the
-  rest by deep path: `effect/unstable/cli`, `effect/unstable/http`, `effect/unstable/httpapi`,
-  `effect/unstable/process`, `effect/testing`, `@effect/platform-node`, `@effect/vitest`.
+- Import Effect core from the barrel (`import { Effect, Layer, Schema } from "effect"`) and
+  every other Effect module as a namespace by its module path
+  (`import * as Command from "effect/unstable/cli/Command"`,
+  `import * as NodeServices from "@effect/platform-node/NodeServices"`), never from an unstable
+  or platform barrel. Why: the `effect/unstable/httpapi` barrel loads the Scalar docs page, and
+  `@effect/platform-node` loads the redis client, msgpackr and the mime table, so a CLI paid a
+  quarter of a second per call for modules it never used; the module path loads the module alone
+  (`test/repo/architecture.unit.test.ts` checks it). Tests may import `effect/testing` and
+  `@effect/vitest`.
 - Identifiers are `@oligarchy/<dir>/<file>/<Name>` for schemas, errors and `Context.Reference`s
   (`@oligarchy/shared/errors/BadRequest`, `@oligarchy/qemu-server/sessions/Shutdown`) and
   `@oligarchy/<dir>/<Service>` for services (`@oligarchy/db/Database`, `@oligarchy/qemu-server/Sessions`).

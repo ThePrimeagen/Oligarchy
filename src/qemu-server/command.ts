@@ -1,6 +1,8 @@
 import { Deferred, Effect, Layer, Option, Schema } from "effect";
-import { CliError, Command, Flag } from "effect/unstable/cli";
-import type { HttpServerError } from "effect/unstable/http";
+import * as CliError from "effect/unstable/cli/CliError";
+import * as Command from "effect/unstable/cli/Command";
+import * as Flag from "effect/unstable/cli/Flag";
+import type * as HttpServerError from "effect/unstable/http/HttpServerError";
 import * as Config from "../config.ts";
 import * as Client from "../db/client.ts";
 import * as ExternalFailure from "../external-failure.ts";

@@ -1,5 +1,6 @@
 import { Console, Effect, FileSystem, Option, Path, Stdio, Stream } from "effect";
-import { CliError, Command } from "effect/unstable/cli";
+import * as CliError from "effect/unstable/cli/CliError";
+import * as Command from "effect/unstable/cli/Command";
 import * as Config from "../config.ts";
 import * as ExternalFailure from "../external-failure.ts";
 import * as Contract from "../shared/contract.ts";

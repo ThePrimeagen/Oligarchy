@@ -1,5 +1,5 @@
 import { Context, Effect, FileSystem, Layer, Option, Semaphore } from "effect";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import * as Errors from "../shared/errors.ts";
 import * as Iso from "./iso.ts";
 import * as Process from "./process.ts";
