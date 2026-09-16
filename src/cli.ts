@@ -1,5 +1,6 @@
 import { Effect, Fiber, Ref, Stream } from "effect";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import * as ChildProcess from "effect/unstable/process/ChildProcess";
+import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import * as ExternalFailure from "./external-failure.ts";
 import * as Render from "./observability/render.ts";
 import * as Errors from "./shared/errors.ts";

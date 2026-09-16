@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -698,5 +698,86 @@ describe("./client unhappy path", () => {
     );
     expect(result.stderr).not.toMatch(/fetch failed/);
     expect(result.stderr).not.toMatch(/at file:\/\/.*http\.ts/);
+  });
+});
+
+// The wrapper runs a bytecode bundle it builds under node_modules/.cache and rebuilds when a
+// source is newer; when the build fails it says so and runs the sources as they are.
+describe("./client bundle cache", () => {
+  const CACHE = fileURLToPath(
+    new URL("../../node_modules/.cache/oligarchy/client", import.meta.url),
+  );
+  const BUNDLE = join(CACHE, "main.js");
+  const BYTECODE = join(CACHE, "main.js.jsc");
+  const EPOCH = new Date(0);
+
+  // A cache older than every source, so the next call must rebuild.
+  const age = async (): Promise<void> => {
+    await utimes(BUNDLE, EPOCH, EPOCH);
+    await utimes(BYTECODE, EPOCH, EPOCH);
+  };
+
+  it("builds the bundle once and reuses it while no source is newer", async () => {
+    const first = await runClient(["--help"]);
+    expect(first.stderr).toBe("");
+    expect(first.code).toBe(0);
+    expect(first.stdout).toContain("Drive a guest machine through the qemu server");
+    const built = await stat(BYTECODE);
+    expect((await stat(BUNDLE)).size).toBeGreaterThan(0);
+
+    const second = await runClient(["--help"]);
+    expect(second).toEqual(first);
+    expect((await stat(BYTECODE)).mtimeMs).toBe(built.mtimeMs);
+  });
+
+  it("rebuilds a bundle older than the sources", async () => {
+    await runClient(["--help"]);
+    await age();
+    const result = await runClient(["--help"]);
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    expect((await stat(BYTECODE)).mtimeMs).toBeGreaterThan(0);
+    expect((await stat(BUNDLE)).mtimeMs).toBeGreaterThan(0);
+  });
+
+  // Two builds landing at once can leave one file from each; either file older than a source, or
+  // missing, is a rebuild, so the next call repairs it instead of running the stale half.
+  it("rebuilds when only the bundle is older than the sources, or missing", async () => {
+    await runClient(["--help"]);
+    await utimes(BUNDLE, EPOCH, EPOCH);
+    const aged = await runClient(["--help"]);
+    expect(aged.stderr).toBe("");
+    expect(aged.code).toBe(0);
+    expect((await stat(BUNDLE)).mtimeMs).toBeGreaterThan(0);
+
+    await rm(BUNDLE);
+    const missing = await runClient(["--help"]);
+    expect(missing.stderr).toBe("");
+    expect(missing.code).toBe(0);
+    expect(missing.stdout).toBe(aged.stdout);
+    expect((await stat(BUNDLE)).size).toBeGreaterThan(0);
+  });
+
+  it("runs the sources, and says so, when the build fails", async () => {
+    const fresh = await runClient(["--help"]);
+    await age();
+    // A `bun` ahead on PATH that refuses to build and hands every other call to the real one.
+    const dir = await mkdtemp(join(tmpdir(), "oligarchy-client-bun-"));
+    await writeFile(
+      join(dir, "bun"),
+      `#!/bin/sh\n[ "$1" = build ] && { echo "build refused" >&2; exit 1; }\nexec "${process.execPath}" "$@"\n`,
+      { mode: 0o755 },
+    );
+    try {
+      const result = await runClient(["--help"], { PATH: `${dir}:${process.env.PATH ?? ""}` });
+      expect(result.code).toBe(0);
+      expect(result.stdout).toBe(fresh.stdout);
+      expect(result.stderr).toBe(
+        "build refused\nclient: bundle build failed; running the sources\n",
+      );
+      expect((await stat(BYTECODE)).mtimeMs).toBe(0);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

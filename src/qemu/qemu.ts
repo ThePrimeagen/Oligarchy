@@ -1,7 +1,7 @@
 import { homedir, tmpdir } from "node:os";
 import { Context, Effect, FileSystem, Layer, Path } from "effect";
 import type { PlatformError, Scope } from "effect";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import * as Log from "../observability/log.ts";
 import * as Client from "../qmp/client.ts";
 import * as Socket from "../qmp/socket.ts";

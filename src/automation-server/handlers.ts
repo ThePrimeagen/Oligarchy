@@ -1,6 +1,6 @@
 import { Context, Effect, Layer, Option, Redacted } from "effect";
-import { HttpServerRequest } from "effect/unstable/http";
-import { HttpApiBuilder } from "effect/unstable/httpapi";
+import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
+import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 import * as Config from "../config.ts";
 import * as Automation from "../db/automation.ts";
 import * as Servers from "../db/servers.ts";

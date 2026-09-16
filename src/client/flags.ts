@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { Flag } from "effect/unstable/cli";
+import * as Flag from "effect/unstable/cli/Flag";
 import * as Config from "../config.ts";
 import * as Domain from "../shared/domain.ts";
 

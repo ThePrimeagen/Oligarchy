@@ -1,7 +1,7 @@
 import { WriteStream } from "node:tty";
 import { styleText } from "node:util";
 import { Cause, Console, Effect, Option } from "effect";
-import { CliError } from "effect/unstable/cli";
+import * as CliError from "effect/unstable/cli/CliError";
 import * as ExternalFailure from "../external-failure.ts";
 import type * as Domain from "../shared/domain.ts";
 

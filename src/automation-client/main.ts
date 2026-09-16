@@ -1,5 +1,8 @@
 import { createServer } from "node:http";
-import { NodeHttpClient, NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node";
+import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient";
+import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
+import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   Cause,
   Config as EffectConfig,
@@ -10,8 +13,10 @@ import {
   Option,
   type Runtime,
 } from "effect";
-import { Command } from "effect/unstable/cli";
-import { HttpMiddleware, HttpRouter, HttpServerError } from "effect/unstable/http";
+import * as Command from "effect/unstable/cli/Command";
+import * as HttpMiddleware from "effect/unstable/http/HttpMiddleware";
+import * as HttpRouter from "effect/unstable/http/HttpRouter";
+import * as HttpServerError from "effect/unstable/http/HttpServerError";
 import * as Config from "../config.ts";
 import * as ProxyClient from "../client/proxy-client.ts";
 import * as Client from "../db/client.ts";
