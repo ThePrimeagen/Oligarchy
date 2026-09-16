@@ -10,7 +10,7 @@ import {
   Semaphore,
   Stream,
 } from "effect";
-import { Socket } from "effect/unstable/socket";
+import * as Socket from "effect/unstable/socket/Socket";
 import * as Combat from "./combat.ts";
 import * as Contract from "./contract.ts";
 import type * as Domain from "./domain.ts";

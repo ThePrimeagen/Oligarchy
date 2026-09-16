@@ -1,5 +1,7 @@
 import { Effect, Encoding, Layer, Result } from "effect";
-import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import * as HttpRouter from "effect/unstable/http/HttpRouter";
+import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
+import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 import * as Game from "./game.ts";
 import * as Page from "./page.ts";
 import * as Sprites from "./sprites.ts";

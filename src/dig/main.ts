@@ -1,8 +1,15 @@
 import { createServer } from "node:http";
-import { NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node";
+import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
+import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { Cause, Console, Deferred, Effect, Exit, Layer, type Runtime } from "effect";
-import { CliConfig, CliOutput, Command, GlobalFlag } from "effect/unstable/cli";
-import { HttpMiddleware, HttpRouter, HttpServerError } from "effect/unstable/http";
+import * as CliConfig from "effect/unstable/cli/CliConfig";
+import * as CliOutput from "effect/unstable/cli/CliOutput";
+import * as Command from "effect/unstable/cli/Command";
+import * as GlobalFlag from "effect/unstable/cli/GlobalFlag";
+import * as HttpMiddleware from "effect/unstable/http/HttpMiddleware";
+import * as HttpRouter from "effect/unstable/http/HttpRouter";
+import * as HttpServerError from "effect/unstable/http/HttpServerError";
 import * as Render from "../observability/render.ts";
 import * as Api from "../shared/api.ts";
 import * as DigCommand from "./command.ts";

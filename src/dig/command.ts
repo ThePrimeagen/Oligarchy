@@ -1,6 +1,7 @@
 import { Deferred, Effect, Layer } from "effect";
-import { Command, Flag } from "effect/unstable/cli";
-import type { HttpServerError } from "effect/unstable/http";
+import * as Command from "effect/unstable/cli/Command";
+import * as Flag from "effect/unstable/cli/Flag";
+import type * as HttpServerError from "effect/unstable/http/HttpServerError";
 
 const DEFAULT_PORT = 8080;
 
