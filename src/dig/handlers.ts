@@ -1,7 +1,19 @@
-import { Effect, Layer } from "effect";
+import { Effect, Encoding, Layer, Result } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import * as Game from "./game.ts";
 import * as Page from "./page.ts";
+import * as Sprites from "./sprites.ts";
+
+const png = (b64: string) =>
+  HttpServerResponse.uint8Array(Result.getOrThrow(Encoding.decodeBase64(b64)), {
+    contentType: "image/png",
+  });
+
+const grassPng = png(Sprites.grass);
+const dirtPng = png(Sprites.dirt);
+const crackedPng = png(Sprites.cracked);
+const minerPng = png(Sprites.miner);
+const minerSwingPng = png(Sprites.minerSwing);
 
 const ws = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest;
@@ -18,5 +30,10 @@ export const routes = Layer.mergeAll(
     "/game.js",
     HttpServerResponse.text(Page.script, { contentType: "text/javascript; charset=utf-8" }),
   ),
+  HttpRouter.add("GET", "/sprite/grass.png", grassPng),
+  HttpRouter.add("GET", "/sprite/dirt.png", dirtPng),
+  HttpRouter.add("GET", "/sprite/cracked.png", crackedPng),
+  HttpRouter.add("GET", "/sprite/miner.png", minerPng),
+  HttpRouter.add("GET", "/sprite/miner-swing.png", minerSwingPng),
   HttpRouter.add("GET", "/ws", ws),
 ).pipe(HttpRouter.provideRequest(Game.Game.layer));

@@ -106,10 +106,35 @@ describe("dig page happy path", () => {
       expect(js).toContain("resume");
       expect(js).toContain(String(Domain.MUSIC_LEAD_MS));
       expect(js).toContain("isoCube");
-      expect(js).toContain("grass");
+      expect(js).toContain("drawImage");
+      expect(js).toContain("drawSprite");
+      expect(js).toContain("/sprite/grass.png");
+      expect(js).toContain("/sprite/dirt.png");
+      expect(js).toContain("/sprite/cracked.png");
+      expect(js).toContain("/sprite/miner.png");
+      expect(js).toContain("/sprite/miner-swing.png");
       expect(js).toContain("shatter");
-      expect(js).toContain("voxelMiner");
+      expect(js).toContain("faceCube");
+      expect(js).toContain("visibleDrop");
       expect(js).toContain(String(Domain.DIRT_HP));
+    }).pipe(Effect.provide(serve)),
+  );
+
+  it.effect("serves the grass, dirt, cracked, and miner cube sprites as png", () =>
+    Effect.gen(function* () {
+      const http = yield* HttpClient.HttpClient;
+      const names = ["grass", "dirt", "cracked", "miner", "miner-swing"];
+      for (const name of names) {
+        const res = yield* http.get(`/sprite/${name}.png`);
+        expect(res.status).toBe(200);
+        expect(res.headers["content-type"]).toContain("image/png");
+        const bytes = new Uint8Array(yield* res.arrayBuffer);
+        expect(bytes[0]).toBe(0x89);
+        expect(bytes[1]).toBe(0x50);
+        expect(bytes[2]).toBe(0x4e);
+        expect(bytes[3]).toBe(0x47);
+        expect(bytes.length).toBeGreaterThan(800);
+      }
     }).pipe(Effect.provide(serve)),
   );
 
@@ -190,6 +215,16 @@ describe("dig page happy path", () => {
       expect(snap.players[0]?.depth).toBe(1.25 / Domain.DIRT_HP);
       expect(snap.players[0]?.judged).toEqual([{ noteId: note.id, judgment: "perfect" }]);
       conn.socket.close();
+    }).pipe(Effect.provide(serve)),
+  );
+});
+
+describe("dig page unhappy path", () => {
+  it.effect("does not serve a sprite that is not a cube or miner", () =>
+    Effect.gen(function* () {
+      const http = yield* HttpClient.HttpClient;
+      const res = yield* http.get("/sprite/nope.png");
+      expect(res.status).toBe(404);
     }).pipe(Effect.provide(serve)),
   );
 });

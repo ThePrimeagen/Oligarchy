@@ -158,6 +158,22 @@ var shards = [];
 var swingUntil = 0;
 var lastBroken = {};
 var CUBE_HP = ${String(Domain.DIRT_HP)};
+var COL_ORIGIN = 300;
+var COL_W = 155;
+var GROUND_Y = 250;
+var DROP_H = 32;
+var CUBE_W = 70;
+var CUBE_DRAW_H = 76;
+function loadSprite(src) {
+  var img = new Image();
+  img.src = src;
+  return img;
+}
+var spriteGrass = loadSprite("/sprite/grass.png");
+var spriteDirt = loadSprite("/sprite/dirt.png");
+var spriteCracked = loadSprite("/sprite/cracked.png");
+var spriteMiner = loadSprite("/sprite/miner.png");
+var spriteSwing = loadSprite("/sprite/miner-swing.png");
 var protocol = location.protocol === "https:" ? "wss:" : "ws:";
 var socket = new WebSocket(protocol + "//" + location.host + "/ws");
 
@@ -312,63 +328,24 @@ function isoCube(cx, cy, size, top, left, right, ghost) {
   ctx.restore();
 }
 
-function dirtCube(cx, cy, size, ghost, crack) {
-  isoCube(cx, cy, size, "#c48a4a", "#7a4824", "#a86b35", ghost);
-  if (ghost || crack <= 0) {
-    return;
-  }
+function drawSprite(img, x, y, w, h, ghost) {
   ctx.save();
-  ctx.strokeStyle = "rgba(42,22,12," + String(0.35 + crack * 0.65) + ")";
-  ctx.lineWidth = 1 + crack * 2;
-  ctx.beginPath();
-  ctx.moveTo(cx - size * 0.35, cy - size * 0.15);
-  ctx.lineTo(cx + size * 0.1, cy + size * 0.05);
-  ctx.lineTo(cx + size * 0.4, cy - size * 0.2);
-  ctx.moveTo(cx - size * 0.1, cy - size * 0.4);
-  ctx.lineTo(cx, cy + size * 0.2);
-  ctx.stroke();
+  ctx.globalAlpha = ghost ? 0.5 : 1;
+  if (img.complete && img.naturalWidth > 0) {
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(img, x - w / 2, y - h, w, h);
+  }
   ctx.restore();
 }
 
-function grassCube(cx, cy, size, ghost) {
-  isoCube(cx, cy, size, "#5dbb3b", "#3d7a24", "#7a4824", ghost);
-  if (ghost) {
-    return;
+function faceCube(x, y, w, h, ghost, broken, crack) {
+  var img = spriteDirt;
+  if (broken === 0 && crack <= 0) {
+    img = spriteGrass;
+  } else if (crack > 0) {
+    img = spriteCracked;
   }
-  ctx.fillStyle = "#6fd14a";
-  ctx.fillRect(cx - 3, cy - size * 0.85, 2, 6);
-  ctx.fillRect(cx + 4, cy - size * 0.8, 2, 5);
-  ctx.fillStyle = "#3d7a24";
-  ctx.fillRect(cx - 8, cy - size * 0.7, 2, 4);
-}
-
-function voxelMiner(x, y, ghost, swing) {
-  var lean = swing ? -0.18 : 0;
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(lean);
-  isoCube(0, -36, 9, ghost ? "#fff8e7" : "#ffe066", ghost ? "transparent" : "#d4a017", ghost ? "transparent" : "#f4d35e", ghost);
-  isoCube(0, -18, 11, ghost ? "#fff8e7" : "#5b8c3a", ghost ? "transparent" : "#3d7a24", ghost ? "transparent" : "#6b3f1f", ghost);
-  isoCube(-10, -16, 5, ghost ? "#fff8e7" : "#e8c39a", ghost ? "transparent" : "#c48a4a", ghost ? "transparent" : "#d4a07a", ghost);
-  isoCube(12, swing ? -28 : -14, 5, ghost ? "#fff8e7" : "#e8c39a", ghost ? "transparent" : "#c48a4a", ghost ? "transparent" : "#d4a07a", ghost);
-  isoCube(-6, 0, 6, ghost ? "#fff8e7" : "#6b3f1f", ghost ? "transparent" : "#3b2414", ghost ? "transparent" : "#7a4824", ghost);
-  isoCube(6, 0, 6, ghost ? "#fff8e7" : "#6b3f1f", ghost ? "transparent" : "#3b2414", ghost ? "transparent" : "#7a4824", ghost);
-  ctx.strokeStyle = ghost ? "#fff8e7" : "#5c4030";
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(12, swing ? -28 : -14);
-  ctx.lineTo(22, swing ? 8 : -2);
-  ctx.stroke();
-  ctx.fillStyle = ghost ? "transparent" : "#c0c7d1";
-  ctx.strokeStyle = ghost ? "#fff8e7" : "#3b2414";
-  ctx.beginPath();
-  ctx.moveTo(18, swing ? 4 : -6);
-  ctx.lineTo(28, swing ? 14 : 4);
-  ctx.lineTo(22, swing ? 16 : 6);
-  ctx.closePath();
-  ctx.fill();
-  ctx.stroke();
-  ctx.restore();
+  drawSprite(img, x, y, w, h, ghost);
 }
 
 function rememberJudged(players) {
@@ -430,42 +407,46 @@ function paintGame() {
     return;
   }
   ctx.fillText(snapshot.readyLabel, 24, 64);
-  var ground = 150;
-  var colW = 160;
-  var originX = 310;
-  var cubeSize = 28;
-  var cubeH = 32;
   var row;
   var col;
   var pits = snapshot.players.map(function (player) {
-    return originX + player.slot * colW;
+    var broken = Math.floor(player.totalDamage / CUBE_HP);
+    return {
+      x: COL_ORIGIN + player.slot * COL_W,
+      drop: Math.min(broken, 4),
+    };
   });
-  for (row = 0; row < 4; row++) {
-    for (col = -1; col < 16; col++) {
-      var gx = 200 + col * 52 + (row % 2) * 26;
-      var overPit = pits.some(function (px) {
-        return gx > px - 40 && gx < px + 40 && row > 0;
+  for (row = 0; row < 7; row++) {
+    for (col = 0; col < 13; col++) {
+      var gx = 210 + col * 52 + (row % 2) * 26;
+      var gy = 188 + row * 22;
+      var overPit = pits.some(function (pit) {
+        return gx > pit.x - 42 && gx < pit.x + 42 && gy > GROUND_Y - 30 && gy < GROUND_Y + pit.drop * DROP_H + 40;
       });
       if (overPit) {
         continue;
       }
-      grassCube(gx, ground - 10 + row * 16, 24, false);
+      drawSprite(spriteGrass, gx, gy, 62, 68, false);
     }
   }
   snapshot.players.forEach(function (player) {
-    var x = originX + player.slot * colW;
+    var x = COL_ORIGIN + player.slot * COL_W;
     var broken = Math.floor(player.totalDamage / CUBE_HP);
     var crack = (player.totalDamage % CUBE_HP) / CUBE_HP;
+    var visibleDrop = Math.min(broken, 4);
+    var faceY = GROUND_Y + visibleDrop * DROP_H;
+    var shake = crack > 0 && !player.ghost ? Math.sin(t / 40) * crack * 3 : 0;
     var i;
-    for (i = 6; i >= 0; i--) {
-      var cy = ground + 36 + i * cubeH;
-      if (i === 0 && broken === 0) {
-        grassCube(x, cy, cubeSize, player.ghost);
+    for (i = 5; i >= 0; i--) {
+      var cy = faceY + 18 + i * 30;
+      if (i === 0) {
+        faceCube(x + shake, cy, CUBE_W, CUBE_DRAW_H, player.ghost, broken, crack);
       } else {
-        dirtCube(x, cy, cubeSize, player.ghost, i === 0 ? crack : 0);
+        drawSprite(spriteDirt, x, cy, CUBE_W, CUBE_DRAW_H, player.ghost);
       }
     }
-    voxelMiner(x, ground + 28, player.ghost, !player.ghost && t < swingUntil);
+    var minerImg = !player.ghost && t < swingUntil ? spriteSwing : spriteMiner;
+    drawSprite(minerImg, x + shake, faceY + 8, 58, 80, player.ghost);
   });
   shards = shards.filter(function (bit) {
     bit.x += bit.vx;
@@ -570,13 +551,13 @@ socket.addEventListener("message", function (event) {
     var broken = Math.floor(message.depth);
     var prev = lastBroken[message.playerId] || 0;
     lastBroken[message.playerId] = broken;
-    swingUntil = performance.now() + 240;
+    swingUntil = performance.now() + 420;
     if (snapshot !== null) {
       var seat = snapshot.players.find(function (player) {
         return player.id === message.playerId;
       });
-      var col = seat ? 310 + seat.slot * 160 : 310;
-      var face = 178;
+      var col = seat ? COL_ORIGIN + seat.slot * COL_W : COL_ORIGIN;
+      var face = GROUND_Y + Math.min(broken, 4) * DROP_H;
       shatter(col, face);
       if (broken > prev) {
         shatter(col, face);
