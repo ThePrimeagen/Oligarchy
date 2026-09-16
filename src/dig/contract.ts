@@ -15,6 +15,11 @@ export const ClientMessage = Schema.TaggedUnion({
 }).annotate({ identifier: "@oligarchy/dig/contract/ClientMessage" });
 export type ClientMessage = typeof ClientMessage.Type;
 
+export const Judged = Schema.Struct({
+  noteId: Schema.Int,
+  judgment: Domain.Judgment,
+}).annotate({ identifier: "@oligarchy/dig/contract/Judged" });
+
 export const Seat = Schema.Struct({
   id: Schema.String,
   slot: Schema.Int,
@@ -23,6 +28,7 @@ export const Seat = Schema.Struct({
   depth: Schema.Number,
   totalDamage: Schema.Number,
   ghost: Schema.Boolean,
+  judged: Schema.Array(Judged),
 }).annotate({ identifier: "@oligarchy/dig/contract/Seat" });
 
 export const Note = Schema.Struct({

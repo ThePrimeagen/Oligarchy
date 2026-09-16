@@ -10,7 +10,7 @@ export const make = (seed: number): ReadonlyArray<Domain.Note> => {
     const index = rng < 0 ? -rng : rng;
     const direction = Domain.DIRECTIONS[index % Domain.DIRECTIONS.length];
     if (direction === undefined) {
-      continue;
+      throw new Error("chart direction");
     }
     notes.push({
       id: i + 1,

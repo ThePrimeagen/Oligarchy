@@ -39,6 +39,7 @@ describe("playing hits happy path", () => {
     }
     expect(hit.success.judgment).toBe("perfect");
     expect(hit.success.damage).toBe(1.25);
+    expect(hit.success.depth).toBe(1.25 / Domain.DIRT_HP);
     expect(hit.success.room.players[0]?.totalDamage).toBe(1.25);
     expect(hit.success.room.players[0]?.judged).toEqual([{ noteId: note.id, judgment: "perfect" }]);
   });
@@ -88,6 +89,8 @@ describe("playing hits happy path", () => {
     expect(other?.ghost).toBe(true);
     expect(other?.depth).toBe(1.25 / Domain.DIRT_HP);
     expect(self?.depth).toBe(0);
+    expect(other?.judged).toEqual([{ noteId: note.id, judgment: "perfect" }]);
+    expect(self?.judged).toEqual([]);
     expect(snap.ghostOpacity).toBe(Domain.GHOST_OPACITY);
   });
 });

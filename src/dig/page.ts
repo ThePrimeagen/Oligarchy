@@ -119,8 +119,8 @@ export const html = `<!doctype html>
       <p id="ready-label">players ready</p>
       <div id="seats"></div>
       <div class="actions">
-        <button id="ready" type="button">Ready</button>
-        <button id="start" type="button">Start Game</button>
+        <button id="ready" type="button" disabled>Ready</button>
+        <button id="start" type="button" disabled>Start Game</button>
       </div>
       <p id="kick" hidden></p>
     </div>
@@ -144,7 +144,8 @@ var ctx = canvas.getContext("2d");
 var arrows = { w: "▲", a: "◀", s: "▼", d: "▶" };
 var snapshot = null;
 var judged = {};
-var songOrigin = 0;
+var songOffset = 0;
+var originAt = 0;
 var musicStarted = false;
 var audio = null;
 var fxUntil = 0;
@@ -155,41 +156,82 @@ var protocol = location.protocol === "https:" ? "wss:" : "ws:";
 var socket = new WebSocket(protocol + "//" + location.host + "/ws");
 
 function send(message) {
+  if (socket.readyState !== 1) {
+    return;
+  }
   socket.send(JSON.stringify(message));
 }
 
 function songTimeMs() {
-  if (songOrigin === 0) {
+  if (originAt === 0) {
     return 0;
   }
-  return performance.now() - songOrigin;
+  return songOffset + (performance.now() - originAt);
 }
 
-function startMusic() {
-  if (musicStarted) {
+function syncSong(message) {
+  if (message.phase !== "playing" || originAt !== 0) {
     return;
   }
-  musicStarted = true;
-  songOrigin = performance.now();
+  originAt = performance.now();
+  songOffset = message.serverNowMs - message.startedAtMs;
+}
+
+function armAudio() {
   var AudioCtx = window.AudioContext || window.webkitAudioContext;
   if (!AudioCtx) {
     return;
   }
-  audio = new AudioCtx();
-  var t = audio.currentTime;
+  if (!audio) {
+    audio = new AudioCtx();
+  }
+  if (audio.state === "suspended" && audio.resume) {
+    audio.resume();
+  }
+}
+
+function startMusic() {
+  if (musicStarted || !audio) {
+    return;
+  }
+  musicStarted = true;
+  var elapsed = songTimeMs() / 1000;
+  var t0 = audio.currentTime;
   for (var i = 0; i < 40; i++) {
+    var when = i * 0.5 - elapsed;
+    if (when < 0) {
+      continue;
+    }
     var osc = audio.createOscillator();
     var gain = audio.createGain();
     osc.type = "square";
     osc.frequency.value = i % 4 === 0 ? 220 : 165;
-    gain.gain.setValueAtTime(0.07, t);
-    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+    gain.gain.setValueAtTime(0.07, t0 + when);
+    gain.gain.exponentialRampToValueAtTime(0.001, t0 + when + 0.12);
     osc.connect(gain);
     gain.connect(audio.destination);
-    osc.start(t);
-    osc.stop(t + 0.12);
-    t += 0.5;
+    osc.start(t0 + when);
+    osc.stop(t0 + when + 0.12);
   }
+}
+
+function hex(color) {
+  return parseInt(color.slice(1), 16);
+}
+
+function mix(from, to, t) {
+  var a = hex(from);
+  var b = hex(to);
+  var ar = a >> 16;
+  var ag = (a >> 8) & 255;
+  var ab = a & 255;
+  var br = b >> 16;
+  var bg = (b >> 8) & 255;
+  var bb = b & 255;
+  var r = Math.round(ar + (br - ar) * t);
+  var g = Math.round(ag + (bg - ag) * t);
+  var bl = Math.round(ab + (bb - ab) * t);
+  return "rgb(" + String(r) + "," + String(g) + "," + String(bl) + ")";
 }
 
 function showFx(judgment) {
@@ -207,6 +249,19 @@ function showFx(judgment) {
     fxTo = "#9b1d20";
   }
   fxUntil = performance.now() + 900;
+}
+
+function rememberJudged(players) {
+  var self = players.find(function (player) {
+    return !player.ghost;
+  });
+  judged = {};
+  if (!self) {
+    return;
+  }
+  self.judged.forEach(function (item) {
+    judged[item.noteId] = item.judgment;
+  });
 }
 
 function paintLobby() {
@@ -316,29 +371,34 @@ function paintGame() {
   ctx.beginPath();
   ctx.rect(40, 180, 160, 280);
   ctx.clip();
-  snapshot.notes.forEach(function (note) {
-    if (judged[note.id]) {
-      return;
-    }
-    var dt = note.hitMs - now;
-    if (dt < -160 || dt > 1800) {
-      return;
-    }
-    var y = 400 - dt * 0.12;
-    var size = next && next.id === note.id ? 56 : 36;
-    ctx.font = "900 " + String(size) + "px Trebuchet MS";
-    ctx.fillStyle = next && next.id === note.id ? "#7fff6a" : "#ffe066";
-    ctx.fillText(arrows[note.direction] || "?", 90, y);
-  });
+  if (now >= 3000) {
+    snapshot.notes.forEach(function (note) {
+      if (judged[note.id]) {
+        return;
+      }
+      var dt = note.hitMs - now;
+      if (dt < -160 || dt > 1800) {
+        return;
+      }
+      var y = 400 - dt * 0.12;
+      var size = next && next.id === note.id ? 56 : 36;
+      ctx.font = "900 " + String(size) + "px Trebuchet MS";
+      ctx.fillStyle = next && next.id === note.id ? "#7fff6a" : "#ffe066";
+      ctx.fillText(arrows[note.direction] || "?", 90, y);
+    });
+  }
   ctx.restore();
   if (performance.now() < fxUntil) {
     var t = 1 - (fxUntil - performance.now()) / 900;
+    var color = mix(fxFrom, fxTo, t);
     fxEl.textContent = fxText;
-    fxEl.style.color = t < 0.5 ? fxFrom : fxTo;
-    fxEl.style.opacity = String(1 - t * 0.2);
+    fxEl.style.color = color;
+    fxEl.style.opacity = String(1 - t);
     ctx.font = "900 64px Trebuchet MS";
-    ctx.fillStyle = t < 0.5 ? fxFrom : fxTo;
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 1 - t;
     ctx.fillText(fxText, 240, 80);
+    ctx.globalAlpha = 1;
   } else {
     fxEl.textContent = "";
   }
@@ -349,7 +409,13 @@ function frame() {
     startMusic();
     lobby.hidden = true;
     canvas.hidden = false;
-    send({ _tag: "Tick", songTimeMs: songTimeMs() });
+    var now = songTimeMs();
+    var due = snapshot.notes.find(function (note) {
+      return !judged[note.id] && now > note.hitMs + 100;
+    });
+    if (due) {
+      send({ _tag: "Tick", songTimeMs: now });
+    }
     paintGame();
   } else {
     paintLobby();
@@ -375,15 +441,19 @@ socket.addEventListener("message", function (event) {
   }
   if (message._tag === "Snapshot") {
     snapshot = message;
+    rememberJudged(message.players);
+    syncSong(message);
     paintLobby();
   }
 });
 
 readyBtn.addEventListener("click", function () {
+  armAudio();
   send({ _tag: "Ready" });
 });
 
 startBtn.addEventListener("click", function () {
+  armAudio();
   send({ _tag: "Start" });
 });
 

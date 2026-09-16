@@ -17,8 +17,6 @@ import type * as Domain from "./domain.ts";
 import * as Lobby from "./lobby.ts";
 import * as Room from "./room.ts";
 
-const OUTGOING = 16;
-
 const mapWith = <V>(map: ReadonlyMap<string, V>, key: string, value: V): ReadonlyMap<string, V> =>
   new Map([...map, [key, value]]);
 
@@ -132,16 +130,7 @@ const make = Effect.gen(function* () {
           return;
         }
         yield* Ref.set(room, result.success.room);
-        const player = result.success.room.players.find((seat) => seat.id === id);
-        if (player !== undefined) {
-          yield* fx(
-            id,
-            noteId,
-            result.success.judgment,
-            result.success.damage,
-            Combat.depth(player.totalDamage),
-          );
-        }
+        yield* fx(id, noteId, result.success.judgment, result.success.damage, result.success.depth);
         yield* broadcast();
       }),
     );
@@ -157,10 +146,12 @@ const make = Effect.gen(function* () {
         if (Result.isFailure(result)) {
           return;
         }
-        const known = new Set(player.judged.map((item) => item.noteId));
         const next = result.success.players.find((seat) => seat.id === id);
-        const fresh =
-          next === undefined ? [] : next.judged.filter((item) => !known.has(item.noteId));
+        if (next === undefined) {
+          return;
+        }
+        const known = new Set(player.judged.map((item) => item.noteId));
+        const fresh = next.judged.filter((item) => !known.has(item.noteId));
         if (fresh.length === 0) {
           return;
         }
@@ -171,7 +162,7 @@ const make = Effect.gen(function* () {
             item.noteId,
             item.judgment,
             Combat.damageFor(item.judgment),
-            Combat.depth(next === undefined ? player.totalDamage : next.totalDamage),
+            Combat.depth(next.totalDamage),
           );
         }
         yield* broadcast();
@@ -188,7 +179,7 @@ const make = Effect.gen(function* () {
 
   const attach = Effect.fn("Game.attach")(function* (socket: Socket.Socket) {
     const write = yield* socket.writer;
-    const outgoing = yield* Queue.sliding<Contract.ServerMessage, Cause.Done>(OUTGOING);
+    const outgoing = yield* Queue.unbounded<Contract.ServerMessage, Cause.Done>();
     const id = String(yield* Ref.updateAndGet(seq, (n) => n + 1));
     const send = (message: Contract.ServerMessage): Effect.Effect<void> =>
       // A closed socket cannot be written; leave is the finalizer.
@@ -233,13 +224,15 @@ const make = Effect.gen(function* () {
     yield* socket
       .runString(
         (line) =>
-          Contract.decodeClientLine(line).pipe(
-            Effect.flatMap((message) => handle(id, message)),
-            Effect.catchTag("SchemaError", () => Effect.void),
-          ),
+          Contract.decodeClientLine(line).pipe(Effect.flatMap((message) => handle(id, message))),
         { onOpen },
       )
-      .pipe(Effect.catchTag("SocketError", () => Effect.void));
+      .pipe(
+        Effect.catchTags({
+          SocketError: () => Effect.void,
+          SchemaError: () => Effect.void,
+        }),
+      );
 
     if (Result.isFailure(joined)) {
       Queue.endUnsafe(outgoing);

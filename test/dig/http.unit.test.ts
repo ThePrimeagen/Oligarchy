@@ -93,12 +93,18 @@ describe("dig page happy path", () => {
       expect(html).toContain("Ready");
       expect(html).toContain("Start Game");
       expect(html).toContain("game.js");
+      expect(html).toContain('id="ready" type="button" disabled');
+      expect(html).toContain('id="start" type="button" disabled');
       const script = yield* http.get("/game.js");
       expect(script.status).toBe(200);
       const js = yield* script.text;
       expect(js).toContain("WASD");
       expect(js).toContain("perfect");
       expect(js).toContain("okay");
+      expect(js).toContain("startedAtMs");
+      expect(js).toContain("serverNowMs");
+      expect(js).toContain("resume");
+      expect(js).toContain(String(Domain.MUSIC_LEAD_MS));
     }).pipe(Effect.provide(serve)),
   );
 
@@ -117,6 +123,67 @@ describe("dig page happy path", () => {
       expect(message.players).toHaveLength(1);
       expect(message.players[0]?.ghost).toBe(false);
       expect(message.players[0]?.slot).toBe(0);
+      expect(message.players[0]?.judged).toEqual([]);
+      conn.socket.close();
+    }).pipe(Effect.provide(serve)),
+  );
+
+  it.live("ready, start, and a perfect hit dig and report the judgment", () =>
+    Effect.gen(function* () {
+      const url = yield* wsUrl;
+      const conn = yield* connect(url);
+      expect((yield* conn.next)._tag).toBe("Snapshot");
+      conn.socket.send(JSON.stringify({ _tag: "Ready" }));
+      const readied = yield* conn.next;
+      expect(readied._tag).toBe("Snapshot");
+      if (readied._tag !== "Snapshot") {
+        return;
+      }
+      expect(readied.readyLabel).toBe("1 / 1 players ready");
+      expect(readied.youAreCaptain).toBe(true);
+      conn.socket.send(JSON.stringify({ _tag: "Start" }));
+      const started = yield* conn.next;
+      expect(started._tag).toBe("Snapshot");
+      if (started._tag !== "Snapshot") {
+        return;
+      }
+      expect(started.phase).toBe("playing");
+      expect(started.startedAtMs).toBeGreaterThan(0);
+      expect(started.serverNowMs).toBeGreaterThanOrEqual(started.startedAtMs);
+      const note = started.notes[0];
+      expect(note?.hitMs).toBe(Domain.MUSIC_LEAD_MS);
+      expect(note).toBeDefined();
+      if (note === undefined) {
+        return;
+      }
+      conn.socket.send(
+        JSON.stringify({
+          _tag: "Hit",
+          noteId: note.id,
+          direction: note.direction,
+          songTimeMs: note.hitMs,
+        }),
+      );
+      let fx: Contract.ServerMessage | undefined;
+      let snap: Contract.Snapshot | undefined;
+      while (fx === undefined || snap === undefined) {
+        const message = yield* conn.next;
+        if (message._tag === "JudgmentFx") {
+          fx = message;
+        }
+        if (message._tag === "Snapshot") {
+          snap = message;
+        }
+      }
+      expect(fx._tag).toBe("JudgmentFx");
+      if (fx._tag !== "JudgmentFx") {
+        return;
+      }
+      expect(fx.judgment).toBe("perfect");
+      expect(fx.damage).toBe(1.25);
+      expect(fx.depth).toBe(1.25 / Domain.DIRT_HP);
+      expect(snap.players[0]?.depth).toBe(1.25 / Domain.DIRT_HP);
+      expect(snap.players[0]?.judged).toEqual([{ noteId: note.id, judgment: "perfect" }]);
       conn.socket.close();
     }).pipe(Effect.provide(serve)),
   );
@@ -145,6 +212,27 @@ describe("dig sockets unhappy path", () => {
       for (const conn of seated) {
         conn.socket.close();
       }
+    }).pipe(Effect.provide(serve)),
+  );
+
+  it.live("drops a malformed socket and keeps the seated player", () =>
+    Effect.gen(function* () {
+      const url = yield* wsUrl;
+      const captain = yield* connect(url);
+      expect((yield* captain.next)._tag).toBe("Snapshot");
+      const extra = yield* connect(url);
+      expect((yield* extra.next)._tag).toBe("Snapshot");
+      expect((yield* captain.next)._tag).toBe("Snapshot");
+      extra.socket.send("not-json");
+      const after = yield* captain.next;
+      expect(after._tag).toBe("Snapshot");
+      if (after._tag !== "Snapshot") {
+        return;
+      }
+      expect(after.players).toHaveLength(1);
+      expect(after.youAreCaptain).toBe(true);
+      extra.socket.close();
+      captain.socket.close();
     }).pipe(Effect.provide(serve)),
   );
 });

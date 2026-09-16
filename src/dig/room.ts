@@ -22,6 +22,7 @@ export type Seat = {
   readonly depth: number;
   readonly totalDamage: number;
   readonly ghost: boolean;
+  readonly judged: ReadonlyArray<Domain.Judged>;
 };
 
 export type Snapshot = {
@@ -42,6 +43,7 @@ export type Hit = {
   readonly room: Room;
   readonly judgment: Domain.Judgment;
   readonly damage: number;
+  readonly depth: number;
 };
 
 export const empty = (): Room => ({
@@ -105,6 +107,7 @@ export const snapshot = (room: Room, you: string, serverNowMs: number): Snapshot
       depth: Combat.depth(player.totalDamage),
       totalDamage: player.totalDamage,
       ghost: player.id !== you,
+      judged: player.judged,
     })),
   };
 };
@@ -159,5 +162,6 @@ export const hit = (
     room: replace(room, next),
     judgment,
     damage: Combat.damageFor(judgment),
+    depth: Combat.depth(next.totalDamage),
   });
 };

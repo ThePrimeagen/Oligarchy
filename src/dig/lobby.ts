@@ -86,7 +86,7 @@ export const start = (
   if (captainId(room) !== playerId) {
     return Result.fail(Errors.NotCaptain.make({}));
   }
-  if (room.players.length === 0 || room.players.some((player) => !player.ready)) {
+  if (room.players.some((player) => !player.ready)) {
     return Result.fail(Errors.NotReady.make({}));
   }
   return Result.succeed({
