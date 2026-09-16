@@ -14,13 +14,13 @@ Consult this table of contents first. Read only the section you need.
 | [get-serial](#get-serial) | 136 |
 | [send-keys](#send-keys) | 151 |
 | [send-mouse](#send-mouse) | 167 |
-| [intent start](#intent-start) | 184 |
-| [intent end](#intent-end) | 200 |
-| [stop](#stop) | 214 |
-| [save](#save) | 230 |
-| [Keys](#keys) | 246 |
-| [Mouse](#mouse) | 258 |
-| [The loop](#the-loop) | 266 |
+| [intent start](#intent-start) | 189 |
+| [intent end](#intent-end) | 205 |
+| [stop](#stop) | 219 |
+| [save](#save) | 235 |
+| [Keys](#keys) | 251 |
+| [Mouse](#mouse) | 263 |
+| [The loop](#the-loop) | 275 |
 
 ## Important
 
@@ -39,7 +39,7 @@ If you are the client, or an agent driving the client: do not look at code. Only
 ./client get-image  --session-id <id> [-o <file>]
 ./client get-serial --session-id <id> [-o <file>]
 ./client send-keys  --session-id <id> --keys <keys> [--encoding <encoding>]
-./client send-mouse --session-id <id> --x <0..1> --y <0..1> [--button <button>] [--clicks <n>]
+./client send-mouse --session-id <id> --x <0..1> --y <0..1> [--button <button>] [--clicks <n>] [--to-x <0..1> --to-y <0..1>] [--modifier <key>]... [--press down|up]
 ./client intent start --session-id <id> --test-result-id <id> --message <text>
 ./client intent end   --session-id <id>
 ./client stop       --session-id <id> [--status succeeded|failed|aborted] [--reason <text>]
@@ -167,18 +167,23 @@ Types a key string into the session.
 ## send-mouse
 
 ```
-./client send-mouse --agent-id <agent> --server-url <url> --session-id <id> --x <0..1> --y <0..1> [--button <button>] [--clicks <n>]
+./client send-mouse --agent-id <agent> --server-url <url> --session-id <id> --x <0..1> --y <0..1> [--button <button>] [--clicks <n>] [--to-x <0..1> --to-y <0..1>] [--modifier <key>]... [--press down|up]
 ```
 
-Moves the pointer to a point on the screenshot, and optionally clicks or scrolls there.
+Moves the pointer to a point on the screenshot, and optionally clicks, scrolls, drags, or holds a button there.
 
 - `--session-id <id>` — the session.
 - `--x <0..1>`, `--y <0..1>` — fractions of the screenshot from the top-left. See [Mouse](#mouse).
-- `--button <button>` — `left`, `middle`, `right`, `wheel-up`, or `wheel-down`. Omit to move only.
-- `--clicks <n>` — how many times to pulse `--button`, 1..100. Default 1. Needs `--button`.
+- `--button <button>` — `left`, `middle`, `right`, `wheel-up`, `wheel-down`, `wheel-left`, or `wheel-right`. Omit to move only.
+- `--clicks <n>` — how many times to pulse `--button`, 1..100. Default 1. Needs `--button`. A double-click is `--clicks 2`.
+- `--to-x <0..1> --to-y <0..1>` — a drag: `--button` goes down at `--x --y`, the pointer moves to this point in steps, and the button comes up there. Needs `--button left`, `middle`, or `right`; cannot combine with `--clicks` or `--press`. The two flags go together.
+- `--modifier <key>` — hold `shift`, `ctrl`, `alt`, or `super` around the gesture; repeat the flag to hold several. Held for this command only, then let go. Needs `--button`.
+- `--press down|up` — half a click: `down` moves to the point and leaves `--button` held for the commands that follow; `up` moves to the point and lets it go. Needs `--button left`, `middle`, or `right`; cannot combine with `--clicks`. Low-level: reach for it only when no click, scroll, or drag above can express the gesture. See [Mouse](#mouse).
 
 ```bash
 ./client send-mouse --agent-id OLI-42 --server-url https://qemu.example.com --session-id 6f1c...e2a9 --x 0.3 --y 0.2 --button left --clicks 2
+./client send-mouse --agent-id OLI-42 --server-url https://qemu.example.com --session-id 6f1c...e2a9 --x 0.3 --y 0.2 --button left --to-x 0.7 --to-y 0.6 --modifier super
+./client send-mouse --agent-id OLI-42 --server-url https://qemu.example.com --session-id 6f1c...e2a9 --x 0.3 --y 0.2 --button left --modifier shift
 ```
 
 ## intent start
@@ -262,6 +267,10 @@ Coordinates are fractions of the last screenshot: `0` is the top or left edge, `
 Hyprland as Omarchy ships it focuses the window under the pointer. Move onto the window you mean to type into, then send keys. Window-manager chords (`<M-Enter>`, `<M-2>`, `<M-w>`) land no matter what has focus; plain text lands wherever the pointer says.
 
 A greeter or installer button is a left click at that point. A double-click launches. A right-click opens a menu. `wheel-down` scrolls.
+
+The gestures, in the order to reach for them: a click is `--button left`; a double-click is `--clicks 2`; a right-click is `--button right`; a scroll is `wheel-up`, `wheel-down`, `wheel-left`, or `wheel-right`, with `--clicks` for how far; a drag is `--to-x --to-y`, which presses at the point, moves there in steps the way a hand does, and releases, so windows follow it and text selects under it; a modified click or drag adds `--modifier` (`shift` to extend a selection, `super` with a left drag to move a window on Omarchy, `super` with a right drag to resize one). All of these press and release within one command; a command that fails part-way still sends the release.
+
+`--press down` and `--press up` are the low-level halves every gesture above is made of. Use them only when none of those can express what you need: a button that must stay held while keys are typed, or a drag whose path one `--to-x --to-y` cannot describe. A button held by `--press down` stays down until your `--press up` or the end of the session, across every command in between, so send the `up`; a held `--modifier` is let go when its own command ends and never crosses into the next.
 
 ## The loop
 

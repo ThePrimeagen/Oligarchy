@@ -1,4 +1,4 @@
-import { Console, Effect, FileSystem, Option, Path, Stdio, Stream } from "effect";
+import { Array as Arr, Console, Effect, FileSystem, Option, Path, Stdio, Stream } from "effect";
 import * as CliError from "effect/unstable/cli/CliError";
 import * as Command from "effect/unstable/cli/Command";
 import * as Config from "../config.ts";
@@ -179,6 +179,10 @@ const sendMouseFlags = {
   y: Flags.y,
   button: Flags.button,
   clicks: Flags.clicks,
+  toX: Flags.toX,
+  toY: Flags.toY,
+  modifier: Flags.modifier,
+  press: Flags.press,
 };
 
 const sendMouse = Command.make(
@@ -190,18 +194,33 @@ const sendMouse = Command.make(
     if (Option.isSome(input.clicks) && Option.isNone(input.button)) {
       return yield* Errors.CommandError.make({ message: "send-mouse: --clicks needs --button" });
     }
-    const base = { id: input.sessionId, x: input.x, y: input.y, agent: input.agentId };
-    const body = Option.match(input.button, {
-      onNone: () => Contract.SendMouseBody.make(base),
-      onSome: (button) =>
-        Option.match(input.clicks, {
-          onNone: () => Contract.SendMouseBody.make({ ...base, button }),
-          onSome: (clicks) => Contract.SendMouseBody.make({ ...base, button, clicks }),
-        }),
-    });
+    // The wire carries a point or none; only here do the two flags have names to refuse by.
+    if (Option.isSome(input.toX) !== Option.isSome(input.toY)) {
+      return yield* Errors.CommandError.make({
+        message: "send-mouse: --to-x and --to-y go together",
+      });
+    }
+    const path: Arr.NonEmptyReadonlyArray<Domain.ScreenPoint> | undefined =
+      Option.isSome(input.toX) && Option.isSome(input.toY)
+        ? [{ x: input.toX.value, y: input.toY.value }]
+        : undefined;
+    const body = Contract.SendMouseBody.make(
+      Object.assign(
+        { id: input.sessionId, x: input.x, y: input.y, agent: input.agentId },
+        Option.isSome(input.button) ? { button: input.button.value } : undefined,
+        Option.isSome(input.clicks) ? { clicks: input.clicks.value } : undefined,
+        path === undefined ? undefined : { path },
+        Arr.isReadonlyArrayNonEmpty(input.modifier) ? { modifiers: input.modifier } : undefined,
+        Option.isSome(input.press) ? { press: input.press.value } : undefined,
+      ),
+    );
     return yield* proxy.sendMouse(body);
   }),
-).pipe(Command.withDescription("Move the mouse to a point on the screenshot and optionally click"));
+).pipe(
+  Command.withDescription(
+    "Move the mouse to a point on the screenshot; click, scroll, drag to --to-x --to-y, or hold or release --button, with --modifier keys held",
+  ),
+);
 
 const intentStartFlags = {
   ...Flags.shared,

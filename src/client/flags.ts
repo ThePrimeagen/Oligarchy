@@ -95,6 +95,35 @@ export const clicks = Flag.integer("clicks").pipe(
   Flag.withDescription("Pulses of --button, default 1"),
 );
 
+const DragInterval = Schema.Number.check(
+  Schema.isBetween(
+    { minimum: 0, maximum: 1 },
+    { message: "send-mouse: --to-x and --to-y must be in 0..1" },
+  ),
+);
+
+export const toX = Flag.float("to-x").pipe(
+  Flag.withSchema(DragInterval),
+  Flag.optional,
+  Flag.withDescription("Drag --button from --x --y to here, fraction from the left; with --to-y"),
+);
+
+export const toY = Flag.float("to-y").pipe(
+  Flag.withSchema(DragInterval),
+  Flag.optional,
+  Flag.withDescription("Drag --button from --x --y to here, fraction from the top; with --to-x"),
+);
+
+export const modifier = Flag.choice("modifier", Domain.MouseModifier.literals).pipe(
+  Flag.atMost(Domain.MouseModifier.literals.length),
+  Flag.withDescription("Hold this key around the gesture; repeat the flag to hold several"),
+);
+
+export const press = Flag.choice("press", Domain.MousePress.literals).pipe(
+  Flag.optional,
+  Flag.withDescription("Half a click: down leaves --button held, up lets it go"),
+);
+
 export const testResultId = Flag.string("test-result-id").pipe(
   Flag.withSchema(Schema.NonEmptyString),
   Flag.withDescription("Test result id from the Linear ticket"),

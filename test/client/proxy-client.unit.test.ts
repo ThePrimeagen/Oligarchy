@@ -145,6 +145,51 @@ describe("ProxyClient requests", () => {
     }),
   );
 
+  it.effect("sendMouse posts a drag path, held modifiers and a press when given", () =>
+    Effect.gen(function* () {
+      const recorder = FakeHttp.recordRequests(ok);
+      const proxy = yield* connect.pipe(Effect.provide(recorder.layer));
+      yield* proxy.sendMouse(
+        Contract.SendMouseBody.make({
+          id: SESSION,
+          x: 0.1,
+          y: 0.2,
+          button: "left",
+          path: [{ x: 0.9, y: 0.2 }],
+          modifiers: ["shift"],
+          agent: AGENT,
+        }),
+      );
+      yield* proxy.sendMouse(
+        Contract.SendMouseBody.make({
+          id: SESSION,
+          x: 0.5,
+          y: 0.5,
+          button: "left",
+          press: "up",
+          agent: AGENT,
+        }),
+      );
+      expectJsonPost(recorder.requests[0], "/send-mouse", {
+        id: SESSION,
+        x: 0.1,
+        y: 0.2,
+        button: "left",
+        path: [{ x: 0.9, y: 0.2 }],
+        modifiers: ["shift"],
+        agent: AGENT,
+      });
+      expectJsonPost(recorder.requests[1], "/send-mouse", {
+        id: SESSION,
+        x: 0.5,
+        y: 0.5,
+        button: "left",
+        press: "up",
+        agent: AGENT,
+      });
+    }),
+  );
+
   it.effect("intentStart and intentEnd post their bodies", () =>
     Effect.gen(function* () {
       const recorder = FakeHttp.recordRequests(ok);

@@ -597,6 +597,90 @@ describe("./client unhappy path", () => {
     expect(stub.requests).toEqual([]);
   });
 
+  it("rejects send-mouse --to-x without --to-y before calling the proxy", async () => {
+    const stub = await proxy();
+    const result = await runClient([
+      "send-mouse",
+      "--agent-id",
+      AGENT,
+      "--server-url",
+      stub.url,
+      "--session-id",
+      SESSION,
+      "--x",
+      "0.5",
+      "--y",
+      "0.5",
+      "--button",
+      "left",
+      "--to-x",
+      "0.9",
+    ]);
+    expect(result.code).toBe(1);
+    expect(firstLine(result.stderr)).toBe("send-mouse: --to-x and --to-y go together");
+    expect(stub.requests).toEqual([]);
+  });
+
+  it("send-mouse posts a drag with its modifiers and a press as the wire's fields", async () => {
+    const stub = await proxy();
+    const base = [
+      "send-mouse",
+      "--agent-id",
+      AGENT,
+      "--server-url",
+      stub.url,
+      "--session-id",
+      SESSION,
+    ];
+    const drag = await runClient([
+      ...base,
+      "--x",
+      "0.1",
+      "--y",
+      "0.2",
+      "--button",
+      "left",
+      "--to-x",
+      "0.9",
+      "--to-y",
+      "0.2",
+      "--modifier",
+      "super",
+    ]);
+    expect(drag.stderr).toBe("");
+    expect(drag.code).toBe(0);
+    expect(stub.requests[0]?.body).toEqual({
+      id: SESSION,
+      x: 0.1,
+      y: 0.2,
+      agent: AGENT,
+      button: "left",
+      path: [{ x: 0.9, y: 0.2 }],
+      modifiers: ["super"],
+    });
+    const held = await runClient([
+      ...base,
+      "--x",
+      "0.5",
+      "--y",
+      "0.5",
+      "--button",
+      "left",
+      "--press",
+      "down",
+    ]);
+    expect(held.stderr).toBe("");
+    expect(held.code).toBe(0);
+    expect(stub.requests[1]?.body).toEqual({
+      id: SESSION,
+      x: 0.5,
+      y: 0.5,
+      agent: AGENT,
+      button: "left",
+      press: "down",
+    });
+  });
+
   it("rejects a start whose local ISO does not exist before calling the proxy", async () => {
     const stub = await proxy();
     const result = await runClient([
