@@ -410,20 +410,16 @@ function paintGame() {
   var row;
   var col;
   var pits = snapshot.players.map(function (player) {
-    var broken = Math.floor(player.totalDamage / CUBE_HP);
-    return {
-      x: COL_ORIGIN + player.slot * COL_W,
-      drop: Math.min(broken, 4),
-    };
+    return COL_ORIGIN + player.slot * COL_W;
   });
-  for (row = 0; row < 7; row++) {
+  for (row = 0; row < 6; row++) {
     for (col = 0; col < 13; col++) {
       var gx = 210 + col * 52 + (row % 2) * 26;
       var gy = 188 + row * 22;
-      var overPit = pits.some(function (pit) {
-        return gx > pit.x - 42 && gx < pit.x + 42 && gy > GROUND_Y - 30 && gy < GROUND_Y + pit.drop * DROP_H + 40;
+      var overPit = pits.some(function (px) {
+        return gx > px - 42 && gx < px + 42;
       });
-      if (overPit) {
+      if (overPit || gy > GROUND_Y + 8) {
         continue;
       }
       drawSprite(spriteGrass, gx, gy, 62, 68, false);
@@ -445,8 +441,11 @@ function paintGame() {
         drawSprite(spriteDirt, x, cy, CUBE_W, CUBE_DRAW_H, player.ghost);
       }
     }
-    var minerImg = !player.ghost && t < swingUntil ? spriteSwing : spriteMiner;
-    drawSprite(minerImg, x + shake, faceY + 8, 58, 80, player.ghost);
+    var swinging = !player.ghost && t < swingUntil;
+    var minerImg = swinging ? spriteSwing : spriteMiner;
+    var minerH = 80;
+    var minerW = minerImg.naturalWidth > 0 ? minerH * minerImg.naturalWidth / minerImg.naturalHeight : 58;
+    drawSprite(minerImg, x + shake, faceY + 8, minerW, minerH, player.ghost);
   });
   shards = shards.filter(function (bit) {
     bit.x += bit.vx;
@@ -557,7 +556,8 @@ socket.addEventListener("message", function (event) {
         return player.id === message.playerId;
       });
       var col = seat ? COL_ORIGIN + seat.slot * COL_W : COL_ORIGIN;
-      var face = GROUND_Y + Math.min(broken, 4) * DROP_H;
+      var drop = Math.min(broken > prev ? broken - 1 : broken, 4);
+      var face = GROUND_Y + drop * DROP_H;
       shatter(col, face);
       if (broken > prev) {
         shatter(col, face);
@@ -570,6 +570,9 @@ socket.addEventListener("message", function (event) {
   }
   if (message._tag === "Snapshot") {
     snapshot = message;
+    if (message.phase !== "playing") {
+      lastBroken = {};
+    }
     rememberJudged(message.players);
     syncSong(message);
     paintLobby();
