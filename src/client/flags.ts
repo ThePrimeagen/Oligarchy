@@ -65,12 +65,11 @@ export const encoding = Flag.string("encoding").pipe(
   Flag.withDescription("Key string encoding"),
 );
 
-const UnitInterval = Schema.Number.check(
-  Schema.isBetween(
-    { minimum: 0, maximum: 1 },
-    { message: "send-mouse: --x and --y must be in 0..1" },
-  ),
-);
+// A fraction of the screenshot; each flag pair refuses with its own name.
+const fraction = (message: string) =>
+  Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 }, { message }));
+
+const UnitInterval = fraction("mouse: --x and --y must be in 0..1");
 
 export const x = Flag.float("x").pipe(
   Flag.withSchema(UnitInterval),
@@ -82,36 +81,32 @@ export const y = Flag.float("y").pipe(
   Flag.withDescription("Fraction of the screenshot from the top, 0..1"),
 );
 
-export const button = Flag.choice("button", Domain.MouseButton.literals).pipe(
-  Flag.optional,
-  Flag.withDescription("Omit to move only"),
+const FromInterval = fraction("mouse drag: --from-x and --from-y must be in 0..1");
+const ToInterval = fraction("mouse drag: --to-x and --to-y must be in 0..1");
+
+export const fromX = Flag.float("from-x").pipe(
+  Flag.withSchema(FromInterval),
+  Flag.withDescription("Where the button goes down, fraction from the left, 0..1"),
 );
 
-export const clicks = Flag.integer("clicks").pipe(
-  Flag.withSchema(
-    Schema.Number.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(100)),
-  ),
-  Flag.optional,
-  Flag.withDescription("Pulses of --button, default 1"),
-);
-
-const DragInterval = Schema.Number.check(
-  Schema.isBetween(
-    { minimum: 0, maximum: 1 },
-    { message: "send-mouse: --to-x and --to-y must be in 0..1" },
-  ),
+export const fromY = Flag.float("from-y").pipe(
+  Flag.withSchema(FromInterval),
+  Flag.withDescription("Where the button goes down, fraction from the top, 0..1"),
 );
 
 export const toX = Flag.float("to-x").pipe(
-  Flag.withSchema(DragInterval),
-  Flag.optional,
-  Flag.withDescription("Drag --button from --x --y to here, fraction from the left; with --to-y"),
+  Flag.withSchema(ToInterval),
+  Flag.withDescription("Where the button comes up, fraction from the left, 0..1"),
 );
 
 export const toY = Flag.float("to-y").pipe(
-  Flag.withSchema(DragInterval),
-  Flag.optional,
-  Flag.withDescription("Drag --button from --x --y to here, fraction from the top; with --to-x"),
+  Flag.withSchema(ToInterval),
+  Flag.withDescription("Where the button comes up, fraction from the top, 0..1"),
+);
+
+export const button = Flag.choice("button", Domain.ClickButton.literals).pipe(
+  Flag.withDefault("left"),
+  Flag.withDescription("left, middle or right; left when omitted"),
 );
 
 export const modifier = Flag.choice("modifier", Domain.MouseModifier.literals).pipe(
@@ -119,9 +114,21 @@ export const modifier = Flag.choice("modifier", Domain.MouseModifier.literals).p
   Flag.withDescription("Hold this key around the gesture; repeat the flag to hold several"),
 );
 
-export const press = Flag.choice("press", Domain.MousePress.literals).pipe(
-  Flag.optional,
-  Flag.withDescription("Half a click: down leaves --button held, up lets it go"),
+export const direction = Flag.choice("direction", Domain.ScrollDirection.literals).pipe(
+  Flag.withDescription("Which way the wheel turns"),
+);
+
+export const ticks = Flag.integer("ticks").pipe(
+  Flag.withSchema(
+    Schema.Number.check(
+      Schema.isBetween(
+        { minimum: 1, maximum: 100 },
+        { message: "mouse scroll: --ticks must be in 1..100" },
+      ),
+    ),
+  ),
+  Flag.withDefault(1),
+  Flag.withDescription("How many wheel clicks, 1..100; 1 when omitted"),
 );
 
 export const testResultId = Flag.string("test-result-id").pipe(

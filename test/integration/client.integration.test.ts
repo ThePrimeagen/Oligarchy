@@ -173,44 +173,36 @@ describe("./client happy path", () => {
     expect(stub.requests[0]?.url).toBe(`/serial?id=${SESSION}&agent=${AGENT}`);
   });
 
-  it("send-mouse posts the point, button, and clicks, and omits button and clicks when not given", async () => {
+  it("mouse click and mouse move post their bodies to their own paths", async () => {
     const stub = await proxy();
-    const base = [
-      "send-mouse",
-      "--agent-id",
-      AGENT,
-      "--server-url",
-      stub.url,
-      "--session-id",
-      SESSION,
-    ];
+    const base = ["--agent-id", AGENT, "--server-url", stub.url, "--session-id", SESSION];
     const click = await runClient([
+      "mouse",
+      "click",
       ...base,
       "--x",
       "0.5",
       "--y",
       "0.25",
       "--button",
-      "left",
-      "--clicks",
-      "2",
+      "right",
     ]);
     expect(click.stderr).toBe("");
     expect(click.code).toBe(0);
+    expect(stub.requests[0]?.url).toBe("/mouse/click");
     expect(stub.requests[0]?.body).toEqual({
       id: SESSION,
       x: 0.5,
       y: 0.25,
       agent: AGENT,
-      button: "left",
-      clicks: 2,
+      button: "right",
     });
-    const move = await runClient([...base, "--x", "0", "--y", "1"]);
+    const move = await runClient(["mouse", "move", ...base, "--x", "0", "--y", "1"]);
     expect(move.stderr).toBe("");
     expect(move.code).toBe(0);
+    expect(stub.requests[1]?.url).toBe("/mouse/move");
     expect(stub.requests[1]?.body).toEqual({ id: SESSION, x: 0, y: 1, agent: AGENT });
   });
-
   it("intent start and intent end take kebab-case flags", async () => {
     const stub = await proxy();
     const started = await runClient([
@@ -555,10 +547,11 @@ describe("./client unhappy path", () => {
     expect(firstLine(nothing.stderr)).toBe("request failed");
   });
 
-  it("rejects a send-mouse coordinate outside 0..1 before calling the proxy", async () => {
+  it("rejects a mouse coordinate outside 0..1 before calling the proxy", async () => {
     const stub = await proxy();
     const result = await runClient([
-      "send-mouse",
+      "mouse",
+      "click",
       "--agent-id",
       AGENT,
       "--server-url",
@@ -575,71 +568,17 @@ describe("./client unhappy path", () => {
     expect(stub.requests).toEqual([]);
   });
 
-  it("rejects send-mouse --clicks without --button before calling the proxy", async () => {
+  it("mouse drag posts from, to, the button and the modifiers; a missing --to-y is refused first", async () => {
     const stub = await proxy();
-    const result = await runClient([
-      "send-mouse",
-      "--agent-id",
-      AGENT,
-      "--server-url",
-      stub.url,
-      "--session-id",
-      SESSION,
-      "--x",
-      "0.5",
-      "--y",
-      "0.5",
-      "--clicks",
-      "2",
-    ]);
-    expect(result.code).toBe(1);
-    expect(firstLine(result.stderr)).toBe("send-mouse: --clicks needs --button");
-    expect(stub.requests).toEqual([]);
-  });
-
-  it("rejects send-mouse --to-x without --to-y before calling the proxy", async () => {
-    const stub = await proxy();
-    const result = await runClient([
-      "send-mouse",
-      "--agent-id",
-      AGENT,
-      "--server-url",
-      stub.url,
-      "--session-id",
-      SESSION,
-      "--x",
-      "0.5",
-      "--y",
-      "0.5",
-      "--button",
-      "left",
-      "--to-x",
-      "0.9",
-    ]);
-    expect(result.code).toBe(1);
-    expect(firstLine(result.stderr)).toBe("send-mouse: --to-x and --to-y go together");
-    expect(stub.requests).toEqual([]);
-  });
-
-  it("send-mouse posts a drag with its modifiers and a press as the wire's fields", async () => {
-    const stub = await proxy();
-    const base = [
-      "send-mouse",
-      "--agent-id",
-      AGENT,
-      "--server-url",
-      stub.url,
-      "--session-id",
-      SESSION,
-    ];
+    const base = ["--agent-id", AGENT, "--server-url", stub.url, "--session-id", SESSION];
     const drag = await runClient([
+      "mouse",
+      "drag",
       ...base,
-      "--x",
+      "--from-x",
       "0.1",
-      "--y",
+      "--from-y",
       "0.2",
-      "--button",
-      "left",
       "--to-x",
       "0.9",
       "--to-y",
@@ -649,38 +588,30 @@ describe("./client unhappy path", () => {
     ]);
     expect(drag.stderr).toBe("");
     expect(drag.code).toBe(0);
+    expect(stub.requests[0]?.url).toBe("/mouse/drag");
     expect(stub.requests[0]?.body).toEqual({
       id: SESSION,
-      x: 0.1,
-      y: 0.2,
+      from: { x: 0.1, y: 0.2 },
+      to: { x: 0.9, y: 0.2 },
       agent: AGENT,
       button: "left",
-      to: { x: 0.9, y: 0.2 },
       modifiers: ["super"],
     });
-    const held = await runClient([
+    const half = await runClient([
+      "mouse",
+      "drag",
       ...base,
-      "--x",
-      "0.5",
-      "--y",
-      "0.5",
-      "--button",
-      "left",
-      "--press",
-      "down",
+      "--from-x",
+      "0.1",
+      "--from-y",
+      "0.2",
+      "--to-x",
+      "0.9",
     ]);
-    expect(held.stderr).toBe("");
-    expect(held.code).toBe(0);
-    expect(stub.requests[1]?.body).toEqual({
-      id: SESSION,
-      x: 0.5,
-      y: 0.5,
-      agent: AGENT,
-      button: "left",
-      press: "down",
-    });
+    expect(half.code).toBe(1);
+    expect(half.stderr).toContain("--to-y");
+    expect(stub.requests).toHaveLength(1);
   });
-
   it("rejects a start whose local ISO does not exist before calling the proxy", async () => {
     const stub = await proxy();
     const result = await runClient([

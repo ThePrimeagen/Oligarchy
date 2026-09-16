@@ -62,6 +62,17 @@ const operationOf = (
   return undefined;
 };
 
+// One endpoint per mouse operation, all with the driving endpoints' errors.
+const MOUSE_ENDPOINTS = [
+  "mouseMove",
+  "mouseClick",
+  "mouseDoubleClick",
+  "mouseScroll",
+  "mouseDrag",
+  "mouseHold",
+  "mouseRelease",
+] as const;
+
 describe("QemuServerApi", () => {
   it("declares every path with today's method", () => {
     const table = routes(Api.QemuServerApi).map(({ method, path }) => `${method} ${path}`);
@@ -78,7 +89,13 @@ describe("QemuServerApi", () => {
         "POST /stop",
         "POST /save",
         "POST /send-keys",
-        "POST /send-mouse",
+        "POST /mouse/move",
+        "POST /mouse/click",
+        "POST /mouse/double-click",
+        "POST /mouse/scroll",
+        "POST /mouse/drag",
+        "POST /mouse/hold",
+        "POST /mouse/release",
         "POST /intent/start",
         "POST /intent/end",
       ].sort(),
@@ -104,7 +121,13 @@ describe("QemuServerApi", () => {
     expect(urls.Sessions.stop()).toBe("/stop");
     expect(urls.Sessions.save()).toBe("/save");
     expect(urls.Sessions.sendKeys()).toBe("/send-keys");
-    expect(urls.Sessions.sendMouse()).toBe("/send-mouse");
+    expect(urls.Sessions.mouseMove()).toBe("/mouse/move");
+    expect(urls.Sessions.mouseClick()).toBe("/mouse/click");
+    expect(urls.Sessions.mouseDoubleClick()).toBe("/mouse/double-click");
+    expect(urls.Sessions.mouseScroll()).toBe("/mouse/scroll");
+    expect(urls.Sessions.mouseDrag()).toBe("/mouse/drag");
+    expect(urls.Sessions.mouseHold()).toBe("/mouse/hold");
+    expect(urls.Sessions.mouseRelease()).toBe("/mouse/release");
     expect(urls.Sessions.intentStart()).toBe("/intent/start");
     expect(urls.Sessions.intentEnd()).toBe("/intent/end");
   });
@@ -166,9 +189,11 @@ describe("QemuServerApi", () => {
     expect(byIdentifier(Api.QemuServerApi, "sendKeys").errors).toEqual(
       [...sessions, 403, 404, 502].sort((a, b) => a - b),
     );
-    expect(byIdentifier(Api.QemuServerApi, "sendMouse").errors).toEqual(
-      [...sessions, 403, 404, 502].sort((a, b) => a - b),
-    );
+    for (const mouse of MOUSE_ENDPOINTS) {
+      expect(byIdentifier(Api.QemuServerApi, mouse).errors, mouse).toEqual(
+        [...sessions, 403, 404, 502].sort((a, b) => a - b),
+      );
+    }
     expect(byIdentifier(Api.QemuServerApi, "intentStart").errors).toEqual(
       [...sessions, 403, 404].sort((a, b) => a - b),
     );
@@ -198,7 +223,13 @@ describe("QemuReverseProxyApi", () => {
         "POST /stop",
         "POST /save",
         "POST /send-keys",
-        "POST /send-mouse",
+        "POST /mouse/move",
+        "POST /mouse/click",
+        "POST /mouse/double-click",
+        "POST /mouse/scroll",
+        "POST /mouse/drag",
+        "POST /mouse/hold",
+        "POST /mouse/release",
         "POST /intent/start",
         "POST /intent/end",
         "POST /servers",
@@ -253,7 +284,9 @@ describe("QemuReverseProxyApi", () => {
     // save's own 502 is the boundary's 502 too: one status, declared once.
     expect(byIdentifier(reverse, "save").errors).toEqual(ascending([...boundary, 403]));
     expect(byIdentifier(reverse, "sendKeys").errors).toEqual(ascending([...boundary, 403]));
-    expect(byIdentifier(reverse, "sendMouse").errors).toEqual(ascending([...boundary, 403]));
+    for (const mouse of MOUSE_ENDPOINTS) {
+      expect(byIdentifier(reverse, mouse).errors, mouse).toEqual(ascending([...boundary, 403]));
+    }
     expect(byIdentifier(reverse, "intentStart").errors).toEqual(ascending([...boundary, 403]));
     expect(byIdentifier(reverse, "intentEnd").errors).toEqual(ascending([...boundary, 403]));
     expect(byIdentifier(reverse, "register").errors).toEqual(boundary);

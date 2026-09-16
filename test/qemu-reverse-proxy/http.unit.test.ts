@@ -1703,12 +1703,19 @@ describe("forwarding", () => {
         keys: "ls<ENTER>",
         agent: AGENT_ID,
       });
-      const sendMouse = Contract.SendMouseBody.make({
+      const click = Contract.MouseClickBody.make({
         id: SESSION_ID,
         x: 0.5,
         y: 0.25,
         button: "left",
-        clicks: 2,
+        agent: AGENT_ID,
+      });
+      const drag = Contract.MouseDragBody.make({
+        id: SESSION_ID,
+        from: { x: 0.1, y: 0.2 },
+        to: { x: 0.9, y: 0.2 },
+        button: "left",
+        modifiers: ["super"],
         agent: AGENT_ID,
       });
       const intentStart = Contract.IntentStartBody.make({
@@ -1728,7 +1735,8 @@ describe("forwarding", () => {
       yield* Effect.gen(function* () {
         const api = yield* qemuServerClient;
         expect(yield* api.Sessions.sendKeys({ payload: sendKeys })).toEqual(Contract.Ok.make({}));
-        expect((yield* api.Sessions.sendMouse({ payload: sendMouse })).ok).toBe("true");
+        expect((yield* api.Sessions.mouseClick({ payload: click })).ok).toBe("true");
+        expect((yield* api.Sessions.mouseDrag({ payload: drag })).ok).toBe("true");
         expect((yield* api.Sessions.intentStart({ payload: intentStart })).ok).toBe("true");
         expect((yield* api.Sessions.intentEnd({ payload: intentEnd })).ok).toBe("true");
         const [ok, response] = yield* api.Sessions.stop({
@@ -1751,14 +1759,26 @@ describe("forwarding", () => {
         },
         {
           method: "POST",
-          url: `${SERVER_A}/send-mouse`,
+          url: `${SERVER_A}/mouse/click`,
           headers: expect.objectContaining({ authorization: AUTHORIZATION }),
           body: JSON.stringify({
             id: SESSION_ID,
             x: 0.5,
             y: 0.25,
             button: "left",
-            clicks: 2,
+            agent: AGENT_ID,
+          }),
+        },
+        {
+          method: "POST",
+          url: `${SERVER_A}/mouse/drag`,
+          headers: expect.objectContaining({ authorization: AUTHORIZATION }),
+          body: JSON.stringify({
+            id: SESSION_ID,
+            from: { x: 0.1, y: 0.2 },
+            to: { x: 0.9, y: 0.2 },
+            button: "left",
+            modifiers: ["super"],
             agent: AGENT_ID,
           }),
         },
@@ -2059,7 +2079,13 @@ describe("forwarding refusals", () => {
     ["POST", "/stop", true],
     ["POST", "/save", true],
     ["POST", "/send-keys", true],
-    ["POST", "/send-mouse", true],
+    ["POST", "/mouse/move", true],
+    ["POST", "/mouse/click", true],
+    ["POST", "/mouse/double-click", true],
+    ["POST", "/mouse/scroll", true],
+    ["POST", "/mouse/drag", true],
+    ["POST", "/mouse/hold", true],
+    ["POST", "/mouse/release", true],
     ["POST", "/intent/start", true],
     ["POST", "/intent/end", true],
     ["POST", "/servers", true],

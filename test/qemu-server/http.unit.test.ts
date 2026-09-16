@@ -408,86 +408,111 @@ describe("Sessions endpoints happy path", () => {
     }),
   );
 
-  it.effect("POST /send-mouse forwards the whole body", () =>
+  it.effect("every POST /mouse/* endpoint forwards its body as the gesture it names", () =>
     Effect.gen(function* () {
       const fixed = fixture();
-      const body = Contract.SendMouseBody.make({
-        id: SESSION_ID,
-        x: 0.5,
-        y: 0.25,
-        button: "left",
-        clicks: 2,
-        agent: AGENT_ID,
+      const point = { id: SESSION_ID, agent: AGENT_ID, x: 0.5, y: 0.25 };
+      const move = Contract.MouseMoveBody.make(point);
+      const click = Contract.MouseClickBody.make({ ...point, button: "left" });
+      const doubleClick = Contract.MouseClickBody.make({
+        ...point,
+        button: "right",
+        modifiers: ["shift"],
       });
-      yield* Effect.gen(function* () {
-        const api = yield* client;
-        const ok = yield* api.Sessions.sendMouse({ payload: body });
-        expect(ok.ok).toBe("true");
-      }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.sessions.calls[1]).toEqual({ method: "sendMouse", args: [SESSION_ID, body] });
-    }),
-  );
-
-  it.effect("POST /send-mouse carries a drag end, held modifiers and a press as written", () =>
-    Effect.gen(function* () {
-      const fixed = fixture();
-      const drag = Contract.SendMouseBody.make({
+      const scroll = Contract.MouseScrollBody.make({ ...point, direction: "down", ticks: 3 });
+      const drag = Contract.MouseDragBody.make({
         id: SESSION_ID,
-        x: 0.1,
-        y: 0.2,
-        button: "left",
+        agent: AGENT_ID,
+        from: { x: 0.1, y: 0.2 },
         to: { x: 0.9, y: 0.9 },
+        button: "left",
         modifiers: ["super"],
-        agent: AGENT_ID,
       });
-      const held = Contract.SendMouseBody.make({
-        id: SESSION_ID,
-        x: 0.5,
-        y: 0.5,
-        button: "wheel-right",
-        press: "down",
-        agent: AGENT_ID,
-      });
+      const hold = Contract.MouseButtonBody.make({ ...point, button: "middle" });
       yield* Effect.gen(function* () {
         const api = yield* client;
-        yield* api.Sessions.sendMouse({ payload: drag });
-        yield* api.Sessions.sendMouse({ payload: held });
+        expect((yield* api.Sessions.mouseMove({ payload: move })).ok).toBe("true");
+        yield* api.Sessions.mouseClick({ payload: click });
+        yield* api.Sessions.mouseDoubleClick({ payload: doubleClick });
+        yield* api.Sessions.mouseScroll({ payload: scroll });
+        yield* api.Sessions.mouseDrag({ payload: drag });
+        yield* api.Sessions.mouseHold({ payload: hold });
+        yield* api.Sessions.mouseRelease({ payload: hold });
       }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.sessions.calls.filter((call) => call.method === "sendMouse")).toEqual([
-        { method: "sendMouse", args: [SESSION_ID, drag] },
-        { method: "sendMouse", args: [SESSION_ID, held] },
+      expect(fixed.sessions.calls.filter((call) => call.method === "mouse")).toEqual([
+        { method: "mouse", args: [SESSION_ID, { _tag: "move", x: 0.5, y: 0.25 }] },
+        { method: "mouse", args: [SESSION_ID, { _tag: "click", x: 0.5, y: 0.25, button: "left" }] },
+        {
+          method: "mouse",
+          args: [
+            SESSION_ID,
+            { _tag: "double-click", x: 0.5, y: 0.25, button: "right", modifiers: ["shift"] },
+          ],
+        },
+        {
+          method: "mouse",
+          args: [SESSION_ID, { _tag: "scroll", x: 0.5, y: 0.25, direction: "down", ticks: 3 }],
+        },
+        {
+          method: "mouse",
+          args: [
+            SESSION_ID,
+            {
+              _tag: "drag",
+              from: { x: 0.1, y: 0.2 },
+              to: { x: 0.9, y: 0.9 },
+              button: "left",
+              modifiers: ["super"],
+            },
+          ],
+        },
+        {
+          method: "mouse",
+          args: [SESSION_ID, { _tag: "hold", x: 0.5, y: 0.25, button: "middle" }],
+        },
+        {
+          method: "mouse",
+          args: [SESSION_ID, { _tag: "release", x: 0.5, y: 0.25, button: "middle" }],
+        },
       ]);
     }),
   );
 
-  it.effect(
-    "POST /send-mouse with an unknown modifier, an empty modifier list or a bad press is 400",
-    () =>
-      Effect.gen(function* () {
-        const fixed = fixture();
-        yield* Effect.gen(function* () {
-          const http = yield* HttpClient.HttpClient;
-          const headers = { authorization: `Bearer ${TOKEN}` };
-          const base = { id: SESSION_ID, x: 0.5, y: 0.5, button: "left", agent: AGENT_ID };
-          const bodies: ReadonlyArray<readonly [object, string]> = [
-            [{ ...base, modifiers: ["meta"] }, '["modifiers"'],
-            [{ ...base, modifiers: [] }, '["modifiers"]'],
-            [{ ...base, press: "click" }, '["press"]'],
-            [{ ...base, to: { x: 0.5 } }, '["to"'],
-          ];
-          for (const [body, where] of bodies) {
-            const response = yield* http.post("/send-mouse", {
-              headers,
-              body: HttpBody.jsonUnsafe(body),
-            });
-            expect(response.status).toBe(400);
-            expect(yield* response.json).toMatchObject({ error: expect.stringContaining(where) });
-          }
-        }).pipe(Effect.provide(serve(fixed)));
-        expect(fixed.sessions.calls).toEqual([]);
-        expect(fixed.log.lines).toHaveLength(4);
-        expect(fixed.log.lines.every((line) => line.skipSentry)).toBe(true);
-      }),
+  it.effect("a mouse body outside its vocabulary is 400 before any lookup", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const headers = { authorization: `Bearer ${TOKEN}` };
+        const point = { id: SESSION_ID, agent: AGENT_ID, x: 0.5, y: 0.5 };
+        const bodies: ReadonlyArray<readonly [string, object, string]> = [
+          ["/mouse/click", { ...point, button: "wheel-up" }, '["button"]'],
+          ["/mouse/click", { ...point }, '["button"]'],
+          [
+            "/mouse/double-click",
+            { ...point, button: "left", modifiers: ["meta"] },
+            '["modifiers"',
+          ],
+          ["/mouse/double-click", { ...point, button: "left", modifiers: [] }, '["modifiers"]'],
+          ["/mouse/scroll", { ...point, direction: "sideways", ticks: 1 }, '["direction"]'],
+          ["/mouse/scroll", { ...point, direction: "down" }, '["ticks"]'],
+          [
+            "/mouse/drag",
+            { id: SESSION_ID, agent: AGENT_ID, from: { x: 0.1, y: 0.2 }, button: "left" },
+            '["to"]',
+          ],
+          ["/mouse/release", { ...point, button: "wheel-down" }, '["button"]'],
+        ];
+        for (const [path, body, where] of bodies) {
+          const response = yield* http.post(path, { headers, body: HttpBody.jsonUnsafe(body) });
+          expect(response.status, path).toBe(400);
+          expect(yield* response.json).toMatchObject({ error: expect.stringContaining(where) });
+        }
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.sessions.calls).toEqual([]);
+      expect(fixed.log.lines).toHaveLength(8);
+      expect(fixed.log.lines.every((line) => line.skipSentry)).toBe(true);
+    }),
   );
 
   it.effect("POST /intent/start and /intent/end forward their fields", () =>
@@ -532,7 +557,13 @@ describe("authentication", () => {
     ["POST", "/stop", true],
     ["POST", "/save", true],
     ["POST", "/send-keys", true],
-    ["POST", "/send-mouse", true],
+    ["POST", "/mouse/move", true],
+    ["POST", "/mouse/click", true],
+    ["POST", "/mouse/double-click", true],
+    ["POST", "/mouse/scroll", true],
+    ["POST", "/mouse/drag", true],
+    ["POST", "/mouse/hold", true],
+    ["POST", "/mouse/release", true],
     ["POST", "/intent/start", true],
     ["POST", "/intent/end", true],
   ];
@@ -689,7 +720,7 @@ describe("request decoding", () => {
         expect(yield* response.json).toMatchObject({
           error: expect.stringContaining('["agent"]'),
         });
-        const mouse = yield* http.post("/send-mouse", {
+        const mouse = yield* http.post("/mouse/move", {
           headers,
           body: HttpBody.jsonUnsafe({ id: SESSION_ID, x: "half", y: 0.5, agent: AGENT_ID }),
         });
@@ -698,7 +729,7 @@ describe("request decoding", () => {
       }).pipe(Effect.provide(serve(fixed)));
       expect(fixed.log.lines).toHaveLength(2);
       expect(fixed.log.lines[0]?.text).toMatch(/^POST \/start failed: .*\["agent"\]/s);
-      expect(fixed.log.lines[1]?.text).toMatch(/^POST \/send-mouse failed: .*\["x"\]/s);
+      expect(fixed.log.lines[1]?.text).toMatch(/^POST \/mouse\/move failed: .*\["x"\]/s);
       expect(fixed.log.lines.every((line) => line.skipSentry)).toBe(true);
       expect(fixed.sessions.calls).toEqual([]);
     }),
@@ -915,7 +946,7 @@ describe("Sessions failures", () => {
     Effect.gen(function* () {
       const fixed = fixture({
         sessions: FakeSessions.fakeSessions({
-          sendMouse: (live) =>
+          mouse: (live) =>
             Effect.fail(
               Errors.BadRequest.make({
                 message: "mouse: x and y must be in 0..1",
@@ -936,8 +967,8 @@ describe("Sessions failures", () => {
       yield* Effect.gen(function* () {
         const api = yield* client;
         const mouse = yield* Effect.flip(
-          api.Sessions.sendMouse({
-            payload: Contract.SendMouseBody.make({ id: SESSION_ID, x: 2, y: 0.5, agent: AGENT_ID }),
+          api.Sessions.mouseMove({
+            payload: Contract.MouseMoveBody.make({ id: SESSION_ID, x: 2, y: 0.5, agent: AGENT_ID }),
           }),
         );
         expect(mouse).toMatchObject({
@@ -954,7 +985,7 @@ describe("Sessions failures", () => {
       expect(fixed.log.lines).toEqual([
         {
           level: "error",
-          text: "POST /send-mouse failed: mouse: x and y must be in 0..1",
+          text: "POST /mouse/move failed: mouse: x and y must be in 0..1",
           location: SESSION_ID,
           agentId: AGENT_ID,
           skipSentry: true,

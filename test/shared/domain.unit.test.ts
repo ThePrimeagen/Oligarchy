@@ -268,7 +268,9 @@ describe("encodeQmpCommand", () => {
   it("refuses an action name outside the vocabulary", () => {
     const is = Schema.is(Domain.ActionName);
     expect(is("save")).toBe(true);
+    expect(is("mouse-drag")).toBe(true);
     expect(is("restore")).toBe(false);
+    expect(is("send-mouse")).toBe(false);
   });
 });
 

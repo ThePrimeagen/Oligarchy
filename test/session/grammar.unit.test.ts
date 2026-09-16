@@ -50,18 +50,22 @@ describe("parseLine maps every REPL line to the client's argv", () => {
     ]);
   });
 
-  it("send-mouse with x y, an optional button and optional clicks", () => {
-    expect(clientArgs("send-mouse 0 1")).toEqual([
-      "send-mouse",
+  it("mouse verbs take their positional words and hand the client their flags", () => {
+    const base = ["mouse", "move", "--session-id", SESSION_ID];
+    expect(clientArgs("mouse move 0 1")).toEqual([...base, "--x", "0", "--y", "1"]);
+    expect(clientArgs("mouse click 0.5 0.25")).toEqual([
+      "mouse",
+      "click",
       "--session-id",
       SESSION_ID,
       "--x",
-      "0",
+      "0.5",
       "--y",
-      "1",
+      "0.25",
     ]);
-    expect(clientArgs("send-mouse 0.5 0.25 left")).toEqual([
-      "send-mouse",
+    expect(clientArgs("mouse double-click 0.5 0.25 right")).toEqual([
+      "mouse",
+      "double-click",
       "--session-id",
       SESSION_ID,
       "--x",
@@ -69,20 +73,69 @@ describe("parseLine maps every REPL line to the client's argv", () => {
       "--y",
       "0.25",
       "--button",
-      "left",
+      "right",
     ]);
-    expect(clientArgs("send-mouse 0.5 0.25 left 2")).toEqual([
-      "send-mouse",
+    expect(clientArgs("mouse scroll 0.5 0.5 down")).toEqual([
+      "mouse",
+      "scroll",
       "--session-id",
       SESSION_ID,
       "--x",
       "0.5",
       "--y",
-      "0.25",
-      "--button",
+      "0.5",
+      "--direction",
+      "down",
+    ]);
+    expect(clientArgs("mouse scroll 0.5 0.5 left 3")).toEqual([
+      "mouse",
+      "scroll",
+      "--session-id",
+      SESSION_ID,
+      "--x",
+      "0.5",
+      "--y",
+      "0.5",
+      "--direction",
       "left",
-      "--clicks",
-      "2",
+      "--ticks",
+      "3",
+    ]);
+    expect(clientArgs("mouse drag 0.1 0.2 0.9 0.2")).toEqual([
+      "mouse",
+      "drag",
+      "--session-id",
+      SESSION_ID,
+      "--from-x",
+      "0.1",
+      "--from-y",
+      "0.2",
+      "--to-x",
+      "0.9",
+      "--to-y",
+      "0.2",
+    ]);
+    expect(clientArgs("mouse hold 0.5 0.5 middle")).toEqual([
+      "mouse",
+      "hold",
+      "--session-id",
+      SESSION_ID,
+      "--x",
+      "0.5",
+      "--y",
+      "0.5",
+      "--button",
+      "middle",
+    ]);
+    expect(clientArgs("mouse release 0.5 0.5")).toEqual([
+      "mouse",
+      "release",
+      "--session-id",
+      SESSION_ID,
+      "--x",
+      "0.5",
+      "--y",
+      "0.5",
     ]);
   });
 
@@ -149,8 +202,9 @@ describe("parseLine maps every REPL line to the client's argv", () => {
   });
 
   it("splits on any run of whitespace and ignores surrounding spaces", () => {
-    expect(clientArgs("  send-mouse   0.5\t0.25  ")).toEqual([
-      "send-mouse",
+    expect(clientArgs("  mouse  click   0.5\t0.25  ")).toEqual([
+      "mouse",
+      "click",
       "--session-id",
       SESSION_ID,
       "--x",
@@ -185,22 +239,52 @@ describe("parseLine refuses malformed lines with the exact usage text", () => {
     });
   });
 
-  it("send-mouse with too few or too many words", () => {
-    const usage = "usage: send-mouse <x> <y> [button] [clicks]";
-    expect(Grammar.parseLine("send-mouse 0.5")).toEqual({
+  it("mouse with a missing or unknown verb, or a verb with too few or too many words", () => {
+    const verbs = "usage: mouse <move|click|double-click|scroll|drag|hold|release> ...";
+    expect(Grammar.parseLine("mouse")).toEqual({
       _tag: "malformed",
-      command: "send-mouse",
-      usage,
+      command: "mouse",
+      usage: verbs,
     });
-    expect(Grammar.parseLine("send-mouse")).toEqual({
+    expect(Grammar.parseLine("mouse wiggle 0 0")).toEqual({
       _tag: "malformed",
-      command: "send-mouse",
-      usage,
+      command: "mouse",
+      usage: verbs,
     });
-    expect(Grammar.parseLine("send-mouse 0 0 left 2 extra")).toEqual({
+    expect(Grammar.parseLine("mouse move 0.5")).toEqual({
       _tag: "malformed",
-      command: "send-mouse",
-      usage,
+      command: "mouse",
+      usage: "usage: mouse move <x> <y>",
+    });
+    expect(Grammar.parseLine("mouse click 0.5")).toEqual({
+      _tag: "malformed",
+      command: "mouse",
+      usage: "usage: mouse click <x> <y> [button]",
+    });
+    expect(Grammar.parseLine("mouse double-click 0 0 left extra")).toEqual({
+      _tag: "malformed",
+      command: "mouse",
+      usage: "usage: mouse double-click <x> <y> [button]",
+    });
+    expect(Grammar.parseLine("mouse scroll 0.5 0.5")).toEqual({
+      _tag: "malformed",
+      command: "mouse",
+      usage: "usage: mouse scroll <x> <y> <up|down|left|right> [ticks]",
+    });
+    expect(Grammar.parseLine("mouse drag 0.1 0.2 0.9")).toEqual({
+      _tag: "malformed",
+      command: "mouse",
+      usage: "usage: mouse drag <x> <y> <to-x> <to-y> [button]",
+    });
+    expect(Grammar.parseLine("mouse hold")).toEqual({
+      _tag: "malformed",
+      command: "mouse",
+      usage: "usage: mouse hold <x> <y> [button]",
+    });
+    expect(Grammar.parseLine("mouse release 0 0 left 2")).toEqual({
+      _tag: "malformed",
+      command: "mouse",
+      usage: "usage: mouse release <x> <y> [button]",
     });
   });
 
@@ -265,7 +349,7 @@ describe("help and completion", () => {
       "get-image",
       "get-serial",
       "send-keys",
-      "send-mouse",
+      "mouse",
       "intent",
       "stop",
       "follow",
@@ -283,7 +367,15 @@ describe("help and completion", () => {
     expect(Grammar.complete("")).toEqual({ _tag: "words", completion: [Grammar.COMMANDS, ""] });
     expect(Grammar.complete("se")).toEqual({
       _tag: "words",
-      completion: [["send-keys", "send-mouse"], "se"],
+      completion: [["send-keys"], "se"],
+    });
+    expect(Grammar.complete("mouse d")).toEqual({
+      _tag: "words",
+      completion: [["double-click", "drag"], "d"],
+    });
+    expect(Grammar.complete("mouse ")).toEqual({
+      _tag: "words",
+      completion: [Grammar.MOUSE_VERBS, ""],
     });
     expect(Grammar.complete("intent s")).toEqual({
       _tag: "words",

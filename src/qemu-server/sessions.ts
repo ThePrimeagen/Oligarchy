@@ -51,9 +51,9 @@ const SHUTDOWN_REASON = "qemu server shutdown";
 // is not going to, and its disk is not one to keep.
 const SAVE_POWEROFF = "2 minutes";
 const SAVE_POWEROFF_REASON = "guest did not power off within 2 minutes";
-// A click is two QMP exchanges and two action rows; cap the pulse count so one request cannot
+// A wheel tick is two QMP exchanges and two action rows; cap the count so one request cannot
 // enqueue an unbounded amount of work.
-const MAX_CLICKS = 100;
+const MAX_TICKS = 100;
 // Each chord is a QMP exchange and an action row, paced ~60ms apart; cap the count so one request
 // cannot run for many minutes or write thousands of rows.
 const MAX_KEYS = 1000;
@@ -122,9 +122,11 @@ export type SessionsService = {
     keys: string,
     encoding: string | undefined,
   ) => Effect.Effect<void, Errors.BadRequest | Errors.ExchangeFailed>;
-  readonly sendMouse: (
+  // One mouse operation; a point off the screenshot or a tick count out of range is BadRequest
+  // before any exchange.
+  readonly mouse: (
     live: LiveSession,
-    input: Contract.SendMouseBody,
+    gesture: Qemu.MouseGesture,
   ) => Effect.Effect<void, Errors.BadRequest | Errors.ExchangeFailed>;
   readonly intentStart: (
     live: LiveSession,
@@ -778,79 +780,62 @@ const make = (maxJobs: number) =>
       );
     });
 
-    const sendMouse = Effect.fn("Sessions.sendMouse")(function* (
+    const mouse = Effect.fn("Sessions.mouse")(function* (
       live: LiveSession,
-      input: Contract.SendMouseBody,
+      gesture: Qemu.MouseGesture,
     ) {
       const started = yield* Clock.currentTimeMillis;
-      const { x, y, button, clicks, to, modifiers, press } = input;
       const onScreen = (point: Domain.ScreenPoint) =>
         point.x >= 0 && point.x <= 1 && point.y >= 0 && point.y <= 1;
-      if (!onScreen(input)) {
+      if (gesture._tag === "drag") {
+        if (!onScreen(gesture.from) || !onScreen(gesture.to)) {
+          return yield* badRequest("mouse: from and to must be in 0..1", live);
+        }
+      } else if (!onScreen(gesture)) {
         return yield* badRequest("mouse: x and y must be in 0..1", live);
       }
       if (
-        clicks !== undefined &&
-        (!Number.isInteger(clicks) || clicks < 1 || clicks > MAX_CLICKS)
+        gesture._tag === "scroll" &&
+        (!Number.isInteger(gesture.ticks) || gesture.ticks < 1 || gesture.ticks > MAX_TICKS)
       ) {
         return yield* badRequest(
-          `mouse: clicks must be an integer in 1..${String(MAX_CLICKS)}`,
+          `mouse: ticks must be an integer in 1..${String(MAX_TICKS)}`,
           live,
         );
       }
-      // A drag or a press holds the button; a wheel pulse cannot be held.
-      const pressable = button === "left" || button === "middle" || button === "right";
-      if (to !== undefined) {
-        if (!pressable) {
-          return yield* badRequest("mouse: a drag needs button left, middle or right", live);
-        }
-        if (clicks !== undefined) {
-          return yield* badRequest("mouse: clicks cannot combine with a drag", live);
-        }
-        if (press !== undefined) {
-          return yield* badRequest("mouse: press cannot combine with a drag", live);
-        }
-        if (!onScreen(to)) {
-          return yield* badRequest("mouse: the drag end must be in 0..1", live);
-        }
-      }
-      if (press !== undefined) {
-        if (!pressable) {
-          return yield* badRequest("mouse: press needs button left, middle or right", live);
-        }
-        if (clicks !== undefined) {
-          return yield* badRequest("mouse: clicks cannot combine with press", live);
-        }
-      }
-      if (modifiers !== undefined && button === undefined) {
-        return yield* badRequest("mouse: modifiers need a button", live);
-      }
-      const gesture = Object.assign(
-        { x, y },
-        button === undefined ? undefined : { button },
-        clicks === undefined ? undefined : { clicks },
-        to === undefined ? undefined : { to },
-        modifiers === undefined ? undefined : { modifiers },
-        press === undefined ? undefined : { press },
-      );
       yield* followed(
         live,
-        "send-mouse",
+        `mouse-${gesture._tag}`,
         live.qemu
-          .sendMouse(gesture, recorder(live))
+          .mouse(gesture, recorder(live))
           .pipe(Effect.mapError((error) => exchangeFailed(error, live))),
       );
-      let suffix = clicks === undefined || clicks === 1 ? "" : ` ×${String(clicks)}`;
-      if (press !== undefined) {
-        suffix = ` ${press}`;
-      } else if (to !== undefined) {
-        suffix = ` drag to ${String(to.x)} ${String(to.y)}`;
+      const held = (modifiers: ReadonlyArray<Domain.MouseModifier> | undefined) =>
+        modifiers === undefined ? "" : modifiers.map((key) => ` +${key}`).join("");
+      let what: string;
+      switch (gesture._tag) {
+        case "move":
+          what = `${String(gesture.x)} ${String(gesture.y)}`;
+          break;
+        case "click":
+        case "double-click":
+          what = `${String(gesture.x)} ${String(gesture.y)} ${gesture.button}${held(gesture.modifiers)}`;
+          break;
+        case "scroll":
+          what = `${String(gesture.x)} ${String(gesture.y)} ${gesture.direction} ×${String(gesture.ticks)}`;
+          break;
+        case "drag":
+          what = `${String(gesture.from.x)} ${String(gesture.from.y)} to ${String(gesture.to.x)} ${String(gesture.to.y)} ${gesture.button}${held(gesture.modifiers)}`;
+          break;
+        case "hold":
+        case "release":
+          what = `${String(gesture.x)} ${String(gesture.y)} ${gesture.button}`;
+          break;
       }
-      const held = modifiers === undefined ? "" : modifiers.map((key) => ` +${key}`).join("");
-      return yield* log.info(
-        `mouse ${String(x)} ${String(y)}${button === undefined ? "" : ` ${button}${suffix}${held}`} in ${yield* elapsed(started)}ms`,
-        { location: live.id, agentId: live.agent },
-      );
+      return yield* log.info(`mouse ${gesture._tag} ${what} in ${yield* elapsed(started)}ms`, {
+        location: live.id,
+        agentId: live.agent,
+      });
     });
 
     const intentStart = Effect.fn("Sessions.intentStart")(function* (
@@ -1304,7 +1289,7 @@ const make = (maxJobs: number) =>
       image,
       serial,
       sendKeys,
-      sendMouse,
+      mouse,
       intentStart,
       intentEnd,
       stop,

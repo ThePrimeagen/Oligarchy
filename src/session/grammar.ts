@@ -5,7 +5,7 @@ export const HELP = `start [iso] [disk]                    boot a qemu session (
 get-image                             show the guest display inline
 get-serial                            print the guest serial console
 send-keys <keys>                      type into the guest, e.g. send-keys hello<ENTER>
-send-mouse <x> <y> [button] [clicks]  move, click, or scroll; x and y are 0..1 fractions
+mouse <verb> <x> <y> [...]            move, click, double-click, scroll, drag, hold or release; "mouse" then tab lists the verbs
 intent start <message>                declare what you are about to do
 intent end                            close the open intent
 stop [status] [reason]                stop the session; status is succeeded, failed, or aborted
@@ -21,7 +21,7 @@ export const COMMANDS: ReadonlyArray<string> = [
   "get-image",
   "get-serial",
   "send-keys",
-  "send-mouse",
+  "mouse",
   "intent",
   "stop",
   "follow",
@@ -33,6 +33,16 @@ export const COMMANDS: ReadonlyArray<string> = [
 
 export const STOP_STATUSES: ReadonlyArray<string> = Domain.StopStatus.literals;
 
+export const MOUSE_VERBS: ReadonlyArray<string> = [
+  "move",
+  "click",
+  "double-click",
+  "scroll",
+  "drag",
+  "hold",
+  "release",
+];
+
 // A manual session has no Linear ticket, so its intents carry this result id.
 export const MANUAL_RESULT_ID = "manual";
 
@@ -42,7 +52,7 @@ export const unknownCommand = (command: string): string =>
 export type MalformedCommand =
   | "start"
   | "send-keys"
-  | "send-mouse"
+  | "mouse"
   | "intent"
   | "intent-start"
   | "intent-end"
@@ -60,13 +70,8 @@ export type ClientCommand =
   | { readonly _tag: "get-image" }
   | { readonly _tag: "get-serial" }
   | { readonly _tag: "send-keys"; readonly keys: string }
-  | {
-      readonly _tag: "send-mouse";
-      readonly x: string;
-      readonly y: string;
-      readonly button: Option.Option<string>;
-      readonly clicks: Option.Option<string>;
-    }
+  // The verb and the client flags its words became, `--session-id` still to come.
+  | { readonly _tag: "mouse"; readonly verb: string; readonly flags: ReadonlyArray<string> }
   | { readonly _tag: "intent-start"; readonly message: string }
   | { readonly _tag: "intent-end" }
   | {
@@ -87,7 +92,7 @@ export type Command =
 // These print `no session. run start first.` before their usage is judged.
 export const needsSession = (command: MalformedCommand): boolean =>
   command === "send-keys" ||
-  command === "send-mouse" ||
+  command === "mouse" ||
   command === "intent-start" ||
   command === "intent-end" ||
   command === "stop";
@@ -114,6 +119,82 @@ const parseIntent = (rest: string): Command => {
       return message === "" ? { _tag: "intent-end" } : malformed("intent-end", "usage: intent end");
     default:
       return malformed("intent", "usage: intent start <message> | intent end");
+  }
+};
+
+const optional = (flag: string, value: Option.Option<string>): ReadonlyArray<string> =>
+  Option.match(value, { onNone: () => [], onSome: (found) => [flag, found] });
+
+// `mouse <verb> <x> <y> ...`: the words after the verb become the client's flags in order; a
+// count outside the verb's arity is that verb's usage, an unknown verb the list of verbs.
+const parseMouse = (rest: string): Command => {
+  const [verb, ...args] = words(rest);
+  const point = (usage: string, tail: ReadonlyArray<readonly [string, boolean]>): Command => {
+    const [x, y, ...more] = args;
+    const required = tail.filter(([, mayBeOmitted]) => !mayBeOmitted).length;
+    if (
+      verb === undefined ||
+      x === undefined ||
+      y === undefined ||
+      more.length < required ||
+      more.length > tail.length
+    ) {
+      return malformed("mouse", usage);
+    }
+    const flags = ["--x", x, "--y", y];
+    for (const [index, [flag]] of tail.entries()) {
+      const word = more[index];
+      if (word !== undefined) {
+        flags.push(flag, word);
+      }
+    }
+    return { _tag: "mouse", verb, flags };
+  };
+  switch (verb) {
+    case "move":
+      return point("usage: mouse move <x> <y>", []);
+    case "click":
+    case "double-click":
+    case "hold":
+    case "release":
+      return point(`usage: mouse ${verb} <x> <y> [button]`, [["--button", true]]);
+    case "scroll":
+      return point("usage: mouse scroll <x> <y> <up|down|left|right> [ticks]", [
+        ["--direction", false],
+        ["--ticks", true],
+      ]);
+    case "drag": {
+      const [x, y, toX, toY, button, ...extra] = args;
+      if (
+        x === undefined ||
+        y === undefined ||
+        toX === undefined ||
+        toY === undefined ||
+        extra.length > 0
+      ) {
+        return malformed("mouse", "usage: mouse drag <x> <y> <to-x> <to-y> [button]");
+      }
+      return {
+        _tag: "mouse",
+        verb,
+        flags: [
+          "--from-x",
+          x,
+          "--from-y",
+          y,
+          "--to-x",
+          toX,
+          "--to-y",
+          toY,
+          ...optional("--button", Option.fromNullishOr(button)),
+        ],
+      };
+    }
+    default:
+      return malformed(
+        "mouse",
+        "usage: mouse <move|click|double-click|scroll|drag|hold|release> ...",
+      );
   }
 };
 
@@ -157,19 +238,8 @@ export const parseLine = (line: string): Command => {
       return rest === ""
         ? malformed("send-keys", "usage: send-keys <keys>")
         : { _tag: "send-keys", keys: rest };
-    case "send-mouse": {
-      const [x, y, button, clicks, ...extra] = words(rest);
-      if (x === undefined || y === undefined || extra.length > 0) {
-        return malformed("send-mouse", "usage: send-mouse <x> <y> [button] [clicks]");
-      }
-      return {
-        _tag: "send-mouse",
-        x,
-        y,
-        button: Option.fromNullishOr(button),
-        clicks: Option.fromNullishOr(clicks),
-      };
-    }
+    case "mouse":
+      return parseMouse(rest);
     case "intent":
       return parseIntent(rest);
     case "stop":
@@ -193,9 +263,6 @@ export const parseLine = (line: string): Command => {
   }
 };
 
-const optional = (flag: string, value: Option.Option<string>): ReadonlyArray<string> =>
-  Option.match(value, { onNone: () => [], onSome: (found) => [flag, found] });
-
 // The client's argv for one command, without `--agent-id` and `--server-url` (children.ts
 // appends those). `start` has no session yet and ignores the id.
 export const toClientArgs = (command: ClientCommand, sessionId: string): ReadonlyArray<string> => {
@@ -208,18 +275,8 @@ export const toClientArgs = (command: ClientCommand, sessionId: string): Readonl
       return ["get-serial", "--session-id", sessionId];
     case "send-keys":
       return ["send-keys", "--session-id", sessionId, "--keys", command.keys];
-    case "send-mouse":
-      return [
-        "send-mouse",
-        "--session-id",
-        sessionId,
-        "--x",
-        command.x,
-        "--y",
-        command.y,
-        ...optional("--button", command.button),
-        ...optional("--clicks", command.clicks),
-      ];
+    case "mouse":
+      return ["mouse", command.verb, "--session-id", sessionId, ...command.flags];
     case "intent-start":
       return [
         "intent",
@@ -264,6 +321,10 @@ export const complete = (line: string): Completing => {
   const followArg = /^\s*follow\s+(\S*)$/.exec(line);
   if (followArg !== null) {
     return { _tag: "follow", prefix: followArg[1] };
+  }
+  const mouseArg = /^\s*mouse\s+(\S*)$/.exec(line);
+  if (mouseArg !== null) {
+    return { _tag: "words", completion: startingWith(MOUSE_VERBS, mouseArg[1]) };
   }
   const intentArg = /^\s*intent\s+(\S*)$/.exec(line);
   if (intentArg !== null) {

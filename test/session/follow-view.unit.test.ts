@@ -49,7 +49,7 @@ describe("follow view state", () => {
         { type: "intent", state: "started", message: "wait for the boot menu" },
         { type: "action", id: 1, name: "send-keys", state: "running" },
         { type: "action", id: 1, state: "completed" },
-        { type: "action", id: 2, name: "send-mouse", state: "running" },
+        { type: "action", id: 2, name: "mouse-click", state: "running" },
         { type: "action", id: 2, state: "failed" },
         { type: "intent", state: "completed" },
         { type: "action", id: 3, name: "get-serial", state: "running" },
@@ -59,7 +59,7 @@ describe("follow view state", () => {
       expect(view.entries).toEqual([
         { id: "intent", indent: 0, name: "wait for the boot menu", state: "completed" },
         { id: 1, indent: 2, name: "send-keys", state: "completed" },
-        { id: 2, indent: 2, name: "send-mouse", state: "failed" },
+        { id: 2, indent: 2, name: "mouse-click", state: "failed" },
         { id: 3, indent: 0, name: "get-serial", state: "running" },
       ]);
       expect(Option.isSome(view.png)).toBe(true);
@@ -130,7 +130,7 @@ describe("follow view drawing", () => {
         { type: "intent", state: "started", message: "wait for the boot menu" },
         { type: "action", id: 1, name: "send-keys", state: "running" },
         { type: "action", id: 1, state: "completed" },
-        { type: "action", id: 2, name: "send-mouse", state: "running" },
+        { type: "action", id: 2, name: "mouse-click", state: "running" },
         { type: "action", id: 2, state: "failed" },
       ]);
       const out = FollowView.draw(view, 10);
@@ -142,7 +142,7 @@ describe("follow view drawing", () => {
       );
       expect(out).toContain(`\x1b[2;2H\x1b[90m⠋ wait for the boot menu\x1b[0m`);
       expect(out).toContain(`\x1b[3;2H  \x1b[32m✓ send-keys\x1b[0m`);
-      expect(out).toContain(`\x1b[4;2H  \x1b[31m✗ send-mouse\x1b[0m`);
+      expect(out).toContain(`\x1b[4;2H  \x1b[31m✗ mouse-click\x1b[0m`);
       expect(out).toContain(`\x1b[5;2H${" ".repeat(FollowView.LEFT_COLS - 1)}`);
       expect(out).toContain(`\x1b[9;2H${" ".repeat(FollowView.LEFT_COLS - 1)}`);
       expect(out.endsWith(`\x1b[10;2H\x1b[90mctrl-c detaches\x1b[0m`)).toBe(true);
