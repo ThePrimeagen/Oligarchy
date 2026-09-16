@@ -1,7 +1,7 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { Effect, Fiber, Layer, Option, type PlatformError, Queue, type Terminal } from "effect";
-import { TestClock } from "effect/testing";
+import { Effect, Fiber, Layer, Option, type PlatformError, type Terminal } from "effect";
+import type { HttpClient } from "effect/unstable/http";
 import type * as Automation from "../../src/db/automation.ts";
 import * as Domain from "../../src/shared/domain.ts";
 import * as Errors from "../../src/shared/errors.ts";
@@ -145,44 +145,48 @@ const TINY_PNG = new Uint8Array([
 ]);
 
 describe("peekFromActions", () => {
-  it.effect("keeps the last three commands, oldest first, and names them from the QMP execute", () =>
-    Effect.sync(() => {
-      const peek = Follow.peekFromActions(
-        "OLI-61",
-        SESSION_ID,
-        garage.url,
-        [
-          { request: sendKey, createdAt: ago(40) },
-          { request: mouse, createdAt: ago(20) },
-          { request: screendump, createdAt: ago(8) },
-          { request: power, createdAt: ago(2) },
-        ],
-        Option.none(),
-      );
-      expect(peek._tag).toBe("peek");
-      expect(peek.ticket).toBe("OLI-61");
-      expect(peek.sessionId).toBe(SESSION_ID);
-      expect(peek.serverUrl).toEqual(Option.some(garage.url));
-      expect(peek.commands).toEqual([
-        { name: "input-send-event", at: ago(20) },
-        { name: "screendump", at: ago(8) },
-        { name: "system_powerdown", at: ago(2) },
-      ]);
-    }),
+  it.effect(
+    "keeps the last three commands, oldest first, and names them from the QMP execute",
+    () =>
+      Effect.sync(() => {
+        const peek = Follow.peekFromActions(
+          "OLI-61",
+          SESSION_ID,
+          garage.url,
+          [
+            { request: sendKey, createdAt: ago(40) },
+            { request: mouse, createdAt: ago(20) },
+            { request: screendump, createdAt: ago(8) },
+            { request: power, createdAt: ago(2) },
+          ],
+          Option.none(),
+        );
+        expect(peek._tag).toBe("peek");
+        expect(peek.ticket).toBe("OLI-61");
+        expect(peek.sessionId).toBe(SESSION_ID);
+        expect(peek.serverUrl).toEqual(Option.some(garage.url));
+        expect(peek.commands).toEqual([
+          { name: "input-send-event", at: ago(20) },
+          { name: "screendump", at: ago(8) },
+          { name: "system_powerdown", at: ago(2) },
+        ]);
+      }),
   );
 
-  it.effect("shows fewer than three when that is all there is, and ? when the request has no execute", () =>
-    Effect.sync(() => {
-      const peek = Follow.peekFromActions(
-        "OLI-61",
-        SESSION_ID,
-        null,
-        [{ request: { nope: true }, createdAt: ago(1) }],
-        Option.none(),
-      );
-      expect(peek.serverUrl).toEqual(Option.none());
-      expect(peek.commands).toEqual([{ name: "?", at: ago(1) }]);
-    }),
+  it.effect(
+    "shows fewer than three when that is all there is, and ? when the request has no execute",
+    () =>
+      Effect.sync(() => {
+        const peek = Follow.peekFromActions(
+          "OLI-61",
+          SESSION_ID,
+          null,
+          [{ request: { nope: true }, createdAt: ago(1) }],
+          Option.none(),
+        );
+        expect(peek.serverUrl).toEqual(Option.none());
+        expect(peek.commands).toEqual([{ name: "?", at: ago(1) }]);
+      }),
   );
 });
 
@@ -199,25 +203,27 @@ describe("drawPeek", () => {
     Option.some(TINY_PNG),
   );
 
-  it.effect("is five rows: a title, three command rows, and the keys, each the terminal's width", () =>
-    Effect.sync(() => {
-      const { lines } = Follow.drawPeek(peek, NOW, COLUMNS);
-      expect(lines).toHaveLength(Follow.PEEK_FRAME_ROWS);
-      expect(Follow.PEEK_IMAGE_ROWS).toBe(3);
-      const plain = lines.map(stripAnsi);
-      for (const row of plain) {
-        expect(row).toHaveLength(COLUMNS);
-      }
-      expect(plain[0]).toContain("follow OLI-61 · 7a2d0000");
-      expect(plain[1]).toContain("send-key");
-      expect(plain[1]).toContain("20 s ago");
-      expect(plain[2]).toContain("input-send-event");
-      expect(plain[2]).toContain("8 s ago");
-      expect(plain[3]).toContain("screendump");
-      expect(plain[3]).toContain("2 s ago");
-      expect(plain[4]).toContain("F full screen");
-      expect(plain[4]).toContain("esc close");
-    }),
+  it.effect(
+    "is five rows: a title, three command rows, and the keys, each the terminal's width",
+    () =>
+      Effect.sync(() => {
+        const { lines } = Follow.drawPeek(peek, NOW, COLUMNS);
+        expect(lines).toHaveLength(Follow.PEEK_FRAME_ROWS);
+        expect(Follow.PEEK_IMAGE_ROWS).toBe(3);
+        const plain = lines.map(stripAnsi);
+        for (const row of plain) {
+          expect(row).toHaveLength(COLUMNS);
+        }
+        expect(plain[0]).toContain("follow OLI-61 · 7a2d0000");
+        expect(plain[1]).toContain("send-key");
+        expect(plain[1]).toContain("20 s ago");
+        expect(plain[2]).toContain("input-send-event");
+        expect(plain[2]).toContain("8 s ago");
+        expect(plain[3]).toContain("screendump");
+        expect(plain[3]).toContain("2 s ago");
+        expect(plain[4]).toContain("F full screen");
+        expect(plain[4]).toContain("esc close");
+      }),
   );
 
   it.effect("says so when there are no commands yet, and still keeps three image rows", () =>
@@ -270,10 +276,12 @@ describe("full follow view", () => {
       expect(started.entries).toEqual([
         { id: -1, indent: 0, name: "send-key", state: "completed" },
       ]);
-      const view = Follow.apply(
-        Follow.apply(started, { type: "session", status: "running" }),
-        { type: "action", id: 9, name: "mouse-click", state: "running" },
-      );
+      const view = Follow.apply(Follow.apply(started, { type: "session", status: "running" }), {
+        type: "action",
+        id: 9,
+        name: "mouse-click",
+        state: "running",
+      });
       expect(view.status).toBe("running");
       expect(view.entries.at(-1)).toEqual({
         id: 9,
@@ -301,20 +309,22 @@ describe("full follow view", () => {
 });
 
 describe("followError", () => {
-  it.effect("refuses a missing job, a pending job, a completed job, and a running job with no session", () =>
-    Effect.sync(() => {
-      expect(View.followError(Option.none())).toEqual(Option.some("no job selected"));
-      expect(View.followError(Option.some(pending))).toEqual(
-        Option.some("follow needs a running job"),
-      );
-      expect(View.followError(Option.some(completed))).toEqual(
-        Option.some("follow needs a running job"),
-      );
-      expect(View.followError(Option.some({ ...running, sessionId: null }))).toEqual(
-        Option.some("the selected job has no session"),
-      );
-      expect(View.followError(Option.some(running))).toEqual(Option.none());
-    }),
+  it.effect(
+    "refuses a missing job, a pending job, a completed job, and a running job with no session",
+    () =>
+      Effect.sync(() => {
+        expect(View.followError(Option.none())).toEqual(Option.some("no job selected"));
+        expect(View.followError(Option.some(pending))).toEqual(
+          Option.some("follow needs a running job"),
+        );
+        expect(View.followError(Option.some(completed))).toEqual(
+          Option.some("follow needs a running job"),
+        );
+        expect(View.followError(Option.some({ ...running, sessionId: null }))).toEqual(
+          Option.some("the selected job has no session"),
+        );
+        expect(View.followError(Option.some(running))).toEqual(Option.none());
+      }),
   );
 });
 
@@ -367,7 +377,7 @@ const live = (
   scripted: Scripted = {},
   extra: {
     readonly actions?: ReturnType<typeof Stores.fakeActionStore>;
-    readonly http?: Layer.Layer<never>;
+    readonly http?: Layer.Layer<HttpClient.HttpClient>;
     readonly env?: Record<string, string>;
     readonly spawner?: FakeSpawner;
   } = {},
@@ -526,8 +536,7 @@ describe("run follow unhappy path", () => {
       const done = yield* fakeTerminal();
       const byDone = yield* Effect.forkChild(
         live(done, {
-          jobs: () =>
-            Effect.succeed({ running: [], pending: [], completed: [completed] }),
+          jobs: () => Effect.succeed({ running: [], pending: [], completed: [completed] }),
         }),
         { startImmediately: true },
       );
@@ -542,57 +551,59 @@ describe("run follow unhappy path", () => {
     }),
   );
 
-  it.effect("F on a running job without a session, or without a server on the second F, errors", () =>
-    Effect.gen(function* () {
-      const noSession = yield* fakeTerminal();
-      const byNoSession = yield* Effect.forkChild(
-        live(noSession, {
-          jobs: () =>
-            Effect.succeed({
-              running: [{ ...running, sessionId: null }],
-              pending: [],
-              completed: [],
-            }),
-        }),
-        { startImmediately: true },
-      );
-      yield* settle;
-      yield* noSession.press("j");
-      yield* noSession.press("f");
-      yield* settle;
-      expect(lastRows(noSession)[ROWS - 1]).toContain("the selected job has no session");
-      yield* noSession.press("q");
-      yield* Fiber.join(byNoSession);
-
-      const noServer = yield* fakeTerminal();
-      const actions = Stores.fakeActionStore();
-      seedActions(actions);
-      const byNoServer = yield* Effect.forkChild(
-        live(
-          noServer,
-          {
+  it.effect(
+    "F on a running job without a session, or without a server on the second F, errors",
+    () =>
+      Effect.gen(function* () {
+        const noSession = yield* fakeTerminal();
+        const byNoSession = yield* Effect.forkChild(
+          live(noSession, {
             jobs: () =>
               Effect.succeed({
-                running: [{ ...running, serverUrl: null }],
+                running: [{ ...running, sessionId: null }],
                 pending: [],
                 completed: [],
               }),
-          },
-          { actions },
-        ),
-        { startImmediately: true },
-      );
-      yield* settle;
-      yield* noServer.key("tab");
-      yield* noServer.press("f");
-      yield* settle;
-      expect(lastRows(noServer).some((row) => row.includes("follow OLI-61"))).toBe(true);
-      yield* noServer.press("f");
-      yield* settle;
-      expect(lastRows(noServer)[ROWS - 1]).toContain("follow needs a qemu server");
-      yield* noServer.press("q");
-      yield* Fiber.join(byNoServer);
-    }),
+          }),
+          { startImmediately: true },
+        );
+        yield* settle;
+        yield* noSession.press("j");
+        yield* noSession.press("f");
+        yield* settle;
+        expect(lastRows(noSession)[ROWS - 1]).toContain("the selected job has no session");
+        yield* noSession.press("q");
+        yield* Fiber.join(byNoSession);
+
+        const noServer = yield* fakeTerminal();
+        const actions = Stores.fakeActionStore();
+        seedActions(actions);
+        const byNoServer = yield* Effect.forkChild(
+          live(
+            noServer,
+            {
+              jobs: () =>
+                Effect.succeed({
+                  running: [{ ...running, serverUrl: null }],
+                  pending: [],
+                  completed: [],
+                }),
+            },
+            { actions },
+          ),
+          { startImmediately: true },
+        );
+        yield* settle;
+        yield* noServer.key("tab");
+        yield* noServer.press("f");
+        yield* settle;
+        expect(lastRows(noServer).some((row) => row.includes("follow OLI-61"))).toBe(true);
+        yield* noServer.press("f");
+        yield* settle;
+        expect(lastRows(noServer)[ROWS - 1]).toContain("follow needs a qemu server");
+        yield* noServer.press("q");
+        yield* Fiber.join(byNoServer);
+      }),
   );
 
   it.effect("a refused follow stream leaves the peek and puts the reason on the footer", () =>
@@ -601,7 +612,10 @@ describe("run follow unhappy path", () => {
       const actions = Stores.fakeActionStore();
       seedActions(actions);
       const http = FakeHttp.respondWith(
-        () => new Response(JSON.stringify({ error: 'session "x" has already completed (succeeded)' }), { status: 409 }),
+        () =>
+          new Response(JSON.stringify({ error: 'session "x" has already completed (succeeded)' }), {
+            status: 409,
+          }),
       );
       const fiber = yield* Effect.forkChild(live(tty, {}, { actions, http }), {
         startImmediately: true,

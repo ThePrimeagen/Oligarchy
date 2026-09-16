@@ -935,7 +935,9 @@ export const run: Effect.Effect<
     const now = yield* Clock.currentTimeMillis;
     const columns = yield* terminal.columns;
     const rows = yield* terminal.rows;
-    yield* terminal.display(draw(current, now, columns, rows) + drawFollowImage(current, columns, rows));
+    yield* terminal.display(
+      draw(current, now, columns, rows) + drawFollowImage(current, columns, rows),
+    );
   });
   const setNotice = (text: string) =>
     Ref.update(view, (current) => ({ ...current, notice: Option.some(text) }));

@@ -323,7 +323,6 @@ describe("parseLine refuses malformed lines with the exact usage text", () => {
     });
     expect(Grammar.STOP_STATUSES).toEqual(["succeeded", "failed", "aborted"]);
   });
-
 });
 
 describe("help and completion", () => {

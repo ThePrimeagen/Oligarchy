@@ -226,19 +226,10 @@ const reporting = <A, R>(self: Effect.Effect<A, never, R>): Effect.Effect<void, 
 // Completion, signals, shutdown
 // ---------------------------------------------------------------------------
 
-const complete = (
-  repl: Repl,
-  request: Readline.CompletionRequest,
-): Effect.Effect<void, never, Env | Scope.Scope> => {
-  const completing = Grammar.complete(request.line);
-  switch (completing._tag) {
-    case "words":
-      return Effect.sync(() => {
-        request.complete(completing.completion);
-      });
-  }
-  return completing satisfies never;
-};
+const complete = (request: Readline.CompletionRequest): Effect.Effect<void> =>
+  Effect.sync(() => {
+    request.complete(Grammar.complete(request.line).completion);
+  });
 
 const onSigint = (repl: Repl): Effect.Effect<void> => repl.requestExit;
 
@@ -287,7 +278,7 @@ export const run = Effect.fn("Repl.run")(function* (serverUrl: string) {
       yield* Console.log(`server ${serverUrl}`);
       yield* Console.log(Grammar.HINT);
       const completions = yield* Effect.forkScoped(
-        Stream.runForEach(terminal.completions, (request) => reporting(complete(repl, request))),
+        Stream.runForEach(terminal.completions, (request) => reporting(complete(request))),
       );
       yield* Effect.forkScoped(Stream.runForEach(terminal.sigints, () => onSigint(repl)));
       yield* Effect.forkScoped(host.termination.pipe(Effect.andThen(repl.requestExit)));

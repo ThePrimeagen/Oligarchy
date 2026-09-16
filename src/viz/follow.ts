@@ -230,7 +230,9 @@ export const drawPeek = (
     const command = peek.commands[index];
     if (command === undefined) {
       const empty =
-        index === 0 && peek.commands.length === 0 ? muted(fit("no commands yet", commandWidth)) : "";
+        index === 0 && peek.commands.length === 0
+          ? muted(fit("no commands yet", commandWidth))
+          : "";
       return boxed(`${empty}${" ".repeat(usable - (empty === "" ? 0 : commandWidth))}`);
     }
     const ago = `${age(now - command.at.getTime())} ago`;

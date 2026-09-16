@@ -1503,9 +1503,9 @@ Postgres.describeWithDatabase("database", () => {
           yield* servers.routeSession(sessionId, qemuUrl);
           yield* servers.clearAgent(ticket);
           const started = yield* automation.listJobs(0);
-          expect(started.running.map((job) => [job.clientUrl, job.serverUrl, job.sessionId])).toEqual(
-            [[clientUrl, qemuUrl, sessionId]],
-          );
+          expect(
+            started.running.map((job) => [job.clientUrl, job.serverUrl, job.sessionId]),
+          ).toEqual([[clientUrl, qemuUrl, sessionId]]);
           yield* servers.removeServer(clientUrl);
           yield* servers.removeServer(qemuUrl);
         }),

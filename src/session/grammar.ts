@@ -12,8 +12,7 @@ stop [status] [reason]                stop the session; status is succeeded, fai
 status                                show agent, server, session, and intent
 exit                                  stop the session and leave`;
 
-export const HINT =
-  'tab lists commands; "help" explains them; "exit" stops the session and leaves';
+export const HINT = 'tab lists commands; "help" explains them; "exit" stops the session and leaves';
 
 export const COMMANDS: ReadonlyArray<string> = [
   "start",
