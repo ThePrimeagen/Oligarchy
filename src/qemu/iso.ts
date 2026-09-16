@@ -13,7 +13,7 @@ import {
   Semaphore,
   Stream,
 } from "effect";
-import { HttpClient } from "effect/unstable/http";
+import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as ExternalFailure from "../external-failure.ts";
 import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";

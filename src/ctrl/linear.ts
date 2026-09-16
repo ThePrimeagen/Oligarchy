@@ -1,5 +1,7 @@
 import { Array as Arr, Context, Effect, Layer, Option, Redacted, Schema } from "effect";
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
+import * as HttpClient from "effect/unstable/http/HttpClient";
+import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
+import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 import * as Errors from "../shared/errors.ts";
 
 export const LINEAR_API_URL = "https://api.linear.app/graphql";

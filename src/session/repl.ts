@@ -11,7 +11,7 @@ import {
   type Scope,
   Stream,
 } from "effect";
-import type { ChildProcessSpawner } from "effect/unstable/process";
+import type * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import * as Render from "../observability/render.ts";
 import * as Domain from "../shared/domain.ts";
 import * as Children from "./children.ts";

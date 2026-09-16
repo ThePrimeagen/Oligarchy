@@ -1,6 +1,10 @@
-import { NodeRuntime, NodeServices } from "@effect/platform-node";
+import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { Effect, Layer } from "effect";
-import { CliConfig, CliOutput, Command, GlobalFlag } from "effect/unstable/cli";
+import * as CliConfig from "effect/unstable/cli/CliConfig";
+import * as CliOutput from "effect/unstable/cli/CliOutput";
+import * as Command from "effect/unstable/cli/Command";
+import * as GlobalFlag from "effect/unstable/cli/GlobalFlag";
 import * as Config from "../config.ts";
 import * as Render from "../observability/render.ts";
 import * as Api from "../shared/api.ts";
