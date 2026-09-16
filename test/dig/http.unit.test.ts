@@ -117,6 +117,8 @@ describe("dig page happy path", () => {
       expect(js).toContain("faceCube");
       expect(js).toContain("visibleDrop");
       expect(js).toContain(String(Domain.DIRT_HP));
+      expect(js).toContain('if (message.phase !== "playing")');
+      expect(js).toContain("originAt = 0");
     }).pipe(Effect.provide(serve)),
   );
 

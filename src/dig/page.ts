@@ -192,7 +192,11 @@ function songTimeMs() {
 }
 
 function syncSong(message) {
-  if (message.phase !== "playing" || originAt !== 0) {
+  if (message.phase !== "playing") {
+    originAt = 0;
+    return;
+  }
+  if (originAt !== 0) {
     return;
   }
   originAt = performance.now();
@@ -445,7 +449,7 @@ function paintGame() {
     var minerImg = swinging ? spriteSwing : spriteMiner;
     var minerH = 80;
     var minerW = minerImg.naturalWidth > 0 ? minerH * minerImg.naturalWidth / minerImg.naturalHeight : 58;
-    drawSprite(minerImg, x + shake, faceY + 8, minerW, minerH, player.ghost);
+    drawSprite(minerImg, x + shake, faceY - 34, minerW, minerH, player.ghost);
   });
   shards = shards.filter(function (bit) {
     bit.x += bit.vx;
