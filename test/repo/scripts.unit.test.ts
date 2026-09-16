@@ -23,6 +23,7 @@ const PROCESSES = {
   client: false,
   session: false,
   viz: false,
+  dig: false,
   ctrl: true,
   "qemu-server": true,
   "qemu-reverse-proxy": true,
