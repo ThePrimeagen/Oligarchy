@@ -1,5 +1,6 @@
 import { Effect, Fiber, Path, type PlatformError, Ref, Stream } from "effect";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import * as ChildProcess from "effect/unstable/process/ChildProcess";
+import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import * as State from "./state.ts";
 
 export type ChildResult = {

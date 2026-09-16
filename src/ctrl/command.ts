@@ -9,8 +9,10 @@ import {
   Redacted,
   Schema,
 } from "effect";
-import { CliError, Command, Flag } from "effect/unstable/cli";
-import type { HttpClient } from "effect/unstable/http";
+import * as CliError from "effect/unstable/cli/CliError";
+import * as Command from "effect/unstable/cli/Command";
+import * as Flag from "effect/unstable/cli/Flag";
+import type * as HttpClient from "effect/unstable/http/HttpClient";
 import * as ProxyClient from "../client/proxy-client.ts";
 import * as Config from "../config.ts";
 import * as Actions from "../db/actions.ts";

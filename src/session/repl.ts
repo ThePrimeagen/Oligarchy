@@ -11,7 +11,7 @@ import {
   type Scope,
   Stream,
 } from "effect";
-import type { ChildProcessSpawner } from "effect/unstable/process";
+import type * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import * as Render from "../observability/render.ts";
 import * as Domain from "../shared/domain.ts";
 import * as Children from "./children.ts";
@@ -227,7 +227,7 @@ const dispatch = (repl: Repl, line: string): Effect.Effect<void, never, Env> => 
     case "get-serial":
       return getSerial(repl.session);
     case "send-keys":
-    case "send-mouse":
+    case "mouse":
       return withSession(repl.session, command, okOrStderr);
     case "intent-start":
       return intent(repl.session, command, true);

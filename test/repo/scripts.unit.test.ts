@@ -95,6 +95,9 @@ describe("package.json scripts", () => {
 describe("root executables", () => {
   it("each execs bun on its entry, preloading Sentry on the instrumented ones, never node", () => {
     for (const [name, instrumented] of Object.entries(PROCESSES)) {
+      if (name === "client") {
+        continue;
+      }
       const wrapper = read(name);
       expect(wrapper.startsWith("#!/bin/sh\n"), name).toBe(true);
       expect(wrapper, name).toContain("exec bun --no-env-file ");
@@ -104,6 +107,21 @@ describe("root executables", () => {
       );
       expect(wrapper, name).not.toMatch(NOT_BUN);
     }
+  });
+
+  // A driving agent calls ./client many times per task, so it runs one bundle with a bytecode
+  // cache instead of loading three hundred modules each time; the bundle is rebuilt when a source
+  // is newer, and the sources run as they are when the build fails.
+  it("client runs a bytecode bundle built under node_modules/.cache, its entry when the build fails", () => {
+    const wrapper = read("client");
+    expect(wrapper.startsWith("#!/bin/sh\n")).toBe(true);
+    expect(wrapper).toContain("bun build --target=bun --bytecode ");
+    expect(wrapper).toContain('"$root/src/client/main.ts"');
+    expect(wrapper).toContain("node_modules/.cache/oligarchy/client");
+    expect(wrapper).toContain('exec bun --no-env-file "$cache/main.js" "$@"');
+    expect(wrapper).toContain('exec bun --no-env-file "$root/src/client/main.ts" "$@"');
+    expect(wrapper).not.toContain("--preload");
+    expect(wrapper).not.toMatch(NOT_BUN);
   });
 });
 

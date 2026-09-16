@@ -242,6 +242,23 @@ describe("encodeQmpCommand", () => {
     );
   });
 
+  it("encodes a held key inside input-send-event, as a modifier around a click travels", () => {
+    expect(
+      Domain.encodeQmpCommand({
+        execute: "input-send-event",
+        arguments: {
+          events: [
+            { type: "key", data: { down: true, key: { type: "qcode", data: "shift" } } },
+            { type: "btn", data: { button: "wheel-left", down: true } },
+          ],
+        },
+        id: 6,
+      }),
+    ).toBe(
+      `{"execute":"input-send-event","arguments":{"events":[{"type":"key","data":{"down":true,"key":{"type":"qcode","data":"shift"}}},{"type":"btn","data":{"button":"wheel-left","down":true}}]},"id":6}\n`,
+    );
+  });
+
   it("encodes system_powerdown with empty arguments, as QMP takes it", () => {
     expect(Domain.encodeQmpCommand({ execute: "system_powerdown", arguments: {}, id: 5 })).toBe(
       `{"execute":"system_powerdown","arguments":{},"id":5}\n`,
@@ -251,7 +268,9 @@ describe("encodeQmpCommand", () => {
   it("refuses an action name outside the vocabulary", () => {
     const is = Schema.is(Domain.ActionName);
     expect(is("save")).toBe(true);
+    expect(is("mouse-drag")).toBe(true);
     expect(is("restore")).toBe(false);
+    expect(is("send-mouse")).toBe(false);
   });
 });
 

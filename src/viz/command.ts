@@ -1,5 +1,5 @@
 import { Effect, Layer, type Redacted, Terminal } from "effect";
-import { Command } from "effect/unstable/cli";
+import * as Command from "effect/unstable/cli/Command";
 import * as Config from "../config.ts";
 import * as Automation from "../db/automation.ts";
 import * as Client from "../db/client.ts";

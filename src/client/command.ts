@@ -1,5 +1,6 @@
-import { Console, Effect, FileSystem, Option, Path, Stdio, Stream } from "effect";
-import { CliError, Command } from "effect/unstable/cli";
+import { Array as Arr, Console, Effect, FileSystem, Option, Path, Stdio, Stream } from "effect";
+import * as CliError from "effect/unstable/cli/CliError";
+import * as Command from "effect/unstable/cli/Command";
 import * as Config from "../config.ts";
 import * as ExternalFailure from "../external-failure.ts";
 import * as Contract from "../shared/contract.ts";
@@ -171,36 +172,152 @@ const sendKeys = Command.make(
   }),
 ).pipe(Command.withDescription("Type a key string into the machine"));
 
-const sendMouseFlags = {
+// The mouse, one action per operation: every flag it takes is the operation's own, so nothing
+// combines and nothing is refused for combining.
+const pointFlags = { ...Flags.shared, sessionId: Flags.sessionId, x: Flags.x, y: Flags.y };
+
+const mouseMove = Command.make(
+  "move",
+  pointFlags,
+  Effect.fn("client.mouse.move")(function* (input: Input<typeof pointFlags>) {
+    const proxy = yield* connect(input.serverUrl);
+    yield* proxy.mouseMove(
+      Contract.MouseMoveBody.make({
+        id: input.sessionId,
+        x: input.x,
+        y: input.y,
+        agent: input.agentId,
+      }),
+    );
+  }),
+).pipe(Command.withDescription("Move the pointer to a point on the screenshot"));
+
+const clickFlags = { ...pointFlags, button: Flags.button, modifier: Flags.modifier };
+
+const clickBody = (input: Input<typeof clickFlags>) =>
+  Contract.MouseClickBody.make(
+    Object.assign(
+      { id: input.sessionId, x: input.x, y: input.y, button: input.button, agent: input.agentId },
+      Arr.isReadonlyArrayNonEmpty(input.modifier) ? { modifiers: input.modifier } : undefined,
+    ),
+  );
+
+const mouseClick = Command.make(
+  "click",
+  clickFlags,
+  Effect.fn("client.mouse.click")(function* (input: Input<typeof clickFlags>) {
+    const proxy = yield* connect(input.serverUrl);
+    yield* proxy.mouseClick(clickBody(input));
+  }),
+).pipe(Command.withDescription("Click --button at a point, with --modifier keys held"));
+
+const mouseDoubleClick = Command.make(
+  "double-click",
+  clickFlags,
+  Effect.fn("client.mouse.doubleClick")(function* (input: Input<typeof clickFlags>) {
+    const proxy = yield* connect(input.serverUrl);
+    yield* proxy.mouseDoubleClick(clickBody(input));
+  }),
+).pipe(Command.withDescription("Double-click --button at a point, with --modifier keys held"));
+
+const scrollFlags = { ...pointFlags, direction: Flags.direction, ticks: Flags.ticks };
+
+const mouseScroll = Command.make(
+  "scroll",
+  scrollFlags,
+  Effect.fn("client.mouse.scroll")(function* (input: Input<typeof scrollFlags>) {
+    const proxy = yield* connect(input.serverUrl);
+    yield* proxy.mouseScroll(
+      Contract.MouseScrollBody.make({
+        id: input.sessionId,
+        x: input.x,
+        y: input.y,
+        direction: input.direction,
+        ticks: input.ticks,
+        agent: input.agentId,
+      }),
+    );
+  }),
+).pipe(Command.withDescription("Turn the wheel --ticks clicks in --direction at a point"));
+
+const dragFlags = {
   ...Flags.shared,
   sessionId: Flags.sessionId,
-  x: Flags.x,
-  y: Flags.y,
+  fromX: Flags.fromX,
+  fromY: Flags.fromY,
+  toX: Flags.toX,
+  toY: Flags.toY,
   button: Flags.button,
-  clicks: Flags.clicks,
+  modifier: Flags.modifier,
 };
 
-const sendMouse = Command.make(
-  "send-mouse",
-  sendMouseFlags,
-  Effect.fn("client.sendMouse")(function* (input: Input<typeof sendMouseFlags>) {
+const mouseDrag = Command.make(
+  "drag",
+  dragFlags,
+  Effect.fn("client.mouse.drag")(function* (input: Input<typeof dragFlags>) {
     const proxy = yield* connect(input.serverUrl);
-    // The proxy moves and ignores clicks when there is no button; say so here instead.
-    if (Option.isSome(input.clicks) && Option.isNone(input.button)) {
-      return yield* Errors.CommandError.make({ message: "send-mouse: --clicks needs --button" });
-    }
-    const base = { id: input.sessionId, x: input.x, y: input.y, agent: input.agentId };
-    const body = Option.match(input.button, {
-      onNone: () => Contract.SendMouseBody.make(base),
-      onSome: (button) =>
-        Option.match(input.clicks, {
-          onNone: () => Contract.SendMouseBody.make({ ...base, button }),
-          onSome: (clicks) => Contract.SendMouseBody.make({ ...base, button, clicks }),
-        }),
-    });
-    return yield* proxy.sendMouse(body);
+    yield* proxy.mouseDrag(
+      Contract.MouseDragBody.make(
+        Object.assign(
+          {
+            id: input.sessionId,
+            from: { x: input.fromX, y: input.fromY },
+            to: { x: input.toX, y: input.toY },
+            button: input.button,
+            agent: input.agentId,
+          },
+          Arr.isReadonlyArrayNonEmpty(input.modifier) ? { modifiers: input.modifier } : undefined,
+        ),
+      ),
+    );
   }),
-).pipe(Command.withDescription("Move the mouse to a point on the screenshot and optionally click"));
+).pipe(
+  Command.withDescription(
+    "Press --button at --from-x --from-y, move to --to-x --to-y and release, with --modifier keys held",
+  ),
+);
+
+const buttonFlags = { ...pointFlags, button: Flags.button };
+
+const buttonBody = (input: Input<typeof buttonFlags>) =>
+  Contract.MouseButtonBody.make({
+    id: input.sessionId,
+    x: input.x,
+    y: input.y,
+    button: input.button,
+    agent: input.agentId,
+  });
+
+const mouseHold = Command.make(
+  "hold",
+  buttonFlags,
+  Effect.fn("client.mouse.hold")(function* (input: Input<typeof buttonFlags>) {
+    const proxy = yield* connect(input.serverUrl);
+    yield* proxy.mouseHold(buttonBody(input));
+  }),
+).pipe(Command.withDescription("Press --button at a point and leave it held"));
+
+const mouseRelease = Command.make(
+  "release",
+  buttonFlags,
+  Effect.fn("client.mouse.release")(function* (input: Input<typeof buttonFlags>) {
+    const proxy = yield* connect(input.serverUrl);
+    yield* proxy.mouseRelease(buttonBody(input));
+  }),
+).pipe(Command.withDescription("Let a held --button go at a point"));
+
+const mouse = Command.make("mouse").pipe(
+  Command.withDescription("Move, click, double-click, scroll, drag, hold or release the mouse"),
+  Command.withSubcommands([
+    mouseMove,
+    mouseClick,
+    mouseDoubleClick,
+    mouseScroll,
+    mouseDrag,
+    mouseHold,
+    mouseRelease,
+  ]),
+);
 
 const intentStartFlags = {
   ...Flags.shared,
@@ -307,7 +424,7 @@ export const makeClientCommand = () =>
       getImage,
       getSerial,
       sendKeys,
-      sendMouse,
+      mouse,
       intent,
       stop,
       save,

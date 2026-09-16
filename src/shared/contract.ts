@@ -32,15 +32,60 @@ export class SendKeysBody extends Schema.Class<SendKeysBody>(
   agent: Schema.NonEmptyString,
 }) {}
 
-// x, y and clicks stay plain numbers: the range checks are handler-level BadRequests with today's messages.
-export class SendMouseBody extends Schema.Class<SendMouseBody>(
-  "@oligarchy/shared/contract/SendMouseBody",
+// The mouse operations, one body each. Points stay plain numbers: the range check is a
+// handler-level BadRequest with a fixed message, as it always was.
+export class MouseMoveBody extends Schema.Class<MouseMoveBody>(
+  "@oligarchy/shared/contract/MouseMoveBody",
 )({
   id: Schema.String,
   x: Schema.Number,
   y: Schema.Number,
-  button: Schema.optionalKey(Domain.MouseButton),
-  clicks: Schema.optionalKey(Schema.Number),
+  agent: Schema.NonEmptyString,
+}) {}
+
+// A click and a double-click: the button, and the keys held around it.
+export class MouseClickBody extends Schema.Class<MouseClickBody>(
+  "@oligarchy/shared/contract/MouseClickBody",
+)({
+  id: Schema.String,
+  x: Schema.Number,
+  y: Schema.Number,
+  button: Domain.ClickButton,
+  modifiers: Schema.optionalKey(Schema.NonEmptyArray(Domain.MouseModifier)),
+  agent: Schema.NonEmptyString,
+}) {}
+
+export class MouseScrollBody extends Schema.Class<MouseScrollBody>(
+  "@oligarchy/shared/contract/MouseScrollBody",
+)({
+  id: Schema.String,
+  x: Schema.Number,
+  y: Schema.Number,
+  direction: Domain.ScrollDirection,
+  ticks: Schema.Number,
+  agent: Schema.NonEmptyString,
+}) {}
+
+// The button goes down at `from`, the pointer moves to `to` in steps, the button comes up.
+export class MouseDragBody extends Schema.Class<MouseDragBody>(
+  "@oligarchy/shared/contract/MouseDragBody",
+)({
+  id: Schema.String,
+  from: Domain.ScreenPoint,
+  to: Domain.ScreenPoint,
+  button: Domain.ClickButton,
+  modifiers: Schema.optionalKey(Schema.NonEmptyArray(Domain.MouseModifier)),
+  agent: Schema.NonEmptyString,
+}) {}
+
+// A hold and a release: a button at a point, half a click each.
+export class MouseButtonBody extends Schema.Class<MouseButtonBody>(
+  "@oligarchy/shared/contract/MouseButtonBody",
+)({
+  id: Schema.String,
+  x: Schema.Number,
+  y: Schema.Number,
+  button: Domain.ClickButton,
   agent: Schema.NonEmptyString,
 }) {}
 

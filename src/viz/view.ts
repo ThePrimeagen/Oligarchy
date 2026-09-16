@@ -10,7 +10,8 @@ import {
   Stream,
   Terminal,
 } from "effect";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import * as ChildProcess from "effect/unstable/process/ChildProcess";
+import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import * as Automation from "../db/automation.ts";
 import * as ProcessStats from "../db/process-stats.ts";
 import * as Servers from "../db/servers.ts";

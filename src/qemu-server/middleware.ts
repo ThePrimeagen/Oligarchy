@@ -1,6 +1,7 @@
 import { Cause, Effect, Layer, Redacted, Schema, type Types } from "effect";
-import { HttpServerRequest, type HttpServerResponse } from "effect/unstable/http";
-import { HttpApiError } from "effect/unstable/httpapi";
+import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
+import type * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
+import * as HttpApiError from "effect/unstable/httpapi/HttpApiError";
 import * as Config from "../config.ts";
 import * as ExternalFailure from "../external-failure.ts";
 import * as Log from "../observability/log.ts";

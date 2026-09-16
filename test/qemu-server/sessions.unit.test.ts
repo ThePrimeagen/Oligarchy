@@ -19,6 +19,7 @@ import {
 } from "effect";
 import { TestClock } from "effect/testing";
 import * as Sessions from "../../src/qemu-server/sessions.ts";
+import type * as Qemu from "../../src/qemu/qemu.ts";
 import * as Log from "../../src/observability/log.ts";
 import * as Contract from "../../src/shared/contract.ts";
 import * as Domain from "../../src/shared/domain.ts";
@@ -1092,45 +1093,69 @@ describe("sendKeys", () => {
 });
 
 // ---------------------------------------------------------------------------
-// sendMouse
+// mouse
 // ---------------------------------------------------------------------------
 
-describe("sendMouse", () => {
-  const mouse = (id: string, x: number, y: number, button?: Domain.MouseButton, clicks?: number) =>
-    Contract.SendMouseBody.make(
-      Object.assign(
-        { id, x, y, agent: AGENT },
-        button === undefined ? undefined : { button },
-        clicks === undefined ? undefined : { clicks },
-      ),
-    );
+describe("mouse", () => {
+  const OUTSIDE: ReadonlyArray<readonly [number, number]> = [
+    [1.5, 0.5],
+    [-0.1, 0.5],
+    [0.5, 2],
+  ];
 
-  it.effect("refuses coordinates outside 0..1 and clicks outside 1..100 before any exchange", () =>
+  it.effect("refuses a point outside 0..1 on every operation before any exchange", () =>
     Effect.gen(function* () {
       const h = harness();
       yield* h.run(
         Effect.gen(function* () {
-          const { sessions, id, live } = yield* start();
-          const outside: ReadonlyArray<readonly [number, number]> = [
-            [1.5, 0.5],
-            [-0.1, 0.5],
-            [0.5, 2],
-          ];
-          for (const [x, y] of outside) {
-            expect(yield* Effect.flip(sessions.sendMouse(live, mouse(id, x, y)))).toMatchObject({
-              _tag: "BadRequest",
-              message: "mouse: x and y must be in 0..1",
-              sessionId: id,
-              agentId: AGENT,
+          const { sessions, live } = yield* start();
+          const refused = (gesture: Qemu.MouseGesture) =>
+            Effect.map(Effect.flip(sessions.mouse(live, gesture)), (error) => {
+              expect(error).toMatchObject({
+                _tag: "BadRequest",
+                sessionId: live.id,
+                agentId: AGENT,
+              });
+              return error.message;
             });
-          }
-          for (const clicks of [0, 101, 1.5]) {
+          for (const [x, y] of OUTSIDE) {
+            expect(yield* refused({ _tag: "move", x, y })).toBe("mouse: x and y must be in 0..1");
+            expect(yield* refused({ _tag: "click", x, y, button: "left" })).toBe(
+              "mouse: x and y must be in 0..1",
+            );
+            expect(yield* refused({ _tag: "double-click", x, y, button: "left" })).toBe(
+              "mouse: x and y must be in 0..1",
+            );
+            expect(yield* refused({ _tag: "scroll", x, y, direction: "down", ticks: 1 })).toBe(
+              "mouse: x and y must be in 0..1",
+            );
+            expect(yield* refused({ _tag: "hold", x, y, button: "left" })).toBe(
+              "mouse: x and y must be in 0..1",
+            );
+            expect(yield* refused({ _tag: "release", x, y, button: "left" })).toBe(
+              "mouse: x and y must be in 0..1",
+            );
             expect(
-              yield* Effect.flip(sessions.sendMouse(live, mouse(id, 0.5, 0.5, "left", clicks))),
-            ).toMatchObject({
-              _tag: "BadRequest",
-              message: "mouse: clicks must be an integer in 1..100",
-            });
+              yield* refused({
+                _tag: "drag",
+                from: { x, y },
+                to: { x: 0.5, y: 0.5 },
+                button: "left",
+              }),
+            ).toBe("mouse: from and to must be in 0..1");
+            expect(
+              yield* refused({
+                _tag: "drag",
+                from: { x: 0.5, y: 0.5 },
+                to: { x, y },
+                button: "left",
+              }),
+            ).toBe("mouse: from and to must be in 0..1");
+          }
+          for (const ticks of [0, 101, 1.5]) {
+            expect(yield* refused({ _tag: "scroll", x: 0.5, y: 0.5, direction: "up", ticks })).toBe(
+              "mouse: ticks must be an integer in 1..100",
+            );
           }
           expect(h.qemu.calls.map((call) => call._tag)).toEqual(["prepare", "start"]);
         }),
@@ -1138,39 +1163,54 @@ describe("sendMouse", () => {
     }),
   );
 
-  it.effect("moves, clicks and logs the gesture", () =>
+  it.effect("forwards every gesture, names the action and logs it", () =>
     Effect.gen(function* () {
       const h = harness();
       yield* h.run(
         Effect.gen(function* () {
           const { sessions, id, live } = yield* start();
           const events = yield* sessions.follow(id);
-          yield* sessions.sendMouse(live, mouse(id, 0.5, 0.5, "left", 2));
-          yield* sessions.sendMouse(live, mouse(id, 0.25, 0.75));
-          yield* sessions.sendMouse(live, mouse(id, 0, 1, "right", 1));
-          expect(h.qemu.calls.filter((call) => call._tag === "sendMouse")).toEqual([
-            { _tag: "sendMouse", id, input: { x: 0.5, y: 0.5, button: "left", clicks: 2 } },
-            { _tag: "sendMouse", id, input: { x: 0.25, y: 0.75 } },
-            { _tag: "sendMouse", id, input: { x: 0, y: 1, button: "right", clicks: 1 } },
-          ]);
+          const gestures: ReadonlyArray<Qemu.MouseGesture> = [
+            { _tag: "move", x: 0.25, y: 0.75 },
+            { _tag: "click", x: 0.5, y: 0.5, button: "left" },
+            { _tag: "double-click", x: 0.5, y: 0.5, button: "left" },
+            { _tag: "click", x: 0.5, y: 0.5, button: "right", modifiers: ["shift", "super"] },
+            { _tag: "scroll", x: 0.5, y: 0.5, direction: "left", ticks: 3 },
+            { _tag: "drag", from: { x: 0.1, y: 0.2 }, to: { x: 0.9, y: 0.2 }, button: "left" },
+            { _tag: "hold", x: 0.5, y: 0.5, button: "middle" },
+            { _tag: "release", x: 0.6, y: 0.6, button: "middle" },
+          ];
+          for (const gesture of gestures) {
+            yield* sessions.mouse(live, gesture);
+          }
+          expect(h.qemu.calls.filter((call) => call._tag === "mouse")).toEqual(
+            gestures.map((gesture) => ({ _tag: "mouse", id, gesture })),
+          );
           expect(texts(h).filter((text) => text.startsWith("mouse"))).toEqual([
-            "mouse 0.5 0.5 left ×2 in 0ms",
-            "mouse 0.25 0.75 in 0ms",
-            "mouse 0 1 right in 0ms",
+            "mouse move 0.25 0.75 in 0ms",
+            "mouse click 0.5 0.5 left in 0ms",
+            "mouse double-click 0.5 0.5 left in 0ms",
+            "mouse click 0.5 0.5 right +shift +super in 0ms",
+            "mouse scroll 0.5 0.5 left ×3 in 0ms",
+            "mouse drag 0.1 0.2 to 0.9 0.2 left in 0ms",
+            "mouse hold 0.5 0.5 middle in 0ms",
+            "mouse release 0.6 0.6 middle in 0ms",
           ]);
-          expect(yield* collect(events, 3)).toEqual([
+          expect(yield* collect(events, 5)).toEqual([
             { type: "session", status: "running" },
-            { type: "action", id: 1, name: "send-mouse", state: "running" },
+            { type: "action", id: 1, name: "mouse-move", state: "running" },
             { type: "action", id: 1, state: "completed" },
+            { type: "action", id: 2, name: "mouse-click", state: "running" },
+            { type: "action", id: 2, state: "completed" },
           ]);
-          // A double click is four input-send-event exchanges, a move one, a click two.
+          // The fake plays one exchange per gesture; the real sequences are the qemu tests'.
           expect(
             h.actions.actions.filter(
               (row) =>
                 Schema.is(Domain.QmpCommand)(row.request) &&
                 row.request.execute === "input-send-event",
             ),
-          ).toHaveLength(7);
+          ).toHaveLength(gestures.length);
         }),
       );
     }),
@@ -1180,13 +1220,13 @@ describe("sendMouse", () => {
     Effect.gen(function* () {
       const h = harness({
         script: {
-          sendMouse: () => Effect.fail(Errors.QmpClosed.make({ message: "qemu: socket closed" })),
+          mouse: () => Effect.fail(Errors.QmpClosed.make({ message: "qemu: socket closed" })),
         },
       });
       yield* h.run(
         Effect.gen(function* () {
-          const { sessions, id, live } = yield* start();
-          const error = yield* Effect.flip(sessions.sendMouse(live, mouse(id, 0.5, 0.5)));
+          const { sessions, live } = yield* start();
+          const error = yield* Effect.flip(sessions.mouse(live, { _tag: "move", x: 0.5, y: 0.5 }));
           expect(error).toMatchObject({ _tag: "ExchangeFailed", message: "qemu: socket closed" });
           expect(line(h, "mouse")).toBeUndefined();
         }),

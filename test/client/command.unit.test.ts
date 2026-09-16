@@ -265,32 +265,182 @@ describe("client requests", () => {
     }),
   );
 
-  it.effect(
-    "send-mouse posts point, button and clicks, and omits button and clicks when absent",
-    () =>
-      Effect.gen(function* () {
-        const recorder = FakeHttp.recordRequests(ok);
-        const base = ["send-mouse", ...shared, "--session-id", SESSION];
-        yield* run([...base, "--x", "0.5", "--y", "0.25", "--button", "left", "--clicks", "2"], {
-          http: recorder.layer,
-        });
-        yield* run([...base, "--x", "0", "--y", "1"], { http: recorder.layer });
-        expect(recorder.requests[0]?.url).toBe(`${SERVER}/send-mouse`);
-        expect(parsed(recorder.requests[0]?.body ?? "")).toEqual({
-          id: SESSION,
-          x: 0.5,
-          y: 0.25,
-          button: "left",
-          clicks: 2,
-          agent: AGENT,
-        });
-        expect(parsed(recorder.requests[1]?.body ?? "")).toEqual({
-          id: SESSION,
-          x: 0,
-          y: 1,
-          agent: AGENT,
-        });
-      }),
+  it.effect("mouse move posts the point; mouse click posts the point and the button", () =>
+    Effect.gen(function* () {
+      const recorder = FakeHttp.recordRequests(ok);
+      const session = ["--session-id", SESSION];
+      yield* run(["mouse", "move", ...shared, ...session, "--x", "0", "--y", "1"], {
+        http: recorder.layer,
+      });
+      yield* run(["mouse", "click", ...shared, ...session, "--x", "0.5", "--y", "0.25"], {
+        http: recorder.layer,
+      });
+      yield* run(
+        [
+          "mouse",
+          "double-click",
+          ...shared,
+          ...session,
+          "--x",
+          "0.5",
+          "--y",
+          "0.25",
+          "--button",
+          "right",
+        ],
+        { http: recorder.layer },
+      );
+      expect(recorder.requests.map((request) => request.url)).toEqual([
+        `${SERVER}/mouse/move`,
+        `${SERVER}/mouse/click`,
+        `${SERVER}/mouse/double-click`,
+      ]);
+      expect(parsed(recorder.requests[0]?.body ?? "")).toEqual({
+        id: SESSION,
+        x: 0,
+        y: 1,
+        agent: AGENT,
+      });
+      // --button defaults to left, so the wire always carries one.
+      expect(parsed(recorder.requests[1]?.body ?? "")).toEqual({
+        id: SESSION,
+        x: 0.5,
+        y: 0.25,
+        button: "left",
+        agent: AGENT,
+      });
+      expect(parsed(recorder.requests[2]?.body ?? "")).toEqual({
+        id: SESSION,
+        x: 0.5,
+        y: 0.25,
+        button: "right",
+        agent: AGENT,
+      });
+    }),
+  );
+
+  it.effect("mouse scroll, drag, hold and release post their own bodies", () =>
+    Effect.gen(function* () {
+      const recorder = FakeHttp.recordRequests(ok);
+      const session = ["--session-id", SESSION];
+      yield* run(
+        [
+          "mouse",
+          "scroll",
+          ...shared,
+          ...session,
+          "--x",
+          "0.5",
+          "--y",
+          "0.5",
+          "--direction",
+          "down",
+        ],
+        { http: recorder.layer },
+      );
+      yield* run(
+        [
+          "mouse",
+          "scroll",
+          ...shared,
+          ...session,
+          "--x",
+          "0.5",
+          "--y",
+          "0.5",
+          "--direction",
+          "left",
+          "--ticks",
+          "3",
+        ],
+        { http: recorder.layer },
+      );
+      yield* run(
+        [
+          "mouse",
+          "drag",
+          ...shared,
+          ...session,
+          "--from-x",
+          "0.1",
+          "--from-y",
+          "0.2",
+          "--to-x",
+          "0.9",
+          "--to-y",
+          "0.2",
+          "--modifier",
+          "super",
+          "--modifier",
+          "shift",
+        ],
+        { http: recorder.layer },
+      );
+      yield* run(["mouse", "hold", ...shared, ...session, "--x", "0.5", "--y", "0.5"], {
+        http: recorder.layer,
+      });
+      yield* run(
+        [
+          "mouse",
+          "release",
+          ...shared,
+          ...session,
+          "--x",
+          "0.6",
+          "--y",
+          "0.6",
+          "--button",
+          "middle",
+        ],
+        { http: recorder.layer },
+      );
+      expect(recorder.requests.map((request) => request.url)).toEqual([
+        `${SERVER}/mouse/scroll`,
+        `${SERVER}/mouse/scroll`,
+        `${SERVER}/mouse/drag`,
+        `${SERVER}/mouse/hold`,
+        `${SERVER}/mouse/release`,
+      ]);
+      // --ticks defaults to 1.
+      expect(parsed(recorder.requests[0]?.body ?? "")).toEqual({
+        id: SESSION,
+        x: 0.5,
+        y: 0.5,
+        direction: "down",
+        ticks: 1,
+        agent: AGENT,
+      });
+      expect(parsed(recorder.requests[1]?.body ?? "")).toEqual({
+        id: SESSION,
+        x: 0.5,
+        y: 0.5,
+        direction: "left",
+        ticks: 3,
+        agent: AGENT,
+      });
+      expect(parsed(recorder.requests[2]?.body ?? "")).toEqual({
+        id: SESSION,
+        from: { x: 0.1, y: 0.2 },
+        to: { x: 0.9, y: 0.2 },
+        button: "left",
+        modifiers: ["super", "shift"],
+        agent: AGENT,
+      });
+      expect(parsed(recorder.requests[3]?.body ?? "")).toEqual({
+        id: SESSION,
+        x: 0.5,
+        y: 0.5,
+        button: "left",
+        agent: AGENT,
+      });
+      expect(parsed(recorder.requests[4]?.body ?? "")).toEqual({
+        id: SESSION,
+        x: 0.6,
+        y: 0.6,
+        button: "middle",
+        agent: AGENT,
+      });
+    }),
   );
 
   it.effect("intent start and intent end post kebab-case flags as the wire's snake_case", () =>
@@ -600,7 +750,13 @@ describe("client help", () => {
     ["get-image"],
     ["get-serial"],
     ["send-keys"],
-    ["send-mouse"],
+    ["mouse", "move"],
+    ["mouse", "click"],
+    ["mouse", "double-click"],
+    ["mouse", "scroll"],
+    ["mouse", "drag"],
+    ["mouse", "hold"],
+    ["mouse", "release"],
     ["intent", "start"],
     ["intent", "end"],
     ["stop"],
@@ -717,11 +873,11 @@ describe("client parse failures", () => {
     }),
   );
 
-  it.effect("a send-mouse coordinate outside 0..1 is refused before any request", () =>
+  it.effect("a mouse coordinate outside 0..1 is refused before any request", () =>
     Effect.gen(function* () {
       const recorder = FakeHttp.recordRequests(ok);
       const error = yield* Effect.flip(
-        run(["send-mouse", ...shared, "--session-id", SESSION, "--x", "2", "--y", "0.5"], {
+        run(["mouse", "click", ...shared, "--session-id", SESSION, "--x", "2", "--y", "0.5"], {
           http: recorder.layer,
         }),
       );
@@ -729,18 +885,19 @@ describe("client parse failures", () => {
         showHelp(error)
           .errors.map((failure) => failure.message)
           .join("\n"),
-      ).toContain("send-mouse: --x and --y must be in 0..1");
+      ).toContain("mouse: --x and --y must be in 0..1");
       expect(recorder.requests).toEqual([]);
     }),
   );
 
-  it.effect("send-mouse --clicks outside 1..100 is refused before any request", () =>
+  it.effect("mouse scroll --ticks outside 1..100 is refused before any request", () =>
     Effect.gen(function* () {
       const recorder = FakeHttp.recordRequests(ok);
       const error = yield* Effect.flip(
         run(
           [
-            "send-mouse",
+            "mouse",
+            "scroll",
             ...shared,
             "--session-id",
             SESSION,
@@ -748,51 +905,78 @@ describe("client parse failures", () => {
             "0.5",
             "--y",
             "0.5",
-            "--button",
-            "left",
-            "--clicks",
+            "--direction",
+            "down",
+            "--ticks",
             "101",
           ],
           { http: recorder.layer },
         ),
       );
-      expect(showHelp(error).errors.length).toBeGreaterThan(0);
+      expect(
+        showHelp(error)
+          .errors.map((failure) => failure.message)
+          .join("\n"),
+      ).toContain("mouse scroll: --ticks must be in 1..100");
       expect(recorder.requests).toEqual([]);
     }),
+  );
+
+  it.effect(
+    "mouse drag --to-x outside 0..1, a missing --to-y and an unknown --modifier are refused before any request",
+    () =>
+      Effect.gen(function* () {
+        const recorder = FakeHttp.recordRequests(ok);
+        const drag = [
+          "mouse",
+          "drag",
+          ...shared,
+          "--session-id",
+          SESSION,
+          "--from-x",
+          "0.5",
+          "--from-y",
+          "0.5",
+        ];
+        const far = yield* Effect.flip(
+          run([...drag, "--to-x", "1.5", "--to-y", "0.5"], { http: recorder.layer }),
+        );
+        expect(
+          showHelp(far)
+            .errors.map((failure) => failure.message)
+            .join("\n"),
+        ).toContain("mouse drag: --to-x and --to-y must be in 0..1");
+        const half = yield* Effect.flip(run([...drag, "--to-x", "0.9"], { http: recorder.layer }));
+        expect(
+          showHelp(half)
+            .errors.map((failure) => failure.message)
+            .join("\n"),
+        ).toContain("--to-y");
+        const meta = yield* Effect.flip(
+          run(
+            [
+              "mouse",
+              "click",
+              ...shared,
+              "--session-id",
+              SESSION,
+              "--x",
+              "0.5",
+              "--y",
+              "0.5",
+              "--modifier",
+              "meta",
+            ],
+            { http: recorder.layer },
+          ),
+        );
+        expect(showHelp(meta).errors.length).toBeGreaterThan(0);
+        expect(recorder.requests).toEqual([]);
+      }),
   );
 });
 
 describe("client local checks", () => {
-  it.effect("send-mouse --clicks without --button is a CommandError before any request", () =>
-    Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(ok);
-      const error = yield* Effect.flip(
-        run(
-          [
-            "send-mouse",
-            ...shared,
-            "--session-id",
-            SESSION,
-            "--x",
-            "0.5",
-            "--y",
-            "0.5",
-            "--clicks",
-            "2",
-          ],
-          { http: recorder.layer },
-        ),
-      );
-      expect(error).toMatchObject({
-        _tag: "CommandError",
-        message: "send-mouse: --clicks needs --button",
-      });
-      expect(recorder.requests).toEqual([]);
-    }),
-  );
-
-  // v1 printed Node's own message after `iso: `; the platform wrapper's `NotFound: FileSystem.stat`
-  // preamble must not appear.
   it.effect(
     "start with a missing local iso is a CommandError with the ENOENT message before any request",
     () =>

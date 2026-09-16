@@ -78,7 +78,13 @@ export type ActionState = typeof ActionState.Type;
 
 export const ActionName = Schema.Literals([
   "send-keys",
-  "send-mouse",
+  "mouse-move",
+  "mouse-click",
+  "mouse-double-click",
+  "mouse-scroll",
+  "mouse-drag",
+  "mouse-hold",
+  "mouse-release",
   "get-image",
   "get-serial",
   "save",
@@ -92,16 +98,31 @@ export const LogLevel = Schema.Literals(["info", "warning", "error", "fatal"]).a
 });
 export type LogLevel = typeof LogLevel.Type;
 
-export const MouseButton = Schema.Literals([
-  "left",
-  "middle",
-  "right",
-  "wheel-up",
-  "wheel-down",
-]).annotate({
-  identifier: "@oligarchy/shared/domain/MouseButton",
+// The buttons a click, a drag, a hold or a release take; the wheel is a scroll, never a click.
+export const ClickButton = Schema.Literals(["left", "middle", "right"]).annotate({
+  identifier: "@oligarchy/shared/domain/ClickButton",
 });
-export type MouseButton = typeof MouseButton.Type;
+export type ClickButton = typeof ClickButton.Type;
+
+// Which way a scroll turns the wheel.
+export const ScrollDirection = Schema.Literals(["up", "down", "left", "right"]).annotate({
+  identifier: "@oligarchy/shared/domain/ScrollDirection",
+});
+export type ScrollDirection = typeof ScrollDirection.Type;
+
+// A key held around a click or a drag, by the name a driver writes; qemu/qemu.ts maps it to a
+// qcode.
+export const MouseModifier = Schema.Literals(["shift", "ctrl", "alt", "super"]).annotate({
+  identifier: "@oligarchy/shared/domain/MouseModifier",
+});
+export type MouseModifier = typeof MouseModifier.Type;
+
+// A point on the screenshot as fractions of its width and height, 0 the top-left edge, 1 the
+// bottom-right; the range is checked by the handler with a fixed message.
+export const ScreenPoint = Schema.Struct({ x: Schema.Number, y: Schema.Number }).annotate({
+  identifier: "@oligarchy/shared/domain/ScreenPoint",
+});
+export type ScreenPoint = typeof ScreenPoint.Type;
 
 export const QemuDisplay = Schema.Literals([
   "none",
@@ -237,6 +258,18 @@ export const decodeFollowLine = (line: string): Effect.Effect<FollowEvent, Schem
 
 export const QmpArguments = Schema.Record(Schema.String, Schema.Json);
 
+// QEMU's InputButton names: the wheel is four buttons, one per direction.
+export const InputButton = Schema.Literals([
+  "left",
+  "middle",
+  "right",
+  "wheel-up",
+  "wheel-down",
+  "wheel-left",
+  "wheel-right",
+]).annotate({ identifier: "@oligarchy/shared/domain/InputButton" });
+export type InputButton = typeof InputButton.Type;
+
 export const QmpKey = Schema.Struct({
   type: Schema.Literals(["qcode", "number"]),
   data: Schema.Union([Schema.String, Schema.Number]),
@@ -250,7 +283,13 @@ export const QmpInputEvent = Schema.Union([
   }),
   Schema.Struct({
     type: Schema.Literal("btn"),
-    data: Schema.Struct({ button: MouseButton, down: Schema.Boolean }),
+    data: Schema.Struct({ button: InputButton, down: Schema.Boolean }),
+  }),
+  // A key held or let go on its own, unlike send-key's press-and-release: what keeps a
+  // modifier down across the pointer events of one gesture.
+  Schema.Struct({
+    type: Schema.Literal("key"),
+    data: Schema.Struct({ down: Schema.Boolean, key: QmpKey }),
   }),
 ]).annotate({ identifier: "@oligarchy/shared/domain/QmpInputEvent" });
 export type QmpInputEvent = typeof QmpInputEvent.Type;

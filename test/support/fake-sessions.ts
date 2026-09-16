@@ -71,7 +71,7 @@ const liveSession = (id: string, agent: string): Effect.Effect<Sessions.LiveSess
         diskPath: `${dir}/disk.qcow2`,
         varsPath: `${dir}/OVMF_VARS.fd`,
         sendKeys: die("sendKeys"),
-        sendMouse: die("sendMouse"),
+        mouse: die("mouse"),
         screendump: die("screendump"),
         powerdown: die("powerdown"),
         running: Effect.die("Unexpected QemuHandle.running"),
@@ -161,7 +161,7 @@ export const fakeSessions = (
           record("image", session.id).pipe(Effect.as({ png: PNG, imageId: IMAGE_ID })),
         serial: (session) => record("serial", session.id).pipe(Effect.as(SERIAL)),
         sendKeys: (session, keys, encoding) => record("sendKeys", session.id, keys, encoding),
-        sendMouse: (session, input) => record("sendMouse", session.id, input),
+        mouse: (session, gesture) => record("mouse", session.id, gesture),
         intentStart: (session, testResultId, message) =>
           record("intentStart", session.id, testResultId, message),
         intentEnd: (session) => record("intentEnd", session.id),

@@ -1,5 +1,6 @@
 import { Effect, FileSystem, Layer, Option, type Redacted, Schema, Stdio, Stream } from "effect";
-import { Command, Flag } from "effect/unstable/cli";
+import * as Command from "effect/unstable/cli/Command";
+import * as Flag from "effect/unstable/cli/Flag";
 import * as Config from "../config.ts";
 import * as Actions from "../db/actions.ts";
 import * as Client from "../db/client.ts";

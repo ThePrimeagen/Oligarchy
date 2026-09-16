@@ -91,7 +91,7 @@ export const FOLLOWED_LINES: ReadonlyArray<string> = [
   { type: "action", id: 2, name: "get-image", state: "running" },
   { type: "image", id: IMAGE_ID, png: Buffer.from(tinyPng()).toString("base64") },
   { type: "action", id: 2, state: "completed" },
-  { type: "action", id: 3, name: "send-mouse", state: "running" },
+  { type: "action", id: 3, name: "mouse-click", state: "running" },
   { type: "action", id: 3, state: "failed" },
   { type: "intent", state: "completed" },
   { type: "action", id: 4, name: "get-serial", state: "running" },

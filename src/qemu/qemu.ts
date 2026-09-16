@@ -1,7 +1,7 @@
 import { homedir, tmpdir } from "node:os";
-import { Context, Effect, FileSystem, Layer, Path } from "effect";
+import { Array as Arr, Context, Effect, FileSystem, Layer, Path } from "effect";
 import type { PlatformError, Scope } from "effect";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import * as Log from "../observability/log.ts";
 import * as Client from "../qmp/client.ts";
 import * as Socket from "../qmp/socket.ts";
@@ -27,6 +27,20 @@ const KEY_CHORD_GAP_MS = 60;
 const TABLET_AXIS_MAX = 0x7fff;
 // Guest double-click detection needs a gap between successive press/release pairs.
 const MULTI_CLICK_GAP_MS = 50;
+// A toolkit starts a drag only once the pointer has moved past a threshold while pressed, and
+// follows the motion events it then receives: one jump from A to B is a click at B to GTK and
+// Qt. Eight steps per segment cross the threshold on the first and keep a path of a few points
+// under a second; 20 ms lets the guest take each report before the next.
+const DRAG_STEPS = 8;
+const DRAG_STEP_GAP_MS = 20;
+
+// The qcode QEMU knows each held modifier by; super is the left meta key, as send-keys' <M-...>.
+const MODIFIER_QCODE: Readonly<Record<Domain.MouseModifier, string>> = {
+  shift: "shift",
+  ctrl: "ctrl",
+  alt: "alt",
+  super: "meta_l",
+};
 
 // A session dir with its firmware copy and the disk QEMU boots from: the caller's, or the fresh
 // qcow2 `prepare` created in the dir.
@@ -51,12 +65,38 @@ export type StartInput = {
   readonly record: Client.Recorder;
 };
 
-export type MouseInput = {
-  readonly x: number;
-  readonly y: number;
-  readonly button?: Domain.MouseButton;
-  readonly clicks?: number;
-};
+// One mouse operation, as the qemu server hands it over with its points already checked.
+export type MouseGesture =
+  | { readonly _tag: "move"; readonly x: number; readonly y: number }
+  | {
+      readonly _tag: "click" | "double-click";
+      readonly x: number;
+      readonly y: number;
+      readonly button: Domain.ClickButton;
+      // Held around the click, within this gesture.
+      readonly modifiers?: Arr.NonEmptyReadonlyArray<Domain.MouseModifier>;
+    }
+  | {
+      readonly _tag: "scroll";
+      readonly x: number;
+      readonly y: number;
+      readonly direction: Domain.ScrollDirection;
+      readonly ticks: number;
+    }
+  | {
+      readonly _tag: "drag";
+      readonly from: Domain.ScreenPoint;
+      readonly to: Domain.ScreenPoint;
+      readonly button: Domain.ClickButton;
+      readonly modifiers?: Arr.NonEmptyReadonlyArray<Domain.MouseModifier>;
+    }
+  // Half a click each: the button stays as it was left until the next one.
+  | {
+      readonly _tag: "hold" | "release";
+      readonly x: number;
+      readonly y: number;
+      readonly button: Domain.ClickButton;
+    };
 
 export type QemuHandle = {
   readonly id: string;
@@ -69,8 +109,8 @@ export type QemuHandle = {
     chords: ReadonlyArray<ReadonlyArray<string>>,
     record: Client.Recorder,
   ) => Effect.Effect<void, Client.ExecuteError>;
-  readonly sendMouse: (
-    input: MouseInput,
+  readonly mouse: (
+    gesture: MouseGesture,
     record: Client.Recorder,
   ) => Effect.Effect<void, Client.ExecuteError>;
   readonly screendump: (
@@ -218,35 +258,107 @@ const make: Effect.Effect<
       }
     });
 
-    const sendMouse = Effect.fn("Qemu.sendMouse")(function* (
-      mouse: MouseInput,
+    const mouse = Effect.fn("Qemu.mouse")(function* (
+      gesture: MouseGesture,
       record: Client.Recorder,
     ) {
-      const abs: ReadonlyArray<Domain.QmpInputEvent> = [
-        { type: "abs", data: { axis: "x", value: Math.round(mouse.x * TABLET_AXIS_MAX) } },
-        { type: "abs", data: { axis: "y", value: Math.round(mouse.y * TABLET_AXIS_MAX) } },
+      const at = (point: Domain.ScreenPoint): ReadonlyArray<Domain.QmpInputEvent> => [
+        { type: "abs", data: { axis: "x", value: Math.round(point.x * TABLET_AXIS_MAX) } },
+        { type: "abs", data: { axis: "y", value: Math.round(point.y * TABLET_AXIS_MAX) } },
       ];
+      const btn = (button: Domain.InputButton, down: boolean): Domain.QmpInputEvent => ({
+        type: "btn",
+        data: { button, down },
+      });
       const send = (events: ReadonlyArray<Domain.QmpInputEvent>) =>
         client.execute({ execute: "input-send-event", arguments: { events } }, record);
-      if (mouse.button === undefined) {
-        yield* send(abs);
-        return;
-      }
-      const button = mouse.button;
-      const clicks = mouse.clicks ?? 1;
+
       // usb-tablet applies the event list then syncs once: down and up in the same list leave
       // the button unchanged, so the guest never sees a click. The release always goes out, even
       // after a failed press, so the guest is never left with a button held down.
-      for (let click = 0; click < clicks; click++) {
-        const pressed = yield* Effect.exit(
-          send([...abs, { type: "btn", data: { button, down: true } }]),
-        );
-        yield* send([{ type: "btn", data: { button, down: false } }]);
-        yield* pressed;
-        if (click + 1 < clicks) {
-          yield* Effect.sleep(MULTI_CLICK_GAP_MS);
+      const pulses = (point: Domain.ScreenPoint, button: Domain.InputButton, count: number) =>
+        Effect.gen(function* () {
+          for (let pulse = 0; pulse < count; pulse++) {
+            const pressed = yield* Effect.exit(send([...at(point), btn(button, true)]));
+            yield* send([btn(button, false)]);
+            yield* pressed;
+            if (pulse + 1 < count) {
+              yield* Effect.sleep(MULTI_CLICK_GAP_MS);
+            }
+          }
+        });
+
+      // Modifiers are pressed as their own exchange first and let go as their own exchange
+      // last: after a failed gesture, and after a failed press too, since the row can be refused
+      // once QEMU has taken the keys. The guest is never left with a modifier held down.
+      const withModifiers = (
+        modifiers: Arr.NonEmptyReadonlyArray<Domain.MouseModifier> | undefined,
+        work: Effect.Effect<void, Client.ExecuteError>,
+      ) =>
+        Effect.gen(function* () {
+          if (modifiers === undefined) {
+            return yield* work;
+          }
+          const held = (
+            pressed: boolean,
+            order: ReadonlyArray<Domain.MouseModifier>,
+          ): ReadonlyArray<Domain.QmpInputEvent> =>
+            order.map((modifier) => ({
+              type: "key",
+              data: { down: pressed, key: { type: "qcode", data: MODIFIER_QCODE[modifier] } },
+            }));
+          const done = yield* Effect.exit(
+            Effect.gen(function* () {
+              yield* send(held(true, modifiers));
+              yield* work;
+            }),
+          );
+          yield* send(held(false, Arr.reverse(modifiers)));
+          return yield* done;
+        });
+
+      switch (gesture._tag) {
+        case "move":
+          return yield* send(at(gesture));
+        case "click":
+          return yield* withModifiers(gesture.modifiers, pulses(gesture, gesture.button, 1));
+        case "double-click":
+          return yield* withModifiers(gesture.modifiers, pulses(gesture, gesture.button, 2));
+        case "scroll":
+          return yield* pulses(gesture, `wheel-${gesture.direction}`, gesture.ticks);
+        case "drag": {
+          const { from, to, button } = gesture;
+          // Each step is its own exchange: abs events in one list collapse to the last position.
+          // The release lands at `to` after a failed move too, so the guest is never left
+          // mid-drag with the button down.
+          const drag = Effect.gen(function* () {
+            const moved = yield* Effect.exit(
+              Effect.gen(function* () {
+                yield* send([...at(from), btn(button, true)]);
+                for (let step = 1; step <= DRAG_STEPS; step++) {
+                  yield* Effect.sleep(DRAG_STEP_GAP_MS);
+                  const along = step / DRAG_STEPS;
+                  yield* send(
+                    at({
+                      x: from.x + (to.x - from.x) * along,
+                      y: from.y + (to.y - from.y) * along,
+                    }),
+                  );
+                }
+                yield* Effect.sleep(DRAG_STEP_GAP_MS);
+              }),
+            );
+            yield* send([...at(to), btn(button, false)]);
+            yield* moved;
+          });
+          return yield* withModifiers(gesture.modifiers, drag);
         }
+        case "hold":
+          return yield* send([...at(gesture), btn(gesture.button, true)]);
+        case "release":
+          return yield* send([...at(gesture), btn(gesture.button, false)]);
       }
+      return gesture satisfies never;
     });
 
     const screendump = Effect.fn("Qemu.screendump")(function* (record: Client.Recorder) {
@@ -271,7 +383,7 @@ const make: Effect.Effect<
       diskPath: prepared.diskPath,
       varsPath: path.join(dir, "OVMF_VARS.fd"),
       sendKeys,
-      sendMouse,
+      mouse,
       screendump,
       powerdown,
       running: qemu.running,

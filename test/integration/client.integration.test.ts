@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -173,44 +173,36 @@ describe("./client happy path", () => {
     expect(stub.requests[0]?.url).toBe(`/serial?id=${SESSION}&agent=${AGENT}`);
   });
 
-  it("send-mouse posts the point, button, and clicks, and omits button and clicks when not given", async () => {
+  it("mouse click and mouse move post their bodies to their own paths", async () => {
     const stub = await proxy();
-    const base = [
-      "send-mouse",
-      "--agent-id",
-      AGENT,
-      "--server-url",
-      stub.url,
-      "--session-id",
-      SESSION,
-    ];
+    const base = ["--agent-id", AGENT, "--server-url", stub.url, "--session-id", SESSION];
     const click = await runClient([
+      "mouse",
+      "click",
       ...base,
       "--x",
       "0.5",
       "--y",
       "0.25",
       "--button",
-      "left",
-      "--clicks",
-      "2",
+      "right",
     ]);
     expect(click.stderr).toBe("");
     expect(click.code).toBe(0);
+    expect(stub.requests[0]?.url).toBe("/mouse/click");
     expect(stub.requests[0]?.body).toEqual({
       id: SESSION,
       x: 0.5,
       y: 0.25,
       agent: AGENT,
-      button: "left",
-      clicks: 2,
+      button: "right",
     });
-    const move = await runClient([...base, "--x", "0", "--y", "1"]);
+    const move = await runClient(["mouse", "move", ...base, "--x", "0", "--y", "1"]);
     expect(move.stderr).toBe("");
     expect(move.code).toBe(0);
+    expect(stub.requests[1]?.url).toBe("/mouse/move");
     expect(stub.requests[1]?.body).toEqual({ id: SESSION, x: 0, y: 1, agent: AGENT });
   });
-
   it("intent start and intent end take kebab-case flags", async () => {
     const stub = await proxy();
     const started = await runClient([
@@ -555,10 +547,11 @@ describe("./client unhappy path", () => {
     expect(firstLine(nothing.stderr)).toBe("request failed");
   });
 
-  it("rejects a send-mouse coordinate outside 0..1 before calling the proxy", async () => {
+  it("rejects a mouse coordinate outside 0..1 before calling the proxy", async () => {
     const stub = await proxy();
     const result = await runClient([
-      "send-mouse",
+      "mouse",
+      "click",
       "--agent-id",
       AGENT,
       "--server-url",
@@ -575,28 +568,50 @@ describe("./client unhappy path", () => {
     expect(stub.requests).toEqual([]);
   });
 
-  it("rejects send-mouse --clicks without --button before calling the proxy", async () => {
+  it("mouse drag posts from, to, the button and the modifiers; a missing --to-y is refused first", async () => {
     const stub = await proxy();
-    const result = await runClient([
-      "send-mouse",
-      "--agent-id",
-      AGENT,
-      "--server-url",
-      stub.url,
-      "--session-id",
-      SESSION,
-      "--x",
-      "0.5",
-      "--y",
-      "0.5",
-      "--clicks",
-      "2",
+    const base = ["--agent-id", AGENT, "--server-url", stub.url, "--session-id", SESSION];
+    const drag = await runClient([
+      "mouse",
+      "drag",
+      ...base,
+      "--from-x",
+      "0.1",
+      "--from-y",
+      "0.2",
+      "--to-x",
+      "0.9",
+      "--to-y",
+      "0.2",
+      "--modifier",
+      "super",
     ]);
-    expect(result.code).toBe(1);
-    expect(firstLine(result.stderr)).toBe("send-mouse: --clicks needs --button");
-    expect(stub.requests).toEqual([]);
+    expect(drag.stderr).toBe("");
+    expect(drag.code).toBe(0);
+    expect(stub.requests[0]?.url).toBe("/mouse/drag");
+    expect(stub.requests[0]?.body).toEqual({
+      id: SESSION,
+      from: { x: 0.1, y: 0.2 },
+      to: { x: 0.9, y: 0.2 },
+      agent: AGENT,
+      button: "left",
+      modifiers: ["super"],
+    });
+    const half = await runClient([
+      "mouse",
+      "drag",
+      ...base,
+      "--from-x",
+      "0.1",
+      "--from-y",
+      "0.2",
+      "--to-x",
+      "0.9",
+    ]);
+    expect(half.code).toBe(1);
+    expect(half.stderr).toContain("--to-y");
+    expect(stub.requests).toHaveLength(1);
   });
-
   it("rejects a start whose local ISO does not exist before calling the proxy", async () => {
     const stub = await proxy();
     const result = await runClient([
@@ -698,5 +713,86 @@ describe("./client unhappy path", () => {
     );
     expect(result.stderr).not.toMatch(/fetch failed/);
     expect(result.stderr).not.toMatch(/at file:\/\/.*http\.ts/);
+  });
+});
+
+// The wrapper runs a bytecode bundle it builds under node_modules/.cache and rebuilds when a
+// source is newer; when the build fails it says so and runs the sources as they are.
+describe("./client bundle cache", () => {
+  const CACHE = fileURLToPath(
+    new URL("../../node_modules/.cache/oligarchy/client", import.meta.url),
+  );
+  const BUNDLE = join(CACHE, "main.js");
+  const BYTECODE = join(CACHE, "main.js.jsc");
+  const EPOCH = new Date(0);
+
+  // A cache older than every source, so the next call must rebuild.
+  const age = async (): Promise<void> => {
+    await utimes(BUNDLE, EPOCH, EPOCH);
+    await utimes(BYTECODE, EPOCH, EPOCH);
+  };
+
+  it("builds the bundle once and reuses it while no source is newer", async () => {
+    const first = await runClient(["--help"]);
+    expect(first.stderr).toBe("");
+    expect(first.code).toBe(0);
+    expect(first.stdout).toContain("Drive a guest machine through the qemu server");
+    const built = await stat(BYTECODE);
+    expect((await stat(BUNDLE)).size).toBeGreaterThan(0);
+
+    const second = await runClient(["--help"]);
+    expect(second).toEqual(first);
+    expect((await stat(BYTECODE)).mtimeMs).toBe(built.mtimeMs);
+  });
+
+  it("rebuilds a bundle older than the sources", async () => {
+    await runClient(["--help"]);
+    await age();
+    const result = await runClient(["--help"]);
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    expect((await stat(BYTECODE)).mtimeMs).toBeGreaterThan(0);
+    expect((await stat(BUNDLE)).mtimeMs).toBeGreaterThan(0);
+  });
+
+  // Two builds landing at once can leave one file from each; either file older than a source, or
+  // missing, is a rebuild, so the next call repairs it instead of running the stale half.
+  it("rebuilds when only the bundle is older than the sources, or missing", async () => {
+    await runClient(["--help"]);
+    await utimes(BUNDLE, EPOCH, EPOCH);
+    const aged = await runClient(["--help"]);
+    expect(aged.stderr).toBe("");
+    expect(aged.code).toBe(0);
+    expect((await stat(BUNDLE)).mtimeMs).toBeGreaterThan(0);
+
+    await rm(BUNDLE);
+    const missing = await runClient(["--help"]);
+    expect(missing.stderr).toBe("");
+    expect(missing.code).toBe(0);
+    expect(missing.stdout).toBe(aged.stdout);
+    expect((await stat(BUNDLE)).size).toBeGreaterThan(0);
+  });
+
+  it("runs the sources, and says so, when the build fails", async () => {
+    const fresh = await runClient(["--help"]);
+    await age();
+    // A `bun` ahead on PATH that refuses to build and hands every other call to the real one.
+    const dir = await mkdtemp(join(tmpdir(), "oligarchy-client-bun-"));
+    await writeFile(
+      join(dir, "bun"),
+      `#!/bin/sh\n[ "$1" = build ] && { echo "build refused" >&2; exit 1; }\nexec "${process.execPath}" "$@"\n`,
+      { mode: 0o755 },
+    );
+    try {
+      const result = await runClient(["--help"], { PATH: `${dir}:${process.env.PATH ?? ""}` });
+      expect(result.code).toBe(0);
+      expect(result.stdout).toBe(fresh.stdout);
+      expect(result.stderr).toBe(
+        "build refused\nclient: bundle build failed; running the sources\n",
+      );
+      expect((await stat(BYTECODE)).mtimeMs).toBe(0);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
