@@ -430,36 +430,42 @@ function paintGame() {
     return;
   }
   ctx.fillText(snapshot.readyLabel, 24, 64);
-  var ground = 168;
-  var colW = 150;
-  var originX = 300;
-  var cubeSize = 22;
-  var cubeH = 26;
+  var ground = 150;
+  var colW = 160;
+  var originX = 310;
+  var cubeSize = 28;
+  var cubeH = 32;
   var row;
   var col;
-  for (row = 0; row < 12; row++) {
-    for (col = -1; col < 14; col++) {
-      grassCube(210 + col * 46 + (row % 2) * 23, ground - 18 + row * 14, 20, false);
+  var pits = snapshot.players.map(function (player) {
+    return originX + player.slot * colW;
+  });
+  for (row = 0; row < 4; row++) {
+    for (col = -1; col < 16; col++) {
+      var gx = 200 + col * 52 + (row % 2) * 26;
+      var overPit = pits.some(function (px) {
+        return gx > px - 40 && gx < px + 40 && row > 0;
+      });
+      if (overPit) {
+        continue;
+      }
+      grassCube(gx, ground - 10 + row * 16, 24, false);
     }
   }
   snapshot.players.forEach(function (player) {
     var x = originX + player.slot * colW;
     var broken = Math.floor(player.totalDamage / CUBE_HP);
     var crack = (player.totalDamage % CUBE_HP) / CUBE_HP;
-    var faceY = ground + Math.min(broken * cubeH + crack * cubeH, canvas.height - ground - 70);
-    var n;
-    for (n = broken + 8; n >= broken; n--) {
-      var cy = ground + n * cubeH;
-      if (cy > canvas.height + 20) {
-        continue;
-      }
-      if (n === 0 && broken === 0) {
+    var i;
+    for (i = 6; i >= 0; i--) {
+      var cy = ground + 36 + i * cubeH;
+      if (i === 0 && broken === 0) {
         grassCube(x, cy, cubeSize, player.ghost);
       } else {
-        dirtCube(x, cy, cubeSize, player.ghost, n === broken ? crack : 0);
+        dirtCube(x, cy, cubeSize, player.ghost, i === 0 ? crack : 0);
       }
     }
-    voxelMiner(x, faceY + 8, player.ghost, !player.ghost && t < swingUntil);
+    voxelMiner(x, ground + 28, player.ghost, !player.ghost && t < swingUntil);
   });
   shards = shards.filter(function (bit) {
     bit.x += bit.vx;
@@ -569,8 +575,8 @@ socket.addEventListener("message", function (event) {
       var seat = snapshot.players.find(function (player) {
         return player.id === message.playerId;
       });
-      var col = seat ? 300 + seat.slot * 150 : 300;
-      var face = 168 + Math.min(message.depth * 26, 360);
+      var col = seat ? 310 + seat.slot * 160 : 310;
+      var face = 178;
       shatter(col, face);
       if (broken > prev) {
         shatter(col, face);
