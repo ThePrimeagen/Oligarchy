@@ -200,16 +200,14 @@ const sendMouse = Command.make(
         message: "send-mouse: --to-x and --to-y go together",
       });
     }
-    const path: Arr.NonEmptyReadonlyArray<Domain.ScreenPoint> | undefined =
-      Option.isSome(input.toX) && Option.isSome(input.toY)
-        ? [{ x: input.toX.value, y: input.toY.value }]
-        : undefined;
     const body = Contract.SendMouseBody.make(
       Object.assign(
         { id: input.sessionId, x: input.x, y: input.y, agent: input.agentId },
         Option.isSome(input.button) ? { button: input.button.value } : undefined,
         Option.isSome(input.clicks) ? { clicks: input.clicks.value } : undefined,
-        path === undefined ? undefined : { path },
+        Option.isSome(input.toX) && Option.isSome(input.toY)
+          ? { to: { x: input.toX.value, y: input.toY.value } }
+          : undefined,
         Arr.isReadonlyArrayNonEmpty(input.modifier) ? { modifiers: input.modifier } : undefined,
         Option.isSome(input.press) ? { press: input.press.value } : undefined,
       ),

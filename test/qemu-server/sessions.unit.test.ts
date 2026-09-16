@@ -1212,29 +1212,21 @@ describe("sendMouse", () => {
                 expect(error).toMatchObject({ _tag: "BadRequest", sessionId: id, agentId: AGENT });
                 return error.message;
               });
-            expect(yield* refused({ x: 0.1, y: 0.2, path: [far] })).toBe(
+            expect(yield* refused({ x: 0.1, y: 0.2, to: far })).toBe(
               "mouse: a drag needs button left, middle or right",
             );
-            expect(yield* refused({ x: 0.1, y: 0.2, button: "wheel-up", path: [far] })).toBe(
+            expect(yield* refused({ x: 0.1, y: 0.2, button: "wheel-up", to: far })).toBe(
               "mouse: a drag needs button left, middle or right",
             );
-            expect(yield* refused({ x: 0.1, y: 0.2, button: "left", clicks: 2, path: [far] })).toBe(
+            expect(yield* refused({ x: 0.1, y: 0.2, button: "left", clicks: 2, to: far })).toBe(
               "mouse: clicks cannot combine with a drag",
             );
-            expect(
-              yield* refused({ x: 0.1, y: 0.2, button: "left", press: "down", path: [far] }),
-            ).toBe("mouse: press cannot combine with a drag");
-            expect(
-              yield* refused({ x: 0.1, y: 0.2, button: "left", path: [{ x: 1.5, y: 0 }] }),
-            ).toBe("mouse: drag points must be in 0..1");
-            expect(
-              yield* refused({
-                x: 0.1,
-                y: 0.2,
-                button: "left",
-                path: [far, ...Array.from({ length: 16 }, () => far)],
-              }),
-            ).toBe("mouse: a drag has at most 16 points");
+            expect(yield* refused({ x: 0.1, y: 0.2, button: "left", press: "down", to: far })).toBe(
+              "mouse: press cannot combine with a drag",
+            );
+            expect(yield* refused({ x: 0.1, y: 0.2, button: "left", to: { x: 1.5, y: 0 } })).toBe(
+              "mouse: the drag end must be in 0..1",
+            );
             expect(h.qemu.calls.map((call) => call._tag)).toEqual(["prepare", "start"]);
           }),
         );
@@ -1266,14 +1258,6 @@ describe("sendMouse", () => {
             expect(yield* refused({ x: 0.5, y: 0.5, modifiers: ["shift"] })).toBe(
               "mouse: modifiers need a button",
             );
-            expect(
-              yield* refused({
-                x: 0.5,
-                y: 0.5,
-                button: "left",
-                modifiers: ["shift", "shift", "shift", "shift", "shift"],
-              }),
-            ).toBe("mouse: at most 4 modifiers");
             expect(h.qemu.calls.map((call) => call._tag)).toEqual(["prepare", "start"]);
           }),
         );
@@ -1287,7 +1271,7 @@ describe("sendMouse", () => {
         Effect.gen(function* () {
           const { sessions, id, live } = yield* start();
           const gestures: ReadonlyArray<Gesture> = [
-            { x: 0.1, y: 0.2, button: "left", path: [far] },
+            { x: 0.1, y: 0.2, button: "left", to: far },
             { x: 0.5, y: 0.5, button: "left", modifiers: ["shift", "super"] },
             { x: 0.5, y: 0.5, button: "left", press: "down" },
             { x: 0.6, y: 0.6, button: "left", press: "up" },
@@ -1306,8 +1290,8 @@ describe("sendMouse", () => {
             "mouse 0.6 0.6 left up in 0ms",
             "mouse 0.5 0.5 wheel-left ×3 in 0ms",
           ]);
-          // A drag is a press, a move per point and a release; held modifiers add a down and an
-          // up exchange around the click; a press is one exchange; three wheel pulses are six.
+          // A drag is a press, a move and a release; held modifiers add a down and an up
+          // exchange around the click; a press is one exchange; three wheel pulses are six.
           expect(
             h.actions.actions.filter(
               (row) =>

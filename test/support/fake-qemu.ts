@@ -1,4 +1,4 @@
-import { Array as Arr, Cause, Deferred, Effect, Exit, Layer, Option, Ref } from "effect";
+import { Cause, Deferred, Effect, Exit, Layer, Option, Ref } from "effect";
 import type { PlatformError } from "effect";
 import * as Iso from "../../src/qemu/iso.ts";
 import * as Qemu from "../../src/qemu/qemu.ts";
@@ -126,13 +126,6 @@ const qcodes = (chord: ReadonlyArray<string>): ReadonlyArray<Domain.QmpKey> =>
 
 const TABLET_AXIS_MAX = 0x7fff;
 
-const MODIFIER_QCODE: Readonly<Record<Domain.MouseModifier, string>> = {
-  shift: "shift",
-  ctrl: "ctrl",
-  alt: "alt",
-  super: "meta_l",
-};
-
 export const fakeQemu = (script: Script = {}): FakeQemu => {
   const calls: Array<Call> = [];
   const tmp = script.tmp ?? "/tmp";
@@ -197,9 +190,9 @@ export const fakeQemu = (script: Script = {}): FakeQemu => {
             { discard: true },
           );
         }),
-      // The real handle's shapes without their pacing or interpolation: a move is one exchange, a
-      // click two, a drag a press, one move per point and a release, held modifiers a down and
-      // an up exchange around the gesture, a press one exchange.
+      // The real handle's shapes without their pacing, interpolation or cleanup: a move is one
+      // exchange, a click two, a drag a press, a move and a release, a press one, and held
+      // modifiers a down and an up exchange around the gesture. `first` scripts the first one.
       sendMouse: (input, record) =>
         Effect.gen(function* () {
           calls.push({ _tag: "sendMouse", id, input });
@@ -215,48 +208,31 @@ export const fakeQemu = (script: Script = {}): FakeQemu => {
           }
           const down: Domain.QmpInputEvent = { type: "btn", data: { button, down: true } };
           const up: Domain.QmpInputEvent = { type: "btn", data: { button, down: false } };
-          const modifiers = input.modifiers;
-          const opening = modifiers === undefined ? first : Effect.void;
-          const gesture = Effect.gen(function* () {
-            if (input.press !== undefined) {
-              yield* inputEvents(
-                [...at(input), input.press === "down" ? down : up],
-                record,
-                opening,
-              );
-              return;
-            }
-            if (input.path !== undefined) {
-              yield* inputEvents([...at(input), down], record, opening);
-              for (const point of input.path) {
-                yield* inputEvents(at(point), record, Effect.void);
-              }
-              yield* inputEvents([...at(Arr.lastNonEmpty(input.path)), up], record, Effect.void);
-              return;
-            }
+          const held = (pressed: boolean): ReadonlyArray<Domain.QmpInputEvent> =>
+            (input.modifiers ?? []).map((modifier) => ({
+              type: "key",
+              data: { down: pressed, key: { type: "qcode", data: modifier } },
+            }));
+          if (input.modifiers !== undefined) {
+            yield* inputEvents(held(true), record, first);
+          }
+          const opening = input.modifiers === undefined ? first : Effect.void;
+          if (input.press !== undefined) {
+            yield* inputEvents([...at(input), input.press === "down" ? down : up], record, opening);
+          } else if (input.to !== undefined) {
+            yield* inputEvents([...at(input), down], record, opening);
+            yield* inputEvents(at(input.to), record, Effect.void);
+            yield* inputEvents([...at(input.to), up], record, Effect.void);
+          } else {
             const clicks = input.clicks ?? 1;
             for (let click = 0; click < clicks; click++) {
               yield* inputEvents([...at(input), down], record, click === 0 ? opening : Effect.void);
               yield* inputEvents([up], record, Effect.void);
             }
-          });
-          if (modifiers === undefined) {
-            yield* gesture;
-            return;
           }
-          const held = (
-            pressed: boolean,
-            order: ReadonlyArray<Domain.MouseModifier>,
-          ): ReadonlyArray<Domain.QmpInputEvent> =>
-            order.map((modifier) => ({
-              type: "key",
-              data: { down: pressed, key: { type: "qcode", data: MODIFIER_QCODE[modifier] } },
-            }));
-          // As the real handle: pressed first, let go last in reverse order, after a failure too.
-          const pressed = yield* Effect.exit(inputEvents(held(true, modifiers), record, first));
-          const done = Exit.isSuccess(pressed) ? yield* Effect.exit(gesture) : pressed;
-          yield* inputEvents(held(false, Arr.reverse(modifiers)), record, Effect.void);
-          yield* done;
+          if (input.modifiers !== undefined) {
+            yield* inputEvents(held(false), record, Effect.void);
+          }
         }),
       screendump: (record) =>
         Effect.gen(function* () {

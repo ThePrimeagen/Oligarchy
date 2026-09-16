@@ -293,7 +293,7 @@ describe("client requests", () => {
       }),
   );
 
-  it.effect("send-mouse posts a drag as a one-point path, each --modifier, and --press", () =>
+  it.effect("send-mouse posts --to-x --to-y as the drag end, each --modifier, and --press", () =>
     Effect.gen(function* () {
       const recorder = FakeHttp.recordRequests(ok);
       const base = ["send-mouse", ...shared, "--session-id", SESSION];
@@ -326,7 +326,7 @@ describe("client requests", () => {
         x: 0.1,
         y: 0.2,
         button: "left",
-        path: [{ x: 0.9, y: 0.2 }],
+        to: { x: 0.9, y: 0.2 },
         modifiers: ["super", "shift"],
         agent: AGENT,
       });

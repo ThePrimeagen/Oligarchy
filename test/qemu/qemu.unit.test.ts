@@ -573,7 +573,7 @@ describe("QemuHandle.sendMouse", () => {
         const handle = yield* boot(qemu, FakeSocket.recorder().record);
         const fiber = yield* Effect.forkChild(
           handle.sendMouse(
-            { x: 0, y: 0, button: "left", path: [{ x: 1, y: 0 }] },
+            { x: 0, y: 0, button: "left", to: { x: 1, y: 0 } },
             FakeSocket.recorder().record,
           ),
         );
@@ -599,38 +599,6 @@ describe("QemuHandle.sendMouse", () => {
   );
 
   it.effect(
-    "a drag through several points interpolates every segment and releases at the last",
-    () =>
-      Effect.gen(function* () {
-        const { socket, qemu } = yield* fixture();
-        const handle = yield* boot(qemu, FakeSocket.recorder().record);
-        const fiber = yield* Effect.forkChild(
-          handle.sendMouse(
-            {
-              x: 0.5,
-              y: 0.5,
-              button: "right",
-              path: [
-                { x: 0.5, y: 1 },
-                { x: 0, y: 1 },
-              ],
-            },
-            FakeSocket.recorder().record,
-          ),
-        );
-        yield* settle;
-        yield* steps(17);
-        yield* Fiber.join(fiber);
-        const sent = events(socket);
-        expect(sent).toHaveLength(18);
-        expect(sent[0]).toEqual([...at(0.5, 0.5), down("right")]);
-        expect(sent[8]).toEqual(at(0.5, 1));
-        expect(sent[16]).toEqual(at(0, 1));
-        expect(sent[17]).toEqual([...at(0, 1), up("right")]);
-      }),
-  );
-
-  it.effect(
     "releases at the end of the drag even when a move fails, and fails with the move's error",
     () =>
       Effect.gen(function* () {
@@ -645,7 +613,7 @@ describe("QemuHandle.sendMouse", () => {
         const fiber = yield* Effect.forkChild(
           Effect.flip(
             handle.sendMouse(
-              { x: 0, y: 0, button: "left", path: [{ x: 1, y: 1 }] },
+              { x: 0, y: 0, button: "left", to: { x: 1, y: 1 } },
               FakeSocket.recorder().record,
             ),
           ),

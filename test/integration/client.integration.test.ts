@@ -655,7 +655,7 @@ describe("./client unhappy path", () => {
       y: 0.2,
       agent: AGENT,
       button: "left",
-      path: [{ x: 0.9, y: 0.2 }],
+      to: { x: 0.9, y: 0.2 },
       modifiers: ["super"],
     });
     const held = await runClient([

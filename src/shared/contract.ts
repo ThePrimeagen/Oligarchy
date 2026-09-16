@@ -41,9 +41,9 @@ export class SendMouseBody extends Schema.Class<SendMouseBody>(
   y: Schema.Number,
   button: Schema.optionalKey(Domain.MouseButton),
   clicks: Schema.optionalKey(Schema.Number),
-  // A drag: the button goes down at (x, y), the pointer moves through these points, and the
-  // button comes up at the last one.
-  path: Schema.optionalKey(Schema.NonEmptyArray(Domain.ScreenPoint)),
+  // A drag: the button goes down at (x, y), the pointer moves here in steps, and the button
+  // comes up.
+  to: Schema.optionalKey(Domain.ScreenPoint),
   // Held before the pointer events and let go after them, within this request.
   modifiers: Schema.optionalKey(Schema.NonEmptyArray(Domain.MouseModifier)),
   // Half a click, held across requests; the low-level form of a drag.

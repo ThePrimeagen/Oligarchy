@@ -145,7 +145,7 @@ describe("ProxyClient requests", () => {
     }),
   );
 
-  it.effect("sendMouse posts a drag path, held modifiers and a press when given", () =>
+  it.effect("sendMouse posts a drag end, held modifiers and a press when given", () =>
     Effect.gen(function* () {
       const recorder = FakeHttp.recordRequests(ok);
       const proxy = yield* connect.pipe(Effect.provide(recorder.layer));
@@ -155,7 +155,7 @@ describe("ProxyClient requests", () => {
           x: 0.1,
           y: 0.2,
           button: "left",
-          path: [{ x: 0.9, y: 0.2 }],
+          to: { x: 0.9, y: 0.2 },
           modifiers: ["shift"],
           agent: AGENT,
         }),
@@ -175,7 +175,7 @@ describe("ProxyClient requests", () => {
         x: 0.1,
         y: 0.2,
         button: "left",
-        path: [{ x: 0.9, y: 0.2 }],
+        to: { x: 0.9, y: 0.2 },
         modifiers: ["shift"],
         agent: AGENT,
       });

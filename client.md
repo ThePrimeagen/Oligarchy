@@ -177,8 +177,8 @@ Moves the pointer to a point on the screenshot, and optionally clicks, scrolls, 
 - `--button <button>` — `left`, `middle`, `right`, `wheel-up`, `wheel-down`, `wheel-left`, or `wheel-right`. Omit to move only.
 - `--clicks <n>` — how many times to pulse `--button`, 1..100. Default 1. Needs `--button`. A double-click is `--clicks 2`.
 - `--to-x <0..1> --to-y <0..1>` — a drag: `--button` goes down at `--x --y`, the pointer moves to this point in steps, and the button comes up there. Needs `--button left`, `middle`, or `right`; cannot combine with `--clicks` or `--press`. The two flags go together.
-- `--modifier <key>` — hold `shift`, `ctrl`, `alt`, or `super` around the gesture; repeat the flag to hold several. Held for this command only, then let go. Needs `--button`.
-- `--press down|up` — half a click: `down` moves to the point and leaves `--button` held for the commands that follow; `up` moves to the point and lets it go. Needs `--button left`, `middle`, or `right`; cannot combine with `--clicks`. Low-level: reach for it only when no click, scroll, or drag above can express the gesture. See [Mouse](#mouse).
+- `--modifier <key>` — hold `shift`, `ctrl`, `alt`, or `super` around the gesture; repeat the flag to hold several. Let go when the command ends. Needs `--button`.
+- `--press down|up` — half a click: `down` leaves `--button` held; `up` lets it go. Needs `--button left`, `middle`, or `right`; cannot combine with `--clicks`. See [Mouse](#mouse).
 
 ```bash
 ./client send-mouse --agent-id OLI-42 --server-url https://qemu.example.com --session-id 6f1c...e2a9 --x 0.3 --y 0.2 --button left --clicks 2
@@ -268,9 +268,9 @@ Hyprland as Omarchy ships it focuses the window under the pointer. Move onto the
 
 A greeter or installer button is a left click at that point. A double-click launches. A right-click opens a menu. `wheel-down` scrolls.
 
-The gestures, in the order to reach for them: a click is `--button left`; a double-click is `--clicks 2`; a right-click is `--button right`; a scroll is `wheel-up`, `wheel-down`, `wheel-left`, or `wheel-right`, with `--clicks` for how far; a drag is `--to-x --to-y`, which presses at the point, moves there in steps the way a hand does, and releases, so windows follow it and text selects under it; a modified click or drag adds `--modifier` (`shift` to extend a selection, `super` with a left drag to move a window on Omarchy, `super` with a right drag to resize one). All of these press and release within one command; a command that fails part-way still sends the release.
+The gestures, in the order to reach for them: `--button left` (`--clicks 2` for a double-click; `--button right` for a menu); `wheel-up`, `wheel-down`, `wheel-left`, or `wheel-right` with `--clicks` for how far; a drag is `--to-x --to-y`; a modified click or drag adds `--modifier` (`shift` extends a selection; on Omarchy, `super` with a left drag moves a window and with a right drag resizes one).
 
-`--press down` and `--press up` are the low-level halves every gesture above is made of. Use them only when none of those can express what you need: a button that must stay held while keys are typed, or a drag whose path one `--to-x --to-y` cannot describe. A button held by `--press down` stays down until your `--press up` or the end of the session, across every command in between, so send the `up`; a held `--modifier` is let go when its own command ends and never crosses into the next.
+Use `--press down` and `--press up` only when none of those can do the job: a button that must stay held while you type, or a path one drag cannot describe. A pressed button stays down until `--press up` or the end of the session, so send the `up`. A `--modifier` is let go when its command ends.
 
 ## The loop
 

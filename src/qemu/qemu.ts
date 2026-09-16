@@ -1,5 +1,5 @@
 import { homedir, tmpdir } from "node:os";
-import { Array as Arr, Context, Effect, Exit, FileSystem, Layer, Path } from "effect";
+import { Array as Arr, Context, Effect, FileSystem, Layer, Path } from "effect";
 import type { PlatformError, Scope } from "effect";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import * as Log from "../observability/log.ts";
@@ -65,15 +65,15 @@ export type StartInput = {
   readonly record: Client.Recorder;
 };
 
-// The handler has already checked the combinations: a path or a press comes with a pressable
+// The handler has already checked the combinations: a drag or a press comes with a pressable
 // button and without clicks, modifiers with a button.
 export type MouseInput = {
   readonly x: number;
   readonly y: number;
   readonly button?: Domain.MouseButton;
   readonly clicks?: number;
-  // A drag from (x, y) through these points, released at the last.
-  readonly path?: Arr.NonEmptyReadonlyArray<Domain.ScreenPoint>;
+  // A drag from (x, y) to here.
+  readonly to?: Domain.ScreenPoint;
   // Held around the pointer events of this request.
   readonly modifiers?: Arr.NonEmptyReadonlyArray<Domain.MouseModifier>;
   // Half a click, held across requests.
@@ -258,10 +258,39 @@ const make: Effect.Effect<
       const down: Domain.QmpInputEvent = { type: "btn", data: { button, down: true } };
       const up: Domain.QmpInputEvent = { type: "btn", data: { button, down: false } };
 
-      // usb-tablet applies the event list then syncs once: down and up in the same list leave
-      // the button unchanged, so the guest never sees a click. The release always goes out, even
-      // after a failed press, so the guest is never left with a button held down.
-      const click = Effect.gen(function* () {
+      const gesture = Effect.gen(function* () {
+        if (mouse.press !== undefined) {
+          yield* send([...at(mouse), mouse.press === "down" ? down : up]);
+          return;
+        }
+        const to = mouse.to;
+        if (to !== undefined) {
+          // Each step is its own exchange: abs events in one list collapse to the last position.
+          // The release lands at the end after a failed move too, so the guest is never left
+          // mid-drag with the button down.
+          const moved = yield* Effect.exit(
+            Effect.gen(function* () {
+              yield* send([...at(mouse), down]);
+              for (let step = 1; step <= DRAG_STEPS; step++) {
+                yield* Effect.sleep(DRAG_STEP_GAP_MS);
+                const along = step / DRAG_STEPS;
+                yield* send(
+                  at({
+                    x: mouse.x + (to.x - mouse.x) * along,
+                    y: mouse.y + (to.y - mouse.y) * along,
+                  }),
+                );
+              }
+              yield* Effect.sleep(DRAG_STEP_GAP_MS);
+            }),
+          );
+          yield* send([...at(to), up]);
+          yield* moved;
+          return;
+        }
+        // usb-tablet applies the event list then syncs once: down and up in the same list leave
+        // the button unchanged, so the guest never sees a click. The release always goes out,
+        // even after a failed press, so the guest is never left with a button held down.
         const clicks = mouse.clicks ?? 1;
         for (let pulse = 0; pulse < clicks; pulse++) {
           const pressed = yield* Effect.exit(send([...at(mouse), down]));
@@ -271,47 +300,6 @@ const make: Effect.Effect<
             yield* Effect.sleep(MULTI_CLICK_GAP_MS);
           }
         }
-      });
-
-      // Each step is its own exchange: abs events in one list collapse to the last position.
-      // The release lands at the path's end after a failed move too, so the guest is never left
-      // mid-drag with the button down.
-      const drag = (points: Arr.NonEmptyReadonlyArray<Domain.ScreenPoint>) =>
-        Effect.gen(function* () {
-          const moved = yield* Effect.exit(
-            Effect.gen(function* () {
-              yield* send([...at(mouse), down]);
-              let from: Domain.ScreenPoint = mouse;
-              for (const point of points) {
-                for (let step = 1; step <= DRAG_STEPS; step++) {
-                  yield* Effect.sleep(DRAG_STEP_GAP_MS);
-                  const along = step / DRAG_STEPS;
-                  yield* send(
-                    at({
-                      x: from.x + (point.x - from.x) * along,
-                      y: from.y + (point.y - from.y) * along,
-                    }),
-                  );
-                }
-                from = point;
-              }
-              yield* Effect.sleep(DRAG_STEP_GAP_MS);
-            }),
-          );
-          yield* send([...at(Arr.lastNonEmpty(points)), up]);
-          yield* moved;
-        });
-
-      const gesture = Effect.gen(function* () {
-        if (mouse.press !== undefined) {
-          yield* send([...at(mouse), mouse.press === "down" ? down : up]);
-          return;
-        }
-        if (mouse.path !== undefined) {
-          yield* drag(mouse.path);
-          return;
-        }
-        yield* click;
       });
 
       const modifiers = mouse.modifiers;
@@ -330,8 +318,12 @@ const make: Effect.Effect<
       // Pressed as their own exchange first and let go as their own exchange last: after a
       // failed gesture, and after a failed press too, since the row can be refused once QEMU has
       // taken the keys. The guest is never left with a modifier held down.
-      const pressed = yield* Effect.exit(send(held(true, modifiers)));
-      const done = Exit.isSuccess(pressed) ? yield* Effect.exit(gesture) : pressed;
+      const done = yield* Effect.exit(
+        Effect.gen(function* () {
+          yield* send(held(true, modifiers));
+          yield* gesture;
+        }),
+      );
       yield* send(held(false, Arr.reverse(modifiers)));
       yield* done;
     });

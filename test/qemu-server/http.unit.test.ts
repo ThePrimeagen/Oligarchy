@@ -428,7 +428,7 @@ describe("Sessions endpoints happy path", () => {
     }),
   );
 
-  it.effect("POST /send-mouse carries a drag path, held modifiers and a press as written", () =>
+  it.effect("POST /send-mouse carries a drag end, held modifiers and a press as written", () =>
     Effect.gen(function* () {
       const fixed = fixture();
       const drag = Contract.SendMouseBody.make({
@@ -436,10 +436,7 @@ describe("Sessions endpoints happy path", () => {
         x: 0.1,
         y: 0.2,
         button: "left",
-        path: [
-          { x: 0.5, y: 0.2 },
-          { x: 0.9, y: 0.9 },
-        ],
+        to: { x: 0.9, y: 0.9 },
         modifiers: ["super"],
         agent: AGENT_ID,
       });
@@ -476,7 +473,7 @@ describe("Sessions endpoints happy path", () => {
             [{ ...base, modifiers: ["meta"] }, '["modifiers"'],
             [{ ...base, modifiers: [] }, '["modifiers"]'],
             [{ ...base, press: "click" }, '["press"]'],
-            [{ ...base, path: [{ x: 0.5 }] }, '["path"'],
+            [{ ...base, to: { x: 0.5 } }, '["to"'],
           ];
           for (const [body, where] of bodies) {
             const response = yield* http.post("/send-mouse", {
