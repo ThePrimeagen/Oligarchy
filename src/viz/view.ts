@@ -66,7 +66,7 @@ const OPENER = "xdg-open";
 const OPEN_WAIT = Duration.seconds(2);
 
 export const ENTER_SCREEN = "\x1b[?1049h\x1b[?25l\x1b[2J";
-export const LEAVE_SCREEN = "\x1b[?25h\x1b[?1049l";
+export const LEAVE_SCREEN = `${Image.clearImages}\x1b[?25h\x1b[?1049l`;
 
 // ---------------------------------------------------------------------------
 // Theme: Rosé Pine, as the log's agent colours
@@ -771,7 +771,7 @@ export const draw = (view: View, now: number, columns: number, rows: number): st
     return `\x1b[2J\x1b[1;1H${paint(PALETTE.love, tooSmall(columns, rows))}`;
   }
   if (Option.isSome(view.follow) && view.follow.value._tag === "full") {
-    return Follow.drawFull(view.follow.value, columns, rows);
+    return Follow.drawFull(view.follow.value, columns, rows, view.notice);
   }
   const machines = machinesBox(view, now, columns, rows);
   const lines = [
@@ -795,7 +795,7 @@ export const drawFollowImage = (view: View, columns: number, rows: number): stri
     onSome: (follow) =>
       follow._tag === "full"
         ? Follow.drawFullImage(follow, columns, rows)
-        : Follow.drawPeekImage(follow, columns, rows - 4),
+        : Follow.drawPeekImage(follow, columns, Follow.peekImageScreenRow(rows)),
   });
 
 // A running job with a session can be followed; anything else is a sentence for the footer.
@@ -971,22 +971,43 @@ export const run: Effect.Effect<
         follow: Option.some(opened),
         notice: Option.none(),
       }));
-      const fiber = yield* Effect.forkScoped(
-        Stream.splitLines(Stream.decodeText(bytes)).pipe(
-          Stream.runForEach((line) =>
-            Effect.gen(function* () {
-              const event = yield* Domain.decodeFollowLine(line).pipe(Effect.orDie);
-              yield* Ref.update(view, (current) => ({
-                ...current,
-                follow: Option.map(current.follow, (follow) =>
-                  follow._tag === "full" ? Follow.apply(follow, event) : follow,
-                ),
-              }));
-              yield* paintScreen;
-            }),
-          ),
+      const consume = Stream.splitLines(Stream.decodeText(bytes)).pipe(
+        Stream.runForEach((line) =>
+          Effect.gen(function* () {
+            if (line === "") {
+              return;
+            }
+            const event = yield* Domain.decodeFollowLine(line).pipe(Effect.orDie);
+            yield* Ref.update(view, (current) => ({
+              ...current,
+              follow: Option.map(current.follow, (follow) =>
+                follow._tag === "full" ? Follow.apply(follow, event) : follow,
+              ),
+            }));
+            yield* paintScreen;
+          }),
         ),
+        Effect.matchCauseEffect({
+          onFailure: (cause) =>
+            Cause.hasInterruptsOnly(cause)
+              ? Effect.interrupt
+              : setNotice(Render.headline(Cause.squash(cause))).pipe(Effect.andThen(paintScreen)),
+          onSuccess: () =>
+            Effect.gen(function* () {
+              const latest = yield* Ref.get(view);
+              if (
+                Option.isSome(latest.follow) &&
+                latest.follow.value._tag === "full" &&
+                (latest.follow.value.status === "pending" ||
+                  latest.follow.value.status === "running")
+              ) {
+                yield* setNotice(`dropped from ${peek.sessionId}: this follower fell behind`);
+                yield* paintScreen;
+              }
+            }),
+        }),
       );
+      const fiber = yield* Effect.forkScoped(consume);
       yield* Ref.set(followFiber, Option.some(fiber));
     }).pipe(
       Effect.catchCause((cause) =>
@@ -1011,11 +1032,7 @@ export const run: Effect.Effect<
       return;
     }
     const found = Option.getOrThrow(job);
-    const sessionId = found.sessionId;
-    if (sessionId === null) {
-      yield* setNotice("the selected job has no session");
-      return;
-    }
+    const sessionId = Option.getOrThrow(Option.fromNullishOr(found.sessionId));
     const peek = yield* Follow.loadPeek(found.ticket ?? "—", sessionId, found.serverUrl);
     yield* Ref.update(view, (latest) => ({
       ...latest,

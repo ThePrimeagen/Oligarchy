@@ -215,11 +215,13 @@ const fit = (text: string, width: number): string => {
 const titleOf = (ticket: string, sessionId: string): string =>
   `follow ${ticket} · ${sessionId.slice(0, 8)}`;
 
+export const peekImageScreenRow = (rows: number): number => rows - PEEK_FRAME_ROWS + 1;
+
 export const drawPeek = (
   peek: Peek,
   now: number,
   columns: number,
-): { readonly lines: ReadonlyArray<string>; readonly imageRow: number } => {
+): { readonly lines: ReadonlyArray<string> } => {
   const usable = columns - 4;
   const title = titleOf(peek.ticket, peek.sessionId);
   const top = `${muted("╭─┤ ")}${bold(paint(PALETTE.text, title))}${muted(` ├${"─".repeat(Math.max(0, columns - 7 - title.length))}╮`)}`;
@@ -240,7 +242,7 @@ export const drawPeek = (
     const line = `${paint(PALETTE.text, name)}  ${paint(PALETTE.subtle, ago)}`;
     return boxed(`${line}${" ".repeat(Math.max(0, usable - commandWidth))}`);
   });
-  return { lines: [top, ...rows, bottom], imageRow: 2 };
+  return { lines: [top, ...rows, bottom] };
 };
 
 export const peekImageBox = (columns: number, startRow: number): Option.Option<Image.ImageBox> => {
@@ -257,7 +259,12 @@ export const drawPeekImage = (peek: Peek, columns: number, startRow: number): st
     onSome: ([png, box]) => Image.placeImage(png, box),
   });
 
-export const drawFull = (view: Full, columns: number, rows: number): string => {
+export const drawFull = (
+  view: Full,
+  columns: number,
+  rows: number,
+  notice: Option.Option<string> = Option.none(),
+): string => {
   const glyph = SPINNER[view.frame % SPINNER.length];
   const header = `following ${view.ticket} · ${view.sessionId.slice(0, 8)} `;
   const status = view.status;
@@ -273,11 +280,13 @@ export const drawFull = (view: Full, columns: number, rows: number): string => {
       continue;
     }
     const width = LEFT_COLS - 3 - entry.indent;
-    const label = entry.name.length > width ? `${entry.name.slice(0, width - 1)}…` : entry.name;
+    const name = clean(entry.name);
+    const label = name.length > width ? `${name.slice(0, width - 1)}…` : name;
     const mark = markOf(entry.state, glyph);
     out += `${" ".repeat(entry.indent)}${mark} ${label}${" ".repeat(width - label.length)}`;
   }
-  return `${out}\x1b[${String(rows)};2H${paint(PALETTE.muted, "esc closes")}`;
+  const foot = Option.getOrElse(notice, () => "esc closes");
+  return `${out}\x1b[${String(rows)};2H${paint(PALETTE.muted, fit(foot, columns - 2).trimEnd())}`;
 };
 
 export const fullImageBox = (columns: number, rows: number): Option.Option<Image.ImageBox> =>

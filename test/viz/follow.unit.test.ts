@@ -248,7 +248,8 @@ describe("drawPeek", () => {
         }),
       );
       expect(Follow.peekImageBox(Follow.LEFT_COLS + 2, 33)).toEqual(Option.none());
-      const placed = Follow.drawPeekImage(peek, COLUMNS, 33);
+      expect(Follow.peekImageScreenRow(ROWS)).toBe(33);
+      const placed = Follow.drawPeekImage(peek, COLUMNS, Follow.peekImageScreenRow(ROWS));
       expect(placed).toBe(
         Image.placeImage(TINY_PNG, {
           col: Follow.LEFT_COLS + 3,
@@ -304,6 +305,21 @@ describe("full follow view", () => {
       expect(stripAnsi(out)).toContain("following OLI-61 · 7a2d0000");
       expect(stripAnsi(out)).toContain("running");
       expect(stripAnsi(out)).toContain("esc closes");
+    }),
+  );
+
+  it.effect("strips control characters from an intent so they cannot steer the terminal", () =>
+    Effect.sync(() => {
+      const peek = Follow.peekFromActions("OLI-61", SESSION_ID, garage.url, [], Option.none());
+      const dirty = Follow.apply(Follow.expand(peek, garage.url), {
+        type: "intent",
+        state: "started",
+        message: "wait\nfor\x1b[31mthe boot",
+      });
+      const out = Follow.drawFull(dirty, COLUMNS, ROWS);
+      expect(out).not.toMatch(/\n/);
+      expect(out).not.toContain("\x1b[31m");
+      expect(stripAnsi(out)).toContain("wait for [31mthe boot");
     }),
   );
 });
@@ -487,9 +503,16 @@ describe("run follow happy path", () => {
           state: "running",
         }),
       ].join("");
-      const http = FakeHttp.respondWith((request, url) => {
+      const http = FakeHttp.respondWith((_request, url) => {
         if (url.pathname === "/follow") {
-          return new Response(events, { status: 200 });
+          return new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.enqueue(new TextEncoder().encode(events));
+              },
+            }),
+            { status: 200 },
+          );
         }
         return new Response(null, { status: 404 });
       });
@@ -604,6 +627,36 @@ describe("run follow unhappy path", () => {
         yield* noServer.press("q");
         yield* Fiber.join(byNoServer);
       }),
+  );
+
+  it.effect("a follow stream that ends while the session is still running was dropped", () =>
+    Effect.gen(function* () {
+      const tty = yield* fakeTerminal();
+      const actions = Stores.fakeActionStore();
+      seedActions(actions);
+      const http = FakeHttp.respondWith((_request, url) => {
+        if (url.pathname === "/follow") {
+          return new Response(Domain.encodeFollowLine({ type: "session", status: "running" }), {
+            status: 200,
+          });
+        }
+        return new Response(null, { status: 404 });
+      });
+      const fiber = yield* Effect.forkChild(live(tty, {}, { actions, http }), {
+        startImmediately: true,
+      });
+      yield* settle;
+      yield* tty.press("j");
+      yield* tty.press("f");
+      yield* settle;
+      yield* tty.press("f");
+      yield* settle;
+      expect(stripAnsi(tty.frames.at(-1) ?? "")).toContain(
+        `dropped from ${SESSION_ID}: this follower fell behind`,
+      );
+      yield* tty.press("q");
+      yield* Fiber.join(fiber);
+    }),
   );
 
   it.effect("a refused follow stream leaves the peek and puts the reason on the footer", () =>
