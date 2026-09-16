@@ -3,6 +3,7 @@ import {
   Clock,
   Duration,
   Effect,
+  Fiber,
   Option,
   type PlatformError,
   Ref,
@@ -10,13 +11,20 @@ import {
   Stream,
   Terminal,
 } from "effect";
+import type * as HttpClient from "effect/unstable/http/HttpClient";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import * as ProxyClient from "../client/proxy-client.ts";
+import * as Config from "../config.ts";
+import * as Actions from "../db/actions.ts";
 import * as Automation from "../db/automation.ts";
 import * as ProcessStats from "../db/process-stats.ts";
 import * as Servers from "../db/servers.ts";
 import * as ExternalFailure from "../external-failure.ts";
 import * as Render from "../observability/render.ts";
+import * as Domain from "../shared/domain.ts";
+import * as Image from "../session/image.ts";
+import * as Follow from "./follow.ts";
 
 // The terminal this view is laid out for: a card's header fits its host numbers beside a name
 // and a url across 135 columns, with 33 columns left to each of its three graphs, and 37 rows
@@ -127,6 +135,7 @@ export type View = {
   readonly snapshot: Option.Option<Snapshot>;
   readonly failure: Option.Option<string>;
   readonly notice: Option.Option<string>;
+  readonly follow: Option.Option<Follow.Follow>;
   readonly tab: Tab;
   readonly focus: Focus;
   readonly cursor: Readonly<Record<List, number>>;
@@ -136,6 +145,7 @@ export const initialView: View = {
   snapshot: Option.none(),
   failure: Option.none(),
   notice: Option.none(),
+  follow: Option.none(),
   tab: "servers",
   focus: "machines",
   cursor: { servers: 0, clients: 0, queue: 0 },
@@ -730,6 +740,7 @@ const HINTS: ReadonlyArray<readonly [key: string, does: string]> = [
   ["h/l", "servers/clients"],
   ["g/G", "first/last"],
   ["L", "open ticket"],
+  ["F", "follow"],
   ["q", "quit"],
 ];
 
@@ -759,21 +770,68 @@ export const draw = (view: View, now: number, columns: number, rows: number): st
   if (columns < MIN_COLUMNS || rows < MIN_ROWS) {
     return `\x1b[2J\x1b[1;1H${paint(PALETTE.love, tooSmall(columns, rows))}`;
   }
+  if (Option.isSome(view.follow) && view.follow.value._tag === "full") {
+    return Follow.drawFull(view.follow.value, columns, rows);
+  }
   const machines = machinesBox(view, now, columns, rows);
   const lines = [
     ...machines,
     ...queueBox(view, now, columns, rows - 1 - machines.length),
     footer(view, columns),
   ];
+  if (Option.isSome(view.follow) && view.follow.value._tag === "peek") {
+    const peek = Follow.drawPeek(view.follow.value, now, columns);
+    const start = lines.length - 1 - peek.lines.length;
+    peek.lines.forEach((line, index) => {
+      lines[start + index] = line;
+    });
+  }
   return lines.map((line, index) => `\x1b[${String(index + 1)};1H${line}`).join("");
 };
+
+export const drawFollowImage = (view: View, columns: number, rows: number): string =>
+  Option.match(view.follow, {
+    onNone: () => "",
+    onSome: (follow) =>
+      follow._tag === "full"
+        ? Follow.drawFullImage(follow, columns, rows)
+        : Follow.drawPeekImage(follow, columns, rows - 4),
+  });
+
+// A running job with a session can be followed; anything else is a sentence for the footer.
+export const followError = (job: Option.Option<Job>): Option.Option<string> =>
+  Option.match(job, {
+    onNone: () => Option.some("no job selected"),
+    onSome: (found) => {
+      if (found.status !== "running") {
+        return Option.some("follow needs a running job");
+      }
+      if (found.sessionId === null) {
+        return Option.some("the selected job has no session");
+      }
+      return Option.none();
+    },
+  });
 
 // readline reports a capital L as l with shift.
 const isOpen = (input: Terminal.UserInput): boolean => input.key.shift && input.key.name === "l";
 
-// Every key retires the last notice. L moves nothing here: opening the ticket is the runner's.
+const isFollow = (input: Terminal.UserInput): boolean => input.key.name === "f";
+
+// Every key retires the last notice. L and F move nothing here: opening the ticket or follow
+// is the runner's. A peek closes on any other key so the board stays walkable.
 export const press = (view: View, input: Terminal.UserInput): View => {
   const retired: View = { ...view, notice: Option.none() };
+  if (isOpen(input) || isFollow(input)) {
+    return retired;
+  }
+  if (input.key.name === "escape") {
+    return { ...retired, follow: Option.none() };
+  }
+  const closed: View =
+    Option.isSome(view.follow) && view.follow.value._tag === "peek"
+      ? { ...retired, follow: Option.none() }
+      : retired;
   const list = focused(view);
   const count = Option.match(view.snapshot, {
     onNone: () => 0,
@@ -785,12 +843,9 @@ export const press = (view: View, input: Terminal.UserInput): View => {
   // the end, and a step must start from what is selected.
   const current = clamp(view.cursor[list], 0, last);
   const select = (cursor: number): View => ({
-    ...retired,
+    ...closed,
     cursor: { ...view.cursor, [list]: clamp(cursor, 0, last) },
   });
-  if (isOpen(input)) {
-    return retired;
-  }
   switch (input.key.name) {
     case "j":
     case "down":
@@ -801,14 +856,14 @@ export const press = (view: View, input: Terminal.UserInput): View => {
     case "g":
       return select(input.key.shift ? last : 0);
     case "tab":
-      return { ...retired, focus: view.focus === "machines" ? "queue" : "machines" };
+      return { ...closed, focus: view.focus === "machines" ? "queue" : "machines" };
     case "h":
     case "l":
     case "left":
     case "right":
-      return { ...retired, tab: view.tab === "servers" ? "clients" : "servers" };
+      return { ...closed, tab: view.tab === "servers" ? "clients" : "servers" };
     default:
-      return retired;
+      return closed;
   }
 };
 
@@ -863,22 +918,115 @@ export const run: Effect.Effect<
   PlatformError.PlatformError,
   | Terminal.Terminal
   | ChildProcessSpawner.ChildProcessSpawner
+  | HttpClient.HttpClient
   | Servers.ServerStore
   | ProcessStats.ProcessStatsStore
   | Automation.AutomationStore
+  | Actions.ActionStore
 > = Effect.gen(function* () {
   const terminal = yield* Terminal.Terminal;
   const servers = yield* Servers.ServerStore;
   const processStats = yield* ProcessStats.ProcessStatsStore;
   const automation = yield* Automation.AutomationStore;
   const view = yield* Ref.make(initialView);
+  const followFiber = yield* Ref.make(Option.none<Fiber.Fiber<unknown, unknown>>());
   const paintScreen = Effect.gen(function* () {
     const current = yield* Ref.get(view);
     const now = yield* Clock.currentTimeMillis;
     const columns = yield* terminal.columns;
     const rows = yield* terminal.rows;
-    yield* terminal.display(draw(current, now, columns, rows));
+    yield* terminal.display(draw(current, now, columns, rows) + drawFollowImage(current, columns, rows));
   });
+  const setNotice = (text: string) =>
+    Ref.update(view, (current) => ({ ...current, notice: Option.some(text) }));
+  const stopFollow = Effect.gen(function* () {
+    const running = yield* Ref.getAndSet(followFiber, Option.none());
+    if (Option.isSome(running)) {
+      yield* Fiber.interrupt(running.value);
+    }
+    yield* terminal.display(Image.clearImages);
+  });
+  const expandFollow = (peek: Follow.Peek) =>
+    Effect.gen(function* () {
+      const serverUrl = Option.getOrNull(peek.serverUrl);
+      if (serverUrl === null) {
+        yield* setNotice("follow needs a qemu server");
+        return;
+      }
+      const token = yield* Config.oligarchyToken.pipe(
+        Effect.catchTag("MissingVariable", (error) =>
+          setNotice(error.message).pipe(Effect.as(null)),
+        ),
+      );
+      if (token === null) {
+        return;
+      }
+      const proxy = yield* ProxyClient.connect({ serverUrl, token });
+      const bytes = yield* proxy.follow(peek.sessionId);
+      const opened = Follow.expand(peek, serverUrl);
+      yield* Ref.update(view, (current) => ({
+        ...current,
+        follow: Option.some(opened),
+        notice: Option.none(),
+      }));
+      const fiber = yield* Effect.forkScoped(
+        Stream.splitLines(Stream.decodeText(bytes)).pipe(
+          Stream.runForEach((line) =>
+            Effect.gen(function* () {
+              const event = yield* Domain.decodeFollowLine(line).pipe(Effect.orDie);
+              yield* Ref.update(view, (current) => ({
+                ...current,
+                follow: Option.map(current.follow, (follow) =>
+                  follow._tag === "full" ? Follow.apply(follow, event) : follow,
+                ),
+              }));
+              yield* paintScreen;
+            }),
+          ),
+        ),
+      );
+      yield* Ref.set(followFiber, Option.some(fiber));
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Cause.hasInterruptsOnly(cause)
+          ? Effect.interrupt
+          : setNotice(Render.headline(Cause.squash(cause))),
+      ),
+    );
+  const openFollow = Effect.gen(function* () {
+    const current = yield* Ref.get(view);
+    if (Option.isSome(current.follow) && current.follow.value._tag === "full") {
+      return;
+    }
+    if (Option.isSome(current.follow) && current.follow.value._tag === "peek") {
+      yield* expandFollow(current.follow.value);
+      return;
+    }
+    const job = selectedJob(current);
+    const refused = followError(job);
+    if (Option.isSome(refused)) {
+      yield* setNotice(refused.value);
+      return;
+    }
+    const found = Option.getOrThrow(job);
+    const sessionId = found.sessionId;
+    if (sessionId === null) {
+      yield* setNotice("the selected job has no session");
+      return;
+    }
+    const peek = yield* Follow.loadPeek(found.ticket ?? "—", sessionId, found.serverUrl);
+    yield* Ref.update(view, (latest) => ({
+      ...latest,
+      follow: Option.some(peek),
+      notice: Option.none(),
+    }));
+  }).pipe(
+    Effect.catchCause((cause) =>
+      Cause.hasInterruptsOnly(cause)
+        ? Effect.interrupt
+        : setNotice(Render.headline(Cause.squash(cause))),
+    ),
+  );
   const read = Effect.gen(function* () {
     // Taken before the queries, so an age counts from before its row was read, never after: a
     // slow read leans towards silent, not live.
@@ -920,9 +1068,17 @@ export const run: Effect.Effect<
       Stream.takeWhile((key) => !isQuit(key)),
       Stream.runForEach((key) =>
         Effect.gen(function* () {
+          const before = yield* Ref.get(view);
           yield* Ref.update(view, (current) => press(current, key));
+          const after = yield* Ref.get(view);
+          if (Option.isSome(before.follow) && Option.isNone(after.follow)) {
+            yield* stopFollow;
+          }
           if (isOpen(key)) {
             yield* open;
+          }
+          if (isFollow(key)) {
+            yield* openFollow;
           }
           yield* paintScreen;
         }),
@@ -939,7 +1095,26 @@ export const run: Effect.Effect<
         keys,
         Effect.raceFirst(
           Effect.repeat(Effect.andThen(read, paintScreen), Schedule.spaced(REFRESH)),
-          Effect.schedule(paintScreen, Schedule.spaced(AGE_TICK)),
+          Effect.raceFirst(
+            Effect.schedule(paintScreen, Schedule.spaced(AGE_TICK)),
+            Effect.schedule(
+              Ref.update(view, (current) => ({
+                ...current,
+                follow: Option.map(current.follow, (follow) =>
+                  follow._tag === "full" ? Follow.tick(follow) : follow,
+                ),
+              })).pipe(
+                Effect.andThen(
+                  Effect.flatMap(Ref.get(view), (current) =>
+                    Option.isSome(current.follow) && current.follow.value._tag === "full"
+                      ? paintScreen
+                      : Effect.void,
+                  ),
+                ),
+              ),
+              Schedule.spaced("80 millis"),
+            ),
+          ),
         ),
       );
     }),

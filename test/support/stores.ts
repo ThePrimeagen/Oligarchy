@@ -26,6 +26,7 @@ type FakeAutomationJob = AutomationJobRow & {
   readonly test?: string;
   readonly clientUrl?: string | null;
   readonly serverUrl?: string | null;
+  readonly sessionId?: string | null;
 };
 
 const sameId = (left: string, right: string): boolean => left.toLowerCase() === right.toLowerCase();
@@ -627,6 +628,7 @@ export const fakeAutomationStore = (
           reason: job.reason,
           clientUrl: job.clientUrl ?? null,
           serverUrl: job.serverUrl ?? null,
+          sessionId: job.sessionId ?? null,
           createdAt: job.createdAt,
           startedAt: job.startedAt,
           finishedAt: job.finishedAt,

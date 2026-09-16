@@ -1439,6 +1439,7 @@ Postgres.describeWithDatabase("database", () => {
           for (const job of [...listed.running, ...listed.pending, ...listed.completed]) {
             expect(job.clientUrl).toBeNull();
             expect(job.serverUrl).toBeNull();
+            expect(job.sessionId).toBeNull();
           }
           const more = yield* automation.listJobs(10);
           expect(more.completed.map((job) => job.ticket)).toEqual(["LST-102", "LST-101"]);
@@ -1502,9 +1503,9 @@ Postgres.describeWithDatabase("database", () => {
           yield* servers.routeSession(sessionId, qemuUrl);
           yield* servers.clearAgent(ticket);
           const started = yield* automation.listJobs(0);
-          expect(started.running.map((job) => [job.clientUrl, job.serverUrl])).toEqual([
-            [clientUrl, qemuUrl],
-          ]);
+          expect(started.running.map((job) => [job.clientUrl, job.serverUrl, job.sessionId])).toEqual(
+            [[clientUrl, qemuUrl, sessionId]],
+          );
           yield* servers.removeServer(clientUrl);
           yield* servers.removeServer(qemuUrl);
         }),
@@ -1556,10 +1557,16 @@ Postgres.describeWithDatabase("database", () => {
           yield* automation.enqueue({ resultId: resultIds[3], action: "drive" });
           const listed = yield* automation.listJobs(0);
           expect(
-            listed.running.map((job) => [job.ticket, job.action, job.clientUrl, job.serverUrl]),
+            listed.running.map((job) => [
+              job.ticket,
+              job.action,
+              job.clientUrl,
+              job.serverUrl,
+              job.sessionId,
+            ]),
           ).toEqual([
-            [diagnosed, "diagnose", null, null],
-            [driven, "drive", null, qemuUrl],
+            [diagnosed, "diagnose", null, null, diagnosedSession],
+            [driven, "drive", null, qemuUrl, sessionId],
           ]);
           expect(
             listed.pending.map((job) => [job.ticket, job.status, job.clientUrl, job.serverUrl]),
