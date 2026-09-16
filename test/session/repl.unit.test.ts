@@ -173,8 +173,8 @@ describe("the command tour", () => {
       yield* h.type("status");
       yield* untilLogged("intent  open");
       yield* h.type("send-keys hello world<ENTER>");
-      yield* h.type("send-mouse 0.5 0.25 left 2");
-      yield* h.type("send-mouse 0 1");
+      yield* h.type("mouse double-click 0.5 0.25 left");
+      yield* h.type("mouse move 0 1");
       yield* h.type("get-image");
       yield* untilWritten(h.tty, "▀");
       yield* h.type("get-serial");
@@ -221,7 +221,8 @@ describe("the command tour", () => {
           SERVER_URL,
         ],
         [
-          "send-mouse",
+          "mouse",
+          "double-click",
           "--session-id",
           SESSION_ID,
           "--x",
@@ -230,15 +231,14 @@ describe("the command tour", () => {
           "0.25",
           "--button",
           "left",
-          "--clicks",
-          "2",
           "--agent-id",
           agentId,
           "--server-url",
           SERVER_URL,
         ],
         [
-          "send-mouse",
+          "mouse",
+          "move",
           "--session-id",
           SESSION_ID,
           "--x",
@@ -397,12 +397,12 @@ describe("the command tour", () => {
 
 describe("refusals and failures", () => {
   it.effect(
-    "commands before start, unknown commands and a malformed send-mouse spawn nothing",
+    "commands before start, unknown commands and a malformed mouse command spawn nothing",
     () =>
       Effect.gen(function* () {
         const h = yield* harness(happyClient);
         yield* h.type("send-keys hello");
-        yield* h.type("send-mouse 0.5");
+        yield* h.type("mouse click 0.5");
         yield* h.type("intent start now");
         yield* h.type("intent end");
         yield* h.type("stop");
@@ -426,7 +426,7 @@ describe("refusals and failures", () => {
         ]);
         yield* h.type("start https://example.com/omarchy.iso");
         yield* untilLogged(`session ${SESSION_ID}`);
-        yield* h.type("send-mouse 0.5");
+        yield* h.type("mouse click 0.5");
         yield* h.type("send-keys");
         yield* h.type("intent start");
         yield* h.type("intent end now");
@@ -434,7 +434,7 @@ describe("refusals and failures", () => {
         yield* h.type("start a b c");
         yield* untilLogged("stop it first.");
         expect((yield* consoleLines).slice(-6)).toEqual([
-          "usage: send-mouse <x> <y> [button] [clicks]",
+          "usage: mouse click <x> <y> [button]",
           "usage: send-keys <keys>",
           "usage: intent start <message>",
           "usage: intent end",
@@ -455,7 +455,7 @@ describe("refusals and failures", () => {
     Effect.gen(function* () {
       const h = yield* harness(happyClient);
       yield* h.type("send-keys");
-      yield* h.type("send-mouse 0.5");
+      yield* h.type("mouse click 0.5");
       yield* h.type("intent start");
       yield* h.type("intent end now");
       yield* h.type("stop done");
@@ -764,7 +764,7 @@ describe("follow", () => {
         { type: "action", id: 2, name: "get-image", state: "running" },
         { type: "image", id: IMAGE_ID, png: TINY_PNG.toString("base64") },
         { type: "action", id: 2, state: "completed" },
-        { type: "action", id: 3, name: "send-mouse", state: "running" },
+        { type: "action", id: 3, name: "mouse-click", state: "running" },
         { type: "action", id: 3, state: "failed" },
         { type: "intent", state: "completed" },
         { type: "action", id: 4, name: "get-serial", state: "running" },
@@ -786,7 +786,7 @@ describe("follow", () => {
       expect(view).toContain("following 7a2d0000");
       expect(view).toContain(`${ESC}[32m✓ wait for the boot menu`);
       expect(view).toContain(`${ESC}[32m✓ send-keys`);
-      expect(view).toContain(`${ESC}[31m✗ send-mouse`);
+      expect(view).toContain(`${ESC}[31m✗ mouse-click`);
       expect(view).toMatch(new RegExp(`${ESC}\\[\\d+;2H  ${ESC}\\[32m✓ send-keys`));
       expect(view).toMatch(new RegExp(`${ESC}\\[\\d+;2H${ESC}\\[32m✓ get-serial`));
       expect(view).toContain(`${ESC}[2;42H${ESC}_Ga=T`);

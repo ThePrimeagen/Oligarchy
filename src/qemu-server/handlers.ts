@@ -3,6 +3,7 @@ import * as HttpRouter from "effect/unstable/http/HttpRouter";
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 import * as HttpApiSchema from "effect/unstable/httpapi/HttpApiSchema";
+import type * as Qemu from "../qemu/qemu.ts";
 import * as Api from "../shared/api.ts";
 import * as Contract from "../shared/contract.ts";
 import * as Domain from "../shared/domain.ts";
@@ -12,6 +13,16 @@ import * as Sessions from "./sessions.ts";
 const encoder = new TextEncoder();
 
 const ok = Contract.Ok.make({});
+
+// The modifiers key is absent, never undefined, so the gesture carries it only when the wire did.
+const click = (
+  tag: "click" | "double-click",
+  payload: Contract.MouseClickBody,
+): Qemu.MouseGesture =>
+  Object.assign(
+    { _tag: tag, x: payload.x, y: payload.y, button: payload.button },
+    payload.modifiers === undefined ? undefined : { modifiers: payload.modifiers },
+  );
 
 // The session-driving routes are uninterruptible: a client disconnect interrupts the request's
 // fiber, and a state transition torn in half leaves a machine the sessions map never received —
@@ -134,12 +145,105 @@ export const SessionsLive = (display: Domain.QemuDisplay, automation: boolean) =
         uninterruptible,
       )
       .handle(
-        "sendMouse",
+        "mouseMove",
         ({ payload }) =>
           Effect.gen(function* () {
             const sessions = yield* Sessions.Sessions;
             const live = yield* sessions.lookup(payload.id, payload.agent);
-            yield* sessions.sendMouse(live, payload);
+            yield* sessions.mouse(live, { _tag: "move", x: payload.x, y: payload.y });
+            return ok;
+          }),
+        uninterruptible,
+      )
+      .handle(
+        "mouseClick",
+        ({ payload }) =>
+          Effect.gen(function* () {
+            const sessions = yield* Sessions.Sessions;
+            const live = yield* sessions.lookup(payload.id, payload.agent);
+            yield* sessions.mouse(live, click("click", payload));
+            return ok;
+          }),
+        uninterruptible,
+      )
+      .handle(
+        "mouseDoubleClick",
+        ({ payload }) =>
+          Effect.gen(function* () {
+            const sessions = yield* Sessions.Sessions;
+            const live = yield* sessions.lookup(payload.id, payload.agent);
+            yield* sessions.mouse(live, click("double-click", payload));
+            return ok;
+          }),
+        uninterruptible,
+      )
+      .handle(
+        "mouseScroll",
+        ({ payload }) =>
+          Effect.gen(function* () {
+            const sessions = yield* Sessions.Sessions;
+            const live = yield* sessions.lookup(payload.id, payload.agent);
+            yield* sessions.mouse(live, {
+              _tag: "scroll",
+              x: payload.x,
+              y: payload.y,
+              direction: payload.direction,
+              ticks: payload.ticks,
+            });
+            return ok;
+          }),
+        uninterruptible,
+      )
+      .handle(
+        "mouseDrag",
+        ({ payload }) =>
+          Effect.gen(function* () {
+            const sessions = yield* Sessions.Sessions;
+            const live = yield* sessions.lookup(payload.id, payload.agent);
+            yield* sessions.mouse(
+              live,
+              Object.assign(
+                {
+                  _tag: "drag" as const,
+                  from: payload.from,
+                  to: payload.to,
+                  button: payload.button,
+                },
+                payload.modifiers === undefined ? undefined : { modifiers: payload.modifiers },
+              ),
+            );
+            return ok;
+          }),
+        uninterruptible,
+      )
+      .handle(
+        "mouseHold",
+        ({ payload }) =>
+          Effect.gen(function* () {
+            const sessions = yield* Sessions.Sessions;
+            const live = yield* sessions.lookup(payload.id, payload.agent);
+            yield* sessions.mouse(live, {
+              _tag: "hold",
+              x: payload.x,
+              y: payload.y,
+              button: payload.button,
+            });
+            return ok;
+          }),
+        uninterruptible,
+      )
+      .handle(
+        "mouseRelease",
+        ({ payload }) =>
+          Effect.gen(function* () {
+            const sessions = yield* Sessions.Sessions;
+            const live = yield* sessions.lookup(payload.id, payload.agent);
+            yield* sessions.mouse(live, {
+              _tag: "release",
+              x: payload.x,
+              y: payload.y,
+              button: payload.button,
+            });
             return ok;
           }),
         uninterruptible,

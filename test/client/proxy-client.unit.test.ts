@@ -111,37 +111,51 @@ describe("ProxyClient requests", () => {
     }),
   );
 
-  it.effect("sendMouse posts button and clicks when given and omits them otherwise", () =>
+  it.effect("every mouse method posts its body to its own path", () =>
     Effect.gen(function* () {
       const recorder = FakeHttp.recordRequests(ok);
       const proxy = yield* connect.pipe(Effect.provide(recorder.layer));
-      yield* proxy.sendMouse(
-        Contract.SendMouseBody.make({
+      const point = { id: SESSION, agent: AGENT, x: 0.5, y: 0.25 };
+      yield* proxy.mouseMove(Contract.MouseMoveBody.make(point));
+      yield* proxy.mouseClick(Contract.MouseClickBody.make({ ...point, button: "left" }));
+      yield* proxy.mouseDoubleClick(
+        Contract.MouseClickBody.make({ ...point, button: "right", modifiers: ["shift"] }),
+      );
+      yield* proxy.mouseScroll(
+        Contract.MouseScrollBody.make({ ...point, direction: "down", ticks: 3 }),
+      );
+      yield* proxy.mouseDrag(
+        Contract.MouseDragBody.make({
           id: SESSION,
-          x: 0.5,
-          y: 0.25,
-          button: "left",
-          clicks: 2,
           agent: AGENT,
+          from: { x: 0.1, y: 0.2 },
+          to: { x: 0.9, y: 0.2 },
+          button: "left",
         }),
       );
-      yield* proxy.sendMouse(
-        Contract.SendMouseBody.make({ id: SESSION, x: 0, y: 1, agent: AGENT }),
-      );
-      expectJsonPost(recorder.requests[0], "/send-mouse", {
+      yield* proxy.mouseHold(Contract.MouseButtonBody.make({ ...point, button: "middle" }));
+      yield* proxy.mouseRelease(Contract.MouseButtonBody.make({ ...point, button: "middle" }));
+      expectJsonPost(recorder.requests[0], "/mouse/move", point);
+      expectJsonPost(recorder.requests[1], "/mouse/click", { ...point, button: "left" });
+      expectJsonPost(recorder.requests[2], "/mouse/double-click", {
+        ...point,
+        button: "right",
+        modifiers: ["shift"],
+      });
+      expectJsonPost(recorder.requests[3], "/mouse/scroll", {
+        ...point,
+        direction: "down",
+        ticks: 3,
+      });
+      expectJsonPost(recorder.requests[4], "/mouse/drag", {
         id: SESSION,
-        x: 0.5,
-        y: 0.25,
+        agent: AGENT,
+        from: { x: 0.1, y: 0.2 },
+        to: { x: 0.9, y: 0.2 },
         button: "left",
-        clicks: 2,
-        agent: AGENT,
       });
-      expectJsonPost(recorder.requests[1], "/send-mouse", {
-        id: SESSION,
-        x: 0,
-        y: 1,
-        agent: AGENT,
-      });
+      expectJsonPost(recorder.requests[5], "/mouse/hold", { ...point, button: "middle" });
+      expectJsonPost(recorder.requests[6], "/mouse/release", { ...point, button: "middle" });
     }),
   );
 

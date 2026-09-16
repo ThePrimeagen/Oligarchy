@@ -93,7 +93,61 @@ export const SessionsLive = HttpApiBuilder.group(Api.QemuReverseProxyApi, "Sessi
       uninterruptible,
     )
     .handle(
-      "sendMouse",
+      "mouseMove",
+      ({ payload, request }) =>
+        Effect.gen(function* () {
+          const router = yield* Router.Router;
+          return yield* router.forward(request, payload.id, payload.agent);
+        }),
+      uninterruptible,
+    )
+    .handle(
+      "mouseClick",
+      ({ payload, request }) =>
+        Effect.gen(function* () {
+          const router = yield* Router.Router;
+          return yield* router.forward(request, payload.id, payload.agent);
+        }),
+      uninterruptible,
+    )
+    .handle(
+      "mouseDoubleClick",
+      ({ payload, request }) =>
+        Effect.gen(function* () {
+          const router = yield* Router.Router;
+          return yield* router.forward(request, payload.id, payload.agent);
+        }),
+      uninterruptible,
+    )
+    .handle(
+      "mouseScroll",
+      ({ payload, request }) =>
+        Effect.gen(function* () {
+          const router = yield* Router.Router;
+          return yield* router.forward(request, payload.id, payload.agent);
+        }),
+      uninterruptible,
+    )
+    .handle(
+      "mouseDrag",
+      ({ payload, request }) =>
+        Effect.gen(function* () {
+          const router = yield* Router.Router;
+          return yield* router.forward(request, payload.id, payload.agent);
+        }),
+      uninterruptible,
+    )
+    .handle(
+      "mouseHold",
+      ({ payload, request }) =>
+        Effect.gen(function* () {
+          const router = yield* Router.Router;
+          return yield* router.forward(request, payload.id, payload.agent);
+        }),
+      uninterruptible,
+    )
+    .handle(
+      "mouseRelease",
       ({ payload, request }) =>
         Effect.gen(function* () {
           const router = yield* Router.Router;

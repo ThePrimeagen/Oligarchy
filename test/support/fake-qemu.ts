@@ -9,7 +9,7 @@ import type * as Domain from "../../src/shared/domain.ts";
 import type * as Errors from "../../src/shared/errors.ts";
 
 export type StartInput = Parameters<Qemu.QemuService["start"]>[1];
-export type MouseInput = Parameters<Qemu.QemuHandle["sendMouse"]>[0];
+export type MouseGesture = Parameters<Qemu.QemuHandle["mouse"]>[0];
 export type ExchangeError =
   | Errors.QmpError
   | Errors.QmpTimeout
@@ -32,7 +32,7 @@ export type Call =
       readonly id: string;
       readonly chords: ReadonlyArray<ReadonlyArray<string>>;
     }
-  | { readonly _tag: "sendMouse"; readonly id: string; readonly input: MouseInput }
+  | { readonly _tag: "mouse"; readonly id: string; readonly gesture: MouseGesture }
   | { readonly _tag: "screendump"; readonly id: string }
   | { readonly _tag: "powerdown"; readonly id: string }
   | { readonly _tag: "stderrTail"; readonly id: string };
@@ -55,8 +55,8 @@ export type Script = {
   readonly stop?: (id: string) => Effect.Effect<void>;
   // One send-key exchange per chord; the first failure stops the run.
   readonly sendKey?: (chord: ReadonlyArray<string>) => Effect.Effect<void, ExchangeError>;
-  // Applied to the first input-send-event exchange of a sendMouse.
-  readonly sendMouse?: (input: MouseInput) => Effect.Effect<void, ExchangeError>;
+  // Applied to the one input-send-event exchange a mouse gesture is.
+  readonly mouse?: (gesture: MouseGesture) => Effect.Effect<void, ExchangeError>;
   // The bytes a screendump yields. A Qmp* or DatabaseError failure is a failed exchange; a
   // PlatformError is a completed exchange whose file could not be read.
   readonly screendump?: () => Effect.Effect<
@@ -190,32 +190,20 @@ export const fakeQemu = (script: Script = {}): FakeQemu => {
             { discard: true },
           );
         }),
-      sendMouse: (input, record) =>
+      // One exchange per gesture, its pointer at the gesture's point: the real sequences are the
+      // qemu tests' to pin; a sessions test counts rows and reads the gesture back.
+      mouse: (gesture, record) =>
         Effect.gen(function* () {
-          calls.push({ _tag: "sendMouse", id, input });
-          const first = script.sendMouse?.(input) ?? Effect.void;
-          const abs: ReadonlyArray<Domain.QmpInputEvent> = [
-            { type: "abs", data: { axis: "x", value: Math.round(input.x * TABLET_AXIS_MAX) } },
-            { type: "abs", data: { axis: "y", value: Math.round(input.y * TABLET_AXIS_MAX) } },
-          ];
-          const button = input.button;
-          if (button === undefined) {
-            yield* inputEvents(abs, record, first);
-            return;
-          }
-          const clicks = input.clicks ?? 1;
-          for (let click = 0; click < clicks; click++) {
-            yield* inputEvents(
-              [...abs, { type: "btn", data: { button, down: true } }],
-              record,
-              click === 0 ? first : Effect.void,
-            );
-            yield* inputEvents(
-              [{ type: "btn", data: { button, down: false } }],
-              record,
-              Effect.void,
-            );
-          }
+          calls.push({ _tag: "mouse", id, gesture });
+          const point = gesture._tag === "drag" ? gesture.to : gesture;
+          yield* inputEvents(
+            [
+              { type: "abs", data: { axis: "x", value: Math.round(point.x * TABLET_AXIS_MAX) } },
+              { type: "abs", data: { axis: "y", value: Math.round(point.y * TABLET_AXIS_MAX) } },
+            ],
+            record,
+            script.mouse?.(gesture) ?? Effect.void,
+          );
         }),
       screendump: (record) =>
         Effect.gen(function* () {

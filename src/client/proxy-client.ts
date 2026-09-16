@@ -19,7 +19,13 @@ export type ProxyClientService = {
   readonly image: (id: string, agent: string) => Effect.Effect<Uint8Array, Failure>;
   readonly serial: (id: string, agent: string) => Effect.Effect<Uint8Array, Failure>;
   readonly sendKeys: (body: Contract.SendKeysBody) => Effect.Effect<void, Failure>;
-  readonly sendMouse: (body: Contract.SendMouseBody) => Effect.Effect<void, Failure>;
+  readonly mouseMove: (body: Contract.MouseMoveBody) => Effect.Effect<void, Failure>;
+  readonly mouseClick: (body: Contract.MouseClickBody) => Effect.Effect<void, Failure>;
+  readonly mouseDoubleClick: (body: Contract.MouseClickBody) => Effect.Effect<void, Failure>;
+  readonly mouseScroll: (body: Contract.MouseScrollBody) => Effect.Effect<void, Failure>;
+  readonly mouseDrag: (body: Contract.MouseDragBody) => Effect.Effect<void, Failure>;
+  readonly mouseHold: (body: Contract.MouseButtonBody) => Effect.Effect<void, Failure>;
+  readonly mouseRelease: (body: Contract.MouseButtonBody) => Effect.Effect<void, Failure>;
   readonly intentStart: (body: Contract.IntentStartBody) => Effect.Effect<void, Failure>;
   readonly intentEnd: (body: Contract.IntentEndBody) => Effect.Effect<void, Failure>;
   readonly stop: (body: Contract.StopBody) => Effect.Effect<void, Failure>;
@@ -170,8 +176,39 @@ export const connect = Effect.fn("ProxyClient.connect")(function* (options: Conn
       Effect.asVoid,
     );
 
-  const sendMouse = (body: Contract.SendMouseBody) =>
-    run(label("POST", "/send-mouse"), client.Sessions.sendMouse({ payload: body })).pipe(
+  const mouseMove = (body: Contract.MouseMoveBody) =>
+    run(label("POST", "/mouse/move"), client.Sessions.mouseMove({ payload: body })).pipe(
+      Effect.asVoid,
+    );
+
+  const mouseClick = (body: Contract.MouseClickBody) =>
+    run(label("POST", "/mouse/click"), client.Sessions.mouseClick({ payload: body })).pipe(
+      Effect.asVoid,
+    );
+
+  const mouseDoubleClick = (body: Contract.MouseClickBody) =>
+    run(
+      label("POST", "/mouse/double-click"),
+      client.Sessions.mouseDoubleClick({ payload: body }),
+    ).pipe(Effect.asVoid);
+
+  const mouseScroll = (body: Contract.MouseScrollBody) =>
+    run(label("POST", "/mouse/scroll"), client.Sessions.mouseScroll({ payload: body })).pipe(
+      Effect.asVoid,
+    );
+
+  const mouseDrag = (body: Contract.MouseDragBody) =>
+    run(label("POST", "/mouse/drag"), client.Sessions.mouseDrag({ payload: body })).pipe(
+      Effect.asVoid,
+    );
+
+  const mouseHold = (body: Contract.MouseButtonBody) =>
+    run(label("POST", "/mouse/hold"), client.Sessions.mouseHold({ payload: body })).pipe(
+      Effect.asVoid,
+    );
+
+  const mouseRelease = (body: Contract.MouseButtonBody) =>
+    run(label("POST", "/mouse/release"), client.Sessions.mouseRelease({ payload: body })).pipe(
       Effect.asVoid,
     );
 
@@ -216,7 +253,13 @@ export const connect = Effect.fn("ProxyClient.connect")(function* (options: Conn
     image,
     serial,
     sendKeys,
-    sendMouse,
+    mouseMove,
+    mouseClick,
+    mouseDoubleClick,
+    mouseScroll,
+    mouseDrag,
+    mouseHold,
+    mouseRelease,
     intentStart,
     intentEnd,
     stop,

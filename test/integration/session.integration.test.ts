@@ -166,8 +166,8 @@ describe.skipIf(!ready)("./session happy path", () => {
           "intent start wait for the boot menu",
           "status",
           "send-keys hello world<ENTER>",
-          "send-mouse 0.5 0.25 left 2",
-          "send-mouse 0 1",
+          "mouse double-click 0.5 0.25 left",
+          "mouse move 0 1",
           "get-image",
           "get-serial",
           "intent end",
@@ -195,12 +195,8 @@ describe.skipIf(!ready)("./session happy path", () => {
           "/send-keys",
           { id: SESSION_ID, keys: "hello world<ENTER>", encoding: "oligarchy", agent },
         ],
-        [
-          "POST",
-          "/send-mouse",
-          { id: SESSION_ID, x: 0.5, y: 0.25, agent, button: "left", clicks: 2 },
-        ],
-        ["POST", "/send-mouse", { id: SESSION_ID, x: 0, y: 1, agent }],
+        ["POST", "/mouse/double-click", { id: SESSION_ID, x: 0.5, y: 0.25, agent, button: "left" }],
+        ["POST", "/mouse/move", { id: SESSION_ID, x: 0, y: 1, agent }],
         ["GET", `/image?id=${SESSION_ID}&agent=${agent}`, undefined],
         ["GET", `/serial?id=${SESSION_ID}&agent=${agent}`, undefined],
         ["POST", "/intent/end", { id: SESSION_ID, agent }],
@@ -268,7 +264,7 @@ describe.skipIf(!ready)("./session happy path", () => {
       );
       expect(drawn, "a completed action turns green").toContain(`${ESC}[32m✓ send-keys`);
       expect(drawn).toContain(`${ESC}[32m✓ get-image`);
-      expect(drawn, "a failed action turns red").toContain(`${ESC}[31m✗ send-mouse`);
+      expect(drawn, "a failed action turns red").toContain(`${ESC}[31m✗ mouse-click`);
       expect(drawn.indexOf("wait for the boot menu")).toBeLessThan(drawn.indexOf("send-keys"));
       expect(drawn, "intents start at the margin").toMatch(
         view("ESC\\[\\d+;2HESC\\[32m✓ wait for the boot menu"),
@@ -328,7 +324,7 @@ describe.skipIf(!ready)("./session unhappy path", () => {
     expect((result.output.match(/session> /g) ?? []).length).toBeGreaterThanOrEqual(2);
   });
 
-  it("refuses commands before start, unknown commands, and a malformed send-mouse without calling the proxy", () =>
+  it("refuses commands before start, unknown commands, and a malformed mouse command without calling the proxy", () =>
     withProxy(async (proxy) => {
       const result = await runSession(
         ["--server-url", proxy.url],
@@ -336,7 +332,7 @@ describe.skipIf(!ready)("./session unhappy path", () => {
           "send-keys hello",
           "reboot",
           "start https://example.com/omarchy.iso",
-          "send-mouse 0.5",
+          "mouse click 0.5",
           "stop",
           "exit",
         ],
@@ -345,7 +341,7 @@ describe.skipIf(!ready)("./session unhappy path", () => {
       expect(result.code).toBe(0);
       expect(result.stdout).toContain("no session. run start first.");
       expect(result.stdout).toContain("unknown command: reboot");
-      expect(result.stdout).toContain("usage: send-mouse <x> <y> [button] [clicks]");
+      expect(result.stdout).toContain("usage: mouse click <x> <y> [button]");
       expect(proxy.requests.map((request) => request.url)).toEqual(["/start", "/stop"]);
     }));
 

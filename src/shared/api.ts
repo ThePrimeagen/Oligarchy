@@ -109,10 +109,49 @@ export const sendKeys = HttpApiEndpoint.post("sendKeys", "/send-keys", {
   error: [Errors.ForbiddenWire, Errors.UnknownSessionWire, Errors.ExchangeFailedWire],
 });
 
-export const sendMouse = HttpApiEndpoint.post("sendMouse", "/send-mouse", {
-  payload: Contract.SendMouseBody,
+// The mouse, one endpoint per operation, all answering as a driving action does.
+const driving = [Errors.ForbiddenWire, Errors.UnknownSessionWire, Errors.ExchangeFailedWire];
+
+export const mouseMove = HttpApiEndpoint.post("mouseMove", "/mouse/move", {
+  payload: Contract.MouseMoveBody,
   success: Contract.Ok,
-  error: [Errors.ForbiddenWire, Errors.UnknownSessionWire, Errors.ExchangeFailedWire],
+  error: driving,
+});
+
+export const mouseClick = HttpApiEndpoint.post("mouseClick", "/mouse/click", {
+  payload: Contract.MouseClickBody,
+  success: Contract.Ok,
+  error: driving,
+});
+
+export const mouseDoubleClick = HttpApiEndpoint.post("mouseDoubleClick", "/mouse/double-click", {
+  payload: Contract.MouseClickBody,
+  success: Contract.Ok,
+  error: driving,
+});
+
+export const mouseScroll = HttpApiEndpoint.post("mouseScroll", "/mouse/scroll", {
+  payload: Contract.MouseScrollBody,
+  success: Contract.Ok,
+  error: driving,
+});
+
+export const mouseDrag = HttpApiEndpoint.post("mouseDrag", "/mouse/drag", {
+  payload: Contract.MouseDragBody,
+  success: Contract.Ok,
+  error: driving,
+});
+
+export const mouseHold = HttpApiEndpoint.post("mouseHold", "/mouse/hold", {
+  payload: Contract.MouseButtonBody,
+  success: Contract.Ok,
+  error: driving,
+});
+
+export const mouseRelease = HttpApiEndpoint.post("mouseRelease", "/mouse/release", {
+  payload: Contract.MouseButtonBody,
+  success: Contract.Ok,
+  error: driving,
 });
 
 export const intentStart = HttpApiEndpoint.post("intentStart", "/intent/start", {
@@ -141,7 +180,13 @@ export class Sessions extends HttpApiGroup.make("Sessions")
   .add(stop)
   .add(save)
   .add(sendKeys)
-  .add(sendMouse)
+  .add(mouseMove)
+  .add(mouseClick)
+  .add(mouseDoubleClick)
+  .add(mouseScroll)
+  .add(mouseDrag)
+  .add(mouseHold)
+  .add(mouseRelease)
   .add(intentStart)
   .add(intentEnd)
   .middleware(BearerAuth)
@@ -163,7 +208,13 @@ export class RoutedSessions extends HttpApiGroup.make("Sessions")
   .add(stop)
   .add(save)
   .add(sendKeys)
-  .add(sendMouse)
+  .add(mouseMove)
+  .add(mouseClick)
+  .add(mouseDoubleClick)
+  .add(mouseScroll)
+  .add(mouseDrag)
+  .add(mouseHold)
+  .add(mouseRelease)
   .add(intentStart)
   .add(intentEnd)
   .middleware(BearerAuth)
