@@ -15,10 +15,8 @@ import type * as ChildProcessSpawner from "effect/unstable/process/ChildProcessS
 import * as Render from "../observability/render.ts";
 import * as Domain from "../shared/domain.ts";
 import * as Children from "./children.ts";
-import * as FollowView from "./follow-view.ts";
 import * as Grammar from "./grammar.ts";
 import * as Image from "./image.ts";
-import * as Picker from "./picker.ts";
 import * as Readline from "./readline.ts";
 import * as State from "./state.ts";
 
@@ -28,7 +26,7 @@ type Repl = {
   readonly host: State.HostShape;
   readonly session: State.Session;
   readonly terminal: Readline.Terminal;
-  // The REPL's own scope: work that must outlive one line (a start, the picker's hand-back).
+  // The REPL's own scope: work that must outlive one line (a start).
   readonly scope: Scope.Scope;
   readonly requestExit: Effect.Effect<void>;
 };
@@ -149,43 +147,6 @@ const getSerial = (session: State.Session): Effect.Effect<void, never, Env> =>
     return Console.log(text === "" ? "(serial is empty)" : text);
   });
 
-const follow = (repl: Repl, id: string): Effect.Effect<void, never, Env> =>
-  Effect.gen(function* () {
-    const { host, session } = repl;
-    if (!Image.canPlaceImages(host.imageProtocol)) {
-      yield* Console.log("follow needs the kitty graphics protocol (ghostty or kitty)");
-      return;
-    }
-    yield* Effect.scoped(
-      Effect.gen(function* () {
-        const child = yield* Children.spawnFollow(session, id);
-        const closed = yield* Deferred.make<void>();
-        yield* Ref.set(
-          session.following,
-          Option.some({ id, kill: child.kill, closed: Deferred.await(closed) }),
-        );
-        const view = yield* FollowView.run(id, child.lines, host.output).pipe(
-          Effect.ensuring(
-            Ref.set(session.following, Option.none()).pipe(
-              Effect.andThen(Deferred.succeed(closed, undefined)),
-            ),
-          ),
-        );
-        const exit = yield* child.exit;
-        if (exit.killed) {
-          yield* Console.log(`detached from ${id}`);
-        } else if (exit.code !== 0) {
-          yield* Console.log(exit.stderr);
-        } else if (view.status === "pending" || view.status === "running") {
-          // The proxy only ends a stream early when the follower stopped reading it.
-          yield* Console.log(`dropped from ${id}: this follower fell behind`);
-        } else {
-          yield* Console.log(`session ${id} ${view.status}`);
-        }
-      }),
-    );
-  });
-
 const status = (repl: Repl): Effect.Effect<void> =>
   Effect.gen(function* () {
     const { session } = repl;
@@ -235,8 +196,6 @@ const dispatch = (repl: Repl, line: string): Effect.Effect<void, never, Env> => 
       return intent(repl.session, command, false);
     case "stop":
       return stop(repl.session, command.status, command.reason);
-    case "follow":
-      return follow(repl, command.id);
     case "status":
       return status(repl);
     case "help":
@@ -267,47 +226,18 @@ const reporting = <A, R>(self: Effect.Effect<A, never, R>): Effect.Effect<void, 
 // Completion, signals, shutdown
 // ---------------------------------------------------------------------------
 
-const complete = (
-  repl: Repl,
-  request: Readline.CompletionRequest,
-): Effect.Effect<void, never, Env | Scope.Scope> => {
-  const completing = Grammar.complete(request.line);
-  switch (completing._tag) {
-    case "words":
-      return Effect.sync(() => {
-        request.complete(completing.completion);
-      });
-    case "follow":
-      return Picker.completeFollow(repl.terminal, completing.prefix).pipe(
-        Effect.map((completion) => {
-          request.complete(completion);
-        }),
-      );
-  }
-  return completing satisfies never;
-};
+const complete = (request: Readline.CompletionRequest): Effect.Effect<void> =>
+  Effect.sync(() => {
+    request.complete(Grammar.complete(request.line).completion);
+  });
 
-// While a follow holds the screen, Ctrl-C detaches from it; otherwise it leaves.
-const onSigint = (repl: Repl): Effect.Effect<void> =>
-  Effect.flatMap(
-    Ref.get(repl.session.following),
-    Option.match({ onNone: () => repl.requestExit, onSome: (following) => following.kill }),
-  );
+const onSigint = (repl: Repl): Effect.Effect<void> => repl.requestExit;
 
 const shutdown = (repl: Repl, completions: Fiber.Fiber<void>): Effect.Effect<void, never, Env> =>
   Effect.gen(function* () {
     const { session } = repl;
-    // An open follow picker owns the lines under the prompt and clears them as it leaves, so it
-    // goes first: anything printed before that would be wiped.
     yield* Fiber.interrupt(completions);
     yield* Readline.close(repl.terminal.handle);
-    // The follow child is in its own process group, so a hangup or SIGTERM here never reaches
-    // it; its close is what hands the screen back, so wait for that before exiting.
-    const following = yield* Ref.get(session.following);
-    if (Option.isSome(following)) {
-      yield* following.value.kill;
-      yield* following.value.closed;
-    }
     const inflight = yield* Ref.get(session.startInFlight);
     if (Option.isSome(inflight)) {
       yield* Fiber.await(inflight.value);
@@ -337,7 +267,6 @@ export const run = Effect.fn("Repl.run")(function* (serverUrl: string) {
       const scope = yield* Effect.scope;
       const session = yield* State.make(serverUrl);
       const terminal = yield* Readline.open(host.input, host.output);
-      yield* Readline.enableFollowPickerCompletion(terminal.handle);
       const exitRequested = yield* Deferred.make<void>();
       const repl: Repl = {
         host,
@@ -349,7 +278,7 @@ export const run = Effect.fn("Repl.run")(function* (serverUrl: string) {
       yield* Console.log(`server ${serverUrl}`);
       yield* Console.log(Grammar.HINT);
       const completions = yield* Effect.forkScoped(
-        Stream.runForEach(terminal.completions, (request) => reporting(complete(repl, request))),
+        Stream.runForEach(terminal.completions, (request) => reporting(complete(request))),
       );
       yield* Effect.forkScoped(Stream.runForEach(terminal.sigints, () => onSigint(repl)));
       yield* Effect.forkScoped(host.termination.pipe(Effect.andThen(repl.requestExit)));

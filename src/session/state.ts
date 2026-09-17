@@ -15,20 +15,12 @@ export type HostShape = {
 
 export class Host extends Context.Service<Host, HostShape>()("@oligarchy/session/Host") {}
 
-export type Following = {
-  readonly id: string;
-  readonly kill: Effect.Effect<void>;
-  // Resolves once the child has exited and the screen is back.
-  readonly closed: Effect.Effect<void>;
-};
-
 export type Session = {
   readonly serverUrl: string;
   readonly agentId: Ref.Ref<string>;
   readonly sessionId: Ref.Ref<Option.Option<string>>;
   readonly intentOpen: Ref.Ref<boolean>;
   readonly startInFlight: Ref.Ref<Option.Option<Fiber.Fiber<Children.ChildResult>>>;
-  readonly following: Ref.Ref<Option.Option<Following>>;
 };
 
 // The proxy keys one session per agent id (agent_runs primary key), so every start
@@ -45,6 +37,5 @@ export const make = (serverUrl: string): Effect.Effect<Session> =>
       sessionId: yield* Ref.make(Option.none<string>()),
       intentOpen: yield* Ref.make(false),
       startInFlight: yield* Ref.make(Option.none<Fiber.Fiber<Children.ChildResult>>()),
-      following: yield* Ref.make(Option.none<Following>()),
     };
   });

@@ -1,3 +1,4 @@
+import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { Effect, Layer } from "effect";
@@ -15,6 +16,7 @@ import * as VizCommand from "./command.ts";
 const MainLive = Layer.mergeAll(
   CliOutput.layer(CliOutput.defaultFormatter({ colors: process.stdout.isTTY })),
   CliConfig.layer({ builtIns: GlobalFlag.BuiltIns.filter((flag) => flag !== GlobalFlag.Wizard) }),
+  NodeHttpClient.layerNodeHttp,
   Config.providerLayer,
 ).pipe(Layer.provideMerge(NodeServices.layer));
 

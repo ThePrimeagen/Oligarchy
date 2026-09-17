@@ -177,10 +177,6 @@ describe("parseLine maps every REPL line to the client's argv", () => {
     ]);
   });
 
-  it("follow with one id", () => {
-    expect(clientArgs(`follow ${SESSION_ID}`)).toEqual(["follow", "--session-id", SESSION_ID]);
-  });
-
   it("status, help, exit and quit are REPL commands, not client commands", () => {
     expect(Grammar.parseLine("status")).toEqual({ _tag: "status" });
     expect(Grammar.parseLine("help")).toEqual({ _tag: "help" });
@@ -218,8 +214,16 @@ describe("parseLine maps every REPL line to the client's argv", () => {
 describe("parseLine refuses malformed lines with the exact usage text", () => {
   it("an unknown command names itself", () => {
     expect(Grammar.parseLine("reboot")).toEqual({ _tag: "unknown", command: "reboot" });
+    expect(Grammar.parseLine("follow")).toEqual({ _tag: "unknown", command: "follow" });
+    expect(Grammar.parseLine("follow 7a2d0000-0000-4000-8000-00000000f011")).toEqual({
+      _tag: "unknown",
+      command: "follow",
+    });
     expect(Grammar.unknownCommand("reboot")).toBe(
       "unknown command: reboot. tab lists commands; help explains them.",
+    );
+    expect(Grammar.unknownCommand("follow")).toBe(
+      "unknown command: follow. tab lists commands; help explains them.",
     );
   });
 
@@ -319,28 +323,12 @@ describe("parseLine refuses malformed lines with the exact usage text", () => {
     });
     expect(Grammar.STOP_STATUSES).toEqual(["succeeded", "failed", "aborted"]);
   });
-
-  it("follow with a missing or extra id", () => {
-    expect(Grammar.parseLine("follow")).toEqual({
-      _tag: "malformed",
-      command: "follow",
-      usage: "usage: follow <session-id>",
-    });
-    expect(Grammar.parseLine(`follow ${SESSION_ID} extra`)).toEqual({
-      _tag: "malformed",
-      command: "follow",
-      usage: "usage: follow <session-id>",
-    });
-  });
 });
 
 describe("help and completion", () => {
   it("HELP lists every command on its own line and COMMANDS has each command word", () => {
-    expect(Grammar.HELP.split("\n")).toHaveLength(11);
+    expect(Grammar.HELP.split("\n")).toHaveLength(10);
     expect(Grammar.HELP.startsWith("start [iso] [disk]")).toBe(true);
-    expect(Grammar.HELP).toContain(
-      'follow <session-id>                   watch another session live; "follow " then tab picks one; ctrl-c detaches',
-    );
     expect(
       Grammar.HELP.endsWith("exit                                  stop the session and leave"),
     ).toBe(true);
@@ -352,14 +340,13 @@ describe("help and completion", () => {
       "mouse",
       "intent",
       "stop",
-      "follow",
       "status",
       "help",
       "exit",
       "quit",
     ]);
     expect(Grammar.HINT).toBe(
-      'tab lists commands; "follow " then tab lists active sessions; "help" explains them; "exit" stops the session and leaves',
+      'tab lists commands; "help" explains them; "exit" stops the session and leaves',
     );
   });
 
@@ -391,9 +378,7 @@ describe("help and completion", () => {
     });
   });
 
-  it("hands a follow prefix to the picker and completes nothing after other words", () => {
-    expect(Grammar.complete("follow ")).toEqual({ _tag: "follow", prefix: "" });
-    expect(Grammar.complete("follow 7a2d")).toEqual({ _tag: "follow", prefix: "7a2d" });
+  it("completes nothing after other words", () => {
     expect(Grammar.complete("send-keys hel")).toEqual({
       _tag: "words",
       completion: [[], "send-keys hel"],

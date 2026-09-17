@@ -10,6 +10,8 @@ import * as View from "../../src/viz/view.ts";
 import { byCommand, type FakeSpawner, fakeSpawner } from "../support/fake-spawner.ts";
 import { fakeTerminal, type FakeTerminal } from "../support/fake-terminal.ts";
 import { stripAnsi } from "../support/fake-tty.ts";
+import * as FakeHttp from "../support/fake-http.ts";
+import * as Config from "../support/config.ts";
 import * as Stores from "../support/stores.ts";
 
 const QUERIED_AT = new Date("2026-09-09T16:00:00Z");
@@ -113,6 +115,7 @@ const running: Automation.AutomationJobListRow = {
   reason: null,
   clientUrl: runner.url,
   serverUrl: garage.url,
+  sessionId: "7a2d0000-0000-4000-8000-00000000f011",
   createdAt: ago(180),
   startedAt: ago(45),
   finishedAt: null,
@@ -136,6 +139,7 @@ const pending: Automation.AutomationJobListRow = {
   reason: null,
   clientUrl: null,
   serverUrl: null,
+  sessionId: null,
   createdAt: ago(7),
   startedAt: null,
   finishedAt: null,
@@ -152,6 +156,7 @@ const failed: Automation.AutomationJobListRow = {
   reason: "session timed out",
   clientUrl: runner.url,
   serverUrl: garage.url,
+  sessionId: "7a2d0000-0000-4000-8000-00000000f011",
   createdAt: ago(3_900),
   startedAt: ago(3_800),
   finishedAt: ago(600),
@@ -277,7 +282,7 @@ const PENDING = ["OLI-62", "install", "drive", "◌ pending", "7 s ago", "—"] 
 // The ticket of a job row: the nine columns after the border, its padding and the marker column.
 const ticketOf = (row: string): string => row.slice(4, 13).trimEnd();
 const HINTS =
-  "j/k select   tab machines/queue   h/l servers/clients   g/G first/last   L open ticket   q quit";
+  "j/k select   tab machines/queue   h/l servers/clients   g/G first/last   L open ticket   F follow   q quit";
 const FOOTER = ` ${HINTS}${space(COLUMNS - HINTS.length - 11)}oligarchy `;
 const OPENED = pad(" opened https://linear.app/issue/OLI-61", COLUMNS);
 
@@ -1351,6 +1356,7 @@ const storesLayer = (scripted: Scripted = {}) =>
       listSeries: scripted.series ?? (() => Effect.succeed([garageSeries, runnerSeries])),
     }).layer,
     Stores.fakeAutomationStore({ listJobs: scripted.jobs ?? (() => Effect.succeed(QUEUE)) }).layer,
+    Stores.fakeActionStore().layer,
   );
 
 // The view over the scripted stores, the terminal, and a spawner that opens nothing unless told.
@@ -1359,7 +1365,20 @@ const live = (
   scripted: Scripted = {},
   spawner: FakeSpawner = fakeSpawner(),
 ): Effect.Effect<void, PlatformError.PlatformError> =>
-  View.run.pipe(Effect.provide(Layer.mergeAll(storesLayer(scripted), tty.layer, spawner.layer)));
+  View.run.pipe(
+    Effect.provide(
+      Layer.mergeAll(
+        storesLayer(scripted),
+        tty.layer,
+        spawner.layer,
+        FakeHttp.respondWith(() => new Response(null, { status: 404 })),
+        Config.withEnv({
+          DATABASE_URL: "postgres://user:pw@127.0.0.1:5432/oligarchy",
+          OLIGARCHY_TOKEN: "test-token",
+        }),
+      ),
+    ),
+  );
 
 const refused = Errors.DatabaseError.make({
   operation: "listMachines",

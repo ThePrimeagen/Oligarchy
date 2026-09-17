@@ -24,6 +24,7 @@ export type AutomationJobListRow = {
   readonly reason: string | null;
   readonly clientUrl: string | null;
   readonly serverUrl: string | null;
+  readonly sessionId: string | null;
   readonly createdAt: Date;
   readonly startedAt: Date | null;
   readonly finishedAt: Date | null;
@@ -206,6 +207,7 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
           serverUrl: sql<
             string | null
           >`case when ${DbSchema.automationJobs.action} = ${"drive"} then coalesce(${DbSchema.agentServers.serverUrl}, ${DbSchema.sessionServers.serverUrl}) end`,
+          sessionId: DbSchema.agentRuns.sessionId,
           createdAt: DbSchema.automationJobs.createdAt,
           startedAt: DbSchema.automationJobs.startedAt,
           finishedAt: DbSchema.automationJobs.finishedAt,

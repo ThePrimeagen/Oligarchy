@@ -11,6 +11,7 @@ import * as View from "../../src/viz/view.ts";
 import * as Config from "../support/config.ts";
 import { fakeTerminal } from "../support/fake-terminal.ts";
 import { stripAnsi } from "../support/fake-tty.ts";
+import * as FakeHttp from "../support/fake-http.ts";
 import * as StdioSupport from "../support/stdio.ts";
 import * as Stores from "../support/stores.ts";
 
@@ -41,12 +42,13 @@ const harness = (size: { readonly columns: number; readonly rows: number }) =>
     const automation = Stores.fakeAutomationStore({
       listJobs: () => counted({ running: [], pending: [], completed: [] }),
     });
+    const actions = Stores.fakeActionStore();
     const touched: Array<string> = [];
     const stdio = StdioSupport.capture();
     const command = VizCommand.makeVizCommand({
       database: () => {
         touched.push("database");
-        return Layer.mergeAll(servers.layer, process.layer, automation.layer);
+        return Layer.mergeAll(servers.layer, process.layer, automation.layer, actions.layer);
       },
     });
     const run = (args: ReadonlyArray<string>, env: Record<string, string> = WITH_DB) =>
@@ -59,6 +61,7 @@ const harness = (size: { readonly columns: number; readonly rows: number }) =>
               SpawnerStub,
               tty.layer,
               stdio.layer,
+              FakeHttp.respondWith(() => new Response(null, { status: 404 })),
               Config.withEnv(env),
             ),
           ),
@@ -90,6 +93,7 @@ describe("viz happy path", () => {
       expect(printed).toMatch(/tab moves between the machines and the queue/);
       expect(printed).toMatch(/h\/l switch servers and clients/);
       expect(printed).toMatch(/L opens the selected job's Linear ticket/);
+      expect(printed).toMatch(/F follows the selected running job/);
       expect(printed).toMatch(/q quits/);
     }),
   );
