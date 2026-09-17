@@ -7,10 +7,9 @@ import { CliError, Command } from "effect/unstable/cli";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import * as Api from "../../src/shared/api.ts";
 import * as VizCommand from "../../src/viz/command.ts";
-import * as View from "../../src/viz/view.ts";
 import * as Config from "../support/config.ts";
+import { fakeRenderer, rows } from "../support/fake-renderer.ts";
 import { fakeTerminal } from "../support/fake-terminal.ts";
-import { stripAnsi } from "../support/fake-tty.ts";
 import * as StdioSupport from "../support/stdio.ts";
 import * as Stores from "../support/stores.ts";
 
@@ -26,15 +25,17 @@ const settle: Effect.Effect<void> = Effect.gen(function* () {
   }
 });
 
-// The stores count their reads, so a refusal can be shown to have read nothing.
+// The stores count their reads, so a refusal can be shown to have read nothing; the terminal
+// answers the size check, and the screen is opened on the in-memory renderer.
 const harness = (size: { readonly columns: number; readonly rows: number }) =>
   Effect.gen(function* () {
     const tty = yield* fakeTerminal(size);
+    const screen = fakeRenderer(size);
     const reads = { count: 0 };
-    const counted = <A>(rows: A) =>
+    const counted = <A>(listed: A) =>
       Effect.sync(() => {
         reads.count += 1;
-        return rows;
+        return listed;
       });
     const servers = Stores.fakeServerStore({ listMachines: () => counted([]) });
     const process = Stores.fakeProcessStatsStore({ listSeries: () => counted([]) });
@@ -58,13 +59,14 @@ const harness = (size: { readonly columns: number; readonly rows: number }) =>
               NodePath.layer,
               SpawnerStub,
               tty.layer,
+              screen.layer,
               stdio.layer,
               Config.withEnv(env),
             ),
           ),
         ),
       );
-    return { tty, reads, touched, stdio, run };
+    return { tty, screen, reads, touched, stdio, run };
   });
 
 const failure = (exit: Exit.Exit<void, unknown>): unknown => {
@@ -81,7 +83,7 @@ describe("viz happy path", () => {
       expect(Exit.isSuccess(yield* h.run(["--help"], {}))).toBe(true);
       expect(h.touched).toEqual([]);
       expect(h.reads.count).toBe(0);
-      expect(h.tty.frames).toEqual([]);
+      expect(h.screen.setups).toEqual([]);
       const printed = (yield* TestConsole.logLines).join("\n");
       expect(printed).toMatch(/automation queue/);
       expect(printed).toMatch(/running and pending/);
@@ -95,23 +97,24 @@ describe("viz happy path", () => {
   );
 
   it.effect(
-    "on a 135×37 terminal takes the screen, reads and draws, and q ends it with success",
+    "on a 135×37 terminal opens the screen, reads and draws, and q ends it with success and the screen handed back",
     () =>
       Effect.gen(function* () {
         const h = yield* harness({ columns: 135, rows: 37 });
         const fiber = yield* Effect.forkChild(h.run([]), { startImmediately: true });
+        const setup = yield* h.screen.opened;
         yield* settle;
         expect(h.touched).toEqual(["database"]);
         expect(h.reads.count).toBe(3);
-        expect(h.tty.frames[0]).toBe(View.ENTER_SCREEN);
-        const drawn = stripAnsi(h.tty.frames[1] ?? "");
+        const drawn = (yield* rows(setup)).join("\n");
         expect(drawn).toContain("qemu servers · 0");
         expect(drawn).toContain("no qemu servers registered");
         expect(drawn).toContain("automation · running 0 · pending 0");
-        yield* h.tty.press("q");
+        expect(drawn).toContain("q quit");
+        setup.mockInput.pressKey("q");
         const exit = yield* Fiber.join(fiber);
         expect(Exit.isSuccess(exit)).toBe(true);
-        expect(h.tty.frames.at(-1)).toBe(View.LEAVE_SCREEN);
+        expect(setup.renderer.isDestroyed).toBe(true);
         expect(yield* TestConsole.logLines).toEqual([]);
         expect(h.stdio.stdout).toEqual([]);
         expect(h.stdio.stderr).toEqual([]);
@@ -129,21 +132,23 @@ describe("viz unhappy path", () => {
         message: "DATABASE_URL is not set",
       });
       expect(h.touched).toEqual([]);
-      expect(h.tty.frames).toEqual([]);
+      expect(h.screen.setups).toEqual([]);
     }),
   );
 
-  it.effect("refuses a stdout that is not a terminal without reading anything", () =>
-    Effect.gen(function* () {
-      const h = yield* harness({ columns: 0, rows: 0 });
-      const exit = yield* h.run([]);
-      expect(failure(exit)).toMatchObject({
-        _tag: "CommandError",
-        message: "viz needs a terminal",
-      });
-      expect(h.reads.count).toBe(0);
-      expect(h.tty.frames).toEqual([]);
-    }),
+  it.effect(
+    "refuses a stdout that is not a terminal without reading anything or opening the screen",
+    () =>
+      Effect.gen(function* () {
+        const h = yield* harness({ columns: 0, rows: 0 });
+        const exit = yield* h.run([]);
+        expect(failure(exit)).toMatchObject({
+          _tag: "CommandError",
+          message: "viz needs a terminal",
+        });
+        expect(h.reads.count).toBe(0);
+        expect(h.screen.setups).toEqual([]);
+      }),
   );
 
   it.effect(
@@ -156,7 +161,7 @@ describe("viz unhappy path", () => {
           message: "viz needs a terminal of at least 135×37 (columns×rows); this one is 134×37",
         });
         expect(narrow.reads.count).toBe(0);
-        expect(narrow.tty.frames).toEqual([]);
+        expect(narrow.screen.setups).toEqual([]);
 
         const short = yield* harness({ columns: 135, rows: 36 });
         expect(failure(yield* short.run([]))).toMatchObject({
@@ -164,7 +169,7 @@ describe("viz unhappy path", () => {
           message: "viz needs a terminal of at least 135×37 (columns×rows); this one is 135×36",
         });
         expect(short.reads.count).toBe(0);
-        expect(short.tty.frames).toEqual([]);
+        expect(short.screen.setups).toEqual([]);
       }),
   );
 
@@ -176,7 +181,7 @@ describe("viz unhappy path", () => {
       const unknown = failure(yield* h.run(["--refresh", "1"]));
       expect(CliError.isCliError(unknown)).toBe(true);
       expect(h.reads.count).toBe(0);
-      expect(h.tty.frames).toEqual([]);
+      expect(h.screen.setups).toEqual([]);
     }),
   );
 });

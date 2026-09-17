@@ -125,7 +125,7 @@ logic in files that change independently:
 - The `DatabaseError`-unwrapping `detail` helper is copied verbatim in `src/qemu-server/sessions.ts`,
   `src/qemu-server/heartbeat.ts`, `src/automation-client/heartbeat.ts`, `src/shared/stale-servers.ts`
   and `src/automation-server/worker.ts`; `describeThrowable(causeOf(e), errorDetail(e))` in
-  `src/cli.ts`, `src/qemu/process.ts`, `src/qemu/iso.ts` and `src/viz/view.ts`. Both belong in
+  `src/cli.ts`, `src/qemu/process.ts`, `src/qemu/iso.ts` and `src/viz/run.ts`. Both belong in
   `src/external-failure.ts` beside `causeOf`.
 - `src/qemu-server/heartbeat.ts` and `src/automation-client/heartbeat.ts` differ only in the
   `type`, the location and how `jobs`/`stats` are read; one `announce` taking those would keep a fix

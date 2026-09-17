@@ -1,27 +1,13 @@
-import {
-  Cause,
-  Clock,
-  Duration,
-  Effect,
-  Option,
-  type PlatformError,
-  Ref,
-  Schedule,
-  Stream,
-  Terminal,
-} from "effect";
-import * as ChildProcess from "effect/unstable/process/ChildProcess";
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
-import * as Automation from "../db/automation.ts";
-import * as ProcessStats from "../db/process-stats.ts";
-import * as Servers from "../db/servers.ts";
-import * as ExternalFailure from "../external-failure.ts";
+import { Duration, Option } from "effect";
+import type * as Automation from "../db/automation.ts";
+import type * as ProcessStats from "../db/process-stats.ts";
+import type * as Servers from "../db/servers.ts";
 import * as Render from "../observability/render.ts";
 
 // The terminal this view is laid out for: a card's header fits its host numbers beside a name
 // and a url across 135 columns, with 33 columns left to each of its three graphs, and 37 rows
-// hold four cards and sixteen queued jobs. Anything smaller is refused; anything wider goes to
-// the graphs, anything taller to the job list.
+// hold the tabs, four cards and fifteen queued jobs. Anything smaller is refused; anything wider
+// goes to the graphs, anything taller to the job list.
 export const MIN_COLUMNS = 135;
 export const MIN_ROWS = 37;
 
@@ -31,9 +17,8 @@ const QUEUE_MIN_ROWS = 4;
 
 // A server writes its row every thirty seconds and a job changes on its own clock; five seconds
 // keeps the queue fresh at a handful of small queries a minute.
-const REFRESH_SECONDS = 5;
-export const REFRESH = Duration.seconds(REFRESH_SECONDS);
-// The ages tick between reads; a resize is drawn on the next tick.
+export const REFRESH = Duration.seconds(5);
+// The ages tick between reads.
 export const AGE_TICK = Duration.seconds(1);
 
 // A server writes its row every thirty seconds. One heartbeat may be in flight and one lost to a
@@ -48,30 +33,11 @@ export const SERIES_SAMPLES = 240;
 // view one at a time.
 export const MAX_CARDS = 4;
 
-// Linear resolves a ticket by its identifier alone and redirects into the workspace.
-const LINEAR_ISSUES = "https://linear.app/issue/";
-
-// The desktop's opener, on the Linux boxes viz is watched from. It hands the url to the browser
-// and exits 0 at once, exits non-zero when nothing handles it, or, in a bare session, runs the
-// browser in its foreground and exits with it: two seconds without an exit is the browser up.
-const OPENER = "xdg-open";
-const OPEN_WAIT = Duration.seconds(2);
-
-export const ENTER_SCREEN = "\x1b[?1049h\x1b[?25l\x1b[2J";
-export const LEAVE_SCREEN = "\x1b[?25h\x1b[?1049l";
-
 // ---------------------------------------------------------------------------
 // Theme: Rosé Pine, as the log's agent colours
 // ---------------------------------------------------------------------------
 
-const PALETTE = Render.ROSE_PINE_MAIN;
-const BOLD = "\x1b[1m";
-const UNBOLD = "\x1b[22m";
-const FG_RESET = "\x1b[39m";
-
-const paint = (hex: string, text: string): string => `${Render.foreground(hex)}${text}${FG_RESET}`;
-const bold = (text: string): string => `${BOLD}${text}${UNBOLD}`;
-const muted = (text: string): string => paint(PALETTE.muted, text);
+export const PALETTE = Render.ROSE_PINE_MAIN;
 
 const channel = (hex: string, shift: number): number =>
   (Number.parseInt(hex.slice(1), 16) >> shift) & 255;
@@ -100,7 +66,7 @@ const RUNNING = { glyph: "●", color: PALETTE.gold };
 const PENDING = { glyph: "◌", color: PALETTE.muted };
 
 // ---------------------------------------------------------------------------
-// View: pure
+// State
 // ---------------------------------------------------------------------------
 
 // One read of the three tables and the local clock when it landed: an age on screen is the
@@ -141,6 +107,14 @@ export const initialView: View = {
   cursor: { servers: 0, clients: 0, queue: 0 },
 };
 
+// A key as OpenTUI's parser reports it: a capital letter is its lowercase name with shift.
+export type Key = {
+  readonly name: string;
+  readonly shift: boolean;
+  readonly ctrl: boolean;
+  readonly meta: boolean;
+};
+
 const KIND: Readonly<Record<Tab, Servers.ServerType>> = {
   servers: "qemu",
   clients: "automation-client",
@@ -179,7 +153,7 @@ const clamp = (value: number, min: number, max: number): number =>
 const focused = (view: View): List => (view.focus === "machines" ? view.tab : "queue");
 
 // The gold marker's job: a job on a card, or the queue's; none on a card's header.
-const selectedJob = (view: View): Option.Option<Job> =>
+export const selectedJob = (view: View): Option.Option<Job> =>
   Option.flatMap(view.snapshot, (snapshot) => {
     if (view.focus === "queue") {
       const jobs = jobsOf(snapshot);
@@ -197,6 +171,58 @@ const selectedJob = (view: View): Option.Option<Job> =>
 
 export const tooSmall = (columns: number, rows: number): string =>
   `viz needs a terminal of at least ${String(MIN_COLUMNS)}×${String(MIN_ROWS)} (columns×rows); this one is ${String(columns)}×${String(rows)}`;
+
+// A capital L: the parser reports it as l with shift.
+export const isOpen = (key: Key): boolean => key.shift && key.name === "l";
+
+// q, or ctrl-c, which raw mode delivers as a key rather than a signal.
+export const isQuit = (key: Key): boolean =>
+  (key.name === "q" && !key.ctrl && !key.meta) || (key.name === "c" && key.ctrl);
+
+// Every key retires the last notice. L moves nothing here: opening the ticket is the runner's.
+export const press = (view: View, key: Key): View => {
+  const retired: View = { ...view, notice: Option.none() };
+  const list = focused(view);
+  const count = Option.match(view.snapshot, {
+    onNone: () => 0,
+    onSome: (snapshot) =>
+      list === "queue" ? jobsOf(snapshot).length : entriesOf(snapshot, list).length,
+  });
+  const last = Math.max(0, count - 1);
+  // The row on screen, not the number stored: a list that shrank since leaves the number past
+  // the end, and a step must start from what is selected.
+  const current = clamp(view.cursor[list], 0, last);
+  const select = (cursor: number): View => ({
+    ...retired,
+    cursor: { ...view.cursor, [list]: clamp(cursor, 0, last) },
+  });
+  if (isOpen(key)) {
+    return retired;
+  }
+  switch (key.name) {
+    case "j":
+    case "down":
+      return select(current + 1);
+    case "k":
+    case "up":
+      return select(current - 1);
+    case "g":
+      return select(key.shift ? last : 0);
+    case "tab":
+      return { ...retired, focus: view.focus === "machines" ? "queue" : "machines" };
+    case "h":
+    case "l":
+    case "left":
+    case "right":
+      return { ...retired, tab: view.tab === "servers" ? "clients" : "servers" };
+    default:
+      return retired;
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Text
+// ---------------------------------------------------------------------------
 
 const gigabytes = (bytes: number): string => (bytes / 1_000_000_000).toFixed(1);
 const percent = (value: number): string => `${value.toFixed(1)}%`;
@@ -235,30 +261,27 @@ const clean = (text: string): string =>
     character < " " || (character >= "\u007f" && character <= "\u009f") ? " " : character,
   ).join("");
 
-// Exactly `width` columns: cut with an ellipsis or padded, so a row is as wide as its cells.
-const fit = (text: string, width: number): string => {
+// At most `width` columns, cut with an ellipsis.
+const cut = (text: string, width: number): string => {
   const plain = clean(text);
-  return plain.length > width ? `${plain.slice(0, width - 1)}…` : plain.padEnd(width);
+  return plain.length > width ? `${plain.slice(0, width - 1)}…` : plain;
 };
 
-// Text with its colour, so a line of several colours can still be measured and cut.
-type Piece = {
+// Exactly `width` columns: cut or padded, so a column is as wide as its neighbours.
+const fit = (text: string, width: number): string => cut(text, width).padEnd(width);
+
+// Text with its colour, so a line of several colours can still be measured and cut; a piece
+// without a colour is blank, drawn in whatever the row inherits.
+export type Piece = {
   readonly text: string;
   readonly color?: string;
   readonly bold?: true;
 };
-
-const render = (pieces: ReadonlyArray<Piece>): string =>
-  pieces
-    .map((piece) => {
-      const painted = piece.color === undefined ? piece.text : paint(piece.color, piece.text);
-      return piece.bold === true ? bold(painted) : painted;
-    })
-    .join("");
+export type Row = ReadonlyArray<Piece>;
 
 // Exactly `width` columns of pieces: the piece that crosses the edge is cut with an ellipsis and
 // the rest dropped, or spaces fill what is left.
-const clip = (pieces: ReadonlyArray<Piece>, width: number): ReadonlyArray<Piece> => {
+const clip = (pieces: Row, width: number): Row => {
   const kept: Array<Piece> = [];
   let used = 0;
   for (const piece of pieces) {
@@ -277,26 +300,30 @@ const clip = (pieces: ReadonlyArray<Piece>, width: number): ReadonlyArray<Piece>
   return kept;
 };
 
-const label = (text: string): Piece => ({ text, color: PALETTE.subtle });
-const value = (text: string): Piece => ({ text, color: PALETTE.text });
+const paint = (color: string, text: string): Piece => ({ text, color });
+const muted = (text: string): Piece => paint(PALETTE.muted, text);
+const label = (text: string): Piece => paint(PALETTE.subtle, text);
+const value = (text: string): Piece => paint(PALETTE.text, text);
+const strong = (text: string): Piece => ({ text, color: PALETTE.text, bold: true });
 const SPACE: Piece = { text: " " };
 const GAP: Piece = { text: "  " };
 
-// A run of glyphs, each with its colour, written with a colour change only where the colour
-// changes: a graph of a hundred columns is a handful of sequences, not a hundred.
+// A run of glyphs, each with its colour, as pieces that change only where the colour changes: a
+// graph of a hundred columns is a handful of pieces, not a hundred. Blanks carry no colour.
 type Cell = { readonly glyph: string; readonly color: string };
 
-const stroke = (cells: ReadonlyArray<Cell>): string => {
-  let out = "";
-  let current = "";
+const stroke = (cells: ReadonlyArray<Cell>): Row => {
+  const pieces: Array<Piece> = [];
   for (const cell of cells) {
-    if (cell.glyph !== " " && cell.color !== current) {
-      out += Render.foreground(cell.color);
-      current = cell.color;
+    const color = cell.glyph === " " ? undefined : cell.color;
+    const last = pieces.at(-1);
+    if (last !== undefined && last.color === color) {
+      pieces[pieces.length - 1] = { ...last, text: last.text + cell.glyph };
+    } else {
+      pieces.push(color === undefined ? { text: cell.glyph } : { text: cell.glyph, color });
     }
-    out += cell.glyph;
   }
-  return current === "" ? out : `${out}${FG_RESET}`;
+  return pieces;
 };
 
 // btop's braille, five glyphs a row: a column holds two readings side by side, each lit from
@@ -322,9 +349,9 @@ const graph = (
   readings: ReadonlyArray<number>,
   width: number,
   color: (reading: number) => string,
-): { readonly upper: string; readonly lower: string } => {
+): { readonly upper: Row; readonly lower: Row } => {
   const padded = [...Array.from({ length: 2 * width - readings.length }, () => 0), ...readings];
-  const row = (low: number, high: number): string =>
+  const row = (low: number, high: number): Row =>
     stroke(
       Array.from({ length: width }, (_, column) => {
         const left = padded[2 * column];
@@ -341,15 +368,13 @@ const graph = (
 // btop's meter: sixteen blocks, the lit ones warming from left to right, the rest muted.
 const METER_WIDTH = 16;
 
-const meter = (fraction: number): ReadonlyArray<Piece> => {
+const meter = (fraction: number): Row => {
   const lit = Math.round(clamp(fraction, 0, 1) * METER_WIDTH);
   const blocks = Array.from({ length: lit }, (_, index): Piece => ({
     text: "■",
     color: heat(((index + 1) * 100) / METER_WIDTH),
   }));
-  return lit === METER_WIDTH
-    ? blocks
-    : [...blocks, { text: "■".repeat(METER_WIDTH - lit), color: PALETTE.muted }];
+  return lit === METER_WIDTH ? blocks : [...blocks, muted("■".repeat(METER_WIDTH - lit))];
 };
 
 // The three graphs of a card: cpu on its own scale and by heat, memory and jobs against the
@@ -398,79 +423,63 @@ const GRAPHS_FIXED = 3 * (LABEL_WIDTH + 1) + 2 * GAP.text.length;
 // Rows
 // ---------------------------------------------------------------------------
 
-// Every row is a box row: a muted border, a space, `columns - 4` of content, a space, a border.
-const boxed = (content: string): string => `${muted("│")} ${content} ${muted("│")}`;
-const divider = (columns: number): string => muted(`├${"─".repeat(columns - 2)}┤`);
-const bottom = (columns: number, note: Option.Option<string>): string =>
-  Option.match(note, {
-    onNone: () => muted(`╰${"─".repeat(columns - 2)}╯`),
-    onSome: (text) => muted(`╰${"─".repeat(columns - 7 - text.length)}┤ ${text} ├─╯`),
-  });
-
-// The machines box's top border carries the two tabs, the active one lit, and how old the read is.
-const tabsRow = (view: View, now: number, columns: number): string => {
-  const count = (tab: Tab): string =>
-    Option.match(view.snapshot, {
-      onNone: () => "",
-      onSome: (snapshot) => ` · ${String(ofTab(snapshot, tab).length)}`,
-    });
-  const tab = (name: Tab, text: string): string =>
-    view.tab === name ? bold(paint(PALETTE.text, text)) : muted(text);
-  const servers = `qemu servers${count("servers")}`;
-  const clients = `automation clients${count("clients")}`;
-  const status = Option.match(view.snapshot, {
-    onNone: () => "reading…",
-    onSome: (snapshot) => `read ${age(now - snapshot.readAt)} ago`,
-  });
-  const fill = "─".repeat(columns - 17 - servers.length - clients.length - status.length);
-  return `${muted("╭─┤ ")}${tab("servers", servers)}${muted(" ├─┤ ")}${tab("clients", clients)}${muted(` ├${fill}┤ `)}${muted(status)}${muted(" ├─╮")}`;
-};
-
 // The selected row's marker: gold in the box that has the focus, muted in the other, so both
 // selections stay in view and the one j and k move is told apart. A space where nothing is
 // selected keeps the columns.
 const marker = (selected: boolean, hasFocus: boolean): Piece =>
   selected ? { text: "▸", color: hasFocus ? PALETTE.gold : PALETTE.muted } : SPACE;
 
-// ---------------------------------------------------------------------------
-// Job list: the one way a job is drawn, on a card and in the queue
-// ---------------------------------------------------------------------------
+// The first row of the machines box: the two tabs, the active one lit, counted once read.
+const tabsRow = (view: View): Row => {
+  const count = (tab: Tab): string =>
+    Option.match(view.snapshot, {
+      onNone: () => "",
+      onSome: (snapshot) => ` · ${String(ofTab(snapshot, tab).length)}`,
+    });
+  const tab = (name: Tab, text: string): Piece => (view.tab === name ? strong(text) : muted(text));
+  return [
+    tab("servers", `qemu servers${count("servers")}`),
+    muted(" │ "),
+    tab("clients", `automation clients${count("clients")}`),
+  ];
+};
 
-// A job row: the marker column and a space, six columns with a gap between each, and the rest
-// of the row blank. A live job has no finish and no reason yet, so neither has a column.
-const MARKER_WIDTH = 2;
+// A job row: the marker column and a space, then six columns with a gap between each. A live
+// job has no finish and no reason yet, so neither has a column.
 const JOB_WIDTHS = { ticket: 9, test: 18, action: 9, status: 12, queued: 11, started: 11 };
-const JOB_WIDTH =
-  MARKER_WIDTH +
-  Object.values(JOB_WIDTHS).reduce((total, width) => total + width, 0) +
-  (Object.keys(JOB_WIDTHS).length - 1) * GAP.text.length;
 
-const jobHeader = (usable: number): string =>
-  paint(
-    PALETTE.subtle,
-    `${" ".repeat(MARKER_WIDTH)}${[
+const jobHeader: Row = [
+  label(
+    `  ${[
       fit("ticket", JOB_WIDTHS.ticket),
       fit("test", JOB_WIDTHS.test),
       fit("action", JOB_WIDTHS.action),
       fit("status", JOB_WIDTHS.status),
       fit("queued", JOB_WIDTHS.queued),
       fit("started", JOB_WIDTHS.started),
-    ].join(GAP.text)}${" ".repeat(usable - JOB_WIDTH)}`,
-  );
+    ].join(GAP.text)}`,
+  ),
+];
 
 // The columns are the same for every job, so a pending one shows a dash where its start will
 // go; the status carries its glyph and colour.
-const jobRow = (job: Job, selected: Piece, drift: number, usable: number): string => {
+const jobRow = (job: Job, selected: Piece, drift: number): Row => {
   const status = job.status === "running" ? RUNNING : PENDING;
-  const columns = [
-    paint(PALETTE.text, fit(job.ticket ?? "—", JOB_WIDTHS.ticket)),
-    paint(PALETTE.text, fit(job.test, JOB_WIDTHS.test)),
-    paint(PALETTE.subtle, fit(job.action, JOB_WIDTHS.action)),
+  return [
+    selected,
+    SPACE,
+    value(fit(job.ticket ?? "—", JOB_WIDTHS.ticket)),
+    GAP,
+    value(fit(job.test, JOB_WIDTHS.test)),
+    GAP,
+    label(fit(job.action, JOB_WIDTHS.action)),
+    GAP,
     paint(status.color, fit(`${status.glyph} ${job.status}`, JOB_WIDTHS.status)),
-    paint(PALETTE.subtle, fit(ago(job.createdAt, job.queriedAt, drift), JOB_WIDTHS.queued)),
-    paint(PALETTE.subtle, fit(ago(job.startedAt, job.queriedAt, drift), JOB_WIDTHS.started)),
+    GAP,
+    label(fit(ago(job.createdAt, job.queriedAt, drift), JOB_WIDTHS.queued)),
+    GAP,
+    label(fit(ago(job.startedAt, job.queriedAt, drift), JOB_WIDTHS.started)),
   ];
-  return `${render([selected, SPACE])}${columns.join(GAP.text)}${" ".repeat(usable - JOB_WIDTH)}`;
 };
 
 const jobList = (
@@ -478,15 +487,8 @@ const jobList = (
   selected: Option.Option<number>,
   hasFocus: boolean,
   drift: number,
-  usable: number,
-): ReadonlyArray<string> =>
-  jobs.map((job, index) =>
-    boxed(jobRow(job, marker(Option.contains(selected, index), hasFocus), drift, usable)),
-  );
-
-// ---------------------------------------------------------------------------
-// Cards
-// ---------------------------------------------------------------------------
+): ReadonlyArray<Row> =>
+  jobs.map((job, index) => jobRow(job, marker(Option.contains(selected, index), hasFocus), drift));
 
 // A card's first row: the marker and the machine's name and url on the left, cut to what the
 // right leaves; on the right what its heartbeat says, or the one phrase that says it stopped.
@@ -497,24 +499,24 @@ const cardHeader = (
   silent: boolean,
   drift: number,
   usable: number,
-): string => {
-  const left: ReadonlyArray<Piece> = [
+): Row => {
+  const left: Row = [
     selected,
     SPACE,
-    { text: machine.name ?? "—", color: PALETTE.text, bold: true },
-    { text: " · ", color: PALETTE.muted },
-    { text: machine.url, color: PALETTE.subtle },
+    strong(machine.name ?? "—"),
+    muted(" · "),
+    label(machine.url),
   ];
-  const right = (): ReadonlyArray<Piece> => {
+  const right = (): Row => {
     if (machine.stats === null || machine.heartbeatAt === null) {
-      return [{ text: "never heard from", color: PALETTE.muted }];
+      return [muted("never heard from")];
     }
     const seen = `${age(machine.queriedAt.getTime() - machine.heartbeatAt.getTime() + drift)} ago`;
     if (silent) {
-      return [{ text: `silent · seen ${seen}`, color: PALETTE.love }];
+      return [paint(PALETTE.love, `silent · seen ${seen}`)];
     }
     const { qemus, cpu, memory } = machine.stats;
-    const qemusPieces: ReadonlyArray<Piece> =
+    const qemusPieces: Row =
       machine.type === "qemu" ? [label("qemus"), SPACE, value(String(qemus)), GAP] : [];
     return [
       ...qemusPieces,
@@ -535,7 +537,7 @@ const cardHeader = (
   };
   const said = right();
   const saidWidth = said.reduce((total, piece) => total + piece.text.length, 0);
-  return `${render(clip(left, usable - saidWidth - GAP.text.length))}${GAP.text}${render(said)}`;
+  return [...clip(left, usable - saidWidth - GAP.text.length), GAP, ...said];
 };
 
 // A card's two graph rows: labels above, the newest readings below, a graph beside each of the
@@ -545,9 +547,8 @@ const cardGraphs = (
   series: Option.Option<ProcessStats.Series>,
   silent: boolean,
   usable: number,
-): { readonly upper: string; readonly lower: string } => {
+): { readonly upper: Row; readonly lower: Row } => {
   const width = Math.floor((usable - GRAPHS_FIXED) / 3);
-  const rest = " ".repeat(usable - GRAPHS_FIXED - 3 * width);
   const samples = Option.match(series, {
     onNone: (): ReadonlyArray<ProcessStats.Sample> => [],
     onSome: (found) => found.samples.slice(-2 * width),
@@ -557,14 +558,52 @@ const cardGraphs = (
     const drawn = graph(metric.scaled(samples), width, silent ? () => PALETTE.muted : metric.color);
     const current = (newest === undefined ? "—" : metric.current(newest)).padStart(LABEL_WIDTH);
     return {
-      upper: `${paint(PALETTE.subtle, metric.label.padEnd(LABEL_WIDTH))} ${drawn.upper}`,
-      lower: `${silent ? muted(current) : bold(paint(PALETTE.text, current))} ${drawn.lower}`,
+      upper: [label(metric.label.padEnd(LABEL_WIDTH)), SPACE, ...drawn.upper],
+      lower: [silent ? muted(current) : strong(current), SPACE, ...drawn.lower],
     };
   });
   return {
-    upper: `${sections.map((section) => section.upper).join(GAP.text)}${rest}`,
-    lower: `${sections.map((section) => section.lower).join(GAP.text)}${rest}`,
+    upper: sections.flatMap((section, index) =>
+      index === 0 ? section.upper : [GAP, ...section.upper],
+    ),
+    lower: sections.flatMap((section, index) =>
+      index === 0 ? section.lower : [GAP, ...section.lower],
+    ),
   };
+};
+
+// ---------------------------------------------------------------------------
+// Screen
+// ---------------------------------------------------------------------------
+
+// One machine's card: its header, its two graph rows and the jobs running on it that fit.
+export type Card = {
+  readonly header: Row;
+  readonly upper: Row;
+  readonly lower: Row;
+  readonly jobs: ReadonlyArray<Row>;
+};
+
+// Everything on the screen for one view at one size, in the order it is drawn: the machines
+// box (its top border says how old the read is, its bottom where the window sits when more
+// cards than fit), the queue box (its title counts what runs and waits, its bottom the window's
+// place) and the footer.
+export type Screen = {
+  readonly status: string;
+  readonly tabs: Row;
+  readonly machines: {
+    readonly cards: ReadonlyArray<Card>;
+    readonly empty: Option.Option<string>;
+    readonly place: Option.Option<string>;
+  };
+  readonly queue: {
+    readonly title: string;
+    readonly header: Row;
+    readonly jobs: ReadonlyArray<Row>;
+    readonly empty: Option.Option<string>;
+    readonly place: Option.Option<string>;
+  };
+  readonly footer: { readonly left: Row; readonly right: string };
 };
 
 const card = (
@@ -576,52 +615,43 @@ const card = (
   hasFocus: boolean,
   drift: number,
   usable: number,
-): ReadonlyArray<string> => {
+): Card => {
   const silent =
     machine.heartbeatAt !== null &&
     machine.queriedAt.getTime() - machine.heartbeatAt.getTime() + drift > SILENT_AFTER_MS;
   const graphs = cardGraphs(series, silent, usable);
-  return [
-    boxed(cardHeader(machine, header, silent, drift, usable)),
-    boxed(graphs.upper),
-    boxed(graphs.lower),
-    ...jobList(jobs, job, hasFocus, drift, usable),
-  ];
+  return {
+    header: cardHeader(machine, header, silent, drift, usable),
+    upper: graphs.upper,
+    lower: graphs.lower,
+    jobs: jobList(jobs, job, hasFocus, drift),
+  };
 };
 
-// The machines box: the tabs, then the cards of the active tab around the selected one, at most
-// MAX_CARDS and as many as fit with the queue keeping its rows, dividers between them, and the
-// window's place in the list on the bottom border when there is more than fits. The window
-// grows upward from the selected card first, so a step down scrolls one card, and downward with
-// what room is left. A tab with nothing says so in one row.
-const machinesBox = (
+// The cards of the active tab around the selected one, at most MAX_CARDS and as many as fit
+// with the queue keeping its rows, and the window's place in the list when there is more than
+// fits. The window grows upward from the selected card first, so a step down scrolls one card,
+// and downward with what room is left. The rows the cards and their dividers may take: the
+// footer, the queue's frame with its minimum of rows, and this box's own borders and tabs come
+// off the terminal's height.
+const machines = (
   view: View,
+  snapshot: Snapshot,
   now: number,
   columns: number,
   rows: number,
-): ReadonlyArray<string> => {
+): Screen["machines"] => {
   const usable = columns - 4;
-  const lines: Array<string> = [tabsRow(view, now, columns)];
-  if (Option.isNone(view.snapshot)) {
-    return [...lines, boxed(" ".repeat(usable)), bottom(columns, Option.none())];
-  }
-  const snapshot = view.snapshot.value;
   const listed = ofTab(snapshot, view.tab);
   if (listed.length === 0) {
     const kind = view.tab === "servers" ? "qemu servers" : "automation clients";
-    return [
-      ...lines,
-      boxed(muted(fit(`no ${kind} registered`, usable))),
-      bottom(columns, Option.none()),
-    ];
+    return { cards: [], empty: Option.some(`no ${kind} registered`), place: Option.none() };
   }
   const drift = now - snapshot.readAt;
   const entries = entriesOf(snapshot, view.tab);
   const selected = entries[clamp(view.cursor[view.tab], 0, entries.length - 1)];
   const chosen = listed.indexOf(selected.machine);
-  // The rows the cards and their dividers may take: the footer, the queue's frame with its
-  // minimum of rows, and this box's own borders come off the terminal's height.
-  const available = rows - 1 - (QUEUE_MIN_ROWS + 3) - 2;
+  const available = rows - 1 - (QUEUE_MIN_ROWS + 3) - 3;
   // A machine running more jobs than the box has rows shows the ones that fit; on the selected
   // card the window ends at the selected job, so what L opens is on screen.
   const room = available - 3;
@@ -649,10 +679,8 @@ const machinesBox = (
     used += 1 + height(last);
   }
   const hasFocus = view.focus === "machines";
-  for (let index = first; index <= last; index += 1) {
-    if (index > first) {
-      lines.push(divider(columns));
-    }
+  const cards = Array.from({ length: last - first + 1 }, (_, offset) => {
+    const index = first + offset;
     const machine = listed[index];
     const series = Option.fromUndefinedOr(
       snapshot.series.find((found) => found.type === machine.type && found.name === machine.name),
@@ -661,67 +689,47 @@ const machinesBox = (
     const own = index === chosen;
     const header = marker(own && Option.isNone(selected.job), hasFocus);
     const job = own ? Option.map(selected.job, (at) => at - from) : Option.none<number>();
-    lines.push(...card(machine, series, jobs, header, job, hasFocus, drift, usable));
-  }
+    return card(machine, series, jobs, header, job, hasFocus, drift, usable);
+  });
   const place =
-    last - first + 1 < listed.length
+    cards.length < listed.length
       ? Option.some(`${String(first + 1)}-${String(last + 1)} of ${String(listed.length)}`)
-      : Option.none();
-  return [...lines, bottom(columns, place)];
+      : Option.none<string>();
+  return { cards, empty: Option.none(), place };
 };
 
-// ---------------------------------------------------------------------------
-// Queue
-// ---------------------------------------------------------------------------
-
-// The queue box fills every row the cards leave above the footer: its title counts what runs and
-// waits, the jobs come running then pending with the selected one in view, and the bottom border
-// says where the window sits in the list when they do not all fit.
-const queueBox = (
-  view: View,
-  now: number,
-  columns: number,
-  height: number,
-): ReadonlyArray<string> => {
-  const usable = columns - 4;
-  const blank = boxed(" ".repeat(usable));
-  const title = bold(paint(PALETTE.text, "automation"));
-  const top = (detail: string): string =>
-    `${muted("╭─┤ ")}${title}${paint(PALETTE.subtle, detail)}${muted(` ├${"─".repeat(columns - 17 - detail.length)}╮`)}`;
-  const room = height - 3;
-  if (Option.isNone(view.snapshot)) {
-    return [
-      top(""),
-      boxed(jobHeader(usable)),
-      ...Array.from({ length: room }, () => blank),
-      bottom(columns, Option.none()),
-    ];
-  }
-  const snapshot = view.snapshot.value;
-  const { queue } = snapshot;
+// The queue fills every row the cards leave above the footer: the jobs come running then
+// pending with the selected one in view, never below the window, which starts room - 1 above
+// it at most; the place says where the window sits in the list when they do not all fit.
+const queue = (view: View, snapshot: Snapshot, now: number, room: number): Screen["queue"] => {
   const drift = now - snapshot.readAt;
   const jobs = jobsOf(snapshot);
-  const cursor = clamp(view.cursor.queue, 0, Math.max(0, jobs.length - 1));
-  // The selection is never below the window: the window starts room - 1 above it at most.
+  const title = `automation · running ${String(snapshot.queue.running.length)} · pending ${String(snapshot.queue.pending.length)}`;
+  if (jobs.length === 0) {
+    return {
+      title,
+      header: jobHeader,
+      jobs: [],
+      empty: Option.some("no jobs"),
+      place: Option.none(),
+    };
+  }
+  const cursor = clamp(view.cursor.queue, 0, jobs.length - 1);
   const first = Math.max(0, cursor - (room - 1));
   const shown = jobs.slice(first, first + room);
-  const listed =
-    jobs.length === 0
-      ? [boxed(muted(fit("no jobs", usable)))]
-      : jobList(shown, Option.some(cursor - first), view.focus === "queue", drift, usable);
   const place =
     jobs.length > room
       ? Option.some(
           `${String(first + 1)}-${String(first + shown.length)} of ${String(jobs.length)}`,
         )
       : Option.none<string>();
-  return [
-    top(` · running ${String(queue.running.length)} · pending ${String(queue.pending.length)}`),
-    boxed(jobHeader(usable)),
-    ...listed,
-    ...Array.from({ length: room - listed.length }, () => blank),
-    bottom(columns, place),
-  ];
+  return {
+    title,
+    header: jobHeader,
+    jobs: jobList(shown, Option.some(cursor - first), view.focus === "queue", drift),
+    empty: Option.none(),
+    place,
+  };
 };
 
 const HINTS: ReadonlyArray<readonly [key: string, does: string]> = [
@@ -734,214 +742,64 @@ const HINTS: ReadonlyArray<readonly [key: string, does: string]> = [
 ];
 
 // The last row: the reason the last read failed, else what the last key had to say, else the
-// keys.
-const footer = (view: View, columns: number): string => {
+// keys with the name on the right. A reason is cut to the row less its padding.
+const footer = (view: View, columns: number): Screen["footer"] => {
   if (Option.isSome(view.failure)) {
-    return paint(PALETTE.love, fit(` error: ${view.failure.value}`, columns));
+    return {
+      left: [paint(PALETTE.love, cut(`error: ${view.failure.value}`, columns - 2))],
+      right: "",
+    };
   }
   if (Option.isSome(view.notice)) {
-    return paint(PALETTE.gold, fit(` ${view.notice.value}`, columns));
+    return { left: [paint(PALETTE.gold, cut(view.notice.value, columns - 2))], right: "" };
   }
-  const plain = HINTS.map(([key, does]) => `${key} ${does}`).join("   ");
-  const keys = HINTS.map(([key, does]) => `${paint(PALETTE.text, key)}${muted(` ${does}`)}`).join(
-    muted("   "),
-  );
-  const name = "oligarchy";
-  return ` ${keys}${" ".repeat(columns - plain.length - name.length - 2)}${muted(name)} `;
+  return {
+    left: HINTS.flatMap(([key, does], index) => [
+      ...(index === 0 ? [] : [muted("   ")]),
+      value(key),
+      muted(` ${does}`),
+    ]),
+    right: "oligarchy",
+  };
 };
 
-// Every row is written over in full at the terminal's width with an absolute move and never a
-// newline, so the screen never scrolls and a frame needs no clear. The cards' box is as tall as
-// its cards and the queue's box takes every other row above the footer, so the queue grows with
-// the terminal. A terminal that shrank below the minimum gets the one sentence saying so until
-// it grows back.
-export const draw = (view: View, now: number, columns: number, rows: number): string => {
-  if (columns < MIN_COLUMNS || rows < MIN_ROWS) {
-    return `\x1b[2J\x1b[1;1H${paint(PALETTE.love, tooSmall(columns, rows))}`;
-  }
-  const machines = machinesBox(view, now, columns, rows);
-  const lines = [
-    ...machines,
-    ...queueBox(view, now, columns, rows - 1 - machines.length),
-    footer(view, columns),
-  ];
-  return lines.map((line, index) => `\x1b[${String(index + 1)};1H${line}`).join("");
-};
-
-// readline reports a capital L as l with shift.
-const isOpen = (input: Terminal.UserInput): boolean => input.key.shift && input.key.name === "l";
-
-// Every key retires the last notice. L moves nothing here: opening the ticket is the runner's.
-export const press = (view: View, input: Terminal.UserInput): View => {
-  const retired: View = { ...view, notice: Option.none() };
-  const list = focused(view);
-  const count = Option.match(view.snapshot, {
-    onNone: () => 0,
-    onSome: (snapshot) =>
-      list === "queue" ? jobsOf(snapshot).length : entriesOf(snapshot, list).length,
+// The machines box is as tall as its tabs and cards and the queue's box takes every other row
+// above the footer, so the queue grows with the terminal.
+export const screen = (view: View, now: number, columns: number, rows: number): Screen => {
+  const tabs = tabsRow(view);
+  const status = Option.match(view.snapshot, {
+    onNone: () => "reading…",
+    onSome: (snapshot) => `read ${age(now - snapshot.readAt)} ago`,
   });
-  const last = Math.max(0, count - 1);
-  // The row on screen, not the number stored: a list that shrank since leaves the number past
-  // the end, and a step must start from what is selected.
-  const current = clamp(view.cursor[list], 0, last);
-  const select = (cursor: number): View => ({
-    ...retired,
-    cursor: { ...view.cursor, [list]: clamp(cursor, 0, last) },
-  });
-  if (isOpen(input)) {
-    return retired;
-  }
-  switch (input.key.name) {
-    case "j":
-    case "down":
-      return select(current + 1);
-    case "k":
-    case "up":
-      return select(current - 1);
-    case "g":
-      return select(input.key.shift ? last : 0);
-    case "tab":
-      return { ...retired, focus: view.focus === "machines" ? "queue" : "machines" };
-    case "h":
-    case "l":
-    case "left":
-    case "right":
-      return { ...retired, tab: view.tab === "servers" ? "clients" : "servers" };
-    default:
-      return retired;
-  }
-};
-
-// ---------------------------------------------------------------------------
-// Runner
-// ---------------------------------------------------------------------------
-
-const isQuit = (input: Terminal.UserInput): boolean =>
-  input.key.name === "q" && !input.key.ctrl && !input.key.meta;
-
-// Hands the ticket's url to the opener and says what came of it. The browser is the desktop's:
-// it gets the desktop's environment, none of this screen's stdio, its own process group, and
-// the handle is unreferenced, so neither the bound nor q closing the scope kills it.
-const openTicket = (
-  ticket: string,
-): Effect.Effect<string, never, ChildProcessSpawner.ChildProcessSpawner> =>
-  Effect.gen(function* () {
-    const url = `${LINEAR_ISSUES}${ticket}`;
-    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-    const handle = yield* spawner.spawn(
-      ChildProcess.make(OPENER, [url], {
-        stdin: "ignore",
-        stdout: "ignore",
-        stderr: "ignore",
-        extendEnv: true,
-        detached: true,
-      }),
-    );
-    // The re-ref it hands back is never wanted: the browser is not ours to wait for.
-    yield* Effect.asVoid(handle.unref);
-    const code = yield* handle.exitCode.pipe(
-      Effect.timeoutOrElse({ duration: OPEN_WAIT, orElse: () => Effect.succeed(0) }),
-    );
-    return code === 0 ? `opened ${url}` : `${OPENER} exited ${String(code)}`;
-  }).pipe(
-    Effect.scoped,
-    // Node's own message (`spawn xdg-open ENOENT`) behind the platform wrapper, else the wrapper's.
-    Effect.catchTag("PlatformError", (error) =>
-      Effect.succeed(
-        `${OPENER}: ${ExternalFailure.describeThrowable(ExternalFailure.causeOf(error), Render.errorDetail(error))}`,
-      ),
-    ),
-  );
-
-// Owns the alternate screen while it runs: the tables are read at once and every REFRESH, the
-// ages repainted every AGE_TICK at whatever size the terminal has by then, every other key
-// repainted as it lands, L opening the selected job's ticket first, and q or the input ending
-// (ctrl-c, in raw mode) hands the screen back. A read that fails leaves the last picture up with
-// its reason on the footer; a frame stdout refuses ends the run with that failure.
-export const run: Effect.Effect<
-  void,
-  PlatformError.PlatformError,
-  | Terminal.Terminal
-  | ChildProcessSpawner.ChildProcessSpawner
-  | Servers.ServerStore
-  | ProcessStats.ProcessStatsStore
-  | Automation.AutomationStore
-> = Effect.gen(function* () {
-  const terminal = yield* Terminal.Terminal;
-  const servers = yield* Servers.ServerStore;
-  const processStats = yield* ProcessStats.ProcessStatsStore;
-  const automation = yield* Automation.AutomationStore;
-  const view = yield* Ref.make(initialView);
-  const paintScreen = Effect.gen(function* () {
-    const current = yield* Ref.get(view);
-    const now = yield* Clock.currentTimeMillis;
-    const columns = yield* terminal.columns;
-    const rows = yield* terminal.rows;
-    yield* terminal.display(draw(current, now, columns, rows));
-  });
-  const read = Effect.gen(function* () {
-    // Taken before the queries, so an age counts from before its row was read, never after: a
-    // slow read leans towards silent, not live.
-    const readAt = yield* Clock.currentTimeMillis;
-    const machines = yield* servers.listMachines();
-    const series = yield* processStats.listSeries(SERIES_SAMPLES);
-    // No completed jobs: the screen shows what runs and what waits.
-    const queue = yield* automation.listJobs(0);
-    yield* Ref.update(view, (current) => ({
-      ...current,
-      snapshot: Option.some({ machines, series, queue, readAt }),
-      failure: Option.none(),
-    }));
-  }).pipe(
-    Effect.catchCause((cause) =>
-      Cause.hasInterruptsOnly(cause)
-        ? Effect.interrupt
-        : Ref.update(view, (current) => ({
-            ...current,
-            failure: Option.some(Render.headline(Cause.squash(cause))),
-          })),
-    ),
-  );
-  // L's notice lands after press retired the last one, so it is what the frame shows.
-  const open = Effect.gen(function* () {
-    const current = yield* Ref.get(view);
-    const notice = yield* Option.match(selectedJob(current), {
-      onNone: () => Effect.succeed("no job selected"),
-      onSome: (job) =>
-        job.ticket === null
-          ? Effect.succeed("the selected job has no ticket")
-          : openTicket(job.ticket),
-    });
-    yield* Ref.update(view, (latest) => ({ ...latest, notice: Option.some(notice) }));
-  });
-  const keys = Effect.gen(function* () {
-    const input = yield* terminal.readInput;
-    yield* Stream.fromQueue(input).pipe(
-      Stream.takeWhile((key) => !isQuit(key)),
-      Stream.runForEach((key) =>
-        Effect.gen(function* () {
-          yield* Ref.update(view, (current) => press(current, key));
-          if (isOpen(key)) {
-            yield* open;
-          }
-          yield* paintScreen;
-        }),
-      ),
-    );
-  });
-  yield* Effect.scoped(
-    Effect.gen(function* () {
-      yield* Effect.acquireRelease(terminal.display(ENTER_SCREEN), () =>
-        // A stdout that refused a frame refuses the restore too; there is nowhere left to say so.
-        Effect.ignore(terminal.display(LEAVE_SCREEN)),
-      );
-      yield* Effect.raceFirst(
-        keys,
-        Effect.raceFirst(
-          Effect.repeat(Effect.andThen(read, paintScreen), Schedule.spaced(REFRESH)),
-          Effect.schedule(paintScreen, Schedule.spaced(AGE_TICK)),
-        ),
-      );
+  return Option.match(view.snapshot, {
+    onNone: () => ({
+      status,
+      tabs,
+      machines: { cards: [], empty: Option.none(), place: Option.none() },
+      queue: {
+        title: "automation",
+        header: jobHeader,
+        jobs: [],
+        empty: Option.none(),
+        place: Option.none(),
+      },
+      footer: footer(view, columns),
     }),
-  );
-});
+    onSome: (snapshot) => {
+      const shown = machines(view, snapshot, now, columns, rows);
+      // Top border, tabs, bottom border, then each card's rows and the dividers between them.
+      const height =
+        3 +
+        (Option.isSome(shown.empty) ? 1 : 0) +
+        shown.cards.reduce((total, drawn) => total + 3 + drawn.jobs.length, 0) +
+        Math.max(0, shown.cards.length - 1);
+      return {
+        status,
+        tabs,
+        machines: shown,
+        queue: queue(view, snapshot, now, rows - 1 - height - 3),
+        footer: footer(view, columns),
+      };
+    },
+  });
+};
