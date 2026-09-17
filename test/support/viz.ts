@@ -3,10 +3,14 @@ import type * as Automation from "../../src/db/automation.ts";
 import type * as ProcessStats from "../../src/db/process-stats.ts";
 import type * as Servers from "../../src/db/servers.ts";
 import * as View from "../../src/viz/view.ts";
+import type * as Stores from "./stores.ts";
 
 export const QUERIED_AT = new Date("2026-09-09T16:00:00Z");
 // The local clock at the read; the TestClock starts at 0, so the runner tests read at 0.
 export const READ_AT = 1_000_000;
+// The session the running drive is in, and the id of its last screenshot.
+export const SESSION_ID = "7a2d0000-0000-4000-8000-00000000f011";
+export const IMAGE_ID = "9c4f0000-0000-4000-8000-00000000b2d3";
 
 export const ago = (seconds: number): Date => new Date(QUERIED_AT.getTime() - seconds * 1000);
 
@@ -98,6 +102,7 @@ export const running: Automation.AutomationJobListRow = {
   reason: null,
   clientUrl: runner.url,
   serverUrl: garage.url,
+  sessionId: SESSION_ID,
   createdAt: ago(180),
   startedAt: ago(45),
   finishedAt: null,
@@ -121,6 +126,7 @@ export const pending: Automation.AutomationJobListRow = {
   reason: null,
   clientUrl: null,
   serverUrl: null,
+  sessionId: null,
   createdAt: ago(7),
   startedAt: null,
   finishedAt: null,
@@ -137,6 +143,7 @@ export const failed: Automation.AutomationJobListRow = {
   reason: "session timed out",
   clientUrl: runner.url,
   serverUrl: garage.url,
+  sessionId: SESSION_ID,
   createdAt: ago(3_900),
   startedAt: ago(3_800),
   finishedAt: ago(600),
@@ -272,9 +279,71 @@ export const PENDING = ["OLI-62", "install", "drive", "◌ pending", "7 s ago", 
 // The ticket of a job row: the nine columns after the border, its padding and the marker column.
 export const ticketOf = (row: string): string => row.slice(4, 13).trimEnd();
 export const HINTS =
-  "j/k select   tab machines/queue   h/l servers/clients   g/G first/last   L open ticket   q quit";
+  "j/k select   tab machines/queue   h/l servers/clients   g/G first/last   L open ticket   F follow   q quit";
 export const FOOTER = ` ${HINTS}${space(COLUMNS - HINTS.length - 11)}oligarchy `;
 export const OPENED = pad(" opened https://linear.app/issue/OLI-61", COLUMNS);
+
+// ---------------------------------------------------------------------------
+// A session to follow: three QMP commands the agent sent and the screenshot the last one took.
+// ---------------------------------------------------------------------------
+
+export const sendKey = { execute: "send-key", arguments: { keys: [] }, id: 1 };
+export const screendump = {
+  execute: "screendump",
+  arguments: { filename: "x", format: "png" },
+  id: 2,
+};
+export const mouse = { execute: "input-send-event", arguments: { events: [] }, id: 3 };
+export const power = { execute: "system_powerdown", arguments: {}, id: 4 };
+
+// A 2×2 pine PNG, whole, so the screen decodes and draws it.
+export const TINY_PNG = new Uint8Array([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+  0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x02, 0x08, 0x02, 0x00, 0x00, 0x00, 0xfd, 0xd4, 0x9a,
+  0x73, 0x00, 0x00, 0x00, 0x10, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x30, 0x2c, 0xe9, 0x07,
+  0x22, 0x06, 0x08, 0x05, 0x00, 0x20, 0x46, 0x04, 0xd1, 0xf5, 0xd9, 0x92, 0xa7, 0x00, 0x00, 0x00,
+  0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+]);
+
+// The glyphs an image drawn as blocks is made of.
+export const BLOCKS = /[█▀▄▌▐▖▗▘▙▚▛▜▝▞▟]/;
+
+// The running drive's actions, oldest first, and the screenshot its screendump took.
+export const seedActions = (store: Stores.FakeActionStore): void => {
+  store.actions.push(
+    {
+      id: 1,
+      sessionId: SESSION_ID,
+      agentId: "OLI-61",
+      request: sendKey,
+      state: "completed",
+      response: {},
+      createdAt: ago(20),
+      finishedAt: ago(19),
+    },
+    {
+      id: 2,
+      sessionId: SESSION_ID,
+      agentId: "OLI-61",
+      request: mouse,
+      state: "completed",
+      response: {},
+      createdAt: ago(8),
+      finishedAt: ago(8),
+    },
+    {
+      id: 3,
+      sessionId: SESSION_ID,
+      agentId: "OLI-61",
+      request: screendump,
+      state: "completed",
+      response: {},
+      createdAt: ago(2),
+      finishedAt: ago(2),
+    },
+  );
+  store.images.push({ id: IMAGE_ID, actionId: 3, data: TINY_PNG });
+};
 
 // The Rosé Pine colours the screen is painted in, and the bold attribute bit of a span.
 export const TEXT = "#e0def4";

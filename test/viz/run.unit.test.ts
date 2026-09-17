@@ -3,21 +3,27 @@ import { it } from "@effect/vitest";
 import type { TestRendererSetup } from "@opentui/core/testing";
 import { Effect, Fiber, Layer } from "effect";
 import { TestClock } from "effect/testing";
+import type * as HttpClient from "effect/unstable/http/HttpClient";
 import type * as Automation from "../../src/db/automation.ts";
 import type * as ProcessStats from "../../src/db/process-stats.ts";
 import type * as Servers from "../../src/db/servers.ts";
+import * as Domain from "../../src/shared/domain.ts";
 import * as Errors from "../../src/shared/errors.ts";
 import * as Run from "../../src/viz/run.ts";
 import * as View from "../../src/viz/view.ts";
+import * as Config from "../support/config.ts";
+import * as FakeHttp from "../support/fake-http.ts";
 import { type FakeRenderer, fakeRenderer, rows, spans } from "../support/fake-renderer.ts";
 import { byCommand, type FakeSpawner, fakeSpawner } from "../support/fake-spawner.ts";
 import * as Stores from "../support/stores.ts";
 import {
+  BLOCKS,
   bottom,
   box,
   COLUMNS,
   CPU_TOP,
   EMPTY_QUEUE,
+  failed,
   FOOTER,
   garage,
   GARAGE_RIGHT,
@@ -39,6 +45,8 @@ import {
   RUNNER_RIGHT,
   RUNNING,
   runnerSeries,
+  seedActions,
+  SESSION_ID,
 } from "../support/viz.ts";
 
 const settle: Effect.Effect<void> = Effect.gen(function* () {
@@ -55,7 +63,7 @@ type Scripted = {
   ) => Effect.Effect<Automation.AutomationQueue, Errors.DatabaseError>;
 };
 
-const storesLayer = (scripted: Scripted = {}) =>
+const storesLayer = (scripted: Scripted = {}, actions = Stores.fakeActionStore()) =>
   Layer.mergeAll(
     Stores.fakeServerStore({
       listMachines: scripted.machines ?? (() => Effect.succeed([garage, runner])),
@@ -64,30 +72,70 @@ const storesLayer = (scripted: Scripted = {}) =>
       listSeries: scripted.series ?? (() => Effect.succeed([garageSeries, runnerSeries])),
     }).layer,
     Stores.fakeAutomationStore({ listJobs: scripted.jobs ?? (() => Effect.succeed(QUEUE)) }).layer,
+    actions.layer,
   );
 
-// The view over the scripted stores, the screen, and a spawner that opens nothing unless told.
+// What a run may be given beyond the stores: a spawner that opens nothing unless told, a qemu
+// server that refuses every request unless told, and the token a follow sends it.
+type Extra = {
+  readonly spawner?: FakeSpawner;
+  readonly actions?: Stores.FakeActionStore;
+  readonly http?: Layer.Layer<HttpClient.HttpClient>;
+  readonly env?: Record<string, string>;
+};
+
 const live = (
   screen: FakeRenderer,
   scripted: Scripted = {},
-  spawner: FakeSpawner = fakeSpawner(),
+  extra: Extra = {},
 ): Effect.Effect<void, Errors.CommandError> =>
-  Run.run.pipe(Effect.provide(Layer.mergeAll(storesLayer(scripted), screen.layer, spawner.layer)));
+  Run.run.pipe(
+    Effect.provide(
+      Layer.mergeAll(
+        storesLayer(scripted, extra.actions ?? Stores.fakeActionStore()),
+        screen.layer,
+        (extra.spawner ?? fakeSpawner()).layer,
+        extra.http ?? FakeHttp.respondWith(() => new Response(null, { status: 404 })),
+        Config.withEnv(extra.env ?? { OLIGARCHY_TOKEN: "test-token" }),
+      ),
+    ),
+  );
 
 // The view forked and its screen once opened and painted.
-const started = (
-  screen: FakeRenderer,
-  scripted: Scripted = {},
-  spawner: FakeSpawner = fakeSpawner(),
-) =>
+const started = (screen: FakeRenderer, scripted: Scripted = {}, extra: Extra = {}) =>
   Effect.gen(function* () {
-    const fiber = yield* Effect.forkChild(live(screen, scripted, spawner), {
+    const fiber = yield* Effect.forkChild(live(screen, scripted, extra), {
       startImmediately: true,
     });
     const setup = yield* screen.opened;
     yield* settle;
     return { fiber, setup };
   });
+
+// The screen once `wanted` holds of its rows, giving the fibers behind a stream their turns.
+const until = (
+  setup: TestRendererSetup,
+  wanted: (drawn: ReadonlyArray<string>) => boolean,
+): Effect.Effect<ReadonlyArray<string>> =>
+  Effect.gen(function* () {
+    let drawn: ReadonlyArray<string> = [];
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      yield* settle;
+      drawn = yield* rows(setup);
+      if (wanted(drawn)) {
+        return drawn;
+      }
+    }
+    return drawn;
+  });
+
+// A qemu server whose /follow answers with these events and then ends; anything else is refused.
+const following = (events: ReadonlyArray<Domain.FollowEvent>): Layer.Layer<HttpClient.HttpClient> =>
+  FakeHttp.respondWith((_request, url) =>
+    url.pathname === "/follow"
+      ? new Response(events.map(Domain.encodeFollowLine).join(""), { status: 200 })
+      : new Response(null, { status: 404 }),
+  );
 
 const footer = (setup: TestRendererSetup): Effect.Effect<string> =>
   Effect.map(rows(setup), (drawn) => drawn[36] ?? "");
@@ -187,14 +235,14 @@ describe("run happy path", () => {
       Effect.gen(function* () {
         const screen = fakeRenderer();
         const spawner = fakeSpawner(byCommand({ "xdg-open": { exitCode: 0 } }));
-        const { fiber, setup } = yield* started(screen, {}, spawner);
+        const { fiber, setup } = yield* started(screen, {}, { spawner });
         // The card is selected, not a job on it.
-        setup.mockInput.pressKey("L");
+        setup.mockInput.pressKey("l", { shift: true });
         yield* settle;
         expect(spawner.spawned).toEqual([]);
         expect(yield* footer(setup)).toBe(pad(" no job selected", COLUMNS));
         setup.mockInput.pressKey("j");
-        setup.mockInput.pressKey("L");
+        setup.mockInput.pressKey("l", { shift: true });
         yield* settle;
         expect(spawner.spawned).toHaveLength(1);
         const [opened] = spawner.spawned;
@@ -230,7 +278,7 @@ describe("run happy path", () => {
         // The queue focused: its selection is what L opens.
         setup.mockInput.pressTab();
         setup.mockInput.pressKey("j");
-        setup.mockInput.pressKey("L");
+        setup.mockInput.pressKey("l", { shift: true });
         yield* settle;
         expect(spawner.spawned).toHaveLength(2);
         expect(spawner.spawned[1]?.args).toEqual(["https://linear.app/issue/OLI-62"]);
@@ -247,9 +295,9 @@ describe("run happy path", () => {
       Effect.gen(function* () {
         const screen = fakeRenderer();
         const spawner = fakeSpawner(byCommand({ "xdg-open": {} }));
-        const { fiber, setup } = yield* started(screen, {}, spawner);
+        const { fiber, setup } = yield* started(screen, {}, { spawner });
         setup.mockInput.pressTab();
-        setup.mockInput.pressKey("L");
+        setup.mockInput.pressKey("l", { shift: true });
         yield* settle;
         expect(spawner.spawned).toHaveLength(1);
         expect(yield* footer(setup)).toBe(FOOTER);
@@ -277,7 +325,7 @@ describe("run happy path", () => {
       byUpper.setup.mockInput.pressKey("x");
       yield* settle;
       expect(byUpper.setup.renderer.isDestroyed).toBe(false);
-      byUpper.setup.mockInput.pressKey("Q");
+      byUpper.setup.mockInput.pressKey("q", { shift: true });
       yield* Fiber.join(byUpper.fiber);
       expect(byUpper.setup.renderer.isDestroyed).toBe(true);
 
@@ -309,7 +357,16 @@ describe("run happy path", () => {
           Run.Renderer.of({ open: Effect.andThen(Effect.sleep("3 seconds"), screen.open) }),
         );
         const fiber = yield* Effect.forkChild(
-          Run.run.pipe(Effect.provide(Layer.mergeAll(storesLayer(), slow, fakeSpawner().layer))),
+          Run.run.pipe(
+            Effect.provide(
+              Layer.mergeAll(
+                storesLayer(),
+                slow,
+                fakeSpawner().layer,
+                FakeHttp.respondWith(() => new Response(null, { status: 404 })),
+              ),
+            ),
+          ),
           { startImmediately: true },
         );
         yield* TestClock.adjust("3 seconds");
@@ -405,10 +462,10 @@ describe("run unhappy path", () => {
       const byEmpty = yield* started(
         empty,
         { jobs: () => Effect.succeed(EMPTY_QUEUE) },
-        emptySpawner,
+        { spawner: emptySpawner },
       );
       byEmpty.setup.mockInput.pressTab();
-      byEmpty.setup.mockInput.pressKey("L");
+      byEmpty.setup.mockInput.pressKey("l", { shift: true });
       yield* settle;
       expect(emptySpawner.spawned).toEqual([]);
       expect(yield* footer(byEmpty.setup)).toBe(pad(" no job selected", COLUMNS));
@@ -422,18 +479,18 @@ describe("run unhappy path", () => {
         {
           jobs: () => Effect.succeed({ ...EMPTY_QUEUE, running: [{ ...running, ticket: null }] }),
         },
-        unticketedSpawner,
+        { spawner: unticketedSpawner },
       );
       // The unticketed job on garage's card, then the same job in the queue.
       byUnticketed.setup.mockInput.pressKey("j");
-      byUnticketed.setup.mockInput.pressKey("L");
+      byUnticketed.setup.mockInput.pressKey("l", { shift: true });
       yield* settle;
       expect(unticketedSpawner.spawned).toEqual([]);
       expect(yield* footer(byUnticketed.setup)).toBe(
         pad(" the selected job has no ticket", COLUMNS),
       );
       byUnticketed.setup.mockInput.pressTab();
-      byUnticketed.setup.mockInput.pressKey("L");
+      byUnticketed.setup.mockInput.pressKey("l", { shift: true });
       yield* settle;
       expect(unticketedSpawner.spawned).toEqual([]);
       expect(yield* footer(byUnticketed.setup)).toBe(
@@ -445,8 +502,12 @@ describe("run unhappy path", () => {
       // Before the first read there is nothing to open either.
       const unread = fakeRenderer();
       const unreadSpawner = fakeSpawner();
-      const byUnread = yield* started(unread, { jobs: () => Effect.never }, unreadSpawner);
-      byUnread.setup.mockInput.pressKey("L");
+      const byUnread = yield* started(
+        unread,
+        { jobs: () => Effect.never },
+        { spawner: unreadSpawner },
+      );
+      byUnread.setup.mockInput.pressKey("l", { shift: true });
       yield* settle;
       expect(unreadSpawner.spawned).toEqual([]);
       expect(yield* footer(byUnread.setup)).toBe(pad(" no job selected", COLUMNS));
@@ -463,9 +524,9 @@ describe("run unhappy path", () => {
         const missingSpawner = fakeSpawner(
           byCommand({ "xdg-open": { spawnError: "spawn xdg-open ENOENT" } }),
         );
-        const byMissing = yield* started(missing, {}, missingSpawner);
+        const byMissing = yield* started(missing, {}, { spawner: missingSpawner });
         byMissing.setup.mockInput.pressTab();
-        byMissing.setup.mockInput.pressKey("L");
+        byMissing.setup.mockInput.pressKey("l", { shift: true });
         yield* settle;
         expect(missingSpawner.spawned).toEqual([]);
         expect(yield* footer(byMissing.setup)).toBe(
@@ -486,9 +547,9 @@ describe("run unhappy path", () => {
 
         const refusing = fakeRenderer();
         const refusingSpawner = fakeSpawner(byCommand({ "xdg-open": { exitCode: 3 } }));
-        const byRefusing = yield* started(refusing, {}, refusingSpawner);
+        const byRefusing = yield* started(refusing, {}, { spawner: refusingSpawner });
         byRefusing.setup.mockInput.pressTab();
-        byRefusing.setup.mockInput.pressKey("L");
+        byRefusing.setup.mockInput.pressKey("l", { shift: true });
         yield* settle;
         expect(refusingSpawner.spawned).toHaveLength(1);
         expect(yield* footer(byRefusing.setup)).toBe(pad(" xdg-open exited 3", COLUMNS));
@@ -556,7 +617,14 @@ describe("run unhappy path", () => {
       );
       const error = yield* Effect.flip(
         Run.run.pipe(
-          Effect.provide(Layer.mergeAll(storesLayer({ machines }), failing, fakeSpawner().layer)),
+          Effect.provide(
+            Layer.mergeAll(
+              storesLayer({ machines }),
+              failing,
+              fakeSpawner().layer,
+              FakeHttp.respondWith(() => new Response(null, { status: 404 })),
+            ),
+          ),
         ),
       );
       expect(error).toMatchObject({
@@ -564,6 +632,292 @@ describe("run unhappy path", () => {
         message: "viz could not open the screen: no tty",
       });
       expect(reads.count).toBe(0);
+    }),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Follow: F peeks at a running job, F again follows it live
+// ---------------------------------------------------------------------------
+
+const PEEK_TITLE = "follow OLI-61 · 7a2d0000";
+const seeded = (): Stores.FakeActionStore => {
+  const actions = Stores.fakeActionStore();
+  seedActions(actions);
+  return actions;
+};
+const shows = (text: string) => (drawn: ReadonlyArray<string>) =>
+  drawn.some((row) => row.includes(text));
+
+describe("run follow happy path", () => {
+  it.effect(
+    "F on a running job on a card, or in the queue, opens a peek of its last three commands, their ages and its last image; escape closes it",
+    () =>
+      Effect.gen(function* () {
+        const screen = fakeRenderer();
+        const { fiber, setup } = yield* started(screen, {}, { actions: seeded() });
+        // The card header is selected; F needs a job.
+        setup.mockInput.pressKey("f");
+        yield* settle;
+        expect(yield* footer(setup)).toBe(pad(" no job selected", COLUMNS));
+        setup.mockInput.pressKey("j");
+        setup.mockInput.pressKey("f");
+        const onCard = yield* until(setup, shows(PEEK_TITLE));
+        expect(onCard.some((row) => row.includes("send-key"))).toBe(true);
+        expect(onCard.some((row) => row.includes("input-send-event"))).toBe(true);
+        expect(onCard.some((row) => row.includes("screendump"))).toBe(true);
+        expect(onCard.some((row) => row.includes(" ago"))).toBe(true);
+        expect(onCard.some((row) => row.includes("F full screen   esc close"))).toBe(true);
+        expect(onCard.some((row) => BLOCKS.test(row))).toBe(true);
+        // The footer still says the keys: F took the notice with it.
+        expect(onCard[36]).toBe(FOOTER);
+        setup.mockInput.pressEscape();
+        yield* settle;
+        const closed = yield* rows(setup);
+        expect(closed.some((row) => row.includes(PEEK_TITLE))).toBe(false);
+        expect(closed.some((row) => BLOCKS.test(row))).toBe(false);
+        // The queue's running job opens the same peek.
+        setup.mockInput.pressTab();
+        setup.mockInput.pressKey("f");
+        const fromQueue = yield* until(setup, shows(PEEK_TITLE));
+        expect(fromQueue.some((row) => row.includes(PEEK_TITLE))).toBe(true);
+        // A move closes it and moves.
+        setup.mockInput.pressKey("j");
+        yield* settle;
+        const moved = yield* rows(setup);
+        expect(moved.some((row) => row.includes(PEEK_TITLE))).toBe(false);
+        expect(moved[10]?.startsWith("│ ▸ OLI-62")).toBe(true);
+        setup.mockInput.pressKey("q");
+        yield* Fiber.join(fiber);
+        expect(setup.renderer.isDestroyed).toBe(true);
+      }),
+  );
+
+  it.effect(
+    "F again on a peek opens a full-screen follow fed by the qemu server's stream, and escape brings the board back",
+    () =>
+      Effect.gen(function* () {
+        const screen = fakeRenderer();
+        const http = following([
+          { type: "session", status: "running" },
+          { type: "action", id: 9, name: "mouse-click", state: "running" },
+        ]);
+        const { fiber, setup } = yield* started(screen, {}, { actions: seeded(), http });
+        setup.mockInput.pressKey("j");
+        setup.mockInput.pressKey("f");
+        yield* until(setup, shows(PEEK_TITLE));
+        setup.mockInput.pressKey("f");
+        const full = yield* until(setup, shows("mouse-click"));
+        expect(full[0]).toBe(pad(" following OLI-61 · 7a2d0000 running", COLUMNS));
+        expect(full[1]?.startsWith(" ✓ send-key")).toBe(true);
+        expect(full[4]?.includes(" mouse-click")).toBe(true);
+        expect(full.some((row) => BLOCKS.test(row))).toBe(true);
+        expect(full.join("\n")).not.toContain("qemu servers");
+        // The spinner turns every 80 milliseconds while the follow is up.
+        const before = full[4]?.slice(1, 2);
+        yield* TestClock.adjust("80 millis");
+        yield* settle;
+        const after = (yield* rows(setup))[4]?.slice(1, 2);
+        expect(after).not.toBe(before);
+        setup.mockInput.pressEscape();
+        yield* settle;
+        const back = yield* rows(setup);
+        expect(back.join("\n")).not.toContain("following OLI-61");
+        expect(back[2]).toContain("garage");
+        expect(back.some((row) => BLOCKS.test(row))).toBe(false);
+        setup.mockInput.pressKey("q");
+        yield* Fiber.join(fiber);
+      }),
+  );
+});
+
+describe("run follow unhappy path", () => {
+  it.effect("F on a pending job, or with only completed jobs, says so and opens nothing", () =>
+    Effect.gen(function* () {
+      const screen = fakeRenderer();
+      const { fiber, setup } = yield* started(screen);
+      setup.mockInput.pressTab();
+      setup.mockInput.pressKey("j");
+      setup.mockInput.pressKey("f");
+      yield* settle;
+      const drawn = yield* rows(setup);
+      expect(drawn[36]).toBe(pad(" follow needs a running job", COLUMNS));
+      expect(drawn.some((row) => row.includes("follow OLI-62"))).toBe(false);
+      setup.mockInput.pressKey("q");
+      yield* Fiber.join(fiber);
+
+      const done = fakeRenderer();
+      const byDone = yield* started(done, {
+        jobs: () => Effect.succeed({ running: [], pending: [], completed: [failed] }),
+      });
+      byDone.setup.mockInput.pressTab();
+      byDone.setup.mockInput.pressKey("f");
+      yield* settle;
+      // Completed jobs are not listed; there is nothing to follow.
+      expect(yield* footer(byDone.setup)).toBe(pad(" no job selected", COLUMNS));
+      byDone.setup.mockInput.pressKey("q");
+      yield* Fiber.join(byDone.fiber);
+    }),
+  );
+
+  it.effect(
+    "F on a running job without a session, without a server on the second F, or without a token, says why",
+    () =>
+      Effect.gen(function* () {
+        const noSession = fakeRenderer();
+        const byNoSession = yield* started(noSession, {
+          jobs: () =>
+            Effect.succeed({
+              running: [{ ...running, sessionId: null }],
+              pending: [],
+              completed: [],
+            }),
+        });
+        byNoSession.setup.mockInput.pressKey("j");
+        byNoSession.setup.mockInput.pressKey("f");
+        yield* settle;
+        expect(yield* footer(byNoSession.setup)).toBe(
+          pad(" the selected job has no session", COLUMNS),
+        );
+        byNoSession.setup.mockInput.pressKey("q");
+        yield* Fiber.join(byNoSession.fiber);
+
+        const noServer = fakeRenderer();
+        const byNoServer = yield* started(
+          noServer,
+          {
+            jobs: () =>
+              Effect.succeed({
+                running: [{ ...running, serverUrl: null }],
+                pending: [],
+                completed: [],
+              }),
+          },
+          { actions: seeded() },
+        );
+        byNoServer.setup.mockInput.pressTab();
+        byNoServer.setup.mockInput.pressKey("f");
+        yield* until(byNoServer.setup, shows(PEEK_TITLE));
+        byNoServer.setup.mockInput.pressKey("f");
+        yield* settle;
+        const serverless = yield* rows(byNoServer.setup);
+        expect(serverless.some((row) => row.includes(PEEK_TITLE))).toBe(true);
+        expect(serverless[36]).toBe(pad(" follow needs a qemu server", COLUMNS));
+        byNoServer.setup.mockInput.pressKey("q");
+        yield* Fiber.join(byNoServer.fiber);
+
+        const noToken = fakeRenderer();
+        const byNoToken = yield* started(noToken, {}, { actions: seeded(), env: {} });
+        byNoToken.setup.mockInput.pressKey("j");
+        byNoToken.setup.mockInput.pressKey("f");
+        yield* until(byNoToken.setup, shows(PEEK_TITLE));
+        byNoToken.setup.mockInput.pressKey("f");
+        yield* settle;
+        const unset = yield* rows(byNoToken.setup);
+        expect(unset.some((row) => row.includes(PEEK_TITLE))).toBe(true);
+        expect(unset[36]).toBe(pad(" OLIGARCHY_TOKEN is not set", COLUMNS));
+        byNoToken.setup.mockInput.pressKey("q");
+        yield* Fiber.join(byNoToken.fiber);
+      }),
+  );
+
+  it.effect("a follow stream that ends while the session is still running was dropped", () =>
+    Effect.gen(function* () {
+      const screen = fakeRenderer();
+      const http = following([{ type: "session", status: "running" }]);
+      const { fiber, setup } = yield* started(screen, {}, { actions: seeded(), http });
+      setup.mockInput.pressKey("j");
+      setup.mockInput.pressKey("f");
+      yield* until(setup, shows(PEEK_TITLE));
+      setup.mockInput.pressKey("f");
+      const dropped = yield* until(setup, shows("fell behind"));
+      expect(dropped[0]).toBe(pad(" following OLI-61 · 7a2d0000 running", COLUMNS));
+      expect(dropped[36]).toBe(
+        pad(` dropped from ${SESSION_ID}: this follower fell behind`, COLUMNS),
+      );
+      setup.mockInput.pressKey("q");
+      yield* Fiber.join(fiber);
+    }),
+  );
+
+  it.effect("a follow stream that ends with the session over says nothing more", () =>
+    Effect.gen(function* () {
+      const screen = fakeRenderer();
+      const http = following([
+        { type: "session", status: "running" },
+        { type: "session", status: "succeeded" },
+      ]);
+      const { fiber, setup } = yield* started(screen, {}, { actions: seeded(), http });
+      setup.mockInput.pressKey("j");
+      setup.mockInput.pressKey("f");
+      yield* until(setup, shows(PEEK_TITLE));
+      setup.mockInput.pressKey("f");
+      const over = yield* until(setup, shows("succeeded"));
+      expect(over[0]).toBe(pad(" following OLI-61 · 7a2d0000 succeeded", COLUMNS));
+      expect(over[36]).toBe(pad(" esc closes", COLUMNS));
+      setup.mockInput.pressKey("q");
+      yield* Fiber.join(fiber);
+    }),
+  );
+
+  it.effect(
+    "a qemu server that never answers blocks nothing: escape drops the connecting follow, F peeks again, and q quits",
+    () =>
+      Effect.gen(function* () {
+        const screen = fakeRenderer();
+        const { fiber, setup } = yield* started(
+          screen,
+          {},
+          {
+            actions: seeded(),
+            http: FakeHttp.never,
+          },
+        );
+        setup.mockInput.pressKey("j");
+        setup.mockInput.pressKey("f");
+        yield* until(setup, shows(PEEK_TITLE));
+        setup.mockInput.pressKey("f");
+        yield* settle;
+        // Still the peek: the connect is in flight, and the keys are not behind it.
+        const waiting = yield* rows(setup);
+        expect(waiting.some((row) => row.includes(PEEK_TITLE))).toBe(true);
+        expect(waiting[36]).toBe(FOOTER);
+        setup.mockInput.pressEscape();
+        yield* settle;
+        const dropped = yield* rows(setup);
+        expect(dropped.some((row) => row.includes(PEEK_TITLE))).toBe(false);
+        expect(dropped[36]).toBe(FOOTER);
+        // A new peek opens, and a second connect can start after the first was dropped.
+        setup.mockInput.pressKey("f");
+        yield* until(setup, shows(PEEK_TITLE));
+        setup.mockInput.pressKey("f");
+        yield* settle;
+        expect((yield* rows(setup)).some((row) => row.includes(PEEK_TITLE))).toBe(true);
+        setup.mockInput.pressKey("q");
+        yield* Fiber.join(fiber);
+        expect(setup.renderer.isDestroyed).toBe(true);
+      }),
+  );
+
+  it.effect("a refused follow stream leaves the peek up and puts the reason on the footer", () =>
+    Effect.gen(function* () {
+      const screen = fakeRenderer();
+      const http = FakeHttp.respondWith(
+        () =>
+          new Response(JSON.stringify({ error: 'session "x" has already completed (succeeded)' }), {
+            status: 409,
+          }),
+      );
+      const { fiber, setup } = yield* started(screen, {}, { actions: seeded(), http });
+      setup.mockInput.pressKey("j");
+      setup.mockInput.pressKey("f");
+      yield* until(setup, shows(PEEK_TITLE));
+      setup.mockInput.pressKey("f");
+      const turnedAway = yield* until(setup, shows("already completed"));
+      expect(turnedAway.some((row) => row.includes(PEEK_TITLE))).toBe(true);
+      expect(turnedAway[36]).toContain('session "x" has already completed (succeeded)');
+      setup.mockInput.pressKey("q");
+      yield* Fiber.join(fiber);
     }),
   );
 });

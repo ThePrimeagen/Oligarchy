@@ -14,14 +14,19 @@ export type FakeRenderer = {
 };
 
 // A Renderer whose screen is OpenTUI's in-memory test renderer, opened at the given size; the
-// release destroys it, which is what hands a real terminal back.
+// release destroys it, which is what hands a real terminal back. Keys arrive in the kitty
+// keyboard protocol, as OpenTUI asks a capable terminal for: a lone escape is then a key at
+// once, where the legacy parser holds it until its timeout to tell it from a sequence. A
+// shifted letter is pressed as the terminal sends it, the letter with the shift modifier.
 export const fakeRenderer = (
   size: { readonly columns: number; readonly rows: number } = { columns: 135, rows: 37 },
 ): FakeRenderer => {
   const setups: Array<TestRendererSetup> = [];
   const first = Deferred.makeUnsafe<TestRendererSetup>();
   const open = Effect.acquireRelease(
-    Effect.promise(() => createTestRenderer({ width: size.columns, height: size.rows })).pipe(
+    Effect.promise(() =>
+      createTestRenderer({ width: size.columns, height: size.rows, kittyKeyboard: true }),
+    ).pipe(
       Effect.tap((setup) =>
         Effect.sync(() => {
           setups.push(setup);

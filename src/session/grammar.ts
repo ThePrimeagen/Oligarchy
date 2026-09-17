@@ -9,12 +9,10 @@ mouse <verb> <x> <y> [...]            move, click, double-click, scroll, drag, h
 intent start <message>                declare what you are about to do
 intent end                            close the open intent
 stop [status] [reason]                stop the session; status is succeeded, failed, or aborted
-follow <session-id>                   watch another session live; "follow " then tab picks one; ctrl-c detaches
 status                                show agent, server, session, and intent
 exit                                  stop the session and leave`;
 
-export const HINT =
-  'tab lists commands; "follow " then tab lists active sessions; "help" explains them; "exit" stops the session and leaves';
+export const HINT = 'tab lists commands; "help" explains them; "exit" stops the session and leaves';
 
 export const COMMANDS: ReadonlyArray<string> = [
   "start",
@@ -24,7 +22,6 @@ export const COMMANDS: ReadonlyArray<string> = [
   "mouse",
   "intent",
   "stop",
-  "follow",
   "status",
   "help",
   "exit",
@@ -56,8 +53,7 @@ export type MalformedCommand =
   | "intent"
   | "intent-start"
   | "intent-end"
-  | "stop"
-  | "follow";
+  | "stop";
 
 export type Start = {
   readonly _tag: "start";
@@ -78,8 +74,7 @@ export type ClientCommand =
       readonly _tag: "stop";
       readonly status: Option.Option<Domain.StopStatus>;
       readonly reason: Option.Option<string>;
-    }
-  | { readonly _tag: "follow"; readonly id: string };
+    };
 
 export type Command =
   | ClientCommand
@@ -251,13 +246,6 @@ export const parseLine = (line: string): Command => {
       return parseIntent(rest);
     case "stop":
       return parseStop(rest);
-    case "follow": {
-      const parts = words(rest);
-      const id = parts[0];
-      return parts.length === 1 && id !== undefined
-        ? { _tag: "follow", id }
-        : malformed("follow", "usage: follow <session-id>");
-    }
     case "status":
       return { _tag: "status" };
     case "help":
@@ -307,17 +295,13 @@ export const toClientArgs = (command: ClientCommand, sessionId: string): Readonl
           onSome: (status) => ["--status", status, ...optional("--reason", command.reason)],
         }),
       ];
-    case "follow":
-      return ["follow", "--session-id", command.id];
   }
   return command satisfies never;
 };
 
 export type Completion = readonly [ReadonlyArray<string>, string];
 
-export type Completing =
-  | { readonly _tag: "words"; readonly completion: Completion }
-  | { readonly _tag: "follow"; readonly prefix: string };
+export type Completing = { readonly _tag: "words"; readonly completion: Completion };
 
 const startingWith = (candidates: ReadonlyArray<string>, word: string): Completion => [
   candidates.filter((candidate) => candidate.startsWith(word)),
@@ -325,10 +309,6 @@ const startingWith = (candidates: ReadonlyArray<string>, word: string): Completi
 ];
 
 export const complete = (line: string): Completing => {
-  const followArg = /^\s*follow\s+(\S*)$/.exec(line);
-  if (followArg !== null) {
-    return { _tag: "follow", prefix: followArg[1] };
-  }
   const mouseArg = /^\s*mouse\s+(\S*)$/.exec(line);
   if (mouseArg !== null) {
     return { _tag: "words", completion: startingWith(MOUSE_VERBS, mouseArg[1]) };

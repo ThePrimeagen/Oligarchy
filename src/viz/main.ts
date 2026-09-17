@@ -1,3 +1,4 @@
+import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { Effect, Layer } from "effect";
@@ -16,6 +17,7 @@ import * as Run from "./run.ts";
 const MainLive = Layer.mergeAll(
   CliOutput.layer(CliOutput.defaultFormatter({ colors: process.stdout.isTTY })),
   CliConfig.layer({ builtIns: GlobalFlag.BuiltIns.filter((flag) => flag !== GlobalFlag.Wizard) }),
+  NodeHttpClient.layerNodeHttp,
   Config.providerLayer,
   Run.Renderer.layer,
 ).pipe(Layer.provideMerge(NodeServices.layer));

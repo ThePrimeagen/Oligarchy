@@ -2,7 +2,8 @@ import { Duration, Option } from "effect";
 import type * as Automation from "../db/automation.ts";
 import type * as ProcessStats from "../db/process-stats.ts";
 import type * as Servers from "../db/servers.ts";
-import * as Render from "../observability/render.ts";
+import * as Follow from "./follow.ts";
+import * as Text from "./text.ts";
 
 // The terminal this view is laid out for: a card's header fits its host numbers beside a name
 // and a url across 135 columns, with 33 columns left to each of its three graphs, and 37 rows
@@ -34,10 +35,10 @@ export const SERIES_SAMPLES = 240;
 export const MAX_CARDS = 4;
 
 // ---------------------------------------------------------------------------
-// Theme: Rosé Pine, as the log's agent colours
+// Theme
 // ---------------------------------------------------------------------------
 
-export const PALETTE = Render.ROSE_PINE_MAIN;
+const PALETTE = Text.PALETTE;
 
 const channel = (hex: string, shift: number): number =>
   (Number.parseInt(hex.slice(1), 16) >> shift) & 255;
@@ -85,14 +86,15 @@ type List = Tab | "queue";
 // snapshot is absent until the first read lands; failure is the last read's reason, cleared by
 // the next good read, so a database outage leaves the last picture up with the reason under it.
 // notice is what the last key had to say (the ticket L opened, or why it could not), retired by
-// the next key. tab is the kind of machine the cards show; focus is the box j and k move in;
-// cursor is each list's selected row (a tab's cards and the jobs on them as one list, the
-// queue's jobs as another), kept when the tab or the focus changes and clamped to what the
-// newest read lists.
+// the next key. follow is the job F is looking at: a peek over the board, or the whole screen.
+// tab is the kind of machine the cards show; focus is the box j and k move in; cursor is each
+// list's selected row (a tab's cards and the jobs on them as one list, the queue's jobs as
+// another), kept when the tab or the focus changes and clamped to what the newest read lists.
 export type View = {
   readonly snapshot: Option.Option<Snapshot>;
   readonly failure: Option.Option<string>;
   readonly notice: Option.Option<string>;
+  readonly follow: Option.Option<Follow.Follow>;
   readonly tab: Tab;
   readonly focus: Focus;
   readonly cursor: Readonly<Record<List, number>>;
@@ -102,6 +104,7 @@ export const initialView: View = {
   snapshot: Option.none(),
   failure: Option.none(),
   notice: Option.none(),
+  follow: Option.none(),
   tab: "servers",
   focus: "machines",
   cursor: { servers: 0, clients: 0, queue: 0 },
@@ -175,13 +178,43 @@ export const tooSmall = (columns: number, rows: number): string =>
 // A capital L: the parser reports it as l with shift.
 export const isOpen = (key: Key): boolean => key.shift && key.name === "l";
 
+// f or F: a follow needs no shift, and a shifted one is not another key.
+export const isFollow = (key: Key): boolean => key.name === "f";
+
 // q, or ctrl-c, which raw mode delivers as a key rather than a signal.
 export const isQuit = (key: Key): boolean =>
   (key.name === "q" && !key.ctrl && !key.meta) || (key.name === "c" && key.ctrl);
 
-// Every key retires the last notice. L moves nothing here: opening the ticket is the runner's.
+// A running job with a session can be followed; anything else is a sentence for the footer.
+export const followError = (job: Option.Option<Job>): Option.Option<string> =>
+  Option.match(job, {
+    onNone: () => Option.some("no job selected"),
+    onSome: (found) => {
+      if (found.status !== "running") {
+        return Option.some("follow needs a running job");
+      }
+      if (found.sessionId === null) {
+        return Option.some("the selected job has no session");
+      }
+      return Option.none();
+    },
+  });
+
+// Every key retires the last notice. L and F move nothing here: opening the ticket or the
+// follow is the runner's. escape closes whatever is followed; a peek closes on any other key
+// too, so the board stays walkable, while a full follow stays up until escape.
 export const press = (view: View, key: Key): View => {
   const retired: View = { ...view, notice: Option.none() };
+  if (isOpen(key) || isFollow(key)) {
+    return retired;
+  }
+  if (key.name === "escape") {
+    return { ...retired, follow: Option.none() };
+  }
+  const closed: View =
+    Option.isSome(view.follow) && view.follow.value._tag === "peek"
+      ? { ...retired, follow: Option.none() }
+      : retired;
   const list = focused(view);
   const count = Option.match(view.snapshot, {
     onNone: () => 0,
@@ -193,12 +226,9 @@ export const press = (view: View, key: Key): View => {
   // the end, and a step must start from what is selected.
   const current = clamp(view.cursor[list], 0, last);
   const select = (cursor: number): View => ({
-    ...retired,
+    ...closed,
     cursor: { ...view.cursor, [list]: clamp(cursor, 0, last) },
   });
-  if (isOpen(key)) {
-    return retired;
-  }
   switch (key.name) {
     case "j":
     case "down":
@@ -209,14 +239,14 @@ export const press = (view: View, key: Key): View => {
     case "g":
       return select(key.shift ? last : 0);
     case "tab":
-      return { ...retired, focus: view.focus === "machines" ? "queue" : "machines" };
+      return { ...closed, focus: view.focus === "machines" ? "queue" : "machines" };
     case "h":
     case "l":
     case "left":
     case "right":
-      return { ...retired, tab: view.tab === "servers" ? "clients" : "servers" };
+      return { ...closed, tab: view.tab === "servers" ? "clients" : "servers" };
     default:
-      return retired;
+      return closed;
   }
 };
 
@@ -230,62 +260,18 @@ const percent = (value: number): string => `${value.toFixed(1)}%`;
 const size = (bytes: number): string =>
   bytes >= 1_000_000_000 ? `${gigabytes(bytes)} GB` : `${String(Math.round(bytes / 1_000_000))} MB`;
 
-// The unit an operator reads at a glance: seconds under a minute, then whole minutes, hours,
-// days. A stamp the database wrote just ahead of the read is 0, never negative.
-const age = (ms: number): string => {
-  const seconds = Math.max(0, Math.floor(ms / 1000));
-  if (seconds < 60) {
-    return `${String(seconds)} s`;
-  }
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) {
-    return `${String(minutes)} min`;
-  }
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) {
-    return `${String(hours)} h`;
-  }
-  return `${String(Math.floor(hours / 24))} d`;
-};
-
 // A stamp's age against the clock that stamped it plus the time since the read, or a dash for a
 // stamp not written yet.
 const ago = (stamp: Date | null, queriedAt: Date, drift: number): string =>
-  stamp === null ? "—" : `${age(queriedAt.getTime() - stamp.getTime() + drift)} ago`;
-
-// Text from the database (a test's name, a failure's message) can span lines: a control
-// character, C1 included (a UTF-8 terminal obeys U+009B as it does ESC [), would break the row
-// or steer the terminal, so each is drawn as a space.
-const clean = (text: string): string =>
-  Array.from(text, (character) =>
-    character < " " || (character >= "\u007f" && character <= "\u009f") ? " " : character,
-  ).join("");
-
-// At most `width` columns, cut with an ellipsis.
-const cut = (text: string, width: number): string => {
-  const plain = clean(text);
-  return plain.length > width ? `${plain.slice(0, width - 1)}…` : plain;
-};
-
-// Exactly `width` columns: cut or padded, so a column is as wide as its neighbours.
-const fit = (text: string, width: number): string => cut(text, width).padEnd(width);
-
-// Text with its colour, so a line of several colours can still be measured and cut; a piece
-// without a colour is blank, drawn in whatever the row inherits.
-export type Piece = {
-  readonly text: string;
-  readonly color?: string;
-  readonly bold?: true;
-};
-export type Row = ReadonlyArray<Piece>;
+  stamp === null ? "—" : `${Text.age(queriedAt.getTime() - stamp.getTime() + drift)} ago`;
 
 // Exactly `width` columns of pieces: the piece that crosses the edge is cut with an ellipsis and
 // the rest dropped, or spaces fill what is left.
-const clip = (pieces: Row, width: number): Row => {
-  const kept: Array<Piece> = [];
+const clip = (pieces: Text.Row, width: number): Text.Row => {
+  const kept: Array<Text.Piece> = [];
   let used = 0;
   for (const piece of pieces) {
-    const text = clean(piece.text);
+    const text = Text.clean(piece.text);
     if (used + text.length > width) {
       kept.push({ ...piece, text: `${text.slice(0, width - used - 1)}…` });
       used = width;
@@ -300,20 +286,12 @@ const clip = (pieces: Row, width: number): Row => {
   return kept;
 };
 
-const paint = (color: string, text: string): Piece => ({ text, color });
-const muted = (text: string): Piece => paint(PALETTE.muted, text);
-const label = (text: string): Piece => paint(PALETTE.subtle, text);
-const value = (text: string): Piece => paint(PALETTE.text, text);
-const strong = (text: string): Piece => ({ text, color: PALETTE.text, bold: true });
-const SPACE: Piece = { text: " " };
-const GAP: Piece = { text: "  " };
-
 // A run of glyphs, each with its colour, as pieces that change only where the colour changes: a
 // graph of a hundred columns is a handful of pieces, not a hundred. Blanks carry no colour.
 type Cell = { readonly glyph: string; readonly color: string };
 
-const stroke = (cells: ReadonlyArray<Cell>): Row => {
-  const pieces: Array<Piece> = [];
+const stroke = (cells: ReadonlyArray<Cell>): Text.Row => {
+  const pieces: Array<Text.Piece> = [];
   for (const cell of cells) {
     const color = cell.glyph === " " ? undefined : cell.color;
     const last = pieces.at(-1);
@@ -349,9 +327,9 @@ const graph = (
   readings: ReadonlyArray<number>,
   width: number,
   color: (reading: number) => string,
-): { readonly upper: Row; readonly lower: Row } => {
+): { readonly upper: Text.Row; readonly lower: Text.Row } => {
   const padded = [...Array.from({ length: 2 * width - readings.length }, () => 0), ...readings];
-  const row = (low: number, high: number): Row =>
+  const row = (low: number, high: number): Text.Row =>
     stroke(
       Array.from({ length: width }, (_, column) => {
         const left = padded[2 * column];
@@ -368,13 +346,13 @@ const graph = (
 // btop's meter: sixteen blocks, the lit ones warming from left to right, the rest muted.
 const METER_WIDTH = 16;
 
-const meter = (fraction: number): Row => {
+const meter = (fraction: number): Text.Row => {
   const lit = Math.round(clamp(fraction, 0, 1) * METER_WIDTH);
-  const blocks = Array.from({ length: lit }, (_, index): Piece => ({
+  const blocks = Array.from({ length: lit }, (_, index): Text.Piece => ({
     text: "■",
     color: heat(((index + 1) * 100) / METER_WIDTH),
   }));
-  return lit === METER_WIDTH ? blocks : [...blocks, muted("■".repeat(METER_WIDTH - lit))];
+  return lit === METER_WIDTH ? blocks : [...blocks, Text.muted("■".repeat(METER_WIDTH - lit))];
 };
 
 // The three graphs of a card: cpu on its own scale and by heat, memory and jobs against the
@@ -417,7 +395,7 @@ const METRICS: ReadonlyArray<Metric> = [
 
 // A label or a value column, then a space, then a graph: three of those and two gaps between.
 const LABEL_WIDTH = 8;
-const GRAPHS_FIXED = 3 * (LABEL_WIDTH + 1) + 2 * GAP.text.length;
+const GRAPHS_FIXED = 3 * (LABEL_WIDTH + 1) + 2 * Text.GAP.text.length;
 
 // ---------------------------------------------------------------------------
 // Rows
@@ -426,20 +404,21 @@ const GRAPHS_FIXED = 3 * (LABEL_WIDTH + 1) + 2 * GAP.text.length;
 // The selected row's marker: gold in the box that has the focus, muted in the other, so both
 // selections stay in view and the one j and k move is told apart. A space where nothing is
 // selected keeps the columns.
-const marker = (selected: boolean, hasFocus: boolean): Piece =>
-  selected ? { text: "▸", color: hasFocus ? PALETTE.gold : PALETTE.muted } : SPACE;
+const marker = (selected: boolean, hasFocus: boolean): Text.Piece =>
+  selected ? { text: "▸", color: hasFocus ? PALETTE.gold : PALETTE.muted } : Text.SPACE;
 
 // The first row of the machines box: the two tabs, the active one lit, counted once read.
-const tabsRow = (view: View): Row => {
+const tabsRow = (view: View): Text.Row => {
   const count = (tab: Tab): string =>
     Option.match(view.snapshot, {
       onNone: () => "",
       onSome: (snapshot) => ` · ${String(ofTab(snapshot, tab).length)}`,
     });
-  const tab = (name: Tab, text: string): Piece => (view.tab === name ? strong(text) : muted(text));
+  const tab = (name: Tab, text: string): Text.Piece =>
+    view.tab === name ? Text.strong(text) : Text.muted(text);
   return [
     tab("servers", `qemu servers${count("servers")}`),
-    muted(" │ "),
+    Text.muted(" │ "),
     tab("clients", `automation clients${count("clients")}`),
   ];
 };
@@ -448,37 +427,37 @@ const tabsRow = (view: View): Row => {
 // job has no finish and no reason yet, so neither has a column.
 const JOB_WIDTHS = { ticket: 9, test: 18, action: 9, status: 12, queued: 11, started: 11 };
 
-const jobHeader: Row = [
-  label(
+const jobHeader: Text.Row = [
+  Text.label(
     `  ${[
-      fit("ticket", JOB_WIDTHS.ticket),
-      fit("test", JOB_WIDTHS.test),
-      fit("action", JOB_WIDTHS.action),
-      fit("status", JOB_WIDTHS.status),
-      fit("queued", JOB_WIDTHS.queued),
-      fit("started", JOB_WIDTHS.started),
-    ].join(GAP.text)}`,
+      Text.fit("ticket", JOB_WIDTHS.ticket),
+      Text.fit("test", JOB_WIDTHS.test),
+      Text.fit("action", JOB_WIDTHS.action),
+      Text.fit("status", JOB_WIDTHS.status),
+      Text.fit("queued", JOB_WIDTHS.queued),
+      Text.fit("started", JOB_WIDTHS.started),
+    ].join(Text.GAP.text)}`,
   ),
 ];
 
 // The columns are the same for every job, so a pending one shows a dash where its start will
 // go; the status carries its glyph and colour.
-const jobRow = (job: Job, selected: Piece, drift: number): Row => {
+const jobRow = (job: Job, selected: Text.Piece, drift: number): Text.Row => {
   const status = job.status === "running" ? RUNNING : PENDING;
   return [
     selected,
-    SPACE,
-    value(fit(job.ticket ?? "—", JOB_WIDTHS.ticket)),
-    GAP,
-    value(fit(job.test, JOB_WIDTHS.test)),
-    GAP,
-    label(fit(job.action, JOB_WIDTHS.action)),
-    GAP,
-    paint(status.color, fit(`${status.glyph} ${job.status}`, JOB_WIDTHS.status)),
-    GAP,
-    label(fit(ago(job.createdAt, job.queriedAt, drift), JOB_WIDTHS.queued)),
-    GAP,
-    label(fit(ago(job.startedAt, job.queriedAt, drift), JOB_WIDTHS.started)),
+    Text.SPACE,
+    Text.value(Text.fit(job.ticket ?? "—", JOB_WIDTHS.ticket)),
+    Text.GAP,
+    Text.value(Text.fit(job.test, JOB_WIDTHS.test)),
+    Text.GAP,
+    Text.label(Text.fit(job.action, JOB_WIDTHS.action)),
+    Text.GAP,
+    Text.paint(status.color, Text.fit(`${status.glyph} ${job.status}`, JOB_WIDTHS.status)),
+    Text.GAP,
+    Text.label(Text.fit(ago(job.createdAt, job.queriedAt, drift), JOB_WIDTHS.queued)),
+    Text.GAP,
+    Text.label(Text.fit(ago(job.startedAt, job.queriedAt, drift), JOB_WIDTHS.started)),
   ];
 };
 
@@ -487,7 +466,7 @@ const jobList = (
   selected: Option.Option<number>,
   hasFocus: boolean,
   drift: number,
-): ReadonlyArray<Row> =>
+): ReadonlyArray<Text.Row> =>
   jobs.map((job, index) => jobRow(job, marker(Option.contains(selected, index), hasFocus), drift));
 
 // A card's first row: the marker and the machine's name and url on the left, cut to what the
@@ -495,49 +474,51 @@ const jobList = (
 // stats and heartbeat_at are written together, so either being null is a row no server claimed.
 const cardHeader = (
   machine: Servers.Machine,
-  selected: Piece,
+  selected: Text.Piece,
   silent: boolean,
   drift: number,
   usable: number,
-): Row => {
-  const left: Row = [
+): Text.Row => {
+  const left: Text.Row = [
     selected,
-    SPACE,
-    strong(machine.name ?? "—"),
-    muted(" · "),
-    label(machine.url),
+    Text.SPACE,
+    Text.strong(machine.name ?? "—"),
+    Text.muted(" · "),
+    Text.label(machine.url),
   ];
-  const right = (): Row => {
+  const right = (): Text.Row => {
     if (machine.stats === null || machine.heartbeatAt === null) {
-      return [muted("never heard from")];
+      return [Text.muted("never heard from")];
     }
-    const seen = `${age(machine.queriedAt.getTime() - machine.heartbeatAt.getTime() + drift)} ago`;
+    const seen = `${Text.age(machine.queriedAt.getTime() - machine.heartbeatAt.getTime() + drift)} ago`;
     if (silent) {
-      return [paint(PALETTE.love, `silent · seen ${seen}`)];
+      return [Text.paint(PALETTE.love, `silent · seen ${seen}`)];
     }
     const { qemus, cpu, memory } = machine.stats;
-    const qemusPieces: Row =
-      machine.type === "qemu" ? [label("qemus"), SPACE, value(String(qemus)), GAP] : [];
+    const qemusPieces: Text.Row =
+      machine.type === "qemu"
+        ? [Text.label("qemus"), Text.SPACE, Text.value(String(qemus)), Text.GAP]
+        : [];
     return [
       ...qemusPieces,
-      label("host cpu"),
-      SPACE,
-      value(percent(cpu.mean1m)),
-      GAP,
-      label("host mem"),
-      SPACE,
+      Text.label("host cpu"),
+      Text.SPACE,
+      Text.value(percent(cpu.mean1m)),
+      Text.GAP,
+      Text.label("host mem"),
+      Text.SPACE,
       ...meter(memory.usedBytes / memory.totalBytes),
-      SPACE,
-      value(`${gigabytes(memory.usedBytes)} / ${gigabytes(memory.totalBytes)} GB`),
-      GAP,
-      label("seen"),
-      SPACE,
-      value(seen),
+      Text.SPACE,
+      Text.value(`${gigabytes(memory.usedBytes)} / ${gigabytes(memory.totalBytes)} GB`),
+      Text.GAP,
+      Text.label("seen"),
+      Text.SPACE,
+      Text.value(seen),
     ];
   };
   const said = right();
   const saidWidth = said.reduce((total, piece) => total + piece.text.length, 0);
-  return [...clip(left, usable - saidWidth - GAP.text.length), GAP, ...said];
+  return [...clip(left, usable - saidWidth - Text.GAP.text.length), Text.GAP, ...said];
 };
 
 // A card's two graph rows: labels above, the newest readings below, a graph beside each of the
@@ -547,7 +528,7 @@ const cardGraphs = (
   series: Option.Option<ProcessStats.Series>,
   silent: boolean,
   usable: number,
-): { readonly upper: Row; readonly lower: Row } => {
+): { readonly upper: Text.Row; readonly lower: Text.Row } => {
   const width = Math.floor((usable - GRAPHS_FIXED) / 3);
   const samples = Option.match(series, {
     onNone: (): ReadonlyArray<ProcessStats.Sample> => [],
@@ -558,16 +539,16 @@ const cardGraphs = (
     const drawn = graph(metric.scaled(samples), width, silent ? () => PALETTE.muted : metric.color);
     const current = (newest === undefined ? "—" : metric.current(newest)).padStart(LABEL_WIDTH);
     return {
-      upper: [label(metric.label.padEnd(LABEL_WIDTH)), SPACE, ...drawn.upper],
-      lower: [silent ? muted(current) : strong(current), SPACE, ...drawn.lower],
+      upper: [Text.label(metric.label.padEnd(LABEL_WIDTH)), Text.SPACE, ...drawn.upper],
+      lower: [silent ? Text.muted(current) : Text.strong(current), Text.SPACE, ...drawn.lower],
     };
   });
   return {
     upper: sections.flatMap((section, index) =>
-      index === 0 ? section.upper : [GAP, ...section.upper],
+      index === 0 ? section.upper : [Text.GAP, ...section.upper],
     ),
     lower: sections.flatMap((section, index) =>
-      index === 0 ? section.lower : [GAP, ...section.lower],
+      index === 0 ? section.lower : [Text.GAP, ...section.lower],
     ),
   };
 };
@@ -578,10 +559,10 @@ const cardGraphs = (
 
 // One machine's card: its header, its two graph rows and the jobs running on it that fit.
 export type Card = {
-  readonly header: Row;
-  readonly upper: Row;
-  readonly lower: Row;
-  readonly jobs: ReadonlyArray<Row>;
+  readonly header: Text.Row;
+  readonly upper: Text.Row;
+  readonly lower: Text.Row;
+  readonly jobs: ReadonlyArray<Text.Row>;
 };
 
 // Everything on the screen for one view at one size, in the order it is drawn: the machines
@@ -590,7 +571,7 @@ export type Card = {
 // place) and the footer.
 export type Screen = {
   readonly status: string;
-  readonly tabs: Row;
+  readonly tabs: Text.Row;
   readonly machines: {
     readonly cards: ReadonlyArray<Card>;
     readonly empty: Option.Option<string>;
@@ -598,19 +579,58 @@ export type Screen = {
   };
   readonly queue: {
     readonly title: string;
-    readonly header: Row;
-    readonly jobs: ReadonlyArray<Row>;
+    readonly header: Text.Row;
+    readonly jobs: ReadonlyArray<Text.Row>;
     readonly empty: Option.Option<string>;
     readonly place: Option.Option<string>;
   };
-  readonly footer: { readonly left: Row; readonly right: string };
+  readonly footer: { readonly left: Text.Row; readonly right: string };
+  readonly follow: Option.Option<FollowScreen>;
 };
+
+// What F has open: a peek boxed over the bottom of the board, its title on the border and the
+// image beside the commands, or the whole screen following the session live, its entries the
+// newest that fit above the last row, which carries the notice when there is one.
+export type FollowScreen =
+  | {
+      readonly _tag: "peek";
+      readonly title: string;
+      readonly commands: ReadonlyArray<Text.Row>;
+      readonly png: Option.Option<Uint8Array>;
+    }
+  | {
+      readonly _tag: "full";
+      readonly header: Text.Row;
+      readonly entries: ReadonlyArray<Text.Row>;
+      readonly png: Option.Option<Uint8Array>;
+      readonly foot: string;
+    };
+
+const followScreen = (view: View, now: number, rows: number): Option.Option<FollowScreen> =>
+  Option.map(view.follow, (follow): FollowScreen => {
+    if (follow._tag === "peek") {
+      return {
+        _tag: "peek",
+        title: Follow.title(follow),
+        commands: Follow.peekRows(follow, now),
+        png: follow.png,
+      };
+    }
+    // The header and the last row take one each.
+    return {
+      _tag: "full",
+      header: Follow.fullHeader(follow),
+      entries: Follow.fullEntries(follow, rows - 2),
+      png: follow.png,
+      foot: Option.getOrElse(view.notice, () => Follow.FULL_FOOT),
+    };
+  });
 
 const card = (
   machine: Servers.Machine,
   series: Option.Option<ProcessStats.Series>,
   jobs: ReadonlyArray<Job>,
-  header: Piece,
+  header: Text.Piece,
   job: Option.Option<number>,
   hasFocus: boolean,
   drift: number,
@@ -738,6 +758,7 @@ const HINTS: ReadonlyArray<readonly [key: string, does: string]> = [
   ["h/l", "servers/clients"],
   ["g/G", "first/last"],
   ["L", "open ticket"],
+  ["F", "follow"],
   ["q", "quit"],
 ];
 
@@ -746,18 +767,21 @@ const HINTS: ReadonlyArray<readonly [key: string, does: string]> = [
 const footer = (view: View, columns: number): Screen["footer"] => {
   if (Option.isSome(view.failure)) {
     return {
-      left: [paint(PALETTE.love, cut(`error: ${view.failure.value}`, columns - 2))],
+      left: [Text.paint(PALETTE.love, Text.cut(`error: ${view.failure.value}`, columns - 2))],
       right: "",
     };
   }
   if (Option.isSome(view.notice)) {
-    return { left: [paint(PALETTE.gold, cut(view.notice.value, columns - 2))], right: "" };
+    return {
+      left: [Text.paint(PALETTE.gold, Text.cut(view.notice.value, columns - 2))],
+      right: "",
+    };
   }
   return {
     left: HINTS.flatMap(([key, does], index) => [
-      ...(index === 0 ? [] : [muted("   ")]),
-      value(key),
-      muted(` ${does}`),
+      ...(index === 0 ? [] : [Text.muted("   ")]),
+      Text.value(key),
+      Text.muted(` ${does}`),
     ]),
     right: "oligarchy",
   };
@@ -769,7 +793,7 @@ export const screen = (view: View, now: number, columns: number, rows: number): 
   const tabs = tabsRow(view);
   const status = Option.match(view.snapshot, {
     onNone: () => "reading…",
-    onSome: (snapshot) => `read ${age(now - snapshot.readAt)} ago`,
+    onSome: (snapshot) => `read ${Text.age(now - snapshot.readAt)} ago`,
   });
   return Option.match(view.snapshot, {
     onNone: () => ({
@@ -784,6 +808,7 @@ export const screen = (view: View, now: number, columns: number, rows: number): 
         place: Option.none(),
       },
       footer: footer(view, columns),
+      follow: followScreen(view, now, rows),
     }),
     onSome: (snapshot) => {
       const shown = machines(view, snapshot, now, columns, rows);
@@ -799,6 +824,7 @@ export const screen = (view: View, now: number, columns: number, rows: number): 
         machines: shown,
         queue: queue(view, snapshot, now, rows - 1 - height - 3),
         footer: footer(view, columns),
+        follow: followScreen(view, now, rows),
       };
     },
   });

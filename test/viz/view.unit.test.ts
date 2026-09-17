@@ -1,16 +1,19 @@
 import { describe, expect, it } from "vitest";
 import { Option } from "effect";
+import * as Follow from "../../src/viz/follow.ts";
 import * as View from "../../src/viz/view.ts";
 import {
   at,
   diagnosing,
   EMPTY_QUEUE,
+  failed,
   garage,
   key,
   pending,
   QUEUE,
   running,
   runner,
+  SESSION_ID,
   shown,
   SNAPSHOT,
 } from "../support/viz.ts";
@@ -141,7 +144,7 @@ describe("press happy path", () => {
     expect(Option.map(View.selectedJob(past), (job) => job.ticket)).toEqual(Option.some("OLI-62"));
   });
 
-  it("q, Q and ctrl-c quit; L alone opens", () => {
+  it("q, Q and ctrl-c quit; L alone opens; f and F follow", () => {
     expect(View.isQuit(key("q"))).toBe(true);
     expect(View.isQuit(key("q", true))).toBe(true);
     expect(View.isQuit({ name: "c", shift: false, ctrl: true, meta: false })).toBe(true);
@@ -152,6 +155,50 @@ describe("press happy path", () => {
     expect(View.isOpen(key("l", true))).toBe(true);
     expect(View.isOpen(key("l"))).toBe(false);
     expect(View.isOpen(key("g", true))).toBe(false);
+    expect(View.isFollow(key("f"))).toBe(true);
+    expect(View.isFollow(key("f", true))).toBe(true);
+    expect(View.isFollow(key("g"))).toBe(false);
+  });
+
+  it("F moves nothing: opening follow is the runner's; escape closes a peek, and so does any move", () => {
+    const start = shown(SNAPSHOT);
+    const peek = Follow.peekFromActions("OLI-61", SESSION_ID, garage.url, [], Option.none());
+    const open = {
+      ...start,
+      follow: Option.some<Follow.Follow>(peek),
+      notice: Option.some("opened"),
+    };
+    expect(View.press(open, key("f"))).toEqual({ ...start, follow: Option.some(peek) });
+    expect(View.press(open, key("f", true))).toEqual({ ...start, follow: Option.some(peek) });
+    expect(View.press(open, key("l", true))).toEqual({ ...start, follow: Option.some(peek) });
+    const escaped = View.press(open, key("escape"));
+    expect(escaped.follow).toEqual(Option.none());
+    expect(escaped.notice).toEqual(Option.none());
+    // A navigation key closes the peek and then moves; tab and l close it too.
+    const moved = View.press(open, key("j"));
+    expect(moved.follow).toEqual(Option.none());
+    expect(moved.cursor.servers).toBe(1);
+    expect(View.press(open, key("tab")).follow).toEqual(Option.none());
+    expect(View.press(open, key("l")).follow).toEqual(Option.none());
+    expect(View.press(open, key("x")).follow).toEqual(Option.none());
+    // A full follow stays up through the other keys and closes on escape.
+    const full = { ...start, follow: Option.some<Follow.Follow>(Follow.expand(peek, garage.url)) };
+    expect(View.press(full, key("j")).follow).toEqual(full.follow);
+    expect(View.press(full, key("escape")).follow).toEqual(Option.none());
+  });
+
+  it("follows a running job with a session, and says why not for anything else", () => {
+    expect(View.followError(Option.none())).toEqual(Option.some("no job selected"));
+    expect(View.followError(Option.some(pending))).toEqual(
+      Option.some("follow needs a running job"),
+    );
+    expect(View.followError(Option.some(failed))).toEqual(
+      Option.some("follow needs a running job"),
+    );
+    expect(View.followError(Option.some({ ...running, sessionId: null }))).toEqual(
+      Option.some("the selected job has no session"),
+    );
+    expect(View.followError(Option.some(running))).toEqual(Option.none());
   });
 });
 

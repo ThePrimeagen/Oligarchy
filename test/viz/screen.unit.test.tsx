@@ -4,6 +4,7 @@ import { it } from "@effect/vitest";
 import { testRender } from "@opentui/solid";
 import { Effect, Option } from "effect";
 import type * as Servers from "../../src/db/servers.ts";
+import * as Follow from "../../src/viz/follow.ts";
 import * as Screen from "../../src/viz/screen.tsx";
 import * as View from "../../src/viz/view.ts";
 import * as FakeRenderer from "../support/fake-renderer.ts";
@@ -14,6 +15,7 @@ import {
   atticSeries,
   BLANK_GRAPH,
   blankBox,
+  BLOCKS,
   BOLD,
   bottom,
   box,
@@ -43,6 +45,7 @@ import {
   machinesTop,
   MEM_BOTTOM,
   MEM_TOP,
+  mouse,
   MUTED,
   OPENED,
   pad,
@@ -51,6 +54,7 @@ import {
   PINE,
   PLAIN,
   QUEUE,
+  QUERIED_AT,
   queueTop,
   READ_AT,
   ROWS,
@@ -58,12 +62,16 @@ import {
   RUNNING,
   runner,
   running,
+  screendump,
+  sendKey,
+  SESSION_ID,
   shown,
   SNAPSHOT,
   space,
   SUBTLE,
   TEXT,
   ticketOf,
+  TINY_PNG,
   USABLE,
   values,
 } from "../support/viz.ts";
@@ -895,6 +903,17 @@ describe("screen unhappy path", () => {
     }),
   );
 
+  it.effect(
+    "draws no follow while none is open: no peek box, no image, and the F hint in the footer",
+    () =>
+      Effect.gen(function* () {
+        const rows = yield* draw(shown(SNAPSHOT));
+        expect(rows.join("\n")).not.toContain("follow OLI-61");
+        expect(rows.some((row) => BLOCKS.test(row))).toBe(false);
+        expect(rows[ROWS - 1]).toContain("F follow");
+      }),
+  );
+
   it.effect("names the size it needs, and nothing else, when the terminal is too small", () =>
     Effect.gen(function* () {
       const narrow = yield* draw(shown(SNAPSHOT), READ_AT, 134, 37);
@@ -909,5 +928,161 @@ describe("screen unhappy path", () => {
         "viz needs",
       );
     }),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Follow: a peek over the bottom of the board, or the whole screen
+// ---------------------------------------------------------------------------
+
+describe("screen follow", () => {
+  const peek = Follow.peekFromActions(
+    "OLI-61",
+    SESSION_ID,
+    garage.url,
+    [
+      { request: sendKey, createdAt: ago(20) },
+      { request: mouse, createdAt: ago(8) },
+      { request: screendump, createdAt: ago(2) },
+    ],
+    Option.some(TINY_PNG),
+  );
+  // The peek's rows: the five above the footer.
+  const PEEK_TOP = ROWS - 1 - Follow.PEEK_FRAME_ROWS;
+  const PEEK_TITLE = "follow OLI-61 · 7a2d0000";
+  const command = (name: string, age: string): string =>
+    `${name.padEnd(Follow.LEFT_COLS - age.length - 2)}  ${age}`;
+  // A command's age counts from the local clock, so here the read lands on the database's
+  // clock and the screen is drawn at that instant.
+  const QUERIED_AT_MS = QUERIED_AT.getTime();
+  const AT_READ: View.Snapshot = { ...SNAPSHOT, readAt: QUERIED_AT_MS };
+  const peeking = (follow: Follow.Follow, view: Partial<View.View> = {}): View.View =>
+    shown(AT_READ, { follow: Option.some(follow), ...view });
+
+  it.effect(
+    "a peek boxes the last three commands with their ages over the bottom of the board, the last image beside them, the keys on its border, and leaves the footer",
+    () =>
+      Effect.gen(function* () {
+        const rows = yield* draw(peeking(peek), QUERIED_AT_MS);
+        expect(rows).toHaveLength(ROWS);
+        // The board above is untouched.
+        expect(rows[0]).toBe(machinesTop("read 0 s ago"));
+        expect(rows[2]).toBe(box(header("▸ garage · http://127.0.0.1:55332", GARAGE_RIGHT)));
+        expect(rows[PEEK_TOP]).toBe(queueTop(PEEK_TITLE));
+        expect(rows[PEEK_TOP + 1]?.startsWith(`│ ${command("send-key", "20 s ago")}`)).toBe(true);
+        expect(rows[PEEK_TOP + 2]?.startsWith(`│ ${command("input-send-event", "8 s ago")}`)).toBe(
+          true,
+        );
+        expect(rows[PEEK_TOP + 3]?.startsWith(`│ ${command("screendump", "2 s ago")}`)).toBe(true);
+        for (const row of rows.slice(PEEK_TOP + 1, PEEK_TOP + 4)) {
+          expect(row.endsWith(" │")).toBe(true);
+          // The image, drawn as blocks here, sits to the right of the commands.
+          expect(BLOCKS.test(row.slice(Follow.LEFT_COLS + 2))).toBe(true);
+          expect(BLOCKS.test(row.slice(0, Follow.LEFT_COLS + 2))).toBe(false);
+        }
+        expect(rows[PEEK_TOP + 4]).toBe(bottom(Follow.PEEK_HINT));
+        expect(rows[ROWS - 1]).toBe(FOOTER);
+        expect(rows.slice(0, PEEK_TOP).some((row) => BLOCKS.test(row))).toBe(false);
+        const spans = yield* styled(peeking(peek), QUERIED_AT_MS);
+        expect(styleOf(spans[PEEK_TOP], ` ${PEEK_TITLE} `)).toEqual([TEXT, PLAIN]);
+        // The name is padded to where the age starts, so its run of cells carries the padding.
+        expect(
+          styleOf(spans[PEEK_TOP + 1], "send-key".padEnd(Follow.LEFT_COLS - "20 s ago".length - 2)),
+        ).toEqual([TEXT, PLAIN]);
+        expect(styleOf(spans[PEEK_TOP + 1], "20 s ago")).toEqual([SUBTLE, PLAIN]);
+      }),
+  );
+
+  it.effect("a peek with no commands and no image says so and shows nothing beside it", () =>
+    Effect.gen(function* () {
+      const empty = Follow.peekFromActions("OLI-61", SESSION_ID, garage.url, [], Option.none());
+      const rows = yield* draw(peeking(empty), QUERIED_AT_MS);
+      expect(rows[PEEK_TOP]).toBe(queueTop(PEEK_TITLE));
+      expect(rows[PEEK_TOP + 1]).toBe(box("no commands yet"));
+      expect(rows[PEEK_TOP + 2]).toBe(blankBox);
+      expect(rows[PEEK_TOP + 3]).toBe(blankBox);
+      expect(rows[PEEK_TOP + 4]).toBe(bottom(Follow.PEEK_HINT));
+      expect(rows.some((row) => BLOCKS.test(row))).toBe(false);
+      const spans = yield* styled(peeking(empty), QUERIED_AT_MS);
+      expect(styleOf(spans[PEEK_TOP + 1], "no commands yet")).toEqual([MUTED, PLAIN]);
+    }),
+  );
+
+  it.effect(
+    "a full follow takes the screen: the ticket and status head it, the entries with their marks run down the left, the live image fills the right, and esc closes",
+    () =>
+      Effect.gen(function* () {
+        const full = Follow.apply(
+          Follow.apply(Follow.expand(peek, garage.url), { type: "session", status: "running" }),
+          { type: "action", id: 9, name: "mouse-click", state: "running" },
+        );
+        const rows = yield* draw(peeking(full));
+        expect(rows).toHaveLength(ROWS);
+        expect(rows[0]).toBe(pad(" following OLI-61 · 7a2d0000 running", COLUMNS));
+        expect(rows[1]?.startsWith(" ✓ send-key")).toBe(true);
+        expect(rows[2]?.startsWith(" ✓ input-send-event")).toBe(true);
+        expect(rows[3]?.startsWith(" ✓ screendump")).toBe(true);
+        expect(rows[4]?.startsWith(` ${Follow.SPINNER[0]} mouse-click`)).toBe(true);
+        expect(rows[5]?.slice(0, Follow.LEFT_COLS).trim()).toBe("");
+        // The image fills the rows to the right of the entries.
+        expect(BLOCKS.test(rows[1]?.slice(Follow.LEFT_COLS) ?? "")).toBe(true);
+        expect(BLOCKS.test(rows[20]?.slice(Follow.LEFT_COLS) ?? "")).toBe(true);
+        expect(
+          rows.slice(1, ROWS - 1).every((row) => !BLOCKS.test(row.slice(0, Follow.LEFT_COLS))),
+        ).toBe(true);
+        expect(rows[ROWS - 1]).toBe(pad(" esc closes", COLUMNS));
+        // Nothing of the board remains.
+        expect(rows.join("\n")).not.toContain("qemu servers");
+        expect(rows.join("\n")).not.toContain("automation ·");
+        const spans = yield* styled(peeking(full));
+        expect(styleOf(spans[0], "running")).toEqual([GOLD, PLAIN]);
+        expect(styleOf(spans[1], "✓")).toEqual([PINE, PLAIN]);
+        expect(styleOf(spans[4], Follow.SPINNER[0] ?? "")).toEqual([MUTED, PLAIN]);
+        expect(styleOf(spans[ROWS - 1], "esc closes")).toEqual([MUTED, PLAIN]);
+        // The spinner turns with the frame; a failed action gets a red cross.
+        const later = yield* draw(peeking(Follow.tick(full)));
+        expect(later[4]?.startsWith(` ${Follow.SPINNER[1]} mouse-click`)).toBe(true);
+        const failedRows = yield* styled(
+          peeking(Follow.apply(full, { type: "action", id: 9, state: "failed" })),
+        );
+        expect(styleOf(failedRows[4], "✗")).toEqual([LOVE, PLAIN]);
+      }),
+  );
+
+  it.effect(
+    "a full follow shows the newest entries that fit, a notice on its last row over the closing hint, and no image before one arrives",
+    () =>
+      Effect.gen(function* () {
+        const bare = Follow.expand(
+          Follow.peekFromActions("OLI-61", SESSION_ID, garage.url, [], Option.none()),
+          garage.url,
+        );
+        let busy = Follow.apply(bare, { type: "session", status: "running" });
+        for (let id = 0; id < 50; id += 1) {
+          busy = Follow.apply(busy, { type: "action", id, name: "send-keys", state: "running" });
+        }
+        const rows = yield* draw(
+          peeking(busy, { notice: Option.some("dropped from x: this follower fell behind") }),
+        );
+        // Header and footer leave 35 rows: the newest 35 of the 50, none of the peek's.
+        expect(rows[1]?.startsWith(` ${Follow.SPINNER[0]} send-keys`)).toBe(true);
+        expect(rows[ROWS - 2]?.startsWith(` ${Follow.SPINNER[0]} send-keys`)).toBe(true);
+        expect(rows.slice(1, ROWS - 1).filter((row) => row.includes("send-keys"))).toHaveLength(35);
+        expect(rows.join("\n")).not.toContain("✓");
+        expect(rows[ROWS - 1]).toBe(pad(" dropped from x: this follower fell behind", COLUMNS));
+        expect(rows.some((row) => BLOCKS.test(row))).toBe(false);
+        // A dirty intent is drawn as one clean row.
+        const dirty = Follow.apply(bare, {
+          type: "intent",
+          state: "started",
+          message: "wait\nfor\x1b[31mthe boot",
+        });
+        const cleaned = yield* draw(peeking(dirty));
+        expect(cleaned).toHaveLength(ROWS);
+        expect(cleaned[1]?.startsWith(` ${Follow.SPINNER[0]} wait for [31mthe boot`)).toBe(true);
+        expect(cleaned[0]).toBe(pad(" following OLI-61 · 7a2d0000 pending", COLUMNS));
+        const spans = yield* styled(peeking(dirty));
+        expect(styleOf(spans[0], "pending")).toEqual([MUTED, PLAIN]);
+      }),
   );
 });

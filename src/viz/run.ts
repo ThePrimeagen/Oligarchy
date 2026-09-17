@@ -10,22 +10,30 @@ import {
   Context,
   Duration,
   Effect,
+  Fiber,
   Layer,
   Option,
   Queue,
+  Ref,
   Schedule,
   type Scope,
   Stream,
 } from "effect";
+import type * as HttpClient from "effect/unstable/http/HttpClient";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import { createSignal } from "solid-js";
+import * as ProxyClient from "../client/proxy-client.ts";
+import * as Config from "../config.ts";
+import * as Actions from "../db/actions.ts";
 import * as Automation from "../db/automation.ts";
 import * as ProcessStats from "../db/process-stats.ts";
 import * as Servers from "../db/servers.ts";
 import * as ExternalFailure from "../external-failure.ts";
 import * as Render from "../observability/render.ts";
+import * as Domain from "../shared/domain.ts";
 import * as Errors from "../shared/errors.ts";
+import * as Follow from "./follow.ts";
 import * as Screen from "./screen.tsx";
 import * as View from "./view.ts";
 
@@ -37,6 +45,9 @@ const LINEAR_ISSUES = "https://linear.app/issue/";
 // browser in its foreground and exits with it: two seconds without an exit is the browser up.
 const OPENER = "xdg-open";
 const OPEN_WAIT = Duration.seconds(2);
+
+// The spinner on a followed session's running entries turns this often.
+const SPIN = Duration.millis(80);
 
 // The screen the view draws on: OpenTUI's renderer, which takes the alternate screen and raw
 // mode when opened and hands both back when the scope it was opened in closes. The signals stay
@@ -101,6 +112,21 @@ const openTicket = (
     ),
   );
 
+// The session's last three commands and its last screenshot, as the database has them.
+const loadPeek = (
+  ticket: string,
+  sessionId: string,
+  serverUrl: string | null,
+): Effect.Effect<Follow.Peek, Errors.DatabaseError, Actions.ActionStore> =>
+  Effect.gen(function* () {
+    const actions = yield* Actions.ActionStore;
+    const rows = yield* actions.listActions(sessionId);
+    const images = yield* actions.listImages(sessionId);
+    const last = images.at(-1);
+    const png = last === undefined ? Option.none<Uint8Array>() : yield* actions.getImage(last.id);
+    return Follow.peekFromActions(ticket, sessionId, serverUrl, rows, png);
+  });
+
 // The keys the screen's parser reports while the stream is consumed.
 const keysOf = (renderer: CliRenderer): Stream.Stream<KeyEvent> =>
   Stream.callback<KeyEvent>((queue) =>
@@ -139,17 +165,20 @@ const drawFailure = (renderer: CliRenderer): Effect.Effect<never, Errors.Command
 // Owns the screen while it runs: the state lives in two Solid signals the screen redraws from,
 // so a read, a tick of the ages or a key changes the signal and the cells that changed are
 // written. The tables are read at once and every REFRESH, the clock the ages count from is set
-// at the first frame and every AGE_TICK, L opens the selected job's ticket first, and q or
-// ctrl-c ends the run and the scope hands the screen back. A read that fails leaves the last
-// picture up with its reason on the footer; a frame that fails ends the run.
+// at the first frame and every AGE_TICK, L opens the selected job's ticket first, F peeks at the
+// selected running job and follows it live on a second F, and q or ctrl-c ends the run and the
+// scope hands the screen back. A read that fails leaves the last picture up with its reason on
+// the footer; a frame that fails ends the run.
 export const run: Effect.Effect<
   void,
   Errors.CommandError,
   | Renderer
   | ChildProcessSpawner.ChildProcessSpawner
+  | HttpClient.HttpClient
   | Servers.ServerStore
   | ProcessStats.ProcessStatsStore
   | Automation.AutomationStore
+  | Actions.ActionStore
 > = Effect.gen(function* () {
   const screen = yield* Renderer;
   const servers = yield* Servers.ServerStore;
@@ -157,6 +186,10 @@ export const run: Effect.Effect<
   const automation = yield* Automation.AutomationStore;
   const [view, setView] = createSignal<View.View>(View.initialView);
   const [now, setNow] = createSignal(yield* Clock.currentTimeMillis);
+  const setNotice = (text: string) =>
+    Effect.sync(() => {
+      setView((current) => ({ ...current, notice: Option.some(text) }));
+    });
   const tick = Effect.andThen(Clock.currentTimeMillis, (ms) =>
     Effect.sync(() => {
       setNow(ms);
@@ -196,19 +229,127 @@ export const run: Effect.Effect<
           ? Effect.succeed("the selected job has no ticket")
           : openTicket(job.ticket),
     });
-    setView((current) => ({ ...current, notice: Option.some(notice) }));
+    yield* setNotice(notice);
   });
+  // The connect and the stream behind a full follow while one is up, from the second F on;
+  // closing the follow interrupts it.
+  const followFiber = yield* Ref.make(Option.none<Fiber.Fiber<void>>());
+  const stopFollow = Effect.gen(function* () {
+    const running = yield* Ref.getAndSet(followFiber, Option.none());
+    if (Option.isSome(running)) {
+      yield* Fiber.interrupt(running.value);
+    }
+  });
+  const withFull = (change: (follow: Follow.Full) => Follow.Full) =>
+    Effect.sync(() => {
+      setView((current) => {
+        if (Option.isNone(current.follow) || current.follow.value._tag !== "full") {
+          return current;
+        }
+        return { ...current, follow: Option.some(change(current.follow.value)) };
+      });
+    });
+  const spin = withFull(Follow.tick);
   yield* Effect.scoped(
     Effect.gen(function* () {
       const renderer = yield* screen.open;
       yield* Effect.promise(() => Screen.mount(renderer, { view, now }));
+      // A second F on a peek: the qemu server streams the session, and every event lands on the
+      // full screen as it arrives. A stream that ends with the session still going was dropped
+      // by the server, which keeps one follower at a time and the newest. The connect and the
+      // stream are one fiber of their own, so a server that does not answer holds no key: escape
+      // interrupts it, and a failure clears it so F can try again.
+      const expandFollow = (peek: Follow.Peek) =>
+        Effect.gen(function* () {
+          const serverUrl = Option.getOrNull(peek.serverUrl);
+          if (serverUrl === null) {
+            yield* setNotice("follow needs a qemu server");
+            return;
+          }
+          if (Option.isSome(yield* Ref.get(followFiber))) {
+            return;
+          }
+          const stream = Effect.gen(function* () {
+            const token = yield* Config.oligarchyToken;
+            const proxy = yield* ProxyClient.connect({ serverUrl, token });
+            const bytes = yield* proxy.follow(peek.sessionId);
+            setView((current) => ({
+              ...current,
+              follow: Option.some(Follow.expand(peek, serverUrl)),
+              notice: Option.none(),
+            }));
+            yield* Stream.splitLines(Stream.decodeText(bytes)).pipe(
+              Stream.filter((line) => line !== ""),
+              Stream.runForEach((line) =>
+                Effect.andThen(Domain.decodeFollowLine(line).pipe(Effect.orDie), (event) =>
+                  withFull((follow) => Follow.apply(follow, event)),
+                ),
+              ),
+            );
+            const latest = view();
+            if (
+              Option.isSome(latest.follow) &&
+              latest.follow.value._tag === "full" &&
+              (latest.follow.value.status === "pending" || latest.follow.value.status === "running")
+            ) {
+              yield* setNotice(`dropped from ${peek.sessionId}: this follower fell behind`);
+            }
+          }).pipe(
+            Effect.catchCause((cause) =>
+              Cause.hasInterruptsOnly(cause)
+                ? Effect.interrupt
+                : Effect.andThen(
+                    setNotice(Render.headline(Cause.squash(cause))),
+                    Ref.set(followFiber, Option.none()),
+                  ),
+            ),
+          );
+          const fiber = yield* Effect.forkScoped(stream);
+          yield* Ref.set(followFiber, Option.some(fiber));
+        });
+      // F: nothing more on a full follow, the stream on a peek, else the selected job's peek.
+      const openFollow = Effect.gen(function* () {
+        const current = view();
+        if (Option.isSome(current.follow)) {
+          if (current.follow.value._tag === "peek") {
+            yield* expandFollow(current.follow.value);
+          }
+          return;
+        }
+        const job = View.selectedJob(current);
+        const refused = View.followError(job);
+        if (Option.isSome(refused)) {
+          yield* setNotice(refused.value);
+          return;
+        }
+        const found = Option.getOrThrow(job);
+        const peek = yield* loadPeek(
+          found.ticket ?? "—",
+          Option.getOrThrow(Option.fromNullishOr(found.sessionId)),
+          found.serverUrl,
+        );
+        setView((latest) => ({ ...latest, follow: Option.some(peek), notice: Option.none() }));
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Cause.hasInterruptsOnly(cause)
+            ? Effect.interrupt
+            : setNotice(Render.headline(Cause.squash(cause))),
+        ),
+      );
       const keys = keysOf(renderer).pipe(
         Stream.takeWhile((key) => !View.isQuit(key)),
         Stream.runForEach((key) =>
           Effect.gen(function* () {
+            const before = view();
             setView((current) => View.press(current, key));
+            if (Option.isSome(before.follow) && Option.isNone(view().follow)) {
+              yield* stopFollow;
+            }
             if (View.isOpen(key)) {
               yield* open;
+            }
+            if (View.isFollow(key)) {
+              yield* openFollow;
             }
           }),
         ),
@@ -217,6 +358,7 @@ export const run: Effect.Effect<
         keys,
         Effect.repeat(read, Schedule.spaced(View.REFRESH)),
         Effect.repeat(tick, Schedule.spaced(View.AGE_TICK)),
+        Effect.repeat(spin, Schedule.spaced(SPIN)),
         drawFailure(renderer),
       ]);
     }),

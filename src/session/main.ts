@@ -36,7 +36,7 @@ const main = Command.run(SessionCommand.makeSessionCommand(), { version: Api.VER
 );
 
 // Not NodeRuntime.runMain: that interrupts the root fiber on SIGTERM, while this REPL answers
-// SIGTERM and SIGHUP itself (kill the follow, await the boot, stop the session) and leaves 0.
+// SIGTERM and SIGHUP itself (await the boot, stop the session) and leaves 0.
 const runMain = Runtime.makeRunMain(({ fiber, teardown }) => {
   fiber.addObserver((exit) => {
     teardown(exit, (code) => {
