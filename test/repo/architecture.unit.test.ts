@@ -4,9 +4,10 @@ import { describe, expect, it } from "vitest";
 
 const root = join(import.meta.dirname, "../..");
 
+// The viz's Solid components are `.tsx`; the same rules bind them.
 const sources = (): ReadonlyArray<string> =>
   readdirSync(join(root, "src"), { recursive: true, withFileTypes: true })
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
+    .filter((entry) => entry.isFile() && /\.tsx?$/.test(entry.name))
     .map((entry) => relative(root, join(entry.parentPath, entry.name)))
     .filter((path) => !path.startsWith("src/dashboard/"))
     .sort();
@@ -175,7 +176,7 @@ describe("HttpApi ownership", () => {
 });
 
 describe("module conventions", () => {
-  it("every relative import is a namespace import with a .ts extension", () => {
+  it("every relative import is a namespace import with a .ts or .tsx extension", () => {
     expect(
       violations((_, source) =>
         [
@@ -187,11 +188,23 @@ describe("module conventions", () => {
           if (!/^\*\s+as\s+[A-Za-z_$][\w$]*$/.test(clause)) {
             problems.push(`import ${clause} from "${specifier}"`);
           }
-          if (!specifier.endsWith(".ts")) {
+          if (!/\.tsx?$/.test(specifier)) {
             problems.push(`"${specifier}" lacks .ts`);
           }
           return problems;
         }),
+      ),
+    ).toEqual([]);
+  });
+
+  // A `.tsx` under src/ is a Solid component file for OpenTUI, so it names that JSX runtime for
+  // the type checker; without the pragma tsc would check it against the dashboard's hono/jsx.
+  it("every .tsx outside the dashboard opens with the @opentui/solid jsxImportSource pragma", () => {
+    expect(
+      violations((path, source) =>
+        path.endsWith(".tsx") && !source.startsWith("/** @jsxImportSource @opentui/solid */\n")
+          ? ["missing /** @jsxImportSource @opentui/solid */"]
+          : [],
       ),
     ).toEqual([]);
   });
