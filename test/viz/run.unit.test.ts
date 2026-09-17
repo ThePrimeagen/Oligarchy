@@ -298,6 +298,30 @@ describe("run happy path", () => {
       expect(setup.renderer.isDestroyed).toBe(true);
     }),
   );
+
+  it.effect(
+    "the ages count from the clock at the first frame, not from before a slow screen opened",
+    () =>
+      Effect.gen(function* () {
+        const screen = fakeRenderer();
+        // A screen three seconds in the opening, as a slow terminal setup would be.
+        const slow = Layer.succeed(Run.Renderer)(
+          Run.Renderer.of({ open: Effect.andThen(Effect.sleep("3 seconds"), screen.open) }),
+        );
+        const fiber = yield* Effect.forkChild(
+          Run.run.pipe(Effect.provide(Layer.mergeAll(storesLayer(), slow, fakeSpawner().layer))),
+          { startImmediately: true },
+        );
+        yield* TestClock.adjust("3 seconds");
+        const setup = yield* screen.opened;
+        yield* settle;
+        const first = yield* rows(setup);
+        expect(first[0]).toBe(machinesTop("read 0 s ago"));
+        expect(first[2]).toContain("seen 12 s ago");
+        setup.mockInput.pressKey("q");
+        yield* Fiber.join(fiber);
+      }),
+  );
 });
 
 describe("run unhappy path", () => {
@@ -496,6 +520,23 @@ describe("run unhappy path", () => {
       yield* Fiber.join(fiber);
       expect(setup.renderer.isDestroyed).toBe(true);
     }),
+  );
+
+  it.effect(
+    "a screen that fails to draw ends the run with the reason, the screen handed back",
+    () =>
+      Effect.gen(function* () {
+        const screen = fakeRenderer();
+        const { fiber, setup } = yield* started(screen);
+        // What OpenTUI raises when a render pass throws; synthetic, emitted on the renderer itself.
+        setup.renderer.emit("render:error", { error: new Error("boom"), renderable: undefined });
+        const error = yield* Effect.flip(Fiber.join(fiber));
+        expect(error).toMatchObject({
+          _tag: "CommandError",
+          message: "viz could not draw the screen: boom",
+        });
+        expect(setup.renderer.isDestroyed).toBe(true);
+      }),
   );
 
   it.effect("a screen that cannot be opened ends the run with the reason, before any read", () =>

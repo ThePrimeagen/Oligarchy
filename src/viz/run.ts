@@ -1,4 +1,9 @@
-import { type CliRenderer, createCliRenderer, type KeyEvent } from "@opentui/core";
+import {
+  type CliRenderer,
+  type CliRendererErrorEvent,
+  createCliRenderer,
+  type KeyEvent,
+} from "@opentui/core";
 import {
   Cause,
   Clock,
@@ -38,10 +43,11 @@ const OPEN_WAIT = Duration.seconds(2);
 // runMain's, so SIGTERM interrupts the root fiber and the release restores the terminal; ctrl-c
 // arrives as a key in raw mode and ends the view the same way q does. The mouse is left to the
 // terminal, so its own selection still works.
-export class Renderer extends Context.Service<
-  Renderer,
-  { readonly open: Effect.Effect<CliRenderer, Errors.CommandError, Scope.Scope> }
->()("@oligarchy/viz/Renderer") {
+type Opener = {
+  readonly open: Effect.Effect<CliRenderer, Errors.CommandError, Scope.Scope>;
+};
+
+export class Renderer extends Context.Service<Renderer, Opener>()("@oligarchy/viz/Renderer") {
   static readonly layer: Layer.Layer<Renderer> = Layer.succeed(this)(
     this.of({
       open: Effect.acquireRelease(
@@ -113,12 +119,29 @@ const keysOf = (renderer: CliRenderer): Stream.Stream<KeyEvent> =>
     ),
   );
 
+// A frame that throws is OpenTUI's word that the screen is broken, and left unanswered it would
+// open its console over the view and draw the frame again: the run ends with the reason instead.
+const drawFailure = (renderer: CliRenderer): Effect.Effect<never, Errors.CommandError> =>
+  Effect.callback<never, Errors.CommandError>((resume) => {
+    const onError = ({ error }: CliRendererErrorEvent) => {
+      resume(
+        Effect.fail(
+          Errors.CommandError.make({ message: `viz could not draw the screen: ${error.message}` }),
+        ),
+      );
+    };
+    renderer.on("render:error", onError);
+    return Effect.sync(() => {
+      renderer.off("render:error", onError);
+    });
+  });
+
 // Owns the screen while it runs: the state lives in two Solid signals the screen redraws from,
 // so a read, a tick of the ages or a key changes the signal and the cells that changed are
-// written. The tables are read at once and every REFRESH, the clock the ages count from moves
-// every AGE_TICK, L opens the selected job's ticket first, and q or ctrl-c ends the run and the
-// scope hands the screen back. A read that fails leaves the last picture up with its reason on
-// the footer.
+// written. The tables are read at once and every REFRESH, the clock the ages count from is set
+// at the first frame and every AGE_TICK, L opens the selected job's ticket first, and q or
+// ctrl-c ends the run and the scope hands the screen back. A read that fails leaves the last
+// picture up with its reason on the footer; a frame that fails ends the run.
 export const run: Effect.Effect<
   void,
   Errors.CommandError,
@@ -190,13 +213,12 @@ export const run: Effect.Effect<
           }),
         ),
       );
-      yield* Effect.raceFirst(
+      yield* Effect.raceAllFirst([
         keys,
-        Effect.raceFirst(
-          Effect.repeat(read, Schedule.spaced(View.REFRESH)),
-          Effect.schedule(tick, Schedule.spaced(View.AGE_TICK)),
-        ),
-      );
+        Effect.repeat(read, Schedule.spaced(View.REFRESH)),
+        Effect.repeat(tick, Schedule.spaced(View.AGE_TICK)),
+        drawFailure(renderer),
+      ]);
     }),
   );
 });

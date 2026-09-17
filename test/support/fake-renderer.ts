@@ -1,10 +1,12 @@
-import { type RGBA } from "@opentui/core";
+import type { CliRenderer, RGBA } from "@opentui/core";
 import { createTestRenderer, type TestRendererSetup } from "@opentui/core/testing";
-import { Deferred, Effect, Exit, Layer } from "effect";
+import { Deferred, Effect, Exit, Layer, type Scope } from "effect";
 import * as Run from "../../src/viz/run.ts";
 
 export type FakeRenderer = {
   readonly layer: Layer.Layer<Run.Renderer>;
+  // What the layer's Renderer opens with, for a test that wraps it (a slow opening, say).
+  readonly open: Effect.Effect<CliRenderer, never, Scope.Scope>;
   // The screen once the view has opened it: its keys are typed through `mockInput`, its frames
   // read back with `rows`, its size changed with `resize`.
   readonly opened: Effect.Effect<TestRendererSetup>;
@@ -32,6 +34,7 @@ export const fakeRenderer = (
   );
   return {
     layer: Layer.succeed(Run.Renderer)(Run.Renderer.of({ open })),
+    open,
     opened: Deferred.await(first),
     setups,
   };
