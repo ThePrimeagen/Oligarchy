@@ -272,7 +272,7 @@ Things every instruction/hint in TESTS.md should assume. Source reviewer in brac
   character typed while black both wakes and enters the field. Take a second screenshot ~1 s after
   waking (virtio modeset).
 - **No clock or user name on the lock screen** — only the field with `Enter Password` / `Checking…` /
-  `Authentication failed (N)`. (The existing `lock-screen` proof mentions a clock; it is not there.)
+  `Authentication failed (N)`. (The clock appears only in `ctrl.md`'s example definition, not in the stored `lock-screen` v7.)
 - Idle: 150 s screensaver / 300 s lock. To test the chain, shorten `idle.screensaver`/`idle.lock` in
   `~/.config/omarchy/shell.json` (watched live). **`shell.json` is replace-not-merge**: a user file
   with only `version` + `idle` silently swaps the bar to the builtin minimal layout — copy

@@ -70,9 +70,11 @@ passphrase `prime`. Boot on `--resume`: OVMF → Limine → UKI → Plymouth LUK
    calculator` in `src/qemu/keys.ts` so XF86 bindings can be driven by key.
 2. A held-key verb (`send-keys --hold/--release`) for push-to-talk and hold-to-act bindings.
 3. Optional cidata / second-disk attach on `start` for unattended-install and dual-boot tests.
-4. Re-version `lock-screen`: its proof mentions a clock that no 4.x build ever had (removed 2025-06-09),
-   and it calls `Super+Escape` "Omarchy Menu" when it opens the System submenu. Proposed wording is in
-   TESTS.md under `lock-screen` (v2).
+4. Re-version `lock-screen` (stored v7 → would land as v8): it calls `Super+Escape` "Omarchy Menu" when
+   it opens the System submenu, names the row "Lock Screen" (it is `Lock`), and its hint says
+   `./client-image` (the wrapper is `./client-with-image`). The clock mention lives only in `ctrl.md`'s
+   example (`ctrl.md:89-90`), not in the stored definition — no 4.x build ever had a lock-screen clock
+   (removed 2025-06-09), so fix that example too. Proposed wording is in TESTS.md under `lock-screen`.
 
 ## Defects and doc/code disagreements found by reading (each has a pinning test)
 

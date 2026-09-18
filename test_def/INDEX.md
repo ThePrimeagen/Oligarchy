@@ -71,7 +71,7 @@ nightlight, shell restart, agent invitation). Steps as they were run, for the re
    record HEAD's behaviour as the failure; CODE-INTENDED assert code. Items most likely affected in
    those files: #4 snapshot unknown action (A2), #7 battery notice (D — done), #10 `update -y` (G1
    — check), #11/#25 `finalize`/`agent` description (G2), #29 1Password Remove row (F1/F2). Also
-   add a `lock-screen` (v2) wording under A1 with the clock removed and "System menu" named.
+   add a `lock-screen` re-version under A1 naming the System menu, the `Lock` row and `./client-with-image` (stored v7 has no clock mention; that is only `ctrl.md`'s example).
 3. **Assemble** — `python3 tools/assemble.py -w` writes `90-coverage-matrix.md` and `TESTS.md`
    (preamble from `02-PREAMBLE.md` + all domain `## Tests` + appendix of not-runnable + index of
    names). Then read TESTS.md top to bottom once; fix obvious seams (domain intro paragraphs,
@@ -131,6 +131,18 @@ edit the constants at the top if paths differ.
   key. Several reviewers had this wrong and were corrected.
 - Operator note that affects many tests: run the update once on a fresh mint and `save` that disk;
   `post-update-*` and most NET/SLOW tests assume it.
+
+## 6b. Cloud agent's plan (2026-09-18 16:55)
+
+`bc-fcb7c982-7124-4fc3-93fa-e9a6096c6a31` answered "what should we do?" with a six-step plan: (1) a
+`tools/load.py` loader (argv exec of `./ctrl test define`, `--dry-run`, appendix excluded by default;
+`test define` is idempotent by name+text); (2) disk state: a `mint` v3 that updates before saving, or a
+second minted disk under a second ISO URL name; (3) a ~20-test smoke set on the stock disk (listed in
+the plan), always `test new --name` (bare `test new` tickets every stored definition); (4) waves:
+plain VM-OK → PARTIAL → NET → SLOW, 12–24 fleet-hours; (5) DEFECT pins closed `failed` with an
+`upstream_defect` error type, upstream issues/PRs per item; (6) harness items ordered by yield:
+XF86 qcodes in `keys.ts`, `lock-screen` v8, ISO-boot ticket variant (with a `save` guard), cidata/second
+disk, held key, repeatable `--name`. Full text is in that agent's transcript.
 
 ## 7. Sub-agent ids (resume with the Task tool's `resume`)
 
