@@ -586,6 +586,20 @@ export const fakeAutomationStore = (
           jobs.find((job) => sameId(job.resultId, resultId) && job.status === "running"),
         ),
       ),
+    abortPending: (resultId, action) =>
+      Effect.sync(() => {
+        const job = jobs.find(
+          (row) =>
+            sameId(row.resultId, resultId) && row.action === action && row.status === "pending",
+        );
+        if (job === undefined) {
+          return false;
+        }
+        job.status = "aborted";
+        job.reason = "aborted";
+        job.finishedAt = new Date();
+        return true;
+      }),
     unclaim: (id) =>
       Effect.sync(() => {
         const job = jobs.find((row) => row.id === id && row.status === "running");

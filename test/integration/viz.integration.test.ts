@@ -151,7 +151,7 @@ Postgres.describeWithDatabase("./viz against the seeded database", () => {
     expect(drawn).toMatch(/ticket\s+test\s+action\s+status\s+queued\s+started\s+│/);
     expect(drawn).not.toContain("finished");
     expect(drawn).toContain(
-      "j/k select   tab machines/queue   h/l servers/clients   g/G first/last   L open ticket   F follow   q quit",
+      "j/k select   tab machines/queue   h/l servers/clients   g/G first/last   L open ticket   F follow   A abort   q quit",
     );
     expect(drawn).not.toContain("error:");
     expect(drawn).not.toContain("viz needs");

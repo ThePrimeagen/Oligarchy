@@ -1086,3 +1086,136 @@ describe("screen follow", () => {
       }),
   );
 });
+
+describe("screen pop-up", () => {
+  const popup = Option.some({ text: View.CANNOT_ABORT, shownAt: READ_AT });
+  // The sentence, two cells of padding either side and the border: five rows in the middle of
+  // the screen.
+  const WIDTH = View.CANNOT_ABORT.length + 6;
+  const LEFT = Math.floor((COLUMNS - WIDTH) / 2);
+  const TOP = Math.floor((ROWS - 5) / 2);
+  const TOP_BORDER = `╭${"─".repeat(WIDTH - 2)}╮`;
+  const BOTTOM_BORDER = `╰${"─".repeat(WIDTH - 2)}╯`;
+  const BLANK = `│${space(WIDTH - 2)}│`;
+  const SENTENCE = `│  ${View.CANNOT_ABORT}  │`;
+  const within = (row: string | undefined): string => (row ?? "").slice(LEFT, LEFT + WIDTH);
+
+  it.effect(
+    "a pop-up boxes its sentence in the middle of the board, over the rows it covers alone, in love",
+    () =>
+      Effect.gen(function* () {
+        const plain = yield* draw(shown(SNAPSHOT));
+        const rows = yield* draw(shown(SNAPSHOT, { popup }));
+        expect(rows).toHaveLength(ROWS);
+        expect(within(rows[TOP])).toBe(TOP_BORDER);
+        expect(within(rows[TOP + 1])).toBe(BLANK);
+        expect(within(rows[TOP + 2])).toBe(SENTENCE);
+        expect(within(rows[TOP + 3])).toBe(BLANK);
+        expect(within(rows[TOP + 4])).toBe(BOTTOM_BORDER);
+        // The board shows on either side of the box and above and below it.
+        for (let index = TOP; index <= TOP + 4; index += 1) {
+          expect(rows[index]?.slice(0, LEFT)).toBe(plain[index]?.slice(0, LEFT));
+          expect(rows[index]?.slice(LEFT + WIDTH)).toBe(plain[index]?.slice(LEFT + WIDTH));
+        }
+        expect(rows.slice(0, TOP)).toEqual(plain.slice(0, TOP));
+        expect(rows.slice(TOP + 5)).toEqual(plain.slice(TOP + 5));
+        expect(rows[ROWS - 1]).toBe(FOOTER);
+        const spans = yield* styled(shown(SNAPSHOT, { popup }));
+        expect(styleOf(spans[TOP], TOP_BORDER)).toEqual([LOVE, PLAIN]);
+        expect(styleOf(spans[TOP + 4], BOTTOM_BORDER)).toEqual([LOVE, PLAIN]);
+        expect(styleOf(spans[TOP + 2], View.CANNOT_ABORT)).toEqual([TEXT, PLAIN]);
+      }),
+  );
+
+  it.effect("a pop-up lies over a full follow too, and no box is drawn without one", () =>
+    Effect.gen(function* () {
+      const full = Follow.apply(
+        Follow.expand(
+          Follow.peekFromActions("OLI-61", SESSION_ID, garage.url, [], Option.none()),
+          garage.url,
+        ),
+        { type: "session", status: "running" },
+      );
+      const rows = yield* draw(shown(SNAPSHOT, { follow: Option.some(full), popup }));
+      expect(rows[0]).toBe(pad(" following OLI-61 · 7a2d0000 running", COLUMNS));
+      expect(within(rows[TOP])).toBe(TOP_BORDER);
+      expect(within(rows[TOP + 2])).toBe(SENTENCE);
+      expect(within(rows[TOP + 4])).toBe(BOTTOM_BORDER);
+      expect(rows[ROWS - 1]).toBe(pad(" esc closes", COLUMNS));
+      const without = yield* draw(shown(SNAPSHOT));
+      expect(without.join("\n")).not.toContain(View.CANNOT_ABORT);
+      expect(within(without[TOP])).not.toBe(TOP_BORDER);
+    }),
+  );
+});
+
+describe("screen confirm", () => {
+  const asked: View.Confirm = { ticket: "OLI-61", action: "drive", choice: "no" };
+  // The question's box: its fixed width in the middle of the screen (a half column goes to the
+  // right, as the layout rounds), seven rows tall (the border, a row of padding, the question,
+  // a blank, the answers, padding, the border).
+  const WIDTH = View.CONFIRM_WIDTH;
+  const LEFT = Math.round((COLUMNS - WIDTH) / 2);
+  const TOP = Math.floor((ROWS - 7) / 2);
+  const within = (row: string | undefined): string => (row ?? "").slice(LEFT, LEFT + WIDTH);
+  const asking = (confirm: View.Confirm, view: Partial<View.View> = {}): View.View =>
+    shown(SNAPSHOT, { confirm: Option.some(confirm), ...view });
+
+  it.effect(
+    "the question boxes the job's name, are you sure and the two answers in the middle of the board, the keys on its border, the marker on no",
+    () =>
+      Effect.gen(function* () {
+        const plain = yield* draw(shown(SNAPSHOT));
+        const rows = yield* draw(asking(asked));
+        expect(rows).toHaveLength(ROWS);
+        expect(within(rows[TOP])).toBe(queueTop("abort drive OLI-61", WIDTH));
+        expect(within(rows[TOP + 1])).toBe(box("", WIDTH));
+        expect(within(rows[TOP + 2])).toBe(box("are you sure?", WIDTH));
+        expect(within(rows[TOP + 3])).toBe(box("", WIDTH));
+        expect(within(rows[TOP + 4])).toBe(box("  yes    ▸ no", WIDTH));
+        expect(within(rows[TOP + 5])).toBe(box("", WIDTH));
+        expect(within(rows[TOP + 6])).toBe(bottom(View.CONFIRM_HINT, WIDTH));
+        // The board shows on either side of the box and above and below it.
+        for (let index = TOP; index <= TOP + 6; index += 1) {
+          expect(rows[index]?.slice(0, LEFT)).toBe(plain[index]?.slice(0, LEFT));
+          expect(rows[index]?.slice(LEFT + WIDTH)).toBe(plain[index]?.slice(LEFT + WIDTH));
+        }
+        expect(rows.slice(0, TOP)).toEqual(plain.slice(0, TOP));
+        expect(rows.slice(TOP + 7)).toEqual(plain.slice(TOP + 7));
+        expect(rows[ROWS - 1]).toBe(FOOTER);
+        const spans = yield* styled(asking(asked));
+        expect(styleOf(spans[TOP], " abort drive OLI-61 ")).toEqual([TEXT, PLAIN]);
+        expect(styleOf(spans[TOP + 2], "are you sure?")).toEqual([TEXT, PLAIN]);
+        expect(styleOf(spans[TOP + 4], "  yes")).toEqual([MUTED, PLAIN]);
+        expect(styleOf(spans[TOP + 4], "▸ no")).toEqual([GOLD, BOLD]);
+        expect(styleOf(spans[TOP + 6], ` ${View.CONFIRM_HINT} `)).toEqual([TEXT, PLAIN]);
+        expect(colorsOf(spans[TOP])).toContain(GOLD);
+      }),
+  );
+
+  it.effect(
+    "the marker follows the answer, the question lies over a peek and under a pop-up, and no box is drawn without one",
+    () =>
+      Effect.gen(function* () {
+        const yes = yield* draw(asking({ ...asked, choice: "yes" }));
+        expect(within(yes[TOP + 4])).toBe(box("▸ yes      no", WIDTH));
+        const spans = yield* styled(asking({ ...asked, choice: "yes" }));
+        expect(styleOf(spans[TOP + 4], "▸ yes")).toEqual([GOLD, BOLD]);
+        expect(styleOf(spans[TOP + 4], "  no")).toEqual([MUTED, PLAIN]);
+        // Over a peek: the peek's frame is still there below the question.
+        const peek = Follow.peekFromActions("OLI-61", SESSION_ID, garage.url, [], Option.none());
+        const overPeek = yield* draw(asking(asked, { follow: Option.some(peek) }));
+        expect(within(overPeek[TOP])).toBe(queueTop("abort drive OLI-61", WIDTH));
+        expect(overPeek[ROWS - 1 - Follow.PEEK_FRAME_ROWS]).toBe(
+          queueTop("follow OLI-61 · 7a2d0000"),
+        );
+        // Under a pop-up: the pop-up's sentence covers the question's middle rows.
+        const popup = Option.some({ text: View.CANNOT_ABORT, shownAt: READ_AT });
+        const underPopup = yield* draw(asking(asked, { popup }));
+        expect(within(underPopup[TOP])).toBe(queueTop("abort drive OLI-61", WIDTH));
+        expect(underPopup.some((row) => row.includes(`│  ${View.CANNOT_ABORT}  │`))).toBe(true);
+        const without = yield* draw(shown(SNAPSHOT));
+        expect(without.join("\n")).not.toContain("are you sure?");
+      }),
+  );
+});

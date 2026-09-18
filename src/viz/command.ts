@@ -16,7 +16,8 @@ export type Stores =
   | Automation.AutomationStore
   | Actions.ActionStore;
 
-// viz only reads: the machines, their readings and the queue, straight from the database.
+// viz reads the database alone: the machines, their readings and the queue. What it changes, an
+// abort, goes through the automation server.
 export type Deps = {
   readonly database: (url: Redacted.Redacted) => Layer.Layer<Stores, Errors.DatabaseError>;
 };
@@ -54,7 +55,7 @@ export const makeVizCommand = (deps: Deps = live) => {
     }),
   ).pipe(
     Command.withDescription(
-      "Watch the qemu servers, the automation clients and the automation queue in the terminal: each machine a card with its cpu, memory and jobs graphed and the jobs running on it listed, then the running and pending jobs; j/k select a card, a job on it or a queued job, tab moves between the machines and the queue, h/l switch servers and clients, L opens the selected job's Linear ticket in the browser, F follows the selected running job, q quits",
+      "Watch the qemu servers, the automation clients and the automation queue in the terminal: each machine a card with its cpu, memory and jobs graphed and the jobs running on it listed, then the running and pending jobs; j/k select a card, a job on it or a queued job, tab moves between the machines and the queue, h/l switch servers and clients, L opens the selected job's Linear ticket in the browser, F follows the selected running job, A asks, then aborts the selected job at the automation server (AUTOMATION_SERVER_URL, with OLIGARCHY_TOKEN), q quits",
     ),
     Command.provide(withDb),
   );

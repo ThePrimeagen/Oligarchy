@@ -279,9 +279,13 @@ export const PENDING = ["OLI-62", "install", "drive", "◌ pending", "7 s ago", 
 // The ticket of a job row: the nine columns after the border, its padding and the marker column.
 export const ticketOf = (row: string): string => row.slice(4, 13).trimEnd();
 export const HINTS =
-  "j/k select   tab machines/queue   h/l servers/clients   g/G first/last   L open ticket   F follow   q quit";
+  "j/k select   tab machines/queue   h/l servers/clients   g/G first/last   L open ticket   F follow   A abort   q quit";
 export const FOOTER = ` ${HINTS}${space(COLUMNS - HINTS.length - 11)}oligarchy `;
 export const OPENED = pad(" opened https://linear.app/issue/OLI-61", COLUMNS);
+
+// The automation server A sends the abort to, and the token it takes.
+export const AUTOMATION_SERVER_URL = "http://127.0.0.1:4242";
+export const ABORT_ENV = { OLIGARCHY_TOKEN: "test-token", AUTOMATION_SERVER_URL };
 
 // ---------------------------------------------------------------------------
 // A session to follow: three QMP commands the agent sent and the screenshot the last one took.

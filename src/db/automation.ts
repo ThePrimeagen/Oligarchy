@@ -132,6 +132,31 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
         return Arr.head(rows);
       });
 
+      // A pending job has no client to stop: closing its row is its whole abort, and the next
+      // claim no longer finds it. The status in the condition is what keeps a claim in flight
+      // honest: the claim locks the pending row it takes, so this update waits and then finds
+      // it running, or lands first and the claim never sees it. A row that is running or over
+      // is left alone, and the false says so. (result_id, action) is unique, so one row at most.
+      const abortPending = Effect.fn("db.abortPendingAutomationJob")(function* (
+        resultId: string,
+        action: AutomationAction,
+      ) {
+        const rows = yield* database.run("abortPendingAutomationJob", (db) =>
+          db
+            .update(DbSchema.automationJobs)
+            .set({ status: "aborted", reason: "aborted", finishedAt: sql`now()` })
+            .where(
+              and(
+                eq(DbSchema.automationJobs.resultId, resultId),
+                eq(DbSchema.automationJobs.action, action),
+                eq(DbSchema.automationJobs.status, "pending"),
+              ),
+            )
+            .returning({ id: DbSchema.automationJobs.id }),
+        );
+        return rows.length > 0;
+      });
+
       // Only a running row closes. reason is omitted when null so a previous value stays.
       // A running row the fleet could not take: back to pending, as it was, so its place in
       // the queue (created_at) is unchanged and the next tick can try again.
@@ -263,7 +288,7 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
         return { running, pending, completed };
       });
 
-      return { enqueue, claim, findRunning, unclaim, assign, finish, listJobs };
+      return { enqueue, claim, findRunning, abortPending, unclaim, assign, finish, listJobs };
     }),
   },
 ) {

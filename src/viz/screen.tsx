@@ -2,7 +2,7 @@
 import { BorderChars, type CliRenderer, RGBA } from "@opentui/core";
 import { render, useTerminalDimensions } from "@opentui/solid";
 import { Option } from "effect";
-import { type Accessor, createMemo, For, Index, Show } from "solid-js";
+import { type Accessor, createMemo, For, Index, type ParentProps, Show } from "solid-js";
 import * as Follow from "./follow.ts";
 import * as Text from "./text.ts";
 import * as View from "./view.ts";
@@ -114,9 +114,72 @@ const FullFollow = (props: {
   </box>
 );
 
+// The whole screen, painting nothing, with its one child in the middle: what a box that lies
+// over whatever is up sits in.
+const Centered = (props: ParentProps) => (
+  <box
+    position="absolute"
+    left={0}
+    top={0}
+    width="100%"
+    height="100%"
+    justifyContent="center"
+    alignItems="center"
+  >
+    {props.children}
+  </box>
+);
+
+// The pop-up: one sentence boxed in the middle of the screen, with its own background so
+// nothing shows through.
+const Popup = (props: { readonly text: string }) => (
+  <Centered>
+    <box
+      border
+      borderStyle="rounded"
+      borderColor={Text.PALETTE.love}
+      backgroundColor={RGBA.defaultBackground()}
+      paddingLeft={2}
+      paddingRight={2}
+      paddingTop={1}
+      paddingBottom={1}
+    >
+      <text fg={Text.PALETTE.text} wrapMode="none">
+        {props.text}
+      </text>
+    </box>
+  </Centered>
+);
+
+// A's question: the job on the top border, the keys on the bottom one, the question and the
+// two answers between, as wide as the view says so the borders hold their words.
+const Confirm = (props: { readonly asked: View.Confirm }) => (
+  <Centered>
+    <box
+      width={View.CONFIRM_WIDTH}
+      border
+      borderStyle="rounded"
+      borderColor={Text.PALETTE.gold}
+      backgroundColor={RGBA.defaultBackground()}
+      title={` ${View.confirmTitle(props.asked)} `}
+      titleColor={Text.PALETTE.text}
+      bottomTitle={` ${View.CONFIRM_HINT} `}
+      bottomTitleAlignment="right"
+      paddingLeft={1}
+      paddingRight={1}
+      paddingTop={1}
+      paddingBottom={1}
+      flexDirection="column"
+    >
+      <Index each={View.confirmRows(props.asked)}>{(row) => <Line row={row()} />}</Index>
+    </box>
+  </Centered>
+);
+
 // The machines box is as tall as its tabs and cards, the queue's box takes every row left above
 // the footer, and a terminal that shrank below the minimum shows the one sentence saying so
-// until it grows back. A full follow replaces the board; a peek lies over its bottom rows.
+// until it grows back. A full follow replaces the board; a peek lies over its bottom rows; A's
+// question lies over either, and a pop-up over everything.
 export const App = (props: Props) => {
   const dimensions = useTerminalDimensions();
   const fits = () => dimensions().width >= View.MIN_COLUMNS && dimensions().height >= View.MIN_ROWS;
@@ -131,6 +194,8 @@ export const App = (props: Props) => {
     const follow = Option.getOrUndefined(props.view().follow);
     return follow?._tag === "full" ? follow : undefined;
   };
+  const asked = (): View.Confirm | undefined => Option.getOrUndefined(props.view().confirm);
+  const popup = (): string | undefined => Option.getOrUndefined(props.view().popup)?.text;
   return (
     <Show
       when={fits()}
@@ -227,6 +292,8 @@ export const App = (props: Props) => {
           <FullFollow follow={found()} notice={props.view().notice} rows={dimensions().height} />
         )}
       </Show>
+      <Show when={asked()}>{(found: Accessor<View.Confirm>) => <Confirm asked={found()} />}</Show>
+      <Show when={popup()}>{(text: Accessor<string>) => <Popup text={text()} />}</Show>
     </Show>
   );
 };

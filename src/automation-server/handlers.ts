@@ -103,6 +103,11 @@ export const LinearLive = HttpApiBuilder.group(Api.AutomationServerApi, "Linear"
 // A disconnect must not leave the client killed and the row still running.
 const uninterruptible = { uninterruptible: true } as const;
 
+// The job named by its ticket and action closes whether it waits or runs. A pending job has no
+// client to stop, so closing its row is the whole abort; the claim that may be taking it at
+// that moment either never sees it or has made it running, which the lookup after finds. A
+// running job is stopped at the client that claimed it, then its row is closed. A job that is
+// over, or was never queued, is refused.
 export const AbortLive = HttpApiBuilder.group(Api.AutomationServerApi, "Abort", (handlers) =>
   handlers.handle(
     "abort",
@@ -112,6 +117,10 @@ export const AbortLive = HttpApiBuilder.group(Api.AutomationServerApi, "Abort", 
         const automation = yield* Automation.AutomationStore;
         const servers = yield* Servers.ServerStore;
         const log = yield* Log.Log;
+        const nothingToAbort = Errors.BadRequest.make({
+          message: `ticket "${payload.ticket}" has no ${payload.action} to abort`,
+          agentId: payload.ticket,
+        });
         const result = yield* tests
           .findResultByLinearId(payload.ticket)
           .pipe(
@@ -120,10 +129,21 @@ export const AbortLive = HttpApiBuilder.group(Api.AutomationServerApi, "Abort", 
             ),
           );
         if (Option.isNone(result)) {
-          return yield* Errors.BadRequest.make({
-            message: `ticket "${payload.ticket}" is not running`,
+          return yield* nothingToAbort;
+        }
+        const closedPending = yield* automation
+          .abortPending(result.value.id, payload.action)
+          .pipe(
+            Effect.mapError((error) =>
+              Errors.Internal.make({ cause: error, agentId: payload.ticket }),
+            ),
+          );
+        if (closedPending) {
+          yield* log.info(`aborted pending ${payload.action}`, {
+            location: Log.Locations.automation,
             agentId: payload.ticket,
           });
+          return ok;
         }
         const job = yield* automation
           .findRunning(result.value.id)
@@ -133,13 +153,10 @@ export const AbortLive = HttpApiBuilder.group(Api.AutomationServerApi, "Abort", 
             ),
           );
         if (Option.isNone(job)) {
-          return yield* Errors.BadRequest.make({
-            message: `ticket "${payload.ticket}" is not running`,
-            agentId: payload.ticket,
-          });
+          return yield* nothingToAbort;
         }
-        // One job of a ticket runs at a time; the one running may not be the one clicked, when
-        // the click was on a pending diagnose that closed since and the drive is still on.
+        // One job of a ticket runs at a time; the one running may not be the one named, when
+        // the diagnose named closed since and the drive is still on.
         if (job.value.action !== payload.action) {
           return yield* Errors.BadRequest.make({
             message: `ticket "${payload.ticket}" is running a ${job.value.action}, not a ${payload.action}`,

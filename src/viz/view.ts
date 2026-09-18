@@ -21,6 +21,11 @@ const QUEUE_MIN_ROWS = 4;
 export const REFRESH = Duration.seconds(5);
 // The ages tick between reads.
 export const AGE_TICK = Duration.seconds(1);
+// A pop-up stays this long, whatever keys are pressed under it.
+export const POPUP_FOR = Duration.seconds(3);
+
+// The pop-up A raises on a job that was over before the abort reached the automation server.
+export const CANNOT_ABORT = "you cannot abort completed jobs";
 
 // A server writes its row every thirty seconds. One heartbeat may be in flight and one lost to a
 // slow database; three overdue is a server that stopped.
@@ -83,18 +88,34 @@ export type Tab = "servers" | "clients";
 type Focus = "machines" | "queue";
 type List = Tab | "queue";
 
+// A sentence in a box in the middle of the screen, and the clock when it went up: the runner
+// takes it down POPUP_FOR later, unless another has taken its place by then.
+export type Popup = { readonly text: string; readonly shownAt: number };
+
+// The question A asks before a job is aborted: which job, and the answer the marker is on. It
+// starts on no, so enter alone aborts nothing.
+export type Confirm = {
+  readonly ticket: string;
+  readonly action: Automation.AutomationAction;
+  readonly choice: "yes" | "no";
+};
+
 // snapshot is absent until the first read lands; failure is the last read's reason, cleared by
 // the next good read, so a database outage leaves the last picture up with the reason under it.
 // notice is what the last key had to say (the ticket L opened, or why it could not), retired by
 // the next key. follow is the job F is looking at: a peek over the board, or the whole screen.
-// tab is the kind of machine the cards show; focus is the box j and k move in; cursor is each
-// list's selected row (a tab's cards and the jobs on them as one list, the queue's jobs as
-// another), kept when the tab or the focus changes and clamped to what the newest read lists.
+// confirm is A's question while it is up; popup is what A had to say about a job that could
+// not be aborted, up until its time is over. tab is the kind of machine the cards show; focus
+// is the box j and k move in; cursor is each list's selected row (a tab's cards and the jobs
+// on them as one list, the queue's jobs as another), kept when the tab or the focus changes
+// and clamped to what the newest read lists.
 export type View = {
   readonly snapshot: Option.Option<Snapshot>;
   readonly failure: Option.Option<string>;
   readonly notice: Option.Option<string>;
   readonly follow: Option.Option<Follow.Follow>;
+  readonly confirm: Option.Option<Confirm>;
+  readonly popup: Option.Option<Popup>;
   readonly tab: Tab;
   readonly focus: Focus;
   readonly cursor: Readonly<Record<List, number>>;
@@ -105,6 +126,8 @@ export const initialView: View = {
   failure: Option.none(),
   notice: Option.none(),
   follow: Option.none(),
+  confirm: Option.none(),
+  popup: Option.none(),
   tab: "servers",
   focus: "machines",
   cursor: { servers: 0, clients: 0, queue: 0 },
@@ -181,6 +204,12 @@ export const isOpen = (key: Key): boolean => key.shift && key.name === "l";
 // f or F: a follow needs no shift, and a shifted one is not another key.
 export const isFollow = (key: Key): boolean => key.name === "f";
 
+// A capital A: an abort stops a job, so it takes the deliberate keystroke.
+export const isAbort = (key: Key): boolean => key.shift && key.name === "a";
+
+// Enter, as the parser names it: the answer to A's question.
+export const isSelect = (key: Key): boolean => key.name === "return";
+
 // q, or ctrl-c, which raw mode delivers as a key rather than a signal.
 export const isQuit = (key: Key): boolean =>
   (key.name === "q" && !key.ctrl && !key.meta) || (key.name === "c" && key.ctrl);
@@ -200,12 +229,28 @@ export const followError = (job: Option.Option<Job>): Option.Option<string> =>
     },
   });
 
-// Every key retires the last notice. L and F move nothing here: opening the ticket or the
-// follow is the runner's. escape closes whatever is followed; a peek closes on any other key
-// too, so the board stays walkable, while a full follow stays up until escape.
+// Every key retires the last notice. While A's question is up it has the keys: h, l and the
+// arrows move between yes on the left and no on the right, escape and enter close it (what
+// enter on yes does is the runner's), and nothing else moves. Otherwise L, F and A move
+// nothing here: opening the ticket, the follow or the question is the runner's, and so is the
+// pop-up, which no key takes down. escape closes whatever is followed; a peek closes on any
+// other key too, so the board stays walkable, while a full follow stays up until escape.
 export const press = (view: View, key: Key): View => {
   const retired: View = { ...view, notice: Option.none() };
-  if (isOpen(key) || isFollow(key)) {
+  if (Option.isSome(view.confirm)) {
+    const asked = view.confirm.value;
+    if (key.name === "h" || key.name === "left") {
+      return { ...retired, confirm: Option.some({ ...asked, choice: "yes" }) };
+    }
+    if (key.name === "l" || key.name === "right") {
+      return { ...retired, confirm: Option.some({ ...asked, choice: "no" }) };
+    }
+    if (key.name === "escape" || isSelect(key)) {
+      return { ...retired, confirm: Option.none() };
+    }
+    return retired;
+  }
+  if (isOpen(key) || isFollow(key) || isAbort(key)) {
     return retired;
   }
   if (key.name === "escape") {
@@ -720,8 +765,29 @@ const HINTS: ReadonlyArray<readonly [key: string, does: string]> = [
   ["g/G", "first/last"],
   ["L", "open ticket"],
   ["F", "follow"],
+  ["A", "abort"],
   ["q", "quit"],
 ];
+
+// A's question: a box this wide in the middle of the screen, the job on its top border, the
+// keys on its bottom one, and between them the question and the two answers, the marker on the
+// one the keys are on. The width holds the longest job name and the keys on the borders.
+export const CONFIRM_WIDTH = 44;
+export const CONFIRM_HINT = "h/l choose   enter select   esc close";
+
+export const confirmTitle = (asked: Confirm): string => `abort ${asked.action} ${asked.ticket}`;
+
+export const confirmRows = (asked: Confirm): ReadonlyArray<Text.Row> => {
+  const answer = (choice: Confirm["choice"]): Text.Piece =>
+    asked.choice === choice
+      ? { text: `▸ ${choice}`, color: PALETTE.gold, bold: true }
+      : Text.muted(`  ${choice}`);
+  return [
+    [Text.value("are you sure?")],
+    [Text.SPACE],
+    [answer("yes"), { text: "    " }, answer("no")],
+  ];
+};
 
 // The last row: the reason the last read failed, else what the last key had to say, else the
 // keys with the name on the right. A reason is cut to the row less its padding.

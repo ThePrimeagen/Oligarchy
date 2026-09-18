@@ -121,6 +121,75 @@ describe("press happy path", () => {
     expect(View.press(noticed, key("tab")).notice).toEqual(Option.none());
   });
 
+  it("A moves nothing: the abort is the runner's; and no key takes the pop-up down, the clock does", () => {
+    const start = shown(many);
+    const noticed = { ...start, notice: Option.some("aborted drive OLI-61") };
+    expect(View.press(noticed, key("a", true))).toEqual(start);
+    expect(View.press(start, key("a", true))).toEqual(start);
+    const popped = {
+      ...start,
+      popup: Option.some({ text: View.CANNOT_ABORT, shownAt: 1_000_000 }),
+    };
+    expect(View.press(popped, key("j")).popup).toEqual(popped.popup);
+    expect(View.press(popped, key("escape")).popup).toEqual(popped.popup);
+    expect(View.press(popped, key("a", true)).popup).toEqual(popped.popup);
+    expect(View.press(popped, key("tab")).popup).toEqual(popped.popup);
+    expect(View.initialView.popup).toEqual(Option.none());
+  });
+
+  it("A's question has the keys while it is up: h, l and the arrows move between yes and no, escape and enter close it, nothing else moves", () => {
+    const start = shown(many);
+    const asked: View.Confirm = { ticket: "OLI-61", action: "drive", choice: "no" };
+    const open = { ...start, confirm: Option.some(asked), notice: Option.some("opened") };
+    expect(View.initialView.confirm).toEqual(Option.none());
+    const yes = View.press(open, key("h"));
+    expect(yes.confirm).toEqual(Option.some({ ...asked, choice: "yes" }));
+    expect(yes.notice).toEqual(Option.none());
+    expect(View.press(open, key("left")).confirm).toEqual(yes.confirm);
+    // yes is the left answer, no the right; a step past either end stays.
+    expect(View.press(yes, key("h")).confirm).toEqual(yes.confirm);
+    expect(View.press(yes, key("l")).confirm).toEqual(Option.some(asked));
+    expect(View.press(yes, key("right")).confirm).toEqual(Option.some(asked));
+    expect(View.press(open, key("l")).confirm).toEqual(Option.some(asked));
+    // escape closes it; so does enter, whichever the answer: what yes does is the runner's.
+    expect(View.press(open, key("escape"))).toEqual(start);
+    expect(View.press(open, key("return"))).toEqual(start);
+    expect(View.press(yes, key("return"))).toEqual(start);
+    // Every other key is the question's too, and moves nothing.
+    const retired = { ...open, notice: Option.none() };
+    for (const other of ["j", "k", "down", "up", "tab", "g", "x", "f", "q"]) {
+      expect(View.press(open, key(other))).toEqual(retired);
+    }
+    expect(View.press(open, key("g", true))).toEqual(retired);
+    expect(View.press(open, key("l", true))).toEqual(retired);
+    expect(View.press(open, key("a", true))).toEqual(retired);
+    // A peek underneath stays up, and so does a pop-up.
+    const peek = Follow.peekFromActions("OLI-61", SESSION_ID, garage.url, [], Option.none());
+    const overPeek = { ...open, follow: Option.some<Follow.Follow>(peek) };
+    expect(View.press(overPeek, key("j")).follow).toEqual(overPeek.follow);
+    expect(View.press(overPeek, key("escape")).follow).toEqual(overPeek.follow);
+    expect(View.press(overPeek, key("escape")).confirm).toEqual(Option.none());
+    const popup = Option.some({ text: View.CANNOT_ABORT, shownAt: 1 });
+    expect(View.press({ ...open, popup }, key("return")).popup).toEqual(popup);
+  });
+
+  it("the question names the job and marks the answer the keys are on", () => {
+    const asked: View.Confirm = { ticket: "OLI-61", action: "drive", choice: "no" };
+    expect(View.confirmTitle(asked)).toBe("abort drive OLI-61");
+    expect(View.confirmTitle({ ...asked, action: "diagnose", ticket: "OLI-65" })).toBe(
+      "abort diagnose OLI-65",
+    );
+    const text = (row: ReadonlyArray<{ readonly text: string }>) =>
+      row.map((piece) => piece.text).join("");
+    const no = View.confirmRows(asked);
+    expect(no.map(text)).toEqual(["are you sure?", " ", "  yes    ▸ no"]);
+    expect(View.confirmRows({ ...asked, choice: "yes" }).map(text)).toEqual([
+      "are you sure?",
+      " ",
+      "▸ yes      no",
+    ]);
+  });
+
   it("selects the job the gold marker rests on: one on a card, or the queue's; none on a header", () => {
     const snapshot: View.Snapshot = {
       ...SNAPSHOT,
@@ -144,7 +213,14 @@ describe("press happy path", () => {
     expect(Option.map(View.selectedJob(past), (job) => job.ticket)).toEqual(Option.some("OLI-62"));
   });
 
-  it("q, Q and ctrl-c quit; L alone opens; f and F follow", () => {
+  it("q, Q and ctrl-c quit; L alone opens; f and F follow; A alone asks to abort; enter selects", () => {
+    expect(View.isAbort(key("a", true))).toBe(true);
+    expect(View.isAbort(key("a"))).toBe(false);
+    expect(View.isAbort({ name: "a", shift: false, ctrl: true, meta: false })).toBe(false);
+    expect(View.isAbort(key("l", true))).toBe(false);
+    expect(View.isSelect(key("return"))).toBe(true);
+    expect(View.isSelect(key("j"))).toBe(false);
+    expect(View.isSelect(key("escape"))).toBe(false);
     expect(View.isQuit(key("q"))).toBe(true);
     expect(View.isQuit(key("q", true))).toBe(true);
     expect(View.isQuit({ name: "c", shift: false, ctrl: true, meta: false })).toBe(true);
