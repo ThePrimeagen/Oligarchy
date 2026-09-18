@@ -13,6 +13,7 @@ import * as Image from "../session/image.ts";
 import * as Api from "../shared/api.ts";
 import * as VizCommand from "./command.ts";
 import * as Run from "./run.ts";
+import * as Settings from "./settings.ts";
 
 // Outside tmux, OpenTUI detects kitty graphics itself. Inside tmux it will not
 // send them unless the image asks, and tmux drops that unless passthrough is on.
@@ -39,12 +40,17 @@ const imageProtocol = Effect.sync((): Run.ImageDraw => {
 
 // NodeServices brings the Terminal, for stdout's size before the screen is opened, and the
 // spawner for xdg-open; the Renderer is OpenTUI's, which owns stdin and stdout while it runs.
+const tickets = Layer.unwrap(
+  Effect.map(Settings.load, (settings) => Layer.succeed(Settings.Tickets, settings.tickets)),
+);
+
 const MainLive = Layer.mergeAll(
   CliOutput.layer(CliOutput.defaultFormatter({ colors: process.stdout.isTTY })),
   CliConfig.layer({ builtIns: GlobalFlag.BuiltIns.filter((flag) => flag !== GlobalFlag.Wizard) }),
   NodeHttpClient.layerNodeHttp,
   Config.providerLayer,
   Run.Renderer.layer(imageProtocol),
+  tickets,
 ).pipe(Layer.provideMerge(NodeServices.layer));
 
 // SIGTERM interrupts the root fiber and the view's scope hands the screen back; ctrl-c arrives as

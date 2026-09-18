@@ -16,9 +16,9 @@ export const MIN_ROWS = 37;
 // least this many: what runs is on the cards, so the queue mostly shows what waits.
 const QUEUE_MIN_ROWS = 4;
 
-// A server writes its row every thirty seconds and a job changes on its own clock; five seconds
-// keeps the queue fresh at a handful of small queries a minute.
-export const REFRESH = Duration.seconds(5);
+// A server writes its row every thirty seconds. The screen's cycle is ten: status and
+// the latest tickets, not a query on every frame.
+export const REFRESH = Duration.seconds(10);
 // The ages tick between reads.
 export const AGE_TICK = Duration.seconds(1);
 // A pop-up stays this long, whatever keys are pressed under it.
@@ -455,20 +455,43 @@ const GRAPHS_FIXED = 3 * (LABEL_WIDTH + 1) + 2 * Text.GAP.text.length;
 const marker = (selected: boolean, hasFocus: boolean): Text.Piece =>
   selected ? { text: "▸", color: hasFocus ? PALETTE.gold : PALETTE.muted } : Text.SPACE;
 
-// The first row of the machines box: the two tabs, the active one lit, counted once read.
+const ratio = (used: number, total: number): string => `${String(used)}/${String(total)}`;
+
+// Clients registered that currently hold a running job of this kind. One client counts once
+// even when it runs several, and a job whose client is not in the list counts for neither.
+const clientsDoing = (
+  snapshot: Snapshot,
+  urls: ReadonlySet<string>,
+  action: Job["action"],
+): number => {
+  const seen = new Set<string>();
+  for (const job of snapshot.queue.running) {
+    if (job.action === action && job.clientUrl !== null && urls.has(job.clientUrl)) {
+      seen.add(job.clientUrl);
+    }
+  }
+  return seen.size;
+};
+
+// The first row of the machines box. Servers holding a guest over the servers registered,
+// and the clients that are driving or diagnosing over the clients registered. The side h
+// and l are on is the bold one. Before the first read there is nothing to count.
 const tabsRow = (view: View): Text.Row => {
-  const count = (tab: Tab): string =>
-    Option.match(view.snapshot, {
-      onNone: () => "",
-      onSome: (snapshot) => ` · ${String(ofTab(snapshot, tab).length)}`,
-    });
-  const tab = (name: Tab, text: string): Text.Piece =>
-    view.tab === name ? Text.strong(text) : Text.muted(text);
-  return [
-    tab("servers", `qemu servers${count("servers")}`),
-    Text.muted(" │ "),
-    tab("clients", `automation clients${count("clients")}`),
-  ];
+  const snapshot = Option.getOrNull(view.snapshot);
+  if (snapshot === null) {
+    return view.tab === "servers"
+      ? [Text.strong("servers"), Text.muted(" │ driving diagnosing")]
+      : [Text.muted("servers │ "), Text.strong("driving diagnosing")];
+  }
+  const servers = `servers ${ratio(
+    ofTab(snapshot, "servers").filter((machine) => (machine.stats?.qemus ?? 0) > 0).length,
+    ofTab(snapshot, "servers").length,
+  )}`;
+  const urls = new Set(ofTab(snapshot, "clients").map((machine) => machine.url));
+  const clients = `driving ${ratio(clientsDoing(snapshot, urls, "drive"), urls.size)} diagnosing ${ratio(clientsDoing(snapshot, urls, "diagnose"), urls.size)}`;
+  return view.tab === "servers"
+    ? [Text.strong(servers), Text.muted(` │ ${clients}`)]
+    : [Text.muted(`${servers} │ `), Text.strong(clients)];
 };
 
 // A job row: the marker column and a space, then six columns with a gap between each. A live

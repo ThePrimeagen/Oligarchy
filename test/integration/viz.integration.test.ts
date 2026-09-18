@@ -146,7 +146,7 @@ Postgres.describeWithDatabase("./viz against the seeded database", () => {
     expect(on !== -1 && off !== -1 && on < off, "takes the screen and gives it back").toBe(true);
     const drawn = stripAnsi(result.output.slice(on, off));
     expect(drawn).toMatch(/─ read \d+ s ago ─╮/);
-    expect(drawn).toMatch(/│ qemu servers · \d+ │ automation clients · \d+ /);
+    expect(drawn).toMatch(/│ servers \d+\/\d+ │ driving \d+\/\d+ diagnosing \d+\/\d+ /);
     expect(drawn).toMatch(/╭─ automation · running \d+ · pending \d+ ─+╮/);
     expect(drawn).toMatch(/ticket\s+test\s+action\s+status\s+queued\s+started\s+│/);
     expect(drawn).not.toContain("finished");

@@ -77,7 +77,7 @@ import {
   values,
 } from "../support/viz.ts";
 
-const TABS = "qemu servers · 2 │ automation clients · 1";
+const TABS = "servers 1/2 │ driving 1/1 diagnosing 0/1";
 
 // The screen drawn once for a view at a size, as plain rows or as each row's styled spans.
 const mounted = <A,>(
@@ -247,8 +247,8 @@ describe("screen happy path", () => {
         const rows = yield* styled(shown(SNAPSHOT));
         expect(rows[0]).toEqual([[machinesTop("read 0 s ago"), MUTED, PLAIN]]);
         // The separator shares the inactive tab's muted, so the two are one run of cells.
-        expect(styleOf(rows[1], "qemu servers · 2")).toEqual([TEXT, BOLD]);
-        expect(styleOf(rows[1], " │ automation clients · 1")).toEqual([MUTED, PLAIN]);
+        expect(styleOf(rows[1], "servers 1/2")).toEqual([TEXT, BOLD]);
+        expect(styleOf(rows[1], " │ driving 1/1 diagnosing 0/1")).toEqual([MUTED, PLAIN]);
         expect(styleOf(rows[2], "▸")).toEqual([GOLD, PLAIN]);
         expect(styleOf(rows[2], "garage")).toEqual([TEXT, BOLD]);
         expect(styleOf(rows[2], "http://127.0.0.1:55332")).toEqual([SUBTLE, PLAIN]);
@@ -293,8 +293,8 @@ describe("screen happy path", () => {
         expect(textOf(onJob[2])).not.toContain("▸");
         expect(styleOf(onJob[5], "▸")).toEqual([GOLD, PLAIN]);
         const clients = yield* styled(shown(SNAPSHOT, { tab: "clients" }));
-        expect(styleOf(clients[1], "qemu servers · 2 │ ")).toEqual([MUTED, PLAIN]);
-        expect(styleOf(clients[1], "automation clients · 1")).toEqual([TEXT, BOLD]);
+        expect(styleOf(clients[1], "servers 1/2 │ ")).toEqual([MUTED, PLAIN]);
+        expect(styleOf(clients[1], "driving 1/1 diagnosing 0/1")).toEqual([TEXT, BOLD]);
       }),
   );
 
@@ -740,11 +740,33 @@ describe("screen unhappy path", () => {
     }),
   );
 
+  it.effect(
+    "counts a client once per kind, and ignores a running job whose client is not listed",
+    () =>
+      Effect.gen(function* () {
+        const rows = yield* draw(
+          shown({
+            ...SNAPSHOT,
+            queue: {
+              ...EMPTY_QUEUE,
+              running: [
+                running,
+                { ...running, ticket: "OLI-70" },
+                diagnosing,
+                { ...diagnosing, ticket: "OLI-71", clientUrl: "http://missing.example" },
+              ],
+            },
+          }),
+        );
+        expect(rows[1]).toBe(box("servers 1/2 │ driving 1/1 diagnosing 1/1"));
+      }),
+  );
+
   it.effect("says so in a tab with no machines, and gives the queue the rows", () =>
     Effect.gen(function* () {
       const servers = yield* draw(shown({ ...SNAPSHOT, machines: [runner] }));
       expect(servers[0]).toBe(machinesTop("read 0 s ago"));
-      expect(servers[1]).toBe(box("qemu servers · 0 │ automation clients · 1"));
+      expect(servers[1]).toBe(box("servers 0/0 │ driving 1/1 diagnosing 0/1"));
       expect(servers[2]).toBe(box("no qemu servers registered"));
       expect(servers[3]).toBe(bottom());
       expect(servers[4]).toBe(queueTop("automation · running 1 · pending 1"));
@@ -853,7 +875,7 @@ describe("screen unhappy path", () => {
     Effect.gen(function* () {
       const rows = yield* draw(View.initialView);
       expect(rows[0]).toBe(machinesTop("reading…"));
-      expect(rows[1]).toBe(box("qemu servers │ automation clients"));
+      expect(rows[1]).toBe(box("servers │ driving diagnosing"));
       expect(rows[2]).toBe(bottom());
       expect(rows[3]).toBe(queueTop("automation"));
       expect(rows[4]).toBe(box(JOB_HEADER));
@@ -863,7 +885,7 @@ describe("screen unhappy path", () => {
       expect(rows[ROWS - 2]).toBe(bottom());
       expect(rows[ROWS - 1]).toBe(FOOTER);
       const spans = yield* styled(View.initialView);
-      expect(styleOf(spans[1], "qemu servers")).toEqual([TEXT, BOLD]);
+      expect(styleOf(spans[1], "servers")).toEqual([TEXT, BOLD]);
     }),
   );
 
@@ -880,7 +902,7 @@ describe("screen unhappy path", () => {
       expect(styleOf(spans[ROWS - 1], `error: ${reason}`)).toEqual([LOVE, PLAIN]);
       const bare = yield* draw({ ...View.initialView, failure: Option.some(reason) });
       expect(bare[0]).toBe(machinesTop("reading…"));
-      expect(bare[1]).toBe(box("qemu servers │ automation clients"));
+      expect(bare[1]).toBe(box("servers │ driving diagnosing"));
       expect(bare[ROWS - 1]).toBe(pad(` error: ${reason}`, COLUMNS));
     }),
   );

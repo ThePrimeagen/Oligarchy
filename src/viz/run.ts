@@ -29,14 +29,16 @@ import * as ProxyClient from "../client/proxy-client.ts";
 import * as Config from "../config.ts";
 import * as Actions from "../db/actions.ts";
 import * as Automation from "../db/automation.ts";
-import * as ProcessStats from "../db/process-stats.ts";
-import * as Servers from "../db/servers.ts";
+import type * as ProcessStats from "../db/process-stats.ts";
+import type * as Servers from "../db/servers.ts";
 import * as ExternalFailure from "../external-failure.ts";
 import * as Render from "../observability/render.ts";
 import * as Domain from "../shared/domain.ts";
 import * as Errors from "../shared/errors.ts";
 import * as Follow from "./follow.ts";
+import * as Read from "./read.ts";
 import * as Screen from "./screen.tsx";
+import * as Settings from "./settings.ts";
 import * as View from "./view.ts";
 
 // Linear resolves a ticket by its identifier alone and redirects into the workspace.
@@ -244,9 +246,9 @@ export const run: Effect.Effect<
 > = Effect.gen(function* () {
   const screen = yield* Renderer;
   const imageProtocol = yield* screen.imageProtocol;
-  const servers = yield* Servers.ServerStore;
-  const processStats = yield* ProcessStats.ProcessStatsStore;
-  const automation = yield* Automation.AutomationStore;
+  const tickets = yield* Settings.Tickets;
+  const needs = yield* Read.board(tickets);
+  const prior = yield* Ref.make(Option.none<Read.Live>());
   const [view, setView] = createSignal<View.View>(View.initialView);
   const [now, setNow] = createSignal(yield* Clock.currentTimeMillis);
   // Every change to the view goes through here, so the screen redraws are steps of the fiber
@@ -264,15 +266,13 @@ export const run: Effect.Effect<
   );
   const read = Effect.gen(function* () {
     // Taken before the queries, so an age counts from before its row was read, never after: a
-    // slow read leans towards silent, not live.
+    // slow read leans towards silent, not live. A once-need is kept after the open.
     const readAt = yield* Clock.currentTimeMillis;
-    const machines = yield* servers.listMachines();
-    const series = yield* processStats.listSeries(View.SERIES_SAMPLES);
-    // No completed jobs: the screen shows what runs and what waits.
-    const queue = yield* automation.listJobs(0);
+    const snapshot = yield* Read.collect(needs, yield* Ref.get(prior), readAt);
+    yield* Ref.set(prior, Option.some(snapshot));
     yield* update((current) => ({
       ...current,
-      snapshot: Option.some({ machines, series, queue, readAt }),
+      snapshot: Option.some(snapshot),
       failure: Option.none(),
     }));
   }).pipe(

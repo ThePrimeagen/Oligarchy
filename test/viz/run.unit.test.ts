@@ -152,7 +152,7 @@ const refused = Errors.DatabaseError.make({
 
 describe("run happy path", () => {
   it.effect(
-    "opens the screen, reads and draws at once asking for no completed jobs, ages every second, re-reads every five, and q hands the screen back",
+    "opens the screen, reads and draws at once asking for the default finished tickets, ages every second, re-reads every ten, and q hands the screen back",
     () =>
       Effect.gen(function* () {
         const screen = fakeRenderer({ columns: 135, rows: 37 });
@@ -170,11 +170,11 @@ describe("run happy path", () => {
           });
         const { fiber, setup } = yield* started(screen, { machines, jobs });
         expect(reads.count).toBe(1);
-        expect(asked).toEqual([0]);
+        expect(asked).toEqual([25]);
         const first = yield* rows(setup);
         expect(first).toHaveLength(37);
         expect(first[0]).toBe(machinesTop("read 0 s ago"));
-        expect(first[1]).toBe(box("qemu servers · 1 │ automation clients · 1"));
+        expect(first[1]).toBe(box("servers 1/1 │ driving 1/1 diagnosing 0/1"));
         expect(first[2]).toBe(box(header("▸ garage · http://127.0.0.1:55332", GARAGE_RIGHT)));
         expect(first[3]).toBe(box(labels(CPU_TOP, MEM_TOP, JOBS_TOP)));
         expect(first[5]).toBe(box(job(" ", RUNNING)));
@@ -190,10 +190,10 @@ describe("run happy path", () => {
         expect(second[0]).toBe(machinesTop("read 1 s ago"));
         expect(second[2]).toContain("seen 13 s ago");
 
-        yield* TestClock.adjust("4 seconds");
+        yield* TestClock.adjust("9 seconds");
         yield* settle;
         expect(reads.count).toBe(2);
-        expect(asked).toEqual([0, 0]);
+        expect(asked).toEqual([25, 25]);
         expect((yield* rows(setup))[0]).toBe(machinesTop("read 0 s ago"));
 
         setup.mockInput.pressKey("q");
@@ -273,7 +273,7 @@ describe("run happy path", () => {
           PLAIN,
         ]);
         // The notice outlives the age ticks and the reads, and goes with the next key.
-        yield* TestClock.adjust("5 seconds");
+        yield* TestClock.adjust("10 seconds");
         yield* settle;
         expect(yield* footer(setup)).toBe(OPENED);
         setup.mockInput.pressKey("k");
@@ -403,11 +403,11 @@ describe("run unhappy path", () => {
         const { fiber, setup } = yield* started(screen, { machines });
         expect(yield* footer(setup)).toBe(FOOTER);
 
-        yield* TestClock.adjust("5 seconds");
+        yield* TestClock.adjust("10 seconds");
         yield* settle;
         expect(calls.count).toBe(2);
         const failedFrame = yield* rows(setup);
-        expect(failedFrame[0]).toBe(machinesTop("read 5 s ago"));
+        expect(failedFrame[0]).toBe(machinesTop("read 10 s ago"));
         expect(failedFrame[2]).toContain("http://127.0.0.1:55332");
         expect(failedFrame[36]).toBe(
           pad(" error: Failed query: select 1: connect ECONNREFUSED 127.0.0.1:5432", COLUMNS),
@@ -418,7 +418,7 @@ describe("run unhappy path", () => {
           PLAIN,
         ]);
 
-        yield* TestClock.adjust("5 seconds");
+        yield* TestClock.adjust("10 seconds");
         yield* settle;
         expect(calls.count).toBe(3);
         const recovered = yield* rows(setup);
@@ -446,11 +446,11 @@ describe("run unhappy path", () => {
       const { fiber, setup } = yield* started(screen, { jobs });
       const bare = yield* rows(setup);
       expect(bare[0]).toBe(machinesTop("reading…"));
-      expect(bare[1]).toBe(box("qemu servers │ automation clients"));
+      expect(bare[1]).toBe(box("servers │ driving diagnosing"));
       expect(bare[2]).toBe(bottom());
       expect(bare[36]).toBe(pad(" error: timeout", COLUMNS));
 
-      yield* TestClock.adjust("5 seconds");
+      yield* TestClock.adjust("10 seconds");
       yield* settle;
       expect(calls.count).toBe(2);
       const shownNow = yield* rows(setup);
@@ -756,9 +756,9 @@ describe("run follow happy path", () => {
         const waiting = yield* until(setup, shows("waiting for OLI-61's session"));
         expect(waiting[36]).toBe(pad(" waiting for OLI-61's session", COLUMNS));
         expect(waiting.some((row) => row.includes(PEEK_TITLE))).toBe(false);
-        // The board re-reads at five seconds; the wait looks at that snapshot a second later.
+        // The board re-reads at ten seconds; the wait looks at that snapshot a second later.
         ready.value = true;
-        yield* TestClock.adjust("6 seconds");
+        yield* TestClock.adjust("11 seconds");
         const opened = yield* until(setup, shows(PEEK_TITLE));
         expect(opened.some((row) => row.includes(PEEK_TITLE))).toBe(true);
         expect(opened.some((row) => row.includes("send-key"))).toBe(true);
@@ -839,7 +839,7 @@ describe("run follow unhappy path", () => {
       const waiting = yield* until(setup, shows("waiting for OLI-61's session"));
       expect(waiting[36]).toBe(pad(" waiting for OLI-61's session", COLUMNS));
       alive.value = false;
-      yield* TestClock.adjust("6 seconds");
+      yield* TestClock.adjust("11 seconds");
       const ended = yield* until(setup, shows("OLI-61 ended before a session"));
       expect(ended[36]).toBe(pad(" OLI-61 ended before a session", COLUMNS));
       expect(ended.some((row) => row.includes(PEEK_TITLE))).toBe(false);
@@ -866,7 +866,7 @@ describe("run follow unhappy path", () => {
       setup.mockInput.pressKey("k");
       yield* settle;
       ready.value = true;
-      yield* TestClock.adjust("6 seconds");
+      yield* TestClock.adjust("11 seconds");
       yield* settle;
       const moved = yield* rows(setup);
       expect(moved.some((row) => row.includes(PEEK_TITLE))).toBe(false);

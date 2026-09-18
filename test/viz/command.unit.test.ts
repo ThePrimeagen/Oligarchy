@@ -113,7 +113,7 @@ describe("viz happy path", () => {
         expect(h.touched).toEqual(["database"]);
         expect(h.reads.count).toBe(3);
         const drawn = (yield* rows(setup)).join("\n");
-        expect(drawn).toContain("qemu servers · 0");
+        expect(drawn).toContain("servers 0/0");
         expect(drawn).toContain("no qemu servers registered");
         expect(drawn).toContain("automation · running 0 · pending 0");
         expect(drawn).toContain("q quit");
