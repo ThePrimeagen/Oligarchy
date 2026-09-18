@@ -1003,7 +1003,59 @@ const aborting = (respond: () => Response): FakeHttp.Recorder =>
 
 const OVER = () => FakeHttp.json({ error: 'ticket "OLI-61" has no drive to abort' }, 400);
 
+// A asks first: the question, yes, enter.
+const confirmAbort = (setup: TestRendererSetup): void => {
+  setup.mockInput.pressKey("a", { shift: true });
+  setup.mockInput.pressKey("h");
+  setup.mockInput.pressEnter();
+};
+
+const QUESTION = "are you sure?";
+
 describe("run abort happy path", () => {
+  it.effect(
+    "A asks first: the question names the job with the marker on no, enter there closes it and sends nothing, h, l and the arrows move the marker, and enter on yes sends the abort",
+    () =>
+      Effect.gen(function* () {
+        const screen = fakeRenderer();
+        const server = aborting(() => FakeHttp.json({ ok: "true" }));
+        const { fiber, setup } = yield* started(screen, {}, { http: server.layer });
+        setup.mockInput.pressKey("j");
+        setup.mockInput.pressKey("a", { shift: true });
+        const asked = yield* until(setup, shows(QUESTION));
+        expect(asked.some((row) => row.includes("─ abort drive OLI-61 ─"))).toBe(true);
+        expect(asked.some((row) => row.includes("  yes    ▸ no"))).toBe(true);
+        expect(asked.some((row) => row.includes(View.CONFIRM_HINT))).toBe(true);
+        expect(asked[36]).toBe(FOOTER);
+        setup.mockInput.pressEnter();
+        yield* settle;
+        expect((yield* rows(setup)).some((row) => row.includes(QUESTION))).toBe(false);
+        expect(server.requests).toEqual([]);
+        // Asked again: the arrows and h and l move between the answers.
+        setup.mockInput.pressKey("a", { shift: true });
+        setup.mockInput.pressKey("h");
+        yield* until(setup, shows("▸ yes      no"));
+        setup.mockInput.pressKey("l");
+        yield* until(setup, shows("  yes    ▸ no"));
+        setup.mockInput.pressArrow("left");
+        yield* until(setup, shows("▸ yes      no"));
+        setup.mockInput.pressArrow("right");
+        yield* until(setup, shows("  yes    ▸ no"));
+        setup.mockInput.pressKey("h");
+        setup.mockInput.pressEnter();
+        const closed = yield* until(setup, shows("aborted drive OLI-61"));
+        expect(closed.some((row) => row.includes(QUESTION))).toBe(false);
+        expect(server.requests).toHaveLength(1);
+        expect(JSON.parse(server.requests[0]?.body ?? "")).toEqual({
+          ticket: "OLI-61",
+          action: "drive",
+        });
+        setup.mockInput.pressKey("q");
+        yield* Fiber.join(fiber);
+        expect(setup.renderer.isDestroyed).toBe(true);
+      }),
+  );
+
   it.effect(
     "A asks the automation server to abort the selected job on a card, or in the queue, with the token, re-reads the board at once and says so on the footer until the next key",
     () =>
@@ -1023,7 +1075,7 @@ describe("run abort happy path", () => {
         });
         const { fiber, setup } = yield* started(screen, { jobs }, { http: server.layer });
         setup.mockInput.pressKey("j");
-        setup.mockInput.pressKey("a", { shift: true });
+        confirmAbort(setup);
         const closed = yield* until(setup, shows("aborted drive OLI-61"));
         expect(server.requests).toEqual([
           expect.objectContaining({
@@ -1047,7 +1099,7 @@ describe("run abort happy path", () => {
         ]);
         // The queue's selected job, pending, goes the same way.
         setup.mockInput.pressTab();
-        setup.mockInput.pressKey("a", { shift: true });
+        confirmAbort(setup);
         const queued = yield* until(setup, shows("aborted drive OLI-62"));
         expect(server.requests).toHaveLength(2);
         expect(JSON.parse(server.requests[1]?.body ?? "")).toEqual({
@@ -1073,7 +1125,7 @@ describe("run abort happy path", () => {
         const server = aborting(OVER);
         const { fiber, setup } = yield* started(screen, {}, { http: server.layer });
         setup.mockInput.pressKey("j");
-        setup.mockInput.pressKey("a", { shift: true });
+        confirmAbort(setup);
         const popped = yield* until(setup, shows(POPUP));
         expect(server.requests).toHaveLength(1);
         // In the middle of the screen, the footer's keys still under it.
@@ -1088,10 +1140,10 @@ describe("run abort happy path", () => {
         yield* TestClock.adjust("2 seconds");
         yield* settle;
         expect((yield* rows(setup)).some((row) => row.includes(POPUP))).toBe(true);
-        // A second A two seconds in: the pop-up outlives the first one's three seconds.
+        // A second abort two seconds in: the pop-up outlives the first one's three seconds.
         setup.mockInput.pressKey("j");
-        setup.mockInput.pressKey("a", { shift: true });
-        yield* until(setup, shows(POPUP));
+        confirmAbort(setup);
+        yield* until(setup, (drawn) => shows(POPUP)(drawn) && server.requests.length === 2);
         expect(server.requests).toHaveLength(2);
         yield* TestClock.adjust("1 second");
         yield* settle;
@@ -1109,6 +1161,51 @@ describe("run abort happy path", () => {
 });
 
 describe("run abort unhappy path", () => {
+  it.effect(
+    "while the question is up the board's keys move nothing, L opens nothing, F follows nothing, escape closes it, and q quits with it up; nothing is sent",
+    () =>
+      Effect.gen(function* () {
+        const screen = fakeRenderer();
+        const server = aborting(() => FakeHttp.json({ ok: "true" }));
+        const spawner = fakeSpawner(byCommand({ "xdg-open": { exitCode: 0 } }));
+        const { fiber, setup } = yield* started(
+          screen,
+          {},
+          { http: server.layer, spawner, actions: seeded() },
+        );
+        setup.mockInput.pressKey("j");
+        setup.mockInput.pressKey("a", { shift: true });
+        yield* until(setup, shows(QUESTION));
+        setup.mockInput.pressKey("k");
+        setup.mockInput.pressTab();
+        setup.mockInput.pressKey("l", { shift: true });
+        setup.mockInput.pressKey("f");
+        yield* settle;
+        const held = yield* rows(setup);
+        expect(held.some((row) => row.includes(QUESTION))).toBe(true);
+        expect(held[5]).toBe(box(job("▸", RUNNING)));
+        expect(held.some((row) => row.includes(PEEK_TITLE))).toBe(false);
+        expect(spawner.spawned).toEqual([]);
+        expect(held[36]).toBe(FOOTER);
+        setup.mockInput.pressEscape();
+        yield* settle;
+        const closed = yield* rows(setup);
+        expect(closed.some((row) => row.includes(QUESTION))).toBe(false);
+        expect(closed[5]).toBe(box(job("▸", RUNNING)));
+        // The keys are the board's again.
+        setup.mockInput.pressKey("k");
+        yield* settle;
+        expect((yield* rows(setup))[2]?.startsWith("│ ▸ garage")).toBe(true);
+        setup.mockInput.pressKey("j");
+        setup.mockInput.pressKey("a", { shift: true });
+        yield* until(setup, shows(QUESTION));
+        setup.mockInput.pressKey("q");
+        yield* Fiber.join(fiber);
+        expect(setup.renderer.isDestroyed).toBe(true);
+        expect(server.requests).toEqual([]);
+      }),
+  );
+
   it.effect("A with no job selected, or a job without a ticket, says so and asks nothing", () =>
     Effect.gen(function* () {
       const server = aborting(() => FakeHttp.json({ ok: "true" }));
@@ -1116,7 +1213,9 @@ describe("run abort unhappy path", () => {
       const byHeader = yield* started(onHeader, {}, { http: server.layer });
       byHeader.setup.mockInput.pressKey("a", { shift: true });
       yield* settle;
-      expect(yield* footer(byHeader.setup)).toBe(pad(" no job selected", COLUMNS));
+      const drawn = yield* rows(byHeader.setup);
+      expect(drawn[36]).toBe(pad(" no job selected", COLUMNS));
+      expect(drawn.some((row) => row.includes(QUESTION))).toBe(false);
       byHeader.setup.mockInput.pressKey("q");
       yield* Fiber.join(byHeader.fiber);
 
@@ -1131,9 +1230,9 @@ describe("run abort unhappy path", () => {
       byUnticketed.setup.mockInput.pressTab();
       byUnticketed.setup.mockInput.pressKey("a", { shift: true });
       yield* settle;
-      expect(yield* footer(byUnticketed.setup)).toBe(
-        pad(" the selected job has no ticket", COLUMNS),
-      );
+      const unticketedFrame = yield* rows(byUnticketed.setup);
+      expect(unticketedFrame[36]).toBe(pad(" the selected job has no ticket", COLUMNS));
+      expect(unticketedFrame.some((row) => row.includes(QUESTION))).toBe(false);
       byUnticketed.setup.mockInput.pressKey("q");
       yield* Fiber.join(byUnticketed.fiber);
       expect(server.requests).toEqual([]);
@@ -1152,7 +1251,7 @@ describe("run abort unhappy path", () => {
           { http: server.layer, env: { OLIGARCHY_TOKEN: "test-token" } },
         );
         byNoUrl.setup.mockInput.pressKey("j");
-        byNoUrl.setup.mockInput.pressKey("a", { shift: true });
+        confirmAbort(byNoUrl.setup);
         yield* until(byNoUrl.setup, shows("is not set"));
         expect(yield* footer(byNoUrl.setup)).toBe(
           pad(" AUTOMATION_SERVER_URL is not set", COLUMNS),
@@ -1167,7 +1266,7 @@ describe("run abort unhappy path", () => {
           { http: server.layer, env: { AUTOMATION_SERVER_URL } },
         );
         byNoToken.setup.mockInput.pressKey("j");
-        byNoToken.setup.mockInput.pressKey("a", { shift: true });
+        confirmAbort(byNoToken.setup);
         yield* until(byNoToken.setup, shows("is not set"));
         expect(yield* footer(byNoToken.setup)).toBe(pad(" OLIGARCHY_TOKEN is not set", COLUMNS));
         byNoToken.setup.mockInput.pressKey("q");
@@ -1185,7 +1284,7 @@ describe("run abort unhappy path", () => {
         { http: aborting(() => FakeHttp.json({ error: "unauthorized" }, 401)).layer },
       );
       byUnauthorized.setup.mockInput.pressKey("j");
-      byUnauthorized.setup.mockInput.pressKey("a", { shift: true });
+      confirmAbort(byUnauthorized.setup);
       const refusedFrame = yield* until(byUnauthorized.setup, shows("unauthorized"));
       expect(refusedFrame[36]).toBe(pad(" unauthorized", COLUMNS));
       expect(refusedFrame.some((row) => row.includes(POPUP))).toBe(false);
@@ -1202,7 +1301,7 @@ describe("run abort unhappy path", () => {
         { http: aborting(() => FakeHttp.json({ error: detail }, 500)).layer },
       );
       byFailing.setup.mockInput.pressKey("j");
-      byFailing.setup.mockInput.pressKey("a", { shift: true });
+      confirmAbort(byFailing.setup);
       const failedFrame = yield* until(byFailing.setup, shows("opencode exited 1"));
       expect(failedFrame[36]).toBe(pad(` ${detail}`, COLUMNS));
       byFailing.setup.mockInput.pressKey("q");
@@ -1225,7 +1324,7 @@ describe("run abort unhappy path", () => {
       );
       const { fiber, setup } = yield* started(screen, {}, { http });
       setup.mockInput.pressKey("j");
-      setup.mockInput.pressKey("a", { shift: true });
+      confirmAbort(setup);
       const unreachable = yield* until(setup, shows("ECONNREFUSED"));
       expect(unreachable[36]).toBe(
         pad(
@@ -1246,7 +1345,7 @@ describe("run abort unhappy path", () => {
         const { fiber, setup } = yield* started(screen, {}, { http: FakeHttp.never });
         setup.mockInput.pressTab();
         setup.mockInput.pressKey("j");
-        setup.mockInput.pressKey("a", { shift: true });
+        confirmAbort(setup);
         yield* settle;
         expect(yield* footer(setup)).toBe(FOOTER);
         setup.mockInput.pressKey("k");
@@ -1275,16 +1374,18 @@ describe("run abort unhappy path", () => {
         );
         const { fiber, setup } = yield* started(screen, { jobs }, { http: server.layer });
         setup.mockInput.pressTab();
-        setup.mockInput.pressKey("a", { shift: true });
+        confirmAbort(setup);
         yield* settle;
         expect(server.requests).toHaveLength(1);
         expect(yield* footer(setup)).toBe(FOOTER);
-        // Another A, on the next job, while the server has not answered the first.
+        // Another A, on the next job, while the server has not answered the first: no question.
         setup.mockInput.pressKey("j");
         setup.mockInput.pressKey("a", { shift: true });
         yield* settle;
         expect(server.requests).toHaveLength(1);
-        expect(yield* footer(setup)).toBe(pad(" still aborting drive OLI-61", COLUMNS));
+        const waiting = yield* rows(setup);
+        expect(waiting[36]).toBe(pad(" still aborting drive OLI-61", COLUMNS));
+        expect(waiting.some((row) => row.includes(QUESTION))).toBe(false);
         // The answer lands: the board is read again and the footer says so.
         board.queue = { ...QUEUE, running: [] };
         yield* Deferred.succeed(gate, undefined);
@@ -1292,7 +1393,7 @@ describe("run abort unhappy path", () => {
         expect(closed[36]).toBe(pad(" aborted drive OLI-61", COLUMNS));
         expect(closed.slice(0, 36).some((row) => row.includes("OLI-61"))).toBe(false);
         // With nothing in flight, the next A is sent: the one job left is selected.
-        setup.mockInput.pressKey("a", { shift: true });
+        confirmAbort(setup);
         yield* until(setup, shows("aborted drive OLI-62"));
         expect(server.requests).toHaveLength(2);
         expect(JSON.parse(server.requests[1]?.body ?? "")).toEqual({

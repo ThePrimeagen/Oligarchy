@@ -214,10 +214,10 @@ const drawFailure = (renderer: CliRenderer): Effect.Effect<never, Errors.Command
 // so a read, a tick of the ages or a key changes the signal and the cells that changed are
 // written. The tables are read at once and every REFRESH, the clock the ages count from is set
 // at the first frame and every AGE_TICK, L opens the selected job's ticket first, F peeks at the
-// selected running job and follows it live on a second F, A has the automation server abort
-// the selected job, and q or ctrl-c ends the run and the scope hands the screen back. A read
-// that fails leaves the last picture up with its reason on the footer; a frame that fails ends
-// the run.
+// selected running job and follows it live on a second F, A asks and then has the automation
+// server abort the selected job, and q or ctrl-c ends the run and the scope hands the screen
+// back. A read that fails leaves the last picture up with its reason on the footer; a frame
+// that fails ends the run.
 export const run: Effect.Effect<
   void,
   Errors.CommandError,
@@ -385,12 +385,13 @@ export const run: Effect.Effect<
             ),
           );
         });
-      // A: the selected job goes to the automation server off the key loop, so a server that
-      // never answers holds no key. Closed, the board is read again before the footer says so,
-      // so the job is gone as the words land; over already, the pop-up says what cannot be
-      // done; refused, the footer says why. One abort is in flight at a time, and it is not
-      // interrupted: a second A while it lasts would ask for the same job again, and the
-      // answer to that, a pop-up, would be about a job this screen just closed.
+      // A asks first, and yes on the question sends the job to the automation server off the
+      // key loop, so a server that never answers holds no key. Closed, the board is read again
+      // before the footer says so, so the job is gone as the words land; over already, the
+      // pop-up says what cannot be done; refused, the footer says why. One abort is in flight
+      // at a time, and it is not interrupted: another A while it lasts would ask about the
+      // same job again, and the answer to that, a pop-up, would be about a job this screen
+      // just closed.
       const abortWork = (ticket: string, action: Automation.AutomationAction) =>
         failing(
           Effect.gen(function* () {
@@ -408,7 +409,7 @@ export const run: Effect.Effect<
           }),
         );
       const aborting = yield* Ref.make(Option.none<string>());
-      const abort = Effect.gen(function* () {
+      const ask = Effect.gen(function* () {
         const job = View.selectedJob(view());
         if (Option.isNone(job)) {
           yield* setNotice("no job selected");
@@ -424,11 +425,21 @@ export const run: Effect.Effect<
           yield* setNotice(`still aborting ${inFlight.value}`);
           return;
         }
-        yield* Ref.set(aborting, Option.some(`${action} ${ticket}`));
-        yield* Effect.forkScoped(
-          Effect.ensuring(abortWork(ticket, action), Ref.set(aborting, Option.none())),
-        );
+        yield* update((current) => ({
+          ...current,
+          confirm: Option.some({ ticket, action, choice: "no" }),
+        }));
       });
+      const startAbort = (asked: View.Confirm) =>
+        Effect.gen(function* () {
+          yield* Ref.set(aborting, Option.some(`${asked.action} ${asked.ticket}`));
+          yield* Effect.forkScoped(
+            Effect.ensuring(
+              abortWork(asked.ticket, asked.action),
+              Ref.set(aborting, Option.none()),
+            ),
+          );
+        });
       // F: nothing more on a full follow, the stream on a peek, else the selected job's peek.
       const openFollow = Effect.gen(function* () {
         const current = view();
@@ -455,7 +466,15 @@ export const run: Effect.Effect<
         Stream.takeWhile((key) => !View.isQuit(key)),
         Stream.runForEach((key) =>
           Effect.gen(function* () {
+            const asked = view().confirm;
             yield* update((current) => View.press(current, key));
+            // The question had the key: yes on enter is the one answer that does anything.
+            if (Option.isSome(asked)) {
+              if (View.isSelect(key) && asked.value.choice === "yes") {
+                yield* startAbort(asked.value);
+              }
+              return;
+            }
             if (Option.isNone(view().follow)) {
               yield* stopFollow;
             }
@@ -466,7 +485,7 @@ export const run: Effect.Effect<
               yield* openFollow;
             }
             if (View.isAbort(key)) {
-              yield* abort;
+              yield* ask;
             }
           }),
         ),
