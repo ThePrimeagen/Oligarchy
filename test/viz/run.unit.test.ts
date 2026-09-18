@@ -1,7 +1,7 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import type { TestRendererSetup } from "@opentui/core/testing";
-import { Effect, Fiber, Layer } from "effect";
+import { Deferred, Effect, Fiber, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
 import type * as Automation from "../../src/db/automation.ts";
@@ -896,6 +896,68 @@ describe("run follow unhappy path", () => {
         setup.mockInput.pressKey("q");
         yield* Fiber.join(fiber);
         expect(setup.renderer.isDestroyed).toBe(true);
+      }),
+  );
+
+  it.effect(
+    "a database that never answers the peek holds no key: the board still moves, and q quits",
+    () =>
+      Effect.gen(function* () {
+        const screen = fakeRenderer();
+        const stalled = Stores.fakeActionStore({ listActions: () => Effect.never });
+        const { fiber, setup } = yield* started(screen, {}, { actions: stalled });
+        setup.mockInput.pressKey("j");
+        setup.mockInput.pressKey("f");
+        yield* settle;
+        const waiting = yield* rows(setup);
+        expect(waiting.some((row) => row.includes(PEEK_TITLE))).toBe(false);
+        expect(waiting[36]).toBe(FOOTER);
+        setup.mockInput.pressKey("k");
+        yield* settle;
+        expect((yield* rows(setup))[2]?.startsWith("│ ▸ garage")).toBe(true);
+        setup.mockInput.pressKey("q");
+        yield* Fiber.join(fiber);
+        expect(setup.renderer.isDestroyed).toBe(true);
+      }),
+  );
+
+  it.effect(
+    "a peek whose reads land after the selection moved on is dropped, and one whose reads land in time is shown",
+    () =>
+      Effect.gen(function* () {
+        const gate = yield* Deferred.make<void>();
+        const answered = { count: 0 };
+        const slow = Stores.fakeActionStore({
+          listActions: () =>
+            Effect.as(Deferred.await(gate), []).pipe(
+              Effect.tap(() =>
+                Effect.sync(() => {
+                  answered.count += 1;
+                }),
+              ),
+            ),
+        });
+        const screen = fakeRenderer();
+        const { fiber, setup } = yield* started(screen, {}, { actions: slow });
+        setup.mockInput.pressKey("j");
+        setup.mockInput.pressKey("f");
+        yield* settle;
+        // The selection moves on before the database answers: that peek is nobody's now.
+        setup.mockInput.pressKey("k");
+        yield* settle;
+        yield* Deferred.succeed(gate, undefined);
+        yield* settle;
+        const moved = yield* rows(setup);
+        expect(moved.some((row) => row.includes(PEEK_TITLE))).toBe(false);
+        expect(answered.count).toBe(0);
+        // Asked again with the database answering at once, the peek shows.
+        setup.mockInput.pressKey("j");
+        setup.mockInput.pressKey("f");
+        const shownNow = yield* until(setup, shows(PEEK_TITLE));
+        expect(shownNow.some((row) => row.includes("no commands yet"))).toBe(true);
+        expect(answered.count).toBe(1);
+        setup.mockInput.pressKey("q");
+        yield* Fiber.join(fiber);
       }),
   );
 

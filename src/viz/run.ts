@@ -156,7 +156,7 @@ const drawFailure = (renderer: CliRenderer): Effect.Effect<never, Errors.Command
         ),
       );
     };
-    renderer.on("render:error", onError);
+    renderer.once("render:error", onError);
     return Effect.sync(() => {
       renderer.off("render:error", onError);
     });
@@ -231,8 +231,11 @@ export const run: Effect.Effect<
     });
     yield* setNotice(notice);
   });
-  // The connect and the stream behind a full follow while one is up, from the second F on;
-  // closing the follow interrupts it.
+  // The follow's work off the key loop, one piece at a time: the peek's reads on the first F,
+  // the connect and the stream on the second. The reads clear themselves once the peek is up,
+  // the stream stays until the escape that closes the follow, a failure clears itself into a
+  // notice, and any key that leaves nothing followed interrupts what is in flight, so a database
+  // or a server that never answers holds no key.
   const followFiber = yield* Ref.make(Option.none<Fiber.Fiber<void>>());
   const stopFollow = Effect.gen(function* () {
     const running = yield* Ref.getAndSet(followFiber, Option.none());
@@ -254,22 +257,43 @@ export const run: Effect.Effect<
     Effect.gen(function* () {
       const renderer = yield* screen.open;
       yield* Effect.promise(() => Screen.mount(renderer, { view, now }));
-      // A second F on a peek: the qemu server streams the session, and every event lands on the
-      // full screen as it arrives. A stream that ends with the session still going was dropped
-      // by the server, which keeps one follower at a time and the newest. The connect and the
-      // stream are one fiber of their own, so a server that does not answer holds no key: escape
-      // interrupts it, and a failure clears it so F can try again.
-      const expandFollow = (peek: Follow.Peek) =>
+      const startFollow = <R>(work: Effect.Effect<void, never, R>) =>
         Effect.gen(function* () {
-          const serverUrl = Option.getOrNull(peek.serverUrl);
-          if (serverUrl === null) {
-            yield* setNotice("follow needs a qemu server");
-            return;
-          }
           if (Option.isSome(yield* Ref.get(followFiber))) {
             return;
           }
-          const stream = Effect.gen(function* () {
+          const fiber = yield* Effect.forkScoped(work);
+          yield* Ref.set(followFiber, Option.some(fiber));
+        });
+      // What a piece of follow work fails into: its reason on the footer, and room for the next F.
+      const failing = <A, E, R>(work: Effect.Effect<A, E, R>): Effect.Effect<void, never, R> =>
+        Effect.catchCause(Effect.asVoid(work), (cause) =>
+          Cause.hasInterruptsOnly(cause)
+            ? Effect.interrupt
+            : Effect.andThen(
+                setNotice(Render.headline(Cause.squash(cause))),
+                Ref.set(followFiber, Option.none()),
+              ),
+        );
+      // The first F: the job's last commands and screenshot, read from the database.
+      const peekWork = (job: Automation.AutomationJobListRow) =>
+        failing(
+          Effect.gen(function* () {
+            const peek = yield* loadPeek(
+              job.ticket ?? "—",
+              Option.getOrThrow(Option.fromNullishOr(job.sessionId)),
+              job.serverUrl,
+            );
+            setView((latest) => ({ ...latest, follow: Option.some(peek), notice: Option.none() }));
+            yield* Ref.set(followFiber, Option.none());
+          }),
+        );
+      // The second F: the qemu server streams the session, and every event lands on the full
+      // screen as it arrives. A stream that ends with the session still going was dropped by
+      // the server, which keeps one follower at a time and the newest.
+      const streamWork = (peek: Follow.Peek, serverUrl: string) =>
+        failing(
+          Effect.gen(function* () {
             const token = yield* Config.oligarchyToken;
             const proxy = yield* ProxyClient.connect({ serverUrl, token });
             const bytes = yield* proxy.follow(peek.sessionId);
@@ -294,25 +318,19 @@ export const run: Effect.Effect<
             ) {
               yield* setNotice(`dropped from ${peek.sessionId}: this follower fell behind`);
             }
-          }).pipe(
-            Effect.catchCause((cause) =>
-              Cause.hasInterruptsOnly(cause)
-                ? Effect.interrupt
-                : Effect.andThen(
-                    setNotice(Render.headline(Cause.squash(cause))),
-                    Ref.set(followFiber, Option.none()),
-                  ),
-            ),
-          );
-          const fiber = yield* Effect.forkScoped(stream);
-          yield* Ref.set(followFiber, Option.some(fiber));
-        });
+          }),
+        );
       // F: nothing more on a full follow, the stream on a peek, else the selected job's peek.
       const openFollow = Effect.gen(function* () {
         const current = view();
         if (Option.isSome(current.follow)) {
           if (current.follow.value._tag === "peek") {
-            yield* expandFollow(current.follow.value);
+            const serverUrl = Option.getOrNull(current.follow.value.serverUrl);
+            if (serverUrl === null) {
+              yield* setNotice("follow needs a qemu server");
+              return;
+            }
+            yield* startFollow(streamWork(current.follow.value, serverUrl));
           }
           return;
         }
@@ -322,27 +340,14 @@ export const run: Effect.Effect<
           yield* setNotice(refused.value);
           return;
         }
-        const found = Option.getOrThrow(job);
-        const peek = yield* loadPeek(
-          found.ticket ?? "—",
-          Option.getOrThrow(Option.fromNullishOr(found.sessionId)),
-          found.serverUrl,
-        );
-        setView((latest) => ({ ...latest, follow: Option.some(peek), notice: Option.none() }));
-      }).pipe(
-        Effect.catchCause((cause) =>
-          Cause.hasInterruptsOnly(cause)
-            ? Effect.interrupt
-            : setNotice(Render.headline(Cause.squash(cause))),
-        ),
-      );
+        yield* startFollow(peekWork(Option.getOrThrow(job)));
+      });
       const keys = keysOf(renderer).pipe(
         Stream.takeWhile((key) => !View.isQuit(key)),
         Stream.runForEach((key) =>
           Effect.gen(function* () {
-            const before = view();
             setView((current) => View.press(current, key));
-            if (Option.isSome(before.follow) && Option.isNone(view().follow)) {
+            if (Option.isNone(view().follow)) {
               yield* stopFollow;
             }
             if (View.isOpen(key)) {
