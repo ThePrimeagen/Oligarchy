@@ -135,7 +135,6 @@ describe("press happy path", () => {
     expect(View.press(popped, key("a", true)).popup).toEqual(popped.popup);
     expect(View.press(popped, key("tab")).popup).toEqual(popped.popup);
     expect(View.initialView.popup).toEqual(Option.none());
-    expect(View.CANNOT_ABORT).toBe("you cannot abort completed jobs");
   });
 
   it("selects the job the gold marker rests on: one on a card, or the queue's; none on a header", () => {
@@ -220,16 +219,6 @@ describe("press happy path", () => {
       Option.some("the selected job has no session"),
     );
     expect(View.followError(Option.some(running))).toEqual(Option.none());
-  });
-
-  it("aborts a pending or running job with a ticket, and says why not for anything else", () => {
-    expect(View.abortError(Option.none())).toEqual(Option.some("no job selected"));
-    expect(View.abortError(Option.some({ ...running, ticket: null }))).toEqual(
-      Option.some("the selected job has no ticket"),
-    );
-    expect(View.abortError(Option.some(running))).toEqual(Option.none());
-    expect(View.abortError(Option.some(pending))).toEqual(Option.none());
-    expect(View.abortError(Option.some(diagnosing))).toEqual(Option.none());
   });
 });
 

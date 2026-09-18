@@ -1259,4 +1259,49 @@ describe("run abort unhappy path", () => {
         expect(setup.renderer.isDestroyed).toBe(true);
       }),
   );
+
+  it.effect(
+    "one abort is in flight at a time: a second A says which, asks nothing, and the A after the answer goes through",
+    () =>
+      Effect.gen(function* () {
+        const gate = yield* Deferred.make<void>();
+        const screen = fakeRenderer();
+        const board = { queue: QUEUE };
+        const jobs = () => Effect.sync(() => board.queue);
+        const server = FakeHttp.recordRequests((_request, url) =>
+          url.pathname === "/abort"
+            ? Effect.as(Deferred.await(gate), FakeHttp.json({ ok: "true" }))
+            : new Response(null, { status: 404 }),
+        );
+        const { fiber, setup } = yield* started(screen, { jobs }, { http: server.layer });
+        setup.mockInput.pressTab();
+        setup.mockInput.pressKey("a", { shift: true });
+        yield* settle;
+        expect(server.requests).toHaveLength(1);
+        expect(yield* footer(setup)).toBe(FOOTER);
+        // Another A, on the next job, while the server has not answered the first.
+        setup.mockInput.pressKey("j");
+        setup.mockInput.pressKey("a", { shift: true });
+        yield* settle;
+        expect(server.requests).toHaveLength(1);
+        expect(yield* footer(setup)).toBe(pad(" still aborting drive OLI-61", COLUMNS));
+        // The answer lands: the board is read again and the footer says so.
+        board.queue = { ...QUEUE, running: [] };
+        yield* Deferred.succeed(gate, undefined);
+        const closed = yield* until(setup, shows("aborted drive OLI-61"));
+        expect(closed[36]).toBe(pad(" aborted drive OLI-61", COLUMNS));
+        expect(closed.slice(0, 36).some((row) => row.includes("OLI-61"))).toBe(false);
+        // With nothing in flight, the next A is sent: the one job left is selected.
+        setup.mockInput.pressKey("a", { shift: true });
+        yield* until(setup, shows("aborted drive OLI-62"));
+        expect(server.requests).toHaveLength(2);
+        expect(JSON.parse(server.requests[1]?.body ?? "")).toEqual({
+          ticket: "OLI-62",
+          action: "drive",
+        });
+        setup.mockInput.pressKey("q");
+        yield* Fiber.join(fiber);
+        expect(setup.renderer.isDestroyed).toBe(true);
+      }),
+  );
 });

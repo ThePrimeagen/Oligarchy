@@ -152,12 +152,12 @@ const abortJob = (
     );
     const refused = (reason: string): Abort => ({ _tag: "refused", reason });
     return yield* http.execute(request).pipe(
-      Effect.flatMap((response) => {
+      Effect.flatMap((response): Effect.Effect<Abort> => {
         if (response.status === 200) {
-          return Effect.succeed<Abort>({ _tag: "aborted" });
+          return Effect.succeed({ _tag: "aborted" });
         }
         if (response.status === 400) {
-          return Effect.succeed<Abort>({ _tag: "over" });
+          return Effect.succeed({ _tag: "over" });
         }
         // The status alone is the refusal; an unreadable body only loses its text.
         return response.text.pipe(
@@ -386,9 +386,11 @@ export const run: Effect.Effect<
           );
         });
       // A: the selected job goes to the automation server off the key loop, so a server that
-      // never answers holds no key; once sent, the abort is nobody's to stop. Closed, the board
-      // is read again before the footer says so, so the job is gone as the words land; over
-      // already, the pop-up says what cannot be done; refused, the footer says why.
+      // never answers holds no key. Closed, the board is read again before the footer says so,
+      // so the job is gone as the words land; over already, the pop-up says what cannot be
+      // done; refused, the footer says why. One abort is in flight at a time, and it is not
+      // interrupted: a second A while it lasts would ask for the same job again, and the
+      // answer to that, a pop-up, would be about a job this screen just closed.
       const abortWork = (ticket: string, action: Automation.AutomationAction) =>
         failing(
           Effect.gen(function* () {
@@ -396,27 +398,35 @@ export const run: Effect.Effect<
             switch (outcome._tag) {
               case "aborted":
                 yield* read;
-                yield* setNotice(`aborted ${action} ${ticket}`);
-                return;
+                return yield* setNotice(`aborted ${action} ${ticket}`);
               case "over":
-                yield* popup(View.CANNOT_ABORT);
-                return;
+                return yield* popup(View.CANNOT_ABORT);
               case "refused":
-                yield* setNotice(outcome.reason);
-                return;
+                return yield* setNotice(outcome.reason);
             }
+            return outcome satisfies never;
           }),
         );
+      const aborting = yield* Ref.make(Option.none<string>());
       const abort = Effect.gen(function* () {
         const job = View.selectedJob(view());
-        const refused = View.abortError(job);
-        if (Option.isSome(refused)) {
-          yield* setNotice(refused.value);
+        if (Option.isNone(job)) {
+          yield* setNotice("no job selected");
           return;
         }
-        const selected = Option.getOrThrow(job);
+        const { ticket, action } = job.value;
+        if (ticket === null) {
+          yield* setNotice("the selected job has no ticket");
+          return;
+        }
+        const inFlight = yield* Ref.get(aborting);
+        if (Option.isSome(inFlight)) {
+          yield* setNotice(`still aborting ${inFlight.value}`);
+          return;
+        }
+        yield* Ref.set(aborting, Option.some(`${action} ${ticket}`));
         yield* Effect.forkScoped(
-          abortWork(Option.getOrThrow(Option.fromNullishOr(selected.ticket)), selected.action),
+          Effect.ensuring(abortWork(ticket, action), Ref.set(aborting, Option.none())),
         );
       });
       // F: nothing more on a full follow, the stream on a peek, else the selected job's peek.

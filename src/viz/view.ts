@@ -193,8 +193,8 @@ export const isOpen = (key: Key): boolean => key.shift && key.name === "l";
 // f or F: a follow needs no shift, and a shifted one is not another key.
 export const isFollow = (key: Key): boolean => key.name === "f";
 
-// A capital A alone: an abort stops a job, so it takes the deliberate keystroke.
-export const isAbort = (key: Key): boolean => key.shift && key.name === "a" && !key.ctrl;
+// A capital A: an abort stops a job, so it takes the deliberate keystroke.
+export const isAbort = (key: Key): boolean => key.shift && key.name === "a";
 
 // q, or ctrl-c, which raw mode delivers as a key rather than a signal.
 export const isQuit = (key: Key): boolean =>
@@ -213,16 +213,6 @@ export const followError = (job: Option.Option<Job>): Option.Option<string> =>
       }
       return Option.none();
     },
-  });
-
-// The automation server aborts a job by its ticket and action, so the job needs a ticket; the
-// board lists what runs and what waits, so what is selected is one or the other. Anything else
-// is a sentence for the footer.
-export const abortError = (job: Option.Option<Job>): Option.Option<string> =>
-  Option.match(job, {
-    onNone: () => Option.some("no job selected"),
-    onSome: (found) =>
-      found.ticket === null ? Option.some("the selected job has no ticket") : Option.none(),
   });
 
 // Every key retires the last notice. L, F and A move nothing here: opening the ticket, the
