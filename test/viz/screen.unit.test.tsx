@@ -1086,3 +1086,65 @@ describe("screen follow", () => {
       }),
   );
 });
+
+describe("screen pop-up", () => {
+  const popup = Option.some({ text: View.CANNOT_ABORT, shownAt: READ_AT });
+  // The sentence, two cells of padding either side and the border: five rows in the middle of
+  // the screen.
+  const WIDTH = View.CANNOT_ABORT.length + 6;
+  const LEFT = Math.floor((COLUMNS - WIDTH) / 2);
+  const TOP = Math.floor((ROWS - 5) / 2);
+  const TOP_BORDER = `╭${"─".repeat(WIDTH - 2)}╮`;
+  const BOTTOM_BORDER = `╰${"─".repeat(WIDTH - 2)}╯`;
+  const BLANK = `│${space(WIDTH - 2)}│`;
+  const SENTENCE = `│  ${View.CANNOT_ABORT}  │`;
+  const within = (row: string | undefined): string => (row ?? "").slice(LEFT, LEFT + WIDTH);
+
+  it.effect(
+    "a pop-up boxes its sentence in the middle of the board, over the rows it covers alone, in love",
+    () =>
+      Effect.gen(function* () {
+        const plain = yield* draw(shown(SNAPSHOT));
+        const rows = yield* draw(shown(SNAPSHOT, { popup }));
+        expect(rows).toHaveLength(ROWS);
+        expect(within(rows[TOP])).toBe(TOP_BORDER);
+        expect(within(rows[TOP + 1])).toBe(BLANK);
+        expect(within(rows[TOP + 2])).toBe(SENTENCE);
+        expect(within(rows[TOP + 3])).toBe(BLANK);
+        expect(within(rows[TOP + 4])).toBe(BOTTOM_BORDER);
+        // The board shows on either side of the box and above and below it.
+        for (let index = TOP; index <= TOP + 4; index += 1) {
+          expect(rows[index]?.slice(0, LEFT)).toBe(plain[index]?.slice(0, LEFT));
+          expect(rows[index]?.slice(LEFT + WIDTH)).toBe(plain[index]?.slice(LEFT + WIDTH));
+        }
+        expect(rows.slice(0, TOP)).toEqual(plain.slice(0, TOP));
+        expect(rows.slice(TOP + 5)).toEqual(plain.slice(TOP + 5));
+        expect(rows[ROWS - 1]).toBe(FOOTER);
+        const spans = yield* styled(shown(SNAPSHOT, { popup }));
+        expect(styleOf(spans[TOP], TOP_BORDER)).toEqual([LOVE, PLAIN]);
+        expect(styleOf(spans[TOP + 4], BOTTOM_BORDER)).toEqual([LOVE, PLAIN]);
+        expect(styleOf(spans[TOP + 2], View.CANNOT_ABORT)).toEqual([TEXT, PLAIN]);
+      }),
+  );
+
+  it.effect("a pop-up lies over a full follow too, and no box is drawn without one", () =>
+    Effect.gen(function* () {
+      const full = Follow.apply(
+        Follow.expand(
+          Follow.peekFromActions("OLI-61", SESSION_ID, garage.url, [], Option.none()),
+          garage.url,
+        ),
+        { type: "session", status: "running" },
+      );
+      const rows = yield* draw(shown(SNAPSHOT, { follow: Option.some(full), popup }));
+      expect(rows[0]).toBe(pad(" following OLI-61 · 7a2d0000 running", COLUMNS));
+      expect(within(rows[TOP])).toBe(TOP_BORDER);
+      expect(within(rows[TOP + 2])).toBe(SENTENCE);
+      expect(within(rows[TOP + 4])).toBe(BOTTOM_BORDER);
+      expect(rows[ROWS - 1]).toBe(pad(" esc closes", COLUMNS));
+      const without = yield* draw(shown(SNAPSHOT));
+      expect(without.join("\n")).not.toContain(View.CANNOT_ABORT);
+      expect(within(without[TOP])).not.toBe(TOP_BORDER);
+    }),
+  );
+});

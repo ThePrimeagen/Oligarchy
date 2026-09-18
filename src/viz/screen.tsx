@@ -114,9 +114,40 @@ const FullFollow = (props: {
   </box>
 );
 
+// The pop-up: one sentence boxed in the middle of the screen, over whatever is up, with its own
+// background so nothing shows through. The outer box is the whole screen and paints nothing;
+// it is there to centre the inner one.
+const Popup = (props: { readonly text: string }) => (
+  <box
+    position="absolute"
+    left={0}
+    top={0}
+    width="100%"
+    height="100%"
+    justifyContent="center"
+    alignItems="center"
+  >
+    <box
+      border
+      borderStyle="rounded"
+      borderColor={Text.PALETTE.love}
+      backgroundColor={RGBA.defaultBackground()}
+      paddingLeft={2}
+      paddingRight={2}
+      paddingTop={1}
+      paddingBottom={1}
+    >
+      <text fg={Text.PALETTE.text} wrapMode="none">
+        {props.text}
+      </text>
+    </box>
+  </box>
+);
+
 // The machines box is as tall as its tabs and cards, the queue's box takes every row left above
 // the footer, and a terminal that shrank below the minimum shows the one sentence saying so
-// until it grows back. A full follow replaces the board; a peek lies over its bottom rows.
+// until it grows back. A full follow replaces the board; a peek lies over its bottom rows; a
+// pop-up lies over either.
 export const App = (props: Props) => {
   const dimensions = useTerminalDimensions();
   const fits = () => dimensions().width >= View.MIN_COLUMNS && dimensions().height >= View.MIN_ROWS;
@@ -131,6 +162,7 @@ export const App = (props: Props) => {
     const follow = Option.getOrUndefined(props.view().follow);
     return follow?._tag === "full" ? follow : undefined;
   };
+  const popup = (): string | undefined => Option.getOrUndefined(props.view().popup)?.text;
   return (
     <Show
       when={fits()}
@@ -227,6 +259,7 @@ export const App = (props: Props) => {
           <FullFollow follow={found()} notice={props.view().notice} rows={dimensions().height} />
         )}
       </Show>
+      <Show when={popup()}>{(text: Accessor<string>) => <Popup text={text()} />}</Show>
     </Show>
   );
 };

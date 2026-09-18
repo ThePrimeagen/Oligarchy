@@ -121,6 +121,23 @@ describe("press happy path", () => {
     expect(View.press(noticed, key("tab")).notice).toEqual(Option.none());
   });
 
+  it("A moves nothing: the abort is the runner's; and no key takes the pop-up down, the clock does", () => {
+    const start = shown(many);
+    const noticed = { ...start, notice: Option.some("aborted drive OLI-61") };
+    expect(View.press(noticed, key("a", true))).toEqual(start);
+    expect(View.press(start, key("a", true))).toEqual(start);
+    const popped = {
+      ...start,
+      popup: Option.some({ text: View.CANNOT_ABORT, shownAt: 1_000_000 }),
+    };
+    expect(View.press(popped, key("j")).popup).toEqual(popped.popup);
+    expect(View.press(popped, key("escape")).popup).toEqual(popped.popup);
+    expect(View.press(popped, key("a", true)).popup).toEqual(popped.popup);
+    expect(View.press(popped, key("tab")).popup).toEqual(popped.popup);
+    expect(View.initialView.popup).toEqual(Option.none());
+    expect(View.CANNOT_ABORT).toBe("you cannot abort completed jobs");
+  });
+
   it("selects the job the gold marker rests on: one on a card, or the queue's; none on a header", () => {
     const snapshot: View.Snapshot = {
       ...SNAPSHOT,
@@ -144,7 +161,11 @@ describe("press happy path", () => {
     expect(Option.map(View.selectedJob(past), (job) => job.ticket)).toEqual(Option.some("OLI-62"));
   });
 
-  it("q, Q and ctrl-c quit; L alone opens; f and F follow", () => {
+  it("q, Q and ctrl-c quit; L alone opens; f and F follow; A alone aborts", () => {
+    expect(View.isAbort(key("a", true))).toBe(true);
+    expect(View.isAbort(key("a"))).toBe(false);
+    expect(View.isAbort({ name: "a", shift: false, ctrl: true, meta: false })).toBe(false);
+    expect(View.isAbort(key("l", true))).toBe(false);
     expect(View.isQuit(key("q"))).toBe(true);
     expect(View.isQuit(key("q", true))).toBe(true);
     expect(View.isQuit({ name: "c", shift: false, ctrl: true, meta: false })).toBe(true);
@@ -199,6 +220,16 @@ describe("press happy path", () => {
       Option.some("the selected job has no session"),
     );
     expect(View.followError(Option.some(running))).toEqual(Option.none());
+  });
+
+  it("aborts a pending or running job with a ticket, and says why not for anything else", () => {
+    expect(View.abortError(Option.none())).toEqual(Option.some("no job selected"));
+    expect(View.abortError(Option.some({ ...running, ticket: null }))).toEqual(
+      Option.some("the selected job has no ticket"),
+    );
+    expect(View.abortError(Option.some(running))).toEqual(Option.none());
+    expect(View.abortError(Option.some(pending))).toEqual(Option.none());
+    expect(View.abortError(Option.some(diagnosing))).toEqual(Option.none());
   });
 });
 

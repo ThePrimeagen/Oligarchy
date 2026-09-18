@@ -4,6 +4,7 @@ import type { TestRendererSetup } from "@opentui/core/testing";
 import { Deferred, Effect, Fiber, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
+import * as HttpClientError from "effect/unstable/http/HttpClientError";
 import type * as Automation from "../../src/db/automation.ts";
 import type * as ProcessStats from "../../src/db/process-stats.ts";
 import type * as Servers from "../../src/db/servers.ts";
@@ -17,6 +18,8 @@ import { type FakeRenderer, fakeRenderer, rows, spans } from "../support/fake-re
 import { byCommand, type FakeSpawner, fakeSpawner } from "../support/fake-spawner.ts";
 import * as Stores from "../support/stores.ts";
 import {
+  ABORT_ENV,
+  AUTOMATION_SERVER_URL,
   BLOCKS,
   bottom,
   box,
@@ -75,8 +78,9 @@ const storesLayer = (scripted: Scripted = {}, actions = Stores.fakeActionStore()
     actions.layer,
   );
 
-// What a run may be given beyond the stores: a spawner that opens nothing unless told, a qemu
-// server that refuses every request unless told, and the token a follow sends it.
+// What a run may be given beyond the stores: a spawner that opens nothing unless told, servers
+// that refuse every request unless told, and the token a follow or an abort sends them with
+// the automation server's url.
 type Extra = {
   readonly spawner?: FakeSpawner;
   readonly actions?: Stores.FakeActionStore;
@@ -96,7 +100,7 @@ const live = (
         screen.layer,
         (extra.spawner ?? fakeSpawner()).layer,
         extra.http ?? FakeHttp.respondWith(() => new Response(null, { status: 404 })),
-        Config.withEnv(extra.env ?? { OLIGARCHY_TOKEN: "test-token" }),
+        Config.withEnv(extra.env ?? ABORT_ENV),
       ),
     ),
   );
@@ -981,5 +985,278 @@ describe("run follow unhappy path", () => {
       setup.mockInput.pressKey("q");
       yield* Fiber.join(fiber);
     }),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Abort: A hands the selected job to the automation server
+// ---------------------------------------------------------------------------
+
+const POPUP = `│  ${View.CANNOT_ABORT}  │`;
+
+// An automation server whose /abort answers as scripted, every request recorded; anything else
+// is refused.
+const aborting = (respond: () => Response): FakeHttp.Recorder =>
+  FakeHttp.recordRequests((_request, url) =>
+    url.pathname === "/abort" ? respond() : new Response(null, { status: 404 }),
+  );
+
+const OVER = () => FakeHttp.json({ error: 'ticket "OLI-61" has no drive to abort' }, 400);
+
+describe("run abort happy path", () => {
+  it.effect(
+    "A asks the automation server to abort the selected job on a card, or in the queue, with the token, re-reads the board at once and says so on the footer until the next key",
+    () =>
+      Effect.gen(function* () {
+        const screen = fakeRenderer();
+        const board = { queue: QUEUE };
+        const jobs = () => Effect.sync(() => board.queue);
+        // The server closes the job named: the next read no longer lists it.
+        const server: FakeHttp.Recorder = aborting(() => {
+          const named: { ticket: string } = JSON.parse(server.requests.at(-1)?.body ?? "{}");
+          board.queue = {
+            ...board.queue,
+            running: board.queue.running.filter((row) => row.ticket !== named.ticket),
+            pending: board.queue.pending.filter((row) => row.ticket !== named.ticket),
+          };
+          return FakeHttp.json({ ok: "true" });
+        });
+        const { fiber, setup } = yield* started(screen, { jobs }, { http: server.layer });
+        setup.mockInput.pressKey("j");
+        setup.mockInput.pressKey("a", { shift: true });
+        const closed = yield* until(setup, shows("aborted drive OLI-61"));
+        expect(server.requests).toEqual([
+          expect.objectContaining({
+            method: "POST",
+            url: `${AUTOMATION_SERVER_URL}/abort`,
+            headers: expect.objectContaining({ authorization: "Bearer test-token" }),
+          }),
+        ]);
+        expect(JSON.parse(server.requests[0]?.body ?? "")).toEqual({
+          ticket: "OLI-61",
+          action: "drive",
+        });
+        expect(closed[36]).toBe(pad(" aborted drive OLI-61", COLUMNS));
+        // Re-read at once: the job is off the card and out of the queue.
+        expect(closed.slice(0, 36).some((row) => row.includes("OLI-61"))).toBe(false);
+        expect(closed[5]).toBe(bottom());
+        const styled = yield* spans(setup);
+        expect(styled[36]?.find((span) => span[0].startsWith("aborted "))?.slice(1)).toEqual([
+          GOLD,
+          PLAIN,
+        ]);
+        // The queue's selected job, pending, goes the same way.
+        setup.mockInput.pressTab();
+        setup.mockInput.pressKey("a", { shift: true });
+        const queued = yield* until(setup, shows("aborted drive OLI-62"));
+        expect(server.requests).toHaveLength(2);
+        expect(JSON.parse(server.requests[1]?.body ?? "")).toEqual({
+          ticket: "OLI-62",
+          action: "drive",
+        });
+        expect(queued[36]).toBe(pad(" aborted drive OLI-62", COLUMNS));
+        expect(queued.some((row) => row.includes("no jobs"))).toBe(true);
+        setup.mockInput.pressKey("k");
+        yield* settle;
+        expect(yield* footer(setup)).toBe(FOOTER);
+        setup.mockInput.pressKey("q");
+        yield* Fiber.join(fiber);
+        expect(setup.renderer.isDestroyed).toBe(true);
+      }),
+  );
+
+  it.effect(
+    "a job the server says is over pops up that completed jobs cannot be aborted, for three seconds, over a board that still moves; another A starts the three seconds again",
+    () =>
+      Effect.gen(function* () {
+        const screen = fakeRenderer();
+        const server = aborting(OVER);
+        const { fiber, setup } = yield* started(screen, {}, { http: server.layer });
+        setup.mockInput.pressKey("j");
+        setup.mockInput.pressKey("a", { shift: true });
+        const popped = yield* until(setup, shows(POPUP));
+        expect(server.requests).toHaveLength(1);
+        // In the middle of the screen, the footer's keys still under it.
+        expect(popped[18]?.includes(POPUP)).toBe(true);
+        expect(popped[36]).toBe(FOOTER);
+        // A key moves the board and leaves the pop-up.
+        setup.mockInput.pressKey("k");
+        yield* settle;
+        const moved = yield* rows(setup);
+        expect(moved[2]?.startsWith("│ ▸ garage")).toBe(true);
+        expect(moved.some((row) => row.includes(POPUP))).toBe(true);
+        yield* TestClock.adjust("2 seconds");
+        yield* settle;
+        expect((yield* rows(setup)).some((row) => row.includes(POPUP))).toBe(true);
+        // A second A two seconds in: the pop-up outlives the first one's three seconds.
+        setup.mockInput.pressKey("j");
+        setup.mockInput.pressKey("a", { shift: true });
+        yield* until(setup, shows(POPUP));
+        expect(server.requests).toHaveLength(2);
+        yield* TestClock.adjust("1 second");
+        yield* settle;
+        expect((yield* rows(setup)).some((row) => row.includes(POPUP))).toBe(true);
+        yield* TestClock.adjust("2 seconds");
+        yield* settle;
+        const gone = yield* rows(setup);
+        expect(gone.some((row) => row.includes(POPUP))).toBe(false);
+        expect(gone[36]).toBe(FOOTER);
+        setup.mockInput.pressKey("q");
+        yield* Fiber.join(fiber);
+        expect(setup.renderer.isDestroyed).toBe(true);
+      }),
+  );
+});
+
+describe("run abort unhappy path", () => {
+  it.effect("A with no job selected, or a job without a ticket, says so and asks nothing", () =>
+    Effect.gen(function* () {
+      const server = aborting(() => FakeHttp.json({ ok: "true" }));
+      const onHeader = fakeRenderer();
+      const byHeader = yield* started(onHeader, {}, { http: server.layer });
+      byHeader.setup.mockInput.pressKey("a", { shift: true });
+      yield* settle;
+      expect(yield* footer(byHeader.setup)).toBe(pad(" no job selected", COLUMNS));
+      byHeader.setup.mockInput.pressKey("q");
+      yield* Fiber.join(byHeader.fiber);
+
+      const unticketed = fakeRenderer();
+      const byUnticketed = yield* started(
+        unticketed,
+        {
+          jobs: () => Effect.succeed({ ...EMPTY_QUEUE, running: [{ ...running, ticket: null }] }),
+        },
+        { http: server.layer },
+      );
+      byUnticketed.setup.mockInput.pressTab();
+      byUnticketed.setup.mockInput.pressKey("a", { shift: true });
+      yield* settle;
+      expect(yield* footer(byUnticketed.setup)).toBe(
+        pad(" the selected job has no ticket", COLUMNS),
+      );
+      byUnticketed.setup.mockInput.pressKey("q");
+      yield* Fiber.join(byUnticketed.fiber);
+      expect(server.requests).toEqual([]);
+    }),
+  );
+
+  it.effect(
+    "A without AUTOMATION_SERVER_URL, or without OLIGARCHY_TOKEN, says which is not set and asks nothing",
+    () =>
+      Effect.gen(function* () {
+        const server = aborting(() => FakeHttp.json({ ok: "true" }));
+        const noUrl = fakeRenderer();
+        const byNoUrl = yield* started(
+          noUrl,
+          {},
+          { http: server.layer, env: { OLIGARCHY_TOKEN: "test-token" } },
+        );
+        byNoUrl.setup.mockInput.pressKey("j");
+        byNoUrl.setup.mockInput.pressKey("a", { shift: true });
+        yield* until(byNoUrl.setup, shows("is not set"));
+        expect(yield* footer(byNoUrl.setup)).toBe(
+          pad(" AUTOMATION_SERVER_URL is not set", COLUMNS),
+        );
+        byNoUrl.setup.mockInput.pressKey("q");
+        yield* Fiber.join(byNoUrl.fiber);
+
+        const noToken = fakeRenderer();
+        const byNoToken = yield* started(
+          noToken,
+          {},
+          { http: server.layer, env: { AUTOMATION_SERVER_URL } },
+        );
+        byNoToken.setup.mockInput.pressKey("j");
+        byNoToken.setup.mockInput.pressKey("a", { shift: true });
+        yield* until(byNoToken.setup, shows("is not set"));
+        expect(yield* footer(byNoToken.setup)).toBe(pad(" OLIGARCHY_TOKEN is not set", COLUMNS));
+        byNoToken.setup.mockInput.pressKey("q");
+        yield* Fiber.join(byNoToken.fiber);
+        expect(server.requests).toEqual([]);
+      }),
+  );
+
+  it.effect("the automation server's refusal lands on the footer in its words", () =>
+    Effect.gen(function* () {
+      const unauthorized = fakeRenderer();
+      const byUnauthorized = yield* started(
+        unauthorized,
+        {},
+        { http: aborting(() => FakeHttp.json({ error: "unauthorized" }, 401)).layer },
+      );
+      byUnauthorized.setup.mockInput.pressKey("j");
+      byUnauthorized.setup.mockInput.pressKey("a", { shift: true });
+      const refusedFrame = yield* until(byUnauthorized.setup, shows("unauthorized"));
+      expect(refusedFrame[36]).toBe(pad(" unauthorized", COLUMNS));
+      expect(refusedFrame.some((row) => row.includes(POPUP))).toBe(false);
+      // The board is not re-read for a refusal: the job is still listed.
+      expect(refusedFrame[5]).toBe(box(job("▸", RUNNING)));
+      byUnauthorized.setup.mockInput.pressKey("q");
+      yield* Fiber.join(byUnauthorized.fiber);
+
+      const failing = fakeRenderer();
+      const detail = `automation client: POST ${runner.url}/abort failed: opencode exited 1`;
+      const byFailing = yield* started(
+        failing,
+        {},
+        { http: aborting(() => FakeHttp.json({ error: detail }, 500)).layer },
+      );
+      byFailing.setup.mockInput.pressKey("j");
+      byFailing.setup.mockInput.pressKey("a", { shift: true });
+      const failedFrame = yield* until(byFailing.setup, shows("opencode exited 1"));
+      expect(failedFrame[36]).toBe(pad(` ${detail}`, COLUMNS));
+      byFailing.setup.mockInput.pressKey("q");
+      yield* Fiber.join(byFailing.fiber);
+    }),
+  );
+
+  it.effect("an automation server that cannot be reached says so on the footer", () =>
+    Effect.gen(function* () {
+      const screen = fakeRenderer();
+      const http = FakeHttp.respondWith((request) =>
+        Effect.fail(
+          new HttpClientError.HttpClientError({
+            reason: new HttpClientError.TransportError({
+              request,
+              cause: new Error("connect ECONNREFUSED 127.0.0.1:4242"),
+            }),
+          }),
+        ),
+      );
+      const { fiber, setup } = yield* started(screen, {}, { http });
+      setup.mockInput.pressKey("j");
+      setup.mockInput.pressKey("a", { shift: true });
+      const unreachable = yield* until(setup, shows("ECONNREFUSED"));
+      expect(unreachable[36]).toBe(
+        pad(
+          ` POST ${AUTOMATION_SERVER_URL}/abort failed: connect ECONNREFUSED 127.0.0.1:4242`,
+          COLUMNS,
+        ),
+      );
+      setup.mockInput.pressKey("q");
+      yield* Fiber.join(fiber);
+    }),
+  );
+
+  it.effect(
+    "an automation server that never answers holds no key: the board still moves, and q quits",
+    () =>
+      Effect.gen(function* () {
+        const screen = fakeRenderer();
+        const { fiber, setup } = yield* started(screen, {}, { http: FakeHttp.never });
+        setup.mockInput.pressTab();
+        setup.mockInput.pressKey("j");
+        setup.mockInput.pressKey("a", { shift: true });
+        yield* settle;
+        expect(yield* footer(setup)).toBe(FOOTER);
+        setup.mockInput.pressKey("k");
+        yield* settle;
+        const moved = yield* rows(setup);
+        expect(moved[9]?.startsWith("│ ▸ OLI-61")).toBe(true);
+        expect(moved[10]?.startsWith("│   OLI-62")).toBe(true);
+        setup.mockInput.pressKey("q");
+        yield* Fiber.join(fiber);
+        expect(setup.renderer.isDestroyed).toBe(true);
+      }),
   );
 });
