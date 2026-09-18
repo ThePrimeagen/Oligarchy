@@ -836,6 +836,40 @@ describeServing("automation server abort", () => {
     }),
   );
 
+  it.live("closes a pending job as aborted while no client has it", () =>
+    Effect.promise(async () => {
+      const linearId = `OLI-${randomUUID().slice(0, 8)}`;
+      const resultId = await seedResult(linearId);
+      await seedJob(resultId, "drive");
+      const port = await freePort();
+      const process = spawnAutomationServer(["--port", String(port)]);
+      try {
+        await process.waitFor(/automation server listening/);
+        expect((await jobsFor(resultId))[0]?.status).toBe("pending");
+        const response = await request(
+          port,
+          "POST",
+          "/abort",
+          { "content-type": "application/json", authorization: `Bearer ${TOKEN}` },
+          JSON.stringify({ ticket: linearId, action: "drive" }),
+        );
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual({ ok: "true" });
+        const job = await waitForJob(resultId, "aborted");
+        expect(job).toMatchObject({ status: "aborted", reason: "aborted", serverId: null });
+        expect(job.finishedAt).toBeInstanceOf(Date);
+        expect(job.startedAt).toBeNull();
+        await process.waitFor(/aborted pending drive/);
+        expect(lines(process.stdout())).toContain(
+          `[${linearId}] automation: aborted pending drive`,
+        );
+      } finally {
+        process.child.kill("SIGTERM");
+        await process.exited;
+      }
+    }),
+  );
+
   it.live("400 when the ticket has nothing pending or running", () =>
     Effect.promise(async () => {
       const port = await freePort();
