@@ -836,7 +836,7 @@ describeServing("automation server abort", () => {
     }),
   );
 
-  it.live("400 when the ticket is not running", () =>
+  it.live("400 when the ticket has nothing pending or running", () =>
     Effect.promise(async () => {
       const port = await freePort();
       const process = spawnAutomationServer(["--port", String(port)]);
@@ -851,7 +851,7 @@ describeServing("automation server abort", () => {
         );
         expect(response.status).toBe(400);
         expect(await response.json()).toEqual({
-          error: 'ticket "OLI-missing" is not running',
+          error: 'ticket "OLI-missing" has no drive to abort',
         });
       } finally {
         process.child.kill("SIGTERM");

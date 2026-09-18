@@ -390,6 +390,57 @@ describe("POST /abort", () => {
       expect(fixed.stores.automation.jobs[1]?.status).toBe("running");
     }),
   );
+
+  it.effect("closes a pending job as aborted; no client has it, so none is called", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      seedResult(fixed, TICKET, RESULT);
+      seedJob(fixed, RESULT, "pending", null);
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const response = yield* abort(http);
+        expect(response.status).toBe(200);
+        expect(yield* response.json).toEqual({ ok: "true" });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.stores.automation.jobs[0]).toMatchObject({
+        status: "aborted",
+        reason: "aborted",
+        finishedAt: expect.any(Date),
+      });
+      expect(FakeLog.texts(fixed.log)).toEqual(["aborted pending drive"]);
+      expect(fixed.log.lines[0]?.agentId).toBe(TICKET);
+    }),
+  );
+
+  it.effect(
+    "closes the pending diagnose named while the ticket's drive runs on, and calls no client",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture();
+        seedResult(fixed, TICKET, RESULT);
+        seedJob(fixed, RESULT, "running", seedServer(fixed, CLIENT_URL));
+        fixed.stores.automation.jobs.push({
+          ...fixed.stores.automation.jobs[0],
+          id: "00000000-0000-4000-8000-000000000002",
+          action: "diagnose",
+          status: "pending",
+          serverId: null,
+          startedAt: null,
+        });
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          const response = yield* abort(http, TICKET, abortHeaders, "diagnose");
+          expect(response.status).toBe(200);
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.stores.automation.jobs[0]?.status).toBe("running");
+        expect(fixed.stores.automation.jobs[1]).toMatchObject({
+          action: "diagnose",
+          status: "aborted",
+          reason: "aborted",
+        });
+        expect(FakeLog.texts(fixed.log)).toEqual(["aborted pending diagnose"]);
+      }),
+  );
 });
 
 describe("POST /abort refusals", () => {
@@ -403,37 +454,20 @@ describe("POST /abort refusals", () => {
         const response = yield* abort(http);
         expect(response.status).toBe(400);
         expect(yield* response.json).toEqual({
-          error: `ticket "${TICKET}" is not running`,
+          error: `ticket "${TICKET}" has no drive to abort`,
         });
       }).pipe(Effect.provide(serve(fixed)));
       expect(fixed.stores.automation.jobs[0]?.status).toBe("succeeded");
       expect(fixed.log.lines).toEqual([
         {
           level: "error",
-          text: `POST /abort failed: ticket "${TICKET}" is not running`,
+          text: `POST /abort failed: ticket "${TICKET}" has no drive to abort`,
           location: "automation",
           agentId: TICKET,
           skipSentry: true,
           cause: undefined,
         },
       ]);
-    }),
-  );
-
-  it.effect("400 when the ticket is still pending, and the client is not called", () =>
-    Effect.gen(function* () {
-      const fixed = fixture();
-      seedResult(fixed, TICKET, RESULT);
-      seedJob(fixed, RESULT, "pending", null);
-      yield* Effect.gen(function* () {
-        const http = yield* HttpClient.HttpClient;
-        const response = yield* abort(http);
-        expect(response.status).toBe(400);
-        expect(yield* response.json).toEqual({
-          error: `ticket "${TICKET}" is not running`,
-        });
-      }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.stores.automation.jobs[0]?.status).toBe("pending");
     }),
   );
 
@@ -474,7 +508,7 @@ describe("POST /abort refusals", () => {
         const response = yield* abort(http);
         expect(response.status).toBe(400);
         expect(yield* response.json).toEqual({
-          error: `ticket "${TICKET}" is not running`,
+          error: `ticket "${TICKET}" has no drive to abort`,
         });
       }).pipe(Effect.provide(serve(fixed)));
       expect(fixed.stores.automation.jobs).toEqual([]);

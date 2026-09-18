@@ -21,6 +21,11 @@ const QUEUE_MIN_ROWS = 4;
 export const REFRESH = Duration.seconds(5);
 // The ages tick between reads.
 export const AGE_TICK = Duration.seconds(1);
+// A pop-up stays this long, whatever keys are pressed under it.
+export const POPUP_FOR = Duration.seconds(3);
+
+// The pop-up A raises on a job that was over before the abort reached the automation server.
+export const CANNOT_ABORT = "you cannot abort completed jobs";
 
 // A server writes its row every thirty seconds. One heartbeat may be in flight and one lost to a
 // slow database; three overdue is a server that stopped.
@@ -83,10 +88,15 @@ export type Tab = "servers" | "clients";
 type Focus = "machines" | "queue";
 type List = Tab | "queue";
 
+// A sentence in a box in the middle of the screen, and the clock when it went up: the runner
+// takes it down POPUP_FOR later, unless another has taken its place by then.
+export type Popup = { readonly text: string; readonly shownAt: number };
+
 // snapshot is absent until the first read lands; failure is the last read's reason, cleared by
 // the next good read, so a database outage leaves the last picture up with the reason under it.
 // notice is what the last key had to say (the ticket L opened, or why it could not), retired by
 // the next key. follow is the job F is looking at: a peek over the board, or the whole screen.
+// popup is what A had to say about a job that could not be aborted, up until its time is over.
 // tab is the kind of machine the cards show; focus is the box j and k move in; cursor is each
 // list's selected row (a tab's cards and the jobs on them as one list, the queue's jobs as
 // another), kept when the tab or the focus changes and clamped to what the newest read lists.
@@ -95,6 +105,7 @@ export type View = {
   readonly failure: Option.Option<string>;
   readonly notice: Option.Option<string>;
   readonly follow: Option.Option<Follow.Follow>;
+  readonly popup: Option.Option<Popup>;
   readonly tab: Tab;
   readonly focus: Focus;
   readonly cursor: Readonly<Record<List, number>>;
@@ -105,6 +116,7 @@ export const initialView: View = {
   failure: Option.none(),
   notice: Option.none(),
   follow: Option.none(),
+  popup: Option.none(),
   tab: "servers",
   focus: "machines",
   cursor: { servers: 0, clients: 0, queue: 0 },
@@ -181,6 +193,9 @@ export const isOpen = (key: Key): boolean => key.shift && key.name === "l";
 // f or F: a follow needs no shift, and a shifted one is not another key.
 export const isFollow = (key: Key): boolean => key.name === "f";
 
+// A capital A alone: an abort stops a job, so it takes the deliberate keystroke.
+export const isAbort = (key: Key): boolean => key.shift && key.name === "a" && !key.ctrl;
+
 // q, or ctrl-c, which raw mode delivers as a key rather than a signal.
 export const isQuit = (key: Key): boolean =>
   (key.name === "q" && !key.ctrl && !key.meta) || (key.name === "c" && key.ctrl);
@@ -200,12 +215,23 @@ export const followError = (job: Option.Option<Job>): Option.Option<string> =>
     },
   });
 
-// Every key retires the last notice. L and F move nothing here: opening the ticket or the
-// follow is the runner's. escape closes whatever is followed; a peek closes on any other key
-// too, so the board stays walkable, while a full follow stays up until escape.
+// The automation server aborts a job by its ticket and action, so the job needs a ticket; the
+// board lists what runs and what waits, so what is selected is one or the other. Anything else
+// is a sentence for the footer.
+export const abortError = (job: Option.Option<Job>): Option.Option<string> =>
+  Option.match(job, {
+    onNone: () => Option.some("no job selected"),
+    onSome: (found) =>
+      found.ticket === null ? Option.some("the selected job has no ticket") : Option.none(),
+  });
+
+// Every key retires the last notice. L, F and A move nothing here: opening the ticket, the
+// follow or the abort is the runner's, and so is the pop-up, which no key takes down. escape
+// closes whatever is followed; a peek closes on any other key too, so the board stays
+// walkable, while a full follow stays up until escape.
 export const press = (view: View, key: Key): View => {
   const retired: View = { ...view, notice: Option.none() };
-  if (isOpen(key) || isFollow(key)) {
+  if (isOpen(key) || isFollow(key) || isAbort(key)) {
     return retired;
   }
   if (key.name === "escape") {
@@ -720,6 +746,7 @@ const HINTS: ReadonlyArray<readonly [key: string, does: string]> = [
   ["g/G", "first/last"],
   ["L", "open ticket"],
   ["F", "follow"],
+  ["A", "abort"],
   ["q", "quit"],
 ];
 

@@ -14,12 +14,14 @@ import {
   Layer,
   Option,
   Queue,
+  Redacted,
   Ref,
   Schedule,
   type Scope,
   Stream,
 } from "effect";
-import type * as HttpClient from "effect/unstable/http/HttpClient";
+import * as HttpClient from "effect/unstable/http/HttpClient";
+import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import { createSignal } from "solid-js";
@@ -127,6 +129,52 @@ const loadPeek = (
     return Follow.peekFromActions(ticket, sessionId, serverUrl, rows, png);
   });
 
+// What POST /abort at the automation server made of the job: closed; over already (a 400 is a
+// job with nothing pending or running, which on this board is one that finished since the
+// last read); or refused, in the server's words or the connection's.
+type Abort =
+  | { readonly _tag: "aborted" }
+  | { readonly _tag: "over" }
+  | { readonly _tag: "refused"; readonly reason: string };
+
+const abortJob = (
+  ticket: string,
+  action: Automation.AutomationAction,
+): Effect.Effect<Abort, Errors.MissingVariable, HttpClient.HttpClient> =>
+  Effect.gen(function* () {
+    // The url is read first, so it is the one reported first.
+    const serverUrl = yield* Config.automationServerUrl;
+    const token = yield* Config.oligarchyToken;
+    const http = yield* HttpClient.HttpClient;
+    const request = HttpClientRequest.post(`${serverUrl}/abort`).pipe(
+      HttpClientRequest.bearerToken(Redacted.value(token)),
+      HttpClientRequest.bodyJsonUnsafe({ ticket, action }),
+    );
+    const refused = (reason: string): Abort => ({ _tag: "refused", reason });
+    return yield* http.execute(request).pipe(
+      Effect.flatMap((response) => {
+        if (response.status === 200) {
+          return Effect.succeed<Abort>({ _tag: "aborted" });
+        }
+        if (response.status === 400) {
+          return Effect.succeed<Abort>({ _tag: "over" });
+        }
+        // The status alone is the refusal; an unreadable body only loses its text.
+        return response.text.pipe(
+          Effect.orElseSucceed(() => ""),
+          Effect.map((text) => refused(ProxyClient.apiError(text))),
+        );
+      }),
+      Effect.catch((error) =>
+        Effect.succeed(
+          refused(
+            `POST ${serverUrl}/abort failed: ${ExternalFailure.describeThrowable(ExternalFailure.causeOf(error), error.message)}`,
+          ),
+        ),
+      ),
+    );
+  });
+
 // The keys the screen's parser reports while the stream is consumed.
 const keysOf = (renderer: CliRenderer): Stream.Stream<KeyEvent> =>
   Stream.callback<KeyEvent>((queue) =>
@@ -166,9 +214,10 @@ const drawFailure = (renderer: CliRenderer): Effect.Effect<never, Errors.Command
 // so a read, a tick of the ages or a key changes the signal and the cells that changed are
 // written. The tables are read at once and every REFRESH, the clock the ages count from is set
 // at the first frame and every AGE_TICK, L opens the selected job's ticket first, F peeks at the
-// selected running job and follows it live on a second F, and q or ctrl-c ends the run and the
-// scope hands the screen back. A read that fails leaves the last picture up with its reason on
-// the footer; a frame that fails ends the run.
+// selected running job and follows it live on a second F, A has the automation server abort
+// the selected job, and q or ctrl-c ends the run and the scope hands the screen back. A read
+// that fails leaves the last picture up with its reason on the footer; a frame that fails ends
+// the run.
 export const run: Effect.Effect<
   void,
   Errors.CommandError,
@@ -319,6 +368,57 @@ export const run: Effect.Effect<
             }
           }),
         );
+      // The pop-up, up for POPUP_FOR: the clock it went up on says whose it is, so the one
+      // that takes it down is its own and not a later pop-up's.
+      const popup = (text: string) =>
+        Effect.gen(function* () {
+          const shownAt = yield* Clock.currentTimeMillis;
+          yield* update((current) => ({ ...current, popup: Option.some({ text, shownAt }) }));
+          yield* Effect.forkScoped(
+            Effect.andThen(
+              Effect.sleep(View.POPUP_FOR),
+              update((current) =>
+                Option.exists(current.popup, (shown) => shown.shownAt === shownAt)
+                  ? { ...current, popup: Option.none() }
+                  : current,
+              ),
+            ),
+          );
+        });
+      // A: the selected job goes to the automation server off the key loop, so a server that
+      // never answers holds no key; once sent, the abort is nobody's to stop. Closed, the board
+      // is read again before the footer says so, so the job is gone as the words land; over
+      // already, the pop-up says what cannot be done; refused, the footer says why.
+      const abortWork = (ticket: string, action: Automation.AutomationAction) =>
+        failing(
+          Effect.gen(function* () {
+            const outcome = yield* abortJob(ticket, action);
+            switch (outcome._tag) {
+              case "aborted":
+                yield* read;
+                yield* setNotice(`aborted ${action} ${ticket}`);
+                return;
+              case "over":
+                yield* popup(View.CANNOT_ABORT);
+                return;
+              case "refused":
+                yield* setNotice(outcome.reason);
+                return;
+            }
+          }),
+        );
+      const abort = Effect.gen(function* () {
+        const job = View.selectedJob(view());
+        const refused = View.abortError(job);
+        if (Option.isSome(refused)) {
+          yield* setNotice(refused.value);
+          return;
+        }
+        const selected = Option.getOrThrow(job);
+        yield* Effect.forkScoped(
+          abortWork(Option.getOrThrow(Option.fromNullishOr(selected.ticket)), selected.action),
+        );
+      });
       // F: nothing more on a full follow, the stream on a peek, else the selected job's peek.
       const openFollow = Effect.gen(function* () {
         const current = view();
@@ -354,6 +454,9 @@ export const run: Effect.Effect<
             }
             if (View.isFollow(key)) {
               yield* openFollow;
+            }
+            if (View.isAbort(key)) {
+              yield* abort;
             }
           }),
         ),

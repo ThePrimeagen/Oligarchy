@@ -1327,6 +1327,50 @@ Postgres.describeWithDatabase("database", () => {
       }),
     );
 
+    scoped.effect(
+      "AutomationStore abortPending closes the pending job of a result and action, and nothing else",
+      () =>
+        Effect.gen(function* () {
+          yield* emptyQueue;
+          const tests = yield* Tests.TestStore;
+          const automation = yield* Automation.AutomationStore;
+          const database = yield* Client.Database;
+          const definition = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
+          const created = yield* tests.createRun({
+            iso: "https://example.com/omarchy.iso",
+            serverUrl: "http://127.0.0.1:42069",
+            definitions: [{ id: definition.id }],
+          });
+          const resultId = created.results[0].id;
+          const drive = yield* automation.enqueue({ resultId, action: "drive" });
+          const diagnose = yield* automation.enqueue({ resultId, action: "diagnose" });
+          // The other action's pending job is not the one named.
+          expect(yield* automation.abortPending(resultId, "diagnose")).toBe(true);
+          const [closed] = yield* database.run("select", (db) =>
+            db
+              .select()
+              .from(DbSchema.automationJobs)
+              .where(eq(DbSchema.automationJobs.id, diagnose.id)),
+          );
+          expect(closed).toMatchObject({ status: "aborted", reason: "aborted", serverId: null });
+          expect(closed?.finishedAt).toBeInstanceOf(Date);
+          expect(closed?.startedAt).toBeNull();
+          const [untouched] = yield* database.run("select", (db) =>
+            db
+              .select()
+              .from(DbSchema.automationJobs)
+              .where(eq(DbSchema.automationJobs.id, drive.id)),
+          );
+          expect(untouched).toMatchObject({ status: "pending", reason: null, finishedAt: null });
+          // Closed once: a second abort finds nothing pending, and neither does one for a
+          // job that has been claimed since.
+          expect(yield* automation.abortPending(resultId, "diagnose")).toBe(false);
+          expect(Option.isSome(yield* automation.claim(crypto.randomUUID()))).toBe(true);
+          expect(yield* automation.abortPending(resultId, "drive")).toBe(false);
+          expect(Option.isSome(yield* automation.findRunning(resultId))).toBe(true);
+        }),
+    );
+
     scoped.effect("AutomationStore finish closes a running job and refuses a second close", () =>
       Effect.gen(function* () {
         yield* emptyQueue;

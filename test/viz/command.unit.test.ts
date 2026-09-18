@@ -96,6 +96,8 @@ describe("viz happy path", () => {
       expect(printed).toMatch(/h\/l switch servers and clients/);
       expect(printed).toMatch(/L opens the selected job's Linear ticket/);
       expect(printed).toMatch(/F follows the selected running job/);
+      expect(printed).toMatch(/A aborts the selected job at the automation server/);
+      expect(printed).toMatch(/AUTOMATION_SERVER_URL/);
       expect(printed).toMatch(/q quits/);
     }),
   );
