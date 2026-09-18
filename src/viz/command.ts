@@ -7,6 +7,7 @@ import * as Client from "../db/client.ts";
 import * as ProcessStats from "../db/process-stats.ts";
 import * as Servers from "../db/servers.ts";
 import * as Errors from "../shared/errors.ts";
+import * as Run from "./run.ts";
 import * as View from "./view.ts";
 
 export type Stores =
@@ -33,7 +34,8 @@ export const live: Deps = {
 export const makeVizCommand = (deps: Deps = live) => {
   const withDb = Layer.unwrap(Effect.map(Config.databaseUrl, (url) => deps.database(url)));
 
-  // DATABASE_URL is wanted first (the layer), the terminal second, the first read last.
+  // DATABASE_URL is wanted first (the layer), the terminal second, the screen and the first
+  // read last, so a refused terminal never sees the alternate screen.
   return Command.make(
     "viz",
     {},
@@ -48,7 +50,7 @@ export const makeVizCommand = (deps: Deps = live) => {
       if (columns < View.MIN_COLUMNS || rows < View.MIN_ROWS) {
         return yield* Errors.CommandError.make({ message: View.tooSmall(columns, rows) });
       }
-      return yield* View.run;
+      return yield* Run.run;
     }),
   ).pipe(
     Command.withDescription(

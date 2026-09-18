@@ -18,19 +18,22 @@ const TsConfig = Schema.Struct({
 const decodePackageJson = Schema.decodeUnknownSync(Schema.fromJsonString(PackageJson));
 const decodeTsConfig = Schema.decodeUnknownSync(Schema.fromJsonString(TsConfig));
 
-// Every process, and whether its wrapper and script preload Sentry before any Effect code runs.
-const PROCESSES = {
-  client: false,
-  session: false,
-  viz: false,
-  dig: false,
-  ctrl: true,
-  "qemu-server": true,
-  "qemu-reverse-proxy": true,
-  "automation-server": true,
-  "automation-client": true,
-};
+// Every process and what its wrapper and script preload before the entry loads: Sentry on the
+// instrumented ones, and on viz the Solid JSX transform its OpenTUI components are written for.
 const INSTRUMENT = "src/observability/instrument.ts";
+const SOLID_JSX = "src/viz/preload.ts";
+const PROCESSES: Readonly<Record<string, ReadonlyArray<string>>> = {
+  client: [],
+  session: [],
+  viz: [SOLID_JSX],
+  dig: [],
+  ctrl: [INSTRUMENT],
+  "qemu-server": [INSTRUMENT],
+  "qemu-reverse-proxy": [INSTRUMENT],
+  "automation-server": [INSTRUMENT],
+  "automation-client": [INSTRUMENT],
+};
+const count = (text: string, needle: string): number => text.split(needle).length - 1;
 // Bun runs the sources as they are: no Node, no npm, none of Node's loader flags.
 const NOT_BUN = /\bnode\b|\bnpm\b|\bnpx\b|--experimental-strip-types|--import\b/;
 
@@ -59,12 +62,15 @@ describe("package.json scripts", () => {
   // --no-env-file on every process: Bun's own loader would read `.env.local` as well and expand
   // `$` inside values, where the config provider reads `.env` alone, as written, for what the
   // environment lacks.
-  it("runs every process on bun from its entry, Sentry preloaded on the instrumented ones", () => {
-    for (const [name, instrumented] of Object.entries(PROCESSES)) {
+  it("runs every process on bun from its entry with exactly the preloads it needs", () => {
+    for (const [name, preloads] of Object.entries(PROCESSES)) {
       const script = scripts[name] ?? "";
       expect(script.startsWith("bun --no-env-file "), name).toBe(true);
       expect(script.endsWith(` src/${name}/main.ts`), name).toBe(true);
-      expect(script.includes(`--preload ./${INSTRUMENT}`), name).toBe(instrumented);
+      for (const preload of preloads) {
+        expect(script, name).toContain(`--preload ./${preload}`);
+      }
+      expect(count(script, "--preload"), name).toBe(preloads.length);
     }
     expect(scripts["db:migrate"]).toBe("bun --no-env-file src/db/migrate.ts");
   });
@@ -93,8 +99,9 @@ describe("package.json scripts", () => {
 // The root executables are the operators' entry points: each is a sh wrapper handing its
 // arguments to bun on the process's entry, the instrumented ones loading Sentry first.
 describe("root executables", () => {
-  it("each execs bun on its entry, preloading Sentry on the instrumented ones, never node", () => {
-    for (const [name, instrumented] of Object.entries(PROCESSES)) {
+  // The preload is named from the wrapper's own directory: an operator runs ./viz from anywhere.
+  it("each execs bun on its entry with exactly the preloads it needs, never node", () => {
+    for (const [name, preloads] of Object.entries(PROCESSES)) {
       if (name === "client") {
         continue;
       }
@@ -102,9 +109,10 @@ describe("root executables", () => {
       expect(wrapper.startsWith("#!/bin/sh\n"), name).toBe(true);
       expect(wrapper, name).toContain("exec bun --no-env-file ");
       expect(wrapper, name).toContain(`"$(dirname "$0")/src/${name}/main.ts" "$@"`);
-      expect(wrapper.includes(`--preload "$(dirname "$0")/${INSTRUMENT}"`), name).toBe(
-        instrumented,
-      );
+      for (const preload of preloads) {
+        expect(wrapper, name).toContain(`--preload "$(dirname "$0")/${preload}"`);
+      }
+      expect(count(wrapper, "--preload"), name).toBe(preloads.length);
       expect(wrapper, name).not.toMatch(NOT_BUN);
     }
   });

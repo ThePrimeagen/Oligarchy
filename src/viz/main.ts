@@ -10,14 +10,16 @@ import * as Config from "../config.ts";
 import * as Render from "../observability/render.ts";
 import * as Api from "../shared/api.ts";
 import * as VizCommand from "./command.ts";
+import * as Run from "./run.ts";
 
-// NodeServices brings the Terminal: stdout's size, stdin in raw mode while the view reads keys,
-// and the frames written to stdout.
+// NodeServices brings the Terminal, for stdout's size before the screen is opened, and the
+// spawner for xdg-open; the Renderer is OpenTUI's, which owns stdin and stdout while it runs.
 const MainLive = Layer.mergeAll(
   CliOutput.layer(CliOutput.defaultFormatter({ colors: process.stdout.isTTY })),
   CliConfig.layer({ builtIns: GlobalFlag.BuiltIns.filter((flag) => flag !== GlobalFlag.Wizard) }),
   NodeHttpClient.layerNodeHttp,
   Config.providerLayer,
+  Run.Renderer.layer,
 ).pipe(Layer.provideMerge(NodeServices.layer));
 
 // SIGTERM interrupts the root fiber and the view's scope hands the screen back; ctrl-c arrives as

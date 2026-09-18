@@ -29,6 +29,20 @@ exist.
   `Config.providerLayer`, which reads `.env` alone, as written, for what the environment lacks
   (Config, below). Bun transpiles the sources on load, and `erasableSyntaxOnly` stays on so they
   remain plain JavaScript once the annotations go: no enums, namespaces or parameter properties.
+- `./viz` draws with OpenTUI (`@opentui/core`, cells rendered by a native core behind a
+  TypeScript API) through its Solid reconciler (`@opentui/solid`; `solid-js` is pinned to the one
+  version it accepts). Its components are `.tsx` files opening with
+  `/** @jsxImportSource @opentui/solid */`, which is how tsc checks them against that runtime
+  while the dashboard's `.tsx` stays hono/jsx (`test/repo/architecture.unit.test.ts` checks the
+  pragma). Bun cannot compile Solid's JSX itself, so the wrapper and the `viz` script preload
+  `src/viz/preload.ts` (`@opentui/solid/preload`: babel-preset-solid, and solid-js's client build
+  in place of the server build Bun would resolve). Vitest compiles the same files with the same
+  presets in `vitest.config.ts`, for the files carrying the pragma, aliases `solid-js` to that
+  client build and compiles `@opentui/solid` itself, so the tests' `CliRenderer` is the one
+  `render` tells apart from a config with `instanceof`. Tests run the in-memory renderer from
+  `@opentui/core/testing` (`test/support/fake-renderer.ts`) and read frames back as rows and
+  styled spans; `screen.tsx` mounts on whatever renderer it is handed, so the same components
+  draw the terminal and the tests.
   The Node-compatible platform is what the code targets (`@effect/platform-node`, `node:*` in
   the boundary files, `pg`); Bun implements it. Where its wording differs from libuv's (a missing
   executable, a socket that cannot bind) the tests pin Bun's.
@@ -935,7 +949,7 @@ export const SentryLive: Layer.Layer<never> = Layer.mergeAll(
 
 - Tests are written first. No code lands until a set of failing unit tests describes it, and every
   surface has both a happy and an unhappy test. Plan for failures and how they are handled.
-- Vitest only, two lanes: `test/**/*.unit.test.ts` (no I/O beyond local fakes;
+- Vitest only, two lanes: `test/**/*.unit.test.{ts,tsx}` (no I/O beyond local fakes;
   `bun run test:unit`, part of `check:fast`) and `test/integration/*.integration.test.ts` (spawned
   executables, sockets, containers, processes; `bun run test:integration`). `passWithNoTests` is
   false. Anything that needs `qemu-system-x86_64` is integration and gated on the binary.

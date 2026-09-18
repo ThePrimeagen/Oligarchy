@@ -1,36 +1,29 @@
-import { Effect, Encoding, Option, Result, Schema } from "effect";
-import * as Actions from "../db/actions.ts";
-import * as Render from "../observability/render.ts";
-import * as Image from "../session/image.ts";
-import * as Domain from "../shared/domain.ts";
-import type * as Errors from "../shared/errors.ts";
+import { Encoding, Option, Result, Schema } from "effect";
+import type * as Domain from "../shared/domain.ts";
+import * as Text from "./text.ts";
 
-// The action column; the image takes every column to its right, three rows in a peek and the
-// rest of the screen when follow is full.
+// The commands or entries take the left column; the image takes every column to its right,
+// three rows in a peek and the rest of the screen when the follow is full.
 export const LEFT_COLS = 40;
 export const PEEK_IMAGE_ROWS = 3;
-export const PEEK_FRAME_ROWS = 5;
+// A peek's box: its border rows around the image rows.
+export const PEEK_FRAME_ROWS = PEEK_IMAGE_ROWS + 2;
+// A long session's entries are bounded: the newest two hundred are what is worth scrolling.
 export const MAX_ENTRIES = 200;
 export const SPINNER: ReadonlyArray<string> = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+export const PEEK_HINT = "F full screen   esc close";
+export const FULL_FOOT = "esc closes";
 
-const PALETTE = Render.ROSE_PINE_MAIN;
-const FG_RESET = "\x1b[39m";
-const BOLD = "\x1b[1m";
-const UNBOLD = "\x1b[22m";
-
-const paint = (hex: string, text: string): string => `${Render.foreground(hex)}${text}${FG_RESET}`;
-const bold = (text: string): string => `${BOLD}${text}${UNBOLD}`;
-const muted = (text: string): string => paint(PALETTE.muted, text);
-
-export const STATUS_COLOR: Record<Domain.FollowStatus, string> = {
-  pending: PALETTE.muted,
-  running: PALETTE.gold,
-  succeeded: PALETTE.pine,
-  failed: PALETTE.love,
-  aborted: PALETTE.love,
-  timed_out: PALETTE.iris,
+export const STATUS_COLOR: Readonly<Record<Domain.FollowStatus, string>> = {
+  pending: Text.PALETTE.muted,
+  running: Text.PALETTE.gold,
+  succeeded: Text.PALETTE.pine,
+  failed: Text.PALETTE.love,
+  aborted: Text.PALETTE.love,
+  timed_out: Text.PALETTE.iris,
 };
 
+// An action's request is the QMP command as sent; `execute` names it.
 const Execute = Schema.Struct({ execute: Schema.String }).annotate({
   identifier: "@oligarchy/viz/follow/Execute",
 });
@@ -42,27 +35,13 @@ export const commandName = (request: unknown): string =>
     () => "?",
   );
 
-const age = (ms: number): string => {
-  const seconds = Math.max(0, Math.floor(ms / 1000));
-  if (seconds < 60) {
-    return `${String(seconds)} s`;
-  }
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) {
-    return `${String(minutes)} min`;
-  }
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) {
-    return `${String(hours)} h`;
-  }
-  return `${String(Math.floor(hours / 24))} d`;
-};
-
 export type Command = {
   readonly name: string;
   readonly at: Date;
 };
 
+// What F shows first: the selected job's last three commands and its last screenshot, read
+// from the database, and the qemu server a second F would follow it on.
 export type Peek = {
   readonly _tag: "peek";
   readonly ticket: string;
@@ -72,6 +51,8 @@ export type Peek = {
   readonly png: Option.Option<Uint8Array>;
 };
 
+// One row of the live follow: an intent the agent announced, or an action it sent, indented
+// under the intent it belongs to. The peek's commands come first with negative ids.
 export type Entry = {
   readonly id: number | "intent";
   readonly indent: 0 | 2;
@@ -79,6 +60,8 @@ export type Entry = {
   readonly state: "running" | "completed" | "failed";
 };
 
+// The whole screen following one session as the qemu server streams it; frame turns the
+// spinner on the running entries.
 export type Full = {
   readonly _tag: "full";
   readonly ticket: string;
@@ -190,126 +173,55 @@ export const apply = (view: Full, event: Domain.FollowEvent): Full => {
 
 export const tick = (view: Full): Full => ({ ...view, frame: view.frame + 1 });
 
-const markOf = (state: Entry["state"], glyph: string): string => {
-  if (state === "running") {
-    return paint(PALETTE.muted, glyph);
-  }
-  if (state === "completed") {
-    return paint(PALETTE.pine, "✓");
-  }
-  return paint(PALETTE.love, "✗");
-};
+// ---------------------------------------------------------------------------
+// Rows
+// ---------------------------------------------------------------------------
 
-const boxed = (content: string): string => `${muted("│")} ${content} ${muted("│")}`;
+const session8 = (sessionId: string): string => sessionId.slice(0, 8);
 
-const clean = (text: string): string =>
-  Array.from(text, (character) =>
-    character < " " || (character >= "\u007f" && character <= "\u009f") ? " " : character,
-  ).join("");
+export const title = (peek: Peek): string => `follow ${peek.ticket} · ${session8(peek.sessionId)}`;
 
-const fit = (text: string, width: number): string => {
-  const plain = clean(text);
-  return plain.length > width ? `${plain.slice(0, width - 1)}…` : plain.padEnd(width);
-};
-
-const titleOf = (ticket: string, sessionId: string): string =>
-  `follow ${ticket} · ${sessionId.slice(0, 8)}`;
-
-export const peekImageScreenRow = (rows: number): number => rows - PEEK_FRAME_ROWS + 1;
-
-export const drawPeek = (
-  peek: Peek,
-  now: number,
-  columns: number,
-): { readonly lines: ReadonlyArray<string> } => {
-  const usable = columns - 4;
-  const title = titleOf(peek.ticket, peek.sessionId);
-  const top = `${muted("╭─┤ ")}${bold(paint(PALETTE.text, title))}${muted(` ├${"─".repeat(Math.max(0, columns - 7 - title.length))}╮`)}`;
-  const hint = "F full screen   esc close";
-  const bottom = muted(`╰${"─".repeat(Math.max(0, columns - 7 - hint.length))}┤ ${hint} ├─╯`);
-  const commandWidth = Math.min(LEFT_COLS, usable);
-  const rows = Array.from({ length: PEEK_IMAGE_ROWS }, (_, index) => {
+// The peek's three rows: each command with its age at the column's right edge, the column
+// blank where there are fewer, and one muted sentence when there are none.
+export const peekRows = (peek: Peek, now: number): ReadonlyArray<Text.Row> =>
+  Array.from({ length: PEEK_IMAGE_ROWS }, (_, index): Text.Row => {
     const command = peek.commands[index];
     if (command === undefined) {
-      const empty =
-        index === 0 && peek.commands.length === 0
-          ? muted(fit("no commands yet", commandWidth))
-          : "";
-      return boxed(`${empty}${" ".repeat(usable - (empty === "" ? 0 : commandWidth))}`);
+      return index === 0 && peek.commands.length === 0 ? [Text.muted("no commands yet")] : [];
     }
-    const ago = `${age(now - command.at.getTime())} ago`;
-    const name = fit(command.name, commandWidth - ago.length - 2);
-    const line = `${paint(PALETTE.text, name)}  ${paint(PALETTE.subtle, ago)}`;
-    return boxed(`${line}${" ".repeat(Math.max(0, usable - commandWidth))}`);
-  });
-  return { lines: [top, ...rows, bottom] };
-};
-
-export const peekImageBox = (columns: number, startRow: number): Option.Option<Image.ImageBox> => {
-  const col = LEFT_COLS + 3;
-  const cols = columns - col;
-  return cols < 1
-    ? Option.none()
-    : Option.some({ col, row: startRow, cols, rows: PEEK_IMAGE_ROWS });
-};
-
-export const drawPeekImage = (peek: Peek, columns: number, startRow: number): string =>
-  Option.match(Option.all([peek.png, peekImageBox(columns, startRow)]), {
-    onNone: () => "",
-    onSome: ([png, box]) => Image.placeImage(png, box),
+    const ago = `${Text.age(now - command.at.getTime())} ago`;
+    return [
+      Text.value(Text.fit(command.name, LEFT_COLS - ago.length - Text.GAP.text.length)),
+      Text.GAP,
+      Text.label(ago),
+    ];
   });
 
-export const drawFull = (
-  view: Full,
-  columns: number,
-  rows: number,
-  notice: Option.Option<string> = Option.none(),
-): string => {
-  const glyph = SPINNER[view.frame % SPINNER.length];
-  const header = `following ${view.ticket} · ${view.sessionId.slice(0, 8)} `;
-  const status = view.status;
-  let out = `\x1b[1;2H${header}${paint(STATUS_COLOR[status], status)}${" ".repeat(
-    Math.max(0, LEFT_COLS - 1 - header.length - status.length),
-  )}`;
-  const visible = view.entries.slice(-(rows - 2));
-  for (let row = 2; row < rows; row++) {
-    const entry = visible[row - 2];
-    out += `\x1b[${String(row)};2H`;
-    if (entry === undefined) {
-      out += " ".repeat(LEFT_COLS - 1);
-      continue;
-    }
-    const width = LEFT_COLS - 3 - entry.indent;
-    const name = clean(entry.name);
-    const label = name.length > width ? `${name.slice(0, width - 1)}…` : name;
-    const mark = markOf(entry.state, glyph);
-    out += `${" ".repeat(entry.indent)}${mark} ${label}${" ".repeat(width - label.length)}`;
+export const fullHeader = (view: Full): Text.Row => [
+  Text.value(`following ${view.ticket} · ${session8(view.sessionId)} `),
+  Text.paint(STATUS_COLOR[view.status], view.status),
+];
+
+// A running entry turns the spinner, a completed one is a pine tick, a failed one a red cross.
+const mark = (state: Entry["state"], glyph: string): Text.Piece => {
+  if (state === "running") {
+    return Text.muted(glyph);
   }
-  const foot = Option.getOrElse(notice, () => "esc closes");
-  return `${out}\x1b[${String(rows)};2H${paint(PALETTE.muted, fit(foot, columns - 2).trimEnd())}`;
+  if (state === "completed") {
+    return Text.paint(Text.PALETTE.pine, "✓");
+  }
+  return Text.paint(Text.PALETTE.love, "✗");
 };
 
-export const fullImageBox = (columns: number, rows: number): Option.Option<Image.ImageBox> =>
-  columns - LEFT_COLS - 1 < 1
-    ? Option.none()
-    : Option.some({ col: LEFT_COLS + 2, row: 2, cols: columns - LEFT_COLS - 1, rows: rows - 1 });
-
-export const drawFullImage = (view: Full, columns: number, rows: number): string =>
-  Option.match(Option.all([view.png, fullImageBox(columns, rows)]), {
-    onNone: () => "",
-    onSome: ([png, box]) => Image.placeImage(png, box),
-  });
-
-export const loadPeek = (
-  ticket: string,
-  sessionId: string,
-  serverUrl: string | null,
-): Effect.Effect<Peek, Errors.DatabaseError, Actions.ActionStore> =>
-  Effect.gen(function* () {
-    const actions = yield* Actions.ActionStore;
-    const rows = yield* actions.listActions(sessionId);
-    const images = yield* actions.listImages(sessionId);
-    const last = images.at(-1);
-    const png = last === undefined ? Option.none<Uint8Array>() : yield* actions.getImage(last.id);
-    return peekFromActions(ticket, sessionId, serverUrl, rows, png);
-  });
+// The newest entries that fit in `height` rows, each its mark and its name cut to the column.
+export const fullEntries = (view: Full, height: number): ReadonlyArray<Text.Row> => {
+  const glyph = SPINNER[view.frame % SPINNER.length];
+  return view.entries
+    .slice(-height)
+    .map((entry): Text.Row => [
+      { text: " ".repeat(entry.indent) },
+      mark(entry.state, glyph),
+      Text.SPACE,
+      Text.value(Text.cut(entry.name, LEFT_COLS - 3 - entry.indent)),
+    ]);
+};

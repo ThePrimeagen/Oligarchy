@@ -145,15 +145,15 @@ Postgres.describeWithDatabase("./viz against the seeded database", () => {
     const off = result.output.lastIndexOf(ALT_SCREEN_OFF);
     expect(on !== -1 && off !== -1 && on < off, "takes the screen and gives it back").toBe(true);
     const drawn = stripAnsi(result.output.slice(on, off));
-    expect(drawn).toMatch(/╭─┤ qemu servers · \d+ ├─┤ automation clients · \d+ ├/);
-    expect(drawn).toMatch(/┤ read \d+ s ago ├─╮/);
-    expect(drawn).toMatch(/╭─┤ automation · running \d+ · pending \d+ ├/);
+    expect(drawn).toMatch(/─ read \d+ s ago ─╮/);
+    expect(drawn).toMatch(/│ qemu servers · \d+ │ automation clients · \d+ /);
+    expect(drawn).toMatch(/╭─ automation · running \d+ · pending \d+ ─+╮/);
     expect(drawn).toMatch(/ticket\s+test\s+action\s+status\s+queued\s+started\s+│/);
     expect(drawn).not.toContain("finished");
     expect(drawn).toContain(
-      "j/k select   tab machines/queue   h/l servers/clients   g/G first/last   L open ticket   q quit",
+      "j/k select   tab machines/queue   h/l servers/clients   g/G first/last   L open ticket   F follow   q quit",
     );
     expect(drawn).not.toContain("error:");
-    expect(drawn).not.toContain("\n");
+    expect(drawn).not.toContain("viz needs");
   });
 });
