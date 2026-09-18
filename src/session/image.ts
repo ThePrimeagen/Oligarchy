@@ -26,6 +26,13 @@ export const imageProtocol = (env: Readonly<Record<string, string | undefined>>)
   return "ansi";
 };
 
+// A tmux client's termtype (`ghostty 1.3.1`, `xterm-kitty`). The session's own TERM
+// names tmux, so this is the name of the terminal that has to draw.
+export const speaksKitty = (clientTerm: string): boolean => {
+  const term = clientTerm.toLowerCase();
+  return term.includes("ghostty") || term.includes("kitty");
+};
+
 // Only the kitty protocol can pin an image to a screen cell (ghostty and kitty speak it);
 // iTerm's and the half-block fallback only flow inline with the text.
 export const canPlaceImages = (protocol: ImageProtocol): boolean => protocol === "kitty";

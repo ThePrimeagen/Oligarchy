@@ -1,6 +1,7 @@
 /** @jsxImportSource @opentui/solid */
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
+import { ImageRenderable, type Renderable } from "@opentui/core";
 import { testRender } from "@opentui/solid";
 import { Effect, Option } from "effect";
 import type * as Servers from "../../src/db/servers.ts";
@@ -125,6 +126,11 @@ const colorsOf = (row: ReadonlyArray<FakeRenderer.Span> | undefined): ReadonlyAr
   (row ?? []).map((span) => span[1]);
 const textOf = (row: ReadonlyArray<FakeRenderer.Span> | undefined): string =>
   (row ?? []).map((span) => span[0]).join("");
+
+const imageProtocols = (node: Renderable): ReadonlyArray<string> => [
+  ...(node instanceof ImageRenderable ? [node.protocol] : []),
+  ...node.getChildren().flatMap(imageProtocols),
+];
 
 describe("screen happy path", () => {
   it.effect("fills every row of the terminal, each as wide as the terminal", () =>
@@ -990,6 +996,47 @@ describe("screen follow", () => {
           styleOf(spans[PEEK_TOP + 1], "send-key".padEnd(Follow.LEFT_COLS - "20 s ago".length - 2)),
         ).toEqual([TEXT, PLAIN]);
         expect(styleOf(spans[PEEK_TOP + 1], "20 s ago")).toEqual([SUBTLE, PLAIN]);
+      }),
+  );
+
+  it.effect(
+    "a ghostty or kitty host asks for kitty graphics; anything else leaves the image on auto and draws blocks",
+    () =>
+      Effect.gen(function* () {
+        const kitty = yield* Effect.promise(() =>
+          testRender(
+            () => (
+              <Screen.App
+                view={() => peeking(peek)}
+                now={() => QUERIED_AT_MS}
+                imageProtocol="kitty"
+              />
+            ),
+            { width: COLUMNS, height: ROWS },
+          ),
+        );
+        yield* Effect.promise(() => kitty.renderOnce());
+        expect(imageProtocols(kitty.renderer.root)).toEqual(["kitty"]);
+        kitty.renderer.destroy();
+
+        const plain = yield* Effect.promise(() =>
+          testRender(
+            () => (
+              <Screen.App
+                view={() => peeking(peek)}
+                now={() => QUERIED_AT_MS}
+                imageProtocol="auto"
+              />
+            ),
+            { width: COLUMNS, height: ROWS },
+          ),
+        );
+        const rows = yield* Effect.promise(() => plain.renderOnce()).pipe(
+          Effect.map(() => plain.captureCharFrame().replace(/\n$/, "").split("\n")),
+        );
+        expect(imageProtocols(plain.renderer.root)).toEqual(["auto"]);
+        expect(BLOCKS.test(rows[PEEK_TOP + 1]?.slice(Follow.LEFT_COLS + 2) ?? "")).toBe(true);
+        plain.renderer.destroy();
       }),
   );
 

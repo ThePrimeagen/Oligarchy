@@ -8,9 +8,11 @@ import * as Text from "./text.ts";
 import * as View from "./view.ts";
 
 // What the runner hands the screen: the view as it changes, and the clock the ages tick on.
+// imageProtocol omitted leaves the choice to OpenTUI.
 export type Props = {
   readonly view: Accessor<View.View>;
   readonly now: Accessor<number>;
+  readonly imageProtocol?: "kitty" | "auto";
 };
 
 const MUTED = Text.PALETTE.muted;
@@ -49,8 +51,12 @@ const Divider = () => (
 
 // The peek sits over the bottom of the board, above the footer: its own background so the
 // rows beneath do not show through its blanks, the commands in their column and the last image
-// in what is left, drawn by the terminal's graphics when it has them and as blocks otherwise.
-const Peek = (props: { readonly follow: Follow.Peek; readonly now: number }) => (
+// in what is left.
+const Peek = (props: {
+  readonly follow: Follow.Peek;
+  readonly now: number;
+  readonly imageProtocol: "kitty" | "auto" | undefined;
+}) => (
   <box
     position="absolute"
     left={0}
@@ -77,6 +83,7 @@ const Peek = (props: { readonly follow: Follow.Peek; readonly now: number }) => 
         <image
           source={png()}
           fit="fit"
+          protocol={props.imageProtocol ?? "auto"}
           flexGrow={1}
           height={Follow.PEEK_IMAGE_ROWS}
           marginLeft={2}
@@ -93,6 +100,7 @@ const FullFollow = (props: {
   readonly follow: Follow.Full;
   readonly notice: Option.Option<string>;
   readonly rows: number;
+  readonly imageProtocol: "kitty" | "auto" | undefined;
 }) => (
   <box flexDirection="column" width="100%" height="100%" paddingLeft={1} paddingRight={1}>
     <Line row={Follow.fullHeader(props.follow)} />
@@ -104,7 +112,13 @@ const FullFollow = (props: {
       </box>
       <Show when={Option.getOrUndefined(props.follow.png)}>
         {(png: Accessor<Uint8Array>) => (
-          <image source={png()} fit="fit" flexGrow={1} marginLeft={1} />
+          <image
+            source={png()}
+            fit="fit"
+            protocol={props.imageProtocol ?? "auto"}
+            flexGrow={1}
+            marginLeft={1}
+          />
         )}
       </Show>
     </box>
@@ -283,13 +297,20 @@ export const App = (props: Props) => {
               </text>
             </box>
             <Show when={peek()}>
-              {(found: Accessor<Follow.Peek>) => <Peek follow={found()} now={props.now()} />}
+              {(found: Accessor<Follow.Peek>) => (
+                <Peek follow={found()} now={props.now()} imageProtocol={props.imageProtocol} />
+              )}
             </Show>
           </box>
         }
       >
         {(found: Accessor<Follow.Full>) => (
-          <FullFollow follow={found()} notice={props.view().notice} rows={dimensions().height} />
+          <FullFollow
+            follow={found()}
+            notice={props.view().notice}
+            rows={dimensions().height}
+            imageProtocol={props.imageProtocol}
+          />
         )}
       </Show>
       <Show when={asked()}>{(found: Accessor<View.Confirm>) => <Confirm asked={found()} />}</Show>
@@ -300,4 +321,4 @@ export const App = (props: Props) => {
 
 // Mounts the screen on an open renderer; the renderer's destroy disposes it.
 export const mount = (renderer: CliRenderer, props: Props): Promise<void> =>
-  render(() => <App view={props.view} now={props.now} />, renderer);
+  render(() => <App {...props} />, renderer);

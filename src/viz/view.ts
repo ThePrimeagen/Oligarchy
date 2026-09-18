@@ -214,7 +214,10 @@ export const isSelect = (key: Key): boolean => key.name === "return";
 export const isQuit = (key: Key): boolean =>
   (key.name === "q" && !key.ctrl && !key.meta) || (key.name === "c" && key.ctrl);
 
-// A running job with a session can be followed; anything else is a sentence for the footer.
+// A running job can be followed. One whose guest has not started is still followed: the runner
+// waits for the session that start writes. A running job with neither a session nor a ticket
+// cannot be found again once the read moves on, so that one is a sentence for the footer. So is
+// a job that is not running, and no job at all.
 export const followError = (job: Option.Option<Job>): Option.Option<string> =>
   Option.match(job, {
     onNone: () => Option.some("no job selected"),
@@ -222,7 +225,7 @@ export const followError = (job: Option.Option<Job>): Option.Option<string> =>
       if (found.status !== "running") {
         return Option.some("follow needs a running job");
       }
-      if (found.sessionId === null) {
+      if (found.sessionId === null && found.ticket === null) {
         return Option.some("the selected job has no session");
       }
       return Option.none();

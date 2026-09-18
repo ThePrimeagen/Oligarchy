@@ -358,7 +358,10 @@ describe("run happy path", () => {
         const screen = fakeRenderer();
         // A screen three seconds in the opening, as a slow terminal setup would be.
         const slow = Layer.succeed(Run.Renderer)(
-          Run.Renderer.of({ open: Effect.andThen(Effect.sleep("3 seconds"), screen.open) }),
+          Run.Renderer.of({
+            open: Effect.andThen(Effect.sleep("3 seconds"), screen.open),
+            imageProtocol: Effect.succeed("auto"),
+          }),
         );
         const fiber = yield* Effect.forkChild(
           Run.run.pipe(
@@ -614,6 +617,7 @@ describe("run unhappy path", () => {
         });
       const failing = Layer.succeed(Run.Renderer)(
         Run.Renderer.of({
+          imageProtocol: Effect.succeed("auto"),
           open: Effect.fail(
             Errors.CommandError.make({ message: "viz could not open the screen: no tty" }),
           ),
@@ -733,6 +737,36 @@ describe("run follow happy path", () => {
         yield* Fiber.join(fiber);
       }),
   );
+
+  it.effect(
+    "F on a running job whose session has not started waits, then opens the peek when it does",
+    () =>
+      Effect.gen(function* () {
+        const screen = fakeRenderer();
+        const ready = { value: false };
+        const jobs = () =>
+          Effect.sync(() => ({
+            running: [{ ...running, sessionId: ready.value ? SESSION_ID : null }],
+            pending: [],
+            completed: [],
+          }));
+        const { fiber, setup } = yield* started(screen, { jobs }, { actions: seeded() });
+        setup.mockInput.pressKey("j");
+        setup.mockInput.pressKey("f");
+        const waiting = yield* until(setup, shows("waiting for OLI-61's session"));
+        expect(waiting[36]).toBe(pad(" waiting for OLI-61's session", COLUMNS));
+        expect(waiting.some((row) => row.includes(PEEK_TITLE))).toBe(false);
+        // The board re-reads at five seconds; the wait looks at that snapshot a second later.
+        ready.value = true;
+        yield* TestClock.adjust("6 seconds");
+        const opened = yield* until(setup, shows(PEEK_TITLE));
+        expect(opened.some((row) => row.includes(PEEK_TITLE))).toBe(true);
+        expect(opened.some((row) => row.includes("send-key"))).toBe(true);
+        expect(opened[36]).toBe(FOOTER);
+        setup.mockInput.pressKey("q");
+        yield* Fiber.join(fiber);
+      }),
+  );
 });
 
 describe("run follow unhappy path", () => {
@@ -764,65 +798,123 @@ describe("run follow unhappy path", () => {
     }),
   );
 
-  it.effect(
-    "F on a running job without a session, without a server on the second F, or without a token, says why",
-    () =>
-      Effect.gen(function* () {
-        const noSession = fakeRenderer();
-        const byNoSession = yield* started(noSession, {
+  it.effect("F on a running job with no ticket and no session says so and opens nothing", () =>
+    Effect.gen(function* () {
+      const screen = fakeRenderer();
+      const { fiber, setup } = yield* started(screen, {
+        jobs: () =>
+          Effect.succeed({
+            running: [{ ...running, sessionId: null, ticket: null }],
+            pending: [],
+            completed: [],
+          }),
+      });
+      setup.mockInput.pressKey("j");
+      setup.mockInput.pressKey("f");
+      yield* settle;
+      expect(yield* footer(setup)).toBe(pad(" the selected job has no session", COLUMNS));
+      expect((yield* rows(setup)).some((row) => row.includes("follow"))).toBe(false);
+      setup.mockInput.pressKey("q");
+      yield* Fiber.join(fiber);
+    }),
+  );
+
+  it.effect("F that is still waiting opens nothing once the job is no longer running", () =>
+    Effect.gen(function* () {
+      const screen = fakeRenderer();
+      const alive = { value: true };
+      const jobs = () =>
+        Effect.sync(() =>
+          alive.value
+            ? {
+                running: [{ ...running, sessionId: null }],
+                pending: [],
+                completed: [],
+              }
+            : EMPTY_QUEUE,
+        );
+      const { fiber, setup } = yield* started(screen, { jobs });
+      setup.mockInput.pressKey("j");
+      setup.mockInput.pressKey("f");
+      const waiting = yield* until(setup, shows("waiting for OLI-61's session"));
+      expect(waiting[36]).toBe(pad(" waiting for OLI-61's session", COLUMNS));
+      alive.value = false;
+      yield* TestClock.adjust("6 seconds");
+      const ended = yield* until(setup, shows("OLI-61 ended before a session"));
+      expect(ended[36]).toBe(pad(" OLI-61 ended before a session", COLUMNS));
+      expect(ended.some((row) => row.includes(PEEK_TITLE))).toBe(false);
+      setup.mockInput.pressKey("q");
+      yield* Fiber.join(fiber);
+    }),
+  );
+
+  it.effect("moving off a job while F waits does not open its peek when the session starts", () =>
+    Effect.gen(function* () {
+      const screen = fakeRenderer();
+      const ready = { value: false };
+      const jobs = () =>
+        Effect.sync(() => ({
+          running: [{ ...running, sessionId: ready.value ? SESSION_ID : null }],
+          pending: [],
+          completed: [],
+        }));
+      const { fiber, setup } = yield* started(screen, { jobs }, { actions: seeded() });
+      setup.mockInput.pressKey("j");
+      setup.mockInput.pressKey("f");
+      const waiting = yield* until(setup, shows("waiting for OLI-61's session"));
+      expect(waiting[36]).toBe(pad(" waiting for OLI-61's session", COLUMNS));
+      setup.mockInput.pressKey("k");
+      yield* settle;
+      ready.value = true;
+      yield* TestClock.adjust("6 seconds");
+      yield* settle;
+      const moved = yield* rows(setup);
+      expect(moved.some((row) => row.includes(PEEK_TITLE))).toBe(false);
+      expect(moved[36]).toBe(FOOTER);
+      setup.mockInput.pressKey("q");
+      yield* Fiber.join(fiber);
+    }),
+  );
+
+  it.effect("the second F without a qemu server, or without a token, says why", () =>
+    Effect.gen(function* () {
+      const noServer = fakeRenderer();
+      const byNoServer = yield* started(
+        noServer,
+        {
           jobs: () =>
             Effect.succeed({
-              running: [{ ...running, sessionId: null }],
+              running: [{ ...running, serverUrl: null }],
               pending: [],
               completed: [],
             }),
-        });
-        byNoSession.setup.mockInput.pressKey("j");
-        byNoSession.setup.mockInput.pressKey("f");
-        yield* settle;
-        expect(yield* footer(byNoSession.setup)).toBe(
-          pad(" the selected job has no session", COLUMNS),
-        );
-        byNoSession.setup.mockInput.pressKey("q");
-        yield* Fiber.join(byNoSession.fiber);
+        },
+        { actions: seeded() },
+      );
+      byNoServer.setup.mockInput.pressTab();
+      byNoServer.setup.mockInput.pressKey("f");
+      yield* until(byNoServer.setup, shows(PEEK_TITLE));
+      byNoServer.setup.mockInput.pressKey("f");
+      yield* settle;
+      const serverless = yield* rows(byNoServer.setup);
+      expect(serverless.some((row) => row.includes(PEEK_TITLE))).toBe(true);
+      expect(serverless[36]).toBe(pad(" follow needs a qemu server", COLUMNS));
+      byNoServer.setup.mockInput.pressKey("q");
+      yield* Fiber.join(byNoServer.fiber);
 
-        const noServer = fakeRenderer();
-        const byNoServer = yield* started(
-          noServer,
-          {
-            jobs: () =>
-              Effect.succeed({
-                running: [{ ...running, serverUrl: null }],
-                pending: [],
-                completed: [],
-              }),
-          },
-          { actions: seeded() },
-        );
-        byNoServer.setup.mockInput.pressTab();
-        byNoServer.setup.mockInput.pressKey("f");
-        yield* until(byNoServer.setup, shows(PEEK_TITLE));
-        byNoServer.setup.mockInput.pressKey("f");
-        yield* settle;
-        const serverless = yield* rows(byNoServer.setup);
-        expect(serverless.some((row) => row.includes(PEEK_TITLE))).toBe(true);
-        expect(serverless[36]).toBe(pad(" follow needs a qemu server", COLUMNS));
-        byNoServer.setup.mockInput.pressKey("q");
-        yield* Fiber.join(byNoServer.fiber);
-
-        const noToken = fakeRenderer();
-        const byNoToken = yield* started(noToken, {}, { actions: seeded(), env: {} });
-        byNoToken.setup.mockInput.pressKey("j");
-        byNoToken.setup.mockInput.pressKey("f");
-        yield* until(byNoToken.setup, shows(PEEK_TITLE));
-        byNoToken.setup.mockInput.pressKey("f");
-        yield* settle;
-        const unset = yield* rows(byNoToken.setup);
-        expect(unset.some((row) => row.includes(PEEK_TITLE))).toBe(true);
-        expect(unset[36]).toBe(pad(" OLIGARCHY_TOKEN is not set", COLUMNS));
-        byNoToken.setup.mockInput.pressKey("q");
-        yield* Fiber.join(byNoToken.fiber);
-      }),
+      const noToken = fakeRenderer();
+      const byNoToken = yield* started(noToken, {}, { actions: seeded(), env: {} });
+      byNoToken.setup.mockInput.pressKey("j");
+      byNoToken.setup.mockInput.pressKey("f");
+      yield* until(byNoToken.setup, shows(PEEK_TITLE));
+      byNoToken.setup.mockInput.pressKey("f");
+      yield* settle;
+      const unset = yield* rows(byNoToken.setup);
+      expect(unset.some((row) => row.includes(PEEK_TITLE))).toBe(true);
+      expect(unset[36]).toBe(pad(" OLIGARCHY_TOKEN is not set", COLUMNS));
+      byNoToken.setup.mockInput.pressKey("q");
+      yield* Fiber.join(byNoToken.fiber);
+    }),
   );
 
   it.effect("a follow stream that ends while the session is still running was dropped", () =>

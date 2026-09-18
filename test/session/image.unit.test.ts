@@ -150,6 +150,16 @@ describe("imageProtocol", () => {
     expect(Image.canPlaceImages("iterm")).toBe(false);
     expect(Image.canPlaceImages("ansi")).toBe(false);
   });
+
+  it("a ghostty or kitty tmux client can draw with kitty graphics", () => {
+    expect(Image.speaksKitty("ghostty 1.3.1-arch2")).toBe(true);
+    expect(Image.speaksKitty("xterm-kitty")).toBe(true);
+  });
+
+  it("any other tmux client cannot", () => {
+    expect(Image.speaksKitty("xterm-256color")).toBe(false);
+    expect(Image.speaksKitty("")).toBe(false);
+  });
 });
 
 describe("renderImage", () => {

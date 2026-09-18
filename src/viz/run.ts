@@ -51,6 +51,14 @@ const OPEN_WAIT = Duration.seconds(2);
 // The spinner on a followed session's running entries turns this often.
 const SPIN = Duration.millis(80);
 
+// The board already re-reads the queue. This only looks at that snapshot again, so a session
+// that landed on the last read opens the peek within a second, with no second query.
+const SESSION_WAIT = Duration.seconds(1);
+
+// What the screen asks OpenTUI to draw a screenshot with. auto is its own choice; kitty is
+// forced where that choice is blocks (tmux) and the attached terminal can actually draw it.
+export type ImageDraw = "kitty" | "auto";
+
 // The screen the view draws on: OpenTUI's renderer, which takes the alternate screen and raw
 // mode when opened and hands both back when the scope it was opened in closes. The signals stay
 // runMain's, so SIGTERM interrupts the root fiber and the release restores the terminal; ctrl-c
@@ -58,26 +66,30 @@ const SPIN = Duration.millis(80);
 // terminal, so its own selection still works.
 type Opener = {
   readonly open: Effect.Effect<CliRenderer, Errors.CommandError, Scope.Scope>;
+  // Read when the screen opens, after the command has accepted its flags.
+  readonly imageProtocol: Effect.Effect<ImageDraw>;
 };
 
 export class Renderer extends Context.Service<Renderer, Opener>()("@oligarchy/viz/Renderer") {
-  static readonly layer: Layer.Layer<Renderer> = Layer.succeed(this)(
-    this.of({
-      open: Effect.acquireRelease(
-        Effect.tryPromise({
-          try: () => createCliRenderer({ exitOnCtrlC: false, exitSignals: [], useMouse: false }),
-          catch: (cause) =>
-            Errors.CommandError.make({
-              message: `viz could not open the screen: ${Render.errorDetail(cause)}`,
-            }),
-        }),
-        (renderer) =>
-          Effect.sync(() => {
-            renderer.destroy();
+  static readonly layer = (imageProtocol: Effect.Effect<ImageDraw>): Layer.Layer<Renderer> =>
+    Layer.succeed(this)(
+      this.of({
+        imageProtocol,
+        open: Effect.acquireRelease(
+          Effect.tryPromise({
+            try: () => createCliRenderer({ exitOnCtrlC: false, exitSignals: [], useMouse: false }),
+            catch: (cause) =>
+              Errors.CommandError.make({
+                message: `viz could not open the screen: ${Render.errorDetail(cause)}`,
+              }),
           }),
-      ),
-    }),
-  );
+          (renderer) =>
+            Effect.sync(() => {
+              renderer.destroy();
+            }),
+        ),
+      }),
+    );
 }
 
 // Hands the ticket's url to the opener and says what came of it. The browser is the desktop's:
@@ -214,7 +226,8 @@ const drawFailure = (renderer: CliRenderer): Effect.Effect<never, Errors.Command
 // so a read, a tick of the ages or a key changes the signal and the cells that changed are
 // written. The tables are read at once and every REFRESH, the clock the ages count from is set
 // at the first frame and every AGE_TICK, L opens the selected job's ticket first, F peeks at the
-// selected running job and follows it live on a second F, A asks and then has the automation
+// selected running job (waiting for its session if the guest has not started) and follows it
+// live on a second F, A asks and then has the automation
 // server abort the selected job, and q or ctrl-c ends the run and the scope hands the screen
 // back. A read that fails leaves the last picture up with its reason on the footer; a frame
 // that fails ends the run.
@@ -230,6 +243,7 @@ export const run: Effect.Effect<
   | Actions.ActionStore
 > = Effect.gen(function* () {
   const screen = yield* Renderer;
+  const imageProtocol = yield* screen.imageProtocol;
   const servers = yield* Servers.ServerStore;
   const processStats = yield* ProcessStats.ProcessStatsStore;
   const automation = yield* Automation.AutomationStore;
@@ -304,7 +318,7 @@ export const run: Effect.Effect<
   yield* Effect.scoped(
     Effect.gen(function* () {
       const renderer = yield* screen.open;
-      yield* Effect.promise(() => Screen.mount(renderer, { view, now }));
+      yield* Effect.promise(() => Screen.mount(renderer, { view, now, imageProtocol }));
       const startFollow = <R>(work: Effect.Effect<void, never, R>) =>
         Effect.gen(function* () {
           yield* stopFollow;
@@ -320,15 +334,63 @@ export const run: Effect.Effect<
             ? Effect.interrupt
             : setNotice(Render.headline(Cause.squash(cause))),
         );
-      // The first F: the job's last commands and screenshot, read from the database.
+      // The first F: the job's last commands and screenshot, read from the database. A drive is
+      // claimed and shown on its server before start writes the session, so a running job with a
+      // ticket and no session is waited on rather than refused; the peek opens when the row appears.
       const peekWork = (job: Automation.AutomationJobListRow) =>
         failing(
           Effect.gen(function* () {
-            const peek = yield* loadPeek(
-              job.ticket ?? "—",
-              Option.getOrThrow(Option.fromNullishOr(job.sessionId)),
-              job.serverUrl,
-            );
+            let sessionId = job.sessionId;
+            let serverUrl = job.serverUrl;
+            if (sessionId === null) {
+              const ticket = job.ticket;
+              // followError already refused a running job that also has no ticket.
+              if (ticket === null) {
+                return;
+              }
+              type Step =
+                | {
+                    readonly _tag: "ready";
+                    readonly sessionId: string;
+                    readonly serverUrl: string | null;
+                  }
+                | { readonly _tag: "waiting" }
+                | { readonly _tag: "gone" };
+              const look = (): Step => {
+                const snapshot = Option.getOrNull(view().snapshot);
+                if (snapshot === null) {
+                  return { _tag: "waiting" };
+                }
+                const found = snapshot.queue.running.find(
+                  (row) => row.ticket === ticket && row.action === job.action,
+                );
+                if (found !== undefined && found.sessionId !== null) {
+                  return {
+                    _tag: "ready",
+                    sessionId: found.sessionId,
+                    serverUrl: found.serverUrl,
+                  };
+                }
+                return found === undefined ? { _tag: "gone" } : { _tag: "waiting" };
+              };
+              let settled = look();
+              if (settled._tag === "waiting") {
+                yield* setNotice(`waiting for ${ticket}'s session`);
+                settled = yield* Effect.repeat(Effect.sync(look), {
+                  schedule: Schedule.spaced(SESSION_WAIT),
+                  until: (step) => step._tag !== "waiting",
+                });
+              }
+              if (settled._tag !== "ready") {
+                if (settled._tag === "gone") {
+                  yield* setNotice(`${ticket} ended before a session`);
+                }
+                return;
+              }
+              sessionId = settled.sessionId;
+              serverUrl = settled.serverUrl;
+            }
+            const peek = yield* loadPeek(job.ticket ?? "—", sessionId, serverUrl);
             yield* update((latest) => ({
               ...latest,
               follow: Option.some(peek),

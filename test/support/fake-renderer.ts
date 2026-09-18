@@ -38,7 +38,9 @@ export const fakeRenderer = (
     (renderer) => Effect.sync(() => renderer.destroy()),
   );
   return {
-    layer: Layer.succeed(Run.Renderer)(Run.Renderer.of({ open })),
+    layer: Layer.succeed(Run.Renderer)(
+      Run.Renderer.of({ open, imageProtocol: Effect.succeed("auto") }),
+    ),
     open,
     opened: Deferred.await(first),
     setups,

@@ -263,7 +263,7 @@ describe("press happy path", () => {
     expect(View.press(full, key("escape")).follow).toEqual(Option.none());
   });
 
-  it("follows a running job with a session, and says why not for anything else", () => {
+  it("follows a running job, waiting if its session has not started, and says why not otherwise", () => {
     expect(View.followError(Option.none())).toEqual(Option.some("no job selected"));
     expect(View.followError(Option.some(pending))).toEqual(
       Option.some("follow needs a running job"),
@@ -271,7 +271,10 @@ describe("press happy path", () => {
     expect(View.followError(Option.some(failed))).toEqual(
       Option.some("follow needs a running job"),
     );
-    expect(View.followError(Option.some({ ...running, sessionId: null }))).toEqual(
+    // A running drive is followed before start writes its session; the runner waits for it.
+    expect(View.followError(Option.some({ ...running, sessionId: null }))).toEqual(Option.none());
+    // Nothing names the row once the read moves on: no ticket, no session, nowhere to wait.
+    expect(View.followError(Option.some({ ...running, sessionId: null, ticket: null }))).toEqual(
       Option.some("the selected job has no session"),
     );
     expect(View.followError(Option.some(running))).toEqual(Option.none());
