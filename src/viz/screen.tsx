@@ -47,13 +47,10 @@ const Divider = () => (
   />
 );
 
-type PeekScreen = Extract<View.FollowScreen, { readonly _tag: "peek" }>;
-type FullScreen = Extract<View.FollowScreen, { readonly _tag: "full" }>;
-
 // The peek sits over the bottom of the board, above the footer: its own background so the
 // rows beneath do not show through its blanks, the commands in their column and the last image
 // in what is left, drawn by the terminal's graphics when it has them and as blocks otherwise.
-const Peek = (props: { readonly follow: PeekScreen }) => (
+const Peek = (props: { readonly follow: Follow.Peek; readonly now: number }) => (
   <box
     position="absolute"
     left={0}
@@ -64,7 +61,7 @@ const Peek = (props: { readonly follow: PeekScreen }) => (
     borderStyle="rounded"
     borderColor={MUTED}
     backgroundColor={RGBA.defaultBackground()}
-    title={` ${props.follow.title} `}
+    title={` ${Follow.title(props.follow)} `}
     titleColor={Text.PALETTE.text}
     bottomTitle={` ${Follow.PEEK_HINT} `}
     bottomTitleAlignment="right"
@@ -73,7 +70,7 @@ const Peek = (props: { readonly follow: PeekScreen }) => (
     flexDirection="row"
   >
     <box width={Follow.LEFT_COLS} flexDirection="column">
-      <Index each={props.follow.commands}>{(row) => <Line row={row()} />}</Index>
+      <Index each={Follow.peekRows(props.follow, props.now)}>{(row) => <Line row={row()} />}</Index>
     </box>
     <Show when={Option.getOrUndefined(props.follow.png)}>
       {(png: Accessor<Uint8Array>) => (
@@ -90,13 +87,20 @@ const Peek = (props: { readonly follow: PeekScreen }) => (
 );
 
 // The full follow is the whole screen: the ticket and the session's status on top, the entries
-// down the left, the live image in the rest, and the last row for the way out or a notice.
-const FullFollow = (props: { readonly follow: FullScreen }) => (
+// down the left, the newest that fit between the header and the last row, the live image in the
+// rest, and the last row for the way out or a notice.
+const FullFollow = (props: {
+  readonly follow: Follow.Full;
+  readonly notice: Option.Option<string>;
+  readonly rows: number;
+}) => (
   <box flexDirection="column" width="100%" height="100%" paddingLeft={1} paddingRight={1}>
-    <Line row={props.follow.header} />
+    <Line row={Follow.fullHeader(props.follow)} />
     <box flexDirection="row" flexGrow={1} minHeight={0}>
       <box width={Follow.LEFT_COLS - 1} flexShrink={0} flexDirection="column">
-        <Index each={props.follow.entries}>{(row) => <Line row={row()} />}</Index>
+        <Index each={Follow.fullEntries(props.follow, props.rows - 2)}>
+          {(row) => <Line row={row()} />}
+        </Index>
       </box>
       <Show when={Option.getOrUndefined(props.follow.png)}>
         {(png: Accessor<Uint8Array>) => (
@@ -105,7 +109,7 @@ const FullFollow = (props: { readonly follow: FullScreen }) => (
       </Show>
     </box>
     <text fg={MUTED} wrapMode="none">
-      {props.follow.foot}
+      {Option.getOrElse(props.notice, () => Follow.FULL_FOOT)}
     </text>
   </box>
 );
@@ -119,12 +123,12 @@ export const App = (props: Props) => {
   const screen = createMemo(() =>
     View.screen(props.view(), props.now(), dimensions().width, dimensions().height),
   );
-  const peek = (): PeekScreen | undefined => {
-    const follow = Option.getOrUndefined(screen().follow);
+  const peek = (): Follow.Peek | undefined => {
+    const follow = Option.getOrUndefined(props.view().follow);
     return follow?._tag === "peek" ? follow : undefined;
   };
-  const full = (): FullScreen | undefined => {
-    const follow = Option.getOrUndefined(screen().follow);
+  const full = (): Follow.Full | undefined => {
+    const follow = Option.getOrUndefined(props.view().follow);
     return follow?._tag === "full" ? follow : undefined;
   };
   return (
@@ -213,11 +217,15 @@ export const App = (props: Props) => {
                 {screen().footer.right}
               </text>
             </box>
-            <Show when={peek()}>{(found: Accessor<PeekScreen>) => <Peek follow={found()} />}</Show>
+            <Show when={peek()}>
+              {(found: Accessor<Follow.Peek>) => <Peek follow={found()} now={props.now()} />}
+            </Show>
           </box>
         }
       >
-        {(found: Accessor<FullScreen>) => <FullFollow follow={found()} />}
+        {(found: Accessor<Follow.Full>) => (
+          <FullFollow follow={found()} notice={props.view().notice} rows={dimensions().height} />
+        )}
       </Show>
     </Show>
   );

@@ -585,46 +585,7 @@ export type Screen = {
     readonly place: Option.Option<string>;
   };
   readonly footer: { readonly left: Text.Row; readonly right: string };
-  readonly follow: Option.Option<FollowScreen>;
 };
-
-// What F has open: a peek boxed over the bottom of the board, its title on the border and the
-// image beside the commands, or the whole screen following the session live, its entries the
-// newest that fit above the last row, which carries the notice when there is one.
-export type FollowScreen =
-  | {
-      readonly _tag: "peek";
-      readonly title: string;
-      readonly commands: ReadonlyArray<Text.Row>;
-      readonly png: Option.Option<Uint8Array>;
-    }
-  | {
-      readonly _tag: "full";
-      readonly header: Text.Row;
-      readonly entries: ReadonlyArray<Text.Row>;
-      readonly png: Option.Option<Uint8Array>;
-      readonly foot: string;
-    };
-
-const followScreen = (view: View, now: number, rows: number): Option.Option<FollowScreen> =>
-  Option.map(view.follow, (follow): FollowScreen => {
-    if (follow._tag === "peek") {
-      return {
-        _tag: "peek",
-        title: Follow.title(follow),
-        commands: Follow.peekRows(follow, now),
-        png: follow.png,
-      };
-    }
-    // The header and the last row take one each.
-    return {
-      _tag: "full",
-      header: Follow.fullHeader(follow),
-      entries: Follow.fullEntries(follow, rows - 2),
-      png: follow.png,
-      foot: Option.getOrElse(view.notice, () => Follow.FULL_FOOT),
-    };
-  });
 
 const card = (
   machine: Servers.Machine,
@@ -808,7 +769,6 @@ export const screen = (view: View, now: number, columns: number, rows: number): 
         place: Option.none(),
       },
       footer: footer(view, columns),
-      follow: followScreen(view, now, rows),
     }),
     onSome: (snapshot) => {
       const shown = machines(view, snapshot, now, columns, rows);
@@ -824,7 +784,6 @@ export const screen = (view: View, now: number, columns: number, rows: number): 
         machines: shown,
         queue: queue(view, snapshot, now, rows - 1 - height - 3),
         footer: footer(view, columns),
-        follow: followScreen(view, now, rows),
       };
     },
   });

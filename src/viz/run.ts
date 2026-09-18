@@ -186,10 +186,14 @@ export const run: Effect.Effect<
   const automation = yield* Automation.AutomationStore;
   const [view, setView] = createSignal<View.View>(View.initialView);
   const [now, setNow] = createSignal(yield* Clock.currentTimeMillis);
-  const setNotice = (text: string) =>
+  // Every change to the view goes through here, so the screen redraws are steps of the fiber
+  // that made them.
+  const update = (change: (current: View.View) => View.View) =>
     Effect.sync(() => {
-      setView((current) => ({ ...current, notice: Option.some(text) }));
+      setView(change);
     });
+  const setNotice = (text: string) =>
+    update((current) => ({ ...current, notice: Option.some(text) }));
   const tick = Effect.andThen(Clock.currentTimeMillis, (ms) =>
     Effect.sync(() => {
       setNow(ms);
@@ -203,7 +207,7 @@ export const run: Effect.Effect<
     const series = yield* processStats.listSeries(View.SERIES_SAMPLES);
     // No completed jobs: the screen shows what runs and what waits.
     const queue = yield* automation.listJobs(0);
-    setView((current) => ({
+    yield* update((current) => ({
       ...current,
       snapshot: Option.some({ machines, series, queue, readAt }),
       failure: Option.none(),
@@ -212,12 +216,10 @@ export const run: Effect.Effect<
     Effect.catchCause((cause) =>
       Cause.hasInterruptsOnly(cause)
         ? Effect.interrupt
-        : Effect.sync(() => {
-            setView((current) => ({
-              ...current,
-              failure: Option.some(Render.headline(Cause.squash(cause))),
-            }));
-          }),
+        : update((current) => ({
+            ...current,
+            failure: Option.some(Render.headline(Cause.squash(cause))),
+          })),
     ),
   );
   // L's notice lands after press retired the last one, so it is what the screen shows.
@@ -232,10 +234,9 @@ export const run: Effect.Effect<
     yield* setNotice(notice);
   });
   // The follow's work off the key loop, one piece at a time: the peek's reads on the first F,
-  // the connect and the stream on the second. The reads clear themselves once the peek is up,
-  // the stream stays until the escape that closes the follow, a failure clears itself into a
-  // notice, and any key that leaves nothing followed interrupts what is in flight, so a database
-  // or a server that never answers holds no key.
+  // the connect and the stream on the second. A piece clears itself when it ends, however it
+  // ends; starting the next stops the last; and any key that leaves nothing followed interrupts
+  // what is in flight, so a database or a server that never answers holds no key.
   const followFiber = yield* Ref.make(Option.none<Fiber.Fiber<void>>());
   const stopFollow = Effect.gen(function* () {
     const running = yield* Ref.getAndSet(followFiber, Option.none());
@@ -244,13 +245,11 @@ export const run: Effect.Effect<
     }
   });
   const withFull = (change: (follow: Follow.Full) => Follow.Full) =>
-    Effect.sync(() => {
-      setView((current) => {
-        if (Option.isNone(current.follow) || current.follow.value._tag !== "full") {
-          return current;
-        }
-        return { ...current, follow: Option.some(change(current.follow.value)) };
-      });
+    update((current) => {
+      if (Option.isNone(current.follow) || current.follow.value._tag !== "full") {
+        return current;
+      }
+      return { ...current, follow: Option.some(change(current.follow.value)) };
     });
   const spin = withFull(Follow.tick);
   yield* Effect.scoped(
@@ -259,21 +258,18 @@ export const run: Effect.Effect<
       yield* Effect.promise(() => Screen.mount(renderer, { view, now }));
       const startFollow = <R>(work: Effect.Effect<void, never, R>) =>
         Effect.gen(function* () {
-          if (Option.isSome(yield* Ref.get(followFiber))) {
-            return;
-          }
-          const fiber = yield* Effect.forkScoped(work);
+          yield* stopFollow;
+          const fiber = yield* Effect.forkScoped(
+            Effect.ensuring(work, Ref.set(followFiber, Option.none())),
+          );
           yield* Ref.set(followFiber, Option.some(fiber));
         });
-      // What a piece of follow work fails into: its reason on the footer, and room for the next F.
+      // What a piece of follow work fails into: its reason on the footer.
       const failing = <A, E, R>(work: Effect.Effect<A, E, R>): Effect.Effect<void, never, R> =>
         Effect.catchCause(Effect.asVoid(work), (cause) =>
           Cause.hasInterruptsOnly(cause)
             ? Effect.interrupt
-            : Effect.andThen(
-                setNotice(Render.headline(Cause.squash(cause))),
-                Ref.set(followFiber, Option.none()),
-              ),
+            : setNotice(Render.headline(Cause.squash(cause))),
         );
       // The first F: the job's last commands and screenshot, read from the database.
       const peekWork = (job: Automation.AutomationJobListRow) =>
@@ -284,8 +280,11 @@ export const run: Effect.Effect<
               Option.getOrThrow(Option.fromNullishOr(job.sessionId)),
               job.serverUrl,
             );
-            setView((latest) => ({ ...latest, follow: Option.some(peek), notice: Option.none() }));
-            yield* Ref.set(followFiber, Option.none());
+            yield* update((latest) => ({
+              ...latest,
+              follow: Option.some(peek),
+              notice: Option.none(),
+            }));
           }),
         );
       // The second F: the qemu server streams the session, and every event lands on the full
@@ -297,7 +296,7 @@ export const run: Effect.Effect<
             const token = yield* Config.oligarchyToken;
             const proxy = yield* ProxyClient.connect({ serverUrl, token });
             const bytes = yield* proxy.follow(peek.sessionId);
-            setView((current) => ({
+            yield* update((current) => ({
               ...current,
               follow: Option.some(Follow.expand(peek, serverUrl)),
               notice: Option.none(),
@@ -346,7 +345,7 @@ export const run: Effect.Effect<
         Stream.takeWhile((key) => !View.isQuit(key)),
         Stream.runForEach((key) =>
           Effect.gen(function* () {
-            setView((current) => View.press(current, key));
+            yield* update((current) => View.press(current, key));
             if (Option.isNone(view().follow)) {
               yield* stopFollow;
             }
