@@ -219,7 +219,7 @@ const clientStops = (snapshot: Snapshot): ReadonlyArray<number> =>
 
 // A cursor left on a client header, or past the list, moves onto a ticket. No ticket to land
 // on leaves it where it is.
-export const place = (view: View): View => {
+export const land = (view: View): View => {
   if (Option.isNone(view.snapshot)) {
     return view;
   }
@@ -1241,13 +1241,17 @@ const automationRows = (
 
 const sessionPane = (view: View, height: number, now: number): ReadonlyArray<Text.Row> => {
   const follow = Option.getOrNull(view.session);
-  const lines: Array<Text.Row> =
-    follow === null
-      ? [[Text.muted(Option.getOrElse(view.sessionNote, () => "no session"))]]
-      : follow._tag === "peek"
-        ? [[Text.value(Follow.title(follow))], ...Follow.peekRows(follow, now)]
-        : [Follow.fullHeader(follow), ...Follow.fullEntries(follow, Math.max(0, height - 1))];
-  return Array.from({ length: height }, (_, row) => lines[row] ?? [Text.SPACE]);
+  const lines = (): ReadonlyArray<Text.Row> => {
+    if (follow === null) {
+      return [[Text.muted(Option.getOrElse(view.sessionNote, () => "no session"))]];
+    }
+    if (follow._tag === "peek") {
+      return [[Text.value(Follow.title(follow))], ...Follow.peekRows(follow, now)];
+    }
+    return [Follow.fullHeader(follow), ...Follow.fullEntries(follow, Math.max(0, height - 1))];
+  };
+  const drawn = lines();
+  return Array.from({ length: height }, (_, row) => drawn[row] ?? [Text.SPACE]);
 };
 
 const ticketRows = (

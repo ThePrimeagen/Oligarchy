@@ -1129,6 +1129,10 @@ const aborting = (respond: () => Response): FakeHttp.Recorder =>
     url.pathname === "/abort" ? respond() : new Response(null, { status: 404 }),
   );
 
+// The selected ticket's session also calls this client. An abort assertion counts POST /abort.
+const abortsOf = (server: FakeHttp.Recorder) =>
+  server.requests.filter((request) => request.method === "POST" && request.url.endsWith("/abort"));
+
 const OVER = () => FakeHttp.json({ error: 'ticket "OLI-61" has no drive to abort' }, 400);
 
 // A asks first: the question, yes, enter.
@@ -1158,7 +1162,7 @@ describe("run abort happy path", () => {
         setup.mockInput.pressEnter();
         yield* settle;
         expect((yield* rows(setup)).some((row) => row.includes(QUESTION))).toBe(false);
-        expect(server.requests).toEqual([]);
+        expect(abortsOf(server)).toEqual([]);
         // Asked again: the arrows and h and l move between the answers.
         setup.mockInput.pressKey("a");
         setup.mockInput.pressKey("h");
@@ -1173,8 +1177,8 @@ describe("run abort happy path", () => {
         setup.mockInput.pressEnter();
         const closed = yield* until(setup, shows("aborted drive OLI-61"));
         expect(closed.some((row) => row.includes(QUESTION))).toBe(false);
-        expect(server.requests).toHaveLength(1);
-        expect(JSON.parse(server.requests[0]?.body ?? "")).toEqual({
+        expect(abortsOf(server)).toHaveLength(1);
+        expect(JSON.parse(abortsOf(server)[0]?.body ?? "")).toEqual({
           ticket: "OLI-61",
           action: "drive",
         });
@@ -1193,7 +1197,7 @@ describe("run abort happy path", () => {
         const jobs = () => Effect.sync(() => board.queue);
         // The server closes the job named: the next read no longer lists it.
         const server: FakeHttp.Recorder = aborting(() => {
-          const named: { ticket: string } = JSON.parse(server.requests.at(-1)?.body ?? "{}");
+          const named: { ticket: string } = JSON.parse(abortsOf(server).at(-1)?.body ?? "{}");
           board.queue = {
             ...board.queue,
             running: board.queue.running.filter((row) => row.ticket !== named.ticket),
@@ -1205,14 +1209,14 @@ describe("run abort happy path", () => {
         setup.mockInput.pressKey("j");
         confirmAbort(setup);
         const closed = yield* until(setup, shows("aborted drive OLI-61"));
-        expect(server.requests).toEqual([
+        expect(abortsOf(server)).toEqual([
           expect.objectContaining({
             method: "POST",
             url: `${AUTOMATION_SERVER_URL}/abort`,
             headers: expect.objectContaining({ authorization: "Bearer test-token" }),
           }),
         ]);
-        expect(JSON.parse(server.requests[0]?.body ?? "")).toEqual({
+        expect(JSON.parse(abortsOf(server)[0]?.body ?? "")).toEqual({
           ticket: "OLI-61",
           action: "drive",
         });
@@ -1230,8 +1234,8 @@ describe("run abort happy path", () => {
         setup.mockInput.pressTab();
         confirmAbort(setup);
         const queued = yield* until(setup, shows("aborted drive OLI-62"));
-        expect(server.requests).toHaveLength(2);
-        expect(JSON.parse(server.requests[1]?.body ?? "")).toEqual({
+        expect(abortsOf(server)).toHaveLength(2);
+        expect(JSON.parse(abortsOf(server)[1]?.body ?? "")).toEqual({
           ticket: "OLI-62",
           action: "drive",
         });
@@ -1256,7 +1260,7 @@ describe("run abort happy path", () => {
         setup.mockInput.pressKey("j");
         confirmAbort(setup);
         const popped = yield* until(setup, shows(POPUP));
-        expect(server.requests).toHaveLength(1);
+        expect(abortsOf(server)).toHaveLength(1);
         // In the middle of the screen, the footer's keys still under it.
         expect(popped[18]?.includes(POPUP)).toBe(true);
         expect(popped[36]).toBe(FOOTER);
@@ -1273,8 +1277,8 @@ describe("run abort happy path", () => {
         // A second abort two seconds in: the pop-up outlives the first one's three seconds.
         setup.mockInput.pressKey("j");
         confirmAbort(setup);
-        yield* until(setup, (drawn) => shows(POPUP)(drawn) && server.requests.length === 2);
-        expect(server.requests).toHaveLength(2);
+        yield* until(setup, (drawn) => shows(POPUP)(drawn) && abortsOf(server).length === 2);
+        expect(abortsOf(server)).toHaveLength(2);
         yield* TestClock.adjust("1 second");
         yield* settle;
         expect((yield* rows(setup)).some((row) => row.includes(POPUP))).toBe(true);
@@ -1334,7 +1338,7 @@ describe("run abort unhappy path", () => {
         setup.mockInput.pressKey("q");
         yield* Fiber.join(fiber);
         expect(setup.renderer.isDestroyed).toBe(true);
-        expect(server.requests).toEqual([]);
+        expect(abortsOf(server)).toEqual([]);
       }),
   );
 
@@ -1368,7 +1372,7 @@ describe("run abort unhappy path", () => {
       expect(unticketedFrame.some((row) => row.includes(QUESTION))).toBe(false);
       byUnticketed.setup.mockInput.pressKey("q");
       yield* Fiber.join(byUnticketed.fiber);
-      expect(server.requests).toEqual([]);
+      expect(abortsOf(server)).toEqual([]);
     }),
   );
 
@@ -1404,7 +1408,7 @@ describe("run abort unhappy path", () => {
         expect(yield* footer(byNoToken.setup)).toBe(pad(" OLIGARCHY_TOKEN is not set", COLUMNS));
         byNoToken.setup.mockInput.pressKey("q");
         yield* Fiber.join(byNoToken.fiber);
-        expect(server.requests).toEqual([]);
+        expect(abortsOf(server)).toEqual([]);
       }),
   );
 
@@ -1511,13 +1515,13 @@ describe("run abort unhappy path", () => {
         setup.mockInput.pressTab();
         confirmAbort(setup);
         yield* settle;
-        expect(server.requests).toHaveLength(1);
+        expect(abortsOf(server)).toHaveLength(1);
         expect(yield* footer(setup)).toBe(FOOTER);
         // Another A, on the next job, while the server has not answered the first: no question.
         setup.mockInput.pressKey("j");
         setup.mockInput.pressKey("a");
         yield* settle;
-        expect(server.requests).toHaveLength(1);
+        expect(abortsOf(server)).toHaveLength(1);
         const waiting = yield* rows(setup);
         expect(waiting[36]).toBe(pad(" still aborting drive OLI-61", COLUMNS));
         expect(waiting.some((row) => row.includes(QUESTION))).toBe(false);
@@ -1530,8 +1534,8 @@ describe("run abort unhappy path", () => {
         // With nothing in flight, the next A is sent: the one job left is selected.
         confirmAbort(setup);
         yield* until(setup, shows("aborted drive OLI-62"));
-        expect(server.requests).toHaveLength(2);
-        expect(JSON.parse(server.requests[1]?.body ?? "")).toEqual({
+        expect(abortsOf(server)).toHaveLength(2);
+        expect(JSON.parse(abortsOf(server)[1]?.body ?? "")).toEqual({
           ticket: "OLI-62",
           action: "drive",
         });
@@ -1626,9 +1630,9 @@ describe("definition and ticket information", () => {
         );
         byBroken.setup.mockInput.pressKey("d");
         yield* settle;
-        const failed = yield* rows(byBroken.setup);
-        expect(failed[36]).toContain("timeout: boom");
-        expect(failed.join("\n")).not.toContain(View.SHEET_HINT);
+        const timedOut = yield* rows(byBroken.setup);
+        expect(timedOut[36]).toContain("timeout: boom");
+        expect(timedOut.join("\n")).not.toContain(View.SHEET_HINT);
         byBroken.setup.mockInput.pressKey("q");
         yield* Fiber.join(byBroken.fiber);
 
@@ -1675,7 +1679,7 @@ describe("definition and ticket information", () => {
       yield* settle;
       const drawn = yield* rows(setup);
       expect(drawn.some((row) => row.includes(QUESTION))).toBe(false);
-      expect(server.requests).toEqual([]);
+      expect(abortsOf(server)).toEqual([]);
       setup.mockInput.pressKey("q");
       yield* Fiber.join(fiber);
     }),

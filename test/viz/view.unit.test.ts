@@ -357,23 +357,23 @@ describe("sidebar tickets", () => {
 
   it("place snaps a header or a cursor past the end onto a ticket, and leaves a ticket cursor", () => {
     const header = shown(two, { tab: "automation" });
-    expect(View.place(header).cursor.clients).toBe(1);
+    expect(View.land(header).cursor.clients).toBe(1);
     const onSecond = shown(two, {
       tab: "automation",
       cursor: { servers: 0, clients: 2, queue: 0 },
     });
-    expect(View.place(onSecond)).toEqual(onSecond);
+    expect(View.land(onSecond)).toEqual(onSecond);
     const past = shown(two, {
       tab: "automation",
       cursor: { servers: 0, clients: 40, queue: 0 },
     });
-    expect(View.place(past).cursor.clients).toBe(2);
-    expect(View.place(View.initialView)).toBe(View.initialView);
+    expect(View.land(past).cursor.clients).toBe(2);
+    expect(View.land(View.initialView)).toBe(View.initialView);
   });
 
   it("place leaves the cursor when there is no ticket to land on (unhappy)", () => {
     const empty = shown({ ...SNAPSHOT, queue: EMPTY_QUEUE }, { tab: "automation" });
-    expect(View.place(empty).cursor.clients).toBe(0);
+    expect(View.land(empty).cursor.clients).toBe(0);
     expect(View.press(empty, key("j")).cursor.clients).toBe(0);
     expect(View.press(empty, key("k")).cursor.clients).toBe(0);
     expect(View.press(empty, key("g", true)).cursor.clients).toBe(0);

@@ -274,7 +274,7 @@ export const run: Effect.Effect<
     const snapshot = yield* Read.collect(needs, yield* Ref.get(prior), readAt);
     yield* Ref.set(prior, Option.some(snapshot));
     yield* update((current) =>
-      View.place({
+      View.land({
         ...current,
         snapshot: Option.some(snapshot),
         failure: Option.none(),
@@ -589,12 +589,15 @@ export const run: Effect.Effect<
             | { readonly _tag: "waiting" }
             | { readonly _tag: "gone" }
             | { readonly _tag: "none" };
-          const initial = (): Step =>
-            job.sessionId !== null
-              ? { _tag: "ready", sessionId: job.sessionId, serverUrl: job.serverUrl }
-              : job.status === "running" && job.ticket !== null
-                ? { _tag: "waiting" }
-                : { _tag: "none" };
+          const initial = (): Step => {
+            if (job.sessionId !== null) {
+              return { _tag: "ready", sessionId: job.sessionId, serverUrl: job.serverUrl };
+            }
+            if (job.status === "running" && job.ticket !== null) {
+              return { _tag: "waiting" };
+            }
+            return { _tag: "none" };
+          };
           let settled = initial();
           if (settled._tag === "none") {
             yield* note("no session");
