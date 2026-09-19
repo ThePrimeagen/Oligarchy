@@ -566,7 +566,9 @@ export const run: Effect.Effect<
         keys,
         Effect.repeat(read, Schedule.spaced(View.REFRESH)),
         Effect.repeat(tick, Schedule.spaced(View.AGE_TICK)),
-        Effect.repeat(spin, Schedule.spaced(Duration.millis(View.SPIN_MS))),
+        // The glyph is floor(now / SPIN_MS), so this clock has to land on the interval. spaced
+        // waits SPIN_MS after the redraw and the index skips a frame.
+        Effect.repeat(spin, Schedule.fixed(Duration.millis(View.SPIN_MS))),
         drawFailure(renderer),
       ]);
     }),

@@ -70,11 +70,15 @@ const heat = (percent: number): string => {
 // What waits is a hollow mark. What runs is a spinner, coloured below by the action.
 const PENDING = { glyph: "◌", color: PALETTE.muted };
 
-// Leaf and pine are neighbours, and leaf is already an agent's colour, so a running drive and a
-// running diagnose take colours the rest of the board does not use: green while driven, blue
-// while diagnosed.
+// Rosé Pine has no unambiguous green or blue: pine is teal and leaf is sage, and they sit next
+// to each other. A running drive and a running diagnose take colours the rest of the board does
+// not use.
 export const DRIVE_COLOR = "#4ade80";
 export const DIAGNOSE_COLOR = "#60a5fa";
+export const ACTION_COLOR: Readonly<Record<Automation.AutomationAction, string>> = {
+  drive: DRIVE_COLOR,
+  diagnose: DIAGNOSE_COLOR,
+};
 
 // The braille spinner on a running row turns with the follow's spinner. A frame short of this
 // still shows the previous glyph.
@@ -567,7 +571,8 @@ const jobHeader: Text.Row = [
 // action's colour, say what it is doing and for how long.
 const jobRow = (job: Job, selected: Text.Piece, drift: number, now: number): Text.Row => {
   const running = job.status === "running";
-  const color = job.action === "diagnose" ? DIAGNOSE_COLOR : DRIVE_COLOR;
+  const color = ACTION_COLOR[job.action];
+  const started = ago(job.startedAt, job.queriedAt, drift);
   return [
     selected,
     Text.SPACE,
@@ -576,7 +581,7 @@ const jobRow = (job: Job, selected: Text.Piece, drift: number, now: number): Tex
     Text.value(Text.fit(job.test, JOB_WIDTHS.test)),
     Text.GAP,
     running
-      ? Text.paint(color, Text.fit(ago(job.startedAt, job.queriedAt, drift), JOB_WIDTHS.action))
+      ? Text.paint(color, Text.fit(started, JOB_WIDTHS.action))
       : Text.label(Text.fit(job.action, JOB_WIDTHS.action)),
     Text.GAP,
     Text.paint(
@@ -586,7 +591,7 @@ const jobRow = (job: Job, selected: Text.Piece, drift: number, now: number): Tex
     Text.GAP,
     Text.label(Text.fit(ago(job.createdAt, job.queriedAt, drift), JOB_WIDTHS.queued)),
     Text.GAP,
-    Text.label(Text.fit(ago(job.startedAt, job.queriedAt, drift), JOB_WIDTHS.started)),
+    Text.label(Text.fit(started, JOB_WIDTHS.started)),
   ];
 };
 
@@ -1037,9 +1042,10 @@ const automationRows = (
       return [marker(on, true), Text.SPACE, Text.strong(Text.fit(entry.machine.name ?? "—", 16))];
     }
     const job = jobsOn(snapshot, entry.machine)[entry.job.value];
-    // Twenty-six columns: the indent, the marker, the ticket, then the spinner and at most ten
-    // of elapsed ("59 min ago"). That is the whole line; the action word is not on it.
-    const color = job.action === "diagnose" ? DIAGNOSE_COLOR : DRIVE_COLOR;
+    // Twenty-six columns: the indent, the marker, the ticket, then the spinner and the elapsed.
+    // "59 min ago" is ten and fills what is left; clip bounds the line. The action word is not
+    // on it.
+    const color = ACTION_COLOR[job.action];
     return [
       Text.muted("  "),
       marker(on, true),
@@ -1048,7 +1054,7 @@ const automationRows = (
       Text.SPACE,
       Text.paint(color, spinnerAt(now)),
       Text.SPACE,
-      Text.paint(color, Text.cut(ago(job.startedAt, job.queriedAt, drift), 10)),
+      Text.paint(color, ago(job.startedAt, job.queriedAt, drift)),
     ];
   });
   // Keep the marked row on screen, the window growing down from it.
