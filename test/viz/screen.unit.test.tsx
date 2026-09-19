@@ -49,6 +49,7 @@ import {
   MUTED,
   OPENED,
   pad,
+  DIAGNOSING,
   PENDING,
   pending,
   PINE,
@@ -259,7 +260,10 @@ describe("screen happy path", () => {
         expect(styleOf(rows[7], "   37.5%")).toEqual([TEXT, BOLD]);
         // The card's job, in the queue's look, with no marker of its own while the card is selected.
         expect(textOf(rows[8]).startsWith("│   OLI-61")).toBe(true);
-        expect(styleOf(rows[8], pad("● running", 12))).toEqual([GOLD, PLAIN]);
+        expect(styleOf(rows[8], pad(`${View.spinnerAt(READ_AT)} running`, 12))).toEqual([
+          View.DRIVE_COLOR,
+          PLAIN,
+        ]);
         expect(rows[9]).toEqual([[divider, MUTED, PLAIN]]);
         expect(colorsOf(rows[10])).not.toContain(GOLD);
         expect(styleOf(rows[10], "never heard from")).toEqual([MUTED, PLAIN]);
@@ -268,7 +272,10 @@ describe("screen happy path", () => {
         // The machines have the focus: the queue's marker is muted, its ticket text.
         expect(styleOf(rows[16], "▸")).toEqual([MUTED, PLAIN]);
         expect(styleOf(rows[16], pad("OLI-61", 9))).toEqual([TEXT, PLAIN]);
-        expect(styleOf(rows[16], pad("● running", 12))).toEqual([GOLD, PLAIN]);
+        expect(styleOf(rows[16], pad(`${View.spinnerAt(READ_AT)} running`, 12))).toEqual([
+          View.DRIVE_COLOR,
+          PLAIN,
+        ]);
         expect(styleOf(rows[17], pad("◌ pending", 12))).toEqual([MUTED, PLAIN]);
         expect(styleOf(rows[ROWS - 1], "j/k")).toEqual([TEXT, PLAIN]);
         expect(styleOf(rows[ROWS - 1], " select   ")).toEqual([MUTED, PLAIN]);
@@ -816,8 +823,8 @@ describe("screen unhappy path", () => {
       const truncated = [
         "OLI-61",
         `${"a".repeat(17)}…`,
-        "drive",
-        "● running",
+        "45 s ago",
+        `${View.spinnerAt(READ_AT)} running`,
         "3 min ago",
         "45 s ago",
       ] as const;
@@ -853,8 +860,8 @@ describe("screen unhappy path", () => {
         const cleaned = [
           "OLI-61",
           "one two [31m t  c",
-          "drive",
-          "● running",
+          "45 s ago",
+          `${View.spinnerAt(READ_AT)} running`,
           "3 min ago",
           "45 s ago",
         ] as const;
@@ -1277,5 +1284,129 @@ describe("screen confirm", () => {
         const without = yield* draw(shown(SNAPSHOT));
         expect(without.join("\n")).not.toContain("are you sure?");
       }),
+  );
+});
+
+describe("running job rows", () => {
+  const status = (now: number): string => pad(`${View.spinnerAt(now)} running`, 12);
+  const strip = (row: string | undefined): string => (row ?? "").slice(2, 28);
+  const withBoth = (snapshot: View.Snapshot = SNAPSHOT): View.Snapshot => ({
+    ...snapshot,
+    queue: { ...snapshot.queue, running: [running, diagnosing] },
+  });
+
+  it.effect(
+    "paints a running drive green, with the spinner and how long it has run in place of the action word",
+    () =>
+      Effect.gen(function* () {
+        const rows = yield* styled(shown(SNAPSHOT));
+        const elapsed = pad("45 s ago", 10);
+        for (const index of [8, 16]) {
+          expect(styleOf(rows[index], status(READ_AT))).toEqual([View.DRIVE_COLOR, PLAIN]);
+          expect(styleOf(rows[index], elapsed)).toEqual([View.DRIVE_COLOR, PLAIN]);
+          expect(styleOf(rows[index], pad("45 s ago", 11))).toEqual([SUBTLE, PLAIN]);
+          expect(textOf(rows[index])).not.toContain("drive");
+        }
+        const tickets = yield* draw(shown(SNAPSHOT, { tab: "tickets" }));
+        expect(tickets[5]).toBe(box(JOB_HEADER));
+        expect(tickets[6]).toBe(box(job("▸", RUNNING)));
+        const clients = yield* draw(shown(SNAPSHOT, { tab: "automation" }));
+        expect(strip(clients[6])).toContain(View.spinnerAt(READ_AT));
+        expect(strip(clients[6])).toContain("45 s ago");
+        expect(strip(clients[6])).not.toContain("drive");
+        const painted = yield* styled(shown(SNAPSHOT, { tab: "automation" }));
+        expect(styleOf(painted[6], View.spinnerAt(READ_AT))).toEqual([View.DRIVE_COLOR, PLAIN]);
+        expect(styleOf(painted[6], "45 s ago")).toEqual([View.DRIVE_COLOR, PLAIN]);
+      }),
+  );
+
+  it.effect(
+    "paints a running diagnose blue, and drops the action word on the queue, the client and the tickets",
+    () =>
+      Effect.gen(function* () {
+        const snapshot = withBoth();
+        const queue = yield* styled(shown(snapshot));
+        const diagnose = queue.find((row) => textOf(row).includes("OLI-65"));
+        expect(styleOf(diagnose, status(READ_AT))).toEqual([View.DIAGNOSE_COLOR, PLAIN]);
+        expect(styleOf(diagnose, pad("45 s ago", 10))).toEqual([View.DIAGNOSE_COLOR, PLAIN]);
+        expect(textOf(diagnose)).not.toContain("diagnose");
+        const clients = yield* styled(shown(snapshot, { tab: "automation" }));
+        const client = clients.find((row) => textOf(row).includes("OLI-65"));
+        expect(styleOf(client, View.spinnerAt(READ_AT))).toEqual([View.DIAGNOSE_COLOR, PLAIN]);
+        expect(styleOf(client, "45 s ago")).toEqual([View.DIAGNOSE_COLOR, PLAIN]);
+        expect(textOf(client)).not.toContain("diagnose");
+        const tickets = yield* draw(shown(snapshot, { tab: "tickets" }));
+        expect(tickets[7]).toBe(box(job(" ", DIAGNOSING)));
+        expect(tickets[7]).not.toContain("diagnose");
+      }),
+  );
+
+  it.effect("a pending row keeps the action word and the hollow mark, and spins nothing", () =>
+    Effect.gen(function* () {
+      const rows = yield* styled(shown(SNAPSHOT));
+      expect(styleOf(rows[17], pad("drive", 10))).toEqual([SUBTLE, PLAIN]);
+      expect(styleOf(rows[17], pad("◌ pending", 12))).toEqual([MUTED, PLAIN]);
+      expect(textOf(rows[17])).toContain("drive");
+      expect(textOf(rows[17])).not.toContain(View.spinnerAt(READ_AT));
+      const drawn = yield* draw(shown(SNAPSHOT));
+      expect(drawn[17]).toBe(box(job(" ", PENDING)));
+    }),
+  );
+
+  it.effect("a finished ticket keeps the action word and is not spun", () =>
+    Effect.gen(function* () {
+      const rows = yield* draw(
+        shown(
+          { ...SNAPSHOT, queue: { running: [], pending: [], completed: [failed] } },
+          { tab: "tickets" },
+        ),
+      );
+      const finished = rows[6] ?? "";
+      expect(finished).toContain("OLI-60");
+      expect(finished).toContain("drive");
+      expect(finished).toContain("◌ failed");
+      expect(finished).not.toContain(View.spinnerAt(READ_AT));
+    }),
+  );
+
+  it.effect("a running job that has not recorded a start shows a dash beside the spinner", () =>
+    Effect.gen(function* () {
+      const snapshot: View.Snapshot = {
+        ...SNAPSHOT,
+        queue: { ...EMPTY_QUEUE, running: [{ ...running, startedAt: null }] },
+      };
+      const rows = yield* styled(shown(snapshot));
+      expect(styleOf(rows[8], status(READ_AT))).toEqual([View.DRIVE_COLOR, PLAIN]);
+      expect(styleOf(rows[8], pad("—", 10))).toEqual([View.DRIVE_COLOR, PLAIN]);
+      expect(textOf(rows[8])).not.toContain("drive");
+      const clients = yield* draw(shown(snapshot, { tab: "automation" }));
+      expect(strip(clients[6])).toContain("—");
+      expect(strip(clients[6])).toContain(View.spinnerAt(READ_AT));
+      expect(strip(clients[6])).not.toContain("drive");
+    }),
+  );
+
+  it.effect("the next 80 milliseconds show the next glyph and the same elapsed age", () =>
+    Effect.gen(function* () {
+      const later = READ_AT + View.SPIN_MS;
+      const rows = yield* styled(shown(SNAPSHOT), later);
+      expect(View.spinnerAt(later)).not.toBe(View.spinnerAt(READ_AT));
+      expect(styleOf(rows[16], status(later))).toEqual([View.DRIVE_COLOR, PLAIN]);
+      expect(styleOf(rows[16], pad("45 s ago", 10))).toEqual([View.DRIVE_COLOR, PLAIN]);
+    }),
+  );
+
+  it.effect("fifty-nine minutes of running still fits the action column, uncut", () =>
+    Effect.gen(function* () {
+      const rows = yield* styled(
+        shown({
+          ...SNAPSHOT,
+          queue: { ...EMPTY_QUEUE, running: [{ ...running, startedAt: ago(59 * 60) }] },
+        }),
+      );
+      expect(styleOf(rows[16], pad("59 min ago", 10))).toEqual([View.DRIVE_COLOR, PLAIN]);
+      expect(textOf(rows[16])).not.toContain("…");
+      expect(textOf(rows[16])).not.toContain("drive");
+    }),
   );
 });

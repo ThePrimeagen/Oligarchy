@@ -203,6 +203,30 @@ describe("run happy path", () => {
   );
 
   it.effect(
+    "a running job's spinner turns every 80 milliseconds while the read's age stays put",
+    () =>
+      Effect.gen(function* () {
+        const screen = fakeRenderer();
+        const { fiber, setup } = yield* started(screen);
+        const left = (row: string | undefined): string => (row ?? "").slice(2, 28);
+        const first = yield* rows(setup);
+        expect(left(first[6])).toContain(View.spinnerAt(0));
+        expect(left(first[6])).toContain("45 s ago");
+        expect(left(first[6])).not.toContain("drive");
+        expect(first[0]).toBe(machinesTop("read 0 s ago"));
+        yield* TestClock.adjust("80 millis");
+        yield* settle;
+        const next = yield* rows(setup);
+        expect(left(next[6])).toContain(View.spinnerAt(View.SPIN_MS));
+        expect(left(next[6])).not.toContain(View.spinnerAt(0));
+        expect(left(next[6])).toContain("45 s ago");
+        expect(next[0]).toBe(machinesTop("read 0 s ago"));
+        setup.mockInput.pressKey("q");
+        yield* Fiber.join(fiber);
+      }),
+  );
+
+  it.effect(
     "a key redraws at once: it opens on automation, l shows the qemu servers, j and k move the selection",
     () =>
       Effect.gen(function* () {

@@ -67,9 +67,25 @@ const heat = (percent: number): string => {
     : blend(PALETTE.gold, PALETTE.love, (value - 50) / 50);
 };
 
-// The queue lists what runs and what waits, so a job's status is one or the other.
-const RUNNING = { glyph: "●", color: PALETTE.gold };
+// What waits is a hollow mark. What runs is a spinner, coloured below by the action.
 const PENDING = { glyph: "◌", color: PALETTE.muted };
+
+// Rosé Pine has no unambiguous green or blue: pine is teal and leaf is sage, and they sit next
+// to each other. A running drive and a running diagnose take colours the rest of the board does
+// not use.
+export const DRIVE_COLOR = "#4ade80";
+export const DIAGNOSE_COLOR = "#60a5fa";
+export const ACTION_COLOR: Readonly<Record<Automation.AutomationAction, string>> = {
+  drive: DRIVE_COLOR,
+  diagnose: DIAGNOSE_COLOR,
+};
+
+// The braille spinner on a running row turns with the follow's spinner. A frame short of this
+// still shows the previous glyph.
+export const SPIN_MS = 80;
+
+export const spinnerAt = (now: number): string =>
+  Follow.SPINNER[Math.floor(now / SPIN_MS) % Follow.SPINNER.length];
 
 // ---------------------------------------------------------------------------
 // State
@@ -532,8 +548,10 @@ const tabsRow = (view: View): Text.Row => {
 };
 
 // A job row: the marker column and a space, then six columns with a gap between each. A live
-// job has no finish and no reason yet, so neither has a column.
-const JOB_WIDTHS = { ticket: 9, test: 18, action: 9, status: 12, queued: 11, started: 11 };
+// job has no finish and no reason yet, so neither has a column. The action column is ten: that
+// holds "59 min ago", the longest minute reading, which is what a running row shows there. The
+// header stays "action" because a waiting row still names drive or diagnose in that cell.
+const JOB_WIDTHS = { ticket: 9, test: 18, action: 10, status: 12, queued: 11, started: 11 };
 
 const jobHeader: Text.Row = [
   Text.label(
@@ -549,9 +567,12 @@ const jobHeader: Text.Row = [
 ];
 
 // The columns are the same for every job, so a pending one shows a dash where its start will
-// go; the status carries its glyph and colour.
-const jobRow = (job: Job, selected: Text.Piece, drift: number): Text.Row => {
-  const status = job.status === "running" ? RUNNING : PENDING;
+// go. A running one drops the action word: the spinner and the elapsed time, both in the
+// action's colour, say what it is doing and for how long.
+const jobRow = (job: Job, selected: Text.Piece, drift: number, now: number): Text.Row => {
+  const running = job.status === "running";
+  const color = ACTION_COLOR[job.action];
+  const started = ago(job.startedAt, job.queriedAt, drift);
   return [
     selected,
     Text.SPACE,
@@ -559,13 +580,18 @@ const jobRow = (job: Job, selected: Text.Piece, drift: number): Text.Row => {
     Text.GAP,
     Text.value(Text.fit(job.test, JOB_WIDTHS.test)),
     Text.GAP,
-    Text.label(Text.fit(job.action, JOB_WIDTHS.action)),
+    running
+      ? Text.paint(color, Text.fit(started, JOB_WIDTHS.action))
+      : Text.label(Text.fit(job.action, JOB_WIDTHS.action)),
     Text.GAP,
-    Text.paint(status.color, Text.fit(`${status.glyph} ${job.status}`, JOB_WIDTHS.status)),
+    Text.paint(
+      running ? color : PENDING.color,
+      Text.fit(`${running ? spinnerAt(now) : PENDING.glyph} ${job.status}`, JOB_WIDTHS.status),
+    ),
     Text.GAP,
     Text.label(Text.fit(ago(job.createdAt, job.queriedAt, drift), JOB_WIDTHS.queued)),
     Text.GAP,
-    Text.label(Text.fit(ago(job.startedAt, job.queriedAt, drift), JOB_WIDTHS.started)),
+    Text.label(Text.fit(started, JOB_WIDTHS.started)),
   ];
 };
 
@@ -574,8 +600,11 @@ const jobList = (
   selected: Option.Option<number>,
   hasFocus: boolean,
   drift: number,
+  now: number,
 ): ReadonlyArray<Text.Row> =>
-  jobs.map((job, index) => jobRow(job, marker(Option.contains(selected, index), hasFocus), drift));
+  jobs.map((job, index) =>
+    jobRow(job, marker(Option.contains(selected, index), hasFocus), drift, now),
+  );
 
 // A card's first row: the marker and the machine's name and url on the left, cut to what the
 // right leaves; on the right what its heartbeat says, or the one phrase that says it stopped.
@@ -707,6 +736,7 @@ const card = (
   hasFocus: boolean,
   drift: number,
   usable: number,
+  now: number,
 ): Card => {
   const silent =
     machine.heartbeatAt !== null &&
@@ -716,7 +746,7 @@ const card = (
     header: cardHeader(machine, header, silent, drift, usable),
     upper: graphs.upper,
     lower: graphs.lower,
-    jobs: jobList(jobs, job, hasFocus, drift),
+    jobs: jobList(jobs, job, hasFocus, drift, now),
   };
 };
 
@@ -782,7 +812,7 @@ const machines = (
     const own = index === chosen;
     const header = marker(own && Option.isNone(selected.job), hasFocus);
     const job = own ? Option.map(selected.job, (at) => at - from) : Option.none<number>();
-    return card(machine, series, jobs, header, job, hasFocus, drift, usable);
+    return card(machine, series, jobs, header, job, hasFocus, drift, usable, now);
   });
   const place =
     cards.length < listed.length
@@ -819,7 +849,7 @@ const queue = (view: View, snapshot: Snapshot, now: number, room: number): Scree
   return {
     title,
     header: jobHeader,
-    jobs: jobList(shown, Option.some(cursor - first), view.focus === "queue", drift),
+    jobs: jobList(shown, Option.some(cursor - first), view.focus === "queue", drift, now),
     empty: Option.none(),
     place,
   };
@@ -995,6 +1025,7 @@ const automationRows = (
   snapshot: Snapshot,
   columns: number,
   height: number,
+  now: number,
 ): ReadonlyArray<Text.Row> => {
   const inner = columns - 4;
   const entries = entriesOf(snapshot, "clients");
@@ -1004,18 +1035,26 @@ const automationRows = (
     );
   }
   const cursor = clamp(view.cursor.clients, 0, entries.length - 1);
+  const drift = now - snapshot.readAt;
   const left = entries.map((entry, index): Text.Row => {
     const on = index === cursor;
     if (Option.isNone(entry.job)) {
       return [marker(on, true), Text.SPACE, Text.strong(Text.fit(entry.machine.name ?? "—", 16))];
     }
     const job = jobsOn(snapshot, entry.machine)[entry.job.value];
+    // Twenty-six columns: the indent, the marker, the ticket, then the spinner and the elapsed.
+    // "59 min ago" is ten and fills what is left; clip bounds the line. The action word is not
+    // on it.
+    const color = ACTION_COLOR[job.action];
     return [
       Text.muted("  "),
       marker(on, true),
       Text.SPACE,
-      Text.value(Text.fit(job?.ticket ?? "—", 9)),
-      Text.muted(` ${job?.action ?? ""}`),
+      Text.value(Text.fit(job.ticket ?? "—", 9)),
+      Text.SPACE,
+      Text.paint(color, spinnerAt(now)),
+      Text.SPACE,
+      Text.paint(color, ago(job.startedAt, job.queriedAt, drift)),
     ];
   });
   // Keep the marked row on screen, the window growing down from it.
@@ -1046,7 +1085,13 @@ const ticketRows = (
       ? [jobHeader, [Text.muted("no tickets")]]
       : [
           jobHeader,
-          ...jobList(jobs.slice(first, first + room), Option.some(cursor - first), true, drift),
+          ...jobList(
+            jobs.slice(first, first + room),
+            Option.some(cursor - first),
+            true,
+            drift,
+            now,
+          ),
         ];
   return Array.from({ length: height }, (_, row) => listed[row] ?? [Text.SPACE]);
 };
@@ -1086,7 +1131,7 @@ export const screen = (view: View, now: number, columns: number, rows: number): 
           ...blank,
           body:
             view.tab === "automation"
-              ? automationRows(view, snapshot, columns, height)
+              ? automationRows(view, snapshot, columns, height, now)
               : ticketRows(view, snapshot, now, height),
         };
       }

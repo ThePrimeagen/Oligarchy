@@ -50,9 +50,6 @@ const LINEAR_ISSUES = "https://linear.app/issue/";
 const OPENER = "xdg-open";
 const OPEN_WAIT = Duration.seconds(2);
 
-// The spinner on a followed session's running entries turns this often.
-const SPIN = Duration.millis(80);
-
 // The board already re-reads the queue. This only looks at that snapshot again, so a session
 // that landed on the last read opens the peek within a second, with no second query.
 const SESSION_WAIT = Duration.seconds(1);
@@ -227,7 +224,8 @@ const drawFailure = (renderer: CliRenderer): Effect.Effect<never, Errors.Command
 // Owns the screen while it runs: the state lives in two Solid signals the screen redraws from,
 // so a read, a tick of the ages or a key changes the signal and the cells that changed are
 // written. The tables are read at once and every REFRESH, the clock the ages count from is set
-// at the first frame and every AGE_TICK, L opens the selected job's ticket first, F peeks at the
+// at the first frame and every AGE_TICK, and every SPIN_MS while a job is running, L opens the
+// selected job's ticket first, F peeks at the
 // selected running job (waiting for its session if the guest has not started) and follows it
 // live on a second F, A asks and then has the automation
 // server abort the selected job, and q or ctrl-c ends the run and the scope hands the screen
@@ -314,7 +312,19 @@ export const run: Effect.Effect<
       }
       return { ...current, follow: Option.some(change(current.follow.value)) };
     });
-  const spin = withFull(Follow.tick);
+  // Ages stay on the one-second tick: an 80ms step lands short of the second, so "1 s ago"
+  // would still read "0 s ago". The braille spinner needs the finer clock, and only while a
+  // row is actually turning.
+  const spin = Effect.gen(function* () {
+    const spinning = Option.match(view().snapshot, {
+      onNone: () => false,
+      onSome: (snapshot) => snapshot.queue.running.length > 0,
+    });
+    if (spinning) {
+      yield* tick;
+    }
+    yield* withFull(Follow.tick);
+  });
   yield* Effect.scoped(
     Effect.gen(function* () {
       const renderer = yield* screen.open;
@@ -556,7 +566,9 @@ export const run: Effect.Effect<
         keys,
         Effect.repeat(read, Schedule.spaced(View.REFRESH)),
         Effect.repeat(tick, Schedule.spaced(View.AGE_TICK)),
-        Effect.repeat(spin, Schedule.spaced(SPIN)),
+        // The glyph is floor(now / SPIN_MS), so this clock has to land on the interval. spaced
+        // waits SPIN_MS after the redraw and the index skips a frame.
+        Effect.repeat(spin, Schedule.fixed(Duration.millis(View.SPIN_MS))),
         drawFailure(renderer),
       ]);
     }),

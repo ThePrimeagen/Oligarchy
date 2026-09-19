@@ -13,6 +13,7 @@ import {
   QUEUE,
   running,
   runner,
+  READ_AT,
   SESSION_ID,
   shown,
   SNAPSHOT,
@@ -325,5 +326,19 @@ describe("press unhappy path", () => {
     expect(View.tooSmall(100, 24)).toBe(
       "viz needs a terminal of at least 135×37 (columns×rows); this one is 100×24",
     );
+  });
+});
+
+describe("spinner", () => {
+  it("turns one frame every 80 milliseconds and wraps after the last", () => {
+    expect(View.spinnerAt(READ_AT)).toBe(Follow.SPINNER[0]);
+    expect(View.spinnerAt(READ_AT + View.SPIN_MS)).toBe(Follow.SPINNER[1]);
+    expect(View.spinnerAt(READ_AT + View.SPIN_MS * Follow.SPINNER.length)).toBe(Follow.SPINNER[0]);
+  });
+
+  it("holds the frame until a full 80 milliseconds have passed", () => {
+    expect(View.spinnerAt(0)).toBe(Follow.SPINNER[0]);
+    expect(View.spinnerAt(View.SPIN_MS - 1)).toBe(Follow.SPINNER[0]);
+    expect(View.spinnerAt(READ_AT + View.SPIN_MS - 1)).toBe(View.spinnerAt(READ_AT));
   });
 });
