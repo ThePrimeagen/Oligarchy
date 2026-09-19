@@ -84,9 +84,9 @@ export type Snapshot = {
   readonly readAt: number;
 };
 
-export type Tab = "servers" | "clients";
+export type Tab = "automation" | "servers" | "tickets";
 type Focus = "machines" | "queue";
-type List = Tab | "queue";
+type List = "servers" | "clients" | "queue";
 
 // A sentence in a box in the middle of the screen, and the clock when it went up: the runner
 // takes it down POPUP_FOR later, unless another has taken its place by then.
@@ -128,7 +128,7 @@ export const initialView: View = {
   follow: Option.none(),
   confirm: Option.none(),
   popup: Option.none(),
-  tab: "servers",
+  tab: "automation",
   focus: "machines",
   cursor: { servers: 0, clients: 0, queue: 0 },
 };
@@ -141,12 +141,12 @@ export type Key = {
   readonly meta: boolean;
 };
 
-const KIND: Readonly<Record<Tab, Servers.ServerType>> = {
+const KIND = {
   servers: "qemu",
   clients: "automation-client",
-};
+} as const;
 
-const ofTab = (snapshot: Snapshot, tab: Tab): ReadonlyArray<Servers.Machine> =>
+const ofTab = (snapshot: Snapshot, tab: keyof typeof KIND): ReadonlyArray<Servers.Machine> =>
   snapshot.machines.filter((machine) => machine.type === KIND[tab]);
 
 type Job = Automation.AutomationJobListRow;
@@ -155,6 +155,12 @@ type Job = Automation.AutomationJobListRow;
 const jobsOf = (snapshot: Snapshot): ReadonlyArray<Job> => [
   ...snapshot.queue.running,
   ...snapshot.queue.pending,
+];
+
+// Running, then waiting, then the newest finished: the tickets tab, cut where the cycle cut them.
+const ticketsOf = (snapshot: Snapshot): ReadonlyArray<Job> => [
+  ...jobsOf(snapshot),
+  ...snapshot.queue.completed,
 ];
 
 // The running jobs a machine is part of: a qemu server hosts a drive's guest, an automation
@@ -167,7 +173,7 @@ const jobsOn = (snapshot: Snapshot, machine: Servers.Machine): ReadonlyArray<Job
 // A row of the machines box the cursor rests on: a card, or the nth job on it.
 type Entry = { readonly machine: Servers.Machine; readonly job: Option.Option<number> };
 
-const entriesOf = (snapshot: Snapshot, tab: Tab): ReadonlyArray<Entry> =>
+const entriesOf = (snapshot: Snapshot, tab: keyof typeof KIND): ReadonlyArray<Entry> =>
   ofTab(snapshot, tab).flatMap((machine) => [
     { machine, job: Option.none() },
     ...jobsOn(snapshot, machine).map((_, index) => ({ machine, job: Option.some(index) })),
@@ -176,22 +182,34 @@ const entriesOf = (snapshot: Snapshot, tab: Tab): ReadonlyArray<Entry> =>
 const clamp = (value: number, min: number, max: number): number =>
   Math.min(max, Math.max(min, value));
 
-const focused = (view: View): List => (view.focus === "machines" ? view.tab : "queue");
+// Automation walks its clients, tickets walk the tickets, and the qemu tab keeps the
+// machines/queue split.
+const focused = (view: View): List => {
+  if (view.tab === "automation") {
+    return "clients";
+  }
+  if (view.tab === "tickets" || view.focus === "queue") {
+    return "queue";
+  }
+  return "servers";
+};
 
-// The gold marker's job: a job on a card, or the queue's; none on a card's header.
+// The gold marker's job: a job on a card or under a client, or the queue's; none on a header.
 export const selectedJob = (view: View): Option.Option<Job> =>
   Option.flatMap(view.snapshot, (snapshot) => {
-    if (view.focus === "queue") {
-      const jobs = jobsOf(snapshot);
+    // Automation and tickets have one list; the machines/queue split is the qemu tab's.
+    if (view.tab === "tickets" || (view.tab === "servers" && view.focus === "queue")) {
+      const jobs = view.tab === "tickets" ? ticketsOf(snapshot) : jobsOf(snapshot);
       return jobs.length === 0
         ? Option.none()
         : Option.some(jobs[clamp(view.cursor.queue, 0, jobs.length - 1)]);
     }
-    const entries = entriesOf(snapshot, view.tab);
+    const list = view.tab === "automation" ? "clients" : "servers";
+    const entries = entriesOf(snapshot, list);
     if (entries.length === 0) {
       return Option.none();
     }
-    const entry = entries[clamp(view.cursor[view.tab], 0, entries.length - 1)];
+    const entry = entries[clamp(view.cursor[list], 0, entries.length - 1)];
     return Option.map(entry.job, (index) => jobsOn(snapshot, entry.machine)[index]);
   });
 
@@ -267,7 +285,9 @@ export const press = (view: View, key: Key): View => {
   const count = Option.match(view.snapshot, {
     onNone: () => 0,
     onSome: (snapshot) =>
-      list === "queue" ? jobsOf(snapshot).length : entriesOf(snapshot, list).length,
+      list === "queue"
+        ? (view.tab === "tickets" ? ticketsOf(snapshot) : jobsOf(snapshot)).length
+        : entriesOf(snapshot, list).length,
   });
   const last = Math.max(0, count - 1);
   // The row on screen, not the number stored: a list that shrank since leaves the number past
@@ -288,11 +308,19 @@ export const press = (view: View, key: Key): View => {
       return select(key.shift ? last : 0);
     case "tab":
       return { ...closed, focus: view.focus === "machines" ? "queue" : "machines" };
+    case "s":
+      return key.shift ? closed : { ...closed, tab: "automation" };
+    case "t":
+      return key.shift ? closed : { ...closed, tab: "tickets" };
     case "h":
     case "l":
     case "left":
-    case "right":
-      return { ...closed, tab: view.tab === "servers" ? "clients" : "servers" };
+    case "right": {
+      const order: ReadonlyArray<Tab> = ["automation", "servers", "tickets"];
+      const step = key.name === "h" || key.name === "left" ? -1 : 1;
+      const index = order.indexOf(view.tab);
+      return { ...closed, tab: order[(index + step + order.length) % order.length] };
+    }
     default:
       return closed;
   }
@@ -481,7 +509,12 @@ const tabsRow = (view: View): Text.Row => {
   if (snapshot === null) {
     return view.tab === "servers"
       ? [Text.strong("servers"), Text.muted(" │ driving diagnosing")]
-      : [Text.muted("servers │ "), Text.strong("driving diagnosing")];
+      : [
+          Text.muted("servers │ "),
+          view.tab === "automation"
+            ? Text.strong("driving diagnosing")
+            : Text.muted("driving diagnosing"),
+        ];
   }
   const servers = `servers ${ratio(
     ofTab(snapshot, "servers").filter((machine) => (machine.stats?.qemus ?? 0) > 0).length,
@@ -489,9 +522,13 @@ const tabsRow = (view: View): Text.Row => {
   )}`;
   const urls = new Set(ofTab(snapshot, "clients").map((machine) => machine.url));
   const clients = `driving ${ratio(clientsDoing(snapshot, urls, "drive"), urls.size)} diagnosing ${ratio(clientsDoing(snapshot, urls, "diagnose"), urls.size)}`;
-  return view.tab === "servers"
-    ? [Text.strong(servers), Text.muted(` │ ${clients}`)]
-    : [Text.muted(`${servers} │ `), Text.strong(clients)];
+  if (view.tab === "servers") {
+    return [Text.strong(servers), Text.muted(` │ ${clients}`)];
+  }
+  if (view.tab === "automation") {
+    return [Text.muted(`${servers} │ `), Text.strong(clients)];
+  }
+  return [Text.muted(`${servers} │ ${clients}`)];
 };
 
 // A job row: the marker column and a space, then six columns with a gap between each. A live
@@ -642,7 +679,10 @@ export type Card = {
 // place) and the footer.
 export type Screen = {
   readonly status: string;
+  readonly tab: Tab;
   readonly tabs: Text.Row;
+  readonly pages: ReadonlyArray<Text.Row>;
+  readonly body: ReadonlyArray<Text.Row>;
   readonly machines: {
     readonly cards: ReadonlyArray<Card>;
     readonly empty: Option.Option<string>;
@@ -694,16 +734,17 @@ const machines = (
   rows: number,
 ): Screen["machines"] => {
   const usable = columns - 4;
-  const listed = ofTab(snapshot, view.tab);
+  const listed = ofTab(snapshot, "servers");
   if (listed.length === 0) {
-    const kind = view.tab === "servers" ? "qemu servers" : "automation clients";
+    const kind = "qemu servers";
     return { cards: [], empty: Option.some(`no ${kind} registered`), place: Option.none() };
   }
   const drift = now - snapshot.readAt;
-  const entries = entriesOf(snapshot, view.tab);
-  const selected = entries[clamp(view.cursor[view.tab], 0, entries.length - 1)];
+  const entries = entriesOf(snapshot, "servers");
+  const selected = entries[clamp(view.cursor.servers, 0, entries.length - 1)];
   const chosen = listed.indexOf(selected.machine);
-  const available = rows - 1 - (QUEUE_MIN_ROWS + 3) - 3;
+  // The three tab rows sit under the counts, so the cards have that much less room.
+  const available = rows - 1 - (QUEUE_MIN_ROWS + 3) - 3 - PAGES.length;
   // A machine running more jobs than the box has rows shows the ones that fit; on the selected
   // card the window ends at the selected job, so what L opens is on screen.
   const room = available - 3;
@@ -786,9 +827,9 @@ const queue = (view: View, snapshot: Snapshot, now: number, room: number): Scree
 
 const HINTS: ReadonlyArray<readonly [key: string, does: string]> = [
   ["j/k", "select"],
-  ["tab", "machines/queue"],
-  ["h/l", "servers/clients"],
-  ["g/G", "first/last"],
+  ["s", "automation"],
+  ["h/l", "tabs"],
+  ["t", "tickets"],
   ["L", "open ticket"],
   ["F", "follow"],
   ["A", "abort"],
@@ -840,6 +881,176 @@ const footer = (view: View, columns: number): Screen["footer"] => {
   };
 };
 
+// Thirty-second heartbeats: ten of them are the last five minutes the graph scales over.
+const FIVE_MIN = 10;
+const MEM = PALETTE.foam;
+const CPU = PALETTE.gold;
+// Braille dots, top to bottom, left half then right half.
+const DOT_LEFT = [0x01, 0x02, 0x04, 0x40];
+const DOT_RIGHT = [0x08, 0x10, 0x20, 0x80];
+
+const PAGES: ReadonlyArray<readonly [Tab, string]> = [
+  ["automation", "s  automation"],
+  ["servers", "qemu servers"],
+  ["tickets", "t  tickets"],
+];
+
+const pageRows = (view: View): ReadonlyArray<Text.Row> =>
+  PAGES.map(([tab, label]) => {
+    const on = view.tab === tab;
+    const text = `${on ? "▸" : " "} ${label}`;
+    return [on ? { text, color: PALETTE.gold, bold: true } : Text.muted(text)];
+  });
+
+// One column of the overlay: memory fills from the bottom in foam, the cpu line sits on top
+// in gold. A cell that the line crosses is gold, so the line reads over the bars.
+const columnGlyph = (
+  row: number,
+  totalDots: number,
+  memoryDots: number,
+  cpuDot: number,
+): Text.Piece => {
+  let bits = 0;
+  let line = false;
+  let bar = false;
+  for (let dot = 0; dot < 4; dot++) {
+    const fromBottom = totalDots - 1 - (row * 4 + dot);
+    if (fromBottom === cpuDot) {
+      bits |= DOT_LEFT[dot] | DOT_RIGHT[dot];
+      line = true;
+    } else if (fromBottom < memoryDots) {
+      bits |= DOT_LEFT[dot] | DOT_RIGHT[dot];
+      bar = true;
+    }
+  }
+  if (!bar && !line) {
+    return { text: " " };
+  }
+  return { text: String.fromCharCode(0x2800 + bits), color: line ? CPU : MEM };
+};
+
+const side = (text: string, width: number, color: string): Text.Piece =>
+  Text.paint(color, Text.fit(text, width));
+
+// Memory scaled from its low to its high over the last five minutes, cpu on 0–100, the
+// current numbers in their colours at the edges.
+const usage = (
+  samples: ReadonlyArray<ProcessStats.Sample>,
+  width: number,
+  height: number,
+): ReadonlyArray<Text.Row> => {
+  const recent = samples.slice(-FIVE_MIN);
+  const memory = recent.map((sample) => sample.memoryBytes);
+  const low = memory.length === 0 ? 0 : Math.min(...memory);
+  const high = memory.length === 0 ? 0 : Math.max(...memory);
+  const span = Math.max(1, high - low);
+  const totalDots = Math.max(1, height * 4);
+  const graphWidth = Math.max(1, width - 18);
+  const newest = recent.at(-1);
+  return Array.from({ length: height }, (_, row) => {
+    const cells = Array.from({ length: graphWidth }, (__, column) => {
+      const index =
+        recent.length === 0
+          ? -1
+          : Math.min(recent.length - 1, Math.floor((column * recent.length) / graphWidth));
+      const sample = index < 0 ? undefined : recent[index];
+      // A flat trace is both the low and the high, so it fills rather than disappearing.
+      let memoryDots = 0;
+      if (sample !== undefined) {
+        memoryDots =
+          high === low ? totalDots : Math.round(((sample.memoryBytes - low) / span) * totalDots);
+      }
+      const cpuDot =
+        sample === undefined
+          ? -1
+          : Math.round((Math.min(100, Math.max(0, sample.cpuPercent)) / 100) * (totalDots - 1));
+      return columnGlyph(row, totalDots, memoryDots, cpuDot);
+    });
+    const memoryNow = row === 0 && newest !== undefined ? size(newest.memoryBytes) : "";
+    let memoryBound = "";
+    if (row === 1) {
+      memoryBound = size(high);
+    } else if (row === height - 1) {
+      memoryBound = size(low);
+    }
+    const cpuNow = row === 0 && newest !== undefined ? percent(newest.cpuPercent) : "";
+    let cpuBound = "";
+    if (row === 1) {
+      cpuBound = "100%";
+    } else if (row === height - 1) {
+      cpuBound = "0%";
+    }
+    return [
+      side(memoryNow || memoryBound, 8, memoryNow === "" ? PALETTE.muted : MEM),
+      Text.SPACE,
+      ...stroke(cells.map((cell) => ({ glyph: cell.text, color: cell.color ?? MEM }))),
+      Text.SPACE,
+      side(cpuNow || cpuBound, 7, cpuNow === "" ? PALETTE.muted : CPU),
+    ];
+  });
+};
+
+const automationRows = (
+  view: View,
+  snapshot: Snapshot,
+  columns: number,
+  height: number,
+): ReadonlyArray<Text.Row> => {
+  const inner = columns - 4;
+  const entries = entriesOf(snapshot, "clients");
+  if (entries.length === 0) {
+    return Array.from({ length: height }, (_, row) =>
+      row === 0 ? [Text.muted("no automation clients")] : [Text.SPACE],
+    );
+  }
+  const cursor = clamp(view.cursor.clients, 0, entries.length - 1);
+  const left = entries.map((entry, index): Text.Row => {
+    const on = index === cursor;
+    if (Option.isNone(entry.job)) {
+      return [marker(on, true), Text.SPACE, Text.strong(Text.fit(entry.machine.name ?? "—", 16))];
+    }
+    const job = jobsOn(snapshot, entry.machine)[entry.job.value];
+    return [
+      Text.muted("  "),
+      marker(on, true),
+      Text.SPACE,
+      Text.value(Text.fit(job?.ticket ?? "—", 9)),
+      Text.muted(` ${job?.action ?? ""}`),
+    ];
+  });
+  // Keep the marked row on screen, the window growing down from it.
+  const from = Math.min(cursor, Math.max(0, left.length - height));
+  const series = snapshot.series.find(
+    (found) => found.type === "automation-client" && found.name === entries[cursor]?.machine.name,
+  );
+  const plotted = usage(series?.samples ?? [], inner - 28, height);
+  return Array.from({ length: height }, (_, row) => {
+    const line = left[from + row] ?? [Text.SPACE];
+    return [...clip(line, 26), Text.muted(" │ "), ...(plotted[row] ?? [])];
+  });
+};
+
+const ticketRows = (
+  view: View,
+  snapshot: Snapshot,
+  now: number,
+  height: number,
+): ReadonlyArray<Text.Row> => {
+  const jobs = ticketsOf(snapshot);
+  const drift = now - snapshot.readAt;
+  const room = Math.max(1, height - 1);
+  const cursor = jobs.length === 0 ? 0 : clamp(view.cursor.queue, 0, jobs.length - 1);
+  const first = Math.max(0, Math.min(cursor, jobs.length - room));
+  const listed =
+    jobs.length === 0
+      ? [jobHeader, [Text.muted("no tickets")]]
+      : [
+          jobHeader,
+          ...jobList(jobs.slice(first, first + room), Option.some(cursor - first), true, drift),
+        ];
+  return Array.from({ length: height }, (_, row) => listed[row] ?? [Text.SPACE]);
+};
+
 // The machines box is as tall as its tabs and cards and the queue's box takes every other row
 // above the footer, so the queue grows with the terminal.
 export const screen = (view: View, now: number, columns: number, rows: number): Screen => {
@@ -848,34 +1059,49 @@ export const screen = (view: View, now: number, columns: number, rows: number): 
     onNone: () => "reading…",
     onSome: (snapshot) => `read ${Text.age(now - snapshot.readAt)} ago`,
   });
+  const pages = pageRows(view);
+  const blank = {
+    status,
+    tab: view.tab,
+    tabs,
+    pages,
+    body: [],
+    machines: { cards: [], empty: Option.none(), place: Option.none() },
+    queue: {
+      title: "automation",
+      header: jobHeader,
+      jobs: [],
+      empty: Option.none(),
+      place: Option.none(),
+    },
+    footer: footer(view, columns),
+  };
   return Option.match(view.snapshot, {
-    onNone: () => ({
-      status,
-      tabs,
-      machines: { cards: [], empty: Option.none(), place: Option.none() },
-      queue: {
-        title: "automation",
-        header: jobHeader,
-        jobs: [],
-        empty: Option.none(),
-        place: Option.none(),
-      },
-      footer: footer(view, columns),
-    }),
+    onNone: () => blank,
     onSome: (snapshot) => {
+      if (view.tab !== "servers") {
+        // Top and bottom borders, the counts, the tabs, and the footer, off the height.
+        const height = Math.max(1, rows - 4 - PAGES.length);
+        return {
+          ...blank,
+          body:
+            view.tab === "automation"
+              ? automationRows(view, snapshot, columns, height)
+              : ticketRows(view, snapshot, now, height),
+        };
+      }
       const shown = machines(view, snapshot, now, columns, rows);
-      // Top border, tabs, bottom border, then each card's rows and the dividers between them.
+      // Top border, the counts, the tab rows, bottom border, then each card and its divider.
       const height =
         3 +
+        PAGES.length +
         (Option.isSome(shown.empty) ? 1 : 0) +
         shown.cards.reduce((total, drawn) => total + 3 + drawn.jobs.length, 0) +
         Math.max(0, shown.cards.length - 1);
       return {
-        status,
-        tabs,
+        ...blank,
         machines: shown,
         queue: queue(view, snapshot, now, rows - 1 - height - 3),
-        footer: footer(view, columns),
       };
     },
   });

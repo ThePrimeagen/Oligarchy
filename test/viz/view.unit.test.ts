@@ -58,11 +58,17 @@ describe("press happy path", () => {
     expect(View.press(onNext, key("j")).cursor.servers).toBe(2);
     expect(View.press(start, key("g", true)).cursor.servers).toBe(2);
     expect(View.press(onNext, key("g")).cursor.servers).toBe(0);
-    const clients = View.press(View.press(shown(snapshot, { tab: "clients" }), key("j")), key("j"));
+    const clients = View.press(
+      View.press(shown(snapshot, { tab: "automation" }), key("j")),
+      key("j"),
+    );
     expect(clients.cursor.clients).toBe(2);
     expect(View.press(clients, key("j")).cursor.clients).toBe(2);
     // A job that finished under the cursor: the rows above take the selection.
-    const gone = shown(SNAPSHOT, { tab: "clients", cursor: { servers: 0, clients: 2, queue: 0 } });
+    const gone = shown(SNAPSHOT, {
+      tab: "automation",
+      cursor: { servers: 0, clients: 2, queue: 0 },
+    });
     expect(View.press(gone, key("k")).cursor.clients).toBe(0);
   });
 
@@ -93,22 +99,17 @@ describe("press happy path", () => {
     expect(View.press(one, key("tab", true)).focus).toBe("machines");
   });
 
-  it("h, l, left and right switch between servers and clients whichever list has the focus, each keeping its own cursor", () => {
-    const start = View.press(shown(many), key("j"));
-    const clients = View.press(start, key("l"));
-    expect(clients.tab).toBe("clients");
-    expect(clients.focus).toBe("machines");
-    expect(clients.cursor).toEqual({ servers: 1, clients: 0, queue: 0 });
-    // One client with one job: j reaches the job, and no further.
-    expect(View.press(clients, key("j")).cursor).toEqual({ servers: 1, clients: 1, queue: 0 });
-    expect(View.press(View.press(clients, key("j")), key("j")).cursor.clients).toBe(1);
-    expect(View.press(clients, key("h")).tab).toBe("servers");
-    expect(View.press(clients, key("left")).tab).toBe("servers");
-    expect(View.press(start, key("right")).tab).toBe("clients");
-    expect(View.press(View.press(clients, key("l")), key("l")).tab).toBe("clients");
-    const queue = View.press(start, key("tab"));
-    expect(View.press(queue, key("l")).tab).toBe("clients");
-    expect(View.press(queue, key("l")).focus).toBe("queue");
+  it("opens on automation; s stays there, t opens tickets, and h and l cycle the three", () => {
+    expect(View.initialView.tab).toBe("automation");
+    expect(View.press(View.initialView, key("s")).tab).toBe("automation");
+    expect(View.press(View.initialView, key("t")).tab).toBe("tickets");
+    expect(View.press(View.initialView, key("l")).tab).toBe("servers");
+    expect(View.press(View.initialView, key("h")).tab).toBe("tickets");
+    expect(View.press(View.press(View.initialView, key("l")), key("l")).tab).toBe("tickets");
+    const servers = shown(many);
+    expect(View.press(servers, key("s")).tab).toBe("automation");
+    expect(View.press(servers, key("l")).tab).toBe("tickets");
+    expect(View.press(servers, key("h")).tab).toBe("automation");
   });
 
   it("L moves nothing: opening the ticket is the runner's, and any key retires the last notice", () => {
@@ -200,7 +201,7 @@ describe("press happy path", () => {
       Option.some("OLI-61"),
     );
     const clients = shown(snapshot, {
-      tab: "clients",
+      tab: "automation",
       cursor: { servers: 0, clients: 2, queue: 0 },
     });
     expect(Option.map(View.selectedJob(clients), (job) => job.ticket)).toEqual(
@@ -311,7 +312,7 @@ describe("press unhappy path", () => {
       clients: 0,
       queue: 0,
     });
-    expect(View.press(View.initialView, key("l")).tab).toBe("clients");
+    expect(View.press(View.initialView, key("l")).tab).toBe("servers");
     expect(View.press(View.initialView, key("tab")).focus).toBe("queue");
     expect(View.press(View.press(View.initialView, key("tab")), key("j")).cursor.queue).toBe(0);
     expect(View.selectedJob(View.initialView)).toEqual(Option.none());

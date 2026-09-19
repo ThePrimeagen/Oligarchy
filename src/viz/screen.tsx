@@ -235,9 +235,14 @@ export const App = (props: Props) => {
               paddingLeft={1}
               paddingRight={1}
               flexDirection="column"
-              flexShrink={0}
+              flexGrow={screen().tab === "servers" ? 0 : 1}
+              flexShrink={screen().tab === "servers" ? 0 : 1}
             >
               <Line row={screen().tabs} />
+              <Index each={screen().pages}>{(row) => <Line row={row()} />}</Index>
+              <Show when={screen().tab !== "servers"}>
+                <Index each={screen().body}>{(row) => <Line row={row()} />}</Index>
+              </Show>
               <Show when={Option.getOrUndefined(screen().machines.empty)}>
                 {(text: Accessor<string>) => (
                   <text fg={MUTED} wrapMode="none">
@@ -259,31 +264,33 @@ export const App = (props: Props) => {
                 )}
               </Index>
             </box>
-            <box
-              border
-              borderStyle="rounded"
-              borderColor={MUTED}
-              titleColor={MUTED}
-              title={` ${screen().queue.title} `}
-              bottomTitle={title(screen().queue.place)}
-              bottomTitleAlignment="right"
-              paddingLeft={1}
-              paddingRight={1}
-              flexDirection="column"
-              flexGrow={1}
-              flexShrink={1}
-              minHeight={0}
-            >
-              <Line row={screen().queue.header} />
-              <Show when={Option.getOrUndefined(screen().queue.empty)}>
-                {(text: Accessor<string>) => (
-                  <text fg={MUTED} wrapMode="none">
-                    {text()}
-                  </text>
-                )}
-              </Show>
-              <Index each={screen().queue.jobs}>{(job) => <Line row={job()} />}</Index>
-            </box>
+            <Show when={screen().tab === "servers"}>
+              <box
+                border
+                borderStyle="rounded"
+                borderColor={MUTED}
+                titleColor={MUTED}
+                title={` ${screen().queue.title} `}
+                bottomTitle={title(screen().queue.place)}
+                bottomTitleAlignment="right"
+                paddingLeft={1}
+                paddingRight={1}
+                flexDirection="column"
+                flexGrow={1}
+                flexShrink={1}
+                minHeight={0}
+              >
+                <Line row={screen().queue.header} />
+                <Show when={Option.getOrUndefined(screen().queue.empty)}>
+                  {(text: Accessor<string>) => (
+                    <text fg={MUTED} wrapMode="none">
+                      {text()}
+                    </text>
+                  )}
+                </Show>
+                <Index each={screen().queue.jobs}>{(job) => <Line row={job()} />}</Index>
+              </box>
+            </Show>
             <box
               flexDirection="row"
               justifyContent="space-between"

@@ -55,7 +55,7 @@ export const makeVizCommand = (deps: Deps = live) => {
     }),
   ).pipe(
     Command.withDescription(
-      "Watch the qemu servers, the automation clients and the automation queue in the terminal: each machine a card with its cpu, memory and jobs graphed and the jobs running on it listed, then the running and pending jobs; j/k select a card, a job on it or a queued job, tab moves between the machines and the queue, h/l switch servers and clients, L opens the selected job's Linear ticket in the browser, F follows the selected running job, waiting for its session if the guest has not started, A asks, then aborts the selected job at the automation server (AUTOMATION_SERVER_URL, with OLIGARCHY_TOKEN), q quits",
+      "Watch the automation clients, the qemu servers and the tickets in the terminal. It opens on automation: each client and the jobs it runs, beside that client's memory and cpu over the last five minutes. s, t and h/l switch tabs; the qemu tab keeps each server as a card with the running and pending jobs below, and the tickets tab lists those plus the newest finished. j/k select, tab moves between the machines and the queue on the qemu tab, L opens the selected job's Linear ticket in the browser, F follows the selected running job, waiting for its session if the guest has not started, A asks, then aborts the selected job at the automation server (AUTOMATION_SERVER_URL, with OLIGARCHY_TOKEN), q quits",
     ),
     Command.provide(withDb),
   );

@@ -88,12 +88,12 @@ describe("viz happy path", () => {
       expect(h.reads.count).toBe(0);
       expect(h.screen.setups).toEqual([]);
       const printed = (yield* TestConsole.logLines).join("\n");
-      expect(printed).toMatch(/automation queue/);
-      expect(printed).toMatch(/running and pending/);
-      expect(printed).toMatch(/jobs running on it/);
+      expect(printed).toMatch(/opens on automation/);
+      expect(printed).toMatch(/last five minutes/);
+      expect(printed).toMatch(/newest finished/);
       expect(printed).toMatch(/j\/k/);
       expect(printed).toMatch(/tab moves between the machines and the queue/);
-      expect(printed).toMatch(/h\/l switch servers and clients/);
+      expect(printed).toMatch(/h\/l switch tabs/);
       expect(printed).toMatch(/L opens the selected job's Linear ticket/);
       expect(printed).toMatch(/F follows the selected running job/);
       expect(printed).toMatch(/A asks, then aborts the selected job at the automation server/);
@@ -114,8 +114,8 @@ describe("viz happy path", () => {
         expect(h.reads.count).toBe(3);
         const drawn = (yield* rows(setup)).join("\n");
         expect(drawn).toContain("servers 0/0");
-        expect(drawn).toContain("no qemu servers registered");
-        expect(drawn).toContain("automation · running 0 · pending 0");
+        expect(drawn).toContain("s  automation");
+        expect(drawn).toContain("no automation clients");
         expect(drawn).toContain("q quit");
         setup.mockInput.pressKey("q");
         const exit = yield* Fiber.join(fiber);

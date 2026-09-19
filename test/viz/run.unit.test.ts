@@ -24,7 +24,6 @@ import {
   bottom,
   box,
   COLUMNS,
-  CPU_TOP,
   EMPTY_QUEUE,
   failed,
   FOOTER,
@@ -34,18 +33,14 @@ import {
   GOLD,
   header,
   job,
-  JOBS_TOP,
-  labels,
   LOVE,
   machinesTop,
-  MEM_TOP,
   OPENED,
   pad,
   PLAIN,
   QUEUE,
   running,
   runner,
-  RUNNER_RIGHT,
   RUNNING,
   runnerSeries,
   seedActions,
@@ -175,12 +170,12 @@ describe("run happy path", () => {
         expect(first).toHaveLength(37);
         expect(first[0]).toBe(machinesTop("read 0 s ago"));
         expect(first[1]).toBe(box("servers 1/1 │ driving 1/1 diagnosing 0/1"));
-        expect(first[2]).toBe(box(header("▸ garage · http://127.0.0.1:55332", GARAGE_RIGHT)));
-        expect(first[3]).toBe(box(labels(CPU_TOP, MEM_TOP, JOBS_TOP)));
-        expect(first[5]).toBe(box(job(" ", RUNNING)));
-        // One server in this fleet, so the queue sits right under its card.
-        expect(first[6]).toBe(bottom());
-        expect(first[9]).toBe(box(job("▸", RUNNING)));
+        expect(first[2]).toBe(box("▸ s  automation"));
+        expect(first[5]).toContain("▸ runner");
+        expect(first[5]).toContain("256 MB");
+        expect(first[5]).toContain("8.0%");
+        expect(first[6]).toContain("OLI-61");
+        expect(first[35]).toBe(bottom());
         expect(first[36]).toBe(FOOTER);
 
         yield* TestClock.adjust("1 second");
@@ -188,7 +183,7 @@ describe("run happy path", () => {
         expect(reads.count).toBe(1);
         const second = yield* rows(setup);
         expect(second[0]).toBe(machinesTop("read 1 s ago"));
-        expect(second[2]).toContain("seen 13 s ago");
+        expect(second[6]).toContain("OLI-61");
 
         yield* TestClock.adjust("9 seconds");
         yield* settle;
@@ -207,30 +202,33 @@ describe("run happy path", () => {
       }),
   );
 
-  it.effect("a key redraws at once: l shows the clients, j and k move the selection", () =>
-    Effect.gen(function* () {
-      const screen = fakeRenderer();
-      const { fiber, setup } = yield* started(screen);
-      setup.mockInput.pressKey("l");
-      yield* settle;
-      const clients = yield* rows(setup);
-      expect(clients[2]).toBe(box(header("▸ runner · http://10.0.0.9:7000", RUNNER_RIGHT)));
-      setup.mockInput.pressKey("h");
-      setup.mockInput.pressKey("j");
-      yield* settle;
-      // One server with one job: j selects the job.
-      const onJob = yield* rows(setup);
-      expect(onJob[2]).toBe(box(header("  garage · http://127.0.0.1:55332", GARAGE_RIGHT)));
-      expect(onJob[5]).toBe(box(job("▸", RUNNING)));
-      setup.mockInput.pressKey("k");
-      yield* settle;
-      expect((yield* rows(setup))[2]).toBe(
-        box(header("▸ garage · http://127.0.0.1:55332", GARAGE_RIGHT)),
-      );
-      setup.mockInput.pressKey("q");
-      yield* Fiber.join(fiber);
-      expect(setup.renderer.isDestroyed).toBe(true);
-    }),
+  it.effect(
+    "a key redraws at once: it opens on automation, l shows the qemu servers, j and k move the selection",
+    () =>
+      Effect.gen(function* () {
+        const screen = fakeRenderer();
+        const { fiber, setup } = yield* started(screen);
+        const opened = yield* rows(setup);
+        expect(opened[5]).toContain("▸ runner");
+        setup.mockInput.pressKey("l");
+        yield* settle;
+        const servers = yield* rows(setup);
+        expect(servers[5]).toBe(box(header("▸ garage · http://127.0.0.1:55332", GARAGE_RIGHT)));
+        setup.mockInput.pressKey("j");
+        yield* settle;
+        // One server with one job: j selects the job.
+        const onJob = yield* rows(setup);
+        expect(onJob[5]).toBe(box(header("  garage · http://127.0.0.1:55332", GARAGE_RIGHT)));
+        expect(onJob[8]).toBe(box(job("▸", RUNNING)));
+        setup.mockInput.pressKey("k");
+        yield* settle;
+        expect((yield* rows(setup))[5]).toBe(
+          box(header("▸ garage · http://127.0.0.1:55332", GARAGE_RIGHT)),
+        );
+        setup.mockInput.pressKey("q");
+        yield* Fiber.join(fiber);
+        expect(setup.renderer.isDestroyed).toBe(true);
+      }),
   );
 
   it.effect(
@@ -279,7 +277,8 @@ describe("run happy path", () => {
         setup.mockInput.pressKey("k");
         yield* settle;
         expect(yield* footer(setup)).toBe(FOOTER);
-        // The queue focused: its selection is what L opens.
+        // The qemu tab's queue: its selection is what L opens.
+        setup.mockInput.pressKey("l");
         setup.mockInput.pressTab();
         setup.mockInput.pressKey("j");
         setup.mockInput.pressKey("l", { shift: true });
@@ -300,7 +299,7 @@ describe("run happy path", () => {
         const screen = fakeRenderer();
         const spawner = fakeSpawner(byCommand({ "xdg-open": {} }));
         const { fiber, setup } = yield* started(screen, {}, { spawner });
-        setup.mockInput.pressTab();
+        setup.mockInput.pressKey("j");
         setup.mockInput.pressKey("l", { shift: true });
         yield* settle;
         expect(spawner.spawned).toHaveLength(1);
@@ -381,7 +380,7 @@ describe("run happy path", () => {
         yield* settle;
         const first = yield* rows(setup);
         expect(first[0]).toBe(machinesTop("read 0 s ago"));
-        expect(first[2]).toContain("seen 12 s ago");
+        expect(first.join("\n")).toContain("OLI-61");
         setup.mockInput.pressKey("q");
         yield* Fiber.join(fiber);
       }),
@@ -408,7 +407,7 @@ describe("run unhappy path", () => {
         expect(calls.count).toBe(2);
         const failedFrame = yield* rows(setup);
         expect(failedFrame[0]).toBe(machinesTop("read 10 s ago"));
-        expect(failedFrame[2]).toContain("http://127.0.0.1:55332");
+        expect(failedFrame.join("\n")).toContain("runner");
         expect(failedFrame[36]).toBe(
           pad(" error: Failed query: select 1: connect ECONNREFUSED 127.0.0.1:5432", COLUMNS),
         );
@@ -447,14 +446,15 @@ describe("run unhappy path", () => {
       const bare = yield* rows(setup);
       expect(bare[0]).toBe(machinesTop("reading…"));
       expect(bare[1]).toBe(box("servers │ driving diagnosing"));
-      expect(bare[2]).toBe(bottom());
+      expect(bare[2]).toBe(box("▸ s  automation"));
+      expect(bare[35]).toBe(bottom());
       expect(bare[36]).toBe(pad(" error: timeout", COLUMNS));
 
       yield* TestClock.adjust("10 seconds");
       yield* settle;
       expect(calls.count).toBe(2);
       const shownNow = yield* rows(setup);
-      expect(shownNow[9]).toBe(box(job("▸", RUNNING)));
+      expect(shownNow.join("\n")).toContain("OLI-61");
       expect(shownNow[36]).toBe(FOOTER);
 
       setup.mockInput.pressKey("q");
@@ -532,7 +532,7 @@ describe("run unhappy path", () => {
           byCommand({ "xdg-open": { spawnError: "spawn xdg-open ENOENT" } }),
         );
         const byMissing = yield* started(missing, {}, { spawner: missingSpawner });
-        byMissing.setup.mockInput.pressTab();
+        byMissing.setup.mockInput.pressKey("j");
         byMissing.setup.mockInput.pressKey("l", { shift: true });
         yield* settle;
         expect(missingSpawner.spawned).toEqual([]);
@@ -555,7 +555,7 @@ describe("run unhappy path", () => {
         const refusing = fakeRenderer();
         const refusingSpawner = fakeSpawner(byCommand({ "xdg-open": { exitCode: 3 } }));
         const byRefusing = yield* started(refusing, {}, { spawner: refusingSpawner });
-        byRefusing.setup.mockInput.pressTab();
+        byRefusing.setup.mockInput.pressKey("j");
         byRefusing.setup.mockInput.pressKey("l", { shift: true });
         yield* settle;
         expect(refusingSpawner.spawned).toHaveLength(1);
@@ -583,7 +583,8 @@ describe("run unhappy path", () => {
       const regrown = yield* rows(setup);
       expect(regrown).toHaveLength(40);
       expect(regrown[0]).toBe(machinesTop("read 1 s ago", 140));
-      expect(regrown[2]).toContain("http://127.0.0.1:55332");
+      expect(regrown.join("\n")).toContain("runner");
+      expect(regrown.join("\n")).toContain("OLI-61");
       setup.mockInput.pressKey("q");
       yield* Fiber.join(fiber);
       expect(setup.renderer.isDestroyed).toBe(true);
@@ -684,7 +685,8 @@ describe("run follow happy path", () => {
         const closed = yield* rows(setup);
         expect(closed.some((row) => row.includes(PEEK_TITLE))).toBe(false);
         expect(closed.some((row) => BLOCKS.test(row))).toBe(false);
-        // The queue's running job opens the same peek.
+        // The qemu tab's queue opens the same peek.
+        setup.mockInput.pressKey("l");
         setup.mockInput.pressTab();
         setup.mockInput.pressKey("f");
         const fromQueue = yield* until(setup, shows(PEEK_TITLE));
@@ -694,7 +696,7 @@ describe("run follow happy path", () => {
         yield* settle;
         const moved = yield* rows(setup);
         expect(moved.some((row) => row.includes(PEEK_TITLE))).toBe(false);
-        expect(moved[10]?.startsWith("│ ▸ OLI-62")).toBe(true);
+        expect(moved[13]?.startsWith("│ ▸ OLI-62")).toBe(true);
         setup.mockInput.pressKey("q");
         yield* Fiber.join(fiber);
         expect(setup.renderer.isDestroyed).toBe(true);
@@ -731,7 +733,7 @@ describe("run follow happy path", () => {
         yield* settle;
         const back = yield* rows(setup);
         expect(back.join("\n")).not.toContain("following OLI-61");
-        expect(back[2]).toContain("garage");
+        expect(back.join("\n")).toContain("runner");
         expect(back.some((row) => BLOCKS.test(row))).toBe(false);
         setup.mockInput.pressKey("q");
         yield* Fiber.join(fiber);
@@ -774,6 +776,7 @@ describe("run follow unhappy path", () => {
     Effect.gen(function* () {
       const screen = fakeRenderer();
       const { fiber, setup } = yield* started(screen);
+      setup.mockInput.pressKey("l");
       setup.mockInput.pressTab();
       setup.mockInput.pressKey("j");
       setup.mockInput.pressKey("f");
@@ -788,6 +791,7 @@ describe("run follow unhappy path", () => {
       const byDone = yield* started(done, {
         jobs: () => Effect.succeed({ running: [], pending: [], completed: [failed] }),
       });
+      byDone.setup.mockInput.pressKey("l");
       byDone.setup.mockInput.pressTab();
       byDone.setup.mockInput.pressKey("f");
       yield* settle;
@@ -891,7 +895,7 @@ describe("run follow unhappy path", () => {
         },
         { actions: seeded() },
       );
-      byNoServer.setup.mockInput.pressTab();
+      byNoServer.setup.mockInput.pressKey("j");
       byNoServer.setup.mockInput.pressKey("f");
       yield* until(byNoServer.setup, shows(PEEK_TITLE));
       byNoServer.setup.mockInput.pressKey("f");
@@ -1010,7 +1014,7 @@ describe("run follow unhappy path", () => {
         expect(waiting[36]).toBe(FOOTER);
         setup.mockInput.pressKey("k");
         yield* settle;
-        expect((yield* rows(setup))[2]?.startsWith("│ ▸ garage")).toBe(true);
+        expect((yield* rows(setup))[5]).toContain("▸ runner");
         setup.mockInput.pressKey("q");
         yield* Fiber.join(fiber);
         expect(setup.renderer.isDestroyed).toBe(true);
@@ -1183,13 +1187,14 @@ describe("run abort happy path", () => {
         expect(closed[36]).toBe(pad(" aborted drive OLI-61", COLUMNS));
         // Re-read at once: the job is off the card and out of the queue.
         expect(closed.slice(0, 36).some((row) => row.includes("OLI-61"))).toBe(false);
-        expect(closed[5]).toBe(bottom());
+        expect(closed.join("\n")).toContain("runner");
         const styled = yield* spans(setup);
         expect(styled[36]?.find((span) => span[0].startsWith("aborted "))?.slice(1)).toEqual([
           GOLD,
           PLAIN,
         ]);
-        // The queue's selected job, pending, goes the same way.
+        // The qemu tab's queue, its first job now the pending one, goes the same way.
+        setup.mockInput.pressKey("l");
         setup.mockInput.pressTab();
         confirmAbort(setup);
         const queued = yield* until(setup, shows("aborted drive OLI-62"));
@@ -1227,7 +1232,7 @@ describe("run abort happy path", () => {
         setup.mockInput.pressKey("k");
         yield* settle;
         const moved = yield* rows(setup);
-        expect(moved[2]?.startsWith("│ ▸ garage")).toBe(true);
+        expect(moved[5]).toContain("▸ runner");
         expect(moved.some((row) => row.includes(POPUP))).toBe(true);
         yield* TestClock.adjust("2 seconds");
         yield* settle;
@@ -1275,7 +1280,7 @@ describe("run abort unhappy path", () => {
         yield* settle;
         const held = yield* rows(setup);
         expect(held.some((row) => row.includes(QUESTION))).toBe(true);
-        expect(held[5]).toBe(box(job("▸", RUNNING)));
+        expect(held.join("\n")).toContain("OLI-61");
         expect(held.some((row) => row.includes(PEEK_TITLE))).toBe(false);
         expect(spawner.spawned).toEqual([]);
         expect(held[36]).toBe(FOOTER);
@@ -1283,11 +1288,11 @@ describe("run abort unhappy path", () => {
         yield* settle;
         const closed = yield* rows(setup);
         expect(closed.some((row) => row.includes(QUESTION))).toBe(false);
-        expect(closed[5]).toBe(box(job("▸", RUNNING)));
+        expect(closed.join("\n")).toContain("OLI-61");
         // The keys are the board's again.
         setup.mockInput.pressKey("k");
         yield* settle;
-        expect((yield* rows(setup))[2]?.startsWith("│ ▸ garage")).toBe(true);
+        expect((yield* rows(setup))[5]).toContain("▸ runner");
         setup.mockInput.pressKey("j");
         setup.mockInput.pressKey("a", { shift: true });
         yield* until(setup, shows(QUESTION));
@@ -1319,7 +1324,7 @@ describe("run abort unhappy path", () => {
         },
         { http: server.layer },
       );
-      byUnticketed.setup.mockInput.pressTab();
+      byUnticketed.setup.mockInput.pressKey("j");
       byUnticketed.setup.mockInput.pressKey("a", { shift: true });
       yield* settle;
       const unticketedFrame = yield* rows(byUnticketed.setup);
@@ -1381,7 +1386,7 @@ describe("run abort unhappy path", () => {
       expect(refusedFrame[36]).toBe(pad(" unauthorized", COLUMNS));
       expect(refusedFrame.some((row) => row.includes(POPUP))).toBe(false);
       // The board is not re-read for a refusal: the job is still listed.
-      expect(refusedFrame[5]).toBe(box(job("▸", RUNNING)));
+      expect(refusedFrame.join("\n")).toContain("OLI-61");
       byUnauthorized.setup.mockInput.pressKey("q");
       yield* Fiber.join(byUnauthorized.fiber);
 
@@ -1435,6 +1440,7 @@ describe("run abort unhappy path", () => {
       Effect.gen(function* () {
         const screen = fakeRenderer();
         const { fiber, setup } = yield* started(screen, {}, { http: FakeHttp.never });
+        setup.mockInput.pressKey("l");
         setup.mockInput.pressTab();
         setup.mockInput.pressKey("j");
         confirmAbort(setup);
@@ -1443,8 +1449,8 @@ describe("run abort unhappy path", () => {
         setup.mockInput.pressKey("k");
         yield* settle;
         const moved = yield* rows(setup);
-        expect(moved[9]?.startsWith("│ ▸ OLI-61")).toBe(true);
-        expect(moved[10]?.startsWith("│   OLI-62")).toBe(true);
+        expect(moved[12]?.startsWith("│ ▸ OLI-61")).toBe(true);
+        expect(moved[13]?.startsWith("│   OLI-62")).toBe(true);
         setup.mockInput.pressKey("q");
         yield* Fiber.join(fiber);
         expect(setup.renderer.isDestroyed).toBe(true);
@@ -1465,6 +1471,7 @@ describe("run abort unhappy path", () => {
             : new Response(null, { status: 404 }),
         );
         const { fiber, setup } = yield* started(screen, { jobs }, { http: server.layer });
+        setup.mockInput.pressKey("l");
         setup.mockInput.pressTab();
         confirmAbort(setup);
         yield* settle;
