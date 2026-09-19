@@ -224,7 +224,8 @@ const drawFailure = (renderer: CliRenderer): Effect.Effect<never, Errors.Command
 // Owns the screen while it runs: the state lives in two Solid signals the screen redraws from,
 // so a read, a tick of the ages or a key changes the signal and the cells that changed are
 // written. The tables are read at once and every REFRESH, the clock the ages count from is set
-// at the first frame and every AGE_TICK, L opens the selected job's ticket first, F peeks at the
+// at the first frame and every AGE_TICK, and every SPIN_MS while a job is running, L opens the
+// selected job's ticket first, F peeks at the
 // selected running job (waiting for its session if the guest has not started) and follows it
 // live on a second F, A asks and then has the automation
 // server abort the selected job, and q or ctrl-c ends the run and the scope hands the screen
@@ -311,12 +312,17 @@ export const run: Effect.Effect<
       }
       return { ...current, follow: Option.some(change(current.follow.value)) };
     });
-  // The board's running rows read `now`, so the follow's cadence advances that clock too.
+  // Ages stay on the one-second tick: an 80ms step lands short of the second, so "1 s ago"
+  // would still read "0 s ago". The braille spinner needs the finer clock, and only while a
+  // row is actually turning.
   const spin = Effect.gen(function* () {
-    const ms = yield* Clock.currentTimeMillis;
-    yield* Effect.sync(() => {
-      setNow(ms);
+    const spinning = Option.match(view().snapshot, {
+      onNone: () => false,
+      onSome: (snapshot) => snapshot.queue.running.length > 0,
     });
+    if (spinning) {
+      yield* tick;
+    }
     yield* withFull(Follow.tick);
   });
   yield* Effect.scoped(

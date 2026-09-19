@@ -81,7 +81,7 @@ export const DIAGNOSE_COLOR = "#60a5fa";
 export const SPIN_MS = 80;
 
 export const spinnerAt = (now: number): string =>
-  Follow.SPINNER[Math.floor(now / SPIN_MS) % Follow.SPINNER.length] ?? "⠋";
+  Follow.SPINNER[Math.floor(now / SPIN_MS) % Follow.SPINNER.length];
 
 // ---------------------------------------------------------------------------
 // State
