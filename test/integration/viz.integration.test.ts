@@ -151,7 +151,7 @@ Postgres.describeWithDatabase("./viz against the seeded database", () => {
     expect(drawn).toContain("qemu servers");
     expect(drawn).toContain("t  tickets");
     expect(drawn).toContain(
-      "j/k select   s automation   h/l tabs   t tickets   L open ticket   F follow   A abort   q quit",
+      "j/k select   s automation   h/l tabs   t tickets   d definition   enter info   L linear   a abort   F follow   q quit",
     );
     expect(drawn).not.toContain("error:");
     expect(drawn).not.toContain("viz needs");

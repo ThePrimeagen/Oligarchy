@@ -44,12 +44,19 @@ const harness = (size: { readonly columns: number; readonly rows: number }) =>
       listJobs: () => counted({ running: [], pending: [], completed: [] }),
     });
     const actions = Stores.fakeActionStore();
+    const tests = Stores.fakeTestStore();
     const touched: Array<string> = [];
     const stdio = StdioSupport.capture();
     const command = VizCommand.makeVizCommand({
       database: () => {
         touched.push("database");
-        return Layer.mergeAll(servers.layer, process.layer, automation.layer, actions.layer);
+        return Layer.mergeAll(
+          servers.layer,
+          process.layer,
+          automation.layer,
+          actions.layer,
+          tests.layer,
+        );
       },
     });
     const run = (args: ReadonlyArray<string>, env: Record<string, string> = WITH_DB) =>
@@ -96,7 +103,11 @@ describe("viz happy path", () => {
       expect(printed).toMatch(/h\/l switch tabs/);
       expect(printed).toMatch(/L opens the selected job's Linear ticket/);
       expect(printed).toMatch(/F follows the selected running job/);
-      expect(printed).toMatch(/A asks, then aborts the selected job at the automation server/);
+      expect(printed).toMatch(/j and k rest on a ticket/);
+      expect(printed).toMatch(/selected ticket's session/);
+      expect(printed).toMatch(/d opens the selected ticket's test definition/);
+      expect(printed).toMatch(/enter shows the ticket/);
+      expect(printed).toMatch(/a asks, then aborts the selected job at the automation server/);
       expect(printed).toMatch(/AUTOMATION_SERVER_URL/);
       expect(printed).toMatch(/q quits/);
     }),

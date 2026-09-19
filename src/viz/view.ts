@@ -108,7 +108,7 @@ type List = "servers" | "clients" | "queue";
 // takes it down POPUP_FOR later, unless another has taken its place by then.
 export type Popup = { readonly text: string; readonly shownAt: number };
 
-// The question A asks before a job is aborted: which job, and the answer the marker is on. It
+// The question a asks before a job is aborted: which job, and the answer the marker is on. It
 // starts on no, so enter alone aborts nothing.
 export type Confirm = {
   readonly ticket: string;
@@ -116,22 +116,34 @@ export type Confirm = {
   readonly choice: "yes" | "no";
 };
 
+// d's definition or enter's ticket information, and how far j and k have scrolled it.
+export type Sheet = {
+  readonly title: string;
+  readonly lines: ReadonlyArray<string>;
+  readonly offset: number;
+};
+
 // snapshot is absent until the first read lands; failure is the last read's reason, cleared by
 // the next good read, so a database outage leaves the last picture up with the reason under it.
 // notice is what the last key had to say (the ticket L opened, or why it could not), retired by
 // the next key. follow is the job F is looking at: a peek over the board, or the whole screen.
-// confirm is A's question while it is up; popup is what A had to say about a job that could
-// not be aborted, up until its time is over. tab is the kind of machine the cards show; focus
-// is the box j and k move in; cursor is each list's selected row (a tab's cards and the jobs
-// on them as one list, the queue's jobs as another), kept when the tab or the focus changes
-// and clamped to what the newest read lists.
+// session is that job's calls, intents and image, drawn in the main area whether or not F is
+// up; sessionNote is why that pane is empty. confirm is a's question while it is up; popup is
+// what a had to say about a job that could not be aborted, up until its time is over. sheet is
+// d's definition or enter's ticket information. tab is the kind of machine the cards show;
+// focus is the box j and k move in; cursor is each list's selected row (a tab's cards and the
+// jobs on them as one list, the queue's jobs as another), kept when the tab or the focus
+// changes and clamped to what the newest read lists.
 export type View = {
   readonly snapshot: Option.Option<Snapshot>;
   readonly failure: Option.Option<string>;
   readonly notice: Option.Option<string>;
   readonly follow: Option.Option<Follow.Follow>;
+  readonly session: Option.Option<Follow.Follow>;
+  readonly sessionNote: Option.Option<string>;
   readonly confirm: Option.Option<Confirm>;
   readonly popup: Option.Option<Popup>;
+  readonly sheet: Option.Option<Sheet>;
   readonly tab: Tab;
   readonly focus: Focus;
   readonly cursor: Readonly<Record<List, number>>;
@@ -142,8 +154,11 @@ export const initialView: View = {
   failure: Option.none(),
   notice: Option.none(),
   follow: Option.none(),
+  session: Option.none(),
+  sessionNote: Option.none(),
   confirm: Option.none(),
   popup: Option.none(),
+  sheet: Option.none(),
   tab: "automation",
   focus: "machines",
   cursor: { servers: 0, clients: 0, queue: 0 },
@@ -195,6 +210,27 @@ const entriesOf = (snapshot: Snapshot, tab: keyof typeof KIND): ReadonlyArray<En
     ...jobsOn(snapshot, machine).map((_, index) => ({ machine, job: Option.some(index) })),
   ]);
 
+// The sidebar lists a client and then its jobs. j and k rest only on a job, so a header is
+// never where the marker stops.
+const clientStops = (snapshot: Snapshot): ReadonlyArray<number> =>
+  entriesOf(snapshot, "clients").flatMap((entry, index) =>
+    Option.isSome(entry.job) ? [index] : [],
+  );
+
+// A cursor left on a client header, or past the list, moves onto a ticket. No ticket to land
+// on leaves it where it is.
+export const place = (view: View): View => {
+  if (Option.isNone(view.snapshot)) {
+    return view;
+  }
+  const stops = clientStops(view.snapshot.value);
+  if (stops.length === 0 || stops.includes(view.cursor.clients)) {
+    return view;
+  }
+  const next = stops.find((stop) => stop >= view.cursor.clients) ?? stops[stops.length - 1];
+  return { ...view, cursor: { ...view.cursor, clients: next } };
+};
+
 const clamp = (value: number, min: number, max: number): number =>
   Math.min(max, Math.max(min, value));
 
@@ -238,10 +274,15 @@ export const isOpen = (key: Key): boolean => key.shift && key.name === "l";
 // f or F: a follow needs no shift, and a shifted one is not another key.
 export const isFollow = (key: Key): boolean => key.name === "f";
 
-// A capital A: an abort stops a job, so it takes the deliberate keystroke.
-export const isAbort = (key: Key): boolean => key.shift && key.name === "a";
+// d, not D: the selected ticket's test definition.
+export const isDefinition = (key: Key): boolean =>
+  key.name === "d" && !key.shift && !key.ctrl && !key.meta;
 
-// Enter, as the parser names it: the answer to A's question.
+// a, not A: the abort question. A shifted a is not another command.
+export const isAbort = (key: Key): boolean =>
+  key.name === "a" && !key.shift && !key.ctrl && !key.meta;
+
+// Enter, as the parser names it: the answer to a's question, or the ticket's details.
 export const isSelect = (key: Key): boolean => key.name === "return";
 
 // q, or ctrl-c, which raw mode delivers as a key rather than a signal.
@@ -266,10 +307,21 @@ export const followError = (job: Option.Option<Job>): Option.Option<string> =>
     },
   });
 
-// Every key retires the last notice. While A's question is up it has the keys: h, l and the
+// The definition and the ticket information share one box. The window is what j and k scroll.
+export const SHEET_WIDTH = 76;
+export const SHEET_ROWS = 16;
+const SHEET_INNER = SHEET_WIDTH - 4;
+
+const scroll = (sheet: Sheet, step: number): Sheet => ({
+  ...sheet,
+  offset: clamp(sheet.offset + step, 0, Math.max(0, sheet.lines.length - SHEET_ROWS)),
+});
+
+// Every key retires the last notice. While a's question is up it has the keys: h, l and the
 // arrows move between yes on the left and no on the right, escape and enter close it (what
-// enter on yes does is the runner's), and nothing else moves. Otherwise L, F and A move
-// nothing here: opening the ticket, the follow or the question is the runner's, and so is the
+// enter on yes does is the runner's), and nothing else moves. A sheet has j and k and escape;
+// everything else waits. Otherwise L, F, d, enter and a move nothing here: opening the ticket,
+// the follow, the definition, the information or the question is the runner's, and so is the
 // pop-up, which no key takes down. escape closes whatever is followed; a peek closes on any
 // other key too, so the board stays walkable, while a full follow stays up until escape.
 export const press = (view: View, key: Key): View => {
@@ -287,7 +339,20 @@ export const press = (view: View, key: Key): View => {
     }
     return retired;
   }
-  if (isOpen(key) || isFollow(key) || isAbort(key)) {
+  if (Option.isSome(view.sheet)) {
+    const shown = view.sheet.value;
+    if (key.name === "j" || key.name === "down") {
+      return { ...retired, sheet: Option.some(scroll(shown, 1)) };
+    }
+    if (key.name === "k" || key.name === "up") {
+      return { ...retired, sheet: Option.some(scroll(shown, -1)) };
+    }
+    if (key.name === "escape") {
+      return { ...retired, sheet: Option.none() };
+    }
+    return retired;
+  }
+  if (isOpen(key) || isFollow(key) || isAbort(key) || isDefinition(key) || isSelect(key)) {
     return retired;
   }
   if (key.name === "escape") {
@@ -313,6 +378,28 @@ export const press = (view: View, key: Key): View => {
     ...closed,
     cursor: { ...view.cursor, [list]: clamp(cursor, 0, last) },
   });
+  // The sidebar's rows that are not tickets are visible and not selectable.
+  if (list === "clients") {
+    const stops = Option.match(view.snapshot, {
+      onNone: (): ReadonlyArray<number> => [],
+      onSome: clientStops,
+    });
+    const at = stops.indexOf(current);
+    const pick = (index: number): View =>
+      stops.length === 0 ? closed : select(stops[clamp(index, 0, stops.length - 1)]);
+    switch (key.name) {
+      case "j":
+      case "down":
+        return pick(at === -1 ? 0 : at + 1);
+      case "k":
+      case "up":
+        return pick(at === -1 ? 0 : at - 1);
+      case "g":
+        return pick(key.shift ? stops.length - 1 : 0);
+      default:
+        break;
+    }
+  }
   switch (key.name) {
     case "j":
     case "down":
@@ -725,7 +812,16 @@ export type Screen = {
     readonly place: Option.Option<string>;
   };
   readonly footer: { readonly left: Text.Row; readonly right: string };
+  // The selected ticket's last image, over the session pane. Absent when there is none.
+  readonly image: Option.Option<{
+    readonly png: Uint8Array;
+    readonly top: number;
+    readonly height: number;
+  }>;
 };
+
+// Where the session image sits: past the border, the sidebar and the calls column.
+export const SESSION_IMAGE_LEFT = 2 + 26 + 3 + Follow.LEFT_COLS;
 
 const card = (
   machine: Servers.Machine,
@@ -860,9 +956,11 @@ const HINTS: ReadonlyArray<readonly [key: string, does: string]> = [
   ["s", "automation"],
   ["h/l", "tabs"],
   ["t", "tickets"],
-  ["L", "open ticket"],
+  ["d", "definition"],
+  ["enter", "info"],
+  ["L", "linear"],
+  ["a", "abort"],
   ["F", "follow"],
-  ["A", "abort"],
   ["q", "quit"],
 ];
 
@@ -873,6 +971,74 @@ export const CONFIRM_WIDTH = 44;
 export const CONFIRM_HINT = "h/l choose   enter select   esc close";
 
 export const confirmTitle = (asked: Confirm): string => `abort ${asked.action} ${asked.ticket}`;
+
+const wrap = (text: string, width: number): ReadonlyArray<string> => {
+  const plain = Text.clean(text).trim();
+  if (plain.length === 0) {
+    return ["—"];
+  }
+  const lines: Array<string> = [];
+  let rest = plain;
+  while (rest.length > width) {
+    const at = rest.lastIndexOf(" ", width);
+    const cut = at > 0 ? at : width;
+    lines.push(rest.slice(0, cut));
+    rest = rest.slice(at > 0 ? at + 1 : cut);
+  }
+  lines.push(rest);
+  return lines;
+};
+
+const headed = (heading: string, text: string): ReadonlyArray<string> => [
+  heading,
+  ...wrap(text, SHEET_INNER),
+  "",
+];
+
+// d's box: the name, then the three parts of the stored wording.
+export const definitionSheet = (definition: {
+  readonly name: string;
+  readonly description: string;
+  readonly instruction: string;
+  readonly proof: string;
+}): Sheet => ({
+  title: definition.name,
+  offset: 0,
+  lines: [
+    ...headed("description", definition.description),
+    ...headed("instruction", definition.instruction),
+    ...headed("proof", definition.proof),
+  ],
+});
+
+const field = (name: string, value: string): string => `${name.padEnd(10)}${value}`;
+
+// enter's box: what the row cannot hold. Ages are the same reading the columns use.
+export const infoSheet = (job: Job, drift: number): Sheet => ({
+  title: `ticket ${job.ticket ?? "—"}`,
+  offset: 0,
+  lines: [
+    field("ticket", job.ticket ?? "—"),
+    field("test", job.test),
+    field("action", job.action),
+    field("status", job.status),
+    field("reason", job.reason ?? "—"),
+    field("session", job.sessionId ?? "—"),
+    field("client", job.clientUrl ?? "—"),
+    field("server", job.serverUrl ?? "—"),
+    field("queued", ago(job.createdAt, job.queriedAt, drift)),
+    field("started", ago(job.startedAt, job.queriedAt, drift)),
+    field("finished", ago(job.finishedAt, job.queriedAt, drift)),
+  ],
+});
+
+export const sheetRows = (sheet: Sheet): ReadonlyArray<Text.Row> =>
+  Array.from({ length: SHEET_ROWS }, (_, index) => {
+    const line = sheet.lines[sheet.offset + index];
+    return line === undefined ? [Text.SPACE] : [Text.value(Text.cut(line, SHEET_INNER))];
+  });
+
+export const SHEET_HINT = "j/k scroll   esc close";
 
 export const confirmRows = (asked: Confirm): ReadonlyArray<Text.Row> => {
   const answer = (choice: Confirm["choice"]): Text.Piece =>
@@ -1062,11 +1228,26 @@ const automationRows = (
   const series = snapshot.series.find(
     (found) => found.type === "automation-client" && found.name === entries[cursor]?.machine.name,
   );
-  const plotted = usage(series?.samples ?? [], inner - 28, height);
+  // The graphs keep the top third. The rest is the selected ticket's session.
+  const graphHeight = Math.max(1, Math.floor(height / 3));
+  const plotted = usage(series?.samples ?? [], inner - 28, graphHeight);
+  const session = sessionPane(view, height - graphHeight, now);
   return Array.from({ length: height }, (_, row) => {
     const line = left[from + row] ?? [Text.SPACE];
-    return [...clip(line, 26), Text.muted(" │ "), ...(plotted[row] ?? [])];
+    const right = row < graphHeight ? plotted[row] : session[row - graphHeight];
+    return [...clip(line, 26), Text.muted(" │ "), ...(right ?? [])];
   });
+};
+
+const sessionPane = (view: View, height: number, now: number): ReadonlyArray<Text.Row> => {
+  const follow = Option.getOrNull(view.session);
+  const lines: Array<Text.Row> =
+    follow === null
+      ? [[Text.muted(Option.getOrElse(view.sessionNote, () => "no session"))]]
+      : follow._tag === "peek"
+        ? [[Text.value(Follow.title(follow))], ...Follow.peekRows(follow, now)]
+        : [Follow.fullHeader(follow), ...Follow.fullEntries(follow, Math.max(0, height - 1))];
+  return Array.from({ length: height }, (_, row) => lines[row] ?? [Text.SPACE]);
 };
 
 const ticketRows = (
@@ -1120,6 +1301,7 @@ export const screen = (view: View, now: number, columns: number, rows: number): 
       place: Option.none(),
     },
     footer: footer(view, columns),
+    image: Option.none(),
   };
   return Option.match(view.snapshot, {
     onNone: () => blank,
@@ -1127,12 +1309,22 @@ export const screen = (view: View, now: number, columns: number, rows: number): 
       if (view.tab !== "servers") {
         // Top and bottom borders, the counts, the tabs, and the footer, off the height.
         const height = Math.max(1, rows - 4 - PAGES.length);
+        const graphHeight = Math.max(1, Math.floor(height / 3));
+        const png =
+          view.tab === "automation"
+            ? Option.flatMap(view.session, (follow) => follow.png)
+            : Option.none<Uint8Array>();
         return {
           ...blank,
           body:
             view.tab === "automation"
               ? automationRows(view, snapshot, columns, height, now)
               : ticketRows(view, snapshot, now, height),
+          image: Option.map(png, (bytes) => ({
+            png: bytes,
+            top: 2 + PAGES.length + graphHeight,
+            height: height - graphHeight,
+          })),
         };
       }
       const shown = machines(view, snapshot, now, columns, rows);

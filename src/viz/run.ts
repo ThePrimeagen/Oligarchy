@@ -16,6 +16,7 @@ import {
   Queue,
   Redacted,
   Ref,
+  Result,
   Schedule,
   type Scope,
   Stream,
@@ -29,6 +30,7 @@ import * as ProxyClient from "../client/proxy-client.ts";
 import * as Config from "../config.ts";
 import * as Actions from "../db/actions.ts";
 import * as Automation from "../db/automation.ts";
+import * as Tests from "../db/tests.ts";
 import type * as ProcessStats from "../db/process-stats.ts";
 import type * as Servers from "../db/servers.ts";
 import * as ExternalFailure from "../external-failure.ts";
@@ -227,10 +229,12 @@ const drawFailure = (renderer: CliRenderer): Effect.Effect<never, Errors.Command
 // at the first frame and every AGE_TICK, and every SPIN_MS while a job is running, L opens the
 // selected job's ticket first, F peeks at the
 // selected running job (waiting for its session if the guest has not started) and follows it
-// live on a second F, A asks and then has the automation
-// server abort the selected job, and q or ctrl-c ends the run and the scope hands the screen
-// back. A read that fails leaves the last picture up with its reason on the footer; a frame
-// that fails ends the run.
+// live on a second F, a asks and then has the automation
+// server abort the selected job, d opens its test definition and enter its details, and q or
+// ctrl-c ends the run and the scope hands the screen back. The selected ticket's session is
+// drawn in the main area, and steps aside while F holds the stream. A read that fails leaves
+// the last picture up with its reason on the footer; a frame that fails ends the run. A
+// session that fails leaves its calls and says so in that pane, not on the footer.
 export const run: Effect.Effect<
   void,
   Errors.CommandError,
@@ -241,6 +245,7 @@ export const run: Effect.Effect<
   | ProcessStats.ProcessStatsStore
   | Automation.AutomationStore
   | Actions.ActionStore
+  | Tests.TestStore
 > = Effect.gen(function* () {
   const screen = yield* Renderer;
   const imageProtocol = yield* screen.imageProtocol;
@@ -268,11 +273,15 @@ export const run: Effect.Effect<
     const readAt = yield* Clock.currentTimeMillis;
     const snapshot = yield* Read.collect(needs, yield* Ref.get(prior), readAt);
     yield* Ref.set(prior, Option.some(snapshot));
-    yield* update((current) => ({
-      ...current,
-      snapshot: Option.some(snapshot),
-      failure: Option.none(),
-    }));
+    yield* update((current) =>
+      View.place({
+        ...current,
+        snapshot: Option.some(snapshot),
+        failure: Option.none(),
+      }),
+    );
+    // Filled in once the session watcher exists. A read before that has nothing to attach.
+    yield* yield* Ref.get(watched);
   }).pipe(
     Effect.catchCause((cause) =>
       Cause.hasInterruptsOnly(cause)
@@ -298,6 +307,10 @@ export const run: Effect.Effect<
   // the connect and the stream on the second. A piece clears itself when it ends, however it
   // ends; starting the next stops the last; and any key that leaves nothing followed interrupts
   // what is in flight, so a database or a server that never answers holds no key.
+  // Effect is covariant in its requirements, so the empty effect fits a watcher that needs them.
+  const watched = yield* Ref.make<
+    Effect.Effect<void, never, Scope.Scope | Actions.ActionStore | HttpClient.HttpClient>
+  >(Effect.void);
   const followFiber = yield* Ref.make(Option.none<Fiber.Fiber<void>>());
   const stopFollow = Effect.gen(function* () {
     const running = yield* Ref.getAndSet(followFiber, Option.none());
@@ -312,6 +325,13 @@ export const run: Effect.Effect<
       }
       return { ...current, follow: Option.some(change(current.follow.value)) };
     });
+  const withSession = (change: (follow: Follow.Full) => Follow.Full) =>
+    update((current) => {
+      if (Option.isNone(current.session) || current.session.value._tag !== "full") {
+        return current;
+      }
+      return { ...current, session: Option.some(change(current.session.value)) };
+    });
   // Ages stay on the one-second tick: an 80ms step lands short of the second, so "1 s ago"
   // would still read "0 s ago". The braille spinner needs the finer clock, and only while a
   // row is actually turning.
@@ -324,6 +344,7 @@ export const run: Effect.Effect<
       yield* tick;
     }
     yield* withFull(Follow.tick);
+    yield* withSession(Follow.tick);
   });
   yield* Effect.scoped(
     Effect.gen(function* () {
@@ -457,7 +478,7 @@ export const run: Effect.Effect<
             ),
           );
         });
-      // A asks first, and yes on the question sends the job to the automation server off the
+      // a asks first, and yes on the question sends the job to the automation server off the
       // key loop, so a server that never answers holds no key. Closed, the board is read again
       // before the footer says so, so the job is gone as the words land; over already, the
       // pop-up says what cannot be done; refused, the footer says why. One abort is in flight
@@ -534,6 +555,183 @@ export const run: Effect.Effect<
         }
         yield* startFollow(peekWork(Option.getOrThrow(job)));
       });
+      // The selected ticket's session, in the main area. One follower: while F holds the stream
+      // this one steps aside, and a read starts it again once F has closed. A failure stays in
+      // the pane; the footer is for keys.
+      const sessionFiber = yield* Ref.make(Option.none<Fiber.Fiber<void>>());
+      const attached = yield* Ref.make<Option.Option<string>>(Option.none());
+      const stopSession = Effect.gen(function* () {
+        const running = yield* Ref.getAndSet(sessionFiber, Option.none());
+        if (Option.isSome(running)) {
+          yield* Fiber.interrupt(running.value);
+        }
+      });
+      const sessionKey = (current: View.View): string => {
+        const job = Option.getOrNull(View.selectedJob(current));
+        return job === null
+          ? ""
+          : `${job.ticket ?? ""}|${job.action}|${job.status}|${job.sessionId ?? ""}|${job.serverUrl ?? ""}`;
+      };
+      const note = (text: string) =>
+        update((current) => ({
+          ...current,
+          session: Option.none(),
+          sessionNote: Option.some(text),
+        }));
+      const sessionWork = (job: Automation.AutomationJobListRow) =>
+        Effect.gen(function* () {
+          type Step =
+            | {
+                readonly _tag: "ready";
+                readonly sessionId: string;
+                readonly serverUrl: string | null;
+              }
+            | { readonly _tag: "waiting" }
+            | { readonly _tag: "gone" }
+            | { readonly _tag: "none" };
+          const initial = (): Step =>
+            job.sessionId !== null
+              ? { _tag: "ready", sessionId: job.sessionId, serverUrl: job.serverUrl }
+              : job.status === "running" && job.ticket !== null
+                ? { _tag: "waiting" }
+                : { _tag: "none" };
+          let settled = initial();
+          if (settled._tag === "none") {
+            yield* note("no session");
+            return;
+          }
+          if (settled._tag === "waiting") {
+            const ticket = job.ticket;
+            if (ticket === null) {
+              yield* note("no session");
+              return;
+            }
+            yield* note(`waiting for ${ticket}'s session`);
+            const look = (): Step => {
+              const snapshot = Option.getOrNull(view().snapshot);
+              const found = snapshot?.queue.running.find(
+                (row) => row.ticket === ticket && row.action === job.action,
+              );
+              if (found !== undefined && found.sessionId !== null) {
+                return {
+                  _tag: "ready",
+                  sessionId: found.sessionId,
+                  serverUrl: found.serverUrl,
+                };
+              }
+              return found === undefined ? { _tag: "gone" } : { _tag: "waiting" };
+            };
+            settled = yield* Effect.repeat(Effect.sync(look), {
+              schedule: Schedule.spaced(SESSION_WAIT),
+              until: (step) => step._tag !== "waiting",
+            });
+          }
+          if (settled._tag !== "ready") {
+            yield* note("no session");
+            return;
+          }
+          const { sessionId, serverUrl } = settled;
+          const peek = yield* loadPeek(job.ticket ?? "—", sessionId, serverUrl);
+          yield* update((latest) => ({
+            ...latest,
+            session: Option.some(peek),
+            sessionNote: Option.none(),
+          }));
+          if (serverUrl === null || job.status !== "running") {
+            return;
+          }
+          const liveUrl = serverUrl;
+          const token = yield* Config.oligarchyToken;
+          const proxy = yield* ProxyClient.connect({ serverUrl: liveUrl, token });
+          const bytes = yield* proxy.follow(sessionId);
+          yield* update((current) => ({
+            ...current,
+            session: Option.some(Follow.expand(peek, liveUrl)),
+            sessionNote: Option.none(),
+          }));
+          yield* Stream.splitLines(Stream.decodeText(bytes)).pipe(
+            Stream.filter((line) => line !== ""),
+            Stream.runForEach((line) =>
+              Effect.andThen(Domain.decodeFollowLine(line).pipe(Effect.orDie), (event) =>
+                withSession((follow) => Follow.apply(follow, event)),
+              ),
+            ),
+          );
+        }).pipe(
+          Effect.catchCause((cause) =>
+            Cause.hasInterruptsOnly(cause)
+              ? Effect.interrupt
+              : update((current) => ({
+                  ...current,
+                  sessionNote: Option.some(Render.headline(Cause.squash(cause))),
+                })),
+          ),
+        );
+      const syncSession = Effect.gen(function* () {
+        if (Option.isSome(view().follow) || Option.isSome(yield* Ref.get(followFiber))) {
+          yield* stopSession;
+          yield* Ref.set(attached, Option.none());
+          return;
+        }
+        const key = sessionKey(view());
+        const known = yield* Ref.get(attached);
+        const running = yield* Ref.get(sessionFiber);
+        if (Option.isSome(known) && known.value === key && (Option.isSome(running) || key === "")) {
+          return;
+        }
+        yield* Ref.set(attached, Option.some(key));
+        yield* stopSession;
+        const job = Option.getOrNull(View.selectedJob(view()));
+        if (job === null) {
+          yield* note("no session");
+          return;
+        }
+        const fiber = yield* Effect.forkScoped(
+          Effect.ensuring(sessionWork(job), Ref.set(sessionFiber, Option.none())),
+        );
+        yield* Ref.set(sessionFiber, Option.some(fiber));
+      });
+      yield* Ref.set(watched, syncSession);
+      const openDefinition = Effect.gen(function* () {
+        const job = Option.getOrNull(View.selectedJob(view()));
+        if (job === null) {
+          yield* setNotice("no job selected");
+          return;
+        }
+        const tests = yield* Tests.TestStore;
+        const found = yield* Effect.result(tests.findTestDefinition(job.test));
+        if (Result.isFailure(found)) {
+          yield* setNotice(Render.headline(found.failure));
+          return;
+        }
+        const definition = Option.getOrNull(found.success);
+        if (definition === null) {
+          yield* setNotice(`no test definition named ${job.test}`);
+          return;
+        }
+        yield* update((current) => ({
+          ...current,
+          sheet: Option.some(View.definitionSheet(definition)),
+          notice: Option.none(),
+        }));
+      });
+      const openInfo = Effect.gen(function* () {
+        const current = view();
+        const job = Option.getOrNull(View.selectedJob(current));
+        if (job === null) {
+          yield* setNotice("no job selected");
+          return;
+        }
+        const drift = Option.match(current.snapshot, {
+          onNone: () => 0,
+          onSome: (snapshot) => now() - snapshot.readAt,
+        });
+        yield* update((latest) => ({
+          ...latest,
+          sheet: Option.some(View.infoSheet(job, drift)),
+          notice: Option.none(),
+        }));
+      });
       const keys = keysOf(renderer).pipe(
         Stream.takeWhile((key) => !View.isQuit(key)),
         Stream.runForEach((key) =>
@@ -559,6 +757,13 @@ export const run: Effect.Effect<
             if (View.isAbort(key)) {
               yield* ask;
             }
+            if (View.isDefinition(key)) {
+              yield* openDefinition;
+            }
+            if (View.isSelect(key)) {
+              yield* openInfo;
+            }
+            yield* syncSession;
           }),
         ),
       );
