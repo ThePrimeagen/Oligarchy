@@ -190,7 +190,9 @@ describe("screen happy path", () => {
         expect(rows[5]).toContain("8.0%");
         expect(rows[6]).toContain("OLI-61");
         expect(rows[6]).toContain("100%");
-        expect(rows[ROWS - 3]).toContain("0%");
+        // The graphs keep the top third. 0% is the last of those rows, not the foot of the body.
+        expect(rows[14]).toContain("0%");
+        expect(rows[15]).toContain("no session");
         expect(rows[ROWS - 2]).toBe(bottom());
         expect(rows[ROWS - 1]).toBe(FOOTER);
         expect(rows.join("\n")).not.toContain("╭─ automation");
@@ -1407,6 +1409,93 @@ describe("running job rows", () => {
       expect(styleOf(rows[16], pad("59 min ago", 10))).toEqual([View.DRIVE_COLOR, PLAIN]);
       expect(textOf(rows[16])).not.toContain("…");
       expect(textOf(rows[16])).not.toContain("drive");
+    }),
+  );
+});
+
+describe("session pane", () => {
+  const sessionOf = (
+    follow: Follow.Follow,
+    note: Option.Option<string> = Option.none(),
+  ): View.View => ({
+    ...shown(SNAPSHOT, { tab: "automation" }),
+    session: Option.some(follow),
+    sessionNote: note,
+  });
+
+  it.effect(
+    "the bottom two thirds is the selected ticket's session: the calls, the intent and the image",
+    () =>
+      Effect.gen(function* () {
+        const full = Follow.apply(
+          Follow.apply(
+            Follow.expand(
+              Follow.peekFromActions(
+                "OLI-61",
+                SESSION_ID,
+                garage.url,
+                [{ request: sendKey, createdAt: ago(2) }],
+                Option.some(TINY_PNG),
+              ),
+              garage.url,
+            ),
+            { type: "intent", state: "started", message: "lock the screen" },
+          ),
+          { type: "action", id: 10, name: "send-keys", state: "running" },
+        );
+        const view = sessionOf(full);
+        const rows = yield* draw(view);
+        expect(rows[15]).toContain("following OLI-61");
+        expect(rows.join("\n")).toContain("lock the screen");
+        expect(rows.join("\n")).toContain("send-keys");
+        expect(rows.join("\n")).toContain("send-key");
+        expect(rows.some((row) => BLOCKS.test(row))).toBe(true);
+        const drawn = View.screen(view, READ_AT, COLUMNS, ROWS);
+        expect(drawn.image).toEqual(Option.some({ png: TINY_PNG, top: 15, height: 20 }));
+      }),
+  );
+
+  it.effect("with no session the pane says so and draws no image (unhappy)", () =>
+    Effect.gen(function* () {
+      const waiting = {
+        ...shown(SNAPSHOT, { tab: "automation" }),
+        sessionNote: Option.some("waiting for OLI-61's session"),
+      };
+      const rows = yield* draw(waiting);
+      expect(rows[15]).toContain("waiting for OLI-61's session");
+      expect(rows.some((row) => BLOCKS.test(row))).toBe(false);
+      expect(View.screen(waiting, READ_AT, COLUMNS, ROWS).image).toEqual(Option.none());
+      const bare = yield* draw(shown(SNAPSHOT, { tab: "automation" }));
+      expect(bare[15]).toContain("no session");
+      expect(bare.some((row) => BLOCKS.test(row))).toBe(false);
+    }),
+  );
+
+  it.effect("d's definition and enter's ticket information are drawn over the board", () =>
+    Effect.gen(function* () {
+      const defined = yield* draw({
+        ...shown(SNAPSHOT, { tab: "automation" }),
+        sheet: Option.some(
+          View.definitionSheet({
+            name: "lock-screen",
+            description: "The screen locks.",
+            instruction: "Lock it.",
+            proof: "It is locked.",
+          }),
+        ),
+      });
+      expect(defined.join("\n")).toContain("lock-screen");
+      expect(defined.join("\n")).toContain("The screen locks.");
+      expect(defined.join("\n")).toContain(View.SHEET_HINT);
+      expect(defined.join("\n")).toContain("OLI-61");
+
+      const informed = yield* draw({
+        ...shown(SNAPSHOT, { tab: "automation" }),
+        sheet: Option.some(View.infoSheet(running, 0)),
+      });
+      expect(informed.join("\n")).toContain("ticket    OLI-61");
+      expect(informed.join("\n")).toContain("reason    —");
+      expect(informed.join("\n")).toContain(View.SHEET_HINT);
     }),
   );
 });
