@@ -254,7 +254,7 @@ export const jobCells = (
   cells(
     pad(ticket, 9),
     pad(test, 18),
-    pad(action, 9),
+    pad(action, 10),
     pad(status, 12),
     pad(queued, 11),
     pad(started, 11),
@@ -265,16 +265,16 @@ export const job = (marker: "▸" | " ", columns: Readonly<Parameters<typeof job
 export const RUNNING = [
   "OLI-61",
   "lock-screen",
-  "drive",
-  "● running",
+  "45 s ago",
+  `${View.spinnerAt(READ_AT)} running`,
   "3 min ago",
   "45 s ago",
 ] as const;
 export const DIAGNOSING = [
   "OLI-65",
   "wifi",
-  "diagnose",
-  "● running",
+  "45 s ago",
+  `${View.spinnerAt(READ_AT)} running`,
   "3 min ago",
   "45 s ago",
 ] as const;

@@ -50,9 +50,6 @@ const LINEAR_ISSUES = "https://linear.app/issue/";
 const OPENER = "xdg-open";
 const OPEN_WAIT = Duration.seconds(2);
 
-// The spinner on a followed session's running entries turns this often.
-const SPIN = Duration.millis(80);
-
 // The board already re-reads the queue. This only looks at that snapshot again, so a session
 // that landed on the last read opens the peek within a second, with no second query.
 const SESSION_WAIT = Duration.seconds(1);
@@ -314,7 +311,14 @@ export const run: Effect.Effect<
       }
       return { ...current, follow: Option.some(change(current.follow.value)) };
     });
-  const spin = withFull(Follow.tick);
+  // The board's running rows read `now`, so the follow's cadence advances that clock too.
+  const spin = Effect.gen(function* () {
+    const ms = yield* Clock.currentTimeMillis;
+    yield* Effect.sync(() => {
+      setNow(ms);
+    });
+    yield* withFull(Follow.tick);
+  });
   yield* Effect.scoped(
     Effect.gen(function* () {
       const renderer = yield* screen.open;
@@ -556,7 +560,7 @@ export const run: Effect.Effect<
         keys,
         Effect.repeat(read, Schedule.spaced(View.REFRESH)),
         Effect.repeat(tick, Schedule.spaced(View.AGE_TICK)),
-        Effect.repeat(spin, Schedule.spaced(SPIN)),
+        Effect.repeat(spin, Schedule.spaced(Duration.millis(View.SPIN_MS))),
         drawFailure(renderer),
       ]);
     }),
