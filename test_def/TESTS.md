@@ -2594,15 +2594,24 @@ instruction: |
   From the desktop please do the following, pressing Escape (twice if a filter is set) between chords:
 
   <ActionList>
-  * Press Super+Ctrl+C: header "Capture…" with Screenshot, Screenrecord, Text, QR Code, Color (no "Stop Screenrecording", nothing is recording). Type "screenshot", Return: the screen freezes with a crosshair exactly as with Print. Click once inside the bar: the shot snaps to the whole monitor and a toast "Screenshot saved to clipboard and file" appears.
-  ** Then press Super+Space → Trigger → Capture with the arrows: the same five rows via the long route. Escape.
-  * Press Super+Ctrl+O: header "Toggle…" with Stay Awake, Notifications, Crash Capture, Screensaver, Nightlight, Menu Bar, Workspace Layout, Window Gaps, 1-Window Ratio (Battery Percentage absent). Escape. Press Super+Ctrl+S: header "Share…" with Clipboard, File, Folder, Receive. Escape. Press Super+Ctrl+H: either the card opens with header "Hardware…" and the empty-state "Nothing here yet", or it lists only Touchscreen — record which. Escape.
-  * Press Super+Ctrl+R: no menu card titled "Set one…" appears; instead the reminder input flow starts (describe what appears) — the route is an alias for the leaf action. Escape. Press Super+Space → Trigger → Reminder: rows Set one, Show all, Clear all. Highlight "Show all", Enter: the menu closes and a notification about reminders appears (e.g. that there are none).
-  * Press Super+Shift+Ctrl+Space: the theme picker (a list of theme names). Escape. Press Super+Ctrl+Space: the background image grid. Escape.
-  ** Do not pick anything in Theme or Background; those change persisted state.
-  * Press Super+Space and type "system": the first row is the System submenu (›); keyword-matched apps, if any, sit below the divider (htop ships Keywords=system). Press Escape twice, then Super+Escape: the System submenu opens, never an application. Escape.
-  * Press Super+Enter and type `omarchy menu summon process` Enter: the menu opens (root or a submenu), no application launches. Escape.
-  * Unhappy path: press Super+Ctrl+C, then Escape. Nothing is captured. In the terminal type `rm ~/Pictures/screenshot-*.png` Enter and press Super+W; the desktop is as before.
+  * Press Super+Ctrl+C. The Capture menu opens.
+  * Press Escape. The menu closes. Nothing is captured.
+  * Press Super+Ctrl+O. The Toggle menu opens.
+  * Press Escape. The menu closes.
+  * Press Super+Ctrl+S. The Share menu opens.
+  * Press Escape. The menu closes.
+  * Press Super+Ctrl+H. The Hardware menu opens. Do not select a row.
+  * Press Escape. The menu closes.
+  * Press Super+Ctrl+R. A reminder prompt starts. No empty submenu stays open.
+  * Press Escape. The prompt closes.
+  * Press Super+Shift+Ctrl+Space. The theme picker opens. Do not pick a theme.
+  * Press Escape. The picker closes.
+  * Press Super+Ctrl+Space. The background picker opens. Do not pick a background.
+  * Press Escape. The picker closes.
+  * Press Super+Enter. A terminal opens.
+  * Run `omarchy menu summon process` and press Enter. The menu opens. No application launches.
+  * Press Escape. The menu closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -2628,16 +2637,20 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Escape: header "System…" with Screensaver, Lock, Suspend, Logout, Reboot, Shutdown and NO Hibernate. Do not select anything. Escape.
-  * Press Super+Ctrl+C: header "Capture…" with Screenshot, Screenrecord, Text, QR Code, Color and NO "Stop Screenrecording". Press Down once and Enter (Screenrecord): the card widens and lists "With no audio", "With desktop audio", "With desktop + microphone audio" — no webcam row. Escape twice.
-  * Press Super+Ctrl+O: header "Toggle…" with Stay Awake, Notifications, Crash Capture, Screensaver, Nightlight, Menu Bar, Workspace Layout, Window Gaps, 1-Window Ratio and NO "Battery Percentage". Escape.
-  * Press Super+Space, Down twice (Trigger), Enter: the rows are Emoji, Reminder, Capture, Transcode, Share, Toggle, Speed Test — note whether a "Hardware" row is present. Escape. Press Super+Ctrl+H: the card opens with header "Hardware…" and, instead of rows, the empty-state glyph with "Nothing here yet" — or a lone Touchscreen row (the QEMU tablet pointer may register as a touchscreen); record which. There must be no Laptop Display, Mirror Display, Hybrid GPU, Touchpad or Touchpad Haptics row. Escape.
-  * Press Super+Space and type "Laptop Display": No matches. Escape once. Repeat for "Battery Percentage", "Fingerprint" and "webcam" — No matches each. Type "QR": only Capture › QR Code appears, no Network › QR Code. Escape twice.
-  * Press Super+Space → Setup → Security: Fido2, SSHD, Passwordless Sudo, Sudoless Docker are present and Fingerprint is absent. Back; Setup → Network shows only DNS. Escape.
-  * Screenshot the whole bar: no battery, bluetooth or agents icon in the right section (the weather pill appears only after a network fetch).
-  * Press Super+Enter and type `omarchy-hw-touchscreen; echo ts=$?` Enter — ts=0 ⇔ the Touchscreen row was shown. Type `omarchy-hw-touchpad; echo $?` → an empty line and 1. Type `hyprctl devices -j | jq '[.mice[].name, .tablets, .touch]'` → the QEMU tablet listed under mice and `[]` for tablets and touch. Type `omarchy-toggle-touchpad; echo $?` → "No touchpad device found", 1. Only if `.tablets` and `.touch` were empty and ts=1, type `omarchy-toggle-touchscreen off; echo $?` → "No touchscreen device found", 1. Type `ls ~/.local/state/omarchy/toggles/hypr/` → no `*-disabled-name` file was created. Type `omarchy-toggle-input-device mouse; echo $?` → usage, 1.
-  ** If `.tablets` is not empty, the QEMU tablet was classified as a tablet on this build and `omarchy-toggle-touchscreen off` WOULD disable your pointer: do not run it; report the device name instead.
-  * Press Super+Ctrl+Alt+B. Intended (03-INTENDED-BEHAVIOUR item 7): no toast, or a toast whose headline reads e.g. `No battery`. A low-urgency toast with the battery glyph and empty text is the known defect — screenshot it and report it as such. Type `omarchy-battery-status; echo exit=$?` Enter → empty output and `exit=0`. Close the terminal with Super+W; the desktop is as before.
+  * Press Super+Escape. The System menu opens. Hibernate is absent. Do not select Suspend.
+  * Press Escape. The menu closes.
+  * Press Super+Ctrl+O. The Toggle menu opens. No battery row is shown.
+  * Press Escape. The menu closes.
+  * Press Super+Ctrl+H. The Hardware menu opens. No laptop or touchpad row is shown.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Type `Laptop Display`. No match is shown.
+  * Press Escape. The filter clears. The menu stays open.
+  * Press Escape. The menu closes.
+  * Press Super+Enter. A terminal opens.
+  * Run `omarchy-hw-touchpad; echo exit=$?` and press Enter. It prints `exit=1`.
+  * Run `omarchy-toggle-touchpad; echo exit=$?` and press Enter. It says no touchpad was found. It prints `exit=1`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -2664,14 +2677,21 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Space → Install → Terminal. The row of the terminal that is installed (Foot on the stock disk) is dimmed with a ✓; the rows for terminals not installed look normal. Press Down repeatedly: the highlight never lands on the dimmed row. Type `foot`: the search shows no selectable Foot row; press Enter: nothing launches. Escape.
-  * Press Super+Space → Install → Service: Dropbox, Spotify and Signal are NOT dimmed (not installed on a stock disk). Escape. Press Super+Space → Remove: there is no row for software that is absent (for instance no Dropbox, no Sunshine); whole Remove submenus with nothing to remove are absent. Escape.
-  * Press Super+Space → Setup → Defaults → Terminal: Foot ✓, Alacritty/Ghostty/Kitty unmarked. Back; Browser shows Chromium ✓; Editor shows Neovim ✓; Agent lists fourteen rows (Antigravity … Pi) with no ✓. Escape.
-  * Open a terminal with Super+Enter and type `mkdir -p ~/.config/omarchy/defaults && echo codex > ~/.config/omarchy/defaults/agent`. Press Super+Space → Setup → Defaults → Agent: the Codex row now carries ✓ (the guard batch re-ran on open). Do NOT select any row. Escape.
-  ** ✓ reflects the previous open's guard batch: if it has not moved yet, press Escape, reopen once more and report that the marker lagged one open.
-  * Round trip: type `rm ~/.config/omarchy/defaults/agent`; reopen the same submenu (twice) → no ✓ again. Escape.
-  * Unhappy path: press Super+Space → Setup → Defaults → Terminal and select Alacritty. Defaults list every option whether installed or not and install a missing one when picked (03-INTENDED-BEHAVIOUR A1), so on the stock disk a floating installer terminal opens instead of an "Alacritty is now the default terminal" toast; press Ctrl+C at its password prompt to abort — the sudo prompt is the consent point. Reopen the Terminal defaults twice and press Super+Enter: record where the ✓ sits and which terminal opened (a ✓ on an uninstalled terminal is a finding). Close the new terminal.
-  * Press Super+Space → Style → Font: the rows are installed monospace fonts (provider rows) with exactly one ticked. Escape and close the terminal with Super+W; the desktop is as before.
+  * Press Super+Space. The menu opens.
+  * Click Install, then Terminal. Use the mouse only. The installed terminal is dimmed. Do not select it.
+  * Press Escape. The menu closes.
+  * Press Super+Enter. A terminal opens.
+  * Run `mkdir -p ~/.config/omarchy/defaults && echo codex > ~/.config/omarchy/defaults/agent` and press Enter. The agent default is written.
+  * Press Super+Space. The menu opens.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Click Setup, then Defaults, then Agent. Use the mouse only. Codex is ticked. Do not select a row.
+  * Press Escape. The menu closes.
+  * Run `rm ~/.config/omarchy/defaults/agent` and press Enter. The agent default is removed.
+  * Press Super+Space. The menu opens.
+  * Click Setup, then Defaults, then Agent. Use the mouse only. No row is ticked.
+  * Press Escape. The menu closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -2732,15 +2752,23 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter twice so two terminals tile side by side.
-  * Press Super+Ctrl+O → Window Gaps. The gaps between the windows and the screen edge change. Super+Ctrl+O → Window Gaps again restores them.
-  * Press Super+Ctrl+O → Menu Bar. The bar hides. Press Super+Ctrl+O again (the menu still works with the bar hidden) and select Menu Bar: the bar returns.
-  ** If the bar does not return, type `omarchy-toggle-bar` (no argument) in a terminal and report it — note that `omarchy-toggle-bar on` means "hidden on".
-  * Close one terminal (Super+W) and press Super+Ctrl+O → 1-Window Ratio. The remaining window becomes narrower and centred. Toggle it again to restore.
-  * Press Super+Space → Trigger → Toggle and click "Nightlight": the screen takes an orange tint (visible in the screenshot — Hyprland applies it in its renderer). Reopen and click "Nightlight" again: the tint is gone.
-  * Reopen Trigger → Toggle and click "Notifications": the do-not-disturb indicator appears in the bar (no toast is sent; the indicator is concealed until hovered). Click it again: off.
-  ** Each click closes the menu; reopen it for the next row.
-  * Close the terminal; the desktop is as before.
+  * Press Super+Enter. A terminal opens.
+  * Press Super+Enter. A second terminal opens.
+  * Press Super+Ctrl+O. The Toggle menu opens.
+  * Click Window Gaps. Use the mouse only. The gaps change.
+  * Press Super+Ctrl+O. The Toggle menu opens.
+  * Click Window Gaps. Use the mouse only. The gaps return.
+  * Press Super+Ctrl+O. The Toggle menu opens.
+  * Click Menu Bar. Use the mouse only. The bar hides.
+  * Press Super+Ctrl+O. The Toggle menu opens. The menu still works.
+  * Click Menu Bar. Use the mouse only. The bar returns.
+  * Press Super+W. One terminal closes.
+  * Press Super+Ctrl+O. The Toggle menu opens.
+  * Click Nightlight. Use the mouse only. The screen tints.
+  * Press Super+Ctrl+O. The Toggle menu opens.
+  * Click Nightlight. Use the mouse only. The tint is gone.
+  * Press Super+W. The terminal closes.
+  * the desktop must return exactly as left.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -2763,16 +2791,17 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `mkdir -p ~/.config/omarchy/extensions; cp ~/.config/omarchy/extensions/omarchy-menu.jsonc /tmp/menu.bak 2>/dev/null; echo saved=$?` Enter (the shipped file, if present, is comments only).
-  * Write the extension in one command: `printf '%s\n' '{' '"hello-test": {"icon":"", "label":"Hello Test", "description":"added by test", "action":"omarchy-notification-send Hello-from-menu"},' '"personal": {"icon":"", "label":"Personal"},' '"personal.notes": {"icon":"", "label":"Notes", "action":"omarchy-notification-send Notes-row-clicked"},' '"zz-test": {"icon":"", "label":"ZZ Test", "action":"omarchy-no-such-command"},' '"style.theme": {"label":"Theme (overridden)"}' '}' > ~/.config/omarchy/extensions/omarchy-menu.jsonc` Enter.
-  * Press Super+Space: the root menu has new rows "Hello Test", "Personal ›" and "ZZ Test" after System, alongside the ten shipped rows. Open Style: the Theme row reads "Theme (overridden)" in its usual position. Escape.
-  ** The shell watches the file; if the rows are missing after one reopen, type `omarchy menu refresh` Enter in the terminal, reopen, and report that a refresh was required.
-  * Select "Hello Test" with the mouse: a toast "Hello-from-menu". Super+Space → Personal → Notes: toast "Notes-row-clicked". Super+Space → "ZZ Test": the menu closes, nothing else happens, and Super+Space opens the menu again fine. Escape.
-  * Press Super+Space and type `added`: "Hello Test" is matched by its description. Escape twice.
-  * Break it: type `sed -i 's/"label":"Hello Test",/"label":"Hello Test", \/\/ inline comment/' ~/.config/omarchy/extensions/omarchy-menu.jsonc` Enter and `cat` it. Press Super+Space: "Hello Test", "Personal" and "ZZ Test" are gone AND the Style › Theme row reads plain "Theme" again, while Apps, Learn, Trigger, Style, Setup, Install, Remove, Update, About, System are all present, no error toast appeared, and Setup → Monitors still works (open it and quit with `:q`). Escape.
-  ** Quirk: this is the documented JSONC limitation — only whole-line `//` comments are stripped; a broken user file contributes nothing, silently.
-  * Type `printf '{ not json' > ~/.config/omarchy/extensions/omarchy-menu.jsonc; omarchy menu refresh` Enter and press Super+Space: the ten shipped root rows only. Escape.
-  * Round trip: if saved=0, type `cp /tmp/menu.bak ~/.config/omarchy/extensions/omarchy-menu.jsonc` Enter; otherwise type `rm ~/.config/omarchy/extensions/omarchy-menu.jsonc` Enter. Press Super+Space: the stock root menu with no user rows. Escape and close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Run `mkdir -p ~/.config/omarchy/extensions` and press Enter. The directory exists.
+  * Run `printf '%s\n' '{' '"hello-test": {"icon":"", "label":"Hello Test", "action":"omarchy-notification-send Hello-from-menu"}' '}' > ~/.config/omarchy/extensions/omarchy-menu.jsonc` and press Enter. The extension is written.
+  * Press Super+Space. The menu opens. Hello Test is listed.
+  * Click Hello Test. Use the mouse only. A toast appears. The menu closes.
+  * Run `printf '{ not json' > ~/.config/omarchy/extensions/omarchy-menu.jsonc` and press Enter. The file is broken.
+  * Press Super+Space. The menu opens. Hello Test is gone. The shipped rows remain.
+  * Press Escape. The menu closes.
+  * Run `rm ~/.config/omarchy/extensions/omarchy-menu.jsonc` and press Enter. The extension is removed.
+  * Press Super+W. The terminal closes.
+  * the desktop must return exactly as left.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>

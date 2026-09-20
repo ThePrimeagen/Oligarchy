@@ -65,12 +65,12 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `menu-search-filter-and-two-stage-escape`
 - [x] `menu-submenu-navigation-keyboard-and-mouse`
 - [x] `menu-overlays-keep-keys-from-window-behind`
-- [ ] `menu-route-hotkeys-aliases-and-summon`
-- [ ] `menu-guards-hide-hardware-rows-on-vm`
-- [ ] `menu-guards-dim-installed-hide-absent-tick-current`
+- [x] `menu-route-hotkeys-aliases-and-summon`
+- [x] `menu-guards-hide-hardware-rows-on-vm`
+- [x] `menu-guards-dim-installed-hide-absent-tick-current`
 - [ ] `menu-catalogue-rows-match-documented-layout`
-- [ ] `menu-toggle-rows-flip-desktop-state`
-- [ ] `menu-extension-jsonc-hot-reload-and-broken-file`
+- [x] `menu-toggle-rows-flip-desktop-state`
+- [x] `menu-extension-jsonc-hot-reload-and-broken-file`
 - [ ] `menu-select-and-input-dmenu-contract`
 - [ ] `menu-file-and-image-pickers`
 - [ ] `menu-timezone-set-filter-and-cancel`
