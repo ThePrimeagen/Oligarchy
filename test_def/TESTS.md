@@ -17357,36 +17357,54 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter, press Super+F so it fills the screen, type `omarchy version` and press Enter; record the version (e.g. `4.0.2-1`).
-  * Type `omarchy | head -n 20`; the first line must be `Omarchy command center`, followed by `Usage:` and `Common commands:` (`omarchy update`, `omarchy theme list`, `omarchy theme set <name>`, `omarchy font list`, `omarchy screenshot`, `omarchy debug`…), with `Groups:` and `Discovery:` blocks further down.
-  * Type `omarchy | sed -n '/^Groups:/,/^Discovery:/p' | sudo tee /dev/ttyS0 >/dev/null` (password `prime`) and read it with get-serial.
-  ** The group table is alphabetical (`agent` first, `windows` last), two columns, no counts; `theme`, `update`, `crash` and `agent` must appear; `show`, `upgrade`, `apply`, `provision`, `state`, `done`, `upload` and `git` must NOT.
-  ** Intended: no group with zero commands is advertised, so `finalize` (and `branch`, `config`, `wifi`) must be absent. At HEAD they are still listed (`omarchy --help | grep -c '^  finalize '` → `1`; expected `0` once issue #7113 lands) — record the count as the defect, do not treat it as a pass.
-  ** Intended: the `agent` row describes launching an agent, matching `omarchy agent --help` → `Launch the default coding agent in a terminal`. At HEAD `omarchy --help | grep '^  agent '` still reads `AI coding agent usage data` — record the stale string as the defect.
-  * Type `omarchy capture`; expected `Capture commands — Screenshots and screen recording:` with rows qr, screenrecording, screenshot, text, webcam resize. Then `omarchy apply`; expected the header `Apply commands:` followed by `No documented commands found. Try: omarchy commands --all` — a hidden group still routes.
-  * Renamed route (issue #7113): type `omarchy provision user --help; echo "exit=$?"`; expected `Usage: omarchy provision user`, `exit=0` — the binary `omarchy-provision-user` routes under its real name (hidden; visible in `omarchy commands --all`). Then `omarchy finalize; echo "exit=$?"` and `omarchy finalize user; echo "exit=$?"`.
-  ** Expected: `Unknown Omarchy command: omarchy finalize` (and `… omarchy finalize user`) with `exit=127` both times — correct, since the route was renamed; the defect is only that `finalize` is still advertised in the Groups table (and in `docs/file-layout.md`, `agents/skills/install-scripts.md` and the binary's own usage line). Quote the exact text. `commands --check` does not catch this.
-  * Type `omarchy commands | head -n 3; omarchy commands | grep -cE 'omarchy (state|done|upload log|version branch)'; omarchy commands --all | grep -cE 'omarchy (state|done|upload log|version branch)'`; expected `Omarchy commands:` with indented `omarchy … <summary>` rows, then `0`, then `4` — hidden commands only show under `--all`. Then `omarchy commands | grep -c provision` → `0` and `omarchy commands --all | grep -c provision` → 3 or more.
-  * Type `omarchy commands --check; echo "exit=$?"`; expected one line `Command metadata check passed (N commands)` with N ≥ 200 and `exit=0`. Then `omarchy commands --json | jq -r '.ok, (.commands|length)'` → `true` and a number ≥ 200.
-  ** `--json` is HEAD-only: plain help or an unknown-option message on 4.0.2 is version skew — record it with the version, do not fail the test.
-  * Unhappy path: type `omarchy commands --bogus; echo "exit=$?"`; expected `Unknown option for omarchy commands: --bogus`, the `omarchy commands` usage, nothing listed, `exit=2`.
-  * Press Super+F to un-fullscreen and Super+W to close the terminal; the desktop is as it started.
+  * Press Super+Return. A terminal opens.
+  * Press Super+F. The terminal fills the screen.
+  * Type `omarchy version` and press Return. Record the version.
+  * Type `omarchy | head -n 20` and press Return. The first line is `Omarchy command center`.
+  * Type `omarchy | sed -n '/^Groups:/,/^Discovery:/p' | sudo tee /dev/ttyS0 >/dev/null` and press Return. Read the serial log.
+  ** If sudo asks, type `prime` and press Return.
+  * Confirm the serial log shows alphabetical groups including `theme`, `update`, `crash`, and `agent`.
+  * Confirm the serial log excludes `show`, `upgrade`, `apply`, `provision`, `state`, `done`, `upload`, and `git`.
+  * Type `omarchy --help | grep -c '^  finalize '` and press Return. Record the count.
+  ** The intended count is `0`. A count of `1` is defect #7113. Record it and continue.
+  * Type `omarchy --help | grep '^  agent '` and press Return. Record the agent row text.
+  ** The intended text describes launching an agent. `AI coding agent usage data` is the stale string. Record it and continue.
+  * Type `omarchy capture` and press Return. The header is `Capture commands — Screenshots and screen recording:`.
+  * Type `omarchy apply` and press Return. The header is `Apply commands:`, and it says no documented commands were found.
+  * Type `omarchy provision user --help; echo "exit=$?"` and press Return. The output includes `Usage: omarchy provision user`, and the last line is `exit=0`.
+  * Type `omarchy finalize; echo "exit=$?"` and press Return. The output includes `Unknown Omarchy command: omarchy finalize`, and the last line is `exit=127`.
+  * Type `omarchy finalize user; echo "exit=$?"` and press Return. The output includes `Unknown Omarchy command: omarchy finalize user`, and the last line is `exit=127`.
+  * Type `omarchy commands | head -n 3` and press Return. The first line is `Omarchy commands:`.
+  * Type `omarchy commands | grep -cE 'omarchy (state|done|upload log|version branch)'` and press Return. The output is `0`.
+  * Type `omarchy commands --all | grep -cE 'omarchy (state|done|upload log|version branch)'` and press Return. The output is `4`.
+  * Type `omarchy commands | grep -c provision` and press Return. The output is `0`.
+  * Type `omarchy commands --all | grep -c provision` and press Return. The count is 3 or more.
+  * Type `omarchy commands --check; echo "exit=$?"` and press Return. The line says the metadata check passed, and the last line is `exit=0`.
+  * Type `omarchy commands --json | jq -r '.ok, (.commands|length)'` and press Return. The output is `true` and a number of at least 200.
+  ** If `--json` is unknown, record `omarchy version` and continue.
+  * Type `omarchy commands --bogus; echo "exit=$?"` and press Return. The output includes `Unknown option for omarchy commands: --bogus`, and the last line is `exit=2`.
+  * Press Super+F. The terminal leaves fullscreen.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The full `omarchy` output is ~90 lines (a ~70-row Groups table); fullscreen may fit it, otherwise only the head and the serial dump are readable — do not try to screenshot it whole.
-  * ./client-with-image allows you to get an image back of what you did, so can be useful for speeding things up
+  * The full `omarchy` listing is long. Use the head and the serial dump rather than one screenshot of the whole table.
+  * A listed `finalize` group and an `agent` row that says `AI coding agent usage data` are known defects. Quote them. They do not fail the other checks.
+  * Capture rows include qr, screenrecording, screenshot, text, and webcam resize.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the version, the `Omarchy command center` header with Common commands, the `Capture commands —` header, and the `Apply commands:` / `No documented commands found` pair
-  ** Serial dump of the alphabetical Groups block without `show`/`upgrade`/`apply`/`provision`; the `finalize` grep count and the `agent` row text quoted verbatim — a pass on these two rows means `0` and a launch-an-agent description; `1` and `AI coding agent usage data` are the known HEAD defects (#7113, stale string) to capture, not failures of the rest of the test
-  ** Screenshot of `omarchy provision user --help` with `exit=0`, the `omarchy finalize` results with `exit=127` quoted verbatim, the grep counts (`0`/`4` and `0`/≥3), the `--check` pass line, the jq values (or the recorded skew) and the `--bogus` refusal with `exit=2`
+  ** The version is recorded. `omarchy` starts with `Omarchy command center`.
+  ** The serial group table includes `theme`, `update`, `crash`, and `agent`, and excludes `show`, `upgrade`, `apply`, `provision`, `state`, `done`, `upload`, and `git`.
+  ** The `finalize` count and the `agent` row text are recorded. `0` and a launch description are the intended result. `1` and `AI coding agent usage data` are the known defects.
+  ** `omarchy capture` prints the capture header. `omarchy apply` says no documented commands were found.
+  ** `omarchy provision user --help` exits 0. Both `finalize` routes exit 127.
+  ** Hidden commands are absent from the default list and present with `--all`. `--check` passes. `--json` prints `true` and at least 200, or the version skew is recorded. `--bogus` exits 2.
   * If unsuccessful
-  ** the terminal output of the invocation that errored, hung, or listed a hidden command by default; `omarchy provision user --help` failing to route; serial dump of the full `omarchy commands --check` output (it names the offending binary)
+  ** A command errors or hangs, a hidden command appears in the default list, or `omarchy provision user --help` does not route.
 covers: bin/omarchy:29-97,414-424,509-547,549-784,1073-1091; bin/omarchy GROUP_DESCRIPTIONS (:29 agent, :45 finalize); bin/omarchy-provision-user:4,10; bin/omarchy-agent:3; bin/omarchy-version; docs/cli-router.md "Groups and the top-level listing", "Introspection"; test/cli:54-109; AGENTS.md §Command Naming; docs/file-layout.md:39-40; agents/skills/install-scripts.md:10; manual/14:7-58; 03-INTENDED-BEHAVIOUR #11, #25 (issue #7113)
 
 ### cli-help-never-executes   [VM-OK]
@@ -17396,32 +17414,47 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter; screenshot the bar and terminal colours for later comparison. Type `omarchy dev`; expected `Dev commands — Omarchy development tools:` with 11 rows (`omarchy dev link <path-to-checkout> [--no-reboot]`, `omarchy dev status`, …) and nothing executed. Then `omarchy theme --help | head -3` → `Theme commands — Theme management:`.
-  * Type `omarchy update --help`, then `omarchy update aur --help`, then `omarchy update bogus --help`; each prints help with `Usage:` and `Binary:` / `omarchy-update`. Wait 5 s and screenshot again — no sudo prompt, no `Ready to update?` box, no update banner or package list.
-  ** If a sudo prompt or progress bar appears, press Ctrl+C immediately and report it (an `update --help` that started an update was a real bug).
-  * Type `omarchy version --help`; expected `Usage:` / `omarchy version`, `Binary:` / `omarchy-version`, and `Related commands:` listing `version channel` and `version pkgs` but NOT the hidden `version branch`. Then `omarchy show --help`; expected the header exactly `Show commands:` (no em-dash — the group has no listing entry) with `omarchy show done [exit-code]` and `omarchy show logo`.
-  * Type `omarchy snapshot; echo "exit=$?"`; expected `Usage:` / `omarchy snapshot <create|restore>` and `exit=0`, no sudo prompt. Then `omarchy reminder; echo "exit=$?"` — its usage and `exit=0`, no toast. Then `omarchy theme set` with no name — the same kind of usage instead of an interactive picker, colours unchanged; `omarchy theme set --help | grep -i binary` → a `Binary:` line with `omarchy-theme-set`.
-  * Type `omarchy capture screenshot --help`; expected Usage, "Take a screenshot", Arguments, Examples, `Aliases` / `omarchy screenshot`, `Binary` / `omarchy-capture-screenshot`. Then `omarchy dev theme preview --help | grep -A1 Binary` and `omarchy dev theme-preview --help | grep -A1 Binary`; both print `omarchy-dev-theme-preview`.
-  * Type `omarchy menu -- --help` → the menu's own text `Usage: omarchy menu [verb] [route]` (the `--` handed the flag to the binary). Then `omarchy theme set --help --json | jq -r '.ok, .command.binary'` → `true` and `omarchy-theme-set`.
-  ** `--help --json` is HEAD-only: on 4.0.2 this may print plain help instead — record it with `omarchy version`.
-  * Unhappy path — a real argument does reach the binary: type `omarchy theme set nosuchtheme; echo "exit=$?"` → `Theme 'nosuchtheme' does not exist`, `exit=1`; then `omarchy theme set ../etc; echo "exit=$?"` → `Invalid theme name: ../etc`, `exit=1`. Colours unchanged.
-  * Close the terminal with Super+W; the desktop colours are unchanged from the first screenshot.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy dev` and press Return. The header is `Dev commands — Omarchy development tools:`, and nothing else runs.
+  * Type `omarchy theme --help | head -3` and press Return. The first line is `Theme commands — Theme management:`.
+  * Type `omarchy update --help` and press Return. Help is printed, and no update starts.
+  * Type `omarchy update aur --help` and press Return. Help names `omarchy-update`.
+  * Type `omarchy update bogus --help` and press Return. Help is printed.
+  * Wait 5 seconds. No sudo prompt and no update banner appear.
+  * Type `omarchy version --help` and press Return. Help names `omarchy-version` and does not list `version branch`.
+  * Type `omarchy show --help` and press Return. The header is exactly `Show commands:`.
+  * Type `omarchy snapshot; echo "exit=$?"` and press Return. Help names `omarchy snapshot <create|restore>`, and the last line is `exit=0`.
+  * Type `omarchy reminder; echo "exit=$?"` and press Return. Help is printed, the last line is `exit=0`, and no notification appears.
+  * Type `omarchy theme set` and press Return. Usage is printed, and no picker opens.
+  * Type `omarchy theme set --help | grep -i binary` and press Return. The line names `omarchy-theme-set`.
+  * Type `omarchy capture screenshot --help` and press Return. Help names `omarchy-capture-screenshot` and alias `omarchy screenshot`.
+  * Type `omarchy dev theme preview --help | grep -A1 Binary` and press Return. The binary is `omarchy-dev-theme-preview`.
+  * Type `omarchy dev theme-preview --help | grep -A1 Binary` and press Return. The binary is `omarchy-dev-theme-preview`.
+  * Type `omarchy menu -- --help` and press Return. The output includes `Usage: omarchy menu [verb] [route]`.
+  * Type `omarchy theme set --help --json | jq -r '.ok, .command.binary'` and press Return. The output is `true` and `omarchy-theme-set`.
+  ** If this prints plain help, record `omarchy version` and continue.
+  * Type `omarchy theme set nosuchtheme; echo "exit=$?"` and press Return. The output includes `Theme 'nosuchtheme' does not exist`, and the last line is `exit=1`.
+  * Type `omarchy theme set ../etc; echo "exit=$?"` and press Return. The output includes `Invalid theme name: ../etc`, and the last line is `exit=1`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Help output is short; one screenshot per command is enough.
-  * If a gum confirmation box ever appears, press Escape immediately and report it as the failure.
-  * Compare the first and last screenshots to prove the theme never changed.
+  * If a sudo prompt, progress bar, or confirmation appears, press Ctrl+C and report it. Help must not start the command.
+  * Compare the desktop at the end with the start. The theme must not have changed.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the help blocks with the quoted headers (`Dev commands —`, `Theme commands —`, `Show commands:`), the two 5-seconds-apart screenshots after the `update … --help` variants showing an idle prompt, the two identical `Binary:` lines, the `Aliases` line, the menu usage and the jq output (or the recorded skew)
-  ** Screenshot of the two theme refusals with `exit=1`; first and last screenshots with identical bar/terminal colours
+  ** `omarchy dev` and `omarchy theme --help` print their headers and run nothing else.
+  ** The three `update` help forms print help. Five seconds later there is no sudo prompt and no update banner.
+  ** `version --help` omits `version branch`. `show --help` uses the header `Show commands:`.
+  ** `snapshot` and `reminder` print usage and exit 0. `theme set` with no name prints usage. Both theme-preview spellings name `omarchy-dev-theme-preview`.
+  ** `omarchy menu -- --help` prints the menu usage. `--help --json` prints `true` and `omarchy-theme-set`, or the version skew is recorded.
+  ** `nosuchtheme` and `../etc` are refused and exit 1. The theme is unchanged.
   * If unsuccessful
-  ** the sudo prompt / update banner / snapshot output that proves a command ran, an `Unknown Omarchy command` for a valid spelling, or a changed theme; `cat /tmp/omarchy-update.log | head` if an update began
+  ** Help starts an update, a valid spelling is unknown, or the theme changes.
 covers: bin/omarchy:126-149,361-372,389-412,736-738,799-909,949-1047; bin/omarchy-theme-set:8,283-290; docs/cli-router.md "Dispatch" (help interception, required-args guard, `--`); docs/testing.md:16-17; test/cli:54-56,111-131,185-195,236-239,664-715
 
 ### cli-unknown-command-typos-and-aliases   [VM-OK]
@@ -17431,31 +17464,41 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy help; echo "exit=$?"`.
-  ** Expected: `Unknown Omarchy command: omarchy help`, `Run 'omarchy commands --all' to discover available commands.`, `exit=127`. Then `omarchy --help | head -1; omarchy -h | head -1; omarchy | head -1` → `Omarchy command center` three times — those are the help spellings. A command-center help for `omarchy help` would be a behaviour change to report, not the intended state.
-  * Type `omarchy ver; echo "exit=$?"`; expected the Unknown line, `Did you mean: omarchy version ?`, the Run line, `exit=127`. Then `omarchy themx list; echo "exit=$?"` → `Unknown Omarchy command: omarchy themx list`, the Run line, `exit=127`.
-  ** A `Did you mean: omarchy … ?` line appears only when a known route starts with the typed word; report whether one appeared for `themx`.
-  * Type `omarchy bogus-nothing; echo "exit=$?"`; expected the Unknown and Run lines, no `Did you mean`, `exit=127`.
-  * Type `omarchy dev benchmark; echo "exit=$?"`; expected a prefix listing `dev benchmark commands:` with `omarchy dev benchmark cli …` and `… theme switcher …`, `exit=0`, no benchmark run. Then `omarchy hw asus` → a listing headed `hw asus commands:` with rows such as `omarchy hw asus rog`; then `omarchy hw asus rog; echo "exit=$?"` → no output and `exit=1` (a quiet hardware predicate; this is not an ASUS machine).
-  * Type `omarchy dev bench; echo "exit=$?"`; expected `Unknown Omarchy command: omarchy dev bench`, `Did you mean: omarchy dev ?`, `exit=127`.
-  * Quirk: type `omarchy version chan; echo "exit=$?"`; `version` is a root binary, so the version string prints with `exit=0` — no error. Record it.
-  * Aliases and filename routes: type `omarchy screenshot --help` → help naming binary `omarchy-capture-screenshot`; then `omarchy share --help` and `omarchy menu share --help` → both name binary `omarchy-menu-share` (canonical and filename route).
-  * Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy help; echo "exit=$?"` and press Return. The output includes `Unknown Omarchy command: omarchy help`, and the last line is `exit=127`.
+  * Type `omarchy --help | head -1` and press Return. The line is `Omarchy command center`.
+  * Type `omarchy -h | head -1` and press Return. The line is `Omarchy command center`.
+  * Type `omarchy | head -1` and press Return. The line is `Omarchy command center`.
+  * Type `omarchy ver; echo "exit=$?"` and press Return. The output includes `Did you mean: omarchy version ?`, and the last line is `exit=127`.
+  * Type `omarchy themx list; echo "exit=$?"` and press Return. The output includes `Unknown Omarchy command: omarchy themx list`, and the last line is `exit=127`.
+  * Record whether a `Did you mean` line appeared for `themx`.
+  * Type `omarchy bogus-nothing; echo "exit=$?"` and press Return. The output includes the unknown-command line and no `Did you mean` line, and the last line is `exit=127`.
+  * Type `omarchy dev benchmark; echo "exit=$?"` and press Return. A prefix listing of benchmark commands appears, and the last line is `exit=0`.
+  * Type `omarchy hw asus` and press Return. A prefix listing headed `hw asus commands:` appears.
+  * Type `omarchy hw asus rog; echo "exit=$?"` and press Return. There is no command output, and the last line is `exit=1`.
+  * Type `omarchy dev bench; echo "exit=$?"` and press Return. The output includes `Did you mean: omarchy dev ?`, and the last line is `exit=127`.
+  * Type `omarchy version chan; echo "exit=$?"` and press Return. The version is printed, and the last line is `exit=0`.
+  * Type `omarchy screenshot --help` and press Return. Help names binary `omarchy-capture-screenshot`.
+  * Type `omarchy share --help` and press Return. Help names binary `omarchy-menu-share`.
+  * Type `omarchy menu share --help` and press Return. Help names binary `omarchy-menu-share`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * All messages go to stderr but appear in the same terminal; nothing scrolls. The `exit=` echo is the proof of the exit code.
-  * ./client-with-image allows you to get an image back of what you did, so can be useful for speeding things up
+  * `omarchy help` is not a command. `--help`, `-h`, and bare `omarchy` are the help spellings.
+  * `omarchy version chan` printing the version is a recorded quirk. The `hw asus rog` exit of 1 is a quiet hardware check, not a missing command.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of each result with its `exit=` line; `omarchy help` refused with `exit=127` beside the three `Omarchy command center` headers; the Unknown line with the discovery pointer and `exit=127` for `ver`, `themx list` and `bogus-nothing`
-  ** Screenshot of the `dev benchmark` and `hw asus` prefix listings with `exit=0`, the quiet predicate's `exit=1`, the `version chan` quirk, and the alias and both share routes naming one binary each
+  ** `omarchy help` exits 127. `--help`, `-h`, and bare `omarchy` each start with `Omarchy command center`.
+  ** `ver` suggests `omarchy version` and exits 127. `themx list` and `bogus-nothing` exit 127, and whether `themx` got a suggestion is recorded.
+  ** `dev benchmark` and `hw asus` print prefix listings and do not run the tool. `hw asus rog` exits 1 with no output. `dev bench` suggests `omarchy dev` and exits 127.
+  ** `version chan` prints the version and exits 0. Screenshot help names `omarchy-capture-screenshot`. Both share routes name `omarchy-menu-share`.
   * If unsuccessful
-  ** an invocation that hangs, runs something, or exits 0 where 127 is expected (other than the recorded quirks); `omarchy commands --all | grep share`
+  ** A typo hangs or runs a command, or an expected 127 exits 0 outside the recorded quirks.
 covers: bin/omarchy:824-841,934-947,1060-1070,1073-1090; docs/cli-router.md §Dispatch ("did you mean", prefix listing), §How a binary becomes routes (share, aliases); 03-INTENDED-BEHAVIOUR #12
 
 ### cli-alias-omarchy-up   [VM-OK]
@@ -17498,27 +17541,36 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy installed --help`; expected `Installed commands — Installed optional service checks:` and `No documented commands found. Try: omarchy commands --all`.
-  * Type `omarchy commands --all | grep -E 'omarchy (installed service|sudo docker|cmd terminal cwd)'`; expected four rows.
-  * Type `omarchy cmd --help`; expected rows `omarchy cmd missing` and `omarchy cmd present` but no `terminal cwd`.
-  * Type `omarchy state --help | grep -A1 Binary`; expected `omarchy-state` — hidden commands still route.
-  * Type `omarchy installed service tailscale; echo "exit=$?"` and `omarchy installed service dropbox; echo "exit=$?"`; expected `exit=1` twice (neither installed).
-  * Type `omarchy done check nothing-here; echo "exit=$?"`; expected no output and `exit=1` — the hidden binary really ran.
-  * Press Super+Space → Remove; there must be no `Dropbox`/`Tailscale` rows (the `Services` entry may be absent entirely — record). Press Escape until the menu closes, then Super+W on the terminal.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy installed --help` and press Return. The header names installed service checks, and it says to try `omarchy commands --all`.
+  * Type `omarchy commands --all | grep -E 'omarchy (installed service|sudo docker|cmd terminal cwd)'` and press Return. Four rows are printed.
+  * Type `omarchy cmd --help` and press Return. `cmd missing` and `cmd present` are listed, and `terminal cwd` is not.
+  * Type `omarchy state --help | grep -A1 Binary` and press Return. The binary is `omarchy-state`.
+  * Type `omarchy installed service tailscale; echo "exit=$?"` and press Return. The last line is `exit=1`.
+  * Type `omarchy installed service dropbox; echo "exit=$?"` and press Return. The last line is `exit=1`.
+  * Type `omarchy done check nothing-here; echo "exit=$?"` and press Return. There is no other output, and the last line is `exit=1`.
+  * Press Super+Space. The menu opens.
+  * Select Remove. Record whether Services, Dropbox, or Tailscale is listed.
+  * Press Escape. The menu closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Menu rows are hidden by `when:` shell conditions; an empty submenu may simply not be listed. Escape in the menu is two-stage (clear filter, then close).
-  * ./client-with-image allows you to get an image back of what you did, so can be useful for speeding things up
+  * An empty submenu may be omitted rather than shown empty. Escape clears a filter before it closes the menu.
+  * Hidden commands are absent from the default listing and from group help, but the typed route still runs.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the empty group help, the four `--all` rows, the `cmd` group help without `terminal cwd`, the routed `state --help`, the three `exit=1` lines and the Remove menu
+  ** Installed-group help says no documented commands were found and points at `--all`.
+  ** `--all` prints four rows for installed service, sudo docker, and cmd terminal cwd.
+  ** `cmd --help` lists missing and present, and not `terminal cwd`. `state --help` names `omarchy-state`.
+  ** Tailscale and Dropbox checks exit 1. `done check nothing-here` exits 1.
+  ** Remove does not list Dropbox or Tailscale. Whether Services itself is listed is recorded.
   * If unsuccessful
-  ** a hidden route in a default listing, or a hidden route failing to dispatch
+  ** A hidden route appears in a default listing, or a hidden route fails to run.
 covers: bin/omarchy:236-239,414-424,585-620,817-821,1032-1036; bin/omarchy-installed-service-dropbox; bin/omarchy-installed-service-tailscale; docs/cli-router.md "How a binary becomes routes"; test/cli:196-220
 
 ### agent-skill-command-contract   [VM-OK]
@@ -17528,36 +17580,55 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `ls -l ~/.claude/skills ~/.codex/skills ~/.agents/skills 2>&1`.
-  ** Each existing directory shows `omarchy ->` and `diagnose-crash ->` symlinks into `/usr/share/omarchy/default/agents/skills/` (a directory missing on 4.0.2 is recorded, not failed).
-  * Type `head -3 ~/.claude/skills/omarchy/SKILL.md; omarchy commands | head -5` → `name: omarchy` front matter and a command list.
-  * Type the loop below on one line, then answer the sudo prompt with `prime`:
-    `for c in "theme set" "theme list" "theme current" "theme bg next" "theme install" "refresh shell" "refresh hyprland" "refresh hyprsunset" "refresh config" "restart shell" "restart terminal" "restart hyprsunset" "toggle nightlight" "bar move" "plugin clone" "plugin add" "plugin remove" "hook install" "install" "launch browser" "capture screenshot" "capture text" "capture webcam resize" "screenshot" "screenrecord" "reminder" "pkg add" "pkg aur add" "setup security fingerprint" "update" "version" "debug" "system lock" "system shutdown" "system reboot" "reinstall" "menu keybindings" "font list" "font current" "font set" "share clipboard" "share file" "tailscale send" "tailscale receive" "transcode" "default agent" "agent prompt" "agent crash" "crash mute" "toggle crash-capture" "install docker dbs"; do printf '%-28s ' "$c"; omarchy $c --help 2>&1 | grep -m1 -E '^(Usage|Unknown Omarchy|Binary)'; done 2>&1 | sudo tee /dev/ttyS0 >/dev/null`
-  ** Read the serial log: one line per command, each showing `Usage` (or `Binary`). Any line containing `Unknown Omarchy command` is skill drift — quote it in the report.
-  * Type `for c in omarchy-theme-set omarchy-refresh-shell omarchy-toggle-nightlight omarchy-reminder omarchy-capture-screenshot omarchy-crash-mute omarchy-debug; do command -v $c >/dev/null && echo ok $c || echo MISSING $c; done` → all `ok`.
-  ** A MISSING entry names a command the skill documents but 4.0.2 lacks; report it rather than fail everything.
-  * Spot-check that the skill's example strings run harmlessly: type `omarchy theme list | head -5`, `omarchy font current`, `omarchy version; omarchy version channel`, `omarchy menu keybindings --print | grep 'SUPER + F'` → each prints (themes, a font name, `4.0.2` — the installed package version, not `dev (…)` and not `4.0.0.alpha` — and `stable`, the Super+F binding).
-  * Type `sudo -k; omarchy debug --no-sudo --print 2>&1 | tail -5; ls -la /tmp/omarchy-debug.log` → report lines print with NO `[sudo] password` prompt; the log file exists with a non-zero size. Then `head -30 /tmp/omarchy-debug.log | sudo tee /dev/ttyS0 >/dev/null` (password `prime`) and read the header (`Date:`, `Hostname:`, `Omarchy Package:`) with get-serial. Then `omarchy-debug --no-sudo --print | head -3` → also works (the hyphenated name the GitHub bug template asks for).
-  ** Plain `omarchy debug` → a `[sudo] password for prime:` prompt appears; press Ctrl+C — the shell prompt returns and nothing was uploaded. The interactive chooser is covered by `debug-report-print-view-save-no-upload`.
-  * Type `omarchy reminder 1 "Skill test"`; wait ~60 s screenshotting every 5 s → a notification "Skill test" appears. Type `omarchy reminder clear`.
-  * Unhappy path: type `omarchy debug --bogus-flag; echo "exit=$?"` → `Unknown option: --bogus-flag` with the usage line and a non-zero exit.
-  * Close the terminal with Super+W; the desktop is as before.
+  * Press Super+Return. A terminal opens.
+  * Type `ls -l ~/.claude/skills ~/.codex/skills ~/.agents/skills 2>&1` and press Return. Record which directories exist.
+  * Confirm each existing directory links `omarchy` and `diagnose-crash` into `/usr/share/omarchy/default/agents/skills/`.
+  ** A directory missing on this build is recorded, not failed.
+  * Type `head -3 ~/.claude/skills/omarchy/SKILL.md` and press Return. The front matter includes `name: omarchy`.
+  * Type `omarchy commands | head -5` and press Return. A command list is printed.
+  * Type `for c in "theme set" "theme list" "theme current" "theme bg next" "theme install" "refresh shell" "refresh hyprland" "refresh hyprsunset" "refresh config" "restart shell" "restart terminal" "restart hyprsunset" "toggle nightlight" "bar move" "plugin clone" "plugin add" "plugin remove" "hook install" "install" "launch browser" "capture screenshot" "capture text" "capture webcam resize" "screenshot" "screenrecord" "reminder" "pkg add" "pkg aur add" "setup security fingerprint" "update" "version" "debug" "system lock" "system shutdown" "system reboot" "reinstall" "menu keybindings" "font list" "font current" "font set" "share clipboard" "share file" "tailscale send" "tailscale receive" "transcode" "default agent" "agent prompt" "agent crash" "crash mute" "toggle crash-capture" "install docker dbs"; do printf '%-28s ' "$c"; omarchy $c --help 2>&1 | grep -m1 -E '^(Usage|Unknown Omarchy|Binary)'; done 2>&1 | sudo tee /dev/ttyS0 >/dev/null` and press Return.
+  ** If sudo asks, type `prime` and press Return.
+  * Read the serial log. Each command has a Usage or Binary line.
+  * Quote any serial line that contains `Unknown Omarchy command`.
+  * Type `for c in omarchy-theme-set omarchy-refresh-shell omarchy-toggle-nightlight omarchy-reminder omarchy-capture-screenshot omarchy-crash-mute omarchy-debug; do command -v $c >/dev/null && echo ok $c || echo MISSING $c; done` and press Return. Record any `MISSING` line.
+  * Type `omarchy theme list | head -5` and press Return. Theme names are printed.
+  * Type `omarchy font current` and press Return. A font name is printed.
+  * Type `omarchy version; omarchy version channel` and press Return. A package version and `stable` are printed.
+  * Type `omarchy menu keybindings --print | grep 'SUPER + F'` and press Return. The Super+F binding is printed.
+  * Type `sudo -k` and press Return. The prompt returns.
+  * Type `omarchy debug --no-sudo --print 2>&1 | tail -5` and press Return. Report lines print, and no password prompt appears.
+  * Type `ls -la /tmp/omarchy-debug.log` and press Return. The log exists and its size is not zero.
+  * Type `head -30 /tmp/omarchy-debug.log | sudo tee /dev/ttyS0 >/dev/null` and press Return. Read the serial log.
+  ** If sudo asks, type `prime` and press Return.
+  * Confirm the serial log includes `Date:`, `Hostname:`, and `Omarchy Package:`.
+  * Type `omarchy-debug --no-sudo --print | head -3` and press Return. Report lines print.
+  * Type `omarchy debug` and press Return. A password prompt appears.
+  * Press Ctrl+C. The prompt returns, and nothing is uploaded.
+  * Type `omarchy reminder 1 "Skill test"` and press Return. The prompt returns.
+  * Wait until a notification reads `Skill test`. Check about every 5 seconds for up to a minute.
+  * Type `omarchy reminder clear` and press Return. The prompt returns.
+  * Type `omarchy debug --bogus-flag; echo "exit=$?"` and press Return. The output includes `Unknown option: --bogus-flag`, and the exit is non-zero.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Type the loop exactly; a mistyped quote makes bash wait for more input — press Ctrl+C and retype.
-  * `grep -m1` keeps one line per command; a command that prints nothing matching shows as a bare name — run that one by hand and report.
+  * Type the help loop as one line. If the shell waits for more input, press Ctrl+C and retype it.
+  * A bare name in the serial log means that command printed no Usage or Binary line. Run that one by hand and record it.
+  * A `MISSING` binary is recorded as absent on this build. It does not fail the other checks.
+  * The interactive debug chooser is a different test. Ctrl+C at the password prompt is enough here.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the symlink listings and the SKILL head with the command list
-  ** Serial dump with one Usage/Binary fragment per command and zero `Unknown Omarchy command` lines (or each drift line quoted); the `ok` table
-  ** Screenshots of the spot-checks including the `4.0.2` / `stable` version lines, the debug tail with the log file size and no prompt, the serial header of the log, the hyphenated `omarchy-debug` head, the sudo prompt from plain `omarchy debug` before Ctrl+C, the reminder notification, and the bogus-flag error
+  ** Existing skill directories link `omarchy` and `diagnose-crash` into the shipped skills. A missing directory is recorded. The skill front matter names `omarchy`.
+  ** The serial help loop has a Usage or Binary line for each command. Any `Unknown Omarchy command` line is quoted.
+  ** The named binaries print `ok`, or a `MISSING` line is recorded. Theme list, the current font, the package version, `stable`, and the Super+F binding are printed.
+  ** `omarchy debug --no-sudo --print` prints a report with no password prompt, and the log has a Date, Hostname, and Omarchy Package header. The hyphenated `omarchy-debug` also prints.
+  ** Plain `omarchy debug` asks for a password, and Ctrl+C returns without an upload. The reminder notification appears and is cleared. `--bogus-flag` is rejected.
   * If unsuccessful
-  ** Serial dump; screenshot of the failing command run by hand; broken symlinks, MISSING commands, a sudo prompt during `--no-sudo` (full stderr of `omarchy debug --no-sudo --print`), or no reminder notification
+  ** A symlink is broken, `--no-sudo` asks for a password, or the reminder never appears.
 covers: default/agents/skills/omarchy/SKILL.md §Command Groups, §System Commands, §Troubleshooting, §Example Requests; default/agents/skills/omarchy/{hyprland,plugins,theming,hooks,capture,contributing}.md; default/agents/skills/diagnose-crash/*.md (reporting.md §Filing a new issue); docs/file-layout.md (skill symlinks); docs/update-process.md §Channels and versions; .github/ISSUE_TEMPLATE/bug.yml; test/shell.d/default-agent-test.sh
 
 ### state-done-markers-and-name-guards   [VM-OK]

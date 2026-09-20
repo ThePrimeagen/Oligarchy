@@ -371,12 +371,12 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `update-hook-post-update-invitations-once`
 - [x] `preinstalls-remove-decline-and-confirm`
 - [x] `preinstalls-restore-after-remove`
-- [ ] `cli-discover-commands-and-groups`
-- [ ] `cli-help-never-executes`
-- [ ] `cli-unknown-command-typos-and-aliases`
+- [x] `cli-discover-commands-and-groups`
+- [x] `cli-help-never-executes`
+- [x] `cli-unknown-command-typos-and-aliases`
 - [x] `cli-alias-omarchy-up`
-- [ ] `cli-hidden-commands-route-but-stay-unlisted`
-- [ ] `agent-skill-command-contract`
+- [x] `cli-hidden-commands-route-but-stay-unlisted`
+- [x] `agent-skill-command-contract`
 - [ ] `state-done-markers-and-name-guards`
 - [ ] `hooks-install-run-theme-set-and-reject`
 - [ ] `debug-report-print-view-save-no-upload`
