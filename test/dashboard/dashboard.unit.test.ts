@@ -209,4 +209,40 @@ describe("definition pages unhappy path", () => {
     expect(response.status).toBe(500);
     expect(await response.text()).toBe("<p>error: internal error</p>");
   });
+
+  it("keeps /definitions/histories a fragment, not a definition named histories", async () => {
+    const response = await app.request("/definitions/histories?name=lock-screen", undefined, env);
+    expect(response.status).toBe(500);
+    expect(await response.text()).toBe("<p>error: internal error</p>");
+  });
+
+  it("does not open a definition page for a histories refresh that names nothing", async () => {
+    const response = await app.request("/definitions/histories", undefined, env);
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("");
+  });
+});
+
+describe("test diagnostic page unhappy path", () => {
+  it("does not look up an id that is not a result id", async () => {
+    const response = await app.request("/tests/not-a-uuid", undefined, env);
+    expect(response.status).toBe(404);
+    const html = await response.text();
+    expect(html).toContain("<p>No test result.</p>");
+    expect(html).not.toContain("postgres://");
+    expect(html).not.toContain("not-a-uuid");
+  });
+
+  it("says the test result is unavailable when the database cannot be read", async () => {
+    const response = await app.request(
+      "/tests/11111111-1111-4111-8111-111111111111",
+      undefined,
+      env,
+    );
+    expect(response.status).toBe(500);
+    const html = await response.text();
+    expect(html).toContain("<p>error: The test result is unavailable.</p>");
+    expect(html).toContain('href="/definitions" aria-current="page"');
+    expect(html).not.toContain("postgres://");
+  });
 });

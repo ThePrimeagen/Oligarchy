@@ -1,6 +1,11 @@
 import type { FC } from "hono/jsx";
 import { OperatorPage } from "./page.tsx";
-import type { AutomationJob, DefinitionVersions } from "./query.ts";
+import type {
+  AutomationJob,
+  DefinitionHistory,
+  DefinitionPill,
+  DefinitionVersions,
+} from "./query.ts";
 import { since } from "./servers.tsx";
 import { followHref, linearHref } from "./ticket.ts";
 
@@ -193,10 +198,94 @@ const DefinitionSearch: FC = () => (
   </search>
 );
 
+const pillTime = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  timeZone: "UTC",
+  timeZoneName: "short",
+});
+
+// One result in the strip. The link is the diagnostic page. The tip is the hover: the name, the
+// status, when it ran, and the model when one was recorded. A failure's reason is the red line.
+const HistoryPill: FC<{ name: string; pill: DefinitionPill }> = ({ name, pill }) => {
+  const at = new Date(pill.at);
+  return (
+    <a
+      class={`definition-blip definition-blip--${pill.status}`}
+      href={`/tests/${pill.id}`}
+      aria-label={`${name} ${pill.status}`}
+    >
+      <span class="definition-tip" aria-hidden="true">
+        <span class="definition-tip__name">{name}</span>
+        <span class="definition-tip__status">{pill.status}</span>
+        <time datetime={at.toISOString()}>{pillTime.format(at)}</time>
+        {pill.model === null ? null : <span class="definition-tip__model">{pill.model}</span>}
+        {pill.status === "failed" && pill.reason !== null ? (
+          <span class="definition-tip__reason">{pill.reason}</span>
+        ) : null}
+      </span>
+    </a>
+  );
+};
+
+// The rate is passes out of that name's passes and fails. Running is a pill and not a count, so a
+// name that has only ever been running has pills and no "0 out of 0". The wait is hidden until the
+// minute refresh marks the block loading. Every name has a block, even with nothing in it yet, so
+// that refresh has somewhere to put the first pill.
+const DefinitionHistoryView: FC<{
+  name: string;
+  history: DefinitionHistory | undefined;
+}> = ({ name, history }) => (
+  <div class="definition-history" data-name={name}>
+    {history !== undefined && history.total > 0 ? (
+      <span class="definition-rate">
+        {history.passed} out of {history.total}
+      </span>
+    ) : null}
+    {history !== undefined && history.recent.length > 0 ? (
+      <span class="definition-blips">
+        {history.recent.map((item) => (
+          <HistoryPill name={name} pill={item} />
+        ))}
+      </span>
+    ) : null}
+    <span class="definition-history__wait" aria-hidden="true">
+      <span class="definition-history__spin"></span>
+      {"Loading"}
+    </span>
+  </div>
+);
+
+// What /definitions/histories swaps in: one block per requested name, in that order, including a
+// name that has nothing to draw so a strip can be cleared.
+export const DefinitionHistories: FC<{
+  names: ReadonlyArray<string>;
+  histories: ReadonlyArray<DefinitionHistory>;
+}> = ({ names, histories }) => {
+  const byName = new Map(histories.map((history) => [history.name, history]));
+  return (
+    <>
+      {names.map((name) => (
+        <DefinitionHistoryView name={name} history={byName.get(name)} />
+      ))}
+    </>
+  );
+};
+
 // Every name is on the page. Definitions do not change while it is open, so the search hides
 // rows in the browser. The miss starts hidden; the script shows it when nothing matches.
-const DefinitionList: FC<{ groups: ReadonlyArray<DefinitionVersions> }> = ({ groups }) =>
-  groups.length === 0 ? (
+// The pills are the last twenty-five passes, fails and runs, oldest on the left: green a pass,
+// red a fail, yellow one that is still running. Pending is not drawn. public/dashboard.js rereads
+// the ones on screen once a minute. The running list above is the part that polls by itself.
+const DefinitionList: FC<{
+  groups: ReadonlyArray<DefinitionVersions>;
+  histories: ReadonlyArray<DefinitionHistory>;
+}> = ({ groups, histories }) => {
+  const byName = new Map(histories.map((history) => [history.name, history]));
+  return groups.length === 0 ? (
     <p>no definitions</p>
   ) : (
     <>
@@ -204,6 +293,7 @@ const DefinitionList: FC<{ groups: ReadonlyArray<DefinitionVersions> }> = ({ gro
         {groups.map((group) => (
           <li>
             <a href={definitionHref(group.name)}>{group.name}</a>
+            <DefinitionHistoryView name={group.name} history={byName.get(group.name)} />
           </li>
         ))}
       </ul>
@@ -212,6 +302,7 @@ const DefinitionList: FC<{ groups: ReadonlyArray<DefinitionVersions> }> = ({ gro
       </p>
     </>
   );
+};
 
 // The index is a search and one link per name. A name's own page is its newest wording as a
 // form, then the current wording and the one before it. Running jobs sit above that body.
@@ -225,7 +316,8 @@ export const DefinitionsPage: FC<{
   notice: EditNotice | undefined;
   error: string | undefined;
   running: ReadonlyArray<AutomationJob> | null;
-}> = ({ groups, name, selected, notice, error, running }) => {
+  histories: ReadonlyArray<DefinitionHistory>;
+}> = ({ groups, name, selected, notice, error, running, histories }) => {
   const index = error === undefined && name === undefined && groups !== null;
   return (
     <OperatorPage title="oligarchy definitions" page="definitions" scriptSrc="/dashboard.js">
@@ -233,7 +325,7 @@ export const DefinitionsPage: FC<{
       {error === undefined ? null : <p>error: {error}</p>}
       {index ? <DefinitionSearch /> : null}
       {running === null ? null : <RunningTests jobs={running} definition={name} />}
-      {index ? <DefinitionList groups={groups} /> : null}
+      {index ? <DefinitionList groups={groups} histories={histories} /> : null}
       {error === undefined && name !== undefined && selected === undefined ? (
         <p>
           No test definition named <code>{name}</code>.

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   FOLLOW_LIMIT,
   actionName,
+  definitionHistories,
   definitionStats,
   durationChart,
   followEvents,
@@ -63,6 +64,142 @@ describe("definitionStats happy path", () => {
         failed: 1,
         other: 0,
         models: ["composer-2.5", "grok-4.6"],
+      },
+    ]);
+  });
+});
+
+const historyRow = (
+  name: string,
+  status: TestResultOutcome["status"],
+  at: number,
+  extra: { readonly reason?: string | null; readonly model?: string | null } = {},
+) => ({
+  name,
+  id: `${name}:${at}`,
+  status,
+  at,
+  reason: extra.reason ?? null,
+  model: extra.model ?? null,
+});
+
+const shown = (
+  name: string,
+  status: "passed" | "failed" | "running",
+  at: number,
+  extra: { readonly reason?: string | null; readonly model?: string | null } = {},
+) => ({
+  id: `${name}:${at}`,
+  status,
+  at,
+  reason: extra.reason ?? null,
+  model: extra.model ?? null,
+});
+
+describe("definitionHistories happy path", () => {
+  it("counts passes out of passes and fails, oldest of the run first", () => {
+    const rows = [historyRow("lock-screen", "failed", 17), historyRow("lock-screen", "failed", 16)];
+    for (let at = 15; at >= 1; at -= 1) {
+      rows.push(historyRow("lock-screen", "passed", at));
+    }
+    expect(definitionHistories(rows)).toEqual([
+      {
+        name: "lock-screen",
+        passed: 15,
+        total: 17,
+        recent: [
+          ...Array.from({ length: 15 }, (_, index) => shown("lock-screen", "passed", index + 1)),
+          shown("lock-screen", "failed", 16),
+          shown("lock-screen", "failed", 17),
+        ],
+      },
+    ]);
+  });
+
+  it("keeps each definition's rate and puts only its newest twenty-five on the strip", () => {
+    const rows = [];
+    for (let at = 1; at <= 5; at += 1) {
+      rows.push(historyRow("lock-screen", "failed", at));
+    }
+    for (let at = 6; at <= 30; at += 1) {
+      rows.push(historyRow("lock-screen", "passed", at));
+    }
+    rows.push(historyRow("install", "passed", 1), historyRow("install", "failed", 2));
+    expect(definitionHistories(rows)).toEqual([
+      {
+        name: "install",
+        passed: 1,
+        total: 2,
+        recent: [shown("install", "passed", 1), shown("install", "failed", 2)],
+      },
+      {
+        name: "lock-screen",
+        passed: 25,
+        total: 30,
+        recent: Array.from({ length: 25 }, (_, index) => shown("lock-screen", "passed", index + 6)),
+      },
+    ]);
+  });
+});
+
+describe("definitionHistories unhappy path", () => {
+  it("returns nothing when there are no results", () => {
+    expect(definitionHistories([])).toEqual([]);
+  });
+
+  it("keeps a running result on the strip and out of the rate, and drops pending, aborted and timed out", () => {
+    expect(
+      definitionHistories([
+        historyRow("lock-screen", "pending", 1),
+        historyRow("lock-screen", "running", 2, { model: "grok-4.6" }),
+        historyRow("lock-screen", "aborted", 3),
+        historyRow("lock-screen", "timed_out", 4),
+        historyRow("lock-screen", "passed", 5),
+        historyRow("lock-screen", "failed", 6, { reason: "the screen stayed unlocked" }),
+        historyRow("install", "timed_out", 1),
+        historyRow("install", "aborted", 2),
+      ]),
+    ).toEqual([
+      {
+        name: "lock-screen",
+        passed: 1,
+        total: 2,
+        recent: [
+          shown("lock-screen", "running", 2, { model: "grok-4.6" }),
+          shown("lock-screen", "passed", 5),
+          shown("lock-screen", "failed", 6, { reason: "the screen stayed unlocked" }),
+        ],
+      },
+    ]);
+  });
+
+  it("still lists a definition that is only running, and does not call that zero out of zero", () => {
+    expect(
+      definitionHistories([
+        historyRow("lock-screen", "running", 4, { model: "grok-4.6" }),
+        historyRow("lock-screen", "pending", 5),
+      ]),
+    ).toEqual([
+      {
+        name: "lock-screen",
+        passed: 0,
+        total: 0,
+        recent: [shown("lock-screen", "running", 4, { model: "grok-4.6" })],
+      },
+    ]);
+  });
+
+  it("drops a running result that falls outside the newest twenty-five and does not count it", () => {
+    const rows = [historyRow("lock-screen", "running", 1)];
+    for (let at = 2; at <= 26; at += 1) {
+      rows.push(historyRow("lock-screen", "passed", at));
+    }
+    expect(definitionHistories(rows)).toEqual([
+      {
+        name: "lock-screen",
+        passed: 25,
+        total: 25,
+        recent: Array.from({ length: 25 }, (_, index) => shown("lock-screen", "passed", index + 2)),
       },
     ]);
   });

@@ -1,4 +1,16 @@
-import { and, count, desc, eq, getTableColumns, inArray, like, lt, or, sql } from "drizzle-orm";
+import {
+  and,
+  count,
+  desc,
+  eq,
+  getTableColumns,
+  inArray,
+  like,
+  lt,
+  lte,
+  or,
+  sql,
+} from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Client } from "pg";
 import {
@@ -191,6 +203,77 @@ async function withDatabase<T>(
   } finally {
     await client.end();
   }
+}
+
+// Twenty-five is the strip beside a name. The counts are every pass and fail of that name, not
+// just the pills: 15 out of 17 is fifteen passes and two fails. A running result is a pill and
+// not a verdict, so it is on the strip and out of that number.
+const DEFINITION_RECENT = 25;
+
+export type DefinitionPill = {
+  readonly id: string;
+  readonly status: "passed" | "failed" | "running";
+  readonly at: number;
+  readonly reason: string | null;
+  readonly model: string | null;
+};
+
+export type DefinitionHistory = {
+  readonly name: string;
+  readonly passed: number;
+  readonly total: number;
+  readonly recent: ReadonlyArray<DefinitionPill>;
+};
+
+// Passes out of passes and fails, one row per name. Pending, aborted and timed out are not drawn.
+// recent is the newest twenty-five of the pills, oldest first, so the rightmost pill is the latest.
+// `at` is when the result finished, or when it was created if it is still running.
+export function definitionHistories(
+  rows: ReadonlyArray<{
+    readonly name: string;
+    readonly id: string;
+    readonly status: (typeof testResults.$inferSelect)["status"];
+    readonly at: number;
+    readonly reason: string | null;
+    readonly model: string | null;
+  }>,
+): DefinitionHistory[] {
+  const byName = new Map<string, DefinitionPill[]>();
+  for (const row of rows) {
+    if (row.status !== "passed" && row.status !== "failed" && row.status !== "running") {
+      continue;
+    }
+    const current = byName.get(row.name) ?? [];
+    current.push({
+      id: row.id,
+      status: row.status,
+      at: row.at,
+      reason: row.reason,
+      model: row.model,
+    });
+    byName.set(row.name, current);
+  }
+  return [...byName.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([name, group]) => {
+      group.sort((left, right) => left.at - right.at);
+      let passed = 0;
+      let total = 0;
+      for (const row of group) {
+        if (row.status === "passed") {
+          passed += 1;
+          total += 1;
+        } else if (row.status === "failed") {
+          total += 1;
+        }
+      }
+      return {
+        name,
+        passed,
+        total,
+        recent: group.slice(-DEFINITION_RECENT),
+      };
+    });
 }
 
 export function definitionStats(rows: ReadonlyArray<Session>): DefinitionStat[] {
@@ -422,6 +505,168 @@ export function getImage(connectionString: string, id: string): Promise<Buffer |
       .from(images)
       .where(eq(images.id, id));
     return row?.data;
+  });
+}
+
+// Every pass, fail and running result still inside retention, grouped by the definition's name so
+// an older wording counts toward the same line. Ordered by when the result finished, or by when it
+// was created if it has not finished, so a tie stays in creation order. `names` limits the read to
+// the rows on screen. The clock keeps a minute's refresh out of Hyperdrive's query cache.
+export function listDefinitionHistories(
+  connectionString: string,
+  names?: ReadonlyArray<string>,
+): Promise<DefinitionHistory[]> {
+  if (names !== undefined && names.length === 0) {
+    return Promise.resolve([]);
+  }
+  return withDatabase(connectionString, async (db) => {
+    const rows = await db
+      .select({
+        name: testDefinitions.name,
+        id: testResults.id,
+        status: testResults.status,
+        reason: testResults.reason,
+        model: testResults.model,
+        at: sql<Date>`coalesce(${testResults.finishedAt}, ${testResults.createdAt})`.mapWith(
+          testResults.createdAt,
+        ),
+        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(testResults.createdAt),
+      })
+      .from(testResults)
+      .innerJoin(testDefinitions, eq(testDefinitions.id, testResults.definitionId))
+      .where(
+        names === undefined
+          ? inArray(testResults.status, ["passed", "failed", "running"])
+          : and(
+              inArray(testResults.status, ["passed", "failed", "running"]),
+              inArray(testDefinitions.name, [...names]),
+            ),
+      )
+      .orderBy(
+        testDefinitions.name,
+        sql`coalesce(${testResults.finishedAt}, ${testResults.createdAt})`,
+        testResults.createdAt,
+      );
+    return definitionHistories(
+      rows.map((row) => ({
+        name: row.name,
+        id: row.id,
+        status: row.status,
+        at: row.at.getTime(),
+        reason: row.reason,
+        model: row.model,
+      })),
+    );
+  });
+}
+
+// One result as the diagnostic page dumps it. version is that wording's place among the name's
+// rows by id, the same order the definitions page numbers. Screenshots and logs are empty together
+// when the result never opened a session. The clock keeps the page out of Hyperdrive's cache.
+export type TestLogLine = {
+  readonly level: (typeof logs.$inferSelect)["level"];
+  readonly text: string;
+  readonly at: Date;
+};
+
+export type TestDump = {
+  readonly id: string;
+  readonly name: string;
+  readonly version: number;
+  readonly description: string;
+  readonly instruction: string;
+  readonly proof: string;
+  readonly status: (typeof testResults.$inferSelect)["status"];
+  readonly reason: string | null;
+  readonly model: string | null;
+  readonly ticket: string | null;
+  readonly sessionId: string | null;
+  readonly at: Date;
+  readonly screenshots: ReadonlyArray<string>;
+  readonly logs: ReadonlyArray<TestLogLine>;
+};
+
+export function readTestDump(connectionString: string, id: string): Promise<TestDump | undefined> {
+  return withDatabase(connectionString, async (db) => {
+    const [row] = await db
+      .select({
+        id: testResults.id,
+        definitionId: testDefinitions.id,
+        name: testDefinitions.name,
+        description: testDefinitions.description,
+        instruction: testDefinitions.instruction,
+        proof: testDefinitions.proof,
+        status: testResults.status,
+        reason: testResults.reason,
+        model: testResults.model,
+        ticket: testResults.linearId,
+        sessionId: testResults.sessionId,
+        at: sql<Date>`coalesce(${testResults.finishedAt}, ${testResults.createdAt})`.mapWith(
+          testResults.createdAt,
+        ),
+        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(testResults.createdAt),
+      })
+      .from(testResults)
+      .innerJoin(testDefinitions, eq(testDefinitions.id, testResults.definitionId))
+      .where(eq(testResults.id, id));
+    if (row === undefined) {
+      return undefined;
+    }
+    const [versionRow] = await db
+      .select({ version: count().mapWith(Number) })
+      .from(testDefinitions)
+      .where(and(eq(testDefinitions.name, row.name), lte(testDefinitions.id, row.definitionId)));
+    const version = versionRow?.version ?? 1;
+    if (row.sessionId === null) {
+      return {
+        id: row.id,
+        name: row.name,
+        version,
+        description: row.description,
+        instruction: row.instruction,
+        proof: row.proof,
+        status: row.status,
+        reason: row.reason,
+        model: row.model,
+        ticket: row.ticket,
+        sessionId: null,
+        at: row.at,
+        screenshots: [],
+        logs: [],
+      };
+    }
+    const sessionId = row.sessionId;
+    const shots = await db
+      .select({ id: images.id })
+      .from(images)
+      .innerJoin(actions, eq(actions.id, images.actionId))
+      .where(eq(actions.sessionId, sessionId))
+      .orderBy(actions.id);
+    const logRows = await db
+      .select({
+        level: logs.level,
+        text: logs.text,
+        at: logs.createdAt,
+      })
+      .from(logs)
+      .where(eq(logs.location, sessionId))
+      .orderBy(logs.id);
+    return {
+      id: row.id,
+      name: row.name,
+      version,
+      description: row.description,
+      instruction: row.instruction,
+      proof: row.proof,
+      status: row.status,
+      reason: row.reason,
+      model: row.model,
+      ticket: row.ticket,
+      sessionId,
+      at: row.at,
+      screenshots: shots.map((shot) => shot.id),
+      logs: logRows,
+    };
   });
 }
 

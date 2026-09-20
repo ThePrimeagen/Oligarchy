@@ -361,6 +361,20 @@ const section = (html: string, name: string): string => {
 // that follow it, up to the next wording or the section's end.
 type Wording = { readonly label: string; readonly body: string };
 
+// One name's row in the definitions index, rate and pills included. The running strip links the
+// same names, so this is the list and not that strip.
+const definitionItem = (html: string, name: string): string => {
+  const list = /<ul class="definition-list">([\s\S]*?)<\/ul>/.exec(html)?.[1] ?? "";
+  const at = list.indexOf(`href="/definitions/${name}"`);
+  if (at < 0) {
+    return "";
+  }
+  return list.slice(list.lastIndexOf("<li>", at), list.indexOf("</li>", at) + "</li>".length);
+};
+
+const blipStatuses = (item: string): ReadonlyArray<string> =>
+  [...item.matchAll(/definition-blip--(passed|failed|running)/g)].map((match) => match[1] ?? "");
+
 // The running strip at the top of the definitions page, up to its own end. It has no nested
 // section, so the first close is the close.
 const runningSection = (html: string): string =>
@@ -453,6 +467,7 @@ const seedResults = async (
   outcomes: ReadonlyArray<{
     readonly status: (typeof testResults.$inferInsert)["status"];
     readonly model: string;
+    readonly reason?: string;
     readonly createdAt?: Date;
     readonly finishedAt?: Date;
   }>,
@@ -478,6 +493,7 @@ const seedResults = async (
         },
         outcome.createdAt === undefined ? undefined : { createdAt: outcome.createdAt },
         outcome.finishedAt === undefined ? undefined : { finishedAt: outcome.finishedAt },
+        outcome.reason === undefined ? undefined : { reason: outcome.reason },
       ),
     ),
   );
@@ -497,6 +513,96 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
     expect(html).not.toContain("dashboard.css");
     // The suite is not a button on this page yet. The heading is where it would go.
     expect(html).not.toContain("/create-test-suite-run");
+  });
+
+  it("shows passes out of a definition's runs, across its wordings, beside the name", async () => {
+    const at = (minute: number): Date => new Date(Date.UTC(2026, 8, 1, 0, minute));
+    await seed(dbUrl, async (db) => {
+      const [older] = await db
+        .insert(testDefinitions)
+        .values({ name: "rate-mixed", description: "d", instruction: "older", proof: "p" })
+        .returning({ id: testDefinitions.id });
+      const [newer] = await db
+        .insert(testDefinitions)
+        .values({ name: "rate-mixed", description: "d", instruction: "newer", proof: "p" })
+        .returning({ id: testDefinitions.id });
+      await db
+        .insert(testDefinitions)
+        .values({ name: "rate-unrun", description: "d", instruction: "i", proof: "p" });
+      await seedResults(db, older.id, [
+        {
+          status: "failed",
+          model: "grok-4.6",
+          reason: "stayed unlocked",
+          finishedAt: at(0),
+        },
+        { status: "failed", model: "grok-4.6", finishedAt: at(1) },
+        { status: "timed_out", model: "grok-4.6", finishedAt: at(2) },
+        { status: "aborted", model: "grok-4.6", finishedAt: at(3) },
+        { status: "pending", model: "grok-4.6" },
+        { status: "running", model: "grok-4.6" },
+      ]);
+      await seedResults(
+        db,
+        newer.id,
+        Array.from({ length: 15 }, (_, index) => ({
+          status: "passed" as const,
+          model: "grok-4.6",
+          finishedAt: at(10 + index),
+        })),
+      );
+    });
+    const { status, html } = await getPage("/definitions", dbUrl);
+    expect(status).toBe(200);
+    const mixed = definitionItem(html, "rate-mixed");
+    expect(mixed).toContain('<a href="/definitions/rate-mixed">rate-mixed</a>');
+    expect(mixed).toContain('<span class="definition-rate">15 out of 17</span>');
+    expect(blipStatuses(mixed)).toEqual([
+      "failed",
+      "failed",
+      ...Array.from({ length: 15 }, () => "passed"),
+      "running",
+    ]);
+    expect(mixed).toContain('<span class="definition-tip__reason">stayed unlocked</span>');
+    expect(mixed).not.toMatch(/definition-blip--(?:pending|aborted|timed_out)/);
+    expect(mixed).not.toContain("hx-");
+    expect(definitionItem(html, "rate-unrun")).toBe(
+      '<li><a href="/definitions/rate-unrun">rate-unrun</a><div class="definition-history" data-name="rate-unrun"><span class="definition-history__wait" aria-hidden="true"><span class="definition-history__spin"></span>Loading</span></div></li>',
+    );
+    const fragment = await getPage("/definitions/histories?name=rate-mixed&name=rate-unrun", dbUrl);
+    expect(fragment.status).toBe(200);
+    expect(fragment.html).not.toContain("<!doctype");
+    expect(fragment.html).toContain('data-name="rate-mixed"');
+    expect(fragment.html).toContain("15 out of 17");
+    const unrun = fragment.html.slice(fragment.html.indexOf('data-name="rate-unrun"'));
+    expect(unrun.startsWith('data-name="rate-unrun"')).toBe(true);
+    expect(unrun).not.toContain("definition-rate");
+    expect(unrun).toContain("Loading");
+  });
+
+  it("draws the newest twenty-five pills and still counts every earlier pass and fail", async () => {
+    const at = (minute: number): Date => new Date(Date.UTC(2026, 8, 1, 1, minute));
+    await seed(dbUrl, async (db) => {
+      const [definition] = await db
+        .insert(testDefinitions)
+        .values({ name: "rate-capped", description: "d", instruction: "i", proof: "p" })
+        .returning({ id: testDefinitions.id });
+      await seedResults(
+        db,
+        definition.id,
+        Array.from({ length: 30 }, (_, index) => ({
+          status: index < 5 ? "failed" : "passed",
+          model: "grok-4.6",
+          finishedAt: at(index),
+        })),
+      );
+    });
+    const { status, html } = await getPage("/definitions", dbUrl);
+    expect(status).toBe(200);
+    const item = definitionItem(html, "rate-capped");
+    expect(item).toContain('<a href="/definitions/rate-capped">rate-capped</a>');
+    expect(item).toContain('<span class="definition-rate">25 out of 30</span>');
+    expect(blipStatuses(item)).toEqual(Array.from({ length: 25 }, () => "passed"));
   });
 
   it("keeps every name on the page when a query is present; the browser narrows them", async () => {
@@ -760,7 +866,180 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
   });
 });
 
+describe.skipIf(dbUrl === "")("dashboard test diagnostic happy path", () => {
+  it("dumps the wording that ran, then its screenshots and logs, and the pill opens that page", async () => {
+    const sessionId = randomUUID();
+    let resultId = "";
+    let olderShot = "";
+    let newerShot = "";
+    await seed(dbUrl, async (db) => {
+      await db.insert(sessions).values({
+        id: sessionId,
+        config: { iso: "x" },
+        status: "failed",
+      });
+      const [older] = await db
+        .insert(testDefinitions)
+        .values({
+          name: "dump-lock",
+          description: "the lock screen",
+          instruction: "lock the older one",
+          proof: "it stays locked",
+        })
+        .returning({ id: testDefinitions.id });
+      await db.insert(testDefinitions).values({
+        name: "dump-lock",
+        description: "later",
+        instruction: "lock the newer one",
+        proof: "later proof",
+      });
+      const [run] = await db
+        .insert(testRuns)
+        .values({
+          name: "dump",
+          iso: "https://example.com/omarchy.iso",
+          serverUrl: "http://127.0.0.1:42069",
+        })
+        .returning({ id: testRuns.id });
+      const [result] = await db
+        .insert(testResults)
+        .values({
+          runId: run.id,
+          definitionId: older.id,
+          sessionId,
+          model: "grok-4.6",
+          linearId: "DUMP-1",
+          status: "failed",
+          reason: "the screen stayed unlocked",
+          finishedAt: new Date("2026-09-01T00:16:00.000Z"),
+        })
+        .returning({ id: testResults.id });
+      resultId = result.id;
+      const [first, second] = await db
+        .insert(actions)
+        .values([
+          { sessionId, request: { execute: "screendump", arguments: {} }, state: "completed" },
+          { sessionId, request: { execute: "screendump", arguments: {} }, state: "failed" },
+        ])
+        .returning({ id: actions.id });
+      const shots = await db
+        .insert(images)
+        .values([
+          { actionId: first.id, data: Buffer.from("one") },
+          { actionId: second.id, data: Buffer.from("two") },
+        ])
+        .returning({ id: images.id, actionId: images.actionId });
+      olderShot = shots.find((shot) => shot.actionId === first.id)?.id ?? "";
+      newerShot = shots.find((shot) => shot.actionId === second.id)?.id ?? "";
+      await db.insert(logs).values([
+        { location: sessionId, level: "info", text: "intent start; lock it" },
+        { location: sessionId, level: "error", text: "the screen stayed unlocked" },
+      ]);
+    });
+    const listed = await getPage("/definitions", dbUrl);
+    expect(definitionItem(listed.html, "dump-lock")).toContain(`href="/tests/${resultId}"`);
+    const { status, html } = await getPage(`/tests/${resultId}`, dbUrl);
+    expect(status).toBe(200);
+    const link = html.indexOf('<a href="/definitions/dump-lock">dump-lock</a>');
+    const shots = html.indexOf("<h2>screenshots</h2>");
+    const logHeading = html.indexOf("<h2>logs</h2>");
+    expect(html).toContain("<h1>dump-lock</h1>");
+    expect(html).toContain("v1");
+    expect(link).toBeGreaterThan(html.indexOf("<h1>dump-lock</h1>"));
+    expect(shots).toBeGreaterThan(link);
+    expect(logHeading).toBeGreaterThan(shots);
+    expect(html).toContain('<p class="wording">lock the older one</p>');
+    expect(html).not.toContain("lock the newer one");
+    expect(html).toContain('<p class="test-reason">the screen stayed unlocked</p>');
+    expect(html).toContain("grok-4.6");
+    expect(html).toContain("DUMP-1");
+    expect(html).toContain(sessionId);
+    expect(html.indexOf(`/images/${olderShot}`)).toBeGreaterThan(0);
+    expect(html.indexOf(`/images/${olderShot}`)).toBeLessThan(html.indexOf(`/images/${newerShot}`));
+    expect(html).toContain(
+      '<pre class="test-logs">info intent start; lock it\nerror the screen stayed unlocked</pre>',
+    );
+  });
+});
+
+describe.skipIf(dbUrl === "")("dashboard test diagnostic unhappy path", () => {
+  it("says the result is missing when nobody ran it, and dumps nothing when it has no session", async () => {
+    const unknown = await getPage("/tests/99999999-9999-4999-8999-999999999999", dbUrl);
+    expect(unknown.status).toBe(404);
+    expect(unknown.html).toContain("<p>No test result.</p>");
+
+    const bad = await getPage("/tests/not-a-result", dbUrl);
+    expect(bad.status).toBe(404);
+    expect(bad.html).toContain("<p>No test result.</p>");
+    expect(bad.html).not.toContain("not-a-result");
+
+    let resultId = "";
+    await seed(dbUrl, async (db) => {
+      const [definition] = await db
+        .insert(testDefinitions)
+        .values({
+          name: "dump-empty",
+          description: "d",
+          instruction: "i",
+          proof: "p",
+        })
+        .returning({ id: testDefinitions.id });
+      const [run] = await db
+        .insert(testRuns)
+        .values({
+          name: "dump empty",
+          iso: "https://example.com/omarchy.iso",
+          serverUrl: "http://127.0.0.1:42069",
+        })
+        .returning({ id: testRuns.id });
+      const [result] = await db
+        .insert(testResults)
+        .values({
+          runId: run.id,
+          definitionId: definition.id,
+          status: "passed",
+          model: "grok-4.6",
+          reason: "not a failure",
+        })
+        .returning({ id: testResults.id });
+      resultId = result.id;
+    });
+    const { status, html } = await getPage(`/tests/${resultId}`, dbUrl);
+    expect(status).toBe(200);
+    const body = html.slice(html.indexOf("<body>"));
+    expect(body).toContain("<p>no session</p>");
+    expect(body).toContain("<p>no screenshots</p>");
+    expect(body).toContain("<p>no logs</p>");
+    expect(body).not.toContain("<img");
+    expect(body).not.toContain("test-reason");
+    expect(body).not.toContain("not a failure");
+  });
+});
+
 describe.skipIf(dbUrl === "")("dashboard/definitions page unhappy path", () => {
+  it("shows no rate when a definition's runs never passed or failed", async () => {
+    await seed(dbUrl, async (db) => {
+      const [definition] = await db
+        .insert(testDefinitions)
+        .values({ name: "rate-open", description: "d", instruction: "i", proof: "p" })
+        .returning({ id: testDefinitions.id });
+      await seedResults(db, definition.id, [
+        { status: "pending", model: "grok-4.6" },
+        { status: "running", model: "grok-4.6" },
+        { status: "aborted", model: "grok-4.6" },
+        { status: "timed_out", model: "grok-4.6" },
+      ]);
+    });
+    const { status, html } = await getPage("/definitions", dbUrl);
+    expect(status).toBe(200);
+    const item = definitionItem(html, "rate-open");
+    expect(item).not.toContain("out of");
+    expect(blipStatuses(item)).toEqual(["running"]);
+    expect(item).toContain('href="/tests/');
+    expect(item).toContain("Loading");
+    expect(item).not.toMatch(/definition-blip--(?:pending|aborted|timed_out)/);
+  });
+
   it("says nothing is running, and offers no abort, when every job is waiting or finished", async () => {
     await seed(dbUrl, (db) =>
       seedQueue(db, "nothing-running", [

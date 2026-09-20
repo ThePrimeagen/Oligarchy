@@ -11,7 +11,9 @@ import {
   getImage,
   groupDefinitions,
   listAutomationQueue,
+  listDefinitionHistories,
   listRunningAutomationJobs,
+  readTestDump,
   readSessionFollow,
   listProcessSeries,
   listServers,
@@ -28,7 +30,14 @@ import {
   type TestBasePrompt,
 } from "./query.ts";
 import { clickerPage } from "./clicker.ts";
-import { definitionHref, DefinitionsPage, RunningList, type EditNotice } from "./definitions.tsx";
+import { TestMissingPage, TestPage, TestUnavailablePage } from "./diagnostic.tsx";
+import {
+  definitionHref,
+  DefinitionHistories,
+  DefinitionsPage,
+  RunningList,
+  type EditNotice,
+} from "./definitions.tsx";
 import { HTMX_INTEGRITY, HTMX_URL } from "./htmx.ts";
 import { abortLinearIssue, type LinearEnv } from "./linear.ts";
 import { FollowBody, FollowFrame } from "./follow.tsx";
@@ -389,9 +398,10 @@ app.get("/definitions", async (context) => {
     return context.redirect(legacyDefinition(name, context.req.query("edit")), 302);
   }
   try {
-    const [definitions, running] = await Promise.all([
+    const [definitions, running, histories] = await Promise.all([
       listTestDefinitions(context.env.HYPERDRIVE.connectionString),
       listRunningAutomationJobs(context.env.HYPERDRIVE.connectionString),
+      listDefinitionHistories(context.env.HYPERDRIVE.connectionString),
     ]);
     return definitionsPage(context, 200, {
       groups: groupDefinitions(definitions),
@@ -400,6 +410,7 @@ app.get("/definitions", async (context) => {
       notice: undefined,
       error: undefined,
       running,
+      histories,
     });
   } catch (error) {
     Sentry.captureException(error);
@@ -411,6 +422,7 @@ app.get("/definitions", async (context) => {
       notice: undefined,
       error: "Test definitions are unavailable.",
       running: null,
+      histories: [],
     });
   }
 });
@@ -426,6 +438,23 @@ app.get("/definitions/running", async (context) => {
   } catch (error) {
     Sentry.captureException(error);
     console.error("dashboard: listing running tests:", errorMessage(error));
+    return context.html(<p>error: internal error</p>, 500);
+  }
+});
+
+// What the pills on screen ask for once a minute. One block per requested name, not a page, and
+// not a definition named histories. No names is an empty body, not a look at the database.
+app.get("/definitions/histories", async (context) => {
+  const names = context.req.queries("name") ?? [];
+  if (names.length === 0) {
+    return context.text("");
+  }
+  try {
+    const histories = await listDefinitionHistories(context.env.HYPERDRIVE.connectionString, names);
+    return context.html(<DefinitionHistories names={names} histories={histories} />);
+  } catch (error) {
+    Sentry.captureException(error);
+    console.error("dashboard: listing definition histories:", errorMessage(error));
     return context.html(<p>error: internal error</p>, 500);
   }
 });
@@ -447,6 +476,7 @@ app.get("/definitions/:name", async (context) => {
       notice,
       error: undefined,
       running,
+      histories: [],
     });
   } catch (error) {
     Sentry.captureException(error);
@@ -458,6 +488,7 @@ app.get("/definitions/:name", async (context) => {
       notice: undefined,
       error: "Test definitions are unavailable.",
       running: null,
+      histories: [],
     });
   }
 });
@@ -507,6 +538,7 @@ app.post("/definitions", async (context) => {
       notice: undefined,
       error: "Test definitions are unavailable.",
       running: null,
+      histories: [],
     });
   }
 });
@@ -621,6 +653,27 @@ app.get("/tickets/:ticket", async (context) => {
       </section>
     </Shell>,
   );
+});
+
+const RESULT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// One result, dumped. An id that is not a uuid is not looked up: the column would refuse it.
+app.get("/tests/:id", async (context) => {
+  const id = context.req.param("id");
+  if (!RESULT_ID.test(id)) {
+    return context.html(html`<!doctype html>${<TestMissingPage />}`, 404);
+  }
+  try {
+    const dump = await readTestDump(context.env.HYPERDRIVE.connectionString, id);
+    if (dump === undefined) {
+      return context.html(html`<!doctype html>${<TestMissingPage />}`, 404);
+    }
+    return context.html(html`<!doctype html>${<TestPage dump={dump} />}`);
+  } catch (error) {
+    Sentry.captureException(error);
+    console.error("dashboard: loading a test:", errorMessage(error));
+    return context.html(html`<!doctype html>${<TestUnavailablePage />}`, 500);
+  }
 });
 
 app.get("/images/:id", async (context) => {
