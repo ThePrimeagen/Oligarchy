@@ -13331,26 +13331,46 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `ls -l /usr/share/omarchy/install/omarchy-base.packages` → the file exists; `grep -vE '^\s*(#|$)' /usr/share/omarchy/install/omarchy-base.packages | wc -l` → about 149.
-  ** If it does not exist on the 4.0.2 disk, run `ls /usr/share/omarchy/install/` and report the contents.
-  * Type `grep -Ev '^\s*(#|$)' /usr/share/omarchy/install/omarchy-base.packages | while read -r p; do pacman -Q "$p" >/dev/null 2>&1 || echo "MISSING $p"; done | sudo tee /dev/ttyS0; echo AUDIT-DONE` (password `prime` if asked). The loop can take up to a minute on 2 vCPUs; screenshot every 5 s until `AUDIT-DONE`. There must be no `MISSING` lines on screen or in the serial log.
-  * Type `pacman -Qq omarchy omarchy-settings omarchy-nvim omarchy-keyring linux-omarchy linux-omarchy-headers limine limine-mkinitcpio-hook limine-snapper-sync snapper zram-generator btrfs-progs efibootmgr openssh pipewire pipewire-pulse wireplumber` → all names echoed back, no error. Type `cat /usr/share/omarchy/version; pacman -Q omarchy` → the installed version pair (report it; the disk is from the 4.0.2 ISO).
-  * Unhappy path: `pacman -Qq nvidia-utils linux-t2 t2fanrd 2>&1` → three `error: package '…' was not found`; `pacman -Q not-a-real-package; echo rc=$?` → `was not found` and `rc=1`.
-  * Type `grep -E '^\[|^Server|^Include' /etc/pacman.conf | head; head -3 /etc/pacman.d/mirrorlist` → the stable omarchy repo/mirrorlist (no `[offline]` file:// server).
-  * Open the Omarchy Menu (Super+Space) → Install: `Preinstalls` dimmed ✓; Menu → Remove: a `Preinstalls` row is present — do not select it; screenshot only. Escape; close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `ls -l /usr/share/omarchy/install/omarchy-base.packages` and press Return. The file is listed.
+  ** If it is missing, type `ls /usr/share/omarchy/install/` and report the contents, then stop.
+  * Type `grep -vE '^\s*(#|$)' /usr/share/omarchy/install/omarchy-base.packages | wc -l` and press Return. The count is about 149.
+  * Type `grep -Ev '^\s*(#|$)' /usr/share/omarchy/install/omarchy-base.packages | while read -r p; do pacman -Q "$p" >/dev/null 2>&1 || echo "MISSING $p"; done | sudo tee /dev/ttyS0; echo AUDIT-DONE` and press Return. The last line is `AUDIT-DONE`.
+  ** If sudo asks, type `prime` and press Return.
+  * Read the serial log with get-serial. No line starts with `MISSING`.
+  * Type `pacman -Qq omarchy omarchy-settings omarchy-nvim omarchy-keyring linux-omarchy linux-omarchy-headers limine limine-mkinitcpio-hook limine-snapper-sync snapper zram-generator btrfs-progs efibootmgr openssh pipewire pipewire-pulse wireplumber` and press Return. Every name is echoed, and there is no error.
+  * Type `cat /usr/share/omarchy/version; pacman -Q omarchy` and press Return. Record the version pair.
+  * Type `pacman -Qq nvidia-utils linux-t2 t2fanrd 2>&1` and press Return. Each name reports `was not found`.
+  * Type `pacman -Q not-a-real-package; echo rc=$?` and press Return. The output includes `was not found`, and the last line is `rc=1`.
+  * Type `grep -E '^\[|^Server|^Include' /etc/pacman.conf | head` and press Return. No `[offline]` section is listed.
+  * Type `head -3 /etc/pacman.d/mirrorlist` and press Return. The lines name the stable omarchy mirror.
+  * Press Super+Space. The menu opens.
+  * Select Install. Preinstalls is dimmed with a check.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Remove. Preinstalls is listed.
+  * Press Escape. The menu closes without selecting Preinstalls.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The `sudo tee` copy exists so a long MISSING list can be read with get-serial.
+  * The audit can take a minute. Screenshot about every 5 seconds until `AUDIT-DONE`.
+  * `sudo tee` copies the missing-package lines to the serial log so get-serial can read them.
+  * The disk is from the 4.0.2 ISO. Do not select Remove → Preinstalls.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** The count, `AUDIT-DONE` with no `MISSING` lines (serial log empty of MISSING), the essentials list, the version pair, the three not-found errors and `rc=1`, the pacman.conf without `[offline]`, the two Preinstalls rows
+  ** The base package file exists, and its uncommented line count is about 149.
+  ** The audit ends with `AUDIT-DONE`, and neither the screen nor the serial log contains a `MISSING` line.
+  ** Every named essential package is installed. The version pair from `/usr/share/omarchy/version` and `pacman -Q omarchy` is recorded.
+  ** `nvidia-utils`, `linux-t2`, and `t2fanrd` are not installed. `not-a-real-package` reports `was not found` and exits 1.
+  ** pacman.conf has no `[offline]` section, and the mirror list is the stable omarchy list.
+  ** Install dims Preinstalls, and Remove lists it. It is not selected.
   * If unsuccessful
-  ** The `MISSING <pkg>` lines on screen or in the serial listing, or a leftover `[offline]` repo
+  ** A `MISSING` line appears, or pacman.conf still has an `[offline]` repository.
 covers: install/omarchy-base.packages; install/omarchy-other.packages; omarchy-iso _runtime_package_list/_early_packages; install/post-install/pacman.sh; install/hardware/pacman.sh; test/shell.d/preinstalls-test.sh (base list is the preinstall source); test/acceptance.d/system-test.sh:8-25; default/omarchy/omarchy-menu.jsonc (install.preinstalls, remove.preinstalls)
 
 ### dev-env-php-pacman-install-and-remove   [VM-OK] [NET]
@@ -13360,27 +13380,51 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `php -v 2>&1` → `command not found`. Open the Omarchy Menu (Super+Space) → Install → Development → PHP → PHP.
-  ** Floating terminal: `Installing PHP...`, sudo `prime`, pacman installs `php composer php-sqlite xdebug`, `Added Composer global bin directory to PATH.`, `Done!`. Press a key.
-  * In the terminal type `php -v` → `PHP 8.x` and a `with Xdebug` line.
-  * Type `grep -E '^extension=(bcmath|intl|pdo_sqlite)' /etc/php/php.ini` → three uncommented lines.
-  * Menu → Install → Development → PHP (reopen twice): `PHP` dimmed ✓. Menu → Remove → Development → PHP: `PHP` listed; click it.
-  ** Floating terminal: `Removing PHP...`, sudo, pacman removes the four packages, `Done!`. Press a key.
-  * In the terminal type `php -v 2>&1` → `command not found`; Menu → Install → Development → PHP → `PHP` enabled again. Close the terminal with Super+W.
-  ** The PATH line added to `.bashrc` survives removal; that is expected.
+  * Press Super+Return. A terminal opens.
+  * Type `php -v 2>&1` and press Return. The output is `command not found`.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Development, then PHP, then PHP. A floating terminal opens.
+  * Type `prime` and press Return if sudo asks. The install continues.
+  * Wait until it shows `Added Composer global bin directory to PATH.` and `Done!`.
+  * Press a key. The floating terminal closes.
+  * Click the terminal. The terminal is focused.
+  * Type `php -v` and press Return. The output starts with `PHP 8.` and includes `with Xdebug`.
+  * Type `grep -E '^extension=(bcmath|intl|pdo_sqlite)' /etc/php/php.ini` and press Return. Three uncommented lines are printed.
+  * Press Super+Space. The menu opens.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Development, then PHP. PHP is dimmed with a check.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Remove, then Development, then PHP. PHP is listed.
+  * Click PHP. A floating terminal opens.
+  * Type `prime` and press Return if sudo asks. The removal continues.
+  * Wait until it shows `Removing PHP...` and `Done!`.
+  * Press a key. The floating terminal closes.
+  * Click the terminal. The terminal is focused.
+  * Type `php -v 2>&1` and press Return. The output is `command not found`.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Development, then PHP. PHP is enabled.
+  * Press Escape. The menu closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * PHP is a CLI toolchain with no launcher entry; `php -v` is the visible proof.
+  * PHP has no launcher entry. `php -v` is the proof. The install is about 25 MB.
+  * pacman installs `php`, `composer`, `php-sqlite`, and `xdebug`.
+  * The Composer PATH line left in `.bashrc` after removal is expected.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** `command not found` before; `Installing PHP...` / `Done!`; `php -v` with Xdebug; the three `extension=` lines; the dimmed row and the Remove row; `Removing PHP...` / `Done!`; `command not found` after
+  ** `php` is missing. The install finishes with the Composer PATH sentence and `Done!`.
+  ** `php -v` prints PHP 8 with Xdebug, and `php.ini` has uncommented `bcmath`, `intl`, and `pdo_sqlite` lines.
+  ** After a reopen, Install dims PHP and Remove lists it. Removal finishes with `Done!`.
+  ** `php` is missing again, and the Install row is enabled.
   * If unsuccessful
-  ** pacman/sed errors in the floating terminal
+  ** The floating terminal prints a pacman or sed error, `php -v` does not mention Xdebug, or `php` remains after removal.
 covers: bin/omarchy-install-dev-env (php); bin/omarchy-remove-dev-env (php); default/omarchy/omarchy-menu.jsonc (install.development.php.php, remove.development.php.php)
 
 ### install-editor-helix-theme-alias-and-cleanup   [VM-OK] [NET]
@@ -13390,25 +13434,52 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy-install-editor-helix` → `Installing Helix...`, sudo `prime`, pacman installs `helix`.
-  * Type `cat ~/.config/helix/config.toml; ls -l ~/.config/helix/themes/omarchy.toml; grep 'alias hx' ~/.bashrc` → `theme = "omarchy"`, a symlink into `~/.local/state/omarchy/current/theme/helix.toml`, and `alias hx="helix"`.
-  * Open a new terminal (Super+Enter) and type `hx --version` → `helix 2x.yy`.
-  * Open Apps (Super+Alt+Space), type `helix` → a `Helix` entry is listed. Escape. Open the Omarchy Menu (Super+Space) → Install → Editor (reopen twice): `Helix` dimmed ✓.
-  * In the terminal type `omarchy-install-editor-helix; grep -c 'alias hx' ~/.bashrc` → no reinstall, and the count is `1` (no duplicate alias).
-  * Type `omarchy-pkg-drop helix; hx --version` → pacman removes helix; `command not found`; `ls ~/.config/helix` still lists the config (documented leftover — expected per 03-INTENDED-BEHAVIOUR #30). Apps → `helix` → gone; Menu → Install → Editor → `Helix` enabled again. Close the terminals with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy-install-editor-helix` and press Return. The output includes `Installing Helix...`.
+  ** If sudo asks, type `prime` and press Return.
+  * Wait until the prompt returns.
+  * Type `cat ~/.config/helix/config.toml` and press Return. The output includes `theme = "omarchy"`.
+  * Type `ls -l ~/.config/helix/themes/omarchy.toml` and press Return. The entry is a symlink into `~/.local/state/omarchy/current/theme/helix.toml`.
+  * Type `grep 'alias hx' ~/.bashrc` and press Return. The output includes `alias hx="helix"`.
+  * Press Super+Return. A new terminal opens.
+  * Type `hx --version` and press Return. The output starts with `helix 2`.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `helix`. A Helix entry is listed.
+  * Press Escape. Apps closes.
+  * Press Super+Space. The menu opens.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Editor. Helix is dimmed with a check.
+  * Press Escape. The menu closes.
+  * Click the first terminal. It is focused.
+  * Type `omarchy-install-editor-helix; grep -c 'alias hx' ~/.bashrc` and press Return. The last line is `1`.
+  * Type `omarchy-pkg-drop helix` and press Return. The prompt returns.
+  * Type `hx --version` and press Return. The output is `command not found`.
+  * Type `ls ~/.config/helix` and press Return. The config directory is still listed.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `helix`. No Helix entry is listed.
+  * Press Escape. Apps closes.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Editor. Helix is enabled.
+  * Press Escape. The menu closes.
+  * Close the open terminals with Super+W. The desktop is clear.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * `hx` only exists in a shell opened after the install; the first terminal will not know it.
+  * `hx` exists only in a shell opened after the install. The first terminal will not have the alias.
+  * Helix has no Remove row. `omarchy-pkg-drop helix` is the cleanup. `~/.config/helix` remaining is expected (03-INTENDED-BEHAVIOUR #30).
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** The three config checks; `hx --version`; the launcher entry and dimmed row; `1` from `grep -c`; `command not found` after the drop with the launcher and menu back to stock
+  ** The install finishes, `config.toml` sets `theme = "omarchy"`, the theme file is a symlink into the live theme, and `~/.bashrc` contains `alias hx="helix"`.
+  ** A new shell prints a Helix 2 version. Apps lists Helix, and after a reopen Install dims it.
+  ** A second install leaves exactly one `alias hx` line.
+  ** `omarchy-pkg-drop helix` removes the command, leaves `~/.config/helix`, Apps no longer lists Helix, and the Install row is enabled.
   * If unsuccessful
-  ** The failing check's output or a duplicated alias line
+  ** A check fails, `grep -c` is not `1`, or `hx` still runs after the drop.
 covers: bin/omarchy-install-editor-helix; bin/omarchy-pkg-drop; default/omarchy/omarchy-menu.jsonc (install.editor.helix)
 
 ### install-service-nordvpn-decline-reboot-and-drop   [VM-PARTIAL] [NET]
@@ -13418,26 +13489,49 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open the Omarchy Menu (Super+Space) → Install → Service → NordVPN.
-  ** Floating terminal: `Installing NordVPN...`, sudo `prime`, `Enabling NordVPN daemon...`, `Adding user to nordvpn group...`, `NordVPN installed! After reboot, run 'nordvpn login' to authenticate.`, then `Reboot now to make NordVPN usable?` — choose **No**. `Done!`. Press a key.
-  * Open a terminal (Super+Enter) and type `systemctl is-active nordvpnd; id -nG | grep -c nordvpn` → `active` and `1`.
-  * Type `nordvpn status` → a permission or "not logged in" message, not a crash.
-  * Menu → Install → Service (reopen twice): `NordVPN` dimmed ✓. Menu → Remove → Services: no NordVPN row (no remover exists — record which Install → Service rows lack a Remove row).
-  * In the terminal type `omarchy-pkg-drop nordvpn-bin; systemctl is-active nordvpnd` → pacman removes it; `inactive` / `unknown`. Menu → Install → Service → `NordVPN` enabled again. Close the terminal with Super+W.
-  ** The `nordvpn` group membership only takes effect after a re-login; the session is left as found otherwise.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Service, then NordVPN. A floating terminal opens.
+  * Type `prime` and press Return if sudo asks. The install continues.
+  * Wait until it shows `NordVPN installed! After reboot, run 'nordvpn login' to authenticate.` and asks `Reboot now to make NordVPN usable?`.
+  * Choose No. The output includes `Done!`.
+  * Press a key. The floating terminal closes.
+  * Press Super+Return. A terminal opens.
+  * Type `systemctl is-active nordvpnd` and press Return. The output is `active`.
+  * Type `id -nG | grep -c nordvpn` and press Return. The output is `1`.
+  * Type `nordvpn status` and press Return. The output is a permission message or a not-logged-in message.
+  * Press Super+Space. The menu opens.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Service. NordVPN is dimmed with a check.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Remove, then Services. NordVPN is not listed.
+  * Press Escape. The menu closes.
+  * Click the terminal. The terminal is focused.
+  * Type `omarchy-pkg-drop nordvpn-bin` and press Return. The prompt returns.
+  * Type `systemctl is-active nordvpnd` and press Return. The output is `inactive` or `unknown`.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Service. NordVPN is enabled.
+  * Press Escape. The menu closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Never answer Yes to the reboot within the test. Skipped: `nordvpn login` (needs an account).
+  * Never choose Yes. Do not run `nordvpn login`.
+  * The missing Remove row is 03-INTENDED-BEHAVIOUR #29 and is unclear. Record which Install → Service rows have no Remove row.
+  * Group membership takes effect after a new login. Do not log out or reboot. The `id` count can still be `1` in this session.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Install output ending at the declined reboot and `Done!`; `active` and `1`; the `nordvpn status` message; the dimmed row and the absent Remove row; the cleanup with the row enabled again
+  ** The install prints the login sentence, the reboot question is answered No, and the terminal finishes with `Done!`.
+  ** `nordvpnd` is `active`, the `nordvpn` group count is `1`, and `nordvpn status` is a permission or not-logged-in message.
+  ** After a reopen, Install dims NordVPN and Remove does not list it.
+  ** `omarchy-pkg-drop nordvpn-bin` leaves `nordvpnd` inactive or unknown, and the Install row is enabled.
   * If unsuccessful
-  ** pacman/systemd errors, or a reboot despite No
+  ** pacman or systemd prints an error, or the machine reboots after No.
 covers: bin/omarchy-install-service-nordvpn; bin/omarchy-pkg-drop; default/omarchy/omarchy-menu.jsonc (install.service.nordvpn)
 
 ### install-gaming-xbox-controllers-xpadneo-and-remove   [VM-PARTIAL] [NET] [SLOW]
@@ -13447,27 +13541,53 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open the Omarchy Menu (Super+Space) → Install → Gaming → Xbox Controllers.
-  ** Floating terminal: `Installing Xbox controller Bluetooth support...`, sudo `prime`, pacman installs `xpadneo-dkms`, DKMS builds the module (`Building module...`; screenshot every ≤5 s).
-  * Watch the ending: either `Reboot needed to finish setup. Reboot now?` — choose **No** → `Done!`; or `Now you can pair your Xbox controller with Bluetooth using Super + Ctrl + B.` → `Done!`. Record which. Press a key.
-  * Open a terminal (Super+Enter) and type `cat /etc/modprobe.d/blacklist-xpad.conf /etc/modules-load.d/xpadneo.conf` → `blacklist xpad` and `hid_xpadneo`.
-  * Menu → Install → Gaming (reopen twice): `Xbox Controllers` dimmed ✓. Menu → Remove → Gaming → `Xbox Controllers` → floating terminal removes the package and both files, prints `Reboot to fully unload xpadneo and restore xpad.`, `Done!`. Press a key.
-  * In the terminal type `ls /etc/modprobe.d/blacklist-xpad.conf /etc/modules-load.d/xpadneo.conf 2>&1` → both `No such file`; `pacman -Q xpadneo-dkms 2>&1` → not found. Menu → Install → Gaming → `Xbox Controllers` enabled again; Menu → Remove: no Gaming row. Close the terminal with Super+W.
-  ** Do not reboot within the test; the loaded module state is left as found by the removal's own instruction.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Gaming, then Xbox Controllers. A floating terminal opens.
+  * Type `prime` and press Return if sudo asks. The install continues.
+  * Wait until the terminal shows `Done!`. Record whether it asked to reboot or printed the Bluetooth pairing sentence.
+  ** If it asks `Reboot now?`, choose No before it reaches `Done!`.
+  * Press a key. The floating terminal closes.
+  * Press Super+Return. A terminal opens.
+  * Type `cat /etc/modprobe.d/blacklist-xpad.conf` and press Return. The output includes `blacklist xpad`.
+  * Type `cat /etc/modules-load.d/xpadneo.conf` and press Return. The output includes `hid_xpadneo`.
+  * Press Super+Space. The menu opens.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Gaming. Xbox Controllers is dimmed with a check.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Remove, then Gaming, then Xbox Controllers. A floating terminal opens.
+  * Wait until it shows `Reboot to fully unload xpadneo and restore xpad.` and `Done!`.
+  * Press a key. The floating terminal closes.
+  * Click the terminal. The terminal is focused.
+  * Type `ls /etc/modprobe.d/blacklist-xpad.conf /etc/modules-load.d/xpadneo.conf 2>&1` and press Return. Both paths report `No such file`.
+  * Type `pacman -Q xpadneo-dkms 2>&1` and press Return. The output includes `was not found`.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Gaming. Xbox Controllers is enabled.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Remove. Gaming is not listed.
+  * Press Escape. The menu closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Never answer Yes to the reboot prompt inside this test.
-  * A DKMS "missing kernel headers" error is a real failure: `linux-omarchy-headers` should be preinstalled.
+  * Never choose Yes. The DKMS build can take 1 to 3 minutes. Screenshot about every 5 seconds.
+  * The other ending is `Now you can pair your Xbox controller with Bluetooth using Super + Ctrl + B.` Do not pair a controller.
+  * A DKMS error about missing kernel headers is a real failure. `linux-omarchy-headers` should already be installed.
+  * Do not reboot. The loaded-module state is left as the remover leaves it.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** The DKMS build output; the reboot prompt answered No (or the pairing message); the two config files; the dimmed row; the removal output and both files gone with the menus back to stock
+  ** The install builds xpadneo and finishes with `Done!`. A reboot question is answered No, or the pairing sentence is recorded.
+  ** `blacklist-xpad.conf` contains `blacklist xpad`, and `xpadneo.conf` contains `hid_xpadneo`.
+  ** After a reopen, Install dims Xbox Controllers. Removal prints the unload sentence and `Done!`.
+  ** Both config files are gone, the package is missing, the Install row is enabled, and Remove does not list Gaming.
   * If unsuccessful
-  ** The DKMS/pacman error text
+  ** DKMS or pacman prints an error, a config file remains, or the machine reboots after No.
 covers: bin/omarchy-install-gaming-xbox-controllers; bin/omarchy-remove-gaming-xbox-controllers; install/omarchy-other.packages (linux-omarchy-headers); default/omarchy/omarchy-menu.jsonc (install.gaming.xbox-controllers, remove.gaming.xbox-controllers)
 
 ### hermes-cli-stub-owned-remove-restore-and-foreign   [VM-OK]
@@ -13477,28 +13597,56 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `head -3 ~/.local/bin/hermes` → the third line is `# Written by omarchy-install-hermes-cli.`; `omarchy-install-hermes-cli --owns; echo owns=$?; omarchy-install-hermes-cli --check; echo check=$?` → `owns=0`, `check=1`.
-  * Type `chmod -x ~/.local/bin/hermes; bash /usr/share/omarchy/migrations/1787760281.sh; ls -l ~/.local/bin/hermes` → the migration made it executable again.
-  * Type `omarchy-install-hermes-cli --remove; echo rc=$?; ls ~/.local/bin/hermes 2>&1` → `rc=0` and `No such file`; `omarchy-install-hermes-cli --remove; echo rc=$?` → `rc=0` again (nothing owned, nothing to do).
-  * Type `omarchy-install-hermes-cli; omarchy-install-hermes-cli --owns; echo owns=$?` → the stub is back, `owns=0`.
-  * Foreign file: `omarchy-install-hermes-cli --remove; printf '#!/bin/bash\necho mine\n' > ~/.local/bin/hermes; chmod +x ~/.local/bin/hermes; omarchy-install-hermes-cli --owns; echo owns=$?; omarchy-install-hermes-cli; echo rc=$?; bash /usr/share/omarchy/migrations/1787760281.sh; omarchy-install-hermes-cli --remove; cat ~/.local/bin/hermes` → `owns` non-zero, a message that `~/.local/bin/hermes` is not Omarchy's (`...was not installed by Omarchy.` or `...does not support the interactive seeded sessions...`) with `rc=1`, and the file still reads `echo mine` byte for byte.
-  * Opt-out: `rm ~/.local/bin/hermes; touch ~/.local/state/omarchy/preinstalls-removed; bash /usr/share/omarchy/migrations/1787760281.sh; ls ~/.local/bin/hermes 2>&1; rm ~/.local/state/omarchy/preinstalls-removed` → no stub written for a user who removed the preinstalls.
-  * Restore: `bash /usr/share/omarchy/migrations/1787760281.sh; grep -c 'exec env -u UV_PYTHON mise x' ~/.local/bin/hermes; omarchy-install-hermes-cli --owns; echo owns=$?; omarchy-install-openclaw-cli --check; echo rc=$?` → `1`, `owns=0` (the stock stub is back), OpenClaw `rc=1` (not installed). Close the terminal with Super+W.
-  ** None of these commands should touch the network; a `mise` download means something went wrong.
+  * Press Super+Return. A terminal opens.
+  * Type `head -3 ~/.local/bin/hermes` and press Return. The third line is `# Written by omarchy-install-hermes-cli.`
+  * Type `omarchy-install-hermes-cli --owns; echo owns=$?` and press Return. The last line is `owns=0`.
+  * Type `omarchy-install-hermes-cli --check; echo check=$?` and press Return. The last line is `check=1`.
+  * Type `chmod -x ~/.local/bin/hermes` and press Return. The prompt returns.
+  * Type `bash /usr/share/omarchy/migrations/1787760281.sh` and press Return. The prompt returns.
+  * Type `ls -l ~/.local/bin/hermes` and press Return. The file is executable.
+  * Type `omarchy-install-hermes-cli --remove; echo rc=$?` and press Return. The last line is `rc=0`.
+  * Type `ls ~/.local/bin/hermes 2>&1` and press Return. The output includes `No such file`.
+  * Type `omarchy-install-hermes-cli --remove; echo rc=$?` and press Return. The last line is `rc=0`.
+  * Type `omarchy-install-hermes-cli` and press Return. The prompt returns.
+  * Type `omarchy-install-hermes-cli --owns; echo owns=$?` and press Return. The last line is `owns=0`.
+  * Type `omarchy-install-hermes-cli --remove` and press Return. The prompt returns.
+  * Type `printf '#!/bin/bash\necho mine\n' > ~/.local/bin/hermes` and press Return. The prompt returns.
+  * Type `chmod +x ~/.local/bin/hermes` and press Return. The prompt returns.
+  * Type `omarchy-install-hermes-cli --owns; echo owns=$?` and press Return. The exit is non-zero.
+  * Type `omarchy-install-hermes-cli; echo rc=$?` and press Return. The output says the file was not installed by Omarchy, and the last line is `rc=1`.
+  * Type `bash /usr/share/omarchy/migrations/1787760281.sh` and press Return. The prompt returns.
+  * Type `omarchy-install-hermes-cli --remove` and press Return. The prompt returns.
+  * Type `cat ~/.local/bin/hermes` and press Return. The file still contains `echo mine`.
+  * Type `rm ~/.local/bin/hermes` and press Return. The prompt returns.
+  * Type `touch ~/.local/state/omarchy/preinstalls-removed` and press Return. The prompt returns.
+  * Type `bash /usr/share/omarchy/migrations/1787760281.sh` and press Return. The prompt returns.
+  * Type `ls ~/.local/bin/hermes 2>&1` and press Return. The output includes `No such file`.
+  * Type `rm ~/.local/state/omarchy/preinstalls-removed` and press Return. The prompt returns.
+  * Type `bash /usr/share/omarchy/migrations/1787760281.sh` and press Return. The prompt returns.
+  * Type `grep -c 'exec env -u UV_PYTHON mise x' ~/.local/bin/hermes` and press Return. The output is `1`.
+  * Type `omarchy-install-hermes-cli --owns; echo owns=$?` and press Return. The last line is `owns=0`.
+  * Type `omarchy-install-openclaw-cli --check; echo rc=$?` and press Return. The last line is `rc=1`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * `--owns`, `--check`, `--remove` answer only with their exit status; always echo it.
-  * Never run `hermes --version` or `--now`: that installs Python 3.13 + Hermes (minutes, hundreds of MB).
+  * `--owns`, `--check`, and `--remove` answer with their exit status. Echo it.
+  * Do not run `hermes --version` or `--now`. That installs Python and Hermes.
+  * None of these commands should use the network. A mise download means something went wrong.
+  * The foreign-file refusal may say `was not installed by Omarchy.` or `does not support the interactive seeded sessions...`.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** The marker line; `owns=0 check=1`; the executable bit repaired; the removal and idempotent `rc=0`; the restored stub; the foreign wrapper disowned, refused with `rc=1` and preserved; nothing written under the opt-out; the stock stub recreated with `1`/`owns=0`; OpenClaw `rc=1`
+  ** The stub's third line names `omarchy-install-hermes-cli`. `--owns` exits 0 and `--check` exits 1.
+  ** After the executable bit is removed, the migration makes the file executable again.
+  ** `--remove` exits 0 and deletes the stub, and a second `--remove` also exits 0. A plain call restores a stub that `--owns` accepts.
+  ** A user-written `hermes` is not owned, the installer and remover leave `echo mine` in the file, and the migration does not replace it.
+  ** With the preinstalls-removed marker, the migration writes no stub. After the marker is removed, the stock stub is recreated, `--owns` exits 0, and the OpenClaw check exits 1.
   * If unsuccessful
-  ** A differing code, a foreign `hermes` file that was modified or deleted, `--owns` claiming it, or a mise download
+  ** An exit code differs, the foreign file is changed or deleted, `--owns` claims the foreign file, or mise starts a download.
 covers: bin/omarchy-install-hermes-cli; bin/omarchy-install-openclaw-cli; migrations/1787760281.sh; test/shell.d/hermes-cli-test.sh (owns/check/remove/template/foreign); test/shell.d/hermes-cli-migration-test.sh (plain install, repair, opt-out, foreign left alone); manual/17-ai.md
 
 ### plugin-update-local-origin-fast-forward-and-rollback   [VM-OK]
@@ -13508,27 +13656,70 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal (Super+Enter) and create and install the `/tmp/hello` plugin exactly as in `plugin-add-local-repo-enable-disable-remove` (same manifest and `Hello.qml`), first checking `omarchy-plugin-validate /tmp/hello; echo $?` → `0`, silent, then `omarchy-plugin-add /tmp/hello --enable --yes`. A red `HELLO` is on the bar and `omarchy-plugin-list | grep hello` → `prime.hello  enabled  third-party  bar-widget  Hello`.
-  * Type `omarchy-plugin-add file:///tmp/hello --yes; echo $?` → `plugin id 'prime.hello' is already used by …manifest.json` (or `already installed; update it with: omarchy plugin update prime.hello`), `1`. Type `omarchy-plugin-update prime.hello --yes` → `prime.hello is up to date.`; `omarchy-plugin-update nosuch; echo $?` → `plugin 'nosuch' is not installed`, `1`.
-  * Publish a change: `cd /tmp/hello && sed -i 's/HELLO/HELLO2/; s/1.0.0/1.0.1/' Hello.qml manifest.json && git -c user.name=t -c user.email=t@t commit -qam v2 && cd ~`. Type `omarchy-plugin-update prime.hello --yes` → `Updated prime.hello.`; within 3 s the bar label reads `HELLO2`; `jq -r .version ~/.config/omarchy/plugins/prime.hello/manifest.json` → `1.0.1`.
-  * Publish a broken revision: `cd /tmp/hello && git mv Hello.qml Gone.qml && git -c user.name=t -c user.email=t@t commit -qm broken && cd ~`. Type `omarchy-plugin-update prime.hello --yes; echo "exit=$?"` → `entry point file not found: 'Hello.qml'`, `update of 'prime.hello' failed validation; rolled back`, `exit=1`; the bar still shows `HELLO2`; `ls ~/.config/omarchy/plugins/prime.hello/` → `Hello.qml` still there, no `Gone.qml`.
-  * Open the Omarchy Menu (Super+Space) → Setup → Plugins (reopen twice) → `Remove Plugin` (present only while a third-party plugin is installed) → pick `Hello (prime.hello)` → floating terminal `Delete 'prime.hello'? Its git repo remains upstream.` → Yes → `Removed prime.hello.` (a git checkout: deleted, no backup) → `Done!`. `HELLO2` leaves the bar; `omarchy-plugin-list | grep -c hello` → `0`; `omarchy-plugin-update prime.hello; echo exit=$?` → `plugin 'prime.hello' is not installed`, `exit=1`.
-  * Menu path for adding: `cd /tmp/hello && git reset -q --hard HEAD~1 && cd ~` (back to the good revision), then Setup → Plugins → `Add Plugin` → floating terminal prompts `Git URL of the plugin repo:`; type `file:///tmp/hello`, Enter → the ⚠️ warning and `Clone and add this plugin?` → Yes → `Added…` → `Enable 'prime.hello' now?` → No → `Enable it later with: omarchy plugin enable prime.hello`; Done. Then `omarchy-plugin-remove prime.hello --yes` → `Removed prime.hello.`; `rm -rf /tmp/hello`. Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `mkdir -p /tmp/hello && cd /tmp/hello` and press Return. The prompt is in `/tmp/hello`.
+  * Type `printf '%s\n' '{"schemaVersion":1,"id":"prime.hello","name":"Hello","version":"1.0.0","kinds":["bar-widget"],"entryPoints":{"barWidget":"Hello.qml"},"barWidget":{"displayName":"Hello","defaultSection":"right"}}' > manifest.json` and press Return. `manifest.json` exists.
+  * Type `printf '%s\n' 'import QtQuick' 'import qs.Ui' 'BarWidget { moduleName: "prime.hello"; implicitWidth: label.implicitWidth + 16; implicitHeight: barSize; Text { id: label; anchors.centerIn: parent; text: "HELLO"; color: "#ff0000"; font.pixelSize: 14 } }' > Hello.qml` and press Return. `Hello.qml` exists.
+  * Type `git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -qm init && cd ~` and press Return. The prompt is in the home directory.
+  * Type `omarchy-plugin-validate /tmp/hello; echo $?` and press Return. The last line is `0`.
+  * Type `omarchy-plugin-add /tmp/hello --enable --yes` and press Return. The output includes `Added prime.hello` and `Enabled prime.hello`.
+  * Look at the bar. A red `HELLO` label is present.
+  * Type `omarchy-plugin-list | grep hello` and press Return. The row is `prime.hello  enabled  third-party  bar-widget  Hello`.
+  * Type `omarchy-plugin-add file:///tmp/hello --yes; echo $?` and press Return. The output says the id is already used, and the last line is `1`.
+  * Type `omarchy-plugin-update prime.hello --yes` and press Return. The output includes `prime.hello is up to date.`
+  * Type `omarchy-plugin-update nosuch; echo $?` and press Return. The output includes `plugin 'nosuch' is not installed`, and the last line is `1`.
+  * Type `cd /tmp/hello && sed -i 's/HELLO/HELLO2/; s/1.0.0/1.0.1/' Hello.qml manifest.json && git -c user.name=t -c user.email=t@t commit -qam v2 && cd ~` and press Return. The prompt returns.
+  * Type `omarchy-plugin-update prime.hello --yes` and press Return. The output includes `Updated prime.hello.`
+  * Wait 3 seconds. The bar label reads `HELLO2`.
+  * Type `jq -r .version ~/.config/omarchy/plugins/prime.hello/manifest.json` and press Return. The output is `1.0.1`.
+  * Type `cd /tmp/hello && git mv Hello.qml Gone.qml && git -c user.name=t -c user.email=t@t commit -qm broken && cd ~` and press Return. The prompt returns.
+  * Type `omarchy-plugin-update prime.hello --yes; echo "exit=$?"` and press Return. The output includes `entry point file not found: 'Hello.qml'` and `rolled back`, and the last line is `exit=1`.
+  * Look at the bar. The label still reads `HELLO2`.
+  * Type `ls ~/.config/omarchy/plugins/prime.hello/` and press Return. `Hello.qml` is listed, and `Gone.qml` is not.
+  * Press Super+Space. The menu opens.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Setup, then Plugins. Remove Plugin is listed.
+  * Select Remove Plugin. The picker lists `Hello (prime.hello)`.
+  * Select Hello. A floating terminal asks `Delete 'prime.hello'? Its git repo remains upstream.`
+  * Choose Yes. The output includes `Removed prime.hello.` and `Done!`.
+  * Press a key. The floating terminal closes.
+  * Look at the bar. `HELLO2` is gone.
+  * Click the terminal. The terminal is focused.
+  * Type `omarchy-plugin-list | grep -c hello` and press Return. The output is `0`.
+  * Type `omarchy-plugin-update prime.hello; echo exit=$?` and press Return. The output includes `plugin 'prime.hello' is not installed`, and the last line is `exit=1`.
+  * Type `cd /tmp/hello && git reset -q --hard HEAD~1 && cd ~` and press Return. The prompt returns.
+  * Press Super+Space. The menu opens.
+  * Select Setup, then Plugins, then Add Plugin. A floating terminal asks `Git URL of the plugin repo:`.
+  * Type `file:///tmp/hello` and press Enter. A warning is shown, and it asks `Clone and add this plugin?`.
+  * Choose Yes. The output includes `Added`.
+  * Wait until it asks `Enable 'prime.hello' now?`.
+  * Choose No. The output includes `Enable it later with: omarchy plugin enable prime.hello`.
+  * Press a key if the floating terminal is still waiting. The floating terminal closes.
+  * Click the terminal. The terminal is focused.
+  * Type `omarchy-plugin-remove prime.hello --yes` and press Return. The output includes `Removed prime.hello.`
+  * Type `rm -rf /tmp/hello` and press Return. The prompt returns.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The installed copy's origin is `/tmp/hello`, so committing there is "publishing a new version". Without `--yes` the update shows a diff and asks with gum; `--yes` keeps it unattended.
-  * Menu rows show the plugin name with its id underneath; pick by the id line. If the shell logs a QML warning that is acceptable; a bar restart is not.
+  * The installed copy's origin is `/tmp/hello`, so a commit there is a new version. `HEAD~1` returns to the last valid revision.
+  * Without `--yes`, update shows a diff and asks. `--yes` skips that.
+  * Pick Hello by the id line `prime.hello`. A QML warning in the shell log is acceptable. A bar restart is not.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Terminal: validate `0`, the Added/Enabled lines and list row, the duplicate refusal and `not installed` with `1`, `up to date`, `Updated` + `1.0.1`, the validation failure with `rolled back` and `exit=1`, the listing with `Hello.qml`
-  ** Bar screenshots: `HELLO` → `HELLO2` → still `HELLO2` after the failed update → gone after the menu removal; the `Delete 'prime.hello'?` confirm and `Removed prime.hello.`; the Add Plugin floating flow with the warning and both prompts
+  ** Validation exits 0. The add prints Added and Enabled, the list row is enabled, and the bar shows `HELLO`.
+  ** A second add exits 1 because the id is already used. An update of `prime.hello` says it is up to date, and an update of `nosuch` exits 1.
+  ** After the v2 commit, update prints `Updated prime.hello.`, the bar shows `HELLO2`, and the manifest version is `1.0.1`.
+  ** The broken revision prints the missing entry-point error, says it rolled back, and exits 1. The bar still shows `HELLO2`, `Hello.qml` remains, and `Gone.qml` does not.
+  ** Remove Plugin asks `Delete 'prime.hello'?`, Yes prints `Removed prime.hello.` and `Done!`, the bar is clear, the list count is `0`, and a later update says it is not installed.
+  ** Add Plugin from `file:///tmp/hello` warns, adds on Yes, and leaves the plugin disabled on No. A final `--yes` remove deletes it.
   * If unsuccessful
-  ** `Gone.qml` present (broken revision kept), the widget vanishing, `Updated` printed for the broken revision, or `omarchy plugin list --json | jq '.[] | select(.id=="prime.hello")'` and `ls -la ~/.config/omarchy/plugins/`
+  ** `Gone.qml` is kept, the widget vanishes on the failed update, `Updated` is printed for the broken revision, or Remove Plugin does not name `prime.hello`.
 covers: bin/omarchy-plugin-update (fetch/ff/validate/reset ORIG_HEAD); bin/omarchy-plugin-add; bin/omarchy-plugin-validate; bin/omarchy-plugin-enable; bin/omarchy-plugin-disable; bin/omarchy-plugin-remove; bin/omarchy-menu-plugin remove; bin/omarchy-git-url-check; default/omarchy/omarchy-menu.jsonc (setup.plugin.add, setup.plugin.remove when); shell/services/PluginRegistry.qml localPluginWatcher hot reload; manual/32-shell-plugins.md ("Updating is a fast-forward pull", Adding a plugin from git, Removal); test/shell.d/plugin-add-test.sh
 
 ### plugin-add-from-public-git-url-and-unreachable   [VM-PARTIAL] [NET]
@@ -13538,28 +13729,41 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal (Super+Enter) and type `omarchy-plugin-add https://example.invalid/nope.git --yes; echo "exit=$?"` → `omarchy-plugin-add: failed to clone https://example.invalid/nope.git`, `exit=1`; `ls -a ~/.config/omarchy/plugins/` shows no `.add.tmp.*` leftovers.
-  * Type `omarchy-plugin-add https://github.com/omacom-io/this-repo-does-not-exist-404.git --yes; echo $?` → git's "repository not found" / authentication error, then `omarchy-plugin-add: failed to clone …`, `1`; still no `.add.tmp.*`.
-  * Verify the public plugin first: `git ls-remote https://github.com/omacom/elsewhen.git HEAD` succeeds; `git clone --depth 1 https://github.com/omacom/elsewhen.git /tmp/p && omarchy-plugin-validate /tmp/p; echo "exit=$?"` → `exit=0`; `rm -rf /tmp/p`.
-  ** If `git ls-remote` fails, open `https://plugins.omarchy.org` (`xdg-open` from the terminal) and copy any listed plugin's git URL instead; if it lists none, report VM-PARTIAL (no public plugin available) and stop after the two negatives.
-  * Type `omarchy-plugin-add https://github.com/omacom/elsewhen.git --enable --yes` (a few hundred KB; allow up to a minute over the NAT) → git clone progress, `Added <id> into …` and `Enabled <id>`; if it is a bar widget it appears on the bar (screenshot).
-  ** If the manifest is not valid for this shell version, `refusing to add: validation failed` preceded by the exact validate error — report the URL and the error; that is a pass for the guard, not for the plugin.
-  * Type `omarchy-plugin-list | grep -v first-party` → the plugin row is `enabled third-party`; `omarchy-plugin-update <id> --yes` → `<id> is up to date.`
-  * Type `omarchy-plugin-remove <id> --yes` → `Removed <id>.`; the widget leaves the bar and `omarchy-plugin-list` no longer lists it. Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy-plugin-add https://example.invalid/nope.git --yes; echo "exit=$?"` and press Return. The output includes `failed to clone https://example.invalid/nope.git`, and the last line is `exit=1`.
+  * Type `ls -a ~/.config/omarchy/plugins/` and press Return. No `.add.tmp.` entry is listed.
+  * Type `omarchy-plugin-add https://github.com/omacom-io/this-repo-does-not-exist-404.git --yes; echo $?` and press Return. The output includes `failed to clone`, and the last line is `1`.
+  * Type `ls -a ~/.config/omarchy/plugins/` and press Return. No `.add.tmp.` entry is listed.
+  * Type `git ls-remote https://github.com/omacom/elsewhen.git HEAD` and press Return. The command prints a commit.
+  ** If it fails, open `https://plugins.omarchy.org` and use a listed plugin URL for the remaining steps. If the page lists none, report VM-PARTIAL and stop.
+  * Type `git clone --depth 1 https://github.com/omacom/elsewhen.git /tmp/p && omarchy-plugin-validate /tmp/p; echo "exit=$?"` and press Return. The last line is `exit=0`.
+  * Type `rm -rf /tmp/p` and press Return. The prompt returns.
+  * Type `omarchy-plugin-add https://github.com/omacom/elsewhen.git --enable --yes` and press Return. The output includes `Added` and `Enabled`.
+  ** If it prints `refusing to add: validation failed`, record the error and stop. That is a pass for the guard.
+  * Look at the bar. If the plugin is a bar widget, record that it appeared.
+  * Type `omarchy-plugin-list | grep -v first-party` and press Return. The new row says `enabled` and `third-party`, and its id is recorded.
+  * Type `omarchy-plugin-update` followed by that id and `--yes`, and press Return. The output includes `is up to date.`
+  * Type `omarchy-plugin-remove` followed by that id and `--yes`, and press Return. The output includes `Removed`.
+  * Type `omarchy-plugin-list | grep -v first-party` and press Return. That id is not listed.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Network is outbound-only NAT; DNS works. `git ls-remote` failing means the URL is wrong, not the feature. `GIT_TERMINAL_PROMPT=0` is set by the script, so a private/missing repo fails instead of prompting.
-  * Never add a repo you have not validated with `omarchy-plugin-validate` first. A hang > 2 min during clone is a network report, not a defect.
+  * The clone is a few hundred KB and can take a minute. A hang longer than 2 minutes is a network report.
+  * `GIT_TERMINAL_PROMPT=0` is already set, so a missing repository fails instead of asking for a password.
+  * Do not add a repository until `omarchy-plugin-validate` exits 0. Record `omarchy-version`.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** The clean failure for the invalid host and the 404 repo, each `exit=1` with a clean plugins dir; validate `exit=0`; Added/Enabled (or the validate refusal with its reason); the list row and `up to date`; Removed with the bar reverted
+  ** The invalid host and the missing repository each fail to clone, exit 1, and leave no `.add.tmp.` directory.
+  ** `git ls-remote` prints a commit, and validating the shallow clone exits 0. If no public plugin is listed, the run stops as VM-PARTIAL after the two failures.
+  ** Adding the validated URL prints Added and Enabled, or it refuses with a validation error that is recorded as a guard pass.
+  ** The list row is an enabled third-party plugin. Update says it is up to date. Remove prints `Removed`, and the id is gone from the list.
   * If unsuccessful
-  ** The full stderr of the add, `ls -la ~/.config/omarchy/plugins/`, or a `.add.tmp.*` leftover
+  ** The add error is something other than a clone or validation failure, or a `.add.tmp.` directory remains.
 covers: bin/omarchy-plugin-add (https path, git clone path); bin/omarchy-git-url-check; bin/omarchy-plugin-validate; bin/omarchy-plugin-update; bin/omarchy-plugin-remove; manual/32-shell-plugins.md "Adding a plugin from git"
 
 # Apps in use

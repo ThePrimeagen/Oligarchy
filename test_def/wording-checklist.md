@@ -290,14 +290,14 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `plugin-clone-builtin-edit-and-remove-restores`
 - [x] `pkg-add-omarchy-zsh-setup-and-restore`
 - [x] `pkg-add-omarchy-fish-setup-and-restore`
-- [ ] `preinstalls-base-package-set-installed-audit`
-- [ ] `dev-env-php-pacman-install-and-remove`
-- [ ] `install-editor-helix-theme-alias-and-cleanup`
-- [ ] `install-service-nordvpn-decline-reboot-and-drop`
-- [ ] `install-gaming-xbox-controllers-xpadneo-and-remove`
-- [ ] `hermes-cli-stub-owned-remove-restore-and-foreign`
-- [ ] `plugin-update-local-origin-fast-forward-and-rollback`
-- [ ] `plugin-add-from-public-git-url-and-unreachable`
+- [x] `preinstalls-base-package-set-installed-audit`
+- [x] `dev-env-php-pacman-install-and-remove`
+- [x] `install-editor-helix-theme-alias-and-cleanup`
+- [x] `install-service-nordvpn-decline-reboot-and-drop`
+- [x] `install-gaming-xbox-controllers-xpadneo-and-remove`
+- [x] `hermes-cli-stub-owned-remove-restore-and-foreign`
+- [x] `plugin-update-local-origin-fast-forward-and-rollback`
+- [x] `plugin-add-from-public-git-url-and-unreachable`
 - [ ] `webapp-hotkeys-open-app-windows-and-focus-reuse`
 - [ ] `webapp-launch-cli-chromeless-and-or-focus`
 - [ ] `webapp-launcher-entries-open-app-windows`
