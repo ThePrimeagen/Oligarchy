@@ -690,16 +690,28 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and shorten idle so the test fits: `f=~/.config/omarchy/shell.json; [[ -s $f ]] || cp $OMARCHY_PATH/config/omarchy/shell.json $f; jq '.idle = {screensaver: 15, lock: 30}' $f > /tmp/s.json && mv /tmp/s.json $f`
-  ** `shell.json` replaces the defaults wholesale — the stock file is copied first and edited in place so the bar layout survives.
-  * Press Super+Ctrl+O. The menu opens directly in Toggle (Stay Awake, Notifications, Crash Capture, Screensaver, Nightlight, Menu Bar, Workspace Layout, Window Gaps, 1-Window Ratio). Click `Screensaver` with the mouse: a notification `Screensaver disabled` appears top-right.
-  ** The same submenu flips Crash Capture: Super+Ctrl+O, type `crash`, Return → toast `Crash capture disabled`; repeat → `Crash capture enabled`. Leave it enabled.
-  * In the terminal run `omarchy-toggle-enabled screensaver-off; echo "exit=$?"` → `exit=0`, then `omarchy-launch-screensaver; echo "exit=$?"` → `exit=1` and nothing appears on screen.
-  * Press Super+Escape → click `Screensaver`: the screensaver STILL starts (forced). Press Space. Run `omarchy-launch-screensaver force` → it starts too. Press Space.
-  * Stop all input for 35 s, screenshotting every 5 s: no screensaver at ~15 s; the lock screen appears at ~30 s. Move the mouse, type `prime`, press Enter. The desktop returns.
-  * Press Super+Ctrl+O → `Screensaver` again: toast `Screensaver enabled`. Run `omarchy-toggle-enabled screensaver-off; echo "exit=$?"` → `exit=1`, then `omarchy-launch-screensaver; echo "exit=$?"` → the screensaver appears; press Space; `exit=0`.
-  * Unhappy path: run `omarchy toggle` → `Toggle commands — Toggle Omarchy features:` lists `omarchy toggle bar`, `… idle`, `… nightlight`, `… screensaver`, `… suspend` …; then `omarchy-toggle bar-off sideways; echo "exit=$?"` → `Usage: omarchy-toggle <flag-name> [toggle|on|off]`, `exit=1`, and the bar stays visible.
-  * Restore idle: `jq '.idle = {screensaver: 150, lock: 300}' $f > /tmp/s.json && mv /tmp/s.json $f`. Close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Run `f=~/.config/omarchy/shell.json; [[ -s $f ]] || cp $OMARCHY_PATH/config/omarchy/shell.json $f` and press Enter. The shell config file is in place.
+  * Run `jq '.idle = {screensaver: 15, lock: 30}' $f > /tmp/s.json && mv /tmp/s.json $f` and press Enter. Idle times are 15 and 30 seconds.
+  * Press Super+Ctrl+O. The Toggle menu opens.
+  * Click Screensaver. Use the mouse only. The screensaver is disabled.
+  * Run `omarchy-launch-screensaver; echo exit=$?` and press Enter. It prints `exit=1`. Nothing starts.
+  * Press Super+Escape. The System menu opens.
+  * Click Screensaver. Use the mouse only. The screensaver starts.
+  * Press Space. The screensaver closes.
+  * Run `omarchy-launch-screensaver force` and press Enter. The screensaver starts.
+  * Press Space. The screensaver closes.
+  * Wait 35 seconds. Do not press a key or move the mouse. The lock screen appears. No screensaver appears first.
+  * Move the mouse. The lock screen stays up.
+  * Type `prime` and press Enter. The desktop returns.
+  * Press Super+Ctrl+O. The Toggle menu opens.
+  * Click Screensaver. Use the mouse only. The screensaver is enabled.
+  * Run `omarchy-launch-screensaver; echo exit=$?` and press Enter. The screensaver starts. It prints `exit=0`.
+  * Press Space. The screensaver closes.
+  * Run `omarchy-toggle bar-off sideways; echo exit=$?` and press Enter. It prints `exit=1`. The bar stays visible.
+  * Run `jq '.idle = {screensaver: 150, lock: 300}' $f > /tmp/s.json && mv /tmp/s.json $f` and press Enter. Idle times are 150 and 300 seconds.
+  * Press Super+W. The terminal closes.
+  * the desktop must return exactly as left.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -870,19 +882,22 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `f=~/.config/omarchy/shell.json; [[ -s $f ]] || cp $OMARCHY_PATH/config/omarchy/shell.json $f; omarchy-shell idle status | jq '{enabled, screensaver, lock}'` → `"enabled": true`, `"screensaver": 150`, `"lock": 300` (the shipped defaults; with them the screensaver comes at ~150 s and the lock at 300 s — not waited for here).
-  ** `shell.json` replaces the defaults wholesale — never write a file with only an `idle` block, or the bar layout is lost; that is why the stock file is copied and edited in place.
-  * Run `jq '.idle = {screensaver: 20, lock: 40}' $f > /tmp/s.json && mv /tmp/s.json $f` then `omarchy-shell idle status | jq '{screensaver, lock}'` → `20`, `40` (picked up live, no restart; the bar never blinked).
-  * Now stop touching the machine: no keys, no mouse. Take a screenshot every 5 seconds and note the elapsed time since the last Enter.
-  ** ~20 s: a fullscreen black window with animated ASCII art (the screensaver) appears.
-  ** ~40 s: the screensaver is replaced by the lock screen (`Enter Password` box).
-  ** ~45 s: the screen goes black (lock blank).
-  * Move the mouse; the lock box comes back. Type `prime`, Enter. The desktop returns with the terminal as left.
-  * Run `journalctl -t omarchy-shell --since -3min --no-pager | grep 'omarchy idle' | sudo tee /dev/ttyS0` (password `prime`). Expected: `idle-cycle-start: screensaver=20 lock=40`, `process-start: screensaver …`, `lock-system: lock-timeout`.
-  * Second cycle: stop all input again. At ~20 s the screensaver appears; at ~25 s press Space — it closes and the desktop is back. From then until 55 s after this cycle started, move the mouse a little every 4 s (screenshot each time). The lock screen must NOT appear at ~40 s.
-  ** Without the mouse jiggles a fresh cycle would start 20 s after the dismissal and show the screensaver again — correct behaviour, but confusing to judge.
-  * Run the journal command again: it now also contains `idle-cycle-cancel: screensaver-dismissed` and only the one earlier `lock-system: lock-timeout`.
-  * Restore: `jq '.idle = {screensaver: 150, lock: 300}' $f > /tmp/s.json && mv /tmp/s.json $f` and confirm `omarchy-shell idle status | jq .lock` → `300`. Close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Run `f=~/.config/omarchy/shell.json; [[ -s $f ]] || cp $OMARCHY_PATH/config/omarchy/shell.json $f` and press Enter. The shell config file is in place.
+  * Run `omarchy-shell idle status | jq .screensaver,.lock` and press Enter. It prints 150 and 300.
+  * Run `jq '.idle = {screensaver: 20, lock: 40}' $f > /tmp/s.json && mv /tmp/s.json $f` and press Enter. The file is saved.
+  * Run `omarchy-shell idle status | jq .screensaver,.lock` and press Enter. It prints 20 and 40.
+  * Wait, taking a screenshot every 5 seconds. Do not press a key or move the mouse. The screensaver starts.
+  * Keep waiting. The screen locks.
+  * Keep waiting. The lock screen goes black.
+  * Move the mouse. The lock screen returns.
+  * Type `prime` and press Enter. The desktop returns.
+  * Wait, taking a screenshot every 5 seconds. Do not press a key or move the mouse. The screensaver starts.
+  * Press Space. The screensaver closes. The screen does not lock.
+  * Run `jq '.idle = {screensaver: 150, lock: 300}' $f > /tmp/s.json && mv /tmp/s.json $f` and press Enter. The file is saved.
+  * Run `omarchy-shell idle status | jq .lock` and press Enter. It prints 300.
+  * Press Super+W. The terminal closes.
+  * the desktop must return exactly as left.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -911,12 +926,18 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter. Prepare: `f=~/.config/omarchy/shell.json; [[ -s $f ]] || cp $OMARCHY_PATH/config/omarchy/shell.json $f`
-  * Run `jq '.idle = {screensaver: "soon", lock: -5}' $f > /tmp/s.json && mv /tmp/s.json $f` then `omarchy-shell idle status | jq '{screensaver, lock, enabled}'` → `150`, `300`, `true` (invalid values ignored, idle still enabled).
-  * Run `jq '.idle = {screensaver: 600, lock: 25}' $f > /tmp/s.json && mv /tmp/s.json $f` then `omarchy-shell idle status | jq '{screensaver, lock, screensaverDelay, lockDelay}'` → `600`, `25`, `575`, `0`.
-  * Stop all input for 35 s, screenshotting every 5 s. At ~25 s the lock screen appears directly — no screensaver beforehand.
-  * Move the mouse, type `prime`, Enter to unlock.
-  * Restore: `jq '.idle = {screensaver: 150, lock: 300}' $f > /tmp/s.json && mv /tmp/s.json $f`; confirm `omarchy-shell idle status | jq .lock` → `300`. Close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Run `f=~/.config/omarchy/shell.json; [[ -s $f ]] || cp $OMARCHY_PATH/config/omarchy/shell.json $f` and press Enter. The shell config file is in place.
+  * Run `jq '.idle = {screensaver: "soon", lock: -5}' $f > /tmp/s.json && mv /tmp/s.json $f` and press Enter. The file is saved.
+  * Run `omarchy-shell idle status | jq .screensaver,.lock` and press Enter. It prints 150 and 300.
+  * Run `jq '.idle = {screensaver: 600, lock: 25}' $f > /tmp/s.json && mv /tmp/s.json $f` and press Enter. The file is saved.
+  * Run `omarchy-shell idle status | jq .lock` and press Enter. It prints 25.
+  * Wait 35 seconds. Do not press a key or move the mouse. The screen locks. No screensaver appears.
+  * Type `prime` and press Enter. The desktop returns.
+  * Run `jq '.idle = {screensaver: 150, lock: 300}' $f > /tmp/s.json && mv /tmp/s.json $f` and press Enter. The file is saved.
+  * Run `omarchy-shell idle status | jq .lock` and press Enter. It prints 300.
+  * Press Super+W. The terminal closes.
+  * the desktop must return exactly as left.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -941,14 +962,21 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `omarchy toggle idle status` → `{"enabled":false,"class":"disabled","tooltip":"Stay Awake"}`.
-  * Press Super+Ctrl+I. A coffee-cup glyph lights in the bar's indicator area left of the clock; hover it for its tooltip. Run `omarchy toggle idle status` → `"enabled":true` … `"tooltip":"Allow Idle Lock & Screensaver"`, and `ls ~/.local/state/omarchy/indicators/` → `stay-awake`.
-  * Run `omarchy restart shell` — after the bar returns the indicator is still shown (persisted).
-  * Run `omarchy-update-stay-awake start` (password `prime`) then `omarchy-update-stay-awake stop`. The indicator stays ON — the user set it, the update must not clear it.
-  * Press Super+Space → `Trigger` → `Toggle` → `Stay Awake` with the mouse. The glyph disappears; `omarchy toggle idle status` → `"enabled":false`; the file is gone.
-  * Run `omarchy-update-stay-awake start`: the indicator turns ON and `systemd-inhibit --list | grep omarchy-update` shows `Omarchy update in progress` in block mode. Run `omarchy-update-stay-awake stop`: the indicator turns OFF and the grep shows nothing.
-  * Run `omarchy toggle idle stay-awake` (prints `disabled`, cup on), then `omarchy toggle idle allow-idle` (prints `enabled`, cup off).
-  * Unhappy path: run `omarchy toggle idle sleepy; echo "exit=$?"` → `Usage: omarchy-toggle-idle [toggle|stay-awake|allow-idle|status]`, `exit=1`; the cup stays off. Close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Run `omarchy toggle idle status` and press Enter. Stay Awake is off.
+  * Press Super+Ctrl+I. Stay Awake turns on.
+  * Run `omarchy toggle idle status` and press Enter. Stay Awake is on.
+  * Run `omarchy restart shell` and press Enter. The shell restarts. Stay Awake stays on.
+  * Run `omarchy-update-stay-awake start` and press Enter. Password is `prime`. Stay Awake stays on.
+  * Run `omarchy-update-stay-awake stop` and press Enter. Stay Awake stays on.
+  * Press Super+Space. The menu opens.
+  * Click Trigger. Use the mouse only. Trigger opens.
+  * Click Toggle. Use the mouse only. Toggle opens.
+  * Click Stay Awake. Use the mouse only. Stay Awake turns off.
+  * Run `omarchy-update-stay-awake start` and press Enter. Stay Awake turns on.
+  * Run `omarchy-update-stay-awake stop` and press Enter. Stay Awake turns off.
+  * Run `omarchy toggle idle sleepy; echo exit=$?` and press Enter. It prints `exit=1`. Stay Awake stays off.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
