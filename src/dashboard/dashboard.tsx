@@ -12,6 +12,7 @@ import {
   getImage,
   groupDefinitions,
   listAutomationQueue,
+  listRunningAutomationJobs,
   listProcessSeries,
   listServers,
   listSessions,
@@ -27,6 +28,7 @@ import {
   type DefinitionStat,
   type DefinitionVersions,
   type DurationChart as DurationChartData,
+  type AutomationJob,
   type Session,
   type TestBasePrompt,
   type TestResultOutcome,
@@ -34,7 +36,7 @@ import {
 import { clickerPage } from "./clicker.ts";
 import { HTMX_INTEGRITY, HTMX_URL } from "./htmx.ts";
 import { abortLinearIssue, type LinearEnv } from "./linear.ts";
-import { Fleet, type Halves, Process, Queue, ServersPage } from "./servers.tsx";
+import { Fleet, type Halves, Process, Queue, ServersPage, since } from "./servers.tsx";
 import { SENTRY_DSN } from "../observability/dsn.ts";
 
 const errorMessage = (cause: unknown): string =>
@@ -397,9 +399,18 @@ type DefinitionsProps = {
   selected: DefinitionVersions | undefined;
   // Why the last edit of the selected definition was refused, when it was.
   notice: EditNotice | undefined;
+  // What is in flight, or null when the page could not be read, so a failure does not claim
+  // that nothing is running.
+  running: ReadonlyArray<AutomationJob> | null;
 };
 
 const definitionHref = (name: string): string => `/definitions?name=${encodeURIComponent(name)}`;
+
+const runningHref = (name: string | undefined): string =>
+  name === undefined
+    ? "/definitions/running"
+    : `/definitions/running?name=${encodeURIComponent(name)}`;
+
 const editHref = (name: string, notice: EditNotice): string =>
   `${definitionHref(name)}&edit=${notice}`;
 
@@ -601,12 +612,87 @@ const definitionsBody = ({ groups, outcomes, name, selected, notice }: Definitio
   );
 };
 
+// One running job: its definition, what it is doing, the ticket that names it, and how long it
+// has been running. Abort posts the ticket and action the shared /abort route already stops.
+// view=definitions is how that route tells this form apart from the servers page: htmx swaps
+// the list, and a submit without it returns here. A job with no ticket has nothing to name.
+const RunningJob: FC<{ job: AutomationJob; definition: string | undefined }> = ({
+  job,
+  definition,
+}) => (
+  <li class="running-tests__job">
+    <a href={definitionHref(job.test)}>{job.test}</a>
+    <span class="running-tests__action">{job.action}</span>
+    <span class="running-tests__ticket">{job.ticket ?? "—"}</span>
+    <span class="running-tests__age">{since(job.startedAt, job.queriedAt)}</span>
+    {job.ticket === null ? null : (
+      <form
+        method="post"
+        action="/abort"
+        hx-post="/abort"
+        hx-confirm="are you sure?"
+        hx-target="#running-tests"
+        hx-swap="innerHTML"
+      >
+        <input type="hidden" name="ticket" value={job.ticket} />
+        <input type="hidden" name="action" value={job.action} />
+        <input type="hidden" name="view" value="definitions" />
+        {definition === undefined ? null : (
+          <input type="hidden" name="definition" value={definition} />
+        )}
+        <button type="submit" class="button button--abort">
+          Abort
+        </button>
+      </form>
+    )}
+  </li>
+);
+
+// The list the page polls and the abort swaps in. Only what is running: a pending job has not
+// started, and a finished one is a result, not something to stop.
+const RunningList: FC<{
+  jobs: ReadonlyArray<AutomationJob>;
+  definition: string | undefined;
+}> = ({ jobs, definition }) =>
+  jobs.length === 0 ? (
+    <p class="running-tests__empty">No tests are running.</p>
+  ) : (
+    <ol class="running-tests__list">
+      {jobs.map((job) => (
+        <RunningJob job={job} definition={definition} />
+      ))}
+    </ol>
+  );
+
+// Above every definition, so an operator sees what is in flight before any wording. The poll is
+// the queue's thirty seconds: a job that starts after the page opened shows up without a reload,
+// and the swap replaces the list while the poll stays on this frame.
+const RunningTests: FC<{
+  jobs: ReadonlyArray<AutomationJob>;
+  definition: string | undefined;
+}> = ({ jobs, definition }) => (
+  <section class="running-tests" aria-labelledby="running-tests-heading">
+    <h2 id="running-tests-heading">Running</h2>
+    <div
+      id="running-tests"
+      hx-get={runningHref(definition)}
+      hx-trigger="every 30s"
+      hx-swap="innerHTML"
+    >
+      <RunningList jobs={jobs} definition={definition} />
+    </div>
+  </section>
+);
+
 const Definitions: FC<DefinitionsProps> = (props) => (
   <Shell page="definitions">
     <section id="definitions" class="records definitions" aria-labelledby="definitions-heading">
       <div class="sessions__heading">
         <h1 id="definitions-heading">Test definitions</h1>
       </div>
+      {props.running === null ? null : (
+        <RunningTests jobs={props.running} definition={props.name ?? props.selected?.name} />
+      )}
       {definitionsBody(props)}
     </section>
   </Shell>
@@ -709,9 +795,10 @@ app.get("/definitions", async (context) => {
   // a stale or hand-made link and shows nothing.
   const notice = edit === "unchanged" || edit === "empty" ? edit : undefined;
   try {
-    const [definitions, outcomes] = await Promise.all([
+    const [definitions, outcomes, running] = await Promise.all([
       listTestDefinitions(context.env.HYPERDRIVE.connectionString),
       listTestResultOutcomes(context.env.HYPERDRIVE.connectionString),
+      listRunningAutomationJobs(context.env.HYPERDRIVE.connectionString),
     ]);
     const groups = groupDefinitions(definitions);
     const selected = selectDefinition(groups, name);
@@ -726,6 +813,7 @@ app.get("/definitions", async (context) => {
         name={name}
         selected={selected}
         notice={notice}
+        running={running}
       />,
     );
   } catch (error) {
@@ -739,8 +827,23 @@ app.get("/definitions", async (context) => {
         name={name}
         selected={undefined}
         notice={undefined}
+        running={null}
       />,
     );
+  }
+});
+
+// What the running strip polls for: the jobs in flight, not the rest of the page. `name` is the
+// definition an abort without htmx returns to, echoed into the forms the swap inserts.
+app.get("/definitions/running", async (context) => {
+  const definition = context.req.query("name");
+  try {
+    const running = await listRunningAutomationJobs(context.env.HYPERDRIVE.connectionString);
+    return context.html(<RunningList jobs={running} definition={definition} />);
+  } catch (error) {
+    Sentry.captureException(error);
+    console.error("dashboard: listing running tests:", errorMessage(error));
+    return context.html(<p>error: internal error</p>, 500);
   }
 });
 
@@ -790,6 +893,7 @@ app.post("/definitions", async (context) => {
         name={name}
         selected={undefined}
         notice={undefined}
+        running={null}
       />,
     );
   }
@@ -986,17 +1090,28 @@ app.post("/servers/delete", async (context) => {
 // at all, closes the running row here so the queue does not stay stuck; Sentry records
 // "Cloudflare aborted job" only when that write lands. Once a row closed either way the
 // ticket moves; a Linear failure is logged and the row stays closed. This route always
-// answers 200: the operator's click is done either way.
+// answers 200 when htmx or JSON asked, and a plain form post redirects. The servers page
+// gets the queue or /servers. A form that posts view=definitions gets the running list, or
+// /definitions, so aborting there does not land on the servers page. The operator's click
+// is done either way.
 // OpenCode's force-kill is 5s; ten seconds is that wait plus the round trip. A hung
 // server must not hold the operator's 200.
 const ABORT_TIMEOUT_MS = 10_000;
 
 app.post("/abort", async (context) => {
-  const wantsQueue = context.req.header("hx-request") === "true";
+  const wantsFragment = context.req.header("hx-request") === "true";
   const isJson = (context.req.header("content-type") ?? "").includes("application/json");
+  let view: unknown;
+  let definition: unknown;
   const reply = async () => {
-    if (wantsQueue) {
+    const definitionsView = view === "definitions";
+    const back = typeof definition === "string" ? definition : undefined;
+    if (wantsFragment) {
       try {
+        if (definitionsView) {
+          const running = await listRunningAutomationJobs(context.env.HYPERDRIVE.connectionString);
+          return context.html(<RunningList jobs={running} definition={back} />);
+        }
         const queue = await listAutomationQueue(context.env.HYPERDRIVE.connectionString);
         return context.html(<Queue queue={queue} />);
       } catch (error) {
@@ -1007,6 +1122,9 @@ app.post("/abort", async (context) => {
     }
     if (isJson) {
       return context.json({ ok: "true" });
+    }
+    if (definitionsView) {
+      return context.redirect(back === undefined ? "/definitions" : definitionHref(back), 303);
     }
     return context.redirect("/servers", 303);
   };
@@ -1023,6 +1141,8 @@ app.post("/abort", async (context) => {
       const body = await context.req.parseBody();
       ticket = body.ticket;
       action = body.action;
+      view = body.view;
+      definition = body.definition;
     }
     // A post naming less than a job (a text ticket and one of the two actions) does nothing.
     if (

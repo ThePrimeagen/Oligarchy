@@ -358,6 +358,18 @@ const currentCard = (html: string): string =>
 const currentLinks = (html: string): number =>
   (html.match(/class="definitions__link definitions__link--current"/g) ?? []).length;
 
+// The running strip at the top of the definitions page, up to its own end. It has no nested
+// section, so the first close is the close.
+const runningSection = (html: string): string =>
+  /<section class="running-tests"[\s\S]*?<\/section>/.exec(html)?.[0] ?? "";
+
+const definitionsAbortForm = (
+  ticket: string,
+  action: QueuedJob["action"],
+  definition: string,
+): string =>
+  `<form method="post" action="/abort" hx-post="/abort" hx-confirm="are you sure?" hx-target="#running-tests" hx-swap="innerHTML"><input type="hidden" name="ticket" value="${ticket}"/><input type="hidden" name="action" value="${action}"/><input type="hidden" name="view" value="definitions"/><input type="hidden" name="definition" value="${definition}"/><button type="submit" class="button button--abort">Abort</button></form>`;
+
 // The wordings of the current card, in page order: each a <details> whose summary names the
 // version, the newest open, with the body that follows it up to the next wording or the list's end.
 type Wording = { readonly label: string; readonly open: boolean; readonly body: string };
@@ -692,9 +704,100 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
     expect(card).not.toContain('<table class="runs"');
     expect(card).not.toContain("No runs yet.");
   });
+
+  it("lists every running test at the top of the main area, and offers to abort one that has a ticket", async () => {
+    await seed(dbUrl, (db) =>
+      seedQueue(db, "running-on-definitions", [
+        {
+          ticket: "RUN-1",
+          action: "drive",
+          status: "running",
+          queuedSecondsAgo: 120,
+          startedSecondsAgo: 45,
+        },
+        {
+          ticket: "RUN-2",
+          action: "diagnose",
+          status: "running",
+          queuedSecondsAgo: 30,
+          startedSecondsAgo: 10,
+        },
+        {
+          ticket: null,
+          action: "drive",
+          status: "running",
+          queuedSecondsAgo: 20,
+          startedSecondsAgo: 8,
+        },
+        { ticket: "RUN-PEND", action: "drive", status: "pending", queuedSecondsAgo: 5 },
+        {
+          ticket: "RUN-DONE",
+          action: "drive",
+          status: "succeeded",
+          queuedSecondsAgo: 400,
+          startedSecondsAgo: 300,
+          finishedSecondsAgo: 60,
+        },
+      ]),
+    );
+    const { status, html } = await getPage("/definitions?name=running-on-definitions", dbUrl);
+    expect(status).toBe(200);
+    const runningAt = html.indexOf('<section class="running-tests"');
+    const headingAt = html.indexOf('id="definitions-heading"');
+    const layoutAt = html.indexOf('class="definitions__layout"');
+    expect(headingAt).toBeGreaterThan(-1);
+    expect(runningAt).toBeGreaterThan(headingAt);
+    expect(layoutAt).toBeGreaterThan(runningAt);
+    const running = runningSection(html);
+    expect(running).toContain(
+      '<div id="running-tests" hx-get="/definitions/running?name=running-on-definitions" hx-trigger="every 30s" hx-swap="innerHTML">',
+    );
+    // Diagnoses ahead of drives, then queue order: the pending and finished jobs are not running.
+    const diagnose = running.indexOf(">RUN-2<");
+    const drive = running.indexOf(">RUN-1<");
+    const unticketed = running.indexOf(">—</span>");
+    expect(diagnose).toBeGreaterThan(-1);
+    expect(diagnose).toBeLessThan(drive);
+    expect(drive).toBeLessThan(unticketed);
+    expect(running).not.toContain("RUN-PEND");
+    expect(running).not.toContain("RUN-DONE");
+    expect(running).toContain(
+      '<a href="/definitions?name=running-on-definitions">running-on-definitions</a>',
+    );
+    expect(running).toContain(definitionsAbortForm("RUN-2", "diagnose", "running-on-definitions"));
+    expect(running).toContain(definitionsAbortForm("RUN-1", "drive", "running-on-definitions"));
+    expect(running.match(/action="\/abort"/g)).toHaveLength(2);
+    expect(html.indexOf('class="definitions__nav"')).toBeGreaterThan(runningAt);
+  });
 });
 
 describe.skipIf(dbUrl === "")("dashboard/definitions page unhappy path", () => {
+  it("says nothing is running, and offers no abort, when every job is waiting or finished", async () => {
+    await seed(dbUrl, (db) =>
+      seedQueue(db, "nothing-running", [
+        pendingJob("RUN-NONE"),
+        {
+          ticket: "RUN-FINISHED",
+          action: "drive",
+          status: "failed",
+          queuedSecondsAgo: 80,
+          startedSecondsAgo: 40,
+          finishedSecondsAgo: 10,
+        },
+      ]),
+    );
+    const { status, html } = await getPage("/definitions?name=lock-screen", dbUrl);
+    expect(status).toBe(200);
+    const running = runningSection(html);
+    expect(running).toContain("No tests are running.");
+    expect(running).not.toContain("RUN-NONE");
+    expect(running).not.toContain("RUN-FINISHED");
+    expect(running).not.toContain('action="/abort"');
+    expect(html.indexOf('<section class="running-tests"')).toBeLessThan(
+      html.indexOf('class="definitions__layout"'),
+    );
+  });
+
   it("answers 404 for a name no definition carries, keeping the sidebar and selecting nothing", async () => {
     const { status, html } = await getPage("/definitions?name=no-such-definition", dbUrl);
     expect(status).toBe(404);
@@ -872,12 +975,77 @@ describe.skipIf(dbUrl === "")("dashboard/results page: the test each session ran
   });
 });
 
+describe.skipIf(dbUrl === "")("dashboard/definitions running fragment", () => {
+  it("serves the running list alone at /definitions/running, what the top of the page polls for", async () => {
+    await seed(dbUrl, (db) =>
+      seedQueue(db, "running-fragment", [runningJob("RUN-FRAG"), pendingJob("RUN-FRAG-PEND")]),
+    );
+    const { status, html } = await getPage("/definitions/running?name=running-fragment", dbUrl);
+    expect(status).toBe(200);
+    expect(html.startsWith('<ol class="running-tests__list">')).toBe(true);
+    expect(html).toContain(definitionsAbortForm("RUN-FRAG", "drive", "running-fragment"));
+    expect(html).not.toContain("RUN-FRAG-PEND");
+    expect(html).not.toContain("<html");
+    expect(html).not.toContain("definitions-heading");
+  });
+
+  it("lists every running job, past the fifty the queue page shows", async () => {
+    const running: ReadonlyArray<QueuedJob> = Array.from({ length: 51 }, (_, index) => ({
+      ticket: `RUN-ALL-${String(index)}`,
+      action: "drive",
+      status: "running",
+      queuedSecondsAgo: 1_000 - index,
+      startedSecondsAgo: 1_000 - index,
+    }));
+    await seed(dbUrl, (db) =>
+      seedQueue(db, "running-all", [...running, pendingJob("RUN-ALL-PEND")]),
+    );
+    const page = await getPage("/definitions?name=running-all", dbUrl);
+    expect(page.status).toBe(200);
+    const runningHtml = runningSection(page.html);
+    expect(runningHtml.match(/action="\/abort"/g)).toHaveLength(51);
+    expect(runningHtml.indexOf(">RUN-ALL-0<")).toBeLessThan(runningHtml.indexOf(">RUN-ALL-50<"));
+    expect(runningHtml).not.toContain("RUN-ALL-PEND");
+    const fragment = await getPage("/definitions/running?name=running-all", dbUrl);
+    expect(fragment.status).toBe(200);
+    expect(fragment.html.match(/action="\/abort"/g)).toHaveLength(51);
+    expect(fragment.html).not.toContain("RUN-ALL-PEND");
+  });
+
+  it("keeps an empty ?name on the running poll, the same name the page was asked for", async () => {
+    await seed(dbUrl, (db) => seedQueue(db, "running-empty-name", [pendingJob("RUN-EMPTY")]));
+    const { status, html } = await getPage("/definitions?name=", dbUrl);
+    expect(status).toBe(404);
+    expect(runningSection(html)).toContain('hx-get="/definitions/running?name="');
+  });
+
+  it("serves the empty line alone when nothing is running", async () => {
+    await seed(dbUrl, (db) =>
+      seedQueue(db, "running-fragment-empty", [pendingJob("RUN-FRAG-NONE")]),
+    );
+    const { status, html } = await getPage("/definitions/running", dbUrl);
+    expect(status).toBe(200);
+    expect(html).toBe('<p class="running-tests__empty">No tests are running.</p>');
+  });
+});
+
+describe("dashboard/definitions running fragment unhappy path", () => {
+  it("answers 500 when the database is unreachable and never echoes the password", async () => {
+    const { status, html } = await getPage("/definitions/running", REFUSED_URL);
+    expect(status).toBe(500);
+    expect(html).toBe("<p>error: internal error</p>");
+    expect(html).not.toContain(SENTINEL_PASSWORD);
+  });
+});
+
 describe("dashboard/definitions page unhappy path: unreachable database", () => {
   it("answers 500 with the unavailable message and never echoes the password", async () => {
     const { status, html } = await getPage("/definitions?name=lock-screen", REFUSED_URL);
     expect(status).toBe(500);
     expect(html).toContain("Test definitions are unavailable.");
     expect(html).not.toContain('href="/definitions?name=');
+    expect(html).not.toContain('id="running-tests"');
+    expect(html).not.toContain("No tests are running.");
     expect(html).not.toContain(SENTINEL_PASSWORD);
   });
 });
@@ -1725,6 +1893,45 @@ describe("dashboard POST /abort happy path: the outbound calls", () => {
     }
   });
 
+  it("posts a definitions-page abort the same way, and returns to that definition", async () => {
+    const proxy = await StubProxy.startStubProxy(() => StubProxy.OK);
+    const linear = await StubProxy.startStubProxy(linearAnswering());
+    try {
+      const response = await app.request(
+        "/abort",
+        {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            ticket: "ABT-FORM-DEF",
+            action: "drive",
+            view: "definitions",
+            definition: "lock-screen",
+          }).toString(),
+        },
+        abortBindings({
+          databaseUrl: REFUSED_URL,
+          automationUrl: proxy.url,
+          linearUrl: linear.url,
+        }),
+      );
+      expect(response.status).toBe(303);
+      expect(response.headers.get("location")).toBe("/definitions?name=lock-screen");
+      expect(proxy.requests).toEqual([
+        {
+          method: "POST",
+          url: "/abort",
+          authorization: `Bearer ${TOKEN}`,
+          body: { ticket: "ABT-FORM-DEF", action: "drive" },
+        },
+      ]);
+      expect(linear.requests).toEqual(linearMove("ABT-FORM-DEF"));
+    } finally {
+      await proxy.close();
+      await linear.close();
+    }
+  });
+
   it("posts the ticket with the bearer, moves the ticket to Aborted once the automation server answers 200, and answers 200", async () => {
     const proxy = await StubProxy.startStubProxy(() => StubProxy.OK);
     const linear = await StubProxy.startStubProxy(linearAnswering());
@@ -1912,6 +2119,48 @@ describe.skipIf(dbUrl === "")("dashboard POST /abort happy path", () => {
       await linear.close();
     }
   });
+
+  it("answers the running list with the stopped job gone when the definitions page aborts it", async () => {
+    const proxy = await StubProxy.startStubProxy(() => StubProxy.refusal(500, "opencode exited 1"));
+    const linear = await StubProxy.startStubProxy(linearAnswering());
+    try {
+      await seed(dbUrl, (db) =>
+        seedQueue(db, "abort-definitions", [
+          runningJob("ABT-DEF-STOP"),
+          runningJob("ABT-DEF-KEEP"),
+        ]),
+      );
+      const response = await app.request(
+        "/abort",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+            "hx-request": "true",
+          },
+          body: new URLSearchParams({
+            ticket: "ABT-DEF-STOP",
+            action: "drive",
+            view: "definitions",
+            definition: "abort-definitions",
+          }).toString(),
+        },
+        abortBindings({ databaseUrl: dbUrl, automationUrl: proxy.url, linearUrl: linear.url }),
+      );
+      expect(response.status).toBe(200);
+      const html = await response.text();
+      expect(html.startsWith('<ol class="running-tests__list">')).toBe(true);
+      expect(html).toContain(definitionsAbortForm("ABT-DEF-KEEP", "drive", "abort-definitions"));
+      expect(html).not.toContain("ABT-DEF-STOP");
+      expect(html).not.toContain("<h3>running</h3>");
+      expect((await jobByTicket(dbUrl, "ABT-DEF-STOP")).status).toBe("aborted");
+      expect((await jobByTicket(dbUrl, "ABT-DEF-KEEP")).status).toBe("running");
+      expect(linear.requests).toEqual(linearMove("ABT-DEF-STOP"));
+    } finally {
+      await proxy.close();
+      await linear.close();
+    }
+  });
 });
 
 describe("dashboard POST /abort unhappy path: always 200", () => {
@@ -1983,6 +2232,28 @@ describe("dashboard POST /abort unhappy path: always 200", () => {
     );
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("<p>error: internal error</p>");
+  });
+
+  it("answers the running-list error when the definitions page asks and the database is unreachable", async () => {
+    const response = await app.request(
+      "/abort",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          "hx-request": "true",
+        },
+        body: new URLSearchParams({ view: "definitions", definition: "lock-screen" }).toString(),
+      },
+      abortBindings({
+        databaseUrl: REFUSED_URL,
+        automationUrl: REFUSED_HTTP,
+        linearUrl: REFUSED_HTTP,
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("<p>error: internal error</p>");
+    expect(response.headers.get("location")).toBeNull();
   });
 
   it("answers 200 when the automation server is unreachable and the database is too", async () => {

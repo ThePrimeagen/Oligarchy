@@ -64,4 +64,49 @@ describe("POST /abort unhappy path", () => {
     expect(response.status).toBe(303);
     expect(response.headers.get("location")).toBe("/servers");
   });
+
+  it("sends a definitions-page abort that names no ticket back to that definition", async () => {
+    const response = await app.request(
+      "/abort",
+      {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          view: "definitions",
+          definition: "lock-screen",
+        }).toString(),
+      },
+      env,
+    );
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe("/definitions?name=lock-screen");
+  });
+
+  it("sends a definitions-page abort with no definition back to the definitions page", async () => {
+    const response = await app.request(
+      "/abort",
+      {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ view: "definitions" }).toString(),
+      },
+      env,
+    );
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe("/definitions");
+  });
+
+  it("sends a definitions-page abort whose definition is empty back to that empty name", async () => {
+    const response = await app.request(
+      "/abort",
+      {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ view: "definitions", definition: "" }).toString(),
+      },
+      env,
+    );
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe("/definitions?name=");
+  });
 });
