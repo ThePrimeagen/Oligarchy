@@ -4599,24 +4599,31 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a browser (Super+Shift+Enter) on workspace 1 (click Wait on a "not responding" dialog); press Super+2 and open a terminal.
-  * In the terminal type `hyprctl clients -j | jq -r '.[].class'` Return → note the browser's class (e.g. `chromium`).
-  * Type `omarchy-hyprland-focus-app chromium` Return (use the class you saw, any case): the view switches to workspace 1 with the browser focused.
-  * Press Super+2 back to the terminal and type `omarchy-hyprland-focus-app nosuchapp; echo "exit=$?"` Return → 1, focus unchanged. `omarchy-hyprland-focus-app; echo "exit=$?"` → usage, 1.
-  * Close the browser and the terminal; the desktop is empty on workspace 1.
+  * Press Super+Shift+Return. Chromium opens on workspace 1.
+  ** If Chromium shows "application not responding", click Wait.
+  * Press Super+2. Workspace 2 is empty.
+  * Press Super+Return. A terminal opens on workspace 2.
+  * Type `hyprctl clients -j | jq -r '.[].class'` and press Return. Note the browser class.
+  * Type `omarchy-hyprland-focus-app chromium` and press Return. Use the class you noted if it is not `chromium`. The view moves to workspace 1. Chromium has focus.
+  * Press Super+2. Workspace 2 is showing. The terminal is there.
+  * Type `omarchy-hyprland-focus-app nosuchapp; echo "exit=$?"` and press Return. The last line is `exit=1`. The view stays on workspace 2.
+  * Type `omarchy-hyprland-focus-app; echo "exit=$?"` and press Return. A usage line appears. The last line is `exit=1`. The view stays on workspace 2.
+  * Press Super+W. The terminal closes.
+  * Press Super+1. Workspace 1 is showing.
+  * Press Super+W. Chromium closes. The desktop is empty on workspace 1.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The bar's workspace indicator and the gradient focus border show which window received focus; Chromium takes 10–20 s to appear.
+  * Chromium can take 10–20 seconds to appear.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screendump of the browser focused on workspace 1 right after the command from workspace 2; the exit codes 1 and 1 with focus unchanged
+  * On success
+  ** Screenshot of Chromium focused on workspace 1 after the command from workspace 2, and the two `exit=1` lines with the view still on workspace 2
   * If unsuccessful
-  ** `hyprctl clients -j | jq '.[] | {class,initialClass,initialTitle,workspace}'`
+  ** The class list and which workspace is showing
 covers: bin/omarchy-hyprland-focus-app; docs/notifications.md (click fallback); test/shell.d/hyprland-focus-app-test.sh
 
 ### monitor-scaling-hotkeys-cli-and-panel   [VM-OK]
@@ -4626,29 +4633,58 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return and type `omarchy-hyprland-monitor-scaling; hyprctl monitors -j | jq -c '.[]|{name,width,height,scale}'; grep -n 'omarchy_monitor_scale\|omarchy_gdk_scale' ~/.config/hypr/monitors.lua` Return → `1`, `Virtual-1` at 1280x800 scale 1, and the two lines `local omarchy_monitor_scale = "auto"` / `local omarchy_gdk_scale = 2`.
-  * Press Super+/ : everything on screen (bar, terminal text) grows ~25 % within a second — that screenshot is the main proof. Re-run the first command → `1.25`; `grep omarchy_ ~/.config/hypr/monitors.lua` → `local omarchy_monitor_scale = 1.25` and `local omarchy_gdk_scale = 1` (GDK rounds to an integer); `tail -1 ~/.local/state/omarchy/monitor-scaling.log` → a tab-separated `requested=up	current=1	new=1.25	monitor=Virtual-1`.
-  * Press Super+/ again (larger still, `1.6`), then Super+Alt+/ twice: back to scale 1; the file says `= 1`.
-  * Type `omarchy-hyprland-monitor-scaling 3` Return: 1280x800 cannot do exactly 3×, so `3.2` is applied (the desktop is very large — a 400×250 logical screen). Type `omarchy-hyprland-monitor-scaling 1` Return blind straight away: back to 1; the no-argument command prints `1`.
-  ** At 3.2 the terminal shows only a few lines; keep the command short and do not linger above 2.
-  * Press Super+Ctrl+D: the Display panel shows Virtual-1 with the scale pills, 1x filled (the brightness control is absent or inert — no backlight). Click the "1.25x" pill (the pill right after 1x): within ~2 s the bar, panel and fonts grow, the panel stays open and the clicked pill is filled. Click "1x": original size, 1x filled. Press j (ring on the first pill), l twice, Enter: the third pill applies and the desktop rescales; press h twice, Enter: back to 1x. Escape.
-  ** A pill whose clean scale differs from its label is relabelled; report the label you clicked.
-  * Negatives: `omarchy-hyprland-monitor-scaling 9; echo "exit=$?"` → the usage line, exit=1, nothing on screen changes; `omarchy-hyprland-monitor-scaling abc; echo "exit=$?"` → same. `omarchy-hyprland-monitor-modeless; echo "exit=$?"` → exit=1 (a working monitor is not "modeless").
-  * Restore the shipped file: `omarchy-refresh-config hypr/monitors.lua && hyprctl reload && rm ~/.config/hypr/monitors.lua.bak.*` — monitors.lua reads `"auto"` again (which resolves to 1× on this display, so the screen looks as at the start). Close the terminal.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy-hyprland-monitor-scaling` and press Return. The line is `1`.
+  * Type `hyprctl monitors -j | jq -c '.[]|{name,width,height,scale}'` and press Return. The line names `Virtual-1` at 1280x800 scale 1.
+  * Type `grep -n 'omarchy_monitor_scale\|omarchy_gdk_scale' ~/.config/hypr/monitors.lua` and press Return. The lines include `local omarchy_monitor_scale = "auto"` and `local omarchy_gdk_scale = 2`.
+  ** If monitors.lua has no `omarchy_monitor_scale` line, report the file's form and skip the file checks.
+  * Press Super+/. The bar and the terminal text grow.
+  * Type `omarchy-hyprland-monitor-scaling` and press Return. The line is `1.25`.
+  * Type `grep omarchy_ ~/.config/hypr/monitors.lua` and press Return. The lines include `local omarchy_monitor_scale = 1.25` and `local omarchy_gdk_scale = 1`.
+  * Type `tail -1 ~/.local/state/omarchy/monitor-scaling.log` and press Return. The line includes `requested=up`, `current=1`, `new=1.25`, and `monitor=Virtual-1`.
+  * Press Super+/. The text grows again.
+  * Type `omarchy-hyprland-monitor-scaling` and press Return. The line is `1.6`.
+  * Press Super+Alt+/. The text shrinks.
+  * Press Super+Alt+/. The desktop is back at the starting size.
+  * Type `grep omarchy_monitor_scale ~/.config/hypr/monitors.lua` and press Return. The line includes `= 1`.
+  * Type `omarchy-hyprland-monitor-scaling 3` and press Return. The scale becomes `3.2`. The desktop grows.
+  ** Keep the next command short. Do not stay above 2.
+  * Type `omarchy-hyprland-monitor-scaling 1` and press Return. The desktop returns to the starting size.
+  * Type `omarchy-hyprland-monitor-scaling` and press Return. The line is `1`.
+  * Press Super+Ctrl+D. The Display panel opens. The 1x pill is filled.
+  ** If the brightness control is absent or inert, record that.
+  * Click the 1.25x pill. The bar and the panel grow. The 1.25x pill is filled. The panel stays open.
+  ** If the pill's label differs from its scale, report the label you clicked.
+  * Click the 1x pill. The desktop returns to the starting size. The 1x pill is filled.
+  * Press j. A ring is on the first pill.
+  * Press l. The ring moves right.
+  * Press l. The ring is on the third pill.
+  * Press Enter. That pill applies. The desktop rescales.
+  * Press h. The ring moves left.
+  * Press h. The ring is on the 1x pill.
+  * Press Enter. The desktop returns to the starting size.
+  * Press Escape. The panel closes.
+  * Type `omarchy-hyprland-monitor-scaling 9; echo "exit=$?"` and press Return. A usage line appears. The last line is `exit=1`. The desktop does not change.
+  * Type `omarchy-hyprland-monitor-scaling abc; echo "exit=$?"` and press Return. A usage line appears. The last line is `exit=1`. The desktop does not change.
+  * Type `omarchy-hyprland-monitor-modeless; echo "exit=$?"` and press Return. The last line is `exit=1`.
+  * Type `omarchy-refresh-config hypr/monitors.lua && hyprctl reload && rm -f ~/.config/hypr/monitors.lua.bak.*` and press Return. The command finishes.
+  * Type `grep omarchy_monitor_scale ~/.config/hypr/monitors.lua` and press Return. The line includes `"auto"`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Send `<M-/>` and `<M-A-/>`. The screenshot stays 1280×800; the UI inside it grows. At higher scales press Super+F on the terminal to keep the output readable.
-  * If monitors.lua on this disk is not the generic catch-all (no `omarchy_monitor_scale` line), the persist step is skipped by design — report which form the file has. If the screen goes black or the bar vanishes for more than 5 s, screenshot, report, then type `omarchy-hyprland-monitor-scaling 1<ENTER>` blind.
+  * Send `<M-/>` and `<M-A-/>`.
+  * If the screen stays black for more than 5 seconds, take a screenshot, then type `omarchy-hyprland-monitor-scaling 1` and press Enter.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots at scale 1, 1.25, 1.6, 3.2 and back at 1 (visibly bigger bar and text), each with the printed scale, the two monitors.lua lines and the log line; the Display panel with the filled pill by mouse and by keyboard and the restored desktop after 1x; both usage refusals and the modeless exit=1; the restored `"auto"` file
+  * On success
+  ** Screenshots at scale 1, 1.25, 1.6, 3.2, and back at 1, with the printed scale, the monitors.lua lines, and the log line
+  ** The Display panel with the filled pill by mouse and by keyboard, both usage refusals, `exit=1` from modeless, and `"auto"` restored
   * If unsuccessful
-  ** The scale not changing on screen, monitors.lua not updated, the log line missing, the wrong pill active, or a black screen after a scale change; `hyprctl monitors -j` and the monitors.lua contents; `omarchy-version`; `./client get-serial` tail
+  ** Screenshot of a scale that did not change, a missing log line, the wrong pill, or a black screen
 covers: default/hypr/bindings/tiling.lua:97-98; bin/omarchy-hyprland-monitor-scaling; bin/omarchy-hyprland-monitor-modeless; bin/omarchy-monitor-state; config/hypr/monitors.lua:7-8,21-22; shell/plugins/panels/monitor/Panel.qml (setScale, activeScaleIndex, moveCursorH, activateCursor); shell/plugins/panels/monitor/Model.js (cleanScale, matchingScaleIndex); test/shell.d/monitor-scaling-test.sh; test/shell.d/monitor-test.sh (clean VM scale); test/shell.d/monitor-modeless-test.sh; test/shell.d/monitor-state-test.sh; manual/07:54-55; manual/33:21 (Super + / … persist past reboot); manual/33-monitors.md
 
 ### monitor-state-report-single-display   [VM-PARTIAL]
@@ -4658,25 +4694,25 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy monitor state | cat -A; echo "exit=$?"` Return.
-  ** Expected 8 lines ending in `$`: brightness (empty), internal name (empty), the only monitor (e.g. `Virtual-1`), empty, empty, the focused monitor (same name), a scaling value or empty, then a JSON array like `[{"name":"Virtual-1","enabled":true,"focused":true,"width":…,"height":…}]`; `exit=0`.
-  * Type `omarchy monitor state | tail -n 1 | jq '.[0].enabled, .[0].focused'` Return; expected `true` twice.
-  * Type `omarchy monitor --help` Return; expected `Monitor commands — Monitor status helpers:` with `omarchy monitor state`.
-  * Close the terminal; the desktop is as before.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy monitor state | cat -A; echo "exit=$?"` and press Return. Eight lines end in `$`. The last line is `exit=0`.
+  ** The lines are an empty brightness line, an empty internal name, the monitor name, two empty lines, the same monitor name as focused, a scaling value or empty, then a JSON array.
+  * Type `omarchy monitor state | tail -n 1 | jq '.[0].enabled, .[0].focused'` and press Return. The lines are `true` and `true`.
+  * Type `omarchy monitor --help` and press Return. The output includes `omarchy monitor state`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * `cat -A` makes the empty lines visible as a bare `$`. Skipped: the laptop-display and brightness fields (no internal panel, no backlight).
-  * ./client-with-image allows you to get an image back of what you did, so can be useful for speeding things up
+  * `cat -A` shows an empty line as a bare `$`.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshot of the 8 `cat -A` lines, the two `true`s and the group help
+  * On success
+  ** Screenshot of the eight `cat -A` lines, the two `true` lines, and the help line
   * If unsuccessful
-  ** a jq/hyprctl error, fewer than 8 lines, or invalid JSON on the last line
+  ** Fewer than eight lines, or invalid JSON on the last line
 covers: bin/omarchy-monitor-state; test/shell.d/monitor-state-test.sh
 
 ### display-text-size-set-reset-reject   [VM-OK]
@@ -4686,26 +4722,35 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Screenshot the desktop bar for reference, then open a terminal with Super+Enter and type `omarchy display text size` Return → `text size: 12 (default) px`, `gtk text-scaling-factor: 1.0`, `terminal font: 9 pt` (record the pt if different).
-  * Type `omarchy display text size 18; echo "exit=$?"` Return → exit=0; a toast "Restart Foot to apply the new terminal font size" (foot is running) and the bar text visibly larger within 2 s. Type `omarchy display text size` → `text size: 18 px`, a GTK factor around 1.5 (`1.5455`: 17pt/11pt, quantised to a whole point size), `terminal font: 14 pt` (18×9/12 rounded).
-  * Type `grep -A1 '^\[font\]' ~/.config/omarchy/shell.toml; grep '^font=' ~/.config/foot/foot.ini; gsettings get org.gnome.desktop.interface text-scaling-factor` Return → `base-size = 18`, `font=JetBrainsMono Nerd Font:size=14`, and the same factor.
-  * Press Super+Enter: the new terminal's text is visibly larger than the first one's (the already-open foot keeps its old size — foot has no reload signal).
-  * Negatives: `omarchy display text size 30; echo "exit=$?"` → "Size must be an integer between 9 and 20 (px)." + usage, exit=1, the bar does not change; `omarchy display text size abc; echo "exit=$?"` → same, exit=1.
-  * Type `omarchy display text size reset && omarchy display text size` Return → the bar returns to normal and the report reads `12 (default) px` / `1.0` / `9 pt`; `grep '^font=' ~/.config/foot/foot.ini` → size=9; the `base-size` line is gone from shell.toml.
-  * Close all terminals with Ctrl+Alt+Delete; the bar matches the reference screenshot.
+  * Take a screenshot of the bar. That is the size reference.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy display text size` and press Return. The report includes `text size: 12 (default) px`. Record the terminal font size.
+  * Type `omarchy display text size 18; echo "exit=$?"` and press Return. The last line is `exit=0`. A toast says to restart Foot. The bar text grows.
+  * Type `omarchy display text size` and press Return. The report includes `text size: 18 px`.
+  * Type `grep -A1 '^\[font\]' ~/.config/omarchy/shell.toml` and press Return. The line includes `base-size = 18`.
+  * Type `grep '^font=' ~/.config/foot/foot.ini` and press Return. The line includes `size=14`.
+  * Type `gsettings get org.gnome.desktop.interface text-scaling-factor` and press Return. Record the factor.
+  * Press Super+Enter. A second terminal opens. Its text is larger than the first terminal's text.
+  * Click the first terminal. It has focus.
+  * Type `omarchy display text size 30; echo "exit=$?"` and press Return. The output says the size must be an integer between 9 and 20. The last line is `exit=1`. The bar does not change.
+  * Type `omarchy display text size abc; echo "exit=$?"` and press Return. The same refusal appears. The last line is `exit=1`.
+  * Type `omarchy display text size reset && omarchy display text size` and press Return. The bar returns to the reference size. The report includes `12 (default) px`.
+  * Type `grep '^font=' ~/.config/foot/foot.ini` and press Return. The line includes `size=9`.
+  * Type `grep base-size ~/.config/omarchy/shell.toml` and press Return. No `base-size` line is printed.
+  * Press Ctrl+Alt+Delete. Every window closes. The bar matches the reference screenshot.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The shell watches shell.toml, so bar text re-flows live; compare bar screenshots side by side — the clock and workspace labels grow noticeably at 18 px.
+  * Compare bar screenshots. The clock and workspace labels grow at 18 px.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Before/after/reset bar screenshots, the three-line reports, the `Restart Foot` toast, the config lines, the larger second terminal, and the two refusals with exit=1
+  * On success
+  ** Screenshots of the bar before, at 18 px, and after reset; the reports; the restart-Foot toast; the config lines; the larger second terminal; and both refusals with `exit=1`
   * If unsuccessful
-  ** a bar that does not re-flow, a report that does not match the value set, or a rejection that changed something anyway; the status output and the relevant config lines; `./client get-serial`
+  ** A bar that does not change, or a refusal that changed the size anyway
 covers: bin/omarchy-display-text-size; manual/33-monitors.md (Making text bigger or smaller)
 
 ### monitors-lua-scale-edit-and-gdk-scale   [VM-OK]
@@ -4715,28 +4760,46 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return and type `grep omarchy_ ~/.config/hypr/monitors.lua; echo $GDK_SCALE` Return → `local omarchy_monitor_scale = "auto"`, `local omarchy_gdk_scale = 2`, and `2`.
-  * Open Obsidian from the launcher (Super+Space, type `Obsidian`, Return; allow 15 s, software rendering). Screenshot its window; note the size of its text and buttons against the bar (oversized at 1× with GDK_SCALE=2 is expected, not a bug). Close it with Super+W.
-  * Press Super+Space → Setup → Monitors: Neovim opens monitors.lua. Type `:%s/omarchy_monitor_scale = "auto"/omarchy_monitor_scale = 2/` Return, then `:wq` Return.
-  * Within 15 s and with no further command everything is drawn at 2× (bar twice as tall, large text) — that is the assertion. Type `hyprctl monitors -j | jq '.[0].scale'` Return → 2.
-  ** Only if nothing changed after 15 s, type `hyprctl reload` to continue and report the missing auto-reload as a failure.
-  * Type `sed -i 's/^local omarchy_monitor_scale = .*/local omarchy_monitor_scale = 1/; s/^local omarchy_gdk_scale = .*/local omarchy_gdk_scale = 1/' ~/.config/hypr/monitors.lua && hyprctl reload && hyprctl monitors -j | jq '.[0].scale'` Return → 1, normal size.
-  * Press Super+Return for a NEW terminal and type `echo $GDK_SCALE` Return; record `1` or `2`. Open Obsidian again (or Nautilus with Super+Shift+F) and screenshot: its UI should be about half the size.
-  ** If unchanged, log out (Super+Escape → Logout), log in at SDDM with `prime`, open Obsidian and screenshot; record that a re-login was required (the manual says only "restart the app").
-  * Restore: `omarchy-refresh-config hypr/monitors.lua && hyprctl reload && rm -f ~/.config/hypr/monitors.lua.bak.*` — back to `"auto"` / `2`. Close everything.
+  * Press Super+Return. A terminal opens.
+  * Type `grep omarchy_ ~/.config/hypr/monitors.lua` and press Return. The lines include `local omarchy_monitor_scale = "auto"` and `local omarchy_gdk_scale = 2`.
+  * Type `echo $GDK_SCALE` and press Return. The line is `2`.
+  * Press Super+Alt+Space. The app menu opens.
+  * Type `Obsidian` and press Return. Obsidian opens.
+  ** Allow 15 seconds. Software rendering is expected.
+  * Take a screenshot of the Obsidian window.
+  * Press Super+W. Obsidian closes.
+  * Press Super+Space. The menu opens.
+  * Click Setup.
+  * Click Monitors. The menu closes. Neovim opens `monitors.lua`.
+  * Type `:%s/omarchy_monitor_scale = "auto"/omarchy_monitor_scale = 2/` and press Return. The substitution is done.
+  * Type `:wq` and press Return. Neovim closes.
+  * Wait 15 seconds. Do not type a command. The bar and the text are drawn larger.
+  ** If nothing changed after 15 seconds, type `hyprctl reload` and press Return, and report the missing auto-reload.
+  * Click the terminal. The terminal has focus.
+  * Type `hyprctl monitors -j | jq '.[0].scale'` and press Return. The line is `2`.
+  * Type `sed -i 's/^local omarchy_monitor_scale = .*/local omarchy_monitor_scale = 1/; s/^local omarchy_gdk_scale = .*/local omarchy_gdk_scale = 1/' ~/.config/hypr/monitors.lua && hyprctl reload && hyprctl monitors -j | jq '.[0].scale'` and press Return. The last line is `1`. The desktop returns to the starting size.
+  * Press Super+Return. A new terminal opens.
+  * Type `echo $GDK_SCALE` and press Return. Record `1` or `2`.
+  * Press Super+Shift+F. Files opens. Its controls are smaller than the Obsidian window in the earlier screenshot.
+  ** If the size did not change, log out, log back in as `prime`, open Obsidian, and record that a re-login was required.
+  * Click a terminal. It has focus.
+  * Type `omarchy-refresh-config hypr/monitors.lua && hyprctl reload && rm -f ~/.config/hypr/monitors.lua.bak.*` and press Return. The command finishes.
+  * Type `grep omarchy_monitor_scale ~/.config/hypr/monitors.lua` and press Return. The line includes `"auto"`.
+  * Press Ctrl+Alt+Delete. Every window closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * `hl.env` values reach processes started after the reload only. Obsidian is preinstalled (Electron); Print Settings (GTK3) or Nautilus is a fallback. Electron GPU warnings in the journal are not failures.
+  * A value from `hl.env` reaches a process started after the reload.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshot at 2× within 15 s of `:wq` with no command typed in between and jq printing 2, then at 1× with jq printing 1; before/after screenshots of the same app window at visibly different UI sizes with `echo $GDK_SCALE` and a note on which step (save / app restart / re-login) the GDK change needed
+  * On success
+  ** Screenshot of the larger desktop within 15 seconds of `:wq`, with scale `2`, then scale `1`, the app window at two sizes, and `"auto"` restored
+  ** A note of whether `$GDK_SCALE` changed in the new terminal or only after a re-login
   * If unsuccessful
-  ** a red Hyprland error bar, the scale unchanged 15 s after saving (auto-reload did not fire), no size change even after re-login, or the app failing to start after the edit; `cat ~/.config/hypr/monitors.lua`; `hyprctl getoption misc:disable_autoreload`; `./client get-serial`
+  ** A red error bar, or the scale unchanged 15 seconds after saving
 covers: config/hypr/monitors.lua; default/omarchy/omarchy-menu.jsonc setup.monitors; manual/33-monitors.md (fractional scaling / 1x scaling); manual/45:9
 
 ### monitors-lua-bogus-mode-falls-back   [VM-OK]
@@ -4746,26 +4809,38 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return and type `lspci -k | grep -A2 -i 'vga\|display'; hyprctl monitors | grep -E 'Monitor|@|scale'` Return → a Virtio GPU on `virtio-pci`, one monitor `Virtual-1`, mode 1280x800@…, `scale: 1.00`.
-  * Type `hyprctl keyword monitor Virtual-1,1600x900@60,0x0,1` Return: the desktop re-lays out and the bar spans the new width; `hyprctl monitors | grep '@'` → `1600x900`. Type `hyprctl keyword monitor Virtual-1,12345x6789@60,0x0,1` Return: Hyprland refuses or falls back; the screen stays usable — record the message. Type `hyprctl reload` Return: the preferred 1280x800 mode returns.
-  * Type `printf '%s\n' 'hl.monitor({ output = "Virtual-1", mode = "9999x9999@60", position = "auto", scale = 1 })' >> ~/.config/hypr/monitors.lua && hyprctl reload` Return (users mistype resolutions; this is the safe-failure path).
-  * The screen stays on at the same size. Re-run the grep, and `hyprctl monitors -j | jq -r '.[0] | "\(.width)x\(.height)@\(.refreshRate)"'`: still 1280x800 (Hyprland fell back to the preferred mode). Record any banner or notification about the invalid mode; `journalctl --user -b --no-pager 2>/dev/null | grep -i -m3 'invalid mode\|falling back\|9999' | sudo tee /dev/ttyS0` may show the fallback message (optional).
-  * Press Super+Space → Update → Config → Hyprland to restore the stock file: the floating terminal prints "Replaced /home/prime/.config/hypr/monitors.lua with new Omarchy default. Saved backup as …monitors.lua.bak.<epoch>" with the diff; press a key on Done. The mode is unchanged and no banner remains.
-  * Type `rm ~/.config/hypr/*.bak.*` Return; close the terminal; the desktop looks as it started.
-  ** If the output is not Virtual-1, substitute the real name. If the screen does blank for more than 5 s, keep screenshotting and type `hyprctl reload<ENTER>` blind; if that fails use Ctrl+Alt+F3, log in as prime, run `omarchy-refresh-hyprland` (or `mv ~/.config/hypr/monitors.lua ~/broken.lua && cp /usr/share/omarchy/config/hypr/monitors.lua ~/.config/hypr/`), `hyprctl -i 0 reload`, Ctrl+Alt+F1/F2 — and report the blackout duration as a failure.
+  * Press Super+Return. A terminal opens.
+  * Type `lspci -k | grep -A2 -i 'vga\|display'` and press Return. The output names a Virtio GPU.
+  * Type `hyprctl monitors | grep -E 'Monitor|@|scale'` and press Return. The output names `Virtual-1` at `1280x800` with scale `1.00`.
+  ** If the output name is not `Virtual-1`, use that name in the later commands and record it.
+  * Type `hyprctl keyword monitor Virtual-1,1600x900@60,0x0,1` and press Return. The bar spans a wider desktop.
+  * Type `hyprctl monitors | grep '@'` and press Return. The line includes `1600x900`.
+  * Type `hyprctl keyword monitor Virtual-1,12345x6789@60,0x0,1` and press Return. The screen stays usable. Record the message.
+  * Type `hyprctl reload` and press Return. The desktop returns to `1280x800`.
+  * Type `printf '%s\n' 'hl.monitor({ output = "Virtual-1", mode = "9999x9999@60", position = "auto", scale = 1 })' >> ~/.config/hypr/monitors.lua && hyprctl reload` and press Return. The screen stays on at the same size.
+  * Type `hyprctl monitors -j | jq -r '.[0] | "\(.width)x\(.height)@\(.refreshRate)"'` and press Return. The line starts with `1280x800`.
+  * Press Super+Space. The menu opens.
+  * Click Update.
+  * Click Config.
+  * Click Hyprland. A floating terminal opens. It says `monitors.lua` was replaced and a backup was saved.
+  * Press a key. That terminal closes. No error banner remains.
+  * Click the first terminal. It has focus.
+  * Type `rm ~/.config/hypr/*.bak.*` and press Return.
+  * Press Super+W. The terminal closes.
+  ** If the screen stays black for more than 5 seconds, keep taking screenshots and type `hyprctl reload` and press Enter. Report the blackout.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Omarchy Menu → Setup → Monitors opens the file in the editor if you prefer editing there. Never add a rule that disables Virtual-1 here; that is the TTY-recovery test.
+  * Do not add a rule that disables Virtual-1 in this test.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of lspci/hyprctl, the desktop at 1600x900, the refused bogus keyword, the desktop intact after the 9999x9999 rule with the mode line unchanged and the recorded error text, the restore diff, and the restored desktop
+  * On success
+  ** Screenshots of the Virtio line, the desktop at 1600x900, the refused bogus keyword, the desktop still at 1280x800 after the `9999x9999` rule, and the restore output
   * If unsuccessful
-  ** Hyprland crashing on a mode change, an unrecovered black or garbled screen, or no `Virtual-1`; serial log
+  ** A black screen, or Hyprland crashing on the mode change
 covers: config/hypr/monitors.lua:10-11; bin/omarchy-hyprland-monitor-modeless; bin/omarchy-hyprland-monitor-watch; test/shell.d/monitor-recovery-test.sh; manual/33:5-16,41 (33-monitors.md, Arranging multiple screens / hl.monitor entries); manual/49 (gap: no QEMU guidance)
 
 ### hypr-config-syntax-error-banner-and-menu-restore   [VM-OK]
@@ -4775,28 +4850,40 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return and Super+Shift+Backspace so gaps are off (a toggle sourced *after* bindings.lua in the load order).
-  * Type `printf '%s\n' 'o.bind("SUPER + SHIFT + R", "Broken"' >> ~/.config/hypr/bindings.lua` Return (an unclosed call) and wait two seconds: a red config-error banner appears at the top of the screen.
-  ** Hyprland reloads the saved file itself; only if no banner appears within 15 s type `hyprctl reload` to continue and report the missing auto-reload as a failure.
-  * Type `hyprctl configerrors | sudo tee /dev/ttyS0` Return: the text names `bindings.lua` and a syntax error (e.g. "unexpected symbol"); read it with get-serial.
-  * Press Super+Return: a terminal still opens (bindings from the last good config remain). Press Super+Shift+R: nothing. Look at the gaps: record whether they came back (expected: the no-gaps toggle was skipped on this reload, so gaps are visible again). The bar, terminal and mouse keep working; the display does not go black.
-  * Press Super+Space → Update → Config → Hyprland: the floating terminal prints "Replaced /home/prime/.config/hypr/bindings.lua with new Omarchy default. Saved backup as …bindings.lua.bak.<epoch>" (ten digits) plus the diff showing the broken line; the other six files are rewritten silently with no backup (identical). "● Done!" — press a key. Within a few seconds the banner disappears on its own and the windows are gapless again (Hyprland reloads the rewritten file itself).
-  ** Only if the banner lingers past 15 s type `hyprctl reload` and report the missing auto-reload. The same holds for any of the seven user files: a broken monitors.lua (`echo 'hl.monitor({ output = "", mode = "preferred"' >> ~/.config/hypr/monitors.lua`) gives the same banner mentioning monitors.lua and the same menu restore.
-  * Press Super+Shift+Backspace to restore gaps; type `ls ~/.local/state/omarchy/toggles/hypr/; ls ~/.config/hypr/*.bak.*` Return → only `flags.lua`, and the bindings backup — remove it with `rm ~/.config/hypr/*.bak.*`. Close the terminals.
+  * Press Super+Return. A terminal opens.
+  * Press Super+Shift+Backspace. The gaps go away.
+  * Type `printf '%s\n' 'o.bind("SUPER + SHIFT + R", "Broken"' >> ~/.config/hypr/bindings.lua` and press Return.
+  * Wait 2 seconds. A red error banner appears at the top.
+  ** If no banner appears within 15 seconds, type `hyprctl reload` and press Return, and report the missing auto-reload.
+  * Type `hyprctl configerrors | sudo tee /dev/ttyS0` and press Return. The text names `bindings.lua` and a syntax error.
+  * Press Super+Return. A second terminal opens.
+  * Press Super+Shift+R. Nothing opens.
+  * Look at the gaps. The gaps are visible again. The bar is still there. The screen is not black.
+  * Press Super+Space. The menu opens.
+  * Click Update.
+  * Click Config.
+  * Click Hyprland. A floating terminal opens. It says `bindings.lua` was replaced and a backup was saved.
+  * Press a key. That terminal closes. The banner goes away. The windows are gapless.
+  ** If the banner is still there after 15 seconds, type `hyprctl reload` and press Return, and report the missing auto-reload.
+  * Press Super+Shift+Backspace. The gaps return.
+  * Click a terminal. It has focus.
+  * Type `ls ~/.local/state/omarchy/toggles/hypr/` and press Return. The only line is `flags.lua`.
+  * Type `ls ~/.config/hypr/*.bak.*` and press Return. The bindings backup is listed.
+  * Type `rm ~/.config/hypr/*.bak.*` and press Return.
+  * Press Ctrl+Alt+Delete. Every window closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The banner is Hyprland's own red strip; it is only suppressed while the package reload guard is active, which is not the case here.
-  * If the screen goes black or the compositor restarts, capture `get-serial`, try `<C-A-F3>` to check the system is alive, and report.
+  * If the screen goes black, capture the serial log and report it.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of the banner with the desktop still usable behind it, the configerrors text, a terminal opening while broken, the gaps state while broken, the Update → Config → Hyprland diff, the clean gapless state after the fix, and only flags.lua at the end
+  * On success
+  ** Screenshots of the red banner with the desktop still usable, `configerrors` naming `bindings.lua`, a terminal opening while broken, the gaps back, the restore output, the banner gone, and only `flags.lua` left
   * If unsuccessful
-  ** No banner with a silently ignored file, dead chords while broken, the banner persisting after restore, or a compositor crash / black screen with the serial log
+  ** No banner, dead chords, a banner that stays after restore, or a black screen
 covers: config/hypr/hyprland.lua:19-26; default/hypr/bootstrap.lua; bin/omarchy-hyprland-reload-guard (suppress_errors); default/agents/skills/omarchy/hyprland.md:22-25; config/hypr/monitors.lua; bin/omarchy-refresh-hyprland; default/omarchy/omarchy-menu.jsonc update.config.hyprland; manual/31-dotfiles.md (Resetting any changes); manual/42-common-tweaks.md (restore individual configs)
 
 ### hypr-tty-recovery-disabled-output-and-no-default-bindings   [VM-PARTIAL]
@@ -4806,27 +4893,46 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return and type `sed -i 's/^-- omarchy_default_bindings = false/omarchy_default_bindings = false/' ~/.config/hypr/hyprland.lua && hyprctl reload` Return.
-  * Press Super+Return, Super+K, Super+Space: nothing happens (every Omarchy chord is gone). Click the Omarchy icon in the bar: the menu still opens with the mouse. Escape.
-  * Press Ctrl+Alt+F3 and log in as prime / prime. Type `omarchy-refresh-hyprland` Return: it prints that it replaced `hyprland.lua` and saved a `.bak.<epoch>` copy, with the diff. Type `hyprctl -i 0 reload` Return (or `HYPRLAND_INSTANCE_SIGNATURE=$(ls /run/user/1000/hypr | head -1) hyprctl reload`), then press Ctrl+Alt+F1 (or F2 if the session is on tty2). Press Super+Return: a terminal opens again.
-  * In it type `printf '%s\n' 'hl.monitor({ output = "Virtual-1", disabled = true })' >> ~/.config/hypr/monitors.lua` Return; screenshot; then `hyprctl reload` Return.
-  * The screen goes black. Wait 20 s taking screenshots: it stays black (monitors disabled on purpose are not recovered by the monitor watcher).
-  * Press Ctrl+Alt+F3 (log in again if asked). Type `hyprctl -i 0 monitors all | grep -E 'Monitor|disabled'` Return → `disabled: true`. Type `sed -i '$d' ~/.config/hypr/monitors.lua && hyprctl -i 0 reload` Return, then Ctrl+Alt+F1 (or F2): the desktop is back with the terminal still open.
-  * Type `rm ~/.config/hypr/*.bak.*` Return; close the terminal; the desktop is empty.
+  * Press Super+Return. A terminal opens.
+  * Type `sed -i 's/^-- omarchy_default_bindings = false/omarchy_default_bindings = false/' ~/.config/hypr/hyprland.lua && hyprctl reload` and press Return. The command finishes.
+  * Press Super+Return. Nothing opens.
+  * Press Super+K. Nothing opens.
+  * Press Super+Space. Nothing opens.
+  * Click the Omarchy icon in the bar. The menu opens.
+  * Press Escape. The menu closes.
+  * Press Ctrl+Alt+F3. A text console appears.
+  * Log in as `prime` with password `prime`. A shell prompt appears.
+  * Type `omarchy-refresh-hyprland` and press Return. The output says `hyprland.lua` was replaced and a backup was saved.
+  * Type `hyprctl -i 0 reload` and press Return. The command finishes.
+  ** If that command cannot reach Hyprland, type `HYPRLAND_INSTANCE_SIGNATURE=$(ls /run/user/1000/hypr | head -1) hyprctl reload` and press Return instead.
+  * Press Ctrl+Alt+F1. The desktop returns.
+  ** If the desktop is not on F1, press Ctrl+Alt+F2.
+  * Press Super+Return. A terminal opens.
+  * Type `printf '%s\n' 'hl.monitor({ output = "Virtual-1", disabled = true })' >> ~/.config/hypr/monitors.lua` and press Return.
+  * Take a screenshot. The desktop is still visible.
+  * Type `hyprctl reload` and press Return. The screen goes black.
+  * Wait 20 seconds. The screen stays black.
+  * Press Ctrl+Alt+F3. The text console appears.
+  ** If a login is asked, log in as `prime` with password `prime`.
+  * Type `hyprctl -i 0 monitors all | grep -E 'Monitor|disabled'` and press Return. A line says `disabled: true`.
+  * Type `sed -i '$d' ~/.config/hypr/monitors.lua && hyprctl -i 0 reload` and press Return. The command finishes.
+  * Press Ctrl+Alt+F1. The desktop returns. The terminal is still open.
+  ** If the desktop is not on F1, press Ctrl+Alt+F2.
+  * Type `rm ~/.config/hypr/*.bak.*` and press Return.
+  * Press Super+W. The terminal closes. The desktop is empty.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Skipped: a custom minimal binding set (the flag's intended use) and disabling a secondary phantom output (the documented use) — no second output.
-  * If the VT does not switch back or login fails, end with `stop` and report; the disk is discarded.
+  * If the text console does not return, stop and report. The disk is discarded.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of dead chords with the mouse menu still working, the TTY with the refresh output naming the .bak file, the desktop with Super+Return working again, the black screen, the TTY showing `disabled: true`, and the restored desktop
+  * On success
+  ** Screenshots of the dead chords, the menu opened with the mouse, the text console naming the backup, Super+Return working again, the black screen, `disabled: true`, and the restored desktop
   * If unsuccessful
-  ** Serial log and screenshot of a black screen or a session that did not return; the TTY output if the reload did not bring the output back
+  ** The serial log, and a screenshot of a black screen that did not return
 covers: config/hypr/hyprland.lua:6-7; default/hypr/omarchy.lua:8-15; bin/omarchy-refresh-hyprland; test/shell.d/hyprland-default-config-test.sh:141-145; manual/42:5; config/hypr/monitors.lua; bin/omarchy-hyprland-monitor-modeless; manual/33:53
 
 ### bindings-lua-override-add-rebind-unbind   [VM-OK]

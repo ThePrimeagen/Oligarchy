@@ -114,14 +114,14 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `window-rules-browser-opaque-tiled-no-self-maximize`
 - [x] `window-rule-pip-pinned-top-right`
 - [x] `file-select-portal-dialog-pick-and-cancel`
-- [ ] `focus-app-by-class-across-workspaces`
-- [ ] `monitor-scaling-hotkeys-cli-and-panel`
-- [ ] `monitor-state-report-single-display`
-- [ ] `display-text-size-set-reset-reject`
-- [ ] `monitors-lua-scale-edit-and-gdk-scale`
-- [ ] `monitors-lua-bogus-mode-falls-back`
-- [ ] `hypr-config-syntax-error-banner-and-menu-restore`
-- [ ] `hypr-tty-recovery-disabled-output-and-no-default-bindings`
+- [x] `focus-app-by-class-across-workspaces`
+- [x] `monitor-scaling-hotkeys-cli-and-panel`
+- [x] `monitor-state-report-single-display`
+- [x] `display-text-size-set-reset-reject`
+- [x] `monitors-lua-scale-edit-and-gdk-scale`
+- [x] `monitors-lua-bogus-mode-falls-back`
+- [x] `hypr-config-syntax-error-banner-and-menu-restore`
+- [x] `hypr-tty-recovery-disabled-output-and-no-default-bindings`
 - [ ] `bindings-lua-override-add-rebind-unbind`
 - [ ] `keybindings-print-readable-and-refreshes-cache`
 - [ ] `default-bindings-no-duplicate-chords`
