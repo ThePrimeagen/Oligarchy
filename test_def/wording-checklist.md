@@ -430,14 +430,14 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `agent-skills-linked-into-harnesses`
 - [x] `crash-capture-toast-and-mute-one-program`
 - [x] `crash-mute-cli-list-toggle-and-refusals`
-- [ ] `chromium-bundled-extensions-and-copy-url`
-- [ ] `chromium-download-video-ytdlp`
-- [ ] `browser-policy-colour-helper-rejects-bad-input`
-- [ ] `cups-admin-forbidden-and-browsed-absent`
-- [ ] `docker-requires-sudo-polkit-tui-and-predicate`
-- [ ] `sudoless-docker-enable-and-revert`
-- [ ] `firewall-ufw-defaults-no-ssh`
-- [ ] `system-services-enabled-and-running`
+- [x] `chromium-bundled-extensions-and-copy-url`
+- [x] `chromium-download-video-ytdlp`
+- [x] `browser-policy-colour-helper-rejects-bad-input`
+- [x] `cups-admin-forbidden-and-browsed-absent`
+- [x] `docker-requires-sudo-polkit-tui-and-predicate`
+- [x] `sudoless-docker-enable-and-revert`
+- [x] `firewall-ufw-defaults-no-ssh`
+- [x] `system-services-enabled-and-running`
 - [ ] `user-units-running-and-hardware-gated-units-inert`
 - [ ] `fcitx5-supervised-and-hidden-entries`
 - [ ] `kernel-linux-omarchy-headers-and-tuning`

@@ -19938,28 +19938,68 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter and type `wl-copy sentinel; jq -c '{name,path,allowed_origins}' ~/.config/chromium/NativeMessagingHosts/com.omarchy.copy_url.json ~/.config/chromium/NativeMessagingHosts/com.omarchy.ytdlp.json; ls ~/.config/BraveSoftware/Brave-Origin/NativeMessagingHosts/` + Enter → `com.omarchy.copy_url` with a path ending `/omarchy-chromium-copy-url-host` and origin `chrome-extension://bgpiichlckmfanooecilcjemknkcpngb/`; `com.omarchy.ytdlp` with origin `chrome-extension://dedjgknigfeelejglamclffonmophnfl/`; both manifests listed for Brave Origin.
-  * Press Super+Shift+Enter; the browser opens with a dark UI. Type `chrome://extensions` in the address bar, Enter → three enabled cards: **Copy URL** 1.5, **Download Video** 1.0, **WhatsApp Slim** 1.1, each described as installed by Omarchy. Type `chrome://version`, Enter → Command Line contains `--ozone-platform=wayland`, `--password-store=gnome-libsecret` and `--load-extension=/usr/share/omarchy/default/chromium/extensions/copy-url,…yt-dlp,…whatsapp-slim`. Type `chrome://extensions/shortcuts`, Enter → Copy URL `Alt+Shift+L`, Download Video `Alt+Shift+D` (record if blank on 4.0.2).
-  * Type `https://omarchy.org/manual/?q=one&x=two` in the address bar, Enter; wait for the page. Click into the page area, then press Alt+Shift+L → a toast "URL copied to clipboard" appears top-right within ~2 s.
-  * Click the terminal and type `wl-paste` Enter → exactly `https://omarchy.org/manual/?q=one&x=two`. Press Super+Ctrl+V: the clipboard manager lists that URL as the newest entry. Press Escape.
-  * Back in Chromium click the puzzle-piece toolbar button, then **Copy URL** → the same toast. Then in the terminal type `wl-copy sentinel` Enter; in Chromium press Ctrl+T (new tab) then Alt+Shift+L; `wl-paste` → either `chrome://newtab/` or still `sentinel`; record which. Nothing may crash.
-  * Press Super+Shift+Y (YouTube web app). In the frameless app window press Alt+Shift+L → a toast; `wl-paste` + Enter in the terminal now prints a `https://www.youtube.com/…` URL.
-  * Close the browser windows with Super+W and the terminal with Ctrl+D; the desktop is as before.
+  * Press Super+Return. A terminal opens.
+  * Type `wl-copy sentinel` and press Return. The prompt returns.
+  * Type `jq -c '{name,path,allowed_origins}' ~/.config/chromium/NativeMessagingHosts/com.omarchy.copy_url.json` and press Return. The path ends in `omarchy-chromium-copy-url-host`, and the origin is `chrome-extension://bgpiichlckmfanooecilcjemknkcpngb/`.
+  * Type `jq -c '{name,path,allowed_origins}' ~/.config/chromium/NativeMessagingHosts/com.omarchy.ytdlp.json` and press Return. The origin is `chrome-extension://dedjgknigfeelejglamclffonmophnfl/`.
+  * Type `ls ~/.config/BraveSoftware/Brave-Origin/NativeMessagingHosts/` and press Return. Both host names are listed.
+  * Press Super+Shift+Return. Chromium opens.
+  * Click the address bar. It is focused.
+  * Type `chrome://extensions` and press Return. Copy URL, Download Video, and WhatsApp Slim are enabled.
+  * Click the address bar. It is focused.
+  * Type `chrome://version` and press Return. The command line includes `--ozone-platform=wayland`, `--password-store=gnome-libsecret`, and `--load-extension=`.
+  * Click the address bar. It is focused.
+  * Type `chrome://extensions/shortcuts` and press Return. Copy URL is `Alt+Shift+L`, and Download Video is `Alt+Shift+D`.
+  ** If a shortcut is blank, record that.
+  * Click the address bar. It is focused.
+  * Type `https://omarchy.org/manual/?q=one&x=two` and press Return. The page loads.
+  * Click the page. It is focused.
+  * Press Alt+Shift+L. A notification says the URL was copied.
+  * Click the terminal. It is focused.
+  * Type `wl-paste` and press Return. The output is `https://omarchy.org/manual/?q=one&x=two`.
+  * Press Super+Ctrl+V. The clipboard list opens. That URL is the newest entry.
+  * Press Escape. The clipboard list closes.
+  * Click Chromium. It is focused.
+  * Click the extensions button. The extension menu opens.
+  * Click Copy URL. A notification says the URL was copied.
+  * Click the terminal. It is focused.
+  * Type `wl-copy sentinel` and press Return. The prompt returns.
+  * Click Chromium. It is focused.
+  * Press Ctrl+T. A new tab opens.
+  * Press Alt+Shift+L. Record whether a notification appears.
+  * Click the terminal. It is focused.
+  * Type `wl-paste` and press Return. Record whether the output is `chrome://newtab/` or `sentinel`.
+  * Press Super+Shift+Y. The YouTube window opens.
+  * Click the YouTube window. It is focused.
+  * Press Alt+Shift+L. A notification says the URL was copied.
+  * Click the terminal. It is focused.
+  * Type `wl-paste` and press Return. The output starts with `https://www.youtube.com/`.
+  * Click the YouTube window. It is focused.
+  * Press Super+W. The YouTube window closes.
+  * Click Chromium. It is focused.
+  * Press Super+W. Chromium closes.
+  * Click the terminal. It is focused.
+  * Press Ctrl+D. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Dismiss any "unpacked extensions" bubble on start. Chromium on 2 vCPU may raise Hyprland's "not responding" dialog — click **Wait**.
-  * Toasts fade in a few seconds; screenshot immediately after the shortcut. The extension needs a moment after Chromium starts; if the first Alt+Shift+L shows no toast, wait 2 s and press it again.
-  * If the shortcut does nothing but the toolbar button works, the shortcut is unregistered on 4.0.2; report as such. If YouTube shows a consent/bot page, the URL copied is still a youtube.com URL — that is enough.
+  * Dismiss an unpacked-extension bubble if it appears. If a not-responding dialog appears, click Wait.
+  * Screenshot a notification as soon as it appears. If the first Alt+Shift+L does nothing, wait 2 seconds and press it again.
+  * If only the toolbar button copies the URL, record that the shortcut is unregistered.
+  * A YouTube consent page still counts when the copied URL is on youtube.com.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of both host manifests with pinned ids and the Brave Origin copies, the extensions page with three enabled cards, the command line, the shortcuts page, the toast right after Alt+Shift+L, `wl-paste` showing the exact URL with query string, the clipboard-manager entry, the toolbar variant, and the YouTube web-app copy
+  ** Both host manifests print their pinned origins, and Brave Origin lists both names.
+  ** Chromium shows Copy URL, Download Video, and WhatsApp Slim enabled. The command line includes the Wayland, libsecret, and load-extension flags.
+  ** Copy URL is `Alt+Shift+L` and Download Video is `Alt+Shift+D`, or a blank shortcut is recorded.
+  ** Alt+Shift+L copies `https://omarchy.org/manual/?q=one&x=two`, and that URL is the newest clipboard entry. The extensions-menu Copy URL notifies too.
+  ** A new tab is recorded as `chrome://newtab/` or still `sentinel`. The YouTube window copies a `https://www.youtube.com/` URL.
   * If unsuccessful
-  ** Screenshot with no toast and `wl-paste` still `sentinel`, a missing/disabled extension, or missing host files; `ls ~/.config/chromium/NativeMessagingHosts/`
+  ** No notification appears and the clipboard stays `sentinel`, an extension is missing, or a host file is missing.
 covers: manual/23-browsers.md:19-27; manual/25-web-apps.md:13; default/chromium/extensions/copy-url/*; default/chromium/extensions/*/manifest.json; default/chromium/native-messaging-hosts/*; config/chromium-flags.conf; config/chromium/Default/Preferences; install/user/chromium.sh; bin/omarchy-install-chromium-copy-url; bin/omarchy-install-chromium-ytdlp; bin/omarchy-chromium-copy-url-host; test/shell.d/chromium-copy-url-test.sh; test/shell.d/chromium-ytdlp-test.sh (installer/manifest)
 
 ### chromium-download-video-ytdlp   [VM-OK] [NET] [SLOW]
@@ -19969,29 +20009,50 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter and type `ls ~/Videos` Enter (note the contents, likely nothing).
-  * Press Super+Shift+Enter and open `https://www.youtube.com/watch?v=aqz-KE-bpKQ` (a short trailer). Dismiss any consent dialog.
-  ** If YouTube shows a sign-in/bot wall from this IP, use `https://vimeo.com/76979871` or `https://commons.wikimedia.org/wiki/File:Big_Buck_Bunny_first_23_seconds_1080p.ogv` and note it.
-  * Press Alt+Shift+D → a toast about the download starting; within a few seconds an OSD (the same overlay used for volume) shows the download progress updating in place; later (30 s–3 min) a toast that it finished, naming the title.
-  * In the terminal type `ls -la ~/Videos` Enter every ~10 s until a new video file appears and stops growing.
-  * Click the completion toast if still visible → mpv plays the file; press `q`.
-  * In Chromium open `https://example.com` and press Alt+Shift+D → a notification/OSD saying no video was found or a yt-dlp error — not silence forever, not a crash; report the exact text. `ls ~/Videos` shows no new file.
-  * Type `rm ~/Videos/<the downloaded file>` Enter to restore the folder. Press Super+W and Ctrl+D; the desktop is as before.
+  * Press Super+Return. A terminal opens.
+  * Type `ls ~/Videos` and press Return. Record the listing.
+  * Press Super+Shift+Return. Chromium opens.
+  * Click the address bar. It is focused.
+  * Type `https://www.youtube.com/watch?v=aqz-KE-bpKQ` and press Return. The page loads.
+  ** If a sign-in wall appears, type `https://vimeo.com/76979871` and press Return. Record which page loaded.
+  * Press Alt+Shift+D. A notification says the download started.
+  * Wait until the progress overlay updates. Screenshot it while it changes.
+  * Wait until a notification says the download finished, or 5 minutes pass. Record the title.
+  * Click the terminal. It is focused.
+  * Type `ls -la ~/Videos` and press Return. Record the listing.
+  ** If the new file is still growing, wait 10 seconds and type `ls -la ~/Videos` again. Stop when it stops growing, or when 5 minutes have passed.
+  * Click the completion notification. mpv plays the file.
+  * Press q. mpv closes.
+  * Click Chromium. It is focused.
+  * Click the address bar. It is focused.
+  * Type `https://example.com` and press Return. The page loads.
+  * Press Alt+Shift+D. A notification or overlay says no video was found, or it names a yt-dlp error.
+  * Click the terminal. It is focused.
+  * Type `ls ~/Videos` and press Return. No file was added by the example.com attempt.
+  * Remove the video file this test downloaded. The prompt returns.
+  * Type `ls ~/Videos` and press Return. The listing matches the first one.
+  * Click Chromium. It is focused.
+  * Press Super+W. Chromium closes.
+  * Click the terminal. It is focused.
+  * Press Ctrl+D. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Keep the total wait under ~5 minutes; report partial progress otherwise. Screenshot the OSD every ≤5 s. Move the mouse every ~60 s while waiting so the 150 s screensaver does not engage (screenshots are not activity).
-  * If the download is refused by the network, screenshot the error OSD and report; the wiring is still demonstrated by the error path.
-  * Chromium on 2 vCPU may raise Hyprland's "not responding" dialog — click **Wait**.
+  * Dismiss a consent dialog if the video page shows one. Keep the whole wait under 5 minutes.
+  * Screenshot the progress overlay about every 5 seconds. Move the mouse about every 60 seconds so the screensaver does not start.
+  * Click the completion notification as soon as it appears. If a not-responding dialog appears, click Wait.
+  * A network refusal that shows an error still demonstrates the shortcut. Record that text.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the start toast, the OSD progress, the completion toast, the listing with the new file, mpv playing it, and the failure toast for example.com
+  ** The starting Videos listing is recorded. Alt+Shift+D notifies that a download started, the progress overlay updates, and a later notification names the finished title.
+  ** A new file appears in `~/Videos` and stops growing. Clicking the notification plays it in mpv, and `q` closes mpv.
+  ** example.com reports that no video was found, or names a yt-dlp error, and adds no file. The downloaded file is removed.
   * If unsuccessful
-  ** Screenshot of no toast after the shortcut and an unchanged `~/Videos`; `journalctl --user -n 40 | grep -i ytdlp | sudo tee /dev/ttyS0` read via get-serial
+  ** The shortcut produces no notification and `~/Videos` never changes.
 covers: manual/23-browsers.md:23-25; default/chromium/extensions/yt-dlp/*; default/chromium/native-messaging-hosts/com.omarchy.ytdlp.json; bin/omarchy-chromium-ytdlp-host; test/shell.d/chromium-ytdlp-test.sh
 
 ### browser-policy-colour-helper-rejects-bad-input   [VM-OK]
@@ -20001,26 +20062,33 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal and type `cp /etc/chromium/policies/managed/color.json /tmp/color.before`.
-  * Type `for v in 1C2027 abc12 abc1234 1c202g ../../etc/passwd '1c2027 1c2027' '$(id)' '1c2027;id' '#1c2027'; do omarchy-theme-set-browser-policy "$v"; echo "s=$?"; done` — nine non-zero statuses, no sudo/polkit prompt.
-  * Type `omarchy-theme-set-browser-policy; echo s=$?; omarchy-theme-set-browser-policy 1c2027 ffffff; echo s=$?` — both non-zero (no argument; two arguments).
-  * Type `cmp /tmp/color.before /etc/chromium/policies/managed/color.json && echo unchanged` — `unchanged`.
-  * Type `omarchy-theme-set-browser-policy 1c2027; echo s=$?; cat /etc/chromium/policies/managed/color.json` — `s=0`, no prompt, `"BrowserThemeColor": "#1c2027"`.
-  * Type `omarchy-theme-set-browser; rm /tmp/color.before` — the theme's own colour is back. Close the terminal with Super+W.
-  ** Keep the single quotes around the values containing `$`, `;`, `#` or a space.
+  * Press Super+Return. A terminal opens.
+  * Type `cp /etc/chromium/policies/managed/color.json /tmp/color.before` and press Return. The prompt returns.
+  * Type `for v in 1C2027 abc12 abc1234 1c202g ../../etc/passwd '1c2027 1c2027' '$(id)' '1c2027;id' '#1c2027'; do omarchy-theme-set-browser-policy "$v"; echo "s=$?"; done` and press Return. Every status is non-zero. No password prompt appears.
+  * Type `omarchy-theme-set-browser-policy; echo "s=$?"` and press Return. The last line is non-zero. No password prompt appears.
+  * Type `omarchy-theme-set-browser-policy 1c2027 ffffff; echo "s=$?"` and press Return. The last line is non-zero. No password prompt appears.
+  * Type `cmp /tmp/color.before /etc/chromium/policies/managed/color.json && echo unchanged` and press Return. The output is `unchanged`.
+  * Type `omarchy-theme-set-browser-policy 1c2027; echo "s=$?"` and press Return. The last line is `s=0`. No password prompt appears.
+  * Type `cat /etc/chromium/policies/managed/color.json` and press Return. The file includes `"BrowserThemeColor": "#1c2027"`.
+  * Type `omarchy-theme-set-browser` and press Return. The prompt returns.
+  * Type `rm /tmp/color.before` and press Return. The prompt returns.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * A polkit dialog appearing at any point means the grant was not taken; report it (the `omarchy-theme-browser` sudoers rule is one of the four shipped NOPASSWD drop-ins).
+  * Keep the single quotes around values that contain `$`, `;`, `#`, or a space.
+  * A password dialog at any point is a failure. Screenshot it and stop.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Eleven non-zero refusals and `unchanged`; the valid colour written passwordlessly; the theme colour restored
+  ** Nine bad values, a missing argument, and two arguments each exit non-zero and show no password prompt.
+  ** `color.json` is unchanged after those refusals.
+  ** `1c2027` exits 0, writes `"BrowserThemeColor": "#1c2027"`, and shows no password prompt. `omarchy-theme-set-browser` restores the theme color.
   * If unsuccessful
-  ** A refusal exiting 0 or modifying `color.json`, or a prompt for the valid colour
+  ** A refusal exits 0 or changes `color.json`, or the valid color asks for a password.
 covers: test/shell.d/browser-policy-sudoers-test.sh (argument validation, PACKAGED_PATH elevation); bin/omarchy-theme-set-browser-policy; etc/sudoers.d/omarchy-theme-browser
 
 ### cups-admin-forbidden-and-browsed-absent   [VM-OK]
@@ -20030,29 +20098,70 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter and type `systemctl is-enabled cups.service; systemctl is-active cups.service; timeout 10 lpstat -r` Enter → `enabled`, `active`, `scheduler is running`.
-  * Type `stat -c '%U:%G %a' /etc/cups/cups-files.conf; head -1 /etc/cups/cups-files.conf; LC_ALL=C timeout 10 lpinfo -v </dev/null; echo rc=$?` Enter → `root:cups 640`, `Permission denied`, a line containing `lpinfo: Forbidden` and a non-zero rc.
-  ** Do not use sudo here; the unprivileged result is the point.
-  * Press Super+Shift+Enter, type `localhost:631` in the address bar, Enter → the CUPS home page (tabs Home / Administration / Classes / Help / Jobs / Printers).
-  * Click **Administration**, then **Add Printer** → a basic-auth dialog; enter `prime` / `prime`. Result: a "Forbidden" page (or the dialog re-appears). The printer wizard must NOT open. Press Escape if re-prompted. Click **Printers** → an empty list loads without authentication. Close Chromium (Super+W).
-  * Press Super+Alt+Space, type `Print Settings`, Enter → the printers window opens with an empty list. Click **Add** → a polkit dialog appears (the desktop user is not a CUPS admin); press Escape once to prove it, then click **Add** again and enter `prime`. After the ~10 s scan only generic entries remain; expand `Network Printer` and confirm `Internet Printing Protocol (ipp)` is offered. Cancel and close the window (Super+W).
-  ** Skipped here: adding a real printer (none attached; discovery finds nothing in this VM).
-  * Open Chromium with Super+Shift+Enter, press Ctrl+P: Destination is `Save as PDF`. Click Save, accept the default name in `~/Downloads`. In the terminal type `ls -la ~/Downloads/*.pdf` → the new PDF with non-zero size; type `rm ~/Downloads/*.pdf` and close Chromium (Super+W).
-  * In the terminal type `systemctl is-active avahi-daemon; pacman -Q cups cups-filters system-config-printer cups-pk-helper; pacman -Q cups-browsed cups-pdf 2>&1` Enter → `active`, four package lines, then both `was not found`. Type `systemctl is-enabled cups-browsed.service 2>&1; systemctl is-active cups-browsed.service; pgrep -x cups-browsed; echo pgrep-rc=$?` → `not-found` or `disabled`, `inactive`, no pid, `pgrep-rc=1`.
-  * Type `for p in /etc/cups/cups-browsed.conf /etc/cups/cups-browsed.conf.pacsave /etc/cups/cups-browsed.conf.pacnew /usr/bin/cups-browsed /usr/lib/cups/backend/implicitclass /usr/lib/systemd/system/cups-browsed.service /etc/systemd/system/multi-user.target.wants/cups-browsed.service; do [ -e "$p" ] || [ -L "$p" ] && echo "EXISTS $p"; done; echo PATHS-DONE` Enter → no `EXISTS` line before `PATHS-DONE`. Close the terminal (Ctrl+D); the desktop is as before.
+  * Press Super+Return. A terminal opens.
+  * Type `systemctl is-enabled cups.service` and press Return. The output is `enabled`.
+  * Type `systemctl is-active cups.service` and press Return. The output is `active`.
+  * Type `timeout 10 lpstat -r` and press Return. The output says the scheduler is running.
+  * Type `stat -c '%U:%G %a' /etc/cups/cups-files.conf` and press Return. The output is `root:cups 640`.
+  * Type `head -1 /etc/cups/cups-files.conf` and press Return. The output says permission is denied.
+  * Type `LC_ALL=C timeout 10 lpinfo -v </dev/null; echo "rc=$?"` and press Return. The output includes `lpinfo: Forbidden`, and the last line is non-zero.
+  * Press Super+Shift+Return. Chromium opens.
+  * Click the address bar. It is focused.
+  * Type `localhost:631` and press Return. The CUPS page loads.
+  * Click Administration. The Administration page opens.
+  * Click Add Printer. A login dialog opens.
+  * Type `prime` in the user field.
+  * Press Tab. The password field is focused.
+  * Type `prime` and press Return. A Forbidden page appears, or the login dialog opens again.
+  ** If the login dialog opens again, press Escape. It closes.
+  * Click Printers. An empty printer list loads.
+  * Press Super+W. Chromium closes.
+  * Press Super+Alt+Space. The launcher opens.
+  * Type `Print Settings` and press Return. The printers window opens.
+  * Click Add. A password dialog opens.
+  * Press Escape. The dialog closes.
+  * Click Add. The password dialog opens.
+  * Type `prime` and press Return. The add-printer dialog opens.
+  * Click Network Printer if it is collapsed. Internet Printing Protocol (ipp) is listed.
+  * Click Cancel. The dialog closes.
+  * Press Super+W. The printers window closes.
+  * Press Super+Shift+Return. Chromium opens.
+  * Press Ctrl+P. The print dialog opens. The destination is Save as PDF.
+  * Click Save. A save dialog opens.
+  * Press Return. The file is saved.
+  * Click the terminal. It is focused.
+  * Type `ls -la ~/Downloads/*.pdf` and press Return. A new PDF is listed, and its size is not zero.
+  * Remove that PDF. The prompt returns.
+  * Click Chromium. It is focused.
+  * Press Super+W. Chromium closes.
+  * Click the terminal. It is focused.
+  * Type `systemctl is-active avahi-daemon` and press Return. The output is `active`.
+  * Type `pacman -Q cups cups-filters system-config-printer cups-pk-helper` and press Return. Four package lines are printed.
+  * Type `pacman -Q cups-browsed cups-pdf` and press Return. Both lines say the package was not found.
+  * Type `systemctl is-enabled cups-browsed.service` and press Return. The output is `disabled` or `not-found`.
+  * Type `systemctl is-active cups-browsed.service` and press Return. The output is `inactive`.
+  * Type `pgrep -x cups-browsed; echo "pgrep-rc=$?"` and press Return. No pid is printed, and the last line is `pgrep-rc=1`.
+  * Type `for p in /etc/cups/cups-browsed.conf /etc/cups/cups-browsed.conf.pacsave /etc/cups/cups-browsed.conf.pacnew /usr/bin/cups-browsed /usr/lib/cups/backend/implicitclass /usr/lib/systemd/system/cups-browsed.service /etc/systemd/system/multi-user.target.wants/cups-browsed.service; do [ -e "$p" ] || [ -L "$p" ] && echo "EXISTS $p"; done; echo PATHS-DONE` and press Return. The output is `PATHS-DONE`.
+  * Press Ctrl+D. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Chromium marks http://localhost as "not secure"; that is expected. The path loop wraps onto two terminal lines; type it carefully. The Add dialog scans for ~10 s; screenshot when the spinner stops.
+  * Do not use sudo for the policy file or `lpinfo`. The unprivileged result is the check.
+  * Chromium calling localhost not secure is expected.
+  * The add-printer scan takes about 10 seconds. Screenshot when the spinner stops. Do not add a printer.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of `enabled`/`active`/`scheduler is running`, `root:cups 640` and Permission denied on the policy file, `lpinfo: Forbidden` with non-zero rc, the CUPS home page, the auth dialog and the Forbidden result, the Printers page, the polkit dialog from Print Settings and the Add dialog with the IPP option after authenticating, the Save-as-PDF dialog and the resulting file, avahi active, the package lines with two `was not found`, cups-browsed inactive with `pgrep-rc=1`, and `PATHS-DONE` with no EXISTS lines
+  ** CUPS is enabled and active, and the scheduler is running. The policy file is `root:cups 640` and unreadable. `lpinfo` says Forbidden and exits non-zero.
+  ** The CUPS page loads. Add Printer with `prime` is Forbidden. The Printers page is an empty list.
+  ** Print Settings opens a password dialog. Escape closes it. After `prime`, Internet Printing Protocol (ipp) is listed, and Cancel closes the dialog.
+  ** Print saves a non-empty PDF, and that PDF is removed.
+  ** avahi is active. The four CUPS packages are installed. cups-browsed and cups-pdf are absent, the browsed service is inactive, and no browsed path exists.
   * If unsuccessful
-  ** Screenshot of the Add Printer wizard opening for `prime` on the web UI, `lpinfo -v` listing devices, a different owner/mode, the web UI not loading, Print Settings missing or its Add dialog erroring, no PDF written, any EXISTS line, or cups-browsed active
+  ** The web Add Printer wizard opens, `lpinfo` lists devices, Print Settings does not open, or a cups-browsed path exists.
 covers: etc/cups/cups-files.conf; etc/cups/cups-browsed.conf; etc/systemd/system/cups-browsed.service.d/10-omarchy.conf; install/config/enable-services.sh (cups, avahi); test/acceptance.d/cups-test.sh:7-51; test/shell.d/cups-hardening-test.sh; manual/46:47-53
 
 ### docker-requires-sudo-polkit-tui-and-predicate   [VM-OK]
@@ -20062,28 +20171,53 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter. Type `command -v docker; id -nG; ls -l /var/run/docker.sock` + Enter: the docker path prints, the group list includes `wheel` but not `docker`, and the socket is `srw-rw---- root docker`.
-  * Type `docker ps; echo rc=$?` + Enter → `permission denied while trying to connect to the docker API at unix:///var/run/docker.sock` (or `… the Docker daemon socket`; wording may vary — it must be a permission error, not a hang), `rc=1`. Type `d ps` + Enter → the same error (the alias is refused the same way). Type `timeout 10 docker info 2>&1 | head -3; echo rc=${PIPESTATUS[0]}` → a permission-denied or cannot-connect error and a non-zero rc.
-  * Type `sudo docker ps` + Enter, password `prime` → after a few seconds a `CONTAINER ID   IMAGE …` header with no rows. Type `sudo docker compose version` → `Docker Compose version v2.x`; `sudo docker info 2>&1 | head -3` → client/server info.
-  ** `docker.socket` is socket-activated; the first `sudo docker` can take ~10 s while `docker.service` starts — keep screenshotting.
-  * Type `omarchy sudo docker; echo "exit=$?"; omarchy sudo docker --configured; echo "exit=$?"` → `exit=0` twice (needs sudo now and as configured). Type `omarchy sudo docker --bogus; echo "exit=$?"` → `Usage: omarchy-sudo-docker [--configured]`, `exit=2`.
-  * Press Super+Space → Setup → Security: a `Sudoless Docker` row is present. Escape. Then Remove → Security: NO `Sudoless Docker` row. Escape.
-  * Press Super+Shift+D (Docker TUI): a polkit password dialog appears (the user is not in the docker group). Press Escape and report what the window shows; it must not reach a running Docker TUI as root without a password.
-  * Type `omarchy sudo keepalive; echo "exit=$?"` + Enter, enter `prime` → the prompt returns at once with `exit=0`. Type `pgrep -fc 'sudo -n true'` → `0` (the keepalive loop dies with the script; it only works when sourced). Type `sudo -k`; close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `command -v docker` and press Return. A docker path is printed.
+  * Type `id -nG` and press Return. The groups include `wheel` and do not include `docker`.
+  * Type `ls -l /var/run/docker.sock` and press Return. The socket is `srw-rw----` and owned by `root docker`.
+  * Type `docker ps; echo "rc=$?"` and press Return. The output is a permission error, and the last line is `rc=1`.
+  * Type `d ps` and press Return. The same permission error is printed.
+  * Type `timeout 10 docker info 2>&1 | head -3; echo "rc=${PIPESTATUS[0]}"` and press Return. A permission error is printed, and the last line is non-zero.
+  * Type `sudo docker ps` and press Return. If sudo asks, type `prime` and press Return. A container table header is printed, with no rows.
+  * Type `sudo docker compose version` and press Return. A Docker Compose version line is printed.
+  * Type `sudo docker info 2>&1 | head -3` and press Return. Client and server lines are printed.
+  * Type `omarchy sudo docker; echo "exit=$?"` and press Return. The last line is `exit=0`.
+  * Type `omarchy sudo docker --configured; echo "exit=$?"` and press Return. The last line is `exit=0`.
+  * Type `omarchy sudo docker --bogus; echo "exit=$?"` and press Return. Usage is printed, and the last line is `exit=2`.
+  * Press Super+Space. The menu opens.
+  * Select Setup. The Setup menu opens.
+  * Select Security. The Security menu opens. Sudoless Docker is listed.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Remove. The Remove menu opens.
+  * Select Security. The Security menu opens. Sudoless Docker is not listed.
+  * Press Escape. The menu closes.
+  * Press Super+Shift+D. A password dialog opens.
+  * Press Escape. The dialog closes. The Docker TUI does not open.
+  * Click the terminal. It is focused.
+  * Type `omarchy sudo keepalive; echo "exit=$?"` and press Return. If sudo asks, type `prime` and press Return. The last line is `exit=0`.
+  * Type `pgrep -fc 'sudo -n true'` and press Return. The output is `0`.
+  * Type `sudo -k` and press Return. The prompt returns.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The Security submenus are under Setup and Remove in the root Omarchy menu (Super+Space).
-  * A polkit dialog appears centre-screen; Escape cancels it.
+  * The first `sudo docker` can take about 10 seconds while the socket starts the service. Screenshot while it runs.
+  * Do not enter the password on the Docker TUI dialog. Escape is the check.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the groups line without `docker` and the socket permissions, the permission errors for `docker ps` (`rc=1`), `d ps` and `docker info` with a non-zero rc, the empty container table, the compose version and server info, the three predicate exit codes, the two Security submenus, the polkit dialog after Super+Shift+D, and the keepalive returning with `0` leftover loops
+  ** `docker` exists, the user is not in the `docker` group, and the socket is `srw-rw---- root docker`.
+  ** `docker ps`, `d ps`, and `docker info` are permission errors. `docker ps` exits 1.
+  ** `sudo docker ps` prints an empty table. Compose prints a version. `docker info` prints client and server lines.
+  ** The predicate exits 0 now and with `--configured`. `--bogus` exits 2.
+  ** Setup → Security lists Sudoless Docker. Remove → Security does not. Super+Shift+D opens a password dialog, and Escape closes it without the TUI.
+  ** Keepalive exits 0, and no `sudo -n true` loop remains.
   * If unsuccessful
-  ** Screenshot of unelevated `docker ps`/`docker info` succeeding, the user in the docker group, the daemon failing under sudo, `Sudoless Docker` in both menus or neither, `--bogus` accepted, or the TUI running without a prompt; `systemctl status docker.socket docker.service | head -20 | sudo tee /dev/ttyS0` read via get-serial
+  ** Unelevated docker succeeds, Sudoless Docker is in both menus or neither, or the TUI opens without a password.
 covers: manual/18-development-tools.md:23-27; install/config/docker.sh; etc/docker/daemon.json; etc/systemd/system/docker.service.d/no-block-boot.conf; bin/omarchy-sudo-docker; bin/omarchy-sudo-keepalive; default/bash/aliases:50 (d); default/omarchy/omarchy-menu.jsonc:186,302; test/shell.d/sudo-docker-test.sh; test/shell.d/sudoless-docker-posture-test.sh; test/acceptance.d/system-test.sh:86-100
 
 ### sudoless-docker-enable-and-revert   [VM-OK]
@@ -20093,30 +20227,91 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `id -nG | tr ' ' '\n' | grep -c '^docker$'; omarchy-sudo-docker --configured; echo $?` → `0` and `0` (not configured).
-  * Open Omarchy Menu (Super+Space) → Setup → Security. A "Sudoless Docker" row must be present (also Fido2, SSHD, Passwordless Sudo; no Fingerprint on this machine). Select Sudoless Docker.
-  ** A floating "Omarchy" terminal shows the `⚠️  WARNING` text about `docker run -v /:/host alpine` and asks `Enable sudoless Docker? This gives anything running as you passwordless root.` Choose **No** (press `n`) → `Aborted. No changes made. Docker access still goes through a prompt.` then Done!; press a key. `getent group docker; ls ~/.local/state/omarchy/reboot-required` → no `prime`, `No such file`. Remove → Security: Sudoless Docker is NOT listed while off; in the terminal `omarchy-remove-security-sudoless-docker` → a no-op message, no reboot prompt.
-  * Repeat Setup → Security → Sudoless Docker, this time choose **Yes**; enter the sudo password `prime` → `Sudoless Docker ENABLED. It takes effect after a reboot.` and `Reboot now to apply?` — choose **No**. Press a key at Done!.
-  * In the terminal: `getent group docker` → the line ends with `prime`; `id -nG prime | tr ' ' '\n' | grep -c '^docker$'` → `1`; `omarchy-sudo-docker --configured; echo $?` → `1` (configured to not need sudo); `omarchy-sudo-docker; echo $?` → `0` (still needs it this session — no docker socket access until a reboot); `ls ~/.local/state/omarchy/reboot-required; omarchy-state get reboot-required 2>/dev/null` → the reboot-required flag is present (the bar may show a reboot indicator; report what you see).
-  * Open Omarchy Menu → Setup → Security (reopen twice): Sudoless Docker is gone; Remove → Security now lists Sudoless Docker. In the terminal type `omarchy-setup-security-sudoless-docker` → `Sudoless Docker is already enabled: prime is in the docker group.` and the hint to run the remove command.
-  * Remove → Security → Sudoless Docker → confirm, sudo password if asked → `Removing prime from the docker group...`, `Sudoless Docker DISABLED …`, `Reboot now to apply?` → **No**. Done!, press a key.
-  * `getent group docker` → no longer lists `prime`; `omarchy-sudo-docker --configured; echo $?` → `0`. Setup → Security shows Sudoless Docker again. Type `omarchy-state clear reboot-required` to drop the flag. Close the terminal with Super+W.
-  ** Skipped: the reboot itself, which would actually grant the group to the session.
+  * Press Super+Return. A terminal opens.
+  * Type `id -nG | tr ' ' '\n' | grep -c '^docker$'` and press Return. The output is `0`.
+  * Type `omarchy-sudo-docker --configured; echo "exit=$?"` and press Return. The last line is `exit=0`.
+  * Press Super+Space. The menu opens.
+  * Select Setup. The Setup menu opens.
+  * Select Security. The Security menu opens. Sudoless Docker is listed.
+  * Select Sudoless Docker. A terminal opens and asks whether to enable sudoless Docker.
+  * Press n. The output says it aborted and no changes were made.
+  * Press Return. That terminal closes.
+  * Click the first terminal. It is focused.
+  * Type `getent group docker` and press Return. `prime` is not listed.
+  * Type `ls ~/.local/state/omarchy/reboot-required` and press Return. The output says the file does not exist.
+  * Press Super+Space. The menu opens.
+  * Select Remove. The Remove menu opens.
+  * Select Security. The Security menu opens. Sudoless Docker is not listed.
+  * Press Escape. The menu closes.
+  * Click the terminal. It is focused.
+  * Type `omarchy-remove-security-sudoless-docker` and press Return. A no-op message is printed. It does not ask to reboot.
+  * Press Super+Space. The menu opens.
+  * Select Setup. The Setup menu opens.
+  * Select Security. The Security menu opens.
+  * Select Sudoless Docker. A terminal opens and asks whether to enable sudoless Docker.
+  * Press y. If sudo asks, type `prime` and press Return. The output says sudoless Docker is enabled and asks whether to reboot.
+  * Press n. It does not reboot.
+  * Press Return. That terminal closes.
+  * Click the first terminal. It is focused.
+  * Type `getent group docker` and press Return. The line ends with `prime`.
+  * Type `id -nG prime | tr ' ' '\n' | grep -c '^docker$'` and press Return. The output is `1`.
+  * Type `omarchy-sudo-docker --configured; echo "exit=$?"` and press Return. The last line is `exit=1`.
+  * Type `omarchy-sudo-docker; echo "exit=$?"` and press Return. The last line is `exit=0`.
+  * Type `ls ~/.local/state/omarchy/reboot-required` and press Return. The file is listed.
+  * Press Super+Space. The menu opens.
+  * Select Setup. The Setup menu opens.
+  * Select Security. The Security menu opens. Record whether Sudoless Docker is listed.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Setup. The Setup menu opens.
+  * Select Security. The Security menu opens. Sudoless Docker is not listed.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Remove. The Remove menu opens.
+  * Select Security. The Security menu opens. Sudoless Docker is listed.
+  * Press Escape. The menu closes.
+  * Click the terminal. It is focused.
+  * Type `omarchy-setup-security-sudoless-docker` and press Return. The output says sudoless Docker is already enabled.
+  * Press Super+Space. The menu opens.
+  * Select Remove. The Remove menu opens.
+  * Select Security. The Security menu opens.
+  * Select Sudoless Docker. A terminal opens and asks to confirm.
+  * Confirm it. If sudo asks, type `prime` and press Return. The output says sudoless Docker is disabled and asks whether to reboot.
+  * Press n. It does not reboot.
+  * Press Return. That terminal closes.
+  * Click the first terminal. It is focused.
+  * Type `getent group docker` and press Return. `prime` is not listed.
+  * Type `omarchy-sudo-docker --configured; echo "exit=$?"` and press Return. The last line is `exit=0`.
+  * Press Super+Space. The menu opens.
+  * Select Setup. The Setup menu opens.
+  * Select Security. The Security menu opens. Record whether Sudoless Docker is listed.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Setup. The Setup menu opens.
+  * Select Security. The Security menu opens. Sudoless Docker is listed.
+  * Press Escape. The menu closes.
+  * Click the terminal. It is focused.
+  * Type `omarchy-state clear reboot-required` and press Return. The prompt returns.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Never answer Yes to the reboot. gum confirm: Left/Right or Tab to move, Enter to pick (`n`/`y` also work); the highlighted button is the selection.
-  * `id -nG` without a user shows the running session's groups (still without docker until reboot); `id -nG prime` shows the configured ones. If usermod reports the docker group does not exist, report it and stop.
-  * Menu guards paint from the previous open — reopen a submenu twice before asserting a row moved. A "reboot required" hint may linger in later `omarchy update` runs on this disk if the flag is not cleared; end the session with `stop` if the disk should not be kept.
+  * Never answer yes to a reboot. Press `n`. Left and Right move a gum confirmation, and Enter chooses the highlighted button.
+  * `id -nG` without a user is the current session. `id -nG prime` is the account. The session stays without docker until a reboot. Do not reboot.
+  * Use arrows and Enter if typing does not filter the menu. Reopen a Security menu before judging that a row moved. The second open is that check.
+  * If usermod says the docker group does not exist, record that and stop.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the warning text, the Aborted line with no group/flag change and the Remove row absent plus the no-op remover, the ENABLED line with the declined reboot question, `getent group docker` with `prime`, the two exit codes, the reboot-required flag, the menu without the Setup row and with the Remove row, the already-enabled message, the DISABLED message, and the restored state with the flag cleared
+  ** The account starts out of the docker group, and `--configured` exits 0. Declining the warning adds no group and no reboot flag. Remove → Security does not list Sudoless Docker, and the remover is a no-op.
+  ** Accepting and declining the reboot adds `prime` to the docker group, `--configured` exits 1, the current session still exits 0, and the reboot-required file exists.
+  ** After the second open, Setup → Security hides Sudoless Docker and Remove → Security lists it. Running setup again says it is already enabled.
+  ** Remove disables it, declines the reboot, drops `prime`, `--configured` exits 0, and Setup → Security lists Sudoless Docker again. The reboot flag is cleared.
   * If unsuccessful
-  ** Screenshot of the failing step, the floating terminal's error text (e.g. usermod failure), the group added after No, both menu rows shown together, a reboot happening despite No, `getent group docker` and `omarchy-state get reboot-required`
+  ** Choosing No changes the group, both menus show the row, or a reboot starts.
 covers: manual/18-development-tools.md:25; default/omarchy/omarchy-menu.jsonc:186,302 (setup.security.sudoless-docker, remove.security.sudoless-docker); bin/omarchy-setup-security-sudoless-docker; bin/omarchy-remove-security-sudoless-docker; bin/omarchy-sudo-docker; bin/omarchy-state; install/config/docker.sh; test/shell.d/sudoless-docker-toggle-test.sh; test/shell.d/provisioning-groups-test.sh; test/shell.d/sudo-docker-test.sh; test/shell.d/sudoless-docker-posture-test.sh
 
 ### firewall-ufw-defaults-no-ssh   [VM-OK] [NET]
@@ -20126,26 +20321,43 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter and type `systemctl is-active ufw; ufw status; echo rc=$?` Enter → `active`, then `ERROR: You need to be root to run this script`, `rc=1`.
-  * Type `sudo ufw status verbose | sudo tee /dev/ttyS0` Enter (password `prime`) and read it with get-serial.
-  ** `Status: active`; `Default: deny (incoming), allow (outgoing)…`; rules for `53317/udp` and `53317/tcp` ALLOW IN Anywhere; `172.17.0.1 53/udp` ALLOW IN from `172.16.0.0/12` and `192.168.0.0/16` (two `allow-docker-dns` rules); NO `22/tcp` rule.
-  * Type `systemctl is-enabled sshd; systemctl is-active sshd; sudo grep -c DOCKER-USER /etc/ufw/after.rules` Enter → `disabled` (or not-found), `inactive`, a number greater than 0 (ufw-docker installed).
-  * Type `id; docker ps` Enter → the groups list has no `docker`; a permission-denied error, not a container list.
-  * Open the Omarchy Menu (Super+Space) → Setup → Security: rows include SSHD, Fido2, Passwordless Sudo, Sudoless Docker (no Fingerprint); Remove → Security must NOT show SSHD (not enabled). Escape. Do not enable SSHD in this test.
-  * Type `curl -s --max-time 5 -o /dev/null -w '%{http_code}\n' https://omarchy.org` Enter → `200`. Press Ctrl+D; the desktop is as before.
+  * Press Super+Return. A terminal opens.
+  * Type `systemctl is-active ufw` and press Return. The output is `active`.
+  * Type `ufw status; echo "rc=$?"` and press Return. The output says you need to be root, and the last line is `rc=1`.
+  * Type `sudo ufw status verbose | sudo tee /dev/ttyS0` and press Return. If sudo asks, type `prime` and press Return. The prompt returns.
+  * Read the serial log. Status is active. Incoming is deny and outgoing is allow. `53317` is allowed in. The docker-dns rules are present. Port 22 is not listed.
+  * Type `systemctl is-enabled sshd` and press Return. The output is `disabled` or `not-found`.
+  * Type `systemctl is-active sshd` and press Return. The output is `inactive`.
+  * Type `sudo grep -c DOCKER-USER /etc/ufw/after.rules` and press Return. The output is greater than `0`.
+  * Type `id -nG` and press Return. `docker` is not listed.
+  * Type `docker ps` and press Return. A permission error is printed.
+  * Press Super+Space. The menu opens.
+  * Select Setup. The Setup menu opens.
+  * Select Security. The Security menu opens. SSHD is listed.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Remove. The Remove menu opens.
+  * Select Security. The Security menu opens. SSHD is not listed.
+  * Press Escape. The menu closes.
+  * Click the terminal. It is focused.
+  * Type `curl -s --max-time 5 -o /dev/null -w '%{http_code}\n' https://omarchy.org` and press Return. The output is `200`.
+  * Press Ctrl+D. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * ufw's table is wide; the serial copy is the reliable read. These facts are not visible in any UI; keep the terminal readable.
+  * The status table is wide. Read it with get-serial.
+  * Do not select SSHD.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the non-root refusal; serial text of `ufw status verbose` showing active / deny incoming / 53317 rules / docker-dns rules / no port 22; screenshot of sshd disabled and inactive, the DOCKER-USER count, `id` without docker and `docker ps` denied, the Security submenus, and the `200`
+  ** UFW is active. Unelevated `ufw status` exits 1. The verbose status denies incoming, allows outgoing, allows 53317, includes the docker-dns rules, and has no port 22 rule.
+  ** sshd is not enabled and not active. `after.rules` contains DOCKER-USER. The user is not in `docker`, and `docker ps` is denied.
+  ** Setup → Security lists SSHD. Remove → Security does not. `https://omarchy.org` returns `200`.
   * If unsuccessful
-  ** `Status: inactive`, a missing default deny, a `22/tcp` rule on a stock disk, sshd active, or docker in the user's groups; `./client get-serial`
+  ** UFW is inactive, a port 22 rule is present, sshd is active, or the user is in `docker`.
 covers: manual/35-networking.md (The firewall); manual/48:6; install/config/firewall.sh; install/config/docker.sh; install/config/enable-services.sh; install/omarchy-base.packages (ufw); omarchy-menu.jsonc setup.security.sshd, remove.security.sshd (when); test/shell.d/firewall-config-test.sh; test/acceptance.d/system-test.sh
 
 ### system-services-enabled-and-running   [VM-OK] [NET]
@@ -20155,28 +20367,37 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `systemctl is-enabled cups avahi-daemon docker.socket systemd-resolved NetworkManager power-profiles-daemon sddm systemd-oomd ufw linux-modules-cleanup snapper-cleanup.timer limine-snapper-sync 2>&1` Enter → `enabled` for each (report any `static`/`disabled`/`not-found`).
-  * Type `systemctl is-enabled sshd snapper-timeline.timer NetworkManager-wait-online 2>&1` Enter → `disabled`, `disabled`, `masked`.
-  * Type `systemctl is-active NetworkManager systemd-resolved ufw docker.socket; readlink /etc/resolv.conf` Enter → all `active`; `../run/systemd/resolve/stub-resolv.conf`.
-  * Type `resolvectl status | grep -E 'Protocols|DNS Servers' | head -3; grep '^hosts:' /etc/nsswitch.conf` Enter → Protocols show `-LLMNR -mDNS`, a DNS server (the NAT gateway, 10.0.2.3), and `hosts: mymachines mdns_minimal [NOTFOUND=return] resolve files myhostname dns`.
-  * Type `resolvectl query omarchy.org; getent hosts $(hostname)` Enter → an address for each. Unhappy path: `time getent hosts nonexistent.local; echo rc=$?` → no output, `rc=2`, real time under 1 s (mdns_minimal returns instead of hanging).
-  * Type `systemctl --user is-active pipewire.service pipewire-pulse.service wireplumber.service` Enter → `active` three times.
-  * Type `sudo iptables -S DOCKER-USER 2>/dev/null | grep -c ufw-docker; grep ENABLED /etc/ufw/ufw.conf` Enter (password `prime`) → ≥1 and `ENABLED=yes`.
-  * Unhappy path: type `curl -m 3 telnet://localhost:22; echo "rc=$?"` Enter → connection refused (`rc=7`): no daemon listens on 22.
-  * Close the terminal with Super+W. The desktop must look exactly as at the start.
+  * Press Super+Return. A terminal opens.
+  * Type `systemctl is-enabled cups avahi-daemon docker.socket systemd-resolved NetworkManager power-profiles-daemon sddm systemd-oomd ufw linux-modules-cleanup snapper-cleanup.timer limine-snapper-sync` and press Return. Each line is `enabled`.
+  ** If a line is `static`, `disabled`, or `not-found`, record that unit.
+  * Type `systemctl is-enabled sshd snapper-timeline.timer NetworkManager-wait-online` and press Return. The lines are `disabled`, `disabled`, and `masked`.
+  * Type `systemctl is-active NetworkManager systemd-resolved ufw docker.socket` and press Return. Each line is `active`.
+  * Type `readlink /etc/resolv.conf` and press Return. The output is `../run/systemd/resolve/stub-resolv.conf`.
+  * Type `resolvectl status | grep -E 'Protocols|DNS Servers' | head -3` and press Return. Protocols include `-LLMNR -mDNS`, and a DNS server is listed.
+  * Type `grep '^hosts:' /etc/nsswitch.conf` and press Return. The line is `hosts: mymachines mdns_minimal [NOTFOUND=return] resolve files myhostname dns`.
+  * Type `resolvectl query omarchy.org` and press Return. An address is printed.
+  * Type `getent hosts $(hostname)` and press Return. An address is printed.
+  * Type `time getent hosts nonexistent.local; echo "rc=$?"` and press Return. No address is printed, the last line is `rc=2`, and the real time is under 1 second.
+  * Type `systemctl --user is-active pipewire.service pipewire-pulse.service wireplumber.service` and press Return. Each line is `active`.
+  * Type `sudo iptables -S DOCKER-USER 2>/dev/null | grep -c ufw-docker; grep ENABLED /etc/ufw/ufw.conf` and press Return. If sudo asks, type `prime` and press Return. The count is at least `1`, and a line is `ENABLED=yes`.
+  * Type `curl -m 3 telnet://localhost:22; echo "rc=$?"` and press Return. The connection is refused, and the last line is `rc=7`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * `systemctl is-enabled` prints one state per line in argument order; output is short, no serial redirection needed.
+  * `is-enabled` prints one state per argument, in the same order.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot showing the enabled/disabled/masked lines, the active states and the resolv.conf link, the `-LLMNR -mDNS` protocol flags and nsswitch line, the two successful lookups and the fast `.local` miss with its time, three user `active`, the ufw-docker count with `ENABLED=yes`, and the refused connection to 22
+  ** The shipped units are `enabled`. sshd and the snapper timeline are `disabled`, and NetworkManager-wait-online is `masked`.
+  ** NetworkManager, resolved, ufw, and docker.socket are `active`. `resolv.conf` points at the stub resolver.
+  ** Protocols include `-LLMNR -mDNS`. `omarchy.org` and the hostname resolve. `nonexistent.local` returns nothing, exits 2, and finishes in under 1 second.
+  ** The three audio user units are `active`. The DOCKER-USER count is at least 1 and ufw is enabled. Port 22 is refused.
   * If unsuccessful
-  ** Screenshot of the offending line plus `systemctl status <unit>` output, `+mDNS`/`+LLMNR`, a lookup failing, the `.local` query taking seconds, or a daemon answering on 22
+  ** A shipped unit is not enabled, a protocol flag is on, the `.local` query takes more than a second, or something answers on port 22.
 covers: test/acceptance.d/system-test.sh:65-84; install/config/enable-services.sh; install/config/firewall.sh; install/config/snapper.sh (timers); install/hardware/network.sh; etc/systemd/resolved.conf.d/*; etc/nsswitch.conf; omarchy-iso configure_dns_resolver, configure_ssh_access (absence)
 
 ### user-units-running-and-hardware-gated-units-inert   [VM-PARTIAL]
