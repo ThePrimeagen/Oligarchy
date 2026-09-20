@@ -49,7 +49,7 @@ describe("homepage unhappy path", () => {
     expect(html).toContain("<title>oligarchy servers</title>");
     expect(html).toContain("<h1>oligarchy servers</h1>");
     expect(html).toContain(
-      '<nav aria-label="Pages"><a href="/" aria-current="page">servers</a><a href="/definitions">definitions</a></nav>',
+      '<nav class="tabs" aria-label="Pages"><a href="/" aria-current="page">servers</a><a href="/definitions">definitions</a></nav>',
     );
     expect(html).toContain("<p>error: internal error</p>");
     expect(html).not.toContain("dashboard.css");
@@ -73,7 +73,7 @@ describe("homepage unhappy path", () => {
     expect(html).toContain("<title>oligarchy definitions</title>");
     expect(html).toContain("<h1>oligarchy definitions</h1>");
     expect(html).toContain(
-      '<nav aria-label="Pages"><a href="/">servers</a><a href="/definitions" aria-current="page">definitions</a></nav>',
+      '<nav class="tabs" aria-label="Pages"><a href="/">servers</a><a href="/definitions" aria-current="page">definitions</a></nav>',
     );
     expect(html).toContain("<p>error: Test definitions are unavailable.</p>");
     expect(html).not.toContain('id="running-tests"');

@@ -86,8 +86,6 @@ const yOf = (value: number, max: number): number => (max === 0 ? 100 : 100 - (va
 
 // One series as SVG line segments, oldest on the left. A single sample spans the plot so it
 // stays visible; a zero max sits on the baseline rather than inventing a height.
-// Stroke lives on the element, not in a stylesheet, so the line is still a line. Cpu is dashed
-// so it can be told from jobs without a color.
 const SeriesLine: FC<{
   kind: "jobs" | "cpu";
   values: ReadonlyArray<number>;
@@ -96,19 +94,15 @@ const SeriesLine: FC<{
   if (values.length === 0) {
     return null;
   }
-  const dash = kind === "cpu" ? "4 2" : undefined;
   if (values.length === 1) {
     const y = yOf(values[0] ?? 0, max);
     return (
       <line
-        data-series={kind}
+        class={`process-graph__${kind}`}
         x1="0"
         y1={y}
         x2="100"
         y2={y}
-        fill="none"
-        stroke="currentColor"
-        stroke-dasharray={dash}
         vector-effect="non-scaling-stroke"
       ></line>
     );
@@ -118,14 +112,11 @@ const SeriesLine: FC<{
     <>
       {values.slice(1).map((value, index) => (
         <line
-          data-series={kind}
+          class={`process-graph__${kind}`}
           x1={(index / last) * 100}
           y1={yOf(values[index] ?? 0, max)}
           x2={((index + 1) / last) * 100}
           y2={yOf(value, max)}
-          fill="none"
-          stroke="currentColor"
-          stroke-dasharray={dash}
           vector-effect="non-scaling-stroke"
         ></line>
       ))}
@@ -143,43 +134,46 @@ const CombinedGraph: FC<{ series: ProcessSeries }> = ({ series }) => {
   const cpuMax = cpu.reduce((max, value) => (value > max ? value : max), 100);
   const memoryMax = memory.reduce((max, value) => (value > max ? value : max), 0);
   const current = `jobs ${String(series.jobs)} · cpu ${percent(series.cpuPercent)} · memory ${megabytes(series.memoryBytes)} MB`;
-  const barWidth = memory.length === 0 ? 0 : 100 / memory.length;
   return (
-    <>
-      <svg viewBox="0 0 100 100" role="img" aria-label={current}>
-        {memory.map((value, index) => {
-          const height = memoryMax === 0 ? 0 : (value / memoryMax) * 100;
-          return (
-            <rect
-              data-series="memory"
-              x={index * barWidth}
-              y={100 - height}
-              width={barWidth}
-              height={height}
-              fill="currentColor"
-            ></rect>
-          );
-        })}
-        <SeriesLine kind="jobs" values={jobs} max={jobsMax} />
-        <SeriesLine kind="cpu" values={cpu} max={cpuMax} />
-      </svg>
-      <ul>
-        <li>memory {megabytes(series.memoryBytes)} MB</li>
-        <li>jobs {series.jobs}</li>
-        <li>cpu {percent(series.cpuPercent)}</li>
+    <div class="process-graph" role="img" aria-label={current}>
+      <div class="process-graph__plot">
+        <div class="process-graph__bars">
+          {memory.map((value) => (
+            <span
+              class="process-graph__bar"
+              style={{ height: memoryMax === 0 ? "0%" : `${String((value / memoryMax) * 100)}%` }}
+            ></span>
+          ))}
+        </div>
+        <svg
+          class="process-graph__lines"
+          viewBox="0 0 100 100"
+          preserveAspectRatio="none"
+          aria-hidden="true"
+        >
+          <SeriesLine kind="jobs" values={jobs} max={jobsMax} />
+          <SeriesLine kind="cpu" values={cpu} max={cpuMax} />
+        </svg>
+      </div>
+      <ul class="process-graph__legend">
+        <li class="process-graph__memory">memory {megabytes(series.memoryBytes)} MB</li>
+        <li class="process-graph__jobs">jobs {series.jobs}</li>
+        <li class="process-graph__cpu">cpu {percent(series.cpuPercent)}</li>
       </ul>
-    </>
+    </div>
   );
 };
 
 const ProcessCard: FC<{ series: ProcessSeries }> = ({ series }) => {
   const sinceReport = series.queriedAt.getTime() - series.reportedAt.getTime();
   return (
-    <article>
-      <h3>{series.name}</h3>
-      <p>
-        {series.type} · {age(sinceReport)} ago
-      </p>
+    <article class="process-card">
+      <header>
+        <h3>{series.name}</h3>
+        <p>
+          {series.type} · {age(sinceReport)} ago
+        </p>
+      </header>
       {sinceReport > SILENT_AFTER_MS ? (
         <p>
           <strong>silent</strong>
@@ -191,17 +185,17 @@ const ProcessCard: FC<{ series: ProcessSeries }> = ({ series }) => {
   );
 };
 
-// Current process readings, one article per name: one graph of jobs, cpu and memory, or the
+// Current process readings as one card per name: one graph of jobs, cpu and memory, or the
 // sentence that there are none. What the page polls for.
 export const Process: FC<{ series: ReadonlyArray<ProcessSeries> }> = ({ series }) =>
   series.length === 0 ? (
     <p>no process stats</p>
   ) : (
-    <>
+    <div class="process-cards">
       {series.map((row) => (
         <ProcessCard series={row} />
       ))}
-    </>
+    </div>
   );
 
 // The fleet as a table, or the sentence that there is none: what the page polls for.
@@ -232,14 +226,14 @@ export const since = (stamp: Date | null, queriedAt: Date): string =>
   stamp === null ? "—" : `${age(queriedAt.getTime() - stamp.getTime())} ago`;
 
 // The test name is the one follow link in the tab order. The rest of the row opens the same page
-// but stays out of the way of the keyboard. An empty cell is still a link, so the row can be
-// followed from any of its text.
+// but stays out of the way of the keyboard. An empty cell is still a link, so its padding is
+// clickable.
 const FollowCell: FC<{ ticket: string; primary: boolean; text: string }> = ({
   ticket,
   primary,
   text,
 }) => (
-  <td>
+  <td class="follow">
     {primary ? (
       <a href={followHref(ticket)}>{text}</a>
     ) : (
@@ -285,7 +279,15 @@ const Jobs: FC<{ jobs: ReadonlyArray<AutomationJob> }> = ({ jobs }) =>
         ];
         return (
           <tr>
-            <td>{ticket === null ? "—" : <a href={linearHref(ticket)}>{ticket}</a>}</td>
+            <td>
+              {ticket === null ? (
+                "—"
+              ) : (
+                <a class="ticket" href={linearHref(ticket)}>
+                  {ticket}
+                </a>
+              )}
+            </td>
             {ticket === null
               ? cells.map((text) => <td>{text}</td>)
               : cells.map((text, index) => (
@@ -303,7 +305,17 @@ const Jobs: FC<{ jobs: ReadonlyArray<AutomationJob> }> = ({ jobs }) =>
                 >
                   <input type="hidden" name="ticket" value={ticket} />
                   <input type="hidden" name="action" value={job.action} />
-                  <button type="submit">abort</button>
+                  <button type="submit" class="abort" aria-label="abort">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="12"
+                      height="12"
+                      viewBox="0 0 12 12"
+                      aria-hidden="true"
+                    >
+                      <path d="M2 2l8 8M10 2L2 10" stroke="red" stroke-width="2" fill="none" />
+                    </svg>
+                  </button>
                 </form>
               ) : null}
             </td>
@@ -352,11 +364,12 @@ export type Halves = {
   readonly process: ReadonlyArray<ProcessSeries>;
 };
 
-// Text an operator reads straight down the page: the process graphs first, one per named server,
-// then the automation queue, then the qemu fleet with its add box. Each list is swapped in fresh
-// every thirty seconds. There is no stylesheet. `halves` is absent only when the database could
-// not be read, so a 500 page claims neither an empty queue nor an empty fleet; `error` is the
-// reason a request was refused, on top.
+// Text an operator reads at a glance on a dark page: the process graphs first, one card per
+// named server, then two halves side by side — the automation queue and the qemu fleet with its
+// add box — each swapped in fresh every thirty seconds. The style is the dark split and the
+// combined graph. `halves` is absent only when the database could not be read, so a 500 page
+// claims neither an empty queue nor an empty fleet; `error` is the reason a request was refused,
+// on top.
 export const ServersPage: FC<{
   halves: Halves | undefined;
   error: string | undefined;
@@ -372,26 +385,28 @@ export const ServersPage: FC<{
         </div>
       )}
     </section>
-    <section>
-      <h2>automation</h2>
-      {halves === undefined ? null : (
-        <div id="queue" hx-get="/servers/queue" hx-trigger="every 30s">
-          <Queue queue={halves.queue} />
-        </div>
-      )}
-    </section>
-    <section>
-      <h2>qemu servers</h2>
-      {halves === undefined ? null : (
-        <div id="fleet" hx-get="/servers/fleet" hx-trigger="every 30s">
-          <Fleet servers={halves.servers} />
-        </div>
-      )}
-      <h2>add a server</h2>
-      <form method="post" action="/servers">
-        <input name="url" size={60} placeholder="https://qemu.example.com" />
-        <button>add</button>
-      </form>
-    </section>
+    <div class="halves">
+      <section>
+        <h2>automation</h2>
+        {halves === undefined ? null : (
+          <div id="queue" hx-get="/servers/queue" hx-trigger="every 30s">
+            <Queue queue={halves.queue} />
+          </div>
+        )}
+      </section>
+      <section>
+        <h2>qemu servers</h2>
+        {halves === undefined ? null : (
+          <div id="fleet" hx-get="/servers/fleet" hx-trigger="every 30s">
+            <Fleet servers={halves.servers} />
+          </div>
+        )}
+        <h2>add a server</h2>
+        <form method="post" action="/servers">
+          <input name="url" size={60} placeholder="https://qemu.example.com" />
+          <button>add</button>
+        </form>
+      </section>
+    </div>
   </OperatorPage>
 );
