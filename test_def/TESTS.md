@@ -4942,28 +4942,54 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return and type `omarchy menu keybindings --print | grep 'SUPER + SHIFT + F'` Return → the row `SUPER + SHIFT + F → File manager`. Type `cp ~/.config/hypr/bindings.lua /tmp/bindings.bak` Return.
-  * Type `printf '%s\n' 'o.bind("SUPER + SHIFT + R", "Override probe", "omarchy-notification-send \"Probe binding works\"")' 'o.rebind("SUPER + SHIFT + F", "File manager", { launch = "foot --title REBOUND-FILES" })' 'hl.unbind("SUPER + SHIFT + B")' >> ~/.config/hypr/bindings.lua` Return; wait two seconds (Hyprland reloads user files on save by itself — no `hyprctl reload`). No red banner may appear; `hyprctl configerrors` prints nothing.
-  ** Only if nothing changed after 15 s, type `hyprctl reload` to continue and report the missing auto-reload as a failure.
-  * Press Super+Shift+R: a notification "Probe binding works" appears (o.bind added a chord). Press Super+Shift+F: a terminal titled REBOUND-FILES opens instead of Nautilus (o.rebind replaced the default's action). Press Super+Shift+B: nothing opens within five seconds; press Super+Shift+Return: the browser still opens (only the alias was unbound). Close both.
-  * Press Super+K and type `Probe`: rows `SUPER + SHIFT + R → Override probe` and `SUPER + SHIFT + F → File manager` exist and `SUPER + SHIFT + B` has none. Escape. `omarchy menu keybindings --print | grep 'SUPER + SHIFT + F'` → the same row, now pointing at the rebound launch.
-  * Unhappy path: type `printf '\no.bind(\n' >> ~/.config/hypr/bindings.lua; hyprctl reload; hyprctl configerrors` Return → an error naming bindings.lua (Lua syntax); the bar and windows still work — the defaults keep working while looknfeel/autostart/toggles are skipped until fixed.
-  * Restore from the menu: Super+Space → Update → Config → Hyprland: the floating terminal prints "Replaced /home/prime/.config/hypr/bindings.lua with new Omarchy default. Saved backup as …bindings.lua.bak.<epoch>" (ten digits) with a diff of your lines (only bindings.lua is reported; the other six files are rewritten identical with no backup). Press a key on Done; within a few seconds `hyprctl configerrors` → empty with no reload command typed.
-  * Press Super+Shift+F: Nautilus opens again (close it with Super+W); Super+Shift+B opens the browser (close it); Super+Shift+R gives no notification. Type `rm -f ~/.config/hypr/*.bak.* /tmp/bindings.bak` Return and close the terminal.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy menu keybindings --print | grep 'SUPER + SHIFT + F'` and press Return. The row is `SUPER + SHIFT + F → File manager`.
+  * Type `cp ~/.config/hypr/bindings.lua /tmp/bindings.bak` and press Return.
+  * Type `printf '%s\n' 'o.bind("SUPER + SHIFT + R", "Override probe", "omarchy-notification-send \"Probe binding works\"")' 'o.rebind("SUPER + SHIFT + F", "File manager", { launch = "foot --title REBOUND-FILES" })' 'hl.unbind("SUPER + SHIFT + B")' >> ~/.config/hypr/bindings.lua` and press Return.
+  * Wait 2 seconds. No red banner appears.
+  * Type `hyprctl configerrors` and press Return. It prints nothing.
+  ** If the new chords do nothing after 15 seconds, type `hyprctl reload` and press Return, and report the missing auto-reload.
+  * Press Super+Shift+R. A notification says "Probe binding works".
+  * Press Super+Shift+F. A terminal titled REBOUND-FILES opens. Files does not open.
+  * Press Super+Shift+B. Nothing opens.
+  * Press Super+Shift+Return. Chromium opens.
+  * Press Super+W. Chromium closes.
+  * Press Super+W. The REBOUND-FILES terminal closes.
+  * Click the first terminal. It has focus.
+  * Press Super+K. The keybindings viewer opens.
+  * Type `Probe`. The rows `SUPER + SHIFT + R → Override probe` and `SUPER + SHIFT + F → File manager` are listed. There is no `SUPER + SHIFT + B` row.
+  * Press Escape. The viewer closes.
+  * Type `omarchy menu keybindings --print | grep 'SUPER + SHIFT + F'` and press Return. The row points at the rebound launch.
+  * Type `printf '\no.bind(\n' >> ~/.config/hypr/bindings.lua; hyprctl reload; hyprctl configerrors` and press Return. The output names `bindings.lua` and a syntax error. The bar is still there.
+  * Press Super+Space. The menu opens.
+  * Click Update.
+  * Click Config.
+  * Click Hyprland. A floating terminal opens. It says `bindings.lua` was replaced and a backup was saved.
+  * Press a key. That terminal closes.
+  * Wait a few seconds. Do not type `hyprctl reload`.
+  * Click the first terminal. It has focus.
+  * Type `hyprctl configerrors` and press Return. It prints nothing.
+  * Press Super+Shift+F. Files opens.
+  * Press Super+W. Files closes.
+  * Press Super+Shift+B. Chromium opens.
+  * Press Super+W. Chromium closes.
+  * Press Super+Shift+R. No notification appears.
+  * Click the terminal. It has focus.
+  * Type `rm -f ~/.config/hypr/*.bak.* /tmp/bindings.bak` and press Return.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Omarchy Menu → Setup → Keybindings opens the same file in the editor. Window titles show in `hyprctl activewindow` if the title bar is not visible. Nautilus takes a couple of seconds on first launch; take a second screenshot before concluding.
-  * `--print` writes the keybinding list to the terminal instead of opening the viewer.
+  * `--print` writes the keybinding list to the terminal. Nautilus can take a couple of seconds the first time.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of the probe notification, REBOUND-FILES, nothing after Super+Shift+B, the browser after Super+Shift+Return, the Super+K rows and the `--print` row before and after, `hyprctl configerrors` reporting the injected error then empty after restore, the Update → Config → Hyprland diff, and Nautilus and the browser back afterwards
+  * On success
+  ** Screenshots of the probe notification, REBOUND-FILES, nothing after Super+Shift+B, Chromium from Super+Shift+Return, the viewer rows, the syntax error, the restore output, empty `configerrors`, and Files and Chromium working again
   * If unsuccessful
-  ** A red banner after the append, Nautilus opening despite the rebind, or a missing notification; `tail -5 ~/.config/hypr/bindings.lua`, `hyprctl configerrors`, `./client get-serial`
+  ** A red banner after the append, Files opening despite the rebind, or a missing notification
 covers: config/hypr/bindings.lua:1-23; default/hypr/helpers.lua:92-111 (o.bind/o.rebind); test/shell.d/hyprland-binding-conflicts-test.sh:199-211; manual/07:127; manual/31-dotfiles.md (Changing internal Omarchy files / o.rebind); bin/omarchy-refresh-hyprland; bin/omarchy-refresh-config; default/agents/skills/omarchy/hyprland.md §Keybindings; SKILL.md §Edit User Config Directly, §Example Requests; .luarc.json
 
 ### keybindings-print-readable-and-refreshes-cache   [VM-OK]
@@ -4973,24 +4999,28 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return and type `omarchy-menu-keybindings --print | sudo tee /dev/ttyS0 | wc -l` Return (about 180–230 rows); read the list from the serial log.
-  * The list contains `SUPER + RETURN` → Terminal, `SUPER + SHIFT + A` → ChatGPT, `SUPER + CTRL + L` → Lock system, `XF86AudioRaiseVolume` → Volume up, `SUPER + 1` … `SUPER + 0` switch rows, `SUPER + W / SUPER + Q → Close window`, `SUPER + S / SUPER + ~ → Toggle scratchpad`, and no line containing `code:` or `__lua`.
-  * Type `ls ~/.cache/omarchy/ | grep -c keybindings-` Return → 1.
-  * Type `printf '%s\n' 'o.bind("SUPER + SHIFT + R", "Probe SSH", "foot")' >> ~/.config/hypr/bindings.lua && hyprctl reload && omarchy-menu-keybindings --print | grep -F 'Probe SSH'` Return → the new row; `ls ~/.cache/omarchy/ | grep -c keybindings-` → still 1 (old cache replaced).
-  * Type `sed -i '$d' ~/.config/hypr/bindings.lua && hyprctl reload && omarchy-menu-keybindings --print | grep -c 'Probe SSH'` Return → 0. Close the terminal.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy-menu-keybindings --print | sudo tee /dev/ttyS0 | wc -l` and press Return. The count is about 180 to 230.
+  * Read the list from the serial log. It includes Terminal, ChatGPT, Lock system, Volume up, workspace rows `SUPER + 1` through `SUPER + 0`, `SUPER + W / SUPER + Q → Close window`, and `SUPER + S / SUPER + ~ → Toggle scratchpad`. No line contains `code:` or `__lua`.
+  ** If a HEAD-only row is missing, report it absent. Do not fail the test for that.
+  * Type `ls ~/.cache/omarchy/ | grep -c keybindings-` and press Return. The line is `1`.
+  * Type `printf '%s\n' 'o.bind("SUPER + SHIFT + R", "Probe SSH", "foot")' >> ~/.config/hypr/bindings.lua && hyprctl reload && omarchy-menu-keybindings --print | grep -F 'Probe SSH'` and press Return. The Probe SSH row is printed.
+  * Type `ls ~/.cache/omarchy/ | grep -c keybindings-` and press Return. The line is `1`.
+  * Type `sed -i '$d' ~/.config/hypr/bindings.lua && hyprctl reload && omarchy-menu-keybindings --print | grep -c 'Probe SSH'` and press Return. The line is `0`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The list is long; the serial log is the way to read it. HEAD-only chords (zoom, tiled fullscreen, grave aliases) may be missing on the 4.0.2 mint — report absent rows, not failures.
+  * The list is long. Read it from the serial log.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Serial dump with the named rows and no `code:`/`__lua`; the single cache file; the Probe SSH row appearing then gone
+  * On success
+  ** The serial list has the named rows and no `code:` or `__lua` line, one cache file, the Probe SSH row, then a count of `0`
   * If unsuccessful
-  ** Raw `code:`/`__lua` rows, a stale list after the reload, or multiple cache files
+  ** A raw `code:` row, a stale list after reload, or more than one cache file
 covers: bin/omarchy-menu-keybindings:511-574; config/hypr/bindings.lua:4-5
 
 ### default-bindings-no-duplicate-chords   [VM-OK]
@@ -5000,25 +5030,31 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal and type `hyprctl -j binds | jq -r '.[] | select(.submap=="") | [(.modmask|tostring), (if .keycode>0 then ("code:"+(.keycode|tostring)) else (.key|ascii_upcase) end), (.release|tostring)] | join("+")' | sort | uniq -d | sudo tee /dev/ttyS0` Return — the serial output holds at most the Alt+Tab stack (`8+TAB+false`, `9+TAB+false`).
-  * Type `hyprctl -j binds | jq -r '.[] | select(.description=="Terminal" or .description=="ChatGPT") | .description+"="+.key'` Return — `Terminal=RETURN` and `ChatGPT=A`.
-  * Type `hyprctl -j binds | jq -r '.[] | select(.description|startswith("Bar panel")) | .description' | sort -u | wc -l` Return — `9`.
-  * Press Super+Ctrl+3 — the third right-section bar panel (Display on this VM: Network / Audio / Display are 1/2/3) opens; press it again — it closes.
-  * Press Super+Return for a second window, then Alt+Tab — the other window is raised (the stacked pair works). Close both terminals.
+  * Press Super+Return. A terminal opens.
+  * Type `hyprctl -j binds | jq -r '.[] | select(.submap=="") | [(.modmask|tostring), (if .keycode>0 then ("code:"+(.keycode|tostring)) else (.key|ascii_upcase) end), (.release|tostring)] | join("+")' | sort | uniq -d | sudo tee /dev/ttyS0` and press Return.
+  * Read the serial log. The only duplicate lines are `8+TAB+false` and `9+TAB+false`.
+  * Type `hyprctl -j binds | jq -r '.[] | select(.description=="Terminal" or .description=="ChatGPT") | .description+"="+.key'` and press Return. The lines are `Terminal=RETURN` and `ChatGPT=A`.
+  * Type `hyprctl -j binds | jq -r '.[] | select(.description|startswith("Bar panel")) | .description' | sort -u | wc -l` and press Return. The line is `9`.
+  ** If there are no `Bar panel` rows, report "absent on this build" and skip the Super+Ctrl+3 steps.
+  * Press Super+Ctrl+3. A bar panel opens.
+  * Press Super+Ctrl+3. That panel closes.
+  * Press Super+Return. A second terminal opens.
+  * Press Alt+Tab. The other window is raised.
+  * Press Super+W. One terminal closes.
+  * Press Super+W. The last terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * modmask 64 = SUPER, 8 = ALT, 9 = ALT+SHIFT, 4 = CTRL; any `64+…` line in the duplicate list is a real conflict.
-  * Bar panel numbers are HEAD-only and may be absent on the 4.0.2 mint; count the right-section icons on the screenshot first, and report "absent on this build" if `Bar panel` rows are missing.
+  * A `64+` line in the duplicate list is a real conflict.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Serial dump with only the Alt+Tab pair; `Terminal=RETURN`, `ChatGPT=A`; `9`; a panel toggling on Super+Ctrl+3; the raised window after Alt+Tab
+  * On success
+  ** The serial dump has only the Alt+Tab pair, `Terminal=RETURN`, `ChatGPT=A`, the line `9`, the panel opening and closing, and the other window raised
   * If unsuccessful
-  ** The duplicated chord lines with their descriptions
+  ** The duplicated chord lines
 covers: test/shell.d/hyprland-binding-conflicts-test.sh; test/shell.d/hyprland-default-config-test.sh (essentials, ChatGPT, nine panel hotkeys); default/hypr/bindings/*.lua
 
 ### reload-guard-pause-resume   [VM-OK]
@@ -5028,25 +5064,45 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return and type `hyprctl getoption misc:disable_autoreload; omarchy-hyprland-reload-guard paused; echo paused=$?` Return → `bool: false` (int 0) and `paused=1` (not paused; `paused` needs no sudo).
-  * Type `sudo omarchy-hyprland-reload-guard pause` Return (password `prime`) → silent. Type `hyprctl getoption misc:disable_autoreload; hyprctl getoption debug:suppress_errors; omarchy-hyprland-reload-guard paused; echo paused=$?; sudo ls /run/omarchy/hyprland-reload-guard/` Return → both `bool: true`, `paused=0`, one file named like the Hyprland instance signature.
-  * Type `printf '%s\n' 'o.bind("SUPER + SHIFT + R", "Guard probe", "foot --title GUARD-PROBE")' >> ~/.config/hypr/bindings.lua` Return; wait three seconds; press Super+Shift+R: nothing opens (auto-reload is paused).
-  * Type `sudo omarchy-hyprland-reload-guard resume` Return: the desktop may redraw once (bar/borders), and only once. Press Super+Shift+R: GUARD-PROBE opens (resume performed exactly one reload that applied the edit); close it. Re-run the check → both `bool: false`, `paused=1`, and the state dir is gone.
-  * Negatives: `omarchy-hyprland-reload-guard; echo "exit=$?"` → usage, exit=1; `sudo omarchy-hyprland-reload-guard bogus; echo "exit=$?"` → usage line, exit=1; `omarchy-hyprland-reload-guard resume; echo "exit=$?"` (unprivileged, nothing paused) → 0 silently; `sudo omarchy-hyprland-reload-guard resume` a second time prints nothing and changes nothing.
-  * Type `sed -i '$d' ~/.config/hypr/bindings.lua && hyprctl reload` Return; close the terminals — the machine is back exactly as it started.
+  * Press Super+Return. A terminal opens.
+  * Type `hyprctl getoption misc:disable_autoreload` and press Return. The line includes `bool: false`.
+  * Type `omarchy-hyprland-reload-guard paused; echo paused=$?` and press Return. The last line is `paused=1`.
+  * Type `sudo omarchy-hyprland-reload-guard pause` and press Return. The command finishes with no error.
+  ** If a password is asked, type `prime` and press Return. The command then finishes with no error.
+  * Type `hyprctl getoption misc:disable_autoreload` and press Return. The line includes `bool: true`.
+  * Type `hyprctl getoption debug:suppress_errors` and press Return. The line includes `bool: true`.
+  * Type `omarchy-hyprland-reload-guard paused; echo paused=$?` and press Return. The last line is `paused=0`.
+  * Type `sudo ls /run/omarchy/hyprland-reload-guard/` and press Return. One file is listed.
+  * Type `printf '%s\n' 'o.bind("SUPER + SHIFT + R", "Guard probe", "foot --title GUARD-PROBE")' >> ~/.config/hypr/bindings.lua` and press Return.
+  * Wait 3 seconds.
+  * Press Super+Shift+R. Nothing opens.
+  * Type `sudo omarchy-hyprland-reload-guard resume` and press Return. The desktop redraws at most once.
+  * Press Super+Shift+R. A terminal titled GUARD-PROBE opens.
+  * Press Super+W. That terminal closes.
+  * Click the first terminal. It has focus.
+  * Type `hyprctl getoption misc:disable_autoreload` and press Return. The line includes `bool: false`.
+  * Type `hyprctl getoption debug:suppress_errors` and press Return. The line includes `bool: false`.
+  * Type `omarchy-hyprland-reload-guard paused; echo paused=$?` and press Return. The last line is `paused=1`.
+  * Type `sudo ls /run/omarchy/hyprland-reload-guard/` and press Return. The directory is gone.
+  * Type `omarchy-hyprland-reload-guard; echo "exit=$?"` and press Return. A usage line appears. The last line is `exit=1`.
+  * Type `sudo omarchy-hyprland-reload-guard bogus; echo "exit=$?"` and press Return. A usage line appears. The last line is `exit=1`.
+  * Type `omarchy-hyprland-reload-guard resume; echo "exit=$?"` and press Return. The last line is `exit=0`. Nothing changes.
+  * Type `sudo omarchy-hyprland-reload-guard resume` and press Return. Nothing changes.
+  * Type `sed -i '$d' ~/.config/hypr/bindings.lua && hyprctl reload` and press Return.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Root is needed because the guard's state lives under `/run/omarchy`; `sudo` asks for `prime` unless passwordless sudo is set up. Read the `bool:`/`int:` line of `getoption`; `set:` may say false and is irrelevant.
+  * Read the `bool:` line of `getoption`. The `set:` line is not the result.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of `bool: false`/`paused=1` → `pause` → `bool: true`×2/`paused=0` with the state file → nothing on Super+Shift+R while paused → `resume` with at most one visible redraw → GUARD-PROBE → `bool: false`×2/`paused=1`; the usage errors and the silent unprivileged resume
+  * On success
+  ** `bool: false` and `paused=1`, then both options `bool: true` and `paused=0`, nothing on Super+Shift+R while paused, GUARD-PROBE after resume, both options `bool: false` again, and the usage lines with `exit=1`
   * If unsuccessful
-  ** Options not flipped, the bind applying while paused, or no reload on resume; `sudo ls -la /run/omarchy/hyprland-reload-guard/`; `journalctl -b --no-pager | grep -i reload-guard | sudo tee /dev/ttyS0`
+  ** The options not flipping, the bind applying while paused, or no reload on resume
 covers: bin/omarchy-hyprland-reload-guard; test/shell.d/hyprland-reload-guard-test.sh; default/libalpm/hooks/10-omarchy-hyprland-reload-pause.hook; default/libalpm/hooks/90-omarchy-hyprland-reload-resume.hook; docs/update-process.md
 
 ### keyboard-layout-switch-both-alts   [VM-OK]
@@ -5056,28 +5112,44 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return and screenshot: the bar centre has no layout indicator with a single layout.
-  * Press Super+Space → Setup → Input; in Neovim press `G`, `o` and type `hl.config({ input = { kb_layout = "us,dk", kb_options = "compose:caps,shift:both_capslock_cancel,grp:alts_toggle" } })`, Escape, `:wq` Return. Within 15 s and with no further command a small layout indicator (`us`/`EN`) appears in the bar centre beside the clock (Hyprland reloads the saved file itself).
-  ** Only if nothing changed after 15 s type `hyprctl reload` to continue and report the missing auto-reload as a failure.
-  * In the terminal type `;'[` and press Space: the US layout prints `;'[`. Press Left Alt and Right Alt together (one chord): the indicator changes to `dk`/`DA`. Type `;'[` again: the Danish layout prints `æøå`.
-  * Press Super+Return while on the Danish layout: a terminal still opens (Super chords keep working because a Latin layout stays first). Close it.
-  * Press both Alts again: indicator back to `us`/`EN`; `;'[` prints `;'[` once more.
-  * Unhappy path: type `echo 'hl.config({ input = { kb_layout = "xx" } })' >> ~/.config/hypr/input.lua && hyprctl reload` Return: a red error banner or `hyprctl configerrors` text names the bad keymap/xkb layout (it falls back to US); typing `echo ok` still works and prints ok.
-  * Restore: `omarchy-refresh-config hypr/input.lua && hyprctl reload && rm -f ~/.config/hypr/input.lua.bak.*` Return — the error bar and the layout indicator both disappear; `;'[` prints `;'[`.
+  * Press Super+Return. A terminal opens.
+  * Take a screenshot of the bar. There is no layout indicator.
+  * Press Super+Space. The menu opens.
+  * Click Setup.
+  * Click Input. The menu closes. Neovim opens `input.lua`.
+  * Press G. The cursor is at the end of the file.
+  * Press o. A new line opens.
+  * Type `hl.config({ input = { kb_layout = "us,dk", kb_options = "compose:caps,shift:both_capslock_cancel,grp:alts_toggle" } })`.
+  * Press Escape.
+  * Type `:wq` and press Return. Neovim closes.
+  * Wait 15 seconds. Do not type a command. A layout indicator appears in the bar.
+  ** If nothing changed after 15 seconds, type `hyprctl reload` and press Return, and report the missing auto-reload.
+  * Click the terminal. It has focus.
+  * Type `;'[`. The terminal shows `;'[`.
+  * Press Left Alt and Right Alt together. The indicator changes to Danish.
+  * Type `;'[`. The terminal shows `æøå`.
+  * Press Super+Return. A terminal opens.
+  * Press Super+W. That terminal closes.
+  * Press Left Alt and Right Alt together. The indicator changes back to US.
+  * Type `;'[`. The terminal shows `;'[`.
+  * Type `echo 'hl.config({ input = { kb_layout = "xx" } })' >> ~/.config/hypr/input.lua && hyprctl reload` and press Return. An error names the bad layout.
+  * Type `echo ok` and press Return. The line `ok` appears.
+  * Type `omarchy-refresh-config hypr/input.lua && hyprctl reload && rm -f ~/.config/hypr/input.lua.bak.*` and press Return. The layout indicator goes away.
+  * Type `;'[`. The terminal shows `;'[`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The both-Alts chord is one send-keys token: `<A-alt_r>`. Tap it once per switch. The indicator widget only exists while more than one layout is configured.
-  * `omarchy-refresh-config` writes the old file to `input.lua.bak.<epoch>`; that is the expected backup name.
+  * The both-Alts chord is one token: `<A-alt_r>`.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of the bar without and with the layout indicator, the terminal line showing `;'[` under us and `æøå` under dk, a terminal opening while on DA, the indicator flipping back, the config error for `xx` with the terminal still typing, and the clean bar after restore
+  * On success
+  ** Screenshots of the bar without an indicator, with a US indicator, `;'[` then `æøå`, a terminal opening on the Danish layout, the error for `xx` with `ok` still printed, and no indicator after restore
   * If unsuccessful
-  ** The indicator not changing, `;'[` printed under dk, Super+Return failing while switched, or the error bar persisting after restore; `cat ~/.config/hypr/input.lua | sudo tee /dev/ttyS0` and `./client get-serial`
+  ** The indicator not changing, `;'[` while the indicator says Danish, or the error staying after restore
 covers: config/hypr/input.lua:6-11; default/hypr/input.lua:26-62; default/omarchy/omarchy-menu.jsonc setup.input; config/omarchy/shell.json (omarchy.keyboard-layout); bin/omarchy-refresh-config; test/shell.d/hyprland-keyboard-layout-test.sh; test/shell.d/keyboard-layout-test.sh; manual/34-keyboard-mouse-trackpad.md:1-38 (multiple keyboard layouts, grp:alts_toggle)
 
 ### input-lua-repeat-rate-and-compose-override   [VM-OK]
@@ -5087,25 +5159,41 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return and type `for o in repeat_rate repeat_delay numlock_by_default follow_mouse kb_options; do hyprctl getoption input:$o | head -2; done | sudo tee /dev/ttyS0` Return → 40, 250, true, 1, `compose:caps,shift:both_capslock_cancel`.
-  * Press Super+Space → Setup → Input; in Neovim go to the end (`G`) and append with `o`: `hl.config({ input = { repeat_rate = 60, repeat_delay = 200, kb_options = "compose:ralt" } })`, Escape, `:wq` Return. Wait a few seconds (Hyprland reloads the saved file itself), then run the same loop → 60, 200, `compose:ralt`.
-  ** Only if the values are unchanged 15 s after saving, type `hyprctl reload` to continue and report the missing auto-reload as a failure.
-  * Type `cat` Return, then send a long run of `a` characters and watch them appear; the getoption values, not the visible speed, are the assertion. Press Ctrl+C.
-  * Unhappy path: type `echo 'hl.config({ input = { repeat_rate = "fast" } })' >> ~/.config/hypr/input.lua && hyprctl reload` Return: Hyprland shows a config error bar (type mismatch) or silently ignores the value; `hyprctl getoption input:repeat_rate | head -1` must still be a number (60). Record which.
-  * Restore: `omarchy-refresh-config hypr/input.lua && hyprctl reload && rm -f ~/.config/hypr/input.lua.bak.*` Return; the loop shows the defaults again (40/250/true/1/compose:caps,…). Close the terminal; input.lua is back to stock.
+  * Press Super+Return. A terminal opens.
+  * Type `for o in repeat_rate repeat_delay numlock_by_default follow_mouse kb_options; do hyprctl getoption input:$o | head -2; done | sudo tee /dev/ttyS0` and press Return. The values include 40, 250, true, 1, and `compose:caps,shift:both_capslock_cancel`.
+  * Press Super+Space. The menu opens.
+  * Click Setup.
+  * Click Input. The menu closes. Neovim opens `input.lua`.
+  * Press G. The cursor is at the end of the file.
+  * Press o. A new line opens.
+  * Type `hl.config({ input = { repeat_rate = 60, repeat_delay = 200, kb_options = "compose:ralt" } })`.
+  * Press Escape.
+  * Type `:wq` and press Return. Neovim closes.
+  * Wait a few seconds.
+  * Click the terminal. It has focus.
+  * Type `for o in repeat_rate repeat_delay numlock_by_default follow_mouse kb_options; do hyprctl getoption input:$o | head -2; done` and press Return. The values include 60, 200, and `compose:ralt`.
+  ** If the values are unchanged after 15 seconds, type `hyprctl reload` and press Return, and report the missing auto-reload.
+  * Type `cat` and press Return. `cat` waits for input.
+  * Type a run of `a` characters. They appear.
+  * Press Ctrl+C. `cat` stops.
+  * Type `echo 'hl.config({ input = { repeat_rate = "fast" } })' >> ~/.config/hypr/input.lua && hyprctl reload` and press Return. Record whether an error bar appears.
+  * Type `hyprctl getoption input:repeat_rate | head -1` and press Return. The value is `60`.
+  * Type `omarchy-refresh-config hypr/input.lua && hyprctl reload && rm -f ~/.config/hypr/input.lua.bak.*` and press Return.
+  * Type `for o in repeat_rate repeat_delay numlock_by_default follow_mouse kb_options; do hyprctl getoption input:$o | head -2; done` and press Return. The values include 40, 250, true, 1, and `compose:caps`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * `hyprctl getoption` prints "int: N" / "str: value" lines followed by "set: true". There is no held-key verb in the client; the repeat rate is proven by getoption.
+  * `getoption` prints `int:` or `str:` on the first line. There is no held-key verb. The numbers are the proof.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Serial/screenshot values 40/250/true/1/compose options, then 60/200/compose:ralt, the bad-value outcome (error bar or ignored), then the defaults again
+  * On success
+  ** The values 40, 250, true, 1, and the caps compose options, then 60, 200, and `compose:ralt`, the bad-value outcome with the rate still `60`, then the defaults again
   * If unsuccessful
-  ** Values unchanged after reload or a persistent error bar; `cat ~/.config/hypr/input.lua`; `./client get-serial`
+  ** Values unchanged after the save, or an error bar that stays after restore
 covers: default/hypr/input.lua:50-75; config/hypr/input.lua:1-45; default/omarchy/omarchy-menu.jsonc setup.input; manual/34-keyboard-mouse-trackpad.md:6-38 (input.lua example, compose key)
 
 ### xcompose-compose-key-sequences-restart-and-legacy-repair   [VM-OK]
@@ -5115,32 +5203,96 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return and type `systemctl --user is-active omarchy-fcitx5.service; head -4 ~/.XCompose` Return → `active`, and the file shows `include "%L"` and `<Multi_key> <m> <s> : "😄"`.
-  * Type `echo "` then tap CapsLock, `m`, `s` — three separate key presses, not a chord — then `"` Return: the line echoes 😄, not `ms` (CapsLock is the compose key, not caps lock; there is no Caps Lock OSD).
-  ** The very first compose after login can take a second while the input method warms up; if nothing appears, wait two seconds and try once more.
-  * Repeat the same way: CapsLock `m` `h` → ❤️; CapsLock `space` `space` → an em dash `—`; CapsLock `m` `y` → 👍; CapsLock `m` `1` → 💯; CapsLock `space` `n` → the name entered at install (may be empty; record). Unhappy path: CapsLock `m` `z` (undefined) → no emoji (empty or the plain letters), no crash. Type `echo caps-test` Return: it prints in lower case (CapsLock did not toggle capitals).
-  ** Press Super+Shift+Return, click Chromium's address bar, tap CapsLock `m` `h` → ❤️ appears there too (compose works outside the terminal). Press Super+W.
-  * Type `echo '<Multi_key> <q> <q> : "COMPOSE-PROBE"' >> ~/.XCompose` Return, then tap CapsLock and type `qq`.
-  ** Unhappy path: plain `qq` appears — fcitx5 has not re-read the file. This is the quirk the manual warns about. Press Backspace twice.
-  * Type `omarchy-restart-xcompose` Return (returns quietly in a second or two), then tap CapsLock and type `qq`: `COMPOSE-PROBE` appears at the prompt.
-  * Press Super+Space → Setup → Config → XCompose: notification "Editing config file ~/.XCompose"; Neovim shows the file with your line at the end. Delete that line (`G`, `dd`) and `:wq` — this menu entry restarts fcitx5 when the editor closes (one of the two config entries that really chain a restart).
-  * Tap CapsLock and type `qq`: plain `qq` again (sequence gone), while CapsLock `ms` still gives 😄.
-  * Legacy repair: type `cp ~/.XCompose /tmp/xcompose.orig 2>/dev/null; printf '%s\n' '# Include fast emoji access' 'include "%%H/.local/share/omarchy/default/xcompose"' '' '<Multi_key> <space> <n> : "Test User"' > ~/.XCompose` Return, then `bash /usr/share/omarchy/migrations/1788102906.sh; cat ~/.XCompose` → the include reads `include "/usr/share/omarchy/default/xcompose"` and the `Test User` line is still there. `sha256sum ~/.XCompose; bash /usr/share/omarchy/migrations/1788102906.sh; sha256sum ~/.XCompose` → identical (idempotent). `rm ~/.XCompose; bash /usr/share/omarchy/migrations/1788102906.sh; ls ~/.XCompose 2>&1` → not created.
-  * Type `cp /tmp/xcompose.orig ~/.XCompose 2>/dev/null; rm -f /tmp/xcompose.orig; omarchy-restart-xcompose` Return — stock file back. Tap CapsLock then `o` then `c`: `©` appears; press Backspace. Close the terminal.
+  * Press Super+Return. A terminal opens.
+  * Type `systemctl --user is-active omarchy-fcitx5.service` and press Return. The line is `active`.
+  * Type `head -4 ~/.XCompose` and press Return. The output includes `include "%L"` and the 😄 sequence.
+  * Type `echo "`. The prompt shows `echo "`.
+  * Tap CapsLock.
+  * Type `m`.
+  * Type `s`. 😄 appears.
+  * Type `"` and press Return. The echoed line is 😄.
+  ** If nothing appears, wait 2 seconds and repeat the CapsLock, `m`, `s` taps once.
+  * Tap CapsLock.
+  * Type `m`.
+  * Type `h`. ❤️ appears.
+  * Tap CapsLock.
+  * Press Space.
+  * Press Space. An em dash appears.
+  * Tap CapsLock.
+  * Type `m`.
+  * Type `y`. 👍 appears.
+  * Tap CapsLock.
+  * Type `m`.
+  * Type `1`. 💯 appears.
+  * Tap CapsLock.
+  * Press Space.
+  * Type `n`. Record what appears. It may be the installer name, or nothing.
+  * Tap CapsLock.
+  * Type `m`.
+  * Type `z`. No emoji appears.
+  * Type `echo caps-test` and press Return. The line is `caps-test`, in lower case.
+  * Press Super+Shift+Return. Chromium opens.
+  ** If Chromium shows "application not responding", click Wait.
+  * Click the address bar.
+  * Tap CapsLock.
+  * Type `m`.
+  * Type `h`. ❤️ appears in the address bar.
+  * Press Super+W. Chromium closes.
+  * Click the terminal. It has focus.
+  * Type `echo '<Multi_key> <q> <q> : "COMPOSE-PROBE"' >> ~/.XCompose` and press Return.
+  * Tap CapsLock.
+  * Type `q`.
+  * Type `q`. Plain `qq` appears.
+  * Press Backspace. One `q` is deleted.
+  * Press Backspace. The other `q` is deleted.
+  * Type `omarchy-restart-xcompose` and press Return. The command finishes.
+  * Tap CapsLock.
+  * Type `q`.
+  * Type `q`. `COMPOSE-PROBE` appears.
+  * Press Super+Space. The menu opens.
+  * Click Setup.
+  * Click Config.
+  * Click XCompose. The menu closes. Neovim opens `~/.XCompose`.
+  * Press G. The cursor is on the last line.
+  * Type `dd`. That line is deleted.
+  * Type `:wq` and press Return. Neovim closes.
+  * Tap CapsLock.
+  * Type `q`.
+  * Type `q`. Plain `qq` appears.
+  * Tap CapsLock.
+  * Type `m`.
+  * Type `s`. 😄 appears.
+  * Type `cp ~/.XCompose /tmp/xcompose.orig` and press Return.
+  * Type `printf '%s\n' '# Include fast emoji access' 'include "%%H/.local/share/omarchy/default/xcompose"' '' '<Multi_key> <space> <n> : "Test User"' > ~/.XCompose` and press Return.
+  * Type `bash /usr/share/omarchy/migrations/1788102906.sh` and press Return.
+  * Type `cat ~/.XCompose` and press Return. The include is `include "/usr/share/omarchy/default/xcompose"`. The `Test User` line is still there.
+  * Type `sha256sum ~/.XCompose` and press Return. Note the hash.
+  * Type `bash /usr/share/omarchy/migrations/1788102906.sh` and press Return.
+  * Type `sha256sum ~/.XCompose` and press Return. The hash matches.
+  * Type `rm ~/.XCompose` and press Return.
+  * Type `bash /usr/share/omarchy/migrations/1788102906.sh` and press Return.
+  * Type `ls ~/.XCompose` and press Return. The file is not there.
+  * Type `cp /tmp/xcompose.orig ~/.XCompose` and press Return.
+  * Type `rm -f /tmp/xcompose.orig` and press Return.
+  * Type `omarchy-restart-xcompose` and press Return.
+  * Tap CapsLock.
+  * Type `o`.
+  * Type `c`. `©` appears.
+  * Press Backspace. That character is gone.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Send CapsLock as a bare `<CAPSLOCK>` tap followed by the letters as literal text; do not hold it. A shift-tap cancels an accidental caps state (both Shifts toggle caps).
-  * The emoji renders as a colour glyph in foot; a hollow box means the font fell back but the compose still fired. If letters appear instead of emoji at the very first step, fcitx5 is not running: `pgrep -a fcitx5` / `systemctl --user is-active omarchy-fcitx5.service` and report. `%%H` in printf becomes the literal `%H` the legacy file contained.
+  * Send CapsLock as a bare `<CAPSLOCK>` tap. Do not hold it.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of `active` and the `head -4` lines, each echoed emoji/dash/name line, the undefined sequence producing no emoji, `caps-test` in lower case, ❤️ in the browser address bar, plain `qq` before the restart, `COMPOSE-PROBE` after `omarchy-restart-xcompose`, the editor with the line removed, plain `qq` with 😄 still working, the repointed include with the custom line, identical hashes, no file created from nothing, and `©` composed at the end
+  * On success
+  ** Screenshots of `active`, the `head -4` lines, each composed character, `caps-test` in lower case, ❤️ in the address bar, plain `qq` before the restart, `COMPOSE-PROBE` after it, plain `qq` with 😄 still working, the repointed include, matching hashes, no file created from nothing, and `©` at the end
   * If unsuccessful
-  ** Plain letters where emoji were expected, uppercase `CAPS-TEST` (Caps Lock still toggles), the prompt showing plain letters after the restart, the custom line lost or the include unchanged; `systemctl --user status omarchy-fcitx5.service | sudo tee /dev/ttyS0` and `./client get-serial`
+  ** Plain letters where a composed character was expected, or `COMPOSE-PROBE` missing after the restart
 covers: manual/31-dotfiles.md (~/.XCompose, omarchy-restart-xcompose); manual/34-keyboard-mouse-trackpad.md (CapsLock compose key); manual/07-hotkeys.md:336-374 (quick emojis); manual/45:15-23; default/omarchy/omarchy-menu.jsonc setup.config.xcompose; bin/omarchy-restart-xcompose; install/user/xcompose.sh; default/xcompose; default/hypr/input.lua:37; default/systemd/user/omarchy-fcitx5.service; default/environment.d/10-omarchy-fcitx.conf; migrations/1788102906.sh; test/shell.d/legacy-power-udev-rules-migration-test.sh (XCompose half)
 
 ### looknfeel-lua-overrides-rounding-gaps-animations   [VM-OK]
@@ -5150,27 +5302,47 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return twice; note square corners, gaps and 2 px borders. Type `hyprctl getoption decoration:rounding | head -1; hyprctl getoption general:gaps_out | head -1` Return → int: 0 and a non-zero value.
-  * Press Super+Space → Style → Hyprland: Neovim opens ~/.config/hypr/looknfeel.lua. Uncomment the rounding block — `:17,26s/^-- //` then `:wq` (lines 17–26 are the `hl.config({ decoration = { rounding = 8, dim_inactive …` block; if the numbers differ, remove the leading `-- ` from every line of that block by hand).
-  * Within 15 s and with no further command corners are visibly rounded and the unfocused window is dimmed (dim_inactive is in the same block; Hyprland reloads the saved file itself); `hyprctl getoption decoration:rounding | head -1` → int: 8.
-  ** Only if nothing changed after 15 s type `hyprctl reload` to continue and report the missing auto-reload as a failure.
-  * Type `printf '%s\n' 'hl.config({ general = { gaps_in = 0, gaps_out = 0, border_size = 0 } })' >> ~/.config/hypr/looknfeel.lua && hyprctl reload` Return: windows touch each other and the screen edge with no border; `hyprctl getoption general:gaps_out | head -1` → 0.
-  * Type `printf '%s\n' 'hl.config({ animations = { enabled = false } })' >> ~/.config/hypr/looknfeel.lua && hyprctl reload` Return; press Super+Return: the third terminal appears instantly with no pop-in.
-  * Unhappy path: if a red config error bar appears after any edit, the uncomment was unbalanced — fix with `omarchy-refresh-config hypr/looknfeel.lua && hyprctl reload` and report the exact lines.
-  * Restore: Super+Space → Update → Config → Hyprland → the diff shows your changes → Done; `hyprctl reload`: corners square, gaps, borders and animations back; `rm -f ~/.config/hypr/*.bak.*`. Close the terminals with Ctrl+Alt+Delete.
+  * Press Super+Return. A terminal opens.
+  * Press Super+Return. A second terminal opens beside it. The corners are square. There are gaps.
+  * Type `hyprctl getoption decoration:rounding | head -1` and press Return. The line is `int: 0`.
+  * Type `hyprctl getoption general:gaps_out | head -1` and press Return. The value is not `0`.
+  * Press Super+Space. The menu opens.
+  * Click Style.
+  * Click Hyprland. The menu closes. Neovim opens `looknfeel.lua`.
+  * Type `:17,26s/^-- //` and press Return. The leading `-- ` is removed from that block.
+  ** If those lines are not the rounding block, remove the leading `-- ` from every line of that block by hand.
+  * Type `:wq` and press Return. Neovim closes.
+  * Wait 15 seconds. Do not type a command. The corners are rounded. The unfocused window is dimmed.
+  ** If nothing changed after 15 seconds, type `hyprctl reload` and press Return, and report the missing auto-reload.
+  * Click a terminal. It has focus.
+  * Type `hyprctl getoption decoration:rounding | head -1` and press Return. The line is `int: 8`.
+  * Type `printf '%s\n' 'hl.config({ general = { gaps_in = 0, gaps_out = 0, border_size = 0 } })' >> ~/.config/hypr/looknfeel.lua && hyprctl reload` and press Return. The windows touch. There is no border.
+  * Type `hyprctl getoption general:gaps_out | head -1` and press Return. The value is `0`.
+  * Type `printf '%s\n' 'hl.config({ animations = { enabled = false } })' >> ~/.config/hypr/looknfeel.lua && hyprctl reload` and press Return.
+  * Press Super+Return. A third terminal appears with no pop-in.
+  ** If a red error bar appears after an edit, type `omarchy-refresh-config hypr/looknfeel.lua && hyprctl reload` and press Return, and report the lines.
+  * Press Super+Space. The menu opens.
+  * Click Update.
+  * Click Config.
+  * Click Hyprland. A floating terminal shows the diff.
+  * Press a key. That terminal closes.
+  * Click a terminal. It has focus.
+  * Type `hyprctl reload` and press Return. The corners are square. The gaps and borders are back.
+  * Type `rm -f ~/.config/hypr/*.bak.*` and press Return.
+  * Press Ctrl+Alt+Delete. Every window closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The shipped file has each option block wrapped in `-- hl.config({ … -- })`; every line of a block must lose exactly the `-- ` prefix.
+  * Every line of a commented block must lose exactly the `-- ` prefix.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of square/gapped windows, rounded corners with the dimmed neighbour and getoption 8, gapless/borderless windows with gaps_out 0, the instant third terminal, the Update → Config → Hyprland diff, and the stock look restored
+  * On success
+  ** Screenshots of square windows with gaps, rounded corners with the other window dimmed, `int: 8`, windows with no gaps and `gaps_out` `0`, the third terminal with no pop-in, the restore diff, and square corners again
   * If unsuccessful
-  ** A config error bar with the file contents (`cat ~/.config/hypr/looknfeel.lua | sudo tee /dev/ttyS0`), or the look unchanged after reload; `./client get-serial`
+  ** A red error bar, or the look unchanged after the save
 covers: config/hypr/looknfeel.lua; default/hypr/looknfeel.lua:7-32,62-65; default/omarchy/omarchy-menu.jsonc:111 (style.hyprland); bin/omarchy-refresh-hyprland; manual/42:11-37 (Rounded window corners, Remove window gaps)
 
 ### hyprsunset-config-edit-and-process-restart   [VM-OK]

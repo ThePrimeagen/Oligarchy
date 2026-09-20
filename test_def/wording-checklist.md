@@ -122,14 +122,14 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `monitors-lua-bogus-mode-falls-back`
 - [x] `hypr-config-syntax-error-banner-and-menu-restore`
 - [x] `hypr-tty-recovery-disabled-output-and-no-default-bindings`
-- [ ] `bindings-lua-override-add-rebind-unbind`
-- [ ] `keybindings-print-readable-and-refreshes-cache`
-- [ ] `default-bindings-no-duplicate-chords`
-- [ ] `reload-guard-pause-resume`
-- [ ] `keyboard-layout-switch-both-alts`
-- [ ] `input-lua-repeat-rate-and-compose-override`
-- [ ] `xcompose-compose-key-sequences-restart-and-legacy-repair`
-- [ ] `looknfeel-lua-overrides-rounding-gaps-animations`
+- [x] `bindings-lua-override-add-rebind-unbind`
+- [x] `keybindings-print-readable-and-refreshes-cache`
+- [x] `default-bindings-no-duplicate-chords`
+- [x] `reload-guard-pause-resume`
+- [x] `keyboard-layout-switch-both-alts`
+- [x] `input-lua-repeat-rate-and-compose-override`
+- [x] `xcompose-compose-key-sequences-restart-and-legacy-repair`
+- [x] `looknfeel-lua-overrides-rounding-gaps-animations`
 - [ ] `hyprsunset-config-edit-and-process-restart`
 - [ ] `hypr-session-environment-and-autostart`
 - [ ] `autostart-lua-user-entry-runs-on-login`
