@@ -12,6 +12,7 @@ import {
   groupDefinitions,
   listAutomationQueue,
   listRunningAutomationJobs,
+  readSessionFollow,
   listProcessSeries,
   listServers,
   listSessions,
@@ -23,14 +24,17 @@ import {
   selectDefinition,
   type DefinitionStat,
   type Session,
+  type SessionFollow,
   type TestBasePrompt,
 } from "./query.ts";
 import { clickerPage } from "./clicker.ts";
 import { definitionHref, DefinitionsPage, RunningList, type EditNotice } from "./definitions.tsx";
 import { HTMX_INTEGRITY, HTMX_URL } from "./htmx.ts";
 import { abortLinearIssue, type LinearEnv } from "./linear.ts";
-import { createTestSuiteRun, SuiteRequestError } from "./suite.ts";
+import { FollowBody, FollowFrame } from "./follow.tsx";
 import { Fleet, type Halves, Process, Queue, ServersPage } from "./servers.tsx";
+import { createTestSuiteRun, SuiteRequestError } from "./suite.ts";
+import { isTicket } from "./ticket.ts";
 import { SENTRY_DSN } from "../observability/dsn.ts";
 
 const errorMessage = (cause: unknown): string =>
@@ -198,7 +202,7 @@ const SessionError: FC = () => (
   </div>
 );
 
-type PageId = "results" | "definitions" | "prompts";
+type PageId = "results" | "definitions" | "prompts" | "follow";
 
 const PAGES = [
   { id: "results", href: "/results", label: "Test results" },
@@ -539,6 +543,84 @@ app.get("/sessions", async (context) => {
       500,
     );
   }
+});
+
+// Invalid before any database call. A missing ticket is a 404 with no poll. A database that
+// cannot be reached is a 500 that never echoes the connection string. The feed is the fragment
+// the poll swaps into #follow, so it does not carry its own trigger.
+const lookupFollow = async (
+  context: Context<{ Bindings: Bindings }>,
+  ticket: string,
+): Promise<
+  | { readonly kind: "invalid" }
+  | { readonly kind: "missing" }
+  | { readonly kind: "down" }
+  | { readonly kind: "ok"; readonly follow: SessionFollow }
+> => {
+  if (!isTicket(ticket)) {
+    return { kind: "invalid" };
+  }
+  try {
+    const follow = await readSessionFollow(context.env.HYPERDRIVE.connectionString, ticket);
+    return follow === undefined ? { kind: "missing" } : { kind: "ok", follow };
+  } catch (error) {
+    Sentry.captureException(error);
+    console.error("dashboard: reading the session feed:", errorMessage(error));
+    return { kind: "down" };
+  }
+};
+
+app.get("/tickets/:ticket/feed", async (context) => {
+  const ticket = context.req.param("ticket");
+  const looked = await lookupFollow(context, ticket);
+  if (looked.kind === "invalid") {
+    return context.notFound();
+  }
+  if (looked.kind === "missing") {
+    return context.html(<p>No ticket named {ticket}.</p>, 404);
+  }
+  if (looked.kind === "down") {
+    return context.html(<p>error: internal error</p>, 500);
+  }
+  return context.html(<FollowBody follow={looked.follow} />);
+});
+
+app.get("/tickets/:ticket", async (context) => {
+  const ticket = context.req.param("ticket");
+  const looked = await lookupFollow(context, ticket);
+  if (looked.kind === "invalid") {
+    return context.notFound();
+  }
+  if (looked.kind === "missing") {
+    context.status(404);
+    return context.render(
+      <Shell page="follow">
+        <section class="follow">
+          <p>No ticket named {ticket}.</p>
+        </section>
+      </Shell>,
+    );
+  }
+  if (looked.kind === "down") {
+    context.status(500);
+    return context.render(
+      <Shell page="follow">
+        <section class="follow">
+          <div class="empty-state empty-state--error">
+            <p>The session feed is unavailable.</p>
+            <span>Try refreshing in a moment.</span>
+          </div>
+        </section>
+      </Shell>,
+    );
+  }
+  return context.render(
+    <Shell page="follow">
+      <section class="follow" aria-labelledby="follow-heading">
+        <FollowFrame follow={looked.follow} />
+      </section>
+    </Shell>,
+  );
 });
 
 app.get("/images/:id", async (context) => {

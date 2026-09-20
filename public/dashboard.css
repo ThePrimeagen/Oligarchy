@@ -534,3 +534,62 @@ main {
     animation: none;
   }
 }
+
+/* The session feed: the log on the left, the newest frame on the right. */
+.follow {
+  display: grid;
+  gap: 1rem;
+}
+
+.follow h1 {
+  margin: 0;
+  color: var(--terminal-white);
+  font-size: 1.25rem;
+}
+
+.follow h1 a {
+  color: var(--terminal-cyan);
+  text-decoration: none;
+}
+
+.follow__step {
+  margin: 0;
+  color: var(--turquoise);
+}
+
+.follow__log {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.follow__intent,
+.follow__action {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+  padding: 0.2rem 0;
+}
+
+.follow__action--under {
+  padding-left: 1.5rem;
+}
+
+.follow__mark--ok {
+  color: var(--green);
+}
+
+.follow__mark--bad {
+  color: var(--failed);
+}
+
+.follow__age {
+  margin-left: auto;
+  color: var(--terminal-blue);
+}
+
+.follow__image {
+  display: block;
+  max-width: min(100%, 40rem);
+  border: 1px solid rgb(122 162 247 / 30%);
+}

@@ -1,6 +1,7 @@
 import type { FC } from "hono/jsx";
 import { OperatorPage } from "./page.tsx";
 import type { AutomationJob, AutomationQueue, ProcessSeries, Server } from "./query.ts";
+import { followHref, linearHref } from "./ticket.ts";
 
 // A server writes its row every thirty seconds. One heartbeat may be in flight and one lost to a
 // slow database; three overdue is a server that stopped.
@@ -224,11 +225,31 @@ export const Fleet: FC<{ servers: ReadonlyArray<Server> }> = ({ servers }) =>
 export const since = (stamp: Date | null, queriedAt: Date): string =>
   stamp === null ? "—" : `${age(queriedAt.getTime() - stamp.getTime())} ago`;
 
+// The test name is the one follow link in the tab order. The rest of the row opens the same page
+// but stays out of the way of the keyboard. An empty cell is still a link, so its padding is
+// clickable.
+const FollowCell: FC<{ ticket: string; primary: boolean; text: string }> = ({
+  ticket,
+  primary,
+  text,
+}) => (
+  <td class="follow">
+    {primary ? (
+      <a href={followHref(ticket)}>{text}</a>
+    ) : (
+      <a href={followHref(ticket)} tabindex={-1} aria-hidden="true">
+        {text}
+      </a>
+    )}
+  </td>
+);
+
 // One list of the queue as a table, or the one word that says it is empty. The columns are the
-// same in every list, so a pending job shows dashes where its start and finish will go. A running
-// or pending job with a ticket carries the abort, posting the ticket and its own action: a ticket
-// has one drive and one diagnose, and its drive may still be running while its diagnose waits.
-// A completed one is over, and a job with no ticket has nothing to name in the post.
+// same in every list, so a pending job shows dashes where its start and finish will go. The
+// ticket text goes to Linear; every other cell of a ticketed row opens the session feed. A
+// running or pending job with a ticket carries the abort, posting the ticket and its own action:
+// a ticket has one drive and one diagnose, and its drive may still be running while its diagnose
+// waits. A completed one is over, and a job with no ticket has nothing to name in the post.
 const Jobs: FC<{ jobs: ReadonlyArray<AutomationJob> }> = ({ jobs }) =>
   jobs.length === 0 ? (
     <p>none</p>
@@ -245,44 +266,62 @@ const Jobs: FC<{ jobs: ReadonlyArray<AutomationJob> }> = ({ jobs }) =>
         <th>reason</th>
         <th></th>
       </tr>
-      {jobs.map((job) => (
-        <tr>
-          <td>{job.ticket ?? "—"}</td>
-          <td>{job.test}</td>
-          <td>{job.action}</td>
-          <td>{job.status}</td>
-          <td>{since(job.createdAt, job.queriedAt)}</td>
-          <td>{since(job.startedAt, job.queriedAt)}</td>
-          <td>{since(job.finishedAt, job.queriedAt)}</td>
-          <td>{job.reason}</td>
-          <td>
-            {(job.status === "running" || job.status === "pending") && job.ticket !== null ? (
-              <form
-                method="post"
-                action="/abort"
-                hx-post="/abort"
-                hx-confirm="are you sure?"
-                hx-target="#queue"
-                hx-swap="innerHTML"
-              >
-                <input type="hidden" name="ticket" value={job.ticket} />
-                <input type="hidden" name="action" value={job.action} />
-                <button type="submit" class="abort" aria-label="abort">
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="12"
-                    height="12"
-                    viewBox="0 0 12 12"
-                    aria-hidden="true"
-                  >
-                    <path d="M2 2l8 8M10 2L2 10" stroke="red" stroke-width="2" fill="none" />
-                  </svg>
-                </button>
-              </form>
-            ) : null}
-          </td>
-        </tr>
-      ))}
+      {jobs.map((job) => {
+        const ticket = job.ticket;
+        const cells = [
+          job.test,
+          job.action,
+          job.status,
+          since(job.createdAt, job.queriedAt),
+          since(job.startedAt, job.queriedAt),
+          since(job.finishedAt, job.queriedAt),
+          job.reason ?? "",
+        ];
+        return (
+          <tr>
+            <td>
+              {ticket === null ? (
+                "—"
+              ) : (
+                <a class="ticket" href={linearHref(ticket)}>
+                  {ticket}
+                </a>
+              )}
+            </td>
+            {ticket === null
+              ? cells.map((text) => <td>{text}</td>)
+              : cells.map((text, index) => (
+                  <FollowCell ticket={ticket} primary={index === 0} text={text} />
+                ))}
+            <td>
+              {(job.status === "running" || job.status === "pending") && ticket !== null ? (
+                <form
+                  method="post"
+                  action="/abort"
+                  hx-post="/abort"
+                  hx-confirm="are you sure?"
+                  hx-target="#queue"
+                  hx-swap="innerHTML"
+                >
+                  <input type="hidden" name="ticket" value={ticket} />
+                  <input type="hidden" name="action" value={job.action} />
+                  <button type="submit" class="abort" aria-label="abort">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="12"
+                      height="12"
+                      viewBox="0 0 12 12"
+                      aria-hidden="true"
+                    >
+                      <path d="M2 2l8 8M10 2L2 10" stroke="red" stroke-width="2" fill="none" />
+                    </svg>
+                  </button>
+                </form>
+              ) : null}
+            </td>
+          </tr>
+        );
+      })}
     </table>
   );
 

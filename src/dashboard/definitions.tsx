@@ -2,6 +2,7 @@ import type { FC } from "hono/jsx";
 import { OperatorPage } from "./page.tsx";
 import type { AutomationJob, DefinitionVersions } from "./query.ts";
 import { since } from "./servers.tsx";
+import { followHref, linearHref } from "./ticket.ts";
 
 // A definition's name is its page: /definitions/lock-screen. The dashes are the name's own.
 export const definitionHref = (name: string): string => `/definitions/${encodeURIComponent(name)}`;
@@ -12,17 +13,32 @@ const runningHref = (name: string | undefined): string =>
     : `/definitions/running?name=${encodeURIComponent(name)}`;
 
 // One running job: its definition, what it is doing, the ticket that names it, and how long it
-// has been running. Abort posts the ticket and action the shared /abort route already stops.
-// view=definitions is how that route tells this form apart from the servers page: htmx swaps
-// the list, and a submit without it returns here. A job with no ticket has nothing to name.
+// has been running. The definition name stays this page's link. The ticket text goes to Linear.
+// The rest of a ticketed card opens the session feed (the empty link is the click layer under
+// those two and the abort). Abort posts the ticket and action the shared /abort route already
+// stops. view=definitions is how that route tells this form apart from the servers page: htmx
+// swaps the list, and a submit without it returns here. A job with no ticket has nothing to name.
 const RunningJob: FC<{ job: AutomationJob; definition: string | undefined }> = ({
   job,
   definition,
 }) => (
   <li class="running-tests__job">
+    {job.ticket === null ? null : (
+      <a
+        class="running-tests__open"
+        href={followHref(job.ticket)}
+        aria-label={`follow ${job.ticket}`}
+      />
+    )}
     <a href={definitionHref(job.test)}>{job.test}</a>
     <span class="running-tests__action">{job.action}</span>
-    <span class="running-tests__ticket">{job.ticket ?? "—"}</span>
+    {job.ticket === null ? (
+      <span class="running-tests__ticket">—</span>
+    ) : (
+      <a class="running-tests__linear" href={linearHref(job.ticket)}>
+        {job.ticket}
+      </a>
+    )}
     <span class="running-tests__age">{since(job.startedAt, job.queriedAt)}</span>
     {job.ticket === null ? null : (
       <form
