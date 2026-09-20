@@ -15520,36 +15520,63 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy-version; omarchy-channel-current; sudo snapper list | tail -n 3` (password `prime`) — `4.0.2-…`, `stable`, and note the existing snapshot rows. Note the circle-arrows update icon right of the clock in the bar. Close the terminal with Super+W.
-  * Open the Omarchy menu with Super+Space and click `Update`, then `Omarchy`, with the mouse.
-  ** A floating terminal shows the Omarchy logo, then a boxed `Ready to update?` text ("You cannot stop the update once you start!", a link to the releases page) ending in `Continue with update?` with Yes/No. Choose Yes (Enter). Type `prime` at `[sudo] password for prime:` — it can reappear during a long run.
-  * Watch the run and screenshot every few seconds so the scrolling text is captured. Green headings in order: `Prune package cache`, `Create system snapshot` (`Snapshots can be selected during boot.` — or a yellow `Continuing the update without a snapshot` / `No Snapper configs found` warning: record which), `Update Arch signing keys` / `Keys are correct`, `Update system packages` with pacman downloading and installing, then `Running migration (<number>)` lines each followed by a one-line description, then `Update mise tools`.
-  ** The snapshot step must come **before any pacman download output** — that is what lets a bad update be rolled back from Limine. Never Ctrl+C once started.
-  ** Expected migration numbers on a stable update — eleven: 1787215483, 1787760281, 1787843905, 1788577553, 1788619462, 1788662350, 1788724825, 1788745941, 1788848726, 1789325478, 1789444024. Note any difference.
-  ** Under `Running migration (1788745941)` a red `Replaced /home/prime/.config/kitty/kitty.conf with new Omarchy default.` line, a diff, and a rounded box `Restart Kitty` / `Close and reopen all Kitty windows to apply this change.` must appear. Under `(1789325478)` pacman installs `linux-omarchy`.
-  ** The Stay Awake indicator is lit in the bar while packages download and must be off again after `Restarting shell`. After the migrations the post-update hook fires two one-time toasts, **Install Dictation with Voxtype** and **Set your default agent** — do not click the Voxtype one. If `Remove N orphaned package(s)?` appears answer No. No red `Something went wrong during the update!` may appear.
-  * At the end the question `Linux kernel has been updated. Reboot?` (or `Updates require reboot. Ready?`) appears. Screenshot it, then answer Yes.
-  ** A `Rebooting` OSD shows, windows close, the machine reboots. Type `prime` blind at the Plymouth passphrase prompt (one try; a wrong passphrase re-prompts — never three wrong); autologin lands on the desktop.
-  * Back on the desktop the update icon right of the clock must be gone. Open a terminal and type `omarchy-version; uname -r; pacman -Q linux-omarchy; omarchy-migrate --pending; echo pending=$?; omarchy-update-available; sudo snapper list | tail -n 3`.
-  ** The version is newer than at the start (expected `4.0.4-…`), `uname -r` is no longer the ISO kernel, `linux-omarchy` is listed, nothing is pending, `pending=1`, `Omarchy is up to date`, and one new snapshot row whose description is the **old** version (`4.0.2-…`) — the pre-update snapshot.
-  * Confirm the bar is drawn and Super+Space opens the menu. End the session with `save`: this disk is the base for the `post-update-*` tests.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy-version` and press Return. Record the version.
+  * Type `omarchy-channel-current` and press Return. The output is `stable`.
+  * Type `sudo snapper list | tail -n 3` and press Return. Record the snapshot rows.
+  ** If sudo asks, type `prime` and press Return.
+  * Look at the bar. An update icon is to the right of the clock.
+  * Press Super+W. The terminal closes.
+  * Press Super+Space. The menu opens.
+  * Select Update, then Omarchy. A prompt asks `Continue with update?`.
+  * Choose Yes. The update starts.
+  * If a sudo prompt appears, type `prime` and press Return. The update continues.
+  * Wait until `Create system snapshot` appears before any package download. Record whether a snapshot was created or skipped.
+  * Wait until `Keys are correct` appears.
+  * Wait until package downloads appear under `Update system packages`.
+  * Wait through each `Running migration` line. Record every migration number.
+  * Wait until migration `1788745941` shows a Restart Kitty box.
+  * Wait until migration `1789325478` installs `linux-omarchy`.
+  * Record whether the Dictation and default-agent invitations appear. Do not click the Voxtype invitation.
+  ** If an orphan-removal question appears, choose No.
+  * Wait until a reboot question appears. Record its wording.
+  * Choose Yes. The machine reboots.
+  * At the passphrase prompt, type `prime` and press Return. The desktop returns.
+  * Look at the bar. The update icon is gone.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy-version` and press Return. The version is newer than the one recorded at the start.
+  * Type `uname -r` and press Return. It is not the ISO kernel.
+  * Type `pacman -Q linux-omarchy` and press Return. The package is listed.
+  * Type `omarchy-migrate --pending; echo pending=$?` and press Return. Nothing is pending, and the last line is `pending=1`.
+  * Type `omarchy-update-available` and press Return. The output is `Omarchy is up to date`.
+  * Type `sudo snapper list | tail -n 3` and press Return. A new snapshot is described with the old version.
+  * Press Super+Space. The menu opens.
+  * Press Escape. The menu closes.
+  * End the session with `save`. The disk is saved.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The download phase is well over five minutes on user-mode NAT; never sleep more than five seconds between screenshots. If the budget runs out, report the last screenshot and the exact heading reached as "incomplete — time", not as a failure.
-  * gum questions accept `y`/`n` as well as Enter on the highlighted button; Enter on `Continue with update?` means Yes.
-  * The red block `Something went wrong during the update!` followed by `● Failed (exit code N)! Press any key to close...` is the failure signature. Before rebooting, `tail -n 80 /tmp/omarchy-update.log | sudo tee /dev/ttyS0` gets the transcript into `get-serial`; after the reboot /tmp is gone and the screenshots are the transcript.
-  * The menu filters as you type, but this test wants the mouse for the two menu clicks.
+  * Screenshot every few seconds. Never press Ctrl+C after Yes. If the time budget ends, report the last heading as incomplete, not as a failure.
+  * The expected migration numbers are 1787215483, 1787760281, 1787843905, 1788577553, 1788619462, 1788662350, 1788724825, 1788745941, 1788848726, 1789325478, and 1789444024. Note any difference.
+  * The snapshot step must come before pacman output. A yellow warning that the update continued without a snapshot is recorded, not ignored.
+  * A Stay Awake indicator may be lit during downloads and must be off after `Restarting shell`.
+  * `Something went wrong during the update!` is the failure. Before a reboot, copy `/tmp/omarchy-update.log` to the serial log. After reboot, `/tmp` is gone.
+  * Enter on `Continue with update?` means Yes. A wrong passphrase re-prompts. Do not enter it three times.
+  * `save` keeps this disk for the later `post-update-*` tests.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the `Ready to update?` box, the sudo prompt, `Create system snapshot` before any pacman output, `Keys are correct`, `Update system packages` in progress, the `Running migration` lines (all eleven visible across screenshots), the `Restart Kitty` box, the two invitation toasts, the Stay Awake indicator lit then off, the reboot question, the `Rebooting` OSD, the Plymouth prompt
-  ** Post-reboot terminal with the new version, `uname -r`, `linux-omarchy`, `pending=1`, `Omarchy is up to date` and the snapper row described with the old version; bar screenshot without the update icon
+  ** The start version, `stable`, and the existing snapshots are recorded, and the update icon is on the bar.
+  ** Yes starts the update. `Create system snapshot` appears before any package download. Keys are correct, then packages download.
+  ** Each migration number is recorded, including the Restart Kitty box under `1788745941` and `linux-omarchy` under `1789325478`.
+  ** The two invitations are recorded and not clicked. An orphan question, if any, is answered No. The reboot question is recorded and answered Yes.
+  ** After login the update icon is gone. The version is newer, `uname -r` is not the ISO kernel, `linux-omarchy` is installed, nothing is pending, the checker says up to date, and a new snapshot is described with the old version.
+  ** The menu opens, and the session ends with `save`.
   * If unsuccessful
-  ** The screenshot with the red `Something went wrong during the update!` banner or `Failed (exit code N)` and the 30 lines above it, or package output preceding the snapshot step; the serial transcript tail if taken before the reboot; if the machine does not come back, the Limine menu / emergency shell plus `get-serial`
+  ** A red failure banner appears, package output precedes the snapshot, or the machine does not return to the desktop.
 covers: bin/omarchy-update (:30-38 snapshot before packages), bin/omarchy-update-confirm, bin/omarchy-update-pkg-prune, bin/omarchy-snapshot create, bin/omarchy-update-keyring, bin/omarchy-update-system-pkgs, bin/omarchy-update-stay-awake, bin/omarchy-migrate, migrations 1787215483…1789444024 (1788745941 Kitty, 1789325478 kernel), bin/omarchy-update-restart, bin/omarchy-system-reboot, bin/omarchy-update-status, bin/omarchy-update-available, bin/omarchy-hook post-update, default/omarchy/omarchy-menu.jsonc update.omarchy, shell/plugins/bar/widgets/SystemUpdate.qml, docs/update-process.md (Path 1), manual/30-updates.md, manual/47:3, test/shell.d/update-sequence-test.sh, snapshot-create-test.sh, omarchy-kernel-migration-test.sh, update-pkg-prune-test.sh
 
 ### update-terminal-run   [VM-OK] [NET] [SLOW]
@@ -15559,35 +15586,52 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy-version; sudo snapper list | tail -2` (password `prime`). Note the version (`4.0.2-…`) and the last snapshot number.
-  * Type `printf '#!/bin/bash\ndate > /tmp/post-update-ran\n' > /tmp/pu.sh; omarchy hook install post-update /tmp/pu.sh`.
-  ** If `omarchy hook install` is an unknown command on this build, record "absent on this build" and skip the hook checks below.
-  * Type `omarchy update -y`.
-  ** No `Ready to update?` box: the first output is `Prune package cache`, then the sudo prompt (type `prime`). The same headings as the menu path follow — `Create system snapshot`, `Update Arch signing keys`, `Update system packages`, eleven `Running migration (…)` lines (the `Restart Kitty` box under 1788745941, `linux-omarchy` under 1789325478), `Update mise tools`. Under `-y` an orphan section must only list and ask nothing; if `Remove N orphaned package(s)?` is asked anyway, answer No and record it as the unattended-prompt defect.
-  * At the reboot step the intended behaviour under `-y` is **no question**: a printed line that a reboot is required, then `Done!`. If the gum box `Linux kernel has been updated. Reboot?` (or `Updates require reboot. Ready?`) appears instead — it does at HEAD — screenshot it, answer **No**, and record the prompt as the defect (the run is otherwise correct).
-  ** Green `Restarting shell` / `All plugins have been reloaded` follow; the bar blinks off and on.
-  * Type `omarchy-version; sudo snapper list | tail -2; cat /tmp/post-update-ran; ls ~/.local/state/omarchy/reboot-required`.
-  ** The new version (expected `4.0.4-…`), one new snapshot whose description is the old version string, a date written by the hook, and the reboot marker present.
-  * Type `grep -n 'Woah partner\|Checking Omarchy update entrypoint\|Pausing Hyprland\|Reloading Hyprland\|Running migration' /tmp/omarchy-update.log | sudo tee /dev/ttyS0` and read it with `get-serial`.
-  ** `Checking Omarchy update entrypoint...`, `Pausing Hyprland config auto-reload…` and `Reloading Hyprland after Omarchy settings update...` are present; `Woah partner` is absent; the `Running migration` lines match what you saw.
-  * Type `omarchy-hyprland-reload-guard paused; echo paused=$?; hyprctl getoption misc:disable_autoreload | grep int; flock -n $XDG_RUNTIME_DIR/omarchy-update.lock true; echo lock-free=$?` — `paused` non-zero, `int: 0` (the settings upgrade left Hyprland's auto-reload enabled), `lock-free=0`.
-  * Type `rm ~/.config/omarchy/hooks/post-update.d/pu.sh`. Then reboot via Super+Escape → Reboot (passphrase `prime`) before this disk is reused for any `post-update-*` test — or end with `stop`.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy-version` and press Return. Record the version.
+  * Type `sudo snapper list | tail -2` and press Return. Record the last snapshot number.
+  ** If sudo asks, type `prime` and press Return.
+  * Type `printf '#!/bin/bash\ndate > /tmp/post-update-ran\n' > /tmp/pu.sh` and press Return. The prompt returns.
+  * Type `omarchy hook install post-update /tmp/pu.sh` and press Return. The hook is installed.
+  ** If the command is unknown, record it absent and skip the hook checks.
+  * Type `omarchy update -y` and press Return. The first output is `Prune package cache`, and no confirm box appears.
+  * If a sudo prompt appears, type `prime` and press Return. The update continues.
+  * Wait until `Create system snapshot` appears before any package download.
+  * Wait through the migration lines. Record the Restart Kitty box and the `linux-omarchy` install.
+  ** If an orphan-removal question appears, choose No and record it as the unattended-prompt defect.
+  * Wait until the run reaches the reboot step. The intended result is a printed reboot-required line and `Done!`, with no question.
+  ** If a reboot question appears, screenshot it, answer No, and record it as the unattended-prompt defect.
+  * Wait until `Restarting shell` appears and the prompt returns.
+  * Type `omarchy-version` and press Return. The version is newer than the one recorded at the start.
+  * Type `sudo snapper list | tail -2` and press Return. A new snapshot is described with the old version.
+  * Type `cat /tmp/post-update-ran` and press Return. A date is printed.
+  ** Skip this if the hook command was absent.
+  * Type `ls ~/.local/state/omarchy/reboot-required` and press Return. The marker exists.
+  * Type `grep -n 'Woah partner\|Checking Omarchy update entrypoint\|Pausing Hyprland\|Reloading Hyprland\|Running migration' /tmp/omarchy-update.log | sudo tee /dev/ttyS0` and press Return. Read the serial log.
+  * Confirm the serial log. It includes the entrypoint, pause, and reload lines, and it does not include `Woah partner`.
+  * Type `omarchy-hyprland-reload-guard paused; echo paused=$?` and press Return. The exit is non-zero.
+  * Type `hyprctl getoption misc:disable_autoreload | grep int` and press Return. The output includes `int: 0`.
+  * Type `flock -n $XDG_RUNTIME_DIR/omarchy-update.lock true; echo lock-free=$?` and press Return. The last line is `lock-free=0`.
+  * Type `rm ~/.config/omarchy/hooks/post-update.d/pu.sh` and press Return. The prompt returns.
+  * Reboot from the power menu before this disk is reused. Enter passphrase `prime`.
+  ** If this disk will not be reused, end with `stop` instead.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The run is long (> 5 min); screenshot repeatedly instead of sleeping. Report "incomplete — time" with the last heading if the budget runs out.
-  * Not rebooting leaves the `reboot-required` marker in place; the next update will raise the reboot step again — that is why the reboot must happen before `post-update-second-run-nothing-to-do`.
-  * docs/update-process.md: "`-y` exports `OMARCHY_UPDATE_UNATTENDED=1` — a promise not to ask anything. Steps that would prompt … report and skip instead of blocking." Any gum question under `-y` is therefore a defect to record, never a reason to fail the rest of the run.
+  * Screenshot repeatedly. A run can take more than 5 minutes. Report the last heading if time runs out.
+  * Under `-y`, any question is a defect to record. Answer No and continue. Do not fail the rest of the run for that question.
+  * Leaving the reboot marker in place makes the next update ask to reboot again.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the run starting at `Prune package cache` with no confirm box, the migration lines, the reboot step — intended: a printed reboot-required line and `Done!` with no question; observed HEAD: the `Reboot?` box, screenshotted and answered No, recorded as the defect — `Restarting shell`, the new version with the new snapshot row described with the old version, the hook's date and the marker, and the `paused`/`int: 0`/`lock-free=0` line
-  ** Serial log containing the grep with the hook lines and no `Woah partner`
+  ** `omarchy update -y` starts at `Prune package cache` with no confirm box. The snapshot appears before package downloads.
+  ** The Kitty restart box and the `linux-omarchy` install are recorded. An orphan question or a reboot question is answered No and recorded as the unattended-prompt defect. The intended reboot step is a printed line and `Done!`.
+  ** `Restarting shell` returns the prompt. The version is newer, the new snapshot is described with the old version, the hook wrote a date, and the reboot-required marker exists.
+  ** The update log has the entrypoint, pause, and reload lines, and no `Woah partner`. The reload guard is not paused, autoreload is `int: 0`, and the update lock is free.
   * If unsuccessful
-  ** Screenshot of the failing step, a `Ready to update?` box under `-y`, or the update stopping without `Restarting shell`; `sudo cat /tmp/omarchy-update.log | sudo tee /dev/ttyS0` then `get-serial`; `pgrep -a pacman`
+  ** A confirm box appears under `-y`, the update stops before `Restarting shell`, or the log contains `Woah partner`.
 covers: bin/omarchy-update (-y / OMARCHY_UPDATE_UNATTENDED, script transcript, free-space check, prune, snapshot), bin/omarchy-update-restart, bin/omarchy-snapshot, bin/omarchy-update-pacman, bin/omarchy-hyprland-reload-guard, bin/omarchy-hook (post-update.d), bin/omarchy-update-lock, default/libalpm/hooks/00-omarchy-update-guard.hook, 10-omarchy-hyprland-reload-pause.hook, 90-omarchy-hyprland-reload-resume.hook, docs/update-process.md "Path 1", "State and coordination files", "Raw pacman guard", "Update-related binaries", "-y exports OMARCHY_UPDATE_UNATTENDED=1", default/agents/skills/omarchy/hooks.md (post-update.d), test/shell.d/update-sequence-test.sh, update-pacman-guard-test.sh "allows omarchy update pacman call"
 
 ### post-update-second-run-nothing-to-do   [VM-OK] [NET]
@@ -15597,30 +15641,49 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Precondition: the disk left by `update-menu-omarchy`. Open a terminal with Super+Enter and type `omarchy-version; omarchy-update-available; echo exit=$?; ls ~/.local/state/omarchy/reboot-required 2>&1` — `4.0.4-…`, `Omarchy is up to date`, `exit=1`, `No such file or directory`.
-  ** If the marker exists the disk was updated but not rebooted and the kernel prompt would re-ask: reboot from Super+Escape → Reboot (passphrase `prime`) first, then start over.
-  ** If the version is still `4.0.2-…` this test becomes SLOW: run `update-menu-omarchy` first (Yes to the reboot) and come back.
-  * Type `omarchy update -y`.
-  ** No `Ready to update?` box: the first output is `Prune package cache`, then the sudo prompt (type `prime`). Then `Create system snapshot`, `Update Arch signing keys` / `Keys are correct`, `Update system packages` followed by pacman's ` there is nothing to do`, **no** `Running migration` line, `Update mise tools`.
-  ** If an `Orphan system packages` list appears it must end with `… found. Re-run omarchy-update-orphan-pkgs in a terminal to review/remove them.` and ask nothing; a `Remove N orphaned package(s)?` question under `-y` is the unattended-prompt defect — answer No and record it.
-  * The run ends with `Restarting shell` / `All plugins have been reloaded` and the prompt returns with no reboot question.
-  ** A `Reboot?` question here means the precondition disk was not rebooted (the marker was present): answer No and report the precondition, not this test — and note that `-y` asking at all is the defect pinned by `update-terminal-run`.
-  * Open the Omarchy menu with Super+Space → `Update` → `Omarchy` with the mouse. Press Enter at `Continue with update?`, type `prime` at the sudo prompt: the same banners, ` there is nothing to do`, no migration, no reboot prompt, then `● Done! Press any key to close...`. Press a key; it closes.
-  * In the terminal type `sudo snapper list | tail -n 3; omarchy-update-available; echo exit=$?; omarchy-migrate --pending; echo pending=$?; omarchy-migrate; echo migrate=$?` — the newest snapshot rows are from these runs (today's time, description = the version), `Omarchy is up to date` / `exit=1`, nothing listed, `pending=1`, no output from `omarchy-migrate`, `migrate=0`. The bar shows no update icon right of the clock.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy-version` and press Return. Record the version.
+  ** If it still prints `4.0.2-`, run `update-menu-omarchy` first, answer Yes to the reboot, and start again.
+  * Type `omarchy-update-available; echo exit=$?` and press Return. The output is `Omarchy is up to date`, and the last line is `exit=1`.
+  * Type `ls ~/.local/state/omarchy/reboot-required 2>&1` and press Return. The output includes `No such file`.
+  ** If the marker exists, reboot from the power menu with passphrase `prime` and start again.
+  * Type `omarchy update -y` and press Return. The first output is `Prune package cache`, and no confirm box appears.
+  * If a sudo prompt appears, type `prime` and press Return. The update continues.
+  * Wait until pacman says there is nothing to do. No `Running migration` line appears.
+  ** If an orphan question appears, choose No and record it as the unattended-prompt defect.
+  * Wait until `Restarting shell` appears and the prompt returns. No reboot question appears.
+  ** If a reboot question appears, answer No and report that the disk was not rebooted first.
+  * Press Super+Space. The menu opens.
+  * Select Update, then Omarchy. A prompt asks `Continue with update?`.
+  * Press Enter. The update starts.
+  * If a sudo prompt appears, type `prime` and press Return. The update continues.
+  * Wait until pacman says there is nothing to do and the terminal shows `Done!`.
+  * Press a key. The floating terminal closes.
+  * Click the first terminal. It is focused.
+  * Type `sudo snapper list | tail -n 3` and press Return. The newest rows are from these runs.
+  * Type `omarchy-update-available; echo exit=$?` and press Return. The output is `Omarchy is up to date`, and the last line is `exit=1`.
+  * Type `omarchy-migrate --pending; echo pending=$?` and press Return. Nothing is pending, and the last line is `pending=1`.
+  * Type `omarchy-migrate; echo migrate=$?` and press Return. There is no migration output, and the last line is `migrate=0`.
+  * Look at the bar. The update icon is gone.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The keyring step still contacts the mirror on every run, so this needs network even though nothing is installed; each run takes about a minute, the snapshot step being the slowest.
-  * gum prompts default to Yes; Enter accepts.
+  * The keyring step still uses the network. Each run takes about a minute.
+  * Enter accepts the default Yes on the menu confirm.
+  * A reboot question under `-y` is the defect recorded by `update-terminal-run`. Here it means the precondition disk was not rebooted.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the run starting without a confirm box, ` there is nothing to do` with no `Running migration` line, the orphan section (if any) without a question, `Restarting shell`, the menu run ending `● Done!`, the snapper rows, `Omarchy is up to date` / `exit=1`, `pending=1` and the silent `omarchy-migrate`; bar without the update icon
+  ** The version is newer than `4.0.2`, the checker says up to date and exits 1, and the reboot marker is absent.
+  ** `omarchy update -y` has no confirm box, pacman says there is nothing to do, no migration runs, and `Restarting shell` returns with no reboot question.
+  ** The menu run ends with `Done!` and nothing to do.
+  ** The new snapshots are from these runs. The checker still exits 1, pending exits 1, `omarchy-migrate` exits 0 with no output, and the update icon is gone.
   * If unsuccessful
-  ** Screenshot of a confirm box or orphan question under `-y`, any `Running migration` line, a reboot prompt, or the red failure block; `sudo cat /tmp/omarchy-update.log | sudo tee /dev/ttyS0` then `get-serial`
+  ** A confirm box or orphan question appears under `-y`, a migration runs, a reboot is asked, or the failure banner appears.
 covers: bin/omarchy-update (-y / OMARCHY_UPDATE_UNATTENDED), bin/omarchy-update-orphan-pkgs, bin/omarchy-update-restart, bin/omarchy-update-keyring, bin/omarchy-migrate (idempotence), bin/omarchy-update-available, bin/omarchy-update-status, omarchy-snapshot, default/snapper/root, docs/update-process.md "-y exports OMARCHY_UPDATE_UNATTENDED=1", test/shell.d/update-orphan-test.sh, update-status-test.sh, migrate-scope-test.sh "skips completed migrations"
 
 ### post-update-kernel-omarchy   [VM-OK]
@@ -15668,33 +15731,51 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Precondition: the disk left by `update-menu-omarchy`. Open a terminal with Super+Enter and type `omarchy-version`.
-  ** If it still prints `4.0.2-…` this test becomes SLOW: type `omarchy update -y`, type `prime` at sudo prompts, watch for the `Restart Kitty` box under `Running migration (1788745941)`, and answer No to the reboot question.
-  * Type `ls ~/.config/kitty/; head -1 ~/.config/kitty/kitty.conf; grep -c 'allow_remote_control yes' ~/.config/kitty/kitty.conf`.
-  ** `kitty.conf` plus one `kitty.conf.bak.<digits>`; first line `# Remove the include below to disconnect Kitty from Omarchy's theming system.`; count `0`.
-  * Type `grep -c 'allow_remote_control yes' ~/.config/kitty/kitty.conf.bak.*` — `1` (the backup is the old file).
-  * Type `printf '\nallow_remote_control yes\n# my line\n' >> ~/.config/kitty/kitty.conf; rm ~/.local/state/omarchy/migrations/1788745941.sh; omarchy-migrate`.
-  ** `Running migration (1788745941)`, `Unrestricted remote control disabled.`, `Your other Kitty settings were preserved.`, `Backup saved to:` with a `.bak.XXXXXX` path, and the rounded `Restart Kitty` / `Close and reopen all Kitty windows to apply this change.` box.
-  * Type `grep -n 'allow_remote_control\|my line' ~/.config/kitty/kitty.conf` — `# allow_remote_control yes` (commented) and `# my line` both present.
-  ** One reviewer reads the box as appearing only when a stock config is replaced (a custom config repaired quietly): record whether the `Restart Kitty` box appeared on this re-run.
-  * Fully custom file: type `cp ~/.config/kitty/kitty.conf /tmp/kitty.orig; printf '# my comment\ninclude my-theme.conf\nfont_size 13\nallow_remote_control yes\nallow_remote_control true\nallow_remote_control socket-only\nlisten_on unix:/tmp/my-kitty\n' > ~/.config/kitty/kitty.conf; chmod 600 ~/.config/kitty/kitty.conf; bash /usr/share/omarchy/migrations/1788745941.sh; cat ~/.config/kitty/kitty.conf; stat -c %a ~/.config/kitty/kitty.conf` — the `yes` and `true` lines are now `# allow_remote_control …`, `socket-only` untouched, all other lines unchanged and in order, mode `600`, a new backup present.
-  * Type `cp ~/.config/kitty/kitty.conf /tmp/kitty.after; bash /usr/share/omarchy/migrations/1788745941.sh; cmp /tmp/kitty.after ~/.config/kitty/kitty.conf && echo same` — no output from the migration and `same`. Then `printf 'allow_remote_control socket\nfont_size 13\n' > ~/.config/kitty/kitty.conf; bash /usr/share/omarchy/migrations/1788745941.sh; cat ~/.config/kitty/kitty.conf` — a restricted mode is preserved as-is.
-  * Type `cp /tmp/kitty.orig ~/.config/kitty/kitty.conf; rm -f ~/.config/kitty/kitty.conf.bak.?????? /tmp/kitty.*; ls ~/.config/kitty/` — only `kitty.conf` (the post-update default) and the original `kitty.conf.bak.<digits>` remain. Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy-version` and press Return. Record the version.
+  ** If it still prints `4.0.2-`, this test becomes SLOW. Run `omarchy update -y`, type `prime` at sudo, watch for the Restart Kitty box under migration `1788745941`, and answer No to the reboot question.
+  * Type `ls ~/.config/kitty/` and press Return. `kitty.conf` and one `kitty.conf.bak.` file are listed.
+  * Type `head -1 ~/.config/kitty/kitty.conf` and press Return. The line starts with `# Remove the include below`.
+  * Type `grep -c 'allow_remote_control yes' ~/.config/kitty/kitty.conf` and press Return. The output is `0`.
+  * Type `grep -c 'allow_remote_control yes' ~/.config/kitty/kitty.conf.bak.*` and press Return. The output is `1`.
+  * Type `printf '\nallow_remote_control yes\n# my line\n' >> ~/.config/kitty/kitty.conf` and press Return. The prompt returns.
+  * Type `rm ~/.local/state/omarchy/migrations/1788745941.sh` and press Return. The prompt returns.
+  * Type `omarchy-migrate` and press Return. The output includes `Unrestricted remote control disabled.` and `Your other Kitty settings were preserved.`
+  * Record whether a Restart Kitty box appeared on this re-run.
+  * Type `grep -n 'allow_remote_control\|my line' ~/.config/kitty/kitty.conf` and press Return. The remote-control line is commented, and `# my line` remains.
+  * Type `cp ~/.config/kitty/kitty.conf /tmp/kitty.orig` and press Return. The prompt returns.
+  * Type `printf '# my comment\ninclude my-theme.conf\nfont_size 13\nallow_remote_control yes\nallow_remote_control true\nallow_remote_control socket-only\nlisten_on unix:/tmp/my-kitty\n' > ~/.config/kitty/kitty.conf` and press Return. The prompt returns.
+  * Type `chmod 600 ~/.config/kitty/kitty.conf` and press Return. The prompt returns.
+  * Type `bash /usr/share/omarchy/migrations/1788745941.sh` and press Return. The prompt returns.
+  * Type `cat ~/.config/kitty/kitty.conf` and press Return. The `yes` and `true` lines are commented, `socket-only` is unchanged, and the other lines stay in order.
+  * Type `stat -c %a ~/.config/kitty/kitty.conf` and press Return. The output is `600`.
+  * Type `cp ~/.config/kitty/kitty.conf /tmp/kitty.after` and press Return. The prompt returns.
+  * Type `bash /usr/share/omarchy/migrations/1788745941.sh; cmp /tmp/kitty.after ~/.config/kitty/kitty.conf && echo same` and press Return. The migration prints nothing, and the last line is `same`.
+  * Type `printf 'allow_remote_control socket\nfont_size 13\n' > ~/.config/kitty/kitty.conf` and press Return. The prompt returns.
+  * Type `bash /usr/share/omarchy/migrations/1788745941.sh` and press Return. The prompt returns.
+  * Type `cat ~/.config/kitty/kitty.conf` and press Return. The `socket` line is unchanged.
+  * Type `cp /tmp/kitty.orig ~/.config/kitty/kitty.conf` and press Return. The prompt returns.
+  * Type `rm -f ~/.config/kitty/kitty.conf.bak.?????? /tmp/kitty.*` and press Return. The prompt returns.
+  * Type `ls ~/.config/kitty/` and press Return. `kitty.conf` and the original backup remain.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Kitty itself is not installed on this disk; only the config file matters — the migration edits the file regardless.
-  * The migration rewrites a file only when its checksum matches the shipped 4.0.2 config or it contains an active `allow_remote_control yes`/`true`.
-  * `bash /usr/share/omarchy/migrations/1788745941.sh` runs the script directly without touching the done marker; `omarchy-migrate` after `rm` of the marker is the wrapper path.
+  * Kitty does not need to be installed. The migration edits the config file either way.
+  * It rewrites a file only when the checksum matches the shipped 4.0.2 config or an active `allow_remote_control yes` or `true` line is present.
+  * Running the script with bash does not touch the done marker. Removing the marker and running `omarchy-migrate` is the wrapper path.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the directory listing/head/count after the update, the customised-file re-run with the four message lines (and whether the `Restart Kitty` box appeared), the grep showing the commented line with the preserved custom line, the fully custom file with only the `yes`/`true` lines commented, `socket-only` kept, mode `600` and a backup, the silent identical rerun with `same`, `socket` preserved, and the cleaned directory
+  ** After the update, `kitty.conf` starts with the theming comment, has no active `allow_remote_control yes`, and one backup still has that line.
+  ** A custom line survives the wrapper re-run, the remote-control line is commented, and whether the Restart Kitty box appeared is recorded.
+  ** A fully custom file keeps its order and mode `600`. Only `yes` and `true` are commented. `socket-only` and later `socket` stay as written.
+  ** An identical rerun prints nothing and `cmp` says `same`. Cleanup leaves `kitty.conf` and the original backup.
   * If unsuccessful
-  ** Screenshot of the old file untouched after the update, a missing backup, a lost or reordered custom line, `socket-only`/`socket` commented, the mode changed, output on the identical rerun, or an error under `Update Kitty configuration`
+  ** The old file is untouched, a backup is missing, a custom line is lost or reordered, a restricted mode is commented, or the identical rerun prints output.
 covers: migrations/1788745941.sh, bin/omarchy-refresh-config, config/kitty/kitty.conf (4.0.2 vs HEAD), bin/omarchy-migrate, test/shell.d/kitty-config-test.sh (migration half), manual/15-terminal.md
 
 ### post-update-mise-and-agent-wrappers   [VM-OK]
