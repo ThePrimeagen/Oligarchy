@@ -357,16 +357,16 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `channel-current-menu-check-and-refusals`
 - [x] `channel-switch-edge-and-update`
 - [x] `channel-switch-dev-and-back`
-- [ ] `post-update-edge-wrappers-packages-and-sysctl`
+- [x] `post-update-edge-wrappers-packages-and-sysctl`
 - [x] `post-update-edge-work-mise-toml-removed`
-- [ ] `version-commands-and-channel-detection`
-- [ ] `upgrade-to-quattro-refusals-and-decline`
-- [ ] `reinstall-declined-and-configs-reset`
-- [ ] `update-menu-rows-and-process-restart-shell`
-- [ ] `update-config-shell-resets-bar-position`
-- [ ] `update-hardware-rows-without-hardware`
+- [x] `version-commands-and-channel-detection`
+- [x] `upgrade-to-quattro-refusals-and-decline`
+- [x] `reinstall-declined-and-configs-reset`
+- [x] `update-menu-rows-and-process-restart-shell`
+- [x] `update-config-shell-resets-bar-position`
+- [x] `update-hardware-rows-without-hardware`
 - [ ] `update-firmware-no-devices`
-- [ ] `update-time-restarts-timesyncd`
+- [x] `update-time-restarts-timesyncd`
 - [ ] `update-extra-themes-row-appears-with-git-theme`
 - [ ] `update-hook-post-update-invitations-once`
 - [ ] `preinstalls-remove-decline-and-confirm`

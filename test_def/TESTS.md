@@ -16641,32 +16641,47 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Precondition: the disk left by `channel-switch-edge-and-update` (on edge, not rebooted). Open a terminal with Super+Enter and type `omarchy-channel-current`.
-  ** If it says `stable` this test becomes SLOW: first type `mkdir -p ~/.config/omarchy/defaults; echo gemini > ~/.config/omarchy/defaults/agent`, then `omarchy-channel-set edge`, type `prime` at sudo prompts, wait for the switch and update, and answer No to the reboot question.
-  ** On an already-edge disk the default-agent line was not seeded before the migration ran: skip the `agent` file check below and say so.
-  * Type `ls -l ~/.local/bin/agy ~/.local/bin/gemini; head -4 ~/.local/bin/agy; cat ~/.config/omarchy/defaults/agent 2>&1` — `agy` exists, `gemini` says `No such file or directory`; the stub contains `mise use -g --quiet "antigravity-cli"`; the agent file (if seeded) says `agy`.
-  * Type `ls -l ~/.gemini/config/skills/` — symlinks into `/usr/share/omarchy/default/agents/skills/` (`omarchy`, `diagnose-crash`).
-  * Type `pacman -Q vi qt6-multimedia qt6-multimedia-ffmpeg; which vi; sysctl net.ipv4.tcp_congestion_control net.core.default_qdisc` — all three listed, `/usr/bin/vi`, `bbr` and `fq`.
-  ** If not `bbr`/`fq`, type `cat /etc/sysctl.d/99-omarchy-sysctl.conf` and report whether it contains `tcp_congestion_control` (the file comes from the settings package, not the migration).
-  * Type `ls ~/.config/wireplumber/wireplumber.conf.d/; systemctl --user is-active wireplumber; ls ~/.local/bin/hey ~/.local/bin/ori ~/.local/bin/basecamp ~/.local/bin/cf` — `kef-lsx-no-suspend.conf`, `active`, all four wrappers exist.
-  * Type `rm ~/.local/state/omarchy/migrations/1786719479.sh; omarchy-migrate` — `Running migration (1786719479)` / `Replace the Gemini coding agent with Antigravity` runs with no other output and no error (idempotent).
-  * Type `grep -A1 'Running migration (178766683\|Running migration (178886262\|Running migration (178909125' /tmp/omarchy-update.log | sudo tee /dev/ttyS0` (password `prime`) and read the serial log: the Dell, Elgato and T3 Code migrations show only their header line.
-  ** If the disk was rebooted since the switch, /tmp/omarchy-update.log is gone; skip this step and say so.
-  * Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy-channel-current` and press Return. Record the channel.
+  ** If it is `stable`, this test becomes SLOW. Seed `gemini` as the default agent, run `omarchy-channel-set edge`, type `prime` at sudo, and answer No to the reboot question.
+  ** If the disk was already on edge, skip the agent-file check and record that it was not seeded.
+  * Type `ls -l ~/.local/bin/agy` and press Return. The file exists.
+  * Type `ls -l ~/.local/bin/gemini 2>&1` and press Return. The output includes `No such file`.
+  * Type `head -4 ~/.local/bin/agy` and press Return. The stub includes `antigravity-cli`.
+  * Type `cat ~/.config/omarchy/defaults/agent 2>&1` and press Return. If the file was seeded, it says `agy`.
+  * Type `ls -l ~/.gemini/config/skills/` and press Return. `omarchy` and `diagnose-crash` are symlinks into the shipped skills directory.
+  * Type `pacman -Q vi qt6-multimedia qt6-multimedia-ffmpeg` and press Return. All three packages are listed.
+  * Type `which vi` and press Return. The output is `/usr/bin/vi`.
+  * Type `sysctl net.ipv4.tcp_congestion_control net.core.default_qdisc` and press Return. The values are `bbr` and `fq`.
+  ** If they are not, type `cat /etc/sysctl.d/99-omarchy-sysctl.conf` and report whether it names `tcp_congestion_control`.
+  * Type `ls ~/.config/wireplumber/wireplumber.conf.d/` and press Return. `kef-lsx-no-suspend.conf` is listed.
+  * Type `systemctl --user is-active wireplumber` and press Return. The output is `active`.
+  * Type `ls ~/.local/bin/hey ~/.local/bin/ori ~/.local/bin/basecamp ~/.local/bin/cf` and press Return. All four files exist.
+  * Type `rm ~/.local/state/omarchy/migrations/1786719479.sh` and press Return. The prompt returns.
+  * Type `omarchy-migrate` and press Return. Migration `1786719479` runs with no error.
+  * Type `grep -A1 'Running migration (178766683\|Running migration (178886262\|Running migration (178909125' /tmp/omarchy-update.log | sudo tee /dev/ttyS0` and press Return. Read the serial log.
+  ** If sudo asks, type `prime` and press Return.
+  ** If the log is gone because the disk was rebooted, skip this and record that.
+  * Confirm the serial log. The Dell, Elgato, and T3 Code migrations show only their header.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Do not run `agy`; its first run downloads Antigravity.
-  * Skipped in the VM: Dell XPS 13 amplifiers, Elgato Cam Link relay, T3 Code theme — no such hardware or package here.
+  * Do not run `agy`. Its first run downloads Antigravity.
+  * The Dell, Elgato, and T3 Code migrations have no matching hardware here. Only their headers are expected.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the `ls -l` with `agy` present and `gemini` gone, the stub head and agent file, the skills symlinks, the package/which/sysctl line, the wireplumber file with `active` and the four wrappers, the silent Antigravity re-run, and the serial dump of the three header-only migrations
+  ** The channel is `edge`, or the SLOW switch was completed and recorded.
+  ** `agy` exists and mentions `antigravity-cli`. `gemini` is gone. A seeded agent file says `agy`. The Gemini skills are linked.
+  ** `vi`, both multimedia packages, `/usr/bin/vi`, `bbr`, and `fq` are present. A mismatch is recorded from the sysctl file.
+  ** The WirePlumber drop-in exists, the service is active, and `hey`, `ori`, `basecamp`, and `cf` exist.
+  ** Re-running the Antigravity migration is quiet. The three hardware migrations show only headers when the update log is still present.
   * If unsuccessful
-  ** Screenshot of `gemini` still present, `agy` missing, the default still `gemini`, a missing package/wrapper/file, or an error under any of the listed migrations; the sysctl file contents if BBR did not apply
+  ** `gemini` remains, `agy` is missing, a package or wrapper is absent, or a listed migration prints an error.
 covers: migrations/1786609204.sh, 1786719479.sh, 1787215824.sh, 1787342993.sh, 1787666837.sh, 1788596255.sh, 1788862626.sh, 1788941927.sh, 1789091250.sh, 1789130779.sh, 1789294350.sh, 1789310715.sh, bin/omarchy-mise-install, bin/omarchy-pkg-add, bin/omarchy-refresh-config, bin/omarchy-channel-set, test/shell.d/mise-wrapper-quiet-migration-test.sh (wrapper format)
 
 ### post-update-edge-work-mise-toml-removed   [VM-OK]
@@ -16715,29 +16730,52 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open the Omarchy menu with Super+Space → `About` with the mouse. The about screen shows the Omarchy version (e.g. `4.0.2-1`). Screenshot, then close it with Escape.
-  * Open a terminal with Super+Enter and type `omarchy-version; echo exit=$?; omarchy version; pacman -Q omarchy omarchy-settings` — the same single `4.0.2-<n>` line twice with `exit=0`, equal to the version part of `pacman -Q omarchy`.
-  * Type `omarchy-version-channel; omarchy channel current; omarchy-version-branch; echo branch=$?` — `stable`, `stable`, no output, `branch=1`.
-  * Type `omarchy version pkgs; grep -c upgraded /var/log/pacman.log; omarchy version bogus; echo exit=$?` — a date such as `Friday, September 18 2026 at 00:00` (quirk: today at midnight on a never-upgraded disk; record it with the `upgraded` count), then the version again with `exit=0` (quirk: the root binary ignores the argument — record, no error expected).
-  * Type `grep -E '^(Color|ILoveCandy|ParallelDownloads|Server)' /etc/pacman.conf; grep Server /etc/pacman.d/mirrorlist; ls /usr/share/libalpm/hooks/ | grep omarchy` — `Color`, `ILoveCandy`, `ParallelDownloads = 5`, `Server = https://pkgs.omarchy.org/stable/$arch`, one `https://stable-mirror.omarchy.org/$repo/os/$arch` line, and three `*omarchy*.hook` files.
-  * Type `sudo sed -i 's#stable-mirror#other-mirror#' /etc/pacman.d/mirrorlist; omarchy-version-channel; omarchy-channel-current` (password `prime`) — `unknown / stable` and `unknown`. Then `sudo sed -i 's#other-mirror#stable-mirror#' /etc/pacman.d/mirrorlist; omarchy-version-channel; omarchy-channel-current` — `stable`, `stable` again.
-  * Type `OMARCHY_PATH=/usr/share/omarchy omarchy-update-dev; echo exit=$?` — no output, `exit=0` (a package-backed install skips the dev step). Then `mkdir -p /tmp/notgit && OMARCHY_PATH=/tmp/notgit omarchy-update-dev; echo exit=$?` — `OMARCHY_PATH is not a git checkout: /tmp/notgit`, non-zero. Then `OMARCHY_PATH=/tmp/notgit omarchy-version` — `dev` (a checkout path reports `dev`; a linked checkout would add its hash).
-  * Close the terminal with Super+W; the mirrorlist is as it was.
+  * Press Super+Space. The menu opens.
+  * Select About. The version is shown and recorded.
+  * Press Escape. The menu closes.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy-version; echo exit=$?` and press Return. The version matches About, and the last line is `exit=0`.
+  * Type `omarchy version` and press Return. The same version is printed.
+  * Type `pacman -Q omarchy omarchy-settings` and press Return. The omarchy version matches the command output.
+  * Type `omarchy-version-channel` and press Return. The output is `stable`.
+  * Type `omarchy channel current` and press Return. The output is `stable`.
+  * Type `omarchy-version-branch; echo branch=$?` and press Return. There is no branch line, and the last line is `branch=1`.
+  * Type `omarchy version pkgs` and press Return. A date is printed and recorded.
+  * Type `grep -c upgraded /var/log/pacman.log` and press Return. Record the count.
+  * Type `omarchy version bogus; echo exit=$?` and press Return. The version is printed again, and the last line is `exit=0`.
+  * Type `grep -E '^(Color|ILoveCandy|ParallelDownloads|Server)' /etc/pacman.conf` and press Return. The lines include `Color`, `ILoveCandy`, `ParallelDownloads = 5`, and the stable package server.
+  * Type `grep Server /etc/pacman.d/mirrorlist` and press Return. The line names `stable-mirror.omarchy.org`.
+  * Type `ls /usr/share/libalpm/hooks/ | grep omarchy` and press Return. Three Omarchy hooks are listed.
+  * Type `sudo sed -i 's#stable-mirror#other-mirror#' /etc/pacman.d/mirrorlist` and press Return. The prompt returns.
+  ** If sudo asks, type `prime` and press Return.
+  * Type `omarchy-version-channel` and press Return. The output is `unknown / stable`.
+  * Type `omarchy-channel-current` and press Return. The output is `unknown`.
+  * Type `sudo sed -i 's#other-mirror#stable-mirror#' /etc/pacman.d/mirrorlist` and press Return. The prompt returns.
+  * Type `omarchy-version-channel` and press Return. The output is `stable`.
+  * Type `omarchy-channel-current` and press Return. The output is `stable`.
+  * Type `OMARCHY_PATH=/usr/share/omarchy omarchy-update-dev; echo exit=$?` and press Return. There is no error, and the last line is `exit=0`.
+  * Type `mkdir -p /tmp/notgit && OMARCHY_PATH=/tmp/notgit omarchy-update-dev; echo exit=$?` and press Return. The output includes `OMARCHY_PATH is not a git checkout: /tmp/notgit`, and the exit is non-zero.
+  * Type `OMARCHY_PATH=/tmp/notgit omarchy-version` and press Return. The output is `dev`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * `omarchy-version-channel` prints two tokens with a slash only when mirror and package repo disagree. stable → `stable-mirror`, rc → `rc-mirror`, edge → `mirror`.
-  * All outputs are one line; screenshot after each command. About may take a second to draw its art.
-  * ./client-with-image allows you to get an image back of what you did, so can be useful for speeding things up
+  * `omarchy-version-channel` prints two tokens only when the mirror and the package repo disagree. Stable uses `stable-mirror`, rc uses `rc-mirror`, and edge uses `mirror`.
+  * The pkgs date may be today at midnight on a never-upgraded disk. `omarchy version bogus` ignoring the argument is a recorded quirk, not an error.
+  * The mirror substitution must be restored before the terminal closes.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the About screen and the terminal with the matching `4.0.2-n` version and `pacman -Q` line, `stable`/`stable`/`branch=1`, the pkgs date with the `upgraded` count and the `bogus` quirk, the pacman/mirror/hook lines, the `unknown / stable` + `unknown` pair and the restored `stable`/`stable`, the silent dev step, the exact `OMARCHY_PATH is not a git checkout: /tmp/notgit` error and `dev`
+  ** About, `omarchy-version`, `omarchy version`, and `pacman -Q omarchy` show the same version. The channel commands print `stable`, and `version branch` exits 1 with no output.
+  ** `version pkgs` prints a date. `version bogus` prints the version again and exits 0.
+  ** pacman.conf has Color, ILoveCandy, five parallel downloads, and the stable server. The mirror list names `stable-mirror.omarchy.org`. Three Omarchy hooks are present.
+  ** Changing the mirror name makes the channel `unknown / stable` and `unknown`. Restoring it returns both to `stable`.
+  ** A package path skips the dev updater with exit 0. A non-checkout path is refused, and that path makes `omarchy-version` print `dev`.
   * If unsuccessful
-  ** An empty version, About disagreeing with pacman, `unknown` on the untouched disk, a missing error or a git command running against `/usr/share/omarchy`, an error trace, or the mirrorlist not restored
+  ** About disagrees with pacman, an untouched disk reports `unknown`, the mirror list is not restored, or a git command runs against `/usr/share/omarchy`.
 covers: bin/omarchy-version, bin/omarchy-version-channel, bin/omarchy-version-branch, bin/omarchy-version-pkgs, bin/omarchy-channel-current, bin/omarchy-update-dev, bin/omarchy, default/pacman/*, default/pacman/mirrorlist-stable, default/pacman/pacman-stable.conf, default/libalpm/hooks/*, etc/fastfetch/config.jsonc (channel module), docs/update-process.md "Channels and versions", manual/14-omarchy-cli.md, test/shell.d/version-test.sh, channel-test.sh "current channel detects stable", update-dev-test.sh
 
 ### upgrade-to-quattro-refusals-and-decline   [VM-OK]
@@ -16747,30 +16785,44 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy-version; sha256sum /etc/pacman.conf; ls /etc/pacman.conf.omarchy-upgrade-to-quattro.* 2>&1; sudo snapper list | tail -1` (password `prime`) — note version, hash and the last snapshot; the `ls` says No such file.
-  * Type `omarchy upgrade to quattro --help | head -n 2` — `Usage: omarchy-upgrade-to-quattro [--yes] [--reboot] [--dev] [--channel stable|rc|edge] [--user USER]`.
-  * Type each of these and check its red `Error:` line and `exit=1`: `omarchy upgrade to quattro --bogus; echo exit=$?` → `Unknown option: --bogus`; `omarchy-upgrade-to-quattro --channel nightly; echo exit=$?` → `Invalid channel 'nightly'. Use stable, rc, or edge.`; `omarchy-upgrade-to-quattro --dev --channel stable; echo exit=$?` → `--dev needs the edge package repo; use --channel rc or --channel edge.`; `omarchy-upgrade-to-quattro --user nobody-here; echo exit=$?` → `User 'nobody-here' does not exist.`
-  ** None of them shows the banner or asks for a password.
-  * Type `omarchy-upgrade-to-quattro` with no flags.
-  ** The screen clears and shows a large QUATTRO block-letter banner, then `Upgrading Omarchy to Quattro is a one-way street!`, `You cannot downgrade from Quattro.`, `Make sure you have a backup.` and `Continue with upgrade?`. Screenshot it, and record that no "this machine already appears to be on Quattro" notice or refusal appeared before the question (flagged for maintainers; not a failure).
-  * Answer **No** (press `n`). The command exits with no further output; `echo $?` → `0`; no sudo prompt appeared.
-  ** Never answer Yes and never pass `--yes`: the script would start rewriting pacman configuration on this healthy 4.x system.
-  * Type `omarchy-version; sha256sum /etc/pacman.conf; ls /etc/pacman.conf.omarchy-upgrade-to-quattro.* 2>&1; sudo snapper list | tail -1` — version and hash unchanged, still no backup file, no new snapshot. Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy-version` and press Return. Record the version.
+  * Type `sha256sum /etc/pacman.conf` and press Return. Record the hash.
+  * Type `ls /etc/pacman.conf.omarchy-upgrade-to-quattro.* 2>&1` and press Return. The output includes `No such file`.
+  * Type `sudo snapper list | tail -1` and press Return. Record the last snapshot.
+  ** If sudo asks, type `prime` and press Return.
+  * Type `omarchy upgrade to quattro --help | head -n 2` and press Return. The output includes `Usage: omarchy-upgrade-to-quattro`.
+  * Type `omarchy upgrade to quattro --bogus; echo exit=$?` and press Return. The output includes `Unknown option: --bogus`, and the last line is `exit=1`.
+  * Type `omarchy-upgrade-to-quattro --channel nightly; echo exit=$?` and press Return. The output includes `Invalid channel 'nightly'`, and the last line is `exit=1`.
+  * Type `omarchy-upgrade-to-quattro --dev --channel stable; echo exit=$?` and press Return. The output includes `--dev needs the edge package repo`, and the last line is `exit=1`.
+  * Type `omarchy-upgrade-to-quattro --user nobody-here; echo exit=$?` and press Return. The output includes `User 'nobody-here' does not exist.`, and the last line is `exit=1`.
+  * Type `omarchy-upgrade-to-quattro` and press Return. A question asks `Continue with upgrade?`.
+  * Record whether any already-on-Quattro notice appeared before the question.
+  * Press `n`. The command exits with no further output.
+  * Type `echo $?` and press Return. The output is `0`.
+  * Type `omarchy-version` and press Return. The version is unchanged.
+  * Type `sha256sum /etc/pacman.conf` and press Return. The hash matches the recorded one.
+  * Type `ls /etc/pacman.conf.omarchy-upgrade-to-quattro.* 2>&1` and press Return. The output includes `No such file`.
+  * Type `sudo snapper list | tail -1` and press Return. The last snapshot is unchanged.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * If the question does not appear and green `==>` progress lines start, press Ctrl+C immediately and report it: the confirmation gate would be broken. Do not reboot after such a run.
-  * `omarchy upgrade to quattro` (the CLI router spelling) and `omarchy-upgrade-to-quattro` reach the same script.
-  * ./client-with-image allows you to get an image back of what you did, so can be useful for speeding things up
+  * Never answer Yes and never pass `--yes`. That starts rewriting pacman configuration.
+  * If progress lines start without the question, press Ctrl+C immediately and report it. Do not reboot.
+  * `omarchy upgrade to quattro` and `omarchy-upgrade-to-quattro` are the same script.
+  * The missing already-on-Quattro notice is recorded for maintainers. It is not a failure by itself.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the usage line, the four argument refusals with their `Error:` lines and exit 1, the banner with the one-way warning and the question (with a note that no "already on Quattro" notice preceded it), the silent exit 0 after No, and the unchanged version/hash/backup listing/snapshot tail
+  ** Help prints the usage line. `--bogus`, `nightly`, `--dev` with stable, and a missing user each print their error and exit 1, with no banner and no password prompt.
+  ** The no-flag command reaches `Continue with upgrade?`. Whether an already-on-Quattro notice appeared is recorded.
+  ** `n` exits 0 with no further output and no sudo prompt. The version, pacman.conf hash, backup listing, and last snapshot are unchanged.
   * If unsuccessful
-  ** Screenshot of any `==>` progress line, sudo prompt, new `/etc/pacman.conf.omarchy-upgrade-to-quattro.*.bak`, or changed hash after declining, or a validation error arriving after the banner; `Upgrade incomplete - do NOT reboot.` if it ever appears, plus `get-serial`
+  ** Progress lines start without the question, a sudo prompt appears, a backup file is created, or the hash changes after No.
 covers: bin/omarchy-upgrade-to-quattro (usage :1-175, normalize_channel, argument refusals, banner + gum confirm :334-353, cleanup_on_exit), agents/skills/migrations.md "Omarchy 4.0 is upgraded through bin/omarchy-upgrade-to-quattro", test/shell.d/upgrade-to-quattro-test.sh "reports an aborted run instead of exiting silently"
 
 ### reinstall-declined-and-configs-reset   [VM-OK]
@@ -16780,30 +16832,48 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy reinstall --help | head -n 4` — help for `omarchy reinstall` and its summary; nothing runs. Then `echo '-- REINSTALL-PROBE' >> ~/.config/hypr/looknfeel.lua; echo '# marker' >> ~/.bashrc; touch ~/.config/hypr/my-own-file.lua; tail -n 1 ~/.config/hypr/looknfeel.lua; pacman -Q | wc -l` — the probe line and the package count.
-  * Type `omarchy reinstall; echo exit=$?`.
-  ** `This will reinstall all default Omarchy packages and reset default configs.` / `Warning: user config changes will be overwritten.` then `Are you sure you want to reinstall and lose config changes?`. Choose **No** (Right arrow then Enter, or `n`): the prompt returns with `exit=0`, no sudo prompt, no package output.
-  * Type `omarchy-reinstall` and press Ctrl+C at the question. Then `tail -1 ~/.bashrc; pacman -Q | wc -l; omarchy version` — the marker is still there, the count and version unchanged.
-  * Type `sudo omarchy reinstall configs; echo exit=$?` — `Error: This script should not be run as root`, `exit=1`.
-  * Type `omarchy reinstall configs; echo exit=$?`.
-  ** `Resetting Omarchy user configs to shipped defaults...`, no confirmation asked, then the limine/plymouth refresh (a sudo prompt may appear: type `prime`; bootloader output is expected, ~30 s to two minutes) and the Neovim refresh, `exit=0`.
-  * Type `tail -n 1 ~/.config/hypr/looknfeel.lua; cmp /etc/skel/.bashrc ~/.bashrc && echo restored; ls ~/.config/hypr/*.bak.* 2>&1; ls ~/.config/hypr/my-own-file.lua; hyprctl configerrors` — the probe line is gone (the file ends with the shipped `-- })` block), `restored`, `No such file` (no backup, as documented), the extra file still present, no config errors. The bar is up.
-  * Press Super+Enter — a fresh terminal opens normally with the restored shell config. Type `rm ~/.config/hypr/my-own-file.lua` and close both terminals with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy reinstall --help | head -n 4` and press Return. Help is printed, and nothing is reinstalled.
+  * Type `echo '-- REINSTALL-PROBE' >> ~/.config/hypr/looknfeel.lua` and press Return. The prompt returns.
+  * Type `echo '# marker' >> ~/.bashrc` and press Return. The prompt returns.
+  * Type `touch ~/.config/hypr/my-own-file.lua` and press Return. The prompt returns.
+  * Type `pacman -Q | wc -l` and press Return. Record the count.
+  * Type `omarchy reinstall; echo exit=$?` and press Return. A question asks whether to reinstall and lose config changes.
+  * Choose No. The last line is `exit=0`, and no package output appears.
+  * Type `omarchy-reinstall` and press Return. The same question appears.
+  * Press Ctrl+C. The prompt returns.
+  * Type `tail -1 ~/.bashrc` and press Return. The line is `# marker`.
+  * Type `pacman -Q | wc -l` and press Return. The count matches the recorded one.
+  * Type `sudo omarchy reinstall configs; echo exit=$?` and press Return. The output includes `should not be run as root`, and the last line is `exit=1`.
+  * Type `omarchy reinstall configs; echo exit=$?` and press Return. The reset starts with no question.
+  ** If sudo asks, type `prime` and press Return.
+  * Wait until the last line is `exit=0`.
+  * Type `tail -n 1 ~/.config/hypr/looknfeel.lua` and press Return. The probe line is gone.
+  * Type `cmp /etc/skel/.bashrc ~/.bashrc && echo restored` and press Return. The last line is `restored`.
+  * Type `ls ~/.config/hypr/*.bak.* 2>&1` and press Return. The output includes `No such file`.
+  * Type `ls ~/.config/hypr/my-own-file.lua` and press Return. The extra file is listed.
+  * Type `hyprctl configerrors` and press Return. No config error is listed.
+  * Press Super+Return. A new terminal opens.
+  * Type `rm ~/.config/hypr/my-own-file.lua` and press Return. The prompt returns.
+  * Close both terminals with Super+W. The desktop is clear.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * gum confirm highlights `Yes` by default — move to `No` before pressing Enter. Never choose Yes: the real reinstall downloads packages and exceeds the session budget (see the appendix).
-  * The plymouth refresh rebuilds the initramfs and can take a minute or two; keep screenshotting.
-  * ./client-with-image allows you to get an image back of what you did, so can be useful for speeding things up
+  * The question highlights Yes. Move to No, or press `n`. Never choose Yes.
+  * The config reset can rebuild the initramfs and take one or two minutes. Screenshot while it runs.
+  * No backup of the overwritten files is expected.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the help, the warning + confirm declined with `exit=0`, the Ctrl+C path with the intact marker/count/version, the root refusal with `exit=1`, the reset run with `exit=0`, the probe gone / `restored` / no `.bak` / extra file kept / empty `hyprctl configerrors`, and the new terminal
+  ** Help prints and changes nothing. The probe, the bash marker, and the extra Hyprland file are in place.
+  ** Declining reinstall exits 0 with no package output. Ctrl+C leaves the marker, the package count, and the version unchanged.
+  ** Running the config reset as root exits 1. Running it as the user exits 0 with no confirmation.
+  ** The probe line is gone, `.bashrc` matches skel, no backup exists, the extra file remains, and Hyprland reports no config error. A new terminal opens.
   * If unsuccessful
-  ** A pacman/sudo prompt after No, the marker or sentinel removed after declining, a failing refresh step's error, or `.bashrc`/`looknfeel.lua` unchanged after the reset; `diff /etc/skel/.config/hypr/bindings.lua ~/.config/hypr/bindings.lua`; `./client get-serial`
+  ** A package prompt appears after No, the marker disappears after a decline, or the reset leaves the probe or `.bashrc` unchanged.
 covers: bin/omarchy-reinstall, bin/omarchy-reinstall-configs, manual/30-updates.md (Rolling back bad updates), manual/31-dotfiles.md (Resetting any changes), manual/42-common-tweaks.md, manual/45:5, docs/file-layout.md §Explicit resync, default/agents/skills/omarchy/SKILL.md §Troubleshooting (omarchy reinstall)
 
 ### update-menu-rows-and-process-restart-shell   [VM-OK]
@@ -16813,30 +16883,39 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy-notification-send -u critical "Survivor" "still here after restart"` — a persistent toast appears. Leave the terminal open.
-  * Press Super+Space → `Update`.
-  ** Rows: Omarchy, Channel, Config, Process, Hardware, Firmware, Password, Timezone, Time. `Extra Themes` is absent.
-  * Open `Channel` — Stable ✓, RC, Edge, Dev with 🟢🟡🟠🔴. Backspace to go back. Open `Config` — header `Reset to default…`; Hyprland, Hyprsunset, Plymouth, Tmux, Shell. Backspace.
-  * Open `Process` → `Shell` (header `Restart…`).
-  ** The bar disappears briefly and is back within a few seconds; the `Survivor` toast is restored.
-  ** Do NOT pick `Config → Shell` (`Reset to default`): it rewrites shell.json (own test).
-  * Press Super+Space: the menu opens. Escape. Press Super+, — the toast is dismissed.
-  * Unhappy path: in the terminal type `omarchy restart shell; omarchy restart shell` — the bar comes back once; then `pgrep -c quickshell` → `1`.
-  * Press Super+W; the desktop is as before.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy-notification-send -u critical "Survivor" "still here after restart"` and press Return. A notification stays on screen.
+  * Press Super+Space. The menu opens.
+  * Select Update. Omarchy, Channel, Config, Process, Hardware, Firmware, Password, Timezone, and Time are listed, and Extra Themes is not.
+  * Select Channel. Stable has the check.
+  * Press Backspace. The Update list returns.
+  * Select Config. The list includes Hyprland, Hyprsunset, Plymouth, Tmux, and Shell.
+  * Press Backspace. The Update list returns.
+  * Select Process, then Shell. The bar disappears and returns, and the Survivor notification is still there.
+  * Press Super+Space. The menu opens.
+  * Press Escape. The menu closes.
+  * Press Super+comma. The notification is dismissed.
+  * Type `omarchy restart shell` and press Return. The bar returns.
+  * Type `omarchy restart shell` and press Return. The bar returns again.
+  * Type `pgrep -c quickshell` and press Return. The output is `1`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The restart takes two or three seconds; take screenshots every second after Process → Shell to catch the bar returning.
-  * Do not select Omarchy, Firmware, Time, Hardware or any Channel row here — each has its own test.
+  * Screenshot every second after Process → Shell. The bar can take two or three seconds to return.
+  * Do not select Config → Shell. That resets shell.json. Do not select Omarchy, Firmware, Time, Hardware, or a channel.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the Update rows, Channel with Stable ✓, the Config header and rows, the toast, the bar gone, the bar back with the toast, the menu afterwards, and the process count of 1
+  ** A critical Survivor notification stays up. Update lists the maintenance rows and does not list Extra Themes.
+  ** Channel checks Stable. Config lists the reset rows. Process → Shell hides the bar and brings it back with the notification still present.
+  ** The menu opens afterward. Super+comma dismisses the notification.
+  ** Two shell restarts leave `pgrep -c quickshell` at `1`.
   * If unsuccessful
-  ** Screenshot of the missing bar after ten seconds, a missing/extra row, or a count other than 1; `./client get-serial`
+  ** The bar stays missing for ten seconds, a named row is wrong, or the process count is not 1.
 covers: default/omarchy/omarchy-menu.jsonc update.* (:368 process.shell), bin/omarchy-restart-shell, bin/omarchy-theme-extras (when), bin/omarchy-show-done, docs/notifications.md (persistence), manual/05:3
 
 ### update-config-shell-resets-bar-position   [VM-OK]
@@ -16846,27 +16925,36 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open the Omarchy menu with Super+Space → `Style` → `Menu Bar` → `Position` → `Bottom`. The bar moves to the bottom edge.
-  * Open a terminal with Super+Enter and type `grep -n '"position"' ~/.config/omarchy/shell.json` → `"position": "bottom"`.
-  * Open the Omarchy menu → `Update` → `Config` → `Shell`.
-  ** The floating terminal prints `Replaced /home/prime/.config/omarchy/shell.json with new Omarchy default. Saved backup as …shell.json.bak.<epoch>` and a diff containing the position line; the shell restarts (bar disappears and reappears at the top); `● Done!`.
-  * Press a key to close. Type `grep -n '"position"' ~/.config/omarchy/shell.json` → `"position": "top"`, and `ls ~/.config/omarchy/shell.json.bak.*` lists one backup.
-  * Negative: `omarchy-refresh-config not/a/file; echo exit=$?` → `Not a shipped user config: not/a/file`, `exit=1`.
-  * Clean up: `rm ~/.config/omarchy/shell.json.bak.*`; close the terminal with Super+W. The bar is on top as it started.
+  * Press Super+Space. The menu opens.
+  * Select Style, then Menu Bar, then Position, then Bottom. The bar moves to the bottom.
+  * Press Super+Return. A terminal opens.
+  * Type `grep -n '"position"' ~/.config/omarchy/shell.json` and press Return. The line includes `"position": "bottom"`.
+  * Press Super+Space. The menu opens.
+  * Select Update, then Config, then Shell. A floating terminal says shell.json was replaced and names a backup.
+  * Wait until the bar returns at the top and the terminal shows `Done!`.
+  * Press a key. The floating terminal closes.
+  * Type `grep -n '"position"' ~/.config/omarchy/shell.json` and press Return. The line includes `"position": "top"`.
+  * Type `ls ~/.config/omarchy/shell.json.bak.*` and press Return. One backup is listed.
+  * Type `omarchy-refresh-config not/a/file; echo exit=$?` and press Return. The output includes `Not a shipped user config: not/a/file`, and the last line is `exit=1`.
+  * Type `rm ~/.config/omarchy/shell.json.bak.*` and press Return. The prompt returns.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The bar takes a second or two to come back after the shell restart; allow 20 s for the position change.
-  * Menu guards paint from the previous evaluation; if a row looks stale, reopen the menu.
+  * The bar can take a second or two to return. Allow 20 seconds for the position change.
+  * If a menu row looks stale, close the menu and open it again.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the bar at the bottom, the Replaced/diff output, and the bar at the top again; the grep output before/after and the `Not a shipped user config` refusal
+  ** Style → Menu Bar → Position → Bottom puts the bar at the bottom, and shell.json says `"position": "bottom"`.
+  ** Update → Config → Shell prints the replacement and a backup name, restarts the shell, and finishes with `Done!`.
+  ** The bar is back at the top, shell.json says `"position": "top"`, and one backup file exists.
+  ** A path that is not a shipped user config is refused and exits 1. The backup is removed.
   * If unsuccessful
-  ** The floating terminal output, the shell.json contents, `./client get-serial`
+  ** The bar stays at the bottom, the backup is missing, or the bad path is accepted.
 covers: manual/31-dotfiles.md (shell.json, Resetting any changes), bin/omarchy-refresh-shell, bin/omarchy-refresh-config, default/omarchy/omarchy-menu.jsonc update.config.shell, style.bar.position.*
 
 ### update-hardware-rows-without-hardware   [VM-PARTIAL]
@@ -16876,26 +16964,42 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open the Omarchy menu with Super+Space → `Update` → `Hardware` → `Wi-Fi`.
-  ** Floating terminal prints `Unblocking wifi...` followed by (empty) rfkill output, then `● Done!`. Press a key.
-  * `Update` → `Hardware` → `Bluetooth` → `Unblocking bluetooth...` then `● Done!` (or `Failed (exit code N)!` — record which). Press a key.
-  * `Update` → `Hardware` → `Trackpad` → no device found, so it prints nothing (no `Reloading intel_quicki2c`) and ends `Done!`; it must not prompt for sudo when there is no device. Press a key.
-  * `Update` → `Hardware` → `Audio` → `Restarting audio services...`, possibly `Audio status:` with `wpctl status` output listing PipeWire and the `Dummy Output` sink, then `Done!` (or `Failed (exit code 1)` with `Audio services are still not responding` — record which; the guest has no sound card).
-  * After the audio restart confirm the bar still draws and the audio panel opens (Super+Ctrl+2 on this VM, or click the audio icon) — it may list only the Dummy Output. Escape.
+  * Press Super+Space. The menu opens.
+  * Select Update, then Hardware, then Wi-Fi. A floating terminal shows `Unblocking wifi...` and finishes with `Done!`.
+  * Press a key. The floating terminal closes.
+  * Press Super+Space. The menu opens.
+  * Select Update, then Hardware, then Bluetooth. A floating terminal shows `Unblocking bluetooth...` and finishes.
+  * Record whether it ends with `Done!` or `Failed`.
+  * Press a key. The floating terminal closes.
+  * Press Super+Space. The menu opens.
+  * Select Update, then Hardware, then Trackpad. A floating terminal finishes with `Done!`, and no sudo prompt appears.
+  * Press a key. The floating terminal closes.
+  * Press Super+Space. The menu opens.
+  * Select Update, then Hardware, then Audio. A floating terminal shows `Restarting audio services...` and finishes.
+  * Record whether it ends with `Done!` or `Failed`.
+  * Press a key. The floating terminal closes.
+  * Look at the bar. The bar is still there.
+  * Press Super+Ctrl+2. The audio panel opens.
+  ** If that chord does nothing, click the audio icon instead.
+  * Press Escape. The panel closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The audio restart waits up to 25 s twice; keep screenshotting every few seconds.
-  * Skipped part: real Wi-Fi/Bluetooth/trackpad recovery; these rows have no guards and stay visible on the VM.
+  * Audio can wait up to 25 seconds, twice. Screenshot every few seconds.
+  * There is no Wi-Fi, Bluetooth, or trackpad device here. Trackpad must not ask for sudo. A Bluetooth or audio `Failed` line is recorded, not treated as a crash.
+  * The audio panel may list only the Dummy Output.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Four screenshots of the floating terminals ending in `Done!` (or the explained audio/bluetooth `Failed`), and the bar intact with the audio panel afterwards
+  ** Wi-Fi prints `Unblocking wifi...` and `Done!`.
+  ** Bluetooth prints `Unblocking bluetooth...` and finishes with `Done!` or a recorded `Failed`.
+  ** Trackpad finishes with `Done!` and asks for no password.
+  ** Audio prints `Restarting audio services...` and finishes with `Done!` or a recorded `Failed`. The bar remains, and the audio panel opens.
   * If unsuccessful
-  ** A bash error, an unexpected sudo prompt for Trackpad, or a shell crash; `./client get-serial`
+  ** A helper prints a shell error, Trackpad asks for sudo, or the bar disappears.
 covers: manual/35-networking.md (When it stops working), default/omarchy/omarchy-menu.jsonc update.hardware.*, bin/omarchy-restart-wifi, bin/omarchy-restart-bluetooth, bin/omarchy-restart-trackpad, bin/omarchy-restart-audio
 
 ### update-firmware-no-devices   [VM-PARTIAL] [NET]
@@ -16935,26 +17039,34 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `systemctl show -p ActiveEnterTimestamp systemd-timesyncd` and note the timestamp.
-  * Open the Omarchy menu with Super+Space → `Update` → `Time` with the mouse.
-  ** A floating terminal shows the logo, `Updating time...`, a sudo prompt (type `prime`), then `● Done! Press any key to close...`. Press a key.
-  * Type `systemctl show -p ActiveEnterTimestamp systemd-timesyncd; systemctl is-active systemd-timesyncd` — a newer timestamp and `active`.
-  * Type `omarchy-update-time` and press Ctrl+C at the sudo prompt — the command aborts; repeat the `systemctl show` line: the timestamp is unchanged.
-  * Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `systemctl show -p ActiveEnterTimestamp systemd-timesyncd` and press Return. Record the timestamp.
+  * Press Super+Space. The menu opens.
+  * Select Update, then Time. A floating terminal shows `Updating time...` and asks for a password.
+  * Type `prime` and press Return. The output finishes with `Done!`.
+  * Press a key. The floating terminal closes.
+  * Type `systemctl show -p ActiveEnterTimestamp systemd-timesyncd` and press Return. The timestamp is newer.
+  * Type `systemctl is-active systemd-timesyncd` and press Return. Record whether it is `active` or `inactive`.
+  * Type `omarchy-update-time` and press Return. A password prompt appears.
+  * Press Ctrl+C. The command aborts.
+  * Type `systemctl show -p ActiveEnterTimestamp systemd-timesyncd` and press Return. The timestamp is unchanged from the previous reading.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * `System clock synchronized: yes` in timedatectl can lag a minute and is not required.
-  * If timesyncd is not enabled on the image, `is-active` reports `inactive` after the restart; report it as-is.
+  * `System clock synchronized: yes` can lag a minute and is not required.
+  * If timesyncd is disabled on this image, `is-active` staying `inactive` after the restart is recorded as-is.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the first timestamp, the floating terminal with `Updating time...` and `Done!`, the newer timestamp with `active`, and the unchanged timestamp after the Ctrl+C
+  ** The starting timestamp is recorded. Update → Time shows `Updating time...`, accepts `prime`, and finishes with `Done!`.
+  ** The timestamp is newer afterward, and the active state is recorded.
+  ** Ctrl+C at the password prompt aborts, and the timestamp does not change again.
   * If unsuccessful
-  ** Screenshot of a systemctl error or a `Failed (exit code N)` closing line; `systemctl status systemd-timesyncd | sudo tee /dev/ttyS0` via `get-serial`
+  ** The menu run ends with `Failed`, or the timestamp changes after Ctrl+C.
 covers: bin/omarchy-update-time, default/omarchy/omarchy-menu.jsonc update.time
 
 ### update-extra-themes-row-appears-with-git-theme   [VM-OK]
