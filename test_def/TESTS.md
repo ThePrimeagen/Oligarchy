@@ -18211,29 +18211,35 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy disk speedtest /not/a/dir; echo "exit=$?"`; expected `Usage: omarchy-disk-speedtest [target-dir]`, `exit=2`.
-  * Type `omarchy disk speedtest; echo "exit=$?"` and screenshot every 5 s for ~25 s.
-  ** Expected `disk <model or vda>`, ~8 lines `read <MB/s>`, ~8 lines `write <MB/s>`, `exit=0`.
-  ** Acceptable alternative to record: `Direct disk I/O is not available on /home/prime/.cache/omarchy`, `exit=1`.
-  * Type `ls ~/.cache/omarchy/ | grep -c disk-speedtest; ls /dev/shm | grep -c disk-speedtest`; expected `0` and `0` — scratch files removed.
-  * Press Super+Space → Trigger → Speed Test → Disk Speed Test; a panel with read/write dials titled with the disk name appears.
-  * Screenshot every 3–5 s for 25 s: the read dial moves first, then the write dial, then both settle. Press Escape to close.
-  * Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy disk speedtest /not/a/dir; echo "exit=$?"` and press Return. The output includes `Usage: omarchy-disk-speedtest [target-dir]`, and the last line is `exit=2`.
+  * Type `omarchy disk speedtest; echo "exit=$?"` and press Return. The test starts.
+  * Wait until it finishes. Read lines and write lines are printed, and the last line is `exit=0`.
+  ** If the output says direct disk I/O is not available and the last line is `exit=1`, record that and continue.
+  * Type `ls ~/.cache/omarchy/ | grep -c disk-speedtest` and press Return. The output is `0`.
+  * Type `ls /dev/shm | grep -c disk-speedtest` and press Return. The output is `0`.
+  * Press Super+Space. The menu opens.
+  * Select Trigger, then Speed Test, then Disk Speed Test. A panel opens.
+  * Wait until the read value moves, then the write value moves, then both settle.
+  * Press Escape. The panel closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The test needs 2 GB free under `~/.cache`; the 40 GB disk has plenty.
-  * Never sleep through the run — the per-second lines are the evidence.
-  * Menu pickers may not filter on typing: navigate the Trigger → Speed Test path with arrows and Enter.
+  * The run needs 2 GB free under `~/.cache`. Screenshot about every 5 seconds while the lines stream.
+  * Use arrows and Enter if typing does not filter the menu.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the usage refusal with `exit=2`, the streaming `read`/`write` lines with the exit code, the two `0` counts, and the panel during read, during write and settled
+  ** A non-directory exits 2 with the usage line.
+  ** The speed test prints read lines and write lines and exits 0, or it reports that direct I/O is unavailable and exits 1.
+  ** Both scratch-file counts are `0`.
+  ** The panel opens, the read value moves first, the write value moves next, and Escape closes it.
   * If unsuccessful
-  ** `Disk read test failed before finishing`, leftover `disk-speedtest-*.dat` files, or a panel that never moves
+  ** The read test fails before finishing, a `disk-speedtest` file remains, or the panel never moves.
 covers: bin/omarchy-disk-speedtest; default/omarchy/omarchy-menu.jsonc:73,101; shell/plugins/panels/disk-speedtest/Panel.qml:99
 
 ### reminder-cli-set-show-clear-and-rejects   [VM-OK]
@@ -18243,26 +18249,44 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy reminder 7 'Tea ready'`; toast "Tea ready in 7 minutes"; the bell glyph beside the clock lights.
-  * Type `omarchy reminder 3`; toast "Reminder set for 3 minutes".
-  * Type `omarchy reminder show`; toast "Upcoming reminders" with two lines. Then `omarchy reminder show --json`; JSON with `"count":2` prints.
-  * Unhappy paths: type `omarchy-reminder; echo "exit=$?"`, then `omarchy-reminder abc; echo "exit=$?"`, `omarchy-reminder 0 "Nothing"; echo "exit=$?"`, `omarchy-reminder -5; echo "exit=$?"` and `omarchy-reminder show extra; echo "exit=$?"`; each prints the `Usage:` lines and `exit=1`, no toast.
-  ** Wait two seconds after each and confirm no toast appeared before the next. (The router form `omarchy reminder` with no arguments prints synthesized help with `exit=0` instead — that is the router's required-args guard, not the script.)
-  * Type `omarchy reminder clear`; toast "All reminders have been cleared"; the glyph goes out. Hover left of the clock: the bell indicator is dimmed.
-  * Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy reminder 7 'Tea ready'` and press Return. A notification says tea is ready in 7 minutes.
+  * Look at the bar. The bell indicator is lit.
+  * Type `omarchy reminder 3` and press Return. A notification says a reminder was set for 3 minutes.
+  * Type `omarchy reminder show` and press Return. A notification lists two upcoming reminders.
+  * Type `omarchy reminder show --json` and press Return. The JSON includes `"count":2`.
+  * Type `omarchy-reminder; echo "exit=$?"` and press Return. Usage is printed, and the last line is `exit=1`.
+  * Wait 2 seconds. No notification appears.
+  * Type `omarchy-reminder abc; echo "exit=$?"` and press Return. Usage is printed, and the last line is `exit=1`.
+  * Wait 2 seconds. No notification appears.
+  * Type `omarchy-reminder 0 "Nothing"; echo "exit=$?"` and press Return. Usage is printed, and the last line is `exit=1`.
+  * Wait 2 seconds. No notification appears.
+  * Type `omarchy-reminder -5; echo "exit=$?"` and press Return. Usage is printed, and the last line is `exit=1`.
+  * Wait 2 seconds. No notification appears.
+  * Type `omarchy-reminder show extra; echo "exit=$?"` and press Return. Usage is printed, and the last line is `exit=1`.
+  * Wait 2 seconds. No notification appears.
+  * Type `omarchy reminder` and press Return. Router help is printed.
+  * Type `echo "exit=$?"` and press Return. The output is `0`.
+  * Type `omarchy reminder clear` and press Return. A notification says all reminders were cleared.
+  * Look at the bar. The bell indicator is dimmed.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Toasts last 5 s; screenshot right after each command.
+  * Screenshot a notification as soon as it appears. It fades in about 5 seconds.
+  * The router form `omarchy reminder` with no arguments prints help and exits 0. The script form `omarchy-reminder` is the one that exits 1.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the two set toasts with the lit glyph, the upcoming toast, the count-2 JSON, the five usage rejections with `exit=1` and no toast, and the cleared toast with the glyph dimmed
+  ** A 7 minute reminder notifies and lights the bell. A 3 minute reminder notifies.
+  ** Show notifies two reminders, and `--json` reports `"count":2`.
+  ** A missing argument, `abc`, `0`, `-5`, and `show extra` on `omarchy-reminder` each print usage, exit 1, and show no notification.
+  ** Bare `omarchy reminder` prints help and exits 0. Clear notifies that reminders were cleared, and the bell is dimmed.
   * If unsuccessful
-  ** a confirmation toast or a solid bell after a rejected command; screenshot of the terminal output
+  ** A rejected command still shows a notification or leaves the bell lit.
 covers: bin/omarchy-reminder (set/show/clear, usage/validation); manual/09:3
 
 ### menu-cli-summon-toggle-close-and-rejects   [VM-OK]
@@ -18272,29 +18296,56 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy menu ping` → `ok` (or the plugin's reply), no error. Then `omarchy menu` alone → the root menu opens; press Escape.
-  * Type `omarchy menu summon style.theme` → the Theme submenu/picker opens listing the stock themes. Type `omarchy menu close` → it closes.
-  * Type `omarchy menu toggle system` → the System menu opens; screenshot; click the terminal and run it again → it closes. Then `omarchy menu summon trigger.capture` → Capture opens; run it again → it stays open; `omarchy menu close` → closed.
-  * Aliases: `omarchy menu summon power-menu` → System (`System…`); `omarchy menu summon power` → System; `omarchy menu summon settings` → `Setup…`; `omarchy menu summon SETUP_POWER` → the Setup › Power submenu (case and `_`→`-` normalized); `omarchy menu summon reminder-set` → the reminder overlay opens directly (an alias that names an action runs it). Press Escape after each.
-  * Timed close: type `omarchy menu summon root; sleep 3; omarchy menu close` as one line and press Enter → the menu opens and closes by itself about three seconds later.
-  * Unhappy path: `omarchy menu bogusverb; echo "exit=$?"` → `omarchy-menu: unknown verb 'bogusverb'. Try 'omarchy menu --help'.`, `exit=2`. Then `omarchy menu summon no.such.route` → expected the root `Go…` menu (record if an empty submenu or nothing opens instead — no crash); `omarchy menu close`; `omarchy menu ping` still answers `ok`.
-  * Close the terminal with Super+W; the desktop is as before and the bar is present.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy menu ping` and press Return. The output is `ok`.
+  * Type `omarchy menu` and press Return. The root menu opens.
+  * Press Escape. The menu closes.
+  * Type `omarchy menu summon style.theme` and press Return. The Theme list opens.
+  * Click the terminal. It is focused.
+  * Type `omarchy menu close` and press Return. The menu closes.
+  * Type `omarchy menu toggle system` and press Return. The System menu opens.
+  * Click the terminal. It is focused.
+  * Type `omarchy menu toggle system` and press Return. The System menu closes.
+  * Type `omarchy menu summon trigger.capture` and press Return. Capture opens.
+  * Click the terminal. It is focused.
+  * Type `omarchy menu summon trigger.capture` and press Return. Capture stays open.
+  * Type `omarchy menu close` and press Return. Capture closes.
+  * Type `omarchy menu summon power-menu` and press Return. The System menu opens.
+  * Press Escape. The menu closes.
+  * Type `omarchy menu summon power` and press Return. The System menu opens.
+  * Press Escape. The menu closes.
+  * Type `omarchy menu summon settings` and press Return. The Setup menu opens.
+  * Press Escape. The menu closes.
+  * Type `omarchy menu summon SETUP_POWER` and press Return. The Setup Power list opens.
+  * Press Escape. The menu closes.
+  * Type `omarchy menu summon reminder-set` and press Return. The reminder prompt opens.
+  * Press Escape. The prompt closes.
+  * Type `omarchy menu summon root; sleep 3; omarchy menu close` and press Return. The menu opens and then closes.
+  * Type `omarchy menu bogusverb; echo "exit=$?"` and press Return. The output includes `unknown verb 'bogusverb'`, and the last line is `exit=2`.
+  * Type `omarchy menu summon no.such.route` and press Return. Record whether the root menu, an empty list, or nothing opens.
+  * Type `omarchy menu close` and press Return. Any open menu closes.
+  * Type `omarchy menu ping` and press Return. The output is `ok`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The menu takes focus when it opens; press Escape or click the terminal before typing the next command. Type a whole `summon …; sleep 3; … close` line before Enter — the open menu takes the keyboard.
-  * Screenshot within a second of pressing Enter on the summon/close line to catch the menu before it closes.
+  * Click the terminal before the next command. An open menu takes the keyboard.
+  * Type the timed summon and close as one line before pressing Return.
+  * Screenshot as soon as a menu opens if the next command will close it.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of `ok`, the root menu, the Theme submenu then closed, System toggled open and closed, Capture via summon then closed via close
-  ** Screenshots of `System…` via `power-menu` and `power`, `Setup…` via `settings`, Setup › Power via `SETUP_POWER`, the reminder overlay via `reminder-set`, and the timed open-then-gone pair
-  ** Screenshot of the unknown-verb message with `exit=2`, the `no.such.route` result, and `ok` from ping afterwards
+  ** `ping` prints `ok`. A bare `menu` opens the root menu, and Escape closes it.
+  ** `summon style.theme` opens Theme, and `close` closes it. `toggle system` opens System and the next toggle closes it.
+  ** `summon trigger.capture` opens Capture and a second summon leaves it open. `close` closes it.
+  ** `power-menu` and `power` open System. `settings` opens Setup. `SETUP_POWER` opens Setup Power. `reminder-set` opens the reminder prompt.
+  ** The timed line opens the menu and closes it after about 3 seconds.
+  ** `bogusverb` exits 2. An unknown route is recorded and does not crash. `ping` still prints `ok`.
   * If unsuccessful
-  ** Screenshot of the terminal output of the failing verb, the wrong submenu, or the bar (present or gone); `omarchy-shell shell ping`
+  ** A verb opens the wrong menu, `close` leaves it open, or `ping` stops answering.
 covers: bin/omarchy-menu; docs/menu.md §Driving the menu from the CLI; omarchy-menu.jsonc aliases (power-menu, settings, reminder-set); shell/plugins/menu/Menu.qml (openRoute, close); MenuModel.js (resolveRoute); manual/14:62
 
 ### ascii-wordmark-render-skip-and-rejects   [VM-OK]
@@ -18304,28 +18355,42 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and press Super+F so 90 columns fit; type `omarchy ascii Omarchy` — OMARCHY as a 9-row wordmark in `█ ▀ ▄ ▌ ▐` block glyphs; screenshot.
-  * Type `omarchy ascii Omarchy | wc -l; printf Omarchy | omarchy ascii | wc -l; printf 'A\n\nB\n' | omarchy ascii | wc -l` → `9`, `9`, `27` — piped input is accepted and a blank line still costs nine rows.
-  * Type `omarchy ascii Hi | awk 'NR==1{print length($0)}'; omarchy ascii "H i" | awk 'NR==1{print length($0)}'; omarchy ascii Omarchy | grep -c ' $'` → `18`, `23`, `0` (a space is five columns; no trailing blanks).
-  * Type `omarchy ascii "Hi 5"; echo "exit=$?"` → HI drawn, then `Skipped, no glyph in Delta Corps Priest 1: 5` on stderr, `exit=0`. Then `omarchy ascii "Omarchy 4.0" >/dev/null; echo "exit=$?"` → `Skipped, no glyph in Delta Corps Priest 1: 4 . 0`, `exit=0`.
-  * Unhappy paths: `omarchy ascii 123; echo "exit=$?"` → no art, `Delta Corps Priest 1 draws letters and spaces only, and that text has neither.`, `exit=1`; `omarchy ascii --bogus; echo "exit=$?"` → `Unknown option: --bogus` + usage, `exit=1`; `omarchy ascii --width 40; echo "exit=$?"` → `Unknown option: --width`, `exit=1`; `omarchy ascii; echo "exit=$?"` → the usage and `exit=1`; `omarchy ascii --help | head -1` → `Usage: omarchy-ascii …`.
-  * Type `omarchy ascii -- --help 2>&1 | head -n 10`; the router forwards everything after `--`, so HELP is drawn and `Skipped … : -` printed — no router help.
-  * Press Super+F to un-fullscreen, then Super+W to close the terminal.
+  * Press Super+Return. A terminal opens.
+  * Press Super+F. The terminal fills the screen.
+  * Type `omarchy ascii Omarchy` and press Return. A 9-row wordmark is drawn.
+  * Type `omarchy ascii Omarchy | wc -l` and press Return. The output is `9`.
+  * Type `printf Omarchy | omarchy ascii | wc -l` and press Return. The output is `9`.
+  * Type `printf 'A\n\nB\n' | omarchy ascii | wc -l` and press Return. The output is `27`.
+  * Type `omarchy ascii Hi | awk 'NR==1{print length($0)}'` and press Return. The output is `18`.
+  * Type `omarchy ascii "H i" | awk 'NR==1{print length($0)}'` and press Return. The output is `23`.
+  * Type `omarchy ascii Omarchy | grep -c ' $'` and press Return. The output is `0`.
+  * Type `omarchy ascii "Hi 5"; echo "exit=$?"` and press Return. HI is drawn, a Skipped line names `5`, and the last line is `exit=0`.
+  * Type `omarchy ascii "Omarchy 4.0" >/dev/null; echo "exit=$?"` and press Return. A Skipped line names `4`, `.`, and `0`, and the last line is `exit=0`.
+  * Type `omarchy ascii 123; echo "exit=$?"` and press Return. The output says the text has neither letters nor spaces, and the last line is `exit=1`.
+  * Type `omarchy ascii --bogus; echo "exit=$?"` and press Return. The output includes `Unknown option: --bogus`, and the last line is `exit=1`.
+  * Type `omarchy ascii --width 40; echo "exit=$?"` and press Return. The output includes `Unknown option: --width`, and the last line is `exit=1`.
+  * Type `omarchy ascii; echo "exit=$?"` and press Return. Usage is printed, and the last line is `exit=1`.
+  * Type `omarchy ascii --help | head -1` and press Return. The line starts with `Usage: omarchy-ascii`.
+  * Type `omarchy ascii -- --help 2>&1 | head -n 10` and press Return. HELP is drawn, and a Skipped line names `-`.
+  * Press Super+F. The terminal leaves fullscreen.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The art is 9 rows per line of text; a normal terminal shows two words at most and a wrapped line would break the width counts — hence the fullscreen terminal. Clear between steps if needed.
-  * `omarchy ascii` and `omarchy-ascii` are the same program.
-  * ./client-with-image allows you to get an image back of what you did, so can be useful for speeding things up
+  * Each line of text uses 9 rows. Fullscreen keeps the width counts from wrapping.
+  * `omarchy ascii` and `omarchy-ascii` are the same program. Clear the screen between drawings if needed.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the wordmark; `9 9 27`; `18 23 0`; HI and the two Skipped lines with `exit=0`; each refusal with `exit=1` and the usage line; HELP drawn for the `--` case
+  ** `Omarchy` draws a 9-row wordmark. Piped input is also 9 rows, and a blank line makes the total 27.
+  ** `Hi` is 18 columns, `H i` is 23, and no line ends with a space.
+  ** `Hi 5` and `Omarchy 4.0` draw the letters, name the skipped characters, and exit 0.
+  ** Digits only, `--bogus`, `--width`, and no input each exit 1. `-- --help` draws HELP and skips `-`.
   * If unsuccessful
-  ** garbled glyphs, an awk error, a hang waiting on stdin, a silently dropped character, an option drawn as art, or wrong counts
+  ** The glyphs are garbled, a character is dropped with no Skipped line, or a width count is wrong.
 covers: bin/omarchy-ascii:1-294; bin/omarchy:129-138 (route `ascii`, `--` forwarding); test/shell.d/ascii-test.sh; manual/41-branding.md
 
 ### dev-add-migration-in-temp-repo   [VM-OK]
@@ -18335,26 +18400,31 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy dev add migration --no-edit; echo "exit=$?"`; expected `fatal: not a git repository …`, non-zero exit (128) — the packaged `/usr/share/omarchy` is not a checkout; `ls /usr/share/omarchy/migrations | tail -1` shows no new file.
-  * Type `mkdir /tmp/repo && cd /tmp/repo && git init -q && git -c user.name=qa -c user.email=qa@x commit -q --allow-empty -m init && echo ok`; expected `ok`.
-  * Type `OMARCHY_PATH=/tmp/repo omarchy dev add migration --no-edit; echo "exit=$?"`; expected `/tmp/repo/migrations/<10 digits>.sh`, `exit=0`; `ls /tmp/repo/migrations` shows it.
-  * Type `OMARCHY_PATH=/tmp/repo omarchy dev add migration user --no-edit 2>&1 | head -n 1`; expected `omarchy-dev-add-migration: migration scopes are no longer used; creating a regular migration.`
-  * Unhappy path: type `omarchy dev add migration --bogus; echo "exit=$?"`; expected `Unknown option: --bogus`, `Usage: omarchy-dev-add-migration [--no-edit]`, `exit=1`.
-  * Type `cd ~ && rm -rf /tmp/repo` and close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy dev add migration --no-edit; echo "exit=$?"` and press Return. The output includes `fatal: not a git repository`, and the exit is non-zero.
+  * Type `ls /usr/share/omarchy/migrations | tail -1` and press Return. The last name is recorded, and no new file was added.
+  * Type `mkdir /tmp/repo && cd /tmp/repo && git init -q && git -c user.name=qa -c user.email=qa@x commit -q --allow-empty -m init && echo ok` and press Return. The last line is `ok`.
+  * Type `OMARCHY_PATH=/tmp/repo omarchy dev add migration --no-edit; echo "exit=$?"` and press Return. A migrations path is printed, and the last line is `exit=0`.
+  * Type `ls /tmp/repo/migrations` and press Return. The new script is listed.
+  * Type `OMARCHY_PATH=/tmp/repo omarchy dev add migration user --no-edit 2>&1 | head -n 1` and press Return. The line says migration scopes are no longer used.
+  * Type `omarchy dev add migration --bogus; echo "exit=$?"` and press Return. The output includes `Unknown option: --bogus`, and the last line is `exit=1`.
+  * Type `cd ~ && rm -rf /tmp/repo` and press Return. The prompt returns.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Without `--no-edit` the command opens nvim; if that happens, press Escape then type `:q!` Enter.
-  * ./client-with-image allows you to get an image back of what you did, so can be useful for speeding things up
+  * Without `--no-edit`, the command opens nvim. If that happens, press Escape, type `:q!`, and press Return.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the git fatal on the packaged path, the created file path with `exit=0` and its `ls`, the scope warning, and the refused flag with `exit=1`
+  ** The packaged tree is not a git checkout, so the command exits non-zero and adds no migration under `/usr/share/omarchy`.
+  ** In `/tmp/repo`, `--no-edit` exits 0 and creates a numbered script. A legacy scope word prints the no-longer-used warning.
+  ** `--bogus` prints usage and exits 1. The temporary repo is removed.
   * If unsuccessful
-  ** nvim opening despite `--no-edit`, or a file created under `/usr/share/omarchy/migrations`
+  ** nvim opens despite `--no-edit`, or a file is created under `/usr/share/omarchy/migrations`.
 covers: bin/omarchy-dev-add-migration
 
 ### agent-usage-update-without-login   [VM-OK] [NET]
@@ -18364,27 +18434,31 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `ls ~/.local/state/omarchy/agents/usage/ 2>&1`; note which files exist (possibly none).
-  * Type `omarchy agent usage-update; echo "exit=$?"`.
-  ** Lines like `omarchy-agent-usage-update: claude collector failed` may print; `exit=1` if any collector failed, else `exit=0`. No Python traceback. Collectors probe the network and may take several seconds each.
-  * Type `for f in ~/.local/state/omarchy/agents/usage/*.json; do jq -e . "$f" >/dev/null && echo "ok $f"; done` → every existing file prints `ok` (or there are no files).
-  * Type `omarchy agent usage-update --except claude codex; echo "exit=$?"` → at most one `codex collector failed` line; no `claude` line.
-  * Type `omarchy-agent-usage-claude --help | head -3` → help text mentioning `--force` and `--limits-only`.
-  * Type `ls ~/.local/state/omarchy/agents/usage/ 2>&1` again and `rm` any file that was not there in the first step, so the machine is as found. Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `ls ~/.local/state/omarchy/agents/usage/ 2>&1` and press Return. Record the existing files.
+  * Type `omarchy agent usage-update; echo "exit=$?"` and press Return. Each failure is a collector line, and no traceback appears.
+  * Type `for f in ~/.local/state/omarchy/agents/usage/*.json; do jq -e . "$f" >/dev/null && echo "ok $f"; done` and press Return. Every existing file prints `ok`, or no file exists.
+  * Type `omarchy agent usage-update --except claude codex; echo "exit=$?"` and press Return. No line names the claude collector.
+  * Type `omarchy-agent-usage-claude --help | head -3` and press Return. Help mentions `--force` and `--limits-only`.
+  * Remove any usage file that was not present at the start. The directory matches the first listing.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Collectors probe the network and may take several seconds each; wait with screenshots, never a long sleep.
-  * No agent is logged in on the minted disk, so every collector is expected to fail cleanly — a traceback, not a failure line, is the defect.
+  * Collectors use the network and can take several seconds each. Screenshot while they run.
+  * Nobody is logged in, so a clean collector-failed line is expected. A Python traceback is the failure.
+  * `--except` may still print a codex failure. It must not print a claude failure.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Terminal screenshots of the update output with its exit code, the `ok` lines (or empty set), the `--except` run without a `claude` line, and the help text
+  ** The starting usage files are recorded. The update prints collector failures or exits 0, and no traceback appears.
+  ** Every JSON file that exists is valid. `--except claude codex` prints no claude line.
+  ** Claude usage help mentions `--force` and `--limits-only`. New files are removed.
   * If unsuccessful
-  ** Terminal showing a Python traceback, an invalid JSON record, or `--except` still running the excluded collector
+  ** A traceback appears, a JSON file is invalid, or the excluded claude collector still runs.
 covers: bin/omarchy-agent-usage-update; bin/omarchy-agent-usage-{claude,codex,fireworks}
 
 ### cli-tab-completion-discoverability   [VM-OK]
@@ -18394,28 +18468,35 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter, type `omarchy ` (with the trailing space) and press Tab twice.
-  ** Groups appear, including `theme`, `update`, `refresh`, `toggle`, `install`, `commands`; screenshot before the next keystroke clears the list.
-  * Type `theme ` and press Tab twice → actions such as `set`, `list`, `current`, `bg`.
-  * Press Ctrl+C, type `omarchy commands --` and press Tab twice → `--all --json --markdown --check`.
-  ** `--markdown` (and `--json`) are HEAD-only; a shorter list on 4.0.2 is version skew — record it with `omarchy version`.
-  * Press Ctrl+C, type `omarchy-th` and press Tab → nothing completes (the binaries are hidden from word one). Press Ctrl+C.
-  * Unhappy path: type `omarchy theme bogus; echo "exit=$?"` and press Enter → `Unknown Omarchy command: omarchy theme bogus` with the `Run 'omarchy commands --all'` pointer and `exit=127` (or a usage message — record which); no crash.
-  * Close the terminal with Super+W; the desktop is as before.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy ` and press Tab twice. Group names appear, including `theme`, `update`, and `commands`.
+  * Type `theme ` and press Tab twice. Action names appear, including `set` and `list`.
+  * Press Ctrl+C. The prompt returns.
+  * Type `omarchy commands --` and press Tab twice. Flag names appear.
+  ** Record the flags. A shorter list than `--all --json --markdown --check` is version skew.
+  * Press Ctrl+C. The prompt returns.
+  * Type `omarchy-th` and press Tab. Nothing is completed.
+  * Press Ctrl+C. The prompt returns.
+  * Type `omarchy theme bogus; echo "exit=$?"` and press Return. The output includes `Unknown Omarchy command: omarchy theme bogus`, and the last line is `exit=127`.
+  ** If a usage message appears instead, record that.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Completion lists print below the prompt; screenshot before the next keystroke clears them. Send Tab as `<TAB>`; a double Tab is two sends.
-  * Completions come from `default/bash/completions`, so they need the stock bash prompt — do not run this inside a different shell.
+  * Send Tab as a tab key. Press it twice to show the list. Screenshot before the next key clears it.
+  * This needs the stock bash prompt. Do not run it in another shell.
+  * `omarchy-*` binary names must not be offered as the first word.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the group list, the theme action list, the `commands` flag list (or the recorded skew), the non-completion of `omarchy-th`, and the bogus-subcommand refusal with its exit code
+  ** `omarchy` plus Tab lists groups including `theme`, `update`, and `commands`. `theme` plus Tab lists actions including `set` and `list`.
+  ** `omarchy commands --` plus Tab lists flags. A shorter list is recorded with the version.
+  ** `omarchy-th` plus Tab completes nothing. `omarchy theme bogus` exits 127, or a usage message is recorded.
   * If unsuccessful
-  ** Screenshot of `omarchy-*` binaries offered at word one, or no group completion
+  ** Binary names are offered as the first word, or no group list appears.
 covers: default/bash/completions; bin/omarchy (route table the completions read)
 
 ### plans-unshipped-commands-absent   [VM-OK]
@@ -18425,28 +18506,39 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `for r in backup dots server "sunshine pair" "edition server"; do printf '%-16s ' "$r"; omarchy $r 2>&1 | head -1; done` → five lines, each `Unknown Omarchy command: omarchy …`. Then `omarchy backup; echo "exit=$?"` → the Unknown line, the `Run 'omarchy commands --all'` pointer, `exit=127`.
-  * Type `omarchy | grep -E '^  (backup|dots|server|sunshine|edition) '` → nothing (no such groups advertised).
-  * Type `ls /usr/bin/omarchy-backup* /usr/bin/omarchy-dots* /usr/bin/omarchy-sunshine* 2>&1` → `No such file` for all; `pacman -Q restic 2>&1` → not found.
-  * Press Super+Space → Setup: no `Backup` row; Escape. Super+Space → Install → Service: no `Sunshine` row; Escape until closed.
-  * Type `omarchy install service sunshine --help` → a Usage naming `omarchy-install-service-sunshine` (the shipped remainder; do not run it). Then `grep -c 'launch_on_start("sunshine")' /usr/bin/omarchy-install-service-sunshine; grep -c ignore-certificate-errors /usr/bin/omarchy-install-service-sunshine` → `1` and `1` — the autostart double-start and the certificate-bypass web app the remote plan calls out are still in place.
-  * Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `for r in backup dots server "sunshine pair" "edition server"; do printf '%-16s ' "$r"; omarchy $r 2>&1 | head -1; done` and press Return. Each line says the command is unknown.
+  * Type `omarchy backup; echo "exit=$?"` and press Return. The output includes `Unknown Omarchy command: omarchy backup`, and the last line is `exit=127`.
+  * Type `omarchy | grep -E '^  (backup|dots|server|sunshine|edition) '` and press Return. Nothing is printed.
+  * Type `ls /usr/bin/omarchy-backup* /usr/bin/omarchy-dots* /usr/bin/omarchy-sunshine* 2>&1` and press Return. Each path is missing.
+  * Type `pacman -Q restic 2>&1` and press Return. The output says the package was not found.
+  * Press Super+Space. The menu opens.
+  * Select Setup. Backup is not listed.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Service. Sunshine is not listed.
+  * Press Escape. The menu closes.
+  * Type `omarchy install service sunshine --help` and press Return. Help names `omarchy-install-service-sunshine`.
+  * Type `grep -c 'launch_on_start("sunshine")' /usr/bin/omarchy-install-service-sunshine` and press Return. The output is `1`.
+  * Type `grep -c ignore-certificate-errors /usr/bin/omarchy-install-service-sunshine` and press Return. The output is `1`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * A pass is every negative holding. If any planned command resolves, report "plan shipped" with its help text rather than a failure.
-  * Menu pickers may not filter on typing: walk Setup and Install → Service with the arrows; Escape is two-stage.
+  * If a planned command resolves, report that the plan shipped and quote its help. Do not run the Sunshine installer.
+  * Use arrows and Enter if typing does not filter the menu.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the five Unknown lines with `exit=127`, the empty group grep and the missing binaries
-  ** Screenshots of Setup and Install › Service without Backup/Sunshine rows
-  ** Screenshot of the sunshine help and the two grep counts of `1`
+  ** `backup`, `dots`, `server`, `sunshine pair`, and `edition server` are unknown. `omarchy backup` exits 127.
+  ** No matching group is advertised. The planned binaries and `restic` are absent.
+  ** Setup has no Backup row, and Install → Service has no Sunshine row.
+  ** Sunshine help names the installer. The autostart line and the certificate-bypass flag are each present once.
   * If unsuccessful
-  ** Screenshot of `omarchy commands --all | grep -E 'backup|dots|server|sunshine'`
+  ** A planned command resolves, or `omarchy commands --all` lists backup, dots, server, or sunshine as a shipped group.
 covers: plans/backup.md; plans/dots.md; plans/server.md; plans/remote.md §Problem, §Command surface, §Menu; bin/omarchy-install-service-sunshine; bin/omarchy (unknown-route path)
 
 # System, shell and security

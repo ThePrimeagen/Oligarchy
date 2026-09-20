@@ -391,14 +391,14 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `dev-install-ydoo`
 - [x] `transcode-picture-cli-and-rejects`
 - [x] `transcode-ascii-cli-and-rejects`
-- [ ] `disk-speedtest-cli-and-panel`
-- [ ] `reminder-cli-set-show-clear-and-rejects`
-- [ ] `menu-cli-summon-toggle-close-and-rejects`
-- [ ] `ascii-wordmark-render-skip-and-rejects`
-- [ ] `dev-add-migration-in-temp-repo`
-- [ ] `agent-usage-update-without-login`
-- [ ] `cli-tab-completion-discoverability`
-- [ ] `plans-unshipped-commands-absent`
+- [x] `disk-speedtest-cli-and-panel`
+- [x] `reminder-cli-set-show-clear-and-rejects`
+- [x] `menu-cli-summon-toggle-close-and-rejects`
+- [x] `ascii-wordmark-render-skip-and-rejects`
+- [x] `dev-add-migration-in-temp-repo`
+- [x] `agent-usage-update-without-login`
+- [x] `cli-tab-completion-discoverability`
+- [x] `plans-unshipped-commands-absent`
 - [ ] `terminal-hotkey-opens-foot-in-cwd`
 - [ ] `foot-ini-padding-edit-applies-to-new-window`
 - [ ] `tmux-work-session-config-and-reattach`
