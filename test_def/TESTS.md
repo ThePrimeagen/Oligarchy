@@ -5730,27 +5730,43 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Print and capture a region by dragging with the mouse. Open a terminal with Super+Enter and type `ls -t ~/Pictures | head -1` Return: the fresh screenshot in `~/Pictures`.
-  * Type `mkdir -p ~/.config/uwsm/env.d; echo 'export OMARCHY_SCREENSHOT_DIR="$HOME/Pictures/Screenshots"' > ~/.config/uwsm/env.d/capture` Return. Do NOT create the directory yet.
-  * Log out: Super+Escape → Logout. At SDDM (logo, lock glyph and a dotted entry — no user name field) type `prime` and Return.
-  ** Logout closes all windows; finish typing before pressing Logout.
-  * Open a terminal and type `echo $OMARCHY_SCREENSHOT_DIR` Return: `/home/prime/Pictures/Screenshots`. Press Print, capture a region, and record what happens with the directory missing: `ls -t ~/Pictures | head -1; ls ~/Pictures/Screenshots` Return.
-  * Type `mkdir -p ~/Pictures/Screenshots` Return, press Print, capture again: `ls -t ~/Pictures/Screenshots | head -1` shows the new file.
-  * Type `rm ~/.config/uwsm/env.d/capture; rm -rf ~/Pictures/Screenshots ~/Pictures/screenshot-*.png` Return — stock again after the next login. Close the terminal.
+  * Press Print. The selection overlay appears.
+  * Drag a small rectangle and release. A toast says the screenshot was saved.
+  * Press Super+Enter. A terminal opens.
+  * Type `ls -t ~/Pictures | head -1` and press Return. The name starts with `screenshot-`.
+  * Type `mkdir -p ~/.config/uwsm/env.d` and press Return.
+  * Type `echo 'export OMARCHY_SCREENSHOT_DIR="$HOME/Pictures/Screenshots"' > ~/.config/uwsm/env.d/capture` and press Return.
+  ** Do not create `~/Pictures/Screenshots` yet.
+  * Press Super+Escape. The system menu opens.
+  * Click Logout. The greeter appears.
+  * Type `prime` and press Return. The desktop returns.
+  * Press Super+Enter. A terminal opens.
+  * Type `echo $OMARCHY_SCREENSHOT_DIR` and press Return. The line is `/home/prime/Pictures/Screenshots`.
+  * Press Print. The selection overlay appears.
+  * Drag a small rectangle and release. Record what happens. The Screenshots directory does not exist yet.
+  * Type `ls -t ~/Pictures | head -1` and press Return. Record the name.
+  * Type `ls ~/Pictures/Screenshots` and press Return. Record the error.
+  * Type `mkdir -p ~/Pictures/Screenshots` and press Return.
+  * Press Print. The selection overlay appears.
+  * Drag a small rectangle and release. A toast says the screenshot was saved.
+  * Type `ls -t ~/Pictures/Screenshots | head -1` and press Return. A screenshot name is listed.
+  * Type `rm ~/.config/uwsm/env.d/capture` and press Return.
+  * Type `rm -rf ~/Pictures/Screenshots ~/Pictures/screenshot-*.png` and press Return.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Send the Print key as `<PRINT>`; when the region selector appears, `mouse drag` a small rectangle.
-  * Wrong password at SDDM shows a red lock/entry cleared by the next keystroke; stay under five tries (faillock deny=10 is shared with the lock screen and sudo).
+  * Print is `<PRINT>`. Drag a small rectangle when the overlay is up.
+  * A wrong greeter password shares the lock-screen failure count. Stay under five tries.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshot of the stock file in ~/Pictures, the env.d file, the SDDM login, the variable after re-login and the behaviour with the directory missing, and the new file inside ~/Pictures/Screenshots
+  * On success
+  ** A screenshot in `~/Pictures`, the variable `/home/prime/Pictures/Screenshots` after login, the recorded result while the directory is missing, and a new file inside `~/Pictures/Screenshots`
   * If unsuccessful
-  ** The variable unset after re-login, screenshots still in ~/Pictures once the directory exists, or a capture-tool crash
+  ** The variable unset after login, or a new shot still landing in `~/Pictures` after the directory exists
 covers: manual/46:57-65; manual/12 (overlap); uwsm env.d
 
 ### screenrecording-alt-print-start-stop-cpu-encode   [VM-PARTIAL]
@@ -5760,29 +5776,66 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return and type `ls -d ~/Videos; ls -la /tmp/omarchy-screenrecord-filename "$XDG_RUNTIME_DIR"/omarchy-screenrecord-filename 2>&1` Return → `~/Videos` exists (if not, report and `mkdir ~/Videos`) and both state files are absent.
-  * Press Alt+Print: the Capture → Screenrecord submenu shows "With no audio", "With desktop audio", "With desktop + microphone audio" — no webcam row (none present) and no "Stop Screenrecording" row. Select "With no audio".
-  * The screen freezes; click once inside the terminal (snaps to that window). Within ~5 s a red recording indicator lights next to the clock. Type `cat "$XDG_RUNTIME_DIR"/omarchy-screenrecord-filename; ls -la /tmp/omarchy-screenrecord-filename 2>&1; pgrep -fc '^gpu-screen-recorder'` Return → a path under `~/Videos/`, the `/tmp` file still absent, `1`. Type `echo recording` a few times over ~10 s (screenshots, no long sleep).
-  ** Never let a recording run past 15 s; CPU encoding on 2 vCPU is slow and fills the disk quickly. If the indicator never lights, see the hint.
-  * Press Super+Ctrl+C → Screenrecord: "Stop Screenrecording" is now the first row (it exists only while recording). Escape without stopping. Press Alt+Print: the indicator goes out; after a few seconds a toast "Screen recording saved" / "Open with Super + Alt + , (or click this)" with a thumbnail. Click it: mpv plays the clip; press q.
-  * Type `ls -l ~/Videos; ffprobe -v error -show_entries stream=codec_name,width,height -of csv=p=0 ~/Videos/screenrecording-*.mp4` Return → one `screenrecording-YYYY-MM-DD_HH-MM-SS.mp4` with size > 0, no leftover `-preview.png`/`-processed.mp4`, and `h264,<w>,<h>`.
-  * Press Super+Alt+] and Super+Alt+[ : nothing visible, no banner (no webcam overlay to resize). Type `pgrep -f gpu-screen-recorder; echo "exit=$?"` Return → exit=1 (nothing left running).
-  * Unhappy path: press Alt+Print, "With no audio", then Escape at the crosshair: no indicator, no toast, no new file. Then the menu route once: Super+Space → Trigger → Capture → Screenrecord → With no audio, click the terminal, wait 3 s, Super+Space → Trigger → Capture → Screenrecord → Stop Screenrecording: indicator off, saved toast.
-  * Type `rm ~/Videos/screenrecording-*.mp4` Return; close the terminal.
+  * Press Super+Return. A terminal opens.
+  * Type `ls -d ~/Videos` and press Return. `~/Videos` is listed.
+  ** If it is missing, type `mkdir ~/Videos` and press Return, and report that.
+  * Type `ls -la /tmp/omarchy-screenrecord-filename "$XDG_RUNTIME_DIR"/omarchy-screenrecord-filename` and press Return. Both files are absent.
+  * Press Alt+Print. The Screenrecord submenu opens. The rows are With no audio, With desktop audio, and With desktop + microphone audio. There is no webcam row. There is no Stop Screenrecording row.
+  * Click With no audio. The menu closes. The screen freezes.
+  * Click inside the terminal. The selection snaps to that window.
+  * Wait up to 5 seconds. A recording indicator lights next to the clock.
+  ** Do not let a recording run past 15 seconds. If the indicator never lights, follow the hint and report which path happened.
+  * Type `echo recording` and press Return. The line `recording` appears.
+  * Type `cat "$XDG_RUNTIME_DIR"/omarchy-screenrecord-filename` and press Return. A path under `~/Videos/` is printed.
+  * Type `ls -la /tmp/omarchy-screenrecord-filename` and press Return. That file is absent.
+  * Type `pgrep -fc '^gpu-screen-recorder'` and press Return. The line is `1`.
+  * Press Super+Space. The menu opens.
+  * Click Trigger.
+  * Click Capture.
+  * Click Screenrecord. The Screenrecord submenu opens. Stop Screenrecording is the first row.
+  * Press Escape. The menu closes. The indicator stays lit.
+  * Press Alt+Print. The indicator goes out.
+  * Wait a few seconds. A toast says the screen recording was saved.
+  * Click the toast. mpv plays the clip.
+  * Press `q`. mpv closes.
+  * Click the terminal. It has focus.
+  * Type `ls -l ~/Videos` and press Return. One `screenrecording-` mp4 is listed and is larger than 0 bytes. There is no leftover preview png.
+  * Type `ffprobe -v error -show_entries stream=codec_name,width,height -of csv=p=0 ~/Videos/screenrecording-*.mp4` and press Return. The line starts with `h264`.
+  * Press Super+Alt+]. Nothing changes. No banner appears.
+  * Press Super+Alt+[. Nothing changes.
+  * Type `pgrep -f gpu-screen-recorder; echo "exit=$?"` and press Return. The last line is `exit=1`.
+  * Press Alt+Print. The Screenrecord submenu opens.
+  * Click With no audio. The screen freezes.
+  * Press Escape. The overlay closes. The indicator does not light. No toast appears.
+  * Press Super+Space. The menu opens.
+  * Click Trigger.
+  * Click Capture.
+  * Click Screenrecord. The Screenrecord submenu opens.
+  * Click With no audio. The screen freezes.
+  * Click the terminal. The indicator lights.
+  * Wait 3 seconds. The indicator is still lit.
+  * Press Super+Space. The menu opens.
+  * Click Trigger.
+  * Click Capture.
+  * Click Screenrecord. The Screenrecord submenu opens.
+  * Click Stop Screenrecording. The indicator goes out. A toast says the recording was saved.
+  * Click the terminal. It has focus.
+  * Type `rm ~/Videos/screenrecording-*.mp4` and press Return.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Alt+Print is `<A-PRINT>`. If the indicator never lights: type `OMARCHY_SCREENRECORD_DEBUG=true omarchy capture screenrecording --fullscreen` Return, wait 5 s, `omarchy capture screenrecording --stop-recording`, then `cat $XDG_RUNTIME_DIR/omarchy-screenrecord.log | sudo tee /dev/ttyS0` and read it with get-serial; then try once with `OMARCHY_SCREENRECORD_USE_PORTAL=true OMARCHY_SCREENRECORD_DEBUG=true` and stop it the same way. A kms-capture failure on this GPU-less virtio display is a VM limit; an encoder crash is a finding — report which.
-  * Skipped: audio variants and the webcam overlay itself — no sink, mic or camera. The menu row "With no audio" is the same as running the command without flags; the webcam refusals are in `screenrecording-refusals-and-webcam-absent`.
+  * Alt+Print is `<A-PRINT>`.
+  * If the indicator never lights, run `OMARCHY_SCREENRECORD_DEBUG=true omarchy capture screenrecording --fullscreen`, wait 5 seconds, stop it, and read the log. Report whether it is a VM limit or an encoder crash.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of the Screenrecord submenu without webcam/stop rows, the lit indicator, the runtime-dir state file naming the recording and no `/tmp` file, the submenu with Stop Screenrecording, the saved toast with thumbnail, mpv playing, `ls -l ~/Videos` and the ffprobe line, nothing after the webcam chords, the empty pgrep, and the cancelled start with no file
+  * On success
+  ** The submenu without a webcam row or a stop row, the lit indicator, a Videos path with no `/tmp` state file, Stop Screenrecording while recording, the saved toast, mpv, an `h264` line, and a cancel that writes no file
   * If unsuccessful
-  ** The serial dump of omarchy-screenrecord.log (gsr's stderr), `pgrep -af gpu-screen-recorder`, whether the portal variant behaved differently, any "Screen recording error" toast, a `/tmp/omarchy-screenrecord-filename` file, or a Stop row while nothing records; `omarchy-version`
+  ** The screenrecord log, a Stop row while nothing is recording, or a `/tmp/omarchy-screenrecord-filename` file
 covers: default/hypr/bindings/utilities.lua:39-41; default/hypr/apps/webcam-overlay.lua; bin/omarchy-capture-screenrecording; bin/omarchy-capture-region (--match-monitor); shell/plugins/bar/indicators/ScreenRecording.qml; default/omarchy/omarchy-menu.jsonc:59-68 (trigger.capture.screenrecord.*); test/shell.d/screenrecording-test.sh; test/shell.d/menu-test.sh; manual/07:145-146,149-150,156; manual/12:39-47 (12-screenshots-recording.md)
 
 ### screenrecording-refusals-and-webcam-absent   [VM-PARTIAL]
@@ -5792,26 +5845,37 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return and type `OMARCHY_SCREENRECORD_DIR=/tmp/no-such-dir omarchy capture screenrecording --fullscreen; echo "exit=$?"` Return → a persistent critical toast "Screen recording directory does not exist: /tmp/no-such-dir", exit=1, and no indicator lights. Press Super+, to dismiss it.
-  * Type `omarchy capture screenrecording --stop-recording; echo "exit=$?"` Return → exit=1, no toast (nothing was recording).
-  * Type `omarchy capture screenrecording --webcam-size=huge --fullscreen; echo "exit=$?"` Return → `Invalid webcam size: huge (expected small, medium, or large)`, exit=1.
-  * Press Super+Space → Trigger → Capture → Screenrecord: rows "With no audio", "With desktop audio", "With desktop + microphone audio" — and NO "…+ webcam" row. Escape.
-  * Type `omarchy-hw-webcam; echo "exit=$?"; omarchy-capture-webcam-list | wc -l` Return → exit=1 and 0. Type `omarchy-capture-screenrecording-with-webcam; echo "exit=$?"` Return → critical toast "No webcam devices found", exit=1; dismiss it with Super+, .
-  * Type `omarchy-capture-webcam-resize smaller; echo "exit=$?"; omarchy-capture-webcam-resize gigantic; echo "exit=$?"` Return → 0 silently (no overlay to resize), then usage, exit=1.
-  * Type `ls ~/Videos` Return: no recording was written. Close the terminal.
+  * Press Super+Return. A terminal opens.
+  * Type `OMARCHY_SCREENRECORD_DIR=/tmp/no-such-dir omarchy capture screenrecording --fullscreen; echo "exit=$?"` and press Return. A toast says the directory does not exist. The last line is `exit=1`. The recording indicator does not light.
+  * Press Super+,. The toast closes.
+  * Type `omarchy capture screenrecording --stop-recording; echo "exit=$?"` and press Return. The last line is `exit=1`. No toast appears.
+  * Type `omarchy capture screenrecording --webcam-size=huge --fullscreen; echo "exit=$?"` and press Return. The output says the webcam size is invalid. The last line is `exit=1`.
+  * Press Super+Space. The menu opens.
+  * Click Trigger.
+  * Click Capture.
+  * Click Screenrecord. The rows are With no audio, With desktop audio, and With desktop + microphone audio. There is no webcam row.
+  * Press Escape. The menu closes.
+  * Type `omarchy-hw-webcam; echo "exit=$?"` and press Return. The last line is `exit=1`.
+  * Type `omarchy-capture-webcam-list | wc -l` and press Return. The line is `0`.
+  * Type `omarchy-capture-screenrecording-with-webcam; echo "exit=$?"` and press Return. A toast says no webcam devices were found. The last line is `exit=1`.
+  * Press Super+,. The toast closes.
+  * Type `omarchy-capture-webcam-resize smaller; echo "exit=$?"` and press Return. The last line is `exit=0`. Nothing changes.
+  * Type `omarchy-capture-webcam-resize gigantic; echo "exit=$?"` and press Return. A usage line appears. The last line is `exit=1`.
+  * Type `ls ~/Videos` and press Return. No new recording is listed.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Critical toasts stay until dismissed with Super+, (or a right click on them). Skipped: the webcam overlay and a webcam recording — no camera.
+  * A critical toast stays until Super+, or a right click.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of the critical toast with exit=1, the quiet exit=1, the webcam-size rejection, the submenu without the webcam row, the "No webcam devices found" toast with the exit codes 1 / 0 / 0 / 1, and the empty Videos listing
+  * On success
+  ** The missing-directory toast with `exit=1`, the quiet stop with `exit=1`, the invalid size, the submenu without a webcam row, the no-webcam toast, `exit=0` then `exit=1` for resize, and no new file in `~/Videos`
   * If unsuccessful
-  ** Screenshot of an indicator lighting or a file appearing, or any webcam row or device listed on the VM
+  ** An indicator lighting, a recording file, or a webcam row
 covers: bin/omarchy-capture-screenrecording:24-29,60-66; bin/omarchy-capture-webcam-resize; bin/omarchy-capture-screenrecording-with-webcam; bin/omarchy-capture-webcam-list; bin/omarchy-hw-webcam; default/omarchy/omarchy-menu.jsonc (trigger.capture.screenrecord.webcam when); manual/12:41,58
 
 ### color-picker-and-ocr-print-chords   [VM-OK]
@@ -5821,28 +5885,52 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return, type `clear; printf '\e[41m%60s\e[0m\n%.0s' ' ' {1..8}` Return: a large red block fills part of the terminal.
-  * Press Super+Print: the screen freezes and a magnified picker swatch follows the cursor. Click in the middle of the red block: the picker closes (a notification may show the `#rrggbb` value). Type `echo ` then Super+V, Return: a hex colour with high red and low green/blue prints (e.g. `#cd0000`).
-  * Unhappy path: press Super+Print (picker active), then Super+Print again (the second invocation is `pkill hyprpicker`): the picker closes; `wl-paste` Return still prints the same colour. Press Super+Print, then Escape: same, clipboard unchanged.
-  * Press Super+Space → Trigger → Capture → Color: the same eyedropper; click on the terminal's dark background; `wl-paste` → a hex like the theme's terminal background (e.g. `#1a1b26`).
-  * Type `clear; printf '\n\n   HELLO OMARCHY 2026\n\n'` Return and press Super+F for large clear text near the top. Press Super+Ctrl+Print: the screen freezes and the cursor becomes a crosshair. Drag a rectangle tightly around HELLO OMARCHY 2026 and release: after a few seconds (tesseract on 2 vCPU) a toast "Copied text from selection to clipboard".
-  * Type `echo "` then Super+V then `"` Return: the output contains HELLO OMARCHY 2026 (O/0 variations acceptable; report the exact text).
-  * Unhappy path: type `omarchy-capture-text; echo "exit=$?"` Return (the same command as the chord and as Trigger → Capture → Text), then Escape at the crosshair: the freeze ends, no toast, exit=0; `wl-paste` still prints the previous text.
-  * Press Super+F, Super+W; the desktop is empty.
+  * Press Super+Return. A terminal opens.
+  * Type `clear; printf '\e[41m%60s\e[0m\n%.0s' ' ' {1..8}` and press Return. A red block fills part of the terminal.
+  * Press Super+Print. The screen freezes. A magnified picker follows the pointer.
+  * Click the middle of the red block. The picker closes.
+  * Type `echo `. The prompt shows `echo `.
+  * Press Super+V. A hex colour appears.
+  * Press Return. That colour is printed. Red is high. Green and blue are low.
+  * Press Super+Print. The picker appears.
+  * Press Super+Print. The picker closes.
+  * Type `wl-paste` and press Return. The same hex colour is printed.
+  * Press Super+Print. The picker appears.
+  * Press Escape. The picker closes.
+  * Type `wl-paste` and press Return. The same hex colour is printed.
+  * Press Super+Space. The menu opens.
+  * Click Trigger.
+  * Click Capture.
+  * Click Color. The picker appears.
+  * Click the dark part of the terminal. The picker closes.
+  * Type `wl-paste` and press Return. A hex colour is printed.
+  * Type `clear; printf '\n\n   HELLO OMARCHY 2026\n\n'` and press Return. The line `HELLO OMARCHY 2026` appears.
+  * Press Super+F. The terminal covers the screen.
+  * Press Super+Ctrl+Print. The screen freezes. The pointer is a crosshair.
+  * Drag a rectangle around `HELLO OMARCHY 2026` and release. A toast says the selected text was copied.
+  * Type `echo "`. The prompt shows `echo "`.
+  * Press Super+V. The copied text appears.
+  * Type `"`. The quote closes.
+  * Press Return. The output includes `HELLO OMARCHY 2026`. Record the exact text.
+  * Type `omarchy-capture-text; echo "exit=$?"` and press Return. The screen freezes.
+  * Press Escape. The overlay closes. No toast appears. The last line is `exit=0`.
+  * Type `wl-paste` and press Return. The previous text is still there.
+  * Press Super+F. The terminal returns to its tile.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Super+Print is `<M-PRINT>`, Super+Ctrl+Print is `<M-C-PRINT>`. Use `mouse drag` from above-left to below-right of the text. Trigger → Capture → Color / Text are the same commands as the chords.
-  * Larger text OCRs better (the digits must come out right): `omarchy-display-text-size 18` before and `omarchy-display-text-size reset` after if the default font is too small. If `tesseract: command not found` appears, report the missing package — that is a defect.
+  * Super+Print is `<M-PRINT>`. Super+Ctrl+Print is `<M-C-PRINT>`.
+  * If tesseract is missing, report that. It is a defect.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of the red block, the eyedropper overlay, the pasted hex value, the cancelled picker with the clipboard unchanged (twice), the menu-driven pick, the frozen screen with the OCR selection, the OCR toast, the pasted text with the digits right, and the cancelled OCR with no toast and exit=0
+  * On success
+  ** The red block, the pasted hex, the same hex after both cancels, a hex from the menu, the OCR toast, pasted text containing `HELLO OMARCHY 2026`, and a cancelled OCR with `exit=0`
   * If unsuccessful
-  ** Screenshot after the click with no colour pasted (`pgrep -a hyprpicker` and the clipboard contents); after the OCR drag with no toast, type `omarchy capture text` Return and screenshot any error (the tesseract error or garbage output and the region screenshot)
+  ** No colour after the click, or no toast after the OCR drag
 covers: default/hypr/bindings/utilities.lua:42-43; bin/omarchy-capture-text; bin/omarchy-capture-region; default/omarchy/omarchy-menu.jsonc:64 (trigger.capture.color, trigger.capture.text); manual/07:147-148; manual/11:5 (11-text-extraction-dictation.md); manual/12:9-10,62,66 (12-screenshots-recording.md)
 
 ### qr-code-capture-decode-and-none-found   [VM-OK]
@@ -5852,25 +5940,42 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return, Super+F, type `clear; qrencode -t ANSIUTF8 -m 2 'omarchy-qr-ok'` Return: a block-character QR code appears (fullscreen makes the blocks large enough to decode).
-  * Press Super+Ctrl+C, type `qr`, Return (Trigger → Capture → QR Code; walk the menu with the arrows if typing does not filter). Drag a rectangle around the code with some margin: toast "QR code copied to clipboard".
-  * Type `echo ` then Super+V, Return → `omarchy-qr-ok` (`wl-paste` prints the same).
-  * Press Super+Ctrl+V: `omarchy-qr-ok` is NOT listed in the clipboard history (sensitive copies are skipped). Escape.
-  * Unhappy path: type `clear` Return, then Super+Space → Trigger → Capture → QR Code and drag over the empty terminal: critical toast "No QR code found" / "Select a region containing a QR code" (stays until dismissed). Press Super+, (or right-click it).
-  * Press Super+F, Super+W; the desktop is empty.
+  * Press Super+Return. A terminal opens.
+  * Press Super+F. The terminal covers the screen.
+  * Type `clear; qrencode -t ANSIUTF8 -m 2 'omarchy-qr-ok'` and press Return. A QR code appears.
+  * Press Super+Ctrl+C. The menu opens.
+  * Type `qr`. The QR Code row is highlighted.
+  ** If typing does not filter, use the arrow keys.
+  * Press Return. The selection overlay appears.
+  * Drag a rectangle around the QR code and release. A toast says the QR code was copied.
+  * Type `echo `. The prompt shows `echo `.
+  * Press Super+V. `omarchy-qr-ok` appears.
+  * Press Return. The line is `omarchy-qr-ok`.
+  * Type `wl-paste` and press Return. The line is `omarchy-qr-ok`.
+  * Press Super+Ctrl+V. The clipboard history opens. `omarchy-qr-ok` is not listed.
+  * Press Escape. The history closes.
+  * Type `clear` and press Return. The QR code is gone.
+  * Press Super+Space. The menu opens.
+  * Click Trigger.
+  * Click Capture.
+  * Click QR Code. The selection overlay appears.
+  * Drag a rectangle over the empty terminal and release. A toast says no QR code was found.
+  * Press Super+,. The toast closes.
+  * Press Super+F. The terminal returns to its tile.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * If the QR renders with the wrong aspect (tall blocks), use `qrencode -t UTF8` or `-t ANSI` instead; zbar copes with either.
+  * If the QR blocks are the wrong shape, use `qrencode -t UTF8` instead.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of the QR code, the copied toast, the decoded text echoed, the history panel without it, and the critical "No QR code found" toast
+  * On success
+  ** The QR code, the copied toast, `omarchy-qr-ok` from the paste, the history without that text, and the no-QR toast
   * If unsuccessful
-  ** Screenshot after the drag with neither toast; `zbarimg --version`
+  ** Neither toast after the drag
 covers: bin/omarchy-capture-qr; bin/omarchy-capture-region; shell/plugins/clipboard/capture.sh:15-17 (sensitive skip); default/omarchy/omarchy-menu.jsonc:63 (trigger.capture.qr); manual/12:64
 
 # Bar, panels, OSD, notifications, reminders, clipboard, emoji, polkit
@@ -5921,30 +6026,28 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Screenshot the desktop and look at the bar along the top edge (about 26 px tall, y≈0.01).
-  * Confirm the LEFT section shows the Omarchy logo glyph, then workspace numbers 1 2 3 4 5 with the focused one drawn as a filled marker and the others dimmed.
-  * Confirm the CENTER shows the clock as weekday plus 24-hour time, e.g. `Friday 13:09`, with no date.
-  ** A refresh-arrows glyph (an update is pending) and a weather glyph with a temperature may appear right of the clock within ~30 s; note which are present.
-  * Confirm the RIGHT section shows a wired-network plug glyph `󰈀` (not a Wi-Fi arc, not the blocked `󰈂`) and a monitor glyph, with a speaker glyph between them (PipeWire's Dummy Output) and possibly a tray chevron before them.
-  ** There must be NO battery, bluetooth, `EN` keyboard-layout or agents glyph: this machine has none of that hardware, so hiding is the expected behaviour, not a defect.
-  * Hover the clock for one second: a bubble reads `Right-click to toggle format`. Move the mouse to the desktop: the bubble disappears.
-  * Hover the empty bar space just left of the clock for two seconds: a row of dimmed glyphs (microphone, camera, bell, sun, bell-slash, coffee cup) fades in; move the mouse onto the desktop and it collapses again.
-  * Unhappy path: any glyph rendered as a box, question mark or pink square is the failure to report; a widget missing for absent hardware is a pass. Note in words whether the speaker, weather and update glyphs were present.
+  * Take a screenshot of the bar. The left side shows the logo and workspaces 1 through 5. The focused workspace is filled. The others are dim. The center shows the weekday and the time, with no date. The right side shows a wired-network glyph and a monitor glyph.
+  ** A speaker glyph may sit between them. A tray chevron may sit before them. A weather glyph or an update glyph may appear within 30 seconds. Record which are present.
+  ** There is no battery glyph, no bluetooth glyph, no keyboard-layout pill, and no agents glyph.
+  * Hover the clock for one second. A bubble says `Right-click to toggle format`.
+  * Move the pointer onto the desktop. The bubble disappears.
+  * Hover the empty bar just left of the clock for two seconds. A row of dimmed glyphs fades in.
+  * Move the pointer onto the desktop. The row hides.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The clock sits at x≈0.5, y≈0.01; ./client-with-image helps aim the hover and check the result at once.
-  * The dictation (microphone) glyph may be absent if the voxtype status tool is not installed; report which glyphs appeared rather than failing on it.
+  * A glyph drawn as a box, a question mark, or a pink square is a failure. A widget hidden because the hardware is absent is a pass.
+  * The dictation glyph may be absent. Record which glyphs appeared.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshot of the bar with the logo, 1–5, clock `<Weekday> HH:MM`, ethernet glyph, speaker glyph, monitor glyph, and no battery/bluetooth/EN/agents glyph
-  ** Screenshot of the clock tooltip and one with the dimmed indicator row revealed, plus a note on the speaker/weather/update glyphs
+  * On success
+  ** The bar with the logo, workspaces 1 through 5, the weekday and time, the wired-network glyph, and the monitor glyph, and no battery, bluetooth, layout, or agents glyph
+  ** The clock bubble, and the dimmed row while hovered
   * If unsuccessful
-  ** Screenshot of the broken or unexpectedly present widget, and `./client get-serial`
+  ** A broken glyph, or a glyph for hardware this machine does not have
 covers: config/omarchy/shell.json; shell/plugins/bar/Bar.qml (tooltipWindow, setCenterSectionHovered); shell/plugins/bar/widgets/Indicators.qml; shell/plugins/panels/*/Panel.qml root `visible:` bindings; shell/plugins/bar/widgets/KeyboardLayout.qml multipleLayouts; manual/05-the-top-bar.md
 
 ### bar-indicators-reveal-and-toggle   [VM-OK]
@@ -5954,28 +6057,41 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Screenshot the bar centre: no lit indicator glyph next to the clock.
-  * Hover the empty bar space just left of the clock (x≈0.42, y≈0.01) for two seconds: six dimmed glyphs appear in this order — microphone, camera, bell, sun, bell-slash, coffee cup. Hover each for a second: tooltips `Dictate`, `Screen Recording`, `Set Reminder`, `Night Light`, `Silence Notifications`, `Stay Awake`.
-  * Click the coffee cup: it is drawn solid immediately left of the clock and stays when the mouse leaves the bar; its tooltip is now `Allow Idle Lock & Screensaver` (Stay Awake on).
-  * Press Super+Ctrl+I: the solid cup dims and hides once the mouse is off the bar (hotkey and indicator share state).
-  * Click the sun: it becomes solid next to the clock and within two seconds the screen takes a warm/orange tint (visible in screenshots on this VM). Press Super+Ctrl+N: the sun goes away and the tint is gone.
-  ** If the tint is hard to judge, open a terminal and run `hyprctl hyprsunset temperature` → `4000` while on, `6500` after the chord; `grep -E 'identity|time' ~/.config/hypr/hyprsunset.conf` → `time = 07:00`, `identity = true` (the shipped config keeps the screen untinted by default). After stay-awake is off again `omarchy-toggle-idle status` reports `"enabled":false`. Close the terminal with Super+W.
-  * Hover again and click the crossed-out bell: it lights (Do Not Disturb on, no toast of its own). Click it again: off.
-  * Unhappy path: move the mouse to the desktop and screenshot: all indicators hidden, none lit — the bar is exactly as at the start.
+  * Take a screenshot of the bar center. No indicator is lit next to the clock.
+  * Hover the empty bar just left of the clock for two seconds. Dimmed glyphs appear.
+  ** Record which glyphs appeared. The expected order is microphone, camera, bell, sun, bell-slash, coffee cup.
+  * Hover the microphone. The tooltip says `Dictate`.
+  * Hover the camera. The tooltip says `Screen Recording`.
+  * Hover the bell. The tooltip says `Set Reminder`.
+  * Hover the sun. The tooltip says `Night Light`.
+  * Hover the crossed-out bell. The tooltip says `Silence Notifications`.
+  * Hover the coffee cup. The tooltip says `Stay Awake`.
+  * Click the coffee cup. It is drawn solid next to the clock.
+  * Move the pointer onto the desktop. The cup stays.
+  * Hover the cup. The tooltip says `Allow Idle Lock & Screensaver`.
+  * Press Super+Ctrl+I. The cup is no longer solid.
+  * Move the pointer onto the desktop. The cup is hidden.
+  * Hover the empty bar just left of the clock for two seconds. The glyphs appear.
+  * Click the sun. The sun is solid next to the clock. The screen takes a warm tint.
+  * Press Super+Ctrl+N. The sun is gone. The tint is gone.
+  ** If the tint is hard to judge, open a terminal and run `hyprctl hyprsunset temperature`. Record `4000` while the sun is on and `6500` after the chord. Press Super+W.
+  * Hover the empty bar just left of the clock for two seconds. The glyphs appear.
+  * Click the crossed-out bell. It lights. No toast appears.
+  * Click the crossed-out bell. It goes off.
+  * Move the pointer onto the desktop. No indicator is lit.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Super+Ctrl+I is `<M-C-i>`, Super+Ctrl+N is `<M-C-n>`. Hover for a second before each screenshot; the reveal fades in.
-  * Active indicators sit closest to the clock at full opacity; inactive ones show at 45 % only while hovered. The dictation glyph may be absent if voxtype is not installed — report which glyphs appeared.
+  * Super+Ctrl+I is `<M-C-i>`. Super+Ctrl+N is `<M-C-n>`. Wait a second after each hover.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots: hidden row; revealed row with each tooltip; the solid cup and its tooltip; the cup gone after Super+Ctrl+I; the solid sun with the warmer screen; the sun gone after Super+Ctrl+N; the bell lit then off; the clean bar
+  * On success
+  ** Hidden glyphs, each tooltip, the solid cup, the cup gone after Super+Ctrl+I, the solid sun with the tint, the sun gone after Super+Ctrl+N, the bell lit then off, and a clean bar
   * If unsuccessful
-  ** Screenshot of an indicator that disagrees with the action taken, or of the bar centre where nothing revealed; `./client get-serial`
+  ** An indicator that stays on after its chord, or a hover that reveals nothing
 covers: shell/plugins/bar/widgets/Indicators.qml (revealInactiveIndicators, defaultIndicatorEntries); shell/Ui/BarIndicator.qml; shell/plugins/bar/indicators/{StayAwake,NightLight,Dnd}.qml; bin/omarchy-toggle-idle; bin/omarchy-toggle-nightlight; config/hypr/hyprsunset.conf; default/hypr/bindings/utilities.lua:31-32 Super+Ctrl+I / Super+Ctrl+N; test/shell.d/indicator-contract-test.sh; manual/05:75-77, manual/07:187-188, manual/13:38-40
 
 ### workspaces-indicator-follows-super-number   [VM-OK]
@@ -5985,25 +6101,28 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Screenshot the workspace numbers: `1` is the filled marker, 2–5 are dim digits.
-  * Press Super+2: the marker is in slot 2 and `1` is a dim digit.
-  * Press Super+Enter to open a terminal here, then press Super+1: slot 1 is marked and `2` is a BRIGHT digit (occupied) while 3–5 stay dim.
-  * Left-click the `3` digit in the bar with the mouse: slot 3 is marked and the desktop is empty.
-  * Press Super+7: a seventh slot appears and is marked; there is no `6`.
-  * Round trip: press Super+2, close the terminal with Super+W, press Super+1: back to 1–5 with 1 marked and the rest dim, as found.
+  * Take a screenshot of the workspace numbers. `1` is filled. `2` through `5` are dim.
+  * Press Super+2. The filled marker is on `2`. `1` is dim.
+  * Press Super+Enter. A terminal opens.
+  * Press Super+1. The filled marker is on `1`. `2` is bright. `3` through `5` stay dim.
+  * Click `3` in the bar. The filled marker is on `3`. The workspace is empty.
+  * Press Super+7. A seventh slot appears and is filled. There is no `6`.
+  * Press Super+2. The filled marker is on `2`. The terminal is there.
+  * Press Super+W. The terminal closes.
+  * Press Super+1. The bar shows `1` through `5`. `1` is filled. The rest are dim.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The digits start near x≈0.03 and are about 20 px apart; Super+digit is `<M-2>` etc. Double-check the mouse position before clicking `3`.
+  * The workspace digits start near the logo. Super+2 is `<M-2>`.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots with the marker in slots 1, 2, 1 (with a bright 2), 3 and 7; the final screenshot with 1–5 only
+  * On success
+  ** The filled marker on 1, then 2, then 1 with a bright 2, then 3, then 7, then back to 1 through 5
   * If unsuccessful
-  ** Screenshot where the marked slot disagrees with the workspace on screen
+  ** The filled slot not matching the workspace on screen
 covers: shell/plugins/bar/widgets/Workspaces.qml (workspaceIds, focused glyph, occupied opacity, focusWorkspace); default/hypr/bindings/tiling.lua Super+1..10
 
 ### bar-toggle-hide-and-show   [VM-OK]

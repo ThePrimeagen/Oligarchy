@@ -138,14 +138,14 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `media-keys-via-wtype-dummy-sink-no-backlight-touchpad`
 - [x] `screenshot-print-region-keyboard-picker-and-cancel`
 - [x] `capture-cli-screenshot-modes-copy-save-and-dir`
-- [ ] `screenshot-dir-override-uwsm-env`
-- [ ] `screenrecording-alt-print-start-stop-cpu-encode`
-- [ ] `screenrecording-refusals-and-webcam-absent`
-- [ ] `color-picker-and-ocr-print-chords`
-- [ ] `qr-code-capture-decode-and-none-found`
-- [ ] `bar-default-widgets-on-vm`
-- [ ] `bar-indicators-reveal-and-toggle`
-- [ ] `workspaces-indicator-follows-super-number`
+- [x] `screenshot-dir-override-uwsm-env`
+- [x] `screenrecording-alt-print-start-stop-cpu-encode`
+- [x] `screenrecording-refusals-and-webcam-absent`
+- [x] `color-picker-and-ocr-print-chords`
+- [x] `qr-code-capture-decode-and-none-found`
+- [x] `bar-default-widgets-on-vm`
+- [x] `bar-indicators-reveal-and-toggle`
+- [x] `workspaces-indicator-follows-super-number`
 - [ ] `bar-toggle-hide-and-show`
 - [ ] `bar-drag-to-edge-and-widget-reorder`
 - [ ] `bar-custom-command-module`
