@@ -40,7 +40,7 @@ export const requiredRedacted = (
 
 export const oligarchyToken = requiredRedacted("OLIGARCHY_TOKEN");
 export const databaseUrl = requiredRedacted("DATABASE_URL");
-// The automation server viz sends its aborts to; read when A is pressed, so viz opens without it.
+// The automation server viz sends its aborts to; read when a is pressed, so viz opens without it.
 export const automationServerUrl = required("AUTOMATION_SERVER_URL");
 export const linearApiToken = requiredRedacted("LINEAR_API_TOKEN");
 export const linearWebhookSecret = requiredRedacted("LINEAR_WEBHOOK_SECRET");
