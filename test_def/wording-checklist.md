@@ -186,14 +186,14 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `clipboard-history-capture-rules`
 - [x] `clipboard-watchers-survive-shell-restart`
 - [x] `universal-clipboard-super-c-v-terminal-and-gui`
-- [ ] `emoji-picker-search-inserts-and-cancels`
-- [ ] `polkit-dialog-accepts-rejects-and-cancels`
-- [ ] `clock-format-ring-bar-set-and-timezone`
-- [ ] `bar-cli-position-transparent-set-move-and-rejections`
-- [ ] `plugin-validate-rejects-bad-manifests`
-- [ ] `notification-icon-slot-image-themed-glyph`
-- [ ] `dev-gallery-controls-walk-and-dropdowns`
-- [ ] `agent-invitation-toast-once`
+- [x] `emoji-picker-search-inserts-and-cancels`
+- [x] `polkit-dialog-accepts-rejects-and-cancels`
+- [x] `clock-format-ring-bar-set-and-timezone`
+- [x] `bar-cli-position-transparent-set-move-and-rejections`
+- [x] `plugin-validate-rejects-bad-manifests`
+- [x] `notification-icon-slot-image-themed-glyph`
+- [x] `dev-gallery-controls-walk-and-dropdowns`
+- [x] `agent-invitation-toast-once`
 - [ ] `theme-switch-menu-and-hotkey`
 - [ ] `theme-concurrent-switch-serialises`
 - [ ] `theme-switch-cli-list-renders-and-rejects`

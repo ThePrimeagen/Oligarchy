@@ -8102,28 +8102,61 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter, run `printf marker | wl-copy; sleep 1`, then type `echo ` (trailing space, no Enter). Press Super+Ctrl+E: within 15 s a card `Search emojis…` with a grid of emoji cells; the first cell is highlighted.
-  * Type `thumbs`: the grid narrows to thumbs-up/down variants. Press Enter: the picker closes and 👍 appears after `echo `. Press Enter in the terminal: the emoji is echoed back.
-  ** A box glyph still counts if the echoed line contains a non-ASCII character.
-  * Run `wl-paste` → `marker` (the clipboard is unchanged). Press Super+Ctrl+V: `marker` is the top entry and the emoji is NOT listed anywhere in the history. Escape.
-  * Type `echo ` again and press Super+Ctrl+E; press Right three times, Down twice, Left once: the highlight moves one cell per Right/Left and one row per Down. Move the mouse over a cell (it highlights) and click it: the picker closes and that emoji appears at the prompt. Ctrl+U.
-  * Press Super+Ctrl+E, type `rocket`, then Escape: the picker closes and the prompt stays empty. Press Super+Ctrl+E, type `qqqq`: `No matches for “qqqq”`; press Escape once: the grid returns; Escape again: closed, nothing inserted.
-  * Press Super+Ctrl+E, then click the dark scrim outside the card: closed, nothing inserted. Press Super+Ctrl+E twice: it opens, then closes (the hotkey toggles). Press Super+Space → Trigger → Emoji: the same picker opens; Escape.
-  * Unhappy path: with the picker open type `zzzzqq` (no results) and press Enter: nothing is inserted and the picker stays or closes cleanly — no crash. Escape.
-  * Close the terminal with Super+W; the desktop is as at the start.
+  * Press Super+Enter. A terminal opens.
+  * Type `printf marker | wl-copy; sleep 1` and press Return.
+  * Type `echo ` with a trailing space. Do not press Enter.
+  * Press Super+Ctrl+E. The emoji picker opens. The first cell is highlighted.
+  * Type `thumbs`. The grid narrows to thumbs variants.
+  * Press Enter. The picker closes. A thumbs emoji appears after `echo `.
+  * Press Enter. That emoji is printed.
+  ** A box glyph still counts if the printed line is not plain ASCII.
+  * Type `wl-paste` and press Return. The line is `marker`.
+  * Press Super+Ctrl+V. The history opens. `marker` is first. The emoji is not listed.
+  * Press Escape. The history closes.
+  * Type `echo ` with a trailing space. Do not press Enter.
+  * Press Super+Ctrl+E. The emoji picker opens.
+  * Press Right. The highlight moves one cell.
+  * Press Right. The highlight moves one cell.
+  * Press Right. The highlight moves one cell.
+  * Press Down. The highlight moves one row.
+  * Press Down. The highlight moves one row.
+  * Press Left. The highlight moves one cell.
+  * Move the pointer over a cell. That cell is highlighted.
+  * Click that cell. The picker closes. That emoji appears at the prompt.
+  * Press Ctrl+U. The line is cleared.
+  * Press Super+Ctrl+E. The emoji picker opens.
+  * Type `rocket`.
+  * Press Escape. The picker closes. The prompt stays empty.
+  * Press Super+Ctrl+E. The emoji picker opens.
+  * Type `qqqq`. The list says there are no matches.
+  * Press Escape. The full grid returns.
+  * Press Escape. The picker closes. Nothing is inserted.
+  * Press Super+Ctrl+E. The emoji picker opens.
+  * Click the dark area outside the card. The picker closes. Nothing is inserted.
+  * Press Super+Ctrl+E. The emoji picker opens.
+  * Press Super+Ctrl+E. The picker closes.
+  * Press Super+Space. The menu opens.
+  * Click Trigger.
+  * Click Emoji. The emoji picker opens.
+  * Press Escape. The picker closes.
+  * Press Super+Ctrl+E. The emoji picker opens.
+  * Type `zzzzqq`. The list says there are no matches.
+  * Press Enter. Nothing is inserted. Nothing crashes.
+  * Press Escape. The picker closes if it is still open.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Super+Ctrl+E is `<M-C-e>`. The insert is a Shift+Insert paste of a transient clipboard, so the terminal must be the focused window when the picker opens — hover it (`mouse move`) first. Cells are about 44 px; ./client-with-image after each arrow shows the highlighted cell. The overlay opens without animation.
+  * Super+Ctrl+E is `<M-C-e>`. The terminal must have focus before the picker opens.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of the full grid; the `thumbs` grid; the terminal with 👍 typed and echoed; the clipboard picker without the emoji; the highlight after the arrow sequence; the terminal with the clicked emoji; the prompt unchanged after Escape and after the scrim click; the `No matches` state; the picker from the menu
+  * On success
+  ** The grid, the thumbs filter, the emoji printed, `marker` still on the clipboard and not replaced by the emoji in history, the highlight moving, a clicked emoji inserted, and cancel by Escape and by the outside click inserting nothing
   * If unsuccessful
-  ** Screenshot showing nothing inserted (note whether the terminal lost focus), the emoji in history, the highlight not moving, or a cancel path inserting something
+  ** Nothing inserted, the emoji in history, or a cancel that inserts something
 covers: shell/plugins/emojis/Emojis.qml (setFilter, applySelected, select, selectRow, MouseArea, dismiss, empty-state Column); shell/plugins/emojis/EmojiSearch.js; bin/omarchy-menu-emoji; bin/omarchy-menu-emoji-insert; default/hypr/bindings/utilities.lua:3; default/hypr/apps/omarchy-shell.lua:10; default/omarchy/omarchy-menu.jsonc trigger.emoji; test/shell.d/emojis-test.sh; test/acceptance.d/shell-surfaces-test.sh:24-32; manual/07:77-78,338
 
 ### polkit-dialog-accepts-rejects-and-cancels   [VM-OK]
@@ -8133,27 +8166,29 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `pkexec /usr/bin/true; echo "exit=$?"`: the screen dims and a one-line card appears in the centre — a lock glyph and a masked field with placeholder `Enter password`; a small pill above it reads `Authorize running '/usr/bin/true'`. No `Swipe your finger` wording appears (the VM has no reader).
-  * Click on the dimmed background away from the card: the dialog stays (the scrim only refocuses the field).
-  * Type `wrongpass` and press Enter: after a moment the card shakes, the lock and text turn red and the placeholder reads `Wrong` for about a second; the field is empty and still focused. The terminal has not printed `exit=` yet.
-  * Type `prime` and press Enter: the placeholder briefly reads `Checking...` and the dialog closes; the terminal shows `exit=0`.
-  * Run `pkexec /usr/bin/true; echo "exit=$?"` again and press Escape when the dialog appears: it closes within half a second and the terminal prints an authorization error (e.g. `Not authorized` / `Request dismissed`) and `exit=126`. Run it once more and press Escape again: same result, no leftover scrim.
-  * Unhappy path: a wrong password yielding `exit=0`, a dialog that will not close on Escape, or a terminal that hangs after Escape must be reported as critical.
-  * Close the terminal with Super+W; the desktop is as before.
+  * Press Super+Enter. A terminal opens.
+  * Type `pkexec /usr/bin/true; echo "exit=$?"` and press Return. A password dialog appears. It names `/usr/bin/true`.
+  * Click the dimmed area away from the card. The dialog stays.
+  * Type `wrongpass` and press Enter. The dialog says the password is wrong. The field is empty. The terminal has not printed `exit=` yet.
+  * Type `prime` and press Enter. The dialog closes. The last line is `exit=0`.
+  * Type `pkexec /usr/bin/true; echo "exit=$?"` and press Return. The password dialog appears.
+  * Press Escape. The dialog closes. The last line is `exit=126`.
+  * Type `pkexec /usr/bin/true; echo "exit=$?"` and press Return. The password dialog appears.
+  * Press Escape. The dialog closes. The last line is `exit=126`. No scrim remains.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The dialog is a small centred Quickshell window that holds keyboard focus exclusively; no click is needed before typing. Screenshot right after each Enter to catch `Wrong` (shown 1.2 s) and `Checking...`.
-  * Stay under ~5 wrong tries per test: faillock (`deny=10`, 120 s) is shared with the lock screen and sudo.
+  * Screenshot right after Enter to catch the wrong-password state. Stay under five wrong tries.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshot of the dialog with the exact `Authorize running '/usr/bin/true'` pill and dots in the field; the dialog unmoved after the scrim click; the red `Wrong` state; the terminal with `exit=0` after the retry; the error text and `exit=126` twice; the clean desktop
+  * On success
+  ** The dialog naming `/usr/bin/true`, the dialog staying after the outside click, the wrong password rejected, `exit=0` after `prime`, and `exit=126` twice
   * If unsuccessful
-  ** Screenshot of the raw `Authentication is needed to run …` message, a fingerprint prompt, the dialog accepting the wrong password or closing without a retry, or a pkexec error in the terminal (`No session for cookie` or similar); `./client get-serial`; `omarchy-version`
+  ** The wrong password accepted, or Escape leaving `pkexec` running
 covers: shell/plugins/polkit/PolkitAgent.qml (beginFlow, submitResponse, justification pill, scrim MouseArea, triggerFailureFeedback, errorFlash, shakeAnimation, cancelRequest, closeTimer); shell/plugins/polkit/PolkitModel.js (authorizationLabel); etc/sudoers.d/omarchy-dns (why the DNS pills do not trigger it); test/shell.d/polkit-test.sh; manual/37-hardware-authentication.md
 
 ### clock-format-ring-bar-set-and-timezone   [VM-OK]
@@ -8163,29 +8198,57 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Hover the clock label: tooltip `Right-click to toggle format`. Open a terminal with Super+Enter and run `timedatectl show -p Timezone --value; date` — note the zone (ORIGINAL); the clock reads like `Friday 13:12` and matches `date` to the minute. Run `jq -r '.bar.layout.center[] | select((.id // .) == "omarchy.clock") | .format' ~/.config/omarchy/shell.json` → `dddd HH:mm` (or no file on a fresh disk).
-  * Right-click the clock: the 12-hour twin (`Friday 1:12 PM`); re-run the jq → `dddd h:mm AP`. Right-click again: seconds appear and tick (two screenshots 2 s apart differ); jq → `dddd HH:mm:ss`.
-  * Right-click seven more times, screenshotting each: `dddd h:mm:ss AP`, `HH:mm`, `h:mm AP`, `ddd d MMM HH:mm`, `ddd d MMM h:mm AP`, `d MMMM 'W'ww yyyy` (e.g. `18 September W38 2026`, day without a leading zero), `yyyy-MM-dd HH:mm`. Right-click once more: back to `dddd HH:mm` — the ring wrapped and the label matches the first screenshot exactly.
-  ** The bar re-centres as the label width changes; that is expected. Wait a second after each right-click so the label has redrawn.
-  * Run `omarchy bar set omarchy.clock format "yyyy-MM-dd HH:mm"` → `Set format on omarchy.clock`; the clock shows the ISO date and time within two seconds. Run `omarchy bar set omarchy.clock format "dddd h:mm AP"` → `Friday 1:07 PM`-style. Run `omarchy bar set omarchy.clock format ""; echo "exit=$?"` and record the behaviour (error or unchanged clock).
-  * Unhappy path: run `omarchy bar set omarchy.nope format "HH:mm"; echo "exit=$?"` → the command fails and the clock is unchanged.
-  * Middle-click the clock: the menu opens as a timezone picker (rows like `Europe/Copenhagen`). Press Escape until closed, choosing nothing: the clock time did not change zone.
-  * Press Super+Space → Update → Timezone; type `Tokyo` and press Enter on `Asia/Tokyo`: NO password prompt (passwordless since 4.0.2), a notification `Timezone is now set to Asia/Tokyo`, and the clock jumps to Tokyo time. Open the picker again and press Escape: the clock stays on Tokyo time. Open the picker, type the ORIGINAL zone and press Enter: the notification and the clock are back to the original time (`date` agrees).
-  * Left-click the clock: the calendar opens; left-click again: closed. Press Super+Ctrl+Alt+D twice: it toggles the same way.
-  * Round trip: run `rm -f ~/.config/omarchy/shell.json`: the clock returns to `<Weekday> HH:MM`; `timedatectl show -p Timezone --value` prints ORIGINAL. Close the terminal with Super+W.
+  * Hover the clock. The tooltip says to right-click to toggle the format.
+  * Press Super+Enter. A terminal opens.
+  * Type `timedatectl show -p Timezone --value` and press Return. Note the zone.
+  * Type `date` and press Return. The clock matches it to the minute.
+  * Type `jq -r '.bar.layout.center[] | select((.id // .) == "omarchy.clock") | .format' ~/.config/omarchy/shell.json` and press Return. Record the format, or record that the file is absent.
+  * Right-click the clock. The label switches to 12-hour time.
+  * Right-click the clock. Seconds appear.
+  * Wait 2 seconds. The seconds have changed.
+  * Right-click the clock. The label changes.
+  * Right-click the clock. The label changes.
+  * Right-click the clock. The label changes.
+  * Right-click the clock. The label changes.
+  * Right-click the clock. The label changes.
+  * Right-click the clock. The label shows the ISO week.
+  * Right-click the clock. The label shows the ISO date.
+  * Right-click the clock. The label matches the format from the start.
+  * Type `omarchy bar set omarchy.clock format "yyyy-MM-dd HH:mm"` and press Return. The line says the format was set. The clock shows that format.
+  * Type `omarchy bar set omarchy.clock format "dddd h:mm AP"` and press Return. The clock shows 12-hour time.
+  * Type `omarchy bar set omarchy.clock format ""; echo "exit=$?"` and press Return. Record whether it errors or leaves the clock unchanged.
+  * Type `omarchy bar set omarchy.nope format "HH:mm"; echo "exit=$?"` and press Return. The command fails. The clock does not change.
+  * Middle-click the clock. A timezone picker opens.
+  * Press Escape. The picker closes. The clock's zone does not change.
+  * Press Super+Space. The menu opens.
+  * Click Update.
+  * Click Timezone. The timezone list opens.
+  * Type `Tokyo`.
+  * Press Enter on `Asia/Tokyo`. No password dialog appears. A notification says the timezone is `Asia/Tokyo`. The clock jumps.
+  * Middle-click the clock. The timezone picker opens.
+  * Press Escape. The clock stays on Tokyo time.
+  * Middle-click the clock. The timezone picker opens.
+  * Type the original zone and press Enter. A notification names that zone. The clock matches `date`.
+  * Click the clock. The calendar opens.
+  * Click the clock. The calendar closes.
+  * Press Super+Ctrl+Alt+D. The calendar opens.
+  * Press Super+Ctrl+Alt+D. The calendar closes.
+  * Type `rm -f ~/.config/omarchy/shell.json` and press Return. The clock returns to weekday and 24-hour time.
+  * Type `timedatectl show -p Timezone --value` and press Return. The zone is the original one.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Use `./client mouse click --button right|middle` on the clock text at x≈0.5, y≈0.01; check the position first. Count clicks — the ring has ten entries. The timezone picker filters fuzzily as you type; the highlighted row is what Enter selects. Do not select a zone from the middle-click picker; if it is a terminal list, Escape or Ctrl+C cancels.
+  * Right-click the clock text. Wait a second after each click. Do not pick a zone from the middle-click picker except when the step says to.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of the tooltip; all ten formats in order with the matching `jq` values, including the ticking seconds pair and the `W38` week label; the final label equal to the first; the ISO and 12-hour formats after `bar set`; the empty-format result; the failure line for `omarchy.nope` with the clock unchanged; the timezone picker open and the unchanged clock after cancel; the Tokyo notification with the changed clock, the Escape no-op, the restored clock; the calendar by click and hotkey; the clock back to `<Weekday> HH:MM` and the original zone
+  * On success
+  ** Ten format changes ending on the starting label, the formats set from the CLI, the unknown widget refused, the picker cancelled without a zone change, Tokyo applied with no password dialog, the original zone restored, and the calendar opened by click and by hotkey
   * If unsuccessful
-  ** Screenshot of a format out of order, a value not saved, a frozen seconds label, a password/polkit prompt on the timezone change, a clock that does not update, or a missing notification; `./client get-serial`
+  ** A format that does not wrap, a password dialog on the timezone change, or a clock that does not move
 covers: shell/plugins/panels/clock/BarWidget.qml:159-160 (cycleFormat, onPressed, formatted, showsSeconds); shell/plugins/panels/clock/Model.js (CLOCK_FORMATS, clockFormatRing, nextClockFormat, clockNeedsSeconds, isoWeekLiteral); bin/omarchy-bar cmd_set; shell/shell.qml (setBarWidget, updateEntryInline); shell/plugins/bar/BarModel.inlineSettingsDelta; bin/omarchy-menu-timezone; etc/sudoers.d/omarchy-tzupdate; default/omarchy/omarchy-menu.jsonc (update.timezone); default/hypr/bindings/utilities.lua:101; config/omarchy/shell.json (clock); test/shell.d/clock-test.sh (format ring, seconds tick, persistence, click routing, SUPER+CTRL+ALT+D); test/shell.d/config-test.sh (clock formatAlt); manual/05:21,46,57,59; manual/46:21-27
 
 ### bar-cli-position-transparent-set-move-and-rejections   [VM-OK]
@@ -8195,29 +8258,49 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `omarchy bar position bottom; jq .bar.position ~/.config/omarchy/shell.json` → `Bar position set to bottom`, `"bottom"`; the bar is along the bottom edge and the terminal re-tiled to the top (allow 20 s).
-  ** This first command creates `~/.config/omarchy/shell.json`, canonical from now on; the tiled terminal moves each time the bar moves.
-  * Run `omarchy bar position left`: the bar is a narrow vertical strip on the left with the clock stacked `HH` `—` `mm` and the workspaces at the top. Run `omarchy bar position top`: back on top.
-  * Run `omarchy bar transparent toggle; jq .bar.transparent ~/.config/omarchy/shell.json` → the bar background is see-through, `true`; repeat → opaque, `false`.
-  * Run `omarchy-bar set omarchy.clock format "HH:mm:ss"` → `Set format on omarchy.clock`; the clock shows seconds ticking. Run `omarchy-bar move omarchy.clock left` → `Moved omarchy.clock`; the clock sits in the left section after the workspaces. Run `omarchy-bar move omarchy.clock --section center --index 0` → clock back in the centre, first.
-  * Run `omarchy-bar put omarchy.spacer --section right --index 0` → `omarchy.spacer is on the bar` (an invisible 12 px gap appears before the right widgets); `jq '.bar.layout.right[0]' ~/.config/omarchy/shell.json` → the spacer. Run `omarchy bar put omarchy.keyboard-layout --after omarchy.clock` → `omarchy.keyboard-layout is on the bar` (the pill stays hidden while only one layout is configured; record it if it shows).
-  * Unhappy path — first `cp ~/.config/omarchy/shell.json /tmp/shell.before`, then each with `; echo "exit=$?"`: `omarchy bar position sideways` → `position must be top, bottom, left, or right`, non-zero, bar unmoved; `omarchy-bar move omarchy.clock nowhere` → `section must be left, center, or right`, `exit=1`; `omarchy-bar set omarchy.clock` → `set requires a setting key`, `exit=1`; `omarchy-bar put nosuch.widget` → `nosuch.widget is not a known widget; run 'omarchy plugin list'`, `exit=1`; `omarchy bar use local.nonexistent-bar` → non-zero naming the unknown bar; `omarchy bar move omarchy.clock left --section right` → non-zero (positional and `--section` together); `omarchy bar set omarchy.bluetooth broken '{' --json` → non-zero (malformed JSON); `omarchy bar set omarchy.bluetooth broken 'false null' --json` → non-zero (two values). Then `cmp /tmp/shell.before ~/.config/omarchy/shell.json && echo unchanged; rm /tmp/shell.before` → `unchanged` and the bar looks as it did.
-  * Run `omarchy bar defaults` → `Restored the default Omarchy bar`: clock format back to weekday + HH:mm, spacer and keyboard-layout entry gone, top edge, opaque. Run `jq -c '.bar.layout.right | map(.id // .)' ~/.config/omarchy/shell.json; omarchy installed service tailscale; echo t=$?; omarchy installed service dropbox; echo d=$?` → the right section starts `omarchy.tray` then `omarchy.agents` with no `omarchy.tailscale`/`omarchy.dropbox`, `t=1`, `d=1` (widgets for services that are not installed are left out of the defaults).
-  * Round trip: `rm ~/.config/omarchy/shell.json` — the bar is unchanged (shipped defaults are top) and the disk is as found. Close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy bar position bottom` and press Return. The line says the position is bottom. The bar moves to the bottom.
+  * Type `jq .bar.position ~/.config/omarchy/shell.json` and press Return. The line is `"bottom"`.
+  * Type `omarchy bar position left` and press Return. The bar becomes a vertical strip on the left.
+  * Type `omarchy bar position top` and press Return. The bar returns to the top.
+  * Type `omarchy bar transparent toggle` and press Return. The bar background becomes transparent.
+  * Type `jq .bar.transparent ~/.config/omarchy/shell.json` and press Return. The line is `true`.
+  * Type `omarchy bar transparent toggle` and press Return. The bar background is opaque.
+  * Type `jq .bar.transparent ~/.config/omarchy/shell.json` and press Return. The line is `false`.
+  * Type `omarchy-bar set omarchy.clock format "HH:mm:ss"` and press Return. The clock shows seconds.
+  * Type `omarchy-bar move omarchy.clock left` and press Return. The clock moves to the left section.
+  * Type `omarchy-bar move omarchy.clock --section center --index 0` and press Return. The clock is back in the center.
+  * Type `omarchy-bar put omarchy.spacer --section right --index 0` and press Return. The line says the spacer is on the bar.
+  ** If the command is unknown, report "absent on this build" and skip the put steps.
+  * Type `jq '.bar.layout.right[0]' ~/.config/omarchy/shell.json` and press Return. The first right entry is the spacer.
+  * Type `omarchy bar put omarchy.keyboard-layout --after omarchy.clock` and press Return. The line says it is on the bar.
+  * Type `cp ~/.config/omarchy/shell.json /tmp/shell.before` and press Return.
+  * Type `omarchy bar position sideways; echo "exit=$?"` and press Return. The output says the position must be an edge. The exit is not `0`. The bar does not move.
+  * Type `omarchy-bar move omarchy.clock nowhere; echo "exit=$?"` and press Return. The output says the section must be left, center, or right. The last line is `exit=1`.
+  * Type `omarchy-bar set omarchy.clock; echo "exit=$?"` and press Return. The output says a setting key is required. The last line is `exit=1`.
+  * Type `omarchy-bar put nosuch.widget; echo "exit=$?"` and press Return. The output says it is not a known widget. The last line is `exit=1`.
+  * Type `omarchy bar use local.nonexistent-bar; echo "exit=$?"` and press Return. The command fails. It names the unknown bar.
+  * Type `omarchy bar move omarchy.clock left --section right; echo "exit=$?"` and press Return. The exit is not `0`.
+  * Type `omarchy bar set omarchy.bluetooth broken '{' --json; echo "exit=$?"` and press Return. The exit is not `0`.
+  * Type `omarchy bar set omarchy.bluetooth broken 'false null' --json; echo "exit=$?"` and press Return. The exit is not `0`.
+  * Type `cmp /tmp/shell.before ~/.config/omarchy/shell.json && echo unchanged` and press Return. The line is `unchanged`.
+  * Type `rm /tmp/shell.before` and press Return.
+  * Type `omarchy bar defaults` and press Return. The line says the default bar was restored. The clock is weekday and 24-hour time. The bar is on top.
+  * Type `rm ~/.config/omarchy/shell.json` and press Return. The bar stays on top.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * `omarchy bar` and `omarchy-bar` are the same program; each command changes the bar within a second — wait 2 s before the screenshot. Keep the single quotes around `'{'` and `'false null'` exactly.
-  * On the 4.0.2 disk `omarchy bar put`/`transparent`/`use` may be missing; report `Unknown Omarchy command` as a version gap and continue.
+  * `omarchy bar` and `omarchy-bar` are the same program. A missing `put` or `transparent` command on this build is a version gap, not a failure of the other commands.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of the bar at bottom with `"bottom"`, at left with the vertical clock, back on top; transparent then opaque with the jq values; the seconds clock; the clock in the left section and back in the centre; the shell.json spacer entry; the eight refusals with their messages and `unchanged`; the restored bar with the jq/status values; the bar unchanged after the file is removed
+  * On success
+  ** The bar at the bottom, on the left, and back on top; transparent then opaque; the seconds clock; the clock moved and returned; the refusals leaving `shell.json` unchanged; and the restored bar
   * If unsuccessful
-  ** Screenshot of the bar in the wrong place, a refusal exiting 0 or a changed shell.json (`diff /tmp/shell.before ~/.config/omarchy/shell.json`), `jq .bar.layout ~/.config/omarchy/shell.json` and the bar screenshot that disagrees; `omarchy-version`
+  ** A refusal that exits `0`, or `shell.json` changing after a refusal
 covers: bin/omarchy-bar (cmd_position, transparent, cmd_set, cmd_move, cmd_put, use, cmd_defaults); shell/plugins/bar/Bar.qml (applyBarConfig, normalizePosition, verticalBar); shell/plugins/panels/clock/BarWidget.qml verticalFormat; bin/omarchy-plugin-catalog; bin/omarchy-installed-service-*; config/omarchy/shell.json; test/shell.d/config-test.sh (move/position/transparent/defaults, optional service widgets, bar use/move/set rejections); test/shell.d/bar-test.sh (put through a ready shell); test/shell.d/installed-service-test.sh; test/shell.d/keyboard-layout-test.sh (label); manual/05-the-top-bar.md
 
 ### plugin-validate-rejects-bad-manifests   [VM-OK]
@@ -8227,41 +8310,44 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `omarchy plugin validate --help` → the usage paragraph lists the checks, exit 0. Define the helper: `mk(){ mkdir -p /tmp/pv/$1; printf '%s\n' "$2" > /tmp/pv/$1/manifest.json; touch /tmp/pv/$1/W.qml; }`.
-  * Build the cases, one line each:
-    `mk good '{"schemaVersion":1,"id":"t.good","name":"G","version":"1","kinds":["bar-widget"],"entryPoints":{"barWidget":"W.qml"},"barWidget":{"defaultSection":"right"}}'`
-    `mk badjson '{oops'`
-    `mk badschema '{"schemaVersion":"1","id":"t.s","name":"S","version":"1","kinds":["bar-widget"],"entryPoints":{"barWidget":"W.qml"}}'`
-    `mk noname '{"schemaVersion":1,"id":"t.m","kinds":["service"],"entryPoints":{"service":"W.qml"}}'`
-    `mk reserved '{"schemaVersion":1,"id":"omarchy.evil","name":"E","version":"1","kinds":["bar-widget"],"entryPoints":{"barWidget":"W.qml"}}'`
-    `mk nofile '{"schemaVersion":1,"id":"t.n","name":"N","version":"1","kinds":["bar-widget"],"entryPoints":{"barWidget":"Nope.qml"}}'`
-    `mk nokind '{"schemaVersion":1,"id":"t.k","name":"K","version":"1","kinds":["bar-widget","panel"],"entryPoints":{"barWidget":"W.qml"}}'`
-    `mk wrongkind '{"schemaVersion":1,"id":"t.w","name":"W","version":"1","kinds":["bar-widget"],"entryPoints":{"service":"W.qml"}}'`
-    `mk abspath '{"schemaVersion":1,"id":"t.a","name":"A","version":"1","kinds":["bar-widget"],"entryPoints":{"barWidget":"/etc/passwd"}}'`
-    `mk dotdot '{"schemaVersion":1,"id":"t.d","name":"D","version":"1","kinds":["service"],"entryPoints":{"service":"../W.qml"}}'`
-    `mk nokinds '{"schemaVersion":1,"id":"t.e","name":"E","version":"1","kinds":[],"entryPoints":{}}'`
-    `mk badsection '{"schemaVersion":1,"id":"t.b","name":"B","version":"1","kinds":["bar-widget"],"entryPoints":{"barWidget":"W.qml"},"barWidget":{"defaultSection":"bottom"}}'`
-    `mk symlink '{"schemaVersion":1,"id":"t.l","name":"L","version":"1","kinds":["bar-widget"],"entryPoints":{"barWidget":"W.qml"}}'; ln -s /etc/passwd /tmp/pv/symlink/link`
-  * Run `for d in good badjson badschema noname reserved nofile nokind wrongkind abspath dotdot nokinds badsection symlink missing; do echo "== $d"; omarchy-plugin-validate /tmp/pv/$d; echo "exit=$?"; done 2>&1 | sudo tee /dev/ttyS0` (password `prime`) and read the serial log.
-  ** `good` → no message, `exit=0`. Every other case `exit=1` with, respectively: `manifest.json is not valid JSON`; `unsupported or missing schemaVersion (expected 1)`; `manifest missing required field 'name'`; `plugin id 'omarchy.evil' uses the reserved omarchy.* namespace`; `entry point file not found: 'Nope.qml'`; `kind 'panel' requires an 'entryPoints.panel' to load`; `kind 'bar-widget' requires an 'entryPoints.barWidget' to load`; `entry point must be a relative path: '/etc/passwd'`; `entry point may not contain '..'`; `'kinds' must be a non-empty array`; `'barWidget.defaultSection' must be left, center, or right`; `symlinks are not allowed inside a plugin folder: /tmp/pv/symlink/link`; `plugin folder not found: /tmp/pv/missing`.
-  * Fix one in place to prove the messages track the folder: `rm /tmp/pv/symlink/link && omarchy-plugin-validate /tmp/pv/symlink; echo "exit=$?"` → silent, `exit=0`.
-  * `plugin add` honours the same rules: `cd /tmp/pv/nofile && git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -qm x && cd ~ && omarchy-plugin-add /tmp/pv/nofile --yes; echo "exit=$?"` → the `entry point file not found` line, then `omarchy-plugin-add: refusing to add: validation failed`, `exit=1`; `ls -a ~/.config/omarchy/plugins/` has no `t.n` and no `.add.tmp.*`.
-  * Unhappy path (URL guard, offline): `omarchy plugin add 'ext::sh -c id' --yes; echo "exit=$?"` → instantly `… names a git option or transport helper, not a repository.`, `exit=1` — a pause of several seconds means git ran; report it. `ls -a ~/.config/omarchy/plugins/` is unchanged.
-  * Round trip: `rm -rf /tmp/pv`; close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy plugin validate --help` and press Return. A usage paragraph appears.
+  * Type `mk(){ mkdir -p /tmp/pv/$1; printf '%s\n' "$2" > /tmp/pv/$1/manifest.json; touch /tmp/pv/$1/W.qml; }` and press Return.
+  * Type `mk good '{"schemaVersion":1,"id":"t.good","name":"G","version":"1","kinds":["bar-widget"],"entryPoints":{"barWidget":"W.qml"},"barWidget":{"defaultSection":"right"}}'` and press Return.
+  * Type `mk badjson '{oops'` and press Return.
+  * Type `mk badschema '{"schemaVersion":"1","id":"t.s","name":"S","version":"1","kinds":["bar-widget"],"entryPoints":{"barWidget":"W.qml"}}'` and press Return.
+  * Type `mk noname '{"schemaVersion":1,"id":"t.m","kinds":["service"],"entryPoints":{"service":"W.qml"}}'` and press Return.
+  * Type `mk reserved '{"schemaVersion":1,"id":"omarchy.evil","name":"E","version":"1","kinds":["bar-widget"],"entryPoints":{"barWidget":"W.qml"}}'` and press Return.
+  * Type `mk nofile '{"schemaVersion":1,"id":"t.n","name":"N","version":"1","kinds":["bar-widget"],"entryPoints":{"barWidget":"Nope.qml"}}'` and press Return.
+  * Type `mk nokind '{"schemaVersion":1,"id":"t.k","name":"K","version":"1","kinds":["bar-widget","panel"],"entryPoints":{"barWidget":"W.qml"}}'` and press Return.
+  * Type `mk wrongkind '{"schemaVersion":1,"id":"t.w","name":"W","version":"1","kinds":["bar-widget"],"entryPoints":{"service":"W.qml"}}'` and press Return.
+  * Type `mk abspath '{"schemaVersion":1,"id":"t.a","name":"A","version":"1","kinds":["bar-widget"],"entryPoints":{"barWidget":"/etc/passwd"}}'` and press Return.
+  * Type `mk dotdot '{"schemaVersion":1,"id":"t.d","name":"D","version":"1","kinds":["service"],"entryPoints":{"service":"../W.qml"}}'` and press Return.
+  * Type `mk nokinds '{"schemaVersion":1,"id":"t.e","name":"E","version":"1","kinds":[],"entryPoints":{}}'` and press Return.
+  * Type `mk badsection '{"schemaVersion":1,"id":"t.b","name":"B","version":"1","kinds":["bar-widget"],"entryPoints":{"barWidget":"W.qml"},"barWidget":{"defaultSection":"bottom"}}'` and press Return.
+  * Type `mk symlink '{"schemaVersion":1,"id":"t.l","name":"L","version":"1","kinds":["bar-widget"],"entryPoints":{"barWidget":"W.qml"}}'; ln -s /etc/passwd /tmp/pv/symlink/link` and press Return.
+  * Type `for d in good badjson badschema noname reserved nofile nokind wrongkind abspath dotdot nokinds badsection symlink missing; do echo "== $d"; omarchy-plugin-validate /tmp/pv/$d; echo "exit=$?"; done 2>&1 | sudo tee /dev/ttyS0` and press Return.
+  ** If a password is asked, type `prime` and press Return.
+  * Read the serial log. `good` exits `0` with no message. Every other case exits `1` and names the defect.
+  * Type `rm /tmp/pv/symlink/link && omarchy-plugin-validate /tmp/pv/symlink; echo "exit=$?"` and press Return. There is no message. The last line is `exit=0`.
+  * Type `cd /tmp/pv/nofile && git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -qm x && cd ~ && omarchy-plugin-add /tmp/pv/nofile --yes; echo "exit=$?"` and press Return. The output says validation failed. The last line is `exit=1`.
+  * Type `ls -a ~/.config/omarchy/plugins/` and press Return. There is no `t.n` directory.
+  * Type `omarchy plugin add 'ext::sh -c id' --yes; echo "exit=$?"` and press Return. The refusal is immediate. The last line is `exit=1`.
+  * Type `rm -rf /tmp/pv` and press Return.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The serial log is easier to read than fourteen screenshots; still screenshot the terminal. Each failure message is one line on stderr; the exit code is the assertion. On an older disk the `kind … requires` message may be absent (HEAD feature) — report the actual text and `omarchy-version`. Set `OMARCHY_PATH=/usr/share/omarchy` explicitly if the command complains about the path.
-  * The local no-manifest repo stands in for cloning a real repository without a manifest (e.g. `omacom/ttfx`), so the test needs no network.
+  * Read the serial log for the case names and exit codes. A pause of several seconds on the `ext::` command means git ran. Report that.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Serial log with the fourteen `== case` blocks, exit codes and the exact messages above; the symlink case passing after the fix; the terminal showing the refused add and the clean plugins directory; the instant `ext::` refusal
+  * On success
+  ** `good` exits `0`, every other case exits `1` with a reason, the symlink case passes after the link is removed, the bad plugin is not installed, and the `ext::` URL is refused immediately
   * If unsuccessful
-  ** Any broken case exiting 0, `good` exiting 1, a generic error without the named entry point, a staged directory left after the refused add, or a clone running for the helper URL; `omarchy-version`
+  ** A broken case exiting `0`, `good` exiting `1`, or a plugin directory left after the refused add
 covers: bin/omarchy-plugin-validate; bin/omarchy-plugin-add:96-128 (validate + stage cleanup); bin/omarchy-git-url-check; shell/services/PluginRegistry.qml validateManifest (mirrored rules); test/shell.d/plugin-validate-test.sh; test/shell.d/plugins-test.sh; manual/32-shell-plugins.md (Writing your own — validate)
 
 ### notification-icon-slot-image-themed-glyph   [VM-OK]
@@ -8271,26 +8357,28 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `omarchy-notification-send -u critical --image "$OMARCHY_PATH/applications/icons/Docker.png" "With image" "Docker logo on the left"`: the card shows the whale image in a ~40 px slot left of the text.
-  ** If that file is missing on this disk use `~/.local/state/omarchy/current/background` (the wallpaper) instead.
-  * Run `omarchy-notification-send -u critical -i dialog-information "Themed icon" "From the icon theme"`: an information icon in the slot.
-  * Run `omarchy-notification-send -u critical -g "K" "Glyph fallback" "Letter K as glyph"`: a large `K` in the slot.
-  * Run `omarchy-notification-send -u critical -g "K" "Compact glyph"`: a single-line card with a small `K` right before the title.
-  * Unhappy path: run `omarchy-notification-send -u critical -i no-such-icon-name-xyz "Missing icon" "Slot must collapse"`: text only — no pink or broken square and no empty gap where the icon would be.
-  * Press Super+Shift+comma: all cards gone. Close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy-notification-send -u critical --image "$OMARCHY_PATH/applications/icons/Docker.png" "With image" "Docker logo on the left"` and press Return. A toast shows an image beside the text.
+  ** If that file is missing, use `~/.local/state/omarchy/current/background` instead.
+  * Type `omarchy-notification-send -u critical -i dialog-information "Themed icon" "From the icon theme"` and press Return. A toast shows an information icon.
+  * Type `omarchy-notification-send -u critical -g "K" "Glyph fallback" "Letter K as glyph"` and press Return. A toast shows a large `K` beside the body.
+  * Type `omarchy-notification-send -u critical -g "K" "Compact glyph"` and press Return. A single-line toast shows a small `K` before the title.
+  * Type `omarchy-notification-send -u critical -i no-such-icon-name-xyz "Missing icon" "Slot must collapse"` and press Return. The toast is text only. There is no broken-image mark.
+  * Press Super+Shift+comma. No toasts remain.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Critical urgency keeps the cards up for screenshots; Nerd-Font glyphs cannot be typed by the driver, so an ASCII letter stands in for `-g`.
+  * Critical toasts stay up for the screenshot.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of the five cards: image, themed icon, large glyph, compact glyph, collapsed slot; the clean screen after dismiss-all
+  * On success
+  ** An image, a themed icon, a large glyph, a compact glyph, a collapsed slot, and no toasts after dismiss
   * If unsuccessful
-  ** Screenshot of a broken-image placeholder, an empty gap, or a card without its image
+  ** A broken-image mark, or a gap where the missing icon should have collapsed
 covers: shell/plugins/notifications/components/NotificationCard.qml (smallIconSource, iconSource, compactGlyph, slot visibility); shell/plugins/notifications/NotificationLogic.js (shouldRenderCompactGlyph, glyphFromHints); bin/omarchy-notification-send -g/-i/--image
 
 ### dev-gallery-controls-walk-and-dropdowns   [VM-OK]
@@ -8300,26 +8388,56 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `omarchy-shell shell summon omarchy.dev-gallery '{}'`: a window `Omarchy shell – dev gallery` opens beside the terminal with the heading `Omarchy shell · dev gallery`, a Conventions box, a Typography scale and component sections below.
-  * Press j eight times: the highlight walks the CursorSurface rows, the Button row, ButtonGroup, PanelActionButton, PanelToolTip, Slider …, scrolling the window as it goes. With the Slider section highlighted press l three times: the % at the right rises by 15.
-  * Press j until the `Toggle` section highlights and press Enter: the `Transparent bar` switch flips; press Enter again: it flips back. Move the mouse over the `hover me` swatch in the PanelToolTip section: the tooltip `Styled tooltip — drop into any panel` appears. Press Escape: the gallery closes.
-  * Run `omarchy-shell shell summon omarchy.dev-gallery '{"section":"dropdown"}'`: the gallery opens scrolled to the Dropdown section (`Center anchor` showing omarchy.clock) with it highlighted. Press Enter: a popup lists omarchy.clock / omarchy.weather / omarchy.power. Press j, then Enter: the trigger shows `omarchy.weather`. Press Enter again, then Escape: the popup closes and the trigger still shows `omarchy.weather`.
-  * Press j (SearchableDropdown `Add widget`) and Enter: a popup with a `Search widgets...` field. Type `wea` → only `Weather` with its description remains. Press Down, Enter: the trigger shows `Weather`.
-  * Unhappy path: press Enter, type `zzz` → `No matches`. Press Escape: the popup closes, the trigger still shows `Weather`.
-  * Click the `Center anchor` trigger with the mouse and click `omarchy.clock` in the popup: it returns to omarchy.clock. Press Escape to close the gallery; close the terminal with Super+W; the bar is unchanged (the gallery's toggle is a demo, not the real setting — confirm the bar is still opaque).
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy-shell shell summon omarchy.dev-gallery '{}'` and press Return. The dev gallery opens.
+  * Press j. The highlight moves.
+  * Press j. The highlight moves.
+  * Press j. The highlight moves.
+  * Press j. The highlight moves.
+  * Press j. The highlight moves.
+  * Press j. The highlight moves.
+  * Press j. The highlight moves.
+  * Press j. The highlight moves.
+  * Press l. The slider value rises.
+  * Press l. The slider value rises.
+  * Press l. The slider value rises.
+  * Press j until the Toggle section is highlighted.
+  * Press Enter. The switch flips.
+  * Press Enter. The switch flips back.
+  * Move the pointer over the tooltip swatch. A tooltip appears.
+  * Press Escape. The gallery closes.
+  * Type `omarchy-shell shell summon omarchy.dev-gallery '{"section":"dropdown"}'` and press Return. The gallery opens on the Dropdown section.
+  * Press Enter. A popup lists options.
+  * Press j. The highlight moves.
+  * Press Enter. The trigger shows `omarchy.weather`.
+  * Press Enter. The popup opens again.
+  * Press Escape. The popup closes. The trigger still shows `omarchy.weather`.
+  * Press j. The SearchableDropdown section is highlighted.
+  * Press Enter. A search popup opens.
+  * Type `wea`. Only Weather remains.
+  * Press Down. Weather is highlighted.
+  * Press Enter. The trigger shows `Weather`.
+  * Press Enter. The search popup opens.
+  * Type `zzz`. The list says there are no matches.
+  * Press Escape. The popup closes. The trigger still shows `Weather`.
+  * Click the Center anchor trigger. A popup opens.
+  * Click `omarchy.clock`. The trigger shows `omarchy.clock`.
+  * Press Escape. The gallery closes.
+  * Take a screenshot of the bar. It is still opaque.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * If the window opens small, press Super+F to fullscreen it for readability; PageDown/PageUp scroll the page. Use ./client-with-image after each j to see which section holds the highlight. While a popup or field is open, j/k/Enter and typing go to it, not the gallery cursor.
+  * If the gallery window is small, press Super+F. While a popup is open, keys go to the popup.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** The gallery header; the highlight on several sections; the slider % increased; the toggle flipped and restored; the tooltip; the Dropdown popup and the trigger showing omarchy.weather (still after Escape); the filtered `Weather` result; the `No matches` state; the trigger back on omarchy.clock after the mouse pick; the desktop after Escape
+  * On success
+  ** The gallery, the highlight walking, the slider rising, the toggle flipped and restored, the tooltip, `omarchy.weather` kept after Escape, Weather after the filter, no matches for `zzz`, and the trigger back on `omarchy.clock`
   * If unsuccessful
-  ** Screenshot of the gallery failing to open (terminal error), a control not responding, a popup not opening, a value changing on Escape, or the filter not narrowing; `./client get-serial`
+  ** The gallery not opening, a value changing on Escape, or the filter not narrowing
 covers: shell/plugins/dev-gallery/GalleryPanel.qml (open payload section, dropdown / searchable-dropdown sections, keyCatcher blocked); shell/Ui/PanelKeyCatcher.qml; shell/Ui/PanelSlider.qml; shell/Ui/Toggle.qml; shell/Ui/PanelToolTip.qml; shell/Ui/Dropdown.qml; shell/Ui/SearchableDropdown.qml
 
 ### agent-invitation-toast-once   [VM-PARTIAL]
@@ -8329,27 +8447,36 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `rm -f ~/.local/state/omarchy/done/agent-setup-invitation ~/.config/omarchy/defaults/agent` (fresh state).
-  * Run `bash ~/.config/omarchy/hooks/post-update.d/setup-agent.hook`: one critical toast `Set your default agent — Let your favorite agent help with Omarchy.` appears.
-  ** If the hook path is missing, use `$OMARCHY_PATH/install/user/first-run/setup-agent.hook` instead.
-  * Move the mouse onto the toast and click it: the Omarchy menu opens on `Default Agent…`; press Escape.
-  * Run `ls ~/.local/state/omarchy/done/agent-setup-invitation`: the marker exists.
-  * Run the hook again: no toast within 3 seconds (it never repeats).
-  * Unhappy path (already chosen): run `rm ~/.local/state/omarchy/done/agent-setup-invitation; mkdir -p ~/.config/omarchy/defaults; echo pi > ~/.config/omarchy/defaults/agent` and the hook once more: no toast, and `ls ~/.local/state/omarchy/done/agent-setup-invitation` fails (the marker is not written while a default is set).
-  * Round trip: run `rm ~/.config/omarchy/defaults/agent`; close the terminal with Super+W; the desktop is as before.
+  * Press Super+Enter. A terminal opens.
+  * Type `rm -f ~/.local/state/omarchy/done/agent-setup-invitation ~/.config/omarchy/defaults/agent` and press Return.
+  * Type `bash ~/.config/omarchy/hooks/post-update.d/setup-agent.hook` and press Return. A toast says to set the default agent.
+  ** If that path is missing, run `$OMARCHY_PATH/install/user/first-run/setup-agent.hook` instead.
+  * Move the pointer onto the toast.
+  * Click the toast. The menu opens on Default Agent.
+  * Press Escape. The menu closes.
+  * Type `ls ~/.local/state/omarchy/done/agent-setup-invitation` and press Return. The marker exists.
+  * Type `bash ~/.config/omarchy/hooks/post-update.d/setup-agent.hook` and press Return.
+  * Wait 3 seconds. No toast appears.
+  * Type `rm ~/.local/state/omarchy/done/agent-setup-invitation` and press Return.
+  * Type `mkdir -p ~/.config/omarchy/defaults && echo pi > ~/.config/omarchy/defaults/agent` and press Return.
+  * Type `bash ~/.config/omarchy/hooks/post-update.d/setup-agent.hook` and press Return.
+  * Wait 3 seconds. No toast appears.
+  * Type `ls ~/.local/state/omarchy/done/agent-setup-invitation` and press Return. The marker is not there.
+  * Type `rm ~/.config/omarchy/defaults/agent` and press Return.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Toasts appear top-right under the bar; the toast is critical, so it waits for the click. The first-run "Set your default agent" notification may already be consumed on the minted disk — the `rm` re-arms it.
+  * The toast is critical, so it stays until it is clicked.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of the one toast; the Default Agent submenu after the click; the marker present; no toast on rerun; no toast and no marker with a default set; the terminal listing
+  * On success
+  ** One invitation toast, the Default Agent menu, the marker present, no second toast, and no toast or marker while a default agent is set
   * If unsuccessful
-  ** Screenshot of a second toast, a missing marker, a marker written while a default was set, or none after re-arming
+  ** A second toast, a missing marker, or a marker written while a default was set
 covers: install/user/first-run/setup-agent.hook; bin/omarchy-done; test/shell.d/agent-invitation-test.sh
 
 # Theme and style
