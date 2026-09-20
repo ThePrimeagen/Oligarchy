@@ -263,12 +263,12 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `dev-env-go-mise-install-remove-and-unknown-name`
 - [x] `dev-env-python-with-uv-install-and-remove`
 - [x] `dev-env-rust-rustup-install-and-remove`
-- [ ] `mise-install-wrapper-and-name-guard`
+- [x] `mise-install-wrapper-and-name-guard`
 - [x] `install-docker-db-redis-and-escape-cancels-quietly`
-- [ ] `tui-install-launch-and-remove`
-- [ ] `webapp-install-cli-refuses-bad-input-escapes-and-overwrites`
-- [ ] `apps-launcher-delete-key-uninstall-confirm-and-cancel`
-- [ ] `launch-chords-missing-apps-open-installer-abort`
+- [x] `tui-install-launch-and-remove`
+- [x] `webapp-install-cli-refuses-bad-input-escapes-and-overwrites`
+- [x] `apps-launcher-delete-key-uninstall-confirm-and-cancel`
+- [x] `launch-chords-missing-apps-open-installer-abort`
 - [ ] `install-service-1password-hotkey-and-remove`
 - [ ] `install-service-signal-hotkey-and-uninstall`
 - [ ] `install-service-tailscale-blocks-at-login-then-remove`

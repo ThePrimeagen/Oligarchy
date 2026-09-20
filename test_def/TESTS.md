@@ -11663,30 +11663,60 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy-mise-install; echo rc=$?` → `Usage: omarchy-mise-install <package> [command-name [bin-name]]`, `rc=1`.
-  ** Through the router, `omarchy mise install` with no arguments prints the router's help block for the same signature instead.
-  * Refusals, each printing `… is not usable as a command name` with `rc=1`: `omarchy-mise-install somepkg ../escape; echo rc=$?`, then the same with `.hidden`, `-dash` and `"$(printf 'with\ttab')"`. Type `touch /tmp/victim; omarchy-mise-install somepkg "../../../..$PWD/../tmp/victim"; ls /tmp/victim` → refused and `/tmp/victim` still exists; `ls ~/.local/escape 2>&1` → No such file.
-  * Type `omarchy-mise-install qa-tool; echo rc=$?; cat ~/.local/bin/qa-tool; ls -l ~/.local/bin/qa-tool` → `rc=0`, the body `#!/bin/bash` / `export MISE_MINIMUM_RELEASE_AGE=0` / `mise use -g --quiet "qa-tool" || exit 1` / `exec mise x "qa-tool" -- "qa-tool" "$@"`, and an executable bit. Type `omarchy-mise-install npm:@scope/pkg qa-cmd qa-bin && cat ~/.local/bin/qa-cmd` → `mise use -g --quiet "npm:@scope/pkg"` and `exec mise x "npm:@scope/pkg" -- "qa-bin" "$@"`. Do not run these wrappers.
-  * Type `omarchy-mise-install 'npm:pkg$(touch /tmp/PWNED)end' hostile; cat ~/.local/bin/hostile; ls /tmp/PWNED 2>&1` → the package name appears quoted as data and `/tmp/PWNED` does not exist.
-  * Real first use: type `omarchy-mise-install npm:figlet figlet && figlet hello` → the first run installs node and the package (~30 MB, up to 2 min) then prints `hello` as ASCII art; `figlet again` is instant. Type `head -4 ~/.local/bin/gh` → the preinstalled stub has the same shape with `"gh"`; `ls ~/.local/bin | tr '\n' ' '` → `claude codex opencode pi gh copilot crush agy grok ghui hunk omp ori` are among the names.
-  ** A preinstalled stub behaves the same on first use: `gh --version` → mise downloads gh (~20 MB, progress) then `gh version 2.x`; `gh` → its top-level help (`Work seamlessly with GitHub from the command line.`); `gh auth status` → `You are not logged into any GitHub hosts.`; `gh repo clone nonexistent-org-omarchy-test/nonexistent` → an authentication-required (`To get started with GitHub CLI, please run: gh auth login`) or not-found error, no hang. Do not run `gh auth login`.
-  * Clean up: `mise rm -g npm:figlet; mise uninstall --all npm:figlet; mise unuse -g gh; mise uninstall --all gh; rm -f ~/.local/bin/figlet ~/.local/bin/qa-tool ~/.local/bin/qa-cmd ~/.local/bin/hostile /tmp/victim; figlet x` → `command not found`; `cat ~/.local/bin/gh` → still the 4-line stub. Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy-mise-install; echo rc=$?` and press Return. The output is `Usage: omarchy-mise-install <package> [command-name [bin-name]]` and `rc=1`.
+  * Type `omarchy mise install` and press Return. The output is the router's help for that signature.
+  * Type `omarchy-mise-install somepkg ../escape; echo rc=$?` and press Return. The output includes `is not usable as a command name` and `rc=1`.
+  * Type `omarchy-mise-install somepkg .hidden; echo rc=$?` and press Return. The output includes `is not usable as a command name` and `rc=1`.
+  * Type `omarchy-mise-install somepkg -dash; echo rc=$?` and press Return. The output includes `is not usable as a command name` and `rc=1`.
+  * Type `omarchy-mise-install somepkg "$(printf 'with\ttab')"; echo rc=$?` and press Return. The output includes `is not usable as a command name` and `rc=1`.
+  * Type `touch /tmp/victim` and press Return. `/tmp/victim` exists.
+  * Type `omarchy-mise-install somepkg "../../../..$PWD/../tmp/victim"; echo rc=$?` and press Return. The output includes `is not usable as a command name` and `rc=1`.
+  * Type `ls /tmp/victim` and press Return. `/tmp/victim` is still listed.
+  * Type `ls ~/.local/escape 2>&1` and press Return. The output includes `No such file`.
+  * Type `omarchy-mise-install qa-tool; echo rc=$?` and press Return. The last line is `rc=0`.
+  * Type `cat ~/.local/bin/qa-tool` and press Return. The body is `#!/bin/bash`, `export MISE_MINIMUM_RELEASE_AGE=0`, `mise use -g --quiet "qa-tool" || exit 1`, and `exec mise x "qa-tool" -- "qa-tool" "$@"`.
+  * Type `ls -l ~/.local/bin/qa-tool` and press Return. The file is executable.
+  * Type `omarchy-mise-install npm:@scope/pkg qa-cmd qa-bin` and press Return. The prompt returns.
+  * Type `cat ~/.local/bin/qa-cmd` and press Return. The body includes `mise use -g --quiet "npm:@scope/pkg"` and `exec mise x "npm:@scope/pkg" -- "qa-bin" "$@"`.
+  * Type `omarchy-mise-install 'npm:pkg$(touch /tmp/PWNED)end' hostile` and press Return. The prompt returns.
+  * Type `cat ~/.local/bin/hostile` and press Return. The package name appears quoted as data.
+  * Type `ls /tmp/PWNED 2>&1` and press Return. The output includes `No such file`.
+  * Type `omarchy-mise-install npm:figlet figlet` and press Return. The prompt returns.
+  * Type `figlet hello` and press Return. After the install, `hello` prints as ASCII art.
+  * Type `figlet again` and press Return. `again` prints as ASCII art without another install.
+  * Type `head -4 ~/.local/bin/gh` and press Return. The stub is the same four-line shape with `"gh"`.
+  * Type `ls ~/.local/bin | tr '\n' ' '` and press Return. The names include `claude`, `codex`, `opencode`, `pi`, `gh`, `copilot`, `crush`, `agy`, `grok`, `ghui`, `hunk`, `omp`, and `ori`.
+  * Type `gh --version` and press Return. After the download, the output includes `gh version 2.`.
+  * Type `gh` and press Return. The output includes `Work seamlessly with GitHub from the command line.`
+  * Type `gh auth status` and press Return. The output includes `You are not logged into any GitHub hosts.`
+  * Type `gh repo clone nonexistent-org-omarchy-test/nonexistent` and press Return. The command returns, and the output either asks to run `gh auth login` or says the repository was not found.
+  * Type `mise rm -g npm:figlet; mise uninstall --all npm:figlet; mise unuse -g gh; mise uninstall --all gh; rm -f ~/.local/bin/figlet ~/.local/bin/qa-tool ~/.local/bin/qa-cmd ~/.local/bin/hostile /tmp/victim` and press Return. The prompt returns.
+  * Type `figlet x` and press Return. The output is `command not found`.
+  * Type `cat ~/.local/bin/gh` and press Return. The four-line stub is still there.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * mise prints download progress on stderr; wait for the ASCII art before typing further.
-  * Never run `qa-tool`, `qa-cmd` or `hostile`: they would call `mise use -g` and go to the network for a package that does not exist.
+  * Do not run `qa-tool`, `qa-cmd`, or `hostile`. Each would call `mise use -g` for a package that does not exist.
+  * Do not run `gh auth login`.
+  * mise prints download progress on stderr. The first `figlet hello` can take 2 minutes, and `gh --version` downloads about 20 MB. Wait for the ASCII art before the next command.
+  * If mise fails, run `mise doctor | head -30 | sudo tee /dev/ttyS0` and read it with get-serial.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** The usage line with `rc=1`; each refusal with the exact phrase and `rc=1`; `/tmp/victim` intact and no `~/.local/escape`
-  ** Both wrapper bodies and the executable bit; the hostile name quoted with `/tmp/PWNED` absent
-  ** The ASCII-art `hello`, the instant second run, the `gh` stub head, the stub listing; `gh`'s download + version line, help, auth status and the clone error; the cleanup `command not found` with the `gh` stub intact
+  ** A missing argument prints the usage line and exits 1. The router prints its help for the same signature.
+  ** Each bad command name prints `is not usable as a command name` and exits 1. `/tmp/victim` remains, and `~/.local/escape` does not exist.
+  ** `qa-tool` is an executable four-line wrapper, and `qa-cmd` quotes `npm:@scope/pkg` and `qa-bin`.
+  ** The hostile package name stays quoted, and `/tmp/PWNED` does not exist.
+  ** `figlet hello` prints ASCII art after an install, and `figlet again` prints without another install.
+  ** The `gh` stub matches that shape. `gh --version` prints a 2.x version, `gh` prints its help, `gh auth status` says no host is logged in, and the clone either asks for `gh auth login` or reports the repository was not found.
+  ** The stub listing includes the preinstalled agent names. After cleanup, `figlet` is gone and the `gh` stub remains.
   * If unsuccessful
-  ** A wrapper written under a refused name or outside `~/.local/bin`, `/tmp/victim` deleted, `/tmp/PWNED` created, a hanging `gh repo clone`, or mise's error text (`mise doctor | head -30 | sudo tee /dev/ttyS0` via get-serial; `mise ls gh`)
+  ** A wrapper is written for a refused name or outside `~/.local/bin`, `/tmp/victim` is deleted, `/tmp/PWNED` is created, `gh repo clone` hangs, or mise prints an error.
 covers: manual/17-ai.md:3-22; manual/18-development-tools.md:31-37; bin/omarchy-mise-install; install/user/mise.sh:9; etc/mise/conf.d/omarchy.toml; test/shell.d/mise-install-test.sh; test/shell.d/mise-wrapper-quiet-migration-test.sh
 
 ### install-docker-db-redis-and-escape-cancels-quietly   [VM-OK] [NET]
@@ -11740,31 +11770,73 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy tui install "QA Top" btop float utilities-terminal; echo "exit=$?"; cat "$HOME/.local/share/applications/QA Top.desktop"` → `exit=0` and a file with `Name=QA Top`, `Exec=xdg-terminal-exec --app-id=TUI.float -e btop`, `Icon=utilities-terminal`.
-  * Press Super+Alt+Space (Apps), type `QA Top`, Enter: a **floating** terminal running btop appears; press `q` to quit it.
-  ** If the launcher does not list it yet, type `update-desktop-database ~/.local/share/applications` in the terminal, wait 5 s, retry, and record that it was needed.
-  * Press Super+Space → Install → TUI: a floating terminal prints `Let's create a TUI shortcut you can start with the app launcher.` and `Name>`. Press Enter on the empty Name, Enter on the empty `Launch Command>`, pick `float`, Enter on the empty Icon → `You must set app name, app command, and icon URL/name!` then the red `● Failed (exit code 1)! Press any key to close...`. Press a key.
-  * Install → TUI again with Name `QA Tile`, Launch Command `top`, style `tile`, Icon `utilities-terminal` → `You can now find QA Tile using the app launcher (SUPER + SPACE)` and the green `Done!`. Type `grep Exec "$HOME/.local/share/applications/QA Tile.desktop"` → `--app-id=TUI.tile -e top`. Apps → `QA Tile` → a tiled terminal running top; `q`.
-  * Menu → Remove → TUI: a `Select TUI to remove` picker lists `Disk Usage`, `Docker`, `QA Tile`, `QA Top`; press Escape — both files remain. Remove → TUI again and pick **QA Top only** → toast `TUI removed — QA Top`; Apps → `QA Top` → No matches.
-  ** Never pick Disk Usage or Docker: there is no single-item undo.
-  * In the terminal type `omarchy tui remove all; echo "exit=$?"` → `Scanning for TUIs in /home/prime/.local/share/applications...`, `Removing TUI: QA Tile`, `TUIs removed successfully.`, `exit=0`.
-  ** If `Removing TUI: Disk Usage` or `Docker` also print, run `omarchy-refresh-applications` afterwards to restore them and report it.
-  * Type `omarchy tui remove all; echo "exit=$?"; omarchy tui remove; echo "exit=$?"` → `No TUIs found.` / `exit=0`, then `No TUIs to remove.` / `exit=1`. Menu → Remove: report whether the `TUI` row is still present with Disk Usage and Docker (reviewers 11/22 expect it; reviewer 20 expected the row to vanish). Escape; close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy tui install "QA Top" btop float utilities-terminal; echo "exit=$?"` and press Return. The last line is `exit=0`.
+  * Type `cat "$HOME/.local/share/applications/QA Top.desktop"` and press Return. The file contains `Name=QA Top`, `Exec=xdg-terminal-exec --app-id=TUI.float -e btop`, and `Icon=utilities-terminal`.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `QA Top` and press Enter. A floating terminal running btop opens.
+  ** If Apps does not list it, press Escape, run `update-desktop-database ~/.local/share/applications` in the terminal, wait 5 seconds, reopen Apps, and record that the refresh was needed.
+  * Press `q`. btop closes.
+  * Press Super+Space. The menu opens.
+  * Select Install, then TUI. A floating terminal asks `Name>`.
+  * Press Enter. The prompt changes to `Launch Command>`.
+  * Press Enter. The style chooser is showing.
+  * Choose `float` and press Enter. The prompt asks for an icon.
+  * Press Enter. The output includes `You must set app name, app command, and icon URL/name!` and `Failed (exit code 1)! Press any key to close...`.
+  * Press a key. The floating terminal closes.
+  * Press Super+Space. The menu opens.
+  * Select Install, then TUI. A floating terminal asks `Name>`.
+  * Type `QA Tile` and press Enter. The prompt changes to `Launch Command>`.
+  * Type `top` and press Enter. The style chooser is showing.
+  * Choose `tile` and press Enter. The prompt asks for an icon.
+  * Type `utilities-terminal` and press Enter. The output includes `You can now find QA Tile using the app launcher (SUPER + SPACE)` and `Done!`.
+  * Press a key. The floating terminal closes.
+  * Click the terminal. The terminal is focused.
+  * Type `grep Exec "$HOME/.local/share/applications/QA Tile.desktop"` and press Return. The output includes `--app-id=TUI.tile -e top`.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `QA Tile` and press Enter. A tiled terminal running top opens.
+  * Press `q`. top closes.
+  * Press Super+Space. The menu opens.
+  * Select Remove, then TUI. A picker asks which TUI to remove.
+  * Press Escape. The picker closes.
+  * Click the terminal. The terminal is focused.
+  * Type `ls "$HOME/.local/share/applications/QA Top.desktop" "$HOME/.local/share/applications/QA Tile.desktop"` and press Return. Both files are listed.
+  * Press Super+Space. The menu opens.
+  * Select Remove, then TUI. The picker is showing.
+  * Select `QA Top` and press Enter. A notification reads `TUI removed — QA Top`.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `QA Top`. No match is listed.
+  * Press Escape. Apps closes.
+  * Click the terminal. The terminal is focused.
+  * Type `omarchy tui remove all; echo "exit=$?"` and press Return. The output includes `Scanning for TUIs in /home/prime/.local/share/applications...`, `Removing TUI: QA Tile`, `TUIs removed successfully.`, and `exit=0`.
+  ** If `Removing TUI: Disk Usage` or `Removing TUI: Docker` also prints, run `omarchy-refresh-applications` and report it.
+  * Type `omarchy tui remove all; echo "exit=$?"` and press Return. The output includes `No TUIs found.` and `exit=0`.
+  * Type `omarchy tui remove; echo "exit=$?"` and press Return. The output includes `No TUIs to remove.` and `exit=1`.
+  * Press Super+Space. The menu opens.
+  * Select Remove. Note whether `TUI` is still listed.
+  * Press Escape. The menu closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * gum input fields accept typed text and Enter; the window-style question is a two-item chooser (Up/Down + Enter). Use an installed icon name, never a URL, to avoid a download.
-  * Screenshot right after the remove command to catch the toast. Do not name a test launcher "all" — that route always wins.
+  * gum fields take typed text and Enter. The window style is a two-item chooser. Use an installed icon name, never a URL.
+  * The remove picker lists Disk Usage, Docker, QA Tile, and QA Top. Do not pick Disk Usage or Docker. There is no single-item undo.
+  * Screenshot right after the remove command to catch the toast. Do not name a test launcher `all`.
+  * Reviewers 11 and 22 expect the Remove → TUI row to remain with Disk Usage and Docker. Reviewer 20 expected the row to vanish. Record which one happens.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the desktop file, btop in a floating window, the empty-field failure, the interactive success message and the tile Exec line, top tiled
-  ** The picker (Escape leaving both), the `TUI removed — QA Top` toast and the empty Apps search, the remove-all transcript, the two "none" messages, and the Remove menu's TUI row state
+  ** The QA Top desktop file has the floating btop exec line, and Apps opens btop in a floating window.
+  ** Empty wizard fields fail with the required-fields message and `Failed (exit code 1)!`.
+  ** The QA Tile exec line uses `TUI.tile`, and Apps opens top in a tiled window.
+  ** Escape leaves both QA desktop files. Removing QA Top shows `TUI removed — QA Top`, and Apps no longer lists it.
+  ** `tui remove all` removes QA Tile and exits 0. A second `remove all` says `No TUIs found.` and exits 0. `tui remove` says `No TUIs to remove.` and exits 1.
+  ** Whether the Remove menu still lists TUI is recorded.
   * If unsuccessful
-  ** The launcher not finding `QA Top`, btop opening tiled, the wizard accepting empty fields, a launcher surviving `remove all`, or Disk Usage/Docker swept without restoration
+  ** Apps does not find QA Top, btop opens tiled, the wizard accepts empty fields, a launcher survives `remove all`, or Disk Usage or Docker is removed and not restored.
 covers: manual/21-tuis.md:49-51; default/omarchy/omarchy-menu.jsonc:214,295 (install.tui, remove.tui); bin/omarchy-tui-install; bin/omarchy-tui-remove; bin/omarchy-tui-remove-all; default/hypr/apps/system.lua (TUI.float); test/shell.d/launcher-remove-test.sh
 
 ### webapp-install-cli-refuses-bad-input-escapes-and-overwrites   [VM-OK]
@@ -11774,33 +11846,88 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy-webapp-install Bad "javascript:alert(1)" webapp; echo "exit=$?"` → `Error: web app URL must be http or https.` and a non-zero exit. Repeat with `"file:///etc/passwd"` and `"ext://x"` in place of the URL — the same refusal each time.
-  * Type `omarchy-webapp-install Sneak "https://example.com/ --user-agent=INJECT" webapp; echo "exit=$?"` → `Error: web app URL must not contain whitespace.`; `omarchy-webapp-install "http://example.test/oops" "https://example.com" hey; echo "exit=$?"` → `App name cannot contain '/': http://example.test/oops`. Then `ls ~/.local/share/applications/ | grep -iE 'bad|sneak|^http:'` → nothing.
-  * Interactive refusal: type `omarchy-webapp-install`, answer `Name>` with `Evil` and `URL>` with `file:///etc/passwd` → the scheme error appears at once, no icon download starts; `ls ~/.local/share/applications/ | grep Evil` → nothing.
-  ** The same checks fire on the menu route: Install → Web App with Name `https://evil.example` → `App name cannot contain '/': https://evil.example` then `Failed (exit code 1)!` (instant, before any network); Name `Sneak`, URL `https://example.com --user-agent=x` → the whitespace error and `Failed (exit code 1)!`. Press a key each time; Apps → `sneak` → No matches.
-  ** Icon failure writes nothing: `omarchy-webapp-install Probe example.com https://example.invalid/none.png; echo rc=$?` → `Error: Failed to download icon.`, `rc=1`, and `ls ~/.local/share/applications/Probe.desktop` → no such file (the `.invalid` DNS failure is instantaneous).
-  ** On the 4.0.2 build the scheme check may be missing — record `omarchy-version` if a refusal does not appear.
-  * Escaping: type `omarchy-webapp-install 'Dollar App' 'https://example.com/a$b' webapp && grep '^Exec=' ~/.local/share/applications/'Dollar App.desktop'` → `Exec=omarchy-launch-webapp "https://example.com/a\\$b"` (two backslashes before the dollar — correct desktop-entry escaping). Open Apps (Super+Alt+Space), type `Dollar`, Enter: a browser app window opens whose address/title reads `https://example.com/a$b` (the page need not load). Close it with Super+W.
-  * Type `omarchy-webapp-install 'Percent App' 'https://example.com/s?q=a%20b' webapp`, open it the same way → `s?q=a%20b`, not `a0b`; close it. Type `omarchy-webapp-install "$(printf 'Inject\nExec=evil')" 'https://example.com' webapp && grep -c '^Exec=' ~/.local/share/applications/Inject*.desktop` → `1`.
-  * Overwrite: type `omarchy-webapp-install "Dup Test" https://one.example basecamp; echo rc=$?` → `rc=0`; again with `https://two.example` → `rc=0` and no warning; `grep Exec ~/.local/share/applications/Dup\ Test.desktop; ls ~/.local/share/applications | grep -c "Dup Test"` → the Exec shows two.example and the count is `1`. Apps → `dup` → one `Dup Test` row with the Basecamp icon. Escape.
-  * Clean up: `omarchy-webapp-remove 'Dollar App'; omarchy-webapp-remove 'Percent App'; omarchy-webapp-remove "Dup Test"; rm -f ~/.local/share/applications/Inject*.desktop` → a `Web app removed — …` toast per app. Then `ls ~/.local/share/applications | wc -l` (note the count); `omarchy-webapp-remove "Nope Not Here"; echo rc=$?` → a toast `Web app removed Nope Not Here` still appears and `rc=0` (known false success; record it) while the count is unchanged. Apps → `Dollar` → nothing listed. Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy-webapp-install Bad "javascript:alert(1)" webapp; echo "exit=$?"` and press Return. The output includes `Error: web app URL must be http or https.` and a non-zero exit.
+  * Type `omarchy-webapp-install Bad "file:///etc/passwd" webapp; echo "exit=$?"` and press Return. The output includes `Error: web app URL must be http or https.` and a non-zero exit.
+  * Type `omarchy-webapp-install Bad "ext://x" webapp; echo "exit=$?"` and press Return. The output includes `Error: web app URL must be http or https.` and a non-zero exit.
+  * Type `omarchy-webapp-install Sneak "https://example.com/ --user-agent=INJECT" webapp; echo "exit=$?"` and press Return. The output includes `Error: web app URL must not contain whitespace.` and a non-zero exit.
+  * Type `omarchy-webapp-install "http://example.test/oops" "https://example.com" hey; echo "exit=$?"` and press Return. The output includes `App name cannot contain '/': http://example.test/oops` and a non-zero exit.
+  * Type `ls ~/.local/share/applications/ | grep -iE 'bad|sneak|^http:'; echo "grep=$?"` and press Return. The grep prints nothing and the last line is `grep=1`.
+  * Type `omarchy-webapp-install` and press Return. The prompt asks `Name>`.
+  * Type `Evil` and press Enter. The prompt asks `URL>`.
+  * Type `file:///etc/passwd` and press Enter. The output includes `Error: web app URL must be http or https.` at once.
+  * Type `ls ~/.local/share/applications/ | grep Evil; echo "grep=$?"` and press Return. The grep prints nothing and the last line is `grep=1`.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Web App. A prompt asks for a name.
+  * Type `https://evil.example` and press Enter. The output includes `App name cannot contain '/': https://evil.example` and `Failed (exit code 1)!`.
+  * Press a key. The floating terminal closes.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Web App. A prompt asks for a name.
+  * Type `Sneak` and press Enter. The prompt asks for a URL.
+  * Type `https://example.com --user-agent=x` and press Enter. The output includes the whitespace error and `Failed (exit code 1)!`.
+  * Press a key. The floating terminal closes.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `sneak`. No match is listed.
+  * Press Escape. Apps closes.
+  * Click the terminal. The terminal is focused.
+  * Type `omarchy-webapp-install Probe example.com https://example.invalid/none.png; echo rc=$?` and press Return. The output includes `Error: Failed to download icon.` and `rc=1`.
+  * Type `ls ~/.local/share/applications/Probe.desktop` and press Return. The output includes `No such file`.
+  * Type `omarchy-webapp-install 'Dollar App' 'https://example.com/a$b' webapp` and press Return. The prompt returns.
+  * Type `grep '^Exec=' ~/.local/share/applications/'Dollar App.desktop'` and press Return. The line is `Exec=omarchy-launch-webapp "https://example.com/a\\$b"`.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `Dollar` and press Enter. A browser window opens at `https://example.com/a$b`.
+  * Press Super+W. The browser closes.
+  * Click the terminal. The terminal is focused.
+  * Type `omarchy-webapp-install 'Percent App' 'https://example.com/s?q=a%20b' webapp` and press Return. The prompt returns.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `Percent` and press Enter. A browser window opens at an address or title containing `s?q=a%20b`, not `a0b`.
+  * Press Super+W. The browser closes.
+  * Click the terminal. The terminal is focused.
+  * Type `omarchy-webapp-install "$(printf 'Inject\nExec=evil')" 'https://example.com' webapp` and press Return. The prompt returns.
+  * Type `grep -c '^Exec=' ~/.local/share/applications/Inject*.desktop` and press Return. The output is `1`.
+  * Type `omarchy-webapp-install "Dup Test" https://one.example basecamp; echo rc=$?` and press Return. The last line is `rc=0`.
+  * Type `omarchy-webapp-install "Dup Test" https://two.example basecamp; echo rc=$?` and press Return. The last line is `rc=0`.
+  * Type `grep Exec ~/.local/share/applications/Dup\ Test.desktop` and press Return. The Exec line contains `two.example`.
+  * Type `ls ~/.local/share/applications | grep -c "Dup Test"` and press Return. The output is `1`.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `dup`. One `Dup Test` row is listed.
+  * Press Escape. Apps closes.
+  * Click the terminal. The terminal is focused.
+  * Type `omarchy-webapp-remove 'Dollar App'` and press Return. A notification says the web app was removed.
+  * Type `omarchy-webapp-remove 'Percent App'` and press Return. A notification says the web app was removed.
+  * Type `omarchy-webapp-remove "Dup Test"` and press Return. A notification says the web app was removed.
+  * Type `rm -f ~/.local/share/applications/Inject*.desktop` and press Return. The prompt returns.
+  * Type `ls ~/.local/share/applications | wc -l` and press Return. Note the count.
+  * Type `omarchy-webapp-remove "Nope Not Here"; echo rc=$?` and press Return. A notification still says the web app was removed, and the last line is `rc=0`.
+  * Type `ls ~/.local/share/applications | wc -l` and press Return. The count is unchanged.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `Dollar`. No match is listed.
+  * Press Escape. Apps closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The icon arguments `webapp`/`hey`/`basecamp` are bundled icon names, so no network fetch happens on the command-line path.
-  * The launcher may take a second to index a new `.desktop` file; press Escape and reopen if the entry is not there yet. The browser opens in app mode (no tabs); the URL may be shown in the window title — either is fine. Toasts fade after a few seconds; screenshot immediately.
+  * The icon arguments `webapp`, `hey`, and `basecamp` are bundled names, so the command-line path does not fetch an icon.
+  * The launcher may take a second to index a new desktop file. Press Escape and reopen Apps if the entry is missing.
+  * The browser opens in app mode. The URL may be in the window title. Toasts fade quickly, so screenshot immediately.
+  * The menu refusals happen before any network request. The `.invalid` icon failure is an immediate DNS failure and writes no desktop file.
+  * If a scheme refusal does not appear, record `omarchy-version`. On the 4.0.2 build the scheme check may be missing.
+  * A toast for `Nope Not Here` with exit 0 is a known false success. Record it.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Each exact error line with its non-zero exit, the empty `ls` filter, the interactive `file://` refusal without an icon fetch, the menu-route refusals ending `Failed (exit code 1)!`, and `Error: Failed to download icon.` with no `Probe.desktop`
-  ** The `Exec=` line with `\\$b`, `Dollar App` in Apps, the browser at `a$b` and at `s?q=a%20b`, `grep -c` printing `1`
-  ** Both `rc=0` lines with the two.example Exec and count `1`, the single launcher row; the removal toasts, the unknown-name toast with `rc=0` and the unchanged file count, and the empty `Dollar` search
+  ** `javascript:`, `file:`, and `ext:` each print `Error: web app URL must be http or https.` and exit non-zero.
+  ** A whitespace URL prints the whitespace error. A slash in the name prints `App name cannot contain '/'`. None of those names is written under applications.
+  ** The interactive `file://` prompt fails at once, and no Evil desktop file is written.
+  ** The menu rejects `https://evil.example` and the whitespace URL with `Failed (exit code 1)!`. Apps has no sneak entry. The bad icon download prints `Error: Failed to download icon.`, exits 1, and writes no Probe file.
+  ** Dollar App's Exec line contains `a\\$b`, and the browser shows `https://example.com/a$b`. Percent App shows `s?q=a%20b`, not `a0b`. The injected name has one Exec line.
+  ** Both Dup Test installs exit 0, the Exec line names `two.example`, and only one launcher row exists.
+  ** The three removals toast. Removing an unknown name still toasts and exits 0, and the application count does not change. Apps no longer lists Dollar.
   * If unsuccessful
-  ** A `Bad`/`Sneak`/`Evil`/`Probe` launcher existing (`cat` it — security-relevant), a nested `http:` directory, a whitespace URL accepted, an app missing from the launcher (GLib rejected the entry), an address with `a0b`, or two `Exec=` lines
-  ** Output of `omarchy-version`
+  ** A Bad, Sneak, Evil, or Probe launcher exists, a nested `http:` directory is created, a whitespace URL is accepted, an app is missing from the launcher, an address shows `a0b`, or a desktop file has two Exec lines.
 covers: bin/omarchy-webapp-install (argv path, normalize_webapp_url, icon_name_from_ref, require_plain_name, require_http_url, download_icon; :14-27,61-84,155-180); bin/omarchy-webapp-remove:60-70; bin/omarchy-launch-webapp; test/shell.d/webapp-install-test.sh; webapp-name-test.sh; webapp-install-escaping-test.sh; manual/25-web-apps.md:3
 
 ### apps-launcher-delete-key-uninstall-confirm-and-cancel   [VM-OK]
@@ -11810,28 +11937,63 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Alt+Space, type `basecamp`, press Delete → a small dialog over the menu: `Do you want to uninstall Basecamp?` with [Cancel] and a red [Uninstall]. Note which button is pre-selected (reviewers disagree).
-  ** Press Left (or Tab) to move to Cancel and Enter: the dialog closes, Basecamp is still listed. Press Delete again, then Escape: still listed. Press Delete again and click the dark area outside the dialog card: still listed.
-  * Press Delete once more and click `Uninstall` with the mouse → the menu closes and no floating terminal appears (web apps are removed silently). Reopen Super+Alt+Space, type `basecamp` → No matches. Escape twice.
-  * Open a terminal (Super+Enter) and type `omarchy-refresh-applications`, then Super+Alt+Space, `basecamp` → Basecamp is back. Escape.
-  * In the terminal type `omarchy-remove-launcher-entry; echo rc=$?` → `Usage: omarchy-remove-launcher-entry <desktop-id> <name>`, `rc=1`; `omarchy-remove-launcher-entry nosuchapp Nope; echo rc=$?` → `Could not find launcher entry: nosuchapp.desktop`, `rc=1`; `omarchy-remove-launcher-entry Basecamp Basecamp; echo rc=$?` → `rc=0` and Apps → `basecamp` → gone; `omarchy-refresh-applications` brings it back again.
-  * Packaged app: Super+Alt+Space, type `chrom`, press Delete, choose Uninstall → a floating terminal `Uninstalling Chromium...` asks for a sudo password. Press Ctrl+C: it closes and Chromium stays installed (`pacman -Q chromium` in the terminal).
-  * Close the terminal with Super+W; the desktop is as before.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `basecamp`. The Basecamp row is highlighted.
+  * Press Delete. A dialog asks `Do you want to uninstall Basecamp?`, and the pre-selected button is recorded.
+  * Move the highlight to Cancel. Cancel is highlighted.
+  * Press Enter. The dialog closes and Basecamp is still listed.
+  * Press Delete. The dialog opens again.
+  * Press Escape. The dialog closes and Basecamp is still listed.
+  * Press Delete. The dialog opens again.
+  * Click outside the dialog. The dialog closes and Basecamp is still listed.
+  * Press Delete. The dialog opens again.
+  * Click Uninstall. Apps closes and no floating terminal opens.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `basecamp`. No match is listed.
+  * Press Escape. Apps closes.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy-refresh-applications` and press Return. The prompt returns.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `basecamp`. Basecamp is listed.
+  * Press Escape. Apps closes.
+  * Click the terminal. The terminal is focused.
+  * Type `omarchy-remove-launcher-entry; echo rc=$?` and press Return. The output is `Usage: omarchy-remove-launcher-entry <desktop-id> <name>` and `rc=1`.
+  * Type `omarchy-remove-launcher-entry nosuchapp Nope; echo rc=$?` and press Return. The output includes `Could not find launcher entry: nosuchapp.desktop` and `rc=1`.
+  * Type `omarchy-remove-launcher-entry Basecamp Basecamp; echo rc=$?` and press Return. The last line is `rc=0`.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `basecamp`. No match is listed.
+  * Press Escape. Apps closes.
+  * Click the terminal. The terminal is focused.
+  * Type `omarchy-refresh-applications` and press Return. The prompt returns.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `basecamp`. Basecamp is listed.
+  * Press Escape. Apps closes.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `chrom`. Chromium is highlighted.
+  * Press Delete. A dialog asks whether to uninstall Chromium.
+  * Click Uninstall. A floating terminal shows `Uninstalling Chromium...` and asks for a sudo password.
+  * Press Ctrl+C. The floating terminal closes.
+  * Click the terminal. The terminal is focused.
+  * Type `pacman -Q chromium` and press Return. Chromium is installed.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Delete only does something on app rows (the Apps submenu). If arrow keys do not move the highlight in the dialog, use the mouse.
-  * No toast is shown for a launcher-initiated web app removal; the empty search is the proof. If the app row disappears on any cancel path, stop and report it as a destructive failure.
+  * Delete acts on an app row in Apps. If the arrow keys do not move the dialog highlight, click Cancel.
+  * A web-app removal from the launcher shows no toast. The empty search is the proof.
+  * If the app row disappears on any cancel path, stop and report a destructive failure.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** The dialog with both buttons and the pre-selection noted; Basecamp still present after each of the three cancel paths; No matches after Uninstall with no terminal; Basecamp restored after refresh
-  ** Both CLI rejections with `rc=1`, Basecamp removed with `rc=0` and restored again; the `Uninstalling Chromium...` sudo prompt aborted with Chromium still installed
+  ** The dialog names Basecamp, and the pre-selected button is noted. Cancel, Escape, and a click outside each leave Basecamp listed.
+  ** Uninstall closes Apps with no floating terminal, and a search finds no Basecamp row. `omarchy-refresh-applications` brings it back.
+  ** A missing argument prints the usage line and exits 1. An unknown id prints `Could not find launcher entry: nosuchapp.desktop` and exits 1. Removing Basecamp exits 0, Apps no longer lists it, and refresh brings it back again.
+  ** Uninstall on Chromium opens a sudo prompt. Ctrl+C closes it, and `pacman -Q chromium` still shows the package.
   * If unsuccessful
-  ** A dialog that did not appear or did not close, the app row gone after a cancel, a floating terminal or sudo prompt for a web app, or Basecamp surviving `Uninstall`
+  ** The dialog does not appear or does not close, the row is gone after a cancel, a floating terminal opens for a web app, or Basecamp survives Uninstall.
 covers: shell/plugins/menu/Menu.qml (requestDeleteSelected, cancelDelete, confirmDelete); shell/Ui/ConfirmDialog.qml; bin/omarchy-remove-launcher-entry; bin/omarchy-webapp-remove; bin/omarchy-refresh-applications; applications/*.desktop; test/shell.d/launcher-remove-test.sh
 
 ### launch-chords-missing-apps-open-installer-abort   [VM-PARTIAL] [NET]
@@ -11841,26 +12003,46 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `pacman -Q 1password signal-desktop spotify 2>&1` → three `was not found` lines.
-  * Press Super+Shift+M: a floating terminal titled "Omarchy" (centred, ~875×600, logo on top) starts the Spotify installer (`Installing Spotify...`). Press Ctrl+C at once (at the sudo prompt if it appears first): it closes or returns to a prompt with no `Failed` banner (exit 130 is treated as the user bailing).
-  * Press Super+Shift+G: the same floating installer for Signal (`Installing Signal...`). Ctrl+C.
-  * Press Super+Shift+/ (Passwords): the installer for 1Password (`Installing 1Password...`). Ctrl+C. In the terminal type `omarchy-launch-1password` → the same installer terminal; Ctrl+C.
-  * Type `pacman -Q 1password signal-desktop spotify 2>&1` → still three `was not found` lines; no app window opened. Screenshot the desktop — unchanged.
-  * Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `pacman -Q 1password signal-desktop spotify 2>&1` and press Return. Each package reports `was not found`.
+  * Press Super+Shift+M. A floating terminal shows `Installing Spotify...`.
+  * Click the floating terminal. It is focused.
+  * Press Ctrl+C. The installer stops without a `Failed` banner.
+  ** If the floating terminal stays open, close it.
+  * Press Super+Shift+G. A floating terminal shows `Installing Signal...`.
+  * Click the floating terminal. It is focused.
+  * Press Ctrl+C. The installer stops without a `Failed` banner.
+  ** If the floating terminal stays open, close it.
+  * Press Super+Shift+/. A floating terminal shows `Installing 1Password...`.
+  * Click the floating terminal. It is focused.
+  * Press Ctrl+C. The installer stops without a `Failed` banner.
+  ** If the floating terminal stays open, close it.
+  * Click the first terminal. It is focused.
+  * Type `omarchy-launch-1password` and press Return. A floating terminal shows `Installing 1Password...`.
+  * Click the floating terminal. It is focused.
+  * Press Ctrl+C. The installer stops without a `Failed` banner.
+  ** If the floating terminal stays open, close it.
+  * Click the first terminal. It is focused.
+  * Type `pacman -Q 1password signal-desktop spotify 2>&1` and press Return. Each package still reports `was not found`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Click into the floating terminal before pressing Ctrl+C. Letting an installer run needs minutes of network; abort every time (the installer may fetch package lists before Ctrl+C, hence NET).
-  * The floating window is the same `org.omarchy.terminal` presentation used by the Update menu.
+  * Click the floating terminal before Ctrl+C. Abort every installer. The install itself is not part of this test.
+  * Ctrl+C may arrive at a sudo prompt. Exit 130 is the user bailing, not a `Failed` banner.
+  * The installer may fetch package lists before Ctrl+C.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of each floating installer terminal naming its app (Spotify, Signal, 1Password, and the CLI-launched 1Password one), the clean exit after each Ctrl+C, and the three `was not found` lines before and after
+  ** Before the chords, 1Password, Signal, and Spotify are not installed.
+  ** Super+Shift+M, Super+Shift+G, and Super+Shift+/ each open an installer naming Spotify, Signal, and 1Password, and each Ctrl+C stops it without a `Failed` banner.
+  ** `omarchy-launch-1password` opens the same 1Password installer, and Ctrl+C stops it.
+  ** After all four aborts, the three packages are still not installed, and no app window opened.
   * If unsuccessful
-  ** Nothing appearing after a chord, an error toast, an installer continuing after Ctrl+C, or a package found afterwards
+  ** A chord does nothing, an error toast appears, an installer continues after Ctrl+C, or a package is installed afterwards.
 covers: default/hypr/bindings/applications.lua:14,17,20; bin/omarchy-launch-spotify; bin/omarchy-launch-signal; bin/omarchy-launch-1password; bin/omarchy-install-service-spotify; bin/omarchy-launch-floating-terminal-with-presentation; default/hypr/apps/system.lua:6-11; manual/07:106,108,115; manual/24-commercial-apps-services.md:15-19; test/shell.d/launch-1password-test.sh
 
 ### install-service-1password-hotkey-and-remove   [VM-PARTIAL] [NET]
