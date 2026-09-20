@@ -17009,27 +17009,41 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `pacman -Q fwupd` — `was not found` on a fresh disk (record if it is already present).
-  * Open the Omarchy menu with Super+Space → `Update` → `Firmware` with the mouse.
-  ** A floating terminal shows the logo and the green `Update Firmware`, pacman installing `fwupd` (type `prime` at the sudo prompt), `fwupdmgr refresh --force` downloading metadata (`Successfully downloaded new metadata` or similar), then `sudo fwupdmgr update` reporting no updatable devices (`Devices with no available firmware updates:` / `No updatable devices`, or a list of virtual devices with nothing to do).
-  ** fwupdmgr may ask `Do you want to upload report now?` or similar — answer N.
-  * It ends with `● Done! Press any key to close...` or `● Failed (exit code N)!` — record which. Exit code 2 from fwupdmgr ("nothing to do") is acceptable if the text explains it; a bash error, a missing command or a stack trace is not. Press a key; the desktop is as before.
-  * In your terminal type `pacman -Q fwupd; ls /boot/EFI/arch/fwupdx64.efi; fwupdmgr get-devices 2>&1 | head -n 20` — installed, the EFI helper copied (UEFI guest), and the tool answering.
-  * Run the menu entry a second time: no package install this time, straight to refresh/update, same ending. Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `pacman -Q fwupd 2>&1` and press Return. Record whether it is installed.
+  * Press Super+Space. The menu opens.
+  * Select Update, then Firmware. A floating terminal starts the firmware update.
+  * If a sudo prompt appears, type `prime` and press Return. The update continues.
+  * Wait until the output says there are no updatable devices, or lists devices with nothing to do.
+  ** If it asks to upload a report, press `N`.
+  * Record whether the terminal ends with `Done!` or `Failed`.
+  * Press a key. The floating terminal closes.
+  * Type `pacman -Q fwupd` and press Return. The package is installed.
+  * Type `ls /boot/EFI/arch/fwupdx64.efi` and press Return. The EFI helper is listed.
+  * Type `fwupdmgr get-devices 2>&1 | head -n 20` and press Return. The tool prints devices or says there are none.
+  * Press Super+Space. The menu opens.
+  * Select Update, then Firmware. A floating terminal starts again, and no package install appears.
+  * Wait until it finishes with the same kind of ending as the first run.
+  * Press a key. The floating terminal closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * QEMU exposes no updatable firmware; the flow completing gracefully is the point. Skipped: real flashing and the reboot-to-apply path.
-  * fwupd stays installed afterwards (disk altered slightly); note it.
+  * This guest has no updatable firmware. A bash error, a missing command, or a stack trace is a failure. fwupdmgr exit 2 with an explanation that nothing is to do is acceptable.
+  * fwupd stays installed afterward. Record that.
+  * The first run downloads about 5 MB of metadata.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of `Update Firmware`, the fwupd install, the metadata refresh, the no-updatable-devices output, the closing line with its explanation, `pacman -Q fwupd` with the EFI file and `get-devices`, and the second run without an install
+  ** `fwupd` is missing or already present, and that is recorded. Update → Firmware installs it if needed, refreshes metadata, and reports no updatable firmware.
+  ** The ending is `Done!` or a recorded `Failed` whose text says nothing is to do. No bash error appears.
+  ** `fwupd` is installed, the EFI helper exists, and `fwupdmgr get-devices` answers.
+  ** The second run does not install a package and ends the same way.
   * If unsuccessful
-  ** Screenshot of a pacman or fwupdmgr error other than the no-devices message (package install failure, refresh network error, command not found) and the `Failed (exit code N)` line; `./client get-serial`
+  ** Package install fails, the refresh fails on the network, a command is missing, or the output is a stack trace.
 covers: bin/omarchy-update-firmware, default/omarchy/omarchy-menu.jsonc update.firmware, manual/30-updates.md "Firmware updates"
 
 ### update-time-restarts-timesyncd   [VM-OK]
@@ -17076,25 +17090,50 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Space → `Update`. The list has no `Extra Themes` entry. Escape.
-  * Open a terminal with Super+Enter and type `omarchy theme update; echo exit=$?` → no output, `exit=0`.
-  * Type `mkdir -p ~/.config/omarchy/themes/handmade && cp /usr/share/omarchy/themes/nord/colors.toml ~/.config/omarchy/themes/handmade/`. Press Super+Space → `Update`: still no `Extra Themes` (a hand-written theme is not an extra to pull). Escape.
-  * Type `cd ~/.config/omarchy/themes/handmade && git init -q && git add -A && git -c user.email=a@b -c user.name=a commit -qm i && cd ~`. Press Super+Space → `Update`: `Extra Themes` is now listed.
-  * Click it: the floating terminal prints `Updating: handmade` and a git message (no remote → `fatal: No remote repository specified` is acceptable), then a Done/Failed banner. Press a key.
-  * Type `rm -rf ~/.config/omarchy/themes/handmade`; Super+Space → `Update`: `Extra Themes` is gone again. Escape; close the terminal with Super+W.
+  * Press Super+Space. The menu opens.
+  * Select Update. Extra Themes is not listed.
+  * Press Escape. The menu closes.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy theme update; echo exit=$?` and press Return. There is no theme output, and the last line is `exit=0`.
+  * Type `mkdir -p ~/.config/omarchy/themes/handmade && cp /usr/share/omarchy/themes/nord/colors.toml ~/.config/omarchy/themes/handmade/` and press Return. The prompt returns.
+  * Press Super+Space. The menu opens.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Update. Extra Themes is still not listed.
+  * Press Escape. The menu closes.
+  * Type `cd ~/.config/omarchy/themes/handmade && git init -q && git add -A && git -c user.email=a@b -c user.name=a commit -qm i && cd ~` and press Return. The prompt returns.
+  * Press Super+Space. The menu opens.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Update. Extra Themes is listed.
+  * Click Extra Themes. A floating terminal shows `Updating: handmade`.
+  * Wait until it finishes with `Done!` or `Failed`.
+  ** A `fatal: No remote repository specified` line is acceptable.
+  * Press a key. The floating terminal closes.
+  * Type `rm -rf ~/.config/omarchy/themes/handmade` and press Return. The prompt returns.
+  * Press Super+Space. The menu opens.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Update. Extra Themes is not listed.
+  * Press Escape. The menu closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The menu evaluates visibility conditions when opened and paints from the previous evaluation: reopen it twice after each change before asserting a row appeared or vanished.
+  * The menu paints from the previous evaluation. Close it and open it again after each change before deciding whether Extra Themes is listed.
+  * A hand-written theme without git must not create the row.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Update menu without `Extra Themes` (twice), with it (once) and without it again after cleanup; the silent `exit=0`; `Updating: handmade` in the floating terminal
+  ** Update does not list Extra Themes at the start. `omarchy theme update` prints nothing and exits 0.
+  ** A copied theme without git still leaves Extra Themes unlisted.
+  ** After a git commit, Update lists Extra Themes. Opening it prints `Updating: handmade` and finishes.
+  ** Removing the theme makes Extra Themes disappear again.
   * If unsuccessful
-  ** Menu screenshot with the wrong visibility, or the floating terminal's error
+  ** The row appears for a non-git theme, stays missing after the commit, or stays listed after the theme is removed.
 covers: bin/omarchy-theme-extras, bin/omarchy-theme-update, default/omarchy/omarchy-menu.jsonc update.themes (when)
 
 ### update-hook-post-update-invitations-once   [VM-OK]
@@ -17104,29 +17143,38 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `ls ~/.local/state/omarchy/done/ | grep -c invitation` → `0` (no invitation has been shown yet on this disk).
-  ** If the count is not 0 the disk has already been updated; report it and stop — this test needs a stock disk.
-  * Type `omarchy-hook post-update`.
-  ** Two toasts must appear: **Install Dictation with Voxtype** (`Click to install voice dictation for Omarchy.`) and **Set your default agent** (`Let your favorite agent help with Omarchy.`). No **Setup Fingerprint Reader** toast. Screenshot right away — toasts fade.
-  * Type `ls ~/.local/state/omarchy/done/` → now includes `voxtype-install-invitation` and `agent-setup-invitation`, but not `fingerprint-setup-invitation`.
-  * Unhappy path (once-only): type `omarchy-hook post-update` again → no new toast appears (wait 10 s with screenshots).
-  * Click **Set your default agent** if still visible → the Omarchy Menu opens on the default-agent submenu; press Escape. Do not click **Install Dictation with Voxtype** — it starts a large network install.
-  * Type `omarchy-hw-fingerprint; echo $?` → `1`.
-  * Round trip: type `rm ~/.local/state/omarchy/done/voxtype-install-invitation ~/.local/state/omarchy/done/agent-setup-invitation` so the first real update on this disk still shows them once; close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `ls ~/.local/state/omarchy/done/ | grep -c invitation` and press Return. The output is `0`.
+  ** If the count is not 0, stop and report that this disk has already been updated.
+  * Type `omarchy-hook post-update` and press Return. The prompt returns.
+  * Look for notifications. The Voxtype and default-agent invitations are present, and the fingerprint invitation is not.
+  * Type `ls ~/.local/state/omarchy/done/` and press Return. The Voxtype and agent invitation markers are listed, and the fingerprint marker is not.
+  * Type `omarchy-hook post-update` and press Return. The prompt returns.
+  * Wait 10 seconds. No new invitation appears.
+  * If the agent invitation is still visible, click it. The menu opens on the default-agent list.
+  * Press Escape if the menu is open. The menu closes.
+  * Do not click the Voxtype invitation.
+  * Type `omarchy-hw-fingerprint; echo $?` and press Return. The last line is `1`.
+  * Type `rm ~/.local/state/omarchy/done/voxtype-install-invitation ~/.local/state/omarchy/done/agent-setup-invitation` and press Return. The prompt returns.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The first-run "Set your default agent" notification may already have been consumed on the minted disk; the post-update markers are separate and must start absent.
-  * Toasts fade; screenshot right after running the hook.
+  * Screenshot immediately after the hook. The invitations fade.
+  * The first-run agent notification is a different marker. These post-update markers must start absent.
+  * Do not click the Voxtype invitation. It starts a large install.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the two toasts after the first `omarchy-hook post-update`, the done directory with the two new markers and no fingerprint marker, no toast after the second run, the menu opened from the agent toast, `1` from `omarchy-hw-fingerprint`, and the markers removed again
+  ** No invitation marker exists at the start. The first `omarchy-hook post-update` shows the Voxtype and default-agent invitations, and not a fingerprint invitation.
+  ** The done directory then has the two invitation markers and not the fingerprint marker.
+  ** A second hook shows no new invitation for 10 seconds.
+  ** Clicking the agent invitation, if it is still visible, opens the agent menu. `omarchy-hw-fingerprint` exits 1. Both markers are removed.
   * If unsuccessful
-  ** Terminal output of `omarchy-hook post-update` (a `Hook failed:` line) and the done directory listing
+  ** The hook prints `Hook failed`, a fingerprint invitation appears, or the second run shows another invitation.
 covers: install/user/first-run/{install-voxtype,setup-agent,setup-fingerprint}.hook, bin/omarchy-hook, bin/omarchy-hook-install, bin/omarchy-done (ensure), bin/omarchy-hw-fingerprint
 
 ### preinstalls-remove-decline-and-confirm   [VM-OK]
@@ -17136,31 +17184,80 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Baseline: press Super+Shift+A — the ChatGPT web app opens; close it with Super+W. Open Apps with Super+Alt+Space, type `basecamp` — `Basecamp` is listed; type `obsidian` — `Obsidian`. Escape. Open a terminal with Super+Enter and type `pacman -Q obsidian libreoffice-fresh omacalc | wc -l; ls ~/.local/bin | grep -cE '^(claude|gh|codex|opencode|hermes|agy|omp|ori|grok|crush|cursor-agent|muse)$'` — `3` and a non-zero stub count (note it). Then `printf '#!/bin/bash\necho user-muse\n' > ~/.local/bin/muse; chmod +x ~/.local/bin/muse` — a user-managed `muse` is in place.
-  * Open the Omarchy menu with Super+Space → `Remove` → `Preinstalls`. In the floating terminal, at `Are you sure you want to remove all preinstalled web apps, TUI wrappers, and desktop applications?` choose **No** (arrow/Tab to No, Enter) → `Done!`; press a key.
-  ** Apps → `basecamp` still listed; `pacman -Q obsidian` still installed; Super+Space → `Remove` still lists `Preinstalls` and `Install` → `Preinstalls` is still dimmed ✓ (reopen the menu twice — guards paint from the previous evaluation).
-  * Super+Space → `Remove` → `Preinstalls` → **Yes**; type `prime` at the sudo prompt.
-  ** `Removing preinstalled Omarchy applications...` with `Removing web app: …` lines, then pacman removes aether cliamp libreoffice-fresh xournalpp pinta obsidian obs-studio kdenlive moonlight-qt lazydocker omacut omacalc omawrite (no download, one to two minutes), `Done!`. Press a key. A pacman dependency error here is the finding — screenshot it.
-  * Press Super+Shift+A — **nothing** opens; Super+Ctrl+Q and Super+Shift+W — nothing opens and no error dialog; Super+Enter — a terminal still opens.
-  ** If ChatGPT still opens, type `hyprctl reload` in the terminal, retry, and report that the script's own reload did not take.
-  * In the terminal type `pacman -Q obsidian libreoffice-fresh omacalc pinta aether 2>&1; ls ~/.local/bin | grep -cE '^(claude|gh|codex|opencode|hermes|agy|omp|ori|grok|crush|cursor-agent)$'; ~/.local/bin/muse; ls ~/.local/state/omarchy/preinstalls-removed; ls ~/.local/share/applications` — five `was not found` lines, `0`, `user-muse`, the marker present, no web-app or TUI desktop files.
-  * Apps (Super+Alt+Space): `basecamp`, `obsidian`, `libre`, `Omacut` → nothing listed. Press Super+K: the Obsidian binding (Super+O) is no longer listed. Super+Space → `Remove`: the `Preinstalls`, `Web App` and `TUI` rows are gone; `Install` → `Preinstalls` is selectable (not dimmed) — do NOT select it (~700 MB; own test).
-  * Type `rm ~/.local/bin/muse`; end the session with `stop` so the next test starts stock.
+  * Press Super+Shift+A. A ChatGPT window opens.
+  * Press Super+W. The window closes.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `basecamp`. Basecamp is listed.
+  * Type `obsidian`. Obsidian is listed.
+  * Press Escape. Apps closes.
+  * Press Super+Return. A terminal opens.
+  * Type `pacman -Q obsidian libreoffice-fresh omacalc | wc -l` and press Return. The output is `3`.
+  * Type `ls ~/.local/bin | grep -cE '^(claude|gh|codex|opencode|hermes|agy|omp|ori|grok|crush|cursor-agent|muse)$'` and press Return. Record the non-zero count.
+  * Type `printf '#!/bin/bash\necho user-muse\n' > ~/.local/bin/muse` and press Return. The prompt returns.
+  * Type `chmod +x ~/.local/bin/muse` and press Return. The prompt returns.
+  * Press Super+Space. The menu opens.
+  * Select Remove, then Preinstalls. A question asks whether to remove the preinstalled apps.
+  * Choose No. The output includes `Done!`.
+  * Press a key. The floating terminal closes.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `basecamp`. Basecamp is still listed.
+  * Press Escape. Apps closes.
+  * Type `pacman -Q obsidian` and press Return. The package is installed.
+  * Press Super+Space. The menu opens.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Remove. Preinstalls is listed.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Install. Preinstalls is dimmed with a check.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Remove, then Preinstalls. The same question appears.
+  * Choose Yes. The removal starts.
+  * If a sudo prompt appears, type `prime` and press Return. The removal continues.
+  * Wait until it shows `Done!`.
+  * Press a key. The floating terminal closes.
+  * Press Super+Shift+A. Nothing opens.
+  * Press Super+Ctrl+Q. Nothing opens.
+  * Press Super+Shift+W. Nothing opens.
+  * Press Super+Return. A new terminal opens.
+  * Type `pacman -Q obsidian libreoffice-fresh omacalc pinta aether 2>&1` and press Return. Each package was not found.
+  * Type `ls ~/.local/bin | grep -cE '^(claude|gh|codex|opencode|hermes|agy|omp|ori|grok|crush|cursor-agent)$'` and press Return. The output is `0`.
+  * Type `~/.local/bin/muse` and press Return. The output is `user-muse`.
+  * Type `ls ~/.local/state/omarchy/preinstalls-removed` and press Return. The marker exists.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `obsidian`. Nothing is listed.
+  * Press Escape. Apps closes.
+  * Press Super+K. The keybindings list opens.
+  * Type `obsidian`. No Obsidian binding is listed.
+  * Press Escape. The list closes.
+  * Press Super+Space. The menu opens.
+  * Select Remove. Preinstalls, Web App, and TUI are not listed.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Install. Preinstalls is enabled, and it is left unselected.
+  * Press Escape. The menu closes.
+  * Type `rm ~/.local/bin/muse` and press Return. The prompt returns.
+  * End the session with `stop`. The session ends.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The floating terminal asks a gum yes/no; `y` confirms, `n` declines.
-  * The hotkey gating relies on `omarchy_preinstalled_bindings` being switched off and `hyprctl reload` run by the script.
-  * Two windows would tile side by side; a chord that opens nothing leaves the desktop unchanged.
+  * `n` declines and `y` confirms. Reopen the menu after a row change before deciding whether it changed.
+  * If ChatGPT still opens after removal, run `hyprctl reload`, retry, and report that the script's reload did not take.
+  * A pacman dependency error during removal is the finding. Screenshot it. Do not start Install → Preinstalls.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the baseline (ChatGPT, Basecamp/Obsidian rows, counts), the confirmation declined with Basecamp still listed and the rows unchanged, the removal log ending `Done!`, the dead chords (desktop unchanged) with a terminal still opening, the terminal checks (`was not found` ×5, stub count `0`, `user-muse`, the marker, no web-app desktop files), the empty launcher searches, Super+K without Obsidian, and the Remove menu without Preinstalls/Web App/TUI with Install → Preinstalls enabled
+  ** ChatGPT opens, Apps lists Basecamp and Obsidian, three packages are installed, and the stub count is recorded. A user `muse` script is in place.
+  ** Declining removal finishes with `Done!`. Basecamp and Obsidian remain, Remove still lists Preinstalls, and Install dims it.
+  ** Confirming removal finishes with `Done!`. Super+Shift+A, Super+Ctrl+Q, and Super+Shift+W open nothing. A terminal still opens.
+  ** The five packages are gone, the shipped stub count is 0, `muse` still prints `user-muse`, and the removed marker exists.
+  ** Apps and the keybindings list no longer show those apps. Remove no longer lists Preinstalls, Web App, or TUI. Install lists Preinstalls as enabled.
   * If unsuccessful
-  ** Screenshot of the red Failed line or pacman error, packages or web apps surviving after Yes, changes after No, a stub surviving, `muse` overwritten, or ChatGPT still bound; `cat ~/.local/state/omarchy/preinstalls-removed; ls ~/.local/share/applications`
+  ** No changes the machine, Yes leaves a package or web app, a shipped stub survives, or `muse` no longer prints `user-muse`.
 covers: bin/omarchy-remove-preinstalls, bin/omarchy-webapp-remove-all, bin/omarchy-tui-remove-all, install/omarchy-base.packages, default/hypr/helpers.lua:84-90, default/hypr/bindings/applications.lua:10-34, default/omarchy/omarchy-menu.jsonc remove.preinstalls / install.preinstalls (:216,297), manual/25-web-apps.md:7, manual/46:75-81, manual/01-welcome-to-omarchy.md, test/shell.d/preinstalls-test.sh (l.69), default-agent-test.sh (Remove Preinstalls), hyprland-default-config-test.sh (preinstall flag skips bindings)
 
 ### preinstalls-restore-after-remove   [VM-OK] [NET] [SLOW]
@@ -17170,28 +17267,69 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `pacman -Q omacut omacalc omawrite; ls ~/.local/state/omarchy/preinstalls-removed 2>&1` — all three installed; the marker absent. Then type `omarchy-remove-preinstalls`, choose **Yes**, sudo `prime`, and wait for it to finish (offline, ~1 min). Open Apps (Super+Alt+Space), type `obsidian` — nothing. Escape.
-  * Open the Omarchy menu with Super+Space → `Install` → `Preinstalls` (now enabled). At `Are you sure you want to restore all preinstalled web apps, TUI wrappers, and desktop applications?` choose **No** → `Done!`. Reopen the menu twice: `Install` → `Preinstalls` is still enabled; `ls ~/.local/state/omarchy/preinstalls-removed` still present.
-  * Super+Space → `Install` → `Preinstalls` → **Yes**; type `prime`.
-  ** `Restoring preinstalled Omarchy applications...`, then pacman downloads ~700 MB (5–10 minutes; screenshot every 5 s, never sleep longer), `Done!`. Press a key.
-  ** On a pacman failure the floating terminal prints `Preinstalls are still marked as removed. Fix the errors above and try again.` — capture it; the marker must then still be present (correct fail-safe behaviour).
-  * Apps (Super+Alt+Space): `basecamp` → `Basecamp`; `obsidian` → `Obsidian`; `libre` → LibreOffice entries. Escape. Press Super+Shift+A — ChatGPT opens again; close it with Super+W.
-  * In the terminal type `pacman -Q omacut omacalc omawrite obsidian; ls ~/.local/bin | grep -cE '^(claude|gh|codex|opencode|hermes)$'; ls ~/.local/state/omarchy/preinstalls-removed 2>&1` — all installed again, the stub count back to non-zero (`5` at HEAD), the marker gone.
-  * Reopen the menu twice: `Install` → `Preinstalls` dim ✓; `Remove` → `Preinstalls` listed again. End the session with `stop` unless the reinstall completed cleanly and the operator wants the disk.
+  * Press Super+Return. A terminal opens.
+  * Type `pacman -Q omacut omacalc omawrite` and press Return. All three packages are listed.
+  * Type `ls ~/.local/state/omarchy/preinstalls-removed 2>&1` and press Return. The output includes `No such file`.
+  * Type `omarchy-remove-preinstalls` and press Return. A question asks whether to remove the preinstalled apps.
+  * Choose Yes. The removal starts.
+  * If a sudo prompt appears, type `prime` and press Return. The removal continues.
+  * Wait until the prompt returns.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `obsidian`. Nothing is listed.
+  * Press Escape. Apps closes.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Preinstalls. A question asks whether to restore the preinstalled apps.
+  * Choose No. The output includes `Done!`.
+  * Press a key if a floating terminal is still open. It closes.
+  * Press Super+Space. The menu opens.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Install. Preinstalls is still enabled.
+  * Press Escape. The menu closes.
+  * Type `ls ~/.local/state/omarchy/preinstalls-removed` and press Return. The marker exists.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Preinstalls. The same question appears.
+  * Choose Yes. The restore starts.
+  * If a sudo prompt appears, type `prime` and press Return. The restore continues.
+  * Wait until it shows `Done!`.
+  ** If it says preinstalls are still marked removed, record the error and stop. The marker must still exist.
+  * Press a key. The floating terminal closes.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `basecamp`. Basecamp is listed.
+  * Type `obsidian`. Obsidian is listed.
+  * Press Escape. Apps closes.
+  * Press Super+Shift+A. A ChatGPT window opens.
+  * Press Super+W. The window closes.
+  * Type `pacman -Q omacut omacalc omawrite obsidian` and press Return. All four packages are listed.
+  * Type `ls ~/.local/bin | grep -cE '^(claude|gh|codex|opencode|hermes)$'` and press Return. The count is greater than 0.
+  * Type `ls ~/.local/state/omarchy/preinstalls-removed 2>&1` and press Return. The output includes `No such file`.
+  * Press Super+Space. The menu opens.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Install. Preinstalls is dimmed with a check.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Remove. Preinstalls is listed.
+  * Press Escape. The menu closes.
+  * End the session with `stop`. The session ends.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The download may exceed the session budget; if so, report SLOW with the last pacman progress line and the marker still present.
-  * Start the restore early in the session.
+  * The restore downloads about 700 MB and can take 5 to 10 minutes. Screenshot about every 5 seconds.
+  * If time runs out, report SLOW with the last pacman line and whether the marker is still present.
+  * Reopen the menu after a row change before deciding whether it changed.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the packages gone with the marker present, the declined restore leaving the row enabled and the marker in place, `Restoring...`, pacman progress, `Done!`, the launcher entries back, ChatGPT opening, the packages and stubs back with the marker gone, and the rows flipped back
+  ** The three packages are installed and the removed marker is absent. After Yes, Obsidian is gone from Apps and the marker exists.
+  ** Declining restore leaves Install → Preinstalls enabled and leaves the marker in place.
+  ** Confirming restore finishes with `Done!`. Basecamp, Obsidian, and ChatGPT are back.
+  ** The packages are installed again, the stub count is greater than 0, and the marker is gone. Install dims Preinstalls, and Remove lists it.
   * If unsuccessful
-  ** The `Preinstalls are still marked as removed` line with the pacman error above it, the marker cleared while packages are still missing, or the Install row dimmed while removed; `omarchy-version`
+  ** The failure says preinstalls are still marked removed, the marker disappears while packages are missing, or Install is dimmed while the apps are still gone.
 covers: bin/omarchy-install-preinstalls, bin/omarchy-remove-preinstalls, bin/omarchy-refresh-applications, install/omarchy-base.packages, default/omarchy/omarchy-menu.jsonc (install.preinstalls, remove.preinstalls), test/shell.d/preinstalls-test.sh, menu-test.sh, manual/22-guis.md
 
 # CLI router, dev tools and debug
@@ -17327,28 +17465,30 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy version`; note the version.
-  * Type `omarchy up --help; echo "exit=$?"`.
-  ** Expected at HEAD: `Usage:` / `omarchy update [-y]`, an `Aliases:` block with `omarchy up`, `Binary:` / `omarchy-update`, `exit=0`.
-  ** On a disk predating the alias: `Unknown Omarchy command: omarchy up`, a `Did you mean: omarchy update ?` (or `upgrade`/`upload`), `exit=127` — record verbatim with the version; this is skew, not a failure.
-  * Wait 5 s and screenshot: no sudo prompt, no update banner.
-  * Type `omarchy commands | sed -n '/^Aliases:/,$p'`; at HEAD the table contains `omarchy up  omarchy update` beside `omarchy screenshot`, `omarchy reboot`, `omarchy shutdown`, `omarchy logout`, `omarchy background`, `omarchy screenrecord`.
-  * Never run `omarchy up` or `omarchy update` without `--help`.
-  * Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy version` and press Return. Record the version.
+  * Type `omarchy up --help; echo "exit=$?"` and press Return. The output names binary `omarchy-update` and alias `omarchy up`, and the last line is `exit=0`.
+  ** If it says `Unknown Omarchy command: omarchy up` and exits 127, record that with the version. That is version skew, not a failure.
+  * Wait 5 seconds. No sudo prompt and no update banner appear.
+  * Type `omarchy commands | sed -n '/^Aliases:/,$p'` and press Return. The alias table includes `omarchy up` next to `omarchy update`.
+  ** If the unknown-command path happened, record the alias table as it is instead.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The alias table is at the very end of `omarchy commands`; the sed keeps only that part.
-  * ./client-with-image allows you to get an image back of what you did, so can be useful for speeding things up
+  * Do not run `omarchy up` or `omarchy update` without `--help`.
+  * The alias table is at the end of `omarchy commands`.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of `up --help` with `Binary: omarchy-update` and the alias table (or the recorded unknown-command output plus version for the skew case), and the idle prompt 5 s later
+  ** The version is recorded. `omarchy up --help` names binary `omarchy-update` and alias `omarchy up`, and exits 0. An unknown-command result with exit 127 is recorded as version skew.
+  ** Five seconds later there is no sudo prompt and no update banner.
+  ** The alias table includes `omarchy up` mapped to `omarchy update`, or the skew case is recorded instead.
   * If unsuccessful
-  ** an update that started (sudo prompt / package list scrolling)
+  ** Help starts an update, shown by a sudo prompt or a package list.
 covers: bin/omarchy-update:1-7; bin/omarchy:229-231,302-313,606-619,889-896; docs/cli-router.md "Dispatch" (alias fallback)
 
 ### cli-hidden-commands-route-but-stay-unlisted   [VM-OK]

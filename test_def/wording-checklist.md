@@ -365,16 +365,16 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `update-menu-rows-and-process-restart-shell`
 - [x] `update-config-shell-resets-bar-position`
 - [x] `update-hardware-rows-without-hardware`
-- [ ] `update-firmware-no-devices`
+- [x] `update-firmware-no-devices`
 - [x] `update-time-restarts-timesyncd`
-- [ ] `update-extra-themes-row-appears-with-git-theme`
-- [ ] `update-hook-post-update-invitations-once`
-- [ ] `preinstalls-remove-decline-and-confirm`
-- [ ] `preinstalls-restore-after-remove`
+- [x] `update-extra-themes-row-appears-with-git-theme`
+- [x] `update-hook-post-update-invitations-once`
+- [x] `preinstalls-remove-decline-and-confirm`
+- [x] `preinstalls-restore-after-remove`
 - [ ] `cli-discover-commands-and-groups`
 - [ ] `cli-help-never-executes`
 - [ ] `cli-unknown-command-typos-and-aliases`
-- [ ] `cli-alias-omarchy-up`
+- [x] `cli-alias-omarchy-up`
 - [ ] `cli-hidden-commands-route-but-stay-unlisted`
 - [ ] `agent-skill-command-contract`
 - [ ] `state-done-markers-and-name-guards`
