@@ -1455,6 +1455,135 @@ describe("session pane", () => {
       }),
   );
 
+  it.effect(
+    "on a ticket the pane shows the step, the exact line, and that intent's actions, not the history",
+    () =>
+      Effect.gen(function* () {
+        const instruction = `<ActionList>
+* Press Super+Escape. The System menu opens.
+* Click Lock. Use the mouse only. The screen locks.
+* any crashes or erroneous behavior must be reported.
+* always take a screen shot of every step
+</ActionList>`;
+        const full = Follow.apply(
+          Follow.apply(
+            Follow.expand(
+              Follow.peekFromActions(
+                "OLI-61",
+                SESSION_ID,
+                garage.url,
+                [{ request: sendKey, createdAt: ago(2) }],
+                Option.some(TINY_PNG),
+              ),
+              garage.url,
+            ),
+            {
+              type: "intent",
+              state: "started",
+              message: "Click Lock. Use the mouse only. The screen locks.",
+            },
+          ),
+          { type: "action", id: 10, name: "send-keys", state: "running" },
+        );
+        const view = sessionOf(full, Option.none());
+        const onTicket = {
+          ...view,
+          snapshot: Option.some({
+            ...SNAPSHOT,
+            queue: {
+              ...SNAPSHOT.queue,
+              running: [{ ...running, instruction, intent: null }],
+            },
+          }),
+          cursor: { ...view.cursor, clients: 1 },
+        };
+        const rows = yield* draw(onTicket);
+        const body = rows.join("\n");
+        expect(body).toContain("following OLI-61");
+        expect(body).toContain("2/2");
+        expect(body).toContain("Click Lock. Use the mouse only. The");
+        expect(body).toContain("screen locks.");
+        expect(body).toContain("send-keys");
+        expect(body).not.toMatch(/send-key(?!s)/);
+      }),
+  );
+
+  it.effect("a running client shows its step in place of how long it has run", () =>
+    Effect.gen(function* () {
+      const instruction = `<ActionList>
+* Press Super+Escape. The System menu opens.
+* Click Lock. Use the mouse only. The screen locks.
+* any crashes or erroneous behavior must be reported.
+* always take a screen shot of every step
+</ActionList>`;
+      const stepped = {
+        ...running,
+        instruction,
+        intent: "Press Super+Escape. The System menu opens.",
+      };
+      const drawn = yield* draw(
+        shown(
+          { ...SNAPSHOT, queue: { ...EMPTY_QUEUE, running: [stepped] } },
+          { tab: "automation" },
+        ),
+      );
+      const side = (row: string | undefined): string => (row ?? "").slice(2, 28);
+      expect(side(drawn[6])).toContain("1/2");
+      expect(side(drawn[6])).not.toContain("45 s ago");
+      const tickets = yield* draw(
+        shown({ ...SNAPSHOT, queue: { ...EMPTY_QUEUE, running: [stepped] } }, { tab: "tickets" }),
+      );
+      expect(tickets.join("\n")).toContain("1/2");
+    }),
+  );
+
+  it.effect("a paraphrase or a closed stream keeps the elapsed time (unhappy)", () =>
+    Effect.gen(function* () {
+      const instruction = `<ActionList>
+* Press Super+Escape. The System menu opens.
+* any crashes or erroneous behavior must be reported.
+* always take a screen shot of every step
+</ActionList>`;
+      const paraphrased = { ...running, instruction, intent: "lock the screen" };
+      const clients = yield* draw(
+        shown(
+          { ...SNAPSHOT, queue: { ...EMPTY_QUEUE, running: [paraphrased] } },
+          { tab: "automation" },
+        ),
+      );
+      const side = (row: string | undefined): string => (row ?? "").slice(2, 28);
+      expect(side(clients[6])).toContain("45 s ago");
+      expect(side(clients[6])).not.toContain("1/1");
+      const done = Follow.apply(
+        Follow.apply(
+          Follow.expand(
+            Follow.peekFromActions("OLI-61", SESSION_ID, garage.url, [], Option.none()),
+            garage.url,
+          ),
+          { type: "session", status: "running" },
+        ),
+        { type: "intent", state: "completed" },
+      );
+      const selected = yield* draw(
+        shown(
+          {
+            ...SNAPSHOT,
+            queue: {
+              ...EMPTY_QUEUE,
+              running: [{ ...paraphrased, intent: "Press Super+Escape. The System menu opens." }],
+            },
+          },
+          {
+            tab: "automation",
+            session: Option.some(done),
+            cursor: { servers: 0, clients: 1, queue: 0 },
+          },
+        ),
+      );
+      expect(side(selected[6])).toContain("45 s ago");
+    }),
+  );
+
   it.effect("with no session the pane says so and draws no image (unhappy)", () =>
     Effect.gen(function* () {
       const waiting = {

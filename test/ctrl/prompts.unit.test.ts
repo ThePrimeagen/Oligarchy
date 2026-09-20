@@ -1,5 +1,6 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
+import { NodeFileSystem } from "@effect/platform-node";
 import { Effect, FileSystem, Layer } from "effect";
 import * as Prompts from "../../src/ctrl/prompts.ts";
 import * as FakeFs from "../support/fake-fs.ts";
@@ -80,6 +81,24 @@ describe("renderLinearIssue happy path", () => {
         const text = yield* Prompts.renderLinearIssue(ticket).pipe(Effect.provide(fs.layer));
         expect(text).toBe("ticket OLI-42 {not a placeholder} {{lower}}");
         expect(fileNames(fs.reads)).toEqual(["linear-issue.html"]);
+      }),
+  );
+
+  it.effect(
+    "the ticket tells the driver to start each step with that ActionList line exactly",
+    () =>
+      Effect.gen(function* () {
+        const text = yield* Prompts.renderLinearIssue(ticket).pipe(
+          Effect.provide(NodeFileSystem.layer),
+        );
+        expect(text).toContain(ticket.TEST_INSTRUCTION);
+        expect(text).toContain(
+          "the intent message is that step's line exactly, with only the leading asterisk and the spaces beside it removed",
+        );
+        expect(text).toContain("any crashes or erroneous behavior must be reported");
+        expect(text).toContain("always take a screen shot of every step");
+        expect(text).toContain('--message "Press Super+Escape. The System menu opens."');
+        expect(text).not.toContain("boot to the desktop");
       }),
   );
 });
