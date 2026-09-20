@@ -2088,17 +2088,28 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Space.
-  * Press Down three times, then Up once.
+  * Press Super+Space. The menu opens.
+  * Press Down three times. The highlight moves down.
+  * Press Up once. The highlight moves up.
   * Press Super+Space. The menu closes.
   * Press Super+Space. The menu opens.
-  * Press Escape.
-  * Press Super+Alt+Space. Press Escape.
-  * Using the mouse only, left-click the Omarchy logo at the far left of the top bar. Click it again. Click it once more, then click away from the menu.
-  * Right-click the logo.
-  ** Press Super+Shift+2. Left-click workspace 1 on the bar, then workspace 2. Press Super+W.
-  * Middle-click the logo. Left-click the logo. Press Escape.
-  * Left-click the logo. Press Escape.
+  * Press Escape. The menu closes.
+  * Press Super+Alt+Space. The Apps menu opens.
+  * Press Escape. The menu closes.
+  * Left-click the Omarchy logo at the far left of the top bar. Use the mouse only. The menu opens.
+  * Left-click the logo again. The menu closes.
+  * Left-click the logo. The menu opens.
+  * Click away from the menu. The menu closes.
+  * Right-click the logo. A terminal opens.
+  * Press Super+Shift+2. The terminal moves to workspace 2.
+  * Left-click workspace 1 on the bar. Workspace 1 is shown.
+  * Left-click workspace 2 on the bar. The terminal is shown.
+  * Press Super+W. The terminal closes.
+  * Middle-click the logo. Nothing opens.
+  * Left-click the logo. The menu opens.
+  * Press Escape. The menu closes.
+  * Left-click the logo. The menu opens.
+  * Press Escape. The menu closes.
   * the desktop must return exactly as left.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
@@ -2113,10 +2124,11 @@ instruction: |
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the root menu, and one with the highlight on Trigger
-  ** Screenshot of the desktop after the Super+Space that closes the menu, of the menu after the Super+Space that opens it again, of the desktop after Escape, after the second logo click, and after the click away from the menu
-  ** Screenshot of the "Apps…" list, of the terminal after the right click, of the workspace switching by click, and of the bar with the pointer on the logo after the middle click with nothing open
-  ** The mouse was used for every logo step; no hotkey stood in
+  ** A screenshot after each step: menu open, highlight moved down, highlight moved up, menu closed, menu open, menu closed, Apps menu open, menu closed
+  ** Logo left-click opens, second left-click closes, third left-click opens, click away closes
+  ** Right-click opens a terminal; workspace 2 shows it, workspace 1 does not, workspace 2 shows it again; Super+W closes it
+  ** Middle-click opens nothing; the following left-click opens the menu and Escape closes it, twice
+  ** The mouse was used for every logo click; no hotkey stood in
   * If unsuccessful
   ** Screenshot of what is on screen after the failing key or click, showing the pointer position; note whether the bar is still present (a shell crash takes it too) and the tail of ./client get-serial
 covers: shell/plugins/menu/Menu.qml (openRoute, keyCatcher, scrim MouseArea, apps sort); shell/plugins/menu/BarWidget.qml; shell/plugins/bar/widgets/Workspaces.qml; config/omarchy/shell.json bar.layout.left; default/hypr/bindings/utilities.lua:1-2; default/omarchy/omarchy-menu.jsonc root entries; manual/03:13, manual/05:19-20
