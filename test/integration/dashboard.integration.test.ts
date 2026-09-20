@@ -385,7 +385,7 @@ const definitionsAbortForm = (
   action: QueuedJob["action"],
   definition: string,
 ): string =>
-  `<form method="post" action="/abort" hx-post="/abort" hx-confirm="are you sure?" hx-target="#running-tests" hx-swap="innerHTML"><input type="hidden" name="ticket" value="${ticket}"/><input type="hidden" name="action" value="${action}"/><input type="hidden" name="view" value="definitions"/><input type="hidden" name="definition" value="${definition}"/><button type="submit" class="button button--abort">Abort</button></form>`;
+  `<form method="post" action="/abort" hx-post="/abort" hx-confirm="are you sure?" hx-target="#running-tests" hx-swap="innerHTML"><input type="hidden" name="ticket" value="${ticket}"/><input type="hidden" name="action" value="${action}"/><input type="hidden" name="view" value="definitions"/><input type="hidden" name="definition" value="${definition}"/><button type="submit" class="abort" aria-label="abort"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 2l8 8M10 2L2 10" stroke="red" stroke-width="2" fill="none"></path></svg></button></form>`;
 const wordings = (card: string): ReadonlyArray<Wording> =>
   [...card.matchAll(/<h3>(v\d+)<\/h3>([\s\S]*?)(?=<h3>|$)/g)].map(([, label, body]) => ({
     label: label ?? "",
@@ -1250,7 +1250,7 @@ describe.skipIf(dbUrl === "")("dashboard/definitions running fragment", () => {
     );
     const { status, html } = await getPage("/definitions/running?name=running-fragment", dbUrl);
     expect(status).toBe(200);
-    expect(html.startsWith('<ol class="running-tests__list">')).toBe(true);
+    expect(html.startsWith("<table>")).toBe(true);
     expect(html).toContain(definitionsAbortForm("RUN-FRAG", "drive", "running-fragment"));
     expect(html).not.toContain("RUN-FRAG-PEND");
     expect(html).not.toContain("<html");
@@ -2645,7 +2645,7 @@ describe.skipIf(dbUrl === "")("dashboard POST /abort happy path", () => {
       );
       expect(response.status).toBe(200);
       const html = await response.text();
-      expect(html.startsWith('<ol class="running-tests__list">')).toBe(true);
+      expect(html.startsWith("<table>")).toBe(true);
       expect(html).toContain(definitionsAbortForm("ABT-DEF-KEEP", "drive", "abort-definitions"));
       expect(html).not.toContain("ABT-DEF-STOP");
       expect(html).not.toContain("<h3>running</h3>");

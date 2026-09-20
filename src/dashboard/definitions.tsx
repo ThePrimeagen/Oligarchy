@@ -17,59 +17,74 @@ const runningHref = (name: string | undefined): string =>
     ? "/definitions/running"
     : `/definitions/running?name=${encodeURIComponent(name)}`;
 
-// One running job: its definition, what it is doing, the ticket that names it, and how long it
-// has been running. The definition name stays this page's link. The ticket text goes to Linear.
-// The rest of a ticketed card opens the session feed (the empty link is the click layer under
-// those two and the abort). Abort posts the ticket and action the shared /abort route already
-// stops. view=definitions is how that route tells this form apart from the servers page: htmx
-// swaps the list, and a submit without it returns here. A job with no ticket has nothing to name.
+// One running job, as a row of the same kind as the queue: the definition name stays this page's
+// link, the ticket text goes to Linear, and how long it has been running opens the session feed.
+// Abort is the queue's mark, posting the ticket and action the shared /abort route already stops.
+// view=definitions is how that route tells this form apart from the servers page: htmx swaps the
+// list, and a submit without it returns here. A job with no ticket has nothing to name.
 const RunningJob: FC<{ job: AutomationJob; definition: string | undefined }> = ({
   job,
   definition,
-}) => (
-  <li class="running-tests__job">
-    {job.ticket === null ? null : (
-      <a
-        class="running-tests__open"
-        href={followHref(job.ticket)}
-        aria-label={`follow ${job.ticket}`}
-      />
-    )}
-    <a href={definitionHref(job.test)}>{job.test}</a>
-    <span class="running-tests__action">{job.action}</span>
-    {job.ticket === null ? (
-      <span class="running-tests__ticket">—</span>
-    ) : (
-      <a class="running-tests__linear" href={linearHref(job.ticket)}>
-        {job.ticket}
-      </a>
-    )}
-    <span class="running-tests__age">{since(job.startedAt, job.queriedAt)}</span>
-    {job.ticket === null ? null : (
-      <form
-        method="post"
-        action="/abort"
-        hx-post="/abort"
-        hx-confirm="are you sure?"
-        hx-target="#running-tests"
-        hx-swap="innerHTML"
-      >
-        <input type="hidden" name="ticket" value={job.ticket} />
-        <input type="hidden" name="action" value={job.action} />
-        <input type="hidden" name="view" value="definitions" />
-        {definition === undefined ? null : (
-          <input type="hidden" name="definition" value={definition} />
+}) => {
+  const ticket = job.ticket;
+  return (
+    <tr>
+      <td>
+        <a href={definitionHref(job.test)}>{job.test}</a>
+      </td>
+      <td>{job.action}</td>
+      <td>
+        {ticket === null ? (
+          "—"
+        ) : (
+          <a class="ticket" href={linearHref(ticket)}>
+            {ticket}
+          </a>
         )}
-        <button type="submit" class="button button--abort">
-          Abort
-        </button>
-      </form>
-    )}
-  </li>
-);
+      </td>
+      <td class={ticket === null ? undefined : "follow"}>
+        {ticket === null ? (
+          since(job.startedAt, job.queriedAt)
+        ) : (
+          <a href={followHref(ticket)}>{since(job.startedAt, job.queriedAt)}</a>
+        )}
+      </td>
+      <td>
+        {ticket === null ? null : (
+          <form
+            method="post"
+            action="/abort"
+            hx-post="/abort"
+            hx-confirm="are you sure?"
+            hx-target="#running-tests"
+            hx-swap="innerHTML"
+          >
+            <input type="hidden" name="ticket" value={ticket} />
+            <input type="hidden" name="action" value={job.action} />
+            <input type="hidden" name="view" value="definitions" />
+            {definition === undefined ? null : (
+              <input type="hidden" name="definition" value={definition} />
+            )}
+            <button type="submit" class="abort" aria-label="abort">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="12"
+                height="12"
+                viewBox="0 0 12 12"
+                aria-hidden="true"
+              >
+                <path d="M2 2l8 8M10 2L2 10" stroke="red" stroke-width="2" fill="none" />
+              </svg>
+            </button>
+          </form>
+        )}
+      </td>
+    </tr>
+  );
+};
 
 // The list the page polls and the abort swaps in. Only what is running: a pending job has not
-// started, and a finished one is a result, not something to stop.
+// started, and a finished one is a result, not something to stop. A table, like the queue.
 export const RunningList: FC<{
   jobs: ReadonlyArray<AutomationJob>;
   definition: string | undefined;
@@ -77,11 +92,18 @@ export const RunningList: FC<{
   jobs.length === 0 ? (
     <p class="running-tests__empty">No tests are running.</p>
   ) : (
-    <ol class="running-tests__list">
+    <table>
+      <tr>
+        <th>test</th>
+        <th>action</th>
+        <th>ticket</th>
+        <th>running</th>
+        <th></th>
+      </tr>
       {jobs.map((job) => (
         <RunningJob job={job} definition={definition} />
       ))}
-    </ol>
+    </table>
   );
 
 // Above every definition, so an operator sees what is in flight before any wording. The poll is

@@ -49,8 +49,11 @@ const job = (ticket: string | null, action: AutomationJob["action"]): Automation
   queriedAt: QUERIED_AT,
 });
 
+const ABORT_X =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 2l8 8M10 2L2 10" stroke="red" stroke-width="2" fill="none"></path></svg>';
+
 const definitionsAbort = (ticket: string): string =>
-  `<form method="post" action="/abort" hx-post="/abort" hx-confirm="are you sure?" hx-target="#running-tests" hx-swap="innerHTML"><input type="hidden" name="ticket" value="${ticket}"/><input type="hidden" name="action" value="diagnose"/><input type="hidden" name="view" value="definitions"/><input type="hidden" name="definition" value="lock-screen"/><button type="submit" class="button button--abort">Abort</button></form>`;
+  `<form method="post" action="/abort" hx-post="/abort" hx-confirm="are you sure?" hx-target="#running-tests" hx-swap="innerHTML"><input type="hidden" name="ticket" value="${ticket}"/><input type="hidden" name="action" value="diagnose"/><input type="hidden" name="view" value="definitions"/><input type="hidden" name="definition" value="lock-screen"/><button type="submit" class="abort" aria-label="abort">${ABORT_X}</button></form>`;
 
 describe("FollowFrame happy path", () => {
   it("shows the open step, the intents and commands under them, the latest frame, and polls every five seconds", async () => {
@@ -164,18 +167,19 @@ describe("FollowFrame unhappy path", () => {
 });
 
 describe("RunningList happy path", () => {
-  it("opens the session on the card, sends the ticket to Linear, and leaves the definition link and the abort", async () => {
+  it("is a queue row: the definition stays its link, the ticket goes to Linear, the age opens the session, and abort is the queue's mark", async () => {
     const page = await render(
       RunningList({ jobs: [job("OLI-61", "diagnose")], definition: "lock-screen" }),
     );
+    expect(page.startsWith("<table>")).toBe(true);
     expect(page).toContain(
-      '<a class="running-tests__open" href="/tickets/OLI-61" aria-label="follow OLI-61"></a>',
-    );
-    expect(page).toContain(
-      '<a class="running-tests__linear" href="https://linear.app/issue/OLI-61">OLI-61</a>',
+      "<tr><th>test</th><th>action</th><th>ticket</th><th>running</th><th></th></tr>",
     );
     expect(page).toContain('<a href="/definitions/lock-screen">lock-screen</a>');
+    expect(page).toContain('<a class="ticket" href="https://linear.app/issue/OLI-61">OLI-61</a>');
+    expect(page).toContain('<td class="follow"><a href="/tickets/OLI-61">45 s ago</a></td>');
     expect(page).toContain(definitionsAbort("OLI-61"));
+    expect(page).not.toContain("running-tests__open");
   });
 });
 
@@ -184,7 +188,7 @@ describe("RunningList unhappy path", () => {
     const page = await render(
       RunningList({ jobs: [job(null, "drive")], definition: "lock-screen" }),
     );
-    expect(page).toContain(">—</span>");
+    expect(page).toContain("<td>—</td>");
     expect(page).toContain('<a href="/definitions/lock-screen">lock-screen</a>');
     expect(page).not.toContain('href="/tickets/');
     expect(page).not.toContain("linear.app");
@@ -193,15 +197,13 @@ describe("RunningList unhappy path", () => {
   });
 });
 
-describe("running card click layer", () => {
-  it("lays the follow link under the definition link, the ticket link and the abort", () => {
+describe("definitions page shares the servers page", () => {
+  it("keeps the servers page's graphs and does not lay a click layer over a running test", () => {
     const css = readFileSync("src/dashboard/page.tsx", "utf8");
-    expect(css).toContain(".running-tests__open");
-    expect(css).toMatch(/\.running-tests__job\s*\{[^}]*position:\s*relative/);
-    expect(css).toMatch(/\.running-tests__open\s*\{[^}]*position:\s*absolute[^}]*inset:\s*0/);
-    expect(css).toMatch(/\.running-tests__job > a:not\(\.running-tests__open\)[\s\S]*z-index:\s*1/);
-    expect(css).toMatch(/\.running-tests__linear[\s\S]*z-index:\s*1/);
-    expect(css).toMatch(/\.running-tests__job > form[\s\S]*z-index:\s*1/);
+    expect(css).toMatch(/\.process-graph__jobs\s*\{[^}]*stroke:\s*#fbbf24/);
+    expect(css).toMatch(/\.process-graph__cpu\s*\{[^}]*stroke:\s*#38bdf8/);
+    expect(css).toContain(".process-graph__bar");
+    expect(css).not.toContain(".running-tests__open");
   });
 });
 
