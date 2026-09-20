@@ -226,14 +226,14 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `aether-theme-from-wallpaper`
 - [x] `background-picker-select-and-cancel`
 - [x] `background-desktop-double-click-pickers`
-- [ ] `background-picker-filter-and-empty-result`
-- [ ] `background-picker-thumbnails-cache`
-- [ ] `background-next-cycles-and-set-rejects-bad-path`
-- [ ] `background-user-folder-joins-picker-and-cycle`
-- [ ] `background-video-wallpaper`
-- [ ] `owe-aur-install-video-wallpaper`
-- [ ] `font-set-menu-and-cli`
-- [ ] `font-install-nerd-font-from-menu`
+- [x] `background-picker-filter-and-empty-result`
+- [x] `background-picker-thumbnails-cache`
+- [x] `background-next-cycles-and-set-rejects-bad-path`
+- [x] `background-user-folder-joins-picker-and-cycle`
+- [x] `background-video-wallpaper`
+- [x] `owe-aur-install-video-wallpaper`
+- [x] `font-set-menu-and-cli`
+- [x] `font-install-nerd-font-from-menu`
 - [ ] `font-set-and-text-size-edit-kitty-conf`
 - [ ] `fontconfig-defaults-and-icon-font-glyphs`
 - [ ] `branding-about-text-edit-and-reset`

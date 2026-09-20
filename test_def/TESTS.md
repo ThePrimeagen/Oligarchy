@@ -9802,26 +9802,31 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Ctrl+Space — the carousel opens with the current theme's wallpapers, the current one selected/centred; screenshot and note its label if one is shown (labels are file names title-cased, `nord_river` → `Nord River`).
-  * Type the first three letters of a different image's name (Tokyo Night: `qua` for Quattro).
-  ** If the query appears and the carousel narrows with the selection jumping to the first match, continue here. If nothing changes, press Escape, open the theme picker with Super+Shift+Ctrl+Space and type `nor` instead — continue there and report that the background picker did not filter.
-  * Press Backspace until the query is empty, then type `zzqq` — no images are shown, the overlay stays open, no crash; screenshot.
-  * Press Backspace until empty — the full carousel returns with the original selection.
-  * Press Escape (twice if a query is still typed: the first Escape only clears the filter). The overlay closes; open a terminal with Super+Enter and type `omarchy-theme-current; omarchy-theme-bg-current` — unchanged from the start. Close it with Super+W.
+  * Press Super+Ctrl+Space. The background picker opens. Note the current tile.
+  * Type `qua`.
+  ** If the carousel narrows, continue. If nothing changes, press Escape, press Super+Shift+Ctrl+Space, type `nor`, and report that the background picker did not filter.
+  * Press Backspace until the query is empty. The full carousel returns.
+  * Type `zzqq`. No images are shown. The picker stays open.
+  * Press Backspace until the query is empty. The full carousel returns. The original tile is selected.
+  * Press Escape. The picker closes.
+  ** If a query is still typed, the first Escape only clears it. Press Escape again.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy-theme-current` and press Return. The theme is unchanged.
+  * Type `omarchy-theme-bg-current` and press Return. The wallpaper name is unchanged.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Filtering is case-insensitive; the selected image is the enlarged/centred one; Right and Left move the selection.
-  * Do not press Enter in either picker; applying is covered by `background-picker-select-and-cancel` and `theme-switch-menu-and-hotkey`.
+  * Do not press Enter in either picker.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Filtered carousel with the moved selection (and which picker it was); the empty carousel for `zzqq`; the full carousel after clearing; the unchanged theme and wallpaper names
+  * On success
+  ** A narrowed carousel, an empty carousel for `zzqq`, the full carousel after clearing, and unchanged theme and wallpaper names. Record which picker filtered.
   * If unsuccessful
-  ** The selection staying on a hidden image, a crash on empty results, or a change applied by Escape; `./client get-serial`
+  ** A crash on the empty filter, or Escape changing the wallpaper
 covers: test/shell.d/image-picker-test.sh; shell/plugins/image-picker; manual/39-backgrounds.md
 
 ### background-picker-thumbnails-cache   [VM-OK]
@@ -9831,24 +9836,40 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `rm -rf ~/.cache/omarchy/image-selector; t=$(cat ~/.local/state/omarchy/current/theme.name); ls /usr/share/omarchy/themes/$t/backgrounds/ ~/.config/omarchy/backgrounds/$t/ 2>/dev/null | wc -l` → note the count of backgrounds (Tokyo Night: 8).
-  * Press Super+Space → `Style` → `Background`. Thumbnails appear (they may fill in over a second or two; allow 30 s); their number matches the count. Press Escape.
-  * Type `ls ~/.cache/omarchy/image-selector/ | grep -c '\.jpg$'` → equals the count; `ls ~/.cache/omarchy/image-selector/ | grep -E '\.(rows|signature)$'` → a rows and a signature file exist; `ls -d ~/.cache/omarchy/image-selector/*.lock 2>&1` → none left.
-  * Press Super+Space → `Style` → `Background` again → thumbnails appear immediately. Select a different background than the current with the arrows and Enter; the desktop changes. Reopen and select the original one back.
-  * Close the terminal with Super+W; the desktop is as found.
+  * Press Super+Enter. A terminal opens.
+  * Type `rm -rf ~/.cache/omarchy/image-selector` and press Return.
+  * Type `t=$(cat ~/.local/state/omarchy/current/theme.name); ls /usr/share/omarchy/themes/$t/backgrounds/ ~/.config/omarchy/backgrounds/$t/ 2>/dev/null | wc -l` and press Return. Note the count.
+  * Press Super+Space. The menu opens.
+  * Click Style.
+  * Click Background. The background picker opens. The thumbnail count matches the number you noted.
+  * Press Escape. The picker closes.
+  * Type `ls ~/.cache/omarchy/image-selector/ | grep -c '\.jpg$'` and press Return. The count matches.
+  * Type `ls ~/.cache/omarchy/image-selector/ | grep -E '\.(rows|signature)$'` and press Return. A rows file and a signature file are listed.
+  * Type `ls -d ~/.cache/omarchy/image-selector/*.lock` and press Return. No lock is listed.
+  * Press Super+Space. The menu opens.
+  * Click Style.
+  * Click Background. The background picker opens. The thumbnails appear immediately.
+  * Press Right. The highlight moves to a different wallpaper.
+  * Press Enter. The picker closes. The wallpaper changes.
+  * Press Super+Space. The menu opens.
+  * Click Style.
+  * Click Background. The background picker opens.
+  * Select the original wallpaper.
+  * Press Enter. The picker closes. The original wallpaper returns.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * A leftover `.lock` directory would mean a generator died mid-way; the next open recovers it after ten minutes by contract, so report it if seen.
+  * A leftover lock means a generator stopped mid-way. Report it.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of the picker with all thumbnails, the cache listing with the matching `.jpg` count plus rows/signature files and no locks, and the background changing and restoring
+  * On success
+  ** A thumbnail for each background, a matching jpg count, rows and signature files, no lock, and the wallpaper changed then restored
   * If unsuccessful
-  ** Screenshot of blank tiles, a mismatched count, or leftover lock directories; output of `omarchy-version`
+  ** A blank tile, a mismatched count, or a leftover lock
 covers: bin/omarchy-menu-images; shell/plugins/image-picker/list.sh; bin/omarchy-theme-bg-next; test/shell.d/menu-images-test.sh; test/shell.d/video-background-test.sh; manual/39-backgrounds.md
 
 ### background-next-cycles-and-set-rejects-bad-path   [VM-OK]
@@ -9858,28 +9879,34 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `ls ~/.local/state/omarchy/current/theme/backgrounds/; omarchy-theme-bg-current; orig=$(readlink -f ~/.local/state/omarchy/current/background)`. Count the files (N; Tokyo Night: 8) and note the current name (fresh disk: `Winding Road`).
-  * Type `for i in $(seq 8); do omarchy-theme-bg-next; sleep 2; omarchy-theme-bg-current; done` (use N instead of 8 if it differs) and screenshot every ~2 s while it runs.
-  ** Names print in order: `Quattro`, `Swirl Buck`, `Sunset Lake`, `Omakub`, `Oma Cityscape`, `Oma`, `Omarchy`, then `Winding Road` again (wrap-around); the wallpaper changes each time (a diagonal wipe if you are quick) and each printed name is the file's humanised name (`2-swirl-buck.webp` → `Swirl Buck`).
-  * Unhappy paths: type `omarchy-theme-bg-set /tmp/does-not-exist.png; echo "exit=$?"` → `File does not exist: /tmp/does-not-exist.png`, `exit=1`; the wallpaper is unchanged.
-  * Type `omarchy-theme-bg-set; echo "exit=$?"` → `Usage: omarchy-theme-bg-set <path-to-media>`, `exit=1`.
-  * Type `omarchy-theme-bg-set /etc/hostname; echo "exit=$?"` → `exit=0`; the visible wallpaper stays as it was (the shell keeps the last good image) even though the link now points at a text file.
-  * Any image, even another theme's: type `omarchy theme bg set /usr/share/omarchy/themes/nord/backgrounds/1-city-view.webp` → the wallpaper becomes the Nord city view while the bar stays Tokyo Night navy; `readlink ~/.local/state/omarchy/current/background` matches. Type `omarchy-theme-bg-next; omarchy-theme-bg-current` → `Winding Road` (the first, because the Nord file is not in the theme's list).
-  * Type `omarchy-theme-bg-set "$orig"` — the wallpaper is confirmed/redrawn from the original file and `omarchy-theme-bg-current` prints the starting name. Close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Type `ls ~/.local/state/omarchy/current/theme/backgrounds/` and press Return. Note the file count.
+  * Type `omarchy-theme-bg-current` and press Return. Note the current name.
+  * Type `orig=$(readlink -f ~/.local/state/omarchy/current/background)` and press Return.
+  * Type `for i in $(seq 8); do omarchy-theme-bg-next; sleep 2; omarchy-theme-bg-current; done` and press Return. Use the file count instead of 8 if it differs.
+  * Take a screenshot about every 2 seconds while it runs. Each printed name matches a new wallpaper. The last name is the one you started on.
+  * Type `omarchy-theme-bg-set /tmp/does-not-exist.png; echo "exit=$?"` and press Return. The output says the file does not exist. The last line is `exit=1`. The wallpaper does not change.
+  * Type `omarchy-theme-bg-set; echo "exit=$?"` and press Return. A usage line appears. The last line is `exit=1`.
+  * Type `omarchy-theme-bg-set /etc/hostname; echo "exit=$?"` and press Return. The last line is `exit=0`. The visible wallpaper stays as it was.
+  * Type `omarchy theme bg set /usr/share/omarchy/themes/nord/backgrounds/1-city-view.webp` and press Return. The wallpaper becomes the Nord city view. The bar stays on the current theme.
+  * Type `omarchy-theme-bg-next` and press Return.
+  * Type `omarchy-theme-bg-current` and press Return. The name is the first theme wallpaper.
+  * Type `omarchy-theme-bg-set "$orig"` and press Return. The original wallpaper returns.
+  * Type `omarchy-theme-bg-current` and press Return. The name matches the one you noted.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * There is no hotkey for "next background"; the CLI is the only way to cycle. The terminal covers part of the wallpaper; compare the strips beside it.
-  * Do not restart the shell while the link points at /etc/hostname; that would render a black desktop (recover with the restore step and report if it happens). If N is 1, report `N=1` and verify only that one `omarchy-theme-bg-next` keeps the same name.
+  * Do not restart the shell while the link points at `/etc/hostname`.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Terminal listing with N files and N+1 names advancing one file per call and returning to the first, with a visibly different wallpaper after each call; both error messages with `exit=1` and `exit=0` for the text file; the wallpaper identical after all three bad commands; the Nord city view under a navy bar and `Winding Road` after the next call; the original name at the end
+  * On success
+  ** The names advancing and wrapping, both refusals, the text file leaving the visible wallpaper alone, the Nord city view, and the original name restored
   * If unsuccessful
-  ** The name advancing while the wallpaper does not, the notification `No background was found for theme`, a black/blank desktop after the bad file, the bar disappearing, or the restore failing; `ls ~/.local/state/omarchy/current/theme/backgrounds/`; `./client get-serial`
+  ** A name that advances while the wallpaper does not, or a black desktop after the text file
 covers: bin/omarchy-theme-bg-next (index -1 path); bin/omarchy-theme-bg-set (checks; ln + `omarchy-shell background set`); bin/omarchy-theme-bg-current; themes/tokyo-night/backgrounds; shell/plugins/background/Background.qml (IpcHandler set, transitionBackground, reveal; image that never becomes ready); manual/39-backgrounds.md
 
 ### background-user-folder-joins-picker-and-cycle   [VM-OK]
@@ -9889,27 +9916,46 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `T=$(cat ~/.local/state/omarchy/current/theme.name); echo $T; ls ~/.config/omarchy/backgrounds/ 2>&1` (fresh disk: `tokyo-night`, no folder yet).
-  * Press Super+Space → `Install` → `Style` → `Background`. Files (Nautilus, possibly oversized under GDK_SCALE=2, a few seconds to appear) opens on an empty folder whose path bar ends in `backgrounds › tokyo-night`. In the terminal `ls -d ~/.config/omarchy/backgrounds/$T` → the folder now exists.
-  * Type `cp /usr/share/omarchy/themes/ristretto/backgrounds/2-coffee-beans.jpg ~/.config/omarchy/backgrounds/$T/ && magick -size 1280x800 xc:'#ff0000' ~/.config/omarchy/backgrounds/$T/zz-solid-red.png && ls ~/.config/omarchy/backgrounds/$T`. Both files appear in Files.
-  * Press Super+Ctrl+Space: the carousel now has 10 thumbnails (8 + 2) including the coffee beans and a solid red one (last, sorted). Select the red one with the arrows or the mouse and press Enter.
-  ** The desktop wallpaper turns solid red; `readlink ~/.local/state/omarchy/current/background` → …/backgrounds/tokyo-night/zz-solid-red.png; `omarchy theme bg current` → `Zz Solid Red`.
-  * Type `omarchy-theme-set gruvbox && omarchy-theme-set tokyo-night`; press Super+Ctrl+Space: still 10 tiles (user images survive theme switches). Escape. Type `omarchy-theme-bg-next` repeatedly (screenshot each) until `readlink ~/.local/state/omarchy/current/background` shows `2-coffee-beans.jpg` — the user folder is part of the cycle.
-  * Restore: type `rm ~/.config/omarchy/backgrounds/$T/2-coffee-beans.jpg ~/.config/omarchy/backgrounds/$T/zz-solid-red.png && omarchy-theme-bg-next` → `readlink` shows a theme path and the wallpaper is a theme image; press Super+Ctrl+Space: 8 tiles, no red or coffee thumbnail. Escape. Close Files (Super+W on it) and the terminal.
+  * Press Super+Enter. A terminal opens.
+  * Type `T=$(cat ~/.local/state/omarchy/current/theme.name); echo $T` and press Return. Note the theme name.
+  * Type `ls ~/.config/omarchy/backgrounds/` and press Return. Record whether the folder exists.
+  * Press Super+Space. The menu opens.
+  * Click Install.
+  * Click Style.
+  * Click Background. Files opens on the theme's background folder.
+  * Type `ls -d ~/.config/omarchy/backgrounds/$T` and press Return. The folder exists.
+  * Type `cp /usr/share/omarchy/themes/ristretto/backgrounds/2-coffee-beans.jpg ~/.config/omarchy/backgrounds/$T/` and press Return.
+  * Type `magick -size 1280x800 xc:'#ff0000' ~/.config/omarchy/backgrounds/$T/zz-solid-red.png` and press Return.
+  * Type `ls ~/.config/omarchy/backgrounds/$T` and press Return. Both files are listed.
+  * Press Super+Ctrl+Space. The background picker opens. The new images are included.
+  * Select the red image.
+  * Press Enter. The picker closes. The wallpaper turns red.
+  * Type `omarchy theme bg current` and press Return. The name is `Zz Solid Red`.
+  * Type `omarchy-theme-set gruvbox` and press Return.
+  * Type `omarchy-theme-set tokyo-night` and press Return.
+  * Press Super+Ctrl+Space. The background picker opens. The user images are still there.
+  * Press Escape. The picker closes.
+  * Type `omarchy-theme-bg-next` and press Return. Repeat until the wallpaper is the coffee-beans image, or 12 times.
+  * Type `rm ~/.config/omarchy/backgrounds/$T/2-coffee-beans.jpg ~/.config/omarchy/backgrounds/$T/zz-solid-red.png` and press Return.
+  * Type `omarchy-theme-bg-next` and press Return. The wallpaper is a theme image.
+  * Press Super+Ctrl+Space. The background picker opens. The red and coffee images are gone.
+  * Press Escape. The picker closes.
+  * Click Files.
+  * Press Super+W. Files closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Files may open behind the menu; press Super+Space to close the menu first. The picker may not filter on typing; use arrow keys or click the thumbnail.
-  * The user folder sorts before the theme folder, so the copies are reached right after the last theme background.
+  * Files may open behind the menu. Press Escape if the menu is still open.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Files at the folder; the 10-tile carousel with the red and coffee thumbnails; the red desktop with the readlink and `Zz Solid Red`; still 10 tiles after the theme round trip; the coffee-bean wallpaper reached through bg-next; the 8-tile carousel after removal
+  * On success
+  ** Files on the user folder, the new thumbnails, a red wallpaper, the images still present after a theme round trip, the coffee image reached by next, and the extras gone after removal
   * If unsuccessful
-  ** The carousel without the new files, the wallpaper unchanged, or the copies never reached by the cycle; `ls -la ~/.config/omarchy/backgrounds/$T/`; `./client get-serial`
+  ** A picker without the new files, or next never reaching the coffee image
 covers: bin/omarchy-theme-bg-install; omarchy-menu.jsonc install.style.background; bin/omarchy-theme-bg-switcher (user dir); bin/omarchy-theme-bg-cache; bin/omarchy-theme-bg-set; bin/omarchy-theme-bg-current; bin/omarchy-theme-bg-next (USER_BACKGROUNDS_PATH); bin/omarchy-menu-images (picker dirs); shell/plugins/background/Background.qml; default/hypr/bindings/utilities.lua:17; manual/39-backgrounds.md
 
 ### background-video-wallpaper   [VM-PARTIAL]
@@ -9919,29 +9965,44 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `command -v ffmpeg || echo NO-FFMPEG`.
-  ** If NO-FFMPEG, record it and stop: the clip cannot be generated in the guest (do not install anything).
-  * Type `theme=$(cat ~/.local/state/omarchy/current/theme.name); mkdir -p ~/.config/omarchy/backgrounds/$theme; orig=$(readlink -f ~/.local/state/omarchy/current/background); ffmpeg -y -loglevel error -f lavfi -i testsrc=duration=6:size=640x360:rate=10 -pix_fmt yuv420p ~/.config/omarchy/backgrounds/$theme/9-test.mp4; echo "exit=$?"` → `exit=0`.
-  * Press Super+Ctrl+Space (or Super+Space → `Style` → `Background`): a thumbnail for 9-test.mp4 is present and shows a frame of the test pattern, not a blank tile; select it (or type `omarchy-theme-bg-set ~/.config/omarchy/backgrounds/$theme/9-test.mp4`).
-  ** The wallpaper shows the moving SMPTE-style test pattern with a running counter. Take three screenshots two seconds apart; the counter digits must differ (it is playing/looping). `ls ~/.cache/omarchy/image-selector/*.jpg | wc -l` → at least one thumbnail was cached.
-  * Press Super+Ctrl+L. Screenshot within 3 s: the lock screen shows the video darkened (not blurred) with the box on top. Wait 7 s: the screen is black. Move the mouse: the lock returns. Type `prime`, Enter.
-  * Type `omarchy-theme-bg-current` → `Test`. Type `omarchy-theme-bg-next` twice: the video is part of the cycle (`readlink ~/.local/state/omarchy/current/background` shows `9-test.mp4` at some point).
-  * Press Super+F on the terminal (fullscreen), wait five seconds, press Super+F again: no crash, and two screenshots five seconds apart after un-fullscreening differ again (playback resumed; the pause while covered cannot be proven from screenshots). Type `omarchy-theme-set nord` (image wallpaper, video stops) and then `omarchy-theme-set tokyo-night`.
-  * Restore: type `omarchy-theme-bg-set "$orig"; rm ~/.config/omarchy/backgrounds/$theme/9-test.mp4`; close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Type `command -v ffmpeg || echo NO-FFMPEG` and press Return.
+  ** If the line is `NO-FFMPEG`, record it and stop.
+  * Type `theme=$(cat ~/.local/state/omarchy/current/theme.name); mkdir -p ~/.config/omarchy/backgrounds/$theme; orig=$(readlink -f ~/.local/state/omarchy/current/background)` and press Return.
+  * Type `ffmpeg -y -loglevel error -f lavfi -i testsrc=duration=6:size=640x360:rate=10 -pix_fmt yuv420p ~/.config/omarchy/backgrounds/$theme/9-test.mp4; echo "exit=$?"` and press Return. The last line is `exit=0`.
+  * Press Super+Ctrl+Space. The background picker opens. A thumbnail for `9-test.mp4` is shown.
+  * Select that thumbnail.
+  * Press Enter. The picker closes. The wallpaper is the moving test pattern.
+  * Wait 2 seconds and take a screenshot.
+  * Wait 2 seconds and take a screenshot. The counter has changed.
+  * Press Super+Ctrl+L. The lock screen appears. The video is darkened.
+  * Wait 7 seconds. The screen is black.
+  * Move the pointer. The lock screen returns.
+  * Type `prime` and press Enter. The desktop returns.
+  * Type `omarchy-theme-bg-current` and press Return. The name is `Test`.
+  * Type `omarchy-theme-bg-next` and press Return.
+  * Type `omarchy-theme-bg-next` and press Return. At one of these steps the link is `9-test.mp4`.
+  * Press Super+F. The terminal fills the screen.
+  * Wait 5 seconds.
+  * Press Super+F. The terminal returns to a tile. The wallpaper is moving again.
+  * Type `omarchy-theme-set nord` and press Return. The wallpaper is a still image.
+  * Type `omarchy-theme-set tokyo-night` and press Return.
+  * Type `omarchy-theme-bg-set "$orig"` and press Return. The original wallpaper returns.
+  * Type `rm ~/.config/omarchy/backgrounds/$theme/9-test.mp4` and press Return.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Playback is CPU decoded on 2 vCPU; a slightly choppy pattern is fine, a frozen pattern for > 3 s or a black wallpaper is not. If the shell becomes unresponsive, report it.
-  * Skipped here: sound (no audio device), GPU decode, the power-saver pause.
+  * A slightly choppy pattern is fine. A frozen pattern for more than 3 seconds is a failure.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** The picker thumbnail showing a frame of the pattern and the cache count; three desktop screenshots with different counter values; the lock screen with the darkened video, black after 7 s, the desktop after unlock; `Test` and the mp4 in the cycle; differing frames after un-fullscreening; Nord then Tokyo Night image wallpapers; the original restored
+  * On success
+  ** The video thumbnail, two frames with different counters, the darkened lock screen, `Test` in the cycle, playback after leaving fullscreen, and the original wallpaper restored
   * If unsuccessful
-  ** A blank picker tile, a black/static desktop after setting the mp4, the shell crashing, the file missing from the picker, or the lock falling back to black/no background; `journalctl --user -n 60 | sudo tee /dev/ttyS0` and `./client get-serial`; `omarchy-version`
+  ** A black wallpaper, a blank thumbnail, or a shell crash
 covers: shell/Ui/BackgroundMedia.qml; shell/Ui/BackgroundVideo.qml; shell/plugins/background/Background.qml (video path, playbackEnabled); shell/plugins/lock/LockView.qml (video darken); lock/Service.qml (monitorDpmsTimer); bin/omarchy-theme-bg-next (video extensions); bin/omarchy-theme-bg-set (video); bin/omarchy-theme-set (is_video_path, no snapshot); bin/omarchy-theme-bg-switcher; bin/omarchy-menu-images; shell/plugins/image-picker/list.sh; test/shell.d/video-background-test.sh; test/shell.d/menu-images-test.sh; manual/39-backgrounds.md (Backgrounds can be videos)
 
 ### owe-aur-install-video-wallpaper   [VM-PARTIAL] [NET] [SLOW]
@@ -9951,27 +10012,41 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy pkg add owe; echo "exit=$?"` → `error: target not found: owe`, `exit=1` — owe is AUR-only and the README's command cannot work (03-INTENDED-BEHAVIOUR #23, docs DEFECT in the owe repo).
-  * Type `yay -S --noconfirm owe` (password `prime` when asked). yay fetches the PKGBUILD, installs build deps and compiles; several minutes; ends without errors.
-  * Type `ffmpeg -y -f lavfi -i testsrc=duration=8:size=1280x720:rate=30 -pix_fmt yuv420p ~/Videos/loop.mp4`, then `owe status`; if it says the daemon is not running, type `systemctl --user start owed 2>/dev/null || (owed &>/tmp/owed.log &)` and `owe status` again → status JSON with renderer liveness.
-  * Type `owe set ~/Videos/loop.mp4`; take two screenshots 2 seconds apart: the desktop background is the moving test pattern and the two differ.
-  * Type `owe pause`; two screenshots 2 seconds apart are identical (frozen). Type `owe resume`.
-  * Unhappy path: type `owe set /nonexistent/file.mp4; echo "exit=$?"` → rejected with an error and a non-zero exit; the wallpaper keeps playing.
-  * Type `owe shutdown`, then Super+Space → `Style` → `Background` and pick any background: the stock still background is back. Close the terminal and end the session with `stop` so the AUR install does not persist.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy pkg add owe; echo "exit=$?"` and press Return. The output says the target was not found. The last line is `exit=1`.
+  * Type `yay -S --noconfirm owe` and press Return.
+  ** If a password is asked, type `prime` and press Return. The build can take several minutes. Screenshot about every 30 seconds.
+  * Wait until yay finishes without an error.
+  * Type `ffmpeg -y -f lavfi -i testsrc=duration=8:size=1280x720:rate=30 -pix_fmt yuv420p ~/Videos/loop.mp4` and press Return.
+  * Type `owe status` and press Return. Record whether the daemon is running.
+  ** If it is not running, type `systemctl --user start owed` and press Return, then check `owe status` again.
+  * Type `owe set ~/Videos/loop.mp4` and press Return. The wallpaper is the moving test pattern.
+  * Wait 2 seconds and take a screenshot. The pattern has moved.
+  * Type `owe pause` and press Return.
+  * Wait 2 seconds and take a screenshot. The pattern has not moved.
+  * Type `owe resume` and press Return. The pattern moves again.
+  * Type `owe set /nonexistent/file.mp4; echo "exit=$?"` and press Return. The command is rejected. The exit is not `0`. The wallpaper keeps playing.
+  * Type `owe shutdown` and press Return.
+  * Press Super+Space. The menu opens.
+  * Click Style.
+  * Click Background. The background picker opens.
+  * Select a still wallpaper.
+  * Press Enter. The picker closes. The wallpaper is a still image.
+  * Press Super+W. The terminal closes.
+  * End the session with `stop` so the AUR install does not persist.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The compile on 2 vCPU can take 3–6 minutes; screenshot every ~30 s. If yay is still building at the 7-minute mark, report the elapsed time and stop.
-  * No GPU: choppy playback via llvmpipe is acceptable; a black background or a crashed `owe-render` is not — capture `cat /tmp/owed.log | sudo tee /dev/ttyS0`.
+  * If yay is still building after several minutes, report the elapsed time and stop.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshot of `omarchy pkg add owe` failing and of yay finishing; two screenshots showing the background animating, two showing it paused; the rejected bad path; the stock background restored
+  * On success
+  ** `omarchy pkg add owe` failing, yay finishing, two different moving frames, two identical paused frames, the bad path rejected, and a stock still wallpaper restored
   * If unsuccessful
-  ** Serial capture of the build tail or of /tmp/owed.log; `owe status` output
+  ** The build error, or a black background
 covers: owe README "Install", "Quick start", "CLI reference"; default/omarchy/omarchy-menu.jsonc "install.aur"; bin/omarchy-pkg-aur-install
 
 ### font-set-menu-and-cli   [VM-OK]
@@ -9981,29 +10056,42 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy font current` → `JetBrainsMono Nerd Font`; `omarchy font list` → a short list including `Liberation Mono`. Leave the terminal visible.
-  * Press Super+Space → `Style` → `Font`. A submenu lists the fonts with exactly one row marked ✓ current: `JetBrainsMono Nerd Font`. Click `Liberation Mono` with the mouse.
-  ** The bar restarts and its clock/text is now Liberation Mono; a toast `You must restart Foot to see font change` appears. This terminal keeps the old font.
-  * Open a new terminal with Super+Enter and type `ls -la`; its letterforms differ from the first terminal's (compare side by side).
-  * Press Super+Space → `Style` → `Font` again: the ✓ is now on `Liberation Mono`. Escape.
-  * Type `omarchy font current` → `Liberation Mono`; `grep '^font=' ~/.config/foot/foot.ini` → `font=Liberation Mono:size=9`; `grep -c 'Liberation Mono' ~/.config/fontconfig/fonts.conf` → `1`.
-  * Unhappy paths: type `omarchy font set "Comic Sans"; echo "exit=$?"` → `Font 'Comic Sans' not found.`, `exit=1`; the bar does not restart and `omarchy font current` is unchanged. Type `omarchy font set; echo "exit=$?"` → usage, `exit=1`.
-  * Type `omarchy font set "JetBrainsMono Nerd Font"`; the bar returns to the Nerd Font and a new terminal shows the Nerd Font prompt glyphs. Press Super+Space → `Style` → `Font`: the ✓ is back on JetBrainsMono. Escape; close the terminals with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy font current` and press Return. The line is `JetBrainsMono Nerd Font`.
+  * Type `omarchy font list` and press Return. `Liberation Mono` is listed.
+  * Press Super+Space. The menu opens.
+  * Click Style.
+  * Click Font. The font list opens. JetBrainsMono Nerd Font is marked current.
+  * Click Liberation Mono. The bar text changes. A toast says to restart Foot.
+  * Press Super+Enter. A second terminal opens. Its letters differ from the first terminal.
+  * Press Super+Space. The menu opens.
+  * Click Style.
+  * Click Font. The font list opens. Liberation Mono is marked current.
+  * Press Escape. The menu closes.
+  * Type `omarchy font current` and press Return. The line is `Liberation Mono`.
+  * Type `grep '^font=' ~/.config/foot/foot.ini` and press Return. The line includes `Liberation Mono`.
+  * Type `omarchy font set "Comic Sans"; echo "exit=$?"` and press Return. The output says the font was not found. The last line is `exit=1`. The bar does not change.
+  * Type `omarchy font set; echo "exit=$?"` and press Return. A usage line appears. The last line is `exit=1`.
+  * Type `omarchy font set "JetBrainsMono Nerd Font"` and press Return. The bar returns to the Nerd Font.
+  * Press Super+Enter. A third terminal opens. It uses the Nerd Font.
+  * Press Super+Space. The menu opens.
+  * Click Style.
+  * Click Font. The font list opens. JetBrainsMono Nerd Font is marked current.
+  * Press Escape. The menu closes.
+  * Press Super+W until every terminal is closed.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Font differences are subtle: compare bar digits and the two terminals' `ls -la` output at full resolution. Prompt icons may still render through fontconfig fallback in the Liberation window; that is not a failure.
-  * The list is regenerated on every open, so a font that failed to apply simply keeps the ✓ where it was. The stock current font is JetBrainsMono Nerd Font (`fc-match monospace`); reviewer 31 expected CaskaydiaMono — that is only true after `font-install-nerd-font-from-menu`.
-  * A plain (non-Nerd) font such as Liberation Mono shows missing-glyph boxes for the bar's icons while selected — expected, and part of why the manual recommends Nerd Fonts; the boxes must vanish after the restore.
+  * Compare the two terminals at full size. Missing bar-icon glyphs while Liberation Mono is selected are expected.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** The font list; the submenu with the ✓ on JetBrainsMono, then on Liberation Mono; the restart-foot toast; the bar in Liberation Mono; two terminals side by side in different fonts; `font current`, the foot.ini and fonts.conf lines; the two rejections with `exit=1`; the restored bar and ✓
+  * On success
+  ** The current font moving from JetBrainsMono to Liberation Mono and back, the restart-Foot toast, different letters in the two terminals, and both refusals with `exit=1`
   * If unsuccessful
-  ** `fc-match monospace` output, `cat ~/.config/fontconfig/fonts.conf`, the bar screenshot, an empty submenu or a ✓ that did not move; `./client get-serial`
+  ** A font list that does not move the current mark, or a refusal that changes the bar
 covers: bin/omarchy-font-list; bin/omarchy-font-current; bin/omarchy-font-set; default/fontconfig/conf.avail/50-omarchy.conf; config/foot/foot.ini; shell/plugins/menu/Menu.qml (providers.fonts, mergeProviderRows, invalidateVolatileProvider); omarchy-menu.jsonc style.font; manual/38-fonts.md
 
 ### font-install-nerd-font-from-menu   [VM-OK] [NET]
@@ -10013,27 +10101,50 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `echo The quick brown fox 0O1lI`; leave it open at one side. Press Super+Space → `Style` → `Font`: `JetBrainsMono Nerd Font` is marked current and CaskaydiaMono is absent. Escape.
-  * Press Super+Space → `Install` → `Style` → `Font` → `Cascadia Mono` using the mouse.
-  ** Floating terminal: the logo, `Installing Cascadia Mono...`, a sudo prompt (type `prime`), pacman installs `ttf-cascadia-mono-nerd` (a few MB, up to 1–2 min; poll with screenshots), a 2 s pause, the bar flickers as the shell restarts, a toast `You must restart Foot to see font change`, then `● Done! Press any key to close...`. Press a key.
-  * The terminal left open keeps its old typeface (foot needs a new window for a font change). Open a new terminal with Super+Enter and type `echo The quick brown fox 0O1lI`: the same text renders in rounder Cascadia letters. Type `omarchy font current` → `CaskaydiaMono Nerd Font`; `fc-list | grep -ci caskaydia` → a number ≥ 1; `grep '^font=' ~/.config/foot/foot.ini` → `CaskaydiaMono Nerd Font:size=9`.
-  * Press Super+Space → `Style` → `Font`: `CaskaydiaMono Nerd Font` is listed and marked current. Escape. The bar glyphs are intact (Nerd Font variant).
-  * Unhappy path: type `omarchy-install-font; echo "exit=$?"` → `Usage: omarchy-install-font <display-name> <package> <family>`, `exit=1`.
-  * Restore: Super+Space → `Style` → `Font` → `JetBrainsMono Nerd Font` (the shell restarts); `omarchy font current` → `JetBrainsMono Nerd Font`. Then `omarchy pkg drop ttf-cascadia-mono-nerd` (password `prime`) — or end the session with `stop`, since the package alters the disk.
+  * Press Super+Enter. A terminal opens.
+  * Type `echo The quick brown fox 0O1lI` and press Return. Leave that terminal open.
+  * Press Super+Space. The menu opens.
+  * Click Style.
+  * Click Font. The font list opens. JetBrainsMono Nerd Font is current. CaskaydiaMono is absent.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Click Install.
+  * Click Style.
+  * Click Font.
+  * Click Cascadia Mono. A floating terminal starts the install.
+  ** If a password is asked, type `prime` and press Return.
+  * Wait until the terminal says Done.
+  * Press a key. That terminal closes. The bar font has changed.
+  * Press Super+Enter. A new terminal opens.
+  * Type `echo The quick brown fox 0O1lI` and press Return. The letters differ from the first terminal.
+  * Type `omarchy font current` and press Return. The line is `CaskaydiaMono Nerd Font`.
+  * Type `fc-list | grep -ci caskaydia` and press Return. The count is at least `1`.
+  * Press Super+Space. The menu opens.
+  * Click Style.
+  * Click Font. The font list opens. CaskaydiaMono Nerd Font is marked current.
+  * Press Escape. The menu closes.
+  * Type `omarchy-install-font; echo "exit=$?"` and press Return. A usage line appears. The last line is `exit=1`.
+  * Press Super+Space. The menu opens.
+  * Click Style.
+  * Click Font.
+  * Click JetBrainsMono Nerd Font. The bar returns to JetBrainsMono Nerd Font.
+  * Type `omarchy font current` and press Return. The line is `JetBrainsMono Nerd Font`.
+  * Type `omarchy pkg drop ttf-cascadia-mono-nerd` and press Return.
+  ** If a password is asked, type `prime` and press Return.
+  * Press Super+W until every terminal is closed.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Compare a before/after screenshot of the same text in the two terminals; the bar and menu font change too.
-  * A mirror failure in pacman is a NET failure, not an Omarchy one; capture the error text either way.
+  * Compare the same sentence in the old terminal and the new one. A pacman mirror failure is a network failure.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** The Font submenu before (Cascadia absent) and after (present and current); the floating terminal ending Done and the restart-foot toast; the identical text in two typefaces side by side; `omarchy font current`, the fc-list count and the foot.ini line; the usage line with `exit=1`; the restored state
+  * On success
+  ** Cascadia absent, then installed and current, the same sentence in two typefaces, a usage refusal with `exit=1`, and JetBrainsMono restored
   * If unsuccessful
-  ** The floating terminal's `Failed (exit code N)!` text or `Font 'CaskaydiaMono Nerd Font' not found.`, pacman/sudo error text, a bar with broken glyphs, `./client get-serial`
+  ** The install failing, or the bar showing broken glyphs after Cascadia
 covers: bin/omarchy-install-font; bin/omarchy-font-set; omarchy-menu.jsonc install.style.font.cascadia, style.font; manual/38-fonts.md (Install → Style → Font)
 
 ### font-set-and-text-size-edit-kitty-conf   [VM-OK]
