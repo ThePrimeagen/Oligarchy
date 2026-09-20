@@ -3,7 +3,8 @@ import { OperatorPage } from "./page.tsx";
 import type { AutomationJob, DefinitionVersions } from "./query.ts";
 import { since } from "./servers.tsx";
 
-const definitionHref = (name: string): string => `/definitions?name=${encodeURIComponent(name)}`;
+// A definition's name is its page: /definitions/lock-screen. The dashes are the name's own.
+export const definitionHref = (name: string): string => `/definitions/${encodeURIComponent(name)}`;
 
 const runningHref = (name: string | undefined): string =>
   name === undefined
@@ -146,10 +147,39 @@ const Definition: FC<{
   );
 };
 
-// Text, like the servers page: each name, its newest wording as a form, then the current
-// wording and the one before it as paragraphs. Running jobs sit above that. `groups` and
-// `running` are absent only when the database could not be read, so a failure does not claim
-// that nothing is running. `error` is that failure; a name nobody carries is said on its own.
+// Not a form: enter must not reload the page. public/dashboard.js narrows the list as this is typed.
+// autocomplete is off: a restored value does not fire input, so the list would not match the box.
+const DefinitionSearch: FC = () => (
+  <search class="search">
+    <input type="search" aria-label="Search definitions" autocomplete="off" />
+  </search>
+);
+
+// Every name is on the page. Definitions do not change while it is open, so the search hides
+// rows in the browser. The miss starts hidden; the script shows it when nothing matches.
+const DefinitionList: FC<{ groups: ReadonlyArray<DefinitionVersions> }> = ({ groups }) =>
+  groups.length === 0 ? (
+    <p>no definitions</p>
+  ) : (
+    <>
+      <ul class="definition-list">
+        {groups.map((group) => (
+          <li>
+            <a href={definitionHref(group.name)}>{group.name}</a>
+          </li>
+        ))}
+      </ul>
+      <p class="definition-miss" hidden>
+        No definitions match <code></code>.
+      </p>
+    </>
+  );
+
+// The index is a search and one link per name. A name's own page is its newest wording as a
+// form, then the current wording and the one before it. Running jobs sit above that body.
+// `groups` is the index's list, absent on a name's page and when the database could not be
+// read. `running` is absent on that same failure, so it does not claim that nothing is running.
+// `error` is that failure; a name nobody carries is said on its own page.
 export const DefinitionsPage: FC<{
   groups: ReadonlyArray<DefinitionVersions> | null;
   name: string | undefined;
@@ -158,27 +188,20 @@ export const DefinitionsPage: FC<{
   error: string | undefined;
   running: ReadonlyArray<AutomationJob> | null;
 }> = ({ groups, name, selected, notice, error, running }) => {
-  let body = null;
-  if (groups !== null && groups.length === 0) {
-    body = <p>no definitions</p>;
-  } else if (groups !== null) {
-    body = groups.map((group) => (
-      <Definition group={group} notice={group.name === selected?.name ? notice : undefined} />
-    ));
-  }
+  const index = error === undefined && name === undefined && groups !== null;
   return (
     <OperatorPage title="oligarchy definitions" page="definitions" scriptSrc="/dashboard.js">
       <h1>oligarchy definitions</h1>
       {error === undefined ? null : <p>error: {error}</p>}
-      {name !== undefined && groups !== null && selected === undefined ? (
+      {index ? <DefinitionSearch /> : null}
+      {running === null ? null : <RunningTests jobs={running} definition={name} />}
+      {index ? <DefinitionList groups={groups} /> : null}
+      {error === undefined && name !== undefined && selected === undefined ? (
         <p>
           No test definition named <code>{name}</code>.
         </p>
       ) : null}
-      {running === null ? null : (
-        <RunningTests jobs={running} definition={name ?? selected?.name} />
-      )}
-      {body}
+      {selected === undefined ? null : <Definition group={selected} notice={notice} />}
     </OperatorPage>
   );
 };

@@ -485,15 +485,32 @@ const seedResults = async (
 };
 
 describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
-  it("lists every definition as plain text under the definitions tab", async () => {
+  it("lists every definition as its own page, under a search", async () => {
     const { status, html } = await getPage("/definitions", dbUrl);
     expect(status).toBe(200);
-    expect(html).toContain("<h2>lock-screen</h2>");
+    expect(html).toContain('<search class="search"><input type="search"');
+    expect(html).toContain('<a href="/definitions/lock-screen">lock-screen</a>');
+    expect(html.indexOf("<search")).toBeLessThan(html.indexOf('href="/definitions/lock-screen"'));
+    expect(html).not.toContain("<h2>lock-screen</h2>");
     expect(html).toContain('aria-current="page">definitions</a>');
     expect(html).toContain('href="/">servers</a>');
     expect(html).not.toContain("dashboard.css");
     // The suite is not a button on this page yet. The heading is where it would go.
     expect(html).not.toContain("/create-test-suite-run");
+  });
+
+  it("keeps every name on the page when a query is present; the browser narrows them", async () => {
+    await seed(dbUrl, async (db) => {
+      await db
+        .insert(testDefinitions)
+        .values({ name: "wide layout", description: "d", instruction: "i", proof: "p" });
+    });
+    const { status, html } = await getPage("/definitions?q=LOCK", dbUrl);
+    expect(status).toBe(200);
+    expect(html).toContain('<a href="/definitions/lock-screen">lock-screen</a>');
+    expect(html).toContain('<a href="/definitions/wide%20layout">wide layout</a>');
+    expect(html).toContain('<p class="definition-miss" hidden="">');
+    expect(html).not.toContain('value="LOCK"');
   });
 
   it("shows the named definition as text and does not chart its results", async () => {
@@ -510,7 +527,7 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
         { status: "pending", model: "gemini-3.8" },
       ]);
     });
-    const { status, html } = await getPage("/definitions?name=wide%20layout", dbUrl);
+    const { status, html } = await getPage("/definitions/wide%20layout", dbUrl);
     expect(status).toBe(200);
     const card = section(html, "wide layout");
     expect(card).toContain("<h2>wide layout</h2>");
@@ -547,7 +564,7 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
       await seedResults(db, newer.id, [{ status: "passed", model: "composer-2.5" }]);
     });
 
-    const { status, html } = await getPage("/definitions?name=wide-versions", dbUrl);
+    const { status, html } = await getPage("/definitions/wide-versions", dbUrl);
     expect(status).toBe(200);
     expect(html.match(/<h2>wide-versions<\/h2>/g)).toHaveLength(1);
     const card = section(html, "wide-versions");
@@ -585,7 +602,7 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
       await seedResults(db, middle.id, [{ status: "failed", model: "grok-4.6" }]);
       await seedResults(db, newest.id, [{ status: "passed", model: "composer-2.5" }]);
     });
-    const { status, html } = await getPage("/definitions?name=wide-three", dbUrl);
+    const { status, html } = await getPage("/definitions/wide-three", dbUrl);
     expect(status).toBe(200);
     const card = section(html, "wide-three");
     expect(wordings(card).map((wording) => wording.label)).toEqual(["v3", "v2"]);
@@ -622,7 +639,7 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
         },
       ]);
     });
-    const { status, html } = await getPage("/definitions?name=wide-duration", dbUrl);
+    const { status, html } = await getPage("/definitions/wide-duration", dbUrl);
     expect(status).toBe(200);
     const card = section(html, "wide-duration");
     expect(card).toContain("<h2>wide-duration</h2>");
@@ -639,7 +656,7 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
         { name: "wide-edit", description: "new d", instruction: "new i", proof: "new p" },
       ]);
     });
-    const { status, html } = await getPage("/definitions?name=wide-edit", dbUrl);
+    const { status, html } = await getPage("/definitions/wide-edit", dbUrl);
     expect(status).toBe(200);
     const card = section(html, "wide-edit");
     // The form is in the card as it is, not behind a fold; the page's script enables the button
@@ -666,7 +683,7 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
         .insert(testDefinitions)
         .values({ name: "wide-unrun", description: "d", instruction: "i", proof: "p" });
     });
-    const { status, html } = await getPage("/definitions?name=wide-unrun", dbUrl);
+    const { status, html } = await getPage("/definitions/wide-unrun", dbUrl);
     expect(status).toBe(200);
     const card = section(html, "wide-unrun");
     expect(card).toContain("<h2>wide-unrun</h2>");
@@ -713,7 +730,7 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
         },
       ]),
     );
-    const { status, html } = await getPage("/definitions?name=running-on-definitions", dbUrl);
+    const { status, html } = await getPage("/definitions/running-on-definitions", dbUrl);
     expect(status).toBe(200);
     const runningAt = html.indexOf('<section class="running-tests"');
     const headingAt = html.indexOf("<h1>oligarchy definitions</h1>");
@@ -735,7 +752,7 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
     expect(running).not.toContain("RUN-PEND");
     expect(running).not.toContain("RUN-DONE");
     expect(running).toContain(
-      '<a href="/definitions?name=running-on-definitions">running-on-definitions</a>',
+      '<a href="/definitions/running-on-definitions">running-on-definitions</a>',
     );
     expect(running).toContain(definitionsAbortForm("RUN-2", "diagnose", "running-on-definitions"));
     expect(running).toContain(definitionsAbortForm("RUN-1", "drive", "running-on-definitions"));
@@ -758,7 +775,7 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page unhappy path", () => {
         },
       ]),
     );
-    const { status, html } = await getPage("/definitions?name=lock-screen", dbUrl);
+    const { status, html } = await getPage("/definitions/lock-screen", dbUrl);
     expect(status).toBe(200);
     const running = runningSection(html);
     expect(running).toContain("No tests are running.");
@@ -770,11 +787,12 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page unhappy path", () => {
     );
   });
 
-  it("answers 404 for a name no definition carries, and still lists the ones that exist", async () => {
-    const { status, html } = await getPage("/definitions?name=no-such-definition", dbUrl);
+  it("answers 404 for a name no definition carries, and does not open another one", async () => {
+    const { status, html } = await getPage("/definitions/no-such-definition", dbUrl);
     expect(status).toBe(404);
     expect(html).toContain("No test definition named <code>no-such-definition</code>.");
-    expect(html).toContain("<h2>lock-screen</h2>");
+    expect(html).not.toContain("<h2>lock-screen</h2>");
+    expect(html).toContain('href="/definitions" aria-current="page"');
     expect(section(html, "no-such-definition")).toBe("");
   });
 });
@@ -793,10 +811,10 @@ describe.skipIf(dbUrl === "")("dashboard/definitions edit happy path", () => {
       dbUrl,
     );
     expect(saved.status).toBe(303);
-    expect(saved.location).toBe("/definitions?name=wide-save");
+    expect(saved.location).toBe("/definitions/wide-save");
     expect(await wordingsOf(dbUrl, "wide-save")).toEqual(["first", "second", "third\nand more"]);
 
-    const { status, html } = await getPage("/definitions?name=wide-save", dbUrl);
+    const { status, html } = await getPage("/definitions/wide-save", dbUrl);
     expect(status).toBe(200);
     const card = section(html, "wide-save");
     const [newest] = wordings(card);
@@ -824,7 +842,7 @@ describe.skipIf(dbUrl === "")("dashboard/definitions edit happy path", () => {
       dbUrl,
     );
     expect(saved.status).toBe(303);
-    const { html } = await getPage("/definitions?name=wide-one-field", dbUrl);
+    const { html } = await getPage("/definitions/wide-one-field", dbUrl);
     const [newest] = wordings(section(html, "wide-one-field"));
     expect(newest?.body).toContain('<p class="wording">p2</p>');
     expect(newest?.body).toContain('<p class="wording">i</p>');
@@ -847,10 +865,10 @@ describe.skipIf(dbUrl === "")("dashboard/definitions edit unhappy path", () => {
       dbUrl,
     );
     expect(same.status).toBe(303);
-    expect(same.location).toBe("/definitions?name=wide-same&edit=unchanged");
+    expect(same.location).toBe("/definitions/wide-same?edit=unchanged");
     expect(await wordingsOf(dbUrl, "wide-same")).toEqual(["i\nover two lines"]);
 
-    const { status, html } = await getPage("/definitions?name=wide-same&edit=unchanged", dbUrl);
+    const { status, html } = await getPage("/definitions/wide-same?edit=unchanged", dbUrl);
     expect(status).toBe(200);
     const card = section(html, "wide-same");
     expect(card).toContain('<p role="alert">');
@@ -868,13 +886,13 @@ describe.skipIf(dbUrl === "")("dashboard/definitions edit unhappy path", () => {
       dbUrl,
     );
     expect(empty.status).toBe(303);
-    expect(empty.location).toBe("/definitions?name=wide-empty&edit=empty");
+    expect(empty.location).toBe("/definitions/wide-empty?edit=empty");
     const missing = await postForm({ name: "wide-empty", description: "d", proof: "p" }, dbUrl);
     expect(missing.status).toBe(303);
-    expect(missing.location).toBe("/definitions?name=wide-empty&edit=empty");
+    expect(missing.location).toBe("/definitions/wide-empty?edit=empty");
     expect(await wordingsOf(dbUrl, "wide-empty")).toEqual(["i"]);
 
-    const { html } = await getPage("/definitions?name=wide-empty&edit=empty", dbUrl);
+    const { html } = await getPage("/definitions/wide-empty?edit=empty", dbUrl);
     const card = section(html, "wide-empty");
     expect(card).toContain('<p role="alert">');
     expect(card).toContain("Every field needs text.");
@@ -892,7 +910,7 @@ describe.skipIf(dbUrl === "")("dashboard/definitions edit unhappy path", () => {
   });
 
   it("shows a stale ?edit value as no notice at all", async () => {
-    const { status, html } = await getPage("/definitions?name=lock-screen&edit=whatever", dbUrl);
+    const { status, html } = await getPage("/definitions/lock-screen?edit=whatever", dbUrl);
     expect(status).toBe(200);
     expect(html).not.toContain('role="alert"');
   });
@@ -971,7 +989,7 @@ describe.skipIf(dbUrl === "")("dashboard/definitions running fragment", () => {
     await seed(dbUrl, (db) =>
       seedQueue(db, "running-all", [...running, pendingJob("RUN-ALL-PEND")]),
     );
-    const page = await getPage("/definitions?name=running-all", dbUrl);
+    const page = await getPage("/definitions/running-all", dbUrl);
     expect(page.status).toBe(200);
     const runningHtml = runningSection(page.html);
     expect(runningHtml.match(/action="\/abort"/g)).toHaveLength(51);
@@ -983,11 +1001,11 @@ describe.skipIf(dbUrl === "")("dashboard/definitions running fragment", () => {
     expect(fragment.html).not.toContain("RUN-ALL-PEND");
   });
 
-  it("keeps an empty ?name on the running poll, the same name the page was asked for", async () => {
-    await seed(dbUrl, (db) => seedQueue(db, "running-empty-name", [pendingJob("RUN-EMPTY")]));
-    const { status, html } = await getPage("/definitions?name=", dbUrl);
-    expect(status).toBe(404);
-    expect(runningSection(html)).toContain('hx-get="/definitions/running?name="');
+  it("polls the running list with no name on the index", async () => {
+    const { status, html } = await getPage("/definitions", dbUrl);
+    expect(status).toBe(200);
+    expect(runningSection(html)).toContain('hx-get="/definitions/running"');
+    expect(runningSection(html)).not.toContain("?name=");
   });
 
   it("serves the empty line alone when nothing is running", async () => {
@@ -1011,7 +1029,7 @@ describe("dashboard/definitions running fragment unhappy path", () => {
 
 describe("dashboard/definitions page unhappy path: unreachable database", () => {
   it("answers 500 with the unavailable message and never echoes the password", async () => {
-    const { status, html } = await getPage("/definitions?name=lock-screen", REFUSED_URL);
+    const { status, html } = await getPage("/definitions/lock-screen", REFUSED_URL);
     expect(status).toBe(500);
     expect(html).toContain("Test definitions are unavailable.");
     expect(html).not.toContain('href="/definitions?name=');
@@ -1893,7 +1911,7 @@ describe("dashboard POST /abort happy path: the outbound calls", () => {
         }),
       );
       expect(response.status).toBe(303);
-      expect(response.headers.get("location")).toBe("/definitions?name=lock-screen");
+      expect(response.headers.get("location")).toBe("/definitions/lock-screen");
       expect(proxy.requests).toEqual([
         {
           method: "POST",
