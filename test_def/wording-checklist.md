@@ -399,14 +399,14 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `agent-usage-update-without-login`
 - [x] `cli-tab-completion-discoverability`
 - [x] `plans-unshipped-commands-absent`
-- [ ] `terminal-hotkey-opens-foot-in-cwd`
-- [ ] `foot-ini-padding-edit-applies-to-new-window`
-- [ ] `tmux-work-session-config-and-reattach`
-- [ ] `tmux-dev-square-tds-and-tdl`
-- [ ] `editor-hotkey-and-sudoedit-open-neovim`
-- [ ] `neovim-lazyvim-basics`
-- [ ] `fzf-ff-eff-history-and-man-through-bat`
-- [ ] `zoxide-cd-jump-miss-and-dotdot`
+- [x] `terminal-hotkey-opens-foot-in-cwd`
+- [x] `foot-ini-padding-edit-applies-to-new-window`
+- [x] `tmux-work-session-config-and-reattach`
+- [x] `tmux-dev-square-tds-and-tdl`
+- [x] `editor-hotkey-and-sudoedit-open-neovim`
+- [x] `neovim-lazyvim-basics`
+- [x] `fzf-ff-eff-history-and-man-through-bat`
+- [x] `zoxide-cd-jump-miss-and-dotdot`
 - [ ] `eza-listing-aliases`
 - [ ] `compress-decompress-roundtrip`
 - [ ] `drive-helpers-usage-and-declined-format`

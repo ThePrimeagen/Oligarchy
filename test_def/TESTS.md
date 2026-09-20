@@ -18588,30 +18588,44 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter. A tiled terminal with no title bar, a dark themed background, visible inner padding and a prompt ending in a cyan `❯` must open; no `username@host` in the prompt and no fastfetch banner.
-  * Type `echo $TERM; omarchy default terminal; grep -E '^(font|pad)' ~/.config/foot/foot.ini` and press Enter. Expect `xterm-256color`, `foot`, `font=JetBrainsMono Nerd Font:size=9`, `pad=14x14`.
-  * Type `cd /tmp && omarchy cmd terminal cwd` and press Enter → `/tmp`. With this terminal focused press Super+Enter: a second terminal opens; type `pwd` + Enter in it → `/tmp` (the new terminal follows the focused terminal's directory).
-  ** Keep the mouse over the first terminal before pressing Super+Enter; the cwd of the *focused* window is what is read.
-  * In the second terminal type `omarchy cmd present bash jq; echo "exit=$?"` → `exit=0`; `omarchy cmd present bash no-such-cmd-qa; echo "exit=$?"` → `exit=1`; `omarchy cmd missing no-such-cmd-qa; echo "exit=$?"; omarchy cmd missing bash; echo "exit=$?"` → `exit=0` then `exit=1`.
-  * In the first terminal drag the mouse over the word `xterm-256color`, press Ctrl+Shift+C, type `echo ` and press Ctrl+Shift+V, then Enter → the pasted word echoes back. Press Super+C with nothing selected, then type `echo copied` + Enter — the terminal must neither close nor break (Super+C maps to Ctrl+Insert inside terminals).
-  * Type `echo held` and press Shift+Enter (not Enter): the command must NOT run (foot sends a CSI-u code instead of a newline). Press Ctrl+C.
-  * Close both terminals with Super+W; the desktop is as before.
+  * Press Super+Return. A terminal opens.
+  * Type `echo $TERM` and press Return. The output is `xterm-256color`.
+  * Type `omarchy default terminal` and press Return. The output is `foot`.
+  * Type `grep -E '^(font|pad)' ~/.config/foot/foot.ini` and press Return. The font is JetBrainsMono Nerd Font at size 9, and pad is `14x14`.
+  * Type `cd /tmp && omarchy cmd terminal cwd` and press Return. The output is `/tmp`.
+  * Press Super+Return. A second terminal opens.
+  * Type `pwd` and press Return. The output is `/tmp`.
+  * Type `omarchy cmd present bash jq; echo "exit=$?"` and press Return. The last line is `exit=0`.
+  * Type `omarchy cmd present bash no-such-cmd-qa; echo "exit=$?"` and press Return. The last line is `exit=1`.
+  * Type `omarchy cmd missing no-such-cmd-qa; echo "exit=$?"` and press Return. The last line is `exit=0`.
+  * Type `omarchy cmd missing bash; echo "exit=$?"` and press Return. The last line is `exit=1`.
+  * Click the first terminal. It is focused.
+  * Select the word `xterm-256color`. It is highlighted.
+  * Press Ctrl+Shift+C. The word is copied.
+  * Type `echo ` and press Ctrl+Shift+V, then press Return. The pasted word is echoed.
+  * Press Super+C. The terminal stays open.
+  * Type `echo copied` and press Return. The output is `copied`.
+  * Type `echo held` and press Shift+Return. The command does not run.
+  * Press Ctrl+C. The prompt returns.
+  * Close both terminals with Super+W. The desktop is clear.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * foot's window class is `foot`; there are no tabs or splits, so a second Super+Enter always makes a second window.
-  * If the first terminal opened somewhere other than home that is fine; only the second must follow the first's `cd`.
-  * Double-check the selection highlight before pressing Ctrl+Shift+C.
+  * Keep the pointer over the first terminal before the second Super+Return. The new terminal uses the focused window's directory.
+  * The prompt should end in `❯`, without `username@host` and without a fastfetch banner.
+  * Super+C maps to Ctrl+Insert inside a terminal, so it must not close the window.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the fresh terminal (padding, colours, `❯`), the `xterm-256color` / `foot` / font / pad lines, `/tmp` from `cmd terminal cwd` and the second terminal's `pwd` printing `/tmp`
-  ** Screenshot of the four `exit=` lines, the echoed paste, and the un-executed line after Shift+Enter
+  ** Super+Return opens a terminal. `$TERM` is `xterm-256color`, the default terminal is `foot`, and `foot.ini` has the named font and `pad=14x14`.
+  ** From `/tmp`, `omarchy cmd terminal cwd` prints `/tmp`, and a new terminal's `pwd` is `/tmp`.
+  ** `present bash jq` exits 0. A missing command makes `present` exit 1 and `missing` exit 0. `missing bash` exits 1.
+  ** Ctrl+Shift+C and Ctrl+Shift+V echo the selected word. Super+C leaves the terminal usable. Shift+Return does not run `echo held`.
   * If unsuccessful
-  ** Screenshot of whatever opened (wrong program, decorations, default font) or of the second terminal opening in `/home/prime` while the focused one was in `/tmp`; `journalctl --user -n 50 | sudo tee /dev/ttyS0` read via get-serial
+  ** The wrong program opens, or the second terminal is not in `/tmp` while the focused one is.
 covers: manual/15-terminal.md:3-7; default/hypr/bindings/applications.lua:2; bin/omarchy-launch-terminal; bin/omarchy-launch-terminal:6; bin/omarchy-cmd-terminal-cwd; bin/omarchy-cmd-present; bin/omarchy-cmd-missing; config/foot/foot.ini; applications/foot.desktop; default/xdg-terminal-exec/hyprland-xdg-terminals.list; default/uwsm/default; test/acceptance.d/apps-test.sh (terminal row)
 
 ### foot-ini-padding-edit-applies-to-new-window   [VM-OK]
@@ -18621,26 +18635,32 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter and screenshot the terminal (note the ~14 px gap between the window border and the prompt text). Type `grep -n '^pad=' ~/.config/foot/foot.ini` + Enter → `pad=14x14`.
-  * Type `sed -i 's/^pad=.*/pad=60x60/' ~/.config/foot/foot.ini && grep -n '^pad=' ~/.config/foot/foot.ini` + Enter → `pad=60x60`.
-  * Press Super+Enter to open a second terminal.
-  ** The new window has a visibly larger inner margin (about 60 px) around the text; the first window is unchanged (foot does not reload a running window).
-  * In the new terminal type `sed -i 's/^pad=.*/pad=14x14/' ~/.config/foot/foot.ini` + Enter; press Super+Enter → the third terminal's margin is back to normal.
-  * Type `grep -n '^pad=' ~/.config/foot/foot.ini` + Enter → `pad=14x14`. Close all terminals with Super+W (or Ctrl+Alt+Delete, which is bound to close-all-windows).
+  * Press Super+Return. A terminal opens.
+  * Type `grep -n '^pad=' ~/.config/foot/foot.ini` and press Return. The line is `pad=14x14`.
+  * Type `sed -i 's/^pad=.*/pad=60x60/' ~/.config/foot/foot.ini` and press Return. The prompt returns.
+  * Type `grep -n '^pad=' ~/.config/foot/foot.ini` and press Return. The line is `pad=60x60`.
+  * Press Super+Return. A second terminal opens with a larger inner margin.
+  * Look at the first terminal. Its margin is unchanged.
+  * Click the second terminal. It is focused.
+  * Type `sed -i 's/^pad=.*/pad=14x14/' ~/.config/foot/foot.ini` and press Return. The prompt returns.
+  * Press Super+Return. A third terminal opens with the smaller margin.
+  * Type `grep -n '^pad=' ~/.config/foot/foot.ini` and press Return. The line is `pad=14x14`.
+  * Close the terminals with Super+W. The desktop is clear.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The terminals tile automatically side by side; one screenshot shows the 14 px and 60 px windows together.
+  * A running foot window keeps the padding it opened with. Only the next window uses the new value.
+  * The windows tile beside each other, so one screenshot can show both margins.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Side-by-side screenshot of the 14 px and 60 px padded terminals
-  ** Screenshot of the third terminal after the restore and the `pad=14x14` line
+  ** The file starts at `pad=14x14`. After the edit it is `pad=60x60`, and the next terminal has the larger margin while the first terminal does not change.
+  ** Restoring `pad=14x14` makes the third terminal use the smaller margin.
   * If unsuccessful
-  ** foot failing to start (no window) or an error toast, plus `cat ~/.config/foot/foot.ini | sudo tee /dev/ttyS0` read via get-serial
+  ** Foot does not start, or the next window ignores the edited padding.
 covers: manual/31-dotfiles.md (~/.config/foot/foot.ini), config/foot/foot.ini
 
 ### tmux-work-session-config-and-reattach   [VM-OK]
@@ -18650,27 +18670,43 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Alt+Enter. A terminal inside tmux must open: a status line along the TOP with the session name `Work` on a blue block (left) and the hostname (right).
-  * Type `export MARKER=alive` and press Enter.
-  * Press Alt+Enter, then Alt+Shift+Enter: the pane splits stacked, then the active pane splits side by side (three panes). Press Alt+Escape twice → one pane remains.
-  * Press Ctrl+Space then `?` → a centred popup "Tmux keybindings" lists bindings; press `q`. Press Ctrl+Space then `s` → tmux's session chooser lists `Work`; press Escape (or `q`).
-  * Close the window with Super+W (this detaches; it does not kill tmux). Press Super+Alt+Enter again: the same session re-attaches; type `echo $MARKER` + Enter → `alive`.
-  * Press Ctrl+Space then `d` → detached, the window closes. Press Super+Enter and type `t` + Enter → tmux re-attaches to the existing session (same top status bar).
-  * Type `tmux kill-server` and press Enter to clean up; press Ctrl+D if a plain shell remains. The desktop is as before.
+  * Press Super+Alt+Return. A tmux window opens on the Work session.
+  * Type `export MARKER=alive` and press Return. The prompt returns.
+  * Press Alt+Return. The pane splits one above the other.
+  * Press Alt+Shift+Return. The active pane splits side by side, so three panes are showing.
+  * Press Alt+Escape. One split closes.
+  * Press Alt+Escape. One pane remains.
+  * Press Ctrl+Space. The prefix is armed.
+  * Press `?`. A keybindings popup opens.
+  * Press `q`. The popup closes.
+  * Press Ctrl+Space. The prefix is armed.
+  * Press `s`. A session chooser lists Work.
+  * Press Escape. The chooser closes.
+  * Press Super+W. The window closes.
+  * Press Super+Alt+Return. The Work session opens again.
+  * Type `echo $MARKER` and press Return. The output is `alive`.
+  * Press Ctrl+Space. The prefix is armed.
+  * Press `d`. The window closes.
+  * Press Super+Return. A terminal opens.
+  * Type `t` and press Return. The Work session opens again.
+  * Type `tmux kill-server` and press Return. The prompt returns.
+  * Press Ctrl+D if a plain shell remains. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Send Ctrl+Space with send-keys as `<C-SPACE>`; the secondary prefix Ctrl+B (`<C-b>`) is configured too. Ctrl+Space is also the stock fcitx5 trigger — if the prefix seems swallowed, use `<C-b>` and report it.
-  * The status bar shows `PREFIX` on the right while the prefix is armed, which proves the prefix key arrived. Window names follow the current directory basename.
+  * Ctrl+Space is `<C-SPACE>`. Ctrl+B is also a prefix. If Ctrl+Space is swallowed, use Ctrl+B and record that.
+  * The status bar is on top and names `Work`. It shows PREFIX while the prefix is armed.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the top status bar with `Work`, the three-pane split, the keybindings popup, the session chooser, and `echo $MARKER` printing `alive` after re-attaching; the `t` re-attach
+  ** Super+Alt+Return opens tmux on Work. Alt+Return and Alt+Shift+Return leave three panes, and two Alt+Escape presses leave one.
+  ** Prefix+`?` opens the keybindings popup, and prefix+`s` lists Work.
+  ** Closing the window and opening it again still prints `alive`. Prefix+`d` detaches, and `t` attaches to the same session. `tmux kill-server` cleans it up.
   * If unsuccessful
-  ** Screenshot of the terminal after Super+Alt+Enter (plain shell instead of tmux, bottom status bar, or error text), the prefix not working, and `tmux ls` output
+  ** Super+Alt+Return opens a plain shell, the prefix does nothing, or the marker is gone after reattach.
 covers: manual/15-terminal.md:9-15; default/hypr/bindings/applications.lua:12; bin/omarchy-launch-terminal-tmux; config/tmux/tmux.conf; default/bash/aliases:52 (`t`); default/hypr/bindings/applications.lua
 
 ### tmux-dev-square-tds-and-tdl   [VM-PARTIAL] [NET]
@@ -18680,26 +18716,37 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter, type `mkdir -p /tmp/sq && cd /tmp/sq && git init -q && t` and press Enter (tmux starts).
-  * Type `tds extra` and press Enter. It must print `Usage: tds`.
-  * Type `tds` and press Enter. The window must split into four quadrants: Neovim top-left (opened on `.` — the function hard-codes `nvim .`, not `$EDITOR`), the top-right pane running `hunk diff --watch` (initially mise downloading `hunk`, then hunk's watch view or a message that there is nothing to diff), a shell prompt bottom-left, and the bottom-right pane running `opencode` (mise download, then OpenCode's TUI asking to sign in / pick a provider, or an error about credentials).
-  ** Neither `hunk` nor `opencode` is installed on the stock disk; give each download up to 60 s, screenshot every few seconds, never wait longer than 5 s between actions.
-  * Report what the top-right and bottom-right panes ended up showing.
-  * Type `tmux kill-server` in the bottom-left pane and press Enter. Then press Super+Enter, type `cd /tmp/sq && t` + Enter, then `tdl` + Enter: describe the layout it builds and record the last line printed — the function ends with `tmux select-pane -t "$opencode_pane"` where the variable is only set by `tds`, so a `can't find pane` error is the known defect; report its exact text (or its absence).
-  * Type `tmux kill-server` and press Enter.
+  * Press Super+Return. A terminal opens.
+  * Type `mkdir -p /tmp/sq && cd /tmp/sq && git init -q` and press Return. The prompt returns.
+  * Type `t` and press Return. A tmux window opens.
+  * Type `tds extra` and press Return. The output is `Usage: tds`.
+  * Type `tds` and press Return. Four panes appear.
+  * Wait until the top-right pane finishes its first-run download. Record what it shows.
+  * Wait until the bottom-right pane finishes its first-run download. Record what it shows.
+  * Click the bottom-left pane. It is focused.
+  * Type `tmux kill-server` and press Return. The window closes.
+  * Press Super+Return. A terminal opens.
+  * Type `cd /tmp/sq && t` and press Return. A tmux window opens.
+  * Type `tdl` and press Return. Record the layout and the last line.
+  * Type `tmux kill-server` and press Return. The window closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Skipped in this guest: verifying hunk actually watches diffs and that OpenCode can be used (no credentials). Only the pane geometry, the started commands, the usage refusal and the `tdl` error are checked.
+  * `tds` should put Neovim top-left, `hunk diff --watch` top-right, a shell bottom-left, and `opencode` bottom-right. Neither tool is installed, so each may download for up to 60 seconds.
+  * `tdl` ends by selecting `$opencode_pane`, which only `tds` sets. A `can't find pane` error is the known defect. Record the exact text, or that it was absent.
+  * Do not wait for a hunk diff or an OpenCode login. Geometry, the started commands, the usage line, and the `tdl` result are the checks.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of `Usage: tds`, of the four quadrants with Neovim top-left and download/TUI output in the two right panes, and of the `tdl` result with its last line
+  ** `tds extra` prints `Usage: tds`.
+  ** `tds` leaves four panes. The top-left starts Neovim, and the two right panes are recorded after their first-run output.
+  ** After a fresh attach, `tdl` builds a layout and its last line is recorded, including a pane error if that is what prints.
+  ** `tmux kill-server` closes the window.
   * If unsuccessful
-  ** Screenshot of the window after `tds`, plus `tmux list-panes -F '#{pane_id} #{pane_current_command}' | sudo tee /dev/ttyS0` read via get-serial
+  ** `tds` does not leave four panes, or the usage line is missing.
 covers: manual/15-terminal.md:31; manual/20-shell-functions.md:20; default/bash/fns/tmux:42-65; install/user/mise.sh (hunk, opencode stubs)
 
 ### editor-hotkey-and-sudoedit-open-neovim   [VM-OK]
@@ -18709,27 +18756,38 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Shift+N. A terminal window running Neovim must open (LazyVim dashboard or an empty buffer with a status line; the window class is `org.omarchy.nvim`).
-  ** If a Lazy plugin-install window appears on first start, wait for it (network) and press `q`.
-  * Press `i`, type `hello from omarchy`, press Escape. The text must be in the buffer with `-- INSERT --` gone. Type `:q!` and press Enter; the window closes.
-  * Press Super+Enter and type `omarchy default editor; vi --version | head -1; echo $SUDO_EDITOR` + Enter → `nvim`, a `VIM - Vi IMproved` (or vi) banner line, and `omarchy-launch-editor --inline`.
-  * Type `sudoedit /etc/hosts` and press Enter. At `[sudo] password for prime:` type `wrong` and Enter → `Sorry, try again.`; then type `prime` and Enter. Neovim must open a temporary copy of `/etc/hosts` (the status line shows a `/var/tmp/hostsXXXX` path and the file's contents).
-  * Type `:q!` and press Enter without changing anything → `sudoedit: /etc/hosts unchanged`. Type `sudo -k` + Enter to drop the cached credential.
-  * Close the terminal with Super+W; the desktop is as before.
+  * Press Super+Shift+N. A Neovim window opens.
+  ** If a plugin install appears, wait for it and press `q`.
+  * Press `i`. Insert mode is on.
+  * Type `hello from omarchy`. The text is in the buffer.
+  * Press Escape. Insert mode is off.
+  * Type `:q!` and press Return. The window closes.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy default editor` and press Return. The output is `nvim`.
+  * Type `vi --version | head -1` and press Return. The line names Vi IMproved or vi.
+  * Type `echo $SUDO_EDITOR` and press Return. The output is `omarchy-launch-editor --inline`.
+  * Type `sudoedit /etc/hosts` and press Return. A password prompt appears.
+  * Type `wrong` and press Return. The output includes `Sorry, try again.`
+  * Type `prime` and press Return. Neovim opens a temporary copy of `/etc/hosts`.
+  * Type `:q!` and press Return. The output includes `sudoedit: /etc/hosts unchanged`.
+  * Type `sudo -k` and press Return. The prompt returns.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The editor window is tiled like any terminal; if another window is on the workspace it shares the space.
-  * `sudoedit: /etc/hosts unchanged` after `:q!` is expected.
+  * The editor window class is `org.omarchy.nvim`. A first LazyVim start may install plugins.
+  * `:q!` without edits is expected to say the file is unchanged.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of Neovim open after the hotkey, one with the typed text, the terminal showing `nvim`, the vi banner and `omarchy-launch-editor --inline`, the `Sorry, try again.` line, Neovim on the temporary hosts copy, and the `unchanged` message
+  ** Super+Shift+N opens Neovim. Typed text stays after Escape, and `:q!` closes the window.
+  ** The default editor is `nvim`, vi prints its banner, and `SUDO_EDITOR` is `omarchy-launch-editor --inline`.
+  ** A wrong sudo password is refused. The right password opens a temporary hosts file. `:q!` says `/etc/hosts` is unchanged.
   * If unsuccessful
-  ** Screenshot of the desktop after Super+Shift+N and `omarchy-launch-editor 2>&1 | sudo tee /dev/ttyS0` read via get-serial; any `editor not found` message after `sudoedit`
+  ** Super+Shift+N opens nothing, or `sudoedit` says the editor was not found.
 covers: manual/16-neovim.md:36-42; manual/18-development-tools.md:7; default/hypr/bindings/applications.lua:8; bin/omarchy-launch-editor (`--inline`); bin/omarchy-default-editor; default/bash/envs:2-3; test/acceptance.d/apps-test.sh (neovim row); test/shell.d/editor-env-test.sh
 
 ### neovim-lazyvim-basics   [VM-OK]
@@ -18739,28 +18797,44 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter and type `mkdir -p /tmp/nv && cd /tmp/nv && echo one > one.txt && echo two > two.txt && n` then Enter. Neovim must open on the directory (a file explorer listing `one.txt` and `two.txt`, or the LazyVim dashboard).
-  ** If a plugin-install window appears on first start, wait for it (network) and press `q`.
-  * Press Space and wait one second: a which-key popup listing leader commands must appear. Press Escape.
-  * Press Space then `e`. The file tree must be shown/focused on the left listing `one.txt` and `two.txt`. With the tree focused press `a`, type `three.txt` and press Enter → `three.txt` appears in the tree.
-  * Press Ctrl+W then `w` to hop to the editor side. Press Space Space, type `two`, press Enter → `two.txt` opens showing `two`.
-  * Press Space Space, type `one`, Enter (opens `one.txt`). Press Shift+H then Shift+L: the active buffer tab must move between `one.txt` and `two.txt`.
-  * Press Space then `b` then `d`: the current buffer closes (one fewer tab). Type `:qa!` and press Enter to leave.
-  * In the terminal type `n one.txt` and press Enter: Neovim opens with `one` in the buffer; type `:q!` Enter. Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `mkdir -p /tmp/nv && cd /tmp/nv && echo one > one.txt && echo two > two.txt` and press Return. The prompt returns.
+  * Type `n` and press Return. Neovim opens.
+  ** If a plugin install appears, wait for it and press `q`.
+  * Press Space. A which-key popup opens.
+  * Press Escape. The popup closes.
+  * Press Space, then `e`. The file tree lists `one.txt` and `two.txt`.
+  * Press `a`. A name prompt opens.
+  * Type `three.txt` and press Return. `three.txt` is listed.
+  * Press Ctrl+W, then `w`. The editor side is focused.
+  * Press Space twice. The file finder opens.
+  * Type `two` and press Return. `two.txt` opens showing `two`.
+  * Press Space twice. The file finder opens.
+  * Type `one` and press Return. `one.txt` opens.
+  * Press Shift+H. The previous buffer is shown.
+  * Press Shift+L. The next buffer is shown.
+  * Press Space, then `b`, then `d`. The current buffer closes.
+  * Type `:qa!` and press Return. Neovim closes.
+  * Type `n one.txt` and press Return. Neovim opens showing `one`.
+  * Type `:q!` and press Return. Neovim closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Keys are lowercase unless stated; send Space as `<SPACE>`.
-  * If the tree is not focused when pressing `a`, press Space e twice to toggle it back, or click inside it.
+  * Send Space as a space key. Keys are lowercase unless the step says Shift.
+  * If `a` does not create a file, press Space then `e` again so the tree is focused, or click the tree.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the which-key popup, the tree with `three.txt`, the buffer tabs after Shift+H/L, and `n one.txt` showing `one`
+  ** Space opens the which-key popup, and Escape closes it.
+  ** Space then `e` shows the tree. `a` adds `three.txt`.
+  ** Space Space opens `two.txt` and then `one.txt`. Shift+H and Shift+L move between those buffers. Space b d closes the current one.
+  ** `n one.txt` opens that file showing `one`, and `:q!` closes Neovim.
   * If unsuccessful
-  ** Screenshot of the state where a key did nothing or errored, and `:messages` output
+  ** A named key does nothing, or `:messages` shows an error.
 covers: manual/16-neovim.md:13-38; manual/19-shell-tools.md:11,25; default/bash/aliases:57
 
 ### fzf-ff-eff-history-and-man-through-bat   [VM-OK]
@@ -18770,27 +18844,47 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter. Type `mkdir -p /tmp/fz && cd /tmp/fz && printf 'def hello\n  puts 1\nend\n' > a.rb && printf 'alpha\nbeta\n' > notes.txt` + Enter.
-  * Type `n` + Enter → Neovim opens with a directory listing of `/tmp/fz`. Type `:qa!` Enter.
-  * Type `ff` + Enter. fzf must open listing `a.rb` and `notes.txt` with a preview pane on the right showing the highlighted file's contents with line numbers (bat). Move to `a.rb`: the preview shows `def hello` with syntax colouring. Press Escape: it closes, the prompt shows `✗`, nothing else happened.
-  * Type `ff` + Enter and select `notes.txt` with Enter → `notes.txt` is printed and the prompt returns. Type `eff` + Enter and press Enter on `notes.txt` → Neovim opens `notes.txt` showing `alpha`/`beta`; type `:q` Enter.
-  * Type `sff; echo rc=$?` + Enter → `Usage: sff <destination> (e.g. sff host:/tmp/)` and `rc=1`.
-  * Type `echo unique-history-marker-42` + Enter. Press Ctrl+R and type `marker-42`: an fzf history list shows the echo command. Press Enter: the command is placed on the prompt; Enter again runs it.
-  * Type `man ls` + Enter: the manual page must be rendered with colour (bat as pager) — coloured headings/options and the header `LS(1)`. Press `q`. Type `man no-such-page-zz; echo rc=$?` → `No manual entry for no-such-page-zz`, `rc=16`. Type `MANPAGER=cat man ls | head -3` → plain uncoloured text (the pager is what adds colour). Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `mkdir -p /tmp/fz && cd /tmp/fz && printf 'def hello\n  puts 1\nend\n' > a.rb && printf 'alpha\nbeta\n' > notes.txt` and press Return. The prompt returns.
+  * Type `n` and press Return. Neovim opens on the directory.
+  * Type `:qa!` and press Return. Neovim closes.
+  * Type `ff` and press Return. A finder lists `a.rb` and `notes.txt`.
+  * Move to `a.rb`. The preview shows `def hello`.
+  * Press Escape. The finder closes, and the prompt shows `✗`.
+  * Type `ff` and press Return. The finder opens.
+  * Select `notes.txt` and press Return. The file is printed, and the prompt returns.
+  * Type `eff` and press Return. The finder opens.
+  * Select `notes.txt` and press Return. Neovim opens showing `alpha` and `beta`.
+  * Type `:q` and press Return. Neovim closes.
+  * Type `sff; echo rc=$?` and press Return. The output includes `Usage: sff <destination>`, and the last line is `rc=1`.
+  * Type `echo unique-history-marker-42` and press Return. The prompt returns.
+  * Press Ctrl+R. A history finder opens.
+  * Type `marker-42`. The echo command is listed.
+  * Press Return. The command is placed on the prompt.
+  * Press Return. The command runs.
+  * Type `man ls` and press Return. A colored manual page opens with the header `LS(1)`.
+  * Press `q`. The manual page closes.
+  * Type `man no-such-page-zz; echo rc=$?` and press Return. The output says there is no manual entry, and the last line is `rc=16`.
+  * Type `MANPAGER=cat man ls | head -3` and press Return. The text has no color codes added by the pager.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * fzf's prompt is `>` at the bottom-left; the preview pane is on the right half. fzf filters as you type; type `not` if the list is long.
-  * If `man` shows a `bat`/`col` "not found" error instead of a coloured page, that is the failure to capture.
+  * The finder prompt is at the lower left, and the preview is on the right. Type to filter.
+  * A missing `bat` or an uncolored `man` page is the failure.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the Neovim explorer, the `ff` view with the bat preview of `a.rb`, Neovim on `notes.txt` via `eff`, the `sff` usage line with `rc=1`, the Ctrl+R list containing the marker command, the coloured `LS(1)` page, the missing-page error with `rc=16`, and the plain `MANPAGER=cat` variant
+  ** `n` opens Neovim on `/tmp/fz`, and `:qa!` closes it.
+  ** `ff` previews `a.rb` with line numbers. Escape cancels it. Selecting `notes.txt` prints the file. `eff` opens that file in Neovim.
+  ** `sff` with no destination prints usage and exits 1.
+  ** Ctrl+R finds `unique-history-marker-42` and runs it.
+  ** `man ls` is colored and headed `LS(1)`. A missing page exits 16. `MANPAGER=cat` is plain.
   * If unsuccessful
-  ** Screenshot of the terminal after `ff` (e.g. `bat: command not found`, an unstyled preview, fzf not found), Neovim failing to start, or an uncoloured/pager-error man page
+  ** `ff` cannot find its tools, the preview is unstyled, or `man` is uncolored because the pager failed.
 covers: manual/19-shell-tools.md:5-13,41-45; default/bash/aliases:9-13 (n, ff, eff, sff); default/bash/init:21-28 (fzf); default/bash/envs:9-13 (MANPAGER, MANROFFOPT, BAT_THEME)
 
 ### zoxide-cd-jump-miss-and-dotdot   [VM-OK]
@@ -18800,27 +18894,43 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter. Type `type cd` + Enter → `cd is aliased to 'zd'`.
-  * Type `mkdir -p /tmp/zx/alpha/beta && cd /tmp/zx/alpha/beta && cd && pwd` + Enter → `/home/prime` (bare `cd` goes home).
-  * Type `cd ~/.config/omarchy && pwd` + Enter → `/home/prime/.config/omarchy`; then `cd` + Enter and `pwd` → `/home/prime`.
-  * Type `cd beta && pwd` + Enter → a folder glyph followed by `/tmp/zx/alpha/beta`, then pwd confirms the jump.
-  * Type `... && pwd && .. && pwd` + Enter → `/tmp/zx` then `/tmp`.
-  * Type `cd oma` + Enter → the jump marker line (icon followed by `/home/prime/.config/omarchy`); `pwd` + Enter confirms `/home/prime/.config/omarchy`.
-  * Type `cd no-such-directory-xyz; echo rc=$?` + Enter → `Error: Directory not found` and `rc=1`; `pwd` + Enter → still `/home/prime/.config/omarchy`. Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `type cd` and press Return. The output says `cd` is aliased to `zd`.
+  * Type `mkdir -p /tmp/zx/alpha/beta` and press Return. The prompt returns.
+  * Type `cd /tmp/zx/alpha/beta` and press Return. The prompt returns.
+  * Type `cd` and press Return. The prompt returns.
+  * Type `pwd` and press Return. The output is `/home/prime`.
+  * Type `cd ~/.config/omarchy` and press Return. The prompt returns.
+  * Type `pwd` and press Return. The output is `/home/prime/.config/omarchy`.
+  * Type `cd` and press Return. The prompt returns.
+  * Type `pwd` and press Return. The output is `/home/prime`.
+  * Type `cd beta` and press Return. The landing line names `/tmp/zx/alpha/beta`.
+  * Type `pwd` and press Return. The output is `/tmp/zx/alpha/beta`.
+  * Type `...` and press Return. The prompt returns.
+  * Type `pwd` and press Return. The output is `/tmp/zx`.
+  * Type `..` and press Return. The prompt returns.
+  * Type `pwd` and press Return. The output is `/tmp`.
+  * Type `cd oma` and press Return. The landing line names `/home/prime/.config/omarchy`.
+  * Type `pwd` and press Return. The output is `/home/prime/.config/omarchy`.
+  * Type `cd no-such-directory-xyz; echo rc=$?` and press Return. The output includes `Error: Directory not found`, and the last line is `rc=1`.
+  * Type `pwd` and press Return. The output is still `/home/prime/.config/omarchy`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * zoxide only learns directories visited through `cd`; the first `cd` into each directory is what teaches it.
-  * A literal `\U000F17A9` instead of a folder glyph is a locale bug; report it.
+  * zoxide only learns directories visited with `cd`. The first visit is what teaches it.
+  * A raw escape instead of a folder mark on the landing line is a locale bug. Record it.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the alias line, the home `pwd`, the jump lines with glyph and path after `cd beta` and `cd oma`, the two pwd lines after `...` and `..`, and the `Error: Directory not found` line with `rc=1` and unchanged pwd
+  ** `cd` is aliased to `zd`. Bare `cd` returns to `/home/prime`.
+  ** After visiting `beta`, `cd beta` jumps there. `...` lands in `/tmp/zx`, and `..` lands in `/tmp`.
+  ** `cd oma` jumps to `/home/prime/.config/omarchy`. A missing name prints `Error: Directory not found`, exits 1, and leaves `pwd` unchanged.
   * If unsuccessful
-  ** Screenshot of `cd beta` failing after the visit, of the raw escape text, and `zoxide query -l | sudo tee /dev/ttyS0` read via get-serial
+  ** `cd beta` fails after the visit, or the landing line shows a raw escape instead of a mark.
 covers: manual/19-shell-tools.md:15-19; default/bash/aliases:17-34,41-43 (zd, dotdot); default/bash/init:9-11 (zoxide)
 
 ### eza-listing-aliases   [VM-OK]
