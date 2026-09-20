@@ -250,14 +250,14 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `bar-transparent-text-colour-follows-wallpaper`
 - [x] `menu-install-dims-installed-remove-hides-uninstalled`
 - [x] `pkg-add-drop-present-missing-cli`
-- [ ] `pkg-install-remove-picker-round-trip`
-- [ ] `pkg-aur-picker-browse-cancel-and-bogus-name`
-- [ ] `install-app-generic-usage-quoting-and-failure-banner`
-- [ ] `install-editor-vim-set-default-and-uninstall`
-- [ ] `defaults-missing-app-opens-installer-installed-applies-at-once`
-- [ ] `install-editor-vscode-defaults-and-launcher-uninstall`
-- [ ] `install-and-launch-sublime-text-then-uninstall`
-- [ ] `install-editor-emacs-aur-build`
+- [x] `pkg-install-remove-picker-round-trip`
+- [x] `pkg-aur-picker-browse-cancel-and-bogus-name`
+- [x] `install-app-generic-usage-quoting-and-failure-banner`
+- [x] `install-editor-vim-set-default-and-uninstall`
+- [x] `defaults-missing-app-opens-installer-installed-applies-at-once`
+- [x] `install-editor-vscode-defaults-and-launcher-uninstall`
+- [x] `install-and-launch-sublime-text-then-uninstall`
+- [x] `install-editor-emacs-aur-build`
 - [ ] `install-terminal-kitty-switch-and-restore-foot`
 - [ ] `install-browser-firefox-default-policies-and-remove`
 - [ ] `dev-env-go-mise-install-remove-and-unknown-name`

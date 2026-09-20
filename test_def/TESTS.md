@@ -10896,29 +10896,56 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open the Omarchy Menu with Super+Space, select `Install`, then `Package` using the mouse. A floating terminal opens with an fzf list of repository packages, a preview pane and the footer `alt-p: toggle description, alt-j/k: scroll, tab: multi-select`. Press Escape: it closes and nothing is installed.
-  * Menu → Install → Package again; type `omasnap`. The list narrows to `omasnap` and the preview shows `Repository : omarchy` with the "screenshot and annotation overlay" description. Press Enter, type `prime` at the sudo prompt. pacman installs omasnap (5–15 MB), then `● Done! Press any key to close...`. Press a key.
-  ** If `omasnap` never appears, open a terminal, run `sudo pacman -Sy`, and retry; if it is still missing use `sl` instead (it has no launcher entry) and report it.
-  * Open Apps with Super+Alt+Space and type `Omasnap`: an Omasnap entry is offered. Escape. Open a terminal (Super+Enter) and type `omasnap --version` → a 1.x version.
-  * Menu → Remove → Package: an fzf list of installed packages with a red pointer and a `yay -Qi` preview. Press Escape: nothing is removed (`pacman -Q omasnap` in the terminal still lists it).
-  * Menu → Remove → Package again; type `omasnap`, make sure the highlighted row is exactly `omasnap`, press Enter. Sudo `prime` if asked; pacman `-Rns` removes it; `Done!`; press a key.
-  ** The picker removes whatever is highlighted and Tab marks several rows for one removal — never mark or highlight a system package.
-  * In the terminal type `pacman -Q omasnap 2>&1` → `error: package 'omasnap' was not found`. Apps → `Omasnap` → no entry. Close the terminal with Super+W.
+  * Press Super+Space. The menu opens.
+  * Click Install.
+  * Click Package. A package picker opens.
+  * Press Escape. The picker closes. Nothing is installed.
+  * Press Super+Space. The menu opens.
+  * Click Install.
+  * Click Package. A package picker opens.
+  * Type `omasnap`. The list narrows to omasnap.
+  ** If omasnap never appears, run `sudo pacman -Sy` in a terminal and retry. If it is still missing, use `sl` and report that.
+  * Press Enter.
+  ** If a password is asked, type `prime` and press Return.
+  * Wait until the terminal says Done.
+  * Press a key. That terminal closes.
+  * Press Super+Alt+Space. The app menu opens.
+  * Type `Omasnap`. An Omasnap entry is listed.
+  * Press Escape. The menu closes.
+  * Press Super+Enter. A terminal opens.
+  * Type `omasnap --version` and press Return. A version line is printed.
+  * Press Super+Space. The menu opens.
+  * Click Remove.
+  * Click Package. A package picker opens.
+  * Press Escape. The picker closes. Nothing is removed.
+  * Type `pacman -Q omasnap` and press Return. omasnap is still installed.
+  * Press Super+Space. The menu opens.
+  * Click Remove.
+  * Click Package. A package picker opens.
+  * Type `omasnap`. The highlighted row is exactly omasnap.
+  ** Do not highlight or mark a system package.
+  * Press Enter.
+  ** If a password is asked, type `prime` and press Return.
+  * Wait until the terminal says Done.
+  * Press a key. That terminal closes.
+  * Type `pacman -Q omasnap` and press Return. The package was not found.
+  * Press Super+Alt+Space. The app menu opens.
+  * Type `Omasnap`. No Omasnap entry is listed.
+  * Press Escape. The menu closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Both pickers are fzf in an `org.omarchy.terminal` floating window: typing filters immediately (click into the terminal first if it does not), Enter confirms, Escape aborts; Alt+P toggles the preview if it hides the list.
-  * ./client-with-image after each menu click saves a round trip.
+  * Click the picker before typing if the keys do not filter.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of both pickers, the desktop after each Escape with nothing changed, the filtered `omasnap` row with `Repository : omarchy`, the `Done!` after install and after remove
-  ** Screenshot of Omasnap in the Apps menu and of `omasnap --version`, then the `was not found` line and the empty Apps search afterwards
+  * On success
+  ** Escape installs and removes nothing, omasnap installs and appears in Apps, then it is removed and is gone from Apps
   * If unsuccessful
-  ** The picker terminal's `Failed (exit code N)!` text, a pacman signature/sync error, a leftover terminal window, or `pacman -Q omasnap` after the removal
+  ** A Failed banner, or omasnap still installed after removal
 covers: manual/29-other-packages.md:5,9; manual/46:77; default/omarchy/omarchy-menu.jsonc (install.package, remove.package); bin/omarchy-pkg-install; bin/omarchy-pkg-remove; bin/omarchy-pkg-drop; bin/omarchy-pkg-add; bin/omarchy-show-done; omarchy-pkgs/pkgbuilds/omasnap; default/pacman/pacman-stable.conf l.28-29
 
 ### pkg-aur-picker-browse-cancel-and-bogus-name   [VM-OK] [NET]
@@ -10928,25 +10955,35 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy-pkg-aur-accessible; echo rc=$?` → `rc=0`; then `yay -Qm | wc -l` and note the count of foreign packages (baseline).
-  * Open the Omarchy Menu (Super+Space) → Install → AUR. yay downloads the AUR list (~10 MB, up to 60 s); an fzf list appears with the footer `alt-p: toggle description, alt-b/B: toggle PKGBUILD, alt-j/k: scroll, tab: multi-select`.
-  * Type `yay`, arrow to `yay-bin`, press Alt+b: the preview switches to PKGBUILD text; press Alt+Shift+B: back to the package info. Clear the filter and type `omarchy`: AUR entries such as `omarchy-…` appear.
-  * Press Escape. The terminal closes without building anything; in your terminal `yay -Qm | wc -l` prints the same count as before.
-  * Type `omarchy-pkg-aur-add omarchy-not-a-real-pkg-xyz; echo rc=$?` → yay cannot find it and `rc=1` (or the red `Error: Package ... did not install`); allow up to 30 s. Close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy-pkg-aur-accessible; echo rc=$?` and press Return. The last line is `rc=0`.
+  * Type `yay -Qm | wc -l` and press Return. Note the count.
+  * Press Super+Space. The menu opens.
+  * Click Install.
+  * Click AUR. The AUR picker opens.
+  * Type `yay`. The list narrows.
+  * Move the highlight to `yay-bin`.
+  * Press Alt+b. The preview shows a PKGBUILD.
+  * Press Alt+Shift+B. The preview returns to package info.
+  * Clear the filter.
+  * Type `omarchy`. AUR packages whose names start with omarchy are listed.
+  * Press Escape. The picker closes. Nothing is built.
+  * Type `yay -Qm | wc -l` and press Return. The count matches the one you noted.
+  * Type `omarchy-pkg-aur-add omarchy-not-a-real-pkg-xyz; echo rc=$?` and press Return. The package is not found. The last line is `rc=1`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Never press Enter on an AUR entry here: an AUR build on 2 vCPUs can exceed the session budget.
-  * If the AUR index fetch fails (network), the terminal shows a yay error and closes — screenshot it; that is the report.
+  * Do not press Enter on an AUR entry. A build can run past the session.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** `rc=0` from the accessibility probe; the AUR picker with its footer; the PKGBUILD preview and the info view again; the desktop after Escape with the unchanged `yay -Qm` count; the rejected bogus name with `rc=1`
+  * On success
+  ** `rc=0` for AUR access, the picker and PKGBUILD preview, Escape leaving the foreign-package count unchanged, and the missing package refused with `rc=1`
   * If unsuccessful
-  ** yay's network error text, an `rc=0` for the bogus package, or a changed foreign-package count
+  ** A network error, `rc=0` for the missing package, or a changed package count
 covers: manual/29-other-packages.md:7; default/omarchy/omarchy-menu.jsonc (install.aur); bin/omarchy-pkg-aur-install; bin/omarchy-pkg-aur-accessible; bin/omarchy-pkg-aur-add
 
 ### install-app-generic-usage-quoting-and-failure-banner   [VM-OK] [NET]
@@ -10956,27 +10993,40 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter. Type `omarchy-install-app; echo rc=$?` → `Usage: omarchy-install-app <display-name> <packages>`, `rc=1`. Type `omarchy-install-and-launch Foo; echo rc=$?` → `Usage: omarchy-install-and-launch <display-name> <packages> <desktop-id>`, `rc=1`.
-  * Type `omarchy-install-app Bogus omarchy-not-a-real-pkg-xyz` → a floating terminal opens: `Installing Bogus...`, sudo `prime`, `error: target not found: omarchy-not-a-real-pkg-xyz`, then the red `● Failed (exit code 1)! Press any key to close...`. Press a key.
-  * Type `omarchy-install-and-launch Bogus omarchy-not-a-real-pkg-xyz bogus` → the same red banner and no application window afterwards. Type `omarchy-install-and-launch "Example App" nosuchpackage-zz "Disk Usage"` → `Installing Example App...`, pacman fails, and the Disk Usage TUI does not open.
-  * Quoting: type `omarchy-install-app "a'; echo PWNED; echo '" nosuchpackage-zz` → the first line is literally `Installing a'; echo PWNED; echo '...`, pacman fails, and `PWNED` never appears on a line of its own. Type `omarchy-install-app "Example App" "alpha; echo PWNED"` → pacman is asked for `alpha;`, `echo`, `PWNED` as package names (fails); no shell prints `PWNED`.
-  * Type `omarchy-install-font "Foo's Font" nosuchpackage-zz "Foo's Family"` → `Installing Foo's Font...`, pacman fails; then `grep -rl "Foo's Family" ~/.config/omarchy 2>/dev/null | wc -l` → `0` (the family was not set).
-  * Type `omarchy-launch-floating-terminal-with-presentation 'echo hello; sleep 20'` and, in your terminal, `hyprctl -j clients | jq -r '.[] | select(.class=="org.omarchy.terminal") | .floating'` → `true`; the helper window closes on its own. Close your terminal with Super+W.
-  ** `sudo` may ask for `prime` inside the floating terminal; pacman needs the network to say "target not found" — offline it fails earlier, which is still a failed install.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy-install-app; echo rc=$?` and press Return. A usage line appears. The last line is `rc=1`.
+  * Type `omarchy-install-and-launch Foo; echo rc=$?` and press Return. A usage line appears. The last line is `rc=1`.
+  * Type `omarchy-install-app Bogus omarchy-not-a-real-pkg-xyz` and press Return. A floating terminal says the install failed.
+  ** If a password is asked, type `prime` and press Return.
+  * Press a key. That terminal closes.
+  * Type `omarchy-install-and-launch Bogus omarchy-not-a-real-pkg-xyz bogus` and press Return. The install fails. No application window opens.
+  * Press a key. That terminal closes.
+  * Type `omarchy-install-and-launch "Example App" nosuchpackage-zz "Disk Usage"` and press Return. The install fails. Disk Usage does not open.
+  * Press a key. That terminal closes.
+  * Type `omarchy-install-app "a'; echo PWNED; echo '" nosuchpackage-zz` and press Return. The first line shows the name as text. `PWNED` is not printed on its own line.
+  * Press a key. That terminal closes.
+  * Type `omarchy-install-app "Example App" "alpha; echo PWNED"` and press Return. The install fails. `PWNED` is not printed on its own line.
+  * Press a key. That terminal closes.
+  * Type `omarchy-install-font "Foo's Font" nosuchpackage-zz "Foo's Family"` and press Return. The install fails.
+  * Press a key. That terminal closes.
+  * Type `grep -rl "Foo's Family" ~/.config/omarchy 2>/dev/null | wc -l` and press Return. The line is `0`.
+  * Type `omarchy-launch-floating-terminal-with-presentation 'echo hello; sleep 20'` and press Return. A floating terminal opens.
+  * Type `hyprctl -j clients | jq -r '.[] | select(.class=="org.omarchy.terminal") | .floating'` and press Return. A line is `true`.
+  * Wait until the helper window closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The floating window appears centred over your terminal; screenshot as soon as its first `Installing …` line shows, then again at the red banner before pressing a key.
+  * Screenshot the floating terminal at the failure banner before pressing a key.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Both usage lines with `rc=1`; the floating terminal with `target not found` and the red `Failed (exit code 1)!` banner; no window launched after either failed `install-and-launch`
-  ** Literal `Installing …` first lines for the quoted names with no standalone `PWNED`; `0` for the font family; `true` for the floating `org.omarchy.terminal` window
+  * On success
+  ** Both usage lines with `rc=1`, failed installs with no launched app, quoted names that do not run `PWNED`, a font family that was not saved, and a floating terminal
   * If unsuccessful
-  ** A floating terminal that closed without a banner or printed `Done!` after a failed install, a `PWNED` line, a window launched after a failed install, or a changed font
+  ** `Done!` after a failed install, a standalone `PWNED` line, or an app that opened anyway
 covers: bin/omarchy-install-app; bin/omarchy-install-and-launch; bin/omarchy-install-font; bin/omarchy-launch-floating-terminal-with-presentation; bin/omarchy-show-done; test/shell.d/desktop-entry-launch-test.sh; test/shell.d/floating-terminal-test.sh
 
 ### install-editor-vim-set-default-and-uninstall   [VM-OK] [NET]
@@ -10986,31 +11036,66 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `pacman -Q vim 2>&1; omarchy default editor` → `was not found` and `nvim`. Open the Omarchy Menu (Super+Space) → Install → Editor with the mouse: rows VSCode, Cursor, Zed, Sublime Text, Helix, Vim, Emacs, none dimmed. Click `Vim`.
-  ** Floating terminal: `Installing Vim...`, sudo `prime`, pacman installs `vim`, `● Done! Press any key to close...`. Press a key.
-  * Menu → Install → Editor again (reopen twice if needed): `Vim` is dimmed with a ✓ and Enter on it does nothing. Escape. Open Apps (Super+Alt+Space), type `vim`: an entry named exactly `Vim` is listed (nvim also matches; ignore it). Escape.
-  * Menu → Setup → Defaults → Editor: Neovim carries the ✓. Select Vim → a notification `Vim is now the default editor` (record whether it appears). Press Super+Shift+N: the window that opens is Vim — the classic `VIM - Vi IMproved` splash with `version 9.x` and `by Bram Moolenaar et al.`, no LazyVim dashboard. Type `:q` and Enter.
-  * In the terminal type `omarchy default editor` → `vim`; `omarchy default editor bogus` → `Usage: omarchy-default-editor <code|cursor|zed|sublime_text|helix|vim|emacs|nvim>`; `omarchy default editor nvim` → notification `Neovim is now the default editor`. Press Super+Shift+N: Neovim opens (LazyVim dashboard); type `:q!` and Enter.
-  * Apps → type `vim`, highlight `Vim`, press Delete → a dialog `Do you want to uninstall Vim?` with an `Uninstall` button. Click `Uninstall` with the mouse.
-  ** Floating terminal: `Uninstalling Vim...`, sudo `prime`, pacman removes vim, `Done!`. Press a key.
-  * Apps → `vim` → no `Vim` entry. Menu → Install → Editor (twice): `Vim` enabled again. In the terminal `pacman -Q vim 2>&1; omarchy default editor` → `was not found` and `nvim`. Close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Type `pacman -Q vim` and press Return. Vim is not installed.
+  * Type `omarchy default editor` and press Return. The line is `nvim`.
+  * Press Super+Space. The menu opens.
+  * Click Install.
+  * Click Editor. The editor list opens. Vim is not dimmed.
+  * Click Vim. A floating terminal starts the install.
+  ** If a password is asked, type `prime` and press Return.
+  * Wait until the terminal says Done.
+  * Press a key. That terminal closes.
+  * Press Super+Space. The menu opens.
+  * Click Install.
+  * Click Editor. Vim is dimmed.
+  * Press Enter on Vim. Nothing starts.
+  * Press Escape. The menu closes.
+  * Press Super+Alt+Space. The app menu opens.
+  * Type `vim`. A Vim entry is listed.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Click Setup.
+  * Click Defaults.
+  * Click Editor. The editor defaults open. Neovim is marked.
+  * Select Vim. Record whether a notification says Vim is now the default editor.
+  * Press Super+Shift+N. Vim opens.
+  * Type `:q` and press Enter. Vim closes.
+  * Type `omarchy default editor` and press Return. The line is `vim`.
+  * Type `omarchy default editor bogus` and press Return. A usage line appears.
+  * Type `omarchy default editor nvim` and press Return. Neovim is the default again.
+  * Press Super+Shift+N. Neovim opens.
+  * Type `:q!` and press Enter. Neovim closes.
+  * Press Super+Alt+Space. The app menu opens.
+  * Type `vim`. Highlight the Vim entry.
+  * Press Delete. A dialog asks to uninstall Vim.
+  * Click Uninstall. A floating terminal starts the uninstall.
+  ** If a password is asked, type `prime` and press Return.
+  * Wait until the terminal says Done.
+  * Press a key. That terminal closes.
+  * Press Super+Alt+Space. The app menu opens.
+  * Type `vim`. The Vim entry is gone.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Click Install.
+  * Click Editor. Vim is not dimmed.
+  * Press Escape. The menu closes.
+  * Type `pacman -Q vim` and press Return. Vim is not installed.
+  * Type `omarchy default editor` and press Return. The line is `nvim`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The uninstall dialog has Cancel and Uninstall; click Uninstall explicitly rather than pressing Enter.
-  * `omarchy default editor --install vim` is the CLI form of the same install-then-set path if the menu route is unavailable.
-  * ./client-with-image after each menu click saves a round trip.
+  * Click Uninstall with the mouse. Reopen the Install menu twice before judging the dimmed row.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of Install → Editor before (Vim enabled) and after (dimmed ✓); `Installing Vim...` → `Done!`; `Vim` in Apps
-  ** The `Vim is now the default editor` notification (or its absence, noted), Vim's splash opened by Super+Shift+N, `vim` from the CLI, the usage line, Neovim restored by the hotkey
-  ** The uninstall dialog, `Uninstalling Vim...` → `Done!`, Apps without Vim, the Install row enabled again, `was not found` and `nvim`
+  * On success
+  ** Vim installed and dimmed, Vim opened by Super+Shift+N, Neovim restored, then Vim uninstalled and the Install row enabled again
   * If unsuccessful
-  ** The floating terminal's `Failed` text, `cat ~/.local/state/omarchy/defaults/editor`, or a launcher/menu state that did not change
+  ** A Failed banner, or the default editor not returning to `nvim`
 covers: manual/18-development-tools.md:5-11; default/omarchy/omarchy-menu.jsonc:165-173,232-238 (install.editor.vim, setup.default.editor); bin/omarchy-default-editor; bin/omarchy-install-app; bin/omarchy-launch-editor; bin/omarchy-remove-launcher-entry; shell/plugins/menu/Menu.qml (Delete-key uninstall); test/shell.d/default-apps-test.sh (missing editor → installer, editor becomes default)
 
 ### defaults-missing-app-opens-installer-installed-applies-at-once   [VM-PARTIAL] [NET]
@@ -11020,30 +11105,74 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy default browser; omarchy default editor; omarchy default terminal; tail -1 ~/.config/xdg-terminals.list; pacman -Q alacritty foot ghostty kitty 2>&1` → `chromium`, `nvim`, `foot`, `foot.desktop`, and only `foot` installed.
-  * Open the Omarchy Menu (Super+Space) → Setup → Defaults → Browser. Rows: Chromium ✓, Chrome, Brave, Brave Origin, Edge, Firefox, Zen — all selectable although only Chromium is installed. Select Zen: a floating terminal starts `Installing Zen...` (an AUR build). Press Ctrl+C immediately; it closes. Select Firefox: a floating terminal starts installing Firefox; Ctrl+C.
-  ** Ctrl+C within the first seconds aborts before anything meaningful downloads; if a sudo prompt appears first, Ctrl+C there.
-  * Setup → Defaults → Editor → Vim: installer terminal, Ctrl+C. Setup → Defaults → Terminal: Alacritty, Foot ✓, Ghostty, Kitty all listed and selectable; select Kitty: installer terminal, Ctrl+C.
-  * Reopen each of the three Defaults submenus twice: Chromium ✓, Neovim ✓ and Foot ✓ are unchanged, nothing else is marked. In the terminal `omarchy-default-browser; omarchy-default-editor; omarchy-default-terminal` → `chromium`, `nvim`, `foot`; `pacman -Q zen-browser-bin firefox vim kitty 2>&1` → four `was not found` lines.
-  * Installed choice applies at once: Setup → Defaults → Browser → Chromium (already the default) → the ✓ stays, no terminal or window opens. In the terminal `omarchy default editor nvim; omarchy default editor` → immediate, `nvim`. Record whether a "… is now the default …" notification appears (reviewer 11 expects one, reviewer 51 none).
-  ** Only one terminal is installed on the stock disk, so switching between two installed terminals (✓ moving and `xdg-terminals.list` following) is exercised in the Kitty test.
-  * Close the terminal with Super+W; the desktop is as before.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy default browser` and press Return. The line is `chromium`.
+  * Type `omarchy default editor` and press Return. The line is `nvim`.
+  * Type `omarchy default terminal` and press Return. The line is `foot`.
+  * Press Super+Space. The menu opens.
+  * Click Setup.
+  * Click Defaults.
+  * Click Browser. All browser rows are listed. Chromium is marked.
+  * Select Zen. A floating installer starts.
+  * Press Ctrl+C. The installer closes.
+  * Press Super+Space. The menu opens.
+  * Click Setup.
+  * Click Defaults.
+  * Click Browser. The browser list opens.
+  * Select Firefox. A floating installer starts.
+  * Press Ctrl+C. The installer closes.
+  * Press Super+Space. The menu opens.
+  * Click Setup.
+  * Click Defaults.
+  * Click Editor. The editor list opens.
+  * Select Vim. A floating installer starts.
+  * Press Ctrl+C. The installer closes.
+  * Press Super+Space. The menu opens.
+  * Click Setup.
+  * Click Defaults.
+  * Click Terminal. The terminal list opens. Foot is marked. The other rows can be selected.
+  * Select Kitty. A floating installer starts.
+  * Press Ctrl+C. The installer closes.
+  * Press Super+Space. The menu opens.
+  * Click Setup.
+  * Click Defaults.
+  * Click Browser. Chromium is still marked. Nothing else is marked.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Click Setup.
+  * Click Defaults.
+  * Click Editor. Neovim is still marked.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Click Setup.
+  * Click Defaults.
+  * Click Terminal. Foot is still marked.
+  * Press Escape. The menu closes.
+  * Type `omarchy-default-browser` and press Return. The line is `chromium`.
+  * Type `omarchy-default-editor` and press Return. The line is `nvim`.
+  * Type `omarchy-default-terminal` and press Return. The line is `foot`.
+  * Type `pacman -Q zen-browser-bin firefox vim kitty` and press Return. Each package was not found.
+  * Press Super+Space. The menu opens.
+  * Click Setup.
+  * Click Defaults.
+  * Click Browser.
+  * Click Chromium. No installer opens. Chromium stays marked.
+  * Type `omarchy default editor nvim` and press Return.
+  * Type `omarchy default editor` and press Return. The line is `nvim`. Record whether a notification appeared.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The floating installer is centred; click into it before pressing Ctrl+C.
-  * Use the mouse for the menu selections. Guards paint from the previous evaluation: reopen a submenu twice before asserting a ✓.
+  * Press Ctrl+C as soon as the installer starts. If a password prompt appears first, press Ctrl+C there.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshot of the Defaults → Browser list with all seven rows and ✓ on Chromium; the aborted Zen, Firefox, Vim and Kitty installer terminals; the Terminal list with four selectable rows
-  ** Screenshots of the three submenus with the ✓ unchanged; the terminal line `chromium nvim foot` and the four not-found lines
-  ** Screenshot of Chromium re-selected with nothing opening and `nvim` printed immediately
+  * On success
+  ** Missing apps start an installer, each abort leaves the old default marked, the aborted packages are not installed, and choosing Chromium opens no installer
   * If unsuccessful
-  ** A "… is now the default" toast for an app that is not installed, a moved ✓ after an aborted install, an installer terminal for an installed app, or the list differing from the expectation (that would mean the code changed to match the manual — report which)
+  ** A default that moved after an abort, or an installer for an app that is already installed
 covers: bin/omarchy-default-browser:40-47; bin/omarchy-default-editor; bin/omarchy-default-terminal:34-41; default/omarchy/omarchy-menu.jsonc:152-164 (setup.default.*); test/shell.d/default-apps-test.sh (installed defaults selected immediately, xdg-terminals.list, failed install preserves default); manual/23-browsers.md:9; manual/15-terminal.md:7
 
 ### install-editor-vscode-defaults-and-launcher-uninstall   [VM-OK] [NET]
@@ -11053,26 +11182,56 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open the Omarchy Menu (Super+Space) → Install → Editor → VSCode.
-  ** Floating terminal: `Installing VSCode...`, sudo `prime`, ~110 MB download (1–3 min; screenshot every ≤5 s), theme output, `Done!`. A VS Code window opens within ~20 s in the Omarchy colours; screenshot it and close it with Super+W.
-  * Open a terminal (Super+Enter) and type `grep password-store ~/.vscode/argv.json; cat ~/.config/Code/User/settings.json` → `"password-store":"gnome-libsecret"` and `"update.mode": "none"`.
-  * Open Apps (Super+Alt+Space), type `code` → `Visual Studio Code` listed. Escape. Menu → Install → Editor (reopen twice): `VSCode` dimmed ✓. Menu → Remove: no Editor row (editors have no remover).
-  * Apps → `Visual Studio Code` → press Delete → click `Uninstall` in the `Do you want to uninstall Visual Studio Code?` dialog → floating terminal `Uninstalling Visual Studio Code...`, sudo, `Done!`. Press a key.
-  * Apps → `code` → no entry; Menu → Install → Editor → `VSCode` enabled again. In the terminal `ls -d ~/.config/Code 2>&1` → the config directory remains (the launcher uninstall is `pacman -Rns`, which never touches `$HOME` — expected per 03-INTENDED-BEHAVIOUR #30). Close the terminal with Super+W.
+  * Press Super+Space. The menu opens.
+  * Click Install.
+  * Click Editor.
+  * Click VSCode. A floating terminal starts the install.
+  ** If a password is asked, type `prime` and press Return. The download can take a few minutes.
+  * Wait until the terminal says Done.
+  * Press a key. That terminal closes. A VS Code window opens.
+  * Press Super+W. VS Code closes.
+  * Press Super+Enter. A terminal opens.
+  * Type `grep password-store ~/.vscode/argv.json` and press Return. The line includes `gnome-libsecret`.
+  * Type `cat ~/.config/Code/User/settings.json` and press Return. The file includes `"update.mode": "none"`.
+  * Press Super+Alt+Space. The app menu opens.
+  * Type `code`. Visual Studio Code is listed.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Click Install.
+  * Click Editor. VSCode is dimmed.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Click Remove. There is no Editor row.
+  * Press Escape. The menu closes.
+  * Press Super+Alt+Space. The app menu opens.
+  * Type `code`. Highlight Visual Studio Code.
+  * Press Delete. A dialog asks to uninstall it.
+  * Click Uninstall. A floating terminal starts the uninstall.
+  ** If a password is asked, type `prime` and press Return.
+  * Wait until the terminal says Done.
+  * Press a key. That terminal closes.
+  * Press Super+Alt+Space. The app menu opens.
+  * Type `code`. Visual Studio Code is not listed.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Click Install.
+  * Click Editor. VSCode is not dimmed.
+  * Press Escape. The menu closes.
+  * Type `ls -d ~/.config/Code` and press Return. The directory is still there.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * VS Code's first window may show a welcome tab and a workspace-trust prompt; ignore them. Electron on 2 vCPU may raise Hyprland's "not responding" dialog — click Wait.
-  * If the download exceeds the budget, screenshot the progress and report it as SLOW rather than failed.
+  * If Hyprland says VS Code is not responding, click Wait. The config directory remaining after uninstall is expected.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Install output through `Done!`; the VS Code window in Omarchy colours; both config lines; the launcher entry and the dimmed row; the uninstall dialog and `Uninstalling Visual Studio Code...` → `Done!`; the launcher without it and the Install row enabled
+  * On success
+  ** VS Code installed and opened, both config lines, the dimmed Install row, no Remove editor row, uninstall from the launcher, and the config directory still present
   * If unsuccessful
-  ** `Failed` text in the floating terminal, or no window 30 s after `Done!`
+  ** A Failed banner, or no window after Done
 covers: bin/omarchy-install-editor-vscode; bin/omarchy-remove-launcher-entry; default/omarchy/omarchy-menu.jsonc (install.editor.vscode); shell/plugins/menu/Menu.qml (Delete-key uninstall)
 
 ### install-and-launch-sublime-text-then-uninstall   [VM-OK] [NET]
@@ -11082,28 +11241,49 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open the Omarchy Menu (Super+Space) → Install → Editor → Sublime Text with the mouse.
-  ** Floating terminal: `Installing Sublime Text...`, sudo `prime`, pacman installs `sublime-text-4`, `Done!`. Press a key.
-  * Wait up to 10 s: a Sublime Text window opens on its own. Screenshot it, then close it with Super+W.
-  ** An "unregistered version" banner inside Sublime is normal. If no window appears within 15 s of `Done!`, that is the failure to report — the launch is part of the row's contract.
-  * Open Apps (Super+Alt+Space), type `sublime` → `Sublime Text` listed. Escape. Menu → Install → Editor (reopen twice): `Sublime Text` dimmed ✓.
-  * Apps → `sublime` → highlight `Sublime Text` → press Delete → click `Uninstall` in the `Do you want to uninstall Sublime Text?` dialog.
-  ** Floating terminal: `Uninstalling Sublime Text...`, sudo, `Done!`. Press a key.
-  * Apps → `sublime` → no entry; Menu → Install → Editor → `Sublime Text` enabled again.
+  * Press Super+Space. The menu opens.
+  * Click Install.
+  * Click Editor.
+  * Click Sublime Text. A floating terminal starts the install.
+  ** If a password is asked, type `prime` and press Return.
+  * Wait until the terminal says Done.
+  * Press a key. That terminal closes.
+  * Wait up to 15 seconds. A Sublime Text window opens on its own.
+  * Press Super+W. Sublime Text closes.
+  * Press Super+Alt+Space. The app menu opens.
+  * Type `sublime`. Sublime Text is listed.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Click Install.
+  * Click Editor. Sublime Text is dimmed.
+  * Press Escape. The menu closes.
+  * Press Super+Alt+Space. The app menu opens.
+  * Type `sublime`. Highlight Sublime Text.
+  * Press Delete. A dialog asks to uninstall it.
+  * Click Uninstall. A floating terminal starts the uninstall.
+  ** If a password is asked, type `prime` and press Return.
+  * Wait until the terminal says Done.
+  * Press a key. That terminal closes.
+  * Press Super+Alt+Space. The app menu opens.
+  * Type `sublime`. Sublime Text is not listed.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Click Install.
+  * Click Editor. Sublime Text is not dimmed.
+  * Press Escape. The menu closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The uninstall dialog has Cancel and Uninstall; click Uninstall with the mouse.
-  * ./client-with-image after each menu click saves a round trip.
+  * An unregistered-version banner inside Sublime is expected. No window within 15 seconds of Done is a failure.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** `Installing Sublime Text...` → `Done!`; the Sublime window that opened by itself; the launcher entry and the dimmed row; the uninstall dialog and `Uninstalling Sublime Text...` → `Done!`; the launcher and menu back to stock
+  * On success
+  ** Sublime installed, a window that opened by itself, the dimmed row, uninstall from the launcher, and the Install row enabled again
   * If unsuccessful
-  ** `Failed (exit code N)!`, or `Done!` with no window 15 s later
+  ** A Failed banner, or Done with no window
 covers: bin/omarchy-install-and-launch; bin/omarchy-remove-launcher-entry; default/omarchy/omarchy-menu.jsonc (install.editor.sublime)
 
 ### install-editor-emacs-aur-build   [VM-OK] [NET] [SLOW]
@@ -11113,26 +11293,48 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `pacman -Q emacs omarchy-emacs 2>&1` → both not found. Open the Omarchy Menu (Super+Space) → Install → Editor → Emacs.
-  ** Floating terminal: `Installing Emacs...`, yay fetches `omarchy-emacs`, installs `emacs` (~50 MB) and builds the package (sudo `prime` when asked; several minutes on 2 vCPU; screenshot every ≤5 s), then `omarchy-install-emacs` setup output and `Done!`.
-  ** If yay asks `Diff to show?` / `Proceed?`, answer `N` / `Y` and report that `--noconfirm` was not honoured.
-  * Press a key to close the floating terminal.
-  * Within ~30 s an Emacs frame opens (the daemon starts first) in the Omarchy theme colours; screenshot and close it with Super+W.
-  * Open Apps (Super+Alt+Space), type `emacs` → an Emacs entry is listed. Escape. Menu → Install → Editor (reopen twice): `Emacs` dimmed ✓.
-  * In the terminal type `omarchy-pkg-drop omarchy-emacs emacs` → sudo, pacman removes both. Apps → `emacs` → gone; Menu → Install → Editor → `Emacs` enabled again. Close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Type `pacman -Q emacs omarchy-emacs` and press Return. Both packages are missing.
+  * Press Super+Space. The menu opens.
+  * Click Install.
+  * Click Editor.
+  * Click Emacs. A floating terminal starts the install.
+  ** If a password is asked, type `prime` and press Return. If yay asks a question, record that `--noconfirm` was not honoured and answer it.
+  * Wait until the terminal says Done. Screenshot about every 5 seconds during the build.
+  * Press a key. That terminal closes.
+  * Wait up to 30 seconds. An Emacs window opens.
+  * Press Super+W. Emacs closes.
+  * Press Super+Alt+Space. The app menu opens.
+  * Type `emacs`. An Emacs entry is listed.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Click Install.
+  * Click Editor. Emacs is dimmed.
+  * Press Escape. The menu closes.
+  * Type `omarchy-pkg-drop omarchy-emacs emacs` and press Return.
+  ** If a password is asked, type `prime` and press Return.
+  * Wait until both packages are removed.
+  * Press Super+Alt+Space. The app menu opens.
+  * Type `emacs`. The Emacs entry is gone.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Click Install.
+  * Click Editor. Emacs is not dimmed.
+  * Press Escape. The menu closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The AUR build on 2 vCPUs may approach the budget; keep screenshotting rather than waiting silently. If it exceeds the budget, Ctrl+C in the floating terminal and report SLOW with the progress reached.
+  * If the build runs past the session, press Ctrl+C in the floating terminal and report how far it got.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** The AUR build output and `Done!`; the themed Emacs frame; the launcher entry and dimmed row; the cleanup with the entry gone and the row enabled
+  * On success
+  ** The AUR build ending Done, an Emacs window, the dimmed row, both packages removed, and the Install row enabled again
   * If unsuccessful
-  ** yay/makepkg error text, an unanswered yay prompt, or `Done!` with no frame after 60 s
+  ** A yay error, an unanswered prompt, or Done with no Emacs window
 covers: bin/omarchy-install-editor-emacs; bin/omarchy-pkg-aur-add; bin/omarchy-pkg-drop; default/omarchy/omarchy-menu.jsonc (install.editor.emacs)
 
 ### install-terminal-kitty-switch-and-restore-foot   [VM-OK] [NET]
