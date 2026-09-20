@@ -242,14 +242,14 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `plymouth-list-current-and-unlock-picker`
 - [x] `plymouth-set-rejects-bad-input-and-wrong-sudo-password`
 - [x] `plymouth-set-by-theme-reboot-and-reset`
-- [ ] `refresh-config-hyprland-restores-with-backup`
-- [ ] `refresh-config-shell-tmux-hyprsunset-restart`
-- [ ] `refresh-applications-and-chromium-flags`
-- [ ] `bar-position-menu-and-cli`
-- [ ] `bar-transparency-doubleclick-menu-cli`
-- [ ] `bar-transparent-text-colour-follows-wallpaper`
-- [ ] `menu-install-dims-installed-remove-hides-uninstalled`
-- [ ] `pkg-add-drop-present-missing-cli`
+- [x] `refresh-config-hyprland-restores-with-backup`
+- [x] `refresh-config-shell-tmux-hyprsunset-restart`
+- [x] `refresh-applications-and-chromium-flags`
+- [x] `bar-position-menu-and-cli`
+- [x] `bar-transparency-doubleclick-menu-cli`
+- [x] `bar-transparent-text-colour-follows-wallpaper`
+- [x] `menu-install-dims-installed-remove-hides-uninstalled`
+- [x] `pkg-add-drop-present-missing-cli`
 - [ ] `pkg-install-remove-picker-round-trip`
 - [ ] `pkg-aur-picker-browse-cancel-and-bogus-name`
 - [ ] `install-app-generic-usage-quoting-and-failure-banner`

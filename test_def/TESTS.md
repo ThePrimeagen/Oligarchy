@@ -10495,30 +10495,50 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `echo 'this is not lua (' >> ~/.config/hypr/bindings.lua && echo '-- probe edit' >> ~/.config/hypr/looknfeel.lua && hyprctl reload`. Hyprland shows a config-error banner or `hyprctl reload` prints an error.
-  * Press Super+Space → `Update` → `Config` → `Hyprland`.
-  ** The floating terminal prints, for the two changed files only, a red `Replaced /home/prime/.config/hypr/bindings.lua with new Omarchy default.`, `Saved backup as …bindings.lua.bak.<epoch>.`, a green `Changes:` with `> this is not lua (`, and the same block for looknfeel.lua with `-- probe edit`; nothing for the five untouched files; then `● Done!`. Press a key.
-  * The error banner is gone; press Super+K — the keybindings list opens; Escape. In the terminal type `ls ~/.config/hypr/` → the seven files plus two `.bak.*`; `tail -1 ~/.config/hypr/bindings.lua.bak.*` → `this is not lua (`; `cmp /usr/share/omarchy/config/hypr/bindings.lua ~/.config/hypr/bindings.lua` → identical; `hyprctl configerrors` → empty.
-  * Idempotence: type `omarchy refresh config hypr/bindings.lua; echo "exit=$?"` again → no `Replaced` line, `exit=0` (identical files leave no new backup); `ls ~/.config/hypr/bindings.lua.bak.*` → exactly one. A deleted config is recreated silently: `rm ~/.config/tmux/tmux.conf; omarchy-refresh-config tmux/tmux.conf; ls ~/.config/tmux/` → `tmux.conf` back, no output, no backup.
-  * Unhappy paths: type `omarchy-refresh-config hypr/missing.lua; echo "exit=$?"` → `Not a shipped user config: hypr/missing.lua`, `exit=1`; `omarchy-refresh-config; echo "exit=$?"` → the `Usage:` text mentioning `hypr/hyprland.lua`, `exit=1`. Press Super+Space → `Update` → `Config`: a list of shipped config groups is offered; Escape.
-  * Path escape: type `omarchy refresh config ../default/bashrc; echo "exit=$?"; ls -l ~/default/bashrc 2>&1`.
-  ** Intended: `Not a shipped user config: ../default/bashrc`, `exit=1`, and `ls` reports No such file (nothing written outside ~/.config).
-  ** Observed at HEAD: `exit=0` and `~/default/bashrc` exists — record this as the known defect.
-  * Clean up: type `rm -rf ~/default ~/.config/hypr/*.bak.*` and close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Type `echo 'this is not lua (' >> ~/.config/hypr/bindings.lua` and press Return.
+  * Type `echo '-- probe edit' >> ~/.config/hypr/looknfeel.lua` and press Return.
+  * Type `hyprctl reload` and press Return. An error is printed, or a config-error banner appears.
+  * Press Super+Space. The menu opens.
+  * Click Update.
+  * Click Config.
+  * Click Hyprland. A floating terminal says the two changed files were replaced and backed up.
+  * Press a key. That terminal closes. The error banner is gone.
+  * Press Super+K. The keybindings viewer opens.
+  * Press Escape. The viewer closes.
+  * Type `ls ~/.config/hypr/` and press Return. The seven files are listed, plus two backup files.
+  * Type `tail -1 ~/.config/hypr/bindings.lua.bak.*` and press Return. The line includes `this is not lua (`.
+  * Type `cmp /usr/share/omarchy/config/hypr/bindings.lua ~/.config/hypr/bindings.lua` and press Return. Nothing is printed.
+  * Type `hyprctl configerrors` and press Return. Nothing is printed.
+  * Type `omarchy refresh config hypr/bindings.lua; echo "exit=$?"` and press Return. There is no `Replaced` line. The last line is `exit=0`.
+  * Type `ls ~/.config/hypr/bindings.lua.bak.*` and press Return. Exactly one backup is listed.
+  * Type `rm ~/.config/tmux/tmux.conf` and press Return.
+  * Type `omarchy-refresh-config tmux/tmux.conf` and press Return. No backup is mentioned.
+  * Type `ls ~/.config/tmux/` and press Return. `tmux.conf` is listed.
+  * Type `omarchy-refresh-config hypr/missing.lua; echo "exit=$?"` and press Return. The output says it is not a shipped user config. The last line is `exit=1`.
+  * Type `omarchy-refresh-config; echo "exit=$?"` and press Return. A usage line appears. The last line is `exit=1`.
+  * Press Super+Space. The menu opens.
+  * Click Update.
+  * Click Config. The shipped config groups are listed.
+  * Press Escape. The menu closes.
+  * Type `omarchy refresh config ../default/bashrc; echo "exit=$?"` and press Return. Record the exit code.
+  * Type `ls -l ~/default/bashrc` and press Return. Record whether the file exists.
+  ** The intended result is `exit=1` and no file. `exit=0` with the file present is the known defect. Record which one happened, with `omarchy-version`.
+  * Type `rm -rf ~/default ~/.config/hypr/*.bak.*` and press Return.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * If the broken file takes Super+Space down with it, type `omarchy-refresh-hyprland` in the open terminal instead and report that.
-  * The `Replaced` lines are red and the `Changes:` header green. `Update → Config` restores groups (all seven `~/.config/hypr` files are rewritten; the untouched ones leave no backup because identical files are not kept); per-file restore is the CLI. The `..` refusal is the intended pass condition; the HEAD copy is the expected failure today.
+  * If Super+Space stops working after the broken file, type `omarchy-refresh-hyprland` in the terminal and report that.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** The error state; the floating terminal with the two red Replaced/Saved backup blocks and diffs; working Super+K; the directory listing, the backup's last line, identical `cmp`, empty `hyprctl configerrors`; no second Replaced and a single `.bak`; the recreated `tmux.conf` with no backup; the three refusals (`hypr/missing.lua`, no argument, `../default/bashrc`) with `exit=1` and no `~/default/bashrc`
+  * On success
+  ** The two replaced files and their backups, Super+K working, one bindings backup, `tmux.conf` recreated, the missing path and the bare command refused, and the `..` path either refused or recorded as the known defect
   * If unsuccessful
-  ** The `..` path copying with `exit=0` and `ls -l ~/default/bashrc` existing (the known defect, recorded with `omarchy-version`); a stray `.bak` for an unmodified file; the floating terminal output and `hyprctl reload` error text; the marker surviving in the live file, no backup created, or the missing-path case accepted; `ls -la ~/.config/hypr/`
+  ** A backup for an unmodified file, or the marker still in the live file
 covers: bin/omarchy-refresh-hyprland; bin/omarchy-refresh-config (identical → no backup, recreate deleted); omarchy-menu.jsonc update.config.hyprland (:355-369); test/shell.d/refresh-config-test.sh; manual/42:3-5; manual/42-common-tweaks.md; manual/31-dotfiles.md; AGENTS.md §Refresh Pattern (incl. `..` caveat); default/agents/skills/omarchy/SKILL.md §Troubleshooting, §Reset to Defaults
 
 ### refresh-config-shell-tmux-hyprsunset-restart   [VM-OK]
@@ -10528,27 +10548,43 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy-bar position bottom` — the bar moves to the bottom of the screen (this also creates `~/.config/omarchy/shell.json`). Then type `echo 'set -g status off # BROKEN' >> ~/.config/tmux/tmux.conf && echo 'garbage' >> ~/.config/hypr/hyprsunset.conf`.
-  * Press Super+Space → `Update` → `Config` → `Shell`.
-  ** The floating terminal prints `Replaced /home/prime/.config/omarchy/shell.json…`, `Saved backup as …shell.json.bak.<epoch>`, the shell restarts (the bar disappears ~2 s) and comes back at the top; `● Done!`. Press a key.
-  * Press Super+Space → `Update` → `Config` → `Tmux`: `Replaced …/tmux/tmux.conf…`, a backup, a diff with `# BROKEN`, `● Done!`. Press a key.
-  * Press Super+Space → `Update` → `Config` → `Hyprsunset`: `Replaced …/hypr/hyprsunset.conf…`, a backup, a diff with `garbage`, `● Done!`. Press a key.
-  * In the terminal type `ls ~/.config/omarchy/shell.json.bak.* ~/.config/tmux/*.bak.* ~/.config/hypr/hyprsunset.conf.bak.*` → three files; `tmux new -d -s t && tmux kill-session -t t && echo tmux-ok; pgrep -x hyprsunset` → `tmux-ok` and a PID.
-  * Type `rm ~/.config/omarchy/shell.json.bak.* ~/.config/tmux/*.bak.* ~/.config/hypr/hyprsunset.conf.bak.*` and close the terminal with Super+W. The bar is on top as found.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy-bar position bottom` and press Return. The bar moves to the bottom.
+  * Type `echo 'set -g status off # BROKEN' >> ~/.config/tmux/tmux.conf` and press Return.
+  * Type `echo 'garbage' >> ~/.config/hypr/hyprsunset.conf` and press Return.
+  * Press Super+Space. The menu opens.
+  * Click Update.
+  * Click Config.
+  * Click Shell. A floating terminal says `shell.json` was replaced. The bar disappears and returns at the top.
+  * Press a key. That terminal closes.
+  * Press Super+Space. The menu opens.
+  * Click Update.
+  * Click Config.
+  * Click Tmux. A floating terminal says `tmux.conf` was replaced and shows the `# BROKEN` line.
+  * Press a key. That terminal closes.
+  * Press Super+Space. The menu opens.
+  * Click Update.
+  * Click Config.
+  * Click Hyprsunset. A floating terminal says `hyprsunset.conf` was replaced and shows `garbage`.
+  * Press a key. That terminal closes.
+  * Type `ls ~/.config/omarchy/shell.json.bak.* ~/.config/tmux/*.bak.* ~/.config/hypr/hyprsunset.conf.bak.*` and press Return. Three backup files are listed.
+  * Type `tmux new -d -s t && tmux kill-session -t t && echo tmux-ok` and press Return. The line is `tmux-ok`.
+  * Type `pgrep -x hyprsunset` and press Return. A PID is printed.
+  * Type `rm ~/.config/omarchy/shell.json.bak.* ~/.config/tmux/*.bak.* ~/.config/hypr/hyprsunset.conf.bak.*` and press Return.
+  * Press Super+W. The terminal closes. The bar is on top.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Screenshot the bottom bar before the refresh; that is the "before" proof. All three floating terminals close on any key; read the red lines before pressing one.
-  * Restarting hyprsunset silently turns nightlight off if it was on — expected.
+  * Read the replacement lines before pressing a key. The floating terminal closes on any key.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Bar at the bottom; three floating-terminal screenshots with Replaced/Saved backup and the diff lines; bar at the top; the three backups listed; `tmux-ok` and the hyprsunset PID
+  * On success
+  ** The bar at the bottom, then three restore terminals, the bar back on top, three backups, `tmux-ok`, and a hyprsunset PID
   * If unsuccessful
-  ** The floating terminal output, a bar that stayed at the bottom, `pgrep -a hyprsunset`
+  ** A bar that stays at the bottom, or no hyprsunset process
 covers: bin/omarchy-refresh-shell; bin/omarchy-refresh-tmux; bin/omarchy-refresh-hyprsunset; bin/omarchy-refresh-config; bin/omarchy-bar; omarchy-menu.jsonc update.config.{shell,tmux,hyprsunset}
 
 ### refresh-applications-and-chromium-flags   [VM-OK]
@@ -10558,26 +10594,35 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter, press Super+F, and type `rm ~/.local/share/applications/YouTube.desktop`.
-  * Press Super+Alt+Space (Apps menu) and type `youtube`: no result. Escape.
-  * In the terminal type `omarchy-refresh-applications`; it finishes without an error. Press Super+Alt+Space and type `youtube`: the YouTube web app is listed. Escape.
-  * Type `echo '--broken-flag' >> ~/.config/chromium-flags.conf`, then `omarchy-refresh-chromium`.
-  ** Output: `Replaced /home/prime/.config/chromium-flags.conf…`, `Saved backup as …chromium-flags.conf.bak.<epoch>`, a diff with `> --broken-flag`, plus lines from re-installing the native messaging hosts; no errors.
-  * Type `grep -c broken ~/.config/chromium-flags.conf` → `0`; `rm ~/.config/chromium-flags.conf.bak.*`. Close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Press Super+F. The terminal fills the screen.
+  * Type `rm ~/.local/share/applications/YouTube.desktop` and press Return.
+  * Press Super+Alt+Space. The app menu opens.
+  * Type `youtube`. YouTube is not listed.
+  * Press Escape. The menu closes.
+  * Type `omarchy-refresh-applications` and press Return. The command finishes.
+  * Press Super+Alt+Space. The app menu opens.
+  * Type `youtube`. YouTube is listed.
+  * Press Escape. The menu closes.
+  * Type `echo '--broken-flag' >> ~/.config/chromium-flags.conf` and press Return.
+  * Type `omarchy-refresh-chromium` and press Return. The output says the flags file was replaced and shows `--broken-flag`.
+  * Type `grep -c broken ~/.config/chromium-flags.conf` and press Return. The line is `0`.
+  * Type `rm ~/.config/chromium-flags.conf.bak.*` and press Return.
+  * Press Super+F. The terminal returns to a tile.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The Apps menu may need a second to re-read the desktop database; reopen it if the entry is not there at once.
-  * Keep the terminal maximised so the red Replaced lines are readable.
+  * Reopen the app menu if YouTube is not listed at once.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Apps menu without YouTube, then with it; the terminal with Replaced/Saved backup and the diff line; `0`
+  * On success
+  ** YouTube missing, then listed, the flags file replaced with the broken line in the diff, and `broken` gone from the live file
   * If unsuccessful
-  ** The command output and `ls ~/.local/share/applications/`
+  ** The command output and the applications directory
 covers: bin/omarchy-refresh-applications; applications/*.desktop; bin/omarchy-refresh-chromium; bin/omarchy-refresh-config
 
 ### bar-position-menu-and-cli   [VM-OK]
@@ -10587,26 +10632,41 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Space → `Style` → `Menu Bar` → `Position` → `Bottom`. Within 20 s the bar moves to the bottom edge; windows re-tile.
-  * Press Super+Return and type `jq .bar.position ~/.config/omarchy/shell.json` → `"bottom"`; then `omarchy bar position left` → `Bar position set to left`; the bar stands as a vertical strip along the left edge with icon-only widgets and a stacked clock (`HH`, a dash, `mm`); the top edge is empty.
-  * Press Super+Ctrl+W (the network panel; Super+Ctrl+1 is the same panel by position): it opens beside the left bar, not under the top edge. Press Escape.
-  * Press Super+Space → `Style` → `Menu Bar` → `Position` → `Top` (with the bar on the left the menu logo is the topmost icon of the strip and Super+Space still works). The bar returns to the top as a horizontal strip.
-  * Unhappy paths: type `omarchy bar position middle; echo "exit=$?"` → `omarchy-bar: position must be top, bottom, left, or right`, `exit=1`; the bar stays on top. `omarchy-bar use nosuch.bar; echo "exit=$?"` → `nosuch.bar is not a known bar option; run 'omarchy plugin list'`, `exit=1`. `omarchy-bar frob; echo "exit=$?"` → `unknown command: frob`, `exit=1`. `omarchy-bar` → usage.
-  * Type `omarchy-bar reset` → `Using omarchy.bar as the active bar`; then `omarchy bar defaults` → `Restored the default Omarchy bar`. Press Super+W. The desktop is as found.
+  * Press Super+Space. The menu opens.
+  * Click Style.
+  * Click Menu Bar.
+  * Click Position.
+  * Click Bottom. The bar moves to the bottom.
+  * Press Super+Enter. A terminal opens.
+  * Type `jq .bar.position ~/.config/omarchy/shell.json` and press Return. The line is `"bottom"`.
+  * Type `omarchy bar position left` and press Return. The bar becomes a vertical strip on the left.
+  * Press Super+Ctrl+W. The network panel opens beside the left bar.
+  * Press Escape. The panel closes.
+  * Press Super+Space. The menu opens.
+  * Click Style.
+  * Click Menu Bar.
+  * Click Position.
+  * Click Top. The bar returns to the top.
+  * Type `omarchy bar position middle; echo "exit=$?"` and press Return. The output says the position must be an edge. The last line is `exit=1`. The bar stays on top.
+  * Type `omarchy-bar use nosuch.bar; echo "exit=$?"` and press Return. The output says it is not a known bar option. The last line is `exit=1`.
+  * Type `omarchy-bar frob; echo "exit=$?"` and press Return. The output says the command is unknown. The last line is `exit=1`.
+  * Type `omarchy-bar` and press Return. A usage line appears.
+  * Type `omarchy-bar reset` and press Return. The line says omarchy.bar is the active bar.
+  * Type `omarchy bar defaults` and press Return. The line says the default bar was restored.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Windows re-tile when the bar moves; that is expected. Allow 20 s for a position change.
-  * The first `omarchy bar` command creates `~/.config/omarchy/shell.json`; `defaults` restores it.
+  * Allow up to 20 seconds for a position change. Windows re-tile when the bar moves.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots with the bar at the bottom and `"bottom"`, at the left (vertical, stacked clock) with the network panel anchored beside it, on top again, and the four rejection messages with `exit=1`; the reset/defaults lines
+  * On success
+  ** The bar at the bottom, on the left with the network panel beside it, back on top, and the three bad commands refused with `exit=1`
   * If unsuccessful
-  ** Screenshot of the bar in the wrong place or a mis-anchored panel; `cat ~/.config/omarchy/shell.json`
+  ** The bar in the wrong place, or a panel that opens under the top edge while the bar is on the left
 covers: manual/05:85-94; omarchy-menu.jsonc:108-118 (style.bar.position.*); bin/omarchy-bar (cmd_position, cmd_defaults, use, reset); bin/omarchy-shell-config; shell/Ui/KeyboardPanel.qml (cardOrigin for left bars); test/acceptance.d/menu-test.sh
 
 ### bar-transparency-doubleclick-menu-cli   [VM-OK]
@@ -10616,26 +10676,32 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return so a terminal sits under the bar. Screenshot the bar: a solid background strip.
-  * Double-left-click an empty patch of the bar at about x≈0.25, y≈0.01 (between the workspace indicators and the clock, clear of any widget). Within 2 s the bar background turns transparent (the wallpaper/terminal shows through) while the text stays readable. Double-click again: opaque.
-  ** Keep the double-click quick; a click-and-hold starts a bar drag instead.
-  * Press Super+Space → `Style` → `Menu Bar` → `Transparency`. The bar turns transparent; in the terminal `jq .bar.transparent ~/.config/omarchy/shell.json` → `true`.
-  * Type `omarchy bar transparent false` → `Bar transparency set to false`; opaque again. Type `omarchy bar transparent toggle` → `Bar transparency toggled`; transparent.
-  * Unhappy path: type `omarchy bar transparent maybe; echo "exit=$?"` → `omarchy-bar: transparent must be true, false, or toggle`, `exit=1`; nothing changes.
-  * Type `omarchy bar defaults` → `Restored the default Omarchy bar`; the bar is solid and as found. Press Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Double-click empty bar space. The bar background turns transparent. The text stays readable.
+  * Double-click empty bar space. The bar background turns opaque.
+  * Press Super+Space. The menu opens.
+  * Click Style.
+  * Click Menu Bar.
+  * Click Transparency. The bar background turns transparent.
+  * Type `jq .bar.transparent ~/.config/omarchy/shell.json` and press Return. The line is `true`.
+  * Type `omarchy bar transparent false` and press Return. The bar background turns opaque.
+  * Type `omarchy bar transparent toggle` and press Return. The bar background turns transparent.
+  * Type `omarchy bar transparent maybe; echo "exit=$?"` and press Return. The output says the value must be true, false, or toggle. The last line is `exit=1`. The bar does not change.
+  * Type `omarchy bar defaults` and press Return. The bar is opaque again.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Use `./client mouse double-click`; the space between the workspaces and the clock is safe bar background. Compare the strip behind the clock text to judge transparency.
+  * Double-click quickly. A click and hold starts a bar drag.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots: opaque, transparent after the double-click with the wallpaper visible behind the clock, opaque, transparent via the menu with `true`, opaque via CLI, transparent via toggle, the rejection with `exit=1`, and the restored solid bar
+  * On success
+  ** Transparent then opaque from the double-click, transparent from the menu with `true`, opaque then transparent from the CLI, the bad value refused, and a solid bar after defaults
   * If unsuccessful
-  ** Screenshot of the bar unchanged after the double-click
+  ** The bar unchanged after the double-click
 covers: manual/05:83-91; omarchy-menu.jsonc:110 (style.bar.transparency); bin/omarchy-bar cmd_transparent; shell/plugins/bar/Bar.qml (CenterGestureArea.onDoubleClicked, toggleTransparency, refreshTransparentForeground); test/shell.d/bar-text-color-test.sh
 
 ### bar-transparent-text-colour-follows-wallpaper   [VM-OK]
@@ -10645,25 +10711,27 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy-theme-set tokyo-night; omarchy bar transparent true` — after 3 s the bar is see-through with light text; screenshot.
-  * Type `omarchy-theme-set flexoki-light` — after 5 s the wallpaper is light and the bar text is dark; screenshot.
-  * Type `omarchy-theme-set catppuccin-latte` — after 5 s still dark text on the light strip; screenshot.
-  * Type `omarchy-theme-set tokyo-night` — light text again; screenshot.
-  * Type `omarchy bar transparent false` — the bar is opaque again: back to stock. Close the terminal with Super+W.
-  ** Theme application is asynchronous; if the bar has not recoloured after 5 s, wait 5 s once more.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy-theme-set tokyo-night` and press Return.
+  * Type `omarchy bar transparent true` and press Return. The bar is transparent. The text is light.
+  * Type `omarchy-theme-set flexoki-light` and press Return. The wallpaper turns light. The bar text turns dark.
+  * Type `omarchy-theme-set catppuccin-latte` and press Return. The bar text stays dark.
+  * Type `omarchy-theme-set tokyo-night` and press Return. The bar text turns light.
+  * Type `omarchy bar transparent false` and press Return. The bar is opaque.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Judge contrast on the clock digits in the top strip of the screenshot.
+  * Wait up to 5 seconds after each theme switch. Judge the clock digits.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Light text on dark; dark text on two light themes; light text on dark again; opaque bar at the end
+  * On success
+  ** Light text on Tokyo Night, dark text on both light themes, light text again, and an opaque bar at the end
   * If unsuccessful
-  ** A screenshot where the bar text matches the brightness of the strip behind it
+  ** Bar text that matches the brightness of the strip behind it
 covers: test/shell.d/bar-text-color-test.sh; test/shell.d/background-test.sh (async theme apply); bin/omarchy-bar-text-color; manual/05-the-top-bar.md; manual/06-themes.md
 
 # Install and remove machinery
@@ -10713,36 +10781,68 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Space → Install. Rows: Package, AUR, AI, Service, Development, Editor, Style, Gaming, Browser, Web App, Terminal, TUI, Windows, Preinstalls; `Preinstalls` is dimmed with a ✓.
-  * Open Terminal. Rows Alacritty, Foot, Ghostty, Kitty; `Foot ✓` is dimmed to about 40 % (the installed default), the other three normal.
-  ** Press Down and Up through the list: the highlight skips the dimmed row. Move the mouse over it and click: nothing happens, the menu stays open, no installer window appears.
-  ** Backspace to Install, type `foot`: no Install → Terminal → Foot row appears (dimmed rows are omitted from search; the Setup › Defaults row or the Foot app may appear). Clear the filter.
-  * Open Browser: Chrome, Edge, Brave, Brave Origin, Firefox, Zen — no Chromium row, `Zen` selectable. Back. Open Development → JavaScript: `Node.js` dimmed ✓ (provisioned at install), Bun and Deno selectable. Back twice. Open Service: 1Password, Dropbox, Spotify, Signal, Tailscale, NordVPN, ONCE, Bitwarden, Chromium Account — none dimmed.
-  ** `Chromium Account` is not in the manual's service list; report it as present. Never press Enter on an undimmed Install row — they start installers.
-  ** Walk the rest of the catalogue, one screenshot each: Editor (7 rows), AI (10), Gaming (10), Development (14, with JavaScript 3 and PHP sub-rows), Style → Font (Cascadia Mono, Meslo LG Mono, Fira Code, Victor Code, Bitstream Vera Mono, Iosevka); `Windows` enabled. Only `Preinstalls`, `Terminal → Foot` and `Development → JavaScript → Node.js` are dimmed ✓. Long submenus scroll — use mouse scroll or type a row name to filter.
-  * Backspace to the root and open Remove. Rows exactly: Package, Theme, Web App, TUI, Preinstalls. AI, Services, Development, Gaming, Browser, Windows and Security are absent (their guards hide the whole submenu on a stock disk).
-  * Open Remove → Web App: a picker "Select web app to remove…" lists Basecamp, Discord, Google Contacts, Google Maps, Google Messages, Google Photos, HEY, WhatsApp, X, YouTube, Zoom; press Escape. Remove → TUI: picker lists Disk Usage and Docker; Escape. Remove → Theme: a theme picker; Escape. Nothing is removed.
-  * At the root type `chrome`: only `Chrome` under Install › Browser appears, no Remove › Browser result. Clear and type `install service`: the Service submenu row is found. Escape until the menu is closed.
-  * Open a terminal with Super+Enter and type `omarchy-installed-service-tailscale; echo $?; omarchy-installed-service-dropbox; echo $?` → `1` and `1`; `systemctl is-enabled tailscaled 2>&1` → not found; `omarchy install service` → a help table listing 1password, dropbox, nordvpn, once, signal, spotify, sunshine, tailscale. Close the terminal with Super+W.
+  * Press Super+Space. The menu opens.
+  * Click Install. Preinstalls is dimmed.
+  * Click Terminal. Foot is dimmed. Alacritty, Ghostty, and Kitty are not.
+  * Press Down. The highlight skips Foot.
+  * Click Foot. Nothing starts. The menu stays open.
+  * Press Backspace. The Install menu returns.
+  * Type `foot`. The Install Terminal Foot row is not offered.
+  * Press Escape. The filter clears.
+  * Click Browser. There is no Chromium row. Zen can be selected.
+  * Press Backspace. The Install menu returns.
+  * Click Development.
+  * Click JavaScript. Node.js is dimmed. Bun and Deno can be selected.
+  * Press Backspace. Development returns.
+  * Press Backspace. The Install menu returns.
+  * Click Service. None of the service rows is dimmed.
+  * Press Backspace. The Install menu returns.
+  * Click Editor. Record the rows. Do not start an install.
+  * Press Backspace.
+  * Click AI. Record the rows. Do not start an install.
+  * Press Backspace.
+  * Click Gaming. Record the rows. Do not start an install.
+  * Press Backspace.
+  * Click Style.
+  * Click Font. Record the font rows. Do not start an install.
+  * Press Escape until the menu is closed.
+  * Press Super+Space. The menu opens.
+  * Click Remove. The rows are Package, Theme, Web App, TUI, and Preinstalls. AI, Services, Development, Gaming, Browser, Windows, and Security are absent.
+  * Click Web App. A picker lists web apps.
+  * Press Escape. The picker closes. Nothing is removed.
+  * Press Super+Space. The menu opens.
+  * Click Remove.
+  * Click TUI. A picker lists Disk Usage and Docker.
+  * Press Escape. The picker closes.
+  * Press Super+Space. The menu opens.
+  * Click Remove.
+  * Click Theme. A theme picker opens.
+  * Press Escape. The picker closes.
+  * Press Super+Space. The menu opens.
+  * Type `chrome`. Only the Install Browser Chrome row is offered.
+  * Press Escape. The filter clears.
+  * Type `install service`. The Service row is found.
+  * Press Escape until the menu is closed.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy-installed-service-tailscale; echo $?` and press Return. The line is `1`.
+  * Type `omarchy-installed-service-dropbox; echo $?` and press Return. The line is `1`.
+  * Type `systemctl is-enabled tailscaled` and press Return. The unit is not found.
+  * Type `omarchy install service` and press Return. A help table lists the services.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Dimmed rows are drawn at 40 % opacity; compare against neighbouring rows in the screenshot. Move the mouse before hovering: the menu ignores the pointer's resting position when it opens.
-  * Escape is two-stage (clears the filter, then closes); Backspace on an empty filter goes back one level.
-  * Guards paint from the previous evaluation: if a row looks wrong, close and reopen the menu twice before reporting.
+  * Never press Enter on an undimmed Install row. It starts an installer.
+  * If a guard looks stale, close the menu and open it twice before reporting.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshot of Install with a dimmed `Preinstalls ✓`; Install → Terminal with a dimmed `Foot ✓` and the cursor resting on a neighbour after Down; the `foot` search without the Install row
-  ** Screenshots of Browser (no Chromium, Zen selectable), JavaScript (Node.js dimmed ✓), Service (nine rows, none dimmed), and one per remaining submenu (Editor 7, AI 10, Gaming 10, Development 14, Style → Font 6) with only the three preinstalled rows dimmed
-  ** Screenshot of Remove with exactly Package, Theme, Web App, TUI, Preinstalls; the web-app picker; the TUI picker with Disk Usage and Docker
-  ** Screenshot of the `chrome` search showing only the Install row; the terminal with `1` `1`, the missing unit and the service help table
+  * On success
+  ** Preinstalls and Foot dimmed, the highlight skipping Foot, no Foot row in search, Node.js dimmed, Remove limited to the five stock rows, the web-app and TUI pickers cancelled, and both service probes exiting `1`
   * If unsuccessful
-  ** Screenshot of a dimmed row being selectable or activating on click, an installer terminal opening, a Remove submenu present with nothing installed, or a Remove row for absent software
-  ** Output of `omarchy-version`
+  ** A dimmed row that starts an installer, or a Remove submenu for software that is not installed
 covers: default/omarchy/omarchy-menu.jsonc (install.*, remove.*), shell/plugins/menu/MenuModel.js (isDisabled, labelFor, matchesQuery, isVisible), shell/plugins/menu/Menu.qml (rowSelectable, nextSelectable, disabled row MouseArea), docs/menu.md Guards, test/shell.d/menu-test.sh ("never hides an Install row"), menu-guards-test.sh, pointer-move-gate-test.sh, manual/04-navigation.md, manual/24-commercial-apps-services.md, bin/omarchy (group help), bin/omarchy-webapp-remove, bin/omarchy-tui-remove, bin/omarchy-refresh-applications, bin/omarchy-installed-service-{tailscale,dropbox}, test/shell.d/installed-service-test.sh, omarchy-iso configure_tailscale (absence path), install/omarchy-base.packages
 
 ### pkg-add-drop-present-missing-cli   [VM-OK] [NET]
@@ -10752,30 +10852,41 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy pkg add sl; echo rc=$?` → a sudo prompt (`prime`), pacman installs `sl` (a few KB), `rc=0`. Type `sl -h 2>&1 | head -1` → sl's usage line.
-  * Type `omarchy pkg add sl; echo rc=$?` → no pacman output (already installed), `rc=0`.
-  * Type `omarchy pkg add definitely-not-a-package-xyz; echo rc=$?` → `error: target not found: definitely-not-a-package-xyz`, the red `Error: Package 'definitely-not-a-package-xyz' did not install`, `rc=1`.
-  * Probes, one pair per screenshot: `omarchy-pkg-present bash; echo $?` → `0`; `omarchy-pkg-present bash omarchy-not-real; echo $?` → `1`; `omarchy-pkg-missing bash; echo $?` → `1`; `omarchy-pkg-missing bash omarchy-not-real; echo $?` → `0`.
-  ** `omarchy-cmd-present bash ls; echo $?` → `0`; `omarchy-cmd-present bash nosuchcmd; echo $?` → `1`; `omarchy-cmd-missing nosuchcmd; echo $?` → `0`; `omarchy-cmd-missing bash; echo $?` → `1`; `omarchy pkg present sl; echo rc=$?` → `rc=0`; `omarchy pkg present sl nothere; echo rc=$?` → `rc=1`.
-  * Type `cd /tmp && omarchy-cmd-terminal-cwd; cd ~` → prints `/tmp` (the "open terminal here" helper follows the shell).
-  * Type `omarchy pkg drop sl nothere; echo rc=$?` → pacman removes only `sl`, `rc=0`; `omarchy pkg drop sl; echo rc=$?` again → no pacman output, no sudo prompt, `rc=0`; `sl -h 2>&1 | head -1` → `command not found`. Close the terminal with Super+W.
-  ** `omarchy-pkg-add` / `omarchy-pkg-drop` are the same commands without the router; `cowsay` (~20 KB, `cowsay hi` draws the cow) is an equally harmless probe package.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy pkg add sl; echo rc=$?` and press Return. The install finishes. The last line is `rc=0`.
+  ** If a password is asked, type `prime` and press Return.
+  * Type `sl -h 2>&1 | head -1` and press Return. A usage line appears.
+  * Type `omarchy pkg add sl; echo rc=$?` and press Return. Pacman does not install it again. The last line is `rc=0`.
+  * Type `omarchy pkg add definitely-not-a-package-xyz; echo rc=$?` and press Return. The output says the package did not install. The last line is `rc=1`.
+  * Type `omarchy-pkg-present bash; echo $?` and press Return. The line is `0`.
+  * Type `omarchy-pkg-present bash omarchy-not-real; echo $?` and press Return. The line is `1`.
+  * Type `omarchy-pkg-missing bash; echo $?` and press Return. The line is `1`.
+  * Type `omarchy-pkg-missing bash omarchy-not-real; echo $?` and press Return. The line is `0`.
+  * Type `omarchy-cmd-present bash ls; echo $?` and press Return. The line is `0`.
+  * Type `omarchy-cmd-present bash nosuchcmd; echo $?` and press Return. The line is `1`.
+  * Type `omarchy-cmd-missing nosuchcmd; echo $?` and press Return. The line is `0`.
+  * Type `omarchy-cmd-missing bash; echo $?` and press Return. The line is `1`.
+  * Type `omarchy pkg present sl; echo rc=$?` and press Return. The last line is `rc=0`.
+  * Type `omarchy pkg present sl nothere; echo rc=$?` and press Return. The last line is `rc=1`.
+  * Type `cd /tmp && omarchy-cmd-terminal-cwd` and press Return. The line is `/tmp`.
+  * Type `cd ~` and press Return.
+  * Type `omarchy pkg drop sl nothere; echo rc=$?` and press Return. Pacman removes `sl`. The last line is `rc=0`.
+  * Type `omarchy pkg drop sl; echo rc=$?` and press Return. Nothing is removed. The last line is `rc=0`.
+  * Type `sl -h 2>&1 | head -1` and press Return. The command is not found.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The helpers print nothing themselves; only the echoed code is visible. The sudo credential is cached for a few minutes, so later prompts may not appear (passwordless sudo is fine).
-  * Exit codes are invisible on a screenshot: every command carries its `; echo rc=$?`. Read the echoed `rc=` lines, not pacman's coloured progress.
+  * The helpers print nothing. Read the echoed exit code.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshot of each command with its `rc=` line, especially the red `did not install` error and the idempotent second `add`
-  ** Screenshot(s) showing the probe codes `0 1 1 0 0 1 0 1` in that order, `rc=0`/`rc=1` for `pkg present`, and `/tmp`
-  ** Screenshot of `drop sl nothere` removing only `sl`, the no-op drop with no sudo prompt, and the final `command not found`
+  * On success
+  ** `sl` installed with `rc=0`, the second add doing nothing, the missing package refused with `rc=1`, the probe codes, `/tmp`, and `sl` gone after drop
   * If unsuccessful
-  ** Screenshot of the deviating output (an `rc=0` after the typo, a sudo prompt on the no-op drop) and `pacman -Q sl`
+  ** `rc=0` after the missing package, or a password prompt on the second drop
 covers: manual/29-other-packages.md:5,9; bin/omarchy-pkg-add; bin/omarchy-pkg-drop; bin/omarchy-pkg-present; bin/omarchy-pkg-missing; bin/omarchy-cmd-present; bin/omarchy-cmd-missing; bin/omarchy-cmd-terminal-cwd; test/shell.d/pkg-drop-test.sh
 
 ### pkg-install-remove-picker-round-trip   [VM-OK] [NET]
