@@ -3183,15 +3183,16 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Shift+Enter. Within 45 seconds a Chromium window appears, tiled and themed with Omarchy colours. Load `https://example.com` in the address bar: "Example Domain" (offline the error page still shows the URL — that is the proof).
-  ** Without GPU acceleration it renders slowly: screenshot every 5 seconds until the tab strip is visible; click Wait on a "not responding" dialog; dismiss any first-run or sign-in bubble and report that it appeared.
-  * Press Super+Shift+B: a second normal Chromium window — the chord is intended (03-INTENDED-BEHAVIOUR item 17: same as Super+Shift+Return; only the manual's hotkey table omits it). Press Super+Shift+Alt+B: a window in Incognito mode (dark "You've gone Incognito" page). Close all three with Super+W (confirm a "Close all tabs?" prompt with the mouse).
-  * Open a terminal with Super+Enter and type `omarchy-default-browser; xdg-mime query default x-scheme-handler/http` Enter → `chromium` then `chromium.desktop`. Type `xdg-settings get default-web-browser; echo $BROWSER` Enter → `chromium.desktop`, `omarchy-launch-browser`.
-  * Unhappy path: type `omarchy default browser bogus` Enter → `Usage: omarchy-default-browser <chromium|chrome|brave|brave-origin|edge|firefox|zen>`.
-  * Press Super+1 and open Chromium with Super+Shift+Enter; wait for it. Press Super+3, open a terminal and type `omarchy launch browser https://example.com` Enter: focus jumps to workspace 1 with example.com in Chromium.
-  * Press Super+3 and type `omarchy launch browser` Enter: a new Chromium window opens on workspace 3 and the desktop stays there; close it with Super+W. Type `omarchy-launch-browser --private https://example.com` Enter: an Incognito window with example.com on workspace 3; close it.
-  * Type `omarchy-hyprland-focus-app '^chromium$'` Enter: focus jumps to workspace 1. Press Super+3 and type `omarchy-hyprland-focus-app Mail; echo s=$?` Enter: non-zero and focus stays on workspace 3.
-  * Press Super+1 and close Chromium (Super+W); press Super+3 and close both terminals. The desktop must look exactly as at the start.
+  * Press Super+Shift+Enter. Chromium opens.
+  * Press Super+Shift+B. A second Chromium window opens.
+  * Press Super+Shift+Alt+B. An Incognito window opens.
+  * Press Super+W. One window closes.
+  * Press Super+W. One window closes.
+  * Press Super+W. The last window closes.
+  * Press Super+Enter. A terminal opens.
+  * Run `omarchy-default-browser` and press Enter. It prints `chromium`.
+  * Run `omarchy default browser bogus` and press Enter. Usage is printed. Nothing changes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -3214,16 +3215,23 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Shift+N. Within 45 seconds a terminal window running Neovim (LazyVim dashboard or an empty buffer with a status line; app id `org.omarchy.nvim`) appears. Type `:qa!` Enter: within 30 seconds the window closes.
-  ** First launch may install plugins; allow the full 45 seconds and report anything longer. If it stays open, press Super+W and report it.
-  * Press Super+Space → Setup → Monitors. A low-urgency toast "Editing config file" with the path ~/.config/hypr/monitors.lua appears and a Neovim window (floating) opens on that file: first line `-- See https://wiki.hypr.land/Configuring/Basics/Monitors/`, containing `local omarchy_monitor_scale = "auto"` and `local omarchy_gdk_scale = 2`. Unhappy path: type `iBROKEN`, press Escape, type `:q!` Enter — the edit is discarded and the desktop is unchanged.
-  * Press Super+Space → Setup → Monitors again and type `:%s/= "auto"/= 1.25/` Enter, then `:wq` Enter. Within 15 seconds the whole desktop rescales (bar and text larger) with no further command. Reopen Setup → Monitors, type `:%s/= 1.25/= "auto"/` Enter and `:wq` Enter: within 15 seconds the desktop is back at 1×.
-  ** This is the round trip for the saved change; screenshot before and after each save.
-  * Repeat, each time screenshotting the toast and Neovim's status-line filename and quitting with `:q` Enter: Setup → Keybindings (bindings.lua, first line `-- Keep only your personal keybinding overrides here…`); Setup → Input (input.lua, `-- Keep only your personal input overrides here…`); Setup → Config → Hyprland (hyprland.lua); Setup → Config → XCompose (.XCompose, may be empty); Style → Hyprland (looknfeel.lua, `-- Change the default Omarchy look'n'feel.`).
-  ** The toast's path and the status-line filename must be the same file every time.
-  * Open a terminal with Super+Enter and type `pgrep -o hyprsunset` Enter (note the PID, or that none is running). Press Super+Space → Setup → Config → Hyprsunset (hyprsunset.conf), quit with `:q` Enter, then type `pgrep -o hyprsunset` Enter again: a different (or newly present) PID shows that hyprsunset was restarted on quit; no error toast.
-  * Type `omarchy-launch-config-editor; echo rc=$?` Enter → `Usage: omarchy-launch-config-editor <path>` and rc=1.
-  * Type `nvim --headless '+qa' && echo NVIM-OK; omarchy-default-editor` Enter → `NVIM-OK` then `nvim`. Close the terminal with Super+W; the desktop is as before.
+  * Press Super+Shift+N. Neovim opens.
+  * Type `:qa!` and press Enter. Neovim closes.
+  * Press Super+Space. The menu opens.
+  * Click Setup, then Monitors. Use the mouse only. Neovim opens on monitors.lua.
+  * Type `:q!` and press Enter. Neovim closes. The desktop scale does not change.
+  * Press Super+Space. The menu opens.
+  * Click Setup, then Monitors. Use the mouse only. Neovim opens on monitors.lua.
+  * Type `:%s/= "auto"/= 1.25/` and press Enter. The line changes.
+  * Type `:wq` and press Enter. The desktop scale changes. Neovim closes.
+  * Press Super+Space. The menu opens.
+  * Click Setup, then Monitors. Use the mouse only. Neovim opens on monitors.lua.
+  * Type `:%s/= 1.25/= "auto"/` and press Enter. The line changes.
+  * Type `:wq` and press Enter. The desktop scale returns. Neovim closes.
+  * Press Super+Enter. A terminal opens.
+  * Run `omarchy-launch-config-editor; echo rc=$?` and press Enter. It prints `rc=1`.
+  * Press Super+W. The terminal closes.
+  * the desktop must return exactly as left.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -3247,14 +3255,16 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy-default-browser; omarchy-default-terminal; omarchy-default-editor` Enter → `chromium`, `foot`, `nvim`. Type `xdg-mime query default x-scheme-handler/http; xdg-mime query default inode/directory` Enter → `chromium.desktop` then `org.gnome.Nautilus.desktop`.
-  * Type `omarchy-theme-current; omarchy-theme-bg-current; omarchy-font-current` Enter: none prints `Unknown` or an empty line.
-  * Type `echo hello > /tmp/o.txt && cp /usr/share/omarchy/default/plymouth/logo.png /tmp/o.png && open /tmp/o.txt` Enter: a terminal window with Neovim showing `hello` opens. Type `:q` Enter.
-  * Type `xdg-open /tmp/o.png` Enter: imv shows the Omarchy logo in a floating window. Press `q`.
-  * Type `xdg-open /tmp` Enter: Files (Nautilus) opens at /tmp (oversized GTK rendering at 1× is expected). Press Super+W.
-  * Type `xdg-open https://example.com` Enter: Chromium (tabbed, with address bar) opens example.com. Press Super+W.
-  * Unhappy path: type `xdg-open /tmp/does-not-exist.txt; echo rc=$?` Enter → `xdg-open: file '/tmp/does-not-exist.txt' does not exist`, `rc=2`, nothing opens.
-  * Type `rm /tmp/o.txt /tmp/o.png` Enter and press Ctrl+D; the desktop is as before.
+  * Press Super+Enter. A terminal opens.
+  * Run `omarchy-default-browser` and press Enter. It prints `chromium`.
+  * Run `echo hello > /tmp/o.txt` and press Enter. The file exists.
+  * Run `open /tmp/o.txt` and press Enter. Neovim opens.
+  * Type `:q` and press Enter. Neovim closes.
+  * Run `xdg-open /tmp` and press Enter. Files opens.
+  * Press Super+W. Files closes.
+  * Run `xdg-open /tmp/does-not-exist.txt; echo rc=$?` and press Enter. It prints `rc=2`. Nothing opens.
+  * Run `rm /tmp/o.txt` and press Enter. The file is gone.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -3277,15 +3287,17 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy show logo` Enter: the screen clears and the Omarchy block-letter logo prints in green. Type `omarchy show done` Enter: a green `●` and `Done! Press any key to close...` with the cursor waiting; press Space.
-  * Type `omarchy show done 3` Enter: a red `●` and `Failed (exit code 3)! Press any key to close...`; press Space. Type `omarchy show done 0 </dev/null >/dev/null; echo "exit=$?"` Enter: the prompt still appears (it talks to `/dev/tty`); press Space; `exit=0`.
-  * Type `omarchy-launch-floating-terminal-with-presentation 'echo HELLO-FLOAT'` Enter: a terminal titled "Omarchy" floats centred over the first one (about 875×600, not tiled) showing the logo, HELLO-FLOAT, a green dot and "Done! Press any key to close...". Press a key: it closes.
-  * Type `omarchy-launch-floating-terminal-with-presentation 'false'` Enter: red dot and "Failed (exit code 1)! Press any key to close...". Press a key.
-  * Type `omarchy-launch-floating-terminal-with-presentation 'sleep 30'` Enter, then press Ctrl+C in the floating window: it closes immediately with no Done/Failed prompt.
-  * Type `systemctl --user show -p MainPID --value pipewire.service` Enter and note the PID. Press Super+Space → Update → Hardware → Audio: a floating "Omarchy" terminal shows the logo, "Restarting audio services...", then "Audio status:" followed by a `wpctl status` tree (Audio → Devices/Sinks with Dummy Output), then the Done prompt. Screenshot it and press a key to close.
-  ** The floating terminal runs for a second or two; screenshot as soon as it appears and again when the Done line shows.
-  * Type `systemctl --user show -p MainPID --value pipewire.service; systemctl --user is-active pipewire wireplumber pipewire-pulse; pactl list sinks short` Enter → a new PID, `active` ×3, and `auto_null` still present. Type `omarchy-restart-audio; echo $?` Enter → the same text inline and 0.
-  * Close the terminal with Super+W; the desktop is as before.
+  * Press Super+Enter. A terminal opens.
+  * Run `omarchy show done` and press Enter. A Done prompt waits.
+  * Press Space. The prompt closes.
+  * Run `omarchy show done 3` and press Enter. A Failed prompt waits.
+  * Press Space. The prompt closes.
+  * Run `omarchy-launch-floating-terminal-with-presentation 'echo HELLO-FLOAT'` and press Enter. A floating terminal opens and finishes.
+  * Press a key. The floating terminal closes.
+  * Press Super+Space. The menu opens.
+  * Click Update, then Hardware, then Audio. Use the mouse only. A floating terminal restarts audio and finishes.
+  * Press a key. The floating terminal closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -3308,15 +3320,15 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter and type `echo shared-text-123 | wl-copy` Enter.
-  * Press Super+Ctrl+S. The Omarchy Menu opens on the Share submenu with rows Clipboard, File, Folder, Receive. Type "receive", Return: LocalSend opens as a floating centred window (about 1100×700, nearly the full guest height, over the terminal) with this device's name and the Receive tab. Press Super+W.
-  ** LocalSend is a Flutter app rendered in software; allow 10 s per launch.
-  * Press Super+Ctrl+S, type "clipboard", Return: a floating LocalSend window in "send" mode listing one `.txt` temp file and scanning for nearby devices (none found is expected). Press Super+W.
-  * Press Super+Ctrl+S, type "file", Return: a "Share files" chooser dialog floats in the middle. Press Escape (or click Cancel): nothing else opens, no error toast. Press Super+Ctrl+S → Folder: a "Share folder" chooser. Cancel it.
-  ** The chooser is a GTK portal dialog (rendered oversized at 1×); Cancel is bottom-left or top-left.
-  * In the terminal type `omarchy share` Enter → a usage/help block for `omarchy share <clipboard|file|folder> [path...]`. Type `omarchy-menu-share; echo rc=$?` Enter → `Usage: omarchy-menu-share [clipboard|file|folder]`, rc=1. Type `omarchy share folder /tmp` Enter → LocalSend opens in send mode with `tmp`; close it.
-  * Unhappy path: type `omarchy share bogus` Enter — the mode is not validated: a "Share files" chooser opens as if `file` had been given. Cancel it (Escape); nothing else opens. Record this as a finding.
-  * Press Super+Space → Trigger → Share: the same four rows exist. Press Super+Ctrl+S, then Escape twice: nothing launches. Close the terminal with Super+W; the desktop is as before.
+  * Press Super+Enter. A terminal opens.
+  * Run `echo shared-text-123 | wl-copy` and press Enter. The text is copied.
+  * Press Super+Ctrl+S. The Share menu opens.
+  * Press Escape. The menu closes. Nothing launches.
+  * Press Super+Ctrl+S. The Share menu opens.
+  * Type `receive` and press Enter. LocalSend opens.
+  * Press Super+W. LocalSend closes.
+  * Run `omarchy share` and press Enter. Usage prints.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -3339,12 +3351,17 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `magick -size 800x600 xc:green ~/Pictures/pick.png` Enter (the picker is empty on a fresh disk).
-  * Press Super+Ctrl+Period: a shell menu titled `Transcode picture or video` lists `pick.png`. Press Escape: the menu closes, no toast; `ls ~/Pictures` still shows only `pick.png`.
-  * Press Super+Space, click Trigger, click Transcode: the same picker appears — click `pick.png` with the mouse. Choose `jpg` in `Select format`, then `low` in `Select resolution` (Return each): toast `Transcoded to low jpg` / `Saved and copied to clipboard.`
-  * In the terminal type `ls ~/Pictures/` Enter: `pick-low.jpg` beside `pick.png`. Type `echo ` (trailing space) then press Super+V and Return → `file:///home/prime/Pictures/pick-low.jpg`.
-  * Unhappy path: type `omarchy transcode /tmp/missing.png jpg low` Enter → `File not found: /tmp/missing.png`.
-  * Type `rm ~/Pictures/pick.png ~/Pictures/pick-low.jpg` Enter and press Super+W; the desktop is as before.
+  * Press Super+Enter. A terminal opens.
+  * Run `magick -size 800x600 xc:green ~/Pictures/pick.png` and press Enter. The picture exists.
+  * Press Super+Ctrl+Period. The transcode picker opens.
+  * Press Escape. The picker closes. No new file appears.
+  * Press Super+Ctrl+Period. The transcode picker opens.
+  * Press Enter on pick.png. A format menu opens.
+  * Press Enter on jpg. A resolution menu opens.
+  * Press Enter on low. A new file is saved.
+  * Run `ls ~/Pictures/pick-low.jpg` and press Enter. The file exists.
+  * Run `rm ~/Pictures/pick.png ~/Pictures/pick-low.jpg` and press Enter. The files are gone.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -3368,12 +3385,16 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter and type `mkdir -p /tmp/ntx && cp /usr/share/omarchy/default/plymouth/logo.png /tmp/ntx/pic1.png && cp /tmp/ntx/pic1.png /tmp/ntx/pic2.png && echo x > /tmp/ntx/note.txt && nautilus /tmp/ntx &` Enter.
-  * Right-click `pic1.png`: the menu includes **Transcode** and **Send via LocalSend**. Press Escape.
-  * Unhappy path: right-click `note.txt`: **Send via LocalSend** present, no **Transcode**. Press Escape.
-  * Click `pic1.png`, Shift+click `pic2.png`, right-click: **Transcode 2 items** and **Send selected via LocalSend**. Click **Transcode 2 items**: a floating terminal prints `Transcoding /tmp/ntx/pic1.png` … and waits for a key when done; press Enter. New output files appear in the folder (record their names).
-  * Right-click `pic1.png` → **Send via LocalSend**: LocalSend opens looking for nearby devices (none). Press Super+W on it.
-  * Press Super+W on Nautilus; in the terminal type `rm -r /tmp/ntx` Enter and press Ctrl+D; the desktop is as before.
+  * Press Super+Enter. A terminal opens.
+  * Run `mkdir -p /tmp/ntx && cp /usr/share/omarchy/default/plymouth/logo.png /tmp/ntx/pic1.png && echo x > /tmp/ntx/note.txt` and press Enter. The files exist.
+  * Run `nautilus /tmp/ntx &` and press Enter. Files opens.
+  * Right-click pic1.png. Transcode and LocalSend are offered.
+  * Press Escape. The menu closes.
+  * Right-click note.txt. LocalSend is offered. Transcode is not.
+  * Press Escape. The menu closes.
+  * Press Super+W. Files closes.
+  * Run `rm -r /tmp/ntx` and press Enter. The folder is gone.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -3396,13 +3417,13 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return and type `cat ~/.config/hypr/xdph.conf` Enter → `allow_token_by_default = true` and `custom_picker_binary = hyprland-preview-share-picker`.
-  * Press Super+Shift+Return and open `https://mozilla.github.io/webrtc-landing/gum_test.html`; click the "Screen capture" (or "Window") button.
-  ** Click Wait on a Chromium "not responding" dialog.
-  * A picker with previews of the screen and windows appears (the custom picker, not a plain list). Choose the terminal window and confirm: the page shows the shared terminal in its video element. Stop sharing.
-  ** The picker is a Qt window and may take a few seconds to render previews.
-  * Unhappy path: trigger the share again and cancel the picker: the page reports the permission was denied, nothing crashes.
-  * Close Chromium and the terminal; the desktop is empty.
+  * Press Super+Enter. A terminal opens.
+  * Run `grep allow_token_by_default ~/.config/hypr/xdph.conf` and press Enter. Token sharing is allowed.
+  * Press Super+Shift+Enter. Chromium opens.
+  * Open a page that can share the screen. A share picker appears.
+  * Press Escape. Sharing is denied. Chromium stays open.
+  * Press Super+W. Chromium closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>

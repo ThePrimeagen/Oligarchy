@@ -82,14 +82,14 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `apps-launcher-search-rank-and-launch`
 - [x] `apps-launcher-delete-key-removes-entry`
 - [x] `launch-terminal-files-calculator-chords`
-- [ ] `launch-browser-chords-url-follow-and-private`
-- [ ] `launch-editor-chord-and-config-rows-open-right-file`
-- [ ] `xdg-open-lands-in-default-apps`
-- [ ] `floating-presentation-terminal-logo-done-failed`
-- [ ] `share-menu-localsend-clipboard-file-folder-receive`
-- [ ] `transcode-picker-hotkey-menu-and-cli`
-- [ ] `nautilus-context-menu-transcode-and-localsend`
-- [ ] `browser-screen-share-preview-picker`
+- [x] `launch-browser-chords-url-follow-and-private`
+- [x] `launch-editor-chord-and-config-rows-open-right-file`
+- [x] `xdg-open-lands-in-default-apps`
+- [x] `floating-presentation-terminal-logo-done-failed`
+- [x] `share-menu-localsend-clipboard-file-folder-receive`
+- [x] `transcode-picker-hotkey-menu-and-cli`
+- [x] `nautilus-context-menu-transcode-and-localsend`
+- [x] `browser-screen-share-preview-picker`
 - [ ] `nightlight-toggle-hotkey-menu-and-status`
 - [ ] `shell-restart-from-menu-and-supervisor-relaunch`
 - [ ] `launch-docker-tui-polkit-gate`
