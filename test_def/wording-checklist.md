@@ -68,14 +68,14 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `menu-route-hotkeys-aliases-and-summon`
 - [x] `menu-guards-hide-hardware-rows-on-vm`
 - [x] `menu-guards-dim-installed-hide-absent-tick-current`
-- [ ] `menu-catalogue-rows-match-documented-layout`
+- [x] `menu-catalogue-rows-match-documented-layout`
 - [x] `menu-toggle-rows-flip-desktop-state`
 - [x] `menu-extension-jsonc-hot-reload-and-broken-file`
-- [ ] `menu-select-and-input-dmenu-contract`
-- [ ] `menu-file-and-image-pickers`
-- [ ] `menu-timezone-set-filter-and-cancel`
-- [ ] `keybindings-viewer-opens-filters-and-variants`
-- [ ] `keybindings-viewer-runs-selected-binding`
+- [x] `menu-select-and-input-dmenu-contract`
+- [x] `menu-file-and-image-pickers`
+- [x] `menu-timezone-set-filter-and-cancel`
+- [x] `keybindings-viewer-opens-filters-and-variants`
+- [x] `keybindings-viewer-runs-selected-binding`
 - [ ] `keybindings-viewer-merges-alternative-chords`
 - [ ] `about-window-fastfetch-sheen-and-focus`
 - [ ] `menu-learn-rows-open-docs-webapps`

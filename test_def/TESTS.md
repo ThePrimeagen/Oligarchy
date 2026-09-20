@@ -2717,17 +2717,18 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Space → Trigger: rows Emoji, Reminder, Capture, Transcode, Share, Toggle, [Hardware], Speed Test — note whether Hardware is listed (if so open it and record its rows, at most Touchscreen). Open Capture → Color, then click anywhere on the desktop: a notification with a hex colour appears. Open Trigger → Speed Test → Disk Speed Test: a panel opens and measures; close it with Escape.
-  * Press Super+Space → Style: rows Theme, Background, Unlock, Font, Menu Bar, Hyprland, Screensaver, About. Open Font: a list of font names with exactly one ✓. Back. Style → About and Style → Screensaver each list Edit Text, Set From Image, Restore Default. Back.
-  * Open Style → Menu Bar → Position and select Bottom: the bar moves to the bottom edge (allow 20 s). Reopen Style → Menu Bar → Position → Top: the bar is back at the top.
-  ** When the bar is at the bottom, the menu still opens with Super+Space.
-  * Press Super+Space → Setup: rows Monitors, Keybindings, Input, Network, Defaults, Plugins, Security, Config, Direct Boot, and Reset Computer last only if the root disk is btrfs. Note Reset Computer's presence. Open Network: only DNS (no QR Code); DNS shows DHCP ✓, Cloudflare, Google, Custom — do not select any. Back twice.
-  ** Reset Computer and Update → Channel were added after 4.0.2 and may be missing on a pristine disk; report "absent on this build", not "broken".
-  * Open Setup → Defaults → Agent: exactly Antigravity, Claude, Codex, Copilot, Crush, Cursor CLI, Grok, Hermes, Muse Code, omp, OpenClaw, OpenCode, Ori, Pi, in that order, each with its own glyph and none ticked. Back; Browser shows Chromium ✓, Terminal Foot ✓, Editor Neovim ✓. Back.
-  * Setup → Plugins shows exactly Enable Plugin, Disable Plugin, Add Plugin, Clone Plugin (no Remove Plugin on a fresh disk). Security shows Fido2, SSHD, Passwordless Sudo, Sudoless Docker (no Fingerprint). Config shows Hyprland, Hyprsunset, XCompose. Back to the root.
-  ** Do not run Direct Boot, Reset Computer or any Security action.
-  * Open Update: Omarchy, Config, Timezone are present (Channel if this build has it); Extra Themes is absent on a fresh disk. Back to the root, type `power-menu` and screenshot, then clear it (Escape once) and type `power_menu`: both show the System entries (Lock, Suspend, Logout, Reboot, Shutdown). Escape twice.
-  * Press Super+Enter and type `findmnt -no FSTYPE /` Enter: btrfs ⇔ Reset Computer was present. Close the terminal with Super+W; the desktop is as before.
+  * Press Super+Space. The menu opens.
+  * Click Trigger. Use the mouse only. Trigger opens.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Click Style. Use the mouse only. Style opens.
+  * Click Menu Bar. Use the mouse only. Menu Bar opens.
+  * Click Position. Use the mouse only. Position opens.
+  * Click Bottom. Use the mouse only. The bar moves to the bottom. The menu closes.
+  * Press Super+Space. The menu opens. The menu still works.
+  * Click Style, then Menu Bar, then Position. Use the mouse only. Position opens.
+  * Click Top. Use the mouse only. The bar returns to the top.
+  * the desktop must return exactly as left.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -2827,14 +2828,17 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter for a terminal and type `omarchy-menu-select Format jpg png webp; echo "exit=$?"` Enter. A small card "Format…" with rows jpg, png, webp appears. Press Down, then Enter: the terminal prints "png" and "exit=0".
-  * Run the same command again and press Escape on the card: the terminal prints only "exit=1" (nothing else).
-  * Type `printf 'x\tDisk\tsda\nx\tDisk\tsdb\n' | omarchy menu select Drive` Enter and pick the second row: two rows both labelled Disk with subtexts sda and sdb; the terminal prints Disk followed by a tab and sdb.
-  * Type `omarchy-menu-input "Your name"; echo "exit=$?"` Enter: a card with header "Your name…" and no rows. Type `Prime Tester` and press Enter: the terminal prints "Prime Tester" and "exit=0".
-  * Unhappy path: run the input command again and click on the dark scrim: the terminal prints only "exit=1". Run it once more and press Escape: "exit=1".
-  * Take a screenshot of the desktop (wallpaper, bar, colours). Then, each time opening the menu with Super+Space and pressing Escape at the picker: Style → Theme (theme unchanged); Style → Background (wallpaper unchanged); Style → Unlock (no floating terminal opens); Remove → Web App, then Super+Alt+Space and type "youtube" — YouTube still listed, Escape twice; Setup → Plugins → Disable Plugin (bar unchanged). Compare with the first screenshot.
-  ** Each picker is a dmenu-style card; a single Escape closes it when no filter is typed.
-  * Type exit and Enter; the desktop is as before.
+  * Press Super+Enter. A terminal opens.
+  * Run `omarchy-menu-select Format jpg png webp; echo exit=$?` and press Enter. A picker opens.
+  * Press Down. The highlight moves.
+  * Press Enter. The terminal prints png and `exit=0`.
+  * Run `omarchy-menu-select Format jpg png webp; echo exit=$?` and press Enter. A picker opens.
+  * Press Escape. The terminal prints `exit=1`.
+  * Run `omarchy-menu-input "Your name"; echo exit=$?` and press Enter. A prompt opens.
+  * Type `Prime Tester` and press Enter. The terminal prints Prime Tester and `exit=0`.
+  * Run `omarchy-menu-input "Your name"; echo exit=$?` and press Enter. A prompt opens.
+  * Press Escape. The terminal prints `exit=1`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -2859,11 +2863,16 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter and type `omarchy menu file "Pick" /nonexistent "png"; echo rc=$?` Enter: "Path not found: /nonexistent" and rc=1.
-  * Type `omarchy menu file "Pick a background" ~/.config/omarchy/current/theme/backgrounds "jpg png webp"` Enter: a picker listing the background paths; press Enter on one and its path prints.
-  * Type `omarchy-menu-images; echo rc=$?` Enter: a usage line and rc=1.
-  * Type `omarchy-menu-images --print-name ~/.config/omarchy/current/theme/backgrounds` Enter: a grid of thumbnails; select one with the arrows and Enter: the name without extension prints.
-  * Unhappy path: run it again and press Escape: nothing is printed. Close the terminal; the desktop is as before.
+  * Press Super+Enter. A terminal opens.
+  * Run `omarchy menu file "Pick" /nonexistent "png"; echo rc=$?` and press Enter. It prints `rc=1`.
+  * Run `omarchy menu file "Pick a background" ~/.config/omarchy/current/theme/backgrounds "jpg png webp"` and press Enter. A file picker opens.
+  * Press Enter. A path prints.
+  * Run `omarchy-menu-images; echo rc=$?` and press Enter. It prints `rc=1`.
+  * Run `omarchy-menu-images --print-name ~/.config/omarchy/current/theme/backgrounds` and press Enter. An image grid opens.
+  * Press Enter. A name prints.
+  * Run `omarchy-menu-images --print-name ~/.config/omarchy/current/theme/backgrounds` and press Enter. An image grid opens.
+  * Press Escape. Nothing is printed.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -2886,15 +2895,19 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter and type `timedatectl show -p Timezone --value` Enter; note the zone and the bar clock.
-  * Press Super+Space → Update → Timezone. A tall card "Set timezone…" lists timezones from Africa/Abidjan onward with a clipped last row (the list comes from `timedatectl list-timezones` and may take a second).
-  * Type `utc`: the list narrows to "UTC" (and Etc/UTC variants). Press Down and Up: the highlight moves within the short list. Press Escape: the card closes and the bar clock is unchanged.
-  * Press Super+Space → Update → Timezone again and click on the dark scrim: the card closes; the clock is unchanged.
-  * Press Super+Space → Update → Timezone, type "Tokyo", Enter on Asia/Tokyo. No password prompt appears; within five seconds a toast "Timezone is now set to Asia/Tokyo" shows and the clock jumps. In the terminal type `timedatectl show -p Timezone --value` Enter → Asia/Tokyo.
-  ** A sudo or polkit prompt here is a regression of the NOPASSWD rule — report it.
-  * Type `omarchy-menu-timezone` Enter in the terminal; in the picker type "London", Enter: toast "Timezone is now set to Europe/London" and the clock changes, again without a password prompt; `timedatectl show -p Timezone --value` → Europe/London.
-  * Restore: run `omarchy-menu-timezone` again and choose the zone noted at the start; confirm with `timedatectl show -p Timezone --value` and the clock.
-  * Unhappy path: run `omarchy-menu-timezone` once more and press Escape in the picker: nothing changes. Close the terminal with Super+W; the desktop is as before.
+  * Press Super+Enter. A terminal opens.
+  * Run `timedatectl show -p Timezone --value` and press Enter. Note the zone.
+  * Press Super+Space. The menu opens.
+  * Click Update, then Timezone. Use the mouse only. A timezone list opens.
+  * Type `utc`. The list narrows.
+  * Press Escape. The list closes. The clock does not change.
+  * Press Super+Space. The menu opens.
+  * Click Update, then Timezone. Use the mouse only. A timezone list opens.
+  * Type `Tokyo` and press Enter on Asia/Tokyo. The clock changes. No password prompt appears.
+  * Run `timedatectl show -p Timezone --value` and press Enter. It prints Asia/Tokyo.
+  * Run `omarchy-menu-timezone` and press Enter. A timezone list opens.
+  * Choose the zone you noted at the start and press Enter. The clock returns.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -2919,17 +2932,14 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+K. A picker "Keybindings…" with monospace rows "CHORD → Action" opens; the first rows are `SUPER + K → Keybindings`, `SUPER + SPACE → Omarchy menu`, `SUPER + RETURN → Terminal`, `SUPER + SHIFT + RETURN → Browser`, `SUPER + SHIFT + F → File manager` in that order.
-  ** The first open builds a cache and may take a couple of seconds; screenshot again rather than retyping the hotkey.
-  * Type "screenshot": only matching rows remain (e.g. `PRINT → Screenshot`). Escape once. Type "Expand": `SUPER + MINUS → Expand window left` (keycode resolved, no `code:20`). Escape once. Type "MOUSE": `SUPER + LEFT MOUSE BUTTON → Move window`. Escape once.
-  * Type "code:201" (then "201"): No matches — the Copilot key duplicate is hidden. Escape once. Type "Copy URL": the static row `SHIFT ALT + L → Copy URL from Web App`. Escape once.
-  * Press PageDown repeatedly to the end: the last rows are XF86 media keys, then "… → Tmux keybindings" and "… → Herdr keybindings". Unhappy path: type "qqqzzz" → No matches. Escape twice.
-  * Press Super+K again: it reopens within about a second. Escape.
-  * Press Super+Alt+K: picker "Tmux keybindings…" whose first row reads `PREFIX → CTRL + SPACE / CTRL + b` and later rows include `ALT + ENTER → Split pane vertically` and `PREFIX + h → Split pane vertically`. Type "session": rows like `PREFIX + C → Create session` remain; press Enter on one: the picker closes and nothing else happens (display only). Press Super+Enter and type `omarchy-menu-tmux-keybindings --print | head -5` Enter: the same rows print. Leave the terminal open.
-  ** The same sheet is reachable inside tmux: press Super+Alt+Return, then Ctrl+Space followed by `?` — a popup titled "Tmux keybindings" opens inside tmux showing the list in `less`; press `q`, then type `tmux kill-server` Enter and close that window.
-  * Press Super+Ctrl+K: a Herdr bindings list opens. Escape until closed.
-  ** Herdr and other newer chords may be absent on 4.0.2 — check the Super+K row first and report "absent on this build", not "broken"; do not fail on missing rows for newer chords.
-  * Press Super+Space, type "keybindings", Return (Learn → Keybindings): the Hyprland list opens again. Escape; close the terminal with Super+W; the desktop is as before.
+  * Press Super+K. The keybindings viewer opens.
+  * Type `screenshot`. The list narrows.
+  * Press Escape. The filter clears. The viewer stays open.
+  * Type `qqqzzz`. No matches are shown.
+  * Press Escape. The filter clears.
+  * Press Escape. The viewer closes.
+  * Press Super+K. The viewer opens again.
+  * Press Escape. The viewer closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -2952,12 +2962,19 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+K, type "Terminal", highlight `SUPER + RETURN → Terminal` and press Enter. The picker closes and a terminal window opens. Leave it open.
-  * Press Super+K, type "Toggle window gaps", Enter. The gaps around the terminal change. Repeat to restore them.
-  * Press Super+K, type "Lock system", Enter. The lock screen appears. Type prime and Enter: the desktop returns with the terminal still there.
-  ** The lock screen blanks 5 s after the last input and shows no clock or user name — only the password field; the first character typed while black both wakes it and enters the field.
-  * Unhappy path: press Super+K and then Escape. Nothing runs.
-  * Type exit and Enter in the terminal; the desktop is as before.
+  * Press Super+K. The keybindings viewer opens.
+  * Type `Terminal`. The list narrows.
+  * Press Enter on the Terminal row. A terminal opens. The viewer closes.
+  * Press Super+K. The keybindings viewer opens.
+  * Type `Toggle window gaps` and press Enter. The gaps change.
+  * Press Super+K. The keybindings viewer opens.
+  * Type `Toggle window gaps` and press Enter. The gaps return.
+  * Press Super+K. The keybindings viewer opens.
+  * Type `Lock system` and press Enter. The screen locks.
+  * Type `prime` and press Enter. The desktop returns. The terminal is still there.
+  * Press Super+K. The keybindings viewer opens.
+  * Press Escape. The viewer closes. Nothing else starts.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
