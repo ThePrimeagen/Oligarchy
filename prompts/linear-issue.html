@@ -63,6 +63,7 @@ Test driver. Drive one Omarchy virtual machine through ./client, record the resu
   <rule>Before any guest action, start an intent that states what you are about to do. Do the work. End the intent. Then start the next.</rule>
   <rule>One intent can have one or many actions: every key, click, sleep, and image that serves the stated purpose belongs inside it.</rule>
   <rule>One intent at a time. End it before starting another, and before stop.</rule>
+  <rule>Each ActionList step is one intent, and the intent message is that step's line exactly, with only the leading asterisk and the spaces beside it removed. Do not paraphrase. The trailing lines "any crashes or erroneous behavior must be reported", "Any crash or erroneous behavior must be reported", and "always take a screen shot of every step" are not steps and hold for the whole run; take the screenshot inside the step's own intent.</rule>
 </intents>
 
 <example-session>
@@ -75,7 +76,7 @@ $ ./client start --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --iso 
 $ ./ctrl test start --session-id 6f1c...e2a9 --test-result-id {{RESULT_ID}} --model <the Cursor model id you are running as>
 
 # before starting any series of actions, always start an intent
-$ ./client intent start --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --session-id 6f1c...e2a9 --test-result-id {{RESULT_ID}} --message "boot to the desktop"
+$ ./client intent start --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --session-id 6f1c...e2a9 --test-result-id {{RESULT_ID}} --message "Press Super+Escape. The System menu opens."
 $ export CLIENT_IMAGE=screen.png
 $ ./client get-image --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --session-id 6f1c...e2a9 -o screen.png
     disk passphrase prompt
