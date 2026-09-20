@@ -13806,32 +13806,76 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Shift+A. A Chromium app window without tab strip or address bar loads `chatgpt.com` (landing or login page; a network error page still counts as the window). Press Super+Shift+A again: a **second** ChatGPT window opens (this chord has no focus flag). Close both with Super+W.
-  ** Chromium on 2 vCPU can raise Hyprland's "not responding" dialog: click **Wait**, do not report a hang. Pages take 10–20 s over the VM's NAT; keep screenshotting.
-  * Press Super+Shift+P (Google Photos, sign-in page). Press Super+Shift+P again on the same workspace: still one Photos window. Press Super+3, then Super+Shift+P again: you are brought back to the existing Photos window on workspace 1, no second window. Press Super+Return and type `hyprctl clients | grep -c 'photos.google.com'` Enter → `1`. Close Photos with Super+W and keep the terminal.
-  ** Two app windows would tile side by side; a single window fills the workspace — that is the quick visual check before the count.
-  * Press Super+Shift+Y (YouTube). In the terminal type `hyprctl clients | grep -A30 'youtube' | grep tags` Enter → no `chromium-based-browser`, no `default-opacity` (video is never dimmed). Close YouTube.
-  * Press each remaining chord in turn, confirm an app window for the named site appears (login pages, cookie banners and bot checks are fine; the site in the window title is the check), screenshot it and close it with Super+W before the next: Super+Shift+Alt+A (`grok.com`), Super+Shift+E (`app.hey.com` sign-in), Super+Shift+Alt+E (`app.hey.com/messages/new…`, sign-in redirect acceptable), Super+Shift+C (`app.hey.com/calendar/…`), Super+Shift+Alt+G (`web.whatsapp.com` QR/sign-in — press it a second time from the terminal: the same single window is focused, still **one** WhatsApp window), Super+Shift+Ctrl+G (Google Messages), Super+Shift+S (Google Maps — a map or consent page), Super+Shift+X (`x.com`), Super+Shift+Alt+X (`x.com/compose/post`, login wall acceptable).
-  ** Super+Shift+S is Maps here, not a screenshot. When in doubt, `hyprctl activewindow | grep -i title` in the terminal names the site.
-  * Press Super+Shift+Alt+B: a separate **Incognito** browser window ("You've gone Incognito") opens — a full browser with a tab strip, unlike the app windows. Close it.
-  * Press Super+Alt+Space (Apps) and type `ChatGPT`: **no** application row is found — ChatGPT and Grok are hotkey-only web apps with no `.desktop` entry. Press Escape.
-  ** Searching from the root menu (Super+Space) instead matches *Install → AI → ChatGPT Desktop*, which is a menu row, not a launcher.
-  * Unhappy path: in the terminal type `omarchy-launch-webapp 'not a url'` Enter → a Chromium error/search page or a printed error, no crash. Close whatever opened, then close the terminal with Super+W; the desktop is empty as at the start.
+  * Press Super+Shift+A. A Chromium app window opens for `chatgpt.com`.
+  * Press Super+Shift+A. A second ChatGPT window opens.
+  * Press Super+W. One ChatGPT window closes.
+  * Press Super+W. The other ChatGPT window closes.
+  * Press Super+Shift+P. A Chromium app window opens for Google Photos.
+  * Press Super+Shift+P. The same Photos window is focused, and no second window opens.
+  * Press Super+3. Workspace 3 is showing.
+  * Press Super+Shift+P. The existing Photos window on workspace 1 is focused.
+  * Press Super+Return. A terminal opens.
+  * Type `hyprctl clients | grep -c 'photos.google.com'` and press Return. The output is `1`.
+  * Click the Photos window. It is focused.
+  * Press Super+W. The Photos window closes.
+  * Click the terminal. It is focused.
+  * Press Super+Shift+Y. A YouTube window opens.
+  * Type `hyprctl clients | grep -A30 'youtube' | grep tags` and press Return. The output includes neither `chromium-based-browser` nor `default-opacity`.
+  * Click the YouTube window. It is focused.
+  * Press Super+W. The YouTube window closes.
+  * Press Super+Shift+Alt+A. An app window opens for `grok.com`.
+  * Press Super+W. The window closes.
+  * Press Super+Shift+E. An app window opens for `app.hey.com`.
+  * Press Super+W. The window closes.
+  * Press Super+Shift+Alt+E. An app window opens for `app.hey.com`.
+  * Press Super+W. The window closes.
+  * Press Super+Shift+C. An app window opens for `app.hey.com`.
+  * Press Super+W. The window closes.
+  * Press Super+Shift+Alt+G. An app window opens for `web.whatsapp.com`.
+  * Click the terminal. It is focused.
+  * Press Super+Shift+Alt+G. The same WhatsApp window is focused.
+  * Type `hyprctl clients | grep -c 'web.whatsapp.com'` and press Return. The output is `1`.
+  * Click the WhatsApp window. It is focused.
+  * Press Super+W. The WhatsApp window closes.
+  * Press Super+Shift+Ctrl+G. An app window opens for Google Messages.
+  * Press Super+W. The window closes.
+  * Press Super+Shift+S. An app window opens for Google Maps.
+  * Press Super+W. The window closes.
+  * Press Super+Shift+X. An app window opens for `x.com`.
+  * Press Super+W. The window closes.
+  * Press Super+Shift+Alt+X. An app window opens for `x.com`.
+  * Press Super+W. The window closes.
+  * Press Super+Shift+Alt+B. An Incognito browser window opens, and it has a tab strip.
+  * Press Super+W. The Incognito window closes.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `ChatGPT`. No ChatGPT application row is listed.
+  * Press Escape. Apps closes.
+  * Click the terminal. It is focused.
+  * Type `omarchy-launch-webapp 'not a url'` and press Return. A Chromium error or search page opens, or the terminal prints an error, and Chromium does not crash.
+  * Close whatever opened. The terminal remains.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Super+Shift+Alt+B is `<M-S-A-b>`; the Ctrl chord for Messages is `<M-S-C-g>`.
-  * Each page is 1–3 MB; wait for the window, not for the page to finish. The window opening at the right domain is the pass condition.
-  * Web-app windows are Chromium `--app=` windows; the focus variant matches the description text ("Google Photos") against the window class/title.
+  * An app window has no tab strip and no address bar. A landing page, a login page, a cookie banner, or a network error page still counts. Wait for the window, not for the page.
+  * If Hyprland says Chromium is not responding, click Wait. Pages can take 10 to 20 seconds.
+  * Super+Shift+Alt+B is `<M-S-A-b>`. Super+Shift+Ctrl+G is `<M-S-C-g>`. Super+Shift+S is Maps, not a screenshot.
+  * ChatGPT and Grok have no `.desktop` entry. Super+Space can still match Install → AI → ChatGPT Desktop, which is a menu row, not Apps.
+  * If a title is unclear, type `hyprctl activewindow | grep -i title` in the terminal.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the ChatGPT app window and its duplicate, being pulled back to Photos with a single window and the `1` count, the YouTube tags line without the browser tags, one screenshot per remaining web app showing its site, one WhatsApp window after the second press, the Incognito window with its tab strip, the empty Apps search for ChatGPT, and the bad-URL result
+  ** Super+Shift+A opens a ChatGPT app window, and a second press opens a second one. Both close.
+  ** Super+Shift+P opens one Photos window. A second press on the same workspace does not open another. From workspace 3 it returns to that window, and the client count is `1`.
+  ** YouTube's client tags include neither `chromium-based-browser` nor `default-opacity`.
+  ** Grok, HEY, HEY messages, HEY calendar, WhatsApp, Google Messages, Google Maps, X, and X compose each open an app window for their site, and each is closed before the next chord.
+  ** A second WhatsApp chord focuses the same window, and the client count is `1`.
+  ** Super+Shift+Alt+B opens an Incognito browser with a tab strip. Apps lists no ChatGPT row. A non-URL does not crash Chromium.
   * If unsuccessful
-  ** Screenshot of a normal tabbed browser window instead of an app window, a duplicated Photos/WhatsApp window, or a chord with no window; `hyprctl clients | grep -E 'class|title|tags' | sudo tee /dev/ttyS0` read via get-serial
+  ** A chord opens a normal tabbed browser, Photos or WhatsApp duplicates, or a chord opens nothing.
 covers: default/hypr/bindings/applications.lua:7,22-33; default/hypr/helpers.lua:67-72; default/hypr/apps/browser.lua:2-9; bin/omarchy-launch-webapp; bin/omarchy-launch-or-focus-webapp; bin/omarchy-launch-or-focus; bin/omarchy-launch-browser; manual/07:103,110-125; manual/25-web-apps.md:17-63
 
 ### webapp-launch-cli-chromeless-and-or-focus   [VM-OK] [NET]
@@ -13841,29 +13885,35 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter and type `omarchy-launch-webapp https://example.com` Enter.
-  ** A Chromium window with no tab strip or address bar shows example.com (an offline error page still counts for the window-shape check). Click **Wait** if Hyprland's "not responding" dialog appears.
-  * Click the terminal and type `omarchy-launch-or-focus-webapp example.com https://example.com` Enter.
-  ** Focus returns to the same window; still exactly one web-app window on screen.
-  * Click the terminal and type `omarchy-launch-webapp https://example.com` Enter.
-  ** A second web-app window opens. Close both with Super+W.
-  * In the terminal type `omarchy-launch-or-focus-webapp; echo "exit=$?"` Enter.
-  ** A usage line and `exit=1`; nothing opens.
-  * Close the terminal with Super+W; the desktop is as before.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy-launch-webapp https://example.com` and press Return. A Chromium app window opens for `example.com`.
+  * Click the terminal. It is focused.
+  * Type `omarchy-launch-or-focus-webapp example.com https://example.com` and press Return. The same window is focused, and no second window opens.
+  * Click the terminal. It is focused.
+  * Type `omarchy-launch-webapp https://example.com` and press Return. A second web-app window opens.
+  * Press Super+W. One window closes.
+  * Press Super+W. The other window closes.
+  * Click the terminal. It is focused.
+  * Type `omarchy-launch-or-focus-webapp; echo "exit=$?"` and press Return. The output is a usage line, the last line is `exit=1`, and nothing opens.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Page load is a few KB; offline is fine for the window-shape check.
-  * The or-focus helper matches its first argument against the window class/title, so `example.com` is the key it looks for.
+  * An app window has no tab strip and no address bar. An offline error page still counts.
+  * If Hyprland says Chromium is not responding, click Wait.
+  * The or-focus helper matches its first argument against the window class or title, so `example.com` is the key.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the chromeless window; one window after or-focus; two after the plain relaunch; the usage line with `exit=1`
+  ** `omarchy-launch-webapp` opens one chromeless window for `example.com`.
+  ** `omarchy-launch-or-focus-webapp` focuses that window and does not open another.
+  ** A second plain launch opens a second window. Both are closed.
+  ** `omarchy-launch-or-focus-webapp` with no arguments prints a usage line, exits 1, and opens nothing.
   * If unsuccessful
-  ** Screenshot showing a tabbed browser instead of app mode, a duplicate after or-focus, or a terminal error
+  ** The window has a tab strip, or-focus opens a duplicate, or the terminal prints an unexpected error.
 covers: bin/omarchy-launch-webapp; bin/omarchy-launch-or-focus-webapp; default/hypr/apps/browser.lua
 
 ### webapp-launcher-entries-open-app-windows   [VM-OK] [NET]
@@ -13873,29 +13923,54 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Alt+Space and type `You`.
-  ** **YouTube** is listed with its icon. Press Enter: a Chromium app window (no tabs or address bar) loads youtube.com. Press Super+W.
-  * Press Super+Alt+Space, type `Maps`, Enter → Google Maps app window. Press Super+W.
-  * Press Super+Alt+Space, type `Basecamp`, Enter → app window on the 37signals launchpad sign-in (`launchpad.37signals.com`). Press Super+W.
-  * Repeat for `Discord` (discord.com login), `Zoom` (`app.zoom.us/wc/home`) and `Google Contacts` (Google sign-in), closing each with Super+W.
-  ** Chromium may raise the "not responding" dialog on 2 vCPU: click **Wait**.
-  * Press Super+Alt+Space and look through the list (scroll if needed): rows for HEY, X, WhatsApp, Google Messages and Google Photos are also present. Screenshot the list, then press Escape.
-  * Press Super+Alt+Space, type `zzqx` → no results, no error. Press Escape.
-  * Press Super+Return and type `ls ~/.local/share/applications/` Enter → the same set of `.desktop` files (Basecamp, Discord, Disk Usage, Docker, Google Contacts/Maps/Messages/Photos, HEY, WhatsApp, X, YouTube, Zoom). Close the terminal with Super+W; the desktop is as before.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `You`. YouTube is listed.
+  * Press Enter. A Chromium app window opens for youtube.com.
+  * Press Super+W. The window closes.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `Maps` and press Enter. A Chromium app window opens for Google Maps.
+  * Press Super+W. The window closes.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `Basecamp` and press Enter. A Chromium app window opens for `launchpad.37signals.com`.
+  * Press Super+W. The window closes.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `Discord` and press Enter. A Chromium app window opens for discord.com.
+  * Press Super+W. The window closes.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `Zoom` and press Enter. A Chromium app window opens for `app.zoom.us`.
+  * Press Super+W. The window closes.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `Google Contacts` and press Enter. A Chromium app window opens for a Google sign-in page.
+  * Press Super+W. The window closes.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `HEY`. A HEY row is listed.
+  * Type `X`. An X row is listed.
+  * Type `WhatsApp`. A WhatsApp row is listed.
+  * Type `Messages`. A Google Messages row is listed.
+  * Type `Photos`. A Google Photos row is listed.
+  * Press Escape. Apps closes.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `zzqx`. No row is listed.
+  * Press Escape. Apps closes.
+  * Press Super+Return. A terminal opens.
+  * Type `ls ~/.local/share/applications/` and press Return. The listing includes Basecamp, Discord, Disk Usage, Docker, Google Contacts, Google Maps, Google Messages, Google Photos, HEY, WhatsApp, X, YouTube, and Zoom.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Pages load slowly through NAT; wait up to 15 s with repeated screenshots.
-  * The Zoom and YouTube app windows are configured opaque; the others carry slight transparency.
+  * An app window has no tab strip and no address bar. Wait up to 15 seconds for each page. If Hyprland says Chromium is not responding, click Wait.
+  * Zoom and YouTube windows are opaque. The others may be slightly transparent. That is expected.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the launcher entry with icon, the YouTube, Maps, Basecamp, Discord, Zoom and Contacts app windows, the Apps list with the remaining rows, the empty `zzqx` search, and the `ls` output
+  ** Apps lists YouTube, and Enter opens a YouTube app window. Maps, Basecamp, Discord, Zoom, and Google Contacts each do the same for their own site, and each window is closed.
+  ** HEY, X, WhatsApp, Google Messages, and Google Photos are listed. `zzqx` lists nothing.
+  ** The applications directory contains the same desktop files, including Disk Usage and Docker.
   * If unsuccessful
-  ** Screenshot of a full browser (tabs) opening instead of an app window, a missing launcher row, or the `ls` output lacking a file
+  ** A launcher opens a tabbed browser, a named row is missing, or `ls` lacks one of those files.
 covers: applications/*.desktop; applications/icons/*; bin/omarchy-launch-webapp; manual/25-web-apps.md:23-27,49-51,65-75; docs/file-layout.md:89; default/hypr/apps/browser.lua:8-9
 
 ### webapp-handlers-mailto-zoommtg-and-unknown-scheme   [VM-OK] [NET]
@@ -13905,31 +13980,50 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter and type `xdg-mime query default x-scheme-handler/mailto; xdg-mime query default x-scheme-handler/zoommtg` Enter → `HEY.desktop` and `Zoom.desktop`.
-  * Type `xdg-open 'mailto:test@example.com?subject=Hi'` Enter.
-  ** A chromeless window opens on `app.hey.com` (after the sign-in redirect its URL targets `app.hey.com/messages/new?to=test@example.com`; a HEY sign-in page is acceptable). Click **Wait** on a "not responding" dialog.
-  * With the HEY window focused press Alt+Shift+L, then click the terminal and type `wl-paste; hyprctl clients | grep -i 'title:'` Enter.
-  ** The copied URL is on `app.hey.com` and a title line names HEY. Click the web window and close it with Super+W.
-  * In the terminal type `xdg-open 'zoommtg://zoom.us/join?confno=1234567890&pwd=abc'` Enter.
-  ** A chromeless Zoom window opens at `app.zoom.us/wc/join/1234567890?pwd=abc` (Zoom's web-client join page, possibly saying the meeting is invalid — the URL is what matters); no "no application" dialog. Read the URL the same way (Alt+Shift+L, `wl-paste`) and the `hyprctl clients` title naming Zoom. Close the window.
-  * Type `omarchy-webapp-handler-zoom` Enter (no argument).
-  ** A Zoom window at `app.zoom.us/wc/home` opens. Close it.
-  * Type `xdg-open 'notascheme://x'; echo "exit=$?"` Enter → an xdg-open error, a non-zero exit, nothing opens (no "Open with" chooser).
-  * Close the terminal with Super+W; the desktop is as before.
+  * Press Super+Return. A terminal opens.
+  * Type `xdg-mime query default x-scheme-handler/mailto` and press Return. The output is `HEY.desktop`.
+  * Type `xdg-mime query default x-scheme-handler/zoommtg` and press Return. The output is `Zoom.desktop`.
+  * Type `xdg-open 'mailto:test@example.com?subject=Hi'` and press Return. A Chromium app window opens for `app.hey.com`.
+  * Press Alt+Shift+L. The page URL is copied.
+  * Click the terminal. It is focused.
+  * Type `wl-paste` and press Return. The output is on `app.hey.com`.
+  * Type `hyprctl clients | grep -i 'title:'` and press Return. A title line names HEY.
+  * Click the HEY window. It is focused.
+  * Press Super+W. The HEY window closes.
+  * Click the terminal. It is focused.
+  * Type `xdg-open 'zoommtg://zoom.us/join?confno=1234567890&pwd=abc'` and press Return. A Chromium app window opens for `app.zoom.us`.
+  * Press Alt+Shift+L. The page URL is copied.
+  * Click the terminal. It is focused.
+  * Type `wl-paste` and press Return. The output includes `app.zoom.us/wc/join/1234567890`.
+  * Type `hyprctl clients | grep -i 'title:'` and press Return. A title line names Zoom.
+  * Click the Zoom window. It is focused.
+  * Press Super+W. The Zoom window closes.
+  * Click the terminal. It is focused.
+  * Type `omarchy-webapp-handler-zoom` and press Return. A Zoom window opens for `app.zoom.us/wc/home`.
+  * Click the Zoom window. It is focused.
+  * Press Super+W. The Zoom window closes.
+  * Click the terminal. It is focused.
+  * Type `xdg-open 'notascheme://x'; echo "exit=$?"` and press Return. An xdg-open error is printed, the exit is non-zero, and nothing opens.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * App-mode windows show no address bar: the window title (from hyprctl), the page content and the Alt+Shift+L copy are the only places the target URL shows.
-  * Sites may show login pages; only the host and path matter.
+  * App windows have no address bar. Alt+Shift+L, `wl-paste`, and the window title are how the target URL is read.
+  * A HEY sign-in page on `app.hey.com` is acceptable. A Zoom page that says the meeting is invalid is acceptable if the copied URL contains the conference number.
+  * If Hyprland says Chromium is not responding, click Wait. An "Open with" chooser is a failure.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of both `xdg-mime` answers, the HEY window with its copied URL, the Zoom join window with its URL and Zoom's home, the terminal title lines naming HEY and Zoom, and the unknown-scheme error with its exit code
+  ** The mailto handler is `HEY.desktop`, and the zoommtg handler is `Zoom.desktop`.
+  ** `mailto:` opens an app window on `app.hey.com`. The copied URL is on that host, and a window title names HEY.
+  ** `zoommtg:` opens an app window whose copied URL includes `app.zoom.us/wc/join/1234567890`, and a window title names Zoom.
+  ** `omarchy-webapp-handler-zoom` opens `app.zoom.us/wc/home`.
+  ** `notascheme://x` prints an xdg-open error, exits non-zero, and opens nothing.
   * If unsuccessful
-  ** Screenshot of Chromium opening the raw `mailto:`, an "Open with" chooser, the wrong page, or a terminal error; `cat ~/.config/mimeapps.list | sudo tee /dev/ttyS0` read via get-serial
+  ** Chromium opens the raw `mailto:` text, an "Open with" chooser appears, or the copied URL is the wrong host.
 covers: bin/omarchy-webapp-handler-hey; bin/omarchy-webapp-handler-zoom; applications/HEY.desktop; applications/Zoom.desktop; default/applications/mimeapps.list (mailto, zoommtg); manual/25-web-apps.md:17-21,65-69
 
 ### webapp-copy-url-and-download-shortcuts-listed   [VM-PARTIAL] [NET]
@@ -13939,29 +14033,35 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+K and type `Web App`.
-  ** Rows `SHIFT ALT + L → Copy URL from Web App` and `SHIFT ALT + D → Download Video from Web App`. Press Escape.
-  * Press Super+Shift+Y and, with the YouTube window focused, press Shift+Alt+L.
-  ** If the bundled Chromium extension is active a toast "URL copied to clipboard" appears; otherwise nothing. Record which. Click **Wait** on a "not responding" dialog.
-  * Press Super+K, type `Copy URL`, Enter.
-  ** Same outcome as the direct chord.
-  * Press Super+Enter and type `wl-paste` Enter.
-  ** Report the clipboard content (a `https://www.youtube.com/…` URL when the extension is active).
-  * Close the terminal and the YouTube window with Super+W; the desktop is as before.
+  * Press Super+K. The keybindings list opens.
+  * Type `Web App`. A Copy URL row for Shift+Alt+L is listed, and a Download Video row for Shift+Alt+D is listed.
+  * Press Escape. The keybindings list closes.
+  * Press Super+Shift+Y. A YouTube window opens.
+  * Press Shift+Alt+L. Record whether a notification says the URL was copied.
+  * Press Super+K. The keybindings list opens.
+  * Type `Copy URL` and press Enter. Record whether the outcome matches the direct chord.
+  * Press Super+Return. A terminal opens.
+  * Type `wl-paste` and press Return. Record the clipboard text.
+  * Press Super+W. The terminal closes.
+  * Click the YouTube window. It is focused.
+  * Press Super+W. The YouTube window closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Skipped: the yt-dlp download itself (needs a real video and time); the toast is the observable half.
-  * The viewer is a fuzzy picker; typing filters live.
+  * The yt-dlp download is not part of this test. The notification and the clipboard are the proof.
+  * The keybindings list filters as you type. If Hyprland says YouTube is not responding, click Wait.
+  * When the Chromium extension is active, the notification says the URL was copied and `wl-paste` shows a `https://www.youtube.com/` URL. When it is not, record that nothing happens.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the two rows; the toast or an explicit note of its absence; the `wl-paste` output
+  ** Super+K lists Shift+Alt+L as Copy URL and Shift+Alt+D as Download Video.
+  ** Shift+Alt+L on YouTube either notifies that the URL was copied or does nothing, and that result is recorded. Picking the Copy URL row does the same thing.
+  ** `wl-paste` is recorded. A copied result is a `https://www.youtube.com/` URL.
   * If unsuccessful
-  ** Screenshot of the viewer missing the rows, or the chord crashing the web app
+  ** The keybindings list has no web-app rows, or the chord crashes the YouTube window.
 covers: bin/omarchy-menu-keybindings (static_bindings/dispatch_sendshortcut_binding); bin/omarchy-chromium-copy-url-host; bin/omarchy-chromium-ytdlp-host
 
 ### launch-chords-neovim-tmux-herdr-and-cheatsheets   [VM-OK]
@@ -13971,28 +14071,46 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Shift+N: a terminal with the Neovim (LazyVim) dashboard opens, tiled like a normal window, not floating. Type `:q` Enter to close it.
-  ** First Neovim start loads plugins for several seconds; wait for the dashboard.
-  * Press Super+Alt+Return: a terminal with a tmux status bar (session "Work") opens. Type `echo INSIDE-TMUX` Enter, then press Super+Alt+Return again: a second terminal attached to the same session shows INSIDE-TMUX too. Close both with Super+W; in a new terminal (Super+Enter) run `tmux kill-server`.
-  * Press Super+Alt+K: a viewer listing tmux bindings (Prefix + v "Split pane beside", Alt + Enter …). Press Escape.
-  * Press Super+Ctrl+Return: a terminal running Herdr (a tab bar with one tab, the hostname on the right) opens. Press Ctrl+Space then `d` to detach (the window closes); in the terminal run `herdr server stop`.
-  ** Herdr chords are newer than 4.0.2: if Super+K has no "Herdr" row on this build, report them absent, not broken.
-  * Press Super+Ctrl+K: a viewer listing Herdr bindings, first row `PREFIX → CTRL + SPACE`. Press Escape.
-  * Close the remaining terminal with Super+W; the desktop is empty.
+  * Press Super+Shift+N. A tiled Neovim window opens.
+  * Type `:q` and press Return. Neovim closes.
+  * Press Super+Alt+Return. A tmux window for the Work session opens.
+  * Type `echo INSIDE-TMUX` and press Return. The output is `INSIDE-TMUX`.
+  * Press Super+Alt+Return. A second window attached to the same session opens, and it shows `INSIDE-TMUX`.
+  * Press Super+W. One tmux window closes.
+  * Press Super+W. The other tmux window closes.
+  * Press Super+Return. A terminal opens.
+  * Type `tmux kill-server` and press Return. The prompt returns.
+  * Press Super+Alt+K. A viewer lists tmux bindings.
+  * Press Escape. The viewer closes.
+  * Press Super+Ctrl+Return. A Herdr window opens.
+  ** If Super+K has no Herdr row on this build, report the Herdr chords as absent and skip them.
+  * Press Ctrl+Space. Herdr's prefix is active.
+  * Press `d`. The Herdr window closes.
+  ** If Ctrl+Space does nothing, close the window with Super+W instead.
+  * Click the terminal. It is focused.
+  * Type `herdr server stop` and press Return. The prompt returns.
+  * Press Super+Ctrl+K. A viewer lists Herdr bindings, and the first row names `CTRL + SPACE`.
+  * Press Escape. The viewer closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * If Ctrl+Space appears to do nothing in Herdr it may be swallowed by the fcitx5 input method; close the window with Super+W instead and still run `herdr server stop`.
-  * The tmux session is persistent: killing the server is what returns the machine to its stock state.
+  * The first Neovim start can take several seconds. Wait for its window before typing `:q`.
+  * `tmux kill-server` is what returns the machine to stock. The Work session otherwise stays running.
+  * Herdr chords are newer than the 4.0.2 image. Report them absent, not broken, when the binding is missing.
+  * Ctrl+Space may be swallowed by the input method. Closing Herdr with Super+W and then stopping the server is the fallback.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the Neovim dashboard tiled, the tmux status bar, the second terminal showing INSIDE-TMUX, the tmux sheet, Herdr, and the Herdr sheet
+  ** Super+Shift+N opens a tiled Neovim window, and `:q` closes it.
+  ** Super+Alt+Return opens a tmux window for Work. A second press opens another window on that session showing `INSIDE-TMUX`. `tmux kill-server` then returns.
+  ** Super+Alt+K lists tmux bindings, including a split-pane binding.
+  ** Super+Ctrl+Return opens Herdr, detach closes it, and `herdr server stop` returns. Super+Ctrl+K lists Herdr bindings with `CTRL + SPACE` first. A missing Herdr binding on this build is reported as absent.
   * If unsuccessful
-  ** Screenshot of a terminal error (command not found) or an empty viewer after the chord
+  ** A chord prints `command not found`, Neovim opens floating, the second tmux window is a new empty session, or a present binding opens an empty viewer.
 covers: default/hypr/bindings/applications.lua:8,12-13; default/hypr/bindings/utilities.lua:11-12; bin/omarchy-launch-editor; bin/omarchy-launch-terminal-tmux; bin/omarchy-launch-terminal-herdr; test/acceptance.d/apps-test.sh:39; manual/07:3,100-101,109,214
 
 ### obsidian-launch-or-focus-single-window   [VM-OK]

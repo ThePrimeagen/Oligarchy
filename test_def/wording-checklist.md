@@ -298,12 +298,12 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `hermes-cli-stub-owned-remove-restore-and-foreign`
 - [x] `plugin-update-local-origin-fast-forward-and-rollback`
 - [x] `plugin-add-from-public-git-url-and-unreachable`
-- [ ] `webapp-hotkeys-open-app-windows-and-focus-reuse`
-- [ ] `webapp-launch-cli-chromeless-and-or-focus`
-- [ ] `webapp-launcher-entries-open-app-windows`
-- [ ] `webapp-handlers-mailto-zoommtg-and-unknown-scheme`
-- [ ] `webapp-copy-url-and-download-shortcuts-listed`
-- [ ] `launch-chords-neovim-tmux-herdr-and-cheatsheets`
+- [x] `webapp-hotkeys-open-app-windows-and-focus-reuse`
+- [x] `webapp-launch-cli-chromeless-and-or-focus`
+- [x] `webapp-launcher-entries-open-app-windows`
+- [x] `webapp-handlers-mailto-zoommtg-and-unknown-scheme`
+- [x] `webapp-copy-url-and-download-shortcuts-listed`
+- [x] `launch-chords-neovim-tmux-herdr-and-cheatsheets`
 - [ ] `obsidian-launch-or-focus-single-window`
 - [ ] `disk-usage-dua-floating-tui`
 - [ ] `shell-tools-rg-fd-bat`
