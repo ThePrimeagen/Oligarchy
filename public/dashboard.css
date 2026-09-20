@@ -236,6 +236,20 @@ main {
   cursor: not-allowed;
 }
 
+.button--abort {
+  height: auto;
+  padding: 0.45em 0.85em;
+  border: 1px solid var(--failed);
+  background: transparent;
+  box-shadow: none;
+  color: var(--failed);
+}
+
+.button--abort:hover:not(:disabled) {
+  background: var(--failed);
+  color: var(--background-night);
+}
+
 .scoreboard {
   width: 100%;
   margin: 0 0 2.5rem;
@@ -702,6 +716,68 @@ main {
 
 .definition__form .button {
   justify-self: start;
+}
+
+/* What is in flight, above the definitions: a job that is running is visible before any wording. */
+.running-tests {
+  display: grid;
+  gap: 0.8rem;
+  margin-bottom: 2.5rem;
+}
+
+.running-tests > h2 {
+  margin: 0;
+  color: var(--turquoise);
+  font-size: 0.75em;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.running-tests__list {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.running-tests__job {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem 1.25rem;
+  padding: 0.75em 1em;
+  border: 1px solid rgb(180 249 248 / 40%);
+  background: rgb(180 249 248 / 8%);
+}
+
+.running-tests__job > a {
+  color: var(--terminal-white);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.running-tests__job > a:hover,
+.running-tests__job > a:focus-visible {
+  color: var(--turquoise);
+}
+
+.running-tests__action,
+.running-tests__age {
+  color: var(--terminal-blue);
+}
+
+.running-tests__ticket {
+  font-weight: 700;
+}
+
+.running-tests__job > form {
+  margin-left: auto;
+}
+
+.running-tests__empty {
+  margin: 0;
 }
 
 /* Narrow screens keep the scrolling list of cards; the sidebar belongs to the wide layout below. */
