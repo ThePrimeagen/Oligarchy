@@ -193,6 +193,60 @@ async function withDatabase<T>(
   }
 }
 
+// Twenty-five is the strip beside a name. The counts are every pass and fail of that name, not
+// just the pills: 15 out of 17 is fifteen passes and two fails.
+const DEFINITION_RECENT = 25;
+
+export type DefinitionVerdict = "passed" | "failed";
+
+export type DefinitionHistory = {
+  readonly name: string;
+  readonly passed: number;
+  readonly total: number;
+  readonly recent: ReadonlyArray<DefinitionVerdict>;
+};
+
+// Passes out of passes and fails, one row per name. A pending, running, aborted or timed-out
+// result is neither, so it is not in the number or the strip. recent is the newest twenty-five,
+// oldest first, so the rightmost pill is the latest verdict. `at` is the verdict's time.
+export function definitionHistories(
+  rows: ReadonlyArray<{
+    readonly name: string;
+    readonly status: (typeof testResults.$inferSelect)["status"];
+    readonly at: number;
+  }>,
+): DefinitionHistory[] {
+  const byName = new Map<
+    string,
+    Array<{ readonly status: DefinitionVerdict; readonly at: number }>
+  >();
+  for (const row of rows) {
+    if (row.status !== "passed" && row.status !== "failed") {
+      continue;
+    }
+    const current = byName.get(row.name) ?? [];
+    current.push({ status: row.status, at: row.at });
+    byName.set(row.name, current);
+  }
+  return [...byName.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([name, group]) => {
+      group.sort((left, right) => left.at - right.at);
+      let passed = 0;
+      for (const row of group) {
+        if (row.status === "passed") {
+          passed += 1;
+        }
+      }
+      return {
+        name,
+        passed,
+        total: group.length,
+        recent: group.slice(-DEFINITION_RECENT).map((row) => row.status),
+      };
+    });
+}
+
 export function definitionStats(rows: ReadonlyArray<Session>): DefinitionStat[] {
   const byName = new Map<
     string,
@@ -422,6 +476,33 @@ export function getImage(connectionString: string, id: string): Promise<Buffer |
       .from(images)
       .where(eq(images.id, id));
     return row?.data;
+  });
+}
+
+// Every pass and fail still inside retention, grouped by the definition's name so an older
+// wording counts toward the same line. Ordered by when the result finished, or by when it was
+// created if the close never stamped a finish, so a tie stays in creation order.
+export function listDefinitionHistories(connectionString: string): Promise<DefinitionHistory[]> {
+  return withDatabase(connectionString, async (db) => {
+    const rows = await db
+      .select({
+        name: testDefinitions.name,
+        status: testResults.status,
+        at: sql<Date>`coalesce(${testResults.finishedAt}, ${testResults.createdAt})`.mapWith(
+          testResults.createdAt,
+        ),
+      })
+      .from(testResults)
+      .innerJoin(testDefinitions, eq(testDefinitions.id, testResults.definitionId))
+      .where(inArray(testResults.status, ["passed", "failed"]))
+      .orderBy(
+        testDefinitions.name,
+        sql`coalesce(${testResults.finishedAt}, ${testResults.createdAt})`,
+        testResults.createdAt,
+      );
+    return definitionHistories(
+      rows.map((row) => ({ name: row.name, status: row.status, at: row.at.getTime() })),
+    );
   });
 }
 

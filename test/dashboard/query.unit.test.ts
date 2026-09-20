@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   FOLLOW_LIMIT,
   actionName,
+  definitionHistories,
   definitionStats,
   durationChart,
   followEvents,
@@ -65,6 +66,78 @@ describe("definitionStats happy path", () => {
         models: ["composer-2.5", "grok-4.6"],
       },
     ]);
+  });
+});
+
+const historyRow = (
+  name: string,
+  status: TestResultOutcome["status"],
+  at: number,
+): {
+  readonly name: string;
+  readonly status: TestResultOutcome["status"];
+  readonly at: number;
+} => ({
+  name,
+  status,
+  at,
+});
+
+describe("definitionHistories happy path", () => {
+  it("counts passes out of passes and fails, oldest of the run first", () => {
+    const rows = [historyRow("lock-screen", "failed", 17), historyRow("lock-screen", "failed", 16)];
+    for (let at = 15; at >= 1; at -= 1) {
+      rows.push(historyRow("lock-screen", "passed", at));
+    }
+    expect(definitionHistories(rows)).toEqual([
+      {
+        name: "lock-screen",
+        passed: 15,
+        total: 17,
+        recent: [...Array.from({ length: 15 }, () => "passed"), "failed", "failed"],
+      },
+    ]);
+  });
+
+  it("keeps each definition's rate and puts only its newest twenty-five on the strip", () => {
+    const rows = [];
+    for (let at = 1; at <= 5; at += 1) {
+      rows.push(historyRow("lock-screen", "failed", at));
+    }
+    for (let at = 6; at <= 30; at += 1) {
+      rows.push(historyRow("lock-screen", "passed", at));
+    }
+    rows.push(historyRow("install", "passed", 1), historyRow("install", "failed", 2));
+    expect(definitionHistories(rows)).toEqual([
+      { name: "install", passed: 1, total: 2, recent: ["passed", "failed"] },
+      {
+        name: "lock-screen",
+        passed: 25,
+        total: 30,
+        recent: Array.from({ length: 25 }, () => "passed"),
+      },
+    ]);
+  });
+});
+
+describe("definitionHistories unhappy path", () => {
+  it("returns nothing when there are no results", () => {
+    expect(definitionHistories([])).toEqual([]);
+  });
+
+  it("ignores pending, running, aborted and timed out, and a definition that has only those", () => {
+    expect(
+      definitionHistories([
+        historyRow("lock-screen", "pending", 1),
+        historyRow("lock-screen", "running", 2),
+        historyRow("lock-screen", "aborted", 3),
+        historyRow("lock-screen", "timed_out", 4),
+        historyRow("lock-screen", "passed", 5),
+        historyRow("lock-screen", "failed", 6),
+        historyRow("install", "timed_out", 1),
+        historyRow("install", "aborted", 2),
+      ]),
+    ).toEqual([{ name: "lock-screen", passed: 1, total: 2, recent: ["passed", "failed"] }]);
   });
 });
 

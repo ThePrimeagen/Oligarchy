@@ -1,6 +1,6 @@
 import type { FC } from "hono/jsx";
 import { OperatorPage } from "./page.tsx";
-import type { AutomationJob, DefinitionVersions } from "./query.ts";
+import type { AutomationJob, DefinitionHistory, DefinitionVersions } from "./query.ts";
 import { since } from "./servers.tsx";
 import { followHref, linearHref } from "./ticket.ts";
 
@@ -173,23 +173,46 @@ const DefinitionSearch: FC = () => (
 
 // Every name is on the page. Definitions do not change while it is open, so the search hides
 // rows in the browser. The miss starts hidden; the script shows it when nothing matches.
-const DefinitionList: FC<{ groups: ReadonlyArray<DefinitionVersions> }> = ({ groups }) =>
-  groups.length === 0 ? (
+// The rate is passes out of that name's passes and fails. The pills are its last twenty-five
+// of those, oldest on the left: green a pass, blue a fail, packed to a pixel. Drawn with the
+// page. The running list is the part that polls.
+const DefinitionList: FC<{
+  groups: ReadonlyArray<DefinitionVersions>;
+  histories: ReadonlyArray<DefinitionHistory>;
+}> = ({ groups, histories }) => {
+  const byName = new Map(histories.map((history) => [history.name, history]));
+  return groups.length === 0 ? (
     <p>no definitions</p>
   ) : (
     <>
       <ul class="definition-list">
-        {groups.map((group) => (
-          <li>
-            <a href={definitionHref(group.name)}>{group.name}</a>
-          </li>
-        ))}
+        {groups.map((group) => {
+          const history = byName.get(group.name);
+          return (
+            <li>
+              <a href={definitionHref(group.name)}>{group.name}</a>
+              {history === undefined ? null : (
+                <>
+                  <span class="definition-rate">
+                    {history.passed} out of {history.total}
+                  </span>
+                  <span class="definition-blips" aria-hidden="true">
+                    {history.recent.map((status) => (
+                      <span class={`definition-blip definition-blip--${status}`} />
+                    ))}
+                  </span>
+                </>
+              )}
+            </li>
+          );
+        })}
       </ul>
       <p class="definition-miss" hidden>
         No definitions match <code></code>.
       </p>
     </>
   );
+};
 
 // The index is a search and one link per name. A name's own page is its newest wording as a
 // form, then the current wording and the one before it. Running jobs sit above that body.
@@ -203,7 +226,8 @@ export const DefinitionsPage: FC<{
   notice: EditNotice | undefined;
   error: string | undefined;
   running: ReadonlyArray<AutomationJob> | null;
-}> = ({ groups, name, selected, notice, error, running }) => {
+  histories: ReadonlyArray<DefinitionHistory>;
+}> = ({ groups, name, selected, notice, error, running, histories }) => {
   const index = error === undefined && name === undefined && groups !== null;
   return (
     <OperatorPage title="oligarchy definitions" page="definitions" scriptSrc="/dashboard.js">
@@ -211,7 +235,7 @@ export const DefinitionsPage: FC<{
       {error === undefined ? null : <p>error: {error}</p>}
       {index ? <DefinitionSearch /> : null}
       {running === null ? null : <RunningTests jobs={running} definition={name} />}
-      {index ? <DefinitionList groups={groups} /> : null}
+      {index ? <DefinitionList groups={groups} histories={histories} /> : null}
       {error === undefined && name !== undefined && selected === undefined ? (
         <p>
           No test definition named <code>{name}</code>.

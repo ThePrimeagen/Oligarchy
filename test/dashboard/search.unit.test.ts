@@ -69,6 +69,9 @@ class Element {
     if (selector === "li") {
       return this.tag === "li";
     }
+    if (selector === "a") {
+      return this.tag === "a";
+    }
     if (selector === "code") {
       return this.tag === "code";
     }
@@ -148,6 +151,26 @@ describe("dashboard.js definition search happy path", () => {
     input.value = "   ";
     document.dispatch("input", input);
     expect(names(list).every((item) => !item.hidden)).toBe(true);
+    expect(miss.hidden).toBe(true);
+  });
+
+  it("matches the name and not the rate drawn on the same line", () => {
+    const { input, list, miss } = index();
+    const item = list.querySelectorAll("li")[1];
+    const rate = new Element("span", "definition-rate");
+    rate.text = "15 out of 17";
+    item?.append(rate);
+    input.value = "out";
+    document.dispatch("input", input);
+    expect(names(list)).toEqual([
+      { name: "install", hidden: true },
+      { name: "lock-screen15 out of 17", hidden: true },
+    ]);
+    expect(miss.hidden).toBe(false);
+
+    input.value = "LOCK";
+    document.dispatch("input", input);
+    expect(names(list)[1]).toEqual({ name: "lock-screen15 out of 17", hidden: false });
     expect(miss.hidden).toBe(true);
   });
 

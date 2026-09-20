@@ -11,6 +11,7 @@ import {
   getImage,
   groupDefinitions,
   listAutomationQueue,
+  listDefinitionHistories,
   listRunningAutomationJobs,
   readSessionFollow,
   listProcessSeries,
@@ -389,9 +390,10 @@ app.get("/definitions", async (context) => {
     return context.redirect(legacyDefinition(name, context.req.query("edit")), 302);
   }
   try {
-    const [definitions, running] = await Promise.all([
+    const [definitions, running, histories] = await Promise.all([
       listTestDefinitions(context.env.HYPERDRIVE.connectionString),
       listRunningAutomationJobs(context.env.HYPERDRIVE.connectionString),
+      listDefinitionHistories(context.env.HYPERDRIVE.connectionString),
     ]);
     return definitionsPage(context, 200, {
       groups: groupDefinitions(definitions),
@@ -400,6 +402,7 @@ app.get("/definitions", async (context) => {
       notice: undefined,
       error: undefined,
       running,
+      histories,
     });
   } catch (error) {
     Sentry.captureException(error);
@@ -411,6 +414,7 @@ app.get("/definitions", async (context) => {
       notice: undefined,
       error: "Test definitions are unavailable.",
       running: null,
+      histories: [],
     });
   }
 });
@@ -447,6 +451,7 @@ app.get("/definitions/:name", async (context) => {
       notice,
       error: undefined,
       running,
+      histories: [],
     });
   } catch (error) {
     Sentry.captureException(error);
@@ -458,6 +463,7 @@ app.get("/definitions/:name", async (context) => {
       notice: undefined,
       error: "Test definitions are unavailable.",
       running: null,
+      histories: [],
     });
   }
 });
@@ -507,6 +513,7 @@ app.post("/definitions", async (context) => {
       notice: undefined,
       error: "Test definitions are unavailable.",
       running: null,
+      histories: [],
     });
   }
 });

@@ -12,7 +12,10 @@ const narrowDefinitions = (target) => {
   const needle = target.value.trim().toLowerCase();
   let shown = 0;
   for (const item of list.querySelectorAll("li")) {
-    const match = needle === "" || item.textContent.toLowerCase().includes(needle);
+    // The rate and the pills sit on the same line. The query is the name, not "out of" or a count.
+    const name = item.querySelector("a");
+    const text = name === null ? "" : name.textContent;
+    const match = needle === "" || text.toLowerCase().includes(needle);
     item.hidden = !match;
     if (match) {
       shown += 1;

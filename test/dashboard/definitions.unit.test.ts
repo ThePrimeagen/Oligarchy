@@ -1,7 +1,11 @@
 import { html } from "hono/html";
 import { describe, expect, it } from "vitest";
 import { DefinitionsPage } from "../../src/dashboard/definitions.tsx";
-import type { AutomationJob, TestDefinition } from "../../src/dashboard/query.ts";
+import type {
+  AutomationJob,
+  DefinitionHistory,
+  TestDefinition,
+} from "../../src/dashboard/query.ts";
 
 const wording = (
   id: number,
@@ -40,9 +44,16 @@ const page = (
       notice: undefined,
       error: undefined,
       running: [],
+      histories: [],
       ...extra,
     }),
   );
+
+const blip = (status: "passed" | "failed"): string =>
+  `<span class="definition-blip definition-blip--${status}"></span>`;
+
+const pills = (statuses: ReadonlyArray<"passed" | "failed">): string =>
+  `<span class="definition-blips" aria-hidden="true">${statuses.map(blip).join("")}</span>`;
 
 const both = [
   { name: "install", versions: install },
@@ -83,6 +94,43 @@ describe("DefinitionsPage happy path", () => {
     expect(htmlText).not.toContain("dashboard.css");
     expect(htmlText).not.toContain("OMARCHY");
     expect(htmlText).not.toContain("error:");
+    expect(htmlText).not.toContain('<span class="definition-rate"');
+  });
+
+  it("puts a definition's passes out of its runs, and the last twenty-five as tight pills, on its line", async () => {
+    const recent = [
+      ...Array.from({ length: 15 }, () => "passed" as const),
+      "failed" as const,
+      "failed" as const,
+    ];
+    const capped = Array.from({ length: 25 }, (): "failed" => "failed");
+    const histories: ReadonlyArray<DefinitionHistory> = [
+      { name: "lock-screen", passed: 15, total: 17, recent },
+      { name: "wide", passed: 20, total: 40, recent: capped },
+    ];
+    const htmlText = await page([...both, { name: "wide", versions: install }], { histories });
+    const list = htmlText.slice(
+      htmlText.indexOf('<ul class="definition-list">'),
+      htmlText.indexOf("</ul>") + "</ul>".length,
+    );
+    const item = (name: string): string => {
+      const at = list.indexOf(`href="/definitions/${name}"`);
+      return list.slice(list.lastIndexOf("<li>", at), list.indexOf("</li>", at));
+    };
+    expect(item("install")).toBe('<li><a href="/definitions/install">install</a>');
+    expect(item("lock-screen")).toBe(
+      `<li><a href="/definitions/lock-screen">lock-screen</a><span class="definition-rate">15 out of 17</span>${pills(recent)}`,
+    );
+    expect(item("wide")).toBe(
+      `<li><a href="/definitions/wide">wide</a><span class="definition-rate">20 out of 40</span>${pills(capped)}`,
+    );
+    expect(list).not.toContain("hx-");
+    expect(htmlText).toMatch(/\.definition-list li\s*\{[^}]*display:\s*flex/);
+    expect(htmlText).toMatch(/\.definition-blips\s*\{[^}]*gap:\s*1px/);
+    expect(htmlText).toMatch(/\.definition-blip\s*\{[^}]*width:\s*4px/);
+    expect(htmlText).toMatch(/\.definition-blip--passed\s*\{[^}]*background:\s*#9ece6a/);
+    expect(htmlText).toMatch(/\.definition-blip--failed\s*\{[^}]*background:\s*#7aa2f7/);
+    expect(item("wide").match(/definition-blip /g)).toHaveLength(25);
   });
 
   it("is one definition's page: its wording, not the list", async () => {
@@ -164,6 +212,32 @@ describe("DefinitionsPage happy path", () => {
 });
 
 describe("DefinitionsPage unhappy path", () => {
+  it("does not draw the rate on a definition's own page, or when that name has no runs", async () => {
+    const histories: ReadonlyArray<DefinitionHistory> = [
+      {
+        name: "lock-screen",
+        passed: 15,
+        total: 17,
+        recent: ["passed", "failed"],
+      },
+    ];
+    const selected = { name: "lock-screen", versions: lock };
+    const ownPage = await page(null, { name: "lock-screen", selected, histories });
+    expect(ownPage).toContain("<h2>lock-screen</h2>");
+    const body = ownPage.slice(ownPage.indexOf("<body>"));
+    expect(body).not.toContain("definition-rate");
+    expect(body).not.toContain("definition-blip");
+
+    const listed = await page([...both], { histories });
+    const installAt = listed.indexOf('href="/definitions/install"');
+    const installItem = listed.slice(
+      listed.lastIndexOf("<li>", installAt),
+      listed.indexOf("</li>", installAt),
+    );
+    expect(installItem).toBe('<li><a href="/definitions/install">install</a>');
+    expect(installItem).not.toContain("out of");
+  });
+
   it("says the definitions are unavailable and lists none when the database could not be read", async () => {
     const htmlText = await page(null, {
       error: "Test definitions are unavailable.",
