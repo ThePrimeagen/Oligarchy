@@ -29,6 +29,7 @@ import { clickerPage } from "./clicker.ts";
 import { DefinitionsPage, RunningList, type EditNotice } from "./definitions.tsx";
 import { HTMX_INTEGRITY, HTMX_URL } from "./htmx.ts";
 import { abortLinearIssue, type LinearEnv } from "./linear.ts";
+import { createTestSuiteRun, SuiteRequestError } from "./suite.ts";
 import { Fleet, type Halves, Process, Queue, ServersPage } from "./servers.tsx";
 import { SENTRY_DSN } from "../observability/dsn.ts";
 
@@ -789,6 +790,36 @@ app.post("/abort", async (context) => {
     console.error("dashboard: aborting a job:", errorMessage(error));
   }
   return reply();
+});
+
+// The same run as `./ctrl test run testsuite`, which is all this route does. Not linked from a
+// page yet. The button belongs beside the definitions heading, not on a selected definition: the
+// suite is every name's newest wording, and a button on one definition would read as running that
+// one name (`./ctrl test run --name`). It posts iso, version and serverUrl here and shows the run
+// id and ticket identifiers this answers with, and it stays disabled when the list is empty.
+// Until that form exists the route takes JSON only, those three fields.
+app.post("/create-test-suite-run", async (context) => {
+  let body: unknown;
+  try {
+    body = await context.req.json();
+  } catch {
+    return context.json({ error: "iso, version and serverUrl are required" }, 400);
+  }
+  try {
+    const created = await createTestSuiteRun(
+      context.env,
+      context.env.HYPERDRIVE.connectionString,
+      body,
+    );
+    return context.json(created);
+  } catch (error) {
+    if (error instanceof SuiteRequestError) {
+      return context.json({ error: error.message }, 400);
+    }
+    Sentry.captureException(error);
+    console.error("dashboard: create test-suite-run:", errorMessage(error));
+    return context.json({ error: errorMessage(error) }, 500);
+  }
 });
 
 // The retention sweep, run by Cloudflare on the cron in wrangler.jsonc. One line says what went;

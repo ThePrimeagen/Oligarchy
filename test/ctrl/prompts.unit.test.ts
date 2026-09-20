@@ -230,3 +230,23 @@ describe("renderMintIssue unhappy path", () => {
       }),
   );
 });
+
+describe("modulePath", () => {
+  it.effect("resolves a file beside this module from a file url (happy)", () =>
+    Effect.sync(() => {
+      expect(Prompts.modulePath("../../client.md", import.meta.url)).toMatch(/\/client\.md$/);
+      expect(Prompts.modulePath("../../prompts/linear-issue.html", import.meta.url)).toMatch(
+        /\/prompts\/linear-issue\.html$/,
+      );
+    }),
+  );
+
+  it.effect("keeps the relative path when the base is not a url, as workerd's is (unhappy)", () =>
+    Effect.sync(() => {
+      expect(Prompts.modulePath("../../prompts/linear-issue.html", "not a url")).toBe(
+        "../../prompts/linear-issue.html",
+      );
+      expect(Prompts.modulePath("../../client.md", "")).toBe("../../client.md");
+    }),
+  );
+});

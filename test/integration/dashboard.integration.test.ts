@@ -492,6 +492,8 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
     expect(html).toContain('aria-current="page">definitions</a>');
     expect(html).toContain('href="/">servers</a>');
     expect(html).not.toContain("dashboard.css");
+    // The suite is not a button on this page yet. The heading is where it would go.
+    expect(html).not.toContain("/create-test-suite-run");
   });
 
   it("shows the named definition as text and does not chart its results", async () => {

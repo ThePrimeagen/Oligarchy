@@ -87,7 +87,7 @@ OpenRouter's usage page is billed truth.
 From `.env` in the repo root (already-set vars win):
 
 - All: whatever the wrappers already read (`OLIGARCHY_TOKEN`, `DATABASE_URL`, …)
-- `ctrl test new`: `LINEAR_API_TOKEN`, `DATABASE_URL`
+- `ctrl test run` and `ctrl test run testsuite`: `LINEAR_API_TOKEN`, `DATABASE_URL`
 - qemu-server: `TMPDIR` **in the process environment**, expanded path
 - automation-client: `SERVER_URL=http://127.0.0.1:55555` so `/reserve` hits the
   proxy (which places onto a live qemu). Default is `:42069`. Not in `.env`.

@@ -27,7 +27,7 @@ export const labelId = (name: string): string => `label-${name}`;
 
 export const stateId = (name: string): string => `state-${name}`;
 
-// The two board states `test new` and `mint` hand a ticket through, as the fake answers them.
+// The two board states `test run` and `mint` hand a ticket through, as the fake answers them.
 export const STATES: Linear.WorkflowStateIds = {
   backlog: stateId(Linear.BACKLOG_STATE),
   automationNeeded: stateId(Linear.AUTOMATION_NEEDED_STATE),
