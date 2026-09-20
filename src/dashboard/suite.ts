@@ -93,6 +93,27 @@ export const bundledPrompts: Layer.Layer<FileSystem.FileSystem> = FileSystem.lay
   },
 });
 
+const NO_DEFINITIONS = "test: no test definitions found";
+
+// The command prints one JSON object, then a finalizer may print a log line (a failed log insert
+// does not fail the command). The answer is the last JSON object, not whatever landed last.
+export const responseJson = (lines: ReadonlyArray<string>): unknown => {
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index];
+    if (line === undefined || !line.startsWith("{")) {
+      continue;
+    }
+    try {
+      return JSON.parse(line);
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) {
+        throw error;
+      }
+    }
+  }
+  throw new Error("create test-suite-run printed no JSON");
+};
+
 const commandMessage = (error: unknown): string | undefined => {
   if (typeof error !== "object" || error === null || !("message" in error)) {
     return undefined;
@@ -103,8 +124,7 @@ const commandMessage = (error: unknown): string | undefined => {
   return typeof error.message === "string" ? error.message : undefined;
 };
 
-// The command's JSON is its last log line. `Log` writes the line before it; both come through
-// this console, and nothing else does.
+// `Log` and the printed JSON both come through this console. A finalizer may add a line after.
 const runCtrlCommand: SuiteRunner = async (connectionString, token, args) => {
   const lines: Array<string> = [];
   const recording: Console.Console = Object.assign(Object.create(console), {
@@ -136,11 +156,7 @@ const runCtrlCommand: SuiteRunner = async (connectionString, token, args) => {
     const error = Cause.squash(exit.cause);
     throw error instanceof Error ? error : new Error(String(error));
   }
-  const printed = lines.at(-1);
-  if (printed === undefined) {
-    throw new Error("create test-suite-run printed no JSON");
-  }
-  return JSON.parse(printed);
+  return responseJson(lines);
 };
 
 export const createTestSuiteRun = async (
@@ -162,9 +178,8 @@ export const createTestSuiteRun = async (
       request.serverUrl,
     ]);
   } catch (error) {
-    const message = commandMessage(error);
-    if (message !== undefined) {
-      throw new SuiteRequestError(message);
+    if (commandMessage(error) === NO_DEFINITIONS) {
+      throw new SuiteRequestError(NO_DEFINITIONS);
     }
     throw error;
   }

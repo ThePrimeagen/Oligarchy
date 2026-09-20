@@ -5,6 +5,7 @@ import { app } from "../../src/dashboard/dashboard.tsx";
 import {
   bundledPrompts,
   createTestSuiteRun,
+  responseJson,
   SuiteRequestError,
 } from "../../src/dashboard/suite.ts";
 import * as Prompts from "../../src/ctrl/prompts.ts";
@@ -153,6 +154,30 @@ describe("create test-suite-run runner", () => {
       throw Errors.DatabaseError.make({ operation: "query", message: "database request failed" });
     });
     await expect(database).rejects.toBeInstanceOf(Errors.DatabaseError);
+
+    const other = createTestSuiteRun(env, env.HYPERDRIVE.connectionString, body, async () => {
+      throw Errors.CommandError.make({ message: "mint: no live qemu server" });
+    });
+    await expect(other).rejects.toBeInstanceOf(Errors.CommandError);
+    await expect(other).rejects.not.toBeInstanceOf(SuiteRequestError);
+  });
+
+  it("reads the command's JSON, not a log line printed after it (happy)", () => {
+    const created = { id: "run-id", tests: [] };
+    expect(
+      responseJson([
+        "[global] info: test run-id created; 0 tests",
+        JSON.stringify(created),
+        "[global] error: db: log insert failed: connection terminated",
+      ]),
+    ).toEqual(created);
+  });
+
+  it("refuses output that never printed the JSON (unhappy)", () => {
+    expect(() => responseJson(["[global] info: nothing"])).toThrow(
+      "create test-suite-run printed no JSON",
+    );
+    expect(() => responseJson(["{not json"])).toThrow("create test-suite-run printed no JSON");
   });
 
   it("does not run the command for a body it refuses (unhappy)", async () => {

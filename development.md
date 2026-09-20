@@ -198,7 +198,9 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   visible, `Layer.mergeAll` for siblings, `Layer.unwrap` when a layer depends on a value,
   `Layer.effectDiscard` for background loops and fail-fast preconditions.
 - Background fibers belong to the layer scope: `Effect.forkScoped`, never `Effect.runFork`. Do not
-  use `Layer.fresh` in production, `ManagedRuntime`, or `Layer.catch` (not exported).
+  use `Layer.fresh` in production, or `Layer.catch` (not exported). `ManagedRuntime` is only the
+  dashboard request that runs `./ctrl create test-suite-run`: that request is the entry, and it
+  disposes the runtime when the command returns.
 - `HttpRouter.serve` provides the module-level `HttpRouter.layer`, so two `HttpRouter.serve`s in
   one graph share one router and both listeners serve both route sets. A process has one
   listener; a page for an operator is the dashboard's, not a second port (below).
