@@ -3,6 +3,7 @@ import type * as Automation from "../db/automation.ts";
 import type * as ProcessStats from "../db/process-stats.ts";
 import type * as Servers from "../db/servers.ts";
 import * as Follow from "./follow.ts";
+import * as Steps from "./steps.ts";
 import * as Text from "./text.ts";
 
 // The terminal this view is laid out for: a card's header fits its host numbers beside a name
@@ -653,13 +654,30 @@ const jobHeader: Text.Row = [
   ),
 ];
 
+// 1-based place in the ActionList when the message is one of its steps, otherwise nothing:
+// the row keeps the elapsed time. A paraphrase, a closed intent, or a ticket with no steps
+// does not get a place.
+const stepPlace = (job: Job, message: string | null): string | null => {
+  if (job.ticket === null || message === null) {
+    return null;
+  }
+  const steps = Steps.stepsOf(job.instruction);
+  const at = Steps.indexOf(steps, message);
+  if (at === 0) {
+    return null;
+  }
+  return `${String(at)}/${String(steps.length)}`;
+};
+
 // The columns are the same for every job, so a pending one shows a dash where its start will
-// go. A running one drops the action word: the spinner and the elapsed time, both in the
-// action's colour, say what it is doing and for how long.
+// go. A running one drops the action word. A ticket whose open intent is a step shows n/total
+// in that cell; every other running row shows how long it has run. The started column keeps
+// the elapsed time either way.
 const jobRow = (job: Job, selected: Text.Piece, drift: number, now: number): Text.Row => {
   const running = job.status === "running";
   const color = ACTION_COLOR[job.action];
   const started = ago(job.startedAt, job.queriedAt, drift);
+  const place = running ? stepPlace(job, job.intent) : null;
   return [
     selected,
     Text.SPACE,
@@ -668,7 +686,7 @@ const jobRow = (job: Job, selected: Text.Piece, drift: number, now: number): Tex
     Text.value(Text.fit(job.test, JOB_WIDTHS.test)),
     Text.GAP,
     running
-      ? Text.paint(color, Text.fit(started, JOB_WIDTHS.action))
+      ? Text.paint(color, Text.fit(place ?? started, JOB_WIDTHS.action))
       : Text.label(Text.fit(job.action, JOB_WIDTHS.action)),
     Text.GAP,
     Text.paint(
@@ -1208,10 +1226,26 @@ const automationRows = (
       return [marker(on, true), Text.SPACE, Text.strong(Text.fit(entry.machine.name ?? "—", 16))];
     }
     const job = jobsOn(snapshot, entry.machine)[entry.job.value];
-    // Twenty-six columns: the indent, the marker, the ticket, then the spinner and the elapsed.
-    // "59 min ago" is ten and fills what is left; clip bounds the line. The action word is not
-    // on it.
+    // Twenty-six columns: the indent, the marker, the ticket, then the spinner and either the
+    // step (n/total) or how long it has run. "59 min ago" is ten and fills what is left; clip
+    // bounds the line. The selected client's open follow wins over the polled intent, and a
+    // follow with nothing still open shows the elapsed time rather than a stale poll.
     const color = ACTION_COLOR[job.action];
+    const follow = Option.getOrNull(view.session);
+    let message = job.intent;
+    if (
+      on &&
+      job.ticket !== null &&
+      follow !== null &&
+      follow._tag === "full" &&
+      follow.ticket === job.ticket
+    ) {
+      const running = follow.entries.findLast(
+        (found) => found.id === "intent" && found.state === "running",
+      );
+      message = running === undefined ? null : running.name;
+    }
+    const place = stepPlace(job, message);
     return [
       Text.muted("  "),
       marker(on, true),
@@ -1220,7 +1254,7 @@ const automationRows = (
       Text.SPACE,
       Text.paint(color, spinnerAt(now)),
       Text.SPACE,
-      Text.paint(color, ago(job.startedAt, job.queriedAt, drift)),
+      Text.paint(color, place ?? ago(job.startedAt, job.queriedAt, drift)),
     ];
   });
   // Keep the marked row on screen, the window growing down from it.
@@ -1247,6 +1281,13 @@ const sessionPane = (view: View, height: number, now: number): ReadonlyArray<Tex
     }
     if (follow._tag === "peek") {
       return [[Text.value(Follow.title(follow))], ...Follow.peekRows(follow, now)];
+    }
+    const job = Option.getOrNull(selectedJob(view));
+    if (job !== null && job.ticket === follow.ticket) {
+      const steps = Steps.stepsOf(job.instruction);
+      if (steps.length > 0) {
+        return Follow.ticketRows(follow, steps, height);
+      }
     }
     return [Follow.fullHeader(follow), ...Follow.fullEntries(follow, Math.max(0, height - 1))];
   };

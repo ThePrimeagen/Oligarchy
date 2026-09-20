@@ -1556,6 +1556,76 @@ Postgres.describeWithDatabase("database", () => {
     );
 
     scoped.effect(
+      "AutomationStore listJobs carries the wording the result ran and the open intent, and drops a closed one",
+      () =>
+        Effect.gen(function* () {
+          yield* emptyQueue;
+          const tests = yield* Tests.TestStore;
+          const automation = yield* Automation.AutomationStore;
+          const sessions = yield* Sessions.SessionStore;
+          const logs = yield* Logs.LogStore;
+          const definition = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
+          const created = yield* tests.createRun({
+            iso: "https://example.com/omarchy.iso",
+            serverUrl: "http://127.0.0.1:42069",
+            definitions: [{ id: definition.id }],
+          });
+          const resultId = created.results[0].id;
+          const ticket = `PLC-${uuid().slice(0, 8)}`;
+          yield* tests.setLinearId(resultId, ticket);
+          yield* automation.enqueue({ resultId, action: "drive" });
+          expect(Option.isSome(yield* automation.claim(uuid()))).toBe(true);
+          const sessionId = uuid();
+          yield* sessions.insertSession(sessionId, { iso: "x" }, "running");
+          yield* sessions.registerAgent(ticket, sessionId);
+          // A newer wording of the same name must not replace the one this result was created with.
+          yield* tests.defineTestDefinition({
+            name: definition.name,
+            description: definition.description,
+            instruction: `${definition.instruction}\nand a later step`,
+            proof: definition.proof,
+          });
+          const before = yield* automation.listJobs(0);
+          const open = before.running.find((job) => job.ticket === ticket);
+          expect(open).toMatchObject({ instruction: definition.instruction, intent: null });
+          yield* logs.insertLog({
+            text: "intent start; Click Lock. Use the mouse only.",
+            level: "info",
+            location: sessionId,
+            agentId: ticket,
+          });
+          yield* logs.insertLog({
+            text: "starting",
+            level: "info",
+            location: sessionId,
+            agentId: ticket,
+          });
+          const started = yield* automation.listJobs(0);
+          expect(started.running.find((job) => job.ticket === ticket)?.intent).toBe(
+            "Click Lock. Use the mouse only.",
+          );
+          yield* logs.insertLog({
+            text: "intent end",
+            level: "info",
+            location: sessionId,
+            agentId: ticket,
+          });
+          const ended = yield* automation.listJobs(0);
+          expect(ended.running.find((job) => job.ticket === ticket)?.intent).toBeNull();
+          yield* logs.insertLog({
+            text: "intent start; Press Super+W. The terminal closes.",
+            level: "info",
+            location: sessionId,
+            agentId: ticket,
+          });
+          const again = yield* automation.listJobs(0);
+          expect(again.running.find((job) => job.ticket === ticket)?.intent).toBe(
+            "Press Super+W. The terminal closes.",
+          );
+        }),
+    );
+
+    scoped.effect(
       "AutomationStore listJobs leaves a pending job unplaced, a diagnose without a server, a drive whose client row is gone with only its server, and a result without a ticket unplaced",
       () =>
         Effect.gen(function* () {

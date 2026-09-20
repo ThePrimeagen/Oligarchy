@@ -107,6 +107,8 @@ export const running: Automation.AutomationJobListRow = {
   startedAt: ago(45),
   finishedAt: null,
   queriedAt: QUERIED_AT,
+  instruction: "",
+  intent: null,
 };
 
 // A diagnose runner took: no guest, so on runner's card alone.
@@ -131,6 +133,8 @@ export const pending: Automation.AutomationJobListRow = {
   startedAt: null,
   finishedAt: null,
   queriedAt: QUERIED_AT,
+  instruction: "",
+  intent: null,
 };
 
 // Over, and so never drawn: the store lists none when asked for zero, and one it did list would
@@ -148,6 +152,8 @@ export const failed: Automation.AutomationJobListRow = {
   startedAt: ago(3_800),
   finishedAt: ago(600),
   queriedAt: QUERIED_AT,
+  instruction: "",
+  intent: null,
 };
 
 export const QUEUE: Automation.AutomationQueue = {

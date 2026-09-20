@@ -82,7 +82,7 @@ Lists stored test definitions, one name per line, each in its newest wording. No
 ./ctrl test define --name <definition> [--description <text>] [--instruction <text>] [--proof <text>]
 ```
 
-Stores a test definition, or a new wording of one, and prints it as JSON: `{ id, name, version }`. A wording is never edited in place: every result records the `id` it ran against, so the wording behind a past verdict is always the one the driver was handed, and the dashboard charts each version on its own. Not used while driving a guest.
+Stores a test definition, or a new wording of one, and prints it as JSON: `{ id, name, version }`. A wording is never edited in place: every result records the `id` it ran against, so the wording behind a past verdict is always the one the driver was handed. The definitions page shows the newest wording and the one before it as text. Not used while driving a guest.
 
 - `--name <definition>` — the test. A name nobody carries yet needs all three fields and becomes `v1`; a known name gets the next version, and `test run` runs that from then on.
 - `--description <text>`, `--instruction <text>`, `--proof <text>` — the wording. On a known name a field left out is carried forward from the newest wording, so one flag changes one field. Nothing changed is a failure: `test define: <name> is unchanged`.

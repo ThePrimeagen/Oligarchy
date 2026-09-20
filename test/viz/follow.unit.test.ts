@@ -226,6 +226,69 @@ describe("full follow happy path", () => {
   });
 });
 
+const STEPS = [
+  "Press Super+Escape. The System menu opens.",
+  "Click Lock. Use the mouse only. The screen locks.",
+  "the desktop must return exactly as left.",
+];
+
+const withIntent = (message: string): Follow.Full =>
+  Follow.apply(
+    Follow.apply(
+      Follow.apply(Follow.expand(peek, garage.url), { type: "session", status: "running" }),
+      { type: "intent", state: "started", message },
+    ),
+    { type: "action", id: 10, name: "send-keys", state: "running" },
+  );
+
+describe("ticket session happy path", () => {
+  it("shows the step index, the exact intent line, and only that intent's actions", () => {
+    const rows = Follow.ticketRows(withIntent(STEPS[1] ?? ""), STEPS, 8).map(textOf);
+    expect(rows[0]).toBe("following OLI-61 · 7a2d0000 running");
+    expect(rows[1]).toBe("2/3");
+    // The line is wider than the column the image sits beside, so it wraps and the words stay.
+    expect(rows[2]).toBe(`${Follow.SPINNER[0]} Click Lock. Use the mouse only. The`);
+    expect(rows[3]).toBe("  screen locks.");
+    expect(rows[4]).toBe(`  ${Follow.SPINNER[0]} send-keys`);
+    expect(rows.every((row) => row.length <= Follow.LEFT_COLS)).toBe(true);
+    expect(rows.join("\n")).not.toMatch(/send-key(?!s)/);
+    expect(colorOf(Follow.ticketRows(withIntent(STEPS[1] ?? ""), STEPS, 8)[1] ?? [], "2/3")).toBe(
+      GOLD,
+    );
+  });
+
+  it("keeps the index and the start of a long line, and the newest action, when the pane is short", () => {
+    const long = `${"word ".repeat(30)}end`;
+    const rows = Follow.ticketRows(withIntent(long), [long], 4).map(textOf);
+    expect(rows[0]).toContain("following OLI-61");
+    expect(rows[1]).toBe("1/1");
+    expect(rows[2]?.startsWith(`${Follow.SPINNER[0]} word`)).toBe(true);
+    expect(rows[3]).toBe(`  ${Follow.SPINNER[0]} send-keys`);
+    expect(rows.every((row) => row.length <= Follow.LEFT_COLS)).toBe(true);
+  });
+});
+
+describe("ticket session unhappy path", () => {
+  it("shows 0 and no intent yet before the first intent, and hides the peek's old commands", () => {
+    const bare = Follow.apply(Follow.expand(peek, garage.url), {
+      type: "session",
+      status: "running",
+    });
+    const rows = Follow.ticketRows(bare, STEPS, 6).map(textOf);
+    expect(rows[1]).toBe("0/3");
+    expect(rows.join("\n")).toContain("no intent yet");
+    expect(rows.join("\n")).not.toMatch(/send-key(?!s)/);
+  });
+
+  it("shows a dash when the open intent is not a step, and still shows what was said", () => {
+    const rows = Follow.ticketRows(withIntent("lock the screen"), STEPS, 6);
+    expect(textOf(rows[1] ?? [])).toBe("—/3");
+    expect(colorOf(rows[1] ?? [], "—/3")).toBe(MUTED);
+    expect(rows.map(textOf).join("\n")).toContain("lock the screen");
+    expect(rows.map(textOf).join("\n")).toContain("send-keys");
+  });
+});
+
 describe("full follow unhappy path", () => {
   it("strips control characters from an intent so they cannot steer the terminal, and cuts a long one", () => {
     const dirty = Follow.apply(Follow.expand(peek, garage.url), {
