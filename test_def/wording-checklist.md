@@ -332,15 +332,15 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `launcher-gui-apps-open-and-close`
 - [x] `pdf-open-evince-and-fill-xournalpp`
 - [x] `imv-rotate-edit-trash-keybindings`
-- [ ] `chromium-whatsapp-slim-extension`
-- [ ] `plugin-add-notification-center-and-dnd`
-- [ ] `omarchy-audio-tuner-probe-without-device`
+- [x] `chromium-whatsapp-slim-extension`
+- [x] `plugin-add-notification-center-and-dnd`
+- [x] `omarchy-audio-tuner-probe-without-device`
 - [ ] `update-menu-omarchy`
 - [ ] `update-terminal-run`
 - [ ] `post-update-second-run-nothing-to-do`
-- [ ] `post-update-kernel-omarchy`
+- [x] `post-update-kernel-omarchy`
 - [ ] `post-update-kitty-config-refreshed`
-- [ ] `post-update-mise-and-agent-wrappers`
+- [x] `post-update-mise-and-agent-wrappers`
 - [ ] `update-indicator-click-and-cancel`
 - [ ] `update-refuses-overlapping-run-and-notifier-stays-quiet`
 - [ ] `update-refuses-low-disk-space`

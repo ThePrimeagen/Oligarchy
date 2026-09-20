@@ -15358,28 +15358,33 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Shift+Alt+G (or Super+Alt+Space → WhatsApp → Enter).
-  ** A Chromium app window (no address bar) shows the WhatsApp Web login/QR page in dark colours. Click **Wait** on a "not responding" dialog; the page takes 10–20 s over NAT.
-  * Press F12; in the Console type `localStorage.getItem("system-theme-mode")` Enter → `"true"`. Press F12 again to close.
-  ** Skip this step and record it if DevTools is unavailable in app mode.
-  * Press Super+T: the app window floats (no title bar).
-  * Drag the window's right edge to make it narrower than about half the screen.
-  ** The page still renders without a horizontal scrollbar.
-  * Press Super+T again to re-tile, then Super+W to close the window; the desktop is as before.
+  * Press Super+Shift+Alt+G. A Chromium app window opens on the WhatsApp login page in dark colors.
+  ** If the chord does nothing, open Apps, type `WhatsApp`, and press Enter.
+  * Press F12. DevTools opens.
+  ** If DevTools is unavailable, record that and skip the next command.
+  * Type `localStorage.getItem("system-theme-mode")` and press Enter. The result is `"true"`.
+  * Press F12. DevTools closes.
+  * Press Super+T. The window floats.
+  * Drag the right edge until the window is less than half the screen wide. The page has no horizontal scrollbar.
+  * Press Super+T. The window tiles again.
+  * Press Super+W. The window closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Skipped: logging in (needs a phone) and the 90 px avatar rail below 1100 px.
-  * Drag from the window edge, not the title area; floating windows have no title bar.
+  * If Hyprland says Chromium is not responding, click Wait. The page can take 10 to 20 seconds.
+  * Do not log in. The chat-list collapse below 1100 px is not part of this test.
+  * Drag the window edge. A floating window has no title bar. An app window has no address bar.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the dark WhatsApp login page in an app window, the console value `"true"` (or the note that DevTools was unavailable), and the narrowed window without a horizontal scrollbar
+  ** Super+Shift+Alt+G opens a dark WhatsApp login page in an app window.
+  ** DevTools reports `"true"` for `system-theme-mode`, or DevTools is unavailable and that is recorded.
+  ** Super+T floats the window. Narrowing it does not add a horizontal scrollbar. Super+T tiles it again, and Super+W closes it.
   * If unsuccessful
-  ** Screenshot of a light-themed page, a horizontal scrollbar, or the window failing to open
+  ** The page is light, a horizontal scrollbar appears, or no window opens.
 covers: default/chromium/extensions/whatsapp-slim/*; applications/WhatsApp.desktop; bin/omarchy-launch-webapp
 
 ### plugin-add-notification-center-and-dnd   [VM-OK] [NET]
@@ -15389,34 +15394,41 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `omarchy plugin add https://github.com/omacom-io/omarchy-notification-center-plugin.git --enable --yes`.
-  ** It clones, validates, enables `omacom.notification-center`; a bell-style icon appears in the right section of the bar.
-  * Run `omarchy-notification-send "VM notification" "from the guest"`.
-  ** A toast appears and fades.
-  * Click the notification-center icon.
-  ** A popup with Pending and Recently tabs lists "VM notification". Click Mark All as Seen, then Recently — it moved there.
-  * Toggle Do Not Disturb on, close the popup, run `omarchy-notification-send "silenced?"`.
-  ** No toast; the bar shows the DND indicator.
-  * Reopen the popup, toggle DND off, click Clear Recent.
-  ** Recently is empty.
-  * Run `omarchy plugin remove omacom.notification-center --yes` and close the terminal with Super+W.
-  ** The icon leaves the bar; the desktop must return exactly as left.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy plugin add https://github.com/omacom-io/omarchy-notification-center-plugin.git --enable --yes` and press Return. The output says the plugin is enabled.
+  * Look at the bar. A notification icon appears on the right.
+  * Type `omarchy-notification-send "VM notification" "from the guest"` and press Return. A notification appears.
+  * Click the notification icon. A panel opens listing `VM notification`.
+  * Click Mark All as Seen. The pending item is cleared.
+  * Open Recently. `VM notification` is listed there.
+  * Turn Do Not Disturb on. Do Not Disturb is on.
+  * Close the panel. The panel closes.
+  * Type `omarchy-notification-send "silenced?"` and press Return. No notification appears.
+  * Look at the bar. A do-not-disturb indicator is showing.
+  * Click the notification icon. The panel opens.
+  * Turn Do Not Disturb off. Do Not Disturb is off.
+  * Click Clear Recent. Recently is empty.
+  * Type `omarchy plugin remove omacom.notification-center --yes` and press Return. The prompt returns.
+  * Look at the bar. The notification icon is gone.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * `--yes` skips the interactive warning; the warning path is covered by the elsewhen test.
-  * Hover the right section of the bar to find the new icon if the glyph is unfamiliar. The stock DND toggle gives no toast of its own — the missing toast after the second send is the proof.
+  * `--yes` skips the warning. The warning path is the elsewhen test.
+  * Hover the right side of the bar if the icon is hard to find.
+  * The missing notification after the second send is the proof that Do Not Disturb is on.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the popup listing "VM notification", then of it under Recently
-  ** Screenshot of DND on with no toast after the second send
-  ** Screenshot of the bar after removal
+  ** The plugin enables, and a notification icon appears on the right of the bar.
+  ** Sending `VM notification` shows a notification. The panel lists it, Mark All as Seen clears Pending, and Recently then lists it.
+  ** With Do Not Disturb on, `silenced?` shows no notification and the bar shows the indicator. Clearing Recent leaves Recently empty.
+  ** Removing the plugin takes the icon off the bar.
   * If unsuccessful
-  ** Screenshot of the missing widget or popup, or a toast shown under DND; `omarchy plugin list | sudo tee /dev/ttyS0`
+  ** The icon or panel is missing, or a notification appears while Do Not Disturb is on.
 covers: omarchy-notification-center-plugin README; bin/omarchy-plugin-add (--enable --yes); bin/omarchy-plugin-remove
 
 ### omarchy-audio-tuner-probe-without-device   [VM-PARTIAL] [NET]
@@ -15426,32 +15438,38 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `pactl list short sinks`.
-  ** What audio the VM has — the pipewire `auto_null` Dummy Output or nothing; include it in the report.
-  * Run `omarchy pkg add omarchy-audio-tuner` (password `prime`).
-  * Run `omarchy-audio-tuner; echo "exit=$?"`.
-  ** Usage listing `probe capture analyse delta fit generate mic-sweep compare switch` and a non-zero exit.
-  * Run `omarchy-audio-tuner probe && ls ~/.cache/omarchy-audio-tuner/`.
-  ** A probe WAV and its tone list are generated (ffmpeg only, no hardware).
-  * Run `omarchy-audio-tuner capture no-such-sink ~/raw.wav; echo "exit=$?"`.
-  ** A clear error about the missing sink (not a traceback), non-zero exit, no `~/raw.wav`.
-  * Run `rm -rf ~/.cache/omarchy-audio-tuner ~/raw.wav; sudo pacman -R --noconfirm omarchy-audio-tuner` and close the terminal with Super+W.
-  ** The desktop must return exactly as left.
+  * Press Super+Return. A terminal opens.
+  * Type `pactl list short sinks` and press Return. Record the sink list.
+  * Type `omarchy pkg add omarchy-audio-tuner` and press Return. The package installs.
+  ** If a password is asked, type `prime` and press Return.
+  ** If it says `target not found`, record `omarchy version` and stop.
+  * Type `omarchy-audio-tuner; echo "exit=$?"` and press Return. The usage lists the subcommands, and the exit is non-zero.
+  * Type `omarchy-audio-tuner probe` and press Return. The prompt returns.
+  * Type `ls ~/.cache/omarchy-audio-tuner/` and press Return. A probe file and a tone list are listed.
+  * Type `omarchy-audio-tuner capture no-such-sink ~/raw.wav; echo "exit=$?"` and press Return. An error names the missing sink, and the exit is non-zero.
+  * Type `ls ~/raw.wav 2>&1` and press Return. The output includes `No such file`.
+  * Type `rm -rf ~/.cache/omarchy-audio-tuner ~/raw.wav` and press Return. The prompt returns.
+  * Type `sudo pacman -R --noconfirm omarchy-audio-tuner` and press Return. The package is removed.
+  ** If sudo asks, type `prime` and press Return.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Skipped: the measure-through-speakers workflow (`capture` on a real sink, `analyse`, `fit`, `switch`) — no audio device.
-  * If `omarchy pkg add` reports `target not found`, record `omarchy version`; the package may post-date this repo snapshot.
+  * Do not run capture, analyse, fit, or switch against a real sink. There is no audio device to measure.
+  * The usage names `probe`, `capture`, `analyse`, `delta`, `fit`, `generate`, `mic-sweep`, `compare`, and `switch`.
+  * A traceback is a failure. A clear missing-sink error is the expected result.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the sink list, the usage text and of the generated probe files
-  ** Screenshot of the clean capture failure with its exit code
+  ** The sink list is recorded. The package installs, and running it with no arguments prints usage and exits non-zero.
+  ** `probe` writes a probe file and a tone list without using hardware.
+  ** Capture from `no-such-sink` prints a missing-sink error, exits non-zero, and creates no `~/raw.wav`.
+  ** The cache and the package are removed.
   * If unsuccessful
-  ** Screenshot of a traceback or hang; `pacman -Ql omarchy-audio-tuner | head`
+  ** The command prints a traceback, hangs, or `target not found` is not recorded with the version.
 covers: omarchy-audio-tuner README "The short version"; docs/audio-tuning.md; omarchy-pkgs/pkgbuilds/omarchy-audio-tuner
 
 # Update, migrations and channels
@@ -15612,29 +15630,35 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Precondition: the disk left by `update-menu-omarchy` (updated and rebooted). Open a terminal with Super+Enter and type `omarchy-version`.
-  ** If it still prints `4.0.2-…` this test becomes SLOW: note `uname -r`, type `omarchy update -y`, type `prime` at sudo prompts, answer Yes to `Linux kernel has been updated. Reboot?` (or `Updates require reboot. Ready?`), enter the passphrase `prime` and log in.
-  * Type `uname -r; pacman -Q linux-omarchy linux-omarchy-headers`.
-  ** Both packages are listed; `uname -r` is not the ISO kernel string — report the exact value (the Omarchy kernel).
-  * Type `grep BOOT_ORDER /etc/default/limine`.
-  ** Exactly `BOOT_ORDER="linux-omarchy, linux-omarchy-*, *, *fallback, Snapshots"`.
-  * Type `sudo limine-entry-tool --tree | sudo tee /dev/ttyS0` (password `prime`) and read the serial log: an entry for `linux-omarchy` is present, and the previous kernel is still listed as a fallback choice.
-  * Type `ls ~/.local/state/omarchy/reboot-required; omarchy-migrate --pending; echo pending=$?` — `No such file or directory`, nothing pending, `pending=1`.
-  * Close the terminal with Super+W; nothing was changed.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy-version` and press Return. Record the version.
+  ** If it still prints `4.0.2-`, this test becomes SLOW. Run `omarchy update -y`, type `prime` at sudo, answer Yes to the reboot question, enter passphrase `prime`, and start again after login.
+  * Type `uname -r` and press Return. Record the kernel, and it is not the ISO kernel.
+  * Type `pacman -Q linux-omarchy linux-omarchy-headers` and press Return. Both packages are listed.
+  * Type `grep BOOT_ORDER /etc/default/limine` and press Return. The line is `BOOT_ORDER="linux-omarchy, linux-omarchy-*, *, *fallback, Snapshots"`.
+  * Type `sudo limine-entry-tool --tree | sudo tee /dev/ttyS0` and press Return. Read the serial log.
+  ** If sudo asks, type `prime` and press Return.
+  * Confirm the serial log. It lists `linux-omarchy`, and the previous kernel is still a fallback.
+  * Type `ls ~/.local/state/omarchy/reboot-required 2>&1` and press Return. The output includes `No such file`.
+  * Type `omarchy-migrate --pending; echo pending=$?` and press Return. Nothing is pending, and the last line is `pending=1`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * If the Limine boot menu is visible during a precondition reboot, screenshot it: the first entry names linux-omarchy.
-  * The old kernel stays installed on purpose so the user can boot it from Limine if the new one fails.
+  * If Limine is visible during a precondition reboot, screenshot it. The first entry names linux-omarchy.
+  * The old kernel stays installed so it can still be booted from Limine.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of `uname -r` with both packages, the BOOT_ORDER line, the serial dump of the Limine tree with linux-omarchy, and the absent reboot marker with `pending=1`
+  ** The version is newer than `4.0.2` unless the SLOW update path was required and completed.
+  ** `uname -r` is the Omarchy kernel, and both `linux-omarchy` and its headers are installed.
+  ** `BOOT_ORDER` is the expected string. The Limine tree lists `linux-omarchy` and keeps the previous kernel as a fallback.
+  ** The reboot-required marker is absent, and `omarchy-migrate --pending` exits 1.
   * If unsuccessful
-  ** Screenshot of `The Omarchy kernel has no Limine boot entry; rerun omarchy-migrate…`, a missing package, a wrong BOOT_ORDER, or a boot that does not reach the desktop (Limine menu / emergency shell) plus `get-serial`
+  ** A package is missing, `BOOT_ORDER` differs, Limine has no Omarchy entry, or the boot does not reach the desktop.
 covers: migrations/1789325478.sh, migrations/1789444024.sh, bin/omarchy-update-restart, bin/omarchy-state, test/shell.d/omarchy-kernel-migration-test.sh, kernel-headers-migration-test.sh
 
 ### post-update-kitty-config-refreshed   [VM-OK]
@@ -15680,28 +15704,32 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Precondition: the disk left by `update-menu-omarchy`. Open a terminal with Super+Enter and type `omarchy-version`.
-  ** If it still prints `4.0.2-…` this test becomes SLOW: type `omarchy update -y`, type `prime` at sudo prompts, and answer No to the reboot question.
-  * Type `mise settings get upgrade.auto_prune` — `false`.
-  * Type `ls -l ~/.local/bin/hermes ~/.local/bin/cursor-agent ~/.local/bin/muse` — all three exist and are executable.
-  * Type `head -4 ~/.local/bin/muse; head -1 ~/.local/bin/hermes`.
-  ** `muse` starts with `#!/bin/bash`, `export MISE_MINIMUM_RELEASE_AGE=0`, `mise use -g --quiet "http:muse[…]"`; `hermes` starts with `# Written by omarchy-install-hermes-cli.`
-  * Type `ls -l ~/.hermes/skills/` — symlinks `omarchy -> /usr/share/omarchy/default/agents/skills/omarchy` and `diagnose-crash -> …/diagnose-crash`.
-  * Type `omarchy-mise-install 'x/y'; echo exit=$?` — `omarchy-mise-install: 'x/y' is not usable as a command name`, `exit=1`.
-  * Close the terminal with Super+W; nothing was changed.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy-version` and press Return. Record the version.
+  ** If it still prints `4.0.2-`, this test becomes SLOW. Run `omarchy update -y`, type `prime` at sudo, and answer No to the reboot question.
+  * Type `mise settings get upgrade.auto_prune` and press Return. The output is `false`.
+  * Type `ls -l ~/.local/bin/hermes ~/.local/bin/cursor-agent ~/.local/bin/muse` and press Return. All three files exist and are executable.
+  * Type `head -4 ~/.local/bin/muse` and press Return. The file starts with `#!/bin/bash` and includes `MISE_MINIMUM_RELEASE_AGE=0`.
+  * Type `head -1 ~/.local/bin/hermes` and press Return. The line is `# Written by omarchy-install-hermes-cli.`
+  * Type `ls -l ~/.hermes/skills/` and press Return. `omarchy` and `diagnose-crash` are symlinks into `/usr/share/omarchy/default/agents/skills/`.
+  * Type `omarchy-mise-install 'x/y'; echo exit=$?` and press Return. The output includes `is not usable as a command name`, and the last line is `exit=1`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Do not run `muse`, `cursor-agent` or `hermes`: their first run downloads the tool and can take minutes.
+  * Do not run `muse`, `cursor-agent`, or `hermes`. The first run downloads the tool.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of `false` from mise, the three wrappers, their first lines, the Hermes skill symlinks, and the rejected wrapper name
+  ** mise reports `upgrade.auto_prune` as `false`.
+  ** `hermes`, `cursor-agent`, and `muse` exist and are executable. `muse` is a mise wrapper, and `hermes` starts with the Omarchy marker.
+  ** `~/.hermes/skills/` links `omarchy` and `diagnose-crash` into the shipped skills.
+  ** `omarchy-mise-install 'x/y'` refuses the name and exits 1.
   * If unsuccessful
-  ** Screenshot of a missing wrapper, `auto_prune` not `false`, or an error line under one of migrations 1787215483/1787760281/1787843905/1788577553/1788724825 in the update output
+  ** A wrapper is missing, `auto_prune` is not `false`, or a skill symlink is absent.
 covers: migrations/1787215483.sh, 1787760281.sh, 1787843905.sh, 1788577553.sh, 1788724825.sh, bin/omarchy-mise-install, bin/omarchy-install-hermes-cli, test/shell.d/hermes-cli-migration-test.sh, hermes-skills-migration-test.sh
 
 ### update-indicator-click-and-cancel   [VM-OK] [NET]
