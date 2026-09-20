@@ -236,6 +236,20 @@ main {
   cursor: not-allowed;
 }
 
+.button--abort {
+  height: auto;
+  padding: 0.45em 0.85em;
+  border: 1px solid var(--failed);
+  background: transparent;
+  box-shadow: none;
+  color: var(--failed);
+}
+
+.button--abort:hover:not(:disabled) {
+  background: var(--failed);
+  color: var(--background-night);
+}
+
 .scoreboard {
   width: 100%;
   margin: 0 0 2.5rem;

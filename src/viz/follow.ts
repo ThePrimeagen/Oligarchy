@@ -1,5 +1,6 @@
 import { Encoding, Option, Result, Schema } from "effect";
 import type * as Domain from "../shared/domain.ts";
+import * as Steps from "./steps.ts";
 import * as Text from "./text.ts";
 
 // The commands or entries take the left column; the image takes every column to its right,
@@ -211,6 +212,86 @@ const mark = (state: Entry["state"], glyph: string): Text.Piece => {
     return Text.paint(Text.PALETTE.pine, "✓");
   }
   return Text.paint(Text.PALETTE.love, "✗");
+};
+
+const wrap = (text: string, width: number): ReadonlyArray<string> => {
+  const plain = Text.clean(text).trim();
+  if (plain.length === 0) {
+    return [];
+  }
+  const lines: Array<string> = [];
+  let rest = plain;
+  while (rest.length > width) {
+    const at = rest.lastIndexOf(" ", width);
+    const cut = at > 0 ? at : width;
+    lines.push(rest.slice(0, cut));
+    rest = rest.slice(at > 0 ? at + 1 : cut);
+  }
+  if (rest.length > 0) {
+    lines.push(rest);
+  }
+  return lines;
+};
+
+const intentPiece = (text: string, failed: boolean): Text.Piece => ({
+  text,
+  color: failed ? Text.PALETTE.love : Text.PALETTE.foam,
+  bold: true,
+});
+
+// On a ticket the pane is the open step, not the session's history: the place of that line in
+// the ActionList, the line itself, and only the actions started under it.
+export const ticketRows = (
+  view: Full,
+  steps: ReadonlyArray<string>,
+  height: number,
+): ReadonlyArray<Text.Row> => {
+  const glyph = SPINNER[view.frame % SPINNER.length];
+  const at = view.entries.findLastIndex((entry) => entry.id === "intent");
+  const intent = at === -1 ? undefined : view.entries[at];
+  const actions =
+    at === -1
+      ? view.entries.filter((entry) => typeof entry.id === "number" && entry.id > 0)
+      : view.entries.slice(at + 1);
+  const place = intent === undefined ? 0 : Steps.indexOf(steps, intent.name);
+  const indexText =
+    intent !== undefined && place === 0
+      ? `—/${String(steps.length)}`
+      : `${String(place)}/${String(steps.length)}`;
+  const indexRow: Text.Row =
+    place > 0
+      ? [{ text: indexText, color: Text.PALETTE.gold, bold: true }]
+      : [Text.muted(indexText)];
+  const said = intent === undefined ? "no intent yet" : intent.name;
+  const failed = intent?.state === "failed";
+  const lines = wrap(said, LEFT_COLS - 2);
+  const intentRows: Array<Text.Row> =
+    intent === undefined
+      ? [[Text.muted(Text.cut(said, LEFT_COLS))]]
+      : lines.map((line, index) =>
+          index === 0
+            ? [mark(intent.state, glyph), Text.SPACE, intentPiece(line, failed)]
+            : [{ text: "  " }, intentPiece(line, failed)],
+        );
+  const actionRows = actions.map((entry): Text.Row => [
+    { text: " ".repeat(entry.indent) },
+    mark(entry.state, glyph),
+    Text.SPACE,
+    Text.value(Text.cut(entry.name, LEFT_COLS - 3 - entry.indent)),
+  ]);
+  const budget = Math.max(0, height - 2);
+  // One row stays with the step, so a short pane still says which line this is.
+  let actionBudget = Math.min(actionRows.length, budget);
+  if (budget > 0 && intentRows.length > 0) {
+    actionBudget = Math.min(actionRows.length, budget - 1);
+  }
+  const intentBudget = budget - actionBudget;
+  return [
+    fullHeader(view),
+    indexRow,
+    ...intentRows.slice(0, intentBudget),
+    ...actionRows.slice(actionRows.length - actionBudget),
+  ].slice(0, Math.max(0, height));
 };
 
 // The newest entries that fit in `height` rows, each its mark and its name cut to the column.

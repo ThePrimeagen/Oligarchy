@@ -11,6 +11,7 @@ import {
   getImage,
   groupDefinitions,
   listAutomationQueue,
+  listRunningAutomationJobs,
   listProcessSeries,
   listServers,
   listSessions,
@@ -25,7 +26,7 @@ import {
   type TestBasePrompt,
 } from "./query.ts";
 import { clickerPage } from "./clicker.ts";
-import { DefinitionsPage, type EditNotice } from "./definitions.tsx";
+import { DefinitionsPage, RunningList, type EditNotice } from "./definitions.tsx";
 import { HTMX_INTEGRITY, HTMX_URL } from "./htmx.ts";
 import { abortLinearIssue, type LinearEnv } from "./linear.ts";
 import { Fleet, type Halves, Process, Queue, ServersPage } from "./servers.tsx";
@@ -267,6 +268,7 @@ const Home: FC<HomeProps> = ({ sessions }) => (
 );
 
 const definitionHref = (name: string): string => `/definitions?name=${encodeURIComponent(name)}`;
+
 const editHref = (name: string, notice: EditNotice): string =>
   `${definitionHref(name)}&edit=${notice}`;
 
@@ -375,7 +377,10 @@ app.get("/definitions", async (context) => {
   // a stale or hand-made link and shows nothing.
   const notice = edit === "unchanged" || edit === "empty" ? edit : undefined;
   try {
-    const definitions = await listTestDefinitions(context.env.HYPERDRIVE.connectionString);
+    const [definitions, running] = await Promise.all([
+      listTestDefinitions(context.env.HYPERDRIVE.connectionString),
+      listRunningAutomationJobs(context.env.HYPERDRIVE.connectionString),
+    ]);
     const groups = groupDefinitions(definitions);
     const selected = selectDefinition(groups, name);
     // A stale link: the page still lists what exists, the status says the name does not.
@@ -385,6 +390,7 @@ app.get("/definitions", async (context) => {
       selected,
       notice,
       error: undefined,
+      running,
     });
   } catch (error) {
     Sentry.captureException(error);
@@ -395,7 +401,22 @@ app.get("/definitions", async (context) => {
       selected: undefined,
       notice: undefined,
       error: "Test definitions are unavailable.",
+      running: null,
     });
+  }
+});
+
+// What the running strip polls for: the jobs in flight, not the rest of the page. `name` is the
+// definition an abort without htmx returns to, echoed into the forms the swap inserts.
+app.get("/definitions/running", async (context) => {
+  const definition = context.req.query("name");
+  try {
+    const running = await listRunningAutomationJobs(context.env.HYPERDRIVE.connectionString);
+    return context.html(<RunningList jobs={running} definition={definition} />);
+  } catch (error) {
+    Sentry.captureException(error);
+    console.error("dashboard: listing running tests:", errorMessage(error));
+    return context.html(<p>error: internal error</p>, 500);
   }
 });
 
@@ -443,6 +464,7 @@ app.post("/definitions", async (context) => {
       selected: undefined,
       notice: undefined,
       error: "Test definitions are unavailable.",
+      running: null,
     });
   }
 });
@@ -641,17 +663,28 @@ app.post("/servers/delete", async (context) => {
 // at all, closes the running row here so the queue does not stay stuck; Sentry records
 // "Cloudflare aborted job" only when that write lands. Once a row closed either way the
 // ticket moves; a Linear failure is logged and the row stays closed. This route always
-// answers 200: the operator's click is done either way.
+// answers 200 when htmx or JSON asked, and a plain form post redirects. The servers page
+// gets the queue or /servers. A form that posts view=definitions gets the running list, or
+// /definitions, so aborting there does not land on the servers page. The operator's click
+// is done either way.
 // OpenCode's force-kill is 5s; ten seconds is that wait plus the round trip. A hung
 // server must not hold the operator's 200.
 const ABORT_TIMEOUT_MS = 10_000;
 
 app.post("/abort", async (context) => {
-  const wantsQueue = context.req.header("hx-request") === "true";
+  const wantsFragment = context.req.header("hx-request") === "true";
   const isJson = (context.req.header("content-type") ?? "").includes("application/json");
+  let view: unknown;
+  let definition: unknown;
   const reply = async () => {
-    if (wantsQueue) {
+    const definitionsView = view === "definitions";
+    const back = typeof definition === "string" ? definition : undefined;
+    if (wantsFragment) {
       try {
+        if (definitionsView) {
+          const running = await listRunningAutomationJobs(context.env.HYPERDRIVE.connectionString);
+          return context.html(<RunningList jobs={running} definition={back} />);
+        }
         const queue = await listAutomationQueue(context.env.HYPERDRIVE.connectionString);
         return context.html(<Queue queue={queue} />);
       } catch (error) {
@@ -662,6 +695,9 @@ app.post("/abort", async (context) => {
     }
     if (isJson) {
       return context.json({ ok: "true" });
+    }
+    if (definitionsView) {
+      return context.redirect(back === undefined ? "/definitions" : definitionHref(back), 303);
     }
     return context.redirect("/servers", 303);
   };
@@ -678,6 +714,8 @@ app.post("/abort", async (context) => {
       const body = await context.req.parseBody();
       ticket = body.ticket;
       action = body.action;
+      view = body.view;
+      definition = body.definition;
     }
     // A post naming less than a job (a text ticket and one of the two actions) does nothing.
     if (

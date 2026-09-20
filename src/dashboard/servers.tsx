@@ -220,7 +220,8 @@ export const Fleet: FC<{ servers: ReadonlyArray<Server> }> = ({ servers }) =>
   );
 
 // A stamp's age against the clock the read was made at, or a dash for a stamp not written yet.
-const since = (stamp: Date | null, queriedAt: Date): string =>
+// The definitions page uses the same wording for how long a test has been running.
+export const since = (stamp: Date | null, queriedAt: Date): string =>
   stamp === null ? "—" : `${age(queriedAt.getTime() - stamp.getTime())} ago`;
 
 // One list of the queue as a table, or the one word that says it is empty. The columns are the

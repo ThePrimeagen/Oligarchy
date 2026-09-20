@@ -544,6 +544,31 @@ export function listAutomationQueue(connectionString: string): Promise<Automatio
   });
 }
 
+// Every job that is running, in the queue's running order: diagnoses ahead of drives, then
+// created_at. The definitions page lists what is in flight so an operator can stop it; the
+// queue's fifty would hide one.
+export function listRunningAutomationJobs(connectionString: string): Promise<AutomationJob[]> {
+  return withDatabase(connectionString, (db) =>
+    db
+      .select({
+        ticket: testResults.linearId,
+        test: testDefinitions.name,
+        action: automationJobs.action,
+        status: automationJobs.status,
+        reason: automationJobs.reason,
+        createdAt: automationJobs.createdAt,
+        startedAt: automationJobs.startedAt,
+        finishedAt: automationJobs.finishedAt,
+        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(automationJobs.createdAt),
+      })
+      .from(automationJobs)
+      .innerJoin(testResults, eq(testResults.id, automationJobs.resultId))
+      .innerJoin(testDefinitions, eq(testDefinitions.id, testResults.definitionId))
+      .where(eq(automationJobs.status, "running"))
+      .orderBy(desc(sql`${automationJobs.action} = 'diagnose'`), automationJobs.createdAt),
+  );
+}
+
 // Closes the one job a ticket has for the action ((result_id, action) is unique), and only from
 // the status named, so the two closes stay apart: a pending row has no client to stop and this
 // write is its whole abort; a running row is the automation server's to stop and this write is

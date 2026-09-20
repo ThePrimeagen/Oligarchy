@@ -1,7 +1,7 @@
 import { html } from "hono/html";
 import { describe, expect, it } from "vitest";
 import { DefinitionsPage } from "../../src/dashboard/definitions.tsx";
-import type { TestDefinition } from "../../src/dashboard/query.ts";
+import type { AutomationJob, TestDefinition } from "../../src/dashboard/query.ts";
 
 const wording = (
   id: number,
@@ -39,6 +39,7 @@ const page = (
       selected: undefined,
       notice: undefined,
       error: undefined,
+      running: [],
       ...extra,
     }),
   );
@@ -126,19 +127,26 @@ describe("DefinitionsPage happy path", () => {
 
   it("says no definitions for an empty list, with no form", async () => {
     const htmlText = await page([]);
-    expect(htmlText).toContain("<h1>oligarchy definitions</h1><p>no definitions</p>");
-    expect(htmlText).not.toContain("<form");
-    expect(htmlText).not.toContain("<h2>");
+    expect(htmlText).toContain("<h1>oligarchy definitions</h1>");
+    expect(htmlText).toContain("<p>no definitions</p>");
+    expect(htmlText).toContain('<p class="running-tests__empty">No tests are running.</p>');
+    expect(htmlText).not.toContain('class="definition__form"');
+    expect(htmlText).not.toContain("<h2>install</h2>");
   });
 });
 
 describe("DefinitionsPage unhappy path", () => {
   it("says the definitions are unavailable and lists none when the database could not be read", async () => {
-    const htmlText = await page(null, { error: "Test definitions are unavailable." });
+    const htmlText = await page(null, {
+      error: "Test definitions are unavailable.",
+      running: null,
+    });
     expect(htmlText).toContain("<p>error: Test definitions are unavailable.</p>");
     expect(htmlText).not.toContain("no definitions");
     expect(htmlText).not.toContain("<form");
     expect(htmlText).not.toContain("<h2>");
+    expect(htmlText).not.toContain('id="running-tests"');
+    expect(htmlText).not.toContain("No tests are running.");
   });
 
   it("names a definition that does not exist and still lists the ones that do", async () => {
@@ -181,5 +189,40 @@ describe("DefinitionsPage unhappy path", () => {
     expect(htmlText).not.toContain('a<"b>');
     expect(htmlText).not.toContain("<nope>");
     expect(htmlText).not.toContain("<d>");
+  });
+
+  it("lists the running jobs it is given, above the wordings, and offers no abort without a ticket", async () => {
+    const queriedAt = new Date("2026-09-09T16:00:00Z");
+    const startedAt = new Date("2026-09-09T15:59:50Z");
+    const running = (ticket: string | null, action: AutomationJob["action"]): AutomationJob => ({
+      ticket,
+      test: "lock-screen",
+      action,
+      status: "running",
+      reason: null,
+      createdAt: startedAt,
+      startedAt,
+      finishedAt: null,
+      queriedAt,
+    });
+    const htmlText = await page([{ name: "lock-screen", versions: lock }], {
+      name: "lock-screen",
+      selected: { name: "lock-screen", versions: lock },
+      running: [running("RUN-2", "diagnose"), running("RUN-1", "drive"), running(null, "drive")],
+    });
+    const strip = htmlText.slice(
+      htmlText.indexOf('<section class="running-tests"'),
+      htmlText.indexOf("<h2>lock-screen</h2>"),
+    );
+    expect(strip).toContain(
+      '<div id="running-tests" hx-get="/definitions/running?name=lock-screen" hx-trigger="every 30s" hx-swap="innerHTML">',
+    );
+    expect(strip.indexOf(">RUN-2<")).toBeLessThan(strip.indexOf(">RUN-1<"));
+    expect(strip.indexOf(">RUN-1<")).toBeLessThan(strip.indexOf(">—</span>"));
+    expect(strip).toContain("10 s ago");
+    expect(strip).toContain(
+      '<form method="post" action="/abort" hx-post="/abort" hx-confirm="are you sure?" hx-target="#running-tests" hx-swap="innerHTML"><input type="hidden" name="ticket" value="RUN-2"/><input type="hidden" name="action" value="diagnose"/><input type="hidden" name="view" value="definitions"/><input type="hidden" name="definition" value="lock-screen"/><button type="submit" class="button button--abort">Abort</button></form>',
+    );
+    expect(strip.match(/action="\/abort"/g)).toHaveLength(2);
   });
 });
