@@ -210,14 +210,14 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `theme-remove-active-user-theme-unguarded`
 - [x] `theme-user-templates-render-on-switch`
 - [x] `theme-refresh-repairs-rendered-file`
-- [ ] `theme-terminal-and-tmux-retint-live`
-- [ ] `restart-helpers-quiet-when-target-absent`
-- [ ] `theme-btop-retint`
-- [ ] `theme-neovim-colorscheme-follows-theme`
-- [ ] `theme-lumon-fetches-lumon-nvim`
-- [ ] `theme-hyprland-border-and-overrides`
-- [ ] `theme-shell-section-override-lock-screen`
-- [ ] `theme-chromium-policy-colour-follows-theme`
+- [x] `theme-terminal-and-tmux-retint-live`
+- [x] `restart-helpers-quiet-when-target-absent`
+- [x] `theme-btop-retint`
+- [x] `theme-neovim-colorscheme-follows-theme`
+- [x] `theme-lumon-fetches-lumon-nvim`
+- [x] `theme-hyprland-border-and-overrides`
+- [x] `theme-shell-section-override-lock-screen`
+- [x] `theme-chromium-policy-colour-follows-theme`
 - [ ] `theme-obsidian-sync`
 - [ ] `theme-hooks-absent-apps-and-hardware-stay-silent`
 - [ ] `theme-preview-palette-in-terminal`

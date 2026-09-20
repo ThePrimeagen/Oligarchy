@@ -9174,27 +9174,36 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `ls --color=always /usr/share/omarchy/bin | head -40` so coloured text is on screen.
-  * Open a second terminal with Super+Enter (it tiles beside the first) and type `tmux`, then `echo hello` inside it.
-  * Click the first terminal and type `omarchy-theme-set gruvbox`.
-  ** Within ~3 s the first terminal's background turns dark grey and its text warm, with the `ls` output still there, and the tmux pane in the second terminal repaints too — tmux is not restarted.
-  * Open a third terminal with Super+Enter; it opens already in Gruvbox colours. In it type `omarchy-theme-set catppuccin-latte`: all panes turn light (pale background, dark text); `tmux show-environment -g COLORFGBG` → `COLORFGBG=0;15`.
-  * Type `omarchy-theme-set tokyo-night`: all three terminals repaint to navy; `tmux show-environment -g COLORFGBG` → `COLORFGBG=15;0`.
-  * Click the second terminal and type `exit` to leave tmux; close the extra terminals with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Type `ls --color=always /usr/share/omarchy/bin | head -40` and press Return. Coloured text stays on screen.
+  * Press Super+Enter. A second terminal opens.
+  * Type `tmux` and press Return. A tmux pane opens.
+  * Type `echo hello` and press Return. The line `hello` appears.
+  * Click the first terminal. It has focus.
+  * Type `omarchy-theme-set gruvbox` and press Return. Both terminals recolour. The `ls` output is still there. Tmux was not restarted.
+  * Press Super+Enter. A third terminal opens. It is already in the Gruvbox colours.
+  * Type `omarchy-theme-set catppuccin-latte` and press Return. All three terminals turn light.
+  * Type `tmux show-environment -g COLORFGBG` and press Return. The line is `COLORFGBG=0;15`.
+  * Type `omarchy-theme-set tokyo-night` and press Return. All three terminals turn navy.
+  * Type `tmux show-environment -g COLORFGBG` and press Return. The line is `COLORFGBG=15;0`.
+  * Click the second terminal. It has focus.
+  * Type `exit` and press Return. Tmux closes.
+  * Press Super+W. One terminal closes.
+  * Press Super+W. Another terminal closes.
+  * Press Super+W. The last terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Keep the terminals visible; side-by-side before/after screenshots are the proof. The tmux status line keeps its own colours; only the pane background/foreground is expected to change.
-  * Foot cannot reload its config; this repaint is done with escape sequences, so it should be near-instant.
+  * The tmux status line may keep its own colours. The pane colours are the result.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Terminal 1 and the tmux pane in Tokyo Night; both in Gruvbox with the earlier output intact; a new terminal in Gruvbox; all light under Catppuccin Latte with `COLORFGBG=0;15`; all navy again with `COLORFGBG=15;0`
+  * On success
+  ** Both terminals recoloured to Gruvbox with the earlier output intact, a new terminal already in Gruvbox, all light under Catppuccin Latte with `COLORFGBG=0;15`, and all navy with `COLORFGBG=15;0`
   * If unsuccessful
-  ** Screenshot of a terminal or pane that kept its old colours and `tmux show-options -g window-style`
+  ** A terminal or pane that kept its old colours
 covers: bin/omarchy-theme-set-foot; bin/omarchy-theme-osc; default/themed/foot.ini.tpl; config/foot/foot.ini include; bin/omarchy-restart-terminal; bin/omarchy-theme-set-tmux; default/themed/gum_env.lua.tpl
 
 ### restart-helpers-quiet-when-target-absent   [VM-OK]
@@ -9204,26 +9213,33 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy-restart-terminal; echo "exit=$?"` → `exit=0`; the terminal itself stays open (foot cannot reload; alacritty re-reads its config, kitty/ghostty get a reload signal — none is installed on the stock disk, so nothing visible changes).
-  * Type `omarchy-restart-tmux; echo "exit=$?"` → `exit=0` with no session. Then `tmux new -d -s t && omarchy-restart-tmux; echo "exit=$?"; tmux kill-server` → `exit=0`.
-  * Type `omarchy-restart-btop; omarchy-restart-helix; omarchy-restart-opencode; omarchy-restart-herdr; echo "exit=$?"` → nothing printed (none running); a 0 or 1 exit is acceptable for the `pkill`-based ones — report what you see.
-  * Type `systemctl --user is-active omarchy-fcitx5.service` (note it); `omarchy-restart-xcompose; echo "exit=$?"` → `exit=0`; `systemctl --user show -p ActiveEnterTimestamp --value omarchy-fcitx5.service` → a timestamp within the last seconds; `pgrep -x fcitx5` → one PID.
-  * Type `source omarchy-restart-gum; echo "$GUM_CONFIRM_PROMPT_FOREGROUND $BORDER_FOREGROUND"` → two colour values (the theme's accent) from `~/.local/state/omarchy/current/theme/gum_env.lua`.
-  * Unhappy path: type `omarchy-restart-app; echo "exit=$?"` with no argument → `pkill` usage noise and a non-zero exit is acceptable; report what you see. Close the terminal with Super+W; the desktop is as found.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy-restart-terminal; echo "exit=$?"` and press Return. The last line is `exit=0`. The terminal stays open.
+  * Type `omarchy-restart-tmux; echo "exit=$?"` and press Return. The last line is `exit=0`.
+  * Type `tmux new -d -s t && omarchy-restart-tmux; echo "exit=$?"` and press Return. The last line is `exit=0`.
+  * Type `tmux kill-server` and press Return.
+  * Type `omarchy-restart-btop; omarchy-restart-helix; omarchy-restart-opencode; omarchy-restart-herdr; echo "exit=$?"` and press Return. Nothing is reported for a missing target. Record the exit code.
+  * Type `systemctl --user is-active omarchy-fcitx5.service` and press Return. Note the state.
+  * Type `omarchy-restart-xcompose; echo "exit=$?"` and press Return. The last line is `exit=0`.
+  * Wait 1 second.
+  * Type `systemctl --user show -p ActiveEnterTimestamp --value omarchy-fcitx5.service` and press Return. The timestamp is recent.
+  * Type `pgrep -x fcitx5` and press Return. One PID is printed.
+  * Type `source omarchy-restart-gum; echo "$GUM_CONFIRM_PROMPT_FOREGROUND $BORDER_FOREGROUND"` and press Return. Two colour values are printed.
+  * Type `omarchy-restart-app; echo "exit=$?"` and press Return. Record the output. A non-zero exit is acceptable.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * All commands are instant; maximise the terminal (Super+F) so one screenshot per step is readable.
-  * Caps Lock is the Compose key on Omarchy; restarting fcitx5 briefly interrupts input — wait a second before typing the next command.
+  * Wait a second after restarting fcitx5 before typing the next command.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Terminal screenshots with the exit codes, the fcitx5 timestamp change and single PID, and the two gum colour values
+  * On success
+  ** Each restart helper returning without an error for a missing target, fcitx5 active with one PID, and two gum colour values
   * If unsuccessful
-  ** `systemctl --user status omarchy-fcitx5.service` if the unit is missing or failed; any helper printing an error for an absent target
+  ** An error printed because the target was not running, or fcitx5 failing to restart
 covers: bin/omarchy-restart-terminal; bin/omarchy-restart-tmux; bin/omarchy-restart-btop; bin/omarchy-restart-helix; bin/omarchy-restart-opencode; bin/omarchy-restart-xcompose; bin/omarchy-restart-herdr; bin/omarchy-restart-gum; bin/omarchy-restart-app
 
 ### theme-btop-retint   [VM-OK]
@@ -9233,25 +9249,28 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Ctrl+T. btop opens in a terminal window with Tokyo Night colours (blue/purple boxes).
-  ** If nothing opens, open a terminal and type `btop`, and report the hotkey miss.
-  * Open another terminal with Super+Enter and type `omarchy-theme-set retro-82`.
-  ** Within 3 s btop's boxes change to the Retro-82 palette without being restarted (its uptime counter keeps running).
-  * Type `omarchy-theme-set gruvbox`; btop repaints again in brown/olive.
-  * Type `omarchy-theme-set tokyo-night`; btop is blue/purple again. Click on btop and press `q` to quit; close the terminal with Super+W.
+  * Press Super+Ctrl+T. btop opens.
+  ** If nothing opens, open a terminal, type `btop`, and report that the hotkey missed.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy-theme-set retro-82` and press Return. btop recolours. It was not restarted.
+  * Type `omarchy-theme-set gruvbox` and press Return. btop recolours again.
+  * Type `omarchy-theme-set tokyo-night` and press Return. btop recolours again.
+  * Click btop. It has focus.
+  * Press `q`. btop closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * btop may need a second to redraw after the signal; take two screenshots.
+  * btop may need a second to redraw. Take a second screenshot.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** The same btop window in Tokyo Night, Retro-82, Gruvbox and Tokyo Night again
+  * On success
+  ** The same btop window recoloured for Retro-82, Gruvbox, and Tokyo Night
   * If unsuccessful
-  ** btop screenshot with stale colours
+  ** btop keeping its old colours
 covers: install/user/theme.sh (btop symlink), default/themed/btop.theme.tpl, themes/retro-82/btop.theme, bin/omarchy-restart-btop
 
 ### theme-neovim-colorscheme-follows-theme   [VM-OK]
@@ -9261,26 +9280,35 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `nvim /etc/os-release`. The buffer is in Tokyo Night colours. Type `:colorscheme` and Enter; record the name printed (21 expects the theme's own scheme, 60 expects `aether`). Type `:q` and Enter.
-  ** If a plugin-install window appears, wait for it (10–20 s) and press `q`; a download prompt inside it means the pre-built plugin cache is missing — screenshot it.
-  * Type `omarchy-theme-set ethereal`, then `nvim /etc/os-release` again.
-  ** The buffer background is near-black blue and the text peach. Type `:colorscheme` Enter → `aether`. Type `:Lazy` Enter: the plugin list contains `aether` (from bjarneo/aether.nvim); press `q`. Quit with `:qa!`.
-  * Type `omarchy-theme-set gruvbox`, then `nvim /etc/os-release`; the classic Gruvbox scheme (dark grey, cream text). Quit with `:q`.
-  * Type `omarchy-theme-set tokyo-night` and close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Type `nvim /etc/os-release` and press Return. Neovim opens.
+  ** If a plugin window appears, wait for it and press `q`. Screenshot a download prompt.
+  * Type `:colorscheme` and press Enter. Record the name.
+  * Type `:q` and press Enter. Neovim closes.
+  * Type `omarchy-theme-set ethereal` and press Return.
+  * Type `nvim /etc/os-release` and press Return. Neovim opens.
+  * Type `:colorscheme` and press Enter. The name is `aether`.
+  * Type `:Lazy` and press Enter. The plugin list includes `aether`.
+  * Press `q`. The plugin list closes.
+  * Type `:qa!` and press Enter. Neovim closes.
+  * Type `omarchy-theme-set gruvbox` and press Return.
+  * Type `nvim /etc/os-release` and press Return. Neovim opens in the Gruvbox colours.
+  * Type `:q` and press Enter. Neovim closes.
+  * Type `omarchy-theme-set tokyo-night` and press Return.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The first nvim start after a theme change may sync plugins (a Lazy window) for 10–20 s; poll with screenshots.
-  * A red `Error` line at nvim start is a failure; capture it. If `:colorscheme` prints something unexpected, also run `:echo g:colors_name`.
+  * The first Neovim start after a theme change may take 10 to 20 seconds. A red Error line is a failure.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Three nvim screenshots with visibly different schemes matching the theme; `:colorscheme` output on Tokyo Night recorded; `aether` printed on Ethereal and `:Lazy` listing aether
+  * On success
+  ** The Tokyo Night colourscheme name, `aether` on Ethereal with the plugin listed, and a Gruvbox buffer
   * If unsuccessful
-  ** The nvim error text on screen, the Lazy error or download prompt; `pacman -Q omarchy-nvim`
+  ** The Neovim error text, or a missing `aether` plugin
 covers: default/themed/neovim.lua.tpl (l.1-10, l.47-51); themes/tokyo-night/neovim.lua; themes/gruvbox/neovim.lua; docs/theming.md (hand-written overrides win); manual/16-neovim.md; omarchy-pkgs/pkgbuilds/omarchy-nvim
 
 ### theme-lumon-fetches-lumon-nvim   [VM-OK] [NET]
@@ -9290,26 +9318,36 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Space → `Style` → `Theme` → `Lumon`. The desktop recolours to Lumon's palette.
-  * Open a terminal with Super+Enter and type `nvim`.
-  ** Lazy installs `lumon.nvim` (a short download); wait, press `q` if the window stays.
-  * Type `:colorscheme` Enter → `lumon`.
-  * Type `:qa!` Enter, then Super+Space → `Style` → `Theme` → `Tokyo Night`.
-  * Type `nvim`, then `:colorscheme` Enter → `aether` (or the Tokyo Night scheme — record which; see `theme-neovim-colorscheme-follows-theme`). Type `:qa!` Enter and close the terminal with Super+W.
-  ** The desktop is as found; the downloaded plugin stays in Neovim's plugin cache (harmless).
+  * Press Super+Space. The menu opens.
+  * Click Style.
+  * Click Theme.
+  * Click Lumon. The desktop switches to Lumon.
+  * Press Super+Enter. A terminal opens.
+  * Type `nvim` and press Return. Neovim opens.
+  ** If a plugin window stays open, press `q`.
+  * Type `:colorscheme` and press Enter. The name is `lumon`.
+  * Type `:qa!` and press Enter. Neovim closes.
+  * Press Super+Space. The menu opens.
+  * Click Style.
+  * Click Theme.
+  * Click Tokyo Night. The desktop switches to Tokyo Night.
+  * Type `nvim` and press Return. Neovim opens.
+  * Type `:colorscheme` and press Enter. Record the name.
+  * Type `:qa!` and press Enter. Neovim closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * A Lazy clone error is the finding — screenshot it and check connectivity with `curl -sI https://github.com | head -1`.
+  * A plugin-install error is a failure. Check `curl -sI https://github.com | head -1` if the download fails.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshot of the Lumon desktop and of `:colorscheme` printing lumon; `:colorscheme` after switching back
+  * On success
+  ** `:colorscheme` printing `lumon`, then a Tokyo Night scheme after switching back
   * If unsuccessful
-  ** Screenshot of the Lazy error; `cat ~/.local/state/omarchy/current/theme/neovim.lua`
+  ** The plugin-install error
 covers: themes/lumon/neovim.lua l.3-9; manual/06-themes.md "Lumon"
 
 ### theme-hyprland-border-and-overrides   [VM-OK]
@@ -9319,24 +9357,27 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open two terminals with Super+Enter twice so one is focused and one is not. The focused one has a blue border, the other grey.
-  * In the focused terminal type `omarchy-theme-set gruvbox`. The focused border turns teal.
-  * Type `omarchy-theme-set kanagawa`. The focused border is off-white (that theme ships its own Hyprland file).
-  * Type `omarchy-theme-set last-horizon`. The focused border shows a two-tone grey-to-white gradient.
-  * Type `omarchy-theme-set tokyo-night`; the border is blue again. Close the extra terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Press Super+Enter. A second terminal opens. The focused window has a blue border.
+  * Type `omarchy-theme-set gruvbox` and press Return. The focused border turns teal.
+  * Type `omarchy-theme-set kanagawa` and press Return. The focused border is off-white.
+  * Type `omarchy-theme-set last-horizon` and press Return. The focused border is a two-tone gradient.
+  * Type `omarchy-theme-set tokyo-night` and press Return. The focused border is blue again.
+  * Press Super+W. One terminal closes.
+  * Press Super+W. The other terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Borders are 2 px; take full-resolution screenshots and look at the window edges.
+  * Borders are thin. Look at the window edge in the screenshot.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots showing the focused border blue, teal, off-white, gradient, blue
+  * On success
+  ** The focused border blue, teal, off-white, gradient, then blue again
   * If unsuccessful
-  ** Screenshot of a border that did not change; in a terminal `hyprctl reload` output
+  ** A border that did not change
 covers: default/themed/hyprland.lua.tpl (hypr_gradient), themes/kanagawa/hyprland.lua, themes/last-horizon/hyprland.lua, bin/omarchy-restart-hyprctl, default/hypr/omarchy.lua
 
 ### theme-shell-section-override-lock-screen   [VM-OK]
@@ -9346,26 +9387,29 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Ctrl+L. The lock screen's password field border and text are muted blue-grey, not the bright accent blue.
-  ** The lock screen blanks to black 5 s after the last input; a mouse move wakes it and keys still go to the password field. There is no clock or user name — only the field.
-  * Type `prime` and Enter to unlock.
-  * Open a terminal with Super+Enter and type `omarchy-theme-set gruvbox`.
-  * Press Super+Ctrl+L. The password field is now in Gruvbox cream/teal (generated colours). Unlock with `prime`.
-  * Type `grep -c '^\[lock\]' ~/.local/state/omarchy/current/theme/shell.toml` → `1` (the override must not leave a duplicate section).
-  * Type `omarchy-theme-set tokyo-night` and close the terminal with Super+W.
+  * Press Super+Ctrl+L. The lock screen appears.
+  ** Screenshot before it blanks. A mouse move wakes it.
+  * Type `prime` and press Enter. The desktop returns.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy-theme-set gruvbox` and press Return.
+  * Press Super+Ctrl+L. The lock screen appears. The password field uses the Gruvbox colours.
+  * Type `prime` and press Enter. The desktop returns.
+  * Type `grep -c '^\[lock\]' ~/.local/state/omarchy/current/theme/shell.toml` and press Return. The line is `1`.
+  * Type `omarchy-theme-set tokyo-night` and press Return.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Screenshot the lock screen immediately after locking, before it blanks; take a second screenshot ~1 s after waking.
+  * The lock screen blanks after 5 seconds. Screenshot it first.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Tokyo Night lock screen in muted blue-grey; Gruvbox lock screen in cream/teal; `1`; restored desktop
+  * On success
+  ** A Tokyo Night lock screen, a Gruvbox lock screen, and exactly one `[lock]` section
   * If unsuccessful
-  ** The lock screen screenshot and the grep count
+  ** The lock-screen screenshot and the grep count
 covers: bin/omarchy-theme-set-templates (apply_shell_section_overrides), themes/tokyo-night/shell.lock.toml, docs/theming.md "shell.toml"
 
 ### theme-chromium-policy-colour-follows-theme   [VM-OK]
@@ -9375,28 +9419,42 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter, press Super+F, and type `stat -c '%U:%G %a %n' /etc/chromium /etc/chromium/policies /etc/chromium/policies/managed /etc/chromium/policies/managed/color.json; cat /etc/chromium/policies/managed/color.json` → dirs `root:root 755`, file `root:root 644`, `"BrowserThemeColor": "#xxxxxx"` (six lowercase hex).
-  * Press Super+F again, type `chromium &`. Chromium opens (20–30 s without GPU; click **Wait** if Hyprland's "not responding" dialog appears) with a dark navy toolbar.
-  * In the terminal type `omarchy-theme-set flexoki-light; sleep 3; cat /etc/chromium/policies/managed/color.json`.
-  ** No password or polkit dialog may appear. The file shows the light colour `#f2f0e5`; within a few seconds Chromium's toolbar turns pale cream and the wallpaper is light. In Chromium click the address bar, type `chrome://policy`, Enter: the row `BrowserThemeColor` shows `#f2f0e5`.
-  * In the terminal type `sudo -n -l -l 2>/dev/null | grep -A2 omarchy-theme-set-browser-policy` → the `NOPASSWD` rule for `/usr/bin/omarchy-theme-set-browser-policy` with six `[0-9a-f]` classes.
-  * Type `omarchy-theme-set-browser-policy GGGGGG; echo "exit=$?"` → `expected six lowercase hex digits, got 'GGGGGG'`, `exit=1`.
-  * Type `sudo touch /etc/chromium/policies/managed/evil.json && sudo chown prime /etc/chromium/policies/managed/evil.json && omarchy-theme-set-browser; ls -l /etc/chromium/policies/managed/` (only this `sudo` asks for `prime`) → `evil.json` is gone, `color.json` still `root 644`.
-  * Type `omarchy-theme-set tokyo-night; sleep 3; cat /etc/chromium/policies/managed/color.json` → a dark colour, again no prompt; Chromium's toolbar is navy again. Close Chromium (Ctrl+Shift+Q or Super+W) and the terminal.
+  * Press Super+Enter. A terminal opens.
+  * Type `stat -c '%U:%G %a %n' /etc/chromium /etc/chromium/policies /etc/chromium/policies/managed /etc/chromium/policies/managed/color.json` and press Return. The directories are `root:root` mode `755`.
+  * Type `cat /etc/chromium/policies/managed/color.json` and press Return. The colour is six lowercase hex digits.
+  * Type `chromium &` and press Return. Chromium opens.
+  ** If Chromium says it is not responding, click Wait.
+  * Type `omarchy-theme-set flexoki-light` and press Return. No password dialog appears.
+  * Wait 3 seconds.
+  * Type `cat /etc/chromium/policies/managed/color.json` and press Return. The colour is `#f2f0e5`.
+  * Click the Chromium address bar.
+  * Type `chrome://policy` and press Enter. The `BrowserThemeColor` row shows `#f2f0e5`.
+  * Click the terminal. It has focus.
+  * Type `sudo -n -l -l 2>/dev/null | grep -A2 omarchy-theme-set-browser-policy` and press Return. A NOPASSWD rule is listed.
+  * Type `omarchy-theme-set-browser-policy GGGGGG; echo "exit=$?"` and press Return. The output says six lowercase hex digits were expected. The last line is `exit=1`.
+  * Type `sudo touch /etc/chromium/policies/managed/evil.json` and press Return.
+  ** If a password is asked, type `prime` and press Return.
+  * Type `sudo chown prime /etc/chromium/policies/managed/evil.json` and press Return.
+  * Type `omarchy-theme-set-browser` and press Return.
+  * Type `ls -l /etc/chromium/policies/managed/` and press Return. `evil.json` is gone. `color.json` is still owned by root.
+  * Type `omarchy-theme-set tokyo-night` and press Return. No password dialog appears.
+  * Wait 3 seconds.
+  * Type `cat /etc/chromium/policies/managed/color.json` and press Return. The colour is dark.
+  * Press Super+W. Chromium closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * If a polkit password dialog appears during a theme switch, enter `prime`, let it finish, and report it: the passwordless rule is missing on this build (record `omarchy-version`).
-  * Chromium's toolbar follows the policy live; if it does not, reload the page and note it. Firefox/Zen are absent on the stock disk, so their `distribution/policies.json` half is skipped.
+  * If a password dialog appears during a theme switch, type `prime`, finish the switch, and report that the passwordless rule is missing.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** The stat/cat output; Chromium navy; Chromium cream after the switch with no prompt on screen and the `chrome://policy` row `#f2f0e5`; the sudoers listing; the `GGGGGG` rejection; `evil.json` dropped with `color.json` root 644; Chromium navy again
+  * On success
+  ** Root-owned policy directories, `#f2f0e5` after the light theme with no password dialog, the policy page showing that colour, the bad hex refused, `evil.json` removed, and a dark colour after Tokyo Night
   * If unsuccessful
-  ** Screenshot of a polkit/sudo prompt during the switch, a toolbar that did not change, a non-root or non-755 directory, or `evil.json` surviving
+  ** A password dialog during the switch, a toolbar that did not change, or `evil.json` surviving
 covers: bin/omarchy-theme-set-browser; bin/omarchy-theme-set-browser-policy; etc/sudoers.d/omarchy-theme-browser; themes/flexoki-light/chromium.theme; default/themed/chromium.theme.tpl; install/helpers/browser-policy.sh; test/shell.d/browser-policy-dir-test.sh; test/shell.d/browser-policy-sudoers-test.sh (grant/elevation); test/shell.d/default-apps-test.sh (Chromium installer policy dirs); manual/23-browsers.md
 
 ### theme-obsidian-sync   [VM-OK]
