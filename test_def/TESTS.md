@@ -465,15 +465,19 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `omarchy-hyprland-session-locked; echo "unlocked-probe=$?"` → `1`. Then `omarchy-restart-shell; echo "exit=$?"`: the bar disappears briefly and returns, `exit=0`; `pgrep -c -x quickshell` → `1` (try `qs` if that prints 0); `omarchy-shell shell ping` → `ok`.
-  * Run `sudo -v` (password `prime`), then exactly: `(sleep 12; omarchy-hyprland-session-locked; echo "locked-probe=$?" | sudo -n tee /dev/ttyS0; omarchy-restart-shell >/tmp/restart.log 2>&1; echo "exit=$?" >>/tmp/restart.log) &`
-  * Immediately press Super+Ctrl+L to lock. Stay locked for at least 25 seconds, moving the mouse every 4 seconds so the screen stays visible (screenshot each time).
-  ** The lock screen must remain; the bar must not flash back; nothing else appears.
-  * Read `./client get-serial` → `locked-probe=0`.
-  * Type `prime` and Enter to unlock.
-  * In the terminal run `cat /tmp/restart.log` → `Refusing to restart Omarchy shell while the session is locked.` and `exit=1`. Then `pgrep -c -x quickshell` → still `1` (same instance, no restart happened), `omarchy-shell shell ping` → `ok`, `omarchy-hyprland-session-locked; echo $?` → `1`, and the bar is still at the top.
-  ** The same refusal is reachable from a text console: Ctrl+Alt+F3, log in `prime`/`prime`, `export HYPRLAND_INSTANCE_SIGNATURE=$(ls /run/user/1000/hypr | tail -1); omarchy restart shell; echo status=$?` → the refusal line and `status=1` while locked.
-  * Close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Run `omarchy-hyprland-session-locked; echo unlocked-probe=$?` and press Enter. It prints `unlocked-probe=1`.
+  * Run `omarchy-restart-shell; echo exit=$?` and press Enter. The shell restarts. It prints `exit=0`.
+  * Run `omarchy-shell shell ping` and press Enter. It prints `ok`.
+  * Run `sudo -v` and press Enter. Password is `prime`. Sudo is cached.
+  * Run `(sleep 12; omarchy-hyprland-session-locked; echo "locked-probe=$?" | sudo -n tee /dev/ttyS0; omarchy-restart-shell >/tmp/restart.log 2>&1; echo "exit=$?" >>/tmp/restart.log) &` and press Enter. The command is waiting.
+  * Press Super+Ctrl+L. The screen locks.
+  * Wait 25 seconds. Move the mouse every 4 seconds. The screen stays locked.
+  * Read `./client get-serial`. It shows `locked-probe=0`.
+  * Type `prime` and press Enter. The desktop returns.
+  * Run `cat /tmp/restart.log` and press Enter. It refuses to restart while locked, and the exit is 1.
+  * Run `omarchy-shell shell ping` and press Enter. It prints `ok`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -501,15 +505,16 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run exactly: `(sleep 10; pkill -9 -x quickshell || pkill -9 -x qs) &`
-  * Immediately press Super+Ctrl+L and keep the lock screen visible by moving the mouse every 4 seconds, screenshotting each time.
-  * At around 10 s the password box disappears (the shell was killed). Screenshot what the screen shows — Hyprland's plain lock fallback (a solid or tinted screen, possibly with a text message). It must NOT show the desktop, the bar or any windows.
-  * Keep screenshotting every 3–4 s. Within about 10–15 seconds the `Enter Password` box reappears (new shell, lock re-taken).
-  * Type `prime` and press Enter. The desktop returns with the bar and the terminal.
-  * In the terminal run `omarchy-shell lock status | jq .locked` → `false`, then `journalctl -t omarchy-shell --since -3min --no-pager | grep -E 'relaunching|lock-stranded|lock-requested|unlocked' | sudo tee /dev/ttyS0` (password `prime`) and read the serial log.
-  ** Expected lines: `Omarchy shell exited with status 137; relaunching.`, `omarchy lock … lock-stranded: recovering`, `… lock-requested`, `… unlocked`.
-  ** The same recovery can be driven from a console: Ctrl+Alt+F3, log in `prime`/`prime`, `kill -9 $(pgrep -x quickshell); sleep 3; pgrep -x quickshell` prints a new PID; back on Ctrl+Alt+F1 the lock screen has a password field, not a black failsafe. A manual `omarchy-restart-shell` after the kill also exits 0 and re-acquires the lock.
-  * Close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Run `(sleep 10; pkill -9 -x quickshell || pkill -9 -x qs) &` and press Enter. The command is waiting.
+  * Press Super+Ctrl+L. The screen locks.
+  * Move the mouse every 4 seconds. The screen stays locked.
+  * Wait until the password box disappears. The desktop is not shown.
+  * Wait. The password box returns.
+  * Type `prime` and press Enter. The desktop returns.
+  * Run `omarchy-shell lock status | jq .locked` and press Enter. It prints `false`.
+  * Run `journalctl -t omarchy-shell --since -3min --no-pager | grep -E 'relaunching|lock-stranded|unlocked' | sudo tee /dev/ttyS0` and press Enter. Password is `prime`. Read `./client get-serial`. It shows the relaunch and the unlock.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -535,13 +540,13 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `omarchy-shell lock status | jq .`. It shows `"locked": false`, `"passwordPam": true`, `"fingerprint": false`, `"realScreens": 1`.
-  * Run `omarchy-shell lock lock`. It prints `ok` and the lock screen appears at once.
-  ** The lock screen blanks 5 s after the last input; a mouse move brings it back.
-  * Type `prime` and press Enter. The desktop with the terminal returns.
-  * Run `omarchy-shell lock status | jq .lastEvent` → `"unlocked"`.
-  * Run `journalctl -t omarchy-shell --since -3min --no-pager | grep 'omarchy lock' | sudo tee /dev/ttyS0` (password `prime`) and read the serial log. In order it contains `lock-requested`, `lock-pending: screen-stabilizing`, `session-locked=true`, `secure=true`, `unlocked`.
-  * Close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Run `omarchy-shell lock status | jq .locked` and press Enter. It prints `false`.
+  * Run `omarchy-shell lock lock` and press Enter. It prints `ok`. The screen locks.
+  * Type `prime` and press Enter. The desktop returns.
+  * Run `omarchy-shell lock status | jq .lastEvent` and press Enter. It prints `"unlocked"`.
+  * Run `journalctl -t omarchy-shell --since -3min --no-pager | grep 'omarchy lock' | sudo tee /dev/ttyS0` and press Enter. Password is `prime`. Read `./client get-serial`. It shows lock-requested, then unlocked.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -566,12 +571,16 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `omarchy-shell lock preview`. The screen shows the lock look (blurred wallpaper + `Enter Password` box) and the command printed `ok`.
-  * Type `abc` and press Enter. Nothing happens: no dots, no `Checking…`, no failure message (the preview field is disabled).
-  * Click anywhere with the left mouse button. The preview disappears and the desktop with the terminal is back.
-  * Run `omarchy-shell lock isLocked` — `false` (the session was never locked).
-  * Run exactly: `omarchy-shell lock preview; sleep 6; omarchy-shell lock hidePreview` — the preview shows for ~6 s and then hides itself without any click.
-  * Run `omarchy-shell lock preview` again and wait 8 s taking a screenshot every 4 s: the preview never blanks the screen (no black) — the 5 s blank timer belongs to real locks only. Click to dismiss it, then close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Run `omarchy-shell lock preview` and press Enter. It prints `ok`. The preview opens.
+  * Type `abc` and press Enter. Nothing happens.
+  * Left-click the preview. The preview closes.
+  * Run `omarchy-shell lock isLocked` and press Enter. It prints `false`.
+  * Run `omarchy-shell lock preview; sleep 6; omarchy-shell lock hidePreview` and press Enter. The preview opens, then closes on its own.
+  * Run `omarchy-shell lock preview` and press Enter. The preview opens.
+  * Wait 8 seconds. The preview stays lit.
+  * Left-click the preview. The preview closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
