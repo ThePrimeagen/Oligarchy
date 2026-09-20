@@ -96,6 +96,7 @@ describe("renderLinearIssue happy path", () => {
           "the intent message is that step's line exactly, with only the leading asterisk and the spaces beside it removed",
         );
         expect(text).toContain("any crashes or erroneous behavior must be reported");
+      expect(text).toContain("Any crash or erroneous behavior must be reported");
         expect(text).toContain("always take a screen shot of every step");
         expect(text).toContain('--message "Press Super+Escape. The System menu opens."');
         expect(text).not.toContain("boot to the desktop");
