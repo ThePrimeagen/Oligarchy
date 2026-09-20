@@ -29,12 +29,12 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `shell-json-idle-hot-reload-and-invalid-fallback`
 - [x] `logout-to-sddm-greeter-wrong-empty-then-right-password`
 - [x] `console-tty-login-wrong-then-right-and-back`
-- [ ] `suspend-toggle-hides-system-menu-row`
-- [ ] `hibernation-setup-adds-menu-row-and-remove`
-- [ ] `sleep-lock-secures-session-before-suspend`
-- [ ] `suspend-from-system-menu-locks-first`
-- [ ] `lid-close-absence-noop-and-hardware-binds-present`
-- [ ] `session-desktop-health-after-boot`
+- [x] `suspend-toggle-hides-system-menu-row`
+- [x] `hibernation-setup-adds-menu-row-and-remove`
+- [x] `sleep-lock-secures-session-before-suspend`
+- [x] `suspend-from-system-menu-locks-first`
+- [x] `lid-close-absence-noop-and-hardware-binds-present`
+- [x] `session-desktop-health-after-boot`
 - [ ] `system-menu-power-entries-listed`
 - [ ] `reboot-from-system-menu-full-boot-chain`
 - [ ] `shutdown-powers-off`

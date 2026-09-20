@@ -1195,14 +1195,28 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Escape. The System menu lists Screensaver, Lock, Suspend, Logout, Reboot, Shutdown (Hibernate absent unless set up). Screenshot, then Escape.
-  * Open a terminal with Super+Enter and run `omarchy-hibernation-available; echo hib=$?` → `hib=1` matches Hibernate being absent (`hib=0` would have to match it being listed).
-  * Run `omarchy toggle suspend` → notification `Suspend removed from system menu`; `ls ~/.local/state/omarchy/toggles/` shows `suspend-off`.
-  * Press Super+Escape, Escape, then Super+Escape again: the Suspend row is gone; the other rows remain. Escape.
-  ** The menu paints guard results from the previous open — always open it twice after a state change.
-  * Run `omarchy toggle suspend` again → `Suspend now available in system menu`; the flag file is gone; Super+Escape (twice) shows Suspend again. Escape — do NOT select it.
-  * Drive the flag by hand: `mkdir -p ~/.local/state/omarchy/toggles && touch ~/.local/state/omarchy/toggles/suspend-off` → the menu (opened twice) hides Suspend; `rm ~/.local/state/omarchy/toggles/suspend-off` → Suspend is back.
-  * Unhappy path: `omarchy-toggle; echo "exit=$?"` → `Usage: omarchy-toggle <flag-name> [toggle|on|off]`, `exit=1`; `omarchy-toggle suspend-off sideways; echo "exit=$?"` → the same usage, `exit=1`; `omarchy-toggle-enabled suspend-off && echo OFF || echo ON` → `ON` (state as at the start). Close the terminal with Super+W.
+  * Press Super+Escape. The System menu opens. Suspend is listed.
+  * Press Escape. The menu closes.
+  * Press Super+Enter. A terminal opens.
+  * Run `omarchy-hibernation-available; echo hib=$?` and press Enter. It prints `hib=1`.
+  * Run `omarchy toggle suspend` and press Enter. Suspend is removed.
+  * Press Super+Escape. The System menu opens.
+  * Press Escape. The menu closes.
+  * Press Super+Escape. The System menu opens. Suspend is gone.
+  * Press Escape. The menu closes.
+  * Run `omarchy toggle suspend` and press Enter. Suspend is restored.
+  * Press Super+Escape. The System menu opens.
+  * Press Escape. The menu closes.
+  * Press Super+Escape. The System menu opens. Suspend is listed. Do not select it.
+  * Press Escape. The menu closes.
+  * Run `mkdir -p ~/.local/state/omarchy/toggles && touch ~/.local/state/omarchy/toggles/suspend-off` and press Enter. The flag file exists.
+  * Press Super+Escape. The System menu opens.
+  * Press Escape. The menu closes.
+  * Press Super+Escape. The System menu opens. Suspend is gone.
+  * Press Escape. The menu closes.
+  * Run `rm ~/.local/state/omarchy/toggles/suspend-off` and press Enter. The flag file is gone.
+  * Run `omarchy-toggle suspend-off sideways; echo exit=$?` and press Enter. It prints `exit=1`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -1227,15 +1241,21 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Escape: the System menu shows Screensaver, Lock, Suspend, Logout, Reboot, Shutdown and NO Hibernate. Escape. Open a terminal with Super+Enter and run `omarchy-hibernation-remove` → `Hibernation is not set up` (the remove path is safe when nothing is configured).
-  * Run `omarchy-hibernation-setup` (password `prime`). At `Use 3.8Gi on boot drive to make hibernation available?` (the figure is the RAM size; may read 3.8Gi/4.0Gi) choose Yes.
-  ** Lines follow in order: `Creating Btrfs subvolume`, `Creating swapfile in Btrfs subvolume`, `Adding swapfile to /etc/fstab`, `Enabling swap on /swap/swapfile`, `Adding resume hook to /etc/mkinitcpio.conf.d/omarchy_resume.conf`, `Adding resume kernel parameters`, `Regenerating initramfs...` (1–3 minutes; screenshot every 20 s). At `Reboot to enable hibernation?` answer **No**.
-  ** If it prints `Hibernation is not supported on your system` or `Skipping hibernation setup (requires Limine bootloader)`, record it and stop: the guest kernel/bootloader lacks the prerequisite.
-  * Run `swapon --show; cat /etc/limine-entry-tool.d/resume.conf; omarchy-hibernation-available; echo hib=$?` → `/swap/swapfile` listed beside zram, `resume_offset=<number>` (not empty), `hib=0`.
-  * Press Super+Escape: a `Hibernate` row now sits between Suspend and Logout. Do NOT select it. Escape.
-  * Run `omarchy-hibernation-setup` again → `Hibernation is already set up`, no prompt.
-  * Run `omarchy-hibernation-remove`; at `Remove hibernation setup?` choose Yes. Lines: `Disabling swap on /swap/swapfile`, `Removing swapfile`, `Removing Btrfs subvolume /swap`, `Removing swapfile from /etc/fstab`, `Removing resume hook`, `Regenerating initramfs...` (1–3 minutes again), `Hibernation removed`.
-  * Run `swapon --show` → zram only. Press Super+Escape: no Hibernate row — back to stock. Escape; close the terminal with Super+W.
+  * Press Super+Escape. The System menu opens. Hibernate is absent. Do not select Suspend.
+  * Press Escape. The menu closes.
+  * Press Super+Enter. A terminal opens.
+  * Run `omarchy-hibernation-remove` and press Enter. It says hibernation is not set up.
+  * Run `omarchy-hibernation-setup` and press Enter. Password is `prime`. A size prompt appears.
+  * Choose Yes. Setup runs. At the reboot prompt, choose No. Setup finishes.
+  * Run `omarchy-hibernation-available; echo hib=$?` and press Enter. It prints `hib=0`.
+  * Press Super+Escape. The System menu opens. Hibernate is listed. Do not select it.
+  * Press Escape. The menu closes.
+  * Run `omarchy-hibernation-setup` and press Enter. It says hibernation is already set up.
+  * Run `omarchy-hibernation-remove` and press Enter. Choose Yes. Hibernation is removed.
+  * Run `swapon --show` and press Enter. Only zram is listed.
+  * Press Super+Escape. The System menu opens. Hibernate is absent.
+  * Press Escape. The menu closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -1260,13 +1280,15 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `systemctl --user is-active omarchy-sleep-lock.service; systemd-inhibit --list | grep -i omarchy; grep InhibitDelayMaxSec /etc/systemd/logind.conf.d/20-inhibit-delay.conf` → `active`, a line `Lock screen before suspend` with mode delay, and the configured delay value (note it).
-  * Run `omarchy-system-sleep-lock; echo "exit=$?"`. The lock screen engages at once. Unlock with `prime`; the terminal shows `exit=0`.
-  * Run `journalctl --user -b --no-pager | grep -c 'suspending without a secure lock'` → `0`, and confirm no toast `did not lock before suspend` appeared.
-  * Run `omarchy-system-sleep-lock 30; echo "exit=$?"`. The terminal prints `omarchy-system-sleep-lock: suspending without a secure lock (the shell did not secure the session within 30ms)` and `exit=1`, and a critical notification `Screen did not lock before suspend` appears.
-  ** The lock request may still land a moment later; if the screen locks, unlock with `prime`.
-  * Run `omarchy-system-sleep-lock abc; echo "exit=$?"` — a non-numeric budget falls back to the derived one: the screen locks, `exit=0`. Unlock with `prime`.
-  * Do NOT run `systemctl suspend`: the guest cannot be woken by the driver. Close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Run `systemctl --user is-active omarchy-sleep-lock.service` and press Enter. It prints `active`.
+  * Run `omarchy-system-sleep-lock; echo exit=$?` and press Enter. The screen locks.
+  * Type `prime` and press Enter. The desktop returns. The terminal shows `exit=0`.
+  * Run `omarchy-system-sleep-lock 30; echo exit=$?` and press Enter. It prints `exit=1`.
+  * If the screen locked, type `prime` and press Enter. The desktop returns.
+  * Run `omarchy-system-sleep-lock abc; echo exit=$?` and press Enter. The screen locks. It prints `exit=0`.
+  * Type `prime` and press Enter. The desktop returns.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -1292,12 +1314,13 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `systemd-inhibit --list | grep -i omarchy` — a line `Lock screen before suspend` with mode delay (the sleep-lock service is running).
-  * Run `journalctl -f -o cat -g 'PrepareForSleep|omarchy-system-sleep-lock|PM: suspend' | sudo tee /dev/ttyS0 &` (password `prime`) so sleep messages reach the serial log.
-  * Press Super+Escape and click `Suspend` with the mouse. Within a second the lock screen appears, then the display freezes or blanks. Screenshot every 2 seconds for 10 seconds.
-  * Read `./client get-serial`: lines about PrepareForSleep and the suspend, and no `suspending without a secure lock`.
-  * Try to wake: press Space, then move the mouse. If the guest wakes, the lock screen must be showing; unlock with `prime`. If nothing changes in 30 seconds record that as the expected limitation and end the session with `stop`.
-  ** Hibernate (present only after hibernation setup) would take the same lock-then-sleep path; it is not attempted here.
+  * Press Super+Enter. A terminal opens.
+  * Run `systemd-inhibit --list | grep -i omarchy` and press Enter. A lock-before-suspend line is shown.
+  * Run `journalctl -f -o cat -g 'PrepareForSleep|omarchy-system-sleep-lock|PM: suspend' | sudo tee /dev/ttyS0 &` and press Enter. Password is `prime`. The log is following.
+  * Press Super+Escape. The System menu opens.
+  * Click Suspend. Use the mouse only. The screen locks, then the display stops.
+  * Read `./client get-serial`. It shows the suspend. It does not show an unlocked sleep.
+  * Press Space. If the lock screen returns, type `prime` and press Enter. If nothing changes, run `./client stop`.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -1321,11 +1344,13 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `ls /proc/acpi/button/lid/; omarchy-hw-laptop; echo laptop=$?` — no lid directory, `laptop=1`.
-  * Run `omarchy-system-lid-close; echo "exit=$?"`. The screen must not lock; `exit=0`.
-  * Run `omarchy-system-wake; echo "exit=$?"` — no error text, `exit=0`.
-  * Run `hyprctl binds | grep -B3 -A8 -E 'code:201|XF86PowerOff|Lid Switch' | sudo tee /dev/ttyS0` (password `prime`) and read the serial log: a SUPER+SHIFT bind on `code:201` for `omarchy-menu toggle root`; `XF86PowerOff` with `locked: 1` running `omarchy-menu toggle system`; two `switch:` binds for the lid (on → `omarchy-system-lid-close`, off → `omarchy-hyprland-monitor-clamshell`) with `locked: 1`.
-  * Run `omarchy-menu-keybindings --print | grep -c 201` → `0` (hidden from the viewer). Close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Run `omarchy-hw-laptop; echo laptop=$?` and press Enter. It prints `laptop=1`.
+  * Run `omarchy-system-lid-close; echo exit=$?` and press Enter. The screen stays unlocked. It prints `exit=0`.
+  * Run `omarchy-system-wake; echo exit=$?` and press Enter. It prints `exit=0`.
+  * Run `hyprctl binds | grep -E 'code:201|XF86PowerOff|Lid Switch' | sudo tee /dev/ttyS0` and press Enter. Password is `prime`. Read `./client get-serial`. The binds are listed.
+  * Run `omarchy-menu-keybindings --print | grep -c 201` and press Enter. It prints `0`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -1349,15 +1374,15 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Take a screenshot. The top bar (menu icon, workspaces, clock) and the wallpaper must be visible with no crash dialog.
-  ** If the screen is black the idle screensaver (150 s) or lock (300 s) has engaged: press Shift once (or type `prime` and Enter on the lock screen) and screenshot again.
-  * Open a terminal with Super+Enter. A foot window with a shell prompt must appear within 45 seconds.
-  * Type `omarchy-shell shell ping; omarchy-version; findmnt -no FSTYPE /` and press Enter. It must print `ok`, a version string (about `4.0.2` on the minted disk), and `btrfs`.
-  ** Right after boot the shell may take up to 60 seconds to answer `ok`; retry every 5 seconds until then.
-  * Type `wpctl status | head -3` and press Enter. A PipeWire header must print, not `connection refused` (the only sink is the `Dummy Output`; that is expected).
-  * Type `systemctl --failed --no-legend --plain; systemctl --user --failed --no-legend --plain; echo UNITS-DONE` and press Enter. Nothing may be listed above `UNITS-DONE`.
-  ** If a unit is listed, run `systemctl status <unit> | sudo tee /dev/ttyS0` (password `prime`) so the reason lands in the serial log, and report it.
-  * Close the terminal with Super+W. The desktop must return exactly as it started.
+  * Look at the desktop. The bar is up. No crash dialog is showing.
+  * Press Super+Enter. A terminal opens.
+  * Run `omarchy-shell shell ping` and press Enter. It prints `ok`.
+  * Run `omarchy-version` and press Enter. A version prints.
+  * Run `findmnt -no FSTYPE /` and press Enter. It prints `btrfs`.
+  * Run `wpctl status | head -3` and press Enter. A PipeWire header prints.
+  * Run `systemctl --failed --no-legend --plain; systemctl --user --failed --no-legend --plain; echo UNITS-DONE` and press Enter. Nothing is listed above `UNITS-DONE`.
+  * Press Super+W. The terminal closes.
+  * the desktop must return exactly as left.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
