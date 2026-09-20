@@ -4,22 +4,23 @@ Consult this table of contents first. Read only the section you need.
 
 | Section | Line |
 |---------|-----:|
-| [Important](#important) | 24 |
-| [Synopsis](#synopsis) | 30 |
-| [test --list](#test---list) | 59 |
-| [test define](#test-define) | 77 |
-| [test new](#test-new) | 93 |
-| [mint](#mint) | 109 |
-| [test list](#test-list) | 128 |
-| [test start](#test-start) | 140 |
-| [test-results](#test-results) | 157 |
-| [session list](#session-list) | 175 |
-| [session](#session) | 191 |
-| [session --search](#session---search) | 216 |
-| [error-type new](#error-type-new) | 234 |
-| [error-type list](#error-type-list) | 249 |
-| [diagnose](#diagnose) | 263 |
-| [automation --list](#automation---list) | 282 |
+| [Important](#important) | 25 |
+| [Synopsis](#synopsis) | 31 |
+| [test --list](#test---list) | 61 |
+| [test define](#test-define) | 79 |
+| [test new](#test-new) | 95 |
+| [test suite](#test-suite) | 113 |
+| [mint](#mint) | 129 |
+| [test list](#test-list) | 148 |
+| [test start](#test-start) | 160 |
+| [test-results](#test-results) | 177 |
+| [session list](#session-list) | 195 |
+| [session](#session) | 211 |
+| [session --search](#session---search) | 236 |
+| [error-type new](#error-type-new) | 254 |
+| [error-type list](#error-type-list) | 269 |
+| [diagnose](#diagnose) | 283 |
+| [automation --list](#automation---list) | 302 |
 
 ## Important
 
@@ -35,6 +36,7 @@ If you are an agent driving a guest, you need two of these: [test start](#test-s
 ./ctrl test --list    [--details] [--name <definition>] [--history]
 ./ctrl test define    --name <definition> [--description <text>] [--instruction <text>] [--proof <text>]
 ./ctrl test new       --server-url <url> --iso <https-url> --version <version> [--name <definition>]
+./ctrl test suite     --server-url <url> --iso <https-url> --version <version>
 ./ctrl test list
 ./ctrl mint           --server-url <url> --iso <https-url> [--unminted]
 ./ctrl test start     --session-id <id> --test-result-id <id> --model <id>
@@ -50,9 +52,9 @@ If you are an agent driving a guest, you need two of these: [test start](#test-s
 
 The action comes first. Every value is a flag; there are no positional arguments. Flags may sit in any order after the action.
 
-- `DATABASE_URL` — read from the environment by every action; it is the only variable most of them need. `test new`, `mint` and `test list` also read `LINEAR_API_TOKEN`. No action reads `OLIGARCHY_TOKEN`. A `.env` in the current directory fills in missing variables only. A missing variable means exit 1.
+- `DATABASE_URL` — read from the environment by every action; it is the only variable most of them need. `test new`, `test suite`, `mint` and `test list` also read `LINEAR_API_TOKEN`. No action reads `OLIGARCHY_TOKEN`. A `.env` in the current directory fills in missing variables only. A missing variable means exit 1.
 - `--session-id <id>` — taken by `test start`, `session` and `diagnose`. Omitted, it is read from `SESSION_ID` in the environment; the flag wins when both are given, and an empty `SESSION_ID` counts as unset. Set it once — `SESSION_ID=$(./ctrl session --search --test-result-id <id>) && export SESSION_ID`, so a failed search stops there instead of exporting nothing — and every command that follows is about that session. Neither given is a usage error; on `session` without `--search` it is the refusal `session: --session-id or SESSION_ID is required`.
-- `--server-url <url>` — taken by `test new` and `mint`: the qemu server the driving agents will talk to, a full http or https URL, stored on the run and written into every ticket. Falls back to `SERVER_URL` from the environment; there is no default. `test start` and `test-results` accept it and ignore it, so a ticket written before it went still runs; every other action refuses it as an unrecognized flag.
+- `--server-url <url>` — taken by `test new`, `test suite` and `mint`: the qemu server the driving agents will talk to, a full http or https URL, stored on the run and written into every ticket. Falls back to `SERVER_URL` from the environment; there is no default. `test start` and `test-results` accept it and ignore it, so a ticket written before it went still runs; every other action refuses it as an unrecognized flag.
 
 A command that works exits 0. A command that fails exits 1 and prints the error: one headline, then the stack trace and the cause behind it. Read the headline first. `./ctrl <action> --help` prints that action's flags.
 
@@ -106,6 +108,22 @@ Each issue is created in `Backlog` and moved to `Automation Needed` once its res
 
 ```bash
 ./ctrl test new --server-url https://qemu.example.com --iso https://example.com/omarchy.iso --version 1.2.3
+```
+
+## test suite
+
+```
+./ctrl test suite --server-url <url> --iso <https-url> --version <version>
+```
+
+`test new` with no `--name`: one pending result for every stored test definition, each in its newest wording, and one Linear ticket each, printed as the same JSON. There is no `--name`; one definition is `test new --name`. A definition named `mint` is included when one is stored, and it is ticketed with the test template, not the mint template. Not used while driving a guest. Reads `LINEAR_API_TOKEN`.
+
+The dashboard answers the same run at `POST /run-test-suite`, JSON `{ iso, version, serverUrl }` in and the same JSON out. It is not linked from a page. The button would sit in the definitions heading, beside "Test definitions", not on a selected card: a card button would read as running that one name. It would post those three fields and show the run id and ticket identifiers, and stay disabled when the list is empty.
+
+Tickets are born in `Backlog` and moved to `Automation Needed` as in `test new`. An empty table is refused before Linear: `test: no test definitions found`.
+
+```bash
+./ctrl test suite --server-url https://qemu.example.com --iso https://example.com/omarchy.iso --version 1.2.3
 ```
 
 ## mint

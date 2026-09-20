@@ -229,7 +229,7 @@ describe("./ctrl without a database", () => {
       ["--help"],
       ["test", "--help"],
       ["session", "--help"],
-      ["test", "start", "--help"],
+      ["test", "suite", "--help"],
       ["diagnose", "--help"],
       ["automation", "--help"],
     ]) {
@@ -272,6 +272,25 @@ describe("./ctrl without a database", () => {
     });
     expect(fromEnv.code).toBe(1);
     expect(firstLine(fromEnv.stderr)).toBe("LINEAR_API_TOKEN is not set");
+  });
+
+  it("test suite accepts --server-url and SERVER_URL, then wants LINEAR_API_TOKEN, and refuses --name", async () => {
+    const iso = ["test", "suite", "--iso", "https://example.com/omarchy.iso", "--version", "1.2.3"];
+    const flagged = await runCtrl([...iso, `--server-url=${SERVER}`], { DATABASE_URL: UNUSED_DB });
+    expect(flagged.code).toBe(1);
+    expect(firstLine(flagged.stderr)).toBe("LINEAR_API_TOKEN is not set");
+    const fromEnv = await runCtrl(iso, {
+      DATABASE_URL: UNUSED_DB,
+      SERVER_URL: "https://from.env.example",
+    });
+    expect(fromEnv.code).toBe(1);
+    expect(firstLine(fromEnv.stderr)).toBe("LINEAR_API_TOKEN is not set");
+    const named = await runCtrl([...iso, `--server-url=${SERVER}`, "--name", DEFINITION], {
+      DATABASE_URL: UNUSED_DB,
+      LINEAR_API_TOKEN: "l",
+    });
+    expect(named.code).toBe(1);
+    expect(named.stderr).toMatch(/Unrecognized flag: --name/);
   });
 
   it("mint --help exits 0 without a database; without LINEAR_API_TOKEN it wants it first", async () => {
@@ -325,6 +344,16 @@ describe("./ctrl without a database", () => {
         randomUUID(),
         "--status",
         "success",
+        "--server-url",
+        SERVER,
+      ],
+      [
+        "test",
+        "suite",
+        "--iso",
+        "https://example.com/omarchy.iso",
+        "--version",
+        "1.2.3",
         "--server-url",
         SERVER,
       ],
@@ -412,7 +441,7 @@ describe("./ctrl without a database", () => {
     const env = { DATABASE_URL: UNUSED_DB, LINEAR_API_TOKEN: "l" };
     const cases: ReadonlyArray<readonly [ReadonlyArray<string>, RegExp, Record<string, string>]> = [
       [["test"], /Missing required flag: --list/, env],
-      // The proxy url is test new's alone; nothing else has a proxy to name.
+      // The proxy url is test new's and test suite's; the actions below have no proxy to name.
       [["test", "--list", "--server-url", SERVER], /Unrecognized flag: --server-url/, env],
       [["session", "list", "--server-url", SERVER], /Unrecognized flag: --server-url/, env],
       [
@@ -519,6 +548,51 @@ describe("./ctrl without a database", () => {
         ],
         /server-url must be a valid http or https url/,
         { ...env, SERVER_URL: SERVER },
+      ],
+      [
+        [
+          "test",
+          "suite",
+          "--iso",
+          "http://example.com/omarchy.iso",
+          "--server-url",
+          SERVER,
+          "--version",
+          "1.2.3",
+        ],
+        /iso must be a valid https url/,
+        env,
+      ],
+      [
+        ["test", "suite", "--server-url", SERVER, "--version", "1.2.3"],
+        /Missing required flag: --iso/,
+        env,
+      ],
+      [
+        ["test", "suite", "--iso", "https://example.com/omarchy.iso", "--server-url", SERVER],
+        /Missing required flag: --version/,
+        env,
+      ],
+      [
+        ["test", "suite", "--iso", "https://example.com/omarchy.iso", "--version", "1.2.3"],
+        /Missing required flag: --server-url/,
+        env,
+      ],
+      [
+        [
+          "test",
+          "suite",
+          "--iso",
+          "https://example.com/omarchy.iso",
+          "--version",
+          "1.2.3",
+          "--name",
+          DEFINITION,
+          "--server-url",
+          SERVER,
+        ],
+        /Unrecognized flag: --name/,
+        env,
       ],
       [
         ["test-results", "--id", randomUUID(), "--status", "success"],

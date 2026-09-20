@@ -453,6 +453,129 @@ export function reviseTestDefinition(
   });
 }
 
+// One result of a suite: the definition it pins is that name's newest wording, the row the
+// ticket's body is filled from.
+export type SuiteResult = {
+  readonly id: string;
+  readonly definitionId: number;
+  readonly name: string;
+  readonly description: string;
+  readonly instruction: string;
+  readonly proof: string;
+};
+
+export type CreatedSuite = {
+  readonly runId: string;
+  readonly results: ReadonlyArray<SuiteResult>;
+};
+
+// One run of every definition's newest wording: the highest id per name, names in order. The
+// select and the inserts are one transaction, so a definition saved between them cannot land
+// half in the run. No definitions is null: nothing is inserted, and the route refuses.
+// CURRENT_TIMESTAMP in the select keeps the list out of Hyperdrive's query cache, the same way
+// the definitions page reads it, so a wording saved a moment ago is the one ticketed.
+export function createTestSuite(
+  connectionString: string,
+  input: { readonly iso: string; readonly serverUrl: string },
+): Promise<CreatedSuite | null> {
+  return withDatabase(connectionString, (db) =>
+    db.transaction(async (tx) => {
+      const definitions = await tx
+        .selectDistinctOn([testDefinitions.name], {
+          ...getTableColumns(testDefinitions),
+          queriedAt: sql`CURRENT_TIMESTAMP`,
+        })
+        .from(testDefinitions)
+        .orderBy(testDefinitions.name, desc(testDefinitions.id));
+      if (definitions.length === 0) {
+        return null;
+      }
+      const [run] = await tx
+        .insert(testRuns)
+        .values({
+          name: "Omarchy experiment",
+          iso: input.iso,
+          serverUrl: input.serverUrl,
+          status: "pending",
+        })
+        .returning({ id: testRuns.id });
+      if (run === undefined) {
+        throw new Error("createTestSuite: insert returned no run");
+      }
+      const inserted = await tx
+        .insert(testResults)
+        .values(
+          definitions.map((definition) => ({
+            runId: run.id,
+            definitionId: definition.id,
+            status: "pending" as const,
+          })),
+        )
+        .returning({ id: testResults.id, definitionId: testResults.definitionId });
+      const resultId = new Map(inserted.map((row) => [row.definitionId, row.id]));
+      // One result per definition, ticketed in name order — the same order `./ctrl test suite`
+      // walks, not whatever order INSERT RETURNING happens to answer in.
+      return {
+        runId: run.id,
+        results: definitions.map((definition) => {
+          const id = resultId.get(definition.id);
+          if (id === undefined) {
+            throw new Error(`createTestSuite: no result for ${definition.name}`);
+          }
+          return {
+            id,
+            definitionId: definition.id,
+            name: definition.name,
+            description: definition.description,
+            instruction: definition.instruction,
+            proof: definition.proof,
+          };
+        }),
+      };
+    }),
+  );
+}
+
+// The identifier the webhook looks up. A missing result after createTestSuite is a broken invariant.
+export function setResultLinearId(
+  connectionString: string,
+  resultId: string,
+  linearId: string,
+): Promise<void> {
+  return withDatabase(connectionString, async (db) => {
+    const rows = await db
+      .update(testResults)
+      .set({ linearId })
+      .where(eq(testResults.id, resultId))
+      .returning({ id: testResults.id });
+    if (rows.length === 0) {
+      throw new Error(`setLinearId: no result ${resultId}`);
+    }
+  });
+}
+
+// A suite that could not finish its tickets: the run and every result fail together, linear ids
+// already written left in place so the tickets that stand can be found.
+export function failTestSuite(
+  connectionString: string,
+  runId: string,
+  reason: string,
+): Promise<void> {
+  return withDatabase(connectionString, (db) =>
+    db.transaction(async (tx) => {
+      const closedAt = sql`now()`;
+      await tx
+        .update(testRuns)
+        .set({ status: "failed", reason, endedAt: closedAt })
+        .where(eq(testRuns.id, runId));
+      await tx
+        .update(testResults)
+        .set({ status: "failed", reason, finishedAt: closedAt })
+        .where(eq(testResults.runId, runId));
+    }),
+  );
+}
+
 export function listTestResultOutcomes(connectionString: string): Promise<TestResultOutcome[]> {
   return withDatabase(connectionString, (db) =>
     db

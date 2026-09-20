@@ -34,6 +34,7 @@ import {
 import { clickerPage } from "./clicker.ts";
 import { HTMX_INTEGRITY, HTMX_URL } from "./htmx.ts";
 import { abortLinearIssue, type LinearEnv } from "./linear.ts";
+import { startTestSuite, SuiteRequestError } from "./suite.ts";
 import { Fleet, type Halves, Process, Queue, ServersPage } from "./servers.tsx";
 import { SENTRY_DSN } from "../observability/dsn.ts";
 
@@ -1096,6 +1097,37 @@ app.post("/abort", async (context) => {
     console.error("dashboard: aborting a job:", errorMessage(error));
   }
   return reply();
+});
+
+// The same run as `./ctrl test suite`: one pending result for every test definition, each in its
+// newest wording, and one Linear ticket moved to Automation Needed. Not linked from a page yet.
+// The button belongs in the definitions heading, beside "Test definitions", not on a card: the
+// suite is every name's newest wording, and a button on the selected card would read as running
+// that one name (`./ctrl test new --name`). It posts iso, version and serverUrl here and shows
+// the run id and ticket identifiers this answers with, and it stays disabled when the list is
+// empty. Until that form exists the route takes JSON only, those three fields.
+app.post("/run-test-suite", async (context) => {
+  let body: unknown;
+  try {
+    body = await context.req.json();
+  } catch {
+    return context.json({ error: "iso, version and serverUrl are required" }, 400);
+  }
+  try {
+    const created = await startTestSuite(
+      context.env,
+      context.env.HYPERDRIVE.connectionString,
+      body,
+    );
+    return context.json(created);
+  } catch (error) {
+    if (error instanceof SuiteRequestError) {
+      return context.json({ error: error.message }, 400);
+    }
+    Sentry.captureException(error);
+    console.error("dashboard: running the test suite:", errorMessage(error));
+    return context.json({ error: errorMessage(error) }, 500);
+  }
 });
 
 // The retention sweep, run by Cloudflare on the cron in wrangler.jsonc. One line says what went;

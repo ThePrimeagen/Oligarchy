@@ -116,9 +116,9 @@ const Count = Schema.Number.check(
 
 const DEFAULT_COUNT = 10;
 
-// test new alone: the qemu server its drivers will talk to, stored on the run and written into every
-// ticket for ./client. No other action has a server to name. No default: SERVER_URL or the flag, or
-// a usage error.
+// test new and test suite store it on the run and write it into every ticket for ./client. mint
+// takes the same flag, for the reverse proxy the install's drivers talk to. No default: SERVER_URL
+// or the flag, or a usage error.
 const serverUrlFlag = Flag.string("server-url").pipe(
   Flag.withFallbackConfig(Config.serverUrl),
   Flag.withSchema(HttpUrl),
@@ -998,6 +998,31 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     Command.provide(withDbAndLinear),
   );
 
+  // test suite --server-url <url> --iso <https-url> --version <version>
+  //
+  // test new with no --name: one result for every definition, each its newest wording. A name
+  // cannot be picked; that is test new --name.
+  const testSuiteCommand = Command.make(
+    "suite",
+    {
+      serverUrl: serverUrlFlag,
+      iso: Flag.string("iso").pipe(
+        Flag.withSchema(HttpsUrl),
+        Flag.withDescription("HTTPS URL of the ISO"),
+      ),
+      version: Flag.string("version").pipe(
+        Flag.withSchema(Schema.NonEmptyString),
+        Flag.withDescription("Version label attached to every Linear ticket"),
+      ),
+    },
+    (input) => testNew({ ...input, name: Option.none() }),
+  ).pipe(
+    Command.withDescription(
+      "Run the test suite: one Linear ticket for every test definition, each in its newest wording",
+    ),
+    Command.provide(withDbAndLinear),
+  );
+
   const testListCommand = Command.make("list", {}, testList).pipe(
     Command.withDescription("Print the Oligarchy backlog from Linear as JSON"),
     Command.provide(withDbAndLinear),
@@ -1054,10 +1079,16 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     testDefinitions,
   ).pipe(
     Command.withDescription(
-      "test --list [--details] [--name <definition>] [--history]; or define, new, list, start",
+      "test --list [--details] [--name <definition>] [--history]; or define, new, suite, list, start",
     ),
     Command.provide(withDb),
-    Command.withSubcommands([testDefineCommand, testNewCommand, testListCommand, testStartCommand]),
+    Command.withSubcommands([
+      testDefineCommand,
+      testNewCommand,
+      testSuiteCommand,
+      testListCommand,
+      testStartCommand,
+    ]),
   );
 
   const testResultsCommand = Command.make(
@@ -1207,7 +1238,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
 
   return Command.make("ctrl").pipe(
     Command.withDescription(
-      "Record and inspect Oligarchy test runs. Every action reads DATABASE_URL; test new alone takes --server-url (or SERVER_URL), the qemu server its drivers talk to; test start and test-results accept it unread.",
+      "Record and inspect Oligarchy test runs. Every action reads DATABASE_URL; test new and test suite take --server-url (or SERVER_URL), the qemu server their drivers talk to; test start and test-results accept it unread.",
     ),
     Command.withSubcommands([
       testCommand,

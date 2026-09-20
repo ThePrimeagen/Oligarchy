@@ -483,6 +483,8 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
     const { status, html } = await getPage("/definitions", dbUrl);
     expect(status).toBe(200);
     expect(html).toContain('href="/definitions?name=lock-screen"');
+    // The suite is not a button on this page yet. The heading is where it would go.
+    expect(html).not.toContain("/run-test-suite");
     expect(currentLinks(html)).toBe(1);
     expect(currentCard(html)).toMatch(/<h2>[^<]+<\/h2>/);
   });
