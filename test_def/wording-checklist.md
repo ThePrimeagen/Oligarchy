@@ -324,14 +324,14 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `omareel-record-and-export`
 - [x] `plugin-add-elsewhen-from-menu`
 - [x] `plugin-add-port-forward-error-path`
-- [ ] `openclaw-launch-and-onboard-without-openclaw`
-- [ ] `powerprofiles-set-remember-and-reject`
-- [ ] `system-stats-cli-output`
-- [ ] `toggle-generic-flag-and-bad-action`
-- [ ] `cliamp-music-tui-without-audio`
-- [ ] `launcher-gui-apps-open-and-close`
-- [ ] `pdf-open-evince-and-fill-xournalpp`
-- [ ] `imv-rotate-edit-trash-keybindings`
+- [x] `openclaw-launch-and-onboard-without-openclaw`
+- [x] `powerprofiles-set-remember-and-reject`
+- [x] `system-stats-cli-output`
+- [x] `toggle-generic-flag-and-bad-action`
+- [x] `cliamp-music-tui-without-audio`
+- [x] `launcher-gui-apps-open-and-close`
+- [x] `pdf-open-evince-and-fill-xournalpp`
+- [x] `imv-rotate-edit-trash-keybindings`
 - [ ] `chromium-whatsapp-slim-extension`
 - [ ] `plugin-add-notification-center-and-dnd`
 - [ ] `omarchy-audio-tuner-probe-without-device`

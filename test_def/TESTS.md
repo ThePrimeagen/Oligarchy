@@ -15000,30 +15000,40 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy cmd present openclaw; echo "exit=$?"; ls ~/.openclaw/openclaw.json 2>&1`; expected `exit=1` and `No such file or directory`. If `exit=0`, stop and report — this test assumes OpenClaw is absent.
-  * Type `time omarchy openclaw onboard; echo "exit=$?"`; expected within ~3 s a line ending `openclaw: command not found` and `exit=127`.
-  * Type `omarchy openclaw --help`; expected `Openclaw commands — OpenClaw agent platform setup:` with `omarchy openclaw onboard`.
-  ** An `Unknown Omarchy command` here means the group post-dates this build: record `omarchy version` and report "absent on this build".
-  * Type `omarchy-launch-openclaw; echo "exit=$?"` Enter.
-  ** A floating Omarchy terminal runs the OpenClaw onboarding or installer — press Ctrl+C at once to abort before anything downloads; if the openclaw command is missing entirely an error line prints instead. Record exactly what appeared; a browser opening a dead dashboard page is the failure.
-  * Type `omarchy-launch-openclaw --tui --message; echo "exit=$?"` Enter → `--message needs a value` and a non-zero exit.
-  * Press Super+Space → Install → AI: the OpenClaw row is enabled (not dimmed). Press Escape.
-  * Type `ls ~/.openclaw 2>&1`; expected still `No such file or directory`. Close the terminal with Super+W; the desktop is as before.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy cmd present openclaw; echo "exit=$?"` and press Return. The last line is `exit=1`.
+  ** If the last line is `exit=0`, stop and report that OpenClaw is present.
+  * Type `ls ~/.openclaw/openclaw.json 2>&1` and press Return. The output includes `No such file`.
+  * Type `time omarchy openclaw onboard; echo "exit=$?"` and press Return. The output includes `openclaw: command not found`, and the last line is `exit=127`.
+  * Type `omarchy openclaw --help` and press Return. The output includes `omarchy openclaw onboard`.
+  ** If it says `Unknown Omarchy command`, record `omarchy version` and report the group absent.
+  * Type `omarchy-launch-openclaw; echo "exit=$?"` and press Return. A floating terminal starts, or an error is printed.
+  * If a floating terminal opened, press Ctrl+C at once. It stops before a download.
+  * Click the first terminal if it is not focused. It is focused.
+  * Type `omarchy-launch-openclaw --tui --message; echo "exit=$?"` and press Return. The output includes `--message needs a value`, and the exit is non-zero.
+  * Press Super+Space. The menu opens.
+  * Select Install, then AI. OpenClaw is enabled.
+  * Press Escape. The menu closes.
+  * Type `ls ~/.openclaw 2>&1` and press Return. The output includes `No such file`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * If a command sits silent for more than 10 s, press Ctrl+C and report a hang (the watch loop running without a wizard).
-  * Skipped: onboarding and gateway start (needs installation, network, minutes).
-  * ./client-with-image allows you to get an image back of what you did, so can be useful for speeding things up
+  * If a command stays silent for more than 10 seconds, press Ctrl+C and report a hang.
+  * Do not finish onboarding. A browser opening a dead dashboard is a failure.
+  * Record exactly what the launcher showed: an installer terminal or an error line.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the `command not found` line with `exit=127` and the `real` time, the group help, the wizard/installer terminal (or the error line) after the launcher, the `--message` error, the enabled Install → AI row, and the absent `~/.openclaw`
+  ** OpenClaw is absent, and `~/.openclaw/openclaw.json` does not exist.
+  ** `omarchy openclaw onboard` prints `command not found` and exits 127 within about 3 seconds. `--help` names `omarchy openclaw onboard`. An unknown-command line is recorded as absent.
+  ** The launcher starts an onboarding or installer terminal, or prints an error. Ctrl+C stops it before a download.
+  ** `--message` without a value is rejected. Install lists OpenClaw as enabled, and `~/.openclaw` is still absent.
   * If unsuccessful
-  ** A silent hang > 10 s, a browser opening a dead page, or files created under `~/.openclaw`; `omarchy version`
+  ** A command hangs past 10 seconds, a browser opens a dead page, or files appear under `~/.openclaw`.
 covers: bin/omarchy-openclaw-onboard; bin/omarchy:29-97 (openclaw group); bin/omarchy-launch-openclaw; test/shell.d/launch-openclaw-test.sh; default/omarchy/omarchy-menu.jsonc (install.ai.openclaw)
 
 ### powerprofiles-set-remember-and-reject   [VM-PARTIAL]
@@ -15033,31 +15043,51 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy powerprofiles list; omarchy powerprofiles list --active-state` Enter.
-  ** One profile per line (power-saver, balanced, performance — a VM may offer only balanced and performance; record the set); the second listing adds a tab and `1` on the active one.
-  ** If the list is empty, type `systemctl is-active power-profiles-daemon` and report it; the remaining steps then show the "not available" errors instead.
-  * Type `powerprofilesctl get; cat ~/.local/state/omarchy/powerprofiles/ac 2>&1` Enter and record both (the current profile, and whether an AC preference file exists yet).
-  * Type `omarchy powerprofiles set ac power-saver; powerprofilesctl get; cat ~/.local/state/omarchy/powerprofiles/ac` Enter → no output from `set`, then `power-saver` twice.
-  ** Use `balanced` here and below if power-saver is not offered, and note it.
-  * Type `omarchy powerprofiles set ac balanced; omarchy powerprofiles set; powerprofilesctl get` Enter → `balanced`: the bare `set` is autodetect, which resolves to AC on a machine without a battery and restores the remembered AC choice.
-  * Type `omarchy powerprofiles set battery performance; cat ~/.local/state/omarchy/powerprofiles/battery; powerprofilesctl get` Enter → `performance` is written to the battery file while `powerprofilesctl get` stays `balanced` (setting the other power source does not switch now).
-  * Negatives, each followed by `; echo "exit=$?"`: `omarchy powerprofiles set ac turbo` → `Power profile is not available: turbo`, `exit=1`; `omarchy powerprofiles set laptop` → `Usage: omarchy-powerprofiles-set [autodetect|ac|battery] [power-saver|balanced|performance]`, `exit=1`; `omarchy powerprofiles list --nope` → usage, `exit=1`. Then `powerprofilesctl get` → still `balanced` (a failed selection is not persisted).
-  * Press Super+Ctrl+P: no power panel stays open on a machine without a battery (a brief flicker is acceptable; report if a card stays). The panel's profile buttons are the skipped part.
-  * Restore: `omarchy powerprofiles set ac <profile recorded in step 2>; rm -f ~/.local/state/omarchy/powerprofiles/battery` (also `rm -f ~/.local/state/omarchy/powerprofiles/ac` if that file did not exist in step 2). Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy powerprofiles list` and press Return. Record the profile names.
+  * Type `omarchy powerprofiles list --active-state` and press Return. The active profile is marked.
+  ** If the list is empty, type `systemctl is-active power-profiles-daemon` and report it. The later commands then show not-available errors.
+  * Type `powerprofilesctl get` and press Return. Record the current profile.
+  * Type `cat ~/.local/state/omarchy/powerprofiles/ac 2>&1` and press Return. Record whether the file exists.
+  * Type `omarchy powerprofiles set ac power-saver` and press Return. The prompt returns with no extra output.
+  ** If power-saver is not offered, use `balanced` instead and record that.
+  * Type `powerprofilesctl get` and press Return. The output matches the profile just set.
+  * Type `cat ~/.local/state/omarchy/powerprofiles/ac` and press Return. The file contains that profile.
+  * Type `omarchy powerprofiles set ac balanced` and press Return. The prompt returns.
+  * Type `omarchy powerprofiles set` and press Return. The prompt returns.
+  * Type `powerprofilesctl get` and press Return. The output is `balanced`.
+  * Type `omarchy powerprofiles set battery performance` and press Return. The prompt returns.
+  * Type `cat ~/.local/state/omarchy/powerprofiles/battery` and press Return. The file contains `performance`.
+  * Type `powerprofilesctl get` and press Return. The output is `balanced`.
+  * Type `omarchy powerprofiles set ac turbo; echo "exit=$?"` and press Return. The output includes `Power profile is not available: turbo`, and the last line is `exit=1`.
+  * Type `omarchy powerprofiles set laptop; echo "exit=$?"` and press Return. The output includes a usage line, and the last line is `exit=1`.
+  * Type `omarchy powerprofiles list --nope; echo "exit=$?"` and press Return. The output includes a usage line, and the last line is `exit=1`.
+  * Type `powerprofilesctl get` and press Return. The output is still `balanced`.
+  * Press Super+Ctrl+P. No power panel stays open.
+  * Type `omarchy powerprofiles set ac` followed by the profile recorded at the start, and press Return. The prompt returns.
+  * Type `rm -f ~/.local/state/omarchy/powerprofiles/battery` and press Return. The prompt returns.
+  ** If the AC file did not exist at the start, also run `rm -f ~/.local/state/omarchy/powerprofiles/ac`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * `omarchy powerprofiles …` routes to `omarchy-powerprofiles-list` / `omarchy-powerprofiles-set`; the bare binaries behave the same.
-  * Exit codes are invisible on a screenshot — keep the `; echo "exit=$?"` on every negative.
+  * `omarchy powerprofiles` routes to the list and set binaries. The bare binaries behave the same.
+  * A machine without a battery treats a bare `set` as AC. Setting battery writes the battery file without changing the active profile.
+  * A brief flicker after Super+Ctrl+P is acceptable. A card that stays open is not. The panel buttons are not part of this test.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the two listings, `powerprofilesctl get` after each `set` matching the stored preference, the AC and battery state files, the unchanged active profile after setting battery, the three refusals with `exit=1` and the unchanged profile after them, and the desktop after Super+Ctrl+P with no lingering power card
+  ** The profile list and the active profile are recorded. An empty list is reported with the daemon status.
+  ** Setting AC to the chosen profile makes `powerprofilesctl get` and the AC file match it.
+  ** Setting AC to `balanced` and then running a bare `set` leaves the active profile `balanced`.
+  ** Setting battery to `performance` writes that file and leaves the active profile `balanced`.
+  ** `turbo`, `laptop`, and `--nope` each exit 1, and the active profile stays `balanced`.
+  ** Super+Ctrl+P leaves no power panel open. The recorded starting profile is restored, and the battery file is removed.
   * If unsuccessful
-  ** A `set` reporting success while `powerprofilesctl get` disagrees, a refusal accepted or persisted, autodetect applying the battery preference on AC, or a panel card that stays open; the daemon status and `omarchy-version`
+  ** A successful set disagrees with `powerprofilesctl get`, a refusal is persisted, autodetect applies the battery choice, or a power card stays open.
 covers: manual/36-system-sleep.md (Power profiles); bin/omarchy-powerprofiles-list; bin/omarchy-powerprofiles-set; bin/omarchy-powerprofiles-init; shell/plugins/panels/power/Panel.qml; shell/plugins/services/battery/Service.qml; default/hypr/bindings/utilities.lua (SUPER+CTRL+P); test/shell.d/powerprofiles-set-test.sh; test/shell.d/power-test.sh
 
 ### system-stats-cli-output   [VM-OK]
@@ -15067,28 +15097,28 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy-system-stats` Enter.
-  ** Two lines: `cpu` with a percentage and `memory` as `X.XGB / 4GB`.
-  * Type `omarchy-system-stats --bar-widget` Enter.
-  ** Three lines: cpu counters, memory percentage, load.
-  * Type `yes > /dev/null & sleep 3; omarchy-system-stats; kill %1` Enter.
-  ** The cpu percentage is clearly higher than at rest.
-  * Type `omarchy-system-stats --bogus; echo "exit=$?"` Enter.
-  ** `Usage: omarchy-system-stats [--bar-widget]` and a non-zero exit.
-  * Close the terminal with Super+W; the desktop is as before.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy-system-stats` and press Return. One line starts with `cpu`, and one starts with `memory` and includes `4GB`.
+  * Type `omarchy-system-stats --bar-widget` and press Return. Three lines print.
+  * Type `yes > /dev/null & sleep 3; omarchy-system-stats; kill %1` and press Return. The cpu percentage is higher than the first reading.
+  * Type `omarchy-system-stats --bogus; echo "exit=$?"` and press Return. The output includes `Usage: omarchy-system-stats [--bar-widget]`, and the exit is non-zero.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Tabs render as wide gaps in the terminal.
+  * Tabs in the output can look like wide gaps.
+  * `kill %1` stops the `yes` job. If it is still running, type `kill %1` again.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the two-line output with 4GB total, the three-line output, the raised cpu figure and the usage error
+  ** The plain command prints a cpu percentage and memory as a fraction of `4GB`.
+  ** `--bar-widget` prints three lines.
+  ** After a short load, the cpu percentage is higher. `--bogus` prints the usage line and exits non-zero.
   * If unsuccessful
-  ** Missing lines, a wrong total, or awk errors
+  ** A line is missing, the memory total is not 4GB, or awk prints an error.
 covers: bin/omarchy-system-stats; shell/plugins/panels/power/Panel.qml
 
 ### toggle-generic-flag-and-bad-action   [VM-OK]
@@ -15098,27 +15128,40 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `ls ~/.local/state/omarchy/toggles/ 2>&1` Enter → no `demo-flag` listed.
-  * Type `omarchy-toggle demo-flag on; echo "exit=$?"; omarchy-toggle-enabled demo-flag; echo "exit=$?"` Enter → `exit=0` twice; `ls ~/.local/state/omarchy/toggles/` now shows `demo-flag`.
-  * Type `omarchy-toggle demo-flag on; echo "exit=$?"; ls ~/.local/state/omarchy/toggles/ | grep -c demo-flag` Enter → `exit=0` and `1` (still one file).
-  * Type `omarchy-toggle demo-flag; echo "exit=$?"; omarchy-toggle-enabled demo-flag; echo "exit=$?"` Enter → the bare call toggles it off: `exit=0` then `exit=1`.
-  * Type `omarchy-toggle demo-flag; omarchy-toggle-enabled demo-flag; echo "exit=$?"; omarchy-toggle demo-flag off; omarchy-toggle-enabled demo-flag; echo "exit=$?"` Enter → on again (`exit=0`), then off (`exit=1`).
-  * Negatives: `omarchy-toggle demo-flag sideways; echo "exit=$?"` → usage on stderr, `exit=1`; `omarchy-toggle; echo "exit=$?"` → usage, `exit=1`.
-  * Type `ls ~/.local/state/omarchy/toggles/ 2>&1` Enter → `demo-flag` is not there. Close the terminal with Super+W; the desktop is as before.
+  * Press Super+Return. A terminal opens.
+  * Type `ls ~/.local/state/omarchy/toggles/ 2>&1` and press Return. `demo-flag` is not listed.
+  * Type `omarchy-toggle demo-flag on; echo "exit=$?"` and press Return. The last line is `exit=0`.
+  * Type `omarchy-toggle-enabled demo-flag; echo "exit=$?"` and press Return. The last line is `exit=0`.
+  * Type `ls ~/.local/state/omarchy/toggles/` and press Return. `demo-flag` is listed.
+  * Type `omarchy-toggle demo-flag on; echo "exit=$?"` and press Return. The last line is `exit=0`.
+  * Type `ls ~/.local/state/omarchy/toggles/ | grep -c demo-flag` and press Return. The output is `1`.
+  * Type `omarchy-toggle demo-flag; echo "exit=$?"` and press Return. The last line is `exit=0`.
+  * Type `omarchy-toggle-enabled demo-flag; echo "exit=$?"` and press Return. The last line is `exit=1`.
+  * Type `omarchy-toggle demo-flag; echo "exit=$?"` and press Return. The last line is `exit=0`.
+  * Type `omarchy-toggle-enabled demo-flag; echo "exit=$?"` and press Return. The last line is `exit=0`.
+  * Type `omarchy-toggle demo-flag off; echo "exit=$?"` and press Return. The last line is `exit=0`.
+  * Type `omarchy-toggle-enabled demo-flag; echo "exit=$?"` and press Return. The last line is `exit=1`.
+  * Type `omarchy-toggle demo-flag sideways; echo "exit=$?"` and press Return. A usage line is printed, and the last line is `exit=1`.
+  * Type `omarchy-toggle; echo "exit=$?"` and press Return. A usage line is printed, and the last line is `exit=1`.
+  * Type `ls ~/.local/state/omarchy/toggles/ 2>&1` and press Return. `demo-flag` is not listed.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Exit codes are invisible on a screenshot — every call carries `; echo "exit=$?"`.
-  * `omarchy-toggle` writes only under `~/.local/state/omarchy/toggles/`; nothing on screen changes, the terminal is the whole proof.
+  * Every call prints its exit code because a screenshot cannot show it otherwise.
+  * The toggle writes only under `~/.local/state/omarchy/toggles/`. Nothing else on the desktop changes.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Terminal screendumps with the exit-code sequence 0 0 · 0 1 · 0 1 · 0 1 · 1 1, the `demo-flag` file present then absent in `ls`, and the two usage lines
+  ** `demo-flag` is absent, then `on` exits 0 and enabled exits 0, and the file exists.
+  ** A second `on` exits 0 and still leaves one file. A bare call turns it off, and enabled exits 1.
+  ** Another bare call turns it on, and `off` turns it off again. Both enabled checks match.
+  ** `sideways` and a missing name each print usage and exit 1. The file is gone at the end.
   * If unsuccessful
-  ** The line whose exit code differs, or a `demo-flag` left behind
+  ** An exit code differs, or `demo-flag` remains after `off`.
 covers: bin/omarchy-toggle; bin/omarchy-toggle-enabled; test/shell.d/toggle-test.sh
 
 ### cliamp-music-tui-without-audio   [VM-PARTIAL] [NET]
@@ -15128,30 +15171,34 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Shift+Alt+M.
-  ** A terminal window opens running Cliamp: a Winamp-style panel with a playlist / radio station list and transport controls (window class `org.omarchy.cliamp`).
-  ** Super+Shift+M (without Alt) is the Spotify chord, which starts an installer immediately — do not press it.
-  * Press `?`: the keybinding list overlays. Press Escape (or `?` again) to dismiss it.
-  * Select a radio station and press Enter/play.
-  ** The guest has no sound card but pipewire offers a `Dummy Output` (auto_null) sink, so Cliamp may show a "playing" state with no audible sound, or a playback error message inside Cliamp; either is acceptable. It must not crash or freeze. Record which.
-  * Press Super+Shift+Alt+M again.
-  ** The existing Cliamp window is focused; no second window appears.
-  * Press Super+Alt+Space and type `cliamp`: a Cliamp app row exists. Press Escape.
-  * Quit Cliamp with `q` (or Super+W); the desktop is as before.
+  * Press Super+Shift+Alt+M. A Cliamp window opens.
+  ** If nothing opens, type `pacman -Q cliamp` and `cliamp --version` in a terminal and report it.
+  * Press `?`. A keybinding list opens.
+  * Press Escape. The list closes.
+  * Select a radio station and press Enter. Record whether Cliamp shows playing or a playback error.
+  * Press Super+Shift+Alt+M. The same window is focused, and no second window opens.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `cliamp`. A Cliamp row is listed.
+  * Press Escape. Apps closes.
+  * Press `q`. Cliamp closes.
+  ** If it stays open, press Super+W.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Skipped here: audible audio output; the station stream needs the network (a few hundred KB).
-  * If the chord opens nothing, run `pacman -Q cliamp` and `cliamp --version` in a terminal and report.
+  * Do not press Super+Shift+M without Alt. That chord starts the Spotify installer.
+  * There is no sound card. A playing state on the dummy output, or a playback error inside Cliamp, both count. A crash or a freeze does not.
+  * The window class is `org.omarchy.cliamp`. A station stream uses the network.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of Cliamp's main screen, the `?` help, the state after play (error or silent playing), the single window after the second chord, and the launcher row
+  ** Super+Shift+Alt+M opens one Cliamp window. `?` opens a keybinding list, and Escape closes it.
+  ** Playing a station shows either a playing state or an error inside Cliamp, and that result is recorded.
+  ** A second chord focuses the same window. Apps lists Cliamp, and `q` closes it.
   * If unsuccessful
-  ** Screenshot of a crash/blank terminal or a duplicate window; `cliamp --version`
+  ** The chord opens nothing while the package is installed, Cliamp crashes, or a second window opens.
 covers: manual/21-tuis.md:41-43; default/hypr/bindings/applications.lua:15; bin/omarchy-launch-or-focus-tui; install/omarchy-base.packages (cliamp)
 
 ### launcher-gui-apps-open-and-close   [VM-PARTIAL]
@@ -15161,30 +15208,50 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Alt+Space, type `Pinta`, Enter: an image editor with a toolbox and a blank canvas opens (up to 30 s). Screenshot, then Super+W (dismiss any "save changes?" with Don't Save / Discard).
-  ** Heavy apps may raise Hyprland's "not responding" dialog: click **Wait**. If a window has not painted after 45 s, screenshot and report it as slow rather than waiting.
-  * Repeat for `Aether`: the theming app with an image/colour extraction view. Screenshot, Super+W.
-  * Repeat for `Omacut`: the video trimmer window (empty timeline / open-file prompt). Screenshot, Super+W.
-  * Repeat for `LibreOffice Writer`: a blank document (the Start Center is hidden from the launcher; Writer/Calc/Impress rows exist). Screenshot, Super+W, Don't Save.
-  * Repeat for `Disks`: GNOME Disks showing the 40 GB virtio disk `/dev/vda` (GTK renders oversized at 1× — expected). Screenshot, Super+W.
-  * Repeat for `Moonlight`: the streaming client showing "Searching for PCs…" / an Add PC button. Screenshot, Super+W.
-  * Repeat for `Kdenlive`: the video editor (a first-run config wizard may appear; accept defaults). Screenshot, Super+W.
-  * Repeat for `OBS Studio`: the OBS main window (an auto-configuration wizard may appear; cancel it; a "no audio device" indicator is expected). Screenshot, Super+W. The desktop is as before.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `Pinta` and press Enter. Pinta opens.
+  * Press Super+W. Pinta closes.
+  ** If it asks to save, choose Don't Save.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `Aether` and press Enter. Aether opens.
+  * Press Super+W. Aether closes.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `Omacut` and press Enter. Omacut opens.
+  * Press Super+W. Omacut closes.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `LibreOffice Writer` and press Enter. Writer opens.
+  * Press Super+W. Writer closes.
+  ** If it asks to save, choose Don't Save.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `Disks` and press Enter. Disks opens.
+  * Press Super+W. Disks closes.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `Moonlight` and press Enter. Moonlight opens.
+  * Press Super+W. Moonlight closes.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `Kdenlive` and press Enter. Kdenlive opens.
+  ** If a first-run wizard appears, accept the defaults.
+  * Press Super+W. Kdenlive closes.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `OBS Studio` and press Enter. OBS Studio opens.
+  ** If a wizard appears, cancel it.
+  * Press Super+W. OBS Studio closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Skipped here: any actual editing, streaming or recording; audio and GPU features.
-  * Kdenlive and OBS are the slowest under llvmpipe. Media windows (Pinta, Kdenlive, OBS) are configured opaque; that is expected.
-  * A missing launcher row is a real failure: all eight are in the base package set.
+  * If Hyprland says an app is not responding, click Wait. If a window has not painted after 45 seconds, report it as slow and go on.
+  * Do not edit, stream, or record. A missing row is a failure. All eight apps are in the base set.
+  * Disks should show the virtio disk. Moonlight may say it is searching. OBS may say there is no audio device. GTK windows may render oversized.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** One screenshot per app showing its main window, and the empty desktop at the end
+  ** Pinta, Aether, Omacut, LibreOffice Writer, Disks, Moonlight, Kdenlive, and OBS Studio each open from Apps and each close.
+  ** A save prompt is declined, a Kdenlive wizard is accepted, and an OBS wizard is cancelled.
   * If unsuccessful
-  ** Screenshot of the missing row or blank window; `journalctl --user -n 30 | sudo tee /dev/ttyS0` read via get-serial for that launch
+  ** A named row is missing, a window stays blank, or an app does not close.
 covers: manual/22-guis.md:27-37,56-60,74-96; manual/26-gaming.md:63; install/omarchy-base.packages (pinta, aether, omacut, libreoffice-fresh, gnome-disk-utility, moonlight-qt, kdenlive, obs-studio); default/omarchy/launcher.hides; default/hypr/apps/system.lua:41-52
 
 ### pdf-open-evince-and-fill-xournalpp   [VM-OK]
@@ -15194,29 +15261,49 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return and type `mkdir -p /tmp/pdf && cd /tmp/pdf && printf 'Name: ______\n' > form.txt && libreoffice --headless --convert-to pdf form.txt >/dev/null && ls` Enter → `form.pdf`.
-  ** If the LibreOffice conversion is unavailable, use any PDF: `fd -e pdf . /usr/share | head -1` and `cp` it to `/tmp/pdf/form.pdf`.
-  * Type `xdg-mime query default application/pdf` Enter → `org.gnome.Evince.desktop`.
-  * Press Super+Shift+Alt+F (Files in `/tmp/pdf`); if that chord does nothing on this build, press Super+Shift+F (Files) and navigate to `/tmp/pdf`. Double-click `form.pdf`: Document Viewer (Evince) opens the page in a floating window. Close it with Super+W.
-  ** Files, Evince and the chooser are GTK and render oversized at 1× — expected.
-  * Right-click `form.pdf` → *Open With…* → choose Xournal++ (type `Xournal` to filter the chooser) → Open. Xournal++ opens (tiled) with the PDF as the background; dismiss any first-run dialog.
-  * Press `T` (or click the Text tool in the toolbar), click on the page next to `Name:`, type `Prime`, click elsewhere. The text sits on the page.
-  * Menu *File → Export as PDF*, name `filled.pdf` in `/tmp/pdf`, Save. Close Xournal++ with Super+W (discard the `.xopp` save prompt).
-  * In the terminal type `ls /tmp/pdf` Enter → `filled.pdf` present; `xdg-open /tmp/pdf/filled.pdf` Enter → Evince shows the page with `Prime` on it. Close it, close Files, then `cd && rm -rf /tmp/pdf` and close the terminal with Super+W; the desktop is as before.
+  * Press Super+Return. A terminal opens.
+  * Type `mkdir -p /tmp/pdf && cd /tmp/pdf && printf 'Name: ______\n' > form.txt && libreoffice --headless --convert-to pdf form.txt >/dev/null && ls` and press Return. The listing includes `form.pdf`.
+  ** If conversion fails, copy any PDF found by `fd -e pdf . /usr/share | head -1` to `/tmp/pdf/form.pdf`.
+  * Type `xdg-mime query default application/pdf` and press Return. The output is `org.gnome.Evince.desktop`.
+  * Press Super+Shift+Alt+F. Files opens in `/tmp/pdf`.
+  ** If that chord does nothing, press Super+Shift+F and open `/tmp/pdf`.
+  * Double-click `form.pdf`. Document Viewer opens.
+  * Press Super+W. Document Viewer closes.
+  * Right-click `form.pdf`. A menu opens.
+  * Choose Open With. The chooser opens.
+  * Type `Xournal` and choose Xournal++. Xournal++ opens.
+  ** Dismiss a first-run dialog if one appears.
+  * Press `T`. The text tool is active.
+  * Click the page next to `Name:`. A text field is placed.
+  * Type `Prime` and click elsewhere. The word `Prime` is on the page.
+  * Open File, then Export as PDF. An export dialog opens.
+  * Save it as `filled.pdf` in `/tmp/pdf`. The file is written.
+  * Press Super+W. Xournal++ closes.
+  ** If it asks to save a `.xopp` file, discard it.
+  * Click the terminal. It is focused.
+  * Type `ls /tmp/pdf` and press Return. `filled.pdf` is listed.
+  * Type `xdg-open /tmp/pdf/filled.pdf` and press Return. Document Viewer shows `Prime` on the page.
+  * Press Super+W. Document Viewer closes.
+  * Close Files. Files closes.
+  * Type `cd && rm -rf /tmp/pdf` and press Return. The prompt returns.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The Open With chooser is a GTK dialog; type to filter. Double-check the mouse position before clicking in the oversized dialogs.
-  * Evince's window floats (rule), Xournal++ tiles.
+  * Files, Document Viewer, and the chooser may render oversized. Type in the chooser to filter.
+  * Document Viewer floats. Xournal++ tiles.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the `xdg-mime` answer, Evince on `form.pdf`, the Open With chooser with Xournal++, the typed text on the page, the export dialog, and Evince showing `filled.pdf` with `Prime`
+  ** `form.pdf` exists, and the PDF default is `org.gnome.Evince.desktop`.
+  ** Double-click opens Document Viewer. Open With starts Xournal++.
+  ** The text tool places `Prime` on the page, and export writes `filled.pdf`.
+  ** Opening `filled.pdf` shows `Prime`. `/tmp/pdf` is then removed.
   * If unsuccessful
-  ** Screenshot of the step that failed (a different viewer opening, Xournal++ missing from the chooser, no export) and `xdg-mime query default application/pdf`
+  ** A different viewer opens, Xournal++ is missing from the chooser, or the export has no `Prime`.
 covers: manual/27-filling-out-pdfs.md; install/omarchy-base.packages (evince, xournalpp); default/hypr/apps/system.lua:7
 
 ### imv-rotate-edit-trash-keybindings   [VM-OK]
@@ -15226,28 +15313,42 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter and type `mkdir -p /tmp/imvt && cp /usr/share/omarchy/default/plymouth/logo.png /tmp/imvt/a.png && cp /tmp/imvt/a.png /tmp/imvt/b.png && identify -format '%wx%h\n' /tmp/imvt/a.png && imv /tmp/imvt/a.png &` Enter.
-  ** The dimensions print and imv shows the logo in a floating window.
-  * Click the imv window and press Ctrl+R → the image rotates 90°. Click the terminal and type `identify -format '%wx%h\n' /tmp/imvt/a.png` Enter → swapped dimensions (the rotation was written to disk).
-  * Click imv and press Ctrl+E → Tensaku opens the image and imv quits. Press Super+W on Tensaku.
-  * In the terminal type `imv /tmp/imvt/b.png &` Enter, click the imv window and press Ctrl+X.
-  ** imv quits; type `ls /tmp/imvt; gio list trash:// | grep b.png` Enter → `b.png` gone from the folder and present in the Trash.
-  * Type `imv /tmp/imvt/missing.png` Enter → an error about the file; press `q` if a window opened.
-  * Type `rm -rf /tmp/imvt; gio trash --empty` Enter and close the terminal with Super+W; the desktop is as before.
+  * Press Super+Return. A terminal opens.
+  * Type `mkdir -p /tmp/imvt && cp /usr/share/omarchy/default/plymouth/logo.png /tmp/imvt/a.png && cp /tmp/imvt/a.png /tmp/imvt/b.png` and press Return. The prompt returns.
+  * Type `identify -format '%wx%h\n' /tmp/imvt/a.png` and press Return. Record the dimensions.
+  * Type `imv /tmp/imvt/a.png &` and press Return. An image window opens.
+  * Click the image window. It is focused.
+  * Press Ctrl+R. The image rotates.
+  * Click the terminal. It is focused.
+  * Type `identify -format '%wx%h\n' /tmp/imvt/a.png` and press Return. The width and height are swapped.
+  * Click the image window. It is focused.
+  * Press Ctrl+E. Tensaku opens, and the image viewer closes.
+  * Press Super+W. Tensaku closes.
+  * Type `imv /tmp/imvt/b.png &` and press Return. An image window opens.
+  * Click the image window. It is focused.
+  * Press Ctrl+X. The image viewer closes.
+  * Type `ls /tmp/imvt` and press Return. `b.png` is not listed.
+  * Type `gio list trash:// | grep b.png` and press Return. `b.png` is listed.
+  * Type `imv /tmp/imvt/missing.png` and press Return. An error names the missing file.
+  ** If a window opened, press `q`. It closes.
+  * Type `rm -rf /tmp/imvt; gio trash --empty` and press Return. The prompt returns.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Click the imv window before pressing its shortcuts so they are not sent to the terminal.
-  * imv is a floating viewer by window rule; Tensaku is the stock screenshot editor.
+  * Click the image window before its shortcuts so they are not typed into the terminal.
+  * The viewer floats. Tensaku is the stock image editor.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of imv with the image, the swapped dimensions, Tensaku opening, the folder listing plus Trash entry, and the missing-file error
+  ** imv opens the logo. Ctrl+R rotates it, and `identify` shows the swapped dimensions.
+  ** Ctrl+E opens Tensaku and closes imv. Ctrl+X closes the second image and puts `b.png` in the Trash.
+  ** A missing file prints an error. `/tmp/imvt` and the trash entry are then removed.
   * If unsuccessful
-  ** Screenshot of a shortcut doing nothing, a file deleted without landing in Trash, or Tensaku not opening
+  ** A shortcut does nothing, `b.png` is deleted without reaching the Trash, or Tensaku does not open.
 covers: config/imv/config; applications/imv.desktop; default/tensaku/state.toml
 
 ### chromium-whatsapp-slim-extension   [VM-PARTIAL] [NET]
