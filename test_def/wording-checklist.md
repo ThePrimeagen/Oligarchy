@@ -61,10 +61,10 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `locate-indexes-and-prunes-snapshots`
 - [x] `hardware-gated-entries-hidden-in-vm`
 - [x] `menu-open-close-hotkey-and-bar-logo`
-- [ ] `menu-system-super-escape-cancels`
-- [ ] `menu-search-filter-and-two-stage-escape`
-- [ ] `menu-submenu-navigation-keyboard-and-mouse`
-- [ ] `menu-overlays-keep-keys-from-window-behind`
+- [x] `menu-system-super-escape-cancels`
+- [x] `menu-search-filter-and-two-stage-escape`
+- [x] `menu-submenu-navigation-keyboard-and-mouse`
+- [x] `menu-overlays-keep-keys-from-window-behind`
 - [ ] `menu-route-hotkeys-aliases-and-summon`
 - [ ] `menu-guards-hide-hardware-rows-on-vm`
 - [ ] `menu-guards-dim-installed-hide-absent-tick-current`

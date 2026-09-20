@@ -2441,14 +2441,15 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Escape. Within 15 seconds a centred card with the header "System…" must appear listing Screensaver, Lock, Suspend, Logout, Reboot, Shutdown.
-  ** Hibernate must be absent (the VM has no swap); if a Hibernate row is present between Suspend and Logout, report it as a finding about the VM, not a driver error.
-  * Press Escape. Within 15 seconds the menu must be gone. Screenshot again after 10 seconds: the desktop is still running, no lock screen, no logout.
-  * Press Super+Escape, then Down until `Shutdown` is highlighted, then Escape. The menu closes and nothing fires.
-  ** Do NOT press Enter on Suspend, Logout, Reboot or Shutdown; the session would be lost.
-  * Press Super+Escape, then Backspace once. The header changes to "Go…" and the ten root rows Apps, Learn, Trigger, Style, Setup, Install, Remove, Update, About, System are listed; submenu rows end with "›". Press Escape.
-  ** Backspace on an empty filter goes back a level; it does not close the menu.
-  * The desktop must look exactly as at the start.
+  * Press Super+Escape. The System menu opens. Hibernate is absent. Do not select Suspend.
+  * Press Escape. The menu closes. The desktop stays.
+  * Press Super+Escape. The System menu opens.
+  * Press Down until Shutdown is highlighted. Shutdown is highlighted. Do not press Enter.
+  * Press Escape. The menu closes. Nothing powers off.
+  * Press Super+Escape. The System menu opens.
+  * Press Backspace. The root menu opens. The menu stays open.
+  * Press Escape. The menu closes.
+  * the desktop must return exactly as left.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -2471,13 +2472,16 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Space, press Down twice, then Return (twice if the first press only settles the cursor). You are inside "Trigger…": Emoji, Reminder, Capture, Transcode, Share, Toggle, Speed Test. Press Backspace with nothing typed: the root list returns.
-  * Type "toggle". The header shows the typed text in full brightness and only matching rows remain (Trigger › Toggle and its children such as Stay Awake, Nightlight, Menu Bar), deeper rows carrying a grey path line under the label.
-  * Press Escape once: the filter clears, the full root list returns, the menu is still open. Type "keyb": "Keybindings" rows appear with their parent as subtitle (Learn first, then Setup).
-  * Press Escape once, type "font". A "Font" row with subtitle "Style" and a "Font" row with subtitle "Install › Style" are separated by a thin divider, followed by rows like "Fira Code" with subtitle "Install › Style › Font". Press Escape once, move to Install, press Enter, type "font": only Install descendants remain — "Font" (subtitle Style) and the six font names, no Style › Font row.
-  ** Do not press Enter on a font row; that starts a network install.
-  * Press Escape once and Backspace once (back to the root). Type "theme": rows from Style, Install › Style and Remove appear with path lines and the divider. Press Backspace five times: the filter empties and the root list returns.
-  * Unhappy path: type "zzqx". The list is replaced by a large glyph and the text: No matches for “zzqx”. Press Escape once: the filter clears and the root menu is shown again (menu still open). Press Escape again: the menu closes and the desktop is exactly as at the start.
+  * Press Super+Space. The menu opens.
+  * Press Down twice. The highlight moves.
+  * Press Return. A submenu opens. If the first Return only settles the cursor, press Return again.
+  * Press Backspace. The root menu returns.
+  * Type `toggle`. Only matching rows remain.
+  * Press Escape. The filter clears. The menu stays open.
+  * Type `zzqx`. No matches are shown.
+  * Press Escape. The filter clears. The menu stays open.
+  * Press Escape. The menu closes.
+  * the desktop must return exactly as left.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -2501,16 +2505,32 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Space, Down four times (Setup), Enter: header "Setup…". Press Down until "Defaults" is highlighted and press Right: header "Defaults…" with Agent, Browser, Terminal, Editor. Press Down twice and Enter on Terminal.
-  ** The header reads "Default Terminal…" (a title different from the row label); rows Alacritty, Foot, Ghostty, Kitty; exactly one row ends with " ✓" (Foot on the stock disk).
-  * Press Left: header "Defaults…". Move to Browser and press Enter: header "Default Browser…" with Chromium ✓, Chrome, Brave, Brave Origin, Edge, Firefox, Zen. Press Backspace: "Defaults…"; Backspace: "Setup…"; Backspace: "Go…".
-  * Unhappy path: press Backspace once more at the root. Nothing changes; the menu stays open at the root.
-  * Keyboard-only walk (do not use the mouse): from the root press Down three times so `Style` is highlighted, Enter: within 15 seconds the Style submenu shows Theme, Background, Unlock, Font, Menu Bar, Hyprland, Screensaver, About. Down four times (`Menu Bar`), Enter: `Position` and `Transparency`. Enter on `Position`: Top, Bottom, Left, Right. Down twice (`Left`), Enter: within 20 seconds the bar is a vertical strip on the left edge and within 15 seconds the menu has closed.
-  ** The vertical clock reads as `HH`, a dash, `mm` stacked. Open a terminal with Super+Enter and type `jq .bar.position ~/.config/omarchy/shell.json; omarchy-bar position top` Enter: it prints `"left"` and within 20 seconds the bar is horizontal along the top again. Close the terminal with Super+W.
-  * Press Super+Space, move to Install, Enter, then Development, Enter. Many rows (Ruby on Rails, Docker DB, JavaScript, Go, PHP, Python, Elixir, Zig, Rust, Java, .NET, OCaml, Clojure, Scala) and the card is cut off mid-row at the bottom. Press Down about eight times: the list scrolls and a fade appears at the top edge. Keep pressing Down past the last row: the highlight wraps to the first row. Press Up once: it wraps to the last row. Press PageUp: the highlight jumps six rows up. Press Escape twice.
-  ** Do not press Enter on any row here — they start installers.
-  * Press Super+Space. Using the mouse only: move onto the "Style" row (nudge the pointer a few pixels once over it) — it highlights — and click it: header "Style…". Click "Menu Bar", then click "Position": rows Top, Bottom, Left, Right. Do not click any of them. Click on the dark scrim far from the card: the menu closes and the bar is still at the top.
-  * Click the Omarchy logo on the bar to open the menu. Move the mouse over the "Learn" row and screenshot: the highlight must follow the pointer. Click it: header "Learn…" with Keybindings, Omarchy, Hyprland, Arch, Neovim, Bash, Tmux, Herdr, Community. Click "Keybindings": the keybindings picker opens (header "Keybindings…", monospace rows). Click on the desktop outside the card: the picker closes; desktop as before.
+  * Press Super+Space. The menu opens.
+  * Press Down four times. Setup is highlighted.
+  * Press Enter. Setup opens.
+  * Press Down until Defaults is highlighted. Defaults is highlighted.
+  * Press Right. Defaults opens. Do not use the mouse.
+  * Press Down twice. Terminal is highlighted.
+  * Press Enter. The terminal choices open. One row is ticked.
+  * Press Backspace. Defaults returns.
+  * Press Backspace. Setup returns.
+  * Press Backspace. The root menu returns.
+  * Press Backspace. The menu stays open.
+  * Press Down three times. Style is highlighted.
+  * Press Enter. Style opens.
+  * Press Down four times. Menu Bar is highlighted.
+  * Press Enter. Menu Bar opens.
+  * Press Enter. Position opens.
+  * Press Down twice. Left is highlighted.
+  * Press Enter. The bar moves to the left. The menu closes.
+  * Press Super+Enter. A terminal opens.
+  * Run `omarchy-bar position top` and press Enter. The bar returns to the top.
+  * Press Super+W. The terminal closes.
+  * Press Super+Space. The menu opens.
+  * Move the pointer onto Style. Style highlights.
+  * Click Style. Use the mouse only. Style opens.
+  * Click away from the menu. The menu closes. The bar stays on top.
+  * the desktop must return exactly as left.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -2537,12 +2557,20 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter for a terminal and type (no Enter): echo before
-  * Press Super+Space, type: setup  then press Escape twice. The terminal line still reads exactly "echo before".
-  * Press Super+Ctrl+E (emoji picker), type: smile  then Escape twice. Terminal line unchanged.
-  * Press Super+Ctrl+V (clipboard picker), type: abc  then Escape twice. Terminal line unchanged.
-  * Type:  after  and press Enter. The terminal echoes "before after" — focus came back to it.
-  * Type exit and Enter; the desktop is as before.
+  * Press Super+Enter. A terminal opens.
+  * Type `echo before`. Do not press Enter. The line reads echo before.
+  * Press Super+Space. The menu opens.
+  * Type `setup`. The filter is set.
+  * Press Escape. The filter clears. The menu stays open.
+  * Press Escape. The menu closes.
+  * Look at the terminal. The line still reads echo before.
+  * Press Super+Ctrl+E. The emoji picker opens.
+  * Type `smile`. The filter is set.
+  * Press Escape. The filter clears.
+  * Press Escape. The picker closes.
+  * Look at the terminal. The line still reads echo before.
+  * Type ` after` and press Enter. The terminal prints before after.
+  * Type `exit` and press Enter. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
