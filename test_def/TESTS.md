@@ -1632,18 +1632,16 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal (Super+Enter) and type `sudo snapper list-configs; sudo snapper -c root list | sudo tee /dev/ttyS0` (password `prime`) — the configs (typically only `root`) and the numbered rows (a fresh disk usually has only `0 | single | current`); note the highest number.
-  ** `snapper list` is wide: read it with `./client get-serial`, or append `| cut -c1-100`.
-  * Type `omarchy-snapshot; echo "exit=$?"` — `Usage: omarchy-snapshot <create|restore>` and `exit=1`.
-  * Type `omarchy snapshot create; echo "exit=$?"` — green `Create system snapshot`, one snapper line with the new number, `Snapshots can be selected during boot.`, `exit=0`.
-  ** A yellow `No Snapper configs found, so no snapshot was created.` means the disk shipped unconfigured: type the command it prints (`sudo bash -euo pipefail "/usr/share/omarchy/install/config/snapper.sh"`), rerun, and record it as an environment finding.
-  * Type `omarchy-version; sudo snapper -c root list | tail -n 3` — a new row of type `single`, cleanup `number`, whose description equals the version just printed (e.g. `4.0.2-1`, or `dev (<hash>)` on a dev checkout); no row has cleanup `timeline`.
-  * Type `sudo grep -E '^(TIMELINE_CREATE|NUMBER_LIMIT|NUMBER_LIMIT_IMPORTANT|NUMBER_CLEANUP)=' /etc/snapper/configs/root; systemctl is-enabled snapper-timeline.timer snapper-cleanup.timer limine-snapper-sync.service; grep MAX_SNAPSHOT_ENTRIES /etc/limine-entry-tool.d/omarchy-defaults.conf; sudo grep -c snapshot /boot/limine.conf` — `TIMELINE_CREATE="no"`, `NUMBER_LIMIT="5"`, `NUMBER_LIMIT_IMPORTANT="5"`, `NUMBER_CLEANUP="yes"`; `disabled`, `enabled`, `enabled`; `MAX_SNAPSHOT_ENTRIES=6`; a count greater than 0 (the boot menu picked the snapshot up).
-  * Type `for i in 1 2 3 4 5 6; do omarchy-snapshot create; done` and wait until six "Create system snapshot" blocks have printed (a second or two each; screenshot while it runs, do not interrupt). Then `sudo snapper -c root list | sudo tee /dev/ttyS0` — at most 5 numbered rows besides `0 | current`, and the lowest number created in this run is gone.
-  * Unhappy path: type `omarchy-snapshot bogus; echo "exit=$?"`, then `omarchy snapshot bogus; echo "exit=$?"` — intended: `Usage: omarchy-snapshot <create|restore>` (on stderr) and `exit=1` for both. Capture exactly what appears.
-  ** Known defect at HEAD (03-INTENDED-BEHAVIOUR #4): no output and `exit=0`. If that is what you see, the step FAILS — report the silent acceptance as the defect, with both screenshots. Either way, `sudo snapper -c root list | tail -n 1` must show the row count unchanged: nothing was created or deleted.
-  * Round trip: delete each snapshot this run created with `sudo snapper -c root delete <n>` (the numbers seen above), then `sudo snapper -c root list | tail -n 2` — the list is back to what it was. Press Super+W.
-  ** Or end the session with `stop`; a left-over snapshot only adds entries to the boot menu.
+  * Press Super+Enter. A terminal opens.
+  * Run `sudo snapper list-configs` and press Enter. Password is `prime`. A root config is listed.
+  * Run `omarchy-snapshot; echo exit=$?` and press Enter. It prints usage and `exit=1`.
+  * Run `omarchy snapshot create; echo exit=$?` and press Enter. A snapshot is created. It prints `exit=0`.
+  * Run `sudo snapper -c root list | tail -n 2` and press Enter. The new snapshot is listed.
+  * Run `for i in 1 2 3 4 5 6; do omarchy-snapshot create; done` and press Enter. Six creates finish.
+  * Run `sudo snapper -c root list | sudo tee /dev/ttyS0` and press Enter. Read `./client get-serial`. At most five numbered snapshots remain besides the current row.
+  * Run `omarchy-snapshot bogus; echo exit=$?` and press Enter. It must print usage and `exit=1`. If it prints nothing and `exit=0`, that is the failure.
+  * Run `sudo snapper -c root list | tail -n 1` and press Enter. The row count did not change.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -1670,12 +1668,14 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter.
-  * Temporarily hide the Snapper root config: `sudo mv /etc/snapper/configs/root /root/snapper-root.bak && sudo cp /etc/conf.d/snapper /root/snapper-conf.bak && sudo sed -i 's/^SNAPPER_CONFIGS=.*/SNAPPER_CONFIGS=""/' /etc/conf.d/snapper` (password `prime`).
-  * Run `sudo snapper list-configs` → only the header, no `root` row.
-  * Run `omarchy-snapshot create; echo "exit=$?"` → yellow `No Snapper configs found, so no snapshot was created.` and `Configure Snapper with: sudo bash -euo pipefail "/usr/share/omarchy/install/config/snapper.sh"`, with `exit=1`.
-  * Restore immediately: `sudo mv /root/snapper-root.bak /etc/snapper/configs/root && sudo cp /root/snapper-conf.bak /etc/conf.d/snapper && sudo snapper list-configs` → the `root` row is back.
-  * Run `omarchy-snapshot create` once more to confirm it works again (`Create system snapshot` … `Snapshots can be selected during boot.`). Round trip: `sudo snapper -c root list | tail -n 1` shows the new number; `sudo snapper -c root delete <that number>`. Press Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Run `sudo mv /etc/snapper/configs/root /root/snapper-root.bak` and press Enter. Password is `prime`. The root config is moved aside.
+  * Run `sudo sed -i 's/^SNAPPER_CONFIGS=.*/SNAPPER_CONFIGS=""/' /etc/conf.d/snapper` and press Enter. Snapper has no named config.
+  * Run `sudo snapper list-configs` and press Enter. No root row is listed.
+  * Run `omarchy-snapshot create; echo exit=$?` and press Enter. It says no config was found. It prints `exit=1`.
+  * Run `sudo mv /root/snapper-root.bak /etc/snapper/configs/root` and press Enter. The root config is restored.
+  * Run `omarchy-snapshot create; echo exit=$?` and press Enter. A snapshot is created. It prints `exit=0`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -1699,18 +1699,26 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal (Super+Enter). Type `sudo touch /etc/before-snapshot` (password `prime`), then `omarchy-snapshot create`, then `sudo rm /etc/before-snapshot; sudo touch /etc/rollback-probe; omarchy-version; sudo snapper -c root list | tail -n 1` — note the version and the new snapshot number N. Take screenshots for ~10 s so the boot menu can sync.
-  ** `No Snapper configs found, so no snapshot was created.` means the minted disk has snapper unconfigured — record it and stop; the test does not apply.
-  * Press Super+Escape and click Reboot with the mouse. When the screen goes dark press Down every second, screenshotting, until the "Omarchy Bootloader" menu is visible.
-  ** The menu is on screen only ~5 s unless a key is pressed; if the passphrase prompt shows instead, type `prime`, reach the desktop and reboot again.
-  * Move to the `Snapshots` entry, press Enter and screenshot the list: the entry for N shows a date and the version you noted. Highlight it, press Enter, type `prime` at the passphrase prompt (log in with `prime` only if a greeter appears).
-  ** If the desktop does not load, press Ctrl+Alt+F3 and log in as prime/prime on the text console.
-  * On the desktop, within ~30 s, a critical notification `Restore this snapshot now!` (app "Snapshot detected!") must appear. Do not click it.
-  ** If it does not appear, open a terminal and type `limine-snapper-restore --notify`; note whether it prints "You are not in a snapshot." and report.
-  * Open a terminal and type `ls /etc/before-snapshot /etc/rollback-probe; findmnt -no OPTIONS /; sudo btrfs property get / ro; grep -o 'snapshots/[0-9]*/snapshot' /proc/cmdline; touch /usr/test` — `before-snapshot` exists, `rollback-probe` is "No such file or directory" (the snapshot predates it), the mount options contain `.snapshots/N/snapshot` and `ro`, `ro=true`, the cmdline names the snapshot, and touch says "Read-only file system".
-  * Reboot again (Super+Escape → Reboot, or `systemctl reboot` on the console), let Limine auto-boot without touching keys, type `prime`. On the desktop type `ls /etc/before-snapshot /etc/rollback-probe; findmnt -no OPTIONS /` — `before-snapshot` missing, `rollback-probe` present, `subvol=/@` again: the live root is back exactly as left.
-  * Restore: `sudo rm /etc/rollback-probe; sudo snapper -c root delete N`. Press Super+W. (Or end with `stop`.)
-  ** Do not run `omarchy snapshot restore` here: that makes the rollback permanent and is its own test.
+  * Press Super+Enter. A terminal opens.
+  * Run `sudo touch /etc/before-snapshot` and press Enter. Password is `prime`. The file exists.
+  * Run `omarchy-snapshot create` and press Enter. A snapshot is created. Note its number.
+  * Run `sudo rm /etc/before-snapshot; sudo touch /etc/rollback-probe` and press Enter. The later file exists. The earlier file is gone.
+  * Press Super+Escape. The System menu opens.
+  * Click Reboot. Use the mouse only. The machine reboots.
+  * When the boot menu appears, press Down. The countdown stops.
+  * Open Snapshots and press Enter on the snapshot you just made. Do not change anything else. The passphrase prompt appears.
+  * Type `prime` and press Enter. The snapshot desktop returns.
+  * Do not click the restore notice.
+  * Press Super+Enter. A terminal opens.
+  * Run `ls /etc/before-snapshot /etc/rollback-probe` and press Enter. The earlier file exists. The later file does not.
+  * Run `touch /usr/test` and press Enter. The write is refused.
+  * Press Super+Escape. The System menu opens.
+  * Click Reboot. Use the mouse only. The machine reboots.
+  * Let the normal entry boot. Type `prime` at the passphrase prompt and press Enter. The live desktop returns.
+  * Press Super+Enter. A terminal opens.
+  * Run `ls /etc/rollback-probe` and press Enter. The later file is back.
+  * Run `sudo rm /etc/rollback-probe; sudo snapper -c root delete N` and press Enter. Replace N with the snapshot number. The probe and the snapshot are gone.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -1737,14 +1745,24 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter. Type `omarchy-snapshot create` (password `prime`), then `sudo touch /etc/broken-after-snapshot`, then `touch ~/keep-me`.
-  * Reboot (Super+Escape → click Reboot), press Down at the Limine menu, open `Snapshots`, boot the snapshot you just made, type `prime`.
-  * When `Restore this snapshot now!` appears, click it with the mouse. A terminal must open running the restore; enter `prime` in the polkit password dialog if one appears.
-  ** If nothing opens within 10 s, open a terminal, type `omarchy-snapshot restore` (password `prime`) and report that the click path failed.
-  * Answer the restore tool's prompts (confirm the currently booted snapshot). Screenshot every prompt. It must end with a success message.
-  * Reboot as the tool suggests (or Super+Escape → Reboot), let Limine auto-boot, type `prime`.
-  * Open a terminal and type `ls /etc/broken-after-snapshot ~/keep-me; grep -o 'subvol=/@[^ ]*' /proc/cmdline`: the /etc file is MISSING, `~/keep-me` is PRESENT, and the root is `subvol=/@`.
-  * Reboot once more, press Down at Limine and screenshot the menu: a backup/previous-state entry added by the restore is expected. Boot normally with `prime`. The root filesystem has been replaced: end the session with `stop`.
+  * Press Super+Enter. A terminal opens.
+  * Run `omarchy-snapshot create` and press Enter. Password is `prime`. A snapshot is created.
+  * Run `sudo touch /etc/broken-after-snapshot` and press Enter. The root file exists.
+  * Run `touch ~/keep-me` and press Enter. The home file exists.
+  * Press Super+Escape. The System menu opens.
+  * Click Reboot. Use the mouse only. The machine reboots.
+  * When the boot menu appears, press Down. The countdown stops.
+  * Open Snapshots and boot the snapshot you just made. The passphrase prompt appears.
+  * Type `prime` and press Enter. The snapshot desktop returns.
+  * Click the restore notice. Use the mouse only. The restore starts.
+  * Confirm the restore. The restore finishes.
+  * Press Super+Escape. The System menu opens.
+  * Click Reboot. Use the mouse only. The machine reboots.
+  * Let the normal entry boot. Type `prime` and press Enter. The desktop returns.
+  * Press Super+Enter. A terminal opens.
+  * Run `ls /etc/broken-after-snapshot` and press Enter. The file is gone.
+  * Run `ls ~/keep-me` and press Enter. The home file is still there.
+  * Run `./client stop`. The session ends.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -1770,12 +1788,13 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal (Super+Enter) and type `findmnt -no OPTIONS /; sudo snapper -c root list | tail -n 2` (password `prime`) — the options contain `subvol=/@`; note whether any numbered snapshots exist (none on a fresh disk is the "nothing to restore" case).
-  * Type `omarchy snapshot restore` (enter `prime` if sudo asks). A text UI from `limine-snapper-restore` appears: either a snapshot picker/confirmation or a message that the system is not booted from a snapshot / nothing is available. Screenshot it and describe its options; capture the wording verbatim.
-  * Do NOT confirm any restore. If it takes a number, type an invalid one such as `9999` first and capture the message. Then cancel with Escape / Ctrl+C / its Quit option (answer No to any confirmation) until the prompt returns; type `echo "exit=$?"` and record it.
-  ** If a picker highlights a snapshot, the safe key is Escape; never press Enter on a highlighted row.
-  * Type `sudo limine-snapper-sync --restore-kernels 9999; echo "exit=$?"` — an error and a non-zero exit for the nonexistent ID.
-  * Type `findmnt -no OPTIONS /; grep -o 'subvol=/@[^ ]*' /proc/cmdline; hostname; omarchy version; sudo snapper -c root list | tail -n 2` — still `subvol=/@`, the same version and the same snapshot list: nothing changed. Press Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Run `findmnt -no OPTIONS /` and press Enter. The root is the live subvolume.
+  * Run `omarchy snapshot restore` and press Enter. Password is `prime` if asked. A restore prompt appears.
+  * Do not confirm a restore. Press Escape. The prompt closes. The root is unchanged.
+  * Run `sudo limine-snapper-sync --restore-kernels 9999; echo exit=$?` and press Enter. It prints a non-zero exit.
+  * Run `findmnt -no OPTIONS /` and press Enter. The root is still the live subvolume.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -1800,15 +1819,26 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal (Super+Enter) and type `sudo efibootmgr` (password `prime`) — entries include `Limine`, none labelled `Omarchy` (`sudo efibootmgr | grep -c Omarchy` → 0); note `BootOrder`.
-  * Open the Omarchy Menu (Super+Space) → Setup → Direct Boot with the mouse. At `Setup direct boot (so snapshot booting must be done via bios)?` choose **No**: the terminal ends with "Done!" and nothing else; `sudo efibootmgr` is unchanged.
-  ** gum confirm: Left/Right or Tab picks Yes/No, Enter confirms.
-  * Repeat Setup → Direct Boot and choose **Yes** — `Creating EFI boot entry for omarchy_linux-omarchy.efi`, the efibootmgr listing, "Done!". Type `sudo efibootmgr -v | grep Omarchy; sudo efibootmgr | grep BootOrder` — one `Boot000X* Omarchy … File(\EFI\Linux\omarchy_linux-omarchy.efi)` line, and its number is now first in `BootOrder`.
-  * Reboot (Super+Escape → Reboot) screenshotting every 2–3 s: the "Omarchy Bootloader" menu must NOT appear — the passphrase prompt comes straight after the firmware. Type `prime` (blind).
-  ** If Limine does appear, the firmware did not keep the variable (harness NVRAM caveat) — record it and continue.
-  * Type `sudo efibootmgr` and note whether the Omarchy entry survived. Open Setup → Direct Boot again: it must ask `Disable direct boot (remove Omarchy EFI entry)?` — choose **No** first: the entry stays and nothing is printed. Reopen and choose **Yes** → `Removing EFI boot entry 000X`, "Done!". `sudo efibootmgr | grep -c Omarchy` → 0.
-  ** If it offers to set up instead (entry lost), choose No and report the caveat.
-  * Reboot once more; the Limine menu must show again (press Down to hold it, screenshot), then boot the Omarchy entry and type `prime`. The desktop must return exactly as left.
+  * Press Super+Enter. A terminal opens.
+  * Run `sudo efibootmgr | grep -c Omarchy` and press Enter. Password is `prime`. It prints `0`.
+  * Press Super+Space. The menu opens.
+  * Click Setup. Use the mouse only. Setup opens.
+  * Click Direct Boot. Use the mouse only. A confirm prompt appears.
+  * Choose No. Nothing is added.
+  * Press Super+Space. The menu opens.
+  * Click Setup, then Direct Boot. Use the mouse only. A confirm prompt appears.
+  * Choose Yes. An Omarchy boot entry is added.
+  * Run `sudo efibootmgr | grep Omarchy` and press Enter. The entry is listed.
+  * Press Super+Escape. The System menu opens.
+  * Click Reboot. Use the mouse only. The machine reboots. The passphrase prompt appears without the boot menu.
+  * Type `prime` and press Enter. The desktop returns.
+  * Press Super+Space. The menu opens.
+  * Click Setup, then Direct Boot. Use the mouse only. A remove prompt appears.
+  * Choose Yes. The Omarchy entry is removed.
+  * Press Super+Escape. The System menu opens.
+  * Click Reboot. Use the mouse only. The machine reboots. The boot menu appears.
+  * Press Enter on the Omarchy row. Type `prime` and press Enter. The desktop returns.
+  * the desktop must return exactly as left.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -1834,11 +1864,14 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `echo '# user tweak' | sudo tee -a /boot/limine.conf` (password `prime`).
-  * Type `omarchy-refresh-limine` → `Resetting limine config`, then `limine-update` listing entries and `limine-snapper-sync`, no errors.
-  * Type `sudo tail -1 /boot/limine.conf; sudo tail -1 /boot/limine.conf.bak` → a normal config line, then `# user tweak` (the tweak survived only in the backup).
-  * Type `systemctl reboot`; screenshot continuously and press Down as soon as the Limine menu appears to hold it: the rebuilt menu lists the Omarchy entry (and Snapshots).
-  * Boot the Omarchy entry, enter `prime` at the passphrase (blind), log in only if asked; the desktop returns exactly as left.
+  * Press Super+Enter. A terminal opens.
+  * Run `echo '# user tweak' | sudo tee -a /boot/limine.conf` and press Enter. Password is `prime`. The tweak is appended.
+  * Run `omarchy-refresh-limine` and press Enter. The config is reset.
+  * Run `sudo tail -1 /boot/limine.conf.bak` and press Enter. The tweak is in the backup.
+  * Run `systemctl reboot` and press Enter. The machine reboots.
+  * When the boot menu appears, press Down. The countdown stops. The Omarchy entry is listed.
+  * Press Enter on the Omarchy row. Type `prime` and press Enter. The desktop returns.
+  * the desktop must return exactly as left.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -1862,11 +1895,15 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `sudo cp /boot/limine.conf /tmp/limine.before` (password `prime`).
-  * Type `sudo limine-scan`. Read each prompt; it reports the EFI entries found (only Omarchy/Limine here) and either offers nothing or asks to add — answer No/quit to any add. Screenshot the output.
-  * Type `sudo diff /tmp/limine.before /boot/limine.conf && echo UNCHANGED`: `UNCHANGED` (record any diff).
-  * Reboot (Super+Escape → click Reboot), press Down at Limine and screenshot: only the Omarchy entry (and Snapshots) — no foreign entry was added.
-  * Boot the Omarchy entry with `prime` (blind); the desktop returns exactly as left.
+  * Press Super+Enter. A terminal opens.
+  * Run `sudo cp /boot/limine.conf /tmp/limine.before` and press Enter. Password is `prime`. A copy is saved.
+  * Run `sudo limine-scan` and press Enter. Answer No to any add prompt. No foreign loader is added.
+  * Run `sudo diff /tmp/limine.before /boot/limine.conf; echo exit=$?` and press Enter. It prints `exit=0`.
+  * Press Super+Escape. The System menu opens.
+  * Click Reboot. Use the mouse only. The machine reboots.
+  * When the boot menu appears, press Down. The countdown stops. No foreign entry is listed.
+  * Press Enter on the Omarchy row. Type `prime` and press Enter. The desktop returns.
+  * the desktop must return exactly as left.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>

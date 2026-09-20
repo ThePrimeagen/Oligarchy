@@ -41,14 +41,14 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `fast-shutdown-stuck-unit-reboots-quickly`
 - [x] `post-boot-hook-fires-after-reboot`
 - [x] `passwordless-sudo-grant-cleared-by-reboot`
-- [ ] `snapshot-create-list-retention-and-unknown-action`
-- [ ] `snapshot-create-fails-loudly-without-config`
-- [ ] `snapshot-boot-from-limine-menu-read-only`
-- [ ] `snapshot-restore-from-booted-snapshot`
-- [ ] `snapshot-restore-picker-cancel-from-normal-boot`
-- [ ] `direct-boot-toggle-skips-limine-and-back`
-- [ ] `refresh-limine-bootloader`
-- [ ] `limine-scan-on-single-os-finds-nothing`
+- [x] `snapshot-create-list-retention-and-unknown-action`
+- [x] `snapshot-create-fails-loudly-without-config`
+- [x] `snapshot-boot-from-limine-menu-read-only`
+- [x] `snapshot-restore-from-booted-snapshot`
+- [x] `snapshot-restore-picker-cancel-from-normal-boot`
+- [x] `direct-boot-toggle-skips-limine-and-back`
+- [x] `refresh-limine-bootloader`
+- [x] `limine-scan-on-single-os-finds-nothing`
 - [ ] `drive-password-change-and-back-at-boot`
 - [ ] `drive-password-rejects-bad-input`
 - [ ] `user-password-change-keeps-disk-password`
