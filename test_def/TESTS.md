@@ -21234,30 +21234,66 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `for u in https://github.com/omacom/omarchy.git git@github.com:omacom/omarchy.git ssh://git@github.com/acme/repo.git 'ssh://git@[2001:db8::1]:22/org/repo.git' file:///home/prime/repo ./repo; do omarchy-git-url-check "$u"; echo "s=$?"; done` → `s=0` six times and no other output.
-  * Type `omarchy git url check 'ext::sh -c id'; echo "exit=$?"` → `omarchy-git-url-check: 'ext::sh -c id' names a git option or transport helper, not a repository.`, `exit=1`. Type `omarchy git url check --upload-pack=id; echo "exit=$?"` → the same "names a git option or transport helper" refusal, `exit=1`.
-  * Type `omarchy git url check foo://example.com/x; echo "exit=$?"` → `… names the 'foo' transport, which Omarchy does not clone from.`, `exit=1`. Type `omarchy-git-url-check; echo "exit=$?"` → `omarchy-git-url-check: a git URL is required`, `exit=1`.
-  * Type `for u in 'fd::0,1' 'HTTPS://github.com/a/b' '--upload-pack=touch /tmp/pwned' ''; do omarchy-git-url-check "$u"; echo "s=$?"; done; ls /tmp/pwned` → four non-zero statuses and `ls` fails.
-  * Plugin installer, echoing `$?` after each: `omarchy-plugin-add 'ext::sh -c id' --yes` → the helper refusal, 1; `omarchy-plugin-add --upload-pack=id --yes` → `unknown add option: --upload-pack=id`, 1; `omarchy-plugin-add 'gopher://example.org/repo' --yes` → `… names the 'gopher' transport, which Omarchy does not clone from.`, 1; `omarchy-plugin-add 'fd::3' --yes` → helper refusal, 1; `omarchy-plugin-add file:///tmp/nonexistent --yes` → git error then "failed to clone", 1; `omarchy-plugin-add file:///tmp/nonexistent < /dev/null` (no --yes, no TTY) → `refusing to continue without confirmation; pass --yes`, 1; `omarchy-plugin-add one two --yes` → `unexpected argument: two`, 1; `omarchy-plugin-add --help` → usage, 0. Then `ls -a ~/.config/omarchy/plugins/` → no `.add.tmp.*` leftovers.
-  * Press Super+Space → Install → Style → Theme — a floating terminal asks for a repository URL. Type `ext::sh -c id` and Enter → `'ext::sh -c id' names a git option or transport helper, not a repository.`; the installer stops; screenshot quickly. Repeat via the menu with `zzz://a` → `'zzz://a' names the 'zzz' transport, which Omarchy does not clone from.`
-  ** The floating terminal closes right after the message; run `omarchy-theme-install` in the normal terminal instead if you need time to read it.
-  * Type `omarchy plugin add https://example.com/x.git` (no `--yes`) → the warning `⚠️  Plugins run as arbitrary, unsandboxed code inside your long-lived omarchy-shell process…` with `URL: https://example.com/x.git` and `Clone and add this plugin?`; answer **No** → `omarchy-plugin-add: aborted`, nothing cloned.
-  * Press Super+Space → Setup → Plugins → Add Plugin → the floating terminal asks `Git URL of the plugin repo:`; type `ext::sh -c id`, Enter → the same helper refusal. Reopen it and press Escape (or Ctrl+C) at the prompt → `omarchy-plugin-add: cancelled` and Failed exit 1 (or the window closes on Ctrl+C). Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `for u in https://github.com/omacom/omarchy.git git@github.com:omacom/omarchy.git ssh://git@github.com/acme/repo.git 'ssh://git@[2001:db8::1]:22/org/repo.git' file:///home/prime/repo ./repo; do omarchy-git-url-check "$u"; echo "s=$?"; done` and press Return. Six lines are `s=0`. Nothing else is printed.
+  * Type `omarchy git url check 'ext::sh -c id'; echo "exit=$?"` and press Return. The output says the value names a git option or transport helper, and the last line is `exit=1`.
+  * Type `omarchy git url check --upload-pack=id; echo "exit=$?"` and press Return. The same refusal is printed, and the last line is `exit=1`.
+  * Type `omarchy git url check foo://example.com/x; echo "exit=$?"` and press Return. The output says Omarchy does not clone the `foo` transport, and the last line is `exit=1`.
+  * Type `omarchy-git-url-check; echo "exit=$?"` and press Return. The output says a git URL is required, and the last line is `exit=1`.
+  * Type `for u in 'fd::0,1' 'HTTPS://github.com/a/b' '--upload-pack=touch /tmp/pwned' ''; do omarchy-git-url-check "$u"; echo "s=$?"; done` and press Return. Four lines are non-zero.
+  * Type `ls /tmp/pwned` and press Return. The output says the file does not exist.
+  * Type `omarchy-plugin-add 'ext::sh -c id' --yes; echo "exit=$?"` and press Return. The helper refusal is printed, and the last line is `exit=1`.
+  * Type `omarchy-plugin-add --upload-pack=id --yes; echo "exit=$?"` and press Return. The output says `--upload-pack=id` is an unknown add option, and the last line is `exit=1`.
+  * Type `omarchy-plugin-add 'gopher://example.org/repo' --yes; echo "exit=$?"` and press Return. The output says Omarchy does not clone the `gopher` transport, and the last line is `exit=1`.
+  * Type `omarchy-plugin-add 'fd::3' --yes; echo "exit=$?"` and press Return. The helper refusal is printed, and the last line is `exit=1`.
+  * Type `omarchy-plugin-add file:///tmp/nonexistent --yes; echo "exit=$?"` and press Return. The output says the clone failed, and the last line is `exit=1`.
+  * Type `omarchy-plugin-add file:///tmp/nonexistent < /dev/null; echo "exit=$?"` and press Return. The output says to pass `--yes`, and the last line is `exit=1`.
+  * Type `omarchy-plugin-add one two --yes; echo "exit=$?"` and press Return. The output says `two` is an unexpected argument, and the last line is `exit=1`.
+  * Type `omarchy-plugin-add --help; echo "exit=$?"` and press Return. Usage is printed, and the last line is `exit=0`.
+  * Type `ls -a ~/.config/omarchy/plugins/` and press Return. No `.add.tmp` name is listed.
+  * Press Super+Space. The menu opens.
+  * Select Install. The Install menu opens.
+  * Select Style. The Style menu opens.
+  * Select Theme. A terminal asks for a repository URL.
+  * Type `ext::sh -c id` and press Return. The output says that value names a git option or transport helper. The installer stops.
+  * Press Super+Space. The menu opens.
+  * Select Install. The Install menu opens.
+  * Select Style. The Style menu opens.
+  * Select Theme. A terminal asks for a repository URL.
+  * Type `zzz://a` and press Return. The output says Omarchy does not clone the `zzz` transport.
+  * Click the first terminal. It is focused.
+  * Type `omarchy plugin add https://example.com/x.git` and press Return. A warning asks whether to clone the plugin.
+  * Press n. The output says the add was aborted.
+  * Press Super+Space. The menu opens.
+  * Select Setup. The Setup menu opens.
+  * Select Plugins. The Plugins menu opens.
+  * Select Add Plugin. A terminal asks for a git URL.
+  * Type `ext::sh -c id` and press Return. The helper refusal is printed.
+  * Press Super+Space. The menu opens.
+  * Select Setup. The Setup menu opens.
+  * Select Plugins. The Plugins menu opens.
+  * Select Add Plugin. A terminal asks for a git URL.
+  * Press Escape. The output says the add was cancelled, or the window closes.
+  * Click the first terminal if it is still open. It is focused.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Accepted URLs print nothing — the `exit=0` line is the proof. Nothing is cloned in this test, so it needs no network. Quote the odd URLs exactly as shown; the point is that they never reach git.
-  * The transport-helper checks may be missing on the 4.0.2 disk (build drift): record `omarchy-version` with any failure so drift is separable from regression.
+  * An accepted URL prints nothing. The `s=0` line is the result. Quote the odd URLs exactly. Nothing is cloned.
+  * Screenshot a menu refusal as soon as it appears. The floating terminal closes quickly.
+  * If a refusal text differs, record `omarchy-version`.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots with the six `s=0` lines, the four named refusals with `exit=1`, non-zero for every hostile form and no `/tmp/pwned`, each plugin-add message with exit 1 (usage with 0) and a clean plugins directory, the unsandboxed-code warning declined with `aborted`, both installer refusals verbatim from the menu, and the `cancelled` exit
+  ** Six ordinary URLs exit 0 with no other output. `ext::`, `--upload-pack`, an unknown transport, and a missing URL each exit 1 with a named reason.
+  ** `fd::`, an uppercase HTTPS URL, an option that would write `/tmp/pwned`, and an empty string are non-zero. `/tmp/pwned` does not exist.
+  ** Each hostile `omarchy-plugin-add` exits 1 with its own refusal. Help exits 0. No `.add.tmp` directory remains.
+  ** The theme installer refuses `ext::` and `zzz://`. Declining the plugin warning aborts. Add Plugin refuses `ext::`, and Escape cancels.
   * If unsuccessful
-  ** `ext::` accepted (exit 0 or clone output such as `uid=1000` or `Cloning into`), an https URL refused, a URL that reached `git clone`, or a leftover temp dir
-  ** Output of `omarchy-version`
+  ** `ext::` exits 0 or prints clone output, an https URL is refused, or a temp directory remains.
 covers: bin/omarchy-git-url-check; bin/omarchy-plugin-add; bin/omarchy-theme-install; test/shell.d/git-url-check-test.sh; test/shell.d/plugin-add-test.sh; manual/43-making-your-own-theme.md; manual/32-shell-plugins.md (Adding a plugin from git); omarchy-menu.jsonc setup.plugin.add
 
 ### sshd-setup-key-hardens-login-and-removes   [VM-OK]
@@ -21267,32 +21303,70 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `ssh-keygen -t ed25519 -N '' -f ~/.ssh/tkey -q && wl-copy < ~/.ssh/tkey.pub && systemctl is-enabled sshd; sudo ufw status | grep -c 22` (password `prime`) → sshd `disabled`, `0` rules for 22; the public key is now on the clipboard.
-  * Open the Omarchy Menu with Super+Space, click Setup → Security → SSHD. Enter `prime` at the sudo prompt. Expect `Setting up SSH server access with key-based authentication.`, `Installing and starting the OpenSSH server...`, `Opening the SSH port in the firewall (rate limited against brute force)...`, then the chooser `How would you like to add your SSH key?` — pick `Paste key manually`. At `Public key>` paste with Ctrl+Shift+V and press Enter → `Authorized key: 256 SHA256:… (ED25519)`, `Disabling SSH password authentication, now that a key is authorized...`, `Perfect! The SSH server is running and your key is authorized.`, `Password logins are off; this machine now accepts authorized keys only.`, `You can now connect with: ssh prime@omarchy`, then "Done!". Press a key.
-  ** Hover the floating "Omarchy" terminal (mouse move) before pasting so the keys go there. If the paste lands nothing, type `cat ~/.ssh/tkey.pub` in your terminal, select the text, press Super+C and retry. openssh is already installed, so no download happens; allow up to 3 minutes, screenshot every 5 seconds.
-  * Type `systemctl is-active sshd.service; grep -c -xF "$(cat ~/.ssh/tkey.pub)" ~/.ssh/authorized_keys; sudo cat /etc/ssh/sshd_config.d/10-omarchy-hardening.conf` → `active`, `1`, and a drop-in holding `PasswordAuthentication no` and `KbdInteractiveAuthentication no`.
-  * Type `sudo ufw status | grep 22; sudo sshd -T | grep -iE '^(passwordauthentication|kbdinteractiveauthentication)'` → `22/tcp LIMIT Anywhere # omarchy-sshd` and both keywords `no`.
-  ** OpenSSH 10.x may print the keywords in CamelCase; the values are what matter.
-  * Type `ssh -o StrictHostKeyChecking=no -o BatchMode=yes -i ~/.ssh/tkey prime@localhost 'echo key-login-ok'` → `key-login-ok` with no password prompt.
-  * Unhappy path: type `ssh -o StrictHostKeyChecking=no -o PubkeyAuthentication=no -o PreferredAuthentications=password -o ConnectTimeout=5 prime@localhost true 2>&1; echo rc=$?` → `Permission denied (publickey).` and a non-zero rc with no `password:` prompt at all.
-  ** If a password prompt appears, press Ctrl+C and report it; do not type the password — that is the failure this test guards.
-  * Type `omarchy-setup-security-sshd --key="$(cat ~/.ssh/tkey.pub)"; echo rc=$?` → the same setup lines with `Key already authorized: …` and `rc=0` (idempotent; the `--key` form avoids transcribing a key). Press Super+Space → Remove → Security: an SSHD row is now listed (visible only while sshd is enabled). Escape.
-  * Revert: Super+Space → Remove → Security → SSHD, password `prime`; at `Also remove all authorized SSH keys…?` choose **Yes** → `Authorized keys removed.`, `The SSH server has been disabled and its firewall port closed.`, "Done!". Type `systemctl is-enabled sshd; sudo ufw status | grep -c 22; ls ~/.ssh/authorized_keys 2>&1` → `disabled`, `0`, `No such file`. Reopen Remove → Security: SSHD is no longer listed. Type `rm -f ~/.ssh/tkey ~/.ssh/tkey.pub`; close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `ssh-keygen -t ed25519 -N '' -f ~/.ssh/tkey -q && wl-copy < ~/.ssh/tkey.pub` and press Return. The prompt returns.
+  * Type `systemctl is-enabled sshd` and press Return. The output is `disabled`.
+  * Type `sudo ufw status | grep -c 22` and press Return. If sudo asks, type `prime` and press Return. The output is `0`.
+  * Press Super+Space. The menu opens.
+  * Select Setup. The Setup menu opens.
+  * Select Security. The Security menu opens.
+  * Select SSHD. A terminal opens and asks for a password.
+  * Type `prime` and press Return. A chooser asks how to add the SSH key.
+  * Select Paste key manually. A public-key prompt appears.
+  * Click that terminal. It is focused.
+  * Press Ctrl+Shift+V and press Return. The output says the key is authorized and password logins are off.
+  * Press Return. That terminal closes.
+  * Click the first terminal. It is focused.
+  * Type `systemctl is-active sshd.service` and press Return. The output is `active`.
+  * Type `grep -c -xF "$(cat ~/.ssh/tkey.pub)" ~/.ssh/authorized_keys` and press Return. The output is `1`.
+  * Type `sudo cat /etc/ssh/sshd_config.d/10-omarchy-hardening.conf` and press Return. The file sets password authentication to no and keyboard-interactive authentication to no.
+  * Type `sudo ufw status | grep 22` and press Return. The line allows `22/tcp` with a limit.
+  * Type `sudo sshd -T | grep -iE '^(passwordauthentication|kbdinteractiveauthentication)'` and press Return. Both values are `no`.
+  * Type `ssh -o StrictHostKeyChecking=no -o BatchMode=yes -i ~/.ssh/tkey prime@localhost 'echo key-login-ok'` and press Return. The output is `key-login-ok`.
+  * Type `ssh -o StrictHostKeyChecking=no -o PubkeyAuthentication=no -o PreferredAuthentications=password -o ConnectTimeout=5 prime@localhost true; echo "rc=$?"` and press Return. The output says permission is denied, and the last line is non-zero. No password prompt appears.
+  * Type `omarchy-setup-security-sshd --key="$(cat ~/.ssh/tkey.pub)"; echo "rc=$?"` and press Return. The output says the key is already authorized, and the last line is `rc=0`.
+  * Press Super+Space. The menu opens.
+  * Select Remove. The Remove menu opens.
+  * Select Security. The Security menu opens. SSHD is listed.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Remove. The Remove menu opens.
+  * Select Security. The Security menu opens.
+  * Select SSHD. A terminal opens and asks for a password.
+  * Type `prime` and press Return. It asks whether to remove authorized keys.
+  * Press y. The output says the keys were removed and the SSH server was disabled.
+  * Press Return. That terminal closes.
+  * Click the first terminal. It is focused.
+  * Type `systemctl is-enabled sshd` and press Return. The output is `disabled`.
+  * Type `sudo ufw status | grep -c 22` and press Return. The output is `0`.
+  * Type `ls ~/.ssh/authorized_keys` and press Return. The output says the file does not exist.
+  * Press Super+Space. The menu opens.
+  * Select Remove. The Remove menu opens.
+  * Select Security. The Security menu opens. SSHD is not listed.
+  * Press Escape. The menu closes.
+  * Click the terminal. It is focused.
+  * Type `rm -f ~/.ssh/tkey ~/.ssh/tkey.pub` and press Return. The prompt returns.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * ufw's rule for 22 does not block localhost, so the loopback ssh test works regardless. The first sudo asks for `prime`.
-  * Answer `yes` if ssh asks about the localhost host key even with `StrictHostKeyChecking=no`. `./client-with-image` after each Enter speeds up reading the long wizard output.
+  * Click the setup terminal before pasting. If the paste is empty, copy the public key with Super+C and paste again.
+  * Screenshot about every 5 seconds while setup runs. Allow up to 3 minutes.
+  * If the password-only ssh shows a password prompt, press Ctrl+C. Do not type the password.
+  * If ssh asks to confirm localhost, type `yes` and press Return.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the chooser, the pasted key accepted and the wizard output ending in `Password logins are off`, `active` and `1` with the drop-in contents, the LIMIT rule and both `no` lines, `key-login-ok`, `Permission denied (publickey).` with no password prompt, the idempotent `--key` rerun with `rc=0`, the Remove → Security SSHD row, the removal output and post-removal checks, and Remove → Security without SSHD
+  ** sshd starts disabled, and no port 22 rule exists. Pasting the key authorizes it and says password logins are off.
+  ** sshd is active, the key is present once, and the hardening file sets both password methods to no. The firewall limits port 22.
+  ** Key login prints `key-login-ok`. A password-only attempt is denied and shows no password prompt.
+  ** Running setup again says the key is already authorized and exits 0. Remove → Security lists SSHD.
+  ** Removal disables sshd, drops the port 22 rule and the authorized-keys file, and hides the SSHD row. The test key is removed.
   * If unsuccessful
-  ** The wizard output at the failing line (`Not a valid SSH public key`, `sshd rejected the hardening config`, `did not apply the password-authentication restrictions`), a password prompt from ssh, `Password logins are off` printed while `sshd -T` still says `yes`, a 22 rule surviving removal, `sudo sshd -T | grep -i auth`, `sudo ufw status`, and `journalctl -u sshd | tail | sudo tee /dev/ttyS0` read via the serial log
-  ** Output of `omarchy-version`
+  ** The pasted key is rejected, ssh offers a password, password authentication stays yes, or port 22 remains after removal.
 covers: bin/omarchy-setup-security-sshd, bin/omarchy-remove-security-sshd, install/config/firewall.sh (22 closed by default), default/omarchy/omarchy-menu.jsonc (setup.security.sshd, remove.security.sshd), test/shell.d/setup-security-sshd-test.sh, test/shell.d/sshd-hardening-migration-test.sh, test/acceptance.d/security-test.sh:54-115, manual/48:6, manual/48-security.md, manual/35-networking.md, manual/51 (SSH access)
 
 ### sshd-setup-rejects-bad-arguments-and-bad-key-before-opening-port   [VM-OK]
@@ -21302,32 +21376,59 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `systemctl is-enabled sshd; sudo ufw status | grep -c 22` (password `prime`): `disabled` and `0`. Type `sudo -k`.
-  * Type `omarchy-setup-security-sshd --gh-keys; echo "exit=$?"`: `--gh-keys needs a GitHub username.` and `exit=2`, with no sudo prompt.
-  * Type `omarchy-setup-security-sshd --key=x --gh-keys dhh; echo "exit=$?"`: `pass either --key or --gh-keys, not both.`, `exit=2`. Type `omarchy-setup-security-sshd --bogus; echo "exit=$?"`: `unknown option '--bogus'. Try --help.`, `exit=2`. None of these may print `Installing and starting`. Type `systemctl is-enabled sshd`: still `disabled`.
-  * Type `omarchy-setup-security-sshd --key="not-a-key"; echo "exit=$?"`, password `prime`: the red `Not a valid SSH public key: not-a-key` and `exit=1`; `ls ~/.ssh/authorized_keys 2>&1` → still absent.
-  * Type `systemctl is-enabled sshd; systemctl is-active sshd; sudo ufw status | grep 22; ls /etc/ssh/sshd_config.d/`.
-  ** Intended (the script's own rule — reject bad input before anything is installed or opened): `disabled`, `inactive`, no `22/tcp` rule, no Omarchy drop-in.
-  ** Observed at HEAD (the known defect): sshd `enabled`/`active`, `22/tcp LIMIT`, and `sudo sshd -T | grep -i passwordauthentication` → `passwordauthentication yes` (password logins left on). Capture every line exactly and report it as the item-2 defect, not as a driver error. If sshd is active, type `omarchy-remove-security-sshd` (No to removing keys) before the next step so each path starts from `disabled`.
-  * Menu path: open the Omarchy Menu with Super+Space → Setup → Security → SSHD (mouse). Enter `prime` for sudo. At `How would you like to add your SSH key?` choose **Paste key manually** and press Enter on the empty `Public key>` → `No SSH key given.` and `Failed (exit code 1)!`. Press a key. Reopen Setup → Security → SSHD; at the picker press Escape → the terminal ends `Failed (exit code 1)!`.
-  * Type `systemctl is-active sshd; sudo ufw status | grep 22; sudo sshd -T | grep -i ^passwordauthentication` again → intended: `inactive`, no rule (a cancel must not leave the machine half-hardened); observed at HEAD: `active`, a `LIMIT` rule and `passwordauthentication yes` — report the state verbatim as the same item-2 defect.
-  * Clean up: type `omarchy-remove-security-sshd` (No to removing keys) → `systemctl is-enabled sshd; sudo ufw status | grep -c 22` → `disabled`, `0`, back as it started (if sshd was never enabled, record what the remover prints). Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `systemctl is-enabled sshd` and press Return. The output is `disabled`.
+  * Type `sudo ufw status | grep -c 22` and press Return. If sudo asks, type `prime` and press Return. The output is `0`.
+  * Type `sudo -k` and press Return. The prompt returns.
+  * Type `omarchy-setup-security-sshd --gh-keys; echo "exit=$?"` and press Return. The output says `--gh-keys` needs a GitHub username, and the last line is `exit=2`. No password prompt appears.
+  * Type `omarchy-setup-security-sshd --key=x --gh-keys dhh; echo "exit=$?"` and press Return. The output says to pass either `--key` or `--gh-keys`, and the last line is `exit=2`.
+  * Type `omarchy-setup-security-sshd --bogus; echo "exit=$?"` and press Return. The output says `--bogus` is an unknown option, and the last line is `exit=2`.
+  * Type `systemctl is-enabled sshd` and press Return. The output is `disabled`.
+  * Type `omarchy-setup-security-sshd --key="not-a-key"; echo "exit=$?"` and press Return. If sudo asks, type `prime` and press Return. The output says `not-a-key` is not a valid SSH public key, and the last line is `exit=1`.
+  * Type `ls ~/.ssh/authorized_keys` and press Return. The output says the file does not exist.
+  * Type `systemctl is-enabled sshd; systemctl is-active sshd` and press Return. Record both lines.
+  * Type `sudo ufw status | grep 22; ls /etc/ssh/sshd_config.d/` and press Return. Record whether a port 22 rule or an Omarchy drop-in exists.
+  ** If sshd is active, type `sudo sshd -T | grep -i passwordauthentication` and press Return. Record the value. Then type `omarchy-remove-security-sshd` and press Return, and press n when it asks about keys. Wait until sshd is `disabled` before the next step.
+  * Press Super+Space. The menu opens.
+  * Select Setup. The Setup menu opens.
+  * Select Security. The Security menu opens.
+  * Select SSHD. A terminal opens and asks for a password.
+  * Type `prime` and press Return. A chooser asks how to add the SSH key.
+  * Select Paste key manually. A public-key prompt appears.
+  * Press Return. The output says no SSH key was given and the command failed.
+  * Press Return. That terminal closes.
+  * Press Super+Space. The menu opens.
+  * Select Setup. The Setup menu opens.
+  * Select Security. The Security menu opens.
+  * Select SSHD. A terminal opens and asks for a password.
+  * Type `prime` and press Return. The chooser appears.
+  * Press Escape. The output says the command failed, or the window closes.
+  * Click the first terminal. It is focused.
+  * Type `systemctl is-active sshd` and press Return. Record the output.
+  * Type `sudo ufw status | grep 22` and press Return. Record whether a port 22 rule is present.
+  * Type `sudo sshd -T | grep -i ^passwordauthentication` and press Return. Record the value.
+  * Type `omarchy-remove-security-sshd` and press Return. If it asks about keys, press n. If sudo asks, type `prime` and press Return. The prompt returns.
+  * Type `systemctl is-enabled sshd` and press Return. The output is `disabled`.
+  * Type `sudo ufw status | grep -c 22` and press Return. The output is `0`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * A sudo prompt during the first three flag errors is itself a failure — they must exit before touching sudo.
-  * The key picker is a gum choose; arrows move, Enter selects, Escape cancels. The Failed prompt closes on any key.
-  * `--gh-keys`/`--key=` are HEAD's flags; if the 4.0.2 disk answers `unknown option` for them, record `omarchy-version` and report version skew.
+  * A password prompt on the first three flag errors is a failure. They must exit before sudo.
+  * Arrows move the key chooser. Enter selects. Escape cancels.
+  * If sshd is active after a refused key or a cancel, record that state exactly, then remove it before continuing. The intended state is still disabled, with no port 22 rule.
+  * If these flags are unknown, record `omarchy-version`.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of each flag error with its `exit=` and sshd still disabled afterwards; `Not a valid SSH public key: not-a-key` with `exit=1` and no authorized_keys; the post-state showing `disabled`, `inactive`, no 22 rule and no drop-in; `No SSH key given.` and the Escape exit both ending `Failed (exit code 1)!` with sshd still inactive; `disabled`/`0` after cleanup
+  ** sshd starts disabled with no port 22 rule. `--gh-keys` without a user, both key flags together, and `--bogus` each exit 2 with no password prompt, and sshd stays disabled.
+  ** `not-a-key` exits 1 and writes no authorized-keys file. An empty paste and Escape each fail. Record whether sshd stayed inactive.
+  ** After removal, sshd is `disabled` and the port 22 count is `0`.
   * If unsuccessful
-  ** The post-state showing sshd `enabled`/`active`, a `22/tcp LIMIT` rule and `passwordauthentication yes` after the bad key or after the menu cancel (the item-2 defect — report it as such), a flag error that still started sshd, a bad key written to authorized_keys, a sudo prompt during parsing, or a crash
-  ** Output of `omarchy-version`
+  ** A flag error asks for a password or starts sshd. A bad key is written to authorized_keys. After the bad key or the cancel, sshd is active, port 22 is limited, and password authentication is still yes.
 covers: bin/omarchy-setup-security-sshd (require_github_user, option parsing, authorize_key, prompt paths, setup_sshd/open_firewall ordering); default/omarchy/omarchy-menu.jsonc setup.security.sshd; test/shell.d/setup-security-sshd-test.sh; 13-manual-rest.md Observations #17; manual/48:6; manual/35-networking.md:33; 03-INTENDED-BEHAVIOUR.md item 2
 
 ### sshd-setup-github-keys   [VM-OK] [NET]
@@ -21337,27 +21438,55 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open the Omarchy Menu with Super+Space, click Setup → Security → SSHD, password `prime`. At the chooser pick `Grab key from GitHub`. At `GitHub username>` type `this-user-does-not-exist-omarchy-9f3k` and Enter: expect the red `Could not fetch any SSH keys for GitHub user '…'.` and "Failed (exit code 1)!". Press a key. Open a terminal with Super+Enter and type `systemctl is-enabled sshd; systemctl is-active sshd; sudo ufw status | grep 22`.
-  ** Intended (reject bad input before anything is installed or opened): `disabled`, `inactive`, no 22 rule. If sshd is enabled/active or `22/tcp LIMIT` is present after the failed fetch, record it as the same early-open defect as `sshd-setup-rejects-bad-arguments-and-bad-key-before-opening-port` (03-INTENDED-BEHAVIOUR item 2), not as a driver error.
-  * Repeat Setup → Security → SSHD → `Grab key from GitHub`, type `dhh`, Enter: `Fetching keys from https://github.com/dhh.keys...`, one or more `Authorized key: …` lines, the password-auth disable step and `Perfect!`. Press a key.
-  * In the terminal type `wc -l ~/.ssh/authorized_keys`: a count ≥ 1 matching the keys reported.
-  * Type `omarchy-setup-security-sshd --gh-keys dhh` (password `prime`): every key now prints `Key already authorized: …` and `wc -l ~/.ssh/authorized_keys` is unchanged.
-  * Unhappy path (offline): type `nmcli networking off; omarchy-setup-security-sshd --gh-keys dhh; echo "rc=$?"; nmcli networking on` → the same `Could not fetch` error and `rc=1`.
-  ** Run `nmcli networking on` even if the step misbehaves, so the guest is back online.
-  * Clean up: type `omarchy-remove-security-sshd`, password `prime`, answer Yes to removing keys. `systemctl is-enabled sshd` → `disabled`. Close the terminal with Super+W.
+  * Press Super+Space. The menu opens.
+  * Select Setup. The Setup menu opens.
+  * Select Security. The Security menu opens.
+  * Select SSHD. A terminal opens and asks for a password.
+  * Type `prime` and press Return. A chooser asks how to add the SSH key.
+  * Select Grab key from GitHub. A username prompt appears.
+  * Type `this-user-does-not-exist-omarchy-9f3k` and press Return. The output says no keys could be fetched, and the command failed.
+  * Press Return. That terminal closes.
+  * Press Super+Return. A terminal opens.
+  * Type `systemctl is-enabled sshd` and press Return. Record the output.
+  * Type `systemctl is-active sshd` and press Return. Record the output.
+  * Type `sudo ufw status | grep 22` and press Return. If sudo asks, type `prime` and press Return. Record whether a port 22 rule exists.
+  ** If sshd is active, type `omarchy-remove-security-sshd` and press Return, and press n when it asks about keys. Wait until sshd is `disabled`.
+  * Press Super+Space. The menu opens.
+  * Select Setup. The Setup menu opens.
+  * Select Security. The Security menu opens.
+  * Select SSHD. A terminal opens and asks for a password.
+  * Type `prime` and press Return. The chooser appears.
+  * Select Grab key from GitHub. A username prompt appears.
+  * Type `dhh` and press Return. The output fetches `https://github.com/dhh.keys`, lists at least one authorized key, and says the server is ready.
+  * Press Return. That terminal closes.
+  * Click the first terminal. It is focused.
+  * Type `wc -l ~/.ssh/authorized_keys` and press Return. The count is at least `1`. Record it.
+  * Type `omarchy-setup-security-sshd --gh-keys dhh` and press Return. If sudo asks, type `prime` and press Return. Each key says it is already authorized.
+  * Type `wc -l ~/.ssh/authorized_keys` and press Return. The count matches the recorded count.
+  * Type `nmcli networking off` and press Return. The prompt returns.
+  * Type `omarchy-setup-security-sshd --gh-keys dhh; echo "rc=$?"` and press Return. The output says the keys could not be fetched, and the last line is `rc=1`.
+  * Type `nmcli networking on` and press Return. The prompt returns.
+  * Type `omarchy-remove-security-sshd` and press Return. If sudo asks, type `prime` and press Return. It asks whether to remove authorized keys.
+  * Press y. The output says the server was disabled.
+  * Type `systemctl is-enabled sshd` and press Return. The output is `disabled`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The fetch is a few KB; if it hangs more than 30 s the guest network is down — report that rather than the wizard.
+  * Turn networking back on even if the offline step fails.
+  * If a fetch hangs longer than 30 seconds, record that the network is down.
+  * If the unknown user leaves sshd active or opens port 22, record that and remove it before the `dhh` run.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the unknown-user refusal with Failed (exit code 1) and the recorded post-state; the fetch and `Authorized key:` lines with the matching `wc -l`; the rerun showing "Key already authorized" with the same line count; the offline `Could not fetch` with `rc=1`; sshd disabled after cleanup
+  ** An unknown GitHub user fails with no keys fetched. Record whether sshd stayed disabled.
+  ** `dhh` fetches keys, authorizes at least one, and `wc -l` matches that count. The rerun says each key is already authorized and the count stays the same.
+  ** With networking off, the same fetch fails and exits 1. Networking is turned back on. Removal leaves sshd `disabled`.
   * If unsuccessful
-  ** curl/network errors, duplicated key lines, the bogus user accepted, or `curl -fsSL https://github.com/dhh.keys | head -1` to separate network from wizard failures
+  ** The unknown user is accepted, keys are duplicated, the offline fetch succeeds, or networking stays off.
 covers: bin/omarchy-setup-security-sshd (authorize_keys_from_github, prompt_for_github_user); manual/48:6; manual/51 (SSH access)
 
 ### fido2-setup-without-device   [VM-PARTIAL] [NET]
@@ -21367,29 +21496,46 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `ls -ld /etc/fido2 2>&1; grep -c pam_u2f /etc/pam.d/sudo` → no such directory on a fresh disk, `0`.
-  * Open the Omarchy Menu (Super+Space) → Setup → Security → Fido2 with the mouse.
-  ** The floating terminal prints `Setting up FIDO2 device for authentication.`, `Installing required packages...` (password `prime`; `libfido2` and `pam-u2f`, ~1 MB download if missing), then the red `No FIDO2 device detected. Please plug it in (you may need to unlock it as well).` and `Failed (exit code 1)! Press any key to close...`. Press a key.
-  * Type `grep -c pam_u2f /etc/pam.d/sudo; ls /etc/fido2 2>&1; pacman -Q libfido2 pam-u2f` → `0`, `No such file or directory`, both packages installed.
-  * Type `sudo -k; sudo true` → the normal password prompt still works (type `prime`).
-  * Type `omarchy-remove-security-fido2; echo "exit=$?"` → with nothing registered it should complete without a sudo password prompt; record the outcome exactly — a pacman dependency error while removing `libfido2` (required by openssh) is a known candidate defect; report it as such, not as a driver failure.
-  * Unhappy path (offline install): type `sudo pacman -Rns --noconfirm pam-u2f; nmcli networking off; omarchy-setup-security-fido2; echo "rc=$?"; nmcli networking on` → the package step fails with a pacman download error and a non-zero `rc`, still no PAM change. Run `nmcli networking on` even if the step misbehaves.
-  * Close the terminal with Super+W. The package set may differ from the pristine disk afterwards; end with `stop` if the disk must stay pristine.
-  ** Skipped here: `pamu2fcfg` registration, `/etc/fido2/fido2`, and the `sudo` touch test — no token in the VM.
+  * Press Super+Return. A terminal opens.
+  * Type `ls -ld /etc/fido2` and press Return. The output says the directory does not exist.
+  * Type `grep -c pam_u2f /etc/pam.d/sudo` and press Return. The output is `0`.
+  * Press Super+Space. The menu opens.
+  * Select Setup. The Setup menu opens.
+  * Select Security. The Security menu opens.
+  * Select Fido2. A terminal opens.
+  * If sudo asks, type `prime` and press Return. The output says no FIDO2 device was detected, and the command failed.
+  * Press Return. That terminal closes.
+  * Click the first terminal. It is focused.
+  * Type `grep -c pam_u2f /etc/pam.d/sudo` and press Return. The output is `0`.
+  * Type `ls /etc/fido2` and press Return. The output says the directory does not exist.
+  * Type `pacman -Q libfido2 pam-u2f` and press Return. Both package lines are printed.
+  * Type `sudo -k; sudo true` and press Return. A password prompt appears.
+  * Type `prime` and press Return. The prompt returns.
+  * Type `omarchy-remove-security-fido2; echo "exit=$?"` and press Return. Record the output and the exit. No password prompt is expected.
+  * Type `sudo pacman -Rns --noconfirm pam-u2f` and press Return. If sudo asks, type `prime` and press Return. The prompt returns.
+  * Type `nmcli networking off` and press Return. The prompt returns.
+  * Type `omarchy-setup-security-fido2; echo "rc=$?"` and press Return. If sudo asks, type `prime` and press Return. A package error is printed, and the last line is non-zero.
+  * Type `grep -c pam_u2f /etc/pam.d/sudo` and press Return. The output is `0`.
+  * Type `nmcli networking on` and press Return. The prompt returns.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * gum/Failed prompts close on any key. The registration path (pamu2fcfg → root-owned stage → atomic publish) needs a real token and cannot be exercised here.
+  * Turn networking back on even if the offline install fails.
+  * A pacman error while removing `libfido2` is a record. Do not treat it as a driver mistake.
+  * Do not plug in a token. Registration is not part of this test.
+  * The installed packages may remain. Stop the disk if it must stay pristine.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the install lines, the exact no-device message with `Failed (exit code 1)!`, `0` pam_u2f lines and no `/etc/fido2` with both packages installed, the working sudo prompt, the removal outcome, and the offline failure with no PAM change
+  ** `/etc/fido2` is absent and sudo has no `pam_u2f` line. The menu setup says no FIDO2 device was detected and fails.
+  ** After that, PAM is still unchanged, `/etc/fido2` is still absent, and both packages are installed. `sudo true` still asks for the password.
+  ** Removal with nothing registered is recorded and does not require a password. The offline setup fails on the package step and still does not change PAM. Networking is back on.
   * If unsuccessful
-  ** PAM modified or `/etc/fido2` created without a device, a package install failure online, removal prompting for sudo with nothing present, or a crash; `cat /etc/pam.d/sudo`
-  ** Output of `omarchy-version`
+  ** PAM changes or `/etc/fido2` appears with no token, the online package install fails, or networking stays off.
 covers: bin/omarchy-setup-security-fido2, bin/omarchy-remove-security-fido2; default/omarchy/omarchy-menu.jsonc (setup.security.fido2); test/shell.d/security-fido2-test.sh, security-fido2-remove-test.sh; manual/37-hardware-authentication.md
 
 ### dns-preset-switch-no-password-menu-panel-terminal   [VM-OK] [NET]
@@ -21399,28 +21545,77 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter and type `omarchy-dns; resolvectl status | grep -A3 '^Global'; getent hosts omarchy.org` Enter → `DHCP`, the current resolver lines for reference, and an address.
-  * Type `sudo -k; sudo omarchy-dns Cloudflare; omarchy-dns` Enter → NO password prompt; `Cloudflare`. Type `cat /etc/NetworkManager/conf.d/20-omarchy-dns.conf; grep ^DNS /etc/systemd/resolved.conf; resolvectl status | grep -i 'DNS Servers'; getent hosts omarchy.org; resolvectl query omarchy.org` → `servers=1.1.1.1,1.0.0.1,2606:4700:4700::1111,2606:4700:4700::1001`; `1.1.1.1#cloudflare-dns.com …`; a line including 1.1.1.1; the name still resolves both ways.
-  * Type `sudo -k; sudo -n omarchy-dns Custom; sudo -n omarchy-dns cloudflare; omarchy-dns Bogus; echo $?; omarchy-dns Google Cloudflare; echo $?` Enter → two `a password is required` lines (Custom is not covered; the script accepts lowercase but the sudoers rule does not), then `Usage: omarchy-dns [Cloudflare|Google|DHCP|Custom]` and `1` for `Bogus` and for two arguments.
-  * Type `omarchy-dns Custom` Enter (no sudo) → a polkit dialog appears (the script falls back to pkexec because no sudo rule covers Custom); press Escape/Cancel → `omarchy-dns` still `Cloudflare`, unchanged.
-  * Press Super+Space → Setup → Network → DNS: DHCP / Cloudflare / Google / Custom are listed, ✓ on Cloudflare. Click **Google** with the mouse: no password dialog and no polkit prompt (a dialog is a failure). Reopen the DNS submenu twice: ✓ is on Google. In the terminal `omarchy-dns; grep ^DNS /etc/systemd/resolved.conf` → `Google`, `8.8.8.8#dns.google`.
-  * Press Super+Ctrl+W (network panel). In the "DNS PROVIDER" row the Google pill is filled (active). Hover "DHCP": tooltip "Set DNS to DHCP". Click the DHCP pill → the panel closes itself silently (expected), no polkit dialog. Wait 3 s, press Super+Ctrl+W: the DHCP pill is now the filled one. Press Escape.
-  * Type `omarchy-dns; ls /etc/NetworkManager/conf.d/20-omarchy-dns.conf 2>&1; cat /etc/systemd/resolved.conf; getent hosts omarchy.org` Enter → `DHCP`; the conf.d file is gone; `resolved.conf` contains only `DNSOverTLS=no`; an address. Optionally press Super+Shift+Enter and load https://omarchy.org.
-  * Close the browser and terminal with Super+W; the desktop is as before with DNS on DHCP.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy-dns` and press Return. The output is `DHCP`.
+  * Type `getent hosts omarchy.org` and press Return. An address is printed.
+  * Type `sudo -k; sudo omarchy-dns Cloudflare; echo "exit=$?"` and press Return. No password prompt appears, and the last line is `exit=0`.
+  * Type `omarchy-dns` and press Return. The output is `Cloudflare`.
+  * Type `grep servers /etc/NetworkManager/conf.d/20-omarchy-dns.conf` and press Return. The line includes `1.1.1.1` and `1.0.0.1`.
+  * Type `grep ^DNS /etc/systemd/resolved.conf` and press Return. The line includes `1.1.1.1`.
+  * Type `getent hosts omarchy.org` and press Return. An address is printed.
+  * Type `sudo -k; sudo -n omarchy-dns Custom; echo "exit=$?"` and press Return. The output says a password is required, and the last line is non-zero.
+  * Type `sudo -n omarchy-dns cloudflare; echo "exit=$?"` and press Return. The output says a password is required, and the last line is non-zero.
+  * Type `omarchy-dns Bogus; echo "exit=$?"` and press Return. Usage is printed, and the last line is `exit=1`.
+  * Type `omarchy-dns Google Cloudflare; echo "exit=$?"` and press Return. Usage is printed, and the last line is `exit=1`.
+  * Type `omarchy-dns` and press Return. The output is still `Cloudflare`.
+  * Type `omarchy-dns Custom` and press Return. A password dialog opens.
+  * Press Escape. The dialog closes.
+  * Type `omarchy-dns` and press Return. The output is still `Cloudflare`.
+  * Press Super+Space. The menu opens.
+  * Select Setup. The Setup menu opens.
+  * Select Network. The Network menu opens.
+  * Select DNS. The DNS list opens. The check is on Cloudflare.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Setup. The Setup menu opens.
+  * Select Network. The Network menu opens.
+  * Select DNS. The DNS list opens. The check is still on Cloudflare.
+  * Click Google. No password dialog opens.
+  * Press Super+Space. The menu opens.
+  * Select Setup. The Setup menu opens.
+  * Select Network. The Network menu opens.
+  * Select DNS. The DNS list opens. Record the check.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Setup. The Setup menu opens.
+  * Select Network. The Network menu opens.
+  * Select DNS. The DNS list opens. The check is on Google.
+  * Press Escape. The menu closes.
+  * Click the terminal. It is focused.
+  * Type `omarchy-dns` and press Return. The output is `Google`.
+  * Type `grep ^DNS /etc/systemd/resolved.conf` and press Return. The line includes `8.8.8.8`.
+  * Press Super+Ctrl+W. The network panel opens. The Google DNS choice is selected.
+  * Press Escape. The panel closes.
+  * Press Super+Ctrl+W. The network panel opens.
+  * Click DHCP. The panel closes. No password dialog opens.
+  * Wait 3 seconds.
+  * Press Super+Ctrl+W. The network panel opens. The DHCP choice is selected.
+  * Press Escape. The panel closes.
+  * Click the terminal. It is focused.
+  * Type `omarchy-dns` and press Return. The output is `DHCP`.
+  * Type `ls /etc/NetworkManager/conf.d/20-omarchy-dns.conf` and press Return. The output says the file does not exist.
+  * Type `grep -v '^[#;]' /etc/systemd/resolved.conf | grep .` and press Return. The only setting line is `DNSOverTLS=no`.
+  * Type `getent hosts omarchy.org` and press Return. An address is printed.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * `sudo -n -l -l /usr/bin/omarchy-dns Cloudflare | grep authenticate` (or `sudo -n -l -l | grep omarchy-dns`) shows the rule limited to `Cloudflare`, `Google`, `DHCP`; report it either way (it is expected to exist since 4.0.2). A password or polkit dialog on Cloudflare/Google/DHCP is a failure of the sudoers grant.
-  * Menu guards paint from the previous open — reopen the DNS submenu twice before asserting the ✓ moved. The panel closes itself after a DNS click; that is expected. `resolvectl` may take a second to reflect a switch; its output is long — pipe to `| sudo tee /dev/ttyS0` if needed.
+  * A password dialog on Cloudflare, Google, or DHCP is a failure. Custom is the one that asks.
+  * Reopen the DNS list before judging the check. The second open is that check.
+  * The panel closes itself after a DNS click.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Terminal screenshots of the prompt-free Cloudflare switch with both config files (IPv4 and IPv6 servers) and resolvectl showing 1.1.1.1, the successful `getent` and `resolvectl query`, the two refusals and the two exact usage errors with `1`, the polkit dialog for the unprivileged `omarchy-dns Custom` cancelled with the provider unchanged; menu screenshots with the ✓ on Cloudflare → Google; panel screenshots with Google active, the DHCP tooltip, then DHCP active; the final `DHCP` with the conf.d file gone, `DNSOverTLS=no` only, and a successful `getent`
+  ** DNS starts at `DHCP`, and `omarchy.org` resolves. Cloudflare switches with no password prompt. The resolver files name `1.1.1.1`, and the name still resolves.
+  ** `Custom` and lowercase `cloudflare` through `sudo -n` say a password is required. `Bogus` and two arguments print usage and exit 1. The provider stays `Cloudflare`.
+  ** Unprivileged `omarchy-dns Custom` opens a password dialog. Escape leaves the provider on `Cloudflare`.
+  ** The DNS check moves from Cloudflare to Google with no password dialog, and the CLI says `Google`.
+  ** The panel shows Google, then DHCP after the DHCP click. The CLI returns to `DHCP`, the NetworkManager DNS file is gone, resolved shows only `DNSOverTLS=no`, and the name still resolves.
   * If unsuccessful
-  ** Screenshot of a password/polkit prompt for a stock provider, Custom running unprompted, the pill or ✓ not changing, a floating terminal error, or a failed lookup; `journalctl -b -u NetworkManager -u systemd-resolved | tail -30 | sudo tee /dev/ttyS0` and `resolvectl status | sudo tee /dev/ttyS0` read via get-serial
+  ** A stock provider asks for a password, Custom applies with no dialog, or the check and the CLI disagree.
 covers: etc/sudoers.d/omarchy-dns; bin/omarchy-dns (require_root sudo/pkexec); default/omarchy/omarchy-menu.jsonc (setup.network.dns.*); shell/plugins/panels/network/Panel.qml (setDns, DnsProviderPill, dnsProc); PolkitAgent.qml; test/shell.d/dns-sudoers-test.sh; test/shell.d/network-manager-transition-test.sh; manual/35-networking.md (DNS); manual/46:35
 
 ### dns-custom-asks-password-and-rejects-empty   [VM-OK] [NET]
@@ -21430,26 +21625,80 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `sudo -k; omarchy-dns` → `DHCP`.
-  * Open the Omarchy Menu with Super+Space, click Setup → Network → DNS → Custom. The floating "Omarchy" terminal with the logo must prompt `[sudo] password for prime:` (unlike the other three providers). Type `prime`. At `Enter your DNS servers (space-separated, e.g. '192.168.1.1 1.1.1.1'):` press Enter with nothing typed → `Error: No DNS servers provided.` and "Failed (exit code 1)!". Press a key. In your terminal `omarchy-dns` → still `DHCP`.
-  * Press Super+Ctrl+W and click the **Custom** DNS pill → the panel closes and the floating terminal opens; after the sudo step type `9.9.9.9 149.112.112.112` and Enter → Done prompt; close it.
-  * Type `omarchy-dns; grep servers /etc/NetworkManager/conf.d/20-omarchy-dns.conf; grep ^DNS /etc/systemd/resolved.conf; resolvectl status | grep -A3 '^Global'; getent hosts archlinux.org` → `Custom`; `servers=9.9.9.9,149.112.112.112`; `DNS=9.9.9.9 149.112.112.112`; 9.9.9.9 in the Global block; the name resolves. Press Super+Space → Setup → Network → DNS (reopen twice) → ✓ on Custom; Super+Ctrl+W → the Custom pill is active; Escape.
-  * Setup → Network → DNS → Custom again; press Enter on an empty line → `Error: No DNS servers provided.` and the red `● Failed (exit code 1)!` prompt; reopen the DNS submenu: ✓ still on Custom (the failed Custom changed nothing) and `omarchy-dns` is still `Custom` with the same servers.
-  * Type `omarchy dns DHCP; omarchy dns` → `DHCP` — back to stock; Setup → Network → DNS shows ✓ on DHCP and Super+Ctrl+W shows the DHCP pill active. Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `sudo -k` and press Return. The prompt returns.
+  * Type `omarchy-dns` and press Return. The output is `DHCP`.
+  * Press Super+Space. The menu opens.
+  * Select Setup. The Setup menu opens.
+  * Select Network. The Network menu opens.
+  * Select DNS. The DNS list opens.
+  * Select Custom. A terminal opens and asks for a password.
+  * Type `prime` and press Return. A prompt asks for DNS servers.
+  * Press Return. The output says no DNS servers were provided, and the command failed.
+  * Press Return. That terminal closes.
+  * Click the first terminal. It is focused.
+  * Type `omarchy-dns` and press Return. The output is still `DHCP`.
+  * Press Super+Ctrl+W. The network panel opens.
+  * Click Custom. The panel closes, and a terminal opens and asks for a password.
+  * Type `prime` and press Return. A prompt asks for DNS servers.
+  * Type `9.9.9.9 149.112.112.112` and press Return. The output says Done.
+  * Press Return. That terminal closes.
+  * Click the first terminal. It is focused.
+  * Type `omarchy-dns` and press Return. The output is `Custom`.
+  * Type `grep servers /etc/NetworkManager/conf.d/20-omarchy-dns.conf` and press Return. The line includes `9.9.9.9` and `149.112.112.112`.
+  * Type `grep ^DNS /etc/systemd/resolved.conf` and press Return. The line includes both addresses.
+  * Type `getent hosts archlinux.org` and press Return. An address is printed.
+  * Press Super+Space. The menu opens.
+  * Select Setup. The Setup menu opens.
+  * Select Network. The Network menu opens.
+  * Select DNS. The DNS list opens. Record the check.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Setup. The Setup menu opens.
+  * Select Network. The Network menu opens.
+  * Select DNS. The DNS list opens. The check is on Custom.
+  * Press Escape. The menu closes.
+  * Press Super+Ctrl+W. The network panel opens. The Custom choice is selected.
+  * Press Escape. The panel closes.
+  * Press Super+Space. The menu opens.
+  * Select Setup. The Setup menu opens.
+  * Select Network. The Network menu opens.
+  * Select DNS. The DNS list opens.
+  * Select Custom. A terminal opens and asks for a password.
+  * Type `prime` and press Return. A prompt asks for DNS servers.
+  * Press Return. The output says no DNS servers were provided, and the command failed.
+  * Press Return. That terminal closes.
+  * Click the first terminal. It is focused.
+  * Type `omarchy-dns` and press Return. The output is still `Custom`.
+  * Type `grep servers /etc/NetworkManager/conf.d/20-omarchy-dns.conf` and press Return. The line still includes both addresses.
+  * Type `omarchy dns DHCP` and press Return. The prompt returns.
+  * Type `omarchy dns` and press Return. The output is `DHCP`.
+  * Press Super+Space. The menu opens.
+  * Select Setup. The Setup menu opens.
+  * Select Network. The Network menu opens.
+  * Select DNS. The DNS list opens. The check is on DHCP.
+  * Press Escape. The menu closes.
+  * Press Super+Ctrl+W. The network panel opens. The DHCP choice is selected.
+  * Press Escape. The panel closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * If passwordless sudo was left on by an earlier test the password prompt will be missing; it must be off for this test.
-  * The floating terminal's Failed/Done prompt closes on any key. The ✓ is computed when the submenu opens, so always reopen it (twice) to read the state.
+  * Custom is supposed to ask for the password. If it does not, passwordless sudo is still on. Record that and stop.
+  * Reopen the DNS list before judging the check. The second open is that check.
+  * Any key closes the Done or Failed prompt.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the password prompt inside the Custom terminal and the "No DNS servers provided" failure with `DHCP` unchanged; the prompt from the panel pill; the config files with the two servers, the Global block and the resolved name; ✓ on Custom and the active Custom pill; the second empty-input error with `● Failed (exit code 1)!`, ✓ and servers kept; the return to `DHCP` in CLI, menu and panel
+  ** DNS starts at `DHCP`. An empty Custom server list fails and leaves it on `DHCP`.
+  ** The panel Custom prompt accepts `9.9.9.9 149.112.112.112`. The CLI says `Custom`, both resolver files list those addresses, and `archlinux.org` resolves.
+  ** The DNS check and the panel show Custom. A second empty list fails and leaves the same servers in place.
+  ** `omarchy dns DHCP` returns the CLI, the check, and the panel to DHCP.
   * If unsuccessful
-  ** Custom applying with no servers, no password prompt, the terminal not opening, the active pill or ✓ changing on the empty input, or stale servers after DHCP; `cat /etc/systemd/resolved.conf`
+  ** An empty list changes the servers, Custom never asks for a password, or DHCP leaves the custom servers behind.
 covers: bin/omarchy-dns (Custom branch, require_root/pkexec, normalize_servers, split_dns_servers); etc/sudoers.d/omarchy-dns; default/omarchy/omarchy-menu.jsonc (setup.network.dns.*, setup.network.dns.custom); bin/omarchy-launch-floating-terminal-with-presentation; shell/plugins/panels/network/Panel.qml (setDns Custom branch); manual/35-networking.md (DNS)
 
 ### tmux-dev-layouts-tdl-tsl-tdlm   [VM-OK]
@@ -21459,28 +21708,47 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter and type `tdl bash; tsl 2 x; tds` Enter → three refusal lines of the form `You must start tmux to use tdl.` (each naming its own function), nothing else happens.
-  * Type `mkdir -p /tmp/multi/a /tmp/multi/b /tmp/multi/c && cd /tmp/multi && t` Enter (tmux starts; status bar `Work`). Type `tdl; tsl 4; tdlm; tds x` Enter → `Usage: tdl <c|cx|codex|other_ai> [<second_ai>]`, `Usage: tsl <pane_count> <command>`, `Usage: tdlm <c|cx|codex|other_ai> [<second_ai>]`, `Usage: tds`.
-  * Type `tdl bash` Enter. Within a few seconds the window shows three panes: a large editor pane (Neovim opened on the directory) on the left, a narrower (~30 %) pane on the right running a fresh bash prompt, and a short pane along the bottom with a prompt; the window name in the status bar becomes `multi`.
-  ** If Neovim shows a plugin-install window on its first start, wait for it (network) and press `q`. Note whether any `can't find pane` text appears in the bottom pane and which pane has focus — the function ends with `tmux select-pane -t "$opencode_pane"`, a variable only `tds` sets; report it either way.
-  * Click the bottom pane and type `tdl bash bash` Enter → a second agent pane appears under the first right-hand pane (the right column is split in two).
-  * Click a shell pane and type `tmux kill-window; tmux new-window` Enter, then `tsl 4 'echo swarm; bash'` Enter → the window splits into a 2×2 grid, each pane showing `swarm` above a prompt.
-  * Press Ctrl+Space then `k` to kill this window (if the terminal closes, press Super+Alt+Enter and `cd /tmp/multi`). Type `tdlm bash` Enter → the session is renamed `multi` (status bar left) and three windows named `a`, `b`, `c` appear in the status bar, each with the tdl layout. Press Alt+2 and Alt+3 to switch windows; the active window highlight must follow.
-  * Type `tmux kill-server` in any shell pane and press Enter; press Ctrl+D if a plain shell remains. The desktop is as before.
+  * Press Super+Return. A terminal opens.
+  * Type `tdl bash` and press Return. The output says you must start tmux to use `tdl`.
+  * Type `tsl 2 x` and press Return. The output says you must start tmux to use `tsl`.
+  * Type `tds` and press Return. The output says you must start tmux to use `tds`.
+  * Type `mkdir -p /tmp/multi/a /tmp/multi/b /tmp/multi/c && cd /tmp/multi && t` and press Return. tmux opens.
+  * Type `tdl` and press Return. Usage for `tdl` is printed.
+  * Type `tsl 4` and press Return. Usage for `tsl` is printed.
+  * Type `tdlm` and press Return. Usage for `tdlm` is printed.
+  * Type `tds x` and press Return. Usage for `tds` is printed.
+  * Type `tdl bash` and press Return. Three panes appear. Neovim is on the left, and the window name is `multi`.
+  * Click the bottom pane. It is focused.
+  * Type `tdl bash bash` and press Return. A second pane appears in the right column.
+  * Click a shell pane. It is focused.
+  * Type `tmux kill-window; tmux new-window` and press Return. A new window opens.
+  * Type `tsl 4 'echo swarm; bash'` and press Return. Four panes appear, and each shows `swarm`.
+  * Press Ctrl+Space, then `k`. That window closes.
+  ** If the terminal closes, press Super+Return. A terminal opens. Type `cd /tmp/multi && t` and press Return. tmux opens.
+  * Type `tdlm bash` and press Return. The session name is `multi`, and the windows are `a`, `b`, and `c`.
+  * Press Alt+2. Window `b` is current.
+  * Press Alt+3. Window `c` is current.
+  * Click a shell pane. It is focused.
+  * Type `tmux kill-server` and press Return. tmux closes.
+  * Press Ctrl+D if a shell prompt remains. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * `bash` stands in for an AI agent so no download is needed; the layout is identical. The `ic`/`ix`/`icx` aliases would start real agents — do not use them.
-  * tmux has `mouse on`: click a pane to focus it. Neovim can be left with `:qa!` + Enter if you need its pane back. Window numbering starts at 1 (`base-index 1`), so Alt+1 is the first window.
+  * `bash` stands in for an agent. Do not run `ic`, `ix`, or `icx`.
+  * Click a pane to focus it. If Neovim is installing plugins, wait and press `q`. If you need its pane, type `:qa!` and press Return.
+  * Record any `can't find pane` text after `tdl bash`.
+  * Alt+1 is the first window.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the three "You must start tmux" refusals and the four usage lines; the three-pane `tdl` layout with Neovim on the left and the window named `multi` (plus a note of any `select-pane` error text); the right column split after `tdl bash bash`; the 2×2 `tsl` grid with `swarm` in every pane; the status bar with session `multi` and windows `a b c` while Alt+3 is active
+  ** Outside tmux, `tdl`, `tsl`, and `tds` each say tmux must be started. Inside tmux, the four missing-argument commands print usage.
+  ** `tdl bash` makes three panes with Neovim on the left and names the window `multi`. `tdl bash bash` splits the right column.
+  ** `tsl 4` makes four panes that each show `swarm`. `tdlm bash` names the session `multi` and the windows `a`, `b`, and `c`. Alt+2 and Alt+3 follow those windows. `tmux kill-server` closes the session.
   * If unsuccessful
-  ** Screenshot of a wrong pane count, a missing rename, or a tmux error, plus `tmux list-panes` / `tmux list-windows` output
+  ** A command runs outside tmux, the pane count is wrong, or the session and window names do not change.
 covers: manual/15-terminal.md:17-38; manual/20-shell-functions.md:19-22; default/bash/fns/tmux:3-38,69-124; default/bash/fns/tmux; default/bash/aliases:52-55 (ic, ix, icx); config/tmux/tmux.conf:39-47
 
 ### fingerprint-setup-hidden-and-refused-without-reader   [VM-PARTIAL]

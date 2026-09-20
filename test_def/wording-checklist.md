@@ -454,14 +454,14 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `passwordless-sudo-toggle-expiry-and-guards`
 - [x] `timezone-menu-change-passwordless-and-rule-variants`
 - [x] `privileged-command-without-terminal-fails-cleanly`
-- [ ] `git-url-check-refuses-hostile-urls`
-- [ ] `sshd-setup-key-hardens-login-and-removes`
-- [ ] `sshd-setup-rejects-bad-arguments-and-bad-key-before-opening-port`
-- [ ] `sshd-setup-github-keys`
-- [ ] `fido2-setup-without-device`
-- [ ] `dns-preset-switch-no-password-menu-panel-terminal`
-- [ ] `dns-custom-asks-password-and-rejects-empty`
-- [ ] `tmux-dev-layouts-tdl-tsl-tdlm`
+- [x] `git-url-check-refuses-hostile-urls`
+- [x] `sshd-setup-key-hardens-login-and-removes`
+- [x] `sshd-setup-rejects-bad-arguments-and-bad-key-before-opening-port`
+- [x] `sshd-setup-github-keys`
+- [x] `fido2-setup-without-device`
+- [x] `dns-preset-switch-no-password-menu-panel-terminal`
+- [x] `dns-custom-asks-password-and-rejects-empty`
+- [x] `tmux-dev-layouts-tdl-tsl-tdlm`
 - [ ] `fingerprint-setup-hidden-and-refused-without-reader`
 - [ ] `pacman-repos-and-signing-key`
 - [ ] `zram-swap-active-and-oomd-kills-runaway-app`
