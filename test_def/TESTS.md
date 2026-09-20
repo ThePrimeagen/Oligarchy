@@ -14723,37 +14723,52 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter, install omasnap if needed (`omarchy pkg add omasnap`, password `prime`; if that command is unknown on this build use Omarchy Menu → Install → Package and pick omasnap), then run `omasnap` Enter.
-  ** The screen freezes under a translucent overlay with tabs Region / Window / Scrolling Region / Fullscreen and a crosshair with a pixel readout.
-  * Drag with the mouse from about (0.2, 0.2) to (0.7, 0.7) of the screen.
-  ** The annotation editor opens showing the captured rectangle on a backdrop with a toolbar.
-  * Press `A` and drag an arrow across the image; press `R` and drag a rectangle; press `T`, click on the image, type `VM`, Enter.
-  ** Arrow, rectangle and the label "VM" are visible.
-  * Press Ctrl+Z, then Ctrl+Shift+Z.
-  ** The text vanishes, then returns.
-  * Press Ctrl+S.
-  ** The editor closes and a "Screenshot saved" notification with a thumbnail appears.
-  * Press Super+Shift+F, open Pictures → Screenshots and double-click the newest `screenshot-<date>_<time>….png`.
-  ** Files renders oversized at 1× (expected). The thumbnail is the annotated shot, and it opens in the image viewer showing the arrow, rectangle and VM label.
-  * Close the viewer and Files; in the terminal run `rm ~/Pictures/Screenshots/screenshot-*.png` for the file just made and `sudo pacman -R --noconfirm omasnap` (unless another omasnap test follows), then close it with Super+W.
-  ** The desktop must return exactly as left.
+  * Press Super+Return. A terminal opens.
+  * Type `pacman -Q omasnap` and press Return. Record whether it is installed.
+  * If it is missing, type `omarchy pkg add omasnap` and press Return. The package installs.
+  ** If a password is asked, type `prime` and press Return.
+  ** If that command is unknown, open Install → Package and pick omasnap.
+  * Type `omasnap` and press Return. A capture overlay opens.
+  * Drag from about a fifth of the way across the screen to about seven tenths. The annotation editor opens.
+  * Press `A`. Arrow mode is active.
+  * Drag an arrow across the image. An arrow is drawn.
+  * Press `R`. Rectangle mode is active.
+  * Drag a rectangle. A rectangle is drawn.
+  * Press `T`. Text mode is active.
+  * Click the image. A text field is placed.
+  * Type `VM` and press Enter. The label `VM` is visible.
+  * Press Ctrl+Z. The text disappears.
+  * Press Ctrl+Shift+Z. The text returns.
+  * Press Ctrl+S. The editor closes, and a notification says the screenshot was saved.
+  * Press Super+Shift+F. Files opens.
+  * Open Pictures, then Screenshots. The newest screenshot file is listed.
+  * Double-click that file. The image viewer shows the arrow, the rectangle, and `VM`.
+  * Close the image viewer. It closes.
+  * Close Files. Files closes.
+  * Click the terminal. It is focused.
+  * Type `rm ~/Pictures/Screenshots/screenshot-*.png` and press Return. The prompt returns.
+  * Type `sudo pacman -R --noconfirm omasnap` and press Return. The package is removed.
+  ** If sudo asks, type `prime` and press Return.
+  ** Skip the removal if another omasnap test follows immediately.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * omasnap needs an install first — it is not the stock `Print` editor (that is Tensaku via grim/slurp).
-  * Creation tools return to Select after one shape; press the letter again for another. `Enter` saves and copies, `Ctrl+S` saves only.
-  * If the overlay never appears, run `omasnap 2>&1 | sudo tee /dev/ttyS0` and read the serial log with get-serial.
+  * omasnap is not the Print editor. The overlay names Region, Window, Scrolling Region, and Fullscreen.
+  * A tool returns to Select after one shape. Enter saves and copies. Ctrl+S saves only.
+  * Files may render oversized. If the overlay never appears, run `omasnap 2>&1 | sudo tee /dev/ttyS0` and read it with get-serial.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the select overlay with tabs and readout
-  ** Screenshot of the editor with arrow, rectangle and VM text; one after undo, one after redo
-  ** Screenshot of the saved notification and of the PNG open in a viewer
+  ** omasnap is installed if it was missing. Running it opens a capture overlay.
+  ** A dragged region opens the editor. An arrow, a rectangle, and the label `VM` are drawn. Undo removes the text, and redo restores it.
+  ** Ctrl+S closes the editor and notifies that the screenshot was saved. Files lists the newest PNG, and the image viewer shows the arrow, the rectangle, and `VM`.
+  ** The PNG is removed, and omasnap is removed unless another omasnap test follows.
   * If unsuccessful
-  ** Serial capture of omasnap's stderr; screenshot of the state it stalled in; the install output if the package was not found
+  ** The package cannot be installed, the overlay never appears, undo does not change the text, or the saved file lacks the marks.
 covers: omasnap README "Controls", "Annotation editor", "Edit an existing or clipboard image"
 
 ### omasnap-toggle-quick-save-and-clipboard-refusal   [VM-OK] [NET]
@@ -14763,32 +14778,39 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter; make sure omasnap is installed (`omarchy pkg add omasnap` if not, password `prime`).
-  * Run `(sleep 3; omasnap; echo "second exit=$?") & omasnap`.
-  ** The overlay opens, and about three seconds later disappears on its own; the terminal shows `second exit=0` and no capture was taken.
-  * Run `omasnap --capture-fullscreen --save`.
-  ** No overlay; a "saved" notification appears immediately.
-  * Press Super+Shift+F and open Pictures → Screenshots.
-  ** The newest PNG is a full-screen shot of the desktop (Files renders oversized at 1× — expected). Close Files.
-  * Run `echo 'just text' | wl-copy && omasnap --clipboard; echo "exit=$?"`.
-  ** An error that the clipboard holds no image, `exit=1`, and no editor window.
-  * Remove the PNG just made from `~/Pictures/Screenshots`, run `sudo pacman -R --noconfirm omasnap` (unless another omasnap test follows) and close the terminal with Super+W.
-  ** The desktop must return exactly as left.
+  * Press Super+Return. A terminal opens.
+  * If omasnap is missing, type `omarchy pkg add omasnap` and press Return. The package installs.
+  ** If a password is asked, type `prime` and press Return.
+  * Type `(sleep 3; omasnap; echo "second exit=$?") & omasnap` and press Return. A capture overlay opens.
+  * Wait about 3 seconds. The overlay closes, and the terminal shows `second exit=0`.
+  * Type `omasnap --capture-fullscreen --save` and press Return. A notification says the screenshot was saved, and no overlay opens.
+  * Press Super+Shift+F. Files opens.
+  * Open Pictures, then Screenshots. The newest file is a full-screen shot.
+  * Close Files. Files closes.
+  * Click the terminal. It is focused.
+  * Type `echo 'just text' | wl-copy && omasnap --clipboard; echo "exit=$?"` and press Return. The output says the clipboard holds no image, the last line is `exit=1`, and no editor opens.
+  * Type `rm ~/Pictures/Screenshots/screenshot-*.png` and press Return. The prompt returns.
+  * Type `sudo pacman -R --noconfirm omasnap` and press Return. The package is removed.
+  ** If sudo asks, type `prime` and press Return.
+  ** Skip the removal if another omasnap test follows immediately.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The background subshell is what a user pressing the hotkey twice does; keep the mouse still while the overlay is up so no region is drawn.
+  * Keep the mouse still while the overlay is up so no region is drawn.
+  * Files may render oversized. The second `omasnap` is what a second hotkey press does.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the overlay open, then gone with `second exit=0`
-  ** Screenshot of the quick-save notification and the fullscreen PNG in Files
-  ** Screenshot of the clipboard refusal with `exit=1`
+  ** The overlay opens, then closes itself, and the terminal prints `second exit=0`. No capture is taken.
+  ** `--capture-fullscreen --save` notifies that a screenshot was saved and opens no overlay. Files shows a full-screen PNG.
+  ** A text-only clipboard is refused with an error and `exit=1`, and no editor opens.
+  ** The PNG is removed, and omasnap is removed unless another omasnap test follows.
   * If unsuccessful
-  ** Screenshot of an editor opened on text, or of a stuck overlay; serial capture of stderr
+  ** The overlay stays open, an editor opens for text, or the quick-save creates no PNG.
 covers: omasnap README "One instance, toggled by the same hotkey", "Quick output", "Edit an existing or clipboard image", "Exit codes"
 
 ### omasnap-pin-capture   [VM-OK] [NET]
@@ -14798,33 +14820,36 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter; make sure omasnap is installed (`omarchy pkg add omasnap` if not, password `prime`). Run `omasnap`.
-  * Drag a region about a quarter of the screen.
-  * In the editor press `P`.
-  ** The editor closes and a small image of the capture sits pinned at the bottom-right.
-  * Press Super+Enter to open another terminal.
-  ** The pin stays visible above the new window.
-  * Hover the pin, then click its Close control.
-  ** Controls (Edit, Link, Copy, Close) appear on hover; after Close the pin is gone.
-  * In a terminal run `pgrep -a omasnap; echo "exit=$?"`.
-  ** Nothing listed, `exit=1`.
-  * Run `sudo pacman -R --noconfirm omasnap` (unless another omasnap test follows) and close the terminals with Super+W.
-  ** The desktop must return exactly as left.
+  * Press Super+Return. A terminal opens.
+  * If omasnap is missing, type `omarchy pkg add omasnap` and press Return. The package installs.
+  ** If a password is asked, type `prime` and press Return.
+  * Type `omasnap` and press Return. A capture overlay opens.
+  * Drag a region about a quarter of the screen. The annotation editor opens.
+  * Press `P`. The editor closes, and the capture is pinned.
+  * Press Super+Return. A new terminal opens, and the pin stays above it.
+  * Hover the pin. Its controls appear.
+  * Click Close. The pin is gone.
+  * Type `pgrep -a omasnap; echo "exit=$?"` and press Return. Nothing is listed, and the last line is `exit=1`.
+  * Type `sudo pacman -R --noconfirm omasnap` and press Return. The package is removed.
+  ** If sudo asks, type `prime` and press Return.
+  ** Skip the removal if another omasnap test follows immediately.
+  * Close the open terminals with Super+W. The desktop is clear.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The pin is at most a third of the screen wide, lower right. Middle-click also closes it.
-  * Double-check the mouse position over the small Close control before clicking.
+  * The pin sits toward the lower right. Middle-click also closes it.
+  * Hover shows Edit, Link, Copy, and Close. Aim at Close before clicking.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the pin over a fresh terminal window, and of its hover controls
-  ** Screenshot after close with `pgrep` empty and `exit=1`
+  ** A dragged region opens the editor, and `P` replaces it with a pinned image.
+  ** A new terminal opens underneath the pin. Hover shows the pin controls, and Close removes the pin.
+  ** `pgrep` lists nothing and exits 1. omasnap is then removed unless another omasnap test follows.
   * If unsuccessful
-  ** Screenshot of the pin missing or stuck; `pgrep -a omasnap`
+  ** The pin does not appear, it disappears behind the new terminal, or an omasnap process remains after Close.
 covers: omasnap README "Pinned captures"
 
 ### omareel-record-and-export   [VM-PARTIAL] [NET]
@@ -14834,42 +14859,59 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter; install omareel with `omarchy pkg add omareel` (password `prime`) if `pacman -Q omareel` says it is missing (10–30 MB). Run `omareel help | head -30`.
-  ** Subcommands `record`, `edit`, `export`, `probe`, `help` and record options `--region --fullscreen --window --no-audio --stop --cancel` are listed.
-  * Run `omareel &` Enter.
-  ** A small launcher (about 380×460, tiled since there is no window rule — expected) with a Record button, capture-mode choice, audio toggles and a webcam toggle. Toggle the webcam option on, then off: no camera exists, so a disabled/"no camera" state is shown, no crash, no self-view window. Close the launcher with Super+W.
-  * In the terminal run `omareel record --stop; echo "exit=$?"`.
-  ** A message that no recording is active and `exit=1`.
-  * Run `OMAREEL_DEBUG=1 omareel record --fullscreen --no-audio --no-selfview`.
-  ** Within 3 seconds a recording bar appears top-centre and a REC indicator lights in the Omarchy bar.
-  * Wait 5 seconds, type `echo recording` Enter, then run `omareel record --stop`.
-  ** The bar disappears and the omareel editor opens on the new bundle with a timeline and preview.
-  * Press Space, Space, then `Z`.
-  ** Playback started and paused; a zoom block was added on the timeline.
-  * Press Ctrl+E, choose MP4, keep defaults, export to `~/Videos/omareel/vmtest.mp4` (Ctrl+L in the file dialog); when the progress indicator finishes, press Super+Shift+F, open Videos → omareel and double-click `vmtest.mp4`.
-  ** The export is CPU-encoded (up to a minute); the file sits next to the `.omareel` bundle and plays in mpv. The GTK dialog and Files render oversized at 1× — expected.
-  * Close mpv, Files and the editor; run `rm -rf ~/Videos/omareel; sudo pacman -R --noconfirm omareel` and close the terminal with Super+W.
-  ** The desktop must return exactly as left.
+  * Press Super+Return. A terminal opens.
+  * Type `pacman -Q omareel` and press Return. Record whether it is installed.
+  * If it is missing, type `omarchy pkg add omareel` and press Return. The package installs.
+  ** If a password is asked, type `prime` and press Return.
+  * Type `omareel help | head -30` and press Return. The output lists `record`, `edit`, `export`, `probe`, and `help`.
+  * Type `omareel &` and press Return. A launcher window opens.
+  * Turn the webcam option on. A no-camera state is shown, and no extra window opens.
+  * Turn the webcam option off. The no-camera state clears.
+  * Press Super+W. The launcher closes.
+  * Click the terminal. It is focused.
+  * Type `omareel record --stop; echo "exit=$?"` and press Return. The output says no recording is active, and the last line is `exit=1`.
+  * Type `OMAREEL_DEBUG=1 omareel record --fullscreen --no-audio --no-selfview` and press Return. A recording indicator appears.
+  * Wait 5 seconds.
+  * Type `echo recording` and press Return. The output is `recording`.
+  * Type `omareel record --stop` and press Return. The recording indicator disappears, and the editor opens.
+  * Press Space. Playback starts.
+  * Press Space. Playback pauses.
+  * Press `Z`. A zoom block is added.
+  * Press Ctrl+E. An export dialog opens.
+  * Choose MP4 and keep the defaults. A path field is ready.
+  * Save as `~/Videos/omareel/vmtest.mp4`. The export finishes.
+  * Press Super+Shift+F. Files opens.
+  * Open Videos, then omareel. `vmtest.mp4` is listed.
+  * Double-click `vmtest.mp4`. mpv plays it.
+  * Close mpv. It closes.
+  * Close Files. Files closes.
+  * Close the editor. It closes.
+  * Click the terminal. It is focused.
+  * Type `rm -rf ~/Videos/omareel` and press Return. The prompt returns.
+  * Type `sudo pacman -R --noconfirm omareel` and press Return. The package is removed.
+  ** If sudo asks, type `prime` and press Return.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * No GPU here: if recording does not start, run `cat /tmp/omareel.log | sudo tee /dev/ttyS0`, read it with get-serial, and retry once with `OMAREEL_CAPTURE=gsr` in front of the record command. An encoder error in the log is a valid VM-PARTIAL outcome — report it with the log.
-  * A warning that the Hyprland capture-exclusion plugin does not match the running Hyprland is expected, not a failure.
-  * Keep acting: a stall over 150 s brings the screensaver.
-  * omareel has no chord or menu entry on a stock disk; the terminal is the only launcher.
+  * Help also lists `--region`, `--fullscreen`, `--window`, `--no-audio`, `--stop`, and `--cancel`.
+  * The launcher has no window rule, so a tiled window is expected. Software encoding can take a minute.
+  * A warning that the capture-exclusion plugin does not match Hyprland is expected.
+  * If recording does not start, read `/tmp/omareel.log` with get-serial and retry once with `OMAREEL_CAPTURE=gsr`. An encoder error is a VM-PARTIAL outcome.
+  * There is no chord or menu entry. Stay active so the screensaver does not start.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the install completing and of `omareel help`
-  ** Screenshot of the launcher, and of the webcam toggle's no-device state
-  ** Screenshot of the `--stop` refusal with `exit=1`
-  ** Screenshot of the recording bar and REC indicator
-  ** Screenshot of the editor with the zoom block, and of the exported file playing in mpv
+  ** omareel is installed if it was missing, and help lists `record`, `edit`, `export`, `probe`, and `help`.
+  ** The launcher opens. Turning the webcam on shows a no-camera state and no extra window, and turning it off clears that state.
+  ** `record --stop` with nothing recording exits 1. A fullscreen recording shows an indicator, and stop opens the editor.
+  ** Space starts and pauses playback, and `Z` adds a zoom block. Export writes `vmtest.mp4`, and mpv plays it.
+  ** The Videos/omareel directory and the package are removed.
   * If unsuccessful
-  ** Screenshot of the pacman failure or launcher crash (`omareel 2>&1 | head | sudo tee /dev/ttyS0`); serial capture of /tmp/omareel.log; screenshot of the stalled state
+  ** pacman fails, the launcher crashes, stop does not open the editor, or the encoder log shows the recording never started.
 covers: omareel README "Install", "Usage", "Troubleshooting"; omareel docs/USAGE.md "Launcher window", "record", "Stopping a recording", "Editor keys", "Environment"; omarchy-pkgs/pkgbuilds/omareel
 
 ### plugin-add-elsewhen-from-menu   [VM-OK] [NET]
@@ -14879,35 +14921,36 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open the Omarchy Menu with Super+Space → Setup → Plugins → Add Plugin.
-  ** A floating terminal asks `Git URL of the plugin repo:`.
-  * Type `https://github.com/omacom/elsewhen.git` Enter.
-  ** A warning "Plugins run as arbitrary, unsandboxed code…" shows the URL and asks `Clone and add this plugin?`.
-  * Choose Yes; when asked `Enable 'omacom.elsewhen' now?` choose Yes; if asked for a bar section choose `right`.
-  ** `Added omacom.elsewhen into ~/.config/omarchy/plugins/omacom.elsewhen` prints and a globe icon appears in the right section of the bar.
-  * Click the globe.
-  ** A panel opens with five city rows and times (your location plus four spread round the world) and a globe behind them. Press Escape.
-  * Open a terminal with Super+Enter and run `omarchy plugin remove omacom.elsewhen --yes`.
-  ** The globe leaves the bar.
-  * Close the terminal with Super+W.
-  ** The desktop must return exactly as left.
+  * Press Super+Space. The menu opens.
+  * Select Setup, then Plugins, then Add Plugin. A prompt asks for a git URL.
+  * Type `https://github.com/omacom/elsewhen.git` and press Enter. A warning shows that URL and asks whether to clone it.
+  * Choose Yes. A prompt asks `Enable 'omacom.elsewhen' now?`.
+  * Choose Yes. The output includes `Added omacom.elsewhen`.
+  ** If it asks for a bar section, choose `right`.
+  * Look at the bar. A globe icon is on the right.
+  * Click the globe. A panel opens with five city times.
+  * Press Escape. The panel closes.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy plugin remove omacom.elsewhen --yes` and press Return. The prompt returns.
+  * Look at the bar. The globe is gone.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * gum prompts: arrow keys move the highlight, Enter selects.
-  * Temperature/currency in the panel come from the network and may still be loading — fine.
-  * The elsewhen package recipe installs to a path the plugin catalog never scans at HEAD (03-INTENDED-BEHAVIOUR #24, UNCLEAR pending PR #12051); the git URL is the only working install path — record `omarchy version` with the result.
+  * Arrow keys move a gum highlight, and Enter selects it.
+  * Temperature or currency in the panel may still be loading. Record `omarchy version`.
+  * The git URL is the working install path (03-INTENDED-BEHAVIOUR #24).
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the warning prompt with the URL
-  ** Screenshot of the globe in the bar and of the five-city panel
-  ** Screenshot of the bar after removal
+  ** Add Plugin warns before cloning `https://github.com/omacom/elsewhen.git`.
+  ** Choosing Yes twice prints `Added omacom.elsewhen`, and a globe appears on the right of the bar.
+  ** Clicking the globe opens a panel with five city times. Removing the plugin takes the globe off the bar.
   * If unsuccessful
-  ** Screenshot of the clone/validation failure; `omarchy plugin list | sudo tee /dev/ttyS0`
+  ** Clone or validation fails, the globe never appears, or the globe remains after removal.
 covers: default/omarchy/omarchy-menu.jsonc "setup.plugin.add"; bin/omarchy-plugin-add; manual/32-shell-plugins.md "Adding a plugin from git"; elsewhen README "Installing", "The first run"
 
 ### plugin-add-port-forward-error-path   [VM-OK] [NET]
@@ -14917,33 +14960,37 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `omarchy plugin add https://github.com/omacom-io/omarchy-port-forward-plugin.git --enable --yes`.
-  ** Plugin `port-forward` is enabled; a tunnel icon appears in the bar.
-  * Click the icon.
-  ** A panel opens with an empty list and an "Add forward" row.
-  * Press `a`; fill label `vm`, local port `3000`, SSH host `nohost.invalid`, remote host `localhost`, remote port `3000`; save.
-  ** A row `vm` with status `○` appears.
-  * Select the row and press Enter.
-  ** Status goes `◐` and within ~15 seconds becomes `✕` with an error (name resolution failed); it must not stay on `◐`.
-  * Press `x` on the row, confirm deletion, press Escape.
-  * Run `omarchy plugin remove port-forward --yes` and close the terminal with Super+W.
-  ** The icon leaves the bar; the desktop must return exactly as left.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy plugin add https://github.com/omacom-io/omarchy-port-forward-plugin.git --enable --yes` and press Return. The output says the plugin is enabled.
+  * Look at the bar. A tunnel icon appears.
+  * Click the icon. A panel opens with an add-forward row.
+  * Press `a`. An add form opens.
+  * Fill label `vm`, local port `3000`, SSH host `nohost.invalid`, remote host `localhost`, and remote port `3000`. The fields are filled.
+  * Save the form. A row named `vm` appears.
+  * Select the `vm` row and press Enter. The status leaves the idle mark.
+  * Wait up to 15 seconds. The row shows an error, and it is not still connecting.
+  * Press `x`. A delete confirmation appears.
+  * Confirm the deletion. The `vm` row is gone.
+  * Press Escape. The panel closes.
+  * Type `omarchy plugin remove port-forward --yes` and press Return. The prompt returns.
+  * Look at the bar. The tunnel icon is gone.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Panel keys: `j/k` move, `enter` toggle, `a` add, `e` edit, `x` delete, `esc` close.
-  * `.invalid` never resolves, which is what exercises the error path without an SSH server.
+  * `j` and `k` move, Enter toggles, `a` adds, `e` edits, `x` deletes, and Escape closes.
+  * The idle, connecting, and error marks are `○`, `◐`, and `✕`. `.invalid` never resolves, so this stays on the error path.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the empty panel, then of the `vm` row
-  ** Screenshot of the `✕` error state with its message
-  ** Screenshot of the bar after removal
+  ** The plugin enables, and a tunnel icon appears. The panel starts with an add-forward row.
+  ** Saving the `vm` forward creates that row. Enter starts it, and within 15 seconds the status is an error rather than still connecting.
+  ** `x` deletes the row. Removing the plugin takes the tunnel icon off the bar.
   * If unsuccessful
-  ** Screenshot of a row stuck on `◐` after 30 s; `journalctl --user -u 'omarchy-pf-*' -n 30 --no-pager | sudo tee /dev/ttyS0`
+  ** The row stays connecting for 30 seconds, the form will not save, or the icon remains after removal.
 covers: omarchy-port-forward-plugin README "What it does", "Keyboard shortcuts", "Where state lives"
 
 ### openclaw-launch-and-onboard-without-openclaw   [VM-PARTIAL] [NET]

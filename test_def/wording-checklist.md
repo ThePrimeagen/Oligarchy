@@ -318,12 +318,12 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `omawrite-external-change-warning`
 - [x] `omacut-trim-and-export`
 - [x] `ttfx-terminal-effect`
-- [ ] `omasnap-region-capture-annotate-save`
-- [ ] `omasnap-toggle-quick-save-and-clipboard-refusal`
-- [ ] `omasnap-pin-capture`
-- [ ] `omareel-record-and-export`
-- [ ] `plugin-add-elsewhen-from-menu`
-- [ ] `plugin-add-port-forward-error-path`
+- [x] `omasnap-region-capture-annotate-save`
+- [x] `omasnap-toggle-quick-save-and-clipboard-refusal`
+- [x] `omasnap-pin-capture`
+- [x] `omareel-record-and-export`
+- [x] `plugin-add-elsewhen-from-menu`
+- [x] `plugin-add-port-forward-error-path`
 - [ ] `openclaw-launch-and-onboard-without-openclaw`
 - [ ] `powerprofiles-set-remember-and-reject`
 - [ ] `system-stats-cli-output`
