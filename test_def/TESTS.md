@@ -7683,29 +7683,57 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `systemctl --user is-active omarchy-crash-watch.service` → `active`; `omarchy-default-agent; echo "[$?]"` → prints nothing on a stock disk.
-  * Run `sleep 300 & sleep 1; kill -SEGV $!` and wait 5 s: NO toast appears (no agent chosen — this quirk makes a stock disk look broken). Run `coredumpctl list --no-pager | tail -2`: a `sleep` row with `SIGSEGV`/11 — the crash itself was recorded.
-  * Run `mkdir -p ~/.config/omarchy/defaults && echo claude > ~/.config/omarchy/defaults/agent` (names an agent without installing one). Run `sleep 300 & sleep 1; kill -SEGV $!`: within ~5 s a critical toast with a robot glyph reads `Process crashed: sleep` / `Click to diagnose with AI`.
-  * Run the same crash line again at once: no second toast (one per program per minute). Click the toast: nothing visibly opens, or a terminal reports the missing agent — record which; a shell crash is the failure. Confirm the reason: `omarchy agent crash 1; echo "exit=$?"` → `claude is not installed. Choose an installed agent with: omarchy default agent <name>`, `exit=1`.
-  * Press Super+Space → Trigger → Toggle → click Crash Capture with the mouse: toast `Crash capture disabled`; `ls ~/.local/state/omarchy/toggles/crash-capture-off && systemctl --user is-active omarchy-crash-watch.service` → the flag file is listed and `inactive`; `systemctl --user cat omarchy-crash-watch.service | grep ConditionPathExists` → `ConditionPathExists=!%h/.local/state/omarchy/toggles/crash-capture-off` (so the choice survives logout). Wait 60 s (screenshot every 5 s, so the dedupe window passes), crash again: no toast within 15 s.
-  ** The toggle row carries no ✓ mark by design; the toast is the feedback. If the unit does not exist on this disk (`Unit … could not be found`), report that instead of failing the toggle.
-  * Press Super+Ctrl+O (the Toggle menu chord) and click Crash Capture again: `Crash capture enabled`, the flag is gone and the service is `active`; wait 60 s and crash again: the toast is back. CLI form: `omarchy toggle crash-capture` → `Crash capture disabled`; again → `Crash capture enabled` (`omarchy-toggle-crash-capture` is the same program).
-  * Unhappy path: `omarchy agent crash abc; echo "exit=$?"` → `Not a PID: abc` and `Usage: omarchy agent crash <pid>   (see: coredumpctl list)`, `exit=1`.
-  * Round trip: run `rm ~/.config/omarchy/defaults/agent`, press Super+Shift+comma to clear toasts, close the terminal with Super+W; capture is on and the flag file is absent.
+  * Press Super+Enter. A terminal opens.
+  * Type `systemctl --user is-active omarchy-crash-watch.service` and press Return. The line is `active`.
+  * Type `omarchy-default-agent; echo "[$?]"` and press Return. Nothing is printed before the bracket line on a stock disk.
+  * Type `sleep 300 & sleep 1; kill -SEGV $!` and press Return.
+  * Wait 5 seconds. No toast appears.
+  * Type `coredumpctl list --no-pager | tail -2` and press Return. A `sleep` row says `SIGSEGV`.
+  * Type `mkdir -p ~/.config/omarchy/defaults && echo claude > ~/.config/omarchy/defaults/agent` and press Return.
+  * Type `sleep 300 & sleep 1; kill -SEGV $!` and press Return.
+  * Wait 5 seconds. A toast says `Process crashed: sleep`.
+  * Type `sleep 300 & sleep 1; kill -SEGV $!` and press Return.
+  * Wait 5 seconds. No second toast appears.
+  * Click the toast. Record what opens. The shell does not crash.
+  * Click the terminal. It has focus.
+  * Type `omarchy agent crash 1; echo "exit=$?"` and press Return. The output says claude is not installed. The last line is `exit=1`.
+  * Press Super+Space. The menu opens.
+  * Click Trigger.
+  * Click Toggle.
+  * Click Crash Capture. A toast says `Crash capture disabled`.
+  * Type `ls ~/.local/state/omarchy/toggles/crash-capture-off` and press Return. The flag file is listed.
+  * Type `systemctl --user is-active omarchy-crash-watch.service` and press Return. The line is `inactive`.
+  ** If the unit is not found, report that and skip the rest of the toggle checks.
+  * Type `systemctl --user cat omarchy-crash-watch.service | grep ConditionPathExists` and press Return. The line names `crash-capture-off`.
+  * Wait 60 seconds.
+  * Type `sleep 300 & sleep 1; kill -SEGV $!` and press Return.
+  * Wait 15 seconds. No toast appears.
+  * Press Super+Ctrl+O. The Toggle menu opens.
+  * Click Crash Capture. A toast says `Crash capture enabled`.
+  * Type `ls ~/.local/state/omarchy/toggles/crash-capture-off` and press Return. The flag file is gone.
+  * Type `systemctl --user is-active omarchy-crash-watch.service` and press Return. The line is `active`.
+  * Wait 60 seconds.
+  * Type `sleep 300 & sleep 1; kill -SEGV $!` and press Return.
+  * Wait 5 seconds. The crash toast is back.
+  * Type `omarchy toggle crash-capture` and press Return. A toast says `Crash capture disabled`.
+  * Type `omarchy toggle crash-capture` and press Return. A toast says `Crash capture enabled`.
+  * Type `omarchy agent crash abc; echo "exit=$?"` and press Return. The output says `Not a PID: abc`. The last line is `exit=1`.
+  * Type `rm ~/.config/omarchy/defaults/agent` and press Return.
+  * Press Super+Shift+comma. No toasts remain.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * `Segmentation fault (core dumped)` printed in the terminal is the shell reporting the killed job; the toast is separate. Time the dedupe with `date +%s`; the window is 60 s per program name. Dismiss toasts with Super+comma between steps so a new one is unambiguous. Typing `crash` in the root menu search jumps straight to the Crash Capture row; use the mouse for the row so its click path is exercised.
-  * Skipped here: handing the crash to an agent (none installed); `omarchy agent crash` explains why.
+  * The same program is announced at most once a minute. Dismiss a toast with Super+comma before the next crash if you need a clear screen.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshot after the first crash: no toast, but a `sleep` SIGSEGV row in `coredumpctl list`; the `Process crashed: sleep` toast after setting the agent; no duplicate after the immediate second crash; what the click did; the `claude is not installed` line; `Crash capture disabled` with the flag file, `inactive`, the ConditionPathExists line and no toast after the next crash; `Crash capture enabled` from the Super+Ctrl+O menu with the flag gone, `active` and the toast back; the CLI pair of toasts; the `Not a PID` lines with `exit=1`
+  * On success
+  ** No toast before an agent is named, a `sleep` SIGSEGV row, the crash toast after naming claude, no second toast inside a minute, capture disabled with the service inactive, no toast while disabled, the toast back after it is enabled, and `Not a PID` with `exit=1`
   * If unsuccessful
-  ** A toast without an agent, none with one, a toast while disabled, the toggle not taking effect, a missing toast, or the shell crashing on click; `journalctl --user -u omarchy-crash-watch -n 30 | sudo tee /dev/ttyS0` read via get-serial; `systemctl --user status omarchy-crash-watch`; `ls ~/.local/state/omarchy/toggles/`
+  ** A toast with no agent, no toast with one, or a toast while capture is disabled
 covers: bin/omarchy-crash-watch:64-108; bin/omarchy-toggle-crash-capture; bin/omarchy-agent-crash:14-19; bin/omarchy-agent:40-52; default/systemd/user/omarchy-crash-watch.service (ConditionPathExists); default/agents/skills/diagnose-crash/SKILL.md:119-120; default/omarchy/omarchy-menu.jsonc:92 trigger.toggle.crash-capture; default/hypr/bindings/utilities.lua:5 (Super+Ctrl+O); docs/notifications.md §Crash capture; test/shell.d/crash-capture-test.sh (toggle, unit condition, enabled by default); manual/13-toggles-idle-screensaver.md; manual/17-ai.md:43-47 §Crash diagnosis
 
 ### reminder-set-fires-and-clears   [VM-OK]
@@ -7715,28 +7743,44 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Ctrl+R: a dimmed screen with a centred card reading `Remind in minutes...`. Type `1` and press Enter: the card reads `Reminder message...`. Type `Tea is ready` and Enter: the overlay closes and a toast `Tea is ready in 1 minutes` / `You'll be reminded at HH:MM` appears; a solid bell glyph now sits left of the clock. Hover it: tooltip `1 reminder`.
-  ** The reminders overlay is newer than 4.0.2; if Super+Ctrl+R shows nothing, report "absent on this build" and set the reminder with the CLI in the next step instead.
-  * Open a terminal with Super+Enter and run `omarchy reminder 2 "Check the oven"; echo "exit=$?"` → toast `Check the oven in 2 minutes`, `exit=0`; `systemctl --user list-timers 'omarchy-reminder-*' --no-pager` lists two timers; the bell tooltip reads `2 reminders`.
-  * Screenshot every 5 s: within about 70 s a toast `Reminder` / `Tea is ready` appears with a bell glyph, and at ~120 s `Reminder` / `Check the oven`.
-  ** Timers fire on the minute, so up to ~65 s after setting; the fired toast is low urgency (5 s) — the 5 s cadence is required to catch it.
-  * After both fired: the solid bell is gone; `systemctl --user list-timers 'omarchy-reminder-*' --no-pager` → `0 timers listed`; press Super+Ctrl+Alt+R → `Upcoming reminders` / `No outstanding reminders`.
-  * Run `omarchy reminder 30 "Later"` then `omarchy reminder 45` (toast `Reminder set for 45 minutes`): the bell is solid again. Press Super+Shift+Ctrl+R: toast `All reminders have been cleared`, the bell goes out, the timer list is empty.
-  * Unhappy path: `omarchy reminder 0; echo "exit=$?"`, `omarchy reminder abc; echo "exit=$?"`, `omarchy reminder show --bogus; echo "exit=$?"` → each prints the four-line usage and `exit=1`; no indicator lights and no timer is created. Press Super+Ctrl+R, type `abc`, Enter: the flow does not proceed (an `Invalid reminder` toast); Escape twice closes it with nothing set.
-  * Close the terminal with Super+W; the bar is as found.
+  * Press Super+Ctrl+R. A card says `Remind in minutes...`.
+  ** If nothing opens, report "absent on this build" and set the reminder with the CLI instead.
+  * Type `1` and press Enter. The card says `Reminder message...`.
+  * Type `Tea is ready` and press Enter. The card closes. A toast says `Tea is ready in 1 minutes`. A bell appears next to the clock.
+  * Hover the bell. The tooltip says `1 reminder`.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy reminder 2 "Check the oven"; echo "exit=$?"` and press Return. A toast says `Check the oven in 2 minutes`. The last line is `exit=0`.
+  * Type `systemctl --user list-timers 'omarchy-reminder-*' --no-pager` and press Return. Two timers are listed.
+  * Hover the bell. The tooltip says `2 reminders`.
+  * Wait until a toast says `Tea is ready`. Screenshot about every 5 seconds. It should appear within about 70 seconds.
+  * Wait until a toast says `Check the oven`. The bell is gone.
+  * Type `systemctl --user list-timers 'omarchy-reminder-*' --no-pager` and press Return. The line says `0 timers listed`.
+  * Press Super+Ctrl+Alt+R. A toast says there are no outstanding reminders.
+  * Type `omarchy reminder 30 "Later"` and press Return. A confirmation toast appears. The bell returns.
+  * Type `omarchy reminder 45` and press Return. A toast says a reminder was set for 45 minutes.
+  * Press Super+Shift+Ctrl+R. A toast says all reminders were cleared. The bell is gone.
+  * Type `systemctl --user list-timers 'omarchy-reminder-*' --no-pager` and press Return. No timers are listed.
+  * Type `omarchy reminder 0; echo "exit=$?"` and press Return. A usage line appears. The last line is `exit=1`.
+  * Type `omarchy reminder abc; echo "exit=$?"` and press Return. A usage line appears. The last line is `exit=1`.
+  * Type `omarchy reminder show --bogus; echo "exit=$?"` and press Return. A usage line appears. The last line is `exit=1`.
+  * Press Super+Ctrl+R. The minutes card opens.
+  * Type `abc` and press Enter. A toast says the reminder is invalid. The card stays open.
+  * Press Escape. The card closes.
+  * Press Escape. If a second card is open, it closes. Nothing is set.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * `<M-C-r>` set, `<M-C-A-r>` show, `<M-S-C-r>` clear. The overlay takes keyboard focus by itself; just type. If a toast never fires, the timer listing shows whether the timer exists.
+  * Super+Ctrl+R is `<M-C-r>`. Super+Ctrl+Alt+R shows reminders. Super+Shift+Ctrl+R clears them.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots: both prompts; the confirmation toast with the solid bell and tooltip `1 reminder`; the CLI confirmation, the two-timer list and `2 reminders`; both fired `Reminder` toasts; the bar with the bell cleared and `0 timers listed`; `No outstanding reminders`; the cleared toast after Super+Shift+Ctrl+R; the three usage refusals with `exit=1` and the refused overlay input
+  * On success
+  ** Both prompts, the confirmation and the bell, two timers, both fired toasts, no timers after they fire, the clear toast, and the three usage lines with `exit=1`
   * If unsuccessful
-  ** Screenshot at 70 s without the fired toast, a `systemd-run` error, an indicator that stays after firing, or a reminder armed from bad input; `systemctl --user list-timers 'omarchy-reminder-*'`
+  ** No fired toast within about 70 seconds, or a reminder armed from bad input
 covers: bin/omarchy-reminder:135-201 (set, confirmation, fire payload, usage); shell/plugins/reminders/ReminderFlow.qml; shell/plugins/reminders/ReminderFlowModel.js; shell/plugins/bar/indicators/Reminder.qml; default/hypr/bindings/utilities.lua:89-91; default/omarchy/omarchy-menu.jsonc:83-85 trigger.reminder.set; docs/notifications.md §Reminders; default/agents/skills/omarchy/SKILL.md §Reminder Requests; manual/07:196-203; manual/09
 
 ### reminder-show-clear-and-prompt-rejects-bad-input   [VM-OK]
@@ -7746,27 +7790,63 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `omarchy-reminder 30 "Check the oven"` (toast `Check the oven in 30 minutes` / `You'll be reminded at HH:MM`, solid bell next to the clock) then `omarchy-reminder 45` (toast `Reminder set for 45 minutes`); hover the bell: tooltip `2 reminders`.
-  * Press Super+Ctrl+Alt+R: toast `Upcoming reminders` listing `Check the oven in 29m …s (HH:MM)` and `45-min reminder in 44m …s (HH:MM)`. Left-click the solid bell: the same listing. Press Super+Space, type `Reminder`, Enter: a submenu `Set one` / `Show all` / `Clear all`; choose `Show all` with the arrows and Enter: the listing again. Run `omarchy reminder show --json | jq '.count, .tooltip, .reminders[0].label'` → `2`, `"2 reminders"`, `"Check the oven"` (this JSON feeds the bar indicator).
-  * Press Super+Shift+Ctrl+R: toast `All reminders have been cleared`; the bell is gone; `omarchy reminder show --json | jq .count` → `0`. Press Super+Ctrl+Alt+R: `Upcoming reminders` / `No outstanding reminders`. Run `omarchy reminder clear` with nothing set: a harmless message, no crash — record it.
-  * Hover left of the clock and click the dimmed bell: the `Remind in minutes...` prompt opens within 15 s. Type `abc`, Enter: within 5 s a toast `Invalid reminder` / `Enter the number of minutes` and the overlay is still open showing `abc`. Press Escape once: the text clears to the placeholder, overlay still open. Try `0`, `-5`, `1.5` and `soon` in turn, Enter after each (Escape clears between them): the `Invalid reminder` toast each time, the overlay stays on the minutes prompt — only a positive whole number is accepted. Press Escape twice: the overlay is gone.
-  * Press Super+Ctrl+R, type `5`, Enter: the prompt changes to `Reminder message...`; press Escape: the overlay closes — abandoning at the message prompt schedules nothing (`omarchy-reminder show` → no reminders). Press Super+Ctrl+R and press Enter with nothing typed: the overlay closes with no toast (by design). Press Super+Ctrl+R, then left-click the dimmed area far from the card (x≈0.1, y≈0.9): the overlay closes.
-  * Run `omarchy reminder -i; echo "exit=$?"`: the same prompt opens from the CLI; type `3`, Enter, `Tea`, Enter → toast `Tea in 3 minutes`; `exit=0`. Run `omarchy reminder show --json | jq -r '.reminders[].label'` → `Tea`. Run `omarchy reminder clear` → `All reminders have been cleared`.
-  * Unhappy path: hover left of the clock: the bell is dimmed (nothing pending was created by the refused inputs); `systemctl --user list-timers 'omarchy-reminder-*' --no-pager` → `0 timers listed`.
-  * Close the terminal with Super+W; the desktop is as found.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy-reminder 30 "Check the oven"` and press Return. A toast confirms it. A bell appears.
+  * Type `omarchy-reminder 45` and press Return. A toast says a reminder was set for 45 minutes.
+  * Hover the bell. The tooltip says `2 reminders`.
+  * Press Super+Ctrl+Alt+R. A toast lists both reminders.
+  * Click the bell. The same listing appears.
+  * Press Super+Space. The menu opens.
+  * Type `Reminder` and press Enter. A submenu opens.
+  * Select Show all and press Enter. The listing appears.
+  * Click the terminal. It has focus.
+  * Type `omarchy reminder show --json | jq '.count, .tooltip, .reminders[0].label'` and press Return. The values are `2`, `2 reminders`, and `Check the oven`.
+  * Press Super+Shift+Ctrl+R. A toast says all reminders were cleared. The bell is gone.
+  * Type `omarchy reminder show --json | jq .count` and press Return. The line is `0`.
+  * Press Super+Ctrl+Alt+R. A toast says there are no outstanding reminders.
+  * Type `omarchy reminder clear` and press Return. Record the message. Nothing crashes.
+  * Hover the empty bar just left of the clock.
+  * Click the dimmed bell. The minutes card opens.
+  * Type `abc` and press Enter. A toast says the reminder is invalid. The card stays open.
+  * Press Escape. The typed text clears. The card stays open.
+  * Type `0` and press Enter. A toast says the reminder is invalid. The card stays on the minutes prompt.
+  * Press Escape. The typed text clears. The card stays open.
+  * Type `-5` and press Enter. A toast says the reminder is invalid. The card stays on the minutes prompt.
+  * Press Escape. The typed text clears. The card stays open.
+  * Type `1.5` and press Enter. A toast says the reminder is invalid. The card stays on the minutes prompt.
+  * Press Escape. The typed text clears. The card stays open.
+  * Type `soon` and press Enter. A toast says the reminder is invalid. The card stays on the minutes prompt.
+  * Press Escape. The typed text clears. The card stays open.
+  * Press Escape. The card closes.
+  * Press Super+Ctrl+R. The minutes card opens.
+  * Type `5` and press Enter. The card says `Reminder message...`.
+  * Press Escape. The card closes.
+  * Type `omarchy-reminder show` and press Return. No reminders are listed.
+  * Press Super+Ctrl+R. The minutes card opens.
+  * Press Enter. The card closes. No toast appears.
+  * Press Super+Ctrl+R. The minutes card opens.
+  * Click the dimmed area away from the card. The card closes.
+  * Type `omarchy reminder -i; echo "exit=$?"` and press Return. The minutes card opens.
+  * Type `3` and press Enter. The card says `Reminder message...`.
+  * Type `Tea` and press Enter. A toast says `Tea in 3 minutes`. The last line, once the command returns, is `exit=0`.
+  * Type `omarchy reminder show --json | jq -r '.reminders[].label'` and press Return. The line is `Tea`.
+  * Type `omarchy reminder clear` and press Return. A toast says all reminders were cleared.
+  * Hover the bar. The bell is dimmed.
+  * Type `systemctl --user list-timers 'omarchy-reminder-*' --no-pager` and press Return. The line says `0 timers listed`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Hotkeys: `<M-C-A-r>` show, `<M-S-C-r>` clear, `<M-C-r>` set. The listing and invalid toasts are low urgency — screenshot promptly. The overlay is newer than 4.0.2: if it never appears, report "absent on this build" and keep the CLI/hotkey parts.
+  * If the prompt never appears, report "absent on this build" and keep the CLI steps.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots: both confirmation toasts; tooltip `2 reminders`; the two-line listing from the hotkey, the bell click and the menu; the jq count/tooltip/label; the cleared toast with the bell gone and count `0`; `No outstanding reminders`; the `Invalid reminder` toast with the overlay still on the minutes prompt for `abc`, `0`, `-5`, `1.5` and `soon`; the cleared prompt; the `Reminder message...` prompt then the overlay closed with nothing scheduled; the overlay closed after Escape, the empty Enter and the outside click; the CLI-opened prompt and `Tea`; the dimmed bell and `0 timers listed`
+  * On success
+  ** Both reminders listed from the hotkey, the bell, and the menu, the JSON count `2`, the clear, each invalid input leaving the minutes card open, nothing scheduled after leaving the message prompt, `Tea` from the CLI, and no timers at the end
   * If unsuccessful
-  ** Screenshot of a listing that disagrees with the reminders set, wrong remaining times, timers surviving `clear`, a bell that stays solid after clear, the message prompt appearing for a rejected input, a solid bell or scheduled reminder after bad input, or an overlay that will not close; `./client get-serial`; `omarchy-version`
+  ** A rejected input that schedules a reminder, or a bell that stays lit after clear
 covers: bin/omarchy-reminder:41-43,45-133,143-146 (show, clear, -i, --json); shell/plugins/reminders/ReminderFlow.qml (promptText, submit, dismiss, Keys.onPressed, scrim MouseArea); shell/plugins/reminders/ReminderFlowModel.js validMinutes; shell/plugins/bar/indicators/Reminder.qml (onPressed, openReminderFlow); default/hypr/bindings/utilities.lua:90-91 Super+Ctrl+Alt+R / Super+Shift+Ctrl+R; default/omarchy/omarchy-menu.jsonc:57,83-85 trigger.reminder.*; test/shell.d/reminders-test.sh; test/acceptance.d/shell-surfaces-test.sh:74-86; manual/09-reminders.md
 
 ### clipboard-history-pick-paste-and-filter   [VM-OK]
@@ -7776,28 +7856,49 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `printf 'Omarchy acceptance clipboard 12345' | wl-copy; sleep 1; printf 'alpha-111' | wl-copy; sleep 1; printf 'beta-222' | wl-copy; sleep 1; printf 'gamma-333' | wl-copy; sleep 1; grep -c 'Omarchy acceptance clipboard' ~/.local/state/omarchy/clipboard-history.json` → 1 or more (rerun the grep if it prints 0; capture lags a moment).
-  * Type `echo ` (trailing space, no Enter) and press Super+Ctrl+V: within 15 s a wide card `Search clipboard…` opens — a list on the left with `gamma-333` first, then `beta-222`, `alpha-111`, the long entry — and a preview pane on the right showing the highlighted entry's text.
-  * Press Down twice (`alpha-111` highlighted; the preview follows), then Return: the picker closes and `alpha-111` lands after `echo `; press Enter — it prints. Run `wl-paste` → `alpha-111` (it is now the current clipboard).
-  ** The paste goes to the previously focused window via Shift+Insert, so the terminal must be focused before the picker opens. If nothing is highlighted, the first Return only settles the cursor — watch the highlight.
-  * Press Super+Ctrl+V again: `alpha-111` is now the first row and there are still exactly four rows (moved to the top, not duplicated). Type `Omarchy acceptance`: only the long row is listed and highlighted, the header shows the filter. Press Shift+Return: the overlay closes and nothing is typed. Run `wl-paste --no-newline; echo` → `Omarchy acceptance clipboard 12345`, not `alpha-111`.
-  * Press Super+Ctrl+V, type `beta`: only `beta-222`; type `zzz` more: the list empties and shows the glyph with `No matches for “betazzz”`. Press Escape once: the filter clears and all rows return. Press End: the last row highlights; Home: the first. Press Escape: the picker closes.
-  * Run `omarchy menu clipboard`: the same overlay opens; click the terminal and run it again: it closes.
-  * Unhappy path: press Super+Ctrl+V, type `zzqqxx` (empty list, `No matches`), press Escape twice: the overlay is gone and nothing was pasted.
-  * Close the terminal with Super+W; the desktop is as at the start.
+  * Press Super+Enter. A terminal opens.
+  * Type `printf 'Omarchy acceptance clipboard 12345' | wl-copy; sleep 1; printf 'alpha-111' | wl-copy; sleep 1; printf 'beta-222' | wl-copy; sleep 1; printf 'gamma-333' | wl-copy; sleep 1` and press Return.
+  * Type `grep -c 'Omarchy acceptance clipboard' ~/.local/state/omarchy/clipboard-history.json` and press Return. The count is at least `1`.
+  ** If the count is `0`, wait a second and run it again.
+  * Type `echo ` with a trailing space. Do not press Enter.
+  * Press Super+Ctrl+V. The clipboard history opens. `gamma-333` is first.
+  * Press Down. The highlight moves.
+  * Press Down. `alpha-111` is highlighted.
+  * Press Return. The picker closes. `alpha-111` is pasted after `echo `.
+  * Press Enter. The line `alpha-111` is printed.
+  * Type `wl-paste` and press Return. The line is `alpha-111`.
+  * Press Super+Ctrl+V. The history opens. `alpha-111` is first. There are still four rows.
+  * Type `Omarchy acceptance`. Only the long row is listed.
+  * Press Shift+Return. The picker closes. Nothing is typed in the terminal.
+  * Type `wl-paste --no-newline; echo` and press Return. The line is `Omarchy acceptance clipboard 12345`.
+  * Press Super+Ctrl+V. The history opens.
+  * Type `beta`. Only `beta-222` is listed.
+  * Type `zzz`. The list says there are no matches for `betazzz`.
+  * Press Escape. The filter clears. The rows return.
+  * Press End. The last row is highlighted.
+  * Press Home. The first row is highlighted.
+  * Press Escape. The picker closes.
+  * Type `omarchy menu clipboard` and press Return. The history opens.
+  * Click the terminal. It has focus.
+  * Type `omarchy menu clipboard` and press Return. The history closes.
+  * Press Super+Ctrl+V. The history opens.
+  * Type `zzqqxx`. The list says there are no matches.
+  * Press Escape. The filter clears.
+  * Press Escape. The picker closes. Nothing was pasted.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Super+Ctrl+V is `<M-C-v>`, Shift+Return `<S-ENTER>`. The overlay opens without animation; the screenshot right after the hotkey is final. Text selected in a terminal is not copied automatically — that is why `wl-copy` is used. The overlay takes focus; click back into the terminal before typing commands.
+  * Super+Ctrl+V is `<M-C-v>`. The terminal must have focus before the picker opens, or the paste has nowhere to go.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** The grep count; the picker with four rows newest first and the preview; `alpha-111` pasted and echoed and `wl-paste` agreeing; the picker with `alpha-111` first and still four rows; the filtered long row, the prompt untouched after Shift+Return and `wl-paste` printing the token; `No matches for “betazzz”`; both rows after the first Escape with the End/Home highlight positions; the overlay opened and closed by `omarchy menu clipboard`; the empty `zzqqxx` result and the closed overlay
+  * On success
+  ** Four rows newest first, `alpha-111` pasted and on the clipboard, still four rows with it first, Shift+Return copying the long row without pasting, the empty filter, and the empty search closed without a paste
   * If unsuccessful
-  ** Screenshot of `Clipboard is empty` right after copying (watcher dead), nothing pasted (note whether the terminal lost focus), the filter not applying, the picker closing on the first Escape, or `wl-paste` printing the wrong entry; `jq -r '.[0:4][].text' ~/.local/state/omarchy/clipboard-history.json` and `pgrep -af 'wl-paste.*--watch'`
+  ** Nothing pasted, the filter not applying, or `wl-paste` showing the wrong text
 covers: shell/plugins/clipboard/Clipboard.qml:388-392 (watch processes, applySelected, setFilter, keyCatcher Escape/Home/End, copyIndex); shell/plugins/clipboard/ClipboardHistory.js (addEntry dedup, displayRows, searchableText); shell/plugins/clipboard/capture.sh; bin/omarchy-clipboard-paste-text (--copy-only); bin/omarchy-menu-clipboard; default/hypr/bindings/clipboard.lua:48 (Super+Ctrl+V); test/shell.d/clipboard-test.sh; test/acceptance.d/shell-surfaces-test.sh:34-48; manual/03:27; manual/08-unified-clipboard-history.md:18-24
 
 ### clipboard-history-delete-open-and-clear   [VM-OK]
@@ -7807,28 +7908,47 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `printf 'https://omarchy.org' | wl-copy; sleep 1; for w in one two three; do printf $w | wl-copy; sleep 1; done`.
-  * Press Super+Ctrl+V: rows `three`, `two`, `one`, `https://omarchy.org`. Press Down (`two` highlighted), then Delete: `two` disappears; `three`, `one` and the URL remain. Escape. Run `jq -r '.[].text' ~/.local/state/omarchy/clipboard-history.json | grep -c '^two$'` → `0`.
-  * Press Super+Ctrl+V, press End (the URL row), then Alt+Return: the picker closes and a browser window opens on omarchy.org (the page body needs network; the window opening is what counts). Close it with Super+W.
-  ** Click **Wait** if Chromium raises a "not responding" dialog on this 2-vCPU guest.
-  * Press Super+Ctrl+V, select `one`, Alt+Return: the default editor opens a temp file under `~/.local/state/omarchy/clipboard-open/` containing `one`. Close it (Super+W).
-  * Press Super+Ctrl+V, then Shift+Delete: a dialog `Delete entire clipboard history?` with [Cancel] and a red pre-selected [Delete]. Press Escape: the dialog closes and the rows are still listed.
-  * Press Shift+Delete, then Enter (confirms Delete): the list is gone; the card shows the glyph with `Clipboard is empty`. Escape, then Super+Ctrl+V again: still `Clipboard is empty`; `jq length ~/.local/state/omarchy/clipboard-history.json` → `0`. Escape.
-  * Unhappy path: run `omarchy-clipboard-open --history-index 99; echo "exit=$?"` → `exit=1`; `omarchy-clipboard-paste-text --copy-only ""; echo "exit=$?"` → `exit=0` with nothing copied and no crash.
-  * Close the terminal with Super+W; the desktop is as found (the history starts empty on a fresh disk).
+  * Press Super+Enter. A terminal opens.
+  * Type `printf 'https://omarchy.org' | wl-copy; sleep 1; for w in one two three; do printf $w | wl-copy; sleep 1; done` and press Return.
+  * Press Super+Ctrl+V. The history opens. The rows are `three`, `two`, `one`, and the URL.
+  * Press Down. `two` is highlighted.
+  * Press Delete. `two` is gone.
+  * Press Escape. The picker closes.
+  * Type `jq -r '.[].text' ~/.local/state/omarchy/clipboard-history.json | grep -c '^two$'` and press Return. The line is `0`.
+  * Press Super+Ctrl+V. The history opens.
+  * Press End. The URL row is highlighted.
+  * Press Alt+Return. The picker closes. A browser opens.
+  ** If Chromium says it is not responding, click Wait.
+  * Press Super+W. The browser closes.
+  * Press Super+Ctrl+V. The history opens.
+  * Highlight `one`.
+  * Press Alt+Return. An editor opens a file that contains `one`.
+  * Press Super+W. The editor closes.
+  * Press Super+Ctrl+V. The history opens.
+  * Press Shift+Delete. A dialog asks to delete the clipboard history.
+  * Press Escape. The dialog closes. The rows are still listed.
+  * Press Shift+Delete. The dialog opens again.
+  * Press Enter. The list is gone. The card says the clipboard is empty.
+  * Press Escape. The picker closes.
+  * Press Super+Ctrl+V. The history opens. It still says the clipboard is empty.
+  * Type `jq length ~/.local/state/omarchy/clipboard-history.json` and press Return. The line is `0`.
+  * Press Escape. The picker closes.
+  * Type `omarchy-clipboard-open --history-index 99; echo "exit=$?"` and press Return. The last line is `exit=1`.
+  * Type `omarchy-clipboard-paste-text --copy-only ""; echo "exit=$?"` and press Return. The last line is `exit=0`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Shift+Delete is `<S-DEL>`, Alt+Return `<A-ENTER>`. If Alt+Return is not the open key on this build, the row's action hint is shown in the panel footer (Ctrl+O or an open button) — use it and note it. Activate the cursor with a first Return if no row is highlighted.
+  * Shift+Delete is `<S-DEL>`. Alt+Return is `<A-ENTER>`. If Alt+Return does not open, use the action named in the footer and record it.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots with four rows; three after Delete and the jq count 0; the browser window after Alt+Return on the URL; the editor with `one`; the confirm dialog; rows intact after Escape; `Clipboard is empty` after confirming and again after reopening with `jq length` 0; the two helper exit codes
+  * On success
+  ** Four rows, `two` deleted, the browser, the editor containing `one`, the confirm dialog cancelled with the rows still there, an empty clipboard after confirm, and the helper exits `1` and `0`
   * If unsuccessful
-  ** Screenshot of the wrong entry removed, no browser/editor after Alt+Return, the dialog missing, or history surviving the confirm; the panel state and the history JSON after the failing action
+  ** The wrong row removed, no browser or editor, or history surviving the confirm
 covers: shell/plugins/clipboard/Clipboard.qml (removeDisplayIndex, requestClearHistory, confirmClearHistory, openIndex, empty-state Column); shell/Ui/ConfirmDialog.qml; shell/plugins/clipboard/ClipboardHistory.js (removeEntryAt, clearHistory); bin/omarchy-clipboard-open; bin/omarchy-clipboard-paste-text; bin/omarchy-clipboard-paste-file; test/shell.d/clipboard-test.sh (keyboard navigation, clipboard-open); manual/08-unified-clipboard-history.md
 
 ### clipboard-history-capture-rules   [VM-OK]
@@ -7838,25 +7958,46 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `printf 'first entry' | wl-copy; sleep 1; printf 'second entry' | wl-copy; sleep 1; printf 'first entry' | wl-copy; sleep 1`. Press Super+Ctrl+V: `first entry` on top, then `second entry`, and `first entry` only once. Escape.
-  * Run `printf 'UTF-16 clipboard - fixed' | iconv -f UTF-8 -t UTF-16LE | wl-copy; sleep 1`; Super+Ctrl+V shows `UTF-16 clipboard - fixed` decoded on top. Escape. Run `printf 'line one\nline two' | wl-copy; sleep 1`; Super+Ctrl+V shows it as one row `line one line two`. Escape.
-  * Run `printf 'file:///etc/hostname\n' | wl-copy --type text/uri-list; sleep 1`; Super+Ctrl+V shows a file row named `hostname`. Escape.
-  * Run `img=$(find /usr/share -name '*.png' | head -1); echo "$img"; wl-copy --type image/png < "$img"; sleep 1`; Super+Ctrl+V: the first row shows a small thumbnail and `Screenshot from <Weekday HH:MM>`; the right pane shows the image large. Type `screenshot`: the image row remains. Escape twice.
-  * Unhappy path (sensitive): run `printf visible-one | wl-copy; sleep 1; printf secret-pw-123 | wl-copy --sensitive; sleep 1`. Super+Ctrl+V: `visible-one` is listed; `secret-pw-123` is NOT listed anywhere. Type `secret` → `No matches for “secret”`. Escape twice. Press Ctrl+Shift+V in the terminal (whatever pastes), then Super+Ctrl+V again: the secret is still absent. Escape.
-  * Close the terminal with Super+W; the desktop is as found.
+  * Press Super+Enter. A terminal opens.
+  * Type `printf 'first entry' | wl-copy; sleep 1; printf 'second entry' | wl-copy; sleep 1; printf 'first entry' | wl-copy; sleep 1` and press Return.
+  * Press Super+Ctrl+V. The history opens. `first entry` is on top. `second entry` is next. `first entry` appears only once.
+  * Press Escape. The picker closes.
+  * Type `printf 'UTF-16 clipboard - fixed' | iconv -f UTF-8 -t UTF-16LE | wl-copy; sleep 1` and press Return.
+  * Press Super+Ctrl+V. The history opens. The decoded text `UTF-16 clipboard - fixed` is on top.
+  * Press Escape. The picker closes.
+  * Type `printf 'line one\nline two' | wl-copy; sleep 1` and press Return.
+  * Press Super+Ctrl+V. The history opens. The two lines are one row.
+  * Press Escape. The picker closes.
+  * Type `printf 'file:///etc/hostname\n' | wl-copy --type text/uri-list; sleep 1` and press Return.
+  * Press Super+Ctrl+V. The history opens. A file row is named `hostname`.
+  * Press Escape. The picker closes.
+  * Type `img=$(find /usr/share -name '*.png' | head -1); echo "$img"; wl-copy --type image/png < "$img"; sleep 1` and press Return.
+  * Press Super+Ctrl+V. The history opens. The first row has a thumbnail.
+  * Type `screenshot`. The image row stays.
+  * Press Escape. The filter clears.
+  * Press Escape. The picker closes.
+  * Type `printf visible-one | wl-copy; sleep 1; printf secret-pw-123 | wl-copy --sensitive; sleep 1` and press Return.
+  * Press Super+Ctrl+V. The history opens. `visible-one` is listed. `secret-pw-123` is not.
+  * Type `secret`. The list says there are no matches.
+  * Press Escape. The filter clears.
+  * Press Escape. The picker closes.
+  * Press Ctrl+Shift+V.
+  * Press Super+Ctrl+V. The history opens. `secret-pw-123` is still absent.
+  * Press Escape. The picker closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Wait a second after each copy; the watcher is asynchronous. If the echoed png path is empty, use `find / -name '*.png' 2>/dev/null | head -1`. If the URI copy is not shown as a file, open Nautilus (Super+Shift+F), select a file and press Ctrl+C instead. The sensitive marker is the `x-kde-passwordManagerHint` mime type the capture script checks.
+  * Wait a second after each copy. If no png is found under `/usr/share`, search more widely and record the path.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots: the deduped order; the decoded UTF-16 row; the collapsed multi-line row; the `hostname` file row; the image row with thumbnail and preview and the `screenshot` filter result; the picker listing `visible-one` but never `secret-pw-123`, the `No matches` for `secret`, and the picker still without it after the paste
+  * On success
+  ** `first entry` only once and on top, the decoded UTF-16 row, the collapsed two-line row, the `hostname` file row, the image row under the `screenshot` filter, and `secret-pw-123` never listed
   * If unsuccessful
-  ** Duplicate rows, mojibake, a missing file or screenshot row, a blank preview, or the secret in the list; `pgrep -af 'wl-paste.*--watch'`
+  ** A duplicate row, a missing image row, or the secret in the list
 covers: shell/plugins/clipboard/capture.sh (dedup, UTF-16, uri-list, emit_image, sensitive guard); shell/plugins/clipboard/ClipboardHistory.js (imagePreviewText, displayRows previewImage); shell/plugins/clipboard/Clipboard.qml (Image delegates); test/shell.d/clipboard-test.sh (capture.sh rules, display rows, "ignores sensitive"); manual/08-unified-clipboard-history.md
 
 ### clipboard-watchers-survive-shell-restart   [VM-OK]
@@ -7866,27 +8007,29 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `pgrep -fa 'wl-paste .*--watch' | sed 's/^[0-9]* //'` → exactly two lines, one `--type text` and one `--type image/png`.
-  * Run `omarchy restart shell` and wait for the bar to return (screenshot every 5 s).
-  * Run `pgrep -fa 'wl-paste .*--watch' | wc -l` → still `2` (old watchers reaped, new ones started).
-  * Run `printf 'after restart' | wl-copy; sleep 1` and press Super+Ctrl+V: `after restart` is on top. Escape.
-  * Run `kill -9 $(pgrep -x quickshell); sleep 4; pgrep -fa 'wl-paste .*--watch' | wc -l` → `2` again after the supervisor relaunch (the watchers died with the shell via pdeathsig and were restarted).
-  ** The bar vanishes for a moment during both restarts; that is expected.
-  * Unhappy path: a count of 3 or more is a leaked watcher — paste the `pgrep -fa` list into the report; 0 or 1 means capture is dead.
-  * Close the terminal with Super+W; the desktop is as found.
+  * Press Super+Enter. A terminal opens.
+  * Type `pgrep -fa 'wl-paste .*--watch' | sed 's/^[0-9]* //'` and press Return. Two lines are listed, one text and one image.
+  * Type `omarchy restart shell` and press Return. The bar disappears.
+  * Wait until the bar returns.
+  * Type `pgrep -fa 'wl-paste .*--watch' | wc -l` and press Return. The line is `2`.
+  * Type `printf 'after restart' | wl-copy; sleep 1` and press Return.
+  * Press Super+Ctrl+V. The history opens. `after restart` is on top.
+  * Press Escape. The picker closes.
+  * Type `kill -9 $(pgrep -x quickshell); sleep 4; pgrep -fa 'wl-paste .*--watch' | wc -l` and press Return. The line is `2`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * If the bar does not return within ~15 s after the hard kill, run `omarchy restart shell` and report it.
+  * The bar vanishing during a restart is expected. If it does not return, run `omarchy restart shell` and report it.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Two watchers before, after `restart shell`, and after the hard kill; `after restart` captured on top
+  * On success
+  ** Two watchers before the restart, two after it, `after restart` captured, and two watchers after the hard kill
   * If unsuccessful
-  ** A watcher count ≠ 2 with the process list; `./client get-serial`
+  ** A watcher count other than `2`
 covers: shell/plugins/clipboard/Clipboard.qml (setpriv pdeathsig watchers, reaper pattern, respawn); test/shell.d/clipboard-test.sh
 
 ### universal-clipboard-super-c-v-terminal-and-gui   [VM-OK]
@@ -7896,26 +8039,60 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter, run `echo unified-clipboard-42`. Double-click the printed word to select it and press Super+C. Type `echo ` then Super+V, Enter: `unified-clipboard-42` prints again.
-  * Run `sleep 30`, then press Super+C: the sleep keeps running (no `^C`, no prompt). Press Ctrl+C: the prompt returns.
-  * Press Super+Shift+Enter (Chromium), click the address bar, type `hello-omarchy`, press Ctrl+A then Super+C. Press Super+Left to the terminal, type `echo ` then Super+V, Enter: `hello-omarchy` prints.
-  * Back in the address bar: Ctrl+A then Super+X: the field empties. Super+V in the address bar: the text is back; Escape.
-  * Press Super+Ctrl+V: the clipboard history lists `hello-omarchy` and `unified-clipboard-42`; arrow to `unified-clipboard-42` and press Shift+Return (copy only). Click the terminal, type `echo ` then Super+V, Enter: `unified-clipboard-42` prints. Press Super+Ctrl+V then Escape: the panel closes.
-  * Unhappy path: run `omarchy capture screenshot fullscreen copy` (the clipboard now holds an image), then type `echo ` and Super+V, Enter: nothing meaningful is pasted and nothing crashes.
-  * Close Chromium and the terminal with Super+W; the desktop is empty.
+  * Press Super+Enter. A terminal opens.
+  * Type `echo unified-clipboard-42` and press Return. The line is printed.
+  * Double-click that word. It is selected.
+  * Press Super+C.
+  * Type `echo ` with a trailing space.
+  * Press Super+V. The word is pasted.
+  * Press Enter. `unified-clipboard-42` is printed again.
+  * Type `sleep 30` and press Return. `sleep` is running.
+  * Press Super+C. `sleep` keeps running.
+  * Press Ctrl+C. The prompt returns.
+  * Press Super+Shift+Enter. Chromium opens.
+  ** If Chromium says it is not responding, click Wait.
+  * Click the address bar.
+  * Type `hello-omarchy`.
+  * Press Ctrl+A. The text is selected.
+  * Press Super+C.
+  * Press Super+Left. The terminal has focus.
+  * Type `echo ` with a trailing space.
+  * Press Super+V. `hello-omarchy` is pasted.
+  * Press Enter. `hello-omarchy` is printed.
+  * Click the address bar.
+  * Press Ctrl+A.
+  * Press Super+X. The field is empty.
+  * Press Super+V. The text is back.
+  * Press Escape.
+  * Press Super+Ctrl+V. The history opens. Both `hello-omarchy` and `unified-clipboard-42` are listed.
+  * Highlight `unified-clipboard-42`.
+  * Press Shift+Return. The picker closes. Nothing is typed.
+  * Click the terminal. It has focus.
+  * Type `echo ` with a trailing space.
+  * Press Super+V. `unified-clipboard-42` is pasted.
+  * Press Enter. `unified-clipboard-42` is printed.
+  * Press Super+Ctrl+V. The history opens.
+  * Press Escape. The picker closes.
+  * Type `omarchy capture screenshot fullscreen copy` and press Return.
+  * Type `echo ` with a trailing space.
+  * Press Super+V.
+  * Press Enter. Nothing harmful is pasted. Nothing crashes.
+  * Click Chromium.
+  * Press Super+W. Chromium closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * `<M-c>` `<M-v>` `<M-x>`. In the terminal these become Ctrl+Insert / Shift+Insert under the hood, so select first (double-click or `mouse drag` along the line), then Super+C. Click **Wait** on a Chromium "not responding" dialog.
+  * Super+C, Super+V, and Super+X are `<M-c>`, `<M-v>`, and `<M-x>`. Select the terminal text before Super+C.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of the pasted word; the sleep surviving Super+C; the GUI text pasted into the terminal; the emptied address bar after Super+X and restored after Super+V; the history panel with both entries and the older entry pasted; the harmless image paste
+  * On success
+  ** The word pasted in the terminal, `sleep` surviving Super+C, the browser text pasted into the terminal, the address bar cut and restored, the older history entry pasted, and an image paste that does not crash
   * If unsuccessful
-  ** Screenshot of the prompt unchanged after Super+V, `^C` after Super+C, or an empty history panel
+  ** `^C` after Super+C, nothing pasted after Super+V, or an empty history
 covers: default/hypr/bindings/clipboard.lua; default/hypr/apps/terminals.lua; default/hypr/apps/omarchy-shell.lua:10; config/foot/foot.ini:18-20; test/shell.d/hyprland-default-config-test.sh:108-120; manual/03:25; manual/07:129-138; manual/08:8-12
 
 ### emoji-picker-search-inserts-and-cancels   [VM-OK]

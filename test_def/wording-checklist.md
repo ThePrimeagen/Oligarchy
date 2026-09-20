@@ -178,14 +178,14 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `notification-markup-sanitised-titles-plain`
 - [x] `notification-position-follows-bar-edge`
 - [x] `notification-time-and-battery-notices-without-battery`
-- [ ] `crash-capture-toast-needs-agent-and-toggle`
-- [ ] `reminder-set-fires-and-clears`
-- [ ] `reminder-show-clear-and-prompt-rejects-bad-input`
-- [ ] `clipboard-history-pick-paste-and-filter`
-- [ ] `clipboard-history-delete-open-and-clear`
-- [ ] `clipboard-history-capture-rules`
-- [ ] `clipboard-watchers-survive-shell-restart`
-- [ ] `universal-clipboard-super-c-v-terminal-and-gui`
+- [x] `crash-capture-toast-needs-agent-and-toggle`
+- [x] `reminder-set-fires-and-clears`
+- [x] `reminder-show-clear-and-prompt-rejects-bad-input`
+- [x] `clipboard-history-pick-paste-and-filter`
+- [x] `clipboard-history-delete-open-and-clear`
+- [x] `clipboard-history-capture-rules`
+- [x] `clipboard-watchers-survive-shell-restart`
+- [x] `universal-clipboard-super-c-v-terminal-and-gui`
 - [ ] `emoji-picker-search-inserts-and-cancels`
 - [ ] `polkit-dialog-accepts-rejects-and-cancels`
 - [ ] `clock-format-ring-bar-set-and-timezone`
