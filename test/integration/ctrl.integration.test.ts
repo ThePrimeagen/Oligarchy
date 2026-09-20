@@ -229,7 +229,7 @@ describe("./ctrl without a database", () => {
       ["--help"],
       ["test", "--help"],
       ["session", "--help"],
-      ["test", "run", "test-suite", "--help"],
+      ["test", "run", "testsuite", "--help"],
       ["diagnose", "--help"],
       ["automation", "--help"],
     ]) {
@@ -288,11 +288,11 @@ describe("./ctrl without a database", () => {
     expect(nameless.stderr).not.toMatch(/LINEAR_API_TOKEN/);
   });
 
-  it("test run test-suite accepts --server-url and SERVER_URL, then wants LINEAR_API_TOKEN, and refuses --name", async () => {
+  it("test run testsuite accepts --server-url and SERVER_URL, then wants LINEAR_API_TOKEN, and refuses --name", async () => {
     const iso = [
       "test",
       "run",
-      "test-suite",
+      "testsuite",
       "--iso",
       "https://example.com/omarchy.iso",
       "--version",
@@ -377,7 +377,7 @@ describe("./ctrl without a database", () => {
       [
         "test",
         "run",
-        "test-suite",
+        "testsuite",
         "--iso",
         "https://example.com/omarchy.iso",
         "--version",
@@ -469,7 +469,7 @@ describe("./ctrl without a database", () => {
     const env = { DATABASE_URL: UNUSED_DB, LINEAR_API_TOKEN: "l" };
     const cases: ReadonlyArray<readonly [ReadonlyArray<string>, RegExp, Record<string, string>]> = [
       [["test"], /Missing required flag: --list/, env],
-      // The proxy url is test run's and test run test-suite's; the actions below have no proxy to name.
+      // The proxy url is test run's and test run testsuite's; the actions below have no proxy to name.
       [["test", "--list", "--server-url", SERVER], /Unrecognized flag: --server-url/, env],
       [["session", "list", "--server-url", SERVER], /Unrecognized flag: --server-url/, env],
       [
@@ -625,7 +625,7 @@ describe("./ctrl without a database", () => {
         [
           "test",
           "run",
-          "test-suite",
+          "testsuite",
           "--iso",
           "http://example.com/omarchy.iso",
           "--server-url",
@@ -637,7 +637,7 @@ describe("./ctrl without a database", () => {
         env,
       ],
       [
-        ["test", "run", "test-suite", "--server-url", SERVER, "--version", "1.2.3"],
+        ["test", "run", "testsuite", "--server-url", SERVER, "--version", "1.2.3"],
         /Missing required flag: --iso/,
         env,
       ],
@@ -645,7 +645,7 @@ describe("./ctrl without a database", () => {
         [
           "test",
           "run",
-          "test-suite",
+          "testsuite",
           "--iso",
           "https://example.com/omarchy.iso",
           "--server-url",
@@ -658,7 +658,7 @@ describe("./ctrl without a database", () => {
         [
           "test",
           "run",
-          "test-suite",
+          "testsuite",
           "--iso",
           "https://example.com/omarchy.iso",
           "--version",
@@ -671,7 +671,7 @@ describe("./ctrl without a database", () => {
         [
           "test",
           "run",
-          "test-suite",
+          "testsuite",
           "--iso",
           "https://example.com/omarchy.iso",
           "--version",

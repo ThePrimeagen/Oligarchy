@@ -116,7 +116,7 @@ const Count = Schema.Number.check(
 
 const DEFAULT_COUNT = 10;
 
-// test run and test run test-suite store it on the run and write it into every ticket for ./client. mint
+// test run and test run testsuite store it on the run and write it into every ticket for ./client. mint
 // takes the same flag, for the reverse proxy the install's drivers talk to. No default: SERVER_URL
 // or the flag, or a usage error.
 const serverUrlFlag = Flag.string("server-url").pipe(
@@ -331,9 +331,9 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     yield* printJson({ id: defined.id, name: input.name, version: defined.version });
   });
 
-  // test run --name <definition>, and test run test-suite, which passes no name: one pending
+  // test run --name <definition>, and test run testsuite, which passes no name: one pending
   // result per definition, each its newest wording, and one Linear ticket each.
-  const testNew = Effect.fn("ctrl.test.run")(function* (input: {
+  const openRun = Effect.fn("ctrl.test.run")(function* (input: {
     readonly serverUrl: string;
     readonly iso: string;
     readonly version: string;
@@ -979,12 +979,12 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     Command.provide(withDb),
   );
 
-  // test run test-suite --server-url <url> --iso <https-url> --version <version>
+  // test run testsuite --server-url <url> --iso <https-url> --version <version>
   //
   // Every definition, each its newest wording. A name cannot be picked; one definition is
   // `test run --name`, and omitting --name there is a usage error.
   const testRunTestSuiteCommand = Command.make(
-    "test-suite",
+    "testsuite",
     {
       serverUrl: serverUrlFlag,
       iso: Flag.string("iso").pipe(
@@ -996,7 +996,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
         Flag.withDescription("Version label attached to every Linear ticket"),
       ),
     },
-    (input) => testNew({ ...input, name: Option.none() }),
+    (input) => openRun({ ...input, name: Option.none() }),
   ).pipe(
     Command.withDescription(
       "Create one test run for every definition, each in its newest wording, and one Linear ticket each",
@@ -1021,10 +1021,10 @@ export const makeCtrlCommand = (deps: Deps = live) => {
         Flag.withDescription("Version label attached to the Linear ticket"),
       ),
     },
-    (input) => testNew({ ...input, name: Option.some(input.name) }),
+    (input) => openRun({ ...input, name: Option.some(input.name) }),
   ).pipe(
     Command.withDescription(
-      "test run --name <definition> --server-url <url> --iso <https-url> --version <version>; or test-suite",
+      "test run --name <definition> --server-url <url> --iso <https-url> --version <version>; or testsuite",
     ),
     Command.provide(withDbAndLinear),
     Command.withSubcommands([testRunTestSuiteCommand]),
@@ -1239,7 +1239,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
 
   return Command.make("ctrl").pipe(
     Command.withDescription(
-      "Record and inspect Oligarchy test runs. Every action reads DATABASE_URL; test run and test run test-suite take --server-url (or SERVER_URL), the qemu server their drivers talk to; test start and test-results accept it unread.",
+      "Record and inspect Oligarchy test runs. Every action reads DATABASE_URL; test run and test run testsuite take --server-url (or SERVER_URL), the qemu server their drivers talk to; test start and test-results accept it unread.",
     ),
     Command.withSubcommands([
       testCommand,

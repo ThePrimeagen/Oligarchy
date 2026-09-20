@@ -1017,20 +1017,20 @@ describe("test run", () => {
 });
 
 // ---------------------------------------------------------------------------
-// test run test-suite
+// test run testsuite
 // ---------------------------------------------------------------------------
 
 const SUITE = [
   "test",
   "run",
-  "test-suite",
+  "testsuite",
   "--iso",
   "https://example.com/omarchy.iso",
   "--version",
   "1.2.3",
 ];
 
-describe("test run test-suite", () => {
+describe("test run testsuite", () => {
   it.effect("opens one run for every newest wording, and one ticket each (happy)", () =>
     Effect.gen(function* () {
       const h = harness();
@@ -1139,7 +1139,7 @@ describe("test run test-suite", () => {
         [
           "test",
           "run",
-          "test-suite",
+          "testsuite",
           "--iso",
           "http://example.com/omarchy.iso",
           "--server-url",
@@ -1175,6 +1175,18 @@ describe("test run test-suite", () => {
         WITH_LINEAR,
       );
       expect(helpErrors(exit).join("\n")).toMatch(/Missing required flag: --name/);
+      expect(h.stores.tests.runs).toEqual([]);
+      expect(h.linear.calls).toEqual([]);
+      expect(h.touched).toEqual([]);
+    }),
+  );
+
+  it.effect("the hyphenated name is not a command (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.tests.definitions.push(install, terminal);
+      const exit = yield* h.run(["test", "run", "test-suite"], {});
+      expect(helpErrors(exit).join("\n")).toMatch(/Unknown subcommand "test-suite"/);
       expect(h.stores.tests.runs).toEqual([]);
       expect(h.linear.calls).toEqual([]);
       expect(h.touched).toEqual([]);
@@ -3399,7 +3411,7 @@ describe("environment order", () => {
   );
 });
 
-// The proxy url is data on test run and test run test-suite: stored on the run and written into every ticket
+// The proxy url is data on test run and test run testsuite: stored on the run and written into every ticket
 // for the drivers' ./client. Every other action reads the database and has no proxy to name; test
 // start and test-results still accept it unread, because tickets written before it went name it.
 describe("--server-url", () => {
@@ -3447,7 +3459,7 @@ describe("--server-url", () => {
   );
 
   it.effect(
-    "is unrecognized on every action but test run, test run test-suite, test start and test-results (unhappy)",
+    "is unrecognized on every action but test run, test run testsuite, test start and test-results (unhappy)",
     () =>
       Effect.gen(function* () {
         const h = harness();
@@ -3491,7 +3503,7 @@ describe("--server-url", () => {
   );
 
   it.effect(
-    "SERVER_URL in the environment is ignored by every action but test run and test run test-suite (happy)",
+    "SERVER_URL in the environment is ignored by every action but test run and test run testsuite (happy)",
     () =>
       Effect.gen(function* () {
         const h = harness();
@@ -3689,7 +3701,7 @@ describe("--help", () => {
           ["test", "--help"],
           ["test", "define", "--help"],
           ["test", "run", "--help"],
-          ["test", "run", "test-suite", "--help"],
+          ["test", "run", "testsuite", "--help"],
           ["test", "list", "--help"],
           ["test", "start", "--help"],
           ["test-results", "--help"],

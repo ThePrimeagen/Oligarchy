@@ -112,7 +112,7 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   left open holds a Hyperdrive connection past the response), never calls the qemu server's API, and
   reports route failures with `@sentry/cloudflare` — the one `captureException` outside
   `observability/`, and with the test setup the one place `console.*` is allowed. Nothing below
-  that says Effect applies to it, except `POST /create-test-suite-run`, which runs `./ctrl test run test-suite` in process rather than a second ticket client. Its `scheduled` handler is the retention policy: on the cron in
+  that says Effect applies to it, except `POST /create-test-suite-run`, which runs `./ctrl test run testsuite` in process rather than a second ticket client. Its `scheduled` handler is the retention policy: on the cron in
   `wrangler.jsonc` it deletes every row older than thirty days in one transaction, a row before
   the row it references, and leaves configuration (definitions, base prompts, error types, the
   fleet) alone; a row is history for a month and then gone. What it calls beyond Postgres is the
@@ -199,7 +199,7 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   `Layer.effectDiscard` for background loops and fail-fast preconditions.
 - Background fibers belong to the layer scope: `Effect.forkScoped`, never `Effect.runFork`. Do not
   use `Layer.fresh` in production, or `Layer.catch` (not exported). `ManagedRuntime` is only the
-  dashboard request that runs `./ctrl test run test-suite`: that request is the entry, and it
+  dashboard request that runs `./ctrl test run testsuite`: that request is the entry, and it
   disposes the runtime when the command returns.
 - `HttpRouter.serve` provides the module-level `HttpRouter.layer`, so two `HttpRouter.serve`s in
   one graph share one router and both listeners serve both route sets. A process has one
