@@ -1,4 +1,4 @@
-import { and, desc, eq, getTableColumns, inArray, lt, sql } from "drizzle-orm";
+import { and, count, desc, eq, getTableColumns, inArray, lt, sql } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Client } from "pg";
 import {
@@ -58,12 +58,32 @@ export type AutomationJob = {
   readonly queriedAt: Date;
 };
 
-// The queue as the page shows it: what runs, what waits, what finished, each list cut at fifty.
+// Test suites still open, and how their results have landed so far. A suite is open
+// while any of its results is pending or running; passed and failed are those
+// results, not the ones in a suite that has already closed.
+export type TestSuiteSummary = {
+  readonly running: number;
+  readonly passed: number;
+  readonly failed: number;
+};
+
+// The queue as the page shows it. running and pending are the fifty an operator
+// reads; the counts beside those headings are the whole lists. suites is every
+// run that still has a result open. Completed is the fifty that finished last,
+// and has no count: that total only grows.
 export type AutomationQueue = {
   readonly running: ReadonlyArray<AutomationJob>;
   readonly pending: ReadonlyArray<AutomationJob>;
   readonly completed: ReadonlyArray<AutomationJob>;
+  readonly runningCount: number;
+  readonly pendingCount: number;
+  readonly suites: TestSuiteSummary;
 };
+
+const countOf = (
+  rows: ReadonlyArray<{ readonly status: string; readonly total: number }>,
+  status: string,
+): number => rows.find((row) => row.status === status)?.total ?? 0;
 
 // One process's word on itself: current jobs, VmRSS of this process and every child that
 // still answers, cpu over the last thirty seconds, and the database's clock at the read so
@@ -502,12 +522,21 @@ export function listServers(connectionString: string): Promise<Server[]> {
 // Fifty of each list: an operator reads the front of the queue and what finished last.
 const QUEUE_LIMIT = 50;
 
-// The queue in three lists, each ordered and cut by the database. Running and pending put the
-// diagnoses ahead of the drives and then follow queue order, created_at (a boolean sorts false
-// before true, so descending puts the diagnoses first). Completed is every terminal status,
-// newest finished first: finished_at is the stamp the close writes, the row's last change. The
-// clock in each select is the one the stamps' ages are read against, and it keeps a poll out of
-// Hyperdrive's query cache.
+// A run still in progress: one of its results has not closed. The run row's own status is not
+// that — it is opened pending, and a row that still says running can already be finished.
+const openRunIds = (db: NodePgDatabase) =>
+  db
+    .selectDistinct({ runId: testResults.runId })
+    .from(testResults)
+    .where(inArray(testResults.status, ["pending", "running"]));
+
+// The queue in three lists, each ordered and cut by the database, plus the totals the headings
+// show and the open suites. Running and pending put the diagnoses ahead of the drives and then
+// follow queue order, created_at (a boolean sorts false before true, so descending puts the
+// diagnoses first). Completed is every terminal status, newest finished first: finished_at is
+// the stamp the close writes, the row's last change. The clock in each select is the one the
+// stamps' ages are read against, and it keeps a poll out of Hyperdrive's query cache. The
+// counts are not the lists: a list stops at fifty.
 export function listAutomationQueue(connectionString: string): Promise<AutomationQueue> {
   return withDatabase(connectionString, async (db) => {
     const jobs = () =>
@@ -527,6 +556,8 @@ export function listAutomationQueue(connectionString: string): Promise<Automatio
         .innerJoin(testResults, eq(testResults.id, automationJobs.resultId))
         .innerJoin(testDefinitions, eq(testDefinitions.id, testResults.definitionId));
     const diagnosesFirst = desc(sql`${automationJobs.action} = 'diagnose'`);
+    // One client, one query at a time: pg warns, and soon refuses, a second query
+    // started while the first is still running.
     const running = await jobs()
       .where(eq(automationJobs.status, "running"))
       .orderBy(diagnosesFirst, automationJobs.createdAt)
@@ -539,7 +570,38 @@ export function listAutomationQueue(connectionString: string): Promise<Automatio
       .where(inArray(automationJobs.status, ["succeeded", "failed", "aborted", "timed_out"]))
       .orderBy(desc(automationJobs.finishedAt))
       .limit(QUEUE_LIMIT);
-    return { running, pending, completed };
+    const jobCounts = await db
+      .select({
+        status: automationJobs.status,
+        total: count().mapWith(Number),
+      })
+      .from(automationJobs)
+      .where(inArray(automationJobs.status, ["running", "pending"]))
+      .groupBy(automationJobs.status);
+    const suiteCounts = await db
+      .select({ total: count().mapWith(Number) })
+      .from(openRunIds(db).as("open_runs"));
+    const verdicts = await db
+      .select({
+        status: testResults.status,
+        total: count().mapWith(Number),
+      })
+      .from(testResults)
+      .where(inArray(testResults.runId, openRunIds(db)))
+      .groupBy(testResults.status);
+    const [suiteCount] = suiteCounts;
+    return {
+      running,
+      pending,
+      completed,
+      runningCount: countOf(jobCounts, "running"),
+      pendingCount: countOf(jobCounts, "pending"),
+      suites: {
+        running: suiteCount?.total ?? 0,
+        passed: countOf(verdicts, "passed"),
+        failed: countOf(verdicts, "failed"),
+      },
+    };
   });
 }
 

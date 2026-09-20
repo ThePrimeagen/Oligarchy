@@ -83,8 +83,23 @@ const failed: AutomationJob = {
   queriedAt: QUERIED_AT,
 };
 
-const QUEUE: AutomationQueue = { running: [running], pending: [pending], completed: [failed] };
-const EMPTY_QUEUE: AutomationQueue = { running: [], pending: [], completed: [] };
+const SUITES_QUIET = { running: 0, passed: 0, failed: 0 };
+const QUEUE: AutomationQueue = {
+  running: [running],
+  pending: [pending],
+  completed: [failed],
+  runningCount: 1,
+  pendingCount: 1,
+  suites: { running: 2, passed: 8, failed: 2 },
+};
+const EMPTY_QUEUE: AutomationQueue = {
+  running: [],
+  pending: [],
+  completed: [],
+  runningCount: 0,
+  pendingCount: 0,
+  suites: SUITES_QUIET,
+};
 
 const processAlive: ProcessSeries = {
   name: "garage",
@@ -212,14 +227,58 @@ describe("Fleet unhappy path", () => {
 describe("Queue happy path", () => {
   it("lists what is running, then what is pending, then what completed, each under its heading as a table of the same columns", async () => {
     const page = await render(Queue({ queue: QUEUE }));
-    expect(page).toContain(`<h3>running</h3><table>${JOB_COLUMNS}`);
-    expect(page).toContain(`<h3>pending</h3><table>${JOB_COLUMNS}`);
+    expect(page).toContain(`<h3>running 1</h3><table>${JOB_COLUMNS}`);
+    expect(page).toContain(`<h3>pending 1</h3><table>${JOB_COLUMNS}`);
     expect(page).toContain(`<h3>completed</h3><table>${JOB_COLUMNS}`);
-    expect(page.indexOf("<h3>running</h3>")).toBeLessThan(page.indexOf("<h3>pending</h3>"));
-    expect(page.indexOf("<h3>pending</h3>")).toBeLessThan(page.indexOf("<h3>completed</h3>"));
-    expect(page.indexOf("<td>OLI-61</td>")).toBeLessThan(page.indexOf("<h3>pending</h3>"));
+    expect(page.indexOf("<h3>running 1</h3>")).toBeLessThan(page.indexOf("<h3>pending 1</h3>"));
+    expect(page.indexOf("<h3>pending 1</h3>")).toBeLessThan(page.indexOf("<h3>completed</h3>"));
+    expect(page.indexOf("<td>OLI-61</td>")).toBeLessThan(page.indexOf("<h3>pending 1</h3>"));
     expect(page.indexOf("<td>OLI-62</td>")).toBeLessThan(page.indexOf("<h3>completed</h3>"));
     expect(page.indexOf("<td>OLI-60</td>")).toBeGreaterThan(page.indexOf("<h3>completed</h3>"));
+  });
+
+  it("puts how many jobs are running and pending next to those headings, and not a count of completed", async () => {
+    const page = await render(Queue({ queue: QUEUE }));
+    expect(page).toContain("<h3>running 1</h3>");
+    expect(page).toContain("<h3>pending 1</h3>");
+    expect(page).toContain("<h3>completed</h3>");
+    expect(page).not.toContain("<h3>completed ");
+  });
+
+  it("states how many test suites are still running and their pass rate, above the queue", async () => {
+    const page = await render(Queue({ queue: QUEUE }));
+    expect(page.startsWith("<p>2 test suites running · 8 passed · 2 failed · 80.0% pass</p>")).toBe(
+      true,
+    );
+    expect(page.indexOf("2 test suites running")).toBeLessThan(page.indexOf("<h3>running 1</h3>"));
+  });
+
+  it("says one test suite, and rounds the pass rate to a tenth", async () => {
+    const page = await render(
+      Queue({
+        queue: { ...EMPTY_QUEUE, suites: { running: 1, passed: 1, failed: 2 } },
+      }),
+    );
+    expect(page.startsWith("<p>1 test suite running · 1 passed · 2 failed · 33.3% pass</p>")).toBe(
+      true,
+    );
+  });
+
+  it("uses the totals, not how many rows the fifty-row lists still show", async () => {
+    const page = await render(
+      Queue({
+        queue: {
+          ...EMPTY_QUEUE,
+          running: [running],
+          runningCount: 60,
+          pendingCount: 52,
+          suites: { running: 3, passed: 2, failed: 1 },
+        },
+      }),
+    );
+    expect(page).toContain("<h3>running 60</h3>");
+    expect(page).toContain("<h3>pending 52</h3><p>none</p>");
+    expect(page).toContain("<p>3 test suites running · 2 passed · 1 failed · 66.7% pass</p>");
   });
 
   it("shows a running job's ticket, test, action and status, how long ago it was queued and started, and no finish yet", async () => {
@@ -246,7 +305,7 @@ describe("Queue happy path", () => {
 
   it("puts the red X on a pending job that has a ticket, posting to the same route as a running one", async () => {
     const page = await render(
-      Queue({ queue: { running: [running], pending: [pending], completed: [] } }),
+      Queue({ queue: { ...EMPTY_QUEUE, running: [running], pending: [pending] } }),
     );
     expect(page).toContain(abortForm("OLI-62", "drive"));
     expect(page.match(/action="\/abort"/g)?.length).toBe(2);
@@ -257,7 +316,7 @@ describe("Queue happy path", () => {
     const drive: AutomationJob = { ...running, ticket: "OLI-63", action: "drive" };
     const diagnose: AutomationJob = { ...pending, ticket: "OLI-63", action: "diagnose" };
     const page = await render(
-      Queue({ queue: { running: [drive], pending: [diagnose], completed: [] } }),
+      Queue({ queue: { ...EMPTY_QUEUE, running: [drive], pending: [diagnose] } }),
     );
     expect(page).toContain(abortForm("OLI-63", "drive"));
     expect(page).toContain(abortForm("OLI-63", "diagnose"));
@@ -281,8 +340,31 @@ describe("Queue unhappy path", () => {
   it("says none under a heading with nothing in its list, and draws no table for it", async () => {
     const page = await render(Queue({ queue: EMPTY_QUEUE }));
     expect(page).toBe(
-      "<h3>running</h3><p>none</p><h3>pending</h3><p>none</p><h3>completed</h3><p>none</p>",
+      "<p>0 test suites running</p><h3>running 0</h3><p>none</p><h3>pending 0</h3><p>none</p><h3>completed</h3><p>none</p>",
     );
+  });
+
+  it("names a running suite that has no pass or fail yet, and prints no rate", async () => {
+    const page = await render(
+      Queue({ queue: { ...EMPTY_QUEUE, suites: { running: 1, passed: 0, failed: 0 } } }),
+    );
+    expect(page.startsWith("<p>1 test suite running · 0 passed · 0 failed</p>")).toBe(true);
+    expect(page).not.toContain("% pass");
+  });
+
+  it("prints 0% when every finished result in the running suites failed, and 100% when every one passed", async () => {
+    const nonePassed = await render(
+      Queue({ queue: { ...EMPTY_QUEUE, suites: { running: 1, passed: 0, failed: 4 } } }),
+    );
+    expect(
+      nonePassed.startsWith("<p>1 test suite running · 0 passed · 4 failed · 0.0% pass</p>"),
+    ).toBe(true);
+    const allPassed = await render(
+      Queue({ queue: { ...EMPTY_QUEUE, suites: { running: 1, passed: 5, failed: 0 } } }),
+    );
+    expect(
+      allPassed.startsWith("<p>1 test suite running · 5 passed · 0 failed · 100.0% pass</p>"),
+    ).toBe(true);
   });
 
   it("shows a dash for a job whose result has no ticket yet", async () => {
@@ -296,6 +378,7 @@ describe("Queue unhappy path", () => {
     const page = await render(
       Queue({
         queue: {
+          ...EMPTY_QUEUE,
           running: [{ ...running, ticket: null }],
           pending: [{ ...pending, ticket: null }],
           completed: [
@@ -450,7 +533,7 @@ describe("ServersPage happy path", () => {
     );
     expect(page).toContain(garageGraph);
     expect(page).toContain(
-      '<div class="halves"><section><h2>automation</h2><div id="queue" hx-get="/servers/queue" hx-trigger="every 30s"><h3>running</h3>',
+      '<div class="halves"><section><h2>automation</h2><div id="queue" hx-get="/servers/queue" hx-trigger="every 30s"><p>2 test suites running · 8 passed · 2 failed · 80.0% pass</p><h3>running 1</h3>',
     );
     expect(page).toContain("<td>OLI-61</td>");
     expect(page).toContain(

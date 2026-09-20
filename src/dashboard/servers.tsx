@@ -286,13 +286,32 @@ const Jobs: FC<{ jobs: ReadonlyArray<AutomationJob> }> = ({ jobs }) =>
     </table>
   );
 
+// A suite is open while any of its results is still pending or running. The rate is of the
+// results that have already passed or failed; none yet, and there is no rate to invent.
+const suiteLine = (suites: AutomationQueue["suites"]): string => {
+  const noun = suites.running === 1 ? "test suite" : "test suites";
+  const running = `${String(suites.running)} ${noun} running`;
+  if (suites.running === 0) {
+    return running;
+  }
+  const closed = suites.passed + suites.failed;
+  const verdicts = `${String(suites.passed)} passed · ${String(suites.failed)} failed`;
+  if (closed === 0) {
+    return `${running} · ${verdicts}`;
+  }
+  return `${running} · ${verdicts} · ${percent((suites.passed / closed) * 100)} pass`;
+};
+
 // The automation queue in the order the database sorted it: what runs, what waits, what finished.
-// What the automation half polls for.
+// What the automation half polls for, every thirty seconds. The line above is the test suites
+// still open. The numbers beside running and pending are the totals, not the length of the
+// fifty-row lists. Completed has no number: that total only grows.
 export const Queue: FC<{ queue: AutomationQueue }> = ({ queue }) => (
   <>
-    <h3>running</h3>
+    <p>{suiteLine(queue.suites)}</p>
+    <h3>running {queue.runningCount}</h3>
     <Jobs jobs={queue.running} />
-    <h3>pending</h3>
+    <h3>pending {queue.pendingCount}</h3>
     <Jobs jobs={queue.pending} />
     <h3>completed</h3>
     <Jobs jobs={queue.completed} />
