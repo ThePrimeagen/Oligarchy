@@ -1454,13 +1454,13 @@ console.log([failed.test, failed.action, failed.reason, failed.createdAt instanc
     );
     // The ages are read against the database's clock: a minute has margin, seconds are counted.
     expect(html).toMatch(
-      /<tr><td>QUE-102<\/td><td>queue-order<\/td><td>diagnose<\/td><td>running<\/td><td>1 min ago<\/td><td>\d+ s ago<\/td><td>—<\/td><td><\/td><td><form method="post" action="\/abort" hx-post="\/abort" hx-confirm="are you sure\?" hx-target="#queue" hx-swap="innerHTML"><input type="hidden" name="ticket" value="QUE-102"\/><input type="hidden" name="action" value="diagnose"\/><button type="submit" class="abort" aria-label="abort"><svg/,
+      /<tr><td><a class="ticket" href="https:\/\/linear\.app\/issue\/QUE-102">QUE-102<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-102">queue-order<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-102" tabindex="-1" aria-hidden="true">diagnose<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-102" tabindex="-1" aria-hidden="true">running<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-102" tabindex="-1" aria-hidden="true">1 min ago<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-102" tabindex="-1" aria-hidden="true">\d+ s ago<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-102" tabindex="-1" aria-hidden="true">—<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-102" tabindex="-1" aria-hidden="true"><\/a><\/td><td><form method="post" action="\/abort" hx-post="\/abort" hx-confirm="are you sure\?" hx-target="#queue" hx-swap="innerHTML"><input type="hidden" name="ticket" value="QUE-102"\/><input type="hidden" name="action" value="diagnose"\/><button type="submit" class="abort" aria-label="abort"><svg/,
     );
     expect(html).toMatch(
-      /<h3>pending<\/h3><table>.*?<tr><td>QUE-104<\/td><td>queue-order<\/td><td>diagnose<\/td><td>pending<\/td><td>\d+ s ago<\/td><td>—<\/td><td>—<\/td><td><\/td><td><form method="post" action="\/abort" hx-post="\/abort" hx-confirm="are you sure\?" hx-target="#queue" hx-swap="innerHTML"><input type="hidden" name="ticket" value="QUE-104"\/><input type="hidden" name="action" value="diagnose"\/><button type="submit" class="abort" aria-label="abort"><svg.*?<\/form><\/td><\/tr><tr><td>QUE-103<\/td>.*?<tr><td>QUE-105<\/td>.*?<tr><td>—<\/td><td>queue-order<\/td><td>drive<\/td><td>pending<\/td><td>\d+ s ago<\/td><td>—<\/td><td>—<\/td><td><\/td><td><\/td><\/tr>.*?<h3>completed<\/h3>/s,
+      /<h3>pending<\/h3><table>.*?<tr><td><a class="ticket" href="https:\/\/linear\.app\/issue\/QUE-104">QUE-104<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-104">queue-order<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-104" tabindex="-1" aria-hidden="true">diagnose<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-104" tabindex="-1" aria-hidden="true">pending<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-104" tabindex="-1" aria-hidden="true">\d+ s ago<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-104" tabindex="-1" aria-hidden="true">—<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-104" tabindex="-1" aria-hidden="true">—<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-104" tabindex="-1" aria-hidden="true"><\/a><\/td><td><form method="post" action="\/abort" hx-post="\/abort" hx-confirm="are you sure\?" hx-target="#queue" hx-swap="innerHTML"><input type="hidden" name="ticket" value="QUE-104"\/><input type="hidden" name="action" value="diagnose"\/><button type="submit" class="abort" aria-label="abort"><svg.*?<\/form><\/td><\/tr>.*?>QUE-103<\/a>.*?>QUE-105<\/a>.*?<tr><td>—<\/td><td>queue-order<\/td><td>drive<\/td><td>pending<\/td><td>\d+ s ago<\/td><td>—<\/td><td>—<\/td><td><\/td><td><\/td><\/tr>.*?<h3>completed<\/h3>/s,
     );
     expect(html).toMatch(
-      /<h3>completed<\/h3><table>.*?<tr><td>QUE-107<\/td><td>queue-order<\/td><td>drive<\/td><td>failed<\/td><td>\d+ min ago<\/td><td>\d+ min ago<\/td><td>1 min ago<\/td><td>session timed out<\/td><td><\/td><\/tr><tr><td>QUE-108<\/td>.*?<tr><td>QUE-106<\/td>.*?<tr><td>QUE-109<\/td>/s,
+      /<h3>completed<\/h3><table>.*?<tr><td><a class="ticket" href="https:\/\/linear\.app\/issue\/QUE-107">QUE-107<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-107">queue-order<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-107" tabindex="-1" aria-hidden="true">drive<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-107" tabindex="-1" aria-hidden="true">failed<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-107" tabindex="-1" aria-hidden="true">\d+ min ago<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-107" tabindex="-1" aria-hidden="true">\d+ min ago<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-107" tabindex="-1" aria-hidden="true">1 min ago<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-107" tabindex="-1" aria-hidden="true">session timed out<\/a><\/td><td><\/td><\/tr>.*?>QUE-108<\/a>.*?>QUE-106<\/a>.*?>QUE-109<\/a>/s,
     );
     expect(html.indexOf("<h2>automation</h2>")).toBeLessThan(html.indexOf("<h2>qemu servers</h2>"));
     expect(html).toContain('<div id="fleet" hx-get="/servers/fleet" hx-trigger="every 30s">');
@@ -1471,8 +1471,10 @@ console.log([failed.test, failed.action, failed.reason, failed.createdAt instanc
     const { status, html } = await getPage("/servers/queue", dbUrl);
     expect(status).toBe(200);
     expect(html.startsWith("<h3>running</h3><table>")).toBe(true);
-    expect(html).toContain("<td>QUE-102</td>");
-    expect(html).toContain("<td>QUE-109</td>");
+    expect(html).toContain('href="https://linear.app/issue/QUE-102"');
+    expect(html).toContain('href="/tickets/QUE-102"');
+    expect(html).toContain('href="https://linear.app/issue/QUE-109"');
+    expect(html).toContain('href="/tickets/QUE-109"');
     expect(html).not.toContain("<html");
     expect(html).not.toContain("qemu servers");
     expect(html).not.toContain("add a server");
@@ -1507,6 +1509,111 @@ console.log(queue.running.length);
     expect(result.stderr).toBe("");
     expect(result.code).toBe(0);
     expect(lines(result.stdout)).toEqual(["50 QUE-C-0 QUE-C-49", "50 QUE-P-51 QUE-P-2", "0"]);
+  });
+});
+
+// The ticket page is the terminal follow, read from the database: the open step, the command
+// under it, the newest frame, and a poll. The feed route is only what that poll swaps in.
+describe.skipIf(dbUrl === "")("dashboard ticket follow", () => {
+  it("shows the open step, the command under it and the latest frame, and polls every five seconds", async () => {
+    const sessionId = randomUUID();
+    await seed(dbUrl, async (db) => {
+      await db.insert(sessions).values({
+        id: sessionId,
+        config: { iso: "x" },
+        status: "running",
+      });
+      const [definition] = await db
+        .insert(testDefinitions)
+        .values({
+          name: "follow-page",
+          description: "d",
+          instruction:
+            "<ActionList>\n* open a terminal\n* type hello\n* any crashes or erroneous behavior must be reported.\n</ActionList>",
+          proof: "p",
+        })
+        .returning({ id: testDefinitions.id });
+      const [run] = await db
+        .insert(testRuns)
+        .values({
+          name: "follow page",
+          iso: "https://example.com/omarchy.iso",
+          serverUrl: "http://127.0.0.1:42069",
+        })
+        .returning({ id: testRuns.id });
+      const [result] = await db
+        .insert(testResults)
+        .values({
+          runId: run.id,
+          definitionId: definition.id,
+          sessionId,
+          linearId: "FOL-1",
+          status: "running",
+        })
+        .returning({ id: testResults.id });
+      await db.insert(automationJobs).values({
+        resultId: result.id,
+        action: "drive",
+        status: "running",
+      });
+      await db.insert(logs).values({
+        location: sessionId,
+        text: "intent start; open a terminal",
+        createdAt: secondsAgo(12),
+      });
+      const [action] = await db
+        .insert(actions)
+        .values({
+          sessionId,
+          request: { execute: "screendump", arguments: {} },
+          state: "completed",
+          createdAt: secondsAgo(8),
+        })
+        .returning({ id: actions.id });
+      await db.insert(images).values({ actionId: action.id, data: Buffer.from("png") });
+    });
+
+    const page = await getPage("/tickets/FOL-1", dbUrl);
+    expect(page.status).toBe(200);
+    expect(page.html).toContain(
+      `<h1 id="follow-heading">following <a href="https://linear.app/issue/FOL-1">FOL-1</a> · <code>${sessionId.slice(0, 8)}</code> running</h1>`,
+    );
+    expect(page.html).toContain('<p class="follow__step">1/2</p>');
+    expect(page.html).toContain("screendump");
+    expect(page.html).toContain('class="follow__image" src="/images/');
+    expect(page.html).toContain('hx-get="/tickets/FOL-1/feed" hx-trigger="every 5s"');
+
+    const feed = await getPage("/tickets/FOL-1/feed", dbUrl);
+    expect(feed.status).toBe(200);
+    expect(feed.html).toContain("screendump");
+    expect(feed.html).toContain('class="follow__image"');
+    expect(feed.html).not.toContain("<html");
+    expect(feed.html).not.toContain("hx-trigger");
+  });
+
+  it("waits, and keeps polling, when the ticket has not started a session", async () => {
+    await seed(dbUrl, (db) =>
+      seedQueue(db, "follow-wait", [
+        { ticket: "FOL-WAIT", action: "drive", status: "pending", queuedSecondsAgo: 5 },
+      ]),
+    );
+    const page = await getPage("/tickets/FOL-WAIT", dbUrl);
+    expect(page.status).toBe(200);
+    expect(page.html).toContain("waiting for FOL-WAIT");
+    expect(page.html).toContain("session");
+    expect(page.html).toContain('hx-trigger="every 5s"');
+    expect(page.html).not.toContain("no commands yet");
+  });
+
+  it("answers 404 and does not poll when no result carries the ticket", async () => {
+    const page = await getPage("/tickets/FOL-NONE", dbUrl);
+    const feed = await getPage("/tickets/FOL-NONE/feed", dbUrl);
+    expect(page.status).toBe(404);
+    expect(feed.status).toBe(404);
+    expect(page.html).toContain("No ticket named FOL-NONE");
+    expect(page.html).not.toContain("every 5s");
+    expect(feed.html).toContain("No ticket named FOL-NONE");
+    expect(feed.html).not.toContain("hx-trigger");
   });
 });
 

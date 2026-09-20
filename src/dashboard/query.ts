@@ -1,4 +1,4 @@
-import { and, desc, eq, getTableColumns, inArray, lt, sql } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, inArray, like, lt, or, sql } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Client } from "pg";
 import {
@@ -567,6 +567,241 @@ export function listRunningAutomationJobs(connectionString: string): Promise<Aut
       .where(eq(automationJobs.status, "running"))
       .orderBy(desc(sql`${automationJobs.action} = 'diagnose'`), automationJobs.createdAt),
   );
+}
+
+// The newest two hundred lines the follow shows. An older intent still indents the actions that
+// stay in the window, so the cut happens after that indent is known.
+export const FOLLOW_LIMIT = 200;
+
+export type FollowLog = {
+  readonly text: string;
+  readonly at: Date;
+};
+
+export type FollowAction = {
+  readonly name: string;
+  readonly state: "running" | "completed" | "failed";
+  readonly at: Date;
+};
+
+// An intent the agent announced, or a QMP command sent while one was open (`under`).
+export type FollowEvent =
+  | {
+      readonly kind: "intent";
+      readonly text: string;
+      readonly state: "running" | "completed";
+      readonly at: Date;
+    }
+  | {
+      readonly kind: "action";
+      readonly name: string;
+      readonly state: "running" | "completed" | "failed";
+      readonly under: boolean;
+      readonly at: Date;
+    };
+
+// What the ticket page shows, read from Postgres. The dashboard never calls the qemu server:
+// intents, QMP commands and the newest screenshot are the operator-visible part of a terminal
+// follow. waiting is a ticket whose session has not started and whose job is still in flight.
+export type SessionFollow = {
+  readonly ticket: string;
+  readonly sessionId: string | null;
+  readonly status:
+    | "downloading"
+    | "running"
+    | "succeeded"
+    | "failed"
+    | "aborted"
+    | "timed_out"
+    | null;
+  readonly imageId: string | null;
+  readonly instruction: string;
+  readonly events: ReadonlyArray<FollowEvent>;
+  readonly waiting: boolean;
+  readonly queriedAt: Date;
+};
+
+// A stored action is the QMP request; `execute` is the command name the follow prints. Anything
+// else is not a command.
+export const actionName = (request: unknown): string => {
+  if (typeof request !== "object" || request === null) {
+    return "?";
+  }
+  const execute = (request as { readonly execute?: unknown }).execute;
+  return typeof execute === "string" && execute.length > 0 ? execute : "?";
+};
+
+const INTENT_START = "intent start; ";
+
+// Logs and commands into one time order. Same-millisecond ties keep input order, and the logs
+// are handed in before the commands, so a log written with a command precedes it. Indent is
+// decided before the window is cut, so an action stays under an intent the window no longer shows.
+export function followEvents(
+  lines: ReadonlyArray<FollowLog>,
+  commands: ReadonlyArray<FollowAction>,
+): FollowEvent[] {
+  const stamped = [
+    ...lines.map((line, index) => ({
+      kind: "log" as const,
+      text: line.text,
+      at: line.at,
+      index,
+    })),
+    ...commands.map((command, index) => ({
+      kind: "action" as const,
+      name: command.name,
+      state: command.state,
+      at: command.at,
+      index: lines.length + index,
+    })),
+  ].sort((left, right) => left.at.getTime() - right.at.getTime() || left.index - right.index);
+
+  const events: FollowEvent[] = [];
+  let open: number | undefined;
+  for (const item of stamped) {
+    if (item.kind === "log") {
+      if (item.text.startsWith(INTENT_START)) {
+        const text = item.text.slice(INTENT_START.length);
+        if (text.length === 0) {
+          continue;
+        }
+        if (open !== undefined) {
+          const previous = events[open];
+          if (previous !== undefined && previous.kind === "intent") {
+            events[open] = { ...previous, state: "completed" };
+          }
+        }
+        open = events.length;
+        events.push({ kind: "intent", text, state: "running", at: item.at });
+      } else if (item.text === "intent end" && open !== undefined) {
+        const previous = events[open];
+        if (previous !== undefined && previous.kind === "intent") {
+          events[open] = { ...previous, state: "completed" };
+        }
+        open = undefined;
+      }
+      continue;
+    }
+    events.push({
+      kind: "action",
+      name: item.name,
+      state: item.state,
+      under: open !== undefined,
+      at: item.at,
+    });
+  }
+  return events.length > FOLLOW_LIMIT ? events.slice(events.length - FOLLOW_LIMIT) : events;
+}
+
+// One ticket's follow, or undefined when no result carries that Linear id. Intent logs and
+// actions are the newest FOLLOW_LIMIT, reversed to chronological; the clock in every select is
+// the one ages are read against, and it keeps a poll out of Hyperdrive's query cache.
+export function readSessionFollow(
+  connectionString: string,
+  ticket: string,
+): Promise<SessionFollow | undefined> {
+  return withDatabase(connectionString, async (db) => {
+    const clock = sql<Date>`CURRENT_TIMESTAMP`.mapWith(testResults.createdAt);
+    const [result] = await db
+      .select({
+        sessionId: testResults.sessionId,
+        instruction: testDefinitions.instruction,
+        status: sessions.status,
+        queriedAt: clock,
+      })
+      .from(testResults)
+      .innerJoin(testDefinitions, eq(testDefinitions.id, testResults.definitionId))
+      .leftJoin(sessions, eq(sessions.id, testResults.sessionId))
+      .where(eq(testResults.linearId, ticket))
+      .limit(1);
+    if (result === undefined) {
+      return undefined;
+    }
+
+    let waiting = false;
+    if (result.sessionId === null) {
+      const [job] = await db
+        .select({
+          id: automationJobs.id,
+          queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(automationJobs.createdAt),
+        })
+        .from(automationJobs)
+        .innerJoin(testResults, eq(testResults.id, automationJobs.resultId))
+        .where(
+          and(
+            eq(testResults.linearId, ticket),
+            inArray(automationJobs.status, ["pending", "running"]),
+          ),
+        )
+        .limit(1);
+      waiting = job !== undefined;
+      return {
+        ticket,
+        sessionId: null,
+        status: null,
+        imageId: null,
+        instruction: result.instruction,
+        events: [],
+        waiting,
+        queriedAt: result.queriedAt,
+      };
+    }
+
+    const logRows = await db
+      .select({
+        text: logs.text,
+        at: logs.createdAt,
+        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(logs.createdAt),
+      })
+      .from(logs)
+      .where(
+        and(
+          eq(logs.location, result.sessionId),
+          or(like(logs.text, "intent start; %"), eq(logs.text, "intent end")),
+        ),
+      )
+      .orderBy(desc(logs.id))
+      .limit(FOLLOW_LIMIT);
+    const actionRows = await db
+      .select({
+        request: actions.request,
+        state: actions.state,
+        at: actions.createdAt,
+        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(actions.createdAt),
+      })
+      .from(actions)
+      .where(eq(actions.sessionId, result.sessionId))
+      .orderBy(desc(actions.id))
+      .limit(FOLLOW_LIMIT);
+    const [image] = await db
+      .select({
+        id: images.id,
+        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(actions.createdAt),
+      })
+      .from(images)
+      .innerJoin(actions, eq(actions.id, images.actionId))
+      .where(eq(actions.sessionId, result.sessionId))
+      .orderBy(desc(actions.id))
+      .limit(1);
+
+    return {
+      ticket,
+      sessionId: result.sessionId,
+      status: result.status,
+      imageId: image?.id ?? null,
+      instruction: result.instruction,
+      events: followEvents(
+        logRows.toReversed().map((row) => ({ text: row.text, at: row.at })),
+        actionRows.toReversed().map((row) => ({
+          name: actionName(row.request),
+          state: row.state ?? "running",
+          at: row.at,
+        })),
+      ),
+      waiting,
+      queriedAt: result.queriedAt,
+    };
+  });
 }
 
 // Closes the one job a ticket has for the action ((result_id, action) is unique), and only from

@@ -119,6 +119,21 @@ const garageCard = `<div class="process-cards"><article class="process-card"><he
 const JOB_COLUMNS =
   "<tr><th>ticket</th><th>test</th><th>action</th><th>status</th><th>queued</th><th>started</th><th>finished</th><th>reason</th><th></th></tr>";
 
+const linearLink = (ticket: string): string =>
+  `<a class="ticket" href="https://linear.app/issue/${encodeURIComponent(ticket)}">${ticket}</a>`;
+
+// The test name is the one follow link in the tab order. The rest of the row opens the same
+// page but stays out of the way of the keyboard.
+const followCell = (ticket: string, text: string, primary = false): string =>
+  `<td class="follow"><a href="/tickets/${encodeURIComponent(ticket)}"${primary ? "" : ' tabindex="-1" aria-hidden="true"'}>${text}</a></td>`;
+
+const ticketRow = (
+  ticket: string,
+  cells: readonly [string, string, string, string, string, string, string],
+  abort: string,
+): string =>
+  `<tr><td>${linearLink(ticket)}</td>${followCell(ticket, cells[0], true)}${followCell(ticket, cells[1])}${followCell(ticket, cells[2])}${followCell(ticket, cells[3])}${followCell(ticket, cells[4])}${followCell(ticket, cells[5])}${followCell(ticket, cells[6])}<td>${abort}</td></tr>`;
+
 const ABORT_X =
   '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 2l8 8M10 2L2 10" stroke="red" stroke-width="2" fill="none"></path></svg>';
 
@@ -217,15 +232,19 @@ describe("Queue happy path", () => {
     expect(page).toContain(`<h3>completed</h3><table>${JOB_COLUMNS}`);
     expect(page.indexOf("<h3>running</h3>")).toBeLessThan(page.indexOf("<h3>pending</h3>"));
     expect(page.indexOf("<h3>pending</h3>")).toBeLessThan(page.indexOf("<h3>completed</h3>"));
-    expect(page.indexOf("<td>OLI-61</td>")).toBeLessThan(page.indexOf("<h3>pending</h3>"));
-    expect(page.indexOf("<td>OLI-62</td>")).toBeLessThan(page.indexOf("<h3>completed</h3>"));
-    expect(page.indexOf("<td>OLI-60</td>")).toBeGreaterThan(page.indexOf("<h3>completed</h3>"));
+    expect(page.indexOf(">OLI-61</a>")).toBeLessThan(page.indexOf("<h3>pending</h3>"));
+    expect(page.indexOf(">OLI-62</a>")).toBeLessThan(page.indexOf("<h3>completed</h3>"));
+    expect(page.indexOf(">OLI-60</a>")).toBeGreaterThan(page.indexOf("<h3>completed</h3>"));
   });
 
   it("shows a running job's ticket, test, action and status, how long ago it was queued and started, and no finish yet", async () => {
     const page = await render(Queue({ queue: { ...EMPTY_QUEUE, running: [running] } }));
     expect(page).toContain(
-      `<tr><td>OLI-61</td><td>lock-screen</td><td>diagnose</td><td>running</td><td>3 min ago</td><td>45 s ago</td><td>—</td><td></td><td>${abortForm("OLI-61", "diagnose")}</td></tr>`,
+      ticketRow(
+        "OLI-61",
+        ["lock-screen", "diagnose", "running", "3 min ago", "45 s ago", "—", ""],
+        abortForm("OLI-61", "diagnose"),
+      ),
     );
   });
 
@@ -240,7 +259,11 @@ describe("Queue happy path", () => {
   it("shows a pending job as queued and not yet started or finished, with the same abort", async () => {
     const page = await render(Queue({ queue: { ...EMPTY_QUEUE, pending: [pending] } }));
     expect(page).toContain(
-      `<tr><td>OLI-62</td><td>install</td><td>drive</td><td>pending</td><td>7 s ago</td><td>—</td><td>—</td><td></td><td>${abortForm("OLI-62", "drive")}</td></tr>`,
+      ticketRow(
+        "OLI-62",
+        ["install", "drive", "pending", "7 s ago", "—", "—", ""],
+        abortForm("OLI-62", "drive"),
+      ),
     );
   });
 
@@ -266,14 +289,20 @@ describe("Queue happy path", () => {
   it("shows a completed job's terminal status, when it finished, and the reason it closed with", async () => {
     const page = await render(Queue({ queue: { ...EMPTY_QUEUE, completed: [failed] } }));
     expect(page).toContain(
-      "<tr><td>OLI-60</td><td>wifi</td><td>drive</td><td>failed</td><td>1 h ago</td><td>1 h ago</td><td>10 min ago</td><td>session timed out</td><td></td></tr>",
+      ticketRow(
+        "OLI-60",
+        ["wifi", "drive", "failed", "1 h ago", "1 h ago", "10 min ago", "session timed out"],
+        "",
+      ),
     );
+    expect(page).toContain('href="https://linear.app/issue/OLI-60"');
+    expect(page).toContain('href="/tickets/OLI-60"');
   });
 
   it("lists the jobs in the order it is given: the database sorted them", async () => {
     const other: AutomationJob = { ...pending, ticket: "OLI-70" };
     const page = await render(Queue({ queue: { ...EMPTY_QUEUE, pending: [other, pending] } }));
-    expect(page.indexOf("<td>OLI-70</td>")).toBeLessThan(page.indexOf("<td>OLI-62</td>"));
+    expect(page.indexOf(">OLI-70</a>")).toBeLessThan(page.indexOf(">OLI-62</a>"));
   });
 });
 
@@ -309,6 +338,11 @@ describe("Queue unhappy path", () => {
     expect(page).not.toContain('hx-confirm="are you sure?"');
     expect(page).not.toContain('aria-label="abort"');
     expect(page).not.toContain("<svg");
+    expect(page).toContain("<tr><td>—</td><td>lock-screen</td><td>diagnose</td>");
+    expect(page).toContain("<tr><td>—</td><td>install</td><td>drive</td><td>pending</td>");
+    expect(page).toContain('href="https://linear.app/issue/OLI-59"');
+    expect(page).toContain('href="/tickets/OLI-59"');
+    expect(page).toContain('href="/tickets/OLI-60"');
   });
 
   it("escapes a ticket, a test name and a reason", async () => {
@@ -319,8 +353,12 @@ describe("Queue unhappy path", () => {
       reason: "<script>alert(1)</script>",
     };
     const page = await render(Queue({ queue: { ...EMPTY_QUEUE, completed: [hostile] } }));
-    expect(page).toContain("<td>OLI-&lt;1&quot;&gt;</td><td>&lt;b&gt;wifi&lt;/b&gt;</td>");
-    expect(page).toContain("<td>&lt;script&gt;alert(1)&lt;/script&gt;</td>");
+    expect(page).toContain(
+      `<td><a class="ticket" href="https://linear.app/issue/OLI-%3C1%22%3E">OLI-&lt;1&quot;&gt;</a></td>${followCell('OLI-<1">', "&lt;b&gt;wifi&lt;/b&gt;", true)}`,
+    );
+    expect(page).toContain(followCell('OLI-<1">', "&lt;script&gt;alert(1)&lt;/script&gt;"));
+    expect(page).not.toContain('href="https://linear.app/issue/OLI-<1">');
+    expect(page).toContain('href="https://linear.app/issue/OLI-%3C1%22%3E"');
     const runningHostile = await render(
       Queue({ queue: { ...EMPTY_QUEUE, running: [{ ...running, ticket: 'OLI-<1">' }] } }),
     );
@@ -445,7 +483,8 @@ describe("ServersPage happy path", () => {
     expect(page).toContain(
       '<div class="halves"><section><h2>automation</h2><div id="queue" hx-get="/servers/queue" hx-trigger="every 30s"><h3>running</h3>',
     );
-    expect(page).toContain("<td>OLI-61</td>");
+    expect(page).toContain(linearLink("OLI-61"));
+    expect(page).toMatch(/<style>[^<]*td\.follow a\s*\{[^}]*display:\s*block/);
     expect(page).toContain(
       '<section><h2>qemu servers</h2><div id="fleet" hx-get="/servers/fleet" hx-trigger="every 30s"><table>',
     );
@@ -477,7 +516,7 @@ describe("ServersPage unhappy path", () => {
       }),
     );
     expect(page).toContain("<p>error: url must be an http or https url</p>");
-    expect(page).toContain("<td>OLI-61</td>");
+    expect(page).toContain(linearLink("OLI-61"));
     expect(page).toContain("<td>http://127.0.0.1:55332</td>");
   });
 

@@ -13,6 +13,7 @@ import {
   groupDefinitions,
   listAutomationQueue,
   listRunningAutomationJobs,
+  readSessionFollow,
   listProcessSeries,
   listServers,
   listSessions,
@@ -30,13 +31,16 @@ import {
   type DurationChart as DurationChartData,
   type AutomationJob,
   type Session,
+  type SessionFollow,
   type TestBasePrompt,
   type TestResultOutcome,
 } from "./query.ts";
 import { clickerPage } from "./clicker.ts";
 import { HTMX_INTEGRITY, HTMX_URL } from "./htmx.ts";
 import { abortLinearIssue, type LinearEnv } from "./linear.ts";
+import { FollowBody, FollowFrame } from "./follow.tsx";
 import { Fleet, type Halves, Process, Queue, ServersPage, since } from "./servers.tsx";
+import { followHref, isTicket, linearHref } from "./ticket.ts";
 import { SENTRY_DSN } from "../observability/dsn.ts";
 
 const errorMessage = (cause: unknown): string =>
@@ -313,7 +317,7 @@ const SessionError: FC = () => (
   </div>
 );
 
-type PageId = "results" | "definitions" | "prompts";
+type PageId = "results" | "definitions" | "prompts" | "follow";
 
 const PAGES = [
   { id: "results", href: "/", label: "Test results" },
@@ -613,17 +617,32 @@ const definitionsBody = ({ groups, outcomes, name, selected, notice }: Definitio
 };
 
 // One running job: its definition, what it is doing, the ticket that names it, and how long it
-// has been running. Abort posts the ticket and action the shared /abort route already stops.
-// view=definitions is how that route tells this form apart from the servers page: htmx swaps
-// the list, and a submit without it returns here. A job with no ticket has nothing to name.
+// has been running. The card itself opens the session feed. The definition name stays a link to
+// that definition, and the ticket text goes to Linear, both above the stretched follow link. Abort
+// posts the ticket and action the shared /abort route already stops. view=definitions is how that
+// route tells this form apart from the servers page: htmx swaps the list, and a submit without it
+// returns here. A job with no ticket has nothing to name.
 const RunningJob: FC<{ job: AutomationJob; definition: string | undefined }> = ({
   job,
   definition,
 }) => (
   <li class="running-tests__job">
+    {job.ticket === null ? null : (
+      <a
+        class="running-tests__open"
+        href={followHref(job.ticket)}
+        aria-label={`follow ${job.ticket}`}
+      />
+    )}
     <a href={definitionHref(job.test)}>{job.test}</a>
     <span class="running-tests__action">{job.action}</span>
-    <span class="running-tests__ticket">{job.ticket ?? "—"}</span>
+    {job.ticket === null ? (
+      <span class="running-tests__ticket">—</span>
+    ) : (
+      <a class="running-tests__linear" href={linearHref(job.ticket)}>
+        {job.ticket}
+      </a>
+    )}
     <span class="running-tests__age">{since(job.startedAt, job.queriedAt)}</span>
     {job.ticket === null ? null : (
       <form
@@ -650,7 +669,7 @@ const RunningJob: FC<{ job: AutomationJob; definition: string | undefined }> = (
 
 // The list the page polls and the abort swaps in. Only what is running: a pending job has not
 // started, and a finished one is a result, not something to stop.
-const RunningList: FC<{
+export const RunningList: FC<{
   jobs: ReadonlyArray<AutomationJob>;
   definition: string | undefined;
 }> = ({ jobs, definition }) =>
@@ -931,6 +950,84 @@ app.get("/sessions", async (context) => {
       500,
     );
   }
+});
+
+// Invalid before any database call. A missing ticket is a 404 with no poll. A database that
+// cannot be reached is a 500 that never echoes the connection string. The feed is the fragment
+// the poll swaps into #follow, so it does not carry its own trigger.
+const lookupFollow = async (
+  context: Context<{ Bindings: Bindings }>,
+  ticket: string,
+): Promise<
+  | { readonly kind: "invalid" }
+  | { readonly kind: "missing" }
+  | { readonly kind: "down" }
+  | { readonly kind: "ok"; readonly follow: SessionFollow }
+> => {
+  if (!isTicket(ticket)) {
+    return { kind: "invalid" };
+  }
+  try {
+    const follow = await readSessionFollow(context.env.HYPERDRIVE.connectionString, ticket);
+    return follow === undefined ? { kind: "missing" } : { kind: "ok", follow };
+  } catch (error) {
+    Sentry.captureException(error);
+    console.error("dashboard: reading the session feed:", errorMessage(error));
+    return { kind: "down" };
+  }
+};
+
+app.get("/tickets/:ticket/feed", async (context) => {
+  const ticket = context.req.param("ticket");
+  const looked = await lookupFollow(context, ticket);
+  if (looked.kind === "invalid") {
+    return context.notFound();
+  }
+  if (looked.kind === "missing") {
+    return context.html(<p>No ticket named {ticket}.</p>, 404);
+  }
+  if (looked.kind === "down") {
+    return context.html(<p>error: internal error</p>, 500);
+  }
+  return context.html(<FollowBody follow={looked.follow} />);
+});
+
+app.get("/tickets/:ticket", async (context) => {
+  const ticket = context.req.param("ticket");
+  const looked = await lookupFollow(context, ticket);
+  if (looked.kind === "invalid") {
+    return context.notFound();
+  }
+  if (looked.kind === "missing") {
+    context.status(404);
+    return context.render(
+      <Shell page="follow">
+        <section class="follow">
+          <p>No ticket named {ticket}.</p>
+        </section>
+      </Shell>,
+    );
+  }
+  if (looked.kind === "down") {
+    context.status(500);
+    return context.render(
+      <Shell page="follow">
+        <section class="follow">
+          <div class="empty-state empty-state--error">
+            <p>The session feed is unavailable.</p>
+            <span>Try refreshing in a moment.</span>
+          </div>
+        </section>
+      </Shell>,
+    );
+  }
+  return context.render(
+    <Shell page="follow">
+      <section class="follow" aria-labelledby="follow-heading">
+        <FollowFrame follow={looked.follow} />
+      </section>
+    </Shell>,
+  );
 });
 
 app.get("/images/:id", async (context) => {

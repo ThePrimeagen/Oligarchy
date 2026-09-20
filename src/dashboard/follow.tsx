@@ -1,0 +1,123 @@
+import type { FC } from "hono/jsx";
+import { indexOf, stepsOf } from "../viz/steps.ts";
+import { FOLLOW_POLL, feedHref, linearHref } from "./ticket.ts";
+import type { FollowEvent, SessionFollow } from "./query.ts";
+import { since } from "./servers.tsx";
+
+export type { SessionFollow };
+
+// The poll stays on this frame; the feed route replaces only what is inside it, so a swap never
+// nests a second poll.
+export const FollowFrame: FC<{ follow: SessionFollow }> = ({ follow }) => (
+  <div id="follow" hx-get={feedHref(follow.ticket)} hx-trigger={FOLLOW_POLL} hx-swap="innerHTML">
+    <FollowBody follow={follow} />
+  </div>
+);
+
+const Mark: FC<{ state: FollowEvent["state"] }> = ({ state }) => {
+  if (state === "completed") {
+    return <span class="follow__mark follow__mark--ok">✓</span>;
+  }
+  if (state === "failed") {
+    return <span class="follow__mark follow__mark--bad">✗</span>;
+  }
+  return <span class="follow__mark">…</span>;
+};
+
+const Heading: FC<{ follow: SessionFollow }> = ({ follow }) => (
+  <h1 id="follow-heading">
+    {"following "}
+    <a href={linearHref(follow.ticket)}>{follow.ticket}</a>
+    {follow.sessionId === null ? null : (
+      <>
+        {" · "}
+        <code>{follow.sessionId.slice(0, 8)}</code>
+        {follow.status === null ? null : ` ${follow.status}`}
+      </>
+    )}
+  </h1>
+);
+
+// A step line only while an intent is still open and the definition actually lists steps. The
+// place is 1-based; an open intent that is not one of those steps is a dash.
+const Step: FC<{ follow: SessionFollow }> = ({ follow }) => {
+  const steps = stepsOf(follow.instruction);
+  const open = follow.events.findLast(
+    (event) => event.kind === "intent" && event.state === "running",
+  );
+  if (steps.length === 0 || open === undefined || open.kind !== "intent") {
+    return null;
+  }
+  const place = indexOf(steps, open.text);
+  return (
+    <p class="follow__step">
+      {place === 0 ? "—" : String(place)}/{String(steps.length)}
+    </p>
+  );
+};
+
+const EventList: FC<{ follow: SessionFollow }> = ({ follow }) => (
+  <ol class="follow__log">
+    {follow.events.map((event) =>
+      event.kind === "intent" ? (
+        <li
+          class={
+            event.state === "running" ? "follow__intent follow__intent--running" : "follow__intent"
+          }
+        >
+          <Mark state={event.state} /> {event.text}
+        </li>
+      ) : (
+        <li class={event.under ? "follow__action follow__action--under" : "follow__action"}>
+          <Mark state={event.state} /> {event.name}{" "}
+          <span class="follow__age">{since(event.at, follow.queriedAt)}</span>
+        </li>
+      ),
+    )}
+  </ol>
+);
+
+const Frame: FC<{ follow: SessionFollow }> = ({ follow }) =>
+  follow.imageId === null ? (
+    <p>no screenshot yet</p>
+  ) : (
+    <img
+      class="follow__image"
+      src={`/images/${follow.imageId}`}
+      alt={`Latest frame from ${follow.ticket}`}
+    />
+  );
+
+// The feed the page paints and the poll swaps in. A session that has not started says so, and
+// does not claim there are no commands; a session with nothing sent yet says that plainly.
+export const FollowBody: FC<{ follow: SessionFollow }> = ({ follow }) => {
+  let body = <Frame follow={follow} />;
+  if (follow.sessionId === null) {
+    body = follow.waiting ? (
+      <p>waiting for {follow.ticket} to start its session</p>
+    ) : (
+      <p>no session</p>
+    );
+  } else if (follow.events.length === 0) {
+    body = (
+      <>
+        <p>no commands yet</p>
+        <Frame follow={follow} />
+      </>
+    );
+  } else {
+    body = (
+      <>
+        <EventList follow={follow} />
+        <Frame follow={follow} />
+      </>
+    );
+  }
+  return (
+    <>
+      <Heading follow={follow} />
+      <Step follow={follow} />
+      {body}
+    </>
+  );
+};

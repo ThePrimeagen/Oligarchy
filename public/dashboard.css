@@ -743,6 +743,7 @@ main {
 }
 
 .running-tests__job {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -752,15 +753,28 @@ main {
   background: rgb(180 249 248 / 8%);
 }
 
-.running-tests__job > a {
+/* The follow link fills the card. The definition link, the ticket and the abort sit above it. */
+.running-tests__open {
+  position: absolute;
+  inset: 0;
+}
+
+.running-tests__job > a:not(.running-tests__open) {
+  position: relative;
+  z-index: 1;
   color: var(--terminal-white);
   font-weight: 700;
   text-decoration: none;
 }
 
-.running-tests__job > a:hover,
-.running-tests__job > a:focus-visible {
+.running-tests__job > a:not(.running-tests__open):hover,
+.running-tests__job > a:not(.running-tests__open):focus-visible {
   color: var(--turquoise);
+}
+
+.running-tests__linear {
+  position: relative;
+  z-index: 1;
 }
 
 .running-tests__action,
@@ -773,6 +787,8 @@ main {
 }
 
 .running-tests__job > form {
+  position: relative;
+  z-index: 1;
   margin-left: auto;
 }
 
@@ -949,4 +965,63 @@ main {
   .brand {
     animation: none;
   }
+}
+
+/* The session feed: the log on the left, the newest frame on the right. */
+.follow {
+  display: grid;
+  gap: 1rem;
+}
+
+.follow h1 {
+  margin: 0;
+  color: var(--terminal-white);
+  font-size: 1.25rem;
+}
+
+.follow h1 a {
+  color: var(--terminal-cyan);
+  text-decoration: none;
+}
+
+.follow__step {
+  margin: 0;
+  color: var(--turquoise);
+}
+
+.follow__log {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.follow__intent,
+.follow__action {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+  padding: 0.2rem 0;
+}
+
+.follow__action--under {
+  padding-left: 1.5rem;
+}
+
+.follow__mark--ok {
+  color: var(--green);
+}
+
+.follow__mark--bad {
+  color: var(--failed);
+}
+
+.follow__age {
+  margin-left: auto;
+  color: var(--terminal-blue);
+}
+
+.follow__image {
+  display: block;
+  max-width: min(100%, 40rem);
+  border: 1px solid rgb(122 162 247 / 30%);
 }

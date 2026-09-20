@@ -1,12 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
+  FOLLOW_LIMIT,
+  actionName,
   definitionStats,
   durationChart,
+  followEvents,
   groupDefinitions,
   groupProcessSeries,
   modelStats,
   selectDefinition,
   versionStats,
+  type FollowAction,
+  type FollowLog,
   type ProcessStat,
   type Session,
   type TestDefinition,
@@ -450,5 +455,92 @@ describe("groupProcessSeries unhappy path", () => {
     expect(series).toHaveLength(2);
     expect(series.map((row) => row.type)).toEqual(["qemu", "automation-client"]);
     expect(series.every((row) => row.samples.length === 1)).toBe(true);
+  });
+});
+
+const atMs = (ms: number): Date => new Date(ms);
+
+const log = (text: string, ms: number): FollowLog => ({ text, at: atMs(ms) });
+
+const action = (name: string, state: FollowAction["state"], ms: number): FollowAction => ({
+  name,
+  state,
+  at: atMs(ms),
+});
+
+describe("actionName happy path", () => {
+  it("reads the QMP command the action row stored", () => {
+    expect(actionName({ execute: "screendump", arguments: {}, id: 1 })).toBe("screendump");
+  });
+});
+
+describe("actionName unhappy path", () => {
+  it("names nothing a command when execute is missing, empty, or not text", () => {
+    expect(actionName(null)).toBe("?");
+    expect(actionName("screendump")).toBe("?");
+    expect(actionName({})).toBe("?");
+    expect(actionName({ execute: "" })).toBe("?");
+    expect(actionName({ execute: 1 })).toBe("?");
+  });
+});
+
+describe("followEvents happy path", () => {
+  it("orders intents and the commands under them by time, newest kept when the window fills", () => {
+    const events = followEvents(
+      [
+        log("intent end", 3_000),
+        log("intent start; open a terminal", 1_000),
+        log("intent start; type hello", 4_000),
+      ],
+      [action("send-key", "completed", 2_000), action("screendump", "running", 5_000)],
+    );
+    expect(events).toEqual([
+      { kind: "intent", text: "open a terminal", state: "completed", at: atMs(1_000) },
+      { kind: "action", name: "send-key", state: "completed", under: true, at: atMs(2_000) },
+      { kind: "intent", text: "type hello", state: "running", at: atMs(4_000) },
+      { kind: "action", name: "screendump", state: "running", under: true, at: atMs(5_000) },
+    ]);
+  });
+
+  it("keeps an action indented when its intent falls outside the newest window", () => {
+    const logs: FollowLog[] = [log("intent start; open a terminal", 0)];
+    const actions: FollowAction[] = Array.from({ length: FOLLOW_LIMIT }, (_, index) =>
+      action("send-key", "completed", (index + 1) * 1_000),
+    );
+    const events = followEvents(logs, actions);
+    expect(events).toHaveLength(FOLLOW_LIMIT);
+    expect(events[0]).toEqual({
+      kind: "action",
+      name: "send-key",
+      state: "completed",
+      under: true,
+      at: atMs(1_000),
+    });
+    expect(events.at(-1)).toMatchObject({ kind: "action", at: atMs(FOLLOW_LIMIT * 1_000) });
+  });
+});
+
+describe("followEvents unhappy path", () => {
+  it("ignores a log that is not an intent, an empty intent, and an end with nothing open", () => {
+    expect(
+      followEvents(
+        [log("follower attached", 1_000), log("intent start; ", 2_000), log("intent end", 3_000)],
+        [action("screendump", "failed", 4_000)],
+      ),
+    ).toEqual([
+      { kind: "action", name: "screendump", state: "failed", under: false, at: atMs(4_000) },
+    ]);
+  });
+
+  it("closes the previous intent when a second one starts without an end", () => {
+    const events = followEvents(
+      [log("intent start; first", 1_000), log("intent start; second", 3_000)],
+      [action("send-key", "completed", 2_000)],
+    );
+    expect(events.map((event) => (event.kind === "intent" ? event.state : event.under))).toEqual([
+      "completed",
+      true,
+      "running",
+    ]);
   });
 });
