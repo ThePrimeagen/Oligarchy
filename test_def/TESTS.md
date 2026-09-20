@@ -4225,27 +4225,50 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return and type `echo BELOW` Return. Press Super+S: a dimmed overlay covers the workspace and the special workspace slides down from the top; with no default agent the console is empty (its `omarchy-agent` seed exits silently). Press Super+S again: gone.
-  * Press Super+Return, type `echo CONSOLE` Return, press Super+Alt+S: CONSOLE vanishes from the workspace without following.
-  * Press Super+Grave: CONSOLE drops from the top as a centred, borderless panel flush with the top edge, about half the screen height and twice as wide as tall (≈770×385 on this guest), BELOW dimmed beneath. In it type `hyprctl activewindow -j | jq '{ws:.workspace.name,at,size}'` Return → workspace `special:scratchpad`.
-  * Press Super+Return while the console is open: the new terminal opens on the scratchpad and the console widens to the full screen width, two side by side, still half height. Type `exit` Return in one: the remaining window recenters to the 2:1 panel.
-  * Press Super+2: the console hides. Press Super+1, Super+Grave: it reopens. Press Super+Grave to hide, Super+S to show (same panel), Super+S to hide.
-  * Click BELOW to focus it and press Super+Shift+Grave: BELOW also moves onto the scratchpad; Super+S shows both full width. Focus one and press Super+Shift+1: it leaves the scratchpad and tiles on workspace 1; do the same for the other, then close both.
-  ** The Grave aliases and the centred panel are newer; on 4.0.2 the console may span the full width and Super+Grave may be missing from Super+K — record the geometry and use Super+S / Super+Alt+S instead of failing.
-  * Unhappy path: press Super+S with the empty scratchpad, then Super+S again: nothing stays on screen, no crash; the desktop is empty as it started.
+  * Press Super+Return. A terminal opens.
+  * Type `echo BELOW` and press Return. The line `BELOW` appears.
+  * Press Super+S. A console panel opens over the workspace. It is empty.
+  * Press Super+S. The console hides.
+  * Press Super+Return. A second terminal opens.
+  * Type `echo CONSOLE` and press Return. The line `CONSOLE` appears.
+  * Press Super+Alt+S. That terminal leaves the workspace. The BELOW terminal stays.
+  * Press Super+Grave. The console opens. The CONSOLE terminal is a panel at the top, about twice as wide as it is tall.
+  ** If Super+K has no Super+Grave row, record that, use Super+S for the open and hide steps, and continue.
+  * Type `hyprctl activewindow -j | jq '{ws:.workspace.name,at,size}'` and press Return. The workspace name is `special:scratchpad`.
+  * Press Super+Return. A new terminal opens on the scratchpad. The console becomes full width.
+  * Type `exit` and press Return. That terminal closes. The remaining window recenters.
+  * Press Super+2. The console hides. Workspace 2 is empty.
+  * Press Super+1. Workspace 1 is showing. The BELOW terminal is there. The console stays hidden.
+  * Press Super+Grave. The console opens.
+  * Press Super+Grave. The console hides.
+  * Press Super+S. The console opens.
+  * Press Super+S. The console hides.
+  * Click the BELOW terminal. That terminal has focus.
+  * Press Super+Shift+Grave. The BELOW terminal leaves the workspace.
+  ** If Super+Shift+Grave does nothing, press Super+Alt+S instead and record that.
+  * Press Super+S. The console opens. Both terminals are in it, full width.
+  * Click one terminal. That terminal has focus.
+  * Press Super+Shift+1. That terminal tiles on workspace 1. The view follows it. The other terminal stays on the scratchpad.
+  * Press Super+S. The console opens. The remaining terminal is there.
+  * Click that terminal. It has focus.
+  * Press Super+Shift+1. It tiles on workspace 1 beside the first terminal.
+  * Press Super+W. One terminal closes.
+  * Press Super+W. The last terminal closes. The desktop is empty.
+  * Press Super+S. The empty console opens. No window stays on screen.
+  * Press Super+S. The console hides. The desktop is empty.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Grave is the key left of 1: `<M-`>` and `<M-S-`>`. The dimming (0.6) of the workspace beneath is the tell that a special workspace is open.
+  * Grave is the key left of 1: `<M-`>` and `<M-S-`>`.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of the dimmed empty console, CONSOLE gone from the workspace, the centred half-height panel with the jq line naming `special:scratchpad`, two windows full width, the recentred panel, hidden after Super+2, reopened with Super+Grave, both windows back on workspace 1, and the empty desktop
+  * On success
+  ** Screenshots of the empty console, CONSOLE gone from the workspace, the half-height panel with `special:scratchpad`, two windows full width, the recentered panel, the console hidden on workspace 2, both windows back on workspace 1, and the empty desktop
   * If unsuccessful
-  ** Screenshot of the console with wrong geometry (a full-width single window, a panel not flush with the top) or a chord that did nothing; `hyprctl workspacerules -j | jq '.[] | select(.workspaceString|test("scratchpad"))'`
+  ** Screenshot of a chord that did nothing, or of a single window filling the full width
 covers: default/hypr/bindings/tiling.lua:28-31; default/hypr/qconsole.lua; default/hypr/looknfeel.lua:122-124; test/shell.d/hyprland-qconsole-test.sh; test/shell.d/hyprland-default-config-test.sh (grave aliases); manual/04:63-69 (04-navigation.md); manual/07:29-30
 
 ### desktop-style-toggles-transparency-gaps-square-fullscreen   [VM-OK]
@@ -4255,31 +4278,80 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return twice: two tiles with gaps between them and the screen edges, and a hint of wallpaper through the terminal background (default opacity 0.985/0.96).
-  * Press Super+Backspace: the focused terminal becomes fully solid. Press again: translucent again.
-  ** The difference is subtle; zoom into the screenshots, and if they cannot show it `hyprctl activewindow | grep opaque` flipping is the proof.
-  * Press Super+Shift+Backspace: gaps, borders and rounding vanish (tiles touch each other and the edges). Type `ls ~/.local/state/omarchy/toggles/hypr/; hyprctl getoption general:gaps_out | head -1` Return → `flags.lua` and `window-no-gaps.lua`, and 0. Type `hyprctl reload` Return: gaps stay off (the flag is re-sourced). Press Super+Space → Trigger → Toggle → Window Gaps: gaps return, the file is gone, gaps_out is back to its default.
-  ** Gap toggles reload Hyprland; allow a second.
-  * Press Super+Shift+Space: the top bar hides and the terminals grow into the space (Super+Space still opens the menu with the bar hidden). Press it again: the bar returns. Super+Space → Trigger → Toggle → Menu Bar does the same — use it twice so the bar ends visible.
-  * Press Super+Ctrl+Alt+F: bar hidden and gaps gone at once. Type `omarchy-toggle-enabled bar-off; echo $?; omarchy-hyprland-toggle-enabled window-no-gaps; echo $?` Return → 0 and 0. Press Super+Ctrl+Alt+F again: both back; both checks print 1.
-  ** If Super+K has no "Toggle full screen desktop" row on this build, report it absent and skip the fullscreen-desktop steps.
-  * Half states: press Super+Shift+Backspace (gaps off only), then Super+Ctrl+Alt+F: because only one half was on, the toggle goes fully ON (the bar hides too), not off. Type `omarchy-toggle-fullscreen-desktop off` Return → both restored. Now press Super+Shift+Space (bar off only), then Super+Ctrl+Alt+F: again both halves go to full-screen desktop; Super+Ctrl+Alt+F once more restores both.
-  * Press Super+W (one tile left). Press Super+Ctrl+Backspace: toast "Enable single-window square aspect ratio" and the lone window shrinks to a centred, roughly square tile (about 770 px wide on the 1280×800 guest) with wallpaper either side. Press Super+Return: with two windows the square rule no longer applies and both fill the width; close it with Super+W. Press Super+Space → Trigger → Toggle → 1-Window Ratio: toast "Disable single-window square aspect ratio" and the window fills the workspace again.
-  * Negatives: type `omarchy-hyprland-toggle nosuchflag on; echo "exit=$?"` Return → "Flag not found: nosuchflag", exit=1; `omarchy-hyprland-toggle window-no-gaps sideways; echo "exit=$?"` → usage, exit=1; `omarchy-toggle-fullscreen-desktop sideways; echo "exit=$?"` → usage, exit=1. `ls ~/.local/state/omarchy/toggles/hypr/` → only `flags.lua`.
-  * Press Super+W. Unhappy path: press Super+Backspace on the empty desktop: nothing happens. The desktop must look exactly as at the start (gaps, borders, bar).
+  * Press Super+Return. A terminal opens.
+  * Press Super+Return. A second terminal opens beside it.
+  * Press Super+Backspace. The focused terminal becomes solid.
+  * Type `hyprctl activewindow | grep opaque` and press Return. Record the line.
+  ** If the screenshots cannot show the solid window, this line is the proof.
+  * Press Super+Backspace. The focused terminal is translucent again.
+  * Type `hyprctl activewindow | grep opaque` and press Return. The line has flipped.
+  * Press Super+Shift+Backspace. The gaps go away.
+  ** Allow a second. The gap toggle reloads Hyprland.
+  * Type `ls ~/.local/state/omarchy/toggles/hypr/` and press Return. The lines include `flags.lua` and `window-no-gaps.lua`.
+  * Type `hyprctl getoption general:gaps_out | head -1` and press Return. The value is `0`.
+  * Type `hyprctl reload` and press Return. The gaps stay off.
+  * Press Super+Space. The menu opens.
+  * Click Trigger.
+  * Click Toggle.
+  * Click Window Gaps. The menu closes. The gaps return.
+  * Click a terminal. That terminal has focus.
+  * Type `ls ~/.local/state/omarchy/toggles/hypr/` and press Return. `window-no-gaps.lua` is gone.
+  * Type `hyprctl getoption general:gaps_out | head -1` and press Return. The value is not `0`.
+  * Press Super+Shift+Space. The top bar hides.
+  * Press Super+Space. The menu opens. The bar stays hidden.
+  * Press Escape. The menu closes.
+  * Press Super+Shift+Space. The top bar returns.
+  * Press Super+Space. The menu opens.
+  * Click Trigger.
+  * Click Toggle.
+  * Click Menu Bar. The menu closes. The top bar hides.
+  * Press Super+Space. The menu opens.
+  * Click Trigger.
+  * Click Toggle.
+  * Click Menu Bar. The menu closes. The top bar returns.
+  * Press Super+Ctrl+Alt+F. The top bar hides. The gaps go away.
+  ** If Super+K has no "Toggle full screen desktop" row, report the chord absent and skip the fullscreen-desktop steps.
+  * Click a terminal. That terminal has focus.
+  * Type `omarchy-toggle-enabled bar-off; echo $?` and press Return. The last line is `0`.
+  * Type `omarchy-hyprland-toggle-enabled window-no-gaps; echo $?` and press Return. The last line is `0`.
+  * Press Super+Ctrl+Alt+F. The bar returns. The gaps return.
+  * Type `omarchy-toggle-enabled bar-off; echo $?` and press Return. The last line is `1`.
+  * Type `omarchy-hyprland-toggle-enabled window-no-gaps; echo $?` and press Return. The last line is `1`.
+  * Press Super+Shift+Backspace. The gaps go away. The bar stays.
+  * Press Super+Ctrl+Alt+F. The bar hides as well.
+  * Type `omarchy-toggle-fullscreen-desktop off` and press Return. The bar returns. The gaps return.
+  * Press Super+Shift+Space. The bar hides. The gaps stay.
+  * Press Super+Ctrl+Alt+F. The gaps go away as well.
+  * Press Super+Ctrl+Alt+F. The bar returns. The gaps return.
+  * Press Super+W. One terminal closes. One remains.
+  * Press Super+Ctrl+Backspace. A toast says "Enable single-window square aspect ratio". The window shrinks and stays centred.
+  * Press Super+Return. A second terminal opens. Both windows fill the width.
+  * Press Super+W. That new terminal closes. One window remains.
+  * Press Super+Space. The menu opens.
+  * Click Trigger.
+  * Click Toggle.
+  * Click 1-Window Ratio. The menu closes. A toast says "Disable single-window square aspect ratio". The window fills the workspace.
+  * Click the terminal. The terminal has focus.
+  * Type `omarchy-hyprland-toggle nosuchflag on; echo "exit=$?"` and press Return. The output includes `Flag not found: nosuchflag`. The last line is `exit=1`.
+  * Type `omarchy-hyprland-toggle window-no-gaps sideways; echo "exit=$?"` and press Return. A usage line appears. The last line is `exit=1`.
+  * Type `omarchy-toggle-fullscreen-desktop sideways; echo "exit=$?"` and press Return. A usage line appears. The last line is `exit=1`.
+  * Type `ls ~/.local/state/omarchy/toggles/hypr/` and press Return. The only line is `flags.lua`.
+  * Press Super+W. The terminal closes.
+  * Press Super+Backspace. Nothing changes. The bar is visible and the gaps are on.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Chords: `<M-BS>`, `<M-S-BS>`, `<M-S-SPACE>`, `<M-C-A-f>`, `<M-C-BS>`. `omarchy-toggle-bar on` hides the bar ("hidden on"); the Hyprland toggle flags live in `~/.local/state/omarchy/toggles/hypr/`, the bar flag under `~/.local/state/omarchy/toggles/`.
+  * Chords: `<M-BS>`, `<M-S-BS>`, `<M-S-SPACE>`, `<M-C-A-f>`, `<M-C-BS>`.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots: translucent vs opaque terminal (or the `opaque` flag flipping); gaps off with the flag file and gaps_out 0, still off after reload, on again after the menu row with the file gone; bar hidden and shown by chord and by menu; bar+gaps off with 0/0 and on with 1/1; both half states going fully on and restoring; the square tile with its toast, two windows filling the width, the disable toast; the three refusals with exit=1 and only `flags.lua` left; the stock desktop at the end
+  * On success
+  ** Screenshots of the solid and translucent terminal, gaps off and back, the bar hidden and shown, both halves off and restored, the shrunken single window, the three refusals, and the stock desktop
+  ** The flag file appears and disappears, `gaps_out` is `0` then not `0`, and the enable checks print `0` then `1`
   * If unsuccessful
-  ** Screenshot of the state that did not change, a stuck hidden bar, or where bar and gaps disagree with the flags; screenshot after `hyprctl reload` if gaps came back while the flag file existed; `hyprctl activewindow -j` and `hyprctl getoption layout:single_window_aspect_ratio`; a toggles listing with a leftover file; `./client get-serial`
+  ** Screenshot of a state that did not change, or of a bar and gaps that disagree with the flags
 covers: default/hypr/bindings/utilities.lua:16,19-22; bin/omarchy-hyprland-window-transparency-toggle; bin/omarchy-hyprland-window-gaps-toggle; bin/omarchy-hyprland-window-single-square-aspect-toggle; bin/omarchy-toggle-fullscreen-desktop; bin/omarchy-toggle-bar; bin/omarchy-hyprland-toggle; bin/omarchy-hyprland-toggle-enabled; default/hypr/toggles.lua; default/hypr/toggles/window-no-gaps.lua; default/hypr/toggles/single-window-aspect-ratio.lua; default/hypr/windows.lua (default-opacity); default/omarchy/omarchy-menu.jsonc (trigger.toggle.one-window-ratio, trigger.toggle.window-gaps, trigger.toggle.top-bar); test/shell.d/toggle-test.sh; manual/07:176-177,192-195; manual/13:26; manual/42:24-37 (42-common-tweaks.md, Remove window gaps, top bar toggle)
 
 ### zoom-and-alt-tab-cycle   [VM-OK]
@@ -4289,26 +4361,38 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return three times and type `one`, `two`, `three` (Return each) in the three terminals.
-  * Press Alt+Tab three times: the bright focus border visits each terminal and the third press returns to the start. Press Alt+Shift+Tab: focus moves the other way.
-  * Move the mouse to the centre of a terminal and press Super+Ctrl+Z: the screen is magnified 2× around the pointer (text twice as big, edges cut off). Press Super+Ctrl+Z again: 3×.
-  * Press Super+Ctrl+Alt+Z: normal view.
-  ** Newer chord: if Super+K has no "Zoom in" row on this build, report it absent.
-  * Unhappy path: press Super+Ctrl+Alt+Z again at normal zoom: nothing changes.
-  * Press Super+W three times: empty desktop.
+  * Press Super+Return. A terminal opens.
+  * Type `echo one` and press Return. The line `one` appears.
+  * Press Super+Return. A second terminal opens.
+  * Type `echo two` and press Return. The line `two` appears.
+  * Press Super+Return. A third terminal opens.
+  * Type `echo three` and press Return. The line `three` appears.
+  * Press Alt+Tab. Focus moves to a different terminal.
+  * Press Alt+Tab. Focus moves to another terminal.
+  * Press Alt+Tab. Focus returns to the terminal it started on.
+  * Press Alt+Shift+Tab. Focus moves the other way.
+  * Move the pointer to the centre of a terminal.
+  * Press Super+Ctrl+Z. The screen magnifies to 2× around the pointer.
+  ** If Super+K has no "Zoom in" row, report the chord absent and skip the zoom steps.
+  * Press Super+Ctrl+Z. The screen magnifies to 3×.
+  * Press Super+Ctrl+Alt+Z. The screen returns to normal scale.
+  * Press Super+Ctrl+Alt+Z. Nothing changes.
+  * Press Super+W. One terminal closes.
+  * Press Super+W. A second terminal closes.
+  * Press Super+W. The last terminal closes. The desktop is empty.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The zoom is compositor-level and shows in screenshots; the pointer position decides what is magnified — keep it over terminal text so the screenshot shows enlarged characters.
+  * Keep the pointer over terminal text before the zoom chord, so the screenshot shows enlarged characters.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of the focus ring on different terminals, the 2× and 3× zoom, and normal scale
+  * On success
+  ** Screenshots of focus on different terminals, the 2× zoom, the 3× zoom, and normal scale
   * If unsuccessful
-  ** Screenshot where zoom stuck or focus did not move
+  ** Screenshot where the zoom stuck or focus did not move
 covers: default/hypr/bindings/tiling.lua:47-50; default/hypr/bindings/utilities.lua:118-125; manual/07:52-53,56-57
 
 ### activity-btop-floats-and-tiles   [VM-OK]
@@ -4318,26 +4402,34 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return so one tiled window exists, then Super+Ctrl+T: a floating window (roughly 875×600, centred, not tiled next to the terminal) opens running btop — CPU graph, memory, disks, network and process list in the Omarchy theme colours (not btop's default).
-  ** btop needs a second to draw its graphs.
-  * Press Super+T: btop snaps into the tiling beside the terminal (both share the screen). Press Super+T again: it floats again.
-  * Press Super+Shift+F: Files opens and tiles with the terminal while btop stays floating on top.
-  * Click btop and press Super+Q: btop closes (`q` inside btop works too). Press Super+W twice: Files and the terminal close; the desktop is empty.
-  * Press Super+Space and type `btop`: no `btop` app row is offered (it is hidden from the launcher list). Press Escape.
-  * Unhappy path: press Super+W and Super+Q on the empty desktop: nothing happens; the bar remains.
+  * Press Super+Return. A terminal opens.
+  * Press Super+Ctrl+T. btop opens as a floating window over the terminal.
+  ** Wait until btop has drawn.
+  * Press Super+T. btop tiles beside the terminal.
+  * Press Super+T. btop floats again.
+  * Press Super+Shift+F. Files opens and tiles with the terminal. btop stays floating on top.
+  * Click btop. btop has focus.
+  * Press Super+Q. btop closes.
+  * Press Super+W. One window closes.
+  * Press Super+W. The last window closes. The desktop is empty.
+  * Press Super+Space. The menu opens.
+  * Type `btop`. No btop row is offered.
+  * Press Escape. The menu closes.
+  * Press Super+W. Nothing changes. The bar stays.
+  * Press Super+Q. Nothing changes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The btop window class is `org.omarchy.btop`; the floating rule gives it 875×600. A floating window shows desktop margin around it and does not resize its neighbours.
+  * A floating window leaves the terminal's size alone.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of btop floating over the terminal, tiled beside it, floating again, Files tiled underneath, the launcher search with no btop row, and the empty desktop
+  * On success
+  ** Screenshots of btop floating, tiled, floating again, Files tiled under it, the search with no btop row, and the empty desktop
   * If unsuccessful
-  ** Screenshot of what Super+Ctrl+T produced (a tiled window, or nothing); if btop never opened, the output of `omarchy-launch-tui btop` typed in a terminal
+  ** Screenshot of what Super+Ctrl+T produced
 covers: default/hypr/bindings/utilities.lua:104; default/hypr/bindings/tiling.lua:1-2,6; default/hypr/apps/system.lua:2-9; default/omarchy/launcher.hides; config/btop/btop.conf; manual/04:15; manual/07:73; manual/21-tuis.md:19-23
 
 ### window-rules-helper-windows-float-centred   [VM-OK]
@@ -4347,27 +4439,49 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return and type `omarchy-launch-floating-terminal-with-presentation 'sleep 20'` Return: a floating centred window of about 875×600 sits over the tiled terminal. Press Ctrl+C in it.
-  * Type `xdg-terminal-exec --app-id=TUI.float -e sleep 20` Return: another floating centred window of the same size; Ctrl+C in it. Type `xdg-terminal-exec --app-id=TUI.tile -e sleep 20` Return: this one tiles beside the first terminal, not floating; Ctrl+C in it.
-  * Type `imv "$(readlink -f ~/.local/state/omarchy/current/background)" &` Return: the image opens as a floating centred window over the terminal, fully opaque. Press `q` in it. Type `imv /nonexistent.png; echo "exit=$?"` Return: an error and a non-zero exit, no window.
-  * Press Super+Shift+Return (Chromium; click Wait on a "not responding" dialog) and, once it is up, press Ctrl+O in it: a GTK "Open File" dialog floats centred over the tiled browser. Escape closes it; Chromium is still tiled. Close Chromium.
-  ** If Chromium shows its own picker instead of the portal one, record which appeared.
-  * Press Super+Space → About: the About window (logo + fastfetch) floats centred, visibly wider than the 875-pixel floats (~920×480). Press a key or Super+W to close it; open it again from the menu: still floating (it may now have its measured size). Close it.
-  * Press Super+Shift+F: the Nautilus main window opens tiled (only its Open/Save dialogs float). Close it and the terminal; the desktop is empty.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy-launch-floating-terminal-with-presentation 'sleep 20'` and press Return. A floating window opens centred over the terminal.
+  * Click that floating window. It has focus.
+  * Press Ctrl+C. It closes.
+  * Type `xdg-terminal-exec --app-id=TUI.float -e sleep 20` and press Return. Another floating window opens centred over the terminal.
+  * Click that floating window. It has focus.
+  * Press Ctrl+C. It closes.
+  * Type `xdg-terminal-exec --app-id=TUI.tile -e sleep 20` and press Return. A window tiles beside the first terminal.
+  * Click that tiled window. It has focus.
+  * Press Ctrl+C. It closes.
+  * Type `imv "$(readlink -f ~/.local/state/omarchy/current/background)" &` and press Return. The image opens as a floating window over the terminal.
+  * Click the image window. It has focus.
+  * Press `q`. The image window closes.
+  * Type `imv /nonexistent.png; echo "exit=$?"` and press Return. An error appears. The exit is not `0`. No window opens.
+  * Press Super+Shift+Return. Chromium opens. Wait until its window is up.
+  ** If Chromium shows "application not responding", click Wait.
+  * Click Chromium. Chromium has focus.
+  * Press Ctrl+O. A file dialog opens over Chromium.
+  ** If Chromium shows its own picker instead of the portal dialog, record which one appeared.
+  * Press Escape. The dialog closes. Chromium stays tiled.
+  * Press Super+W. Chromium closes.
+  * Press Super+Space. The menu opens.
+  * Click About. The About window opens floating, wider than the earlier floats.
+  * Press Super+W. The About window closes.
+  * Press Super+Space. The menu opens.
+  * Click About. The About window opens floating again.
+  * Press Super+W. The About window closes.
+  * Press Super+Shift+F. Files opens tiled.
+  * Press Super+W. Files closes.
+  * Press Super+W. The terminal closes. The desktop is empty.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Floating windows have a border and are drawn above the tiles with the tiles unchanged behind them — that is the visual tell versus a tiled window that would shrink the others.
-  * Chromium takes 10–20 s to appear on 2 vCPU.
+  * Chromium can take 10–20 seconds to appear.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of the two floating 875×600 windows, the tiled TUI, floating imv, the imv error line, the file dialog floating over the tiled browser, the floating About window twice, and Nautilus tiled
+  * On success
+  ** Screenshots of both floating windows, the tiled TUI, floating imv, the imv error, the file dialog over Chromium, the About window twice, and Files tiled
   * If unsuccessful
-  ** Screenshot of a presentation terminal, dialog or viewer tiled and splitting the workspace, or About at the small float size
+  ** Screenshot of a helper window that tiled, or of About at the smaller float size
 covers: default/hypr/apps/system.lua:2-32,40-51 (floating-window tag, org.omarchy.about, TUI.float); default/hypr/apps/terminals.lua; bin/omarchy-launch-tui; default/omarchy/omarchy-menu.jsonc:32
 
 ### window-rules-browser-opaque-tiled-no-self-maximize   [VM-OK]
@@ -4377,26 +4491,34 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return, then Super+Shift+Return so a terminal and Chromium share the screen (click Wait on a "not responding" dialog).
-  * Look at the terminal over a busy wallpaper area: a hint of wallpaper shows through (0.985/0.96). Press Super+Backspace with the terminal focused: it becomes solid. Press Super+Backspace again: translucent again.
-  ** The difference is subtle; if the screenshot cannot show it, `hyprctl activewindow | grep opaque` flipping true/false is the proof.
-  * Focus Chromium and press Super+T: it must not float (its rule pins it tiled) — record whether it snaps back or ignores the chord.
-  * Double-click an empty part of Chromium's tab strip (its own maximize gesture): nothing changes, the terminal keeps its half.
-  * Press Super+Alt+F with Chromium focused: it fills the workspace; press again to undo.
-  * Close both windows; the desktop is empty.
+  * Press Super+Return. A terminal opens.
+  * Press Super+Shift+Return. Chromium opens beside it.
+  ** If Chromium shows "application not responding", click Wait.
+  * Click the terminal. The terminal has focus.
+  * Type `hyprctl activewindow | grep opaque` and press Return. Record the line.
+  * Press Super+Backspace. The terminal becomes solid.
+  * Type `hyprctl activewindow | grep opaque` and press Return. The line has flipped.
+  * Press Super+Backspace. The terminal is translucent again.
+  * Click Chromium. Chromium has focus.
+  * Press Super+T. Chromium stays tiled. Record whether it snaps back or the chord does nothing.
+  * Double-click an empty part of Chromium's tab strip. Nothing changes. The terminal keeps its half.
+  * Press Super+Alt+F. Chromium fills the workspace. The top bar stays.
+  * Press Super+Alt+F. The split returns.
+  * Press Super+W. The focused window closes.
+  * Press Super+W. The last window closes. The desktop is empty.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Chromium's tab strip is the top ~40 px of its window; double-click right of the tabs.
+  * Chromium's tab strip is the top of its window. Double-click to the right of the tabs.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of the translucent and solid terminal (or the opaque flag flipping), Chromium staying tiled after Super+T, unchanged after the double-click, and maximized after Super+Alt+F
+  * On success
+  ** Screenshots of the translucent and solid terminal, Chromium still tiled after Super+T, unchanged after the double-click, and filling the workspace after Super+Alt+F
   * If unsuccessful
-  ** Chromium floating or maximizing by its own gesture, or Super+Backspace having no effect
+  ** Screenshot of Chromium floating, or of Chromium maximizing from its own gesture
 covers: default/hypr/windows.lua:3,6,25; default/hypr/apps/browser.lua:2-5; default/hypr/bindings/utilities.lua:19; bin/omarchy-hyprland-window-transparency-toggle; manual/07:176
 
 ### window-rule-pip-pinned-top-right   [VM-OK] [NET]
@@ -4406,25 +4528,32 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Shift+Return, open `https://www.w3schools.com/html/mov_bbb.mp4`, right-click the video twice and choose "Picture in picture".
-  ** ~10 MB download; any page with a plain `<video>` works if this one is slow. Click Wait on a "not responding" dialog.
-  * A small borderless video window appears top-right above the browser, about 600×338.
-  * Press Super+2: the PiP window is still visible over the empty workspace (pinned). Press Super+1.
-  * Super+right-drag its corner to resize: it stays 16:9.
-  * Close the PiP (hover → X) and Chromium; the desktop is empty.
+  * Press Super+Shift+Return. Chromium opens.
+  ** If Chromium shows "application not responding", click Wait.
+  * Click the address bar.
+  * Type `https://www.w3schools.com/html/mov_bbb.mp4` and press Enter. The video page loads.
+  * Right-click the video. The video menu opens.
+  ** If that click opens a page menu instead, right-click the video again.
+  * Click Picture in picture. A small borderless window appears at the top-right, over the browser.
+  * Press Super+2. The small window is still visible. Workspace 2 is otherwise empty.
+  * Press Super+1. Workspace 1 is showing. The browser and the small window are both there.
+  * Hold Super and right-drag a corner of the small window. The window stays 16:9.
+  * Hover the small window. A close control appears.
+  * Click the close control. The small window closes.
+  * Press Super+W. Chromium closes. The desktop is empty.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The PiP window's position (top-right, 40 px margins) and lack of border are the visual proof of the `pip` rule.
+  * Any page with a plain video element is fine if this download is slow.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of the PiP top-right on workspace 1 and on workspace 2, and after the resize still 16:9
+  * On success
+  ** Screenshots of the small window at the top-right on workspace 1, still visible on workspace 2, and still 16:9 after the resize
   * If unsuccessful
-  ** PiP tiled, centred, or lost on the workspace switch
+  ** Screenshot of the small window tiled, centred, or missing after the workspace switch
 covers: default/hypr/apps/pip.lua:1-12
 
 ### file-select-portal-dialog-pick-and-cancel   [VM-OK]
@@ -4434,27 +4563,33 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `touch ~/Pictures/pick-me.png` Return.
-  * Type `omarchy file select --title "QA pick" --extensions "png"; echo "exit=$?"` Return; a GTK chooser titled `QA pick` opens floating over the terminal with a `*.png` filter.
-  * Click into `Pictures`, click `pick-me.png`, click Open; expected `/home/prime/Pictures/pick-me.png` and `exit=0` in the terminal.
-  * Type `omarchy file select --title "Cancel me"; echo "exit=$?"` Return; press Escape in the dialog; expected no path and `exit=1`.
-  * Type `omarchy file select --directory --title "Pick folder"; echo "exit=$?"` Return; select `Pictures` and confirm; expected `/home/prime/Pictures`, `exit=0`.
-  * Type `omarchy file select --bogus; echo "exit=$?"` Return; expected `omarchy-file-select: unknown option --bogus`, `exit=2`, no dialog.
-  * Type `rm ~/Pictures/pick-me.png` Return and close the terminal; the desktop is as before.
+  * Press Super+Enter. A terminal opens.
+  * Type `touch ~/Pictures/pick-me.png` and press Return.
+  * Type `omarchy file select --title "QA pick" --extensions "png"; echo "exit=$?"` and press Return. A file chooser titled `QA pick` opens over the terminal.
+  * Click Pictures. The Pictures folder is showing.
+  * Click `pick-me.png`. That file is selected.
+  * Click Open. The dialog closes. The terminal prints `/home/prime/Pictures/pick-me.png`. The last line is `exit=0`.
+  * Type `omarchy file select --title "Cancel me"; echo "exit=$?"` and press Return. A file chooser opens.
+  * Press Escape. The dialog closes. No path is printed. The last line is `exit=1`.
+  * Type `omarchy file select --directory --title "Pick folder"; echo "exit=$?"` and press Return. A folder chooser opens.
+  * Click Pictures. Pictures is selected.
+  * Click Open. The dialog closes. The terminal prints `/home/prime/Pictures`. The last line is `exit=0`.
+  * Type `omarchy file select --bogus; echo "exit=$?"` and press Return. The output includes `unknown option --bogus`. The last line is `exit=2`. No dialog opens.
+  * Type `rm ~/Pictures/pick-me.png` and press Return.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The dialog is a separate floating window (GTK renders oversized at 1× on this guest — expected); hover/click it before typing so keys reach it.
-  * double checking your mouse position before clicking can be useful to prevent failure.
+  * Click the dialog before sending keys, so they reach it.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of the chooser with title and filter floating over the terminal, the printed path with `exit=0`, the cancel `exit=1`, the folder result, and the refused option
+  * On success
+  ** Screenshots of the chooser titled `QA pick`, the printed path with `exit=0`, the cancel with `exit=1`, the folder path, and the refused option with `exit=2`
   * If unsuccessful
-  ** a `GLib.Error`/portal message, no dialog, or a path printed after cancel
+  ** A portal error, no dialog, or a path printed after cancel
 covers: bin/omarchy-file-select
 
 ### focus-app-by-class-across-workspaces   [VM-OK]

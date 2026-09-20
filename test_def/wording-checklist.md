@@ -106,14 +106,14 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `workspace-switch-move-and-silent-move`
 - [x] `workspace-tab-scroll-and-former`
 - [x] `workspace-layout-toggle-scrolling-and-default`
-- [ ] `scratchpad-quake-console`
-- [ ] `desktop-style-toggles-transparency-gaps-square-fullscreen`
-- [ ] `zoom-and-alt-tab-cycle`
-- [ ] `activity-btop-floats-and-tiles`
-- [ ] `window-rules-helper-windows-float-centred`
-- [ ] `window-rules-browser-opaque-tiled-no-self-maximize`
-- [ ] `window-rule-pip-pinned-top-right`
-- [ ] `file-select-portal-dialog-pick-and-cancel`
+- [x] `scratchpad-quake-console`
+- [x] `desktop-style-toggles-transparency-gaps-square-fullscreen`
+- [x] `zoom-and-alt-tab-cycle`
+- [x] `activity-btop-floats-and-tiles`
+- [x] `window-rules-helper-windows-float-centred`
+- [x] `window-rules-browser-opaque-tiled-no-self-maximize`
+- [x] `window-rule-pip-pinned-top-right`
+- [x] `file-select-portal-dialog-pick-and-cancel`
 - [ ] `focus-app-by-class-across-workspaces`
 - [ ] `monitor-scaling-hotkeys-cli-and-panel`
 - [ ] `monitor-state-report-single-display`
