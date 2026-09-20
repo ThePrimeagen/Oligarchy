@@ -258,13 +258,13 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `install-editor-vscode-defaults-and-launcher-uninstall`
 - [x] `install-and-launch-sublime-text-then-uninstall`
 - [x] `install-editor-emacs-aur-build`
-- [ ] `install-terminal-kitty-switch-and-restore-foot`
-- [ ] `install-browser-firefox-default-policies-and-remove`
-- [ ] `dev-env-go-mise-install-remove-and-unknown-name`
-- [ ] `dev-env-python-with-uv-install-and-remove`
-- [ ] `dev-env-rust-rustup-install-and-remove`
+- [x] `install-terminal-kitty-switch-and-restore-foot`
+- [x] `install-browser-firefox-default-policies-and-remove`
+- [x] `dev-env-go-mise-install-remove-and-unknown-name`
+- [x] `dev-env-python-with-uv-install-and-remove`
+- [x] `dev-env-rust-rustup-install-and-remove`
 - [ ] `mise-install-wrapper-and-name-guard`
-- [ ] `install-docker-db-redis-and-escape-cancels-quietly`
+- [x] `install-docker-db-redis-and-escape-cancels-quietly`
 - [ ] `tui-install-launch-and-remove`
 - [ ] `webapp-install-cli-refuses-bad-input-escapes-and-overwrites`
 - [ ] `apps-launcher-delete-key-uninstall-confirm-and-cancel`

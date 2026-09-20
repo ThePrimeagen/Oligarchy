@@ -11344,31 +11344,79 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `echo $TERM` → `foot`. Type `omarchy-install-terminal wezterm; echo rc=$?` → `Unknown terminal: wezterm`, `rc=1`; `omarchy-install-terminal; echo rc=$?` → the usage line, `rc=1`; `omarchy default terminal bogus` → `Usage: omarchy-default-terminal <alacritty|foot|ghostty|kitty>`.
-  * Open the Omarchy Menu (Super+Space) → Install → Terminal: Alacritty, Foot, Ghostty, Kitty with `Foot` dimmed ✓. Click `Kitty`.
-  ** Floating terminal with the logo, `Installing kitty...`, sudo `prime`, pacman output, `● Done! Press any key to close...`. Press a key.
-  * Press Super+Return: the new window is Kitty (class `kitty`, same Starship prompt; software OpenGL — allow 10 s; if foot opens, wait 3 s and press it once more). Type `echo $TERM` → `xterm-kitty`; `omarchy default terminal` → `kitty`; `cat ~/.config/xdg-terminals.list` → last line `kitty.desktop`. Open Apps (Super+Alt+Space), type `kitty` → a Kitty entry is listed. Escape.
-  ** Kitty inherits the system defaults: same font size, padding and theme colours as foot, powerline tab bar at the bottom. In kitty type `kitty @ ls | head -3` → JSON (socket remote control works); `printf '\eP@kitty-cmd{"cmd":"ls"}\e\\'` → no response (remote control via terminal output is rejected).
-  * Menu → Install → Terminal (reopen twice): `Kitty` dimmed ✓. Menu → Setup → Defaults → Terminal: Kitty carries the ✓; select Foot → record whether a `Foot is now the default terminal` notification appears. Press Super+Return: a Foot window opens (`echo $TERM` → `foot`; `tail -1 ~/.config/xdg-terminals.list` → `foot.desktop`). Close the Kitty window.
-  * Apps → `kitty` → highlight the Kitty entry → press Delete → a `Do you want to uninstall …?` dialog naming Kitty → click `Uninstall` → floating terminal `Uninstalling …`, sudo, `Done!`. Press a key.
-  ** Terminals have no Remove counterpart; the launcher Delete key is the only uninstall path and `pacman -Rns` never touches `$HOME`, so `ls -d ~/.config/kitty 2>&1` still lists the directory — expected (03-INTENDED-BEHAVIOUR #30), not a failure.
-  * Apps → `kitty` → gone; `pacman -Q kitty 2>&1` → `was not found`; Menu → Install → Terminal → `Kitty` enabled again; Super+Return still opens foot. Close the terminals with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `echo $TERM` and press Return. The output is `foot`.
+  * Type `omarchy-install-terminal wezterm; echo rc=$?` and press Return. The output includes `Unknown terminal: wezterm` and `rc=1`.
+  * Type `omarchy-install-terminal; echo rc=$?` and press Return. The output is the usage line and `rc=1`.
+  * Type `omarchy default terminal bogus` and press Return. The output is `Usage: omarchy-default-terminal <alacritty|foot|ghostty|kitty>`.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Terminal. Foot is dimmed with a check.
+  * Click Kitty. A floating terminal opens.
+  * Wait until the floating terminal shows `Done! Press any key to close...`.
+  * Press a key. The floating terminal closes.
+  * Press Super+Return. A Kitty window opens.
+  ** If a Foot window opens instead, wait 3 seconds and press Super+Return once more.
+  * Type `echo $TERM` and press Return. The output is `xterm-kitty`.
+  * Type `omarchy default terminal` and press Return. The output is `kitty`.
+  * Type `cat ~/.config/xdg-terminals.list` and press Return. The last line is `kitty.desktop`.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `kitty`. A Kitty entry is listed.
+  * Press Escape. Apps closes.
+  * Click the Kitty window. The Kitty window is focused.
+  * Type `kitty @ ls | head -3` and press Return. The output is JSON.
+  * Type `printf '\eP@kitty-cmd{"cmd":"ls"}\e\\'` and press Return. Nothing is printed.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Terminal. Kitty is dimmed with a check.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Setup, then Defaults, then Terminal. Kitty has the check.
+  * Select Foot. Note whether a notification reads `Foot is now the default terminal`.
+  * Press Super+Return. A Foot window opens.
+  * Type `echo $TERM` and press Return. The output is `foot`.
+  * Type `tail -1 ~/.config/xdg-terminals.list` and press Return. The output is `foot.desktop`.
+  * Click the Kitty window. The Kitty window is focused.
+  * Press Super+W. The Kitty window closes.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `kitty`. The Kitty entry is highlighted.
+  * Press Delete. A dialog asks whether to uninstall Kitty.
+  * Click Uninstall. A floating terminal opens.
+  * Wait until the floating terminal shows `Done!`.
+  * Press a key. The floating terminal closes.
+  * Press Escape. Apps closes.
+  * Click the Foot window. The Foot window is focused.
+  * Type `ls -d ~/.config/kitty 2>&1` and press Return. The directory is still listed.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `kitty`. No Kitty entry is listed.
+  * Press Escape. Apps closes.
+  * Type `pacman -Q kitty 2>&1` and press Return. The output includes `was not found`.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Terminal. Kitty is enabled.
+  * Press Escape. The menu closes.
+  * Press Super+Return. A Foot window opens.
+  * Close the open terminals with Super+W. The desktop is clear.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Kitty renders through software OpenGL here; give it 10 s to appear.
+  * Kitty may take 10 seconds to open. Allow that before deciding it did not start.
   * If the install fails with a network error, screenshot the red `Failed (exit code …)` line and stop.
+  * Kitty inherits the system defaults, so its font size, padding, and colors match Foot.
+  * Terminals have no Remove row. The launcher Delete key is the only uninstall path.
+  * Uninstalling leaves `~/.config/kitty` in place. That is expected (03-INTENDED-BEHAVIOUR #30), not a failure.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** The two rejections and the usage line; Install → Terminal with `Foot` dimmed ✓; the `Done!` line; a Kitty window with `xterm-kitty`, `kitty` and `kitty.desktop`, looking like foot, the `kitty @ ls` JSON and the ignored escape sequence; Kitty in Apps
-  ** The dimmed `Kitty ✓` row; Defaults → Terminal with Kitty ✓ then Foot re-selected (notification or not, noted); the final Foot window with `foot.desktop`
-  ** The uninstall dialog, `Done!`, Apps without Kitty, `was not found`, and the Install row enabled again
+  ** The three refusals show the unknown-terminal line, the usage line, and the default-terminal usage line.
+  ** The install finishes with `Done!`, a Kitty window prints `xterm-kitty`, and the last terminal line is `kitty.desktop`.
+  ** Apps lists Kitty. `kitty @ ls` prints JSON, and the terminal-output remote-control sequence prints nothing.
+  ** Install dims Kitty, Defaults shows that check, and selecting Foot is noted with or without a notification.
+  ** A new terminal then prints `foot` and `foot.desktop`. The Kitty window is closed.
+  ** The uninstall dialog names Kitty, the floating terminal finishes with `Done!`, and `~/.config/kitty` remains.
+  ** Apps no longer lists Kitty, `pacman` says it was not found, the Install row is enabled, and Super+Return opens Foot.
   * If unsuccessful
-  ** The floating terminal's `Failed to install kitty` line, `pacman -Q kitty`, and `cat ~/.config/xdg-terminals.list`
+  ** The floating terminal shows `Failed to install kitty`, `pacman -Q kitty` fails, or `~/.config/xdg-terminals.list` still names Kitty after the switch back.
 covers: manual/15-terminal.md:5-7; default/omarchy/omarchy-menu.jsonc:160-164,239-242 (install.terminal.*, setup.default.terminal); bin/omarchy-install-terminal; bin/omarchy-default-terminal; bin/omarchy-remove-launcher-entry; config/kitty/kitty.conf; etc/xdg/kitty/kitty.conf; config/alacritty/alacritty.toml; config/ghostty/config; docs/file-layout.md (Kitty defaults); test/shell.d/kitty-config-test.sh
 
 ### install-browser-firefox-default-policies-and-remove   [VM-OK] [NET]
@@ -11378,29 +11426,77 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy-install-browser opera; echo rc=$?` and `omarchy-remove-browser chromium; echo rc=$?` → each prints its usage line and `rc=1`. Open the Omarchy Menu (Super+Space) → Install → Browser: Chrome, Edge, Brave, Brave Origin, Firefox, Zen, none dimmed. Click `Firefox`.
-  ** Floating terminal: `Installing Firefox...`, sudo `prime`, ~75 MB download (1–3 min; screenshot every ≤5 s), then `Firefox browser installed. Make it the default via Setup > Defaults > Browser.` and `Done!`. Press a key.
-  * Press Super+Shift+Return: **Chromium** still opens (installing does not promote). Close it. Open Apps (Super+Alt+Space), type `firefox`, Enter: a Firefox window opens (allow 15 s; a welcome tab; not themed by Omarchy — expected).
-  * In Firefox open `about:policies`: the Active table lists `Preferences` with `apz.overscroll.enabled`, `media.ffmpeg.vaapi.enabled`, `media.hardware-video-decoding.force-enabled`, `widget.disable-swipe-tracker`, `widget.wayland.fractional-scale.enabled`, each `Status: default`. Open `about:config`, search `widget.wayland.fractional-scale.enabled` → `true`; double-click to toggle to `false` (editable), double-click again to restore. Close Firefox with Super+W.
-  * Menu → Setup → Defaults → Browser: Chromium has the ✓. Select Firefox → notification `Firefox is now the default browser`. Press Super+Shift+Return: Firefox opens; press Super+Shift+Alt+B: a Firefox **Private Browsing** window opens. Close both. In the terminal `omarchy default browser` → `firefox`; `cat ~/.config/environment.d/omarchy-firefox-wayland.conf` → `MOZ_ENABLE_WAYLAND=1`.
-  * Type `omarchy default browser chromium` → notification `Chromium is now the default browser`. Menu → Install → Browser (reopen twice): `Firefox` dimmed ✓. Menu → Remove → Browser: `Firefox` is listed and Chromium is **not**; click Firefox → floating terminal `Removing Firefox...`, sudo, pacman removes it, `Done!`. Press a key.
-  * In the terminal `pacman -Q firefox 2>&1` → `was not found`; `omarchy default browser` → `chromium`. Apps → `firefox` → no entry; Menu → Remove → Browser row hidden again. Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy-install-browser opera; echo rc=$?` and press Return. The output is the usage line and `rc=1`.
+  * Type `omarchy-remove-browser chromium; echo rc=$?` and press Return. The output is the usage line and `rc=1`.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Browser. No browser row is dimmed.
+  * Click Firefox. A floating terminal opens.
+  * Wait until it shows `Firefox browser installed. Make it the default via Setup > Defaults > Browser.` and `Done!`.
+  * Press a key. The floating terminal closes.
+  * Press Super+Shift+Return. Chromium opens.
+  * Press Super+W. Chromium closes.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `firefox` and press Enter. A Firefox window opens.
+  * Press Ctrl+L. The address bar is focused.
+  * Type `about:policies` and press Enter. The Active table lists `apz.overscroll.enabled`, `media.ffmpeg.vaapi.enabled`, `media.hardware-video-decoding.force-enabled`, `widget.disable-swipe-tracker`, and `widget.wayland.fractional-scale.enabled`, each with `Status: default`.
+  * Press Ctrl+L. The address bar is focused.
+  * Type `about:config` and press Enter. The config page opens.
+  * Type `widget.wayland.fractional-scale.enabled` and press Enter. The value is `true`.
+  * Double-click that preference. The value becomes `false`.
+  * Double-click that preference. The value returns to `true`.
+  * Press Super+W. Firefox closes.
+  * Press Super+Space. The menu opens.
+  * Select Setup, then Defaults, then Browser. Chromium has the check.
+  * Select Firefox. A notification reads `Firefox is now the default browser`.
+  * Press Super+Shift+Return. Firefox opens.
+  * Press Super+Shift+Alt+B. A Firefox Private Browsing window opens.
+  * Press Super+W. The private window closes.
+  * Press Super+W. Firefox closes.
+  * Click the terminal. The terminal is focused.
+  * Type `omarchy default browser` and press Return. The output is `firefox`.
+  * Type `cat ~/.config/environment.d/omarchy-firefox-wayland.conf` and press Return. The output includes `MOZ_ENABLE_WAYLAND=1`.
+  * Type `omarchy default browser chromium` and press Return. A notification reads `Chromium is now the default browser`.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Browser. Firefox is dimmed with a check.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Remove, then Browser. Firefox is listed and Chromium is not.
+  * Click Firefox. A floating terminal opens.
+  * Wait until it shows `Removing Firefox...` and then `Done!`.
+  * Press a key. The floating terminal closes.
+  * Click the terminal. The terminal is focused.
+  * Type `pacman -Q firefox 2>&1` and press Return. The output includes `was not found`.
+  * Type `omarchy default browser` and press Return. The output is `chromium`.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `firefox`. No Firefox entry is listed.
+  * Press Escape. Apps closes.
+  * Press Super+Space. The menu opens.
+  * Select Remove. Browser is not listed.
+  * Press Escape. The menu closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Firefox on 2 vCPU may raise Hyprland's "not responding" dialog while starting — click Wait.
-  * `firefox about:policies &` typed in the terminal is an alternative way to reach the policies page.
+  * The Firefox install downloads about 75 MB and can take 1 to 3 minutes. Screenshot about every 5 seconds until `Done!`.
+  * Firefox may take 15 seconds to open. A welcome tab that is not themed by Omarchy is expected.
+  * On 2 vCPU, Hyprland may say Firefox is not responding while it starts. Click Wait.
+  * `firefox about:policies` typed in a terminal is another way to open the policies page.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Both usage rejections; the install completion line and `Done!`; Chromium still opening on the hotkey; Firefox in Apps and its window; about:policies with the five entries and the editable about:config pref
-  ** The `Firefox is now the default browser` notification; Firefox and its Private window opened by the hotkeys; `firefox` and `MOZ_ENABLE_WAYLAND=1` from the CLI
-  ** The `Chromium is now the default browser` notification; the dimmed row; Remove → Browser listing Firefox without Chromium; `Removing Firefox...` → `Done!`; `was not found`, `chromium`, and the launcher and Remove submenu without Firefox
+  ** Both bad browser names print a usage line and exit 1.
+  ** The install finishes with the default-browser hint and `Done!`, and Super+Shift+Return still opens Chromium.
+  ** Apps opens Firefox. `about:policies` lists the five preferences as default, and the Wayland preference toggles from true to false and back to true.
+  ** Selecting Firefox notifies `Firefox is now the default browser`. The browser hotkey opens Firefox and the private hotkey opens a Private Browsing window.
+  ** `omarchy default browser` prints `firefox`, and the environment file contains `MOZ_ENABLE_WAYLAND=1`.
+  ** Switching back notifies `Chromium is now the default browser`. Install dims Firefox, and Remove lists Firefox without Chromium.
+  ** Removal finishes with `Done!`. `pacman` says Firefox was not found, the default is `chromium`, Apps has no Firefox entry, and Remove no longer lists Browser.
   * If unsuccessful
-  ** The floating terminal's `Failed` text, Firefox not starting (screenshot 15 s after Enter), about:policies showing "No policies", or `xdg-settings get default-web-browser`
+  ** The floating terminal shows `Failed`, Firefox does not start within 15 seconds, `about:policies` says "No policies", or `xdg-settings get default-web-browser` names a different browser.
 covers: manual/23-browsers.md:5-17,31-39; default/omarchy/omarchy-menu.jsonc:152-159,217-222,304-309 (install.browser.firefox, remove.browser.firefox, setup.default.browser); bin/omarchy-install-browser; bin/omarchy-remove-browser; bin/omarchy-default-browser; bin/omarchy-launch-browser; install/helpers/browser-policy.sh; default/firefox/policies.json; test/shell.d/browser-policy-dir-test.sh
 
 ### dev-env-go-mise-install-remove-and-unknown-name   [VM-OK] [NET]
@@ -11410,30 +11506,56 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open the Omarchy Menu (Super+Space) → Install → Development. Rows: Ruby on Rails, Docker DB, JavaScript, Go, PHP, Python, Elixir, Zig, Rust, Java, .NET, OCaml, Clojure, Scala. Open JavaScript: `Node.js` dimmed ✓ (preinstalled), Bun and Deno selectable. Go back.
-  * Select Go. A floating terminal shows `Installing Go...` and mise downloading/installing `go@latest` (`mise go@1.x.y ✓ installed`), then `● Done!`. Press a key when done (allow 2 minutes, screenshot every ≤5 s).
-  * Press Super+Return (a *new* shell). Type `go version` → `go version go1.x linux/amd64`; `mise ls go` → the installed version.
-  * Unknown name: type `omarchy-install-dev-env; echo exit=$?` → the usage line, `exit=1`; `omarchy-install-dev-env cobol; echo exit=$?` → intended `Unknown environment: cobol`, `exit=1`; `omarchy-remove-dev-env cobol; echo exit=$?` → `Unknown environment: cobol`, `exit=1` (correct today).
-  ** Observed at HEAD the installer prints nothing and exits 0 for `cobol` — screenshot it and record defect #5. `omarchy install dev-env …` is the same command through the router.
-  ** Node.js is provisioned at install (its row is dimmed ✓, `node --version` already works), so the Node.js install → `omarchy-remove-dev-env node` → reinstall round trip is not run here; Go stands in for the mise path.
-  * Menu → Install → Development (reopen twice): `Go` dimmed ✓. Menu → Remove → Development is now present and lists Go; select it, wait for `Done!`, press a key.
-  * In a new terminal (Super+Return) type `go version` → `command not found` (or mise reporting no version installed). Menu → Remove: the Development row is hidden again. Close the terminals with Super+W.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Development. The Development list is showing.
+  * Select JavaScript. Node.js is dimmed with a check.
+  * Go back to Development. The Development list is showing.
+  * Select Go. A floating terminal opens.
+  * Wait until it shows `Done!`.
+  * Press a key. The floating terminal closes.
+  * Press Super+Return. A new terminal opens.
+  * Type `go version` and press Return. The output starts with `go version go1.` and includes `linux/amd64`.
+  * Type `mise ls go` and press Return. The installed version is listed.
+  * Type `omarchy-install-dev-env; echo exit=$?` and press Return. The output is the usage line and `exit=1`.
+  * Type `omarchy-install-dev-env cobol; echo exit=$?` and press Return. The intended output is `Unknown environment: cobol` and `exit=1`.
+  ** If the command prints nothing and `exit=0`, record defect #5 and continue.
+  * Type `omarchy-remove-dev-env cobol; echo exit=$?` and press Return. The output is `Unknown environment: cobol` and `exit=1`.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Development. Go is dimmed with a check.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Remove, then Development. Go is listed.
+  * Select Go. A floating terminal opens.
+  * Wait until it shows `Done!`.
+  * Press a key. The floating terminal closes.
+  * Press Super+Return. A new terminal opens.
+  * Type `go version` and press Return. The output is `command not found`, or mise reports that no version is installed.
+  * Press Super+Space. The menu opens.
+  * Select Remove. Development is not listed.
+  * Press Escape. The menu closes.
+  * Close the open terminals with Super+W. The desktop is clear.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Use a *new* terminal after install and after remove so the shell re-evaluates mise shims.
-  * If the download fails, screenshot the red `Failed` line and `mise ls | sudo tee /dev/ttyS0` read via get-serial.
+  * The Go install can take 2 minutes. Screenshot about every 5 seconds until `Done!`.
+  * Use a new terminal after installing and after removing so the shell re-evaluates mise shims.
+  * Node.js is already provisioned, so this test uses Go for the mise install and remove path. Bun and Deno stay selectable and are not installed here.
+  * `omarchy install dev-env` is the same installer through the router.
+  * If the download fails, screenshot the red `Failed` line, then run `mise ls | sudo tee /dev/ttyS0` and read it with get-serial.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of JavaScript → Node.js dimmed ✓; the Go install `Done!`; `go version` and `mise ls go`
-  ** Both `cobol` commands refusing with `Unknown environment: cobol` and `exit=1`
-  ** Go dimmed ✓ under Install and listed under Remove; the post-removal `command not found` and the hidden Remove → Development row
+  ** JavaScript shows Node.js dimmed with a check, and the Go install finishes with `Done!`.
+  ** A new shell prints a Go 1 version for linux/amd64, and `mise ls go` lists that version.
+  ** A missing argument prints the usage line and exits 1. Removing `cobol` prints `Unknown environment: cobol` and exits 1.
+  ** Installing `cobol` also prints `Unknown environment: cobol` and exits 1. Silence with exit 0 is defect #5 and is recorded.
+  ** Install dims Go, Remove lists it, and removal finishes with `Done!`.
+  ** A new shell then cannot run `go`, and Remove no longer lists Development.
   * If unsuccessful
-  ** The installer silent with `exit=0` for `cobol` (defect #5 present — capture it), or the failed floating terminal and the serial `mise ls` output
+  ** The floating terminal shows `Failed`, `go version` fails after a successful install, or Go remains installed after removal.
 covers: manual/18-development-tools.md:13-19; default/omarchy/omarchy-menu.jsonc:263-284,330-350 (install.development.*, remove.development.*, install.development.javascript.node, remove.development.javascript.node); bin/omarchy-install-dev-env (go, node, arg handling); bin/omarchy-remove-dev-env (go, node, unknown); install/user/mise-work.sh; test/shell.d/dev-env-path-test.sh
 
 ### dev-env-python-with-uv-install-and-remove   [VM-OK] [NET]
@@ -11443,26 +11565,43 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal (Super+Enter) and type `uv --version` → `command not found`.
-  * Type `omarchy-install-dev-env python` → `Installing Python...`, mise downloads a prebuilt CPython (~40 MB), then `Installing uv...` and the uv installer's `installing to /home/prime/.local/bin`.
-  ** The uv installer may mention adding to PATH; `~/.local/bin` is already on PATH in Omarchy.
-  * Open a new terminal (Super+Enter): `python --version; uv --version` → `Python 3.1x` and `uv 0.x`.
-  * Open the Omarchy Menu (Super+Space) → Install → Development (reopen twice): `Python` dimmed ✓; Remove → Development lists Python. Escape.
-  * In the terminal type `omarchy-remove-dev-env python` → `Removing Python...` … `Done!`.
-  * New terminal: `uv --version` → `command not found`; `which python` → `/usr/bin/python` or nothing (mise's Python gone). Close the terminals with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `uv --version` and press Return. The output is `command not found`.
+  * Type `omarchy-install-dev-env python` and press Return. The output includes `Installing Python...`.
+  * Wait until the output includes `Installing uv...` and the prompt returns.
+  * Press Super+Return. A new terminal opens.
+  * Type `python --version` and press Return. The output starts with `Python 3.`.
+  * Type `uv --version` and press Return. The output starts with `uv 0.`.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Development. Python is dimmed with a check.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Remove, then Development. Python is listed.
+  * Press Escape. The menu closes.
+  * Click the first terminal. That terminal is focused.
+  * Type `omarchy-remove-dev-env python` and press Return. The output includes `Removing Python...`.
+  * Wait until the output finishes with `Done!`.
+  * Press Super+Return. A new terminal opens.
+  * Type `uv --version` and press Return. The output is `command not found`.
+  * Type `which python` and press Return. The output is `/usr/bin/python`, or the command prints nothing.
+  * Close the open terminals with Super+W. The desktop is clear.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * mise and the uv installer print progress on stderr; screenshot every ≤5 s until the prompt returns.
+  * mise and the uv installer print progress on stderr. Screenshot about every 5 seconds until the prompt returns.
+  * The uv installer may mention adding a directory to PATH. `~/.local/bin` is already on PATH.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** `command not found` before; the mise and uv installer output; both versions in a new shell; the dimmed row and the Remove row; `Done!`; uv gone and python back to the system one
+  ** `uv` is missing before the install, and the installer prints both the Python and uv stages.
+  ** A new shell prints a Python 3 version and a uv 0 version.
+  ** Install dims Python, and Remove lists Python.
+  ** Removal finishes with `Done!`. A new shell cannot find `uv`, and `python` is the system binary or missing.
   * If unsuccessful
-  ** The curl or mise error text
+  ** mise or the uv installer prints an error, `uv` stays missing after the install, or `uv` remains after removal.
 covers: bin/omarchy-install-dev-env (python); bin/omarchy-remove-dev-env (python); default/omarchy/omarchy-menu.jsonc (install.development.python, remove.development.python)
 
 ### dev-env-rust-rustup-install-and-remove   [VM-OK] [NET] [SLOW]
@@ -11472,25 +11611,49 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `cargo --version; ls -d ~/.rustup 2>&1` → `command not found` and `No such file`. Open the Omarchy Menu (Super+Space) → Install → Development: `Rust` enabled; select it.
-  ** Floating terminal: `Installing Rust...`, rustup downloads the stable toolchain (2–5 min; screenshot every 5 s), `Rust is installed now. Great!`, `Done!`. Press a key.
-  * Open a new terminal (Super+Enter) and type `cargo --version` → `cargo 1.x`.
-  * Menu → Install → Development (reopen twice): `Rust` dimmed ✓; Menu → Remove → Development is present and lists Rust.
-  * Remove → Development → Rust → floating terminal `Removing Rust...` → `Done!`. Press a key.
-  * New terminal: `cargo --version; ls -d ~/.rustup 2>&1` → `command not found` and `No such file`. Menu → Install → Development: `Rust` enabled again. Close the terminals with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `cargo --version` and press Return. The output is `command not found`.
+  * Type `ls -d ~/.rustup 2>&1` and press Return. The output includes `No such file`.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Development. Rust is enabled.
+  * Select Rust. A floating terminal opens.
+  * Wait until it shows `Rust is installed now. Great!` and `Done!`.
+  * Press a key. The floating terminal closes.
+  * Press Super+Return. A new terminal opens.
+  * Type `cargo --version` and press Return. The output starts with `cargo 1.`.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Development. Rust is dimmed with a check.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Remove, then Development. Rust is listed.
+  * Select Rust. A floating terminal opens.
+  * Wait until it shows `Removing Rust...` and `Done!`.
+  * Press a key. The floating terminal closes.
+  * Press Super+Return. A new terminal opens.
+  * Type `cargo --version` and press Return. The output is `command not found`.
+  * Type `ls -d ~/.rustup 2>&1` and press Return. The output includes `No such file`.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Development. Rust is enabled.
+  * Press Escape. The menu closes.
+  * Close the open terminals with Super+W. The desktop is clear.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * If the download exceeds the budget, Ctrl+C in the floating terminal and report SLOW with the progress reached.
+  * The rustup download can take 2 to 5 minutes. Screenshot every 5 seconds until `Done!`.
+  * If the download exceeds the budget, press Ctrl+C in the floating terminal and report SLOW with the progress reached.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** rustup's completion line and `Done!`; the cargo version; the dimmed row; the removal; `command not found` and `~/.rustup` gone
+  ** `cargo` is missing and `~/.rustup` does not exist before the install.
+  ** rustup finishes with `Rust is installed now. Great!` and `Done!`.
+  ** A new shell prints a cargo 1 version, and Install dims Rust.
+  ** Remove lists Rust and finishes with `Done!`.
+  ** A new shell then cannot find `cargo`, `~/.rustup` is gone, and the Install row is enabled again.
   * If unsuccessful
-  ** The rustup/curl error text
+  ** rustup or curl prints an error, `cargo` stays missing after the install, or `~/.rustup` remains after removal.
 covers: bin/omarchy-install-dev-env (rust); bin/omarchy-remove-dev-env (rust); default/omarchy/omarchy-menu.jsonc (install.development.rust, remove.development.rust)
 
 ### mise-install-wrapper-and-name-guard   [VM-OK] [NET]
@@ -11533,27 +11696,41 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open the Omarchy Menu (Super+Space) → Install → Development → Docker DB: a floating terminal with the gum picker `Select database (return to install, esc to cancel)` listing MySQL, PostgreSQL, Redis, MongoDB, MariaDB, MSSQL.
-  * Press Escape and read the output exactly → intended: only `No databases selected for installation.` then `Done!`; nothing installed. Press a key.
-  ** Observed at HEAD: `…/omarchy-install-docker-dbs: line 9: main_menu: command not found` precedes that line — screenshot it and record defect #6.
-  * Menu → Install → Development → Docker DB again; arrow to `Redis`, Enter → `Installing Redis...`, sudo `prime`, docker pulls `redis:7` and prints a long container id, `Done!`. Press a key.
-  * Open a terminal (Super+Enter) and type `sudo docker ps --format '{{.Names}} {{.Ports}}'` → `redis 127.0.0.1:6379->6379/tcp`; `sudo docker exec redis redis-cli ping` → `PONG`.
-  * Type `omarchy-install-docker-dbs Redis` → docker answers `Conflict. The container name "/redis" is already in use` (no duplicate guard; note it).
-  * Type `sudo docker rm -f redis` then `sudo docker ps` → the container is gone (empty list). Close the terminal with Super+W.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Development, then Docker DB. A picker asks to select a database.
+  * Press Escape. The intended output is only `No databases selected for installation.` and then `Done!`.
+  ** If `main_menu: command not found` appears before that line, record defect #6 and continue.
+  * Press a key. The floating terminal closes.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Development, then Docker DB. A picker asks to select a database.
+  * Select Redis and press Enter. A floating terminal shows `Installing Redis...`.
+  * Wait until it shows `Done!`.
+  * Press a key. The floating terminal closes.
+  * Press Super+Return. A terminal opens.
+  * Type `sudo docker ps --format '{{.Names}} {{.Ports}}'` and press Return. The output includes `redis` and `127.0.0.1:6379->6379/tcp`.
+  * Type `sudo docker exec redis redis-cli ping` and press Return. The output is `PONG`.
+  * Type `omarchy-install-docker-dbs Redis` and press Return. The output includes `Conflict. The container name "/redis" is already in use`.
+  * Type `sudo docker rm -f redis` and press Return. The container is removed.
+  * Type `sudo docker ps` and press Return. The list is empty.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Docker's socket is root-only by default in Omarchy (the user is deliberately not in the docker group), hence the sudo prompt inside the floating terminal and `sudo docker` in the terminal.
-  * If docker is not running, type `sudo systemctl start docker` and retry once.
+  * Docker's socket is root-only, so the floating terminal and the terminal commands use sudo.
+  * If Docker is not running, type `sudo systemctl start docker` and retry the install once.
+  * The picker lists MySQL, PostgreSQL, Redis, MongoDB, MariaDB, and MSSQL. Choose Redis.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** The picker; the quiet `No databases selected for installation.` after Escape; `Installing Redis...` with the pull and container id; `docker ps` with the port binding and `PONG`; the conflict error; the empty `docker ps` after cleanup
+  ** Escape prints `No databases selected for installation.` and then `Done!`. A preceding `main_menu: command not found` line is defect #6 and is recorded.
+  ** Selecting Redis prints `Installing Redis...` and finishes with `Done!`.
+  ** `docker ps` shows the Redis container on `127.0.0.1:6379`, and `redis-cli ping` returns `PONG`.
+  ** A second install reports that the name `/redis` is already in use. After `docker rm -f redis`, `docker ps` is empty.
   * If unsuccessful
-  ** The `main_menu: command not found` line after Escape (defect #6 present — capture it), or Docker's daemon/pull error text and `sudo docker ps -a`
+  ** Docker's daemon or pull error is visible, the container never answers `PONG`, or the cancel path installs a database.
 covers: bin/omarchy-install-docker-dbs; default/omarchy/omarchy-menu.jsonc:264 (install.development.docker-dbs); bin/omarchy-sudo-docker; manual/18-development-tools.md:29
 
 ### tui-install-launch-and-remove   [VM-OK]
