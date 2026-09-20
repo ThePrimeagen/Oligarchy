@@ -18940,25 +18940,31 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter. Type `mkdir -p /tmp/ez/sub/deep && cd /tmp/ez && touch .hidden sub/file sub/deep/leaf visible` + Enter.
-  * Type `ls` + Enter → a long listing (permissions, size, date) with icons; `sub` listed before `visible`; `.hidden` absent.
-  * Type `lsa` + Enter → same, now including `.hidden`.
-  * Type `lt` + Enter → a tree two levels deep: `sub` → `deep` and `file`; `leaf` must NOT be shown (level 2 cap). Type `lta` + Enter → the tree including `.hidden`.
-  * Type `type ls` + Enter → `ls is aliased to 'eza -lh --group-directories-first --icons=auto'`.
-  * Type `ls /nonexistent-zz` + Enter → an eza "No such file or directory" error and the prompt shows `✗`. Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `mkdir -p /tmp/ez/sub/deep && cd /tmp/ez && touch .hidden sub/file sub/deep/leaf visible` and press Return. The prompt returns.
+  * Type `ls` and press Return. The listing is long format with icons. `sub` is before `visible`. `.hidden` is not listed.
+  * Type `lsa` and press Return. `.hidden` is listed.
+  * Type `lt` and press Return. The tree shows `sub`, then `deep` and `file`. `leaf` is not shown.
+  * Type `lta` and press Return. The same tree includes `.hidden`.
+  * Type `type ls` and press Return. The output is `ls is aliased to 'eza -lh --group-directories-first --icons=auto'`.
+  * Type `ls /nonexistent-zz; echo "exit=$?"` and press Return. The output says the path does not exist, and the last line is non-zero.
+  * Look at the next prompt. It shows `✗`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Icons render only because the terminal font is a Nerd Font; if they show as boxes, report it. Plain coreutils output (no icons, no grouping) means eza is missing; report it.
+  * Icons need a Nerd Font. Boxes instead of icons, or plain GNU ls output, is a failure. Report which you saw.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of each listing, the `type ls` line, and the error for the bad path
+  ** `ls` is long format, directories first, with icons, and without `.hidden`. `lsa` includes `.hidden`.
+  ** `lt` stops at two levels, so `leaf` is hidden. `lta` includes `.hidden`.
+  ** `type ls` prints the eza alias. A missing path prints an error, exits non-zero, and the next prompt shows `✗`.
   * If unsuccessful
-  ** Screenshot of the deviating listing (e.g. GNU ls output) or a hang
+  ** The listing is plain GNU ls, icons are boxes, or the tree shows `leaf`.
 covers: manual/19-shell-tools.md:29-33; default/bash/aliases:2-7 (eza block)
 
 ### compress-decompress-roundtrip   [VM-OK]
@@ -18968,25 +18974,33 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter. Type `mkdir -p /tmp/cz/data && cd /tmp/cz && echo payload > data/file.txt` + Enter.
-  * Type `compress data/ && ls` + Enter → `data  data.tar.gz` (the trailing slash must not produce `data/.tar.gz`).
-  * Type `mkdir out && cd out && decompress ../data.tar.gz && cat data/file.txt` + Enter → `payload`.
-  * Type `cd /tmp/cz && compress; echo rc=$?; ls -a | grep tar` + Enter → a tar error (`tar: Cowardly refusing to create an empty archive` or `Cannot stat`), a non-zero `rc`, and only `data.tar.gz` listed — record whether a stray `.tar.gz` was created.
-  * Type `decompress missing.tar.gz` + Enter → `tar: missing.tar.gz: Cannot open: No such file or directory`.
-  * Type `type compress decompress` + Enter → a function and an alias. Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `mkdir -p /tmp/cz/data && cd /tmp/cz && echo payload > data/file.txt` and press Return. The prompt returns.
+  * Type `compress data/; echo "exit=$?"` and press Return. The last line is `exit=0`.
+  * Type `ls` and press Return. The listing includes `data` and `data.tar.gz`. `data/.tar.gz` is not listed.
+  * Type `mkdir out && cd out && decompress ../data.tar.gz && cat data/file.txt` and press Return. The last line is `payload`.
+  * Type `cd /tmp/cz && compress; echo "exit=$?"` and press Return. tar refuses to create an empty archive, and the last line is non-zero.
+  * Type `ls -a *.tar.gz` and press Return. Only `data.tar.gz` is listed.
+  * Type `decompress missing.tar.gz; echo "exit=$?"` and press Return. tar says the file cannot be opened, and the last line is non-zero.
+  * Type `type compress` and press Return. The output says `compress` is a function.
+  * Type `type decompress` and press Return. The output says `decompress` is an alias.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The negative results are printed lines; screenshot right after each command.
+  * Screenshot as soon as an error is printed.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the listing with `data.tar.gz`, `payload` after decompress, and both error lines with return codes
+  ** `compress data/` exits 0 and creates `data.tar.gz`, not `data/.tar.gz`.
+  ** Decompressing into `out` prints `payload`.
+  ** A bare `compress` prints a tar error, exits non-zero, and leaves only `data.tar.gz`.
+  ** A missing archive prints a tar error and exits non-zero. `compress` is a function and `decompress` is an alias.
   * If unsuccessful
-  ** Screenshot of a silent no-arg compress, a stray archive, or a decompress that does nothing; `ls -la /tmp/cz`
+  ** A bare compress writes a stray archive, or decompress does not print `payload`.
 covers: manual/20-shell-functions.md:5-8; default/bash/fns/compression
 
 ### drive-helpers-usage-and-declined-format   [VM-OK]
@@ -18996,26 +19010,32 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter. Type `iso2sd; echo rc=$?` + Enter → `Usage: iso2sd <input_file> [output_device]`, an `Example:` line, `rc=1`.
-  * Type `touch /tmp/fake.iso && iso2sd /tmp/fake.iso; echo rc=$?` + Enter → `No SD drives found and no drive specified`, `rc=1` (there are no `/dev/sd*` devices in this guest). No sudo prompt must appear.
-  * Type `format-drive` + Enter → `Usage: format-drive <device> <name>`, an example, then `Available drives:` followed by `/dev/vda` (and possibly `/dev/zram0`).
-  * Type `format-drive /dev/vda` + Enter (one argument) → the same usage + drive list; nothing else.
-  * Type `format-drive /dev/null Probe` + Enter → `WARNING: This will completely erase all data on /dev/null and label it 'Probe'.` and `Are you sure you want to continue? (y/N):` — type `n` and Enter. The prompt returns with no further output.
-  * Type `lsblk` + Enter → the vda partitions unchanged. Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `iso2sd; echo "exit=$?"` and press Return. Usage is printed, and the last line is `exit=1`.
+  * Type `touch /tmp/fake.iso && iso2sd /tmp/fake.iso; echo "exit=$?"` and press Return. The output says no SD drives were found, and the last line is `exit=1`.
+  * Wait 2 seconds. No sudo prompt appears.
+  * Type `format-drive` and press Return. Usage is printed, then an available-drives list that includes `/dev/vda`.
+  * Type `format-drive /dev/vda` and press Return. The same usage and drive list are printed.
+  * Type `format-drive /dev/null Probe` and press Return. A warning says this would erase `/dev/null` and label it `Probe`.
+  * Type `n` and press Return. The prompt returns. Nothing else is printed.
+  * Type `lsblk` and press Return. The `vda` partitions are unchanged from the drive list.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * NEVER answer `y` (or anything but `n`/Ctrl+C); `/dev/null` is used only to reach the confirmation prompt safely — declining runs nothing.
-  * If a `/dev/sd*` device unexpectedly exists, stop the iso2sd step at the drive picker and press Escape.
+  * Never type `y`. `/dev/null` only reaches the confirmation. Declining runs nothing.
+  * If a `/dev/sd*` device exists, stop at the drive picker and press Escape. Do not write to a disk.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of each usage output, the "No SD drives found" line, the drive list showing `/dev/vda`, the WARNING prompt, the declined confirmation, and `lsblk` unchanged
+  ** Bare `iso2sd` prints usage and exits 1. The fake ISO reports no SD drives, exits 1, and shows no sudo prompt.
+  ** Bare `format-drive` and one argument both print usage and list `/dev/vda`.
+  ** The probe warning is declined with `n`, and `lsblk` still shows the same `vda` partitions.
   * If unsuccessful
-  ** Screenshot of any sudo/dd/parted activity (a serious failure) and `lsblk`
+  ** A sudo, `dd`, or `parted` prompt appears, or `lsblk` changes.
 covers: manual/20-shell-functions.md:10-14; default/bash/fns/drives
 
 ### git-worktree-ga-gd   [VM-OK]
@@ -19025,26 +19045,39 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter. Type `mkdir -p /tmp/wt/repo && cd /tmp/wt/repo && git init -q && git config user.email t@e.st && git config user.name T && git commit -q --allow-empty -m init` + Enter.
-  * Type `ga; echo rc=$?` + Enter → `Usage: ga [branch name]`, `rc=1`.
-  * Type `ga feature` + Enter. git prints `Preparing worktree (new branch 'feature')`; `pwd` + Enter → `/tmp/wt/repo--feature`; `git branch --show-current` + Enter → `feature`.
-  * Type `gd` + Enter → a gum confirmation `Remove worktree and branch?`. Choose **No**. `pwd` + Enter → still `/tmp/wt/repo--feature`.
-  * Type `gd` + Enter → choose **Yes**. It prints `Deleted branch feature …`; `pwd` + Enter → `/tmp/wt/repo`; `ls /tmp/wt` + Enter → only `repo`.
-  * Type `cd /tmp/wt && gd` + Enter → choose Yes: because the directory name has no `--`, nothing must be removed and `ls` still shows `repo`. Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `mkdir -p /tmp/wt/repo && cd /tmp/wt/repo && git init -q && git config user.email t@e.st && git config user.name T && git commit -q --allow-empty -m init` and press Return. The prompt returns.
+  * Type `ga; echo "exit=$?"` and press Return. The output includes `Usage: ga [branch name]`, and the last line is `exit=1`.
+  * Type `ga feature` and press Return. git prints `Preparing worktree (new branch 'feature')`.
+  * Type `pwd` and press Return. The output is `/tmp/wt/repo--feature`.
+  * Type `git branch --show-current` and press Return. The output is `feature`.
+  * Type `gd` and press Return. A confirmation asks `Remove worktree and branch?`.
+  * Select No and press Return. The prompt returns.
+  * Type `pwd` and press Return. The output is still `/tmp/wt/repo--feature`.
+  * Type `gd` and press Return. The same confirmation opens.
+  * Select Yes and press Return. The output says branch `feature` was deleted.
+  * Type `pwd` and press Return. The output is `/tmp/wt/repo`.
+  * Type `ls /tmp/wt` and press Return. The only entry is `repo`.
+  * Type `cd /tmp/wt && gd` and press Return. The confirmation opens.
+  * Select Yes and press Return. The prompt returns. Nothing is removed.
+  * Type `ls /tmp/wt` and press Return. `repo` is still the only entry.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * `mise trust` inside `ga` may print a line about trusting the directory; that is fine.
-  * gum confirm: Left/Right moves, Enter chooses; the highlighted button is the selection.
+  * A `mise trust` line during `ga` is fine.
+  * Left and Right move the gum buttons. Enter chooses the highlighted one. Screenshot the dialog before choosing.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the usage line, the worktree creation with `pwd`, the confirm dialog and the state after No, the deletion output with `pwd` back in `repo`, and the no-op on a non-worktree directory
+  ** Bare `ga` prints usage and exits 1. `ga feature` creates `/tmp/wt/repo--feature` on branch `feature`.
+  ** Choosing No leaves the worktree in place. Choosing Yes deletes it and returns to `/tmp/wt/repo`.
+  ** From `/tmp/wt`, choosing Yes removes nothing and `repo` remains.
   * If unsuccessful
-  ** Screenshot of a worktree removed without confirmation or `gd` deleting a non-worktree directory; `git worktree list`
+  ** A worktree is removed without confirmation, or `gd` deletes a directory that is not a worktree.
 covers: manual/20-shell-functions.md:26-29; default/bash/fns/worktrees
 
 ### git-aliases-and-config-defaults   [VM-OK]
@@ -19054,28 +19087,31 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter and type `mkdir -p /tmp/gx && cd /tmp/gx && g init && g st` Enter.
-  ** "Initialized empty Git repository" and `On branch master`.
-  * Type `echo a > a && git add a && gcm first` Enter.
-  ** If no identity was set at install, git prints "Please tell me who you are" (expected). Then type `git config user.name T && git config user.email t@e.com && gcm first` Enter → the commit succeeds. If an identity exists it succeeds at once; record which.
-  * Type `echo b >> a && gcam second && gcad --no-edit && git log --oneline` Enter → two commits.
-  * Type `git init -q --bare /tmp/gx-remote && git remote add origin /tmp/gx-remote && git push` Enter.
-  ** Push succeeds and prints that `master` is set up to track `origin/master` (no `-u` needed).
-  * Type `git co -b feature && git br` Enter → `* feature` above `master`.
-  * Press Ctrl+D; the desktop is as before.
+  * Press Super+Return. A terminal opens.
+  * Type `mkdir -p /tmp/gx && cd /tmp/gx && g init && g st` and press Return. The output says the repository was initialized and is on branch `master`.
+  * Type `echo a > a && git add a && gcm first` and press Return. Record the result.
+  ** If git says who you are is unset, type `git config user.name T && git config user.email t@e.com && gcm first` and press Return. The commit succeeds.
+  ** If an identity already exists, the first `gcm` succeeds. Record which happened.
+  * Type `echo b >> a && gcam second && gcad --no-edit` and press Return. The prompt returns. No editor opens.
+  * Type `git log --oneline` and press Return. Two commits are listed.
+  * Type `git init -q --bare /tmp/gx-remote && git remote add origin /tmp/gx-remote && git push` and press Return. The push says `master` tracks `origin/master`.
+  * Type `git co -b feature && git br` and press Return. `* feature` is listed above `master`.
+  * Press Ctrl+D. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * `gcad` opens no editor because of `--no-edit`; if an editor opens anyway type `:q` Enter.
+  * If `gcad` opens an editor, press Escape, type `:q!`, and press Return. That is a failure.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of `master` on init, the identity message (or immediate success), the two-commit log, the auto-upstream push text, and the branch list
+  ** `g init` starts on `master`. The first commit either succeeds or, after the identity is set, succeeds. Which one is recorded.
+  ** `gcam` and `gcad --no-edit` add a second commit without an editor.
+  ** A push with no `-u` tracks `origin/master`. `git co` and `git br` show `* feature` above `master`.
   * If unsuccessful
-  ** Screenshot of `main` as default, a push refused for missing upstream, or an alias not found
+  ** The default branch is `main`, the push is refused for a missing upstream, or an alias is not found.
 covers: config/git/config, default/bash/aliases (git block), install/user/git.sh
 
 ### ssh-helpers-fail-fast-without-server   [VM-OK]
@@ -19085,26 +19121,36 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter. Type `type ssh | head -1; fip; dip; lip` + Enter → `ssh is a function`, `Usage: fip <host> <port1> [port2] ...`, `Usage: dip <port1> [port2] ...`, `No active forwards`.
-  * Type `fip somehost` + Enter → the same fip usage (needs at least one port). Type `dip 3000` + Enter → `No forwarding on port 3000`.
-  * Type `fip 127.0.0.1 3000; lip` + Enter. Because no sshd listens locally it fails fast with `ssh: connect to host 127.0.0.1 port 22: Connection refused`, prints no `Forwarding` line, and `lip` says `No active forwards`.
-  * Type `ssh -o ConnectTimeout=3 127.0.0.1; echo rc=$?` + Enter → the same refusal and `rc=255`, with the prompt back immediately and **no** `Connection lost. Reconnecting` line.
-  * Type `ssh -o ConnectTimeout=3 127.0.0.1 true; echo rc=$?` + Enter → same refusal, `rc=255`, no retry (a remote command is never retried).
-  * Move the mouse across the terminal and type `echo still typing fine` + Enter → echoes normally; no escape junk appears (the wrapper restored terminal modes). Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `type ssh | head -1` and press Return. The output starts with `ssh is a function`.
+  * Type `fip` and press Return. Usage for `fip` is printed.
+  * Type `dip` and press Return. Usage for `dip` is printed.
+  * Type `lip` and press Return. The output is `No active forwards`.
+  * Type `fip somehost` and press Return. The same `fip` usage is printed.
+  * Type `dip 3000` and press Return. The output is `No forwarding on port 3000`.
+  * Type `fip 127.0.0.1 3000` and press Return. The output says the connection was refused. No `Forwarding` line is printed.
+  * Type `lip` and press Return. The output is `No active forwards`.
+  * Type `ssh -o ConnectTimeout=3 127.0.0.1; echo "exit=$?"` and press Return. The connection is refused, the last line is `exit=255`, and no `Reconnecting` line appears.
+  * Type `ssh -o ConnectTimeout=3 127.0.0.1 true; echo "exit=$?"` and press Return. The connection is refused, the last line is `exit=255`, and no retry appears.
+  * Move the mouse across the terminal. No escape text appears.
+  * Type `echo still typing fine` and press Return. The output is `still typing fine`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * A reconnect loop only triggers for interactive sessions that lasted 30 s and exited 255; it cannot be provoked without a server, so only the pass-through is checked here (see `ssh-wrapper-reconnects-after-drop`).
-  * If sshd was enabled earlier in this session (Setup → Security → SSHD) a password prompt appears instead; press Ctrl+C and note it — nothing here should connect.
+  * If a password prompt appears, sshd is already running. Press Ctrl+C and record that. Nothing in this test should connect.
+  * A reconnect loop cannot be provoked here without a server. That is the next test.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the function line and usage lines, the refused forward without a `Forwarding` line, both `rc=255` lines with no Reconnecting text, and the clean echo afterwards
+  ** `ssh` is a function. `fip`, `dip`, and `lip` print usage or `No active forwards`.
+  ** A host without a port reprints `fip` usage. `dip 3000` says there is no forward. A refused forward leaves `lip` empty.
+  ** Both `ssh` attempts exit 255 with no `Reconnecting` line. The mouse and a typed echo stay clean.
   * If unsuccessful
-  ** Screenshot of a `Reconnecting` loop (press Ctrl+C to stop it), a hang beyond 15 s, or mouse escape junk in the prompt; `pgrep -af 'ssh.*-L'`
+  ** A `Reconnecting` loop starts, a command hangs past 15 seconds, or mouse movement inserts escape text.
 covers: manual/20-shell-functions.md:37-49; default/bash/fns/ssh-port-forwarding; default/bash/fns/ssh-reconnect; install/config/ssh-keepalive.sh; test/shell.d/ssh-reconnect-test.sh
 
 ### ssh-wrapper-reconnects-after-drop   [VM-OK]
@@ -19114,30 +19160,49 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter and type `ssh-keygen -t ed25519 -N '' -f ~/.ssh/testkey -q && omarchy-setup-security-sshd --key="$(cat ~/.ssh/testkey.pub)"` + Enter (password `prime`). It must end with `Perfect! The SSH server is running and your key is authorized.`
-  * Fast failure: type `ssh -o ConnectTimeout=2 nonexistent.invalid; echo "exit=$?"` + Enter → fails once, no `Connection lost`, non-zero exit.
-  * Remote command: type `ssh -i ~/.ssh/testkey -o StrictHostKeyChecking=no localhost 'exit 255'; echo "exit=$?"` + Enter → `exit=255` with no reconnect attempt.
-  * Interactive drop: type `ssh -i ~/.ssh/testkey -o StrictHostKeyChecking=no localhost` + Enter, then inside the session type `sleep 40` + Enter (the wrapper only reconnects sessions older than 30 s). Open a second terminal with Super+Enter and type `sudo pkill -f 'sshd: prime'` + Enter (password `prime`).
-  ** The first terminal prints `Connection lost` and reconnects, presenting a fresh remote prompt. Type `exit`; the terminal must be usable (no stuck mouse/alt-screen modes).
-  * Ctrl+C stops the loop: repeat the drop, but in the second terminal type `sudo systemctl stop sshd` + Enter before the `pkill`; while the first terminal shows `Connection lost` and retries, press Ctrl+C there → the prompt returns; type `echo "exit=$?"` → `exit=130`.
-  * In the second terminal type `sudo systemctl start sshd` + Enter, then `omarchy-remove-security-sshd` + Enter and answer **Yes** to removing authorized keys; `systemctl is-enabled sshd` → `disabled`. Type `rm -f ~/.ssh/testkey ~/.ssh/testkey.pub` + Enter.
-  * Close both terminals with Super+W; the machine is as it started.
+  * Press Super+Return. A terminal opens.
+  * Type `ssh-keygen -t ed25519 -N '' -f ~/.ssh/testkey -q && omarchy-setup-security-sshd --key="$(cat ~/.ssh/testkey.pub)"` and press Return. If sudo asks, type `prime` and press Return. The last line says the SSH server is running and the key is authorized.
+  * Type `ssh -o ConnectTimeout=2 nonexistent.invalid; echo "exit=$?"` and press Return. The connection fails once, no `Connection lost` line appears, and the last line is non-zero.
+  * Type `ssh -i ~/.ssh/testkey -o StrictHostKeyChecking=no localhost 'exit 255'; echo "exit=$?"` and press Return. The last line is `exit=255`. No reconnect line appears.
+  * Type `ssh -i ~/.ssh/testkey -o StrictHostKeyChecking=no localhost` and press Return. A remote prompt appears.
+  * Type `sleep 40` and press Return. The remote session stays open.
+  * Press Super+Return. A second terminal opens.
+  * Type `sudo pkill -f 'sshd: prime'` and press Return. If sudo asks, type `prime` and press Return. The prompt returns.
+  * Click the first terminal. It prints `Connection lost` and a new remote prompt appears.
+  * Type `exit` and press Return. The local prompt returns and accepts typing.
+  * Type `ssh -i ~/.ssh/testkey -o StrictHostKeyChecking=no localhost` and press Return. A remote prompt appears.
+  * Type `sleep 40` and press Return. The remote session stays open.
+  * Click the second terminal. Type `sudo systemctl stop sshd` and press Return. If sudo asks, type `prime` and press Return. The prompt returns.
+  * Click the first terminal. It prints `Connection lost` and keeps retrying.
+  * Press Ctrl+C. The local prompt returns.
+  * Type `echo "exit=$?"` and press Return. The output is `exit=130`.
+  * Click the second terminal. Type `sudo systemctl start sshd` and press Return. The prompt returns.
+  * Type `omarchy-remove-security-sshd` and press Return. A confirmation asks about authorized keys.
+  * Select Yes and press Return. The prompt returns.
+  * Type `systemctl is-enabled sshd` and press Return. The output is `disabled`.
+  * Type `rm -f ~/.ssh/testkey ~/.ssh/testkey.pub` and press Return. The prompt returns.
+  * Press Super+W. The second terminal closes.
+  * Click the first terminal. Press Super+W. It closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The wrapper is a bash function from Omarchy's shell functions; run these from a normal interactive terminal, not a script.
-  * Use `mouse move` to hover the first terminal before typing Ctrl+C so the keystroke lands there.
-  * The 40 s sleep is eight 5 s screenshots; never a single long sleep.
+  * Run these from a normal interactive terminal. The wrapper is a shell function.
+  * Click a terminal before typing so the keys land there.
+  * Screenshot about every 5 seconds during each 40 second sleep.
+  * Never leave sshd enabled. The last checks must show `disabled` and the test key removed.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the sshd setup ending in `Perfect!`, the fast failure (no reconnect), `exit=255` for the remote command, `Connection lost` followed by a new remote prompt after the kill, Ctrl+C stopping the retry loop with `exit=130`, and `disabled` after the revert
+  ** Setup ends with the server running and the key authorized.
+  ** A bad host fails once with no reconnect. A remote `exit 255` prints `exit=255` with no reconnect.
+  ** After 40 seconds, killing the session prints `Connection lost` and opens a new remote prompt. `exit` returns a usable local prompt.
+  ** Stopping sshd starts the retry loop, and Ctrl+C returns `exit=130`.
+  ** After removal, sshd is `disabled` and the test key is gone.
   * If unsuccessful
-  ** Screenshot of a reconnect after a fast failure or remote command, no reconnect after a real drop, or a terminal left with broken modes
-  ** Output of `omarchy-version`
+  ** A fast failure reconnects, a real drop does not, or the terminal is left with broken mouse or screen modes.
 covers: default/bash/fns/ssh-reconnect; test/shell.d/ssh-reconnect-test.sh; manual/20-shell-functions.md; bin/omarchy-setup-security-sshd; bin/omarchy-remove-security-sshd
 
 ### rsync-watchers-rsw-lsw-dsw   [VM-OK]
@@ -19147,27 +19212,34 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter and type `rsw; lsw; dsw; rsw /tmp/only-one` Enter.
-  ** `Usage: rsw <source> <destination>`, `No active watches`, `No active watches`, and the usage again for the single argument.
-  * Type `mkdir -p /tmp/rs/src && echo one > /tmp/rs/src/one.txt && rsw /tmp/rs/src /tmp/rs/dst` Enter → `Watching /tmp/rs/src -> /tmp/rs/dst`. Type `sleep 2; ls /tmp/rs/dst` → `one.txt` (initial sync).
-  * Type `echo two > /tmp/rs/src/two.txt; sleep 3; ls /tmp/rs/dst` Enter → `one.txt  two.txt` (change picked up).
-  * Type `lsw` Enter → one line `<pid>: /tmp/rs/src -> /tmp/rs/dst`.
-  * Type `dsw; echo three > /tmp/rs/src/three.txt; sleep 3; ls /tmp/rs/dst` Enter.
-  ** `Stopped watch (pid N)` and the listing still shows only `one.txt two.txt`.
-  * Type `lsw` Enter → `No active watches`. Press Ctrl+D; the desktop is as before.
+  * Press Super+Return. A terminal opens.
+  * Type `rsw` and press Return. The output is `Usage: rsw <source> <destination>`.
+  * Type `lsw` and press Return. The output is `No active watches`.
+  * Type `dsw` and press Return. The output is `No active watches`.
+  * Type `rsw /tmp/only-one` and press Return. The same usage is printed.
+  * Type `mkdir -p /tmp/rs/src && echo one > /tmp/rs/src/one.txt && rsw /tmp/rs/src /tmp/rs/dst` and press Return. The output is `Watching /tmp/rs/src -> /tmp/rs/dst`.
+  * Type `sleep 2; ls /tmp/rs/dst` and press Return. The output includes `one.txt`.
+  * Type `echo two > /tmp/rs/src/two.txt; sleep 3; ls /tmp/rs/dst` and press Return. The output includes `one.txt` and `two.txt`.
+  * Type `lsw` and press Return. One line names the pid and `/tmp/rs/src -> /tmp/rs/dst`.
+  * Type `dsw` and press Return. The output says the watch was stopped.
+  * Type `echo three > /tmp/rs/src/three.txt; sleep 3; ls /tmp/rs/dst` and press Return. The listing still has only `one.txt` and `two.txt`.
+  * Type `lsw` and press Return. The output is `No active watches`.
+  * Press Ctrl+D. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * If `lsw` shows nothing right after `rsw`, the watcher died (inotifywait missing); report it.
+  * If `lsw` is empty right after `rsw`, the watcher died. Report it and run `pgrep -af rsw-watch`.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the usage lines, the Watching line, the synced listing, the lsw entry, and the unchanged listing after dsw
+  ** Bare `rsw` and one argument print usage. Bare `lsw` and `dsw` say there are no watches.
+  ** `rsw` prints the Watching line, the first file appears, and a new file appears after a few seconds.
+  ** `lsw` names that watch. After `dsw`, a third file does not appear and `lsw` says there are no watches.
   * If unsuccessful
-  ** Screenshot of files not syncing or `lsw` empty after `rsw`; `pgrep -af rsw-watch`
+  ** Files do not sync, or `lsw` is empty while the watcher was just started.
 covers: default/bash/fns/rsyncing; manual/20-shell-functions.md:31-35
 
 ### readline-history-prefix-and-tab-cycling   [VM-OK]

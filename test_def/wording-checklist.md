@@ -407,14 +407,14 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `neovim-lazyvim-basics`
 - [x] `fzf-ff-eff-history-and-man-through-bat`
 - [x] `zoxide-cd-jump-miss-and-dotdot`
-- [ ] `eza-listing-aliases`
-- [ ] `compress-decompress-roundtrip`
-- [ ] `drive-helpers-usage-and-declined-format`
-- [ ] `git-worktree-ga-gd`
-- [ ] `git-aliases-and-config-defaults`
-- [ ] `ssh-helpers-fail-fast-without-server`
-- [ ] `ssh-wrapper-reconnects-after-drop`
-- [ ] `rsync-watchers-rsw-lsw-dsw`
+- [x] `eza-listing-aliases`
+- [x] `compress-decompress-roundtrip`
+- [x] `drive-helpers-usage-and-declined-format`
+- [x] `git-worktree-ga-gd`
+- [x] `git-aliases-and-config-defaults`
+- [x] `ssh-helpers-fail-fast-without-server`
+- [x] `ssh-wrapper-reconnects-after-drop`
+- [x] `rsync-watchers-rsw-lsw-dsw`
 - [ ] `readline-history-prefix-and-tab-cycling`
 - [ ] `starship-prompt-path-git-and-error-state`
 - [ ] `shell-env-defaults-and-bashrc-additions`
