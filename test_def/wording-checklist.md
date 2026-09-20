@@ -154,14 +154,14 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `keyboard-layout-pill-two-layouts`
 - [x] `tray-icon-drawer-menu-and-manage`
 - [x] `calendar-week-start-and-month-stepping`
-- [ ] `calendar-memento-mori-life-bar`
-- [ ] `agents-widget-hidden-without-usage`
-- [ ] `bar-panels-open-switch-close-and-numbers`
-- [ ] `bluetooth-power-wifi-absent-paths`
-- [ ] `network-panel-wired-only`
-- [ ] `network-speed-test-overlay-and-cli`
-- [ ] `disk-speed-test-overlay-and-cli`
-- [ ] `audio-panel-on-dummy-output`
+- [x] `calendar-memento-mori-life-bar`
+- [x] `agents-widget-hidden-without-usage`
+- [x] `bar-panels-open-switch-close-and-numbers`
+- [x] `bluetooth-power-wifi-absent-paths`
+- [x] `network-panel-wired-only`
+- [x] `network-speed-test-overlay-and-cli`
+- [x] `disk-speed-test-overlay-and-cli`
+- [x] `audio-panel-on-dummy-output`
 - [ ] `display-panel-fixed-brightness-scale-text-size`
 - [ ] `weather-widget-panel-and-location-search`
 - [ ] `weather-location-cli-set-status-clear`

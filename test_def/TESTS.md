@@ -6593,27 +6593,46 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Left-click the clock — the calendar opens with a year progress rail (the thin bar under the hero with the year at left and NN% at right) and no `LIFE` rail.
-  * Double-click the year rail with the mouse — it is replaced by `BORN [year] LIVE TO [90]` fields with BORN focused. Unhappy path first: type `abcd`, Tab, Enter — the editor closes and NO `LIFE` rail appears.
-  ** If the inputs do not take focus, click into the birth-year field first.
-  * Double-click the rail again; type `1979`, Tab, `90`, Enter. A `LIFE ─── NN%` rail appears about half full under the year rail; hover it — tooltip `Memento Mori`. Double-click the year rail once more and press Escape: the editor closes with nothing changed (the `LIFE` rail is still there; a second Escape would close the panel).
-  * Open a terminal with Super+Enter and type `jq -c '.bar.layout.center[] | select((.id // .) == "omarchy.clock") | {birthYear,lifeExpectancy}' ~/.config/omarchy/shell.json` — `{"birthYear":1979,"lifeExpectancy":90}`.
-  * Press Escape and click the clock again — the `LIFE` bar is still there (persisted).
-  * Unhappy path: double-click the year bar, type `2050`, Enter — a future year is rejected and the bar keeps its value.
-  * Round trip: double-click the `LIFE` bar — it disappears; the `jq` shows `birthYear` 0. Escape; `rm -f ~/.config/omarchy/shell.json` if it did not exist before this test; close the terminal with Super+W.
+  * Click the clock. The calendar opens. There is no LIFE rail.
+  * Double-click the year rail. Birth-year and live-to fields appear. The birth-year field has focus.
+  ** If the fields do not take focus, click the birth-year field.
+  * Type `abcd`.
+  * Press Tab.
+  * Press Enter. The editor closes. No LIFE rail appears.
+  * Double-click the year rail. The fields appear again.
+  * Type `1979`.
+  * Press Tab.
+  * Type `90`.
+  * Press Enter. A LIFE rail appears.
+  * Hover the LIFE rail. The tooltip says `Memento Mori`.
+  * Double-click the year rail. The fields appear.
+  * Press Escape. The editor closes. The LIFE rail stays.
+  * Press Super+Enter. A terminal opens.
+  * Type `jq -c '.bar.layout.center[] | select((.id // .) == "omarchy.clock") | {birthYear,lifeExpectancy}' ~/.config/omarchy/shell.json` and press Return. The output includes `1979` and `90`.
+  * Press Escape. The calendar closes.
+  * Click the clock. The calendar opens. The LIFE rail is still there.
+  * Double-click the year rail. The fields appear.
+  * Type `2050`.
+  * Press Enter. The LIFE rail keeps its previous value.
+  * Double-click the LIFE rail. The LIFE rail disappears.
+  * Click the terminal. It has focus.
+  * Type `jq -c '.bar.layout.center[] | select((.id // .) == "omarchy.clock") | {birthYear,lifeExpectancy}' ~/.config/omarchy/shell.json` and press Return. `birthYear` is `0`.
+  * Press Escape. The calendar closes.
+  * Type `rm -f ~/.config/omarchy/shell.json` and press Return.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Double-click means `mouse double-click` on the bar itself, not its label; double-check the mouse position first.
+  * Double-click the rail itself, not its label.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** No LIFE rail at first; the BORN / LIVE TO editor; no LIFE rail after `abcd`; the LIFE rail with `Memento Mori` after 1979/90 and the matching JSON; the rail intact after Escape on the editor; persisted across reopen; 2050 rejected; cleared with `birthYear` 0
+  * On success
+  ** No LIFE rail, none after `abcd`, a LIFE rail after 1979 and 90 with the matching JSON, the rail still there after Escape and after reopen, `2050` rejected, and `birthYear` `0` after the clear
   * If unsuccessful
-  ** A LIFE rail shown before any birth year or after invalid input, the editor not appearing, values not persisted, or 2050 accepted
+  ** A LIFE rail before a valid year, or `2050` accepted
 covers: shell/plugins/panels/clock/Panel.qml (startEditingLife, handleLifeKey, commitLife, clearLife); shell/plugins/panels/clock/Model.js (parseBirthYear, parseLifeExpectancy, lifeProgress); shell/Ui/TextField.qml; test/shell.d/clock-test.sh (memento mori inputs, birth-year validation, persistence, clearLife)
 
 ### agents-widget-hidden-without-usage   [VM-PARTIAL]
@@ -6623,25 +6642,26 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Screenshot the bar's right section: there is no 󱚣 (agents) icon between the tray area and the network icon.
-  * Open a terminal with Super+Enter and type `omarchy-shell omarchy.agents open` Enter: either a card appears reading `No AI coding subscriptions found. Agents show up here once you've used them.`, or the command prints an error such as `Target not found.` — report which. No crash, the bar stays.
-  * Press Escape if a card opened.
-  * Type `omarchy-shell omarchy.agents refresh` Enter; wait 5 s and screenshot the bar: still no agents icon.
-  * Unhappy path: an agents icon on a pristine disk, or the bar vanishing after the open, is the failure to report.
-  * Close the terminal with Super+W; the desktop is as before.
+  * Take a screenshot of the right side of the bar. There is no agents icon.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy-shell omarchy.agents open` and press Return. Either a card says no AI coding subscriptions were found, or the command says the target was not found. Record which. The bar stays.
+  ** If a card opened, press Escape. The card closes.
+  * Type `omarchy-shell omarchy.agents refresh` and press Return.
+  * Wait 5 seconds. The bar still has no agents icon.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Skipped on this VM: left click opening the usage panel (`Waiting for auth`), middle click cycling providers, right click opening the Omarchy menu on `Default Agent`, limits meters and provider chips.
+  * The pill's clicks and the usage meters need agent records. They are not part of this test.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Bar screenshot without the icon; the terminal output; the empty card if it appeared; the bar still without the icon after refresh
+  * On success
+  ** No agents icon, the empty card or the not-found line, and still no icon after refresh
   * If unsuccessful
-  ** Screenshot of an agents icon on a pristine disk, or the bar vanishing on open; `./client get-serial`
+  ** An agents icon, or a bar that disappears
 covers: shell/plugins/agents/Panel.qml (visible: providers.length > 0, empty Text); shell/plugins/agents/Main.qml (enabledProviders, runUpdate); shell/plugins/agents/README.md; test/shell.d/agents-panel-test.sh; test/shell.d/agent-usage-claude-limits-test.sh
 
 ### bar-panels-open-switch-close-and-numbers   [VM-PARTIAL]
@@ -6651,29 +6671,58 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and leave it focused. Screenshot the right section and count the icons: ethernet plug, speaker, monitor (no bluetooth, battery or agents icon).
-  * Press Super+Ctrl+W: within 15 s the Network panel hangs under the ethernet glyph with a small accent dot under that icon. Press Escape: it closes. Press Super+Ctrl+A: the Audio panel (hero `Audio`, a slider). Escape. Press Super+Ctrl+D: the Display panel (text-size and scale controls, one display). Escape — only observe, change nothing.
-  * Click the ethernet icon with the mouse: the panel opens. Click the desktop far below the card: it closes. Click the icon again, then press Tab: the Network panel closes and the Audio panel opens under its own glyph, the dot moving with it; Tab again: Display; Shift+Tab twice: Network. Escape.
-  * With the Network panel open, click the monitor icon without closing first: the Display panel replaces it in one click — only one panel is open. Escape.
-  * Press Super+Ctrl+1: Network. Escape. Super+Ctrl+2: Audio. Escape. Super+Ctrl+3: Display. Escape. Record the mapping you saw.
-  ** Hidden hardware widgets are not counted, so 1/2/3 are Network/Audio/Display on this machine. Bar-panel numbering is newer than the 4.0.2 disk: if `Super+K` has no "Bar panel 1" row and the digits do nothing, report "absent on this build" and continue.
-  * Press Super+Ctrl+W, then Super+Ctrl+W to close it, then immediately Super+Ctrl+W again (three chords back to back): the panel is open again. Press Escape once: it closes and the terminal did not receive the Escape — type `echo focus-ok` Enter; it prints `focus-ok`.
-  * Unhappy path: press Super+Ctrl+9: nothing opens, nothing crashes. Absence path: press Super+Ctrl+B, screenshot, then Super+Ctrl+P, screenshot: the bluetooth and power widgets are hidden here, so expected is nothing; if a card appears (`Bluetooth` / `NO ADAPTER`, or a power card with no battery section) it must close on Escape — describe precisely what happened. Press Super+Ctrl+B twice in quick succession: it must end closed.
-  * Close the terminal with Super+W; the desktop is as at the start.
+  * Press Super+Enter. A terminal opens.
+  * Take a screenshot of the right side of the bar. The icons are the wired network, the speaker, and the monitor.
+  * Press Super+Ctrl+W. The Network panel opens under the network icon.
+  * Press Escape. The panel closes.
+  * Press Super+Ctrl+A. The Audio panel opens.
+  * Press Escape. The panel closes.
+  * Press Super+Ctrl+D. The Display panel opens.
+  * Press Escape. The panel closes.
+  * Click the network icon. The Network panel opens.
+  * Click the desktop below the panel. The panel closes.
+  * Click the network icon. The Network panel opens.
+  * Press Tab. The Audio panel opens. The Network panel is gone.
+  * Press Tab. The Display panel opens.
+  * Press Shift+Tab. The Audio panel opens.
+  * Press Shift+Tab. The Network panel opens.
+  * Press Escape. The panel closes.
+  * Click the network icon. The Network panel opens.
+  * Click the monitor icon. The Display panel replaces it. Only one panel is open.
+  * Press Escape. The panel closes.
+  * Press Super+Ctrl+1. The Network panel opens.
+  * Press Escape. The panel closes.
+  * Press Super+Ctrl+2. The Audio panel opens.
+  * Press Escape. The panel closes.
+  * Press Super+Ctrl+3. The Display panel opens.
+  * Press Escape. The panel closes.
+  ** If Super+K has no Bar panel 1 row and the digits do nothing, report "absent on this build".
+  * Press Super+Ctrl+W. The Network panel opens.
+  * Press Super+Ctrl+W. The panel closes.
+  * Press Super+Ctrl+W. The panel opens again.
+  * Press Escape. The panel closes.
+  * Type `echo focus-ok` and press Return. The line is `focus-ok`.
+  * Press Super+Ctrl+9. Nothing opens.
+  * Press Super+Ctrl+B. Record whether a card opens.
+  ** If a card opens, press Escape. It closes.
+  * Press Super+Ctrl+P. Record whether a card stays open. A brief flicker is acceptable.
+  ** If a card stays open, press Escape. It closes.
+  * Press Super+Ctrl+B. Record whether anything opens.
+  * Press Super+Ctrl+B. It ends closed.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The digit combos are `<M-C-1>` etc.; Tab is `<TAB>`, Shift+Tab `<S-TAB>`. A panel is open when a card hangs under the bar and a small accent dot underlines the owning icon; all panels share one surface, so only one is open at a time.
-  * Use the keyboard for the focus step; the point is where keyboard focus lands. The bar strip stays clickable while a panel is open; everything else dismisses. `Bar.findPanelWidget` ignores visibility, so Super+Ctrl+B/P on hidden widgets is a known unverified corner worth a careful screenshot.
+  * Super+Ctrl+1 is `<M-C-1>`. Tab is `<TAB>`. Shift+Tab is `<S-TAB>`. Only one panel is open at a time.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots: the right section with only network/speaker/monitor icons; each panel by letter with the accent dot under its icon; closed after Escape and after the outside click; Audio and Display after Tab, Network after Shift+Tab ×2; Display replacing Network on the icon click; the panels for digits 1–3 (or the "absent on this build" note); the reopened panel and `focus-ok`; nothing after Super+Ctrl+9; the screen after B and P with a sentence naming the outcome
+  * On success
+  ** Each panel opening under its icon, closing on Escape and on an outside click, Tab and Shift+Tab moving between them, digits 1 through 3 or the absent note, `focus-ok`, nothing after Super+Ctrl+9, and Bluetooth and Power ending closed
   * If unsuccessful
-  ** Screenshot of a panel under the wrong icon, two panels open, a panel ignoring Escape or closing on Tab, a stray `^[` in the terminal, or a panel that would not close; `omarchy-shell shell ping` output; `./client get-serial`
+  ** Two panels open, a panel that ignores Escape, or the Escape landing in the terminal
 covers: shell/shell.qml togglePanelAt; shell/plugins/bar/Bar.qml (panelWidgetIdAt, panelNavigationSlots, switchPanelFrom, requestPopout, findPanelWidget); shell/plugins/bar/BarModel.pickPanelSlot; shell/Ui/PanelKeyCatcher.qml (Tab); shell/Ui/KeyboardPanel.qml (dismissArea, forwardBarClick, popout coordination); shell/Ui/Panel.qml (switchPanel); default/hypr/bindings/utilities.lua:98-116 (Super+Ctrl+W/A/D/B/P, Super+Ctrl+1..9); test/acceptance.d/panels-test.sh:39-48,62-74,90-116; test/shell.d/runtime-smoke-test.sh:543-547; test/shell.d/hyprland-default-config-test.sh:193-206; manual/05:40-61; manual/07:65-71
 
 ### bluetooth-power-wifi-absent-paths   [VM-PARTIAL]
@@ -6683,30 +6732,68 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Screenshot the bar's right section: no Bluetooth icon and no battery icon between the tray area and the network icon; the icons are (tray), network, speaker, display — anything else is a finding.
-  * Press Super+Ctrl+B and wait 2 s: either nothing happens, or a card appears with hero `Bluetooth` / `NO ADAPTER`, no power switch and the text `No Bluetooth adapter`. Report which; press Escape if a card opened. Press Super+Ctrl+P and screenshot within 5 s: the power widget is hidden, so expected is no panel — the power panel opens and immediately closes itself without a battery, so a brief flicker is acceptable, a card that stays is not; describe anything that appears. Escape. Press Super+Ctrl+D then Escape: the neighbouring display panel still works.
-  * Click the clock and press Escape: the bar is still responsive. Press Super+Space → Trigger → Toggle: there is no `Battery Percentage` row (laptop-only). Escape.
-  * Open a terminal with Super+Enter and run: `omarchy-battery-present; echo "exit=$?"` → `exit=1`; `omarchy-power-present; echo "exit=$?"` → `exit=1` (if it prints 0, run `grep . /sys/class/power_supply/*/type` and report it); `omarchy-battery-status; echo "[exit=$?]"` → an empty line then `[exit=0]`; `omarchy-battery-status --bogus` → `Usage: omarchy-battery-status [--shell]`; `upower -e | grep -c /battery_; omarchy-shell shell ping` → `0` then `ok`.
-  ** The Super+Ctrl+Alt+B battery notice is asserted in `notification-time-and-battery-notices-without-battery`.
-  * Run `bluetoothctl list` → empty; `omarchy-bluetooth-power is-on; echo "exit=$?"` → `exit=1`; `time omarchy-bluetooth-power on; echo "exit=$?"` → `omarchy-bluetooth-power: adapter did not come up`, `exit=1`, within ~10 s; `omarchy-bluetooth-power off; echo "exit=$?"` → `exit=0` silently; `omarchy-bluetooth-power toggle; echo "exit=$?"` → the same power-on failure, `exit=1`.
-  * Unhappy path (usage): `omarchy-bluetooth-power; echo "exit=$?"` → usage, `exit=1`; `omarchy-bluetooth-device connect nope; echo "exit=$?"` → usage, `exit=1`; `omarchy-bluetooth-device dance 00:11:22:33:44:55; echo "exit=$?"` → usage, `exit=1`; `omarchy-bluetooth-device connect 00:11:22:33:44:55; echo "exit=$?"` → returns promptly (bluetoothctl's `No default controller` is swallowed) — report the exit code.
-  * Run `omarchy-restart-wifi; echo "exit=$?"` → `Unblocking wifi...`, nothing from `rfkill list wifi` (no radios), `exit=0`; `omarchy-restart-bluetooth; echo "exit=$?"` → `Unblocking bluetooth...`, empty list, `exit=0`; `rfkill list` → empty.
-  * Press Super+Space → Update → Hardware → Bluetooth: a floating terminal prints the unblock line and an empty list and ends on a Done prompt (exit 0); close it. Update → Hardware → Trackpad: sudo asks for the password (`prime`), no `Resetting …` lines (no i2c_hid_acpi devices), Done; close it.
-  * Run `pactl list sinks short` → one `auto_null` line (the Dummy Output; see the audio tests). Close the terminal with Super+W; the desktop is as before.
+  * Take a screenshot of the right side of the bar. There is no Bluetooth icon. There is no battery icon.
+  * Press Super+Ctrl+B.
+  * Wait 2 seconds. Either nothing opens, or a card says there is no Bluetooth adapter. Record which.
+  ** If a card opened, press Escape. It closes.
+  * Press Super+Ctrl+P.
+  * Wait 5 seconds. No power panel stays open. A brief flicker is acceptable. Record anything that appears.
+  ** If a card stays open, press Escape. It closes.
+  * Press Super+Ctrl+D. The Display panel opens.
+  * Press Escape. The panel closes.
+  * Click the clock. The calendar opens.
+  * Press Escape. The calendar closes. The bar stays usable.
+  * Press Super+Space. The menu opens.
+  * Click Trigger.
+  * Click Toggle. There is no Battery Percentage row.
+  * Press Escape. The menu closes.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy-battery-present; echo "exit=$?"` and press Return. The last line is `exit=1`.
+  * Type `omarchy-power-present; echo "exit=$?"` and press Return. The last line is `exit=1`.
+  ** If it prints `0`, run `grep . /sys/class/power_supply/*/type` and report it.
+  * Type `omarchy-battery-status; echo "[exit=$?]"` and press Return. The status line is empty. The last line is `[exit=0]`.
+  * Type `omarchy-battery-status --bogus` and press Return. A usage line appears.
+  * Type `upower -e | grep -c /battery_` and press Return. The line is `0`.
+  * Type `omarchy-shell shell ping` and press Return. The line is `ok`.
+  * Type `bluetoothctl list` and press Return. The output is empty.
+  * Type `omarchy-bluetooth-power is-on; echo "exit=$?"` and press Return. The last line is `exit=1`.
+  * Type `time omarchy-bluetooth-power on; echo "exit=$?"` and press Return. The output says the adapter did not come up. The last line is `exit=1`. It returns within about 10 seconds.
+  * Type `omarchy-bluetooth-power off; echo "exit=$?"` and press Return. The last line is `exit=0`.
+  * Type `omarchy-bluetooth-power toggle; echo "exit=$?"` and press Return. The output says the adapter did not come up. The last line is `exit=1`.
+  * Type `omarchy-bluetooth-power; echo "exit=$?"` and press Return. A usage line appears. The last line is `exit=1`.
+  * Type `omarchy-bluetooth-device connect nope; echo "exit=$?"` and press Return. A usage line appears. The last line is `exit=1`.
+  * Type `omarchy-bluetooth-device dance 00:11:22:33:44:55; echo "exit=$?"` and press Return. A usage line appears. The last line is `exit=1`.
+  * Type `omarchy-bluetooth-device connect 00:11:22:33:44:55; echo "exit=$?"` and press Return. The command returns promptly. Record the exit code.
+  * Type `omarchy-restart-wifi; echo "exit=$?"` and press Return. The output says it is unblocking wifi. The last line is `exit=0`.
+  * Type `omarchy-restart-bluetooth; echo "exit=$?"` and press Return. The output says it is unblocking bluetooth. The last line is `exit=0`.
+  * Type `rfkill list` and press Return. The output is empty.
+  * Press Super+Space. The menu opens.
+  * Click Update.
+  * Click Hardware.
+  * Click Bluetooth. A floating terminal opens. It ends on Done.
+  * Press a key. That terminal closes.
+  * Press Super+Space. The menu opens.
+  * Click Update.
+  * Click Hardware.
+  * Click Trackpad. A password prompt appears.
+  * Type `prime` and press Return. No device-reset lines appear. The terminal ends on Done.
+  * Press a key. That terminal closes.
+  * Click the first terminal. It has focus.
+  * Type `pactl list sinks short` and press Return. One `auto_null` line is listed.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Skipped on this VM: pairing/connecting a device, the Bluetooth power switch, battery percentage and power profiles, Wi-Fi scanning. A panel that opens for Super+Ctrl+P or B anchored to nothing is a known unverified corner — screenshot it carefully.
-  * A hang beyond 30 s on any bluetooth helper is the failure: `pgrep -a bluetoothctl` shows what is stuck.
+  * A helper that hangs past 30 seconds is a failure.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Bar screenshot without bluetooth/battery icons (the last icon is the Display icon); the screen after Super+Ctrl+B and after Super+Ctrl+P with a sentence naming each outcome; the display panel opening; the calendar opening afterwards; the Toggle submenu without `Battery Percentage`; the exit codes, empty status, usage line, `0` and `ok`; the terminal with every bluetooth message, exit code and the `time`; the three restart outputs with exit 0 and the empty `rfkill list`; the two floating terminals ending in Done; the `auto_null` line
+  * On success
+  ** No Bluetooth or battery icon, Bluetooth and Power ending closed, the Display panel still opening, no Battery Percentage row, the exit codes, the restart lines with `exit=0`, and both hardware terminals ending on Done
   * If unsuccessful
-  ** Screenshot of a Bluetooth or battery icon present, a lingering power card, the bar vanishing after a hotkey, a helper hanging beyond 30 s, status printing garbage, a shell that stopped answering, or a floating terminal ending in a Failed prompt; `./client get-serial`
+  ** A Bluetooth or battery icon, a power card that stays open, or a helper that hangs
 covers: shell/plugins/panels/bluetooth/Panel.qml (visible: adapter !== null, empty text); shell/plugins/panels/power/Panel.qml (visible: batteryPresent, onOpenedChanged close); shell/plugins/panels/audio/Panel.qml (outputIcon, onWheelMoved, toggleAllMuted); shell/plugins/bar/Bar.qml findPanelWidget; bin/omarchy-bluetooth-power; bin/omarchy-bluetooth-device; bin/omarchy-restart-wifi; bin/omarchy-restart-bluetooth; bin/omarchy-restart-trackpad; bin/omarchy-battery-present; bin/omarchy-battery-status; bin/omarchy-power-present; bin/omarchy-hw-laptop; default/hypr/bindings/utilities.lua (Super+Ctrl+B / Super+Ctrl+P); default/omarchy/omarchy-menu.jsonc (update.hardware.*, trigger.toggle.battery-percentage); test/shell.d/bluetooth-test.sh; test/shell.d/power-present-test.sh; test/shell.d/power-test.sh; test/acceptance.d/panels-test.sh:76-87 (self-hiding widgets, hidden power panel)
 
 ### network-panel-wired-only   [VM-OK]
@@ -6716,30 +6803,47 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Look at the right section: the network widget shows the ethernet glyph `󰈀` (not a Wi-Fi arc, not the blocked `󰈂`). Open a terminal with Super+Enter (leave it open), then press Super+Ctrl+W.
-  ** A card under the ethernet icon. Hero: ethernet glyph, title `Ethernet` (optionally a speed in parentheses), a small-caps phrase that changes every ~3 s (`WIRING BITS`, `HANDLING PACKETS`, …). On the hero's right only a gauge button — NO on/off switch and NO QR button.
-  ** Grid: Ping, Packet Loss, Receiving, Sending, Downloaded, Uploaded, IP Address (`10.0.2.15`), Gateway (`10.0.2.2`). Before the first sample the ping rows show `--`; within ten seconds Ping reads `Timeout` and Packet Loss `100%` in red — expected here (user-mode NAT drops ICMP), not a fault; the router ping may show a value.
-  ** `DNS PROVIDER` pills DHCP (filled), Cloudflare, Google, Custom. NO `WI-FI BAND`, NO `SCANNING WI-FI…`, NO `KNOWN NETWORKS`/`OTHER NETWORKS` rows, NO "open portal" button; the card ends after the pills.
-  * Wait 5 s and screenshot again: the hero phrase changed and Downloaded/Uploaded may have grown. Hover `10.0.2.15`: tooltip `Copy IP`; click it. Hover `10.0.2.2`: tooltip `Copy gateway`.
-  * Press j (a highlight ring appears on the DHCP pill), then l twice (Google) and h once (Cloudflare): only the highlight moves. Click the Cloudflare pill with the mouse: NO password dialog appears (the DNS helper runs as root passwordless since 4.0.2) and Cloudflare becomes the filled pill. Click DHCP to restore it.
-  * Press Escape. Click the ethernet icon with the mouse: the same panel opens; Escape. In the terminal press Ctrl+Shift+V: `10.0.2.15` is pasted; press Ctrl+C.
-  * Run `omarchy-network-status | cat -A` → `ethernet^I<iface>^I^I$` (e.g. `enp0s3`); `omarchy-network-status --verbose` → lines `iface`, `ip 10.0.2.15`, `prefix 24`, `gateway 10.0.2.2`, `rx_bytes`, `tx_bytes`, `type ethernet`, `speed`/`duplex` (may be empty on virtio), `router_ping_ms <n>` and `internet_ping_ms` with an EMPTY value (expected: ICMP blocked while `curl -sI https://archlinux.org | head -n 1` still answers).
-  * Unhappy path: `omarchy-network-qr; echo "exit=$?"` → `No active Wi-Fi connection`, `exit=1`; `omarchy-network-password; echo "exit=$?"` → an error, non-zero, no QR matrix; `omarchy-network-status --frob; echo "exit=$?"` → usage, `exit=2`. Press Super+Space → Setup → Network: only `DNS` is listed, no `QR Code` row; Escape.
-  * Close the terminal with Super+W; DNS is back on DHCP and the desktop is as before.
+  * Take a screenshot of the network icon. It is the wired glyph, not a Wi-Fi arc.
+  * Press Super+Enter. A terminal opens.
+  * Press Super+Ctrl+W. The Network panel opens. The title is `Ethernet`. There is no Wi-Fi switch and no QR button.
+  * Wait 10 seconds. Ping reads `Timeout`. Packet loss reads `100%`. The IP is `10.0.2.15`. The gateway is `10.0.2.2`. The DHCP pill is filled. There is no Wi-Fi list.
+  * Hover `10.0.2.15`. The tooltip says `Copy IP`.
+  * Click `10.0.2.15`.
+  * Hover `10.0.2.2`. The tooltip says `Copy gateway`.
+  * Press j. A highlight ring appears on the DHCP pill.
+  * Press l. The highlight moves.
+  * Press l. The highlight is on Google.
+  * Press h. The highlight is on Cloudflare.
+  * Click the Cloudflare pill. No password dialog appears. The Cloudflare pill is filled.
+  * Click the DHCP pill. The DHCP pill is filled.
+  * Press Escape. The panel closes.
+  * Click the network icon. The Network panel opens.
+  * Press Escape. The panel closes.
+  * Press Ctrl+Shift+V. `10.0.2.15` is pasted.
+  * Press Ctrl+C.
+  * Type `omarchy-network-status | cat -A` and press Return. The line starts with `ethernet`.
+  * Type `omarchy-network-status --verbose` and press Return. The lines include `ip 10.0.2.15`, `gateway 10.0.2.2`, and `type ethernet`. The internet ping value is empty.
+  * Type `omarchy-network-qr; echo "exit=$?"` and press Return. The output says there is no active Wi-Fi connection. The last line is `exit=1`.
+  * Type `omarchy-network-password; echo "exit=$?"` and press Return. An error appears. The exit is not `0`. No QR matrix appears.
+  * Type `omarchy-network-status --frob; echo "exit=$?"` and press Return. A usage line appears. The last line is `exit=2`.
+  * Press Super+Space. The menu opens.
+  * Click Setup.
+  * Click Network. The only row is DNS. There is no QR Code row.
+  * Press Escape. The menu closes.
+  * Press Super+W. The terminal closes. DNS is on DHCP.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * No keyboard highlight is painted until the first j; that press only reveals it. The ethernet icon is the first panel icon after the tray area on this VM (agents/bluetooth slots are hidden).
-  * The source proposals expected a polkit dialog on the DNS pills; `etc/sudoers.d/omarchy-dns` (present since 4.0.2) makes it silent — a dialog appearing here is the finding, not its absence. If DNS does not return to DHCP, end the session with `stop`.
+  * A password dialog on a DNS pill is a failure. If DNS does not return to DHCP, stop and report it.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Two screenshots of the open panel a few seconds apart showing hero, the eight detail cells with `10.0.2.15` / `10.0.2.2`, `--` then the red `Timeout`/`100%`, the DNS pills and nothing Wi-Fi related; the tooltips; the ring on each pill; Cloudflare filled with no dialog and DHCP restored; the pasted IP; the status line, the verbose block with the empty internet ping; the three refusals; the Setup → Network menu without `QR Code`
+  * On success
+  ** The Ethernet panel, `Timeout` and `100%`, the IP and gateway, Cloudflare filled with no dialog, DHCP restored, the pasted IP, the status lines, the three refusals, and Setup → Network without a QR Code row
   * If unsuccessful
-  ** Screenshot of a Wi-Fi switch/list, a `No connection` hero, an empty grid, a portal button, a `QR Code` row, or a password dialog on the DNS pill; `ip -j route get 1.1.1.1` and `nmcli device status`; `omarchy-version`
+  ** A Wi-Fi list, a password dialog on a DNS pill, or a QR Code row
 covers: shell/plugins/panels/network/Panel.qml (hero, heroActions visibility, details GridLayout, DetailValue copyable, canSelectBand, wifiStationAvailable, keyCatcher dns/header, ethernet kind, canToggleWifi); shell/plugins/panels/network/Model.js (connectivityState, formatPingLatency, headerDetail, connectionIcon); bin/omarchy-network-status; bin/omarchy-network-qr; bin/omarchy-network-password; bin/omarchy-dns; etc/sudoers.d/omarchy-dns; default/hypr/bindings/utilities.lua:102 (Super+Ctrl+W); default/omarchy/omarchy-menu.jsonc setup.network.qr (when); test/shell.d/network-test.sh; test/shell.d/network-captive-portal-test.sh; test/shell.d/network-qr-test.sh; test/shell.d/network-password-test.sh; test/shell.d/wifiqr-test.sh; manual/35-networking.md (Networking intro, Sharing your Wi-Fi); manual/05-the-top-bar.md
 
 ### network-speed-test-overlay-and-cli   [VM-OK] [NET]
@@ -6749,26 +6853,37 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Ctrl+W and click the gauge icon at the right of the hero (tooltip `Run a speed test`): the panel closes and a near-black overlay appears — title `ETHERNET`, dials `DOWNLOAD` and `UPLOAD` in `Mbps`; on open the needles sweep to full scale and back.
-  * Screenshot every 2–3 s for about 12 s: the DOWNLOAD readout climbs first (non-zero within ~10 s), then UPLOAD; when done a `Run Again` button appears between the dials.
-  * Click `Run Again`: readouts reset and a new run starts. Press Escape mid-run: the overlay closes.
-  * Press Super+Space → Trigger → Speed Test → Network Speed Test: the same overlay opens. Click the dark scrim: it closes.
-  * Open a terminal with Super+Enter and run `timeout 12 omarchy network speedtest down`: one number per second (Mbit/s, non-zero), stopping after 12 s. Run `timeout 8 omarchy network speedtest up`: likewise.
-  * Unhappy path: `omarchy network speedtest sideways; echo "exit=$?"` → `Usage: omarchy-network-speedtest [down|up]`, `exit=2`; `omarchy-network-speedtest; echo "exit=$?"` → usage, `exit=2`.
-  * Close the terminal with Super+W; the desktop is as before.
+  * Press Super+Ctrl+W. The Network panel opens.
+  * Click the gauge button. The panel closes. A speed-test overlay opens.
+  * Wait about 10 seconds. Take a screenshot. The download value is not zero.
+  * Wait until the upload value is not zero. Take a screenshot.
+  * Wait until Run Again appears.
+  * Click Run Again. The readouts reset. A new run starts.
+  * Press Escape. The overlay closes.
+  * Press Super+Space. The menu opens.
+  * Click Trigger.
+  * Click Speed Test.
+  * Click Network Speed Test. The overlay opens.
+  * Click the dark area outside the dials. The overlay closes.
+  * Press Super+Enter. A terminal opens.
+  * Type `timeout 12 omarchy network speedtest down` and press Return. A number is printed about once a second. A number is not zero.
+  * Type `timeout 8 omarchy network speedtest up` and press Return. A number is printed about once a second. A number is not zero.
+  * Type `omarchy network speedtest sideways; echo "exit=$?"` and press Return. A usage line appears. The last line is `exit=2`.
+  * Type `omarchy-network-speedtest; echo "exit=$?"` and press Return. A usage line appears. The last line is `exit=2`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Each phase lasts ~5 s. If the dials stay at 0 and a red error line appears under them, or the CLI prints `Failed to fetch speed test endpoints`, api.fast.com is unreachable: retry once, then report it as a network condition with `getent hosts api.fast.com` and `curl -sI https://api.fast.com | head -1`, not as a defect.
+  * If the dials stay at 0 and an error says the endpoints could not be fetched, retry once, then report the network condition.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Overlay with the ignition sweep; a frame with a non-zero DOWNLOAD value; a frame with UPLOAD live; the finished state with `Run Again`; the overlay gone after Escape and after the scrim click; the terminal with per-second samples for down and up and the two usage refusals with `exit=2`
+  * On success
+  ** A non-zero download, a non-zero upload, Run Again, the overlay closed by Escape and by the outside click, per-second samples, and both refusals with `exit=2`
   * If unsuccessful
-  ** Screenshot of the red error text or dials stuck at 0 after 15 s; the CLI error line and the `getent`/`curl` output; `./client get-serial`
+  ** Dials stuck at 0 after 15 seconds, or the CLI error line
 covers: shell/plugins/panels/speedtest/Panel.qml; shell/Ui/SpeedTestOverlay.qml; shell/plugins/panels/network/Panel.qml (summonSpeedTest); bin/omarchy-network-speedtest; default/omarchy/omarchy-menu.jsonc (trigger.tests.network-speedtest); manual/35-networking.md (How fast is it?)
 
 ### disk-speed-test-overlay-and-cli   [VM-OK]
@@ -6778,25 +6893,32 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Space → Trigger → Speed Test → Disk Speed Test: a dark overlay titled with the disk model (e.g. `QEMU HARDDISK`, or `vda` when virtio reports no model), dials `READ` and `WRITE` with unit `MB/s`.
-  * Screenshot every 3 s for about 20 s: READ climbs first (~8 s), then WRITE; then `Run Again` appears. Press Escape: the overlay closes.
-  * Open a terminal with Super+Enter and run `omarchy disk speedtest`: a `disk <model or vda>` line, `read N` lines, then `write N` lines — any positive figure passes.
-  * Unhappy path: `omarchy-disk-speedtest /does/not/exist; echo "exit=$?"` → `Usage: omarchy-disk-speedtest [target-dir]`, `exit=2`.
-  * Run `ls ~/.cache/omarchy/ | grep -ci speed` → `0` (scratch files cleaned up).
-  * Close the terminal with Super+W; the desktop is as before.
+  * Press Super+Space. The menu opens.
+  * Click Trigger.
+  * Click Speed Test.
+  * Click Disk Speed Test. A speed-test overlay opens.
+  * Wait until the read value is not zero. Take a screenshot.
+  * Wait until the write value is not zero. Take a screenshot.
+  * Wait until Run Again appears.
+  * Press Escape. The overlay closes.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy disk speedtest` and press Return. A disk line appears. A read number is greater than zero. A write number is greater than zero.
+  * Type `omarchy-disk-speedtest /does/not/exist; echo "exit=$?"` and press Return. A usage line appears. The last line is `exit=2`.
+  * Type `ls ~/.cache/omarchy/ | grep -ci speed` and press Return. The line is `0`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The test writes about 1 GB temporarily; on a slow virtual disk WRITE values in the tens of MB/s are normal.
+  * A slow virtual disk can report write speeds in the tens of MB/s.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Frames with READ live, WRITE live and the finished `Run Again` state; the CLI output; the usage error with `exit=2`; the terminal printing `0` for leftovers
+  * On success
+  ** A live read, a live write, Run Again, the CLI numbers, the usage line with `exit=2`, and no leftover speed files
   * If unsuccessful
-  ** `Need at least 2048MB free`, `Direct disk I/O is not available`, a failed phase, dials never moving, or leftover `disk-speedtest-*.dat` files
+  ** Dials that never move, or a leftover `disk-speedtest` file
 covers: shell/plugins/panels/disk-speedtest/Panel.qml; shell/Ui/SpeedTestOverlay.qml (scaleStops); bin/omarchy-disk-speedtest; default/omarchy/omarchy-menu.jsonc trigger.tests.disk-speedtest; manual/46:39
 
 ### audio-panel-on-dummy-output   [VM-PARTIAL]
@@ -6806,27 +6928,43 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Screenshot the right side of the bar: a speaker glyph sits between the ethernet and monitor glyphs. Press Super+Ctrl+A: a card opens — hero `Audio` with a mood label (`SILENCED` or `MUTED`) and an on/off switch; `OUTPUT` with a percentage and a slider and a `Dummy Output` row. `INPUT` and `SOURCES` are absent (no microphone). Record exactly which sections exist.
-  ** If the panel shows no device row and a greyed slider, PipeWire's dummy sink is missing — report it and expect the no-sink branches below.
-  * Click on the output slider track: the percentage follows the click. Click the hero switch twice: the label toggles to `MUTED` and back; no error either way.
-  * Press j, then l three times, then m: the keyboard moves the highlight and toggles mute with no error. Press Escape.
-  * Right-click the speaker icon in the bar, then press Super+Ctrl+A: hero `MUTED`. Escape; right-click again to restore. Scroll the mouse wheel up three notches over the speaker icon: a volume OSD appears at the bottom centre with a rising percentage; scroll down three notches to return.
-  * Open a terminal with Super+Enter and run `pactl list sinks short` → one `auto_null` line; `wpctl status | sed -n '/Audio/,/Video/p'` → the Dummy Output under Sinks and nothing under Sources.
-  * Unhappy path: run `omarchy audio tuning status; omarchy audio tuning off; echo "exit=$?"` → a no-tuning message (`Installed: no` / nothing ships for this laptop) and a harmless line, no traceback.
-  * Close the terminal with Super+W; volume and mute are as found.
+  * Take a screenshot of the right side of the bar. A speaker glyph is there.
+  * Press Super+Ctrl+A. The Audio panel opens. It names Dummy Output. Record which sections are present.
+  ** If there is no device row, report that the dummy sink is missing.
+  * Click the output slider. The percentage changes.
+  * Click the mute switch. The label changes.
+  * Click the mute switch. The label changes back.
+  * Press j. The highlight moves.
+  * Press l. The highlight moves.
+  * Press l. The highlight moves.
+  * Press l. The highlight moves.
+  * Press m. Mute toggles. No error appears.
+  * Press Escape. The panel closes.
+  * Right-click the speaker icon.
+  * Press Super+Ctrl+A. The panel says muted.
+  * Press Escape. The panel closes.
+  * Right-click the speaker icon. Mute is cleared.
+  * Scroll up three notches over the speaker icon. A volume OSD appears. The percentage rises.
+  * Scroll down three notches over the speaker icon. The percentage falls.
+  * Press Super+Enter. A terminal opens.
+  * Type `pactl list sinks short` and press Return. One `auto_null` line is listed.
+  * Type `wpctl status | sed -n '/Audio/,/Video/p'` and press Return. Dummy Output is listed under Sinks. Sources is empty.
+  * Type `omarchy audio tuning status` and press Return. Record the line. There is no traceback.
+  * Type `omarchy audio tuning off; echo "exit=$?"` and press Return. A harmless line appears. There is no traceback.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * If the bar icon renders blank, find its slot by opening the panel first and noting where the card is anchored. Skipped here: choosing a real output and per-app mixing.
+  * This test does not switch real outputs or mix per-app streams.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshot of the open audio panel with the sections named; after the slider click; after the switch clicks; hero `MUTED` after the right click and restored; the volume OSD during the wheel; the `auto_null` line and the wpctl sections; the tuning output
+  * On success
+  ** The audio panel naming Dummy Output, the slider and mute changing, the muted panel after the right-click, the volume OSD, the `auto_null` line, and tuning output with no traceback
   * If unsuccessful
-  ** Screenshot of the panel failing to open, the bar vanishing (shell crash), phantom devices, or a traceback from `omarchy audio tuning`; `pactl info; wpctl status | sudo tee /dev/ttyS0` read via get-serial
+  ** A panel that does not open, or a traceback from `omarchy audio tuning`
 covers: shell/plugins/panels/audio/Panel.qml (hasOutput/hasInput, sectionVisible, outputSlider enabled, BarIconButton right click/wheel); shell/plugins/panels/audio/Model.js; bin/omarchy-audio-tuning (status/off); test/acceptance.d/panels-test.sh (audio); manual/45:31,35
 
 ### display-panel-fixed-brightness-scale-text-size   [VM-OK]
