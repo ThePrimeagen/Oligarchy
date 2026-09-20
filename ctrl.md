@@ -8,7 +8,7 @@ Consult this table of contents first. Read only the section you need.
 | [Synopsis](#synopsis) | 31 |
 | [test --list](#test---list) | 61 |
 | [test define](#test-define) | 79 |
-| [test new](#test-new) | 95 |
+| [test run](#test-run) | 95 |
 | [test run test-suite](#test-run-test-suite) | 113 |
 | [mint](#mint) | 129 |
 | [test list](#test-list) | 148 |
@@ -35,7 +35,7 @@ If you are an agent driving a guest, you need two of these: [test start](#test-s
 
 ./ctrl test --list    [--details] [--name <definition>] [--history]
 ./ctrl test define    --name <definition> [--description <text>] [--instruction <text>] [--proof <text>]
-./ctrl test new       --server-url <url> --iso <https-url> --version <version> [--name <definition>]
+./ctrl test run       --name <definition> --server-url <url> --iso <https-url> --version <version>
 ./ctrl test run test-suite --server-url <url> --iso <https-url> --version <version>
 ./ctrl test list
 ./ctrl mint           --server-url <url> --iso <https-url> [--unminted]
@@ -52,9 +52,9 @@ If you are an agent driving a guest, you need two of these: [test start](#test-s
 
 The action comes first. Every value is a flag; there are no positional arguments. Flags may sit in any order after the action.
 
-- `DATABASE_URL` — read from the environment by every action; it is the only variable most of them need. `test new`, `test run test-suite`, `mint` and `test list` also read `LINEAR_API_TOKEN`. No action reads `OLIGARCHY_TOKEN`. A `.env` in the current directory fills in missing variables only. A missing variable means exit 1.
+- `DATABASE_URL` — read from the environment by every action; it is the only variable most of them need. `test run`, `test run test-suite`, `mint` and `test list` also read `LINEAR_API_TOKEN`. No action reads `OLIGARCHY_TOKEN`. A `.env` in the current directory fills in missing variables only. A missing variable means exit 1.
 - `--session-id <id>` — taken by `test start`, `session` and `diagnose`. Omitted, it is read from `SESSION_ID` in the environment; the flag wins when both are given, and an empty `SESSION_ID` counts as unset. Set it once — `SESSION_ID=$(./ctrl session --search --test-result-id <id>) && export SESSION_ID`, so a failed search stops there instead of exporting nothing — and every command that follows is about that session. Neither given is a usage error; on `session` without `--search` it is the refusal `session: --session-id or SESSION_ID is required`.
-- `--server-url <url>` — taken by `test new`, `test run test-suite` and `mint`: the qemu server the driving agents will talk to, a full http or https URL, stored on the run and written into every ticket. Falls back to `SERVER_URL` from the environment; there is no default. `test start` and `test-results` accept it and ignore it, so a ticket written before it went still runs; every other action refuses it as an unrecognized flag.
+- `--server-url <url>` — taken by `test run`, `test run test-suite` and `mint`: the qemu server the driving agents will talk to, a full http or https URL, stored on the run and written into every ticket. Falls back to `SERVER_URL` from the environment; there is no default. `test start` and `test-results` accept it and ignore it, so a ticket written before it went still runs; every other action refuses it as an unrecognized flag.
 
 A command that works exits 0. A command that fails exits 1 and prints the error: one headline, then the stack trace and the cause behind it. Read the headline first. `./ctrl <action> --help` prints that action's flags.
 
@@ -84,7 +84,7 @@ Lists stored test definitions, one name per line, each in its newest wording. No
 
 Stores a test definition, or a new wording of one, and prints it as JSON: `{ id, name, version }`. A wording is never edited in place: every result records the `id` it ran against, so the wording behind a past verdict is always the one the driver was handed, and the dashboard charts each version on its own. Not used while driving a guest.
 
-- `--name <definition>` — the test. A name nobody carries yet needs all three fields and becomes `v1`; a known name gets the next version, and `test new` runs that from then on.
+- `--name <definition>` — the test. A name nobody carries yet needs all three fields and becomes `v1`; a known name gets the next version, and `test run` runs that from then on.
 - `--description <text>`, `--instruction <text>`, `--proof <text>` — the wording. On a known name a field left out is carried forward from the newest wording, so one flag changes one field. Nothing changed is a failure: `test define: <name> is unchanged`.
 
 ```bash
@@ -92,22 +92,22 @@ Stores a test definition, or a new wording of one, and prints it as JSON: `{ id,
 ./ctrl test define --name lock-screen --proof "The lock screen shows the clock and the user's name"
 ```
 
-## test new
+## test run
 
 ```
-./ctrl test new --server-url <url> --iso <https-url> --version <version> [--name <definition>]
+./ctrl test run --name <definition> --server-url <url> --iso <https-url> --version <version>
 ```
 
-Creates one pending test run and one Linear issue per stored test definition, each in its newest wording, and prints them as JSON. Omitting `--name` is the same run as `test run test-suite`. Each issue is assigned to `prime@terminal.shop`. `--server-url` is stored on the run and written into every issue as the qemu server the driving agent's `./client` talks to; `./ctrl` itself never calls it. Not used while driving a guest. Reads `LINEAR_API_TOKEN`.
+Creates one pending test run and one Linear issue for one stored test definition, in its newest wording, and prints them as JSON. `--name` is required; omitting it is a usage error, and the run of every definition is `test run test-suite`. The issue is assigned to `prime@terminal.shop`. `--server-url` is stored on the run and written into the issue as the qemu server the driving agent's `./client` talks to; `./ctrl` itself never calls it. Not used while driving a guest. Reads `LINEAR_API_TOKEN`.
 
-Each issue is created in `Backlog` and moved to `Automation Needed` once its result carries its identifier. One left in `Backlog` by a failure or a Ctrl-C is logged as `ticket trapped in Backlog; <reason>` and reported to Sentry; a failure also fails the run naming the ticket (`…; created OLI-n`).
+The issue is created in `Backlog` and moved to `Automation Needed` once its result carries its identifier. One left in `Backlog` by a failure or a Ctrl-C is logged as `ticket trapped in Backlog; <reason>` and reported to Sentry; a failure also fails the run naming the ticket (`…; created OLI-n`).
 
-- `--iso <https-url>` — the ISO whose minted disk the agents resume; every ticket's start line carries `--resume`. Must be HTTPS.
-- `--version <version>` — the version label attached to every issue.
-- `--name <definition>` — create a run for this one definition instead of every definition, in its newest wording like the rest. A name that matches none is a failure.
+- `--name <definition>` — the one definition, in its newest wording. A name that matches none is a failure.
+- `--iso <https-url>` — the ISO whose minted disk the agents resume; the ticket's start line carries `--resume`. Must be HTTPS.
+- `--version <version>` — the version label attached to the issue.
 
 ```bash
-./ctrl test new --server-url https://qemu.example.com --iso https://example.com/omarchy.iso --version 1.2.3
+./ctrl test run --name lock-screen --server-url https://qemu.example.com --iso https://example.com/omarchy.iso --version 1.2.3
 ```
 
 ## test run test-suite
@@ -116,11 +116,11 @@ Each issue is created in `Backlog` and moved to `Automation Needed` once its res
 ./ctrl test run test-suite --server-url <url> --iso <https-url> --version <version>
 ```
 
-`test new` with no `--name`: one pending result for every stored test definition, each in its newest wording, and one Linear ticket each, printed as the same JSON. There is no `--name`; one definition is `test new --name`. A definition named `mint` is included when one is stored, and it is ticketed with the test template, not the mint template. Not used while driving a guest. Reads `LINEAR_API_TOKEN`.
+One pending result for every stored test definition, each in its newest wording, and one Linear ticket each, printed as the same JSON. There is no `--name`; one definition is `test run --name`. A definition named `mint` is included when one is stored, and it is ticketed with the test template, not the mint template. Not used while driving a guest. Reads `LINEAR_API_TOKEN`.
 
 The dashboard answers the same run at `POST /create-test-suite-run` by running `./ctrl test run test-suite`, JSON `{ iso, version, serverUrl }` in and the same JSON out. It is not linked from a page. The button would sit in the definitions heading, beside "Test definitions", not on a selected card: a card button would read as running that one name. It would post those three fields and show the run id and ticket identifiers, and stay disabled when the list is empty.
 
-Tickets are born in `Backlog` and moved to `Automation Needed` as in `test new`. An empty table is refused before Linear: `test: no test definitions found`.
+Tickets are born in `Backlog` and moved to `Automation Needed` as in `test run`. An empty table is refused before Linear: `test: no test definitions found`.
 
 ```bash
 ./ctrl test run test-suite --server-url https://qemu.example.com --iso https://example.com/omarchy.iso --version 1.2.3
@@ -138,7 +138,7 @@ Not a test: it gets the ISO installed once on every qemu server, so that server 
 - `--server-url <url>` — the reverse proxy the drivers talk to; the live qemu servers behind it are the ones minted.
 - `--unminted` — ticket only the live qemu servers that do not hold this ISO's minted disk: the redo after a mint that failed, or after the operator removed one server's disk. Asks the reverse proxy at `--server-url` once (`GET /minted?iso=`, the one server call `./ctrl` makes; reads `OLIGARCHY_TOKEN`), which asks every server whether the two files are beside its ISO. A minted server is skipped and named in the log line; every live server minted prints `[]` and exits 0. Refused before anything is created when a live server gave the proxy no answer of its own (`<url> did not answer /minted`): fix that server, or mint without the flag. A second mint overwrites, so without the flag every server is minted again.
 
-Refused before anything is created when there is no definition named `mint` — define the install once with `test define --name mint`, its instruction holding the user name, password and disk passphrase and how the desktop is shut down from inside, its proof the desktop after the reboot — or when no qemu server is live. A Linear failure part-way fails the run it was creating and names the tickets that stand; the servers already ticketed keep theirs. Issues move from `Backlog` to `Automation Needed` as in `test new`, and one left behind is reported the same way.
+Refused before anything is created when there is no definition named `mint` — define the install once with `test define --name mint`, its instruction holding the user name, password and disk passphrase and how the desktop is shut down from inside, its proof the desktop after the reboot — or when no qemu server is live. A Linear failure part-way fails the run it was creating and names the tickets that stand; the servers already ticketed keep theirs. Issues move from `Backlog` to `Automation Needed` as in `test run`, and one left behind is reported the same way.
 
 ```bash
 ./ctrl mint --server-url https://qemu.example.com --iso https://example.com/omarchy.iso

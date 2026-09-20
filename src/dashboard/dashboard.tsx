@@ -1102,7 +1102,7 @@ app.post("/abort", async (context) => {
 // The same run as `./ctrl test run test-suite`, which is all this route does. Not linked from a
 // page yet. The button belongs in the definitions heading, beside "Test definitions", not on a
 // card: the suite is every name's newest wording, and a button on the selected card would read as
-// running that one name (`./ctrl test new --name`). It posts iso, version and serverUrl here and
+// running that one name (`./ctrl test run --name`). It posts iso, version and serverUrl here and
 // shows the run id and ticket identifiers this answers with, and it stays disabled when the list
 // is empty. Until that form exists the route takes JSON only, those three fields.
 app.post("/create-test-suite-run", async (context) => {

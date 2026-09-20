@@ -86,7 +86,7 @@ const seedEndedSession = async (
 };
 
 // A run with one result for the seeded definition, tied to the session given, or to none: the
-// row `test new` would create, without Linear.
+// row `test run` would create, without Linear.
 const seedResult = async (sessionId: string | null): Promise<string> => {
   const client = new Client({ connectionString: Postgres.getDbUrl() });
   await client.connect();
@@ -240,16 +240,23 @@ describe("./ctrl without a database", () => {
     }
   });
 
-  it("test new accepts --server-url as --flag=value, --flag value, and SERVER_URL, then wants LINEAR_API_TOKEN", async () => {
-    const iso = ["--iso", "https://example.com/omarchy.iso", "--version", "1.2.3"];
-    const equals = await runCtrl(["test", "new", ...iso, `--server-url=${SERVER}`], {
+  it("test run accepts --server-url as --flag=value, --flag value, and SERVER_URL, then wants LINEAR_API_TOKEN, and refuses no --name", async () => {
+    const iso = [
+      "--name",
+      DEFINITION,
+      "--iso",
+      "https://example.com/omarchy.iso",
+      "--version",
+      "1.2.3",
+    ];
+    const equals = await runCtrl(["test", "run", ...iso, `--server-url=${SERVER}`], {
       DATABASE_URL: UNUSED_DB,
     });
     expect(equals.code).toBe(1);
     expect(firstLine(equals.stderr)).toBe("LINEAR_API_TOKEN is not set");
 
     const spaced = await runCtrl(
-      ["test", "new", "--server-url", "http://127.0.0.1:42069", ...iso],
+      ["test", "run", "--server-url", "http://127.0.0.1:42069", ...iso],
       {
         DATABASE_URL: UNUSED_DB,
       },
@@ -257,21 +264,28 @@ describe("./ctrl without a database", () => {
     expect(spaced.code).toBe(1);
     expect(firstLine(spaced.stderr)).toBe("LINEAR_API_TOKEN is not set");
 
-    const named = await runCtrl(
-      ["test", "new", ...iso, `--server-url=${SERVER}`, "--name", DEFINITION],
-      {
-        DATABASE_URL: UNUSED_DB,
-      },
-    );
-    expect(named.code).toBe(1);
-    expect(firstLine(named.stderr)).toBe("LINEAR_API_TOKEN is not set");
-
-    const fromEnv = await runCtrl(["test", "new", ...iso], {
+    const fromEnv = await runCtrl(["test", "run", ...iso], {
       DATABASE_URL: UNUSED_DB,
       SERVER_URL: "https://from.env.example",
     });
     expect(fromEnv.code).toBe(1);
     expect(firstLine(fromEnv.stderr)).toBe("LINEAR_API_TOKEN is not set");
+
+    const nameless = await runCtrl(
+      [
+        "test",
+        "run",
+        "--iso",
+        "https://example.com/omarchy.iso",
+        "--version",
+        "1.2.3",
+        `--server-url=${SERVER}`,
+      ],
+      { DATABASE_URL: UNUSED_DB, LINEAR_API_TOKEN: "l" },
+    );
+    expect(nameless.code).toBe(1);
+    expect(nameless.stderr).toMatch(/Missing required flag: --name/);
+    expect(nameless.stderr).not.toMatch(/LINEAR_API_TOKEN/);
   });
 
   it("test run test-suite accepts --server-url and SERVER_URL, then wants LINEAR_API_TOKEN, and refuses --name", async () => {
@@ -455,7 +469,7 @@ describe("./ctrl without a database", () => {
     const env = { DATABASE_URL: UNUSED_DB, LINEAR_API_TOKEN: "l" };
     const cases: ReadonlyArray<readonly [ReadonlyArray<string>, RegExp, Record<string, string>]> = [
       [["test"], /Missing required flag: --list/, env],
-      // The proxy url is test new's and test run test-suite's; the actions below have no proxy to name.
+      // The proxy url is test run's and test run test-suite's; the actions below have no proxy to name.
       [["test", "--list", "--server-url", SERVER], /Unrecognized flag: --server-url/, env],
       [["session", "list", "--server-url", SERVER], /Unrecognized flag: --server-url/, env],
       [
@@ -489,7 +503,9 @@ describe("./ctrl without a database", () => {
       [
         [
           "test",
-          "new",
+          "run",
+          "--name",
+          DEFINITION,
           "--iso",
           "http://example.com/omarchy.iso",
           `--server-url=${SERVER}`,
@@ -500,24 +516,44 @@ describe("./ctrl without a database", () => {
         env,
       ],
       [
-        ["test", "new", "--iso", "https://?", `--server-url=${SERVER}`, "--version", "1.2.3"],
+        [
+          "test",
+          "run",
+          "--name",
+          DEFINITION,
+          "--iso",
+          "https://?",
+          `--server-url=${SERVER}`,
+          "--version",
+          "1.2.3",
+        ],
         /iso must be a valid https url/,
         env,
       ],
       [
-        ["test", "new", `--server-url=${SERVER}`, "--version", "1.2.3"],
+        ["test", "run", "--name", DEFINITION, `--server-url=${SERVER}`, "--version", "1.2.3"],
         /Missing required flag: --iso/,
         env,
       ],
       [
-        ["test", "new", "--iso", "https://example.com/omarchy.iso", `--server-url=${SERVER}`],
+        [
+          "test",
+          "run",
+          "--name",
+          DEFINITION,
+          "--iso",
+          "https://example.com/omarchy.iso",
+          `--server-url=${SERVER}`,
+        ],
         /Missing required flag: --version/,
         env,
       ],
       [
         [
           "test",
-          "new",
+          "run",
+          "--name",
+          DEFINITION,
           "--iso",
           "https://example.com/omarchy.iso",
           `--server_url=${SERVER}`,
@@ -528,14 +564,25 @@ describe("./ctrl without a database", () => {
         env,
       ],
       [
-        ["test", "new", "--iso", "https://example.com/omarchy.iso", "--version", "1.2.3"],
+        [
+          "test",
+          "run",
+          "--name",
+          DEFINITION,
+          "--iso",
+          "https://example.com/omarchy.iso",
+          "--version",
+          "1.2.3",
+        ],
         /Missing required flag: --server-url/,
         env,
       ],
       [
         [
           "test",
-          "new",
+          "run",
+          "--name",
+          DEFINITION,
           "--iso",
           "https://example.com/omarchy.iso",
           "--server-url=ftp://qemu.example.com",
@@ -546,14 +593,25 @@ describe("./ctrl without a database", () => {
         env,
       ],
       [
-        ["test", "new", "--iso", "https://example.com/omarchy.iso", "--version", "1.2.3"],
+        [
+          "test",
+          "run",
+          "--name",
+          DEFINITION,
+          "--iso",
+          "https://example.com/omarchy.iso",
+          "--version",
+          "1.2.3",
+        ],
         /server-url must be a valid http or https url/,
         { ...env, SERVER_URL: "ftp://qemu.example.com" },
       ],
       [
         [
           "test",
-          "new",
+          "run",
+          "--name",
+          DEFINITION,
           "--iso",
           "https://example.com/omarchy.iso",
           "--server-url=ssh://flag.example",
@@ -1273,11 +1331,13 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
     expect(firstLine(unknown.stderr)).toBe(`session: no session ${sessionId}`);
   });
 
-  it("test new without LINEAR_API_TOKEN exits 1 after parsing and writes nothing", async () => {
+  it("test run without LINEAR_API_TOKEN exits 1 after parsing and writes nothing", async () => {
     const result = await runCtrl(
       [
         "test",
-        "new",
+        "run",
+        "--name",
+        DEFINITION,
         "--iso",
         "https://example.com/omarchy.iso",
         "--version",

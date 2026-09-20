@@ -116,7 +116,7 @@ const Count = Schema.Number.check(
 
 const DEFAULT_COUNT = 10;
 
-// test new and test run test-suite store it on the run and write it into every ticket for ./client. mint
+// test run and test run test-suite store it on the run and write it into every ticket for ./client. mint
 // takes the same flag, for the reverse proxy the install's drivers talk to. No default: SERVER_URL
 // or the flag, or a usage error.
 const serverUrlFlag = Flag.string("server-url").pipe(
@@ -331,8 +331,9 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     yield* printJson({ id: defined.id, name: input.name, version: defined.version });
   });
 
-  // test new --iso <https-url> --version <version> [--name <definition>]
-  const testNew = Effect.fn("ctrl.test.new")(function* (input: {
+  // test run --name <definition>, and test run test-suite, which passes no name: one pending
+  // result per definition, each its newest wording, and one Linear ticket each.
+  const testNew = Effect.fn("ctrl.test.run")(function* (input: {
     readonly serverUrl: string;
     readonly iso: string;
     readonly version: string;
@@ -552,7 +553,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     // Every ticket Linear created, the one being described included, so a failure names it.
     const tickets: Array<Linear.LinearTicket> = [];
     const identifiers = () => tickets.map((ticket) => ticket.identifier).join(", ");
-    // A failure fails the run it was creating and names the tickets that stand, as `test new`
+    // A failure fails the run it was creating and names the tickets that stand, as `test run`
     // does; the runs already whole for earlier servers are left standing, they are complete.
     const failRunWith = <E extends { readonly message: string }>(
       runId: string,
@@ -579,7 +580,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
         ),
         Effect.orDie,
       );
-      // Born in Backlog and moved to Automation Needed with its body, as `test new` does.
+      // Born in Backlog and moved to Automation Needed with its body, as `test run` does.
       const ticket = Effect.gen(function* () {
         const issued = yield* linear.createIssue({
           teamId,
@@ -978,30 +979,10 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     Command.provide(withDb),
   );
 
-  const testNewCommand = Command.make(
-    "new",
-    {
-      serverUrl: serverUrlFlag,
-      iso: Flag.string("iso").pipe(
-        Flag.withSchema(HttpsUrl),
-        Flag.withDescription("HTTPS URL of the ISO"),
-      ),
-      version: Flag.string("version").pipe(
-        Flag.withSchema(Schema.NonEmptyString),
-        Flag.withDescription("Version label attached to every Linear ticket"),
-      ),
-      name: nameFlag("Create a test for this test definition only"),
-    },
-    testNew,
-  ).pipe(
-    Command.withDescription("Create a test run and one Linear ticket per test definition"),
-    Command.provide(withDbAndLinear),
-  );
-
   // test run test-suite --server-url <url> --iso <https-url> --version <version>
   //
-  // test new with no --name: one result for every definition, each its newest wording. A name
-  // cannot be picked; that is test new --name. test new without --name stays, the same function.
+  // Every definition, each its newest wording. A name cannot be picked; one definition is
+  // `test run --name`, and omitting --name there is a usage error.
   const testRunTestSuiteCommand = Command.make(
     "test-suite",
     {
@@ -1023,10 +1004,29 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     Command.provide(withDbAndLinear),
   );
 
-  const testRunCommand = Command.make("run").pipe(
+  const testRunCommand = Command.make(
+    "run",
+    {
+      name: Flag.string("name").pipe(
+        Flag.withSchema(Schema.NonEmptyString),
+        Flag.withDescription("The one test definition to run, in its newest wording"),
+      ),
+      serverUrl: serverUrlFlag,
+      iso: Flag.string("iso").pipe(
+        Flag.withSchema(HttpsUrl),
+        Flag.withDescription("HTTPS URL of the ISO"),
+      ),
+      version: Flag.string("version").pipe(
+        Flag.withSchema(Schema.NonEmptyString),
+        Flag.withDescription("Version label attached to the Linear ticket"),
+      ),
+    },
+    (input) => testNew({ ...input, name: Option.some(input.name) }),
+  ).pipe(
     Command.withDescription(
-      "test run test-suite --server-url <url> --iso <https-url> --version <version>",
+      "test run --name <definition> --server-url <url> --iso <https-url> --version <version>; or test-suite",
     ),
+    Command.provide(withDbAndLinear),
     Command.withSubcommands([testRunTestSuiteCommand]),
   );
 
@@ -1086,16 +1086,10 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     testDefinitions,
   ).pipe(
     Command.withDescription(
-      "test --list [--details] [--name <definition>] [--history]; or define, new, run, list, start",
+      "test --list [--details] [--name <definition>] [--history]; or define, run, list, start",
     ),
     Command.provide(withDb),
-    Command.withSubcommands([
-      testDefineCommand,
-      testNewCommand,
-      testRunCommand,
-      testListCommand,
-      testStartCommand,
-    ]),
+    Command.withSubcommands([testDefineCommand, testRunCommand, testListCommand, testStartCommand]),
   );
 
   const testResultsCommand = Command.make(
@@ -1245,7 +1239,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
 
   return Command.make("ctrl").pipe(
     Command.withDescription(
-      "Record and inspect Oligarchy test runs. Every action reads DATABASE_URL; test new and test run test-suite take --server-url (or SERVER_URL), the qemu server their drivers talk to; test start and test-results accept it unread.",
+      "Record and inspect Oligarchy test runs. Every action reads DATABASE_URL; test run and test run test-suite take --server-url (or SERVER_URL), the qemu server their drivers talk to; test start and test-results accept it unread.",
     ),
     Command.withSubcommands([
       testCommand,
