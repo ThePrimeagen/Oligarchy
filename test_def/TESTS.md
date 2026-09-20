@@ -2095,16 +2095,31 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal (Super+Enter) and type `hostname; cat /etc/machine-id; touch ~/seller-file` — note the hostname (expect `omarchy`) and the machine-id. Open the Omarchy Menu (Super+Space) → Setup → Reset Computer with the mouse; sudo password `prime`; at `Type 'reset' to continue` type `reset`, Enter.
-  * At `Confirm your disk encryption passphrase to authorize the re-key.` → `Passphrase>`: unhappy path first — type `nope`, Enter → `That passphrase does not unlock … Try again.`; then type `prime`, Enter.
-  * Watch the grey progress lines: `Cloning the factory snapshot`, `Scrubbing machine identity from the factory system`, `Removing account credentials from the factory system`, `Recreating the hibernation swapfile in the factory system`, `Rebuilding boot files from the factory system (this can take a minute)`, `Activating the factory system`. Screenshot every 5 s; 2–5 minutes.
-  * At `Reset staged. The wipe finishes on the next boot.` / `Reboot to complete the reset?` choose **Reboot later** → `Do not keep using this machine — changes made now will be lost.` Screenshot, then reboot deliberately: `systemctl reboot` in a terminal.
-  * Let Limine auto-boot. The boot must NOT ask for a LUKS passphrase (throwaway auto-unlock key) — record whether one appears. `./client get-serial` should show `factory-wipe: … factory wipe complete`. tty1 then shows the provisioning greeter: animated logo, `Beautiful, Fun & Agentic Linux by DHH`, `Press Return to Start Setup`. Press Enter.
-  ** The form runs on tty1 with a dark palette; if it looks garbled wait 2–3 s — it redraws after the virtio-gpu console resize. If the machine parks at the `Omarchy Bootloader` menu instead of booting, screenshot it (that is a defect) and select the Omarchy entry with the arrows and Enter.
-  * Walk the wizard: `Let's setup your keyboard...` → leave `English (US)`, Enter. `Let's setup your user account...`: `Username>` `owner`, Enter; `Password>` `owner`, Enter; `Confirm>` `other`, Enter → `Passwords didn't match!`; re-enter `owner` / `owner`. `Full name>` `Second Owner`; `Email address>` Enter (skip); `Hostname>` `reset-box`. `Let's set your timezone...` → Enter on the preselected zone (or type `UTC` and Enter if it is a filter). The review table shows Keyboard, Username `owner`, Password `*****`, Full name, Email `[Skipped]`, Hostname `reset-box`, Timezone → `Does this look right?` choose **No, change it** once, then **Yes**.
-  * `Setting up your machine` with a progress bar and rotating tips runs 2–5 minutes (offline Node unpack, LUKS re-key, UKI rebuild). Screenshot every 5 s. It hands straight to the desktop (autologin) with no login prompt.
-  * On the new desktop open a terminal and type `whoami; hostname; cat /etc/machine-id; id; ls /home; id prime; ls ~/seller-file; ls /var/lib/omarchy/provisioning/; ls /etc/sudoers.d/00-omarchy-wheel` → `owner`, `reset-box`, a **different** machine-id, `owner` in `wheel`, only `owner` in /home, `no such user` for prime, `No such file` for the seller file, no `pending`/`wipe-pending`/`luks-key`, the wheel drop-in present. Then `D=$(sudo blkid -t TYPE=crypto_LUKS -o device | head -1); sudo cryptsetup luksDump $D | grep -E '^\s+[0-9]+: luks2'; grep -c cryptkey /proc/cmdline; sudo btrfs subvolume list /` (password `owner`) → exactly one keyslot; `0`; no `@omarchy-old-*` and `@factory` retained.
-  * If budget remains, reboot (Super+Escape → Reboot): a passphrase prompt MUST appear; type `prime` → refused (the one wrong try); type `owner` → the desktop returns. The machine now belongs to the new owner: end the session with `stop` (it cannot return to `prime`; never `save`).
+  * Press Super+Enter. A terminal opens.
+  * Run `touch ~/seller-file` and press Enter. The file exists.
+  * Press Super+Space. The menu opens.
+  * Click Setup, then Reset Computer. Use the mouse only. Password is `prime`. A confirm prompt appears. If it says there is no factory snapshot, stop and run `./client stop`.
+  * Type `reset` and press Enter. A passphrase prompt appears.
+  * Type `nope` and press Enter. The passphrase is refused.
+  * Type `prime` and press Enter. The reset stages.
+  * Choose Reboot later. The machine is not rebooted yet.
+  * Run `systemctl reboot` and press Enter. The machine reboots. No disk passphrase is asked.
+  * Press Enter at the setup greeter. The owner form starts.
+  * Press Enter for the keyboard. The user step starts.
+  * Type `owner` and press Enter. A password prompt appears.
+  * Type `owner` and press Enter. A confirm prompt appears.
+  * Type `other` and press Enter. The passwords do not match.
+  * Type `owner` and press Enter, then `owner`. The passwords match.
+  * Type `Second Owner` and press Enter. The name is accepted.
+  * Press Enter. The email is skipped.
+  * Type `reset-box` and press Enter. The hostname is set.
+  * Press Enter for the timezone. The review appears.
+  * Choose No, change it. The form restarts.
+  * Repeat the form with the same answers and choose Yes. Setup runs. The desktop appears as `owner`.
+  * Press Super+Enter. A terminal opens.
+  * Run `whoami; hostname` and press Enter. It prints `owner` and `reset-box`.
+  * Run `id prime` and press Enter. The old user is gone.
+  * Run `./client stop`. The session ends. Never save this disk.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -2132,14 +2147,30 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Stage a reset as in `factory-reset-full-cycle-new-owner`: Omarchy Menu (Super+Space) → Setup → Reset Computer with the mouse, sudo `prime`, type `reset`, `Passphrase>` `prime`, wait for `Reset staged.` and choose `Reboot now`. Let Limine auto-boot (no passphrase prompt is expected) and press Enter at the console greeter (`Press Return to Start Setup`).
-  ** `This machine has no factory snapshot to reset to.` is a mint/ISO gap — report it and stop. If the form looks garbled, wait 2–3 s for the virtio-gpu console redraw.
-  * Keyboard step: press Esc — nothing precedes it, so the picker simply reappears. Press Enter for `English (US)`.
-  * `Username>`: type `root` → `Username is reserved for system`; `Bad Name` → `Username must be alphanumeric with no spaces`; then `newowner` is accepted.
-  * `Password>`: press Enter twice → `Your password can't be blank!`; `abc` / `xyz` → `Passwords didn't match!`; then `owner-pass-1` twice.
-  * At `Full name>` press Ctrl+C once → `Reboot this machine?` with `Yes, reboot` / `No, keep setting up`; choose `No, keep setting up`, then press Enter twice to skip name and email.
-  * `Hostname>`: type `-bad-` → `Hostname must be 1-63 letters, digits, or dashes…`; press Enter on empty → the default `omarchy`. At the timezone step press Esc — the form unwinds to the keyboard step; go through it again quickly (Enter, `newowner`, `owner-pass-1` twice, Enter ×2, Enter, pick a timezone with Enter).
-  * At `Does this look right?` choose `No, change it` once (the form restarts), run through again and choose `Yes`. `Setting up your machine` runs 2–5 minutes (screenshot every 5 s); on the desktop open a terminal and type `whoami; hostname` → `newowner`, `omarchy`. The machine now belongs to the new owner: end the session with `stop`.
+  * Press Super+Space. The menu opens.
+  * Click Setup, then Reset Computer. Use the mouse only. Password is `prime`. A confirm prompt appears. If it says there is no factory snapshot, stop and run `./client stop`.
+  * Type `reset` and press Enter. A passphrase prompt appears.
+  * Type `prime` and press Enter. The reset is staged.
+  * Choose Reboot now. The machine reboots. No disk passphrase is asked.
+  * Press Enter at the setup greeter. The keyboard step starts.
+  * Press Escape. The keyboard step stays.
+  * Press Enter. The username step starts.
+  * Type `root` and press Enter. The name is refused.
+  * Type `Bad Name` and press Enter. The name is refused.
+  * Type `newowner` and press Enter. The name is accepted.
+  * Press Enter. The blank password is refused.
+  * Type `abc` and press Enter, then `xyz`. The passwords do not match.
+  * Type `owner-pass-1` and press Enter, then `owner-pass-1`. The password is accepted.
+  * Press Ctrl+C. A reboot confirm appears.
+  * Choose No, keep setting up. The form continues.
+  * Press Enter twice. Name and email are skipped.
+  * Type `-bad-` and press Enter. The hostname is refused.
+  * Press Enter. The hostname stays `omarchy`.
+  * Choose No, change it on the review. The form restarts.
+  * Complete the form again with the same answers and choose Yes. Setup runs. The desktop appears.
+  * Press Super+Enter. A terminal opens.
+  * Run `whoami; hostname` and press Enter. It prints `newowner` and `omarchy`.
+  * Run `./client stop`. The session ends. Never save this disk.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -2199,14 +2230,14 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal (Super+Enter). Everything under /boot needs `sudo` (password `prime`): /boot is mounted with umask=0077.
-  * Type `sudo ls -la /boot/EFI/Linux/ /boot/EFI/limine/` → `omarchy_linux-omarchy.efi` (tens of MB) and `limine_x64.efi`.
-  * Type `sudo grep -E '^/|machine-id|cryptdevice|interface_branding|default_entry' /boot/limine.conf; cat /etc/machine-id` → an `/Omarchy` entry carrying `machine-id=<32 hex>` equal to `/etc/machine-id`, `cryptdevice=`, `interface_branding: Omarchy Bootloader`, `default_entry: 2`.
-  * Type `cat /etc/kernel/cmdline; grep -E 'ESP_PATH|KERNEL_CMDLINE' /etc/default/limine; sudo grep -c '@@CMDLINE@@' /etc/default/limine` → both hold `root=` and `cryptdevice=`; `ESP_PATH="/boot"`; the unhappy-path count of the unexpanded placeholder is `0`.
-  * Type `sudo efibootmgr | head -6` → `BootOrder:` starts with the `Limine` entry's number.
-  * Type `ls -la /etc/pacman.d/hooks/; ls /usr/lib/modules/*/build/include/config/kernel.release && uname -r` → `99-omarchy-limine.hook` present, no `*.omarchy-backup`, `90-mkinitcpio-install.hook` a regular file (shipped by limine-mkinitcpio-hook, never a symlink to /dev/null); the headers' release equals the running kernel.
-  * Snapper: type `sudo diff /usr/share/omarchy/default/snapper/root /etc/snapper/configs/root && echo same; cat /etc/conf.d/snapper; sudo btrfs subvolume show /.snapshots | head -2; grep -E 'NUMBER_LIMIT|TIMELINE_CREATE' /etc/snapper/configs/root` → `same`, `SNAPPER_CONFIGS="root"`, `.snapshots` is a subvolume, `TIMELINE_CREATE="no"` with the shipped `NUMBER_LIMIT`.
-  * Unhappy path: `sudo snapper -c nosuch list 2>&1 | head -1` → an error that config `nosuch` does not exist; then `sudo snapper list | head -5` → at least the header (snapshots may or may not exist). Press Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Run `sudo ls /boot/EFI/Linux/omarchy_linux-omarchy.efi` and press Enter. Password is `prime`. The UKI exists.
+  * Run `sudo grep machine-id /boot/limine.conf` and press Enter. The machine id matches `/etc/machine-id`.
+  * Run `sudo efibootmgr | head -6` and press Enter. BootOrder starts with Limine.
+  * Run `sudo diff /usr/share/omarchy/default/snapper/root /etc/snapper/configs/root; echo exit=$?` and press Enter. It prints `exit=0`.
+  * Run `grep TIMELINE_CREATE /etc/snapper/configs/root` and press Enter. Timeline create is no.
+  * Run `sudo snapper -c nosuch list; echo exit=$?` and press Enter. It prints a non-zero exit.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -2231,15 +2262,14 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal (Super+Enter); every command here is read-only.
-  * Type `cat /usr/lib/chromium/initial_preferences; readlink /usr/share/icons/Yaru/scalable/actions/go-previous-symbolic.svg; head -1 /usr/bin/powerprofilesctl` → JSON with `"require_eula":false` and `"color_scheme":0`; `/usr/share/icons/Adwaita/symbolic/actions/go-previous-symbolic.svg`; `#!/bin/python3`.
-  * Type `cat /etc/ssh/ssh_config.d/20-omarchy-keepalive.conf; ssh -G localhost | grep -iE 'serveralive|connecttimeout'; ssh -o ServerAliveInterval=5 -G localhost | grep -i serveraliveinterval` → `ServerAliveInterval 15`, `ServerAliveCountMax 3`, `ConnectTimeout 10` effective; the override path prints `5` (user options win).
-  * Type `grep '^PATH' /etc/security/pam_env.conf; stat -c '%U %a %n' /etc/chromium /etc/chromium/policies /etc/chromium/policies/managed; ls /etc/chromium/policies/managed` → the line containing `@{HOME}/.local/share/mise/shims:@{HOME}/.local/bin`; `root 755` ×3; `color.json`.
-  * Type `ls /etc/pam.d/omarchy-lock-password; grep -c gnome_keyring /etc/pam.d/sddm; ls /etc/sudoers.d/; sudo grep -E '^%wheel' /etc/sudoers` (password `prime`) → the file present; `0`; the four shipped drop-ins `omarchy-dns omarchy-passwd-tries omarchy-theme-browser omarchy-tzupdate` and no `00-omarchy-wheel` (only first-boot provisioning writes that); `%wheel ALL=(ALL:ALL) ALL` uncommented.
-  * Type `grep -E '^(SystemGroup|PeerCred)' /etc/cups/cups-files.conf; pacman -Q cups cups-filters system-config-printer cups-pk-helper; pacman -Q cups-browsed cups-pdf 2>&1; systemctl is-active cups` → exactly `SystemGroup cups-browsed sys root` and `PeerCred on`; four packages; two `was not found`; `active`. Then press Super+Alt+Space, type `print`, open "Print Settings" — it opens without an authentication error; close it with Super+W.
-  * Type `pacman -Q linux-omarchy linux-omarchy-headers; cat /etc/limine-entry-tool.d/omarchy-defaults.conf; grep -o initramfs_async=0 /proc/cmdline` → both packages at the same version; `KERNEL_CMDLINE[default]+=" initramfs_async=0"`, `BOOT_ORDER="linux-t2, linux-omarchy, linux-omarchy-*, *, *fallback, Snapshots"`; the cmdline match.
-  * Type `systemctl is-enabled ufw; sudo ufw status | head -1; systemctl cat plocate-updatedb.service | grep -E 'ExecStart|ConditionACPower'; systemctl --user cat bt-agent.service | grep Condition; systemctl --user is-enabled omarchy-crash-watch.service; ls /usr/share/libalpm/hooks/ | grep -c omarchy` → `enabled`, `Status: active`; an empty `ExecStart=` then `ExecStart=/usr/bin/updatedb --prune-bind-mounts=no --add-prunepaths=/.snapshots` and `ConditionACPower=true`; `ConditionPathIsDirectory=/sys/class/bluetooth`; `enabled`; `3`. Press Super+W.
-  ** The minted ISO is 4.0.2; if a file predates a HEAD change, report its actual content and `omarchy-version` rather than failing silently.
+  * Press Super+Enter. A terminal opens.
+  * Run `head -1 /usr/bin/powerprofilesctl` and press Enter. It is a Python script.
+  * Run `ssh -G localhost | grep -i serveraliveinterval` and press Enter. The interval is 15.
+  * Run `ls /etc/pam.d/omarchy-lock-password` and press Enter. The lock password file exists.
+  * Run `ls /etc/sudoers.d/omarchy-tzupdate` and press Enter. The file exists.
+  * Run `systemctl is-enabled ufw` and press Enter. It prints `enabled`.
+  * Run `systemctl is-active cups` and press Enter. It prints `active`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>

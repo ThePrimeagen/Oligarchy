@@ -53,11 +53,11 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `drive-password-rejects-bad-input`
 - [x] `user-password-change-keeps-disk-password`
 - [x] `factory-reset-confirm-cancel-and-wrong-passphrase`
-- [ ] `factory-reset-full-cycle-new-owner`
-- [ ] `factory-reset-first-boot-form-validation`
+- [x] `factory-reset-full-cycle-new-owner`
+- [x] `factory-reset-first-boot-form-validation`
 - [x] `factory-snapshot-present-and-reset-refuses-without-it`
-- [ ] `boot-chain-and-snapper-config-invariants`
-- [ ] `shipped-system-defaults-in-place`
+- [x] `boot-chain-and-snapper-config-invariants`
+- [x] `shipped-system-defaults-in-place`
 - [x] `locate-indexes-and-prunes-snapshots`
 - [x] `hardware-gated-entries-hidden-in-vm`
 - [x] `menu-open-close-hotkey-and-bar-logo`
