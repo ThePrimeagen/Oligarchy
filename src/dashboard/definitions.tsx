@@ -14,32 +14,20 @@ const runningHref = (name: string | undefined): string =>
 
 // One running job: its definition, what it is doing, the ticket that names it, and how long it
 // has been running. The definition name stays this page's link. The ticket text goes to Linear.
-// The rest of a ticketed card opens the session feed (the empty link is the click layer under
-// those two and the abort). Abort posts the ticket and action the shared /abort route already
-// stops. view=definitions is how that route tells this form apart from the servers page: htmx
-// swaps the list, and a submit without it returns here. A job with no ticket has nothing to name.
+// follow opens the session feed. Abort posts the ticket and action the shared /abort route
+// already stops. view=definitions is how that route tells this form apart from the servers page:
+// htmx swaps the list, and a submit without it returns here. A job with no ticket has nothing to
+// name.
 const RunningJob: FC<{ job: AutomationJob; definition: string | undefined }> = ({
   job,
   definition,
 }) => (
-  <li class="running-tests__job">
-    {job.ticket === null ? null : (
-      <a
-        class="running-tests__open"
-        href={followHref(job.ticket)}
-        aria-label={`follow ${job.ticket}`}
-      />
-    )}
+  <li>
     <a href={definitionHref(job.test)}>{job.test}</a>
-    <span class="running-tests__action">{job.action}</span>
-    {job.ticket === null ? (
-      <span class="running-tests__ticket">—</span>
-    ) : (
-      <a class="running-tests__linear" href={linearHref(job.ticket)}>
-        {job.ticket}
-      </a>
-    )}
-    <span class="running-tests__age">{since(job.startedAt, job.queriedAt)}</span>
+    <span>{job.action}</span>
+    {job.ticket === null ? <span>—</span> : <a href={linearHref(job.ticket)}>{job.ticket}</a>}
+    <span>{since(job.startedAt, job.queriedAt)}</span>
+    {job.ticket === null ? null : <a href={followHref(job.ticket)}>follow</a>}
     {job.ticket === null ? null : (
       <form
         method="post"
@@ -55,9 +43,7 @@ const RunningJob: FC<{ job: AutomationJob; definition: string | undefined }> = (
         {definition === undefined ? null : (
           <input type="hidden" name="definition" value={definition} />
         )}
-        <button type="submit" class="button button--abort">
-          Abort
-        </button>
+        <button type="submit">abort</button>
       </form>
     )}
   </li>
@@ -70,9 +56,9 @@ export const RunningList: FC<{
   definition: string | undefined;
 }> = ({ jobs, definition }) =>
   jobs.length === 0 ? (
-    <p class="running-tests__empty">No tests are running.</p>
+    <p>No tests are running.</p>
   ) : (
-    <ol class="running-tests__list">
+    <ol>
       {jobs.map((job) => (
         <RunningJob job={job} definition={definition} />
       ))}
@@ -86,7 +72,7 @@ const RunningTests: FC<{
   jobs: ReadonlyArray<AutomationJob>;
   definition: string | undefined;
 }> = ({ jobs, definition }) => (
-  <section class="running-tests" aria-labelledby="running-tests-heading">
+  <section aria-labelledby="running-tests-heading">
     <h2 id="running-tests-heading">Running</h2>
     <div
       id="running-tests"
@@ -153,9 +139,9 @@ const Definition: FC<{
         return (
           <>
             <h3>v{version}</h3>
-            <p class="wording">{wording.description}</p>
-            <p class="wording">{wording.instruction}</p>
-            <p class="wording">{wording.proof}</p>
+            <pre>{wording.description}</pre>
+            <pre>{wording.instruction}</pre>
+            <pre>{wording.proof}</pre>
           </>
         );
       })}
@@ -166,7 +152,7 @@ const Definition: FC<{
 // Not a form: enter must not reload the page. public/dashboard.js narrows the list as this is typed.
 // autocomplete is off: a restored value does not fire input, so the list would not match the box.
 const DefinitionSearch: FC = () => (
-  <search class="search">
+  <search>
     <input type="search" aria-label="Search definitions" autocomplete="off" />
   </search>
 );

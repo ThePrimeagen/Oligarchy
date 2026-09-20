@@ -127,20 +127,20 @@ const processSilent: ProcessSeries = {
 };
 
 const garageGraph =
-  '<div class="process-graph" role="img" aria-label="jobs 2 · cpu 37.5% · memory 512.0 MB"><div class="process-graph__plot"><div class="process-graph__bars"><span class="process-graph__bar" style="height:50%"></span><span class="process-graph__bar" style="height:100%"></span></div><svg class="process-graph__lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><line class="process-graph__jobs" x1="0" y1="50" x2="100" y2="0" vector-effect="non-scaling-stroke"></line><line class="process-graph__cpu" x1="0" y1="90" x2="100" y2="62.5" vector-effect="non-scaling-stroke"></line></svg></div><ul class="process-graph__legend"><li class="process-graph__memory">memory 512.0 MB</li><li class="process-graph__jobs">jobs 2</li><li class="process-graph__cpu">cpu 37.5%</li></ul></div>';
+  '<svg viewBox="0 0 100 100" role="img" aria-label="jobs 2 · cpu 37.5% · memory 512.0 MB"><rect data-series="memory" x="0" y="50" width="50" height="50" fill="currentColor"></rect><rect data-series="memory" x="50" y="0" width="50" height="100" fill="currentColor"></rect><line data-series="jobs" x1="0" y1="50" x2="100" y2="0" fill="none" stroke="currentColor" vector-effect="non-scaling-stroke"></line><line data-series="cpu" x1="0" y1="90" x2="100" y2="62.5" fill="none" stroke="currentColor" stroke-dasharray="4 2" vector-effect="non-scaling-stroke"></line></svg><ul><li>memory 512.0 MB</li><li>jobs 2</li><li>cpu 37.5%</li></ul>';
 
-const garageCard = `<div class="process-cards"><article class="process-card"><header><h3>garage</h3><p>qemu · 12 s ago</p></header>${garageGraph}</article></div>`;
+const garageCard = `<article><h3>garage</h3><p>qemu · 12 s ago</p>${garageGraph}</article>`;
 
 const JOB_COLUMNS =
   "<tr><th>ticket</th><th>test</th><th>action</th><th>status</th><th>queued</th><th>started</th><th>finished</th><th>reason</th><th></th></tr>";
 
 const linearLink = (ticket: string): string =>
-  `<a class="ticket" href="https://linear.app/issue/${encodeURIComponent(ticket)}">${ticket}</a>`;
+  `<a href="https://linear.app/issue/${encodeURIComponent(ticket)}">${ticket}</a>`;
 
 // The test name is the one follow link in the tab order. The rest of the row opens the same
 // page but stays out of the way of the keyboard.
 const followCell = (ticket: string, text: string, primary = false): string =>
-  `<td class="follow"><a href="/tickets/${encodeURIComponent(ticket)}"${primary ? "" : ' tabindex="-1" aria-hidden="true"'}>${text}</a></td>`;
+  `<td><a href="/tickets/${encodeURIComponent(ticket)}"${primary ? "" : ' tabindex="-1" aria-hidden="true"'}>${text}</a></td>`;
 
 const ticketRow = (
   ticket: string,
@@ -149,13 +149,10 @@ const ticketRow = (
 ): string =>
   `<tr><td>${linearLink(ticket)}</td>${followCell(ticket, cells[0], true)}${followCell(ticket, cells[1])}${followCell(ticket, cells[2])}${followCell(ticket, cells[3])}${followCell(ticket, cells[4])}${followCell(ticket, cells[5])}${followCell(ticket, cells[6])}<td>${abort}</td></tr>`;
 
-const ABORT_X =
-  '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 2l8 8M10 2L2 10" stroke="red" stroke-width="2" fill="none"></path></svg>';
-
 // The form names the row: a ticket has one drive and one diagnose, so the action is the rest of
-// its key.
+// its key. The button is the word, not an icon.
 const abortForm = (ticket: string, action: AutomationJob["action"]): string =>
-  `<form method="post" action="/abort" hx-post="/abort" hx-confirm="are you sure?" hx-target="#queue" hx-swap="innerHTML"><input type="hidden" name="ticket" value="${ticket}"/><input type="hidden" name="action" value="${action}"/><button type="submit" class="abort" aria-label="abort">${ABORT_X}</button></form>`;
+  `<form method="post" action="/abort" hx-post="/abort" hx-confirm="are you sure?" hx-target="#queue" hx-swap="innerHTML"><input type="hidden" name="ticket" value="${ticket}"/><input type="hidden" name="action" value="${action}"/><button type="submit">abort</button></form>`;
 
 // The components are functions of their props; the string they render, through the same html
 // helper the routes serve them with, is the page. The helper hands back a String object, hence
@@ -307,12 +304,12 @@ describe("Queue happy path", () => {
     );
   });
 
-  it("puts a red X on a running job that has a ticket, and asks are you sure before it posts", async () => {
+  it("offers abort as a word on a running job that has a ticket, and asks are you sure before it posts", async () => {
     const page = await render(Queue({ queue: { ...EMPTY_QUEUE, running: [running] } }));
     expect(page).toContain(abortForm("OLI-61", "diagnose"));
     expect(page).toContain('hx-confirm="are you sure?"');
-    expect(page).toContain('stroke="red"');
-    expect(page).not.toContain(">abort</button>");
+    expect(page).toContain(">abort</button>");
+    expect(page).not.toContain("<svg");
   });
 
   it("shows a pending job as queued and not yet started or finished, with the same abort", async () => {
@@ -326,7 +323,7 @@ describe("Queue happy path", () => {
     );
   });
 
-  it("puts the red X on a pending job that has a ticket, posting to the same route as a running one", async () => {
+  it("offers abort on a pending job that has a ticket, posting to the same route as a running one", async () => {
     const page = await render(
       Queue({ queue: { ...EMPTY_QUEUE, running: [running], pending: [pending] } }),
     );
@@ -437,7 +434,7 @@ describe("Queue unhappy path", () => {
     };
     const page = await render(Queue({ queue: { ...EMPTY_QUEUE, completed: [hostile] } }));
     expect(page).toContain(
-      `<td><a class="ticket" href="https://linear.app/issue/OLI-%3C1%22%3E">OLI-&lt;1&quot;&gt;</a></td>${followCell('OLI-<1">', "&lt;b&gt;wifi&lt;/b&gt;", true)}`,
+      `<td><a href="https://linear.app/issue/OLI-%3C1%22%3E">OLI-&lt;1&quot;&gt;</a></td>${followCell('OLI-<1">', "&lt;b&gt;wifi&lt;/b&gt;", true)}`,
     );
     expect(page).toContain(followCell('OLI-<1">', "&lt;script&gt;alert(1)&lt;/script&gt;"));
     expect(page).not.toContain('href="https://linear.app/issue/OLI-<1">');
@@ -455,10 +452,12 @@ describe("Queue unhappy path", () => {
 });
 
 describe("Process happy path", () => {
-  it("names a server and draws one dark-well graph: memory as bars, jobs and cpu as lines, newest reading on the legend", async () => {
+  it("names a server and draws one graph: memory as bars, jobs and cpu as lines, newest reading on the legend", async () => {
     const page = await render(Process({ series: [processAlive] }));
     expect(page).toBe(garageCard);
-    expect(page.match(/class="process-graph"/g)?.length).toBe(1);
+    expect(page.match(/role="img"/g)?.length).toBe(1);
+    expect(page).not.toMatch(/class=/);
+    expect(page).not.toMatch(/\sstyle=/);
     expect(page).not.toContain("<h4>");
     expect(page).not.toContain("<table>");
   });
@@ -480,7 +479,7 @@ describe("Process happy path", () => {
     const page = await render(Process({ series: [over] }));
     expect(page).toContain('aria-label="jobs 2 · cpu 150.0% · memory 512.0 MB"');
     expect(page).toContain(
-      '<line class="process-graph__cpu" x1="0" y1="50" x2="100" y2="0" vector-effect="non-scaling-stroke">',
+      '<line data-series="cpu" x1="0" y1="50" x2="100" y2="0" fill="none" stroke="currentColor" stroke-dasharray="4 2" vector-effect="non-scaling-stroke">',
     );
   });
 
@@ -491,22 +490,24 @@ describe("Process happy path", () => {
     };
     const page = await render(Process({ series: [one] }));
     expect(page).toContain(
-      '<line class="process-graph__jobs" x1="0" y1="0" x2="100" y2="0" vector-effect="non-scaling-stroke">',
+      '<line data-series="jobs" x1="0" y1="0" x2="100" y2="0" fill="none" stroke="currentColor" vector-effect="non-scaling-stroke">',
     );
     expect(page).toContain(
-      '<line class="process-graph__cpu" x1="0" y1="62.5" x2="100" y2="62.5" vector-effect="non-scaling-stroke">',
+      '<line data-series="cpu" x1="0" y1="62.5" x2="100" y2="62.5" fill="none" stroke="currentColor" stroke-dasharray="4 2" vector-effect="non-scaling-stroke">',
     );
-    expect(page).toContain('<span class="process-graph__bar" style="height:100%"></span>');
-    expect(page.match(/class="process-graph__bar"/g)?.length).toBe(1);
+    expect(page).toContain(
+      '<rect data-series="memory" x="0" y="0" width="100" height="100" fill="currentColor"></rect>',
+    );
+    expect(page.match(/data-series="memory"/g)?.length).toBe(1);
   });
 });
 
 describe("Process unhappy path", () => {
   it("collapses a silent process's graphs into one word", async () => {
     const page = await render(Process({ series: [processSilent] }));
-    expect(page).toContain("<header><h3>attic</h3><p>automation-client · 5 min ago</p></header>");
+    expect(page).toContain("<h3>attic</h3><p>automation-client · 5 min ago</p>");
     expect(page).toContain("<p><strong>silent</strong></p>");
-    expect(page).not.toContain("process-graph__bar");
+    expect(page).not.toContain("<svg");
     expect(page).not.toContain("256.0 MB");
     expect(page).not.toContain("8.0%");
   });
@@ -530,22 +531,22 @@ describe("Process unhappy path", () => {
     };
     const page = await render(Process({ series: [idle] }));
     expect(page).toContain('aria-label="jobs 0 · cpu 0.0% · memory 0.0 MB"');
-    expect(page).toContain('<li class="process-graph__memory">memory 0.0 MB</li>');
-    expect(page).toContain('<li class="process-graph__jobs">jobs 0</li>');
-    expect(page).toContain('<li class="process-graph__cpu">cpu 0.0%</li>');
-    expect(page.match(/style="height:0%"/g)?.length).toBe(2);
+    expect(page).toContain("<li>memory 0.0 MB</li>");
+    expect(page).toContain("<li>jobs 0</li>");
+    expect(page).toContain("<li>cpu 0.0%</li>");
+    expect(page.match(/height="0"/g)?.length).toBe(2);
     expect(page).toContain(
-      '<line class="process-graph__jobs" x1="0" y1="100" x2="100" y2="100" vector-effect="non-scaling-stroke">',
+      '<line data-series="jobs" x1="0" y1="100" x2="100" y2="100" fill="none" stroke="currentColor" vector-effect="non-scaling-stroke">',
     );
     expect(page).toContain(
-      '<line class="process-graph__cpu" x1="0" y1="100" x2="100" y2="100" vector-effect="non-scaling-stroke">',
+      '<line data-series="cpu" x1="0" y1="100" x2="100" y2="100" fill="none" stroke="currentColor" stroke-dasharray="4 2" vector-effect="non-scaling-stroke">',
     );
-    expect(page).not.toContain('style="height:100%"');
+    expect(page).not.toContain('height="100"');
   });
 });
 
 describe("ServersPage happy path", () => {
-  it("puts the process graphs first, then two halves side by side: the automation queue, the qemu fleet with its add box, each polled every thirty seconds", async () => {
+  it("puts the process graphs first, then the automation queue, then the qemu fleet with its add box, each polled every thirty seconds, with no stylesheet", async () => {
     const page = await render(
       ServersPage({
         halves: { queue: QUEUE, servers: [alive, neverHeardFrom], process: [processAlive] },
@@ -555,26 +556,23 @@ describe("ServersPage happy path", () => {
     expect(page).toContain("<title>oligarchy servers</title>");
     expect(page).toContain('<script src="https://cdn.jsdelivr.net/npm/htmx.org@4.0.0"');
     expect(page).toContain(
-      '<nav class="tabs" aria-label="Pages"><a href="/" aria-current="page">servers</a><a href="/definitions">definitions</a></nav>',
+      '<nav aria-label="Pages"><a href="/" aria-current="page">servers</a><a href="/definitions">definitions</a></nav>',
     );
-    expect(page.indexOf('<nav class="tabs"')).toBeLessThan(
+    expect(page.indexOf('<nav aria-label="Pages">')).toBeLessThan(
       page.indexOf("<h1>oligarchy servers</h1>"),
     );
-    expect(page).toMatch(/<style>[^<]*body\s*\{[^}]*background:\s*#161616/);
-    expect(page).toMatch(/<style>[^<]*\.tabs a\[aria-current=page\]\s*\{[^}]*color:\s*#fff/);
-    expect(page).toMatch(/<style>[^<]*\.process-cards\s*\{[^}]*grid-template-columns:\s*1fr 1fr/);
-    expect(page).toMatch(/<style>[^<]*\.halves\s*\{[^}]*grid-template-columns:\s*1fr 1fr/);
-    expect(page).toMatch(/<style>[^<]*\.abort\s*\{[^}]*background:\s*none/);
+    expect(page).not.toContain("<style");
+    expect(page).not.toMatch(/\sstyle=/);
+    expect(page).not.toMatch(/class=/);
     expect(page).toContain("<h1>oligarchy servers</h1>");
     expect(page).toContain(
       `<section><h2>process</h2><div id="process" hx-get="/servers/process" hx-trigger="every 30s">${garageCard}`,
     );
     expect(page).toContain(garageGraph);
     expect(page).toContain(
-      '<div class="halves"><section><h2>automation</h2><div id="queue" hx-get="/servers/queue" hx-trigger="every 30s"><p>2 test suites running · 8 passed · 2 failed · 80.0% pass</p><h3>running 1</h3>',
+      '<section><h2>automation</h2><div id="queue" hx-get="/servers/queue" hx-trigger="every 30s"><p>2 test suites running · 8 passed · 2 failed · 80.0% pass</p><h3>running 1</h3>',
     );
     expect(page).toContain(linearLink("OLI-61"));
-    expect(page).toMatch(/<style>[^<]*td\.follow a\s*\{[^}]*display:\s*block/);
     expect(page).toContain(
       '<section><h2>qemu servers</h2><div id="fleet" hx-get="/servers/fleet" hx-trigger="every 30s"><table>',
     );
@@ -589,9 +587,6 @@ describe("ServersPage happy path", () => {
     expect(page.indexOf("<h2>qemu servers</h2>")).toBeLessThan(
       page.indexOf("<h2>add a server</h2>"),
     );
-    expect(page).toMatch(/<style>[^<]*\.process-card/);
-    expect(page).toMatch(/<style>[^<]*\.process-graph__plot/);
-    expect(page).toMatch(/<style>[^<]*\.process-graph__bar/);
     expect(page).not.toContain("<h2>servers</h2>");
     expect(page).not.toContain("error:");
   });

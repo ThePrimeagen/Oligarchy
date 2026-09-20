@@ -541,10 +541,10 @@ NodeRuntime.runMain(main, { disableErrorReporting: true });
   thirty seconds, its `generation` counting the writes, so a number that stops moving is a process
   that stopped without deleting its row, and ten minutes of that is a row the reader of its kind
   deletes: the qemu reverse proxy a qemu server's, the automation server an automation-client's),
-  never a call into the process from the Worker. The page is text: tables, a form, and
-  htmx polling one fragment per table at the interval the rows are written at, styled only where
-  the layout asks for it (the servers page's two halves); a value from a row goes into it through
-  JSX, never a string template.
+  never a call into the process from the Worker. The operator page is text with no stylesheet:
+  tables, a form, and htmx polling one fragment per table at the interval the rows are written at.
+  A process series is an svg of its samples. A value from a row goes into it through JSX, never a
+  string template.
 - Declare endpoints as `HttpApiEndpoint.get/post(name, path, { params, query, payload, success,
   error })`; binary via `Schema.Uint8Array.pipe(HttpApiSchema.asUint8Array({ contentType }))`,
   headers via `HttpApiSchema.WithHeaders`, byte streams via `HttpApiSchema.StreamUint8Array`.

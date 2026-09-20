@@ -357,21 +357,21 @@ const section = (html: string, name: string): string => {
   return html.slice(start, next === -1 ? html.length : next);
 };
 
-// The wordings of a section, newest first: each an h3 naming the version and the paragraphs
-// that follow it, up to the next wording or the section's end.
+// The wordings of a section, newest first: each an h3 naming the version and the pre
+// elements that follow it, up to the next wording or the section's end.
 type Wording = { readonly label: string; readonly body: string };
 
 // The running strip at the top of the definitions page, up to its own end. It has no nested
 // section, so the first close is the close.
 const runningSection = (html: string): string =>
-  /<section class="running-tests"[\s\S]*?<\/section>/.exec(html)?.[0] ?? "";
+  /<section aria-labelledby="running-tests-heading"[\s\S]*?<\/section>/.exec(html)?.[0] ?? "";
 
 const definitionsAbortForm = (
   ticket: string,
   action: QueuedJob["action"],
   definition: string,
 ): string =>
-  `<form method="post" action="/abort" hx-post="/abort" hx-confirm="are you sure?" hx-target="#running-tests" hx-swap="innerHTML"><input type="hidden" name="ticket" value="${ticket}"/><input type="hidden" name="action" value="${action}"/><input type="hidden" name="view" value="definitions"/><input type="hidden" name="definition" value="${definition}"/><button type="submit" class="button button--abort">Abort</button></form>`;
+  `<form method="post" action="/abort" hx-post="/abort" hx-confirm="are you sure?" hx-target="#running-tests" hx-swap="innerHTML"><input type="hidden" name="ticket" value="${ticket}"/><input type="hidden" name="action" value="${action}"/><input type="hidden" name="view" value="definitions"/><input type="hidden" name="definition" value="${definition}"/><button type="submit">abort</button></form>`;
 const wordings = (card: string): ReadonlyArray<Wording> =>
   [...card.matchAll(/<h3>(v\d+)<\/h3>([\s\S]*?)(?=<h3>|$)/g)].map(([, label, body]) => ({
     label: label ?? "",
@@ -488,7 +488,7 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
   it("lists every definition as its own page, under a search", async () => {
     const { status, html } = await getPage("/definitions", dbUrl);
     expect(status).toBe(200);
-    expect(html).toContain('<search class="search"><input type="search"');
+    expect(html).toContain('<search><input type="search"');
     expect(html).toContain('<a href="/definitions/lock-screen">lock-screen</a>');
     expect(html.indexOf("<search")).toBeLessThan(html.indexOf('href="/definitions/lock-screen"'));
     expect(html).not.toContain("<h2>lock-screen</h2>");
@@ -531,9 +531,9 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
     expect(status).toBe(200);
     const card = section(html, "wide layout");
     expect(card).toContain("<h2>wide layout</h2>");
-    expect(card).toContain('<p class="wording">d</p>');
-    expect(card).toContain('<p class="wording">i</p>');
-    expect(card).toContain('<p class="wording">p</p>');
+    expect(card).toContain("<pre>d</pre>");
+    expect(card).toContain("<pre>i</pre>");
+    expect(card).toContain("<pre>p</pre>");
     expect(card).not.toContain("succeeded");
     expect(card).not.toContain("gemini-3.8");
     expect(card).not.toContain("lock-screen");
@@ -573,12 +573,12 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
     expect(rest).toEqual([]);
     expect(v2).toMatchObject({ label: "v2" });
     expect(v1).toMatchObject({ label: "v1" });
-    expect(v2?.body).toContain('<p class="wording">second</p>');
-    expect(v2?.body).not.toContain('<p class="wording">first</p>');
+    expect(v2?.body).toContain("<pre>second</pre>");
+    expect(v2?.body).not.toContain("<pre>first</pre>");
     expect(v2?.body).not.toContain("composer-2.5:");
     expect(v2?.body).not.toContain("grok-4.6:");
-    expect(v1?.body).toContain('<p class="wording">first</p>');
-    expect(v1?.body).not.toContain('<p class="wording">second</p>');
+    expect(v1?.body).toContain("<pre>first</pre>");
+    expect(v1?.body).not.toContain("<pre>second</pre>");
     expect(v1?.body).not.toContain("grok-4.6:");
     expect(v1?.body).not.toContain("composer-2.5:");
     expect(card).not.toContain('<table class="runs"');
@@ -606,9 +606,9 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
     expect(status).toBe(200);
     const card = section(html, "wide-three");
     expect(wordings(card).map((wording) => wording.label)).toEqual(["v3", "v2"]);
-    expect(card).toContain('<p class="wording">third</p>');
-    expect(card).toContain('<p class="wording">second</p>');
-    expect(card).not.toContain('<p class="wording">first</p>');
+    expect(card).toContain("<pre>third</pre>");
+    expect(card).toContain("<pre>second</pre>");
+    expect(card).not.toContain("<pre>first</pre>");
     expect(card).not.toContain("<h3>v1</h3>");
   });
 
@@ -643,7 +643,7 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
     expect(status).toBe(200);
     const card = section(html, "wide-duration");
     expect(card).toContain("<h2>wide-duration</h2>");
-    expect(card).toContain('<p class="wording">i</p>');
+    expect(card).toContain("<pre>i</pre>");
     expect(card).not.toContain("Last 50 runs by duration");
     expect(card).not.toContain("duration-chart");
     expect(card).not.toContain("succeeded in");
@@ -687,9 +687,9 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
     expect(status).toBe(200);
     const card = section(html, "wide-unrun");
     expect(card).toContain("<h2>wide-unrun</h2>");
-    expect(card).toContain('<p class="wording">d</p>');
-    expect(card).toContain('<p class="wording">i</p>');
-    expect(card).toContain('<p class="wording">p</p>');
+    expect(card).toContain("<pre>d</pre>");
+    expect(card).toContain("<pre>i</pre>");
+    expect(card).toContain("<pre>p</pre>");
     expect(card).not.toContain("No passed or failed results yet.");
     expect(card).not.toContain("result-chart");
     expect(card).not.toContain('<table class="runs"');
@@ -732,7 +732,7 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
     );
     const { status, html } = await getPage("/definitions/running-on-definitions", dbUrl);
     expect(status).toBe(200);
-    const runningAt = html.indexOf('<section class="running-tests"');
+    const runningAt = html.indexOf('<section aria-labelledby="running-tests-heading">');
     const headingAt = html.indexOf("<h1>oligarchy definitions</h1>");
     const nameAt = html.indexOf("<h2>running-on-definitions</h2>");
     expect(headingAt).toBeGreaterThan(-1);
@@ -782,7 +782,7 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page unhappy path", () => {
     expect(running).not.toContain("RUN-NONE");
     expect(running).not.toContain("RUN-FINISHED");
     expect(running).not.toContain('action="/abort"');
-    expect(html.indexOf('<section class="running-tests"')).toBeLessThan(
+    expect(html.indexOf('<section aria-labelledby="running-tests-heading">')).toBeLessThan(
       html.indexOf("<h2>lock-screen</h2>"),
     );
   });
@@ -819,7 +819,7 @@ describe.skipIf(dbUrl === "")("dashboard/definitions edit happy path", () => {
     const card = section(html, "wide-save");
     const [newest] = wordings(card);
     expect(newest).toMatchObject({ label: "v3" });
-    expect(newest?.body).toContain('<p class="wording">third\nand more</p>');
+    expect(newest?.body).toContain("<pre>third\nand more</pre>");
     expect(wordings(card).map((wording) => wording.label)).toEqual(["v3", "v2"]);
     expect(editForm(card)).toMatchObject({
       fields: { instruction: "third\nand more" },
@@ -844,8 +844,8 @@ describe.skipIf(dbUrl === "")("dashboard/definitions edit happy path", () => {
     expect(saved.status).toBe(303);
     const { html } = await getPage("/definitions/wide-one-field", dbUrl);
     const [newest] = wordings(section(html, "wide-one-field"));
-    expect(newest?.body).toContain('<p class="wording">p2</p>');
-    expect(newest?.body).toContain('<p class="wording">i</p>');
+    expect(newest?.body).toContain("<pre>p2</pre>");
+    expect(newest?.body).toContain("<pre>i</pre>");
   });
 });
 
@@ -971,7 +971,7 @@ describe.skipIf(dbUrl === "")("dashboard/definitions running fragment", () => {
     );
     const { status, html } = await getPage("/definitions/running?name=running-fragment", dbUrl);
     expect(status).toBe(200);
-    expect(html.startsWith('<ol class="running-tests__list">')).toBe(true);
+    expect(html.startsWith("<ol>")).toBe(true);
     expect(html).toContain(definitionsAbortForm("RUN-FRAG", "drive", "running-fragment"));
     expect(html).not.toContain("RUN-FRAG-PEND");
     expect(html).not.toContain("<html");
@@ -1014,7 +1014,7 @@ describe.skipIf(dbUrl === "")("dashboard/definitions running fragment", () => {
     );
     const { status, html } = await getPage("/definitions/running", dbUrl);
     expect(status).toBe(200);
-    expect(html).toBe('<p class="running-tests__empty">No tests are running.</p>');
+    expect(html).toBe("<p>No tests are running.</p>");
   });
 });
 
@@ -1193,14 +1193,14 @@ describe.skipIf(dbUrl === "")("dashboard/servers page happy path", () => {
     expect(html).toContain('<div id="process" hx-get="/servers/process" hx-trigger="every 30s">');
     expect(html).toContain("<h3>garage</h3>");
     expect(html).toContain('aria-label="jobs 2 · cpu 37.5% · memory 512.0 MB"');
-    expect(html).toContain('<li class="process-graph__memory">memory 512.0 MB</li>');
-    expect(html).toContain('<li class="process-graph__jobs">jobs 2</li>');
-    expect(html).toContain('<li class="process-graph__cpu">cpu 37.5%</li>');
-    expect(html).toContain('class="process-cards"');
-    expect(html).toMatch(/body\s*\{[^}]*background:\s*#161616/);
-    expect(html).toContain('class="process-graph__jobs"');
-    expect(html).toContain('class="process-graph__cpu"');
-    expect(html).toContain("process-graph__bar");
+    expect(html).toContain("<li>memory 512.0 MB</li>");
+    expect(html).toContain("<li>jobs 2</li>");
+    expect(html).toContain("<li>cpu 37.5%</li>");
+    expect(html).toContain("<article><h3>garage</h3>");
+    expect(html).not.toContain("<style");
+    expect(html).toContain('data-series="jobs"');
+    expect(html).toContain('data-series="cpu"');
+    expect(html).toContain('data-series="memory"');
     expect(html.indexOf("<h2>process</h2>")).toBeLessThan(html.indexOf("<h2>automation</h2>"));
     expect(html).toContain("<h3>attic</h3>");
     expect(html).toContain("<p><strong>silent</strong></p>");
@@ -1228,12 +1228,12 @@ describe.skipIf(dbUrl === "")("dashboard/servers page happy path", () => {
   it("serves the process graphs alone at /servers/process, what the page's poll swaps in", async () => {
     const { status, html } = await getPage("/servers/process", dbUrl);
     expect(status).toBe(200);
-    expect(html).toContain('<article class="process-card">');
+    expect(html).toContain("<article><h3>garage</h3>");
     expect(html).toContain("<h3>garage</h3>");
     expect(html).toContain('aria-label="jobs 2 · cpu 37.5% · memory 512.0 MB"');
-    expect(html).toContain("process-graph__bar");
-    expect(html).toContain('class="process-graph__jobs"');
-    expect(html).toContain('class="process-graph__cpu"');
+    expect(html).toContain('data-series="memory"');
+    expect(html).toContain('data-series="jobs"');
+    expect(html).toContain('data-series="cpu"');
     expect(html).not.toContain("<table>");
     expect(html).not.toContain("<html");
     expect(html).not.toContain("add a server");
@@ -1441,21 +1441,21 @@ console.log([failed.test, failed.action, failed.reason, failed.createdAt instanc
     ]);
   });
 
-  it("shows the queue in the automation half, running then pending then completed, beside the fleet", async () => {
+  it("shows the queue under automation, running then pending then completed, before the fleet", async () => {
     const { status, html } = await getPage("/servers", dbUrl);
     expect(status).toBe(200);
     expect(html).toMatch(
-      /<div class="halves"><section><h2>automation<\/h2><div id="queue" hx-get="\/servers\/queue" hx-trigger="every 30s"><p>\d+ test suites? running(?: · \d+ passed · \d+ failed(?: · \d+\.\d% pass)?)?<\/p><h3>running 2<\/h3><table>/,
+      /<section><h2>automation<\/h2><div id="queue" hx-get="\/servers\/queue" hx-trigger="every 30s"><p>\d+ test suites? running(?: · \d+ passed · \d+ failed(?: · \d+\.\d% pass)?)?<\/p><h3>running 2<\/h3><table>/,
     );
     // The ages are read against the database's clock: a minute has margin, seconds are counted.
     expect(html).toMatch(
-      /<tr><td><a class="ticket" href="https:\/\/linear\.app\/issue\/QUE-102">QUE-102<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-102">queue-order<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-102" tabindex="-1" aria-hidden="true">diagnose<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-102" tabindex="-1" aria-hidden="true">running<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-102" tabindex="-1" aria-hidden="true">1 min ago<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-102" tabindex="-1" aria-hidden="true">\d+ s ago<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-102" tabindex="-1" aria-hidden="true">—<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-102" tabindex="-1" aria-hidden="true"><\/a><\/td><td><form method="post" action="\/abort" hx-post="\/abort" hx-confirm="are you sure\?" hx-target="#queue" hx-swap="innerHTML"><input type="hidden" name="ticket" value="QUE-102"\/><input type="hidden" name="action" value="diagnose"\/><button type="submit" class="abort" aria-label="abort"><svg/,
+      /<tr><td><a href="https:\/\/linear\.app\/issue\/QUE-102">QUE-102<\/a><\/td><td><a href="\/tickets\/QUE-102">queue-order<\/a><\/td><td><a href="\/tickets\/QUE-102" tabindex="-1" aria-hidden="true">diagnose<\/a><\/td><td><a href="\/tickets\/QUE-102" tabindex="-1" aria-hidden="true">running<\/a><\/td><td><a href="\/tickets\/QUE-102" tabindex="-1" aria-hidden="true">1 min ago<\/a><\/td><td><a href="\/tickets\/QUE-102" tabindex="-1" aria-hidden="true">\d+ s ago<\/a><\/td><td><a href="\/tickets\/QUE-102" tabindex="-1" aria-hidden="true">—<\/a><\/td><td><a href="\/tickets\/QUE-102" tabindex="-1" aria-hidden="true"><\/a><\/td><td><form method="post" action="\/abort" hx-post="\/abort" hx-confirm="are you sure\?" hx-target="#queue" hx-swap="innerHTML"><input type="hidden" name="ticket" value="QUE-102"\/><input type="hidden" name="action" value="diagnose"\/><button type="submit">abort<\/button>/,
     );
     expect(html).toMatch(
-      /<h3>pending 4<\/h3><table>.*?<tr><td><a class="ticket" href="https:\/\/linear\.app\/issue\/QUE-104">QUE-104<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-104">queue-order<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-104" tabindex="-1" aria-hidden="true">diagnose<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-104" tabindex="-1" aria-hidden="true">pending<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-104" tabindex="-1" aria-hidden="true">\d+ s ago<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-104" tabindex="-1" aria-hidden="true">—<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-104" tabindex="-1" aria-hidden="true">—<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-104" tabindex="-1" aria-hidden="true"><\/a><\/td><td><form method="post" action="\/abort" hx-post="\/abort" hx-confirm="are you sure\?" hx-target="#queue" hx-swap="innerHTML"><input type="hidden" name="ticket" value="QUE-104"\/><input type="hidden" name="action" value="diagnose"\/><button type="submit" class="abort" aria-label="abort"><svg.*?<\/form><\/td><\/tr>.*?>QUE-103<\/a>.*?>QUE-105<\/a>.*?<tr><td>—<\/td><td>queue-order<\/td><td>drive<\/td><td>pending<\/td><td>\d+ s ago<\/td><td>—<\/td><td>—<\/td><td><\/td><td><\/td><\/tr>.*?<h3>completed<\/h3>/s,
+      /<h3>pending 4<\/h3><table>.*?<tr><td><a href="https:\/\/linear\.app\/issue\/QUE-104">QUE-104<\/a><\/td><td><a href="\/tickets\/QUE-104">queue-order<\/a><\/td><td><a href="\/tickets\/QUE-104" tabindex="-1" aria-hidden="true">diagnose<\/a><\/td><td><a href="\/tickets\/QUE-104" tabindex="-1" aria-hidden="true">pending<\/a><\/td><td><a href="\/tickets\/QUE-104" tabindex="-1" aria-hidden="true">\d+ s ago<\/a><\/td><td><a href="\/tickets\/QUE-104" tabindex="-1" aria-hidden="true">—<\/a><\/td><td><a href="\/tickets\/QUE-104" tabindex="-1" aria-hidden="true">—<\/a><\/td><td><a href="\/tickets\/QUE-104" tabindex="-1" aria-hidden="true"><\/a><\/td><td><form method="post" action="\/abort" hx-post="\/abort" hx-confirm="are you sure\?" hx-target="#queue" hx-swap="innerHTML"><input type="hidden" name="ticket" value="QUE-104"\/><input type="hidden" name="action" value="diagnose"\/><button type="submit">abort<\/button><\/form><\/td><\/tr>.*?>QUE-103<\/a>.*?>QUE-105<\/a>.*?<tr><td>—<\/td><td>queue-order<\/td><td>drive<\/td><td>pending<\/td><td>\d+ s ago<\/td><td>—<\/td><td>—<\/td><td><\/td><td><\/td><\/tr>.*?<h3>completed<\/h3>/s,
     );
     expect(html).toMatch(
-      /<h3>completed<\/h3><table>.*?<tr><td><a class="ticket" href="https:\/\/linear\.app\/issue\/QUE-107">QUE-107<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-107">queue-order<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-107" tabindex="-1" aria-hidden="true">drive<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-107" tabindex="-1" aria-hidden="true">failed<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-107" tabindex="-1" aria-hidden="true">\d+ min ago<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-107" tabindex="-1" aria-hidden="true">\d+ min ago<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-107" tabindex="-1" aria-hidden="true">1 min ago<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-107" tabindex="-1" aria-hidden="true">session timed out<\/a><\/td><td><\/td><\/tr>.*?>QUE-108<\/a>.*?>QUE-106<\/a>.*?>QUE-109<\/a>/s,
+      /<h3>completed<\/h3><table>.*?<tr><td><a href="https:\/\/linear\.app\/issue\/QUE-107">QUE-107<\/a><\/td><td><a href="\/tickets\/QUE-107">queue-order<\/a><\/td><td><a href="\/tickets\/QUE-107" tabindex="-1" aria-hidden="true">drive<\/a><\/td><td><a href="\/tickets\/QUE-107" tabindex="-1" aria-hidden="true">failed<\/a><\/td><td><a href="\/tickets\/QUE-107" tabindex="-1" aria-hidden="true">\d+ min ago<\/a><\/td><td><a href="\/tickets\/QUE-107" tabindex="-1" aria-hidden="true">\d+ min ago<\/a><\/td><td><a href="\/tickets\/QUE-107" tabindex="-1" aria-hidden="true">1 min ago<\/a><\/td><td><a href="\/tickets\/QUE-107" tabindex="-1" aria-hidden="true">session timed out<\/a><\/td><td><\/td><\/tr>.*?>QUE-108<\/a>.*?>QUE-106<\/a>.*?>QUE-109<\/a>/s,
     );
     expect(html.indexOf("<h2>automation</h2>")).toBeLessThan(html.indexOf("<h2>qemu servers</h2>"));
     expect(html).toContain('<div id="fleet" hx-get="/servers/fleet" hx-trigger="every 30s">');
@@ -2329,7 +2329,7 @@ describe.skipIf(dbUrl === "")("dashboard POST /abort happy path", () => {
         /^<p>\d+ test suites? running(?: · \d+ passed · \d+ failed(?: · \d+\.\d% pass)?)?<\/p><h3>running 0<\/h3><p>none<\/p><h3>pending 1<\/h3><table>/,
       );
       expect(html).toMatch(
-        /<h3>pending 1<\/h3><table>.*?<a class="ticket" href="https:\/\/linear\.app\/issue\/ABT-HX-2">ABT-HX-2<\/a>.*?<h3>completed<\/h3><table>.*?<tr><td><a class="ticket" href="https:\/\/linear\.app\/issue\/ABT-HX-1">ABT-HX-1<\/a><\/td><td class="follow"><a href="\/tickets\/ABT-HX-1">abort-htmx-pending<\/a><\/td><td class="follow"><a href="\/tickets\/ABT-HX-1" tabindex="-1" aria-hidden="true">drive<\/a><\/td><td class="follow"><a href="\/tickets\/ABT-HX-1" tabindex="-1" aria-hidden="true">aborted<\/a><\/td><td class="follow"><a href="\/tickets\/ABT-HX-1" tabindex="-1" aria-hidden="true">\d+ s ago<\/a><\/td><td class="follow"><a href="\/tickets\/ABT-HX-1" tabindex="-1" aria-hidden="true">—<\/a><\/td><td class="follow"><a href="\/tickets\/ABT-HX-1" tabindex="-1" aria-hidden="true">\d+ s ago<\/a><\/td><td class="follow"><a href="\/tickets\/ABT-HX-1" tabindex="-1" aria-hidden="true">aborted<\/a><\/td><td><\/td><\/tr>/s,
+        /<h3>pending 1<\/h3><table>.*?<a href="https:\/\/linear\.app\/issue\/ABT-HX-2">ABT-HX-2<\/a>.*?<h3>completed<\/h3><table>.*?<tr><td><a href="https:\/\/linear\.app\/issue\/ABT-HX-1">ABT-HX-1<\/a><\/td><td><a href="\/tickets\/ABT-HX-1">abort-htmx-pending<\/a><\/td><td><a href="\/tickets\/ABT-HX-1" tabindex="-1" aria-hidden="true">drive<\/a><\/td><td><a href="\/tickets\/ABT-HX-1" tabindex="-1" aria-hidden="true">aborted<\/a><\/td><td><a href="\/tickets\/ABT-HX-1" tabindex="-1" aria-hidden="true">\d+ s ago<\/a><\/td><td><a href="\/tickets\/ABT-HX-1" tabindex="-1" aria-hidden="true">—<\/a><\/td><td><a href="\/tickets\/ABT-HX-1" tabindex="-1" aria-hidden="true">\d+ s ago<\/a><\/td><td><a href="\/tickets\/ABT-HX-1" tabindex="-1" aria-hidden="true">aborted<\/a><\/td><td><\/td><\/tr>/s,
       );
       expect(linear.requests).toEqual(linearMove("ABT-HX-1"));
     } finally {
@@ -2366,7 +2366,7 @@ describe.skipIf(dbUrl === "")("dashboard POST /abort happy path", () => {
       );
       expect(response.status).toBe(200);
       const html = await response.text();
-      expect(html.startsWith('<ol class="running-tests__list">')).toBe(true);
+      expect(html.startsWith("<ol>")).toBe(true);
       expect(html).toContain(definitionsAbortForm("ABT-DEF-KEEP", "drive", "abort-definitions"));
       expect(html).not.toContain("ABT-DEF-STOP");
       expect(html).not.toContain("<h3>running</h3>");

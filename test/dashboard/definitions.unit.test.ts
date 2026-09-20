@@ -54,16 +54,15 @@ describe("DefinitionsPage happy path", () => {
     const htmlText = await page([...both]);
     expect(htmlText).toContain("<title>oligarchy definitions</title>");
     expect(htmlText).toContain('<script src="/dashboard.js"');
-    expect(htmlText).toMatch(/<style>[^<]*body\s*\{[^}]*background:\s*#161616/);
-    expect(htmlText).toMatch(/\.search\s*\{[^}]*display:\s*flex/);
+    expect(htmlText).not.toContain("<style");
     expect(htmlText).toContain(
-      '<nav class="tabs" aria-label="Pages"><a href="/">servers</a><a href="/definitions" aria-current="page">definitions</a></nav>',
+      '<nav aria-label="Pages"><a href="/">servers</a><a href="/definitions" aria-current="page">definitions</a></nav>',
     );
-    expect(htmlText.indexOf('<nav class="tabs"')).toBeLessThan(
+    expect(htmlText.indexOf('<nav aria-label="Pages">')).toBeLessThan(
       htmlText.indexOf("<h1>oligarchy definitions</h1>"),
     );
     const search = htmlText.indexOf(
-      '<search class="search"><input type="search" aria-label="Search definitions" autocomplete="off"/></search>',
+      '<search><input type="search" aria-label="Search definitions" autocomplete="off"/></search>',
     );
     const list = htmlText.indexOf(
       '<ul class="definition-list"><li><a href="/definitions/install">install</a></li><li><a href="/definitions/lock-screen">lock-screen</a></li></ul>',
@@ -79,7 +78,7 @@ describe("DefinitionsPage happy path", () => {
     expect(htmlText).not.toContain("<h2>install</h2>");
     expect(htmlText).not.toContain("<h2>lock-screen</h2>");
     expect(htmlText).not.toContain('class="definition__form"');
-    expect(htmlText).not.toContain('<p class="wording">');
+    expect(htmlText).not.toContain("<pre>");
     expect(htmlText).not.toContain("dashboard.css");
     expect(htmlText).not.toContain("OMARCHY");
     expect(htmlText).not.toContain("error:");
@@ -90,21 +89,15 @@ describe("DefinitionsPage happy path", () => {
     const htmlText = await page(null, { name: "lock-screen", selected });
     expect(htmlText).toContain("<title>oligarchy definitions</title>");
     expect(htmlText).toContain('<script src="/dashboard.js"');
-    expect(htmlText).toMatch(/p\.wording\s*\{[^}]*white-space:\s*pre-wrap/);
-    expect(htmlText).toMatch(/button:disabled\s*\{[^}]*opacity:\s*0\.45/);
-    expect(htmlText).not.toMatch(/[^-]p\s*\{[^}]*white-space:\s*pre-wrap/);
+    expect(htmlText).not.toContain("<style");
     expect(htmlText).toContain('aria-current="page">definitions</a>');
     expect(htmlText).not.toContain("<search");
     expect(htmlText).not.toContain('href="/definitions/install"');
     expect(htmlText).toContain("<h2>lock-screen</h2>");
     expect(htmlText).toContain("<h3>v2</h3>");
-    expect(htmlText).toContain(
-      '<p class="wording">new d</p><p class="wording">second</p><p class="wording">new p</p>',
-    );
+    expect(htmlText).toContain("<pre>new d</pre><pre>second</pre><pre>new p</pre>");
     expect(htmlText).toContain("<h3>v1</h3>");
-    expect(htmlText).toContain(
-      '<p class="wording">old d</p><p class="wording">first</p><p class="wording">old p</p>',
-    );
+    expect(htmlText).toContain("<pre>old d</pre><pre>first</pre><pre>old p</pre>");
     expect(htmlText.indexOf("<h3>v2</h3>")).toBeLessThan(htmlText.indexOf("<h3>v1</h3>"));
     expect(htmlText).toContain(
       '<form method="post" action="/definitions" class="definition__form"><input type="hidden" name="name" value="lock-screen"/>',
@@ -135,14 +128,10 @@ describe("DefinitionsPage happy path", () => {
       ],
     };
     const htmlText = await page(null, { name: "wide-three", selected });
-    expect(htmlText).toContain(
-      '<h3>v3</h3><p class="wording">d3</p><p class="wording">newest</p><p class="wording">p3</p>',
-    );
-    expect(htmlText).toContain(
-      '<h3>v2</h3><p class="wording">d2</p><p class="wording">middle</p><p class="wording">p2</p>',
-    );
+    expect(htmlText).toContain("<h3>v3</h3><pre>d3</pre><pre>newest</pre><pre>p3</pre>");
+    expect(htmlText).toContain("<h3>v2</h3><pre>d2</pre><pre>middle</pre><pre>p2</pre>");
     expect(htmlText).not.toContain("<h3>v1</h3>");
-    expect(htmlText).not.toContain('<p class="wording">oldest</p>');
+    expect(htmlText).not.toContain("<pre>oldest</pre>");
     expect(htmlText).toContain(
       "Updating writes v4 of wide-three; the earlier wordings keep their runs.",
     );
@@ -157,7 +146,7 @@ describe("DefinitionsPage happy path", () => {
     expect(htmlText).toContain("<search");
     expect(htmlText).not.toContain("definition-miss");
     expect(htmlText).toContain("<p>no definitions</p>");
-    expect(htmlText).toContain('<p class="running-tests__empty">No tests are running.</p>');
+    expect(htmlText).toContain("<p>No tests are running.</p>");
     expect(htmlText).not.toContain('class="definition__form"');
     expect(htmlText).not.toContain("<h2>install</h2>");
   });
@@ -217,9 +206,9 @@ describe("DefinitionsPage unhappy path", () => {
     });
     expect(shown).toContain("<h2>a&lt;&quot;b&gt;</h2>");
     expect(shown).toContain('value="a&lt;&quot;b&gt;"');
-    expect(shown).toContain('<p class="wording">d &lt;d&gt;</p>');
-    expect(shown).toContain('<p class="wording">i &lt;i&gt;</p>');
-    expect(shown).toContain('<p class="wording">p &lt;p&gt;</p>');
+    expect(shown).toContain("<pre>d &lt;d&gt;</pre>");
+    expect(shown).toContain("<pre>i &lt;i&gt;</pre>");
+    expect(shown).toContain("<pre>p &lt;p&gt;</pre>");
     expect(shown).not.toContain('a<"b>');
     expect(shown).not.toContain("<d>");
 
@@ -248,7 +237,7 @@ describe("DefinitionsPage unhappy path", () => {
       running: [running("RUN-2", "diagnose"), running("RUN-1", "drive"), running(null, "drive")],
     });
     const strip = htmlText.slice(
-      htmlText.indexOf('<section class="running-tests"'),
+      htmlText.indexOf('<section aria-labelledby="running-tests-heading">'),
       htmlText.indexOf("<h2>lock-screen</h2>"),
     );
     expect(strip).toContain(
@@ -258,7 +247,7 @@ describe("DefinitionsPage unhappy path", () => {
     expect(strip.indexOf(">RUN-1<")).toBeLessThan(strip.indexOf(">—</span>"));
     expect(strip).toContain("10 s ago");
     expect(strip).toContain(
-      '<form method="post" action="/abort" hx-post="/abort" hx-confirm="are you sure?" hx-target="#running-tests" hx-swap="innerHTML"><input type="hidden" name="ticket" value="RUN-2"/><input type="hidden" name="action" value="diagnose"/><input type="hidden" name="view" value="definitions"/><input type="hidden" name="definition" value="lock-screen"/><button type="submit" class="button button--abort">Abort</button></form>',
+      '<form method="post" action="/abort" hx-post="/abort" hx-confirm="are you sure?" hx-target="#running-tests" hx-swap="innerHTML"><input type="hidden" name="ticket" value="RUN-2"/><input type="hidden" name="action" value="diagnose"/><input type="hidden" name="view" value="definitions"/><input type="hidden" name="definition" value="lock-screen"/><button type="submit">abort</button></form>',
     );
     expect(strip.match(/action="\/abort"/g)).toHaveLength(2);
   });
