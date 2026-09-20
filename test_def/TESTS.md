@@ -1428,12 +1428,15 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Escape. The Omarchy Menu opens directly on the System submenu.
-  * The rows must be, in order: Screensaver, Lock, Suspend, Logout, Reboot, Shutdown — and no Hibernate.
-  ** Do not type while the menu is open (typing filters the rows) and do not select Suspend or Hibernate: suspend is one-way in this guest.
-  * Press Escape. The menu closes and the desktop is unchanged.
-  * Press Super+Space and click System with the mouse: the same six rows. Press Escape.
-  * Open a terminal (Super+Enter) and type `swapon --show` (only `/dev/zram0`) and `omarchy-hibernation-remove` — "Hibernation is not set up", no prompt. This explains the missing row. Press Super+W.
+  * Press Super+Escape. The System menu opens. Hibernate is absent. Do not select Suspend.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Click System. Use the mouse only. The System menu opens. Hibernate is absent.
+  * Press Escape. The menu closes.
+  * Press Super+Enter. A terminal opens.
+  * Run `swapon --show` and press Enter. Only zram is listed.
+  * Run `omarchy-hibernation-remove` and press Enter. It says hibernation is not set up.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -1457,18 +1460,21 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal (Super+Enter) and type `omarchy-state set reboot-required; ls ~/.local/state/omarchy/reboot-required; touch ~/before-reboot-marker; journalctl --list-boots | wc -l; cat /etc/sddm.conf.d/autologin.conf; loginctl show-session $XDG_SESSION_ID -p Service -p Type` — the flag file is listed (the bar may show a reboot indicator); note the boot count; `[Autologin] User=prime Session=omarchy.desktop`; `Service=sddm-autologin`, `Type=wayland`. Press Super+Enter again so a second window is open.
-  ** If `omarchy-state` is missing on this build, note "absent on this build" and continue without the flag.
-  * Press Super+Escape and click Reboot with the mouse. An OSD "Rebooting" shows, all windows close within a second and the screen goes dark about two seconds later.
-  ** Do not pick Suspend or Hibernate. Screenshot continuously from the moment the screen goes dark; the bootloader menu is brief.
-  * As soon as the firmware splash is gone press Down once per screenshot to stop the countdown. The Limine menu shows a green "Omarchy Bootloader" heading on a dark (Tokyo Night) background, entries with a countdown: one containing "Omarchy" (linux-omarchy), a "fallback" entry, and a Snapshots entry. Record every entry name and which row was highlighted — the second row is the configured default (`default_entry: 2`).
-  ** Limine waits only about five seconds; if it boots on its own that is acceptable — note it and skip the next step.
-  * Highlight Snapshots and press Enter: the submenu lists snapshots with a date and description, never more than 6 (on a freshly minted disk it may be empty or the entry absent — record it, do not fail). Press Escape: the main menu reappears unchanged. Highlight the first Omarchy entry and press Enter.
-  ** Never press Enter on a snapshot row.
-  * The Plymouth splash appears: logo, lock icon, entry box (only the logo until the first key). Type `wrongpass` and Enter — dots appear while typing, then clear, and the same lock/entry prompt returns; no text console, no scrolling log, no emergency shell. Type `prime` and Enter — a thin progress bar replaces the box.
-  ** Exactly ONE wrong passphrase. Three wrong tries drop to an emergency shell and the disk is lost.
-  * The desktop must appear **without** any SDDM password screen (autologin; log in with `prime` only if a greeter shows — and report it). Open a terminal and type `journalctl --list-boots | wc -l; ls ~/.local/state/omarchy/reboot-required 2>&1; ls ~/before-reboot-marker && rm ~/before-reboot-marker; uptime -s` — the count is one higher, the flag is "No such file or directory", the marker is listed (a clean shutdown preserved it) and the boot time is from just now.
-  * Type `cat /proc/cmdline; journalctl -b -u sddm --no-pager | grep -i autologin | head -3` — the cmdline contains `cryptdevice=`, `quiet splash` and `initramfs_async=0`; an autologin line for `prime` from this boot. Press Ctrl+D; the desktop is back with no windows.
+  * Press Super+Enter. A terminal opens.
+  * Run `touch ~/before-reboot-marker` and press Enter. The marker file exists.
+  * Press Super+Escape. The System menu opens.
+  * Click Reboot. Use the mouse only. Do not select Suspend. The machine reboots.
+  * When the boot menu appears, press Down. The countdown stops.
+  * Press Enter on Snapshots, if that row is listed. The snapshot list opens. Do not boot a snapshot.
+  * Press Escape. The main boot menu returns.
+  * Press Enter on the Omarchy row. The passphrase prompt appears.
+  * Type `wrongpass` and press Enter. The passphrase is rejected. The prompt stays.
+  * Type `prime` and press Enter. The desktop returns. No login screen appears.
+  * Press Super+Enter. A terminal opens.
+  * Run `ls ~/before-reboot-marker` and press Enter. The marker is still there.
+  * Run `rm ~/before-reboot-marker` and press Enter. The marker is gone.
+  * Press Super+W. The terminal closes.
+  * the desktop must return exactly as left.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -1494,12 +1500,13 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal (Super+Enter) and a browser (Super+Shift+Enter). In the terminal type `echo SHUTDOWN-TEST-START | sudo tee /dev/ttyS0` (password `prime`).
-  ** Chromium on 2 vCPU may raise Hyprland's "not responding" dialog while starting: click Wait, do not report a hang.
-  * Press Super+Escape and click Shutdown with the mouse. An OSD "Shutting down" shows and the windows close.
-  * Screenshot every 3–5 seconds. Within 30 seconds the screen is black or the guest is gone (screenshots stop changing or the client reports no machine).
-  * Read `./client get-serial`: SHUTDOWN-TEST-START is present (the serial channel worked); note any power-down text if the console shows it.
-  * This is the last action; the machine cannot be resumed afterwards — end the session with `stop`.
+  * Press Super+Enter. A terminal opens.
+  * Run `echo SHUTDOWN-TEST-START | sudo tee /dev/ttyS0` and press Enter. Password is `prime`. The line is written.
+  * Press Super+Shift+Enter. A browser opens.
+  * Press Super+Escape. The System menu opens.
+  * Click Shutdown. Use the mouse only. Do not select Suspend. The machine powers off.
+  * Read `./client get-serial`. It shows `SHUTDOWN-TEST-START`.
+  * Run `./client stop`. The session ends.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -1524,13 +1531,14 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter and type `systemd-run --user --unit=stuck-test bash -c 'trap "" TERM; sleep 600'` Enter.
-  ** A transient unit that ignores SIGTERM is now running.
-  * Press Super+Escape and click Reboot with the mouse; screenshot every 3–5 s.
-  ** From the "Rebooting" OSD to the boot menu must take well under 60 s (expect 10–25 s). Any "A stop job is running" line shows a 5 s limit, not 1 min 30 s.
-  * Let Limine auto-boot. At the Plymouth passphrase prompt type `prime` Enter (typed blind) and reach the desktop (log in with `prime` only if a greeter shows).
-  * Press Super+Enter and type `journalctl -b -1 --no-pager | grep -iE 'stop job|stuck-test' | tail -3` Enter → the stuck unit was killed after ~5 s.
-  * Press Ctrl+D; the desktop is as before.
+  * Press Super+Enter. A terminal opens.
+  * Run `systemd-run --user --unit=stuck-test bash -c 'trap "" TERM; sleep 600'` and press Enter. A stuck unit is running.
+  * Press Super+Escape. The System menu opens.
+  * Click Reboot. Use the mouse only. The machine reboots in well under a minute.
+  * At the passphrase prompt, type `prime` and press Enter. The desktop returns.
+  * Press Super+Enter. A terminal opens.
+  * Run `journalctl -b -1 --no-pager | grep stuck-test | tail -3` and press Enter. The stuck unit was stopped.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -1554,12 +1562,18 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `printf '#!/bin/bash\ndate > ~/post-boot-ran\nomarchy-notification-send "post-boot hook ran"\n' > /tmp/pb.sh && omarchy hook install post-boot /tmp/pb.sh`; expected `Installed post-boot hook: …/post-boot.d/pb.sh`.
-  * Type `omarchy hook post-boot && cat ~/post-boot-ran && rm ~/post-boot-ran`; a toast `post-boot hook ran` appears and a date prints (the manual run works).
-  * Press Super+Escape (the System menu) and click Reboot with the mouse. Answer the LUKS passphrase `prime` (typed blind); log in as `prime`/`prime` only if a login screen appears.
-  * Screenshot every 3 s for the first 20 s after the desktop appears; a toast `post-boot hook ran` must show.
-  * Open a terminal and type `cat ~/post-boot-ran`; a date from the last two minutes.
-  * Type `rm -r ~/.config/omarchy/hooks/post-boot.d ~/post-boot-ran` to restore the stock state. Press Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Run `printf '#!/bin/bash\ndate > ~/post-boot-ran\nomarchy-notification-send "post-boot hook ran"\n' > /tmp/pb.sh && omarchy hook install post-boot /tmp/pb.sh` and press Enter. The hook is installed.
+  * Run `omarchy hook post-boot` and press Enter. A toast appears.
+  * Run `rm ~/post-boot-ran` and press Enter. The marker is gone.
+  * Press Super+Escape. The System menu opens.
+  * Click Reboot. Use the mouse only. The machine reboots.
+  * At the passphrase prompt, type `prime` and press Enter. The desktop returns.
+  * Wait for the toast. The post-boot hook ran.
+  * Press Super+Enter. A terminal opens.
+  * Run `cat ~/post-boot-ran` and press Enter. A recent time prints.
+  * Run `rm -r ~/.config/omarchy/hooks/post-boot.d ~/post-boot-ran` and press Enter. The hook is removed.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -1583,11 +1597,17 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `omarchy-sudo-passwordless 120`; confirm Yes and enter the password `prime`. Expect `Passwordless sudo has been ENABLED. It will automatically disable in 120 minutes.`
-  * Run `ls /etc/sudoers.d/` and confirm both `99-omarchy-nopasswd-prime` and `omarchy-tzupdate` are listed. Run `sudo -k; sudo -n true; echo "exit=$?"` → `exit=0` (no password needed now).
-  * Press Super+Escape (the System menu) and click Reboot with the mouse. Answer the LUKS passphrase `prime` (typed blind); log in with `prime` only if a greeter appears.
-  * Open a terminal and run `ls /etc/sudoers.d/` → `99-omarchy-nopasswd-prime` must be gone and `omarchy-tzupdate` must still be present.
-  * Run `sudo -k; sudo -n true; echo "exit=$?"` → `exit=1` (a password is required again). Press Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Run `omarchy-sudo-passwordless 120` and press Enter. Choose Yes. Password is `prime`. Passwordless sudo turns on.
+  * Run `sudo -k; sudo -n true; echo exit=$?` and press Enter. It prints `exit=0`.
+  * Press Super+Escape. The System menu opens.
+  * Click Reboot. Use the mouse only. The machine reboots.
+  * At the passphrase prompt, type `prime` and press Enter. The desktop returns.
+  * Press Super+Enter. A terminal opens.
+  * Run `ls /etc/sudoers.d/omarchy-tzupdate` and press Enter. The file is still there.
+  * Run `ls /etc/sudoers.d/99-omarchy-nopasswd-prime` and press Enter. The file is gone.
+  * Run `sudo -k; sudo -n true; echo exit=$?` and press Enter. It prints `exit=1`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>

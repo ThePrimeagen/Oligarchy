@@ -35,12 +35,12 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `suspend-from-system-menu-locks-first`
 - [x] `lid-close-absence-noop-and-hardware-binds-present`
 - [x] `session-desktop-health-after-boot`
-- [ ] `system-menu-power-entries-listed`
-- [ ] `reboot-from-system-menu-full-boot-chain`
-- [ ] `shutdown-powers-off`
-- [ ] `fast-shutdown-stuck-unit-reboots-quickly`
-- [ ] `post-boot-hook-fires-after-reboot`
-- [ ] `passwordless-sudo-grant-cleared-by-reboot`
+- [x] `system-menu-power-entries-listed`
+- [x] `reboot-from-system-menu-full-boot-chain`
+- [x] `shutdown-powers-off`
+- [x] `fast-shutdown-stuck-unit-reboots-quickly`
+- [x] `post-boot-hook-fires-after-reboot`
+- [x] `passwordless-sudo-grant-cleared-by-reboot`
 - [ ] `snapshot-create-list-retention-and-unknown-action`
 - [ ] `snapshot-create-fails-loudly-without-config`
 - [ ] `snapshot-boot-from-limine-menu-read-only`
