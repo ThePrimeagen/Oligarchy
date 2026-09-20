@@ -12052,28 +12052,60 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `pacman -Q 1password 2>&1` → not found. Press Super+Shift+/ (Super+Shift+Slash): a floating Omarchy terminal shows `Installing 1Password...` and a sudo prompt — the hotkey installs immediately; type `prime`.
-  ** It installs `1password` and `1password-cli` (allow 4 minutes, screenshot every ≤5 s), prints `Installing 1Password extension for Chromium...`, `Opening 1Password...`, `1Password has been installed. Restart Chromium to load the browser extension.` and `Done!`. Press a key.
-  * Within ~20 s a 1Password window opens with its welcome / sign-in screen (Electron without GPU acceleration paints slowly). Screenshot it.
-  * Press Super+Shift+/ again: the same 1Password window is focused or relaunched — no installer this time. Close it with Super+W.
-  * Open Apps (Super+Alt+Space), type `1pass` → `1Password` listed. Escape. Menu (Super+Space) → Install → Service (reopen twice): `1Password` dimmed ✓. Menu → Remove → Services: no 1Password row although the remover exists (03-INTENDED-BEHAVIOUR #29 sub-item, DEFECT: `omarchy-remove-service-1password` is unreachable from the menu — record it).
-  * In the terminal type `cat /usr/share/chromium/extensions/aeblfdkhhhdcdjpifhhbdiojplfjncoa.json` → `{ "external_update_url": "https://clients2.google.com/service/update2/crx" }`; `op --version` → a version.
-  * Type `omarchy-remove-service-1password` → sudo, pacman removes both packages, `1Password has been removed.` Then Apps → `1pass` → gone; `ls /usr/share/chromium/extensions/aeblfdkhhhdcdjpifhhbdiojplfjncoa.json 2>&1` → `No such file`; Menu → Install → Service → `1Password` enabled again. Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `pacman -Q 1password 2>&1` and press Return. The output includes `was not found`.
+  * Press Super+Shift+/. A floating terminal shows `Installing 1Password...` and asks for a sudo password.
+  * Type `prime` and press Return. The install continues.
+  * Wait until it shows `Installing 1Password extension for Chromium...`, `Opening 1Password...`, `1Password has been installed. Restart Chromium to load the browser extension.`, and `Done!`.
+  * Press a key. The floating terminal closes.
+  * Wait until a 1Password window opens.
+  * Press Super+Shift+/. The same 1Password window is focused, and no installer opens.
+  * Press Super+W. The 1Password window closes.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `1pass`. A 1Password entry is listed.
+  * Press Escape. Apps closes.
+  * Press Super+Space. The menu opens.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Service. 1Password is dimmed with a check.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Remove, then Services. 1Password is not listed.
+  * Press Escape. The menu closes.
+  * Click the terminal. The terminal is focused.
+  * Type `cat /usr/share/chromium/extensions/aeblfdkhhhdcdjpifhhbdiojplfjncoa.json` and press Return. The output includes `"external_update_url": "https://clients2.google.com/service/update2/crx"`.
+  * Type `op --version` and press Return. A version is printed.
+  * Type `omarchy-remove-service-1password` and press Return. The output includes `1Password has been removed.`
+  ** If sudo asks, type `prime` and press Return.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `1pass`. No 1Password entry is listed.
+  * Press Escape. Apps closes.
+  * Click the terminal. The terminal is focused.
+  * Type `ls /usr/share/chromium/extensions/aeblfdkhhhdcdjpifhhbdiojplfjncoa.json 2>&1` and press Return. The output includes `No such file`.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Service. 1Password is enabled.
+  * Press Escape. The menu closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The packages come from Omarchy's own repository, not the AUR. If the download exceeds the budget, screenshot the progress and report SLOW.
-  * Skipped here: signing in and the browser extension loading (needs a Chromium restart and Web Store access).
+  * The hotkey installs at once. The sudo prompt is the only back-out (03-INTENDED-BEHAVIOUR A2).
+  * The packages come from Omarchy's repository, not the AUR. Allow 4 minutes and screenshot about every 5 seconds. If the download exceeds the budget, screenshot the progress and report SLOW.
+  * A 1Password window may take 20 seconds to open. Do not sign in, and do not restart Chromium to load the extension.
+  * The missing Remove row is defect #29: `omarchy-remove-service-1password` exists and is not in the menu.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** The installer lines through `Done!`; 1Password's first screen; the repeat chord focusing it with no installer; the launcher entry and dimmed row; the empty Services remove menu
-  ** The extension JSON and `op --version`; the remover's `1Password has been removed.`; the entry and file gone and the Install row enabled
+  ** `1password` is missing, the hotkey starts the installer, and it finishes with the extension line, the restart-Chromium line, and `Done!`.
+  ** A 1Password window opens. Super+Shift+/ focuses that window and does not start the installer again.
+  ** Apps lists 1Password. After a reopen, Install dims it, and Remove → Services does not list it.
+  ** The Chromium extension JSON contains the CRX update URL, and `op --version` prints a version.
+  ** The CLI remover prints `1Password has been removed.`. Apps no longer lists 1Password, the extension JSON is gone, and the Install row is enabled.
   * If unsuccessful
-  ** The red `Failed` line and `pacman -Q 1password 1password-cli`, or no window 20 s after `Done!`
+  ** The floating terminal shows `Failed`, `pacman -Q 1password 1password-cli` fails, or no window opens within 20 seconds of `Done!`.
 covers: manual/24-commercial-apps-services.md:5-9; default/hypr/bindings/applications.lua:20; bin/omarchy-launch-1password; bin/omarchy-install-service-1password; bin/omarchy-remove-service-1password; default/omarchy/omarchy-menu.jsonc (install.service.1password); test/shell.d/launch-1password-test.sh
 
 ### install-service-signal-hotkey-and-uninstall   [VM-PARTIAL] [NET] [SLOW]
@@ -12083,28 +12115,70 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `pacman -Q signal-desktop 2>&1` → `error: package 'signal-desktop' was not found`.
-  * Press Super+Shift+G: a floating Omarchy terminal appears with the logo, `Installing Signal...`, then a sudo password prompt. Press Ctrl+C at the prompt: the terminal closes and nothing is installed (`pacman -Q signal-desktop` still errors).
-  * Press Super+Shift+G again; type `prime` at the sudo prompt. pacman downloads signal-desktop (allow up to 4 minutes, screenshot every ≤5 s), then `Opening Signal...`, `Signal has been installed.` and `Done!`. Press a key.
-  * A Signal window opens (software rendering; allow 20 s) showing the "Link this device" QR / welcome screen. Press Super+Shift+G once more: focus goes to the same window; in the terminal `hyprctl clients | grep -ci signal` → `1`.
-  * Open Apps (Super+Alt+Space), type `signal` → a Signal entry is listed. Escape. Menu (Super+Space) → Install → Service (reopen twice): `Signal` dimmed ✓; Menu → Remove → Services: no Signal row (no remover — gap to note).
-  * Close Signal. Apps → `signal` → highlight Signal → press Delete → `Do you want to uninstall Signal?` → click `Uninstall` → floating terminal `Uninstalling Signal...`, sudo, `Done!`. Press a key.
-  * Apps → `signal` → gone; `pacman -Q signal-desktop 2>&1` → not found; `ls -d ~/.config/Signal 2>&1` → the config directory remains (expected, #30); Menu → Install → Service → `Signal` enabled again. Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `pacman -Q signal-desktop 2>&1` and press Return. The output includes `was not found`.
+  * Press Super+Shift+G. A floating terminal shows `Installing Signal...` and asks for a sudo password.
+  * Press Ctrl+C. The floating terminal closes.
+  * Click the terminal. The terminal is focused.
+  * Type `pacman -Q signal-desktop 2>&1` and press Return. The output includes `was not found`.
+  * Press Super+Shift+G. A floating terminal shows `Installing Signal...` and asks for a sudo password.
+  * Type `prime` and press Return. The install continues.
+  * Wait until it shows `Opening Signal...`, `Signal has been installed.`, and `Done!`.
+  * Press a key. The floating terminal closes.
+  * Wait until a Signal window opens on its welcome screen.
+  * Press Super+Shift+G. The same Signal window is focused.
+  * Click the terminal. The terminal is focused.
+  * Type `hyprctl clients | grep -ci signal` and press Return. The output is `1`.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `signal`. A Signal entry is listed.
+  * Press Escape. Apps closes.
+  * Press Super+Space. The menu opens.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Service. Signal is dimmed with a check.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Remove, then Services. Signal is not listed.
+  * Press Escape. The menu closes.
+  * Click the Signal window. The Signal window is focused.
+  * Press Super+W. The Signal window closes.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `signal`. The Signal row is highlighted.
+  * Press Delete. A dialog asks `Do you want to uninstall Signal?`.
+  * Click Uninstall. A floating terminal shows `Uninstalling Signal...` and asks for a sudo password.
+  * Type `prime` and press Return. The uninstall continues.
+  * Wait until it shows `Done!`.
+  * Press a key. The floating terminal closes.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `signal`. No Signal entry is listed.
+  * Press Escape. Apps closes.
+  * Click the terminal. The terminal is focused.
+  * Type `pacman -Q signal-desktop 2>&1` and press Return. The output includes `was not found`.
+  * Type `ls -d ~/.config/Signal 2>&1` and press Return. The directory is still listed.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Service. Signal is enabled.
+  * Press Escape. The menu closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The manual says the hotkey "offers" to install; the code starts the install at once and the sudo prompt is the consent point — CODE-INTENDED (03-INTENDED-BEHAVIOUR A2), the manual is loose.
-  * Electron on 2 vCPU may raise Hyprland's "not responding" dialog while Signal starts — click Wait.
+  * The hotkey starts the install at once. The sudo prompt is the consent point (03-INTENDED-BEHAVIOUR A2).
+  * Allow up to 4 minutes for the download and screenshot about every 5 seconds. Signal may take 20 seconds to open. If Hyprland says it is not responding, click Wait.
+  * There is no Remove row for Signal. The launcher Delete key is the uninstall path.
+  * `~/.config/Signal` remaining after uninstall is expected (03-INTENDED-BEHAVIOUR #30). Do not link a phone.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** The installer terminal, the cancelled attempt with Signal still absent, the completed install lines, Signal's welcome screen, the count `1`, Signal in Apps and the dimmed row
-  ** The uninstall dialog, `Uninstalling Signal...` → `Done!`, Apps without Signal, `was not found`, the Install row enabled again
+  ** Signal is not installed. The first Super+Shift+G reaches a sudo prompt, Ctrl+C closes it, and the package is still missing.
+  ** The second install finishes with `Signal has been installed.` and `Done!`, and a Signal window opens on the welcome screen.
+  ** Super+Shift+G focuses that window, and `hyprctl` reports one Signal client.
+  ** Apps lists Signal. After a reopen, Install dims it, and Remove → Services does not list it.
+  ** The Delete dialog names Signal, the uninstall finishes with `Done!`, Apps no longer lists it, the package is missing, `~/.config/Signal` remains, and the Install row is enabled.
   * If unsuccessful
-  ** The red `Failed` line and `pacman -Q signal-desktop`, or a second Signal window after the repeat chord
+  ** The floating terminal shows `Failed`, `pacman -Q signal-desktop` finds a package after the abort or after removal, or a second Signal window opens on the repeat chord.
 covers: manual/22-guis.md:68-72; default/hypr/bindings/applications.lua:17; bin/omarchy-launch-signal; bin/omarchy-install-service-signal; bin/omarchy-remove-launcher-entry; default/omarchy/omarchy-menu.jsonc:226 (install.service.signal)
 
 ### install-service-tailscale-blocks-at-login-then-remove   [VM-PARTIAL] [NET]
@@ -12114,30 +12188,70 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy-installed-service-tailscale; echo rc=$?` → `rc=1`; `omarchy-tailscale-send; echo rc=$?` → `Usage: omarchy-tailscale-send <machine> [file...]`, `rc=1`; `omarchy-tailscale-send mybox.example.ts.net ~/.bashrc; echo rc=$?` → a red/critical notification `Could not send to mybox` top-right (body mentions `tailscale: command not found`), `rc=1`; `omarchy-tailscale-receive --once; echo rc=$?` → `tailscale: command not found`, `rc=1` within a few seconds (no loop).
-  * Open the Omarchy Menu (Super+Space) → Install → Service: `Tailscale` selectable. Select it. Floating terminal: sudo `prime`, pacman installs tailscale (~30 MB), `Installing Tailscale...`, `Starting Tailscale...`, then `To authenticate, visit: https://login.tailscale.com/a/…` and the terminal **waits** at `sudo tailscale up` (no account here). Screenshot the URL.
-  ** If the terminal instead reaches `Allowing prime to manage Tailscale...` / `Adding Tailscale to the bar...` / `Done!` without a login, report that the behaviour changed.
-  * Press Ctrl+C in the floating terminal: it closes (exit 130) with no `Done!`. The bar shows no Tailscale icon and Apps (Super+Alt+Space) → `tailscale` → no web app entry (the follow-up setup never ran).
-  * In the terminal type `systemctl is-active tailscaled` → `active`; `tailscale status; echo rc=$?` → `Logged out.`, `rc=1`; `omarchy-installed-service-tailscale; echo rc=$?` → record the value.
-  ** If the floating terminal vanished too fast to read, type `omarchy-install-service-tailscale` in this terminal (`tailscale version` → `command not found` beforehand), Ctrl+C at the login URL, and read the same status; `tailscale status` may need a second after Ctrl+C — repeat once if it errors on the socket. The remaining steps (operator, receive service, bar plugin, web app) do not run — the half-installed state.
-  * Menu → Install → Service (reopen twice): `Tailscale` dimmed ✓ — the row is disabled by package presence, so the setup can only be finished from the CLI (record as the minor defect of #13). Menu → Remove → Services is now present and lists Tailscale; select it → floating terminal: `tailscale down`, systemd disables, pacman removes tailscale (sudo), `Tailscale has been removed.`, `Done!`. Press a key.
-  * In the terminal `pacman -Q tailscale 2>&1` → `was not found`; `tailscale version 2>&1` → `command not found`; `systemctl is-active tailscaled 2>&1` → inactive / unknown. Menu → Install → Service: `Tailscale` selectable again; Menu → Remove: the Services row hidden again. Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy-installed-service-tailscale; echo rc=$?` and press Return. The last line is `rc=1`.
+  * Type `omarchy-tailscale-send; echo rc=$?` and press Return. The output includes `Usage: omarchy-tailscale-send <machine> [file...]` and `rc=1`.
+  * Type `omarchy-tailscale-send mybox.example.ts.net ~/.bashrc; echo rc=$?` and press Return. A notification reads `Could not send to mybox`, and the last line is `rc=1`.
+  * Type `omarchy-tailscale-receive --once; echo rc=$?` and press Return. The output includes `tailscale: command not found` and `rc=1`.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Service. Tailscale is selectable.
+  * Select Tailscale. A floating terminal opens.
+  * Type `prime` and press Return if a sudo prompt appears. The install continues.
+  * Wait until the floating terminal shows `To authenticate, visit:` followed by a `https://login.tailscale.com/a/` URL, and it is still waiting.
+  ** If it reaches `Allowing prime to manage Tailscale...`, `Adding Tailscale to the bar...`, or `Done!` without a login, report that the behaviour changed and stop.
+  * Press Ctrl+C. The floating terminal closes, and `Done!` was not printed.
+  * Look at the bar. No Tailscale icon is present.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `tailscale`. No Tailscale web app is listed.
+  * Press Escape. Apps closes.
+  * Click the terminal. The terminal is focused.
+  * Type `systemctl is-active tailscaled` and press Return. The output is `active`.
+  * Type `tailscale status; echo rc=$?` and press Return. The output includes `Logged out.` and `rc=1`.
+  * Type `omarchy-installed-service-tailscale; echo rc=$?` and press Return. Record the exit code.
+  * Press Super+Space. The menu opens.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Service. Tailscale is dimmed with a check.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Remove, then Services. Tailscale is listed.
+  * Select Tailscale. A floating terminal opens.
+  * Type `prime` and press Return if sudo or a polkit dialog asks. The removal continues.
+  * Wait until it shows `Tailscale has been removed.` and `Done!`.
+  * Press a key. The floating terminal closes.
+  * Click the terminal. The terminal is focused.
+  * Type `pacman -Q tailscale 2>&1` and press Return. The output includes `was not found`.
+  * Type `tailscale version 2>&1` and press Return. The output includes `command not found`.
+  * Type `systemctl is-active tailscaled 2>&1` and press Return. The output is `inactive` or `unknown`.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Service. Tailscale is selectable.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Remove. Services is not listed.
+  * Press Escape. The menu closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Notifications fade after a few seconds; screenshot right after the command returns. If `--once` has not returned after 30 s, press Ctrl+C and report a hang.
-  * Never open the login URL: there is no account to complete it with. If a polkit dialog appears during removal, type `prime`.
+  * Screenshot the send notification as soon as the command returns. The body mentions `tailscale: command not found`.
+  * If `omarchy-tailscale-receive --once` has not returned after 30 seconds, press Ctrl+C and report a hang.
+  * Do not open the login URL. There is no account to finish it.
+  * If the floating terminal closes before the URL can be read, type `tailscale version` first and expect `command not found`, then run `omarchy-install-service-tailscale`, press Ctrl+C at the login URL, and read the same status. Repeat `tailscale status` once if it errors on the socket.
+  * The dimmed Install row is the minor defect of #13: package presence blocks the menu, so only the CLI can finish setup. The operator, receive service, bar plugin, and web app do not run after Ctrl+C.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Usage + `rc=1`, the critical `Could not send to mybox` notification with `rc=1`, the receive error with `rc=1`, the probe `rc=1`
-  ** The floating terminal waiting at `To authenticate, visit: https://login.tailscale.com/a/…` after `Starting Tailscale...`; the terminal closed after Ctrl+C with no `Done!`; the bar without a Tailscale icon and Apps without a Tailscale web app
-  ** `active` and `Logged out.` with `rc=1`; the dimmed row (noted as the CLI-only re-run defect) and the Remove row; `Tailscale has been removed.` and `Done!`; `was not found`, `command not found`, inactive, and the menus back to stock
+  ** The install probe exits 1. Send with no arguments prints the usage line and exits 1. Send to `mybox` notifies `Could not send to mybox` and exits 1. Receive prints `tailscale: command not found` and exits 1.
+  ** The installer waits at `To authenticate, visit: https://login.tailscale.com/a/…`. Reaching `Done!` without a login is changed behaviour and is reported.
+  ** Ctrl+C closes the floating terminal without `Done!`. The bar has no Tailscale icon, and Apps has no Tailscale web app.
+  ** `tailscaled` is `active`, `tailscale status` says `Logged out.` and exits 1, and the install probe's exit code is recorded.
+  ** After a reopen, Install dims Tailscale. Remove takes it off with `Tailscale has been removed.` and `Done!`.
+  ** Afterwards the package is missing, `tailscale` is not a command, the service is inactive or unknown, Install lists Tailscale again, and Remove does not list Services.
   * If unsuccessful
-  ** A hung receive command, a missing notification, the installer's error before the URL, the installer reaching `Done!` without a login (report as changed behaviour), `systemctl status tailscaled | head`, the remover's `Failed` output, or the Remove row missing while the package is installed
+  ** Receive hangs, the notification is missing, the installer errors before the URL, `Done!` appears without a login, `systemctl status tailscaled` shows a failure, the remover prints `Failed`, or Remove has no Tailscale row while the package is installed.
 covers: manual/24-commercial-apps-services.md:25-29; manual/35-networking.md (Tailscale); manual/51:29; default/omarchy/omarchy-menu.jsonc:227,311 (install.service.tailscale, remove.service.tailscale); bin/omarchy-install-service-tailscale; bin/omarchy-remove-service-tailscale; bin/omarchy-tailscale-send; bin/omarchy-tailscale-receive; bin/omarchy-installed-service-tailscale; bin/omarchy-installed-service-dropbox; test/shell.d/tailscale-test.sh; test/shell.d/tailscale-receive-test.sh
 
 ### install-service-dropbox-without-account-and-remove   [VM-PARTIAL] [NET] [SLOW]
@@ -12147,26 +12261,49 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open the Omarchy Menu (Super+Space) → Install → Service → Dropbox.
-  ** Floating terminal: `Installing all dependencies...`, sudo `prime`, five packages, `Adding Dropbox to the bar...`, `Starting Dropbox...`, `See Dropbox icon behind  hover tray in top right and right-click for setup.`, `Done!`. Press a key.
-  * Screenshot every 5 s for up to 3 min while the daemon downloads; a Dropbox indicator appears in the bar's tray area.
-  * Open a terminal (Super+Enter) and type `dropbox-cli status; omarchy-installed-service-dropbox; echo rc=$?` → a starting / link-account status and `rc=0`.
-  * Menu → Install → Service (reopen twice): `Dropbox` dimmed ✓. Menu → Remove → Services: `Dropbox` listed; click it → floating terminal `Dropbox has been removed.` → `Done!`. Press a key.
-  * The bar indicator is gone; in the terminal type `omarchy-installed-service-dropbox; echo rc=$?` → `rc=1`. Menu → Install → Service: `Dropbox` enabled again. Close the terminal with Super+W.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Service, then Dropbox. A floating terminal opens.
+  * Type `prime` and press Return if a sudo prompt appears. The install continues.
+  * Wait until it shows `Adding Dropbox to the bar...`, `Starting Dropbox...`, `See Dropbox icon behind  hover tray in top right and right-click for setup.`, and `Done!`.
+  * Press a key. The floating terminal closes.
+  * Wait until a Dropbox indicator appears in the bar.
+  * Press Super+Return. A terminal opens.
+  * Type `dropbox-cli status` and press Return. The output is a starting or link-account status.
+  * Type `omarchy-installed-service-dropbox; echo rc=$?` and press Return. The last line is `rc=0`.
+  * Press Super+Space. The menu opens.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Service. Dropbox is dimmed with a check.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Remove, then Services. Dropbox is listed.
+  * Click Dropbox. A floating terminal opens.
+  * Wait until it shows `Dropbox has been removed.` and `Done!`.
+  * Press a key. The floating terminal closes.
+  * Look at the bar. The Dropbox indicator is gone.
+  * Click the terminal. The terminal is focused.
+  * Type `omarchy-installed-service-dropbox; echo rc=$?` and press Return. The last line is `rc=1`.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Service. Dropbox is enabled.
+  * Press Escape. The menu closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * If the daemon download stalls past 5 min, proceed to removal and mark that step SLOW.
-  * Skipped here: linking an account and syncing.
+  * The install pulls dependencies and then the daemon downloads about 100 MB. Check the bar every 5 seconds for up to 3 minutes. If it is still missing after 5 minutes, continue to removal and mark that step SLOW.
+  * Do not link an account or start a sync.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** The install output; the bar indicator; `dropbox-cli status` and `rc=0`; the dimmed row and the Remove row; the removal `Done!`; the indicator gone and `rc=1`
+  ** The install prints the bar and start lines, the hover-tray line, and `Done!`.
+  ** A Dropbox indicator appears in the bar. `dropbox-cli status` reports a starting or link-account state, and the install probe exits 0.
+  ** After a reopen, Install dims Dropbox and Remove lists it. Removal finishes with `Dropbox has been removed.` and `Done!`.
+  ** The bar indicator is gone, the probe exits 1, and the Install row is enabled.
   * If unsuccessful
-  ** pacman errors, or the indicator/plugin surviving removal
+  ** pacman prints an error, the indicator never appears and the probe is not 0, or the indicator remains after removal.
 covers: bin/omarchy-install-service-dropbox; bin/omarchy-remove-service-dropbox; bin/omarchy-installed-service-dropbox; default/omarchy/omarchy-menu.jsonc (install.service.dropbox, remove.service.dropbox); test/shell.d/dropbox-test.sh
 
 ### install-service-sunshine-and-remove   [VM-PARTIAL] [NET] [SLOW]
@@ -12176,26 +12313,51 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `sudo ufw status | grep -c omarchy-sunshine` (`prime`) → `0`. Type `omarchy install service sunshine`. Wait for completion with 5-second screenshots: `Installing Sunshine...`, pacman installs sunshine, `Opening Sunshine firewall ports...`, `Installing Sunshine admin web app...`, `Enabling Sunshine autostart...`, the closing `...ports are open for private LANs and Tailscale.` line. Chromium opens on `https://localhost:47990` with a certificate-error bypass — screenshot it and close it with Super+W.
-  * Type `pacman -Q sunshine; systemctl --user is-active sunshine; grep -c 'launch_on_start("sunshine")' ~/.config/hypr/autostart.lua` → installed, `active` or `failed` (report the state — the VM has no encoder), `1` (`o.launch_on_start("sunshine")`).
-  * Type `sudo ufw status | grep -c omarchy-sunshine` → several rules (`27` expected: the three private ranges; no tailscale0 rules since Tailscale is absent). Press Super+Alt+Space, type `Sunshine` → the "Sunshine Admin" web app row is listed. Escape.
-  * Type `omarchy remove service sunshine`; confirm → pacman removes sunshine, `Sunshine has been removed and its Omarchy-managed Moonlight streaming ports have been closed.` Then `pacman -Q sunshine 2>&1; sudo ufw status | grep -c omarchy-sunshine; grep -c 'launch_on_start("sunshine")' ~/.config/hypr/autostart.lua; ls ~/.config/sunshine/` → not found, `0`, `0`, and the config directory still exists (pairing state kept).
-  * Apps → `Sunshine` → the web app row is gone. Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `sudo ufw status | grep -c omarchy-sunshine` and press Return. The output is `0`.
+  ** If sudo asks, type `prime` and press Return.
+  * Type `omarchy install service sunshine` and press Return. The output includes `Installing Sunshine...`.
+  * Wait until the output includes `Opening Sunshine firewall ports...`, `Installing Sunshine admin web app...`, `Enabling Sunshine autostart...`, and `ports are open for private LANs and Tailscale.`
+  * Wait until Chromium opens on `https://localhost:47990`.
+  * Press Super+W. Chromium closes.
+  * Click the terminal. The terminal is focused.
+  * Type `pacman -Q sunshine` and press Return. sunshine is installed.
+  * Type `systemctl --user is-active sunshine` and press Return. The output is `active` or `failed`, and which one is recorded.
+  * Type `grep -c 'launch_on_start("sunshine")' ~/.config/hypr/autostart.lua` and press Return. The output is `1`.
+  * Type `sudo ufw status | grep -c omarchy-sunshine` and press Return. The output is `27`.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `Sunshine`. A Sunshine Admin row is listed.
+  * Press Escape. Apps closes.
+  * Click the terminal. The terminal is focused.
+  * Type `omarchy remove service sunshine` and press Return. A confirmation is showing, or removal has started.
+  * Confirm the removal if a prompt is showing. The output includes `Sunshine has been removed and its Omarchy-managed Moonlight streaming ports have been closed.`
+  * Type `pacman -Q sunshine 2>&1` and press Return. The output includes `was not found`.
+  * Type `sudo ufw status | grep -c omarchy-sunshine` and press Return. The output is `0`.
+  * Type `grep -c 'launch_on_start("sunshine")' ~/.config/hypr/autostart.lua` and press Return. The output is `0`.
+  * Type `ls ~/.config/sunshine/` and press Return. The directory is still listed.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `Sunshine`. No Sunshine Admin row is listed.
+  * Press Escape. Apps closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * There is no Install → Service → Sunshine row; the CLI is the only path (`omarchy-install-service-sunshine` / `omarchy-remove-service-sunshine` without the router). The installer needs network for pacman; allow several minutes of screenshots. ufw output is long; the `grep -c` counts are what to read.
-  * The `--ignore-certificate-errors` web app and the autostart double-start are known plan defects (plans/remote.md); record, do not fail on them.
+  * There is no Install → Service → Sunshine row. Use the CLI. The install needs the network and can take several minutes. Screenshot about every 5 seconds.
+  * If the firewall count is not `27`, record the number. tailscale0 rules are not expected, because Tailscale is not installed.
+  * The certificate-error bypass and the autostart line are known plan defects. Record them. Do not fail the test for them.
+  * If the unit fails, run `journalctl --user -u sunshine -n 50 | sudo tee /dev/ttyS0` and read it with get-serial. Streaming is not part of this test.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** `0` before; the installer's step lines; the admin web app with its certificate bypass; the package/unit/autostart line after install; the ufw rule count and the launcher row
-  ** After removal: the remover's message, package gone, `0` rules, `0` autostart lines, `~/.config/sunshine/` still present, launcher row gone
+  ** The sunshine firewall count is `0` before the install. The installer prints the firewall, web-app, and autostart lines, then the private-LAN closing line.
+  ** Chromium opens on `https://localhost:47990` with a certificate bypass. sunshine is installed, the user unit is `active` or `failed`, and autostart.lua contains one launch line.
+  ** The firewall count is `27`, and Apps lists Sunshine Admin.
+  ** Removal prints the ports-closed sentence. The package is gone, the firewall count is `0`, the autostart count is `0`, `~/.config/sunshine/` remains, and Apps no longer lists Sunshine Admin.
   * If unsuccessful
-  ** ufw or systemd errors, leftover rules/autostart line after removal, or `journalctl --user -u sunshine -n 50 | sudo tee /dev/ttyS0` read via get-serial
+  ** ufw or systemd errors, the firewall count or autostart line remains after removal, or Chromium does not open the admin page.
 covers: plans/remote.md §Problem (current defects), §Uninstall symmetry; bin/omarchy-install-service-sunshine; bin/omarchy-remove-service-sunshine; manual/26-gaming.md
 
 ### install-chromium-account-and-claude-extension-idempotent   [VM-OK]
@@ -12205,29 +12367,62 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `grep -c oauth2 ~/.config/chromium-flags.conf` → `0`.
-  ** If the file is missing, type `omarchy-install-browser chromium` first (no download; it only writes config) and repeat.
-  * Open the Omarchy Menu (Super+Space) → Install → Service: `Chromium Account` is listed and enabled; click it → floating terminal `Installing Chromium Google account support...`, `Now you can login to your Google Account in Chromium.`, `Done!` — no sudo, no network. Press a key.
-  * In the terminal `grep oauth2 ~/.config/chromium-flags.conf` → exactly two lines, `--oauth2-client-id=...` and `--oauth2-client-secret=...`. Menu → Install → Service (reopen twice): `Chromium Account` dimmed ✓ and clicking it does nothing. Type `omarchy-install-chromium-google-account; grep -c oauth2 ~/.config/chromium-flags.conf` → the message again, still `2`.
-  ** Optionally open Chromium with Super+Shift+Return and click the profile avatar (top right): a Sign in / Turn on sync option is present. Close it with Super+W. Signing in needs a Google account and is not tested.
-  * Type `ls /usr/share/chromium/extensions/ 2>&1` → no `fcoeoabgfenejglbffodgkkbkcdhcgfn.json` (or the directory is absent). Type `omarchy-install-chromium-claude; echo rc=$?` → one authentication (a terminal sudo prompt or a centred polkit dialog — type `prime`; screenshot the dialog), then `rc=0`.
-  * Type `for b in chromium google-chrome microsoft-edge; do f=/usr/share/$b/extensions/fcoeoabgfenejglbffodgkkbkcdhcgfn.json; stat -c %a $f; jq -r .external_update_url $f; done` → `644` and `https://clients2.google.com/service/update2/crx` three times. Type `omarchy-install-chromium-claude; echo rc=$?` again → no prompt, no output, `rc=0`.
-  ** Cancel writes nothing: `sudo rm /usr/share/google-chrome/extensions/fcoeoabgfenejglbffodgkkbkcdhcgfn.json; omarchy-install-chromium-claude; echo rc=$?` → the authentication appears again; click Cancel (or Ctrl+C at the sudo prompt) → non-zero `rc` and `ls` of that file fails. Run `omarchy-install-chromium-claude; echo rc=$?` once more and authenticate → `rc=0`, all three registrations back.
-  * Type `omarchy-install-chromium-copy-url && omarchy-install-chromium-ytdlp && ls ~/.config/chromium/NativeMessagingHosts/` → `com.omarchy.copy_url.json` and `com.omarchy.ytdlp.json`. Close the terminal with Super+W; end the session with `stop` (the flags and the seeded extension JSON remain).
+  * Press Super+Return. A terminal opens.
+  * Type `grep -c oauth2 ~/.config/chromium-flags.conf` and press Return. The output is `0`.
+  ** If the file is missing, type `omarchy-install-browser chromium` and press Return, then repeat the grep.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Service. Chromium Account is enabled.
+  * Click Chromium Account. A floating terminal opens.
+  * Wait until it shows `Installing Chromium Google account support...`, `Now you can login to your Google Account in Chromium.`, and `Done!`.
+  * Press a key. The floating terminal closes.
+  * Click the terminal. The terminal is focused.
+  * Type `grep oauth2 ~/.config/chromium-flags.conf` and press Return. The output is two lines, one starting `--oauth2-client-id=` and one starting `--oauth2-client-secret=`.
+  * Press Super+Space. The menu opens.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Service. Chromium Account is dimmed with a check.
+  * Click Chromium Account. Nothing opens.
+  * Press Escape. The menu closes.
+  * Click the terminal. The terminal is focused.
+  * Type `omarchy-install-chromium-google-account; grep -c oauth2 ~/.config/chromium-flags.conf` and press Return. The install message prints again, and the last line is `2`.
+  * Type `ls /usr/share/chromium/extensions/ 2>&1` and press Return. `fcoeoabgfenejglbffodgkkbkcdhcgfn.json` is not listed.
+  * Type `omarchy-install-chromium-claude; echo rc=$?` and press Return. An authentication prompt appears.
+  * Authenticate with `prime`. The last line is `rc=0`.
+  * Type `for b in chromium google-chrome microsoft-edge; do f=/usr/share/$b/extensions/fcoeoabgfenejglbffodgkkbkcdhcgfn.json; stat -c %a $f; jq -r .external_update_url $f; done` and press Return. Each browser prints `644` and `https://clients2.google.com/service/update2/crx`.
+  * Type `omarchy-install-chromium-claude; echo rc=$?` and press Return. No authentication prompt appears, and the last line is `rc=0`.
+  * Type `sudo rm /usr/share/google-chrome/extensions/fcoeoabgfenejglbffodgkkbkcdhcgfn.json` and press Return. The prompt returns.
+  ** If sudo asks, type `prime` and press Return.
+  * Type `omarchy-install-chromium-claude; echo rc=$?` and press Return. An authentication prompt appears.
+  * Cancel the prompt. The exit is non-zero.
+  * Type `ls /usr/share/google-chrome/extensions/fcoeoabgfenejglbffodgkkbkcdhcgfn.json` and press Return. The output includes `No such file`.
+  * Type `omarchy-install-chromium-claude; echo rc=$?` and press Return. An authentication prompt appears.
+  * Authenticate with `prime`. The last line is `rc=0`.
+  * Type `for b in chromium google-chrome microsoft-edge; do ls /usr/share/$b/extensions/fcoeoabgfenejglbffodgkkbkcdhcgfn.json; done` and press Return. All three files are listed.
+  * Type `omarchy-install-chromium-copy-url && omarchy-install-chromium-ytdlp` and press Return. The prompt returns.
+  * Type `ls ~/.config/chromium/NativeMessagingHosts/` and press Return. The listing includes `com.omarchy.copy_url.json` and `com.omarchy.ytdlp.json`.
+  * Press Super+W. The terminal closes, and the flags file and the seeded extension JSON are left in place.
+  * End the session with `stop`. The session ends.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * A password prompt for the Chromium Account row would be unexpected — report it; if the row is hidden, `~/.config/chromium-flags.conf` is missing — report that. The Claude seed authenticates through polkit (a centred Quickshell dialog) or a terminal sudo prompt depending on the build; either is fine once.
+  * A password prompt on the Chromium Account row is unexpected. Report it. If the row is hidden, report whether `~/.config/chromium-flags.conf` exists.
+  * The Claude seed uses a polkit dialog or a terminal sudo prompt. Either is fine. Screenshot it. Cancel with the dialog's Cancel button or Ctrl+C at a sudo prompt.
+  * Opening Chromium and clicking the profile avatar is optional. A Sign in or Turn on sync option is present if you do. Do not sign in.
+  * `omarchy-install-browser chromium` only writes config. It does not download a browser.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** `0` before; the floating terminal's two messages and `Done!`; the two flag lines; the dimmed, inert row; `2` after the repeat (and Chromium's sign-in option if opened)
-  ** The absent extension file; one authentication then `rc=0`; `644` + the update URL for all three browser families; the silent second run with `rc=0`; the cancelled re-seed writing nothing with a non-zero `rc`; the re-authenticated run restoring the file; the two native-host files
+  ** The oauth2 count is `0` before. The Chromium Account install finishes with the login sentence and `Done!`, with no sudo prompt and no download.
+  ** The flags file has one client-id line and one client-secret line. After a reopen, the row is dimmed and a click does nothing. Running the installer again still leaves the count at `2`.
+  ** The Claude extension JSON is absent, the first seed authenticates once and exits 0, and Chromium, Chrome, and Edge each have mode `644` and the CRX update URL.
+  ** The second seed prints nothing, asks for no password, and exits 0.
+  ** Cancelling a re-seed exits non-zero and leaves the Chrome JSON missing. Authenticating again restores all three files.
+  ** The copy-url and yt-dlp native-host files are present. The flags file and extension JSON are left in place when the session stops.
   * If unsuccessful
-  ** A flag count other than 2, the row missing (report whether the flags file exists), the seed's error text, a second run that prompts again, a missing browser family, or a cancelled authentication that still wrote the file
+  ** The flag count is not 2, the row is missing, a second seed prompts again, one browser family is missing, or a cancelled authentication still writes the file.
 covers: bin/omarchy-install-chromium-google-account; bin/omarchy-install-chromium-claude; bin/omarchy-install-chromium-copy-url; bin/omarchy-install-chromium-ytdlp; default/omarchy/omarchy-menu.jsonc (install.service.chromium-account); manual/46:43; test/shell.d/chromium-claude-test.sh
 
 ### install-ai-ollama-cpu-and-remove   [VM-OK] [NET]

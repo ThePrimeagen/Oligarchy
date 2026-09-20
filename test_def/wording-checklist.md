@@ -269,12 +269,12 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `webapp-install-cli-refuses-bad-input-escapes-and-overwrites`
 - [x] `apps-launcher-delete-key-uninstall-confirm-and-cancel`
 - [x] `launch-chords-missing-apps-open-installer-abort`
-- [ ] `install-service-1password-hotkey-and-remove`
-- [ ] `install-service-signal-hotkey-and-uninstall`
-- [ ] `install-service-tailscale-blocks-at-login-then-remove`
-- [ ] `install-service-dropbox-without-account-and-remove`
-- [ ] `install-service-sunshine-and-remove`
-- [ ] `install-chromium-account-and-claude-extension-idempotent`
+- [x] `install-service-1password-hotkey-and-remove`
+- [x] `install-service-signal-hotkey-and-uninstall`
+- [x] `install-service-tailscale-blocks-at-login-then-remove`
+- [x] `install-service-dropbox-without-account-and-remove`
+- [x] `install-service-sunshine-and-remove`
+- [x] `install-chromium-account-and-claude-extension-idempotent`
 - [ ] `install-ai-ollama-cpu-and-remove`
 - [ ] `install-ai-claude-desktop-and-remove`
 - [ ] `remove-ai-perplexity-claude-keep-user-and-cli-state`
