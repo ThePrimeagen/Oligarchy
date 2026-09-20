@@ -12906,29 +12906,71 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `lspci | grep -iE 'VGA|Display'` → a virtio/QXL/bochs adapter, no Intel/AMD/NVIDIA. Type `omarchy-install-gaming-gpu-lib32; echo exit=$?` → `Installing lib32 graphics drivers...`, no sudo prompt, no pacman transaction, then intended `exit=0` (no GPU → nothing to do); `pacman -Q steam 2>&1` → not found.
-  ** Observed at HEAD: `exit=1`. Screenshot it, record it as defect #1, and continue. Confirm nothing was installed: `omarchy-pkg-present lib32-vulkan-intel lib32-vulkan-radeon lib32-nvidia-utils; echo $?` → `1`; `omarchy-hw-nvidia-gsp; echo $?; omarchy-hw-nvidia-without-gsp; echo $?` → `1` and `1`.
-  * Open the Omarchy Menu (Super+Space) → Install → Gaming → Steam: floating terminal `Installing Steam...`, sudo `prime`; pacman may ask which `lib32` provider to use — accept the default; ~300 MB incl. lib32 packages (allow 5 minutes, screenshot every ≤5 s), then `Steam will start automatically now. This might take a while...` and `Done!`. Press a key.
-  ** At HEAD the terminal instead ends `● Failed (exit code 1)! Press any key to close...` before that line (the helper under `set -e`). Screenshot the lines above the banner, press a key, record defect #1 and skip to the final check step.
-  * Wait for Steam (10–60 s with no feedback, as the manual warns): a floating "Steam" window (1100×700, centred) appears — its self-update/bootstrap dialog or the login window. Screenshot it; do not sign in; close Steam with Super+W (confirm if asked).
-  ** If the window has not appeared after 3 minutes, screenshot and report "bootstrap did not finish" — a note, not a failure of the installer.
-  * Open Apps (Super+Alt+Space), type `steam` → `Steam` listed. Escape. Menu → Install → Gaming (reopen twice): `Steam` dimmed ✓; Menu → Remove → Gaming lists Steam.
-  * Remove → Gaming → Steam → sudo → `Steam and its data have been removed.` → `Done!`. In the terminal `ls -d ~/.steam ~/.local/share/Steam 2>&1` → both `No such file`.
-  * Final check: `pacman -Q steam 2>&1` → not found; Apps → `steam` → no entry; Menu → Install → Gaming → `Steam` enabled; Menu → Remove: no Gaming row. Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `lspci | grep -iE 'VGA|Display'` and press Return. The line names a virtio, QXL, or bochs adapter, and no Intel, AMD, or NVIDIA GPU.
+  * Type `omarchy-install-gaming-gpu-lib32; echo exit=$?` and press Return. The output includes `Installing lib32 graphics drivers...`, and the intended last line is `exit=0`.
+  ** If the last line is `exit=1`, record defect #1 and continue. No sudo prompt and no pacman transaction should appear.
+  * Type `pacman -Q steam 2>&1` and press Return. The output includes `was not found`.
+  * Type `omarchy-pkg-present lib32-vulkan-intel lib32-vulkan-radeon lib32-nvidia-utils; echo $?` and press Return. The last line is `1`.
+  * Type `omarchy-hw-nvidia-gsp; echo $?; omarchy-hw-nvidia-without-gsp; echo $?` and press Return. Both exit lines are `1`.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Gaming, then Steam. A floating terminal shows `Installing Steam...` and asks for a sudo password.
+  * Type `prime` and press Return. The install continues.
+  ** If pacman asks which lib32 provider to use, accept the default.
+  * Wait until it shows `Steam will start automatically now. This might take a while...` and `Done!`.
+  ** If it ends with `Failed (exit code 1)!`, screenshot the lines above the banner, press a key, record defect #1, and skip to the final package check.
+  * Press a key. The floating terminal closes.
+  * Wait until a Steam window opens.
+  ** If no Steam window has opened after 3 minutes, record that the bootstrap did not finish and continue.
+  * Press Super+W. Steam closes.
+  ** If a confirm appears, confirm it.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `steam`. A Steam entry is listed.
+  * Press Escape. Apps closes.
+  * Press Super+Space. The menu opens.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Gaming. Steam is dimmed with a check.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Remove, then Gaming. Steam is listed.
+  * Select Steam. A floating terminal opens.
+  * Type `prime` and press Return if sudo asks. The removal continues.
+  * Wait until it shows `Steam and its data have been removed.` and `Done!`.
+  * Press a key. The floating terminal closes.
+  * Click the terminal. The terminal is focused.
+  * Type `ls -d ~/.steam ~/.local/share/Steam 2>&1` and press Return. Both paths report `No such file`.
+  * Type `pacman -Q steam 2>&1` and press Return. The output includes `was not found`.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `steam`. No Steam entry is listed.
+  * Press Escape. Apps closes.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Gaming. Steam is enabled.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Remove. Gaming is not listed.
+  * Press Escape. The menu closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The helper alone downloads nothing. Steam's own runtime download (~500 MB) happens after launch; never wait for it to finish.
-  * Heroic, Lutris and Battle.net call the same helper; their full installs are recorded as not runnable here.
+  * The helper alone downloads nothing. Allow 5 minutes for Steam and screenshot about every 5 seconds.
+  * Do not sign in, and do not wait for Steam's own runtime download.
+  * Heroic, Lutris, and Battle.net call the same helper. Their full installs are not run here.
+  * Defect #1 is the helper leaking exit 1, which makes Steam end in `Failed (exit code 1)!` under `set -e`. Record it. The intended result is still `exit=0` and `Done!`.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** The lspci line; `exit=0` from the helper with no sudo prompt or pacman transaction, `1` from pkg-present and the two hw probes; `Installing Steam...` through `Steam will start automatically now...` and `Done!`; the Steam window; the launcher entry and dimmed row; `Steam and its data have been removed.` with both directories missing; the final stock state
+  ** lspci names no Intel, AMD, or NVIDIA GPU. The helper prints `Installing lib32 graphics drivers...` and exits 0, with no sudo prompt and no pacman transaction. An `exit=1` is defect #1 and is recorded.
+  ** The three lib32 packages are absent, and both NVIDIA probes exit 1. Steam is not installed before the menu install.
+  ** The Steam install reaches `Steam will start automatically now...` and `Done!`. A `Failed (exit code 1)!` banner is defect #1 and is recorded.
+  ** A Steam window opens. Apps lists Steam, Install dims it after a reopen, and Remove lists it.
+  ** Removal prints `Steam and its data have been removed.` and `Done!`. Both Steam directories are missing, the package is gone, Apps has no Steam entry, Install lists Steam as enabled, and Remove does not list Gaming.
   * If unsuccessful
-  ** `exit=1` from the helper and/or the red `Failed (exit code 1)!` banner with the lines above it (defect #1 present — also capture `pacman -Q steam`), a sudo prompt or pacman transaction from the helper, a Steam window never appearing after `Done!`, or Steam surviving the removal
+  ** The helper asks for sudo or runs pacman, Steam remains after removal, or a Steam window never appears after `Done!`.
 covers: manual/26-gaming.md:11-17; default/omarchy/omarchy-menu.jsonc:253,321 (install.gaming.steam, remove.gaming.steam); bin/omarchy-install-gaming-steam; bin/omarchy-remove-gaming-steam; bin/omarchy-install-gaming-gpu-lib32 (and omarchy-install-gaming-heroic/lutris/battlenet by dependency); bin/omarchy-hw-nvidia-gsp; bin/omarchy-hw-nvidia-without-gsp; default/hypr/apps/steam.lua
 
 ### windows-vm-install-refused-and-unconfigured-commands   [VM-PARTIAL]
@@ -12938,31 +12980,68 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy-windows-vm status; echo rc=$?` → `Windows VM not configured.` / `To set up: omarchy-windows-vm install`, `rc=1`; `omarchy-windows-vm launch; echo rc=$?` and `omarchy-windows-vm stop; echo rc=$?` → `...not configured. Please run: omarchy-windows-vm install` and `Windows VM not configured.`, both `rc=1`.
-  * Type `omarchy-windows-vm help; echo rc=$?` → the `Usage: omarchy-windows-vm [command] [options]` block listing install / remove / launch (`--keep-alive, -k`) / stop / status / help, `rc=0`; `omarchy-windows-vm frobnicate; echo rc=$?` → `Unknown command: frobnicate` + usage, `rc=1`. Type `omarchy-windows-vm remove` → `Remove Windows VM and delete all associated data?` with No preselected; press Enter → `Removal cancelled by user`. Type `omarchy-windows-key; echo rc=$?` → `No Windows license key found in firmware.`, `rc=1` (OVMF has no MSDM table; reviewer 11 notes a sudo prompt may precede it — type `prime` if so).
-  ** `omarchy windows vm status` / `omarchy windows key` are the same commands through the router. None of these need Docker or a password; a polkit dialog here is a finding (cancel it and report).
-  * Type `df -h ~ | tail -1; ls -l /dev/kvm 2>&1; ls -d ~/.windows ~/Windows ~/.local/share/applications/windows-vm.desktop 2>&1` → free space well under 74 G, KVM present or absent (note which), and three `No such file`.
-  * Open the Omarchy Menu (Super+Space) → Install → `Windows` (enabled; not dimmed because no `windows-vm.desktop` exists). The floating terminal starts `omarchy-windows-vm install`:
-  ** No `/dev/kvm`: a boxed `❌ KVM virtualization not available!` with `sudo modprobe kvm-intel / kvm-amd` hints, then `● Failed (exit code 1)!`. The check may come after the RAM/cores/disk questions — answer them with Enter to accept the defaults (4G, 2, 64G) and leave username/password blank.
-  ** `/dev/kvm` present: after the questions, `❌ Insufficient disk space!` with `Available: NNGB` and `Required: 74GB (64GB disk + 10GB for Windows image)`, then `Failed`. No polkit prompt is expected before the check; if one appears, authorize with `prime` and report it.
-  ** If instead the installer proceeds (`Monitor installation progress at: http://127.0.0.1:8006` or a Docker pull), press Ctrl+C (`Installation cancelled by user`) and report that the check was not exercised. Press a key to close.
-  * In the terminal `ls -ld ~/.windows ~/Windows` → both now exist as `drwx------` (created before the check — note it); `ls ~/.local/share/applications/windows-vm.desktop 2>&1` → `No such file`; `sudo ls /var/lib/omarchy/windows 2>&1` → absent or empty (no compose file); `omarchy-pkg-present freerdp; echo $?` → `1`; `omarchy-windows-vm status` → still `Windows VM not configured.`
-  * Menu → Install: `Windows` still enabled; Menu → Remove: still no `Windows` row. Type `rmdir ~/.windows ~/Windows` to leave the home directory as found; close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy-windows-vm status; echo rc=$?` and press Return. The output includes `Windows VM not configured.` and `To set up: omarchy-windows-vm install`, and the last line is `rc=1`.
+  * Type `omarchy-windows-vm launch; echo rc=$?` and press Return. The output includes `not configured`, and the last line is `rc=1`.
+  * Type `omarchy-windows-vm stop; echo rc=$?` and press Return. The output includes `Windows VM not configured.`, and the last line is `rc=1`.
+  * Type `omarchy-windows-vm help; echo rc=$?` and press Return. The usage block lists install, remove, launch, stop, status, and help, and the last line is `rc=0`.
+  * Type `omarchy-windows-vm frobnicate; echo rc=$?` and press Return. The output includes `Unknown command: frobnicate`, and the last line is `rc=1`.
+  * Type `omarchy-windows-vm remove` and press Return. A prompt asks `Remove Windows VM and delete all associated data?`, and No is preselected.
+  * Press Enter. The output includes `Removal cancelled by user`.
+  * Type `omarchy-windows-key; echo rc=$?` and press Return. The output includes `No Windows license key found in firmware.`, and the last line is `rc=1`.
+  ** If sudo asks, type `prime` and press Return.
+  * Type `df -h ~ | tail -1` and press Return. Free space is under 74G, and the number is recorded.
+  * Type `ls -l /dev/kvm 2>&1` and press Return. Note whether `/dev/kvm` exists.
+  * Type `ls -d ~/.windows ~/Windows ~/.local/share/applications/windows-vm.desktop 2>&1` and press Return. Each path reports `No such file`.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Windows. Windows is enabled, and a floating terminal starts the install.
+  * If a RAM question appears, press Enter. The default is accepted.
+  * If a cores question appears, press Enter. The default is accepted.
+  * If a disk question appears, press Enter. The default is accepted.
+  * If a username question appears, press Enter. It stays blank.
+  * If a password question appears, press Enter. It stays blank.
+  * Wait until a boxed error appears and the terminal shows `Failed`.
+  ** If `/dev/kvm` was absent, the box says `KVM virtualization not available!`.
+  ** If `/dev/kvm` was present, the box says `Insufficient disk space!` and names 74GB.
+  ** If a polkit prompt appears, type `prime`, report it, and continue.
+  ** If the installer proceeds to a progress URL or a Docker pull, press Ctrl+C, report that the prerequisite check was skipped, and press a key.
+  * Press a key. The floating terminal closes.
+  * Click the terminal. The terminal is focused.
+  * Type `ls -ld ~/.windows ~/Windows` and press Return. Both directories exist with mode `drwx------`.
+  * Type `ls ~/.local/share/applications/windows-vm.desktop 2>&1` and press Return. The output includes `No such file`.
+  * Type `sudo ls /var/lib/omarchy/windows 2>&1` and press Return. The path is absent or empty.
+  ** If sudo asks, type `prime` and press Return.
+  * Type `omarchy-pkg-present freerdp; echo $?` and press Return. The last line is `1`.
+  * Type `omarchy-windows-vm status` and press Return. The output includes `Windows VM not configured.`
+  * Press Super+Space. The menu opens.
+  * Select Install. Windows is still enabled.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Remove. Windows is not listed.
+  * Press Escape. The menu closes.
+  * Type `rmdir ~/.windows ~/Windows` and press Return. The prompt returns.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The boxed error is drawn by gum; screenshot before pressing a key.
-  * Skipped here: the 10–15 minute Windows download, RDP session, shared folder, `--keep-alive`, Remove → Windows — they need nested KVM and a ≥ 80 GB disk.
+  * Screenshot the boxed error before pressing a key. The real Windows download is not part of this test.
+  * `omarchy windows vm status` and `omarchy windows key` are the same commands through the router.
+  * Help lists `--keep-alive` and `-k` on launch. None of the unconfigured commands need Docker. A polkit dialog on those commands is a finding: cancel it and report it.
+  * `~/.windows` and `~/Windows` being created before the failed check is expected. Note it, then remove them.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Each subcommand message with its `rc`; the usage block; the cancelled removal; the windows-key message
-  ** The pre-state line; the KVM or disk-space box and `Failed (exit code 1)!`; the two 0700 directories, no desktop file, no compose file, `1`, `not configured`; the unchanged Install/Remove menus
+  ** status, launch, and stop each say the VM is not configured and exit 1. Help prints the usage block and exits 0. `frobnicate` is rejected with exit 1.
+  ** Remove asks for confirmation with No preselected, Enter cancels it, and `omarchy-windows-key` says no firmware key was found and exits 1.
+  ** Free space is under 74G, and `~/.windows`, `~/Windows`, and `windows-vm.desktop` are absent before the menu install.
+  ** The installer stops with either `KVM virtualization not available!` or `Insufficient disk space!`, then `Failed`.
+  ** Both directories then exist as `drwx------`. There is no desktop file, no compose file, freerdp is absent, and status still says not configured.
+  ** Install still lists Windows, Remove does not list Windows, and the two directories are removed.
   * If unsuccessful
-  ** A polkit/sudo prompt or hang on the unconfigured commands, the installer proceeding to a download (then Ctrl+C) — report which prerequisite check was skipped — or any package or desktop file created despite the failed check
+  ** An unconfigured command hangs or asks for polkit, the installer starts a download, or a package or desktop file is created despite the failed check.
 covers: manual/28-windows-vm.md:3-7,17-24,47-49; default/omarchy/omarchy-menu.jsonc:215,296 (install.windows, remove.windows); bin/omarchy-windows-vm:1126-1153,1520-1553 (status/launch/stop/help/remove dispatch, install_windows, check_prerequisites, available_storage_gb, prepare_user_mount_sources); bin/omarchy-windows-key; test/shell.d/windows-vm-test.sh; test/shell.d/windows-vm-compose-test.sh (disk-space); test/shell.d/menu-test.sh
 
 ### security-fido2-without-device-and-removers-on-stock   [VM-PARTIAL] [NET]
@@ -12972,29 +13051,64 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `grep -c pam_u2f /etc/pam.d/sudo` → `0`; `pacman -Q pam-u2f libfido2 2>&1` → pam-u2f not found (record whether libfido2 is already present as an openssh dependency). Open the Omarchy Menu (Super+Space) → Remove: no Security row on a stock disk. Escape.
-  * Type `omarchy-remove-security-sudoless-docker; echo rc=$?` → `Sudoless Docker is not enabled: prime is not in the docker group.`, `rc=0`, no reboot prompt. Type `omarchy-remove-security-sshd; echo rc=$?` → green `Removing SSH server access.`, the stop/disable and firewall lines (sudo `prime`), no authorized-keys question, `The openssh package remains installed since it also provides the ssh client.`, `rc=0`.
-  * Type `omarchy-remove-security-fingerprint; echo rc=$?` → the headline, `Removing fingerprint packages...` with no transaction, a green completion line, `rc=0`. Type `ssh -V; sudo ufw status | grep -c 22/tcp` → ssh still works and `0`.
-  * Menu → Setup → Security → Fido2: floating terminal, green `Setting up FIDO2 device for authentication.`, `Installing required packages...` (sudo `prime`; pacman installs libfido2 and pam-u2f, small download), then red `No FIDO2 device detected. Please plug it in (you may need to unlock it as well).` and `● Failed (exit code 1)!`. Press a key.
-  * In the terminal `pacman -Q pam-u2f libfido2` → both listed; `grep -c pam_u2f /etc/pam.d/sudo` → `0` (PAM untouched); `ls /etc/fido2 2>&1` → `No such file`.
-  * Menu → Remove (reopen twice) → Security → the Fido2 row is now present; select it → floating terminal `Removing FIDO2 device from authentication.`, `Removing FIDO2 packages...` (sudo). Record the outcome: either green `FIDO2 authentication has been completely removed.` and `Done!`, or pacman `removing libfido2 breaks dependency 'libfido2' required by openssh` with `Failed (exit code 1)` (a defect to file).
-  ** If the remover failed, type `omarchy-pkg-drop pam-u2f` in the terminal to restore stock and report it.
-  * `pacman -Q pam-u2f 2>&1` → not found; `ssh -V` → still works; Menu → Remove: the Security row hidden again. Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `grep -c pam_u2f /etc/pam.d/sudo` and press Return. The output is `0`.
+  * Type `pacman -Q pam-u2f libfido2 2>&1` and press Return. pam-u2f is not found, and whether libfido2 is already installed is recorded.
+  * Press Super+Space. The menu opens.
+  * Select Remove. Security is not listed.
+  * Press Escape. The menu closes.
+  * Click the terminal. The terminal is focused.
+  * Type `omarchy-remove-security-sudoless-docker; echo rc=$?` and press Return. The output includes `Sudoless Docker is not enabled: prime is not in the docker group.`, and the last line is `rc=0`.
+  * Type `omarchy-remove-security-sshd; echo rc=$?` and press Return. The output includes `Removing SSH server access.` and `The openssh package remains installed since it also provides the ssh client.`, and the last line is `rc=0`.
+  ** If sudo asks, type `prime` and press Return.
+  * Type `omarchy-remove-security-fingerprint; echo rc=$?` and press Return. The output includes `Removing fingerprint packages...`, and the last line is `rc=0`.
+  * Type `ssh -V` and press Return. A version is printed.
+  * Type `sudo ufw status | grep -c 22/tcp` and press Return. The output is `0`.
+  ** If sudo asks, type `prime` and press Return.
+  * Press Super+Space. The menu opens.
+  * Select Setup, then Security, then Fido2. A floating terminal opens.
+  * Type `prime` and press Return if sudo asks. The setup continues.
+  * Wait until it shows `No FIDO2 device detected. Please plug it in (you may need to unlock it as well).` and `Failed (exit code 1)!`.
+  * Press a key. The floating terminal closes.
+  * Click the terminal. The terminal is focused.
+  * Type `pacman -Q pam-u2f libfido2` and press Return. Both packages are listed.
+  * Type `grep -c pam_u2f /etc/pam.d/sudo` and press Return. The output is `0`.
+  * Type `ls /etc/fido2 2>&1` and press Return. The output includes `No such file`.
+  * Press Super+Space. The menu opens.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Remove, then Security. Fido2 is listed.
+  * Select Fido2. A floating terminal opens.
+  * Type `prime` and press Return if sudo asks. The removal continues.
+  * Wait until the terminal finishes. Record either `FIDO2 authentication has been completely removed.` and `Done!`, or the openssh dependency error and `Failed (exit code 1)`.
+  * Press a key. The floating terminal closes.
+  ** If removal failed, type `omarchy-pkg-drop pam-u2f` and press Return, then report the dependency error.
+  * Click the terminal. The terminal is focused.
+  * Type `pacman -Q pam-u2f 2>&1` and press Return. The output includes `was not found`.
+  * Type `ssh -V` and press Return. A version is printed.
+  * Press Super+Space. The menu opens.
+  * Select Remove. Security is not listed.
+  * Press Escape. The menu closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * All four removers are idempotent; re-running any is harmless. `omarchy-pkg-drop` may also remove now-unneeded dependencies; that is expected.
+  * The four removers are idempotent. `omarchy-pkg-drop` may also remove dependencies that are no longer needed.
+  * The sshd remover asks no authorized-keys question. The fingerprint remover runs no package transaction on a stock disk.
+  * Do not plug in a key. The no-device failure is the expected setup result. The libfido2/openssh dependency error on removal is a defect to record, not a reason to leave pam-u2f installed.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** `0`, the package state, and the Remove menu without Security; each remover's output with its `rc`; `ssh -V` and `0`
-  ** The Fido2 setup terminal ending in the red no-device message and `Failed (exit code 1)`; pacman showing both packages, PAM grep `0`, no `/etc/fido2`; the Remove → Security → Fido2 row appearing
-  ** The removal transcript with its outcome captured clearly (clean, or the libfido2/openssh dependency error), pam-u2f gone, ssh working, Security hidden again
+  ** `pam_u2f` is absent from sudo's PAM file, pam-u2f is not installed, and Remove does not list Security.
+  ** Sudoless-docker reports that prime is not in the docker group and exits 0. sshd removal exits 0 and says openssh stays for the client. Fingerprint removal exits 0 with no transaction.
+  ** `ssh -V` prints a version, and the firewall count for `22/tcp` is `0`.
+  ** FIDO2 setup installs the packages, then fails with `No FIDO2 device detected` and exit 1. pam-u2f and libfido2 are installed, the PAM count stays `0`, and `/etc/fido2` does not exist.
+  ** After a reopen, Remove lists Fido2. Removal either finishes with `Done!` or fails on the libfido2/openssh dependency and is recorded. pam-u2f is gone, ssh still prints a version, and Remove no longer lists Security.
   * If unsuccessful
-  ** PAM modified (grep > 0) without a device, a remover hanging on a prompt, ssh broken afterwards, or `./client get-serial`
+  ** The PAM count becomes greater than 0 with no device, a remover hangs on a prompt, or ssh stops working.
 covers: manual/37-hardware-authentication.md (Fido2 authentication); bin/omarchy-setup-security-fido2; bin/omarchy-remove-security-fido2; bin/omarchy-remove-security-sshd; bin/omarchy-remove-security-sudoless-docker; bin/omarchy-remove-security-fingerprint; default/omarchy/omarchy-menu.jsonc (setup.security.fido2, remove.security.* when)
 
 ### plugin-add-local-repo-enable-disable-remove   [VM-OK]
@@ -13004,31 +13118,41 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal (Super+Enter) and create the plugin repo by typing these lines exactly:
-    `mkdir -p /tmp/hello && cd /tmp/hello`
-    `printf '%s\n' '{"schemaVersion":1,"id":"prime.hello","name":"Hello","version":"1.0.0","kinds":["bar-widget"],"entryPoints":{"barWidget":"Hello.qml"},"barWidget":{"displayName":"Hello","defaultSection":"right"}}' > manifest.json`
-    `printf '%s\n' 'import QtQuick' 'import qs.Ui' 'BarWidget { moduleName: "prime.hello"; implicitWidth: label.implicitWidth + 16; implicitHeight: barSize; Text { id: label; anchors.centerIn: parent; text: "HELLO"; color: "#ff0000"; font.pixelSize: 14 } }' > Hello.qml`
-    `git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -qm init && cd ~`
-  * Type `omarchy-plugin-add 'ext::sh -c id'; echo exit=$?` → refused by the URL check before any warning or clone, non-zero exit.
-  * Type `omarchy-plugin-add /tmp/hello --enable --yes` → `Added prime.hello into /home/prime/.config/omarchy/plugins/prime.hello` and `Enabled prime.hello`; within ~2 s a red `HELLO` label appears on the right side of the bar. Type `omarchy-plugin-list` → a row `prime.hello  enabled  third-party  bar-widget  Hello`.
-  * Type `omarchy-plugin-disable prime.hello` → `Disabled prime.hello`; `HELLO` disappears from the bar.
-  * Type `omarchy-plugin-enable prime.hello left` → `Enabled and moved prime.hello`; `HELLO` now shows on the left side of the bar.
-  * Type `omarchy-plugin-remove prime.hello --yes` → `Removed prime.hello.` and `Plugin was enabled and was unloaded from omarchy-shell.`; `HELLO` is gone and `omarchy-plugin-list` no longer lists it. Type `rm -rf /tmp/hello`; close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `mkdir -p /tmp/hello && cd /tmp/hello` and press Return. The prompt is in `/tmp/hello`.
+  * Type `printf '%s\n' '{"schemaVersion":1,"id":"prime.hello","name":"Hello","version":"1.0.0","kinds":["bar-widget"],"entryPoints":{"barWidget":"Hello.qml"},"barWidget":{"displayName":"Hello","defaultSection":"right"}}' > manifest.json` and press Return. `manifest.json` exists.
+  * Type `printf '%s\n' 'import QtQuick' 'import qs.Ui' 'BarWidget { moduleName: "prime.hello"; implicitWidth: label.implicitWidth + 16; implicitHeight: barSize; Text { id: label; anchors.centerIn: parent; text: "HELLO"; color: "#ff0000"; font.pixelSize: 14 } }' > Hello.qml` and press Return. `Hello.qml` exists.
+  * Type `git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -qm init && cd ~` and press Return. The prompt is in the home directory.
+  * Type `omarchy-plugin-add 'ext::sh -c id'; echo exit=$?` and press Return. The URL is refused before a clone, and the exit is non-zero.
+  * Type `omarchy-plugin-add /tmp/hello --enable --yes` and press Return. The output includes `Added prime.hello into /home/prime/.config/omarchy/plugins/prime.hello` and `Enabled prime.hello`.
+  * Look at the bar. A red `HELLO` label is on the right.
+  * Type `omarchy-plugin-list` and press Return. A row reads `prime.hello  enabled  third-party  bar-widget  Hello`.
+  * Type `omarchy-plugin-disable prime.hello` and press Return. The output includes `Disabled prime.hello`.
+  * Look at the bar. `HELLO` is gone.
+  * Type `omarchy-plugin-enable prime.hello left` and press Return. The output includes `Enabled and moved prime.hello`.
+  * Look at the bar. `HELLO` is on the left.
+  * Type `omarchy-plugin-remove prime.hello --yes` and press Return. The output includes `Removed prime.hello.` and `Plugin was enabled and was unloaded from omarchy-shell.`
+  * Look at the bar. `HELLO` is gone.
+  * Type `omarchy-plugin-list` and press Return. `prime.hello` is not listed.
+  * Type `rm -rf /tmp/hello` and press Return. The prompt returns.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Type each printf line as one line; the quotes matter. `cat manifest.json Hello.qml` lets you check them before committing.
-  * The red HELLO is small; zoom into the bar. If it does not show within 5 s, run `journalctl -t omarchy-shell --since -1min --no-pager | grep -i hello | sudo tee /dev/ttyS0` and report via get-serial.
+  * Type each printf as one line. The quotes matter. `cat manifest.json Hello.qml` checks them before the commit.
+  * `HELLO` is small. If it is not on the bar within 5 seconds, run `journalctl -t omarchy-shell --since -1min --no-pager | grep -i hello | sudo tee /dev/ttyS0` and read it with get-serial.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Terminal: the `ext::` refusal, the Added/Enabled lines, the list row, Disabled, Enabled and moved, Removed
-  ** Bar screenshots: HELLO on the right, gone, on the left, gone again
+  ** The `ext::` URL is refused before a clone and exits non-zero.
+  ** Adding `/tmp/hello` prints the Added and Enabled lines, the list row names `prime.hello` as enabled, and a red `HELLO` appears on the right of the bar.
+  ** Disable removes `HELLO`. Enable to `left` puts `HELLO` on the left.
+  ** Remove prints `Removed prime.hello.` and the unload sentence. `HELLO` is gone, and `omarchy-plugin-list` no longer names it.
   * If unsuccessful
-  ** `refusing to add: validation failed` with its reason, `plugin 'prime.hello' is not known`, an `ext::` URL accepted, or a HELLO that never renders
+  ** Validation fails, `prime.hello` is unknown after a successful add, the `ext::` URL is accepted, or `HELLO` never renders.
 covers: bin/omarchy-plugin-add; bin/omarchy-plugin-validate; bin/omarchy-plugin-enable; bin/omarchy-plugin-disable; bin/omarchy-plugin-remove; bin/omarchy-plugin-list; bin/omarchy-git-url-check (bare path, ext:: refusal); shell/services/PluginRegistry.qml (scan, setEnabled, barTarget); shell/shell.qml (syncPluginWidgets, listPlugins IPC); shell/Ui/BarWidget.qml; manual/32-shell-plugins.md; test/shell.d/plugin-add-test.sh; plugin-enable-test.sh; runtime-smoke-test.sh
 
 ### plugin-clone-builtin-edit-and-remove-restores   [VM-OK]
@@ -13038,31 +13162,78 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Screenshot the bar: the centre clock shows weekday and time (e.g. `Friday 13:10`). Open a terminal with Super+Enter and type `omarchy-menu-plugin remove; echo rc=$?` → notification `No plugin to remove`, `rc=0`. Open the Omarchy Menu (Super+Space) → Setup → Plugins: rows Enable, Disable, Add, Clone present; no `Remove Plugin` row. Escape.
-  * Type `omarchy-plugin-clone omarchy.clock` (answer `y` if it asks) → `Cloned omarchy.clock to /home/prime/.config/omarchy/plugins/prime.clock and switched to prime.clock`; a notification `Editing Cloned Plugin` appears; the clock is still on the bar. Type `omarchy-plugin-list | grep -i clock` → `prime.clock  enabled  third-party  bar-widget  My Clock` and `omarchy.clock  disabled  first-party …`; `ls ~/.config/omarchy/plugins/prime.clock/` → `manifest.json BarWidget.qml Panel.qml Model.js`; `jq -r '.id,.name,.omarchy.clonedFrom' ~/.config/omarchy/plugins/prime.clock/manifest.json` → `prime.clock`, `My Clock`, `omarchy.clock`.
-  * Type `sed -i 's/text: root.vertical ? "" : root.displayText/text: root.vertical ? "" : "CLONE " + root.displayText/' ~/.config/omarchy/plugins/prime.clock/BarWidget.qml` and wait 3 s → the bar clock reads `CLONE Friday 13:11` (live time): the saved file hot-reloaded without a restart.
-  ** If `sed` matched nothing (`grep -n displayText ~/.config/omarchy/plugins/prime.clock/BarWidget.qml` shows a different line), edit that line to prefix `"CLONE " +` and report the difference.
-  * Refusals, each non-zero: `omarchy-plugin-clone omarchy.clock; echo $?` → `… already exists`, `1`; `omarchy-plugin-clone omarchy.nosuch; echo $?` → `unknown built-in plugin: omarchy.nosuch`, `1`; `omarchy-plugin-clone omarchy.weather custom.weather` (custom id) and `omarchy-plugin-clone prime.clock` (not built-in) fail and `ls -d ~/.config/omarchy/plugins/prime.weather 2>&1` → No such file; `omarchy-plugin-remove omarchy.clock; echo $?` → refused (a built-in has no checkout); `echo | omarchy-plugin-remove prime.clock; echo $?` → `refusing to continue without confirmation; pass --yes`, the clone still exists; `omarchy-plugin-remove nosuch --yes; echo $?` → `plugin 'nosuch' is not installed`, `1`; `omarchy-plugin-remove 'bad/id' --yes; echo $?` → `invalid plugin id`, `1`.
-  * Menu → Setup → Plugins → Clone Plugin: the picker does NOT offer Clock any more (already cloned) but offers e.g. Weather; Escape. Setup → Plugins → Disable Plugin: rows show the plugin name with its id underneath; Escape. Reopen Setup → Plugins twice: `Remove Plugin` is now listed.
-  * Select Remove Plugin → the picker lists `My Clock (prime.clock)`; choose it → a floating terminal asks `Remove 'prime.clock'? The folder will be backed up.` → Yes → `Removed prime.clock. Backup at: …/plugins/.prime.clock.bak.<timestamp>` and `Restored omarchy.clock.`; `Done!`. Press a key.
-  * Within 3 s the bar clock shows the plain time again. In the terminal `omarchy-plugin-list | grep -i clock` → only `omarchy.clock  enabled  first-party`; `ls -a ~/.config/omarchy/plugins/` shows the `.prime.clock.bak.*` dir — remove it with `rm -rf ~/.config/omarchy/plugins/.prime.clock.bak.*`. Reopen Setup → Plugins twice: `Remove Plugin` is gone. Close the terminal with Super+W.
+  * Look at the bar. Note the clock text.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy-menu-plugin remove; echo rc=$?` and press Return. A notification reads `No plugin to remove`, and the last line is `rc=0`.
+  * Press Super+Space. The menu opens.
+  * Select Setup, then Plugins. Enable, Disable, Add, and Clone are listed, and Remove Plugin is not.
+  * Press Escape. The menu closes.
+  * Click the terminal. The terminal is focused.
+  * Type `omarchy-plugin-clone omarchy.clock` and press Return. The output includes `Cloned omarchy.clock to /home/prime/.config/omarchy/plugins/prime.clock and switched to prime.clock`.
+  ** If it asks for confirmation, type `y` and press Return.
+  * A notification reads `Editing Cloned Plugin`.
+  * Look at the bar. The clock is still there.
+  * Type `omarchy-plugin-list | grep -i clock` and press Return. The output includes `prime.clock  enabled  third-party` and `omarchy.clock  disabled  first-party`.
+  * Type `ls ~/.config/omarchy/plugins/prime.clock/` and press Return. The listing includes `manifest.json`, `BarWidget.qml`, `Panel.qml`, and `Model.js`.
+  * Type `jq -r '.id,.name,.omarchy.clonedFrom' ~/.config/omarchy/plugins/prime.clock/manifest.json` and press Return. The lines are `prime.clock`, `My Clock`, and `omarchy.clock`.
+  * Type `sed -i 's/text: root.vertical ? "" : root.displayText/text: root.vertical ? "" : "CLONE " + root.displayText/' ~/.config/omarchy/plugins/prime.clock/BarWidget.qml` and press Return. The prompt returns.
+  ** If sed matches nothing, prefix the displayText line with `"CLONE " +` and report the difference.
+  * Wait 3 seconds. The bar clock text starts with `CLONE`.
+  * Type `omarchy-plugin-clone omarchy.clock; echo $?` and press Return. The output includes `already exists`, and the last line is `1`.
+  * Type `omarchy-plugin-clone omarchy.nosuch; echo $?` and press Return. The output includes `unknown built-in plugin: omarchy.nosuch`, and the last line is `1`.
+  * Type `omarchy-plugin-clone omarchy.weather custom.weather; echo $?` and press Return. The exit is non-zero.
+  * Type `omarchy-plugin-clone prime.clock; echo $?` and press Return. The exit is non-zero.
+  * Type `ls -d ~/.config/omarchy/plugins/prime.weather 2>&1` and press Return. The output includes `No such file`.
+  * Type `omarchy-plugin-remove omarchy.clock; echo $?` and press Return. The built-in is refused, and the exit is non-zero.
+  * Type `echo | omarchy-plugin-remove prime.clock; echo $?` and press Return. The output includes `refusing to continue without confirmation; pass --yes`, and the exit is non-zero.
+  * Type `ls -d ~/.config/omarchy/plugins/prime.clock` and press Return. The directory is still listed.
+  * Type `omarchy-plugin-remove nosuch --yes; echo $?` and press Return. The output includes `plugin 'nosuch' is not installed`, and the last line is `1`.
+  * Type `omarchy-plugin-remove 'bad/id' --yes; echo $?` and press Return. The output includes `invalid plugin id`, and the last line is `1`.
+  * Press Super+Space. The menu opens.
+  * Select Setup, then Plugins, then Clone Plugin. Clock is not offered.
+  * Press Escape. The picker closes.
+  * Press Super+Space. The menu opens.
+  * Select Setup, then Plugins, then Disable Plugin. Each row shows a name and an id.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Setup, then Plugins. Remove Plugin is listed.
+  * Select Remove Plugin. The picker lists `My Clock (prime.clock)`.
+  * Select My Clock. A floating terminal asks `Remove 'prime.clock'? The folder will be backed up.`
+  * Choose Yes. The output includes `Removed prime.clock.`, `Restored omarchy.clock.`, and `Done!`.
+  * Press a key. The floating terminal closes.
+  * Wait 3 seconds. The bar clock no longer starts with `CLONE`.
+  * Click the terminal. The terminal is focused.
+  * Type `omarchy-plugin-list | grep -i clock` and press Return. The only clock row is `omarchy.clock  enabled  first-party`.
+  * Type `ls -a ~/.config/omarchy/plugins/` and press Return. A `.prime.clock.bak.` directory is listed.
+  * Type `rm -rf ~/.config/omarchy/plugins/.prime.clock.bak.*` and press Return. The prompt returns.
+  * Press Super+Space. The menu opens.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Setup, then Plugins. Remove Plugin is not listed.
+  * Press Escape. The menu closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The clone id is `prime.clock` because the login name is `prime`. The Remove Plugin row is guarded: reopen the submenu twice after cloning or removing. Menu rows are `name` with the id as smaller subtext — pick by the id line.
-  * The menu's Clone Plugin path does the same as the CLI and then opens the clone directory in the default editor (nvim — `$EDITOR` is `omarchy-launch-editor --inline` on Omarchy; CODE-INTENDED per 03-INTENDED-BEHAVIOUR #28); the CLI keeps the steps typeable.
+  * The clone id is `prime.clock` because the login name is `prime`. Reopen Setup → Plugins after cloning or removing before deciding whether Remove Plugin is listed.
+  * Pick My Clock by the id line `prime.clock`.
+  * The menu Clone path opens the clone in nvim because `$EDITOR` is `omarchy-launch-editor --inline` (03-INTENDED-BEHAVIOUR #28). This test uses the CLI so the steps stay typeable.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** The `No plugin to remove` toast and Setup → Plugins without Remove Plugin; the Cloned line, the `Editing Cloned Plugin` notification, both list rows, the directory listing and manifest fields
-  ** Bar screenshots: normal clock → `CLONE …` clock → normal clock; every refusal with its exit code and no `prime.weather`
-  ** Clone Plugin without a Clock row, Disable Plugin rows with id subtext, Remove Plugin present, the remove confirmation and its `Removed … Backup at … Restored omarchy.clock.` output; the final list row, the backup dir, Remove Plugin gone
+  ** `omarchy-menu-plugin remove` notifies `No plugin to remove` and exits 0. Setup → Plugins lists Enable, Disable, Add, and Clone, and does not list Remove Plugin.
+  ** The clone prints the switched-to sentence, notifies `Editing Cloned Plugin`, and leaves the clock on the bar. The list shows `prime.clock` enabled and `omarchy.clock` disabled. The directory has the four files, and the manifest id, name, and clonedFrom match.
+  ** After the sed, the bar clock starts with `CLONE`. A second clone says it already exists. An unknown built-in, a custom id, and a non-built-in each fail, and `prime.weather` is not created.
+  ** Removing the built-in is refused. An unconfirmed remove is refused and the clone remains. `nosuch` and `bad/id` each exit 1.
+  ** Clone Plugin no longer offers Clock. Disable Plugin shows a name and an id. After a reopen, Remove Plugin lists `My Clock (prime.clock)`, and Yes prints the backup path, `Restored omarchy.clock.`, and `Done!`.
+  ** The clock no longer starts with `CLONE`. The list shows only the first-party clock. The backup directory is removed, and Remove Plugin is gone.
   * If unsuccessful
-  ** The clock disappearing from the bar, `CLONE` not appearing after 10 s, `omarchy.clock` not restored after removal, a clone created for a refused command, Remove Plugin acting on the wrong plugin, or `journalctl -t omarchy-shell --since -3min --no-pager | grep -iE 'clock|plugin' | sudo tee /dev/ttyS0`
-  ** Output of `omarchy-version`
+  ** The clock disappears, `CLONE` never appears, `omarchy.clock` is not restored, a refused command creates a clone, or Remove Plugin acts on the wrong plugin. Record `omarchy-version`.
 covers: bin/omarchy-plugin-clone; bin/omarchy-plugin-remove (clonedFrom restore); bin/omarchy-menu-plugin (clone, remove); bin/omarchy-plugin-enable; default/omarchy/omarchy-menu.jsonc (setup.plugin.clone / setup.plugin.remove when); shell/services/PluginRegistry.qml (clonedFrom, resolveEnabledId, restoreCloneSource, localPluginWatcher); shell/shell.qml (hot reload); shell/plugins/panels/clock/BarWidget.qml:150; docs/omarchy-shell.md §Installing a third-party plugin; default/agents/skills/omarchy/plugins.md §Customizing Built-In Plugins; manual/32-shell-plugins.md "Cloning a built-in"; test/shell.d/plugin-clone-test.sh; menu-plugin-test.sh; runtime-smoke-test.sh
 
 ### pkg-add-omarchy-zsh-setup-and-restore   [VM-OK] [NET]
@@ -13072,26 +13243,41 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `echo $0` → `bash`.
-  * Type `omarchy pkg add omarchy-zsh` (password `prime`), then `omarchy-setup-zsh` → zsh and omarchy-zsh install; setup writes `~/.zshrc`, backs up `~/.bashrc` to `~/.bashrc.backup-<date>` and reports it.
-  ** If `omarchy-setup-zsh` is not found, type `pacman -Ql omarchy-zsh | grep bin/` to find the setup command and report the name.
-  * Close the terminal, open a new one with Super+Enter, type `echo $0; echo $ZSH_VERSION` → `zsh` (or `-zsh`) and a version; the prompt is the Starship prompt.
-  * Press Ctrl+R → an fzf history search opens. Press Escape.
-  * Type `cp "$(ls -t ~/.bashrc.backup-* | head -1)" ~/.bashrc && sudo pacman -R --noconfirm omarchy-zsh`.
-  * Close the terminal, open a new one, type `echo $0` → `bash` again. Close it and end the session with `stop`.
+  * Press Super+Return. A terminal opens.
+  * Type `echo $0` and press Return. The output is `bash`.
+  * Type `omarchy pkg add omarchy-zsh` and press Return. The package installs.
+  ** If a password is asked, type `prime` and press Return.
+  * Type `omarchy-setup-zsh` and press Return. The output says `~/.zshrc` was written and `~/.bashrc` was backed up.
+  ** If the command is not found, type `pacman -Ql omarchy-zsh | grep bin/` and report the setup command's name.
+  * Press Super+W. The terminal closes.
+  * Press Super+Return. A new terminal opens.
+  * Type `echo $0` and press Return. The output includes `zsh`.
+  * Type `echo $ZSH_VERSION` and press Return. A version is printed.
+  * Press Ctrl+R. An fzf history search opens.
+  * Press Escape. The search closes.
+  * Type `cp "$(ls -t ~/.bashrc.backup-* | head -1)" ~/.bashrc && sudo pacman -R --noconfirm omarchy-zsh` and press Return. The prompt returns.
+  ** If sudo asks, type `prime` and press Return.
+  * Press Super+W. The terminal closes.
+  * Press Super+Return. A new terminal opens.
+  * Type `echo $0` and press Return. The output is `bash`.
+  * Press Super+W. The terminal closes.
+  * End the session with `stop`. The session ends.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The package is a few MB from the omarchy repo; if pacman cannot find it, `sudo pacman -Sy` and retry once.
+  * The package is a few MB from the omarchy repository. If pacman cannot find it, run `sudo pacman -Sy` and retry once.
+  * The new terminal's prompt is the Starship prompt. `stop` ends the session so the shell change does not leak.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** bash before; zsh after with `$ZSH_VERSION` and the Starship prompt; the fzf Ctrl+R popup under zsh; bash after the restore
+  ** The first terminal prints `bash`. `omarchy pkg add omarchy-zsh` installs the package, and setup writes `~/.zshrc` and a `~/.bashrc` backup.
+  ** A new terminal prints `zsh` and a `$ZSH_VERSION`, and Ctrl+R opens an fzf history search.
+  ** After the backup is restored and the package is removed, a new terminal prints `bash`.
   * If unsuccessful
-  ** The setup error or a terminal that fails to open; `cat ~/.bashrc | head -20`
+  ** Setup prints an error, or a new terminal does not open. `head -20 ~/.bashrc` shows the shell setup that was left behind.
 covers: omarchy-zsh README "Install", "fzf Keybindings", "Uninstall"; omarchy-pkgs/pkgbuilds/omarchy-zsh; migrations/1786952219.sh; bin/omarchy-pkg-add
 
 ### pkg-add-omarchy-fish-setup-and-restore   [VM-OK] [NET]
@@ -13101,25 +13287,41 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy pkg add omarchy-fish` (password `prime`), then `omarchy-setup-fish` → fish and omarchy-fish install; `~/.bashrc` is backed up and set to launch fish.
-  ** If `omarchy-setup-fish` is not found, type `pacman -Ql omarchy-fish | grep bin/` to find the setup command and report the name.
-  * Close the terminal, open a new one with Super+Enter, type `echo $FISH_VERSION` → a version prints; the prompt is fish/Starship styled.
-  * Press Ctrl+R, look, Escape; press Ctrl+Alt+P, look, Escape → the fzf.fish history search, then the process search, each opened.
-  * Type `cp (ls -t ~/.bashrc.backup-* | head -1) ~/.bashrc; sudo pacman -R --noconfirm omarchy-fish`.
-  * Close the terminal, open a new one, type `echo $0` → `bash`. Close it and end the session with `stop`.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy pkg add omarchy-fish` and press Return. The package installs.
+  ** If a password is asked, type `prime` and press Return.
+  * Type `omarchy-setup-fish` and press Return. The output says `~/.bashrc` was backed up and set to launch fish.
+  ** If the command is not found, type `pacman -Ql omarchy-fish | grep bin/` and report the setup command's name.
+  * Press Super+W. The terminal closes.
+  * Press Super+Return. A new terminal opens.
+  * Type `echo $FISH_VERSION` and press Return. A version is printed.
+  * Press Ctrl+R. An fzf history search opens.
+  * Press Escape. The search closes.
+  * Press Ctrl+Alt+P. A process search opens.
+  * Press Escape. The search closes.
+  * Type `cp (ls -t ~/.bashrc.backup-* | head -1) ~/.bashrc; sudo pacman -R --noconfirm omarchy-fish` and press Return. The prompt returns.
+  ** If sudo asks, type `prime` and press Return.
+  * Press Super+W. The terminal closes.
+  * Press Super+Return. A new terminal opens.
+  * Type `echo $0` and press Return. The output is `bash`.
+  * Press Super+W. The terminal closes.
+  * End the session with `stop`. The session ends.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * fish syntax: command substitution is `(…)`, not `$(…)`.
+  * In fish, command substitution uses parentheses, not `$()`.
+  * The new terminal's prompt is fish or Starship styled. `stop` ends the session so the shell change does not leak.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** fish running with `$FISH_VERSION`; the Ctrl+R and Ctrl+Alt+P popups; bash restored
+  ** `omarchy pkg add omarchy-fish` installs the package, and setup backs up `~/.bashrc` and points it at fish.
+  ** A new terminal prints a `$FISH_VERSION`. Ctrl+R opens the history search, and Ctrl+Alt+P opens the process search.
+  ** After the backup is restored and the package is removed, a new terminal prints `bash`.
   * If unsuccessful
-  ** The setup error; `cat ~/.bashrc | head -20`
+  ** Setup prints an error. `head -20 ~/.bashrc` shows the shell setup that was left behind.
 covers: omarchy-fish README; omarchy-pkgs/pkgbuilds/omarchy-fish; bin/omarchy-pkg-add
 
 ### preinstalls-base-package-set-installed-audit   [VM-OK]

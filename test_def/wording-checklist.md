@@ -283,13 +283,13 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `voxtype-invitation-hook-runs-once`
 - [x] `install-gaming-xbox-cloud-webapp-and-remove`
 - [x] `gaming-launchers-refuse-without-install`
-- [ ] `gaming-gpu-lib32-without-gpu-and-steam-install-remove`
-- [ ] `windows-vm-install-refused-and-unconfigured-commands`
-- [ ] `security-fido2-without-device-and-removers-on-stock`
-- [ ] `plugin-add-local-repo-enable-disable-remove`
-- [ ] `plugin-clone-builtin-edit-and-remove-restores`
-- [ ] `pkg-add-omarchy-zsh-setup-and-restore`
-- [ ] `pkg-add-omarchy-fish-setup-and-restore`
+- [x] `gaming-gpu-lib32-without-gpu-and-steam-install-remove`
+- [x] `windows-vm-install-refused-and-unconfigured-commands`
+- [x] `security-fido2-without-device-and-removers-on-stock`
+- [x] `plugin-add-local-repo-enable-disable-remove`
+- [x] `plugin-clone-builtin-edit-and-remove-restores`
+- [x] `pkg-add-omarchy-zsh-setup-and-restore`
+- [x] `pkg-add-omarchy-fish-setup-and-restore`
 - [ ] `preinstalls-base-package-set-installed-audit`
 - [ ] `dev-env-php-pacman-install-and-remove`
 - [ ] `install-editor-helix-theme-alias-and-cleanup`
