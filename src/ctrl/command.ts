@@ -116,7 +116,7 @@ const Count = Schema.Number.check(
 
 const DEFAULT_COUNT = 10;
 
-// test new and create test-suite-run store it on the run and write it into every ticket for ./client. mint
+// test new and test run test-suite store it on the run and write it into every ticket for ./client. mint
 // takes the same flag, for the reverse proxy the install's drivers talk to. No default: SERVER_URL
 // or the flag, or a usage error.
 const serverUrlFlag = Flag.string("server-url").pipe(
@@ -998,12 +998,12 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     Command.provide(withDbAndLinear),
   );
 
-  // create test-suite-run --server-url <url> --iso <https-url> --version <version>
+  // test run test-suite --server-url <url> --iso <https-url> --version <version>
   //
   // test new with no --name: one result for every definition, each its newest wording. A name
   // cannot be picked; that is test new --name. test new without --name stays, the same function.
-  const createTestSuiteRunCommand = Command.make(
-    "test-suite-run",
+  const testRunTestSuiteCommand = Command.make(
+    "test-suite",
     {
       serverUrl: serverUrlFlag,
       iso: Flag.string("iso").pipe(
@@ -1023,11 +1023,11 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     Command.provide(withDbAndLinear),
   );
 
-  const createCommand = Command.make("create").pipe(
+  const testRunCommand = Command.make("run").pipe(
     Command.withDescription(
-      "create test-suite-run --server-url <url> --iso <https-url> --version <version>",
+      "test run test-suite --server-url <url> --iso <https-url> --version <version>",
     ),
-    Command.withSubcommands([createTestSuiteRunCommand]),
+    Command.withSubcommands([testRunTestSuiteCommand]),
   );
 
   const testListCommand = Command.make("list", {}, testList).pipe(
@@ -1086,10 +1086,16 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     testDefinitions,
   ).pipe(
     Command.withDescription(
-      "test --list [--details] [--name <definition>] [--history]; or define, new, list, start",
+      "test --list [--details] [--name <definition>] [--history]; or define, new, run, list, start",
     ),
     Command.provide(withDb),
-    Command.withSubcommands([testDefineCommand, testNewCommand, testListCommand, testStartCommand]),
+    Command.withSubcommands([
+      testDefineCommand,
+      testNewCommand,
+      testRunCommand,
+      testListCommand,
+      testStartCommand,
+    ]),
   );
 
   const testResultsCommand = Command.make(
@@ -1239,11 +1245,10 @@ export const makeCtrlCommand = (deps: Deps = live) => {
 
   return Command.make("ctrl").pipe(
     Command.withDescription(
-      "Record and inspect Oligarchy test runs. Every action reads DATABASE_URL; test new and create test-suite-run take --server-url (or SERVER_URL), the qemu server their drivers talk to; test start and test-results accept it unread.",
+      "Record and inspect Oligarchy test runs. Every action reads DATABASE_URL; test new and test run test-suite take --server-url (or SERVER_URL), the qemu server their drivers talk to; test start and test-results accept it unread.",
     ),
     Command.withSubcommands([
       testCommand,
-      createCommand,
       mintCommand,
       testResultsCommand,
       sessionCommand,

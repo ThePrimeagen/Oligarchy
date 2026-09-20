@@ -1099,7 +1099,7 @@ app.post("/abort", async (context) => {
   return reply();
 });
 
-// The same run as `./ctrl create test-suite-run`, which is all this route does. Not linked from a
+// The same run as `./ctrl test run test-suite`, which is all this route does. Not linked from a
 // page yet. The button belongs in the definitions heading, beside "Test definitions", not on a
 // card: the suite is every name's newest wording, and a button on the selected card would read as
 // running that one name (`./ctrl test new --name`). It posts iso, version and serverUrl here and

@@ -9,7 +9,7 @@ Consult this table of contents first. Read only the section you need.
 | [test --list](#test---list) | 61 |
 | [test define](#test-define) | 79 |
 | [test new](#test-new) | 95 |
-| [create test-suite-run](#create-test-suite-run) | 113 |
+| [test run test-suite](#test-run-test-suite) | 113 |
 | [mint](#mint) | 129 |
 | [test list](#test-list) | 148 |
 | [test start](#test-start) | 160 |
@@ -36,7 +36,7 @@ If you are an agent driving a guest, you need two of these: [test start](#test-s
 ./ctrl test --list    [--details] [--name <definition>] [--history]
 ./ctrl test define    --name <definition> [--description <text>] [--instruction <text>] [--proof <text>]
 ./ctrl test new       --server-url <url> --iso <https-url> --version <version> [--name <definition>]
-./ctrl create test-suite-run --server-url <url> --iso <https-url> --version <version>
+./ctrl test run test-suite --server-url <url> --iso <https-url> --version <version>
 ./ctrl test list
 ./ctrl mint           --server-url <url> --iso <https-url> [--unminted]
 ./ctrl test start     --session-id <id> --test-result-id <id> --model <id>
@@ -52,9 +52,9 @@ If you are an agent driving a guest, you need two of these: [test start](#test-s
 
 The action comes first. Every value is a flag; there are no positional arguments. Flags may sit in any order after the action.
 
-- `DATABASE_URL` — read from the environment by every action; it is the only variable most of them need. `test new`, `create test-suite-run`, `mint` and `test list` also read `LINEAR_API_TOKEN`. No action reads `OLIGARCHY_TOKEN`. A `.env` in the current directory fills in missing variables only. A missing variable means exit 1.
+- `DATABASE_URL` — read from the environment by every action; it is the only variable most of them need. `test new`, `test run test-suite`, `mint` and `test list` also read `LINEAR_API_TOKEN`. No action reads `OLIGARCHY_TOKEN`. A `.env` in the current directory fills in missing variables only. A missing variable means exit 1.
 - `--session-id <id>` — taken by `test start`, `session` and `diagnose`. Omitted, it is read from `SESSION_ID` in the environment; the flag wins when both are given, and an empty `SESSION_ID` counts as unset. Set it once — `SESSION_ID=$(./ctrl session --search --test-result-id <id>) && export SESSION_ID`, so a failed search stops there instead of exporting nothing — and every command that follows is about that session. Neither given is a usage error; on `session` without `--search` it is the refusal `session: --session-id or SESSION_ID is required`.
-- `--server-url <url>` — taken by `test new`, `create test-suite-run` and `mint`: the qemu server the driving agents will talk to, a full http or https URL, stored on the run and written into every ticket. Falls back to `SERVER_URL` from the environment; there is no default. `test start` and `test-results` accept it and ignore it, so a ticket written before it went still runs; every other action refuses it as an unrecognized flag.
+- `--server-url <url>` — taken by `test new`, `test run test-suite` and `mint`: the qemu server the driving agents will talk to, a full http or https URL, stored on the run and written into every ticket. Falls back to `SERVER_URL` from the environment; there is no default. `test start` and `test-results` accept it and ignore it, so a ticket written before it went still runs; every other action refuses it as an unrecognized flag.
 
 A command that works exits 0. A command that fails exits 1 and prints the error: one headline, then the stack trace and the cause behind it. Read the headline first. `./ctrl <action> --help` prints that action's flags.
 
@@ -98,7 +98,7 @@ Stores a test definition, or a new wording of one, and prints it as JSON: `{ id,
 ./ctrl test new --server-url <url> --iso <https-url> --version <version> [--name <definition>]
 ```
 
-Creates one pending test run and one Linear issue per stored test definition, each in its newest wording, and prints them as JSON. Omitting `--name` is the same run as `create test-suite-run`. Each issue is assigned to `prime@terminal.shop`. `--server-url` is stored on the run and written into every issue as the qemu server the driving agent's `./client` talks to; `./ctrl` itself never calls it. Not used while driving a guest. Reads `LINEAR_API_TOKEN`.
+Creates one pending test run and one Linear issue per stored test definition, each in its newest wording, and prints them as JSON. Omitting `--name` is the same run as `test run test-suite`. Each issue is assigned to `prime@terminal.shop`. `--server-url` is stored on the run and written into every issue as the qemu server the driving agent's `./client` talks to; `./ctrl` itself never calls it. Not used while driving a guest. Reads `LINEAR_API_TOKEN`.
 
 Each issue is created in `Backlog` and moved to `Automation Needed` once its result carries its identifier. One left in `Backlog` by a failure or a Ctrl-C is logged as `ticket trapped in Backlog; <reason>` and reported to Sentry; a failure also fails the run naming the ticket (`…; created OLI-n`).
 
@@ -110,20 +110,20 @@ Each issue is created in `Backlog` and moved to `Automation Needed` once its res
 ./ctrl test new --server-url https://qemu.example.com --iso https://example.com/omarchy.iso --version 1.2.3
 ```
 
-## create test-suite-run
+## test run test-suite
 
 ```
-./ctrl create test-suite-run --server-url <url> --iso <https-url> --version <version>
+./ctrl test run test-suite --server-url <url> --iso <https-url> --version <version>
 ```
 
 `test new` with no `--name`: one pending result for every stored test definition, each in its newest wording, and one Linear ticket each, printed as the same JSON. There is no `--name`; one definition is `test new --name`. A definition named `mint` is included when one is stored, and it is ticketed with the test template, not the mint template. Not used while driving a guest. Reads `LINEAR_API_TOKEN`.
 
-The dashboard answers the same run at `POST /create-test-suite-run` by running this command, JSON `{ iso, version, serverUrl }` in and the same JSON out. It is not linked from a page. The button would sit in the definitions heading, beside "Test definitions", not on a selected card: a card button would read as running that one name. It would post those three fields and show the run id and ticket identifiers, and stay disabled when the list is empty.
+The dashboard answers the same run at `POST /create-test-suite-run` by running `./ctrl test run test-suite`, JSON `{ iso, version, serverUrl }` in and the same JSON out. It is not linked from a page. The button would sit in the definitions heading, beside "Test definitions", not on a selected card: a card button would read as running that one name. It would post those three fields and show the run id and ticket identifiers, and stay disabled when the list is empty.
 
 Tickets are born in `Backlog` and moved to `Automation Needed` as in `test new`. An empty table is refused before Linear: `test: no test definitions found`.
 
 ```bash
-./ctrl create test-suite-run --server-url https://qemu.example.com --iso https://example.com/omarchy.iso --version 1.2.3
+./ctrl test run test-suite --server-url https://qemu.example.com --iso https://example.com/omarchy.iso --version 1.2.3
 ```
 
 ## mint

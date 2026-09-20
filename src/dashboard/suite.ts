@@ -9,7 +9,7 @@ import linearIssue from "../../prompts/linear-issue.html";
 import * as CtrlCommand from "../ctrl/command.ts";
 import * as Api from "../shared/api.ts";
 
-// POST /create-test-suite-run runs `./ctrl create test-suite-run`. The worker has no checkout, so
+// POST /create-test-suite-run runs `./ctrl test run test-suite`. The worker has no checkout, so
 // the files that command reads — the ticket template and the two guides it embeds — are these
 // strings, the same files wrangler loads as text.
 
@@ -88,7 +88,7 @@ export const bundledPrompts: Layer.Layer<FileSystem.FileSystem> = FileSystem.lay
   readFileString: (path) => {
     const text = promptText(path);
     return text === undefined
-      ? Effect.die(new Error(`create test-suite-run: no prompt at ${path}`))
+      ? Effect.die(new Error(`test run test-suite: no prompt at ${path}`))
       : Effect.succeed(text);
   },
 });
@@ -111,7 +111,7 @@ export const responseJson = (lines: ReadonlyArray<string>): unknown => {
       }
     }
   }
-  throw new Error("create test-suite-run printed no JSON");
+  throw new Error("test run test-suite printed no JSON");
 };
 
 const commandMessage = (error: unknown): string | undefined => {
@@ -168,8 +168,9 @@ export const createTestSuiteRun = async (
   const request = readBody(body);
   try {
     return await run(connectionString, env.LINEAR_API_TOKEN, [
-      "create",
-      "test-suite-run",
+      "test",
+      "run",
+      "test-suite",
       "--iso",
       request.iso,
       "--version",

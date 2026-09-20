@@ -137,7 +137,7 @@ describe("create test-suite-run runner", () => {
       [
         env.HYPERDRIVE.connectionString,
         env.LINEAR_API_TOKEN,
-        ["create", "test-suite-run", "--iso", ISO, "--version", "1.2.3", "--server-url", SERVER],
+        ["test", "run", "test-suite", "--iso", ISO, "--version", "1.2.3", "--server-url", SERVER],
       ],
     ]);
     expect(answer).toBe(created);
@@ -175,9 +175,9 @@ describe("create test-suite-run runner", () => {
 
   it("refuses output that never printed the JSON (unhappy)", () => {
     expect(() => responseJson(["[global] info: nothing"])).toThrow(
-      "create test-suite-run printed no JSON",
+      "test run test-suite printed no JSON",
     );
-    expect(() => responseJson(["{not json"])).toThrow("create test-suite-run printed no JSON");
+    expect(() => responseJson(["{not json"])).toThrow("test run test-suite printed no JSON");
   });
 
   it("does not run the command for a body it refuses (unhappy)", async () => {

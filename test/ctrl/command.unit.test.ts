@@ -971,19 +971,20 @@ describe("test new", () => {
 });
 
 // ---------------------------------------------------------------------------
-// create test-suite-run
+// test run test-suite
 // ---------------------------------------------------------------------------
 
 const SUITE = [
-  "create",
-  "test-suite-run",
+  "test",
+  "run",
+  "test-suite",
   "--iso",
   "https://example.com/omarchy.iso",
   "--version",
   "1.2.3",
 ];
 
-describe("create test-suite-run", () => {
+describe("test run test-suite", () => {
   it.effect(
     "opens the same run as test new with no name: one ticket per newest wording (happy)",
     () =>
@@ -1092,8 +1093,9 @@ describe("create test-suite-run", () => {
       expect(helpErrors(named).join("\n")).toMatch(/Unrecognized flag: --name/);
       const http = yield* h.run(
         [
-          "create",
-          "test-suite-run",
+          "test",
+          "run",
+          "test-suite",
           "--iso",
           "http://example.com/omarchy.iso",
           "--server-url",
@@ -1111,11 +1113,20 @@ describe("create test-suite-run", () => {
     }),
   );
 
-  it.effect("bare create prints help and touches nothing (happy)", () =>
+  it.effect("bare test run prints help and touches nothing (happy)", () =>
     Effect.gen(function* () {
       const h = harness();
-      const exit = yield* h.run(["create"], {});
+      const exit = yield* h.run(["test", "run"], {});
       expect(helpErrors(exit)).toEqual([]);
+      expect(h.touched).toEqual([]);
+    }),
+  );
+
+  it.effect("the old create parent is not a command (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      const exit = yield* h.run(["create", "test-suite-run"], {});
+      expect(helpErrors(exit).join("\n")).toMatch(/Unknown subcommand "create"/);
       expect(h.touched).toEqual([]);
     }),
   );
@@ -1631,20 +1642,29 @@ describe("test list", () => {
 // gone Cursor agent kickoffs
 // ---------------------------------------------------------------------------
 
-describe("test run and diagnose run", () => {
-  it.effect("are unknown actions: they spawn no agent and touch nothing (unhappy)", () =>
-    Effect.gen(function* () {
-      const h = harness();
-      for (const args of [
-        ["test", "run", "--ticket", "OLI-42"],
-        ["diagnose", "run", "--session-id", SESSION_ID],
-      ]) {
-        const exit = yield* h.run(args, {});
-        expect(helpErrors(exit).length, args.join(" ")).toBeGreaterThan(0);
-      }
-      expect(h.touched).toEqual([]);
-      expect(yield* stdout).not.toContain(expect.stringContaining("Agent here"));
-    }),
+describe("gone Cursor agent kickoffs", () => {
+  it.effect(
+    "test run --ticket is not an agent: it is a stray flag and touches nothing (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const h = harness();
+        const exit = yield* h.run(["test", "run", "--ticket", "OLI-42"], {});
+        expect(helpErrors(exit).join("\n")).toMatch(/Unrecognized flag: --ticket/);
+        expect(h.touched).toEqual([]);
+        expect(yield* stdout).not.toContain(expect.stringContaining("Agent here"));
+      }),
+  );
+
+  it.effect(
+    "diagnose run is an unknown action: it spawns no agent and touches nothing (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const h = harness();
+        const exit = yield* h.run(["diagnose", "run", "--session-id", SESSION_ID], {});
+        expect(helpErrors(exit).length).toBeGreaterThan(0);
+        expect(h.touched).toEqual([]);
+        expect(yield* stdout).not.toContain(expect.stringContaining("Agent here"));
+      }),
   );
 });
 
@@ -3318,7 +3338,7 @@ describe("environment order", () => {
   );
 });
 
-// The proxy url is data on test new and create test-suite-run: stored on the run and written into every ticket
+// The proxy url is data on test new and test run test-suite: stored on the run and written into every ticket
 // for the drivers' ./client. Every other action reads the database and has no proxy to name; test
 // start and test-results still accept it unread, because tickets written before it went name it.
 describe("--server-url", () => {
@@ -3366,7 +3386,7 @@ describe("--server-url", () => {
   );
 
   it.effect(
-    "is unrecognized on every action but test new, create test-suite-run, test start and test-results (unhappy)",
+    "is unrecognized on every action but test new, test run test-suite, test start and test-results (unhappy)",
     () =>
       Effect.gen(function* () {
         const h = harness();
@@ -3410,7 +3430,7 @@ describe("--server-url", () => {
   );
 
   it.effect(
-    "SERVER_URL in the environment is ignored by every action but test new and create test-suite-run (happy)",
+    "SERVER_URL in the environment is ignored by every action but test new and test run test-suite (happy)",
     () =>
       Effect.gen(function* () {
         const h = harness();

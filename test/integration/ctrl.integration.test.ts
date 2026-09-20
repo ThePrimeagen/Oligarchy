@@ -229,7 +229,7 @@ describe("./ctrl without a database", () => {
       ["--help"],
       ["test", "--help"],
       ["session", "--help"],
-      ["create", "test-suite-run", "--help"],
+      ["test", "run", "test-suite", "--help"],
       ["diagnose", "--help"],
       ["automation", "--help"],
     ]) {
@@ -274,10 +274,11 @@ describe("./ctrl without a database", () => {
     expect(firstLine(fromEnv.stderr)).toBe("LINEAR_API_TOKEN is not set");
   });
 
-  it("create test-suite-run accepts --server-url and SERVER_URL, then wants LINEAR_API_TOKEN, and refuses --name", async () => {
+  it("test run test-suite accepts --server-url and SERVER_URL, then wants LINEAR_API_TOKEN, and refuses --name", async () => {
     const iso = [
-      "create",
-      "test-suite-run",
+      "test",
+      "run",
+      "test-suite",
       "--iso",
       "https://example.com/omarchy.iso",
       "--version",
@@ -314,16 +315,21 @@ describe("./ctrl without a database", () => {
     expect(firstLine(token.stderr)).toBe("LINEAR_API_TOKEN is not set");
   });
 
-  it("test run and diagnose run are unknown actions that spawn no agent", async () => {
-    for (const args of [
-      ["test", "run", "--ticket", "OLI-42"],
-      ["diagnose", "run", "--session-id", SUCCEEDED_ID],
-    ]) {
-      const result = await runCtrl(args, { DATABASE_URL: UNUSED_DB });
-      expect(result.code, args.join(" ")).toBe(1);
-      expect(result.stdout.includes("Agent here"), args.join(" ")).toBe(false);
-      expect(result.stdout.includes("{"), args.join(" ")).toBe(false);
-    }
+  it("test run --ticket is a stray flag, and diagnose run is unknown; neither spawns an agent", async () => {
+    const ticket = await runCtrl(["test", "run", "--ticket", "OLI-42"], {
+      DATABASE_URL: UNUSED_DB,
+    });
+    expect(ticket.code).toBe(1);
+    expect(ticket.stderr).toMatch(/Unrecognized flag: --ticket/);
+    expect(ticket.stdout.includes("Agent here")).toBe(false);
+    expect(ticket.stdout.includes("{")).toBe(false);
+
+    const diagnose = await runCtrl(["diagnose", "run", "--session-id", SUCCEEDED_ID], {
+      DATABASE_URL: UNUSED_DB,
+    });
+    expect(diagnose.code).toBe(1);
+    expect(diagnose.stdout.includes("Agent here")).toBe(false);
+    expect(diagnose.stdout.includes("{")).toBe(false);
   });
 
   it("rejects a missing DATABASE_URL before doing anything, on every database action", async () => {
@@ -355,8 +361,9 @@ describe("./ctrl without a database", () => {
         SERVER,
       ],
       [
-        "create",
-        "test-suite-run",
+        "test",
+        "run",
+        "test-suite",
         "--iso",
         "https://example.com/omarchy.iso",
         "--version",
@@ -448,7 +455,7 @@ describe("./ctrl without a database", () => {
     const env = { DATABASE_URL: UNUSED_DB, LINEAR_API_TOKEN: "l" };
     const cases: ReadonlyArray<readonly [ReadonlyArray<string>, RegExp, Record<string, string>]> = [
       [["test"], /Missing required flag: --list/, env],
-      // The proxy url is test new's and create test-suite-run's; the actions below have no proxy to name.
+      // The proxy url is test new's and test run test-suite's; the actions below have no proxy to name.
       [["test", "--list", "--server-url", SERVER], /Unrecognized flag: --server-url/, env],
       [["session", "list", "--server-url", SERVER], /Unrecognized flag: --server-url/, env],
       [
@@ -558,8 +565,9 @@ describe("./ctrl without a database", () => {
       ],
       [
         [
-          "create",
-          "test-suite-run",
+          "test",
+          "run",
+          "test-suite",
           "--iso",
           "http://example.com/omarchy.iso",
           "--server-url",
@@ -571,14 +579,15 @@ describe("./ctrl without a database", () => {
         env,
       ],
       [
-        ["create", "test-suite-run", "--server-url", SERVER, "--version", "1.2.3"],
+        ["test", "run", "test-suite", "--server-url", SERVER, "--version", "1.2.3"],
         /Missing required flag: --iso/,
         env,
       ],
       [
         [
-          "create",
-          "test-suite-run",
+          "test",
+          "run",
+          "test-suite",
           "--iso",
           "https://example.com/omarchy.iso",
           "--server-url",
@@ -589,8 +598,9 @@ describe("./ctrl without a database", () => {
       ],
       [
         [
-          "create",
-          "test-suite-run",
+          "test",
+          "run",
+          "test-suite",
           "--iso",
           "https://example.com/omarchy.iso",
           "--version",
@@ -601,8 +611,9 @@ describe("./ctrl without a database", () => {
       ],
       [
         [
-          "create",
-          "test-suite-run",
+          "test",
+          "run",
+          "test-suite",
           "--iso",
           "https://example.com/omarchy.iso",
           "--version",
