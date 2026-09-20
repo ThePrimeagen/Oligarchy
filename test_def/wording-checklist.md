@@ -312,12 +312,12 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `herdr-launch-detach-reattach-and-stop`
 - [x] `herdr-keybindings-menu-and-cli-help`
 - [x] `herdr-split-tabs-with-omarchy-prefix`
-- [ ] `herdr-shell-layouts-hdl-hds-hsl`
-- [ ] `omacalc-floating-calculator`
-- [ ] `omawrite-open-write-and-save`
-- [ ] `omawrite-external-change-warning`
-- [ ] `omacut-trim-and-export`
-- [ ] `ttfx-terminal-effect`
+- [x] `herdr-shell-layouts-hdl-hds-hsl`
+- [x] `omacalc-floating-calculator`
+- [x] `omawrite-open-write-and-save`
+- [x] `omawrite-external-change-warning`
+- [x] `omacut-trim-and-export`
+- [x] `ttfx-terminal-effect`
 - [ ] `omasnap-region-capture-annotate-save`
 - [ ] `omasnap-toggle-quick-save-and-clipboard-refusal`
 - [ ] `omasnap-pin-capture`

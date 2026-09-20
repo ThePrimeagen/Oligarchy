@@ -14439,37 +14439,49 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `hdl bash`, then `hdl`.
-  ** `You must start herdr to use hdl.` and nothing else; then the usage line `Usage: hdl <c|cx|codex|other_ai> [<second_ai>]`.
-  * Run `hds x; hds; hsl 2 bash`.
-  ** `Usage: hds`, `You must start herdr to use hds.`, `You must start herdr to use hsl.`
-  ** A "command not found" means the minted 4.0.2 predates that helper: record it as absent on this build.
-  * Press Super+Ctrl+Return; in Herdr's pane run `mkdir -p ~/hdltest && cd ~/hdltest && hdl bash`.
-  ** The tab is renamed `hdltest`; the layout becomes a large Neovim pane on the left, a `bash` pane on the right and a short terminal pane along the bottom.
-  ** Neovim's first start may install plugins — wait for it.
-  * In Neovim press Escape, type `:qa!` Enter.
-  * Press Ctrl+Space then `c` for a fresh tab; run `cd /tmp && hsl 3 'echo herdr-$RANDOM'`.
-  ** Three tiled panes each printing `herdr-<n>`; the tab is renamed `tmp`.
-  * Press Ctrl+Space then `?` → the Herdr help overlay; press Escape.
-  * Press Ctrl+Space then `d`; in the plain terminal run `herdr server stop; rm -rf ~/hdltest` and close it with Super+W.
-  ** The desktop must return exactly as left.
+  * Press Super+Return. A terminal opens.
+  * Type `hdl bash` and press Return. The output is `You must start herdr to use hdl.`
+  * Type `hdl` and press Return. The output is `Usage: hdl <c|cx|codex|other_ai> [<second_ai>]`.
+  * Type `hds x` and press Return. The output is `Usage: hds`.
+  * Type `hds` and press Return. The output is `You must start herdr to use hds.`
+  * Type `hsl 2 bash` and press Return. The output is `You must start herdr to use hsl.`
+  ** If a helper prints `command not found`, record it absent on this build and skip the rest.
+  * Press Super+Ctrl+Return. A Herdr window opens.
+  ** If nothing opens, type `herdr` in the terminal. If it is not installed, report the rest absent.
+  * Type `mkdir -p ~/hdltest && cd ~/hdltest && hdl bash` and press Return. The tab is renamed `hdltest`.
+  * Wait until the layout finishes. A Neovim pane is on the left, a bash pane is on the right, and a short terminal pane is along the bottom.
+  ** Neovim's first start may install plugins. Wait for it.
+  * Click the Neovim pane. It is focused.
+  * Press Escape. Neovim is in normal mode.
+  * Type `:qa!` and press Return. Neovim closes.
+  * Press Ctrl+Space. Herdr's prefix is active.
+  * Press `c`. A new tab appears.
+  * Type `cd /tmp && hsl 3 'echo herdr-$RANDOM'` and press Return. Three panes each print a `herdr-` line, and the tab is renamed `tmp`.
+  * Press Ctrl+Space. Herdr's prefix is active.
+  * Press `?`. A help overlay opens.
+  * Press Escape. The help overlay closes.
+  * Press Ctrl+Space. Herdr's prefix is active.
+  * Press `d`. The Herdr window closes.
+  * Click the plain terminal. It is focused.
+  * Type `herdr server stop; rm -rf ~/hdltest` and press Return. The prompt returns.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * `hdl` normally starts an AI CLI in the right pane; `bash` is used so no login or network is needed.
-  * If Super+Ctrl+Enter opens nothing, type `herdr` in the terminal; if it is not installed, mark the inside-Herdr steps "absent on this build".
-  * If the Ctrl+Space prefix is swallowed by the input method, Alt+Enter splits — note it.
+  * `hdl bash` puts bash in the side pane so no AI login or network is needed.
+  * Release Ctrl+Space before the next key. If the prefix is swallowed, Alt+Enter splits. Record that.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the refusal and usage lines outside Herdr (hdl, hds, hsl)
-  ** Screenshot of the three-pane `hdl` layout with the tab named hdltest
-  ** Screenshot of the 3-pane `hsl` swarm with the tab named tmp, and of the help overlay
+  ** Outside Herdr, `hdl bash` and `hds` refuse, `hdl` and `hds x` print usage, and `hsl` refuses. A `command not found` is recorded as absent.
+  ** Inside Herdr, `hdl bash` renames the tab `hdltest` and leaves a Neovim pane, a bash pane, and a short terminal pane.
+  ** `:qa!` closes Neovim. A new tab running `hsl 3` shows three `herdr-` lines and is named `tmp`.
+  ** Prefix+`?` opens help, detach closes Herdr, and the server and `~/hdltest` are removed.
   * If unsuccessful
-  ** Screenshot of a helper acting outside Herdr, an error, or Herdr crashing; `type hdl` output
+  ** A helper runs a layout outside Herdr, the tab is not renamed, or Herdr crashes. `type hdl` shows which helper is missing.
 covers: default/bash/fns/herdr (hdl, hds, hsl); config/herdr/config.toml; manual/20-shell-functions.md:24; test/shell.d/herdr-functions-test.sh
 
 ### omacalc-floating-calculator   [VM-OK]
@@ -14479,38 +14491,51 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return so a tiled terminal exists, then press Super+Ctrl+Q.
-  ** A small **floating** calculator window titled Omacalc appears centred over the terminal, with a display and a keypad (digits, × ÷ + −, %, ±, =).
-  ** If nothing opens on the chord, run `pacman -Q omacalc` in the terminal and report the result instead of installing it.
-  * Using the mouse only, click `4` `2` `×` `3` `+` `7` `=`.
-  ** The result reads `133` and the expression `42 × 3 + 7` stays visible above it.
-  * Press `C` on the keyboard, then type `200+10%=`.
-  ** The result reads `220` (percent of the running total when + is pending).
-  * Press `C`, then type `7/0=`.
-  ** The display shows an error or a non-finite value; the window stays open and responsive.
-  * Press `C`, type `12.5*4=`, press Ctrl+C, then click the terminal and type `wl-paste` Enter.
-  ** The terminal prints `50`.
-  * Click Omacalc and press Super+T: it tiles beside the terminal; Super+T again floats it. Close it with Super+W.
-  * Press Super+Alt+Space, type `Omacalc`, Enter: it opens floating again. Close it and the terminal with Super+W.
-  ** The desktop must return exactly as left.
+  * Press Super+Return. A terminal opens.
+  * Press Super+Ctrl+Q. A floating Omacalc window opens.
+  ** If nothing opens, type `pacman -Q omacalc` and report the result. Do not install it.
+  * Click `4`. The display shows `4`.
+  * Click `2`. The display shows `42`.
+  * Click `×`. An operator is pending.
+  * Click `3`. The display shows `3`.
+  * Click `+`. An operator is pending.
+  * Click `7`. The display shows `7`.
+  * Click `=`. The result is `133`.
+  * Press `C`. The display clears.
+  * Type `200+10%=`. The result is `220`.
+  * Press `C`. The display clears.
+  * Type `7/0=`. The display shows an error or a non-finite value, and the window stays open.
+  * Press `C`. The display clears.
+  * Type `12.5*4=`. The result is `50`.
+  * Press Ctrl+C. The result is copied.
+  * Click the terminal. It is focused.
+  * Type `wl-paste` and press Return. The output is `50`.
+  * Click Omacalc. It is focused.
+  * Press Super+T. Omacalc tiles beside the terminal.
+  * Press Super+T. Omacalc floats again.
+  * Press Super+W. Omacalc closes.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `Omacalc` and press Enter. A floating Omacalc window opens.
+  * Press Super+W. Omacalc closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The keypad is small; double-check the mouse position before each click — a mis-click on ± or % changes the result.
-  * Keyboard operators are `*` and `/`; Enter also equals. Escape clears the display and may not close the window; use Super+W to close.
-  * Omacalc's window class is `omacalc`; a window rule floats it. The XF86Calculator binding cannot be sent by the driver — ignore it.
+  * Use the mouse for the first expression. Check the pointer before each click. `±` or `%` by mistake changes the result.
+  * Keyboard operators are `*` and `/`. Enter also equals. Escape may clear the display without closing the window.
+  * The window class is `omacalc`. Ignore XF86Calculator. It cannot be sent.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the floating Omacalc over the terminal showing `42 × 3 + 7` and `133`
-  ** Screenshot showing `220`, and one showing the display after `7/0=` with the window still open
-  ** Screenshot of the terminal printing `50`, of Omacalc tiled, and of the Apps-menu launch
-  ** Screenshot of the restored desktop
+  ** Super+Ctrl+Q opens a floating Omacalc window. `4`, `2`, `×`, `3`, `+`, `7`, `=` shows `133`.
+  ** After clear, `200+10%=` shows `220`. After clear, `7/0=` shows an error or a non-finite value and the window stays open.
+  ** `12.5*4=` copies `50`, and `wl-paste` prints `50`.
+  ** Super+T tiles Omacalc and then floats it again. Apps opens another floating Omacalc, and both windows and the terminal are closed.
   * If unsuccessful
-  ** Screenshot of the wrong result, the vanished window, or the empty desktop after the chord; `pacman -Q omacalc omawrite` output
+  ** The result is not `133`, `220`, or `50`, the window closes on division by zero, or the chord does nothing while the package is installed.
 covers: default/hypr/bindings/utilities.lua:13-14; default/hypr/bindings/applications.lua:19; default/hypr/apps/system.lua:32,37; manual/22-guis.md:21-25,62-66 ("Omacalc", "Omawrite"); omacalc README "Usage"; test/shell.d/keybindings-menu-test.sh:104; install/omarchy-base.packages (omacalc, omawrite)
 
 ### omawrite-open-write-and-save   [VM-OK]
@@ -14520,38 +14545,45 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Take a screenshot: no Omawrite window is open. Press Super+Shift+W.
-  ** Within 45 seconds an Omawrite window opens: a plain writing surface in the theme colours, no toolbar clutter.
-  ** If the hotkey does nothing, open a terminal with Super+Enter, type `omawrite &` Enter and allow the same 45 seconds; `pacman -Q omawrite` if still nothing.
-  * Press Ctrl+? (Ctrl+Shift+/), look at the shortcut reference, then press Escape.
-  ** The reference lists at least Ctrl+S, Ctrl+O, Ctrl+F, Ctrl+H.
-  * Type `# VM test`, Enter, `Hello from the guest.`
-  * Press Ctrl+S, then click Cancel in the file dialog.
-  ** A floating GTK Save dialog appeared (it renders oversized at 1× — expected); after Cancel the text is still in the editor and the title still shows an unsaved/untitled document.
-  * Press Ctrl+S again; in the dialog press Ctrl+L, type `~/Documents/vmtest.md`, Enter (confirm if asked).
-  ** The title now shows `vmtest.md`.
-  * Type Enter then `Third line.` and press Ctrl+S.
-  ** No dialog this time.
-  * Open a terminal with Super+Enter, run `cat ~/Documents/vmtest.md; rm ~/Documents/vmtest.md`, then close the terminal with Super+W.
-  ** The three lines print exactly.
-  * Press Super+W on Omawrite: within 30 seconds the window is gone and the desktop looks exactly as at the start.
+  * Look at the desktop. No Omawrite window is open.
+  * Press Super+Shift+W. An Omawrite window opens.
+  ** If nothing opens within 45 seconds, type `omawrite &` in a terminal and wait again. If it still does nothing, type `pacman -Q omawrite` and report it.
+  * Press Ctrl+Shift+/. The shortcut reference lists Ctrl+S, Ctrl+O, Ctrl+F, and Ctrl+H.
+  * Press Escape. The reference closes.
+  * Type `# VM test` and press Enter. The heading is in the editor.
+  * Type `Hello from the guest.` The line is in the editor.
+  * Press Ctrl+S. A save dialog opens.
+  * Click Cancel. The dialog closes, and the text remains.
+  * Press Ctrl+S. The save dialog opens.
+  * Press Ctrl+L. A path field is focused.
+  * Type `~/Documents/vmtest.md` and press Enter. The title shows `vmtest.md`.
+  ** Confirm if asked. If `~/Documents` is missing, create it first.
+  * Press Enter. A new line starts.
+  * Type `Third line.` The line is in the editor.
+  * Press Ctrl+S. No dialog opens.
+  * Press Super+Return. A terminal opens.
+  * Type `cat ~/Documents/vmtest.md` and press Return. The output is the heading, `Hello from the guest.`, and `Third line.`
+  * Type `rm ~/Documents/vmtest.md` and press Return. The prompt returns.
+  * Press Super+W. The terminal closes.
+  * Click Omawrite. It is focused.
+  * Press Super+W. The Omawrite window closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Ctrl+L in the GTK dialog opens a path entry; `~` expands. If `~/Documents` is missing, `mkdir -p ~/Documents` in a terminal first.
-  * Super+Shift+W launches rather than focuses — a second press opens a second window; close both. The acceptance suite matches the class `(?i)omawrite`.
+  * Allow 45 seconds for the window and 30 seconds for it to close. The save dialog is a GTK picker and may render oversized.
+  * Super+Shift+W launches rather than focuses. A second press opens a second window. Close both.
+  * `~` expands in the path field.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the empty editor (within 45 s) and of the shortcut reference
-  ** Screenshot of the Save dialog and of the intact text after Cancel
-  ** Screenshot of the title bar showing vmtest.md
-  ** Screenshot of `cat ~/Documents/vmtest.md` printing three lines, and of the desktop after the window closed
+  ** Super+Shift+W opens Omawrite within 45 seconds. The shortcut reference lists Ctrl+S, Ctrl+O, Ctrl+F, and Ctrl+H.
+  ** Cancel on the first save leaves the typed text. The second save sets the title to `vmtest.md`, and the third line saves with no dialog.
+  ** `cat` prints the heading, `Hello from the guest.`, and `Third line.` The file and the window are then removed.
   * If unsuccessful
-  ** Screenshot after 45 seconds with no window; the missing dialog, lost text, or wrong file contents; `pacman -Q omawrite`; terminal output if launched by command
+  ** No window opens within 45 seconds, Cancel loses the text, the dialog appears on the second save, or the file contents differ.
 covers: default/hypr/bindings/applications.lua:19; manual/22-guis.md "Omawrite"; omawrite README "Shortcuts"; default/hypr/apps/system.lua:16; test/acceptance.d/shell-surfaces-test.sh:99-117; test/acceptance.d/apps-test.sh:12-31,40
 
 ### omawrite-external-change-warning   [VM-OK]
@@ -14561,34 +14593,39 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `mkdir -p ~/Documents && printf 'alpha beta\nalpha gamma\n' > ~/Documents/ext.md && omawrite ~/Documents/ext.md &` then Enter.
-  ** Omawrite opens showing the two lines.
-  * In Omawrite press Ctrl+H, enter find `alpha` and replace `omega`, apply to all matches. Do not save.
-  ** Both lines now start with `omega`.
-  * Click the terminal and run `echo 'changed outside' >> ~/Documents/ext.md`.
-  * Click back into the Omawrite window and wait up to 5 seconds.
-  ** A warning that the file changed on disk appears (banner or dialog) offering to reload or keep the local version; the `omega` text is still there.
-  * Choose to keep the local version, then press Ctrl+S.
-  * In the terminal run `cat ~/Documents/ext.md`.
-  ** The two `omega` lines print.
-  * Run `rm ~/Documents/ext.md`, then close Omawrite and the terminal with Super+W.
-  ** The desktop must return exactly as left.
+  * Press Super+Return. A terminal opens.
+  * Type `mkdir -p ~/Documents && printf 'alpha beta\nalpha gamma\n' > ~/Documents/ext.md` and press Return. The prompt returns.
+  * Type `omawrite ~/Documents/ext.md &` and press Return. An Omawrite window opens showing the two lines.
+  * Click Omawrite. It is focused.
+  * Press Ctrl+H. The find and replace controls are showing.
+  * Set find to `alpha` and replace to `omega`. Both fields are filled.
+  * Apply the replacement to all matches. Both lines start with `omega`.
+  * Click the terminal. It is focused.
+  * Type `echo 'changed outside' >> ~/Documents/ext.md` and press Return. The prompt returns.
+  * Click Omawrite. It is focused.
+  * Wait up to 5 seconds. A warning says the file changed on disk, and the `omega` text is still there.
+  * Choose to keep the local version. The `omega` text remains.
+  * Press Ctrl+S. The file is saved.
+  * Click the terminal. It is focused.
+  * Type `cat ~/Documents/ext.md` and press Return. Both lines start with `omega`.
+  * Type `rm ~/Documents/ext.md` and press Return. The prompt returns.
+  * Close Omawrite and the terminal with Super+W. The desktop is clear.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The warning may be a slim banner at the top or bottom edge of the editor rather than a dialog — look at both edges.
-  * Use the mouse to switch windows so focus (which triggers the check) is unambiguous.
+  * Do not save before the external change. The warning may be a slim banner at the top or bottom, not a dialog.
+  * Use the mouse to switch windows so the focus change is unambiguous.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot after replace showing `omega`
-  ** Screenshot of the external-change warning
-  ** Screenshot of `cat ~/Documents/ext.md` with the two `omega` lines
+  ** Omawrite opens the two `alpha` lines. Replace-all changes both to start with `omega`, and the file is not saved yet.
+  ** After an outside append, focusing Omawrite warns that the file changed, and the `omega` text is still visible.
+  ** Keeping the local version and saving leaves `cat` showing the two `omega` lines. The file is then removed.
   * If unsuccessful
-  ** Screenshot showing the editor content replaced with no warning, or the replace dialog missing
+  ** The editor is replaced by the outside text with no warning, or the find and replace controls do not appear.
 covers: omawrite README (Ctrl+H; "watches open files and warns before an external change can replace local work")
 
 ### omacut-trim-and-export   [VM-OK]
@@ -14598,40 +14635,52 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `ffmpeg -y -f lavfi -i testsrc=duration=6:size=640x360:rate=30 -pix_fmt yuv420p ~/Videos/test.mp4`; wait for the prompt to return.
-  * Open the Apps menu with Super+Alt+Space, type `Omacut`, press Enter.
-  ** Omacut opens with an empty player. Press `?` to see the hotkey list, then dismiss it. If nothing opens, `pacman -Q omacut` and report.
-  * Press Ctrl+O; in the dialog press Ctrl+L, type `~/Videos/test.mp4`, Enter.
-  ** The test pattern loads with a timeline and two trim handles. The GTK picker renders oversized at 1× — expected.
-  * Press Space, wait 2 seconds, Space again, then Ctrl+Space; press Right twice, then Alt+Space.
-  ** The highlighted range between the handles is about 2 seconds long.
-  * Press Q.
-  ** Omacut asks for confirmation because the trim is not exported. Choose to stay.
-  * Press Ctrl+S; in the export dialog keep the default quality and save as `~/Videos/test-cut.mp4`.
-  ** A progress indication runs and completes.
-  * In the terminal run `ffprobe -v error -show_entries format=duration -of csv=p=0 ~/Videos/test-cut.mp4`, then press Q in Omacut.
-  ** A duration between 1.5 and 3 seconds prints; Omacut quits without asking.
-  * Run `rm ~/Videos/test.mp4 ~/Videos/test-cut.mp4` and close the terminal with Super+W.
-  ** The desktop must return exactly as left.
+  * Press Super+Return. A terminal opens.
+  * Type `ffmpeg -y -f lavfi -i testsrc=duration=6:size=640x360:rate=30 -pix_fmt yuv420p ~/Videos/test.mp4` and press Return. The command starts.
+  * Wait until the prompt returns. `~/Videos/test.mp4` exists.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `Omacut` and press Enter. Omacut opens.
+  ** If nothing opens, type `pacman -Q omacut` and report it.
+  * Press `?`. A hotkey list opens.
+  * Dismiss the hotkey list. It closes.
+  * Press Ctrl+O. A file dialog opens.
+  * Press Ctrl+L. A path field is focused.
+  * Type `~/Videos/test.mp4` and press Enter. The video loads with a timeline.
+  * Press Space. Playback starts.
+  * Wait 2 seconds.
+  * Press Space. Playback pauses.
+  * Press Ctrl+Space. The in-point is set.
+  * Press Right. The playhead moves.
+  * Press Right. The playhead moves again.
+  * Press Alt+Space. The out-point is set, and the highlighted range is about 2 seconds.
+  * Press `Q`. Omacut asks to confirm because the trim is not exported.
+  * Choose to stay. Omacut stays open.
+  * Press Ctrl+S. An export dialog opens.
+  * Save as `~/Videos/test-cut.mp4` at the default quality. The export finishes.
+  * Click the terminal. It is focused.
+  * Type `ffprobe -v error -show_entries format=duration -of csv=p=0 ~/Videos/test-cut.mp4` and press Return. The duration is between 1.5 and 3 seconds.
+  * Click Omacut. It is focused.
+  * Press `Q`. Omacut closes without asking.
+  * Type `rm ~/Videos/test.mp4 ~/Videos/test-cut.mp4` and press Return. The prompt returns.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * There is no chord for Omacut; the Apps menu is the only launcher.
-  * Both dialogs are GTK portal pickers: Ctrl+L then a path works.
-  * If ffmpeg complains about libx264, add `-c:v mpeg4` before the output path.
-  * Ctrl+Space is also the fcitx5 input-method trigger; if the in-handle does not move, report it as the swallowed-prefix quirk, not an Omacut defect.
+  * There is no chord for Omacut. Apps is the launcher. Both dialogs accept Ctrl+L and a path. An oversized picker is expected.
+  * If ffmpeg complains about libx264, add `-c:v mpeg4` before the output path and run it again.
+  * If Ctrl+Space does not move the in-handle, record it as the input-method prefix being swallowed.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the hotkey overlay
-  ** Screenshot of the loaded video with a highlighted trim range
-  ** Screenshot of the quit confirmation on the un-exported trim
-  ** Screenshot of ffprobe printing a ~2 s duration
+  ** ffmpeg writes `~/Videos/test.mp4`, and Apps opens Omacut. `?` opens a hotkey list.
+  ** The test video loads. Space, a 2 second wait, Space, Ctrl+Space, two Right presses, and Alt+Space leave a highlighted range of about 2 seconds.
+  ** `Q` asks for confirmation, and staying leaves Omacut open. Export writes `test-cut.mp4`.
+  ** ffprobe prints a duration between 1.5 and 3 seconds. The next `Q` closes Omacut without asking, and both files are removed.
   * If unsuccessful
-  ** Screenshot of the failing step; `ls -la ~/Videos`; any crash dialog
+  ** Omacut does not open, the video does not load, quit does not ask, or the exported duration is outside that range.
 covers: manual/22-guis.md "Omacut"; omacut README "Hotkeys"; bin/omarchy-install-preinstalls:25
 
 ### ttfx-terminal-effect   [VM-OK]
@@ -14641,32 +14690,30 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `ttfx --help | head -25`.
-  ** The usage header and the start of the effect list (beams, binarypath, blackhole …) print. A `command not found` → `pacman -Q ttfx`; report "absent on this build".
-  * Run `printf 'OMARCHY VM TEST\nline two\n' | ttfx decrypt`.
-  ** A decrypt animation plays for a few seconds and ends with the two lines legible; the prompt returns.
-  * Run `printf 'hello\n' | ttfx --random-effect`.
-  ** Some effect plays and ends with `hello`.
-  * Run `printf 'x\n' | ttfx nosucheffect; echo "exit=$?"`.
-  ** An error naming the unknown effect and a non-zero exit (expected `exit=2`).
-  * Close the terminal with Super+W.
-  ** The desktop must return exactly as left.
+  * Press Super+Return. A terminal opens.
+  * Type `ttfx --help | head -25` and press Return. The output includes the usage header and effect names.
+  ** If it says `command not found`, type `pacman -Q ttfx` and report it absent on this build.
+  * Type `printf 'OMARCHY VM TEST\nline two\n' | ttfx decrypt` and press Return. The animation settles on the two lines, and the prompt returns.
+  * Type `printf 'hello\n' | ttfx --random-effect` and press Return. The animation settles on `hello`.
+  * Type `printf 'x\n' | ttfx nosucheffect; echo "exit=$?"` and press Return. An error names the unknown effect, and the exit is non-zero.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Take a screenshot mid-animation as well as after it settles.
-  * If the terminal is left garbled after a run, type `reset` Enter and report it.
+  * Screenshot once while an animation is moving and once after it settles.
+  * If the terminal stays garbled, type `reset` and press Return, then report it.
+  * The unknown-effect exit is expected to be `2`.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the `--help` head
-  ** Mid-animation and final screenshots of the decrypt run, and the settled `hello`
-  ** Screenshot of the non-zero exit for the bad effect
+  ** `ttfx --help` prints a usage header and effect names. A missing command is reported as absent.
+  ** `ttfx decrypt` settles on `OMARCHY VM TEST` and `line two`, and the prompt returns.
+  ** `--random-effect` settles on `hello`. An unknown effect prints an error and exits non-zero.
   * If unsuccessful
-  ** Screenshot of a hang (after 10 s, Ctrl+C) or garbled terminal; `pacman -Q ttfx`
+  ** An animation hangs past 10 seconds, the settled text is wrong, or the terminal stays garbled after `reset`.
 covers: ttfx README "Usage"; install/omarchy-base.packages:107
 
 ### omasnap-region-capture-annotate-save   [VM-OK] [NET]
