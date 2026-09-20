@@ -989,6 +989,36 @@ describe.skipIf(dbUrl === "")("dashboard/definitions running fragment", () => {
     expect(html).not.toContain("definitions-heading");
   });
 
+  it("lists every running job, past the fifty the queue page shows", async () => {
+    const running: ReadonlyArray<QueuedJob> = Array.from({ length: 51 }, (_, index) => ({
+      ticket: `RUN-ALL-${String(index)}`,
+      action: "drive",
+      status: "running",
+      queuedSecondsAgo: 1_000 - index,
+      startedSecondsAgo: 1_000 - index,
+    }));
+    await seed(dbUrl, (db) =>
+      seedQueue(db, "running-all", [...running, pendingJob("RUN-ALL-PEND")]),
+    );
+    const page = await getPage("/definitions?name=running-all", dbUrl);
+    expect(page.status).toBe(200);
+    const runningHtml = runningSection(page.html);
+    expect(runningHtml.match(/action="\/abort"/g)).toHaveLength(51);
+    expect(runningHtml.indexOf(">RUN-ALL-0<")).toBeLessThan(runningHtml.indexOf(">RUN-ALL-50<"));
+    expect(runningHtml).not.toContain("RUN-ALL-PEND");
+    const fragment = await getPage("/definitions/running?name=running-all", dbUrl);
+    expect(fragment.status).toBe(200);
+    expect(fragment.html.match(/action="\/abort"/g)).toHaveLength(51);
+    expect(fragment.html).not.toContain("RUN-ALL-PEND");
+  });
+
+  it("keeps an empty ?name on the running poll, the same name the page was asked for", async () => {
+    await seed(dbUrl, (db) => seedQueue(db, "running-empty-name", [pendingJob("RUN-EMPTY")]));
+    const { status, html } = await getPage("/definitions?name=", dbUrl);
+    expect(status).toBe(404);
+    expect(runningSection(html)).toContain('hx-get="/definitions/running?name="');
+  });
+
   it("serves the empty line alone when nothing is running", async () => {
     await seed(dbUrl, (db) =>
       seedQueue(db, "running-fragment-empty", [pendingJob("RUN-FRAG-NONE")]),

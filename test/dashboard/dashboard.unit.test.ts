@@ -95,4 +95,18 @@ describe("POST /abort unhappy path", () => {
     expect(response.status).toBe(303);
     expect(response.headers.get("location")).toBe("/definitions");
   });
+
+  it("sends a definitions-page abort whose definition is empty back to that empty name", async () => {
+    const response = await app.request(
+      "/abort",
+      {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ view: "definitions", definition: "" }).toString(),
+      },
+      env,
+    );
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe("/definitions?name=");
+  });
 });

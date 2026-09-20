@@ -12,6 +12,7 @@ import {
   getImage,
   groupDefinitions,
   listAutomationQueue,
+  listRunningAutomationJobs,
   listProcessSeries,
   listServers,
   listSessions,
@@ -410,12 +411,6 @@ const runningHref = (name: string | undefined): string =>
     ? "/definitions/running"
     : `/definitions/running?name=${encodeURIComponent(name)}`;
 
-// The name an abort without htmx returns to: the one the URL asked for, including a stale
-// link, otherwise the definition the page opened on.
-const returnName = (
-  name: string | undefined,
-  selected: DefinitionVersions | undefined,
-): string | undefined => (name === undefined || name === "" ? selected?.name : name);
 const editHref = (name: string, notice: EditNotice): string =>
   `${definitionHref(name)}&edit=${notice}`;
 
@@ -696,7 +691,7 @@ const Definitions: FC<DefinitionsProps> = (props) => (
         <h1 id="definitions-heading">Test definitions</h1>
       </div>
       {props.running === null ? null : (
-        <RunningTests jobs={props.running} definition={returnName(props.name, props.selected)} />
+        <RunningTests jobs={props.running} definition={props.name ?? props.selected?.name} />
       )}
       {definitionsBody(props)}
     </section>
@@ -800,10 +795,10 @@ app.get("/definitions", async (context) => {
   // a stale or hand-made link and shows nothing.
   const notice = edit === "unchanged" || edit === "empty" ? edit : undefined;
   try {
-    const [definitions, outcomes, queue] = await Promise.all([
+    const [definitions, outcomes, running] = await Promise.all([
       listTestDefinitions(context.env.HYPERDRIVE.connectionString),
       listTestResultOutcomes(context.env.HYPERDRIVE.connectionString),
-      listAutomationQueue(context.env.HYPERDRIVE.connectionString),
+      listRunningAutomationJobs(context.env.HYPERDRIVE.connectionString),
     ]);
     const groups = groupDefinitions(definitions);
     const selected = selectDefinition(groups, name);
@@ -818,7 +813,7 @@ app.get("/definitions", async (context) => {
         name={name}
         selected={selected}
         notice={notice}
-        running={queue.running}
+        running={running}
       />,
     );
   } catch (error) {
@@ -841,11 +836,10 @@ app.get("/definitions", async (context) => {
 // What the running strip polls for: the jobs in flight, not the rest of the page. `name` is the
 // definition an abort without htmx returns to, echoed into the forms the swap inserts.
 app.get("/definitions/running", async (context) => {
-  const name = context.req.query("name");
-  const definition = name === undefined || name === "" ? undefined : name;
+  const definition = context.req.query("name");
   try {
-    const queue = await listAutomationQueue(context.env.HYPERDRIVE.connectionString);
-    return context.html(<RunningList jobs={queue.running} definition={definition} />);
+    const running = await listRunningAutomationJobs(context.env.HYPERDRIVE.connectionString);
+    return context.html(<RunningList jobs={running} definition={definition} />);
   } catch (error) {
     Sentry.captureException(error);
     console.error("dashboard: listing running tests:", errorMessage(error));
@@ -1111,17 +1105,15 @@ app.post("/abort", async (context) => {
   let definition: unknown;
   const reply = async () => {
     const definitionsView = view === "definitions";
-    const back = typeof definition === "string" && definition !== "" ? definition : undefined;
+    const back = typeof definition === "string" ? definition : undefined;
     if (wantsFragment) {
       try {
+        if (definitionsView) {
+          const running = await listRunningAutomationJobs(context.env.HYPERDRIVE.connectionString);
+          return context.html(<RunningList jobs={running} definition={back} />);
+        }
         const queue = await listAutomationQueue(context.env.HYPERDRIVE.connectionString);
-        return context.html(
-          definitionsView ? (
-            <RunningList jobs={queue.running} definition={back} />
-          ) : (
-            <Queue queue={queue} />
-          ),
-        );
+        return context.html(<Queue queue={queue} />);
       } catch (error) {
         Sentry.captureException(error);
         console.error("dashboard: aborting a job:", errorMessage(error));
