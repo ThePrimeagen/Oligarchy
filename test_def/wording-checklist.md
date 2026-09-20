@@ -194,14 +194,14 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `notification-icon-slot-image-themed-glyph`
 - [x] `dev-gallery-controls-walk-and-dropdowns`
 - [x] `agent-invitation-toast-once`
-- [ ] `theme-switch-menu-and-hotkey`
-- [ ] `theme-concurrent-switch-serialises`
-- [ ] `theme-switch-cli-list-renders-and-rejects`
-- [ ] `theme-cycle-all-22`
-- [ ] `theme-reset-current-advances-background`
-- [ ] `theme-light-dark-gtk-settings`
-- [ ] `theme-user-theme-directory-applies`
-- [ ] `theme-user-overlay-on-stock-theme`
+- [x] `theme-switch-menu-and-hotkey`
+- [x] `theme-concurrent-switch-serialises`
+- [x] `theme-switch-cli-list-renders-and-rejects`
+- [x] `theme-cycle-all-22`
+- [x] `theme-reset-current-advances-background`
+- [x] `theme-light-dark-gtk-settings`
+- [x] `theme-user-theme-directory-applies`
+- [x] `theme-user-overlay-on-stock-theme`
 - [ ] `theme-legacy-alacritty-only-theme`
 - [ ] `theme-install-git-url-drops-code-files`
 - [ ] `theme-install-community-via-menu`

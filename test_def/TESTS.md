@@ -8518,33 +8518,55 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy-theme-current; omarchy-theme-bg-current`. Note both names (fresh disk: `Tokyo Night`; neither may be `Unknown`). Leave the terminal open and note its navy background.
-  * Press Super+Space, click `Style`, then click `Theme` with the mouse. Within 30 s a carousel of labelled theme previews opens with `Tokyo Night` highlighted in the centre (thumbnails are generated on first open).
-  ** Unhappy path first: press Right twice (the centre preview and its label change), then Escape. Within 15 s the overlay closes; wallpaper and colours are unchanged.
-  * Repeat the menu path and click the `Gruvbox` tile with the mouse. Do not use the keyboard for this selection.
-  ** Within ~5 s (allow up to 15 s — applying a theme runs several scripts) the wallpaper, bar and menu turn warm brown/olive and the open terminal's background turns dark grey without restarting anything. Type `omarchy-theme-current` → `Gruvbox`.
-  * Press Super+Shift+Ctrl+Space. The theme picker opens directly, without the main menu. Press Escape: the desktop is unchanged.
-  * Press Super+Shift+Ctrl+Space again and type `nor`: the query appears under the label and the carousel narrows to `Nord`. Press Enter. The desktop switches to Nord (blue-grey wallpaper and bar).
-  * Press Super+Space → `Style` → `Background`: move the highlight to a different thumbnail with the arrow keys and press Escape. Then `Style` → `Unlock`: move to a different tile (`default` is one of them) and press Escape.
-  ** No floating terminal and no password prompt may appear; the wallpaper and colours stay Nord.
-  * Press Super+Shift+Ctrl+Space, type `tokyo`, press Enter. The desktop is Tokyo Night again and `omarchy-theme-current` prints the original name.
-  ** The wallpaper may be a *different* Tokyo Night image than at the start — expected (a switch lands on the theme's next background).
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy-theme-current` and press Return. Note the theme name.
+  * Type `omarchy-theme-bg-current` and press Return. Note the background name.
+  * Press Super+Space. The menu opens.
+  * Click Style.
+  * Click Theme. The theme picker opens. The current theme is highlighted.
+  * Press Right. The highlight moves.
+  * Press Right. The highlight moves.
+  * Press Escape. The picker closes. The desktop theme does not change.
+  * Press Super+Space. The menu opens.
+  * Click Style.
+  * Click Theme. The theme picker opens.
+  * Click the Gruvbox tile. Use the mouse. The desktop switches to Gruvbox.
+  * Type `omarchy-theme-current` and press Return. The line is `Gruvbox`.
+  * Press Super+Shift+Ctrl+Space. The theme picker opens. The main menu does not open.
+  * Press Escape. The picker closes. The desktop stays Gruvbox.
+  * Press Super+Shift+Ctrl+Space. The theme picker opens.
+  * Type `nor`. The carousel narrows to Nord.
+  ** If typing does not filter, move with the arrow keys and report that.
+  * Press Enter. The desktop switches to Nord.
+  * Press Super+Space. The menu opens.
+  * Click Style.
+  * Click Background. The background picker opens.
+  * Press Right. The highlight moves.
+  * Press Escape. The picker closes. The wallpaper stays Nord.
+  * Press Super+Space. The menu opens.
+  * Click Style.
+  * Click Unlock. The unlock picker opens.
+  * Press Right. The highlight moves.
+  * Press Escape. The picker closes. No password prompt appears. The desktop stays Nord.
+  * Press Super+Shift+Ctrl+Space. The theme picker opens.
+  * Type `tokyo`. The carousel narrows to Tokyo Night.
+  * Press Enter. The desktop switches to Tokyo Night.
+  * Type `omarchy-theme-current` and press Return. The original theme name is printed.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Super+Shift+Ctrl+Space is `<M-C-S-SPACE>`. Escape while a filter is typed only clears the filter (two-stage): press it again to close. If typing does not filter, move the highlight with the arrow keys and report that filtering did not work.
-  * Left/Right wrap around the carousel; scroll with the mouse wheel if a tile is off-screen. ./client-with-image returns a screenshot after each action; double-check the mouse position before clicking a tile.
-  * Theme switches animate for about a second; take a screenshot every 3–5 s for up to 15 s before judging.
+  * Super+Shift+Ctrl+Space is `<M-C-S-SPACE>`. A theme switch can take several seconds. Screenshot about every 5 seconds before judging.
+  * Escape while a filter is typed clears the filter first. Press it again to close.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshot of the picker with Tokyo Night highlighted; the unchanged desktop after each Escape (theme, background, unlock); the Gruvbox desktop with the retinted terminal and `Gruvbox` in the terminal; the carousel narrowed to Nord and the Nord desktop; the restored navy desktop with the original name printed
-  ** The mouse, not the keyboard, made both menu selections
+  * On success
+  ** The picker with the current theme, no theme change after Escape, Gruvbox after the mouse click, Nord after the filtered picker, the background and unlock pickers cancelled without a change, and the original theme name after switching back
   * If unsuccessful
-  ** Screenshot of a half-themed desktop (bar and terminal disagreeing), of whatever Escape triggered (theme change, floating terminal, sudo prompt), or of the picker not opening after 30 s; the terminal output of `omarchy-theme-current`
+  ** A half-themed desktop, a password prompt from Escape, or the picker not opening
 covers: manual/06:3-5; manual/07:174; default/hypr/bindings/utilities.lua:18 (SUPER+SHIFT+CTRL+SPACE); omarchy-menu.jsonc style.theme/style.background/style.unlock (`[[ -n $x ]] &&` guards); bin/omarchy-theme-switcher (--filterable); bin/omarchy-theme-set; bin/omarchy-theme-current; bin/omarchy-theme-bg-switcher; bin/omarchy-plymouth-switcher; bin/omarchy-menu-images; shell/plugins/image-picker/ImagePicker.qml (filterable, labels, selectAdjacent, applySelected); test/shell.d/background-test.sh; test/acceptance.d/shell-surfaces-test.sh:58-72; test/acceptance.d/system-test.sh:51-55
 
 ### theme-concurrent-switch-serialises   [VM-OK]
@@ -8554,23 +8576,24 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy-theme-set nord & omarchy-theme-set gruvbox & omarchy-theme-set kanagawa & wait; sleep 5; omarchy-theme-current`.
-  * The printed name must match what is on screen: `Nord` ↔ blue-grey, `Gruvbox` ↔ brown/olive, `Kanagawa` ↔ ink-dark with an off-white border. Which one wins is not defined.
-  * Type `ls ~/.local/state/omarchy/current/` → `background theme theme.name` and no `next-theme` left behind.
-  * Type `omarchy-theme-set tokyo-night`; it applies normally (the lock was released).
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy-theme-set nord & omarchy-theme-set gruvbox & omarchy-theme-set kanagawa & wait; sleep 5; omarchy-theme-current` and press Return. One theme name is printed. It matches the desktop. Record which theme won.
+  * Type `ls ~/.local/state/omarchy/current/` and press Return. The names are `background`, `theme`, and `theme.name`. There is no `next-theme`.
+  * Type `omarchy-theme-set tokyo-night` and press Return. The desktop switches to Tokyo Night.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Take the desktop screenshot in the same moment as reading the printed name.
+  * Screenshot the desktop at the moment you read the printed name.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Terminal name matching the desktop screenshot; the `ls` without `next-theme`; successful restore to Tokyo Night
+  * On success
+  ** The printed name matching the desktop, no `next-theme` file, and Tokyo Night applying afterwards
   * If unsuccessful
-  ** Mismatched name/desktop or a lingering `next-theme`
+  ** A name that does not match the desktop, or a leftover `next-theme`
 covers: bin/omarchy-theme-set (flock, atomic swap)
 
 ### theme-switch-cli-list-renders-and-rejects   [VM-OK]
@@ -8580,30 +8603,41 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy theme current; cat ~/.local/state/omarchy/current/theme.name` → `Tokyo Night` and `tokyo-night` on a fresh disk. Screenshot the desktop for comparison.
-  * Type `omarchy theme list | sudo tee /dev/ttyS0` (password `prime`). Read the serial: 22 Title Case names (Catppuccin … White) including `Tokyo Night`, `Gruvbox`, `Catppuccin Latte`, `Last Horizon`, `Lupine`, `Solitude`.
-  * Type `omarchy theme set nord 2>&1 | tee /tmp/theme.out; echo "exit=$?"`. Within 5 s the bar, terminal background and wallpaper change to Nord's blue-grey palette; `exit=0`; `cat ~/.local/state/omarchy/current/theme.name` → `nord`.
-  ** `/tmp/theme.out` must contain no `command not found` or `No such file` lines for obsidian, vscode, hermes, pi, claude, t3code or keyboard — those targets are absent here and must fail silently.
-  * Type `ls ~/.local/state/omarchy/current/theme/ | sudo tee /dev/ttyS0` → the listing includes alacritty.toml, btop.theme, chromium.theme, claude.json, foot.ini, ghostty.conf, gum_env.lua, helix.toml, hermes.yaml, hyprland.lua, hyprland-preview-share-picker.css, keyboard.rgb, kitty.conf, neovim.lua, obsidian.css, pi.json, shell.toml, t3code.json, vscode-theme.json, colors.toml and backgrounds. Type `grep -l '{{' ~/.local/state/omarchy/current/theme/*` → prints nothing (no unrendered placeholders).
-  * Press Super+Shift+Ctrl+Space: the picker opens on `Nord` as current. Press Escape.
-  * Type `omarchy theme set Catppuccin` → the desktop switches to Catppuccin (purple/blue); `omarchy theme current` → `Catppuccin`.
-  * Unhappy paths: type `omarchy-theme-set; echo "exit=$?"` → `Usage: omarchy-theme-set <theme-name>`, `exit=1`; `omarchy-theme-set not-a-theme; echo "exit=$?"` → `Theme 'not-a-theme' does not exist`, `exit=1`, the desktop stays Catppuccin; `omarchy-theme-set ../gruvbox; echo "exit=$?"` → `Invalid theme name: ../gruvbox`, `exit=1`.
-  * Type `omarchy theme set "Tokyo Night"` (quoted display name). Within 5 s the desktop matches the first screenshot (the wallpaper may differ — a switch lands on the theme's next background); `rm /tmp/theme.out`; close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy theme current` and press Return. Note the display name.
+  * Type `cat ~/.local/state/omarchy/current/theme.name` and press Return. Note the slug.
+  * Take a screenshot of the desktop. That is the starting look.
+  * Type `omarchy theme list | sudo tee /dev/ttyS0` and press Return.
+  ** If a password is asked, type `prime` and press Return.
+  * Read the serial log. It lists 22 theme names, including Tokyo Night, Gruvbox, Catppuccin Latte, Last Horizon, Lupine, and Solitude.
+  * Type `omarchy theme set nord 2>&1 | tee /tmp/theme.out; echo "exit=$?"` and press Return. The desktop switches to Nord. The last line is `exit=0`.
+  * Type `cat ~/.local/state/omarchy/current/theme.name` and press Return. The line is `nord`.
+  * Type `grep -E 'command not found|No such file' /tmp/theme.out` and press Return. Nothing matches.
+  * Type `ls ~/.local/state/omarchy/current/theme/` and press Return. The listing includes the rendered theme files, including `alacritty.toml`, `neovim.lua`, and `backgrounds`.
+  * Type `grep -l '{{' ~/.local/state/omarchy/current/theme/*` and press Return. Nothing is printed.
+  * Press Super+Shift+Ctrl+Space. The theme picker opens on Nord.
+  * Press Escape. The picker closes.
+  * Type `omarchy theme set Catppuccin` and press Return. The desktop switches to Catppuccin.
+  * Type `omarchy theme current` and press Return. The line is `Catppuccin`.
+  * Type `omarchy-theme-set; echo "exit=$?"` and press Return. A usage line appears. The last line is `exit=1`.
+  * Type `omarchy-theme-set not-a-theme; echo "exit=$?"` and press Return. The output says the theme does not exist. The last line is `exit=1`. The desktop stays Catppuccin.
+  * Type `omarchy-theme-set ../gruvbox; echo "exit=$?"` and press Return. The output says the theme name is invalid. The last line is `exit=1`.
+  * Type `omarchy theme set "Tokyo Night"` and press Return. The desktop switches to Tokyo Night.
+  * Type `rm /tmp/theme.out` and press Return.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The retint runs in parallel; give it up to 5 s before judging colours. The `ls` may wrap — the serial copy is authoritative.
-  * Theme names are case- and space-insensitive on the CLI (`Catppuccin`, `"Tokyo Night"`, `nord` all work). Reviewer 61 wrote `omarchy theme current` → `tokyo-night`; reviewers 10/21 say it prints the display name `Tokyo Night` — the slug is in `theme.name`. Record what it prints.
-  * 22 themes is the shipped count; the manual's gallery omits Last Horizon, Lupine and Solitude (03-INTENDED-BEHAVIOUR #18, doc gap only).
+  * Give a switch up to 5 seconds. The slug is in `theme.name`. The display name is what `omarchy theme current` prints. Record both if they differ from these words.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Serial with the 22-entry list; before/after screenshots (stock Tokyo Night, Nord palette on bar + terminal + wallpaper with `exit=0`, Catppuccin, Tokyo Night again); the directory listing with all template outputs and the empty grep; the picker on Nord; the three refusal messages with `exit=1`
+  * On success
+  ** 22 names in the list, Nord with `exit=0` and no missing-command lines, no unrendered `{{` placeholders, the picker on Nord, Catppuccin, the three refusals with `exit=1`, and Tokyo Night restored
   * If unsuccessful
-  ** Screenshot of `/tmp/theme.out` (any `command not found` / `No such file` line) and of the theme directory listing; the failing command's output; any error toast
+  ** A `command not found` line in `/tmp/theme.out`, or a refusal that changes the desktop
 covers: bin/omarchy-theme-set (argument guards, name normalisation, post_theme_commands); bin/omarchy-theme-list; bin/omarchy-theme-current; bin/omarchy; default/themed/*.tpl; docs/theming.md §Theme activation flow, §Template placeholders; default/agents/skills/omarchy/theming.md §Theme Commands; manual/06:3; manual/14:22-23; omarchy-menu.jsonc:104
 
 ### theme-cycle-all-22   [VM-OK] [SLOW]
@@ -8613,28 +8647,28 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `sudo -v` (password `prime`) so the loop can write to the serial console.
-  * Type this loop on one line and press Enter:
-  ** `for t in $(ls /usr/share/omarchy/themes); do omarchy-theme-set "$t" && sleep 4 && echo "== $t: mode=$(omarchy-theme-color mode) leftovers=$(grep -Il '{{' ~/.local/state/omarchy/current/theme/* 2>/dev/null | wc -l)"; done 2>&1 | sudo tee /dev/ttyS0`
-  * Take a screenshot roughly every 5 seconds while it runs (22 themes ≈ 2–4 minutes) so every theme's desktop is captured.
-  ** The bar must stay visible throughout; if the screen goes black or the bar disappears, stop and report which theme.
-  * When the prompt returns, read the serial (`get-serial`): 22 `== <theme>:` lines, `leftovers=0` on every line, `mode=light` on exactly catppuccin-latte, flexoki-light, lupine, rose-pine and white, `mode=dark` on the other 17.
-  * Type `omarchy-theme-set tokyo-night`; the desktop is back to Tokyo Night (its wallpaper may differ from the start — expected).
+  * Press Super+Enter. A terminal opens.
+  * Type `sudo -v` and press Return.
+  ** If a password is asked, type `prime` and press Return.
+  * Type `for t in $(ls /usr/share/omarchy/themes); do omarchy-theme-set "$t" && sleep 4 && echo "== $t: mode=$(omarchy-theme-color mode) leftovers=$(grep -Il '{{' ~/.local/state/omarchy/current/theme/* 2>/dev/null | wc -l)"; done 2>&1 | sudo tee /dev/ttyS0` and press Return.
+  * Take a screenshot about every 5 seconds until the prompt returns. The bar stays visible.
+  ** If the screen goes black or the bar disappears, stop and report the theme.
+  * Read the serial log. There are 22 theme lines. Every line says `leftovers=0`. Exactly five lines say `mode=light`. The other 17 say `mode=dark`.
+  * Type `omarchy-theme-set tokyo-night` and press Return. The desktop switches to Tokyo Night.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Never sleep more than 5 s between screenshots; poll with get-image instead of waiting for the loop.
-  * The `leftovers` count is the one fact the screen cannot show: a raw `{{ … }}` left in a generated file.
-  * There are 22 stock themes, including `last-horizon`, `lupine` and `solitude`, which the manual's preview gallery omits (03-INTENDED-BEHAVIOUR #18: CODE-INTENDED, pure doc gap).
+  * Do not wait more than 5 seconds between screenshots. The light themes are catppuccin-latte, flexoki-light, lupine, rose-pine, and white.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** 22 desktop screenshots with visibly different wallpapers/palettes; serial log with 22 lines, all `leftovers=0`, 5 light / 17 dark
+  * On success
+  ** A desktop screenshot for each theme, 22 serial lines, every `leftovers=0`, five light and 17 dark, and Tokyo Night at the end
   * If unsuccessful
-  ** The serial line that disagrees and the screenshot of the broken desktop
+  ** The serial line that disagrees, and the desktop at that theme
 covers: bin/omarchy-theme-set, bin/omarchy-theme-set-templates, bin/omarchy-theme-color (mode), themes/*, default/themed/*.tpl
 
 ### theme-reset-current-advances-background   [VM-OK]
@@ -8644,25 +8678,30 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy-theme-bg-current` (fresh disk: `Winding Road`).
-  * Type `omarchy-theme-set tokyo-night` (the theme already active). The wallpaper changes; `omarchy-theme-bg-current` → `Quattro`.
-  * Type it again → `Swirl Buck`.
-  * Type `omarchy-theme-set nord`; `omarchy-theme-bg-current` → `Black Moon` (Nord's first).
-  * Type `omarchy-theme-set tokyo-night`; `omarchy-theme-bg-current` → `Winding Road` (back to the first, since the Nord filename does not exist in Tokyo Night). The desktop is as found.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy-theme-bg-current` and press Return. Note the background name.
+  * Type `omarchy-theme-set tokyo-night` and press Return. The wallpaper changes.
+  * Type `omarchy-theme-bg-current` and press Return. The name is the next image, not the one you noted.
+  * Type `omarchy-theme-set tokyo-night` and press Return. The wallpaper changes again.
+  * Type `omarchy-theme-bg-current` and press Return. The name has advanced again.
+  * Type `omarchy-theme-set nord` and press Return. The desktop switches to Nord.
+  * Type `omarchy-theme-bg-current` and press Return. Note Nord's background name.
+  * Type `omarchy-theme-set tokyo-night` and press Return. The desktop switches to Tokyo Night.
+  * Type `omarchy-theme-bg-current` and press Return. The name is the first Tokyo Night background you noted.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * If the starting name is not `Winding Road`, record it; the sequence must still advance one image at a time.
-  * Only `omarchy-theme-refresh` re-renders without moving the wallpaper (see `theme-refresh-repairs-rendered-file`).
+  * If the starting name is not `Winding Road`, record it. The sequence must still advance one image at a time.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Five wallpaper screenshots with the matching names in the terminal
+  * On success
+  ** Each wallpaper screenshot with the matching background name, including the return to the first Tokyo Night image
   * If unsuccessful
-  ** `ls ~/.local/state/omarchy/current/theme/backgrounds/` and the observed sequence
+  ** The observed sequence and the background directory listing
 covers: bin/omarchy-theme-set (choose_theme_background / choose_staged_theme_background), bin/omarchy-theme-bg-current
 
 ### theme-light-dark-gtk-settings   [VM-OK]
@@ -8672,27 +8711,38 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy-theme-set tokyo-night` (the install-time apply never wrote the GTK settings, so normalise first), then `gsettings get org.gnome.desktop.interface color-scheme` → `'prefer-dark'`.
-  * Type `nautilus &`. The Files window opens with dark chrome and magenta folder icons (oversized under GDK_SCALE=2 — expected).
-  * Type `omarchy-theme-set catppuccin-latte`. Within 5 s the wallpaper is pale and Files turns light with blue folder icons; `gsettings get org.gnome.desktop.interface color-scheme` → `'prefer-light'`; `gsettings get org.gnome.desktop.interface gtk-theme` → `'Adwaita'`.
-  * Type `omarchy-theme-set gruvbox`: Files is dark again, folders olive. Type `omarchy-theme-set white`: Files is light once more with grey folders.
-  * User theme mode flag: type `cp -r /usr/share/omarchy/themes/catppuccin-latte ~/.config/omarchy/themes/probe-light && grep -n '^mode' ~/.config/omarchy/themes/probe-light/colors.toml` → `mode = "light"`; then `sed -i 's/^mode = "light"/mode = "dark"/' ~/.config/omarchy/themes/probe-light/colors.toml && omarchy-theme-set probe-light`.
-  ** color-scheme is back to `'prefer-dark'` and Files is dark although the palette is Latte's.
-  * Restore: type `omarchy-theme-set tokyo-night && omarchy theme remove probe-light` → `Removed probe-light`; close Files (Ctrl+Q or Super+W on it).
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy-theme-set tokyo-night` and press Return. The desktop switches to Tokyo Night.
+  * Type `gsettings get org.gnome.desktop.interface color-scheme` and press Return. The line is `'prefer-dark'`.
+  * Type `nautilus &` and press Return. Files opens. Its chrome is dark.
+  * Type `omarchy-theme-set catppuccin-latte` and press Return. The wallpaper turns pale. Files turns light.
+  * Type `gsettings get org.gnome.desktop.interface color-scheme` and press Return. The line is `'prefer-light'`.
+  * Type `gsettings get org.gnome.desktop.interface gtk-theme` and press Return. The line is `'Adwaita'`.
+  * Type `omarchy-theme-set gruvbox` and press Return. Files turns dark again.
+  * Type `omarchy-theme-set white` and press Return. Files turns light again.
+  * Type `cp -r /usr/share/omarchy/themes/catppuccin-latte ~/.config/omarchy/themes/probe-light` and press Return.
+  * Type `grep -n '^mode' ~/.config/omarchy/themes/probe-light/colors.toml` and press Return. The line includes `mode = "light"`.
+  * Type `sed -i 's/^mode = "light"/mode = "dark"/' ~/.config/omarchy/themes/probe-light/colors.toml` and press Return.
+  * Type `omarchy-theme-set probe-light` and press Return. Files turns dark.
+  * Type `gsettings get org.gnome.desktop.interface color-scheme` and press Return. The line is `'prefer-dark'`.
+  * Type `omarchy-theme-set tokyo-night` and press Return. The desktop switches to Tokyo Night.
+  * Type `omarchy theme remove probe-light` and press Return. The line says `Removed probe-light`.
+  * Click Files.
+  * Press Super+W. Files closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Files follows the setting live; if it does not, close and reopen it and note that in the report.
-  * Light/dark is `mode = …` in colors.toml; the 5 light stock themes are catppuccin-latte, flexoki-light, lupine, rose-pine, white.
+  * If Files does not follow the setting, close it and open it again, and record that.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Files dark with magenta icons; light with blue icons and `'prefer-light'`/`'Adwaita'`; dark with olive icons; light with grey icons; dark again under the edited user theme with `'prefer-dark'`; restored Tokyo Night
+  * On success
+  ** Files dark on Tokyo Night, light on Catppuccin Latte with `prefer-light`, dark on Gruvbox, light on White, dark again under the edited user theme with `prefer-dark`, and Tokyo Night restored
   * If unsuccessful
-  ** The Files screenshot that did not flip and `gsettings get org.gnome.desktop.interface gtk-theme`
+  ** A Files window that did not flip, and the `gtk-theme` setting
 covers: bin/omarchy-theme-set-gnome, themes/*/icons.theme, themes/*/colors.toml mode, themes/catppuccin-latte/colors.toml, bin/omarchy-theme-color, manual/43-making-your-own-theme.md (Light mode)
 
 ### theme-user-theme-directory-applies   [VM-OK]
@@ -8702,29 +8752,43 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `mkdir -p ~/.config/omarchy/themes/mytheme && sed 's/#282828/#102030/; s/#7daea3/#ff8800/' /usr/share/omarchy/themes/gruvbox/colors.toml > ~/.config/omarchy/themes/mytheme/colors.toml`.
-  * Type `omarchy-theme-set mytheme`.
-  ** A toast `No background was found for theme` appears for ~2 s; the wallpaper stays, but the bar and menu recolour to navy with an orange accent.
-  * Press Super+Shift+Ctrl+Space: a `Mytheme` tile is in the carousel (a blank or generic thumbnail is fine, the label must be there). Press Escape.
-  * Type `mkdir -p ~/.config/omarchy/themes/mytheme/backgrounds && cp /usr/share/omarchy/themes/nord/backgrounds/1-city-view.webp ~/.config/omarchy/themes/mytheme/backgrounds/ && omarchy-theme-set mytheme`. The wallpaper becomes the Nord city view with no toast.
-  * Copy a whole shipped theme: type `cp -r /usr/share/omarchy/themes/tokyo-night ~/.config/omarchy/themes/probe-red && sed -i 's/^accent = .*/accent = "#ff2020"/; s/^background = .*/background = "#2a0000"/; s/^foreground = .*/foreground = "#ffd0d0"/' ~/.config/omarchy/themes/probe-red/colors.toml && omarchy theme set "Probe Red"` (title case with a space applies too — names are normalised).
-  ** The bar, menu and terminal recolour to a dark red background with red accents and one of the copied Tokyo Night wallpapers. Press Super+Space and screenshot the red-accented menu; then `Style` → `Unlock` includes a `probe-red` preview (the copy carries preview-unlock.png). Escape.
-  * Unhappy path: type `omarchy theme set nonexistent; echo "exit=$?"` → `Theme 'nonexistent' does not exist`, `exit=1`, desktop unchanged; `omarchy theme set '../etc'; echo "exit=$?"` → `Invalid theme name: ../etc`, `exit=1`.
-  * Restore: type `omarchy-theme-set tokyo-night && omarchy theme remove probe-red && rm -rf ~/.config/omarchy/themes/mytheme` → `Removed probe-red` plus a `Theme removed` toast; Super+Shift+Ctrl+Space no longer lists Probe Red or Mytheme. Escape.
+  * Press Super+Enter. A terminal opens.
+  * Type `mkdir -p ~/.config/omarchy/themes/mytheme && sed 's/#282828/#102030/; s/#7daea3/#ff8800/' /usr/share/omarchy/themes/gruvbox/colors.toml > ~/.config/omarchy/themes/mytheme/colors.toml` and press Return.
+  * Type `omarchy-theme-set mytheme` and press Return. A toast says no background was found. The bar recolours. The wallpaper stays.
+  * Press Super+Shift+Ctrl+Space. The theme picker opens. A Mytheme tile is listed.
+  * Press Escape. The picker closes.
+  * Type `mkdir -p ~/.config/omarchy/themes/mytheme/backgrounds && cp /usr/share/omarchy/themes/nord/backgrounds/1-city-view.webp ~/.config/omarchy/themes/mytheme/backgrounds/` and press Return.
+  * Type `omarchy-theme-set mytheme` and press Return. The wallpaper changes. No missing-background toast appears.
+  * Type `cp -r /usr/share/omarchy/themes/tokyo-night ~/.config/omarchy/themes/probe-red` and press Return.
+  * Type `sed -i 's/^accent = .*/accent = "#ff2020"/; s/^background = .*/background = "#2a0000"/; s/^foreground = .*/foreground = "#ffd0d0"/' ~/.config/omarchy/themes/probe-red/colors.toml` and press Return.
+  * Type `omarchy theme set "Probe Red"` and press Return. The desktop recolours.
+  * Press Super+Space. The menu opens. The menu uses the new accent.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Click Style.
+  * Click Unlock. The unlock picker opens. A probe-red preview is listed.
+  * Press Escape. The picker closes.
+  * Type `omarchy theme set nonexistent; echo "exit=$?"` and press Return. The output says the theme does not exist. The last line is `exit=1`. The desktop does not change.
+  * Type `omarchy theme set '../etc'; echo "exit=$?"` and press Return. The output says the theme name is invalid. The last line is `exit=1`.
+  * Type `omarchy-theme-set tokyo-night` and press Return. The desktop switches to Tokyo Night.
+  * Type `omarchy theme remove probe-red` and press Return. The line says `Removed probe-red`.
+  * Type `rm -rf ~/.config/omarchy/themes/mytheme` and press Return.
+  * Press Super+Shift+Ctrl+Space. The theme picker opens. Probe Red and Mytheme are not listed.
+  * Press Escape. The picker closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Screenshot right after the first `omarchy-theme-set mytheme`; the toast is short.
-  * Theme switches animate for about a second; Neovim/btop/browser retints run in the background — the bar and menu are the visible proof.
+  * Screenshot the missing-background toast as soon as it appears.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** The `No background was found for theme` toast with the navy/orange bar; the `Mytheme` tile; the city-view wallpaper; the red desktop with the red-accented menu and the Unlock list showing probe-red; the two refusals with `exit=1`; restored Tokyo Night with both themes gone from the picker
+  * On success
+  ** The missing-background toast, the Mytheme tile, a wallpaper after the background is added, Probe Red in the Unlock list, both refusals with `exit=1`, and both themes gone after restore
   * If unsuccessful
-  ** Terminal output of the failing `omarchy-theme-set`, `ls ~/.local/state/omarchy/current/theme/`, `./client get-serial`
+  ** The failing `omarchy-theme-set` output
 covers: bin/omarchy-theme-set (user themes, set_theme_background failure path, name normalisation), bin/omarchy-theme-list, bin/omarchy-theme-switcher (preview fallback), bin/omarchy-theme-remove, bin/omarchy-plymouth-list, default/hypr/bindings/utilities.lua:18, test/shell.d/user-theme-test.sh, docs/theming.md, manual/43-making-your-own-theme.md (intro, Unlock image), manual/06 (theme picker)
 
 ### theme-user-overlay-on-stock-theme   [VM-OK]
@@ -8734,26 +8798,31 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `mkdir -p ~/.config/omarchy/themes/gruvbox && sed 's/#7daea3/#ff0000/' /usr/share/omarchy/themes/gruvbox/colors.toml > ~/.config/omarchy/themes/gruvbox/colors.toml`.
-  * Type `omarchy-theme-set gruvbox`. Within 5 s the wallpaper is a stock Gruvbox image but the focused window border, the bar's active-workspace accent and the menu highlight are pure red.
-  * Type `grep -c ff0000 ~/.local/state/omarchy/current/theme/alacritty.toml` → 1 or more (the overlay reached a rendered template); `ls ~/.local/state/omarchy/current/theme/backgrounds | head -3` → Gruvbox's stock wallpapers (files you did not overlay come from the stock theme).
-  * Type `mkdir -p ~/.config/omarchy/backgrounds/gruvbox && cp /usr/share/omarchy/themes/white/backgrounds/1-white.webp ~/.config/omarchy/backgrounds/gruvbox/zz-user.webp`, then `omarchy-theme-bg-next`, repeating up to 7 times, until the wallpaper turns white.
-  ** The user image is part of the cycle; its position depends on sort order.
-  * Round trip: type `rm -rf ~/.config/omarchy/themes/gruvbox ~/.config/omarchy/backgrounds/gruvbox && omarchy-theme-set gruvbox` → the focused border is Gruvbox's normal teal again.
-  * Type `omarchy-theme-set tokyo-night` and close the terminal with Super+W; the desktop is stock.
+  * Press Super+Enter. A terminal opens.
+  * Type `mkdir -p ~/.config/omarchy/themes/gruvbox && sed 's/#7daea3/#ff0000/' /usr/share/omarchy/themes/gruvbox/colors.toml > ~/.config/omarchy/themes/gruvbox/colors.toml` and press Return.
+  * Type `omarchy-theme-set gruvbox` and press Return. The wallpaper is a Gruvbox image. The accent is red.
+  * Type `grep -c ff0000 ~/.local/state/omarchy/current/theme/alacritty.toml` and press Return. The count is at least `1`.
+  * Type `ls ~/.local/state/omarchy/current/theme/backgrounds | head -3` and press Return. Stock Gruvbox wallpaper names are listed.
+  * Type `mkdir -p ~/.config/omarchy/backgrounds/gruvbox && cp /usr/share/omarchy/themes/white/backgrounds/1-white.webp ~/.config/omarchy/backgrounds/gruvbox/zz-user.webp` and press Return.
+  * Type `omarchy-theme-bg-next` and press Return. Record whether the wallpaper turned white.
+  * Repeat `omarchy-theme-bg-next` until the wallpaper is white, at most 7 times.
+  * Type `rm -rf ~/.config/omarchy/themes/gruvbox ~/.config/omarchy/backgrounds/gruvbox` and press Return.
+  * Type `omarchy-theme-set gruvbox` and press Return. The accent is no longer pure red.
+  * Type `omarchy-theme-set tokyo-night` and press Return. The desktop switches to Tokyo Night.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Press Super+Space between steps to see the red accent on the menu highlight; open a second terminal with Super+Enter if you need two borders to compare.
+  * The user image joins the cycle. Its place depends on sort order.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Gruvbox wallpaper with a red border/accent and the grep count; the white wallpaper reached through bg-next; teal accent after the overlay is removed; restored Tokyo Night
+  * On success
+  ** A Gruvbox wallpaper with a red accent, the grep count, the white wallpaper from the cycle, the stock accent after the overlay is removed, and Tokyo Night restored
   * If unsuccessful
-  ** `ls -la ~/.config/omarchy/themes/`, `ls ~/.local/state/omarchy/current/theme/backgrounds/`, the theme-set stderr and the last wallpaper screenshot
+  ** The theme directory listing and the background directory listing
 covers: bin/omarchy-theme-set (overlay copy order), bin/omarchy-theme-bg-next (user backgrounds), docs/theming.md §Theme activation flow (overlay step 2), default/agents/skills/omarchy/theming.md §Customizing a Stock Theme, default/agents/skills/omarchy/SKILL.md §Example Requests
 
 ### theme-legacy-alacritty-only-theme   [VM-OK]
