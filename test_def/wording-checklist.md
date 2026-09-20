@@ -49,17 +49,17 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `direct-boot-toggle-skips-limine-and-back`
 - [x] `refresh-limine-bootloader`
 - [x] `limine-scan-on-single-os-finds-nothing`
-- [ ] `drive-password-change-and-back-at-boot`
-- [ ] `drive-password-rejects-bad-input`
-- [ ] `user-password-change-keeps-disk-password`
-- [ ] `factory-reset-confirm-cancel-and-wrong-passphrase`
+- [x] `drive-password-change-and-back-at-boot`
+- [x] `drive-password-rejects-bad-input`
+- [x] `user-password-change-keeps-disk-password`
+- [x] `factory-reset-confirm-cancel-and-wrong-passphrase`
 - [ ] `factory-reset-full-cycle-new-owner`
 - [ ] `factory-reset-first-boot-form-validation`
-- [ ] `factory-snapshot-present-and-reset-refuses-without-it`
+- [x] `factory-snapshot-present-and-reset-refuses-without-it`
 - [ ] `boot-chain-and-snapper-config-invariants`
 - [ ] `shipped-system-defaults-in-place`
-- [ ] `locate-indexes-and-prunes-snapshots`
-- [ ] `hardware-gated-entries-hidden-in-vm`
+- [x] `locate-indexes-and-prunes-snapshots`
+- [x] `hardware-gated-entries-hidden-in-vm`
 - [x] `menu-open-close-hotkey-and-bar-logo`
 - [ ] `menu-system-super-escape-cancels`
 - [ ] `menu-search-filter-and-two-stage-escape`

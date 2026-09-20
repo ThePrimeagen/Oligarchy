@@ -1927,15 +1927,27 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open the Omarchy Menu (Super+Space) → Update → Password → Drive Encryption with the mouse. A floating terminal shows a masked input `New encryption password`.
-  * Type `newpass1` Enter, then `newpass1` Enter at `Confirm new encryption password`. It prints `Changing full-disk encryption password for /dev/vdaN`, may ask `[sudo] password for prime:` (type `prime`), then cryptsetup asks `Enter passphrase to be changed:` — type `prime` Enter. After a few seconds: `● Done! Press any key to close...`. Press a key.
-  ** Password fields echo nothing (count the bullets in gum's masked inputs); cryptsetup's prompt is plain text without gum styling; argon2id makes each change take ~2–4 s.
-  * Open a terminal (Super+Enter) and type `D=$(sudo blkid -t TYPE=crypto_LUKS -o device | head -1); printf newpass1 | sudo cryptsetup open --test-passphrase --key-file - $D; echo "new=$?"; printf prime | sudo cryptsetup open --test-passphrase --key-file - $D; echo "old=$?"` — `new=0`, `old=2` (No key available with this passphrase).
-  * Press Super+Escape → click Reboot. At the Plymouth box type `prime` Enter — rejected, the box clears (this is the ONE wrong try allowed). Type `newpass1` Enter — the progress bar appears and the system boots to the desktop (autologin; the user password is unchanged — log in with `prime` only if a greeter shows).
-  * Lock with Super+Ctrl+L and unlock with `prime`: the user password is unaffected.
-  ** The lock screen blanks 5 s after the last input; just type — the first character wakes it and enters the field.
-  * Change back: open a terminal and type `omarchy-drive-password`: new `prime`, confirm `prime`, then `newpass1` at `Enter passphrase to be changed:` — no error.
-  * Type `D=$(sudo blkid -t TYPE=crypto_LUKS -o device | head -1); printf prime | sudo cryptsetup open --test-passphrase --key-file - $D; echo "prime=$?"; printf newpass1 | sudo cryptsetup open --test-passphrase --key-file - $D; echo "new=$?"` — `prime=0` (unlocks again without another reboot), `new=2`. Press Super+W.
+  * Press Super+Space. The menu opens.
+  * Click Update. Use the mouse only. Update opens.
+  * Click Password. Use the mouse only. Password opens.
+  * Click Drive Encryption. Use the mouse only. A new-password prompt appears.
+  * Type `newpass1` and press Enter. A confirm prompt appears.
+  * Type `newpass1` and press Enter. A current-passphrase prompt appears. Password is `prime` if sudo asks.
+  * Type `prime` and press Enter. The disk passphrase changes. Press a key when it finishes.
+  * Press Super+Enter. A terminal opens.
+  * Run `D=$(sudo blkid -t TYPE=crypto_LUKS -o device | head -1); printf newpass1 | sudo cryptsetup open --test-passphrase --key-file - "$D"; echo new=$?` and press Enter. It prints `new=0`.
+  * Press Super+Escape. The System menu opens.
+  * Click Reboot. Use the mouse only. The machine reboots.
+  * At the passphrase prompt, type `prime` and press Enter. The passphrase is rejected.
+  * Type `newpass1` and press Enter. The desktop returns.
+  * Press Super+Ctrl+L. The screen locks.
+  * Type `prime` and press Enter. The desktop returns.
+  * Press Super+Enter. A terminal opens.
+  * Run `omarchy-drive-password` and press Enter. A new-password prompt appears.
+  * Type `prime` and press Enter, then `prime`, then `newpass1`. The disk passphrase is `prime` again.
+  * Run `D=$(sudo blkid -t TYPE=crypto_LUKS -o device | head -1); printf prime | sudo cryptsetup open --test-passphrase --key-file - "$D"; echo prime=$?` and press Enter. It prints `prime=0`.
+  * Press Super+W. The terminal closes.
+  * the desktop must return exactly as left.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -1961,11 +1973,19 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open the Omarchy Menu (Super+Space) → Update → Password → Drive Encryption with the mouse. At `New encryption password` press Enter with nothing typed — `Password cannot be empty.` and `Failed (exit code 1)!`; the floating terminal closes on the next key — screenshot quickly.
-  * Reopen it; type `abc123` Enter, then `abc124` Enter at `Confirm new encryption password` — `Passwords do not match.` and `Failed (exit code 1)!`.
-  * Open a terminal (Super+Enter) and type `omarchy-drive-password`: `abc123` Enter, `abc123` Enter; at `Enter passphrase to be changed:` type `wrongpass` Enter (password `prime` first if sudo asks) — cryptsetup prints `No key available with this passphrase.`. Press Ctrl+C if it offers a retry.
-  * Type `omarchy-drive-password` once more and press Esc at the first prompt: it exits quietly with no change.
-  * Type `D=$(sudo blkid -t TYPE=crypto_LUKS -o device | head -1); printf prime | sudo cryptsetup open --test-passphrase --key-file - $D && echo PRIME-OK; sudo cryptsetup luksDump $D | grep -m1 -i version; omarchy-drive-info /dev/vda` — `PRIME-OK`, a `Version:` line (the device is still a valid LUKS container), and one line like `/dev/vda (40G) - … [vfat(/boot), crypto_LUKS]`. Press Super+W.
+  * Press Super+Space. The menu opens.
+  * Click Update, then Password, then Drive Encryption. Use the mouse only. A new-password prompt appears.
+  * Press Enter. The empty password is refused.
+  * Press Super+Space. The menu opens.
+  * Click Update, then Password, then Drive Encryption. Use the mouse only. A new-password prompt appears.
+  * Type `abc123` and press Enter. A confirm prompt appears.
+  * Type `abc124` and press Enter. The mismatch is refused.
+  * Press Super+Enter. A terminal opens.
+  * Run `omarchy-drive-password` and press Enter. A new-password prompt appears.
+  * Type `abc123` and press Enter, then `abc123`, then `wrongpass`. The current passphrase is refused.
+  * Run `omarchy-drive-password` and press Enter. Press Escape at the first prompt. Nothing changes.
+  * Run `D=$(sudo blkid -t TYPE=crypto_LUKS -o device | head -1); printf prime | sudo cryptsetup open --test-passphrase --key-file - "$D"; echo prime=$?` and press Enter. It prints `prime=0`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -1990,12 +2010,26 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open the Omarchy Menu (Super+Space) → Update → Password → User with the mouse. At `Current password:` type `prime`; at `New password:` and `Retype new password:` type `newuserpw1`. Expect `passwd: password updated successfully` and "Done!". Press a key.
-  * Lock with Super+Ctrl+L. Type `prime` Enter: stays locked (`Authentication failed`). Type `newuserpw1` Enter: the desktop returns.
-  ** The lock screen blanks 5 s after the last input; keystrokes still reach the password box (the first character wakes it).
-  * Reboot (Super+Escape → click Reboot). At the disk prompt type `prime` (blind): it must unlock; the desktop appears (autologin, no login step).
-  * Unhappy path: open Update → Password → User again and type `wrong` at `Current password:`: `passwd: Authentication token manipulation error` (or "Authentication failure") and "Failed (exit code 1)!". Press a key.
-  * Change back: Update → Password → User, current `newuserpw1`, new `prime` twice, "Done!". Lock with Super+Ctrl+L and unlock with `prime` — exactly as it started.
+  * Press Super+Space. The menu opens.
+  * Click Update, then Password, then User. Use the mouse only. A current-password prompt appears.
+  * Type `prime` and press Enter. A new-password prompt appears.
+  * Type `newuserpw1` and press Enter, then `newuserpw1`. The user password changes.
+  * Press Super+Ctrl+L. The screen locks.
+  * Type `prime` and press Enter. The password is rejected.
+  * Type `newuserpw1` and press Enter. The desktop returns.
+  * Press Super+Escape. The System menu opens.
+  * Click Reboot. Use the mouse only. The machine reboots.
+  * At the disk prompt, type `prime` and press Enter. The desktop returns.
+  * Press Super+Space. The menu opens.
+  * Click Update, then Password, then User. Use the mouse only. A current-password prompt appears.
+  * Type `wrong` and press Enter. The change is refused.
+  * Press Super+Space. The menu opens.
+  * Click Update, then Password, then User. Use the mouse only. A current-password prompt appears.
+  * Type `newuserpw1` and press Enter. A new-password prompt appears.
+  * Type `prime` and press Enter, then `prime`. The user password is `prime` again.
+  * Press Super+Ctrl+L. The screen locks.
+  * Type `prime` and press Enter. The desktop returns.
+  * the desktop must return exactly as left.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -2021,16 +2055,21 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open the Omarchy Menu (Super+Space) → Setup → Reset Computer with the mouse. A floating terminal opens; enter the sudo password `prime` when asked.
-  ** If a yellow `This machine has no factory snapshot to reset to.` appears with `Reinstall from the Omarchy ISO to make this machine resettable.` and `● Failed (exit code 1)!`, press a key, record it as a mint/ISO gap and stop here.
-  * The bold red `Reset this computer to factory state?` screen lists what is erased (all user accounts and everything in /home; all packages and system changes since installation; machine identity), says `The next boot asks for a new user, exactly like a fresh install.` and shows a `Type 'reset' to continue` input. Screenshot.
-  * Unhappy path 1: type `RESET` and press Enter → `Error: Reset not confirmed.` then `Failed (exit code 1)! Press any key to close...`. Press a key.
-  * Reopen Setup → Reset Computer (`prime`); at the input press Escape → the terminal ends with `Failed (exit code 1)!`, nothing staged. Press a key.
-  * Verify nothing changed: open a terminal (Super+Enter) and type `sudo ls /var/lib/omarchy/provisioning/; sudo btrfs subvolume list / | grep -c omarchy-reset; systemctl is-enabled limine-snapper-sync.service` → no `pending`/`wipe-pending`, `0`, `enabled` (the runtime mask is only applied after confirmation).
-  * Unhappy path 2 — cancel after confirming: reopen Setup → Reset Computer, `prime`, type `reset` Enter. After the grey lines `Cloning the factory snapshot` … `Removing account credentials from the factory system` it asks `Confirm your disk encryption passphrase to authorize the re-key.` with a `Passphrase>` prompt. Type `wrong` Enter → red `That passphrase does not unlock /dev/… Try again.`. Press Esc: the script exits with `Failed (exit code 1)!`. Press a key.
-  ** Quirk: by this point the script has already scrubbed the `@factory` baseline in place and runtime-masked `limine-snapper-sync` until reboot. Harmless on this disposable disk, but the session must end with `stop` — never `save` this disk. Never type the correct passphrase here: that stages the wipe (the separate test `factory-reset-full-cycle-new-owner`).
-  * Type `sudo ls /var/lib/omarchy/provisioning/; DEV=$(findmnt -no SOURCE / | sed 's/\[.*//'); sudo mkdir -p /mnt/top; sudo mount -o subvolid=5 $DEV /mnt/top; ls /mnt/top; sudo umount /mnt/top` → still no `pending`/`wipe-pending`; list the top-level subvolumes and report any `@omarchy-reset-next` or `@omarchy-old-*` left behind (the cleanup trap should have removed the staged clone).
-  * Reboot (Super+Escape → Reboot), type `prime` (blind) at the passphrase prompt: the same desktop and user return — no first-boot wizard. End the session with `stop`.
+  * Press Super+Space. The menu opens.
+  * Click Setup, then Reset Computer. Use the mouse only. Password is `prime`. A confirm prompt appears. If it says there is no factory snapshot, stop. Run `./client stop`.
+  * Type `RESET` and press Enter. The reset is refused.
+  * Press Super+Space. The menu opens.
+  * Click Setup, then Reset Computer. Use the mouse only. Password is `prime`. A confirm prompt appears.
+  * Press Escape. Nothing is staged.
+  * Press Super+Space. The menu opens.
+  * Click Setup, then Reset Computer. Use the mouse only. Password is `prime`. A confirm prompt appears.
+  * Type `reset` and press Enter. A passphrase prompt appears. Do not type `prime`.
+  * Type `wrong` and press Enter. The passphrase is refused.
+  * Press Escape. The reset is not staged.
+  * Press Super+Escape. The System menu opens.
+  * Click Reboot. Use the mouse only. The machine reboots.
+  * At the passphrase prompt, type `prime` and press Enter. The same desktop returns.
+  * Run `./client stop`. The session ends.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -2127,14 +2166,14 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal (Super+Enter). Type `sudo btrfs subvolume list / | grep -E 'path @'` (password `prime`) → lines for `@`, `@home`, `@log`, `@pkg` and `@factory`.
-  * Type `DEV=$(findmnt -no SOURCE / | sed 's/\[.*//'); echo $DEV; sudo mkdir -p /mnt/top && sudo mount -o subvolid=5 $DEV /mnt/top && ls /mnt/top` → `@ @factory @home @log @pkg` (an `@omarchy-*` entry means a reset was once staged — there must be none).
-  * Type `sudo btrfs property get -ts /mnt/top/@factory ro; sudo touch /mnt/top/@factory/x; echo "exit=$?"` → `ro=true` and `touch: cannot touch … Read-only file system`, `exit=1`.
-  * Type `sudo ls /mnt/top/@factory/var/lib/omarchy/provisioning/ /mnt/top/@factory/etc/omarchy/ /mnt/top/@factory/etc/tailscale 2>&1; sudo ls /mnt/top/@factory/home/` → `packages` (and maybe `groups`); no `luks-key`, `provisioning.key` or `authorized_keys`; the tailscale dir absent; `prime` present (a normal install's snapshot still has the install user — the reset scrubs it later).
-  * Unhappy path — remove the baseline on this throwaway disk: `sudo btrfs subvolume delete /mnt/top/@factory && ls /mnt/top && sudo umount /mnt/top` → the listing without `@factory`.
-  * Type `omarchy-system-factory-reset; echo "rc=$?"` (it self-elevates: sudo password `prime`) → `This machine has no factory snapshot to reset to.`, the explanation paragraph, `Reinstall from the Omarchy ISO to make this machine resettable.`, and `rc=1`. No `Type 'reset'` prompt appears.
-  * Open the Omarchy Menu (Super+Space) → Setup: the Reset Computer entry is still listed (it is gated on btrfs, not on the snapshot); click it → the same refusal in a floating terminal ending `Failed (exit code 1)!`. Press a key.
-  * The disk no longer has its baseline: end the session with `stop`.
+  * Press Super+Enter. A terminal opens.
+  * Run `sudo btrfs subvolume list / | grep '@factory'` and press Enter. Password is `prime`. `@factory` is listed.
+  * Run `sudo btrfs property get -ts /mnt/top/@factory ro` and press Enter. If the mount is missing, mount the top subvolume first. It shows `ro=true`.
+  * Run `sudo btrfs subvolume delete /mnt/top/@factory` and press Enter. `@factory` is deleted.
+  * Run `omarchy-system-factory-reset; echo rc=$?` and press Enter. It refuses. It prints `rc=1`.
+  * Press Super+Space. The menu opens.
+  * Click Setup, then Reset Computer. Use the mouse only. The same refusal appears.
+  * Run `./client stop`. The session ends.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -2224,13 +2263,15 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal (Super+Enter) and type `sudo stat -c '%a %U %Y' /etc/updatedb.conf; sudo sha256sum /etc/updatedb.conf; mkdir -p ~/locate-probe && touch ~/locate-probe/omarchy-locate-probe-file` (password `prime`).
-  * Type `sudo /usr/bin/updatedb --prune-bind-mounts=no --add-prunepaths=/.snapshots` (about 20 s; screenshot while it runs).
-  * Type `locate omarchy-locate-probe-file; locate -c /.snapshots/; sudo ls /.snapshots | head -2` — the probe path, `0`, and existing snapshot directories (if any).
-  ** `locate -c` counts matches; a non-zero count under `/.snapshots` is the failure.
-  * Type `sudo stat -c '%a %U %Y' /etc/updatedb.conf; sudo sha256sum /etc/updatedb.conf` — identical to the first reading.
-  * Type `sudo systemctl start plocate-updatedb.service; systemctl status plocate-updatedb.service | head -6` — the unit ran the same `updatedb` command line and exited 0.
-  * Type `rm -r ~/locate-probe` — the probe is gone. Press Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Run `sudo stat -c '%Y' /etc/updatedb.conf` and press Enter. Password is `prime`. Note the time.
+  * Run `mkdir -p ~/locate-probe && touch ~/locate-probe/omarchy-locate-probe-file` and press Enter. The probe file exists.
+  * Run `sudo /usr/bin/updatedb --prune-bind-mounts=no --add-prunepaths=/.snapshots` and press Enter. The index finishes.
+  * Run `locate omarchy-locate-probe-file` and press Enter. The probe path is found.
+  * Run `locate -c /.snapshots/` and press Enter. It prints `0`.
+  * Run `sudo stat -c '%Y' /etc/updatedb.conf` and press Enter. The time is unchanged.
+  * Run `rm -r ~/locate-probe` and press Enter. The probe is gone.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -2254,12 +2295,16 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Screenshot the bar: no battery widget (the power, bluetooth and agents icons are also absent by design).
-  * Open the Omarchy Menu with Super+Space, click Trigger → Hardware: no `Laptop Display`, `Mirror Display`, `Touchpad`, `Hybrid GPU`.
-  ** A fully guarded submenu vanishes from its parent and its route opens "Nothing here yet" — screenshot whichever you see. `Touchscreen` may still show (the QEMU USB tablet can register as a tablet): report what is there.
-  * Trigger → Toggle: no `Battery Percentage`. Trigger → Capture → Screen Record: no webcam variant. Setup → Security: no `Fingerprint`, but `Fido2`, `SSHD`, `Passwordless Sudo` present. Press Escape until the menu closes.
-  * Press Super+Escape: the System menu has no `Hibernate` (Screensaver, Lock, Suspend, Logout, Reboot, Shutdown only). Press Esc. Do not select Suspend.
-  * Open a terminal with Super+Enter and type `for c in laptop fingerprint webcam touchpad touchscreen; do omarchy-hw-$c; echo "$c=$?"; done; ls /sys/class/power_supply/` — every `=1` and an empty power_supply listing (record `touchscreen=` either way if the menu showed a Touchscreen row). Press Super+W.
+  * Look at the bar. No battery icon is shown.
+  * Press Super+Space. The menu opens.
+  * Click Trigger, then Hardware. Use the mouse only. No laptop, touchpad, or webcam row is shown.
+  * Press Escape until the menu closes. The menu closes.
+  * Press Super+Escape. The System menu opens. Hibernate is absent. Do not select Suspend.
+  * Press Escape. The menu closes.
+  * Press Super+Enter. A terminal opens.
+  * Run `omarchy-hw-laptop; echo laptop=$?` and press Enter. It prints `laptop=1`.
+  * Run `omarchy-hw-fingerprint; echo fingerprint=$?` and press Enter. It prints `fingerprint=1`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
