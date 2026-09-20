@@ -5352,26 +5352,52 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return and type `systemctl --user show -p ActiveEnterTimestamp omarchy-hyprsunset.service 2>/dev/null || systemctl --user list-units --no-pager | grep -i hyprsunset; pgrep -a hyprsunset` Return; record the timestamp/unit name and the PID (if no user unit exists, the PID is the proof).
-  * Press Super+Space → Setup → Config → Hyprsunset: notification "Editing config file ~/.config/hypr/hyprsunset.conf"; Neovim opens the file. Press `G`, `o`, type `# probe edit`, Escape, `:wq` Return.
-  * Rerun the status command: the ActiveEnterTimestamp is later than before (or the PID changed), proving a restart followed the editor. `grep -c 'probe edit' ~/.config/hypr/hyprsunset.conf` → 1.
-  * Press Super+Ctrl+N: an orange tint over the whole screen and the night-light indicator in the bar. `pgrep -x hyprsunset` → a PID.
-  * Press Super+Space → Update → Process → Hyprsunset: the tint disappears within ~2 s; `pgrep -x hyprsunset` → a different PID; `omarchy-toggle-nightlight --status` → enabled false (temperature 6000 or 6500); the indicator turns off after the shell's next refresh (wait a few seconds).
-  * Type `omarchy-restart-app hyprsunset` Return → the PID changes again, the screen stays neutral. `omarchy-restart-hyprctl; echo "exit=$?"` → 0 (a plain reload, no visible change).
-  * Restore: Super+Space → Update → Config → Hyprsunset → the floating terminal shows the Replaced… diff with the probe line and restarts the service; Done. `rm -f ~/.config/hypr/*.bak.*`. Close the terminal.
+  * Press Super+Return. A terminal opens.
+  * Type `systemctl --user show -p ActiveEnterTimestamp omarchy-hyprsunset.service 2>/dev/null || systemctl --user list-units --no-pager | grep -i hyprsunset; pgrep -a hyprsunset` and press Return. Record the timestamp or unit name, and the PID.
+  * Press Super+Space. The menu opens.
+  * Click Setup.
+  * Click Config.
+  * Click Hyprsunset. The menu closes. A notification names `hyprsunset.conf`. Neovim opens that file.
+  * Press G. The cursor is at the end of the file.
+  * Press o. A new line opens.
+  * Type `# probe edit`.
+  * Press Escape.
+  * Type `:wq` and press Return. Neovim closes.
+  * Type `systemctl --user show -p ActiveEnterTimestamp omarchy-hyprsunset.service 2>/dev/null || systemctl --user list-units --no-pager | grep -i hyprsunset; pgrep -a hyprsunset` and press Return. The timestamp is later than before, or the PID has changed.
+  * Type `grep -c 'probe edit' ~/.config/hypr/hyprsunset.conf` and press Return. The line is `1`.
+  * Press Super+Ctrl+N. The screen takes a warm tint. A night-light glyph appears in the bar.
+  * Type `pgrep -x hyprsunset` and press Return. A PID is printed. Note it.
+  * Press Super+Space. The menu opens.
+  * Click Update.
+  * Click Process.
+  * Click Hyprsunset. The menu closes. The tint goes away.
+  * Type `pgrep -x hyprsunset` and press Return. The PID is different.
+  * Type `omarchy-toggle-nightlight --status` and press Return. The line says enabled is false.
+  * Wait a few seconds. The night-light glyph is gone.
+  * Type `omarchy-restart-app hyprsunset` and press Return. The screen stays untinted.
+  * Type `pgrep -x hyprsunset` and press Return. The PID has changed again.
+  * Type `omarchy-restart-hyprctl; echo "exit=$?"` and press Return. The last line is `exit=0`. The desktop does not change.
+  * Press Super+Space. The menu opens.
+  * Click Update.
+  * Click Config.
+  * Click Hyprsunset. A floating terminal says the file was replaced and shows the probe line.
+  * Press a key. That terminal closes.
+  * Click the first terminal. It has focus.
+  * Type `rm -f ~/.config/hypr/*.bak.*` and press Return.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * hyprsunset may be run by omarchy-restart-app rather than a unit; the PID comparison is the fallback proof. The nightlight tint is visible in screenshots (Hyprland applies the CTM in its renderer).
+  * If there is no user unit, the PID change is the proof of a restart.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of the status/PID before and after the edit showing a restart, the edited file, the tinted screen with its indicator, the neutral screen after Update → Process with the new PID and the status JSON, and the Update → Config → Hyprsunset diff
+  * On success
+  ** Screenshots of the status before and after the edit, the tint with the glyph, the untinted screen after Update → Process, a new PID, enabled false, and the restore output
   * If unsuccessful
-  ** Identical timestamps/PIDs after quitting the editor; a screenshot still tinted with the new PID and `hyprctl hyprsunset temperature`; `./client get-serial`
+  ** The same PID after the editor closes, or a tint that stays after the process restart
 covers: manual/31-dotfiles.md (any process that needs restarting…); default/omarchy/omarchy-menu.jsonc setup.config.hyprsunset, update.config.hyprsunset, update.process.hyprsunset; bin/omarchy-refresh-hyprsunset; bin/omarchy-restart-hyprsunset; bin/omarchy-restart-app; bin/omarchy-restart-hyprctl; bin/omarchy-toggle-nightlight
 
 ### hypr-session-environment-and-autostart   [VM-OK]
@@ -5381,25 +5407,27 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return and type `env | grep -E '^(XCURSOR_SIZE|HYPRCURSOR_SIZE|GDK_BACKEND|QT_QPA_PLATFORM|QT_QPA_PLATFORMTHEME|MOZ_ENABLE_WAYLAND|ELECTRON_OZONE_PLATFORM_HINT|OZONE_PLATFORM|XDG_SESSION_TYPE|XDG_CURRENT_DESKTOP|XDG_SESSION_DESKTOP|XCOMPOSEFILE|OMARCHY_PATH|GDK_SCALE|NVD_BACKEND|LIBVA_DRIVER_NAME|__GLX_VENDOR_LIBRARY_NAME)=' | sort | sudo tee /dev/ttyS0` Return.
-  * The serial log shows XCURSOR_SIZE=24, HYPRCURSOR_SIZE=24, GDK_BACKEND=wayland,x11,*, QT_QPA_PLATFORM=wayland;xcb, QT_QPA_PLATFORMTHEME=gtk3, MOZ_ENABLE_WAYLAND=1, ELECTRON_OZONE_PLATFORM_HINT=wayland, OZONE_PLATFORM=wayland, XDG_SESSION_TYPE=wayland, XDG_CURRENT_DESKTOP=Hyprland, XDG_SESSION_DESKTOP=Hyprland, XCOMPOSEFILE=/home/prime/.XCompose, OMARCHY_PATH=/usr/share/omarchy, GDK_SCALE=2 — and none of the three NVIDIA variables.
-  * Type `echo $PATH | tr : '\n' | head -1` Return → `/usr/share/omarchy/bin`.
-  * Type `pgrep -af 'omarchy-hyprland-monitor-watch|udiskie' | sudo tee /dev/ttyS0` Return: one monitor watcher and one `udiskie --automount --no-notify --no-tray`; the bar being on screen is the shell.
-  * Type `hyprctl reload` Return and repeat the pgrep: identical PIDs, nothing duplicated.
-  * Close the terminal; the desktop is empty.
+  * Press Super+Return. A terminal opens.
+  * Type `env | grep -E '^(XCURSOR_SIZE|HYPRCURSOR_SIZE|GDK_BACKEND|QT_QPA_PLATFORM|QT_QPA_PLATFORMTHEME|MOZ_ENABLE_WAYLAND|ELECTRON_OZONE_PLATFORM_HINT|OZONE_PLATFORM|XDG_SESSION_TYPE|XDG_CURRENT_DESKTOP|XDG_SESSION_DESKTOP|XCOMPOSEFILE|OMARCHY_PATH|GDK_SCALE|NVD_BACKEND|LIBVA_DRIVER_NAME|__GLX_VENDOR_LIBRARY_NAME)=' | sort | sudo tee /dev/ttyS0` and press Return.
+  * Read the serial log. It includes `XCURSOR_SIZE=24`, `HYPRCURSOR_SIZE=24`, `GDK_BACKEND=wayland,x11,*`, `QT_QPA_PLATFORM=wayland;xcb`, `QT_QPA_PLATFORMTHEME=gtk3`, `MOZ_ENABLE_WAYLAND=1`, `ELECTRON_OZONE_PLATFORM_HINT=wayland`, `OZONE_PLATFORM=wayland`, `XDG_SESSION_TYPE=wayland`, `XDG_CURRENT_DESKTOP=Hyprland`, `XDG_SESSION_DESKTOP=Hyprland`, `XCOMPOSEFILE=/home/prime/.XCompose`, `OMARCHY_PATH=/usr/share/omarchy`, and `GDK_SCALE=2`. It does not include `NVD_BACKEND`, `LIBVA_DRIVER_NAME`, or `__GLX_VENDOR_LIBRARY_NAME`.
+  * Type `echo $PATH | tr : '\n' | head -1` and press Return. The line is `/usr/share/omarchy/bin`.
+  * Type `pgrep -af 'omarchy-hyprland-monitor-watch|udiskie'` and press Return. One monitor-watch line is listed. One udiskie line is listed. Note both PIDs.
+  * Type `hyprctl reload` and press Return.
+  * Type `pgrep -af 'omarchy-hyprland-monitor-watch|udiskie'` and press Return. The PIDs match the ones you noted. Nothing is duplicated.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The terminal is spawned by Hyprland's exec so it sees exactly the `hl.env` set; nothing here changes state.
+  * The terminal is started by Hyprland, so it sees the session environment.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Serial dump with the 14 variables at the expected values and no NVIDIA ones, the PATH head, the two processes before and after reload with the same PIDs
+  * On success
+  ** The serial list of the named variables with no NVIDIA variables, PATH starting at `/usr/share/omarchy/bin`, and the same two PIDs before and after reload
   * If unsuccessful
-  ** A missing/different variable, a missing process, or duplicated PIDs after reload
+  ** A missing variable, a missing process, or a new PID after reload
 covers: default/hypr/envs.lua; default/hypr/nvidia.lua; config/hypr/monitors.lua:21-22; default/hypr/autostart.lua; default/hypr/helpers.lua:117-125
 
 ### autostart-lua-user-entry-runs-on-login   [VM-OK]
@@ -5409,27 +5437,31 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return and type `printf '%s\n' 'o.launch_on_start("foot --title AUTOSTART-PROBE")' >> ~/.config/hypr/autostart.lua && hyprctl reload` Return; wait three seconds taking screenshots: no AUTOSTART-PROBE window appears (autostart runs on the `hyprland.start` event only).
-  * Press Super+Escape → Logout. At SDDM (logo, lock glyph and a dotted entry — no user name field) type `prime` and Return.
-  ** Logout closes all windows; finish typing before pressing Logout.
-  * Within ~15 s of the desktop appearing a terminal titled AUTOSTART-PROBE is open.
-  * In it type `hyprctl activewindow | grep title` Return → the AUTOSTART-PROBE title, then `sed -i '$d' ~/.config/hypr/autostart.lua && tail -1 ~/.config/hypr/autostart.lua` Return → the stock last line (the probe line is gone).
-  * Unhappy path: type `hyprctl reload` Return: no second AUTOSTART-PROBE window appears (a reload never re-runs autostart).
-  * Close the terminal; the desktop is empty and autostart.lua is stock.
+  * Press Super+Return. A terminal opens.
+  * Type `printf '%s\n' 'o.launch_on_start("foot --title AUTOSTART-PROBE")' >> ~/.config/hypr/autostart.lua && hyprctl reload` and press Return.
+  * Wait 3 seconds. No AUTOSTART-PROBE window appears.
+  * Press Super+Escape. The system menu opens.
+  * Click Logout. The greeter appears.
+  * Type `prime` and press Return. The desktop returns.
+  * Wait up to 15 seconds. A terminal titled AUTOSTART-PROBE is open.
+  * Type `hyprctl activewindow | grep title` and press Return. The title includes `AUTOSTART-PROBE`.
+  * Type `sed -i '$d' ~/.config/hypr/autostart.lua && tail -1 ~/.config/hypr/autostart.lua` and press Return. The probe line is gone.
+  * Type `hyprctl reload` and press Return.
+  * Wait 3 seconds. No second AUTOSTART-PROBE window appears.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The title shows in the bar's window title area or via `hyprctl activewindow | grep title` if the terminal has no title bar.
-  * Wrong password at SDDM shows a red lock/entry cleared by the next keystroke; stay under five tries (faillock deny=10 is shared with the lock screen and sudo).
+  * Finish the logout click before typing. A wrong greeter password shares the lock-screen failure count. Stay under five tries.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots proving no probe after the reload, the greeter/login, the AUTOSTART-PROBE terminal after login with its title line, the stock last line after the cleanup, and no second probe after the final reload
+  * On success
+  ** No probe window after the first reload, the greeter, the AUTOSTART-PROBE title after login, the stock last line, and no second probe after the last reload
   * If unsuccessful
-  ** The desktop after login without the probe window, or a probe window appearing on a plain reload; `cat ~/.config/hypr/autostart.lua`; `./client get-serial`
+  ** No probe window after login, or a probe window appearing on a plain reload
 covers: config/hypr/autostart.lua; default/hypr/helpers.lua:117-125; default/hypr/autostart.lua:1
 
 ### hyprland-lua-preinstalled-bindings-flag   [VM-OK]
@@ -5439,26 +5471,38 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return and type `grep -c '^-- omarchy_preinstalled' ~/.config/hypr/hyprland.lua` Return → 1 (the flag ships commented out).
-  * Type `sed -i 's/^-- omarchy_preinstalled_bindings = false/omarchy_preinstalled_bindings = false/' ~/.config/hypr/hyprland.lua && hyprctl reload` Return.
-  * Press Super+Shift+A: nothing happens (no ChatGPT window within 15 s). Press Super+Return: a terminal still opens (the essentials stay bound). Close it.
-  * Press Super+K, type `ChatGPT`: no row; clear the filter (Escape once) and type `Terminal`: row present. Escape.
-  * Type `sed -i 's/^omarchy_preinstalled_bindings = false/-- omarchy_preinstalled_bindings = false/' ~/.config/hypr/hyprland.lua && hyprctl reload` Return; press Super+Shift+A: the ChatGPT app window opens again (NET-free: an offline error page is fine). Close it with Super+W.
-  * Type `grep -c '^-- omarchy_preinstalled' ~/.config/hypr/hyprland.lua` Return → 1; close the terminal. The desktop is empty and hyprland.lua is back to stock.
+  * Press Super+Return. A terminal opens.
+  * Type `grep -c '^-- omarchy_preinstalled' ~/.config/hypr/hyprland.lua` and press Return. The line is `1`.
+  * Type `sed -i 's/^-- omarchy_preinstalled_bindings = false/omarchy_preinstalled_bindings = false/' ~/.config/hypr/hyprland.lua && hyprctl reload` and press Return.
+  * Press Super+Shift+A. Nothing opens.
+  * Wait 15 seconds. Still nothing opens.
+  * Press Super+Return. A second terminal opens.
+  * Press Super+W. That terminal closes.
+  * Press Super+K. The keybindings viewer opens.
+  * Type `ChatGPT`. No ChatGPT row is listed.
+  * Press Escape. The filter clears. The viewer stays open.
+  * Type `Terminal`. A Terminal row is listed.
+  * Press Escape. The viewer closes.
+  * Click the first terminal. It has focus.
+  * Type `sed -i 's/^omarchy_preinstalled_bindings = false/-- omarchy_preinstalled_bindings = false/' ~/.config/hypr/hyprland.lua && hyprctl reload` and press Return.
+  * Press Super+Shift+A. A ChatGPT window opens.
+  ** An offline error page is fine.
+  * Press Super+W. That window closes.
+  * Type `grep -c '^-- omarchy_preinstalled' ~/.config/hypr/hyprland.lua` and press Return. The line is `1`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Omarchy Menu → Setup → Config → Hyprland opens the same file in the editor if you prefer; a save there applies by itself (Hyprland reloads the file).
-  * Escape in the keybindings viewer is two-stage: the first clears the filter, the second closes it.
+  * Escape in the keybindings viewer clears the filter first. The next Escape closes it.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of Super+Shift+A doing nothing, a terminal from Super+Return, Super+K without ChatGPT and with Terminal, ChatGPT working again after the restore, and the grep count 1 before and after
+  * On success
+  ** Nothing after Super+Shift+A, a terminal from Super+Return, no ChatGPT row, a Terminal row, ChatGPT opening after the restore, and the grep count `1` before and after
   * If unsuccessful
-  ** ChatGPT opening while the flag is set, or Super+Return failing; `grep omarchy_preinstalled ~/.config/hypr/hyprland.lua`
+  ** ChatGPT opening while the flag is set, or Super+Return doing nothing
 covers: config/hypr/hyprland.lua:9-11; default/hypr/helpers.lua:84-90; default/hypr/bindings/applications.lua:10; test/shell.d/hyprland-default-config-test.sh:131-139
 
 ### multi-monitor-and-laptop-display-chords-single-display   [VM-PARTIAL]
@@ -5468,28 +5512,47 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return.
-  * Press Super+Shift+Alt+Left, Super+Shift+Alt+Right, Super+Shift+Alt+Up, Super+Shift+Alt+Down: the terminal stays put; no notification or banner.
-  * Press Ctrl+Alt+Tab and Ctrl+Alt+Shift+Tab: focus stays on the terminal.
-  * Press Super+Ctrl+Delete: notification "No laptop display found"; the screen stays on (`omarchy-hyprland-monitor-internal toggle; echo "exit=$?"` gives the same toast and exit=1). Press Super+Ctrl+Alt+Delete: notification "No laptop monitor found to mirror" (or "No external monitors found for mirror" — record the exact text); the screen stays on.
-  * Type `omarchy-hyprland-monitor-focused; omarchy-hyprland-monitor-laptop; echo "[$?]"; omarchy-hyprland-monitor-external-active; echo "exit=$?"; omarchy-hyprland-monitor-focused-apple; echo "exit=$?"` Return → `Virtual-1`; empty then `[0]`; exit=0 (the virtual output counts as external); exit=1. Then `omarchy-hyprland-monitor-internal on; echo "exit=$?"; omarchy-hyprland-monitor-internal sideways; echo "exit=$?"; omarchy-hyprland-monitor-clamshell; echo "exit=$?"; omarchy-hw-recover-internal-monitor; echo "exit=$?"` → 0 with no toast (nothing to enable); usage, 1; 0 with no change; 0.
-  * Type `omarchy-hw-laptop; echo "exit=$?"; ls ~/.local/state/omarchy/toggles/hypr/` Return → exit=1 and only `flags.lua` (no `internal-monitor-*.lua` was written).
-  * Press Super+Ctrl+H (Trigger → Hardware; the same as Super+Space → Trigger → Hardware): the submenu has no "Laptop Display", "Mirror Display", "Touchpad", "Touchpad Haptics", "Touchscreen" or "Hybrid GPU" rows (all gated on hardware); it may be empty, vanish from its parent, or open "Nothing here yet" — record exactly what is listed. Escape.
-  * Press Super+Ctrl+D: the Display panel opens (Virtual-1 with scale pills; there is no backlight to move). Escape. Close the terminal.
+  * Press Super+Return. A terminal opens.
+  * Press Super+Shift+Alt+Left. The terminal stays put. No notification appears.
+  * Press Super+Shift+Alt+Right. The terminal stays put.
+  * Press Super+Shift+Alt+Up. The terminal stays put.
+  * Press Super+Shift+Alt+Down. The terminal stays put.
+  * Press Ctrl+Alt+Tab. Focus stays on the terminal.
+  * Press Ctrl+Alt+Shift+Tab. Focus stays on the terminal.
+  * Press Super+Ctrl+Delete. A notification says "No laptop display found". The screen stays on.
+  * Type `omarchy-hyprland-monitor-internal toggle; echo "exit=$?"` and press Return. The same notification appears. The last line is `exit=1`.
+  * Press Super+Ctrl+Alt+Delete. A notification says there is no laptop monitor to mirror, or no external monitor to mirror. Record the exact text. The screen stays on.
+  * Type `omarchy-hyprland-monitor-focused` and press Return. The line is `Virtual-1`.
+  * Type `omarchy-hyprland-monitor-laptop; echo "[$?]"` and press Return. The output before the bracket line is empty. The last line is `[0]`.
+  * Type `omarchy-hyprland-monitor-external-active; echo "exit=$?"` and press Return. The last line is `exit=0`.
+  * Type `omarchy-hyprland-monitor-focused-apple; echo "exit=$?"` and press Return. The last line is `exit=1`.
+  * Type `omarchy-hyprland-monitor-internal on; echo "exit=$?"` and press Return. The last line is `exit=0`. No notification appears.
+  * Type `omarchy-hyprland-monitor-internal sideways; echo "exit=$?"` and press Return. A usage line appears. The last line is `exit=1`.
+  * Type `omarchy-hyprland-monitor-clamshell; echo "exit=$?"` and press Return. The last line is `exit=0`. The desktop does not change.
+  * Type `omarchy-hw-recover-internal-monitor; echo "exit=$?"` and press Return. The last line is `exit=0`.
+  * Type `omarchy-hw-laptop; echo "exit=$?"` and press Return. The last line is `exit=1`.
+  * Type `ls ~/.local/state/omarchy/toggles/hypr/` and press Return. The only line is `flags.lua`.
+  * Press Super+Ctrl+H. Record what opens.
+  * Press Escape. The menu closes.
+  * Press Super+Ctrl+H. Record the rows. There is no Laptop Display, Mirror Display, Touchpad, Touchpad Haptics, Touchscreen, or Hybrid GPU row.
+  ** If the submenu is empty or does not stay open, record that.
+  * Press Escape. The menu closes.
+  * Press Super+Ctrl+D. The Display panel opens. Virtual-1 is listed.
+  * Press Escape. The panel closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Skipped: moving a workspace to another output, disabling/mirroring a real internal panel, the lid-close clamshell sync — no second monitor, no laptop, no lid. Notifications hide after a few seconds; screenshot immediately after each hotkey.
-  * Menu guards paint from the previous evaluation: reopen Trigger → Hardware twice before asserting what is listed.
+  * Screenshot a notification as soon as it appears.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots after each chord with the terminal unmoved and focused, the two notifications, every helper value and exit code above, the exit=1 and `flags.lua`-only listing, the Hardware submenu without laptop rows, the Display panel
+  * On success
+  ** The terminal unmoved after each chord, both notifications, the helper values and exit codes, only `flags.lua`, the Hardware submenu without the laptop rows, and the Display panel
   * If unsuccessful
-  ** A black screen, an error banner, a missing notification, a stray `internal-monitor-*.lua` file in the listing, or a helper that changed the only display; `./client get-serial`
+  ** A black screen, a missing notification, or a file named `internal-monitor`
 covers: default/hypr/bindings/tiling.lua:37-40,52-53; default/hypr/bindings/utilities.lua:33-34; bin/omarchy-hyprland-monitor-internal; bin/omarchy-hyprland-monitor-internal-mirror; bin/omarchy-hyprland-monitor-{focused,laptop,external-active,focused-apple,modeless,clamshell}; bin/omarchy-hw-recover-internal-monitor; bin/omarchy-hw-laptop; bin/omarchy-monitor-state; default/omarchy/omarchy-menu.jsonc trigger.hardware.* (trigger.hardware.laptop-display, mirror-display); test/shell.d/monitor-output-name-test.sh; test/shell.d/monitor-state-test.sh; test/shell.d/monitor-modeless-test.sh; manual/07:31,58-59,189-190; manual/33:34-37 (Extending and mirroring laptop displays)
 
 ### media-keys-via-wtype-dummy-sink-no-backlight-touchpad   [VM-PARTIAL]
@@ -5499,27 +5562,40 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return and type `hyprctl binds | grep -c XF86; wpctl status | grep -A3 Sinks` Return → at least 20 (the binds exist even without keys) and an `auto_null` "Dummy Output" sink.
-  * Type `wtype -k XF86AudioRaiseVolume` Return: the volume OSD appears with a percentage; `wtype -k XF86AudioLowerVolume` lowers it; `wtype -k XF86AudioMute` shows the muted OSD, and again unmutes.
-  ** If `wtype` is not installed, run the commands the binds call instead (`omarchy-audio-output-volume raise`, `lower`, `mute-toggle`) and report that the key path was skipped.
-  * Type `wtype -k XF86AudioMicMute` Return → toast "Microphone on" (no source to mute). Type `omarchy-audio-output-switch; omarchy-audio-source-switch; echo "exit=$?"` Return → messages, no hang.
-  * Type `wtype -k XF86MonBrightnessUp; wtype -k XF86KbdBrightnessUp; omarchy-brightness-display +5%; echo "exit=$?"; omarchy-brightness-keyboard up; echo "exit=$?"` Return → no OSD and no-backlight exits (`omarchy-brightness-display` exits 1 silently — it takes the DDC path on `Virtual-1`).
-  * Type `wtype -k XF86TouchpadToggle; omarchy-toggle-touchpad; echo "exit=$?"; ls ~/.local/state/omarchy/toggles/hypr/` Return → `No touchpad device found`, exit=1, and no `touchpad-disabled-name` file.
-  * Type `wtype -k XF86AudioPlay; omarchy-shell media playPause; echo "exit=$?"` Return (no player): record the result; nothing may hang longer than 10 s.
-  * Close the terminal.
+  * Press Super+Return. A terminal opens.
+  * Type `hyprctl binds | grep -c XF86` and press Return. The count is at least 20.
+  * Type `wpctl status | grep -A3 Sinks` and press Return. The output includes Dummy Output.
+  * Type `wtype -k XF86AudioRaiseVolume` and press Return. A volume OSD appears.
+  ** If `wtype` is not installed, run the matching `omarchy-audio-output-volume` command instead and report that the key path was skipped.
+  * Type `wtype -k XF86AudioLowerVolume` and press Return. The volume OSD shows a lower level.
+  * Type `wtype -k XF86AudioMute` and press Return. A muted OSD appears.
+  * Type `wtype -k XF86AudioMute` and press Return. The mute clears.
+  * Type `wtype -k XF86AudioMicMute` and press Return. A toast says "Microphone on".
+  * Type `omarchy-audio-output-switch` and press Return. A message appears. The command returns.
+  * Type `omarchy-audio-source-switch; echo "exit=$?"` and press Return. A message appears. The command returns.
+  * Type `wtype -k XF86MonBrightnessUp` and press Return. No brightness OSD appears.
+  * Type `wtype -k XF86KbdBrightnessUp` and press Return. No brightness OSD appears.
+  * Type `omarchy-brightness-display +5%; echo "exit=$?"` and press Return. The last line is `exit=1`.
+  * Type `omarchy-brightness-keyboard up; echo "exit=$?"` and press Return. The last line is `exit=1`.
+  * Type `wtype -k XF86TouchpadToggle` and press Return. The output says no touchpad device was found.
+  * Type `omarchy-toggle-touchpad; echo "exit=$?"` and press Return. The last line is `exit=1`.
+  * Type `ls ~/.local/state/omarchy/toggles/hypr/` and press Return. There is no `touchpad-disabled-name` file.
+  * Type `wtype -k XF86AudioPlay` and press Return. Record the result. The command returns within 10 seconds.
+  * Type `omarchy-shell media playPause; echo "exit=$?"` and press Return. Record the result. The command returns within 10 seconds.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Skipped: the physical keys (no send-keys token for XF86 qcodes) and any OSD needing a real device; the Dummy Output stands in for a sound card. OSDs fade after a few seconds — screenshot straight after each `wtype`.
+  * Screenshot an OSD as soon as it appears.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Terminal screenshots with the bind count and the Dummy Output, the volume and mute OSDs, the "Microphone on" toast, each brightness/touchpad message and exit code, the toggles listing without a touchpad file
+  * On success
+  ** The bind count, Dummy Output, the volume and mute OSDs, the microphone toast, the brightness and touchpad exit codes, and no touchpad state file
   * If unsuccessful
-  ** A command hanging (>10 s), a traceback, no OSD after `wtype` despite the sink, or a state file written for a missing device
+  ** A command that hangs, no volume OSD, or a touchpad state file
 covers: default/hypr/bindings/media.lua; bin/omarchy-audio-output-volume; bin/omarchy-toggle-touchpad; bin/omarchy-toggle-input-device; test/shell.d/toggle-input-device-test.sh; manual/07:86-93,195
 
 ### screenshot-print-region-keyboard-picker-and-cancel   [VM-OK]
@@ -5529,30 +5605,65 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return twice; type `echo LEFT` Return in the left terminal and `echo RIGHT` Return in the right one; in the right one type `ls ~/Pictures | wc -l` Return and note the count.
-  * Press Print: the screen freezes and dims slightly under a selection overlay (crosshair, window outlines). Drag a rectangle from about (0.2,0.2) to (0.6,0.6) and release: toast "Screenshot saved to clipboard and file" / "Edit with Super + Alt + , (or click this)" with a thumbnail. Click the toast: Tensaku opens floating with the captured image; press Super+W.
-  ** The toast lasts 5 s; if it is gone, press Super+Alt+, to invoke it. If `~/Pictures` did not exist you first see a toast "Created screenshot directory".
-  * Type `ls -t ~/Pictures | head -1; file ~/Pictures/$(ls -t ~/Pictures | head -1); wl-paste --list-types` Return → `screenshot-YYYY-MM-DD_HH-MM-SS.png`, roughly 512x320 (40 % of 1280x800), and `image/png` among the clipboard types; the count is +1.
-  * Super+Space → Trigger → Capture → Screenshot (the menu row is the same smart picker), then click once — no drag — in the middle of the LEFT terminal: the capture snaps to the window under the cursor; the same toast; `file` on the newest PNG shows dimensions close to that terminal, not the full 1280x800.
-  * Move the mouse over the LEFT terminal, press Print, then Tab: the highlight and pointer jump to a window; Tab again (or Ctrl+Tab) moves back; Left/Right and Up/Down follow the direction (or stay when no window lies that way). With RIGHT highlighted press Return: a toast; the newest PNG has the right terminal's size (about half the screen width) — click the toast to see exactly one terminal in the editor, then Super+W.
-  * Press Print, then Ctrl+Return at once: the whole screen is captured; the newest PNG is 1280x800 and the editor shows the bar and both terminals. Super+W.
-  ** Older builds have no Tab/Return binds in the overlay: drag a region with the mouse instead and report the keys absent.
-  * Unhappy paths: press Print, then Escape at the crosshair: the freeze ends, no toast, the count is unchanged. Press Print, then Print again: the picker is dismissed, nothing saved. Type `omarchy-capture-screenshot &` Return and, while the picker is up, type `omarchy-capture-screenshot` Return blind: the picker closes (the second invocation kills slurp) and nothing is saved.
-  * Type `rm ~/Pictures/screenshot-*.png` Return, press Super+W twice; the desktop is empty.
+  * Press Super+Return. A terminal opens.
+  * Type `echo LEFT` and press Return. The line `LEFT` appears.
+  * Press Super+Return. A second terminal opens.
+  * Type `echo RIGHT` and press Return. The line `RIGHT` appears.
+  * Type `ls ~/Pictures | wc -l` and press Return. Note the count.
+  * Press Print. The screen freezes under a selection overlay.
+  * Drag a rectangle from about (0.2, 0.2) to (0.6, 0.6) and release. A toast says the screenshot was saved.
+  ** If the toast is gone, press Super+Alt+,.
+  * Click the toast. Tensaku opens with the captured image.
+  * Press Super+W. Tensaku closes.
+  * Click the RIGHT terminal. It has focus.
+  * Type `ls -t ~/Pictures | head -1` and press Return. The name starts with `screenshot-`.
+  * Type `file ~/Pictures/$(ls -t ~/Pictures | head -1)` and press Return. The size is about 512 by 320.
+  * Type `wl-paste --list-types` and press Return. The list includes `image/png`.
+  * Type `ls ~/Pictures | wc -l` and press Return. The count is one more than the number you noted.
+  * Press Super+Space. The menu opens.
+  * Click Trigger.
+  * Click Capture.
+  * Click Screenshot. The selection overlay appears.
+  * Click the middle of the LEFT terminal. Do not drag. A toast says the screenshot was saved.
+  * Click the RIGHT terminal. It has focus.
+  * Type `file ~/Pictures/$(ls -t ~/Pictures | head -1)` and press Return. The size is close to the LEFT terminal, not 1280 by 800.
+  * Move the pointer over the LEFT terminal.
+  * Press Print. The selection overlay appears.
+  * Press Tab. Record whether the highlight moves.
+  ** If Tab does nothing, report the overlay keys absent, drag a region instead, and skip the Return and Ctrl+Return captures.
+  * If the highlight moved, press Return while the RIGHT terminal is highlighted. A toast says the screenshot was saved.
+  * If that toast appeared, click it. The editor shows one terminal.
+  * If the editor is open, press Super+W. It closes.
+  * Press Print. The selection overlay appears.
+  * Press Ctrl+Return. A toast says the screenshot was saved.
+  * Click the toast. The editor shows the bar and both terminals.
+  * Press Super+W. The editor closes.
+  * Click the RIGHT terminal. It has focus.
+  * Type `file ~/Pictures/$(ls -t ~/Pictures | head -1)` and press Return. The dimensions are 1280 by 800.
+  * Press Print. The selection overlay appears.
+  * Press Escape. The overlay closes. No toast appears.
+  * Type `ls ~/Pictures | wc -l` and press Return. The count matches the last capture.
+  * Press Print. The selection overlay appears.
+  * Press Print. The overlay closes. No toast appears.
+  * Type `omarchy-capture-screenshot &` and press Return. The selection overlay appears.
+  * Type `omarchy-capture-screenshot` and press Return. The overlay closes.
+  * Type `ls ~/Pictures | wc -l` and press Return. The count is unchanged from the previous count.
+  * Type `rm ~/Pictures/screenshot-*.png` and press Return.
+  * Press Super+W. One terminal closes.
+  * Press Super+W. The last terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Print is `<PRINT>`; Ctrl+Return is `<C-ENTER>`. These keys only exist while the selection overlay is up; the overlay hides the cursor after key presses — move the mouse if you need to see the crosshair.
-  * `file ~/Pictures/$(ls -t ~/Pictures | head -1)` prints the newest file's dimensions; a stuck frozen screen shows in `pgrep -a slurp hyprpicker`.
+  * Print is `<PRINT>`. Ctrl+Return is `<C-ENTER>`. Those keys exist only while the overlay is up.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of the frozen picker with the drag rectangle, the toast with thumbnail, Tensaku with the image, the file name / dimensions / `image/png` lines, the click-snapped window-sized capture from the menu row, the highlight moving with Tab, the single-window capture and the full-screen capture in the editor, and the unchanged count after each cancel
+  * On success
+  ** The overlay, the drag toast, Tensaku, the file name and `image/png`, the window-sized capture, the full-screen capture, and an unchanged count after each cancel
   * If unsuccessful
-  ** Screenshot of no overlay after Print, a missing toast after the drag, a file written after Escape, or the overlay stuck after Escape; the terminal error from grim/slurp; `hyprctl binds | grep -i capture-region` taken while the picker is up (from a third terminal)
+  ** No overlay after Print, a file written after Escape, or an overlay that stays after Escape
 covers: default/hypr/bindings/utilities.lua:38,50-83 (selection layer binds); default/hypr/apps/screenshot-selection.lua; bin/omarchy-capture-screenshot (region, pkill slurp); bin/omarchy-capture-region (region, smart bare-click snap, --take-window, --take-fullscreen, --select-window); bin/omarchy-notification-send (--image, --exec); default/omarchy/omarchy-menu.jsonc (trigger.capture.screenshot); test/shell.d/screenshot-sanity-test.sh; manual/03:35; manual/07:140-146; manual/12:16-35 (12-screenshots-recording.md, Driving the picker)
 
 ### capture-cli-screenshot-modes-copy-save-and-dir   [VM-OK]
@@ -5562,28 +5673,54 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return and type `wl-copy "plain text"; ls ~/Pictures | wc -l` Return (seed the clipboard, note the count).
-  * Type `omarchy capture screenshot fullscreen save` Return → the last line is a path ending in `.png` under `~/Pictures/`, printed immediately (no picker, no editor, no toast). Type `ls -l "$(ls -t ~/Pictures/*.png | head -1)"; file "$(ls -t ~/Pictures/*.png | head -1)"; wl-paste` Return → larger than 10 KB, `PNG image data, 1280 x 800`, and the clipboard still `plain text`; the count is +1.
-  * Type `xdg-open "$(ls -t ~/Pictures/*.png | head -1)" &` Return: an image viewer shows the captured desktop with the bar rendered along the top (a black image is a failure). Press Super+W on the viewer.
-  * Type `omarchy-capture-screenshot fullscreen copy` Return → no path printed, no toast, count unchanged, but `wl-paste --list-types` shows `image/png`. Type `wl-copy "plain text"; omarchy-capture-screenshot fullscreen` Return → path printed, toast, count +1, and `image/png` on the clipboard (the default does both).
-  * Type `omarchy-capture-screenshot windows` Return → a picker with window/monitor rectangles hinted; click on the bar area → the shot is full-monitor sized (`file` on the newest PNG → 1280 x 800).
-  * Type `OMARCHY_SCREENSHOT_DIR=/tmp/shots omarchy capture screenshot fullscreen` Return → toast "Created screenshot directory: /tmp/shots" (the directory is made on demand) then the normal saved toast; the path is under `/tmp/shots/`. Type `omarchy screenshot` Return (the router alias): the crosshair appears; press Ctrl+Return → toast. Type `omarchy capture screenshot --help` Return → usage with `[smart|region|windows|fullscreen] [slurp|copy|save] [--editor=<name>]`.
-  * Unhappy path: type `omarchy capture screenshot region; echo "exit=$?"` Return and press Escape at the crosshair → cancelled quietly, no editor, no new file, exit=0. Then the menu route once: Super+Space → Trigger → Capture → Screenshot, drag a small region → the saved toast with its preview.
-  * Round trip: `rm -rf /tmp/shots ~/Pictures/screenshot-*.png` Return; close the terminal. The desktop must look exactly as at the start.
+  * Press Super+Return. A terminal opens.
+  * Type `wl-copy "plain text"` and press Return. The clipboard holds `plain text`.
+  * Type `ls ~/Pictures | wc -l` and press Return. Note the count.
+  * Type `omarchy capture screenshot fullscreen save` and press Return. The last line is a path ending in `.png` under `~/Pictures`. No picker appears.
+  * Type `ls -l "$(ls -t ~/Pictures/*.png | head -1)"` and press Return. The file is larger than 10 KB.
+  * Type `file "$(ls -t ~/Pictures/*.png | head -1)"` and press Return. The line includes `PNG image data, 1280 x 800`.
+  * Type `wl-paste` and press Return. The line is `plain text`.
+  * Type `ls ~/Pictures | wc -l` and press Return. The count is one more.
+  * Type `xdg-open "$(ls -t ~/Pictures/*.png | head -1)" &` and press Return. An image viewer opens. The captured bar is visible.
+  * Click the viewer. It has focus.
+  * Press Super+W. The viewer closes.
+  * Type `omarchy-capture-screenshot fullscreen copy` and press Return. No path is printed. No toast appears.
+  * Type `ls ~/Pictures | wc -l` and press Return. The count is unchanged.
+  * Type `wl-paste --list-types` and press Return. The list includes `image/png`.
+  * Type `wl-copy "plain text"` and press Return. The clipboard holds `plain text`.
+  * Type `omarchy-capture-screenshot fullscreen` and press Return. A path is printed. A toast appears.
+  * Type `ls ~/Pictures | wc -l` and press Return. The count is one more.
+  * Type `wl-paste --list-types` and press Return. The list includes `image/png`.
+  * Type `omarchy-capture-screenshot windows` and press Return. A picker appears.
+  * Click the bar. The picker closes.
+  * Type `file "$(ls -t ~/Pictures/*.png | head -1)"` and press Return. The line includes `1280 x 800`.
+  * Type `OMARCHY_SCREENSHOT_DIR=/tmp/shots omarchy capture screenshot fullscreen` and press Return. A toast says `/tmp/shots` was created. The printed path is under `/tmp/shots`.
+  * Type `omarchy screenshot` and press Return. The selection overlay appears.
+  * Press Ctrl+Return. A toast says the screenshot was saved.
+  * Type `omarchy capture screenshot --help` and press Return. The usage line includes `smart`, `region`, `windows`, and `fullscreen`.
+  * Type `omarchy capture screenshot region; echo "exit=$?"` and press Return. The selection overlay appears.
+  * Press Escape. The overlay closes. The last line is `exit=0`.
+  * Press Super+Space. The menu opens.
+  * Click Trigger.
+  * Click Capture.
+  * Click Screenshot. The selection overlay appears.
+  * Drag a small rectangle and release. A toast says the screenshot was saved.
+  * Click the terminal. It has focus.
+  * Type `rm -rf /tmp/shots ~/Pictures/screenshot-*.png` and press Return.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The printed path is the last line; `f=$(omarchy capture screenshot fullscreen save | tail -n 1); file "$f"` captures it exactly. `imv "$f" &` (press `q` to close) is an alternative viewer to `xdg-open`; the bar band is the top ~26 px of the image (menu glyph left, clock centre) — compare it against the live bar in your own screenshot. Make sure the viewer, not the terminal, is focused before Super+W.
-  * `fullscreen` needs no interaction; use it whenever you just need a file. `omarchy screenrecord --fullscreen` / `--stop-recording` are the same recorder as Alt+Print and are exercised in the screen-recording tests.
+  * `fullscreen` needs no picker. Click the viewer, not the terminal, before Super+W.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of the printed path with its `ls -l` size and `PNG image data, 1280 x 800`, the viewer showing a non-blank rendered bar band, the count and clipboard type after each mode as described, the windows picker, the "Created screenshot directory" toast and the custom-dir path, the alias capture, the help text, the quiet cancel with no new file, and the menu-route toast
+  * On success
+  ** The printed path, a file larger than 10 KB, `1280 x 800`, the viewer showing the bar, `image/png` only after copy, a path and a toast after the default mode, the created `/tmp/shots` path, the help line, and a quiet cancel
   * If unsuccessful
-  ** The mode whose side effect leaked (a toast in copy mode, an image on the clipboard in save mode), a missing/zero-size file, a command error, or a viewer showing a black image or black bar band; `omarchy-version`
+  ** A toast in copy mode, an image on the clipboard in save mode, or a black image in the viewer
 covers: bin/omarchy-capture-screenshot (fullscreen|windows, slurp|copy|save); bin/omarchy-capture-region (windows, fullscreen); bin/omarchy (alias routing, capture screenshot); default/hypr/bindings/utilities.lua:38; shell runtime (bar); test/shell.d/screenshot-sanity-test.sh:121-244; test/shell.d/manifest-entrypoints-test.sh; agents/skills/visual-verification.md:13-19; default/agents/skills/omarchy/capture.md; SKILL.md ("Record my screen"); contributing.md (captures for bug reports); manual/12:20-22 (12-screenshots-recording.md); manual/14:24,55
 
 ### screenshot-dir-override-uwsm-env   [VM-OK]

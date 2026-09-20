@@ -130,14 +130,14 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `input-lua-repeat-rate-and-compose-override`
 - [x] `xcompose-compose-key-sequences-restart-and-legacy-repair`
 - [x] `looknfeel-lua-overrides-rounding-gaps-animations`
-- [ ] `hyprsunset-config-edit-and-process-restart`
-- [ ] `hypr-session-environment-and-autostart`
-- [ ] `autostart-lua-user-entry-runs-on-login`
-- [ ] `hyprland-lua-preinstalled-bindings-flag`
-- [ ] `multi-monitor-and-laptop-display-chords-single-display`
-- [ ] `media-keys-via-wtype-dummy-sink-no-backlight-touchpad`
-- [ ] `screenshot-print-region-keyboard-picker-and-cancel`
-- [ ] `capture-cli-screenshot-modes-copy-save-and-dir`
+- [x] `hyprsunset-config-edit-and-process-restart`
+- [x] `hypr-session-environment-and-autostart`
+- [x] `autostart-lua-user-entry-runs-on-login`
+- [x] `hyprland-lua-preinstalled-bindings-flag`
+- [x] `multi-monitor-and-laptop-display-chords-single-display`
+- [x] `media-keys-via-wtype-dummy-sink-no-backlight-touchpad`
+- [x] `screenshot-print-region-keyboard-picker-and-cancel`
+- [x] `capture-cli-screenshot-modes-copy-save-and-dir`
 - [ ] `screenshot-dir-override-uwsm-env`
 - [ ] `screenrecording-alt-print-start-stop-cpu-encode`
 - [ ] `screenrecording-refusals-and-webcam-absent`
