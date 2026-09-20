@@ -87,6 +87,11 @@ class Element {
     return this.parent === null ? null : this.parent.closest(selector);
   }
 
+  querySelector(selector: string): Element | null {
+    const [found] = this.querySelectorAll(selector);
+    return found ?? null;
+  }
+
   querySelectorAll(selector: string): Element[] {
     return this.children.flatMap((child) => [
       ...(child.matches(selector) ? [child] : []),

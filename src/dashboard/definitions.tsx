@@ -190,8 +190,9 @@ const Definition: FC<{
   );
 };
 
-// Not a form: enter must not reload the page. public/dashboard.js narrows the list as this is typed.
-// autocomplete is off: a restored value does not fire input, so the list would not match the box.
+// Not a form: enter must not reload the page. public/dashboard.js filters and reorders the list
+// as this is typed. autocomplete is off: a restored value does not fire input, so the list would
+// not match the box.
 const DefinitionSearch: FC = () => (
   <search class="search">
     <input type="search" aria-label="Search definitions" autocomplete="off" />
@@ -275,8 +276,10 @@ export const DefinitionHistories: FC<{
   );
 };
 
-// Every name is on the page. Definitions do not change while it is open, so the search hides
-// rows in the browser. The miss starts hidden; the script shows it when nothing matches.
+// Every name is on the page. New tests are rare and the list does not change while it is open,
+// so the browser filters and sorts it; typing asks nothing of the server. The miss starts
+// hidden; the script shows it when nothing matches.
+
 // The pills are the last twenty-five passes, fails and runs, oldest on the left: green a pass,
 // red a fail, yellow one that is still running. Pending is not drawn. public/dashboard.js rereads
 // the ones on screen once a minute. The running list above is the part that polls by itself.
