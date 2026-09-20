@@ -3446,29 +3446,43 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Take a screenshot of the plain desktop as the colour reference. Open a terminal with Super+Enter and type `omarchy-toggle-nightlight --status; omarchy-shell nightlight status` Enter: both report `"enabled":false` (temperature `null` or `6500` — hyprsunset is not running yet).
-  * Press Super+Ctrl+N. Within ~3 seconds the whole screen takes on a warm orange tint and a night-light glyph appears in the bar's indicator area just left of the clock. Type `omarchy-toggle-nightlight --status; hyprctl hyprsunset temperature; pgrep -x hyprsunset && echo RUNNING` Enter → `{"enabled":true,"temperature":4000}`, `4000`, `RUNNING`.
-  ** If the status JSON says enabled while the screen is not tinted, report it — the shell and hyprsunset disagree.
-  * Hover the indicator area left of the clock and click the lit glyph with the mouse: the tint goes away and the glyph fades out; `omarchy-toggle-nightlight --status; hyprctl hyprsunset temperature` → `"enabled":false`, `6500`.
-  * Press Super+Space → Trigger → Toggle → Nightlight: tint and glyph return and `--status` flips to true/4000. Toggle it again from the menu: status and temperature flip back to false/6500.
-  * Type `omarchy-shell nightlight enable` Enter → `enabled`, indicator lit; type `omarchy-shell nightlight toggle` Enter → `disabled`, indicator gone, status false/6500. Type `omarchy-shell nightlight enable` Enter, then press Super+Ctrl+N: back to disabled (hotkey and IPC share one state).
-  * Unhappy path: press Super+Ctrl+N twice more within a couple of seconds: on → off works repeatedly, the indicator ends off, `--status` agrees, no crash.
-  * Close the terminal with Super+W; the desktop is untinted, as at the start.
-  * any crashes or erroneous behavior must be reported.
-  * always take a screen shot of every step
+  * Take a screenshot of the desktop.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy-toggle-nightlight --status` and press Enter. The line says `"enabled":false`.
+  * Type `omarchy-shell nightlight status` and press Enter. The line says `"enabled":false`.
+  * Press Super+Ctrl+N. The screen takes on a warm tint. A night-light glyph appears in the bar, left of the clock.
+  * Type `omarchy-toggle-nightlight --status` and press Enter. The line says `{"enabled":true,"temperature":4000}`.
+  * Type `hyprctl hyprsunset temperature` and press Enter. The line is `4000`.
+  * Type `pgrep -x hyprsunset && echo RUNNING` and press Enter. The line is `RUNNING`.
+  ** If the status line says enabled and the screen is not tinted, report that the shell and hyprsunset disagree.
+  * Click the night-light glyph left of the clock. The tint goes away. The glyph goes away.
+  * Type `omarchy-toggle-nightlight --status` and press Enter. The line says `"enabled":false`.
+  * Type `hyprctl hyprsunset temperature` and press Enter. The line is `6500`.
+  * Press Super+Space. The menu opens. Click Trigger. Click Toggle. Click Nightlight. The menu closes. The tint and the glyph are back.
+  * Type `omarchy-toggle-nightlight --status` and press Enter. The line says `{"enabled":true,"temperature":4000}`.
+  * Press Super+Space. The menu opens. Click Trigger. Click Toggle. Click Nightlight. The menu closes. The tint and the glyph are gone.
+  * Type `omarchy-shell nightlight enable` and press Enter. The line is `enabled`. The glyph is back.
+  * Type `omarchy-shell nightlight toggle` and press Enter. The line is `disabled`. The glyph is gone.
+  * Type `omarchy-toggle-nightlight --status` and press Enter. The line says `"enabled":false`.
+  * Type `omarchy-shell nightlight enable` and press Enter. The line is `enabled`.
+  * Press Super+Ctrl+N. The tint and the glyph are gone. Status and the hotkey share one state.
+  * Press Super+Ctrl+N. The tint and the glyph are back.
+  * Press Super+Ctrl+N. The tint and the glyph are gone.
+  * Type `omarchy-toggle-nightlight --status` and press Enter. The line says `"enabled":false`.
+  * Press Super+W. The terminal closes. The desktop is untinted.
+  * Any crash or erroneous behavior must be reported.
   </ActionList>
 
   <Hints>
-  * Super+Ctrl+N is <M-C-n>. Compare screenshots side by side; the tint is unmistakable on white terminal text or the wallpaper.
-  * Menu guards paint from the previous open; each Toggle click closes the menu — reopen it for the next.
+  * Super+Ctrl+N is <M-C-n>. Each Toggle click closes the menu. Reopen it for the next toggle.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots: neutral desktop → orange-tinted desktop with the glyph next to the clock → neutral again with the glyph gone, for the hotkey, the indicator click and the menu row
-  ** Terminal shows `--status` flipping false → true (4000) → false (6500), `RUNNING`, the IPC `enabled`/`disabled` replies and `hyprctl hyprsunset temperature` agreeing each time
+  * On success
+  ** Screenshots: desktop, tint with the glyph, desktop with the glyph gone, for the hotkey, the glyph click, and the menu row
+  ** The terminal shows `--status` false, then true with `4000`, then false with `6500`, `RUNNING`, and the `enabled` and `disabled` replies
   * If unsuccessful
-  ** Screenshot of the untinted screen after a toggle with the `--status` output and `pgrep -x hyprsunset`, `Couldn't connect to hyprsunset`, or the indicator/hotkey/IPC disagreeing
+  ** Screenshot of the desktop after a toggle, with the status line and `pgrep -x hyprsunset`
   ** Output of `omarchy-version`
 covers: bin/omarchy-toggle-nightlight; bin/omarchy-restart-hyprsunset (indirectly); shell/plugins/services/nightlight/Service.qml, NightlightModel.js; shell/plugins/bar/indicators/NightLight.qml; default/hypr/bindings/utilities.lua:32 (SUPER+CTRL+N); default/omarchy/omarchy-menu.jsonc trigger.toggle.nightlight; test/shell.d/nightlight-test.sh; manual/13-toggles-idle-screensaver.md "Night light"
 
@@ -3479,30 +3493,40 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Screenshot the desktop (wallpaper and bar). Open a terminal with Super+Enter and type `cat /proc/$(pgrep -x quickshell)/environ | tr '\0' '\n' | grep '^QS_'; pgrep -x quickshell` Enter → `QS_DISABLE_FILE_WATCHER=1`, `QS_NO_RELOAD_POPUP=1` and the shell PID (note it).
-  * Press Super+Space, click `Update`, click `Process`, click `Shell` with the mouse. The bar vanishes for a moment and returns within ~3 seconds; the wallpaper may flash but comes back identical to the first screenshot. Type `pgrep -x quickshell; omarchy-shell shell ping` Enter → a NEW pid and `ok`.
-  ** If the desktop is black after the restart, wait 3 s and screenshot again before reporting a black background (that is the failure this test guards).
-  * Type `omarchy-notification-send "After restart" "notifications work"` Enter → a toast appears top-right. Press Super+Ctrl+L → the lock screen (blurred copy of the same wallpaper, only the password field — no clock or user name; it blanks after 5 s); type `prime` Enter → desktop. Press Super+Space → the menu opens; Escape.
-  * Type `pkill -9 -x quickshell` Enter: the bar disappears at once and is back within ~3 seconds (screenshot at 1 s and 4 s). Press Super+Space: the menu opens (the relaunched shell works); Escape. Type `journalctl --user -t omarchy-shell --no-pager | tail -1` Enter → `Omarchy shell exited with status 137; relaunching.`
-  * Unhappy path: type `for i in 1 2 3 4 5 6; do pkill -9 -x quickshell; sleep 3; done; sleep 3; pgrep -x quickshell || echo shell-gone` Enter and screenshot every 5 s until it finishes (~25 s). After the sixth kill the bar does NOT come back and the terminal prints `shell-gone`. Type `journalctl --user -t omarchy-shell --no-pager | tail -1` Enter → `Giving up on the Omarchy shell after 6 relaunches in under a minute.`
-  ** The terminal keeps working without the shell; only the bar, background and menu belong to it. A `pkill` error inside the loop means the shell was already gone that round; that is fine. If the bar does come back after the sixth kill, count the `relaunching` lines and report that instead.
-  * Type `omarchy-restart-shell; echo "exit=$?"` Enter → the bar returns and `exit=0`. Press Super+Space → the menu opens; Escape.
-  * Close the terminal with Super+W; the desktop is as it started.
-  * any crashes or erroneous behavior must be reported.
-  * always take a screen shot of every step
+  * Take a screenshot of the desktop.
+  * Press Super+Enter. A terminal opens.
+  * Type `cat /proc/$(pgrep -x quickshell)/environ | tr '\0' '\n' | grep '^QS_'; pgrep -x quickshell` and press Enter. The lines include `QS_DISABLE_FILE_WATCHER=1` and `QS_NO_RELOAD_POPUP=1`, then the shell PID. Note that PID.
+  * Press Super+Space. The menu opens. Click Update. Click Process. Click Shell. The bar vanishes, then returns. The wallpaper matches the screenshot.
+  ** If the desktop is black, wait 3 seconds and take another screenshot before reporting a black background.
+  * Type `pgrep -x quickshell; omarchy-shell shell ping` and press Enter. The PID is new. The last line is `ok`.
+  * Type `omarchy-notification-send "After restart" "notifications work"` and press Enter. A toast appears at the top-right.
+  * Press Super+Ctrl+L. The lock screen appears. Type `prime` and press Enter. The desktop returns.
+  * Press Super+Space. The menu opens. Press Escape. The menu closes.
+  * Type `pkill -9 -x quickshell` and press Enter. The bar disappears.
+  * Wait 1 second and take a screenshot. Wait until 4 seconds. The bar is back.
+  * Press Super+Space. The menu opens. Press Escape. The menu closes.
+  * Type `journalctl --user -t omarchy-shell --no-pager | tail -1` and press Enter. The line says `Omarchy shell exited with status 137; relaunching.`
+  * Type `for i in 1 2 3 4 5 6; do pkill -9 -x quickshell; sleep 3; done; sleep 3; pgrep -x quickshell || echo shell-gone` and press Enter. After the command finishes, the bar is gone. The last line is `shell-gone`.
+  ** A `pkill` error inside the loop means the shell was already gone for that round. Continue.
+  ** If the bar comes back after the sixth kill, count the `relaunching` lines and report that instead.
+  * Type `journalctl --user -t omarchy-shell --no-pager | tail -1` and press Enter. The line says `Giving up on the Omarchy shell after 6 relaunches in under a minute.`
+  * Type `omarchy-restart-shell; echo "exit=$?"` and press Enter. The bar returns. The last line is `exit=0`.
+  * Press Super+Space. The menu opens. Press Escape. The menu closes.
+  * Press Super+W. The terminal closes. The desktop matches the first screenshot.
+  * Any crash or erroneous behavior must be reported.
   </ActionList>
 
   <Hints>
-  * Double-check the mouse position before clicking the menu rows; ./client-with-image helps.
-  * A missing bar for more than ~10 s after a restart is a failure (`Omarchy shell did not become ready after restart.`).
+  * A missing bar for more than about 10 seconds after a restart is a failure.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots: desktop before, bar gone, bar back with the same wallpaper and a new PID, the toast, the lock and unlock, the open menu, `ok`; bar gone then back after one kill with the `relaunching.` line; bar absent after the loop with `shell-gone` and the `Giving up` line; bar back after `omarchy-restart-shell` with `exit=0` and the menu opening
+  * On success
+  ** Screenshots: desktop, bar gone, bar back with the same wallpaper, the toast, the lock screen, the menu, bar gone and back after one kill, bar gone after the loop, bar back after restart
+  ** The terminal shows a new PID, `ok`, `relaunching.`, `shell-gone`, the `Giving up` line, and `exit=0`
   ** The menu rows were clicked with the mouse
   * If unsuccessful
-  ** Bar not returning after the restart or after one kill, a black or different wallpaper, no toast, the lock hotkey dead, or the bar returning after the give-up; `journalctl --user -t omarchy-shell --since -3min --no-pager | tail -60 | sudo tee /dev/ttyS0` read via get-serial
+  ** Bar not returning after one restart or one kill, a different wallpaper, no toast, or the bar returning after the give-up
 covers: bin/omarchy-restart-shell; bin/omarchy-launch-shell (supervisor loop, attempt budget, logger); bin/omarchy-shell; default/omarchy/omarchy-menu.jsonc update.process.shell; shell/shell.qml startup (_syncServices, keepLoaded); shell/plugins/background/Background.qml (Component.onCompleted refreshBackground); test/shell.d/restart-shell-test.sh, launch-shell-test.sh; docs/omarchy-shell.md
 
 ### launch-docker-tui-polkit-gate   [VM-OK]
@@ -3512,28 +3536,28 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Shift+D. A terminal appears and over it the Omarchy polkit dialog (a small centred shell window with a shortened "Authorize running …" label) asks for prime's password to run lazydocker.
-  ** The dialog may appear a second after the terminal; type the password blind if the field is not obviously focused.
-  * Unhappy path: type `wrong` and press Enter. The dialog reports the failure (red "Wrong", shake) and re-prompts, or closes and the terminal says not authorized. Screenshot.
-  * Type `prime` Enter (press Super+Shift+D again first if the dialog closed). lazydocker opens (panels Project / Containers / Images / Volumes) within ~10 seconds while the Docker socket activates. Press `q`; the window closes.
-  ** If lazydocker says it cannot connect to the daemon, wait 5 s and press Super+Shift+D once more; record which happened.
-  * Press Super+Shift+D again and click Cancel: the terminal shows pkexec's refusal ("Not authorized" or similar) and either stays at a prompt or closes; no compositor error. Close it with Super+W if it stayed.
-  * Press Super+Alt+Space, type `Docker`, Enter → the same dialog; press Escape. The terminal closes with no TUI.
-  * Press Super+Space → Setup → Security: "Sudoless Docker" is listed (the opt-in that would remove this gate; do not run it). Escape; the desktop is as before, no stray windows.
-  * any crashes or erroneous behavior must be reported.
-  * always take a screen shot of every step
+  * Press Super+Shift+D. A terminal opens. A polkit dialog asks for prime's password.
+  * Type `wrong` and press Enter. The dialog reports the password as wrong and asks again, or it closes and the terminal says the run was not authorized.
+  * If the dialog closed, press Super+Shift+D again.
+  * Type `prime` and press Enter. lazydocker opens.
+  ** If lazydocker says it cannot connect to the daemon, wait 5 seconds and press Super+Shift+D again. Record which one happened.
+  * Press `q`. The lazydocker window closes.
+  * Press Super+Shift+D. The polkit dialog returns. Click Cancel. The terminal shows a not-authorized line, or it closes.
+  * If the terminal stayed open, press Super+W. It closes.
+  * Press Super+Alt+Space. The app menu opens. Type `Docker` and press Enter. The polkit dialog appears. Press Escape. The dialog closes. The terminal closes. No TUI is open.
+  * Press Super+Space. The menu opens. Click Setup. Click Security. The row Sudoless Docker is listed. Do not run it. Press Escape until the menu is closed. The desktop has no stray windows.
+  * Any crash or erroneous behavior must be reported.
   </ActionList>
 
   <Hints>
-  * Super+Shift+D is <M-S-d>. The polkit dialog is drawn by the Omarchy shell; Escape exits pkexec with 126.
-  * Skipped: the sudoless (docker group) path, which needs a reboot.
+  * Super+Shift+D is <M-S-d>. Do not run Sudoless Docker.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of the polkit dialog, the rejected wrong password, lazydocker running (or its daemon error after the retry), the refusal after Cancel, the cancelled launcher entry closing with no TUI, and the Security row
+  * On success
+  ** Screenshots of the polkit dialog, the rejected password, lazydocker, the refusal after Cancel, the cancelled Docker launcher, and the Sudoless Docker row
   * If unsuccessful
-  ** Screenshot of lazydocker opening with no prompt (a security regression), a terminal error, or a hang after Cancel
+  ** Screenshot of lazydocker opening with no password prompt, or a hang after Cancel
 covers: bin/omarchy-launch-docker-tui; bin/omarchy-sudo-docker; applications/Docker.desktop; default/hypr/bindings/applications.lua:16; default/omarchy/omarchy-menu.jsonc setup.security.sudoless-docker; test/shell.d/polkit-test.sh; test/acceptance.d/system-test.sh:86-100; manual/07:120
 
 ### launch-tui-chords-btop-cliamp-and-focus-existing   [VM-OK]
@@ -3543,26 +3567,35 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return so a tiled terminal exists. Press Super+Ctrl+T: btop appears as a floating window centred over the terminal, about 875×600. Click it and press Super+T: it tiles beside the terminal; Super+T again: floating.
-  * Click the terminal and type `omarchy-launch-or-focus-tui btop` Enter: focus jumps to the existing btop; the screenshot shows exactly one btop window. Click the terminal and type `omarchy-launch-tui btop` Enter: a second btop window opens (the plain launcher does not dedupe). Press `q` in each btop to close both.
-  * Press Super+Ctrl+Q: a calculator floats over the terminal; type `2+2` Enter → 4. Press Super+K, type `Calculator`: the row reads `SUPER + CTRL + Q / XF86Calculator → Calculator`. Escape. Focus the calculator and press Super+W.
-  * Press Super+Shift+Alt+M: a terminal running cliamp opens tiled; record what it says about audio output (the Dummy Output or none) — it must not exit by itself.
-  * Press Super+2, then Super+Shift+Alt+M again: you are brought back to the existing cliamp window, not a second one. Quit cliamp (`q` or Ctrl+C) and close its window.
-  ** Newer chords may be absent on 4.0.2 — check the Super+K row first and report "absent on this build", not "broken".
-  * Unhappy path: in the terminal type `omarchy-launch-or-focus; echo rc=$?` Enter → `Usage: omarchy-launch-or-focus [window-pattern] [launch-command]` and rc=1.
-  * Close the terminal; the desktop is empty.
-  * any crashes or erroneous behavior must be reported.
-  * always take a screen shot of every step
+  * Press Super+Return. A tiled terminal opens.
+  * Press Super+Ctrl+T. btop opens as a floating window over the terminal.
+  * Click btop. Press Super+T. btop tiles beside the terminal.
+  * Press Super+T. btop is floating again.
+  * Click the first terminal. Type `omarchy-launch-or-focus-tui btop` and press Enter. Focus moves to the existing btop. There is still one btop window.
+  * Click the first terminal. Type `omarchy-launch-tui btop` and press Enter. A second btop window opens.
+  * Click the first btop and press `q`. That window closes.
+  * Click the second btop and press `q`. That window closes.
+  * Press Super+Ctrl+Q. A calculator opens as a floating window.
+  * Type `2+2` and press Enter. The result is `4`.
+  * Press Super+K. The keybindings viewer opens. Type `Calculator`. The row reads `SUPER + CTRL + Q / XF86Calculator → Calculator`. Press Escape. The viewer closes.
+  * Click the calculator. Press Super+W. It closes.
+  * Press Super+Shift+Alt+M. A terminal running cliamp opens tiled. It does not exit on its own. Record what it says about audio output.
+  ** If this chord is absent, open Super+K, look up the row, report "absent on this build", and skip the rest of the cliamp steps.
+  * Press Super+2. The view moves to workspace 2.
+  * Press Super+Shift+Alt+M. Focus returns to the same cliamp window on workspace 1. No second cliamp window opens.
+  * Quit cliamp with `q` or Ctrl+C. Press Super+W if its window stays.
+  * Click the first terminal. Type `omarchy-launch-or-focus; echo rc=$?` and press Enter. The usage line appears. The last line is `rc=1`.
+  * Press Super+W. The terminal closes. The desktop is empty.
+  * Any crash or erroneous behavior must be reported.
   </ActionList>
 
   <Hints>
-  * Chords: <M-C-t>, <M-C-q>, <M-S-A-m>, Super+T <M-t>. btop redraws constantly; a mid-frame screenshot is fine. Refocus the terminal with a mouse click before typing after a TUI takes focus.
-  * Playback is not exercised (no audio sink); cliamp starting and being re-focused is the story.
+  * Chords: <M-C-t>, <M-C-q>, <M-S-A-m>, Super+T is <M-t>. Playback is not part of this test.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of floating btop, btop tiled and floating again, one btop window after or-focus and two after the plain launch, the floating calculator showing 4, the merged Calculator row, cliamp running, being pulled back to the same cliamp window, and the usage line with rc=1
+  * On success
+  ** Screenshots of floating btop, tiled btop, one btop after or-focus, two btop windows, the calculator showing 4, the merged Calculator row, cliamp, the same cliamp window after the second chord, and the usage line with `rc=1`
   * If unsuccessful
   ** Screenshot of btop opening tiled, a duplicate after or-focus, a missing calculator, a second cliamp window, or a missing usage line
 covers: default/hypr/bindings/utilities.lua:13-14,104; default/hypr/bindings/applications.lua:15; default/hypr/apps/system.lua:2-11,32; bin/omarchy-launch-tui; bin/omarchy-launch-or-focus; bin/omarchy-launch-or-focus-tui; bin/omarchy-menu-keybindings:339-346; manual/04:15; manual/07:73,77,107
@@ -3574,28 +3607,39 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Space → Install → Web App. A floating terminal shows `Let's create a new web app…` with a `Name>` prompt. Type `Arch Wiki Probe` Enter; at `URL>` type `wiki.archlinux.org` Enter (no scheme on purpose). The icon is fetched automatically (up to ten seconds; no `Icon URL/name>` prompt), then `You can now find Arch Wiki Probe using the app launcher (SUPER + SPACE)` and `Done! Press any key to close...`. Press a key.
-  ** If the favicon fetch fails, an `Icon URL/name>` prompt appears: type `omarchy-discord` (a bundled icon name) Enter and note that the automatic fetch failed.
-  * Open a terminal with Super+Enter and type `grep -E '^(Exec|Icon)' ~/.local/share/applications/'Arch Wiki Probe.desktop'; ls ~/.local/share/icons/hicolor/256x256/apps/ | grep arch-wiki` Enter → `Exec=omarchy-launch-webapp "https://wiki.archlinux.org"`, `Icon=arch-wiki-probe` (or the bundled name) and `arch-wiki-probe.png`.
-  * Press Super+Alt+Space, type `Arch Wiki`, Enter: a frameless (chromeless) window loads the Arch Wiki. Press Super+W.
-  * Press Super+Space → Remove → Web App: a picker lists the web apps. Select **Arch Wiki Probe only**: toast `Web app removed — Arch Wiki Probe`; reopen the Apps menu (twice): it no longer finds it, and `ls ~/.local/share/applications/ | grep -c 'Arch Wiki'` → `0`.
-  * Press Super+Space → Remove → Web App, type "you", Enter on YouTube: toast `Web app removed — YouTube`. Press Super+Alt+Space and type "youtube": No matches; Escape twice. Press Super+Shift+Y: youtube.com still opens as a web app (the chord is independent of the launcher entry). Close it with Super+W.
-  * Unhappy path: type `omarchy-webapp-remove "Nope Not Here"; echo rc=$?` Enter → a toast still appears and rc=0 (current behaviour; record it). Type `mkdir -p /tmp/emptyapps && omarchy-webapp-remove-all /tmp/emptyapps` Enter → `Scanning for web apps in /tmp/emptyapps...` then `No web apps found.`
-  * Round trip: type `omarchy-refresh-applications; rmdir /tmp/emptyapps` Enter and reopen Remove → Web App: YouTube is listed again. Escape; close the terminal with Super+W; the desktop is as before.
-  * any crashes or erroneous behavior must be reported.
-  * always take a screen shot of every step
+  * Press Super+Space. The menu opens. Click Install. Click Web App. A floating terminal shows `Name>`.
+  * Type `Arch Wiki Probe` and press Enter. The prompt is `URL>`.
+  * Type `wiki.archlinux.org` and press Enter. The line says the app can be found with the app launcher. The next line says `Done! Press any key to close...`.
+  ** If the prompt is `Icon URL/name>` instead, the automatic icon fetch failed. Type `omarchy-discord` and press Enter, then continue.
+  * Press a key. That terminal closes.
+  * Press Super+Enter. A terminal opens.
+  * Type `grep -E '^(Exec|Icon)' ~/.local/share/applications/'Arch Wiki Probe.desktop'` and press Enter. The lines include `Exec=omarchy-launch-webapp "https://wiki.archlinux.org"` and `Icon=arch-wiki-probe` or the bundled icon name you typed.
+  * Type `ls ~/.local/share/icons/hicolor/256x256/apps/ | grep arch-wiki` and press Enter. The icon file is listed, or the bundled-icon case from the hint is recorded.
+  * Press Super+Alt+Space. The app menu opens. Type `Arch Wiki` and press Enter. A frameless window opens. Press Super+W. It closes.
+  * Press Super+Space. The menu opens. Click Remove. Click Web App. A picker lists web apps.
+  * Select Arch Wiki Probe only. The toast says `Web app removed — Arch Wiki Probe`. The menu closes.
+  * Press Super+Alt+Space. The app menu opens. Type `Arch Wiki`. No matches. Press Escape. The menu closes.
+  * Type `ls ~/.local/share/applications/ | grep -c 'Arch Wiki'` and press Enter. The line is `0`.
+  * Press Super+Space. The menu opens. Click Remove. Click Web App. Select YouTube. The toast says `Web app removed — YouTube`.
+  * Press Super+Alt+Space. Type `youtube`. No matches. Press Escape until the menu is closed.
+  * Press Super+Shift+Y. youtube.com opens as a web app. Press Super+W. It closes.
+  * Click the terminal. Type `omarchy-webapp-remove "Nope Not Here"; echo rc=$?` and press Enter. A toast still appears. The last line is `rc=0`. Record that.
+  * Type `mkdir -p /tmp/emptyapps && omarchy-webapp-remove-all /tmp/emptyapps` and press Enter. The lines say `Scanning for web apps in /tmp/emptyapps...` and `No web apps found.`
+  * Type `omarchy-refresh-applications; rmdir /tmp/emptyapps` and press Enter.
+  * Press Super+Space. The menu opens. Click Remove. Click Web App. YouTube is listed again. Press Escape until the menu is closed.
+  * Press Super+W. The terminal closes.
+  * Any crash or erroneous behavior must be reported.
   </ActionList>
 
   <Hints>
-  * Never pick a preinstalled web app in the removal picker other than YouTube (restored by the refresh). Toasts disappear after a few seconds; screenshot immediately after Enter.
-  * A same-name install silently overwrites the earlier one (no duplicate check); the page loads are small.
+  * Do not remove any preinstalled web app except YouTube. Screenshot a toast as soon as it appears. A same-name install overwrites the earlier one.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of the prompts, the success line, the Exec/Icon lines and icon file, the chromeless Arch Wiki window, the picker, the removal toasts, the empty `youtube` search, the YouTube window from the chord, the CLI outputs, and the restored picker
+  * On success
+  ** Screenshots of the name and URL prompts, the success line, the Exec and Icon lines, the frameless window, the removal toasts, the empty searches, the YouTube window from the chord, the CLI lines, and YouTube listed again
   * If unsuccessful
-  ** Screenshot of the failing prompt or terminal error and `ls ~/.local/share/applications ~/.local/share/icons/hicolor/256x256/apps`
+  ** Screenshot of the failing prompt or terminal error
 covers: bin/omarchy-webapp-install (interactive, normalize_webapp_url, fetch_site_icon); bin/omarchy-webapp-remove; bin/omarchy-webapp-remove-all; bin/omarchy-refresh-applications; default/omarchy/omarchy-menu.jsonc:212,294 (install.webapp, remove.webapp); default/hypr/bindings/applications.lua:27; test/shell.d/webapp-install-test.sh; manual/25-web-apps.md:3-9
 
 # Hyprland windows, workspaces, config, input and capture
@@ -3644,29 +3688,44 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+W, Super+Q and Ctrl+Alt+Delete on the empty desktop: nothing may change (bar stays, no dialog, no text console).
-  * Press Super+Return twice; two terminals tile side by side, the right one focused. Press Super+W: it closes and the left one fills the screen. Press Super+Return again and Super+Q: the focused one closes.
-  * Press Super+2, Super+Return, Super+Shift+Return (Chromium), then Super+3, Super+Return and Super+Ctrl+T (a floating btop). In that terminal type `hyprctl clients -j | jq length` and press Return → 5.
-  ** If Chromium shows an "application not responding" dialog, click Wait. Chromium takes 10–20 s to appear on 2 vCPU; wait for it before the close-all.
-  * Press Ctrl+Alt+Delete. Within a few seconds every window is gone (browser and floating btop included) and the bar shows workspace 1 active with no other occupied workspace; Super+2 and Super+3 show empty workspaces.
-  ** If the browser shows a "close tabs?" dialog it may survive the polite close request — report it. Chromium may offer to restore pages next time; that is fine.
-  * Press Super+1, Super+Return and type `hyprctl clients -j | jq length; hyprctl activeworkspace -j | jq .id` Return → 1 and 1. Then type `omarchy-hyprland-window-close-all` Return: the terminal closes itself; the desktop is empty, still on workspace 1.
-  * Press Super+K, type `Close window`: one merged row `SUPER + W / SUPER + Q → Close window`. Press Escape.
-  * The desktop must be as you found it: empty, workspace 1.
-  * any crashes or erroneous behavior must be reported.
-  * always take a screen shot of every step
+  * Press Super+W. The desktop stays empty.
+  * Press Super+Q. The desktop stays empty.
+  * Press Ctrl+Alt+Delete. The desktop stays empty. The bar stays. No text console appears.
+  * Press Super+Return. A terminal opens.
+  * Press Super+Return. A second terminal opens beside it. The second one has focus.
+  * Press Super+W. The focused terminal closes. One terminal remains.
+  * Press Super+Return. A second terminal opens.
+  * Press Super+Q. The focused terminal closes. One terminal remains.
+  * Press Super+2. The view moves to workspace 2.
+  * Press Super+Return. A terminal opens on workspace 2.
+  * Press Super+Shift+Return. Chromium opens on workspace 2. Wait until its window is up.
+  ** If Chromium shows "application not responding", click Wait.
+  * Press Super+3. The view moves to workspace 3.
+  * Press Super+Return. A terminal opens on workspace 3.
+  * Press Super+Ctrl+T. btop opens as a floating window.
+  * In that terminal type `hyprctl clients -j | jq length` and press Return. The line is `5`.
+  * Press Ctrl+Alt+Delete. Every window closes. The bar shows workspace 1, with no other occupied workspace.
+  ** If the browser shows a "close tabs?" dialog and stays open, report that.
+  * Press Super+2. Workspace 2 is empty.
+  * Press Super+3. Workspace 3 is empty.
+  * Press Super+1. The view is workspace 1.
+  * Press Super+Return. A terminal opens.
+  * Type `hyprctl clients -j | jq length` and press Return. The line is `1`.
+  * Type `hyprctl activeworkspace -j | jq .id` and press Return. The line is `1`.
+  * Type `omarchy-hyprland-window-close-all` and press Return. The terminal closes. The desktop is empty, still on workspace 1.
+  * Press Super+K. The keybindings viewer opens. Type `Close window`. The row reads `SUPER + W / SUPER + Q → Close window`. Press Escape. The viewer closes. The desktop is empty on workspace 1.
+  * Any crash or erroneous behavior must be reported.
   </ActionList>
 
   <Hints>
-  * Ctrl+Alt+Delete is `<C-A-DEL>` — a Hyprland bind here, not a VT switch or reboot; a text console means the wrong key was sent.
-  * The bar's workspace indicators sit right of the Omarchy logo; only occupied workspaces are listed.
+  * Ctrl+Alt+Delete is `<C-A-DEL>`. A text console means the wrong key was sent. Chromium can take 10–20 seconds to appear.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots: the empty desktop unchanged after the three chords; one terminal left after Super+W and after Super+Q; windows across workspaces 1–3 with the jq count 5; empty workspace 1 right after Ctrl+Alt+Delete with the bar indicators cleared; the `1` / `1` jq lines; the merged Super+K row
+  * On success
+  ** Screenshots: empty desktop after Super+W, Super+Q, and Ctrl+Alt+Delete; one terminal left after Super+W and after Super+Q; the jq line `5`; empty workspace 1 after Ctrl+Alt+Delete; jq lines `1` and `1`; the merged Close window row
   * If unsuccessful
-  ** Screenshot of a window that survived (with `hyprctl clients -j | jq '.[].class'` listing survivors), of a text console, or of a crash dialog
+  ** Screenshot of a window that stayed open, a text console, or a crash dialog
 covers: default/hypr/bindings/tiling.lua:1-3; bin/omarchy-hyprland-window-close-all; bin/omarchy-menu-keybindings (alternative_chord_actions); test/shell.d/hyprland-window-close-all-test.sh; manual/04:25; manual/07:13-14
 
 ### window-float-pseudo-split   [VM-OK]
@@ -3676,24 +3735,28 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return twice: two terminals side by side.
-  * Press Super+J: they stack top/bottom. Press Super+J again: side by side.
-  * Press Super+T: the focused (right) terminal becomes a smaller floating window drawn over the other, which expands underneath. Press Super+T again: it tiles back beside the other.
-  * Press Super+P: the focused terminal shrinks toward its natural size inside its slot with wallpaper showing around it while the other terminal keeps its width. Press Super+P again: it fills its slot.
-  * Close one terminal (Super+W) and press Super+J and Super+P on the lone window: no visible change, no error.
-  * Close the last terminal; the desktop is empty again.
-  * any crashes or erroneous behavior must be reported.
-  * always take a screen shot of every step
+  * Press Super+Return. A terminal opens.
+  * Press Super+Return. A second terminal opens beside it.
+  * Press Super+J. The two terminals stack, one above the other.
+  * Press Super+J. They sit side by side again.
+  * Press Super+T. The focused terminal becomes a floating window over the other.
+  * Press Super+T. It tiles beside the other again.
+  * Press Super+P. The focused terminal shrinks inside its slot. Wallpaper shows around it. The other terminal keeps its width.
+  * Press Super+P. The focused terminal fills its slot again.
+  * Press Super+W. One terminal closes.
+  * Press Super+J. The remaining terminal does not change.
+  * Press Super+P. The remaining terminal does not change.
+  * Press Super+W. The last terminal closes. The desktop is empty.
+  * Any crash or erroneous behavior must be reported.
   </ActionList>
 
   <Hints>
-  * `dwindle.force_split = 2` puts new windows right/below, so the newer terminal is the one on the right or bottom.
-  * Screenshot a second after each chord; the popin animation is ~0.3 s.
+  * New windows open on the right or below. Wait about a second after each chord before the screenshot.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of side-by-side, stacked, side-by-side; the floating terminal over the expanded one and tiled again; the pseudo window with wallpaper around it and filled again
+  * On success
+  ** Screenshots of side-by-side, stacked, side-by-side, floating, tiled, the shrunken window with wallpaper around it, and the filled slot
   * If unsuccessful
   ** Screenshot after the chord that did not change the layout
 covers: default/hypr/bindings/tiling.lua:5-7; default/hypr/looknfeel.lua:91-94; manual/04:9-15; manual/07:15-19
@@ -3705,28 +3768,49 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return, then Super+Shift+Return: a terminal and Chromium share the width half and half. Press Super+J: they stack top/bottom; Super+J again: side by side. Click Chromium and press Super+W to close it.
-  ** A first-run page or "restore pages" bubble in Chromium is fine; click Wait if Hyprland raises a "not responding" dialog.
-  * Press Super+Return twice more and label the three terminals by typing `echo A`, `echo B`, `echo C` Return in each (click each to focus it).
-  * Click A (the left column). Press Super+Right: focus moves to a right-column terminal (gradient border) and the pointer jumps to its centre. Press Super+Up / Super+Down: focus moves between the two stacked ones. Press Super+Left twice: focus returns to A and stays there on the second press.
-  * With A focused press Super+Shift+Right: A swaps places with the right neighbour and keeps focus. Press Super+Shift+Left: back. Press Super+Shift+Up and Super+Shift+Down on a stacked one: the stacked order flips each time.
-  * Press Alt+Tab three times: each press moves focus to a different terminal and the third returns to the start. Press Alt+Shift+Tab: one step back.
-  * Press Super+T on B and on C so they float overlapping; focus B, press Alt+Tab until C is focused: C is now drawn on top of B.
-  * Close all three terminals. Unhappy path: on the empty desktop press Super+J, Super+Shift+Right and Super+Right: nothing changes, nothing crashes.
-  * any crashes or erroneous behavior must be reported.
-  * always take a screen shot of every step
+  * Press Super+Return. A terminal opens.
+  * Press Super+Shift+Return. Chromium opens beside it.
+  ** A first-run page or "restore pages" bubble is fine. If Hyprland shows "not responding", click Wait.
+  * Press Super+J. The terminal and Chromium stack, one above the other.
+  * Press Super+J. They sit side by side again.
+  * Click Chromium. Press Super+W. Chromium closes.
+  * Press Super+Return. A second terminal opens.
+  * Click the left terminal. Type `echo A` and press Return. The line `A` appears.
+  * Click the next terminal. Type `echo B` and press Return. The line `B` appears.
+  * Press Super+Return. A third terminal opens. Type `echo C` and press Return. The line `C` appears.
+  * Click the terminal that shows `A`.
+  * Press Super+Right. Focus moves to a terminal in the right column. The pointer moves into that window.
+  * Press Super+Up. Focus moves to the stacked neighbor.
+  * Press Super+Down. Focus moves to the other stacked neighbor.
+  * Press Super+Left. Focus returns toward `A`.
+  * Press Super+Left. Focus stays on `A`.
+  * Press Super+Shift+Right. `A` swaps with the right neighbor and keeps focus.
+  * Press Super+Shift+Left. `A` swaps back.
+  * Focus a stacked terminal. Press Super+Shift+Up. The stacked order flips.
+  * Press Super+Shift+Down. The stacked order flips again.
+  * Press Alt+Tab. Focus moves to a different terminal.
+  * Press Alt+Tab. Focus moves to another terminal.
+  * Press Alt+Tab. Focus returns to the terminal it started on.
+  * Press Alt+Shift+Tab. Focus moves one step back.
+  * Click the terminal that shows `B`. Press Super+T. `B` floats.
+  * Click the terminal that shows `C`. Press Super+T. `C` floats over `B`.
+  * Click `B`. Press Alt+Tab until `C` is focused. `C` is drawn on top of `B`.
+  * Press Super+W until all three terminals are closed.
+  * Press Super+J. The empty desktop does not change.
+  * Press Super+Shift+Right. The empty desktop does not change.
+  * Press Super+Right. The empty desktop does not change.
+  * Any crash or erroneous behavior must be reported.
   </ActionList>
 
   <Hints>
-  * Focus warps the pointer into the new window; the cursor hides after key presses, so move the mouse a pixel if you need to show it.
-  * Read the `echo` letters, not positions, to tell windows apart after swaps; the focused window has the brighter gradient border in every theme — compare borders, not titles.
+  * Tell the windows apart by the letters `A`, `B`, and `C`, not by where they sit after a swap. The focused window has the brighter gradient border.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots: terminal and browser side by side, stacked, side by side again; a screenshot per chord showing the gradient border on the expected letter with the pointer inside it; the swapped positions; the Alt+Tab cycle; C on top of B after Alt+Tab; the empty desktop unchanged
+  * On success
+  ** Screenshots: terminal and browser side by side, stacked, side by side; focus moving between `A`, `B`, and `C`; the swap; `C` drawn on top of `B`; the empty desktop after the three chords
   * If unsuccessful
-  ** Screenshot with focus or position unchanged after a chord
+  ** Screenshot of the chord that did not move focus, did not swap, or changed the empty desktop
 covers: default/hypr/bindings/tiling.lua:5,16-19,42-50; default/hypr/bindings/applications.lua:2-3; test/shell.d/hyprland-binding-conflicts-test.sh:125-130; manual/04:5-19; manual/07:32-33,56-57
 
 ### window-fullscreen-three-modes   [VM-OK]

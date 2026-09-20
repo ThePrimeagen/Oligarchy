@@ -90,14 +90,14 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `transcode-picker-hotkey-menu-and-cli`
 - [x] `nautilus-context-menu-transcode-and-localsend`
 - [x] `browser-screen-share-preview-picker`
-- [ ] `nightlight-toggle-hotkey-menu-and-status`
-- [ ] `shell-restart-from-menu-and-supervisor-relaunch`
-- [ ] `launch-docker-tui-polkit-gate`
-- [ ] `launch-tui-chords-btop-cliamp-and-focus-existing`
-- [ ] `webapp-install-launch-and-remove-from-menu`
-- [ ] `window-close-and-close-all`
-- [ ] `window-float-pseudo-split`
-- [ ] `window-focus-swap-and-alt-tab`
+- [x] `nightlight-toggle-hotkey-menu-and-status`
+- [x] `shell-restart-from-menu-and-supervisor-relaunch`
+- [x] `launch-docker-tui-polkit-gate`
+- [x] `launch-tui-chords-btop-cliamp-and-focus-existing`
+- [x] `webapp-install-launch-and-remove-from-menu`
+- [x] `window-close-and-close-all`
+- [x] `window-float-pseudo-split`
+- [x] `window-focus-swap-and-alt-tab`
 - [ ] `window-fullscreen-three-modes`
 - [ ] `window-pop-pinned-follows-workspaces`
 - [ ] `window-resize-chords-and-width-memory`
