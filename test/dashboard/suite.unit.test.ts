@@ -1,10 +1,14 @@
 import { NodeFileSystem } from "@effect/platform-node";
-import { Effect } from "effect";
+import { Effect, Exit, FileSystem } from "effect";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import * as Linear from "../../src/ctrl/linear.ts";
-import * as Prompts from "../../src/ctrl/prompts.ts";
 import { app } from "../../src/dashboard/dashboard.tsx";
-import { renderSuiteTicket, SUITE_LINEAR } from "../../src/dashboard/suite.ts";
+import {
+  bundledPrompts,
+  createTestSuiteRun,
+  SuiteRequestError,
+} from "../../src/dashboard/suite.ts";
+import * as Prompts from "../../src/ctrl/prompts.ts";
+import * as Errors from "../../src/shared/errors.ts";
 
 const SENTINEL_PASSWORD = "sentinel-secret-pw";
 const REQUIRED = "iso, version and serverUrl are required";
@@ -24,7 +28,7 @@ const SERVER = "http://qemu.example:42069";
 
 const post = (body: string) =>
   app.request(
-    "/run-test-suite",
+    "/create-test-suite-run",
     { method: "POST", headers: { "content-type": "application/json" }, body },
     env,
   );
@@ -42,7 +46,9 @@ const ticket = {
   TEST_PROOF: "the screen shows it",
 };
 
-describe("POST /run-test-suite unhappy path", () => {
+const body = { iso: ISO, version: "1.2.3", serverUrl: SERVER };
+
+describe("POST /create-test-suite-run unhappy path", () => {
   const error = vi.spyOn(console, "error").mockImplementation(() => {});
 
   afterEach(() => {
@@ -88,16 +94,15 @@ describe("POST /run-test-suite unhappy path", () => {
   });
 });
 
-describe("POST /run-test-suite unhappy path: unreachable database", () => {
+describe("POST /create-test-suite-run unhappy path: unreachable database", () => {
   it("answers 500 without the database password, and does not call Linear", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
-      const response = await post(
-        JSON.stringify({ iso: ISO, version: "1.2.3", serverUrl: SERVER }),
-      );
+      const response = await post(JSON.stringify(body));
       const text = await response.text();
       expect(response.status).toBe(500);
+      expect(text).toMatch(/ECONNREFUSED|Failed query|database request failed/);
       expect(text).not.toContain(SENTINEL_PASSWORD);
       expect(text).not.toContain("linear:");
       expect(error.mock.calls.map((call) => call.join(" ")).join("\n")).not.toContain(
@@ -111,21 +116,72 @@ describe("POST /run-test-suite unhappy path: unreachable database", () => {
   });
 });
 
-describe("suite ticket text", () => {
-  it("matches the text ./ctrl renders for the same values", async () => {
-    const fromCtrl = await Effect.runPromise(
-      Prompts.renderLinearIssue(ticket).pipe(Effect.provide(NodeFileSystem.layer)),
+describe("create test-suite-run runner", () => {
+  it("hands the command its arguments and returns what the command returned (happy)", async () => {
+    const created = {
+      id: "run-id",
+      tests: [{ id: "result-id", linear: { identifier: "OLI-42" } }],
+    };
+    const calls: Array<readonly [string, string, ReadonlyArray<string>]> = [];
+    const answer = await createTestSuiteRun(
+      env,
+      env.HYPERDRIVE.connectionString,
+      body,
+      async (connectionString, token, args) => {
+        calls.push([connectionString, token, args]);
+        return created;
+      },
     );
-    expect(renderSuiteTicket(ticket)).toBe(fromCtrl);
+    expect(calls).toEqual([
+      [
+        env.HYPERDRIVE.connectionString,
+        env.LINEAR_API_TOKEN,
+        ["create", "test-suite-run", "--iso", ISO, "--version", "1.2.3", "--server-url", SERVER],
+      ],
+    ]);
+    expect(answer).toBe(created);
   });
 
-  it("names the same team, label, assignee and states as ./ctrl", () => {
-    expect(SUITE_LINEAR).toEqual({
-      team: Linear.LINEAR_TEAM,
-      agentTestLabel: Linear.AGENT_TEST_LABEL,
-      assigneeEmail: Linear.ASSIGNEE_EMAIL,
-      backlogState: Linear.BACKLOG_STATE,
-      automationNeededState: Linear.AUTOMATION_NEEDED_STATE,
+  it("turns the command's empty-table refusal into the route's 400, and nothing else (unhappy)", async () => {
+    const refused = createTestSuiteRun(env, env.HYPERDRIVE.connectionString, body, async () => {
+      throw Errors.CommandError.make({ message: "test: no test definitions found" });
     });
+    await expect(refused).rejects.toBeInstanceOf(SuiteRequestError);
+    await expect(refused).rejects.toThrow("test: no test definitions found");
+
+    const database = createTestSuiteRun(env, env.HYPERDRIVE.connectionString, body, async () => {
+      throw Errors.DatabaseError.make({ operation: "query", message: "database request failed" });
+    });
+    await expect(database).rejects.toBeInstanceOf(Errors.DatabaseError);
+  });
+
+  it("does not run the command for a body it refuses (unhappy)", async () => {
+    const run = vi.fn(async () => ({ id: "run-id" }));
+    await expect(
+      createTestSuiteRun(env, env.HYPERDRIVE.connectionString, { iso: ISO }, run),
+    ).rejects.toBeInstanceOf(SuiteRequestError);
+    expect(run).not.toHaveBeenCalled();
+  });
+});
+
+describe("bundled prompts", () => {
+  it("serves the same ticket text ./ctrl reads from disk (happy)", async () => {
+    const fromDisk = await Effect.runPromise(
+      Prompts.renderLinearIssue(ticket).pipe(Effect.provide(NodeFileSystem.layer)),
+    );
+    const fromWorker = await Effect.runPromise(
+      Prompts.renderLinearIssue(ticket).pipe(Effect.provide(bundledPrompts)),
+    );
+    expect(fromWorker).toBe(fromDisk);
+  });
+
+  it("dies on a prompt path the command does not read (unhappy)", async () => {
+    const exit = await Effect.runPromiseExit(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        return yield* fs.readFileString("/prompts/mint-issue.html");
+      }).pipe(Effect.provide(bundledPrompts)),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
   });
 });

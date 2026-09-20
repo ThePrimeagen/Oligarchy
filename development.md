@@ -107,12 +107,12 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   and `test/`.
 - `src/` is one directory per process plus the shared kernel (`src/shared/`, `src/config.ts`,
   `src/cli.ts`, `src/external-failure.ts`, `src/observability/`, `src/db/`); `main.ts` files are the entries.
-- `src/dashboard/` is a Hono Worker, not Effect: it has no Effect runtime, reaches Postgres
+- `src/dashboard/` is a Hono Worker, not Effect: it reaches Postgres
   through Hyperdrive and drizzle with one `pg.Client` per request ended in `finally` (a client
   left open holds a Hyperdrive connection past the response), never calls the qemu server's API, and
   reports route failures with `@sentry/cloudflare` — the one `captureException` outside
   `observability/`, and with the test setup the one place `console.*` is allowed. Nothing below
-  that says Effect applies to it. Its `scheduled` handler is the retention policy: on the cron in
+  that says Effect applies to it, except `POST /create-test-suite-run`, which runs `./ctrl create test-suite-run` in process rather than a second ticket client. Its `scheduled` handler is the retention policy: on the cron in
   `wrangler.jsonc` it deletes every row older than thirty days in one transaction, a row before
   the row it references, and leaves configuration (definitions, base prompts, error types, the
   fleet) alone; a row is history for a month and then gone. What it calls beyond Postgres is the

@@ -31,7 +31,7 @@ const opentuiSolid = (): Plugin => ({
   },
 });
 
-// The dashboard's suite route imports the ticket template and its guides as strings, the way
+// POST /create-test-suite-run imports the ticket template and its guides as strings, the way
 // wrangler's Text rule loads them in the worker.
 const textModules = (): Plugin => ({
   name: "oligarchy-text-modules",

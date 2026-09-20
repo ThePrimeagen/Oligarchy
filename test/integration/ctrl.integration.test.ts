@@ -229,7 +229,7 @@ describe("./ctrl without a database", () => {
       ["--help"],
       ["test", "--help"],
       ["session", "--help"],
-      ["test", "suite", "--help"],
+      ["create", "test-suite-run", "--help"],
       ["diagnose", "--help"],
       ["automation", "--help"],
     ]) {
@@ -274,8 +274,15 @@ describe("./ctrl without a database", () => {
     expect(firstLine(fromEnv.stderr)).toBe("LINEAR_API_TOKEN is not set");
   });
 
-  it("test suite accepts --server-url and SERVER_URL, then wants LINEAR_API_TOKEN, and refuses --name", async () => {
-    const iso = ["test", "suite", "--iso", "https://example.com/omarchy.iso", "--version", "1.2.3"];
+  it("create test-suite-run accepts --server-url and SERVER_URL, then wants LINEAR_API_TOKEN, and refuses --name", async () => {
+    const iso = [
+      "create",
+      "test-suite-run",
+      "--iso",
+      "https://example.com/omarchy.iso",
+      "--version",
+      "1.2.3",
+    ];
     const flagged = await runCtrl([...iso, `--server-url=${SERVER}`], { DATABASE_URL: UNUSED_DB });
     expect(flagged.code).toBe(1);
     expect(firstLine(flagged.stderr)).toBe("LINEAR_API_TOKEN is not set");
@@ -348,8 +355,8 @@ describe("./ctrl without a database", () => {
         SERVER,
       ],
       [
-        "test",
-        "suite",
+        "create",
+        "test-suite-run",
         "--iso",
         "https://example.com/omarchy.iso",
         "--version",
@@ -441,7 +448,7 @@ describe("./ctrl without a database", () => {
     const env = { DATABASE_URL: UNUSED_DB, LINEAR_API_TOKEN: "l" };
     const cases: ReadonlyArray<readonly [ReadonlyArray<string>, RegExp, Record<string, string>]> = [
       [["test"], /Missing required flag: --list/, env],
-      // The proxy url is test new's and test suite's; the actions below have no proxy to name.
+      // The proxy url is test new's and create test-suite-run's; the actions below have no proxy to name.
       [["test", "--list", "--server-url", SERVER], /Unrecognized flag: --server-url/, env],
       [["session", "list", "--server-url", SERVER], /Unrecognized flag: --server-url/, env],
       [
@@ -551,8 +558,8 @@ describe("./ctrl without a database", () => {
       ],
       [
         [
-          "test",
-          "suite",
+          "create",
+          "test-suite-run",
           "--iso",
           "http://example.com/omarchy.iso",
           "--server-url",
@@ -564,24 +571,38 @@ describe("./ctrl without a database", () => {
         env,
       ],
       [
-        ["test", "suite", "--server-url", SERVER, "--version", "1.2.3"],
+        ["create", "test-suite-run", "--server-url", SERVER, "--version", "1.2.3"],
         /Missing required flag: --iso/,
         env,
       ],
       [
-        ["test", "suite", "--iso", "https://example.com/omarchy.iso", "--server-url", SERVER],
+        [
+          "create",
+          "test-suite-run",
+          "--iso",
+          "https://example.com/omarchy.iso",
+          "--server-url",
+          SERVER,
+        ],
         /Missing required flag: --version/,
         env,
       ],
       [
-        ["test", "suite", "--iso", "https://example.com/omarchy.iso", "--version", "1.2.3"],
+        [
+          "create",
+          "test-suite-run",
+          "--iso",
+          "https://example.com/omarchy.iso",
+          "--version",
+          "1.2.3",
+        ],
         /Missing required flag: --server-url/,
         env,
       ],
       [
         [
-          "test",
-          "suite",
+          "create",
+          "test-suite-run",
           "--iso",
           "https://example.com/omarchy.iso",
           "--version",
