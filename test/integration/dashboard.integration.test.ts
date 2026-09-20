@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createServer as createHttpServer } from "node:http";
 import { fileURLToPath } from "node:url";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Client } from "pg";
 import { describe, expect, inject, it } from "vitest";
@@ -1426,15 +1426,15 @@ console.log([failed.test, failed.action, failed.reason, failed.createdAt instanc
   it("shows the queue in the automation half, running then pending then completed, beside the fleet", async () => {
     const { status, html } = await getPage("/servers", dbUrl);
     expect(status).toBe(200);
-    expect(html).toContain(
-      '<div class="halves"><section><h2>automation</h2><div id="queue" hx-get="/servers/queue" hx-trigger="every 30s"><h3>running</h3><table>',
+    expect(html).toMatch(
+      /<div class="halves"><section><h2>automation<\/h2><div id="queue" hx-get="\/servers\/queue" hx-trigger="every 30s"><p>\d+ test suites? running(?: · \d+ passed · \d+ failed(?: · \d+\.\d% pass)?)?<\/p><h3>running 2<\/h3><table>/,
     );
     // The ages are read against the database's clock: a minute has margin, seconds are counted.
     expect(html).toMatch(
       /<tr><td>QUE-102<\/td><td>queue-order<\/td><td>diagnose<\/td><td>running<\/td><td>1 min ago<\/td><td>\d+ s ago<\/td><td>—<\/td><td><\/td><td><form method="post" action="\/abort" hx-post="\/abort" hx-confirm="are you sure\?" hx-target="#queue" hx-swap="innerHTML"><input type="hidden" name="ticket" value="QUE-102"\/><input type="hidden" name="action" value="diagnose"\/><button type="submit" class="abort" aria-label="abort"><svg/,
     );
     expect(html).toMatch(
-      /<h3>pending<\/h3><table>.*?<tr><td>QUE-104<\/td><td>queue-order<\/td><td>diagnose<\/td><td>pending<\/td><td>\d+ s ago<\/td><td>—<\/td><td>—<\/td><td><\/td><td><form method="post" action="\/abort" hx-post="\/abort" hx-confirm="are you sure\?" hx-target="#queue" hx-swap="innerHTML"><input type="hidden" name="ticket" value="QUE-104"\/><input type="hidden" name="action" value="diagnose"\/><button type="submit" class="abort" aria-label="abort"><svg.*?<\/form><\/td><\/tr><tr><td>QUE-103<\/td>.*?<tr><td>QUE-105<\/td>.*?<tr><td>—<\/td><td>queue-order<\/td><td>drive<\/td><td>pending<\/td><td>\d+ s ago<\/td><td>—<\/td><td>—<\/td><td><\/td><td><\/td><\/tr>.*?<h3>completed<\/h3>/s,
+      /<h3>pending 4<\/h3><table>.*?<tr><td>QUE-104<\/td><td>queue-order<\/td><td>diagnose<\/td><td>pending<\/td><td>\d+ s ago<\/td><td>—<\/td><td>—<\/td><td><\/td><td><form method="post" action="\/abort" hx-post="\/abort" hx-confirm="are you sure\?" hx-target="#queue" hx-swap="innerHTML"><input type="hidden" name="ticket" value="QUE-104"\/><input type="hidden" name="action" value="diagnose"\/><button type="submit" class="abort" aria-label="abort"><svg.*?<\/form><\/td><\/tr><tr><td>QUE-103<\/td>.*?<tr><td>QUE-105<\/td>.*?<tr><td>—<\/td><td>queue-order<\/td><td>drive<\/td><td>pending<\/td><td>\d+ s ago<\/td><td>—<\/td><td>—<\/td><td><\/td><td><\/td><\/tr>.*?<h3>completed<\/h3>/s,
     );
     expect(html).toMatch(
       /<h3>completed<\/h3><table>.*?<tr><td>QUE-107<\/td><td>queue-order<\/td><td>drive<\/td><td>failed<\/td><td>\d+ min ago<\/td><td>\d+ min ago<\/td><td>1 min ago<\/td><td>session timed out<\/td><td><\/td><\/tr><tr><td>QUE-108<\/td>.*?<tr><td>QUE-106<\/td>.*?<tr><td>QUE-109<\/td>/s,
@@ -1447,7 +1447,9 @@ console.log([failed.test, failed.action, failed.reason, failed.createdAt instanc
   it("serves the queue alone at /servers/queue, what the automation half's poll swaps in", async () => {
     const { status, html } = await getPage("/servers/queue", dbUrl);
     expect(status).toBe(200);
-    expect(html.startsWith("<h3>running</h3><table>")).toBe(true);
+    expect(html).toMatch(
+      /^<p>\d+ test suites? running(?: · \d+ passed · \d+ failed(?: · \d+\.\d% pass)?)?<\/p><h3>running 2<\/h3><table>/,
+    );
     expect(html).toContain("<td>QUE-102</td>");
     expect(html).toContain("<td>QUE-109</td>");
     expect(html).not.toContain("<html");
@@ -1477,13 +1479,124 @@ const queue = await query.listAutomationQueue(url);
 console.log([queue.completed.length, queue.completed[0].ticket, queue.completed[49].ticket].join(" "));
 console.log([queue.pending.length, queue.pending[0].ticket, queue.pending[49].ticket].join(" "));
 console.log(queue.running.length);
+console.log([queue.runningCount, queue.pendingCount].join(" "));
 `,
       dbUrl,
     );
     expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
     expect(result.stderr).toBe("");
     expect(result.code).toBe(0);
-    expect(lines(result.stdout)).toEqual(["50 QUE-C-0 QUE-C-49", "50 QUE-P-51 QUE-P-2", "0"]);
+    expect(lines(result.stdout)).toEqual([
+      "50 QUE-C-0 QUE-C-49",
+      "50 QUE-P-51 QUE-P-2",
+      "0",
+      "0 52",
+    ]);
+  });
+
+  it("counts running and pending jobs in full, and pass and fail only inside suites that still have a result open", async () => {
+    const read = async (): Promise<ReadonlyArray<number>> => {
+      const result = await runQuery(
+        `
+const queue = await query.listAutomationQueue(url);
+console.log([queue.runningCount, queue.pendingCount, queue.suites.running, queue.suites.passed, queue.suites.failed].join(" "));
+`,
+        dbUrl,
+      );
+      expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
+      expect(result.stderr).toBe("");
+      expect(result.code).toBe(0);
+      const row = lines(result.stdout)[0];
+      if (row === undefined) {
+        throw new Error("listAutomationQueue printed nothing");
+      }
+      return row.split(" ").map(Number);
+    };
+    const before = await read();
+    const inserted = await seed(dbUrl, async (db) => {
+      const definitions = await db
+        .insert(testDefinitions)
+        .values([
+          { name: "suite-counts-a", description: "d", instruction: "i", proof: "p" },
+          { name: "suite-counts-b", description: "d", instruction: "i", proof: "p" },
+          { name: "suite-counts-c", description: "d", instruction: "i", proof: "p" },
+          { name: "suite-counts-d", description: "d", instruction: "i", proof: "p" },
+        ])
+        .returning({ id: testDefinitions.id });
+      const [open, fresh, closed] = definitions;
+      if (open === undefined || fresh === undefined || closed === undefined) {
+        throw new Error("suite-counts definitions were not inserted");
+      }
+      const runs = await db
+        .insert(testRuns)
+        .values([
+          {
+            name: "suite-counts-open",
+            iso: "https://example.com/omarchy.iso",
+            serverUrl: "http://127.0.0.1:42069",
+            status: "pending",
+          },
+          {
+            name: "suite-counts-fresh",
+            iso: "https://example.com/omarchy.iso",
+            serverUrl: "http://127.0.0.1:42069",
+            status: "pending",
+          },
+          {
+            name: "suite-counts-closed",
+            iso: "https://example.com/omarchy.iso",
+            serverUrl: "http://127.0.0.1:42069",
+            // The run row still says running. The results have all closed, so it is not current.
+            status: "running",
+          },
+        ])
+        .returning({ id: testRuns.id });
+      const [openRun, freshRun, closedRun] = runs;
+      if (openRun === undefined || freshRun === undefined || closedRun === undefined) {
+        throw new Error("suite-counts runs were not inserted");
+      }
+      const more = await db
+        .insert(testDefinitions)
+        .values([
+          { name: "suite-counts-e", description: "d", instruction: "i", proof: "p" },
+          { name: "suite-counts-f", description: "d", instruction: "i", proof: "p" },
+          { name: "suite-counts-g", description: "d", instruction: "i", proof: "p" },
+        ])
+        .returning({ id: testDefinitions.id });
+      const [second, third, fourth] = more;
+      if (second === undefined || third === undefined || fourth === undefined) {
+        throw new Error("suite-counts definitions were not inserted");
+      }
+      await db.insert(testResults).values([
+        { runId: openRun.id, definitionId: open.id, status: "passed" },
+        { runId: openRun.id, definitionId: second.id, status: "failed" },
+        { runId: openRun.id, definitionId: third.id, status: "running" },
+        { runId: openRun.id, definitionId: fourth.id, status: "pending" },
+        { runId: freshRun.id, definitionId: open.id, status: "pending" },
+        { runId: freshRun.id, definitionId: second.id, status: "aborted" },
+        { runId: closedRun.id, definitionId: open.id, status: "passed" },
+        { runId: closedRun.id, definitionId: second.id, status: "failed" },
+        { runId: closedRun.id, definitionId: third.id, status: "timed_out" },
+      ]);
+      return {
+        runIds: [openRun.id, freshRun.id, closedRun.id],
+        definitionIds: [...definitions, ...more].map((row) => row.id),
+      };
+    });
+    try {
+      const after = await read();
+      expect(after[0] - before[0]).toBe(0);
+      expect(after[1] - before[1]).toBe(0);
+      expect(after[2] - before[2]).toBe(2);
+      expect(after[3] - before[3]).toBe(1);
+      expect(after[4] - before[4]).toBe(1);
+    } finally {
+      await seed(dbUrl, async (db) => {
+        await db.delete(testResults).where(inArray(testResults.runId, inserted.runIds));
+        await db.delete(testRuns).where(inArray(testRuns.id, inserted.runIds));
+        await db.delete(testDefinitions).where(inArray(testDefinitions.id, inserted.definitionIds));
+      });
+    }
   });
 });
 
@@ -2087,9 +2200,11 @@ describe.skipIf(dbUrl === "")("dashboard POST /abort happy path", () => {
       );
       expect(response.status).toBe(200);
       const html = await response.text();
-      expect(html.startsWith("<h3>running</h3><p>none</p><h3>pending</h3><table>")).toBe(true);
       expect(html).toMatch(
-        /<h3>pending<\/h3><table>.*?<td>ABT-HX-2<\/td>.*?<h3>completed<\/h3><table>.*?<tr><td>ABT-HX-1<\/td><td>abort-htmx-pending<\/td><td>drive<\/td><td>aborted<\/td><td>\d+ s ago<\/td><td>—<\/td><td>\d+ s ago<\/td><td>aborted<\/td><td><\/td><\/tr>/s,
+        /^<p>\d+ test suites? running(?: · \d+ passed · \d+ failed(?: · \d+\.\d% pass)?)?<\/p><h3>running 0<\/h3><p>none<\/p><h3>pending 1<\/h3><table>/,
+      );
+      expect(html).toMatch(
+        /<h3>pending 1<\/h3><table>.*?<td>ABT-HX-2<\/td>.*?<h3>completed<\/h3><table>.*?<tr><td>ABT-HX-1<\/td><td>abort-htmx-pending<\/td><td>drive<\/td><td>aborted<\/td><td>\d+ s ago<\/td><td>—<\/td><td>\d+ s ago<\/td><td>aborted<\/td><td><\/td><\/tr>/s,
       );
       expect(linear.requests).toEqual(linearMove("ABT-HX-1"));
     } finally {
