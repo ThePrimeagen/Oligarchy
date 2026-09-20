@@ -6974,26 +6974,40 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Ctrl+D: a card under the monitor icon — hero `Display` with `FIXED BRIGHTNESS`; NO `BRIGHTNESS` section; `TEXT SIZE` with `12px` at the right and a notched slider; `SCALE` with pills such as `1x 1.25x 1.6x 2x 3.2x 4x` (the set depends on the resolution — report exactly what you see) with `1x` filled; NO `DISPLAYS` section.
-  * Hover the `2x` pill: it highlights; do not click. Press j: a ring appears on the first scale pill; press l once: it moves to the next pill; press k: the `TEXT SIZE` row highlights. Do not press Enter on a pill.
-  * Click on the `TEXT SIZE` track about 60 % along it: the value at the right snaps to a notch (`14px` or `16px`) and the panel text, bar text and menu font grow within a second. Press Escape, then Super+Space: the menu is visibly larger; Escape.
-  * Press Super+Ctrl+D: the `TEXT SIZE` value still shows the new px (kept). Press j (ring on a scale pill), k (`TEXT SIZE` row), then h once per notch until the value reads `12px`; the shell shrinks back with each step. Press Escape, then Super+Space: the menu is back to its original size; Escape.
-  ** Notches are 9, 10, 11, 12, 14, 16, 20 px; l moves right, h left; if you overshoot to 11px press l once. Hover is ignored for 300 ms after each change while the panel reflows — use keys, not the mouse, for the restore.
-  * Unhappy path: scroll the mouse wheel over the monitor bar icon: nothing changes (no brightness to adjust) and no OSD appears.
-  * Press Escape: the panel closes. Click the monitor icon with the mouse: it opens again at `12px`; Escape. The desktop is as before.
+  * Press Super+Ctrl+D. The Display panel opens. It says `FIXED BRIGHTNESS`. The text size is `12px`. The `1x` pill is filled. There is no brightness slider.
+  ** Record the scale-pill labels. Do not click a scale pill.
+  * Hover the `2x` pill. It highlights.
+  * Press j. A ring appears on the first scale pill.
+  * Press l. The ring moves to the next pill.
+  * Press k. The Text Size row highlights.
+  * Click the Text Size track about 60 percent along it. The value snaps to a notch. The bar text grows.
+  * Press Escape. The panel closes.
+  * Press Super+Space. The menu opens. The menu text is larger.
+  * Press Escape. The menu closes.
+  * Press Super+Ctrl+D. The Display panel opens. The text size is still the new value.
+  * Press j. A ring appears on a scale pill.
+  * Press k. The Text Size row highlights.
+  * Press h until the value reads `12px`. The text shrinks with each press.
+  ** The notches are 9, 10, 11, 12, 14, 16, and 20. If you pass `12px`, press l once.
+  * Press Escape. The panel closes.
+  * Press Super+Space. The menu opens. The menu text is back to the starting size.
+  * Press Escape. The menu closes.
+  * Scroll the wheel over the monitor icon. Nothing changes. No OSD appears.
+  * Click the monitor icon. The Display panel opens. The text size is `12px`.
+  * Press Escape. The panel closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The monitor icon is the rightmost icon in the bar on this VM. Never click a scale pill: it persists to disk and re-lays out the whole desktop (a 4x pill leaves a 320×200 desktop). The text size also persists — end at `12px` or finish with `stop`.
+  * The monitor icon is the rightmost icon. Never click a scale pill.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshot of the panel with `FIXED BRIGHTNESS`, `TEXT SIZE 12px` and the `SCALE` pills with `1x` active; the hover highlight; the keyboard ring on a pill and on the text-size row; the panel with the larger px value and visibly larger text; the larger menu; the panel reopened with the value kept; the panel back at `12px` and the menu at normal size; the unchanged screen after the wheel; the panel closed
+  * On success
+  ** `FIXED BRIGHTNESS` at `12px` with `1x` filled, the hover and the ring, the larger text and larger menu, the value kept on reopen, `12px` restored, and no change from the wheel
   * If unsuccessful
-  ** Screenshot showing a brightness slider, a `DISPLAYS` section, missing sections, a changed scale, the value not snapping, no reflow, or the size not returning to 12px
+  ** A brightness slider, a scale that changed, or a text size that does not return to `12px`
 covers: shell/plugins/panels/monitor/Panel.qml (brightnessAvailable, visibleSections, ScalePill, moveCursor, textSizeStops, adjustTextSize, textSizeSlider onReleased, reflowingText); shell/plugins/panels/monitor/Model.js (availableScales); shell/Ui/PanelSlider.qml (tickCount, integer); bin/omarchy-display-text-size; bin/omarchy-monitor-state; bin/omarchy-brightness-display
 
 ### weather-widget-panel-and-location-search   [VM-OK] [NET]
@@ -7003,28 +7017,51 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Within 30 s of reaching the desktop, screenshotting every 5 s: a weather glyph (sun/cloud/rain) with a temperature appears right of the clock.
-  ** If it never appears, open a terminal and run `omarchy-weather-status`: `Weather unavailable` means the service is unreachable — report it as a network limitation and stop.
-  * Left-click the glyph: a wide card — a big condition glyph, temperature with °C/°F, a ` <LOCATION>` line, `FEELS` / `WIND` / `HUMID` values, a divider and three forecast cells (icon, DAY, hi° lo°); `Fetching forecast…` may show briefly. Press Escape. Press Super+Ctrl+Alt+W: the panel opens again; press it again: it closes.
-  * Right-click the glyph: within three seconds a toast top-right reads `<Place>  ·  Temp …  ·  Wind …`. Middle-click it: nothing visible (a refresh).
-  * Click the glyph, click the location line: it becomes a `Search city` field; type `Paris`: within ~2 s suggestions appear (Paris, Île-de-France, France …). Press Down once, then Enter: a spinner replaces the ✕ while saving, then the location reads `PARIS` and the numbers refresh. Escape, click the glyph again: still `PARIS` (kept). Click the location, then the ✕ beside the field: the location returns to the auto-detected city. Escape.
-  * Open a terminal with Super+Enter and run `omarchy-weather-location --set "San Francisco" "37.7749,-122.4194"` (no error), middle-click the glyph, press Super+Ctrl+Alt+W: within 30 s the heading `SAN FRANCISCO` and the caption `WIND` are visible. Right-click the glyph: the toast now names San Francisco. Press Super+Ctrl+Alt+W: closed within 15 s.
-  * Unhappy path: run `omarchy weather location --set Malibu 34.0259` → `Invalid coordinates: 34.0259 (expected lat,lon)`; the panel still says San Francisco.
-  * Round trip: run `omarchy-weather-location --clear`, middle-click the glyph (back to the auto-detected place); close the terminal with Super+W.
+  * Wait up to 30 seconds. A weather glyph with a temperature appears to the right of the clock.
+  ** If it never appears, open a terminal, run `omarchy-weather-status`, and stop if it says `Weather unavailable`.
+  * Click the weather glyph. The weather panel opens.
+  * Press Escape. The panel closes.
+  * Press Super+Ctrl+Alt+W. The weather panel opens. No toast appears.
+  * Press Super+Ctrl+Alt+W. The panel closes.
+  * Right-click the weather glyph. A toast appears. It names the place, the temperature, and the wind.
+  * Middle-click the weather glyph. No new toast appears.
+  * Click the weather glyph. The weather panel opens.
+  * Click the location line. A search field appears.
+  * Type `Paris`. Suggestions appear.
+  * Press Down. The highlight moves.
+  * Press Enter. The location becomes `PARIS`.
+  * Press Escape. The panel closes.
+  * Click the weather glyph. The panel opens. The location is still `PARIS`.
+  * Click the location line. The search field appears.
+  * Click the clear control beside the field. The location returns to the detected city.
+  * Press Escape. The panel closes.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy-weather-location --set "San Francisco" "37.7749,-122.4194"` and press Return. No error appears.
+  * Middle-click the weather glyph.
+  * Press Super+Ctrl+Alt+W. The panel opens. The heading is `SAN FRANCISCO`.
+  ** Wait up to 30 seconds if the fetch is slow. The caption `WIND` is visible.
+  * Right-click the weather glyph. The toast names San Francisco.
+  * Press Super+Ctrl+Alt+W. The panel closes.
+  * Click the terminal. It has focus.
+  * Type `omarchy weather location --set Malibu 34.0259` and press Return. The output says the coordinates are invalid.
+  * Press Super+Ctrl+Alt+W. The panel opens. It still says San Francisco.
+  * Press Escape. The panel closes.
+  * Type `omarchy-weather-location --clear` and press Return.
+  * Middle-click the weather glyph. The location returns to the detected city.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Super+Ctrl+Alt+W is `<M-C-A-w>`. The captions are small (the acceptance suite OCRs at 2x); look near the bottom of the panel. wttr.in / Open-Meteo can be slow and the panel retries by itself: screenshot repeatedly instead of waiting more than 5 s; a `--` temperature only means the fetch has not returned yet.
-  * If the panel stays blank for 30 s, `curl -sI https://api.open-meteo.com | head -1` separates a network failure from a shell failure.
+  * Super+Ctrl+Alt+W is `<M-C-A-w>`. A `--` temperature means the fetch has not returned yet.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Bar with the weather glyph; the panel with conditions and forecast; the panel opened and closed by the hotkey; the status toast; the Paris suggestions, the panel reading `PARIS` and again after reopen, the panel after ✕; the panel showing `SAN FRANCISCO` and `WIND` with the matching toast; the coordinates rejection; the desktop after closing
+  * On success
+  ** The weather glyph, the panel opened and closed by the hotkey with no toast, the status toast, `PARIS` kept after reopen, `SAN FRANCISCO`, the invalid-coordinates line, and the detected city after clear
   * If unsuccessful
-  ** Screenshot of `Fetching forecast…` persisting beyond 60 s, no glyph at all, or a blank/errored panel; `omarchy-weather-status` output and the curl line
+  ** No glyph, or a panel that stays blank
 covers: shell/plugins/panels/weather/Panel.qml (startEditingLocation, geocode, pickSuggestion, clearLocation); shell/plugins/panels/weather/BarWidget.qml:78-80 (togglePanel, right-click toast, middle refresh); shell/plugins/panels/weather/Model.js; bin/omarchy-weather-location; bin/omarchy-weather-status; bin/omarchy-notification-weather; default/hypr/bindings/utilities.lua Super+Ctrl+Alt+W; test/acceptance.d/panels-test.sh:51-60 (weather); test/shell.d/weather-test.sh; manual/05:22; manual/07:211; manual/10:13-17
 
 ### weather-location-cli-set-status-clear   [VM-OK] [NET]
@@ -7034,26 +7071,41 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `omarchy-weather-location; echo "exit=$?"` → the auto-detected city or nothing (no location pinned on a fresh disk) — record which. Run `omarchy-weather-status` → `<City>  ·  Temp NN°C  ·  Wind …` (or `Weather unavailable`, exit 1, if wttr.in failed — retry once).
-  * Run `omarchy-weather-location --set Malibu 34.02577,-118.7804; jq -c . ~/.local/state/omarchy/settings/weather.json` → `{"name":"Malibu","latitude":34.02577,"longitude":-118.7804}`; `omarchy-weather-location` → `Malibu`; `omarchy-weather-status` → starts with `Malibu  ·  Temp`; `omarchy-weather-icon` → a single glyph.
-  * Click the weather widget in the bar: the panel shows `Malibu` as the location (allow up to a minute for the temperature). Escape.
-  * Run `omarchy-weather-location --set Reykjavik; jq -c . ~/.local/state/omarchy/settings/weather.json` → `{"name":"Reykjavik"}`; the status line starts with `Reykjavik`.
-  * Unhappy path, each with `; echo "exit=$?"`: `omarchy-weather-location --set Nowhere 12,abc` → `Invalid coordinates: 12,abc (expected lat,lon)`, `exit=1` and the file still holds Reykjavik; `omarchy-weather-location --set` → usage, `exit=1`; `omarchy-weather-location --frob` → usage, `exit=1`.
-  * Run `omarchy-weather-location --clear; ls ~/.local/state/omarchy/settings/weather.json` → `No such file`; `omarchy-weather-location` → the value from the first step again.
-  * Middle-click the weather glyph (refresh); close the terminal with Super+W; the widget is as found.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy-weather-location; echo "exit=$?"` and press Return. Record the city, or record that nothing is pinned.
+  * Type `omarchy-weather-status` and press Return. The line names a city, a temperature, and the wind. Retry once if it says `Weather unavailable`.
+  * Type `omarchy-weather-location --set Malibu 34.02577,-118.7804` and press Return.
+  * Type `jq -c . ~/.local/state/omarchy/settings/weather.json` and press Return. The JSON names `Malibu` and includes both coordinates.
+  * Type `omarchy-weather-location` and press Return. The line is `Malibu`.
+  * Type `omarchy-weather-status` and press Return. The line starts with `Malibu`.
+  * Type `omarchy-weather-icon` and press Return. One glyph is printed.
+  * Click the weather glyph. The panel shows `Malibu`.
+  * Press Escape. The panel closes.
+  * Type `omarchy-weather-location --set Reykjavik` and press Return.
+  * Type `jq -c . ~/.local/state/omarchy/settings/weather.json` and press Return. The JSON is `{"name":"Reykjavik"}`.
+  * Type `omarchy-weather-status` and press Return. The line starts with `Reykjavik`.
+  * Type `omarchy-weather-location --set Nowhere 12,abc; echo "exit=$?"` and press Return. The output says the coordinates are invalid. The last line is `exit=1`.
+  * Type `jq -c . ~/.local/state/omarchy/settings/weather.json` and press Return. The JSON still names `Reykjavik`.
+  * Type `omarchy-weather-location --set; echo "exit=$?"` and press Return. A usage line appears. The last line is `exit=1`.
+  * Type `omarchy-weather-location --frob; echo "exit=$?"` and press Return. A usage line appears. The last line is `exit=1`.
+  * Type `omarchy-weather-location --clear` and press Return.
+  * Type `ls ~/.local/state/omarchy/settings/weather.json` and press Return. The file is not there.
+  * Type `omarchy-weather-location` and press Return. The value matches the first step.
+  * Middle-click the weather glyph.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * A `--` temperature in the widget only means the fetch has not returned yet; the JSON file and the name printouts are the proof, the panel is the confirmation.
+  * The JSON file and the printed name are the proof. A `--` temperature only means the fetch has not returned.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Terminal screenshots of each JSON state and name printout, the Malibu/Reykjavik status lines, the icon glyph, the three rejections with `exit=1`, the cleared state; the panel showing Malibu
+  * On success
+  ** The Malibu JSON and status, the icon, the panel showing Malibu, the Reykjavik JSON and status, the three refusals with `exit=1`, and the file gone after clear
   * If unsuccessful
-  ** Screenshot of malformed coordinates accepted, a wrong JSON shape, or the panel ignoring the pinned name; `curl -sS --max-time 4 'https://wttr.in/?format=%l'` to separate a wttr.in outage from a script defect; `omarchy-version`
+  ** Bad coordinates accepted, or the panel ignoring the pinned name
 covers: bin/omarchy-weather-location; bin/omarchy-weather-status; bin/omarchy-weather-icon; bin/omarchy-notification-weather; shell/plugins/panels/weather/Model.js; shell/plugins/panels/weather/Panel.qml; test/shell.d/weather-test.sh; manual/05-the-top-bar.md
 
 ### weather-panel-offline-keeps-state   [VM-OK] [NET]
@@ -7063,26 +7115,34 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Wait for the weather glyph to appear right of the clock (screenshot every 5 s, up to 30 s). Open a terminal with Super+Enter and run `nmcli networking off`: the network bar icon turns into the disconnected glyph; the weather glyph stays.
-  ** If nmcli asks for authentication, type `prime` in the polkit dialog; if it fails, report it and skip the offline half.
-  * Click the weather glyph: the last conditions are still shown. Click the location, type `Berlin`: no suggestions appear. Press Escape (cancels the edit), Escape (closes).
-  * Run `nmcli networking on`; screenshot every 5 s until the network icon is the ethernet glyph again.
-  * Middle-click the weather glyph, then click it: the data is present (refreshed). Press Escape.
-  * Unhappy path: an error text in the panel or the glyph vanishing while offline is the failure to report.
-  * Close the terminal with Super+W; the desktop is as before with networking on.
+  * Wait up to 30 seconds. A weather glyph appears to the right of the clock.
+  * Press Super+Enter. A terminal opens.
+  * Type `nmcli networking off` and press Return. The network icon changes to disconnected. The weather glyph stays.
+  ** If a password dialog appears, type `prime` and press Return. If it fails, report it and skip the offline steps.
+  * Click the weather glyph. The panel opens. The last conditions are still shown.
+  * Click the location line. The search field appears.
+  * Type `Berlin`. No suggestions appear.
+  * Press Escape. The search field closes.
+  * Press Escape. The panel closes.
+  * Type `nmcli networking on` and press Return.
+  * Wait until the network icon is the wired glyph again.
+  * Middle-click the weather glyph.
+  * Click the weather glyph. The panel opens. The forecast is shown.
+  * Press Escape. The panel closes.
+  * Press Super+W. The terminal closes. Networking is on.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Never leave the VM with networking off; if `nmcli networking on` does not restore the ethernet glyph within a minute, run it again and report.
+  * If the wired glyph does not return within a minute, run `nmcli networking on` again and report it.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Bar with the disconnected network icon and the weather glyph still present; the panel offline with no suggestions; the network restored; the panel after refresh
+  * On success
+  ** The disconnected network icon with the weather glyph still present, no suggestions while offline, the wired glyph back, and the panel after refresh
   * If unsuccessful
-  ** Screenshot of an error text in the panel or the glyph vanishing; `./client get-serial`
+  ** An error in the panel, or the weather glyph disappearing while offline
 covers: shell/plugins/panels/weather/Panel.qml (retry timers, report kept on failure, geocodeProc); shell/plugins/panels/network/Panel.qml (kind disconnected icon)
 
 ### osd-cards-render-hide-and-click-through   [VM-OK]
@@ -7092,27 +7152,33 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter (it tiles to fill the screen). Run `omarchy-osd -i volume-high -p 40 -d 6000`: within two seconds a rounded card near the bottom centre shows a speaker glyph, a bar filled 40 % in the accent colour, and `40%`. Wait seven seconds (screenshot at 5 s and 7 s): the card is gone.
-  * Run `omarchy-osd -i volume-muted -p 0 -d 6000`: a muted-speaker glyph with an empty bar and `0%`. Run `omarchy-osd -i brightness -p 30 -d 3000`: a monitor glyph at 30 %, gone after ~3 s.
-  * Run `omarchy-osd -i microphone-muted -m "Microphone muted"`: a muted-mic glyph with text and no bar. Run `omarchy-osd -m "Hello OSD"`: text only.
-  ** The default duration is ~1.2 s: run the command and screenshot immediately (./client-with-image).
-  * Run `omarchy-osd -m "Click through me" -d 15000`: a text-only card over the lower part of the terminal. Left-click exactly on that card (x≈0.5, y≈0.93), then type `echo clicked` and Enter: the terminal prints `clicked` and the card is still visible (the click passed through and did not dismiss it).
-  * Unhappy path: run `omarchy-osd --bogus 1; echo "exit=$?"` → `Unknown OSD option: --bogus`, `exit=1`, no card.
-  * Close the terminal with Super+W; no card remains.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy-osd -i volume-high -p 40 -d 6000` and press Return. A card appears near the bottom. It shows `40%`.
+  * Wait 7 seconds. The card is gone.
+  * Type `omarchy-osd -i volume-muted -p 0 -d 6000` and press Return. A muted card shows `0%`.
+  * Type `omarchy-osd -i brightness -p 30 -d 3000` and press Return. A card shows `30%`.
+  * Wait 4 seconds. That card is gone.
+  * Type `omarchy-osd -i microphone-muted -m "Microphone muted"` and press Return. A card shows that text. There is no progress bar.
+  * Type `omarchy-osd -m "Hello OSD"` and press Return. A card shows `Hello OSD`.
+  * Type `omarchy-osd -m "Click through me" -d 15000` and press Return. A card appears over the lower part of the terminal.
+  * Click the card. The card stays.
+  * Type `echo clicked` and press Return. The line is `clicked`. The card is still visible.
+  * Type `omarchy-osd --bogus 1; echo "exit=$?"` and press Return. The output says the option is unknown. The last line is `exit=1`. No new card appears.
+  * Press Super+W. The terminal closes. No card remains.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The card sits 67 px above the bottom edge and never takes focus, so the terminal keeps focus throughout.
-  * `omarchy osd` is the same command on newer builds; if `omarchy-osd` is missing on 4.0.2 report the version gap.
+  * A short card disappears quickly. Screenshot it as soon as it appears.
+  * If `omarchy-osd` is missing, report the version and stop.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of the 40 % card and the empty screen after expiry; the muted 0 % card; the brightness card; the mic and text-only cards; the message card with `clicked` printed beneath it while still visible; the terminal rejection line with `exit=1`
+  * On success
+  ** The `40%` card and it gone after 7 seconds, the `0%` and `30%` cards, the text cards, `clicked` printed while the card is still visible, and the unknown-option line with `exit=1`
   * If unsuccessful
-  ** Screenshot with no card, or with the card dismissed by the click; the output of `omarchy-shell osd show '{"icon":"volume-high","message":"","value":"50","progressText":"50%","max":"100","duration":""}'`
+  ** No card, or the click dismissing the card
 covers: bin/omarchy-osd; shell/plugins/osd/Osd.qml (show/hideTimer, mask: Region {}, keyboardFocus None); shell/plugins/osd/OsdModel.js (iconFor, stateForShow); test/shell.d/osd-test.sh
 
 ### media-keys-osd-on-dummy-output   [VM-PARTIAL]
@@ -7122,32 +7188,58 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `pactl list sinks short` → one `auto_null` line; `omarchy-audio-output-sink` → `auto_null`; `omarchy-audio-sink-availability` → `auto_null<TAB>1`.
-  ** If there is no sink at all, note it and expect `Could not resolve an audio sink to control.` / `No audio devices found` below instead of OSD cards.
-  * Run `wtype -k XF86AudioRaiseVolume`: within two seconds a volume OSD card with a speaker glyph and a percentage appears bottom-centre (5 higher than before; `pactl get-sink-volume auto_null` agrees). Run `wtype -k XF86AudioLowerVolume`: the percentage drops by 5. Run `wtype -k XF86AudioMute` twice: a muted glyph, then unmuted (`pactl get-sink-mute auto_null` → `yes` between them).
-  ** `omarchy-audio-output-volume raise|lower|mute-toggle` is the fallback if `wtype` is missing.
-  * Run `omarchy-audio-output-volume +1` → +1 %; `omarchy-audio-output-volume -3` → −3 %; `omarchy-audio-output-switch` → an OSD naming `Dummy Output` (one sink rotates onto itself).
-  * Run `wtype -k XF86MonBrightnessUp`: wait two seconds — NO card and no error text (there is no backlight). Confirm the quiet failures: `omarchy-hw-display; echo "exit=$?"` → empty, `exit=1`; `ls /sys/class/backlight/` → empty; `omarchy-brightness-display +5%; echo "exit=$?"` → `exit=1` and NO OSD; `omarchy-brightness-keyboard up; echo "exit=$?"` → `No keyboard backlight device found`, `exit=1`; `omarchy-brightness-display-apple; echo "exit=$?"` → `No Apple Display HID device found`, `exit=1`. Then, as ONE line, `omarchy-brightness-display off; sleep 4; omarchy-brightness-display on`: the screen goes dark (a black or frozen screenshot) and comes back within ~5 s — `off`/`on` still drive DPMS.
-  ** If the screen stays dark after `on`, press any key (Hyprland wakes DPMS on key press) and report it.
-  * Run `wtype -k XF86AudioMicMute`: a card reading `Microphone on` (or `Microphone muted`) appears; record the text — reporting a state with no microphone present is the current behaviour, note it, do not fail on it.
-  * Media keys have no player either: `omarchy-shell media ping` → `ok`; `omarchy-shell media status | jq '{hasPlayer, hasMedia, playing}'` → all `false`; `omarchy-shell media playPause; omarchy-shell media next; omarchy-shell media sourceNext` → three lines `unhandled`; screenshot the bar: no now-playing label or glyph anywhere (the media widget hides without media); `omarchy-shell shell ping` → `ok` afterwards.
-  * Press Caps Lock (`<CAPSLOCK>`), wait two seconds: no card. Then type `'e`: the terminal shows `é` (Caps Lock is Compose, not a lock — there is no Caps Lock OSD by design).
-  * Unhappy path: `omarchy-audio-output-volume; echo "exit=$?"` → usage, `exit=1`; `omarchy-audio-output-volume sideways; echo "exit=$?"` → `Unknown volume action: sideways`, `exit=1`; `omarchy-audio-output-set-default; echo "exit=$?"` → usage, `exit=1`.
-  * Round trip: raise/lower back to the starting percentage, make sure the sink is unmuted, close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Type `pactl list sinks short` and press Return. One `auto_null` line is listed.
+  * Type `omarchy-audio-output-sink` and press Return. The line is `auto_null`.
+  * Type `omarchy-audio-sink-availability` and press Return. The line includes `auto_null`.
+  ** If there is no sink, record that and expect the no-sink messages below instead of an OSD.
+  * Type `wtype -k XF86AudioRaiseVolume` and press Return. A volume OSD appears. The percentage is higher.
+  ** If `wtype` is missing, use `omarchy-audio-output-volume raise`, `lower`, and `mute-toggle` for the three volume keys.
+  * Type `wtype -k XF86AudioLowerVolume` and press Return. The percentage drops.
+  * Type `wtype -k XF86AudioMute` and press Return. A muted OSD appears.
+  * Type `wtype -k XF86AudioMute` and press Return. The mute clears.
+  * Type `omarchy-audio-output-volume +1` and press Return. The volume rises by 1.
+  * Type `omarchy-audio-output-volume -3` and press Return. The volume falls by 3.
+  * Type `omarchy-audio-output-switch` and press Return. An OSD names Dummy Output.
+  * Type `wtype -k XF86MonBrightnessUp` and press Return.
+  * Wait 2 seconds. No brightness card appears.
+  * Type `omarchy-hw-display; echo "exit=$?"` and press Return. The last line is `exit=1`.
+  * Type `ls /sys/class/backlight/` and press Return. The directory is empty.
+  * Type `omarchy-brightness-display +5%; echo "exit=$?"` and press Return. The last line is `exit=1`. No OSD appears.
+  * Type `omarchy-brightness-keyboard up; echo "exit=$?"` and press Return. The output says no keyboard backlight was found. The last line is `exit=1`.
+  * Type `omarchy-brightness-display-apple; echo "exit=$?"` and press Return. The output says no Apple display was found. The last line is `exit=1`.
+  * Type `omarchy-brightness-display off` and press Return. The screen goes dark.
+  * Type `omarchy-brightness-display on` and press Return. The screen comes back.
+  ** If the screen stays dark, press a key and report that.
+  * Type `wtype -k XF86AudioMicMute` and press Return. A card appears. Record whether it says the microphone is on or muted.
+  * Type `omarchy-shell media ping` and press Return. The line is `ok`.
+  * Type `omarchy-shell media status | jq '{hasPlayer, hasMedia, playing}'` and press Return. Each value is `false`.
+  * Type `omarchy-shell media playPause` and press Return. The line is `unhandled`.
+  * Type `omarchy-shell media next` and press Return. The line is `unhandled`.
+  * Type `omarchy-shell media sourceNext` and press Return. The line is `unhandled`.
+  * Take a screenshot of the bar. There is no now-playing label.
+  * Type `omarchy-shell shell ping` and press Return. The line is `ok`.
+  * Press Caps Lock.
+  * Wait 2 seconds. No OSD appears.
+  * Type `'e`. The terminal shows `é`.
+  * Type `omarchy-audio-output-volume; echo "exit=$?"` and press Return. A usage line appears. The last line is `exit=1`.
+  * Type `omarchy-audio-output-volume sideways; echo "exit=$?"` and press Return. The output says the volume action is unknown. The last line is `exit=1`.
+  * Type `omarchy-audio-output-set-default; echo "exit=$?"` and press Return. A usage line appears. The last line is `exit=1`.
+  * Type `omarchy-audio-output-volume unmute` and press Return. The sink is unmuted.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The terminal must have focus when `wtype` runs; it does right after Super+Enter. OSD cards last ~1.2 s: screenshot immediately with ./client-with-image.
-  * A card with a box glyph, a hung script, an error dialog or a card that never hides is the failure; both "card" and "nothing" are passes for the brightness key.
+  * Screenshot an OSD as soon as it appears. It lasts about a second.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** The `auto_null` lines; OSD screenshots for raise, lower, mute and unmute with the pactl values agreeing; the +1/−3 cards; the `Dummy Output` switch card; no card after the brightness key with the brightness helpers' exit codes and messages; the dark screen during DPMS off and the desktop back after on; the microphone card text; the media service `ok`, all-false status and three `unhandled` lines with no media widget on the bar; no card after Caps Lock and `é` in the terminal; the three usage errors
+  * On success
+  ** `auto_null`, the raise, lower, mute, and unmute OSDs, Dummy Output, no brightness card, the screen dark then back, the microphone card, the media lines all false or `unhandled`, no card after Caps Lock, `é`, and the three usage lines
   * If unsuccessful
-  ** Screenshot of an error dialog, broken glyph or stuck card, an OSD for a failed brightness call, the screen not returning after DPMS, `Target not found.` from the media service or a media widget rendered with nothing playing; `pactl info; wpctl status | sudo tee /dev/ttyS0` read via get-serial
+  ** A stuck card, an OSD for the failed brightness call, or the screen not returning
 covers: default/hypr/bindings/media.lua (XF86Audio*/XF86MonBrightness* bindings); bin/omarchy-audio-output-volume; bin/omarchy-audio-output-sink; bin/omarchy-audio-output-switch; bin/omarchy-audio-sink-availability; bin/omarchy-audio-input-mute; bin/omarchy-audio-output-set-default; bin/omarchy-brightness-display; bin/omarchy-brightness-display-ddc; bin/omarchy-brightness-display-apple; bin/omarchy-brightness-keyboard; bin/omarchy-brightness-keyboard-mute; bin/omarchy-hw-display; bin/omarchy-osd; shell/plugins/osd/OsdModel.js; shell/plugins/services/media/Service.qml (IpcHandler, selectActivePlayer); shell/plugins/services/media/MediaModel.js; shell/plugins/services/media/BarWidget.qml visible: hasMedia; default/hypr/input.lua compose:caps; test/shell.d/audio-test.sh; test/shell.d/brightness-display-test.sh; test/shell.d/hw-display-test.sh
 
 ### notification-send-lifetimes-and-urgency   [VM-OK]
@@ -7157,28 +7249,46 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter; if it covers the top-right corner move it with Super+Shift+Left. Type `omarchy-notification-send "Acceptance notification" "Shell notification rendering" --expire-time=15000` Enter: within 15 s a card in the top-right corner just below the bar shows bold `Acceptance notification` and a lighter body `Shell notification rendering`; it is present at ~5 and ~12 s and gone by ~20 s (the sender stretched the life beyond the default).
-  * Type `omarchy-notification-send "Low default"` Enter and screenshot at once, after 3 s and after 7 s: it is gone by the third screenshot (default urgency is low: 5 s). Type `omarchy-notification-send -u low -t 2000 "Short ask"`: it still lives about 5 s — `-t` never shortens a toast below its floor.
-  * Type `omarchy-notification-send -u critical -g "" "Critical stays" "until dismissed"` then `omarchy-notification-send -u normal "Normal eight seconds"`: two stacked cards, the newest on top, the critical one with a differently coloured border accent. Screenshot every 5 s for 35 s: `Normal eight seconds` is gone by the second screenshot; `Critical stays` is present in all of them and survives a hover.
-  * Type `omarchy-notification-send -u normal "Hover me"` and immediately move the mouse onto that card, screenshotting every 4 s for 16 s: it stays and a `✕` shows in its corner. Move the mouse away: gone within ten seconds.
-  * Type `omarchy-notification-send -g 󰄬 "Hello driver" "first body"` (or `-i`/`--image` if the glyph cannot be typed): a toast with the glyph, headline and body. Type `id=$(omarchy-notification-send -p -u critical "Step 1 of 3" "Working"); echo "id=$id"` → a number and one card `Step 1 of 3`; then `omarchy-notification-send -r "$id" -u critical "Step 2 of 3" "Still working"` and `omarchy-notification-send -r "$id" -u critical "Step 3 of 3" "Done"` → still exactly one card, its text updated in place each time (count the cards — two stacked cards is the failure); `omarchy-notification-dismiss "Step 3 of 3"` → it is gone.
-  * Type `notify-send "Third party" "libnotify client"` → a toast appears (no dunst or mako is involved).
-  * Unhappy path: type `omarchy-notification-send; echo "exit=$?"` → a `Usage:` line, `exit=1`, no toast. Right-click `Critical stays`: dismissed. Press Super+Shift+comma (`<M-S-,>`): no cards remain.
-  * Close the terminal with Super+W; the desktop is as at the start.
+  * Press Super+Enter. A terminal opens.
+  ** If it covers the top-right corner, press Super+Shift+Left. The terminal moves.
+  * Type `omarchy-notification-send "Acceptance notification" "Shell notification rendering" --expire-time=15000` and press Return. A toast shows both lines.
+  * Wait 12 seconds. The toast is still there.
+  * Wait until 20 seconds from the send. The toast is gone.
+  * Type `omarchy-notification-send "Low default"` and press Return. A toast appears.
+  * Wait 7 seconds. That toast is gone.
+  * Type `omarchy-notification-send -u low -t 2000 "Short ask"` and press Return. A toast appears.
+  * Wait 5 seconds. That toast is still there.
+  * Type `omarchy-notification-send -u critical "Critical stays" "until dismissed"` and press Return. A toast appears.
+  * Type `omarchy-notification-send -u normal "Normal eight seconds"` and press Return. A second toast appears above the first.
+  * Wait 15 seconds. The normal toast is gone. The critical toast is still there.
+  * Type `omarchy-notification-send -u normal "Hover me"` and press Return. A toast appears.
+  * Move the pointer onto that toast. A close mark appears. The toast stays.
+  * Wait 8 seconds. The toast is still there.
+  * Move the pointer off the toast.
+  * Wait 10 seconds. That toast is gone.
+  * Type `omarchy-notification-send "Hello driver" "first body"` and press Return. A toast shows that headline and body.
+  * Type `id=$(omarchy-notification-send -p -u critical "Step 1 of 3" "Working"); echo "id=$id"` and press Return. A number is printed. One toast says `Step 1 of 3`.
+  * Type `omarchy-notification-send -r "$id" -u critical "Step 2 of 3" "Still working"` and press Return. The same toast now says `Step 2 of 3`. There is still one of these toasts.
+  * Type `omarchy-notification-send -r "$id" -u critical "Step 3 of 3" "Done"` and press Return. The same toast now says `Step 3 of 3`.
+  * Type `omarchy-notification-dismiss "Step 3 of 3"` and press Return. That toast is gone.
+  * Type `notify-send "Third party" "libnotify client"` and press Return. A toast appears.
+  * Type `omarchy-notification-send; echo "exit=$?"` and press Return. A usage line appears. The last line is `exit=1`. No new toast appears.
+  * Right-click the critical toast. It closes.
+  * Press Super+Shift+comma. No toasts remain.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Toasts sit at roughly x 0.75–0.99, y 0.03–0.1; keep the mouse off them except in the hover step and use `./client mouse move` for the hover, not click. Never wait more than 5 s at a time; a long life is proven by a series of screenshots.
-  * Nerd-Font glyphs cannot be typed by the driver: use `-i`/`--image` or ASCII for the glyph step; `<`/`>` are `<LT>`/`<GT>`.
+  * Keep the pointer off a toast except during the hover step. A Nerd Font glyph cannot be typed, so the glyph form is not sent.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshot of `Acceptance notification` with both texts under the bar and present at ~12 s; the timed series for the low toast (gone by ~7 s) and the 2 s ask still at ~5 s; the stacked pair with the critical accent and the series with the normal card gone and the critical one lasting 35 s; the hovered card with `✕`; the glyph toast; the single card at each of the three replace steps and gone after dismiss; the notify-send toast; the usage line with no popup and `exit=1`; the clean screen
+  * On success
+  ** The long toast still present at 12 seconds and gone by 20, the low toast gone by 7 seconds, the short ask still present at 5 seconds, the critical toast outliving the normal one, the hover pause, one toast updated in place, the notify-send toast, and the usage line with `exit=1`
   * If unsuccessful
-  ** Screenshot of a critical card that vanished, a normal card outliving 30 s, stacked cards after `-r`, a toast after the bare command, or no card at all; the busctl error printed by the send and `busctl --user list | grep -i notif`; `omarchy-shell notifications ping`
+  ** A critical toast that vanishes, two toasts after replace, or a toast after the bare command
 covers: bin/omarchy-notification-send (defaults, -g, -p, -r, -t/--expire-time); bin/omarchy-notification-dismiss; shell/plugins/notifications/Service.qml (durationFor, requestedDuration, cardSlot ticking, watchForUpdates, refreshPopup, removePopupsByOriginalId); shell/plugins/notifications/NotificationLogic.js (popupPlacement, replacementSnapshot, popupRowChanged); shell/plugins/notifications/components/NotificationCard.qml (accentColor, close button); docs/notifications.md §Toast lifecycle, §The sender contract; AGENTS.md helper rule (never raw notify-send); test/acceptance.d/shell-surfaces-test.sh:88-95; test/shell.d/notification-send-test.sh; default/hypr/bindings/utilities.lua:25-26
 
 ### notification-send-rejects-bad-options   [VM-OK]
@@ -7188,27 +7298,35 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `omarchy-notification-send; echo "exit=$?"`: a `Usage:` line, `exit=1`, no toast.
-  * Run `omarchy-notification-send "Hi" --nope; echo "exit=$?"` → `Unknown option: --nope` plus usage, `exit=1`; `omarchy-notification-send "x" "y" --hint=foo; echo "exit=$?"` → `Unknown option: --hint=foo` plus usage, `exit=1`, no toast.
-  * Run `omarchy-notification-send -u bogus "Hi"; echo "exit=$?"` → `Unknown urgency: bogus (use low, normal, or critical)`, `exit=1`; `omarchy-notification-send -t abc "Hi"; echo "exit=$?"` → `Invalid -t value (milliseconds expected): abc`, `exit=1`; `omarchy-notification-send -r abc "x"; echo "exit=$?"` → `Invalid -r value (numeric id expected): abc`, `exit=1`.
-  * Run `omarchy-notification-send "Bad exec" --exec "xdg-terminal-exec -e btop"; echo "exit=$?"` → `--exec takes the command as separate words, not one quoted string.` and `Write:  --exec xdg-terminal-exec -e btop`, `exit=1`, no toast; `omarchy-notification-send "Click me" --exec; echo "exit=$?"` → `--exec needs a command: --exec <program> [args...]`, `exit=1`.
-  ** On the 4.0.2 build `--exec` may still take a shell string; record `omarchy-version` if it is accepted and report version skew, not a defect.
-  * Accepted content: run `omarchy-notification-send "-50% off" "-1 is a body too"` → a toast whose title is literally `-50% off`; `omarchy-notification-send "Sale" "-50% off today"` → body `-50% off today`; `omarchy-notification-send "--exec" "literal headline"` → a toast headlined `--exec`; `omarchy-notification-send --hint=foo "x"; echo "exit=$?"` → `exit=0` and a toast whose HEADLINE is literally `--hint=foo` with body `x`.
-  * Wait two seconds after each rejected command and confirm no toast appeared before the next.
-  * Press Super+Shift+comma to clear the accepted toasts; close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy-notification-send; echo "exit=$?"` and press Return. A usage line appears. The last line is `exit=1`. No toast appears.
+  * Type `omarchy-notification-send "Hi" --nope; echo "exit=$?"` and press Return. The output says the option is unknown. The last line is `exit=1`. No toast appears.
+  * Type `omarchy-notification-send "x" "y" --hint=foo; echo "exit=$?"` and press Return. The output says `--hint=foo` is an unknown option. The last line is `exit=1`. No toast appears.
+  * Type `omarchy-notification-send -u bogus "Hi"; echo "exit=$?"` and press Return. The output says the urgency is unknown. The last line is `exit=1`.
+  * Type `omarchy-notification-send -t abc "Hi"; echo "exit=$?"` and press Return. The output says the timeout is invalid. The last line is `exit=1`.
+  * Type `omarchy-notification-send -r abc "x"; echo "exit=$?"` and press Return. The output says the replace id is invalid. The last line is `exit=1`.
+  * Type `omarchy-notification-send "Bad exec" --exec "xdg-terminal-exec -e btop"; echo "exit=$?"` and press Return. The output says `--exec` takes separate words. The last line is `exit=1`. No toast appears.
+  ** If this build accepts the quoted `--exec`, record `omarchy-version` and report the version skew.
+  * Type `omarchy-notification-send "Click me" --exec; echo "exit=$?"` and press Return. The output says `--exec` needs a command. The last line is `exit=1`.
+  * Type `omarchy-notification-send "-50% off" "-1 is a body too"` and press Return. A toast appears. The title is `-50% off`.
+  * Type `omarchy-notification-send "Sale" "-50% off today"` and press Return. A toast appears. The body is `-50% off today`.
+  * Type `omarchy-notification-send "--exec" "literal headline"` and press Return. A toast appears. The headline is `--exec`.
+  * Type `omarchy-notification-send --hint=foo "x"; echo "exit=$?"` and press Return. The last line is `exit=0`. A toast appears. The headline is `--hint=foo`.
+  * Press Super+Shift+comma. No toasts remain.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * `<`/`>` are `<LT>`/`<GT>` if you need them; every message above is exact — copy it from the screenshot into the report.
+  * Copy each refusal from the screen. A rejected command must not raise a toast.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Terminal screenshots showing each rejection message with `exit=1` and no toast on screen; the four accepted toasts with the dash-leading / `--exec` / `--hint=foo` text rendered literally
+  * On success
+  ** Each refusal with `exit=1` and no toast, then the four accepted toasts whose dash-leading text is shown as written
   * If unsuccessful
-  ** A toast appearing after a rejected command, a missing message, or a case accepted/rejected wrongly; `omarchy-version`
+  ** A toast after a rejected command, or a refusal that accepted the bad option
 covers: bin/omarchy-notification-send (option parsing, --exec guards, forged-hint position rule); docs/notifications.md (Click commands are argv); test/shell.d/notification-send-test.sh
 
 ### notification-dismiss-hotkeys-and-mouse   [VM-OK]

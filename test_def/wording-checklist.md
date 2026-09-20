@@ -162,14 +162,14 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `network-speed-test-overlay-and-cli`
 - [x] `disk-speed-test-overlay-and-cli`
 - [x] `audio-panel-on-dummy-output`
-- [ ] `display-panel-fixed-brightness-scale-text-size`
-- [ ] `weather-widget-panel-and-location-search`
-- [ ] `weather-location-cli-set-status-clear`
-- [ ] `weather-panel-offline-keeps-state`
-- [ ] `osd-cards-render-hide-and-click-through`
-- [ ] `media-keys-osd-on-dummy-output`
-- [ ] `notification-send-lifetimes-and-urgency`
-- [ ] `notification-send-rejects-bad-options`
+- [x] `display-panel-fixed-brightness-scale-text-size`
+- [x] `weather-widget-panel-and-location-search`
+- [x] `weather-location-cli-set-status-clear`
+- [x] `weather-panel-offline-keeps-state`
+- [x] `osd-cards-render-hide-and-click-through`
+- [x] `media-keys-osd-on-dummy-output`
+- [x] `notification-send-lifetimes-and-urgency`
+- [x] `notification-send-rejects-bad-options`
 - [ ] `notification-dismiss-hotkeys-and-mouse`
 - [ ] `notification-history-replay-trim-and-clear`
 - [ ] `notification-click-runs-literal-argv`
