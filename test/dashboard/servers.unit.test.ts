@@ -433,7 +433,14 @@ describe("ServersPage happy path", () => {
     );
     expect(page).toContain("<title>oligarchy servers</title>");
     expect(page).toContain('<script src="https://cdn.jsdelivr.net/npm/htmx.org@4.0.0"');
+    expect(page).toContain(
+      '<nav class="tabs" aria-label="Pages"><a href="/" aria-current="page">servers</a><a href="/definitions">definitions</a></nav>',
+    );
+    expect(page.indexOf('<nav class="tabs"')).toBeLessThan(
+      page.indexOf("<h1>oligarchy servers</h1>"),
+    );
     expect(page).toMatch(/<style>[^<]*body\s*\{[^}]*background:\s*#161616/);
+    expect(page).toMatch(/<style>[^<]*\.tabs a\[aria-current=page\]\s*\{[^}]*color:\s*#fff/);
     expect(page).toMatch(/<style>[^<]*\.process-cards\s*\{[^}]*grid-template-columns:\s*1fr 1fr/);
     expect(page).toMatch(/<style>[^<]*\.halves\s*\{[^}]*grid-template-columns:\s*1fr 1fr/);
     expect(page).toMatch(/<style>[^<]*\.abort\s*\{[^}]*background:\s*none/);

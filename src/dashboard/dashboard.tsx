@@ -8,7 +8,6 @@ import {
   addServer,
   definitionStats,
   deleteOldRows,
-  durationChart,
   getImage,
   groupDefinitions,
   listAutomationQueue,
@@ -18,25 +17,19 @@ import {
   listSessions,
   listTestBasePrompts,
   listTestDefinitions,
-  listTestResultOutcomes,
-  modelStats,
   removeServer,
   RETENTION_DAYS,
   reviseTestDefinition,
   selectDefinition,
-  versionStats,
   type DefinitionStat,
-  type DefinitionVersions,
-  type DurationChart as DurationChartData,
-  type AutomationJob,
   type Session,
   type TestBasePrompt,
-  type TestResultOutcome,
 } from "./query.ts";
 import { clickerPage } from "./clicker.ts";
+import { DefinitionsPage, RunningList, type EditNotice } from "./definitions.tsx";
 import { HTMX_INTEGRITY, HTMX_URL } from "./htmx.ts";
 import { abortLinearIssue, type LinearEnv } from "./linear.ts";
-import { Fleet, type Halves, Process, Queue, ServersPage, since } from "./servers.tsx";
+import { Fleet, type Halves, Process, Queue, ServersPage } from "./servers.tsx";
 import { SENTRY_DSN } from "../observability/dsn.ts";
 
 const errorMessage = (cause: unknown): string =>
@@ -93,115 +86,6 @@ const SessionStatus: FC<SessionStatusProps> = ({ sessions, outOfBand = false }) 
     {sessionStatusText(sessions)}
   </span>
 );
-
-type ChartRow = {
-  readonly label: string;
-  readonly succeeded: number;
-  readonly failed: number;
-};
-
-// One stacked bar per row: succeeded then failed, each as wide as its share.
-const ResultChart: FC<{ title: string; rows: ReadonlyArray<ChartRow> }> = ({ title, rows }) => (
-  <div class="record__field">
-    <h3>{title}</h3>
-    {rows.length === 0 ? (
-      <p class="result-chart__empty">No passed or failed results yet.</p>
-    ) : (
-      <ul class="result-chart">
-        {rows.map((row) => (
-          <li class="result-chart__row">
-            <span class="result-chart__name">{row.label}</span>
-            <div
-              class="result-chart__bar"
-              role="img"
-              aria-label={`${row.label}: ${String(row.succeeded)} succeeded, ${String(row.failed)} failed`}
-            >
-              {row.succeeded > 0 ? (
-                <span class="result-chart__ok" style={{ flexGrow: row.succeeded, flexBasis: 0 }}>
-                  {row.succeeded}
-                </span>
-              ) : null}
-              {row.failed > 0 ? (
-                <span class="result-chart__failed" style={{ flexGrow: row.failed, flexBasis: 0 }}>
-                  {row.failed}
-                </span>
-              ) : null}
-            </div>
-          </li>
-        ))}
-      </ul>
-    )}
-  </div>
-);
-
-// The unit an operator reads at a glance: seconds under a minute, then whole minutes, hours, days.
-const formatDuration = (ms: number): string => {
-  const seconds = Math.floor(ms / 1000);
-  if (seconds < 60) {
-    return `${String(seconds)} s`;
-  }
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) {
-    return `${String(minutes)} min`;
-  }
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) {
-    return `${String(hours)} h`;
-  }
-  return `${String(Math.floor(hours / 24))} d`;
-};
-
-const PERCENTILES = [
-  ["p10", "10%"],
-  ["p25", "25%"],
-  ["p50", "median"],
-  ["p75", "75%"],
-  ["p90", "90%"],
-  ["p99", "99%"],
-] as const;
-
-// One bar per run: green succeeded, red failed, height the duration, shortest on the left.
-const DurationChart: FC<{ chart: DurationChartData }> = ({ chart }) => {
-  const { bars, percentiles } = chart;
-  const longest = bars.reduce((max, bar) => (bar.ms > max ? bar.ms : max), 0);
-  return (
-    <div class="record__field">
-      <h3>Last 50 runs by duration</h3>
-      {bars.length === 0 || percentiles === undefined ? (
-        <p class="result-chart__empty">No timed passed or failed results yet.</p>
-      ) : (
-        <>
-          <div
-            class="duration-chart"
-            role="group"
-            aria-label="Last 50 runs by duration, shortest to longest"
-          >
-            {bars.map((bar) => (
-              <span
-                class={
-                  bar.succeeded
-                    ? "duration-chart__bar duration-chart__bar--ok"
-                    : "duration-chart__bar duration-chart__bar--failed"
-                }
-                style={{ height: longest === 0 ? "100%" : `${String((bar.ms / longest) * 100)}%` }}
-                role="img"
-                aria-label={`${bar.succeeded ? "succeeded" : "failed"} in ${formatDuration(bar.ms)}`}
-              ></span>
-            ))}
-          </div>
-          <dl class="duration-chart__percentiles">
-            {PERCENTILES.map(([key, label]) => (
-              <div>
-                <dt>{label}</dt>
-                <dd>{formatDuration(percentiles[key])}</dd>
-              </div>
-            ))}
-          </dl>
-        </>
-      )}
-    </div>
-  );
-};
 
 const DefinitionScoreboard: FC<{ stats: ReadonlyArray<DefinitionStat> }> = ({ stats }) =>
   stats.length === 0 ? null : (
@@ -316,7 +200,7 @@ const SessionError: FC = () => (
 type PageId = "results" | "definitions" | "prompts";
 
 const PAGES = [
-  { id: "results", href: "/", label: "Test results" },
+  { id: "results", href: "/results", label: "Test results" },
   { id: "definitions", href: "/definitions", label: "Test definitions" },
   { id: "prompts", href: "/prompts", label: "Base prompts" },
 ] as const;
@@ -383,320 +267,10 @@ const Home: FC<HomeProps> = ({ sessions }) => (
   </Shell>
 );
 
-type EditNotice = "unchanged" | "empty";
-
-const EDIT_NOTICES: Record<EditNotice, string> = {
-  unchanged: "Nothing changed: the newest wording already reads like this.",
-  empty: "Every field needs text.",
-};
-
-type DefinitionsProps = {
-  groups: DefinitionVersions[] | null;
-  outcomes: TestResultOutcome[];
-  // The ?name the page was asked for and the definition it resolved to: nothing when the name is
-  // unknown, so the wide layout can say so instead of opening on another one.
-  name: string | undefined;
-  selected: DefinitionVersions | undefined;
-  // Why the last edit of the selected definition was refused, when it was.
-  notice: EditNotice | undefined;
-  // What is in flight, or null when the page could not be read, so a failure does not claim
-  // that nothing is running.
-  running: ReadonlyArray<AutomationJob> | null;
-};
-
 const definitionHref = (name: string): string => `/definitions?name=${encodeURIComponent(name)}`;
-
-const runningHref = (name: string | undefined): string =>
-  name === undefined
-    ? "/definitions/running"
-    : `/definitions/running?name=${encodeURIComponent(name)}`;
 
 const editHref = (name: string, notice: EditNotice): string =>
   `${definitionHref(name)}&edit=${notice}`;
-
-// One name's card: its results by version beside the newest wording as a form whose update writes
-// the next version, then the current wording and the one before it, newest first, the newest
-// open, each with its text and its charts. The name is what the wordings collapse under, so it
-// is not a field.
-const DefinitionCard: FC<{
-  group: DefinitionVersions;
-  outcomes: ReadonlyArray<TestResultOutcome>;
-  notice: EditNotice | undefined;
-}> = ({ group, outcomes, notice }) => {
-  const newest = group.versions[group.versions.length - 1];
-  const next = group.versions.length + 1;
-  // Two: the current wording and the one before it. Older wordings stay in the database.
-  const shown = group.versions.slice(-2);
-  const firstShown = group.versions.length - shown.length + 1;
-  const shownIds = new Set(shown.map((wording) => wording.id));
-  const shownOutcomes = outcomes.filter((row) => shownIds.has(row.definitionId));
-  return (
-    <article class="record definition">
-      <h2>{group.name}</h2>
-      <div class="definition__chart">
-        <ResultChart
-          title="Results by version"
-          rows={versionStats(shown, shownOutcomes).map((row) => ({
-            label: `v${String(row.version + firstShown - 1)}`,
-            succeeded: row.succeeded,
-            failed: row.failed,
-          }))}
-        />
-        <DurationChart chart={durationChart(shownOutcomes)} />
-      </div>
-      {/* The update button is handed over disabled; public/dashboard.js enables it once a field
-          differs from the wording it was rendered with, so an unchanged wording is not offered. */}
-      <form method="post" action="/definitions" class="definition__form">
-        <input type="hidden" name="name" value={group.name} />
-        <p class="definition__form-note">
-          Updating writes v{next} of {group.name}; the earlier wordings keep their runs.
-        </p>
-        {notice === undefined ? null : (
-          <p class="definition__form-notice" role="alert">
-            {EDIT_NOTICES[notice]}
-          </p>
-        )}
-        <label class="definition__form-field">
-          <span>Description</span>
-          <textarea name="description" rows={3} required>
-            {newest.description}
-          </textarea>
-        </label>
-        <label class="definition__form-field">
-          <span>Instruction</span>
-          <textarea name="instruction" rows={6} required>
-            {newest.instruction}
-          </textarea>
-        </label>
-        <label class="definition__form-field">
-          <span>Proof</span>
-          <textarea name="proof" rows={3} required>
-            {newest.proof}
-          </textarea>
-        </label>
-        <button class="button" type="submit" disabled>
-          Update
-        </button>
-      </form>
-      <ul class="definition__wordings">
-        {shown.toReversed().map((wording, index) => {
-          const version = group.versions.length - index;
-          const runs = outcomes.filter((row) => row.definitionId === wording.id);
-          return (
-            <li>
-              <details class="definition__wording" open={version === group.versions.length}>
-                <summary>
-                  <span class="definition__wording-label">v{version}</span>
-                  <time dateTime={wording.createdAt.toISOString()}>
-                    {dateTime.format(wording.createdAt)}
-                  </time>
-                  <span class="definition__wording-runs">
-                    {runs.length} {runs.length === 1 ? "run" : "runs"}
-                  </span>
-                </summary>
-                <div class="definition__wording-body">
-                  <div class="definition__fields">
-                    <div class="record__field">
-                      <h3>Description</h3>
-                      <p>{wording.description}</p>
-                    </div>
-                    <div class="record__field">
-                      <h3>Instruction</h3>
-                      <p>{wording.instruction}</p>
-                    </div>
-                    <div class="record__field">
-                      <h3>Proof</h3>
-                      <p>{wording.proof}</p>
-                    </div>
-                  </div>
-                  <div class="definition__chart">
-                    <ResultChart
-                      title="Results by model"
-                      rows={modelStats(runs).map((row) => ({
-                        label: row.model,
-                        succeeded: row.succeeded,
-                        failed: row.failed,
-                      }))}
-                    />
-                    <DurationChart chart={durationChart(runs)} />
-                  </div>
-                </div>
-              </details>
-            </li>
-          );
-        })}
-      </ul>
-    </article>
-  );
-};
-
-// Every card is in the page so a narrow screen keeps its scrolling list; the wide layout shows
-// the sidebar and only the current card. A sidebar click fetches the page for that name and swaps
-// this section in place (htmx 4 inherits an attribute only when told to), pushing the URL so a
-// reload or a shared link opens on the same definition.
-// The section's body: the fleet of definitions, or why there is none to show.
-const definitionsBody = ({ groups, outcomes, name, selected, notice }: DefinitionsProps) => {
-  if (groups === null) {
-    return (
-      <div class="empty-state empty-state--error">
-        <p>Test definitions are unavailable.</p>
-        <span>Try refreshing in a moment.</span>
-      </div>
-    );
-  }
-  if (groups.length === 0) {
-    return (
-      <div class="empty-state">
-        <p>No test definitions yet.</p>
-      </div>
-    );
-  }
-  return (
-    <div class="definitions__layout">
-      <nav
-        class="definitions__nav"
-        aria-label="Test definitions"
-        hx-target:inherited="#definitions"
-        hx-select:inherited="#definitions"
-        hx-swap:inherited="outerHTML"
-        hx-push-url:inherited="true"
-      >
-        {groups.map((group) => {
-          const isCurrent = group.name === selected?.name;
-          // The swap replaces the focused link; htmx puts focus back only on an element with
-          // the same id, so a keyboard user does not fall back to the top of the page. The
-          // first wording's id is the name's for good.
-          return (
-            <a
-              id={`definition-${String(group.versions[0].id)}`}
-              href={definitionHref(group.name)}
-              hx-get={definitionHref(group.name)}
-              class={
-                isCurrent ? "definitions__link definitions__link--current" : "definitions__link"
-              }
-              aria-current={isCurrent ? "true" : undefined}
-            >
-              {group.name}
-            </a>
-          );
-        })}
-      </nav>
-      <div class="definitions__detail">
-        {selected === undefined ? (
-          <div class="empty-state definitions__missing">
-            <p>
-              No test definition named <code>{name}</code>.
-            </p>
-            <span>Pick one from the list.</span>
-          </div>
-        ) : null}
-        <ol class="definitions__list">
-          {groups.map((group) => (
-            <li
-              class={
-                group.name === selected?.name
-                  ? "definitions__item definitions__item--current"
-                  : "definitions__item"
-              }
-            >
-              <DefinitionCard
-                group={group}
-                outcomes={outcomes}
-                notice={group.name === selected?.name ? notice : undefined}
-              />
-            </li>
-          ))}
-        </ol>
-      </div>
-    </div>
-  );
-};
-
-// One running job: its definition, what it is doing, the ticket that names it, and how long it
-// has been running. Abort posts the ticket and action the shared /abort route already stops.
-// view=definitions is how that route tells this form apart from the servers page: htmx swaps
-// the list, and a submit without it returns here. A job with no ticket has nothing to name.
-const RunningJob: FC<{ job: AutomationJob; definition: string | undefined }> = ({
-  job,
-  definition,
-}) => (
-  <li class="running-tests__job">
-    <a href={definitionHref(job.test)}>{job.test}</a>
-    <span class="running-tests__action">{job.action}</span>
-    <span class="running-tests__ticket">{job.ticket ?? "—"}</span>
-    <span class="running-tests__age">{since(job.startedAt, job.queriedAt)}</span>
-    {job.ticket === null ? null : (
-      <form
-        method="post"
-        action="/abort"
-        hx-post="/abort"
-        hx-confirm="are you sure?"
-        hx-target="#running-tests"
-        hx-swap="innerHTML"
-      >
-        <input type="hidden" name="ticket" value={job.ticket} />
-        <input type="hidden" name="action" value={job.action} />
-        <input type="hidden" name="view" value="definitions" />
-        {definition === undefined ? null : (
-          <input type="hidden" name="definition" value={definition} />
-        )}
-        <button type="submit" class="button button--abort">
-          Abort
-        </button>
-      </form>
-    )}
-  </li>
-);
-
-// The list the page polls and the abort swaps in. Only what is running: a pending job has not
-// started, and a finished one is a result, not something to stop.
-const RunningList: FC<{
-  jobs: ReadonlyArray<AutomationJob>;
-  definition: string | undefined;
-}> = ({ jobs, definition }) =>
-  jobs.length === 0 ? (
-    <p class="running-tests__empty">No tests are running.</p>
-  ) : (
-    <ol class="running-tests__list">
-      {jobs.map((job) => (
-        <RunningJob job={job} definition={definition} />
-      ))}
-    </ol>
-  );
-
-// Above every definition, so an operator sees what is in flight before any wording. The poll is
-// the queue's thirty seconds: a job that starts after the page opened shows up without a reload,
-// and the swap replaces the list while the poll stays on this frame.
-const RunningTests: FC<{
-  jobs: ReadonlyArray<AutomationJob>;
-  definition: string | undefined;
-}> = ({ jobs, definition }) => (
-  <section class="running-tests" aria-labelledby="running-tests-heading">
-    <h2 id="running-tests-heading">Running</h2>
-    <div
-      id="running-tests"
-      hx-get={runningHref(definition)}
-      hx-trigger="every 30s"
-      hx-swap="innerHTML"
-    >
-      <RunningList jobs={jobs} definition={definition} />
-    </div>
-  </section>
-);
-
-const Definitions: FC<DefinitionsProps> = (props) => (
-  <Shell page="definitions">
-    <section id="definitions" class="records definitions" aria-labelledby="definitions-heading">
-      <div class="sessions__heading">
-        <h1 id="definitions-heading">Test definitions</h1>
-      </div>
-      {props.running === null ? null : (
-        <RunningTests jobs={props.running} definition={props.name ?? props.selected?.name} />
-      )}
-      {definitionsBody(props)}
-    </section>
-  </Shell>
-);
 
 type PromptsProps = {
   prompts: TestBasePrompt[] | null;
@@ -776,7 +350,7 @@ app.use(
   )),
 );
 
-app.get("/", async (context) => {
+app.get("/results", async (context) => {
   try {
     const sessions = await listSessions(context.env.HYPERDRIVE.connectionString);
     return context.render(<Home sessions={sessions} />);
@@ -788,6 +362,14 @@ app.get("/", async (context) => {
   }
 });
 
+// Text, served whole, the same document as the servers page. `groups` is absent only when the
+// database could not be read.
+const definitionsPage = (
+  context: Context<{ Bindings: Bindings }>,
+  status: 200 | 404 | 500,
+  props: Parameters<typeof DefinitionsPage>[0],
+) => context.html(html`<!doctype html>${<DefinitionsPage {...props} />}`, status);
+
 app.get("/definitions", async (context) => {
   const name = context.req.query("name");
   const edit = context.req.query("edit");
@@ -795,41 +377,32 @@ app.get("/definitions", async (context) => {
   // a stale or hand-made link and shows nothing.
   const notice = edit === "unchanged" || edit === "empty" ? edit : undefined;
   try {
-    const [definitions, outcomes, running] = await Promise.all([
+    const [definitions, running] = await Promise.all([
       listTestDefinitions(context.env.HYPERDRIVE.connectionString),
-      listTestResultOutcomes(context.env.HYPERDRIVE.connectionString),
       listRunningAutomationJobs(context.env.HYPERDRIVE.connectionString),
     ]);
     const groups = groupDefinitions(definitions);
     const selected = selectDefinition(groups, name);
     // A stale link: the page still lists what exists, the status says the name does not.
-    if (name !== undefined && selected === undefined) {
-      context.status(404);
-    }
-    return context.render(
-      <Definitions
-        groups={groups}
-        outcomes={outcomes}
-        name={name}
-        selected={selected}
-        notice={notice}
-        running={running}
-      />,
-    );
+    return definitionsPage(context, name !== undefined && selected === undefined ? 404 : 200, {
+      groups,
+      name,
+      selected,
+      notice,
+      error: undefined,
+      running,
+    });
   } catch (error) {
     Sentry.captureException(error);
     console.error("dashboard: loading the definitions page:", errorMessage(error));
-    context.status(500);
-    return context.render(
-      <Definitions
-        groups={null}
-        outcomes={[]}
-        name={name}
-        selected={undefined}
-        notice={undefined}
-        running={null}
-      />,
-    );
+    return definitionsPage(context, 500, {
+      groups: null,
+      name,
+      selected: undefined,
+      notice: undefined,
+      error: "Test definitions are unavailable.",
+      running: null,
+    });
   }
 });
 
@@ -885,17 +458,14 @@ app.post("/definitions", async (context) => {
   } catch (error) {
     Sentry.captureException(error);
     console.error("dashboard: saving a definition:", errorMessage(error));
-    context.status(500);
-    return context.render(
-      <Definitions
-        groups={null}
-        outcomes={[]}
-        name={name}
-        selected={undefined}
-        notice={undefined}
-        running={null}
-      />,
-    );
+    return definitionsPage(context, 500, {
+      groups: null,
+      name,
+      selected: undefined,
+      notice: undefined,
+      error: "Test definitions are unavailable.",
+      running: null,
+    });
   }
 });
 
@@ -957,7 +527,7 @@ app.get("/images/:id", async (context) => {
   }
 });
 
-// The servers page, outside the dashboard's shell: text served whole, not through the renderer.
+// The homepage, and /servers: text served whole, not through the renderer.
 // Its two halves are rows: the automation queue the webhook and the worker write
 // (automation_jobs), and the fleet the servers themselves write every thirty seconds
 // (src/qemu-server/heartbeat.ts). Below them, process_stats is the series each announcing
@@ -990,7 +560,7 @@ const isServerUrl = (url: string): boolean => {
   return (parsed.protocol === "http:" || parsed.protocol === "https:") && parsed.hostname !== "";
 };
 
-app.get("/servers", async (context) => {
+const serveServers = async (context: Context<{ Bindings: Bindings }>) => {
   try {
     const halves = await readHalves(context.env.HYPERDRIVE.connectionString);
     return await serversPage(context, 200, halves);
@@ -999,7 +569,10 @@ app.get("/servers", async (context) => {
     console.error("dashboard: reading the servers page:", errorMessage(error));
     return serversPage(context, 500, undefined, "internal error");
   }
-});
+};
+
+app.get("/", serveServers);
+app.get("/servers", serveServers);
 
 // What the automation half's poll swaps in.
 app.get("/servers/queue", async (context) => {
