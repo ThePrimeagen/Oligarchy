@@ -347,16 +347,19 @@ const seed = async <T>(
   }
 };
 
-// The card the wide layout shows: the list item marked current, up to the next item or the end
-// of the list (the model chart nests its own list items, so a bare </li> is not the end).
-const currentCard = (html: string): string =>
-  /<li class="definitions__item definitions__item--current">([\s\S]*?)<\/li>\s*(?:<li class="definitions__item|<\/ol>)/.exec(
-    html,
-  )?.[1] ?? "";
+// One name's section of the plain page, from its heading up to the next name.
+const section = (html: string, name: string): string => {
+  const start = html.indexOf(`<h2>${name}</h2>`);
+  if (start < 0) {
+    return "";
+  }
+  const next = html.indexOf("<h2>", start + 4);
+  return html.slice(start, next === -1 ? html.length : next);
+};
 
-// The sidebar links marked current: one when a definition is selected, none on a stale link.
-const currentLinks = (html: string): number =>
-  (html.match(/class="definitions__link definitions__link--current"/g) ?? []).length;
+// The wordings of a section, newest first: each an h3 naming the version and the paragraphs
+// that follow it, up to the next wording or the section's end.
+type Wording = { readonly label: string; readonly body: string };
 
 // The running strip at the top of the definitions page, up to its own end. It has no nested
 // section, so the first close is the close.
@@ -369,18 +372,9 @@ const definitionsAbortForm = (
   definition: string,
 ): string =>
   `<form method="post" action="/abort" hx-post="/abort" hx-confirm="are you sure?" hx-target="#running-tests" hx-swap="innerHTML"><input type="hidden" name="ticket" value="${ticket}"/><input type="hidden" name="action" value="${action}"/><input type="hidden" name="view" value="definitions"/><input type="hidden" name="definition" value="${definition}"/><button type="submit" class="button button--abort">Abort</button></form>`;
-
-// The wordings of the current card, in page order: each a <details> whose summary names the
-// version, the newest open, with the body that follows it up to the next wording or the list's end.
-type Wording = { readonly label: string; readonly open: boolean; readonly body: string };
 const wordings = (card: string): ReadonlyArray<Wording> =>
-  [
-    ...card.matchAll(
-      /<details class="definition__wording"([^>]*)>\s*<summary[^>]*>[\s\S]*?<span class="definition__wording-label">([^<]+)<\/span>[\s\S]*?<\/summary>([\s\S]*?)<\/details>/g,
-    ),
-  ].map(([, attributes, label, body]) => ({
+  [...card.matchAll(/<h3>(v\d+)<\/h3>([\s\S]*?)(?=<h3>|$)/g)].map(([, label, body]) => ({
     label: label ?? "",
-    open: (attributes ?? "").includes("open"),
     body: body ?? "",
   }));
 
@@ -491,15 +485,35 @@ const seedResults = async (
 };
 
 describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
-  it("lists every definition as a sidebar link and selects the first when no name is asked for", async () => {
+  it("lists every definition as its own page, under a search", async () => {
     const { status, html } = await getPage("/definitions", dbUrl);
     expect(status).toBe(200);
-    expect(html).toContain('href="/definitions?name=lock-screen"');
-    expect(currentLinks(html)).toBe(1);
-    expect(currentCard(html)).toMatch(/<h2>[^<]+<\/h2>/);
+    expect(html).toContain('<search class="search"><input type="search"');
+    expect(html).toContain('<a href="/definitions/lock-screen">lock-screen</a>');
+    expect(html.indexOf("<search")).toBeLessThan(html.indexOf('href="/definitions/lock-screen"'));
+    expect(html).not.toContain("<h2>lock-screen</h2>");
+    expect(html).toContain('aria-current="page">definitions</a>');
+    expect(html).toContain('href="/">servers</a>');
+    expect(html).not.toContain("dashboard.css");
+    // The suite is not a button on this page yet. The heading is where it would go.
+    expect(html).not.toContain("/create-test-suite-run");
   });
 
-  it("selects the definition named by ?name, marks its link current and charts its results by model", async () => {
+  it("keeps every name on the page when a query is present; the browser narrows them", async () => {
+    await seed(dbUrl, async (db) => {
+      await db
+        .insert(testDefinitions)
+        .values({ name: "wide layout", description: "d", instruction: "i", proof: "p" });
+    });
+    const { status, html } = await getPage("/definitions?q=LOCK", dbUrl);
+    expect(status).toBe(200);
+    expect(html).toContain('<a href="/definitions/lock-screen">lock-screen</a>');
+    expect(html).toContain('<a href="/definitions/wide%20layout">wide layout</a>');
+    expect(html).toContain('<p class="definition-miss" hidden="">');
+    expect(html).not.toContain('value="LOCK"');
+  });
+
+  it("shows the named definition as text and does not chart its results", async () => {
     let runIds: ReadonlyArray<string> = [];
     await seed(dbUrl, async (db) => {
       const [charted] = await db
@@ -513,31 +527,27 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
         { status: "pending", model: "gemini-3.8" },
       ]);
     });
-    const { status, html } = await getPage("/definitions?name=wide%20layout", dbUrl);
+    const { status, html } = await getPage("/definitions/wide%20layout", dbUrl);
     expect(status).toBe(200);
-    expect(html).toMatch(
-      /<a [^>]*href="\/definitions\?name=wide%20layout"[^>]*aria-current="true"[^>]*>wide layout<\/a>/,
-    );
-    expect(currentLinks(html)).toBe(1);
-    const card = currentCard(html);
+    const card = section(html, "wide layout");
     expect(card).toContain("<h2>wide layout</h2>");
-    expect(card).toContain('aria-label="composer-2.5: 1 succeeded, 0 failed"');
-    expect(card).toContain('aria-label="grok-4.6: 1 succeeded, 1 failed"');
-    expect(card).toContain('aria-label="v1: 2 succeeded, 1 failed"');
-    expect(card).not.toContain("gemini-3.8:");
+    expect(card).toContain('<p class="wording">d</p>');
+    expect(card).toContain('<p class="wording">i</p>');
+    expect(card).toContain('<p class="wording">p</p>');
+    expect(card).not.toContain("succeeded");
+    expect(card).not.toContain("gemini-3.8");
     expect(card).not.toContain("lock-screen");
-    // One wording so far, open. The pending run is not a passed or failed result, so it is
-    // not in either chart, and the page no longer lists individual runs.
+    // One wording so far. Results are not drawn; the page does not list individual runs.
     const [only, ...rest] = wordings(card);
     expect(rest).toEqual([]);
-    expect(only).toMatchObject({ label: "v1", open: true });
+    expect(only).toMatchObject({ label: "v1" });
     expect(card).not.toContain('<table class="runs"');
     for (const runId of runIds) {
       expect(card).not.toContain(`<code>${runId}</code>`);
     }
   });
 
-  it("lines a name's wordings up newest first, the newest open, each with its own charts", async () => {
+  it("lines a name's wordings up newest first, each as its own text", async () => {
     await seed(dbUrl, async (db) => {
       const [older] = await db
         .insert(testDefinitions)
@@ -554,27 +564,22 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
       await seedResults(db, newer.id, [{ status: "passed", model: "composer-2.5" }]);
     });
 
-    const { status, html } = await getPage("/definitions?name=wide-versions", dbUrl);
+    const { status, html } = await getPage("/definitions/wide-versions", dbUrl);
     expect(status).toBe(200);
-    // One sidebar entry for the name, however many wordings it has.
-    expect(html.match(/href="\/definitions\?name=wide-versions"/g)).toHaveLength(1);
-    expect(currentLinks(html)).toBe(1);
-    const card = currentCard(html);
+    expect(html.match(/<h2>wide-versions<\/h2>/g)).toHaveLength(1);
+    const card = section(html, "wide-versions");
     expect(card).toContain("<h2>wide-versions</h2>");
-    // The version chart spans the name; each wording carries its own text and charts.
-    expect(card).toContain('aria-label="v1: 1 succeeded, 1 failed"');
-    expect(card).toContain('aria-label="v2: 1 succeeded, 0 failed"');
     const [v2, v1, ...rest] = wordings(card);
     expect(rest).toEqual([]);
-    expect(v2).toMatchObject({ label: "v2", open: true });
-    expect(v1).toMatchObject({ label: "v1", open: false });
-    expect(v2?.body).toContain("<p>second</p>");
-    expect(v2?.body).not.toContain("<p>first</p>");
-    expect(v2?.body).toContain('aria-label="composer-2.5: 1 succeeded, 0 failed"');
+    expect(v2).toMatchObject({ label: "v2" });
+    expect(v1).toMatchObject({ label: "v1" });
+    expect(v2?.body).toContain('<p class="wording">second</p>');
+    expect(v2?.body).not.toContain('<p class="wording">first</p>');
+    expect(v2?.body).not.toContain("composer-2.5:");
     expect(v2?.body).not.toContain("grok-4.6:");
-    expect(v1?.body).toContain("<p>first</p>");
-    expect(v1?.body).not.toContain("<p>second</p>");
-    expect(v1?.body).toContain('aria-label="grok-4.6: 1 succeeded, 1 failed"');
+    expect(v1?.body).toContain('<p class="wording">first</p>');
+    expect(v1?.body).not.toContain('<p class="wording">second</p>');
+    expect(v1?.body).not.toContain("grok-4.6:");
     expect(v1?.body).not.toContain("composer-2.5:");
     expect(card).not.toContain('<table class="runs"');
   });
@@ -597,19 +602,17 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
       await seedResults(db, middle.id, [{ status: "failed", model: "grok-4.6" }]);
       await seedResults(db, newest.id, [{ status: "passed", model: "composer-2.5" }]);
     });
-    const { status, html } = await getPage("/definitions?name=wide-three", dbUrl);
+    const { status, html } = await getPage("/definitions/wide-three", dbUrl);
     expect(status).toBe(200);
-    const card = currentCard(html);
+    const card = section(html, "wide-three");
     expect(wordings(card).map((wording) => wording.label)).toEqual(["v3", "v2"]);
-    expect(card).toContain("<p>third</p>");
-    expect(card).toContain("<p>second</p>");
-    expect(card).not.toContain("<p>first</p>");
-    expect(card).toContain('aria-label="v2: 0 succeeded, 1 failed"');
-    expect(card).toContain('aria-label="v3: 1 succeeded, 0 failed"');
-    expect(card).not.toContain('aria-label="v1:');
+    expect(card).toContain('<p class="wording">third</p>');
+    expect(card).toContain('<p class="wording">second</p>');
+    expect(card).not.toContain('<p class="wording">first</p>');
+    expect(card).not.toContain("<h3>v1</h3>");
   });
 
-  it("charts the last timed runs by duration, shortest first, with percentiles under each chart", async () => {
+  it("shows a wording as text and does not chart its timed runs", async () => {
     await seed(dbUrl, async (db) => {
       const [definition] = await db
         .insert(testDefinitions)
@@ -636,28 +639,14 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
         },
       ]);
     });
-    const { status, html } = await getPage("/definitions?name=wide-duration", dbUrl);
+    const { status, html } = await getPage("/definitions/wide-duration", dbUrl);
     expect(status).toBe(200);
-    const card = currentCard(html);
-    expect(card).toContain("Last 50 runs by duration");
-    expect(card).toContain('aria-label="succeeded in 1 min"');
-    expect(card).toContain('aria-label="succeeded in 2 min"');
-    expect(card).toContain('aria-label="failed in 4 min"');
-    const firstBar = card.indexOf('aria-label="succeeded in 1 min"');
-    const secondBar = card.indexOf('aria-label="succeeded in 2 min"');
-    const thirdBar = card.indexOf('aria-label="failed in 4 min"');
-    expect(firstBar).toBeGreaterThan(-1);
-    expect(firstBar).toBeLessThan(secondBar);
-    expect(secondBar).toBeLessThan(thirdBar);
-    expect(card).toContain("10%");
-    expect(card).toContain("25%");
-    expect(card).toContain("median");
-    expect(card).toContain("75%");
-    expect(card).toContain("90%");
-    expect(card).toContain("99%");
-    expect(card).toContain("1 min");
-    expect(card).toContain("2 min");
-    expect(card).toContain("4 min");
+    const card = section(html, "wide-duration");
+    expect(card).toContain("<h2>wide-duration</h2>");
+    expect(card).toContain('<p class="wording">i</p>');
+    expect(card).not.toContain("Last 50 runs by duration");
+    expect(card).not.toContain("duration-chart");
+    expect(card).not.toContain("succeeded in");
   });
 
   it("shows the newest wording in a form, the name fixed, its update button handed over disabled", async () => {
@@ -667,9 +656,9 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
         { name: "wide-edit", description: "new d", instruction: "new i", proof: "new p" },
       ]);
     });
-    const { status, html } = await getPage("/definitions?name=wide-edit", dbUrl);
+    const { status, html } = await getPage("/definitions/wide-edit", dbUrl);
     expect(status).toBe(200);
-    const card = currentCard(html);
+    const card = section(html, "wide-edit");
     // The form is in the card as it is, not behind a fold; the page's script enables the button
     // once a field differs from the text it was rendered with.
     expect(card).not.toContain('<details class="definition__edit"');
@@ -688,21 +677,22 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
     expect(card).not.toContain('class="definition__form-notice"');
   });
 
-  it("says so in the charts and the run list when the selected definition has not run yet", async () => {
+  it("shows the wording when the definition has not run yet, with no chart", async () => {
     await seed(dbUrl, async (db) => {
       await db
         .insert(testDefinitions)
         .values({ name: "wide-unrun", description: "d", instruction: "i", proof: "p" });
     });
-    const { status, html } = await getPage("/definitions?name=wide-unrun", dbUrl);
+    const { status, html } = await getPage("/definitions/wide-unrun", dbUrl);
     expect(status).toBe(200);
-    const card = currentCard(html);
+    const card = section(html, "wide-unrun");
     expect(card).toContain("<h2>wide-unrun</h2>");
-    expect(card).toContain("No passed or failed results yet.");
-    expect(card).toContain("No timed passed or failed results yet.");
-    expect(card).not.toContain('class="result-chart__bar"');
+    expect(card).toContain('<p class="wording">d</p>');
+    expect(card).toContain('<p class="wording">i</p>');
+    expect(card).toContain('<p class="wording">p</p>');
+    expect(card).not.toContain("No passed or failed results yet.");
+    expect(card).not.toContain("result-chart");
     expect(card).not.toContain('<table class="runs"');
-    expect(card).not.toContain("No runs yet.");
   });
 
   it("lists every running test at the top of the main area, and offers to abort one that has a ticket", async () => {
@@ -740,14 +730,14 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
         },
       ]),
     );
-    const { status, html } = await getPage("/definitions?name=running-on-definitions", dbUrl);
+    const { status, html } = await getPage("/definitions/running-on-definitions", dbUrl);
     expect(status).toBe(200);
     const runningAt = html.indexOf('<section class="running-tests"');
-    const headingAt = html.indexOf('id="definitions-heading"');
-    const layoutAt = html.indexOf('class="definitions__layout"');
+    const headingAt = html.indexOf("<h1>oligarchy definitions</h1>");
+    const nameAt = html.indexOf("<h2>running-on-definitions</h2>");
     expect(headingAt).toBeGreaterThan(-1);
     expect(runningAt).toBeGreaterThan(headingAt);
-    expect(layoutAt).toBeGreaterThan(runningAt);
+    expect(nameAt).toBeGreaterThan(runningAt);
     const running = runningSection(html);
     expect(running).toContain(
       '<div id="running-tests" hx-get="/definitions/running?name=running-on-definitions" hx-trigger="every 30s" hx-swap="innerHTML">',
@@ -762,12 +752,11 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
     expect(running).not.toContain("RUN-PEND");
     expect(running).not.toContain("RUN-DONE");
     expect(running).toContain(
-      '<a href="/definitions?name=running-on-definitions">running-on-definitions</a>',
+      '<a href="/definitions/running-on-definitions">running-on-definitions</a>',
     );
     expect(running).toContain(definitionsAbortForm("RUN-2", "diagnose", "running-on-definitions"));
     expect(running).toContain(definitionsAbortForm("RUN-1", "drive", "running-on-definitions"));
     expect(running.match(/action="\/abort"/g)).toHaveLength(2);
-    expect(html.indexOf('class="definitions__nav"')).toBeGreaterThan(runningAt);
   });
 });
 
@@ -786,7 +775,7 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page unhappy path", () => {
         },
       ]),
     );
-    const { status, html } = await getPage("/definitions?name=lock-screen", dbUrl);
+    const { status, html } = await getPage("/definitions/lock-screen", dbUrl);
     expect(status).toBe(200);
     const running = runningSection(html);
     expect(running).toContain("No tests are running.");
@@ -794,17 +783,17 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page unhappy path", () => {
     expect(running).not.toContain("RUN-FINISHED");
     expect(running).not.toContain('action="/abort"');
     expect(html.indexOf('<section class="running-tests"')).toBeLessThan(
-      html.indexOf('class="definitions__layout"'),
+      html.indexOf("<h2>lock-screen</h2>"),
     );
   });
 
-  it("answers 404 for a name no definition carries, keeping the sidebar and selecting nothing", async () => {
-    const { status, html } = await getPage("/definitions?name=no-such-definition", dbUrl);
+  it("answers 404 for a name no definition carries, and does not open another one", async () => {
+    const { status, html } = await getPage("/definitions/no-such-definition", dbUrl);
     expect(status).toBe(404);
     expect(html).toContain("No test definition named <code>no-such-definition</code>.");
-    expect(html).toContain('href="/definitions?name=lock-screen"');
-    expect(currentLinks(html)).toBe(0);
-    expect(currentCard(html)).toBe("");
+    expect(html).not.toContain("<h2>lock-screen</h2>");
+    expect(html).toContain('href="/definitions" aria-current="page"');
+    expect(section(html, "no-such-definition")).toBe("");
   });
 });
 
@@ -822,15 +811,15 @@ describe.skipIf(dbUrl === "")("dashboard/definitions edit happy path", () => {
       dbUrl,
     );
     expect(saved.status).toBe(303);
-    expect(saved.location).toBe("/definitions?name=wide-save");
+    expect(saved.location).toBe("/definitions/wide-save");
     expect(await wordingsOf(dbUrl, "wide-save")).toEqual(["first", "second", "third\nand more"]);
 
-    const { status, html } = await getPage("/definitions?name=wide-save", dbUrl);
+    const { status, html } = await getPage("/definitions/wide-save", dbUrl);
     expect(status).toBe(200);
-    const card = currentCard(html);
+    const card = section(html, "wide-save");
     const [newest] = wordings(card);
-    expect(newest).toMatchObject({ label: "v3", open: true });
-    expect(newest?.body).toContain("<p>third\nand more</p>");
+    expect(newest).toMatchObject({ label: "v3" });
+    expect(newest?.body).toContain('<p class="wording">third\nand more</p>');
     expect(wordings(card).map((wording) => wording.label)).toEqual(["v3", "v2"]);
     expect(editForm(card)).toMatchObject({
       fields: { instruction: "third\nand more" },
@@ -853,10 +842,10 @@ describe.skipIf(dbUrl === "")("dashboard/definitions edit happy path", () => {
       dbUrl,
     );
     expect(saved.status).toBe(303);
-    const { html } = await getPage("/definitions?name=wide-one-field", dbUrl);
-    const [newest] = wordings(currentCard(html));
-    expect(newest?.body).toContain("<p>p2</p>");
-    expect(newest?.body).toContain("<p>i</p>");
+    const { html } = await getPage("/definitions/wide-one-field", dbUrl);
+    const [newest] = wordings(section(html, "wide-one-field"));
+    expect(newest?.body).toContain('<p class="wording">p2</p>');
+    expect(newest?.body).toContain('<p class="wording">i</p>');
   });
 });
 
@@ -876,13 +865,13 @@ describe.skipIf(dbUrl === "")("dashboard/definitions edit unhappy path", () => {
       dbUrl,
     );
     expect(same.status).toBe(303);
-    expect(same.location).toBe("/definitions?name=wide-same&edit=unchanged");
+    expect(same.location).toBe("/definitions/wide-same?edit=unchanged");
     expect(await wordingsOf(dbUrl, "wide-same")).toEqual(["i\nover two lines"]);
 
-    const { status, html } = await getPage("/definitions?name=wide-same&edit=unchanged", dbUrl);
+    const { status, html } = await getPage("/definitions/wide-same?edit=unchanged", dbUrl);
     expect(status).toBe(200);
-    const card = currentCard(html);
-    expect(card).toContain('<p class="definition__form-notice" role="alert">');
+    const card = section(html, "wide-same");
+    expect(card).toContain('<p role="alert">');
     expect(card).toContain("Nothing changed: the newest wording already reads like this.");
   });
 
@@ -897,15 +886,15 @@ describe.skipIf(dbUrl === "")("dashboard/definitions edit unhappy path", () => {
       dbUrl,
     );
     expect(empty.status).toBe(303);
-    expect(empty.location).toBe("/definitions?name=wide-empty&edit=empty");
+    expect(empty.location).toBe("/definitions/wide-empty?edit=empty");
     const missing = await postForm({ name: "wide-empty", description: "d", proof: "p" }, dbUrl);
     expect(missing.status).toBe(303);
-    expect(missing.location).toBe("/definitions?name=wide-empty&edit=empty");
+    expect(missing.location).toBe("/definitions/wide-empty?edit=empty");
     expect(await wordingsOf(dbUrl, "wide-empty")).toEqual(["i"]);
 
-    const { html } = await getPage("/definitions?name=wide-empty&edit=empty", dbUrl);
-    const card = currentCard(html);
-    expect(card).toContain('<p class="definition__form-notice" role="alert">');
+    const { html } = await getPage("/definitions/wide-empty?edit=empty", dbUrl);
+    const card = section(html, "wide-empty");
+    expect(card).toContain('<p role="alert">');
     expect(card).toContain("Every field needs text.");
   });
 
@@ -921,9 +910,9 @@ describe.skipIf(dbUrl === "")("dashboard/definitions edit unhappy path", () => {
   });
 
   it("shows a stale ?edit value as no notice at all", async () => {
-    const { status, html } = await getPage("/definitions?name=lock-screen&edit=whatever", dbUrl);
+    const { status, html } = await getPage("/definitions/lock-screen?edit=whatever", dbUrl);
     expect(status).toBe(200);
-    expect(currentCard(html)).not.toContain('class="definition__form-notice"');
+    expect(html).not.toContain('role="alert"');
   });
 });
 
@@ -969,7 +958,7 @@ describe.skipIf(dbUrl === "")("dashboard/results page: the test each session ran
         model: "grok-4.6",
       });
     });
-    const { status, html } = await getPage("/", dbUrl);
+    const { status, html } = await getPage("/results", dbUrl);
     expect(status).toBe(200);
     expect(html).toContain('<span class="session__version-name">card-versions v2</span>');
   });
@@ -1000,7 +989,7 @@ describe.skipIf(dbUrl === "")("dashboard/definitions running fragment", () => {
     await seed(dbUrl, (db) =>
       seedQueue(db, "running-all", [...running, pendingJob("RUN-ALL-PEND")]),
     );
-    const page = await getPage("/definitions?name=running-all", dbUrl);
+    const page = await getPage("/definitions/running-all", dbUrl);
     expect(page.status).toBe(200);
     const runningHtml = runningSection(page.html);
     expect(runningHtml.match(/action="\/abort"/g)).toHaveLength(51);
@@ -1012,11 +1001,11 @@ describe.skipIf(dbUrl === "")("dashboard/definitions running fragment", () => {
     expect(fragment.html).not.toContain("RUN-ALL-PEND");
   });
 
-  it("keeps an empty ?name on the running poll, the same name the page was asked for", async () => {
-    await seed(dbUrl, (db) => seedQueue(db, "running-empty-name", [pendingJob("RUN-EMPTY")]));
-    const { status, html } = await getPage("/definitions?name=", dbUrl);
-    expect(status).toBe(404);
-    expect(runningSection(html)).toContain('hx-get="/definitions/running?name="');
+  it("polls the running list with no name on the index", async () => {
+    const { status, html } = await getPage("/definitions", dbUrl);
+    expect(status).toBe(200);
+    expect(runningSection(html)).toContain('hx-get="/definitions/running"');
+    expect(runningSection(html)).not.toContain("?name=");
   });
 
   it("serves the empty line alone when nothing is running", async () => {
@@ -1040,7 +1029,7 @@ describe("dashboard/definitions running fragment unhappy path", () => {
 
 describe("dashboard/definitions page unhappy path: unreachable database", () => {
   it("answers 500 with the unavailable message and never echoes the password", async () => {
-    const { status, html } = await getPage("/definitions?name=lock-screen", REFUSED_URL);
+    const { status, html } = await getPage("/definitions/lock-screen", REFUSED_URL);
     expect(status).toBe(500);
     expect(html).toContain("Test definitions are unavailable.");
     expect(html).not.toContain('href="/definitions?name=');
@@ -1185,6 +1174,12 @@ describe.skipIf(dbUrl === "")("dashboard/servers page happy path", () => {
     expect(status).toBe(200);
     expect(html).toContain("<!doctype html>");
     expect(html).toContain("<h1>oligarchy servers</h1>");
+    expect(html).toContain('aria-current="page">servers</a>');
+    const home = await getPage("/", dbUrl);
+    expect(home.status).toBe(200);
+    expect(home.html).toContain("<h1>oligarchy servers</h1>");
+    expect(home.html).toContain('aria-current="page">servers</a>');
+    expect(home.html).toContain("<td>http://10.1.0.1:42069</td>");
     expect(html).toContain('<div id="fleet" hx-get="/servers/fleet" hx-trigger="every 30s">');
     expect(html).toContain(
       "<tr><td>garage</td><td>http://10.1.0.1:42069</td><td>2</td><td>31.5 / 66.9 GB</td><td>12.3% / 11.0% / 9.8%</td><td>42</td><td>12 s ago</td>",
@@ -2023,7 +2018,7 @@ describe("dashboard POST /abort happy path: the outbound calls", () => {
         }),
       );
       expect(response.status).toBe(303);
-      expect(response.headers.get("location")).toBe("/definitions?name=lock-screen");
+      expect(response.headers.get("location")).toBe("/definitions/lock-screen");
       expect(proxy.requests).toEqual([
         {
           method: "POST",

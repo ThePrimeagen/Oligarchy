@@ -39,9 +39,12 @@ export type MintValues = {
   readonly INSTALL_PROOF: string;
 };
 
-// The files sit beside the package, not the working directory: resolve them from this module.
-const besideModule = (relative: string): string =>
-  decodeURIComponent(new URL(relative, import.meta.url).pathname);
+// Beside this module. workerd's `import.meta.url` is not a URL base, so the relative path stands;
+// it still ends with the file the dashboard overlay serves. ./ctrl's base parses.
+export const modulePath = (relative: string, base: string): string =>
+  URL.canParse(relative, base) ? decodeURIComponent(new URL(relative, base).pathname) : relative;
+
+const besideModule = (relative: string): string => modulePath(relative, import.meta.url);
 
 // The guides a template may embed, by the name it uses. Read only when named, so an unreadable
 // guide cannot stop a command whose template does not embed it.

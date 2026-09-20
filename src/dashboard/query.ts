@@ -225,14 +225,13 @@ export function groupDefinitions(rows: ReadonlyArray<TestDefinition>): Definitio
     }));
 }
 
-// The definition the wide layout opens on, every wording of it: the name ?name asks for, or the
-// first listed when the page is opened bare. A name nobody carries selects nothing, so the route
-// can answer 404 rather than quietly show another definition under a URL that names this one.
+// The definition a name's page opens, every wording of it. A name nobody carries selects nothing,
+// so the route can answer 404 rather than show another definition under a URL that names this one.
 export function selectDefinition(
   groups: ReadonlyArray<DefinitionVersions>,
-  name: string | undefined,
+  name: string,
 ): DefinitionVersions | undefined {
-  return name === undefined ? groups[0] : groups.find((group) => group.name === name);
+  return groups.find((group) => group.name === name);
 }
 
 // Passed and failed per wording of one name, oldest first; a wording with neither is left out.

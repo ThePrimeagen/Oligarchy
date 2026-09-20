@@ -1,5 +1,5 @@
 import type { FC } from "hono/jsx";
-import { HTMX_INTEGRITY, HTMX_URL } from "./htmx.ts";
+import { OperatorPage } from "./page.tsx";
 import type { AutomationJob, AutomationQueue, ProcessSeries, Server } from "./query.ts";
 import { followHref, linearHref } from "./ticket.ts";
 
@@ -355,51 +355,39 @@ export const ServersPage: FC<{
   halves: Halves | undefined;
   error: string | undefined;
 }> = ({ halves, error }) => (
-  <html lang="en">
-    <head>
-      <meta charset="utf-8" />
-      <title>oligarchy servers</title>
-      <style>
-        {
-          ':root { color-scheme: dark; } body { margin: 24px 32px 40px; font: 16px/1.4 system-ui, sans-serif; color: #e8e6e3; background: #161616; } h1, h2, h3 { color: #fff; } h1 { margin: 0 0 20px; } h2 { margin: 1.25rem 0 12px; } table { border-collapse: collapse; width: 100%; } th, td { text-align: left; padding: 4px 10px 4px 0; vertical-align: top; } th { color: #9a9691; font-weight: 600; } input, button { color: #e8e6e3; background: #1f1f1f; border: 1px solid #2c2c2c; border-radius: 6px; padding: 4px 8px; } button { cursor: pointer; } .halves { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: start; } .abort { background: none; border: none; padding: 0; cursor: pointer; line-height: 0; vertical-align: middle; } .process-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; } .process-card { display: grid; gap: 10px; background: #1f1f1f; border: 1px solid #2c2c2c; border-radius: 12px; padding: 14px 16px 12px; } .process-card > header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; } .process-card > header h3, .process-card > header p, .process-card > p { margin: 0; } .process-card > header p { color: #9a9691; font-size: 13px; } .process-graph { display: grid; gap: 10px; } .process-graph__plot { position: relative; height: 10rem; background: #111; border-radius: 8px; overflow: hidden; } .process-graph__plot::before { content: ""; position: absolute; inset: 0; background-image: linear-gradient(to top, #2a2a2a 1px, transparent 1px); background-size: 100% 25%; opacity: 0.7; } .process-graph__bars { position: absolute; inset: 10px 10px 8px; display: flex; align-items: flex-end; gap: 2px; } .process-graph__bar { flex: 1 1 0; min-width: 0; min-height: 0; background: #3f3f46; border-radius: 3px 3px 0 0; } .process-graph__lines { position: absolute; inset: 10px 10px 8px; width: calc(100% - 20px); height: calc(100% - 18px); overflow: visible; } .process-graph__lines .process-graph__jobs, .process-graph__lines .process-graph__cpu { fill: none; stroke-width: 2.25; } .process-graph__lines .process-graph__jobs { stroke: #fbbf24; } .process-graph__lines .process-graph__cpu { stroke: #38bdf8; } .process-graph__legend { display: flex; gap: 16px; list-style: none; margin: 0; padding: 0; font-size: 13px; color: #c4c0ba; } .process-graph__legend li::before { content: ""; display: inline-block; width: 12px; height: 8px; margin-right: 6px; vertical-align: middle; border-radius: 1px; } .process-graph__legend .process-graph__memory::before { background: #3f3f46; } .process-graph__legend .process-graph__jobs::before { background: #fbbf24; height: 3px; } .process-graph__legend .process-graph__cpu::before { background: #38bdf8; height: 3px; } a.ticket { color: #7dcfff; } td.follow { padding: 0; } td.follow a { display: block; padding: 4px 10px 4px 0; color: inherit; text-decoration: none; }'
-        }
-      </style>
-      <script src={HTMX_URL} integrity={HTMX_INTEGRITY} crossorigin="anonymous"></script>
-    </head>
-    <body>
-      <h1>oligarchy servers</h1>
-      {error === undefined ? null : <p>error: {error}</p>}
+  <OperatorPage title="oligarchy servers" page="servers">
+    <h1>oligarchy servers</h1>
+    {error === undefined ? null : <p>error: {error}</p>}
+    <section>
+      <h2>process</h2>
+      {halves === undefined ? null : (
+        <div id="process" hx-get="/servers/process" hx-trigger="every 30s">
+          <Process series={halves.process} />
+        </div>
+      )}
+    </section>
+    <div class="halves">
       <section>
-        <h2>process</h2>
+        <h2>automation</h2>
         {halves === undefined ? null : (
-          <div id="process" hx-get="/servers/process" hx-trigger="every 30s">
-            <Process series={halves.process} />
+          <div id="queue" hx-get="/servers/queue" hx-trigger="every 30s">
+            <Queue queue={halves.queue} />
           </div>
         )}
       </section>
-      <div class="halves">
-        <section>
-          <h2>automation</h2>
-          {halves === undefined ? null : (
-            <div id="queue" hx-get="/servers/queue" hx-trigger="every 30s">
-              <Queue queue={halves.queue} />
-            </div>
-          )}
-        </section>
-        <section>
-          <h2>qemu servers</h2>
-          {halves === undefined ? null : (
-            <div id="fleet" hx-get="/servers/fleet" hx-trigger="every 30s">
-              <Fleet servers={halves.servers} />
-            </div>
-          )}
-          <h2>add a server</h2>
-          <form method="post" action="/servers">
-            <input name="url" size={60} placeholder="https://qemu.example.com" />
-            <button>add</button>
-          </form>
-        </section>
-      </div>
-    </body>
-  </html>
+      <section>
+        <h2>qemu servers</h2>
+        {halves === undefined ? null : (
+          <div id="fleet" hx-get="/servers/fleet" hx-trigger="every 30s">
+            <Fleet servers={halves.servers} />
+          </div>
+        )}
+        <h2>add a server</h2>
+        <form method="post" action="/servers">
+          <input name="url" size={60} placeholder="https://qemu.example.com" />
+          <button>add</button>
+        </form>
+      </section>
+    </div>
+  </OperatorPage>
 );

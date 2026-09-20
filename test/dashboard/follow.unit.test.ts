@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { app } from "../../src/dashboard/dashboard.tsx";
 import { FollowFrame, type SessionFollow } from "../../src/dashboard/follow.tsx";
-import { RunningList } from "../../src/dashboard/dashboard.tsx";
+import { RunningList } from "../../src/dashboard/definitions.tsx";
 import type { AutomationJob } from "../../src/dashboard/query.ts";
 
 const QUERIED_AT = new Date("2026-09-09T16:00:00Z");
@@ -174,7 +174,7 @@ describe("RunningList happy path", () => {
     expect(page).toContain(
       '<a class="running-tests__linear" href="https://linear.app/issue/OLI-61">OLI-61</a>',
     );
-    expect(page).toContain('<a href="/definitions?name=lock-screen">lock-screen</a>');
+    expect(page).toContain('<a href="/definitions/lock-screen">lock-screen</a>');
     expect(page).toContain(definitionsAbort("OLI-61"));
   });
 });
@@ -185,7 +185,7 @@ describe("RunningList unhappy path", () => {
       RunningList({ jobs: [job(null, "drive")], definition: "lock-screen" }),
     );
     expect(page).toContain(">—</span>");
-    expect(page).toContain('<a href="/definitions?name=lock-screen">lock-screen</a>');
+    expect(page).toContain('<a href="/definitions/lock-screen">lock-screen</a>');
     expect(page).not.toContain('href="/tickets/');
     expect(page).not.toContain("linear.app");
     expect(page).not.toContain("running-tests__open");
@@ -195,7 +195,7 @@ describe("RunningList unhappy path", () => {
 
 describe("running card click layer", () => {
   it("lays the follow link under the definition link, the ticket link and the abort", () => {
-    const css = readFileSync("public/dashboard.css", "utf8");
+    const css = readFileSync("src/dashboard/page.tsx", "utf8");
     expect(css).toContain(".running-tests__open");
     expect(css).toMatch(/\.running-tests__job\s*\{[^}]*position:\s*relative/);
     expect(css).toMatch(/\.running-tests__open\s*\{[^}]*position:\s*absolute[^}]*inset:\s*0/);

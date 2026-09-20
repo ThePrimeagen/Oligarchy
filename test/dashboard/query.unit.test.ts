@@ -200,15 +200,6 @@ describe("groupDefinitions unhappy path", () => {
 });
 
 describe("selectDefinition happy path", () => {
-  it("selects the first name, with every one of its versions, when nothing is asked for", () => {
-    const [first] = groupDefinitions(ROWS);
-    expect(selectDefinition(groupDefinitions(ROWS), undefined)).toEqual(first);
-    expect(selectDefinition(groupDefinitions([lockV2, lockV1]), undefined)).toEqual({
-      name: "lock-screen",
-      versions: [lockV1, lockV2],
-    });
-  });
-
   it("selects the name asked for, wherever it sits, with every one of its versions", () => {
     expect(selectDefinition(groupDefinitions(ROWS), "lock-screen")).toEqual({
       name: "lock-screen",
@@ -229,8 +220,7 @@ describe("selectDefinition unhappy path", () => {
     expect(selectDefinition(groups, "")).toBeUndefined();
   });
 
-  it("selects nothing from no groups, with or without a name", () => {
-    expect(selectDefinition([], undefined)).toBeUndefined();
+  it("selects nothing from no groups", () => {
     expect(selectDefinition([], "install")).toBeUndefined();
   });
 });
