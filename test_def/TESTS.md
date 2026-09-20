@@ -166,25 +166,24 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open the System menu with Super+Escape (the System menu: Screensaver, Lock, Suspend, Logout, Reboot, Shutdown).
-  * Select the Lock option using the mouse.  Do not use keyboard.
-  * On the lock screen unlock it with a password.
-  ** The lock screen shows only the password field (`Enter Password`) over the blurred wallpaper — no clock, no user name. That is how it is built; do not report the missing clock.
-  ** The password screen, if not interacted with within a few seconds, it will turn black.  You can still type and keys will be inputted into the password text box
+  * Press Super+Escape. The System menu opens.
+  * Click Lock. Use the mouse only. The screen locks.
+  * Type `prime` and press Enter. The desktop returns.
   * the desktop must return exactly as left.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * ./client-with-image allows you to get an image back of what you did, so can be useful for speeding things up
-  * double checking your mouse position before clicking can be useful to prevent failure.
+  * Super+Escape is <M-ESC>. Password is `prime`.
+  * The lock screen turns black after a few seconds without input. Keys still reach the password field. Move the mouse to bring it back. Do not report a missing clock.
+  * Check the pointer before the click. ./client-with-image helps.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screendumps of the engaged lock screen showing only the password field — no clock — and the restored desktop
-  ** The mouse button was used to click the Lock option and not the keyboard
+  ** Screenshot of the open System menu, the lock screen, and the restored desktop
+  ** The mouse was used to click Lock
   * If unsuccessful
   ** the crash dialog on failure.
 covers: existing `lock-screen` definition (ctrl.md:89-90); default/hypr/bindings/utilities.lua:8 (SUPER+ESCAPE → omarchy-menu toggle system); default/omarchy/omarchy-menu.jsonc system.lock; bin/omarchy-system-lock; shell/plugins/lock/LockView.qml:25,191; 03-INTENDED-BEHAVIOUR (a), (b)
@@ -197,33 +196,33 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `echo LOCK-HOTKEY-MARKER` then Enter so the window has recognisable content.
-  * Press Super+Ctrl+L. Within two seconds the screen changes to the lock screen: a blurred, slightly darkened copy of the wallpaper with one centred rounded box reading `Enter Password`. No clock, no user name. Screenshot at once.
-  ** The field-only design is intended (no 4.x build ever showed a clock on the lock screen) — do not report the absence.
-  ** After 5 seconds without input the lock screen turns black; a mouse move brings it back and typing still reaches the field.
-  * Type `wrongpass` and press Enter. The box empties and shows italic `Authentication failed (1)`; the box border turns to the theme's error colour (reddish). Screenshot right after Enter.
-  * Type `wrongagain` and press Enter. The message now reads `Authentication failed (2)`.
-  * Do nothing for 7 seconds (screenshots at ~3 s and ~7 s): the screen is black by the second one. Move the mouse a little: the lock screen returns and still reads `Authentication failed (2)`.
-  * Type `prime` and press Enter. The failure text disappears with the first character; the box briefly reads `Checking…`; the desktop returns with the terminal still showing `LOCK-HOTKEY-MARKER` and the bar at the top.
-  * In the terminal run `omarchy-shell lock isLocked` — it prints `false`.
-  * Unhappy path: press Super+Ctrl+L twice quickly. Exactly one lock screen appears; unlock with `prime` and Enter. Close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Type `echo LOCK-HOTKEY-MARKER` and press Enter. The marker is on screen.
+  * Press Super+Ctrl+L. The screen locks.
+  * Type `wrongpass` and press Enter. The failure count is 1.
+  * Type `wrongagain` and press Enter. The failure count is 2.
+  * Wait. The lock screen goes black.
+  * Move the mouse. The lock screen returns, still on failure 2.
+  * Type `prime` and press Enter. The desktop returns.
+  * Run `omarchy-shell lock isLocked` and press Enter. It prints `false`.
+  * Press Super+Ctrl+L. The screen locks.
+  * Press Super+Ctrl+L again. The screen stays locked.
+  * Type `prime` and press Enter. The desktop returns.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The hotkey is Ctrl+Super+L; with send-keys that is `<C-M-l>`. The keyboard, not the menu, must be used to lock here — the menu/mouse route is the existing `lock-screen` test.
-  * Each PAM check takes 1–3 seconds; wait for the message before typing the next attempt. The counter is per lock session and resets to 0 the next time you lock.
-  * These two failures count toward the ten-failure lockout if another wrong-password test runs on the same disk within 15 minutes.
-  * If the screenshot after locking is black, move the mouse and screenshot again ~1 s later (virtio modeset).
-  * ./client-with-image allows you to get an image back of what you did, so can be useful for speeding things up
+  * Super+Ctrl+L is <C-M-l>. Lock with the keyboard. The mouse lock is `lock-screen`.
+  * Wait for each rejection before the next password. A check takes 1–3 seconds.
+  * The lock screen turns black after 5 seconds. A mouse move brings it back. If the first shot after waking is black, take another a second later. Do not report a missing clock.
+  * These failures count toward the ten-failure lockout for 15 minutes.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the lock screen showing the `Enter Password` box over the blurred wallpaper, with no clock or user name
-  ** Screenshots of `Authentication failed (1)` and `Authentication failed (2)` with the error-coloured border; a black shot; the box back with `(2)` after the mouse move
-  ** Screenshot of the restored desktop with `LOCK-HOTKEY-MARKER` visible; terminal shows `false`; a single lock screen after the double press
+  ** Screenshots of the lock, failure 1, failure 2, the black screen, the return still on failure 2, the desktop with the marker, `false`, and one lock after the second Super+Ctrl+L
   * If unsuccessful
   ** A desktop that unlocked on a wrong password (security failure — report loudly), a box with no message or the wrong count, the lock never engaging, or the crash dialog
   ** `omarchy-shell lock status` and `journalctl -t omarchy-shell --since -3min --no-pager | grep 'omarchy lock' | sudo tee /dev/ttyS0`
@@ -236,22 +235,29 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Ctrl+L. Screenshot at once: the `Enter Password` box is visible.
-  * Without any input take screenshots at roughly 2 s, 4 s and 7 s after locking: the 2 s and 4 s shots still show the box; the 7 s shot is completely black.
-  * Move the mouse a little. Screenshot within 1–2 s: the lock screen with the box is back.
-  * Type `prim` (no Enter): four dots show in the box. Wait 5 s and screenshot: black again despite the partial password.
-  * Tap Shift (the box returns with the four dots still there), type `wrongpass` and press Enter; screenshot within a second: the box reads `Checking…` and the screen is not black during the check; the attempt is then rejected with `Authentication failed (1)`.
-  ** If characters were swallowed while blank, press Backspace ten times before typing.
-  * Wait 7 seconds again with no input and screenshot: black again (the timer re-armed). With the screen black, type `prime` and press Enter without moving the mouse first: the screen wakes and the desktop appears.
-  * Open a terminal with Super+Enter and run `omarchy-shell lock isLocked` — `false`. Close it with Super+W.
+  * Press Super+Ctrl+L. The screen locks.
+  * Wait about 4 seconds. The lock screen stays lit.
+  * Wait until 7 seconds. The lock screen goes black.
+  * Move the mouse. The lock screen returns.
+  * Type `prim`. Four dots show. Do not press Enter.
+  * Wait 5 seconds. The lock screen goes black.
+  * Press Shift. The four dots are still there.
+  * Type `wrongpass` and press Enter. The password is rejected, and the screen stays lit during the check.
+  * Wait 7 seconds. The lock screen goes black.
+  * Type `prime` and press Enter. Do not move the mouse first. The desktop returns.
+  * Press Super+Enter. A terminal opens.
+  * Run `omarchy-shell lock isLocked` and press Enter. It prints `false`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * "Black" means the whole screenshot is black; a dark blurred wallpaper with the box is not black.
-  * After waking, the virtual display needs a moment to turn back on; if the first screenshot is still black, take another one a second later before deciding.
-  * You may only pause up to 5 s between actions; make each wait a single ≤5 s pause followed by one screenshot, not repeated polling that would keep the screen awake.
+  * Super+Ctrl+L is <C-M-l>.
+  * Black means the whole screenshot is black. A dark wallpaper with the box is not black.
+  * After a wake, if the first screenshot is still black, take another a second later.
+  * Each wait is one pause of at most 5 seconds, then one screenshot. Polling keeps the screen awake.
+  * If keys were swallowed while black, press Backspace ten times before the next password.
   </Hints>
   </Instructions>
 proof: |
@@ -270,12 +276,15 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Ctrl+L and wait for the `Enter Password` box.
-  * Press Enter three times, about one second apart. Nothing changes: the placeholder stays `Enter Password`, no `Checking…`, no `Authentication failed` text, and the session stays locked.
-  * Type `abc`. Three dots `●●●` appear in the box.
-  * Press Escape. The dots vanish and `Enter Password` returns.
-  * Type `abc` again, then press Ctrl+U. The dots vanish again.
-  * Type `abc` then press Enter. `Authentication failed (1)` appears — proving the empty Enters earlier were not counted.
+  * Press Super+Ctrl+L. The screen locks.
+  * Press Enter. Nothing happens.
+  * Press Enter. Nothing happens.
+  * Press Enter. Nothing happens.
+  * Type `abc`. Three dots show.
+  * Press Escape. The field clears.
+  * Type `abc`. Three dots show.
+  * Press Ctrl+U. The field clears.
+  * Type `abc` and press Enter. The failure count is 1.
   * Type `prime` and press Enter. The desktop returns.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
@@ -302,13 +311,15 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Ctrl+L and wait for the `Enter Password` box.
-  * Type 40 letters `a` in one go. Dots fill the middle of the box at normal size. Screenshot.
-  * Type another 120 letters `a` in three chunks of 40 back to back (total 160). Screenshot.
-  ** The dots are now visibly smaller and tightly packed, all still inside the rounded box; nothing spills past the box border or is cut off on either side.
-  * Press Backspace 20 times. The dot count drops and the dots re-space themselves, still inside the field. Screenshot.
-  * Press Enter. The box clears and shows `Authentication failed (1)`; the screen stays locked.
-  * Type `prime` and press Enter. The desktop returns exactly as left.
+  * Press Super+Ctrl+L. The screen locks.
+  * Type 40 letter a's. The dots stay normal size.
+  * Type 40 more letter a's. The dots shrink.
+  * Type 40 more letter a's. The dots stay inside the field.
+  * Type 40 more letter a's. The dots stay inside the field.
+  * Press Backspace 20 times. The dots spread out.
+  * Press Enter. The password is rejected. The screen stays locked.
+  * Type `prime` and press Enter. The desktop returns.
+  * the desktop must return exactly as left.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -333,17 +344,31 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `grep faillock /etc/pam.d/system-auth; grep -E '^deny' /etc/security/faillock.conf; grep authsucc /etc/pam.d/sddm-autologin; grep passwd_tries /etc/sudoers.d/omarchy-passwd-tries; faillock --user prime`.
-  ** Expect `preauth silent deny=10 unlock_time=120` and `authfail deny=10 unlock_time=120`, `deny = 10`, one `pam_faillock.so authsucc` line, `Defaults passwd_tries=10`, and an empty tally.
-  * Press Super+Ctrl+L and wait for the `Enter Password` box. Type `x`, press Enter, wait for `Authentication failed (N)`, screenshot; repeat until the message reads `Authentication failed (10)`. Note the wall-clock time of the tenth failure.
-  ** Failures 1–4 alone lock nothing (Omarchy raises the limit from the Arch default of three to ten); each PAM check takes 1–3 s.
-  * Type the correct password `prime` and press Enter: it must be REFUSED — `Authentication failed (11)` appears near-instantly and the session stays locked.
-  * Recover as the manual says: press Ctrl+Alt+F3; at `login:` type `root` Enter, then `prime` Enter (root shares the user's password on ISO installs). Run `faillock --user prime` (a table of ≥10 failures), then `faillock --reset --user prime`, then `faillock --user prime` again (empty). Type `exit` and press Ctrl+Alt+F1 to return to the lock screen.
-  ** If F1 shows a text console, try Ctrl+Alt+F2 through F7 until the lock screen is visible. Tap Shift to wake it if black.
-  ** Without the reset the tally clears itself 120 s after the tenth failure: if the console login is unavailable, wait 125 s moving the mouse every 4–5 s (screenshot each) and `prime` must then unlock. Do not try `sudo` during the window — the same tally blocks it for the same 120 s.
-  * Type `prime` and press Enter. The desktop returns exactly as left.
-  * In the terminal run `sudo faillock --user prime` (password `prime`) — the tally is empty (a successful unlock resets it). Then run `sudo -k; sudo true`, typing `nope` at the first four `[sudo] password for prime:` prompts and `prime` at the fifth — the command succeeds (sudo allows up to ten tries in one invocation) and `faillock --user prime` is empty again.
-  * Close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Run `grep faillock /etc/pam.d/system-auth` and press Enter. It shows deny=10 and unlock_time=120.
+  * Run `grep -E '^deny' /etc/security/faillock.conf` and press Enter. It shows deny = 10.
+  * Run `faillock --user prime` and press Enter. The tally is empty.
+  * Press Super+Ctrl+L. The screen locks.
+  * Type `x` and press Enter. The failure count is 1.
+  * Type `x` and press Enter. The failure count is 2.
+  * Type `x` and press Enter. The failure count is 3.
+  * Type `x` and press Enter. The failure count is 4.
+  * Type `x` and press Enter. The failure count is 5.
+  * Type `x` and press Enter. The failure count is 6.
+  * Type `x` and press Enter. The failure count is 7.
+  * Type `x` and press Enter. The failure count is 8.
+  * Type `x` and press Enter. The failure count is 9.
+  * Type `x` and press Enter. The failure count is 10.
+  * Type `prime` and press Enter. The password is refused. The screen stays locked.
+  * Press Ctrl+Alt+F3. A text login appears.
+  * Log in as `root` with password `prime`. A root shell opens.
+  * Run `faillock --reset --user prime` and press Enter. The tally is cleared.
+  * Type `exit` and press Enter. The login prompt returns.
+  * Press Ctrl+Alt+F1. The lock screen returns.
+  * Type `prime` and press Enter. The desktop returns.
+  * Run `sudo faillock --user prime` and press Enter. Password is `prime`. The tally is empty.
+  * Press Super+W. The terminal closes.
+  * the desktop must return exactly as left.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -372,21 +397,23 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `orig=$(readlink -f ~/.local/state/omarchy/current/background); omarchy-theme-bg-current`. Note the name printed.
-  * Run `omarchy-theme-bg-next`. The desktop wallpaper changes (quick diagonal wipe); `omarchy-theme-bg-current` now prints a different name.
-  ** If the theme has a single background the name will not change; report that and continue.
-  * Press Super+Ctrl+L and screenshot at once.
-  ** The lock background is a blurred, darker version of the wallpaper you just saw on the desktop — same colours and rough composition — not the previous one.
-  ** Take the screenshot within 5 s of locking; after that the screen goes black (move the mouse to bring it back).
+  * Press Super+Enter. A terminal opens.
+  * Run `orig=$(readlink -f ~/.local/state/omarchy/current/background)` and press Enter. The path is saved.
+  * Run `omarchy-theme-bg-next` and press Enter. The wallpaper changes.
+  * Run `omarchy-theme-bg-current` and press Enter. The name is different.
+  * Press Super+Ctrl+L. The screen locks on the new wallpaper.
   * Type `prime` and press Enter. The desktop returns.
-  * Restore the original wallpaper: `omarchy-theme-bg-set "$orig"` — the desktop shows the first wallpaper again. Close the terminal with Super+W.
+  * Run `omarchy-theme-bg-set "$orig"` and press Enter. The first wallpaper returns.
+  * Press Super+W. The terminal closes.
+  * the desktop must return exactly as left.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The lock screen has no clock or text besides the password box; judge the background by colour and shapes against the desktop screenshot.
-  * ./client-with-image allows you to get an image back of what you did, so can be useful for speeding things up
+  * Super+Ctrl+L is <C-M-l>. Screenshot the lock within 5 seconds. If it is black, move the mouse and shoot again.
+  * If the theme has one background, the name does not change. Report that and stop.
+  * Do not report a missing clock.
   </Hints>
   </Instructions>
 proof: |
@@ -404,20 +431,23 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter, run `sudo -v` (password `prime`) so sudo is cached, then run exactly: `(sleep 12; pgrep -x ttfx | sudo -n tee /dev/ttyS0; sleep 3; omarchy-system-lock) &`
-  * Press Super+Escape to open the System menu and click `Screensaver` with the mouse. A fullscreen black window with animated ASCII art appears within ~2 s.
-  * Do not press any key or move the mouse; take screenshots every 4 s.
-  * At about 15 s the screensaver is replaced by the lock screen (`Enter Password` box over the blurred wallpaper) with no screensaver text visible.
-  * Type `prime`, Enter. The desktop returns.
-  * Read `./client get-serial`: a ttfx PID was printed at 12 s (the screensaver was running when the lock fired). In the terminal run `pgrep -fa org.omarchy.screensaver; pgrep -x ttfx; echo "done"` → only `done` (no processes).
-  * Close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Run `sudo -v` and press Enter. Password is `prime`. Sudo is cached.
+  * Run `(sleep 12; pgrep -x ttfx | sudo -n tee /dev/ttyS0; sleep 3; omarchy-system-lock) &` and press Enter. The command is waiting.
+  * Press Super+Escape. The System menu opens.
+  * Click Screensaver. Use the mouse only. The screensaver starts.
+  * Wait, taking a screenshot every 4 seconds. Do not press a key or move the mouse. The lock screen replaces the screensaver.
+  * Type `prime` and press Enter. The desktop returns.
+  * Read `./client get-serial`. A ttfx pid was recorded.
+  * Run `pgrep -x ttfx; echo done` and press Enter. Only `done` prints.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Any key or mouse click while the screensaver runs would end it early; screenshots are fine.
-  * If the screensaver does not start, run `omarchy-launch-screensaver force; echo $?` and report its message (it needs foot/alacritty/ghostty/kitty as default terminal). The screensaver is a terminal window with class `org.omarchy.screensaver` running `ttfx`.
+  * Do not press a key or move the mouse while the screensaver is up. Screenshots are fine.
+  * If the screensaver does not start, run `omarchy-launch-screensaver force; echo $?` and report the message.
   </Hints>
   </Instructions>
 proof: |
