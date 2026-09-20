@@ -16019,28 +16019,42 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `sudo touch /usr/bin/omarchy-install-hermes-cli; pacman -Qo /usr/bin/omarchy-install-hermes-cli` (password `prime`) — expect `error: No package owns /usr/bin/omarchy-install-hermes-cli`.
-  * Type `omarchy update`, answer Yes, type `prime` at sudo prompts.
-  ** Under `Update system packages` pacman fails with `error: failed to commit transaction (conflicting files)` and `omarchy: /usr/bin/omarchy-install-hermes-cli exists in filesystem`.
-  ** Right after, a yellow `Taking over files pacman doesn't own yet:` heading with `  /usr/bin/omarchy-install-hermes-cli -> /var/lib/omarchy/replaced/usr/bin/omarchy-install-hermes-cli`, then a second `Update system packages` heading and a successful pacman run, then the migrations.
-  * Answer No to any orphan question and No to the reboot question.
-  * Type `ls -l /var/lib/omarchy/replaced/usr/bin/; pacman -Qo /usr/bin/omarchy-install-hermes-cli; omarchy-version`.
-  ** The quarantined empty file is listed, the live path is owned by `omarchy`, the version is the new one.
-  * This leaves the disk updated but not rebooted: end with `stop` (or reboot via Super+Escape → Reboot before reusing it).
+  * Press Super+Return. A terminal opens.
+  * Type `sudo touch /usr/bin/omarchy-install-hermes-cli` and press Return. The prompt returns.
+  ** If sudo asks, type `prime` and press Return.
+  * Type `pacman -Qo /usr/bin/omarchy-install-hermes-cli` and press Return. The output says no package owns that path.
+  ** If a package already owns it, use `/usr/bin/omarchy-update-pacman` instead and record that.
+  * Type `omarchy update` and press Return. The question `Continue with update?` appears.
+  * Choose Yes. The update continues.
+  * If a sudo prompt appears, type `prime` and press Return. The update continues.
+  * Wait until pacman reports `exists in filesystem` for `/usr/bin/omarchy-install-hermes-cli`.
+  * Wait until a line moves that path under `/var/lib/omarchy/replaced/`.
+  * Wait until a second `Update system packages` run succeeds.
+  ** If an orphan question appears, choose No.
+  ** If a reboot question appears, choose No.
+  * Type `ls -l /var/lib/omarchy/replaced/usr/bin/` and press Return. The quarantined file is listed.
+  * Type `pacman -Qo /usr/bin/omarchy-install-hermes-cli` and press Return. The live path is owned by `omarchy`.
+  * Type `omarchy-version` and press Return. The version is newer than the one at the start.
+  * End the session with `stop`. The disk stays updated and not rebooted.
+  ** Reboot from the power menu with passphrase `prime` instead if this disk will be reused.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Screenshot as soon as the pacman error appears; the yellow handler text follows within seconds. The whole run is a full update (> 5 min); screenshot repeatedly instead of sleeping.
-  * The path must be outside /usr/share/omarchy (that tree is overwritten unconditionally) and new in the target release. If `pacman -Qo` already reports the path as owned, note it and use `/usr/bin/omarchy-update-pacman` (new in HEAD) on an edge disk instead.
+  * Screenshot as soon as the conflict appears. The takeover line follows within a few seconds.
+  * The run is a full update and can take more than 5 minutes. Screenshot repeatedly.
+  * The planted path must be outside `/usr/share/omarchy`.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the unowned check, the pacman conflict error, the yellow `Taking over files…` block with the `->` line, the second successful `Update system packages`, and the final `ls`/`pacman -Qo`/`omarchy-version` output
+  ** `pacman -Qo` says no package owns the planted file.
+  ** The update hits `exists in filesystem`, then moves the file under `/var/lib/omarchy/replaced/`, then runs `Update system packages` successfully.
+  ** Any orphan or reboot question is answered No.
+  ** The quarantined file is listed, the live path is owned by `omarchy`, and the version is newer.
   * If unsuccessful
-  ** Screenshot of the update stopping with `Something went wrong` after the conflict, or of `Putting back what the upgrade didn't take:`; `sudo cat /tmp/omarchy-update.log | sudo tee /dev/ttyS0` then `get-serial`
+  ** The update stops after the conflict, or it puts the old file back.
 covers: bin/omarchy-update-system-pkgs, bin/omarchy-update-system-pkgs-when-conflicted, docs/update-process.md conflict handler, test/shell.d/update-file-conflict-test.sh
 
 ### update-stops-on-failed-migration   [VM-OK] [NET] [SLOW]
@@ -16050,30 +16064,40 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `chmod 555 ~/.config/mise; ls -ld ~/.config/mise` — the directory shows `dr-xr-xr-x`.
-  * Type `omarchy update`, answer Yes, type `prime` at sudo prompts, and wait through the package upgrade.
-  ** The first migration is `Running migration (1787215483)` / `Stop mise upgrades from pruning versions still in use`; `mise settings set` fails with a permission/read-only error; **no** further `Running migration` line; the red `Something went wrong during the update!` banner is printed and the prompt returns. No `Update mise tools`, no reboot question, no `Restarting shell`.
-  * Type `omarchy-migrate --pending | sudo tee /dev/ttyS0` — the list starts with `1787215483.sh` and includes the others (`1788745941.sh`, `1789325478.sh`, …).
-  * Type `chmod 755 ~/.config/mise; ls -ld ~/.config/mise` — back to `drwxr-xr-x`.
-  * Type `omarchy-migrate` (type `prime` at sudo prompts).
-  ** `Running migration (1787215483)` runs again, then every remaining migration in order (the `Restart Kitty` box, the kernel install…) with no error.
-  * Type `omarchy-migrate --pending; echo pending=$?; omarchy-version` — nothing pending, `pending=1`, the new version.
-  * This leaves the disk updated but not rebooted: end with `stop` (or reboot via Super+Escape → Reboot before reusing it).
+  * Press Super+Return. A terminal opens.
+  * Type `chmod 555 ~/.config/mise` and press Return. The prompt returns.
+  * Type `ls -ld ~/.config/mise` and press Return. The mode is `dr-xr-xr-x`.
+  * Type `omarchy update` and press Return. The question appears.
+  * Choose Yes. The update continues.
+  * If a sudo prompt appears, type `prime` and press Return. The update continues.
+  * Wait until migration `1787215483` fails with a permission error and the failure banner appears.
+  * Confirm the output. No later `Running migration` line, no `Update mise tools`, no `Restarting shell`, and no reboot question appear.
+  * Type `omarchy-migrate --pending | sudo tee /dev/ttyS0` and press Return. The serial log starts with `1787215483.sh`.
+  * Type `chmod 755 ~/.config/mise` and press Return. The prompt returns.
+  * Type `ls -ld ~/.config/mise` and press Return. The mode is `drwxr-xr-x`.
+  * Type `omarchy-migrate` and press Return. Migration `1787215483` runs again.
+  * Wait until the remaining migrations finish and the prompt returns.
+  ** If sudo asks, type `prime` and press Return.
+  * Type `omarchy-migrate --pending; echo pending=$?` and press Return. Nothing is pending, and the last line is `pending=1`.
+  * Type `omarchy-version` and press Return. The version is newer.
+  * End the session with `stop`. The disk stays updated and not rebooted.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * If `mise settings set` unexpectedly succeeds with the read-only directory, report it; the fallback is to break the edge-only `vi` migration on an edge disk with `sudo touch /usr/bin/vi` before the update.
-  * The bar is not restarted after a failed update, so the update icon stays until the manual `omarchy-migrate` and a later `omarchy update`.
-  * A full update precedes the failure (> 5 min); screenshot repeatedly instead of sleeping.
+  * The first migration stops mise from pruning versions still in use. A permission error on `mise settings set` is the intended failure.
+  * If that command succeeds on the read-only directory, report it.
+  * The update icon can stay until a later successful migrate. Screenshot through the package phase instead of waiting silently.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the read-only directory, the failing migration output followed directly by the red banner, the serial log listing `1787215483.sh` first, the restored permissions, the manual `omarchy-migrate` running the remaining migrations, and `pending=1` with the new version
+  ** `~/.config/mise` is read-only. The update reaches migration `1787215483`, that migration fails, and the failure banner follows with no later migration, mise step, shell restart, or reboot question.
+  ** `--pending` starts with `1787215483.sh`. After the directory is writable again, `omarchy-migrate` reruns that migration and the rest.
+  ** Nothing is pending, and the version is newer.
   * If unsuccessful
-  ** Screenshot showing a later migration running after the failed one, the failed migration missing from `--pending`, or `Restarting shell` after the failure; `sudo cat /tmp/omarchy-update.log | sudo tee /dev/ttyS0` then `get-serial`
+  ** A later migration runs after the failure, the failed migration is missing from `--pending`, or `Restarting shell` appears after the banner.
 covers: bin/omarchy-migrate (set -e, marker only on success), bin/omarchy-update (ERR trap, ordering), agents/skills/migrations.md "strictly ordered and synchronous", migrations/1787215483.sh, test/shell.d/migrate-scope-test.sh "does not mark failed migrations complete", update-sequence-test.sh
 
 ### update-orphan-pkgs-defaults-to-keeping   [VM-OK]
@@ -16122,30 +16146,51 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `ls /usr/share/libalpm/hooks/ | grep omarchy; cat /usr/share/libalpm/hooks/00-omarchy-update-guard.hook; omarchy-version; pacman -Q omarchy` — the three `*-omarchy-*.hook` files (update-guard, hyprland-reload-pause, hyprland-reload-resume), the hook naming `omarchy-update-pacman-guard` with `AbortOnFail`, and the build.
-  * Type `OMARCHY_PACMAN_CMDLINE="pacman -Syu" omarchy-update-pacman-guard; echo rc=$?` — the `Woah partner...` message ("This looks like a direct pacman system upgrade") ending with `sudo env OMARCHY_ALLOW_DIRECT_PACMAN=1 pacman -Syu`, then `rc=1`. Then `OMARCHY_PACMAN_CMDLINE="pacman -S cowsay" omarchy-update-pacman-guard; echo rc=$?` — silent, `rc=0`; `OMARCHY_ALLOW_DIRECT_PACMAN=1 OMARCHY_PACMAN_CMDLINE="pacman -Syu" omarchy-update-pacman-guard; echo rc=$?` — silent, `rc=0`; and `omarchy update pacman guard --help` — the hidden guard still answers help.
-  * Type `sudo pacman -Sy; echo exit=$?` and at `[sudo] password for prime:` first type `wrong` — `Sorry, try again.` and a second prompt; then `prime` — databases sync with the candy progress bar, `exit=0`, no guard message (a sync without `-u` is not guarded). Then `pacman -Qu | head -3; pacman -Q | wc -l; pacman -Q bash` — the pending upgrades, and note the count and version.
-  * Type `sudo pacman -Syu --ignore '*' bash 2>&1 | tail -20; echo status=${PIPESTATUS[0]}` — the real command line reaching the real hook with one package.
-  ** pacman asks `bash is in IgnorePkg/IgnoreGroup. Install anyway? [Y/n]` — type `y`; then `:: Proceed with installation? [Y/n]` — type `Y`. After a small download (~2 MB): `:: Running pre-transaction hooks...` / `Checking Omarchy update entrypoint...`, then the `Woah partner...` block naming `omarchy update` and `sudo env OMARCHY_ALLOW_DIRECT_PACMAN=1 pacman -Syu`, and pacman ends with `error: failed to commit transaction (failed to run transaction hooks)`; `status` non-zero. After the abort the transaction is over — answer nothing further.
-  ** The same block appears for the long form `--sync --refresh --sysupgrade --ignore '*' bash` and for `sudo env OMARCHY_PACMAN_CMDLINE='pacman -Syu' pacman -S --noconfirm bash` (the hook reads the faked command line — same code path). The hook fires inside the transaction, after the download — so never run a bare `sudo pacman -Syu`: it would download every pending upgrade first. If pacman rejects the `*` glob, use the `OMARCHY_PACMAN_CMDLINE` form instead.
-  * Type `sudo env OMARCHY_ALLOW_DIRECT_PACMAN=1 pacman -Syu --ignore '*' bash 2>&1 | tail -5; echo status=${PIPESTATUS[0]}`, answering `y`/`Y` to the same questions — `Checking Omarchy update entrypoint...` passes silently, bash is reinstalled, no `Woah partner`, `status=0`.
-  * Type `sudo pacman -S --needed bash` — a plain install (no `-u`) is not blocked either (`is up to date -- skipping` or a reinstall). Then `pacman -Q | wc -l; pacman -Q bash; pacman -Q omarchy; omarchy version` — the same count, bash version and omarchy version as before; nothing else changed.
-  * Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `ls /usr/share/libalpm/hooks/ | grep omarchy` and press Return. The listing includes the update-guard, reload-pause, and reload-resume hooks.
+  * Type `cat /usr/share/libalpm/hooks/00-omarchy-update-guard.hook` and press Return. The hook names `omarchy-update-pacman-guard` and `AbortOnFail`.
+  * Type `omarchy-version; pacman -Q omarchy` and press Return. Record the build and package version.
+  * Type `OMARCHY_PACMAN_CMDLINE="pacman -Syu" omarchy-update-pacman-guard; echo rc=$?` and press Return. The output includes `Woah partner` and the allow-direct command, and the last line is `rc=1`.
+  * Type `OMARCHY_PACMAN_CMDLINE="pacman -S cowsay" omarchy-update-pacman-guard; echo rc=$?` and press Return. There is no warning, and the last line is `rc=0`.
+  * Type `OMARCHY_ALLOW_DIRECT_PACMAN=1 OMARCHY_PACMAN_CMDLINE="pacman -Syu" omarchy-update-pacman-guard; echo rc=$?` and press Return. There is no warning, and the last line is `rc=0`.
+  * Type `omarchy update pacman guard --help` and press Return. Help is printed.
+  * Type `sudo pacman -Sy; echo exit=$?` and press Return. A password prompt appears.
+  * Type `wrong` and press Return. The output includes `Sorry, try again.`
+  * Type `prime` and press Return. The databases sync, and the last line is `exit=0`.
+  * Type `pacman -Q | wc -l` and press Return. Record the count.
+  * Type `pacman -Q bash; pacman -Q omarchy` and press Return. Record both versions.
+  * Type `sudo pacman -Syu --ignore '*' bash 2>&1 | tail -20; echo status=${PIPESTATUS[0]}` and press Return. A question asks whether to install bash anyway.
+  ** If sudo asks, type `prime` and press Return.
+  ** If pacman rejects the `*` glob, use `sudo env OMARCHY_PACMAN_CMDLINE='pacman -Syu' pacman -S --noconfirm bash` instead.
+  * Type `y` and press Return. A question asks whether to proceed.
+  * Type `Y` and press Return. The output includes `Woah partner` and `failed to run transaction hooks`, and the status is non-zero.
+  * Type `sudo env OMARCHY_ALLOW_DIRECT_PACMAN=1 pacman -Syu --ignore '*' bash 2>&1 | tail -5; echo status=${PIPESTATUS[0]}` and press Return.
+  ** If a question appears, type `y` and then `Y`.
+  * Wait until the command finishes. The last line is `status=0` with no `Woah partner` line.
+  * Type `sudo pacman -S --needed bash` and press Return. Bash is skipped as up to date, or it is reinstalled, and no guard message appears.
+  * Type `pacman -Q | wc -l` and press Return. The count matches the one recorded earlier.
+  * Type `pacman -Q bash; pacman -Q omarchy; omarchy version` and press Return. The versions match the ones recorded earlier.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The message is long and on stderr just before pacman's own error; if it scrolls, rerun with `2>&1 | sudo tee /dev/ttyS0` and read `./client get-serial`. Screenshot as soon as the hooks start.
-  * A mirror error before the hook is an environment problem, not a failure. If pacman says `there is nothing to do` for the sysupgrade, the mirror has no upgrades for this image: record it — the `--ignore '*' bash` target still produces a transaction. A missing guard on the 4.0.2 build may be build drift — the `omarchy-version` line tells the two apart.
-  * Do not run `omarchy update` here (own tests) and do not confirm any real upgrade set. The database sync can take a minute on the VM's NAT; keep screenshotting rather than retyping.
+  * Do not run a bare `sudo pacman -Syu`. It would download every pending upgrade before the hook. Do not confirm a real upgrade set.
+  * A sync without `-u` is not guarded. A plain `-S` install is not guarded.
+  * If the message scrolls away, rerun with `2>&1 | sudo tee /dev/ttyS0` and read it with get-serial.
+  * `there is nothing to do` on a sysupgrade still leaves the `--ignore '*' bash` transaction to test. A missing guard on 4.0.2 is build drift.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** The three hook files with the AbortOnFail hook text and the build; the guard script's `Woah partner` with `rc=1`, two silent `rc=0` runs and the `--help`; `Sorry, try again.` then the plain sync with `exit=0` and no message; the real `--ignore '*' bash` transaction aborted by the hook with `:: Running pre-transaction hooks...`, `Woah partner...`, `omarchy update`, the `OMARCHY_ALLOW_DIRECT_PACMAN=1` line, `error: failed to commit transaction (failed to run transaction hooks)` and a non-zero status; the bypass run completing with `status=0` and no block; the plain `-S --needed bash` unblocked; unchanged package count, bash and omarchy versions
+  ** The three Omarchy hook files are present, and the guard hook names `omarchy-update-pacman-guard` with `AbortOnFail`.
+  ** A faked `-Syu` prints `Woah partner` and exits 1. A faked single install and an allowed `-Syu` are silent and exit 0. Help is printed.
+  ** A wrong sudo password is refused. `pacman -Sy` then syncs and exits 0 with no guard message.
+  ** `pacman -Syu --ignore '*' bash` reaches the hook, prints `Woah partner`, and fails the transaction. The allowed rerun finishes with status 0 and no block.
+  ** `pacman -S --needed bash` is not blocked. The package count and the bash and omarchy versions are unchanged.
   * If unsuccessful
-  ** Screenshot of the transaction going through without the message (packages actually upgrading), the bypass still blocked, the guard blocking a single install, or a missing hook; the guard script's output for the mismatching case; `tail -30 /var/log/pacman.log`; `omarchy-version`
+  ** The transaction upgrades packages without the message, the allowed run is still blocked, a single install is blocked, or the hook file is missing.
 covers: default/libalpm/hooks/00-omarchy-update-guard.hook, default/libalpm/hooks/10-omarchy-hyprland-reload-pause.hook, default/libalpm/hooks/90-omarchy-hyprland-reload-resume.hook, bin/omarchy-update-pacman-guard, bin/omarchy-update-pacman, default/pacman/*.conf, test/shell.d/config-test.sh (alpm hooks installed), update-pacman-guard-test.sh, update-pacman-test.sh, docs/update-process.md (Raw pacman guard, Path 2), manual/30-updates.md (Warning about direct pacman/yay updates)
 
 ### migrate-idempotent-and-login-notifier   [VM-OK]
@@ -16155,33 +16200,66 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `ls ~/.local/state/omarchy/migrations | wc -l; ls /usr/share/omarchy/migrations | wc -l; omarchy-migrate --pending; echo pending=$?` — two equal counts (`96` on a stock 4.0.2 disk), no list, `pending=1`.
-  ** If names print with `exit=0`, the disk has pending migrations (HEAD/4.0.2 skew): record them and continue.
-  * Type `omarchy-migrate; echo exit=$?; omarchy-migrate-notify; echo exit=$?; systemctl --user restart omarchy-migrate-notify.service; systemctl --user status omarchy-migrate-notify.service --no-pager | head -n 4` — no `Running migration` line and `exit=0`; no toast and `exit=0`; **no** toast within five seconds of the restart either (nothing pending); the unit exists and is `inactive (dead)` after its run.
-  * Type `rm ~/.local/state/omarchy/migrations/1786517850.sh; omarchy-migrate --pending; echo pending=$?` — `1786517850.sh`, `pending=0`.
-  * Type `systemctl --user restart omarchy-migrate-notify.service` (the login notifier, fired without a relogin): within a few seconds a critical toast `Pending Omarchy Migrations` / `Click to run 1 pending migration.` appears at the top right — screenshot at once.
-  * Click the toast with the mouse. A floating terminal shows the green logo, green `Running migration (1786517850)`, `Drop the retired notification image cache`, then `● Done! Press any key to close...`; press a key; the toast is gone.
-  ** If the toast already faded, `omarchy-migrate-notify` re-sends it; if clicking does nothing, type `omarchy-migrate; echo exit=$?` (same two lines, `exit=0`) and report the click failure. Stderr text `Omarchy has pending migrations` means no notification server answered — report it.
-  * Type `omarchy-migrate; echo exit=$?; omarchy-migrate --pending; echo pending=$?; ls ~/.local/state/omarchy/migrations/1786517850.sh` — no `Running migration` line, `exit=0`, `pending=1`, the marker is back (nothing runs twice).
-  * Type `rm ~/.local/state/omarchy/migrations/1786517850.sh ~/.local/state/omarchy/migrations/1785511354.sh; systemctl --user restart omarchy-migrate-notify.service` — the toast now says `Click to run 2 pending migrations.`; do **not** click it. Type `omarchy-migrate` (type `prime` if sudo asks): both migrations run (1785511354 only checks that qrencode is installed) and the toast disappears on its own.
-  * Type `omarchy-migrate --bogus; echo exit=$?; omarchy-migrate --force; echo exit=$?; omarchy-migrate --help` — `Unknown option: --bogus`, `exit=1`, `Unknown option: --force`, a non-zero exit, then `Usage: omarchy-migrate [--pending]`. Then `rm ~/.local/state/omarchy/migrations/1786517850.sh` (one pending again) and close the terminal with Super+W.
-  * Real login path: press Super+Escape → click `Logout` with the mouse → at the login screen log in as `prime` / `prime` (autologin does not re-fire after a logout; no LUKS passphrase — the disk stays unlocked). Within ~15 seconds of the desktop the `Click to run 1 pending migration.` toast appears; click it → the migration runs, `Done!`, press a key. Log out and in the same way once more: with nothing pending, **no** migration toast may appear in 15 seconds of screenshots. Open a terminal and type `omarchy-migrate --pending; echo pending=$?` — empty, `pending=1`; close it with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `ls ~/.local/state/omarchy/migrations | wc -l` and press Return. Record the count.
+  * Type `ls /usr/share/omarchy/migrations | wc -l` and press Return. The count matches.
+  * Type `omarchy-migrate --pending; echo pending=$?` and press Return. Nothing is listed, and the last line is `pending=1`.
+  ** If names are listed and the exit is 0, record them and continue.
+  * Type `omarchy-migrate; echo exit=$?` and press Return. No migration runs, and the last line is `exit=0`.
+  * Type `omarchy-migrate-notify; echo exit=$?` and press Return. No notification appears, and the last line is `exit=0`.
+  * Type `systemctl --user restart omarchy-migrate-notify.service` and press Return. The prompt returns.
+  * Wait 5 seconds. No migration notification appears.
+  * Type `systemctl --user status omarchy-migrate-notify.service --no-pager | head -n 4` and press Return. The unit is `inactive (dead)`.
+  * Type `rm ~/.local/state/omarchy/migrations/1786517850.sh` and press Return. The prompt returns.
+  * Type `omarchy-migrate --pending; echo pending=$?` and press Return. `1786517850.sh` is listed, and the last line is `pending=0`.
+  * Type `systemctl --user restart omarchy-migrate-notify.service` and press Return. A notification says 1 pending migration is ready.
+  * Click the notification. A floating terminal runs migration `1786517850` and shows `Done!`.
+  ** If the notification faded, run `omarchy-migrate-notify` again. If the click does nothing, run `omarchy-migrate` and report the click failure.
+  * Press a key. The floating terminal closes.
+  * Type `omarchy-migrate; echo exit=$?` and press Return. No migration runs, and the last line is `exit=0`.
+  * Type `omarchy-migrate --pending; echo pending=$?` and press Return. Nothing is listed, and the last line is `pending=1`.
+  * Type `ls ~/.local/state/omarchy/migrations/1786517850.sh` and press Return. The marker is listed.
+  * Type `rm ~/.local/state/omarchy/migrations/1786517850.sh ~/.local/state/omarchy/migrations/1785511354.sh` and press Return. The prompt returns.
+  * Type `systemctl --user restart omarchy-migrate-notify.service` and press Return. A notification says 2 pending migrations are ready, and it is left unclicked.
+  * Type `omarchy-migrate` and press Return. Both migrations run, and the notification goes away.
+  ** If sudo asks, type `prime` and press Return.
+  * Type `omarchy-migrate --bogus; echo exit=$?` and press Return. The output includes `Unknown option: --bogus`, and the last line is `exit=1`.
+  * Type `omarchy-migrate --force; echo exit=$?` and press Return. The output includes `Unknown option: --force`, and the exit is non-zero.
+  * Type `omarchy-migrate --help` and press Return. The output includes `Usage: omarchy-migrate [--pending]`.
+  * Type `rm ~/.local/state/omarchy/migrations/1786517850.sh` and press Return. The prompt returns.
+  * Press Super+W. The terminal closes.
+  * Press Super+Escape. The power menu opens.
+  * Click Logout. The login screen appears.
+  * Log in as `prime` with password `prime`. The desktop returns.
+  * Wait up to 15 seconds. A notification says 1 pending migration is ready.
+  * Click the notification. The migration runs and shows `Done!`.
+  * Press a key. The floating terminal closes.
+  * Press Super+Escape. The power menu opens.
+  * Click Logout. The login screen appears.
+  * Log in as `prime` with password `prime`. The desktop returns.
+  * Wait 15 seconds. No migration notification appears.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy-migrate --pending; echo pending=$?` and press Return. Nothing is listed, and the last line is `pending=1`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Only un-mark 1786517850 and 1785511354; other migrations may need sudo or network, or change groups and the kernel. `omarchy migrate` (the router spelling) reaches the same script.
-  * `omarchy-migrate` waits up to 15 min if pacman is running; `Waiting for pacman transaction…` means another process is updating — report it.
-  * The toast is critical-urgency and stays a little longer than normal ones, but click it within a few seconds; double-check the mouse position before clicking. The notifier waits for the notification server; allow up to ten seconds for the toast after a restart, ~15 s after a login.
-  * The greeter has no username field or session chooser — just the dotted entry; a wrong password shows a red lock, cleared by the next keystroke.
+  * Only un-mark `1786517850` and `1785511354`. Other migrations may need sudo, network, or a reboot.
+  * `omarchy migrate` is the same command through the router.
+  * Click the notification within a few seconds. Allow up to 10 seconds after a service restart and about 15 seconds after login.
+  * A wrong login password shows a red lock. The next keystroke clears it. There is no username field.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the equal counts with `pending=1`, the silent run and quiet notifier (no toast after the restart with nothing pending) with the unit status, the pending listing, the toast after the service restart, the floating terminal with `Running migration (1786517850)` and its description, the silent re-run with `pending=1` and the marker restored, the `2 pending migrations` toast and the desktop with it gone after the manual `omarchy-migrate`, the `Unknown option` / usage lines, the toast ~15 s after the re-login with a pending marker and the terminal it opens, and the clean re-login with no toast plus the empty `--pending`
+  ** The local and shipped migration counts match. Nothing is pending. A migrate and a notifier restart are silent, and the unit is inactive.
+  ** Removing `1786517850` makes it pending. The notifier shows 1 pending migration, the click runs it, and a later migrate is silent with the marker restored.
+  ** Removing two markers shows 2 pending migrations. Running migrate clears the notification. `--bogus` and `--force` are unknown, and `--help` prints the usage line.
+  ** After logout and login, the 1-pending notification appears and the click finishes the migration. A second login shows no migration notification, and nothing is pending.
   * If unsuccessful
-  ** Screenshot of output or a non-zero exit on the silent runs, a toast with nothing pending, no toast after the restart or the re-login (`journalctl --user -u omarchy-migrate-notify -n 30 | sudo tee /dev/ttyS0`), a click that opens nothing, the migration running twice, or the marker missing after a successful run; `omarchy-version`
+  ** A silent run prints output, a notification appears with nothing pending, a click opens nothing, a migration runs twice, or the marker is missing after success.
 covers: bin/omarchy-migrate (--pending, run, option parsing, marker, notification dismiss), bin/omarchy-migrate-notify, bin/omarchy-update-user-notify, default/systemd/user/omarchy-migrate-notify.service, bin/omarchy-launch-floating-terminal-with-presentation, migrations/1786517850.sh, migrations/1785511354.sh, agents/skills/migrations.md ("Manually", "Testing migrations", "At login", model, --pending exit codes), docs/update-process.md (§Migration layout, §Path 2, §Fallbacks), docs/notifications.md §Pending migrations, test/shell.d/migrate-wrapper-test.sh, migrate-notify-test.sh, migrate-scope-test.sh, manual/30-updates.md
 
 ### migrations-hand-rerun-small-scripts   [VM-OK]
@@ -16191,27 +16269,46 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `cp ~/.config/omarchy/shell.json /tmp/shell.json.orig; printf '{ not json' > ~/.config/omarchy/shell.json; bash /usr/share/omarchy/migrations/1786099804.sh; cat ~/.config/omarchy/shell.json; cp /tmp/shell.json.orig ~/.config/omarchy/shell.json` — still exactly `{ not json`, then restored.
-  ** If `~/.config/omarchy/shell.json` does not exist on this disk, the first `cp` fails: skip this step and say so (the bar then runs on the shipped file).
-  * Type `mkdir -p ~/.local/share/fonts; cp /usr/share/fonts/omarchy/omarchy.ttf ~/.local/share/fonts/omarchy.ttf; bash /usr/share/omarchy/migrations/1788848726.sh; ls ~/.local/share/fonts/omarchy.ttf 2>&1` — the identical stock copy was removed (`No such file or directory`).
-  * Type `cp /usr/share/fonts/omarchy/omarchy.ttf ~/.local/share/fonts/omarchy.ttf; echo custom >> ~/.local/share/fonts/omarchy.ttf; bash /usr/share/omarchy/migrations/1788848726.sh; ls ~/.local/share/fonts/omarchy.ttf; rm ~/.local/share/fonts/omarchy.ttf` — the modified font was kept, then removed by hand.
-  * Type `bash /usr/share/omarchy/migrations/1787843905.sh; ls -l ~/.hermes/skills/; ls ~/.hermes/profiles 2>&1` — symlinks `omarchy` and `diagnose-crash` → `/usr/share/omarchy/default/agents/skills/…`, and no `profiles` directory.
-  * Type `bash /usr/share/omarchy/migrations/1788619462.sh; echo s=$?; rm /tmp/shell.json.orig` — `s=0` and nothing happens (no Hermes Desktop).
-  * Close the terminal with Super+W; the bar is unchanged.
+  * Press Super+Return. A terminal opens.
+  * Type `cp ~/.config/omarchy/shell.json /tmp/shell.json.orig` and press Return. The prompt returns.
+  ** If the file is missing, skip the shell.json steps and record that.
+  * Type `printf '{ not json' > ~/.config/omarchy/shell.json` and press Return. The prompt returns.
+  * Type `bash /usr/share/omarchy/migrations/1786099804.sh` and press Return. The prompt returns.
+  * Type `cat ~/.config/omarchy/shell.json` and press Return. The file is still `{ not json`.
+  * Type `cp /tmp/shell.json.orig ~/.config/omarchy/shell.json` and press Return. The original file is restored.
+  * Type `mkdir -p ~/.local/share/fonts` and press Return. The prompt returns.
+  * Type `cp /usr/share/fonts/omarchy/omarchy.ttf ~/.local/share/fonts/omarchy.ttf` and press Return. The prompt returns.
+  * Type `bash /usr/share/omarchy/migrations/1788848726.sh` and press Return. The prompt returns.
+  * Type `ls ~/.local/share/fonts/omarchy.ttf 2>&1` and press Return. The output includes `No such file`.
+  * Type `cp /usr/share/fonts/omarchy/omarchy.ttf ~/.local/share/fonts/omarchy.ttf` and press Return. The prompt returns.
+  * Type `echo custom >> ~/.local/share/fonts/omarchy.ttf` and press Return. The prompt returns.
+  * Type `bash /usr/share/omarchy/migrations/1788848726.sh` and press Return. The prompt returns.
+  * Type `ls ~/.local/share/fonts/omarchy.ttf` and press Return. The modified file is still listed.
+  * Type `rm ~/.local/share/fonts/omarchy.ttf` and press Return. The prompt returns.
+  * Type `bash /usr/share/omarchy/migrations/1787843905.sh` and press Return. The prompt returns.
+  * Type `ls -l ~/.hermes/skills/` and press Return. `omarchy` and `diagnose-crash` are symlinks into the shipped skills directory.
+  * Type `ls ~/.hermes/profiles 2>&1` and press Return. The output includes `No such file`.
+  * Type `bash /usr/share/omarchy/migrations/1788619462.sh; echo s=$?` and press Return. The last line is `s=0`.
+  * Type `rm -f /tmp/shell.json.orig` and press Return. The prompt returns.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * `~/.hermes/skills` may already hold the links from provisioning; the migration must then leave them as they are.
-  * `shell.json` is replace-not-merge: restore it exactly from the copy, never hand-edit it here.
+  * Existing Hermes skill links may already be present. The migration must leave them in place.
+  * Restore `shell.json` from the copy. Do not edit it by hand.
+  * `s=0` with no other output means the skin migration found no Hermes Desktop.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** `{ not json` intact and the file restored; stock font removed, modified font kept; skill links with no profiles; skin migration no-op with `s=0`
+  ** An unparsable `shell.json` is left as `{ not json` and then restored.
+  ** An identical copy of the stock font is removed. A modified copy is kept and then removed by hand.
+  ** The skills migration links `omarchy` and `diagnose-crash` and does not create `profiles`.
+  ** The skin migration exits 0 with no other change.
   * If unsuccessful
-  ** A truncated shell.json, a deleted custom font, or profiles created; the failing script's output
+  ** `shell.json` is rewritten, the custom font is deleted, or a profiles directory is created.
 covers: test/shell.d/agents-rename-migration-test.sh (unparsable config), legacy-icon-font-migration-test.sh, hermes-skills-migration-test.sh, hermes-skin-migration-test.sh; migrations/1786099804.sh, 1788848726.sh, 1787843905.sh, 1788619462.sh
 
 ### migration-legacy-udev-rules-quarantine   [VM-OK]
@@ -16221,28 +16318,41 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `M=/usr/share/omarchy/migrations/1788102906.sh; R=/etc/udev/rules.d; sudo -v` (password `prime`), then `printf '%s\n' 'SUBSYSTEM=="power_supply", ATTR{type}=="Mains", ATTR{online}=="0", RUN+="/home/someuser/.local/share/omarchy/bin/omarchy-wifi-powersave on"' 'SUBSYSTEM=="power_supply", ATTR{type}=="Mains", ATTR{online}=="1", RUN+="/home/someuser/.local/share/omarchy/bin/omarchy-wifi-powersave off"' | sudo tee $R/99-wifi-powersave.rules >/dev/null`.
-  * Type `bash $M; echo s=$?; ls $R/99-wifi-powersave.rules* 2>&1` — `s=0` and the file is gone with no quarantine copy.
-  * Type `printf '%s\n' 'SUBSYSTEM=="power_supply", ATTR{type}=="Mains", RUN+="/usr/bin/systemd-run --no-block --collect --unit=omarchy-power-profile --property=After=power-profiles-daemon.service /home/someuser/.local/share/omarchy/bin/omarchy-powerprofiles-set"' 'ACTION=="add", SUBSYSTEM=="usb", RUN+="/usr/local/sbin/admin-power-hook"' | sudo tee $R/99-power-profile.rules >/dev/null`.
-  * Type `bash $M; echo s=$?; ls $R/99-power-profile.rules*; sudo cat $R/99-power-profile.rules.omarchy-disabled` — `s=0`, a `Quarantined … .omarchy-disabled` line, the `.rules` gone, the `.omarchy-disabled` file holding both original lines.
-  * Type `printf '%s\n' '# Replaces the rule Omarchy used to install from /home/someuser/.local/share/omarchy/bin/omarchy-powerprofiles-set' 'SUBSYSTEM=="power_supply", ATTR{type}=="Mains", RUN+="/usr/local/bin/my-own-power-hook"' | sudo tee $R/99-power-profile.rules >/dev/null; sudo sha256sum $R/99-power-profile.rules; bash $M; echo s=$?; sudo sha256sum $R/99-power-profile.rules` — identical hashes (kept), `s=0`.
-  * Type `bash $M; echo s=$?` — `s=0` with no output (no-op).
-  * Type `sudo rm -f $R/99-power-profile.rules $R/99-power-profile.rules.omarchy-disabled; sudo udevadm control --reload` — the rules directory is as it started. Close the terminal with Super+W.
-  ** The migration itself runs `sudo /usr/bin/rm`, `mv --no-clobber` and `udevadm control --reload`; the cached credential satisfies them.
+  * Press Super+Return. A terminal opens.
+  * Type `M=/usr/share/omarchy/migrations/1788102906.sh; R=/etc/udev/rules.d; sudo -v` and press Return. The prompt returns.
+  ** If sudo asks, type `prime` and press Return.
+  * Type `printf '%s\n' 'SUBSYSTEM=="power_supply", ATTR{type}=="Mains", ATTR{online}=="0", RUN+="/home/someuser/.local/share/omarchy/bin/omarchy-wifi-powersave on"' 'SUBSYSTEM=="power_supply", ATTR{type}=="Mains", ATTR{online}=="1", RUN+="/home/someuser/.local/share/omarchy/bin/omarchy-wifi-powersave off"' | sudo tee $R/99-wifi-powersave.rules >/dev/null` and press Return. The prompt returns.
+  * Type `bash $M; echo s=$?` and press Return. The last line is `s=0`.
+  * Type `ls $R/99-wifi-powersave.rules* 2>&1` and press Return. The file is gone, and no quarantine copy is listed.
+  * Type `printf '%s\n' 'SUBSYSTEM=="power_supply", ATTR{type}=="Mains", RUN+="/usr/bin/systemd-run --no-block --collect --unit=omarchy-power-profile --property=After=power-profiles-daemon.service /home/someuser/.local/share/omarchy/bin/omarchy-powerprofiles-set"' 'ACTION=="add", SUBSYSTEM=="usb", RUN+="/usr/local/sbin/admin-power-hook"' | sudo tee $R/99-power-profile.rules >/dev/null` and press Return. The prompt returns.
+  * Type `bash $M; echo s=$?` and press Return. The output includes `Quarantined`, and the last line is `s=0`.
+  * Type `ls $R/99-power-profile.rules` and press Return. The output includes `No such file`.
+  * Type `sudo cat $R/99-power-profile.rules.omarchy-disabled` and press Return. Both original lines are present.
+  * Type `printf '%s\n' '# Replaces the rule Omarchy used to install from /home/someuser/.local/share/omarchy/bin/omarchy-powerprofiles-set' 'SUBSYSTEM=="power_supply", ATTR{type}=="Mains", RUN+="/usr/local/bin/my-own-power-hook"' | sudo tee $R/99-power-profile.rules >/dev/null` and press Return. The prompt returns.
+  * Type `sudo sha256sum $R/99-power-profile.rules` and press Return. Record the hash.
+  * Type `bash $M; echo s=$?` and press Return. The last line is `s=0`.
+  * Type `sudo sha256sum $R/99-power-profile.rules` and press Return. The hash matches the recorded one.
+  * Type `bash $M; echo s=$?` and press Return. There is no other output, and the last line is `s=0`.
+  * Type `sudo rm -f $R/99-power-profile.rules $R/99-power-profile.rules.omarchy-disabled` and press Return. The prompt returns.
+  * Type `sudo udevadm control --reload` and press Return. The prompt returns.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Type each `printf … | sudo tee` line as one command; the quoting must reach the file exactly.
-  * The lines are long; `| sudo tee /dev/ttyS0` and `get-serial` are handy for reading the quarantined file back.
+  * Type each printf line as one command. The quotes have to reach the file exactly.
+  * The migration itself removes the exact generated files, quarantines a modified variant with `mv --no-clobber`, and reloads udev.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Exact rule removed; modified rule quarantined with the message and both lines preserved; harmless rule hash unchanged; silent rerun; clean directory
+  ** The exact generated wifi rule is removed, and no quarantine copy is left.
+  ** The modified power-profile rule is quarantined. The `.rules` file is gone, and the `.omarchy-disabled` file keeps both original lines.
+  ** A harmless replacement keeps the same hash. A second run prints nothing and exits 0.
+  ** The planted rules are removed before the terminal closes.
   * If unsuccessful
-  ** The exact rule surviving, the admin line deleted instead of quarantined, or the harmless rule altered; the script's output
+  ** The exact rule survives, an admin line is deleted instead of quarantined, or the harmless rule changes.
 covers: test/shell.d/legacy-power-udev-rules-migration-test.sh (udev half); migrations/1788102906.sh; manual/48-security.md
 
 ### migration-security-groups-flag-reboot   [VM-OK]
