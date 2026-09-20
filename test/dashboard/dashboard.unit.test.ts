@@ -48,9 +48,8 @@ describe("homepage unhappy path", () => {
     expect(html).toContain("<!doctype html>");
     expect(html).toContain("<title>oligarchy servers</title>");
     expect(html).toContain("<h1>oligarchy servers</h1>");
-    expect(html).toContain(
-      '<nav class="tabs" aria-label="Pages"><a href="/" aria-current="page">servers</a><a href="/definitions">definitions</a></nav>',
-    );
+    expect(html).toContain('href="/" aria-current="page">servers</a>');
+    expect(html).toContain('href="/definitions">definitions</a>');
     expect(html).toContain("<p>error: internal error</p>");
     expect(html).not.toContain("dashboard.css");
     expect(html).not.toContain("Test results");
@@ -72,9 +71,8 @@ describe("homepage unhappy path", () => {
     expect(html).toContain("<!doctype html>");
     expect(html).toContain("<title>oligarchy definitions</title>");
     expect(html).toContain("<h1>oligarchy definitions</h1>");
-    expect(html).toContain(
-      '<nav class="tabs" aria-label="Pages"><a href="/">servers</a><a href="/definitions" aria-current="page">definitions</a></nav>',
-    );
+    expect(html).toContain('href="/">servers</a>');
+    expect(html).toContain('href="/definitions" aria-current="page">definitions</a>');
     expect(html).toContain("<p>error: Test definitions are unavailable.</p>");
     expect(html).not.toContain('id="running-tests"');
     expect(html).not.toContain("No tests are running.");

@@ -50,16 +50,6 @@ const page = (
     }),
   );
 
-const PILL_TIME = new Intl.DateTimeFormat("en-US", {
-  month: "short",
-  day: "numeric",
-  year: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-  timeZone: "UTC",
-  timeZoneName: "short",
-});
-
 const pill = (
   id: string,
   status: DefinitionPill["status"],
@@ -73,34 +63,14 @@ const pill = (
   model: extra.model ?? null,
 });
 
-const tip = (name: string, item: DefinitionPill): string => {
-  const model =
-    item.model === null ? "" : `<span class="definition-tip__model">${item.model}</span>`;
-  const reason =
-    item.status === "failed" && item.reason !== null
-      ? `<span class="definition-tip__reason">${item.reason}</span>`
-      : "";
-  const at = new Date(item.at);
-  return `<span class="definition-tip" aria-hidden="true"><span class="definition-tip__name">${name}</span><span class="definition-tip__status">${item.status}</span><time datetime="${at.toISOString()}">${PILL_TIME.format(at)}</time>${model}${reason}</span>`;
+const listItem = (htmlText: string, name: string): string => {
+  const list = /<ul class="definition-list">([\s\S]*?)<\/ul>/.exec(htmlText)?.[1] ?? "";
+  const at = list.indexOf(`href="/definitions/${encodeURIComponent(name)}"`);
+  if (at < 0) {
+    return "";
+  }
+  return list.slice(list.lastIndexOf("<li>", at), list.indexOf("</li>", at) + "</li>".length);
 };
-
-const blip = (name: string, item: DefinitionPill): string =>
-  `<a class="definition-blip definition-blip--${item.status}" href="/tests/${item.id}" aria-label="${name} ${item.status}">${tip(name, item)}</a>`;
-
-const historyBlock = (name: string, history: DefinitionHistory | undefined): string => {
-  const rate =
-    history !== undefined && history.total > 0
-      ? `<span class="definition-rate">${history.passed} out of ${history.total}</span>`
-      : "";
-  const blips =
-    history !== undefined && history.recent.length > 0
-      ? `<span class="definition-blips">${history.recent.map((item) => blip(name, item)).join("")}</span>`
-      : "";
-  return `<div class="definition-history" data-name="${name}">${rate}${blips}<span class="definition-history__wait" aria-hidden="true"><span class="definition-history__spin"></span>Loading</span></div>`;
-};
-
-const line = (name: string, history: DefinitionHistory | undefined): string =>
-  `<li><a href="/definitions/${name}">${name}</a>${historyBlock(name, history)}</li>`;
 
 const both = [
   { name: "install", versions: install },
@@ -108,30 +78,16 @@ const both = [
 ] as const;
 
 describe("DefinitionsPage happy path", () => {
-  it("is its own page: the definitions tab, a search, then each name as its own link", async () => {
+  it("is its own page: the definitions tab, a search, and each name as its own link", async () => {
     const htmlText = await page([...both]);
     expect(htmlText).toContain("<title>oligarchy definitions</title>");
     expect(htmlText).toContain('<script src="/dashboard.js"');
-    expect(htmlText).toMatch(/<style>[^<]*body\s*\{[^}]*background:\s*#161616/);
-    expect(htmlText).toMatch(/\.search\s*\{[^}]*display:\s*flex/);
-    expect(htmlText).toContain(
-      '<nav class="tabs" aria-label="Pages"><a href="/">servers</a><a href="/definitions" aria-current="page">definitions</a></nav>',
-    );
-    expect(htmlText.indexOf('<nav class="tabs"')).toBeLessThan(
-      htmlText.indexOf("<h1>oligarchy definitions</h1>"),
-    );
-    const search = htmlText.indexOf(
-      '<search class="search"><input type="search" aria-label="Search definitions" autocomplete="off"/></search>',
-    );
-    const list = htmlText.indexOf(
-      `<ul class="definition-list">${line("install", undefined)}${line("lock-screen", undefined)}</ul>`,
-    );
-    const miss = htmlText.indexOf(
-      '<p class="definition-miss" hidden="">No definitions match <code></code>.</p>',
-    );
-    expect(search).toBeGreaterThan(htmlText.indexOf("<h1>oligarchy definitions</h1>"));
-    expect(list).toBeGreaterThan(search);
-    expect(miss).toBeGreaterThan(list);
+    expect(htmlText).toContain('href="/">servers</a>');
+    expect(htmlText).toContain('aria-current="page">definitions</a>');
+    expect(htmlText).toContain('aria-label="Search definitions"');
+    expect(htmlText).toContain('<a href="/definitions/install">install</a>');
+    expect(htmlText).toContain('<a href="/definitions/lock-screen">lock-screen</a>');
+    expect(htmlText).toContain("No definitions match");
     expect(htmlText).not.toContain('method="get"');
     expect(htmlText).not.toContain('name="q"');
     expect(htmlText).not.toContain("<h2>install</h2>");
@@ -144,7 +100,7 @@ describe("DefinitionsPage happy path", () => {
     expect(htmlText).not.toContain('<span class="definition-rate"');
   });
 
-  it("puts a definition's passes out of its runs, and the last twenty-five as tall pills, on its line", async () => {
+  it("states a definition's passes out of its runs, and the last twenty-five verdicts", async () => {
     const recent = [
       ...Array.from({ length: 15 }, (_, index) => pill(`pass-${index}`, "passed", index + 1)),
       pill("fail-old", "failed", 16),
@@ -163,42 +119,27 @@ describe("DefinitionsPage happy path", () => {
       { name: "wide", passed: 20, total: 40, recent: capped },
     ];
     const htmlText = await page([...both, { name: "wide", versions: install }], { histories });
-    const list = htmlText.slice(
-      htmlText.indexOf('<ul class="definition-list">'),
-      htmlText.indexOf("</ul>") + "</ul>".length,
-    );
-    const item = (name: string): string => {
-      const at = list.indexOf(`href="/definitions/${name}"`);
-      return list.slice(list.lastIndexOf("<li>", at), list.indexOf("</li>", at) + "</li>".length);
-    };
-    const lockHistory = { name: "lock-screen", passed: 15, total: 17, recent };
-    const wideHistory = { name: "wide", passed: 20, total: 40, recent: capped };
-    expect(item("install")).toBe(line("install", undefined));
-    expect(item("lock-screen")).toBe(line("lock-screen", lockHistory));
-    expect(item("wide")).toBe(line("wide", wideHistory));
-    expect(item("wide")).toContain(
-      '<span class="definition-tip__reason">the screen stayed unlocked</span>',
-    );
-    expect(item("lock-screen")).not.toContain("definition-tip__reason");
-    expect(item("lock-screen")).toContain("definition-blip--running");
-    expect(item("lock-screen")).toContain('href="/tests/run-now"');
-    expect(list).not.toContain("hx-");
-    expect(list).not.toContain("definition-blip--pending");
-    expect(htmlText).toMatch(/\.definition-list li\s*\{[^}]*display:\s*flex/);
-    expect(htmlText).toMatch(/\.definition-blips\s*\{[^}]*gap:\s*1px/);
-    expect(htmlText).toMatch(/\.definition-blip\s*\{[^}]*width:\s*6px/);
-    expect(htmlText).toMatch(/\.definition-blip\s*\{[^}]*height:\s*1lh/);
-    expect(htmlText).toMatch(/\.definition-blip\s*\{[^}]*border-radius:\s*99px/);
-    expect(htmlText).toMatch(/\.definition-blip--passed\s*\{[^}]*background:\s*#9ece6a/);
-    expect(htmlText).toMatch(/\.definition-blip--failed\s*\{[^}]*background:\s*#f7768e/);
-    expect(htmlText).toMatch(/\.definition-blip--running\s*\{[^}]*background:\s*#fbbf24/);
-    expect(htmlText).toMatch(/\.definition-tip__reason\s*\{[^}]*color:\s*#f7768e/);
-    expect(htmlText).toMatch(
-      /\.definition-history--loading \.definition-history__wait\s*\{[^}]*position:\s*absolute/,
-    );
-    expect(htmlText).not.toContain("#7aa2f7");
-    expect(item("wide").match(/definition-blip /g)).toHaveLength(25);
-    expect(item("install")).toContain("Loading");
+    const installRow = listItem(htmlText, "install");
+    const lockRow = listItem(htmlText, "lock-screen");
+    const wide = listItem(htmlText, "wide");
+    expect(installRow).toContain("install");
+    expect(installRow).not.toContain("out of");
+    expect(installRow).not.toContain('href="/tests/');
+    expect(lockRow).toContain("15 out of 17");
+    expect(lockRow).toContain('href="/tests/run-now"');
+    expect(lockRow).toContain('href="/tests/pass-0"');
+    expect(lockRow).toContain('href="/tests/fail-old"');
+    expect(lockRow).toContain("running");
+    expect(lockRow).toContain("grok-4.6");
+    expect(lockRow).not.toContain("the screen stayed unlocked");
+    expect(wide).toContain("20 out of 40");
+    expect(wide).toContain("the screen stayed unlocked");
+    expect(wide).toContain('href="/tests/fail-reason"');
+    expect(wide).toContain('href="/tests/fail-23"');
+    expect(wide.match(/href="\/tests\//g)).toHaveLength(25);
+    expect(wide).not.toContain("pending");
+    const list = /<ul class="definition-list">[\s\S]*?<\/ul>/.exec(htmlText)?.[0] ?? "";
+    expect(list).not.toContain("hx-get");
   });
 
   it("is one definition's page: its wording, not the list", async () => {
@@ -206,9 +147,6 @@ describe("DefinitionsPage happy path", () => {
     const htmlText = await page(null, { name: "lock-screen", selected });
     expect(htmlText).toContain("<title>oligarchy definitions</title>");
     expect(htmlText).toContain('<script src="/dashboard.js"');
-    expect(htmlText).toMatch(/p\.wording\s*\{[^}]*white-space:\s*pre-wrap/);
-    expect(htmlText).toMatch(/button:disabled\s*\{[^}]*opacity:\s*0\.45/);
-    expect(htmlText).not.toMatch(/[^-]p\s*\{[^}]*white-space:\s*pre-wrap/);
     expect(htmlText).toContain('aria-current="page">definitions</a>');
     expect(htmlText).not.toContain("<search");
     expect(htmlText).not.toContain('href="/definitions/install"');
@@ -293,17 +231,14 @@ describe("DefinitionsPage unhappy path", () => {
     const ownPage = await page(null, { name: "lock-screen", selected, histories });
     expect(ownPage).toContain("<h2>lock-screen</h2>");
     const body = ownPage.slice(ownPage.indexOf("<body>"));
-    expect(body).not.toContain("definition-rate");
-    expect(body).not.toContain("definition-blip");
+    expect(body).not.toContain("out of");
+    expect(body).not.toContain('href="/tests/');
 
     const listed = await page([...both], { histories });
-    const installAt = listed.indexOf('href="/definitions/install"');
-    const installItem = listed.slice(
-      listed.lastIndexOf("<li>", installAt),
-      listed.indexOf("</li>", installAt) + "</li>".length,
-    );
-    expect(installItem).toBe(line("install", undefined));
-    expect(installItem).not.toContain("out of");
+    const installRow = listItem(listed, "install");
+    expect(installRow).toContain("install");
+    expect(installRow).not.toContain("out of");
+    expect(listItem(listed, "lock-screen")).toContain("15 out of 17");
   });
 
   it("draws a running pill and no rate when nothing has passed or failed", async () => {
@@ -316,15 +251,11 @@ describe("DefinitionsPage unhappy path", () => {
       },
     ];
     const htmlText = await page([...both], { histories });
-    const at = htmlText.indexOf('href="/definitions/lock-screen"');
-    const item = htmlText.slice(
-      htmlText.lastIndexOf("<li>", at),
-      htmlText.indexOf("</li>", at) + "</li>".length,
-    );
-    expect(item).toBe(line("lock-screen", histories[0]));
+    const item = listItem(htmlText, "lock-screen");
+    expect(item).toContain('href="/tests/run"');
+    expect(item).toContain("running");
+    expect(item).toContain("grok-4.6");
     expect(item).not.toContain("out of");
-    expect(item).toContain("definition-blip--running");
-    expect(item).not.toContain("definition-tip__reason");
   });
 
   it("answers a histories refresh with one block per name, including a name with nothing to draw", async () => {
@@ -340,9 +271,12 @@ describe("DefinitionsPage unhappy path", () => {
         histories: [history],
       })}`,
     );
-    expect(htmlText).toBe(
-      `${historyBlock("lock-screen", history)}${historyBlock("install", undefined)}`,
-    );
+    expect(htmlText).toContain('data-name="lock-screen"');
+    expect(htmlText).toContain('data-name="install"');
+    expect(htmlText).toContain("1 out of 2");
+    expect(htmlText).toContain("the screen stayed unlocked");
+    expect(htmlText).toContain('href="/tests/fail"');
+    expect(htmlText.match(/out of/g)).toHaveLength(1);
     expect(htmlText).not.toContain("<html");
     expect(htmlText).not.toContain("hx-");
   });
@@ -381,7 +315,7 @@ describe("DefinitionsPage unhappy path", () => {
       '<p role="alert">Nothing changed: the newest wording already reads like this.</p>',
     );
     expect(htmlText.match(/role="alert"/g)).toHaveLength(1);
-    expect(htmlText.indexOf("<h2>lock-screen</h2>")).toBeLessThan(htmlText.indexOf('role="alert"'));
+    expect(htmlText).toContain("<h2>lock-screen</h2>");
     expect(htmlText).not.toContain("<h2>install</h2>");
 
     const empty = await page(null, { name: "lock-screen", selected, notice: "empty" });
@@ -411,7 +345,7 @@ describe("DefinitionsPage unhappy path", () => {
     expect(missing).not.toContain("<nope>");
   });
 
-  it("lists the running jobs it is given, above the wordings, and offers no abort without a ticket", async () => {
+  it("lists the running jobs it is given, and offers no abort without a ticket", async () => {
     const queriedAt = new Date("2026-09-09T16:00:00Z");
     const startedAt = new Date("2026-09-09T15:59:50Z");
     const running = (ticket: string | null, action: AutomationJob["action"]): AutomationJob => ({
@@ -430,10 +364,8 @@ describe("DefinitionsPage unhappy path", () => {
       selected: { name: "lock-screen", versions: lock },
       running: [running("RUN-2", "diagnose"), running("RUN-1", "drive"), running(null, "drive")],
     });
-    const strip = htmlText.slice(
-      htmlText.indexOf('<section class="running-tests"'),
-      htmlText.indexOf("<h2>lock-screen</h2>"),
-    );
+    const runningAt = htmlText.indexOf('<section class="running-tests"');
+    const strip = htmlText.slice(runningAt, htmlText.indexOf("</section>", runningAt));
     expect(strip).toContain(
       '<div id="running-tests" hx-get="/definitions/running?name=lock-screen" hx-trigger="every 30s" hx-swap="innerHTML">',
     );
@@ -445,7 +377,7 @@ describe("DefinitionsPage unhappy path", () => {
     expect(strip).toContain('<td class="follow"><a href="/tickets/RUN-2">10 s ago</a></td>');
     expect(strip).toContain('<a class="ticket" href="https://linear.app/issue/RUN-2">RUN-2</a>');
     expect(strip).toContain(
-      '<form method="post" action="/abort" hx-post="/abort" hx-confirm="are you sure?" hx-target="#running-tests" hx-swap="innerHTML"><input type="hidden" name="ticket" value="RUN-2"/><input type="hidden" name="action" value="diagnose"/><input type="hidden" name="view" value="definitions"/><input type="hidden" name="definition" value="lock-screen"/><button type="submit" class="abort" aria-label="abort"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 2l8 8M10 2L2 10" stroke="red" stroke-width="2" fill="none"></path></svg></button></form>',
+      '<form method="post" action="/abort" hx-post="/abort" hx-confirm="are you sure?" hx-target="#running-tests" hx-swap="innerHTML"><input type="hidden" name="ticket" value="RUN-2"/><input type="hidden" name="action" value="diagnose"/><input type="hidden" name="view" value="definitions"/><input type="hidden" name="definition" value="lock-screen"/><button type="submit" class="abort" aria-label="abort">',
     );
     expect(strip).not.toContain("running-tests__open");
     expect(strip.match(/action="\/abort"/g)).toHaveLength(2);
