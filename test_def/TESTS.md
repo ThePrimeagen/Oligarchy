@@ -7336,28 +7336,41 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `for i in 1 2 3; do omarchy-notification-send -u critical --app-name Demo "Toast $i" "body $i"; done`: three cards stack top-right, `Toast 3` on top.
-  * Right-click `Toast 3`: it is gone, two remain. Press Super+comma: `Toast 2` is gone, `Toast 1` remains.
-  * Run `omarchy-notification-send -u critical "Close button" "Hover then hit the x" --exec xdg-terminal-exec` and move the mouse onto it: a `✕` appears in the card's top-right corner. Left-click exactly on the `✕`: the card is gone AND no terminal opened.
-  * Press Super+Shift+comma: `Toast 1` is gone; no cards remain.
-  * Press Super+Shift+Alt+comma: the history overlay lists Toast 1–3 (and `Close button`) newest first. Escape.
-  * Run `omarchy-notification-send "Probe" "invoke me" --exec foot --title INVOKED`, wait ~6 s for the toast to expire, then press Super+Alt+comma: a terminal titled `INVOKED` opens even though the toast is gone. Close it with Super+W.
-  * Press Super+Ctrl+Alt+T three times: three time notices stack; Super+comma removes the newest, Super+Shift+comma the rest.
-  * Unhappy path: press Super+comma with nothing on screen: nothing changes, no error dialog. Close the terminal with Super+W; the desktop is empty.
+  * Press Super+Enter. A terminal opens.
+  * Type `for i in 1 2 3; do omarchy-notification-send -u critical --app-name Demo "Toast $i" "body $i"; done` and press Return. Three toasts appear. `Toast 3` is on top.
+  * Right-click `Toast 3`. That toast is gone. Two remain.
+  * Press Super+comma. `Toast 2` is gone. `Toast 1` remains.
+  * Type `omarchy-notification-send -u critical "Close button" "Hover then hit the x" --exec xdg-terminal-exec` and press Return. A toast appears.
+  * Move the pointer onto that toast. A close mark appears.
+  * Click the close mark. The toast is gone. No terminal opens.
+  * Press Super+Shift+comma. `Toast 1` is gone. No toasts remain.
+  * Press Super+Shift+Alt+comma. The history opens. It lists Toast 1, Toast 2, Toast 3, and Close button.
+  * Press Escape. The history closes.
+  * Type `omarchy-notification-send "Probe" "invoke me" --exec foot --title INVOKED` and press Return. A toast appears.
+  * Wait 6 seconds. The toast is gone.
+  * Press Super+Alt+comma. A terminal titled `INVOKED` opens.
+  * Press Super+W. That terminal closes.
+  * Press Super+Ctrl+Alt+T. A time notice appears.
+  * Press Super+Ctrl+Alt+T. A second time notice appears.
+  * Press Super+Ctrl+Alt+T. A third time notice appears.
+  * Press Super+comma. The newest time notice is gone.
+  * Press Super+Shift+comma. No toasts remain.
+  * Press Super+comma. Nothing changes.
+  * Press Super+W. The first terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The chords are `<M-,>` dismiss one, `<M-S-,>` dismiss all, `<M-A-,>` invoke last, `<M-S-A-,>` history. Normal toasts last 8 s and the time notice 5 s: screenshot promptly. If a chord cannot be sent, `omarchy-shell notifications dismissOne|dismissAll|invokeLast|showHistory` do the same.
-  * The `✕` is an 18 px target 3 px inside the corner — use ./client-with-image to aim; count the cards after each dismiss, the newest is at the top of the stack.
+  * Super+comma is `<M-,>`. Super+Shift+comma is `<M-S-,>`. Super+Alt+comma is `<M-A-,>`. Super+Shift+Alt+comma is `<M-S-A-,>`.
+  * The close mark is small and in the corner of the toast.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots: three cards; two after the right-click; one after Super+comma; the revealed `✕`; that card gone with no new terminal; none after Super+Shift+comma; the history with the entries; the `INVOKED` terminal after Super+Alt+comma; the three time notices reduced to two then none; the unchanged desktop after the empty dismiss
+  * On success
+  ** Three toasts, two after the right-click, one after Super+comma, the close mark dismissing its toast with no terminal, the history, the `INVOKED` terminal, the time notices reduced to none, and nothing after the empty dismiss
   * If unsuccessful
-  ** Screenshot of the wrong card removed, a terminal opened by the `✕` click, toasts that did not dismiss, or no terminal after invoke-last; `./client get-serial`
+  ** The wrong toast removed, a terminal opened by the close mark, or no terminal after Super+Alt+comma
 covers: shell/plugins/notifications/components/NotificationCard.qml (RightButton, closeRequested, close-button stacking); shell/plugins/notifications/Service.qml dismissPopup; IPC dismissOne/dismissAll/invokeLast/showHistory; default/hypr/bindings/utilities.lua:25-29,93; docs/notifications.md §Helper commands (hotkeys); bin/omarchy-notification-send (--exec); bin/omarchy-notification-time; manual/03:36; manual/07:160-168,209
 
 ### notification-history-replay-trim-and-clear   [VM-OK]
@@ -7367,26 +7380,36 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `omarchy-shell notifications clear`, then press Super+Shift+Alt+comma: a single toast `No recent notifications` with a bell glyph.
-  * Wait six seconds, then run `for i in 1 2 3; do omarchy-notification-send -u normal "History $i" "body $i" -t 1500; done; sleep 4` and wait until no card is on screen. Run `ls ~/.local/state/omarchy/notifications/history/ | wc -l` → `3`; `ls ~/.local/state/omarchy/notifications/` shows no live files.
-  * Press Super+Shift+Alt+comma: within three seconds three cards are back, `History 3` on top and `History 1` at the bottom.
-  ** Replayed toasts get a fresh standard lifetime (5 s here), so screenshot right after the hotkey.
-  * Run `for i in $(seq 1 12); do omarchy-notification-send "Trim $i" -t 500; sleep 0.7; done; sleep 2; ls ~/.local/state/omarchy/notifications/history/ | wc -l` → `10` (trimmed). Press Super+Shift+Alt+comma: the replay shows no more than ten entries and `History 1`–`History 3` are no longer among them. Wait for them to expire.
-  * Unhappy path: run `omarchy-shell notifications clear`, press Super+Shift+Alt+comma: `No recent notifications` again; `ls ~/.local/state/omarchy/notifications/history/ | wc -l` → `0`.
-  * Close the terminal with Super+W; the desktop is as found.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy-shell notifications clear` and press Return.
+  * Press Super+Shift+Alt+comma. A toast says `No recent notifications`.
+  * Wait 6 seconds. That toast is gone.
+  * Type `for i in 1 2 3; do omarchy-notification-send -u normal "History $i" "body $i" -t 1500; done` and press Return.
+  * Wait until no toast is on screen.
+  * Type `ls ~/.local/state/omarchy/notifications/history/ | wc -l` and press Return. The line is `3`.
+  * Type `ls ~/.local/state/omarchy/notifications/` and press Return. No live notification files are listed.
+  * Press Super+Shift+Alt+comma. Three toasts appear. `History 3` is on top. `History 1` is at the bottom.
+  * Wait until those toasts expire.
+  * Type `for i in $(seq 1 12); do omarchy-notification-send "Trim $i" -t 500; sleep 0.7; done; sleep 2; ls ~/.local/state/omarchy/notifications/history/ | wc -l` and press Return. The line is `10`.
+  * Press Super+Shift+Alt+comma. No more than ten toasts appear. `History 1`, `History 2`, and `History 3` are not among them.
+  * Wait until those toasts expire.
+  * Type `omarchy-shell notifications clear` and press Return.
+  * Press Super+Shift+Alt+comma. A toast says `No recent notifications`.
+  * Type `ls ~/.local/state/omarchy/notifications/history/ | wc -l` and press Return. The line is `0`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The hotkey is `<M-S-A-,>`; `omarchy-shell notifications showHistory` is the same action from the terminal.
+  * Screenshot the replay as soon as the hotkey is pressed. The replayed toasts expire quickly.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshot of the placeholder toast; the `wc -l` values 3, 10 and 0; the three replayed toasts in newest-first order; the ≤10 replay without the early entries; the placeholder again after clearing
+  * On success
+  ** The placeholder toast, history counts `3`, `10`, and `0`, the three replayed toasts newest first, and a replay of at most ten without the early entries
   * If unsuccessful
-  ** Screenshot after the hotkey with nothing replayed or more than ten cards; `ls -la ~/.local/state/omarchy/notifications/{,history} | sudo tee /dev/ttyS0` read via get-serial
+  ** Nothing replayed, or more than ten toasts
 covers: shell/plugins/notifications/Service.qml (showRecentHistory, replayHistory, clearHistory, archivePopupFileFor); shell/plugins/notifications/NotificationLogic.historyRows; IPC clear/showHistory; default/hypr/bindings/utilities.lua (Super+Shift+Alt+comma); docs/notifications.md (Toast lifecycle: persistence and history, trimmed to ten)
 
 ### notification-click-runs-literal-argv   [VM-OK]
@@ -7396,28 +7419,45 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `rm -f /tmp/pwned /tmp/pwn '/tmp/a b' '/tmp/$(touch /tmp/pwned)'`. Run `omarchy-notification-send -u critical "Open a terminal" "Click me" --exec foot --title CLICK-PROOF`: left-click the card body (not the corner): within three seconds a terminal titled `CLICK-PROOF` opens and the card is gone. Close it with Super+W.
-  * Run `omarchy-notification-send "Download complete" "A body" -u critical -g K --exec touch -- '/tmp/a b' '/tmp/$(touch /tmp/pwned)'`: a toast titled `Download complete` with body `A body`. Click it, then run `ls -la /tmp/'a b' /tmp/'$(touch /tmp/pwned)' /tmp/pwned 2>&1`: the two literal files `/tmp/a b` and `/tmp/$(touch /tmp/pwned)` exist and `/tmp/pwned` does NOT.
-  * Run `omarchy-notification-send '--hint=string:omarchy-exec-argv:["bash","-c","touch /tmp/pwn"]' "body"` → the toast's *title* is that literal `--hint=…` text. Click it; `ls /tmp/pwn` → no such file. Run `omarchy-notification-send -u critical "Title ; touch /tmp/inj" "-rf --hint=x" --exec foot --title SAFE`: the headline and body render literally; click it → a `SAFE` terminal opens and `ls /tmp/inj` → `No such file`. Close SAFE with Super+W.
-  * Run `notify-send -w -A default=Open -u critical "Third party" "Click prints default"` (it blocks); left-click the card: the terminal prints `default`, the prompt returns, the card is gone.
-  ** If `notify-send` lacks `-A`, note its version and skip this step; it is a tooling gap.
-  * Run `omarchy-notification-send -u critical "No action" "Just closes"`; left-click it: the card is dismissed and nothing else opens.
-  * Unhappy path: `omarchy-notification-send "Bad" --exec "foot --title X"; echo "exit=$?"` → `--exec takes the command as separate words, not one quoted string.`, a `Write:  --exec foot --title X` hint, `exit=1`, no toast; `omarchy-notification-send "Head" --exec "omarchy toggle something"; echo "exit=$?"` → the same refusal.
-  ** On the 4.0.2 build `--exec` may still take a shell string — `omarchy-version` tells the two apart; report skew, not a defect.
-  * Clean up: `rm -f '/tmp/a b' '/tmp/$(touch /tmp/pwned)'`, dismiss any remaining toast with Super+Shift+comma, close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Type `rm -f /tmp/pwned /tmp/pwn '/tmp/a b' '/tmp/$(touch /tmp/pwned)'` and press Return.
+  * Type `omarchy-notification-send -u critical "Open a terminal" "Click me" --exec foot --title CLICK-PROOF` and press Return. A toast appears.
+  * Click the body of the toast. A terminal titled `CLICK-PROOF` opens. The toast is gone.
+  * Press Super+W. That terminal closes.
+  * Type `omarchy-notification-send "Download complete" "A body" -u critical --exec touch -- '/tmp/a b' '/tmp/$(touch /tmp/pwned)'` and press Return. A toast appears. The title is `Download complete`.
+  * Click the toast. The toast closes.
+  * Type `ls -la '/tmp/a b' '/tmp/$(touch /tmp/pwned)' /tmp/pwned` and press Return. The first two paths exist. `/tmp/pwned` does not.
+  * Type `omarchy-notification-send '--hint=string:omarchy-exec-argv:["bash","-c","touch /tmp/pwn"]' "body"` and press Return. A toast appears. Its title is that literal hint text.
+  * Click the toast. The toast closes.
+  * Type `ls /tmp/pwn` and press Return. The file is not there.
+  * Type `omarchy-notification-send -u critical "Title ; touch /tmp/inj" "-rf --hint=x" --exec foot --title SAFE` and press Return. A toast appears. The headline and body are shown as written.
+  * Click the toast. A terminal titled `SAFE` opens. The toast is gone.
+  * Type `ls /tmp/inj` and press Return. The file is not there.
+  * Press Super+W. The SAFE terminal closes.
+  * Type `notify-send -w -A default=Open -u critical "Third party" "Click prints default"` and press Return. A toast appears. The command waits.
+  ** If `notify-send` has no `-A`, record its version and skip the click.
+  * Click the toast. The terminal prints `default`. The prompt returns. The toast is gone.
+  * Type `omarchy-notification-send -u critical "No action" "Just closes"` and press Return. A toast appears.
+  * Click the toast. The toast closes. Nothing else opens.
+  * Type `omarchy-notification-send "Bad" --exec "foot --title X"; echo "exit=$?"` and press Return. The output says `--exec` takes separate words. The last line is `exit=1`. No toast appears.
+  ** If this build accepts the quoted `--exec`, record `omarchy-version`.
+  * Type `omarchy-notification-send "Head" --exec "omarchy toggle something"; echo "exit=$?"` and press Return. The same refusal appears. The last line is `exit=1`.
+  * Type `rm -f '/tmp/a b' '/tmp/$(touch /tmp/pwned)'` and press Return.
+  * Press Super+Shift+comma. No toasts remain.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Click the body of the card, not the close button that appears on hover — double-check the mouse position first. `hyprctl clients | grep CLICK-PROOF` confirms the title if the screenshot is ambiguous. Critical toasts do not time out; dismiss leftovers with `<M-S-,>`.
+  * Click the body of the toast, not the close mark.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshot of the card and the `CLICK-PROOF` terminal with the card gone; `ls` showing `/tmp/a b` and `/tmp/$(touch /tmp/pwned)` present and `/tmp/pwned` absent; the forged-hint title rendered literally and `/tmp/pwn` absent; the literal hostile headline/body, the `SAFE` terminal and `ls /tmp/inj` failing; the terminal showing `default` after the third-party click; the no-action card dismissed with nothing opened; the two refusals with `exit=1`
+  * On success
+  ** The `CLICK-PROOF` terminal, the two literal files with no `/tmp/pwned`, the forged hint as a title with no `/tmp/pwn`, the `SAFE` terminal with no `/tmp/inj`, `default` printed, the no-action toast closing alone, and both refusals with `exit=1`
   * If unsuccessful
-  ** Screenshot of `/tmp/pwned`, `/tmp/pwn` or `/tmp/inj` existing, a card surviving the click, no terminal appearing, or a quoted `--exec` accepted; `cat ~/.local/state/omarchy/notifications/*.json` showing the exec hint; `omarchy-version`
+  ** `/tmp/pwned`, `/tmp/pwn`, or `/tmp/inj` existing, or a quoted `--exec` accepted
 covers: bin/omarchy-notification-send:162-179 (--exec argv); shell/plugins/notifications/NotificationLogic.js (parseExecArgv); shell/plugins/notifications/Service.qml (invokePopupDefault, focusApp); NotificationServer actionsSupported; IPC invokeLast; default/hypr/bindings/utilities.lua Super+Alt+comma; docs/notifications.md §Click commands are argv, never shell strings; test/shell.d/notification-send-test.sh; test/shell.d/notifications-test.sh; manual/10-notices.md
 
 ### notification-do-not-disturb-rules   [VM-OK]
@@ -7427,28 +7467,56 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `omarchy-shell notifications clear`, then `notify-send -a demo "Before DND" "visible"` → a toast appears; wait for it to expire (~8 s).
-  * Hover left of the clock to reveal the indicators and left-click the bell-slash glyph: it is drawn solid next to the clock and stays when the mouse leaves; its tooltip reads `Allow Notifications`. No toast announces DND — the solid indicator is the only feedback. Run `cat ~/.local/state/omarchy/notifications.json` → `"dnd": true`; `omarchy-shell notifications ping` → `ok`.
-  * Run `notify-send -a Demo "Hidden normal"`, then `omarchy-notification-send --app-name Slack "Silenced one" "should not show"`: wait three seconds each — NO toast.
-  * Run `omarchy-notification-send "Omarchy action shows"` then `notify-send -u critical "Critical notify-send shows"`: both toasts appear (Omarchy action toasts and bare critical CLI alerts bypass). Press Super+Ctrl+Alt+T: the time toast also appears under DND.
-  * Run `notify-send -a Discord -u critical "Branded critical hidden"` and `omarchy-notification-send --app-name Slack "Silenced critical" "still hidden" -u critical`: wait three seconds — NO new toast (a critical from an ordinary branded app does not bypass).
-  * Press Super+Ctrl+comma: the solid bell-slash disappears and `notifications.json` says `"dnd": false`. Run `notify-send -a Demo "Now visible"`: the toast appears. Right-click the remaining critical toast, wait for the rest to expire, then press Super+Shift+Alt+comma: the replay includes `Hidden normal`, `Silenced one`, `Branded critical hidden` and `Silenced critical` (silenced but recorded) alongside the ones that were shown, but not `Omarchy action shows` (ephemeral). Escape.
-  * Unhappy path: run `omarchy-toggle-notification-silencing; omarchy-toggle-notification-silencing`: the indicator ends off, as it started, with no toast and no crash. Also toggle once on and once off via Super+Space → Trigger → Toggle → Notifications (or `omarchy toggle notification silencing`): same result.
-  * Close the terminal with Super+W; DND is off and the desktop is as found.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy-shell notifications clear` and press Return.
+  * Type `notify-send -a demo "Before DND" "visible"` and press Return. A toast appears.
+  * Wait 8 seconds. That toast is gone.
+  * Hover the empty bar just left of the clock until the glyphs appear.
+  * Click the crossed-out bell. It stays lit after the pointer leaves. No toast appears.
+  * Type `cat ~/.local/state/omarchy/notifications.json` and press Return. The file says `"dnd": true`.
+  * Type `omarchy-shell notifications ping` and press Return. The line is `ok`.
+  * Type `notify-send -a Demo "Hidden normal"` and press Return.
+  * Wait 3 seconds. No toast appears.
+  * Type `omarchy-notification-send --app-name Slack "Silenced one" "should not show"` and press Return.
+  * Wait 3 seconds. No toast appears.
+  * Type `omarchy-notification-send "Omarchy action shows"` and press Return. A toast appears.
+  * Type `notify-send -u critical "Critical notify-send shows"` and press Return. A toast appears.
+  * Press Super+Ctrl+Alt+T. A time notice appears.
+  * Type `notify-send -a Discord -u critical "Branded critical hidden"` and press Return.
+  * Wait 3 seconds. No new toast appears.
+  * Type `omarchy-notification-send --app-name Slack "Silenced critical" "still hidden" -u critical` and press Return.
+  * Wait 3 seconds. No new toast appears.
+  * Press Super+Ctrl+comma. The crossed-out bell is no longer lit.
+  * Type `cat ~/.local/state/omarchy/notifications.json` and press Return. The file says `"dnd": false`.
+  * Type `notify-send -a Demo "Now visible"` and press Return. A toast appears.
+  * Right-click the remaining critical toast. It closes.
+  * Wait until the other visible toasts expire.
+  * Press Super+Shift+Alt+comma. The history includes `Hidden normal`, `Silenced one`, `Branded critical hidden`, and `Silenced critical`. It does not include `Omarchy action shows`.
+  * Press Escape. The history closes.
+  * Type `omarchy-toggle-notification-silencing` and press Return. Do-not-disturb turns on. No toast appears.
+  * Type `omarchy-toggle-notification-silencing` and press Return. Do-not-disturb turns off.
+  * Press Super+Space. The menu opens.
+  * Click Trigger.
+  * Click Toggle.
+  * Click Notifications. Do-not-disturb turns on. No toast appears.
+  * Press Super+Space. The menu opens.
+  * Click Trigger.
+  * Click Toggle.
+  * Click Notifications. Do-not-disturb turns off.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The DND hotkey is `<M-C-,>`. `notify-send -a Demo` / `--app-name Chat` makes the sender third-party and non-ephemeral so the silenced toast is recorded (a bare `notify-send "x"` while silenced is dropped; without `--app-name`, `omarchy-notification-send` is treated as Omarchy's own confirmation and bypasses).
-  * Take a screenshot 2–3 s after each send so a missing toast is a positive observation, not a timing miss. `omarchy-shell notifications setDnd false` is another way off if the indicator state is unclear.
+  * Super+Ctrl+comma is `<M-C-,>`. Screenshot a few seconds after a send that should stay hidden.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshot of the first toast; the solid DND indicator with its tooltip, `"dnd": true` and no announcing toast; no toast after the two silenced sends; the two bypassing toasts and the time toast; no toast after the two branded criticals; the indicator gone with `"dnd": false` and `Now visible` shown; the replay listing the four silenced entries and not the ephemeral action toast; the indicator off after the double toggle and after the menu round trip
+  * On success
+  ** A toast before do-not-disturb, the lit indicator with `"dnd": true` and no announcing toast, the silenced sends hidden, the Omarchy and critical `notify-send` toasts shown, the branded criticals hidden, `"dnd": false` with `Now visible`, and the history listing the silenced entries
   * If unsuccessful
-  ** Screenshot of a toast that should have been hidden (or hidden that should have shown) with the indicator state visible, or a toast announcing DND; `cat ~/.local/state/omarchy/notifications.json`; `omarchy-version`
+  ** A toast that should have been hidden, or a toast announcing do-not-disturb
 covers: shell/plugins/bar/indicators/Dnd.qml; shell/plugins/notifications/Service.qml (setDoNotDisturb, handleNotification, writeSilenced); shell/plugins/notifications/NotificationLogic.js (shouldBypassDnd, isEphemeralApp, historyRows); bin/omarchy-toggle-notification-silencing; default/hypr/bindings/utilities.lua:27-29 (Super+Ctrl+comma); docs/notifications.md §Silencing; default/omarchy/omarchy-menu.jsonc trigger.toggle; test/shell.d/notifications-test.sh; test/shell.d/runtime-smoke-test.sh; manual/07:166; manual/10-notices.md; manual/13:14,58-63
 
 ### notification-survives-shell-restart   [VM-OK]
@@ -7458,25 +7526,32 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `omarchy-notification-send -u critical "Survive restart" "I should come back" --exec foot --title PERSISTED`: the card is present. Run `ls ~/.local/state/omarchy/notifications/` → one `<timestamp>-<id>.json` file.
-  * Run `omarchy-restart-shell` (or `omarchy restart shell`) and screenshot every 3–5 s: the bar disappears and returns within ~15 s; a second or two after it is back the `Survive restart` card is on screen again.
-  * Left-click the restored card: a terminal titled `PERSISTED` opens (the click command was restored too) and the card is gone. Close it with Super+W. Run `ls ~/.local/state/omarchy/notifications/history/`: the toast's file has moved here. Run `omarchy-shell shell ping` → `ok`.
-  * Unhappy path: run `omarchy-notification-send "Expires before restart"`, wait six seconds so it expires, then run `omarchy-restart-shell`: after the bar returns there is NO `Expires before restart` card.
-  * Close the terminal with Super+W; the desktop is as found.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy-notification-send -u critical "Survive restart" "I should come back" --exec foot --title PERSISTED` and press Return. A toast appears.
+  * Type `ls ~/.local/state/omarchy/notifications/` and press Return. One json file is listed.
+  * Type `omarchy-restart-shell` and press Return. The bar disappears.
+  * Wait until the bar returns. The `Survive restart` toast is on screen.
+  * Click the toast. A terminal titled `PERSISTED` opens. The toast is gone.
+  * Press Super+W. That terminal closes.
+  * Type `ls ~/.local/state/omarchy/notifications/history/` and press Return. The toast's file is listed there.
+  * Type `omarchy-shell shell ping` and press Return. The line is `ok`.
+  * Type `omarchy-notification-send "Expires before restart"` and press Return. A toast appears.
+  * Wait 6 seconds. That toast is gone.
+  * Type `omarchy-restart-shell` and press Return. The bar disappears and returns. The `Expires before restart` toast does not come back.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The bar vanishing for a few seconds is the restart; the terminal window stays. Restored toasts start with a full lifetime; critical ones have none. Allow one extra screenshot after the bar returns for the re-render.
-  * If the bar does not return within ~15 seconds, run `omarchy restart shell` once more and report it. `omarchy-restart-shell` refuses while the screen is locked — irrelevant here, but do not lock during this test.
+  * Do not lock the screen during this test. If the bar does not return within about 15 seconds, run `omarchy restart shell` once more and report it.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshot before the restart with its json file; with the bar gone; with the bar back and the restored card; the `PERSISTED` terminal after the click and the file under `history/`; `ok` from ping; the screen after the second restart without the expired card
+  * On success
+  ** The toast and its json file before the restart, the same toast after the bar returns, the `PERSISTED` terminal, the file in history, `ok`, and no expired toast after the second restart
   * If unsuccessful
-  ** Screenshot of the desktop after restart without the card; `journalctl --user -n 50 | sudo tee /dev/ttyS0` read via get-serial
+  ** No toast after the bar returns
 covers: shell/plugins/notifications/Service.qml (persistPopupFile, restorePopups); shell/plugins/notifications/NotificationLogic.js (persistablePopup, popupExpired); bin/omarchy-restart-shell; docs/notifications.md §Toast lifecycle (persistence files, restored toasts click through); docs/omarchy-shell.md (omarchy-restart-shell); test/shell.d/notifications-test.sh restore assertions
 
 ### notification-markup-sanitised-titles-plain   [VM-OK]
@@ -7486,28 +7561,37 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and start a local listener that would log any fetch: `python3 -m http.server 8877 --bind 127.0.0.1 > /tmp/http.log 2>&1 &`.
-  * Run `omarchy-notification-send -u critical "Img" '<img src="http://127.0.0.1:8877/plain.png">Hello <b>bold</b>'` → the toast body reads `Hello bold` with `bold` in bold weight; no image, no broken-image placeholder and no literal `<img` text.
-  ** Send `<` as `<LT>` and `>` as `<GT>`; check each line with ./client-with-image before Enter — a mistyped command shows as a shell error, not a toast.
-  * Run `omarchy-notification-send "Img2" "$(printf '<x\n<img src="http://127.0.0.1:8877/split.png">')"` → body shows at most `<x` and no image; `omarchy-notification-send "Img3" '<IMG SRC="http://127.0.0.1:8877/upper.png">shout'` → body `shout`; `omarchy-notification-send "Img4" '< img src="http://127.0.0.1:8877/spaced.png">after'` → body `after`. Also `notify-send -a Demo -u critical "Markup" "<b>bold</b> then <img src=\"http://127.0.0.1:8877/x.png\"> after"` → `bold then  after` with `bold` bold.
-  * Run `omarchy-notification-send --app-name Chromium "Web" '<a href="https://example.com">example.com</a> Message body'` → body `Message body` (the leading origin link is stripped).
-  * Run `notify-send -a Demo -u critical "Plain summary <b>not bold</b>"` and `omarchy-notification-send '<img src="http://127.0.0.1:8877/summary.png">Summary' 'body'` → both TITLES show the literal tags (summaries are plain text).
-  * Set the terminal's window title to an image tag: `printf '\e]2;<img src="http://127.0.0.1:8877/title.png">TITLE\a'`. If the bar shows a window-title widget (left section), it must show the literal text (possibly truncated), not an image or an empty label; if the stock bar has no such widget, say so and skip this check.
-  * Wait five seconds, then `cat /tmp/http.log` → NO request lines (no `GET /plain.png` etc.).
-  * Round trip: `printf '\e]2;Terminal\a'`, `kill %1`, press Super+Shift+comma to dismiss the toasts, close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Type `python3 -m http.server 8877 --bind 127.0.0.1 > /tmp/http.log 2>&1 &` and press Return. The listener starts.
+  * Type `omarchy-notification-send -u critical "Img" '<img src="http://127.0.0.1:8877/plain.png">Hello <b>bold</b>'` and press Return. The toast body is `Hello bold`. `bold` is bold. No image appears.
+  * Type `omarchy-notification-send "Img2" "$(printf '<x\n<img src="http://127.0.0.1:8877/split.png">')"` and press Return. The body shows no image.
+  * Type `omarchy-notification-send "Img3" '<IMG SRC="http://127.0.0.1:8877/upper.png">shout'` and press Return. The body is `shout`.
+  * Type `omarchy-notification-send "Img4" '< img src="http://127.0.0.1:8877/spaced.png">after'` and press Return. The body is `after`.
+  * Type `notify-send -a Demo -u critical "Markup" "<b>bold</b> then <img src=\"http://127.0.0.1:8877/x.png\"> after"` and press Return. The body shows `bold` in bold and no image.
+  * Type `omarchy-notification-send --app-name Chromium "Web" '<a href="https://example.com">example.com</a> Message body'` and press Return. The body is `Message body`.
+  * Type `notify-send -a Demo -u critical "Plain summary <b>not bold</b>"` and press Return. The title shows the tags as text.
+  * Type `omarchy-notification-send '<img src="http://127.0.0.1:8877/summary.png">Summary' 'body'` and press Return. The title shows the tag as text.
+  * Type `printf '\e]2;<img src="http://127.0.0.1:8877/title.png">TITLE\a'` and press Return.
+  ** If the bar shows a window title, it shows the tag as text. If it does not show a window title, record that and continue.
+  * Wait 5 seconds.
+  * Type `cat /tmp/http.log` and press Return. There is no `GET` line.
+  * Type `printf '\e]2;Terminal\a'` and press Return.
+  * Type `kill %1` and press Return.
+  * Press Super+Shift+comma. No toasts remain.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * `http.server` prints one line per request to the log; an empty log is the proof. Dismiss toasts between steps if they stack. Zoom the screenshot on the left bar section for the title check.
+  * An empty log is the proof. Send `<` as `<LT>` and `>` as `<GT>` if the client needs it.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of each toast body without an image and with `bold` rendered bold; the Chromium-style body reduced to `Message body`; the literal tags in both summaries; the bar title check (or the note that no title widget exists); `cat /tmp/http.log` empty
+  * On success
+  ** Each body without an image, `bold` rendered bold, the Chromium body reduced to `Message body`, titles showing tags as text, and an empty HTTP log
   * If unsuccessful
-  ** Screenshot of a pink/broken image square in a toast, rendered markup in a summary, an image or empty label where the title should be, or a `GET` line in the log; `omarchy-version`
+  ** An image in a toast, markup rendered in a title, or a `GET` line in the log
 covers: shell/plugins/notifications/NotificationLogic.js (stripImageTags, styledBody, sanitizeBody); shell/plugins/notifications/components/NotificationCard.qml textFormat (PlainText summary, StyledText body); shell/**/*.qml (textFormat contract); shell/plugins/bar (active-window); test/shell.d/qml-text-format-test.sh; test/shell.d/qml-text-format-scan.py; test/shell.d/notifications-test.sh; manual/05-the-top-bar.md; manual/10-notices.md
 
 ### notification-position-follows-bar-edge   [VM-OK]
@@ -7517,24 +7601,29 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `omarchy-notification-send -u critical "Bar on top"`: the card's top edge sits a bar-height plus a gap below the screen top, at the right edge.
-  * Run `omarchy bar position bottom`, then `omarchy-notification-send -u critical "Bar on bottom"`: the new card stack starts just a small gap below the very top edge (about 26 px higher than before).
-  * Run `omarchy bar position right`, then `omarchy-notification-send -u critical "Bar on right"`: the cards sit LEFT of the vertical bar, not under it.
-  * Unhappy path: a card overlapping the bar in any of the three positions is the failure to report.
-  * Round trip: run `omarchy bar position top`, press Super+Shift+comma, run `rm ~/.config/omarchy/shell.json`: bar on top, no cards, as found. Close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy-notification-send -u critical "Bar on top"` and press Return. The toast sits below the top bar, at the right edge.
+  * Type `omarchy bar position bottom` and press Return. The bar moves to the bottom.
+  * Type `omarchy-notification-send -u critical "Bar on bottom"` and press Return. The new toast starts near the top edge, higher than the first one.
+  * Type `omarchy bar position right` and press Return. The bar moves to the right edge.
+  * Type `omarchy-notification-send -u critical "Bar on right"` and press Return. The toast sits to the left of the bar. It does not cover the bar.
+  * Type `omarchy bar position top` and press Return. The bar returns to the top.
+  * Press Super+Shift+comma. No toasts remain.
+  * Type `rm ~/.config/omarchy/shell.json` and press Return.
+  * Press Super+W. The terminal closes. The bar is on top.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Compare the top card's vertical position between the first two screenshots; allow up to 20 s for the bar to change position.
+  * Allow up to 20 seconds for the bar to change edge.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Three screenshots with the toast stack placed relative to each bar edge as described; the final clean screenshot with the bar on top
+  * On success
+  ** A toast below the top bar, a toast near the top while the bar is at the bottom, a toast left of the right-edge bar, and the bar back on top with no toasts
   * If unsuccessful
-  ** Screenshot of a card overlapping the bar
+  ** A toast covering the bar
 covers: shell/plugins/notifications/Service.qml (barPosition, barClearance); shell/plugins/notifications/NotificationLogic.popupPlacement; bin/omarchy-bar cmd_position
 
 ### notification-time-and-battery-notices-without-battery   [VM-PARTIAL]
@@ -7544,27 +7633,47 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Ctrl+Alt+T: within two seconds a compact toast top-right shows a clock glyph and text like `Friday 13:09  ·  18 September 2026  ·  Week 38`; its time matches the bar clock. Wait six seconds: it expires. Press it five times quickly: the toasts stack or replace and the shell keeps running; press Super+Shift+comma to clear them.
-  * Press Super+Ctrl+Alt+B and screenshot within two seconds: the intended result on a machine without a battery is NO toast, or a toast whose headline reads `No battery`. A very small toast with only the 󰁹 battery glyph and no text is the known defect (HEAD behaviour) — report it as a failure of this step with the screenshot; a hang or crash dialog is also a failure.
-  * Open a terminal with Super+Enter and run `omarchy-battery-status; echo "exit=$?"` → an empty line and `exit=0`.
-  * Run `omarchy-battery-low 15`: a critical notification `Time to recharge!` / `Battery is down to 15%` appears at the top right and stays.
-  * Run `mkdir -p ~/.config/omarchy/hooks && printf '#!/bin/bash\necho "hook got $1" | sudo tee /dev/ttyS0\n' > ~/.config/omarchy/hooks/battery-low && chmod +x ~/.config/omarchy/hooks/battery-low`, then `sudo -v` (password `prime`) and `omarchy-battery-low 9`: a second notification stacks on the first; `./client get-serial` contains `hook got 9`. The drop-in form works too: `mkdir -p ~/.config/omarchy/hooks/battery-low.d && printf '#!/bin/bash\nomarchy-notification-send "battery hook got $1"\n' > ~/.config/omarchy/hooks/battery-low.d/probe && chmod +x ~/.config/omarchy/hooks/battery-low.d/probe`, then `omarchy-battery-low 7` → the stock warning AND a toast `battery hook got 7`.
-  ** The bar shows no battery widget and Super+Space → Trigger → Toggle has no `Battery Percentage` row: the shell-side trigger is skipped on this machine, the command is what the shell would run.
-  * Unhappy path: run `omarchy-battery-low; echo "exit=$?"` → `Usage: omarchy-battery-low <percentage>`, non-zero, no notification.
-  * Round trip: run `rm -r ~/.config/omarchy/hooks/battery-low ~/.config/omarchy/hooks/battery-low.d`, press Super+Shift+comma to dismiss the notices, close the terminal with Super+W.
+  * Press Super+Ctrl+Alt+T. A time notice appears. Its time matches the bar clock.
+  * Wait 6 seconds. The notice is gone.
+  * Press Super+Ctrl+Alt+T. A time notice appears.
+  * Press Super+Ctrl+Alt+T. Another notice appears or replaces the first. The shell keeps running.
+  * Press Super+Ctrl+Alt+T. The shell keeps running.
+  * Press Super+Ctrl+Alt+T. The shell keeps running.
+  * Press Super+Ctrl+Alt+T. The shell keeps running.
+  * Press Super+Shift+comma. No toasts remain.
+  * Press Super+Ctrl+Alt+B. Screenshot within two seconds.
+  ** No toast, or a toast whose headline is `No battery`, is the pass. A glyph-only toast with an empty headline is a failure of this step. Record which one happened.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy-battery-status; echo "exit=$?"` and press Return. The status line is empty. The last line is `exit=0`.
+  * Type `omarchy-battery-low 15` and press Return. A toast says `Time to recharge!` and `Battery is down to 15%`.
+  * Type `mkdir -p ~/.config/omarchy/hooks` and press Return.
+  * Type `printf '#!/bin/bash\necho "hook got $1" | sudo tee /dev/ttyS0\n' > ~/.config/omarchy/hooks/battery-low` and press Return.
+  * Type `chmod +x ~/.config/omarchy/hooks/battery-low` and press Return.
+  * Type `sudo -v` and press Return.
+  ** If a password is asked, type `prime` and press Return.
+  * Type `omarchy-battery-low 9` and press Return. A second toast appears.
+  * Read the serial log. It contains `hook got 9`.
+  * Type `mkdir -p ~/.config/omarchy/hooks/battery-low.d` and press Return.
+  * Type `printf '#!/bin/bash\nomarchy-notification-send "battery hook got $1"\n' > ~/.config/omarchy/hooks/battery-low.d/probe` and press Return.
+  * Type `chmod +x ~/.config/omarchy/hooks/battery-low.d/probe` and press Return.
+  * Type `omarchy-battery-low 7` and press Return. A stock warning appears. A toast says `battery hook got 7`.
+  * Type `omarchy-battery-low; echo "exit=$?"` and press Return. A usage line appears. The exit is not `0`. No new notification appears.
+  * Type `rm -r ~/.config/omarchy/hooks/battery-low ~/.config/omarchy/hooks/battery-low.d` and press Return.
+  * Press Super+Shift+comma. No toasts remain.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The hotkeys are `<M-C-A-t>` and `<M-C-A-b>`; both notices are low urgency, screenshot promptly. Send `>` as `<GT>` in the printf line.
+  * Super+Ctrl+Alt+T is `<M-C-A-t>`. Super+Ctrl+Alt+B is `<M-C-A-b>`. Screenshot the battery hotkey within two seconds.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshot of the time toast beside the bar clock with date and week number, and the cleared desktop after five quick presses; the screen after the battery hotkey showing no toast or a `No battery` headline; the empty `omarchy-battery-status` line; the `Time to recharge!` notification; the second notice and the serial dump containing `hook got 9`; `battery hook got 7` together with the warning; the Toggle submenu without `Battery Percentage`; the usage line with no notification
+  * On success
+  ** The time notice matching the bar clock, the battery hotkey result, the empty battery status with `exit=0`, `Time to recharge!`, `hook got 9`, `battery hook got 7`, and the usage line with no notification
   * If unsuccessful
-  ** Screenshot of the glyph-only empty-headline battery toast (the pinned defect), an error dialog, no time toast, a notification on the usage path, or a hook not firing; notification history; `./client get-serial`; `omarchy-version`
+  ** A glyph-only battery toast, no time notice, or a notification after the bare `omarchy-battery-low`
 covers: bin/omarchy-notification-time; bin/omarchy-notification-battery; bin/omarchy-battery-status; bin/omarchy-battery-low; bin/omarchy-hook (hooks/battery-low and battery-low.d/); bin/omarchy-notification-send; default/hypr/bindings/utilities.lua:93-95 (Super+Ctrl+Alt+T/B); default/omarchy/omarchy-menu.jsonc trigger.toggle.battery-percentage (when); shell/plugins/notifications/components/NotificationCard.qml compactGlyph; manual/07:209-211; manual/10:7; manual/31-dotfiles.md (battery-low hook)
 
 ### crash-capture-toast-needs-agent-and-toggle   [VM-PARTIAL]

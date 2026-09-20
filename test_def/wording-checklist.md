@@ -170,14 +170,14 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `media-keys-osd-on-dummy-output`
 - [x] `notification-send-lifetimes-and-urgency`
 - [x] `notification-send-rejects-bad-options`
-- [ ] `notification-dismiss-hotkeys-and-mouse`
-- [ ] `notification-history-replay-trim-and-clear`
-- [ ] `notification-click-runs-literal-argv`
-- [ ] `notification-do-not-disturb-rules`
-- [ ] `notification-survives-shell-restart`
-- [ ] `notification-markup-sanitised-titles-plain`
-- [ ] `notification-position-follows-bar-edge`
-- [ ] `notification-time-and-battery-notices-without-battery`
+- [x] `notification-dismiss-hotkeys-and-mouse`
+- [x] `notification-history-replay-trim-and-clear`
+- [x] `notification-click-runs-literal-argv`
+- [x] `notification-do-not-disturb-rules`
+- [x] `notification-survives-shell-restart`
+- [x] `notification-markup-sanitised-titles-plain`
+- [x] `notification-position-follows-bar-edge`
+- [x] `notification-time-and-battery-notices-without-battery`
 - [ ] `crash-capture-toast-needs-agent-and-toggle`
 - [ ] `reminder-set-fires-and-clears`
 - [ ] `reminder-show-clear-and-prompt-rejects-bad-input`
