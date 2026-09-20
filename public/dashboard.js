@@ -1,6 +1,52 @@
-// Definitions do not change while the index is open, so the search narrows the list that was
-// rendered. A blank box is every name; otherwise a case-insensitive substring of the name.
-// The query is written as text, so it cannot become markup. A page with no list is left alone.
+// Every name is already on the page — tests are rarely added — so finding and sorting
+// stay here. A blank box is every name, A to Z. Typed text is a case-insensitive fuzzy
+// match: words split on whitespace, and each word's characters must occur in order, not
+// necessarily together. The list is then reordered, tightest match first. The query is
+// written as text, so it cannot become markup. A page with no list is left alone.
+//
+// A matched character is worth 16. Sitting beside the previous one is worth 32 more, and
+// starting the name or a word (after -, _ or a space) is worth 16 more. The first
+// character also loses a point for each step past the start, up to 24, so the same run
+// early beats it later in a longer name. -1 is no match; an empty query is 0, so the
+// names fall through to alphabetical order.
+const scoreDefinition = (query, name) => {
+  const words = query
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((word) => word !== "");
+  const text = name.toLowerCase();
+  if (words.length === 0) {
+    return 0;
+  }
+  let score = 0;
+  for (const word of words) {
+    let from = 0;
+    let previous = -2;
+    let wordScore = 0;
+    for (let index = 0; index < word.length; index++) {
+      const at = text.indexOf(word[index], from);
+      if (at < 0) {
+        return -1;
+      }
+      wordScore += 16;
+      if (at === previous + 1) {
+        wordScore += 32;
+      }
+      if (at === 0 || text[at - 1] === "-" || text[at - 1] === "_" || text[at - 1] === " ") {
+        wordScore += 16;
+      }
+      if (index === 0) {
+        wordScore += Math.max(0, 24 - at);
+      }
+      previous = at;
+      from = at + 1;
+    }
+    score += wordScore;
+  }
+  return score;
+};
+
 const narrowDefinitions = (target) => {
   if (!(target instanceof Element) || target.closest("search") === null) {
     return;
@@ -9,17 +55,34 @@ const narrowDefinitions = (target) => {
   if (list === null) {
     return;
   }
-  const needle = target.value.trim().toLowerCase();
+  // The rate and the pills sit on the same line, and a pill is its own link. The query is
+  // the name, the first link, not a count or a status.
+  const ranked = [...list.querySelectorAll("li")].map((item) => {
+    const link = item.querySelector("a");
+    const name = link === null ? "" : link.textContent;
+    return { item, name, score: scoreDefinition(target.value, name) };
+  });
+  ranked.sort((left, right) => {
+    const leftMiss = left.score < 0;
+    const rightMiss = right.score < 0;
+    if (leftMiss !== rightMiss) {
+      return leftMiss ? 1 : -1;
+    }
+    if (left.score !== right.score) {
+      return right.score - left.score;
+    }
+    return (
+      left.name.localeCompare(right.name, "en", { sensitivity: "base" }) ||
+      left.name.localeCompare(right.name, "en")
+    );
+  });
   let shown = 0;
-  for (const item of list.querySelectorAll("li")) {
-    // The rate and the pills sit on the same line. The query is the name, not "out of" or a count.
-    const name = item.querySelector("a");
-    const text = name === null ? "" : name.textContent;
-    const match = needle === "" || text.toLowerCase().includes(needle);
-    item.hidden = !match;
-    if (match) {
+  for (const row of ranked) {
+    row.item.hidden = row.score < 0;
+    if (row.score >= 0) {
       shown += 1;
     }
+    list.appendChild(row.item);
   }
   const miss = document.querySelector(".definition-miss");
   miss.querySelector("code").textContent = target.value.trim();
@@ -28,6 +91,18 @@ const narrowDefinitions = (target) => {
 
 document.addEventListener("input", (event) => {
   narrowDefinitions(event.target);
+});
+
+// defer runs before DOMContentLoaded, so this orders the list on open, before a keystroke.
+document.addEventListener("DOMContentLoaded", () => {
+  const search = document.querySelector("search");
+  if (search === null) {
+    return;
+  }
+  const input = search.querySelector("input[type=search]");
+  if (input !== null) {
+    narrowDefinitions(input);
+  }
 });
 
 // A definition's update button is handed over disabled and enabled here once a field differs from
