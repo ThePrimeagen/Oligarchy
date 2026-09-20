@@ -20813,27 +20813,49 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `cat /sys/class/dmi/id/sys_vendor /sys/class/dmi/id/product_name; lspci | grep -iE 'vga|3d|display'` → `QEMU` / `Standard PC (Q35 …)` and a `Red Hat, Inc. Virtio 1.0 GPU` line (no NVIDIA/Intel/AMD).
-  * Run `ls /etc/modprobe.d/; cat /etc/modprobe.d/hid_apple.conf` → `hid_apple.conf` present with `options hid_apple fnmode=2`; **none** of `nvidia.conf brcmfmac.conf iwlwifi-disable-eht.conf lenovo-yoga-pro7-bass.conf blacklist-clevo-xsm-wmi.conf v4l2loopback-exclusive-caps.conf`.
-  * Run `ls /etc/mkinitcpio.conf.d/ /etc/limine-entry-tool.d/ /etc/udev/rules.d/ /etc/libinput/ 2>&1 | sudo tee /dev/ttyS0` (password `prime`) and read the serial → no `nvidia.conf`, `apple-t2.conf`, `surface_device_modules.conf`, `macbook_spi_modules.conf`, `t2-mac.conf`, `intel-panther-lake-fred.conf`, `asus-*.conf`, `71-elgato-camlink-4k.rules`, `99-omarchy-asus-z13-touchpad.rules`, `50-framework16-qmk-hid.rules`, `asus-expertbook-b9406.quirks`.
-  * Run `pacman -Q nvidia-open-dkms nvidia-utils vulkan-intel vulkan-radeon intel-media-driver thermald intel-lpmd asusctl broadcom-wl-dkms 2>&1 | grep -c 'was not found'; pacman -Q linux-t2 t2fanrd apple-bcm-firmware; pacman -Q linux-omarchy` → `9`, three `was not found`, and linux-omarchy installed.
-  * Run `lsmod | grep -cE 'applespi|apple_bce|brcmfmac'; uname -r; sudo grep -cE 'linux-t2' /boot/limine.conf` → `0`, a non-`t2` kernel, `0`.
-  * Run `systemctl is-enabled bluetooth NetworkManager-wait-online systemd-networkd-wait-online iwd systemd-networkd 2>&1` → `enabled`, `masked`, `masked`, then disabled/not-found for iwd and systemd-networkd.
-  * Run `grep -c no_hardware_cursors ~/.config/hypr/looknfeel.lua; ls /etc/systemd/system/omarchy-nvme-suspend-fix.service 2>&1; cat /etc/conf.d/wireless-regdom | grep -v '^#' | grep .; timedatectl show -p Timezone --value` → `0`, `No such file`, and report whether `WIRELESS_REGDOM` is set and to what (expected only when the timezone maps to a country).
-  * Unhappy path: run `omarchy-hw-nvidia; echo $?; omarchy-hw-asus-rog; echo $?; omarchy-hw-laptop; echo $?` → `1 1 1`. Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `cat /sys/class/dmi/id/sys_vendor` and press Return. The output is `QEMU`.
+  * Type `cat /sys/class/dmi/id/product_name` and press Return. The output starts with `Standard PC`.
+  * Type `lspci | grep -iE 'vga|3d|display'` and press Return. The line names a Virtio GPU. No NVIDIA, Intel, or AMD line is printed.
+  * Type `ls /etc/modprobe.d/` and press Return. `hid_apple.conf` is listed. `nvidia.conf`, `brcmfmac.conf`, `iwlwifi-disable-eht.conf`, `lenovo-yoga-pro7-bass.conf`, `blacklist-clevo-xsm-wmi.conf`, and `v4l2loopback-exclusive-caps.conf` are not listed.
+  * Type `cat /etc/modprobe.d/hid_apple.conf` and press Return. The line is `options hid_apple fnmode=2`.
+  * Type `ls /etc/mkinitcpio.conf.d/ /etc/limine-entry-tool.d/ /etc/udev/rules.d/ /etc/libinput/ 2>&1 | sudo tee /dev/ttyS0` and press Return. If sudo asks, type `prime` and press Return. The prompt returns.
+  * Read the serial log. `nvidia.conf`, `apple-t2.conf`, `surface_device_modules.conf`, `macbook_spi_modules.conf`, `t2-mac.conf`, `intel-panther-lake-fred.conf`, `71-elgato-camlink-4k.rules`, `99-omarchy-asus-z13-touchpad.rules`, `50-framework16-qmk-hid.rules`, and `asus-expertbook-b9406.quirks` are absent. No `asus-` config is listed.
+  * Type `pacman -Q nvidia-open-dkms nvidia-utils vulkan-intel vulkan-radeon intel-media-driver thermald intel-lpmd asusctl broadcom-wl-dkms 2>&1 | grep -c 'was not found'` and press Return. The output is `9`.
+  * Type `pacman -Q linux-t2 t2fanrd apple-bcm-firmware` and press Return. Three lines say the package was not found.
+  * Type `pacman -Q linux-omarchy` and press Return. The package line is printed.
+  * Type `lsmod | grep -cE 'applespi|apple_bce|brcmfmac'` and press Return. The output is `0`.
+  * Type `uname -r` and press Return. The version does not contain `t2`.
+  * Type `sudo grep -cE 'linux-t2' /boot/limine.conf` and press Return. The output is `0`.
+  * Type `systemctl is-enabled bluetooth NetworkManager-wait-online systemd-networkd-wait-online iwd systemd-networkd` and press Return. The lines are `enabled`, `masked`, `masked`, then `disabled` or `not-found` for `iwd` and `systemd-networkd`.
+  * Type `grep -c no_hardware_cursors ~/.config/hypr/looknfeel.lua` and press Return. The output is `0`.
+  * Type `ls /etc/systemd/system/omarchy-nvme-suspend-fix.service` and press Return. The output says the file does not exist.
+  * Type `cat /etc/conf.d/wireless-regdom | grep -v '^#' | grep .` and press Return. Record whether `WIRELESS_REGDOM` is set.
+  * Type `timedatectl show -p Timezone --value` and press Return. Record the timezone.
+  * Type `omarchy-hw-nvidia; echo "exit=$?"` and press Return. The last line is `exit=1`.
+  * Type `omarchy-hw-asus-rog; echo "exit=$?"` and press Return. The last line is `exit=1`.
+  * Type `omarchy-hw-laptop; echo "exit=$?"` and press Return. The last line is `exit=1`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Long listings: pipe to `| sudo tee /dev/ttyS0` and read via ./client get-serial. Observational; the interesting failure is a vendor-only package, module or drop-in leaking into every install.
+  * A long listing can be read with get-serial. A vendor package, module, or drop-in on this guest is the failure.
+  * `WIRELESS_REGDOM` is expected only when the timezone maps to a country. Record the pair.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots/serial of the DMI vendor and virtio GPU line, the modprobe/mkinitcpio/limine/udev listings without vendor files, `9` and three not-found packages, `0` modules with the kernel name and `0` t2 entries, the service states, the regdom report, and the three `1` exit codes
+  ** The vendor is `QEMU`, the product is a Standard PC, and the only display line is a Virtio GPU.
+  ** `hid_apple.conf` sets `fnmode=2`. The named NVIDIA, Broadcom, Intel, Lenovo, Clevo, and loopback configs are absent.
+  ** The initramfs, boot, udev, and libinput listings contain none of the named vendor files.
+  ** Nine vendor packages are missing, the three Apple packages are missing, and `linux-omarchy` is installed.
+  ** No Apple or Broadcom module is loaded, the kernel name is not t2, and Limine has no `linux-t2` line.
+  ** Bluetooth is enabled. The wait-online units are masked. iwd and systemd-networkd are not enabled. The cursor override count is 0, and the NVMe suspend unit is absent.
+  ** NVIDIA, ASUS ROG, and laptop detectors each exit 1.
   * If unsuccessful
-  ** The listing containing an unexpected vendor drop-in, any T2/Apple package, module or boot entry, or a vendor package present on the QEMU guest
+  ** A vendor drop-in, T2 package, Apple module, or vendor package is present.
 covers: install/hardware/** (every leaf); install/hardware/apple/*.sh; bin/omarchy-apply-hardware; install/user/hardware/**; bin/omarchy-hw-*; agents/skills/install-scripts.md; etc/limine-entry-tool.d/omarchy-defaults.conf BOOT_ORDER; manual/44:37, 44:71
 
 ### hardware-restart-entries-run-without-devices   [VM-PARTIAL]
@@ -20843,26 +20865,49 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open the Omarchy Menu with Super+Space, click Update → Hardware: Audio, Wi-Fi, Bluetooth, Trackpad are listed (these rows have no hardware guards and stay visible).
-  * Click Wi-Fi: `Unblocking wifi...`, an empty `rfkill list wifi`, "Done! Press any key to close...". Press a key.
-  * Update → Hardware → Bluetooth: `Unblocking bluetooth...`, empty list, Done. Press a key.
-  * Update → Hardware → Audio: `Restarting audio services...`, then `Audio status:` with a `wpctl status` tree whose Sinks/Sources are empty, Done. It must not say `Audio services are still not responding`. Press a key.
-  * Update → Hardware → Trackpad: password `prime`; no devices, Done. Press a key.
-  * Open a terminal with Super+Enter and type `systemctl --user is-active pipewire wireplumber pipewire-pulse`: three `active` — the audio stack came back. Close the terminal with Super+W.
-  ** Skipped: recovering a real Wi-Fi, Bluetooth, audio or trackpad device.
+  * Press Super+Space. The menu opens.
+  * Select Update. The Update menu opens.
+  * Select Hardware. The Hardware list opens. Audio, Wi-Fi, Bluetooth, and Trackpad are listed.
+  * Select Wi-Fi. A terminal opens.
+  * Wait until it says Done. The output says wifi was unblocked, and the wifi list is empty.
+  * Press Return. That terminal closes.
+  * Press Super+Space. The menu opens.
+  * Select Update. The Update menu opens.
+  * Select Hardware. The Hardware list opens.
+  * Select Bluetooth. A terminal opens.
+  * Wait until it says Done. The output says bluetooth was unblocked, and the list is empty.
+  * Press Return. That terminal closes.
+  * Press Super+Space. The menu opens.
+  * Select Update. The Update menu opens.
+  * Select Hardware. The Hardware list opens.
+  * Select Audio. A terminal opens.
+  * Wait until it says Done. The output shows an audio status with no sinks and no sources. It does not say the audio services are still not responding.
+  * Press Return. That terminal closes.
+  * Press Super+Space. The menu opens.
+  * Select Update. The Update menu opens.
+  * Select Hardware. The Hardware list opens.
+  * Select Trackpad. A terminal opens. If sudo asks, type `prime` and press Return.
+  * Wait until it says Done. The output says no devices were found.
+  * Press Return. That terminal closes.
+  * Press Super+Return. A terminal opens.
+  * Type `systemctl --user is-active pipewire wireplumber pipewire-pulse` and press Return. Three lines are `active`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * "Failed (exit code N)!" on any entry is the finding — capture exit code and output.
+  * A line that says `Failed` is the finding. Record the exit text.
+  * Do not attach a Wi-Fi, Bluetooth, audio, or trackpad device.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the submenu and of each terminal ending in Done (Audio showing the wpctl tree), and the three `active` user services
+  ** Update → Hardware lists Audio, Wi-Fi, Bluetooth, and Trackpad.
+  ** Wi-Fi, Bluetooth, Audio, and Trackpad each end in Done. The wifi and bluetooth lists are empty. Audio shows no sinks or sources and does not say the services are still not responding. Trackpad reports no devices.
+  ** pipewire, wireplumber, and pipewire-pulse are `active` afterward.
   * If unsuccessful
-  ** A Failed line, "Audio services are still not responding", or a missing entry
+  ** An entry prints Failed, Audio says the services are still not responding, or one of the four rows is missing.
 covers: manual/45:27; bin/omarchy-restart-wifi, -bluetooth, -audio, -trackpad; omarchy-menu.jsonc update.hardware.*
 
 ### audio-tuning-no-matching-hardware   [VM-PARTIAL]
@@ -20872,27 +20917,37 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy audio tuning status; echo "exit=$?"` → a status block `Installed:    no`, `Host service: inactive (disabled)` (or `not-found` — report), `Tuning sink:  absent`, `Default sink: auto_null`, `Matches:      nothing ships for this laptop`; note the exit code. Bare `omarchy-audio-tuning` prints the same block.
-  * Type `omarchy-audio-tuning match; echo $?; omarchy-audio-tuning fronted-sink; echo $?` → empty and `1`, twice.
-  * Type `omarchy audio tuning on; echo "exit=$?"` → `No speaker tuning matches this laptop.` (reviewers disagree on the exit code — 25 expects `0`, 61 non-zero; record it); then `ls ~/.config/pipewire/ 2>&1` → no `omarchy-speaker-tuning` entries; `systemctl --user is-active omarchy-speaker-tuning.service` → `inactive`.
-  * Type `omarchy audio tuning off; echo "exit=$?"` → `No speaker tuning installed.`; report the exit code (expected `0`).
-  * Unhappy path: type `omarchy audio tuning dance; echo "exit=$?"` → usage, `exit=2`.
-  * Type `ls /usr/share/omarchy/default/audio/tunings/` → the shipped tuning directories (e.g. `dell-xps-14`); `head -12 /usr/share/omarchy/default/audio/tunings/*/tuning.conf` → `match_sku`/`sink_pattern` and the measurement fields. `ls ~/.config/systemd/user/ 2>&1 | grep -c speaker-tuning` → `0` (nothing written).
-  * Close the terminal with Super+W.
-  ** Skipped: applying a tuning (needs matching Dell hardware and a real sink).
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy audio tuning status; echo "exit=$?"` and press Return. The block says the tuning is not installed, the host service is inactive or not found, the tuning sink is absent, the default sink is `auto_null`, and nothing matches this laptop. Record the exit.
+  * Type `omarchy-audio-tuning` and press Return. The same block is printed.
+  * Type `omarchy-audio-tuning match; echo "exit=$?"` and press Return. No match is printed, and the last line is `exit=1`.
+  * Type `omarchy-audio-tuning fronted-sink; echo "exit=$?"` and press Return. No sink is printed, and the last line is `exit=1`.
+  * Type `omarchy audio tuning on; echo "exit=$?"` and press Return. The output says no speaker tuning matches this laptop. Record the exit.
+  * Type `ls ~/.config/pipewire/` and press Return. No `omarchy-speaker-tuning` entry is listed.
+  * Type `systemctl --user is-active omarchy-speaker-tuning.service` and press Return. The output is `inactive`.
+  * Type `omarchy audio tuning off; echo "exit=$?"` and press Return. The output says no speaker tuning is installed. Record the exit.
+  * Type `omarchy audio tuning dance; echo "exit=$?"` and press Return. Usage is printed, and the last line is `exit=2`.
+  * Type `ls /usr/share/omarchy/default/audio/tunings/` and press Return. Shipped tuning directories are listed.
+  * Type `head -12 /usr/share/omarchy/default/audio/tunings/*/tuning.conf` and press Return. The text includes `match_sku` and `sink_pattern`.
+  * Type `ls ~/.config/systemd/user/ | grep -c speaker-tuning` and press Return. The output is `0`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The guest has no sound card, so the audio bar widget may show muted/no device (the `auto_null` Dummy Output); that is expected and not a failure of this test.
+  * Record the exit of `on`. One build exits 0 and another exits non-zero. Either is a record, not a crash.
+  * `off` is expected to exit 0. A host service of `not-found` is a record, not a missing command.
+  * This guest has no sound card. Do not apply a Dell tuning.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the status block, `match`/`fronted-sink` exits, the on/off messages with exit codes, the empty pipewire and systemd user dirs and `inactive`, the usage error with `exit=2`, and the shipped tuning listing
+  ** Status says the tuning is not installed, the sink is absent, the default sink is `auto_null`, and nothing matches. The bare command prints the same block.
+  ** `match` and `fronted-sink` each exit 1. `on` says nothing matches and writes no pipewire entry. The service stays `inactive`.
+  ** `off` says nothing is installed. `dance` prints usage and exits 2. Shipped tunings list `match_sku` and `sink_pattern`, and the user systemd directory has no speaker-tuning file.
   * If unsuccessful
-  ** Any file created under `~/.config/pipewire` or `~/.config/systemd/user`, an audio restart triggered, or a crash; `journalctl --user -u omarchy-speaker-tuning -n 20`
+  ** A file appears under `~/.config/pipewire` or `~/.config/systemd/user`, or the service becomes active.
 covers: docs/audio-tuning.md (commands, gating on match, verification and rollback, service); bin/omarchy-audio-tuning; bin/omarchy-audio-output-sink; bin/omarchy-audio-sink-availability
 
 ### wifi-helpers-and-qr-absent-on-wired   [VM-PARTIAL]
@@ -20902,27 +20957,51 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Space → Setup → Network. The only row is DNS — NO "QR Code". Press Escape.
-  * Press Super+Ctrl+W (the network panel; also `Super+Ctrl+1`): the hero has no QR button, no Wi-Fi switch, band or network list — only the wired connection. Ping `Timeout` / Packet Loss `100%` in red is the expected reading (ICMP is dropped by user-mode NAT), not a failure. Press Escape.
-  * Press Super+Enter and type `omarchy-network-status; ip route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}'; nmcli radio wifi; nmcli device status` Enter → the wired interface line and its name (e.g. `enp0s2` or `ens3`); `enabled`/`disabled` with no device; no wifi rows.
-  * Type `omarchy-network-band; echo $?; omarchy-network-band 5; echo $?; omarchy-network-band 7; echo $?; omarchy-network-band 5 6; echo $?` Enter → nothing and `0`; `Error: no connected Wi-Fi device.` and `1`; `Usage: omarchy-network-band [auto|2.4|5|6]` and `1`; usage and `1`.
-  * Type `omarchy-network-password wlan9; echo $?; omarchy-network-password nosuch0; echo $?; omarchy-network-password; echo $?; omarchy-network-password $(omarchy-network-status | cut -f2); echo $?` Enter → `No active Wi-Fi connection` and `1`; an nmcli error plus `No active Wi-Fi connection` and `1`; the `${1:?Usage…}` message and `1`; `This network has no password` (or `No active Wi-Fi connection` / `Could not read the Wi-Fi password`) and `1` for the wired interface — never a password.
-  * Type `omarchy-network-qr; echo $?; omarchy-network-qr --meta wlan9; echo $?` Enter → `No active Wi-Fi connection` and `1`, twice.
-  * Type `omarchy-shell shell summon omarchy.wifiqr` Enter → a dark overlay titled "WI-FI", briefly "Generating QR code…", then a red error line (no Wi-Fi connection / "Could not generate the Wi-Fi QR code"). No white QR square, no "Show password". Press Escape: the overlay closes. Type `exit` and Enter.
-  ** Skipped on this VM: the rendered code for a connected Wi-Fi network, the password reveal, and band pinning.
+  * Press Super+Space. The menu opens.
+  * Select Setup. The Setup menu opens.
+  * Select Network. The Network list opens. DNS is listed. QR Code is not listed.
+  * Press Escape. The menu closes.
+  * Press Super+Ctrl+W. The network panel opens. The wired connection is shown. No QR button and no Wi-Fi list are shown.
+  * Look at the ping reading. It says Timeout, and packet loss says 100%.
+  * Press Escape. The panel closes.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy-network-status` and press Return. A wired interface is printed.
+  * Type `ip route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}'` and press Return. A device name is printed.
+  * Type `nmcli radio wifi` and press Return. The output is `enabled` or `disabled`.
+  * Type `nmcli device status` and press Return. No wifi row is listed.
+  * Type `omarchy-network-band; echo "exit=$?"` and press Return. No error is printed, and the last line is `exit=0`.
+  * Type `omarchy-network-band 5; echo "exit=$?"` and press Return. The output says no connected Wi-Fi device was found, and the last line is `exit=1`.
+  * Type `omarchy-network-band 7; echo "exit=$?"` and press Return. Usage is printed, and the last line is `exit=1`.
+  * Type `omarchy-network-band 5 6; echo "exit=$?"` and press Return. Usage is printed, and the last line is `exit=1`.
+  * Type `omarchy-network-password wlan9; echo "exit=$?"` and press Return. The output says there is no active Wi-Fi connection, and the last line is `exit=1`.
+  * Type `omarchy-network-password nosuch0; echo "exit=$?"` and press Return. An error is printed, and the last line is `exit=1`.
+  * Type `omarchy-network-password; echo "exit=$?"` and press Return. Usage is printed, and the last line is `exit=1`.
+  * Type `omarchy-network-password $(omarchy-network-status | cut -f2); echo "exit=$?"` and press Return. The output does not print a password, and the last line is `exit=1`.
+  * Type `omarchy-network-qr; echo "exit=$?"` and press Return. The output says there is no active Wi-Fi connection, and the last line is `exit=1`.
+  * Type `omarchy-network-qr --meta wlan9; echo "exit=$?"` and press Return. The same message is printed, and the last line is `exit=1`.
+  * Type `omarchy-shell shell summon omarchy.wifiqr` and press Return. A Wi-Fi card opens.
+  * Look at the card. It shows an error. No QR code is drawn.
+  * Press Escape. The card closes.
+  * Type `exit` and press Return. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The panel's Ping/Packet Loss readings are red by design here; do not report them as a failure.
+  * The timeout and 100% packet loss are expected on this network. Do not report them as a failure.
+  * Super+Ctrl+1 opens the same panel if Super+Ctrl+W does not.
+  * No connected-network QR, password reveal, or band pin is possible here.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Setup › Network without QR Code; the network hero without a QR button and with the wired connection; the terminal with each helper message and exit code; the wifiqr overlay with the red error; the desktop after Escape
+  ** Setup → Network lists DNS and not QR Code. The panel shows the wired connection, no QR button, and no Wi-Fi list. Ping reads Timeout.
+  ** The status names a wired device. Wi-Fi radio has no wifi row.
+  ** A bare band command exits 0. Band `5` says no Wi-Fi device and exits 1. Band `7` and two arguments print usage and exit 1.
+  ** Every password and QR command exits 1 and prints no password and no QR matrix.
+  ** The summoned card shows an error and no QR code. Escape closes it.
   * If unsuccessful
-  ** Any helper that printed a QR matrix or a password on a wired-only VM, a helper hanging or exiting 0 where an error was expected, a QR square rendered without Wi-Fi, an overlay that will not close, or a crash
+  ** A helper prints a password or a QR matrix, a refused command exits 0, or the card stays open.
 covers: bin/omarchy-network-band, bin/omarchy-network-password, bin/omarchy-network-qr, bin/omarchy-network-status; shell/plugins/panels/wifiqr/Panel.qml (error path), Model.js; shell/plugins/panels/network/Panel.qml (canShareWifi); default/omarchy/omarchy-menu.jsonc (setup.network.qr when-guard); test/shell.d/network-password-test.sh, network-qr-test.sh, wifiqr-test.sh; manual/35-networking.md (Sharing your Wi-Fi, Pinning the Wi-Fi band)
 
 ### sudo-wrong-password-retries-and-narrow-nopasswd-rules   [VM-OK]
@@ -20932,28 +21011,43 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter and type `sudo -k; sudo -n true 2>&1; echo rc=$?` Enter → `sudo: a password is required`, `rc=1`.
-  * Type `sudo true` Enter. At `[sudo] password for prime:` type `wrong1` Enter → `Sorry, try again.`; `wrong2` → same; `wrong3` → same; a FOURTH prompt must still appear (stock sudo gives up after 3). Type `prime` Enter: the command succeeds silently. Type `echo $?` → `0`.
-  ** Stop at three wrong attempts: faillock (`deny=10`, shared with the lock screen and SDDM) counts sudo failures too.
-  * Type `sudo -n true; echo rc=$?` Enter → `rc=0` (credential cached).
-  * Type `sudo -l | grep -E 'NOPASSWD|passwd_tries'` Enter → `passwd_tries=10` and NOPASSWD lines for `omarchy-dns Cloudflare/Google/DHCP`, `timedatectl ^set-timezone …`, `omarchy-theme-set-browser-policy […]` — and nothing else.
-  * Type `sudo ls /etc/sudoers.d/; sudo test -e /etc/sudoers.d/omarchy-asdcontrol; echo rc=$?` Enter → the Omarchy drop-ins with no `omarchy-asdcontrol` entry, and `rc=1`.
-  * Type `sudo -k; sudo true` Enter and press Ctrl+C at the prompt: sudo exits without running. Type `sudo -k; sudo -n true 2>&1; echo rc=$?` → a password-required error and `rc=1`.
-  * Type `sudo faillock --user prime --reset` Enter (password `prime`), then `sudo -k`. Press Ctrl+D; the desktop is as before.
+  * Press Super+Return. A terminal opens.
+  * Type `sudo -k` and press Return. The prompt returns.
+  * Type `sudo -n true; echo "rc=$?"` and press Return. The output says a password is required, and the last line is `rc=1`.
+  * Type `sudo true` and press Return. A password prompt appears.
+  * Type `wrong1` and press Return. The output says sorry, try again. Another prompt appears.
+  * Type `wrong2` and press Return. The same message appears. Another prompt appears.
+  * Type `wrong3` and press Return. The same message appears. Another prompt appears.
+  * Type `prime` and press Return. The prompt returns.
+  * Type `echo "exit=$?"` and press Return. The output is `exit=0`.
+  * Type `sudo -n true; echo "rc=$?"` and press Return. The last line is `rc=0`.
+  * Type `sudo -l | grep -E 'NOPASSWD|passwd_tries'` and press Return. The output includes `passwd_tries=10`, the DNS presets, `timedatectl set-timezone`, and the browser-policy helper. No other NOPASSWD line is printed.
+  * Type `sudo ls /etc/sudoers.d/` and press Return. The Omarchy drop-ins are listed. `omarchy-asdcontrol` is not listed.
+  * Type `sudo test -e /etc/sudoers.d/omarchy-asdcontrol; echo "rc=$?"` and press Return. The last line is `rc=1`.
+  * Type `sudo -k` and press Return. The prompt returns.
+  * Type `sudo true` and press Return. A password prompt appears.
+  * Press Ctrl+C. The prompt returns. The command does not run.
+  * Type `sudo -k; sudo -n true; echo "rc=$?"` and press Return. The output says a password is required, and the last line is `rc=1`.
+  * Type `sudo faillock --user prime --reset` and press Return. If sudo asks, type `prime` and press Return. The prompt returns.
+  * Type `sudo -k` and press Return. The prompt returns.
+  * Press Ctrl+D. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Passwords are not echoed; count Enter presses. Three wrong + one right stays well under the faillock limit.
-  * The sudo prompt appears inline in the terminal; type `prime` and Enter.
+  * Passwords are not echoed. Stop after three wrong attempts. A fourth wrong password can lock the account.
+  * Type `prime` only on the fourth sudo prompt, and again for the faillock reset.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of three "Sorry, try again." lines followed by a fourth prompt and success with `prime`, the cached `rc=0`, the rule listing, the sudoers.d listing without asdcontrol with `rc=1`, and the password-required error after `sudo -k`
+  ** A cleared sudo cache refuses `sudo -n true` with `rc=1`.
+  ** Three wrong passwords each say sorry, and a fourth prompt still appears. `prime` then exits 0.
+  ** The cache lets the next `sudo -n true` exit 0. The rule list has `passwd_tries=10` and only the DNS, timezone, and browser-policy grants.
+  ** `omarchy-asdcontrol` is absent and the existence test exits 1. Ctrl+C leaves sudo cleared, so `sudo -n true` exits 1 again. The faillock reset runs.
   * If unsuccessful
-  ** sudo giving up after 3 ("3 incorrect password attempts"), accepting a wrong password, a lockout, the asdcontrol file existing, or `sudo -n true` succeeding after `sudo -k`
+  ** Sudo stops after three wrong passwords, a wrong password is accepted, the account locks, or `omarchy-asdcontrol` exists.
 covers: etc/sudoers.d/omarchy-passwd-tries; etc/sudoers.d/*; etc/security/faillock.conf; manual/45:39; manual/48:13; test/acceptance.d/security-test.sh:45-52,104-108
 
 ### passwordless-sudo-toggle-expiry-and-guards   [VM-OK]
@@ -20963,31 +21057,68 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `sudo -k; sudo -n true; echo "exit=$?"` → `exit=1` (sudo needs a password). Type `omarchy-sudo-passwordless abc; echo "exit=$?"` → `Usage: omarchy-sudo-passwordless [MINUTES]` and `exit=1`, no sudo prompt; `omarchy-sudo-passwordless 5x; echo "exit=$?"` → same usage, `exit=1`.
-  * Open the Omarchy Menu with Super+Space, click Setup → Security → Passwordless Sudo with the mouse. The floating terminal prints `Toggle passwordless sudo...`, asks the sudo password (`prime`), shows the `⚠️ WARNING` block about `ANY command as root WITHOUT a password for 15 minutes` and `Enable passwordless sudo for 15 minutes? This is a significant security risk!`. Choose **No** → `Aborted. No changes made.`, then Done!; press a key. In the terminal `sudo -k; sudo -n true; echo "exit=$?"; ls /etc/sudoers.d/` → `exit=1` and no `nopasswd` file.
-  * Repeat Setup → Security → Passwordless Sudo, choose **Yes** → `Passwordless sudo has been ENABLED. It will automatically disable in 15 minutes.`, `A restart removes the passwordless sudo rule as well.`, Done!; press a key. Type `sudo -k; sudo -n true; echo "exit=$?"; systemctl list-timers 'omarchy-nopasswd-expire-*' --no-pager; sudo cat /etc/sudoers.d/99-omarchy-nopasswd-prime` → `exit=0`, one timer about 15 min out, and `prime ALL=(ALL) NOPASSWD: ALL`.
-  * Type `omarchy-sudo-passwordless 1` → `Passwordless sudo timer updated. It will now automatically disable in 1 minutes.`
-  * Every 5 seconds type `sudo -k; sudo -n true; echo "exit=$?"` and screenshot until it flips to `exit=1` (about 60–70 s, with no command from you). Then `ls /etc/sudoers.d/` → `99-omarchy-nopasswd-prime` has disappeared (`omarchy-tzupdate` and the others stay); `systemctl list-timers --all | grep -ci nopasswd` → `0` (the timer is gone too).
-  * Type `omarchy-sudo-passwordless`, choose Yes, `prime` → ENABLED again (15 min); confirm `sudo -n true` succeeds; then open Setup → Security → Passwordless Sudo once more with the mouse → the floating terminal prints `Passwordless sudo has been DISABLED. Sudo will require a password again.` Type `sudo -k; sudo -n true; echo "exit=$?"; ls /etc/sudoers.d/` → `exit=1` and no `99-omarchy-nopasswd-prime` — back where it started.
-  * Close the terminal with Super+W; the desktop is as before and sudo asks for a password.
+  * Press Super+Return. A terminal opens.
+  * Type `sudo -k; sudo -n true; echo "exit=$?"` and press Return. The last line is `exit=1`.
+  * Type `omarchy-sudo-passwordless abc; echo "exit=$?"` and press Return. Usage is printed, and the last line is `exit=1`. No password prompt appears.
+  * Type `omarchy-sudo-passwordless 5x; echo "exit=$?"` and press Return. Usage is printed, and the last line is `exit=1`. No password prompt appears.
+  * Press Super+Space. The menu opens.
+  * Click Setup. The Setup menu opens.
+  * Click Security. The Security menu opens.
+  * Click Passwordless Sudo. A terminal opens and asks for a password.
+  * Type `prime` and press Return. A warning asks whether to enable passwordless sudo.
+  * Press n. The output says it aborted and no changes were made.
+  * Press Return. That terminal closes.
+  * Click the first terminal. It is focused.
+  * Type `sudo -k; sudo -n true; echo "exit=$?"` and press Return. The last line is `exit=1`.
+  * Type `ls /etc/sudoers.d/` and press Return. No `nopasswd` file is listed.
+  * Press Super+Space. The menu opens.
+  * Click Setup. The Setup menu opens.
+  * Click Security. The Security menu opens.
+  * Click Passwordless Sudo. A terminal opens and asks for a password.
+  * Type `prime` and press Return. The warning appears again.
+  * Press y. The output says passwordless sudo is enabled for 15 minutes.
+  * Press Return. That terminal closes.
+  * Click the first terminal. It is focused.
+  * Type `sudo -k; sudo -n true; echo "exit=$?"` and press Return. The last line is `exit=0`.
+  * Type `systemctl list-timers 'omarchy-nopasswd-expire-*' --no-pager` and press Return. One timer is listed.
+  * Type `sudo cat /etc/sudoers.d/99-omarchy-nopasswd-prime` and press Return. The line is `prime ALL=(ALL) NOPASSWD: ALL`.
+  * Type `omarchy-sudo-passwordless 1` and press Return. The output says the timer will disable it in 1 minute.
+  * Type `sudo -k; sudo -n true; echo "exit=$?"` and press Return. Record the exit.
+  ** If the last line is still `exit=0`, wait 5 seconds and type the same command again. Stop when it is `exit=1`, or when 90 seconds have passed.
+  * Type `ls /etc/sudoers.d/` and press Return. `99-omarchy-nopasswd-prime` is not listed.
+  * Type `systemctl list-timers --all | grep -ci nopasswd` and press Return. The output is `0`.
+  * Type `omarchy-sudo-passwordless` and press Return. If sudo asks, type `prime` and press Return. The warning asks whether to enable it.
+  * Press y. The output says passwordless sudo is enabled.
+  * Type `sudo -k; sudo -n true; echo "exit=$?"` and press Return. The last line is `exit=0`.
+  * Press Super+Space. The menu opens.
+  * Click Setup. The Setup menu opens.
+  * Click Security. The Security menu opens.
+  * Click Passwordless Sudo. A terminal opens. The output says passwordless sudo has been disabled.
+  * Press Return. That terminal closes.
+  * Click the first terminal. It is focused.
+  * Type `sudo -k; sudo -n true; echo "exit=$?"` and press Return. The last line is `exit=1`.
+  * Type `ls /etc/sudoers.d/` and press Return. `99-omarchy-nopasswd-prime` is not listed.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * `sudo -n` never prompts, so it is a clean probe; `sudo -k` first drops the cached credential so it tests the rule, not the timestamp. Enabling always costs one password: the script uses sudo to write the rule.
-  * gum confirm highlights `Yes` first; use Left/Right or Tab then Enter. The expiry wait is twelve to fourteen 5 s screenshots; never a single long sleep.
-  * The floating terminal closes when the command ends; screenshot as soon as the ENABLED/DISABLED line appears, or run `omarchy-sudo-passwordless` from the normal terminal to read it at leisure.
-  * The sudo-expiry fail-closed guard may be missing on the 4.0.2 disk (build drift): record `omarchy-version` with any failure.
+  * Use the mouse on the menu rows. Left and Right move the confirmation. `n` and `y` choose.
+  * Screenshot about every 5 seconds during the minute wait. Do not use one long sleep.
+  * If the disable step does not run, remove `/etc/sudoers.d/99-omarchy-nopasswd-prime` before leaving the machine. Sudo must ask for a password at the end.
+  * If the timer message differs, record `omarchy-version`.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of both usage errors with `exit=1`, the WARNING with No → `Aborted. No changes made.` and the `exit=1` probe with no rule file, the menu-launched ENABLED message, `exit=0` with the timer and the `prime ALL=(ALL) NOPASSWD: ALL` rule, the 1-minute update, the poll where `exit` flips to 1 with the rule file and timer gone, the menu-launched DISABLED message, and the final `exit=1` with the file gone
-  ** The menu was operated with the mouse
+  ** The probe starts at `exit=1`. `abc` and `5x` print usage, exit 1, and show no password prompt.
+  ** Declining the warning leaves the probe at `exit=1` and writes no rule.
+  ** Accepting writes `prime ALL=(ALL) NOPASSWD: ALL`, the probe exits 0, and an expiry timer is listed. Setting 1 minute is announced.
+  ** Within about 90 seconds the probe returns to `exit=1`, the rule file is gone, and the timer count is 0.
+  ** Enabling again makes the probe exit 0. The menu run disables it, the probe returns to `exit=1`, and the rule file is gone.
   * If unsuccessful
-  ** `Failed to schedule passwordless sudo expiry. Revoking access now.` / `CRITICAL: Could not remove …`, `ENABLED` printed without a timer, the rule surviving past the timer, `sudo -n` still succeeding after DISABLED, a rule file after No, or a usage error that prompted for sudo
-  ** Output of `omarchy-version`
+  ** A refused value asks for a password, No writes a rule, the rule survives the timer, or sudo still succeeds after disable.
 covers: manual/48:23-25; manual/48-security.md; manual/18-development-tools.md; bin/omarchy-sudo-passwordless:16-27,60-67; etc/tmpfiles.d/omarchy-nopasswd-sudo.conf; default/omarchy/omarchy-menu.jsonc:185 (setup.security.passwordless-sudo); test/shell.d/nopasswd-sudo-expiry-test.sh; test/shell.d/menu-test.sh
 
 ### timezone-menu-change-passwordless-and-rule-variants   [VM-OK]
@@ -20997,29 +21128,63 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `sudo -k; timedatectl show -p Timezone --value` Enter; write down the value (ORIGINAL).
-  * Open the Omarchy Menu with Super+Space, click Update → Timezone. A `Set timezone` picker opens. Press Esc: it closes and the bar clock is unchanged.
-  * Update → Timezone again; type `Auckland`, select `Pacific/Auckland`, Enter. NO password prompt. A notification `Timezone is now set to Pacific/Auckland` appears and the clock jumps by the offset. Type `timedatectl show -p Timezone --value` → `Pacific/Auckland`.
-  * Update → Time: the floating terminal prints `Updating time...`, asks `[sudo] password for prime:` → `prime`, then "Done!". Press a key.
-  * Type `sudo -k; sudo -n timedatectl set-timezone Pacific/Kiritimati; echo rc=$?` Enter → no password prompt, `rc=0`, and the bar clock jumps within a few seconds (UTC+14).
-  * Type `sudo -n timedatectl set-timezone -H localhost Europe/Paris; echo rc=$?; sudo -n timedatectl set-timezone 'Bad;Zone'; sudo -n timedatectl set-time '2020-01-01 00:00:00'; sudo -n timedatectl set-timezone 'UTC -H'` Enter → each `a password is required` (`rc=1` for the first): extra flags, junk zones, other subcommands and padded arguments are not matched.
-  * Type `sudo -n timedatectl set-timezone Not/AZone; echo rc=$?` Enter → no prompt (the pattern matches) but `Failed to set time zone: Invalid time zone` and a non-zero rc; the zone stays Kiritimati.
-  * Restore: Update → Timezone, type ORIGINAL, Enter (or `sudo -n timedatectl set-timezone <ORIGINAL>`, no prompt) → notification and the clock back as it started. Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `sudo -k` and press Return. The prompt returns.
+  * Type `timedatectl show -p Timezone --value` and press Return. Record this as the original zone.
+  * Press Super+Space. The menu opens.
+  * Select Update. The Update menu opens.
+  * Select Timezone. The timezone picker opens.
+  * Press Escape. The picker closes.
+  * Look at the bar clock. It is unchanged.
+  * Press Super+Space. The menu opens.
+  * Select Update. The Update menu opens.
+  * Select Timezone. The timezone picker opens.
+  * Type `Auckland`. The list filters.
+  * Select Pacific/Auckland and press Return. No password prompt appears. A notification says the timezone is Pacific/Auckland.
+  * Look at the bar clock. It has moved.
+  * Click the terminal. It is focused.
+  * Type `timedatectl show -p Timezone --value` and press Return. The output is `Pacific/Auckland`.
+  * Press Super+Space. The menu opens.
+  * Select Update. The Update menu opens.
+  * Select Time. A terminal opens and asks for a password.
+  * Type `prime` and press Return. The output says Done.
+  * Press Return. That terminal closes.
+  * Click the first terminal. It is focused.
+  * Type `sudo -k; sudo -n timedatectl set-timezone Pacific/Kiritimati; echo "rc=$?"` and press Return. No password prompt appears, and the last line is `rc=0`.
+  * Look at the bar clock. It has moved.
+  * Type `sudo -n timedatectl set-timezone -H localhost Europe/Paris; echo "rc=$?"` and press Return. The output says a password is required, and the last line is `rc=1`.
+  * Type `sudo -n timedatectl set-timezone 'Bad;Zone'` and press Return. The output says a password is required.
+  * Type `sudo -n timedatectl set-time '2020-01-01 00:00:00'` and press Return. The output says a password is required.
+  * Type `sudo -n timedatectl set-timezone 'UTC -H'` and press Return. The output says a password is required.
+  * Type `sudo -n timedatectl set-timezone Not/AZone; echo "rc=$?"` and press Return. No password prompt appears. The output says the time zone is invalid, and the last line is non-zero.
+  * Type `timedatectl show -p Timezone --value` and press Return. The output is still `Pacific/Kiritimati`.
+  * Press Super+Space. The menu opens.
+  * Select Update. The Update menu opens.
+  * Select Timezone. The timezone picker opens.
+  * Type the original zone and press Return. No password prompt appears. A notification names that zone.
+  * Look at the bar clock. It matches the start.
+  * Click the terminal. It is focused.
+  * Type `timedatectl show -p Timezone --value` and press Return. The output is the original zone.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The picker is the Omarchy menu in select mode and filters as you type. A sudo or polkit password prompt on the timezone change is a failure (the sudoers grant is shipped).
-  * The bar clock is the visible proof of each change; screenshot the whole screen, not just the terminal.
+  * The picker filters as you type. A password prompt on the plain menu change or the plain `set-timezone` command is a failure.
+  * Screenshot the whole screen when the clock should move.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the picker, the Esc cancel with the unchanged clock, the notification and shifted clock with `Pacific/Auckland`, the Update → Time terminal with password prompt and Done, the prompt-free `rc=0` change with the clock before/after, each "a password is required" line, the invalid-zone error, and the restored clock
+  ** Escape closes the picker and the clock stays put. Choosing Pacific/Auckland notifies, moves the clock, and sets that zone with no password prompt.
+  ** Update → Time asks for the password and ends in Done.
+  ** `set-timezone Pacific/Kiritimati` exits 0 with no prompt and moves the clock.
+  ** An extra flag, a junk zone with a semicolon, `set-time`, and a padded zone each say a password is required.
+  ** `Not/AZone` matches the rule, asks for no password, fails as invalid, and leaves the zone at Pacific/Kiritimati.
+  ** Restoring the original zone notifies, moves the clock back, and `timedatectl` matches.
   * If unsuccessful
-  ** A sudo/polkit prompt on the plain form or the menu change, a flagged form or `set-time` accepted without one, no notification, or the clock not moving
-  ** Output of `omarchy-version`
+  ** The plain menu change or plain `set-timezone` asks for a password, a flagged form runs without one, or the clock does not move.
 covers: manual/46:31; manual/05-the-top-bar.md; manual/46-faq.md; bin/omarchy-menu-timezone; bin/omarchy-update-time; etc/sudoers.d/omarchy-tzupdate; omarchy-menu.jsonc update.timezone / update.time; test/shell.d/timezone-test.sh
 
 ### privileged-command-without-terminal-fails-cleanly   [VM-OK]
@@ -21029,24 +21194,37 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `sudo -k; sudo snapper list` (password `prime`); note the row count; type `sudo -k`.
-  * Type `setsid -f bash -c 'omarchy-snapshot create >/tmp/no-tty.log 2>&1'`, wait 5 s, then `cat /tmp/no-tty.log`: it must contain `sudo: a terminal is required to read the password…` and must NOT contain "Create system snapshot".
-  * Type `sudo snapper list` (password `prime`): row count unchanged.
-  * Type `sudo -k; setsid -f bash -c 'omarchy-dns Google >/tmp/dns.log 2>&1'`, wait 5 s, `cat /tmp/dns.log; omarchy dns`: no sudo error and `Google`.
-  * Type `omarchy dns DHCP` then `omarchy dns`: `DHCP` — back to stock. Type `rm /tmp/no-tty.log /tmp/dns.log`; close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `sudo -k` and press Return. The prompt returns.
+  * Type `sudo snapper list` and press Return. If sudo asks, type `prime` and press Return. Record the row count.
+  * Type `sudo -k` and press Return. The prompt returns.
+  * Type `setsid -f bash -c 'omarchy-snapshot create >/tmp/no-tty.log 2>&1'` and press Return. The prompt returns.
+  * Wait 5 seconds.
+  * Type `cat /tmp/no-tty.log` and press Return. The output says a terminal is required to read the password. It does not say a snapshot was created.
+  * Type `sudo snapper list` and press Return. If sudo asks, type `prime` and press Return. The row count matches the first listing.
+  * Type `sudo -k` and press Return. The prompt returns.
+  * Type `setsid -f bash -c 'omarchy-dns Google >/tmp/dns.log 2>&1'` and press Return. The prompt returns.
+  * Wait 5 seconds.
+  * Type `cat /tmp/dns.log` and press Return. No sudo error is printed.
+  * Type `omarchy dns` and press Return. The output is `Google`.
+  * Type `omarchy dns DHCP` and press Return. The prompt returns.
+  * Type `omarchy dns` and press Return. The output is `DHCP`.
+  * Type `rm /tmp/no-tty.log /tmp/dns.log` and press Return. The prompt returns.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * `setsid -f` detaches the command from the terminal so sudo has no tty — that is the point of the test. Wait with screenshots, not a long sleep.
+  * `setsid -f` leaves the command with no terminal. Screenshot during each 5 second wait. If a log is still empty after 15 seconds, record that.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of `/tmp/no-tty.log` with "a terminal is required" and unchanged snapper rows; `omarchy dns` showing Google after the tty-less run, then DHCP
+  ** The first snapper listing is recorded. The detached snapshot command says a terminal is required and does not create a snapshot. The row count is unchanged.
+  ** The detached DNS command writes no sudo error, and `omarchy dns` prints `Google`. Setting DHCP returns `DHCP`. Both logs are removed.
   * If unsuccessful
-  ** A snapshot created without a password, a hung `sudo` (`pgrep -a sudo`), or an empty log after 15 s
+  ** A snapshot is created without a password, sudo stays running, or the DNS log is empty after 15 seconds.
 covers: bin/omarchy-snapshot (requires-sudo); bin/omarchy-dns require_root; etc/sudoers.d/omarchy-dns; 13-manual-rest.md Observations #12
 
 ### git-url-check-refuses-hostile-urls   [VM-OK]

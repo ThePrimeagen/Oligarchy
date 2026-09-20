@@ -446,14 +446,14 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `first-run-artefacts-and-user-state-present`
 - [x] `provision-rerun-guards-force-replay-and-hooks-once`
 - [x] `hardware-detectors-and-commands-report-absence`
-- [ ] `hardware-quirks-inert-on-virtio`
-- [ ] `hardware-restart-entries-run-without-devices`
-- [ ] `audio-tuning-no-matching-hardware`
-- [ ] `wifi-helpers-and-qr-absent-on-wired`
-- [ ] `sudo-wrong-password-retries-and-narrow-nopasswd-rules`
-- [ ] `passwordless-sudo-toggle-expiry-and-guards`
-- [ ] `timezone-menu-change-passwordless-and-rule-variants`
-- [ ] `privileged-command-without-terminal-fails-cleanly`
+- [x] `hardware-quirks-inert-on-virtio`
+- [x] `hardware-restart-entries-run-without-devices`
+- [x] `audio-tuning-no-matching-hardware`
+- [x] `wifi-helpers-and-qr-absent-on-wired`
+- [x] `sudo-wrong-password-retries-and-narrow-nopasswd-rules`
+- [x] `passwordless-sudo-toggle-expiry-and-guards`
+- [x] `timezone-menu-change-passwordless-and-rule-variants`
+- [x] `privileged-command-without-terminal-fails-cleanly`
 - [ ] `git-url-check-refuses-hostile-urls`
 - [ ] `sshd-setup-key-hardens-login-and-removes`
 - [ ] `sshd-setup-rejects-bad-arguments-and-bad-key-before-opening-port`
