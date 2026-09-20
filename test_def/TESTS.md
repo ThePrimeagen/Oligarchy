@@ -9464,25 +9464,41 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Space → `Apps`, type `obsidian`, Enter. In its welcome dialog click `Create` new vault, name it `Vault`, keep the default location (home), click `Create`.
-  ** Obsidian is slow without GPU; allow 30 s per step and poll with screenshots. Click **Wait** if Hyprland's "not responding" dialog appears.
-  * Open a terminal with Super+Enter and type `omarchy-theme-set gruvbox`.
-  * In Obsidian open Settings (the gear, bottom-left) → `Appearance` → `Themes` → `Manage`: a theme named `Omarchy` is listed. Click it; the editor turns Gruvbox grey/cream.
-  * In the terminal type `omarchy-theme-set catppuccin-latte`; Obsidian's editor turns light within a few seconds (it hot-reloads the theme file).
-  * Type `omarchy-theme-set tokyo-night`; close Obsidian (Super+W); type `rm -rf ~/Vault` and close the terminal.
+  * Press Super+Space. The menu opens.
+  * Click Apps.
+  * Type `obsidian` and press Enter. Obsidian starts.
+  ** Allow 30 seconds. If Hyprland says it is not responding, click Wait.
+  * Click Create. The new-vault form opens.
+  * Type `Vault`.
+  * Click Create. The vault opens.
+  ** If a trust-plugins prompt appears, accept it.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy-theme-set gruvbox` and press Return.
+  * Click the Obsidian gear. Settings opens.
+  * Click Appearance.
+  * Click Themes.
+  * Click Manage. A theme named Omarchy is listed.
+  * Click Omarchy. The editor recolours.
+  * Click the terminal. It has focus.
+  * Type `omarchy-theme-set catppuccin-latte` and press Return. The Obsidian editor turns light.
+  * Type `omarchy-theme-set tokyo-night` and press Return.
+  * Click Obsidian.
+  * Press Super+W. Obsidian closes.
+  * Type `rm -rf ~/Vault` and press Return.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * If Obsidian shows a "trust plugins" prompt for the vault, accept it.
+  * Obsidian is slow without a GPU. Screenshot while it starts.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Obsidian's theme list with `Omarchy`; the editor in Gruvbox colours; the editor light under Catppuccin Latte
+  * On success
+  ** Omarchy listed in the theme manager, the editor recoloured for Gruvbox, and the editor turned light under Catppuccin Latte
   * If unsuccessful
-  ** In the terminal `ls ~/Vault/.obsidian/themes/Omarchy/` and the Obsidian screenshot
+  ** The vault theme directory listing and the Obsidian window
 covers: bin/omarchy-theme-set-obsidian, default/themed/obsidian.css.tpl
 
 ### theme-hooks-absent-apps-and-hardware-stay-silent   [VM-PARTIAL]
@@ -9492,28 +9508,39 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `grep '"background"' ~/.pi/agent/themes/omarchy-system.json` → `"#1a1b26"`; `cat ~/.local/state/omarchy/current/theme/keyboard.rgb` → `ff00ff` (Tokyo Night's own value).
-  * Type `omarchy-theme-set nord && grep '"background"' ~/.pi/agent/themes/omarchy-system.json` → `"#2e3440"` (Pi is kept current).
-  * Type `omarchy-theme-set gruvbox && cat ~/.local/state/omarchy/current/theme/keyboard.rgb` → `#7daea3` (generated from the accent).
-  * Type `omarchy-theme-set-claude; omarchy-theme-set-t3code; omarchy-theme-set-vscode; omarchy-theme-set-keyboard; echo "exit=$?"` → no output, `exit=0` (apps and hardware absent, hooks silent).
-  * Type `ls ~/.hermes/skins 2>&1; omarchy-theme-set-hermes --activate; echo "exit=$?"; ls ~/.hermes/skins 2>&1` → `skins` does not exist before or after; stderr `Hermes is not set up yet; launch it once, then run omarchy-theme-set-hermes --activate.` and `exit=0` — nothing written for a Hermes that never ran.
-  * Give Hermes a config: type `mkdir -p ~/.hermes; printf 'display:\n  skin: default\n' > ~/.hermes/config.yaml; omarchy-theme-set-hermes; echo "exit=$?"; ls ~/.hermes/skins/` → `exit=0` and `omarchy.yaml` is published (Hermes itself is not run). Then `omarchy-theme-set-hermes --activate 2>&1 | tail -2` → prints the `hermes config set display.skin omarchy` command the user can run once Hermes is ready.
-  * Type `omarchy-theme-set-pi --bogus; echo "exit=$?"` → `Usage: omarchy-theme-set-pi [--activate]`, `exit=1`.
-  * Type `rm -r ~/.hermes/skins ~/.hermes/config.yaml; omarchy-theme-set tokyo-night` and close the terminal with Super+W.
-  ** `~/.hermes` itself may already exist (skills are linked there by a migration); only `skins` and `config.yaml` are this test's.
+  * Press Super+Enter. A terminal opens.
+  * Type `grep '"background"' ~/.pi/agent/themes/omarchy-system.json` and press Return. The line includes a colour.
+  * Type `cat ~/.local/state/omarchy/current/theme/keyboard.rgb` and press Return. Note the value.
+  * Type `omarchy-theme-set nord` and press Return.
+  * Type `grep '"background"' ~/.pi/agent/themes/omarchy-system.json` and press Return. The colour has changed.
+  * Type `omarchy-theme-set gruvbox` and press Return.
+  * Type `cat ~/.local/state/omarchy/current/theme/keyboard.rgb` and press Return. Note the new value.
+  * Type `omarchy-theme-set-claude; omarchy-theme-set-t3code; omarchy-theme-set-vscode; omarchy-theme-set-keyboard; echo "exit=$?"` and press Return. Nothing is printed for the missing apps. The last line is `exit=0`.
+  * Type `ls ~/.hermes/skins` and press Return. The directory is not there.
+  * Type `omarchy-theme-set-hermes --activate; echo "exit=$?"` and press Return. The output says Hermes is not set up yet. The last line is `exit=0`.
+  * Type `ls ~/.hermes/skins` and press Return. The directory is still not there.
+  * Type `mkdir -p ~/.hermes` and press Return.
+  * Type `printf 'display:\n  skin: default\n' > ~/.hermes/config.yaml` and press Return.
+  * Type `omarchy-theme-set-hermes; echo "exit=$?"` and press Return. The last line is `exit=0`.
+  * Type `ls ~/.hermes/skins/` and press Return. `omarchy.yaml` is listed.
+  * Type `omarchy-theme-set-hermes --activate 2>&1 | tail -2` and press Return. The output includes `hermes config set display.skin omarchy`.
+  * Type `omarchy-theme-set-pi --bogus; echo "exit=$?"` and press Return. A usage line appears. The last line is `exit=1`.
+  * Type `rm -r ~/.hermes/skins ~/.hermes/config.yaml` and press Return.
+  * Type `omarchy-theme-set tokyo-night` and press Return.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Skipped part: the apps' UIs, activation on a running Hermes (`config get/set display.skin`, needs Hermes Desktop) and any ASUS/Framework keyboard; only the no-device/no-app paths run. If `~/.claude` or `~/.hermes/config.yaml` already exists on this build, note it and skip that app's "absent" expectation.
+  * If `~/.hermes/config.yaml` already exists, record that and skip the absent-Hermes expectation.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Terminal with the two Pi values, the two keyboard.rgb values, the silent `exit=0`, the Hermes `not set up yet` note with no skins dir, `omarchy.yaml` published once a config exists, the printed `hermes config set` command, the usage error, and the clean-up
+  * On success
+  ** The Pi colour changing, the keyboard colour changing, the absent apps exiting `0`, no skins directory before a Hermes config, `omarchy.yaml` after one exists, and the usage line with `exit=1`
   * If unsuccessful
-  ** The command output that differed, a skin written for a Hermes that never ran, any error text from the keyboard hook
+  ** A skin written before Hermes was set up, or an error from the keyboard hook
 covers: bin/omarchy-theme-set-pi, -claude, -hermes, -t3code, -vscode, -keyboard, -asus-rog, -f16; install/user/theme.sh (pi --activate); default/themed/keyboard.rgb.tpl; themes/tokyo-night/keyboard.rgb; test/shell.d/hermes-theme-test.sh (never-ran, publish, unready --activate); test/shell.d/vscode-theme-test.sh; manual/17-ai.md
 
 ### theme-preview-palette-in-terminal   [VM-OK]
@@ -9523,25 +9550,28 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter, press Super+F to maximise, and type `omarchy dev theme-preview gruvbox`.
-  ** Header `Theme: gruvbox`, `File: /usr/share/omarchy/themes/gruvbox/colors.toml`, `Mode:  dark`, a contrast ratio, then coloured swatch rows, a gradient strip, a `selected text` sample and ANSI strips. The terminal's own background turned Gruvbox grey (OSC applied to this terminal only).
-  * Press Super+F, then open a second terminal with Super+Enter; it is still Tokyo Night navy — the desktop theme did not change.
-  * In the second terminal type `omarchy dev theme-preview white --no-osc`. Swatches are printed but this terminal stays navy; `Mode:  light`.
-  * Type `omarchy dev theme-preview nope; echo "exit=$?"` → `Theme not found: nope`, `exit=1`.
-  * Close both terminals (Super+W each).
+  * Press Super+Enter. A terminal opens.
+  * Press Super+F. The terminal fills the screen.
+  * Type `omarchy dev theme-preview gruvbox` and press Return. A palette is printed. This terminal recolours.
+  * Press Super+F. The terminal returns to a tile.
+  * Press Super+Enter. A second terminal opens. It keeps the desktop theme colours.
+  * Type `omarchy dev theme-preview white --no-osc` and press Return. A light palette is printed. This terminal does not recolour.
+  * Type `omarchy dev theme-preview nope; echo "exit=$?"` and press Return. The output says the theme was not found. The last line is `exit=1`.
+  * Press Super+W. One terminal closes.
+  * Press Super+W. The other terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The preview retints only the terminal it runs in; that is the point of the second terminal.
+  * The preview recolours only the terminal it runs in.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** The Gruvbox preview in a Gruvbox-coloured terminal; a navy second terminal beside it; the white preview with the terminal still navy; `Theme not found: nope` with `exit=1`
+  * On success
+  ** The Gruvbox preview in a recoloured terminal, a second terminal that did not change, the white preview without a recolour, and `Theme not found` with `exit=1`
   * If unsuccessful
-  ** The error text or a second terminal that changed colour
+  ** The second terminal changing colour
 covers: bin/omarchy-dev-theme-preview, bin/omarchy-theme-osc, bin/omarchy-theme-color
 
 ### theme-sync-chromium-extension   [VM-OK] [NET]
@@ -9551,27 +9581,48 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Shift+Return to open Chromium once (so a profile exists; click **Wait** on a "not responding" dialog), then close it with Super+W.
-  * Open a terminal with Super+Enter and type `git clone --depth 1 https://github.com/omacom/omarchy-theme-sync.git ~/omarchy-theme-sync && cd ~/omarchy-theme-sync && ./install.sh`.
-  ** The installer registers the extension and helper without sudo and prints a success summary.
-  * Press Super+Shift+Return; press Ctrl+L, type `chrome://extensions`, Enter → "Omarchy Theme Sync" is listed and enabled.
-  * Ctrl+L, type `https://omarchy.org`, Enter; press Ctrl+Shift+J and in the console type `window.omarchy && window.omarchy.theme` Enter → the current theme name (e.g. `tokyo-night`).
-  * Super+Space → `Style` → `Theme` → `Nord`; back in the console, after 3 seconds, run `window.omarchy.theme` again → `nord`.
-  * Super+Space → `Style` → `Theme` → `Tokyo Night`; close Chromium; in the terminal run `cd ~ && (~/omarchy-theme-sync/uninstall.sh 2>/dev/null || sed -i '/omarchy-theme-sync/d' ~/.config/chromium-flags.conf); rm -rf ~/omarchy-theme-sync` and close it. The desktop is as found.
+  * Press Super+Shift+Return. Chromium opens.
+  ** If Chromium says it is not responding, click Wait.
+  * Press Super+W. Chromium closes.
+  * Press Super+Enter. A terminal opens.
+  * Type `git clone --depth 1 https://github.com/omacom/omarchy-theme-sync.git ~/omarchy-theme-sync` and press Return. The clone finishes.
+  * Type `cd ~/omarchy-theme-sync && ./install.sh` and press Return. The installer finishes.
+  * Press Super+Shift+Return. Chromium opens.
+  * Press Ctrl+L.
+  * Type `chrome://extensions` and press Enter. Omarchy Theme Sync is listed and enabled.
+  * Press Ctrl+L.
+  * Type `https://omarchy.org` and press Enter. The page loads.
+  * Press Ctrl+Shift+J. The console opens.
+  * Type `window.omarchy && window.omarchy.theme` and press Enter. The current theme name is printed.
+  * Press Super+Space. The menu opens.
+  * Click Style.
+  * Click Theme.
+  * Click Nord. The desktop switches to Nord.
+  * Click the console.
+  * Wait 3 seconds.
+  * Type `window.omarchy.theme` and press Enter. The line is `nord`.
+  * Press Super+Space. The menu opens.
+  * Click Style.
+  * Click Theme.
+  * Click Tokyo Night. The desktop switches to Tokyo Night.
+  * Press Super+W. Chromium closes.
+  * Click the terminal. It has focus.
+  * Type `cd ~ && (~/omarchy-theme-sync/uninstall.sh 2>/dev/null || sed -i '/omarchy-theme-sync/d' ~/.config/chromium-flags.conf)` and press Return.
+  * Type `rm -rf ~/omarchy-theme-sync` and press Return.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The extension's helper watches the theme with inotify; give it 2–3 seconds after switching before re-reading.
-  * If the checkout has an `uninstall.sh`, it is preferred over the sed line (the command above tries it first).
+  * Wait 2 to 3 seconds after a theme switch before reading `window.omarchy.theme`.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshot of install.sh finishing; chrome://extensions with Omarchy Theme Sync enabled; the console printing tokyo-night, then nord after the switch
+  * On success
+  ** The installer finishing, Omarchy Theme Sync enabled, the console printing the starting theme and then `nord`
   * If unsuccessful
-  ** Screenshot of the extension missing or `window.omarchy` undefined; `cat ~/.config/chromium-flags.conf`
+  ** The extension missing, or `window.omarchy` undefined
 covers: omarchy-theme-sync README "Install", "Use the JavaScript API"; default/chromium (flags file)
 
 ### install-t3-code-themed-and-remove   [VM-OK] [NET]
@@ -9581,26 +9632,43 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Space → `Install` → `AI` → `T3 Code`.
-  ** Floating terminal: `Installing T3 Code...`, sudo `prime`, ~100 MB download (1–3 min; poll with screenshots), `Matching T3 Code to the current theme...`, a `t3 theme set` confirmation, `Opening T3 Code...`, `T3 Code has been installed.`, `Done!`.
-  * Within ~15 s a T3 Code window opens using the Omarchy colours; screenshot and close it (Super+W).
-  * Open a terminal with Super+Enter and type `cmp ~/.local/state/omarchy/current/theme/t3code.json ~/.t3/userdata/themes/omarchy.json && echo same` → `same`.
-  * Press Super+Space → `Install` → `AI`: `T3 Code` is dim with a ✓ (reopen the menu twice if the guard has not repainted). Then `Remove` → `AI` → `T3 Code` → floating terminal `T3 Code has been removed.` → `Done!`.
-  * In the terminal type `ls -d ~/.t3 ~/.config/t3code 2>&1` → both `No such file`; press Super+Alt+Space, type `t3` → no entry. Escape; close the terminal.
+  * Press Super+Space. The menu opens.
+  * Click Install.
+  * Click AI.
+  * Click T3 Code. A floating terminal starts the install.
+  ** If a password is asked, type `prime` and press Return.
+  * Wait until the terminal says T3 Code has been installed.
+  * Press a key. That terminal closes. A T3 Code window opens.
+  * Press Super+W. T3 Code closes.
+  * Press Super+Enter. A terminal opens.
+  * Type `cmp ~/.local/state/omarchy/current/theme/t3code.json ~/.t3/userdata/themes/omarchy.json && echo same` and press Return. The line is `same`.
+  * Press Super+Space. The menu opens.
+  * Click Install.
+  * Click AI. The T3 Code row is marked installed.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Click Remove.
+  * Click AI.
+  * Click T3 Code. A floating terminal says T3 Code was removed.
+  * Press a key. That terminal closes.
+  * Type `ls -d ~/.t3 ~/.config/t3code` and press Return. Both paths are missing.
+  * Press Super+Alt+Space. The app menu opens.
+  * Type `t3`. No T3 Code entry is listed.
+  * Press Escape. The menu closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * If the palette was missing before install, the script renders it itself; `same` must still print.
-  * Menu guards paint from the previous evaluation: reopen the menu twice before asserting the ✓.
+  * Reopen the Install menu twice before judging the installed mark. The download can take a few minutes.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Install output including the theme step; the themed T3 window; `same`; the dim ✓ row; the removal output; both dirs gone and no Apps entry
+  * On success
+  ** The install finishing with a theme step, `same` from the file compare, the installed mark, the removal, and both directories gone
   * If unsuccessful
-  ** `T3 theme selection failed` or the `Failed` banner text
+  ** A failed theme step or a failed banner
 covers: bin/omarchy-install-ai-t3-code; bin/omarchy-remove-ai-t3-code; default/omarchy/omarchy-menu.jsonc (install.ai.t3-code, remove.ai.t3-code); test/shell.d/t3code-install-test.sh
 
 ### aether-theme-from-wallpaper   [VM-OK]
@@ -9610,27 +9678,42 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Alt+Space to open the Apps menu, type `Aether`, press Enter.
-  ** An "Aether" entry is listed. Within ~15 s a window titled Aether opens with a wallpaper column, a 16-swatch palette area and Extract / Apply buttons (may be oversized). A white window for several seconds is normal — software rendering.
-  * Unhappy path: click Extract before choosing a wallpaper. It is disabled or asks for a wallpaper first; no crash.
-  * Use the wallpaper file picker; in the dialog press Ctrl+L, type `/usr/share/omarchy/themes/tokyo-night/backgrounds/`, Enter, then double-click the first image. The wallpaper preview appears in Aether.
-  * Click Extract, wait for the swatches to fill (a few seconds on 2 vCPU), then click Apply Theme; if asked for a name, enter `vmtest`.
-  ** The desktop, bar and any open terminal recolour to the extracted palette. Aether may show a confirmation toast — screenshot it.
-  * Press Super+Shift+Ctrl+Space: the theme picker lists the new theme (`vmtest` or the name Aether chose). Press Escape.
-  * Restore: Super+Space → `Style` → `Theme` → `Tokyo Night`; close Aether with Super+W. Open a terminal with Super+Enter: `pacman -Q aether` → a version line; `omarchy theme remove vmtest` (or the name Aether chose) → `Removed vmtest`. The desktop is as found.
+  * Press Super+Alt+Space. The app menu opens.
+  * Type `Aether` and press Enter. Aether opens.
+  ** A white window for several seconds is expected. If Hyprland says it is not responding, click Wait.
+  * Click Extract. Nothing is extracted. Nothing crashes.
+  * Click the wallpaper picker. A file dialog opens.
+  * Press Ctrl+L.
+  * Type `/usr/share/omarchy/themes/tokyo-night/backgrounds/` and press Enter. That folder is showing.
+  * Double-click the first image. The preview appears in Aether.
+  * Click Extract. The swatches fill.
+  * Click Apply Theme.
+  ** If a name is asked, type `vmtest` and confirm.
+  * The desktop recolours.
+  * Press Super+Shift+Ctrl+Space. The theme picker opens. The new theme is listed. Note its name.
+  * Press Escape. The picker closes.
+  * Press Super+Space. The menu opens.
+  * Click Style.
+  * Click Theme.
+  * Click Tokyo Night. The desktop switches to Tokyo Night.
+  * Press Super+W. Aether closes.
+  * Press Super+Enter. A terminal opens.
+  * Type `pacman -Q aether` and press Return. A version line is printed.
+  * Type `omarchy theme remove vmtest` and press Return. Use the name you noted if it is not `vmtest`. The line says the theme was removed.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Aether is a WebKit app rendering in software: do not click Extract twice; if the window is black for a while, wait. Report a crash dialog if one appears.
+  * Do not click Extract twice. Wait if the window stays black.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshot of the Apps menu entry and the Aether window; the disabled/complaining Extract with no wallpaper; the wallpaper loaded and the extracted swatches; the recoloured desktop after Apply; the theme picker listing the new theme; Tokyo Night restored, `pacman -Q aether` and `Removed vmtest`
+  * On success
+  ** Aether opening, Extract doing nothing before a wallpaper, swatches after Extract, the desktop recoloured, the new theme in the picker, and Tokyo Night restored after removal
   * If unsuccessful
-  ** Screenshot of the blank window, no Apps entry, or the failed Apply; `pacman -Q aether`; `./client get-serial`
+  ** A blank window that never draws, or Apply failing
 covers: manual/22-guis.md "Aether"; manual/43-making-your-own-theme.md (Aether, l.7); aether README "Basic Usage"; install/omarchy-base.packages:4-5; test/shell.d/app-search-test.sh l.40
 
 ### background-picker-select-and-cancel   [VM-OK]
@@ -9640,30 +9723,45 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `orig=$(readlink -f ~/.local/state/omarchy/current/background); omarchy-theme-bg-current`. Note the name (fresh disk: `Winding Road`).
-  * Press Super+Space, click `Style`, click `Background` with the mouse. Do not use the keyboard.
-  ** Within 30 s a fullscreen dimmed carousel of the theme's 8 unlabelled wallpaper thumbnails (Tokyo Night) opens with the current one highlighted/centred; there is no filter. Thumbnails are generated on first open.
-  * Unhappy paths: press Escape — within 15 s the carousel closes and the wallpaper is unchanged. Press Super+Ctrl+Space, Right once, then click the dark scrim far from the carousel — unchanged.
-  * Press Super+Ctrl+Space, press Right (or Down if there is one row) to move the highlight, then Enter. The carousel closes and the wallpaper changes to that image; `omarchy-theme-bg-current` prints its name.
-  * Press Super+Space → `Style` → `Background`; click a side slice with the mouse (it slides into the centre), then click the centred image. The wallpaper changes again.
-  ** If the theme has a single background nothing can change; exercise the cancel paths and report it.
-  * Type `omarchy-theme-set gruvbox`; press Super+Ctrl+Space: the carousel now has Gruvbox's 6 images. Escape. Type `omarchy-theme-set tokyo-night`.
-  * Restore: type `omarchy-theme-bg-set "$orig"` — the original wallpaper is back and `omarchy-theme-bg-current` prints the first name. Close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Type `orig=$(readlink -f ~/.local/state/omarchy/current/background); omarchy-theme-bg-current` and press Return. Note the background name.
+  * Press Super+Space. The menu opens.
+  * Click Style.
+  * Click Background. The background picker opens. The current wallpaper is highlighted.
+  * Press Escape. The picker closes. The wallpaper does not change.
+  * Press Super+Ctrl+Space. The background picker opens.
+  * Press Right. The highlight moves.
+  * Click the dark area away from the carousel. The picker closes. The wallpaper does not change.
+  * Press Super+Ctrl+Space. The background picker opens.
+  * Press Right. The highlight moves.
+  * Press Enter. The picker closes. The wallpaper changes.
+  * Type `omarchy-theme-bg-current` and press Return. The name is the new wallpaper.
+  * Press Super+Space. The menu opens.
+  * Click Style.
+  * Click Background. The background picker opens.
+  * Click a side thumbnail. It moves to the centre.
+  * Click the centred image. The picker closes. The wallpaper changes.
+  * Type `omarchy-theme-set gruvbox` and press Return.
+  * Press Super+Ctrl+Space. The background picker opens. The images are Gruvbox wallpapers.
+  * Press Escape. The picker closes.
+  * Type `omarchy-theme-set tokyo-night` and press Return.
+  * Type `omarchy-theme-bg-set "$orig"` and press Return. The original wallpaper returns.
+  * Type `omarchy-theme-bg-current` and press Return. The name matches the one you noted.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * This picker does not filter on typing; use arrows and Enter, or click a tile with the mouse. Super+Ctrl+Space is `<M-C-SPACE>`.
-  * Use ./client-with-image after each click to see which slice is centred; double-check the mouse position before clicking menu rows.
+  * This picker does not filter as you type. Super+Ctrl+Space is `<M-C-SPACE>`.
+  * If the theme has only one wallpaper, run the cancel steps and report that.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Menu screenshot on Style → Background; the carousel with a highlighted current tile; the unchanged wallpaper after Escape and after the scrim click; the wallpaper after the keyboard pick with its name in the terminal; the wallpaper after the mouse pick; the 6-tile Gruvbox carousel; the original restored
-  ** The menu path was clicked with the mouse, not typed
+  * On success
+  ** The picker opening from the menu and from the hotkey, no change after Escape or the outside click, a keyboard choice applied, a mouse choice applied, Gruvbox images, and the original wallpaper restored
   * If unsuccessful
-  ** The menu entry or hotkey doing nothing, a carousel without thumbnails after 30 s, Escape or the scrim click applying a change, or Enter/click not applying one
+  ** Escape changing the wallpaper, or Enter not changing it
 covers: omarchy-menu.jsonc style.background; default/hypr/bindings/utilities.lua:17; bin/omarchy-menu (toggle background); bin/omarchy-theme-bg-switcher; bin/omarchy-theme-bg-set; bin/omarchy-theme-bg-next; bin/omarchy-menu-images; shell/plugins/background/Background.qml; shell/plugins/image-picker/ImagePicker.qml (cancel, slice MouseArea select/apply); test/acceptance.d/shell-surfaces-test.sh (background selector); manual/06:7; manual/07:175-178
 
 ### background-desktop-double-click-pickers   [VM-OK]
@@ -9673,25 +9771,28 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Make sure no window covers the wallpaper: close any open window with Super+W (or switch to an empty workspace with Super+9).
-  * Double-click the left mouse button on the empty wallpaper area. The fullscreen background picker opens (current tile highlighted).
-  * Press Escape; the desktop returns unchanged.
-  * Double-click the right mouse button on the empty wallpaper area. The theme picker opens (tiles are whole-theme previews with names).
-  * Press Escape; the desktop returns unchanged.
-  * Open a terminal with Super+Enter and type `omarchy-theme-bg-current; cat ~/.local/state/omarchy/current/theme.name` — the same values as before the clicks (nothing applied). Close it with Super+W.
+  * Press Super+W until no window covers the wallpaper.
+  * Double-click the empty wallpaper with the left button. The background picker opens.
+  * Press Escape. The picker closes. The wallpaper does not change.
+  * Double-click the empty wallpaper with the right button. The theme picker opens.
+  * Press Escape. The picker closes. The theme does not change.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy-theme-bg-current` and press Return. The name is unchanged.
+  * Type `cat ~/.local/state/omarchy/current/theme.name` and press Return. The theme is unchanged.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Use `mouse double-click --x 0.5 --y 0.6 --button left|right`. Single clicks do nothing on the wallpaper.
+  * Use `mouse double-click`. A single click on the wallpaper does nothing.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshot of the background picker after the left double-click and of the theme picker after the right double-click, and the untouched desktop after each Escape; the unchanged names
+  * On success
+  ** The background picker after the left double-click, the theme picker after the right double-click, and unchanged names after both Escapes
   * If unsuccessful
-  ** Nothing opening on double-click, the wrong picker, or a theme/background silently applied
+  ** Nothing opening, the wrong picker, or a theme or wallpaper that changed
 covers: shell/plugins/background/Background.qml (MouseArea onDoubleClicked, openSelector/openThemeSwitcher)
 
 ### background-picker-filter-and-empty-result   [VM-OK]

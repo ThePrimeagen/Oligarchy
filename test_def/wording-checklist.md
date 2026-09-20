@@ -218,14 +218,14 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `theme-hyprland-border-and-overrides`
 - [x] `theme-shell-section-override-lock-screen`
 - [x] `theme-chromium-policy-colour-follows-theme`
-- [ ] `theme-obsidian-sync`
-- [ ] `theme-hooks-absent-apps-and-hardware-stay-silent`
-- [ ] `theme-preview-palette-in-terminal`
-- [ ] `theme-sync-chromium-extension`
-- [ ] `install-t3-code-themed-and-remove`
-- [ ] `aether-theme-from-wallpaper`
-- [ ] `background-picker-select-and-cancel`
-- [ ] `background-desktop-double-click-pickers`
+- [x] `theme-obsidian-sync`
+- [x] `theme-hooks-absent-apps-and-hardware-stay-silent`
+- [x] `theme-preview-palette-in-terminal`
+- [x] `theme-sync-chromium-extension`
+- [x] `install-t3-code-themed-and-remove`
+- [x] `aether-theme-from-wallpaper`
+- [x] `background-picker-select-and-cancel`
+- [x] `background-desktop-double-click-pickers`
 - [ ] `background-picker-filter-and-empty-result`
 - [ ] `background-picker-thumbnails-cache`
 - [ ] `background-next-cycles-and-set-rejects-bad-path`
