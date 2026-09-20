@@ -254,12 +254,17 @@ describe("DefinitionsPage unhappy path", () => {
     expect(strip).toContain(
       '<div id="running-tests" hx-get="/definitions/running?name=lock-screen" hx-trigger="every 30s" hx-swap="innerHTML">',
     );
-    expect(strip.indexOf(">RUN-2<")).toBeLessThan(strip.indexOf(">RUN-1<"));
-    expect(strip.indexOf(">RUN-1<")).toBeLessThan(strip.indexOf(">—</span>"));
-    expect(strip).toContain("10 s ago");
     expect(strip).toContain(
-      '<form method="post" action="/abort" hx-post="/abort" hx-confirm="are you sure?" hx-target="#running-tests" hx-swap="innerHTML"><input type="hidden" name="ticket" value="RUN-2"/><input type="hidden" name="action" value="diagnose"/><input type="hidden" name="view" value="definitions"/><input type="hidden" name="definition" value="lock-screen"/><button type="submit" class="button button--abort">Abort</button></form>',
+      "<tr><th>test</th><th>action</th><th>ticket</th><th>running</th><th></th></tr>",
     );
+    expect(strip.indexOf(">RUN-2<")).toBeLessThan(strip.indexOf(">RUN-1<"));
+    expect(strip.indexOf(">RUN-1<")).toBeLessThan(strip.indexOf("<td>—</td>"));
+    expect(strip).toContain('<td class="follow"><a href="/tickets/RUN-2">10 s ago</a></td>');
+    expect(strip).toContain('<a class="ticket" href="https://linear.app/issue/RUN-2">RUN-2</a>');
+    expect(strip).toContain(
+      '<form method="post" action="/abort" hx-post="/abort" hx-confirm="are you sure?" hx-target="#running-tests" hx-swap="innerHTML"><input type="hidden" name="ticket" value="RUN-2"/><input type="hidden" name="action" value="diagnose"/><input type="hidden" name="view" value="definitions"/><input type="hidden" name="definition" value="lock-screen"/><button type="submit" class="abort" aria-label="abort"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 2l8 8M10 2L2 10" stroke="red" stroke-width="2" fill="none"></path></svg></button></form>',
+    );
+    expect(strip).not.toContain("running-tests__open");
     expect(strip.match(/action="\/abort"/g)).toHaveLength(2);
   });
 });
