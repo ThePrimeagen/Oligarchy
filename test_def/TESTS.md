@@ -10154,26 +10154,37 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `cp ~/.config/kitty/kitty.conf /tmp/kitty.orig 2>/dev/null; rm -f ~/.config/kitty/kitty.conf; omarchy display text-size` — the output contains `terminal font: 9 pt` even with no config.
-  * Type `omarchy display text-size 16; grep -x 'font_size 12.0' ~/.config/kitty/kitty.conf` — present; the desktop text visibly grows.
-  * Type `omarchy display text-size 18; grep -c '^font_size ' ~/.config/kitty/kitty.conf` → `1` (updated, not duplicated).
-  * Type `omarchy font set 'Liberation Mono'; omarchy font set 'JetBrainsMono Nerd Font'; grep -c '^font_family ' ~/.config/kitty/kitty.conf; grep -c '^include ' ~/.config/kitty/kitty.conf` → `1` and `0`.
-  * Type `omarchy display text-size reset; grep -x 'font_size 9.0' ~/.config/kitty/kitty.conf` — present; the desktop text is back to normal.
-  * Type `cp /tmp/kitty.orig ~/.config/kitty/kitty.conf 2>/dev/null || rm ~/.config/kitty/kitty.conf; rm -f /tmp/kitty.orig` — stock again. Close the terminal with Super+W.
-  ** The text-size command scales the whole desktop; the larger UI after `16`/`18` is expected.
+  * Press Super+Enter. A terminal opens.
+  * Type `cp ~/.config/kitty/kitty.conf /tmp/kitty.orig` and press Return.
+  ** If the file is missing, continue.
+  * Type `rm -f ~/.config/kitty/kitty.conf` and press Return.
+  * Type `omarchy display text-size` and press Return. The output includes `terminal font: 9 pt`.
+  * Type `omarchy display text-size 16` and press Return. The desktop text grows.
+  * Type `grep -x 'font_size 12.0' ~/.config/kitty/kitty.conf` and press Return. The line is present.
+  * Type `omarchy display text-size 18` and press Return.
+  * Type `grep -c '^font_size ' ~/.config/kitty/kitty.conf` and press Return. The line is `1`.
+  * Type `omarchy font set 'Liberation Mono'` and press Return.
+  * Type `omarchy font set 'JetBrainsMono Nerd Font'` and press Return.
+  * Type `grep -c '^font_family ' ~/.config/kitty/kitty.conf` and press Return. The line is `1`.
+  * Type `grep -c '^include ' ~/.config/kitty/kitty.conf` and press Return. The line is `0`.
+  * Type `omarchy display text-size reset` and press Return. The desktop text returns to the starting size.
+  * Type `grep -x 'font_size 9.0' ~/.config/kitty/kitty.conf` and press Return. The line is present.
+  * Type `cp /tmp/kitty.orig ~/.config/kitty/kitty.conf 2>/dev/null || rm -f ~/.config/kitty/kitty.conf` and press Return.
+  * Type `rm -f /tmp/kitty.orig` and press Return.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * kitty is not installed on the stock disk (foot is); the file is still written. Both fonts named here are installed on the stock disk.
+  * Kitty is not installed. The file is still written. Both named fonts are installed.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** `9 pt`; `font_size 12.0`; single `font_size`/`font_family` lines; no include; `9.0` after reset; the UI size visibly changing and returning
+  * On success
+  ** `9 pt` with no config, one `font_size` line after 18, one `font_family` and no include, and `9.0` after reset
   * If unsuccessful
-  ** Duplicated keys, an `include` line added, or a report that does not read `9 pt`
+  ** A duplicated key, an include line, or a report that is not `9 pt`
 covers: test/shell.d/kitty-config-test.sh (font/text-size half); bin/omarchy-display-text-size; bin/omarchy-font-set; manual/38-fonts.md
 
 ### fontconfig-defaults-and-icon-font-glyphs   [VM-OK]
@@ -10183,26 +10194,40 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `for f in monospace sans-serif serif system-ui; do fc-match $f; done; fc-match :lang=ar` → `JetBrainsMono Nerd Font`, `Liberation Sans`, `Liberation Serif`, `Liberation Sans`, `Noto Naskh Arabic`.
-  * Type `printf '\ue900 \ue902 \ue90e \U0001F604 \u0645\u0631\u062d\u0628\u0627 \u05e9\u05dc\u05d5\u05dd\n'` → three icon glyphs (not boxes), a coloured emoji, legible Arabic and Hebrew.
-  * Press Super+Shift+Enter (Chromium; click **Wait** on a "not responding" dialog) and open `data:text/html,<p style="font-family:system-ui">system-ui Sans</p><p style="font-family:monospace">monospace 0O1l</p><p>&#x1F604; &#x645;&#x631;&#x62D;&#x628;&#x627;</p>` → first line in a sans face, second monospace, a coloured emoji, legible Arabic. Press Super+W.
-  * Press Super+Space → `Setup` → `Defaults` → `Agent`. The rows (Codex, Cursor CLI, Grok, Hermes, omp, OpenClaw, OpenCode, Ori, Pi…) each show a distinct monochrome brand mark in the theme foreground colour. Press Down once: the highlighted row's mark takes the selection colour.
-  * Press Escape twice, then Super+Space → `Install` → `AI`: the same marks appear beside Claude Desktop, ChatGPT Desktop, Hermes Desktop, LM Studio, Ollama, Perplexity, T3 Code. Escape.
-  * Press Ctrl+D in the terminal; the desktop is as before.
+  * Press Super+Enter. A terminal opens.
+  * Type `for f in monospace sans-serif serif system-ui; do fc-match $f; done` and press Return. The families are JetBrainsMono Nerd Font, Liberation Sans, Liberation Serif, and Liberation Sans.
+  * Type `fc-match :lang=ar` and press Return. The line includes `Noto Naskh Arabic`.
+  * Type `printf '\ue900 \ue902 \ue90e \U0001F604 \u0645\u0631\u062d\u0628\u0627 \u05e9\u05dc\u05d5\u05dd\n'` and press Return. Three icons, an emoji, Arabic, and Hebrew appear. None is an empty box.
+  * Press Super+Shift+Return. Chromium opens.
+  ** If Chromium says it is not responding, click Wait.
+  * Press Ctrl+L.
+  * Type `data:text/html,<p style="font-family:system-ui">system-ui Sans</p><p style="font-family:monospace">monospace 0O1l</p><p>&#x1F604; &#x645;&#x631;&#x62D;&#x628;&#x627;</p>` and press Enter. The page shows a sans line, a monospace line, an emoji, and Arabic.
+  * Press Super+W. Chromium closes.
+  * Press Super+Space. The menu opens.
+  * Click Setup.
+  * Click Defaults.
+  * Click Agent. The agent rows show distinct marks.
+  * Press Down. The highlighted row's mark changes colour.
+  * Press Escape. The submenu closes.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Click Install.
+  * Click AI. The install rows show the same kind of marks.
+  * Press Escape. The menu closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Boxes with hex digits in the terminal line mean a missing font; report which glyph. A hollow rectangle (tofu) or a blank where a menu icon should be is the failure this test looks for.
-  * Type `<` and `>` in the data URL as `<LT>`/`<GT>`; the emoji and Arabic are given as escapes/entities because the driver can only type ASCII.
+  * An empty box where an icon should be is a failure. Report which glyph it was.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of the fc-match lines, the terminal glyph line, the Chromium rendering, the Agent submenu with distinct marks and the highlighted row recoloured, and the Install → AI submenu with marks
+  * On success
+  ** The five `fc-match` lines, the icon and script line, the Chromium page, and distinct marks in both menus
   * If unsuccessful
-  ** Screenshot of DejaVu/Noto Sans picked for monospace/sans, boxes for the icon glyphs, Nastaliq for plain Arabic, or a submenu with tofu boxes
+  ** A fallback font for monospace, or an empty box in a menu
 covers: default/fontconfig/conf.avail/50-omarchy.conf; default/fonts/omarchy/* (omarchy.ttf); docs/file-layout.md; omarchy-menu.jsonc setup.default.agent.* / install.ai.* (iconFont); agents/skills/icon-font.md
 
 ### branding-about-text-edit-and-reset   [VM-OK]
@@ -10212,28 +10237,45 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Space and click `About` with the mouse. A floating terminal opens with the block-art Omarchy logo on the left and system info (OS `Omarchy`, kernel, uptime, packages, shell, resolution, theme…) on the right.
-  ** Take three screenshots about one second apart: a bright diagonal band (green glint) moves across the logo while the info text stays put. Press any key; the window closes.
-  * Press Super+Space → `Style` → `About` → `Edit Text`. Neovim opens `~/.config/omarchy/branding/about.txt`.
-  * Replace the content: type `ggdG`, then `i`, type `HELLO` Enter `OLIGARCHY` Enter `!!!`, press Escape, type `:wq` and Enter.
-  ** About opens automatically showing HELLO / OLIGARCHY / !!! where the logo was, the window re-fitted smaller. Screenshot twice a few seconds apart (the glint applies to single-width text). Press a key to close it.
-  * Press Super+Space → `Style` → `About` → `Restore Default`. About opens with the Omarchy block logo again at its original size. Press a key.
-  * Open a terminal with Super+Enter and type `diff -q ~/.config/omarchy/branding/about.txt /usr/share/omarchy/icon.txt` → no output (identical).
-  * Unhappy path: type `omarchy-branding-about bogus; echo "exit=$?"` → `Usage: omarchy-branding-about <image|text|reset>`, `exit=1`. Close the terminal with Super+W.
+  * Press Super+Space. The menu opens.
+  * Click About. The About window opens.
+  * Wait 1 second and take a screenshot.
+  * Wait 1 second and take a screenshot. The sheen has moved. Press a key only after the second screenshot.
+  * Press a key. The About window closes.
+  * Press Super+Space. The menu opens.
+  * Click Style.
+  * Click About.
+  * Click Edit Text. Neovim opens `about.txt`.
+  * Type `ggdG`. The buffer is empty.
+  * Press `i`. Insert mode starts.
+  * Type `HELLO` and press Enter.
+  * Type `OLIGARCHY` and press Enter.
+  * Type `!!!`.
+  * Press Escape.
+  * Type `:wq` and press Enter. Neovim closes. About opens with those three lines.
+  * Press a key. The About window closes.
+  * Press Super+Space. The menu opens.
+  * Click Style.
+  * Click About.
+  * Click Restore Default. About opens with the stock logo.
+  * Press a key. The About window closes.
+  * Press Super+Enter. A terminal opens.
+  * Type `diff -q ~/.config/omarchy/branding/about.txt /usr/share/omarchy/icon.txt` and press Return. Nothing is printed.
+  * Type `omarchy-branding-about bogus; echo "exit=$?"` and press Return. A usage line appears. The last line is `exit=1`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * About closes on any key, so take the screenshot before pressing anything; the window resizes to its content on launch — wait a second. A clipped or scrolling logo is a failure.
-  * About relaunches only when the editor exits cleanly; if a different editor opens, use its own save-and-quit.
+  * About closes on any key. Screenshot it before pressing a key.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Three stock About screenshots with the band in different positions; the editor with the custom text; About showing HELLO / OLIGARCHY / !!! re-fitted; About with the restored logo at original size; empty diff; the usage error with `exit=1`
+  * On success
+  ** The sheen moving on the stock About window, the custom three lines, the stock logo restored, an empty diff, and the usage line with `exit=1`
   * If unsuccessful
-  ** About not appearing after `:wq`, the art unchanged, or a clipped/absent logo; About screenshot after each step; `./client get-serial`
+  ** About not opening after the save, or the logo unchanged
 covers: bin/omarchy-branding-about (text, reset, usage); bin/omarchy-launch-editor; bin/omarchy-launch-about (fit on logo change); bin/omarchy-branding-about-animation; omarchy-menu.jsonc style.about.*, about; $OMARCHY_PATH/icon.txt; test/shell.d/branding-about-animation-test.sh; manual/41-branding.md (About screen)
 
 ### branding-about-from-image-and-cancel   [VM-OK]
@@ -10243,24 +10285,39 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Space → `Style` → `About` → `Set From Image`. A file chooser titled `Pick PNG or SVG for About` opens (portal GTK dialog, possibly oversized).
-  * Unhappy path: press Escape. Nothing opens; press Super+Space → `About`: the stock logo is unchanged. Press a key.
-  * Repeat the menu path; in the chooser press Ctrl+L, type `/usr/share/omarchy/themes/gruvbox/unlock.png`, press Enter.
-  ** About opens showing a braille rendering of the Gruvbox unlock logo, no wider than the previous logo area. Press a key to close About.
-  * Press Super+Space → `Style` → `About` → `Restore Default`; About shows the stock logo. Press a key. The desktop is as found.
+  * Press Super+Space. The menu opens.
+  * Click Style.
+  * Click About.
+  * Click Set From Image. A file chooser opens.
+  * Press Escape. The chooser closes. Nothing else opens.
+  * Press Super+Space. The menu opens.
+  * Click About. About opens with the stock logo.
+  * Press a key. About closes.
+  * Press Super+Space. The menu opens.
+  * Click Style.
+  * Click About.
+  * Click Set From Image. A file chooser opens.
+  * Press Ctrl+L.
+  * Type `/usr/share/omarchy/themes/gruvbox/unlock.png` and press Enter. About opens with a text-art rendering of that image.
+  * Press a key. About closes.
+  * Press Super+Space. The menu opens.
+  * Click Style.
+  * Click About.
+  * Click Restore Default. About opens with the stock logo.
+  * Press a key. About closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Ctrl+L plus a typed path is the reliable way to pick a file in the portal chooser. About closes on any key — screenshot first.
+  * Ctrl+L is the reliable way to type a path in the chooser. Screenshot About before pressing a key.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** The chooser; unchanged About after cancel; About with the transcoded logo; the restored logo
+  * On success
+  ** The chooser, stock About after cancel, About with the rendered image, and the stock logo restored
   * If unsuccessful
-  ** In a terminal `omarchy-transcode-ascii /usr/share/omarchy/themes/gruvbox/unlock.png /tmp/x.txt --width 54 --height 26; echo "exit=$?"`
+  ** About unchanged after choosing the image, or cancel changing the logo
 covers: bin/omarchy-branding-about (image); bin/omarchy-file-select; bin/omarchy-transcode-ascii; omarchy-menu.jsonc style.about.image
 
 ### plymouth-preview-render-and-reject   [VM-OK]
@@ -10270,26 +10327,31 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy plymouth preview '#1d2021' '#ebdbb2' /usr/share/omarchy/default/plymouth/logo.png /tmp/preview.png`.
-  ** After a second or two imv opens full-screen: a dark (#1d2021) canvas with the Omarchy logo centred and a password entry box beneath it with a lock icon to its left and four bullets inside, all tinted #ebdbb2. Screenshot, then press `q` to close imv.
-  * Type `ls -la /tmp/preview.png; magick identify /tmp/preview.png` → the file exists, `PNG 1920x1080`.
-  * Type `omarchy plymouth preview '#004400' '#ffff00' /usr/share/omarchy/themes/gruvbox/unlock.png /tmp/preview2.png` → green canvas, Gruvbox logo, yellow entry box. Press `q`.
-  * Unhappy paths: type `omarchy plymouth preview '#zzz' '#ebdbb2' /usr/share/omarchy/default/plymouth/logo.png /tmp/x.png; echo "exit=$?"` → `Invalid background color: #zzz (expected #RRGGBB)`, `exit=1`; `omarchy plymouth preview red '#ffffff' /usr/share/omarchy/themes/gruvbox/unlock.png /tmp/x.png; echo "exit=$?"` → `Invalid background color: red (expected #RRGGBB)`, `exit=1`.
-  * Type `omarchy plymouth preview '#000000' '#ffffff' /nope.png /tmp/x.png; echo "exit=$?"` → `Logo file not found: /nope.png`, `exit=1`; `omarchy plymouth preview a b; echo "exit=$?"` → usage, `exit=1`.
-  * Clean up: type `rm -f /tmp/preview.png /tmp/preview2.png` and close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy plymouth preview '#1d2021' '#ebdbb2' /usr/share/omarchy/default/plymouth/logo.png /tmp/preview.png` and press Return. imv opens with the preview.
+  * Press `q`. imv closes.
+  * Type `magick identify /tmp/preview.png` and press Return. The line includes `PNG` and `1920x1080`.
+  * Type `omarchy plymouth preview '#004400' '#ffff00' /usr/share/omarchy/themes/gruvbox/unlock.png /tmp/preview2.png` and press Return. imv opens with a different preview.
+  * Press `q`. imv closes.
+  * Type `omarchy plymouth preview '#zzz' '#ebdbb2' /usr/share/omarchy/default/plymouth/logo.png /tmp/x.png; echo "exit=$?"` and press Return. The output says the background colour is invalid. The last line is `exit=1`.
+  * Type `omarchy plymouth preview red '#ffffff' /usr/share/omarchy/themes/gruvbox/unlock.png /tmp/x.png; echo "exit=$?"` and press Return. The output says the background colour is invalid. The last line is `exit=1`.
+  * Type `omarchy plymouth preview '#000000' '#ffffff' /nope.png /tmp/x.png; echo "exit=$?"` and press Return. The output says the logo file was not found. The last line is `exit=1`.
+  * Type `omarchy plymouth preview a b; echo "exit=$?"` and press Return. A usage line appears. The last line is `exit=1`.
+  * Type `rm -f /tmp/preview.png /tmp/preview2.png` and press Return.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * imv is full-screen (-f); take the screenshot before pressing `q`. No sudo is needed anywhere in this test.
+  * Screenshot imv before pressing `q`. No sudo is needed.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of both imv previews and of `magick identify` reporting 1920x1080; the four refusals with `exit=1`
+  * On success
+  ** Both previews, `1920x1080`, and the four refusals with `exit=1`
   * If unsuccessful
-  ** The magick/imv error text, `./client get-serial`
+  ** The imv or magick error
 covers: bin/omarchy-plymouth-preview; default/plymouth/{bullet,entry,lock}.png; manual/41-branding.md (Boot unlock preview)
 
 ### plymouth-list-current-and-unlock-picker   [VM-OK]
@@ -10299,22 +10361,28 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy plymouth list | wc -l` → `22`; `omarchy plymouth current` → `default`.
-  * Press Super+Space → `Style` → `Unlock`. A labelled grid opens: a `default` tile plus one per theme, each a dark boot-screen mock-up with a logo and password box; `default` is highlighted.
-  * Press Escape. No terminal or password prompt appeared; `omarchy plymouth current` still prints `default`. Close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy plymouth list | wc -l` and press Return. The line is `22`.
+  * Type `omarchy plymouth current` and press Return. The line is `default`.
+  * Press Super+Space. The menu opens.
+  * Click Style.
+  * Click Unlock. The unlock picker opens. `default` is highlighted.
+  * Press Escape. The picker closes. No password prompt appears.
+  * Type `omarchy plymouth current` and press Return. The line is `default`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * This test needs no sudo at all. `plymouth current` identifies the theme by logo byte-compare, so a custom set with the stock logo also reports `default`.
+  * This test needs no sudo.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** `22` and `default` in the terminal; the labelled Unlock grid; `default` again after Escape
+  * On success
+  ** `22` and `default`, the labelled unlock grid, and `default` still current after Escape
   * If unsuccessful
-  ** The list output and the picker screenshot, or whatever Escape triggered
+  ** Escape starting a password prompt or a rebuild
 covers: bin/omarchy-plymouth-list; bin/omarchy-plymouth-current; bin/omarchy-plymouth-switcher; omarchy-menu.jsonc style.unlock; themes/*/preview-unlock.png
 
 ### plymouth-set-rejects-bad-input-and-wrong-sudo-password   [VM-OK]
@@ -10324,29 +10392,50 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `sudo -k; md5sum /usr/share/plymouth/themes/omarchy/logo.png /usr/share/sddm/themes/omarchy/logo.png` — record both checksums.
-  * Type `omarchy plymouth set '#zzzzzz' '#ffffff' /usr/share/omarchy/themes/nord/unlock.png; echo "exit=$?"` → `Invalid background color: #zzzzzz (expected #RRGGBB)`, `exit=1`, no password prompt.
-  * Type `omarchy plymouth set '#000000' '#ffffff' /nope.png; echo "exit=$?"` → `Logo file not found: /nope.png`; then `ln -sf /etc/hostname /tmp/link.png; omarchy plymouth set '#000000' '#ffffff' /tmp/link.png; echo "exit=$?"` → `Logo file is a symlink, which is not accepted: /tmp/link.png`, `exit=1`, no sudo prompt.
-  * Type `omarchy-plymouth-set-by-theme nope 2>&1 | tail -1` → `Invalid background color:  (expected #RRGGBB)` (the theme has no colours file; note the unhelpful message).
-  * Type `sudo omarchy-plymouth-set '#000000' '#ffffff' /usr/share/omarchy/themes/nord/unlock.png; echo "exit=$?"` (this one prompts; type `prime`) → `Error: run omarchy-plymouth-set as your user, not under sudo.`, non-zero. Then type `sudo -k`.
-  * Hostile theme name as data: type `mkdir -p "$HOME/.config/omarchy/themes/a';touch \$HOME\/unlock-pwned;'b"`; press Super+Space → `Style` → `Unlock` and select that odd row → the floating terminal runs `omarchy-plymouth-set-by-theme` with the whole name and fails (no `unlock.png`); press a key. Type `ls ~/unlock-pwned 2>&1` → no such file; `rm -rf "$HOME/.config/omarchy/themes/a';touch \$HOME\/unlock-pwned;'b"`.
-  * Press Super+Space → `Style` → `Unlock` and click `nord`. At `[sudo] password for prime:` type `wrong` and Enter, three times.
-  ** `Sorry, try again.` twice, then `sudo: 3 incorrect password attempts` and `● Failed (exit code 1)! Press any key to close...`. Press a key.
-  * In the terminal type `omarchy plymouth current; md5sum /usr/share/plymouth/themes/omarchy/logo.png /usr/share/sddm/themes/omarchy/logo.png` → still `default` and both checksums unchanged; `rm /tmp/link.png`; close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Type `sudo -k` and press Return.
+  * Type `md5sum /usr/share/plymouth/themes/omarchy/logo.png /usr/share/sddm/themes/omarchy/logo.png` and press Return. Note both checksums.
+  * Type `omarchy plymouth set '#zzzzzz' '#ffffff' /usr/share/omarchy/themes/nord/unlock.png; echo "exit=$?"` and press Return. The output says the colour is invalid. The last line is `exit=1`. No password prompt appears.
+  * Type `omarchy plymouth set '#000000' '#ffffff' /nope.png; echo "exit=$?"` and press Return. The output says the logo was not found. The last line is `exit=1`.
+  * Type `ln -sf /etc/hostname /tmp/link.png` and press Return.
+  * Type `omarchy plymouth set '#000000' '#ffffff' /tmp/link.png; echo "exit=$?"` and press Return. The output says a symlink is not accepted. The last line is `exit=1`. No password prompt appears.
+  * Type `omarchy-plymouth-set-by-theme nope 2>&1 | tail -1` and press Return. Record the colour error.
+  * Type `sudo omarchy-plymouth-set '#000000' '#ffffff' /usr/share/omarchy/themes/nord/unlock.png; echo "exit=$?"` and press Return. The output says to run the command as the user, not under sudo. The exit is not `0`.
+  ** If a password is asked, type `prime` and press Return.
+  * Type `sudo -k` and press Return.
+  * Type `mkdir -p "$HOME/.config/omarchy/themes/a';touch \$HOME\/unlock-pwned;'b"` and press Return.
+  * Press Super+Space. The menu opens.
+  * Click Style.
+  * Click Unlock. The unlock picker opens. The odd theme name is listed.
+  * Select that odd row. A floating terminal runs and fails.
+  * Press a key. That terminal closes.
+  * Type `ls ~/unlock-pwned` and press Return. The file is not there.
+  * Type `rm -rf "$HOME/.config/omarchy/themes/a';touch \$HOME\/unlock-pwned;'b"` and press Return.
+  * Press Super+Space. The menu opens.
+  * Click Style.
+  * Click Unlock. The unlock picker opens.
+  * Click nord. A floating terminal asks for a password.
+  * Type `wrong` and press Enter. It asks again.
+  * Type `wrong` and press Enter. It asks again.
+  * Type `wrong` and press Enter. The terminal says the password attempts failed.
+  * Press a key. That terminal closes.
+  * Type `omarchy plymouth current` and press Return. The line is `default`.
+  * Type `md5sum /usr/share/plymouth/themes/omarchy/logo.png /usr/share/sddm/themes/omarchy/logo.png` and press Return. Both checksums match the ones you noted.
+  * Type `rm /tmp/link.png` and press Return.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Except for the deliberate `sudo` case and the two Unlock-picker runs, none of these may prompt for a password or start `mkinitcpio`/`limine-mkinitcpio`.
-  * The three wrong passwords count toward faillock (deny=10, unlock 120 s, shared with the lock screen and sudo); do not add more wrong passwords in this session. On an old build a file `~/unlock-pwned` appearing is the exact regression the unit test guards — record `omarchy-version`.
+  * Do not add more wrong passwords. They share the lock-screen failure count.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Terminal with the five refusals (symlink and root messages verbatim); the hostile-name picker run and `~/unlock-pwned` absent; the floating terminal with the three failures and the Failed banner; `default` and unchanged checksums; no unexpected password prompt on any screenshot
+  * On success
+  ** Each bad colour, missing logo, and symlink refused before a password prompt, the sudo form refused, no `unlock-pwned` file, three wrong passwords ending in Failed, and both checksums unchanged
   * If unsuccessful
-  ** Any refusal that instead prompted for a password or began rebuilding; a Done banner, a changed `plymouth current` or checksum, or `~/unlock-pwned` existing; `omarchy-version`
+  ** A password prompt on a refusal, a changed checksum, or `~/unlock-pwned` existing
 covers: bin/omarchy-plymouth-set (argument/logo guards, EUID check, run_root_transaction failure); bin/omarchy-plymouth-set-by-theme; bin/omarchy-plymouth-switcher; bin/omarchy-launch-floating-terminal-with-presentation; bin/omarchy-show-done; omarchy-menu.jsonc style.unlock; test/shell.d/plymouth-set-test.sh; test/shell.d/menu-test.sh; manual/41-branding.md; manual/06-themes.md
 
 ### plymouth-set-by-theme-reboot-and-reset   [VM-OK] [SLOW]
@@ -10356,28 +10445,47 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy plymouth current; ls -l /usr/share/plymouth/themes/omarchy/ /usr/share/sddm/themes/omarchy/ | sudo tee /dev/ttyS0` → `default`; every file is a regular `-rw-r--r-- root root` file.
-  * Press Super+Space → `Style` → `Unlock`. The labelled picker opens with `default` preselected. Unhappy path first: press Escape — the picker closes and no terminal opens.
-  * Press Super+Space → `Style` → `Unlock` again and select `gruvbox`.
-  ** A floating "Omarchy" terminal runs `omarchy-plymouth-set-by-theme gruvbox`: sudo prompt (type `prime`), the Plymouth theme is recoloured, `limine-mkinitcpio`/`mkinitcpio` regenerates the initramfs (1–4 min on 2 vCPU; keep screenshotting), SDDM colours are updated, `● Done!`. Press the key it names.
-  * Type `omarchy plymouth current` → `gruvbox`; `cmp /usr/share/plymouth/themes/omarchy/logo.png /usr/share/omarchy/themes/gruvbox/unlock.png && echo SAME` → `SAME`; `ls -l /usr/share/plymouth/themes/omarchy/logo.png /usr/share/sddm/themes/omarchy/logo.png` → still regular 0644 root files; `grep -c SetBackgroundTopColor /usr/share/plymouth/themes/omarchy/omarchy.script` → `1`; `find /usr/share/plymouth/themes/omarchy /usr/share/sddm/themes/omarchy -name '.*omarchy-new*'` → nothing left behind.
-  * Reboot: press Super+Escape (System menu) → `Reboot`. From the moment the firmware screen disappears, screenshot every second: the Plymouth passphrase screen must use the Gruvbox background colour and the Gruvbox unlock logo, not the stock Omarchy logo. Type the LUKS passphrase `prime` blind (early keys are discarded; at most one wrong try) — autologin lands on the desktop with no SDDM step.
-  * Open a terminal with Super+Enter and type `omarchy plymouth reset` (password `prime`) → refreshes Plymouth and SDDM (another initramfs rebuild, 1–4 min); `omarchy plymouth current` → `default`; `cmp /usr/share/omarchy/default/plymouth/logo.png /usr/share/plymouth/themes/omarchy/logo.png && echo SAME` → `SAME`.
-  ** Menu equivalent: Super+Space → `Style` → `Unlock` → `default` runs `omarchy-plymouth-reset` in a floating terminal and must end `● Done!` even when already default.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy plymouth current` and press Return. The line is `default`.
+  * Type `ls -l /usr/share/plymouth/themes/omarchy/ /usr/share/sddm/themes/omarchy/` and press Return. The files are regular root-owned mode `644` files.
+  * Press Super+Space. The menu opens.
+  * Click Style.
+  * Click Unlock. The unlock picker opens. `default` is highlighted.
+  * Press Escape. The picker closes. No terminal opens.
+  * Press Super+Space. The menu opens.
+  * Click Style.
+  * Click Unlock. The unlock picker opens.
+  * Select gruvbox. A floating terminal starts the set.
+  ** If a password is asked, type `prime` and press Return. The initramfs rebuild can take several minutes.
+  * Wait until the terminal says Done.
+  * Press a key. That terminal closes.
+  * Type `omarchy plymouth current` and press Return. The line is `gruvbox`.
+  * Type `cmp /usr/share/plymouth/themes/omarchy/logo.png /usr/share/omarchy/themes/gruvbox/unlock.png && echo SAME` and press Return. The line is `SAME`.
+  * Type `grep -c SetBackgroundTopColor /usr/share/plymouth/themes/omarchy/omarchy.script` and press Return. The line is `1`.
+  * Press Super+Escape. The system menu opens.
+  * Click Reboot. The machine reboots.
+  * Screenshot the passphrase screen. It uses the Gruvbox logo and colours.
+  * Type `prime` and press Enter. The desktop returns.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy plymouth reset` and press Return.
+  ** If a password is asked, type `prime` and press Return. The rebuild can take several minutes.
+  * Wait until it finishes.
+  * Type `omarchy plymouth current` and press Return. The line is `default`.
+  * Type `cmp /usr/share/omarchy/default/plymouth/logo.png /usr/share/plymouth/themes/omarchy/logo.png && echo SAME` and press Return. The line is `SAME`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The boot splash is brief before the passphrase prompt and is not reliably OCR-able; rely on the logo shape and background colour. `plymouth current` identifies the theme by logo byte-compare.
-  * The presentation terminal shows the logo, the output, then `Done` or `Failed`; red `Failed` text is a failure — capture it. If the session budget runs out before the reset, report the state so the disk is discarded (`stop`), never saved.
+  * Early keys at the passphrase screen are discarded. Do not enter more than one wrong passphrase.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** The Unlock picker and the desktop after Escape; the set terminal ending Done; `gruvbox`, `SAME`, the 0644 root listings, `1` and no temp files; the Gruvbox-branded Plymouth passphrase screen after reboot; the reset terminal and `default`/`SAME` afterwards
+  * On success
+  ** Escape doing nothing, the set ending Done, `gruvbox` and `SAME`, the Gruvbox passphrase screen, and `default` with `SAME` after reset
   * If unsuccessful
-  ** The stock logo still shown at boot, the set/reset terminal failing (initramfs error), a symlink or non-0644 file in the theme directories, leftover `.omarchy-new` files; `./client get-serial`; `omarchy-version`
+  ** The stock logo at boot, or the set or reset ending Failed
 covers: manual/41-branding.md (Boot unlock); manual/43 (Unlock image); manual/06:70; omarchy-menu.jsonc style.unlock (:106); bin/omarchy-plymouth-switcher; bin/omarchy-plymouth-set-by-theme; bin/omarchy-plymouth-set; bin/omarchy-plymouth-reset; bin/omarchy-plymouth-current; bin/omarchy-plymouth-list; bin/omarchy-refresh-plymouth; bin/omarchy-refresh-sddm; test/shell.d/plymouth-set-test.sh
 
 ### refresh-config-hyprland-restores-with-backup   [VM-OK]

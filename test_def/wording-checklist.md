@@ -234,14 +234,14 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `owe-aur-install-video-wallpaper`
 - [x] `font-set-menu-and-cli`
 - [x] `font-install-nerd-font-from-menu`
-- [ ] `font-set-and-text-size-edit-kitty-conf`
-- [ ] `fontconfig-defaults-and-icon-font-glyphs`
-- [ ] `branding-about-text-edit-and-reset`
-- [ ] `branding-about-from-image-and-cancel`
-- [ ] `plymouth-preview-render-and-reject`
-- [ ] `plymouth-list-current-and-unlock-picker`
-- [ ] `plymouth-set-rejects-bad-input-and-wrong-sudo-password`
-- [ ] `plymouth-set-by-theme-reboot-and-reset`
+- [x] `font-set-and-text-size-edit-kitty-conf`
+- [x] `fontconfig-defaults-and-icon-font-glyphs`
+- [x] `branding-about-text-edit-and-reset`
+- [x] `branding-about-from-image-and-cancel`
+- [x] `plymouth-preview-render-and-reject`
+- [x] `plymouth-list-current-and-unlock-picker`
+- [x] `plymouth-set-rejects-bad-input-and-wrong-sudo-password`
+- [x] `plymouth-set-by-theme-reboot-and-reset`
 - [ ] `refresh-config-hyprland-restores-with-backup`
 - [ ] `refresh-config-shell-tmux-hyprsunset-restart`
 - [ ] `refresh-applications-and-chromium-flags`
