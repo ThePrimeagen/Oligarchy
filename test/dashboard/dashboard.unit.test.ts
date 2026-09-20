@@ -29,6 +29,60 @@ describe("POST /abort happy path", () => {
   });
 });
 
+describe("test results page unhappy path", () => {
+  it("answers /results with the test results page when the database cannot be read", async () => {
+    const response = await app.request("/results", undefined, env);
+    expect(response.status).toBe(500);
+    const html = await response.text();
+    expect(html).toContain("Sessions are unavailable.");
+    expect(html).toContain("Test results");
+    expect(html).toContain('href="/results"');
+  });
+});
+
+describe("homepage unhappy path", () => {
+  it("answers / as the servers page when the database cannot be read, with the definitions tab", async () => {
+    const response = await app.request("/", undefined, env);
+    expect(response.status).toBe(500);
+    const html = await response.text();
+    expect(html).toContain("<!doctype html>");
+    expect(html).toContain("<title>oligarchy servers</title>");
+    expect(html).toContain("<h1>oligarchy servers</h1>");
+    expect(html).toContain(
+      '<nav class="tabs" aria-label="Pages"><a href="/" aria-current="page">servers</a><a href="/definitions">definitions</a></nav>',
+    );
+    expect(html).toContain("<p>error: internal error</p>");
+    expect(html).not.toContain("dashboard.css");
+    expect(html).not.toContain("Test results");
+    expect(html).not.toContain("postgres://");
+  });
+
+  it("answers /servers the same way", async () => {
+    const response = await app.request("/servers", undefined, env);
+    expect(response.status).toBe(500);
+    const html = await response.text();
+    expect(html).toContain("<h1>oligarchy servers</h1>");
+    expect(html).toContain('aria-current="page">servers</a>');
+  });
+
+  it("answers /definitions as the same plain document when the database cannot be read", async () => {
+    const response = await app.request("/definitions", undefined, env);
+    expect(response.status).toBe(500);
+    const html = await response.text();
+    expect(html).toContain("<!doctype html>");
+    expect(html).toContain("<title>oligarchy definitions</title>");
+    expect(html).toContain("<h1>oligarchy definitions</h1>");
+    expect(html).toContain(
+      '<nav class="tabs" aria-label="Pages"><a href="/">servers</a><a href="/definitions" aria-current="page">definitions</a></nav>',
+    );
+    expect(html).toContain("<p>error: Test definitions are unavailable.</p>");
+    expect(html).not.toContain("dashboard.css");
+    expect(html).not.toContain('href="/definitions?name=');
+    expect(html).not.toContain("postgres://");
+    expect(html).not.toContain("OMARCHY");
+  });
+});
+
 describe("POST /abort unhappy path", () => {
   it("answers 200 with ok when the ticket is empty", async () => {
     const response = await abort({ ticket: "", action: "drive" });
