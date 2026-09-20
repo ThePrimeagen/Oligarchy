@@ -21758,26 +21758,37 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open the Omarchy Menu (Super+Space) → Setup → Security with the mouse: rows Fido2, SSHD, Passwordless Sudo, Sudoless Docker — **no Fingerprint** row. Screenshot; Escape.
-  * Open the Omarchy Menu → Remove → Security: no Fingerprint row either (fprintd is not installed). Escape.
-  * Open a terminal with Super+Enter and run `omarchy-hw-fingerprint; echo exit=$?` → `exit=1`.
-  * Run `omarchy setup security fingerprint; echo exit=$?` → green `Setting up fingerprint scanner for authentication.` then red `No fingerprint sensor detected.`, `exit=1`, with no `Installing required packages` line, no sudo prompt and no pacman activity.
-  * Run `pacman -Q fprintd libfprint-git 2>&1; ls /etc/pam.d/omarchy-lock-fingerprint 2>&1; grep -c pam_fprintd /etc/pam.d/sudo` → both packages `was not found`, `No such file`, `0` (PAM untouched).
-  * Close the terminal with Super+W; the desktop is as before.
-  ** Skipped here: enrolment, verification, the PAM edits and the lock-screen fingerprint path — they need a reader.
+  * Press Super+Space. The menu opens.
+  * Select Setup. The Setup menu opens.
+  * Select Security. The Security menu opens. Fingerprint is not listed.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Remove. The Remove menu opens.
+  * Select Security. The Security menu opens. Fingerprint is not listed.
+  * Press Escape. The menu closes.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy-hw-fingerprint; echo "exit=$?"` and press Return. The last line is `exit=1`.
+  * Type `omarchy setup security fingerprint; echo "exit=$?"` and press Return. The output says no fingerprint sensor was detected, and the last line is `exit=1`. No password prompt appears.
+  * Type `pacman -Q fprintd` and press Return. The output says the package was not found.
+  * Type `pacman -Q libfprint-git` and press Return. The output says the package was not found.
+  * Type `ls /etc/pam.d/omarchy-lock-fingerprint` and press Return. The output says the file does not exist.
+  * Type `grep -c pam_fprintd /etc/pam.d/sudo` and press Return. The output is `0`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The command needs no sudo on this path; a sudo prompt or a package install is itself the failure.
+  * A password prompt or a package install is a failure. Do not attach a reader.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of both Security submenus without Fingerprint, `exit=1` from the detector, the refusal with `exit=1`, and the untouched package/PAM state
+  ** Setup → Security and Remove → Security both omit Fingerprint.
+  ** The detector exits 1. Setup says no sensor was detected, exits 1, and does not ask for a password or install packages.
+  ** `fprintd` and `libfprint-git` are absent. The lock PAM file is absent. sudo has no `pam_fprintd` line.
   * If unsuccessful
-  ** A Fingerprint row shown, the wizard proceeding to install packages or prompting for sudo, or PAM modified without hardware
+  ** A Fingerprint row is shown, the wizard installs packages, or PAM changes.
 covers: manual/37-hardware-authentication.md (Fingerprint authentication); bin/omarchy-setup-security-fingerprint; bin/omarchy-hw-fingerprint; install/user/first-run/setup-fingerprint.hook; default/omarchy/omarchy-menu.jsonc setup.security.fingerprint, remove.security.fingerprint (when)
 
 ### pacman-repos-and-signing-key   [VM-OK] [NET]
@@ -21787,25 +21798,30 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `pacman -Q omarchy-keyring; pacman-key --list-keys 40DFB630FF42BCFFB047046CF0134EE680CAC571` → a version line and a `pub` block with `pkgs@omarchy.org`.
-  * Type `grep -E '^\[' /etc/pacman.conf` → exactly `[options] [core] [extra] [multilib] [omarchy]`.
-  * Type `grep -E '^Server' /etc/pacman.conf /etc/pacman.d/mirrorlist; grep '^SigLevel' /etc/pacman.conf` → an `*.omarchy.org` mirror, `pkgs.omarchy.org` for `[omarchy]`, `Required DatabaseOptional`.
-  * Type `curl -sIL https://iso.omarchy.org/omarchy-4.0.4.iso.sig | grep -m1 HTTP` → a `200`.
-  * Unhappy path: type `pacman-key --list-keys 0000000000000000000000000000000000000000; echo rc=$?` → `error: key "…" could not be looked up remotely` (or `No public key`) and a non-zero rc — only the published key is trusted.
-  * Close the terminal with Super+W; nothing was changed.
+  * Press Super+Return. A terminal opens.
+  * Type `pacman -Q omarchy-keyring` and press Return. A package version is printed.
+  * Type `pacman-key --list-keys 40DFB630FF42BCFFB047046CF0134EE680CAC571` and press Return. A public-key block for `pkgs@omarchy.org` is printed.
+  * Type `grep -E '^\[' /etc/pacman.conf` and press Return. The lines are `[options]`, `[core]`, `[extra]`, `[multilib]`, and `[omarchy]`.
+  * Type `grep -E '^Server' /etc/pacman.conf /etc/pacman.d/mirrorlist` and press Return. An `omarchy.org` mirror is listed, and `[omarchy]` uses `pkgs.omarchy.org`.
+  * Type `grep '^SigLevel' /etc/pacman.conf` and press Return. The line includes `Required DatabaseOptional`.
+  * Type `curl -sIL https://iso.omarchy.org/omarchy-4.0.4.iso.sig | grep -m1 HTTP` and press Return. The line includes `200`.
+  * Type `pacman-key --list-keys 0000000000000000000000000000000000000000; echo "rc=$?"` and press Return. The output says the key could not be found, and the last line is non-zero.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Only the `.sig` HEAD request needs network (a few hundred bytes).
+  * Only the signature request uses the network.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the key block with the fingerprint and `pkgs@omarchy.org`, the repo list, mirror servers, SigLevel, the `200` for the `.sig`, and the unknown-key error
+  ** The Omarchy keyring package is installed, and the published key belongs to `pkgs@omarchy.org`.
+  ** The repo list is options, core, extra, multilib, and omarchy. The servers are Omarchy mirrors, and the signature level is `Required DatabaseOptional`.
+  ** The ISO signature URL returns 200. An all-zero key is not found and exits non-zero.
   * If unsuccessful
-  ** Key missing, extra repositories, a non-omarchy mirror, or a 404
+  ** The published key is missing, an extra repository is enabled, or the signature URL is not 200.
 covers: manual/48:8, 48:29-31; default/pacman/*; omarchy-keyring
 
 ### zram-swap-active-and-oomd-kills-runaway-app   [VM-OK]
@@ -21815,27 +21831,45 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter and type `swapon --show; zramctl` Enter → `/dev/zram0 … ~4G … PRIO 100` and `zstd`.
-  * Type `cat /sys/module/zswap/parameters/enabled; sysctl vm.swappiness vm.page-cluster` Enter → `N`, `150`, `0`.
-  * Type `free -h | grep -i swap; ls /swapfile 2>&1; systemctl is-active systemd-oomd` Enter → Swap total ≈ RAM (`3.8G`/`3.9G` for a 4 GB guest), no swapfile, `active`.
-  * Press Super+Enter for a second terminal and type `echo SURVIVOR` Enter there.
-  * Click the first terminal and type `python3 -c 'import os; b=[]` Enter `while True: b.append(os.urandom(1<<26))'` Enter (the newline between the two python lines matters; type it as shown). Random data is used because zeros would compress into zram and never fill memory.
-  * Screenshot every 5 seconds. The guest may be sluggish for up to two minutes; then the first terminal prints `Killed` (or the prompt returns). The second terminal with `SURVIVOR` and the bar are still present; click the second terminal and type `echo alive` Enter — it responds.
-  * Type `journalctl -b -o cat | grep -iE 'oom|Killed process' | tail -n 5 | sudo tee /dev/ttyS0` Enter (password `prime`) and read get-serial → a kill of python is logged.
-  * Close both terminals with Super+W; the desktop is as before.
+  * Press Super+Return. A terminal opens.
+  * Type `swapon --show` and press Return. `/dev/zram0` is listed with priority 100.
+  * Type `zramctl` and press Return. The algorithm is `zstd`.
+  * Type `cat /sys/module/zswap/parameters/enabled` and press Return. The output is `N`.
+  * Type `sysctl vm.swappiness` and press Return. The value is `150`.
+  * Type `sysctl vm.page-cluster` and press Return. The value is `0`.
+  * Type `free -h | grep -i swap` and press Return. The swap total is close to the RAM size.
+  * Type `ls /swapfile` and press Return. The output says the file does not exist.
+  * Type `systemctl is-active systemd-oomd` and press Return. The output is `active`.
+  * Press Super+Return. A second terminal opens.
+  * Type `echo SURVIVOR` and press Return. The output is `SURVIVOR`.
+  * Click the first terminal. It is focused.
+  * Type `python3 -c 'import os; b=[]` and press Return. The continuation prompt appears.
+  * Type `while True: b.append(os.urandom(1<<26))'` and press Return. The process runs.
+  * Wait until that terminal prints `Killed`, or 2 minutes pass.
+  * Click the second terminal. It is focused.
+  * Type `echo alive` and press Return. The output is `alive`.
+  * Type `journalctl -b -o cat | grep -iE 'oom|Killed process' | tail -n 5 | sudo tee /dev/ttyS0` and press Return. If sudo asks, type `prime` and press Return. The prompt returns.
+  * Read the serial log. A python process was killed.
+  * Press Super+W. The second terminal closes.
+  * Click the first terminal. It is focused.
+  * Press Super+W. The first terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * If nothing happens after three minutes press Ctrl+C in the first terminal and report. Move the mouse between screenshots so the 150 s screensaver does not engage.
+  * Screenshot about every 5 seconds while the process runs. Move the mouse so the screensaver does not start.
+  * If nothing is killed after 3 minutes, press Ctrl+C in the first terminal and record that.
+  * The blank line between the two Python lines is required.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of swapon/zramctl, the zswap and sysctl values, free/swapfile with oomd active, the `Killed` terminal, the surviving terminal and bar answering `alive`, and the serial lines naming the killed python
+  ** zram0 is active at priority 100 with zstd. zswap is `N`, swappiness is 150, and page-cluster is 0.
+  ** Swap is about the size of RAM, no swapfile exists, and systemd-oomd is active.
+  ** The memory loop prints `Killed`. The second terminal still prints `alive`, and the log names the killed python process.
   * If unsuccessful
-  ** Screenshot of no swap device, zswap `Y`, a wrong priority, the desktop flashing/restarting (compositor killed), a lock-up beyond three minutes, or no kill logged
+  ** No swap device is present, zswap is on, the desktop restarts, or nothing is killed within 3 minutes.
 covers: default/systemd/zram-generator.conf.d/90-omarchy.conf, etc/tmpfiles.d/omarchy-zswap.conf, etc/sysctl.d/99-omarchy-sysctl.conf, default/systemd/user/app.slice.d/10-oomd.conf, etc/systemd/oomd.conf.d/10-omarchy.conf
 
 ### plugin-registry-rejects-reserved-id-broken-manifest-and-duplicate   [VM-OK]
@@ -21845,27 +21879,50 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and screenshot the bar as a reference. Run `d=~/.config/omarchy/plugins/omarchy.evil; mkdir -p $d; printf '%s\n' 'import QtQuick' 'import qs.Ui' 'BarWidget { moduleName: "omarchy.evil"; implicitWidth: 60; implicitHeight: barSize; Text { anchors.centerIn: parent; text: "EVIL"; color: "red" } }' > $d/W.qml` then `printf '%s\n' '{"schemaVersion":1,"id":"omarchy.evil","name":"Evil","version":"1","kinds":["bar-widget"],"entryPoints":{"barWidget":"W.qml"}}' > $d/manifest.json`.
-  * Wait 3 s (the folder watch reloads plugins). Screenshot the bar: no `EVIL` label. Run `omarchy-plugin-enable omarchy.evil; echo "exit=$?"` → `plugin 'omarchy.evil' is not known; run: omarchy-shell shell rescanPlugins`, `exit=1`. Run `journalctl -t omarchy-shell --since -2min --no-pager | grep -i 'omarchy.evil'` → `PluginRegistry: plugin omarchy.evil rejected: id is reserved for first-party Omarchy plugins`.
-  * Run `d2=~/.config/omarchy/plugins/t.broken; mkdir -p $d2; printf '%s\n' '{"schemaVersion":1,"id":"t.broken","version":"1","kinds":["bar-widget"],"entryPoints":{"barWidget":"W.qml"}}' > $d2/manifest.json` (no `name`). Wait 3 s. Run `omarchy-plugin-list | grep -c broken` → `0`; `journalctl -t omarchy-shell --since -2min --no-pager | grep -i 't.broken'` → `missing required field 'name'`.
-  * CLI negatives, echoing the exit code after each: `omarchy-plugin-enable nope.plugin` → `plugin 'nope.plugin' is not known; run: omarchy-shell shell rescanPlugins`, 1; `omarchy-plugin-enable omarchy.bar --section left` → `'omarchy.bar' is a bar; it replaces the bar in use rather than taking a place in one`, 1; `omarchy-plugin-enable omarchy.clock middle` → `section must be left, center, or right`, 1; `omarchy-plugin-disable nope.plugin` → record the exact output (expected quirk: `Disabled nope.plugin`, exit 0); `omarchy-plugin-remove '../etc' --yes` → `invalid plugin id '../etc'`, 1.
-  * Create a valid local plugin repo: `mkdir -p /tmp/acme-demo && cd /tmp/acme-demo && printf '%s\n' '{"schemaVersion":1,"id":"acme.demo","name":"Demo","version":"1.0.0","description":"demo","kinds":["bar-widget"],"entryPoints":{"barWidget":"Widget.qml"},"barWidget":{"displayName":"Demo","description":"demo","category":"Test","allowMultiple":false}}' > manifest.json && printf 'import QtQuick\nItem {}\n' > Widget.qml && git init -q && git add . && git -c user.name=t -c user.email=t@t commit -qm init && cd ~`. Run `omarchy-plugin-add /tmp/acme-demo --yes` → `Added acme.demo into /home/prime/.config/omarchy/plugins/acme.demo` and `Enable it later with: omarchy plugin enable acme.demo`.
-  * Duplicate id: `cp -r ~/.config/omarchy/plugins/acme.demo ~/.config/omarchy/plugins/other-folder` then `omarchy-plugin-add /tmp/acme-demo --yes; echo "exit=$?"` → `plugin id 'acme.demo' is already used by …` and a non-zero exit.
-  * Clean up: `rm -rf ~/.config/omarchy/plugins/omarchy.evil ~/.config/omarchy/plugins/t.broken ~/.config/omarchy/plugins/acme.demo ~/.config/omarchy/plugins/other-folder /tmp/acme-demo`; wait 3 s; `omarchy-shell shell ping` → `ok`; `ls -a ~/.config/omarchy/plugins/` → no `.add.tmp.*` entries. Screenshot the bar again: identical to the reference. Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Look at the bar. Record it.
+  * Type `d=~/.config/omarchy/plugins/omarchy.evil; mkdir -p $d; printf '%s\n' 'import QtQuick' 'import qs.Ui' 'BarWidget { moduleName: "omarchy.evil"; implicitWidth: 60; implicitHeight: barSize; Text { anchors.centerIn: parent; text: "EVIL"; color: "red" } }' > $d/W.qml` and press Return. The prompt returns.
+  * Type `printf '%s\n' '{"schemaVersion":1,"id":"omarchy.evil","name":"Evil","version":"1","kinds":["bar-widget"],"entryPoints":{"barWidget":"W.qml"}}' > $d/manifest.json` and press Return. The prompt returns.
+  * Wait 3 seconds.
+  * Look at the bar. No EVIL label is shown.
+  * Type `omarchy-plugin-enable omarchy.evil; echo "exit=$?"` and press Return. The output says the plugin is not known, and the last line is `exit=1`.
+  * Type `journalctl -t omarchy-shell --since -2min --no-pager | grep -i 'omarchy.evil'` and press Return. The output says the id is reserved.
+  * Type `d2=~/.config/omarchy/plugins/t.broken; mkdir -p $d2; printf '%s\n' '{"schemaVersion":1,"id":"t.broken","version":"1","kinds":["bar-widget"],"entryPoints":{"barWidget":"W.qml"}}' > $d2/manifest.json` and press Return. The prompt returns.
+  * Wait 3 seconds.
+  * Type `omarchy-plugin-list | grep -c broken` and press Return. The output is `0`.
+  * Type `journalctl -t omarchy-shell --since -2min --no-pager | grep -i 't.broken'` and press Return. The output says the name field is missing.
+  * Type `omarchy-plugin-enable nope.plugin; echo "exit=$?"` and press Return. The output says the plugin is not known, and the last line is `exit=1`.
+  * Type `omarchy-plugin-enable omarchy.bar --section left; echo "exit=$?"` and press Return. The output says `omarchy.bar` is a bar, and the last line is `exit=1`.
+  * Type `omarchy-plugin-enable omarchy.clock middle; echo "exit=$?"` and press Return. The output says the section must be left, center, or right, and the last line is `exit=1`.
+  * Type `omarchy-plugin-disable nope.plugin; echo "exit=$?"` and press Return. Record the output and the exit.
+  * Type `omarchy-plugin-remove '../etc' --yes; echo "exit=$?"` and press Return. The output says the plugin id is invalid, and the last line is `exit=1`.
+  * Type `mkdir -p /tmp/acme-demo && cd /tmp/acme-demo && printf '%s\n' '{"schemaVersion":1,"id":"acme.demo","name":"Demo","version":"1.0.0","description":"demo","kinds":["bar-widget"],"entryPoints":{"barWidget":"Widget.qml"},"barWidget":{"displayName":"Demo","description":"demo","category":"Test","allowMultiple":false}}' > manifest.json && printf 'import QtQuick\nItem {}\n' > Widget.qml && git init -q && git add . && git -c user.name=t -c user.email=t@t commit -qm init && cd ~` and press Return. The prompt returns in the home directory.
+  * Type `omarchy-plugin-add /tmp/acme-demo --yes` and press Return. The output says `acme.demo` was added.
+  * Type `cp -a ~/.config/omarchy/plugins/acme.demo ~/.config/omarchy/plugins/other-folder` and press Return. The prompt returns.
+  * Type `omarchy-plugin-add /tmp/acme-demo --yes; echo "exit=$?"` and press Return. The output says the id is already used, and the last line is non-zero.
+  * Type `rm -rf ~/.config/omarchy/plugins/omarchy.evil ~/.config/omarchy/plugins/t.broken ~/.config/omarchy/plugins/acme.demo ~/.config/omarchy/plugins/other-folder /tmp/acme-demo` and press Return. The prompt returns.
+  * Wait 3 seconds.
+  * Type `omarchy-shell shell ping` and press Return. The output is `ok`.
+  * Type `ls -a ~/.config/omarchy/plugins/` and press Return. No `.add.tmp` name is listed.
+  * Look at the bar. It matches the first look.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The shell reloads plugins on every file save in that folder; the bar may flicker once — that is expected. The menu's Remove Plugin row appears only while a user plugin is installed — you may notice it appear and disappear.
-  * If the terminal scrolls, wrap the commands in `{ …; } 2>&1 | sudo tee /dev/ttyS0` and read the serial log.
+  * The bar may flicker once when a plugin folder changes.
+  * If the output scrolls away, send the command through `sudo tee /dev/ttyS0` and read the serial log.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Terminal/serial output with the `not known` error, both journal rejection lines, every CLI message and exit code as listed (and the recorded disable-unknown quirk), `Added acme.demo into …`, the `plugin id 'acme.demo' is already used by` refusal, `ok` after cleanup and a clean plugins directory; bar screenshots identical before and after with no `EVIL` label
+  ** The reserved plugin is not shown on the bar. Enabling it says it is not known and exits 1. The journal says the id is reserved.
+  ** The broken manifest is not listed. The journal says `name` is missing.
+  ** An unknown id, enabling the bar as a widget, and a bad section each exit 1. The disable of an unknown id is recorded. A path-shaped id is invalid.
+  ** A local `acme.demo` repo is added. A second add says the id is already used. After cleanup, ping prints `ok`, no temp directory remains, and the bar matches the start.
   * If unsuccessful
-  ** `omarchy.evil` listed or `EVIL` rendered, the shell dying during reload, the built-in widgets disappearing, a duplicate id accepted, a wrong exit code, or a changed bar
+  ** EVIL appears, the shell stops, a duplicate id is accepted, or the bar changes.
 covers: shell/services/PluginRegistry.qml (parseScanOutput reserved-id rejection, validateManifest, localPluginWatcher); shell/shell.qml reloadPlugins, setPluginEnabled/enablePlugin; bin/omarchy-plugin-enable, -disable, -remove, -add; bin/omarchy-git-url-check; test/shell.d/plugin-registry-contract-test.sh, runtime-smoke-test.sh ("installed plugin changes reload without an explicit rescan"), plugin-add-test.sh, plugin-enable-test.sh, menu-test.sh (setup.plugin.add); manual/32-shell-plugins.md
 
 ### plugin-third-party-api-boundary   [VM-OK]
@@ -21875,27 +21932,35 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and create the probe plugin: `d=/tmp/probe; mkdir -p $d && cd $d` then `printf '%s\n' '{"schemaVersion":1,"id":"prime.probe","name":"Probe","version":"1","kinds":["service"],"entryPoints":{"service":"Probe.qml"}}' > manifest.json`.
-  * Type `printf '%s\n' 'import QtQuick' 'import Quickshell.Io' 'Item { id: root; property var shell: null; Process { id: p } Timer { interval: 2000; running: true; onTriggered: { var s = root.shell; var r = "own=" + (s && s.serviceFor("prime.probe") !== null) + " lock=" + (s && s.serviceFor("omarchy.lock") === null) + " lockfp=" + (s && s.firstPartyServiceFor("omarchy.lock") === null) + " idle=" + (s && s.firstPartyServiceFor("omarchy.idle") === null) + " summon=" + (s && s.summon("omarchy.menu", "{}")) + " hasServices=" + (s && s.services === undefined); p.command = ["bash", "-c", "echo " + r + " > /tmp/probe.txt"]; p.running = true } } }' > Probe.qml` then `git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -qm init && cd ~`.
-  * Run `omarchy-plugin-add /tmp/probe --enable --yes` → `Added prime.probe …` and `Enabled prime.probe`.
-  * Wait 5 s (one screenshot proving no menu opened). Run `cat /tmp/probe.txt`.
-  ** Must read exactly: `own=true lock=true lockfp=true idle=true summon=false hasServices=true` — the plugin sees its own service, gets `null` for the lock (both lookups) and for idle, its summon of the menu is refused, and there is no `services` map on the object it was given.
-  * Run `omarchy-plugin-remove prime.probe --yes; rm -f /tmp/probe.txt; rm -rf /tmp/probe` → `Removed prime.probe.`; `omarchy-plugin-list | grep -c probe` → `0`.
-  * Close the terminal with Super+W; the desktop is as before.
+  * Press Super+Return. A terminal opens.
+  * Type `d=/tmp/probe; mkdir -p $d && cd $d` and press Return. The prompt is in `/tmp/probe`.
+  * Type `printf '%s\n' '{"schemaVersion":1,"id":"prime.probe","name":"Probe","version":"1","kinds":["service"],"entryPoints":{"service":"Probe.qml"}}' > manifest.json` and press Return. The prompt returns.
+  * Type `printf '%s\n' 'import QtQuick' 'import Quickshell.Io' 'Item { id: root; property var shell: null; Process { id: p } Timer { interval: 2000; running: true; onTriggered: { var s = root.shell; var r = "own=" + (s && s.serviceFor("prime.probe") !== null) + " lock=" + (s && s.serviceFor("omarchy.lock") === null) + " lockfp=" + (s && s.firstPartyServiceFor("omarchy.lock") === null) + " idle=" + (s && s.firstPartyServiceFor("omarchy.idle") === null) + " summon=" + (s && s.summon("omarchy.menu", "{}")) + " hasServices=" + (s && s.services === undefined); p.command = ["bash", "-c", "echo " + r + " > /tmp/probe.txt"]; p.running = true } } }' > Probe.qml` and press Return. The prompt returns.
+  * Type `git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -qm init && cd ~` and press Return. The prompt is in the home directory.
+  * Type `omarchy-plugin-add /tmp/probe --enable --yes` and press Return. The output says `prime.probe` was added and enabled.
+  * Wait 5 seconds. No menu opens.
+  * Type `cat /tmp/probe.txt` and press Return. The output is `own=true lock=true lockfp=true idle=true summon=false hasServices=true`.
+  * Type `omarchy-plugin-remove prime.probe --yes` and press Return. The output says `prime.probe` was removed.
+  * Type `rm -f /tmp/probe.txt` and press Return. The prompt returns.
+  * Type `rm -rf /tmp/probe` and press Return. The prompt returns.
+  * Type `omarchy-plugin-list | grep -c probe` and press Return. The output is `0`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * If `/tmp/probe.txt` does not exist after 10 s the service failed to load: `journalctl -t omarchy-shell --since -2min --no-pager | grep -i probe | sudo tee /dev/ttyS0` and report.
-  * Any `false` where `true` is expected (or `summon=true` / the menu popping up) is a security boundary failure — report loudly.
+  * If `/tmp/probe.txt` is missing after 10 seconds, read `journalctl -t omarchy-shell --since -2min` and record the probe lines.
+  * A menu opening during the wait is a failure.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Terminal showing `Added`/`Enabled`, the exact probe line, and the plugin gone from the list afterwards; a screenshot proving no menu opened during the 5 s wait
+  ** The probe plugin is added and enabled. During the wait, no menu opens.
+  ** The probe file reads `own=true lock=true lockfp=true idle=true summon=false hasServices=true`.
+  ** Removal says the plugin was removed, and it is no longer listed. The temp files are gone.
   * If unsuccessful
-  ** The probe line with any unexpected value, a menu opened by the plugin, or a missing probe file with the journal excerpt
+  ** Any probe value differs, the menu opens, or the probe file is missing.
 covers: shell/services/PluginShellApi.qml, shell/shell.qml (createScopedPluginShell, pluginOwnsTarget, pluginServiceFor, ensureService third-party parenting), shell/services/AuthServiceStore.js, manual/32-shell-plugins.md (trust paragraph), test/shell.d/plugin-auth-boundary-test.sh
 
 ### plocate-index-excludes-snapshots   [VM-OK]
@@ -21905,24 +21970,29 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter and type `systemctl cat plocate-updatedb.service --no-pager | grep -E 'ExecStart=/|ConditionACPower'` Enter → `ExecStart=/usr/bin/updatedb --prune-bind-mounts=no --add-prunepaths=/.snapshots` and `ConditionACPower=true`.
-  * Type `sudo systemctl start plocate-updatedb.service` Enter (password `prime`); poll `systemctl is-active plocate-updatedb.service` with screenshots until it prints `inactive` (the index run takes a few seconds).
-  * Type `plocate omarchy.ttf; echo "snap-hits=$(plocate -c /.snapshots/)"` Enter → `/usr/share/fonts/omarchy/omarchy.ttf` and `snap-hits=0`.
-  * Unhappy path: type `plocate no-such-file-zz-123; echo rc=$?` Enter → no output, `rc=1`.
-  * Press Ctrl+D; the desktop is as before.
+  * Press Super+Return. A terminal opens.
+  * Type `systemctl cat plocate-updatedb.service --no-pager | grep -E 'ExecStart=/|ConditionACPower'` and press Return. The start line prunes `/.snapshots`, and AC power is required.
+  * Type `sudo systemctl start plocate-updatedb.service` and press Return. If sudo asks, type `prime` and press Return. The prompt returns.
+  * Type `systemctl is-active plocate-updatedb.service` and press Return. Record the output.
+  ** If it is still `active`, wait 5 seconds and type the same command again. Stop when it is `inactive`.
+  * Type `plocate omarchy.ttf` and press Return. The output includes `/usr/share/fonts/omarchy/omarchy.ttf`.
+  * Type `plocate -c /.snapshots/` and press Return. The output is `0`.
+  * Type `plocate no-such-file-zz-123; echo "rc=$?"` and press Return. No path is printed, and the last line is `rc=1`.
+  * Press Ctrl+D. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Poll `is-active` with repeated commands and screenshots rather than a long sleep.
+  * Repeat the active check with a screenshot each time. Do not use one long sleep.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the effective unit lines, the found font path with zero snapshot hits, and the `rc=1` miss
+  ** The updatedb unit prunes `/.snapshots` and requires AC power. The index run returns to `inactive`.
+  ** `omarchy.ttf` is found under the font directory. The snapshot count is `0`. A missing name exits 1.
   * If unsuccessful
-  ** Screenshot of the stock ExecStart or snapshot paths in results
+  ** The start line does not prune snapshots, or a `/.snapshots` path is returned.
 covers: default/systemd/system/plocate-updatedb.service.d/10-omarchy.conf, etc/systemd/system/plocate-updatedb.service.d/ac-only.conf, docs/file-layout.md
 
 ### install-log-and-phase-timing-clean   [VM-OK]
@@ -21932,25 +22002,29 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `sudo grep -c 'Completed:' /var/log/omarchy-install.log; sudo grep -c 'Failed:' /var/log/omarchy-install.log` (password `prime`) → a count in the dozens, and `0`.
-  * Run `sudo grep -E '^=== Omarchy|Omarchy setup:' /var/log/omarchy-install.log` → `=== Omarchy Target Setup Started`, `=== Omarchy Setup Started`, `=== Omarchy Setup Completed`, `Omarchy setup: Xm Ys`.
-  * Run `sudo jq -r '.phases[] | "\(.status) \(.name) \(.elapsed|floor)s"' /var/log/omarchy-install-timing.json` → 14 lines all starting `ok`, from `Preparing live environment` to `Creating factory snapshot`.
-  * Run `sudo jq '{installed_packages, expected_packages, total: ((.finished_at - .started_at)|floor)}' /var/log/omarchy-install-timing.json` → installed within a few of expected, and the total seconds of the install.
-  * Unhappy path: `sudo grep -iE 'error|failed' /var/log/omarchy-install.log | grep -v 'Failed: 0' | head` → report anything found (expected: only harmless lines such as ufw's "not running" in the chroot).
-  * Close the terminal with Super+W; nothing was changed.
+  * Press Super+Return. A terminal opens.
+  * Type `sudo grep -c 'Completed:' /var/log/omarchy-install.log` and press Return. If sudo asks, type `prime` and press Return. The count is greater than `0`.
+  * Type `sudo grep -c 'Failed:' /var/log/omarchy-install.log` and press Return. The output is `0`.
+  * Type `sudo grep -E '^=== Omarchy|Omarchy setup:' /var/log/omarchy-install.log` and press Return. The lines include setup started and setup completed.
+  * Type `sudo jq -r '.phases[] | "\(.status) \(.name) \(.elapsed|floor)s"' /var/log/omarchy-install-timing.json` and press Return. Every line starts with `ok`.
+  * Type `sudo jq '{installed_packages, expected_packages, total: ((.finished_at - .started_at)|floor)}' /var/log/omarchy-install-timing.json` and press Return. Record the installed count, the expected count, and the total seconds.
+  * Type `sudo grep -iE 'error|failed' /var/log/omarchy-install.log | grep -v 'Failed: 0' | head` and press Return. Record any lines.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The log is long; the grep/jq summaries keep output on one screen.
+  * A ufw line that says the firewall was not running in the install environment is a record, not a failed phase.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the Completed/Failed counts (`0` failed), the header/footer lines, the 14 `ok` phases and the package counts
+  ** The install log has completed lines and zero `Failed:` lines. The headers include setup started and setup completed.
+  ** Every timing phase starts with `ok`. The installed count is close to the expected count, and the total seconds are recorded.
+  ** Any error-like lines are recorded and are not a failed phase.
   * If unsuccessful
-  ** The `Failed:` lines or the phase with `status: failed` and its `error`
+  ** A `Failed:` count is above zero, or a phase status is not `ok`.
 covers: install/helpers/logging.sh, bin/omarchy-apply-system, omarchy-iso orchestrator phases.py (state/timing), _run_target_setup_command (log bind), install/config/all.sh, install/hardware/all.sh, install/login/all.sh, install/post-install/all.sh
 
 ### mise-node-offline-bundle-and-stubs   [VM-OK]
@@ -21960,27 +22034,36 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `nmcli networking off; mise ls node; node --version; nmcli networking on` → one installed node version and the matching `v…` from `node` — with the network off.
-  ** Run `nmcli networking on` even if a step misbehaves, so the guest is back online.
-  * Run `grep -A1 '\[tools\]' ~/.config/mise/config.toml; mise settings get upgrade.auto_prune` → `node = "latest"`, `false`.
-  ** `auto_prune=false` is written by a 4.0.4 migration; on a pristine 4.0.2 disk record what is printed and `omarchy-version` instead of failing.
-  * Run `ls ~/.local/share/mise/installs/node/; ls /var/lib/omarchy/provisioning/packages/` → the same version as the staged `node-v<ver>-linux-x64.tar.gz`.
-  * Run `ls ~/.local/share/mise/shims | tr '\n' ' '` → includes `claude codex gh opencode pi grok hey basecamp cf ori playwright` (stubs; report the full list). Run `ls -d ~/Work/tries` → exists.
-  * Unhappy path: `mise ls python 2>&1; echo "rc=$?"` → no installed python via mise (empty) — nothing beyond node was installed at install time.
-  * Close the terminal with Super+W; nothing was changed.
+  * Press Super+Return. A terminal opens.
+  * Type `nmcli networking off` and press Return. The prompt returns.
+  * Type `mise ls node` and press Return. One node version is listed.
+  * Type `node --version` and press Return. A `v` version is printed.
+  * Type `nmcli networking on` and press Return. The prompt returns.
+  * Type `grep -A1 '\[tools\]' ~/.config/mise/config.toml` and press Return. The line is `node = "latest"`.
+  * Type `mise settings get upgrade.auto_prune` and press Return. The output is `false`.
+  ** If the setting is missing, record `omarchy-version` and the output.
+  * Type `ls ~/.local/share/mise/installs/node/` and press Return. Record the version.
+  * Type `ls /var/lib/omarchy/provisioning/packages/` and press Return. The tarball name matches that version.
+  * Type `ls ~/.local/share/mise/shims` and press Return. The names include `claude`, `codex`, `gh`, `opencode`, `pi`, `grok`, `hey`, `basecamp`, `cf`, `ori`, and `playwright`.
+  * Type `ls -d ~/Work/tries` and press Return. The directory is listed.
+  * Type `mise ls python; echo "rc=$?"` and press Return. No installed python is listed.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Do not run `claude`, `codex` or other stubs: they trigger network installs.
+  * Turn networking back on even if a later step fails. Do it before leaving the terminal.
+  * Do not run `claude`, `codex`, or the other shims. That starts a download.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of `mise ls node` and `node --version` while offline, the config pin `latest`, `false` auto_prune (or the recorded 4.0.2 value), matching tarball/installed versions, the shim list, `~/Work/tries`, and the empty python listing
+  ** With networking off, mise lists one node and `node --version` prints a version. Networking is turned back on.
+  ** The config pins `node` to `latest`. Auto-prune is `false`, or the older-build output is recorded.
+  ** The installed node version matches the staged tarball. The shim list includes the named agent stubs. `~/Work/tries` exists. No python is installed through mise.
   * If unsuccessful
-  ** `mise doctor | head -20` and `cat ~/.config/mise/config.toml`
+  ** Node fails while offline, the version does not match the tarball, or networking stays off.
 covers: install/user/mise-work.sh, install/user/mise.sh, omarchy-iso _stage_node_tarball, builder/build-iso.sh (Node download), bin/omarchy-provision-user
 
 

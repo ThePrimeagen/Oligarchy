@@ -462,11 +462,11 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `dns-preset-switch-no-password-menu-panel-terminal`
 - [x] `dns-custom-asks-password-and-rejects-empty`
 - [x] `tmux-dev-layouts-tdl-tsl-tdlm`
-- [ ] `fingerprint-setup-hidden-and-refused-without-reader`
-- [ ] `pacman-repos-and-signing-key`
-- [ ] `zram-swap-active-and-oomd-kills-runaway-app`
-- [ ] `plugin-registry-rejects-reserved-id-broken-manifest-and-duplicate`
-- [ ] `plugin-third-party-api-boundary`
-- [ ] `plocate-index-excludes-snapshots`
-- [ ] `install-log-and-phase-timing-clean`
-- [ ] `mise-node-offline-bundle-and-stubs`
+- [x] `fingerprint-setup-hidden-and-refused-without-reader`
+- [x] `pacman-repos-and-signing-key`
+- [x] `zram-swap-active-and-oomd-kills-runaway-app`
+- [x] `plugin-registry-rejects-reserved-id-broken-manifest-and-duplicate`
+- [x] `plugin-third-party-api-boundary`
+- [x] `plocate-index-excludes-snapshots`
+- [x] `install-log-and-phase-timing-clean`
+- [x] `mise-node-offline-bundle-and-stubs`
