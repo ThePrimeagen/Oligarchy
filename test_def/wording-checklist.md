@@ -341,13 +341,13 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `post-update-kernel-omarchy`
 - [x] `post-update-kitty-config-refreshed`
 - [x] `post-update-mise-and-agent-wrappers`
-- [ ] `update-indicator-click-and-cancel`
-- [ ] `update-refuses-overlapping-run-and-notifier-stays-quiet`
-- [ ] `update-refuses-low-disk-space`
-- [ ] `update-keyring-passes-and-fails-cleanly`
+- [x] `update-indicator-click-and-cancel`
+- [x] `update-refuses-overlapping-run-and-notifier-stays-quiet`
+- [x] `update-refuses-low-disk-space`
+- [x] `update-keyring-passes-and-fails-cleanly`
 - [ ] `update-heals-unowned-file-conflict`
 - [ ] `update-stops-on-failed-migration`
-- [ ] `update-orphan-pkgs-defaults-to-keeping`
+- [x] `update-orphan-pkgs-defaults-to-keeping`
 - [ ] `pacman-direct-upgrade-guard`
 - [ ] `migrate-idempotent-and-login-notifier`
 - [ ] `migrations-hand-rerun-small-scripts`

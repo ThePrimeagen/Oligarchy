@@ -15820,36 +15820,48 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Screenshot the bar right of the clock: a circle-arrows icon is expected (allow up to a minute after login for the check). Open a terminal with Super+Enter and type `omarchy-version; omarchy-update-available; echo exit=$?`.
-  ** `4.0.2-…`, then exactly one line like `omarchy 4.0.2-1 -> 4.0.4-1` and `exit=0` — no `linux`, `omarchy-settings` or other package lines.
-  ** `Omarchy is up to date` with `exit=1` means the image already matches the mirror: record it, the icon is then correctly absent, skip the icon steps and continue with the menu and terminal paths.
-  ** Icon absent while the command reports an update: type `omarchy-update-status` (or `omarchy-shell -q omarchy.system-update refresh`), wait five seconds, screenshot again; if still absent, report the mismatch.
-  * Move the mouse over the icon: tooltip `Pending Omarchy Updates`. Click it with the left mouse button.
-  ** A floating Omarchy terminal opens with the logo and the boxed `Ready to update?` text ("You cannot stop the update once you start!", the releases link) ending in `Continue with update?`. No password prompt and no snapshot text appear before the question.
-  * Choose **No** (press `n`, or Right then Enter).
-  ** `Update cancelled` then `● Done! Press any key to close...` — a cancel is not an error exit. Press a key; the terminal closes and the icon is still in the bar.
-  ** If this build prints `● Failed (exit code 1)! Press any key to close...` instead, record it together with `omarchy-version` as build drift, not as a failure.
-  * Open the Omarchy menu with Super+Space → `Update` → `Omarchy` with the mouse: the same box; choose No; the same closing line; press a key and the desktop is as before.
-  * In your terminal type `omarchy update`: the same box inside the terminal; choose No → `Update cancelled`. Then type `pacman -Q omarchy; omarchy-migrate --pending; echo pending=$?; flock -n $XDG_RUNTIME_DIR/omarchy-update.lock true; echo lock-free=$?; ls -l /tmp/omarchy-update.log`.
-  ** The version is unchanged, nothing is pending (`pending=1`), `lock-free=0` (no stale lock), and the log exists (the transcript starts before the question) — no packages were changed.
-  * Close the terminal with Super+W; the desktop is as it started, icon included.
+  * Look at the bar to the right of the clock. An update icon is there.
+  ** Allow up to a minute after login. If it is missing while an update is reported, run `omarchy-update-status`, wait 5 seconds, and report the mismatch if it stays missing.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy-version` and press Return. Record the version.
+  * Type `omarchy-update-available; echo exit=$?` and press Return. One line names only the omarchy package, and the last line is `exit=0`.
+  ** If the output is `Omarchy is up to date` and `exit=1`, the icon is correctly absent. Skip the icon click and continue with the menu and terminal paths.
+  * Hover the update icon. The tooltip is `Pending Omarchy Updates`.
+  * Click the update icon. A prompt asks `Continue with update?`, and no sudo prompt appears before it.
+  * Choose No. The output includes `Update cancelled` and `Done!`.
+  ** If it prints `Failed (exit code 1)!` instead, record `omarchy-version` as build drift and continue.
+  * Press a key. The floating terminal closes.
+  * Look at the bar. The update icon is still there.
+  * Press Super+Space. The menu opens.
+  * Select Update, then Omarchy. The same question appears.
+  * Choose No. The output includes `Update cancelled`.
+  * Press a key. The floating terminal closes.
+  * Click the first terminal. It is focused.
+  * Type `omarchy update` and press Return. The same question appears.
+  * Choose No. The output includes `Update cancelled`.
+  * Type `pacman -Q omarchy` and press Return. The version is unchanged.
+  * Type `omarchy-migrate --pending; echo pending=$?` and press Return. Nothing is pending, and the last line is `pending=1`.
+  * Type `flock -n $XDG_RUNTIME_DIR/omarchy-update.lock true; echo lock-free=$?` and press Return. The last line is `lock-free=0`.
+  * Type `ls -l /tmp/omarchy-update.log` and press Return. The log exists.
+  * Press Super+W. The terminal closes.
+  * Look at the bar. The update icon is still there.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The gum box highlights Yes by default: make sure No is highlighted before pressing Enter, or press `n`. Never confirm the update in this test.
-  * The bar's centre group is indicators, clock, (hidden keyboard-layout), weather, update icon; the icon is the small rotating-arrows glyph at the far right of that cluster. Double-check the mouse position with ./client-with-image before clicking it.
-  * `checkupdates` needs the network; give the first command up to 30 seconds.
-  * If a red free-space error appears instead of the box, report it: the 40 GB guest should pass the 10 GiB check.
+  * The question highlights Yes. Press `n`, or move to No before Enter. Do not confirm the update.
+  * `checkupdates` can take 30 seconds. A free-space error instead of the question is a separate failure on this 40 GB disk.
+  * The available line must not name `linux`, `omarchy-settings`, or any package other than omarchy.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the bar with the update icon, the terminal with the single `omarchy … -> …` line and `exit=0`, the tooltip, the `Ready to update?` box after the click with no sudo prompt before it, `Update cancelled` with the closing line, the same box from the menu and from the terminal, and the unchanged version / `pending=1` / `lock-free=0` / log listing with the icon still present
-  ** For the absence path: the exact `Omarchy is up to date` line with `exit=1` and a bar without the icon
+  ** The update icon is on the bar, and `omarchy-update-available` names only the omarchy upgrade and exits 0. An up-to-date result with exit 1 and no icon is the alternate pass.
+  ** Clicking the icon, Update → Omarchy, and `omarchy update` each ask `Continue with update?` with no sudo prompt before the question. No is `Update cancelled` and `Done!`, or a recorded `Failed (exit code 1)!` drift.
+  ** After every cancel the version is unchanged, nothing is pending, the lock is free, the log exists, and the icon is still on the bar.
   * If unsuccessful
-  ** Screenshot of the bar without the icon plus the `omarchy-update-available` output, extra package lines in that output, a sudo prompt or snapshot text before the question, or a changed version after a cancel; `tail -20 /tmp/omarchy-update.log` and `pgrep -a pacman`; `omarchy-version`
+  ** Extra package lines appear, a sudo prompt or snapshot appears before the question, or the version changes after a cancel.
 covers: bin/omarchy-update-available, bin/omarchy-update-status, bin/omarchy-update-confirm, bin/omarchy-update (cancel exits 0, lock acquisition), bin/omarchy-update-lock, bin/omarchy-launch-floating-terminal-with-presentation, bin/omarchy-show-done, shell/plugins/bar/widgets/SystemUpdate.qml (updateProc, runUpdate, tooltip), config/omarchy/shell.json (omarchy.system-update), default/omarchy/omarchy-menu.jsonc update.omarchy, manual/30-updates.md (Updates intro, circle arrow icon), manual/05-the-top-bar.md, docs/update-process.md (Path 1, State and coordination files, Shell update indicator), test/shell.d/update-available-test.sh, update-status-test.sh, version-test.sh
 
 ### update-refuses-overlapping-run-and-notifier-stays-quiet   [VM-OK]
@@ -15859,30 +15871,45 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy update`. Leave it at `Continue with update?` — do not answer.
-  * Open a second terminal with Super+Enter (Hyprland tiles it next to the first) and type `omarchy update; echo exit=$?; ls -l $XDG_RUNTIME_DIR/omarchy-update.lock`.
-  ** Expected: the single line `An Omarchy update is already running.` and `exit=1` — no box, no sudo prompt, no `Create system snapshot`; the lock file is listed.
-  * In the second terminal type `rm ~/.local/state/omarchy/migrations/1786517850.sh; systemctl --user restart omarchy-migrate-notify.service`, wait ten seconds with screenshots: **no** `Pending Omarchy Migrations` toast (one harmless migration is pending, but the lock is held).
-  * Click into the first terminal and answer **No** → `Update cancelled`.
-  * In the second terminal type `systemctl --user restart omarchy-migrate-notify.service`.
-  ** The toast `Pending Omarchy Migrations` / `Click to run 1 pending migration.` appears within a few seconds. Click it: a floating terminal runs `Running migration (1786517850)` and shows `● Done!`. Press a key.
-  * In the second terminal type `omarchy update` again: the `Ready to update?` box appears now (lock released). Answer No. Then type `omarchy-migrate --pending; echo pending=$?; flock -n $XDG_RUNTIME_DIR/omarchy-update.lock true; echo lock-free=$?; sudo snapper list | tail -n 2` (password `prime`) — nothing pending, `pending=1`, `lock-free=0`, and no snapshot from the last minutes: nothing ran before the confirmation.
-  * Close both terminals with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy update` and press Return. The question `Continue with update?` is showing, and it is left unanswered.
+  * Press Super+Return. A second terminal opens.
+  * Type `omarchy update; echo exit=$?` and press Return. The output is `An Omarchy update is already running.`, and the last line is `exit=1`.
+  * Type `ls -l $XDG_RUNTIME_DIR/omarchy-update.lock` and press Return. The lock file is listed.
+  * Type `rm ~/.local/state/omarchy/migrations/1786517850.sh` and press Return. The prompt returns.
+  * Type `systemctl --user restart omarchy-migrate-notify.service` and press Return. The prompt returns.
+  * Wait 10 seconds. No pending-migration notification appears.
+  * Click the first terminal. It is focused.
+  * Choose No. The output includes `Update cancelled`.
+  * Click the second terminal. It is focused.
+  * Type `systemctl --user restart omarchy-migrate-notify.service` and press Return. A notification says a pending migration is ready.
+  * Click that notification. A floating terminal runs migration `1786517850` and shows `Done!`.
+  * Press a key. The floating terminal closes.
+  * Type `omarchy update` and press Return. The question `Continue with update?` appears.
+  * Choose No. The output includes `Update cancelled`.
+  * Type `omarchy-migrate --pending; echo pending=$?` and press Return. Nothing is pending, and the last line is `pending=1`.
+  * Type `flock -n $XDG_RUNTIME_DIR/omarchy-update.lock true; echo lock-free=$?` and press Return. The last line is `lock-free=0`.
+  * Type `sudo snapper list | tail -n 2` and press Return. No snapshot from the last few minutes is listed.
+  ** If sudo asks, type `prime` and press Return.
+  * Close both terminals with Super+W. The desktop is clear.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The lock is taken before the question, so the first update holds it without any answer. Hover or click a terminal before typing so the keys go to the right window.
-  * An alternative way to hold the lock is `omarchy-update-lock run sleep 300 &` (or `flock "$XDG_RUNTIME_DIR/omarchy-update.lock" sleep 600 &`); `kill %1` releases it — if `kill %1` says no such job, `pkill -f 'sleep 300'`.
-  * If the second run stops with `You need at least 10 GiB free...` instead, that is a different test; report it as such.
+  * The first update holds the lock before it is answered. Click a terminal before typing so the keys go to the right window.
+  * `omarchy-update-lock run sleep 300 &` is another way to hold the lock. Kill that job to release it.
+  * A free-space refusal on the second run is a different test. Report it as that.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot showing both terminals: one at the confirm box, the other with `An Omarchy update is already running.` / `exit=1` and the lock file; no toast after the notifier restart while locked; the toast after the cancel; the migration running from the click; the box appearing in the second terminal afterwards with `pending=1`, `lock-free=0` and the snapper tail without a new row
+  ** The first update waits at the question. The second prints `An Omarchy update is already running.` and exits 1, with no confirm box, sudo prompt, or snapshot. The lock file exists.
+  ** Restarting the notifier while the lock is held shows no toast.
+  ** After No, restarting the notifier shows the pending-migration toast. Clicking it runs migration `1786517850` and finishes with `Done!`.
+  ** A later `omarchy update` reaches the question. After No, nothing is pending, the lock is free, and snapper has no new row.
   * If unsuccessful
-  ** Screenshot of the second update reaching its own confirm box, a `Create system snapshot` line or a sudo prompt while the first is open, the re-run refused after the cancel, or a toast while the lock is held / no toast after release; `journalctl --user -u omarchy-migrate-notify.service -n 20 | sudo tee /dev/ttyS0` then `get-serial`; `omarchy-version`
+  ** The second update reaches its own question while the first is open, a toast appears while the lock is held, or the retry stays refused after the cancel.
 covers: bin/omarchy-update-lock, bin/omarchy-update (lock acquisition), bin/omarchy-update-confirm, bin/omarchy-migrate-notify update_in_progress, docs/update-process.md "the notifier also refuses to run while omarchy update holds its lock", test/shell.d/update-lock-test.sh "prevents overlapping top-level updates", migrate-notify-test.sh "stays quiet while omarchy update holds its lock", manual/30-updates.md
 
 ### update-refuses-low-disk-space   [VM-OK]
@@ -15892,31 +15919,40 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `df -h /`; note `Avail` (expected 25–35G).
-  * Type `fallocate -l 25G ~/fill.img; df -h /`. `Avail` must now be below 10G; if not, type `fallocate -l 5G ~/fill2.img; df -h /` and check again.
-  * Type `omarchy-update-requires-free-space; echo exit=$?` — `You need at least 10 GiB free to safely update Omarchy.`, `exit=1`.
-  * Type `omarchy update; echo exit=$?`.
-  ** The same line followed by the red `Something went wrong during the update!` banner and `exit=1`. No `Ready to update?` box, no sudo prompt, no `Create system snapshot`.
-  * Type `omarchy update -y` — the same refusal, no snapshot line, non-zero exit.
-  * Type `OMARCHY_UPDATE_FORCE=1 omarchy update`.
-  ** The `Ready to update?` box appears despite the low space. Answer **No** → `Update cancelled`.
-  * Type `rm -f ~/fill.img ~/fill2.img; df -h /; omarchy-update-requires-free-space; echo exit=$?` — the original free space is back and the helper is silent with `exit=0`.
-  * Type `omarchy update` once more: the box appears; answer No. Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `df -h /` and press Return. Record the free space.
+  * Type `fallocate -l 25G ~/fill.img` and press Return. The prompt returns.
+  * Type `df -h /` and press Return. Free space is below 10G.
+  ** If it is not, type `fallocate -l 5G ~/fill2.img` and press Return, then check `df -h /` again.
+  * Type `omarchy-update-requires-free-space; echo exit=$?` and press Return. The output includes `You need at least 10 GiB free to safely update Omarchy.`, and the last line is `exit=1`.
+  * Type `omarchy update; echo exit=$?` and press Return. The same refusal appears, then the failure banner, and the last line is `exit=1`.
+  * Type `omarchy update -y; echo exit=$?` and press Return. The same refusal appears, no snapshot line appears, and the exit is non-zero.
+  * Type `OMARCHY_UPDATE_FORCE=1 omarchy update` and press Return. The question `Continue with update?` appears.
+  * Choose No. The output includes `Update cancelled`.
+  * Type `rm -f ~/fill.img ~/fill2.img` and press Return. The prompt returns.
+  * Type `df -h /` and press Return. The free space is back near the starting amount.
+  * Type `omarchy-update-requires-free-space; echo exit=$?` and press Return. There is no refusal, and the last line is `exit=0`.
+  * Type `omarchy update` and press Return. The question appears.
+  * Choose No. The output includes `Update cancelled`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * `fallocate` on btrfs returns instantly; if it says "No space left", use a smaller size and add a second file (`dd if=/dev/zero of=~/fill.bin bs=1G count=22 status=progress` is the slow fallback).
-  * The generic red banner after the refusal is expected: the free-space check is an ordinary failing step.
-  * Always delete the filler before finishing, even on failure — other tests on this disk need the space.
+  * `fallocate` on btrfs returns at once. If it says there is no space, use a smaller file and add a second one.
+  * Delete the filler before finishing, even if a later step fails. Later tests on this disk need the space.
+  * The red banner after the refusal is expected. No confirm box, sudo prompt, or snapshot may appear while free space is under 10G.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of `df -h /` under 10G, the helper's refusal with `exit=1`, the refusal line plus banner with `exit=1` from `omarchy update` and from `-y` with no confirm box and no snapshot line, the forced run showing the confirm box, and the restored free space with the silent helper and the box appearing again
+  ** Free space starts above 10G and falls below 10G after the filler.
+  ** The helper, `omarchy update`, and `omarchy update -y` each print the 10 GiB refusal and exit non-zero, with no confirm box and no snapshot.
+  ** `OMARCHY_UPDATE_FORCE=1` reaches the question, and No cancels it.
+  ** Deleting the filler restores the free space, the helper exits 0 with no message, and `omarchy update` reaches the question again.
   * If unsuccessful
-  ** Screenshot of the update reaching the confirm box or a `Create system snapshot` line with under 10G free, of the forced run still refusing, or of the filler failing to delete; `omarchy-version`
+  ** The update reaches the question or a snapshot while under 10G free, the forced run still refuses, or the filler is not deleted.
 covers: bin/omarchy-update-requires-free-space, bin/omarchy-update (free-space step before confirm), docs/update-process.md "free-space requirement", test/shell.d/update-disk-space-test.sh, manual/30-updates.md
 
 ### update-keyring-passes-and-fails-cleanly   [VM-PARTIAL] [NET]
@@ -15926,33 +15962,54 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy-update-keyring 2>&1 | tee /tmp/keyring.log; echo "exit=${PIPESTATUS[0]}"` (password `prime`).
-  ** pacman reinstalls `archlinux-keyring` (~1 MB plus a database refresh; allow a minute) and the last line is `Keys are correct`, `exit=0`. Then `sudo pacman-key --list-keys | grep -i omarchy` — an Omarchy key is present.
-  * Type `sudo cp /etc/pacman.d/mirrorlist /etc/pacman.d/mirrorlist.bak`, then `echo 'Server = http://127.0.0.1:1/$repo/os/$arch' | sudo tee /etc/pacman.d/mirrorlist`.
-  * Type `omarchy-update-available; echo exit=$?` — `Omarchy is up to date`, `exit=1`, even though updates exist: record this as the known offline reading (the bar icon simply does not appear from it).
-  * Type `omarchy update` and press Enter at `Continue with update?` (sudo `prime`). `Prune package cache` and `Create system snapshot` run; under `Update Arch signing keys` pacman prints errors like `failed retrieving file 'core.db' from 127.0.0.1` and `failed to synchronize all databases`, then the red `Something went wrong during the update!` block.
-  ** `Update system packages` must not appear.
-  * Type `sudo mv /etc/pacman.d/mirrorlist.bak /etc/pacman.d/mirrorlist; omarchy-update-available` — the pending `omarchy … -> …` line is back (or "up to date" on an already-updated disk).
-  * Type `sudo touch /var/lib/pacman/db.lck; ls -l /var/lib/pacman/db.lck; omarchy update`, Enter at the question: `Prune package cache` and `Create system snapshot` run normally, then under `Update Arch signing keys` pacman prints `error: failed to init transaction (unable to lock database)` / `could not lock database: File exists` and the same red multi-line block; again no `Update system packages` and no `Running migration` line. `omarchy-version` — unchanged `4.0.2-…`.
-  ** If the run instead stops at `Prune package cache`, report it — that step is not expected to need the pacman lock. The failure comes right after the snapshot, so the run is under a minute.
-  * With the lock still in place type `rm -f ~/.local/state/omarchy/migrations/1786517850.sh; omarchy-migrate` — `Waiting for pacman transaction to finish before running Omarchy migrations...` is printed and the command keeps waiting: no `Running migration` line, the prompt does not return (screenshot after ten seconds). Open a second terminal with Super+Enter and type `sudo rm /var/lib/pacman/db.lck; ls /var/lib/pacman/db.lck` — `No such file or directory`. Click back into the first terminal: within a couple of seconds it prints `Running migration (1786517850)` / `Drop the retired notification image cache` and returns. Then `omarchy-migrate --pending; echo pending=$?` — nothing listed, `pending=1`.
-  ** The waiter polls once a second for up to 15 minutes; remove the lock after your screenshot, do not wait it out. Migration 1786517850 only deletes an empty cache directory; it is safe to re-run.
-  * Type `omarchy update` once more: the `Ready to update?` box appears; answer No (back to normal). Close both terminals with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy-update-keyring 2>&1 | tee /tmp/keyring.log; echo "exit=${PIPESTATUS[0]}"` and press Return. The last lines include `Keys are correct` and `exit=0`.
+  ** If sudo asks, type `prime` and press Return.
+  * Type `sudo pacman-key --list-keys | grep -i omarchy` and press Return. An Omarchy key is listed.
+  * Type `sudo cp /etc/pacman.d/mirrorlist /etc/pacman.d/mirrorlist.bak` and press Return. The prompt returns.
+  * Type `echo 'Server = http://127.0.0.1:1/$repo/os/$arch' | sudo tee /etc/pacman.d/mirrorlist` and press Return. The prompt returns.
+  * Type `omarchy-update-available; echo exit=$?` and press Return. The output is `Omarchy is up to date`, and the last line is `exit=1`.
+  * Type `omarchy update` and press Return. The question appears.
+  * Press Enter. The update starts.
+  * If sudo asks, type `prime` and press Return. The update continues.
+  * Wait until the keyring step fails. The failure banner appears, and `Update system packages` does not.
+  * Type `sudo mv /etc/pacman.d/mirrorlist.bak /etc/pacman.d/mirrorlist` and press Return. The prompt returns.
+  * Type `omarchy-update-available` and press Return. The pending upgrade line is back, or the disk is already up to date.
+  * Type `sudo touch /var/lib/pacman/db.lck` and press Return. The prompt returns.
+  * Type `omarchy update` and press Return. The question appears.
+  * Press Enter. The update starts.
+  * Wait until the keyring step reports that it cannot lock the database. The failure banner appears, and no migration runs.
+  * Type `omarchy-version` and press Return. The version is unchanged.
+  * Type `rm -f ~/.local/state/omarchy/migrations/1786517850.sh` and press Return. The prompt returns.
+  * Type `omarchy-migrate` and press Return. The output says it is waiting for a pacman transaction, and the prompt does not return.
+  * Press Super+Return. A second terminal opens.
+  * Type `sudo rm /var/lib/pacman/db.lck` and press Return. The prompt returns.
+  * Type `ls /var/lib/pacman/db.lck 2>&1` and press Return. The output includes `No such file`.
+  * Click the first terminal. It is focused.
+  * Wait until it prints `Running migration (1786517850)` and the prompt returns.
+  * Type `omarchy-migrate --pending; echo pending=$?` and press Return. Nothing is pending, and the last line is `pending=1`.
+  * Type `omarchy update` and press Return. The question appears.
+  * Choose No. The output includes `Update cancelled`.
+  * Close both terminals with Super+W. The desktop is clear.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Skipped part: a real link-down, DNS failure and the bar widget with no route at all cannot be produced from inside the guest.
-  * The Omarchy repo is in /etc/pacman.conf and still syncs; the failure comes from core/extra.
-  * Do not leave the bogus mirrorlist or the `db.lck` in place: every later pacman step on this disk depends on them being restored.
+  * The keyring reinstall is about 1 MB and can take a minute. The bogus mirror makes core and extra fail. The Omarchy repo is still configured.
+  * If the first failure stops at `Prune package cache` instead of the keyring step, report that. The snapshot may still run before the keyring failure.
+  * Do not wait out the migration lock. Remove `db.lck` after the waiting line is visible. The waiter polls for up to 15 minutes.
+  * Restore the mirror list and delete the lock before finishing. Later pacman steps need both.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the `archlinux-keyring` reinstall followed by `Keys are correct` and `exit=0`, the Omarchy key, the replaced mirrorlist, `Omarchy is up to date`, the retrieval errors under the keyring banner with the red block, the restored check, the lock file listing and the `unable to lock database` error with the red block and unchanged `omarchy-version`, the `Waiting for pacman transaction…` line with nothing running while the lock exists, `Running migration (1786517850)` after its removal with `pending=1` and the lock gone, and the box appearing again after cleanup
+  ** The keyring step ends with `Keys are correct` and exit 0, and an Omarchy key is listed.
+  ** With the bogus mirror, the availability check says up to date and exits 1. The update fails at the keyring step with the failure banner, and `Update system packages` does not appear. Restoring the mirror brings the pending line back.
+  ** With `db.lck` present, the update fails at the keyring step on the database lock, no migration runs, and the version is unchanged.
+  ** `omarchy-migrate` waits while the lock exists and runs `1786517850` after it is removed. Nothing is pending afterward, and `omarchy update` reaches the question again.
   * If unsuccessful
-  ** `Keys are correct` printed after an earlier error, the update continuing to `Update system packages` with the bogus mirror or the lock, no red block, the update hanging, the migration running while the lock file exists, the command not resuming after the lock is removed, or the lock not removable; `tail -n 60 /tmp/omarchy-update.log | sudo tee /dev/ttyS0` via `get-serial`; `omarchy-version`
+  ** `Keys are correct` follows an error, the update reaches `Update system packages` with the bad mirror or lock, the migration runs while the lock exists, or the mirror or lock is left in place.
 covers: bin/omarchy-update (ERR trap), bin/omarchy-update-keyring, bin/omarchy-update-system-pkgs, bin/omarchy-update-available, bin/omarchy-migrate wait_for_pacman_transaction, migrations/1786517850.sh, agents/skills/migrations.md "waits for any active pacman transaction", docs/update-process.md (Path 1), test/shell.d/update-keyring-test.sh, manual/30-updates.md
 
 ### update-heals-unowned-file-conflict   [VM-OK] [NET] [SLOW]
@@ -16026,28 +16083,36 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy-update-orphan-pkgs; echo "exit=$?"` — on a fresh install expect no output and `exit=0`.
-  * Create one orphan without installing anything: mark an installed leaf package as a dependency, `sudo pacman -D --asdeps btop` (password `prime`). Confirm `pacman -Qtdq` now prints `btop`.
-  * Type `omarchy-update-orphan-pkgs | cat` (piped, so it is non-interactive).
-  ** Expect the heading `Orphan system packages`, the line `  btop`, and `1 orphaned package(s) found. Re-run omarchy-update-orphan-pkgs in a terminal to review/remove them.` — and no removal.
-  * Type `omarchy-update-orphan-pkgs` directly. Expect the prompt `Remove 1 orphaned package(s)?` with **No** preselected. Press Enter.
-  ** Expect `Keeping orphaned packages.` and `pacman -Q btop` still succeeding.
-  * Restore the package's status: `sudo pacman -D --asexplicit btop` and confirm `pacman -Qtdq` prints nothing again. Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy-update-orphan-pkgs; echo "exit=$?"` and press Return. There is no package list, and the last line is `exit=0`.
+  * Type `sudo pacman -D --asdeps btop` and press Return. The prompt returns.
+  ** If sudo asks, type `prime` and press Return.
+  ** If `btop` is not installed, use another installed package that nothing requires, such as `fastfetch`.
+  * Type `pacman -Qtdq` and press Return. The output is `btop`.
+  * Type `omarchy-update-orphan-pkgs | cat` and press Return. The output names `btop` and says to re-run the command in a terminal.
+  * Type `omarchy-update-orphan-pkgs` and press Return. A question asks whether to remove 1 orphan, and No is preselected.
+  * Press Enter. The output includes `Keeping orphaned packages.`
+  * Type `pacman -Q btop` and press Return. The package is still installed.
+  * Type `sudo pacman -D --asexplicit btop` and press Return. The prompt returns.
+  * Type `pacman -Qtdq` and press Return. Nothing is listed.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * If `btop` is not installed, pick another installed package that nothing depends on (check with `pacman -Qi <pkg>` → `Required By : None`), e.g. `fastfetch`.
-  * The gum confirm defaults to No; pressing Enter without moving must keep the package.
+  * The piped run must not remove anything. Enter on the question keeps the package because No is the default.
+  * Check `Required By : None` in `pacman -Qi` before using a substitute package.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the non-interactive listing with the `Re-run omarchy-update-orphan-pkgs in a terminal` line and no removal
-  ** Screenshot of the confirm prompt with No preselected and the resulting `Keeping orphaned packages.`; `pacman -Q btop` still present; `pacman -Qtdq` empty after restoring
+  ** A fresh run prints no orphans and exits 0. Marking `btop` as a dependency makes `pacman -Qtdq` print `btop`.
+  ** The piped run lists `btop` and tells the user to re-run in a terminal. It does not remove the package.
+  ** The direct run asks to remove 1 orphan with No preselected. Enter prints `Keeping orphaned packages.`, and `btop` is still installed.
+  ** Restoring it as explicit leaves `pacman -Qtdq` empty.
   * If unsuccessful
-  ** Screenshot of a `Removing orphan system packages` line or a `pacman -Rns` transaction that ran without an explicit Yes; `omarchy-version`
+  ** A removal transaction runs without an explicit Yes, or Enter removes `btop`.
 covers: bin/omarchy-update-orphan-pkgs, test/shell.d/update-orphan-test.sh, manual/30-updates.md
 
 ### pacman-direct-upgrade-guard   [VM-OK] [NET]
