@@ -605,14 +605,29 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Ctrl+L and screenshot the password box within 5 s: the right end of the box is empty — no fingerprint glyph inside the field; the placeholder is centred. Type `prime`, press Enter.
-  * Open a terminal with Super+Enter and run `omarchy-shell lock status | jq '{passwordPam, fingerprint}'` → `true`, `false`; `ls /etc/pam.d/omarchy-lock-*` → only `omarchy-lock-password`; `ls /etc/pam.d/omarchy-lock-fingerprint` → `No such file or directory`.
-  * Press Super+Space, click `Setup`, click `Security` and screenshot: no `Fingerprint` row is offered. Press Escape to close the menu.
-  * Run `sudo omarchy-apply-lock` (password `prime`) → `Configuring lock screen password authentication...` then `Lock screen authentication configured.`; no fingerprint line; `ls /etc/pam.d/omarchy-lock-*` is unchanged (idempotent). Press Super+Ctrl+L, type `wrong` Enter (rejected), then `prime` Enter (unlocked).
-  * Run `sudo mv /etc/pam.d/omarchy-lock-password /tmp/`. Wait 3 s, then `omarchy-shell lock status | jq .passwordPam` → `false` and `omarchy-shell lock lock` → prints `missing-pam`; no lock screen appears.
-  * Press Super+Ctrl+L. Nothing happens: the desktop stays (screenshot).
-  ** If a lock screen does appear here, type `prime` + Enter and report the failure; if it does not open, press Ctrl+Alt+F3, log in `prime`/`prime`, run `sudo mv /tmp/omarchy-lock-password /etc/pam.d/`, return with Ctrl+Alt+F1 and unlock before continuing.
-  * Run `sudo omarchy-apply-lock` → the two lines again. Wait 3 s; `omarchy-shell lock status | jq .passwordPam` → `true`. Press Super+Ctrl+L: the lock screen appears; type `prime`, Enter → desktop. Run `sudo rm -f /tmp/omarchy-lock-password` to tidy up and close the terminal with Super+W.
+  * Press Super+Ctrl+L. The screen locks. No fingerprint mark is shown.
+  * Type `prime` and press Enter. The desktop returns.
+  * Press Super+Enter. A terminal opens.
+  * Run `omarchy-shell lock status | jq .fingerprint` and press Enter. It prints `false`.
+  * Run `ls /etc/pam.d/omarchy-lock-fingerprint` and press Enter. The file is absent.
+  * Press Super+Space. The menu opens.
+  * Click Setup. Use the mouse only. Setup opens.
+  * Click Security. Use the mouse only. Security opens. No Fingerprint row is shown.
+  * Press Escape. The menu closes.
+  * Run `sudo omarchy-apply-lock` and press Enter. Password is `prime`. It reports the lock screen is configured.
+  * Press Super+Ctrl+L. The screen locks.
+  * Type `wrong` and press Enter. The password is rejected.
+  * Type `prime` and press Enter. The desktop returns.
+  * Run `sudo mv /etc/pam.d/omarchy-lock-password /tmp/` and press Enter. The password PAM file is moved aside.
+  * Run `omarchy-shell lock status | jq .passwordPam` and press Enter. It prints `false`.
+  * Run `omarchy-shell lock lock` and press Enter. It prints `missing-pam`. The screen stays unlocked.
+  * Press Super+Ctrl+L. Nothing happens.
+  * Run `sudo omarchy-apply-lock` and press Enter. It reports the lock screen is configured.
+  * Run `omarchy-shell lock status | jq .passwordPam` and press Enter. It prints `true`.
+  * Press Super+Ctrl+L. The screen locks.
+  * Type `prime` and press Enter. The desktop returns.
+  * Run `sudo rm -f /tmp/omarchy-lock-password` and press Enter. The temporary file is gone.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -638,14 +653,18 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter so a window is on screen. Press Super+Escape (System menu) and click `Screensaver` with the mouse. Do not use keyboard.
-  ** Within ~3 s the whole screen turns black and animated block-letter Omarchy text plays edge to edge in a large font with no padding; the mouse cursor is hidden.
-  * Take screenshots at 3 s and 8 s without any input: the two frames differ (it is animating).
-  * Move the mouse once and screenshot after 2 s. Record whether the screensaver is still running (report what you see — the manual claims movement exits it).
-  * Press Space (if it is still running). The screensaver closes; the desktop with the terminal is back and the cursor is visible.
-  * In the terminal run `hyprctl clients -j | jq '[.[] | select(.class=="org.omarchy.screensaver")] | length'; pgrep -x ttfx; echo "exit=$?"` → `0`, no PID, `exit=1`.
-  * Run `omarchy-launch-screensaver force & sleep 3; omarchy-launch-screensaver force; echo rc=$?`. Exactly one screensaver instance appears; press Space; the terminal shows `rc=0` (the second call exited because one was already running).
-  * Close the terminal with Super+W. The desktop must return exactly as left.
+  * Press Super+Enter. A terminal opens.
+  * Press Super+Escape. The System menu opens.
+  * Click Screensaver. Use the mouse only. The screensaver starts.
+  * Wait 5 seconds. Do not press a key or move the mouse. The screensaver is still running.
+  * Move the mouse. Report whether the screensaver stays up.
+  * Press Space. The screensaver closes.
+  * Run `pgrep -x ttfx; echo exit=$?` and press Enter. It prints `exit=1`.
+  * Run `omarchy-launch-screensaver force` and press Enter. The screensaver starts.
+  * Run `omarchy-launch-screensaver force; echo rc=$?` and press Enter. It prints `rc=0`. A second screensaver does not start.
+  * Press Space. The screensaver closes.
+  * Press Super+W. The terminal closes.
+  * the desktop must return exactly as left.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -708,13 +727,12 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `time omarchy screensaver; echo "exit=$?"`; screenshot at once and again after 3 s.
-  ** Expected: the terminal background turns black (maybe a brief ttfx frame), then the prompt returns with `real` ≈ 1–2 s and `exit=0`.
-  ** Quirk: the black background is never reset (OSC 11), so this terminal may stay black until closed.
-  * Move the mouse; the cursor is visible again.
-  * Type `pgrep -c ttfx || echo none`; expected `none`.
-  * Type `omarchy screensaver --help | grep -A1 Binary`; expected `omarchy-screensaver` — the router help, not a screensaver run.
-  * Close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Run `time omarchy screensaver; echo exit=$?` and press Enter. The command returns in about 2 seconds with `exit=0`.
+  * Move the mouse. The cursor is visible.
+  * Run `pgrep -c ttfx || echo none` and press Enter. It prints `none`.
+  * Run `omarchy screensaver --help | grep Binary` and press Enter. It names `omarchy-screensaver`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -738,14 +756,24 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Escape and click `Screensaver`. The screen fills with the animated Omarchy ASCII logo; two screenshots 2 s apart differ. Press any key to exit.
-  * Press Super+Space → `Style` → `Screensaver` → `Edit Text`. Neovim opens `~/.config/omarchy/branding/screensaver.txt` containing the logo art.
-  * Replace the content: type `ggdG`, then `i`, type `PROBE SCREENSAVER TEXT`, press Escape, type `:wq` and Enter.
-  ** The screensaver starts immediately showing the words PROBE SCREENSAVER TEXT (drifting/animated). Screenshot, then press a key to exit.
-  * Open a terminal with Super+Enter and run `cat ~/.config/omarchy/branding/screensaver.txt` → the one line.
-  * Press Super+Space → `Style` → `Screensaver` → `Restore Default`. The screensaver starts with the Omarchy logo again. Press a key. Run `diff -q ~/.config/omarchy/branding/screensaver.txt /usr/share/omarchy/logo.txt` → no output (identical).
-  * Unhappy path: run `omarchy branding screensaver sideways; echo "exit=$?"` → `Usage: omarchy-branding-screensaver <image|text|reset>`, `exit=1`.
-  * Close the terminal with Super+W.
+  * Press Super+Escape. The System menu opens.
+  * Click Screensaver. Use the mouse only. The screensaver starts.
+  * Press Space. The screensaver closes.
+  * Press Super+Space. The menu opens.
+  * Click Style. Use the mouse only. Style opens.
+  * Click Screensaver. Use the mouse only. Screensaver opens.
+  * Click Edit Text. Use the mouse only. The editor opens.
+  * Type `ggdG`. The file is cleared.
+  * Type `iPROBE SCREENSAVER TEXT` then Escape, then `:wq` and Enter. The screensaver starts.
+  * Press Space. The screensaver closes.
+  * Press Super+Enter. A terminal opens.
+  * Run `cat ~/.config/omarchy/branding/screensaver.txt` and press Enter. It shows the probe line.
+  * Press Super+Space. The menu opens.
+  * Click Style, then Screensaver, then Restore Default. Use the mouse only. The screensaver starts.
+  * Press Space. The screensaver closes.
+  * Run `diff -q ~/.config/omarchy/branding/screensaver.txt /usr/share/omarchy/logo.txt; echo exit=$?` and press Enter. It prints `exit=0`.
+  * Run `omarchy branding screensaver sideways; echo exit=$?` and press Enter. It prints `exit=1`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -769,13 +797,20 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `omarchy ascii Omarchy | head -n 12`. Large block-character letters spelling OMARCHY across ~9 rows.
-  * Run `omarchy ascii "Back in five" > ~/.config/omarchy/branding/screensaver.txt && wc -l ~/.config/omarchy/branding/screensaver.txt` → about 9 lines.
-  * Press Super+Escape → `Screensaver`. The screensaver shows BACK IN FIVE in the wordmark font. Press a key to exit.
-  * Run `omarchy ascii "Hi 5" >/dev/null; echo "exit=$?"` → stderr `Skipped, no glyph in Delta Corps Priest 1: 5` and `exit=0`.
-  * Run `omarchy ascii "2026!"; echo "exit=$?"` → `Delta Corps Priest 1 draws letters and spaces only, and that text has neither.`, `exit=1`. Run `omarchy ascii ""; echo "exit=$?"` → `Nothing to render`, `exit=1`. Run `echo piped | omarchy ascii | head -n 3` → art from stdin.
-  * Restore: `omarchy branding screensaver reset` (the screensaver launches with the logo; press a key) and `diff -q ~/.config/omarchy/branding/screensaver.txt /usr/share/omarchy/logo.txt` prints nothing.
-  * Close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Run `omarchy ascii Omarchy | head -n 12` and press Enter. Block letters spell Omarchy.
+  * Run `omarchy ascii "Back in five" > ~/.config/omarchy/branding/screensaver.txt` and press Enter. The screensaver file is replaced.
+  * Press Super+Escape. The System menu opens.
+  * Click Screensaver. Use the mouse only. The screensaver starts.
+  * Press Space. The screensaver closes.
+  * Run `omarchy ascii "Hi 5" >/dev/null; echo exit=$?` and press Enter. It prints `exit=0` and names the skipped glyph.
+  * Run `omarchy ascii "2026!"; echo exit=$?` and press Enter. It prints `exit=1`.
+  * Run `omarchy ascii ""; echo exit=$?` and press Enter. It prints `exit=1`.
+  * Run `echo piped | omarchy ascii | head -n 3` and press Enter. Art prints.
+  * Run `omarchy branding screensaver reset` and press Enter. The screensaver starts.
+  * Press Space. The screensaver closes.
+  * Run `diff -q ~/.config/omarchy/branding/screensaver.txt /usr/share/omarchy/logo.txt; echo exit=$?` and press Enter. It prints `exit=0`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -798,12 +833,21 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `stat -c %Y ~/.config/omarchy/branding/screensaver.txt`; note the number.
-  * Press Super+Space → `Style` → `Screensaver` → `Set From Image`. A GTK file chooser titled `Pick PNG or SVG for screensaver` opens (it renders oversized at 1× — expected).
-  * Press Ctrl+L, type `/usr/share/omarchy/icon.png`, Enter (or click Open). The chooser closes; after a second the screensaver launches showing a braille-dot rendering of the Omarchy icon. Screenshot; press a key to exit.
-  * In the terminal run `head -c 300 ~/.config/omarchy/branding/screensaver.txt | od -c | head -3` (multi-byte braille characters) and `wc -l ~/.config/omarchy/branding/screensaver.txt` (≤ 26 lines).
-  * Unhappy path: `Style` → `Screensaver` → `Set From Image` again, then press Escape / click Cancel in the chooser. Nothing happens: no screensaver launch, and `stat -c %Y ~/.config/omarchy/branding/screensaver.txt` equals the value after the successful set.
-  * Restore: `Style` → `Screensaver` → `Restore Default`; press a key when the logo screensaver appears. Close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Run `stat -c %Y ~/.config/omarchy/branding/screensaver.txt` and press Enter. Note the number.
+  * Press Super+Space. The menu opens.
+  * Click Style, then Screensaver, then Set From Image. Use the mouse only. A file chooser opens.
+  * Press Ctrl+L, type `/usr/share/omarchy/icon.png`, and press Enter. The screensaver starts.
+  * Press Space. The screensaver closes.
+  * Run `wc -l ~/.config/omarchy/branding/screensaver.txt` and press Enter. The line count is at most 26.
+  * Press Super+Space. The menu opens.
+  * Click Style, then Screensaver, then Set From Image. Use the mouse only. A file chooser opens.
+  * Press Escape. The chooser closes. The screensaver does not start.
+  * Run `stat -c %Y ~/.config/omarchy/branding/screensaver.txt` and press Enter. The number is unchanged.
+  * Press Super+Space. The menu opens.
+  * Click Style, then Screensaver, then Restore Default. Use the mouse only. The screensaver starts.
+  * Press Space. The screensaver closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
