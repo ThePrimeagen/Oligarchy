@@ -16362,27 +16362,44 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy state clear reboot-required; id -nG` — note the groups (`prime` is not in `input` or `docker` on a stock disk).
-  ** If `omarchy state` is an unknown command on this build, use `rm -f ~/.local/state/omarchy/reboot-required` wherever `clear` appears and note "absent on this build".
-  * Type `sudo gpasswd -a prime input; bash /usr/share/omarchy/migrations/1787865477.sh; getent group input; ls ~/.local/state/omarchy/reboot-required` (password `prime`) — `prime` no longer in `input`, the flag exists and the bar shows the reboot indicator; screenshot.
-  * Type `omarchy state clear reboot-required; bash /usr/share/omarchy/migrations/1787865477.sh; ls ~/.local/state/omarchy/reboot-required 2>&1` — not a member → no flag (idempotent).
-  * Type `sudo gpasswd -a prime docker; bash /usr/share/omarchy/migrations/1787580187.sh; getent group docker; ls ~/.local/state/omarchy/reboot-required; cmp ~/.local/share/applications/Docker.desktop /usr/share/omarchy/applications/Docker.desktop && echo launcher-refreshed` — `prime` removed, flag set, `launcher-refreshed`.
-  * Type `omarchy state clear reboot-required` — the indicator disappears; the machine did not reboot. Close the terminal with Super+W.
-  ** Group changes apply at next login; the migrations must never reboot on their own.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy state clear reboot-required` and press Return. The prompt returns.
+  ** If that command is unknown, use `rm -f ~/.local/state/omarchy/reboot-required` wherever clear appears, and record it absent.
+  * Type `id -nG` and press Return. The groups are recorded, and `prime` is not in `input` or `docker`.
+  * Type `sudo gpasswd -a prime input` and press Return. The prompt returns.
+  ** If sudo asks, type `prime` and press Return.
+  * Type `bash /usr/share/omarchy/migrations/1787865477.sh` and press Return. The prompt returns.
+  * Type `getent group input` and press Return. `prime` is not listed.
+  * Type `ls ~/.local/state/omarchy/reboot-required` and press Return. The flag exists.
+  * Look at the bar. A reboot indicator is showing.
+  * Type `omarchy state clear reboot-required` and press Return. The prompt returns.
+  * Type `bash /usr/share/omarchy/migrations/1787865477.sh` and press Return. The prompt returns.
+  * Type `ls ~/.local/state/omarchy/reboot-required 2>&1` and press Return. The output includes `No such file`.
+  * Type `sudo gpasswd -a prime docker` and press Return. The prompt returns.
+  * Type `bash /usr/share/omarchy/migrations/1787580187.sh` and press Return. The prompt returns.
+  * Type `getent group docker` and press Return. `prime` is not listed.
+  * Type `ls ~/.local/state/omarchy/reboot-required` and press Return. The flag exists.
+  * Type `cmp ~/.local/share/applications/Docker.desktop /usr/share/omarchy/applications/Docker.desktop && echo launcher-refreshed` and press Return. The last line is `launcher-refreshed`.
+  * Type `omarchy state clear reboot-required` and press Return. The prompt returns.
+  * Look at the bar. The reboot indicator is gone, and the machine did not reboot.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * If `prime` was already in `input` at the start, the first migration run is the real repair; note it.
-  * The reboot indicator is a small glyph in the bar's indicator cluster; screenshot the bar before and after clearing the flag.
+  * If `prime` was already in `input`, the first migration is the real repair. Record that.
+  * Group changes apply at the next login. The migrations must not reboot on their own.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Membership removed and the indicator shown for both groups; no flag when not a member; `launcher-refreshed`; the indicator gone after clearing; no reboot
+  ** Adding `prime` to `input` and running the input migration removes that membership and sets the reboot flag. The bar shows the indicator.
+  ** Running it again with `prime` not in the group leaves no flag.
+  ** Adding `prime` to `docker` and running the docker migration removes that membership, sets the flag, and refreshes the Docker launcher.
+  ** Clearing the flag removes the indicator, and the machine never reboots.
   * If unsuccessful
-  ** Membership kept, a flag with nothing changed, or a reboot triggered; the script's output
+  ** A membership stays, a flag appears when nothing changed, or a migration reboots the machine.
 covers: test/shell.d/input-group-migration-test.sh, docker-group-migration-test.sh; migrations/1787865477.sh; migrations/1787580187.sh; bin/omarchy-state; manual/18-development-tools.md
 
 ### migration-copy-url-defers-while-chromium-open   [VM-OK]
@@ -16392,27 +16409,50 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Close Chromium if open (Super+W). Open a terminal with Super+Enter and type `P=~/.config/chromium/Default/Preferences; cp "$P" /tmp/prefs.orig; jq '.extensions.commands["linux:Alt+Shift+L"]={command_name:"copy-url",extension:"ikkebdkaanlebnifjnbeiaklodhbjcci",global:false} | .extensions.settings["ikkebdkaanlebnifjnbeiaklodhbjcci"]={commands:{"copy-url":{suggested_key:"Alt+Shift+L",was_assigned:true}}}' /tmp/prefs.orig > "$P"`.
-  ** If `Preferences` does not exist, open Chromium once (Super+Shift+B, or `setsid chromium >/dev/null 2>&1 &` from the terminal), wait for the window, close it with Super+W, and retry. Chromium on 2 vCPU may raise Hyprland's "not responding" dialog: click Wait.
-  * Open Chromium (Super+Shift+B or the terminal command above); back in the terminal type `bash /usr/share/omarchy/migrations/1786643346.sh; echo s=$?` — a gum yes/no asks to close the browser; answer No (`n`) — non-zero `s`, and `jq -r '.extensions.commands["linux:Alt+Shift+L"].extension' "$P"` still shows the ghost id.
-  * Close Chromium (Super+W, wait 3 s) and run the migration again — `s=0`; the `jq` now prints `bgpiichlckmfanooecilcjemknkcpngb`; `ls "$P.omarchy-copy-url-repair.bak"` exists.
-  * Type `sha256sum "$P"; bash /usr/share/omarchy/migrations/1786643346.sh; sha256sum "$P"` — identical (idempotent).
-  * Type `jq '.extensions.commands["linux:Ctrl+Alt+P"]={command_name:"copy-url",extension:"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",global:false} | .extensions.settings["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]={path:"/home/prime/ext",commands:{}}' "$P" > /tmp/p && mv /tmp/p "$P"; sha256sum "$P"; bash /usr/share/omarchy/migrations/1786643346.sh; sha256sum "$P"` — identical (third-party binding left alone).
-  * Type `cp /tmp/prefs.orig "$P"; rm -f "$P".omarchy-copy-url-repair.bak /tmp/prefs.orig` — Chromium's preferences are as they were. Close the terminal with Super+W.
+  * Press Super+W if Chromium is open. Chromium closes.
+  * Press Super+Return. A terminal opens.
+  * Type `P=~/.config/chromium/Default/Preferences; cp "$P" /tmp/prefs.orig` and press Return. The prompt returns.
+  ** If Preferences is missing, open Chromium, wait for it, close it, and retry.
+  * Type `jq '.extensions.commands["linux:Alt+Shift+L"]={command_name:"copy-url",extension:"ikkebdkaanlebnifjnbeiaklodhbjcci",global:false} | .extensions.settings["ikkebdkaanlebnifjnbeiaklodhbjcci"]={commands:{"copy-url":{suggested_key:"Alt+Shift+L",was_assigned:true}}}' /tmp/prefs.orig > "$P"` and press Return. The prompt returns.
+  * Press Super+Shift+B. Chromium opens.
+  * Click the terminal. It is focused.
+  * Type `bash /usr/share/omarchy/migrations/1786643346.sh; echo s=$?` and press Return. A question asks to close the browser.
+  * Type `n` and press Return. The exit is non-zero.
+  * Type `jq -r '.extensions.commands["linux:Alt+Shift+L"].extension' "$P"` and press Return. The output is the ghost id `ikkebdkaanlebnifjnbeiaklodhbjcci`.
+  * Click Chromium. It is focused.
+  * Press Super+W. Chromium closes.
+  * Wait 3 seconds.
+  * Type `bash /usr/share/omarchy/migrations/1786643346.sh; echo s=$?` and press Return. The last line is `s=0`.
+  * Type `jq -r '.extensions.commands["linux:Alt+Shift+L"].extension' "$P"` and press Return. The output is `bgpiichlckmfanooecilcjemknkcpngb`.
+  * Type `ls "$P.omarchy-copy-url-repair.bak"` and press Return. The backup exists.
+  * Type `sha256sum "$P"` and press Return. Record the hash.
+  * Type `bash /usr/share/omarchy/migrations/1786643346.sh` and press Return. The prompt returns.
+  * Type `sha256sum "$P"` and press Return. The hash matches.
+  * Type `jq '.extensions.commands["linux:Ctrl+Alt+P"]={command_name:"copy-url",extension:"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",global:false} | .extensions.settings["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]={path:"/home/prime/ext",commands:{}}' "$P" > /tmp/p && mv /tmp/p "$P"` and press Return. The prompt returns.
+  * Type `sha256sum "$P"` and press Return. Record the hash.
+  * Type `bash /usr/share/omarchy/migrations/1786643346.sh` and press Return. The prompt returns.
+  * Type `sha256sum "$P"` and press Return. The hash matches.
+  * Type `cp /tmp/prefs.orig "$P"` and press Return. The prompt returns.
+  * Type `rm -f "$P".omarchy-copy-url-repair.bak /tmp/prefs.orig` and press Return. The prompt returns.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The prompt is a gum yes/no in the terminal; `n` declines.
-  * Hover the terminal before typing while Chromium is open so the keys go to the right window.
+  * The question is a gum yes/no. `n` declines.
+  * Click the terminal before typing while Chromium is open.
+  * If Hyprland says Chromium is not responding, click Wait. `setsid chromium >/dev/null 2>&1 &` is another way to open it.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Deferral with the browser open; repair to the pinned id with a backup once closed; identical hashes on rerun and with a third-party binding; the restored preferences
+  ** With Chromium open, declining the question leaves the ghost extension id in place and exits non-zero.
+  ** With Chromium closed, the migration exits 0, writes the pinned id `bgpiichlckmfanooecilcjemknkcpngb`, and leaves a backup.
+  ** A second run leaves the same hash. A third-party `copy-url` binding also keeps the same hash.
+  ** The original Preferences file is restored.
   * If unsuccessful
-  ** The file rewritten while Chromium ran, the ghost surviving a clean run, or the third-party entry changed; the script's output
+  ** The file changes while Chromium is open, the ghost id survives a closed-browser run, or the third-party binding changes.
 covers: test/shell.d/copy-url-shortcut-migration-test.sh; migrations/1786643346.sh; manual/23-browsers.md
 
 ### channel-current-menu-check-and-refusals   [VM-OK]
@@ -16422,32 +16462,61 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy channel current; omarchy-version-channel; sha256sum /etc/pacman.conf /etc/pacman.d/mirrorlist; grep -c omarchy.org /etc/pacman.d/mirrorlist` — `stable`, `stable`, note the two hashes and the count.
-  ** If `omarchy-channel-current` is "command not found" or the menu has no Channel row, the disk predates channels (4.0.2 skew): record it, judge by what exists, and skip the missing parts.
-  * Open the Omarchy menu with Super+Space → `Update` → `Channel`. Four rows: Stable 🟢, RC 🟡, Edge 🟠, Dev 🔴; only Stable carries a ✓. Press Escape — select nothing.
-  * Type `omarchy-channel-set; echo exit=$?` — `Usage: omarchy-channel-set [stable|rc|edge|dev]`, `exit=1`. Then `omarchy-channel-set bogus; echo exit=$?` — `Unknown channel: bogus`, the usage line, `exit=1`, no sudo prompt.
-  * Type `sudo -v` (password `prime`), then `omarchy-refresh-pacman bogus; echo exit=$?` — `Error: Invalid channel 'bogus'. Must be one of: stable, rc, edge`, `exit=1`; then `cmp /etc/pacman.conf /etc/pacman.conf.bak && echo same` — `same` (the backup is taken before the check, the live file is untouched).
-  * Type `omarchy-channel-set dev`.
-  ** The warning `The dev channel links Omarchy directly to a checkout of the source in ~/omarchy.` / `It's exclusively intended for developers working on Omarchy itself.` and `Switch to dev channel?` with **No** pre-selected. Press Enter (accept No) → `Cancelled.`; `echo $?` → `0`.
-  * Open the Omarchy menu with Super+Space → `Update` → `Channel` → `Dev` with the mouse; in the floating terminal answer **No** again → `Cancelled.` then `● Done! Press any key to close...`. Press a key.
-  * Type `mkdir -p ~/omarchy && touch ~/omarchy/not-a-checkout; omarchy channel set dev; echo s=$?` and this once answer **Yes** (`y`) to `Switch to dev channel?`.
-  ** Expected: `…/omarchy already exists and is not a git checkout.` and a non-zero `s`, with no clone, sudo prompt or pacman output before it — the occupied directory makes the switch refuse before any change. If a download starts anyway, press Ctrl+C at once and report it. Then `rm -rf ~/omarchy`.
-  * Type `ls ~/omarchy 2>&1 | head -n 1; sha256sum /etc/pacman.conf /etc/pacman.d/mirrorlist; grep -c omarchy.org /etc/pacman.d/mirrorlist; omarchy channel current; cat /etc/omarchy.conf` — `No such file or directory`, both hashes and the count unchanged, `stable`, `/usr/share/omarchy`. Super+Space → `Update` → `Channel` still shows ✓ on Stable only. Escape; close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy channel current` and press Return. The output is `stable`.
+  * Type `omarchy-version-channel` and press Return. The output is `stable`.
+  * Type `sha256sum /etc/pacman.conf /etc/pacman.d/mirrorlist` and press Return. Record both hashes.
+  * Type `grep -c omarchy.org /etc/pacman.d/mirrorlist` and press Return. Record the count.
+  ** If a channel command is missing or the menu has no Channel row, record that the disk predates channels and skip the missing parts.
+  * Press Super+Space. The menu opens.
+  * Select Update, then Channel. Only Stable has a check.
+  * Press Escape. The menu closes without selecting a channel.
+  * Type `omarchy-channel-set; echo exit=$?` and press Return. The output includes `Usage: omarchy-channel-set [stable|rc|edge|dev]`, and the last line is `exit=1`.
+  * Type `omarchy-channel-set bogus; echo exit=$?` and press Return. The output includes `Unknown channel: bogus`, and the last line is `exit=1`.
+  * Type `sudo -v` and press Return. The prompt returns.
+  ** If sudo asks, type `prime` and press Return.
+  * Type `omarchy-refresh-pacman bogus; echo exit=$?` and press Return. The output includes `Invalid channel 'bogus'`, and the last line is `exit=1`.
+  * Type `cmp /etc/pacman.conf /etc/pacman.conf.bak && echo same` and press Return. The last line is `same`.
+  * Type `omarchy-channel-set dev` and press Return. A warning asks `Switch to dev channel?`, and No is preselected.
+  * Press Enter. The output includes `Cancelled.`
+  * Type `echo $?` and press Return. The output is `0`.
+  * Press Super+Space. The menu opens.
+  * Select Update, then Channel, then Dev. A floating terminal asks the same question.
+  * Choose No. The output includes `Cancelled.` and `Done!`.
+  * Press a key. The floating terminal closes.
+  * Type `mkdir -p ~/omarchy && touch ~/omarchy/not-a-checkout` and press Return. The prompt returns.
+  * Type `omarchy channel set dev` and press Return. The warning appears.
+  * Type `y` and press Return. The output says `~/omarchy` is not a git checkout, and the exit is non-zero.
+  ** If a download starts, press Ctrl+C and report it.
+  * Type `rm -rf ~/omarchy` and press Return. The prompt returns.
+  * Type `ls ~/omarchy 2>&1 | head -n 1` and press Return. The output includes `No such file`.
+  * Type `sha256sum /etc/pacman.conf /etc/pacman.d/mirrorlist` and press Return. Both hashes match the recorded ones.
+  * Type `grep -c omarchy.org /etc/pacman.d/mirrorlist` and press Return. The count matches.
+  * Type `omarchy channel current` and press Return. The output is `stable`.
+  * Type `cat /etc/omarchy.conf` and press Return. The output includes `/usr/share/omarchy`.
+  * Press Super+Space. The menu opens.
+  * Select Update, then Channel. Only Stable has a check.
+  * Press Escape. The menu closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Never click Stable/RC/Edge and never confirm Dev on an empty `~/omarchy`: each ends in a full mirror resync and `omarchy update -y` (network, many minutes; own SLOW tests).
-  * gum confirm: `n` or Enter on the highlighted No both decline; `y` (or Left then Enter) accepts.
-  * Do not run `omarchy-refresh-pacman stable`: it performs a full system upgrade.
+  * Do not select Stable, RC, or Edge, and do not confirm Dev on an empty `~/omarchy`. Those start a full update.
+  * Do not run `omarchy-refresh-pacman stable`. It performs a full system upgrade.
+  * Enter on the highlighted No declines. `y` accepts.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the Channel submenu with a single ✓ on Stable, the two `stable` outputs, the usage refusal and `Unknown channel: bogus` with `exit=1`, the `Invalid channel 'bogus'` error with `same`, the dev warning answered No with `Cancelled.` / exit 0, the menu-launched cancel ending in `Done!`, the occupied-checkout refusal with no package output, and the unchanged hashes/count/channel/`/etc/omarchy.conf` afterwards
+  ** Both channel commands print `stable`. The menu marks only Stable.
+  ** A missing argument prints the usage line and exits 1. `bogus` is an unknown channel and exits 1.
+  ** `omarchy-refresh-pacman bogus` is an invalid channel and exits 1, and `pacman.conf` is unchanged.
+  ** Declining Dev from the terminal prints `Cancelled.` and exits 0. Declining it from the menu ends with `Done!`.
+  ** Confirming Dev with a non-checkout `~/omarchy` refuses before any clone or pacman output. After cleanup the hashes, count, channel, and `/etc/omarchy.conf` are unchanged, and only Stable is checked.
   * If unsuccessful
-  ** A ✓ on the wrong row, disagreeing outputs, `set dev` proceeding without confirmation, a sudo prompt, clone or pacman activity after a refusal or cancel, or a changed hash; the terminal contents and `./client get-serial`
+  ** The check is on the wrong row, Dev proceeds without confirmation, or a refusal changes pacman or starts a download.
 covers: bin/omarchy-channel-set (usage, unknown channel, confirm_dev, occupied checkout), bin/omarchy-channel-current, bin/omarchy-version-channel, bin/omarchy-refresh-pacman (channel guard), default/omarchy/omarchy-menu.jsonc update.channel.* (:354,363-366), manual/30-updates.md (Four channels), manual/31-dotfiles.md (dev channel), test/shell.d/channel-test.sh (current, "dev refuses…", dev refusal before package changes, usage)
 
 ### channel-switch-edge-and-update   [VM-OK] [NET] [SLOW]
@@ -16457,30 +16526,48 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy-channel-current; omarchy-version-channel; omarchy-version` — `stable`, `stable`, `4.0.2-…`.
-  * Open the Omarchy menu with Super+Space, click `Update`, then `Channel` — `Stable` is shown checked. Click `Edge` with the mouse.
-  ** A floating terminal runs `omarchy-channel-set edge`: sudo prompt (type `prime`), `Setting channel to edge`, a full pacman sync, pacman replacing `omarchy` with `omarchy-dev` and `omarchy-settings` with `omarchy-settings-dev`, then the unattended update (`Prune package cache` … `Running migration (…)` …) with no `Reboot now` question before the update pipeline.
-  ** Record the `Running migration` lines; besides the 4.0.4 eleven they must include 1786609204, 1786719479, 1787215824, 1787342993, 1787573629, 1787666837, 1788595060, 1788596255, 1788862626, 1788941927, 1789091250, 1789095456, 1789130779, 1789294350, 1789310715.
-  * Answer No to the reboot question; press a key at `Done!`.
-  * In your terminal type `omarchy-channel-current; omarchy-version-channel; omarchy-version; pacman -Q omarchy-dev omarchy-settings-dev` — `edge`, `edge`, an `omarchy-dev` version string, both packages listed.
-  * Type `grep -h Server /etc/pacman.d/mirrorlist /etc/pacman.conf` — `https://mirror.omarchy.org/…` and `https://pkgs.omarchy.org/edge/…`.
-  * Open the menu again with Super+Space → `Update` → `Channel`: `Edge` is checked now. Press Escape.
-  * Keep this disk (on edge, not rebooted) for the `post-update-edge-*` tests. Only if it is not being kept and budget remains: Super+Space → `Update` → `Channel` → `Stable` (sudo `prime`) — `Setting channel to stable`, pacman may print `warning: downgrading package omarchy`, `omarchy` replaces `omarchy-dev`, the update banners run through `Restarting shell`; answer No to any reboot prompt; then `omarchy-channel-current` → `stable` and the Channel submenu shows ✓ on Stable. End with `stop` either way unless the operator asked for `save`.
-  ** RC (`Update → Channel → RC`) is this same flow with `rc` everywhere, the `rc-mirror` and `pkgs.omarchy.org/rc`; it is not run separately.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy-channel-current` and press Return. The output is `stable`.
+  * Type `omarchy-version-channel` and press Return. The output is `stable`.
+  * Type `omarchy-version` and press Return. Record the version.
+  * Press Super+Space. The menu opens.
+  * Select Update, then Channel. Stable has the check.
+  * Click Edge. A floating terminal starts the switch.
+  * If a sudo prompt appears, type `prime` and press Return. The switch continues.
+  * Wait until it prints `Setting channel to edge` and replaces `omarchy` with `omarchy-dev`.
+  * Wait through the update. Each `Running migration` number is recorded, and no reboot question appears before the update pipeline.
+  * If a reboot question appears at the end, choose No.
+  * Wait until `Done!` appears.
+  * Press a key. The floating terminal closes.
+  * Click the first terminal. It is focused.
+  * Type `omarchy-channel-current` and press Return. The output is `edge`.
+  * Type `omarchy-version-channel` and press Return. The output is `edge`.
+  * Type `omarchy-version` and press Return. The version names `omarchy-dev`.
+  * Type `pacman -Q omarchy-dev omarchy-settings-dev` and press Return. Both packages are listed.
+  * Type `grep -h Server /etc/pacman.d/mirrorlist /etc/pacman.conf` and press Return. The lines include `mirror.omarchy.org` and `pkgs.omarchy.org/edge`.
+  * Press Super+Space. The menu opens.
+  * Select Update, then Channel. Edge has the check.
+  * Press Escape. The menu closes.
+  * End the session with `stop` if this disk is not being kept. Otherwise leave it on edge and not rebooted.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Two full package transactions plus a kernel: the longest run in this area. Screenshot the floating terminal repeatedly; never sleep more than five seconds. If a switch exceeds the budget, press Ctrl+C, record how far it got, and end with `stop` — never leave the machine half-switched without saying so.
-  * On failure the terminal prints `The channel switch did not complete. Review the error above, then rerun: omarchy-channel-set edge` — capture it.
+  * This is a long package transaction. Screenshot every few seconds. If it exceeds the budget, press Ctrl+C, record the last heading, and do not leave a half-switch unreported.
+  * The expected extra migration numbers, beyond the stable eleven, are 1786609204, 1786719479, 1787215824, 1787342993, 1787573629, 1787666837, 1788595060, 1788596255, 1788862626, 1788941927, 1789091250, 1789095456, 1789130779, 1789294350, and 1789310715.
+  * Switching back to Stable is optional and only if the disk is not kept. RC is the same flow with `rc` and is not run here.
+  * `The channel switch did not complete` is the failure line.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the before-state, the Channel submenu with Stable checked, `Setting channel to edge`, the package replacement, the migration lines including the HEAD-only ids, no reboot prompt before the update stage, the after-state commands and Server lines, and the submenu with Edge checked (and, if switched back, `stable` with ✓ on Stable)
+  ** The start channel is `stable`, and the menu checks only Stable.
+  ** Choosing Edge prints `Setting channel to edge`, replaces `omarchy` with `omarchy-dev` and `omarchy-settings` with `omarchy-settings-dev`, and runs migrations with no reboot question before that pipeline.
+  ** After No and `Done!`, both channel commands print `edge`, the version names `omarchy-dev`, both dev packages are installed, and the server lines name the edge mirror.
+  ** The menu then checks Edge. The disk is left on edge when it is being kept.
   * If unsuccessful
-  ** Screenshot of the error and the `The channel switch did not complete…` line, a reboot prompt before the update stage, or a mismatch between the command and the ✓; `omarchy-channel-current` output; `sudo cat /tmp/omarchy-update.log | sudo tee /dev/ttyS0` then `get-serial`
+  ** The switch prints `The channel switch did not complete`, a reboot question appears before the update, or the menu check disagrees with the channel command.
 covers: bin/omarchy-channel-set, bin/omarchy-refresh-pacman, bin/omarchy-channel-current, bin/omarchy-version-channel, bin/omarchy-update (-y path), bin/omarchy-update-pacman, default/pacman/pacman-edge.conf, default/pacman/mirrorlist-edge, default/omarchy/omarchy-menu.jsonc update.channel.* (stable/rc/edge), manual/30-updates.md "Four channels", test/shell.d/channel-test.sh (stable/rc paths)
 
 ### channel-switch-dev-and-back   [VM-OK] [NET] [SLOW]
@@ -16490,31 +16577,61 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `ls ~/omarchy; omarchy-channel-current; omarchy-version` — no checkout, `stable`, `4.0.2-…`.
-  * Open the Omarchy menu with Super+Space → `Update` → `Channel` → `Dev` with the mouse.
-  ** A floating terminal prints `The dev channel links Omarchy directly to a checkout of the source in ~/omarchy.` / `It's exclusively intended for developers working on Omarchy itself.` and asks `Switch to dev channel?` with **No** highlighted. Choose Yes (Left then Enter, or `y`); type `prime` at the sudo prompt.
-  ** `git clone https://github.com/omacom/omarchy.git` scrolls, then the dev-link messages, `Setting channel to edge`, the pacman sync, the `omarchy` → `omarchy-dev` replacement, then the unattended update with migrations. Type `prime` whenever sudo asks. Minutes pass before `Setting channel to edge`.
-  * At the end `Updates require reboot. Ready?` (or the kernel variant) appears. Screenshot, answer Yes, type the passphrase `prime` blind at the Plymouth prompt (one try) and land on the desktop.
-  ** Until the reboot `omarchy-version` still prints the `omarchy-dev` package version — OMARCHY_PATH is only re-read at login.
-  * Open a terminal and type `omarchy-version; omarchy-channel-current; omarchy-version-branch; echo $OMARCHY_PATH; ls ~/omarchy/bin | head -3` — `dev (<7-char hash>)`, `dev`, `master`, `/home/prime/omarchy`, three omarchy scripts. Super+Space → `Update` → `Channel` shows ✓ on Dev; Escape.
-  * Type `omarchy update -y` (password `prime`): the first heading after the snapshot is green `Update Omarchy dev checkout` with `Already up to date.` (or a fast-forward), then the rest of the pipeline; answer No to any reboot question.
-  * Super+Space → `Update` → `Channel` → `Stable` with the mouse (sudo `prime`): `Setting channel to stable`, another resync that downgrades the too-new packages, `omarchy` replacing `omarchy-dev`, the update run, `Done!`. Then `omarchy-channel-current; omarchy version` — `stable` and a `4.0.x` package version; the Channel submenu shows ✓ on Stable. `~/omarchy` may remain on disk (the checkout is unlinked, not deleted) — note it.
-  * The disk has been switched twice: end the session with `stop` (a reboot via Super+Escape → Reboot first, to see the desktop return with the bar drawn, is a bonus if budget remains).
+  * Press Super+Return. A terminal opens.
+  * Type `ls ~/omarchy 2>&1` and press Return. The output includes `No such file`.
+  * Type `omarchy-channel-current` and press Return. The output is `stable`.
+  * Type `omarchy-version` and press Return. Record the version.
+  * Press Super+Space. The menu opens.
+  * Select Update, then Channel, then Dev. A warning asks `Switch to dev channel?`, and No is highlighted.
+  * Choose Yes. The switch starts.
+  * If a sudo prompt appears, type `prime` and press Return. The switch continues.
+  * Wait until the git clone finishes and the output includes `Setting channel to edge`.
+  * Wait through the package replacement and the update. Record the last heading if time runs out.
+  * Wait until a reboot question appears. Record its wording.
+  * Choose Yes. The machine reboots.
+  * At the passphrase prompt, type `prime` and press Return. The desktop returns.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy-version` and press Return. The output starts with `dev (` and includes a hash.
+  * Type `omarchy-channel-current` and press Return. The output is `dev`.
+  * Type `omarchy-version-branch` and press Return. The output is `master`.
+  * Type `echo $OMARCHY_PATH` and press Return. The output is `/home/prime/omarchy`.
+  * Type `ls ~/omarchy/bin | head -3` and press Return. Three scripts are listed.
+  * Press Super+Space. The menu opens.
+  * Select Update, then Channel. Dev has the check.
+  * Press Escape. The menu closes.
+  * Type `omarchy update -y` and press Return. The output includes `Update Omarchy dev checkout`.
+  ** If sudo asks, type `prime` and press Return.
+  * If a reboot question appears, choose No.
+  * Press Super+Space. The menu opens.
+  * Select Update, then Channel, then Stable. A floating terminal starts the switch back.
+  * If a sudo prompt appears, type `prime` and press Return. The switch continues.
+  * Wait until it prints `Setting channel to stable` and finishes with `Done!`.
+  * Press a key if the floating terminal is still waiting. The floating terminal closes.
+  * Type `omarchy-channel-current` and press Return. The output is `stable`.
+  * Type `omarchy version` and press Return. The version is a `4.0` package version.
+  * Press Super+Space. The menu opens.
+  * Select Update, then Channel. Stable has the check.
+  * Press Escape. The menu closes.
+  * Type `ls ~/omarchy` and press Return. Record whether the checkout remains.
+  * End the session with `stop`.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * A repository clone plus two full mirror resyncs: this is the slowest test in the set. Report the last screenshot and the exact step if time runs out; do not leave the machine half-switched without saying so.
-  * The red `The channel switch did not complete. Review the error above, then rerun: omarchy-channel-set <channel>` block is the failure signature.
-  * Never sleep more than five seconds between screenshots.
+  * This clones a repository and runs two package syncs. Screenshot every few seconds. Report the last step if time runs out, and say if the machine is left half-switched.
+  * Until the reboot, `omarchy-version` can still show the packaged version. `OMARCHY_PATH` is reread at login.
+  * `The channel switch did not complete` is the failure line. `~/omarchy` may remain after switching back.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the dev warning answered Yes, the clone, the channel/package steps, the reboot question, the post-reboot `dev (<hash>)` / `dev` / `master` / OMARCHY_PATH with ✓ on Dev, the second update's `Update Omarchy dev checkout` heading, then `stable` with a `4.0.x` version and ✓ on Stable after switching back
+  ** There is no checkout, the channel is `stable`, and Dev asks to switch with No highlighted.
+  ** Yes clones `omarchy` into `~/omarchy`, sets the channel through edge packages, and ends in a reboot question that is answered Yes.
+  ** After login the version is `dev` plus a hash, the channel and branch are `dev` and `master`, `OMARCHY_PATH` is `/home/prime/omarchy`, and the menu checks Dev.
+  ** `omarchy update -y` prints `Update Omarchy dev checkout`. Switching to Stable finishes with `Done!`, the channel is `stable`, the version is `4.0`, and the menu checks Stable.
   * If unsuccessful
-  ** Screenshot of the failure and the `The channel switch did not complete…` line, a pacman error, or a post-reboot session that lost its bar/desktop; `tail -n 40 /tmp/omarchy-update.log | sudo tee /dev/ttyS0` then `get-serial`
+  ** The switch prints `The channel switch did not complete`, pacman errors, or the desktop does not return after reboot.
 covers: bin/omarchy-channel-set (dev, stable), bin/omarchy-dev-link (usage), bin/omarchy-update-dev, bin/omarchy-version, bin/omarchy-version-branch, bin/omarchy-channel-current, bin/omarchy-refresh-pacman, default/omarchy/omarchy-menu.jsonc update.channel.dev/stable, manual/30-updates.md (Four channels), manual/31-dotfiles.md (dev channel), docs/update-process.md "Channels and versions", test/shell.d/channel-test.sh, update-dev-test.sh
 
 ### post-update-edge-wrappers-packages-and-sysctl   [VM-PARTIAL]
@@ -16559,27 +16676,36 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Precondition: the disk left by `channel-switch-edge-and-update`. Open a terminal with Super+Enter and type `omarchy-channel-current`.
-  ** If it says `stable` this test becomes SLOW: type `omarchy-channel-set edge`, type `prime` at sudo prompts, wait for the switch and update, and answer No to the reboot question.
-  * Type `ls -a ~/Work; ls ~/Work/tries` — no `.mise.toml`; `tries` still present.
-  * Type `printf '[env]\n_.path = "{{ cwd }}/bin"\nFOO = "bar"\n' > ~/Work/.mise.toml; mise trust ~/Work/.mise.toml; rm ~/.local/state/omarchy/migrations/1789095456.sh; omarchy-migrate`.
-  ** Output: `Running migration (1789095456)`, `Automatic project bin directories were removed from your Mise PATH.`, `Your other Mise settings were preserved.`, `Backup saved to:` with a `~/Work/.mise.toml.bak.XXXXXX` path, and `Mise trust for this custom config was revoked. Review it before trusting it again:` / `mise trust /home/prime/Work/.mise.toml`.
-  * Type `cat ~/Work/.mise.toml; ls ~/Work/.mise.toml.bak.*` — only `[env]` and `FOO = "bar"` remain; the backup exists.
-  * Type `rm -f ~/Work/.mise.toml ~/Work/.mise.toml.bak.*; ls -a ~/Work` — back to no mise file. Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy-channel-current` and press Return. Record the channel.
+  ** If it is `stable`, this test becomes SLOW. Run `omarchy-channel-set edge`, type `prime` at sudo, wait for the update, and answer No to the reboot question.
+  * Type `ls -a ~/Work` and press Return. `.mise.toml` is not listed.
+  * Type `ls ~/Work/tries` and press Return. The directory is listed.
+  * Type `printf '[env]\n_.path = "{{ cwd }}/bin"\nFOO = "bar"\n' > ~/Work/.mise.toml` and press Return. The prompt returns.
+  * Type `mise trust ~/Work/.mise.toml` and press Return. The prompt returns.
+  * Type `rm ~/.local/state/omarchy/migrations/1789095456.sh` and press Return. The prompt returns.
+  * Type `omarchy-migrate` and press Return. The output includes `Automatic project bin directories were removed` and `Mise trust for this custom config was revoked`.
+  * Type `cat ~/Work/.mise.toml` and press Return. `[env]` and `FOO = "bar"` remain, and the path line is gone.
+  * Type `ls ~/Work/.mise.toml.bak.*` and press Return. A backup is listed.
+  * Type `rm -f ~/Work/.mise.toml ~/Work/.mise.toml.bak.*` and press Return. The prompt returns.
+  * Type `ls -a ~/Work` and press Return. No mise file is listed.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The stock 4.0.2 file matched the migration's known checksum, which is why it was deleted silently during the switch.
-  * `cd ~/Work` after the re-run may print a mise "config not trusted" notice for the custom file — that is the revoked trust working.
+  * The stock file matched a known checksum, so the channel switch deleted it silently.
+  * `cd ~/Work` after the re-run may say the config is not trusted. That is the revoked trust.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of `ls -a ~/Work` without `.mise.toml`, the custom-file re-run messages, the trimmed file plus backup, and the cleaned directory
+  ** After the edge switch, `~/Work` has no `.mise.toml`, and `~/Work/tries` remains.
+  ** A custom file is rewritten without the `_.path` line. The other setting stays, a backup exists, and the output says trust was revoked.
+  ** Removing the custom file and its backup leaves no mise file.
   * If unsuccessful
-  ** Screenshot of the stock file surviving, the `_.path` line surviving in the custom file, or a `mise trust --untrust` error aborting the migration
+  ** The stock file survives the switch, the path line survives the custom re-run, or trust revocation aborts the migration.
 covers: migrations/1789095456.sh, install/user/mise-work.sh (v4.0.2 stock hash), bin/omarchy-migrate
 
 ### version-commands-and-channel-detection   [VM-OK]

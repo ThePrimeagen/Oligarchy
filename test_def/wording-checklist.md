@@ -352,13 +352,13 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `migrate-idempotent-and-login-notifier`
 - [x] `migrations-hand-rerun-small-scripts`
 - [x] `migration-legacy-udev-rules-quarantine`
-- [ ] `migration-security-groups-flag-reboot`
-- [ ] `migration-copy-url-defers-while-chromium-open`
-- [ ] `channel-current-menu-check-and-refusals`
-- [ ] `channel-switch-edge-and-update`
-- [ ] `channel-switch-dev-and-back`
+- [x] `migration-security-groups-flag-reboot`
+- [x] `migration-copy-url-defers-while-chromium-open`
+- [x] `channel-current-menu-check-and-refusals`
+- [x] `channel-switch-edge-and-update`
+- [x] `channel-switch-dev-and-back`
 - [ ] `post-update-edge-wrappers-packages-and-sysctl`
-- [ ] `post-update-edge-work-mise-toml-removed`
+- [x] `post-update-edge-work-mise-toml-removed`
 - [ ] `version-commands-and-channel-detection`
 - [ ] `upgrade-to-quattro-refusals-and-decline`
 - [ ] `reinstall-declined-and-configs-reset`
