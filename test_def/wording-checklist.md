@@ -24,11 +24,11 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `idle-chain-screensaver-lock-and-dismiss-cancels`
 - [x] `idle-config-invalid-values-fall-back`
 - [x] `stay-awake-toggle-indicator-and-status`
-- [ ] `stay-awake-blocks-idle-screensaver-and-lock`
-- [ ] `debug-idle-report-tracks-toggles`
-- [ ] `shell-json-idle-hot-reload-and-invalid-fallback`
-- [ ] `logout-to-sddm-greeter-wrong-empty-then-right-password`
-- [ ] `console-tty-login-wrong-then-right-and-back`
+- [x] `stay-awake-blocks-idle-screensaver-and-lock`
+- [x] `debug-idle-report-tracks-toggles`
+- [x] `shell-json-idle-hot-reload-and-invalid-fallback`
+- [x] `logout-to-sddm-greeter-wrong-empty-then-right-password`
+- [x] `console-tty-login-wrong-then-right-and-back`
 - [ ] `suspend-toggle-hides-system-menu-row`
 - [ ] `hibernation-setup-adds-menu-row-and-remove`
 - [ ] `sleep-lock-secures-session-before-suspend`

@@ -1001,14 +1001,21 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and shorten idle so the test fits: `f=~/.config/omarchy/shell.json; [[ -s $f ]] || cp $OMARCHY_PATH/config/omarchy/shell.json $f; jq '.idle = {screensaver: 15, lock: 30}' $f > /tmp/s.json && mv /tmp/s.json $f`
-  ** `shell.json` replaces the defaults wholesale, which is why the stock file is copied first and edited in place; the bar must stay intact.
-  * Press Super+Ctrl+I. A coffee-cup glyph appears in the bar's centre indicator area, left of the clock.
-  * Run `omarchy-shell idle status | jq '{enabled, stayAwake}'` → `"enabled": false`, `"stayAwake": true`.
-  * Stop all input for 40 s, screenshotting every 5 s: no screensaver and no lock screen may appear.
-  * Press Super+Space, click `Trigger`, click `Toggle`, click `Stay Awake` with the mouse. The coffee-cup indicator disappears.
-  * Stop all input for 20 s: the screensaver (fullscreen black window with animated text, class `org.omarchy.screensaver`) appears at ~15 s. Press Space once to dismiss it; the desktop with the terminal is back.
-  * Restore idle: `jq '.idle = {screensaver: 150, lock: 300}' $f > /tmp/s.json && mv /tmp/s.json $f`. Close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Run `f=~/.config/omarchy/shell.json; [[ -s $f ]] || cp $OMARCHY_PATH/config/omarchy/shell.json $f` and press Enter. The shell config file is in place.
+  * Run `jq '.idle = {screensaver: 15, lock: 30}' $f > /tmp/s.json && mv /tmp/s.json $f` and press Enter. Idle times are 15 and 30 seconds.
+  * Press Super+Ctrl+I. Stay Awake turns on.
+  * Run `omarchy-shell idle status | jq .stayAwake` and press Enter. It prints `true`.
+  * Wait 40 seconds. Do not press a key or move the mouse. The screen does not lock.
+  * Press Super+Space. The menu opens.
+  * Click Trigger. Use the mouse only. Trigger opens.
+  * Click Toggle. Use the mouse only. Toggle opens.
+  * Click Stay Awake. Use the mouse only. Stay Awake turns off.
+  * Wait 20 seconds. Do not press a key or move the mouse. The screensaver starts.
+  * Press Space. The screensaver closes.
+  * Run `jq '.idle = {screensaver: 150, lock: 300}' $f > /tmp/s.json && mv /tmp/s.json $f` and press Enter. Idle times are 150 and 300 seconds.
+  * Press Super+W. The terminal closes.
+  * the desktop must return exactly as left.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -1035,13 +1042,23 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `omarchy debug idle 20 | sudo tee /dev/ttyS0 >/dev/null` (password `prime`); read it with get-serial.
-  ** Expected headers `== Time ==`, `== Idle IPC status ==`, `== Quickshell instances ==`, `== Recent idle logs ==`, `== Persisted shell log ==`, `== Relevant processes ==`, `== Sleep lock service ==` (active (running)), `== Hyprland screensaver clients ==`, `== Idle inhibitors ==`, `== Screensaver detector ==` followed by `stopped`, `== Lock detector ==` with `"secure": false`.
-  * Run `omarchy debug idle abc | grep -A1 'Screensaver detector'` → `stopped` again — a non-numeric count is silently replaced by 200.
-  * Press Super+Ctrl+I (Stay Awake). An indicator appears in the bar. Run `omarchy-debug-idle 20 | grep -A2 'Idle IPC'` — the status now shows idle disabled / stay-awake. Press Super+Ctrl+I again; the indicator is gone.
-  * Press Super+Space → `Trigger` → `Toggle` → `Screensaver`; toast `Screensaver disabled`. Run `omarchy debug idle 5 | grep -A1 'Screensaver detector'` → `disabled`.
-  * Press Super+Space → `Trigger` → `Toggle` → `Screensaver` again; toast `Screensaver enabled`; re-run the grep → `stopped`.
-  * Close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Run `omarchy debug idle 20 | sudo tee /dev/ttyS0 >/dev/null` and press Enter. Password is `prime`. Read `./client get-serial`. The dump includes a Screensaver detector that says `stopped`.
+  * Run `omarchy debug idle abc | grep -A1 'Screensaver detector'` and press Enter. It says `stopped`.
+  * Press Super+Ctrl+I. Stay Awake turns on.
+  * Run `omarchy-debug-idle 20 | grep -A2 'Idle IPC'` and press Enter. It shows stay-awake.
+  * Press Super+Ctrl+I. Stay Awake turns off.
+  * Press Super+Space. The menu opens.
+  * Click Trigger. Use the mouse only. Trigger opens.
+  * Click Toggle. Use the mouse only. Toggle opens.
+  * Click Screensaver. Use the mouse only. The screensaver is disabled.
+  * Run `omarchy debug idle 5 | grep -A1 'Screensaver detector'` and press Enter. It says `disabled`.
+  * Press Super+Space. The menu opens.
+  * Click Trigger. Use the mouse only. Trigger opens.
+  * Click Toggle. Use the mouse only. Toggle opens.
+  * Click Screensaver. Use the mouse only. The screensaver is enabled.
+  * Run `omarchy debug idle 5 | grep -A1 'Screensaver detector'` and press Enter. It says `stopped`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -1066,15 +1083,23 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `f=~/.config/omarchy/shell.json; [[ -s $f ]] || cp $OMARCHY_PATH/config/omarchy/shell.json $f; cp $f /tmp/shell.json.bak`. Screenshot the bar (full layout: menu, workspaces | indicators, clock, … | tray … power). Run `omarchy-shell shell listShellConfig | jq .idle` → `{"screensaver":150,"lock":300}`.
-  * Run `jq '.idle.lock = 600' $f > /tmp/s.json && mv /tmp/s.json $f`; wait 3 s; `omarchy-shell shell listShellConfig | jq .idle.lock` → `600` — no restart happened (the bar never blinked).
-  * Run `echo '{ this is not json' > $f`. Wait 2 s. The bar is unchanged; `omarchy-shell shell ping` → `ok`; `omarchy-shell shell listShellConfig | jq .idle` → `{"screensaver":150,"lock":300}` (defaults). Run `journalctl -t omarchy-shell --since -1min --no-pager | grep -i 'shell.json'` → a line containing `shell.json parse failed, using defaults`.
-  * Run `echo '{"idle":{"screensaver":150,"lock":300}}' > $f`; wait 2 s; the same grep now also shows `shell.json missing version: 1, using defaults`; bar unchanged.
-  ** A version-less `{"bar":{"position":"bottom"}}` is ignored the same way — the bar stays on top.
-  * Run `echo '{"version":1,"idle":{"screensaver":150,"lock":300}}' > $f`. Wait 2 s and screenshot. The bar changes to the minimal builtin layout: left `menu` + `workspaces`, centre `clock` only, right `audio` only — the indicators, weather, tray, network, power widgets are gone.
-  ** A minimal valid file is honoured verbatim; there is no deep-merge with the defaults. `{"version":1,"bar":{"position":"bottom"}}` moves the bar to the bottom as an EMPTY strip (no `layout` → no widgets).
-  * Run `cp /tmp/shell.json.bak $f`. Wait 2 s: the full bar layout is back (screenshot).
-  * Round trip: run `omarchy refresh shell` (confirm if asked) → the file is stock again and `omarchy-shell shell listShellConfig | jq .idle.lock` → `300`. Close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Run `f=~/.config/omarchy/shell.json; [[ -s $f ]] || cp $OMARCHY_PATH/config/omarchy/shell.json $f; cp $f /tmp/shell.json.bak` and press Enter. A backup is saved.
+  * Run `omarchy-shell shell listShellConfig | jq .idle.lock` and press Enter. It prints 300.
+  * Run `jq '.idle.lock = 600' $f > /tmp/s.json && mv /tmp/s.json $f` and press Enter. The file is saved.
+  * Run `omarchy-shell shell listShellConfig | jq .idle.lock` and press Enter. It prints 600. The bar stays up.
+  * Run `echo '{ this is not json' > $f` and press Enter. The file is broken.
+  * Run `omarchy-shell shell ping` and press Enter. It prints `ok`.
+  * Run `omarchy-shell shell listShellConfig | jq .idle.lock` and press Enter. It prints 300.
+  * Run `echo '{"idle":{"screensaver":150,"lock":300}}' > $f` and press Enter. The file has no version.
+  * Run `omarchy-shell shell listShellConfig | jq .idle.lock` and press Enter. It prints 300. The bar stays up.
+  * Run `echo '{"version":1,"idle":{"screensaver":150,"lock":300}}' > $f` and press Enter. The file is valid and minimal.
+  * Wait 2 seconds. The bar loses its extra widgets.
+  * Run `cp /tmp/shell.json.bak $f` and press Enter. The backup is restored.
+  * Wait 2 seconds. The full bar returns.
+  * Run `omarchy refresh shell` and press Enter. Confirm if asked. Idle lock is 300.
+  * Press Super+W. The terminal closes.
+  * the desktop must return exactly as left.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -1100,14 +1125,17 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal (Super+Enter) and a browser (Super+Shift+Enter) so windows exist.
-  * Press Super+Escape and click `Logout` with the mouse. An OSD `Logging out` shows, the windows close, and within 5–20 s the login screen appears: dark background, Omarchy logo, lock glyph and one dotted password entry — no username field and no session list. The entry already has focus; do not click first.
-  ** Autologin does not re-fire here. If the desktop comes back without a greeter, report it with screenshots.
-  * Press Enter with nothing typed. The lock glyph and entry turn red; the greeter does not disappear or restart.
-  * Press Tab three times and click each corner of the screen once, screenshotting each: no username field, session list, power or reboot button appears anywhere.
-  * Type `wrongpass` and press Enter. One dot appears per character while typing; after Enter the dots vanish and the lock icon and entry border turn red — screenshot within two seconds. Type one character: the red state clears immediately; press Backspace to remove it.
-  * Type `prime` and press Enter. The Omarchy desktop loads with the bar and no leftover windows.
-  * Press Super+Enter and run `echo $XDG_CURRENT_DESKTOP $XDG_SESSION_TYPE; systemctl --user is-active 'wayland-wm@*'` → `Hyprland wayland` and `active`; then `loginctl list-sessions --no-pager` → one active session for `prime` on the sddm seat. Press Ctrl+D to close the terminal.
+  * Press Super+Enter. A terminal opens.
+  * Press Super+Shift+Enter. A browser opens.
+  * Press Super+Escape. The System menu opens.
+  * Click Logout. Use the mouse only. The greeter appears.
+  * Press Enter. The password is rejected. The greeter stays.
+  * Type `wrongpass` and press Enter. The password is rejected. The greeter stays.
+  * Type `prime` and press Enter. The desktop returns. The old windows are gone.
+  * Press Super+Enter. A terminal opens.
+  * Run `echo $XDG_CURRENT_DESKTOP` and press Enter. It prints `Hyprland`.
+  * Press Ctrl+D. The terminal closes.
+  * the desktop must return exactly as left.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -1133,11 +1161,16 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Ctrl+Alt+F3. A text console with `omarchy login:` appears (the default hostname is `omarchy`). Screenshot.
-  * Type `prime`, Enter; at `Password:` type `wrong`, Enter → `Login incorrect` and a new `login:` prompt. Screenshot.
-  * Log in again with `prime` / `prime` → a shell prompt. Run `hostname; tty; who` → `omarchy`, `/dev/tty3`, and both your tty3 login and the graphical session.
-  * Run `sudo tee /dev/ttyS0 <<<"tty3-login-ok"` (password `prime`) so the serial log carries the marker.
-  * Type `exit`, Enter, then press Ctrl+Alt+F1 → the desktop is back exactly as left. Screenshot.
+  * Press Ctrl+Alt+F3. A text login appears.
+  * Type `prime` and press Enter. A password prompt appears.
+  * Type `wrong` and press Enter. The login is rejected.
+  * Type `prime` and press Enter. A password prompt appears.
+  * Type `prime` and press Enter. A shell opens.
+  * Run `hostname; tty` and press Enter. The hostname and `/dev/tty3` print.
+  * Run `sudo tee /dev/ttyS0 <<<"tty3-login-ok"` and press Enter. Password is `prime`. Read `./client get-serial`. It shows `tty3-login-ok`.
+  * Type `exit` and press Enter. The login prompt returns.
+  * Press Ctrl+Alt+F1. The desktop returns.
+  * the desktop must return exactly as left.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
