@@ -384,7 +384,6 @@ app.get("/definitions", async (context) => {
   if (name !== undefined) {
     return context.redirect(legacyDefinition(name, context.req.query("edit")), 302);
   }
-  const query = context.req.query("q") ?? "";
   try {
     const [definitions, running] = await Promise.all([
       listTestDefinitions(context.env.HYPERDRIVE.connectionString),
@@ -392,7 +391,6 @@ app.get("/definitions", async (context) => {
     ]);
     return definitionsPage(context, 200, {
       groups: groupDefinitions(definitions),
-      query,
       name: undefined,
       selected: undefined,
       notice: undefined,
@@ -404,7 +402,6 @@ app.get("/definitions", async (context) => {
     console.error("dashboard: loading the definitions page:", errorMessage(error));
     return definitionsPage(context, 500, {
       groups: null,
-      query,
       name: undefined,
       selected: undefined,
       notice: undefined,
@@ -441,7 +438,6 @@ app.get("/definitions/:name", async (context) => {
     const selected = selectDefinition(groupDefinitions(definitions), name);
     return definitionsPage(context, selected === undefined ? 404 : 200, {
       groups: null,
-      query: "",
       name,
       selected,
       notice,
@@ -453,7 +449,6 @@ app.get("/definitions/:name", async (context) => {
     console.error("dashboard: loading a definition:", errorMessage(error));
     return definitionsPage(context, 500, {
       groups: null,
-      query: "",
       name,
       selected: undefined,
       notice: undefined,
@@ -503,7 +498,6 @@ app.post("/definitions", async (context) => {
     console.error("dashboard: saving a definition:", errorMessage(error));
     return definitionsPage(context, 500, {
       groups: null,
-      query: "",
       name,
       selected: undefined,
       notice: undefined,

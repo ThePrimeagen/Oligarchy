@@ -35,7 +35,6 @@ const page = (
   render(
     DefinitionsPage({
       groups,
-      query: "",
       name: undefined,
       selected: undefined,
       notice: undefined,
@@ -64,13 +63,19 @@ describe("DefinitionsPage happy path", () => {
       htmlText.indexOf("<h1>oligarchy definitions</h1>"),
     );
     const search = htmlText.indexOf(
-      '<form class="search" method="get" action="/definitions" role="search"><input type="search" name="q" value="" aria-label="Search definitions"/><button>search</button></form>',
+      '<search class="search"><input type="search" aria-label="Search definitions" autocomplete="off"/></search>',
     );
     const list = htmlText.indexOf(
       '<ul class="definition-list"><li><a href="/definitions/install">install</a></li><li><a href="/definitions/lock-screen">lock-screen</a></li></ul>',
     );
+    const miss = htmlText.indexOf(
+      '<p class="definition-miss" hidden="">No definitions match <code></code>.</p>',
+    );
     expect(search).toBeGreaterThan(htmlText.indexOf("<h1>oligarchy definitions</h1>"));
     expect(list).toBeGreaterThan(search);
+    expect(miss).toBeGreaterThan(list);
+    expect(htmlText).not.toContain('method="get"');
+    expect(htmlText).not.toContain('name="q"');
     expect(htmlText).not.toContain("<h2>install</h2>");
     expect(htmlText).not.toContain("<h2>lock-screen</h2>");
     expect(htmlText).not.toContain('class="definition__form"');
@@ -78,21 +83,6 @@ describe("DefinitionsPage happy path", () => {
     expect(htmlText).not.toContain("dashboard.css");
     expect(htmlText).not.toContain("OMARCHY");
     expect(htmlText).not.toContain("error:");
-  });
-
-  it("narrows the list to names containing the search, ignoring case", async () => {
-    const htmlText = await page([...both], { query: "LOCK" });
-    expect(htmlText).toContain('value="LOCK"');
-    expect(htmlText).toContain('<a href="/definitions/lock-screen">lock-screen</a>');
-    expect(htmlText).not.toContain('href="/definitions/install"');
-    expect(htmlText).not.toContain("No definitions match");
-  });
-
-  it("treats a blank search as every name", async () => {
-    const htmlText = await page([...both], { query: "   " });
-    expect(htmlText).toContain('href="/definitions/install"');
-    expect(htmlText).toContain('href="/definitions/lock-screen"');
-    expect(htmlText).not.toContain("No definitions match");
   });
 
   it("is one definition's page: its wording, not the list", async () => {
@@ -104,7 +94,7 @@ describe("DefinitionsPage happy path", () => {
     expect(htmlText).toMatch(/button:disabled\s*\{[^}]*opacity:\s*0\.45/);
     expect(htmlText).not.toMatch(/[^-]p\s*\{[^}]*white-space:\s*pre-wrap/);
     expect(htmlText).toContain('aria-current="page">definitions</a>');
-    expect(htmlText).not.toContain('role="search"');
+    expect(htmlText).not.toContain("<search");
     expect(htmlText).not.toContain('href="/definitions/install"');
     expect(htmlText).toContain("<h2>lock-screen</h2>");
     expect(htmlText).toContain("<h3>v2</h3>");
@@ -164,7 +154,8 @@ describe("DefinitionsPage happy path", () => {
   it("says no definitions for an empty list, with a search and no edit form", async () => {
     const htmlText = await page([]);
     expect(htmlText).toContain("<h1>oligarchy definitions</h1>");
-    expect(htmlText).toContain('role="search"');
+    expect(htmlText).toContain("<search");
+    expect(htmlText).not.toContain("definition-miss");
     expect(htmlText).toContain("<p>no definitions</p>");
     expect(htmlText).toContain('<p class="running-tests__empty">No tests are running.</p>');
     expect(htmlText).not.toContain('class="definition__form"');
@@ -184,14 +175,6 @@ describe("DefinitionsPage unhappy path", () => {
     expect(htmlText).not.toContain("<h2>");
     expect(htmlText).not.toContain('id="running-tests"');
     expect(htmlText).not.toContain("No tests are running.");
-  });
-
-  it("says nothing matches a search no name contains", async () => {
-    const htmlText = await page([...both], { query: "wifi" });
-    expect(htmlText).toContain("No definitions match <code>wifi</code>.");
-    expect(htmlText).not.toContain('href="/definitions/lock-screen"');
-    expect(htmlText).not.toContain('href="/definitions/install"');
-    expect(htmlText).not.toContain("<h2>");
   });
 
   it("names a definition that does not exist and does not open another one", async () => {
@@ -224,12 +207,6 @@ describe("DefinitionsPage unhappy path", () => {
 
   it("escapes a name in the list, and a wording on its page", async () => {
     const hostile = [wording(1, 'a<"b>', "d <d>", "i <i>", "p <p>")];
-    const missed = await page([{ name: 'a<"b>', versions: hostile }], { query: "<script>" });
-    expect(missed).toContain("No definitions match <code>&lt;script&gt;</code>.");
-    expect(missed).toContain('value="&lt;script&gt;"');
-    expect(missed).not.toContain('href="/definitions/');
-    expect(missed).not.toContain('a<"b>');
-    expect(missed).not.toContain("<script>");
     const listed = await page([{ name: 'a<"b>', versions: hostile }]);
     expect(listed).toContain('<a href="/definitions/a%3C%22b%3E">a&lt;&quot;b&gt;</a>');
     expect(listed).not.toContain('a<"b>');

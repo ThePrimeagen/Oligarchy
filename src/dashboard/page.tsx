@@ -24,7 +24,7 @@ const Tabs: FC<{ page: OperatorTab }> = ({ page }) => (
 );
 
 // `scriptSrc` is the one extra script a page needs. The servers page polls with htmx alone;
-// the definitions page's update button is enabled by /dashboard.js.
+// the definitions page's search and update button are /dashboard.js.
 export const OperatorPage: FC<
   PropsWithChildren<{ title: string; page: OperatorTab; scriptSrc?: string }>
 > = ({ title, page, scriptSrc, children }) => (

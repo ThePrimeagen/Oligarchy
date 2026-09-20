@@ -147,43 +147,33 @@ const Definition: FC<{
   );
 };
 
-const DefinitionSearch: FC<{ query: string }> = ({ query }) => (
-  <form class="search" method="get" action="/definitions" role="search">
-    <input type="search" name="q" value={query} aria-label="Search definitions" />
-    <button>search</button>
-  </form>
+// Not a form: enter must not reload the page. public/dashboard.js narrows the list as this is typed.
+// autocomplete is off: a restored value does not fire input, so the list would not match the box.
+const DefinitionSearch: FC = () => (
+  <search class="search">
+    <input type="search" aria-label="Search definitions" autocomplete="off" />
+  </search>
 );
 
-const DefinitionList: FC<{
-  groups: ReadonlyArray<DefinitionVersions>;
-  query: string;
-}> = ({ groups, query }) => {
-  if (groups.length === 0) {
-    return <p>no definitions</p>;
-  }
-  // Names only: a blank search is the whole list, otherwise a case-insensitive substring, so
-  // "lock" finds lock-screen.
-  const needle = query.trim().toLowerCase();
-  const shown = groups.filter(
-    (group) => needle === "" || group.name.toLowerCase().includes(needle),
-  );
-  if (shown.length === 0) {
-    return (
-      <p>
-        No definitions match <code>{query.trim()}</code>.
+// Every name is on the page. Definitions do not change while it is open, so the search hides
+// rows in the browser. The miss starts hidden; the script shows it when nothing matches.
+const DefinitionList: FC<{ groups: ReadonlyArray<DefinitionVersions> }> = ({ groups }) =>
+  groups.length === 0 ? (
+    <p>no definitions</p>
+  ) : (
+    <>
+      <ul class="definition-list">
+        {groups.map((group) => (
+          <li>
+            <a href={definitionHref(group.name)}>{group.name}</a>
+          </li>
+        ))}
+      </ul>
+      <p class="definition-miss" hidden>
+        No definitions match <code></code>.
       </p>
-    );
-  }
-  return (
-    <ul class="definition-list">
-      {shown.map((group) => (
-        <li>
-          <a href={definitionHref(group.name)}>{group.name}</a>
-        </li>
-      ))}
-    </ul>
+    </>
   );
-};
 
 // The index is a search and one link per name. A name's own page is its newest wording as a
 // form, then the current wording and the one before it. Running jobs sit above that body.
@@ -192,21 +182,20 @@ const DefinitionList: FC<{
 // `error` is that failure; a name nobody carries is said on its own page.
 export const DefinitionsPage: FC<{
   groups: ReadonlyArray<DefinitionVersions> | null;
-  query: string;
   name: string | undefined;
   selected: DefinitionVersions | undefined;
   notice: EditNotice | undefined;
   error: string | undefined;
   running: ReadonlyArray<AutomationJob> | null;
-}> = ({ groups, query, name, selected, notice, error, running }) => {
+}> = ({ groups, name, selected, notice, error, running }) => {
   const index = error === undefined && name === undefined && groups !== null;
   return (
     <OperatorPage title="oligarchy definitions" page="definitions" scriptSrc="/dashboard.js">
       <h1>oligarchy definitions</h1>
       {error === undefined ? null : <p>error: {error}</p>}
-      {index ? <DefinitionSearch query={query} /> : null}
+      {index ? <DefinitionSearch /> : null}
       {running === null ? null : <RunningTests jobs={running} definition={name} />}
-      {index ? <DefinitionList groups={groups} query={query} /> : null}
+      {index ? <DefinitionList groups={groups} /> : null}
       {error === undefined && name !== undefined && selected === undefined ? (
         <p>
           No test definition named <code>{name}</code>.

@@ -488,13 +488,9 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
   it("lists every definition as its own page, under a search", async () => {
     const { status, html } = await getPage("/definitions", dbUrl);
     expect(status).toBe(200);
-    expect(html).toContain(
-      '<form class="search" method="get" action="/definitions" role="search">',
-    );
+    expect(html).toContain('<search class="search"><input type="search"');
     expect(html).toContain('<a href="/definitions/lock-screen">lock-screen</a>');
-    expect(html.indexOf('role="search"')).toBeLessThan(
-      html.indexOf('href="/definitions/lock-screen"'),
-    );
+    expect(html.indexOf("<search")).toBeLessThan(html.indexOf('href="/definitions/lock-screen"'));
     expect(html).not.toContain("<h2>lock-screen</h2>");
     expect(html).toContain('aria-current="page">definitions</a>');
     expect(html).toContain('href="/">servers</a>');
@@ -503,22 +499,18 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
     expect(html).not.toContain("/create-test-suite-run");
   });
 
-  it("narrows the list to names containing the search, and says so when none do", async () => {
+  it("keeps every name on the page when a query is present; the browser narrows them", async () => {
     await seed(dbUrl, async (db) => {
       await db
         .insert(testDefinitions)
         .values({ name: "wide layout", description: "d", instruction: "i", proof: "p" });
     });
-    const hit = await getPage("/definitions?q=LOCK", dbUrl);
-    expect(hit.status).toBe(200);
-    expect(hit.html).toContain('value="LOCK"');
-    expect(hit.html).toContain('<a href="/definitions/lock-screen">lock-screen</a>');
-    expect(hit.html).not.toContain('href="/definitions/wide%20layout"');
-    const miss = await getPage("/definitions?q=no-such-fragment", dbUrl);
-    expect(miss.status).toBe(200);
-    expect(miss.html).toContain("No definitions match <code>no-such-fragment</code>.");
-    expect(miss.html).not.toContain('href="/definitions/lock-screen"');
-    expect(miss.html).not.toContain('href="/definitions/wide%20layout"');
+    const { status, html } = await getPage("/definitions?q=LOCK", dbUrl);
+    expect(status).toBe(200);
+    expect(html).toContain('<a href="/definitions/lock-screen">lock-screen</a>');
+    expect(html).toContain('<a href="/definitions/wide%20layout">wide layout</a>');
+    expect(html).toContain('<p class="definition-miss" hidden="">');
+    expect(html).not.toContain('value="LOCK"');
   });
 
   it("shows the named definition as text and does not chart its results", async () => {
