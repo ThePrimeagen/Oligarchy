@@ -19249,26 +19249,41 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter and type `echo first-a` Enter, `echo first-b` Enter, `ls /tmp` Enter.
-  * Type `echo` (no Enter) and press Up twice.
-  ** The line becomes `echo first-b`, then `echo first-a`; `ls /tmp` is skipped. Press Ctrl+C.
-  * Type `cd ~/down` and press Tab once → `cd ~/Downloads/` despite the lowercase d. Press Ctrl+C.
-  * Type `touch /tmp/ab1 /tmp/ab2 /tmp/.abh` Enter, then type `ls /tmp/ab` and press Tab, Tab, Tab, Shift+Tab.
-  ** First Tab lists `ab1 ab2`; the next Tabs cycle the line to `/tmp/ab1`, `/tmp/ab2`; Shift+Tab goes back. `.abh` never appears. Press Ctrl+C.
-  * Press Ctrl+D; the desktop is as before.
+  * Press Super+Return. A terminal opens.
+  * Type `echo first-a` and press Return. The output is `first-a`.
+  * Type `echo first-b` and press Return. The output is `first-b`.
+  * Type `ls /tmp` and press Return. The prompt returns.
+  * Type `echo` and do not press Return.
+  * Press Up. The line is `echo first-b`.
+  * Press Up. The line is `echo first-a`.
+  * Press Ctrl+C. The prompt returns.
+  * Type `cd ~/down` and do not press Return.
+  * Press Tab. The line is `cd ~/Downloads/`.
+  * Press Ctrl+C. The prompt returns.
+  * Type `touch /tmp/ab1 /tmp/ab2 /tmp/.abh` and press Return. The prompt returns.
+  * Type `ls /tmp/ab` and do not press Return.
+  * Press Tab. `ab1` and `ab2` are offered. `.abh` is not.
+  * Press Tab. The line is `ls /tmp/ab1`.
+  * Press Tab. The line is `ls /tmp/ab2`.
+  * Press Shift+Tab. The line is `ls /tmp/ab1`.
+  * Press Ctrl+C. The prompt returns.
+  * Press Ctrl+D. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Screenshot after every single Tab so the cycling is visible.
+  * Do not press Return on the lines you are recalling or completing.
+  * Screenshot after every Tab before the next key replaces it.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the prefix recall, the case-insensitive completion, and the cycling sequence without the hidden file
+  ** Up from `echo` recalls `echo first-b`, then `echo first-a`, and skips `ls /tmp`.
+  ** Tab on `cd ~/down` completes `~/Downloads/`.
+  ** Tab on `ls /tmp/ab` offers only `ab1` and `ab2`, then cycles to `ab1` and `ab2`. Shift+Tab returns to `ab1`.
   * If unsuccessful
-  ** Screenshot of Up recalling `ls /tmp` or Tab listing without cycling
+  ** Up recalls `ls /tmp`, or Tab lists matches and does not cycle the line.
 covers: default/bash/inputrc, default/bash/rc
 
 ### starship-prompt-path-git-and-error-state   [VM-OK]
@@ -19278,31 +19293,50 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter and screenshot the prompt (a cyan `❯` after the directory, a blank line before it). Type `mkdir -p /tmp/sp/deep/er && cd /tmp/sp/deep/er` Enter.
-  ** The prompt shows `…/deep/er` followed by `❯`.
-  * Type `git init -q /tmp/repo1 && cd /tmp/repo1 && touch a` Enter.
-  ** Prompt shows `repo1` in bold cyan, `master` in italic cyan and a `?` (untracked).
-  * Type `git add a && git -c user.name=t -c user.email=t@t commit -qm init` Enter: the `?` disappears.
-  * Type `false` Enter: the prompt character becomes `✗`. Type `true` Enter: back to `❯`.
-  * Type `sed -i 's/^add_newline = true/add_newline = false/; s/success_symbol = .*/success_symbol = "[→](bold green)"/' ~/.config/starship.toml && grep -n 'add_newline\|success_symbol' ~/.config/starship.toml` Enter, then open a new terminal with Super+Enter.
-  ** The prompt character is now a green `→` and there is no blank line between commands.
-  * Break the file: type `echo 'this is not = toml = at all [' >> ~/.config/starship.toml` Enter; open another terminal with Super+Enter.
-  ** Starship prints a warning such as `[WARN] - (starship::config): Unable to parse the config file` and shows its built-in default prompt (typically `❯` in green/red, directory in bold cyan); the shell itself works (`echo ok`).
-  * Restore: type `cp /usr/share/omarchy/config/starship.toml ~/.config/starship.toml` Enter; open a new terminal → the original cyan `❯` prompt with the blank line. Close all terminals with Super+W; the desktop is as before.
+  * Press Super+Return. A terminal opens.
+  * Look at the prompt. A blank line sits above it, and the character is a cyan `❯`.
+  * Type `mkdir -p /tmp/sp/deep/er && cd /tmp/sp/deep/er` and press Return. The prompt shows `…/deep/er` and then `❯`.
+  * Type `git init -q /tmp/repo1 && cd /tmp/repo1 && touch a` and press Return. The prompt shows `repo1`, `master`, and `?`.
+  * Type `git add a && git -c user.name=t -c user.email=t@t commit -qm init` and press Return. The `?` is gone.
+  * Type `false` and press Return. The prompt character is `✗`.
+  * Type `true` and press Return. The prompt character is `❯`.
+  * Type `sed -i 's/^add_newline = true/add_newline = false/; s/success_symbol = .*/success_symbol = "[→](bold green)"/' ~/.config/starship.toml && grep -n 'add_newline\|success_symbol' ~/.config/starship.toml` and press Return. `add_newline` is false, and `success_symbol` is the green arrow.
+  * Press Super+Return. A new terminal opens.
+  * Look at its prompt. The character is a green `→`, and there is no blank line above it.
+  * Click the first terminal. It is focused.
+  * Type `echo 'this is not = toml = at all [' >> ~/.config/starship.toml` and press Return. The prompt returns.
+  * Press Super+Return. A new terminal opens.
+  * Look at its prompt. Starship warns that the config cannot be parsed, and the prompt is the built-in default.
+  * Type `echo ok` and press Return. The output is `ok`.
+  * Type `cp /usr/share/omarchy/config/starship.toml ~/.config/starship.toml` and press Return. The prompt returns.
+  * Press Super+Return. A new terminal opens.
+  * Look at its prompt. The character is a cyan `❯`, and a blank line sits above it.
+  * Press Super+W. That terminal closes.
+  * Click an open terminal. It is focused.
+  * Press Super+W. It closes.
+  * Click an open terminal. It is focused.
+  * Press Super+W. It closes.
+  * Click the remaining terminal. It is focused.
+  * Press Super+W. It closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * A box where a glyph should be means the Nerd Font is missing; report it.
-  * Keep the terminals tiled so the prompt styles are visible in one screenshot.
+  * A box where a glyph should be means the Nerd Font is missing. Report it.
+  * Click a terminal before typing so the command lands there.
+  * The broken-config warning looks like `[WARN] - (starship::config): Unable to parse the config file`.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the truncated path prompt, the repo prompt with branch and `?`, the clean repo prompt, `✗` after `false`, the modified prompt (green `→`, no blank line), the warning + fallback prompt with `echo ok`, and the restored prompt
+  ** The first prompt is a cyan `❯` with a blank line above it. A deep path is shown as `…/deep/er`.
+  ** Inside a repo the prompt shows `repo1`, `master`, and `?`. The `?` disappears after the commit.
+  ** `false` turns the character into `✗`. `true` turns it back into `❯`.
+  ** After the edit, a new terminal uses a green `→` and no blank line.
+  ** A broken config warns and falls back, and `echo ok` still prints. The restored file returns the cyan `❯` and the blank line.
   * If unsuccessful
-  ** Screenshot of a prompt without branch/status or with rendering errors, a terminal that fails to open or a shell error; `cat ~/.config/starship.toml | sudo tee /dev/ttyS0` read via get-serial
+  ** The repo prompt has no branch or status, a new terminal does not pick up the edit, or a broken config breaks the shell.
 covers: config/starship.toml, default/bash/init, config/git/config; manual/40-prompt.md
 
 ### shell-env-defaults-and-bashrc-additions   [VM-OK]
@@ -19312,29 +19346,41 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter and type `echo "$EDITOR | $BROWSER | $TERMINAL | $SUDO_EDITOR | $OMARCHY_PATH | $LANG"` Enter.
-  ** `omarchy-launch-editor --inline | omarchy-launch-browser | xdg-terminal-exec | omarchy-launch-editor --inline | /usr/share/omarchy | <a UTF-8 locale>`.
-  * Type `systemctl --user show-environment | grep -E '^(BROWSER|EDITOR)='` Enter → `EDITOR=…` is present; no `BROWSER=` line.
-  * Type `env -u LANG bash -ic 'printf "%s \U000F17A9\n" "$LANG"' 2>/dev/null` Enter → a UTF-8 locale followed by a folder glyph, not a literal `\U000F17A9`.
-  * Type `BROWSER=firefox bash -ic 'echo $BROWSER'; EDITOR=helix bash -ic 'echo $EDITOR'` Enter → `firefox`, `helix` (inherited values kept).
-  * Type `xdg-settings set default-web-browser chromium.desktop; echo s=$?; xdg-settings get default-web-browser` Enter → `s=0`, `chromium.desktop`.
-  * Type `echo "alias probehello='echo hello-from-bashrc'" >> ~/.bashrc && echo 'export PROBE_VAR=set-in-bashrc' >> ~/.bashrc` Enter. Close this terminal with Super+W and open a new one with Super+Enter. Type `probehello; echo $PROBE_VAR` Enter → `hello-from-bashrc`, `set-in-bashrc`.
-  * Restore: type `sed -i '/probehello/d; /PROBE_VAR/d' ~/.bashrc && grep -c probehello ~/.bashrc` Enter → `0`. Press Ctrl+D; the desktop is as before.
+  * Press Super+Return. A terminal opens.
+  * Type `echo "$EDITOR | $BROWSER | $TERMINAL | $SUDO_EDITOR | $OMARCHY_PATH | $LANG"` and press Return. The line is `omarchy-launch-editor --inline | omarchy-launch-browser | xdg-terminal-exec | omarchy-launch-editor --inline | /usr/share/omarchy` followed by a UTF-8 locale.
+  * Type `systemctl --user show-environment | grep -E '^(BROWSER|EDITOR)='` and press Return. An `EDITOR=` line is printed. No `BROWSER=` line is printed.
+  * Type `env -u LANG bash -ic 'printf "%s \U000F17A9\n" "$LANG"' 2>/dev/null` and press Return. A UTF-8 locale is printed, then a glyph. The text `\U000F17A9` is not printed.
+  * Type `BROWSER=firefox bash -ic 'echo $BROWSER'` and press Return. The output is `firefox`.
+  * Type `EDITOR=helix bash -ic 'echo $EDITOR'` and press Return. The output is `helix`.
+  * Type `xdg-settings set default-web-browser chromium.desktop; echo "s=$?"` and press Return. The last line is `s=0`.
+  * Type `xdg-settings get default-web-browser` and press Return. The output is `chromium.desktop`.
+  * Type `echo "alias probehello='echo hello-from-bashrc'" >> ~/.bashrc` and press Return. The prompt returns.
+  * Type `echo 'export PROBE_VAR=set-in-bashrc' >> ~/.bashrc` and press Return. The prompt returns.
+  * Press Super+W. The terminal closes.
+  * Press Super+Return. A terminal opens.
+  * Type `probehello` and press Return. The output is `hello-from-bashrc`.
+  * Type `echo $PROBE_VAR` and press Return. The output is `set-in-bashrc`.
+  * Type `sed -i '/probehello/d; /PROBE_VAR/d' ~/.bashrc` and press Return. The prompt returns.
+  * Type `grep -c probehello ~/.bashrc` and press Return. The output is `0`.
+  * Press Ctrl+D. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * If a line wraps, widen the terminal with Super+F (fullscreen) before screenshotting; press Super+F again to restore.
-  * `bash -ic` starts an interactive shell so Omarchy's env files are sourced. The Omarchy `.bashrc` sources other files; appending at the end is safe.
-  * The glyph is a folder icon from the Nerd Font; any visible symbol counts, a backslash sequence does not.
+  * Press Super+F before a long line if it wraps, then press Super+F again to leave fullscreen.
+  * `bash -ic` is an interactive shell, so Omarchy's env files are sourced.
+  * Any visible glyph counts. A printed backslash sequence does not.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the six-value line, no `BROWSER=` in the session environment, the UTF-8 locale with the glyph, the inherited values, `xdg-settings set` succeeding, and `probehello`/`echo $PROBE_VAR` in the new terminal
+  ** The six values name the editor launcher, the browser launcher, `xdg-terminal-exec`, the same editor launcher, `/usr/share/omarchy`, and a UTF-8 locale.
+  ** The user session has `EDITOR` and no `BROWSER`. A cleared `LANG` still prints a UTF-8 locale and a glyph.
+  ** `BROWSER` and `EDITOR` inherited into a new shell are `firefox` and `helix`. `xdg-settings` sets and reads `chromium.desktop`.
+  ** A new terminal runs the appended alias and prints `PROBE_VAR`. After the restore, `probehello` is absent.
   * If unsuccessful
-  ** Screenshot of a mismatched variable, an empty LANG, a literal `\U000F17A9`, a session `BROWSER=`, `xdg-settings set` refusing, or `command not found` for the alias with `tail ~/.bashrc`
+  ** A value does not match, `LANG` is empty, the glyph is a literal escape, the session has `BROWSER=`, or the alias is not found.
 covers: default/bash/envs; default/bash/env-bootstrap; default/uwsm/default; default/uwsm/env.d/10-omarchy; etc/profile.d/omarchy.sh; test/shell.d/{editor-env,browser-env,locale-env}-test.sh; manual/15-terminal.md; manual/31-dotfiles.md (Adding your own shell exports, functions, and aliases)
 
 ### lazygit-launch-stage-and-commit   [VM-OK]
@@ -19344,28 +19390,38 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter. Type `mkdir -p /tmp/lg-not-git && cd /tmp/lg-not-git && lazygit` + Enter. lazygit must ask whether to initialise a repository (`No valid git repository … Would you like to initialize?`) — answer No / press `n` or Escape; it exits. Type `ls -a` + Enter → no `.git`.
-  * Type `mkdir -p /tmp/lg && cd /tmp/lg && git init -q && git config user.email t@e.st && git config user.name T && echo hi > a.txt && lazygit` + Enter.
-  ** lazygit opens with panels Status / Files / Branches / Commits / Stash on the left and a diff/log on the right; the Files panel lists `?? a.txt`.
-  * With the Files panel focused press Space: the entry becomes `A  a.txt` (staged, green).
-  * Press `c`, type `first commit`, press Enter. The Commits panel must now list `first commit`.
-  * Press `?`: the keybindings overlay opens. Press Escape. Press Tab a few times: focus cycles across panels (the highlighted border moves).
-  * Press `q` to quit. Type `git log --oneline` + Enter → one line `first commit`. Press Ctrl+D; the desktop is as before.
+  * Press Super+Return. A terminal opens.
+  * Type `mkdir -p /tmp/lg-not-git && cd /tmp/lg-not-git && lazygit` and press Return. lazygit asks whether to initialize a repository.
+  * Press n. lazygit exits.
+  * Type `ls -a` and press Return. `.git` is not listed.
+  * Type `mkdir -p /tmp/lg && cd /tmp/lg && git init -q && git config user.email t@e.st && git config user.name T && echo hi > a.txt && lazygit` and press Return. lazygit opens, and Files shows `?? a.txt`.
+  * Press Space. The file line becomes `A  a.txt`.
+  * Press c. The commit prompt opens.
+  * Type `first commit` and press Return. The Commits panel lists `first commit`.
+  * Press ?. The keybinding overlay opens.
+  * Press Escape. The overlay closes.
+  * Press Tab. Focus moves to the next panel.
+  * Press Tab. Focus moves again.
+  * Press q. lazygit exits.
+  * Type `git log --oneline` and press Return. One line names `first commit`.
+  * Press Ctrl+D. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * If the Files panel is not focused at start, press `2` or click it.
-  * The repo-local user.name/email avoids a "please tell me who you are" failure when the minted user has no global identity.
-  * The Omarchy lazygit config is intentionally empty; any config error on start is a failure.
+  * If Files is not focused at the start, press `2` or click it before Space.
+  * The repo-local name and email avoid a missing-identity failure.
+  * A config error when lazygit starts is a failure. The shipped config is empty on purpose.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the not-a-repo prompt declined and `ls -a` without `.git`, `?? a.txt`, the staged `A  a.txt`, the commit in the Commits panel, the `?` overlay, and `git log --oneline`
+  ** Outside a repo, declining the prompt exits and leaves no `.git`.
+  ** Inside the repo, Files shows `?? a.txt`, Space stages it, and `c` records `first commit` in the Commits panel.
+  ** `?` opens the keybinding overlay, Escape closes it, and Tab moves focus. `git log --oneline` names `first commit`.
   * If unsuccessful
-  ** Screenshot of a config parse error or crash on start, or the state where a key did nothing and lazygit's error bar
+  ** lazygit shows a config error, the declined prompt leaves a `.git`, or a key does nothing.
 covers: manual/21-tuis.md:3-9; manual/18-development-tools.md:37; install/omarchy-base.packages (lazygit); config/lazygit/config.yml
 
 ### btop-omarchy-config   [VM-OK]
@@ -19375,25 +19431,31 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter and type `btop` Enter.
-  ** Four boxes (cpu, mem, net, proc) with rounded corners and braille graphs in the desktop theme's colours; a clock at the top.
-  * Press `j` twice then `k` → the process selection moves down/up.
-  * Press `q` → btop exits. Type `grep '^color_theme' ~/.config/btop/btop.conf` Enter → `"current"` (kept after the save-on-exit).
-  * Press Super+Alt+Space, type `btop` → no launcher entry. Press Escape.
-  * Press Ctrl+D; the desktop is as before.
+  * Press Super+Return. A terminal opens.
+  * Type `btop` and press Return. Four boxes appear in the desktop theme colors.
+  * Press j. The process selection moves down.
+  * Press j. The selection moves down again.
+  * Press k. The selection moves up.
+  * Press q. btop exits.
+  * Type `grep '^color_theme' ~/.config/btop/btop.conf` and press Return. The line names `"current"`.
+  * Press Super+Alt+Space. The launcher opens.
+  * Type `btop`. No entry matches.
+  * Press Escape. The launcher closes.
+  * Press Ctrl+D. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Default btop colours (blue/white) instead of the desktop theme mean the `current` theme is missing; report it.
+  * Default blue and white btop colors mean the `current` theme is missing. Report that.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of btop with theme colours and four boxes, the moved selection, the `color_theme` line, and the empty launcher search
+  ** btop opens with four theme-colored boxes. `j` moves the selection down and `k` moves it up.
+  ** After exit, `color_theme` is `"current"`. The launcher has no `btop` entry.
   * If unsuccessful
-  ** Screenshot of default-coloured btop, `j`/`k` not moving, or a launcher entry
+  ** btop uses its default colors, `j` or `k` does not move, or the launcher offers btop.
 covers: config/btop/btop.conf, default/omarchy/launcher.hides
 
 ### terminal-toolchain-runnable   [VM-OK]
@@ -19403,25 +19465,30 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter (note: no fastfetch banner is printed on open; it is reached via `Omarchy Menu → About` or by hand).
-  * Type `git --version; tmux -V; mise --version` and press Enter. Three version lines must print.
-  * Type `timeout 10 fastfetch --pipe false | head -20` and press Enter. System information (OS, kernel, shell) must print.
-  * Type `nvim --headless '+qa' && echo NVIM-OK` and press Enter. It must print `NVIM-OK`.
-  * Type `mise not-a-command; echo rc=$?` and press Enter. It must print an error and a non-zero rc.
-  * Close the terminal with Super+W. The desktop must look exactly as at the start.
+  * Press Super+Return. A terminal opens. No fastfetch banner is printed.
+  * Type `git --version` and press Return. A git version line is printed.
+  * Type `tmux -V` and press Return. A tmux version line is printed.
+  * Type `mise --version` and press Return. A mise version line is printed.
+  * Type `timeout 10 fastfetch --pipe false | head -20` and press Return. OS, kernel, and shell lines are printed.
+  * Type `nvim --headless '+qa' && echo NVIM-OK` and press Return. The output is `NVIM-OK`.
+  * Type `mise not-a-command; echo "rc=$?"` and press Return. An error is printed, and the last line is non-zero.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * fastfetch prints colour blocks; only the text lines matter.
+  * fastfetch prints color blocks. The text lines are the result.
+  * Fastfetch is not printed when the terminal opens. It is run by hand here, or from the menu About screen.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot with three version lines, fastfetch output, `NVIM-OK`, and the mise error with non-zero rc
+  ** The terminal opens with no fastfetch banner. git, tmux, and mise each print a version.
+  ** fastfetch prints OS, kernel, and shell lines. Headless Neovim prints `NVIM-OK`.
+  ** `mise not-a-command` prints an error and a non-zero `rc`.
   * If unsuccessful
-  ** Screenshot of the command that failed
+  ** A version command fails, Neovim does not print `NVIM-OK`, or the bad mise command exits 0.
 covers: test/acceptance.d/system-test.sh:102-111
 
 ### default-apps-show-set-and-reject   [VM-OK]
@@ -19431,28 +19498,85 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy default browser; omarchy default editor; omarchy default terminal; omarchy default agent; echo "agent-exit=$?"` → `chromium`, `nvim`, `foot`, nothing for the agent, `agent-exit=0` (record the words if the build differs). Type `xdg-mime query default x-scheme-handler/http; xdg-mime query default inode/directory` → `chromium.desktop`, `org.gnome.Nautilus.desktop`.
-  * Type `omarchy default --help` → `Default commands — Default application selection:` with four rows and their option lists.
-  * Press Super+Space → Setup → Defaults → Browser: the ✓ is on `Chromium` only. Escape. Setup → Defaults → Editor: ✓ on `Neovim` only. Setup → Defaults → Terminal: ✓ on `Foot` only. Setup → Defaults → Agent: NO ✓ on any row. Escape each time.
-  ** The submenus list every option, installed or not; do not click any row other than `Foot`/`Neovim` below — the others start a package download.
-  * Type `omarchy default editor nvim; echo "exit=$?"` → toast `Neovim is now the default editor`, `exit=0`; `cat ~/.local/state/omarchy/defaults/editor` → `nvim`.
-  * Press Super+Space → Setup → Defaults → Terminal → click `Foot` with the mouse → toast `Foot is now the default terminal`, no installer window. Type `cat ~/.config/xdg-terminals.list; omarchy default terminal` → two comment lines then `foot.desktop`, and `foot`. Press Super+Enter → a foot window opens (`echo $TERM` prints `xterm-256color`); close it with Super+W.
-  * Type `omarchy default editor bogus; echo "exit=$?"` → `Usage: omarchy-default-editor <code|cursor|zed|sublime_text|helix|vim|emacs|nvim>`, `exit=1`; `cat ~/.local/state/omarchy/defaults/editor` still `nvim`. Type `omarchy default terminal bogus; echo "exit=$?"` and `omarchy default browser bogus; echo "exit=$?"` → the matching usage lines, `exit=1` each.
-  * Press Super+Space → Setup → Defaults → Editor; `Neovim` still carries the ✓ (reopen the submenu twice before judging). Escape. Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy default browser` and press Return. The output is `chromium`.
+  * Type `omarchy default editor` and press Return. The output is `nvim`.
+  * Type `omarchy default terminal` and press Return. The output is `foot`.
+  * Type `omarchy default agent; echo "agent-exit=$?"` and press Return. No agent name is printed, and the last line is `agent-exit=0`.
+  * Type `xdg-mime query default x-scheme-handler/http` and press Return. The output is `chromium.desktop`.
+  * Type `xdg-mime query default inode/directory` and press Return. The output is `org.gnome.Nautilus.desktop`.
+  * Type `omarchy default --help` and press Return. Help names browser, editor, terminal, and agent.
+  * Press Super+Space. The menu opens.
+  * Select Setup. The Setup menu opens.
+  * Select Defaults. The Defaults menu opens.
+  * Select Browser. The Browser list opens. The check is on Chromium only.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Setup. The Setup menu opens.
+  * Select Defaults. The Defaults menu opens.
+  * Select Editor. The Editor list opens. The check is on Neovim only.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Setup. The Setup menu opens.
+  * Select Defaults. The Defaults menu opens.
+  * Select Terminal. The Terminal list opens. The check is on Foot only.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Setup. The Setup menu opens.
+  * Select Defaults. The Defaults menu opens.
+  * Select Agent. The Agent list opens. No row has a check.
+  * Press Escape. The menu closes.
+  * Click the terminal. It is focused.
+  * Type `omarchy default editor nvim; echo "exit=$?"` and press Return. A notification says Neovim is now the default editor, and the last line is `exit=0`.
+  * Type `cat ~/.local/state/omarchy/defaults/editor` and press Return. The output is `nvim`.
+  * Press Super+Space. The menu opens.
+  * Select Setup. The Setup menu opens.
+  * Select Defaults. The Defaults menu opens.
+  * Select Terminal. The Terminal list opens.
+  * Click Foot. A notification says Foot is now the default terminal. No installer opens.
+  * Click the first terminal. It is focused.
+  * Type `cat ~/.config/xdg-terminals.list` and press Return. Two comment lines are followed by `foot.desktop`.
+  * Type `omarchy default terminal` and press Return. The output is `foot`.
+  * Press Super+Return. A new terminal opens.
+  * Type `echo $TERM` and press Return. The output is `xterm-256color`.
+  * Press Super+W. That terminal closes.
+  * Click the first terminal. It is focused.
+  * Type `omarchy default editor bogus; echo "exit=$?"` and press Return. Usage lists the editor names, and the last line is `exit=1`.
+  * Type `cat ~/.local/state/omarchy/defaults/editor` and press Return. The output is still `nvim`.
+  * Type `omarchy default terminal bogus; echo "exit=$?"` and press Return. Usage lists the terminal names, and the last line is `exit=1`.
+  * Type `omarchy default browser bogus; echo "exit=$?"` and press Return. Usage lists the browser names, and the last line is `exit=1`.
+  * Press Super+Space. The menu opens.
+  * Select Setup. The Setup menu opens.
+  * Select Defaults. The Defaults menu opens.
+  * Select Editor. The Editor list opens. The check is on Neovim only.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Setup. The Setup menu opens.
+  * Select Defaults. The Defaults menu opens.
+  * Select Editor. The Editor list opens. The check is still on Neovim only.
+  * Press Escape. The menu closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The ✓ is appended to the row label; zoom the screenshot if the glyph is small. Menu guards paint from the previous open — reopen twice before asserting a ✓ moved.
-  * double checking your mouse position before clicking can be useful to prevent failure.
+  * If a printed default word differs from this build, record it and continue.
+  * Use arrows and Enter if typing does not filter the menu. Do not select an uninstalled default. That starts a download.
+  * The check is on the row label. Reopen the Editor list before judging it. The second open in this list is that check.
+  * Click the terminal before the next command. An open menu takes the keyboard.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the four printed defaults and the two MIME handlers, each Defaults submenu with the ✓ where expected (none in Agent), both toasts, the file contents, and the three usage refusals with `exit=1`
+  ** The printed defaults are `chromium`, `nvim`, `foot`, and no agent, with `agent-exit=0`.
+  ** The HTTP handler is `chromium.desktop`, and directories use `org.gnome.Nautilus.desktop`. Help names the four groups.
+  ** Browser, Editor, and Terminal each show one check, on Chromium, Neovim, and Foot. Agent has none.
+  ** Setting the editor to `nvim` notifies and writes `nvim`. Clicking Foot notifies and does not open an installer.
+  ** `xdg-terminals.list` ends with `foot.desktop`, the CLI says `foot`, and a new terminal prints `xterm-256color`.
+  ** A bogus editor, terminal, and browser each print usage and exit 1. The editor file stays `nvim`, and the Editor check stays on Neovim.
   * If unsuccessful
-  ** a ✓ on the wrong row, two ✓ in one submenu, a mismatch between CLI and menu, a floating installer opening for an installed app, or the defaults file changed by a rejected value
+  ** A check is on the wrong row, a rejected value changes a defaults file, or clicking Foot opens an installer.
 covers: bin/omarchy-default-browser:13-25; bin/omarchy-default-editor:14-22; bin/omarchy-default-terminal:13-24; bin/omarchy-default-agent:15-24; default/omarchy/omarchy-menu.jsonc:136-173; default/xdg-terminal-exec/hyprland-xdg-terminals.list; test/shell.d/default-apps-test.sh
 
 ### default-editor-switch-to-vim-installs   [VM-OK] [NET]

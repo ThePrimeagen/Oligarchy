@@ -415,13 +415,13 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `ssh-helpers-fail-fast-without-server`
 - [x] `ssh-wrapper-reconnects-after-drop`
 - [x] `rsync-watchers-rsw-lsw-dsw`
-- [ ] `readline-history-prefix-and-tab-cycling`
-- [ ] `starship-prompt-path-git-and-error-state`
-- [ ] `shell-env-defaults-and-bashrc-additions`
-- [ ] `lazygit-launch-stage-and-commit`
-- [ ] `btop-omarchy-config`
-- [ ] `terminal-toolchain-runnable`
-- [ ] `default-apps-show-set-and-reject`
+- [x] `readline-history-prefix-and-tab-cycling`
+- [x] `starship-prompt-path-git-and-error-state`
+- [x] `shell-env-defaults-and-bashrc-additions`
+- [x] `lazygit-launch-stage-and-commit`
+- [x] `btop-omarchy-config`
+- [x] `terminal-toolchain-runnable`
+- [x] `default-apps-show-set-and-reject`
 - [ ] `default-editor-switch-to-vim-installs`
 - [ ] `files-hotkeys-cwd-preview-and-text-opens-neovim`
 - [ ] `video-double-click-opens-mpv`
