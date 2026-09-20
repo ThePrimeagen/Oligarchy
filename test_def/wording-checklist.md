@@ -275,14 +275,14 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `install-service-dropbox-without-account-and-remove`
 - [x] `install-service-sunshine-and-remove`
 - [x] `install-chromium-account-and-claude-extension-idempotent`
-- [ ] `install-ai-ollama-cpu-and-remove`
-- [ ] `install-ai-claude-desktop-and-remove`
-- [ ] `remove-ai-perplexity-claude-keep-user-and-cli-state`
-- [ ] `default-agent-pick-installs-pi-via-mise-and-abort`
-- [ ] `install-ai-dictation-voxtype-without-microphone`
-- [ ] `voxtype-invitation-hook-runs-once`
-- [ ] `install-gaming-xbox-cloud-webapp-and-remove`
-- [ ] `gaming-launchers-refuse-without-install`
+- [x] `install-ai-ollama-cpu-and-remove`
+- [x] `install-ai-claude-desktop-and-remove`
+- [x] `remove-ai-perplexity-claude-keep-user-and-cli-state`
+- [x] `default-agent-pick-installs-pi-via-mise-and-abort`
+- [x] `install-ai-dictation-voxtype-without-microphone`
+- [x] `voxtype-invitation-hook-runs-once`
+- [x] `install-gaming-xbox-cloud-webapp-and-remove`
+- [x] `gaming-launchers-refuse-without-install`
 - [ ] `gaming-gpu-lib32-without-gpu-and-steam-install-remove`
 - [ ] `windows-vm-install-refused-and-unconfigured-commands`
 - [ ] `security-fido2-without-device-and-removers-on-stock`

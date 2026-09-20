@@ -12432,26 +12432,56 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `ollama --version 2>&1` → `command not found`. Open the Omarchy Menu (Super+Space) → Install → AI. Rows include ChatGPT Desktop, Claude Desktop, Dictation, Grok Bot, Hermes Desktop, LM Studio, Ollama, OpenClaw, Perplexity, T3 Code, none dimmed. Screenshot the list. Select Ollama.
-  ** Floating terminal: `Installing Ollama...`, sudo `prime`, pacman installs the plain `ollama` package (not `ollama-cuda` / `-rocm`; allow up to 5 minutes, screenshot every ≤5 s), `● Done! Press any key to close...`. Press a key.
-  * In the terminal type `ollama --version` → a version line (a warning that the server is not running is acceptable). Do not run `ollama pull`.
-  * Menu → Install → AI (reopen twice): `Ollama` dimmed ✓. Menu → Remove → AI is now present and lists Ollama.
-  * Remove → AI → Ollama → floating terminal: systemd disable (may say unit not found), pacman removes ollama, `Ollama and its models have been removed.`, `Done!`. Press a key.
-  * In the terminal type `ollama --version; ls -d /var/lib/ollama ~/.ollama 2>&1` → `command not found` and both `No such file`. Menu → Remove: the AI row hidden again; Install → AI → `Ollama` enabled. Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `ollama --version 2>&1` and press Return. The output is `command not found`.
+  * Press Super+Space. The menu opens.
+  * Select Install, then AI. Ollama is listed, and no row is dimmed.
+  * Select Ollama. A floating terminal opens.
+  * Type `prime` and press Return if sudo asks. The install continues.
+  * Wait until it shows `Done! Press any key to close...`.
+  * Press a key. The floating terminal closes.
+  * Click the terminal. The terminal is focused.
+  * Type `ollama --version` and press Return. A version is printed.
+  ** A warning that the server is not running is acceptable. Do not run `ollama pull`.
+  * Press Super+Space. The menu opens.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Install, then AI. Ollama is dimmed with a check.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Remove, then AI. Ollama is listed.
+  * Select Ollama. A floating terminal opens.
+  * Wait until it shows `Ollama and its models have been removed.` and `Done!`.
+  * Press a key. The floating terminal closes.
+  * Click the terminal. The terminal is focused.
+  * Type `ollama --version 2>&1` and press Return. The output is `command not found`.
+  * Type `ls -d /var/lib/ollama 2>&1` and press Return. The output includes `No such file`.
+  * Type `ls -d ~/.ollama 2>&1` and press Return. The output includes `No such file`.
+  * Press Super+Space. The menu opens.
+  * Select Remove. AI is not listed.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Install, then AI. Ollama is enabled.
+  * Press Escape. The menu closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Ollama is a CLI/service with no launcher entry; the version line is the visible proof.
-  * If pacman fails on the download, screenshot the red `Failed` line and stop; that is the report.
+  * The package must be the plain `ollama` package, not `ollama-cuda` or `ollama-rocm`. Allow up to 5 minutes and screenshot about every 5 seconds.
+  * A systemd disable line that says the unit was not found is acceptable.
+  * Ollama has no launcher entry. The version line is the proof. If pacman prints `Failed`, screenshot it and stop.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** The Install → AI list; `Installing Ollama...` naming the `ollama` package → `Done!`; `ollama --version`; the dimmed row and the Remove row; the removal output; `command not found` and both dirs missing
+  ** `ollama` is not a command. Install lists it with no dimmed row, and the install finishes with `Done!`.
+  ** `ollama --version` prints a version. After a reopen, Install dims Ollama and Remove lists it.
+  ** Removal prints `Ollama and its models have been removed.` and `Done!`.
+  ** `ollama` is not a command again, `/var/lib/ollama` and `~/.ollama` are missing, Remove no longer lists AI, and the Install row is enabled.
   * If unsuccessful
-  ** A cuda/rocm package being chosen, the failed terminal and `pacman -Q ollama`, or the remover's `Failed` text
+  ** pacman chooses a cuda or rocm package, the floating terminal shows `Failed`, or `pacman -Q ollama` still lists the package after removal.
 covers: manual/17-ai.md:59-61; default/omarchy/omarchy-menu.jsonc:243-252,317 (install.ai.ollama, remove.ai.ollama); bin/omarchy-install-app; bin/omarchy-remove-ai-ollama; test/shell.d/remove-ai-test.sh
 
 ### install-ai-claude-desktop-and-remove   [VM-OK] [NET]
@@ -12461,26 +12491,57 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open the Omarchy Menu (Super+Space) → Install → AI → Claude Desktop.
-  ** Floating terminal: `Installing Claude...`, sudo `prime`, ~110 MB (1–3 min; screenshot every ≤5 s), `Opening Claude...`, `Claude has been installed.`, `Done!`. A Claude login window opens within ~15 s. Screenshot it and leave it running.
-  * Open a terminal (Super+Enter) and type `ls -d ~/.config/Claude ~/.local/bin/claude` → both exist (the app's config and the CLI stub). Open Apps (Super+Alt+Space), type `claude` → a `Claude` desktop entry is listed. Escape.
-  * Menu → Install → AI (reopen twice): `Claude Desktop` dimmed ✓. Menu → Remove → AI: `Claude Desktop` listed; click it.
-  ** Floating terminal: the Claude window disappears (the remover quits it first), pacman removes claude-desktop, `Claude has been removed.`, `Done!`. Press a key.
-  * In the terminal type `ls -d ~/.config/Claude ~/.cache/Claude ~/.local/bin/claude 2>&1` → the first two `No such file`, the stub still present.
-  * Apps → `claude` → no `Claude` desktop entry; Menu → Install → AI → `Claude Desktop` enabled again. Close the terminal with Super+W.
+  * Press Super+Space. The menu opens.
+  * Select Install, then AI, then Claude Desktop. A floating terminal opens.
+  * Type `prime` and press Return if sudo asks. The install continues.
+  * Wait until it shows `Opening Claude...`, `Claude has been installed.`, and `Done!`.
+  * Press a key if the floating terminal is still waiting. The floating terminal closes.
+  * Wait until a Claude window opens. Leave it open.
+  * Press Super+Return. A terminal opens.
+  * Type `ls -d ~/.config/Claude ~/.local/bin/claude` and press Return. Both paths are listed.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `claude`. A Claude desktop entry is listed.
+  * Press Escape. Apps closes.
+  * Press Super+Space. The menu opens.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Install, then AI. Claude Desktop is dimmed with a check.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Remove, then AI. Claude Desktop is listed.
+  * Click Claude Desktop. A floating terminal opens.
+  * Wait until the Claude window closes.
+  * Wait until the floating terminal shows `Claude has been removed.` and `Done!`.
+  * Press a key. The floating terminal closes.
+  * Click the terminal. The terminal is focused.
+  * Type `ls -d ~/.config/Claude 2>&1` and press Return. The output includes `No such file`.
+  * Type `ls -d ~/.cache/Claude 2>&1` and press Return. The output includes `No such file`.
+  * Type `ls -d ~/.local/bin/claude` and press Return. The stub is still listed.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `claude`. No Claude desktop entry is listed.
+  * Press Escape. Apps closes.
+  * Press Super+Space. The menu opens.
+  * Select Install, then AI. Claude Desktop is enabled.
+  * Press Escape. The menu closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Electron on 2 vCPU may raise Hyprland's "not responding" dialog — click Wait. If the app never finished starting and `~/.config/Claude` is absent, continue; the remover must still succeed.
+  * The download is about 110 MB and can take 1 to 3 minutes. Screenshot about every 5 seconds.
+  * If Hyprland says Claude is not responding, click Wait. If the window never opens and `~/.config/Claude` is absent, continue. Removal must still succeed.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** The install output; the Claude window; the two paths present and the launcher entry; the dimmed row and Remove row; the window vanishing and `Claude has been removed.`; config gone, stub kept; launcher and menu back to stock
+  ** The install prints `Opening Claude...`, `Claude has been installed.`, and `Done!`, and a Claude window opens.
+  ** `~/.config/Claude` and `~/.local/bin/claude` both exist, and Apps lists a Claude desktop entry.
+  ** After a reopen, Install dims Claude Desktop and Remove lists it.
+  ** Removal closes the Claude window and prints `Claude has been removed.` and `Done!`.
+  ** `~/.config/Claude` and `~/.cache/Claude` are gone, the `claude` stub remains, Apps has no Claude desktop entry, and the Install row is enabled.
   * If unsuccessful
-  ** `Failed` output, or `~/.config/Claude` surviving with the app still open
+  ** The floating terminal shows `Failed`, or `~/.config/Claude` remains while the Claude window is still open.
 covers: bin/omarchy-install-ai-claude; bin/omarchy-remove-ai-claude; default/omarchy/omarchy-menu.jsonc (install.ai.claude, remove.ai.claude); test/shell.d/remove-ai-test.sh
 
 ### remove-ai-perplexity-claude-keep-user-and-cli-state   [VM-OK]
@@ -12490,28 +12551,45 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and seed stand-in state: `mkdir -p ~/.config/Perplexity ~/.cache/Perplexity ~/.cache/perplexity-rpc-server ~/.local/share/perplexity-rpc-server ~/.local/state/perplexity && touch ~/.config/perplexity-flags.conf`.
-  * Type `omarchy-remove-ai-perplexity < /dev/null` (no terminal on stdin) → no question is asked. Type `ls -d ~/.cache/Perplexity ~/.cache/perplexity-rpc-server ~/.local/share/perplexity-rpc-server ~/.config/Perplexity ~/.local/state/perplexity ~/.config/perplexity-flags.conf` → the first three are gone, the last three remain.
-  * Re-seed the caches (repeat the first `mkdir` line) and type `omarchy-remove-ai-perplexity` → a confirm prompt about deleting the user's data with **No** preselected. Press Enter. `ls -d ~/.config/Perplexity` still lists it.
-  * Type `omarchy-remove-ai-perplexity` again and move to Yes (Left/Right), Enter → `ls -d ~/.config/Perplexity ~/.local/state/perplexity ~/.config/perplexity-flags.conf` → all `No such file`.
-  * Claude: seed `mkdir -p ~/.config/Claude ~/.cache/Claude ~/.cache/claude-cli-nodejs ~/.claude && touch ~/.claude.json`, then `omarchy-remove-ai-claude; echo "exit=$?"` → completes (no package, so only files are handled). Type `ls -d ~/.config/Claude ~/.cache/Claude ~/.cache/claude-cli-nodejs ~/.claude ~/.claude.json` → `No such file` for `.config/Claude` and `.cache/Claude`; the other three are listed.
-  * Open the Omarchy Menu (Super+Space) → Remove: no AI row (nothing installed). Escape. Clean up the stand-ins: `rm -rf ~/.claude ~/.claude.json ~/.cache/claude-cli-nodejs`; the home directory is back as it was. Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `mkdir -p ~/.config/Perplexity ~/.cache/Perplexity ~/.cache/perplexity-rpc-server ~/.local/share/perplexity-rpc-server ~/.local/state/perplexity && touch ~/.config/perplexity-flags.conf` and press Return. The prompt returns.
+  * Type `omarchy-remove-ai-perplexity < /dev/null` and press Return. No question is asked.
+  * Type `ls -d ~/.cache/Perplexity ~/.cache/perplexity-rpc-server ~/.local/share/perplexity-rpc-server 2>&1` and press Return. Each path reports `No such file`.
+  * Type `ls -d ~/.config/Perplexity ~/.local/state/perplexity ~/.config/perplexity-flags.conf` and press Return. All three paths are listed.
+  * Type `mkdir -p ~/.config/Perplexity ~/.cache/Perplexity ~/.cache/perplexity-rpc-server ~/.local/share/perplexity-rpc-server ~/.local/state/perplexity && touch ~/.config/perplexity-flags.conf` and press Return. The prompt returns.
+  * Type `omarchy-remove-ai-perplexity` and press Return. A confirm prompt is showing, and No is preselected.
+  * Press Enter. The prompt closes.
+  * Type `ls -d ~/.config/Perplexity` and press Return. The directory is still listed.
+  * Type `omarchy-remove-ai-perplexity` and press Return. The confirm prompt is showing.
+  * Move the highlight to Yes and press Enter. The prompt closes.
+  * Type `ls -d ~/.config/Perplexity ~/.local/state/perplexity ~/.config/perplexity-flags.conf 2>&1` and press Return. Each path reports `No such file`.
+  * Type `mkdir -p ~/.config/Claude ~/.cache/Claude ~/.cache/claude-cli-nodejs ~/.claude && touch ~/.claude.json` and press Return. The prompt returns.
+  * Type `omarchy-remove-ai-claude; echo "exit=$?"` and press Return. The command finishes and prints an exit code.
+  * Type `ls -d ~/.config/Claude ~/.cache/Claude 2>&1` and press Return. Both paths report `No such file`.
+  * Type `ls -d ~/.cache/claude-cli-nodejs ~/.claude ~/.claude.json` and press Return. All three paths are listed.
+  * Press Super+Space. The menu opens.
+  * Select Remove. AI is not listed.
+  * Press Escape. The menu closes.
+  * Type `rm -rf ~/.claude ~/.claude.json ~/.cache/claude-cli-nodejs` and press Return. The prompt returns.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The Perplexity prompt is `gum confirm --default=false`; a bare Enter must keep the data.
-  * Neither package is installed, so the removers' `omarchy-pkg-drop` is a no-op and no pacman transaction runs. Do not test the LM Studio home-pointer refusal on this disk: on a build predating the guard it would delete the home directory.
+  * The Perplexity prompt is `gum confirm --default=false`. A bare Enter keeps the data.
+  * Neither package is installed, so no pacman transaction runs.
+  * Do not test the LM Studio home-pointer refusal on this disk. On a build without that guard it can delete the home directory.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** No prompt with stdin redirected and the kept/deleted split; the prompt with No preselected leaving `.config/Perplexity`; the data deleted only after Yes
-  ** The Claude `ls`: the two app directories gone, the three CLI paths present; Remove without an AI row
+  ** With stdin closed, Perplexity removal asks no question. The three cache paths are gone, and `~/.config/Perplexity`, `~/.local/state/perplexity`, and the flags file remain.
+  ** A bare Enter on the No-preselected prompt leaves `~/.config/Perplexity`. Choosing Yes deletes `~/.config/Perplexity`, `~/.local/state/perplexity`, and the flags file.
+  ** Claude removal deletes `~/.config/Claude` and `~/.cache/Claude`, and leaves `~/.cache/claude-cli-nodejs`, `~/.claude`, and `~/.claude.json`.
+  ** Remove does not list AI. The leftover CLI stand-ins are removed before the terminal closes.
   * If unsuccessful
-  ** A prompt appearing with stdin redirected, `.config/Perplexity` deleted on a bare Enter, caches surviving, or `~/.claude`, `~/.claude.json` or `~/.cache/claude-cli-nodejs` deleted
-  ** Output of `omarchy-version`
+  ** A prompt appears with stdin redirected, a bare Enter deletes `~/.config/Perplexity`, a cache survives Yes, or a Claude CLI path is deleted. Record `omarchy-version`.
 covers: bin/omarchy-remove-ai-perplexity; bin/omarchy-remove-ai-claude; bin/omarchy-pkg-drop; test/shell.d/remove-ai-test.sh; test/shell.d/pkg-drop-test.sh; manual/17-ai.md
 
 ### default-agent-pick-installs-pi-via-mise-and-abort   [VM-PARTIAL] [NET]
@@ -12521,30 +12599,68 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `echo "[$(omarchy default agent)]"` → `[]`; `omarchy agent; echo exit=$?` → a hint that no default agent is set, `exit=1`. Press Super+Shift+Ctrl+A: the menu opens at "Default Agent…" with 14 rows and no ✓ — nothing is launched. Escape.
-  ** The agents bar widget (robot glyph) is hidden on this VM by design (01-FACTS); if it is present, right-click it → the same Default Agent submenu; left-click → a panel toggles (no usage data, or a prompt to set an agent); click again to close.
-  * Open the Omarchy Menu (Super+Space) → Setup → Defaults → Agent → Codex: a floating terminal runs the install through mise (download output), no toast. Press Ctrl+C within 10 s: it closes. In the terminal `echo "[$(omarchy default agent)]"` → still `[]`; reopen the Agent submenu twice → no ✓ on any row.
-  * Type `omarchy default agent codex` → the same floating installer opens; Ctrl+C.
-  * Menu → Setup → Defaults → Agent → Pi: the floating terminal shows mise installing `pi` (progress lines; ~30 MB, allow 90 s, screenshot every ≤5 s), then the screen clears and Pi's own TUI starts (a provider / API key prompt or its chat input). Screenshot it. Press Ctrl+C (twice if needed): the floating terminal closes.
-  ** On failure the terminal shows `Could not install Pi with mise` and a red `Failed` line — screenshot it.
-  * In the terminal `omarchy default agent` → `pi`; `ls -la ~/.local/bin/pi` → the stub exists. Menu → Setup → Defaults → Agent (reopen twice): `Pi` carries the ✓. Escape.
-  * Press Super+Shift+Ctrl+A: now a terminal window (class `org.omarchy.agent`) opens running Pi directly, started in `~/Work` (Pi's status line or a `pwd` shows `Work`). Ctrl+C to leave; close the window.
-  * Restore: `rm ~/.config/omarchy/defaults/agent; echo "[$(omarchy default agent)]"` → `[]`; `mise ls` → find the pi tool it lists and remove it with `mise uninstall --all <that tool>` (report the name). Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `echo "[$(omarchy default agent)]"` and press Return. The output is `[]`.
+  * Type `omarchy agent; echo exit=$?` and press Return. The output says no default agent is set, and the last line is `exit=1`.
+  * Press Super+Shift+Ctrl+A. The menu opens on Default Agent, and no row has a check.
+  ** If an agents widget is on the bar, right-click it and confirm the same submenu, then left-click it twice so any panel it opened is closed.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Setup, then Defaults, then Agent, then Codex. A floating terminal starts an install, and no notification appears.
+  * Click the floating terminal. It is focused.
+  * Press Ctrl+C. The floating terminal closes.
+  * Click the first terminal. It is focused.
+  * Type `echo "[$(omarchy default agent)]"` and press Return. The output is `[]`.
+  * Press Super+Space. The menu opens.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Setup, then Defaults, then Agent. No row has a check.
+  * Press Escape. The menu closes.
+  * Type `omarchy default agent codex` and press Return. A floating terminal starts the Codex install.
+  * Click the floating terminal. It is focused.
+  * Press Ctrl+C. The floating terminal closes.
+  * Press Super+Space. The menu opens.
+  * Select Setup, then Defaults, then Agent, then Pi. A floating terminal starts the Pi install.
+  * Wait until the install output is replaced by Pi's own screen.
+  ** If the terminal shows `Could not install Pi with mise`, screenshot it and stop.
+  * Press Ctrl+C. The floating terminal closes.
+  ** If it stays open, press Ctrl+C again.
+  * Click the first terminal. It is focused.
+  * Type `omarchy default agent` and press Return. The output is `pi`.
+  * Type `ls -la ~/.local/bin/pi` and press Return. The stub is listed.
+  * Press Super+Space. The menu opens.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Setup, then Defaults, then Agent. Pi has the check.
+  * Press Escape. The menu closes.
+  * Press Super+Shift+Ctrl+A. A Pi window opens, and it shows a `Work` directory.
+  * Press Ctrl+C. Pi stops.
+  * Close the Pi window.
+  * Click the first terminal. It is focused.
+  * Type `rm ~/.config/omarchy/defaults/agent; echo "[$(omarchy default agent)]"` and press Return. The output is `[]`.
+  * Type `mise ls` and press Return. Note the Pi tool name.
+  * Type `mise uninstall --all` followed by that tool name, and press Return. The tool is removed.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The floating terminal is centred; click into it before pressing Ctrl+C. If the Codex install finishes before you abort, Codex launches inline and `[codex]` prints — `rm ~/.config/omarchy/defaults/agent` and note it.
-  * Skipped in this guest: authenticating an agent and running a prompt. The first-run "Set your default agent" notification is already consumed on the minted disk.
+  * Click the floating terminal before Ctrl+C. Abort the Codex install within 10 seconds.
+  * If Codex finishes before the abort, it becomes the default. Run `rm ~/.config/omarchy/defaults/agent` and record that.
+  * The agents widget is hidden on this VM by design. Pi is about 30 MB and can take 90 seconds. Screenshot about every 5 seconds.
+  * Do not sign in or send a prompt. The first-run agent notification is already consumed on the minted disk.
+  * The Pi window's class is `org.omarchy.agent`.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** `[]` and the `exit=1` hint; the Agent submenu opened by the chord with nothing marked; the Codex install terminal with no toast, `[]` after aborting, no ✓
-  ** mise installing Pi, Pi's first screen, `omarchy default agent` printing `pi`, the ✓ on Pi, the agent window opened by the chord in `~/Work`; `[]` after the restore and the mise tool removed
+  ** The default is `[]`, `omarchy agent` exits 1 with a no-default hint, and Super+Shift+Ctrl+A opens Default Agent with no check.
+  ** Codex starts in a floating terminal with no notification. After Ctrl+C the default is still `[]`, and a reopened Agent menu has no check. The CLI Codex install stops the same way.
+  ** mise replaces its output with Pi's own screen. `omarchy default agent` prints `pi`, the `pi` stub exists, and after a reopen Pi has the check.
+  ** Super+Shift+Ctrl+A opens Pi already in a `Work` directory. Removing the default file prints `[]`, and the mise Pi tool is uninstalled.
   * If unsuccessful
-  ** `Could not install Pi with mise`, a ✓ or a changed default after an aborted install, a toast instead of a terminal, or `mise ls | sudo tee /dev/ttyS0` read via get-serial
+  ** The terminal shows `Could not install Pi with mise`, an aborted install leaves a check or a default, a notification appears instead of a terminal, or `mise ls` shows an error.
 covers: manual/17-ai.md:26,33; default/omarchy/omarchy-menu.jsonc:151 (setup.default.agent.*); bin/omarchy-default-agent; bin/omarchy-agent:16-20,128-131 (--pick); install/user/mise.sh; default/hypr/bindings/utilities.lua:97; test/shell.d/default-agent-test.sh; test/shell.d/agents-panel-test.sh
 
 ### install-ai-dictation-voxtype-without-microphone   [VM-PARTIAL] [NET]
@@ -12554,29 +12670,79 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `command -v voxtype || echo NO-VOXTYPE` → `NO-VOXTYPE`; `omarchy-voxtype-status; echo rc=$?` → `{"alt": "", "class": "idle", "tooltip": ""}` and `rc=0`, returning immediately; `omarchy-voxtype-remove; echo rc=$?` → `Voxtype was not installed.`, `rc=0`.
-  * Type `echo ` (no Return), press Super+Ctrl+X, then press and release F9: nothing is typed, no toast, no error. Press Super+K, type `dictation` → no rows; Escape twice. Menu (Super+Space) → Remove: no AI row (Dictation not removable); Install → AI: `Dictation` enabled.
-  * Menu → Install → AI → Dictation: a floating terminal asks `Install Voxtype + AI model (~150MB) to enable dictation?` with Yes/No. Choose **No** → it ends without installing (`command -v voxtype` still empty); Install → AI: `Dictation` still enabled.
-  * Menu → Install → AI → Dictation → **Yes**: sudo `prime`; pacman installs `wtype voxtype-bin`; the model download shows progress (2–4 min; keep screenshotting); the bar restarts; a toast `Voxtype Dictation Ready — Hold F9 to dictate (or toggle with Super + Ctrl + X).`; `Done!`. Screenshot the bar: a dictation/microphone widget is present.
-  * Press Super+Ctrl+X, wait 3 s, screenshot, press Super+Ctrl+X again → an error toast or an error state in the widget (no audio input device), never a crash dialog. In the terminal `journalctl --user -u voxtype.service -n 30 --no-pager | sudo tee /dev/ttyS0` and read the audio/input error lines with get-serial.
-  * Menu → Install → AI (reopen twice): `Dictation` dimmed ✓. Menu → Remove → AI → `Dictation` → floating terminal `Uninstall Voxtype to remove dictation.`, pacman removes voxtype-bin, `Done!`.
-  * The bar widget is gone; in the terminal `ls ~/.config/voxtype ~/.local/share/voxtype 2>&1` → both `No such file or directory`; Menu → Remove: the AI row hidden again. Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `command -v voxtype || echo NO-VOXTYPE` and press Return. The output is `NO-VOXTYPE`.
+  * Type `omarchy-voxtype-status; echo rc=$?` and press Return. The output includes `{"alt": "", "class": "idle", "tooltip": ""}` and the last line is `rc=0`.
+  * Type `omarchy-voxtype-remove; echo rc=$?` and press Return. The output includes `Voxtype was not installed.` and the last line is `rc=0`.
+  * Type `echo ` and do not press Return. The input line is `echo `.
+  * Press Super+Ctrl+X. The input line is still `echo `, and no notification appears.
+  * Press F9 and release it. The input line is still `echo `, and no notification appears.
+  * Press Ctrl+C. The prompt returns.
+  * Press Super+K. The keybindings list opens.
+  * Type `dictation`. No row is listed.
+  * Press Escape. The keybindings list closes.
+  * Press Escape. The desktop is clear.
+  * Press Super+Space. The menu opens.
+  * Select Remove. AI is not listed.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Install, then AI. Dictation is enabled.
+  * Select Dictation. A floating terminal asks `Install Voxtype + AI model (~150MB) to enable dictation?`.
+  * Choose No and press Enter. The floating terminal closes.
+  * Click the terminal. The terminal is focused.
+  * Type `command -v voxtype || echo NO-VOXTYPE` and press Return. The output is `NO-VOXTYPE`.
+  * Press Super+Space. The menu opens.
+  * Select Install, then AI. Dictation is enabled.
+  * Select Dictation. The same question is showing.
+  * Choose Yes and press Enter. The install continues.
+  * Type `prime` and press Return if sudo asks. The install continues.
+  * Wait until a notification reads `Voxtype Dictation Ready — Hold F9 to dictate (or toggle with Super + Ctrl + X).`
+  * Wait until the floating terminal shows `Done!`.
+  * Press a key. The floating terminal closes.
+  * Look at the bar. A dictation widget is present.
+  * Press Super+Ctrl+X. An error notification appears, or the widget shows an error.
+  * Wait 3 seconds. No crash dialog is open.
+  * Press Super+Ctrl+X. The error is shown again.
+  * Click the terminal. The terminal is focused.
+  * Type `journalctl --user -u voxtype.service -n 30 --no-pager | sudo tee /dev/ttyS0` and press Return. Read the audio or input error with get-serial.
+  * Press Super+Space. The menu opens.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Install, then AI. Dictation is dimmed with a check.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Remove, then AI. Dictation is listed.
+  * Select Dictation. A floating terminal opens.
+  * Wait until it shows `Uninstall Voxtype to remove dictation.` and `Done!`.
+  * Press a key. The floating terminal closes.
+  * Look at the bar. The dictation widget is gone.
+  * Click the terminal. The terminal is focused.
+  * Type `ls ~/.config/voxtype ~/.local/share/voxtype 2>&1` and press Return. Both paths report `No such file or directory`.
+  * Press Super+Space. The menu opens.
+  * Select Remove. AI is not listed.
+  * Press Escape. The menu closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * gum confirm highlights one button: Left/Right or Tab moves between Yes/No, Return picks. Super+Ctrl+X is `<M-C-x>`, F9 is `<F9>`; there is no held-key verb, so push-to-talk itself is untestable — the toggle is the story.
-  * If F9 or Super+Ctrl+X produces any toast before the install, that is the bug to report. If the model download stalls past 5 min, Ctrl+C in the floating terminal and report SLOW.
+  * Left, Right, or Tab moves between Yes and No. Return picks the highlighted button.
+  * Super+Ctrl+X is `<M-C-x>` and F9 is `<F9>`. There is no held-key verb, so push-to-talk itself is not tested.
+  * A notification from F9 or Super+Ctrl+X before the install is the bug to report.
+  * The model download can take 2 to 4 minutes. pacman installs `wtype` and `voxtype-bin`. If it stalls past 5 minutes, press Ctrl+C and report SLOW.
+  * Screenshot the ready notification as soon as it appears.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** `NO-VOXTYPE`, the idle JSON with `rc=0`, `Voxtype was not installed.`; the untouched command line after the chords; the empty Super+K filter; the two menu states
-  ** The declined confirm with nothing installed; the download and the `Voxtype Dictation Ready` toast; the bar widget; the error state after the toggle; the serial journal lines
-  ** The dimmed row; the removal `Done!` with widget and directories gone and the Remove → AI row hidden
+  ** `voxtype` is missing, the status command prints the idle JSON and exits 0, and removal says `Voxtype was not installed.` and exits 0.
+  ** Super+Ctrl+X and F9 leave the typed `echo ` line unchanged and show no notification. Keybindings has no dictation row. Remove does not list AI, and Install lists Dictation as enabled.
+  ** Choosing No installs nothing. Choosing Yes finishes with the ready notification and `Done!`, and a dictation widget is on the bar.
+  ** Super+Ctrl+X shows an error and no crash dialog. The journal, read over serial, names an audio or input error.
+  ** After a reopen, Install dims Dictation. Removal finishes with `Done!`, the widget is gone, both voxtype directories are missing, and Remove no longer lists AI.
   * If unsuccessful
-  ** Anything typed by the chords, an install starting without confirmation, a crash dialog, a hung installer, or `~/.config/voxtype` surviving removal
+  ** A chord types text or shows a notification before install, Yes is not required, a crash dialog opens, the installer hangs, or `~/.config/voxtype` survives removal.
 covers: manual/07:153-154; manual/11:13-15; default/hypr/bindings/voxtype.lua; default/hypr/helpers.lua:37-54; default/omarchy/omarchy-menu.jsonc:245,314 (install.ai.dictation, remove.ai.dictation); bin/omarchy-voxtype-install; bin/omarchy-voxtype-remove; bin/omarchy-voxtype-status; default/voxtype/config.toml; test/shell.d/voxtype-invitation-test.sh; test/shell.d/hyprland-default-config-test.sh:147-177
 
 ### voxtype-invitation-hook-runs-once   [VM-OK]
@@ -12586,26 +12752,31 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `ls ~/.local/state/omarchy/done/voxtype-install-invitation ~/.config/omarchy/hooks/post-update.d/install-voxtype.hook 2>&1` → on a minted disk the done marker and the hook both exist.
-  ** If the hook is under `/usr/share/omarchy/install/user/first-run/install-voxtype.hook` instead, use that path below.
-  * Type `bash ~/.config/omarchy/hooks/post-update.d/install-voxtype.hook` → NO notification appears (already done).
-  * Type `rm ~/.local/state/omarchy/done/voxtype-install-invitation` then run the hook again → exactly one toast inviting to install Voxtype/dictation appears, and `ls ~/.local/state/omarchy/done/voxtype-install-invitation` shows the marker recreated.
-  * Run the hook a third time → no new toast.
-  * Optionally click the toast while it is visible: a floating terminal runs `omarchy-voxtype-install`; Ctrl+C at its confirm to abort. Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `ls ~/.local/state/omarchy/done/voxtype-install-invitation ~/.config/omarchy/hooks/post-update.d/install-voxtype.hook` and press Return. Both paths are listed.
+  ** If the hook is under `/usr/share/omarchy/install/user/first-run/install-voxtype.hook` instead, use that path in the following commands.
+  * Type `bash ~/.config/omarchy/hooks/post-update.d/install-voxtype.hook` and press Return. No notification appears.
+  * Type `rm ~/.local/state/omarchy/done/voxtype-install-invitation` and press Return. The prompt returns.
+  * Type `bash ~/.config/omarchy/hooks/post-update.d/install-voxtype.hook` and press Return. Exactly one notification invites a Voxtype install.
+  * Type `ls ~/.local/state/omarchy/done/voxtype-install-invitation` and press Return. The marker is listed.
+  * Type `bash ~/.config/omarchy/hooks/post-update.d/install-voxtype.hook` and press Return. No new notification appears.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Toasts fade after a few seconds; screenshot immediately after each hook run.
+  * Screenshot immediately after each hook run. The notification fades after a few seconds.
+  * If that notification is still visible, clicking it opens the Voxtype installer. Press Ctrl+C at its confirm so nothing is installed. That click is optional.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** No toast with the marker present; exactly one toast after removing the marker with the marker recreated; no toast on the third run
+  ** With the done marker present, the hook sends no notification.
+  ** After the marker is removed, the hook sends exactly one Voxtype invitation and recreates the marker.
+  ** A third run sends no notification.
   * If unsuccessful
-  ** A repeated toast, no toast after the marker was removed, or the hook deleting itself
-  ** Output of `omarchy-version`
+  ** A second notification appears, no notification appears after the marker is removed, or the hook deletes itself. Record `omarchy-version`.
 covers: install/user/first-run/install-voxtype.hook; bin/omarchy-notification-send; bin/omarchy-voxtype-install; test/shell.d/voxtype-invitation-test.sh; manual/11-text-extraction-dictation.md
 
 ### install-gaming-xbox-cloud-webapp-and-remove   [VM-OK] [NET]
@@ -12615,25 +12786,62 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open the Omarchy Menu (Super+Space) → Install → Gaming. Rows: Steam, RetroArch, Minecraft, NVIDIA GeForce NOW, Xbox Cloud Gaming, Xbox Controllers, Battle.net, Lutris, Heroic (Epic Games), RetroArch Game Launcher; none dimmed. Screenshot. Menu → Remove: no Gaming row.
-  * Install → Gaming → Xbox Cloud Gaming: floating terminal `Installing Xbox Cloud Gaming...`, the icon is fetched, then `Done!` (no sudo), and a frameless Chromium window opens on `xbox.com/en-US/play` (a sign-in / Game Pass landing is fine). Press a key in the terminal; close the window with Super+W.
-  ** If the icon download from cdn.jsdelivr.net fails the installer prints `Error: Failed to download icon.` and a red `Failed` line — screenshot and report.
-  * Open Apps (Super+Alt+Space), type `Xbox` → `Xbox Cloud Gaming` with an Xbox icon (a generic icon means the fetch failed — report it). Escape. Menu → Install → Gaming (reopen twice): `Xbox Cloud Gaming` dimmed ✓; Menu → Remove → Gaming now present and lists it.
-  * Remove → Gaming → Xbox Cloud Gaming → floating terminal removes the web app → `Done!`; press a key.
-  * Apps → `Xbox` → no entry; open a terminal (Super+Enter) and type `ls ~/.local/share/applications/ | grep -c Xbox` → `0`. Menu → Remove: no Gaming row; Install → Gaming → `Xbox Cloud Gaming` enabled again. Close the terminal with Super+W.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Gaming. Xbox Cloud Gaming is listed, and no row is dimmed.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Remove. Gaming is not listed.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Gaming, then Xbox Cloud Gaming. A floating terminal opens.
+  * Wait until it shows `Done!`.
+  ** If it prints `Error: Failed to download icon.`, screenshot it and stop.
+  * Wait until a browser window opens on `xbox.com`.
+  * Press a key in the floating terminal. The floating terminal closes.
+  * Press Super+W. The browser window closes.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `Xbox`. An Xbox Cloud Gaming entry is listed, and its icon is an Xbox icon.
+  ** A generic icon means the fetch failed. Report it.
+  * Press Escape. Apps closes.
+  * Press Super+Space. The menu opens.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Gaming. Xbox Cloud Gaming is dimmed with a check.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Remove, then Gaming. Xbox Cloud Gaming is listed.
+  * Select Xbox Cloud Gaming. A floating terminal opens.
+  * Wait until it shows `Done!`.
+  * Press a key. The floating terminal closes.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `Xbox`. No Xbox entry is listed.
+  * Press Escape. Apps closes.
+  * Press Super+Return. A terminal opens.
+  * Type `ls ~/.local/share/applications/ | grep -c Xbox` and press Return. The output is `0`.
+  * Press Super+Space. The menu opens.
+  * Select Remove. Gaming is not listed.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Gaming. Xbox Cloud Gaming is enabled.
+  * Press Escape. The menu closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The Xbox window is a Chromium app window; Chromium on 2 vCPU may raise Hyprland's "not responding" dialog — click Wait.
+  * The installer fetches an icon and does not ask for sudo. A sign-in or Game Pass page at `xbox.com/en-US/play` is enough.
+  * If Hyprland says the browser is not responding, click Wait.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** The Gaming menus before; the install terminal and the Xbox window; the launcher row with icon; the dimmed row and the Remove row; the removal `Done!`; the launcher row gone and `0`
+  ** Install lists Xbox Cloud Gaming with no dimmed row, and Remove does not list Gaming.
+  ** The install finishes with `Done!` and a browser window opens on `xbox.com`.
+  ** Apps lists Xbox Cloud Gaming with an Xbox icon. After a reopen, Install dims the row and Remove lists it.
+  ** Removal finishes with `Done!`. Apps has no Xbox entry, the desktop-file count is `0`, Remove does not list Gaming, and the Install row is enabled.
   * If unsuccessful
-  ** The floating terminal's error, or the entry surviving removal
+  ** The floating terminal prints `Error: Failed to download icon.` or `Failed`, the launcher icon is generic, or an Xbox desktop file remains after removal.
 covers: manual/26-gaming.md:7,35-41; default/omarchy/omarchy-menu.jsonc:253-262,325 (install.gaming.xbox-cloud, remove.gaming.xbox-cloud); bin/omarchy-install-gaming-xbox-cloud; bin/omarchy-remove-gaming-xbox-cloud; bin/omarchy-webapp-install
 
 ### gaming-launchers-refuse-without-install   [VM-OK]
@@ -12643,27 +12851,52 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy launch battlenet; echo rc=$?` → `Battle.net is not installed. Run omarchy-install-gaming-battlenet first.` and `rc=1`.
-  * Type `omarchy launch battlenet --bogus; echo rc=$?` → `Unknown argument: --bogus`, `Try: omarchy-launch-battlenet --help`, `rc=1`. Type `omarchy launch battlenet --help` → the usage block mentioning `--with-mangohud`.
-  * Open the Omarchy Menu (Super+Space) → Install → Gaming: the `Battle.net` row is enabled (not dimmed); Menu → Remove: no Gaming row. Open Apps (Super+Alt+Space), type `Battle` → no Battle.net launcher row (it is created by the installer). Escape.
-  * Menu → Install → Gaming → RetroArch Game Launcher → a notification `No RetroArch cores found — /usr/lib/libretro`; no picker opens.
-  * In the terminal type `omarchy-games-retro-install snes9x; echo rc=$?` → `Usage: omarchy-games-retro-install [core path-to-game]` and an example, `rc=1`; `omarchy-games-retro-install snes9x /tmp/nogame.sfc; echo rc=$?` → `Game not found: /tmp/nogame.sfc`, `rc=1`; `touch /tmp/game.sfc; omarchy-games-retro-install snes9x /tmp/game.sfc; echo rc=$?` → `Core not found: /usr/lib/libretro/snes9x_libretro.so`, `rc=1`; `rm /tmp/game.sfc`.
-  ** `omarchy games retro install …` is the same command through the router.
-  * Apps → `game` → no new launcher row; `ls ~/Games 2>&1` → no such directory (created only by the RetroArch installer); `ls ~/.local/share/applications | grep -ci game` → `0`. Escape; close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy launch battlenet; echo rc=$?` and press Return. The output includes `Battle.net is not installed. Run omarchy-install-gaming-battlenet first.` and the last line is `rc=1`.
+  * Type `omarchy launch battlenet --bogus; echo rc=$?` and press Return. The output includes `Unknown argument: --bogus` and `Try: omarchy-launch-battlenet --help`, and the last line is `rc=1`.
+  * Type `omarchy launch battlenet --help` and press Return. The usage block mentions `--with-mangohud`.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Gaming. Battle.net is enabled.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Remove. Gaming is not listed.
+  * Press Escape. The menu closes.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `Battle`. No Battle.net entry is listed.
+  * Press Escape. Apps closes.
+  * Press Super+Space. The menu opens.
+  * Select Install, then Gaming, then RetroArch Game Launcher. A notification reads `No RetroArch cores found — /usr/lib/libretro`.
+  * Press Escape if the menu is still open. The menu closes.
+  * Click the terminal. The terminal is focused.
+  * Type `omarchy-games-retro-install snes9x; echo rc=$?` and press Return. The output includes `Usage: omarchy-games-retro-install [core path-to-game]` and the last line is `rc=1`.
+  * Type `omarchy-games-retro-install snes9x /tmp/nogame.sfc; echo rc=$?` and press Return. The output includes `Game not found: /tmp/nogame.sfc` and the last line is `rc=1`.
+  * Type `touch /tmp/game.sfc; omarchy-games-retro-install snes9x /tmp/game.sfc; echo rc=$?` and press Return. The output includes `Core not found: /usr/lib/libretro/snes9x_libretro.so` and the last line is `rc=1`.
+  * Type `rm /tmp/game.sfc` and press Return. The prompt returns.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `game`. No new game launcher is listed.
+  * Press Escape. Apps closes.
+  * Click the terminal. The terminal is focused.
+  * Type `ls ~/Games 2>&1` and press Return. The output includes `No such file`.
+  * Type `ls ~/.local/share/applications | grep -ci game` and press Return. The output is `0`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * No network is needed; nothing is downloaded. The "no cores" notification is brief — screenshot right after selecting the row.
+  * Nothing is downloaded. Screenshot the cores notification as soon as it appears.
+  * `omarchy games retro install` is the same command through the router.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** The three Battle.net messages with their `rc` values; the enabled Install row, the absent Remove → Gaming row and the empty `Battle` search
-  ** The `No RetroArch cores found` notification (game-controller glyph); the three retro-install errors with `rc=1`; the empty `game` search, the missing `~/Games` and the `0`
+  ** A missing Battle.net install exits 1 with the install-first sentence. `--bogus` prints the unknown-argument line and the help hint and exits 1. `--help` mentions `--with-mangohud`.
+  ** Install lists Battle.net as enabled, Remove does not list Gaming, and Apps has no Battle.net entry.
+  ** RetroArch Game Launcher notifies `No RetroArch cores found — /usr/lib/libretro` and opens no picker.
+  ** A missing argument, a missing game, and a missing core each exit 1 with their own sentence.
+  ** Apps has no new game launcher, `~/Games` does not exist, and the desktop-file count for `game` is `0`.
   * If unsuccessful
-  ** A hang or umu-run starting despite the missing install, an empty core picker, or a launcher created without a core (`ls ~/.local/share/applications`)
+  ** The launcher hangs or starts umu-run without an install, an empty core picker opens, or a launcher is created without a core.
 covers: manual/26-gaming.md:31,69-73; bin/omarchy-launch-battlenet; default/applications/battlenet.desktop; default/omarchy/omarchy-menu.jsonc:262 (install.gaming.battlenet, remove.gaming.battlenet, install.gaming.retro-launcher); bin/omarchy-games-retro-cores; bin/omarchy-games-retro-install; test/shell.d/battlenet-test.sh
 
 ### gaming-gpu-lib32-without-gpu-and-steam-install-remove   [VM-PARTIAL] [NET] [SLOW]
