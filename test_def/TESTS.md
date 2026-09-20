@@ -19586,31 +19586,56 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open the Omarchy Menu with Super+Space → Setup → Defaults → Editor.
-  ** Rows Neovim (✓), VSCode, Cursor, Zed, Sublime Text, Helix, Vim, Emacs — every option is listed whether installed or not.
+  * Press Super+Space. The menu opens.
+  * Select Setup. The Setup menu opens.
+  * Select Defaults. The Defaults menu opens.
+  * Select Editor. The Editor list opens. The check is on Neovim.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Setup. The Setup menu opens.
+  * Select Defaults. The Defaults menu opens.
+  * Select Editor. The Editor list opens. The check is still on Neovim.
   * Select Vim.
-  ** If vim is not installed a floating terminal installs it (sudo prompt: `prime`; small download) and closes on Done. Then a notification `Vim is now the default editor` appears.
-  * Open a terminal (Super+Enter) and run `omarchy default editor` → `vim`; `cat ~/.local/state/omarchy/defaults/editor` → `vim`.
-  * Open the Omarchy Menu → Setup → Monitors.
-  ** The editor that opens is Vim (plain vim status line, no LazyVim dashboard). Quit with `:q`.
-  * Run `omarchy default editor nope; echo exit=$?` → `Usage: omarchy-default-editor <code|cursor|zed|sublime_text|helix|vim|emacs|nvim>` and `exit=1`; `omarchy default editor` still says `vim`.
-  * Restore: Omarchy Menu → Setup → Defaults → Editor → Neovim; notification `Neovim is now the default editor`; `omarchy default editor` prints `nvim`. Close the terminal with Super+W.
-  ** vim stays installed afterwards; end with `stop` if the disk must remain pristine.
+  ** If a terminal opens, type `prime` when sudo asks, and wait until that terminal closes.
+  * Look for a notification. It says Vim is now the default editor.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy default editor` and press Return. The output is `vim`.
+  * Type `cat ~/.local/state/omarchy/defaults/editor` and press Return. The output is `vim`.
+  * Press Super+Space. The menu opens.
+  * Select Setup. The Setup menu opens.
+  * Select Monitors. Vim opens.
+  * Type `:q` and press Return. Vim closes.
+  * Click the terminal. It is focused.
+  * Type `omarchy default editor nope; echo "exit=$?"` and press Return. Usage lists the editor names, and the last line is `exit=1`.
+  * Type `omarchy default editor` and press Return. The output is still `vim`.
+  * Press Super+Space. The menu opens.
+  * Select Setup. The Setup menu opens.
+  * Select Defaults. The Defaults menu opens.
+  * Select Editor. The Editor list opens.
+  * Select Neovim. A notification says Neovim is now the default editor.
+  * Click the terminal. It is focused.
+  * Type `omarchy default editor` and press Return. The output is `nvim`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * If vim is already present no terminal appears; only the notification.
-  * Reopen the Editor submenu twice before asserting where the ✓ sits.
+  * If Vim is already installed, no terminal appears. Only the notification appears.
+  * Do not select any editor except Vim and then Neovim. The others start a download.
+  * Use arrows and Enter if typing does not filter the menu.
+  * Vim stays installed after the restore. Stop the disk if it must stay pristine.
+  * If the menu is still open after Vim closes, press Escape before clicking the terminal.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the Editor submenu with ✓ on Neovim, the `Vim is now the default editor` notification, and vim opened by Setup → Monitors
-  ** Screenshot of the usage/`exit=1` for a bad name and the restored `nvim`
+  ** The Editor check starts on Neovim. Selecting Vim notifies that Vim is now the default editor.
+  ** The CLI and the defaults file both say `vim`. Setup → Monitors opens Vim.
+  ** `nope` prints usage and exits 1, and the default stays `vim`.
+  ** Selecting Neovim notifies, and the CLI prints `nvim`.
   * If unsuccessful
-  ** the install terminal output or the missing notification, and `./client get-serial`
+  ** The install terminal stays open, no notification appears, or Monitors opens Neovim while the default is still `vim`.
 covers: manual/31-dotfiles.md (Setup → Defaults → Editor), bin/omarchy-default-editor, bin/omarchy-launch-editor, omarchy-menu.jsonc setup.default.editor.*
 
 ### files-hotkeys-cwd-preview-and-text-opens-neovim   [VM-OK]
@@ -19620,28 +19645,41 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Shift+F. A Nautilus window must open on the home folder (sidebar with Home, Documents, Downloads…; a `Work` folder in the main pane).
-  ** GTK apps render oversized at 1× (`GDK_SCALE=2` is fixed) — expected, not a bug.
-  * Close it (Super+W). Press Super+Enter, type `mkdir -p /tmp/nfm && cd /tmp/nfm && echo preview me > note.txt && xdg-mime query default text/plain` + Enter; record the handler printed (Neovim's desktop entry is expected).
-  * With the terminal focused press Super+Shift+Alt+F. Nautilus must open **in `/tmp/nfm`** showing `note.txt` (path bar reads `/tmp/nfm` or `tmp › nfm`).
-  * Press Ctrl+L, type `/usr/share/omarchy` and Enter: the view changes to that directory (folders like `bin`, `themes`, `default`).
-  * Press Alt+Left (back) to return to `/tmp/nfm`, click `note.txt` once and press Space: a quick-preview popup (Sushi) shows `preview me`. Press Space again to close it.
-  * Double-click `note.txt`: it must open in Neovim in a terminal window (plain text → Neovim). Type `:q!` + Enter.
-  * Close Nautilus and the terminal with Super+W; the desktop is as before.
+  * Press Super+Shift+F. Files opens on Home.
+  * Press Super+W. Files closes.
+  * Press Super+Return. A terminal opens.
+  * Type `mkdir -p /tmp/nfm && cd /tmp/nfm && echo preview me > note.txt` and press Return. The prompt returns.
+  * Type `xdg-mime query default text/plain` and press Return. Record the handler.
+  * Press Super+Shift+Alt+F. Files opens in `/tmp/nfm` and shows `note.txt`.
+  * Press Ctrl+L. The path bar opens.
+  * Type `/usr/share/omarchy` and press Return. Files shows that directory.
+  * Press Alt+Left. Files returns to `/tmp/nfm`.
+  * Click `note.txt`. It is selected.
+  * Press Space. A preview shows `preview me`.
+  * Press Space. The preview closes.
+  * Double-click `note.txt`. Neovim opens and shows `preview me`.
+  * Type `:q!` and press Return. Neovim closes.
+  * Click Files. It is focused.
+  * Press Super+W. Files closes.
+  * Click the terminal. It is focused.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Super+Shift+Alt+F reads the cwd of the *focused* terminal; keep the terminal focused when pressing it.
-  * If double-click opens a different editor, report which; the default handler for text/plain is expected to be Neovim.
+  * Super+Shift+Alt+F uses the focused terminal. Leave the terminal focused when you press it.
+  * A GTK window drawn large at 1× is expected.
+  * Neovim is the expected text handler. If another editor opens, record which one.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of Nautilus on home, on `/tmp/nfm`, on `/usr/share/omarchy` after Ctrl+L, the Sushi preview, and Neovim with `preview me`
+  ** Files opens on Home, then closes. The text handler is recorded.
+  ** The chord opens Files in `/tmp/nfm` on `note.txt`. Ctrl+L opens `/usr/share/omarchy`, and Alt+Left returns.
+  ** Space shows `preview me` and the next Space closes it. Double-click opens that text in Neovim.
   * If unsuccessful
-  ** Screenshot of the wrong directory / missing preview and the `xdg-mime query default text/plain` output
+  ** Files opens in the wrong directory, Space shows no preview, or the text file opens in another program.
 covers: manual/22-guis.md:3-9; default/hypr/bindings/applications.lua:4-5; bin/omarchy-launch-nautilus; bin/omarchy-launch-nautilus-cwd; bin/omarchy-cmd-terminal-cwd; install/omarchy-base.packages (nautilus, sushi)
 
 ### video-double-click-opens-mpv   [VM-PARTIAL]
@@ -19651,26 +19689,38 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter. Type `mkdir -p /tmp/vid && ffmpeg -loglevel error -f lavfi -i testsrc=duration=6:size=320x240:rate=15 /tmp/vid/test.mp4 && ls -la /tmp/vid` + Enter → `test.mp4` (a few tens of KB).
-  * Type `xdg-mime query default video/mp4` + Enter → `mpv.desktop`.
-  * Press Super+Shift+Alt+F (Files in `/tmp/vid`), double-click `test.mp4`. mpv must open a floating window playing the colour test pattern with a moving counter; it closes by itself at the end or with `q`.
-  * From the terminal type `mpv --no-audio /tmp/vid/test.mp4` + Enter: the same clip plays; press `q`.
-  * Type `mpv /tmp/vid/missing.mp4` + Enter → `Failed to open /tmp/vid/missing.mp4.` / no such file, back to the prompt.
-  * Close Files and the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `mkdir -p /tmp/vid && ffmpeg -loglevel error -f lavfi -i testsrc=duration=6:size=320x240:rate=15 /tmp/vid/test.mp4` and press Return. The prompt returns.
+  * Type `ls -la /tmp/vid` and press Return. `test.mp4` is listed.
+  * Type `xdg-mime query default video/mp4` and press Return. The output is `mpv.desktop`.
+  * Press Super+Shift+Alt+F. Files opens in `/tmp/vid`.
+  * Double-click `test.mp4`. mpv opens and plays the clip.
+  * Press q. mpv closes.
+  * Click the terminal. It is focused.
+  * Type `mpv --no-audio /tmp/vid/test.mp4` and press Return. The clip plays.
+  * Press q. mpv closes.
+  * Type `mpv /tmp/vid/missing.mp4` and press Return. The output says the file failed to open.
+  * Click Files. It is focused.
+  * Press Super+W. Files closes.
+  * Click the terminal. It is focused.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Skipped here: audio output. mpv may log `[ao] Failed to initialize audio driver`; that is expected.
-  * `ffmpeg` is present as a dependency of kdenlive/obs/yt-dlp; if it is missing, report it and use any `.mp4` found with `fd -e mp4 /usr/share`.
+  * An audio-driver line from mpv is expected. This guest has no audio device.
+  * If mpv already closed at the end of the clip, skip that `q`.
+  * If `ffmpeg` is missing, record that and use an `.mp4` already on the disk. Do not download one.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the mpv window with the test pattern (after double-click), the `mpv.desktop` line, and the missing-file error
+  ** `test.mp4` exists, and the video handler is `mpv.desktop`.
+  ** Double-click plays the clip in mpv, and `q` closes it. The CLI plays the same clip.
+  ** A missing file prints an open failure and returns the prompt.
   * If unsuccessful
-  ** Screenshot of the wrong player / no window and `xdg-mime query default video/mp4`
+  ** Another player opens, no window appears, or the missing file does not print an error.
 covers: manual/22-guis.md:9,74-78; applications/mpv.desktop; default/hypr/apps/system.lua:7-9,41-52
 
 ### agent-hotkey-and-cli-with-no-default   [VM-OK]
@@ -19680,28 +19730,37 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Shift+Ctrl+A. The Omarchy Menu must open directly on the "Default Agent" list (Antigravity, Claude, Codex, Copilot, Crush, Cursor CLI, Grok, Hermes, Muse Code, omp, OpenClaw, OpenCode, Ori, Pi) with **no** row carrying a ✓. Press Escape without choosing.
-  ** Do not select an agent: it installs through mise (network, minutes).
-  * Press Super+Enter. Type `echo "agent=[$(omarchy-default-agent)]"; omarchy default agent` + Enter → `agent=[]` and an empty line (the prompt returns).
-  * Type `omarchy agent; echo rc=$?` + Enter → `Choose default agent with: omarchy default agent <name>` and `rc=1`. Type `a; echo rc=$?` + Enter → the same message and a non-zero rc (the `a` alias is `omarchy-agent --inline`); nothing downloads.
-  * Type `omarchy agent prompt` + Enter → a usage line for `omarchy agent prompt [--inline] <prompt...>` (from the router or the script — either is fine; it must not try to launch anything).
-  * Type `omarchy agent hello` + Enter → `Unexpected argument: hello` and the hint `To pass a prompt: omarchy agent prompt "hello"`.
-  * Type `omarchy default agent bogus; echo rc=$?; echo "agent=[$(omarchy-default-agent)]"` + Enter → `Usage: omarchy-default-agent <pi|omp|opencode|ori|claude|codex|grok|openclaw|agy|hermes|copilot|crush|cursor-agent|muse>`, a non-zero rc, and `agent=[]` (the default is still empty).
-  * Look at the right section of the top bar: there must be no agents (robot) icon at all on this fresh machine (the panel only appears once usage records exist). Screenshot the bar. Close the terminal with Super+W.
+  * Press Super+Shift+Ctrl+A. The Default Agent list opens. No row has a check.
+  * Press Escape. The menu closes.
+  * Press Super+Return. A terminal opens.
+  * Type `echo "agent=[$(omarchy-default-agent)]"` and press Return. The output is `agent=[]`.
+  * Type `omarchy default agent` and press Return. No agent name is printed.
+  * Type `omarchy agent; echo "rc=$?"` and press Return. The output says to choose a default agent, and the last line is `rc=1`.
+  * Type `a; echo "rc=$?"` and press Return. The same message is printed, and the last line is non-zero.
+  * Type `omarchy agent prompt` and press Return. Usage for `omarchy agent prompt` is printed.
+  * Type `omarchy agent hello` and press Return. The output includes `Unexpected argument: hello`.
+  * Type `omarchy default agent bogus; echo "rc=$?"` and press Return. Usage lists the agent names, and the last line is non-zero.
+  * Type `echo "agent=[$(omarchy-default-agent)]"` and press Return. The output is `agent=[]`.
+  * Look at the bar. No agents icon is shown.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * If a "Set your default agent" notification is still on screen from first boot, that is expected; dismiss it with Super+comma.
-  * The exact hint wording is HEAD's; on the 4.0.2 disk record `omarchy-version` and the text you see.
+  * Do not select an agent. That starts an install.
+  * If a first-boot notification is still up, dismiss it with Super+comma before the hotkey.
+  * If the hint wording differs, record `omarchy-version` and the text you saw.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the Default Agent menu with no ✓, the terminal with each message and rc, and the top bar without an agents icon
+  ** The hotkey opens the Default Agent list with no check, and Escape closes it.
+  ** The default is empty. Bare `omarchy agent` and `a` say to choose one and exit non-zero. Nothing installs.
+  ** `prompt` prints usage. `hello` is an unexpected argument. `bogus` prints usage, exits non-zero, and leaves the default empty.
+  ** The bar has no agents icon.
   * If unsuccessful
-  ** Screenshot of what the hotkey did instead, an install starting, or an unset default launching something; `cat ~/.config/omarchy/defaults/agent` (should not exist)
+  ** The hotkey does nothing, a row is already checked, or a command starts an install.
 covers: manual/17-ai.md:24-35,38; default/hypr/bindings/utilities.lua:97; bin/omarchy-agent; bin/omarchy-agent-prompt; bin/omarchy-default-agent; default/bash/aliases:46 (a); install/user/first-run/setup-agent.hook; test/shell.d/default-agent-test.sh; test/shell.d/agent-invitation-test.sh
 
 ### agent-usage-collectors-without-accounts   [VM-OK]
@@ -19711,26 +19770,32 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy agent usage update; echo status=$?` — it may exit non-zero because a collector whose CLI is absent (codex) fails; the failure is printed, not hidden. Record the status.
-  * Type `ls ~/.local/state/omarchy/agents/usage/` — `claude.json` and `fireworks.json` are listed.
-  * Type `jq -r '.id + " / " + .usageStatusText' ~/.local/state/omarchy/agents/usage/claude.json` — `claude / Waiting for auth`.
-  * Type `jq -c '{id,ready,hasPromptStats}' ~/.local/state/omarchy/agents/usage/fireworks.json` — `{"id":"fireworks","ready":false,"hasPromptStats":false}`.
-  * Type `omarchy agent usage update --except codex; echo status=$?` — `status=0`.
-  * Type `omarchy agent usage update claude; echo status=$?` — `status=0` (only the named collector runs). Look at the bar: still no agents icon. Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy agent usage update; echo "status=$?"` and press Return. Record the status. A missing collector is printed, not hidden.
+  * Type `ls ~/.local/state/omarchy/agents/usage/` and press Return. `claude.json` and `fireworks.json` are listed.
+  * Type `jq -r '.id + " / " + .usageStatusText' ~/.local/state/omarchy/agents/usage/claude.json` and press Return. The output is `claude / Waiting for auth`.
+  * Type `jq -c '{id,ready,hasPromptStats}' ~/.local/state/omarchy/agents/usage/fireworks.json` and press Return. The output is `{"id":"fireworks","ready":false,"hasPromptStats":false}`.
+  * Type `omarchy agent usage update --except codex; echo "status=$?"` and press Return. The last line is `status=0`.
+  * Type `omarchy agent usage update claude; echo "status=$?"` and press Return. The last line is `status=0`.
+  * Look at the bar. No agents icon is shown.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * If `codex.json` exists, `jq -c '{id,limits}'` on it reads `{"id":"codex","limits":[]}`.
-  * The `agent usage` subcommands are HEAD's shape; on 4.0.2 record `omarchy-version` and report "absent on this build" if the router does not know them.
+  * Collectors can take several seconds. Screenshot while they run.
+  * If `codex.json` exists, `jq -c '{id,limits}'` on it may print `{"id":"codex","limits":[]}`.
+  * If the router does not know `agent usage`, record `omarchy-version` and stop. That is absence, not a crash.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** `claude / Waiting for auth`; the fireworks record; `status=0` for `--except codex` and for `claude` alone
+  ** The update records a status. `claude.json` and `fireworks.json` exist.
+  ** Claude reads `claude / Waiting for auth`. Fireworks reads ready false and hasPromptStats false.
+  ** `--except codex` and a named claude update both exit 0. The bar still has no agents icon.
   * If unsuccessful
-  ** A `jq` parse error (invalid record) or a missing file
+  ** A JSON file does not parse, or claude or fireworks is missing after the update.
 covers: test/shell.d/agent-usage-update-test.sh, agent-usage-claude-scanner-test.sh (id/Waiting for auth), agent-usage-claude-limits-test.sh (no-token status), agent-usage-fireworks-scanner-test.sh (no-credential record), agent-usage-codex-scanner-test.sh (id/limits); bin/omarchy-agent-usage-*
 
 ### agent-skills-linked-into-harnesses   [VM-OK]
@@ -19740,26 +19805,36 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and press Super+F for a full screen. Type `for d in ~/.agents/skills ~/.claude/skills ~/.codex/skills ~/.pi/agent/skills ~/.gemini/config/skills ~/.hermes/skills; do echo "== $d"; ls -la "$d" 2>&1; done | sudo tee /dev/ttyS0` + Enter (password `prime`) and read the serial log.
-  ** Each directory must exist and hold exactly two symlinks, `omarchy` and `diagnose-crash`, pointing at `/usr/share/omarchy/default/agents/skills/<name>/` (or `$OMARCHY_PATH/…`).
-  * Type `ls ~/.hermes/profiles 2>&1` + Enter → "No such file" is fine (profiles are only linked when they exist); report what is there.
-  * Type `head -3 ~/.claude/skills/omarchy/SKILL.md` + Enter → the frontmatter starting `name: omarchy` (proves the link resolves); then `ls ~/.codex/skills/omarchy/ ~/.codex/skills/diagnose-crash/` → SKILL.md with capture.md, contributing.md, hooks.md, hyprland.md, plugins.md, theming.md; and SKILL.md with reporting.md.
-  * Type `touch /usr/share/omarchy/test-write; echo "exit=$?"` + Enter → Permission denied, `exit=1` (the tree the skill says never to edit is root-owned); then `cat "$OMARCHY_PATH/config/omarchy/shell.json" | head -3` → readable.
-  * Type `ls ~/.local/state/omarchy/done/` + Enter → `finalize-user` and `first-run-user`.
-  * Press Super+F, then Super+W to close the terminal.
+  * Press Super+Return. A terminal opens.
+  * Press Super+F. The terminal fills the screen.
+  * Type `for d in ~/.agents/skills ~/.claude/skills ~/.codex/skills ~/.pi/agent/skills ~/.gemini/config/skills ~/.hermes/skills; do echo "== $d"; ls -la "$d" 2>&1; done | sudo tee /dev/ttyS0` and press Return. If sudo asks, type `prime` and press Return. Each directory lists `omarchy` and `diagnose-crash`.
+  * Type `ls ~/.hermes/profiles 2>&1` and press Return. Record the output.
+  * Type `head -3 ~/.claude/skills/omarchy/SKILL.md` and press Return. The frontmatter starts with `name: omarchy`.
+  * Type `ls ~/.codex/skills/omarchy/` and press Return. `SKILL.md` is listed with the topic guides.
+  * Type `ls ~/.codex/skills/diagnose-crash/` and press Return. `SKILL.md` and `reporting.md` are listed.
+  * Type `touch /usr/share/omarchy/test-write; echo "exit=$?"` and press Return. Permission is denied, and the last line is `exit=1`.
+  * Type `head -3 "$OMARCHY_PATH/config/omarchy/shell.json"` and press Return. Three lines are printed.
+  * Type `ls ~/.local/state/omarchy/done/` and press Return. `finalize-user` and `first-run-user` are listed.
+  * Press Super+F. The terminal leaves fullscreen.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Use get-serial for the six listings; they are longer than one screen.
+  * The six listings are longer than one screen. Read them with get-serial.
+  * `No such file` for `~/.hermes/profiles` is fine. Profiles are linked only when that directory exists.
+  * The skill links point into `/usr/share/omarchy/default/agents/skills/` or `$OMARCHY_PATH`.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Serial text with all six directories listing both symlinks to `/usr/share/omarchy/default/agents/skills/`, plus screenshots of the frontmatter, the guide listings, the Permission denied, and the done markers
+  ** All six skill directories exist and each lists `omarchy` and `diagnose-crash`.
+  ** The omarchy skill frontmatter starts with `name: omarchy`. The codex copies list their guides and `reporting.md`.
+  ** A write under `/usr/share/omarchy` is denied and exits 1. `shell.json` is readable.
+  ** The done directory lists `finalize-user` and `first-run-user`.
   * If unsuccessful
-  ** The serial text showing the missing directory or dangling link (`ls -l` shows the target; `test -e` it); `ls -la ~ | grep -E '^\.(agents|claude|codex|pi|gemini|hermes)'`
+  ** A skill directory is missing, a link does not resolve, or the package tree accepts the write.
 covers: manual/17-ai.md:63-67; docs/file-layout.md:211, §Runtime finalization (skill symlinks, markers); bin/omarchy-provision-user:87-101 (skill linking); bin/omarchy-agent-crash:24; default/agents/skills/omarchy/SKILL.md §Critical Safety Rules, §Topic Guides
 
 ### crash-capture-toast-and-mute-one-program   [VM-OK]
@@ -19769,30 +19844,46 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy-default-agent` + Enter. If it prints nothing, type `mkdir -p ~/.config/omarchy/defaults && echo claude > ~/.config/omarchy/defaults/agent` + Enter (crash toasts are silent on a stock disk until a default agent is named). Type `systemctl --user is-active omarchy-crash-watch.service; omarchy crash mute` → `active` and `No programs muted. Crashes all notify.`
-  * Type `sleep 300 & sleep 1; kill -SEGV $!` + Enter → within 5 seconds a toast `Process crashed: sleep` appears; screenshot.
-  ** The toast may offer a "diagnose" action; do not click it.
-  * Type `omarchy crash mute /usr/bin/sleep` → `Muted crash notifications for sleep.` (a path reduces to its basename); `omarchy crash mute` → lists `sleep`.
-  * Repeat the crash command and watch 15 seconds — no toast.
-  * Type `cp /usr/bin/sleep /tmp/othersleep; /tmp/othersleep 60 & sleep 0.5; kill -SEGV $!` → a toast `Process crashed: othersleep` appears (other programs still announce; the watcher survived the muted crash).
-  * Type `omarchy crash mute sleep off` → `Crash notifications for sleep are back on.` Wait until 60 seconds have passed since the previous `sleep` crash (screenshot every 5 seconds), then crash `sleep` again → the `Process crashed: sleep` toast returns.
-  * Unhappy path: type `omarchy crash mute /; echo "exit=$?"` → `Not a program name: /`, `exit=1`; `omarchy crash mute sleep sideways; echo "exit=$?"` → `Not an action: sideways` followed by the usage line, `exit=1`.
-  * Round trip: `omarchy crash mute` → `No programs muted. Crashes all notify.`; `rm /tmp/othersleep`; if you created the agent default file, `rm ~/.config/omarchy/defaults/agent`; press Super+Shift+comma to clear toasts; close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy-default-agent` and press Return. Record the output.
+  ** If it prints nothing, type `mkdir -p ~/.config/omarchy/defaults && echo claude > ~/.config/omarchy/defaults/agent` and press Return. The prompt returns.
+  * Type `systemctl --user is-active omarchy-crash-watch.service` and press Return. The output is `active`.
+  * Type `omarchy crash mute` and press Return. The output is `No programs muted. Crashes all notify.`
+  * Type `sleep 300 & sleep 1; kill -SEGV $!` and press Return. A notification says `Process crashed: sleep`.
+  * Type `omarchy crash mute /usr/bin/sleep` and press Return. The output says crash notifications for sleep were muted.
+  * Type `omarchy crash mute` and press Return. The list includes `sleep`.
+  * Type `sleep 300 & sleep 1; kill -SEGV $!` and press Return. The prompt returns.
+  * Wait 15 seconds. No crash notification appears.
+  * Type `cp /usr/bin/sleep /tmp/othersleep; /tmp/othersleep 60 & sleep 0.5; kill -SEGV $!` and press Return. A notification says `Process crashed: othersleep`.
+  * Type `omarchy crash mute sleep off` and press Return. The output says crash notifications for sleep are back on.
+  * Wait until 60 seconds have passed since the muted sleep crash.
+  * Type `sleep 300 & sleep 1; kill -SEGV $!` and press Return. A notification says `Process crashed: sleep`.
+  * Type `omarchy crash mute /; echo "exit=$?"` and press Return. The output includes `Not a program name: /`, and the last line is `exit=1`.
+  * Type `omarchy crash mute sleep sideways; echo "exit=$?"` and press Return. The output includes `Not an action: sideways`, and the last line is `exit=1`.
+  * Type `omarchy crash mute` and press Return. The output is `No programs muted. Crashes all notify.`
+  * Type `rm -f /tmp/othersleep` and press Return. The prompt returns.
+  ** If you created the agent default file, type `rm -f ~/.config/omarchy/defaults/agent` and press Return. The prompt returns.
+  * Press Super+Shift+comma. Open notifications clear.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The watcher de-duplicates per program per minute, so the "toast returns" crash must be ≥60 s after the previous crash of `sleep`; bridge the wait with screenshots, never one long sleep.
-  * If no toast ever appears, `coredumpctl list | tail -3` must list the crash; if it does not, report the environment.
-  * `omarchy crash mute` may be missing on a pristine 4.0.2 disk (only "crash capture" is documented); check `omarchy-version` and report "absent on this build", not "broken".
+  * Do not click a diagnose action on a crash notification.
+  * Screenshot about every 5 seconds during the 15 second wait and the 60 second wait. Do not use one long sleep.
+  * If no notification ever appears, run `coredumpctl list | tail -3` and record it.
+  * If `omarchy crash mute` is missing, record `omarchy-version` and stop. That is absence, not a crash.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the toast for `sleep`, the mute confirmation and the list showing `sleep`, silence while muted, the toast for `othersleep`, the toast for `sleep` again after `off`, both errors with `exit=1`, and `active` with the empty list at the end
+  ** The watcher is `active`, and the mute list starts empty. A sleep crash notifies.
+  ** Muting `/usr/bin/sleep` lists `sleep`, and the next sleep crash is silent.
+  ** An `othersleep` crash still notifies. After `off` and 60 seconds, a sleep crash notifies again.
+  ** `/` and `sideways` each exit 1. The list is empty, and the copied binary and created agent file are removed.
   * If unsuccessful
-  ** No toast at all with the `coredumpctl` listing, a toast while muted, none after unmuting, or the service inactive; `journalctl --user -u omarchy-crash-watch -b | tail | sudo tee /dev/ttyS0`, `ls -la ~/.local/state/omarchy/toggles/crash-ignore/`, and `omarchy-version`
+  ** No notification appears, a muted program still notifies, or the watcher is inactive.
 covers: test/shell.d/crash-capture-test.sh (watcher announces, per-program mute, other programs, un-mute, watcher survives); bin/omarchy-crash-watch (crash-ignore flags); bin/omarchy-crash-mute; default/agents/skills/diagnose-crash/SKILL.md §Offer to stop the notifications; manual/17-ai.md
 
 ### crash-mute-cli-list-toggle-and-refusals   [VM-OK]
@@ -19802,27 +19893,42 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter. Type `omarchy crash mute` + Enter → `No programs muted. Crashes all notify.`
-  * Type `omarchy crash mute sleep` → `Muted crash notifications for sleep.`; `omarchy crash mute /usr/lib/chromium/chromium-browser` → `Muted crash notifications for chromium-browser.`; `omarchy crash mute` → two lines: `chromium-browser` and `sleep`.
-  * Type `omarchy crash mute sleep off` → `Crash notifications for sleep are back on.`; `omarchy crash mute chromium-browser toggle` → `Crash notifications for chromium-browser are back on.`; `omarchy crash mute` → `No programs muted. Crashes all notify.`
-  * Type `omarchy crash mute hyprland sideways; echo s=$?` → `Not an action: sideways` followed by the usage line, non-zero.
-  * Type `omarchy crash mute . ; echo s=$?; omarchy crash mute .. ; echo s=$?; omarchy crash mute / ; echo s=$?` → three non-zero statuses (`Not a program name: /` for the last).
-  * Type `omarchy crash mute ../bar-off; ls ~/.local/state/omarchy/toggles/bar-off; echo exists=$?` → the mute is refused and `ls` fails (nothing written outside `crash-ignore/`).
-  * Type `omarchy crash mute -- -h && ls ~/.local/state/omarchy/toggles/crash-ignore/-h` → the `-h` flag file exists; then `omarchy crash mute -- -h off; omarchy crash mute` → back to `No programs muted. Crashes all notify.` Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy crash mute` and press Return. The output is `No programs muted. Crashes all notify.`
+  * Type `omarchy crash mute sleep` and press Return. The output says crash notifications for sleep were muted.
+  * Type `omarchy crash mute /usr/lib/chromium/chromium-browser` and press Return. The output says crash notifications for chromium-browser were muted.
+  * Type `omarchy crash mute` and press Return. The list includes `chromium-browser` and `sleep`.
+  * Type `omarchy crash mute sleep off` and press Return. The output says crash notifications for sleep are back on.
+  * Type `omarchy crash mute chromium-browser toggle` and press Return. The output says crash notifications for chromium-browser are back on.
+  * Type `omarchy crash mute` and press Return. The output is `No programs muted. Crashes all notify.`
+  * Type `omarchy crash mute hyprland sideways; echo "s=$?"` and press Return. The output includes `Not an action: sideways`, and the last line is non-zero.
+  * Type `omarchy crash mute . ; echo "s=$?"` and press Return. The last line is non-zero.
+  * Type `omarchy crash mute .. ; echo "s=$?"` and press Return. The last line is non-zero.
+  * Type `omarchy crash mute / ; echo "s=$?"` and press Return. The output includes `Not a program name: /`, and the last line is non-zero.
+  * Type `omarchy crash mute ../bar-off; echo "exit=$?"` and press Return. The mute is refused, and the last line is non-zero.
+  * Type `ls ~/.local/state/omarchy/toggles/bar-off; echo "exists=$?"` and press Return. `ls` fails.
+  * Type `omarchy crash mute -- -h` and press Return. The prompt returns.
+  * Type `ls ~/.local/state/omarchy/toggles/crash-ignore/-h` and press Return. `-h` is listed.
+  * Type `omarchy crash mute -- -h off` and press Return. The prompt returns.
+  * Type `omarchy crash mute` and press Return. The output is `No programs muted. Crashes all notify.`
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * All output is plain text in the terminal; no notifications are involved. Keep the space in `mute . ;` so the shell does not read `.;` as one word.
-  * `omarchy crash mute` may be missing on a pristine 4.0.2 disk; check `omarchy-version` and report "absent on this build", not "broken".
+  * Keep the space in `mute . ;` so the shell does not read `.;` as one word.
+  * If `omarchy crash mute` is missing, record `omarchy-version` and stop. That is absence, not a crash.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** One screenshot per command showing the exact message and status; `bar-off` never created; the list empty at the end
+  ** The list starts empty. `sleep` and a Chromium path mute `sleep` and `chromium-browser`.
+  ** `off` and `toggle` clear both, and the list is empty again.
+  ** `sideways`, `.`, `..`, and `/` are refused. `../bar-off` is refused and does not create `toggles/bar-off`.
+  ** `-- -h` creates a crash-ignore file named `-h`, and `-- -h off` leaves the list empty.
   * If unsuccessful
-  ** A refusal with status 0, `toggles/bar-off` existing, or a deviating message; `ls -la ~/.local/state/omarchy/toggles/crash-ignore/` and `omarchy-version`
+  ** A refusal exits 0, `toggles/bar-off` exists, or the list is not empty at the end.
 covers: manual/17-ai.md:49; bin/omarchy-crash-mute; bin/omarchy-toggle; bin/omarchy (crash group); test/shell.d/crash-capture-test.sh (omarchy-crash-mute CLI: list, basename, actions, refusals, `--`, toggle)
 
 ### chromium-bundled-extensions-and-copy-url   [VM-OK] [NET]

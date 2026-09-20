@@ -422,14 +422,14 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `btop-omarchy-config`
 - [x] `terminal-toolchain-runnable`
 - [x] `default-apps-show-set-and-reject`
-- [ ] `default-editor-switch-to-vim-installs`
-- [ ] `files-hotkeys-cwd-preview-and-text-opens-neovim`
-- [ ] `video-double-click-opens-mpv`
-- [ ] `agent-hotkey-and-cli-with-no-default`
-- [ ] `agent-usage-collectors-without-accounts`
-- [ ] `agent-skills-linked-into-harnesses`
-- [ ] `crash-capture-toast-and-mute-one-program`
-- [ ] `crash-mute-cli-list-toggle-and-refusals`
+- [x] `default-editor-switch-to-vim-installs`
+- [x] `files-hotkeys-cwd-preview-and-text-opens-neovim`
+- [x] `video-double-click-opens-mpv`
+- [x] `agent-hotkey-and-cli-with-no-default`
+- [x] `agent-usage-collectors-without-accounts`
+- [x] `agent-skills-linked-into-harnesses`
+- [x] `crash-capture-toast-and-mute-one-program`
+- [x] `crash-mute-cli-list-toggle-and-refusals`
 - [ ] `chromium-bundled-extensions-and-copy-url`
 - [ ] `chromium-download-video-ytdlp`
 - [ ] `browser-policy-colour-helper-rejects-bad-input`
