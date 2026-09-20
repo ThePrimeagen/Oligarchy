@@ -17916,27 +17916,32 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `ls /tmp | grep -c '^tmp\.'`; note the count. Then `omarchy dev benchmark cli --repeat=1; echo "exit=$?"`; expected `Omarchy CLI benchmark (1 runs each)` and 9 rows (`omarchy`, `omarchy --help`, `omarchy commands`, …, `omarchy theme current`) each with `avg … ms  min … ms  max … ms`, `exit=0`, no `failed (exit N)` row.
-  * Type `omarchy dev benchmark cli --repeat=0; echo "exit=$?"`; expected `--repeat must be a positive integer`, `exit=2`.
-  * Type `omarchy dev benchmark theme-switcher --repeat=1; echo "exit=$?"` and screenshot every 5 s (1–3 minutes on 2 vCPU).
-  ** Expected `Theme switcher benchmark (1 warm runs each)`, rows `theme index cold/warm`, `selector prep cold/warm (lazy)`, `thumbnail cache cold/warm`, then `Theme previews: N` with N ≥ 10, `exit=0`.
-  * Type `omarchy dev benchmark theme switcher --repeat=x; echo "exit=$?"`; expected `--repeat must be a positive integer`, `exit=2`.
-  * Type `ls /tmp | grep -c '^tmp\.'`; the benchmark removed its temporary caches (count unchanged from the first step, typically `0`).
-  * Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `ls /tmp | grep -c '^tmp\.'` and press Return. Record the count.
+  * Type `omarchy dev benchmark cli --repeat=1; echo "exit=$?"` and press Return. The header is `Omarchy CLI benchmark (1 runs each)`, and the last line is `exit=0`.
+  * Type `omarchy dev benchmark cli --repeat=0; echo "exit=$?"` and press Return. The output includes `--repeat must be a positive integer`, and the last line is `exit=2`.
+  * Type `omarchy dev benchmark theme-switcher --repeat=1; echo "exit=$?"` and press Return. The command starts.
+  * Wait until it finishes. The header is `Theme switcher benchmark (1 warm runs each)`, `Theme previews:` is at least 10, and the last line is `exit=0`.
+  * Type `omarchy dev benchmark theme switcher --repeat=x; echo "exit=$?"` and press Return. The output includes `--repeat must be a positive integer`, and the last line is `exit=2`.
+  * Type `ls /tmp | grep -c '^tmp\.'` and press Return. The count matches the one recorded at the start.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The theme benchmark is CPU-bound and silent for long stretches; keep screenshotting, it has not hung until 5 minutes pass.
-  * ./client-with-image allows you to get an image back of what you did, so can be useful for speeding things up
+  * The CLI table has nine rows, from `omarchy` through `omarchy theme current`. No row says `failed`.
+  * The theme benchmark can stay quiet for 1 to 3 minutes. It has not hung until 5 minutes pass. Screenshot about every 5 seconds.
+  * The theme rows cover the index, selector prep, and thumbnail cache, each cold and warm.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the 9 CLI rows, the theme-switcher table with `Theme previews: N`, the two `--repeat` refusals with `exit=2`, and the unchanged tmp count
+  ** The starting `/tmp` count is recorded. The CLI benchmark prints nine timing rows and exits 0, with no failed row.
+  ** `--repeat=0` exits 2. The theme-switcher benchmark exits 0 and reports at least 10 previews.
+  ** The spaced `theme switcher` spelling rejects `--repeat=x` with exit 2. The `/tmp` count is unchanged.
   * If unsuccessful
-  ** a `failed (exit N)` row, a magick/`omarchy-menu-images` error, or a preview count of 0
+  ** A row says `failed`, an image tool errors, or the preview count is 0.
 covers: bin/omarchy-dev-benchmark-cli; bin/omarchy-dev-benchmark-theme-switcher; test/cli:235-236
 
 ### dev-theme-preview   [VM-OK]
@@ -17946,25 +17951,30 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy dev theme preview --no-osc; echo "exit=$?"`; expected `Theme: …`, `File: /home/prime/.local/state/omarchy/current/theme/colors.toml`, `Mode: dark|light`, `foreground/background contrast: N:1`, a gradient bar, `Neutral ramp`, `Foundation`, `Selection sample`, `Terminal/UI samples`, `ANSI palette strips`, coloured swatches, `exit=0`.
-  * Type `omarchy dev theme preview tokyo-night --no-osc | head -n 3`; expected `Theme: tokyo-night`, `File: /usr/share/omarchy/themes/tokyo-night/colors.toml`.
-  * Type `omarchy dev theme preview "Tokyo Night" --no-color | grep -c '####'`; a count > 10 (plain swatches; the display name is accepted).
-  * Unhappy path: type `omarchy dev theme preview no-such-theme-qa; echo "exit=$?"`; expected `Theme not found: no-such-theme-qa`, `exit=1`. Then `omarchy dev theme preview a b; echo "exit=$?"`; expected the usage text, `exit=1`.
-  * Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy dev theme preview --no-osc; echo "exit=$?"` and press Return. The output names the current theme file, and the last line is `exit=0`.
+  * Type `omarchy dev theme preview tokyo-night --no-osc | head -n 3` and press Return. The output includes `Theme: tokyo-night` and the tokyo-night colors file.
+  * Type `omarchy dev theme preview "Tokyo Night" --no-color | grep -c '####'` and press Return. The count is greater than 10.
+  * Type `omarchy dev theme preview no-such-theme-qa; echo "exit=$?"` and press Return. The output includes `Theme not found: no-such-theme-qa`, and the last line is `exit=1`.
+  * Type `omarchy dev theme preview a b; echo "exit=$?"` and press Return. Usage is printed, and the last line is `exit=1`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Keep `--no-osc` on: without it the preview recolours this terminal's palette until it is closed, which would confuse later screenshots.
-  * The first preview is ~40 lines; if it scrolls, add `| head -n 30`.
+  * Keep `--no-osc`. Without it, the preview recolors this terminal until it closes.
+  * The first preview is about 40 lines. Add `| head -n 30` if it scrolls.
+  * The current preview also shows the mode, contrast, and the named samples. The hash marks are the no-color swatches.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the coloured preview, the tokyo-night header, the `#` swatch count, and the two refusals with `exit=1`
+  ** The current preview names `~/.local/state/omarchy/current/theme/colors.toml` and exits 0.
+  ** `tokyo-night` names that theme and its shipped colors file. `"Tokyo Night"` with `--no-color` prints more than 10 hash swatches.
+  ** An unknown theme exits 1 with `Theme not found`. Two extra arguments print usage and exit 1.
   * If unsuccessful
-  ** `Missing colors.toml`, empty swatches, or an `omarchy-theme-color` error
+  ** The colors file is missing, the swatches are empty, or a color helper errors.
 covers: bin/omarchy-dev-theme-preview; test/cli:431-437
 
 ### dev-font-list-and-add-glyph   [VM-OK]
@@ -17974,26 +17984,40 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy dev font list | head -n 5; omarchy dev font list | wc -l` → rows `U+E900 … U+E90E`, each `U+E9xx  <glyph>  <name>  <W> x <H>`, and the count `15`.
-  * Type `omarchy dev font; echo "exit=$?"`; the metadata declares required args, so the router help (`omarchy dev font [list|add] <name> …`) prints, `exit=0`.
-  * Type `cp /usr/share/omarchy/default/fonts/omarchy/omarchy.ttf /tmp/f.ttf && printf '<svg viewBox="0 0 24 24"><path d="M2 2h20v20H2z"/></svg>' > /tmp/sq.svg && omarchy dev font add square /tmp/sq.svg --font /tmp/f.ttf; echo "exit=$?"` → `Added square as U+E90F (…)`, a `Next:` list, `exit=0`; `omarchy dev font list --font /tmp/f.ttf | grep square` shows the new row.
-  * Refusals against the copy: `omarchy dev font add again /tmp/sq.svg --font /tmp/f.ttf --codepoint U+E900; echo "exit=$?"` → `U+E900 is already used`, `exit=1`. Then `printf '<svg viewBox="0 0 24 24"><path d="M0 0h1v1z"/><path d="M2 2h1v1z"/></svg>' > /tmp/two.svg && omarchy dev font add two /tmp/two.svg --font /tmp/f.ttf; echo "exit=$?"` → `expected a single <path>, found 2 — flatten the mark to one monochrome path first`, non-zero. Then `omarchy dev font add qa /nonexistent.svg --font /tmp/f.ttf; echo "exit=$?"` → a Python error naming `No such file or directory: '/nonexistent.svg'`, non-zero (record whether it is a raw traceback — that is a finding).
-  * Packaged font: `omarchy dev font add x /tmp/sq.svg; echo "exit=$?"` → a `PermissionError` / `Permission denied` on `/usr/share/omarchy/default/fonts/omarchy/omarchy.ttf`, non-zero; `omarchy dev font list | wc -l` still `15` and `omarchy dev font list | grep -c x` unchanged.
-  * Type `rm /tmp/f.ttf /tmp/*.svg` and close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy dev font list | head -n 5` and press Return. The rows start at `U+E900`.
+  * Type `omarchy dev font list | wc -l` and press Return. The output is `15`.
+  * Type `omarchy dev font; echo "exit=$?"` and press Return. Help lists `list` and `add`, and the last line is `exit=0`.
+  * Type `cp /usr/share/omarchy/default/fonts/omarchy/omarchy.ttf /tmp/f.ttf` and press Return. The prompt returns.
+  * Type `printf '<svg viewBox="0 0 24 24"><path d="M2 2h20v20H2z"/></svg>' > /tmp/sq.svg` and press Return. The prompt returns.
+  * Type `omarchy dev font add square /tmp/sq.svg --font /tmp/f.ttf; echo "exit=$?"` and press Return. The output includes `Added square as U+E90F`, and the last line is `exit=0`.
+  * Type `omarchy dev font list --font /tmp/f.ttf | grep square` and press Return. The new row is listed.
+  * Type `omarchy dev font add again /tmp/sq.svg --font /tmp/f.ttf --codepoint U+E900; echo "exit=$?"` and press Return. The output includes `U+E900 is already used`, and the last line is `exit=1`.
+  * Type `printf '<svg viewBox="0 0 24 24"><path d="M0 0h1v1z"/><path d="M2 2h1v1z"/></svg>' > /tmp/two.svg` and press Return. The prompt returns.
+  * Type `omarchy dev font add two /tmp/two.svg --font /tmp/f.ttf; echo "exit=$?"` and press Return. The output says it expected a single path, and the exit is non-zero.
+  * Type `omarchy dev font add qa /nonexistent.svg --font /tmp/f.ttf; echo "exit=$?"` and press Return. The output names the missing SVG, and the exit is non-zero.
+  * Type `omarchy dev font add x /tmp/sq.svg; echo "exit=$?"` and press Return. The output is a permission error on the packaged font, and the exit is non-zero.
+  * Type `omarchy dev font list | wc -l` and press Return. The output is `15`.
+  * Type `rm /tmp/f.ttf /tmp/*.svg` and press Return. The prompt returns.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The glyph characters print in the private-use area; boxes instead of marks in the *terminal* are fine — the codepoint column is the proof (the menu tests check rendering).
-  * ./client-with-image allows you to get an image back of what you did, so can be useful for speeding things up
+  * Empty boxes for private-use glyphs in the terminal are acceptable. The codepoint column is the proof.
+  * A raw Python traceback for the missing SVG is a finding. Record whether one appears.
+  * The packaged font must stay at 15 rows.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the 15-row list, the router help, `Added square as U+E90F` with the new row in the copy, the three refusals with their exception text, and the permission error with the stock list still 15 rows
+  ** The stock list has 15 rows starting at `U+E900`. Bare `dev font` prints help and exits 0.
+  ** Adding `square` to the copy exits 0 at `U+E90F`, and the copy's list shows it.
+  ** A taken codepoint exits 1. A two-path SVG is refused. A missing SVG is refused, and a traceback is recorded if one appears.
+  ** Adding to the packaged font is denied, and the stock list is still 15 rows.
   * If unsuccessful
-  ** the package font modified (`pacman -Qkk omarchy | grep omarchy.ttf`), `list` failing on the stock font, or a Python traceback text
+  ** The packaged font changes, the stock list fails, or the copy does not show `square`.
 covers: bin/omarchy-dev-font:456-482,552-649; default/fonts/omarchy/{omarchy.ttf,README.md}; agents/skills/icon-font.md
 
 ### dev-pkg-test-without-checkout   [VM-PARTIAL]
@@ -18003,25 +18027,29 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy dev pkg test --help | head -n 2`; expected `Usage: omarchy dev pkg-test [package-name] [path-to-checkout]`.
-  * Type `omarchy dev pkg test; echo "exit=$?"`; expected `Error: checkout not found at /home/prime/Work/omarchy/omarchy-installer`, `exit=1`, no sudo prompt.
-  * Type `mkdir -p /tmp/co && omarchy dev pkg test omarchy /tmp/co; echo "exit=$?"`; expected `Error: PKGBUILD not found at /home/prime/Work/omarchy/omarchy-pkgs/pkgbuilds/omarchy-dev/PKGBUILD` and the `OMARCHY_PKGBUILDS_DIR` hint, `exit=1`.
-  * Type `omarchy dev pkg-test 2>&1 | head -n 1`; the hyphenated spelling gives the same checkout error.
-  * Type `rmdir /tmp/co` and close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy dev pkg test --help | head -n 2` and press Return. The output includes `Usage: omarchy dev pkg-test`.
+  * Type `omarchy dev pkg test; echo "exit=$?"` and press Return. The output includes `checkout not found`, and the last line is `exit=1`.
+  * Type `mkdir -p /tmp/co` and press Return. The prompt returns.
+  * Type `omarchy dev pkg test omarchy /tmp/co; echo "exit=$?"` and press Return. The output includes `PKGBUILD not found`, and the last line is `exit=1`.
+  * Type `omarchy dev pkg-test 2>&1 | head -n 1` and press Return. The first line is the same checkout error.
+  * Type `rmdir /tmp/co` and press Return. The prompt returns.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * A `makepkg` or sudo prompt here would mean the guard failed — Ctrl+C and report.
-  * ./client-with-image allows you to get an image back of what you did, so can be useful for speeding things up
+  * If `makepkg` starts or sudo asks, press Ctrl+C and report it. No checkout means no build.
+  * The PKGBUILD error also mentions `OMARCHY_PKGBUILDS_DIR`.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the help and the two explanatory errors with `exit=1`, and the hyphenated spelling's matching error
+  ** Help prints the pkg-test usage. A bare run says the checkout was not found and exits 1, with no password prompt.
+  ** A checkout without a PKGBUILD exits 1 and names the missing PKGBUILD. The hyphenated spelling prints the same checkout error.
   * If unsuccessful
-  ** a makepkg/sudo prompt without a checkout, or an unhandled bash error
+  ** A build or sudo prompt starts without a checkout, or the command prints an unhandled shell error.
 covers: bin/omarchy-dev-pkg-test:10-96
 
 ### dev-ui-preview-gallery   [VM-PARTIAL]
@@ -18031,25 +18059,29 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy dev ui preview; echo "exit=$?"`.
-  ** Expected either a gallery panel of shell widgets (buttons, sliders, toggles…) with `exit=0`, or an `omarchy-shell` error naming `omarchy.dev-gallery`. Record which.
-  * If the gallery opened, press Escape, then type `omarchy dev ui preview slider`; the gallery opens scrolled to the slider section. Escape again.
-  * Type `omarchy dev ui preview --help | grep -A1 Usage`; expected `omarchy dev ui preview [section]`.
-  * Close the terminal with Super+W; no overlay remains.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy dev ui preview; echo "exit=$?"` and press Return. Record whether a gallery opens or an error names `omarchy.dev-gallery`.
+  * If the gallery opened, press Escape. The gallery closes.
+  * If the gallery opened, type `omarchy dev ui preview slider` and press Return. The gallery opens on the slider section.
+  * If the gallery opened, press Escape. The gallery closes.
+  * Type `omarchy dev ui preview --help | grep -A1 Usage` and press Return. The output includes `omarchy dev ui preview [section]`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The gallery is a shell overlay, not a window; if nothing appears within 3 s and no error printed, report a hang.
-  * ./client-with-image allows you to get an image back of what you did, so can be useful for speeding things up
+  * The gallery is an overlay, not a window. If nothing appears within 3 seconds and no error prints, report a hang.
+  * Either the gallery or the named shell error is a pass. Silence is not.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the gallery panel (and its slider section) or of the explicit shell error, and the help line
+  ** `omarchy dev ui preview` either opens the gallery and exits 0, or prints an `omarchy.dev-gallery` error. Which one happened is recorded.
+  ** When the gallery opens, Escape closes it, and `slider` opens it on that section.
+  ** Help includes `omarchy dev ui preview [section]`. No overlay remains after the terminal closes.
   * If unsuccessful
-  ** silence with no panel and no error
+  ** The command stays silent with no gallery and no error.
 covers: bin/omarchy-dev-ui-preview
 
 ### dev-install-ydoo   [VM-OK] [NET]
@@ -18059,28 +18091,35 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy dev install ydoo; echo "exit=$?"`.
-  ** Expected `Adding prime to the input group. You may need to log out and back in before this applies.` then a polkit password dialog on the desktop — click it, type `prime`, Enter.
-  ** Then the `ydotool` install (a terminal sudo prompt may appear; enter `prime`), then a second polkit dialog for the udev rule — authenticate again.
-  * Expected final line `ydotool is ready.`, `exit=0`.
-  * Type `systemctl --user is-active ydotool.service; ls -l /dev/uinput; cat /etc/udev/rules.d/80-uinput.rules`; expected `active`, group `input` mode `crw-rw----`, and the `KERNEL=="uinput", GROUP="input"…` rule.
-  * Type `omarchy dev install ydoo; echo "exit=$?"` again; no group message this time, at most one polkit prompt, and `ydotool is ready.` — idempotent.
-  * Close the terminal with Super+W.
-  ** This test leaves ydotool installed, the user in `input` and the udev rule in place: end the session with `stop` (do not `save`).
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy dev install ydoo; echo "exit=$?"` and press Return. The output says the user is being added to the input group.
+  * If a polkit dialog appears, type `prime` and press Return. The install continues.
+  * If a terminal sudo prompt appears, type `prime` and press Return. The install continues.
+  * If a second polkit dialog appears, type `prime` and press Return. The install continues.
+  * Wait until the output includes `ydotool is ready.` The last line is `exit=0`.
+  * Type `systemctl --user is-active ydotool.service` and press Return. The output is `active`.
+  * Type `ls -l /dev/uinput` and press Return. The device is group `input`.
+  * Type `cat /etc/udev/rules.d/80-uinput.rules` and press Return. The rule names `KERNEL=="uinput"` and `GROUP="input"`.
+  * Type `omarchy dev install ydoo; echo "exit=$?"` and press Return. The output includes `ydotool is ready.`, and the last line is `exit=0`.
+  * Press Super+W. The terminal closes.
+  * End the session with `stop`. The session ends with ydotool left installed.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Polkit dialogs are floating windows, not terminal prompts; move the mouse over them before typing.
-  * double checking your mouse position before clicking can be useful to prevent failure.
+  * Polkit dialogs are floating windows. Click one before typing.
+  * The second run must not repeat the group message. At most one polkit prompt is expected.
+  * Do not save this disk. The user stays in `input`, and the udev rule stays.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the polkit dialog, `ydotool is ready.` with `exit=0`, the service/device/rule checks, and the idempotent second run
+  ** The first run says the user is being added to `input`, authenticates the prompts, and finishes with `ydotool is ready.` and exit 0.
+  ** The user service is active, `/dev/uinput` is group `input`, and the udev rule names that group.
+  ** The second run finishes with `ydotool is ready.` and exit 0 without repeating the group message.
   * If unsuccessful
-  ** `omarchy-dev-install-ydoo: ydotool.service did not start` with its status dump, or a pkexec authorization error
+  ** The service does not start, or a pkexec authorization error is printed.
 covers: bin/omarchy-dev-install-ydoo
 
 ### transcode-picture-cli-and-rejects   [VM-OK]
@@ -18090,26 +18129,35 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `magick -size 1600x900 gradient:red-blue ~/Pictures/qa.png && ls ~/Pictures/`; `qa.png` exists.
-  * Type `omarchy transcode ~/Pictures/qa.png jpg low; echo "exit=$?"`; expected toast `Transcoded to low jpg` / `Saved and copied to clipboard.`, `exit=0`.
-  * Type `magick identify ~/Pictures/qa-low.jpg; wl-paste`; expected a JPEG 1080 px wide and `file:///home/prime/Pictures/qa-low.jpg`.
-  * Unhappy paths: `omarchy transcode /nope.png jpg low; echo "exit=$?"` → `File not found: /nope.png`, `exit=1`. Then `omarchy transcode ~/Pictures/qa.png bmp low; echo "exit=$?"` and `omarchy transcode ~/Pictures/qa.png jpg huge; echo "exit=$?"` → `Invalid picture format: bmp` and `Invalid picture resolution: huge`, `exit=1` each. Then `omarchy transcode --bogus; echo "exit=$?"` → `Unknown option: --bogus` + usage, `exit=2`.
-  * Type `ls ~/Pictures/` — no file was produced by the refusals; then `rm ~/Pictures/qa.png ~/Pictures/qa-low.jpg` to leave Pictures as found.
-  * Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `magick -size 1600x900 gradient:red-blue ~/Pictures/qa.png` and press Return. The prompt returns.
+  * Type `ls ~/Pictures/` and press Return. `qa.png` is listed.
+  * Type `omarchy transcode ~/Pictures/qa.png jpg low; echo "exit=$?"` and press Return. A notification says the file was transcoded, and the last line is `exit=0`.
+  * Type `magick identify ~/Pictures/qa-low.jpg` and press Return. The image is a JPEG 1080 pixels wide.
+  * Type `wl-paste` and press Return. The output is `file:///home/prime/Pictures/qa-low.jpg`.
+  * Type `omarchy transcode /nope.png jpg low; echo "exit=$?"` and press Return. The output includes `File not found: /nope.png`, and the last line is `exit=1`.
+  * Type `omarchy transcode ~/Pictures/qa.png bmp low; echo "exit=$?"` and press Return. The output includes `Invalid picture format: bmp`, and the last line is `exit=1`.
+  * Type `omarchy transcode ~/Pictures/qa.png jpg huge; echo "exit=$?"` and press Return. The output includes `Invalid picture resolution: huge`, and the last line is `exit=1`.
+  * Type `omarchy transcode --bogus; echo "exit=$?"` and press Return. The output includes `Unknown option: --bogus`, and the last line is `exit=2`.
+  * Type `ls ~/Pictures/` and press Return. Only the two intended files are listed.
+  * Type `rm ~/Pictures/qa.png ~/Pictures/qa-low.jpg` and press Return. The prompt returns.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Screenshot immediately after the transcode command — the toast fades in a few seconds.
-  * `low` means "shrink to 1080 px wide"; the 1600 px source is reduced, never enlarged.
+  * Screenshot the notification as soon as the command returns. It fades in a few seconds.
+  * `low` shrinks the 1600 pixel source to 1080 pixels wide.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the toast, the `identify` line with 1080 width, the clipboard URI, and each refusal with its exit code
+  ** `qa.png` is created. Transcoding to `jpg low` notifies, exits 0, writes a 1080-wide JPEG, and copies that file URI.
+  ** A missing file, `bmp`, and `huge` each exit 1 with their own error. `--bogus` exits 2.
+  ** The refusals add no extra file. Both test pictures are removed.
   * If unsuccessful
-  ** a magick error, a missing output, or a refusal that still produced a file
+  ** ImageMagick errors, the output is missing, or a refusal still writes a file.
 covers: bin/omarchy-transcode
 
 ### transcode-ascii-cli-and-rejects   [VM-OK]
@@ -18119,28 +18167,41 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy transcode ascii /usr/share/omarchy/logo.svg /tmp/logo-braille.txt --width 60; echo "exit=$?"; cat /tmp/logo-braille.txt; wc -L /tmp/logo-braille.txt`.
-  ** `Wrote ASCII art to /tmp/logo-braille.txt`, `exit=0`, then braille-dot art of the Omarchy wordmark, max line length ≤ 60.
-  * Type `omarchy transcode ascii /usr/share/omarchy/logo.svg /tmp/logo-block.txt --mode block --width 40 && cat /tmp/logo-block.txt` → the same logo shape in `█ ▀ ▄` blocks, ≤ 40 columns. Then `omarchy transcode ascii /usr/share/omarchy/icon.png /tmp/icon-block.txt --mode block --width 40 --height 20 && cat /tmp/icon-block.txt` → block art ≤ 40 columns, ≤ 20 rows.
-  * Type `omarchy transcode ascii /usr/share/omarchy/icon.png /tmp/icon-inv.txt --invert --threshold 30 && cat /tmp/icon-inv.txt` → a visibly different (inverted/denser) rendering.
-  * Unhappy paths: `omarchy transcode ascii /nope.svg /tmp/x.txt; echo "exit=$?"` → `Logo file not found: /nope.svg`, `exit=1`. `omarchy transcode ascii /usr/share/omarchy/icon.png /tmp/x.txt --mode ansi; echo "exit=$?"` → `Invalid mode: ansi (expected braille or block)`, `exit=1`. `omarchy transcode ascii /usr/share/omarchy/logo.svg; echo "exit=$?"` → `Usage: omarchy-transcode-ascii <input-image.svg|png> <output-path> [options]`, `exit=1`. `omarchy transcode ascii --help` → the options list.
-  ** `ls /tmp/x.txt 2>&1` → `No such file`: no refusal produced an output file.
-  * Clean up: `rm -f /tmp/logo-braille.txt /tmp/logo-block.txt /tmp/icon-block.txt /tmp/icon-inv.txt` and close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy transcode ascii /usr/share/omarchy/logo.svg /tmp/logo-braille.txt --width 60; echo "exit=$?"` and press Return. The output includes `Wrote ASCII art to /tmp/logo-braille.txt`, and the last line is `exit=0`.
+  * Type `wc -L /tmp/logo-braille.txt` and press Return. The longest line is at most 60.
+  * Type `cat /tmp/logo-braille.txt` and press Return. Braille art is printed.
+  * Type `omarchy transcode ascii /usr/share/omarchy/logo.svg /tmp/logo-block.txt --mode block --width 40` and press Return. The prompt returns.
+  * Type `wc -L /tmp/logo-block.txt` and press Return. The longest line is at most 40.
+  * Type `omarchy transcode ascii /usr/share/omarchy/icon.png /tmp/icon-block.txt --mode block --width 40 --height 20` and press Return. The prompt returns.
+  * Type `wc -L /tmp/icon-block.txt` and press Return. The longest line is at most 40.
+  * Type `wc -l /tmp/icon-block.txt` and press Return. The line count is at most 20.
+  * Type `omarchy transcode ascii /usr/share/omarchy/icon.png /tmp/icon-inv.txt --invert --threshold 30` and press Return. The prompt returns.
+  * Type `cat /tmp/icon-inv.txt` and press Return. The art differs from the earlier block rendering.
+  * Type `omarchy transcode ascii /nope.svg /tmp/x.txt; echo "exit=$?"` and press Return. The output includes `Logo file not found: /nope.svg`, and the last line is `exit=1`.
+  * Type `omarchy transcode ascii /usr/share/omarchy/icon.png /tmp/x.txt --mode ansi; echo "exit=$?"` and press Return. The output includes `Invalid mode: ansi`, and the last line is `exit=1`.
+  * Type `omarchy transcode ascii /usr/share/omarchy/logo.svg; echo "exit=$?"` and press Return. Usage is printed, and the last line is `exit=1`.
+  * Type `omarchy transcode ascii --help` and press Return. The options are listed.
+  * Type `ls /tmp/x.txt 2>&1` and press Return. The output includes `No such file`.
+  * Type `rm -f /tmp/logo-braille.txt /tmp/logo-block.txt /tmp/icon-block.txt /tmp/icon-inv.txt` and press Return. The prompt returns.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * If the art looks like a solid blob, note it; the manual says `--threshold` is the knob, and 30/70 should show a difference.
-  * Braille output can look faint on screenshots; the block variant is the easier one to verify visually.
-  * ./client-with-image allows you to get an image back of what you did, so can be useful for speeding things up
+  * Block art is easier to check than braille. A solid blob should be recorded. `--threshold` 30 and 70 should differ.
+  * The logo and icon art are the wordmark and icon shapes, not a required exact picture.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the `Wrote ASCII art` line with `exit=0`, the braille and block renderings (logo and icon) with their sizes, the inverted variant, the three refusals with `exit=1` and no stray output file, and the help
+  ** The SVG writes braille art and exits 0, with no line longer than 60.
+  ** Block mode writes the logo within 40 columns and the icon within 40 columns and 20 rows.
+  ** Invert with threshold 30 writes a visibly different rendering.
+  ** A missing file, `ansi`, and a missing output path each exit 1. Help lists the options. `/tmp/x.txt` is not created. The test files are removed.
   * If unsuccessful
-  ** a magick error (`Unable to read logo image` / `Unable to convert logo image`), an empty output file, `./client get-serial`
+  ** ImageMagick cannot read the logo, or an output file is empty.
 covers: bin/omarchy-transcode-ascii; manual/41-branding.md (Converting images yourself)
 
 ### disk-speedtest-cli-and-panel   [VM-OK]

@@ -383,14 +383,14 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `upload-log-cli-installed-and-rejects`
 - [x] `dev-link-scratch-status-and-unlink`
 - [x] `dev-link-rejects-bad-input`
-- [ ] `dev-benchmarks-cli-and-theme-switcher`
-- [ ] `dev-theme-preview`
-- [ ] `dev-font-list-and-add-glyph`
-- [ ] `dev-pkg-test-without-checkout`
-- [ ] `dev-ui-preview-gallery`
-- [ ] `dev-install-ydoo`
-- [ ] `transcode-picture-cli-and-rejects`
-- [ ] `transcode-ascii-cli-and-rejects`
+- [x] `dev-benchmarks-cli-and-theme-switcher`
+- [x] `dev-theme-preview`
+- [x] `dev-font-list-and-add-glyph`
+- [x] `dev-pkg-test-without-checkout`
+- [x] `dev-ui-preview-gallery`
+- [x] `dev-install-ydoo`
+- [x] `transcode-picture-cli-and-rejects`
+- [x] `transcode-ascii-cli-and-rejects`
 - [ ] `disk-speedtest-cli-and-panel`
 - [ ] `reminder-cli-set-show-clear-and-rejects`
 - [ ] `menu-cli-summon-toggle-close-and-rejects`
