@@ -304,14 +304,14 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `webapp-handlers-mailto-zoommtg-and-unknown-scheme`
 - [x] `webapp-copy-url-and-download-shortcuts-listed`
 - [x] `launch-chords-neovim-tmux-herdr-and-cheatsheets`
-- [ ] `obsidian-launch-or-focus-single-window`
-- [ ] `disk-usage-dua-floating-tui`
-- [ ] `shell-tools-rg-fd-bat`
-- [ ] `shell-tools-tldr-and-yt-dlp`
-- [ ] `try-experiment-directories`
-- [ ] `herdr-launch-detach-reattach-and-stop`
-- [ ] `herdr-keybindings-menu-and-cli-help`
-- [ ] `herdr-split-tabs-with-omarchy-prefix`
+- [x] `obsidian-launch-or-focus-single-window`
+- [x] `disk-usage-dua-floating-tui`
+- [x] `shell-tools-rg-fd-bat`
+- [x] `shell-tools-tldr-and-yt-dlp`
+- [x] `try-experiment-directories`
+- [x] `herdr-launch-detach-reattach-and-stop`
+- [x] `herdr-keybindings-menu-and-cli-help`
+- [x] `herdr-split-tabs-with-omarchy-prefix`
 - [ ] `herdr-shell-layouts-hdl-hds-hsl`
 - [ ] `omacalc-floating-calculator`
 - [ ] `omawrite-open-write-and-save`

@@ -14120,30 +14120,38 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Shift+O: Obsidian opens (software rendering; allow 15–20 s) showing its vault chooser ("Create new vault" / "Open folder as vault") or a previously opened vault.
-  ** Electron apps take up to 20 s here; click **Wait** on a "not responding" dialog.
-  * Press Super+Return to open a terminal (focus moves to it), then press Super+Shift+O again: focus returns to the **same** Obsidian window. In the terminal type `hyprctl clients | grep -ci 'class: obsidian'` Enter → `1`.
-  * Press Super+2: an empty workspace 2 is shown (the bar's workspace indicator moves).
-  * Press Super+Shift+O again: you are taken back to workspace 1 with the same Obsidian window focused and there is still exactly one Obsidian window.
-  ** Two windows would tile side by side; one fills the workspace.
-  * In Obsidian create a vault named `probe` in the default location (Create new vault → name → Create): the editor view appears. Open Settings (gear) → Appearance and confirm a theme dropdown exists; report whether `Omarchy` is listed.
-  ** The vault-location dialog is a GTK/portal file chooser and renders oversized at 1× — expected.
-  * Press Super+Shift+W: Omawrite opens as its own window.
-  * Close Obsidian, Omawrite and the terminal with Super+W (in the terminal first `rm -rf ~/probe` — the vault folder created in the default location — if it exists); the desktop is empty.
+  * Press Super+Shift+O. An Obsidian window opens.
+  * Press Super+Return. A terminal opens.
+  * Press Super+Shift+O. The same Obsidian window is focused.
+  * Click the terminal. It is focused.
+  * Type `hyprctl clients | grep -ci 'class: obsidian'` and press Return. The output is `1`.
+  * Press Super+2. Workspace 2 is showing.
+  * Press Super+Shift+O. The same Obsidian window on workspace 1 is focused.
+  * Click Create new vault. A name field is showing.
+  * Type `probe` and choose Create. The editor opens.
+  * Click the settings gear. Settings open.
+  * Select Appearance. A theme dropdown is showing, and whether Omarchy is listed is recorded.
+  * Press Super+Shift+W. An Omawrite window opens.
+  * Click the terminal. It is focused.
+  * Type `rm -rf ~/probe` and press Return. The prompt returns.
+  * Close Obsidian, Omawrite, and the terminal with Super+W. The desktop is clear.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Obsidian's first-run vault dialog is fine; the window class is what the focus rule matches.
-  * Electron apps may print GPU warnings in the journal; they are not failures.
+  * Obsidian can take 15 to 20 seconds. If Hyprland says it is not responding, click Wait.
+  * A vault chooser or an already open vault both count as the first window. Accept the default folder if a file chooser appears. An oversized chooser is expected.
+  * GPU warnings in the journal are not a failure. The focus rule matches the window class `obsidian`.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of Obsidian's first screen, the `1` from the client count after the second chord, being pulled back to it from workspace 2 with a single window, the Appearance settings, and Omawrite
+  ** Super+Shift+O opens one Obsidian window. From a terminal, and again from workspace 2, the same window is focused, and the client count is `1`.
+  ** A vault named `probe` opens the editor. Appearance shows a theme dropdown, and whether Omarchy is listed is recorded.
+  ** Super+Shift+W opens Omawrite as its own window. `~/probe` is removed, and the desktop is clear.
   * If unsuccessful
-  ** Screenshot of a second Obsidian window (duplicate launch) or nothing opening after a chord; `journalctl --user -n 30 | sudo tee /dev/ttyS0` read via get-serial
+  ** A second Obsidian window opens, a chord does nothing, or the client count is not `1`.
 covers: default/hypr/bindings/applications.lua:18-19; bin/omarchy-launch-or-focus; default/hypr/helpers.lua:63-64,135-137; test/shell.d/hyprland-focus-app-test.sh; manual/07:121-122; manual/22-guis.md:11-19
 
 ### disk-usage-dua-floating-tui   [VM-OK]
@@ -14153,27 +14161,38 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Alt+Space, type `Disk`, and press Enter on **Disk Usage**.
-  ** A floating, centred terminal (class `TUI.float`) opens running `dua i /`: after the scan (a few seconds, up to 10–30 s) it lists top-level directories (`usr`, `home`, `var`, …) with sizes, largest first.
-  ** A tiled (edge-to-edge) window instead of a floating one means the `TUI.float` app-id was not applied; report it.
-  * Press Down twice, then Enter (or `o`) on `usr` to descend; the listing shows its children. Press `u` (or Backspace) to go up.
-  * Press `?`: dua's help overlay. Press Escape.
-  * Press `q` (confirm with `y`/Enter if asked `Really quit?`); the window closes.
-  * Press Super+Return and type `dua --version` Enter → `dua 2.x`. Close the terminal with Super+W; the desktop is as before.
+  * Press Super+Alt+Space. Apps opens.
+  * Type `Disk`. Disk Usage is listed.
+  * Press Enter. A floating dua window opens.
+  * Wait until the scan finishes. Top-level directories are listed with sizes.
+  * Press Down. The highlight moves down.
+  * Press Down. The highlight moves down again.
+  * Press Enter. The listing shows the children of the highlighted directory.
+  * Press `u`. The listing returns to the parent.
+  * Press `?`. A help overlay opens.
+  * Press Escape. The help overlay closes.
+  * Press `q`. The window closes.
+  ** If it asks `Really quit?`, press `y` and then Enter.
+  * Press Super+Return. A terminal opens.
+  * Type `dua --version` and press Return. The output starts with `dua 2.`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Do **not** press `d` (mark for deletion) or Shift+D.
-  * The floating TUI window is centred; the Apps menu is the only launcher for it.
+  * Do not press `d` or Shift+D. Those mark files for deletion.
+  * The scan can take 10 to 30 seconds. A tiled window means the `TUI.float` app id was not applied. Report that.
+  * `o` also descends, and Backspace also goes up.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the floating dua window with `/` entries sorted by size, inside `usr`, the help overlay, and `dua 2.x`
+  ** Apps opens a floating dua window, and the scan lists top-level directories with sizes.
+  ** Enter descends into the highlighted directory, `u` returns to the parent, `?` opens help, and Escape closes it.
+  ** `q` closes the window. `dua --version` starts with `dua 2.`.
   * If unsuccessful
-  ** Screenshot of the window after launch (a tiled window, an empty terminal, `dua: command not found`, or a permission error)
+  ** The window is tiled, the terminal is empty, `dua` is not found, or a permission error is printed.
 covers: manual/21-tuis.md:37-39; applications/Disk Usage.desktop; applications/icons/Disk Usage.png; install/omarchy-base.packages (dua-cli); default/hypr/apps/system.lua:7-9 (TUI.float)
 
 ### shell-tools-rg-fd-bat   [VM-OK]
@@ -14183,25 +14202,35 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return and type `mkdir -p /tmp/rt/app && cd /tmp/rt && echo 'class UsersController' > app/users_controller.rb && echo 'x' > person.rb` Enter.
-  * Type `rg Controller app/` Enter → `app/users_controller.rb` with line `1:class UsersController` highlighted. Type `rg Nothing app/; echo rc=$?` Enter → no output, `rc=1`.
-  * Type `fd person.rb` Enter → `person.rb`. Type `fd missing.rb; echo rc=$?` Enter → no output, `rc=0` (no match is not an error for fd).
-  * Type `bat person.rb` Enter → a framed view with the file name header and line number `1`. Type `bat nope.rb` Enter → `[bat error]: 'nope.rb': No such file or directory (os error 2)`.
-  * Type `man rg` Enter → a coloured page; press `q`.
-  * Type `cd && rm -rf /tmp/rt` Enter and close the terminal with Super+W; the desktop is as before.
+  * Press Super+Return. A terminal opens.
+  * Type `mkdir -p /tmp/rt/app && cd /tmp/rt && echo 'class UsersController' > app/users_controller.rb && echo 'x' > person.rb` and press Return. The prompt returns.
+  * Type `rg Controller app/` and press Return. The output names `app/users_controller.rb` and `class UsersController`.
+  * Type `rg Nothing app/; echo rc=$?` and press Return. rg prints nothing, and the last line is `rc=1`.
+  * Type `fd person.rb` and press Return. The output is `person.rb`.
+  * Type `fd missing.rb; echo rc=$?` and press Return. fd prints nothing, and the last line is `rc=0`.
+  * Type `bat person.rb` and press Return. The view names the file and shows line `1`.
+  * Type `bat nope.rb` and press Return. The output includes `No such file or directory`.
+  * Type `man rg` and press Return. A manual page opens.
+  * Press `q`. The manual page closes.
+  * Type `cd && rm -rf /tmp/rt` and press Return. The prompt returns.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * All three tools are in the base package set; a `command not found` is a real failure.
+  * `rg`, `fd`, and `bat` are in the base set. `command not found` is a failure.
+  * A missing match is exit 1 for rg and exit 0 for fd.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the rg hit, `rc=1`, the fd results with `rc=0`, the bat frame, the bat error line, and the man page
+  ** `rg Controller app/` names `app/users_controller.rb` and `class UsersController`. A missing pattern exits 1 and prints nothing.
+  ** `fd person.rb` prints `person.rb`. A missing name prints nothing and exits 0.
+  ** `bat person.rb` shows the file and line 1. `bat nope.rb` reports no such file.
+  ** `man rg` opens a manual page, and `/tmp/rt` is removed.
   * If unsuccessful
-  ** Screenshot of the deviating output
+  ** A command is missing, an exit code differs, or `bat` does not report the missing file.
 covers: manual/19-shell-tools.md:21-45; install/omarchy-base.packages (ripgrep, fd, bat)
 
 ### shell-tools-tldr-and-yt-dlp   [VM-PARTIAL] [NET]
@@ -14211,26 +14240,30 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return and type `tldr tar` Enter.
-  ** On first run it may print that it is downloading/updating the page cache (allow 30 s), then a short list of `tar` examples such as `tar cf path/to/target.tar`.
-  * Type `tldr no-such-command-xyz` Enter → a message that no page was found (wording per client) — not a crash.
-  * Type `yt-dlp --version` Enter → a date-style version like `2026.xx.xx`.
-  * Type `yt-dlp not-a-url` Enter → `ERROR: [generic] not-a-url: … is not a valid URL` (or similar "not a valid URL").
-  * Type `echo ${OMARCHY_YTDLP_DIR:-unset}; ls -d ~/Videos` Enter → `unset` and `/home/prime/Videos` (the default download folder for the browser extension).
-  * Close the terminal with Super+W; the desktop is as before.
+  * Press Super+Return. A terminal opens.
+  * Type `tldr tar` and press Return. The output includes `tar cf`.
+  ** The first run may download the page cache. Allow 30 seconds.
+  * Type `tldr no-such-command-xyz` and press Return. The output says no page was found.
+  * Type `yt-dlp --version` and press Return. A date-style version is printed.
+  * Type `yt-dlp not-a-url` and press Return. The output says it is not a valid URL.
+  * Type `echo ${OMARCHY_YTDLP_DIR:-unset}` and press Return. The output is `unset`.
+  * Type `ls -d ~/Videos` and press Return. The output is `/home/prime/Videos`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Skipped here: a real video download (the browser path is the Alt+Shift+D extension test).
+  * Do not download a video. YouTube throttles this guest, and the browser download path is a different test.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the tar examples, the not-found message, the yt-dlp version, the invalid-URL error, and the `unset` / `~/Videos` lines
+  ** `tldr tar` shows a `tar cf` example. A missing page says it was not found and does not crash.
+  ** `yt-dlp --version` prints a date-style version, and `yt-dlp not-a-url` says it is not a valid URL.
+  ** `OMARCHY_YTDLP_DIR` is `unset`, and `~/Videos` exists.
   * If unsuccessful
-  ** Screenshot of the failing command output
+  ** `tldr` hangs past 30 seconds, a command is missing, or `yt-dlp` accepts `not-a-url`.
 covers: manual/19-shell-tools.md:47-55; install/omarchy-base.packages (tldr, yt-dlp); bin/omarchy-chromium-ytdlp-host:18
 
 ### try-experiment-directories   [VM-OK]
@@ -14240,25 +14273,32 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return and type `ls -d ~/Work ~/Work/tries` Enter → both paths exist.
-  * Type `type try` Enter → `try is a function` (the lazy wrapper). Type `try --help` Enter → try's usage text mentioning the tries directory.
-  * Type `try omarchy-probe` Enter. try creates and switches into a new directory; `pwd` Enter shows `/home/prime/Work/tries/<date>-omarchy-probe` (date prefix format per try).
-  ** If `try omarchy-probe` prompts to create the directory, confirm with Enter.
-  * Type `try` Enter with no argument: try's interactive picker/list shows the directory just created; press Escape (or `q`) to leave.
-  * Type `cd && rm -rf ~/Work/tries/*omarchy-probe*` Enter to clean up, then close the terminal with Super+W; the desktop is as before.
+  * Press Super+Return. A terminal opens.
+  * Type `ls -d ~/Work ~/Work/tries` and press Return. Both paths are listed.
+  * Type `type try` and press Return. The output is `try is a function`.
+  * Type `try --help` and press Return. The usage text mentions the tries directory.
+  * Type `try omarchy-probe` and press Return. The shell is inside a new tries directory.
+  ** If it asks to create the directory, press Enter.
+  * Type `pwd` and press Return. The path is `/home/prime/Work/tries/` plus a date and `-omarchy-probe`.
+  * Type `try` and press Return. A picker lists the directory just created.
+  * Press Escape. The picker closes.
+  * Type `cd && rm -rf ~/Work/tries/*omarchy-probe*` and press Return. The prompt returns.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The picker may not filter on typing; navigate with arrows and leave with Escape.
+  * The picker may not filter as you type. Leave it with Escape or `q`.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the `ls -d` line, `try is a function`, the help, the `pwd` inside the dated directory, and the picker
+  ** `~/Work` and `~/Work/tries` exist. `try` is a function, and its help mentions the tries directory.
+  ** `try omarchy-probe` changes into a dated directory under `~/Work/tries` whose name ends in `-omarchy-probe`.
+  ** `try` with no arguments lists that directory. The directory is removed before the terminal closes.
   * If unsuccessful
-  ** Screenshot of the failing command output
+  ** A path is missing, `try` is not a function, or `pwd` is not inside `~/Work/tries`.
 covers: manual/19-shell-tools.md:57-59; default/bash/init:13-19; install/user/mise-work.sh:2-3
 
 ### herdr-launch-detach-reattach-and-stop   [VM-OK]
@@ -14268,34 +14308,40 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Ctrl+Return.
-  ** A terminal opens running Herdr: a tab bar with one tab and a shell pane; the hostname appears on the right of the tab bar and the window title shows the hostname and a workspace name.
-  ** Herdr chords are newer than 4.0.2: if nothing opens, run `pacman -Q herdr` and `omarchy version` in a terminal and report "absent on this build".
-  * In the pane type `export HMARK=kept; echo HERDR-MARK-1` Enter. Press Ctrl+Space, release, then `c`: a second tab appears. Press Alt+1 to return to the first tab.
-  * Press Ctrl+Space, release, then `d`.
-  ** Herdr detaches and the terminal window closes.
-  * Press Super+Ctrl+Return again.
-  ** Herdr re-attaches with **two** tabs still present and the pane still shows `HERDR-MARK-1`; type `echo $HMARK` Enter → `kept`.
-  * Close the Herdr window with Super+W (the session survives). Open a plain terminal with Super+Enter and run `herdr status server --json`.
-  ** JSON with `"running": true`.
-  * Run `herdr server stop`, then `herdr status server --json` again, and close the terminal with Super+W.
-  ** The status reports not running; the desktop must return exactly as left.
+  * Press Super+Ctrl+Return. A Herdr window opens.
+  ** If nothing opens, type `pacman -Q herdr` and `omarchy version` in a terminal and report Herdr absent on this build.
+  * Type `export HMARK=kept; echo HERDR-MARK-1` and press Return. The output is `HERDR-MARK-1`.
+  * Press Ctrl+Space. Herdr's prefix is active.
+  * Press `c`. A second tab appears.
+  * Press Alt+1. The first tab is showing.
+  * Press Ctrl+Space. Herdr's prefix is active.
+  * Press `d`. The Herdr window closes.
+  * Press Super+Ctrl+Return. Herdr opens with two tabs, and the pane still shows `HERDR-MARK-1`.
+  * Type `echo $HMARK` and press Return. The output is `kept`.
+  * Press Super+W. The Herdr window closes.
+  * Press Super+Return. A terminal opens.
+  * Type `herdr status server --json` and press Return. The output includes `"running": true`.
+  * Type `herdr server stop` and press Return. The prompt returns.
+  * Type `herdr status server --json` and press Return. The output says the server is not running.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The Omarchy prefix is Ctrl+Space (not the upstream Ctrl+b); detach is prefix then `d`, tabs are Alt+1..9. If Ctrl+Space appears to do nothing it may be swallowed by the fcitx5 input method — press Alt+Enter: a split proves Herdr is fine and the prefix is the problem; report either way.
+  * The prefix is Ctrl+Space, not Ctrl+b. Release it before the next key.
+  * If Ctrl+Space does nothing, press Alt+Enter. A split means Herdr is running and the prefix was swallowed. Report that, then stop the server.
+  * Herdr is newer than the 4.0.2 image. Report it absent, not broken, when the chord does nothing and the package is missing.
   * `h` in a plain terminal is an alias for `herdr` and attaches to the same session.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of Herdr's first screen with one tab, then with two tabs
-  ** Screenshot after re-attach showing two tabs, `HERDR-MARK-1` and `kept`
-  ** Screenshot of the running-true and not-running status outputs
+  ** Super+Ctrl+Return opens Herdr. A second tab is created, Alt+1 returns to the first, and detach closes the window.
+  ** The next chord restores both tabs and `HERDR-MARK-1`. `echo $HMARK` prints `kept`.
+  ** After the window is closed, `herdr status server --json` says `"running": true`. After `herdr server stop`, the status says it is not running.
   * If unsuccessful
-  ** Screenshot after the chord; `pacman -Q herdr`, `herdr --version`, `omarchy version`
+  ** The chord does nothing while `pacman -Q herdr` shows the package, the reattached session loses the mark, or the server stays running after stop.
 covers: default/hypr/bindings/applications.lua:13; bin/omarchy-launch-terminal-herdr; config/herdr/config.toml [keys]; manual/21-tuis.md:25-29; manual/20-shell-functions.md:24; default/bash/aliases:53; default/hypr/bindings/utilities.lua:12; bin/omarchy-menu-herdr-keybindings; migrations/1786273938.sh
 
 ### herdr-keybindings-menu-and-cli-help   [VM-OK]
@@ -14305,41 +14351,39 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Ctrl+K.
-  ** A searchable "Herdr keybindings" menu opens; the first row reads `PREFIX → CTRL + SPACE`, followed by rows such as `PREFIX + D → Detach`, `PREFIX + C → New tab` and `NAVIGATE + … → …`.
-  ** If Super+K has no "Herdr" row on this build, report the chord absent on this build, not broken.
-  * Type `detach`.
-  ** The list filters to the Detach row. Press Enter: the picker closes without any action (display only).
-  * Open the Omarchy Menu with Super+Space and click Learn, then Herdr, using the mouse.
-  ** The same menu appears. Press Escape.
-  * Open a terminal with Super+Enter and run `omarchy-menu-herdr-keybindings --print | head -5`.
-  ** Rows print, the first with `CTRL + SPACE`.
-  * Run `omarchy-menu-herdr-keybindings --print --config /nonexistent | head -3`.
-  ** Rows still print, now with Herdr's built-in prefix (`CTRL + B`) — no error for a missing config.
-  * Run `herdr --version; herdr --help | head -20`, then `herdr --default-config | grep -A3 '^# \[keys\]'`.
-  ** A version (0.8.x or newer); usage text listing subcommands including `pane`, `tab`, `workspace`, `server`, `status`; a commented `[keys]` section with a `prefix` line — this is what the Super+Ctrl+K menu is built from.
-  * Run `herdr definitely-not-a-command; echo "exit=$?"`.
-  ** An error/usage message and a non-zero exit code; nothing hangs.
-  * Close the terminal with Super+W.
-  ** The desktop must return exactly as left.
+  * Press Super+Ctrl+K. A Herdr keybindings menu opens, and the first row names `CTRL + SPACE`.
+  ** If Super+K has no Herdr row, report the chord absent on this build.
+  * Type `detach`. The list shows the Detach row.
+  * Press Enter. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Learn, then Herdr. The Herdr keybindings menu opens.
+  * Press Escape. The menu closes.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy-menu-herdr-keybindings --print | head -5` and press Return. The first row includes `CTRL + SPACE`.
+  * Type `omarchy-menu-herdr-keybindings --print --config /nonexistent | head -3` and press Return. A row includes `CTRL + B`.
+  * Type `herdr --version` and press Return. A version is printed.
+  * Type `herdr --help | head -20` and press Return. The usage lists `pane`, `tab`, `workspace`, `server`, and `status`.
+  * Type `herdr --default-config | grep -A3 '^# \[keys\]'` and press Return. A commented `[keys]` section includes a `prefix` line.
+  * Type `herdr definitely-not-a-command; echo "exit=$?"` and press Return. An error is printed, the exit is non-zero, and the command returns.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The menu is a fuzzy picker; typing filters live.
-  * An empty menu means `herdr --default-config` changed shape — capture `herdr --default-config | head -40 | sudo tee /dev/ttyS0` and read it with get-serial; the same trick reads `herdr --help` if it scrolls off screen.
-  * If any herdr command shows nothing for 5 seconds, press Ctrl+C and report it.
+  * The menu filters as you type. Enter on a row only closes the picker.
+  * If a herdr command shows nothing for 5 seconds, press Ctrl+C and report it.
+  * If the menu is empty, run `herdr --default-config | head -40 | sudo tee /dev/ttyS0` and read it with get-serial.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the menu with the PREFIX row, and filtered to Detach
-  ** Screenshot of the Learn → Herdr path showing the same menu
-  ** Screenshot of the two `--print` outputs, one with `CTRL + SPACE` and one with `CTRL + B`
-  ** Screenshot (or serial capture) of `herdr --version`, `--help` and the `[keys]` excerpt, and the non-zero exit for the bad subcommand
+  ** Super+Ctrl+K opens a menu whose first row names `CTRL + SPACE`. Typing `detach` leaves the Detach row, and Enter closes the menu.
+  ** Learn → Herdr opens the same menu.
+  ** `--print` starts with `CTRL + SPACE`. The same command with a missing config starts with `CTRL + B`.
+  ** `herdr --version` prints a version. `--help` lists `pane`, `tab`, `workspace`, `server`, and `status`. `--default-config` shows a commented `[keys]` prefix. An unknown subcommand prints an error, exits non-zero, and returns.
   * If unsuccessful
-  ** Screenshot of an empty menu or error; the command's stderr; serial capture of the default config head; the hang or crash with the exact command
+  ** The menu is empty, a present binding does nothing, or an unknown subcommand hangs.
 covers: default/hypr/bindings/utilities.lua:12; default/omarchy/omarchy-menu.jsonc (learn.herdr-keybindings); bin/omarchy-menu-herdr-keybindings:29-33; bin/omarchy-restart-herdr; herdr README "install"
 
 ### herdr-split-tabs-with-omarchy-prefix   [VM-OK]
@@ -14349,33 +14393,43 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Ctrl+Return to open Herdr.
-  ** If nothing opens, `pacman -Q herdr` and report "absent on this build".
-  * Press Ctrl+Space then `h`, then Ctrl+Space then `v`.
-  ** Three panes: two side by side, one of them split top/bottom.
-  * Press Ctrl+Space then `?`.
-  ** A help overlay lists the active bindings; dismiss it with Escape.
-  * Press Ctrl+Space then `c`.
-  ** A second tab appears with a fresh pane and no name prompt.
-  * Press Alt+Left, then Ctrl+Space then `x` twice.
-  ** Back on the first tab, two panes close without confirmation, leaving one.
-  * Press Ctrl+Space then `d`; in a terminal (Super+Enter) run `herdr server stop` and close the terminal with Super+W.
-  ** The desktop must return exactly as left.
+  * Press Super+Ctrl+Return. A Herdr window opens.
+  ** If nothing opens, type `pacman -Q herdr` in a terminal and report Herdr absent on this build.
+  * Press Ctrl+Space. Herdr's prefix is active.
+  * Press `h`. The pane splits side by side.
+  * Press Ctrl+Space. Herdr's prefix is active.
+  * Press `v`. One pane splits top and bottom, so three panes are showing.
+  * Press Ctrl+Space. Herdr's prefix is active.
+  * Press `?`. A help overlay opens.
+  * Press Escape. The help overlay closes.
+  * Press Ctrl+Space. Herdr's prefix is active.
+  * Press `c`. A second tab appears, and no name prompt appears.
+  * Press Alt+Left. The first tab is showing.
+  * Press Ctrl+Space. Herdr's prefix is active.
+  * Press `x`. One pane closes, and no confirmation appears.
+  * Press Ctrl+Space. Herdr's prefix is active.
+  * Press `x`. Another pane closes, and one pane remains.
+  * Press Ctrl+Space. Herdr's prefix is active.
+  * Press `d`. The Herdr window closes.
+  * Press Super+Return. A terminal opens.
+  * Type `herdr server stop` and press Return. The prompt returns.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Release Ctrl+Space before pressing the action key. If the prefix is swallowed by the fcitx5 input method, Alt+Enter / Alt+Shift+Enter also split — note which path you used.
+  * Release Ctrl+Space before the action key. If the prefix is swallowed, Alt+Enter and Alt+Shift+Enter also split. Record which path you used.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot with three panes
-  ** Screenshot of the help overlay
-  ** Screenshot with two tabs, then one pane left after closing
+  ** Prefix+`h` then prefix+`v` leaves three panes.
+  ** Prefix+`?` opens a help overlay, and Escape closes it.
+  ** Prefix+`c` adds a second tab without a name prompt. Alt+Left returns to the first tab, and two prefix+`x` presses leave one pane without a confirmation.
+  ** Prefix+`d` closes the window, and `herdr server stop` returns.
   * If unsuccessful
-  ** Screenshot of an unexpected prompt/dialog or a key doing nothing; `cat ~/.config/herdr/config.toml`
+  ** A key does nothing, a name prompt or confirmation appears, or `~/.config/herdr/config.toml` does not match the shipped prefix.
 covers: config/herdr/config.toml [keys], [ui]; manual/21-tuis.md "Herdr"
 
 ### herdr-shell-layouts-hdl-hds-hsl   [VM-OK]
