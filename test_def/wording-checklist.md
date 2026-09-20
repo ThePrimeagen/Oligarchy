@@ -377,12 +377,12 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `cli-alias-omarchy-up`
 - [x] `cli-hidden-commands-route-but-stay-unlisted`
 - [x] `agent-skill-command-contract`
-- [ ] `state-done-markers-and-name-guards`
-- [ ] `hooks-install-run-theme-set-and-reject`
-- [ ] `debug-report-print-view-save-no-upload`
-- [ ] `upload-log-cli-installed-and-rejects`
-- [ ] `dev-link-scratch-status-and-unlink`
-- [ ] `dev-link-rejects-bad-input`
+- [x] `state-done-markers-and-name-guards`
+- [x] `hooks-install-run-theme-set-and-reject`
+- [x] `debug-report-print-view-save-no-upload`
+- [x] `upload-log-cli-installed-and-rejects`
+- [x] `dev-link-scratch-status-and-unlink`
+- [x] `dev-link-rejects-bad-input`
 - [ ] `dev-benchmarks-cli-and-theme-switcher`
 - [ ] `dev-theme-preview`
 - [ ] `dev-font-list-and-add-glyph`

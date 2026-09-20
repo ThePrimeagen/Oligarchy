@@ -17638,31 +17638,48 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy state set qa-marker; ls ~/.local/state/omarchy/ | grep qa-marker`; expected `qa-marker`.
-  * Type `omarchy state set ../escape; echo "exit=$?"; omarchy state set sub/dir; echo "exit=$?"`; expected `Invalid state name: ../escape`, `exit=2`, then `exit=2`; `ls ~/.local/state/ | grep -c escape` prints `0` — nothing created outside the directory.
-  * Type `omarchy state clear 'qa-*'; ls ~/.local/state/omarchy/ | grep -c qa-marker`; expected `0`. Then `omarchy state set; echo "exit=$?"`; the leftover `set` is forwarded past the router's required-args guard, so expected `Usage: omarchy-state set <state-name>` and `exit=1`.
-  * Type `omarchy state set reboot-required` — a reboot-required indicator appears in the bar; screenshot; type `omarchy state clear reboot-required` — it disappears.
-  * Type `omarchy done check qa-task; echo "exit=$?"`; expected `exit=1`. Then `omarchy done ensure qa-task; echo "exit=$?"; omarchy done ensure qa-task; echo "exit=$?"; omarchy done check qa-task; echo "exit=$?"; omarchy done mark qa-task; echo "exit=$?"`; expected `exit=0`, `exit=1` (already ensured), `exit=0`, `exit=0` (mark is idempotent), and `ls ~/.local/state/omarchy/done/` lists `qa-task`.
-  * Unhappy paths: `omarchy done bogus qa-task; echo "exit=$?"` → `Usage: omarchy-done <check|mark|ensure> <name>`, `exit=1`; `omarchy done check; echo "exit=$?"` → the same usage, `exit=1`; `omarchy done mark ../oops; echo "exit=$?"` → `Invalid done marker name: ../oops`, `exit=1`; `omarchy done mark a/b; echo "exit=$?"` → `Invalid done marker name: a/b`, `exit=1`.
-  ** The codes differ by design: a bad *state* name exits 2, a bad *done* name exits 1; record if the build differs.
-  * Type `rm ~/.local/state/omarchy/done/qa-task` so no marker is left behind, then Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy state set qa-marker` and press Return. The prompt returns.
+  * Type `ls ~/.local/state/omarchy/ | grep qa-marker` and press Return. `qa-marker` is listed.
+  * Type `omarchy state set ../escape; echo "exit=$?"` and press Return. The output includes `Invalid state name: ../escape`, and the last line is `exit=2`.
+  * Type `omarchy state set sub/dir; echo "exit=$?"` and press Return. The last line is `exit=2`.
+  * Type `ls ~/.local/state/ | grep -c escape` and press Return. The output is `0`.
+  * Type `omarchy state clear 'qa-*'` and press Return. The prompt returns.
+  * Type `ls ~/.local/state/omarchy/ | grep -c qa-marker` and press Return. The output is `0`.
+  * Type `omarchy state set; echo "exit=$?"` and press Return. The output includes `Usage: omarchy-state set <state-name>`, and the last line is `exit=1`.
+  * Type `omarchy state set reboot-required` and press Return. The prompt returns.
+  * Look at the bar. A reboot indicator is showing.
+  * Type `omarchy state clear reboot-required` and press Return. The prompt returns.
+  * Look at the bar. The reboot indicator is gone.
+  * Type `omarchy done check qa-task; echo "exit=$?"` and press Return. The last line is `exit=1`.
+  * Type `omarchy done ensure qa-task; echo "exit=$?"` and press Return. The last line is `exit=0`.
+  * Type `omarchy done ensure qa-task; echo "exit=$?"` and press Return. The last line is `exit=1`.
+  * Type `omarchy done check qa-task; echo "exit=$?"` and press Return. The last line is `exit=0`.
+  * Type `omarchy done mark qa-task; echo "exit=$?"` and press Return. The last line is `exit=0`.
+  * Type `ls ~/.local/state/omarchy/done/` and press Return. `qa-task` is listed.
+  * Type `omarchy done bogus qa-task; echo "exit=$?"` and press Return. The output includes `Usage: omarchy-done <check|mark|ensure> <name>`, and the last line is `exit=1`.
+  * Type `omarchy done check; echo "exit=$?"` and press Return. The output includes that usage line, and the last line is `exit=1`.
+  * Type `omarchy done mark ../oops; echo "exit=$?"` and press Return. The output includes `Invalid done marker name: ../oops`, and the last line is `exit=1`.
+  * Type `omarchy done mark a/b; echo "exit=$?"` and press Return. The output includes `Invalid done marker name: a/b`, and the last line is `exit=1`.
+  * Type `rm ~/.local/state/omarchy/done/qa-task` and press Return. The prompt returns.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Both commands are hidden but route normally; the proof is the `ls` output, not the (silent) command — chain every call with `; echo "exit=$?"` so the code is on screen.
-  * Exit code 2 is the specific "bad name" status for `state`; a 1 there would mean something else went wrong.
-  * ./client-with-image allows you to get an image back of what you did, so can be useful for speeding things up
+  * These commands are quiet. The `echo` after each call is what shows the exit code.
+  * A bad state name exits 2. A bad done name exits 1. Record the codes if this build differs.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots: `qa-marker` listed then count `0`, the `../escape` and `sub/dir` refusals with `exit=2` and nothing under `~/.local/state/`, the forwarded `set` usage with `exit=1`
-  ** Screenshot of the reboot indicator on and then off
-  ** Screenshot of the done sequence `1 0 1 0 0` for check/ensure/ensure/check/mark with `qa-task` listed, and the four done refusals with `exit=1`
+  ** `qa-marker` is created and then removed by `clear 'qa-*'`. `../escape` and `sub/dir` exit 2, and nothing named escape appears outside the state directory.
+  ** A bare `state set` prints usage and exits 1. Setting `reboot-required` shows the bar indicator, and clearing it removes the indicator.
+  ** `done check` starts at 1. The first `ensure` exits 0, the second exits 1, check then exits 0, and `mark` exits 0. `qa-task` is listed.
+  ** A bad verb, a missing name, `../oops`, and `a/b` each exit 1. The marker is removed.
   * If unsuccessful
-  ** a file created outside `~/.local/state/omarchy`, `../` accepted, or a refusal with the wrong status
+  ** A file is created outside the state directory, a `../` name is accepted, or a refusal uses the wrong exit code.
 covers: bin/omarchy-state; bin/omarchy-done; test/shell.d/hook-state-name-guard-test.sh; test/shell.d/done-test.sh; docs/file-layout.md (Completion markers); manual/31-dotfiles.md
 
 ### hooks-install-run-theme-set-and-reject   [VM-OK]
@@ -17672,32 +17689,58 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `ls ~/.config/omarchy/hooks/ ~/.config/omarchy/hooks/post-update.d/`; expected six directories (`battery-low.d font-set.d post-boot.d post-update.d pre-refresh-pacman.d theme-set.d`) and the shipped `install-voxtype.hook setup-fingerprint.hook setup-agent.hook`.
-  ** One reviewer expected the directory to be absent on a fresh install — record what you see.
-  * Type `printf '#!/bin/bash\necho "hello from hook $*"\n' > /tmp/hi.sh && omarchy hook install post-update /tmp/hi.sh && ls -l ~/.config/omarchy/hooks/post-update.d/hi.sh`; expected `Installed post-update hook: /home/prime/.config/omarchy/hooks/post-update.d/hi.sh` and `-rwxr-xr-x`. Then `omarchy hook post-update one two; echo "exit=$?"`; expected `hello from hook one two`, `exit=0`.
-  ** The three shipped hooks run too: on a minted disk they may show the Voxtype/agent invitation toasts exactly once — expected, record them.
-  * Type `printf '#!/bin/bash\nexit 1\n' > /tmp/bad.sh && omarchy hook install post-update /tmp/bad.sh && omarchy hook post-update; echo "exit=$?"`; expected the hello line, then `Hook failed: /home/prime/.config/omarchy/hooks/post-update.d/bad.sh`, and `exit=0` — a failing hook does not abort the runner.
-  * Theme and font hooks: type `printf '#!/bin/bash\necho "$1" > /tmp/hook-theme.txt\nomarchy-notification-send "Hook ran for $1"\n' > /tmp/theme-hook.sh && omarchy hook install theme-set /tmp/theme-hook.sh && printf '#!/bin/bash\necho "font hook got: $1" >> /tmp/hooklog\n' > ~/.config/omarchy/hooks/font-set && chmod +x ~/.config/omarchy/hooks/font-set`. Then `omarchy theme set nord`: within 5 s the desktop is Nord and a toast `Hook ran for nord` appears; `cat /tmp/hook-theme.txt` → `nord`. Then `omarchy-font-set "JetBrainsMono Nerd Font"` (re-sets the current font; the bar restarts) and `cat /tmp/hooklog` → `font hook got: JetBrainsMono Nerd Font`.
-  ** The shipped sample works the same way: `cd ~/.config/omarchy/hooks/theme-set.d && mv show-theme-notification.sample show-theme-notification && sed -i 's/^# omarchy-notification-send/omarchy-notification-send/' show-theme-notification && chmod +x show-theme-notification && cd ~` (its last line is now `omarchy-notification-send -u low "New theme" "Your new theme is $1"`), then `omarchy theme set gruvbox` → the desktop turns Gruvbox with a `New theme — Your new theme is gruvbox` notification beside your `Hook ran for gruvbox` toast.
-  * Unhappy paths: `omarchy hook install post-update /nope; echo "exit=$?"` → `Hook file not found: /nope`, `exit=1`; `omarchy hook ../x; echo "exit=$?"` and `omarchy hook install ../x /tmp/hi.sh; echo "exit=$?"` → `Invalid hook name: ../x`, `exit=2` both times; `omarchy hook install; echo "exit=$?"` → usage, non-zero; `omarchy hook; echo "exit=$?"` → quirk: the metadata calls the name optional but the script prints `Usage: omarchy-hook [name] [args...]` with `exit=1`. `ls ~/.config/omarchy/hooks/theme-set.d/` still shows only your hook and the sample; nothing exists under a `..` path.
-  * Restore: `rm ~/.config/omarchy/hooks/post-update.d/hi.sh ~/.config/omarchy/hooks/post-update.d/bad.sh ~/.config/omarchy/hooks/theme-set.d/theme-hook.sh ~/.config/omarchy/hooks/font-set /tmp/hi.sh /tmp/bad.sh /tmp/theme-hook.sh /tmp/hook-theme.txt /tmp/hooklog && mv ~/.config/omarchy/hooks/theme-set.d/show-theme-notification ~/.config/omarchy/hooks/theme-set.d/show-theme-notification.sample && omarchy theme set tokyo-night` → the desktop is stock (the wallpaper may have advanced — re-applying a theme does that) and NO hook toast appears; `omarchy hook post-update; echo "exit=$?"` → nothing from your hooks, `exit=0`. Close the terminal with Super+W.
-  ** Never `rm -r` the `post-update.d` directory: it holds the shipped hooks. Their once-only markers may have been set by this test — if a later test needs the pristine invitations, end with `stop`.
+  * Press Super+Return. A terminal opens.
+  * Type `ls ~/.config/omarchy/hooks/` and press Return. The six hook directories are listed.
+  * Type `ls ~/.config/omarchy/hooks/post-update.d/` and press Return. The shipped invitation hooks are listed.
+  * Type `printf '#!/bin/bash\necho "hello from hook $*"\n' > /tmp/hi.sh` and press Return. The prompt returns.
+  * Type `omarchy hook install post-update /tmp/hi.sh` and press Return. The output says the hook was installed.
+  * Type `ls -l ~/.config/omarchy/hooks/post-update.d/hi.sh` and press Return. The file is executable.
+  * Type `omarchy hook post-update one two; echo "exit=$?"` and press Return. The output includes `hello from hook one two`, and the last line is `exit=0`.
+  * Type `printf '#!/bin/bash\nexit 1\n' > /tmp/bad.sh` and press Return. The prompt returns.
+  * Type `omarchy hook install post-update /tmp/bad.sh` and press Return. The hook is installed.
+  * Type `omarchy hook post-update; echo "exit=$?"` and press Return. The output includes `hello from hook` and `Hook failed:`, and the last line is `exit=0`.
+  * Type `printf '#!/bin/bash\necho "$1" > /tmp/hook-theme.txt\nomarchy-notification-send "Hook ran for $1"\n' > /tmp/theme-hook.sh` and press Return. The prompt returns.
+  * Type `omarchy hook install theme-set /tmp/theme-hook.sh` and press Return. The hook is installed.
+  * Type `printf '#!/bin/bash\necho "font hook got: $1" >> /tmp/hooklog\n' > ~/.config/omarchy/hooks/font-set` and press Return. The prompt returns.
+  * Type `chmod +x ~/.config/omarchy/hooks/font-set` and press Return. The prompt returns.
+  * Type `omarchy theme set nord` and press Return. The desktop becomes Nord.
+  * Wait until a notification reads `Hook ran for nord`.
+  * Type `cat /tmp/hook-theme.txt` and press Return. The output is `nord`.
+  * Type `omarchy-font-set "JetBrainsMono Nerd Font"` and press Return. The prompt returns.
+  * Type `cat /tmp/hooklog` and press Return. The output includes `font hook got: JetBrainsMono Nerd Font`.
+  * Type `cd ~/.config/omarchy/hooks/theme-set.d && mv show-theme-notification.sample show-theme-notification && sed -i 's/^# omarchy-notification-send/omarchy-notification-send/' show-theme-notification && chmod +x show-theme-notification && cd ~` and press Return. The prompt returns.
+  * Type `omarchy theme set gruvbox` and press Return. The desktop becomes Gruvbox.
+  * Wait until a notification includes `Your new theme is gruvbox`.
+  * Type `omarchy hook install post-update /nope; echo "exit=$?"` and press Return. The output includes `Hook file not found: /nope`, and the last line is `exit=1`.
+  * Type `omarchy hook ../x; echo "exit=$?"` and press Return. The output includes `Invalid hook name: ../x`, and the last line is `exit=2`.
+  * Type `omarchy hook install ../x /tmp/hi.sh; echo "exit=$?"` and press Return. The output includes `Invalid hook name: ../x`, and the last line is `exit=2`.
+  * Type `omarchy hook install; echo "exit=$?"` and press Return. Usage is printed, and the exit is non-zero.
+  * Type `omarchy hook; echo "exit=$?"` and press Return. The output includes `Usage: omarchy-hook [name] [args...]`, and the last line is `exit=1`.
+  * Type `rm ~/.config/omarchy/hooks/post-update.d/hi.sh ~/.config/omarchy/hooks/post-update.d/bad.sh ~/.config/omarchy/hooks/theme-set.d/theme-hook.sh ~/.config/omarchy/hooks/font-set /tmp/hi.sh /tmp/bad.sh /tmp/theme-hook.sh /tmp/hook-theme.txt /tmp/hooklog` and press Return. The prompt returns.
+  * Type `mv ~/.config/omarchy/hooks/theme-set.d/show-theme-notification ~/.config/omarchy/hooks/theme-set.d/show-theme-notification.sample` and press Return. The prompt returns.
+  * Type `omarchy theme set tokyo-night` and press Return. The desktop returns to Tokyo Night, and no hook notification appears.
+  * Type `omarchy hook post-update; echo "exit=$?"` and press Return. The test hooks print nothing, and the last line is `exit=0`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The theme switch animates for a second; screenshot after the bar has recoloured. Hook toasts are low-urgency and fade after ~5 s — screenshot right after the theme changes.
-  * The `Hook failed` line may scroll past quickly; the files under `/tmp` are the durable proof the hooks ran.
+  * The six directories are `battery-low.d`, `font-set.d`, `post-boot.d`, `post-update.d`, `pre-refresh-pacman.d`, and `theme-set.d`.
+  * The shipped post-update hooks may show their invitations once. Record them. Do not delete the `post-update.d` directory.
+  * Screenshot a hook notification as soon as the theme changes. It fades in about 5 seconds.
+  * If this test consumed the invitation markers and a later test needs them fresh, end with `stop`.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the hooks listing, the install line, `hello from hook one two`, and the `Hook failed:` line with `exit=0`
-  ** Screenshot of the `Hook ran for nord` toast over the Nord desktop, `nord` in the file, the `font hook got:` line, and the `New theme — Your new theme is gruvbox` notification from the shipped sample
-  ** Screenshot of the refusals with `exit=1` / `exit=2`, the bare-hook usage, and the switch back to tokyo-night with no hook toast
+  ** The hook directories and shipped invitation hooks are listed. `hi.sh` is installed executable and prints `hello from hook one two`.
+  ** The failing hook prints `Hook failed:` and the runner still exits 0.
+  ** Setting Nord shows `Hook ran for nord` and writes `nord`. Setting the font writes the font-hook line. Gruvbox shows the sample notification.
+  ** A missing file exits 1. A `../` hook name exits 2. Bare `hook install` prints usage. Bare `hook` prints usage and exits 1.
+  ** Cleanup returns the desktop to Tokyo Night with no test-hook notification, and `hook post-update` exits 0.
   * If unsuccessful
-  ** a hook written under a path containing `..`, the runner aborting after the failing hook, or a theme switch that aborted; `ls -la ~/.config/omarchy/hooks/*/`, `journalctl --user -n 30`, `./client get-serial`
+  ** A hook is written outside the hooks directory, the runner stops after the failing hook, or a theme switch aborts.
 covers: bin/omarchy-hook; bin/omarchy-hook-install; bin/omarchy-theme-set (omarchy-hook theme-set); bin/omarchy-font-set (omarchy-hook font-set); config/omarchy/hooks/*.d; config/omarchy/hooks/theme-set.d/show-theme-notification.sample; test/shell.d/hook-state-name-guard-test.sh; manual/31-dotfiles.md (Running scripts on system events); docs/theming.md:40-42 (theme-set hook); default/agents/skills/omarchy/hooks.md; SKILL.md ("Run a script every time I change themes")
 
 ### debug-report-print-view-save-no-upload   [VM-PARTIAL]
@@ -17707,31 +17750,43 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `cd ~ && omarchy debug --print --no-sudo | head -n 8`; expected `Date: …`, `Hostname: …`, `Omarchy Package: omarchy 4.0.…`, then the `SYSTEM INFORMATION` banner, and no sudo prompt.
-  * Type `grep -c 'skipped - --no-sudo' /tmp/omarchy-debug.log; grep -cE '^(DMESG|INSTALLED PACKAGES|JOURNALCTL)' /tmp/omarchy-debug.log`; expected `1` then `3` — the DMESG section says `(skipped - --no-sudo flag used)`.
-  * Unhappy path: type `omarchy debug --bogus; echo "exit=$?"`; expected `Unknown option: --bogus`, `Usage: omarchy-debug [--no-sudo] [--print]`, `exit=1`.
-  * Type `omarchy debug`; enter `prime` at the `[sudo] password` prompt and wait up to 20 s (inxi + journal).
-  ** Expected a gum chooser with exactly `View log` and `Save in current directory`; `Upload log` must be ABSENT — record the options shown. If it IS offered, ICMP works in this harness: note it and do not upload. (`omarchy debug --no-sudo` reaches the same chooser without a password.)
-  ** Stay in `~`: the report lives at `/tmp/omarchy-debug.log`, and saving from `/tmp` would copy it onto itself.
-  * Choose `View log` (Enter): `less` shows the report with `Date:`, `Hostname:`, `Omarchy Package: omarchy 4.0…` and `SYSTEM INFORMATION`; press `q`.
-  * Type `omarchy debug` again (`prime` if asked), press Down to `Save in current directory`, Enter; expected `✓ Log saved to /home/prime/omarchy-debug.log`.
-  * Type `ls -l ~/omarchy-debug.log; head -n 2 ~/omarchy-debug.log; grep -E '^(SYSTEM INFORMATION|DMESG|JOURNALCTL|INSTALLED PACKAGES)' ~/omarchy-debug.log; grep -c virtio ~/omarchy-debug.log`; a file of at least 50 KB starting `Date:`, the four section headers, and a non-zero count (dmesg captured this time).
-  * Type `rm ~/omarchy-debug.log` to leave the home directory as found, then Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `cd ~ && omarchy debug --print --no-sudo | head -n 8` and press Return. The output includes `Date:`, `Hostname:`, and `Omarchy Package:`, and no password prompt appears.
+  * Type `grep -c 'skipped - --no-sudo' /tmp/omarchy-debug.log` and press Return. The output is `1`.
+  * Type `grep -cE '^(DMESG|INSTALLED PACKAGES|JOURNALCTL)' /tmp/omarchy-debug.log` and press Return. The output is `3`.
+  * Type `omarchy debug --bogus; echo "exit=$?"` and press Return. The output includes `Unknown option: --bogus`, and the last line is `exit=1`.
+  * Type `omarchy debug` and press Return. A password prompt appears.
+  * Type `prime` and press Return. A chooser appears.
+  * Record the chooser rows, which include `View log` and `Save in current directory`.
+  ** If `Upload log` is also present, do not choose it. Record that ICMP worked.
+  * Press Enter. The report opens.
+  * Press `q`. The report closes.
+  * Type `omarchy debug` and press Return. A password prompt appears, or the chooser opens.
+  ** If a password prompt appears, type `prime` and press Return.
+  * Move to Save in current directory and press Enter. The output says the log was saved under `/home/prime/`.
+  * Type `ls -l ~/omarchy-debug.log` and press Return. The file is at least 50 KB.
+  * Type `head -n 2 ~/omarchy-debug.log` and press Return. The first line starts with `Date:`.
+  * Type `grep -E '^(SYSTEM INFORMATION|DMESG|JOURNALCTL|INSTALLED PACKAGES)' ~/omarchy-debug.log` and press Return. The four headers are listed.
+  * Type `rm ~/omarchy-debug.log` and press Return. The prompt returns.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * gum choose highlights the current row; Up/Down move, Enter selects.
-  * The report takes 10–20 s to gather (inxi is slow); keep screenshotting rather than sleeping.
+  * Stay in the home directory. The report is at `/tmp/omarchy-debug.log`, and saving from `/tmp` would copy it onto itself.
+  * The report can take 10 to 20 seconds. Screenshot while it gathers.
+  * Up and Down move the chooser. Enter selects the highlighted row.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the report header with no password prompt, the two grep counts, and the `--bogus` refusal with `exit=1`
-  ** Screenshot of the chooser documenting which options were present (no `Upload log`), `less` on the report header, the `✓ Log saved` line, the `ls -l` size, the section-header grep and the virtio count
+  ** `--print --no-sudo` prints the date, hostname, and package header with no password prompt. The log skips dmesg once and still has the three named sections.
+  ** `--bogus` prints the unknown-option line and exits 1.
+  ** The chooser lists View and Save. Upload is absent, or it is present and left unchosen.
+  ** View opens the report. Save writes `~/omarchy-debug.log` of at least 50 KB with the four section headers. The saved file is then removed.
   * If unsuccessful
-  ** a sudo prompt despite `--no-sudo`, a chooser that never appears or that offers `Upload log`, a missing section or saved file, or inxi/expac/journalctl errors in the report
+  ** `--no-sudo` asks for a password, the chooser never appears, a section is missing, or the saved file is missing.
 covers: bin/omarchy-debug; manual/45-troubleshooting.md; manual/45:5; manual/14:25; 13-manual-rest.md Observations #13
 
 ### upload-log-cli-installed-and-rejects   [VM-OK] [NET]
@@ -17741,26 +17796,30 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy upload log bogus; echo "exit=$?"`; expected `Usage: … [install|this-boot|last-boot|installed|system-info]` with the option lines, `exit=1`.
-  * Type `omarchy upload log; echo "exit=$?"`; expected the router help for `omarchy upload log <log-file>`, `exit=0`.
-  * Type `omarchy upload log installed; echo "exit=$?"`; expected `Uploading system information to logs.omarchy.org...`, `✓ Log uploaded successfully!`, `Share this URL:` and a `https://logs.omarchy.org/…` URL, `exit=0` (allow 60 s).
-  * Type `omarchy upload log last-boot; echo "exit=$?"`; on a first boot expect either a URL or `Error: No logs found for previous boot` with `exit=1` — record which.
-  * Type `omarchy commands | grep -c 'upload log'`; expected `0` (hidden).
-  * Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy upload log bogus; echo "exit=$?"` and press Return. The output includes `Usage:`, and the last line is `exit=1`.
+  * Type `omarchy upload log; echo "exit=$?"` and press Return. Router help is printed, and the last line is `exit=0`.
+  * Type `omarchy upload log installed; echo "exit=$?"` and press Return. The output includes a `https://logs.omarchy.org/` URL, and the last line is `exit=0`.
+  * Type `omarchy upload log last-boot; echo "exit=$?"` and press Return. Record whether a URL is printed or the output says no previous-boot logs were found.
+  * Type `omarchy commands | grep -c 'upload log'` and press Return. The output is `0`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The upload can take up to a minute on the VM's link; screenshot every 5 s rather than sleeping.
-  * ./client-with-image allows you to get an image back of what you did, so can be useful for speeding things up
+  * The upload can take up to a minute. Screenshot about every 5 seconds.
+  * The usage names `install`, `this-boot`, `last-boot`, `installed`, and `system-info`.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the usage refusal, the router help, the `✓ Log uploaded successfully!` line with its URL, the `last-boot` outcome and the `0` count
+  ** `bogus` prints usage and exits 1. A bare `upload log` prints router help and exits 0.
+  ** `installed` uploads and prints a `logs.omarchy.org` URL, exiting 0.
+  ** `last-boot` either prints a URL or says no logs were found, and that result is recorded.
+  ** The default command list does not contain `upload log`.
   * If unsuccessful
-  ** `Error: Failed to upload log file`, or a hang beyond 60 s
+  ** The upload fails, or it has not finished after 60 seconds.
 covers: bin/omarchy-upload-log
 
 ### dev-link-scratch-status-and-unlink   [VM-OK]
@@ -17770,31 +17829,50 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy dev status; cat /etc/omarchy.conf; ls /etc/sudoers.d/omarchy-dev-path 2>&1`; expected `dev-link: inactive`, `current shell:       OMARCHY_PATH=/usr/share/omarchy`, no `Note:` line, `export OMARCHY_PATH="/usr/share/omarchy"` (or no conf) and no drop-in.
-  * Type `cp -r /usr/share/omarchy /tmp/checkout && omarchy dev link /tmp/checkout --no-reboot; echo "exit=$?"`; enter `prime`; expected `Pointed Omarchy at /tmp/checkout`, `sudo now resolves omarchy-* from /tmp/checkout/bin`, `exit=0`, and NO reboot question.
-  * Type `cat /etc/omarchy.conf; sudo cat /etc/sudoers.d/omarchy-dev-path; sudo stat -c '%U:%G %a' /etc/sudoers.d/omarchy-dev-path; sudo visudo -c | tail -1`; expected `export OMARCHY_PATH="/tmp/checkout"`, `Defaults secure_path="/tmp/checkout/bin:/usr/local/sbin:/usr/local/bin:/usr/bin"`, `root:root 440`, and sudoers parsed OK.
-  * Type `sudo true; omarchy dev status`; expected `dev-link: configured`, `/etc/omarchy.conf -> OMARCHY_PATH=/tmp/checkout`, `sudo resolves omarchy-* from: /usr/bin` (or `/usr/share/omarchy/bin`), `status: reboot required …`, `current shell: OMARCHY_PATH=/usr/share/omarchy`, and `Note: the running session does not match /etc/omarchy.conf. Reboot to settle it.`
-  ** Press Super+Enter for a second terminal and type `echo $OMARCHY_PATH; echo ${PATH%%:*}` — a new shell already reads the conf: `/tmp/checkout` and `/tmp/checkout/bin`. Close it with Super+W.
-  * Type `omarchy dev unlink --bogus; echo "exit=$?"`; expected `Usage: omarchy dev unlink [--no-reboot]`, `exit=1`, still linked.
-  * Type `omarchy dev unlink --no-reboot; echo "exit=$?"`; expected `Pointed Omarchy at /usr/share/omarchy`, `exit=0`.
-  ** Without `--no-reboot` a gum `Reboot now to activate?` Yes/No box appears — if you ever see it, answer No (Right arrow then Enter, or `n`).
-  * Type `cat /etc/omarchy.conf; sudo test -f /etc/sudoers.d/omarchy-dev-path; echo "sudoers=$?"; omarchy dev status; rm -rf /tmp/checkout`; expected `export OMARCHY_PATH="/usr/share/omarchy"`, `sudoers=1`, `dev-link: inactive` with a `(default guard)` line and no `Note:`.
-  * Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy dev status` and press Return. The output includes `dev-link: inactive`.
+  * Type `cat /etc/omarchy.conf` and press Return. The path is `/usr/share/omarchy`, or the file is absent.
+  * Type `ls /etc/sudoers.d/omarchy-dev-path 2>&1` and press Return. The output includes `No such file`.
+  * Type `cp -r /usr/share/omarchy /tmp/checkout` and press Return. The prompt returns.
+  * Type `omarchy dev link /tmp/checkout --no-reboot; echo "exit=$?"` and press Return. The output includes `Pointed Omarchy at /tmp/checkout`, and the last line is `exit=0`.
+  ** If sudo asks, type `prime` and press Return. No reboot question should appear.
+  * Type `cat /etc/omarchy.conf` and press Return. The path is `/tmp/checkout`.
+  * Type `sudo cat /etc/sudoers.d/omarchy-dev-path` and press Return. The secure_path starts with `/tmp/checkout/bin`.
+  * Type `sudo stat -c '%U:%G %a' /etc/sudoers.d/omarchy-dev-path` and press Return. The output is `root:root 440`.
+  * Type `sudo visudo -c | tail -1` and press Return. The output says sudoers parsed OK.
+  * Type `sudo true; omarchy dev status` and press Return. The status says the link is configured and the running session does not match.
+  * Press Super+Return. A second terminal opens.
+  * Type `echo $OMARCHY_PATH` and press Return. The output is `/tmp/checkout`.
+  * Type `echo ${PATH%%:*}` and press Return. The output is `/tmp/checkout/bin`.
+  * Press Super+W. The second terminal closes.
+  * Click the first terminal. It is focused.
+  * Type `omarchy dev unlink --bogus; echo "exit=$?"` and press Return. The output includes `Usage: omarchy dev unlink [--no-reboot]`, and the last line is `exit=1`.
+  * Type `omarchy dev unlink --no-reboot; echo "exit=$?"` and press Return. The output includes `Pointed Omarchy at /usr/share/omarchy`, and the last line is `exit=0`.
+  ** If a reboot question appears, choose No.
+  * Type `cat /etc/omarchy.conf` and press Return. The path is `/usr/share/omarchy`.
+  * Type `sudo test -f /etc/sudoers.d/omarchy-dev-path; echo "sudoers=$?"` and press Return. The last line is `sudoers=1`.
+  * Type `omarchy dev status` and press Return. The output includes `dev-link: inactive`.
+  * Type `rm -rf /tmp/checkout` and press Return. The prompt returns.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * SAFETY: never reboot while linked to the scratch checkout and answer No to any `Reboot now to activate?`; always finish with the unlink step even if an earlier step failed. The running desktop keeps its old path until a reboot; do not reboot for this test.
-  * `unknown (needs sudo)` in the status means the cached credential expired — run `sudo true` and repeat.
-  * The `cp -r` of `/usr/share/omarchy` takes a few seconds; keep screenshotting.
+  * Do not reboot while the checkout is linked. Answer No to any reboot question, and finish the unlink even if an earlier step fails.
+  * If status says it needs sudo, run `sudo true` and repeat the status command.
+  * Copying `/usr/share/omarchy` takes a few seconds.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the stock status, the link output, the conf/sudoers/mode/visudo output, the configured status with the mismatch note, the new terminal's path, the `--bogus` usage, the unlink output, and the restored inactive status without a drop-in
+  ** Status starts inactive, the conf points at `/usr/share/omarchy` or is absent, and no sudoers drop-in exists.
+  ** Linking `/tmp/checkout` without reboot exits 0 and asks no reboot question. The conf, secure_path, owner `root:root`, mode `440`, and `visudo` check all match.
+  ** Status says the session does not match. A new shell reads `/tmp/checkout` and `/tmp/checkout/bin`.
+  ** `--bogus` prints usage and exits 1. Unlink without reboot points back at `/usr/share/omarchy` and exits 0.
+  ** The drop-in is gone, status is inactive, and the checkout directory is removed.
   * If unsuccessful
-  ** `Error: refusing to install an invalid … sudoers`, a status that does not follow the link, or a sudoers drop-in left behind after unlink; `sudo visudo -c`
+  ** Sudoers is refused as invalid, status does not follow the link, or the drop-in remains after unlink.
 covers: bin/omarchy-dev-link; bin/omarchy-dev-unlink; bin/omarchy-dev-status; default/bash/env-bootstrap; test/shell.d/dev-link-test.sh; test/shell.d/dev-unlink-test.sh; test/shell.d/dev-env-path-test.sh
 
 ### dev-link-rejects-bad-input   [VM-OK]
@@ -17804,26 +17882,31 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy dev link; echo "exit=$?"`; expected the router help (`omarchy dev link <path-to-checkout> [--no-reboot]`, `Binary: omarchy-dev-link`), `exit=0`, no sudo prompt.
-  * Type `omarchy dev link /does/not/exist --no-reboot; echo "exit=$?"`; expected `Error: path does not exist: /does/not/exist`, `exit=1`, no sudo prompt.
-  * Type `omarchy dev link /tmp --wrong; echo "exit=$?"`; expected `Usage: omarchy dev link <path-to-checkout> [--no-reboot]`, `exit=1`.
-  * Type `sudo omarchy-dev-link /tmp --no-reboot; echo "exit=$?"` (password `prime`); expected `Error: run omarchy-dev-link as your user, not under sudo.`, `exit=1`.
-  * Type `cat /etc/omarchy.conf 2>&1; ls /etc/sudoers.d/omarchy-dev-path 2>&1; omarchy dev status | head -n 1`; the conf is absent or `/usr/share/omarchy`, no drop-in, status `dev-link: inactive`.
-  * Close the terminal with Super+W.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy dev link; echo "exit=$?"` and press Return. Help names `omarchy-dev-link`, and the last line is `exit=0`.
+  * Type `omarchy dev link /does/not/exist --no-reboot; echo "exit=$?"` and press Return. The output includes `Error: path does not exist: /does/not/exist`, and the last line is `exit=1`.
+  * Type `omarchy dev link /tmp --wrong; echo "exit=$?"` and press Return. The output includes `Usage: omarchy dev link <path-to-checkout> [--no-reboot]`, and the last line is `exit=1`.
+  * Type `sudo omarchy-dev-link /tmp --no-reboot; echo "exit=$?"` and press Return. The output includes `run omarchy-dev-link as your user`, and the last line is `exit=1`.
+  ** If sudo asks, type `prime` and press Return.
+  * Type `cat /etc/omarchy.conf 2>&1` and press Return. The path is `/usr/share/omarchy`, or the file is absent.
+  * Type `ls /etc/sudoers.d/omarchy-dev-path 2>&1` and press Return. The output includes `No such file`.
+  * Type `omarchy dev status | head -n 1` and press Return. The line includes `dev-link: inactive`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * None of these steps should ask for a password except the deliberate `sudo` one; a password prompt elsewhere means something is about to be written — press Ctrl+C and report.
-  * ./client-with-image allows you to get an image back of what you did, so can be useful for speeding things up
+  * Only the deliberate sudo command should ask for a password. If another step asks, press Ctrl+C and report it.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the four refusals with exit codes and the unchanged conf/status
+  ** A bare `dev link` prints help and exits 0. A missing path exits 1 with no password prompt. A wrong flag prints usage and exits 1.
+  ** Running the binary under sudo exits 1 and says to run it as the user.
+  ** The conf is unchanged or absent, no sudoers drop-in exists, and status is inactive.
   * If unsuccessful
-  ** an unexpected sudo prompt or a written `/etc/omarchy.conf`
+  ** A password prompt appears on a non-sudo step, or `/etc/omarchy.conf` is written.
 covers: bin/omarchy-dev-link:10-13,26-60,81-84
 
 ### dev-benchmarks-cli-and-theme-switcher   [VM-OK] [SLOW]
