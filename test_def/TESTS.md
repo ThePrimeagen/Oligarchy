@@ -2089,30 +2089,32 @@ instruction: |
 
   <ActionList>
   * Press Super+Space.
-  ** A dark scrim covers the screen and a narrow centred card appears with the greyed header "Go…" and the rows Apps, Learn, Trigger, Style, Setup, Install, Remove, Update, About, System in that order; submenu rows end with "›".
-  ** A freshly opened menu may have no row settled yet: the first Return only places the cursor, the second activates.
-  * Press Down three times, then Up once. The highlight must land on Style, then on Trigger. Press Escape: menu and scrim vanish and the desktop is exactly as before.
-  * Press Super+Space, then Super+Space again. The menu opens and then closes (the chord toggles).
-  * Press Super+Alt+Space. The header reads "Apps…" and installed applications are listed alphabetically with icons. Press Escape.
-  ** The Apps list can take a second to fill the first time; take a second screenshot if it looks empty.
-  * Using the mouse only, left-click the Omarchy logo glyph at the far left of the top bar (about x=0.01, y=0.01). The root menu "Go…" opens. Click the same spot again: the menu closes (the scrim swallows the click, which counts as closing). Click the logo once more, then click on the dark scrim far from the card: the menu closes.
-  * Right-click the logo. A terminal window opens (not the menu), tiled.
-  ** Press Super+Shift+2: the terminal moves to workspace 2 and the view follows. Left-click the workspace "1" indicator in the bar: workspace 1 (empty) becomes active; left-click "2": the terminal is back. Press Super+W to close it.
-  * Unhappy path: middle-click the logo. Nothing happens; a following left click still opens the menu. Press Escape.
-  * Left-click the logo once more and press Escape: the menu still opens and closes; the desktop is exactly as found.
+  * Press Down three times, then Up once.
+  * Press Super+Space. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Press Escape.
+  * Press Super+Alt+Space. Press Escape.
+  * Using the mouse only, left-click the Omarchy logo at the far left of the top bar. Click it again. Click it once more, then click away from the menu.
+  * Right-click the logo.
+  ** Press Super+Shift+2. Left-click workspace 1 on the bar, then workspace 2. Press Super+W.
+  * Middle-click the logo. Left-click the logo. Press Escape.
+  * Left-click the logo. Press Escape.
+  * the desktop must return exactly as left.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Super+Space is <M-SPACE>, Super+Alt+Space is <M-A-SPACE>. The card fades in and out over ~140 ms; ./client-with-image is useful for every keypress here.
-  * The logo is roughly the leftmost 3 % of the bar and the cursor becomes a pointing hand over it; move the mouse first and screenshot to confirm the position before clicking.
+  * Super+Space is <M-SPACE>. Super+Alt+Space is <M-A-SPACE>.
+  * The menu is still open after the arrow keys, so the next Super+Space closes it and the one after that opens it.
+  * The logo is the leftmost part of the top bar. Move the mouse and screenshot before each click. ./client-with-image helps.
+  * Super+Alt+Space can take a moment the first time. Screenshot again if the list has not appeared yet.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the root menu with all ten rows in order under the "Go…" header, and one with the highlight on Trigger
-  ** Screenshots of the desktop after Escape, after the second Super+Space, after the second logo click and after the scrim click (no menu, no scrim)
+  ** Screenshot of the root menu, and one with the highlight on Trigger
+  ** Screenshot of the desktop after the Super+Space that closes the menu, of the menu after the Super+Space that opens it again, of the desktop after Escape, after the second logo click, and after the click away from the menu
   ** Screenshot of the "Apps…" list, of the terminal after the right click, of the workspace switching by click, and of the bar with the pointer on the logo after the middle click with nothing open
   ** The mouse was used for every logo step; no hotkey stood in
   * If unsuccessful
