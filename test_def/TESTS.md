@@ -20407,28 +20407,38 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter and type `systemctl --user list-units --all 'omarchy-*' 'bt-agent*' --no-pager` Enter.
-  ** `omarchy-sleep-lock`, `omarchy-fcitx5`, `omarchy-crash-watch` active/running; `omarchy-migrate-notify`, `omarchy-recover-internal-monitor`, `bt-agent`, `omarchy-tailscale-receive` inactive/dead (conditions); none `failed`.
-  * Type `systemctl --user is-enabled bt-agent omarchy-recover-internal-monitor omarchy-sleep-lock omarchy-migrate-notify omarchy-fcitx5 omarchy-crash-watch` Enter → six lines of `enabled`.
-  * Type `systemctl --user --failed --no-pager; omarchy-migrate --pending` Enter → `0 loaded units listed` and nothing pending.
-  * Type `systemctl --user status bt-agent omarchy-tailscale-receive --no-pager 2>&1 | grep -E 'Active|Condition'; bluetoothctl show 2>&1 | head -1` Enter → both inactive with a condition note (none `failed`); `No default controller available`.
-  * Type `systemctl list-units --all 'v4l2-relayd*' 'camlink*' --no-pager; ls /dev/camlink4k` Enter → no such units loaded (or inactive) and `No such file`.
-  * Type `wpctl status | head -12; journalctl -b -p err --no-pager | grep -icE 'wireplumber|pipewire|bt-agent'; systemctl --user is-active pipewire wireplumber` Enter → an audio graph with no real sink (the `auto_null` Dummy Output), `0` errors, `active` twice.
-  * Unhappy path: type `systemctl --user is-enabled omarchy-no-such-unit; echo $?` Enter → `Failed to get unit file state … No such file or directory` and a non-zero code. Press Ctrl+D; the desktop is as before.
-  ** Skipped: the hardware paths themselves (no camera, Bluetooth adapter, XPS speakers, tailscale or real sleep).
+  * Press Super+Return. A terminal opens.
+  * Type `systemctl --user list-units --all 'omarchy-*' 'bt-agent*' --no-pager` and press Return. `omarchy-sleep-lock`, `omarchy-fcitx5`, and `omarchy-crash-watch` are active. `omarchy-migrate-notify`, `omarchy-recover-internal-monitor`, `bt-agent`, and `omarchy-tailscale-receive` are inactive. None are `failed`.
+  * Type `systemctl --user is-enabled bt-agent omarchy-recover-internal-monitor omarchy-sleep-lock omarchy-migrate-notify omarchy-fcitx5 omarchy-crash-watch` and press Return. Six lines are `enabled`.
+  * Type `systemctl --user --failed --no-pager` and press Return. The output says 0 loaded units are listed.
+  * Type `omarchy-migrate --pending` and press Return. Nothing is pending.
+  * Type `systemctl --user status bt-agent omarchy-tailscale-receive --no-pager` and press Return. Both are inactive with a condition note. Neither is `failed`.
+  * Type `bluetoothctl show 2>&1 | head -1` and press Return. The output says no default controller is available.
+  * Type `systemctl list-units --all 'v4l2-relayd*' 'camlink*' --no-pager` and press Return. No matching units are loaded, or they are inactive.
+  * Type `ls /dev/camlink4k` and press Return. The output says the file does not exist.
+  * Type `wpctl status | head -12` and press Return. No real audio sink is listed.
+  * Type `journalctl -b -p err --no-pager | grep -icE 'wireplumber|pipewire|bt-agent'` and press Return. The output is `0`.
+  * Type `systemctl --user is-active pipewire wireplumber` and press Return. Both lines are `active`.
+  * Type `systemctl --user is-enabled omarchy-no-such-unit; echo "exit=$?"` and press Return. The output says the unit file was not found, and the last line is non-zero.
+  * Press Ctrl+D. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * "inactive (dead)" with a Condition line is the expected shape; only `failed` counts against it. If the table wraps, press Super+F to fullscreen the terminal for the screenshot, then Super+F again. `--no-pager` keeps output on screen; `q` exits a pager if one opens.
+  * Inactive with a condition line is expected. Only `failed` counts against it.
+  * Press Super+F if the table wraps, then press Super+F again. Press `q` if a pager opens.
+  * Do not attach a camera, Bluetooth adapter, or other device to force these units active.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the unit table with the expected states, six `enabled`, the empty failed list and no pending migrations, bt-agent/tailscale conditions and the missing controller, no camlink units/device, the clean audio status with `0` errors and two `active`, and the unknown-unit error
+  ** sleep-lock, fcitx5, and crash-watch are active. The hardware-gated units are inactive with a condition, and none are failed.
+  ** The six named units are enabled. The failed list is empty and nothing is pending a migration.
+  ** Bluetooth has no controller. Cam Link units and `/dev/camlink4k` are absent. PipeWire and WirePlumber are active with no error lines and no real sink.
+  ** An unknown unit is refused with a non-zero exit.
   * If unsuccessful
-  ** Screenshot of any `failed` unit or a restart loop; `systemctl --user status <unit> --no-pager` for the unit that is disabled or failed
+  ** Any unit is `failed`, a named unit is disabled, or a hardware-gated unit is running.
 covers: default/systemd/user/*.service; default/systemd/user/{bt-agent,omarchy-tailscale-receive,omarchy-speaker-tuning}.service; install/user/first-run/enable-user-units.sh; bin/omarchy-provision-first-run; docs/file-layout.md (First-run); default/udev/*; default/systemd/system/camlink-4k-loopback.service; default/systemd/system/v4l2-relayd@camlink.service.d/camlink.conf; default/v4l2-relayd/camlink.conf; default/audio/**; default/wireplumber/**; config/wireplumber/**; test/shell.d/systemd-test.sh
 
 ### fcitx5-supervised-and-hidden-entries   [VM-OK]
@@ -20438,27 +20448,39 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter and type `pgrep -a fcitx5; cat ~/.config/autostart/*.desktop` Enter.
-  ** One process with `--disable notificationitem`; three files each `[Desktop Entry]` / `Hidden=true`.
-  * Look at the tray in the top bar: no input-method icon, no printer icon.
-  * Type `pkill -x fcitx5; sleep 3; pgrep -a fcitx5` Enter → a new PID (restarted by the service).
-  * Type `echo "` then press CapsLock, `m`, `s`, then type `"` and Enter → 😄 still composes (Caps Lock is the Compose key).
-  * Press Super+Alt+Space, type `fcitx` → no entries; type `btop` → no entry. Press Escape.
-  * Type `pgrep -af 'print-applet|limine-snapper-notify' || echo none` Enter → `none`.
-  * Press Ctrl+D; the desktop is as before.
+  * Press Super+Return. A terminal opens.
+  * Type `pgrep -a fcitx5` and press Return. One process is listed, and the line includes `--disable notificationitem`.
+  * Type `grep -H Hidden ~/.config/autostart/*.desktop` and press Return. Three files each print `Hidden=true`.
+  * Look at the bar. No input-method icon is shown, and no printer icon is shown.
+  * Type `pkill -x fcitx5` and press Return. The prompt returns.
+  * Type `sleep 3; pgrep -a fcitx5` and press Return. A process is listed.
+  * Type `echo "` and do not press Return.
+  * Press Caps Lock, then `m`, then `s`. A grinning face is inserted.
+  * Type `"` and press Return. The output is the grinning face.
+  * Press Super+Alt+Space. The launcher opens.
+  * Type `fcitx`. No entry matches.
+  * Press Escape. The launcher closes.
+  * Press Super+Alt+Space. The launcher opens.
+  * Type `btop`. No entry matches.
+  * Press Escape. The launcher closes.
+  * Click the terminal. It is focused.
+  * Type `pgrep -af 'print-applet|limine-snapper-notify' || echo none` and press Return. The output is `none`.
+  * Press Ctrl+D. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The restart takes ~2 s; screenshot after the sleep completes. Send Caps Lock as `<CAPSLOCK>`.
+  * Send Caps Lock as `<CAPSLOCK>`. The restart takes about 2 seconds. Screenshot after the sleep.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the process/autostart output, the tray, the new PID after pkill, a composed emoji, the empty launcher searches, and `none`
+  ** fcitx5 is running with `--disable notificationitem`, and the three autostart files are `Hidden=true`.
+  ** The bar has no input-method icon and no printer icon. After `pkill`, a process is back within a few seconds.
+  ** Caps Lock then `ms` inserts a grinning face. The launcher offers neither `fcitx` nor `btop`. The print applet and snapper notifier are not running.
   * If unsuccessful
-  ** Screenshot of a tray IM icon, fcitx5 not restarting, a literal `ms` instead of the emoji, or launcher entries for fcitx/btop
+  ** An input-method icon is on the bar, fcitx5 stays dead, the keys print `ms`, or the launcher offers fcitx or btop.
 covers: default/systemd/user/omarchy-fcitx5.service, config/autostart/*.desktop, config/fcitx5/conf/*, default/omarchy/launcher.hides, test/shell.d/systemd-test.sh
 
 ### kernel-linux-omarchy-headers-and-tuning   [VM-OK]
@@ -20468,27 +20490,37 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `uname -r; cat /usr/lib/modules/$(uname -r)/pkgbase` Enter. The second line must be `linux-omarchy`.
-  ** `linux-t2` is for Apple hardware only; report it if it appears.
-  * Type `pacman -Q linux-omarchy-headers; cat /usr/lib/modules/$(uname -r)/build/include/config/kernel.release` Enter → the package and version, then exactly the `uname -r` string.
-  * Type `sysctl net.ipv4.tcp_congestion_control fs.inotify.max_user_watches; cat /sys/block/vda/queue/scheduler` Enter → `bbr`, `524288`, `[kyber]`.
-  * Type `ulimit -Sn; ulimit -Hn; cat /sys/module/usbcore/parameters/autosuspend` Enter → `65536`, `524288`, `-1`.
-  * Type `systemctl show -p DefaultTimeoutStopUSec; systemd-analyze cat-config systemd/logind.conf | grep -E '^(HandlePowerKey|InhibitDelayMaxSec)='` Enter → `5s`, `HandlePowerKey=ignore`, `InhibitDelayMaxSec=15`.
-  * Close the terminal with Super+W. The desktop must look exactly as at the start.
-  ** Skipped: pressing the physical power key (not injectable from the client).
+  * Press Super+Return. A terminal opens.
+  * Type `uname -r` and press Return. Record the version.
+  * Type `cat /usr/lib/modules/$(uname -r)/pkgbase` and press Return. The output is `linux-omarchy`.
+  * Type `pacman -Q linux-omarchy-headers` and press Return. The package line is printed.
+  * Type `cat /usr/lib/modules/$(uname -r)/build/include/config/kernel.release` and press Return. The output matches the `uname -r` line.
+  * Type `sysctl net.ipv4.tcp_congestion_control` and press Return. The value is `bbr`.
+  * Type `sysctl fs.inotify.max_user_watches` and press Return. The value is `524288`.
+  * Type `cat /sys/block/vda/queue/scheduler` and press Return. The line includes `[kyber]`.
+  * Type `ulimit -Sn` and press Return. The output is `65536`.
+  * Type `ulimit -Hn` and press Return. The output is `524288`.
+  * Type `cat /sys/module/usbcore/parameters/autosuspend` and press Return. The output is `-1`.
+  * Type `systemctl show -p DefaultTimeoutStopUSec` and press Return. The value is `5s`.
+  * Type `systemd-analyze cat-config systemd/logind.conf | grep -E '^(HandlePowerKey|InhibitDelayMaxSec)='` and press Return. The lines are `HandlePowerKey=ignore` and `InhibitDelayMaxSec=15`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * All proofs are printed lines; one screenshot per command suffices. Compare the release strings character by character.
+  * Compare the two release strings character by character.
+  * If `pkgbase` is `linux-t2`, record it. That kernel is for Apple hardware.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots with `linux-omarchy`, the headers package line and identical release strings, and the three tuning outputs matching the values
+  ** `pkgbase` is `linux-omarchy`. The headers package is installed, and `kernel.release` matches `uname -r`.
+  ** Congestion control is `bbr`, inotify watches are `524288`, and the `vda` scheduler is `[kyber]`.
+  ** The soft open-file limit is `65536`, the hard limit is `524288`, and USB autosuspend is `-1`.
+  ** The stop timeout is `5s`, the power key is `ignore`, and the inhibit delay is `15`.
   * If unsuccessful
-  ** Screenshot of the mismatch or "No such file", `cubic`, `[none]`/`[mq-deadline]` on vda, `1024` open files, or `HandlePowerKey=poweroff`
+  ** The release strings differ, the scheduler is not kyber, the open-file limit is `1024`, or the power key is `poweroff`.
 covers: test/acceptance.d/system-test.sh:27-39; etc/sysctl.d/*; etc/udev/rules.d/60-omarchy-io-scheduler.rules; etc/modprobe.d/omarchy-usb-autosuspend.conf; etc/systemd/{system,user}.conf.d/20-omarchy-nofile.conf; etc/systemd/system.conf.d/10-faster-shutdown.conf; etc/systemd/logind.conf.d/*
 
 ### stock-system-policy-invariants   [VM-OK]
@@ -20498,35 +20530,31 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run the following, sending the output to the serial console so it can be read in full: `{ id -nG; pacman -Q ydotool xpadneo-dkms 2>&1; systemctl is-active NetworkManager systemd-networkd 2>&1; systemctl is-enabled systemd-oomd 2>&1; cat /etc/systemd/oomd.conf.d/10-omarchy.conf; cat ~/.config/systemd/user/app.slice.d/10-oomd.conf /usr/lib/systemd/user/app.slice.d/10-oomd.conf 2>/dev/null; systemctl --user is-enabled omarchy-sleep-lock.service omarchy-migrate-notify.service omarchy-fcitx5.service 2>&1; systemctl --user is-active omarchy-sleep-lock.service omarchy-fcitx5.service 2>&1; systemctl --user status bt-agent.service 2>&1 | head -n 5; ls /usr/lib/systemd/user/omarchy-update-user-notify.path 2>&1; cat ~/.local/state/omarchy/current/theme.name; grep -c omarchy-tmux-alert ~/.config/tmux/tmux.conf; ls -d ~/Work/tries ~/Work/.mise.toml 2>&1; grep -E '^(TIMELINE_CREATE|NUMBER_LIMIT)=' /etc/snapper/configs/root 2>&1; grep Hidden ~/.config/autostart/limine-snapper-notify.desktop 2>&1; } 2>&1 | sudo tee /dev/ttyS0` (password `prime`).
-  * Read the serial console (`get-serial`) and check:
-  ** `id -nG` contains `wheel` and does NOT contain `docker`; it contains `input` only if `pacman -Q ydotool` or `xpadneo-dkms` succeeded.
-  ** `NetworkManager` is `active`, `systemd-networkd` is `inactive`.
-  ** `systemd-oomd` is `enabled`; the oomd conf has `DefaultMemoryPressureLimit=50%` and `DefaultMemoryPressureDurationSec=20s`; the app.slice drop-in has `ManagedOOMMemoryPressure=kill` and `ManagedOOMSwap=kill`.
-  ** `omarchy-sleep-lock.service`, `omarchy-migrate-notify.service`, `omarchy-fcitx5.service` are `enabled`; sleep-lock and fcitx5 are `active`.
-  ** `bt-agent.service` shows a skipped `ExecCondition` (no bluetooth) rather than a failure.
-  ** `omarchy-update-user-notify.path` does not exist.
-  ** `theme.name` is `tokyo-night` (Tokyo Night).
-  ** tmux alert hook count is `0`; `~/Work/tries` exists and `~/Work/.mise.toml` does not.
-  ** Snapper `TIMELINE_CREATE="no"`, `NUMBER_LIMIT="5"`; the limine notifier autostart has `Hidden=true`.
-  * Type `id -nG | tr ' ' '\n' | grep -x input; echo rc=$?; head -c1 /dev/input/event0; echo " rc=$?"` Enter → nothing listed and `rc=1` (the user is not in `input`, which would let any process read raw keystrokes), then `Permission denied` and a non-zero rc for the raw device.
-  ** If `input` is listed, membership is acceptable only if `pacman -Q ydotool` or `xpadneo-dkms` above succeeded. If `/dev/input/event0` does not exist, use any `/dev/input/event*` that `ls /dev/input` lists.
-  * Close the terminal with Super+W; the machine is unchanged.
+  * Press Super+Return. A terminal opens.
+  * Type `{ id -nG; pacman -Q ydotool xpadneo-dkms 2>&1; systemctl is-active NetworkManager systemd-networkd 2>&1; systemctl is-enabled systemd-oomd 2>&1; cat /etc/systemd/oomd.conf.d/10-omarchy.conf; cat ~/.config/systemd/user/app.slice.d/10-oomd.conf /usr/lib/systemd/user/app.slice.d/10-oomd.conf 2>/dev/null; systemctl --user is-enabled omarchy-sleep-lock.service omarchy-migrate-notify.service omarchy-fcitx5.service 2>&1; systemctl --user is-active omarchy-sleep-lock.service omarchy-fcitx5.service 2>&1; systemctl --user status bt-agent.service 2>&1 | head -n 5; ls /usr/lib/systemd/user/omarchy-update-user-notify.path 2>&1; cat ~/.local/state/omarchy/current/theme.name; grep -c omarchy-tmux-alert ~/.config/tmux/tmux.conf; ls -d ~/Work/tries ~/Work/.mise.toml 2>&1; grep -E '^(TIMELINE_CREATE|NUMBER_LIMIT)=' /etc/snapper/configs/root 2>&1; grep Hidden ~/.config/autostart/limine-snapper-notify.desktop 2>&1; } 2>&1 | sudo tee /dev/ttyS0` and press Return. If sudo asks, type `prime` and press Return. The prompt returns.
+  * Read the serial log. The groups include `wheel` and do not include `docker`. NetworkManager is `active` and systemd-networkd is `inactive`. oomd is `enabled`, with memory pressure `50%` for `20s`, and the app slice kills on memory pressure and swap. sleep-lock, migrate-notify, and fcitx5 are `enabled`, and sleep-lock and fcitx5 are `active`. bt-agent shows a skipped condition. The update-notify path is missing. The theme is Tokyo Night. The tmux alert count is `0`. `~/Work/tries` exists and `~/Work/.mise.toml` does not. Snapper timeline create is `no` and the number limit is `5`. The notifier autostart line is `Hidden=true`.
+  * Type `id -nG | tr ' ' '\n' | grep -x input; echo "rc=$?"` and press Return. Nothing is listed, and the last line is `rc=1`.
+  ** If `input` is listed, it is acceptable only when the serial log shows `ydotool` or `xpadneo-dkms` installed. Record which.
+  * Type `head -c1 /dev/input/event0; echo "rc=$?"` and press Return. Permission is denied, and the last line is non-zero.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Some files may live under `/usr/lib/systemd/user/` instead of `~/.config/systemd/user/`; the command already tries both.
-  * `cat ~/.local/state/omarchy/current/theme.name` may print `Tokyo Night` with capitals on older builds; either spelling is fine.
+  * The oomd drop-in may be under `/usr/lib/systemd/user/` instead of the home config. The command already tries both.
+  * `Tokyo Night` and `tokyo-night` both count.
+  * If `/dev/input/event0` is missing, use an event node that `ls /dev/input` lists.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Serial dump (`get-serial`) containing every value above as expected, plus a screenshot of the terminal command and of the `input` grep with `rc=1` and the `Permission denied` on the raw input device
+  ** The serial log shows `wheel` and no `docker`, NetworkManager active, networkd inactive, and oomd enabled with the 50% and 20s limits and both kill settings.
+  ** sleep-lock, migrate-notify, and fcitx5 are enabled. sleep-lock and fcitx5 are active. bt-agent is skipped, not failed. The update-notify path is absent.
+  ** The theme is Tokyo Night, the tmux alert count is 0, `~/Work/tries` exists without `.mise.toml`, Snapper timeline create is no with a limit of 5, and the notifier is hidden.
+  ** `input` is absent, or a justifying package is recorded. The raw input device is not readable.
   * If unsuccessful
-  ** Serial dump showing `docker` in the groups, `input` in the groups without a justifying package, a readable input device, `systemd-networkd active`, a disabled/inactive Omarchy user unit, a missing oomd setting, `TIMELINE_CREATE="yes"`, or a tmux alert hook
-  ** Output of `omarchy-version`
+  ** `docker` is in the groups, `input` is granted with no justifying package, networkd is active, a user unit is down, or a tmux alert hook remains.
 covers: install/config/docker.sh, install/config/browser-policy.sh, bin/omarchy-provision-owner, install/hardware/network.sh, default/systemd/user/*.service, default/systemd/user/app.slice.d/10-oomd.conf, etc/systemd/oomd.conf.d/10-omarchy.conf, install/user/first-run/enable-user-units.sh, install/config/enable-services.sh, install/user/theme.sh, migrations/1785189600.sh, install/user/mise-work.sh, default/snapper/root, config/autostart/limine-snapper-notify.desktop; test/shell.d/provisioning-groups-test.sh, sudoless-docker-posture-test.sh, network-manager-transition-test.sh, systemd-test.sh, user-theme-test.sh, tmux-alert-removal-migration-test.sh, mise-work-path-test.sh, snapper-test.sh, sleep-monitor-test.sh; test/acceptance.d/security-test.sh:17-30,104; manual/48-security.md, manual/47-system-snapshots.md
 
 ### gpg-keyserver-defaults   [VM-OK] [NET]
@@ -20536,24 +20564,27 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Enter and type `cat ~/.gnupg/dirmngr.conf` Enter.
-  ** Five `keyserver hkps://…` lines and `connect-quick-timeout 4`.
-  * Type `gpg --recv-keys 4AEE18F83AFDEB23 2>&1 | tail -2` Enter (GitHub's web-flow key) → `imported` or `not changed`.
-  * Type `gpg --keyserver hkps://127.0.0.1:1 --recv-keys 4AEE18F83AFDEB23 2>&1 | tail -1` Enter → a connection error within a few seconds.
-  * Press Ctrl+D; the desktop is as before.
+  * Press Super+Return. A terminal opens.
+  * Type `grep -c '^keyserver hkps://' ~/.gnupg/dirmngr.conf` and press Return. The output is `5`.
+  * Type `grep '^connect-quick-timeout' ~/.gnupg/dirmngr.conf` and press Return. The line is `connect-quick-timeout 4`.
+  * Type `gpg --recv-keys 4AEE18F83AFDEB23 2>&1 | tail -2` and press Return. The output says the key was imported, or that it was not changed.
+  * Type `gpg --keyserver hkps://127.0.0.1:1 --recv-keys 4AEE18F83AFDEB23 2>&1 | tail -1` and press Return. A connection error is printed within a few seconds.
+  * Press Ctrl+D. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The first fetch may take ~10 s through NAT; keep screenshotting every ≤5 s.
+  * The first fetch can take about 10 seconds. Screenshot about every 5 seconds. A hang past 30 seconds is a failure.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of the config, the successful import, and the fast failure
+  ** Five `hkps` keyserver lines are present, and the connect timeout is 4.
+  ** Receiving `4AEE18F83AFDEB23` imports the key or says it is unchanged.
+  ** The same fetch against `127.0.0.1:1` prints a connection error within a few seconds.
   * If unsuccessful
-  ** Screenshot of a hang beyond 30 s or a missing config
+  ** The config is missing, the real fetch fails, or the bad server hangs past 30 seconds.
 covers: default/gpg/dirmngr.conf, etc/gnupg/dirmngr.conf
 
 ### first-run-artefacts-and-user-state-present   [VM-OK]
@@ -20563,30 +20594,78 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter. Run `ls ~/.local/state/omarchy/done/; echo "$OMARCHY_PATH"; omarchy version; which omarchy-theme-set; ls /etc/omarchy.conf 2>&1` → `finalize-user` and `first-run-user`; `/usr/share/omarchy`; the package version; `/usr/bin/omarchy-theme-set`; `No such file` (not dev-linked). Run `cat ~/.local/state/omarchy/first-run.log` → every step has a `Completed:` line and there is no `Failed:` line.
-  * Run `cat ~/.local/state/omarchy/current/theme.name; ls -l ~/.local/state/omarchy/current/theme ~/.local/state/omarchy/current/background` → `Tokyo Night` (or `tokyo-night` on other builds) and two symlinks into the themes tree.
-  * Run `ls -d ~/.config/omarchy/themes ~/.config/btop/themes/current.theme ~/.local/share/keyrings/Default_keyring.keyring ~/.XCompose ~/Work/tries ~/.config/omarchy/hooks/post-update.d` → every path exists. Run `ls ~/.config/omarchy/hooks/post-update.d/` → `install-voxtype.hook setup-fingerprint.hook setup-agent.hook`.
-  * Run `xdg-settings get default-web-browser; xdg-mime query default x-scheme-handler/mailto; xdg-mime query default x-scheme-handler/https` → `chromium.desktop`, `HEY.desktop`, `chromium.desktop`. Run `xdg-user-dir DESKTOP; xdg-user-dir TEMPLATES; xdg-user-dir PUBLICSHARE; xdg-user-dir DOWNLOAD` → the first three print `/home/prime` (folded into `$HOME`), the last `/home/prime/Downloads`. Run `for d in DESKTOP DOCUMENTS DOWNLOAD PICTURES; do p=$(xdg-user-dir $d); [ -d "$p" ] && echo "OK $d $p" || echo "MISSING $d $p"; done` → four `OK` lines.
-  * Run `ls -d ~/Downloads ~/Pictures ~/Videos ~/Work; ls -d ~/Desktop ~/Templates ~/Public 2>&1; cat ~/.config/gtk-3.0/bookmarks` → the first four exist, the last three `No such file or directory`, and four bookmark lines `file:///home/prime/Downloads Downloads`, `…/Projects Projects`, `…/Pictures Pictures`, `…/Videos Videos`. Run `readlink ~/.claude/skills/omarchy ~/.codex/skills/omarchy ~/.agents/skills/omarchy` → each prints `/usr/share/omarchy/default/agents/skills/omarchy`.
-  * Run `gsettings get org.gnome.desktop.interface gtk-theme; gsettings get org.gnome.desktop.interface color-scheme; gsettings get org.gnome.desktop.interface icon-theme; gsettings get org.gnome.desktop.interface gtk-enable-primary-paste` → `'Adwaita-dark'`, `'prefer-dark'`, `'Yaru-blue'`, `true`. Run `test -s ~/.config/omarchy/shell.json && jq empty ~/.config/omarchy/shell.json && echo JSON-OK` → `JSON-OK`; then `echo '{bad' | jq empty; echo rc=$?` → a jq parse error and non-zero rc (proves the check is real).
-  ** On the 4.0.2 disk `~/.config/omarchy/shell.json` may not exist until first customisation; if absent, report it and run the same check on `/usr/share/omarchy/config/omarchy/shell.json`.
-  * Unhappy path: run `git config --global user.name; echo "rc=$?"` → nothing printed and `rc=1` (identity was skipped at install); `grep '<n>' ~/.XCompose` → the binding is present with an empty string `""`; `xdg-mime query default x-scheme-handler/nonsense; echo "rc=$?"` → empty line, `rc=0`; `omarchy-done check first-run-user; echo $?; omarchy-done check no-such-marker; echo $?` → `0` then `1`.
-  * Press Super+Shift+F → Nautilus' sidebar shows the Downloads/Projects/Pictures/Videos bookmarks; screenshot, Super+W. Press Super+Space → About → the Omarchy wordmark (from logo.txt) is drawn in a window; Super+W. Press Ctrl+Alt+F3 → a text console; log in `prime` / `prime`; type `echo $OMARCHY_PATH; omarchy version; exit` → the same two values as on the desktop; screenshot, then press Ctrl+Alt+F1 (or F2) to return to the desktop. Close the terminal with Super+W.
-  ** Quirk: the serial log does not capture TTY3; the screenshot is the proof. If Ctrl+Alt+F1 shows a text console, the graphical session is on F2.
+  * Press Super+Return. A terminal opens.
+  * Type `ls ~/.local/state/omarchy/done/` and press Return. `finalize-user` and `first-run-user` are listed.
+  * Type `echo "$OMARCHY_PATH"` and press Return. The output is `/usr/share/omarchy`.
+  * Type `omarchy version` and press Return. Record the version.
+  * Type `which omarchy-theme-set` and press Return. The output is `/usr/bin/omarchy-theme-set`.
+  * Type `ls /etc/omarchy.conf` and press Return. The output says the file does not exist.
+  * Type `grep -c Failed: ~/.local/state/omarchy/first-run.log` and press Return. The output is `0`.
+  * Type `grep -c Completed: ~/.local/state/omarchy/first-run.log` and press Return. The count is greater than `0`.
+  * Type `cat ~/.local/state/omarchy/current/theme.name` and press Return. The output is `Tokyo Night` or `tokyo-night`.
+  * Type `ls -l ~/.local/state/omarchy/current/theme ~/.local/state/omarchy/current/background` and press Return. Both lines are symlinks into the themes tree.
+  * Type `ls -d ~/.config/omarchy/themes ~/.config/btop/themes/current.theme ~/.local/share/keyrings/Default_keyring.keyring ~/.XCompose ~/Work/tries ~/.config/omarchy/hooks/post-update.d` and press Return. Every path is listed.
+  * Type `ls ~/.config/omarchy/hooks/post-update.d/` and press Return. The three names are `install-voxtype.hook`, `setup-fingerprint.hook`, and `setup-agent.hook`.
+  * Type `xdg-settings get default-web-browser` and press Return. The output is `chromium.desktop`.
+  * Type `xdg-mime query default x-scheme-handler/mailto` and press Return. The output is `HEY.desktop`.
+  * Type `xdg-mime query default x-scheme-handler/https` and press Return. The output is `chromium.desktop`.
+  * Type `xdg-user-dir DESKTOP` and press Return. The output is `/home/prime`.
+  * Type `xdg-user-dir TEMPLATES` and press Return. The output is `/home/prime`.
+  * Type `xdg-user-dir PUBLICSHARE` and press Return. The output is `/home/prime`.
+  * Type `xdg-user-dir DOWNLOAD` and press Return. The output is `/home/prime/Downloads`.
+  * Type `for d in DESKTOP DOCUMENTS DOWNLOAD PICTURES; do p=$(xdg-user-dir $d); [ -d "$p" ] && echo "OK $d $p" || echo "MISSING $d $p"; done` and press Return. Four lines start with `OK`.
+  * Type `ls -d ~/Downloads ~/Pictures ~/Videos ~/Work` and press Return. All four paths are listed.
+  * Type `ls -d ~/Desktop ~/Templates ~/Public` and press Return. Each line says the path does not exist.
+  * Type `cat ~/.config/gtk-3.0/bookmarks` and press Return. Four lines name Downloads, Projects, Pictures, and Videos.
+  * Type `readlink ~/.claude/skills/omarchy ~/.codex/skills/omarchy ~/.agents/skills/omarchy` and press Return. Each line is `/usr/share/omarchy/default/agents/skills/omarchy`.
+  * Type `gsettings get org.gnome.desktop.interface gtk-theme` and press Return. The output is `'Adwaita-dark'`.
+  * Type `gsettings get org.gnome.desktop.interface color-scheme` and press Return. The output is `'prefer-dark'`.
+  * Type `gsettings get org.gnome.desktop.interface icon-theme` and press Return. The output is `'Yaru-blue'`.
+  * Type `gsettings get org.gnome.desktop.interface gtk-enable-primary-paste` and press Return. The output is `true`.
+  * Type `test -s ~/.config/omarchy/shell.json && jq empty ~/.config/omarchy/shell.json && echo JSON-OK` and press Return. The output is `JSON-OK`.
+  ** If the file is missing, type `jq empty /usr/share/omarchy/config/omarchy/shell.json && echo JSON-OK` and press Return. The output is `JSON-OK`. Record that the user file is absent.
+  * Type `echo '{bad' | jq empty; echo "rc=$?"` and press Return. A parse error is printed, and the last line is non-zero.
+  * Type `git config --global user.name; echo "rc=$?"` and press Return. No name is printed, and the last line is `rc=1`.
+  * Type `grep '<n>' ~/.XCompose` and press Return. The binding is present, and its string is `""`.
+  * Type `xdg-mime query default x-scheme-handler/nonsense; echo "rc=$?"` and press Return. No handler is printed, and the last line is `rc=0`.
+  * Type `omarchy-done check first-run-user; echo "exit=$?"` and press Return. The last line is `exit=0`.
+  * Type `omarchy-done check no-such-marker; echo "exit=$?"` and press Return. The last line is `exit=1`.
+  * Press Super+Shift+F. Files opens. The sidebar lists Downloads, Projects, Pictures, and Videos.
+  * Press Super+W. Files closes.
+  * Press Super+Space. The menu opens.
+  * Select About. A window draws the Omarchy wordmark.
+  * Press Super+W. That window closes.
+  * Press Ctrl+Alt+F3. A text console appears.
+  * Type `prime` and press Return. The password prompt appears.
+  * Type `prime` and press Return. A shell prompt appears.
+  * Type `echo $OMARCHY_PATH` and press Return. The output matches the desktop path.
+  * Type `omarchy version` and press Return. The output matches the desktop version.
+  * Type `exit` and press Return. The login prompt returns.
+  * Press Ctrl+Alt+F1. The desktop returns.
+  ** If a text console appears instead, press Ctrl+Alt+F2. The desktop returns.
+  * Click the terminal. It is focused.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The terminal is foot; output is small text — keep each command's output short and screenshot after each. ./client-with-image returns the screenshot straight away and saves a round trip.
-  * If Super+Shift+F does not open Nautilus on this build, open it from the Omarchy Menu → Apps.
+  * If Super+Shift+F does not open Files, open it from the menu Apps list.
+  * The text console is not in the serial log. The screenshot is the proof.
+  * If Ctrl+Alt+F1 is a text console, the graphical session is on F2.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshot of the done markers, `OMARCHY_PATH`, version, binary path and the missing `/etc/omarchy.conf`, first-run.log with only `Starting:`/`Completed:` lines, the theme name and two symlinks, every path present with the three hooks, the browser/mailto/https handlers, the folded user dirs with four `OK`, the folder listing and four bookmark lines, the three skill targets, the gsettings values `'Adwaita-dark' 'prefer-dark' 'Yaru-blue' true`, `JSON-OK` with the jq parse error, the unhappy-path values (`rc=1` git identity, XCompose binding, empty nonsense handler with `rc=0`, `0`/`1` from `omarchy-done check`), Nautilus' sidebar bookmarks, About with the wordmark, and the TTY3 session printing the same `OMARCHY_PATH` and version
+  ** Both done markers exist, `$OMARCHY_PATH` is `/usr/share/omarchy`, the theme setter is the packaged binary, and `/etc/omarchy.conf` is absent.
+  ** The first-run log has completed lines and no failed line. The theme is Tokyo Night, and the theme and background paths are symlinks.
+  ** The listed state paths exist. The three post-update hooks are present. Browser and https use Chromium, and mailto uses HEY.
+  ** Desktop, Templates, and Public Share print `/home/prime`. Downloads prints `/home/prime/Downloads`. The four directory checks are `OK`. `~/Desktop`, `~/Templates`, and `~/Public` are absent.
+  ** The bookmarks name the four folders. The three skill links point at the packaged omarchy skill. The four gsettings values match. `shell.json` parses, and a bad document does not.
+  ** Git has no user name and exits 1. The XCompose `<n>` binding is empty. A nonsense MIME query exits 0. The real done marker exits 0 and the unknown marker exits 1.
+  ** Files shows those bookmarks. About draws the wordmark. The text console prints the same path and version, and the desktop returns.
   * If unsuccessful
-  ** The command output showing the missing path, the `Failed:` line in first-run.log, any MISSING line, a wrong default handler, a leftover `~/Desktop`, jq failing on shell.json, a wrong value, or `tail -40 /var/log/omarchy-install.log`
+  ** A marker or path is missing, the log has a failed line, a handler or folder is wrong, or the text console does not print the desktop values.
 covers: bin/omarchy-provision-first-run, bin/omarchy-provision-user (xdg-user-dirs, bookmarks, default browser/mailto), install/user/{theme,xcompose,git,default-keyring,mise-work}.sh, install/user/first-run/{gnome-theme,gtk-primary-paste,enable-user-units}.sh, bin/omarchy-done, default/bash/env-bootstrap, logo.txt, icon.txt, docs/file-layout.md (First-run, Runtime finalization, §Env bootstrap), test/shell.d/first-run-test.sh, provision-user-test.sh; test/acceptance.d/system-test.sh:114-127
 
 ### provision-rerun-guards-force-replay-and-hooks-once   [VM-OK]
@@ -20596,34 +20675,52 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy done check first-run-user; echo s=$?; omarchy-provision-first-run` → `s=0` and `First-run already complete (rerun with --force to refresh).`, returning at once.
-  * Type `omarchy-provision-user; echo "rc=$?"` → `User finalization already complete (rerun with --force to refresh).` and `rc=0`. Type `omarchy-provision-user --help` → usage mentioning `--force`, `--first-install` and the marker `~/.local/state/omarchy/done/finalize-user`.
-  ** Do not pass `--force` to `omarchy-provision-user`; that path downloads tools.
-  ** The usage line should read `Usage: omarchy provision user` (the command was renamed from `finalize`); at HEAD it still says `Usage: omarchy finalize user` — record the stale string (03-INTENDED-BEHAVIOUR item 11, issue #7113), it is not a driver failure.
-  * Type `sudo omarchy-provision-user; echo "rc=$?"` (password `prime`) → `Error: run omarchy-provision-user as the user being configured, not as root.` and `rc=1`. Type `omarchy-provision-owner; echo "rc=$?"` → `Error: omarchy-provision-owner must run as root`, `rc=1`. Type `sudo omarchy-provision-owner; echo exit=$?` → no output, `exit=0` (nothing pending; no wizard appears).
-  ** If the owner wizard's logo appears, press Ctrl+C and report it — it must not start on a provisioned system.
-  * Type `sudo ls -la /var/lib/omarchy/provisioning/ /var/lib/omarchy/provisioning/packages/` → `packages/` holds one `node-v*-linux-x64.tar.gz` (kept for a future factory reset); there is **no** `pending`, `wipe-pending`, `luks-key`, `authorized_keys` or `setup-user`. Type `sudo ls /etc/omarchy/provisioning.key /etc/limine-entry-tool.d/99-omarchy-provisioning-unlock.conf /etc/mkinitcpio.conf.d/99-omarchy-provisioning-key.conf 2>&1; systemctl status omarchy-provision-owner.service omarchy-system-factory-reset-finish.service --no-pager 2>&1 | head; grep -c cryptkey /proc/cmdline` → three `No such file or directory` lines, both units `could not be found`/not loaded, `0`.
-  * The privileged apply commands refuse misuse the same way: type `omarchy-apply-hardware --install-user prime; echo $?` → `Error: omarchy-apply-hardware must run as root`, `1`; `sudo omarchy-apply-hardware` → `Error: --install-user must name the target non-root user`; `sudo omarchy-apply-hardware --install-user nobodyxyz` → `Error: user 'nobodyxyz' does not exist`; `sudo omarchy-apply-system --frobnicate` → `Unknown option: --frobnicate` followed by the usage text; `omarchy-apply-system --help; echo $?` → usage mentioning `--first-install|--upgrade`, `0`.
-  ** Never run `sudo omarchy-apply-system --install-user prime …`; it re-runs the whole system configuration.
-  * Unhappy path: type `omarchy-provision-first-run --bogus` → `Unknown option: --bogus` and the usage block; `omarchy-provision-user --nope; echo "rc=$?"` → `Unknown option: --nope`, usage, `rc=1`.
-  * Type `ls ~/.config/omarchy/hooks/post-update.d/` → `install-voxtype.hook setup-fingerprint.hook setup-agent.hook` (the hooks first-run installed are still in place). Type `omarchy-hook post-update` → the Voxtype and default-agent invitation notifications appear (the fingerprint hook stays silent — no reader). Type `omarchy-hook post-update` again → no notification (one-shot done markers were written under `~/.local/state/omarchy/done/`; `ls` it and report the new entries).
-  * Type `omarchy-provision-first-run --force` → within a few seconds a welcome notification appears; the command ends with `User finalization complete.`. Type `tail -n 12 ~/.local/state/omarchy/first-run.log` → `Starting:`/`Completed:` pairs for each step and no `Failed:`.
-  ** A brief theme flicker is normal as settings are re-applied.
-  * Close the terminal with Super+W. The hook markers persist on this disk: end the session with `stop` if it must stay pristine.
+  * Press Super+Return. A terminal opens.
+  * Type `omarchy done check first-run-user; echo "s=$?"` and press Return. The last line is `s=0`.
+  * Type `omarchy-provision-first-run` and press Return. The output says first-run is already complete. The prompt returns at once.
+  * Type `omarchy-provision-user; echo "rc=$?"` and press Return. The output says user finalization is already complete, and the last line is `rc=0`.
+  * Type `omarchy-provision-user --help` and press Return. Usage mentions `--force`, `--first-install`, and the `finalize-user` marker.
+  ** If the usage still says `omarchy finalize user`, record that line.
+  * Type `sudo omarchy-provision-user; echo "rc=$?"` and press Return. If sudo asks, type `prime` and press Return. The output says to run it as the user, and the last line is `rc=1`.
+  * Type `omarchy-provision-owner; echo "rc=$?"` and press Return. The output says it must run as root, and the last line is `rc=1`.
+  * Type `sudo omarchy-provision-owner; echo "exit=$?"` and press Return. No wizard appears, and the last line is `exit=0`.
+  * Type `sudo ls -la /var/lib/omarchy/provisioning/ /var/lib/omarchy/provisioning/packages/` and press Return. `packages/` lists one Node tarball. `pending`, `wipe-pending`, `luks-key`, `authorized_keys`, and `setup-user` are not listed.
+  * Type `sudo ls /etc/omarchy/provisioning.key /etc/limine-entry-tool.d/99-omarchy-provisioning-unlock.conf /etc/mkinitcpio.conf.d/99-omarchy-provisioning-key.conf` and press Return. Three lines say the file does not exist.
+  * Type `systemctl status omarchy-provision-owner.service omarchy-system-factory-reset-finish.service --no-pager | head` and press Return. Both units are not found.
+  * Type `grep -c cryptkey /proc/cmdline` and press Return. The output is `0`.
+  * Type `omarchy-apply-hardware --install-user prime; echo "exit=$?"` and press Return. The output says it must run as root, and the last line is `exit=1`.
+  * Type `sudo omarchy-apply-hardware` and press Return. The output says `--install-user` must name the target user.
+  * Type `sudo omarchy-apply-hardware --install-user nobodyxyz` and press Return. The output says that user does not exist.
+  * Type `sudo omarchy-apply-system --frobnicate` and press Return. The output includes `Unknown option: --frobnicate`.
+  * Type `omarchy-apply-system --help; echo "exit=$?"` and press Return. Usage mentions `--first-install` and `--upgrade`, and the last line is `exit=0`.
+  * Type `omarchy-provision-first-run --bogus` and press Return. The output includes `Unknown option: --bogus`.
+  * Type `omarchy-provision-user --nope; echo "rc=$?"` and press Return. The output includes `Unknown option: --nope`, and the last line is `rc=1`.
+  * Type `ls ~/.config/omarchy/hooks/post-update.d/` and press Return. The three hook names are listed.
+  * Type `omarchy-hook post-update` and press Return. A Voxtype invitation and a default-agent invitation appear. No fingerprint invitation appears.
+  * Type `omarchy-hook post-update` and press Return. No invitation appears.
+  * Type `ls ~/.local/state/omarchy/done/` and press Return. Record the new marker names.
+  * Type `omarchy-provision-first-run --force` and press Return. A welcome notification appears, and the last line says user finalization is complete.
+  * Type `tail -n 12 ~/.local/state/omarchy/first-run.log` and press Return. The lines are starting and completed pairs. No line starts with `Failed:`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * `omarchy-hook post-update` is HEAD's shape; on 4.0.2 record `omarchy-version` and report "absent on this build" if the command is unknown.
-  * Toasts fade in a few seconds; screenshot immediately after each hook run.
+  * Do not pass `--force` to `omarchy-provision-user`. Do not run `sudo omarchy-apply-system --install-user`.
+  * If the owner wizard appears, press Ctrl+C and record it. It must not start.
+  * Screenshot an invitation as soon as it appears. If `omarchy-hook` is unknown, record `omarchy-version` and stop that step.
+  * The hook markers stay after this test. Stop the disk if it must stay pristine.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Screenshots of `s=0` and both already-complete lines, the `--help` text (with the usage line as printed), the two caller refusals, the silent owner run, the provisioning directory with only `packages/` (and possibly `groups`) and the Node tarball, the three missing-file errors, the absent units and `0` for cryptkey, the four apply-command errors and the apply-system usage, both unknown-option usages, the hook listing, the invitation toasts on the first `omarchy-hook post-update` and none on the second, the welcome notification after `--force`, and the log tail with only Completed lines
+  ** First-run and user finalization both report that they are already complete. Help names `--force` and the marker. Root cannot run user finalization. The owner command refuses a user and does nothing as root.
+  ** The provisioning directory keeps the Node tarball and none of the pending secrets. The three leftover files are absent, both provisioning units are missing, and the kernel command line has no cryptkey.
+  ** The apply commands refuse a user caller, a missing user, and `--frobnicate`. Help exits 0. Both bogus flags print an unknown-option line.
+  ** The three hooks are still installed. The first post-update run shows the two invitations and the second shows none. `--force` shows the welcome line and a log with no `Failed:`.
   * If unsuccessful
-  ** Any `Failed:` line (step and exit code), no notification, root finalization proceeding, the wizard starting, an unexpected `pending`/`luks-key` in the provisioning directory or a loaded provisioning unit, an apply command that proceeded past its guard (install-log lines appearing), the hooks firing twice, or a missing marker/hook
+  ** A command proceeds past its guard, the wizard starts, a hook fires twice, or the log has a `Failed:` line.
 covers: bin/omarchy-provision-first-run, bin/omarchy-provision-user, bin/omarchy-provision-owner, bin/omarchy-done, bin/omarchy-apply-hardware, bin/omarchy-apply-system (argument parsing), install/provisioning/omarchy-provision-owner.service, install/user/first-run/enable-user-units.sh, docs/file-layout.md (Runtime finalization), omarchy-iso orchestrator stage_provisioning_state/_stage_node_tarball, test_provisioning_state.py, test/shell.d/provision-user-test.sh, first-run-test.sh, agent-invitation-test.sh (hook stays installed), fingerprint-invitation-test.sh (hook stays installed); 03-INTENDED-BEHAVIOUR.md item 11
 
 ### hardware-detectors-and-commands-report-absence   [VM-PARTIAL]
@@ -20633,31 +20730,80 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `for h in asus-expertbook-b9406 asus-rog asus-zenbook-ux5406aa clamshell dell-xps13-sidecar-amps dell-xps-haptic-touchpad dell-xps-oled elgato-camlink-4k external-monitors fingerprint framework16 hybrid-gpu intel intel-ptl intel-sof laptop laptop-closed nvidia nvidia-gsp nvidia-without-gsp surface vulkan webcam; do timeout 5 omarchy-hw-$h >/dev/null 2>&1; echo "$h=$?"; done | sudo tee /dev/ttyS0` (password `prime`), then read `./client get-serial`.
-  ** Expected: every line `=1` except `external-monitors=0` (QEMU's `Virtual-1` counts as external), `intel=0` on an Intel host under `-cpu host` (or 1 on AMD — report `grep -m1 vendor_id /proc/cpuinfo`), and `vulkan=0` if mesa ICDs are installed (report `ls /usr/share/vulkan/icd.d`). No line may be `=124` (timeout).
-  * Run `omarchy-hw-display; echo $?; omarchy-hw-touchpad; echo $?; omarchy-hw-touchscreen; echo $?; omarchy-power-present; echo $?` → empty output (or a no-backlight error for display) and `1` each. Run `omarchy-hw-match "Standard PC"; echo $?; omarchy-hw-match XPS; echo $?; cat /sys/class/dmi/id/sys_vendor /sys/class/dmi/id/product_name /sys/class/dmi/id/chassis_type` → `0`, `1`, `QEMU` / `Standard PC (Q35 + ICH9, 2009)` / `1`. Run `lspci | grep -cE 'VGA|3D|Display'; command -v supergfxctl || echo absent` → `1`, `absent`.
-  * Menu consequence: press Super+Space → Trigger → Hardware (also `Super+Ctrl+H`): either "Nothing here yet" or a list with no "Laptop Display", "Mirror Display", "Hybrid GPU" or "Touchpad" rows ("Touchscreen" is uncertain — the USB tablet may register as one; report). Trigger → Toggle: no "Battery Percentage". Setup → Security: Fido2, SSHD, Passwordless Sudo, Sudoless Docker but NO "Fingerprint". Screenshot each; Escape.
-  * Run `omarchy battery status --shell; echo s=$?; omarchy brightness display; echo s=$?` → no `percentage` line, no battery/power widget in the bar, and a brightness error (exit 1, silently taking the DDC path) with no OSD on screen. Run `omarchy-windows-key; echo "exit=$?"` → `No Windows license key found in firmware.` and non-zero.
-  * Run `omarchy-toggle-hybrid-gpu; echo s=$?; omarchy-setup-security-fingerprint; echo s=$?` → both fail promptly with a message; no pacman runs (if a sudo/pacman prompt appears instead of a refusal, press Ctrl+C and report it). Run `omarchy-capture-webcam-list; echo "exit=$?"` → no devices listed; `omarchy-capture-screenrecording-with-webcam` → a notification `No webcam devices found` and no recording started (`pgrep -f gpu-screen-recorder` empty).
-  * Run `omarchy-toggle-input-device touchpad off; echo "exit=$?"; ls ~/.local/state/omarchy/toggles/hypr/touchpad-disabled-name 2>&1` → an error about no device, non-zero, and no such file. Run `omarchy-hyprland-monitor-clamshell; echo "exit=$?"; hyprctl monitors -j | jq '.[0].disabled'; omarchy-hw-recover-internal-monitor; echo $?` → returns without changing the display, `false`, `0`. Run `omarchy-system-lid-close; echo s=$?` → the desktop does NOT lock.
-  * Run `bash ~/.config/omarchy/hooks/post-update.d/setup-fingerprint.hook; ls ~/.local/state/omarchy/done/fingerprint-setup-invitation 2>&1; systemctl --user status bt-agent.service | head -3; omarchy bluetooth power on; echo s=$?` → no toast and no marker; bt-agent inactive with its condition unmet; the power command returns without hanging.
-  * Press Super+Ctrl+L — the lock screen has no fingerprint indicator (only the password field); type `prime` and Enter to unlock. Close the terminal with Super+W.
-  ** Skipped in this VM: every positive hardware path (battery, backlight/DDC, enrolment, supergfx switch, real lid/clamshell, NVIDIA, webcam, Apple quirks).
+  * Press Super+Return. A terminal opens.
+  * Type `for h in asus-expertbook-b9406 asus-rog asus-zenbook-ux5406aa clamshell dell-xps13-sidecar-amps dell-xps-haptic-touchpad dell-xps-oled elgato-camlink-4k external-monitors fingerprint framework16 hybrid-gpu intel intel-ptl intel-sof laptop laptop-closed nvidia nvidia-gsp nvidia-without-gsp surface vulkan webcam; do timeout 5 omarchy-hw-$h >/dev/null 2>&1; echo "$h=$?"; done | sudo tee /dev/ttyS0` and press Return. If sudo asks, type `prime` and press Return. The prompt returns.
+  * Read the serial log. Every line is `=1` except `external-monitors=0`. Record `intel` and `vulkan`. No line is `=124`.
+  * Type `omarchy-hw-display; echo "exit=$?"` and press Return. The last line is `exit=1`.
+  * Type `omarchy-hw-touchpad; echo "exit=$?"` and press Return. The last line is `exit=1`.
+  * Type `omarchy-hw-touchscreen; echo "exit=$?"` and press Return. The last line is `exit=1`.
+  * Type `omarchy-power-present; echo "exit=$?"` and press Return. The last line is `exit=1`.
+  * Type `omarchy-hw-match "Standard PC"; echo "exit=$?"` and press Return. The last line is `exit=0`.
+  * Type `omarchy-hw-match XPS; echo "exit=$?"` and press Return. The last line is `exit=1`.
+  * Type `cat /sys/class/dmi/id/sys_vendor /sys/class/dmi/id/product_name /sys/class/dmi/id/chassis_type` and press Return. The lines are `QEMU`, `Standard PC (Q35 + ICH9, 2009)`, and `1`.
+  * Type `lspci | grep -cE 'VGA|3D|Display'` and press Return. The output is `1`.
+  * Type `command -v supergfxctl || echo absent` and press Return. The output is `absent`.
+  * Press Super+Space. The menu opens.
+  * Select Trigger. The Trigger menu opens.
+  * Select Hardware. The Hardware list opens. Laptop Display, Mirror Display, Hybrid GPU, and Touchpad are not listed.
+  ** If the list says nothing is here yet, record that. If Touchscreen is listed, record that.
+  * Press Escape. The menu closes.
+  * Press Super+Ctrl+H. The Hardware list opens. Those rows are still absent.
+  * Press Escape. The list closes.
+  * Press Super+Space. The menu opens.
+  * Select Trigger. The Trigger menu opens.
+  * Select Toggle. The Toggle list opens. Battery Percentage is not listed.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Select Setup. The Setup menu opens.
+  * Select Security. The Security menu opens. Fingerprint is not listed.
+  * Press Escape. The menu closes.
+  * Click the terminal. It is focused.
+  * Type `omarchy battery status --shell; echo "s=$?"` and press Return. No percentage line is printed, and the last line is non-zero.
+  * Look at the bar. No battery indicator is shown.
+  * Type `omarchy brightness display; echo "s=$?"` and press Return. A brightness error is printed, and the last line is `s=1`.
+  * Wait 2 seconds. No brightness overlay appears.
+  * Type `omarchy-windows-key; echo "exit=$?"` and press Return. The output says no Windows license key was found, and the last line is non-zero.
+  * Type `omarchy-toggle-hybrid-gpu; echo "s=$?"` and press Return. A refusal is printed, and the last line is non-zero.
+  * Type `omarchy-setup-security-fingerprint; echo "s=$?"` and press Return. A refusal is printed, and the last line is non-zero.
+  * Type `omarchy-capture-webcam-list; echo "exit=$?"` and press Return. No device is listed.
+  * Type `omarchy-capture-screenrecording-with-webcam` and press Return. A notification says no webcam devices were found.
+  * Type `pgrep -fc gpu-screen-recorder` and press Return. The output is `0`.
+  * Type `omarchy-toggle-input-device touchpad off; echo "exit=$?"` and press Return. An error says no device was found, and the last line is non-zero.
+  * Type `ls ~/.local/state/omarchy/toggles/hypr/touchpad-disabled-name` and press Return. The output says the file does not exist.
+  * Type `omarchy-hyprland-monitor-clamshell; echo "exit=$?"` and press Return. The prompt returns, and the display stays up.
+  * Type `hyprctl monitors -j | jq '.[0].disabled'` and press Return. The output is `false`.
+  * Type `omarchy-hw-recover-internal-monitor; echo "exit=$?"` and press Return. The last line is `exit=0`.
+  * Type `omarchy-system-lid-close; echo "s=$?"` and press Return. The desktop does not lock.
+  * Type `bash ~/.config/omarchy/hooks/post-update.d/setup-fingerprint.hook` and press Return. The prompt returns. No notification appears.
+  * Type `ls ~/.local/state/omarchy/done/fingerprint-setup-invitation` and press Return. The output says the file does not exist.
+  * Type `systemctl --user is-active bt-agent.service` and press Return. The output is `inactive`.
+  * Type `omarchy bluetooth power on; echo "s=$?"` and press Return. The prompt returns. It does not hang.
+  * Press Super+Ctrl+L. The lock screen appears. No fingerprint indicator is shown.
+  * Type `prime` and press Return. The desktop unlocks.
+  * Click the terminal. It is focused.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Any command here that runs longer than 10 s is a hang and should be reported. The detectors are the `when:` gates the menu relies on; one returning 0 in the VM would make the menu show rows the guest cannot use.
-  * The lock screen blanks 5 s after the last input; the first character typed while black both wakes it and enters the field.
+  * `intel=0` is expected on an Intel host. On AMD, record `grep -m1 vendor_id /proc/cpuinfo` and expect `intel=1`.
+  * `vulkan=0` is expected when `ls /usr/share/vulkan/icd.d` lists mesa files. Record that directory.
+  * A command that runs longer than 10 seconds is a hang. If a package install starts, press Ctrl+C and record it.
+  * A USB tablet may make Touchscreen appear. Record it. Do not select it.
+  * The lock screen blanks about 5 seconds after the last input. The first character both wakes it and types.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** Serial dump with the full `name=code` list; screenshots of the DMI strings and `absent`, the menus without the gated rows, no battery widget or brightness OSD, the exact `No Windows license key found in firmware.` line, the prompt failures for hybrid-gpu/fingerprint, the `No webcam devices found` toast, the touchpad refusal with no state file, `false` for the monitor, no lock from the lid handler, the bt-agent condition, and a lock screen without a fingerprint indicator
+  ** The detector list is `=1` except `external-monitors=0`, with `intel` and `vulkan` recorded and no timeout. Display, touchpad, touchscreen, and power present exit 1.
+  ** The DMI lines are QEMU, Standard PC, and chassis `1`. One display controller is present and `supergfxctl` is absent.
+  ** Hardware, Toggle, and Security hide the laptop, battery, and fingerprint rows. The bar has no battery indicator and brightness shows no overlay.
+  ** The Windows-key, hybrid-GPU, and fingerprint commands refuse. No webcam is listed, the recording notification says none were found, and no recorder is running.
+  ** The touchpad toggle writes no state file. The monitor stays enabled. The lid handler does not lock. The fingerprint hook writes no marker. Bluetooth power returns without hanging.
+  ** The lock screen has no fingerprint indicator, and `prime` unlocks it.
   * If unsuccessful
-  ** Any detector returning 0 unexpectedly (or 124), a hardware row shown, a state file written, the display disabled, a recording started, a hang, a crash toast, or the lid handler locking the screen
-  ** Output of `omarchy-version`
+  ** A detector returns 0 or 124 unexpectedly, a hidden hardware row appears, a state file is written, a recording starts, or the lid handler locks the screen.
 covers: bin/omarchy-hw-* (all 28); bin/omarchy-hw-hybrid-gpu; bin/omarchy-toggle-hybrid-gpu (gating only); bin/omarchy-power-present; bin/omarchy-windows-key; bin/omarchy-capture-webcam-list; bin/omarchy-capture-screenrecording-with-webcam; bin/omarchy-toggle-input-device; bin/omarchy-hyprland-monitor-clamshell; default/omarchy/omarchy-menu.jsonc (when gates; trigger.hardware.hybrid-gpu); test/shell.d/hw-{display,external-monitors,fingerprint,hybrid-gpu,nvidia}-test.sh, hybrid-gpu-test.sh, brightness-display-test.sh, battery-status-test.sh, battery-test.sh, lid-close-test.sh, fingerprint-package-test.sh, fingerprint-invitation-test.sh, bluetooth-test.sh, lock-fingerprint-indicator-test.sh, power-present-test.sh, xps13-sidecar-amps-test.sh, windows-key-test.sh, screenrecording-test.sh, toggle-input-device-test.sh, monitor-clamshell-scale-test.sh, monitor-recovery-test.sh, power-test.sh; manual/12-screenshots-recording.md, 13-toggles-idle-screensaver.md, 34-keyboard-mouse-trackpad.md, 37-hardware-authentication.md
 
 ### hardware-quirks-inert-on-virtio   [VM-OK]

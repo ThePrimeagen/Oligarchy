@@ -438,14 +438,14 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `sudoless-docker-enable-and-revert`
 - [x] `firewall-ufw-defaults-no-ssh`
 - [x] `system-services-enabled-and-running`
-- [ ] `user-units-running-and-hardware-gated-units-inert`
-- [ ] `fcitx5-supervised-and-hidden-entries`
-- [ ] `kernel-linux-omarchy-headers-and-tuning`
-- [ ] `stock-system-policy-invariants`
-- [ ] `gpg-keyserver-defaults`
-- [ ] `first-run-artefacts-and-user-state-present`
-- [ ] `provision-rerun-guards-force-replay-and-hooks-once`
-- [ ] `hardware-detectors-and-commands-report-absence`
+- [x] `user-units-running-and-hardware-gated-units-inert`
+- [x] `fcitx5-supervised-and-hidden-entries`
+- [x] `kernel-linux-omarchy-headers-and-tuning`
+- [x] `stock-system-policy-invariants`
+- [x] `gpg-keyserver-defaults`
+- [x] `first-run-artefacts-and-user-state-present`
+- [x] `provision-rerun-guards-force-replay-and-hooks-once`
+- [x] `hardware-detectors-and-commands-report-absence`
 - [ ] `hardware-quirks-inert-on-virtio`
 - [ ] `hardware-restart-entries-run-without-devices`
 - [ ] `audio-tuning-no-matching-hardware`
